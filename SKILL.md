@@ -1,3 +1,7 @@
+---
+name: context-generator
+description: Type /context-generator to summarize your chat into a portable context block you can paste into any AI and continue where you left off.
+---
 # Context Generator Skill
 
 ## Trigger
