@@ -20,20 +20,18 @@ Before you hit the limit, type `/generate-context`. The AI compresses everything
 
 ## How To Use
 
-### Option 1 — Claude Skills (Recommended)
-1. Go to **Claude.ai → Settings → Custom Instructions** (or Skills if available)
-2. Paste the contents of [`context-generator.md`](./context-generator.md)
-3. Save
-4. Now in any Claude chat, type `/generate-context` when you're running low on context
+### Option 1 — Drag & Drop (Easiest)
+1. Download `SKILL.md` from the repo
+2. Go to [claude.ai](https://claude.ai) → click **Customize**
+3. Drag & drop the file there
+4. Type `/generate-context` in any chat
 
 ### Option 2 — Manual (Any AI)
-1. Open [`context-generator.md`](./context-generator.md)
-2. Copy the full contents
-3. Paste it at the start of any new chat as a system prompt or first message
-4. Type `/generate-context` whenever you need it
+1. Open `SKILL.md` → copy all contents
+2. Paste at the start of any new chat
+3. Type `/generate-context` when needed
 
----
-
+ ---  
 ## When To Use It
 
 - You're at ~90% of your context/message limit
