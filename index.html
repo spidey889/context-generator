@@ -254,6 +254,150 @@
       font-weight: 500;
     }
 
+    .cg-wrap {
+      background: #0d0e14;
+      border-radius: 16px;
+      padding: 48px 32px;
+      min-height: 420px;
+      position: relative;
+      overflow: hidden;
+      font-family: var(--font-sans);
+    }
+
+    .cg-grid {
+      display: grid;
+      grid-template-columns: 1fr 180px 1fr;
+      gap: 0;
+      align-items: center;
+      min-height: 340px;
+    }
+
+    .cg-col {
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+    }
+
+    .cg-col-left {
+      align-items: flex-start;
+      padding-right: 20px;
+    }
+
+    .cg-col-right {
+      align-items: flex-end;
+      padding-left: 20px;
+    }
+
+    .cg-tool {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      width: 100%;
+      box-sizing: border-box;
+      cursor: pointer;
+      background: #16181f;
+      border: 1px solid #2a2d3a;
+      border-radius: 12px;
+      padding: 12px 16px;
+      transition: border-color 0.2s, background 0.2s;
+    }
+
+    .cg-tool:hover {
+      border-color: #4a4f6a;
+      background: #1c1f2a;
+    }
+
+    .cg-col-right .cg-tool {
+      flex-direction: row-reverse;
+      justify-content: flex-start;
+    }
+
+    .cg-tool-icon {
+      width: 36px;
+      height: 36px;
+      border-radius: 8px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+    }
+
+    .cg-tool-info {
+      display: flex;
+      flex-direction: column;
+    }
+
+    .cg-tool-name {
+      font-size: 14px;
+      font-weight: 500;
+      color: #e8eaf0;
+      line-height: 1.2;
+    }
+
+    .cg-tool-sub {
+      font-size: 11px;
+      color: #6b7080;
+      line-height: 1.2;
+      margin-top: 2px;
+    }
+
+    .cg-col-right .cg-tool-info {
+      align-items: flex-end;
+    }
+
+    .cg-hub {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 10px;
+    }
+
+    .cg-hub-box {
+      width: 100px;
+      height: 100px;
+      background: #1a1d28;
+      border: 2px solid #3a3f5a;
+      border-radius: 14px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      position: relative;
+      z-index: 10;
+    }
+
+    .cg-hub-label {
+      font-size: 12px;
+      color: #8890a8;
+      text-align: center;
+      line-height: 1.3;
+    }
+
+    .cg-hub-brain {
+      font-size: 36px;
+      line-height: 1;
+    }
+
+    .cg-tagline {
+      font-size: 16px;
+      color: #9098b0;
+      text-align: center;
+      margin-top: 24px;
+      letter-spacing: 0.01em;
+    }
+
+    svg.cg-lines {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      pointer-events: none;
+      z-index: 1;
+    }
+
     .connector-section {
       padding-top: clamp(2rem, 5vw, 4rem);
     }
@@ -680,6 +824,34 @@
     }
 
     @media (max-width: 1100px) {
+      .cg-grid {
+        grid-template-columns: 1fr;
+        min-height: auto;
+      }
+
+      svg.cg-lines {
+        display: none;
+      }
+
+      .cg-col-left,
+      .cg-col-right {
+        align-items: stretch;
+        padding: 0;
+      }
+
+      .cg-col-right .cg-tool {
+        flex-direction: row;
+      }
+
+      .cg-col-right .cg-tool-info {
+        align-items: flex-start;
+      }
+
+      .cg-hub {
+        order: -1;
+        margin-bottom: 1rem;
+      }
+
       .connector-grid {
         grid-template-columns: 1fr;
         min-height: auto;
@@ -705,6 +877,10 @@
     }
 
     @media (max-width: 820px) {
+      .cg-wrap {
+        padding: 32px 20px;
+      }
+
       .steps {
         grid-template-columns: 1fr;
       }
@@ -862,113 +1038,87 @@
     </section>
 
     <section class="connector-section section container reveal">
-      <div class="connector-card">
-        <svg class="connector-lines" viewBox="0 0 1200 520" preserveAspectRatio="none" aria-hidden="true">
-          <path class="connector-path-base" d="M190 90C315 150 435 205 600 260"></path>
-          <path class="connector-path-base" d="M190 200C325 220 450 240 600 260"></path>
-          <path class="connector-path-base" d="M190 320C325 300 450 280 600 260"></path>
-          <path class="connector-path-base" d="M190 430C315 370 435 315 600 260"></path>
-          <path class="connector-path-base" d="M1010 90C885 150 765 205 600 260"></path>
-          <path class="connector-path-base" d="M1010 200C875 220 750 240 600 260"></path>
-          <path class="connector-path-base" d="M1010 320C875 300 750 280 600 260"></path>
-          <path class="connector-path-base" d="M1010 430C885 370 765 315 600 260"></path>
+      <div class="cg-wrap" id="cgWrap">
+        <svg class="cg-lines" id="cgSvg" aria-hidden="true"></svg>
 
-          <path class="connector-path-glow" d="M190 90C315 150 435 205 600 260"></path>
-          <path class="connector-path-glow alt" d="M190 200C325 220 450 240 600 260"></path>
-          <path class="connector-path-glow" d="M190 320C325 300 450 280 600 260"></path>
-          <path class="connector-path-glow alt" d="M190 430C315 370 435 315 600 260"></path>
-          <path class="connector-path-glow alt" d="M1010 90C885 150 765 205 600 260"></path>
-          <path class="connector-path-glow" d="M1010 200C875 220 750 240 600 260"></path>
-          <path class="connector-path-glow alt" d="M1010 320C875 300 750 280 600 260"></path>
-          <path class="connector-path-glow" d="M1010 430C885 370 765 315 600 260"></path>
-        </svg>
-
-        <div class="connector-grid">
-          <div class="ai-column left" aria-label="Input AI models">
-            <div class="ai-item" data-brand="claude">
-              <div class="logo-chip">
-                <svg viewBox="0 0 48 48" aria-hidden="true"><use href="#icon-claude"></use></svg>
+        <div class="cg-grid" style="position: relative; z-index: 5;">
+          <div class="cg-col cg-col-left" id="colLeft">
+            <div class="cg-tool" data-side="left" data-idx="0">
+              <div class="cg-tool-icon" style="background: #1a1a1a; border: 1px solid #333;">
+                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                  <path d="M12 2C6.477 2 2 6.477 2 12s4.477 10 10 10 10-4.477 10-10S17.523 2 12 2z" fill="#d97757"></path>
+                  <text x="12" y="16" text-anchor="middle" font-size="10" fill="white" font-weight="bold">A</text>
+                </svg>
               </div>
-              <div>
-                <p class="ai-name">Claude</p>
-                <p class="ai-subtitle">Anthropic</p>
-              </div>
-            </div>
-            <div class="ai-item" data-brand="chatgpt">
-              <div class="logo-chip">
-                <svg viewBox="0 0 48 48" aria-hidden="true"><use href="#icon-chatgpt"></use></svg>
-              </div>
-              <div>
-                <p class="ai-name">ChatGPT</p>
-                <p class="ai-subtitle">OpenAI</p>
-              </div>
-            </div>
-            <div class="ai-item" data-brand="gemini">
-              <div class="logo-chip">
-                <svg viewBox="0 0 48 48" aria-hidden="true"><use href="#icon-gemini"></use></svg>
-              </div>
-              <div>
-                <p class="ai-name">Gemini</p>
-                <p class="ai-subtitle">Google</p>
-              </div>
-            </div>
-            <div class="ai-item" data-brand="grok">
-              <div class="logo-chip">
-                <svg viewBox="0 0 48 48" aria-hidden="true"><use href="#icon-grok"></use></svg>
-              </div>
-              <div>
-                <p class="ai-name">Grok</p>
-                <p class="ai-subtitle">xAI</p>
+              <div class="cg-tool-info">
+                <span class="cg-tool-name">Claude</span>
+                <span class="cg-tool-sub">Anthropic</span>
               </div>
             </div>
           </div>
 
-          <div class="core-wrap" aria-label="Context Generator node">
-            <div class="core-node">🧠</div>
-            <div class="core-label">context-generator</div>
+          <div class="cg-hub">
+            <div class="cg-hub-box" id="hubBox">
+              <span class="cg-hub-brain">&#129504;</span>
+              <span class="cg-hub-label">context-<br>generator</span>
+            </div>
           </div>
 
-          <div class="ai-column right" aria-label="Output AI models">
-            <div class="ai-item" data-brand="claude">
-              <div class="logo-chip">
-                <svg viewBox="0 0 48 48" aria-hidden="true"><use href="#icon-claude"></use></svg>
+          <div class="cg-col cg-col-right" id="colRight">
+            <div class="cg-tool" data-side="right" data-idx="0">
+              <div class="cg-tool-icon" style="background: #1a1a1a; border: 1px solid #333;">
+                <svg width="22" height="22" viewBox="0 0 24 24" aria-hidden="true">
+                  <circle cx="12" cy="12" r="10" fill="#10a37f"></circle>
+                  <text x="12" y="16" text-anchor="middle" font-size="11" fill="white" font-weight="bold">G</text>
+                </svg>
               </div>
-              <div>
-                <p class="ai-name">Claude</p>
-                <p class="ai-subtitle">Anthropic</p>
-              </div>
-            </div>
-            <div class="ai-item" data-brand="chatgpt">
-              <div class="logo-chip">
-                <svg viewBox="0 0 48 48" aria-hidden="true"><use href="#icon-chatgpt"></use></svg>
-              </div>
-              <div>
-                <p class="ai-name">ChatGPT</p>
-                <p class="ai-subtitle">OpenAI</p>
+              <div class="cg-tool-info">
+                <span class="cg-tool-name">ChatGPT</span>
+                <span class="cg-tool-sub">OpenAI</span>
               </div>
             </div>
-            <div class="ai-item" data-brand="gemini">
-              <div class="logo-chip">
-                <svg viewBox="0 0 48 48" aria-hidden="true"><use href="#icon-gemini"></use></svg>
+            <div class="cg-tool" data-side="right" data-idx="1">
+              <div class="cg-tool-icon" style="background: #1a1a1a; border: 1px solid #333;">
+                <svg width="22" height="22" viewBox="0 0 24 24" aria-hidden="true">
+                  <polygon points="12,2 22,20 2,20" fill="none" stroke="#4285f4" stroke-width="2"></polygon>
+                  <polygon points="12,7 19,19 5,19" fill="#4285f4" opacity="0.3"></polygon>
+                  <text x="12" y="17" text-anchor="middle" font-size="9" fill="#4285f4" font-weight="bold">&#10022;</text>
+                </svg>
               </div>
-              <div>
-                <p class="ai-name">Gemini</p>
-                <p class="ai-subtitle">Google</p>
+              <div class="cg-tool-info">
+                <span class="cg-tool-name">Gemini</span>
+                <span class="cg-tool-sub">Google</span>
               </div>
             </div>
-            <div class="ai-item" data-brand="grok">
-              <div class="logo-chip">
-                <svg viewBox="0 0 48 48" aria-hidden="true"><use href="#icon-grok"></use></svg>
+            <div class="cg-tool" data-side="right" data-idx="2">
+              <div class="cg-tool-icon" style="background: #1a1a1a; border: 1px solid #333;">
+                <svg width="22" height="22" viewBox="0 0 24 24" aria-hidden="true">
+                  <rect x="2" y="2" width="20" height="20" rx="4" fill="#1d1d1d"></rect>
+                  <text x="12" y="16" text-anchor="middle" font-size="13" fill="#e0e0e0" font-weight="bold">x</text>
+                </svg>
               </div>
-              <div>
-                <p class="ai-name">Grok</p>
-                <p class="ai-subtitle">xAI</p>
+              <div class="cg-tool-info">
+                <span class="cg-tool-name">Grok</span>
+                <span class="cg-tool-sub">xAI</span>
+              </div>
+            </div>
+            <div class="cg-tool" data-side="right" data-idx="3">
+              <div class="cg-tool-icon" style="background: #1a1a1a; border: 1px solid #333;">
+                <svg width="22" height="22" viewBox="0 0 24 24" aria-hidden="true">
+                  <circle cx="12" cy="12" r="10" fill="#0e5cf0"></circle>
+                  <text x="12" y="16" text-anchor="middle" font-size="9" fill="white" font-weight="bold">DS</text>
+                </svg>
+              </div>
+              <div class="cg-tool-info">
+                <span class="cg-tool-name">DeepSeek</span>
+                <span class="cg-tool-sub">DeepSeek AI</span>
               </div>
             </div>
           </div>
         </div>
+
+        <p class="cg-tagline">One skill. Works with every AI.</p>
       </div>
-      <p class="tagline">One skill. Works with every AI.</p>
     </section>
 
     <section id="install" class="section container reveal">
@@ -1118,6 +1268,93 @@
       .catch(() => {
         starsCount.textContent = "Star";
       });
+    (function drawConnectorHubLines() {
+      function drawLines() {
+        const wrap = document.getElementById("cgWrap");
+        const svg = document.getElementById("cgSvg");
+        const hub = document.getElementById("hubBox");
+
+        if (!wrap || !svg || !hub) {
+          return;
+        }
+
+        const wrapRect = wrap.getBoundingClientRect();
+        const hubRect = hub.getBoundingClientRect();
+        const centerY = hubRect.top - wrapRect.top + (hubRect.height / 2);
+        const leftTools = wrap.querySelectorAll('[data-side="left"]');
+        const rightTools = wrap.querySelectorAll('[data-side="right"]');
+
+        svg.innerHTML = "";
+
+        function addLine(x1, y1, x2, y2, color, delay) {
+          const length = Math.hypot(x2 - x1, y2 - y1);
+          const dash = length * 0.3;
+
+          const baseLine = document.createElementNS("http://www.w3.org/2000/svg", "line");
+          baseLine.setAttribute("x1", x1);
+          baseLine.setAttribute("y1", y1);
+          baseLine.setAttribute("x2", x2);
+          baseLine.setAttribute("y2", y2);
+          baseLine.setAttribute("stroke", "#2a2d3a");
+          baseLine.setAttribute("stroke-width", "0.8");
+
+          const line = document.createElementNS("http://www.w3.org/2000/svg", "line");
+          line.setAttribute("x1", x1);
+          line.setAttribute("y1", y1);
+          line.setAttribute("x2", x2);
+          line.setAttribute("y2", y2);
+          line.setAttribute("stroke", color);
+          line.setAttribute("stroke-width", "1");
+          line.setAttribute("stroke-dasharray", `${dash} ${length - dash}`);
+          line.setAttribute("stroke-dashoffset", length);
+          line.setAttribute("opacity", "0.55");
+
+          const animation = document.createElementNS("http://www.w3.org/2000/svg", "animate");
+          animation.setAttribute("attributeName", "stroke-dashoffset");
+          animation.setAttribute("values", `${length};-${length}`);
+          animation.setAttribute("dur", "2.2s");
+          animation.setAttribute("begin", `${delay}s`);
+          animation.setAttribute("repeatCount", "indefinite");
+          animation.setAttribute("calcMode", "linear");
+          line.appendChild(animation);
+
+          svg.appendChild(baseLine);
+          svg.appendChild(line);
+        }
+
+        leftTools.forEach((tool, index) => {
+          const rect = tool.getBoundingClientRect();
+          addLine(
+            rect.right - wrapRect.left,
+            rect.top - wrapRect.top + (rect.height / 2),
+            hubRect.left - wrapRect.left,
+            centerY,
+            "#d97757",
+            index * 0.3
+          );
+        });
+
+        ["#10a37f", "#4285f4", "#888", "#0e5cf0"].forEach((color, index) => {
+          const tool = rightTools[index];
+          if (!tool) {
+            return;
+          }
+
+          const rect = tool.getBoundingClientRect();
+          addLine(
+            hubRect.right - wrapRect.left,
+            centerY,
+            rect.left - wrapRect.left,
+            rect.top - wrapRect.top + (rect.height / 2),
+            color,
+            (index * 0.25) + 0.1
+          );
+        });
+      }
+
+      window.setTimeout(drawLines, 120);
+      window.addEventListener("resize", drawLines);
+    })();
 
     const revealItems = document.querySelectorAll(".reveal");
     const observer = new IntersectionObserver((entries) => {
