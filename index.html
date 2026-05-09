@@ -263,6 +263,8 @@
       position: relative;
       overflow: hidden;
       font-family: var(--font-sans);
+      max-width: 860px;
+      margin: 0 auto;
     }
 
     .cg-grid {
@@ -293,7 +295,7 @@
       display: flex;
       align-items: center;
       gap: 12px;
-      width: 100%;
+      width: fit-content;
       box-sizing: border-box;
       cursor: pointer;
       background: #16181f;
@@ -309,7 +311,6 @@
     }
 
     .cg-col-right .cg-tool {
-      flex-direction: row-reverse;
       justify-content: flex-start;
     }
 
@@ -343,7 +344,7 @@
     }
 
     .cg-col-right .cg-tool-info {
-      align-items: flex-end;
+      align-items: flex-start;
     }
 
     .cg-hub {
