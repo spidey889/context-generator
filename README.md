@@ -72,4 +72,4 @@ Open source. If you improve the prompt or find a better structure, open a PR.
 
 ---
 
-Made by [@spidey889](https://github.com/spidey889)
+Made by [@spidey889](https://github.com/spidey889).
