@@ -1374,6 +1374,20 @@
     }, { threshold: 0.16 });
 
     revealItems.forEach((item) => observer.observe(item));
+
+    const videoElement = document.getElementById('install-video');
+    if (videoElement) {
+      const videoObserver = new IntersectionObserver((entries) => {
+        entries.forEach((entry) => {
+          if (entry.isIntersecting) {
+            videoElement.play();
+          } else {
+            videoElement.pause();
+          }
+        });
+      }, { threshold: 0.3 });
+      videoObserver.observe(videoElement);
+    }
     
     document.getElementById('hero-install-btn')?.addEventListener('click', () => {
       document.getElementById('install-video')?.play();
