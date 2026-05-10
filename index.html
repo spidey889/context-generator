@@ -1122,9 +1122,8 @@
         <div class="install-top">
           <div>
             <p class="eyebrow">Install in 10 seconds</p>
-            <h2 class="section-heading">Drop this into any AI’s custom instructions and keep moving.</h2>
-            <p class="section-copy install-copy">Copy the full <code>SKILL.md</code>, paste it into Customize or System
-              Prompt, then trigger <code>/context-generator</code> whenever you want a portable handoff.</p>
+            <h2 class="section-heading">Set it up in 10 seconds.</h2>
+            <p class="section-copy install-copy">Download the skill, upload it to Claude, and continue anywhere.</p>
           </div>
           <button class="button button-dark button-large" type="button" data-copy-skill
             data-copied-label="Copied ✓">Copy to Clipboard</button>
@@ -1133,19 +1132,21 @@
         <div class="steps" aria-label="Install steps">
           <div class="step">
             <span class="step-index">1</span>
-            <p>Click copy below and grab the full skill file.</p>
+            <p>Download the SKILL.md file</p>
           </div>
           <div class="step">
             <span class="step-index">2</span>
-            <p>Open any AI → Customize / System Prompt.</p>
+            <p>Go to claude.ai → click Customize → drag & drop the file</p>
           </div>
           <div class="step">
             <span class="step-index">3</span>
-            <p>Paste it, then type <code>/context-generator</code>.</p>
+            <p>Type /context-generator in any chat</p>
           </div>
         </div>
 
-        <pre class="skill-block"><code id="skill-content"></code></pre>
+        <div style="margin-top: 1.8rem; border-radius: 1.6rem; overflow: hidden; border: 1px solid rgba(255, 255, 255, 0.08); box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.03);">
+          <video src="2026-05-10 09-51-15.mp4" autoplay loop muted playsinline style="display: block; width: 100%; height: auto;"></video>
+        </div>
       </div>
     </section>
 
@@ -1208,7 +1209,7 @@
     const copyButtons = document.querySelectorAll("[data-copy-skill]");
     const starsCount = document.getElementById("stars-count");
 
-    skillContent.textContent = SKILL_TEXT;
+    if (skillContent) skillContent.textContent = SKILL_TEXT;
 
     async function copyText(text) {
       if (navigator.clipboard && window.isSecureContext) {
