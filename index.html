@@ -1149,7 +1149,7 @@
         </div>
 
         <div style="margin-top: 1.8rem; border-radius: 1.6rem; overflow: hidden; border: 1px solid rgba(255, 255, 255, 0.08); box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.03);">
-          <video src="2026-05-10 09-51-15.mp4" autoplay loop muted playsinline style="display: block; width: 100%; height: auto;"></video>
+          <video id="install-video" src="2026-05-10 09-51-15.mp4" loop muted playsinline style="display: block; width: 100%; height: auto;"></video>
         </div>
       </div>
     </section>
@@ -1376,6 +1376,7 @@
     revealItems.forEach((item) => observer.observe(item));
     
     document.getElementById('hero-install-btn')?.addEventListener('click', () => {
+      document.getElementById('install-video')?.play();
       setTimeout(() => {
         document.getElementById('install')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
       }, 300);
