@@ -1038,7 +1038,7 @@
       <h1 style="color: #000000 !important;">Switch AIs without re-explaining everything.</h1>
       <p>Install once in Claude. Type /context-generator. Continue anywhere.</p>
       <div class="hero-actions">
-        <a class="button button-dark" href="SKILL.md" download="SKILL.md">Install in Claude →</a>
+        <a class="button button-dark" id="hero-install-btn" href="SKILL.md" download="SKILL.md">Install in Claude →</a>
         <a class="button button-outline" href="https://github.com/spidey889/context-generator" target="_blank"
           rel="noreferrer">View on GitHub</a>
       </div>
@@ -1369,6 +1369,12 @@
     }, { threshold: 0.16 });
 
     revealItems.forEach((item) => observer.observe(item));
+    
+    document.getElementById('hero-install-btn')?.addEventListener('click', () => {
+      setTimeout(() => {
+        document.getElementById('install')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }, 300);
+    });
   </script>
 </body>
 
