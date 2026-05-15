@@ -1057,9 +1057,9 @@
       <span>context-generator</span>
     </a>
     <nav class="nav-actions" aria-label="Primary navigation">
-      <a class="nav-link" href="https://github.com/spidey889/context-generator" target="_blank"
-        rel="noreferrer">GitHub</a>
-      <a class="button button-dark" href="#install">Install Free →</a>
+      <a id="nav-install-link" class="nav-link" href="#install">How to install</a>
+      <button class="button button-dark" type="button" data-copy-skill
+        data-copied-label="Copied ✓" data-scroll-target="install">Install Free →</button>
     </nav>
   </header>
 
@@ -1283,6 +1283,9 @@
 
         const scrollTarget = button.getAttribute("data-scroll-target");
         if (scrollTarget) {
+          if (scrollTarget === 'install') {
+            document.getElementById('install-video')?.play();
+          }
           document.getElementById(scrollTarget)?.scrollIntoView({ behavior: "smooth", block: "start" });
         }
       });
@@ -1416,11 +1419,19 @@
       videoObserver.observe(videoElement);
     }
     
-    document.getElementById('hero-install-btn')?.addEventListener('click', () => {
-      document.getElementById('install-video')?.play();
-      setTimeout(() => {
-        document.getElementById('install')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-      }, 300);
+    ['hero-install-btn', 'nav-install-link'].forEach(id => {
+      document.getElementById(id)?.addEventListener('click', (e) => {
+        document.getElementById('install-video')?.play();
+        if (id === 'nav-install-link') {
+          e.preventDefault();
+          document.getElementById('install')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        } else {
+          // For hero button which is a download link, we still want to scroll
+          setTimeout(() => {
+            document.getElementById('install')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+          }, 300);
+        }
+      });
     });
   </script>
 </body>
