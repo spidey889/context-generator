@@ -2,7 +2,7 @@
 
 **Hit your AI limit mid-conversation? Don't lose your progress.**
 
-`/generate-context` summarizes your entire chat into a clean, portable block you can paste into any AI and continue exactly where you left off.
+`/context-generator` summarizes your entire chat into a clean, portable block you can paste into any AI and continue exactly where you left off.
 
 Works with Claude, ChatGPT, Gemini, or any AI.
 
@@ -24,12 +24,12 @@ Before you hit the limit, type `/generate-context`. The AI compresses everything
 1. Download `SKILL.md` from the repo
 2. Go to [claude.ai](https://claude.ai) → click **Customize**
 3. Drag & drop the file there
-4. Type `/generate-context` in any chat
+4. Type `/context-generator` in any chat
 
 ### Option 2 — Manual (Any AI)
 1. Open `SKILL.md` → copy all contents
 2. Paste at the start of any new chat
-3. Type `/generate-context` when needed
+3. Type `/context-generator` when needed
 
  ---  
 ## When To Use It
@@ -61,7 +61,7 @@ Clean. Specific. Under 400 words. Ready to paste.
 
 | File | What it is |
 |------|-----------|
-| `context-generator.md` | The skill/prompt — this is what you actually install |
+| `skill.md` | The skill/prompt — this is what you actually install |
 | `README.md` | This file |
 
 ---
