@@ -1,0 +1,30 @@
+{
+  "manifest_version": 3,
+  "name": "Context Generator Relay",
+  "description": "Send the context-generator prompt to Claude, then paste Claude's response into ChatGPT.",
+  "version": "1.0.0",
+  "permissions": ["activeTab", "scripting", "tabs"],
+  "host_permissions": [
+    "https://claude.ai/*",
+    "https://chatgpt.com/*",
+    "https://chat.openai.com/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": {
+    "default_title": "Generate context and paste into ChatGPT"
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://claude.ai/*"],
+      "js": ["claude-content.js"],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": ["https://chatgpt.com/*", "https://chat.openai.com/*"],
+      "js": ["chatgpt-content.js"],
+      "run_at": "document_idle"
+    }
+  ]
+}
