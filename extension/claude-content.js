@@ -4,6 +4,7 @@
   }
 
   window.__contextGeneratorClaudeLoaded = true;
+  let isRunning = false;
 
   const CONTEXT_GENERATOR_PROMPT = `---
 name: context-generator
@@ -66,16 +67,35 @@ Then write: "Continue from where we left off."
 - If conversation is too short to summarize, say: "Chat too short — no context needed yet. Use this when you're deeper into a session."`;
 
   chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
-    if (message?.type !== "RUN_CONTEXT_GENERATOR") {
+    if (message?.type !== "START_CONTEXT_TRANSFER") {
       return false;
     }
 
-    runClaudeFlow()
-      .then((text) => sendResponse({ ok: true, text }))
-      .catch((error) => sendResponse({ ok: false, error: error.message }));
+    if (isRunning) {
+      sendResponse({ ok: false, error: "Context transfer is already running." });
+      return false;
+    }
 
-    return true;
+    isRunning = true;
+    sendResponse({ ok: true });
+
+    runClaudeFlow()
+      .then((text) => notifyBackground({ type: "TRANSFER_TO_CHATGPT", text }))
+      .catch((error) => notifyBackground({ type: "CONTEXT_TRANSFER_ERROR", error: error.message }))
+      .finally(() => {
+        isRunning = false;
+      });
+
+    return false;
   });
+
+  async function notifyBackground(message) {
+    try {
+      await chrome.runtime.sendMessage(message);
+    } catch (error) {
+      console.error("[Context Generator Relay]", error);
+    }
+  }
 
   async function runClaudeFlow() {
     const beforeText = getClaudeResponseText();
