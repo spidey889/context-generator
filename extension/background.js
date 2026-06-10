@@ -10,31 +10,60 @@ chrome.action.onClicked.addListener(async (tab) => {
     }
 
     await ensureContentScript(tab.id, "claude-content.js");
-    const claudeResult = await sendMessage(tab.id, { type: "RUN_CONTEXT_GENERATOR" });
+    const startResult = await sendMessage(tab.id, { type: "START_CONTEXT_TRANSFER" });
 
-    if (!claudeResult?.ok || !claudeResult.text) {
-      throw new Error(claudeResult?.error || "Claude did not return response text.");
+    if (!startResult?.ok) {
+      throw new Error(startResult?.error || "Could not start Claude transfer.");
     }
 
-    const chatGptTab = await chrome.tabs.create({ url: CHATGPT_URL, active: true });
-    await waitForTabLoaded(chatGptTab.id);
-    await ensureContentScript(chatGptTab.id, "chatgpt-content.js");
-
-    const pasteResult = await sendMessage(chatGptTab.id, {
-      type: "PASTE_CONTEXT",
-      text: claudeResult.text
-    });
-
-    if (!pasteResult?.ok) {
-      throw new Error(pasteResult?.error || "Could not paste into ChatGPT.");
-    }
-
-    await setBadge("OK", "#1f8f4d", 2500);
+    await setBadge("RUN", "#565add");
   } catch (error) {
     console.error("[Context Generator Relay]", error);
     await setBadge("ERR", "#b42318", 5000);
   }
 });
+
+chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+  if (message?.type === "TRANSFER_TO_CHATGPT") {
+    transferToChatGpt(message.text)
+      .then(() => sendResponse({ ok: true }))
+      .catch((error) => {
+        console.error("[Context Generator Relay]", error);
+        setBadge("ERR", "#b42318", 5000);
+        sendResponse({ ok: false, error: error.message });
+      });
+
+    return true;
+  }
+
+  if (message?.type === "CONTEXT_TRANSFER_ERROR") {
+    console.error("[Context Generator Relay]", message.error);
+    setBadge("ERR", "#b42318", 5000);
+  }
+
+  return false;
+});
+
+async function transferToChatGpt(text) {
+  if (!text?.trim()) {
+    throw new Error("Claude did not return response text.");
+  }
+
+  const chatGptTab = await chrome.tabs.create({ url: CHATGPT_URL, active: true });
+  await waitForTabLoaded(chatGptTab.id);
+  await ensureContentScript(chatGptTab.id, "chatgpt-content.js");
+
+  const pasteResult = await sendMessage(chatGptTab.id, {
+    type: "PASTE_CONTEXT",
+    text: text.trim()
+  });
+
+  if (!pasteResult?.ok) {
+    throw new Error(pasteResult?.error || "Could not paste into ChatGPT.");
+  }
+
+  await setBadge("OK", "#1f8f4d", 2500);
+}
 
 async function ensureContentScript(tabId, file) {
   try {
