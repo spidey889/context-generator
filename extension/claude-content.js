@@ -5,6 +5,9 @@
 
   window.__contextGeneratorClaudeLoaded = true;
   let isRunning = false;
+  const RESPONSE_TIMEOUT_MS = 60000;
+  const TEXT_STABLE_AFTER_GENERATING_MS = 1500;
+  const TEXT_STABLE_WITHOUT_INDICATOR_MS = 5000;
 
   const CONTEXT_GENERATOR_PROMPT = `---
 name: context-generator
@@ -112,26 +115,41 @@ Then write: "Continue from where we left off."
   async function waitForClaudeResponse(beforeText) {
     let latestText = "";
     let lastChangedAt = Date.now();
+    let sawGenerating = false;
     const startedAt = Date.now();
-    const timeoutMs = 180000;
 
-    while (Date.now() - startedAt < timeoutMs) {
+    while (Date.now() - startedAt < RESPONSE_TIMEOUT_MS) {
       const text = getClaudeResponseText();
+      const isGenerating = isClaudeGenerating();
       const isNewResponse = text && text !== beforeText && !looksLikePromptEcho(text);
+      sawGenerating = sawGenerating || isGenerating;
 
       if (isNewResponse && text !== latestText) {
         latestText = text;
         lastChangedAt = Date.now();
       }
 
-      if (latestText && Date.now() - lastChangedAt > 2500 && !isStreaming()) {
+      if (latestText && hasClaudeFinishedGenerating(isGenerating, sawGenerating, lastChangedAt)) {
         return latestText.trim();
       }
 
       await sleep(500);
     }
 
+    if (latestText && hasClaudeFinishedGenerating(isClaudeGenerating(), sawGenerating, lastChangedAt)) {
+      return latestText.trim();
+    }
+
     throw new Error("Timed out waiting for Claude to finish responding.");
+  }
+
+  function hasClaudeFinishedGenerating(isGenerating, sawGenerating, lastChangedAt) {
+    const stableForMs = Date.now() - lastChangedAt;
+    const requiredStableMs = sawGenerating
+      ? TEXT_STABLE_AFTER_GENERATING_MS
+      : TEXT_STABLE_WITHOUT_INDICATOR_MS;
+
+    return !isGenerating && stableForMs >= requiredStableMs;
   }
 
   function findClaudeInput() {
@@ -223,8 +241,20 @@ Then write: "Continue from where we left off."
     return cleanText(text.slice(markerIndex + promptEndMarker.length));
   }
 
-  function isStreaming() {
-    return Array.from(document.querySelectorAll("button")).some((button) => {
+  function isClaudeGenerating() {
+    const stopSelectors = [
+      "button[aria-label*='stop' i]",
+      "button[title*='stop' i]",
+      "button[data-testid*='stop' i]",
+      "[role='button'][aria-label*='stop' i]",
+      "[data-testid*='stop' i]"
+    ];
+
+    if (stopSelectors.some((selector) => Array.from(document.querySelectorAll(selector)).some(isVisible))) {
+      return true;
+    }
+
+    return Array.from(document.querySelectorAll("main button, form button")).some((button) => {
       if (!isVisible(button)) {
         return false;
       }
@@ -238,7 +268,7 @@ Then write: "Continue from where we left off."
         .filter(Boolean)
         .join(" ");
 
-      return /stop|cancel/i.test(label);
+      return /\bstop\b|stop generating|stop response|interrupt/i.test(label);
     });
   }
 
