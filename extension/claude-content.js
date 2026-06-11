@@ -6,7 +6,6 @@
   window.__contextGeneratorClaudeLoaded = true;
   let isRunning = false;
   let runningResetTimer = null;
-  const FIXED_CAPTURE_DELAY_MS = 30000;
   const RUNNING_AUTO_RESET_MS = 60000;
 
   const CONTEXT_GENERATOR_PROMPT = `---
@@ -91,7 +90,7 @@ Then write: "Continue from where we left off."
 
   async function runClaudeFlow() {
     try {
-      const text = await captureClaudeResponseAfterFixedDelay();
+      const text = await captureClaudeResponseWithPolling();
       resetRunningFlag();
       await notifyBackground({ type: "TRANSFER_TO_CHATGPT", text });
     } catch (error) {
@@ -120,7 +119,7 @@ Then write: "Continue from where we left off."
     }
   }
 
-  async function captureClaudeResponseAfterFixedDelay() {
+  async function captureClaudeResponseWithPolling() {
     const input = await waitForElement(findClaudeInput, 20000, "Claude chat input");
 
     setEditorText(input, CONTEXT_GENERATOR_PROMPT);
@@ -128,19 +127,50 @@ Then write: "Continue from where we left off."
     const sendButton = await waitForElement(() => findSendButton(input), 10000, "Claude send button");
     sendButton.click();
 
-    await sleep(FIXED_CAPTURE_DELAY_MS);
+    // Smart polling for completion
+    const MAX_WAIT_MS = 30000;
+    const POLL_INTERVAL_MS = 1000;
+    const startTime = Date.now();
+    let previousText = null;
+    let identicalCount = 0;
 
-    const text = getClaudeResponseText();
-    console.log("[Context Generator Relay] Claude captured text after 30s:", text || "");
+    console.log("[Context Generator Relay] Starting smart polling for Claude's response...");
 
+    while (Date.now() - startTime < MAX_WAIT_MS) {
+      await sleep(POLL_INTERVAL_MS);
+      
+      const text = getClaudeResponseText(true);
+      
+      if (!text) {
+        console.log(`[Context Generator Relay] Poll: No text found yet.`);
+        previousText = null;
+        identicalCount = 0;
+        continue;
+      }
+
+      if (text === previousText) {
+        identicalCount++;
+        console.log(`[Context Generator Relay] Poll: Text stabilized (unchanged for ${identicalCount}s).`);
+        if (identicalCount >= 2) {
+          console.log("[Context Generator Relay] Claude finished streaming. Capturing text.");
+          getClaudeResponseText(false); // Log final extraction
+          return text.trim();
+        }
+      } else {
+        console.log(`[Context Generator Relay] Poll: Text changed (streaming).`);
+        identicalCount = 0;
+        previousText = text;
+      }
+    }
+
+    console.log("[Context Generator Relay] Smart polling timed out after 30s. Capturing whatever we have.");
+    const text = getClaudeResponseText(false);
     if (!text) {
-      throw new Error("Claude response was not available after the 30 second wait.");
+      throw new Error("Claude response was not available after the 30 second maximum wait.");
     }
 
     return text.trim();
   }
-
-  function findClaudeInput() {
     const selectors = [
       "textarea",
       "[contenteditable='true'][data-placeholder]",
@@ -176,28 +206,30 @@ Then write: "Continue from where we left off."
     }) || scopedButtons.find((button) => isVisible(button) && !button.disabled && button.type === "submit");
   }
 
-  function getClaudeResponseText() {
-    const candidates = getClaudeResponseCandidates();
+  function getClaudeResponseText(silent = false) {
+    const candidates = getClaudeResponseCandidates(silent);
     if (candidates.length === 0) {
-      console.log("[Context Generator Relay] No Claude responses found matching .font-claude-response");
+      if (!silent) console.log("[Context Generator Relay] No Claude responses found matching .font-claude-response");
       return "";
     }
 
     const winner = candidates[candidates.length - 1];
     const text = cleanText(winner.innerText || winner.textContent || "");
     
-    console.log("[Context Generator Relay] Extracted Claude response from element:", {
-      tagName: winner.tagName,
-      className: winner.className,
-      textSnippet: text.slice(0, 60) + "..."
-    });
+    if (!silent) {
+      console.log("[Context Generator Relay] Extracted Claude response from element:", {
+        tagName: winner.tagName,
+        className: winner.className,
+        textSnippet: text.slice(0, 60) + "..."
+      });
+    }
 
     return text;
   }
 
-  function getClaudeResponseCandidates() {
+  function getClaudeResponseCandidates(silent = false) {
     const matches = document.querySelectorAll(".font-claude-response");
-    console.log(`[Context Generator Relay] Found ${matches.length} element(s) matching .font-claude-response`);
+    if (!silent) console.log(`[Context Generator Relay] Found ${matches.length} element(s) matching .font-claude-response`);
     return Array.from(matches);
   }
 
