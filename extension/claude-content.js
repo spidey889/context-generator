@@ -227,6 +227,13 @@ Then write: "Continue from where we left off."
       "main"
     ];
 
+    // Log per-selector match counts RIGHT AT THE START before any filtering
+    console.log("[Context Generator Relay] getClaudeResponseCandidates() called — checking selectors:");
+    selectors.forEach((selector) => {
+      const matches = document.querySelectorAll(selector);
+      console.log(`[Context Generator Relay]   selector "${selector}" => ${matches.length} element(s)`);
+    });
+
     const seen = new Set();
     const rawCandidates = selectors
       .flatMap((selector) => {
