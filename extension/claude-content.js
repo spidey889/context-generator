@@ -90,6 +90,7 @@ Then write: "Continue from where we left off."
 
   async function runClaudeFlow() {
     try {
+      showOverlay();
       const text = await captureClaudeResponseWithPolling();
       resetRunningFlag();
       await notifyBackground({ type: "TRANSFER_TO_CHATGPT", text });
@@ -102,6 +103,7 @@ Then write: "Continue from where we left off."
   function resetRunningFlag() {
     isRunning = false;
     clearRunningResetTimer();
+    hideOverlay();
   }
 
   function clearRunningResetTimer() {
@@ -317,4 +319,155 @@ Then write: "Continue from where we left off."
   function sleep(ms) {
     return new Promise((resolve) => setTimeout(resolve, ms));
   }
+
+  let countdownInterval = null;
+
+  function showOverlay() {
+    const overlay = document.getElementById("context-generator-overlay");
+    const textSpan = document.getElementById("context-generator-text");
+    const bubble = document.getElementById("context-generator-bubble");
+
+    if (overlay && textSpan) {
+      overlay.style.display = "flex";
+      let countdown = 10;
+      textSpan.textContent = `Generating context... (${countdown}s)`;
+
+      if (countdownInterval) clearInterval(countdownInterval);
+      countdownInterval = setInterval(() => {
+        countdown--;
+        if (countdown >= 0) {
+          textSpan.textContent = `Generating context... (${countdown}s)`;
+        } else {
+          clearInterval(countdownInterval);
+        }
+      }, 1000);
+    }
+
+    if (bubble) {
+      bubble.disabled = true;
+      bubble.style.opacity = "0.7";
+      bubble.style.cursor = "not-allowed";
+    }
+  }
+
+  function hideOverlay() {
+    const overlay = document.getElementById("context-generator-overlay");
+    const bubble = document.getElementById("context-generator-bubble");
+
+    if (overlay) {
+      overlay.style.display = "none";
+    }
+    if (countdownInterval) {
+      clearInterval(countdownInterval);
+      countdownInterval = null;
+    }
+    if (bubble) {
+      bubble.disabled = false;
+      bubble.style.opacity = "1";
+      bubble.style.cursor = "pointer";
+    }
+  }
+
+  function injectFloatingButton() {
+    if (document.getElementById("context-generator-bubble")) {
+      return;
+    }
+
+    const container = document.createElement("div");
+    container.id = "context-generator-container";
+    container.style.position = "fixed";
+    container.style.bottom = "20px";
+    container.style.right = "20px";
+    container.style.zIndex = "999999";
+    container.style.display = "flex";
+    container.style.flexDirection = "column";
+    container.style.alignItems = "flex-end";
+    container.style.fontFamily = "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif";
+
+    const bubble = document.createElement("button");
+    bubble.id = "context-generator-bubble";
+    bubble.title = "Transfer Context to ChatGPT";
+    bubble.style.width = "48px";
+    bubble.style.height = "48px";
+    bubble.style.borderRadius = "50%";
+    bubble.style.backgroundColor = "#d97706";
+    bubble.style.color = "#ffffff";
+    bubble.style.border = "none";
+    bubble.style.boxShadow = "0 4px 12px rgba(0, 0, 0, 0.15)";
+    bubble.style.cursor = "pointer";
+    bubble.style.display = "flex";
+    bubble.style.alignItems = "center";
+    bubble.style.justifyContent = "center";
+    bubble.style.fontSize = "20px";
+    bubble.style.transition = "transform 0.2s, background-color 0.2s";
+    bubble.textContent = "🧠";
+
+    bubble.addEventListener("mouseenter", () => {
+      bubble.style.transform = "scale(1.05)";
+      bubble.style.backgroundColor = "#b45309";
+    });
+    bubble.addEventListener("mouseleave", () => {
+      bubble.style.transform = "scale(1)";
+      bubble.style.backgroundColor = "#d97706";
+    });
+
+    const overlay = document.createElement("div");
+    overlay.id = "context-generator-overlay";
+    overlay.style.display = "none";
+    overlay.style.marginBottom = "10px";
+    overlay.style.padding = "10px 14px";
+    overlay.style.borderRadius = "8px";
+    overlay.style.backgroundColor = "#1f2937";
+    overlay.style.color = "#ffffff";
+    overlay.style.fontSize = "13px";
+    overlay.style.boxShadow = "0 4px 12px rgba(0, 0, 0, 0.2)";
+    overlay.style.whiteSpace = "nowrap";
+    overlay.style.alignItems = "center";
+    overlay.style.gap = "8px";
+
+    const spinner = document.createElement("div");
+    spinner.className = "context-generator-spinner";
+    spinner.style.width = "14px";
+    spinner.style.height = "14px";
+    spinner.style.border = "2px solid rgba(255, 255, 255, 0.3)";
+    spinner.style.borderTop = "2px solid #ffffff";
+    spinner.style.borderRadius = "50%";
+    
+    if (!document.getElementById("context-generator-styles")) {
+      const styleSheet = document.createElement("style");
+      styleSheet.id = "context-generator-styles";
+      styleSheet.textContent = `
+        @keyframes contextSpinner {
+          0% { transform: rotate(0deg); }
+          100% { transform: rotate(360deg); }
+        }
+      `;
+      document.head.appendChild(styleSheet);
+    }
+    spinner.style.animation = "contextSpinner 0.8s linear infinite";
+
+    const textSpan = document.createElement("span");
+    textSpan.id = "context-generator-text";
+    textSpan.textContent = "Generating context... (10s)";
+
+    overlay.appendChild(spinner);
+    overlay.appendChild(textSpan);
+
+    container.appendChild(overlay);
+    container.appendChild(bubble);
+
+    document.body.appendChild(container);
+
+    bubble.addEventListener("click", () => {
+      if (isRunning) return;
+
+      isRunning = true;
+      clearRunningResetTimer();
+      runningResetTimer = setTimeout(resetRunningFlag, RUNNING_AUTO_RESET_MS);
+
+      runClaudeFlow();
+    });
+  }
+
+  injectFloatingButton();
 })();
