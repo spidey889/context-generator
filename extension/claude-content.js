@@ -1,5 +1,7 @@
 (() => {
+  console.log("[Context Generator Relay] Content script loaded on claude.ai");
   if (window.__contextGeneratorClaudeLoaded) {
+    console.log("[Context Generator Relay] Content script already loaded previously. Skipping re-initialization.");
     return;
   }
 
@@ -205,9 +207,15 @@ Then write: "Continue from where we left off."
       "[contenteditable='true']"
     ];
 
-    return selectors
+    const found = selectors
       .flatMap((selector) => Array.from(document.querySelectorAll(selector)))
       .find((element) => isVisible(element) && !element.closest("[aria-hidden='true']"));
+
+    if (found && (!window.__lastInputLogTime || Date.now() - window.__lastInputLogTime > 10000)) {
+      console.log("[Context Generator Relay] Resolved Claude Input element:", found);
+      window.__lastInputLogTime = Date.now();
+    }
+    return found;
   }
 
   function findSendButton(input, includeDisabled = false) {
@@ -218,7 +226,7 @@ Then write: "Continue from where we left off."
       return all.indexOf(button) === index && isVisible(button) && (includeDisabled || !button.disabled);
     });
 
-    return buttons.find((button) => {
+    const sendBtn = buttons.find((button) => {
       const label = [
         button.getAttribute("aria-label"),
         button.getAttribute("title"),
@@ -230,6 +238,12 @@ Then write: "Continue from where we left off."
 
       return /\bsend\b|submit/i.test(label);
     }) || scopedButtons.find((button) => isVisible(button) && (includeDisabled || !button.disabled) && button.type === "submit");
+
+    if (sendBtn && (!window.__lastSendLogTime || Date.now() - window.__lastSendLogTime > 10000)) {
+      console.log("[Context Generator Relay] Resolved Send Button element:", sendBtn);
+      window.__lastSendLogTime = Date.now();
+    }
+    return sendBtn;
   }
 
   function getClaudeResponseText(silent = false) {
@@ -473,6 +487,7 @@ Then write: "Continue from where we left off."
     
     if (!input) {
       if (existingBubble) {
+        console.log("[Context Generator Relay] Input not found, removing existing bubble.");
         existingBubble.remove();
         const overlay = document.getElementById("context-generator-overlay");
         if (overlay) overlay.remove();
@@ -482,6 +497,12 @@ Then write: "Continue from where we left off."
 
     const sendButton = findSendButton(input, true);
     if (!sendButton) {
+      if (existingBubble) {
+        console.log("[Context Generator Relay] Send button not found but bubble exists, removing it.");
+        existingBubble.remove();
+        const overlay = document.getElementById("context-generator-overlay");
+        if (overlay) overlay.remove();
+      }
       return;
     }
 
@@ -489,12 +510,14 @@ Then write: "Continue from where we left off."
       if (existingBubble.parentNode === sendButton.parentNode) {
         return;
       } else {
+        console.log("[Context Generator Relay] Bubble parent changed. Re-injecting.");
         existingBubble.remove();
         const overlay = document.getElementById("context-generator-overlay");
         if (overlay) overlay.remove();
       }
     }
 
+    console.log("[Context Generator Relay] Injecting bubble next to send button:", sendButton);
     injectFloatingButton(input, sendButton);
   }
 
