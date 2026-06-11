@@ -179,6 +179,7 @@ Then write: "Continue from where we left off."
     const buttons = Array.from(document.querySelectorAll("button"));
     return buttons.some((button) => {
       if (!isVisible(button)) return false;
+      // Extract and normalize all label components to check for "stop"
       const label = [
         button.getAttribute("aria-label"),
         button.getAttribute("title"),
