@@ -186,7 +186,7 @@ Then write: "Continue from where we left off."
         button.getAttribute("aria-label"),
         button.getAttribute("title"),
         button.getAttribute("data-testid"),
-        button.textContent
+        button.textContent || ""
       ]
         .filter(Boolean)
         .join(" ")
