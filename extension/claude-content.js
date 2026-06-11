@@ -218,7 +218,7 @@ Then write: "Continue from where we left off."
     return found;
   }
 
-  function findSendButton(input, includeDisabled = false) {
+  function findSendButton(input, includeDisabled = false, silent = false) {
     const form = input?.closest("form");
     const scopedButtons = form ? Array.from(form.querySelectorAll("button")) : [];
     const pageButtons = Array.from(document.querySelectorAll("button"));
@@ -244,7 +244,7 @@ Then write: "Continue from where we left off."
         console.log("[Context Generator Relay] Resolved Send Button element:", sendBtn);
         window.__lastSendLogTime = Date.now();
       }
-    } else {
+    } else if (!silent) {
       if (!window.__lastAllButtonsLogTime || Date.now() - window.__lastAllButtonsLogTime > 10000) {
         window.__lastAllButtonsLogTime = Date.now();
         const allButtons = Array.from(document.querySelectorAll("button"));
@@ -411,7 +411,56 @@ Then write: "Continue from where we left off."
     }
   }
 
-  function injectFloatingButton(input, sendButton) {
+  function findBubbleContainer(input) {
+    const form = input?.closest("form");
+    if (!form) return null;
+
+    const buttons = Array.from(form.querySelectorAll("button")).filter((btn) => {
+      return btn.id !== "context-generator-bubble" && isVisible(btn);
+    });
+
+    if (buttons.length > 0) {
+      return buttons[0].parentNode;
+    }
+
+    const selectors = [
+      "[class*='controls' i]",
+      "[class*='toolbar' i]",
+      "[class*='actions' i]",
+      "[class*='buttons' i]"
+    ];
+    for (const selector of selectors) {
+      try {
+        const found = form.querySelector(selector);
+        if (found) return found;
+      } catch (e) {}
+    }
+
+    return form;
+  }
+
+  function findBubblePlacement(input) {
+    const container = findBubbleContainer(input);
+    if (!container) return null;
+
+    const sendBtn = findSendButton(input, true, true);
+    if (sendBtn && container.contains(sendBtn)) {
+      return { container, nextSibling: sendBtn };
+    }
+
+    const buttons = Array.from(container.querySelectorAll("button")).filter((btn) => {
+      return btn.id !== "context-generator-bubble" && isVisible(btn);
+    });
+
+    if (buttons.length > 0) {
+      const lastBtn = buttons[buttons.length - 1];
+      return { container, nextSibling: lastBtn.nextSibling };
+    }
+
+    return { container, nextSibling: null };
+  }
+
+  function injectFloatingButton(input, container, nextSibling) {
     const bubble = document.createElement("button");
     bubble.id = "context-generator-bubble";
     bubble.title = "Transfer Context to ChatGPT";
@@ -443,8 +492,8 @@ Then write: "Continue from where we left off."
       bubble.style.color = "currentColor";
     });
 
-    // Insert the bubble right before the Send button
-    sendButton.parentNode.insertBefore(bubble, sendButton);
+    // Insert the bubble
+    container.insertBefore(bubble, nextSibling);
 
     // Create the overlay singleton on document.body if it doesn't exist yet
     let overlay = document.getElementById("context-generator-overlay");
@@ -518,10 +567,10 @@ Then write: "Continue from where we left off."
       return;
     }
 
-    const sendButton = findSendButton(input, true);
-    if (!sendButton) {
+    const placement = findBubblePlacement(input);
+    if (!placement) {
       if (existingBubble) {
-        console.log("[Context Generator Relay] Send button not found but bubble exists, removing it.");
+        console.log("[Context Generator Relay] Bubble placement not found but bubble exists, removing it.");
         existingBubble.remove();
         const overlay = document.getElementById("context-generator-overlay");
         if (overlay) overlay.remove();
@@ -530,18 +579,19 @@ Then write: "Continue from where we left off."
     }
 
     if (existingBubble) {
-      if (existingBubble.parentNode === sendButton.parentNode) {
+      const isCorrectSibling = (existingBubble.nextSibling === placement.nextSibling);
+      if (existingBubble.parentNode === placement.container && isCorrectSibling) {
         return;
       } else {
-        console.log("[Context Generator Relay] Bubble parent changed. Re-injecting.");
+        console.log("[Context Generator Relay] Bubble placement or parent changed. Re-injecting.");
         existingBubble.remove();
         const overlay = document.getElementById("context-generator-overlay");
         if (overlay) overlay.remove();
       }
     }
 
-    console.log("[Context Generator Relay] Injecting bubble next to send button:", sendButton);
-    injectFloatingButton(input, sendButton);
+    console.log("[Context Generator Relay] Injecting bubble in container:", placement.container);
+    injectFloatingButton(input, placement.container, placement.nextSibling);
   }
 
   let injectionInterval = null;
