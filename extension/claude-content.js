@@ -131,7 +131,9 @@ Then write: "Continue from where we left off."
     await sleep(FIXED_CAPTURE_DELAY_MS);
 
     const text = getClaudeResponseText();
-    if (!text || looksLikePromptEcho(text)) {
+    console.log("[Context Generator Relay] Claude captured text after 10s:", text || "");
+
+    if (!text) {
       throw new Error("Claude response was not available after the 10 second wait.");
     }
 
@@ -175,56 +177,173 @@ Then write: "Continue from where we left off."
   }
 
   function getClaudeResponseText() {
-    const assistantSelectors = [
+    const candidates = getClaudeResponseCandidates();
+    const scoredCandidates = candidates
+      .map((candidate) => {
+        const text = extractClaudeResponseText(candidate.text);
+        return {
+          ...candidate,
+          text,
+          score: scoreClaudeResponseCandidate(candidate, text)
+        };
+      })
+      .filter((candidate) => candidate.text.length > 0)
+      .sort((a, b) => a.score - b.score);
+
+    return scoredCandidates.at(-1)?.text || "";
+  }
+
+  function getClaudeResponseCandidates() {
+    const selectors = [
       "[data-message-author-role='assistant']",
       "[data-testid='assistant-message']",
       "[data-testid*='assistant']",
       ".font-claude-message",
-      "[class*='font-claude-message']"
+      "[class*='font-claude-message']",
+      "[data-testid*='conversation-turn']",
+      "[data-testid*='message']",
+      "[data-testid*='chat']",
+      "main article",
+      "main [role='article']",
+      "main [class*='message']",
+      "main [class*='Message']",
+      "main [class*='prose']",
+      "main"
     ];
 
-    const assistantText = getLastMeaningfulText(assistantSelectors);
-    if (assistantText) {
-      return assistantText;
+    const seen = new Set();
+    return selectors
+      .flatMap((selector) => {
+        return Array.from(document.querySelectorAll(selector)).map((element) => ({ element, selector }));
+      })
+      .filter(({ element }) => !seen.has(element) && seen.add(element))
+      .filter(({ element }) => isCandidateResponseElement(element))
+      .map(({ element, selector }) => {
+        const rect = element.getBoundingClientRect();
+        return {
+          selector,
+          element,
+          text: cleanText(element.innerText || element.textContent || ""),
+          top: rect.top + window.scrollY
+        };
+      })
+      .filter((candidate) => candidate.text.length > 0);
+  }
+
+  function isCandidateResponseElement(element) {
+    if (!isVisible(element)) {
+      return false;
     }
 
-    const turnSelectors = [
-      "main article",
-      "main [data-testid*='conversation']",
-      "main [data-testid*='message']",
-      "main [role='article']"
-    ];
+    if (element.closest("form, nav, aside, header, footer, [contenteditable='true']")) {
+      return false;
+    }
 
-    return getLastMeaningfulText(turnSelectors);
+    return true;
   }
 
-  function getLastMeaningfulText(selectors) {
-    const elements = selectors.flatMap((selector) => Array.from(document.querySelectorAll(selector)));
-    const texts = elements
-      .filter(isVisible)
-      .map((element) => cleanText(element.innerText || element.textContent || ""))
-      .map(stripPromptEcho)
-      .filter((text) => text.length > 20);
+  function scoreClaudeResponseCandidate(candidate, text) {
+    let score = candidate.top;
 
-    return texts.at(-1) || "";
+    if (/\bassistant\b/i.test(candidate.selector)) {
+      score += 100000;
+    }
+
+    if (/font-claude-message|prose/i.test(candidate.selector)) {
+      score += 75000;
+    }
+
+    if (/message|conversation-turn|article/i.test(candidate.selector)) {
+      score += 50000;
+    }
+
+    if (looksLikeContextOutput(text)) {
+      score += 200000;
+    }
+
+    if (looksLikePromptEcho(candidate.text)) {
+      score -= 25000;
+    }
+
+    return score;
   }
 
-  function looksLikePromptEcho(text) {
-    return text.includes("Context Generator Skill") && text.includes("When `/context-generator` is triggered");
-  }
+  function extractClaudeResponseText(rawText) {
+    const text = cleanText(rawText);
+    if (!text) {
+      return "";
+    }
 
-  function stripPromptEcho(text) {
     if (!looksLikePromptEcho(text)) {
       return text;
     }
 
-    const promptEndMarker = `Chat too short — no context needed yet. Use this when you're deeper into a session.`;
-    const markerIndex = text.lastIndexOf(promptEndMarker);
-    if (markerIndex === -1) {
+    const promptEndIndex = getPromptEndIndex(text);
+    if (promptEndIndex === -1) {
       return "";
     }
 
-    return cleanText(text.slice(markerIndex + promptEndMarker.length));
+    const responseTail = cleanText(text.slice(promptEndIndex));
+    return extractKnownResponseBlock(responseTail);
+  }
+
+  function extractKnownResponseBlock(text) {
+    if (!text) {
+      return "";
+    }
+
+    const shortMessageIndex = text.lastIndexOf("Chat too short");
+    if (shortMessageIndex !== -1) {
+      return cleanText(text.slice(shortMessageIndex));
+    }
+
+    const markerIndex = findFirstIndex(text, [
+      "CONTEXT CARRY",
+      "WHO I AM",
+      "WHAT WE WERE DOING",
+      "WHERE WE LEFT OFF"
+    ]);
+
+    if (markerIndex === -1) {
+      return looksLikePromptEcho(text) ? "" : text;
+    }
+
+    const boxStartIndex = text.lastIndexOf("╔", markerIndex);
+    const startIndex = boxStartIndex !== -1 ? boxStartIndex : markerIndex;
+    return cleanText(text.slice(startIndex));
+  }
+
+  function getPromptEndIndex(text) {
+    const promptEndMarkers = [
+      "Use this when you're deeper into a session.",
+      "Use this when you’re deeper into a session."
+    ];
+
+    const markerIndex = findFirstIndex(text, promptEndMarkers);
+    if (markerIndex === -1) {
+      return -1;
+    }
+
+    const marker = promptEndMarkers.find((candidate) => text.includes(candidate));
+    return markerIndex + marker.length;
+  }
+
+  function looksLikeContextOutput(text) {
+    return text.includes("CONTEXT CARRY")
+      || text.includes("WHO I AM")
+      || text.includes("WHAT WE WERE DOING")
+      || text.includes("Chat too short");
+  }
+
+  function findFirstIndex(text, markers) {
+    return markers
+      .map((marker) => text.indexOf(marker))
+      .filter((index) => index !== -1)
+      .sort((a, b) => a - b)[0] ?? -1;
+  }
+
+  function looksLikePromptEcho(text) {
+    return text.includes("Context Generator Skill") && text.includes("When `/context-generator` is triggered");
   }
 
   function setEditorText(element, text) {
