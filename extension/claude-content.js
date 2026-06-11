@@ -228,11 +228,41 @@ Then write: "Continue from where we left off."
     ];
 
     const seen = new Set();
-    return selectors
+    const rawCandidates = selectors
       .flatMap((selector) => {
         return Array.from(document.querySelectorAll(selector)).map((element) => ({ element, selector }));
       })
-      .filter(({ element }) => !seen.has(element) && seen.add(element))
+      .filter(({ element }) => !seen.has(element) && seen.add(element));
+
+    console.log(`[Context Generator Relay] --- RAW CANDIDATES (${rawCandidates.length} total, before any filter) ---`);
+    rawCandidates.forEach(({ element, selector }, i) => {
+      const ownRole        = element.getAttribute("data-message-author-role") || "none";
+      const ancestorRole   = element.closest("[data-message-author-role]")?.getAttribute("data-message-author-role") || "none";
+      const childUserMsg   = !!element.querySelector("[data-message-author-role='user'], [data-testid='user-message']");
+      const isInForm       = !!element.closest("form, nav, aside, header, footer, [contenteditable='true']");
+      const visible        = isVisible(element);
+      const textSnippet    = (element.innerText || element.textContent || "").trim().slice(0, 80);
+
+      const exclusionReasons = [];
+      if (!visible)         exclusionReasons.push("NOT_VISIBLE");
+      if (isInForm)         exclusionReasons.push("INSIDE_FORM/NAV/ASIDE");
+      if (ownRole === "user")         exclusionReasons.push("OWN_ROLE=user");
+      if (ancestorRole === "user")    exclusionReasons.push("ANCESTOR_ROLE=user");
+
+      console.log(`[Context Generator Relay] Candidate #${i + 1}:`, {
+        selector,
+        tagName: element.tagName,
+        ownRole,
+        ancestorRole,
+        childUserMsg,
+        visible,
+        exclusionReasons: exclusionReasons.length ? exclusionReasons : ["NONE (passes all filters)"],
+        textSnippet: textSnippet + (textSnippet.length >= 80 ? "..." : "")
+      });
+    });
+    console.log(`[Context Generator Relay] --- END RAW CANDIDATES ---`);
+
+    return rawCandidates
       .filter(({ element }) => isCandidateResponseElement(element))
       .filter(({ element }) => !isUserMessageElement(element))
       .map(({ element, selector }) => {
@@ -260,12 +290,19 @@ Then write: "Continue from where we left off."
   }
 
   function isUserMessageElement(element) {
-    if (element.closest("[data-message-author-role='user']") || element.closest("[data-testid='user-message']")) {
-      return true;
-    }
-    if (element.querySelector("[data-message-author-role='user']") || element.querySelector("[data-testid='user-message']")) {
-      return true;
-    }
+    // Only exclude if the element ITSELF is a user message, or is a direct child of one.
+    // Do NOT exclude container elements (like main, article, conversation-turn wrappers)
+    // just because they happen to contain a user message somewhere inside them.
+    const ownRole = element.getAttribute("data-message-author-role");
+    if (ownRole === "user") return true;
+
+    const testId = element.getAttribute("data-testid");
+    if (testId === "user-message") return true;
+
+    // If the element is a child OF a user message container, exclude it
+    if (element.closest("[data-message-author-role='user']")) return true;
+    if (element.closest("[data-testid='user-message']")) return true;
+
     return false;
   }
 
