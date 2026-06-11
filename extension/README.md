@@ -4,8 +4,8 @@ This Chrome extension automates the handoff from Claude to ChatGPT:
 
 1. Click the extension icon while a `claude.ai` chat is open.
 2. The extension injects the context-generator prompt into Claude and sends it.
-3. It waits for Claude to finish responding.
-4. As soon as Claude is done, it grabs Claude's last response text.
+3. It waits exactly 10 seconds.
+4. It grabs whatever text is in Claude's last response at that point.
 5. It opens `chatgpt.com` in a new tab.
 6. It pastes Claude's response into the ChatGPT message input.
 

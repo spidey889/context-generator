@@ -5,9 +5,9 @@
 
   window.__contextGeneratorClaudeLoaded = true;
   let isRunning = false;
-  const RESPONSE_TIMEOUT_MS = 60000;
-  const TEXT_STABLE_AFTER_GENERATING_MS = 1500;
-  const TEXT_STABLE_WITHOUT_INDICATOR_MS = 5000;
+  let runningResetTimer = null;
+  const FIXED_CAPTURE_DELAY_MS = 10000;
+  const RUNNING_AUTO_RESET_MS = 60000;
 
   const CONTEXT_GENERATOR_PROMPT = `---
 name: context-generator
@@ -80,17 +80,37 @@ Then write: "Continue from where we left off."
     }
 
     isRunning = true;
+    clearRunningResetTimer();
+    runningResetTimer = setTimeout(resetRunningFlag, RUNNING_AUTO_RESET_MS);
     sendResponse({ ok: true });
 
-    runClaudeFlow()
-      .then((text) => notifyBackground({ type: "TRANSFER_TO_CHATGPT", text }))
-      .catch((error) => notifyBackground({ type: "CONTEXT_TRANSFER_ERROR", error: error.message }))
-      .finally(() => {
-        isRunning = false;
-      });
+    runClaudeFlow();
 
     return false;
   });
+
+  async function runClaudeFlow() {
+    try {
+      const text = await captureClaudeResponseAfterFixedDelay();
+      resetRunningFlag();
+      await notifyBackground({ type: "TRANSFER_TO_CHATGPT", text });
+    } catch (error) {
+      resetRunningFlag();
+      await notifyBackground({ type: "CONTEXT_TRANSFER_ERROR", error: error.message });
+    }
+  }
+
+  function resetRunningFlag() {
+    isRunning = false;
+    clearRunningResetTimer();
+  }
+
+  function clearRunningResetTimer() {
+    if (runningResetTimer) {
+      clearTimeout(runningResetTimer);
+      runningResetTimer = null;
+    }
+  }
 
   async function notifyBackground(message) {
     try {
@@ -100,8 +120,7 @@ Then write: "Continue from where we left off."
     }
   }
 
-  async function runClaudeFlow() {
-    const beforeText = getClaudeResponseText();
+  async function captureClaudeResponseAfterFixedDelay() {
     const input = await waitForElement(findClaudeInput, 20000, "Claude chat input");
 
     setEditorText(input, CONTEXT_GENERATOR_PROMPT);
@@ -109,47 +128,14 @@ Then write: "Continue from where we left off."
     const sendButton = await waitForElement(() => findSendButton(input), 10000, "Claude send button");
     sendButton.click();
 
-    return waitForClaudeResponse(beforeText);
-  }
+    await sleep(FIXED_CAPTURE_DELAY_MS);
 
-  async function waitForClaudeResponse(beforeText) {
-    let latestText = "";
-    let lastChangedAt = Date.now();
-    let sawGenerating = false;
-    const startedAt = Date.now();
-
-    while (Date.now() - startedAt < RESPONSE_TIMEOUT_MS) {
-      const text = getClaudeResponseText();
-      const isGenerating = isClaudeGenerating();
-      const isNewResponse = text && text !== beforeText && !looksLikePromptEcho(text);
-      sawGenerating = sawGenerating || isGenerating;
-
-      if (isNewResponse && text !== latestText) {
-        latestText = text;
-        lastChangedAt = Date.now();
-      }
-
-      if (latestText && hasClaudeFinishedGenerating(isGenerating, sawGenerating, lastChangedAt)) {
-        return latestText.trim();
-      }
-
-      await sleep(500);
+    const text = getClaudeResponseText();
+    if (!text || looksLikePromptEcho(text)) {
+      throw new Error("Claude response was not available after the 10 second wait.");
     }
 
-    if (latestText && hasClaudeFinishedGenerating(isClaudeGenerating(), sawGenerating, lastChangedAt)) {
-      return latestText.trim();
-    }
-
-    throw new Error("Timed out waiting for Claude to finish responding.");
-  }
-
-  function hasClaudeFinishedGenerating(isGenerating, sawGenerating, lastChangedAt) {
-    const stableForMs = Date.now() - lastChangedAt;
-    const requiredStableMs = sawGenerating
-      ? TEXT_STABLE_AFTER_GENERATING_MS
-      : TEXT_STABLE_WITHOUT_INDICATOR_MS;
-
-    return !isGenerating && stableForMs >= requiredStableMs;
+    return text.trim();
   }
 
   function findClaudeInput() {
@@ -239,37 +225,6 @@ Then write: "Continue from where we left off."
     }
 
     return cleanText(text.slice(markerIndex + promptEndMarker.length));
-  }
-
-  function isClaudeGenerating() {
-    const stopSelectors = [
-      "button[aria-label*='stop' i]",
-      "button[title*='stop' i]",
-      "button[data-testid*='stop' i]",
-      "[role='button'][aria-label*='stop' i]",
-      "[data-testid*='stop' i]"
-    ];
-
-    if (stopSelectors.some((selector) => Array.from(document.querySelectorAll(selector)).some(isVisible))) {
-      return true;
-    }
-
-    return Array.from(document.querySelectorAll("main button, form button")).some((button) => {
-      if (!isVisible(button)) {
-        return false;
-      }
-
-      const label = [
-        button.getAttribute("aria-label"),
-        button.getAttribute("title"),
-        button.getAttribute("data-testid"),
-        button.textContent
-      ]
-        .filter(Boolean)
-        .join(" ");
-
-      return /\bstop\b|stop generating|stop response|interrupt/i.test(label);
-    });
   }
 
   function setEditorText(element, text) {
