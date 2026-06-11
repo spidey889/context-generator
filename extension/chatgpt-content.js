@@ -29,24 +29,38 @@
   }
 
   function findChatGptInput() {
-    const selectors = [
-      "#prompt-textarea",
-      "[data-testid='prompt-textarea']",
+    const contenteditableSelectors = [
+      "#prompt-textarea[contenteditable='true']",
+      "[data-testid='prompt-textarea'][contenteditable='true']",
       ".ProseMirror[contenteditable='true']",
       "div[contenteditable='true'][role='textbox']",
-      "textarea[placeholder]",
-      "textarea",
       "[contenteditable='true'][data-placeholder]",
       "[contenteditable='true'][aria-label*='message' i]",
       "[contenteditable='true']"
     ];
 
-    const found = selectors
+    let found = contenteditableSelectors
       .flatMap((selector) => Array.from(document.querySelectorAll(selector)))
       .find((element) => isVisible(element) && !element.closest("[aria-hidden='true']"));
 
     if (found) {
-      console.log("[Context Generator ChatGPT] findChatGptInput successfully found element matching selectors:", found);
+      console.log("[Context Generator ChatGPT] findChatGptInput successfully found contenteditable element:", found);
+      return found;
+    }
+
+    const fallbackSelectors = [
+      "#prompt-textarea",
+      "[data-testid='prompt-textarea']",
+      "textarea[placeholder]",
+      "textarea"
+    ];
+
+    found = fallbackSelectors
+      .flatMap((selector) => Array.from(document.querySelectorAll(selector)))
+      .find((element) => isVisible(element) && !element.closest("[aria-hidden='true']"));
+
+    if (found) {
+      console.log("[Context Generator ChatGPT] findChatGptInput found fallback element:", found);
     }
     return found;
   }
