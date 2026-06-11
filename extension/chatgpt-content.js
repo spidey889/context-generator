@@ -22,13 +22,16 @@
       throw new Error("No text was provided for ChatGPT.");
     }
 
-    console.log("[Context Generator ChatGPT] Waiting for ChatGPT message input element...");
-    const input = await waitForElement(findChatGptInput, 30000, "ChatGPT message input");
-    console.log("[Context Generator ChatGPT] Found input element:", input);
+    console.log("[Context Generator ChatGPT] Starting ChatGPT paste flow...");
+    const input = await findChatGptInput();
+    if (!input) {
+      throw new Error("ChatGPT message input element could not be found.");
+    }
+    console.log("[Context Generator ChatGPT] Using input element:", input);
     setEditorText(input, text.trim());
   }
 
-  function findChatGptInput() {
+  async function findChatGptInput() {
     const contenteditableSelectors = [
       "#prompt-textarea[contenteditable='true']",
       "[data-testid='prompt-textarea'][contenteditable='true']",
@@ -39,15 +42,6 @@
       "[contenteditable='true']"
     ];
 
-    let found = contenteditableSelectors
-      .flatMap((selector) => Array.from(document.querySelectorAll(selector)))
-      .find((element) => isVisible(element) && !element.closest("[aria-hidden='true']"));
-
-    if (found) {
-      console.log("[Context Generator ChatGPT] findChatGptInput successfully found contenteditable element:", found);
-      return found;
-    }
-
     const fallbackSelectors = [
       "#prompt-textarea",
       "[data-testid='prompt-textarea']",
@@ -55,14 +49,31 @@
       "textarea"
     ];
 
-    found = fallbackSelectors
-      .flatMap((selector) => Array.from(document.querySelectorAll(selector)))
-      .find((element) => isVisible(element) && !element.closest("[aria-hidden='true']"));
+    const findElement = (selectors) => {
+      return selectors
+        .flatMap((selector) => Array.from(document.querySelectorAll(selector)))
+        .find((element) => isVisible(element) && !element.closest("[aria-hidden='true']"));
+    };
 
-    if (found) {
-      console.log("[Context Generator ChatGPT] findChatGptInput found fallback element:", found);
+    console.log("[Context Generator ChatGPT] Starting poll for contenteditable editor (up to 10 seconds)...");
+    
+    const startTime = Date.now();
+    let attempt = 0;
+    while (Date.now() - startTime < 10000) {
+      attempt++;
+      const ceElement = findElement(contenteditableSelectors);
+      console.log(`[Context Generator ChatGPT] Polling contenteditable attempt #${attempt}:`, ceElement);
+      if (ceElement) {
+        console.log("[Context Generator ChatGPT] Successfully found contenteditable element:", ceElement);
+        return ceElement;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 300));
     }
-    return found;
+
+    console.log("[Context Generator ChatGPT] Contenteditable editor did not load after 10s. Checking fallback selectors...");
+    const fallbackElement = findElement(fallbackSelectors);
+    console.log("[Context Generator ChatGPT] Fallback check result:", fallbackElement);
+    return fallbackElement;
   }
 
   function setEditorText(element, text) {
