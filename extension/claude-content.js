@@ -127,50 +127,73 @@ Then write: "Continue from where we left off."
     const sendButton = await waitForElement(() => findSendButton(input), 10000, "Claude send button");
     sendButton.click();
 
-    // Smart polling for completion
+    // Button-state polling
     const MAX_WAIT_MS = 30000;
-    const POLL_INTERVAL_MS = 1000;
+    const POLL_INTERVAL_MS = 500;
     const startTime = Date.now();
-    let previousText = null;
-    let identicalCount = 0;
+    let seenStopButton = false;
 
-    console.log("[Context Generator Relay] Starting smart polling for Claude's response...");
+    console.log("[Context Generator Relay] Starting button-state polling for Claude's response...");
 
     while (Date.now() - startTime < MAX_WAIT_MS) {
       await sleep(POLL_INTERVAL_MS);
-      
-      const text = getClaudeResponseText(true);
-      
-      if (!text) {
-        console.log(`[Context Generator Relay] Poll: No text found yet.`);
-        previousText = null;
-        identicalCount = 0;
-        continue;
-      }
 
-      if (text === previousText) {
-        identicalCount++;
-        console.log(`[Context Generator Relay] Poll: Text stabilized (unchanged for ${identicalCount}s).`);
-        if (identicalCount >= 2) {
-          console.log("[Context Generator Relay] Claude finished streaming. Capturing text.");
-          getClaudeResponseText(false); // Log final extraction
-          return text.trim();
-        }
+      const stopVisible = isStopButtonVisible();
+      
+      if (stopVisible) {
+        seenStopButton = true;
+        console.log("[Context Generator Relay] Poll: 'Stop' button is visible. Claude is generating...");
       } else {
-        console.log(`[Context Generator Relay] Poll: Text changed (streaming).`);
-        identicalCount = 0;
-        previousText = text;
+        // Stop button is not visible.
+        if (seenStopButton) {
+          console.log("[Context Generator Relay] Poll: 'Stop' button disappeared. Response complete!");
+          break;
+        } else {
+          // If we haven't seen the stop button yet, maybe the generation hasn't started, or it finished very quickly.
+          // Give it a 2-second grace period to see if the stop button appears.
+          const elapsed = Date.now() - startTime;
+          if (elapsed > 2000) {
+            console.log("[Context Generator Relay] Poll: No 'Stop' button detected after 2s grace period. Assuming complete.");
+            break;
+          } else {
+            console.log(`[Context Generator Relay] Poll: Waiting for 'Stop' button to appear (${elapsed}ms elapsed)...`);
+          }
+        }
       }
     }
 
-    console.log("[Context Generator Relay] Smart polling timed out after 30s. Capturing whatever we have.");
+    // Wait 500ms more before capturing
+    await sleep(500);
+
     const text = getClaudeResponseText(false);
+    console.log("[Context Generator Relay] Claude captured text:", text || "");
+
     if (!text) {
-      throw new Error("Claude response was not available after the 30 second maximum wait.");
+      throw new Error("Claude response was not available after generation completed.");
     }
 
     return text.trim();
   }
+
+  function isStopButtonVisible() {
+    const buttons = Array.from(document.querySelectorAll("button"));
+    return buttons.some((button) => {
+      if (!isVisible(button)) return false;
+      const label = [
+        button.getAttribute("aria-label"),
+        button.getAttribute("title"),
+        button.getAttribute("data-testid"),
+        button.textContent
+      ]
+        .filter(Boolean)
+        .join(" ")
+        .toLowerCase();
+      
+      return label.includes("stop");
+    });
+  }
+
+  function findClaudeInput() {
     const selectors = [
       "textarea",
       "[contenteditable='true'][data-placeholder]",
