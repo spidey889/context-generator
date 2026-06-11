@@ -6,7 +6,7 @@
   window.__contextGeneratorClaudeLoaded = true;
   let isRunning = false;
   let runningResetTimer = null;
-  const FIXED_CAPTURE_DELAY_MS = 10000;
+  const FIXED_CAPTURE_DELAY_MS = 30000;
   const RUNNING_AUTO_RESET_MS = 60000;
 
   const CONTEXT_GENERATOR_PROMPT = `---
@@ -131,10 +131,10 @@ Then write: "Continue from where we left off."
     await sleep(FIXED_CAPTURE_DELAY_MS);
 
     const text = getClaudeResponseText();
-    console.log("[Context Generator Relay] Claude captured text after 10s:", text || "");
+    console.log("[Context Generator Relay] Claude captured text after 30s:", text || "");
 
     if (!text) {
-      throw new Error("Claude response was not available after the 10 second wait.");
+      throw new Error("Claude response was not available after the 30 second wait.");
     }
 
     return text.trim();

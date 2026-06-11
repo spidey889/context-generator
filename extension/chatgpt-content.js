@@ -22,7 +22,9 @@
       throw new Error("No text was provided for ChatGPT.");
     }
 
+    console.log("[Context Generator ChatGPT] Waiting for ChatGPT message input element...");
     const input = await waitForElement(findChatGptInput, 30000, "ChatGPT message input");
+    console.log("[Context Generator ChatGPT] Found input element:", input);
     setEditorText(input, text.trim());
   }
 
@@ -30,6 +32,8 @@
     const selectors = [
       "#prompt-textarea",
       "[data-testid='prompt-textarea']",
+      ".ProseMirror[contenteditable='true']",
+      "div[contenteditable='true'][role='textbox']",
       "textarea[placeholder]",
       "textarea",
       "[contenteditable='true'][data-placeholder]",
@@ -37,33 +41,67 @@
       "[contenteditable='true']"
     ];
 
-    return selectors
+    const found = selectors
       .flatMap((selector) => Array.from(document.querySelectorAll(selector)))
       .find((element) => isVisible(element) && !element.closest("[aria-hidden='true']"));
+
+    if (found) {
+      console.log("[Context Generator ChatGPT] findChatGptInput successfully found element matching selectors:", found);
+    }
+    return found;
   }
 
   function setEditorText(element, text) {
+    console.log("[Context Generator ChatGPT] setEditorText focusing element...");
     element.focus();
 
     if (element instanceof HTMLTextAreaElement || element instanceof HTMLInputElement) {
+      console.log("[Context Generator ChatGPT] Element is a standard textarea/input.");
       const valueSetter = Object.getOwnPropertyDescriptor(element.constructor.prototype, "value")?.set;
       valueSetter?.call(element, text);
       element.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "insertText", data: text }));
       element.dispatchEvent(new Event("change", { bubbles: true }));
+      console.log("[Context Generator ChatGPT] Text inserted successfully into textarea/input.");
       return;
     }
 
+    console.log("[Context Generator ChatGPT] Element is contenteditable. Attempting text insertion...");
+    
+    // Find inner paragraph or text container if it exists, to select the precise editing node
+    const target = element.querySelector("p") || element;
+    console.log("[Context Generator ChatGPT] Targeting inner node for selection:", target);
+
     const selection = window.getSelection();
     const range = document.createRange();
-    range.selectNodeContents(element);
+    range.selectNodeContents(target);
     selection.removeAllRanges();
     selection.addRange(range);
 
-    const inserted = document.execCommand("insertText", false, text);
-    if (!inserted || !(element.innerText || "").includes(text.slice(0, 20))) {
-      element.textContent = text;
-      element.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "insertText", data: text }));
+    let inserted = document.execCommand("insertText", false, text);
+    
+    // Validate insertion
+    const sampleText = text.slice(0, 20);
+    let hasText = (element.innerText || element.textContent || "").includes(sampleText);
+    
+    if (!inserted || !hasText) {
+      console.log("[Context Generator ChatGPT] execCommand('insertText') failed or text not found. Trying selectAll fallback...");
+      element.focus();
+      document.execCommand("selectAll", false, null);
+      inserted = document.execCommand("insertText", false, text);
+      hasText = (element.innerText || element.textContent || "").includes(sampleText);
     }
+
+    if (!hasText) {
+      console.warn("[Context Generator ChatGPT] execCommand failed completely. Falling back to direct textContent assignment.");
+      element.textContent = text;
+    } else {
+      console.log("[Context Generator ChatGPT] Text successfully inserted via execCommand.");
+    }
+
+    // Always dispatch input events to ensure frameworks (ProseMirror, React) sync state
+    element.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "insertText", data: text }));
+    element.dispatchEvent(new Event("input", { bubbles: true }));
+    console.log("[Context Generator ChatGPT] Dispatched input events.");
   }
 
   function waitForElement(getElement, timeoutMs, name) {
