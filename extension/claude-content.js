@@ -239,9 +239,32 @@ Then write: "Continue from where we left off."
       return /\bsend\b|submit/i.test(label);
     }) || scopedButtons.find((button) => isVisible(button) && (includeDisabled || !button.disabled) && button.type === "submit");
 
-    if (sendBtn && (!window.__lastSendLogTime || Date.now() - window.__lastSendLogTime > 10000)) {
-      console.log("[Context Generator Relay] Resolved Send Button element:", sendBtn);
-      window.__lastSendLogTime = Date.now();
+    if (sendBtn) {
+      if (!window.__lastSendLogTime || Date.now() - window.__lastSendLogTime > 10000) {
+        console.log("[Context Generator Relay] Resolved Send Button element:", sendBtn);
+        window.__lastSendLogTime = Date.now();
+      }
+    } else {
+      if (!window.__lastAllButtonsLogTime || Date.now() - window.__lastAllButtonsLogTime > 10000) {
+        window.__lastAllButtonsLogTime = Date.now();
+        const allButtons = Array.from(document.querySelectorAll("button"));
+        console.log(`[Context Generator Relay] Send button not resolved. Listing all ${allButtons.length} button(s) on the page:`);
+        allButtons.forEach((btn, idx) => {
+          console.log(`Button #${idx}:`, {
+            tagName: btn.tagName,
+            id: btn.id,
+            className: btn.className,
+            ariaLabel: btn.getAttribute("aria-label"),
+            title: btn.getAttribute("title"),
+            dataTestId: btn.getAttribute("data-testid"),
+            textContent: (btn.textContent || "").trim().substring(0, 100),
+            disabled: btn.disabled,
+            type: btn.getAttribute("type"),
+            isVisible: isVisible(btn),
+            inForm: form ? form.contains(btn) : false
+          });
+        });
+      }
     }
     return sendBtn;
   }
