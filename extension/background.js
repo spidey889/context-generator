@@ -5,7 +5,8 @@ chrome.action.onClicked.addListener(async (tab) => {
   try {
     clearBadge();
 
-    if (!tab.id || !tab.url?.startsWith(CLAUDE_ORIGIN)) {
+    const isClaude = tab.url ? new URL(tab.url).hostname.endsWith("claude.ai") : false;
+    if (!tab.id || !isClaude) {
       throw new Error("Open a claude.ai chat, then click the extension icon.");
     }
 

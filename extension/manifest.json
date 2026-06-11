@@ -5,9 +5,9 @@
   "version": "1.0.0",
   "permissions": ["activeTab", "scripting", "tabs"],
   "host_permissions": [
-    "https://claude.ai/*",
-    "https://chatgpt.com/*",
-    "https://chat.openai.com/*"
+    "https://*.claude.ai/*",
+    "https://*.chatgpt.com/*",
+    "https://*.openai.com/*"
   ],
   "background": {
     "service_worker": "background.js"
@@ -17,12 +17,12 @@
   },
   "content_scripts": [
     {
-      "matches": ["https://claude.ai/*"],
+      "matches": ["https://*.claude.ai/*"],
       "js": ["claude-content.js"],
       "run_at": "document_idle"
     },
     {
-      "matches": ["https://chatgpt.com/*", "https://chat.openai.com/*"],
+      "matches": ["https://*.chatgpt.com/*", "https://*.openai.com/*"],
       "js": ["chatgpt-content.js"],
       "run_at": "document_idle"
     }
