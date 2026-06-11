@@ -190,7 +190,23 @@ Then write: "Continue from where we left off."
       .filter((candidate) => candidate.text.length > 0)
       .sort((a, b) => a.score - b.score);
 
-    return scoredCandidates.at(-1)?.text || "";
+    const winner = scoredCandidates.at(-1);
+    if (winner) {
+      const authorRole = winner.element.getAttribute("data-message-author-role")
+        || winner.element.closest("[data-message-author-role]")?.getAttribute("data-message-author-role")
+        || "unknown";
+      
+      console.log("[Context Generator Relay] Extracted Claude response from element:", {
+        tagName: winner.element.tagName,
+        className: winner.element.className,
+        selector: winner.selector,
+        role: authorRole,
+        testid: winner.element.getAttribute("data-testid") || "none",
+        textSnippet: winner.text.slice(0, 60) + "..."
+      });
+    }
+
+    return winner?.text || "";
   }
 
   function getClaudeResponseCandidates() {
@@ -218,6 +234,7 @@ Then write: "Continue from where we left off."
       })
       .filter(({ element }) => !seen.has(element) && seen.add(element))
       .filter(({ element }) => isCandidateResponseElement(element))
+      .filter(({ element }) => !isUserMessageElement(element))
       .map(({ element, selector }) => {
         const rect = element.getBoundingClientRect();
         return {
@@ -240,6 +257,16 @@ Then write: "Continue from where we left off."
     }
 
     return true;
+  }
+
+  function isUserMessageElement(element) {
+    if (element.closest("[data-message-author-role='user']") || element.closest("[data-testid='user-message']")) {
+      return true;
+    }
+    if (element.querySelector("[data-message-author-role='user']") || element.querySelector("[data-testid='user-message']")) {
+      return true;
+    }
+    return false;
   }
 
   function scoreClaudeResponseCandidate(candidate, text) {
