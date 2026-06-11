@@ -411,89 +411,42 @@ Then write: "Continue from where we left off."
     }
   }
 
-  function findBubbleContainer(input) {
-    const form = input?.closest("form");
-    if (!form) return null;
-
-    const buttons = Array.from(form.querySelectorAll("button")).filter((btn) => {
-      return btn.id !== "context-generator-bubble" && isVisible(btn);
-    });
-
-    if (buttons.length > 0) {
-      return buttons[0].parentNode;
-    }
-
-    const selectors = [
-      "[class*='controls' i]",
-      "[class*='toolbar' i]",
-      "[class*='actions' i]",
-      "[class*='buttons' i]"
-    ];
-    for (const selector of selectors) {
-      try {
-        const found = form.querySelector(selector);
-        if (found) return found;
-      } catch (e) {}
-    }
-
-    return form;
-  }
-
-  function findBubblePlacement(input) {
-    const container = findBubbleContainer(input);
-    if (!container) return null;
-
-    const sendBtn = findSendButton(input, true, true);
-    if (sendBtn && container.contains(sendBtn)) {
-      return { container, nextSibling: sendBtn };
-    }
-
-    const buttons = Array.from(container.querySelectorAll("button")).filter((btn) => {
-      return btn.id !== "context-generator-bubble" && isVisible(btn);
-    });
-
-    if (buttons.length > 0) {
-      const lastBtn = buttons[buttons.length - 1];
-      return { container, nextSibling: lastBtn.nextSibling };
-    }
-
-    return { container, nextSibling: null };
-  }
-
-  function injectFloatingButton(input, container, nextSibling) {
+  function injectFloatingButton(input, container) {
     const bubble = document.createElement("button");
     bubble.id = "context-generator-bubble";
     bubble.title = "Transfer Context to ChatGPT";
     
     // Style to integrate inside Claude's message input bar controls
-    bubble.style.width = "28px";
-    bubble.style.height = "28px";
-    bubble.style.borderRadius = "6px";
-    bubble.style.backgroundColor = "transparent";
-    bubble.style.color = "currentColor";
-    bubble.style.border = "none";
+    bubble.style.width = "32px";
+    bubble.style.height = "32px";
+    bubble.style.borderRadius = "50%";
+    bubble.style.backgroundColor = "#d97706"; // Premium amber/orange color
+    bubble.style.color = "#ffffff";
+    bubble.style.border = "2px solid #ffffff";
+    bubble.style.boxShadow = "0 2px 8px rgba(0, 0, 0, 0.2)";
     bubble.style.cursor = "pointer";
     bubble.style.display = "flex";
     bubble.style.alignItems = "center";
     bubble.style.justifyContent = "center";
-    bubble.style.fontSize = "16px";
-    bubble.style.marginRight = "6px";
-    bubble.style.padding = "0";
-    bubble.style.transition = "background-color 0.2s, color 0.2s";
-    bubble.style.flexShrink = "0";
+    bubble.style.fontSize = "18px";
+    bubble.style.transition = "transform 0.2s, background-color 0.2s";
+    bubble.style.zIndex = "999999";
+    bubble.style.position = "absolute";
+    bubble.style.bottom = "12px";
+    bubble.style.right = "85px"; // Positioned next to send button area
     bubble.textContent = "🧠";
 
     bubble.addEventListener("mouseenter", () => {
-      bubble.style.backgroundColor = "rgba(217, 119, 6, 0.15)";
-      bubble.style.color = "#d97706";
+      bubble.style.transform = "scale(1.1)";
+      bubble.style.backgroundColor = "#b45309";
     });
     bubble.addEventListener("mouseleave", () => {
-      bubble.style.backgroundColor = "transparent";
-      bubble.style.color = "currentColor";
+      bubble.style.transform = "scale(1.0)";
+      bubble.style.backgroundColor = "#d97706";
     });
 
-    // Insert the bubble
-    container.insertBefore(bubble, nextSibling);
+    // Append the bubble to the container
+    container.appendChild(bubble);
 
     // Create the overlay singleton on document.body if it doesn't exist yet
     let overlay = document.getElementById("context-generator-overlay");
@@ -542,7 +495,9 @@ Then write: "Continue from where we left off."
       document.body.appendChild(overlay);
     }
 
-    bubble.addEventListener("click", () => {
+    bubble.addEventListener("click", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
       if (isRunning) return;
 
       isRunning = true;
@@ -567,38 +522,34 @@ Then write: "Continue from where we left off."
       return;
     }
 
-    const placement = findBubblePlacement(input);
-    if (!placement) {
-      if (existingBubble) {
-        console.log("[Context Generator Relay] Bubble placement not found but bubble exists, removing it.");
-        existingBubble.remove();
-        const overlay = document.getElementById("context-generator-overlay");
-        if (overlay) overlay.remove();
-      }
-      return;
+    const targetContainer = input.closest("form") || input.parentNode;
+    if (!targetContainer) return;
+
+    // Ensure relative positioning on the container so absolute positioning works
+    if (window.getComputedStyle(targetContainer).position === "static") {
+      targetContainer.style.position = "relative";
     }
 
     if (existingBubble) {
-      const isCorrectSibling = (existingBubble.nextSibling === placement.nextSibling);
-      if (existingBubble.parentNode === placement.container && isCorrectSibling) {
+      if (existingBubble.parentNode === targetContainer) {
         return;
       } else {
-        console.log("[Context Generator Relay] Bubble placement or parent changed. Re-injecting.");
+        console.log("[Context Generator Relay] Bubble parent changed. Moving to new container.");
         existingBubble.remove();
         const overlay = document.getElementById("context-generator-overlay");
         if (overlay) overlay.remove();
       }
     }
 
-    console.log("[Context Generator Relay] Injecting bubble in container:", placement.container);
-    injectFloatingButton(input, placement.container, placement.nextSibling);
+    console.log("[Context Generator Relay] Injecting bubble inside container:", targetContainer);
+    injectFloatingButton(input, targetContainer);
   }
 
   let injectionInterval = null;
 
   function startFloatingButtonMonitoring() {
     if (injectionInterval) clearInterval(injectionInterval);
-    injectionInterval = setInterval(injectButtonIfNeeded, 1000);
+    injectionInterval = setInterval(injectButtonIfNeeded, 500);
     injectButtonIfNeeded();
   }
 
