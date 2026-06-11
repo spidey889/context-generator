@@ -210,12 +210,12 @@ Then write: "Continue from where we left off."
       .find((element) => isVisible(element) && !element.closest("[aria-hidden='true']"));
   }
 
-  function findSendButton(input) {
+  function findSendButton(input, includeDisabled = false) {
     const form = input?.closest("form");
     const scopedButtons = form ? Array.from(form.querySelectorAll("button")) : [];
     const pageButtons = Array.from(document.querySelectorAll("button"));
     const buttons = [...scopedButtons, ...pageButtons].filter((button, index, all) => {
-      return all.indexOf(button) === index && isVisible(button) && !button.disabled;
+      return all.indexOf(button) === index && isVisible(button) && (includeDisabled || !button.disabled);
     });
 
     return buttons.find((button) => {
@@ -229,7 +229,7 @@ Then write: "Continue from where we left off."
         .join(" ");
 
       return /\bsend\b|submit/i.test(label);
-    }) || scopedButtons.find((button) => isVisible(button) && !button.disabled && button.type === "submit");
+    }) || scopedButtons.find((button) => isVisible(button) && (includeDisabled || !button.disabled) && button.type === "submit");
   }
 
   function getClaudeResponseText(silent = false) {
@@ -327,8 +327,14 @@ Then write: "Continue from where we left off."
     const textSpan = document.getElementById("context-generator-text");
     const bubble = document.getElementById("context-generator-bubble");
 
-    if (overlay && textSpan) {
+    if (overlay && textSpan && bubble) {
+      const rect = bubble.getBoundingClientRect();
+      overlay.style.position = "fixed";
+      // Position the overlay right above the bubble button dynamically
+      overlay.style.top = `${rect.top - 45}px`;
+      overlay.style.left = `${rect.left - 80}px`;
       overlay.style.display = "flex";
+      
       let countdown = 10;
       textSpan.textContent = `Generating context... (${countdown}s)`;
 
@@ -345,7 +351,7 @@ Then write: "Continue from where we left off."
 
     if (bubble) {
       bubble.disabled = true;
-      bubble.style.opacity = "0.7";
+      bubble.style.opacity = "0.5";
       bubble.style.cursor = "not-allowed";
     }
   }
@@ -368,95 +374,87 @@ Then write: "Continue from where we left off."
     }
   }
 
-  function injectFloatingButton() {
-    if (document.getElementById("context-generator-bubble")) {
-      return;
-    }
-
-    const container = document.createElement("div");
-    container.id = "context-generator-container";
-    container.style.position = "fixed";
-    container.style.bottom = "20px";
-    container.style.right = "20px";
-    container.style.zIndex = "999999";
-    container.style.display = "flex";
-    container.style.flexDirection = "column";
-    container.style.alignItems = "flex-end";
-    container.style.fontFamily = "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif";
-
+  function injectFloatingButton(input, sendButton) {
     const bubble = document.createElement("button");
     bubble.id = "context-generator-bubble";
     bubble.title = "Transfer Context to ChatGPT";
-    bubble.style.width = "48px";
-    bubble.style.height = "48px";
-    bubble.style.borderRadius = "50%";
-    bubble.style.backgroundColor = "#d97706";
-    bubble.style.color = "#ffffff";
+    
+    // Style to integrate inside Claude's message input bar controls
+    bubble.style.width = "28px";
+    bubble.style.height = "28px";
+    bubble.style.borderRadius = "6px";
+    bubble.style.backgroundColor = "transparent";
+    bubble.style.color = "currentColor";
     bubble.style.border = "none";
-    bubble.style.boxShadow = "0 4px 12px rgba(0, 0, 0, 0.15)";
     bubble.style.cursor = "pointer";
     bubble.style.display = "flex";
     bubble.style.alignItems = "center";
     bubble.style.justifyContent = "center";
-    bubble.style.fontSize = "20px";
-    bubble.style.transition = "transform 0.2s, background-color 0.2s";
+    bubble.style.fontSize = "16px";
+    bubble.style.marginRight = "6px";
+    bubble.style.padding = "0";
+    bubble.style.transition = "background-color 0.2s, color 0.2s";
+    bubble.style.flexShrink = "0";
     bubble.textContent = "🧠";
 
     bubble.addEventListener("mouseenter", () => {
-      bubble.style.transform = "scale(1.05)";
-      bubble.style.backgroundColor = "#b45309";
+      bubble.style.backgroundColor = "rgba(217, 119, 6, 0.15)";
+      bubble.style.color = "#d97706";
     });
     bubble.addEventListener("mouseleave", () => {
-      bubble.style.transform = "scale(1)";
-      bubble.style.backgroundColor = "#d97706";
+      bubble.style.backgroundColor = "transparent";
+      bubble.style.color = "currentColor";
     });
 
-    const overlay = document.createElement("div");
-    overlay.id = "context-generator-overlay";
-    overlay.style.display = "none";
-    overlay.style.marginBottom = "10px";
-    overlay.style.padding = "10px 14px";
-    overlay.style.borderRadius = "8px";
-    overlay.style.backgroundColor = "#1f2937";
-    overlay.style.color = "#ffffff";
-    overlay.style.fontSize = "13px";
-    overlay.style.boxShadow = "0 4px 12px rgba(0, 0, 0, 0.2)";
-    overlay.style.whiteSpace = "nowrap";
-    overlay.style.alignItems = "center";
-    overlay.style.gap = "8px";
+    // Insert the bubble right before the Send button
+    sendButton.parentNode.insertBefore(bubble, sendButton);
 
-    const spinner = document.createElement("div");
-    spinner.className = "context-generator-spinner";
-    spinner.style.width = "14px";
-    spinner.style.height = "14px";
-    spinner.style.border = "2px solid rgba(255, 255, 255, 0.3)";
-    spinner.style.borderTop = "2px solid #ffffff";
-    spinner.style.borderRadius = "50%";
-    
-    if (!document.getElementById("context-generator-styles")) {
-      const styleSheet = document.createElement("style");
-      styleSheet.id = "context-generator-styles";
-      styleSheet.textContent = `
-        @keyframes contextSpinner {
-          0% { transform: rotate(0deg); }
-          100% { transform: rotate(360deg); }
-        }
-      `;
-      document.head.appendChild(styleSheet);
+    // Create the overlay singleton on document.body if it doesn't exist yet
+    let overlay = document.getElementById("context-generator-overlay");
+    if (!overlay) {
+      overlay = document.createElement("div");
+      overlay.id = "context-generator-overlay";
+      overlay.style.display = "none";
+      overlay.style.zIndex = "999999";
+      overlay.style.padding = "8px 12px";
+      overlay.style.borderRadius = "6px";
+      overlay.style.backgroundColor = "#1f2937";
+      overlay.style.color = "#ffffff";
+      overlay.style.fontSize = "12px";
+      overlay.style.boxShadow = "0 4px 12px rgba(0, 0, 0, 0.2)";
+      overlay.style.whiteSpace = "nowrap";
+      overlay.style.alignItems = "center";
+      overlay.style.gap = "6px";
+      overlay.style.fontFamily = "-apple-system, BlinkMacSystemFont, sans-serif";
+
+      const spinner = document.createElement("div");
+      spinner.style.width = "12px";
+      spinner.style.height = "12px";
+      spinner.style.border = "2px solid rgba(255, 255, 255, 0.3)";
+      spinner.style.borderTop = "2px solid #ffffff";
+      spinner.style.borderRadius = "50%";
+      
+      if (!document.getElementById("context-generator-styles")) {
+        const styleSheet = document.createElement("style");
+        styleSheet.id = "context-generator-styles";
+        styleSheet.textContent = `
+          @keyframes contextSpinner {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+          }
+        `;
+        document.head.appendChild(styleSheet);
+      }
+      spinner.style.animation = "contextSpinner 0.8s linear infinite";
+
+      const textSpan = document.createElement("span");
+      textSpan.id = "context-generator-text";
+      textSpan.textContent = "Generating context... (10s)";
+
+      overlay.appendChild(spinner);
+      overlay.appendChild(textSpan);
+      document.body.appendChild(overlay);
     }
-    spinner.style.animation = "contextSpinner 0.8s linear infinite";
-
-    const textSpan = document.createElement("span");
-    textSpan.id = "context-generator-text";
-    textSpan.textContent = "Generating context... (10s)";
-
-    overlay.appendChild(spinner);
-    overlay.appendChild(textSpan);
-
-    container.appendChild(overlay);
-    container.appendChild(bubble);
-
-    document.body.appendChild(container);
 
     bubble.addEventListener("click", () => {
       if (isRunning) return;
@@ -469,5 +467,44 @@ Then write: "Continue from where we left off."
     });
   }
 
-  injectFloatingButton();
+  function injectButtonIfNeeded() {
+    const existingBubble = document.getElementById("context-generator-bubble");
+    const input = findClaudeInput();
+    
+    if (!input) {
+      if (existingBubble) {
+        existingBubble.remove();
+        const overlay = document.getElementById("context-generator-overlay");
+        if (overlay) overlay.remove();
+      }
+      return;
+    }
+
+    const sendButton = findSendButton(input, true);
+    if (!sendButton) {
+      return;
+    }
+
+    if (existingBubble) {
+      if (existingBubble.parentNode === sendButton.parentNode) {
+        return;
+      } else {
+        existingBubble.remove();
+        const overlay = document.getElementById("context-generator-overlay");
+        if (overlay) overlay.remove();
+      }
+    }
+
+    injectFloatingButton(input, sendButton);
+  }
+
+  let injectionInterval = null;
+
+  function startFloatingButtonMonitoring() {
+    if (injectionInterval) clearInterval(injectionInterval);
+    injectionInterval = setInterval(injectButtonIfNeeded, 1000);
+    injectButtonIfNeeded();
+  }
+
+  startFloatingButtonMonitoring();
 })();
