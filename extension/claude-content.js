@@ -443,12 +443,20 @@ Then write: "Continue from where we left off."
     bubble.style.position = "fixed";
     bubble.style.zIndex = "999999";
     
-    // Position the 44px button inside the input field, aligned to the far right.
-    // Standard input box controls are in the bottom row. Placing it at 'left = rect.right - BUTTON_SIZE - 120'
-    // guarantees it stays completely clear of the voice buttons (positioned around rect.right - 95).
-    const BUTTON_SIZE = 44;
-    const top = rect.bottom - BUTTON_SIZE - 6;
-    const left = rect.right - BUTTON_SIZE - 130;
+    // Position the 32px button to the right of the plus button (which sits on the left side of the input bar)
+    // The plus button is located near rect.left + 12px. Placing the bubble at rect.left + 48px puts it cleanly to its right.
+    const BUTTON_SIZE = 32;
+    const icon = bubble.querySelector("img");
+    if (icon) {
+      icon.style.width = `${BUTTON_SIZE}px`;
+      icon.style.height = `${BUTTON_SIZE}px`;
+    }
+    bubble.style.width = `${BUTTON_SIZE}px`;
+    bubble.style.height = `${BUTTON_SIZE}px`;
+
+    // Center vertically in the bottom row (plus button height row)
+    const top = rect.bottom - BUTTON_SIZE - 10;
+    const left = rect.left + 48;
 
     bubble.style.top = `${top}px`;
     bubble.style.left = `${left}px`;
@@ -460,8 +468,8 @@ Then write: "Continue from where we left off."
     bubble.title = "Transfer Context to ChatGPT";
     
     // Clean transparent style — just the icon, no orange circle
-    bubble.style.width = "44px";
-    bubble.style.height = "44px";
+    bubble.style.width = "32px";
+    bubble.style.height = "32px";
     bubble.style.borderRadius = "50%";
     bubble.style.backgroundColor = "transparent";
     bubble.style.border = "none";
@@ -478,8 +486,8 @@ Then write: "Continue from where we left off."
     // Icon fills the button
     const icon = document.createElement("img");
     icon.src = chrome.runtime.getURL("bubble-icon.png");
-    icon.style.width = "44px";
-    icon.style.height = "44px";
+    icon.style.width = "32px";
+    icon.style.height = "32px";
     icon.style.objectFit = "contain";
     icon.style.display = "block";
     icon.draggable = false;
