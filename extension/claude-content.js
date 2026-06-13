@@ -99,8 +99,75 @@ Then write: "Continue from where we left off."
       await notifyBackground({ type: "TRANSFER_TO_CHATGPT", text });
     } catch (error) {
       resetRunningFlag();
-      await notifyBackground({ type: "CONTEXT_TRANSFER_ERROR", error: error.message });
+      showErrorOverlay(error.message);
+      await notifyBackground({ type: "CONTEXT_TRANSFER_ERROR", error: error.message }).catch(() => {});
     }
+  }
+
+  function showErrorOverlay(message) {
+    let errorDiv = document.getElementById("context-generator-error-overlay");
+    if (!errorDiv) {
+      errorDiv = document.createElement("div");
+      errorDiv.id = "context-generator-error-overlay";
+      errorDiv.style.position = "fixed";
+      errorDiv.style.zIndex = "9999999";
+      errorDiv.style.bottom = "80px";
+      errorDiv.style.right = "20px";
+      errorDiv.style.padding = "16px";
+      errorDiv.style.borderRadius = "8px";
+      errorDiv.style.backgroundColor = "#ef4444";
+      errorDiv.style.color = "#ffffff";
+      errorDiv.style.boxShadow = "0 4px 16px rgba(0, 0, 0, 0.3)";
+      errorDiv.style.fontFamily = "-apple-system, BlinkMacSystemFont, sans-serif";
+      errorDiv.style.fontSize = "14px";
+      errorDiv.style.maxWidth = "300px";
+      errorDiv.style.display = "flex";
+      errorDiv.style.flexDirection = "column";
+      errorDiv.style.gap = "10px";
+
+      const header = document.createElement("div");
+      header.style.fontWeight = "bold";
+      header.style.display = "flex";
+      header.style.alignItems = "center";
+      header.style.gap = "6px";
+      header.innerHTML = "⚠️ <span>Transfer Failed</span>";
+
+      const textSpan = document.createElement("span");
+      textSpan.id = "context-generator-error-text";
+
+      const closeBtn = document.createElement("button");
+      closeBtn.textContent = "Dismiss";
+      closeBtn.style.padding = "6px 12px";
+      closeBtn.style.borderRadius = "4px";
+      closeBtn.style.border = "1px solid rgba(255, 255, 255, 0.4)";
+      closeBtn.style.backgroundColor = "transparent";
+      closeBtn.style.color = "#ffffff";
+      closeBtn.style.cursor = "pointer";
+      closeBtn.style.alignSelf = "flex-end";
+      closeBtn.style.fontSize = "12px";
+      closeBtn.style.transition = "background-color 0.2s";
+      
+      closeBtn.addEventListener("mouseenter", () => {
+        closeBtn.style.backgroundColor = "rgba(255, 255, 255, 0.1)";
+      });
+      closeBtn.addEventListener("mouseleave", () => {
+        closeBtn.style.backgroundColor = "transparent";
+      });
+      closeBtn.addEventListener("click", () => {
+        errorDiv.style.display = "none";
+      });
+
+      errorDiv.appendChild(header);
+      errorDiv.appendChild(textSpan);
+      errorDiv.appendChild(closeBtn);
+      document.body.appendChild(errorDiv);
+    }
+
+    const textSpan = document.getElementById("context-generator-error-text");
+    if (textSpan) {
+      textSpan.textContent = message;
+    }
+    errorDiv.style.display = "flex";
   }
 
   function resetRunningFlag() {
@@ -118,9 +185,14 @@ Then write: "Continue from where we left off."
 
   async function notifyBackground(message) {
     try {
-      await chrome.runtime.sendMessage(message);
+      const response = await chrome.runtime.sendMessage(message);
+      if (response && response.ok === false) {
+        throw new Error(response.error || "Unknown background error");
+      }
+      return response;
     } catch (error) {
       console.error("[Context Generator Relay]", error);
+      throw error;
     }
   }
 
@@ -138,8 +210,6 @@ Then write: "Continue from where we left off."
     const startTime = Date.now();
     let seenStopButton = false;
 
-    console.log("[Context Generator Relay] Starting button-state polling for Claude's response...");
-
     while (Date.now() - startTime < MAX_WAIT_MS) {
       await sleep(POLL_INTERVAL_MS);
 
@@ -147,21 +217,15 @@ Then write: "Continue from where we left off."
       
       if (stopVisible) {
         seenStopButton = true;
-        console.log("[Context Generator Relay] Poll: 'Stop' button is visible. Claude is generating...");
       } else {
         // Stop button is not visible.
         if (seenStopButton) {
-          console.log("[Context Generator Relay] Poll: 'Stop' button disappeared. Response complete!");
           break;
         } else {
-          // If we haven't seen the stop button yet, maybe the generation hasn't started, or it finished very quickly.
           // Give it a 2-second grace period to see if the stop button appears.
           const elapsed = Date.now() - startTime;
           if (elapsed > 2000) {
-            console.log("[Context Generator Relay] Poll: No 'Stop' button detected after 2s grace period. Assuming complete.");
             break;
-          } else {
-            console.log(`[Context Generator Relay] Poll: Waiting for 'Stop' button to appear (${elapsed}ms elapsed)...`);
           }
         }
       }
@@ -170,8 +234,7 @@ Then write: "Continue from where we left off."
     // Wait 500ms more before capturing
     await sleep(500);
 
-    const text = getClaudeResponseText(false);
-    console.log("[Context Generator Relay] Claude captured text:", text || "");
+    const text = getClaudeResponseText(true);
 
     if (!text) {
       throw new Error("Claude response was not available after generation completed.");
@@ -208,15 +271,9 @@ Then write: "Continue from where we left off."
       "[contenteditable='true']"
     ];
 
-    const found = selectors
+    return selectors
       .flatMap((selector) => Array.from(document.querySelectorAll(selector)))
       .find((element) => isVisible(element) && !element.closest("[aria-hidden='true']"));
-
-    if (found && (!window.__lastInputLogTime || Date.now() - window.__lastInputLogTime > 10000)) {
-      console.log("[Context Generator Relay] Resolved Claude Input element:", found);
-      window.__lastInputLogTime = Date.now();
-    }
-    return found;
   }
 
   function findSendButton(input, includeDisabled = false, silent = false) {
@@ -227,7 +284,7 @@ Then write: "Continue from where we left off."
       return all.indexOf(button) === index && isVisible(button) && (includeDisabled || !button.disabled);
     });
 
-    const sendBtn = buttons.find((button) => {
+    return buttons.find((button) => {
       const label = [
         button.getAttribute("aria-label"),
         button.getAttribute("title"),
@@ -239,61 +296,20 @@ Then write: "Continue from where we left off."
 
       return /\bsend\b|submit/i.test(label);
     }) || scopedButtons.find((button) => isVisible(button) && (includeDisabled || !button.disabled) && button.type === "submit");
-
-    if (sendBtn) {
-      if (!window.__lastSendLogTime || Date.now() - window.__lastSendLogTime > 10000) {
-        console.log("[Context Generator Relay] Resolved Send Button element:", sendBtn);
-        window.__lastSendLogTime = Date.now();
-      }
-    } else if (!silent) {
-      if (!window.__lastAllButtonsLogTime || Date.now() - window.__lastAllButtonsLogTime > 10000) {
-        window.__lastAllButtonsLogTime = Date.now();
-        const allButtons = Array.from(document.querySelectorAll("button"));
-        console.log(`[Context Generator Relay] Send button not resolved. Listing all ${allButtons.length} button(s) on the page:`);
-        allButtons.forEach((btn, idx) => {
-          console.log(`Button #${idx}:`, {
-            tagName: btn.tagName,
-            id: btn.id,
-            className: btn.className,
-            ariaLabel: btn.getAttribute("aria-label"),
-            title: btn.getAttribute("title"),
-            dataTestId: btn.getAttribute("data-testid"),
-            textContent: (btn.textContent || "").trim().substring(0, 100),
-            disabled: btn.disabled,
-            type: btn.getAttribute("type"),
-            isVisible: isVisible(btn),
-            inForm: form ? form.contains(btn) : false
-          });
-        });
-      }
-    }
-    return sendBtn;
   }
 
   function getClaudeResponseText(silent = false) {
     const candidates = getClaudeResponseCandidates(silent);
     if (candidates.length === 0) {
-      if (!silent) console.log("[Context Generator Relay] No Claude responses found matching .font-claude-response");
       return "";
     }
 
     const winner = candidates[candidates.length - 1];
-    const text = cleanText(winner.innerText || winner.textContent || "");
-    
-    if (!silent) {
-      console.log("[Context Generator Relay] Extracted Claude response from element:", {
-        tagName: winner.tagName,
-        className: winner.className,
-        textSnippet: text.slice(0, 60) + "..."
-      });
-    }
-
-    return text;
+    return cleanText(winner.innerText || winner.textContent || "");
   }
 
   function getClaudeResponseCandidates(silent = false) {
     const matches = document.querySelectorAll(".font-claude-response");
-    if (!silent) console.log(`[Context Generator Relay] Found ${matches.length} element(s) matching .font-claude-response`);
     return Array.from(matches);
   }
 
@@ -541,7 +557,6 @@ Then write: "Continue from where we left off."
     
     if (!input) {
       if (existingBubble) {
-        console.log("[Context Generator Relay] Input not found, removing existing bubble.");
         existingBubble.remove();
         const overlay = document.getElementById("context-generator-overlay");
         if (overlay) overlay.remove();
@@ -551,7 +566,6 @@ Then write: "Continue from where we left off."
     }
 
     if (currentClaudeInput !== input) {
-      console.log("[Context Generator Relay] Claude input element changed. Re-injecting bubble.");
       currentClaudeInput = input;
       if (existingBubble) {
         existingBubble.remove();
