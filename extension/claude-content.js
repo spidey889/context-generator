@@ -485,27 +485,32 @@ Then write: "Continue from where we left off."
     bubble.type = "button";
     bubble.title = "Transfer Context to ChatGPT";
 
-    // Match the + button's style — inline, same row, transparent
-    bubble.style.display = "inline-flex";
-    bubble.style.alignItems = "center";
-    bubble.style.justifyContent = "center";
-    bubble.style.alignSelf = "center";
-    bubble.style.width = "34px";
-    bubble.style.height = "34px";
-    bubble.style.borderRadius = "50%";
+    // Get plus button's computed styles for perfect matching
+    const plusStyle = window.getComputedStyle(plusBtn);
+    const plusRect = plusBtn.getBoundingClientRect();
+
+    // Match the + button's style exactly
+    bubble.style.display = plusStyle.display;
+    bubble.style.alignItems = plusStyle.alignItems;
+    bubble.style.justifyContent = plusStyle.justifyContent;
+    bubble.style.alignSelf = plusStyle.alignSelf;
+    bubble.style.width = "38px";
+    bubble.style.height = "38px";
+    bubble.style.borderRadius = plusStyle.borderRadius;
     bubble.style.backgroundColor = "transparent";
     bubble.style.border = "none";
     bubble.style.cursor = "pointer";
     bubble.style.padding = "0";
-    bubble.style.marginLeft = "2px";
-    bubble.style.marginTop = "1px";
+    bubble.style.margin = plusStyle.margin;
+    bubble.style.marginLeft = "1px";
+    bubble.style.marginTop = "3px";
     bubble.style.flexShrink = "0";
     bubble.style.transition = "transform 0.15s";
 
     const icon = document.createElement("img");
     icon.src = chrome.runtime.getURL("bubble-icon.png");
-    icon.style.width = "34px";
-    icon.style.height = "34px";
+    icon.style.width = "38px";
+    icon.style.height = "38px";
     icon.style.objectFit = "contain";
     icon.style.display = "block";
     icon.draggable = false;
