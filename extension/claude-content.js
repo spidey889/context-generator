@@ -484,8 +484,8 @@ Then write: "Continue from where we left off."
         bubble.style.position = "fixed";
         bubble.style.zIndex = "999999";
         
-        // Match standard toolbar button size (usually ~28px to 32px)
-        const TARGET_SIZE = 28;
+        // Match voice button size (usually 32px)
+        const TARGET_SIZE = Math.min(Math.max(voiceRect.height, 28), 32);
         const icon = bubble.querySelector("img");
         if (icon) {
           icon.style.width = `${TARGET_SIZE}px`;
@@ -494,10 +494,10 @@ Then write: "Continue from where we left off."
         bubble.style.width = `${TARGET_SIZE}px`;
         bubble.style.height = `${TARGET_SIZE}px`;
 
-        // Position to the RIGHT of the voice button with 8px gap
-        // Also vertically centered relative to the voice button
+        // Position to the RIGHT of the voice button with consistent spacing (e.g. 6px gap)
+        // Vertically centered relative to the voice button
         const top = voiceRect.top + (voiceRect.height - TARGET_SIZE) / 2;
-        const left = voiceRect.right + 8;
+        const left = voiceRect.right + 6;
 
         bubble.style.top = `${top}px`;
         bubble.style.left = `${left}px`;
