@@ -532,48 +532,80 @@ Then write: "Continue from where we left off."
     bubble.style.left = `${left}px`;
   }
 
-  function injectFloatingButton(input) {
+  function findToolbarContainer() {
+    const voiceOrMic = findVoiceOrMicButton();
+    if (voiceOrMic) {
+      return voiceOrMic.parentElement;
+    }
+    // Fallback: search for buttons container within the chat input form
+    const input = findClaudeInput();
+    if (input) {
+      const form = input.closest("form");
+      if (form) {
+        // Find element with classes or styling representing the button bar
+        const buttons = Array.from(form.querySelectorAll("button"));
+        if (buttons.length > 0) {
+          return buttons[0].parentElement;
+        }
+      }
+    }
+    return null;
+  }
+
+  function injectFloatingButton() {
+    const toolbar = findToolbarContainer();
+    if (!toolbar) return;
+
+    // Remove if it exists elsewhere
+    const existingBubble = document.getElementById("context-generator-bubble");
+    if (existingBubble) {
+      if (existingBubble.parentElement === toolbar) {
+        return; // Already in correct place
+      }
+      existingBubble.remove();
+    }
+
     const bubble = document.createElement("button");
     bubble.id = "context-generator-bubble";
+    bubble.type = "button";
     bubble.title = "Transfer Context to ChatGPT";
     
-    // Clean transparent style — just the icon, no orange circle
-    bubble.style.width = "28px";
-    bubble.style.height = "28px";
-    bubble.style.borderRadius = "50%";
+    // Style it exactly like adjacent toolbar icons to fit in seamlessly
+    bubble.style.width = "32px";
+    bubble.style.height = "32px";
+    bubble.style.borderRadius = "8px";
     bubble.style.backgroundColor = "transparent";
     bubble.style.border = "none";
-    bubble.style.boxShadow = "none";
     bubble.style.cursor = "pointer";
-    bubble.style.display = "flex";
+    bubble.style.display = "inline-flex";
     bubble.style.alignItems = "center";
     bubble.style.justifyContent = "center";
     bubble.style.padding = "0";
-    bubble.style.transition = "transform 0.15s, filter 0.15s";
-    bubble.style.zIndex = "999999";
-    bubble.style.position = "fixed";
+    bubble.style.transition = "background-color 0.15s, transform 0.15s";
+    bubble.style.marginLeft = "4px";
+    bubble.style.flexShrink = "0";
 
-    // Icon fills the button
+    // Icon fits button
     const icon = document.createElement("img");
     icon.src = chrome.runtime.getURL("bubble-icon.png");
-    icon.style.width = "28px";
-    icon.style.height = "28px";
+    icon.style.width = "22px";
+    icon.style.height = "22px";
     icon.style.objectFit = "contain";
     icon.style.display = "block";
     icon.draggable = false;
     bubble.appendChild(icon);
 
     bubble.addEventListener("mouseenter", () => {
-      bubble.style.transform = "scale(1.12)";
-      icon.style.filter = "brightness(1.15) drop-shadow(0 2px 6px rgba(0,0,0,0.3))";
+      bubble.style.backgroundColor = "rgba(0, 0, 0, 0.05)";
+      bubble.style.transform = "scale(1.08)";
     });
     bubble.addEventListener("mouseleave", () => {
+      bubble.style.backgroundColor = "transparent";
       bubble.style.transform = "scale(1)";
-      icon.style.filter = "none";
     });
 
-    // Append directly to body to avoid overflow clipping issues
-    document.body.appendChild(bubble);
+    // Append to toolbar
+    toolbar.appendChild(bubble);
 
     // Create the overlay singleton on document.body if it doesn't exist yet
     let overlay = document.getElementById("context-generator-overlay");
@@ -581,6 +613,7 @@ Then write: "Continue from where we left off."
       overlay = document.createElement("div");
       overlay.id = "context-generator-overlay";
       overlay.style.display = "none";
+      overlay.style.position = "fixed";
       overlay.style.zIndex = "999999";
       overlay.style.padding = "8px 12px";
       overlay.style.borderRadius = "6px";
@@ -633,50 +666,45 @@ Then write: "Continue from where we left off."
 
       runClaudeFlow();
     });
+  }
 
-    // Update position immediately and listen to typing events
-    updateBubblePosition();
-    input.addEventListener("input", updateBubblePosition);
+  function updateBubbleOverlayPosition() {
+    const overlay = document.getElementById("context-generator-overlay");
+    const bubble = document.getElementById("context-generator-bubble");
+    if (overlay && bubble && overlay.style.display !== "none") {
+      const rect = bubble.getBoundingClientRect();
+      overlay.style.top = `${rect.top - 45}px`;
+      overlay.style.left = `${rect.left - 80}px`;
+    }
   }
 
   function injectButtonIfNeeded() {
-    const existingBubble = document.getElementById("context-generator-bubble");
-    const input = findClaudeInput();
-    
-    if (!input) {
-      if (existingBubble) {
-        existingBubble.remove();
-        const overlay = document.getElementById("context-generator-overlay");
-        if (overlay) overlay.remove();
-        currentClaudeInput = null;
-      }
-      return;
-    }
-
-    if (currentClaudeInput !== input) {
-      currentClaudeInput = input;
-      if (existingBubble) {
-        existingBubble.remove();
-      }
-      injectFloatingButton(input);
-    } else if (!existingBubble) {
-      injectFloatingButton(input);
-    }
+    injectFloatingButton();
   }
 
-  let injectionInterval = null;
-
+  // Monitor DOM modifications with MutationObserver
+  let observer = null;
   function startFloatingButtonMonitoring() {
-    if (injectionInterval) clearInterval(injectionInterval);
-    injectionInterval = setInterval(() => {
-      injectButtonIfNeeded();
-      updateBubblePosition();
-    }, 500);
+    if (observer) {
+      observer.disconnect();
+    }
 
-    window.addEventListener("resize", updateBubblePosition);
-    window.addEventListener("scroll", updateBubblePosition, true);
-    
-    injectButtonIfNeeded();
+    observer = new MutationObserver(() => {
+      injectFloatingButton();
+      updateBubbleOverlayPosition();
+    });
+
+    observer.observe(document.body, {
+      childList: true,
+      subtree: true
+    });
+
+    // Periodic safety check
+    setInterval(() => {
+      injectFloatingButton();
+    }, 1000);
+
+    injectFloatingButton();
   }
 
   startFloatingButtonMonitoring();
