@@ -475,7 +475,7 @@ Then write: "Continue from where we left off."
 
     // Icon fills the button
     const icon = document.createElement("img");
-    icon.src = chrome.runtime.getURL("icon48.png");
+    icon.src = chrome.runtime.getURL("bubble-icon.png");
     icon.style.width = "44px";
     icon.style.height = "44px";
     icon.style.objectFit = "contain";
