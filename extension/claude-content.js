@@ -428,141 +428,81 @@ Then write: "Continue from where we left off."
     }
   }
 
-  function findVoiceOrMicButton() {
-    const buttons = Array.from(document.querySelectorAll("button"));
-    // Search for button with voice mode, waveform, microphone, or audio labels or SVG contents
-    return buttons.find((btn) => {
-      if (!isVisible(btn)) return false;
-      const label = [
-        btn.getAttribute("aria-label"),
-        btn.getAttribute("title"),
-        btn.getAttribute("data-testid"),
-        btn.textContent || ""
-      ].filter(Boolean).join(" ").toLowerCase();
-      
-      if (label.includes("voice") || label.includes("mic") || label.includes("speak") || label.includes("audio")) {
-        return true;
-      }
-      
-      // Also check if SVG path/content might suggest voice/mic
-      const svg = btn.querySelector("svg");
-      if (svg) {
-        const svgHTML = svg.innerHTML.toLowerCase();
-        if (svgHTML.includes("mic") || svgHTML.includes("voice") || svgHTML.includes("path")) {
-          // Let's also check if it's in the input toolbar. The input toolbar buttons are usually close to the input.
-          const input = findClaudeInput();
-          if (input && input.closest("form")?.contains(btn)) {
-            return true;
-          }
-        }
-      }
-      return false;
-    }) || buttons.find((btn) => {
-      // Fallback: check any visible button in the input form containing SVG, except the send button
-      const input = findClaudeInput();
-      if (input && input.closest("form")?.contains(btn) && isVisible(btn)) {
-        const isSend = /send|submit/i.test(btn.getAttribute("aria-label") || btn.getAttribute("title") || "");
-        if (!isSend) {
-          return true;
-        }
-      }
-      return false;
-    });
-  }
-
-  // Since we append the button directly to the toolbar container, native DOM layout handles positioning.
-  function updateBubbleOverlayPosition() {
-    const overlay = document.getElementById("context-generator-overlay");
+  function updateBubblePosition() {
     const bubble = document.getElementById("context-generator-bubble");
-    if (overlay && bubble && overlay.style.display !== "none") {
-      const rect = bubble.getBoundingClientRect();
-      overlay.style.top = `${rect.top - 45}px`;
-      overlay.style.left = `${rect.left - 80}px`;
-    }
-  }
-
-  function findToolbarContainer() {
-    const voiceOrMic = findVoiceOrMicButton();
-    if (voiceOrMic) {
-      return voiceOrMic.parentElement;
-    }
-    // Fallback: search for buttons container within the chat input form
     const input = findClaudeInput();
-    if (input) {
-      const form = input.closest("form");
-      if (form) {
-        const buttons = Array.from(form.querySelectorAll("button"));
-        if (buttons.length > 0) {
-          return buttons[0].parentElement;
-        }
-      }
+    if (!bubble || !input) return;
+
+    const rect = input.getBoundingClientRect();
+    if (rect.width === 0 || rect.height === 0) {
+      bubble.style.display = "none";
+      return;
     }
-    return null;
+
+    bubble.style.display = "flex";
+    bubble.style.position = "fixed";
+    bubble.style.zIndex = "999999";
+    
+    // Position the 44px button inside the input field, aligned to the far right.
+    // Standard input box controls are in the bottom row. Placing it at 'left = rect.right - BUTTON_SIZE - 120'
+    // guarantees it stays completely clear of the voice buttons (positioned around rect.right - 95).
+    const BUTTON_SIZE = 44;
+    const top = rect.bottom - BUTTON_SIZE - 6;
+    const left = rect.right - BUTTON_SIZE - 130;
+
+    bubble.style.top = `${top}px`;
+    bubble.style.left = `${left}px`;
   }
 
-  function injectFloatingButton() {
-    const toolbar = findToolbarContainer();
-    if (!toolbar) return;
-
-    // Check if it already exists as the last child or child of the toolbar
-    const existingBubble = document.getElementById("context-generator-bubble");
-    if (existingBubble) {
-      if (existingBubble.parentElement === toolbar) {
-        // Ensure it stays at the end of the children list
-        if (toolbar.lastChild !== existingBubble) {
-          toolbar.appendChild(existingBubble);
-        }
-        return;
-      }
-      existingBubble.remove();
-    }
-
+  function injectFloatingButton(input) {
     const bubble = document.createElement("button");
     bubble.id = "context-generator-bubble";
-    bubble.type = "button";
     bubble.title = "Transfer Context to ChatGPT";
     
-    // Size to match mic/voice mode button row (usually 28px-32px)
-    bubble.style.width = "28px";
-    bubble.style.height = "28px";
+    // Clean transparent style — just the icon, no orange circle
+    bubble.style.width = "44px";
+    bubble.style.height = "44px";
     bubble.style.borderRadius = "50%";
     bubble.style.backgroundColor = "transparent";
     bubble.style.border = "none";
+    bubble.style.boxShadow = "none";
     bubble.style.cursor = "pointer";
-    bubble.style.display = "inline-flex";
+    bubble.style.display = "flex";
     bubble.style.alignItems = "center";
     bubble.style.justifyContent = "center";
     bubble.style.padding = "0";
-    bubble.style.transition = "transform 0.15s";
-    bubble.style.marginLeft = "8px";
-    bubble.style.flexShrink = "0";
+    bubble.style.transition = "transform 0.15s, filter 0.15s";
+    bubble.style.zIndex = "999999";
+    bubble.style.position = "fixed";
 
+    // Icon fills the button
     const icon = document.createElement("img");
     icon.src = chrome.runtime.getURL("bubble-icon.png");
-    icon.style.width = "24px";
-    icon.style.height = "24px";
+    icon.style.width = "44px";
+    icon.style.height = "44px";
     icon.style.objectFit = "contain";
     icon.style.display = "block";
     icon.draggable = false;
     bubble.appendChild(icon);
 
     bubble.addEventListener("mouseenter", () => {
-      bubble.style.transform = "scale(1.1)";
+      bubble.style.transform = "scale(1.12)";
+      icon.style.filter = "brightness(1.15) drop-shadow(0 2px 6px rgba(0,0,0,0.3))";
     });
     bubble.addEventListener("mouseleave", () => {
       bubble.style.transform = "scale(1)";
+      icon.style.filter = "none";
     });
 
-    // Append directly as last child
-    toolbar.appendChild(bubble);
+    // Append directly to body to avoid overflow clipping issues
+    document.body.appendChild(bubble);
 
-    // Create overlay singleton if needed
+    // Create the overlay singleton on document.body if it doesn't exist yet
     let overlay = document.getElementById("context-generator-overlay");
     if (!overlay) {
       overlay = document.createElement("div");
       overlay.id = "context-generator-overlay";
       overlay.style.display = "none";
-      overlay.style.position = "fixed";
       overlay.style.zIndex = "999999";
       overlay.style.padding = "8px 12px";
       overlay.style.borderRadius = "6px";
@@ -615,21 +555,50 @@ Then write: "Continue from where we left off."
 
       runClaudeFlow();
     });
+
+    // Update position immediately and listen to typing events
+    updateBubblePosition();
+    input.addEventListener("input", updateBubblePosition);
   }
 
   function injectButtonIfNeeded() {
-    injectFloatingButton();
+    const existingBubble = document.getElementById("context-generator-bubble");
+    const input = findClaudeInput();
+    
+    if (!input) {
+      if (existingBubble) {
+        existingBubble.remove();
+        const overlay = document.getElementById("context-generator-overlay");
+        if (overlay) overlay.remove();
+        currentClaudeInput = null;
+      }
+      return;
+    }
+
+    if (currentClaudeInput !== input) {
+      currentClaudeInput = input;
+      if (existingBubble) {
+        existingBubble.remove();
+      }
+      injectFloatingButton(input);
+    } else if (!existingBubble) {
+      injectFloatingButton(input);
+    }
   }
 
-  let monitorInterval = null;
-  function startFloatingButtonMonitoring() {
-    if (monitorInterval) clearInterval(monitorInterval);
-    monitorInterval = setInterval(() => {
-      injectFloatingButton();
-      updateBubbleOverlayPosition();
-    }, 1000);
+  let injectionInterval = null;
 
-    injectFloatingButton();
+  function startFloatingButtonMonitoring() {
+    if (injectionInterval) clearInterval(injectionInterval);
+    injectionInterval = setInterval(() => {
+      injectButtonIfNeeded();
+      updateBubblePosition();
+    }, 500);
+
+    window.addEventListener("resize", updateBubblePosition);
+    window.addEventListener("scroll", updateBubblePosition, true);
+    
+    injectButtonIfNeeded();
   }
 
   startFloatingButtonMonitoring();
