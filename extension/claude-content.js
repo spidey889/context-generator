@@ -494,10 +494,10 @@ Then write: "Continue from where we left off."
         bubble.style.width = `${TARGET_SIZE}px`;
         bubble.style.height = `${TARGET_SIZE}px`;
 
-        // Position to the RIGHT of the voice button with consistent spacing (e.g. 6px gap)
+        // Position to the LEFT of the voice button with consistent spacing (e.g. 6px gap)
         // Vertically centered relative to the voice button
         const top = voiceRect.top + (voiceRect.height - TARGET_SIZE) / 2;
-        const left = voiceRect.right + 6;
+        const left = voiceRect.left - TARGET_SIZE - 6;
 
         bubble.style.top = `${top}px`;
         bubble.style.left = `${left}px`;
