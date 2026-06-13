@@ -490,21 +490,22 @@ Then write: "Continue from where we left off."
     bubble.style.alignItems = "center";
     bubble.style.justifyContent = "center";
     bubble.style.alignSelf = "center";
-    bubble.style.width = "32px";
-    bubble.style.height = "32px";
+    bubble.style.width = "34px";
+    bubble.style.height = "34px";
     bubble.style.borderRadius = "50%";
     bubble.style.backgroundColor = "transparent";
     bubble.style.border = "none";
     bubble.style.cursor = "pointer";
     bubble.style.padding = "0";
-    bubble.style.marginLeft = "4px";
+    bubble.style.marginLeft = "2px";
+    bubble.style.marginTop = "1px";
     bubble.style.flexShrink = "0";
     bubble.style.transition = "transform 0.15s";
 
     const icon = document.createElement("img");
     icon.src = chrome.runtime.getURL("bubble-icon.png");
-    icon.style.width = "30px";
-    icon.style.height = "30px";
+    icon.style.width = "34px";
+    icon.style.height = "34px";
     icon.style.objectFit = "contain";
     icon.style.display = "block";
     icon.draggable = false;
