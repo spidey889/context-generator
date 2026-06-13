@@ -1,8 +1,13 @@
 {
   "manifest_version": 3,
-  "name": "Context Generator Relay",
-  "description": "Send the context-generator prompt to Claude, then paste Claude's response into ChatGPT.",
+  "name": "Context Generator",
+  "description": "Automatically transfer your conversation context from Claude to ChatGPT.",
   "version": "1.0.0",
+  "icons": {
+    "16": "icon16.png",
+    "48": "icon48.png",
+    "128": "icon128.png"
+  },
   "permissions": ["activeTab", "scripting", "tabs"],
   "host_permissions": [
     "https://*.claude.ai/*",
@@ -13,7 +18,12 @@
     "service_worker": "background.js"
   },
   "action": {
-    "default_title": "Generate context and paste into ChatGPT"
+    "default_title": "Generate context and paste into ChatGPT",
+    "default_icon": {
+      "16": "icon16.png",
+      "48": "icon48.png",
+      "128": "icon128.png"
+    }
   },
   "content_scripts": [
     {
