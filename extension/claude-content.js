@@ -443,8 +443,8 @@ Then write: "Continue from where we left off."
     bubble.style.position = "fixed";
     bubble.style.zIndex = "999999";
     
-    // Center the 40px button vertically in the bottom controls row of the input
-    const BUTTON_SIZE = 40;
+    // Center the 44px button vertically in the bottom controls row of the input
+    const BUTTON_SIZE = 44;
     const top = rect.bottom - BUTTON_SIZE - 4;
     const left = rect.right - BUTTON_SIZE - 55;
 
@@ -458,8 +458,8 @@ Then write: "Continue from where we left off."
     bubble.title = "Transfer Context to ChatGPT";
     
     // Clean transparent style — just the icon, no orange circle
-    bubble.style.width = "40px";
-    bubble.style.height = "40px";
+    bubble.style.width = "44px";
+    bubble.style.height = "44px";
     bubble.style.borderRadius = "50%";
     bubble.style.backgroundColor = "transparent";
     bubble.style.border = "none";
@@ -476,8 +476,8 @@ Then write: "Continue from where we left off."
     // Icon fills the button
     const icon = document.createElement("img");
     icon.src = chrome.runtime.getURL("icon48.png");
-    icon.style.width = "36px";
-    icon.style.height = "36px";
+    icon.style.width = "44px";
+    icon.style.height = "44px";
     icon.style.objectFit = "contain";
     icon.style.display = "block";
     icon.draggable = false;
