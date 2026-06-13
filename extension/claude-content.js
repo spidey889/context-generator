@@ -428,11 +428,84 @@ Then write: "Continue from where we left off."
     }
   }
 
+  function findVoiceOrMicButton() {
+    const buttons = Array.from(document.querySelectorAll("button"));
+    // Search for button with voice mode, waveform, microphone, or audio labels or SVG contents
+    return buttons.find((btn) => {
+      if (!isVisible(btn)) return false;
+      const label = [
+        btn.getAttribute("aria-label"),
+        btn.getAttribute("title"),
+        btn.getAttribute("data-testid"),
+        btn.textContent || ""
+      ].filter(Boolean).join(" ").toLowerCase();
+      
+      if (label.includes("voice") || label.includes("mic") || label.includes("speak") || label.includes("audio")) {
+        return true;
+      }
+      
+      // Also check if SVG path/content might suggest voice/mic
+      const svg = btn.querySelector("svg");
+      if (svg) {
+        const svgHTML = svg.innerHTML.toLowerCase();
+        if (svgHTML.includes("mic") || svgHTML.includes("voice") || svgHTML.includes("path")) {
+          // Let's also check if it's in the input toolbar. The input toolbar buttons are usually close to the input.
+          const input = findClaudeInput();
+          if (input && input.closest("form")?.contains(btn)) {
+            return true;
+          }
+        }
+      }
+      return false;
+    }) || buttons.find((btn) => {
+      // Fallback: check any visible button in the input form containing SVG, except the send button
+      const input = findClaudeInput();
+      if (input && input.closest("form")?.contains(btn) && isVisible(btn)) {
+        const isSend = /send|submit/i.test(btn.getAttribute("aria-label") || btn.getAttribute("title") || "");
+        if (!isSend) {
+          return true;
+        }
+      }
+      return false;
+    });
+  }
+
   function updateBubblePosition() {
     const bubble = document.getElementById("context-generator-bubble");
     const input = findClaudeInput();
     if (!bubble || !input) return;
 
+    // Try to find the voice mode / microphone button to align next to it
+    const voiceBtn = findVoiceOrMicButton();
+    if (voiceBtn) {
+      const voiceRect = voiceBtn.getBoundingClientRect();
+      if (voiceRect.width > 0 && voiceRect.height > 0) {
+        bubble.style.display = "flex";
+        bubble.style.position = "fixed";
+        bubble.style.zIndex = "999999";
+        
+        // Match standard toolbar button size (usually ~28px to 32px)
+        const TARGET_SIZE = 28;
+        const icon = bubble.querySelector("img");
+        if (icon) {
+          icon.style.width = `${TARGET_SIZE}px`;
+          icon.style.height = `${TARGET_SIZE}px`;
+        }
+        bubble.style.width = `${TARGET_SIZE}px`;
+        bubble.style.height = `${TARGET_SIZE}px`;
+
+        // Position to the RIGHT of the voice button with 8px gap
+        // Also vertically centered relative to the voice button
+        const top = voiceRect.top + (voiceRect.height - TARGET_SIZE) / 2;
+        const left = voiceRect.right + 8;
+
+        bubble.style.top = `${top}px`;
+        bubble.style.left = `${left}px`;
+        return;
+      }
+    }
+
+    // Fallback: position inside the bottom-right input corner if voice button not found
     const rect = input.getBoundingClientRect();
     if (rect.width === 0 || rect.height === 0) {
       bubble.style.display = "none";
@@ -443,9 +516,16 @@ Then write: "Continue from where we left off."
     bubble.style.position = "fixed";
     bubble.style.zIndex = "999999";
     
-    // Center the 44px button vertically in the bottom controls row of the input
-    const BUTTON_SIZE = 44;
-    const top = rect.bottom - BUTTON_SIZE - 4;
+    const BUTTON_SIZE = 32;
+    const icon = bubble.querySelector("img");
+    if (icon) {
+      icon.style.width = `${BUTTON_SIZE}px`;
+      icon.style.height = `${BUTTON_SIZE}px`;
+    }
+    bubble.style.width = `${BUTTON_SIZE}px`;
+    bubble.style.height = `${BUTTON_SIZE}px`;
+
+    const top = rect.bottom - BUTTON_SIZE - 8;
     const left = rect.right - BUTTON_SIZE - 55;
 
     bubble.style.top = `${top}px`;
@@ -458,8 +538,8 @@ Then write: "Continue from where we left off."
     bubble.title = "Transfer Context to ChatGPT";
     
     // Clean transparent style — just the icon, no orange circle
-    bubble.style.width = "44px";
-    bubble.style.height = "44px";
+    bubble.style.width = "28px";
+    bubble.style.height = "28px";
     bubble.style.borderRadius = "50%";
     bubble.style.backgroundColor = "transparent";
     bubble.style.border = "none";
@@ -476,8 +556,8 @@ Then write: "Continue from where we left off."
     // Icon fills the button
     const icon = document.createElement("img");
     icon.src = chrome.runtime.getURL("bubble-icon.png");
-    icon.style.width = "44px";
-    icon.style.height = "44px";
+    icon.style.width = "28px";
+    icon.style.height = "28px";
     icon.style.objectFit = "contain";
     icon.style.display = "block";
     icon.draggable = false;
