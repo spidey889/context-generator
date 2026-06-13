@@ -621,24 +621,12 @@ Then write: "Continue from where we left off."
     injectFloatingButton();
   }
 
-  let observer = null;
+  let monitorInterval = null;
   function startFloatingButtonMonitoring() {
-    if (observer) {
-      observer.disconnect();
-    }
-
-    observer = new MutationObserver(() => {
+    if (monitorInterval) clearInterval(monitorInterval);
+    monitorInterval = setInterval(() => {
       injectFloatingButton();
       updateBubbleOverlayPosition();
-    });
-
-    observer.observe(document.body, {
-      childList: true,
-      subtree: true
-    });
-
-    setInterval(() => {
-      injectFloatingButton();
     }, 1000);
 
     injectFloatingButton();
