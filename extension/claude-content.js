@@ -428,128 +428,118 @@ Then write: "Continue from where we left off."
     }
   }
 
-  function updateBubblePosition() {
-    const bubble = document.getElementById("context-generator-bubble");
+  // Find the '+' (attachment) button at the bottom-left of the input box
+  function findPlusButton() {
     const input = findClaudeInput();
-    if (!bubble || !input) return;
+    if (!input) return null;
 
-    // Use the container of the input to align it perfectly at the bottom left
     const form = input.closest("form");
-    const container = form || input;
-    const rect = container.getBoundingClientRect();
-    if (rect.width === 0 || rect.height === 0) {
-      bubble.style.display = "none";
+    const searchScope = form || document;
+    const buttons = Array.from(searchScope.querySelectorAll("button")).filter(isVisible);
+
+    // Priority 1: aria-label / title / testid match
+    const byLabel = buttons.find((btn) => {
+      const label = [
+        btn.getAttribute("aria-label") || "",
+        btn.getAttribute("title") || "",
+        btn.getAttribute("data-testid") || ""
+      ].join(" ").toLowerCase();
+      return label.includes("attach") || label.includes("upload") || label.includes("add");
+    });
+    if (byLabel) return byLabel;
+
+    // Priority 2: plain '+' text
+    const byText = buttons.find((btn) => btn.textContent?.trim() === "+");
+    if (byText) return byText;
+
+    // Priority 3: leftmost SVG button in the form's bottom toolbar
+    const inputRect = input.getBoundingClientRect();
+    const leftButtons = buttons.filter((btn) => {
+      const r = btn.getBoundingClientRect();
+      return r.left < inputRect.left + 80 && r.top > inputRect.bottom - 80;
+    });
+    if (leftButtons.length > 0) {
+      // Return the leftmost one
+      return leftButtons.reduce((a, b) =>
+        a.getBoundingClientRect().left <= b.getBoundingClientRect().left ? a : b
+      );
+    }
+
+    return null;
+  }
+
+  function injectFloatingButton() {
+    // Don't inject twice
+    if (document.getElementById("context-generator-bubble")) {
       return;
     }
 
-    bubble.style.display = "flex";
-    bubble.style.position = "fixed";
-    bubble.style.zIndex = "999999";
-    
-    // Position the 32px button to the right of the plus button (which sits on the left side of the input bar)
-    // Using rect.bottom of the form/input container - BUTTON_SIZE - 16 centers it vertically in that bottom row.
-    const BUTTON_SIZE = 32;
-    const icon = bubble.querySelector("img");
-    if (icon) {
-      icon.style.width = `${BUTTON_SIZE}px`;
-      icon.style.height = `${BUTTON_SIZE}px`;
-    }
-    bubble.style.width = `${BUTTON_SIZE}px`;
-    bubble.style.height = `${BUTTON_SIZE}px`;
+    const plusBtn = findPlusButton();
+    if (!plusBtn) return;
 
-    // Lowering it to sit in the bottom toolbar next to the plus icon
-    const top = rect.bottom - BUTTON_SIZE - 16;
-    const left = rect.left + 56;
+    const toolbar = plusBtn.parentElement;
+    if (!toolbar) return;
 
-    bubble.style.top = `${top}px`;
-    bubble.style.left = `${left}px`;
-  }
-
-  function injectFloatingButton(input) {
     const bubble = document.createElement("button");
     bubble.id = "context-generator-bubble";
+    bubble.type = "button";
     bubble.title = "Transfer Context to ChatGPT";
-    
-    // Clean transparent style — just the icon, no orange circle
-    bubble.style.width = "32px";
-    bubble.style.height = "32px";
+
+    // Match the + button's style — inline, same row, transparent
+    bubble.style.display = "inline-flex";
+    bubble.style.alignItems = "center";
+    bubble.style.justifyContent = "center";
+    bubble.style.width = "28px";
+    bubble.style.height = "28px";
     bubble.style.borderRadius = "50%";
     bubble.style.backgroundColor = "transparent";
     bubble.style.border = "none";
-    bubble.style.boxShadow = "none";
     bubble.style.cursor = "pointer";
-    bubble.style.display = "flex";
-    bubble.style.alignItems = "center";
-    bubble.style.justifyContent = "center";
     bubble.style.padding = "0";
-    bubble.style.transition = "transform 0.15s, filter 0.15s";
-    bubble.style.zIndex = "999999";
-    bubble.style.position = "fixed";
+    bubble.style.marginLeft = "8px";
+    bubble.style.flexShrink = "0";
+    bubble.style.transition = "transform 0.15s";
 
-    // Icon fills the button
     const icon = document.createElement("img");
     icon.src = chrome.runtime.getURL("bubble-icon.png");
-    icon.style.width = "32px";
-    icon.style.height = "32px";
+    icon.style.width = "26px";
+    icon.style.height = "26px";
     icon.style.objectFit = "contain";
     icon.style.display = "block";
     icon.draggable = false;
     bubble.appendChild(icon);
 
-    bubble.addEventListener("mouseenter", () => {
-      bubble.style.transform = "scale(1.12)";
-      icon.style.filter = "brightness(1.15) drop-shadow(0 2px 6px rgba(0,0,0,0.3))";
-    });
-    bubble.addEventListener("mouseleave", () => {
-      bubble.style.transform = "scale(1)";
-      icon.style.filter = "none";
-    });
+    bubble.addEventListener("mouseenter", () => { bubble.style.transform = "scale(1.15)"; });
+    bubble.addEventListener("mouseleave", () => { bubble.style.transform = "scale(1)"; });
 
-    // Append directly to body to avoid overflow clipping issues
-    document.body.appendChild(bubble);
+    // Append as sibling right after the + button
+    toolbar.appendChild(bubble);
 
-    // Create the overlay singleton on document.body if it doesn't exist yet
-    let overlay = document.getElementById("context-generator-overlay");
-    if (!overlay) {
-      overlay = document.createElement("div");
+    // Overlay singleton
+    if (!document.getElementById("context-generator-overlay")) {
+      const overlay = document.createElement("div");
       overlay.id = "context-generator-overlay";
-      overlay.style.display = "none";
-      overlay.style.zIndex = "999999";
-      overlay.style.padding = "8px 12px";
-      overlay.style.borderRadius = "6px";
-      overlay.style.backgroundColor = "#1f2937";
-      overlay.style.color = "#ffffff";
-      overlay.style.fontSize = "12px";
-      overlay.style.boxShadow = "0 4px 12px rgba(0, 0, 0, 0.2)";
-      overlay.style.whiteSpace = "nowrap";
-      overlay.style.alignItems = "center";
-      overlay.style.gap = "6px";
-      overlay.style.fontFamily = "-apple-system, BlinkMacSystemFont, sans-serif";
+      overlay.style.cssText = [
+        "display:none", "position:fixed", "z-index:999999",
+        "padding:8px 12px", "border-radius:6px",
+        "background:#1f2937", "color:#fff", "font-size:12px",
+        "box-shadow:0 4px 12px rgba(0,0,0,0.2)", "white-space:nowrap",
+        "align-items:center", "gap:6px",
+        "font-family:-apple-system,BlinkMacSystemFont,sans-serif"
+      ].join(";");
 
-      const spinner = document.createElement("div");
-      spinner.style.width = "12px";
-      spinner.style.height = "12px";
-      spinner.style.border = "2px solid rgba(255, 255, 255, 0.3)";
-      spinner.style.borderTop = "2px solid #ffffff";
-      spinner.style.borderRadius = "50%";
-      
       if (!document.getElementById("context-generator-styles")) {
         const styleSheet = document.createElement("style");
         styleSheet.id = "context-generator-styles";
-        styleSheet.textContent = `
-          @keyframes contextSpinner {
-            0% { transform: rotate(0deg); }
-            100% { transform: rotate(360deg); }
-          }
-        `;
+        styleSheet.textContent = `@keyframes contextSpinner{0%{transform:rotate(0deg)}100%{transform:rotate(360deg)}}`;
         document.head.appendChild(styleSheet);
       }
-      spinner.style.animation = "contextSpinner 0.8s linear infinite";
 
+      const spinner = document.createElement("div");
+      spinner.style.cssText = "width:12px;height:12px;border:2px solid rgba(255,255,255,0.3);border-top:2px solid #fff;border-radius:50%;animation:contextSpinner 0.8s linear infinite";
       const textSpan = document.createElement("span");
       textSpan.id = "context-generator-text";
       textSpan.textContent = "Generating context... (10s)";
-
       overlay.appendChild(spinner);
       overlay.appendChild(textSpan);
       document.body.appendChild(overlay);
@@ -559,57 +549,21 @@ Then write: "Continue from where we left off."
       e.preventDefault();
       e.stopPropagation();
       if (isRunning) return;
-
       isRunning = true;
       clearRunningResetTimer();
       runningResetTimer = setTimeout(resetRunningFlag, RUNNING_AUTO_RESET_MS);
-
       runClaudeFlow();
     });
-
-    // Update position immediately and listen to typing events
-    updateBubblePosition();
-    input.addEventListener("input", updateBubblePosition);
-  }
-
-  function injectButtonIfNeeded() {
-    const existingBubble = document.getElementById("context-generator-bubble");
-    const input = findClaudeInput();
-    
-    if (!input) {
-      if (existingBubble) {
-        existingBubble.remove();
-        const overlay = document.getElementById("context-generator-overlay");
-        if (overlay) overlay.remove();
-        currentClaudeInput = null;
-      }
-      return;
-    }
-
-    if (currentClaudeInput !== input) {
-      currentClaudeInput = input;
-      if (existingBubble) {
-        existingBubble.remove();
-      }
-      injectFloatingButton(input);
-    } else if (!existingBubble) {
-      injectFloatingButton(input);
-    }
   }
 
   let injectionInterval = null;
-
   function startFloatingButtonMonitoring() {
     if (injectionInterval) clearInterval(injectionInterval);
+    // Poll every 500ms — re-inject if the bubble was removed by React re-renders
     injectionInterval = setInterval(() => {
-      injectButtonIfNeeded();
-      updateBubblePosition();
+      injectFloatingButton();
     }, 500);
-
-    window.addEventListener("resize", updateBubblePosition);
-    window.addEventListener("scroll", updateBubblePosition, true);
-    
-    injectButtonIfNeeded();
+    injectFloatingButton();
   }
 
   startFloatingButtonMonitoring();
