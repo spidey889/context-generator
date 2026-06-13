@@ -443,10 +443,10 @@ Then write: "Continue from where we left off."
     bubble.style.position = "fixed";
     bubble.style.zIndex = "999999";
     
-    // Position it at the bottom-right controls area of the input box
-    // Centered vertically in the bottom controls row
-    const top = rect.bottom - 40;
-    const left = rect.right - 95;
+    // Center the 40px button vertically in the bottom controls row of the input
+    const BUTTON_SIZE = 40;
+    const top = rect.bottom - BUTTON_SIZE - 4;
+    const left = rect.right - BUTTON_SIZE - 55;
 
     bubble.style.top = `${top}px`;
     bubble.style.left = `${left}px`;
@@ -457,38 +457,39 @@ Then write: "Continue from where we left off."
     bubble.id = "context-generator-bubble";
     bubble.title = "Transfer Context to ChatGPT";
     
-    // Premium style with amber/orange background, white border and shadow
-    bubble.style.width = "32px";
-    bubble.style.height = "32px";
+    // Clean transparent style — just the icon, no orange circle
+    bubble.style.width = "40px";
+    bubble.style.height = "40px";
     bubble.style.borderRadius = "50%";
-    bubble.style.backgroundColor = "#d97706";
-    bubble.style.color = "#ffffff";
-    bubble.style.border = "2px solid #ffffff";
-    bubble.style.boxShadow = "0 2px 8px rgba(0, 0, 0, 0.2)";
+    bubble.style.backgroundColor = "transparent";
+    bubble.style.border = "none";
+    bubble.style.boxShadow = "none";
     bubble.style.cursor = "pointer";
     bubble.style.display = "flex";
     bubble.style.alignItems = "center";
     bubble.style.justifyContent = "center";
-    bubble.style.fontSize = "18px";
-    bubble.style.transition = "transform 0.2s, background-color 0.2s";
+    bubble.style.padding = "0";
+    bubble.style.transition = "transform 0.15s, filter 0.15s";
     bubble.style.zIndex = "999999";
-    bubble.style.position = "fixed"; // Fixed positioning relative to viewport
+    bubble.style.position = "fixed";
 
-    // Use extension's logo icon instead of the brain emoji
+    // Icon fills the button
     const icon = document.createElement("img");
     icon.src = chrome.runtime.getURL("icon48.png");
-    icon.style.width = "20px";
-    icon.style.height = "20px";
+    icon.style.width = "36px";
+    icon.style.height = "36px";
     icon.style.objectFit = "contain";
+    icon.style.display = "block";
+    icon.draggable = false;
     bubble.appendChild(icon);
 
     bubble.addEventListener("mouseenter", () => {
-      bubble.style.transform = "scale(1.1)";
-      bubble.style.backgroundColor = "#b45309";
+      bubble.style.transform = "scale(1.12)";
+      icon.style.filter = "brightness(1.15) drop-shadow(0 2px 6px rgba(0,0,0,0.3))";
     });
     bubble.addEventListener("mouseleave", () => {
-      bubble.style.transform = "scale(1.0)";
-      bubble.style.backgroundColor = "#d97706";
+      bubble.style.transform = "scale(1)";
+      icon.style.filter = "none";
     });
 
     // Append directly to body to avoid overflow clipping issues
