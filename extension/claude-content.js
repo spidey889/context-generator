@@ -470,66 +470,15 @@ Then write: "Continue from where we left off."
     });
   }
 
-  function updateBubblePosition() {
+  // Since we append the button directly to the toolbar container, native DOM layout handles positioning.
+  function updateBubbleOverlayPosition() {
+    const overlay = document.getElementById("context-generator-overlay");
     const bubble = document.getElementById("context-generator-bubble");
-    const input = findClaudeInput();
-    if (!bubble || !input) return;
-
-    // Try to find the voice mode / microphone button to align next to it
-    const voiceBtn = findVoiceOrMicButton();
-    if (voiceBtn) {
-      const voiceRect = voiceBtn.getBoundingClientRect();
-      if (voiceRect.width > 0 && voiceRect.height > 0) {
-        bubble.style.display = "flex";
-        bubble.style.position = "fixed";
-        bubble.style.zIndex = "999999";
-        
-        // Match voice button size (usually 32px)
-        const TARGET_SIZE = Math.min(Math.max(voiceRect.height, 28), 32);
-        const icon = bubble.querySelector("img");
-        if (icon) {
-          icon.style.width = `${TARGET_SIZE}px`;
-          icon.style.height = `${TARGET_SIZE}px`;
-        }
-        bubble.style.width = `${TARGET_SIZE}px`;
-        bubble.style.height = `${TARGET_SIZE}px`;
-
-        // Position to the LEFT of the voice button with consistent spacing (e.g. 6px gap)
-        // Vertically centered relative to the voice button
-        const top = voiceRect.top + (voiceRect.height - TARGET_SIZE) / 2;
-        const left = voiceRect.left - TARGET_SIZE - 6;
-
-        bubble.style.top = `${top}px`;
-        bubble.style.left = `${left}px`;
-        return;
-      }
+    if (overlay && bubble && overlay.style.display !== "none") {
+      const rect = bubble.getBoundingClientRect();
+      overlay.style.top = `${rect.top - 45}px`;
+      overlay.style.left = `${rect.left - 80}px`;
     }
-
-    // Fallback: position inside the bottom-right input corner if voice button not found
-    const rect = input.getBoundingClientRect();
-    if (rect.width === 0 || rect.height === 0) {
-      bubble.style.display = "none";
-      return;
-    }
-
-    bubble.style.display = "flex";
-    bubble.style.position = "fixed";
-    bubble.style.zIndex = "999999";
-    
-    const BUTTON_SIZE = 32;
-    const icon = bubble.querySelector("img");
-    if (icon) {
-      icon.style.width = `${BUTTON_SIZE}px`;
-      icon.style.height = `${BUTTON_SIZE}px`;
-    }
-    bubble.style.width = `${BUTTON_SIZE}px`;
-    bubble.style.height = `${BUTTON_SIZE}px`;
-
-    const top = rect.bottom - BUTTON_SIZE - 8;
-    const left = rect.right - BUTTON_SIZE - 55;
-
-    bubble.style.top = `${top}px`;
-    bubble.style.left = `${left}px`;
   }
 
   function findToolbarContainer() {
@@ -666,16 +615,6 @@ Then write: "Continue from where we left off."
 
       runClaudeFlow();
     });
-  }
-
-  function updateBubbleOverlayPosition() {
-    const overlay = document.getElementById("context-generator-overlay");
-    const bubble = document.getElementById("context-generator-bubble");
-    if (overlay && bubble && overlay.style.display !== "none") {
-      const rect = bubble.getBoundingClientRect();
-      overlay.style.top = `${rect.top - 45}px`;
-      overlay.style.left = `${rect.left - 80}px`;
-    }
   }
 
   function injectButtonIfNeeded() {
