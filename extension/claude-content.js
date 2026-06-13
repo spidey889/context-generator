@@ -473,7 +473,14 @@ Then write: "Continue from where we left off."
     bubble.style.transition = "transform 0.2s, background-color 0.2s";
     bubble.style.zIndex = "999999";
     bubble.style.position = "fixed"; // Fixed positioning relative to viewport
-    bubble.textContent = "🧠";
+
+    // Use extension's logo icon instead of the brain emoji
+    const icon = document.createElement("img");
+    icon.src = chrome.runtime.getURL("icon48.png");
+    icon.style.width = "20px";
+    icon.style.height = "20px";
+    icon.style.objectFit = "contain";
+    bubble.appendChild(icon);
 
     bubble.addEventListener("mouseenter", () => {
       bubble.style.transform = "scale(1.1)";
