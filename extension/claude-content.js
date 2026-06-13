@@ -433,7 +433,10 @@ Then write: "Continue from where we left off."
     const input = findClaudeInput();
     if (!bubble || !input) return;
 
-    const rect = input.getBoundingClientRect();
+    // Use the container of the input to align it perfectly at the bottom left
+    const form = input.closest("form");
+    const container = form || input;
+    const rect = container.getBoundingClientRect();
     if (rect.width === 0 || rect.height === 0) {
       bubble.style.display = "none";
       return;
@@ -444,7 +447,7 @@ Then write: "Continue from where we left off."
     bubble.style.zIndex = "999999";
     
     // Position the 32px button to the right of the plus button (which sits on the left side of the input bar)
-    // The plus button is located near rect.left + 12px. Placing the bubble at rect.left + 48px puts it cleanly to its right.
+    // Using rect.bottom of the form/input container - BUTTON_SIZE - 16 centers it vertically in that bottom row.
     const BUTTON_SIZE = 32;
     const icon = bubble.querySelector("img");
     if (icon) {
@@ -454,9 +457,9 @@ Then write: "Continue from where we left off."
     bubble.style.width = `${BUTTON_SIZE}px`;
     bubble.style.height = `${BUTTON_SIZE}px`;
 
-    // Center vertically in the bottom row (plus button height row)
-    const top = rect.bottom - BUTTON_SIZE - 10;
-    const left = rect.left + 48;
+    // Lowering it to sit in the bottom toolbar next to the plus icon
+    const top = rect.bottom - BUTTON_SIZE - 16;
+    const left = rect.left + 56;
 
     bubble.style.top = `${top}px`;
     bubble.style.left = `${left}px`;
