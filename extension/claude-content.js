@@ -542,7 +542,6 @@ Then write: "Continue from where we left off."
     if (input) {
       const form = input.closest("form");
       if (form) {
-        // Find element with classes or styling representing the button bar
         const buttons = Array.from(form.querySelectorAll("button"));
         if (buttons.length > 0) {
           return buttons[0].parentElement;
@@ -556,11 +555,15 @@ Then write: "Continue from where we left off."
     const toolbar = findToolbarContainer();
     if (!toolbar) return;
 
-    // Remove if it exists elsewhere
+    // Check if it already exists as the last child or child of the toolbar
     const existingBubble = document.getElementById("context-generator-bubble");
     if (existingBubble) {
       if (existingBubble.parentElement === toolbar) {
-        return; // Already in correct place
+        // Ensure it stays at the end of the children list
+        if (toolbar.lastChild !== existingBubble) {
+          toolbar.appendChild(existingBubble);
+        }
+        return;
       }
       existingBubble.remove();
     }
@@ -570,10 +573,10 @@ Then write: "Continue from where we left off."
     bubble.type = "button";
     bubble.title = "Transfer Context to ChatGPT";
     
-    // Style it exactly like adjacent toolbar icons to fit in seamlessly
-    bubble.style.width = "32px";
-    bubble.style.height = "32px";
-    bubble.style.borderRadius = "8px";
+    // Size to match mic/voice mode button row (usually 28px-32px)
+    bubble.style.width = "28px";
+    bubble.style.height = "28px";
+    bubble.style.borderRadius = "50%";
     bubble.style.backgroundColor = "transparent";
     bubble.style.border = "none";
     bubble.style.cursor = "pointer";
@@ -581,33 +584,30 @@ Then write: "Continue from where we left off."
     bubble.style.alignItems = "center";
     bubble.style.justifyContent = "center";
     bubble.style.padding = "0";
-    bubble.style.transition = "background-color 0.15s, transform 0.15s";
-    bubble.style.marginLeft = "4px";
+    bubble.style.transition = "transform 0.15s";
+    bubble.style.marginLeft = "8px";
     bubble.style.flexShrink = "0";
 
-    // Icon fits button
     const icon = document.createElement("img");
     icon.src = chrome.runtime.getURL("bubble-icon.png");
-    icon.style.width = "22px";
-    icon.style.height = "22px";
+    icon.style.width = "24px";
+    icon.style.height = "24px";
     icon.style.objectFit = "contain";
     icon.style.display = "block";
     icon.draggable = false;
     bubble.appendChild(icon);
 
     bubble.addEventListener("mouseenter", () => {
-      bubble.style.backgroundColor = "rgba(0, 0, 0, 0.05)";
-      bubble.style.transform = "scale(1.08)";
+      bubble.style.transform = "scale(1.1)";
     });
     bubble.addEventListener("mouseleave", () => {
-      bubble.style.backgroundColor = "transparent";
       bubble.style.transform = "scale(1)";
     });
 
-    // Append to toolbar
+    // Append directly as last child
     toolbar.appendChild(bubble);
 
-    // Create the overlay singleton on document.body if it doesn't exist yet
+    // Create overlay singleton if needed
     let overlay = document.getElementById("context-generator-overlay");
     if (!overlay) {
       overlay = document.createElement("div");
@@ -682,7 +682,6 @@ Then write: "Continue from where we left off."
     injectFloatingButton();
   }
 
-  // Monitor DOM modifications with MutationObserver
   let observer = null;
   function startFloatingButtonMonitoring() {
     if (observer) {
@@ -699,7 +698,6 @@ Then write: "Continue from where we left off."
       subtree: true
     });
 
-    // Periodic safety check
     setInterval(() => {
       injectFloatingButton();
     }, 1000);
