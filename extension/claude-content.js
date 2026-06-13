@@ -9,6 +9,7 @@
   let isRunning = false;
   let runningResetTimer = null;
   const RUNNING_AUTO_RESET_MS = 60000;
+  let currentClaudeInput = null;
 
   const CONTEXT_GENERATOR_PROMPT = `---
 name: context-generator
@@ -411,16 +412,40 @@ Then write: "Continue from where we left off."
     }
   }
 
-  function injectFloatingButton(input, container) {
+  function updateBubblePosition() {
+    const bubble = document.getElementById("context-generator-bubble");
+    const input = findClaudeInput();
+    if (!bubble || !input) return;
+
+    const rect = input.getBoundingClientRect();
+    if (rect.width === 0 || rect.height === 0) {
+      bubble.style.display = "none";
+      return;
+    }
+
+    bubble.style.display = "flex";
+    bubble.style.position = "fixed";
+    bubble.style.zIndex = "999999";
+    
+    // Position it at the bottom-right controls area of the input box
+    // Centered vertically in the bottom controls row
+    const top = rect.bottom - 40;
+    const left = rect.right - 95;
+
+    bubble.style.top = `${top}px`;
+    bubble.style.left = `${left}px`;
+  }
+
+  function injectFloatingButton(input) {
     const bubble = document.createElement("button");
     bubble.id = "context-generator-bubble";
     bubble.title = "Transfer Context to ChatGPT";
     
-    // Style to integrate inside Claude's message input bar controls
+    // Premium style with amber/orange background, white border and shadow
     bubble.style.width = "32px";
     bubble.style.height = "32px";
     bubble.style.borderRadius = "50%";
-    bubble.style.backgroundColor = "#d97706"; // Premium amber/orange color
+    bubble.style.backgroundColor = "#d97706";
     bubble.style.color = "#ffffff";
     bubble.style.border = "2px solid #ffffff";
     bubble.style.boxShadow = "0 2px 8px rgba(0, 0, 0, 0.2)";
@@ -431,9 +456,7 @@ Then write: "Continue from where we left off."
     bubble.style.fontSize = "18px";
     bubble.style.transition = "transform 0.2s, background-color 0.2s";
     bubble.style.zIndex = "999999";
-    bubble.style.position = "absolute";
-    bubble.style.bottom = "12px";
-    bubble.style.right = "85px"; // Positioned next to send button area
+    bubble.style.position = "fixed"; // Fixed positioning relative to viewport
     bubble.textContent = "🧠";
 
     bubble.addEventListener("mouseenter", () => {
@@ -445,8 +468,8 @@ Then write: "Continue from where we left off."
       bubble.style.backgroundColor = "#d97706";
     });
 
-    // Append the bubble to the container
-    container.appendChild(bubble);
+    // Append directly to body to avoid overflow clipping issues
+    document.body.appendChild(bubble);
 
     // Create the overlay singleton on document.body if it doesn't exist yet
     let overlay = document.getElementById("context-generator-overlay");
@@ -506,6 +529,10 @@ Then write: "Continue from where we left off."
 
       runClaudeFlow();
     });
+
+    // Update position immediately and listen to typing events
+    updateBubblePosition();
+    input.addEventListener("input", updateBubblePosition);
   }
 
   function injectButtonIfNeeded() {
@@ -518,38 +545,35 @@ Then write: "Continue from where we left off."
         existingBubble.remove();
         const overlay = document.getElementById("context-generator-overlay");
         if (overlay) overlay.remove();
+        currentClaudeInput = null;
       }
       return;
     }
 
-    const targetContainer = input.closest("form") || input.parentNode;
-    if (!targetContainer) return;
-
-    // Ensure relative positioning on the container so absolute positioning works
-    if (window.getComputedStyle(targetContainer).position === "static") {
-      targetContainer.style.position = "relative";
-    }
-
-    if (existingBubble) {
-      if (existingBubble.parentNode === targetContainer) {
-        return;
-      } else {
-        console.log("[Context Generator Relay] Bubble parent changed. Moving to new container.");
+    if (currentClaudeInput !== input) {
+      console.log("[Context Generator Relay] Claude input element changed. Re-injecting bubble.");
+      currentClaudeInput = input;
+      if (existingBubble) {
         existingBubble.remove();
-        const overlay = document.getElementById("context-generator-overlay");
-        if (overlay) overlay.remove();
       }
+      injectFloatingButton(input);
+    } else if (!existingBubble) {
+      injectFloatingButton(input);
     }
-
-    console.log("[Context Generator Relay] Injecting bubble inside container:", targetContainer);
-    injectFloatingButton(input, targetContainer);
   }
 
   let injectionInterval = null;
 
   function startFloatingButtonMonitoring() {
     if (injectionInterval) clearInterval(injectionInterval);
-    injectionInterval = setInterval(injectButtonIfNeeded, 500);
+    injectionInterval = setInterval(() => {
+      injectButtonIfNeeded();
+      updateBubblePosition();
+    }, 500);
+
+    window.addEventListener("resize", updateBubblePosition);
+    window.addEventListener("scroll", updateBubblePosition, true);
+    
     injectButtonIfNeeded();
   }
 
