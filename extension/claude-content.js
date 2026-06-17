@@ -644,29 +644,26 @@ Then write: "Continue from where we left off."
     const input = findClaudeInput();
     if (!bubble || !input) return;
 
-    const plusBtn = findPlusButton();
-    const anchorBtn = plusBtn || findComposerActionButton(input);
-    if (!anchorBtn) {
+    const actionBtn = findComposerActionButton(input);
+    if (!actionBtn) {
       bubble.style.display = "none";
       return;
     }
 
-    const anchorRect = anchorBtn.getBoundingClientRect();
-    if (anchorRect.width === 0 || anchorRect.height === 0) {
+    const actionRect = actionBtn.getBoundingClientRect();
+    if (actionRect.width === 0 || actionRect.height === 0) {
       bubble.style.display = "none";
       return;
     }
 
     const formRect = input.closest("form")?.getBoundingClientRect();
-    const preferredLeft = plusBtn
-      ? anchorRect.right + BUBBLE_GAP
-      : anchorRect.left - BUBBLE_SIZE - BUBBLE_GAP;
+    const preferredLeft = actionRect.right + BUBBLE_GAP;
     const minLeft = formRect ? formRect.left + BUBBLE_GAP : preferredLeft;
     const maxLeft = formRect ? formRect.right - BUBBLE_SIZE - BUBBLE_GAP : preferredLeft;
     const left = Math.max(minLeft, Math.min(preferredLeft, maxLeft));
 
     bubble.style.left = `${Math.round(left)}px`;
-    bubble.style.top = `${Math.round(anchorRect.top + (anchorRect.height - BUBBLE_SIZE) / 2)}px`;
+    bubble.style.top = `${Math.round(actionRect.top + (actionRect.height - BUBBLE_SIZE) / 2)}px`;
     bubble.style.display = "flex";
   }
 
