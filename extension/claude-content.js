@@ -10,6 +10,10 @@
   let runningResetTimer = null;
   const RUNNING_AUTO_RESET_MS = 60000;
   let currentClaudeInput = null;
+  const BUBBLE_ID = "context-generator-bubble";
+  const OVERLAY_ID = "context-generator-overlay";
+  const BUBBLE_SIZE = 32;
+  const BUBBLE_GAP = 8;
 
   const CONTEXT_GENERATOR_PROMPT = `---
 name: context-generator
@@ -377,9 +381,9 @@ Then write: "Continue from where we left off."
   let countdownInterval = null;
 
   function showOverlay() {
-    const overlay = document.getElementById("context-generator-overlay");
+    const overlay = document.getElementById(OVERLAY_ID);
     const textSpan = document.getElementById("context-generator-text");
-    const bubble = document.getElementById("context-generator-bubble");
+    const bubble = document.getElementById(BUBBLE_ID);
 
     if (overlay && textSpan && bubble) {
       const rect = bubble.getBoundingClientRect();
@@ -411,8 +415,8 @@ Then write: "Continue from where we left off."
   }
 
   function hideOverlay() {
-    const overlay = document.getElementById("context-generator-overlay");
-    const bubble = document.getElementById("context-generator-bubble");
+    const overlay = document.getElementById(OVERLAY_ID);
+    const bubble = document.getElementById(BUBBLE_ID);
 
     if (overlay) {
       overlay.style.display = "none";
@@ -433,7 +437,7 @@ Then write: "Continue from where we left off."
     const form = input?.closest("form");
     const searchScope = form || document;
     const buttons = Array.from(searchScope.querySelectorAll("button")).filter((button) => {
-      return button.id !== "context-generator-bubble" && isVisible(button);
+      return button.id !== BUBBLE_ID && isVisible(button);
     });
 
     if (buttons.length === 0) return null;
@@ -501,64 +505,112 @@ Then write: "Continue from where we left off."
   }
 
   function injectFloatingButton() {
+    return ensureFloatingButton();
+  }
+
+  function ensureFloatingButton() {
     const input = findClaudeInput();
-    if (!input) return;
+    const existingBubble = document.getElementById(BUBBLE_ID);
 
-    const actionBtn = findComposerActionButton(input);
-    if (!actionBtn) return;
-
-    const existingBubble = document.getElementById("context-generator-bubble");
-    if (existingBubble) {
-      if (existingBubble.previousElementSibling !== actionBtn || existingBubble.parentElement !== actionBtn.parentElement) {
-        actionBtn.insertAdjacentElement("afterend", existingBubble);
+    if (!input) {
+      if (existingBubble) existingBubble.style.display = "none";
+      if (currentClaudeInput) {
+        currentClaudeInput.removeEventListener("input", scheduleFloatingButtonUpdate);
       }
-      return;
+      currentClaudeInput = null;
+      return existingBubble;
     }
 
+    const bubble = existingBubble || createFloatingButton();
+
+    if (bubble.parentElement !== document.body) {
+      document.body.appendChild(bubble);
+    }
+
+    if (currentClaudeInput !== input) {
+      if (currentClaudeInput) {
+        currentClaudeInput.removeEventListener("input", scheduleFloatingButtonUpdate);
+      }
+      currentClaudeInput = input;
+      input.addEventListener("input", scheduleFloatingButtonUpdate);
+    }
+
+    ensureFloatingOverlay();
+    updateFloatingButtonPosition();
+    return bubble;
+  }
+
+  function createFloatingButton() {
     const bubble = document.createElement("button");
-    bubble.id = "context-generator-bubble";
+    bubble.id = BUBBLE_ID;
     bubble.type = "button";
     bubble.title = "Transfer Context to ChatGPT";
-
-    // Get the action button's computed styles for consistent alignment
-    const actionStyle = window.getComputedStyle(actionBtn);
-
-    // Match the action button's style for consistent alignment
-    bubble.style.display = actionStyle.display;
-    bubble.style.alignItems = actionStyle.alignItems;
-    bubble.style.justifyContent = actionStyle.justifyContent;
-    bubble.style.alignSelf = actionStyle.alignSelf;
-    bubble.style.width = "38px";
-    bubble.style.height = "38px";
-    bubble.style.borderRadius = actionStyle.borderRadius;
-    bubble.style.backgroundColor = "transparent";
-    bubble.style.border = "none";
-    bubble.style.cursor = "pointer";
-    bubble.style.padding = "0";
-    bubble.style.margin = actionStyle.margin;
-    bubble.style.marginLeft = "6px";
-    bubble.style.flexShrink = "0";
-    bubble.style.transition = "transform 0.15s";
+    bubble.setAttribute("aria-label", "Transfer Context to ChatGPT");
+    bubble.dataset.contextGeneratorOwned = "true";
+    bubble.style.cssText = [
+      "display:none",
+      "position:fixed",
+      "z-index:2147483647",
+      `width:${BUBBLE_SIZE}px`,
+      `height:${BUBBLE_SIZE}px`,
+      `min-width:${BUBBLE_SIZE}px`,
+      `min-height:${BUBBLE_SIZE}px`,
+      `max-width:${BUBBLE_SIZE}px`,
+      `max-height:${BUBBLE_SIZE}px`,
+      "border-radius:9999px",
+      "background:transparent",
+      "border:0",
+      "box-shadow:none",
+      "box-sizing:border-box",
+      "cursor:pointer",
+      "padding:0",
+      "margin:0",
+      "line-height:0",
+      "align-items:center",
+      "justify-content:center",
+      "overflow:hidden",
+      "contain:layout style paint",
+      "transition:filter 0.15s ease",
+      "pointer-events:auto"
+    ].join(";");
 
     const icon = document.createElement("img");
     icon.src = chrome.runtime.getURL("bubble-icon.png");
-    icon.style.width = "38px";
-    icon.style.height = "38px";
+    icon.alt = "";
+    icon.style.width = "28px";
+    icon.style.height = "28px";
     icon.style.objectFit = "contain";
     icon.style.display = "block";
+    icon.style.pointerEvents = "none";
     icon.draggable = false;
     bubble.appendChild(icon);
 
-    bubble.addEventListener("mouseenter", () => { bubble.style.transform = "scale(1.15)"; });
-    bubble.addEventListener("mouseleave", () => { bubble.style.transform = "scale(1)"; });
+    bubble.addEventListener("mouseenter", () => {
+      bubble.style.filter = "brightness(1.12) drop-shadow(0 2px 6px rgba(0,0,0,0.25))";
+    });
+    bubble.addEventListener("mouseleave", () => {
+      bubble.style.filter = "none";
+    });
 
-    // Append as sibling right after the send/mic button so it stays last on the right
-    actionBtn.insertAdjacentElement("afterend", bubble);
+    bubble.addEventListener("click", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      if (isRunning) return;
+      isRunning = true;
+      clearRunningResetTimer();
+      runningResetTimer = setTimeout(resetRunningFlag, RUNNING_AUTO_RESET_MS);
+      runClaudeFlow();
+    });
 
-    // Overlay singleton
-    if (!document.getElementById("context-generator-overlay")) {
+    document.body.appendChild(bubble);
+    return bubble;
+  }
+
+  function ensureFloatingOverlay() {
+    if (!document.getElementById(OVERLAY_ID)) {
       const overlay = document.createElement("div");
-      overlay.id = "context-generator-overlay";
+      overlay.id = OVERLAY_ID;
+      overlay.dataset.contextGeneratorOwned = "true";
       overlay.style.cssText = [
         "display:none", "position:fixed", "z-index:999999",
         "padding:8px 12px", "border-radius:6px",
@@ -571,6 +623,7 @@ Then write: "Continue from where we left off."
       if (!document.getElementById("context-generator-styles")) {
         const styleSheet = document.createElement("style");
         styleSheet.id = "context-generator-styles";
+        styleSheet.dataset.contextGeneratorOwned = "true";
         styleSheet.textContent = `@keyframes contextSpinner{0%{transform:rotate(0deg)}100%{transform:rotate(360deg)}}`;
         document.head.appendChild(styleSheet);
       }
@@ -584,26 +637,75 @@ Then write: "Continue from where we left off."
       overlay.appendChild(textSpan);
       document.body.appendChild(overlay);
     }
+  }
 
-    bubble.addEventListener("click", (e) => {
-      e.preventDefault();
-      e.stopPropagation();
-      if (isRunning) return;
-      isRunning = true;
-      clearRunningResetTimer();
-      runningResetTimer = setTimeout(resetRunningFlag, RUNNING_AUTO_RESET_MS);
-      runClaudeFlow();
+  function updateFloatingButtonPosition() {
+    const bubble = document.getElementById(BUBBLE_ID);
+    const input = findClaudeInput();
+    if (!bubble || !input) return;
+
+    const actionBtn = findComposerActionButton(input);
+    if (!actionBtn) {
+      bubble.style.display = "none";
+      return;
+    }
+
+    const actionRect = actionBtn.getBoundingClientRect();
+    const formRect = input.closest("form")?.getBoundingClientRect();
+    if (actionRect.width === 0 || actionRect.height === 0) {
+      bubble.style.display = "none";
+      return;
+    }
+
+    const preferredLeft = actionRect.right + BUBBLE_GAP;
+    const maxLeft = formRect?.width ? formRect.right - BUBBLE_SIZE - BUBBLE_GAP : preferredLeft;
+    const left = Math.round(Math.max(0, Math.min(preferredLeft, maxLeft)));
+    const top = Math.round(actionRect.top + (actionRect.height - BUBBLE_SIZE) / 2);
+
+    bubble.style.left = `${left}px`;
+    bubble.style.top = `${top}px`;
+    bubble.style.display = "flex";
+  }
+
+  let floatingButtonFrame = null;
+  let floatingButtonObserver = null;
+
+  function scheduleFloatingButtonUpdate() {
+    if (floatingButtonFrame) return;
+    floatingButtonFrame = requestAnimationFrame(() => {
+      floatingButtonFrame = null;
+      ensureFloatingButton();
     });
   }
 
-  let injectionInterval = null;
+  function isContextGeneratorNode(node) {
+    return node instanceof Element && (
+      node.id === BUBBLE_ID ||
+      node.id === OVERLAY_ID ||
+      node.id === "context-generator-styles" ||
+      node.dataset.contextGeneratorOwned === "true" ||
+      Boolean(node.closest?.(`#${BUBBLE_ID}, #${OVERLAY_ID}, #context-generator-styles`))
+    );
+  }
+
+  function isOwnDomMutation(mutation) {
+    const changedNodes = [...mutation.addedNodes, ...mutation.removedNodes].filter((node) => node instanceof Element);
+    return isContextGeneratorNode(mutation.target) || (changedNodes.length > 0 && changedNodes.every(isContextGeneratorNode));
+  }
+
   function startFloatingButtonMonitoring() {
-    if (injectionInterval) clearInterval(injectionInterval);
-    // Poll every 500ms — re-inject if the bubble was removed by React re-renders
-    injectionInterval = setInterval(() => {
-      injectFloatingButton();
-    }, 500);
-    injectFloatingButton();
+    if (floatingButtonObserver) floatingButtonObserver.disconnect();
+    floatingButtonObserver = new MutationObserver((mutations) => {
+      if (mutations.every(isOwnDomMutation)) return;
+      scheduleFloatingButtonUpdate();
+    });
+    floatingButtonObserver.observe(document.body || document.documentElement, { childList: true, subtree: true });
+
+    window.addEventListener("resize", scheduleFloatingButtonUpdate);
+    window.addEventListener("scroll", scheduleFloatingButtonUpdate, true);
+    document.addEventListener("visibilitychange", scheduleFloatingButtonUpdate);
+    document.addEventListener("focusin", scheduleFloatingButtonUpdate);
+    scheduleFloatingButtonUpdate();
   }
 
   startFloatingButtonMonitoring();
