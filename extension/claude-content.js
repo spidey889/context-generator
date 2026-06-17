@@ -12,7 +12,7 @@
   let currentClaudeInput = null;
   const BUBBLE_ID = "context-generator-bubble";
   const OVERLAY_ID = "context-generator-overlay";
-  const BUBBLE_SIZE = 40;
+  const BUBBLE_SIZE = 42;
   const BUBBLE_GAP = 8;
   const BUBBLE_SLOT_WIDTH = BUBBLE_SIZE + BUBBLE_GAP + 6;
   let reservedActionCluster = null;
@@ -580,8 +580,8 @@ Then write: "Continue from where we left off."
     const icon = document.createElement("img");
     icon.src = chrome.runtime.getURL("bubble-icon.png");
     icon.alt = "";
-    icon.style.width = "36px";
-    icon.style.height = "36px";
+    icon.style.width = "38px";
+    icon.style.height = "38px";
     icon.style.objectFit = "contain";
     icon.style.display = "block";
     icon.style.pointerEvents = "none";
