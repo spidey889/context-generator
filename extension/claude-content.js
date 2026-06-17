@@ -14,6 +14,8 @@
   const OVERLAY_ID = "context-generator-overlay";
   const BUBBLE_SIZE = 32;
   const BUBBLE_GAP = 8;
+  const BUBBLE_SLOT_WIDTH = BUBBLE_SIZE + BUBBLE_GAP + 6;
+  let reservedActionCluster = null;
 
   const CONTEXT_GENERATOR_PROMPT = `---
 name: context-generator
@@ -514,6 +516,7 @@ Then write: "Continue from where we left off."
 
     if (!input) {
       if (existingBubble) existingBubble.style.display = "none";
+      releaseBubbleSlot();
       if (currentClaudeInput) {
         currentClaudeInput.removeEventListener("input", scheduleFloatingButtonUpdate);
       }
@@ -656,15 +659,90 @@ Then write: "Continue from where we left off."
       return;
     }
 
-    const formRect = input.closest("form")?.getBoundingClientRect();
-    const preferredLeft = actionRect.right + BUBBLE_GAP;
-    const minLeft = formRect ? formRect.left + BUBBLE_GAP : preferredLeft;
-    const maxLeft = formRect ? formRect.right - BUBBLE_SIZE - BUBBLE_GAP : preferredLeft;
-    const left = Math.max(minLeft, Math.min(preferredLeft, maxLeft));
+    reserveBubbleSlot(actionBtn, input);
+
+    const composerRect = findComposerSurfaceRect(input, actionBtn);
+    const left = composerRect.right - BUBBLE_SIZE - BUBBLE_GAP;
+    const top = Math.max(
+      composerRect.top + BUBBLE_GAP,
+      Math.min(
+        actionRect.top + (actionRect.height - BUBBLE_SIZE) / 2,
+        composerRect.bottom - BUBBLE_SIZE - BUBBLE_GAP
+      )
+    );
 
     bubble.style.left = `${Math.round(left)}px`;
-    bubble.style.top = `${Math.round(actionRect.top + (actionRect.height - BUBBLE_SIZE) / 2)}px`;
+    bubble.style.top = `${Math.round(top)}px`;
     bubble.style.display = "flex";
+  }
+
+  function findComposerSurfaceRect(input, actionBtn) {
+    const inputRect = input.getBoundingClientRect();
+    const actionRect = actionBtn.getBoundingClientRect();
+    const candidates = [];
+    let node = actionBtn.parentElement;
+
+    while (node && node !== document.body) {
+      if (node.contains(input)) {
+        const rect = node.getBoundingClientRect();
+        if (
+          rect.width >= 320 &&
+          rect.height >= 80 &&
+          rect.left <= inputRect.left &&
+          rect.right >= actionRect.right &&
+          rect.top <= inputRect.top &&
+          rect.bottom >= actionRect.bottom
+        ) {
+          candidates.push(rect);
+        }
+      }
+      node = node.parentElement;
+    }
+
+    return candidates.sort((a, b) => (a.width * a.height) - (b.width * b.height))[0] ||
+      input.closest("form")?.getBoundingClientRect() ||
+      inputRect;
+  }
+
+  function reserveBubbleSlot(actionBtn, input) {
+    const cluster = findActionCluster(actionBtn, input);
+    if (!cluster) return;
+
+    if (reservedActionCluster && reservedActionCluster !== cluster) {
+      releaseBubbleSlot();
+    }
+
+    if (!cluster.hasAttribute("data-context-generator-original-transform")) {
+      cluster.setAttribute("data-context-generator-original-transform", cluster.style.transform || "");
+    }
+
+    const originalTransform = cluster.getAttribute("data-context-generator-original-transform") || "";
+    cluster.style.transform = `${originalTransform} translateX(-${BUBBLE_SLOT_WIDTH}px)`.trim();
+    cluster.style.willChange = "transform";
+    reservedActionCluster = cluster;
+  }
+
+  function findActionCluster(actionBtn, input) {
+    let node = actionBtn.parentElement;
+    let cluster = null;
+
+    while (node && node !== document.body) {
+      if (node.contains(input)) break;
+      cluster = node;
+      node = node.parentElement;
+    }
+
+    return cluster || actionBtn.parentElement;
+  }
+
+  function releaseBubbleSlot() {
+    if (!reservedActionCluster) return;
+
+    const originalTransform = reservedActionCluster.getAttribute("data-context-generator-original-transform") || "";
+    reservedActionCluster.style.transform = originalTransform;
+    reservedActionCluster.style.willChange = "";
+    reservedActionCluster.removeAttribute("data-context-generator-original-transform");
+    reservedActionCluster = null;
   }
 
   let floatingButtonFrame = null;
