@@ -428,6 +428,38 @@ Then write: "Continue from where we left off."
     }
   }
 
+  // Find the rightmost composer action button (send or mic/voice)
+  function findComposerActionButton(input) {
+    const form = input?.closest("form");
+    const searchScope = form || document;
+    const buttons = Array.from(searchScope.querySelectorAll("button")).filter((button) => {
+      return button.id !== "context-generator-bubble" && isVisible(button);
+    });
+
+    if (buttons.length === 0) return null;
+
+    const sendButton = findSendButton(input, true, true);
+    if (sendButton && buttons.includes(sendButton)) {
+      return sendButton;
+    }
+
+    const inputRect = input.getBoundingClientRect();
+    const composerButtons = buttons.filter((button) => {
+      const rect = button.getBoundingClientRect();
+      return rect.top >= inputRect.top - 80 && rect.bottom <= inputRect.bottom + 140;
+    });
+
+    const candidates = composerButtons.length > 0 ? composerButtons : buttons;
+    return candidates.reduce((rightmost, button) => {
+      const rightmostRect = rightmost.getBoundingClientRect();
+      const buttonRect = button.getBoundingClientRect();
+      if (buttonRect.right !== rightmostRect.right) {
+        return buttonRect.right > rightmostRect.right ? button : rightmost;
+      }
+      return buttonRect.left > rightmostRect.left ? button : rightmost;
+    });
+  }
+
   // Find the '+' (attachment) button at the bottom-left of the input box
   function findPlusButton() {
     const input = findClaudeInput();
@@ -469,41 +501,42 @@ Then write: "Continue from where we left off."
   }
 
   function injectFloatingButton() {
-    // Don't inject twice
-    if (document.getElementById("context-generator-bubble")) {
+    const input = findClaudeInput();
+    if (!input) return;
+
+    const actionBtn = findComposerActionButton(input);
+    if (!actionBtn) return;
+
+    const existingBubble = document.getElementById("context-generator-bubble");
+    if (existingBubble) {
+      if (existingBubble.previousElementSibling !== actionBtn || existingBubble.parentElement !== actionBtn.parentElement) {
+        actionBtn.insertAdjacentElement("afterend", existingBubble);
+      }
       return;
     }
-
-    const plusBtn = findPlusButton();
-    if (!plusBtn) return;
-
-    const toolbar = plusBtn.parentElement;
-    if (!toolbar) return;
 
     const bubble = document.createElement("button");
     bubble.id = "context-generator-bubble";
     bubble.type = "button";
     bubble.title = "Transfer Context to ChatGPT";
 
-    // Get plus button's computed styles for perfect matching
-    const plusStyle = window.getComputedStyle(plusBtn);
-    const plusRect = plusBtn.getBoundingClientRect();
+    // Get the action button's computed styles for consistent alignment
+    const actionStyle = window.getComputedStyle(actionBtn);
 
-    // Match the + button's style exactly
-    bubble.style.display = plusStyle.display;
-    bubble.style.alignItems = plusStyle.alignItems;
-    bubble.style.justifyContent = plusStyle.justifyContent;
-    bubble.style.alignSelf = plusStyle.alignSelf;
+    // Match the action button's style for consistent alignment
+    bubble.style.display = actionStyle.display;
+    bubble.style.alignItems = actionStyle.alignItems;
+    bubble.style.justifyContent = actionStyle.justifyContent;
+    bubble.style.alignSelf = actionStyle.alignSelf;
     bubble.style.width = "38px";
     bubble.style.height = "38px";
-    bubble.style.borderRadius = plusStyle.borderRadius;
+    bubble.style.borderRadius = actionStyle.borderRadius;
     bubble.style.backgroundColor = "transparent";
     bubble.style.border = "none";
     bubble.style.cursor = "pointer";
     bubble.style.padding = "0";
-    bubble.style.margin = plusStyle.margin;
-    bubble.style.marginLeft = "1px";
-    bubble.style.marginTop = "3px";
+    bubble.style.margin = actionStyle.margin;
+    bubble.style.marginLeft = "6px";
     bubble.style.flexShrink = "0";
     bubble.style.transition = "transform 0.15s";
 
@@ -519,8 +552,8 @@ Then write: "Continue from where we left off."
     bubble.addEventListener("mouseenter", () => { bubble.style.transform = "scale(1.15)"; });
     bubble.addEventListener("mouseleave", () => { bubble.style.transform = "scale(1)"; });
 
-    // Append as sibling right after the + button
-    toolbar.appendChild(bubble);
+    // Append as sibling right after the send/mic button so it stays last on the right
+    actionBtn.insertAdjacentElement("afterend", bubble);
 
     // Overlay singleton
     if (!document.getElementById("context-generator-overlay")) {
