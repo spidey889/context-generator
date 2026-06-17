@@ -651,19 +651,13 @@ Then write: "Continue from where we left off."
     }
 
     const actionRect = actionBtn.getBoundingClientRect();
-    const formRect = input.closest("form")?.getBoundingClientRect();
     if (actionRect.width === 0 || actionRect.height === 0) {
       bubble.style.display = "none";
       return;
     }
 
-    const preferredLeft = actionRect.right + BUBBLE_GAP;
-    const maxLeft = formRect?.width ? formRect.right - BUBBLE_SIZE - BUBBLE_GAP : preferredLeft;
-    const left = Math.round(Math.max(0, Math.min(preferredLeft, maxLeft)));
-    const top = Math.round(actionRect.top + (actionRect.height - BUBBLE_SIZE) / 2);
-
-    bubble.style.left = `${left}px`;
-    bubble.style.top = `${top}px`;
+    bubble.style.left = `${Math.round(actionRect.right + 8)}px`;
+    bubble.style.top = `${Math.round(actionRect.top + (actionRect.height - BUBBLE_SIZE) / 2)}px`;
     bubble.style.display = "flex";
   }
 
