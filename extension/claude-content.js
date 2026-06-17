@@ -12,9 +12,11 @@
   let currentClaudeInput = null;
   const BUBBLE_ID = "context-generator-bubble";
   const OVERLAY_ID = "context-generator-overlay";
+  const DESTINATION_SHEET_ID = "context-generator-destination-sheet";
   const BUBBLE_SIZE = 42;
   const BUBBLE_GAP = 8;
   const BUBBLE_SLOT_WIDTH = BUBBLE_SIZE + BUBBLE_GAP + 6;
+  const DESTINATION_SHEET_WIDTH = 248;
   let reservedActionCluster = null;
 
   const CONTEXT_GENERATOR_PROMPT = `---
@@ -516,6 +518,7 @@ Then write: "Continue from where we left off."
 
     if (!input) {
       if (existingBubble) existingBubble.style.display = "none";
+      hideDestinationSheet();
       releaseBubbleSlot();
       if (currentClaudeInput) {
         currentClaudeInput.removeEventListener("input", scheduleFloatingButtonUpdate);
@@ -599,14 +602,189 @@ Then write: "Continue from where we left off."
       e.preventDefault();
       e.stopPropagation();
       if (isRunning) return;
-      isRunning = true;
-      clearRunningResetTimer();
-      runningResetTimer = setTimeout(resetRunningFlag, RUNNING_AUTO_RESET_MS);
-      runClaudeFlow();
+      toggleDestinationSheet();
     });
 
     document.body.appendChild(bubble);
     return bubble;
+  }
+
+  function ensureDestinationSheet() {
+    let sheet = document.getElementById(DESTINATION_SHEET_ID);
+    if (sheet) return sheet;
+
+    sheet = document.createElement("div");
+    sheet.id = DESTINATION_SHEET_ID;
+    sheet.dataset.contextGeneratorOwned = "true";
+    sheet.style.cssText = [
+      "display:none",
+      "position:fixed",
+      "z-index:2147483647",
+      `width:${DESTINATION_SHEET_WIDTH}px`,
+      "box-sizing:border-box",
+      "padding:10px",
+      "border-radius:16px",
+      "border:1px solid rgba(147, 197, 253, 0.18)",
+      "background:linear-gradient(145deg, rgba(18,18,28,0.98), rgba(24,28,48,0.96))",
+      "box-shadow:0 18px 48px rgba(0,0,0,0.42), 0 0 0 1px rgba(124,92,255,0.08)",
+      "backdrop-filter:blur(14px)",
+      "color:#f8fafc",
+      "font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif",
+      "overflow:hidden"
+    ].join(";");
+
+    const header = document.createElement("div");
+    header.style.cssText = "padding:2px 4px 9px 4px;display:flex;flex-direction:column;gap:2px";
+    const title = document.createElement("div");
+    title.textContent = "Send context to";
+    title.style.cssText = "font-size:13px;font-weight:650;letter-spacing:0;color:#f8fafc";
+    const subtitle = document.createElement("div");
+    subtitle.textContent = "Choose your next AI workspace";
+    subtitle.style.cssText = "font-size:11px;color:rgba(226,232,240,0.62);letter-spacing:0";
+    header.appendChild(title);
+    header.appendChild(subtitle);
+    sheet.appendChild(header);
+
+    const options = [
+      { name: "ChatGPT", detail: "Transfer now", tone: "#10b981", action: startChatGptTransfer },
+      { name: "Gemini", detail: "Coming soon", tone: "#60a5fa", action: () => showDestinationHint("Gemini support is coming soon") },
+      { name: "DeepSeek", detail: "Coming soon", tone: "#8b5cf6", action: () => showDestinationHint("DeepSeek support is coming soon") },
+      { name: "Grok", detail: "Coming soon", tone: "#f472b6", action: () => showDestinationHint("Grok support is coming soon") }
+    ];
+
+    options.forEach((option) => {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.style.cssText = [
+        "width:100%",
+        "height:44px",
+        "border:0",
+        "border-radius:11px",
+        "background:transparent",
+        "color:#f8fafc",
+        "display:flex",
+        "align-items:center",
+        "gap:10px",
+        "padding:0 9px",
+        "box-sizing:border-box",
+        "cursor:pointer",
+        "text-align:left",
+        "font:inherit",
+        "transition:background 0.14s ease, transform 0.14s ease"
+      ].join(";");
+
+      const logo = document.createElement("div");
+      logo.textContent = option.name[0];
+      logo.style.cssText = [
+        "width:28px",
+        "height:28px",
+        "border-radius:10px",
+        `background:linear-gradient(145deg, ${option.tone}, rgba(99,102,241,0.82))`,
+        "display:flex",
+        "align-items:center",
+        "justify-content:center",
+        "font-size:13px",
+        "font-weight:800",
+        "color:#fff",
+        "box-shadow:0 8px 18px rgba(99,102,241,0.24)"
+      ].join(";");
+
+      const copy = document.createElement("div");
+      copy.style.cssText = "display:flex;flex-direction:column;gap:1px;min-width:0;flex:1";
+      const name = document.createElement("div");
+      name.textContent = option.name;
+      name.style.cssText = "font-size:13px;font-weight:650;line-height:1.15;color:#f8fafc";
+      const detail = document.createElement("div");
+      detail.textContent = option.detail;
+      detail.style.cssText = "font-size:11px;line-height:1.15;color:rgba(203,213,225,0.62)";
+      copy.appendChild(name);
+      copy.appendChild(detail);
+
+      button.appendChild(logo);
+      button.appendChild(copy);
+      button.addEventListener("mouseenter", () => {
+        button.style.background = "rgba(99,102,241,0.16)";
+        button.style.transform = "translateY(-1px)";
+      });
+      button.addEventListener("mouseleave", () => {
+        button.style.background = "transparent";
+        button.style.transform = "translateY(0)";
+      });
+      button.addEventListener("click", (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        option.action();
+      });
+      sheet.appendChild(button);
+    });
+
+    const hint = document.createElement("div");
+    hint.id = "context-generator-destination-hint";
+    hint.textContent = "";
+    hint.style.cssText = "height:16px;padding:4px 4px 0;color:rgba(191,219,254,0.82);font-size:11px;line-height:1;letter-spacing:0";
+    sheet.appendChild(hint);
+
+    sheet.addEventListener("click", (event) => event.stopPropagation());
+    document.body.appendChild(sheet);
+    document.addEventListener("click", hideDestinationSheet);
+    document.addEventListener("keydown", (event) => {
+      if (event.key === "Escape") hideDestinationSheet();
+    });
+
+    return sheet;
+  }
+
+  function toggleDestinationSheet() {
+    const sheet = ensureDestinationSheet();
+    if (sheet.style.display === "block") {
+      hideDestinationSheet();
+      return;
+    }
+
+    sheet.style.display = "block";
+    showDestinationHint("");
+    positionDestinationSheet();
+  }
+
+  function hideDestinationSheet() {
+    const sheet = document.getElementById(DESTINATION_SHEET_ID);
+    if (sheet) sheet.style.display = "none";
+  }
+
+  function positionDestinationSheet() {
+    const sheet = document.getElementById(DESTINATION_SHEET_ID);
+    const bubble = document.getElementById(BUBBLE_ID);
+    if (!sheet || !bubble || sheet.style.display === "none") return;
+
+    const bubbleRect = bubble.getBoundingClientRect();
+    const margin = 10;
+    const sheetHeight = sheet.offsetHeight || 250;
+    const left = Math.max(
+      margin,
+      Math.min(
+        bubbleRect.right - DESTINATION_SHEET_WIDTH,
+        window.innerWidth - DESTINATION_SHEET_WIDTH - margin
+      )
+    );
+    const preferredTop = bubbleRect.top - sheetHeight - margin;
+    const top = preferredTop >= margin ? preferredTop : bubbleRect.bottom + margin;
+
+    sheet.style.left = `${Math.round(left)}px`;
+    sheet.style.top = `${Math.round(Math.min(top, window.innerHeight - sheetHeight - margin))}px`;
+  }
+
+  function showDestinationHint(message) {
+    const hint = document.getElementById("context-generator-destination-hint");
+    if (hint) hint.textContent = message;
+  }
+
+  function startChatGptTransfer() {
+    hideDestinationSheet();
+    if (isRunning) return;
+    isRunning = true;
+    clearRunningResetTimer();
+    runningResetTimer = setTimeout(resetRunningFlag, RUNNING_AUTO_RESET_MS);
+    runClaudeFlow();
   }
 
   function ensureFloatingOverlay() {
@@ -674,6 +852,7 @@ Then write: "Continue from where we left off."
     bubble.style.left = `${Math.round(left)}px`;
     bubble.style.top = `${Math.round(top)}px`;
     bubble.style.display = "flex";
+    positionDestinationSheet();
   }
 
   function findComposerSurfaceRect(input, actionBtn) {
