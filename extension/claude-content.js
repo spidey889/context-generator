@@ -17,6 +17,7 @@
   const BUBBLE_GAP = 8;
   const BUBBLE_SLOT_WIDTH = BUBBLE_SIZE + BUBBLE_GAP + 6;
   const DESTINATION_SHEET_WIDTH = 316;
+  const CAP_CONTEXT_SITE_URL = "https://spidey889.github.io/context-generator";
   let reservedActionCluster = null;
   let reservedComposerSurface = null;
 
@@ -685,8 +686,10 @@ Then write: "Continue from where we left off."
     const title = document.createElement("div");
     title.textContent = "Where to continue?";
     title.style.cssText = "font-size:12px;font-weight:720;letter-spacing:0;color:#f5f5f5;line-height:1.1";
-    const badge = document.createElement("div");
+    const badge = document.createElement("button");
+    badge.type = "button";
     badge.textContent = "Cap Context";
+    badge.setAttribute("aria-label", "Open Cap Context site");
     badge.style.cssText = [
       "height:20px",
       "padding:0 7px",
@@ -697,8 +700,16 @@ Then write: "Continue from where we left off."
       "font-size:10px",
       "font-weight:650",
       "line-height:20px",
-      "letter-spacing:0"
+      "letter-spacing:0",
+      "font-family:inherit",
+      "cursor:pointer",
+      "outline:0"
     ].join(";");
+    badge.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      window.location.assign(CAP_CONTEXT_SITE_URL);
+    });
     header.appendChild(title);
     header.appendChild(badge);
     sheet.appendChild(header);
