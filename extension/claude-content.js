@@ -880,7 +880,6 @@ Then write: "Continue from where we left off."
     bubble.style.left = `${Math.round(left)}px`;
     bubble.style.top = `${Math.round(top)}px`;
     bubble.style.display = "flex";
-    positionDestinationSheet();
   }
 
   function findComposerSurfaceRect(input, actionBtn) {
