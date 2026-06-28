@@ -16,7 +16,7 @@
   const BUBBLE_SIZE = 42;
   const BUBBLE_GAP = 8;
   const BUBBLE_SLOT_WIDTH = BUBBLE_SIZE + BUBBLE_GAP + 6;
-  const DESTINATION_SHEET_WIDTH = 316;
+  const DESTINATION_SHEET_WIDTH = 296;
   const DESTINATION_SHEET_STYLE_ID = "context-generator-destination-sheet-styles";
   const CAP_CONTEXT_SITE_URL = "https://spidey889.github.io/context-generator";
   let reservedActionCluster = null;
@@ -671,7 +671,7 @@ Then write: "Continue from where we left off."
           transform: translate3d(-150%, 0, 0) skewX(-18deg);
         }
         24% {
-          opacity: 0.48;
+          opacity: 0.22;
         }
         40%, 100% {
           opacity: 0;
@@ -682,8 +682,8 @@ Then write: "Continue from where we left off."
       @keyframes contextGeneratorTileIn {
         from {
           opacity: 0;
-          transform: translate3d(0, 5px, 0) scale(0.985);
-          filter: brightness(0.94);
+          transform: translate3d(0, 3px, 0) scale(0.992);
+          filter: brightness(0.96);
         }
         to {
           opacity: 1;
@@ -699,7 +699,7 @@ Then write: "Continue from where we left off."
       }
 
       .context-generator-destination-tile.context-generator-tile-enter {
-        animation: contextGeneratorTileIn 0.24s cubic-bezier(0.16, 1, 0.3, 1) both;
+        animation: contextGeneratorTileIn 0.18s cubic-bezier(0.16, 1, 0.3, 1) both;
       }
 
       .context-generator-tile-shine {
@@ -710,11 +710,11 @@ Then write: "Continue from where we left off."
         width: 46px;
         z-index: 1;
         pointer-events: none;
-        background: linear-gradient(90deg, transparent, rgba(255,255,255,0.11), rgba(255,255,255,0.22), transparent);
+        background: linear-gradient(90deg, transparent, rgba(255,255,255,0.07), rgba(255,255,255,0.14), transparent);
         filter: blur(0.25px);
         opacity: 0;
         transform: translate3d(-150%, 0, 0) skewX(-18deg);
-        animation: contextGeneratorTileShine 5.4s cubic-bezier(0.16, 1, 0.3, 1) infinite;
+        animation: contextGeneratorTileShine 7.2s cubic-bezier(0.16, 1, 0.3, 1) infinite;
       }
 
       .context-generator-tile-spinner {
@@ -764,7 +764,7 @@ Then write: "Continue from where we left off."
         tile.classList.remove("context-generator-tile-enter");
         tile.style.animationDelay = "";
       });
-    }, 440);
+    }, 320);
   }
 
   function resetDestinationTiles(sheet) {
@@ -797,41 +797,41 @@ Then write: "Continue from where we left off."
       "z-index:2147483647",
       `width:${DESTINATION_SHEET_WIDTH}px`,
       "box-sizing:border-box",
-      "padding:10px",
-      "border-radius:16px",
+      "padding:9px",
+      "border-radius:15px",
       "border:1px solid rgba(255,255,255,0.085)",
       "background:#0a0a0a",
-      "box-shadow:0 18px 44px rgba(0,0,0,0.46), inset 0 1px 0 rgba(255,255,255,0.055)",
+      "box-shadow:0 14px 34px rgba(0,0,0,0.44), inset 0 1px 0 rgba(255,255,255,0.05)",
       "backdrop-filter:blur(16px)",
       "color:#f5f5f5",
       "font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif",
       "overflow:hidden",
       "opacity:0",
-      "transform:translate3d(0,6px,0) scale(0.982)",
+      "transform:translate3d(0,2px,0) scale(0.996)",
       "transform-origin:bottom right",
       "will-change:transform,opacity",
-      "transition:opacity 0.16s cubic-bezier(0.16,1,0.3,1), transform 0.18s cubic-bezier(0.16,1,0.3,1)"
+      "transition:opacity 0.14s cubic-bezier(0.16,1,0.3,1), transform 0.16s cubic-bezier(0.16,1,0.3,1)"
     ].join(";");
 
     const header = document.createElement("div");
-    header.style.cssText = "padding:1px 2px 9px;display:flex;align-items:center;justify-content:space-between;gap:10px";
+    header.style.cssText = "padding:0 1px 8px;display:flex;align-items:center;justify-content:space-between;gap:10px";
     const title = document.createElement("div");
     title.textContent = "Where to continue?";
-    title.style.cssText = "font-size:12px;font-weight:720;letter-spacing:0;color:#f5f5f5;line-height:1.1";
+    title.style.cssText = "font-size:11.5px;font-weight:720;letter-spacing:0;color:#f5f5f5;line-height:1.12";
     const badge = document.createElement("button");
     badge.type = "button";
     badge.textContent = "Cap Context";
     badge.setAttribute("aria-label", "Open Cap Context site");
     badge.style.cssText = [
-      "height:20px",
+      "height:19px",
       "padding:0 7px",
       "border-radius:999px",
       "border:1px solid rgba(255,255,255,0.085)",
       "background:rgba(255,255,255,0.035)",
       "color:rgba(245,245,245,0.62)",
-      "font-size:10px",
+      "font-size:9.5px",
       "font-weight:650",
-      "line-height:20px",
+      "line-height:19px",
       "letter-spacing:0",
       "font-family:inherit",
       "cursor:pointer",
@@ -868,6 +868,7 @@ Then write: "Continue from where we left off."
         name: "ChatGPT",
         detail: "OpenAI",
         accent: "#19c37d",
+        logoSize: 21,
         logo: chrome.runtime.getURL("logos/gptwhitedownload__1_-removebg-preview.png"),
         action: startChatGptTransfer
       },
@@ -875,6 +876,7 @@ Then write: "Continue from where we left off."
         name: "Gemini",
         detail: "Google",
         accent: "#8ab4f8",
+        logoSize: 22,
         logo: chrome.runtime.getURL("logos/gemini-download__1_-removebg-preview.png"),
         action: () => startDestinationTransfer("gemini")
       },
@@ -882,6 +884,7 @@ Then write: "Continue from where we left off."
         name: "Grok",
         detail: "xAI",
         accent: "#f5f5f5",
+        logoSize: 24,
         logo: chrome.runtime.getURL("logos/grokwhitedownload__1_-removebg-preview.png"),
         action: () => startDestinationTransfer("grok")
       },
@@ -889,13 +892,14 @@ Then write: "Continue from where we left off."
         name: "DeepSeek",
         detail: "DeepSeek",
         accent: "#4c8dff",
+        logoSize: 22,
         logo: chrome.runtime.getURL("logos/deepseek-download__1_-removebg-preview.png"),
         action: () => startDestinationTransfer("deepseek")
       }
     ];
 
     const grid = document.createElement("div");
-    grid.style.cssText = "display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:7px";
+    grid.style.cssText = "display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px";
 
     options.forEach((option, index) => {
       const button = document.createElement("button");
@@ -904,15 +908,15 @@ Then write: "Continue from where we left off."
       button.dataset.contextGeneratorDetail = option.detail;
       button.style.cssText = [
         "width:100%",
-        "height:54px",
-        "border:1px solid rgba(255,255,255,0.095)",
-        "border-radius:12px",
-        "background:linear-gradient(180deg, #151515 0%, #101010 58%, #0d0d0d 100%)",
+        "height:48px",
+        "border:1px solid rgba(255,255,255,0.08)",
+        "border-radius:11px",
+        "background:linear-gradient(180deg, #131313 0%, #0f0f0f 58%, #0c0c0c 100%)",
         "color:#f5f5f5",
         "display:flex",
         "align-items:center",
-        "gap:8px",
-        "padding:0 9px",
+        "gap:7px",
+        "padding:0 8px",
         "box-sizing:border-box",
         `cursor:${option.action ? "pointer" : "default"}`,
         "text-align:left",
@@ -921,8 +925,8 @@ Then write: "Continue from where we left off."
         "position:relative",
         "overflow:hidden",
         "isolation:isolate",
-        "box-shadow:inset 0 1px 0 rgba(255,255,255,0.075), inset 0 -1px 0 rgba(0,0,0,0.46), 0 1px 0 rgba(255,255,255,0.025)",
-        "transition:background 0.14s ease, border-color 0.14s ease, box-shadow 0.14s ease, transform 0.14s ease"
+        "box-shadow:inset 0 1px 0 rgba(255,255,255,0.06), inset 0 -1px 0 rgba(0,0,0,0.42), 0 1px 0 rgba(255,255,255,0.018)",
+        "transition:background 0.13s ease, border-color 0.13s ease, box-shadow 0.13s ease, transform 0.13s ease"
       ].join(";");
       if (!option.action) {
         button.setAttribute("aria-disabled", "true");
@@ -930,8 +934,8 @@ Then write: "Continue from where we left off."
 
       const logoWrap = document.createElement("div");
       logoWrap.style.cssText = [
-        "width:28px",
-        "height:28px",
+        "width:26px",
+        "height:26px",
         "display:flex",
         "align-items:center",
         "justify-content:center",
@@ -945,35 +949,35 @@ Then write: "Continue from where we left off."
       logo.src = option.logo;
       logo.alt = "";
       logo.draggable = false;
-      logo.style.cssText = "width:23px;height:23px;object-fit:contain;display:block;filter:drop-shadow(0 1px 3px rgba(0,0,0,0.32))";
+      logo.style.cssText = `width:${option.logoSize}px;height:${option.logoSize}px;object-fit:contain;display:block;filter:drop-shadow(0 1px 3px rgba(0,0,0,0.28))`;
       logoWrap.appendChild(logo);
 
       const copy = document.createElement("div");
-      copy.style.cssText = "display:flex;flex-direction:column;gap:2px;min-width:0;flex:1;position:relative;z-index:2";
+      copy.style.cssText = "display:flex;flex-direction:column;gap:1px;min-width:0;flex:1;position:relative;z-index:2";
       const name = document.createElement("div");
       name.textContent = option.name;
-      name.style.cssText = "font-size:12px;font-weight:720;line-height:1.16;color:#f5f5f5;white-space:nowrap;overflow:hidden;text-overflow:ellipsis";
+      name.style.cssText = "font-size:11.5px;font-weight:720;line-height:1.18;color:#f5f5f5;white-space:nowrap;overflow:hidden;text-overflow:ellipsis";
       const detail = document.createElement("div");
       detail.className = "context-generator-tile-detail";
       detail.textContent = option.detail;
-      detail.style.cssText = "font-size:10px;font-weight:500;line-height:1.28;color:rgba(245,245,245,0.50);white-space:nowrap;overflow:hidden;text-overflow:ellipsis";
+      detail.style.cssText = "font-size:9.5px;font-weight:500;line-height:1.28;color:rgba(245,245,245,0.43);white-space:nowrap;overflow:hidden;text-overflow:ellipsis";
       copy.appendChild(name);
       copy.appendChild(detail);
 
       const setButtonActive = () => {
-        button.style.background = "linear-gradient(180deg, #1b1b1b 0%, #121212 58%, #0d0d0d 100%)";
-        button.style.borderColor = option.action ? `${option.accent}66` : "rgba(255,255,255,0.16)";
+        button.style.background = "linear-gradient(180deg, #171717 0%, #111111 58%, #0c0c0c 100%)";
+        button.style.borderColor = option.action ? `${option.accent}52` : "rgba(255,255,255,0.14)";
         button.style.boxShadow = option.action
-          ? `inset 0 1px 0 rgba(255,255,255,0.105), inset 0 -1px 0 rgba(0,0,0,0.48), 0 0 0 1px ${option.accent}24, 0 10px 24px rgba(0,0,0,0.28)`
-          : "inset 0 1px 0 rgba(255,255,255,0.105), inset 0 -1px 0 rgba(0,0,0,0.48), 0 10px 24px rgba(0,0,0,0.24)";
-        aura.style.opacity = "0.72";
+          ? `inset 0 1px 0 rgba(255,255,255,0.085), inset 0 -1px 0 rgba(0,0,0,0.46), 0 0 0 1px ${option.accent}1f, 0 8px 18px rgba(0,0,0,0.24)`
+          : "inset 0 1px 0 rgba(255,255,255,0.085), inset 0 -1px 0 rgba(0,0,0,0.46), 0 8px 18px rgba(0,0,0,0.20)";
+        aura.style.opacity = "0.56";
         if (option.action) button.style.transform = "translateY(-1px)";
       };
       const setButtonIdle = () => {
-        button.style.background = "linear-gradient(180deg, #151515 0%, #101010 58%, #0d0d0d 100%)";
-        button.style.borderColor = "rgba(255,255,255,0.095)";
-        button.style.boxShadow = "inset 0 1px 0 rgba(255,255,255,0.075), inset 0 -1px 0 rgba(0,0,0,0.46), 0 1px 0 rgba(255,255,255,0.025)";
-        aura.style.opacity = "0.42";
+        button.style.background = "linear-gradient(180deg, #131313 0%, #0f0f0f 58%, #0c0c0c 100%)";
+        button.style.borderColor = "rgba(255,255,255,0.08)";
+        button.style.boxShadow = "inset 0 1px 0 rgba(255,255,255,0.06), inset 0 -1px 0 rgba(0,0,0,0.42), 0 1px 0 rgba(255,255,255,0.018)";
+        aura.style.opacity = "0.28";
         button.style.transform = "translateY(0)";
       };
 
@@ -983,9 +987,9 @@ Then write: "Continue from where we left off."
         "inset:-1px",
         "z-index:0",
         "pointer-events:none",
-        `background:radial-gradient(circle at 18% 50%, ${option.accent}24 0, transparent 42%), linear-gradient(135deg, rgba(255,255,255,0.07), transparent 45%)`,
-        "opacity:0.42",
-        "transition:opacity 0.16s ease"
+        `background:radial-gradient(circle at 18% 50%, ${option.accent}1a 0, transparent 42%), linear-gradient(135deg, rgba(255,255,255,0.045), transparent 45%)`,
+        "opacity:0.28",
+        "transition:opacity 0.14s ease"
       ].join(";");
 
       const shine = document.createElement("span");
@@ -1026,12 +1030,12 @@ Then write: "Continue from where we left off."
     footer.textContent = "Context goes straight into the input box";
     footer.style.cssText = [
       "margin:9px 1px 1px",
-      "padding-top:8px",
+      "padding-top:7px",
       "padding-bottom:1px",
-      "border-top:1px solid rgba(255,255,255,0.055)",
-      "color:rgba(245,245,245,0.44)",
-      "font-size:10px",
-      "font-weight:550",
+      "border-top:1px solid rgba(255,255,255,0.045)",
+      "color:rgba(245,245,245,0.34)",
+      "font-size:9.5px",
+      "font-weight:500",
       "line-height:1.35",
       "letter-spacing:0",
       "text-align:center",
@@ -1060,7 +1064,7 @@ Then write: "Continue from where we left off."
 
     if (destinationSheetAnimationFrame) cancelAnimationFrame(destinationSheetAnimationFrame);
     sheet.style.opacity = "0";
-    sheet.style.transform = "translate3d(0,6px,0) scale(0.982)";
+    sheet.style.transform = "translate3d(0,2px,0) scale(0.996)";
     sheet.style.display = "block";
     delete sheet.dataset.contextGeneratorPositionLocked;
     showDestinationHint("");
@@ -1087,7 +1091,7 @@ Then write: "Continue from where we left off."
         destinationSheetAnimationFrame = null;
       }
       sheet.style.opacity = "0";
-      sheet.style.transform = "translate3d(0,6px,0) scale(0.982)";
+      sheet.style.transform = "translate3d(0,2px,0) scale(0.996)";
       sheet.style.display = "none";
       delete sheet.dataset.contextGeneratorPositionLocked;
     }
