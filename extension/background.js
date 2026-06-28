@@ -1,5 +1,6 @@
 const CLAUDE_ORIGIN = "https://claude.ai";
 const CHATGPT_URL = "https://chatgpt.com/";
+const SUMMARY_BACKEND_URL = "https://context-generator-five.vercel.app/api/summarize";
 const DESTINATIONS = {
   chatgpt: {
     name: "ChatGPT",
@@ -47,6 +48,18 @@ chrome.action.onClicked.addListener(async (tab) => {
 });
 
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+  if (message?.type === "SUMMARIZE_WITH_BACKEND") {
+    summarizeWithBackend(message.conversation)
+      .then((summary) => sendResponse({ ok: true, summary }))
+      .catch((error) => {
+        console.error("[Context Generator Relay]", error);
+        setBadge("ERR", "#b42318", 5000);
+        sendResponse({ ok: false, error: error.message });
+      });
+
+    return true;
+  }
+
   if (message?.type === "TRANSFER_TO_DESTINATION") {
     transferToDestination(message.destination, message.text)
       .then(() => sendResponse({ ok: true }))
@@ -81,6 +94,29 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
 
 async function transferToChatGpt(text) {
   return transferToDestination("chatgpt", text);
+}
+
+async function summarizeWithBackend(conversation) {
+  if (!conversation?.trim()) {
+    throw new Error("Claude conversation text could not be captured.");
+  }
+
+  const response = await fetch(SUMMARY_BACKEND_URL, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ conversation: conversation.trim() })
+  });
+
+  if (!response.ok) {
+    throw new Error("Backup summarizer failed.");
+  }
+
+  const data = await response.json();
+  if (!data.summary?.trim()) {
+    throw new Error("Backup summarizer returned no summary.");
+  }
+
+  return data.summary.trim();
 }
 
 async function transferToDestination(destinationId, text) {

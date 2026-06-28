@@ -15,7 +15,8 @@
     "https://*.openai.com/*",
     "https://gemini.google.com/*",
     "https://grok.com/*",
-    "https://chat.deepseek.com/*"
+    "https://chat.deepseek.com/*",
+    "https://context-generator-five.vercel.app/*"
   ],
   "background": {
     "service_worker": "background.js"

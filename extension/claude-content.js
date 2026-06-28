@@ -19,6 +19,7 @@
   const DESTINATION_SHEET_WIDTH = 296;
   const DESTINATION_SHEET_STYLE_ID = "context-generator-destination-sheet-styles";
   const CAP_CONTEXT_SITE_URL = "https://spidey889.github.io/context-generator";
+  const MAX_BACKEND_CONVERSATION_CHARS = 180000;
   let reservedActionCluster = null;
   let reservedComposerSurface = null;
   let destinationSheetAnimationFrame = null;
@@ -212,12 +213,186 @@ Then write: "Continue from where we left off."
     }
   }
 
+  async function summarizeWithBackendFallback(conversationText) {
+    showBackendFallbackStatus();
+    const response = await notifyBackground({
+      type: "SUMMARIZE_WITH_BACKEND",
+      conversation: conversationText || scrapeClaudeConversationText()
+    });
+
+    if (!response?.summary?.trim()) {
+      throw new Error("Backup summarizer returned no summary.");
+    }
+
+    return response.summary.trim();
+  }
+
+  function scrapeClaudeConversationText() {
+    const turns = getClaudeConversationTurns();
+    const hasUserTurn = turns.some((turn) => turn.role === "User");
+    const transcript = turns
+      .map((turn) => `${turn.role}: ${turn.text}`)
+      .join("\n\n")
+      .trim();
+
+    if (transcript && hasUserTurn) {
+      return limitBackendConversationText(transcript);
+    }
+
+    return limitBackendConversationText(scrapeMainConversationText());
+  }
+
+  function getClaudeConversationTurns() {
+    const selectors = [
+      "[data-testid*='user-message' i]",
+      "[data-testid*='assistant-message' i]",
+      "[data-message-author-role]",
+      ".font-claude-response"
+    ];
+    const candidates = [];
+
+    document.querySelectorAll(selectors.join(",")).forEach((element) => {
+      if (isContextGeneratorNode(element)) return;
+
+      const text = cleanText(element.innerText || element.textContent || "");
+      if (!text || text === CONTEXT_GENERATOR_PROMPT) return;
+
+      candidates.push({
+        element,
+        role: getClaudeConversationRole(element),
+        text
+      });
+    });
+
+    candidates.sort((a, b) => {
+      if (a.element === b.element) return 0;
+      return a.element.compareDocumentPosition(b.element) & Node.DOCUMENT_POSITION_PRECEDING ? 1 : -1;
+    });
+
+    let turns = [];
+    candidates.forEach((candidate) => {
+      if (turns.some((turn) => turn.text === candidate.text || turn.element.contains(candidate.element))) {
+        return;
+      }
+
+      turns = turns.filter((turn) => !candidate.element.contains(turn.element));
+      turns.push(candidate);
+    });
+
+    return turns.map(({ role, text }) => ({ role, text }));
+  }
+
+  function getClaudeConversationRole(element) {
+    const label = [
+      element.getAttribute("data-message-author-role"),
+      element.getAttribute("data-testid"),
+      element.getAttribute("aria-label"),
+      element.className
+    ]
+      .filter(Boolean)
+      .join(" ")
+      .toLowerCase();
+
+    if (label.includes("user") || label.includes("human")) return "User";
+    if (label.includes("assistant") || label.includes("claude") || element.matches(".font-claude-response")) return "Claude";
+    return "Message";
+  }
+
+  function scrapeMainConversationText() {
+    const roots = [
+      document.querySelector("main"),
+      document.querySelector("[data-testid*='conversation' i]"),
+      document.body
+    ].filter(Boolean);
+    const root = roots.find((element) => cleanText(element.innerText || element.textContent || "").length > 200) || document.body;
+
+    return cleanText(root.innerText || root.textContent || "");
+  }
+
+  function limitBackendConversationText(text) {
+    const cleaned = cleanText(text);
+    if (cleaned.length <= MAX_BACKEND_CONVERSATION_CHARS) {
+      return cleaned;
+    }
+
+    const headLength = 40000;
+    const tailLength = MAX_BACKEND_CONVERSATION_CHARS - headLength;
+    return [
+      cleaned.slice(0, headLength),
+      "[...middle of conversation omitted to fit the backup summarizer...]",
+      cleaned.slice(-tailLength)
+    ].join("\n\n");
+  }
+
+  function hasClaudeContextLimitIndicator() {
+    return Boolean(getClaudeContextLimitMessage());
+  }
+
+  function getClaudeContextLimitMessage() {
+    const selectors = [
+      "[role='alert']",
+      "[aria-live]",
+      "[data-testid*='error' i]",
+      "[class*='error' i]",
+      "[class*='danger' i]"
+    ];
+
+    for (const element of document.querySelectorAll(selectors.join(","))) {
+      const text = cleanText(element.innerText || element.textContent || "");
+      if (text && isClaudeContextLimitText(text)) {
+        return text;
+      }
+    }
+
+    let node = findClaudeInput()?.closest("form") || findClaudeInput()?.parentElement;
+    for (let depth = 0; node && depth < 5; depth += 1) {
+      const text = cleanText(node.innerText || node.textContent || "");
+      if (text && isClaudeContextLimitText(text)) {
+        return text;
+      }
+      node = node.parentElement;
+    }
+
+    return "";
+  }
+
+  function isClaudeContextLimitText(text) {
+    const normalized = cleanText(text).toLowerCase();
+    if (!normalized) return false;
+
+    return [
+      /context (window|limit|length)/,
+      /(conversation|chat|message|prompt|input).{0,60}(too long|exceeds|exceeded|maximum|limit)/,
+      /(too long|exceeds|exceeded|maximum).{0,60}(conversation|chat|message|prompt|input|context|tokens)/,
+      /reduce.{0,60}(message|prompt|conversation|context)/,
+      /shorten.{0,60}(message|prompt|conversation|context)/,
+      /maximum.{0,30}(tokens|context|length)/,
+      /too many.{0,30}(tokens|words|characters)/
+    ].some((pattern) => pattern.test(normalized));
+  }
+
   async function captureClaudeResponseWithPolling() {
+    const conversationText = scrapeClaudeConversationText();
     const input = await waitForElement(findClaudeInput, 20000, "Claude chat input");
+    const previousResponseCount = getClaudeResponseCandidates(true).length;
+    const previousResponseText = getClaudeResponseText(true);
 
     setEditorText(input, CONTEXT_GENERATOR_PROMPT);
 
-    const sendButton = await waitForElement(() => findSendButton(input), 10000, "Claude send button");
+    let sendButton;
+    try {
+      sendButton = await waitForElement(() => findSendButton(input), 10000, "Claude send button");
+    } catch (error) {
+      if (hasClaudeContextLimitIndicator() || conversationText) {
+        return summarizeWithBackendFallback(conversationText);
+      }
+      throw error;
+    }
+
+    if (hasClaudeContextLimitIndicator()) {
+      return summarizeWithBackendFallback(conversationText);
+    }
+
     sendButton.click();
 
     // Button-state polling
@@ -228,6 +403,10 @@ Then write: "Continue from where we left off."
 
     while (Date.now() - startTime < MAX_WAIT_MS) {
       await sleep(POLL_INTERVAL_MS);
+
+      if (hasClaudeContextLimitIndicator()) {
+        return summarizeWithBackendFallback(conversationText);
+      }
 
       const stopVisible = isStopButtonVisible();
       
@@ -250,10 +429,10 @@ Then write: "Continue from where we left off."
     // Wait 500ms more before capturing
     await sleep(500);
 
-    const text = getClaudeResponseText(true);
+    const text = getClaudeResponseTextAfter(previousResponseCount, previousResponseText, true);
 
-    if (!text) {
-      throw new Error("Claude response was not available after generation completed.");
+    if (!text || isClaudeContextLimitText(text) || hasClaudeContextLimitIndicator()) {
+      return summarizeWithBackendFallback(conversationText);
     }
 
     return text.trim();
@@ -357,6 +536,19 @@ Then write: "Continue from where we left off."
     return cleanText(winner.innerText || winner.textContent || "");
   }
 
+  function getClaudeResponseTextAfter(previousResponseCount, previousResponseText, silent = false) {
+    const candidates = getClaudeResponseCandidates(silent);
+    const newCandidates = candidates.slice(previousResponseCount);
+    const winner = newCandidates[newCandidates.length - 1] || candidates[candidates.length - 1];
+    const text = winner ? cleanText(winner.innerText || winner.textContent || "") : "";
+
+    if (newCandidates.length === 0 && text === previousResponseText) {
+      return "";
+    }
+
+    return text;
+  }
+
   function getClaudeResponseCandidates(silent = false) {
     const matches = document.querySelectorAll(".font-claude-response");
     return Array.from(matches);
@@ -424,6 +616,18 @@ Then write: "Continue from where we left off."
   }
 
   let countdownInterval = null;
+
+  function showBackendFallbackStatus() {
+    if (countdownInterval) {
+      clearInterval(countdownInterval);
+      countdownInterval = null;
+    }
+
+    const textSpan = document.getElementById("context-generator-text");
+    if (textSpan) {
+      textSpan.textContent = "Summarizing with Mistral...";
+    }
+  }
 
   function showOverlay() {
     const overlay = document.getElementById(OVERLAY_ID);
