@@ -656,32 +656,31 @@ Then write: "Continue from where we left off."
     header.appendChild(badge);
     sheet.appendChild(header);
 
-    const logoDataUrl = (svg) => `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(svg)}`;
     const options = [
       {
         name: "ChatGPT",
-        detail: "Transfer context",
+        detail: "OpenAI",
         accent: "#19c37d",
-        logo: logoDataUrl(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><rect width="32" height="32" rx="10" fill="#101513"/><path d="M16 6.8l7.6 4.4v8.8L16 24.4 8.4 20v-8.8L16 6.8z" fill="none" stroke="#f5f5f5" stroke-width="1.8" stroke-linejoin="round"/><path d="M16 6.8v8.8l7.6 4.4M8.4 11.2l7.6 4.4v8.8" fill="none" stroke="#f5f5f5" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>`),
+        logo: chrome.runtime.getURL("logos/gptwhitedownload__1_-removebg-preview.png"),
         action: startChatGptTransfer
       },
       {
         name: "Gemini",
-        detail: "Coming soon",
+        detail: "Google",
         accent: "#8ab4f8",
-        logo: logoDataUrl(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><rect width="32" height="32" rx="10" fill="#11131a"/><path d="M16 5.8c1.1 5 4.2 8.1 9.2 9.2-5 1.1-8.1 4.2-9.2 9.2-1.1-5-4.2-8.1-9.2-9.2 5-1.1 8.1-4.2 9.2-9.2z" fill="#f5f5f5"/><path d="M23.4 5.8c.4 1.8 1.6 3 3.4 3.4-1.8.4-3 1.6-3.4 3.4-.4-1.8-1.6-3-3.4-3.4 1.8-.4 3-1.6 3.4-3.4z" fill="#8ab4f8"/></svg>`)
+        logo: chrome.runtime.getURL("logos/gemini-download__1_-removebg-preview.png")
       },
       {
         name: "Grok",
-        detail: "Coming soon",
+        detail: "xAI",
         accent: "#f5f5f5",
-        logo: logoDataUrl(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><rect width="32" height="32" rx="10" fill="#111"/><path d="M9 22.5L22.5 9M10 9.5l12 13" fill="none" stroke="#f5f5f5" stroke-width="2.4" stroke-linecap="round"/><circle cx="23.4" cy="8.6" r="2" fill="#f5f5f5"/></svg>`)
+        logo: chrome.runtime.getURL("logos/grokwhitedownload__1_-removebg-preview.png")
       },
       {
         name: "DeepSeek",
-        detail: "Coming soon",
+        detail: "DeepSeek",
         accent: "#4c8dff",
-        logo: logoDataUrl(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><rect width="32" height="32" rx="10" fill="#0e1422"/><path d="M7.6 18.8c3.2 4.8 11.6 5.1 15.6.8 2.2-2.4 2.1-5.9-.2-8.1-2.4-2.3-6.2-2.1-8.8.4" fill="none" stroke="#f5f5f5" stroke-width="2" stroke-linecap="round"/><path d="M11.6 12.5c2.4 1.4 4.5 3.5 6.1 6.3" fill="none" stroke="#4c8dff" stroke-width="2.1" stroke-linecap="round"/><circle cx="22.4" cy="13.1" r="1.7" fill="#4c8dff"/></svg>`)
+        logo: chrome.runtime.getURL("logos/deepseek-download__1_-removebg-preview.png")
       }
     ];
 
@@ -716,7 +715,7 @@ Then write: "Continue from where we left off."
       logo.src = option.logo;
       logo.alt = "";
       logo.draggable = false;
-      logo.style.cssText = "width:28px;height:28px;border-radius:10px;display:block;flex:0 0 auto;box-shadow:0 0 0 1px rgba(255,255,255,0.08)";
+      logo.style.cssText = "width:28px;height:28px;object-fit:contain;display:block;flex:0 0 auto";
 
       const copy = document.createElement("div");
       copy.style.cssText = "display:flex;flex-direction:column;gap:1px;min-width:0;flex:1";
