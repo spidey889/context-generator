@@ -764,23 +764,20 @@ Then write: "Continue from where we left off."
 
       const logoWrap = document.createElement("div");
       logoWrap.style.cssText = [
-        "width:30px",
-        "height:30px",
-        "border-radius:10px",
-        "border:1px solid rgba(255,255,255,0.075)",
-        "background:rgba(255,255,255,0.035)",
+        "width:28px",
+        "height:28px",
         "display:flex",
         "align-items:center",
         "justify-content:center",
         "flex:0 0 auto",
-        "box-shadow:inset 0 1px 0 rgba(255,255,255,0.045)"
+        "opacity:0.96"
       ].join(";");
 
       const logo = document.createElement("img");
       logo.src = option.logo;
       logo.alt = "";
       logo.draggable = false;
-      logo.style.cssText = "width:20px;height:20px;object-fit:contain;display:block";
+      logo.style.cssText = "width:23px;height:23px;object-fit:contain;display:block;filter:drop-shadow(0 1px 3px rgba(0,0,0,0.32))";
       logoWrap.appendChild(logo);
 
       const copy = document.createElement("div");
