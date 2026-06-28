@@ -685,13 +685,13 @@ Then write: "Continue from where we left off."
         bottom: -2px;
         left: -52px;
         width: 46px;
-        z-index: 0;
+        z-index: 1;
         pointer-events: none;
-        background: linear-gradient(90deg, transparent, rgba(255,255,255,0.18), rgba(255,255,255,0.32), transparent);
+        background: linear-gradient(90deg, transparent, rgba(255,255,255,0.11), rgba(255,255,255,0.22), transparent);
         filter: blur(0.25px);
         opacity: 0;
         transform: translate3d(-150%, 0, 0) skewX(-18deg);
-        animation: contextGeneratorTileShine 4.8s cubic-bezier(0.16, 1, 0.3, 1) infinite;
+        animation: contextGeneratorTileShine 5.4s cubic-bezier(0.16, 1, 0.3, 1) infinite;
       }
 
       @media (prefers-reduced-motion: reduce) {
@@ -825,9 +825,9 @@ Then write: "Continue from where we left off."
       button.style.cssText = [
         "width:100%",
         "height:54px",
-        "border:1px solid rgba(255,255,255,0.07)",
+        "border:1px solid rgba(255,255,255,0.095)",
         "border-radius:12px",
-        "background:linear-gradient(180deg, rgba(255,255,255,0.045), rgba(255,255,255,0.025))",
+        "background:linear-gradient(180deg, #151515 0%, #101010 58%, #0d0d0d 100%)",
         "color:#f5f5f5",
         "display:flex",
         "align-items:center",
@@ -841,6 +841,7 @@ Then write: "Continue from where we left off."
         "position:relative",
         "overflow:hidden",
         "isolation:isolate",
+        "box-shadow:inset 0 1px 0 rgba(255,255,255,0.075), inset 0 -1px 0 rgba(0,0,0,0.46), 0 1px 0 rgba(255,255,255,0.025)",
         "transition:background 0.14s ease, border-color 0.14s ease, box-shadow 0.14s ease, transform 0.14s ease"
       ].join(";");
       if (!option.action) {
@@ -857,7 +858,7 @@ Then write: "Continue from where we left off."
         "flex:0 0 auto",
         "opacity:0.96",
         "position:relative",
-        "z-index:1"
+        "z-index:2"
       ].join(";");
 
       const logo = document.createElement("img");
@@ -868,7 +869,7 @@ Then write: "Continue from where we left off."
       logoWrap.appendChild(logo);
 
       const copy = document.createElement("div");
-      copy.style.cssText = "display:flex;flex-direction:column;gap:2px;min-width:0;flex:1;position:relative;z-index:1";
+      copy.style.cssText = "display:flex;flex-direction:column;gap:2px;min-width:0;flex:1;position:relative;z-index:2";
       const name = document.createElement("div");
       name.textContent = option.name;
       name.style.cssText = "font-size:12px;font-weight:720;line-height:1.05;color:#f5f5f5;white-space:nowrap;overflow:hidden;text-overflow:ellipsis";
@@ -879,22 +880,38 @@ Then write: "Continue from where we left off."
       copy.appendChild(detail);
 
       const setButtonActive = () => {
-        button.style.background = "linear-gradient(180deg, rgba(255,255,255,0.075), rgba(255,255,255,0.04))";
-        button.style.borderColor = option.action ? option.accent : "rgba(255,255,255,0.12)";
-        button.style.boxShadow = option.action ? `0 0 0 1px ${option.accent}1f, 0 8px 20px rgba(0,0,0,0.20)` : "none";
+        button.style.background = "linear-gradient(180deg, #1b1b1b 0%, #121212 58%, #0d0d0d 100%)";
+        button.style.borderColor = option.action ? `${option.accent}66` : "rgba(255,255,255,0.16)";
+        button.style.boxShadow = option.action
+          ? `inset 0 1px 0 rgba(255,255,255,0.105), inset 0 -1px 0 rgba(0,0,0,0.48), 0 0 0 1px ${option.accent}24, 0 10px 24px rgba(0,0,0,0.28)`
+          : "inset 0 1px 0 rgba(255,255,255,0.105), inset 0 -1px 0 rgba(0,0,0,0.48), 0 10px 24px rgba(0,0,0,0.24)";
+        aura.style.opacity = "0.72";
         if (option.action) button.style.transform = "translateY(-1px)";
       };
       const setButtonIdle = () => {
-        button.style.background = "linear-gradient(180deg, rgba(255,255,255,0.045), rgba(255,255,255,0.025))";
-        button.style.borderColor = "rgba(255,255,255,0.07)";
-        button.style.boxShadow = "none";
+        button.style.background = "linear-gradient(180deg, #151515 0%, #101010 58%, #0d0d0d 100%)";
+        button.style.borderColor = "rgba(255,255,255,0.095)";
+        button.style.boxShadow = "inset 0 1px 0 rgba(255,255,255,0.075), inset 0 -1px 0 rgba(0,0,0,0.46), 0 1px 0 rgba(255,255,255,0.025)";
+        aura.style.opacity = "0.42";
         button.style.transform = "translateY(0)";
       };
+
+      const aura = document.createElement("span");
+      aura.style.cssText = [
+        "position:absolute",
+        "inset:-1px",
+        "z-index:0",
+        "pointer-events:none",
+        `background:radial-gradient(circle at 18% 50%, ${option.accent}24 0, transparent 42%), linear-gradient(135deg, rgba(255,255,255,0.07), transparent 45%)`,
+        "opacity:0.42",
+        "transition:opacity 0.16s ease"
+      ].join(";");
 
       const shine = document.createElement("span");
       shine.className = "context-generator-tile-shine";
       shine.style.animationDelay = `${index * 0.18}s`;
 
+      button.appendChild(aura);
       button.appendChild(shine);
       button.appendChild(logoWrap);
       button.appendChild(copy);
