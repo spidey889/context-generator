@@ -952,11 +952,11 @@ Then write: "Continue from where we left off."
       copy.style.cssText = "display:flex;flex-direction:column;gap:2px;min-width:0;flex:1;position:relative;z-index:2";
       const name = document.createElement("div");
       name.textContent = option.name;
-      name.style.cssText = "font-size:12px;font-weight:720;line-height:1.05;color:#f5f5f5;white-space:nowrap;overflow:hidden;text-overflow:ellipsis";
+      name.style.cssText = "font-size:12px;font-weight:720;line-height:1.16;color:#f5f5f5;white-space:nowrap;overflow:hidden;text-overflow:ellipsis";
       const detail = document.createElement("div");
       detail.className = "context-generator-tile-detail";
       detail.textContent = option.detail;
-      detail.style.cssText = "font-size:10px;font-weight:500;line-height:1.1;color:rgba(245,245,245,0.50);white-space:nowrap;overflow:hidden;text-overflow:ellipsis";
+      detail.style.cssText = "font-size:10px;font-weight:500;line-height:1.28;color:rgba(245,245,245,0.50);white-space:nowrap;overflow:hidden;text-overflow:ellipsis";
       copy.appendChild(name);
       copy.appendChild(detail);
 
@@ -1027,11 +1027,12 @@ Then write: "Continue from where we left off."
     footer.style.cssText = [
       "margin:9px 1px 1px",
       "padding-top:8px",
+      "padding-bottom:1px",
       "border-top:1px solid rgba(255,255,255,0.055)",
       "color:rgba(245,245,245,0.44)",
       "font-size:10px",
       "font-weight:550",
-      "line-height:1",
+      "line-height:1.35",
       "letter-spacing:0",
       "text-align:center",
       "white-space:nowrap",
