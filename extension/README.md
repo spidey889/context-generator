@@ -1,13 +1,14 @@
-# Context Generator Relay Extension
+# Cap Context Extension
 
-This Chrome extension automates the handoff from Claude to ChatGPT:
+This Chrome extension automates context handoff between Claude, ChatGPT, Gemini, Grok, and DeepSeek:
 
-1. Click the extension icon while a `claude.ai` chat is open.
-2. The extension scrapes the current Claude conversation from the page.
+1. Open a supported AI chat.
+2. Click the Cap Context button in the input bar.
 3. It sends the conversation to the Vercel/Mistral summarization backend.
-4. It opens `chatgpt.com` in a new tab.
-5. It pastes the summary into the ChatGPT message input.
-6. It auto-clicks Send.
+4. Choose one of the other AI platforms.
+5. It opens that platform in a new tab.
+6. It pastes the summary into the message input.
+7. It auto-clicks Send.
 
 ## Install
 
@@ -16,4 +17,4 @@ This Chrome extension automates the handoff from Claude to ChatGPT:
 3. Click **Load unpacked**.
 4. Select this `extension` folder.
 
-You need to be signed in to both Claude and ChatGPT before using it.
+You need to be signed in to the source and destination AI platforms before using it.

@@ -4,63 +4,64 @@ This document explains how the Chrome extension works right now. It is written f
 
 ## Files Involved
 
-- `extension/manifest.json` registers the extension, host permissions, background service worker, Claude content script, ChatGPT content script, and generic destination content script.
+- `extension/manifest.json` registers the extension, host permissions, the background service worker, and the shared platform content script on all supported AI sites.
 - `extension/background.js` coordinates tab creation, content script injection, backend summarization, badge state, and messages between pages.
-- `extension/claude-content.js` owns the Claude-side floating button, destination picker, page scraping, and backend summary request.
-- `extension/chatgpt-content.js` pastes the generated context into ChatGPT and auto-clicks Send.
-- `extension/ai-destination-content.js` pastes the generated context into Gemini, Grok, and DeepSeek.
+- `extension/platform-content.js` owns the Cap Context button, destination picker, conversation scraping, backend summary request, destination paste, and destination auto-send behavior for every supported platform.
 - `api/summarize.js` is the Vercel serverless endpoint that calls Mistral.
+
+The old split content scripts were removed. There is no longer a separate Claude launcher script, ChatGPT paste script, or generic AI destination paste script.
+
+## Supported Platforms
+
+The supported platforms are:
+
+- Claude at `claude.ai`
+- ChatGPT at `chatgpt.com` and OpenAI-hosted ChatGPT pages
+- Gemini at `gemini.google.com`
+- Grok at `grok.com`
+- DeepSeek at `chat.deepseek.com`
+
+The extension button appears on all five platforms. From any one platform, the user can send context to any of the other four platforms.
 
 ## Startup And Extension Icon Flow
 
-The manifest loads `claude-content.js` on `claude.ai`, `chatgpt-content.js` on ChatGPT/OpenAI hosts, and `ai-destination-content.js` on Gemini, Grok, and DeepSeek.
+The manifest loads `platform-content.js` on every supported AI platform. It also makes the bubble icon and platform logos available to all supported hosts.
 
-The background service worker also handles the browser action icon. When the user clicks the extension icon, the background worker checks that the active tab is a Claude tab. It injects `claude-content.js` again just in case the content script is not already present, then sends `START_CONTEXT_TRANSFER` to that tab. The icon flow always targets ChatGPT.
+The background service worker handles the browser action icon. When the user clicks the extension icon, the background worker checks that the active tab is one of the supported AI sites. It injects `platform-content.js` just in case the content script is not already present, then sends `START_CONTEXT_TRANSFER` to that tab.
 
-The Claude content script guards against double loading with `window.__contextGeneratorClaudeLoaded`. It also has an `isRunning` lock and a 60 second auto-reset timer so two transfers do not run at the same time forever.
+The browser action uses a default destination because it does not open the destination picker. If the source tab is ChatGPT, it sends to Claude. Otherwise it sends to ChatGPT. The in-page Cap Context button is the normal way to choose any of the other four destinations.
 
-## How The Button Is Placed In Claude
+The platform content script guards against double loading with `window.__contextGeneratorPlatformLoaded`. It also has an `isRunning` lock and a 60 second auto-reset timer so two transfers do not run at the same time forever.
 
-The Claude content script does not rely on one fixed Claude DOM selector. It continuously watches the page and recomputes placement.
+## How The Button Is Placed
 
-It starts a `MutationObserver` on the document body, plus listeners for resize, visibility changes, and focus changes. When Claude's DOM changes, it schedules one `requestAnimationFrame` update. It ignores mutations caused by the extension's own button, overlay, and sheet so it does not chase itself.
+`platform-content.js` uses one placement system for Claude, ChatGPT, Gemini, Grok, and DeepSeek. Each platform has input selectors for its editor, but placement is otherwise shared.
 
-To find the Claude input, it searches for visible textareas and contenteditable elements. Each candidate gets a score:
+The script watches the page with a `MutationObserver`, plus listeners for resize, visibility changes, and focus changes. When the AI page changes its DOM, the script schedules one `requestAnimationFrame` update. It ignores mutations caused by the extension's own button, overlay, fallback modal, and destination sheet so it does not chase itself.
 
-- Textareas and inputs get points.
-- Elements inside a form get points.
-- Labels/placeholders/classes mentioning message, prompt, chat, write, or ask get points.
-- Wide elements near the lower half of the viewport get points.
-- Elements near the top of the page are penalized.
+To find the input, the script uses the current platform's editor selectors first, then fallback selectors. Candidates are scored by whether they are textarea/input/contenteditable elements, whether they are inside a form, whether their labels mention message/prompt/chat/write/ask/input, whether they are wide enough, and whether they are near the bottom of the viewport. Top-of-page candidates are penalized.
 
-After it finds the best input, it searches upward for the composer surface: a parent element that is wide enough, wraps the input, and has a reasonable composer-like height. If no good parent is found, it falls back to the form or direct parent.
+After it finds the input, it searches upward for a composer surface: a parent element that wraps the input and has a reasonable composer-like size. If no good parent is found, it falls back to the form or the direct parent.
 
 The floating button is a 42px absolute-positioned button with `bubble-icon.png` inside it. The script appends the button inside the composer surface, not directly to `body`. If the composer surface has static positioning, the script temporarily changes it to `position: relative` and remembers the original inline position value so it can restore it later.
 
-The button is placed on the right side of the composer. The script tries to find the right-side Claude action button cluster by scanning visible buttons inside or near the composer. If it finds that cluster, it shifts the cluster left by the bubble slot width so the extension button has room. It remembers the original transform on the shifted cluster and restores it if the input disappears or the anchor changes.
+The button sits on the right side of the composer. The script tries to find the platform's right-side action button cluster by scanning visible buttons inside or near the composer. If it finds that cluster, it shifts the cluster left by the bubble slot width so the Cap Context button has room. It remembers the original transform on the shifted cluster and restores it if the input disappears or the anchor changes.
 
-If a right-side action button is found, the bubble vertically aligns with that button. Otherwise it sits near the bottom-right of the composer. The destination picker sheet is a fixed-position panel that opens above the bubble when there is room, otherwise below it. The sheet position is locked while open so its animation does not jump during DOM updates.
+Clicking the button opens a destination picker. The picker lists all supported platforms except the current one. Each tile starts the same backend summary flow, then opens the selected platform, pastes the summary, and auto-clicks Send.
 
-Clicking the bubble opens a destination picker with ChatGPT, Gemini, Grok, and DeepSeek tiles. Every tile now uses the Vercel/Mistral backend summary path.
+## How Conversation Scraping Works
 
-## How The Conversation Is Scraped
+The scraper runs before the overlay is shown, so extension UI text is not included in the backend input.
 
-The scraper lives in `claude-content.js` and is the only way summary input is collected. It runs before the overlay is shown, so extension UI text is not included in the backend input.
+Each platform has its own likely conversation selectors. Examples include Claude response/user-message selectors, ChatGPT `data-message-author-role` conversation turns, Gemini user/model response elements, Grok message elements, and DeepSeek markdown/message elements.
 
-The main scrape path looks for likely Claude message elements:
+For each candidate element, the script skips extension-owned nodes, reads `innerText` or `textContent`, cleans whitespace, and assigns a rough role:
 
-- Elements whose `data-testid` contains `user-message`.
-- Elements whose `data-testid` contains `assistant-message`.
-- Elements with `data-message-author-role`.
-- Elements with Claude response class `.font-claude-response`.
-
-It skips extension-owned nodes. For each candidate it reads `innerText` or `textContent`, cleans non-breaking spaces and trailing whitespace, and assigns a rough role:
-
-- `User` if metadata mentions user or human.
-- `Claude` if metadata mentions assistant or Claude, or the element has `.font-claude-response`.
+- `User` when metadata mentions user, human, you, me, or query.
+- The current platform name when metadata mentions assistant, model, response, Claude, ChatGPT, Gemini, Grok, DeepSeek, or bot.
 - `Message` otherwise.
 
-Candidates are sorted in document order. Nested duplicates are removed, and identical text duplicates are skipped. If the result includes at least one user turn, the transcript becomes blocks like:
+Candidates are sorted in document order. Nested duplicates and identical text duplicates are removed. If at least two useful turns are found, the transcript becomes blocks like:
 
 ```text
 User: ...
@@ -68,15 +69,17 @@ User: ...
 Claude: ...
 ```
 
-If the structured scrape does not produce a useful transcript, the fallback reads visible text from `main`, then a conversation-looking element, then `document.body`.
+The transcript is prefixed with the source platform name, such as `Gemini conversation:`.
+
+If structured message scraping does not produce a useful transcript, the fallback reads visible text from `main`, then conversation-looking containers, then chat-looking containers, then `document.body`.
 
 The backend conversation input is capped at 180,000 characters. If the page text is longer than that, the script keeps the first 40,000 characters and the last 140,000 characters, with an omission marker in the middle.
 
 ## How Summary Generation Works
 
-There is now one summary path: Vercel/Mistral backend summarization. The extension no longer asks Claude to summarize, no longer injects a prompt into Claude, and no longer clicks Claude's Send button.
+There is one summary path: Vercel/Mistral backend summarization. The extension never asks the source AI to summarize. It does not inject prompts into Claude, ChatGPT, Gemini, Grok, or DeepSeek.
 
-When a transfer starts, `claude-content.js` immediately scrapes the current Claude conversation, shows the `Summarizing with Mistral...` overlay, and sends `SUMMARIZE_WITH_BACKEND` to the background worker with the scraped conversation text.
+When a transfer starts, `platform-content.js` scrapes the current platform conversation, shows the `Summarizing with Mistral...` overlay, and sends `SUMMARIZE_WITH_BACKEND` to the background worker with the scraped conversation text.
 
 The background worker calls:
 
@@ -122,66 +125,44 @@ The function returns the first choice message content as:
 
 Mistral API failures return 502. Empty Mistral summaries return 502. Unexpected server errors return 500.
 
-## How Context Is Transferred To ChatGPT
+## How Context Transfer Works
 
-After the backend summary returns text, `claude-content.js` sends it to the background worker:
+After the backend summary returns text, `platform-content.js` sends `TRANSFER_TO_DESTINATION` to the background worker with the selected destination id and summary text.
 
-- `TRANSFER_TO_CHATGPT` for ChatGPT.
-- `TRANSFER_TO_DESTINATION` with a destination id for Gemini, Grok, or DeepSeek.
+The background worker validates the destination, opens the destination URL in a new active tab, waits for the tab status to become complete, injects `platform-content.js`, and sends that tab a `PASTE_CONTEXT` message.
 
-The background worker validates that text exists, opens the destination URL in a new active tab, waits for the tab's status to become complete, injects the right destination content script, and sends that tab a `PASTE_CONTEXT` message.
+The destination tab receives `PASTE_CONTEXT`, finds the destination input with that platform's input selectors, and writes the summary into the editor.
 
-For ChatGPT, `chatgpt-content.js` waits up to 10 seconds for an input. It prefers these contenteditable targets:
+For textarea/input editors, it uses the native value setter and dispatches input/change events.
 
-- `#prompt-textarea[contenteditable='true']`
-- `[data-testid='prompt-textarea'][contenteditable='true']`
-- `.ProseMirror[contenteditable='true']`
-- `div[contenteditable='true'][role='textbox']`
-- placeholder or aria-label message contenteditables
-- any visible contenteditable
+For contenteditable editors, it targets the first paragraph if one exists, otherwise the editor itself. It selects the current contents, calls `document.execCommand("insertText")`, retries with select-all if needed, and falls back to assigning `textContent` if insertion still fails. It dispatches input and change events afterward so React/ProseMirror-style editors notice the update.
 
-If none is found, it falls back to `#prompt-textarea`, `[data-testid='prompt-textarea']`, placeholder textareas, or any textarea.
+After pasting, it verifies that the first 20 characters of the summary are present in the editor. If verification fails, it shows an "Auto-paste failed" modal with a copy button and returns an error to the background worker.
 
-Once it has an editor, it pastes by focusing the editor and then:
+Once paste verification passes, it waits up to 10 seconds for an enabled Send button. It searches platform-specific send selectors, then buttons in the input/composer area, then visible page buttons. It ignores disabled buttons and obvious non-send controls such as Stop, Cancel, Attach, Upload, Voice, Mic, New, and Menu. It accepts buttons whose metadata mentions send/submit or enabled submit buttons.
 
-- For textarea/input: uses the native value setter, then dispatches `InputEvent("input")` and `change`.
-- For contenteditable: targets the first `p` child if present, otherwise the editor itself. It selects the current contents, calls `document.execCommand("insertText", false, text)`, and verifies the first 20 characters appeared.
-- If the first contenteditable insert did not work, it focuses again, selects all, tries `execCommand("insertText")` again, and checks again.
-- If that still fails, it assigns `element.textContent = text`.
-- Finally it dispatches input events so ChatGPT's React/ProseMirror state notices the change.
-
-After pasting, it verifies that the first 20 characters of the summary are present in the editor. If not, it shows an "Auto-paste failed" modal with a copy button and returns an error to the background worker.
-
-Once the paste is verified, the ChatGPT content script waits up to 10 seconds for an enabled Send button. It searches visible buttons in the input's form first, then the whole page. It matches aria-label, title, data-testid, or text containing send or submit, ignores Stop buttons, and also accepts a visible enabled submit button in the form. When it finds the button, it clicks it automatically.
-
-Important current behavior: ChatGPT is auto-sent. Gemini, Grok, and DeepSeek are still paste-only and do not auto-click their Send buttons.
-
-## Other Destination Paste Logic
-
-`ai-destination-content.js` handles Gemini, Grok, and DeepSeek with the same broad paste strategy as ChatGPT, but destination-specific selectors.
-
-It determines the destination either from the message destination id or from the current hostname. It waits up to 10 seconds for a visible contenteditable or textarea, writes the text, checks the first 20 characters, and shows the same manual copy fallback modal if paste verification fails.
+When it finds the send button, it clicks it automatically. This auto-send behavior applies to all five platforms as destinations.
 
 ## Badges, Overlays, And Error Handling
 
 The background worker sets the extension badge to:
 
 - `RUN` when the extension icon successfully starts a transfer.
-- `OK` after a destination paste succeeds.
+- `OK` after a destination paste/send succeeds.
 - `ERR` for transfer errors.
 
-The Claude page shows a small overlay above the floating bubble while work is running. It displays `Summarizing with Mistral...`.
+The source page shows a small overlay above the floating button while work is running. It displays `Summarizing with Mistral...`.
 
-If the Claude-side flow throws, the script resets the running flag, hides the overlay, shows a red "Transfer Failed" overlay on Claude, and notifies the background worker.
+If the source-side flow throws, the script resets the running flag, hides the overlay, shows a red "Transfer Failed" overlay on the source page, and notifies the background worker.
 
-## Tricky Parts That Were Hard To Get Working
+If destination paste or send fails, the destination page shows a manual copy modal with the summary.
 
-- Claude's DOM is not stable, so the input, composer, action cluster, and message turns are found with scoring and heuristics instead of one brittle selector.
-- The floating bubble has to live inside Claude's composer so it tracks the input, but it also has to reserve space by shifting Claude's own action cluster left. The script stores original inline styles so it can restore them.
+## Tricky Parts
+
+- Each AI platform has a different editor DOM, so input detection is platform-specific but still scored generically.
+- The floating button has to live inside each platform's composer so it tracks the input, but it also has to reserve space by shifting the native action cluster left.
 - The MutationObserver would loop forever if it reacted to its own UI. The script marks owned nodes and ignores mutations that are only caused by the extension.
-- The old Claude summary path was removed completely. The extension avoids Claude context limits by never asking Claude to produce the summary.
-- The backend scraper tries structured message turns first, then falls back to page text. This makes it resilient, but the fallback can include extra Claude UI text if Claude changes its markup.
-- Programmatic pasting into modern AI editors is finicky. The scripts use native setters for real inputs, `execCommand("insertText")` for contenteditables, retries with select-all, direct `textContent` as a last resort, and input/change events for framework state.
-- Pasting is verified by checking a short sample of the inserted text. If verification fails, the user gets a manual copy modal instead of silently losing the summary.
-- ChatGPT auto-send has to avoid clicking a Stop button or a disabled send control. The script waits for an enabled send/submit button after paste verification, then clicks it.
-- Scraping intentionally happens before the overlay is shown, so the overlay text is not included in the conversation sent to Mistral.
+- Conversation scraping is best-effort. It tries structured message turns first, then falls back to page text when a platform changes its markup.
+- Programmatic pasting into modern AI editors is finicky. The script uses native setters, `execCommand("insertText")`, retries, direct `textContent` fallback, and synthetic input/change events.
+- Auto-send is also heuristic. The script waits for an enabled send/submit control and avoids obvious non-send controls, but platform UI changes can still require selector updates.
+- Scraping intentionally happens before the overlay is shown, so extension overlay text is not sent to Mistral.

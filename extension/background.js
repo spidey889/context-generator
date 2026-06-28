@@ -1,43 +1,55 @@
-const CLAUDE_ORIGIN = "https://claude.ai";
 const CHATGPT_URL = "https://chatgpt.com/";
 const SUMMARY_BACKEND_URL = "https://context-generator-five.vercel.app/api/summarize";
+const PLATFORM_CONTENT_SCRIPT = "platform-content.js";
 const DESTINATIONS = {
+  claude: {
+    name: "Claude",
+    url: "https://claude.ai/",
+    contentScript: PLATFORM_CONTENT_SCRIPT
+  },
   chatgpt: {
     name: "ChatGPT",
     url: CHATGPT_URL,
-    contentScript: "chatgpt-content.js"
+    contentScript: PLATFORM_CONTENT_SCRIPT
   },
   gemini: {
     name: "Gemini",
     url: "https://gemini.google.com/",
-    contentScript: "ai-destination-content.js"
+    contentScript: PLATFORM_CONTENT_SCRIPT
   },
   grok: {
     name: "Grok",
     url: "https://grok.com/",
-    contentScript: "ai-destination-content.js"
+    contentScript: PLATFORM_CONTENT_SCRIPT
   },
   deepseek: {
     name: "DeepSeek",
     url: "https://chat.deepseek.com/",
-    contentScript: "ai-destination-content.js"
+    contentScript: PLATFORM_CONTENT_SCRIPT
   }
+};
+const DESTINATION_HOSTS = {
+  claude: ["claude.ai"],
+  chatgpt: ["chatgpt.com", "openai.com"],
+  gemini: ["gemini.google.com"],
+  grok: ["grok.com"],
+  deepseek: ["chat.deepseek.com"]
 };
 
 chrome.action.onClicked.addListener(async (tab) => {
   try {
     clearBadge();
 
-    const isClaude = tab.url ? new URL(tab.url).hostname.endsWith("claude.ai") : false;
-    if (!tab.id || !isClaude) {
-      throw new Error("Open a claude.ai chat, then click the extension icon.");
+    const platform = getPlatformFromUrl(tab.url);
+    if (!tab.id || !platform) {
+      throw new Error("Open a supported AI chat, then click the extension icon.");
     }
 
-    await ensureContentScript(tab.id, "claude-content.js");
+    await ensureContentScript(tab.id, PLATFORM_CONTENT_SCRIPT);
     const startResult = await sendMessage(tab.id, { type: "START_CONTEXT_TRANSFER" });
 
     if (!startResult?.ok) {
-      throw new Error(startResult?.error || "Could not start Claude transfer.");
+      throw new Error(startResult?.error || "Could not start context transfer.");
     }
 
     await setBadge("RUN", "#565add");
@@ -72,18 +84,6 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     return true;
   }
 
-  if (message?.type === "TRANSFER_TO_CHATGPT") {
-    transferToChatGpt(message.text)
-      .then(() => sendResponse({ ok: true }))
-      .catch((error) => {
-        console.error("[Context Generator Relay]", error);
-        setBadge("ERR", "#b42318", 5000);
-        sendResponse({ ok: false, error: error.message });
-      });
-
-    return true;
-  }
-
   if (message?.type === "CONTEXT_TRANSFER_ERROR") {
     console.error("[Context Generator Relay]", message.error);
     setBadge("ERR", "#b42318", 5000);
@@ -92,13 +92,9 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   return false;
 });
 
-async function transferToChatGpt(text) {
-  return transferToDestination("chatgpt", text);
-}
-
 async function summarizeWithBackend(conversation) {
   if (!conversation?.trim()) {
-    throw new Error("Claude conversation text could not be captured.");
+    throw new Error("AI conversation text could not be captured.");
   }
 
   const response = await fetch(SUMMARY_BACKEND_URL, {
@@ -121,7 +117,7 @@ async function summarizeWithBackend(conversation) {
 
 async function transferToDestination(destinationId, text) {
   if (!text?.trim()) {
-    throw new Error("Claude did not return response text.");
+    throw new Error("Context summary text was not available.");
   }
 
   const destination = DESTINATIONS[destinationId];
@@ -159,6 +155,19 @@ async function ensureContentScript(tabId, file) {
 
 function sendMessage(tabId, message) {
   return chrome.tabs.sendMessage(tabId, message);
+}
+
+function getPlatformFromUrl(url) {
+  if (!url) return null;
+
+  try {
+    const hostname = new URL(url).hostname;
+    return Object.entries(DESTINATION_HOSTS).find(([, hosts]) => {
+      return hosts.some((host) => hostname === host || hostname.endsWith(`.${host}`));
+    })?.[0] || null;
+  } catch {
+    return null;
+  }
 }
 
 function waitForTabLoaded(tabId, name = "destination") {

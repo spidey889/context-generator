@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Context Generator",
-  "description": "Automatically transfer your conversation context from Claude to ChatGPT.",
+  "description": "Carry conversation context between Claude, ChatGPT, Gemini, Grok, and DeepSeek.",
   "version": "1.0.0",
   "icons": {
     "16": "icon16.png",
@@ -11,7 +11,9 @@
   "permissions": ["activeTab", "scripting", "tabs"],
   "host_permissions": [
     "https://*.claude.ai/*",
+    "https://chatgpt.com/*",
     "https://*.chatgpt.com/*",
+    "https://openai.com/*",
     "https://*.openai.com/*",
     "https://gemini.google.com/*",
     "https://grok.com/*",
@@ -22,7 +24,7 @@
     "service_worker": "background.js"
   },
   "action": {
-    "default_title": "Generate context and paste into ChatGPT",
+    "default_title": "Carry context to another AI",
     "default_icon": {
       "16": "icon16.png",
       "48": "icon48.png",
@@ -31,25 +33,33 @@
   },
   "content_scripts": [
     {
-      "matches": ["https://*.claude.ai/*"],
-      "js": ["claude-content.js"],
-      "run_at": "document_idle"
-    },
-    {
-      "matches": ["https://*.chatgpt.com/*", "https://*.openai.com/*"],
-      "js": ["chatgpt-content.js"],
-      "run_at": "document_idle"
-    },
-    {
-      "matches": ["https://gemini.google.com/*", "https://grok.com/*", "https://chat.deepseek.com/*"],
-      "js": ["ai-destination-content.js"],
+      "matches": [
+        "https://*.claude.ai/*",
+        "https://chatgpt.com/*",
+        "https://*.chatgpt.com/*",
+        "https://openai.com/*",
+        "https://*.openai.com/*",
+        "https://gemini.google.com/*",
+        "https://grok.com/*",
+        "https://chat.deepseek.com/*"
+      ],
+      "js": ["platform-content.js"],
       "run_at": "document_idle"
     }
   ],
   "web_accessible_resources": [
     {
       "resources": ["icon16.png", "icon48.png", "icon128.png", "bubble-icon.png", "logos/*.png"],
-      "matches": ["https://*.claude.ai/*"]
+      "matches": [
+        "https://*.claude.ai/*",
+        "https://chatgpt.com/*",
+        "https://*.chatgpt.com/*",
+        "https://openai.com/*",
+        "https://*.openai.com/*",
+        "https://gemini.google.com/*",
+        "https://grok.com/*",
+        "https://chat.deepseek.com/*"
+      ]
     }
   ]
 }
