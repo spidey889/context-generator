@@ -71,7 +71,9 @@ Claude: ...
 
 The transcript is prefixed with the source platform name, such as `Gemini conversation:`.
 
-If structured message scraping does not produce a useful transcript, the fallback reads visible text from `main`, then conversation-looking containers, then chat-looking containers, then `document.body`.
+If structured message scraping does not produce a useful transcript, the fallback reads visible text from `main`, then conversation-looking containers, then chat-looking containers. Empty start screens are rejected so the extension does not send sidebar, placeholder, or landing-page text to Mistral.
+
+When no useful chat text exists, the transfer stops before calling the backend and shows a polished in-page error: `No text to summarize yet`. The message tells the user the chat is still a blank canvas and to send a message first.
 
 The backend conversation input is capped at 180,000 characters. If the page text is longer than that, the script keeps the first 40,000 characters and the last 140,000 characters, with an omission marker in the middle.
 

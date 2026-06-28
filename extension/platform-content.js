@@ -18,6 +18,9 @@
   const DEFAULT_MAX_COMPOSER_WIDTH = 1320;
   const DESTINATION_TITLE_TEXT = "Where to continue?";
   const DESTINATION_HELPER_TEXT = "Context goes straight into the input box";
+  const NO_CONVERSATION_ERROR_TITLE = "No text to summarize yet";
+  const NO_CONVERSATION_ERROR_MESSAGE = "This chat is still a blank canvas. Drop a message first, then I'll bottle the context.";
+  const MIN_FALLBACK_CONVERSATION_CHARS = 120;
   const CAP_CONTEXT_SITE_URL = "https://spidey889.github.io/context-generator";
 
   const PLATFORMS = {
@@ -423,17 +426,22 @@
   }
 
   function scrapeConversationText() {
-    const turns = getConversationTurns();
+    const turns = getConversationTurns().filter((turn) => isUsefulConversationTurn(turn));
     const transcript = turns
       .map((turn) => `${turn.role}: ${turn.text}`)
       .join("\n\n")
       .trim();
 
-    if (transcript && turns.length >= 2) {
+    if (transcript) {
       return limitConversationText(`${currentPlatform.name} conversation:\n\n${transcript}`);
     }
 
-    return limitConversationText(`${currentPlatform.name} conversation:\n\n${scrapeMainConversationText()}`);
+    const fallbackText = scrapeMainConversationText();
+    if (isUsefulFallbackConversationText(fallbackText)) {
+      return limitConversationText(`${currentPlatform.name} conversation:\n\n${fallbackText}`);
+    }
+
+    throw new Error(NO_CONVERSATION_ERROR_MESSAGE);
   }
 
   function getConversationTurns() {
@@ -480,17 +488,50 @@
     return "Message";
   }
 
+  function isUsefulConversationTurn(turn) {
+    if (!turn?.text) return false;
+
+    const text = cleanText(turn.text);
+    if (text.length < 3) return false;
+    return !isEmptyConversationText(text);
+  }
+
   function scrapeMainConversationText() {
     const roots = [
       document.querySelector("main"),
       document.querySelector("[data-testid*='conversation' i]"),
       document.querySelector("[class*='conversation' i]"),
-      document.querySelector("[class*='chat' i]"),
-      document.body
+      document.querySelector("[class*='chat' i]")
     ].filter(Boolean);
-    const root = roots.find((element) => cleanText(element.innerText || element.textContent || "").length > 200) || document.body;
 
-    return cleanText(root.innerText || root.textContent || "");
+    return roots
+      .map((element) => cleanText(element.innerText || element.textContent || ""))
+      .find((text) => isUsefulFallbackConversationText(text)) || "";
+  }
+
+  function isUsefulFallbackConversationText(text) {
+    const cleaned = cleanText(text);
+    if (cleaned.length < MIN_FALLBACK_CONVERSATION_CHARS) return false;
+    if (isEmptyConversationText(cleaned)) return false;
+
+    const words = cleaned.split(/\s+/).filter(Boolean);
+    return words.length >= 18;
+  }
+
+  function isEmptyConversationText(text) {
+    const cleaned = cleanText(text).toLowerCase();
+    if (!cleaned) return true;
+
+    return [
+      "the mic is yours",
+      "start chatting",
+      "message deepseek",
+      "ask gemini",
+      "new chat",
+      "what can i help with",
+      "how can i help",
+      "what are you working on"
+    ].some((emptyText) => cleaned.includes(emptyText) && cleaned.length < 700);
   }
 
   function limitConversationText(text) {
@@ -1101,58 +1142,120 @@
   }
 
   function showErrorOverlay(message) {
+    const isNoConversationError = message === NO_CONVERSATION_ERROR_MESSAGE;
     let errorDiv = document.getElementById("context-generator-error-overlay");
     if (!errorDiv) {
       errorDiv = document.createElement("div");
       errorDiv.id = "context-generator-error-overlay";
-      errorDiv.style.position = "fixed";
-      errorDiv.style.zIndex = "9999999";
-      errorDiv.style.bottom = "80px";
-      errorDiv.style.right = "20px";
-      errorDiv.style.padding = "16px";
-      errorDiv.style.borderRadius = "8px";
-      errorDiv.style.backgroundColor = "#ef4444";
-      errorDiv.style.color = "#ffffff";
-      errorDiv.style.boxShadow = "0 4px 16px rgba(0, 0, 0, 0.3)";
-      errorDiv.style.fontFamily = "-apple-system, BlinkMacSystemFont, sans-serif";
-      errorDiv.style.fontSize = "14px";
-      errorDiv.style.maxWidth = "300px";
-      errorDiv.style.display = "flex";
-      errorDiv.style.flexDirection = "column";
-      errorDiv.style.gap = "10px";
+      errorDiv.dataset.contextGeneratorOwned = "true";
+      errorDiv.style.cssText = [
+        "position:fixed",
+        "z-index:9999999",
+        "right:20px",
+        "bottom:80px",
+        "width:min(340px,calc(100vw - 32px))",
+        "box-sizing:border-box",
+        "padding:14px",
+        "border-radius:16px",
+        "border:1px solid rgba(255,255,255,0.12)",
+        "background:linear-gradient(145deg,#111111 0%,#171721 58%,#101015 100%)",
+        "color:#ffffff",
+        "box-shadow:0 18px 44px rgba(0,0,0,0.38), inset 0 1px 0 rgba(255,255,255,0.06)",
+        "font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif",
+        "display:none",
+        "flex-direction:column",
+        "gap:12px",
+        "overflow:hidden"
+      ].join(";");
+
+      const accent = document.createElement("div");
+      accent.style.cssText = [
+        "position:absolute",
+        "inset:-1px",
+        "pointer-events:none",
+        "background:radial-gradient(circle at 12% 18%,rgba(120,95,255,0.24),transparent 34%),radial-gradient(circle at 88% 96%,rgba(25,195,125,0.16),transparent 32%)",
+        "opacity:0.9"
+      ].join(";");
 
       const header = document.createElement("div");
-      header.style.fontWeight = "bold";
-      header.textContent = "Transfer Failed";
+      header.style.cssText = "position:relative;z-index:1;display:flex;align-items:center;gap:10px";
+
+      const mark = document.createElement("div");
+      mark.id = "context-generator-error-mark";
+      mark.style.cssText = [
+        "width:28px",
+        "height:28px",
+        "border-radius:999px",
+        "display:flex",
+        "align-items:center",
+        "justify-content:center",
+        "flex:0 0 auto",
+        "font-size:14px",
+        "font-weight:800",
+        "background:rgba(255,255,255,0.08)",
+        "border:1px solid rgba(255,255,255,0.14)",
+        "color:#ffffff"
+      ].join(";");
+
+      const title = document.createElement("div");
+      title.id = "context-generator-error-title";
+      title.style.cssText = "font-size:14px;font-weight:760;line-height:1.2;letter-spacing:0;color:#ffffff";
 
       const textSpan = document.createElement("span");
       textSpan.id = "context-generator-error-text";
+      textSpan.style.cssText = "position:relative;z-index:1;font-size:12.5px;font-weight:500;line-height:1.42;color:rgba(255,255,255,0.72)";
 
       const closeBtn = document.createElement("button");
       closeBtn.textContent = "Dismiss";
-      closeBtn.style.padding = "6px 12px";
-      closeBtn.style.borderRadius = "4px";
-      closeBtn.style.border = "1px solid rgba(255, 255, 255, 0.4)";
-      closeBtn.style.backgroundColor = "transparent";
-      closeBtn.style.color = "#ffffff";
-      closeBtn.style.cursor = "pointer";
-      closeBtn.style.alignSelf = "flex-end";
-      closeBtn.style.fontSize = "12px";
+      closeBtn.style.cssText = [
+        "position:relative",
+        "z-index:1",
+        "align-self:flex-end",
+        "height:28px",
+        "padding:0 11px",
+        "border-radius:999px",
+        "border:1px solid rgba(255,255,255,0.12)",
+        "background:rgba(255,255,255,0.07)",
+        "color:rgba(255,255,255,0.86)",
+        "cursor:pointer",
+        "font:inherit",
+        "font-size:12px",
+        "font-weight:650",
+        "line-height:28px"
+      ].join(";");
       closeBtn.addEventListener("click", () => {
         errorDiv.style.display = "none";
       });
 
+      header.appendChild(mark);
+      header.appendChild(title);
+      errorDiv.appendChild(accent);
       errorDiv.appendChild(header);
       errorDiv.appendChild(textSpan);
       errorDiv.appendChild(closeBtn);
       document.body.appendChild(errorDiv);
     }
 
+    const title = document.getElementById("context-generator-error-title");
+    if (title) {
+      title.textContent = isNoConversationError ? NO_CONVERSATION_ERROR_TITLE : "Transfer failed";
+    }
+
+    const mark = document.getElementById("context-generator-error-mark");
+    if (mark) {
+      mark.textContent = isNoConversationError ? "i" : "!";
+    }
+
     const textSpan = document.getElementById("context-generator-error-text");
     if (textSpan) {
       textSpan.textContent = message;
     }
+
     errorDiv.style.display = "flex";
+    clearTimeout(errorDiv.contextGeneratorHideTimer);
+    errorDiv.contextGeneratorHideTimer = setTimeout(() => {
+      errorDiv.style.display = "none";
+    }, isNoConversationError ? 6500 : 8000);
   }
 
   function showFallbackModal(text, destinationName) {
