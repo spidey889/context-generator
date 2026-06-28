@@ -814,7 +814,7 @@ Then write: "Continue from where we left off."
     sheet.appendChild(grid);
 
     const footer = document.createElement("div");
-    footer.textContent = "Context goes straight into the input box";
+    footer.textContent = "Claude hit a wall. We didn't.";
     footer.style.cssText = [
       "margin:9px 1px 1px",
       "padding-top:8px",
