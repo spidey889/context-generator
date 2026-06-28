@@ -94,17 +94,21 @@ Then write: "Continue from where we left off."
     runningResetTimer = setTimeout(resetRunningFlag, RUNNING_AUTO_RESET_MS);
     sendResponse({ ok: true });
 
-    runClaudeFlow();
+    runClaudeFlow("chatgpt");
 
     return false;
   });
 
-  async function runClaudeFlow() {
+  async function runClaudeFlow(destination = "chatgpt") {
     try {
       showOverlay();
       const text = await captureClaudeResponseWithPolling();
       resetRunningFlag();
-      await notifyBackground({ type: "TRANSFER_TO_CHATGPT", text });
+      if (destination === "chatgpt") {
+        await notifyBackground({ type: "TRANSFER_TO_CHATGPT", text });
+      } else {
+        await notifyBackground({ type: "TRANSFER_TO_DESTINATION", destination, text });
+      }
     } catch (error) {
       resetRunningFlag();
       showErrorOverlay(error.message);
@@ -668,19 +672,22 @@ Then write: "Continue from where we left off."
         name: "Gemini",
         detail: "Google",
         accent: "#8ab4f8",
-        logo: chrome.runtime.getURL("logos/gemini-download__1_-removebg-preview.png")
+        logo: chrome.runtime.getURL("logos/gemini-download__1_-removebg-preview.png"),
+        action: () => startDestinationTransfer("gemini")
       },
       {
         name: "Grok",
         detail: "xAI",
         accent: "#f5f5f5",
-        logo: chrome.runtime.getURL("logos/grokwhitedownload__1_-removebg-preview.png")
+        logo: chrome.runtime.getURL("logos/grokwhitedownload__1_-removebg-preview.png"),
+        action: () => startDestinationTransfer("grok")
       },
       {
         name: "DeepSeek",
         detail: "DeepSeek",
         accent: "#4c8dff",
-        logo: chrome.runtime.getURL("logos/deepseek-download__1_-removebg-preview.png")
+        logo: chrome.runtime.getURL("logos/deepseek-download__1_-removebg-preview.png"),
+        action: () => startDestinationTransfer("deepseek")
       }
     ];
 
@@ -818,12 +825,16 @@ Then write: "Continue from where we left off."
   }
 
   function startChatGptTransfer() {
+    startDestinationTransfer("chatgpt");
+  }
+
+  function startDestinationTransfer(destination) {
     hideDestinationSheet();
     if (isRunning) return;
     isRunning = true;
     clearRunningResetTimer();
     runningResetTimer = setTimeout(resetRunningFlag, RUNNING_AUTO_RESET_MS);
-    runClaudeFlow();
+    runClaudeFlow(destination);
   }
 
   function ensureFloatingOverlay() {

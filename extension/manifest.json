@@ -12,7 +12,10 @@
   "host_permissions": [
     "https://*.claude.ai/*",
     "https://*.chatgpt.com/*",
-    "https://*.openai.com/*"
+    "https://*.openai.com/*",
+    "https://gemini.google.com/*",
+    "https://grok.com/*",
+    "https://chat.deepseek.com/*"
   ],
   "background": {
     "service_worker": "background.js"
@@ -34,6 +37,11 @@
     {
       "matches": ["https://*.chatgpt.com/*", "https://*.openai.com/*"],
       "js": ["chatgpt-content.js"],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": ["https://gemini.google.com/*", "https://grok.com/*", "https://chat.deepseek.com/*"],
+      "js": ["ai-destination-content.js"],
       "run_at": "document_idle"
     }
   ],

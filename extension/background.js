@@ -1,5 +1,27 @@
 const CLAUDE_ORIGIN = "https://claude.ai";
 const CHATGPT_URL = "https://chatgpt.com/";
+const DESTINATIONS = {
+  chatgpt: {
+    name: "ChatGPT",
+    url: CHATGPT_URL,
+    contentScript: "chatgpt-content.js"
+  },
+  gemini: {
+    name: "Gemini",
+    url: "https://gemini.google.com/",
+    contentScript: "ai-destination-content.js"
+  },
+  grok: {
+    name: "Grok",
+    url: "https://grok.com/",
+    contentScript: "ai-destination-content.js"
+  },
+  deepseek: {
+    name: "DeepSeek",
+    url: "https://chat.deepseek.com/",
+    contentScript: "ai-destination-content.js"
+  }
+};
 
 chrome.action.onClicked.addListener(async (tab) => {
   try {
@@ -25,6 +47,18 @@ chrome.action.onClicked.addListener(async (tab) => {
 });
 
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+  if (message?.type === "TRANSFER_TO_DESTINATION") {
+    transferToDestination(message.destination, message.text)
+      .then(() => sendResponse({ ok: true }))
+      .catch((error) => {
+        console.error("[Context Generator Relay]", error);
+        setBadge("ERR", "#b42318", 5000);
+        sendResponse({ ok: false, error: error.message });
+      });
+
+    return true;
+  }
+
   if (message?.type === "TRANSFER_TO_CHATGPT") {
     transferToChatGpt(message.text)
       .then(() => sendResponse({ ok: true }))
@@ -46,21 +80,31 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
 });
 
 async function transferToChatGpt(text) {
+  return transferToDestination("chatgpt", text);
+}
+
+async function transferToDestination(destinationId, text) {
   if (!text?.trim()) {
     throw new Error("Claude did not return response text.");
   }
 
-  const chatGptTab = await chrome.tabs.create({ url: CHATGPT_URL, active: true });
-  await waitForTabLoaded(chatGptTab.id);
-  await ensureContentScript(chatGptTab.id, "chatgpt-content.js");
+  const destination = DESTINATIONS[destinationId];
+  if (!destination) {
+    throw new Error("Unknown AI destination.");
+  }
 
-  const pasteResult = await sendMessage(chatGptTab.id, {
+  const destinationTab = await chrome.tabs.create({ url: destination.url, active: true });
+  await waitForTabLoaded(destinationTab.id, destination.name);
+  await ensureContentScript(destinationTab.id, destination.contentScript);
+
+  const pasteResult = await sendMessage(destinationTab.id, {
     type: "PASTE_CONTEXT",
+    destination: destinationId,
     text: text.trim()
   });
 
   if (!pasteResult?.ok) {
-    throw new Error(pasteResult?.error || "Could not paste into ChatGPT.");
+    throw new Error(pasteResult?.error || `Could not paste into ${destination.name}.`);
   }
 
   await setBadge("OK", "#1f8f4d", 2500);
@@ -81,7 +125,7 @@ function sendMessage(tabId, message) {
   return chrome.tabs.sendMessage(tabId, message);
 }
 
-function waitForTabLoaded(tabId) {
+function waitForTabLoaded(tabId, name = "destination") {
   return new Promise((resolve, reject) => {
     if (!tabId) {
       reject(new Error("Missing tab id."));
@@ -90,7 +134,7 @@ function waitForTabLoaded(tabId) {
 
     const timeout = setTimeout(() => {
       chrome.tabs.onUpdated.removeListener(listener);
-      reject(new Error("Timed out waiting for ChatGPT to load."));
+      reject(new Error(`Timed out waiting for ${name} to load.`));
     }, 30000);
 
     const listener = (updatedTabId, info) => {
