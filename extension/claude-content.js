@@ -16,7 +16,7 @@
   const BUBBLE_SIZE = 42;
   const BUBBLE_GAP = 8;
   const BUBBLE_SLOT_WIDTH = BUBBLE_SIZE + BUBBLE_GAP + 6;
-  const DESTINATION_SHEET_WIDTH = 248;
+  const DESTINATION_SHEET_WIDTH = 336;
   let reservedActionCluster = null;
 
   const CONTEXT_GENERATOR_PROMPT = `---
@@ -550,8 +550,8 @@ Then write: "Continue from where we left off."
     const bubble = document.createElement("button");
     bubble.id = BUBBLE_ID;
     bubble.type = "button";
-    bubble.title = "Transfer Context to ChatGPT";
-    bubble.setAttribute("aria-label", "Transfer Context to ChatGPT");
+    bubble.title = "Choose AI destination";
+    bubble.setAttribute("aria-label", "Choose AI destination");
     bubble.dataset.contextGeneratorOwned = "true";
     bubble.style.cssText = [
       "display:none",
@@ -622,107 +622,136 @@ Then write: "Continue from where we left off."
       "z-index:2147483647",
       `width:${DESTINATION_SHEET_WIDTH}px`,
       "box-sizing:border-box",
-      "padding:10px",
-      "border-radius:16px",
-      "border:1px solid rgba(147, 197, 253, 0.18)",
-      "background:linear-gradient(145deg, rgba(18,18,28,0.98), rgba(24,28,48,0.96))",
-      "box-shadow:0 18px 48px rgba(0,0,0,0.42), 0 0 0 1px rgba(124,92,255,0.08)",
-      "backdrop-filter:blur(14px)",
-      "color:#f8fafc",
+      "padding:12px",
+      "border-radius:18px",
+      "border:1px solid rgba(255,255,255,0.10)",
+      "background:#0a0a0a",
+      "box-shadow:0 22px 60px rgba(0,0,0,0.52), inset 0 1px 0 rgba(255,255,255,0.06)",
+      "backdrop-filter:blur(18px)",
+      "color:#f5f5f5",
       "font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif",
       "overflow:hidden"
     ].join(";");
 
     const header = document.createElement("div");
-    header.style.cssText = "padding:2px 4px 9px 4px;display:flex;flex-direction:column;gap:2px";
+    header.style.cssText = "padding:0 1px 10px;display:flex;align-items:center;justify-content:space-between;gap:12px";
     const title = document.createElement("div");
-    title.textContent = "Send context to";
-    title.style.cssText = "font-size:13px;font-weight:650;letter-spacing:0;color:#f8fafc";
-    const subtitle = document.createElement("div");
-    subtitle.textContent = "Choose your next AI workspace";
-    subtitle.style.cssText = "font-size:11px;color:rgba(226,232,240,0.62);letter-spacing:0";
+    title.textContent = "Send to AI";
+    title.style.cssText = "font-size:13px;font-weight:680;letter-spacing:0;color:#f5f5f5;line-height:1";
+    const badge = document.createElement("div");
+    badge.textContent = "Cap Context";
+    badge.style.cssText = [
+      "height:22px",
+      "padding:0 8px",
+      "border-radius:999px",
+      "border:1px solid rgba(255,255,255,0.10)",
+      "background:rgba(255,255,255,0.04)",
+      "color:rgba(245,245,245,0.68)",
+      "font-size:10px",
+      "font-weight:600",
+      "line-height:22px",
+      "letter-spacing:0"
+    ].join(";");
     header.appendChild(title);
-    header.appendChild(subtitle);
+    header.appendChild(badge);
     sheet.appendChild(header);
 
+    const logoDataUrl = (svg) => `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(svg)}`;
     const options = [
-      { name: "ChatGPT", detail: "Transfer now", tone: "#10b981", action: startChatGptTransfer },
-      { name: "Gemini", detail: "Coming soon", tone: "#60a5fa", action: () => showDestinationHint("Gemini support is coming soon") },
-      { name: "DeepSeek", detail: "Coming soon", tone: "#8b5cf6", action: () => showDestinationHint("DeepSeek support is coming soon") },
-      { name: "Grok", detail: "Coming soon", tone: "#f472b6", action: () => showDestinationHint("Grok support is coming soon") }
+      {
+        name: "ChatGPT",
+        detail: "Transfer context",
+        accent: "#19c37d",
+        logo: logoDataUrl(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><rect width="32" height="32" rx="10" fill="#101513"/><path d="M16 6.8l7.6 4.4v8.8L16 24.4 8.4 20v-8.8L16 6.8z" fill="none" stroke="#f5f5f5" stroke-width="1.8" stroke-linejoin="round"/><path d="M16 6.8v8.8l7.6 4.4M8.4 11.2l7.6 4.4v8.8" fill="none" stroke="#f5f5f5" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>`),
+        action: startChatGptTransfer
+      },
+      {
+        name: "Gemini",
+        detail: "Coming soon",
+        accent: "#8ab4f8",
+        logo: logoDataUrl(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><rect width="32" height="32" rx="10" fill="#11131a"/><path d="M16 5.8c1.1 5 4.2 8.1 9.2 9.2-5 1.1-8.1 4.2-9.2 9.2-1.1-5-4.2-8.1-9.2-9.2 5-1.1 8.1-4.2 9.2-9.2z" fill="#f5f5f5"/><path d="M23.4 5.8c.4 1.8 1.6 3 3.4 3.4-1.8.4-3 1.6-3.4 3.4-.4-1.8-1.6-3-3.4-3.4 1.8-.4 3-1.6 3.4-3.4z" fill="#8ab4f8"/></svg>`)
+      },
+      {
+        name: "Grok",
+        detail: "Coming soon",
+        accent: "#f5f5f5",
+        logo: logoDataUrl(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><rect width="32" height="32" rx="10" fill="#111"/><path d="M9 22.5L22.5 9M10 9.5l12 13" fill="none" stroke="#f5f5f5" stroke-width="2.4" stroke-linecap="round"/><circle cx="23.4" cy="8.6" r="2" fill="#f5f5f5"/></svg>`)
+      },
+      {
+        name: "DeepSeek",
+        detail: "Coming soon",
+        accent: "#4c8dff",
+        logo: logoDataUrl(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><rect width="32" height="32" rx="10" fill="#0e1422"/><path d="M7.6 18.8c3.2 4.8 11.6 5.1 15.6.8 2.2-2.4 2.1-5.9-.2-8.1-2.4-2.3-6.2-2.1-8.8.4" fill="none" stroke="#f5f5f5" stroke-width="2" stroke-linecap="round"/><path d="M11.6 12.5c2.4 1.4 4.5 3.5 6.1 6.3" fill="none" stroke="#4c8dff" stroke-width="2.1" stroke-linecap="round"/><circle cx="22.4" cy="13.1" r="1.7" fill="#4c8dff"/></svg>`)
+      }
     ];
+
+    const grid = document.createElement("div");
+    grid.style.cssText = "display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px";
 
     options.forEach((option) => {
       const button = document.createElement("button");
       button.type = "button";
       button.style.cssText = [
         "width:100%",
-        "height:44px",
-        "border:0",
-        "border-radius:11px",
-        "background:transparent",
-        "color:#f8fafc",
+        "height:58px",
+        "border:1px solid rgba(255,255,255,0.08)",
+        "border-radius:14px",
+        "background:rgba(255,255,255,0.035)",
+        "color:#f5f5f5",
         "display:flex",
         "align-items:center",
-        "gap:10px",
-        "padding:0 9px",
+        "gap:9px",
+        "padding:0 10px",
         "box-sizing:border-box",
-        "cursor:pointer",
+        `cursor:${option.action ? "pointer" : "default"}`,
         "text-align:left",
         "font:inherit",
-        "transition:background 0.14s ease, transform 0.14s ease"
+        "transition:background 0.14s ease, border-color 0.14s ease, box-shadow 0.14s ease, transform 0.14s ease"
       ].join(";");
+      if (!option.action) {
+        button.setAttribute("aria-disabled", "true");
+      }
 
-      const logo = document.createElement("div");
-      logo.textContent = option.name[0];
-      logo.style.cssText = [
-        "width:28px",
-        "height:28px",
-        "border-radius:10px",
-        `background:linear-gradient(145deg, ${option.tone}, rgba(99,102,241,0.82))`,
-        "display:flex",
-        "align-items:center",
-        "justify-content:center",
-        "font-size:13px",
-        "font-weight:800",
-        "color:#fff",
-        "box-shadow:0 8px 18px rgba(99,102,241,0.24)"
-      ].join(";");
+      const logo = document.createElement("img");
+      logo.src = option.logo;
+      logo.alt = "";
+      logo.draggable = false;
+      logo.style.cssText = "width:28px;height:28px;border-radius:10px;display:block;flex:0 0 auto;box-shadow:0 0 0 1px rgba(255,255,255,0.08)";
 
       const copy = document.createElement("div");
       copy.style.cssText = "display:flex;flex-direction:column;gap:1px;min-width:0;flex:1";
       const name = document.createElement("div");
       name.textContent = option.name;
-      name.style.cssText = "font-size:13px;font-weight:650;line-height:1.15;color:#f8fafc";
+      name.style.cssText = "font-size:12px;font-weight:680;line-height:1.1;color:#f5f5f5;white-space:nowrap;overflow:hidden;text-overflow:ellipsis";
       const detail = document.createElement("div");
       detail.textContent = option.detail;
-      detail.style.cssText = "font-size:11px;line-height:1.15;color:rgba(203,213,225,0.62)";
+      detail.style.cssText = "font-size:10px;line-height:1.15;color:rgba(245,245,245,0.52);white-space:nowrap;overflow:hidden;text-overflow:ellipsis";
       copy.appendChild(name);
       copy.appendChild(detail);
 
       button.appendChild(logo);
       button.appendChild(copy);
       button.addEventListener("mouseenter", () => {
-        button.style.background = "rgba(99,102,241,0.16)";
-        button.style.transform = "translateY(-1px)";
+        button.style.background = "rgba(255,255,255,0.07)";
+        button.style.borderColor = option.action ? option.accent : "rgba(255,255,255,0.12)";
+        button.style.boxShadow = option.action ? `0 0 0 1px ${option.accent}22, 0 10px 26px rgba(0,0,0,0.22)` : "none";
+        if (option.action) button.style.transform = "translateY(-1px)";
       });
       button.addEventListener("mouseleave", () => {
-        button.style.background = "transparent";
+        button.style.background = "rgba(255,255,255,0.035)";
+        button.style.borderColor = "rgba(255,255,255,0.08)";
+        button.style.boxShadow = "none";
         button.style.transform = "translateY(0)";
       });
       button.addEventListener("click", (event) => {
         event.preventDefault();
         event.stopPropagation();
-        option.action();
+        if (option.action) option.action();
       });
-      sheet.appendChild(button);
+      grid.appendChild(button);
     });
 
-    const hint = document.createElement("div");
-    hint.id = "context-generator-destination-hint";
-    hint.textContent = "";
-    hint.style.cssText = "height:16px;padding:4px 4px 0;color:rgba(191,219,254,0.82);font-size:11px;line-height:1;letter-spacing:0";
-    sheet.appendChild(hint);
+    sheet.appendChild(grid);
 
     sheet.addEventListener("click", (event) => event.stopPropagation());
     document.body.appendChild(sheet);
@@ -758,7 +787,7 @@ Then write: "Continue from where we left off."
 
     const bubbleRect = bubble.getBoundingClientRect();
     const margin = 10;
-    const sheetHeight = sheet.offsetHeight || 250;
+    const sheetHeight = sheet.offsetHeight || 164;
     const left = Math.max(
       margin,
       Math.min(
