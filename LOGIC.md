@@ -41,11 +41,11 @@ The script watches the page with a `MutationObserver`, plus listeners for resize
 
 To find the input, the script uses the current platform's editor selectors first, then fallback selectors. Candidates are scored by whether they are textarea/input/contenteditable elements, whether they are inside a form, whether their labels mention message/prompt/chat/write/ask/input, whether they are wide enough, and whether they are near the bottom of the viewport. Top-of-page candidates are penalized.
 
-After it finds the input, it searches upward for a composer surface: a parent element that wraps the input and has a reasonable composer-like size. If no good parent is found, it falls back to the form or the direct parent.
+After it finds the input, it searches for a composer surface: a parent element that wraps the input and has a reasonable composer-like size. Gemini and DeepSeek also have platform-specific composer selectors so the button anchors to their rounded input bars instead of a page-wide app container. Oversized ancestors are rejected before placement. If no good parent is found, it falls back to the form or the direct parent.
 
 The floating button is a 42px absolute-positioned button with `bubble-icon.png` inside it. The script appends the button inside the composer surface, not directly to `body`. If the composer surface has static positioning, the script temporarily changes it to `position: relative` and remembers the original inline position value so it can restore it later.
 
-The button sits on the right side of the composer. The script tries to find the platform's right-side action button cluster by scanning visible buttons inside or near the composer. If it finds that cluster, it shifts the cluster left by the bubble slot width so the Cap Context button has room. It remembers the original transform on the shifted cluster and restores it if the input disappears or the anchor changes.
+The button sits on the right side of the composer. The script tries to find the platform's right-side action button cluster by scanning visible buttons inside or near the composer. If it finds that cluster, it shifts the cluster left by the bubble slot width so the Cap Context button has room. It only shifts a real control cluster or button, never the whole composer. It remembers the original transform on the shifted cluster and restores it if the input disappears or the anchor changes.
 
 Clicking the button opens a destination picker. The picker lists all supported platforms except the current one. Each tile starts the same backend summary flow, then opens the selected platform, pastes the summary, and auto-clicks Send.
 

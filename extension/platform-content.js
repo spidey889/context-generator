@@ -15,6 +15,7 @@
   const DESTINATION_SHEET_WIDTH = 296;
   const RUNNING_AUTO_RESET_MS = 60000;
   const MAX_BACKEND_CONVERSATION_CHARS = 180000;
+  const DEFAULT_MAX_COMPOSER_WIDTH = 1320;
   const CAP_CONTEXT_SITE_URL = "https://spidey889.github.io/context-generator";
 
   const PLATFORMS = {
@@ -24,8 +25,8 @@
       host: "claude.ai",
       url: "https://claude.ai/",
       accent: "#d97757",
-      logoSize: 22,
-      logo: "icon48.png",
+      logoSize: 24,
+      logo: "logos/claude2download__1_-removebg-preview.png",
       inputSelectors: [
         "textarea",
         "[contenteditable='true'][data-placeholder]",
@@ -85,6 +86,16 @@
       accent: "#8ab4f8",
       logoSize: 22,
       logo: "logos/gemini-download__1_-removebg-preview.png",
+      maxComposerWidth: 1080,
+      composerSelectors: [
+        "div[class*='input-area-container' i]",
+        "div[class*='input-area' i]",
+        "div[class*='prompt-input' i]",
+        "div[class*='text-input' i]",
+        "prompt-input",
+        "rich-textarea",
+        "form"
+      ],
       inputSelectors: [
         ".ql-editor[contenteditable='true']",
         "rich-textarea [contenteditable='true']",
@@ -158,6 +169,15 @@
       accent: "#4c8dff",
       logoSize: 22,
       logo: "logos/deepseek-download__1_-removebg-preview.png",
+      maxComposerWidth: 1140,
+      composerSelectors: [
+        "div[class*='input-container' i]",
+        "div[class*='chat-input' i]",
+        "div[class*='input-box' i]",
+        "div[class*='composer' i]",
+        "div[class*='textarea' i]",
+        "form"
+      ],
       inputSelectors: [
         "#chat-input[contenteditable='true']",
         "div[contenteditable='true'][aria-label*='message' i]",
@@ -1342,35 +1362,101 @@
     const inputRect = input?.getBoundingClientRect();
     if (!inputRect) return null;
 
-    const candidates = [];
+    const candidates = getPlatformComposerCandidates(input, inputRect);
     let node = input.parentElement;
 
     while (node && node !== document.body) {
       const rect = node.getBoundingClientRect();
-      if (
-        rect.width >= 280 &&
-        rect.height >= 40 &&
-        rect.height <= 420 &&
-        rect.left <= inputRect.left + 18 &&
-        rect.right >= inputRect.right - 18 &&
-        rect.top <= inputRect.top + 18 &&
-        rect.bottom >= inputRect.bottom - 18
-      ) {
+      if (isComposerSurfaceCandidate(node, rect, inputRect)) {
         candidates.push({ node, rect });
       }
       node = node.parentElement;
     }
 
-    const bestCandidate = candidates.sort((a, b) => (a.rect.width * a.rect.height) - (b.rect.width * b.rect.height))[0];
-    if (bestCandidate) return bestCandidate.node;
+    const bestCandidate = pickComposerSurfaceCandidate(candidates, input);
+    if (bestCandidate) return bestCandidate;
 
     const form = input.closest("form");
     const formRect = form?.getBoundingClientRect();
-    if (formRect && formRect.width >= 280 && formRect.height >= 40 && formRect.height <= 420) {
+    if (formRect && isComposerSurfaceCandidate(form, formRect, inputRect)) {
       return form;
     }
 
     return input.parentElement;
+  }
+
+  function getPlatformComposerCandidates(input, inputRect) {
+    const selectors = currentPlatform.composerSelectors || [];
+    const candidates = [];
+
+    selectors.forEach((selector) => {
+      const closest = input.closest(selector);
+      if (closest) {
+        const rect = closest.getBoundingClientRect();
+        if (isComposerSurfaceCandidate(closest, rect, inputRect)) {
+          candidates.push({ node: closest, rect, preferred: true });
+        }
+      }
+
+      document.querySelectorAll(selector).forEach((element) => {
+        if (!element.contains(input)) return;
+        const rect = element.getBoundingClientRect();
+        if (isComposerSurfaceCandidate(element, rect, inputRect)) {
+          candidates.push({ node: element, rect, preferred: true });
+        }
+      });
+    });
+
+    return candidates.filter((candidate, index, all) => {
+      return all.findIndex((other) => other.node === candidate.node) === index;
+    });
+  }
+
+  function isComposerSurfaceCandidate(element, rect, inputRect) {
+    if (!element || !rect || !inputRect || isContextGeneratorNode(element)) return false;
+
+    const maxWidth = getMaxComposerSurfaceWidth();
+    return (
+      rect.width >= 280 &&
+      rect.width <= maxWidth &&
+      rect.height >= 40 &&
+      rect.height <= 260 &&
+      rect.left <= inputRect.left + 96 &&
+      rect.right >= inputRect.right - 18 &&
+      rect.top <= inputRect.top + 80 &&
+      rect.bottom >= inputRect.bottom - 18
+    );
+  }
+
+  function getMaxComposerSurfaceWidth() {
+    return Math.min(currentPlatform.maxComposerWidth || DEFAULT_MAX_COMPOSER_WIDTH, window.innerWidth - 24);
+  }
+
+  function pickComposerSurfaceCandidate(candidates, input) {
+    if (!candidates.length) return null;
+
+    return candidates
+      .map((candidate) => ({
+        ...candidate,
+        score: scoreComposerSurfaceCandidate(candidate, input)
+      }))
+      .sort((a, b) => b.score - a.score)[0].node;
+  }
+
+  function scoreComposerSurfaceCandidate(candidate, input) {
+    const inputRect = input.getBoundingClientRect();
+    const rect = candidate.rect;
+    const buttonCount = Array.from(candidate.node.querySelectorAll("button"))
+      .filter((button) => button.id !== BUBBLE_ID && isVisible(button)).length;
+
+    let score = candidate.preferred ? 40 : 0;
+    score += Math.min(buttonCount, 4) * 34;
+    if (rect.width >= inputRect.width + 120) score += 28;
+    if (rect.width <= inputRect.width + 44) score -= 34;
+    if (rect.height <= 180) score += 18;
+    score -= (rect.width * rect.height) / 22000;
+
+    return score;
   }
 
   function reserveComposerSurface(surface) {
@@ -1428,7 +1514,7 @@
       node = node.parentElement;
     }
 
-    return cluster || actionBtn.parentElement;
+    return cluster || actionBtn;
   }
 
   function releaseBubbleSlot() {
