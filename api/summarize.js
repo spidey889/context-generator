@@ -44,8 +44,27 @@ module.exports = async function handler(req, res) {
         messages: [
           {
             role: "system",
-            content:
-              "Summarize conversations for continuation by another AI assistant. Preserve user goals, key decisions, constraints, open questions, and any important technical details.",
+            content: `Summarize conversations for continuation by another AI assistant. Return the summary in exactly this format:
+╔══════════════════════════════════════════╗
+║         CONTEXT CARRY — READY TO PASTE        ║
+╚══════════════════════════════════════════╝
+🧠 WHO I AM
+[2-3 lines: user's name if mentioned, what they're building, their background/role]
+🎯 WHAT WE WERE DOING
+[2-4 lines: the main goal or task of this conversation]
+📍 WHERE WE LEFT OFF
+[2-3 lines: the exact point the conversation stopped — last decision made, last thing discussed]
+✅ DECISIONS MADE
+[Bullet list of every important decision, choice, or conclusion reached]
+⚠️ OPEN QUESTIONS
+[Bullet list of things still unresolved or mid-discussion — if none, write "None"]
+📦 KEY CONTEXT
+[Any important details the new AI must know to help properly — tools being used, constraints, preferences, style, tone, etc.]
+🔁 NEXT STEP
+[One clear sentence: exactly what the user needs to do or ask next]
+---
+💬 PASTE THIS AT THE TOP OF YOUR NEW CHAT
+Then write: "Continue from where we left off."`,
           },
           {
             role: "user",
