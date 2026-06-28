@@ -1586,11 +1586,11 @@
 
   function getDeepSeekBubblePlacement(composerRect) {
     const rowButtons = getDeepSeekComposerButtonCandidates(composerRect);
-    if (rowButtons.length < 2) return null;
+    if (rowButtons.length < 2) return getDeepSeekFallbackBubblePlacement(composerRect);
 
     const pinButton = rowButtons[rowButtons.length - 2];
     const left = pinButton.rect.left - composerRect.left - BUBBLE_SIZE - BUBBLE_GAP;
-    if (left < BUBBLE_GAP) return null;
+    if (left < BUBBLE_GAP) return getDeepSeekFallbackBubblePlacement(composerRect);
 
     const top = Math.max(
       BUBBLE_GAP,
@@ -1598,6 +1598,22 @@
         pinButton.rect.top + (pinButton.rect.height - BUBBLE_SIZE) / 2 - composerRect.top,
         composerRect.height - BUBBLE_SIZE - BUBBLE_GAP
       )
+    );
+
+    return {
+      left: Math.round(left),
+      top: Math.round(top)
+    };
+  }
+
+  function getDeepSeekFallbackBubblePlacement(composerRect) {
+    const left = Math.max(
+      BUBBLE_GAP,
+      composerRect.width - BUBBLE_SIZE - 104
+    );
+    const top = Math.max(
+      BUBBLE_GAP,
+      composerRect.height - BUBBLE_SIZE - 16
     );
 
     return {
@@ -1619,8 +1635,8 @@
   function getDeepSeekComposerButtonCandidates(composerRect) {
     const rowTop = composerRect.bottom - Math.max(64, composerRect.height * 0.55);
 
-    return Array.from(document.querySelectorAll("button"))
-      .filter((button) => button.id !== BUBBLE_ID && isVisible(button))
+    return Array.from(document.querySelectorAll("button, [role='button'], [tabindex='0']"))
+      .filter((button) => button.id !== BUBBLE_ID && !isContextGeneratorNode(button) && isVisible(button))
       .map((button) => ({ button, rect: button.getBoundingClientRect() }))
       .filter(({ rect }) => {
         return (
@@ -1733,6 +1749,12 @@
     if (rect.width >= inputRect.width + 120) score += 28;
     if (rect.width <= inputRect.width + 44) score -= 34;
     if (rect.height <= 180) score += 18;
+
+    if (currentPlatform.id === "deepseek") {
+      if (rect.bottom >= inputRect.bottom + 48) score += 140;
+      if (rect.height < 92) score -= 120;
+    }
+
     score -= (rect.width * rect.height) / 22000;
 
     return score;
