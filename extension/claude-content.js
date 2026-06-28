@@ -20,6 +20,7 @@
   const CAP_CONTEXT_SITE_URL = "https://spidey889.github.io/context-generator";
   let reservedActionCluster = null;
   let reservedComposerSurface = null;
+  let destinationSheetAnimationFrame = null;
 
   const CONTEXT_GENERATOR_PROMPT = `---
 name: context-generator
@@ -678,7 +679,12 @@ Then write: "Continue from where we left off."
       "backdrop-filter:blur(16px)",
       "color:#f5f5f5",
       "font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif",
-      "overflow:hidden"
+      "overflow:hidden",
+      "opacity:0",
+      "transform:translate3d(0,6px,0) scale(0.982)",
+      "transform-origin:bottom right",
+      "will-change:transform,opacity",
+      "transition:opacity 0.16s cubic-bezier(0.16,1,0.3,1), transform 0.18s cubic-bezier(0.16,1,0.3,1)"
     ].join(";");
 
     const header = document.createElement("div");
@@ -883,15 +889,34 @@ Then write: "Continue from where we left off."
       return;
     }
 
+    if (destinationSheetAnimationFrame) cancelAnimationFrame(destinationSheetAnimationFrame);
+    sheet.style.opacity = "0";
+    sheet.style.transform = "translate3d(0,6px,0) scale(0.982)";
     sheet.style.display = "block";
     delete sheet.dataset.contextGeneratorPositionLocked;
     showDestinationHint("");
     positionDestinationSheet();
+    if (window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) {
+      sheet.style.opacity = "1";
+      sheet.style.transform = "translate3d(0,0,0) scale(1)";
+      return;
+    }
+    destinationSheetAnimationFrame = requestAnimationFrame(() => {
+      sheet.style.opacity = "1";
+      sheet.style.transform = "translate3d(0,0,0) scale(1)";
+      destinationSheetAnimationFrame = null;
+    });
   }
 
   function hideDestinationSheet() {
     const sheet = document.getElementById(DESTINATION_SHEET_ID);
     if (sheet) {
+      if (destinationSheetAnimationFrame) {
+        cancelAnimationFrame(destinationSheetAnimationFrame);
+        destinationSheetAnimationFrame = null;
+      }
+      sheet.style.opacity = "0";
+      sheet.style.transform = "translate3d(0,6px,0) scale(0.982)";
       sheet.style.display = "none";
       delete sheet.dataset.contextGeneratorPositionLocked;
     }
@@ -923,6 +948,7 @@ Then write: "Continue from where we left off."
 
     sheet.style.left = `${Math.round(left)}px`;
     sheet.style.top = `${Math.round(Math.min(top, window.innerHeight - sheetHeight - margin))}px`;
+    sheet.style.transformOrigin = preferredTop >= margin ? "bottom right" : "top right";
     sheet.dataset.contextGeneratorPositionLocked = "true";
   }
 
