@@ -20,6 +20,7 @@
   const DESTINATION_SHEET_STYLE_ID = "context-generator-destination-sheet-styles";
   const CAP_CONTEXT_SITE_URL = "https://spidey889.github.io/context-generator";
   const MAX_BACKEND_CONVERSATION_CHARS = 180000;
+  const FORCE_BACKEND_STORAGE_KEY = "contextGeneratorForceBackend";
   let reservedActionCluster = null;
   let reservedComposerSurface = null;
   let destinationSheetAnimationFrame = null;
@@ -99,15 +100,19 @@ Then write: "Continue from where we left off."
     runningResetTimer = setTimeout(resetRunningFlag, RUNNING_AUTO_RESET_MS);
     sendResponse({ ok: true });
 
-    runClaudeFlow("chatgpt");
+    runClaudeFlow("chatgpt", { forceBackend: Boolean(message.forceBackend) });
 
     return false;
   });
 
-  async function runClaudeFlow(destination = "chatgpt") {
+  async function runClaudeFlow(destination = "chatgpt", options = {}) {
     try {
+      const forceBackend = shouldForceBackendSummary(options);
+      const backendConversationText = forceBackend ? scrapeClaudeConversationText() : "";
       showOverlay();
-      const text = await captureClaudeResponseWithPolling();
+      const text = forceBackend
+        ? await summarizeWithBackendFallback(backendConversationText)
+        : await captureClaudeResponseWithPolling();
       resetRunningFlag();
       if (destination === "chatgpt") {
         await notifyBackground({ type: "TRANSFER_TO_CHATGPT", text });
@@ -210,6 +215,16 @@ Then write: "Continue from where we left off."
     } catch (error) {
       console.error("[Context Generator Relay]", error);
       throw error;
+    }
+  }
+
+  function shouldForceBackendSummary(options = {}) {
+    if (options.forceBackend) return true;
+
+    try {
+      return localStorage.getItem(FORCE_BACKEND_STORAGE_KEY) === "true";
+    } catch {
+      return false;
     }
   }
 
@@ -1082,7 +1097,7 @@ Then write: "Continue from where we left off."
         accent: "#8ab4f8",
         logoSize: 22,
         logo: chrome.runtime.getURL("logos/gemini-download__1_-removebg-preview.png"),
-        action: () => startDestinationTransfer("gemini")
+        action: (options) => startDestinationTransfer("gemini", options)
       },
       {
         name: "Grok",
@@ -1090,7 +1105,7 @@ Then write: "Continue from where we left off."
         accent: "#f5f5f5",
         logoSize: 24,
         logo: chrome.runtime.getURL("logos/grokwhitedownload__1_-removebg-preview.png"),
-        action: () => startDestinationTransfer("grok")
+        action: (options) => startDestinationTransfer("grok", options)
       },
       {
         name: "DeepSeek",
@@ -1098,7 +1113,7 @@ Then write: "Continue from where we left off."
         accent: "#4c8dff",
         logoSize: 22,
         logo: chrome.runtime.getURL("logos/deepseek-download__1_-removebg-preview.png"),
-        action: () => startDestinationTransfer("deepseek")
+        action: (options) => startDestinationTransfer("deepseek", options)
       }
     ];
 
@@ -1217,13 +1232,14 @@ Then write: "Continue from where we left off."
         event.preventDefault();
         event.stopPropagation();
         if (!option.action || button.dataset.contextGeneratorLoading === "true") return;
+        const forceBackend = event.shiftKey;
         button.dataset.contextGeneratorLoading = "true";
         button.setAttribute("aria-busy", "true");
         button.style.pointerEvents = "none";
         spinner.style.display = "block";
-        detail.textContent = "Preparing...";
+        detail.textContent = forceBackend ? "Mistral..." : "Preparing...";
         button.style.transform = "scale(0.985)";
-        window.setTimeout(() => option.action(), 120);
+        window.setTimeout(() => option.action({ forceBackend }), 120);
       });
       grid.appendChild(button);
     });
@@ -1336,17 +1352,17 @@ Then write: "Continue from where we left off."
     if (hint) hint.textContent = message;
   }
 
-  function startChatGptTransfer() {
-    startDestinationTransfer("chatgpt");
+  function startChatGptTransfer(options = {}) {
+    startDestinationTransfer("chatgpt", options);
   }
 
-  function startDestinationTransfer(destination) {
+  function startDestinationTransfer(destination, options = {}) {
     hideDestinationSheet();
     if (isRunning) return;
     isRunning = true;
     clearRunningResetTimer();
     runningResetTimer = setTimeout(resetRunningFlag, RUNNING_AUTO_RESET_MS);
-    runClaudeFlow(destination);
+    runClaudeFlow(destination, options);
   }
 
   function ensureFloatingOverlay() {
