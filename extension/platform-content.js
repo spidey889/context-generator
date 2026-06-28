@@ -21,6 +21,10 @@
   const NO_CONVERSATION_ERROR_TITLE = "No text to summarize yet";
   const NO_CONVERSATION_ERROR_MESSAGE = "This chat is still a blank canvas. Drop a message first, then I'll bottle the context.";
   const MIN_FALLBACK_CONVERSATION_CHARS = 120;
+  const PASTE_RETRY_TIMEOUT_MS = 18000;
+  const PASTE_RETRY_INTERVAL_MS = 350;
+  const PASTE_VERIFY_TIMEOUT_MS = 800;
+  const SEND_VERIFY_TIMEOUT_MS = 1800;
   const CAP_CONTEXT_SITE_URL = "https://spidey889.github.io/context-generator";
 
   const PLATFORMS = {
@@ -56,6 +60,7 @@
       accent: "#19c37d",
       logoSize: 21,
       logo: "logos/gptwhitedownload__1_-removebg-preview.png",
+      retryPaste: true,
       inputSelectors: [
         "#prompt-textarea[contenteditable='true']",
         "[data-testid='prompt-textarea'][contenteditable='true']",
@@ -174,6 +179,7 @@
       accent: "#4c8dff",
       logoSize: 22,
       logo: "logos/deepseek-download__1_-removebg-preview.png",
+      retryPaste: true,
       maxComposerWidth: 1140,
       composerSelectors: [
         "div[class*='input-container' i]",
@@ -320,22 +326,75 @@
       throw new Error(`No text was provided for ${destination.name}.`);
     }
 
+    const trimmedText = text.trim();
+
+    if (destination.retryPaste) {
+      const sendButton = await pasteAndFindSendButtonWithRetry(trimmedText, destination);
+      sendButton.click();
+      return;
+    }
+
     const input = await waitForElement(() => findPlatformInput(destination), 15000, `${destination.name} message input`);
     if (!input) {
-      showFallbackModal(text.trim(), destination.name);
+      showFallbackModal(trimmedText, destination.name);
       throw new Error(`${destination.name} message input element could not be found.`);
     }
 
-    setEditorText(input, text.trim());
+    setEditorText(input, trimmedText);
 
-    const sampleText = text.trim().slice(0, 20);
+    const sampleText = trimmedText.slice(0, 20);
     if (!getElementText(input).includes(sampleText)) {
-      showFallbackModal(text.trim(), destination.name);
+      showFallbackModal(trimmedText, destination.name);
       throw new Error(`Paste operation failed to populate the ${destination.name} editor.`);
     }
 
     const sendButton = await waitForElement(() => findSendButton(input, destination), 10000, `${destination.name} send button`);
     sendButton.click();
+  }
+
+  async function pasteAndFindSendButtonWithRetry(text, destination) {
+    const startedAt = Date.now();
+    let sawInput = false;
+    let lastError = null;
+
+    while (Date.now() - startedAt <= PASTE_RETRY_TIMEOUT_MS) {
+      const input = findReadyPlatformInput(destination);
+      if (input) {
+        sawInput = true;
+
+        try {
+          setEditorText(input, text);
+
+          if (await waitForEditorText(input, text, PASTE_VERIFY_TIMEOUT_MS)) {
+            const sendButton = await waitForElement(() => {
+              const currentInput = input.isConnected ? input : findReadyPlatformInput(destination);
+              return currentInput ? findSendButton(currentInput, destination) : null;
+            }, SEND_VERIFY_TIMEOUT_MS, `${destination.name} send button`).catch((error) => {
+              lastError = error;
+              return null;
+            });
+
+            if (sendButton) {
+              return sendButton;
+            }
+          } else {
+            lastError = new Error(`Paste operation failed to populate the ${destination.name} editor.`);
+          }
+        } catch (error) {
+          lastError = error;
+        }
+      }
+
+      await delay(PASTE_RETRY_INTERVAL_MS);
+    }
+
+    showFallbackModal(text, destination.name);
+
+    if (!sawInput) {
+      throw new Error(`${destination.name} message input element could not be found.`);
+    }
+
+    throw lastError || new Error(`Paste operation failed to populate the ${destination.name} editor.`);
   }
 
   function findPlatformInput(platform = currentPlatform) {
@@ -349,6 +408,21 @@
     return candidates
       .map((element) => ({ element, score: scoreInputCandidate(element) }))
       .sort((a, b) => b.score - a.score)[0]?.element || null;
+  }
+
+  function findReadyPlatformInput(platform = currentPlatform) {
+    const input = findPlatformInput(platform);
+    return isEditorReady(input) ? input : null;
+  }
+
+  function isEditorReady(element) {
+    if (!element || !isVisible(element) || isDisabled(element)) return false;
+
+    if (element instanceof HTMLTextAreaElement || element instanceof HTMLInputElement) {
+      return !element.readOnly;
+    }
+
+    return element.isContentEditable && element.getAttribute("contenteditable") !== "false";
   }
 
   function scoreInputCandidate(element) {
@@ -379,13 +453,25 @@
       return all.indexOf(button) === index && button.id !== BUBBLE_ID && isVisible(button) && !isDisabled(button);
     });
 
-    return buttons.find((button) => {
+    const labeledSendButton = buttons.find((button) => {
       const label = getElementLabel(button, true);
       if (/\b(stop|cancel|attach|upload|voice|mic|microphone|new|menu)\b/.test(label)) return false;
       return /\b(send|submit)\b/.test(label) || button.type === "submit";
-    }) || scopedButtons.find((button) => {
+    });
+
+    if (labeledSendButton) return labeledSendButton;
+
+    const submitButton = scopedButtons.find((button) => {
       return button.id !== BUBBLE_ID && isVisible(button) && !isDisabled(button) && button.type === "submit";
     });
+
+    if (submitButton) return submitButton;
+
+    if (platform.id === "deepseek") {
+      return findDeepSeekSendButton(input);
+    }
+
+    return null;
   }
 
   function setEditorText(element, text) {
@@ -423,6 +509,29 @@
     element.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "insertText", data: text }));
     element.dispatchEvent(new Event("input", { bubbles: true }));
     element.dispatchEvent(new Event("change", { bubbles: true }));
+  }
+
+  function waitForEditorText(element, text, timeoutMs) {
+    const sampleText = text.slice(0, 20);
+    const startedAt = Date.now();
+
+    return new Promise((resolve) => {
+      const tick = () => {
+        if (getElementText(element).includes(sampleText)) {
+          resolve(true);
+          return;
+        }
+
+        if (Date.now() - startedAt > timeoutMs) {
+          resolve(false);
+          return;
+        }
+
+        setTimeout(tick, 100);
+      };
+
+      tick();
+    });
   }
 
   function scrapeConversationText() {
@@ -1407,6 +1516,18 @@
     const actionBtn = findComposerActionButton(input, composerRect);
     let anchorTop = composerRect.bottom - BUBBLE_SIZE - BUBBLE_GAP;
 
+    if (currentPlatform.id === "deepseek") {
+      const deepSeekPlacement = getDeepSeekBubblePlacement(composerRect);
+      if (deepSeekPlacement) {
+        releaseBubbleSlot();
+        bubble.style.left = `${deepSeekPlacement.left}px`;
+        bubble.style.right = "auto";
+        bubble.style.top = `${deepSeekPlacement.top}px`;
+        bubble.style.display = "flex";
+        return;
+      }
+    }
+
     if (actionBtn) {
       const actionRect = actionBtn.getBoundingClientRect();
       if (actionRect.width > 0 && actionRect.height > 0) {
@@ -1461,6 +1582,59 @@
       }
       return buttonRect.left > rightmostRect.left ? button : rightmost;
     });
+  }
+
+  function getDeepSeekBubblePlacement(composerRect) {
+    const rowButtons = getDeepSeekComposerButtonCandidates(composerRect);
+    if (rowButtons.length < 2) return null;
+
+    const pinButton = rowButtons[rowButtons.length - 2];
+    const left = pinButton.rect.left - composerRect.left - BUBBLE_SIZE - BUBBLE_GAP;
+    if (left < BUBBLE_GAP) return null;
+
+    const top = Math.max(
+      BUBBLE_GAP,
+      Math.min(
+        pinButton.rect.top + (pinButton.rect.height - BUBBLE_SIZE) / 2 - composerRect.top,
+        composerRect.height - BUBBLE_SIZE - BUBBLE_GAP
+      )
+    );
+
+    return {
+      left: Math.round(left),
+      top: Math.round(top)
+    };
+  }
+
+  function findDeepSeekSendButton(input) {
+    const composerSurface = findComposerSurfaceElement(input);
+    const composerRect = composerSurface?.getBoundingClientRect();
+    if (!composerRect) return null;
+
+    const rowButtons = getDeepSeekComposerButtonCandidates(composerRect);
+    const sendButton = rowButtons[rowButtons.length - 1]?.button;
+    return sendButton && !isDisabled(sendButton) ? sendButton : null;
+  }
+
+  function getDeepSeekComposerButtonCandidates(composerRect) {
+    const rowTop = composerRect.bottom - Math.max(64, composerRect.height * 0.55);
+
+    return Array.from(document.querySelectorAll("button"))
+      .filter((button) => button.id !== BUBBLE_ID && isVisible(button))
+      .map((button) => ({ button, rect: button.getBoundingClientRect() }))
+      .filter(({ rect }) => {
+        return (
+          rect.width > 0 &&
+          rect.width <= 80 &&
+          rect.height > 0 &&
+          rect.height <= 72 &&
+          rect.left >= composerRect.left + composerRect.width * 0.35 &&
+          rect.right <= composerRect.right + 12 &&
+          rect.top >= rowTop &&
+          rect.bottom <= composerRect.bottom + 12
+        );
+      })
+      .sort((a, b) => a.rect.left - b.rect.left);
   }
 
   function findComposerSurfaceElement(input) {
@@ -1705,6 +1879,10 @@
 
       tick();
     });
+  }
+
+  function delay(timeoutMs) {
+    return new Promise((resolve) => setTimeout(resolve, timeoutMs));
   }
 
   function getElementLabel(element, includeText = false) {
