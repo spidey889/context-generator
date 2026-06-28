@@ -61,6 +61,13 @@
       logoSize: 21,
       logo: "logos/gptwhitedownload__1_-removebg-preview.png",
       retryPaste: true,
+      maxComposerWidth: 1120,
+      composerSelectors: [
+        "form",
+        "div[class*='composer' i]",
+        "[data-testid*='composer' i]",
+        "[data-type*='composer' i]"
+      ],
       inputSelectors: [
         "#prompt-textarea[contenteditable='true']",
         "[data-testid='prompt-textarea'][contenteditable='true']",
@@ -1513,8 +1520,15 @@
       return;
     }
 
-    const actionBtn = findComposerActionButton(input, composerRect);
-    let anchorTop = composerRect.bottom - BUBBLE_SIZE - BUBBLE_GAP;
+    if (currentPlatform.id === "chatgpt") {
+      const chatGptPlacement = getChatGptBubblePlacement(composerRect);
+      releaseBubbleSlot();
+      bubble.style.left = `${chatGptPlacement.left}px`;
+      bubble.style.right = "auto";
+      bubble.style.top = `${chatGptPlacement.top}px`;
+      bubble.style.display = "flex";
+      return;
+    }
 
     if (currentPlatform.id === "deepseek") {
       const deepSeekPlacement = getDeepSeekBubblePlacement(composerRect);
@@ -1527,6 +1541,9 @@
         return;
       }
     }
+
+    const actionBtn = findComposerActionButton(input, composerRect);
+    let anchorTop = composerRect.bottom - BUBBLE_SIZE - BUBBLE_GAP;
 
     if (actionBtn) {
       const actionRect = actionBtn.getBoundingClientRect();
@@ -1584,6 +1601,41 @@
     });
   }
 
+  function getChatGptBubblePlacement(composerRect) {
+    const rowButtons = getChatGptComposerButtonCandidates(composerRect);
+    const actionButton = rowButtons[rowButtons.length - 1];
+
+    if (actionButton) {
+      const left = actionButton.rect.left - composerRect.left - BUBBLE_SIZE - BUBBLE_GAP;
+      if (left >= BUBBLE_GAP) {
+        return getBubblePlacementBesideRect(actionButton.rect, composerRect, left);
+      }
+    }
+
+    return getBottomRightRowBubblePlacement(composerRect, 64);
+  }
+
+  function getChatGptComposerButtonCandidates(composerRect) {
+    const rowTop = composerRect.bottom - Math.max(60, composerRect.height * 0.55);
+
+    return Array.from(document.querySelectorAll("button, [role='button']"))
+      .filter((button) => button.id !== BUBBLE_ID && !isContextGeneratorNode(button) && isVisible(button))
+      .map((button) => ({ button, rect: button.getBoundingClientRect() }))
+      .filter(({ rect }) => {
+        return (
+          rect.width > 0 &&
+          rect.width <= 84 &&
+          rect.height > 0 &&
+          rect.height <= 72 &&
+          rect.left >= composerRect.left + composerRect.width * 0.45 &&
+          rect.right <= composerRect.right + 12 &&
+          rect.top >= rowTop &&
+          rect.bottom <= composerRect.bottom + 12
+        );
+      })
+      .sort((a, b) => a.rect.left - b.rect.left);
+  }
+
   function getDeepSeekBubblePlacement(composerRect) {
     const rowButtons = getDeepSeekComposerButtonCandidates(composerRect);
     if (rowButtons.length < 2) return getDeepSeekFallbackBubblePlacement(composerRect);
@@ -1592,10 +1644,18 @@
     const left = pinButton.rect.left - composerRect.left - BUBBLE_SIZE - BUBBLE_GAP;
     if (left < BUBBLE_GAP) return getDeepSeekFallbackBubblePlacement(composerRect);
 
+    return getBubblePlacementBesideRect(pinButton.rect, composerRect, left);
+  }
+
+  function getDeepSeekFallbackBubblePlacement(composerRect) {
+    return getBottomRightRowBubblePlacement(composerRect, 104);
+  }
+
+  function getBubblePlacementBesideRect(targetRect, composerRect, left) {
     const top = Math.max(
       BUBBLE_GAP,
       Math.min(
-        pinButton.rect.top + (pinButton.rect.height - BUBBLE_SIZE) / 2 - composerRect.top,
+        targetRect.top + (targetRect.height - BUBBLE_SIZE) / 2 - composerRect.top,
         composerRect.height - BUBBLE_SIZE - BUBBLE_GAP
       )
     );
@@ -1606,10 +1666,10 @@
     };
   }
 
-  function getDeepSeekFallbackBubblePlacement(composerRect) {
+  function getBottomRightRowBubblePlacement(composerRect, rightOffset) {
     const left = Math.max(
       BUBBLE_GAP,
-      composerRect.width - BUBBLE_SIZE - 104
+      composerRect.width - BUBBLE_SIZE - rightOffset
     );
     const top = Math.max(
       BUBBLE_GAP,
@@ -1750,7 +1810,7 @@
     if (rect.width <= inputRect.width + 44) score -= 34;
     if (rect.height <= 180) score += 18;
 
-    if (currentPlatform.id === "deepseek") {
+    if (currentPlatform.id === "chatgpt" || currentPlatform.id === "deepseek") {
       if (rect.bottom >= inputRect.bottom + 48) score += 140;
       if (rect.height < 92) score -= 120;
     }
