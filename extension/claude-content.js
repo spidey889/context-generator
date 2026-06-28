@@ -679,6 +679,29 @@ Then write: "Continue from where we left off."
         }
       }
 
+      @keyframes contextGeneratorTileIn {
+        from {
+          opacity: 0;
+          transform: translate3d(0, 5px, 0) scale(0.985);
+          filter: brightness(0.94);
+        }
+        to {
+          opacity: 1;
+          transform: translate3d(0, 0, 0) scale(1);
+          filter: brightness(1);
+        }
+      }
+
+      @keyframes contextGeneratorSpinnerSpin {
+        to {
+          transform: rotate(360deg);
+        }
+      }
+
+      .context-generator-destination-tile.context-generator-tile-enter {
+        animation: contextGeneratorTileIn 0.24s cubic-bezier(0.16, 1, 0.3, 1) both;
+      }
+
       .context-generator-tile-shine {
         position: absolute;
         top: -2px;
@@ -694,14 +717,69 @@ Then write: "Continue from where we left off."
         animation: contextGeneratorTileShine 5.4s cubic-bezier(0.16, 1, 0.3, 1) infinite;
       }
 
+      .context-generator-tile-spinner {
+        display: none;
+        width: 12px;
+        height: 12px;
+        border-radius: 999px;
+        border: 1.5px solid rgba(245,245,245,0.18);
+        border-top-color: rgba(245,245,245,0.78);
+        flex: 0 0 auto;
+        position: relative;
+        z-index: 2;
+        animation: contextGeneratorSpinnerSpin 0.7s linear infinite;
+      }
+
       @media (prefers-reduced-motion: reduce) {
+        .context-generator-destination-tile.context-generator-tile-enter,
         .context-generator-tile-shine {
           animation: none;
+        }
+
+        .context-generator-tile-shine {
           opacity: 0;
+        }
+
+        .context-generator-tile-spinner {
+          animation: none;
         }
       }
     `;
     (document.head || document.documentElement).appendChild(style);
+  }
+
+  function animateDestinationTiles(sheet) {
+    if (window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) return;
+
+    const tiles = sheet.querySelectorAll(".context-generator-destination-tile");
+    tiles.forEach((tile, index) => {
+      tile.classList.remove("context-generator-tile-enter");
+      tile.style.animationDelay = `${index * 0.045}s`;
+      void tile.offsetWidth;
+      tile.classList.add("context-generator-tile-enter");
+    });
+
+    window.setTimeout(() => {
+      tiles.forEach((tile) => {
+        tile.classList.remove("context-generator-tile-enter");
+        tile.style.animationDelay = "";
+      });
+    }, 440);
+  }
+
+  function resetDestinationTiles(sheet) {
+    sheet.querySelectorAll(".context-generator-destination-tile").forEach((tile) => {
+      tile.dataset.contextGeneratorLoading = "false";
+      tile.removeAttribute("aria-busy");
+      tile.style.pointerEvents = "";
+      tile.style.transform = "translateY(0)";
+      const detail = tile.querySelector(".context-generator-tile-detail");
+      const spinner = tile.querySelector(".context-generator-tile-spinner");
+      if (detail && tile.dataset.contextGeneratorDetail) {
+        detail.textContent = tile.dataset.contextGeneratorDetail;
+      }
+      if (spinner) spinner.style.display = "none";
+    });
   }
 
   function ensureDestinationSheet() {
@@ -822,6 +900,8 @@ Then write: "Continue from where we left off."
     options.forEach((option, index) => {
       const button = document.createElement("button");
       button.type = "button";
+      button.className = "context-generator-destination-tile";
+      button.dataset.contextGeneratorDetail = option.detail;
       button.style.cssText = [
         "width:100%",
         "height:54px",
@@ -874,6 +954,7 @@ Then write: "Continue from where we left off."
       name.textContent = option.name;
       name.style.cssText = "font-size:12px;font-weight:720;line-height:1.05;color:#f5f5f5;white-space:nowrap;overflow:hidden;text-overflow:ellipsis";
       const detail = document.createElement("div");
+      detail.className = "context-generator-tile-detail";
       detail.textContent = option.detail;
       detail.style.cssText = "font-size:10px;font-weight:500;line-height:1.1;color:rgba(245,245,245,0.50);white-space:nowrap;overflow:hidden;text-overflow:ellipsis";
       copy.appendChild(name);
@@ -911,10 +992,15 @@ Then write: "Continue from where we left off."
       shine.className = "context-generator-tile-shine";
       shine.style.animationDelay = `${index * 0.18}s`;
 
+      const spinner = document.createElement("span");
+      spinner.className = "context-generator-tile-spinner";
+      spinner.setAttribute("aria-hidden", "true");
+
       button.appendChild(aura);
       button.appendChild(shine);
       button.appendChild(logoWrap);
       button.appendChild(copy);
+      button.appendChild(spinner);
       button.addEventListener("mouseenter", setButtonActive);
       button.addEventListener("mouseleave", setButtonIdle);
       button.addEventListener("focus", setButtonActive);
@@ -922,7 +1008,14 @@ Then write: "Continue from where we left off."
       button.addEventListener("click", (event) => {
         event.preventDefault();
         event.stopPropagation();
-        if (option.action) option.action();
+        if (!option.action || button.dataset.contextGeneratorLoading === "true") return;
+        button.dataset.contextGeneratorLoading = "true";
+        button.setAttribute("aria-busy", "true");
+        button.style.pointerEvents = "none";
+        spinner.style.display = "block";
+        detail.textContent = "Preparing...";
+        button.style.transform = "scale(0.985)";
+        window.setTimeout(() => option.action(), 120);
       });
       grid.appendChild(button);
     });
@@ -930,7 +1023,7 @@ Then write: "Continue from where we left off."
     sheet.appendChild(grid);
 
     const footer = document.createElement("div");
-    footer.textContent = "Claude hit a wall. We didn't.";
+    footer.textContent = "Context goes straight into the input box";
     footer.style.cssText = [
       "margin:9px 1px 1px",
       "padding-top:8px",
@@ -971,6 +1064,8 @@ Then write: "Continue from where we left off."
     delete sheet.dataset.contextGeneratorPositionLocked;
     showDestinationHint("");
     positionDestinationSheet();
+    resetDestinationTiles(sheet);
+    animateDestinationTiles(sheet);
     if (window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) {
       sheet.style.opacity = "1";
       sheet.style.transform = "translate3d(0,0,0) scale(1)";
