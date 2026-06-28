@@ -703,8 +703,25 @@ Then write: "Continue from where we left off."
       "letter-spacing:0",
       "font-family:inherit",
       "cursor:pointer",
-      "outline:0"
+      "outline:0",
+      "transition:border-color 0.14s ease, background 0.14s ease, box-shadow 0.14s ease, color 0.14s ease"
     ].join(";");
+    const setBadgeActive = () => {
+      badge.style.borderColor = "rgba(245,245,245,0.34)";
+      badge.style.background = "rgba(255,255,255,0.065)";
+      badge.style.boxShadow = "0 0 0 1px rgba(245,245,245,0.08)";
+      badge.style.color = "rgba(245,245,245,0.84)";
+    };
+    const setBadgeIdle = () => {
+      badge.style.borderColor = "rgba(255,255,255,0.085)";
+      badge.style.background = "rgba(255,255,255,0.035)";
+      badge.style.boxShadow = "none";
+      badge.style.color = "rgba(245,245,245,0.62)";
+    };
+    badge.addEventListener("mouseenter", setBadgeActive);
+    badge.addEventListener("mouseleave", setBadgeIdle);
+    badge.addEventListener("focus", setBadgeActive);
+    badge.addEventListener("blur", setBadgeIdle);
     badge.addEventListener("click", (event) => {
       event.preventDefault();
       event.stopPropagation();
