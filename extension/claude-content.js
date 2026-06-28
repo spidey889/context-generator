@@ -283,9 +283,42 @@ Then write: "Continue from where we left off."
       "[contenteditable='true']"
     ];
 
-    return selectors
+    const candidates = selectors
       .flatMap((selector) => Array.from(document.querySelectorAll(selector)))
-      .find((element) => isVisible(element) && !element.closest("[aria-hidden='true']"));
+      .filter((element, index, all) => {
+        return all.indexOf(element) === index && isVisible(element) && !element.closest("[aria-hidden='true']");
+      });
+
+    return candidates
+      .map((element) => ({ element, score: scoreClaudeInputCandidate(element) }))
+      .sort((a, b) => b.score - a.score)[0]?.element || null;
+  }
+
+  function scoreClaudeInputCandidate(element) {
+    const rect = element.getBoundingClientRect();
+    const label = [
+      element.getAttribute("aria-label"),
+      element.getAttribute("placeholder"),
+      element.getAttribute("data-placeholder"),
+      element.getAttribute("role"),
+      element.id,
+      element.className
+    ]
+      .filter(Boolean)
+      .join(" ")
+      .toLowerCase();
+
+    let score = 0;
+    if (element instanceof HTMLTextAreaElement || element instanceof HTMLInputElement) score += 24;
+    if (element.closest("form")) score += 48;
+    if (/\b(message|prompt|chat|write|ask)\b/.test(label)) score += 72;
+    if (rect.width >= 280) score += 24;
+    if (rect.height >= 20 && rect.height <= 240) score += 18;
+    if (rect.bottom >= window.innerHeight * 0.45) score += 56;
+    if (rect.bottom >= window.innerHeight * 0.7) score += 32;
+    if (rect.top < 120 && rect.bottom < window.innerHeight * 0.45) score -= 90;
+
+    return score;
   }
 
   function findSendButton(input, includeDisabled = false, silent = false) {
