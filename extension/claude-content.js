@@ -17,6 +17,7 @@
   const BUBBLE_GAP = 8;
   const BUBBLE_SLOT_WIDTH = BUBBLE_SIZE + BUBBLE_GAP + 6;
   const DESTINATION_SHEET_WIDTH = 316;
+  const DESTINATION_SHEET_STYLE_ID = "context-generator-destination-sheet-styles";
   const CAP_CONTEXT_SITE_URL = "https://spidey889.github.io/context-generator";
   let reservedActionCluster = null;
   let reservedComposerSurface = null;
@@ -658,9 +659,56 @@ Then write: "Continue from where we left off."
     return bubble;
   }
 
+  function ensureDestinationSheetStyles() {
+    if (document.getElementById(DESTINATION_SHEET_STYLE_ID)) return;
+
+    const style = document.createElement("style");
+    style.id = DESTINATION_SHEET_STYLE_ID;
+    style.textContent = `
+      @keyframes contextGeneratorTileShine {
+        0%, 16% {
+          opacity: 0;
+          transform: translate3d(-150%, 0, 0) skewX(-18deg);
+        }
+        24% {
+          opacity: 0.48;
+        }
+        40%, 100% {
+          opacity: 0;
+          transform: translate3d(380%, 0, 0) skewX(-18deg);
+        }
+      }
+
+      .context-generator-tile-shine {
+        position: absolute;
+        top: -2px;
+        bottom: -2px;
+        left: -52px;
+        width: 46px;
+        z-index: 0;
+        pointer-events: none;
+        background: linear-gradient(90deg, transparent, rgba(255,255,255,0.18), rgba(255,255,255,0.32), transparent);
+        filter: blur(0.25px);
+        opacity: 0;
+        transform: translate3d(-150%, 0, 0) skewX(-18deg);
+        animation: contextGeneratorTileShine 4.8s cubic-bezier(0.16, 1, 0.3, 1) infinite;
+      }
+
+      @media (prefers-reduced-motion: reduce) {
+        .context-generator-tile-shine {
+          animation: none;
+          opacity: 0;
+        }
+      }
+    `;
+    (document.head || document.documentElement).appendChild(style);
+  }
+
   function ensureDestinationSheet() {
     let sheet = document.getElementById(DESTINATION_SHEET_ID);
     if (sheet) return sheet;
+
+    ensureDestinationSheetStyles();
 
     sheet = document.createElement("div");
     sheet.id = DESTINATION_SHEET_ID;
@@ -771,7 +819,7 @@ Then write: "Continue from where we left off."
     const grid = document.createElement("div");
     grid.style.cssText = "display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:7px";
 
-    options.forEach((option) => {
+    options.forEach((option, index) => {
       const button = document.createElement("button");
       button.type = "button";
       button.style.cssText = [
@@ -790,6 +838,9 @@ Then write: "Continue from where we left off."
         "text-align:left",
         "font:inherit",
         "outline:0",
+        "position:relative",
+        "overflow:hidden",
+        "isolation:isolate",
         "transition:background 0.14s ease, border-color 0.14s ease, box-shadow 0.14s ease, transform 0.14s ease"
       ].join(";");
       if (!option.action) {
@@ -804,7 +855,9 @@ Then write: "Continue from where we left off."
         "align-items:center",
         "justify-content:center",
         "flex:0 0 auto",
-        "opacity:0.96"
+        "opacity:0.96",
+        "position:relative",
+        "z-index:1"
       ].join(";");
 
       const logo = document.createElement("img");
@@ -815,7 +868,7 @@ Then write: "Continue from where we left off."
       logoWrap.appendChild(logo);
 
       const copy = document.createElement("div");
-      copy.style.cssText = "display:flex;flex-direction:column;gap:2px;min-width:0;flex:1";
+      copy.style.cssText = "display:flex;flex-direction:column;gap:2px;min-width:0;flex:1;position:relative;z-index:1";
       const name = document.createElement("div");
       name.textContent = option.name;
       name.style.cssText = "font-size:12px;font-weight:720;line-height:1.05;color:#f5f5f5;white-space:nowrap;overflow:hidden;text-overflow:ellipsis";
@@ -838,6 +891,11 @@ Then write: "Continue from where we left off."
         button.style.transform = "translateY(0)";
       };
 
+      const shine = document.createElement("span");
+      shine.className = "context-generator-tile-shine";
+      shine.style.animationDelay = `${index * 0.18}s`;
+
+      button.appendChild(shine);
       button.appendChild(logoWrap);
       button.appendChild(copy);
       button.addEventListener("mouseenter", setButtonActive);
