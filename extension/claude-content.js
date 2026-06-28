@@ -770,19 +770,29 @@ Then write: "Continue from where we left off."
     }
 
     sheet.style.display = "block";
+    delete sheet.dataset.contextGeneratorPositionLocked;
     showDestinationHint("");
     positionDestinationSheet();
   }
 
   function hideDestinationSheet() {
     const sheet = document.getElementById(DESTINATION_SHEET_ID);
-    if (sheet) sheet.style.display = "none";
+    if (sheet) {
+      sheet.style.display = "none";
+      delete sheet.dataset.contextGeneratorPositionLocked;
+    }
+  }
+
+  function isDestinationSheetOpen() {
+    const sheet = document.getElementById(DESTINATION_SHEET_ID);
+    return Boolean(sheet && sheet.style.display === "block");
   }
 
   function positionDestinationSheet() {
     const sheet = document.getElementById(DESTINATION_SHEET_ID);
     const bubble = document.getElementById(BUBBLE_ID);
     if (!sheet || !bubble || sheet.style.display === "none") return;
+    if (sheet.dataset.contextGeneratorPositionLocked === "true") return;
 
     const bubbleRect = bubble.getBoundingClientRect();
     const margin = 10;
@@ -799,6 +809,7 @@ Then write: "Continue from where we left off."
 
     sheet.style.left = `${Math.round(left)}px`;
     sheet.style.top = `${Math.round(Math.min(top, window.innerHeight - sheetHeight - margin))}px`;
+    sheet.dataset.contextGeneratorPositionLocked = "true";
   }
 
   function showDestinationHint(message) {
@@ -955,9 +966,11 @@ Then write: "Continue from where we left off."
   let floatingButtonObserver = null;
 
   function scheduleFloatingButtonUpdate() {
+    if (isDestinationSheetOpen()) return;
     if (floatingButtonFrame) return;
     floatingButtonFrame = requestAnimationFrame(() => {
       floatingButtonFrame = null;
+      if (isDestinationSheetOpen()) return;
       ensureFloatingButton();
     });
   }
