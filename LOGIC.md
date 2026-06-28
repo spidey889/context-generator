@@ -6,8 +6,8 @@ This document explains how the Chrome extension works right now. It is written f
 
 - `extension/manifest.json` registers the extension, host permissions, background service worker, Claude content script, ChatGPT content script, and generic destination content script.
 - `extension/background.js` coordinates tab creation, content script injection, backend summarization, badge state, and messages between pages.
-- `extension/claude-content.js` owns the Claude-side floating button, destination picker, Claude prompt flow, page scraping, context-limit fallback, and forced backend test mode.
-- `extension/chatgpt-content.js` pastes the generated context into ChatGPT.
+- `extension/claude-content.js` owns the Claude-side floating button, destination picker, page scraping, and backend summary request.
+- `extension/chatgpt-content.js` pastes the generated context into ChatGPT and auto-clicks Send.
 - `extension/ai-destination-content.js` pastes the generated context into Gemini, Grok, and DeepSeek.
 - `api/summarize.js` is the Vercel serverless endpoint that calls Mistral.
 
@@ -41,11 +41,11 @@ The button is placed on the right side of the composer. The script tries to find
 
 If a right-side action button is found, the bubble vertically aligns with that button. Otherwise it sits near the bottom-right of the composer. The destination picker sheet is a fixed-position panel that opens above the bubble when there is room, otherwise below it. The sheet position is locked while open so its animation does not jump during DOM updates.
 
-Clicking the bubble opens a destination picker with ChatGPT, Gemini, Grok, and DeepSeek tiles. Shift-clicking a tile forces backend summarization for that one transfer.
+Clicking the bubble opens a destination picker with ChatGPT, Gemini, Grok, and DeepSeek tiles. Every tile now uses the Vercel/Mistral backend summary path.
 
 ## How The Conversation Is Scraped
 
-The scraper lives in `claude-content.js` and is used by the Vercel/Mistral backend path. It runs before the extension injects the context-generator prompt, so the prompt and overlay are not included in the backend input.
+The scraper lives in `claude-content.js` and is the only way summary input is collected. It runs before the overlay is shown, so extension UI text is not included in the backend input.
 
 The main scrape path looks for likely Claude message elements:
 
@@ -54,7 +54,7 @@ The main scrape path looks for likely Claude message elements:
 - Elements with `data-message-author-role`.
 - Elements with Claude response class `.font-claude-response`.
 
-It skips extension-owned nodes and skips the literal context-generator prompt. For each candidate it reads `innerText` or `textContent`, cleans non-breaking spaces and trailing whitespace, and assigns a rough role:
+It skips extension-owned nodes. For each candidate it reads `innerText` or `textContent`, cleans non-breaking spaces and trailing whitespace, and assigns a rough role:
 
 - `User` if metadata mentions user or human.
 - `Claude` if metadata mentions assistant or Claude, or the element has `.font-claude-response`.
@@ -74,43 +74,9 @@ The backend conversation input is capped at 180,000 characters. If the page text
 
 ## How Summary Generation Works
 
-There are two summary paths.
+There is now one summary path: Vercel/Mistral backend summarization. The extension no longer asks Claude to summarize, no longer injects a prompt into Claude, and no longer clicks Claude's Send button.
 
-### Old Claude Prompt Path
-
-This is still the normal path unless forced backend mode is enabled or Claude appears to hit a limit.
-
-The script finds Claude's input, remembers how many Claude response elements already exist, and remembers the current last response text. This matters because older versions could accidentally reuse a previous response if the new prompt never generated.
-
-Then it writes `CONTEXT_GENERATOR_PROMPT` into Claude's composer. For textarea/input elements it uses the native value setter and dispatches input/change events. For contenteditable elements it selects the contents and uses `document.execCommand("insertText")`; if that fails, it assigns `textContent` and dispatches an input event.
-
-The prompt asks Claude to produce a portable "context carry" block with these sections: who the user is, what the conversation was doing, where it left off, decisions, open questions, key context, and next step.
-
-After inserting the prompt, the script finds a visible Send button. It looks inside the form first and then the whole page. A button matches if its aria-label, title, test id, or text mentions send or submit. The script clicks that Claude Send button.
-
-### Stop To Send Button Flow
-
-After clicking Claude Send, the script watches Claude's button state instead of waiting a fixed amount of time.
-
-It polls every 500ms for up to 30 seconds. While Claude is generating, the Send button usually changes into a Stop button. The script detects Stop by scanning visible buttons and checking aria-label, title, data-testid, and text for the word `stop`.
-
-The logic is:
-
-- Start polling after clicking Send.
-- If a Stop button appears, mark that generation has started.
-- Once Stop disappears after being seen, treat generation as finished.
-- If Stop never appears, give Claude about 2 seconds of grace, then stop waiting.
-- Sleep 500ms more so the final response text can settle.
-
-Then it reads the newest `.font-claude-response` after the previously remembered response count. If there is no new response, or if the text looks like a context-limit message, the script switches to the backend path.
-
-### Automatic Backend Fallback
-
-The backend fallback is used when Claude cannot produce the summary because of context/input limits.
-
-The content script checks for limit indicators before clicking Send, during generation polling, and after response capture. It looks for alert/live/error-looking DOM nodes and also walks up from the input's form for a few parent levels. The text is matched against patterns like context limit/window/length, conversation too long, prompt too long, maximum tokens/context/length, reduce message, shorten prompt, and too many tokens.
-
-If any of those checks trigger, or if no fresh Claude response is available, the script sends `SUMMARIZE_WITH_BACKEND` to the background worker with the scraped conversation text.
+When a transfer starts, `claude-content.js` immediately scrapes the current Claude conversation, shows the `Summarizing with Mistral...` overlay, and sends `SUMMARIZE_WITH_BACKEND` to the background worker with the scraped conversation text.
 
 The background worker calls:
 
@@ -132,25 +98,6 @@ It expects:
 
 If the backend request fails or returns no summary, the transfer fails and the extension shows an error.
 
-### Forced Backend Test Mode
-
-There are two ways to force the backend path without actually hitting Claude's context limit:
-
-- Shift-click any destination tile in the Claude picker. That one transfer uses Mistral instead of asking Claude.
-- Set this in Claude DevTools:
-
-```js
-localStorage.setItem("contextGeneratorForceBackend", "true")
-```
-
-With that flag set, the normal extension-icon flow also skips Claude summarization and uses the backend. Remove it with:
-
-```js
-localStorage.removeItem("contextGeneratorForceBackend")
-```
-
-When the backend path runs, the overlay text changes to `Summarizing with Mistral...`.
-
 ## How The Vercel/Mistral Backend Works
 
 `api/summarize.js` is a Vercel serverless function. It allows CORS from any origin, handles `OPTIONS`, only accepts `POST`, and requires `MISTRAL_API_KEY` from the environment.
@@ -165,7 +112,7 @@ https://api.mistral.ai/v1/chat/completions
 
 The model is `mistral-small-latest` and temperature is `0.2`.
 
-The system prompt tells Mistral to summarize the conversation for another AI assistant and to return exactly the same context-carry structure used by the Claude prompt path. The user message contains the scraped conversation text.
+The system prompt tells Mistral to summarize the conversation for another AI assistant and to return the context-carry structure. The user message contains the scraped conversation text.
 
 The function returns the first choice message content as:
 
@@ -177,7 +124,7 @@ Mistral API failures return 502. Empty Mistral summaries return 502. Unexpected 
 
 ## How Context Is Transferred To ChatGPT
 
-After either summary path returns text, `claude-content.js` sends it to the background worker:
+After the backend summary returns text, `claude-content.js` sends it to the background worker:
 
 - `TRANSFER_TO_CHATGPT` for ChatGPT.
 - `TRANSFER_TO_DESTINATION` with a destination id for Gemini, Grok, or DeepSeek.
@@ -205,7 +152,9 @@ Once it has an editor, it pastes by focusing the editor and then:
 
 After pasting, it verifies that the first 20 characters of the summary are present in the editor. If not, it shows an "Auto-paste failed" modal with a copy button and returns an error to the background worker.
 
-Important current behavior: the extension does not auto-click ChatGPT's Send button. It only fills the ChatGPT input and verifies the paste. The same is true for Gemini, Grok, and DeepSeek. The only Send button the code clicks today is Claude's Send button during the old Claude prompt path.
+Once the paste is verified, the ChatGPT content script waits up to 10 seconds for an enabled Send button. It searches visible buttons in the input's form first, then the whole page. It matches aria-label, title, data-testid, or text containing send or submit, ignores Stop buttons, and also accepts a visible enabled submit button in the form. When it finds the button, it clicks it automatically.
+
+Important current behavior: ChatGPT is auto-sent. Gemini, Grok, and DeepSeek are still paste-only and do not auto-click their Send buttons.
 
 ## Other Destination Paste Logic
 
@@ -221,7 +170,7 @@ The background worker sets the extension badge to:
 - `OK` after a destination paste succeeds.
 - `ERR` for transfer errors.
 
-The Claude page shows a small overlay above the floating bubble while work is running. In Claude prompt mode it displays `Generating context...` with a countdown. In backend mode it displays `Summarizing with Mistral...`.
+The Claude page shows a small overlay above the floating bubble while work is running. It displays `Summarizing with Mistral...`.
 
 If the Claude-side flow throws, the script resets the running flag, hides the overlay, shows a red "Transfer Failed" overlay on Claude, and notifies the background worker.
 
@@ -230,10 +179,9 @@ If the Claude-side flow throws, the script resets the running flag, hides the ov
 - Claude's DOM is not stable, so the input, composer, action cluster, and message turns are found with scoring and heuristics instead of one brittle selector.
 - The floating bubble has to live inside Claude's composer so it tracks the input, but it also has to reserve space by shifting Claude's own action cluster left. The script stores original inline styles so it can restore them.
 - The MutationObserver would loop forever if it reacted to its own UI. The script marks owned nodes and ignores mutations that are only caused by the extension.
-- Claude generation is detected through the Stop button appearing and disappearing. This is more reliable than a fixed timeout, but the code still has a short grace period for cases where Stop never appears.
-- The old Claude summary path must avoid reusing a stale response. The code remembers the previous response count and previous response text, then requires a fresh response after the prompt.
-- Context-limit fallback is heuristic. Claude can surface limit errors in different places, so the code checks alert/live/error nodes and nearby composer ancestors with several text patterns.
+- The old Claude summary path was removed completely. The extension avoids Claude context limits by never asking Claude to produce the summary.
 - The backend scraper tries structured message turns first, then falls back to page text. This makes it resilient, but the fallback can include extra Claude UI text if Claude changes its markup.
 - Programmatic pasting into modern AI editors is finicky. The scripts use native setters for real inputs, `execCommand("insertText")` for contenteditables, retries with select-all, direct `textContent` as a last resort, and input/change events for framework state.
 - Pasting is verified by checking a short sample of the inserted text. If verification fails, the user gets a manual copy modal instead of silently losing the summary.
-- Forced backend test mode intentionally happens before the overlay is shown, so the overlay text is not scraped into the conversation sent to Mistral.
+- ChatGPT auto-send has to avoid clicking a Stop button or a disabled send control. The script waits for an enabled send/submit button after paste verification, then clicks it.
+- Scraping intentionally happens before the overlay is shown, so the overlay text is not included in the conversation sent to Mistral.

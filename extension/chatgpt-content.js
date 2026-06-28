@@ -37,6 +37,9 @@
       showFallbackModal(text.trim());
       throw new Error("Paste operation failed to populate the ChatGPT editor.");
     }
+
+    const sendButton = await waitForElement(() => findChatGptSendButton(input), 10000, "ChatGPT send button");
+    sendButton.click();
   }
 
   async function findChatGptInput() {
@@ -73,6 +76,32 @@
     }
 
     return findElement(fallbackSelectors);
+  }
+
+  function findChatGptSendButton(input) {
+    const form = input?.closest("form");
+    const scopedButtons = form ? Array.from(form.querySelectorAll("button")) : [];
+    const pageButtons = Array.from(document.querySelectorAll("button"));
+    const buttons = [...scopedButtons, ...pageButtons].filter((button, index, all) => {
+      return all.indexOf(button) === index && isVisible(button) && !isDisabled(button);
+    });
+
+    return buttons.find((button) => {
+      const label = [
+        button.getAttribute("aria-label"),
+        button.getAttribute("title"),
+        button.getAttribute("data-testid"),
+        button.textContent || ""
+      ]
+        .filter(Boolean)
+        .join(" ")
+        .toLowerCase();
+
+      if (label.includes("stop")) return false;
+      return /\bsend\b|submit/.test(label);
+    }) || scopedButtons.find((button) => {
+      return isVisible(button) && !isDisabled(button) && button.type === "submit";
+    });
   }
 
   function setEditorText(element, text) {
@@ -256,5 +285,9 @@
     const rect = element.getBoundingClientRect();
     const style = window.getComputedStyle(element);
     return rect.width > 0 && rect.height > 0 && style.visibility !== "hidden" && style.display !== "none";
+  }
+
+  function isDisabled(element) {
+    return element.disabled || element.getAttribute("aria-disabled") === "true" || element.dataset.disabled === "true";
   }
 })();
