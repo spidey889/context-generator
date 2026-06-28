@@ -35,19 +35,29 @@ The platform content script guards against double loading with `window.__context
 
 ## How The Button Is Placed
 
-`platform-content.js` uses one placement system for Claude, ChatGPT, Gemini, Grok, and DeepSeek. Each platform has input selectors for its editor, but placement is otherwise shared.
+`platform-content.js` uses one placement system for Claude, Gemini, and Grok, with platform-specific stable composer-row placement for ChatGPT and DeepSeek. Each platform has input selectors for its editor.
 
 The script watches the page with a `MutationObserver`, plus listeners for resize, visibility changes, and focus changes. When the AI page changes its DOM, the script schedules one `requestAnimationFrame` update. It ignores mutations caused by the extension's own button, overlay, fallback modal, and destination sheet so it does not chase itself.
 
 To find the input, the script uses the current platform's editor selectors first, then fallback selectors. Candidates are scored by whether they are textarea/input/contenteditable elements, whether they are inside a form, whether their labels mention message/prompt/chat/write/ask/input, whether they are wide enough, and whether they are near the bottom of the viewport. Top-of-page candidates are penalized.
 
-After it finds the input, it searches for a composer surface: a parent element that wraps the input and has a reasonable composer-like size. Gemini and DeepSeek also have platform-specific composer selectors so the button anchors to their rounded input bars instead of a page-wide app container. Oversized ancestors are rejected before placement. If no good parent is found, it falls back to the form or the direct parent.
+After it finds the input, it searches for a composer surface: a parent element that wraps the input and has a reasonable composer-like size. ChatGPT, Gemini, and DeepSeek also have platform-specific composer selectors so the button anchors to their rounded input bars instead of a page-wide app container. Oversized ancestors are rejected before placement. If no good parent is found, it falls back to the form or the direct parent.
 
 The floating button is a 42px absolute-positioned button with `bubble-icon.png` inside it. The script appends the button inside the composer surface, not directly to `body`. If the composer surface has static positioning, the script temporarily changes it to `position: relative` and remembers the original inline position value so it can restore it later.
 
-The button sits on the right side of the composer. The script tries to find the platform's right-side action button cluster by scanning visible buttons inside or near the composer. If it finds that cluster, it shifts the cluster left by the bubble slot width so the Cap Context button has room. It only shifts a real control cluster or button, never the whole composer. It remembers the original transform on the shifted cluster and restores it if the input disappears or the anchor changes.
+For Claude, Gemini, and Grok, the button sits on the right side of the composer. The script tries to find the platform's right-side action button cluster by scanning visible buttons inside or near the composer. If it finds that cluster, it shifts the cluster left by the bubble slot width so the Cap Context button has room. It only shifts a real control cluster or button, never the whole composer. It remembers the original transform on the shifted cluster and restores it if the input disappears or the anchor changes.
 
 Clicking the button opens a destination picker titled `Where to continue?`. The picker lists all supported platforms except the current one, and its helper line is always `Context goes straight into the input box`. Each tile starts the same backend summary flow, then opens the selected platform, pastes the summary, and auto-clicks Send.
+
+## Composer Placement Strategy
+
+ChatGPT and DeepSeek intentionally do not use the shared native-control shifting path. Their composers re-render and resize often, so moving their native action clusters with `transform` can cause flicker, jumping, or broken-looking UI.
+
+For ChatGPT, `updateFloatingButtonPosition()` calls the ChatGPT-specific placement branch before `findComposerActionButton()`. That branch releases any old reserved action slot, scans only the bottom-right composer action row, and positions the Cap Context button immediately to the left of the rightmost action control. If the row controls are not detectable, it uses a fixed bottom-right row fallback inside the composer. It never shifts ChatGPT's own controls.
+
+For DeepSeek, `updateFloatingButtonPosition()` calls the DeepSeek-specific branch before the shared placement path. It scans the bottom-right action row using `button`, `[role='button']`, and `[tabindex='0']` candidates, places Cap Context to the left of the pin/attachment control, and falls back to a fixed bottom-right action-row slot if DeepSeek's controls are not detectable. It never falls back to the old top-right shared placement.
+
+Composer scoring also gives ChatGPT and DeepSeek a bonus for candidates that include the lower action row and penalizes tiny inner text-area wrappers. This keeps the bubble anchored to the full rounded composer instead of a smaller editor child.
 
 ## How Conversation Scraping Works
 
