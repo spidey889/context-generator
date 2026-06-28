@@ -18,6 +18,7 @@
   const BUBBLE_SLOT_WIDTH = BUBBLE_SIZE + BUBBLE_GAP + 6;
   const DESTINATION_SHEET_WIDTH = 316;
   let reservedActionCluster = null;
+  let reservedComposerSurface = null;
 
   const CONTEXT_GENERATOR_PROMPT = `---
 name: context-generator
@@ -558,6 +559,7 @@ Then write: "Continue from where we left off."
       if (existingBubble) existingBubble.style.display = "none";
       hideDestinationSheet();
       releaseBubbleSlot();
+      releaseComposerSurface();
       if (currentClaudeInput) {
         currentClaudeInput.removeEventListener("input", scheduleFloatingButtonUpdate);
       }
@@ -567,8 +569,16 @@ Then write: "Continue from where we left off."
 
     const bubble = existingBubble || createFloatingButton();
 
-    if (bubble.parentElement !== document.body) {
-      document.body.appendChild(bubble);
+    const composerSurface = findComposerSurfaceElement(input);
+    if (!composerSurface) {
+      bubble.style.display = "none";
+      return bubble;
+    }
+
+    reserveComposerSurface(composerSurface);
+
+    if (bubble.parentElement !== composerSurface) {
+      composerSurface.appendChild(bubble);
     }
 
     if (currentClaudeInput !== input) {
@@ -593,7 +603,7 @@ Then write: "Continue from where we left off."
     bubble.dataset.contextGeneratorOwned = "true";
     bubble.style.cssText = [
       "display:none",
-      "position:fixed",
+      "position:absolute",
       "z-index:2147483647",
       `width:${BUBBLE_SIZE}px`,
       `height:${BUBBLE_SIZE}px`,
@@ -643,7 +653,6 @@ Then write: "Continue from where we left off."
       toggleDestinationSheet();
     });
 
-    document.body.appendChild(bubble);
     return bubble;
   }
 
@@ -948,7 +957,19 @@ Then write: "Continue from where we left off."
     const input = findClaudeInput();
     if (!bubble || !input) return;
 
-    const composerRect = findComposerSurfaceRect(input);
+    const composerSurface = findComposerSurfaceElement(input);
+    if (!composerSurface) {
+      bubble.style.display = "none";
+      return;
+    }
+
+    reserveComposerSurface(composerSurface);
+
+    if (bubble.parentElement !== composerSurface) {
+      composerSurface.appendChild(bubble);
+    }
+
+    const composerRect = composerSurface.getBoundingClientRect();
     if (
       composerRect.width < 280 ||
       composerRect.height < 20 ||
@@ -972,21 +993,24 @@ Then write: "Continue from where we left off."
       releaseBubbleSlot();
     }
 
-    const left = composerRect.right - BUBBLE_SIZE - BUBBLE_GAP;
+    const right = BUBBLE_GAP;
     const top = Math.max(
-      composerRect.top + BUBBLE_GAP,
+      BUBBLE_GAP,
       Math.min(
-        anchorTop,
-        composerRect.bottom - BUBBLE_SIZE - BUBBLE_GAP
+        anchorTop - composerRect.top,
+        composerRect.height - BUBBLE_SIZE - BUBBLE_GAP
       )
     );
 
-    bubble.style.left = `${Math.round(left)}px`;
-    bubble.style.top = `${Math.round(top)}px`;
+    const nextTop = Math.round(top);
+
+    bubble.style.left = "auto";
+    bubble.style.right = `${right}px`;
+    bubble.style.top = `${nextTop}px`;
     bubble.style.display = "flex";
   }
 
-  function findComposerSurfaceRect(input) {
+  function findComposerSurfaceElement(input) {
     const inputRect = input.getBoundingClientRect();
     const candidates = [];
     let node = input.parentElement;
@@ -1002,20 +1026,48 @@ Then write: "Continue from where we left off."
         rect.top <= inputRect.top + 12 &&
         rect.bottom >= inputRect.bottom - 12
       ) {
-        candidates.push(rect);
+        candidates.push({ node, rect });
       }
       node = node.parentElement;
     }
 
-    const bestCandidate = candidates.sort((a, b) => (a.width * a.height) - (b.width * b.height))[0];
-    if (bestCandidate) return bestCandidate;
+    const bestCandidate = candidates.sort((a, b) => (a.rect.width * a.rect.height) - (b.rect.width * b.rect.height))[0];
+    if (bestCandidate) return bestCandidate.node;
 
-    const formRect = input.closest("form")?.getBoundingClientRect();
+    const form = input.closest("form");
+    const formRect = form?.getBoundingClientRect();
     if (formRect && formRect.width >= 320 && formRect.height >= 64 && formRect.height <= 360) {
-      return formRect;
+      return form;
     }
 
-    return inputRect;
+    return input.parentElement;
+  }
+
+  function reserveComposerSurface(surface) {
+    if (!surface) return;
+
+    if (reservedComposerSurface && reservedComposerSurface !== surface) {
+      releaseComposerSurface();
+    }
+
+    if (!surface.hasAttribute("data-context-generator-original-position")) {
+      surface.setAttribute("data-context-generator-original-position", surface.style.position || "");
+    }
+
+    if (getComputedStyle(surface).position === "static") {
+      surface.style.position = "relative";
+    }
+
+    reservedComposerSurface = surface;
+  }
+
+  function releaseComposerSurface() {
+    if (!reservedComposerSurface) return;
+
+    const originalPosition = reservedComposerSurface.getAttribute("data-context-generator-original-position") || "";
+    reservedComposerSurface.style.position = originalPosition;
+    reservedComposerSurface.removeAttribute("data-context-generator-original-position");
+    reservedComposerSurface = null;
   }
 
   function reserveBubbleSlot(actionBtn, input) {
@@ -1096,7 +1148,6 @@ Then write: "Continue from where we left off."
     floatingButtonObserver.observe(document.body || document.documentElement, { childList: true, subtree: true });
 
     window.addEventListener("resize", scheduleFloatingButtonUpdate);
-    window.addEventListener("scroll", scheduleFloatingButtonUpdate, true);
     document.addEventListener("visibilitychange", scheduleFloatingButtonUpdate);
     document.addEventListener("focusin", scheduleFloatingButtonUpdate);
     scheduleFloatingButtonUpdate();
