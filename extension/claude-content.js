@@ -807,10 +807,10 @@ Then write: "Continue from where we left off."
       "font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif",
       "overflow:hidden",
       "opacity:0",
-      "transform:translate3d(0,6px,0) scale(0.982)",
+      "transform:translate3d(0,9px,0) scale(0.972)",
       "transform-origin:bottom right",
       "will-change:transform,opacity",
-      "transition:opacity 0.16s cubic-bezier(0.16,1,0.3,1), transform 0.18s cubic-bezier(0.16,1,0.3,1)"
+      "transition:opacity 0.2s cubic-bezier(0.22,1,0.36,1), transform 0.26s cubic-bezier(0.16,1,0.3,1)"
     ].join(";");
 
     const header = document.createElement("div");
@@ -1060,22 +1060,24 @@ Then write: "Continue from where we left off."
 
     if (destinationSheetAnimationFrame) cancelAnimationFrame(destinationSheetAnimationFrame);
     sheet.style.opacity = "0";
-    sheet.style.transform = "translate3d(0,6px,0) scale(0.982)";
+    sheet.style.transform = "translate3d(0,9px,0) scale(0.972)";
     sheet.style.display = "block";
     delete sheet.dataset.contextGeneratorPositionLocked;
     showDestinationHint("");
     positionDestinationSheet();
     resetDestinationTiles(sheet);
-    animateDestinationTiles(sheet);
     if (window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) {
       sheet.style.opacity = "1";
       sheet.style.transform = "translate3d(0,0,0) scale(1)";
       return;
     }
     destinationSheetAnimationFrame = requestAnimationFrame(() => {
-      sheet.style.opacity = "1";
-      sheet.style.transform = "translate3d(0,0,0) scale(1)";
-      destinationSheetAnimationFrame = null;
+      destinationSheetAnimationFrame = requestAnimationFrame(() => {
+        sheet.style.opacity = "1";
+        sheet.style.transform = "translate3d(0,0,0) scale(1)";
+        animateDestinationTiles(sheet);
+        destinationSheetAnimationFrame = null;
+      });
     });
   }
 
@@ -1087,7 +1089,7 @@ Then write: "Continue from where we left off."
         destinationSheetAnimationFrame = null;
       }
       sheet.style.opacity = "0";
-      sheet.style.transform = "translate3d(0,6px,0) scale(0.982)";
+      sheet.style.transform = "translate3d(0,9px,0) scale(0.972)";
       sheet.style.display = "none";
       delete sheet.dataset.contextGeneratorPositionLocked;
     }
