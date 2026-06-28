@@ -16,7 +16,7 @@
   const BUBBLE_SIZE = 42;
   const BUBBLE_GAP = 8;
   const BUBBLE_SLOT_WIDTH = BUBBLE_SIZE + BUBBLE_GAP + 6;
-  const DESTINATION_SHEET_WIDTH = 336;
+  const DESTINATION_SHEET_WIDTH = 316;
   let reservedActionCluster = null;
 
   const CONTEXT_GENERATOR_PROMPT = `---
@@ -626,34 +626,34 @@ Then write: "Continue from where we left off."
       "z-index:2147483647",
       `width:${DESTINATION_SHEET_WIDTH}px`,
       "box-sizing:border-box",
-      "padding:12px",
-      "border-radius:18px",
-      "border:1px solid rgba(255,255,255,0.10)",
+      "padding:10px",
+      "border-radius:16px",
+      "border:1px solid rgba(255,255,255,0.085)",
       "background:#0a0a0a",
-      "box-shadow:0 22px 60px rgba(0,0,0,0.52), inset 0 1px 0 rgba(255,255,255,0.06)",
-      "backdrop-filter:blur(18px)",
+      "box-shadow:0 18px 44px rgba(0,0,0,0.46), inset 0 1px 0 rgba(255,255,255,0.055)",
+      "backdrop-filter:blur(16px)",
       "color:#f5f5f5",
       "font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif",
       "overflow:hidden"
     ].join(";");
 
     const header = document.createElement("div");
-    header.style.cssText = "padding:0 1px 10px;display:flex;align-items:center;justify-content:space-between;gap:12px";
+    header.style.cssText = "padding:1px 2px 9px;display:flex;align-items:center;justify-content:space-between;gap:10px";
     const title = document.createElement("div");
     title.textContent = "Send to AI";
-    title.style.cssText = "font-size:13px;font-weight:680;letter-spacing:0;color:#f5f5f5;line-height:1";
+    title.style.cssText = "font-size:12px;font-weight:720;letter-spacing:0;color:#f5f5f5;line-height:1.1";
     const badge = document.createElement("div");
     badge.textContent = "Cap Context";
     badge.style.cssText = [
-      "height:22px",
-      "padding:0 8px",
+      "height:20px",
+      "padding:0 7px",
       "border-radius:999px",
-      "border:1px solid rgba(255,255,255,0.10)",
-      "background:rgba(255,255,255,0.04)",
-      "color:rgba(245,245,245,0.68)",
+      "border:1px solid rgba(255,255,255,0.085)",
+      "background:rgba(255,255,255,0.035)",
+      "color:rgba(245,245,245,0.62)",
       "font-size:10px",
-      "font-weight:600",
-      "line-height:22px",
+      "font-weight:650",
+      "line-height:20px",
       "letter-spacing:0"
     ].join(";");
     header.appendChild(title);
@@ -692,63 +692,84 @@ Then write: "Continue from where we left off."
     ];
 
     const grid = document.createElement("div");
-    grid.style.cssText = "display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px";
+    grid.style.cssText = "display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:7px";
 
     options.forEach((option) => {
       const button = document.createElement("button");
       button.type = "button";
       button.style.cssText = [
         "width:100%",
-        "height:58px",
-        "border:1px solid rgba(255,255,255,0.08)",
-        "border-radius:14px",
-        "background:rgba(255,255,255,0.035)",
+        "height:54px",
+        "border:1px solid rgba(255,255,255,0.07)",
+        "border-radius:12px",
+        "background:linear-gradient(180deg, rgba(255,255,255,0.045), rgba(255,255,255,0.025))",
         "color:#f5f5f5",
         "display:flex",
         "align-items:center",
-        "gap:9px",
-        "padding:0 10px",
+        "gap:8px",
+        "padding:0 9px",
         "box-sizing:border-box",
         `cursor:${option.action ? "pointer" : "default"}`,
         "text-align:left",
         "font:inherit",
+        "outline:0",
         "transition:background 0.14s ease, border-color 0.14s ease, box-shadow 0.14s ease, transform 0.14s ease"
       ].join(";");
       if (!option.action) {
         button.setAttribute("aria-disabled", "true");
       }
 
+      const logoWrap = document.createElement("div");
+      logoWrap.style.cssText = [
+        "width:30px",
+        "height:30px",
+        "border-radius:10px",
+        "border:1px solid rgba(255,255,255,0.075)",
+        "background:rgba(255,255,255,0.035)",
+        "display:flex",
+        "align-items:center",
+        "justify-content:center",
+        "flex:0 0 auto",
+        "box-shadow:inset 0 1px 0 rgba(255,255,255,0.045)"
+      ].join(";");
+
       const logo = document.createElement("img");
       logo.src = option.logo;
       logo.alt = "";
       logo.draggable = false;
-      logo.style.cssText = "width:28px;height:28px;object-fit:contain;display:block;flex:0 0 auto";
+      logo.style.cssText = "width:20px;height:20px;object-fit:contain;display:block";
+      logoWrap.appendChild(logo);
 
       const copy = document.createElement("div");
-      copy.style.cssText = "display:flex;flex-direction:column;gap:1px;min-width:0;flex:1";
+      copy.style.cssText = "display:flex;flex-direction:column;gap:2px;min-width:0;flex:1";
       const name = document.createElement("div");
       name.textContent = option.name;
-      name.style.cssText = "font-size:12px;font-weight:680;line-height:1.1;color:#f5f5f5;white-space:nowrap;overflow:hidden;text-overflow:ellipsis";
+      name.style.cssText = "font-size:12px;font-weight:720;line-height:1.05;color:#f5f5f5;white-space:nowrap;overflow:hidden;text-overflow:ellipsis";
       const detail = document.createElement("div");
       detail.textContent = option.detail;
-      detail.style.cssText = "font-size:10px;line-height:1.15;color:rgba(245,245,245,0.52);white-space:nowrap;overflow:hidden;text-overflow:ellipsis";
+      detail.style.cssText = "font-size:10px;font-weight:500;line-height:1.1;color:rgba(245,245,245,0.50);white-space:nowrap;overflow:hidden;text-overflow:ellipsis";
       copy.appendChild(name);
       copy.appendChild(detail);
 
-      button.appendChild(logo);
-      button.appendChild(copy);
-      button.addEventListener("mouseenter", () => {
-        button.style.background = "rgba(255,255,255,0.07)";
+      const setButtonActive = () => {
+        button.style.background = "linear-gradient(180deg, rgba(255,255,255,0.075), rgba(255,255,255,0.04))";
         button.style.borderColor = option.action ? option.accent : "rgba(255,255,255,0.12)";
-        button.style.boxShadow = option.action ? `0 0 0 1px ${option.accent}22, 0 10px 26px rgba(0,0,0,0.22)` : "none";
+        button.style.boxShadow = option.action ? `0 0 0 1px ${option.accent}1f, 0 8px 20px rgba(0,0,0,0.20)` : "none";
         if (option.action) button.style.transform = "translateY(-1px)";
-      });
-      button.addEventListener("mouseleave", () => {
-        button.style.background = "rgba(255,255,255,0.035)";
-        button.style.borderColor = "rgba(255,255,255,0.08)";
+      };
+      const setButtonIdle = () => {
+        button.style.background = "linear-gradient(180deg, rgba(255,255,255,0.045), rgba(255,255,255,0.025))";
+        button.style.borderColor = "rgba(255,255,255,0.07)";
         button.style.boxShadow = "none";
         button.style.transform = "translateY(0)";
-      });
+      };
+
+      button.appendChild(logoWrap);
+      button.appendChild(copy);
+      button.addEventListener("mouseenter", setButtonActive);
+      button.addEventListener("mouseleave", setButtonIdle);
+      button.addEventListener("focus", setButtonActive);
+      button.addEventListener("blur", setButtonIdle);
       button.addEventListener("click", (event) => {
         event.preventDefault();
         event.stopPropagation();
