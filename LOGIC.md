@@ -47,7 +47,7 @@ The floating button is a 42px absolute-positioned button with `bubble-icon.png` 
 
 The button sits on the right side of the composer. The script tries to find the platform's right-side action button cluster by scanning visible buttons inside or near the composer. If it finds that cluster, it shifts the cluster left by the bubble slot width so the Cap Context button has room. It only shifts a real control cluster or button, never the whole composer. It remembers the original transform on the shifted cluster and restores it if the input disappears or the anchor changes.
 
-Clicking the button opens a destination picker. The picker lists all supported platforms except the current one. Each tile starts the same backend summary flow, then opens the selected platform, pastes the summary, and auto-clicks Send.
+Clicking the button opens a destination picker titled `Where to continue?`. The picker lists all supported platforms except the current one, and its helper line is always `Context goes straight into the input box`. Each tile starts the same backend summary flow, then opens the selected platform, pastes the summary, and auto-clicks Send.
 
 ## How Conversation Scraping Works
 

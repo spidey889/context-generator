@@ -16,6 +16,8 @@
   const RUNNING_AUTO_RESET_MS = 60000;
   const MAX_BACKEND_CONVERSATION_CHARS = 180000;
   const DEFAULT_MAX_COMPOSER_WIDTH = 1320;
+  const DESTINATION_TITLE_TEXT = "Where to continue?";
+  const DESTINATION_HELPER_TEXT = "Context goes straight into the input box";
   const CAP_CONTEXT_SITE_URL = "https://spidey889.github.io/context-generator";
 
   const PLATFORMS = {
@@ -552,8 +554,8 @@
     const bubble = document.createElement("button");
     bubble.id = BUBBLE_ID;
     bubble.type = "button";
-    bubble.title = "Choose AI destination";
-    bubble.setAttribute("aria-label", "Choose AI destination");
+    bubble.title = DESTINATION_TITLE_TEXT;
+    bubble.setAttribute("aria-label", DESTINATION_TITLE_TEXT);
     bubble.dataset.contextGeneratorOwned = "true";
     bubble.style.cssText = [
       "display:none",
@@ -732,7 +734,7 @@
     const header = document.createElement("div");
     header.style.cssText = "padding:0 1px 8px;display:flex;align-items:center;justify-content:space-between;gap:10px";
     const title = document.createElement("div");
-    title.textContent = `Send ${currentPlatform.name} context to`;
+    title.textContent = DESTINATION_TITLE_TEXT;
     title.style.cssText = "font-size:11.5px;font-weight:720;letter-spacing:0;color:#f5f5f5;line-height:1.12";
     const badge = document.createElement("button");
     badge.type = "button";
@@ -881,7 +883,7 @@
     sheet.appendChild(grid);
 
     const footer = document.createElement("div");
-    footer.textContent = "Summary opens, pastes, and sends automatically";
+    footer.textContent = DESTINATION_HELPER_TEXT;
     footer.style.cssText = [
       "margin:9px 1px 1px",
       "padding-top:7px",
