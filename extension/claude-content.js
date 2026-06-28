@@ -473,29 +473,30 @@ Then write: "Continue from where we left off."
     }
   }
 
-  // Find the rightmost composer action button (send or mic/voice)
-  function findComposerActionButton(input) {
-    const form = input?.closest("form");
-    const searchScope = form || document;
-    const buttons = Array.from(searchScope.querySelectorAll("button")).filter((button) => {
+  function findComposerActionButton(input, composerRect) {
+    if (!input || !composerRect) return null;
+
+    const buttons = Array.from(document.querySelectorAll("button")).filter((button) => {
       return button.id !== BUBBLE_ID && isVisible(button);
     });
 
     if (buttons.length === 0) return null;
 
-    const sendButton = findSendButton(input, true, true);
-    if (sendButton && buttons.includes(sendButton)) {
-      return sendButton;
-    }
-
-    const inputRect = input.getBoundingClientRect();
     const composerButtons = buttons.filter((button) => {
       const rect = button.getBoundingClientRect();
-      return rect.top >= inputRect.top - 80 && rect.bottom <= inputRect.bottom + 140;
+      const centerX = rect.left + rect.width / 2;
+      return (
+        centerX >= composerRect.left + composerRect.width * 0.45 &&
+        rect.left >= composerRect.left - 12 &&
+        rect.right <= composerRect.right + 12 &&
+        rect.top >= composerRect.top - 12 &&
+        rect.bottom <= composerRect.bottom + 12
+      );
     });
 
-    const candidates = composerButtons.length > 0 ? composerButtons : buttons;
-    return candidates.reduce((rightmost, button) => {
+    if (composerButtons.length === 0) return null;
+
+    return composerButtons.reduce((rightmost, button) => {
       const rightmostRect = rightmost.getBoundingClientRect();
       const buttonRect = button.getBoundingClientRect();
       if (buttonRect.right !== rightmostRect.right) {
@@ -947,26 +948,35 @@ Then write: "Continue from where we left off."
     const input = findClaudeInput();
     if (!bubble || !input) return;
 
-    const actionBtn = findComposerActionButton(input);
-    if (!actionBtn) {
+    const composerRect = findComposerSurfaceRect(input);
+    if (
+      composerRect.width < 280 ||
+      composerRect.height < 20 ||
+      composerRect.bottom < 0 ||
+      composerRect.top > window.innerHeight
+    ) {
       bubble.style.display = "none";
       return;
     }
 
-    const actionRect = actionBtn.getBoundingClientRect();
-    if (actionRect.width === 0 || actionRect.height === 0) {
-      bubble.style.display = "none";
-      return;
+    const actionBtn = findComposerActionButton(input, composerRect);
+    let anchorTop = composerRect.bottom - BUBBLE_SIZE - BUBBLE_GAP;
+
+    if (actionBtn) {
+      const actionRect = actionBtn.getBoundingClientRect();
+      if (actionRect.width > 0 && actionRect.height > 0) {
+        reserveBubbleSlot(actionBtn, input);
+        anchorTop = actionRect.top + (actionRect.height - BUBBLE_SIZE) / 2;
+      }
+    } else {
+      releaseBubbleSlot();
     }
 
-    reserveBubbleSlot(actionBtn, input);
-
-    const composerRect = findComposerSurfaceRect(input, actionBtn);
     const left = composerRect.right - BUBBLE_SIZE - BUBBLE_GAP;
     const top = Math.max(
       composerRect.top + BUBBLE_GAP,
       Math.min(
-        actionRect.top + (actionRect.height - BUBBLE_SIZE) / 2,
+        anchorTop,
         composerRect.bottom - BUBBLE_SIZE - BUBBLE_GAP
       )
     );
@@ -976,32 +986,36 @@ Then write: "Continue from where we left off."
     bubble.style.display = "flex";
   }
 
-  function findComposerSurfaceRect(input, actionBtn) {
+  function findComposerSurfaceRect(input) {
     const inputRect = input.getBoundingClientRect();
-    const actionRect = actionBtn.getBoundingClientRect();
     const candidates = [];
-    let node = actionBtn.parentElement;
+    let node = input.parentElement;
 
     while (node && node !== document.body) {
-      if (node.contains(input)) {
-        const rect = node.getBoundingClientRect();
-        if (
-          rect.width >= 320 &&
-          rect.height >= 80 &&
-          rect.left <= inputRect.left &&
-          rect.right >= actionRect.right &&
-          rect.top <= inputRect.top &&
-          rect.bottom >= actionRect.bottom
-        ) {
-          candidates.push(rect);
-        }
+      const rect = node.getBoundingClientRect();
+      if (
+        rect.width >= 320 &&
+        rect.height >= 64 &&
+        rect.height <= 360 &&
+        rect.left <= inputRect.left + 12 &&
+        rect.right >= inputRect.right - 12 &&
+        rect.top <= inputRect.top + 12 &&
+        rect.bottom >= inputRect.bottom - 12
+      ) {
+        candidates.push(rect);
       }
       node = node.parentElement;
     }
 
-    return candidates.sort((a, b) => (a.width * a.height) - (b.width * b.height))[0] ||
-      input.closest("form")?.getBoundingClientRect() ||
-      inputRect;
+    const bestCandidate = candidates.sort((a, b) => (a.width * a.height) - (b.width * b.height))[0];
+    if (bestCandidate) return bestCandidate;
+
+    const formRect = input.closest("form")?.getBoundingClientRect();
+    if (formRect && formRect.width >= 320 && formRect.height >= 64 && formRect.height <= 360) {
+      return formRect;
+    }
+
+    return inputRect;
   }
 
   function reserveBubbleSlot(actionBtn, input) {
