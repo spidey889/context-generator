@@ -640,7 +640,7 @@ Then write: "Continue from where we left off."
     const header = document.createElement("div");
     header.style.cssText = "padding:1px 2px 9px;display:flex;align-items:center;justify-content:space-between;gap:10px";
     const title = document.createElement("div");
-    title.textContent = "Send to AI";
+    title.textContent = "Where to continue?";
     title.style.cssText = "font-size:12px;font-weight:720;letter-spacing:0;color:#f5f5f5;line-height:1.1";
     const badge = document.createElement("div");
     badge.textContent = "Cap Context";
@@ -779,6 +779,24 @@ Then write: "Continue from where we left off."
     });
 
     sheet.appendChild(grid);
+
+    const footer = document.createElement("div");
+    footer.textContent = "Context goes straight into the input box";
+    footer.style.cssText = [
+      "margin:9px 1px 1px",
+      "padding-top:8px",
+      "border-top:1px solid rgba(255,255,255,0.055)",
+      "color:rgba(245,245,245,0.44)",
+      "font-size:10px",
+      "font-weight:550",
+      "line-height:1",
+      "letter-spacing:0",
+      "text-align:center",
+      "white-space:nowrap",
+      "overflow:hidden",
+      "text-overflow:ellipsis"
+    ].join(";");
+    sheet.appendChild(footer);
 
     sheet.addEventListener("click", (event) => event.stopPropagation());
     document.body.appendChild(sheet);
