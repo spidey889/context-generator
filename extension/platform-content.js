@@ -10,6 +10,7 @@
   const DESTINATION_SHEET_ID = "context-generator-destination-sheet";
   const DESTINATION_SHEET_STYLE_ID = "context-generator-destination-sheet-styles";
   const BUBBLE_SIZE = 42;
+  const CHATGPT_INLINE_BUBBLE_SIZE = 36;
   const BUBBLE_GAP = 8;
   const BUBBLE_SLOT_WIDTH = BUBBLE_SIZE + BUBBLE_GAP + 6;
   const DESTINATION_SHEET_WIDTH = 296;
@@ -690,7 +691,7 @@
 
     reserveComposerSurface(composerSurface);
 
-    if (bubble.parentElement !== composerSurface) {
+    if (currentPlatform.id !== "chatgpt" && bubble.parentElement !== composerSurface) {
       composerSurface.appendChild(bubble);
     }
 
@@ -1505,7 +1506,7 @@
 
     reserveComposerSurface(composerSurface);
 
-    if (bubble.parentElement !== composerSurface) {
+    if (currentPlatform.id !== "chatgpt" && bubble.parentElement !== composerSurface) {
       composerSurface.appendChild(bubble);
     }
 
@@ -1521,14 +1522,26 @@
     }
 
     if (currentPlatform.id === "chatgpt") {
-      const chatGptPlacement = getChatGptBubblePlacement(composerRect);
       releaseBubbleSlot();
+
+      if (mountChatGptBubbleBesideModelSelector(bubble, input, composerSurface, composerRect)) {
+        return;
+      }
+
+      setBubbleAbsoluteMode(bubble);
+      if (bubble.parentElement !== composerSurface) {
+        composerSurface.appendChild(bubble);
+      }
+
+      const chatGptPlacement = getChatGptBubblePlacement(composerRect);
       bubble.style.left = `${chatGptPlacement.left}px`;
       bubble.style.right = "auto";
       bubble.style.top = `${chatGptPlacement.top}px`;
       bubble.style.display = "flex";
       return;
     }
+
+    setBubbleAbsoluteMode(bubble);
 
     if (currentPlatform.id === "deepseek") {
       const deepSeekPlacement = getDeepSeekBubblePlacement(composerRect);
@@ -1599,6 +1612,133 @@
       }
       return buttonRect.left > rightmostRect.left ? button : rightmost;
     });
+  }
+
+  function mountChatGptBubbleBesideModelSelector(bubble, input, composerSurface, composerRect) {
+    const insertion = findChatGptModelSelectorInsertionPoint(input, composerSurface, composerRect);
+    if (!insertion) return false;
+
+    if (bubble.parentElement !== insertion.parent || bubble.nextSibling !== insertion.before) {
+      insertion.parent.insertBefore(bubble, insertion.before);
+    }
+
+    setBubbleInlineMode(bubble);
+    bubble.style.display = "flex";
+    return true;
+  }
+
+  function findChatGptModelSelectorInsertionPoint(input, composerSurface, composerRect) {
+    const modelButton = findChatGptModelSelectorButton(composerSurface, composerRect);
+    if (!modelButton) return null;
+
+    let child = modelButton;
+    let parent = modelButton.parentElement;
+
+    while (parent && parent !== composerSurface && parent !== document.body) {
+      const rect = parent.getBoundingClientRect();
+      const controls = Array.from(parent.querySelectorAll("button, [role='button']"))
+        .filter((button) => button.id !== BUBBLE_ID && !isContextGeneratorNode(button) && isVisible(button));
+
+      const style = getComputedStyle(parent);
+      const isRow = (
+        controls.length >= 2 &&
+        rect.height > 0 &&
+        rect.height <= 64 &&
+        rect.width > 0 &&
+        rect.width <= composerRect.width &&
+        rect.left >= composerRect.left - 12 &&
+        rect.right <= composerRect.right + 12 &&
+        rect.top >= composerRect.top - 12 &&
+        rect.bottom <= composerRect.bottom + 12 &&
+        /flex|inline-flex/.test(style.display)
+      );
+
+      if (isRow) {
+        while (child.parentElement !== parent) {
+          child = child.parentElement;
+        }
+
+        return { parent, before: child };
+      }
+
+      child = parent;
+      parent = parent.parentElement;
+    }
+
+    return null;
+  }
+
+  function findChatGptModelSelectorButton(composerSurface, composerRect) {
+    const rowTop = composerRect.bottom - Math.max(58, composerRect.height * 0.55);
+
+    return Array.from(composerSurface.querySelectorAll("button, [role='button']"))
+      .filter((button) => button.id !== BUBBLE_ID && !isContextGeneratorNode(button) && isVisible(button))
+      .map((button) => {
+        const rect = button.getBoundingClientRect();
+        const label = getElementLabel(button, true);
+        const text = (button.innerText || button.textContent || "").toLowerCase();
+        let score = 0;
+
+        if (/\b(instant|medium|high)\b/.test(text)) score += 140;
+        if (/\b(model|intelligence|reasoning|thinking)\b/.test(label)) score += 42;
+        if (rect.left >= composerRect.left + composerRect.width * 0.45) score += 22;
+        if (rect.top >= rowTop && rect.bottom <= composerRect.bottom + 12) score += 28;
+        if (rect.width >= 48 && rect.width <= 140) score += 12;
+        if (/\b(send|voice|mic|microphone|attach|upload|tools|image|canvas)\b/.test(label)) score -= 120;
+
+        return { button, rect, score };
+      })
+      .filter(({ rect, score }) => {
+        return (
+          score > 0 &&
+          rect.width > 0 &&
+          rect.height > 0 &&
+          rect.height <= 56 &&
+          rect.left >= composerRect.left - 12 &&
+          rect.right <= composerRect.right + 12 &&
+          rect.top >= rowTop &&
+          rect.bottom <= composerRect.bottom + 12
+        );
+      })
+      .sort((a, b) => {
+        if (b.score !== a.score) return b.score - a.score;
+        return b.rect.left - a.rect.left;
+      })[0]?.button || null;
+  }
+
+  function setBubbleInlineMode(bubble) {
+    setBubbleSize(bubble, CHATGPT_INLINE_BUBBLE_SIZE);
+    bubble.style.position = "relative";
+    bubble.style.left = "auto";
+    bubble.style.right = "auto";
+    bubble.style.top = "auto";
+    bubble.style.margin = "0 2px 0 0";
+    bubble.style.flex = "0 0 auto";
+    bubble.style.alignSelf = "center";
+  }
+
+  function setBubbleAbsoluteMode(bubble) {
+    setBubbleSize(bubble, BUBBLE_SIZE);
+    bubble.style.position = "absolute";
+    bubble.style.margin = "0";
+    bubble.style.flex = "0 0 auto";
+    bubble.style.alignSelf = "auto";
+  }
+
+  function setBubbleSize(bubble, size) {
+    bubble.style.width = `${size}px`;
+    bubble.style.height = `${size}px`;
+    bubble.style.minWidth = `${size}px`;
+    bubble.style.minHeight = `${size}px`;
+    bubble.style.maxWidth = `${size}px`;
+    bubble.style.maxHeight = `${size}px`;
+
+    const icon = bubble.querySelector("img");
+    if (icon) {
+      const iconSize = Math.max(24, size - 4);
+      icon.style.width = `${iconSize}px`;
+      icon.style.height = `${iconSize}px`;
+    }
   }
 
   function getChatGptBubblePlacement(composerRect) {
