@@ -33,6 +33,8 @@ The browser action uses a default destination because it does not open the desti
 
 The platform content script guards against double loading with `window.__contextGeneratorPlatformLoaded`. It also has an `isRunning` lock and a 60 second auto-reset timer so two transfers do not run at the same time forever.
 
+Because unpacked extension reloads can leave an old content script running in already-open AI tabs, the guard uses a versioned load id instead of a plain boolean. A fresh script can replace stale extension UI nodes instead of being blocked by the old page-level flag. Extension asset URLs are cached at startup, so delayed UI creation does not call `chrome.runtime.getURL()` after Chrome has invalidated the old extension context.
+
 ## How The Button Is Placed
 
 `platform-content.js` uses one placement system for Claude, Gemini, and Grok, with platform-specific stable composer-row placement for ChatGPT and DeepSeek. Each platform has input selectors for its editor.
@@ -178,3 +180,4 @@ If destination paste or send fails, the destination page shows a manual copy mod
 - Programmatic pasting into modern AI editors is finicky. The script uses native setters, `execCommand("insertText")`, retries, direct `textContent` fallback, and synthetic input/change events.
 - Auto-send is also heuristic. The script waits for an enabled send/submit control and avoids obvious non-send controls, but platform UI changes can still require selector updates.
 - Scraping intentionally happens before the overlay is shown, so extension overlay text is not sent to Mistral.
+- After reloading the unpacked extension, already-open AI tabs may still have a stale content script. The script avoids crashing on delayed asset URL lookups and shows a refresh-this-tab error if a runtime message hits an invalidated extension context.

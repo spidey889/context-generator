@@ -1,14 +1,29 @@
 (() => {
-  if (window.__contextGeneratorPlatformLoaded) {
-    return;
-  }
-
-  window.__contextGeneratorPlatformLoaded = true;
-
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-06-29-runtime-safe";
   const BUBBLE_ID = "context-generator-bubble";
   const OVERLAY_ID = "context-generator-overlay";
   const DESTINATION_SHEET_ID = "context-generator-destination-sheet";
   const DESTINATION_SHEET_STYLE_ID = "context-generator-destination-sheet-styles";
+
+  if (window.__contextGeneratorPlatformLoaded === CONTENT_SCRIPT_LOAD_ID) {
+    return;
+  }
+
+  if (window.__contextGeneratorPlatformLoaded) {
+    [
+      BUBBLE_ID,
+      OVERLAY_ID,
+      DESTINATION_SHEET_ID,
+      DESTINATION_SHEET_STYLE_ID,
+      "context-generator-styles",
+      "context-generator-error-overlay",
+      "context-generator-error-mark",
+      "context-generator-fallback-modal"
+    ].forEach((id) => document.getElementById(id)?.remove());
+  }
+
+  window.__contextGeneratorPlatformLoaded = CONTENT_SCRIPT_LOAD_ID;
+
   const BUBBLE_SIZE = 42;
   const CHATGPT_INLINE_BUBBLE_SIZE = 36;
   const BUBBLE_GAP = 8;
@@ -27,6 +42,8 @@
   const PASTE_VERIFY_TIMEOUT_MS = 800;
   const SEND_VERIFY_TIMEOUT_MS = 1800;
   const CAP_CONTEXT_SITE_URL = "https://spidey889.github.io/context-generator";
+  const EXTENSION_ASSET_BASE_URL = getRuntimeAssetBaseUrl();
+  const BUBBLE_ICON_URL = getExtensionAssetUrl("bubble-icon.png");
 
   const PLATFORMS = {
     claude: {
@@ -296,11 +313,37 @@
   }
 
   async function notifyBackground(message) {
-    const response = await chrome.runtime.sendMessage(message);
+    let response;
+    try {
+      response = await chrome.runtime.sendMessage(message);
+    } catch (error) {
+      if (isExtensionContextInvalidated(error)) {
+        throw new Error("Extension was reloaded. Refresh this AI tab once, then try Cap Context again.");
+      }
+      throw error;
+    }
+
     if (response && response.ok === false) {
       throw new Error(response.error || "Unknown background error");
     }
     return response;
+  }
+
+  function getRuntimeAssetBaseUrl() {
+    try {
+      return globalThis.chrome?.runtime?.getURL?.("") || "";
+    } catch (_error) {
+      return "";
+    }
+  }
+
+  function getExtensionAssetUrl(path) {
+    if (!EXTENSION_ASSET_BASE_URL) return "";
+    return `${EXTENSION_ASSET_BASE_URL}${path}`;
+  }
+
+  function isExtensionContextInvalidated(error) {
+    return /extension context invalidated/i.test(error?.message || "");
   }
 
   function getDefaultDestinationId() {
@@ -743,7 +786,7 @@
     ].join(";");
 
     const icon = document.createElement("img");
-    icon.src = chrome.runtime.getURL("bubble-icon.png");
+    icon.src = BUBBLE_ICON_URL;
     icon.alt = "";
     icon.style.width = "38px";
     icon.style.height = "38px";
@@ -976,7 +1019,7 @@
       const logoWrap = document.createElement("div");
       logoWrap.style.cssText = "width:26px;height:26px;display:flex;align-items:center;justify-content:center;flex:0 0 auto;opacity:0.96;position:relative;z-index:2";
       const logo = document.createElement("img");
-      logo.src = chrome.runtime.getURL(option.logo);
+      logo.src = getExtensionAssetUrl(option.logo);
       logo.alt = "";
       logo.draggable = false;
       logo.style.cssText = `width:${option.logoSize}px;height:${option.logoSize}px;object-fit:contain;display:block;filter:drop-shadow(0 1px 3px rgba(0,0,0,0.28))`;
