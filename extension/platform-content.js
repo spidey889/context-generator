@@ -852,29 +852,6 @@
         }
       }
 
-      #context-generator-destination-sheet::before {
-        content: "";
-        position: absolute;
-        inset: 0;
-        z-index: 0;
-        pointer-events: none;
-        background:
-          radial-gradient(circle at 18% 0%, rgba(170,92,255,0.24), transparent 38%),
-          radial-gradient(circle at 92% 12%, rgba(78,196,255,0.16), transparent 34%),
-          linear-gradient(145deg, rgba(255,255,255,0.13), rgba(255,255,255,0.045) 48%, rgba(27,18,45,0.22));
-      }
-
-      #context-generator-destination-sheet::after {
-        content: "";
-        position: absolute;
-        inset: 1px;
-        z-index: 0;
-        pointer-events: none;
-        border-radius: 17px;
-        border: 1px solid rgba(255,255,255,0.10);
-        box-shadow: inset 0 1px 0 rgba(255,255,255,0.16);
-      }
-
       .context-generator-destination-tile.context-generator-tile-enter {
         animation: contextGeneratorTileIn 0.18s cubic-bezier(0.16, 1, 0.3, 1) both;
       }
@@ -883,11 +860,11 @@
         position: absolute;
         top: -2px;
         bottom: -2px;
-        left: -58px;
-        width: 52px;
+        left: -52px;
+        width: 46px;
         z-index: 1;
         pointer-events: none;
-        background: linear-gradient(90deg, transparent, rgba(255,255,255,0.12), rgba(255,255,255,0.26), transparent);
+        background: linear-gradient(90deg, transparent, rgba(255,255,255,0.07), rgba(255,255,255,0.14), transparent);
         filter: blur(0.25px);
         opacity: 0;
         transform: translate3d(-150%, 0, 0) skewX(-18deg);
@@ -940,17 +917,15 @@
       "z-index:2147483647",
       `width:${DESTINATION_SHEET_WIDTH}px`,
       "box-sizing:border-box",
-      "padding:10px",
-      "border-radius:18px",
-      "border:1px solid rgba(255,255,255,0.18)",
-      "background:rgba(14,15,24,0.66)",
-      "box-shadow:0 18px 52px rgba(3,4,10,0.46), 0 0 0 1px rgba(165,92,255,0.10), inset 0 1px 0 rgba(255,255,255,0.14)",
-      "backdrop-filter:blur(24px) saturate(1.35)",
-      "-webkit-backdrop-filter:blur(24px) saturate(1.35)",
+      "padding:9px",
+      "border-radius:15px",
+      "border:1px solid rgba(255,255,255,0.085)",
+      "background:#0a0a0a",
+      "box-shadow:0 14px 34px rgba(0,0,0,0.44), inset 0 1px 0 rgba(255,255,255,0.05)",
+      "backdrop-filter:blur(16px)",
       "color:#f5f5f5",
       "font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif",
       "overflow:hidden",
-      "isolation:isolate",
       "opacity:0",
       "transform:translate3d(0,2px,0) scale(0.996)",
       "transform-origin:bottom right",
@@ -959,10 +934,10 @@
     ].join(";");
 
     const header = document.createElement("div");
-    header.style.cssText = "padding:2px 3px 10px;display:flex;align-items:center;justify-content:space-between;gap:10px;position:relative;z-index:1";
+    header.style.cssText = "padding:0 1px 8px;display:flex;align-items:center;justify-content:space-between;gap:10px";
     const title = document.createElement("div");
     title.textContent = DESTINATION_TITLE_TEXT;
-    title.style.cssText = "font-size:11.5px;font-weight:720;letter-spacing:0;color:rgba(255,255,255,0.94);line-height:1.12;text-shadow:0 1px 12px rgba(169,92,255,0.18)";
+    title.style.cssText = "font-size:11.5px;font-weight:720;letter-spacing:0;color:#f5f5f5;line-height:1.12";
     const badge = document.createElement("button");
     badge.type = "button";
     badge.textContent = "Cap Context";
@@ -971,9 +946,9 @@
       "height:19px",
       "padding:0 7px",
       "border-radius:999px",
-      "border:1px solid rgba(255,255,255,0.16)",
-      "background:rgba(255,255,255,0.09)",
-      "color:rgba(255,255,255,0.70)",
+      "border:1px solid rgba(255,255,255,0.085)",
+      "background:rgba(255,255,255,0.035)",
+      "color:rgba(245,245,245,0.62)",
       "font-size:9.5px",
       "font-weight:650",
       "line-height:19px",
@@ -997,7 +972,7 @@
       .map(([id, platform]) => ({ ...platform, id }));
 
     const grid = document.createElement("div");
-    grid.style.cssText = "display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;position:relative;z-index:1";
+    grid.style.cssText = "display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px";
 
     options.forEach((option, index) => {
       const button = document.createElement("button");
@@ -1006,15 +981,15 @@
       button.dataset.contextGeneratorDetail = option.detail;
       button.style.cssText = [
         "width:100%",
-        "height:58px",
-        "border:1px solid rgba(255,255,255,0.15)",
-        "border-radius:16px 13px 16px 13px",
-        "background:linear-gradient(145deg, rgba(255,255,255,0.16) 0%, rgba(255,255,255,0.07) 52%, rgba(255,255,255,0.04) 100%)",
+        "height:48px",
+        "border:1px solid rgba(255,255,255,0.08)",
+        "border-radius:11px",
+        "background:linear-gradient(180deg, #131313 0%, #0f0f0f 58%, #0c0c0c 100%)",
         "color:#f5f5f5",
         "display:flex",
         "align-items:center",
-        "gap:8px",
-        "padding:0 9px 0 8px",
+        "gap:7px",
+        "padding:0 8px",
         "box-sizing:border-box",
         "cursor:pointer",
         "text-align:left",
@@ -1023,10 +998,8 @@
         "position:relative",
         "overflow:hidden",
         "isolation:isolate",
-        "backdrop-filter:blur(12px) saturate(1.2)",
-        "-webkit-backdrop-filter:blur(12px) saturate(1.2)",
-        "box-shadow:inset 0 1px 0 rgba(255,255,255,0.15), inset 0 -1px 0 rgba(0,0,0,0.24), 0 10px 24px rgba(0,0,0,0.15)",
-        "transition:background 0.13s ease, border-color 0.13s ease, box-shadow 0.13s ease, transform 0.13s ease, border-radius 0.13s ease"
+        "box-shadow:inset 0 1px 0 rgba(255,255,255,0.06), inset 0 -1px 0 rgba(0,0,0,0.42), 0 1px 0 rgba(255,255,255,0.018)",
+        "transition:background 0.13s ease, border-color 0.13s ease, box-shadow 0.13s ease, transform 0.13s ease"
       ].join(";");
 
       const aura = document.createElement("span");
@@ -1035,21 +1008,8 @@
         "inset:-1px",
         "z-index:0",
         "pointer-events:none",
-        `background:radial-gradient(circle at 20% 35%, ${option.accent}30 0, transparent 48%), linear-gradient(135deg, rgba(255,255,255,0.13), transparent 48%)`,
-        "opacity:0.46",
-        "transition:opacity 0.14s ease"
-      ].join(";");
-
-      const edge = document.createElement("span");
-      edge.style.cssText = [
-        "position:absolute",
-        "inset:0",
-        "z-index:1",
-        "pointer-events:none",
-        "border-radius:inherit",
-        "background:linear-gradient(135deg, rgba(255,255,255,0.20), transparent 28%, transparent 68%, rgba(255,255,255,0.07))",
-        "opacity:0.58",
-        "box-shadow:inset 0 0 0 1px rgba(255,255,255,0.035)",
+        `background:radial-gradient(circle at 18% 50%, ${option.accent}1a 0, transparent 42%), linear-gradient(135deg, rgba(255,255,255,0.045), transparent 45%)`,
+        "opacity:0.28",
         "transition:opacity 0.14s ease"
       ].join(";");
 
@@ -1058,22 +1018,7 @@
       shine.style.animationDelay = `${index * 0.18}s`;
 
       const logoWrap = document.createElement("div");
-      logoWrap.style.cssText = [
-        "width:33px",
-        "height:36px",
-        "display:flex",
-        "align-items:center",
-        "justify-content:center",
-        "flex:0 0 auto",
-        "opacity:0.98",
-        "position:relative",
-        "z-index:2",
-        "border-radius:12px 9px 12px 9px",
-        "border:1px solid rgba(255,255,255,0.11)",
-        "background:linear-gradient(180deg, rgba(0,0,0,0.20), rgba(0,0,0,0.08))",
-        "box-shadow:inset 0 1px 0 rgba(255,255,255,0.10), 0 7px 16px rgba(0,0,0,0.16)",
-        "transition:border-color 0.14s ease, transform 0.14s ease"
-      ].join(";");
+      logoWrap.style.cssText = "width:26px;height:26px;display:flex;align-items:center;justify-content:center;flex:0 0 auto;opacity:0.96;position:relative;z-index:2";
       const logo = document.createElement("img");
       logo.src = getExtensionAssetUrl(option.logo);
       logo.alt = "";
@@ -1098,30 +1043,21 @@
       spinner.setAttribute("aria-hidden", "true");
 
       const setButtonActive = () => {
-        button.style.background = "linear-gradient(145deg, rgba(255,255,255,0.22) 0%, rgba(255,255,255,0.10) 52%, rgba(255,255,255,0.055) 100%)";
-        button.style.borderColor = `${option.accent}78`;
-        button.style.borderRadius = "17px 13px 17px 13px";
-        button.style.boxShadow = `inset 0 1px 0 rgba(255,255,255,0.18), inset 0 -1px 0 rgba(0,0,0,0.26), 0 0 0 1px ${option.accent}2e, 0 14px 26px rgba(0,0,0,0.23)`;
-        aura.style.opacity = "0.82";
-        edge.style.opacity = "0.78";
-        logoWrap.style.borderColor = `${option.accent}55`;
-        logoWrap.style.transform = "translateY(-1px)";
-        button.style.transform = "translateY(-1px) scale(1.012)";
+        button.style.background = "linear-gradient(180deg, #171717 0%, #111111 58%, #0c0c0c 100%)";
+        button.style.borderColor = `${option.accent}52`;
+        button.style.boxShadow = `inset 0 1px 0 rgba(255,255,255,0.085), inset 0 -1px 0 rgba(0,0,0,0.46), 0 0 0 1px ${option.accent}1f, 0 8px 18px rgba(0,0,0,0.24)`;
+        aura.style.opacity = "0.56";
+        button.style.transform = "translateY(-1px)";
       };
       const setButtonIdle = () => {
-        button.style.background = "linear-gradient(145deg, rgba(255,255,255,0.16) 0%, rgba(255,255,255,0.07) 52%, rgba(255,255,255,0.04) 100%)";
-        button.style.borderColor = "rgba(255,255,255,0.15)";
-        button.style.borderRadius = "16px 13px 16px 13px";
-        button.style.boxShadow = "inset 0 1px 0 rgba(255,255,255,0.15), inset 0 -1px 0 rgba(0,0,0,0.24), 0 10px 24px rgba(0,0,0,0.15)";
-        aura.style.opacity = "0.46";
-        edge.style.opacity = "0.58";
-        logoWrap.style.borderColor = "rgba(255,255,255,0.11)";
-        logoWrap.style.transform = "translateY(0)";
+        button.style.background = "linear-gradient(180deg, #131313 0%, #0f0f0f 58%, #0c0c0c 100%)";
+        button.style.borderColor = "rgba(255,255,255,0.08)";
+        button.style.boxShadow = "inset 0 1px 0 rgba(255,255,255,0.06), inset 0 -1px 0 rgba(0,0,0,0.42), 0 1px 0 rgba(255,255,255,0.018)";
+        aura.style.opacity = "0.28";
         button.style.transform = "translateY(0)";
       };
 
       button.appendChild(aura);
-      button.appendChild(edge);
       button.appendChild(shine);
       button.appendChild(logoWrap);
       button.appendChild(copy);
@@ -1154,8 +1090,8 @@
       "margin:9px 1px 1px",
       "padding-top:7px",
       "padding-bottom:1px",
-      "border-top:1px solid rgba(255,255,255,0.09)",
-      "color:rgba(255,255,255,0.48)",
+      "border-top:1px solid rgba(255,255,255,0.045)",
+      "color:rgba(245,245,245,0.34)",
       "font-size:9.5px",
       "font-weight:500",
       "line-height:1.35",
@@ -1163,9 +1099,7 @@
       "text-align:center",
       "white-space:nowrap",
       "overflow:hidden",
-      "text-overflow:ellipsis",
-      "position:relative",
-      "z-index:1"
+      "text-overflow:ellipsis"
     ].join(";");
     sheet.appendChild(footer);
 
