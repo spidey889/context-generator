@@ -1533,7 +1533,7 @@
         composerSurface.appendChild(bubble);
       }
 
-      const chatGptPlacement = getChatGptBubblePlacement(composerRect);
+      const chatGptPlacement = getChatGptBubblePlacement(composerRect, composerSurface);
       bubble.style.left = `${chatGptPlacement.left}px`;
       bubble.style.right = "auto";
       bubble.style.top = `${chatGptPlacement.top}px`;
@@ -1624,7 +1624,7 @@
 
     setBubbleInlineMode(bubble);
     bubble.style.display = "flex";
-    return true;
+    return isBubbleVisibleAtPoint(bubble, composerSurface);
   }
 
   function findChatGptModelSelectorInsertionPoint(input, composerSurface, composerRect) {
@@ -1634,14 +1634,18 @@
     let child = modelButton;
     let parent = modelButton.parentElement;
 
-    while (parent && parent !== composerSurface && parent !== document.body) {
+    while (parent && parent !== document.body) {
       const rect = parent.getBoundingClientRect();
       const controls = Array.from(parent.querySelectorAll("button, [role='button']"))
         .filter((button) => button.id !== BUBBLE_ID && !isContextGeneratorNode(button) && isVisible(button));
+      const hasSiblingControl = Array.from(parent.children).some((sibling) => {
+        return sibling !== child && isVisible(sibling) && hasInteractiveControl(sibling);
+      });
 
       const style = getComputedStyle(parent);
       const isRow = (
         controls.length >= 2 &&
+        hasSiblingControl &&
         rect.height > 0 &&
         rect.height <= 64 &&
         rect.width > 0 &&
@@ -1706,6 +1710,38 @@
       })[0]?.button || null;
   }
 
+  function hasInteractiveControl(element) {
+    return Boolean(
+      element.matches?.("button, [role='button']") ||
+      element.querySelector?.("button, [role='button']")
+    );
+  }
+
+  function isBubbleVisibleAtPoint(bubble, composerSurface) {
+    const rect = bubble.getBoundingClientRect();
+    const composerRect = composerSurface.getBoundingClientRect();
+    const centerX = rect.left + rect.width / 2;
+    const centerY = rect.top + rect.height / 2;
+    const style = getComputedStyle(bubble);
+
+    if (
+      rect.width < 20 ||
+      rect.height < 20 ||
+      rect.right <= composerRect.left ||
+      rect.left >= composerRect.right ||
+      rect.bottom <= composerRect.top ||
+      rect.top >= composerRect.bottom ||
+      style.display === "none" ||
+      style.visibility === "hidden" ||
+      Number(style.opacity) === 0
+    ) {
+      return false;
+    }
+
+    const hit = document.elementFromPoint(centerX, centerY);
+    return Boolean(hit && (hit === bubble || bubble.contains(hit)));
+  }
+
   function setBubbleInlineMode(bubble) {
     setBubbleSize(bubble, CHATGPT_INLINE_BUBBLE_SIZE);
     bubble.style.position = "relative";
@@ -1715,6 +1751,9 @@
     bubble.style.margin = "0 2px 0 0";
     bubble.style.flex = "0 0 auto";
     bubble.style.alignSelf = "center";
+    bubble.style.opacity = "1";
+    bubble.style.visibility = "visible";
+    bubble.style.overflow = "visible";
   }
 
   function setBubbleAbsoluteMode(bubble) {
@@ -1723,6 +1762,9 @@
     bubble.style.margin = "0";
     bubble.style.flex = "0 0 auto";
     bubble.style.alignSelf = "auto";
+    bubble.style.opacity = "1";
+    bubble.style.visibility = "visible";
+    bubble.style.overflow = "hidden";
   }
 
   function setBubbleSize(bubble, size) {
@@ -1741,7 +1783,16 @@
     }
   }
 
-  function getChatGptBubblePlacement(composerRect) {
+  function getChatGptBubblePlacement(composerRect, composerSurface = null) {
+    const modelButton = composerSurface ? findChatGptModelSelectorButton(composerSurface, composerRect) : null;
+    if (modelButton) {
+      const modelRect = modelButton.getBoundingClientRect();
+      const left = modelRect.left - composerRect.left - BUBBLE_SIZE - BUBBLE_GAP;
+      if (left >= BUBBLE_GAP) {
+        return getBubblePlacementBesideRect(modelRect, composerRect, left);
+      }
+    }
+
     const rowButtons = getChatGptComposerButtonCandidates(composerRect);
     const actionButton = rowButtons[rowButtons.length - 1];
 
