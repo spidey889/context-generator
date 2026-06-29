@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-06-29-grok-stable-placement";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-06-29-grok-fast-anchor";
   const BUBBLE_ID = "context-generator-bubble";
   const OVERLAY_ID = "context-generator-overlay";
   const DESTINATION_SHEET_ID = "context-generator-destination-sheet";
@@ -1883,12 +1883,20 @@
   }
 
   function getGrokBubblePlacement(composerRect) {
-    const rowButtons = getGrokComposerButtonCandidates(composerRect);
-    const preferredButtons = rowButtons.filter(({ button }) => {
+    const speedButton = findGrokSpeedSelectorButton(composerRect);
+    if (speedButton) {
+      const speedRect = speedButton.getBoundingClientRect();
+      const left = speedRect.left - composerRect.left - BUBBLE_SIZE - BUBBLE_GAP;
+      if (left >= BUBBLE_GAP) {
+        return getBubblePlacementBesideRect(speedRect, composerRect, left);
+      }
+    }
+
+    const safeButtons = getGrokComposerButtonCandidates(composerRect).filter(({ button }) => {
       const label = getElementLabel(button, true);
-      return /\b(send|submit|voice|mic|microphone)\b/.test(label);
+      return !/\b(send|submit|voice|mic|microphone)\b/.test(label);
     });
-    const anchorButton = preferredButtons[preferredButtons.length - 1] || rowButtons[rowButtons.length - 1];
+    const anchorButton = safeButtons[safeButtons.length - 1];
 
     if (anchorButton) {
       const left = anchorButton.rect.left - composerRect.left - BUBBLE_SIZE - BUBBLE_GAP;
@@ -1897,7 +1905,44 @@
       }
     }
 
-    return getBottomRightRowBubblePlacement(composerRect, 82);
+    return getBottomRightRowBubblePlacement(composerRect, 186);
+  }
+
+  function findGrokSpeedSelectorButton(composerRect) {
+    const rowTop = composerRect.bottom - Math.max(64, composerRect.height * 0.65);
+
+    return Array.from(document.querySelectorAll("button, [role='button'], [tabindex='0']"))
+      .filter((button) => button.id !== BUBBLE_ID && !isContextGeneratorNode(button) && isVisible(button))
+      .map((button) => {
+        const rect = button.getBoundingClientRect();
+        const label = getElementLabel(button, true);
+        const text = (button.innerText || button.textContent || "").toLowerCase();
+        let score = 0;
+
+        if (/\b(fast|auto|expert|think|thinking)\b/.test(text)) score += 180;
+        if (/\b(mode|speed|model|reasoning|thinking)\b/.test(label)) score += 36;
+        if (rect.left >= composerRect.left + composerRect.width * 0.55) score += 22;
+        if (rect.width >= 42 && rect.width <= 150) score += 12;
+        if (/\b(send|submit|voice|mic|microphone|attach|upload|image|search)\b/.test(label)) score -= 180;
+
+        return { button, rect, score };
+      })
+      .filter(({ rect, score }) => {
+        return (
+          score >= 120 &&
+          rect.width > 0 &&
+          rect.height > 0 &&
+          rect.height <= 56 &&
+          rect.left >= composerRect.left + composerRect.width * 0.45 &&
+          rect.right <= composerRect.right + 12 &&
+          rect.top >= rowTop &&
+          rect.bottom <= composerRect.bottom + 12
+        );
+      })
+      .sort((a, b) => {
+        if (b.score !== a.score) return b.score - a.score;
+        return b.rect.left - a.rect.left;
+      })[0]?.button || null;
   }
 
   function getGrokComposerButtonCandidates(composerRect) {
