@@ -883,8 +883,8 @@
         position: absolute;
         top: -2px;
         bottom: -2px;
-        left: -52px;
-        width: 46px;
+        left: -58px;
+        width: 52px;
         z-index: 1;
         pointer-events: none;
         background: linear-gradient(90deg, transparent, rgba(255,255,255,0.12), rgba(255,255,255,0.26), transparent);
@@ -997,7 +997,7 @@
       .map(([id, platform]) => ({ ...platform, id }));
 
     const grid = document.createElement("div");
-    grid.style.cssText = "display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:7px;position:relative;z-index:1";
+    grid.style.cssText = "display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;position:relative;z-index:1";
 
     options.forEach((option, index) => {
       const button = document.createElement("button");
@@ -1006,15 +1006,15 @@
       button.dataset.contextGeneratorDetail = option.detail;
       button.style.cssText = [
         "width:100%",
-        "height:50px",
-        "border:1px solid rgba(255,255,255,0.13)",
-        "border-radius:12px",
-        "background:linear-gradient(180deg, rgba(255,255,255,0.13) 0%, rgba(255,255,255,0.055) 58%, rgba(255,255,255,0.035) 100%)",
+        "height:58px",
+        "border:1px solid rgba(255,255,255,0.15)",
+        "border-radius:16px 13px 16px 13px",
+        "background:linear-gradient(145deg, rgba(255,255,255,0.16) 0%, rgba(255,255,255,0.07) 52%, rgba(255,255,255,0.04) 100%)",
         "color:#f5f5f5",
         "display:flex",
         "align-items:center",
-        "gap:7px",
-        "padding:0 8px",
+        "gap:8px",
+        "padding:0 9px 0 8px",
         "box-sizing:border-box",
         "cursor:pointer",
         "text-align:left",
@@ -1025,8 +1025,8 @@
         "isolation:isolate",
         "backdrop-filter:blur(12px) saturate(1.2)",
         "-webkit-backdrop-filter:blur(12px) saturate(1.2)",
-        "box-shadow:inset 0 1px 0 rgba(255,255,255,0.12), inset 0 -1px 0 rgba(0,0,0,0.24), 0 10px 22px rgba(0,0,0,0.14)",
-        "transition:background 0.13s ease, border-color 0.13s ease, box-shadow 0.13s ease, transform 0.13s ease"
+        "box-shadow:inset 0 1px 0 rgba(255,255,255,0.15), inset 0 -1px 0 rgba(0,0,0,0.24), 0 10px 24px rgba(0,0,0,0.15)",
+        "transition:background 0.13s ease, border-color 0.13s ease, box-shadow 0.13s ease, transform 0.13s ease, border-radius 0.13s ease"
       ].join(";");
 
       const aura = document.createElement("span");
@@ -1035,8 +1035,21 @@
         "inset:-1px",
         "z-index:0",
         "pointer-events:none",
-        `background:radial-gradient(circle at 18% 42%, ${option.accent}26 0, transparent 48%), linear-gradient(135deg, rgba(255,255,255,0.10), transparent 46%)`,
-        "opacity:0.42",
+        `background:radial-gradient(circle at 20% 35%, ${option.accent}30 0, transparent 48%), linear-gradient(135deg, rgba(255,255,255,0.13), transparent 48%)`,
+        "opacity:0.46",
+        "transition:opacity 0.14s ease"
+      ].join(";");
+
+      const edge = document.createElement("span");
+      edge.style.cssText = [
+        "position:absolute",
+        "inset:0",
+        "z-index:1",
+        "pointer-events:none",
+        "border-radius:inherit",
+        "background:linear-gradient(135deg, rgba(255,255,255,0.20), transparent 28%, transparent 68%, rgba(255,255,255,0.07))",
+        "opacity:0.58",
+        "box-shadow:inset 0 0 0 1px rgba(255,255,255,0.035)",
         "transition:opacity 0.14s ease"
       ].join(";");
 
@@ -1045,7 +1058,22 @@
       shine.style.animationDelay = `${index * 0.18}s`;
 
       const logoWrap = document.createElement("div");
-      logoWrap.style.cssText = "width:26px;height:26px;display:flex;align-items:center;justify-content:center;flex:0 0 auto;opacity:0.96;position:relative;z-index:2";
+      logoWrap.style.cssText = [
+        "width:33px",
+        "height:36px",
+        "display:flex",
+        "align-items:center",
+        "justify-content:center",
+        "flex:0 0 auto",
+        "opacity:0.98",
+        "position:relative",
+        "z-index:2",
+        "border-radius:12px 9px 12px 9px",
+        "border:1px solid rgba(255,255,255,0.11)",
+        "background:linear-gradient(180deg, rgba(0,0,0,0.20), rgba(0,0,0,0.08))",
+        "box-shadow:inset 0 1px 0 rgba(255,255,255,0.10), 0 7px 16px rgba(0,0,0,0.16)",
+        "transition:border-color 0.14s ease, transform 0.14s ease"
+      ].join(";");
       const logo = document.createElement("img");
       logo.src = getExtensionAssetUrl(option.logo);
       logo.alt = "";
@@ -1070,21 +1098,30 @@
       spinner.setAttribute("aria-hidden", "true");
 
       const setButtonActive = () => {
-        button.style.background = "linear-gradient(180deg, rgba(255,255,255,0.18) 0%, rgba(255,255,255,0.08) 58%, rgba(255,255,255,0.045) 100%)";
+        button.style.background = "linear-gradient(145deg, rgba(255,255,255,0.22) 0%, rgba(255,255,255,0.10) 52%, rgba(255,255,255,0.055) 100%)";
         button.style.borderColor = `${option.accent}78`;
-        button.style.boxShadow = `inset 0 1px 0 rgba(255,255,255,0.16), inset 0 -1px 0 rgba(0,0,0,0.26), 0 0 0 1px ${option.accent}2e, 0 12px 24px rgba(0,0,0,0.22)`;
-        aura.style.opacity = "0.76";
-        button.style.transform = "translateY(-1px)";
+        button.style.borderRadius = "17px 13px 17px 13px";
+        button.style.boxShadow = `inset 0 1px 0 rgba(255,255,255,0.18), inset 0 -1px 0 rgba(0,0,0,0.26), 0 0 0 1px ${option.accent}2e, 0 14px 26px rgba(0,0,0,0.23)`;
+        aura.style.opacity = "0.82";
+        edge.style.opacity = "0.78";
+        logoWrap.style.borderColor = `${option.accent}55`;
+        logoWrap.style.transform = "translateY(-1px)";
+        button.style.transform = "translateY(-1px) scale(1.012)";
       };
       const setButtonIdle = () => {
-        button.style.background = "linear-gradient(180deg, rgba(255,255,255,0.13) 0%, rgba(255,255,255,0.055) 58%, rgba(255,255,255,0.035) 100%)";
-        button.style.borderColor = "rgba(255,255,255,0.13)";
-        button.style.boxShadow = "inset 0 1px 0 rgba(255,255,255,0.12), inset 0 -1px 0 rgba(0,0,0,0.24), 0 10px 22px rgba(0,0,0,0.14)";
-        aura.style.opacity = "0.42";
+        button.style.background = "linear-gradient(145deg, rgba(255,255,255,0.16) 0%, rgba(255,255,255,0.07) 52%, rgba(255,255,255,0.04) 100%)";
+        button.style.borderColor = "rgba(255,255,255,0.15)";
+        button.style.borderRadius = "16px 13px 16px 13px";
+        button.style.boxShadow = "inset 0 1px 0 rgba(255,255,255,0.15), inset 0 -1px 0 rgba(0,0,0,0.24), 0 10px 24px rgba(0,0,0,0.15)";
+        aura.style.opacity = "0.46";
+        edge.style.opacity = "0.58";
+        logoWrap.style.borderColor = "rgba(255,255,255,0.11)";
+        logoWrap.style.transform = "translateY(0)";
         button.style.transform = "translateY(0)";
       };
 
       button.appendChild(aura);
+      button.appendChild(edge);
       button.appendChild(shine);
       button.appendChild(logoWrap);
       button.appendChild(copy);
@@ -1613,6 +1650,16 @@
 
     setBubbleAbsoluteMode(bubble);
 
+    if (currentPlatform.id === "grok") {
+      const grokPlacement = getGrokBubblePlacement(composerRect);
+      releaseBubbleSlot();
+      bubble.style.left = `${grokPlacement.left}px`;
+      bubble.style.right = "auto";
+      bubble.style.top = `${grokPlacement.top}px`;
+      bubble.style.display = "flex";
+      return;
+    }
+
     if (currentPlatform.id === "deepseek") {
       const deepSeekPlacement = getDeepSeekBubblePlacement(composerRect);
       if (deepSeekPlacement) {
@@ -1893,6 +1940,45 @@
           rect.height > 0 &&
           rect.height <= 72 &&
           rect.left >= composerRect.left + composerRect.width * 0.45 &&
+          rect.right <= composerRect.right + 12 &&
+          rect.top >= rowTop &&
+          rect.bottom <= composerRect.bottom + 12
+        );
+      })
+      .sort((a, b) => a.rect.left - b.rect.left);
+  }
+
+  function getGrokBubblePlacement(composerRect) {
+    const rowButtons = getGrokComposerButtonCandidates(composerRect);
+    const preferredButtons = rowButtons.filter(({ button }) => {
+      const label = getElementLabel(button, true);
+      return /\b(send|submit|voice|mic|microphone)\b/.test(label);
+    });
+    const anchorButton = preferredButtons[preferredButtons.length - 1] || rowButtons[rowButtons.length - 1];
+
+    if (anchorButton) {
+      const left = anchorButton.rect.left - composerRect.left - BUBBLE_SIZE - BUBBLE_GAP;
+      if (left >= BUBBLE_GAP) {
+        return getBubblePlacementBesideRect(anchorButton.rect, composerRect, left);
+      }
+    }
+
+    return getBottomRightRowBubblePlacement(composerRect, 82);
+  }
+
+  function getGrokComposerButtonCandidates(composerRect) {
+    const rowTop = composerRect.bottom - Math.max(62, composerRect.height * 0.58);
+
+    return Array.from(document.querySelectorAll("button, [role='button'], [tabindex='0']"))
+      .filter((button) => button.id !== BUBBLE_ID && !isContextGeneratorNode(button) && isVisible(button))
+      .map((button) => ({ button, rect: button.getBoundingClientRect() }))
+      .filter(({ rect }) => {
+        return (
+          rect.width > 0 &&
+          rect.width <= 88 &&
+          rect.height > 0 &&
+          rect.height <= 72 &&
+          rect.left >= composerRect.left + composerRect.width * 0.35 &&
           rect.right <= composerRect.right + 12 &&
           rect.top >= rowTop &&
           rect.bottom <= composerRect.bottom + 12
