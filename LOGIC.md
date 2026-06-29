@@ -39,7 +39,7 @@ Because unpacked extension reloads can leave an old content script running in al
 
 ## How The Button Is Placed
 
-`platform-content.js` uses one placement system for Claude, Gemini, and Grok, with platform-specific stable composer-row placement for ChatGPT and DeepSeek. Each platform has input selectors for its editor.
+`platform-content.js` uses one placement system for Claude, Gemini, and Grok, with platform-specific placement for ChatGPT and DeepSeek. Each platform has input selectors for its editor.
 
 The script watches the page with a `MutationObserver`, plus listeners for resize, visibility changes, and focus changes. When the AI page changes its DOM, the script schedules one `requestAnimationFrame` update. It ignores mutations caused by the extension's own button, overlay, fallback modal, and destination sheet so it does not chase itself.
 
@@ -47,7 +47,9 @@ To find the input, the script uses the current platform's editor selectors first
 
 After it finds the input, it searches for a composer surface: a parent element that wraps the input and has a reasonable composer-like size. ChatGPT, Gemini, and DeepSeek also have platform-specific composer selectors so the button anchors to their rounded input bars instead of a page-wide app container. Oversized ancestors are rejected before placement. If no good parent is found, it falls back to the form or the direct parent.
 
-The floating button is a 42px absolute-positioned button with `bubble-icon.png` inside it. The script appends the button inside the composer surface, not directly to `body`. If the composer surface has static positioning, the script temporarily changes it to `position: relative` and remembers the original inline position value so it can restore it later.
+The floating button is a 42px button with `bubble-icon.png` inside it. For Claude, Gemini, Grok, and DeepSeek, the script appends the button inside the composer surface. If the composer surface has static positioning, the script temporarily changes it to `position: relative` and remembers the original inline position value so it can restore it later.
+
+ChatGPT is the exception. Its Cap Context button is mounted on the page root and uses `position: fixed`, because ChatGPT's composer wrappers re-render, clip unknown children, and sometimes do not expose a stable composer surface during hydration.
 
 For Claude, Gemini, and Grok, the button sits on the right side of the composer. The script tries to find the platform's right-side action button cluster by scanning visible buttons inside or near the composer. If it finds that cluster, it shifts the cluster left by the bubble slot width so the Cap Context button has room. It only shifts a real control cluster or button, never the whole composer. It remembers the original transform on the shifted cluster and restores it if the input disappears or the anchor changes.
 
@@ -57,11 +59,30 @@ Clicking the button opens a destination picker titled `Where to continue?`. The 
 
 ChatGPT and DeepSeek intentionally do not use the shared native-control shifting path. Their composers re-render and resize often, so moving their native action clusters with `transform` can cause flicker, jumping, or broken-looking UI.
 
-For ChatGPT, `updateFloatingButtonPosition()` calls the ChatGPT-specific placement branch before `findComposerActionButton()`. That branch releases any old reserved action slot, finds the bottom-right composer row's intelligence/model selector (`Instant`, `Medium`, or `High`), and absolutely positions the Cap Context button inside the composer immediately to the left of that selector. It never inserts into or shifts ChatGPT's own control row, because nested ChatGPT wrappers can clip unknown inline children. If the intelligence selector cannot be detected, it falls back to the older absolute composer-row placement.
+For ChatGPT, `ensureFloatingButton()` and `updateFloatingButtonPosition()` take the ChatGPT-specific branch before the normal composer-surface path. That branch releases any old reserved action slot, releases any old reserved composer surface, appends the button to the page root, and switches it to fixed positioning. It then scans the page for the bottom-right intelligence/model selector (`Instant`, `Medium`, or `High`) and places Cap Context immediately to the left of that selector. If the selector cannot be detected yet, it falls back to the composer/form/input rectangle and clamps the button inside the viewport. This means the button still appears while ChatGPT is hydrating or reshuffling its composer DOM.
 
 For DeepSeek, `updateFloatingButtonPosition()` calls the DeepSeek-specific branch before the shared placement path. It scans the bottom-right action row using `button`, `[role='button']`, and `[tabindex='0']` candidates, places Cap Context to the left of the pin/attachment control, and falls back to a fixed bottom-right action-row slot if DeepSeek's controls are not detectable. It never falls back to the old top-right shared placement.
 
 Composer scoring also gives ChatGPT and DeepSeek a bonus for candidates that include the lower action row and penalizes tiny inner text-area wrappers. This keeps the bubble anchored to the full rounded composer instead of a smaller editor child.
+
+## ChatGPT Button Fix, June 29 2026
+
+The broken behavior was that the ChatGPT button stopped appearing after several placement changes. Earlier fixes were still trying to make the button live inside, or depend on, ChatGPT's composer surface. That was fragile for three reasons:
+
+- ChatGPT's current UI can render the `Instant`/`High` model selector in a wrapper that is not always inside the composer surface candidate chosen by our scorer.
+- If `findComposerSurfaceElement()` returned no good surface, the old code hid the button before the ChatGPT-specific fallback logic had a chance to run.
+- During unpacked-extension development, stale already-injected scripts could leave old Cap Context DOM behind or keep an old page-level load flag, so the new script needed to fully replace old extension-owned nodes on load.
+
+The working fix is:
+
+- Use a versioned content-script load id and always remove old Cap Context UI nodes before a fresh script starts.
+- Keep the existing input detection, because it already finds ChatGPT's message editor.
+- For ChatGPT only, stop mounting the button inside the composer. Mount it on `document.body`/the page root.
+- Use `position: fixed` for the ChatGPT button, so ChatGPT cannot drag it around or clip it with composer wrappers.
+- First anchor to the real model selector button by finding visible buttons whose text contains `Instant`, `Medium`, or `High`.
+- If that selector is not ready, calculate a safe fallback from the composer, form, or input rectangle and clamp the coordinates to the viewport.
+
+Future rule: do not move the ChatGPT button back into ChatGPT's composer DOM and do not rely on `findComposerSurfaceElement()` before showing it. ChatGPT placement should remain page-root mounted, fixed-positioned, and anchored visually to the model selector.
 
 ## How Conversation Scraping Works
 
