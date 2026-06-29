@@ -36,6 +36,16 @@ const DESTINATION_HOSTS = {
   deepseek: ["chat.deepseek.com"]
 };
 
+chrome.runtime.onInstalled.addListener(() => {
+  injectIntoOpenSupportedTabs();
+});
+
+chrome.runtime.onStartup.addListener(() => {
+  injectIntoOpenSupportedTabs();
+});
+
+injectIntoOpenSupportedTabs();
+
 chrome.action.onClicked.addListener(async (tab) => {
   try {
     clearBadge();
@@ -150,6 +160,19 @@ async function ensureContentScript(tabId, file) {
     if (!message.includes("Cannot access") && !message.includes("No tab with id")) {
       console.debug("[Context Generator Relay] Content script injection skipped:", message);
     }
+  }
+}
+
+async function injectIntoOpenSupportedTabs() {
+  try {
+    const tabs = await chrome.tabs.query({});
+    await Promise.all(
+      tabs
+        .filter((tab) => tab.id && getPlatformFromUrl(tab.url))
+        .map((tab) => ensureContentScript(tab.id, PLATFORM_CONTENT_SCRIPT))
+    );
+  } catch (error) {
+    console.debug("[Context Generator Relay] Startup content script injection skipped:", error?.message || error);
   }
 }
 

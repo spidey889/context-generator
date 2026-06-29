@@ -31,9 +31,11 @@ The background service worker handles the browser action icon. When the user cli
 
 The browser action uses a default destination because it does not open the destination picker. If the source tab is ChatGPT, it sends to Claude. Otherwise it sends to ChatGPT. The in-page Cap Context button is the normal way to choose any of the other four destinations.
 
+When the extension service worker starts, installs, or reloads, it attempts to inject `platform-content.js` into already-open supported AI tabs. This helps unpacked-extension development reloads replace stale content scripts without requiring every AI tab to be manually refreshed.
+
 The platform content script guards against double loading with `window.__contextGeneratorPlatformLoaded`. It also has an `isRunning` lock and a 60 second auto-reset timer so two transfers do not run at the same time forever.
 
-Because unpacked extension reloads can leave an old content script running in already-open AI tabs, the guard uses a versioned load id instead of a plain boolean. A fresh script can replace stale extension UI nodes instead of being blocked by the old page-level flag. Extension asset URLs are cached at startup, so delayed UI creation does not call `chrome.runtime.getURL()` after Chrome has invalidated the old extension context.
+Because unpacked extension reloads can leave an old content script running in already-open AI tabs, the guard uses a versioned load id instead of a plain boolean. A fresh script can replace stale extension UI nodes instead of being blocked by the old page-level flag. Extension asset URLs are cached at startup, so delayed UI creation does not call `chrome.runtime.getURL()` after Chrome has invalidated the old extension context. Placement monitoring no longer attaches listeners directly to the chat input; the MutationObserver, resize, visibility, and focus listeners are enough to keep the button positioned without leaving input listeners from stale scripts behind.
 
 ## How The Button Is Placed
 
@@ -55,7 +57,7 @@ Clicking the button opens a destination picker titled `Where to continue?`. The 
 
 ChatGPT and DeepSeek intentionally do not use the shared native-control shifting path. Their composers re-render and resize often, so moving their native action clusters with `transform` can cause flicker, jumping, or broken-looking UI.
 
-For ChatGPT, `updateFloatingButtonPosition()` calls the ChatGPT-specific placement branch before `findComposerActionButton()`. That branch releases any old reserved action slot, finds the bottom-right composer row's intelligence/model selector (`Instant`, `Medium`, or `High`), and mounts the Cap Context button as an inline sibling immediately to the left of that selector. The inline mount must land in a real visible control row; if it is clipped or cannot be verified, the script falls back to absolute placement beside the same selector. It never shifts ChatGPT's own controls.
+For ChatGPT, `updateFloatingButtonPosition()` calls the ChatGPT-specific placement branch before `findComposerActionButton()`. That branch releases any old reserved action slot, finds the bottom-right composer row's intelligence/model selector (`Instant`, `Medium`, or `High`), and absolutely positions the Cap Context button inside the composer immediately to the left of that selector. It never inserts into or shifts ChatGPT's own control row, because nested ChatGPT wrappers can clip unknown inline children. If the intelligence selector cannot be detected, it falls back to the older absolute composer-row placement.
 
 For DeepSeek, `updateFloatingButtonPosition()` calls the DeepSeek-specific branch before the shared placement path. It scans the bottom-right action row using `button`, `[role='button']`, and `[tabindex='0']` candidates, places Cap Context to the left of the pin/attachment control, and falls back to a fixed bottom-right action-row slot if DeepSeek's controls are not detectable. It never falls back to the old top-right shared placement.
 

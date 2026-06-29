@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-06-29-runtime-safe";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-06-29-chatgpt-visible";
   const BUBBLE_ID = "context-generator-bubble";
   const OVERLAY_ID = "context-generator-overlay";
   const DESTINATION_SHEET_ID = "context-generator-destination-sheet";
@@ -25,7 +25,6 @@
   window.__contextGeneratorPlatformLoaded = CONTENT_SCRIPT_LOAD_ID;
 
   const BUBBLE_SIZE = 42;
-  const CHATGPT_INLINE_BUBBLE_SIZE = 36;
   const BUBBLE_GAP = 8;
   const BUBBLE_SLOT_WIDTH = BUBBLE_SIZE + BUBBLE_GAP + 6;
   const DESTINATION_SHEET_WIDTH = 296;
@@ -249,12 +248,12 @@
 
   let isRunning = false;
   let runningResetTimer = null;
-  let currentInput = null;
   let reservedActionCluster = null;
   let reservedComposerSurface = null;
   let destinationSheetAnimationFrame = null;
   let floatingButtonFrame = null;
   let floatingButtonObserver = null;
+  let floatingButtonMonitoringDisabled = false;
 
   chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     if (message?.type === "PASTE_CONTEXT") {
@@ -718,10 +717,6 @@
       hideDestinationSheet();
       releaseBubbleSlot();
       releaseComposerSurface();
-      if (currentInput) {
-        currentInput.removeEventListener("input", scheduleFloatingButtonUpdate);
-      }
-      currentInput = null;
       return existingBubble;
     }
 
@@ -736,14 +731,6 @@
 
     if (currentPlatform.id !== "chatgpt" && bubble.parentElement !== composerSurface) {
       composerSurface.appendChild(bubble);
-    }
-
-    if (currentInput !== input) {
-      if (currentInput) {
-        currentInput.removeEventListener("input", scheduleFloatingButtonUpdate);
-      }
-      currentInput = input;
-      input.addEventListener("input", scheduleFloatingButtonUpdate);
     }
 
     ensureFloatingOverlay();
@@ -1566,11 +1553,6 @@
 
     if (currentPlatform.id === "chatgpt") {
       releaseBubbleSlot();
-
-      if (mountChatGptBubbleBesideModelSelector(bubble, input, composerSurface, composerRect)) {
-        return;
-      }
-
       setBubbleAbsoluteMode(bubble);
       if (bubble.parentElement !== composerSurface) {
         composerSurface.appendChild(bubble);
@@ -1657,64 +1639,6 @@
     });
   }
 
-  function mountChatGptBubbleBesideModelSelector(bubble, input, composerSurface, composerRect) {
-    const insertion = findChatGptModelSelectorInsertionPoint(input, composerSurface, composerRect);
-    if (!insertion) return false;
-
-    if (bubble.parentElement !== insertion.parent || bubble.nextSibling !== insertion.before) {
-      insertion.parent.insertBefore(bubble, insertion.before);
-    }
-
-    setBubbleInlineMode(bubble);
-    bubble.style.display = "flex";
-    return isBubbleVisibleAtPoint(bubble, composerSurface);
-  }
-
-  function findChatGptModelSelectorInsertionPoint(input, composerSurface, composerRect) {
-    const modelButton = findChatGptModelSelectorButton(composerSurface, composerRect);
-    if (!modelButton) return null;
-
-    let child = modelButton;
-    let parent = modelButton.parentElement;
-
-    while (parent && parent !== document.body) {
-      const rect = parent.getBoundingClientRect();
-      const controls = Array.from(parent.querySelectorAll("button, [role='button']"))
-        .filter((button) => button.id !== BUBBLE_ID && !isContextGeneratorNode(button) && isVisible(button));
-      const hasSiblingControl = Array.from(parent.children).some((sibling) => {
-        return sibling !== child && isVisible(sibling) && hasInteractiveControl(sibling);
-      });
-
-      const style = getComputedStyle(parent);
-      const isRow = (
-        controls.length >= 2 &&
-        hasSiblingControl &&
-        rect.height > 0 &&
-        rect.height <= 64 &&
-        rect.width > 0 &&
-        rect.width <= composerRect.width &&
-        rect.left >= composerRect.left - 12 &&
-        rect.right <= composerRect.right + 12 &&
-        rect.top >= composerRect.top - 12 &&
-        rect.bottom <= composerRect.bottom + 12 &&
-        /flex|inline-flex/.test(style.display)
-      );
-
-      if (isRow) {
-        while (child.parentElement !== parent) {
-          child = child.parentElement;
-        }
-
-        return { parent, before: child };
-      }
-
-      child = parent;
-      parent = parent.parentElement;
-    }
-
-    return null;
-  }
-
   function findChatGptModelSelectorButton(composerSurface, composerRect) {
     const rowTop = composerRect.bottom - Math.max(58, composerRect.height * 0.55);
 
@@ -1751,52 +1675,6 @@
         if (b.score !== a.score) return b.score - a.score;
         return b.rect.left - a.rect.left;
       })[0]?.button || null;
-  }
-
-  function hasInteractiveControl(element) {
-    return Boolean(
-      element.matches?.("button, [role='button']") ||
-      element.querySelector?.("button, [role='button']")
-    );
-  }
-
-  function isBubbleVisibleAtPoint(bubble, composerSurface) {
-    const rect = bubble.getBoundingClientRect();
-    const composerRect = composerSurface.getBoundingClientRect();
-    const centerX = rect.left + rect.width / 2;
-    const centerY = rect.top + rect.height / 2;
-    const style = getComputedStyle(bubble);
-
-    if (
-      rect.width < 20 ||
-      rect.height < 20 ||
-      rect.right <= composerRect.left ||
-      rect.left >= composerRect.right ||
-      rect.bottom <= composerRect.top ||
-      rect.top >= composerRect.bottom ||
-      style.display === "none" ||
-      style.visibility === "hidden" ||
-      Number(style.opacity) === 0
-    ) {
-      return false;
-    }
-
-    const hit = document.elementFromPoint(centerX, centerY);
-    return Boolean(hit && (hit === bubble || bubble.contains(hit)));
-  }
-
-  function setBubbleInlineMode(bubble) {
-    setBubbleSize(bubble, CHATGPT_INLINE_BUBBLE_SIZE);
-    bubble.style.position = "relative";
-    bubble.style.left = "auto";
-    bubble.style.right = "auto";
-    bubble.style.top = "auto";
-    bubble.style.margin = "0 2px 0 0";
-    bubble.style.flex = "0 0 auto";
-    bubble.style.alignSelf = "center";
-    bubble.style.opacity = "1";
-    bubble.style.visibility = "visible";
-    bubble.style.overflow = "visible";
   }
 
   function setBubbleAbsoluteMode(bubble) {
@@ -2123,12 +2001,22 @@
   }
 
   function scheduleFloatingButtonUpdate() {
+    if (floatingButtonMonitoringDisabled) return;
     if (isDestinationSheetOpen()) return;
     if (floatingButtonFrame) return;
     floatingButtonFrame = requestAnimationFrame(() => {
       floatingButtonFrame = null;
+      if (floatingButtonMonitoringDisabled) return;
       if (isDestinationSheetOpen()) return;
-      ensureFloatingButton();
+      try {
+        ensureFloatingButton();
+      } catch (error) {
+        if (isExtensionContextInvalidated(error)) {
+          disableFloatingButtonMonitoring();
+          return;
+        }
+        throw error;
+      }
     });
   }
 
@@ -2150,6 +2038,7 @@
   function startFloatingButtonMonitoring() {
     if (floatingButtonObserver) floatingButtonObserver.disconnect();
     floatingButtonObserver = new MutationObserver((mutations) => {
+      if (floatingButtonMonitoringDisabled) return;
       if (mutations.every(isOwnDomMutation)) return;
       scheduleFloatingButtonUpdate();
     });
@@ -2159,6 +2048,22 @@
     document.addEventListener("visibilitychange", scheduleFloatingButtonUpdate);
     document.addEventListener("focusin", scheduleFloatingButtonUpdate);
     scheduleFloatingButtonUpdate();
+  }
+
+  function disableFloatingButtonMonitoring() {
+    floatingButtonMonitoringDisabled = true;
+    if (floatingButtonFrame) {
+      cancelAnimationFrame(floatingButtonFrame);
+      floatingButtonFrame = null;
+    }
+    if (floatingButtonObserver) {
+      floatingButtonObserver.disconnect();
+      floatingButtonObserver = null;
+    }
+
+    window.removeEventListener("resize", scheduleFloatingButtonUpdate);
+    document.removeEventListener("visibilitychange", scheduleFloatingButtonUpdate);
+    document.removeEventListener("focusin", scheduleFloatingButtonUpdate);
   }
 
   function resetRunningFlag() {
