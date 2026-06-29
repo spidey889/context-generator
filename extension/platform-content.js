@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-06-29-chatgpt-visible";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-06-29-chatgpt-fixed-body-anchor";
   const BUBBLE_ID = "context-generator-bubble";
   const OVERLAY_ID = "context-generator-overlay";
   const DESTINATION_SHEET_ID = "context-generator-destination-sheet";
@@ -9,18 +9,7 @@
     return;
   }
 
-  if (window.__contextGeneratorPlatformLoaded) {
-    [
-      BUBBLE_ID,
-      OVERLAY_ID,
-      DESTINATION_SHEET_ID,
-      DESTINATION_SHEET_STYLE_ID,
-      "context-generator-styles",
-      "context-generator-error-overlay",
-      "context-generator-error-mark",
-      "context-generator-fallback-modal"
-    ].forEach((id) => document.getElementById(id)?.remove());
-  }
+  cleanupContextGeneratorNodes();
 
   window.__contextGeneratorPlatformLoaded = CONTENT_SCRIPT_LOAD_ID;
 
@@ -254,6 +243,19 @@
   let floatingButtonFrame = null;
   let floatingButtonObserver = null;
   let floatingButtonMonitoringDisabled = false;
+
+  function cleanupContextGeneratorNodes() {
+    [
+      BUBBLE_ID,
+      OVERLAY_ID,
+      DESTINATION_SHEET_ID,
+      DESTINATION_SHEET_STYLE_ID,
+      "context-generator-styles",
+      "context-generator-error-overlay",
+      "context-generator-error-mark",
+      "context-generator-fallback-modal"
+    ].forEach((id) => document.getElementById(id)?.remove());
+  }
 
   chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     if (message?.type === "PASTE_CONTEXT") {
@@ -721,6 +723,18 @@
     }
 
     const bubble = existingBubble || createFloatingButton();
+    if (currentPlatform.id === "chatgpt") {
+      releaseBubbleSlot();
+      releaseComposerSurface();
+      const floatingRoot = getFloatingButtonRoot();
+      if (bubble.parentElement !== floatingRoot) {
+        floatingRoot.appendChild(bubble);
+      }
+      ensureFloatingOverlay();
+      updateFloatingButtonPosition();
+      return bubble;
+    }
+
     const composerSurface = findComposerSurfaceElement(input);
     if (!composerSurface) {
       bubble.style.display = "none";
@@ -1528,6 +1542,23 @@
     const input = findPlatformInput();
     if (!bubble || !input) return;
 
+    if (currentPlatform.id === "chatgpt") {
+      releaseBubbleSlot();
+      releaseComposerSurface();
+      const floatingRoot = getFloatingButtonRoot();
+      if (bubble.parentElement !== floatingRoot) {
+        floatingRoot.appendChild(bubble);
+      }
+
+      setBubbleFixedMode(bubble);
+      const placement = getChatGptFixedBubblePlacement(input);
+      bubble.style.left = `${placement.left}px`;
+      bubble.style.right = "auto";
+      bubble.style.top = `${placement.top}px`;
+      bubble.style.display = "flex";
+      return;
+    }
+
     const composerSurface = findComposerSurfaceElement(input);
     if (!composerSurface) {
       bubble.style.display = "none";
@@ -1548,21 +1579,6 @@
       composerRect.top > window.innerHeight
     ) {
       bubble.style.display = "none";
-      return;
-    }
-
-    if (currentPlatform.id === "chatgpt") {
-      releaseBubbleSlot();
-      setBubbleAbsoluteMode(bubble);
-      if (bubble.parentElement !== composerSurface) {
-        composerSurface.appendChild(bubble);
-      }
-
-      const chatGptPlacement = getChatGptBubblePlacement(composerRect, composerSurface);
-      bubble.style.left = `${chatGptPlacement.left}px`;
-      bubble.style.right = "auto";
-      bubble.style.top = `${chatGptPlacement.top}px`;
-      bubble.style.display = "flex";
       return;
     }
 
@@ -1640,9 +1656,13 @@
   }
 
   function findChatGptModelSelectorButton(composerSurface, composerRect) {
-    const rowTop = composerRect.bottom - Math.max(58, composerRect.height * 0.55);
+    const root = composerSurface || document;
+    const rowTop = composerRect ? composerRect.bottom - Math.max(64, composerRect.height * 0.65) : window.innerHeight * 0.45;
+    const rowBottom = composerRect ? composerRect.bottom + 16 : window.innerHeight - BUBBLE_GAP;
+    const scopeLeft = composerRect ? composerRect.left - 12 : window.innerWidth * 0.22;
+    const scopeRight = composerRect ? composerRect.right + 12 : window.innerWidth - BUBBLE_GAP;
 
-    return Array.from(composerSurface.querySelectorAll("button, [role='button']"))
+    return Array.from(root.querySelectorAll("button, [role='button']"))
       .filter((button) => button.id !== BUBBLE_ID && !isContextGeneratorNode(button) && isVisible(button))
       .map((button) => {
         const rect = button.getBoundingClientRect();
@@ -1650,10 +1670,11 @@
         const text = (button.innerText || button.textContent || "").toLowerCase();
         let score = 0;
 
-        if (/\b(instant|medium|high)\b/.test(text)) score += 140;
+        if (/\b(instant|medium|high)\b/.test(text)) score += 180;
         if (/\b(model|intelligence|reasoning|thinking)\b/.test(label)) score += 42;
-        if (rect.left >= composerRect.left + composerRect.width * 0.45) score += 22;
-        if (rect.top >= rowTop && rect.bottom <= composerRect.bottom + 12) score += 28;
+        if (composerRect && rect.left >= composerRect.left + composerRect.width * 0.45) score += 22;
+        if (!composerRect && rect.left >= window.innerWidth * 0.45) score += 12;
+        if (rect.top >= rowTop && rect.bottom <= rowBottom) score += 28;
         if (rect.width >= 48 && rect.width <= 140) score += 12;
         if (/\b(send|voice|mic|microphone|attach|upload|tools|image|canvas)\b/.test(label)) score -= 120;
 
@@ -1661,14 +1682,14 @@
       })
       .filter(({ rect, score }) => {
         return (
-          score > 0 &&
+          score >= 120 &&
           rect.width > 0 &&
           rect.height > 0 &&
           rect.height <= 56 &&
-          rect.left >= composerRect.left - 12 &&
-          rect.right <= composerRect.right + 12 &&
+          rect.left >= scopeLeft &&
+          rect.right <= scopeRight &&
           rect.top >= rowTop &&
-          rect.bottom <= composerRect.bottom + 12
+          rect.bottom <= rowBottom
         );
       })
       .sort((a, b) => {
@@ -1688,6 +1709,22 @@
     bubble.style.overflow = "hidden";
   }
 
+  function setBubbleFixedMode(bubble) {
+    setBubbleSize(bubble, BUBBLE_SIZE);
+    bubble.style.position = "fixed";
+    bubble.style.zIndex = "2147483647";
+    bubble.style.margin = "0";
+    bubble.style.flex = "0 0 auto";
+    bubble.style.alignSelf = "auto";
+    bubble.style.opacity = "1";
+    bubble.style.visibility = "visible";
+    bubble.style.overflow = "hidden";
+  }
+
+  function getFloatingButtonRoot() {
+    return document.body || document.documentElement;
+  }
+
   function setBubbleSize(bubble, size) {
     bubble.style.width = `${size}px`;
     bubble.style.height = `${size}px`;
@@ -1702,6 +1739,93 @@
       icon.style.width = `${iconSize}px`;
       icon.style.height = `${iconSize}px`;
     }
+  }
+
+  function getChatGptFixedBubblePlacement(input) {
+    const composerRect = getChatGptPlacementRect(input);
+    const modelButton = findChatGptModelSelectorButton(document, composerRect);
+
+    if (modelButton) {
+      return getFixedBubblePlacementBesideRect(modelButton.getBoundingClientRect());
+    }
+
+    if (composerRect) {
+      const rowButtons = getChatGptComposerButtonCandidates(composerRect);
+      const actionButton = rowButtons[rowButtons.length - 1];
+
+      if (actionButton) {
+        return getFixedBubblePlacementBesideRect(actionButton.rect);
+      }
+
+      const fallback = getBottomRightRowBubblePlacement(composerRect, 64);
+      return clampFixedBubblePlacement(composerRect.left + fallback.left, composerRect.top + fallback.top);
+    }
+
+    const inputRect = input.getBoundingClientRect();
+    return clampFixedBubblePlacement(
+      inputRect.right - BUBBLE_SIZE - 112,
+      inputRect.top + (inputRect.height - BUBBLE_SIZE) / 2
+    );
+  }
+
+  function getChatGptPlacementRect(input) {
+    const composerSurface = findComposerSurfaceElement(input);
+    const composerRect = composerSurface?.getBoundingClientRect();
+    if (isUsableChatGptPlacementRect(composerRect)) return composerRect;
+
+    const formRect = input.closest("form")?.getBoundingClientRect();
+    if (isUsableChatGptPlacementRect(formRect)) return formRect;
+
+    const inputRect = input.getBoundingClientRect();
+    if (!inputRect || inputRect.width <= 0 || inputRect.height <= 0) return null;
+
+    let left = Math.max(BUBBLE_GAP, inputRect.left - 64);
+    const right = Math.min(window.innerWidth - BUBBLE_GAP, Math.max(inputRect.right + 180, left + 320));
+    if (right - left < 280) {
+      left = Math.max(BUBBLE_GAP, right - 320);
+    }
+    const top = Math.max(BUBBLE_GAP, inputRect.top - 18);
+    const bottom = Math.min(window.innerHeight - BUBBLE_GAP, Math.max(inputRect.bottom + 70, top + 96));
+
+    return {
+      left,
+      right,
+      top,
+      bottom,
+      width: right - left,
+      height: bottom - top
+    };
+  }
+
+  function isUsableChatGptPlacementRect(rect) {
+    return Boolean(
+      rect &&
+      rect.width >= 280 &&
+      rect.height >= 40 &&
+      rect.bottom >= BUBBLE_GAP &&
+      rect.top <= window.innerHeight - BUBBLE_GAP &&
+      rect.right >= BUBBLE_GAP &&
+      rect.left <= window.innerWidth - BUBBLE_GAP
+    );
+  }
+
+  function getFixedBubblePlacementBesideRect(targetRect) {
+    return clampFixedBubblePlacement(
+      targetRect.left - BUBBLE_SIZE - BUBBLE_GAP,
+      targetRect.top + (targetRect.height - BUBBLE_SIZE) / 2
+    );
+  }
+
+  function clampFixedBubblePlacement(left, top) {
+    const minLeft = BUBBLE_GAP;
+    const minTop = BUBBLE_GAP;
+    const maxLeft = Math.max(minLeft, window.innerWidth - BUBBLE_SIZE - BUBBLE_GAP);
+    const maxTop = Math.max(minTop, window.innerHeight - BUBBLE_SIZE - BUBBLE_GAP);
+
+    return {
+      left: Math.round(Math.min(Math.max(left, minLeft), maxLeft)),
+      top: Math.round(Math.min(Math.max(top, minTop), maxTop))
+    };
   }
 
   function getChatGptBubblePlacement(composerRect, composerSurface = null) {
