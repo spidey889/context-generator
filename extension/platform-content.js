@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-06-29-chatgpt-fixed-body-anchor";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-06-29-grok-stable-placement";
   const BUBBLE_ID = "context-generator-bubble";
   const OVERLAY_ID = "context-generator-overlay";
   const DESTINATION_SHEET_ID = "context-generator-destination-sheet";
