@@ -1,3 +1,6 @@
+const MISTRAL_MAX_ATTEMPTS = 3;
+const MISTRAL_RETRY_INTERVAL_MS = 700;
+
 module.exports = async function handler(req, res) {
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
@@ -32,7 +35,7 @@ module.exports = async function handler(req, res) {
   }
 
   try {
-    const mistralResponse = await fetch("https://api.mistral.ai/v1/chat/completions", {
+    const mistralResponse = await fetchWithRetry("https://api.mistral.ai/v1/chat/completions", {
       method: "POST",
       headers: {
         Authorization: `Bearer ${apiKey}`,
@@ -93,3 +96,31 @@ Then write: "Continue from where we left off."`,
     return res.status(500).json({ error: "Unexpected summarization error" });
   }
 };
+
+async function fetchWithRetry(url, options) {
+  let lastError = null;
+
+  for (let attempt = 1; attempt <= MISTRAL_MAX_ATTEMPTS; attempt += 1) {
+    try {
+      const response = await fetch(url, options);
+      if (response.ok || !isRetryableMistralStatus(response.status) || attempt === MISTRAL_MAX_ATTEMPTS) {
+        return response;
+      }
+    } catch (error) {
+      lastError = error;
+      if (attempt === MISTRAL_MAX_ATTEMPTS) throw error;
+    }
+
+    await delay(MISTRAL_RETRY_INTERVAL_MS * attempt);
+  }
+
+  throw lastError || new Error("Mistral request failed");
+}
+
+function isRetryableMistralStatus(status) {
+  return status === 429 || status === 500 || status === 502 || status === 503 || status === 504;
+}
+
+function delay(timeoutMs) {
+  return new Promise((resolve) => setTimeout(resolve, timeoutMs));
+}

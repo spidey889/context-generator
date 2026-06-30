@@ -4,6 +4,8 @@ const PLATFORM_CONTENT_SCRIPT = "platform-content.js";
 const SOURCE_MESSAGE_TIMEOUT_MS = 12000;
 const DESTINATION_MESSAGE_TIMEOUT_MS = 45000;
 const MESSAGE_RETRY_INTERVAL_MS = 650;
+const SUMMARY_BACKEND_ATTEMPTS = 3;
+const SUMMARY_BACKEND_RETRY_INTERVAL_MS = 900;
 const DESTINATIONS = {
   claude: {
     name: "Claude",
@@ -115,22 +117,48 @@ async function summarizeWithBackend(conversation) {
     throw new Error("AI conversation text could not be captured.");
   }
 
-  const response = await fetch(SUMMARY_BACKEND_URL, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ conversation: conversation.trim() })
-  });
+  let lastError = null;
 
-  if (!response.ok) {
-    throw new Error("Backup summarizer failed.");
+  for (let attempt = 1; attempt <= SUMMARY_BACKEND_ATTEMPTS; attempt += 1) {
+    try {
+      const response = await fetch(SUMMARY_BACKEND_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ conversation: conversation.trim() })
+      });
+
+      if (!response.ok) {
+        lastError = new Error("Backup summarizer failed.");
+        if (!isRetryableSummaryStatus(response.status)) throw lastError;
+      } else {
+        const data = await response.json();
+        if (data.summary?.trim()) return data.summary.trim();
+        lastError = new Error("Backup summarizer returned no summary.");
+      }
+    } catch (error) {
+      lastError = error;
+      if (!isRetryableSummaryError(error)) throw error;
+    }
+
+    if (attempt < SUMMARY_BACKEND_ATTEMPTS) {
+      await delay(SUMMARY_BACKEND_RETRY_INTERVAL_MS * attempt);
+    }
   }
 
-  const data = await response.json();
-  if (!data.summary?.trim()) {
-    throw new Error("Backup summarizer returned no summary.");
-  }
+  throw lastError || new Error("Backup summarizer failed.");
+}
 
-  return data.summary.trim();
+function isRetryableSummaryStatus(status) {
+  return status === 429 || status === 500 || status === 502 || status === 503 || status === 504;
+}
+
+function isRetryableSummaryError(error) {
+  const message = String(error?.message || error || "");
+  return (
+    error?.name === "TypeError" ||
+    message.includes("Failed to fetch") ||
+    message.includes("NetworkError")
+  );
 }
 
 async function transferToDestination(destinationId, text) {

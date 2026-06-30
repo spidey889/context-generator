@@ -120,7 +120,7 @@ The backend conversation input is capped at 180,000 characters. If the page text
 
 There is one summary path: Vercel/Mistral backend summarization. The extension never asks the source AI to summarize. It does not inject prompts into Claude, ChatGPT, Gemini, Grok, or DeepSeek.
 
-When a transfer starts, `platform-content.js` scrapes the current platform conversation, shows the `Summarizing with Mistral...` overlay, and sends `SUMMARIZE_WITH_BACKEND` to the background worker with the scraped conversation text.
+When a transfer starts, `platform-content.js` scrapes the current platform conversation, shows the `Summarizing with Mistral...` overlay, and sends `SUMMARIZE_WITH_BACKEND` to the background worker with the scraped conversation text. The background worker retries transient backend failures before reporting an error to the source page.
 
 The background worker calls:
 
@@ -148,7 +148,7 @@ If the backend request fails or returns no summary, the transfer fails and the e
 
 It accepts either an already-parsed body or a string body. Bad JSON returns 400. Missing or non-string `conversation` returns 400. Missing `MISTRAL_API_KEY` returns 500.
 
-For valid requests, it calls Mistral's chat completions endpoint:
+For valid requests, it calls Mistral's chat completions endpoint with retry/backoff for transient rate-limit, server, and network failures:
 
 ```text
 https://api.mistral.ai/v1/chat/completions
@@ -164,7 +164,7 @@ The function returns the first choice message content as:
 { "summary": "..." }
 ```
 
-Mistral API failures return 502. Empty Mistral summaries return 502. Unexpected server errors return 500.
+Mistral API failures return 502 after retryable attempts are exhausted. Empty Mistral summaries return 502. Unexpected server errors return 500.
 
 ## How Context Transfer Works
 
