@@ -170,17 +170,17 @@ Mistral API failures return 502. Empty Mistral summaries return 502. Unexpected 
 
 After the backend summary returns text, `platform-content.js` sends `TRANSFER_TO_DESTINATION` to the background worker with the selected destination id and summary text.
 
-The background worker validates the destination, opens the destination URL in a new active tab, waits for the tab status to become complete, injects `platform-content.js`, and sends that tab a `PASTE_CONTEXT` message.
+The background worker validates the destination, opens the destination URL in a new active tab, waits for the tab status to become complete, then repeatedly injects `platform-content.js` and retries the `PASTE_CONTEXT` message until the destination content script is reachable or the delivery timeout expires. The same retry delivery helper is used when the extension icon starts a source-side transfer, so a hydrated page that has not attached the content-script listener yet does not fail immediately.
 
 The destination tab receives `PASTE_CONTEXT`, finds the destination input with that platform's input selectors, and writes the summary into the editor.
 
 For textarea/input editors, it uses the native value setter and dispatches input/change events.
 
-For contenteditable editors, it targets the first paragraph if one exists, otherwise the editor itself. It selects the current contents, calls `document.execCommand("insertText")`, retries with select-all if needed, and falls back to assigning `textContent` if insertion still fails. It dispatches input and change events afterward so React/ProseMirror-style editors notice the update.
+For contenteditable editors, it targets the first paragraph if one exists, otherwise the editor itself. It selects the current contents, calls `document.execCommand("insertText")`, retries with select-all if needed, and falls back to assigning `textContent` if insertion still fails. It dispatches beforeinput, input, and change events afterward so React/ProseMirror-style editors notice the update.
 
-After pasting, it verifies that the first 20 characters of the summary are present in the editor. If verification fails, it shows an "Auto-paste failed" modal with a copy button and returns an error to the background worker.
+After pasting, it verifies that a normalized leading sample of the summary is present in the editor. If verification fails, it shows an "Auto-paste failed" modal with a copy button and returns an error to the background worker.
 
-Once paste verification passes, it waits up to 10 seconds for an enabled Send button. It searches platform-specific send selectors, then buttons in the input/composer area, then visible page buttons. It ignores disabled buttons and obvious non-send controls such as Stop, Cancel, Attach, Upload, Voice, Mic, New, and Menu. It accepts buttons whose metadata mentions send/submit or enabled submit buttons.
+Once paste verification passes, it waits for an enabled Send button. It searches platform-specific send selectors, then buttons in the input/composer area, then visible page buttons. It ignores disabled buttons and obvious non-send controls such as Stop, Cancel, Attach, Upload, Voice, Mic, New, and Menu. It accepts buttons whose metadata mentions send/submit or enabled submit buttons.
 
 When it finds the send button, it clicks it automatically. This auto-send behavior applies to all five platforms as destinations.
 
@@ -204,7 +204,7 @@ If destination paste or send fails, the destination page shows a manual copy mod
 - The floating button has to live inside each platform's composer so it tracks the input, but it also has to reserve space by shifting the native action cluster left.
 - The MutationObserver would loop forever if it reacted to its own UI. The script marks owned nodes and ignores mutations that are only caused by the extension.
 - Conversation scraping is best-effort. It tries structured message turns first, then falls back to page text when a platform changes its markup.
-- Programmatic pasting into modern AI editors is finicky. The script uses native setters, `execCommand("insertText")`, retries, direct `textContent` fallback, and synthetic input/change events.
+- Programmatic pasting into modern AI editors is finicky. The script uses native setters, `execCommand("insertText")`, retries, direct `textContent` fallback, and synthetic beforeinput/input/change events.
 - Auto-send is also heuristic. The script waits for an enabled send/submit control and avoids obvious non-send controls, but platform UI changes can still require selector updates.
 - Scraping intentionally happens before the overlay is shown, so extension overlay text is not sent to Mistral.
 - After reloading the unpacked extension, already-open AI tabs may still have a stale content script. The script avoids crashing on delayed asset URL lookups and shows a refresh-this-tab error if a runtime message hits an invalidated extension context.

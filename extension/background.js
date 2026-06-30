@@ -1,6 +1,9 @@
 const CHATGPT_URL = "https://chatgpt.com/";
 const SUMMARY_BACKEND_URL = "https://context-generator-five.vercel.app/api/summarize";
 const PLATFORM_CONTENT_SCRIPT = "platform-content.js";
+const SOURCE_MESSAGE_TIMEOUT_MS = 12000;
+const DESTINATION_MESSAGE_TIMEOUT_MS = 45000;
+const MESSAGE_RETRY_INTERVAL_MS = 650;
 const DESTINATIONS = {
   claude: {
     name: "Claude",
@@ -55,8 +58,13 @@ chrome.action.onClicked.addListener(async (tab) => {
       throw new Error("Open a supported AI chat, then click the extension icon.");
     }
 
-    await ensureContentScript(tab.id, PLATFORM_CONTENT_SCRIPT);
-    const startResult = await sendMessage(tab.id, { type: "START_CONTEXT_TRANSFER" });
+    const startResult = await sendMessageWhenReady(
+      tab.id,
+      { type: "START_CONTEXT_TRANSFER" },
+      PLATFORM_CONTENT_SCRIPT,
+      SOURCE_MESSAGE_TIMEOUT_MS,
+      "source AI tab"
+    );
 
     if (!startResult?.ok) {
       throw new Error(startResult?.error || "Could not start context transfer.");
@@ -137,13 +145,18 @@ async function transferToDestination(destinationId, text) {
 
   const destinationTab = await chrome.tabs.create({ url: destination.url, active: true });
   await waitForTabLoaded(destinationTab.id, destination.name);
-  await ensureContentScript(destinationTab.id, destination.contentScript);
 
-  const pasteResult = await sendMessage(destinationTab.id, {
-    type: "PASTE_CONTEXT",
-    destination: destinationId,
-    text: text.trim()
-  });
+  const pasteResult = await sendMessageWhenReady(
+    destinationTab.id,
+    {
+      type: "PASTE_CONTEXT",
+      destination: destinationId,
+      text: text.trim()
+    },
+    destination.contentScript,
+    DESTINATION_MESSAGE_TIMEOUT_MS,
+    destination.name
+  );
 
   if (!pasteResult?.ok) {
     throw new Error(pasteResult?.error || `Could not paste into ${destination.name}.`);
@@ -178,6 +191,41 @@ async function injectIntoOpenSupportedTabs() {
 
 function sendMessage(tabId, message) {
   return chrome.tabs.sendMessage(tabId, message);
+}
+
+async function sendMessageWhenReady(tabId, message, contentScript, timeoutMs, name) {
+  const startedAt = Date.now();
+  let lastError = null;
+
+  while (Date.now() - startedAt <= timeoutMs) {
+    await ensureContentScript(tabId, contentScript);
+
+    try {
+      const response = await sendMessage(tabId, message);
+      if (response !== undefined) return response;
+      lastError = new Error(`No response from ${name}.`);
+    } catch (error) {
+      lastError = error;
+      if (!isRetryableMessageError(error)) {
+        throw error;
+      }
+    }
+
+    await delay(MESSAGE_RETRY_INTERVAL_MS);
+  }
+
+  const detail = lastError?.message ? ` Last error: ${lastError.message}` : "";
+  throw new Error(`Timed out connecting to ${name}.${detail}`);
+}
+
+function isRetryableMessageError(error) {
+  const message = String(error?.message || error || "");
+  return (
+    message.includes("Receiving end does not exist") ||
+    message.includes("Could not establish connection") ||
+    message.includes("The message port closed before a response was received") ||
+    message.includes("Extension context invalidated")
+  );
 }
 
 function getPlatformFromUrl(url) {
@@ -240,4 +288,8 @@ async function setBadge(text, color, timeoutMs) {
 
 function clearBadge() {
   chrome.action.setBadgeText({ text: "" });
+}
+
+function delay(timeoutMs) {
+  return new Promise((resolve) => setTimeout(resolve, timeoutMs));
 }

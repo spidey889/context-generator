@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-06-30-destination-retry";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-06-30-transfer-resilience";
   const BUBBLE_ID = "context-generator-bubble";
   const OVERLAY_ID = "context-generator-overlay";
   const DESTINATION_SHEET_ID = "context-generator-destination-sheet";
@@ -42,6 +42,7 @@
       accent: "#d97757",
       logoSize: 24,
       logo: "logos/claude2download__1_-removebg-preview.png",
+      retryPaste: true,
       inputSelectors: [
         "textarea",
         "[contenteditable='true'][data-placeholder]",
@@ -109,6 +110,7 @@
       accent: "#8ab4f8",
       logoSize: 22,
       logo: "logos/gemini-download__1_-removebg-preview.png",
+      retryPaste: true,
       maxComposerWidth: 1080,
       composerSelectors: [
         "div[class*='input-area-container' i]",
@@ -411,8 +413,7 @@
 
     setEditorText(input, trimmedText);
 
-    const sampleText = trimmedText.slice(0, 20);
-    if (!getElementText(input).includes(sampleText)) {
+    if (!editorContainsText(input, trimmedText)) {
       showFallbackModal(trimmedText, destination.name);
       throw new Error(`Paste operation failed to populate the ${destination.name} editor.`);
     }
@@ -566,18 +567,18 @@
     selection.addRange(range);
 
     let inserted = document.execCommand("insertText", false, text);
-    let hasText = getElementText(element).includes(text.slice(0, 20));
+    let hasText = editorContainsText(element, text);
 
     if (!inserted || !hasText) {
       element.focus();
       document.execCommand("selectAll", false, null);
       inserted = document.execCommand("insertText", false, text);
-      hasText = getElementText(element).includes(text.slice(0, 20));
+      hasText = editorContainsText(element, text);
     }
 
     if (!hasText) {
       target.textContent = text;
-      hasText = getElementText(element).includes(text.slice(0, 20));
+      hasText = editorContainsText(element, text);
     }
 
     if (!hasText) {
@@ -621,12 +622,11 @@
   }
 
   function waitForEditorText(element, text, timeoutMs) {
-    const sampleText = text.slice(0, 20);
     const startedAt = Date.now();
 
     return new Promise((resolve) => {
       const tick = () => {
-        if (getElementText(element).includes(sampleText)) {
+        if (editorContainsText(element, text)) {
           resolve(true);
           return;
         }
@@ -641,6 +641,17 @@
 
       tick();
     });
+  }
+
+  function editorContainsText(element, text) {
+    const expected = normalizeVerificationText(text);
+    const actual = normalizeVerificationText(getElementText(element));
+    const sample = expected.slice(0, Math.min(24, expected.length));
+    return Boolean(sample && actual.includes(sample));
+  }
+
+  function normalizeVerificationText(text) {
+    return String(text || "").replace(/\s+/g, " ").trim();
   }
 
   function scrapeConversationText() {
