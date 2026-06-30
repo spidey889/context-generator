@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-07-01-mature-handoff";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-07-01-premium-handoff";
   const BUBBLE_ID = "context-generator-bubble";
   const OVERLAY_ID = "context-generator-overlay";
   const DESTINATION_SHEET_ID = "context-generator-destination-sheet";
@@ -1423,22 +1423,22 @@
         "z-index:2147483647",
         "left:50%",
         "top:46%",
-        "width:min(380px,calc(100vw - 32px))",
-        "height:164px",
-        "min-height:164px",
-        "max-height:164px",
+        "width:min(420px,calc(100vw - 32px))",
+        "height:188px",
+        "min-height:188px",
+        "max-height:188px",
         "box-sizing:border-box",
-        "padding:22px 22px 19px",
-        "border-radius:18px",
-        "border:1px solid rgba(214,214,214,0.12)",
-        "background:linear-gradient(180deg,#030303 0%,#000000 58%,#030303 100%)",
+        "padding:28px 28px 24px",
+        "border-radius:22px",
+        "border:1px solid rgba(226,226,226,0.135)",
+        "background:linear-gradient(180deg,#171719 0%,#101012 52%,#0b0b0d 100%)",
         "color:#b9b9b9",
-        "box-shadow:0 24px 70px rgba(0,0,0,0.62), 0 0 0 1px rgba(0,0,0,0.88), inset 0 1px 0 rgba(255,255,255,0.045)",
+        "box-shadow:0 26px 76px rgba(0,0,0,0.55), 0 0 0 1px rgba(0,0,0,0.7), inset 0 1px 0 rgba(255,255,255,0.075), inset 0 -1px 0 rgba(255,255,255,0.025)",
         "transform:translate3d(-50%,-50%,0) scale(0.98)",
         "opacity:0",
         "flex-direction:column",
         "justify-content:center",
-        "gap:17px",
+        "gap:22px",
         "overflow:hidden",
         "backdrop-filter:blur(20px)",
         "font-family:'SF Pro Display','SF Pro Text','Segoe UI Variable','Segoe UI',-apple-system,BlinkMacSystemFont,Arial,sans-serif",
@@ -1452,8 +1452,8 @@
         "position:absolute",
         "inset:-1px",
         "pointer-events:none",
-        "background:linear-gradient(180deg,rgba(255,255,255,0.055),transparent 36%,rgba(255,255,255,0.025) 100%)",
-        "opacity:0.72"
+        "background:radial-gradient(circle at 50% -24%,rgba(255,255,255,0.105),transparent 34%),linear-gradient(180deg,rgba(255,255,255,0.04),transparent 42%,rgba(255,255,255,0.018) 100%)",
+        "opacity:0.78"
       ].join(";");
 
       const topRow = document.createElement("div");
@@ -1484,19 +1484,27 @@
       mark.appendChild(markDot);
 
       const copy = document.createElement("div");
-      copy.style.cssText = "min-width:0;display:flex;flex-direction:column;align-items:center;gap:7px;flex:1";
-
-      const title = document.createElement("div");
-      title.id = "context-generator-overlay-title";
-      title.style.cssText = "font-size:16.5px;font-weight:560;line-height:1.14;color:#c7c7c7;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;text-rendering:geometricPrecision";
-      title.textContent = "Carrying context";
+      copy.style.cssText = "min-width:0;display:flex;flex-direction:column;align-items:center;gap:0;flex:1";
 
       const quote = document.createElement("div");
       quote.id = "context-generator-overlay-quote";
-      quote.style.cssText = "font-size:12.2px;font-weight:440;line-height:1.32;color:#868686;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%";
+      quote.style.cssText = [
+        "font-size:14px",
+        "font-weight:470",
+        "line-height:1.32",
+        "white-space:nowrap",
+        "overflow:hidden",
+        "text-overflow:ellipsis",
+        "max-width:100%",
+        "color:transparent",
+        "background-image:linear-gradient(100deg,#777777 0%,#a8a8a8 32%,#d0d0d0 48%,#979797 64%,#6f6f6f 100%)",
+        "background-size:260% 100%",
+        "-webkit-background-clip:text",
+        "background-clip:text",
+        "animation:contextGeneratorQuoteShimmer 4.4s linear infinite"
+      ].join(";");
       quote.textContent = HANDOFF_QUOTES[0];
 
-      copy.appendChild(title);
       copy.appendChild(quote);
       topRow.appendChild(mark);
       topRow.appendChild(copy);
@@ -1505,14 +1513,14 @@
       statusShell.style.cssText = [
         "position:relative",
         "z-index:1",
-        "height:44px",
-        "border-radius:12px",
+        "height:52px",
+        "border-radius:16px",
         "border:0",
         "background:transparent",
         "display:flex",
         "align-items:center",
         "justify-content:center",
-        "padding:0 14px",
+        "padding:0 18px",
         "box-sizing:border-box",
         "overflow:hidden"
       ].join(";");
@@ -1522,6 +1530,10 @@
         styleSheet.id = "context-generator-styles";
         styleSheet.dataset.contextGeneratorOwned = "true";
         styleSheet.textContent = `
+          @keyframes contextGeneratorQuoteShimmer{
+            0%{background-position:140% 50%}
+            100%{background-position:-120% 50%}
+          }
           @keyframes contextGeneratorStatusShimmer{
             0%{opacity:0;transform:translate3d(0,12px,0);background-position:125% 50%;filter:blur(0.2px)}
             16%{opacity:1;transform:translate3d(0,0,0);filter:blur(0)}
@@ -1531,6 +1543,7 @@
           }
           @media (prefers-reduced-motion: reduce){
             #context-generator-text{animation:none!important}
+            #context-generator-overlay-quote{animation:none!important}
           }
         `;
         document.head.appendChild(styleSheet);
@@ -1543,8 +1556,8 @@
         "display:block",
         "width:100%",
         "min-width:0",
-        "font-size:15px",
-        "font-weight:540",
+        "font-size:17px",
+        "font-weight:520",
         "line-height:1.18",
         "text-align:center",
         "white-space:nowrap",
@@ -1556,7 +1569,7 @@
         "background-position:125% 50%",
         "-webkit-background-clip:text",
         "background-clip:text",
-        "animation:contextGeneratorStatusShimmer 1.34s cubic-bezier(0.16,1,0.3,1) both"
+        "animation:contextGeneratorStatusShimmer 1.42s cubic-bezier(0.16,1,0.3,1) both"
       ].join(";");
       statusShell.appendChild(textSpan);
 
@@ -1570,15 +1583,11 @@
   function showOverlay(destinationId = null) {
     ensureFloatingOverlay();
     const overlay = document.getElementById(OVERLAY_ID);
-    const title = document.getElementById("context-generator-overlay-title");
     const quote = document.getElementById("context-generator-overlay-quote");
     const bubble = document.getElementById(BUBBLE_ID);
     const destination = destinationId ? getPlatform(destinationId) : null;
 
     if (overlay) {
-      if (title) {
-        title.textContent = destination ? `${currentPlatform.name} to ${destination.name}` : "Carrying context";
-      }
       if (quote) {
         quote.textContent = getRandomHandoffQuote();
       }
@@ -1638,7 +1647,7 @@
     textSpan.style.animation = "none";
     textSpan.textContent = text;
     void textSpan.offsetWidth;
-    textSpan.style.animation = "contextGeneratorStatusShimmer 1.34s cubic-bezier(0.16,1,0.3,1) both";
+    textSpan.style.animation = "contextGeneratorStatusShimmer 1.42s cubic-bezier(0.16,1,0.3,1) both";
   }
 
   function stopHandoffStatusCycle() {
