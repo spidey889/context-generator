@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-06-30-oled-sheet";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-06-30-premium-title";
   const BUBBLE_ID = "context-generator-bubble";
   const OVERLAY_ID = "context-generator-overlay";
   const DESTINATION_SHEET_ID = "context-generator-destination-sheet";
@@ -1178,7 +1178,7 @@
     header.style.cssText = "padding:0 1px 8px;display:flex;align-items:center;justify-content:space-between;gap:10px";
     const title = document.createElement("div");
     title.textContent = DESTINATION_TITLE_TEXT;
-    title.style.cssText = "font-size:11.5px;font-weight:740;letter-spacing:0;color:#ffffff;line-height:1.12";
+    title.style.cssText = "font-family:Georgia,'Times New Roman',serif;font-size:14px;font-weight:500;letter-spacing:0;color:#ffffff;line-height:1.02;text-rendering:geometricPrecision";
     const badge = document.createElement("button");
     badge.type = "button";
     badge.textContent = "Cap Context";
