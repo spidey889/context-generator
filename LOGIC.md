@@ -6,7 +6,7 @@ This document explains how the Chrome extension works right now. It is written f
 
 - `extension/manifest.json` registers the extension, host permissions, the background service worker, and the shared platform content script on all supported AI sites.
 - `extension/background.js` coordinates tab creation, content script injection, backend summarization, badge state, and messages between pages.
-- `extension/platform-content.js` owns the Cap Context button, destination picker, conversation scraping, backend summary request, destination paste, and destination auto-send behavior for every supported platform.
+- `extension/platform-content.js` owns the Cap Context button, destination picker, conversation scraping, backend summary request, and destination paste behavior for every supported platform.
 - `api/summarize.js` is the Vercel serverless endpoint that calls Mistral.
 
 The old split content scripts were removed. There is no longer a separate Claude launcher script, ChatGPT paste script, or generic AI destination paste script.
@@ -55,7 +55,7 @@ ChatGPT is the exception. Its Cap Context button is mounted on the page root and
 
 For Claude and Gemini, the button sits on the right side of the composer. The script tries to find the platform's right-side action button cluster by scanning visible buttons inside or near the composer. If it finds that cluster, it shifts the cluster left by the bubble slot width so the Cap Context button has room. It only shifts a real control cluster or button, never the whole composer. It remembers the original transform on the shifted cluster and restores it if the input disappears or the anchor changes.
 
-Clicking the button opens a destination picker titled `Where to continue?`. The picker lists all supported platforms except the current one, and its helper line is always `Context goes straight into the input box`. Opening the picker also starts a silent warm summary after the sheet has rendered. It does not show the summarizing overlay and does not inject any prompt into the source AI. The warm summary is only reused if the user clicks a tile soon after and the current scraped chat still matches; otherwise it is discarded and the transfer falls back to a fresh summary. Each tile immediately opens and warms the selected platform tab, starts or reuses the backend summary flow in parallel, then pastes the summary into the already-open destination and auto-clicks Send.
+Clicking the button opens a destination picker titled `Where to continue?`. The picker lists all supported platforms except the current one, and its helper line is always `Context goes straight into the input box`. Opening the picker also starts a silent warm summary after the sheet has rendered. It does not show the summarizing overlay and does not inject any prompt into the source AI. The warm summary is only reused if the user clicks a tile soon after and the current scraped chat still matches; otherwise it is discarded and the transfer falls back to a fresh summary. Each tile immediately opens and warms the selected platform tab, starts or reuses the backend summary flow in parallel, then pastes the summary into the already-open destination input. The user manually reviews and sends it.
 
 ## Composer Placement Strategy
 
@@ -182,23 +182,21 @@ For contenteditable editors, it targets the first paragraph if one exists, other
 
 After pasting, it verifies that a normalized leading sample of the summary is present in the editor. If verification fails, it shows an "Auto-paste failed" modal with a copy button and returns an error to the background worker.
 
-Once paste verification passes, it waits for an enabled Send button. It searches platform-specific send selectors, then buttons in the input/composer area, then visible page buttons. It ignores disabled buttons and obvious non-send controls such as Stop, Cancel, Attach, Upload, Voice, Mic, New, and Menu. It accepts buttons whose metadata mentions send/submit or enabled submit buttons, then scores candidates by composer/form proximity so page-level utility buttons do not beat the real chat send control.
-
-When it finds the send button, it clicks it automatically. If the editor still appears unsent after the click settles, it tries a nearby form submit and an Enter-key fallback, then clicks a refreshed send button if the page re-rendered the control. These fallback attempts write quiet console debug messages for future failure investigation. This auto-send behavior applies to all five platforms as destinations.
+Once paste verification passes, the flow stops. It does not search for Send buttons, click Send, submit forms, or press Enter on any destination platform. The pasted summary stays in the input box for the user to review and send manually.
 
 ## Badges, Overlays, And Error Handling
 
 The background worker sets the extension badge to:
 
 - `RUN` when the extension icon successfully starts a transfer.
-- `OK` after a destination paste/send succeeds.
+- `OK` after a destination paste succeeds.
 - `ERR` for transfer errors.
 
 The source page shows a small overlay above the floating button while work is running. It displays `Summarizing with Mistral...`.
 
 If the source-side flow throws, the script resets the running flag, hides the overlay, shows a red "Transfer Failed" overlay on the source page, and notifies the background worker.
 
-If destination paste or send fails, the destination page shows a manual copy modal with the summary.
+If destination paste fails, the destination page shows a manual copy modal with the summary.
 
 ## Tricky Parts
 
@@ -207,6 +205,6 @@ If destination paste or send fails, the destination page shows a manual copy mod
 - The MutationObserver would loop forever if it reacted to its own UI. The script marks owned nodes and ignores mutations that are only caused by the extension.
 - Conversation scraping is best-effort. It tries structured message turns first, then falls back to page text when a platform changes its markup.
 - Programmatic pasting into modern AI editors is finicky. The script uses native setters, `execCommand("insertText")`, retries, direct `textContent` fallback, and synthetic beforeinput/input/change events.
-- Auto-send is also heuristic. The script waits for an enabled send/submit control and avoids obvious non-send controls, but platform UI changes can still require selector updates.
+- Destination transfer is paste-only. The script intentionally avoids all automatic send/submit/Enter behavior after the summary reaches the input box.
 - Scraping intentionally happens before the overlay is shown, so extension overlay text is not sent to Mistral.
 - After reloading the unpacked extension, already-open AI tabs may still have a stale content script. The script avoids crashing on delayed asset URL lookups and shows a refresh-this-tab error if a runtime message hits an invalidated extension context.

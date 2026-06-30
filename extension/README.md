@@ -8,7 +8,7 @@ This Chrome extension automates context handoff between Claude, ChatGPT, Gemini,
 4. Choose one of the other AI platforms.
 5. It opens that platform in a new tab.
 6. It pastes the summary into the message input.
-7. It auto-clicks Send.
+7. Review it and send manually.
 
 ## Install
 
