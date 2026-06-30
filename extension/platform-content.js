@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-07-01-premium-handoff";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-07-01-large-sharp-handoff";
   const BUBBLE_ID = "context-generator-bubble";
   const OVERLAY_ID = "context-generator-overlay";
   const DESTINATION_SHEET_ID = "context-generator-destination-sheet";
@@ -30,7 +30,7 @@
   const PASTE_VERIFY_TIMEOUT_MS = 1000;
   const WARM_SUMMARY_TTL_MS = 30000;
   const WARM_SUMMARY_START_DELAY_MS = 0;
-  const HANDOFF_STATUS_INTERVAL_MS = 1450;
+  const HANDOFF_STATUS_INTERVAL_MS = 1150;
   const HANDOFF_QUOTES = [
     "Good context beats a cold start.",
     "Tiny bridge, cleaner next reply.",
@@ -1423,13 +1423,13 @@
         "z-index:2147483647",
         "left:50%",
         "top:46%",
-        "width:min(420px,calc(100vw - 32px))",
-        "height:188px",
-        "min-height:188px",
-        "max-height:188px",
+        "width:min(560px,calc(100vw - 32px))",
+        "height:240px",
+        "min-height:240px",
+        "max-height:240px",
         "box-sizing:border-box",
-        "padding:28px 28px 24px",
-        "border-radius:22px",
+        "padding:36px 40px 32px",
+        "border-radius:12px",
         "border:1px solid rgba(226,226,226,0.135)",
         "background:linear-gradient(180deg,#171719 0%,#101012 52%,#0b0b0d 100%)",
         "color:#b9b9b9",
@@ -1438,7 +1438,7 @@
         "opacity:0",
         "flex-direction:column",
         "justify-content:center",
-        "gap:22px",
+        "gap:30px",
         "overflow:hidden",
         "backdrop-filter:blur(20px)",
         "font-family:'SF Pro Display','SF Pro Text','Segoe UI Variable','Segoe UI',-apple-system,BlinkMacSystemFont,Arial,sans-serif",
@@ -1489,7 +1489,7 @@
       const quote = document.createElement("div");
       quote.id = "context-generator-overlay-quote";
       quote.style.cssText = [
-        "font-size:14px",
+        "font-size:16px",
         "font-weight:470",
         "line-height:1.32",
         "white-space:nowrap",
@@ -1497,11 +1497,11 @@
         "text-overflow:ellipsis",
         "max-width:100%",
         "color:transparent",
-        "background-image:linear-gradient(100deg,#777777 0%,#a8a8a8 32%,#d0d0d0 48%,#979797 64%,#6f6f6f 100%)",
-        "background-size:260% 100%",
+        "background-image:linear-gradient(100deg,#858585 0%,#bdbdbd 30%,#ededed 46%,#b1b1b1 62%,#757575 100%)",
+        "background-size:220% 100%",
         "-webkit-background-clip:text",
         "background-clip:text",
-        "animation:contextGeneratorQuoteShimmer 4.4s linear infinite"
+        "animation:contextGeneratorQuoteShimmer 2.8s linear infinite"
       ].join(";");
       quote.textContent = HANDOFF_QUOTES[0];
 
@@ -1513,14 +1513,14 @@
       statusShell.style.cssText = [
         "position:relative",
         "z-index:1",
-        "height:52px",
-        "border-radius:16px",
+        "height:64px",
+        "border-radius:10px",
         "border:0",
         "background:transparent",
         "display:flex",
         "align-items:center",
         "justify-content:center",
-        "padding:0 18px",
+        "padding:0 22px",
         "box-sizing:border-box",
         "overflow:hidden"
       ].join(";");
@@ -1531,15 +1531,15 @@
         styleSheet.dataset.contextGeneratorOwned = "true";
         styleSheet.textContent = `
           @keyframes contextGeneratorQuoteShimmer{
-            0%{background-position:140% 50%}
-            100%{background-position:-120% 50%}
+            0%{background-position:135% 50%}
+            100%{background-position:-105% 50%}
           }
           @keyframes contextGeneratorStatusShimmer{
-            0%{opacity:0;transform:translate3d(0,12px,0);background-position:125% 50%;filter:blur(0.2px)}
+            0%{opacity:0;transform:translate3d(0,14px,0);background-position:122% 50%;filter:blur(0.2px)}
             16%{opacity:1;transform:translate3d(0,0,0);filter:blur(0)}
-            58%{opacity:1;transform:translate3d(0,0,0);background-position:0% 50%}
-            82%{opacity:1;transform:translate3d(0,0,0);background-position:-35% 50%}
-            100%{opacity:0;transform:translate3d(0,-11px,0);background-position:-80% 50%;filter:blur(0.15px)}
+            50%{opacity:1;transform:translate3d(0,0,0);background-position:0% 50%}
+            78%{opacity:1;transform:translate3d(0,0,0);background-position:-42% 50%}
+            100%{opacity:0;transform:translate3d(0,-13px,0);background-position:-88% 50%;filter:blur(0.15px)}
           }
           @media (prefers-reduced-motion: reduce){
             #context-generator-text{animation:none!important}
@@ -1556,7 +1556,7 @@
         "display:block",
         "width:100%",
         "min-width:0",
-        "font-size:17px",
+        "font-size:22px",
         "font-weight:520",
         "line-height:1.18",
         "text-align:center",
@@ -1564,12 +1564,12 @@
         "overflow:hidden",
         "text-overflow:ellipsis",
         "color:transparent",
-        "background-image:linear-gradient(100deg,#808080 0%,#aeaeae 28%,#d4d4d4 45%,#a6a6a6 62%,#747474 100%)",
-        "background-size:240% 100%",
+        "background-image:linear-gradient(100deg,#8a8a8a 0%,#c6c6c6 28%,#f1f1f1 44%,#b6b6b6 60%,#747474 100%)",
+        "background-size:220% 100%",
         "background-position:125% 50%",
         "-webkit-background-clip:text",
         "background-clip:text",
-        "animation:contextGeneratorStatusShimmer 1.42s cubic-bezier(0.16,1,0.3,1) both"
+        "animation:contextGeneratorStatusShimmer 1.05s cubic-bezier(0.16,1,0.3,1) both"
       ].join(";");
       statusShell.appendChild(textSpan);
 
@@ -1647,7 +1647,7 @@
     textSpan.style.animation = "none";
     textSpan.textContent = text;
     void textSpan.offsetWidth;
-    textSpan.style.animation = "contextGeneratorStatusShimmer 1.42s cubic-bezier(0.16,1,0.3,1) both";
+    textSpan.style.animation = "contextGeneratorStatusShimmer 1.05s cubic-bezier(0.16,1,0.3,1) both";
   }
 
   function stopHandoffStatusCycle() {
