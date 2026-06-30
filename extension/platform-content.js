@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-07-01-large-sharp-handoff";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-07-01-serif-handoff";
   const BUBBLE_ID = "context-generator-bubble";
   const OVERLAY_ID = "context-generator-overlay";
   const DESTINATION_SHEET_ID = "context-generator-destination-sheet";
@@ -30,7 +30,7 @@
   const PASTE_VERIFY_TIMEOUT_MS = 1000;
   const WARM_SUMMARY_TTL_MS = 30000;
   const WARM_SUMMARY_START_DELAY_MS = 0;
-  const HANDOFF_STATUS_INTERVAL_MS = 1150;
+  const HANDOFF_STATUS_INTERVAL_MS = 1850;
   const HANDOFF_QUOTES = [
     "Good context beats a cold start.",
     "Tiny bridge, cleaner next reply.",
@@ -1429,7 +1429,7 @@
         "max-height:240px",
         "box-sizing:border-box",
         "padding:36px 40px 32px",
-        "border-radius:12px",
+        "border-radius:30px",
         "border:1px solid rgba(226,226,226,0.135)",
         "background:linear-gradient(180deg,#171719 0%,#101012 52%,#0b0b0d 100%)",
         "color:#b9b9b9",
@@ -1441,7 +1441,7 @@
         "gap:30px",
         "overflow:hidden",
         "backdrop-filter:blur(20px)",
-        "font-family:'SF Pro Display','SF Pro Text','Segoe UI Variable','Segoe UI',-apple-system,BlinkMacSystemFont,Arial,sans-serif",
+        "font-family:'Iowan Old Style','New York',Georgia,'Times New Roman',serif",
         "letter-spacing:0",
         "will-change:transform,opacity",
         "transition:opacity 0.16s cubic-bezier(0.16,1,0.3,1), transform 0.18s cubic-bezier(0.16,1,0.3,1)"
@@ -1489,8 +1489,8 @@
       const quote = document.createElement("div");
       quote.id = "context-generator-overlay-quote";
       quote.style.cssText = [
-        "font-size:16px",
-        "font-weight:470",
+        "font-size:18px",
+        "font-weight:500",
         "line-height:1.32",
         "white-space:nowrap",
         "overflow:hidden",
@@ -1501,7 +1501,7 @@
         "background-size:220% 100%",
         "-webkit-background-clip:text",
         "background-clip:text",
-        "animation:contextGeneratorQuoteShimmer 2.8s linear infinite"
+        "animation:contextGeneratorQuoteShimmer 5.2s linear infinite"
       ].join(";");
       quote.textContent = HANDOFF_QUOTES[0];
 
@@ -1514,7 +1514,7 @@
         "position:relative",
         "z-index:1",
         "height:64px",
-        "border-radius:10px",
+        "border-radius:22px",
         "border:0",
         "background:transparent",
         "display:flex",
@@ -1531,14 +1531,14 @@
         styleSheet.dataset.contextGeneratorOwned = "true";
         styleSheet.textContent = `
           @keyframes contextGeneratorQuoteShimmer{
-            0%{background-position:135% 50%}
-            100%{background-position:-105% 50%}
+            0%{background-position:145% 50%}
+            100%{background-position:-115% 50%}
           }
           @keyframes contextGeneratorStatusShimmer{
             0%{opacity:0;transform:translate3d(0,14px,0);background-position:122% 50%;filter:blur(0.2px)}
-            16%{opacity:1;transform:translate3d(0,0,0);filter:blur(0)}
-            50%{opacity:1;transform:translate3d(0,0,0);background-position:0% 50%}
-            78%{opacity:1;transform:translate3d(0,0,0);background-position:-42% 50%}
+            18%{opacity:1;transform:translate3d(0,0,0);filter:blur(0)}
+            56%{opacity:1;transform:translate3d(0,0,0);background-position:0% 50%}
+            84%{opacity:1;transform:translate3d(0,0,0);background-position:-42% 50%}
             100%{opacity:0;transform:translate3d(0,-13px,0);background-position:-88% 50%;filter:blur(0.15px)}
           }
           @media (prefers-reduced-motion: reduce){
@@ -1556,8 +1556,8 @@
         "display:block",
         "width:100%",
         "min-width:0",
-        "font-size:22px",
-        "font-weight:520",
+        "font-size:30px",
+        "font-weight:500",
         "line-height:1.18",
         "text-align:center",
         "white-space:nowrap",
@@ -1569,7 +1569,7 @@
         "background-position:125% 50%",
         "-webkit-background-clip:text",
         "background-clip:text",
-        "animation:contextGeneratorStatusShimmer 1.05s cubic-bezier(0.16,1,0.3,1) both"
+        "animation:contextGeneratorStatusShimmer 1.72s cubic-bezier(0.16,1,0.3,1) both"
       ].join(";");
       statusShell.appendChild(textSpan);
 
@@ -1647,7 +1647,7 @@
     textSpan.style.animation = "none";
     textSpan.textContent = text;
     void textSpan.offsetWidth;
-    textSpan.style.animation = "contextGeneratorStatusShimmer 1.05s cubic-bezier(0.16,1,0.3,1) both";
+    textSpan.style.animation = "contextGeneratorStatusShimmer 1.72s cubic-bezier(0.16,1,0.3,1) both";
   }
 
   function stopHandoffStatusCycle() {
