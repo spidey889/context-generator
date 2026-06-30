@@ -2,10 +2,12 @@ const CHATGPT_URL = "https://chatgpt.com/";
 const SUMMARY_BACKEND_URL = "https://context-generator-five.vercel.app/api/summarize";
 const PLATFORM_CONTENT_SCRIPT = "platform-content.js";
 const SOURCE_MESSAGE_TIMEOUT_MS = 12000;
-const DESTINATION_MESSAGE_TIMEOUT_MS = 45000;
-const MESSAGE_RETRY_INTERVAL_MS = 650;
-const SUMMARY_BACKEND_ATTEMPTS = 3;
-const SUMMARY_BACKEND_RETRY_INTERVAL_MS = 900;
+const DESTINATION_MESSAGE_TIMEOUT_MS = 18000;
+const MESSAGE_RETRY_INTERVAL_MS = 220;
+const DESTINATION_WARMUP_TIMEOUT_MS = 9000;
+const SUMMARY_BACKEND_ATTEMPTS = 2;
+const SUMMARY_BACKEND_RETRY_INTERVAL_MS = 450;
+const SUMMARY_BACKEND_TIMEOUT_MS = 22000;
 const DESTINATIONS = {
   claude: {
     name: "Claude",
@@ -131,11 +133,15 @@ async function summarizeWithBackend(conversation) {
   let lastError = null;
 
   for (let attempt = 1; attempt <= SUMMARY_BACKEND_ATTEMPTS; attempt += 1) {
+    let timeout = null;
     try {
+      const controller = new AbortController();
+      timeout = setTimeout(() => controller.abort(), SUMMARY_BACKEND_TIMEOUT_MS);
       const response = await fetch(SUMMARY_BACKEND_URL, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ conversation: conversation.trim() })
+        body: JSON.stringify({ conversation: conversation.trim() }),
+        signal: controller.signal
       });
 
       if (!response.ok) {
@@ -149,6 +155,8 @@ async function summarizeWithBackend(conversation) {
     } catch (error) {
       lastError = error;
       if (!isRetryableSummaryError(error)) throw error;
+    } finally {
+      if (timeout) clearTimeout(timeout);
     }
 
     if (attempt < SUMMARY_BACKEND_ATTEMPTS) {
@@ -167,6 +175,7 @@ function isRetryableSummaryError(error) {
   const message = String(error?.message || error || "");
   return (
     error?.name === "TypeError" ||
+    error?.name === "AbortError" ||
     message.includes("Failed to fetch") ||
     message.includes("NetworkError")
   );
@@ -234,8 +243,6 @@ async function activateDestinationTab(tabId) {
 }
 
 async function pasteIntoDestinationTab(tabId, destinationId, destination, text) {
-  await waitForTabLoaded(tabId, destination.name);
-
   return sendMessageWhenReady(
     tabId,
     {
@@ -251,8 +258,11 @@ async function pasteIntoDestinationTab(tabId, destinationId, destination, text) 
 
 async function warmDestinationTab(tabId, destination) {
   try {
-    await waitForTabLoaded(tabId, destination.name);
-    await ensureContentScript(tabId, destination.contentScript);
+    const startedAt = Date.now();
+    while (Date.now() - startedAt <= DESTINATION_WARMUP_TIMEOUT_MS) {
+      if (await ensureContentScript(tabId, destination.contentScript)) return;
+      await delay(MESSAGE_RETRY_INTERVAL_MS);
+    }
   } catch (error) {
     console.debug("[Context Generator Relay] Destination warmup skipped:", error?.message || error);
   }
@@ -261,11 +271,13 @@ async function warmDestinationTab(tabId, destination) {
 async function ensureContentScript(tabId, file) {
   try {
     await chrome.scripting.executeScript({ target: { tabId }, files: [file] });
+    return true;
   } catch (error) {
     const message = String(error?.message || error);
     if (!message.includes("Cannot access") && !message.includes("No tab with id")) {
       console.debug("[Context Generator Relay] Content script injection skipped:", message);
     }
+    return false;
   }
 }
 

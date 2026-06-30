@@ -1,5 +1,6 @@
-const MISTRAL_MAX_ATTEMPTS = 3;
-const MISTRAL_RETRY_INTERVAL_MS = 700;
+const MISTRAL_MAX_ATTEMPTS = 2;
+const MISTRAL_RETRY_INTERVAL_MS = 450;
+const MISTRAL_TIMEOUT_MS = 18000;
 
 module.exports = async function handler(req, res) {
   res.setHeader("Access-Control-Allow-Origin", "*");
@@ -44,6 +45,7 @@ module.exports = async function handler(req, res) {
       body: JSON.stringify({
         model: "mistral-small-latest",
         temperature: 0.2,
+        max_tokens: 900,
         messages: [
           {
             role: "system",
@@ -101,14 +103,18 @@ async function fetchWithRetry(url, options) {
   let lastError = null;
 
   for (let attempt = 1; attempt <= MISTRAL_MAX_ATTEMPTS; attempt += 1) {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), MISTRAL_TIMEOUT_MS);
     try {
-      const response = await fetch(url, options);
+      const response = await fetch(url, { ...options, signal: controller.signal });
       if (response.ok || !isRetryableMistralStatus(response.status) || attempt === MISTRAL_MAX_ATTEMPTS) {
         return response;
       }
     } catch (error) {
       lastError = error;
       if (attempt === MISTRAL_MAX_ATTEMPTS) throw error;
+    } finally {
+      clearTimeout(timeout);
     }
 
     await delay(MISTRAL_RETRY_INTERVAL_MS * attempt);

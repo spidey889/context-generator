@@ -114,13 +114,13 @@ If structured message scraping does not produce a useful transcript, the fallbac
 
 When no useful chat text exists, the transfer stops before calling the backend and shows a polished in-page error: `No text to summarize yet`. The message tells the user the chat is still a blank canvas and to send a message first.
 
-The backend conversation input is capped at 180,000 characters. If the page text is longer than that, the script keeps the first 40,000 characters and the last 140,000 characters, with an omission marker in the middle.
+The backend conversation input is capped at 80,000 characters to keep handoffs fast. If the page text is longer than that, the script keeps the first 16,000 characters and the recent tail, with an omission marker in the middle.
 
 ## How Summary Generation Works
 
 There is one summary path: Vercel/Mistral backend summarization. The extension never asks the source AI to summarize. It does not inject prompts into Claude, ChatGPT, Gemini, Grok, or DeepSeek.
 
-When the destination picker opens, `platform-content.js` waits a tiny tick so the sheet stays instant, then silently scrapes the current platform conversation and sends `SUMMARIZE_WITH_BACKEND` to the background worker as a warm summary request. The warm result is short-lived and keyed to a lightweight conversation fingerprint, so chat changes or time passing make it unusable.
+When the destination picker opens, `platform-content.js` lets the sheet render, then immediately starts a silent warm summary request on the next timer tick. The warm result is short-lived and keyed to a lightweight conversation fingerprint, so chat changes or time passing make it unusable.
 
 When a transfer starts, `platform-content.js` shows a compact centered handoff popup on the source page with a randomized short line and an animated status line such as `Summarizing context`, `Compacting the useful bits`, and `Preparing ChatGPT`. It uses the warm summary only if its fingerprint still matches. If the warm summary is missing, stale, failed, or not ready, the transfer uses the normal fresh `SUMMARIZE_WITH_BACKEND` path. The background worker retries transient backend failures before reporting an error to the source page.
 
@@ -150,13 +150,13 @@ If the backend request fails or returns no summary, the transfer fails and the e
 
 It accepts either an already-parsed body or a string body. Bad JSON returns 400. Missing or non-string `conversation` returns 400. Missing `MISTRAL_API_KEY` returns 500.
 
-For valid requests, it calls Mistral's chat completions endpoint with retry/backoff for transient rate-limit, server, and network failures:
+For valid requests, it calls Mistral's chat completions endpoint with a short timeout and limited retry/backoff for transient rate-limit, server, and network failures:
 
 ```text
 https://api.mistral.ai/v1/chat/completions
 ```
 
-The model is `mistral-small-latest` and temperature is `0.2`.
+The model is `mistral-small-latest`, temperature is `0.2`, and output is capped so long generations do not make the handoff feel stuck.
 
 The system prompt tells Mistral to summarize the conversation for another AI assistant and to return the context-carry structure. The user message contains the scraped conversation text.
 
@@ -172,7 +172,7 @@ Mistral API failures return 502 after retryable attempts are exhausted. Empty Mi
 
 After the backend summary returns text, `platform-content.js` sends `TRANSFER_TO_DESTINATION` to the background worker with the selected destination id, summary text, and the pre-opened destination tab id when one exists.
 
-The background worker validates the destination, opens the destination URL immediately in a background tab for destination-picker clicks, waits for the tab status to become complete, then repeatedly injects `platform-content.js` and retries the `PASTE_CONTEXT` message until the destination content script is reachable or the delivery timeout expires. If no pre-opened tab exists, or if that tab disappears, it falls back to creating a new destination tab. After paste succeeds, it activates the destination tab and focuses its window. The same retry delivery helper is used when the extension icon starts a source-side transfer, so a hydrated page that has not attached the content-script listener yet does not fail immediately.
+The background worker validates the destination, opens the destination URL immediately in a background tab for destination-picker clicks, then starts injecting `platform-content.js` and retrying the `PASTE_CONTEXT` message without waiting for the whole page to report `complete`. If no pre-opened tab exists, or if that tab disappears, it falls back to creating a new destination tab. After paste succeeds, it activates the destination tab and focuses its window. The same retry delivery helper is used when the extension icon starts a source-side transfer, so a hydrated page that has not attached the content-script listener yet does not fail immediately.
 
 The destination tab receives `PASTE_CONTEXT`, finds the destination input with that platform's input selectors, and writes the summary into the editor.
 

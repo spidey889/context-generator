@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-07-01-handoff-popup";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-07-01-faster-handoff";
   const BUBBLE_ID = "context-generator-bubble";
   const OVERLAY_ID = "context-generator-overlay";
   const DESTINATION_SHEET_ID = "context-generator-destination-sheet";
@@ -18,18 +18,18 @@
   const BUBBLE_SLOT_WIDTH = BUBBLE_SIZE + BUBBLE_GAP + 6;
   const DESTINATION_SHEET_WIDTH = 296;
   const RUNNING_AUTO_RESET_MS = 60000;
-  const MAX_BACKEND_CONVERSATION_CHARS = 180000;
+  const MAX_BACKEND_CONVERSATION_CHARS = 80000;
   const DEFAULT_MAX_COMPOSER_WIDTH = 1320;
   const DESTINATION_TITLE_TEXT = "Where to continue?";
   const DESTINATION_HELPER_TEXT = "Context goes straight into the input box";
   const NO_CONVERSATION_ERROR_TITLE = "No text to summarize yet";
   const NO_CONVERSATION_ERROR_MESSAGE = "This chat is still a blank canvas. Drop a message first, then I'll bottle the context.";
   const MIN_FALLBACK_CONVERSATION_CHARS = 120;
-  const PASTE_RETRY_TIMEOUT_MS = 32000;
-  const PASTE_RETRY_INTERVAL_MS = 300;
-  const PASTE_VERIFY_TIMEOUT_MS = 1600;
+  const PASTE_RETRY_TIMEOUT_MS = 14000;
+  const PASTE_RETRY_INTERVAL_MS = 180;
+  const PASTE_VERIFY_TIMEOUT_MS = 1000;
   const WARM_SUMMARY_TTL_MS = 30000;
-  const WARM_SUMMARY_START_DELAY_MS = 90;
+  const WARM_SUMMARY_START_DELAY_MS = 0;
   const HANDOFF_STATUS_INTERVAL_MS = 1450;
   const HANDOFF_QUOTES = [
     "Good context beats a cold start.",
@@ -881,7 +881,7 @@
       return cleaned;
     }
 
-    const headLength = 40000;
+    const headLength = 16000;
     const tailLength = MAX_BACKEND_CONVERSATION_CHARS - headLength;
     return [
       cleaned.slice(0, headLength),
