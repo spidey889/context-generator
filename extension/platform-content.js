@@ -1105,7 +1105,7 @@
         width: 46px;
         z-index: 1;
         pointer-events: none;
-        background: linear-gradient(90deg, transparent, rgba(255,255,255,0.07), rgba(255,255,255,0.14), transparent);
+        background: linear-gradient(90deg, transparent, rgba(255,255,255,0.08), rgba(255,255,255,0.18), transparent);
         filter: blur(0.25px);
         opacity: 0;
         transform: translate3d(-150%, 0, 0) skewX(-18deg);
@@ -1117,8 +1117,8 @@
         width: 12px;
         height: 12px;
         border-radius: 999px;
-        border: 1.5px solid rgba(245,245,245,0.18);
-        border-top-color: rgba(245,245,245,0.78);
+        border: 1.5px solid rgba(226,232,240,0.22);
+        border-top-color: rgba(248,250,252,0.9);
         flex: 0 0 auto;
         position: relative;
         z-index: 2;
@@ -1158,13 +1158,12 @@
       "z-index:2147483647",
       `width:${DESTINATION_SHEET_WIDTH}px`,
       "box-sizing:border-box",
-      "padding:9px",
-      "border-radius:15px",
-      "border:1px solid rgba(255,255,255,0.085)",
-      "background:#0a0a0a",
-      "box-shadow:0 14px 34px rgba(0,0,0,0.44), inset 0 1px 0 rgba(255,255,255,0.05)",
-      "backdrop-filter:blur(16px)",
-      "color:#f5f5f5",
+      "padding:10px",
+      "border-radius:14px",
+      "border:1px solid rgba(88,101,128,0.52)",
+      "background:linear-gradient(180deg,#111521 0%,#090b11 54%,#050609 100%)",
+      "box-shadow:0 18px 44px rgba(0,0,0,0.56), 0 0 0 1px rgba(0,0,0,0.72), inset 0 1px 0 rgba(255,255,255,0.075)",
+      "color:#f8fafc",
       "font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif",
       "overflow:hidden",
       "opacity:0",
@@ -1178,7 +1177,7 @@
     header.style.cssText = "padding:0 1px 8px;display:flex;align-items:center;justify-content:space-between;gap:10px";
     const title = document.createElement("div");
     title.textContent = DESTINATION_TITLE_TEXT;
-    title.style.cssText = "font-size:11.5px;font-weight:720;letter-spacing:0;color:#f5f5f5;line-height:1.12";
+    title.style.cssText = "font-size:11.5px;font-weight:760;letter-spacing:0;color:#f8fafc;line-height:1.12";
     const badge = document.createElement("button");
     badge.type = "button";
     badge.textContent = "Cap Context";
@@ -1187,9 +1186,9 @@
       "height:19px",
       "padding:0 7px",
       "border-radius:999px",
-      "border:1px solid rgba(255,255,255,0.085)",
-      "background:rgba(255,255,255,0.035)",
-      "color:rgba(245,245,245,0.62)",
+      "border:1px solid rgba(85,98,122,0.72)",
+      "background:linear-gradient(180deg,#171c28 0%,#0d111a 100%)",
+      "color:rgba(226,232,240,0.72)",
       "font-size:9.5px",
       "font-weight:650",
       "line-height:19px",
@@ -1223,10 +1222,10 @@
       button.style.cssText = [
         "width:100%",
         "height:48px",
-        "border:1px solid rgba(255,255,255,0.08)",
-        "border-radius:11px",
-        "background:linear-gradient(180deg, #131313 0%, #0f0f0f 58%, #0c0c0c 100%)",
-        "color:#f5f5f5",
+        "border:1px solid rgba(77,91,120,0.62)",
+        "border-radius:10px",
+        "background:linear-gradient(180deg, #171c27 0%, #10141d 56%, #090c12 100%)",
+        "color:#f8fafc",
         "display:flex",
         "align-items:center",
         "gap:7px",
@@ -1239,7 +1238,7 @@
         "position:relative",
         "overflow:hidden",
         "isolation:isolate",
-        "box-shadow:inset 0 1px 0 rgba(255,255,255,0.06), inset 0 -1px 0 rgba(0,0,0,0.42), 0 1px 0 rgba(255,255,255,0.018)",
+        "box-shadow:inset 0 1px 0 rgba(255,255,255,0.07), inset 0 -1px 0 rgba(0,0,0,0.54), 0 1px 0 rgba(255,255,255,0.024)",
         "transition:background 0.13s ease, border-color 0.13s ease, box-shadow 0.13s ease, transform 0.13s ease"
       ].join(";");
 
@@ -1249,8 +1248,8 @@
         "inset:-1px",
         "z-index:0",
         "pointer-events:none",
-        `background:radial-gradient(circle at 18% 50%, ${option.accent}1a 0, transparent 42%), linear-gradient(135deg, rgba(255,255,255,0.045), transparent 45%)`,
-        "opacity:0.28",
+        `background:radial-gradient(circle at 20% 50%, ${option.accent}24 0, transparent 44%), linear-gradient(135deg, rgba(255,255,255,0.055), transparent 46%)`,
+        "opacity:0.34",
         "transition:opacity 0.14s ease"
       ].join(";");
 
@@ -1259,23 +1258,23 @@
       shine.style.animationDelay = `${index * 0.18}s`;
 
       const logoWrap = document.createElement("div");
-      logoWrap.style.cssText = "width:26px;height:26px;display:flex;align-items:center;justify-content:center;flex:0 0 auto;opacity:0.96;position:relative;z-index:2";
+      logoWrap.style.cssText = "width:26px;height:26px;display:flex;align-items:center;justify-content:center;flex:0 0 auto;opacity:0.98;position:relative;z-index:2";
       const logo = document.createElement("img");
       logo.src = getExtensionAssetUrl(option.logo);
       logo.alt = "";
       logo.draggable = false;
-      logo.style.cssText = `width:${option.logoSize}px;height:${option.logoSize}px;object-fit:contain;display:block;filter:drop-shadow(0 1px 3px rgba(0,0,0,0.28))`;
+      logo.style.cssText = `width:${option.logoSize}px;height:${option.logoSize}px;object-fit:contain;display:block;filter:drop-shadow(0 1px 4px rgba(0,0,0,0.42))`;
       logoWrap.appendChild(logo);
 
       const copy = document.createElement("div");
       copy.style.cssText = "display:flex;flex-direction:column;gap:1px;min-width:0;flex:1;position:relative;z-index:2";
       const name = document.createElement("div");
       name.textContent = option.name;
-      name.style.cssText = "font-size:11.5px;font-weight:720;line-height:1.18;color:#f5f5f5;white-space:nowrap;overflow:hidden;text-overflow:ellipsis";
+      name.style.cssText = "font-size:11.5px;font-weight:760;line-height:1.18;color:#f8fafc;white-space:nowrap;overflow:hidden;text-overflow:ellipsis";
       const detail = document.createElement("div");
       detail.className = "context-generator-tile-detail";
       detail.textContent = option.detail;
-      detail.style.cssText = "font-size:9.5px;font-weight:500;line-height:1.28;color:rgba(245,245,245,0.43);white-space:nowrap;overflow:hidden;text-overflow:ellipsis";
+      detail.style.cssText = "font-size:9.5px;font-weight:520;line-height:1.28;color:rgba(203,213,225,0.58);white-space:nowrap;overflow:hidden;text-overflow:ellipsis";
       copy.appendChild(name);
       copy.appendChild(detail);
 
@@ -1284,17 +1283,17 @@
       spinner.setAttribute("aria-hidden", "true");
 
       const setButtonActive = () => {
-        button.style.background = "linear-gradient(180deg, #171717 0%, #111111 58%, #0c0c0c 100%)";
-        button.style.borderColor = `${option.accent}52`;
-        button.style.boxShadow = `inset 0 1px 0 rgba(255,255,255,0.085), inset 0 -1px 0 rgba(0,0,0,0.46), 0 0 0 1px ${option.accent}1f, 0 8px 18px rgba(0,0,0,0.24)`;
-        aura.style.opacity = "0.56";
+        button.style.background = "linear-gradient(180deg, #1c2330 0%, #111722 58%, #090c12 100%)";
+        button.style.borderColor = `${option.accent}70`;
+        button.style.boxShadow = `inset 0 1px 0 rgba(255,255,255,0.105), inset 0 -1px 0 rgba(0,0,0,0.54), 0 0 0 1px ${option.accent}24, 0 10px 22px rgba(0,0,0,0.34)`;
+        aura.style.opacity = "0.68";
         button.style.transform = "translateY(-1px)";
       };
       const setButtonIdle = () => {
-        button.style.background = "linear-gradient(180deg, #131313 0%, #0f0f0f 58%, #0c0c0c 100%)";
-        button.style.borderColor = "rgba(255,255,255,0.08)";
-        button.style.boxShadow = "inset 0 1px 0 rgba(255,255,255,0.06), inset 0 -1px 0 rgba(0,0,0,0.42), 0 1px 0 rgba(255,255,255,0.018)";
-        aura.style.opacity = "0.28";
+        button.style.background = "linear-gradient(180deg, #171c27 0%, #10141d 56%, #090c12 100%)";
+        button.style.borderColor = "rgba(77,91,120,0.62)";
+        button.style.boxShadow = "inset 0 1px 0 rgba(255,255,255,0.07), inset 0 -1px 0 rgba(0,0,0,0.54), 0 1px 0 rgba(255,255,255,0.024)";
+        aura.style.opacity = "0.34";
         button.style.transform = "translateY(0)";
       };
 
@@ -1331,8 +1330,8 @@
       "margin:9px 1px 1px",
       "padding-top:7px",
       "padding-bottom:1px",
-      "border-top:1px solid rgba(255,255,255,0.045)",
-      "color:rgba(245,245,245,0.34)",
+      "border-top:1px solid rgba(88,101,128,0.36)",
+      "color:rgba(148,163,184,0.72)",
       "font-size:9.5px",
       "font-weight:500",
       "line-height:1.35",
