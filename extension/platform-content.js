@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-07-01-shimmer-handoff";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-07-01-mature-handoff";
   const BUBBLE_ID = "context-generator-bubble";
   const OVERLAY_ID = "context-generator-overlay";
   const DESTINATION_SHEET_ID = "context-generator-destination-sheet";
@@ -1423,13 +1423,13 @@
         "z-index:2147483647",
         "left:50%",
         "top:46%",
-        "width:min(340px,calc(100vw - 32px))",
-        "height:144px",
-        "min-height:144px",
-        "max-height:144px",
+        "width:min(380px,calc(100vw - 32px))",
+        "height:164px",
+        "min-height:164px",
+        "max-height:164px",
         "box-sizing:border-box",
-        "padding:18px 18px 16px",
-        "border-radius:16px",
+        "padding:22px 22px 19px",
+        "border-radius:18px",
         "border:1px solid rgba(214,214,214,0.12)",
         "background:linear-gradient(180deg,#030303 0%,#000000 58%,#030303 100%)",
         "color:#b9b9b9",
@@ -1438,10 +1438,10 @@
         "opacity:0",
         "flex-direction:column",
         "justify-content:center",
-        "gap:14px",
+        "gap:17px",
         "overflow:hidden",
         "backdrop-filter:blur(20px)",
-        "font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif",
+        "font-family:'SF Pro Display','SF Pro Text','Segoe UI Variable','Segoe UI',-apple-system,BlinkMacSystemFont,Arial,sans-serif",
         "letter-spacing:0",
         "will-change:transform,opacity",
         "transition:opacity 0.16s cubic-bezier(0.16,1,0.3,1), transform 0.18s cubic-bezier(0.16,1,0.3,1)"
@@ -1484,16 +1484,16 @@
       mark.appendChild(markDot);
 
       const copy = document.createElement("div");
-      copy.style.cssText = "min-width:0;display:flex;flex-direction:column;align-items:center;gap:5px;flex:1";
+      copy.style.cssText = "min-width:0;display:flex;flex-direction:column;align-items:center;gap:7px;flex:1";
 
       const title = document.createElement("div");
       title.id = "context-generator-overlay-title";
-      title.style.cssText = "font-size:14.5px;font-weight:620;line-height:1.12;color:#c9c9c9;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;text-rendering:geometricPrecision";
+      title.style.cssText = "font-size:16.5px;font-weight:560;line-height:1.14;color:#c7c7c7;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;text-rendering:geometricPrecision";
       title.textContent = "Carrying context";
 
       const quote = document.createElement("div");
       quote.id = "context-generator-overlay-quote";
-      quote.style.cssText = "font-size:11px;font-weight:500;line-height:1.28;color:#7f7f7f;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%";
+      quote.style.cssText = "font-size:12.2px;font-weight:440;line-height:1.32;color:#868686;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%";
       quote.textContent = HANDOFF_QUOTES[0];
 
       copy.appendChild(title);
@@ -1505,14 +1505,14 @@
       statusShell.style.cssText = [
         "position:relative",
         "z-index:1",
-        "height:38px",
+        "height:44px",
         "border-radius:12px",
         "border:0",
         "background:transparent",
         "display:flex",
         "align-items:center",
         "justify-content:center",
-        "padding:0 12px",
+        "padding:0 14px",
         "box-sizing:border-box",
         "overflow:hidden"
       ].join(";");
@@ -1543,15 +1543,15 @@
         "display:block",
         "width:100%",
         "min-width:0",
-        "font-size:13px",
-        "font-weight:660",
-        "line-height:1.15",
+        "font-size:15px",
+        "font-weight:540",
+        "line-height:1.18",
         "text-align:center",
         "white-space:nowrap",
         "overflow:hidden",
         "text-overflow:ellipsis",
         "color:transparent",
-        "background-image:linear-gradient(100deg,#7f7f7f 0%,#a9a9a9 28%,#d6d6d6 45%,#9f9f9f 62%,#6f6f6f 100%)",
+        "background-image:linear-gradient(100deg,#808080 0%,#aeaeae 28%,#d4d4d4 45%,#a6a6a6 62%,#747474 100%)",
         "background-size:240% 100%",
         "background-position:125% 50%",
         "-webkit-background-clip:text",
