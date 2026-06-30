@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-06-30-premium-title";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-06-30-instant-destination";
   const BUBBLE_ID = "context-generator-bubble";
   const OVERLAY_ID = "context-generator-overlay";
   const DESTINATION_SHEET_ID = "context-generator-destination-sheet";
@@ -328,13 +328,19 @@
 
   startFloatingButtonMonitoring();
 
-  async function runContextFlow(destinationId) {
+  async function runContextFlow(destinationId, preparedDestinationPromise = null) {
     try {
       const conversationText = scrapeConversationText();
       showOverlay();
       const summary = await summarizeWithBackend(conversationText);
+      const preparedDestination = preparedDestinationPromise ? await preparedDestinationPromise : null;
       resetRunningFlag();
-      await notifyBackground({ type: "TRANSFER_TO_DESTINATION", destination: destinationId, text: summary });
+      await notifyBackground({
+        type: "TRANSFER_TO_DESTINATION",
+        destination: destinationId,
+        text: summary,
+        preparedTabId: preparedDestination?.tabId || null
+      });
     } catch (error) {
       resetRunningFlag();
       showErrorOverlay(error.message);
@@ -353,6 +359,16 @@
     }
 
     return response.summary.trim();
+  }
+
+  function prepareDestinationTab(destinationId) {
+    return notifyBackground({
+      type: "PREPARE_DESTINATION",
+      destination: destinationId
+    }).catch((error) => {
+      logTransferDebug(`Destination pre-open failed; falling back to normal transfer. ${error.message}`);
+      return null;
+    });
   }
 
   async function notifyBackground(message) {
@@ -1190,11 +1206,12 @@
       "border:1px solid rgba(255,255,255,0.12)",
       "background:rgba(255,255,255,0.045)",
       "color:rgba(255,255,255,0.68)",
-      "font-size:9.5px",
-      "font-weight:650",
+      "font-size:10px",
+      "font-weight:500",
       "line-height:19px",
       "letter-spacing:0",
-      "font-family:inherit",
+      "font-family:Georgia,'Times New Roman',serif",
+      "text-rendering:geometricPrecision",
       "cursor:pointer",
       "outline:0",
       "transition:border-color 0.14s ease, background 0.14s ease, box-shadow 0.14s ease, color 0.14s ease"
@@ -1315,9 +1332,9 @@
         button.setAttribute("aria-busy", "true");
         button.style.pointerEvents = "none";
         spinner.style.display = "block";
-        detail.textContent = "Mistral...";
+        detail.textContent = "Opening...";
         button.style.transform = "scale(0.985)";
-        window.setTimeout(() => startDestinationTransfer(option.id), 120);
+        startDestinationTransfer(option.id);
       });
 
       grid.appendChild(button);
@@ -1465,7 +1482,8 @@
     isRunning = true;
     clearRunningResetTimer();
     runningResetTimer = setTimeout(resetRunningFlag, RUNNING_AUTO_RESET_MS);
-    runContextFlow(destinationId);
+    const preparedDestinationPromise = prepareDestinationTab(destinationId);
+    runContextFlow(destinationId, preparedDestinationPromise);
   }
 
   function ensureFloatingOverlay() {

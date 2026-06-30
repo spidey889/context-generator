@@ -93,11 +93,22 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   }
 
   if (message?.type === "TRANSFER_TO_DESTINATION") {
-    transferToDestination(message.destination, message.text)
+    transferToDestination(message.destination, message.text, message.preparedTabId)
       .then(() => sendResponse({ ok: true }))
       .catch((error) => {
         console.error("[Context Generator Relay]", error);
         setBadge("ERR", "#b42318", 5000);
+        sendResponse({ ok: false, error: error.message });
+      });
+
+    return true;
+  }
+
+  if (message?.type === "PREPARE_DESTINATION") {
+    prepareDestination(message.destination)
+      .then((tabId) => sendResponse({ ok: true, tabId }))
+      .catch((error) => {
+        console.error("[Context Generator Relay]", error);
         sendResponse({ ok: false, error: error.message });
       });
 
@@ -161,7 +172,7 @@ function isRetryableSummaryError(error) {
   );
 }
 
-async function transferToDestination(destinationId, text) {
+async function transferToDestination(destinationId, text, preparedTabId = null) {
   if (!text?.trim()) {
     throw new Error("Context summary text was not available.");
   }
@@ -171,26 +182,64 @@ async function transferToDestination(destinationId, text) {
     throw new Error("Unknown AI destination.");
   }
 
-  const destinationTab = await chrome.tabs.create({ url: destination.url, active: true });
-  await waitForTabLoaded(destinationTab.id, destination.name);
+  let pasteResult;
 
-  const pasteResult = await sendMessageWhenReady(
-    destinationTab.id,
-    {
-      type: "PASTE_CONTEXT",
-      destination: destinationId,
-      text: text.trim()
-    },
-    destination.contentScript,
-    DESTINATION_MESSAGE_TIMEOUT_MS,
-    destination.name
-  );
+  try {
+    const destinationTabId = preparedTabId || await createDestinationTab(destination);
+    pasteResult = await pasteIntoDestinationTab(destinationTabId, destinationId, destination, text.trim());
+  } catch (error) {
+    if (!preparedTabId) throw error;
+
+    const destinationTabId = await createDestinationTab(destination);
+    pasteResult = await pasteIntoDestinationTab(destinationTabId, destinationId, destination, text.trim());
+  }
 
   if (!pasteResult?.ok) {
     throw new Error(pasteResult?.error || `Could not paste into ${destination.name}.`);
   }
 
   await setBadge("OK", "#1f8f4d", 2500);
+}
+
+async function prepareDestination(destinationId) {
+  const destination = DESTINATIONS[destinationId];
+  if (!destination) {
+    throw new Error("Unknown AI destination.");
+  }
+
+  const destinationTabId = await createDestinationTab(destination);
+  warmDestinationTab(destinationTabId, destination);
+  return destinationTabId;
+}
+
+async function createDestinationTab(destination) {
+  const destinationTab = await chrome.tabs.create({ url: destination.url, active: true });
+  return destinationTab.id;
+}
+
+async function pasteIntoDestinationTab(tabId, destinationId, destination, text) {
+  await waitForTabLoaded(tabId, destination.name);
+
+  return sendMessageWhenReady(
+    tabId,
+    {
+      type: "PASTE_CONTEXT",
+      destination: destinationId,
+      text
+    },
+    destination.contentScript,
+    DESTINATION_MESSAGE_TIMEOUT_MS,
+    destination.name
+  );
+}
+
+async function warmDestinationTab(tabId, destination) {
+  try {
+    await waitForTabLoaded(tabId, destination.name);
+    await ensureContentScript(tabId, destination.contentScript);
+  } catch (error) {
+    console.debug("[Context Generator Relay] Destination warmup skipped:", error?.message || error);
+  }
 }
 
 async function ensureContentScript(tabId, file) {

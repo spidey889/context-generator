@@ -55,7 +55,7 @@ ChatGPT is the exception. Its Cap Context button is mounted on the page root and
 
 For Claude and Gemini, the button sits on the right side of the composer. The script tries to find the platform's right-side action button cluster by scanning visible buttons inside or near the composer. If it finds that cluster, it shifts the cluster left by the bubble slot width so the Cap Context button has room. It only shifts a real control cluster or button, never the whole composer. It remembers the original transform on the shifted cluster and restores it if the input disappears or the anchor changes.
 
-Clicking the button opens a destination picker titled `Where to continue?`. The picker lists all supported platforms except the current one, and its helper line is always `Context goes straight into the input box`. Each tile starts the same backend summary flow, then opens the selected platform, pastes the summary, and auto-clicks Send.
+Clicking the button opens a destination picker titled `Where to continue?`. The picker lists all supported platforms except the current one, and its helper line is always `Context goes straight into the input box`. Each tile immediately opens and warms the selected platform tab, starts the same backend summary flow in parallel, then pastes the summary into the already-open destination and auto-clicks Send.
 
 ## Composer Placement Strategy
 
@@ -168,9 +168,9 @@ Mistral API failures return 502 after retryable attempts are exhausted. Empty Mi
 
 ## How Context Transfer Works
 
-After the backend summary returns text, `platform-content.js` sends `TRANSFER_TO_DESTINATION` to the background worker with the selected destination id and summary text.
+After the backend summary returns text, `platform-content.js` sends `TRANSFER_TO_DESTINATION` to the background worker with the selected destination id, summary text, and the pre-opened destination tab id when one exists.
 
-The background worker validates the destination, opens the destination URL in a new active tab, waits for the tab status to become complete, then repeatedly injects `platform-content.js` and retries the `PASTE_CONTEXT` message until the destination content script is reachable or the delivery timeout expires. The same retry delivery helper is used when the extension icon starts a source-side transfer, so a hydrated page that has not attached the content-script listener yet does not fail immediately.
+The background worker validates the destination, opens the destination URL immediately for destination-picker clicks, waits for the tab status to become complete, then repeatedly injects `platform-content.js` and retries the `PASTE_CONTEXT` message until the destination content script is reachable or the delivery timeout expires. If no pre-opened tab exists, or if that tab disappears, it falls back to creating a new destination tab. The same retry delivery helper is used when the extension icon starts a source-side transfer, so a hydrated page that has not attached the content-script listener yet does not fail immediately.
 
 The destination tab receives `PASTE_CONTEXT`, finds the destination input with that platform's input selectors, and writes the summary into the editor.
 
