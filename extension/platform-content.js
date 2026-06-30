@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-06-29-grok-fast-anchor";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-06-30-destination-retry";
   const BUBBLE_ID = "context-generator-bubble";
   const OVERLAY_ID = "context-generator-overlay";
   const DESTINATION_SHEET_ID = "context-generator-destination-sheet";
@@ -25,10 +25,10 @@
   const NO_CONVERSATION_ERROR_TITLE = "No text to summarize yet";
   const NO_CONVERSATION_ERROR_MESSAGE = "This chat is still a blank canvas. Drop a message first, then I'll bottle the context.";
   const MIN_FALLBACK_CONVERSATION_CHARS = 120;
-  const PASTE_RETRY_TIMEOUT_MS = 18000;
-  const PASTE_RETRY_INTERVAL_MS = 350;
-  const PASTE_VERIFY_TIMEOUT_MS = 800;
-  const SEND_VERIFY_TIMEOUT_MS = 1800;
+  const PASTE_RETRY_TIMEOUT_MS = 32000;
+  const PASTE_RETRY_INTERVAL_MS = 300;
+  const PASTE_VERIFY_TIMEOUT_MS = 1600;
+  const SEND_VERIFY_TIMEOUT_MS = 4500;
   const CAP_CONTEXT_SITE_URL = "https://spidey889.github.io/context-generator";
   const EXTENSION_ASSET_BASE_URL = getRuntimeAssetBaseUrl();
   const BUBBLE_ICON_URL = getExtensionAssetUrl("bubble-icon.png");
@@ -154,9 +154,13 @@
       accent: "#f5f5f5",
       logoSize: 24,
       logo: "logos/grokwhitedownload__1_-removebg-preview.png",
+      retryPaste: true,
       inputSelectors: [
         "[data-testid='grokInput'][contenteditable='true']",
         "[data-testid='grok-input'][contenteditable='true']",
+        "[data-testid*='composer' i] [contenteditable='true']",
+        "[data-testid*='prompt' i][contenteditable='true']",
+        "[aria-label*='ask grok' i][contenteditable='true']",
         "div[contenteditable='true'][aria-label*='ask' i]",
         "div[contenteditable='true'][role='textbox']",
         "[contenteditable='true'][data-placeholder]",
@@ -167,6 +171,8 @@
         "[data-testid='grok-input'] textarea",
         "textarea[data-testid='grokInput']",
         "textarea[data-testid='grok-input']",
+        "textarea[aria-label*='ask grok' i]",
+        "textarea[placeholder*='ask grok' i]",
         "textarea[placeholder*='ask' i]",
         "textarea[aria-label*='ask' i]",
         "textarea[placeholder]",
@@ -180,8 +186,10 @@
       sendSelectors: [
         "button[aria-label*='send' i]",
         "button[aria-label*='submit' i]",
+        "button[title*='send' i]",
         "button[data-testid*='send' i]",
-        "button[data-testid*='submit' i]"
+        "button[data-testid*='submit' i]",
+        "button[type='submit']"
       ]
     },
     deepseek: {
@@ -204,7 +212,10 @@
       ],
       inputSelectors: [
         "#chat-input[contenteditable='true']",
+        "[data-testid*='chat-input' i][contenteditable='true']",
+        "[data-testid*='composer' i] [contenteditable='true']",
         "div[contenteditable='true'][aria-label*='message' i]",
+        "div[contenteditable='true'][aria-label*='ask' i]",
         "div[contenteditable='true'][role='textbox']",
         "[contenteditable='true'][data-placeholder]",
         "[contenteditable='true']"
@@ -212,7 +223,10 @@
       fallbackSelectors: [
         "textarea[name='search']",
         "#chat-input",
+        "textarea[aria-label*='message' i]",
+        "textarea[aria-label*='ask' i]",
         "textarea[placeholder*='message' i]",
+        "textarea[placeholder*='ask' i]",
         "textarea[placeholder]",
         "textarea"
       ],
@@ -224,7 +238,10 @@
       ],
       sendSelectors: [
         "button[aria-label*='send' i]",
+        "[role='button'][aria-label*='send' i]",
+        "button[title*='send' i]",
         "button[class*='send' i]",
+        "[role='button'][class*='send' i]",
         "button[type='submit']"
       ]
     }
@@ -382,7 +399,7 @@
 
     if (destination.retryPaste) {
       const sendButton = await pasteAndFindSendButtonWithRetry(trimmedText, destination);
-      sendButton.click();
+      clickSendButton(sendButton);
       return;
     }
 
@@ -401,7 +418,7 @@
     }
 
     const sendButton = await waitForElement(() => findSendButton(input, destination), 10000, `${destination.name} send button`);
-    sendButton.click();
+    clickSendButton(sendButton);
   }
 
   async function pasteAndFindSendButtonWithRetry(text, destination) {
@@ -523,17 +540,21 @@
       return findDeepSeekSendButton(input);
     }
 
+    if (platform.id === "grok") {
+      return findGrokSendButton(input);
+    }
+
     return null;
   }
 
   function setEditorText(element, text) {
+    element.click();
     element.focus();
 
     if (element instanceof HTMLTextAreaElement || element instanceof HTMLInputElement) {
       const valueSetter = Object.getOwnPropertyDescriptor(element.constructor.prototype, "value")?.set;
       valueSetter?.call(element, text);
-      element.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "insertText", data: text }));
-      element.dispatchEvent(new Event("change", { bubbles: true }));
+      dispatchEditorEvents(element, text);
       return;
     }
 
@@ -555,12 +576,48 @@
     }
 
     if (!hasText) {
+      target.textContent = text;
+      hasText = getElementText(element).includes(text.slice(0, 20));
+    }
+
+    if (!hasText) {
       element.textContent = text;
     }
 
-    element.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "insertText", data: text }));
-    element.dispatchEvent(new Event("input", { bubbles: true }));
+    dispatchEditorEvents(target, text);
+    if (target !== element) dispatchEditorEvents(element, text);
+  }
+
+  function dispatchEditorEvents(element, text) {
+    try {
+      element.dispatchEvent(new InputEvent("beforeinput", {
+        bubbles: true,
+        cancelable: true,
+        inputType: "insertText",
+        data: text
+      }));
+    } catch {
+      element.dispatchEvent(new Event("beforeinput", { bubbles: true, cancelable: true }));
+    }
+
+    try {
+      element.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "insertText", data: text }));
+    } catch {
+      element.dispatchEvent(new Event("input", { bubbles: true }));
+    }
+
     element.dispatchEvent(new Event("change", { bubbles: true }));
+  }
+
+  function clickSendButton(button) {
+    button.focus();
+
+    ["pointerdown", "mousedown", "pointerup", "mouseup"].forEach((eventName) => {
+      const EventCtor = eventName.startsWith("pointer") && window.PointerEvent ? PointerEvent : MouseEvent;
+      button.dispatchEvent(new EventCtor(eventName, { bubbles: true, cancelable: true, view: window }));
+    });
+
+    button.click();
   }
 
   function waitForEditorText(element, text, timeoutMs) {
@@ -2022,6 +2079,15 @@
     return sendButton && !isDisabled(sendButton) ? sendButton : null;
   }
 
+  function findGrokSendButton(input) {
+    const composerSurface = findComposerSurfaceElement(input);
+    const composerRect = composerSurface?.getBoundingClientRect();
+    if (!composerRect) return null;
+
+    const rowButtons = getGrokComposerButtonCandidates(composerRect);
+    return rowButtons[rowButtons.length - 1]?.button || null;
+  }
+
   function getDeepSeekComposerButtonCandidates(composerRect) {
     const rowTop = composerRect.bottom - Math.max(64, composerRect.height * 0.55);
 
@@ -2038,6 +2104,36 @@
           rect.right <= composerRect.right + 12 &&
           rect.top >= rowTop &&
           rect.bottom <= composerRect.bottom + 12
+        );
+      })
+      .sort((a, b) => a.rect.left - b.rect.left);
+  }
+
+  function getGrokComposerButtonCandidates(composerRect) {
+    const rowTop = composerRect.bottom - Math.max(64, composerRect.height * 0.55);
+
+    return Array.from(document.querySelectorAll("button, [role='button'], [tabindex='0']"))
+      .filter((button) => {
+        const label = getElementLabel(button, true);
+        return (
+          button.id !== BUBBLE_ID &&
+          !isContextGeneratorNode(button) &&
+          isVisible(button) &&
+          !isDisabled(button) &&
+          !/\b(stop|cancel|attach|upload|voice|mic|microphone|new|menu|profile|account|model|mode)\b/.test(label)
+        );
+      })
+      .map((button) => ({ button, rect: button.getBoundingClientRect() }))
+      .filter(({ rect }) => {
+        return (
+          rect.width > 0 &&
+          rect.width <= 84 &&
+          rect.height > 0 &&
+          rect.height <= 76 &&
+          rect.left >= composerRect.left + composerRect.width * 0.45 &&
+          rect.right <= composerRect.right + 16 &&
+          rect.top >= rowTop &&
+          rect.bottom <= composerRect.bottom + 16
         );
       })
       .sort((a, b) => a.rect.left - b.rect.left);
