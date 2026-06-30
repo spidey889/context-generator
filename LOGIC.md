@@ -55,7 +55,7 @@ ChatGPT is the exception. Its Cap Context button is mounted on the page root and
 
 For Claude and Gemini, the button sits on the right side of the composer. The script tries to find the platform's right-side action button cluster by scanning visible buttons inside or near the composer. If it finds that cluster, it shifts the cluster left by the bubble slot width so the Cap Context button has room. It only shifts a real control cluster or button, never the whole composer. It remembers the original transform on the shifted cluster and restores it if the input disappears or the anchor changes.
 
-Clicking the button opens a destination picker titled `Where to continue?`. The picker lists all supported platforms except the current one, and its helper line is always `Context goes straight into the input box`. Each tile immediately opens and warms the selected platform tab, starts the same backend summary flow in parallel, then pastes the summary into the already-open destination and auto-clicks Send.
+Clicking the button opens a destination picker titled `Where to continue?`. The picker lists all supported platforms except the current one, and its helper line is always `Context goes straight into the input box`. Opening the picker also starts a silent warm summary after the sheet has rendered. It does not show the summarizing overlay and does not inject any prompt into the source AI. The warm summary is only reused if the user clicks a tile soon after and the current scraped chat still matches; otherwise it is discarded and the transfer falls back to a fresh summary. Each tile immediately opens and warms the selected platform tab, starts or reuses the backend summary flow in parallel, then pastes the summary into the already-open destination and auto-clicks Send.
 
 ## Composer Placement Strategy
 
@@ -120,7 +120,9 @@ The backend conversation input is capped at 180,000 characters. If the page text
 
 There is one summary path: Vercel/Mistral backend summarization. The extension never asks the source AI to summarize. It does not inject prompts into Claude, ChatGPT, Gemini, Grok, or DeepSeek.
 
-When a transfer starts, `platform-content.js` scrapes the current platform conversation, shows the `Summarizing with Mistral...` overlay, and sends `SUMMARIZE_WITH_BACKEND` to the background worker with the scraped conversation text. The background worker retries transient backend failures before reporting an error to the source page.
+When the destination picker opens, `platform-content.js` waits a tiny tick so the sheet stays instant, then silently scrapes the current platform conversation and sends `SUMMARIZE_WITH_BACKEND` to the background worker as a warm summary request. The warm result is short-lived and keyed to a lightweight conversation fingerprint, so chat changes or time passing make it unusable.
+
+When a transfer starts, `platform-content.js` scrapes the current platform conversation, shows the `Summarizing with Mistral...` overlay, and uses the warm summary only if its fingerprint still matches. If the warm summary is missing, stale, failed, or not ready, the transfer uses the normal fresh `SUMMARIZE_WITH_BACKEND` path. The background worker retries transient backend failures before reporting an error to the source page.
 
 The background worker calls:
 

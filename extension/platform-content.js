@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-06-30-instant-destination";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-06-30-warm-summary";
   const BUBBLE_ID = "context-generator-bubble";
   const OVERLAY_ID = "context-generator-overlay";
   const DESTINATION_SHEET_ID = "context-generator-destination-sheet";
@@ -30,6 +30,8 @@
   const PASTE_VERIFY_TIMEOUT_MS = 1600;
   const SEND_VERIFY_TIMEOUT_MS = 4500;
   const SEND_SETTLE_TIMEOUT_MS = 1200;
+  const WARM_SUMMARY_TTL_MS = 30000;
+  const WARM_SUMMARY_START_DELAY_MS = 90;
   const GENERIC_CONVERSATION_SELECTORS = [
     "[data-message-author-role]",
     "[data-testid*='conversation' i]",
@@ -285,6 +287,9 @@
   let floatingButtonFrame = null;
   let floatingButtonObserver = null;
   let floatingButtonMonitoringDisabled = false;
+  let warmSummary = null;
+  let warmSummaryStartTimer = null;
+  let warmSummaryExpireTimer = null;
 
   function cleanupContextGeneratorNodes() {
     [
@@ -328,11 +333,11 @@
 
   startFloatingButtonMonitoring();
 
-  async function runContextFlow(destinationId, preparedDestinationPromise = null) {
+  async function runContextFlow(destinationId, preparedDestinationPromise = null, warmSummaryRecord = null) {
     try {
       const conversationText = scrapeConversationText();
       showOverlay();
-      const summary = await summarizeWithBackend(conversationText);
+      const summary = await getSummaryForTransfer(conversationText, warmSummaryRecord);
       const preparedDestination = preparedDestinationPromise ? await preparedDestinationPromise : null;
       resetRunningFlag();
       await notifyBackground({
@@ -359,6 +364,100 @@
     }
 
     return response.summary.trim();
+  }
+
+  async function getSummaryForTransfer(conversationText, warmSummaryRecord = null) {
+    const fingerprint = getConversationFingerprint(conversationText);
+    const candidate = warmSummaryRecord || warmSummary;
+
+    if (isWarmSummaryUsable(candidate, fingerprint)) {
+      const summary = candidate.summary || await candidate.promise;
+      if (summary && isWarmSummaryUsable(candidate, fingerprint)) {
+        clearWarmSummary();
+        return summary;
+      }
+    }
+
+    if (candidate) clearWarmSummary();
+    return summarizeWithBackend(conversationText);
+  }
+
+  function scheduleWarmSummary() {
+    if (isRunning) return;
+    if (warmSummaryStartTimer) clearTimeout(warmSummaryStartTimer);
+
+    warmSummaryStartTimer = window.setTimeout(() => {
+      warmSummaryStartTimer = null;
+      startWarmSummary();
+    }, WARM_SUMMARY_START_DELAY_MS);
+  }
+
+  function startWarmSummary() {
+    if (isRunning) return;
+
+    let conversationText;
+    try {
+      conversationText = scrapeConversationText();
+    } catch (error) {
+      logTransferDebug(`Warm summary skipped. ${error.message}`);
+      return;
+    }
+
+    const fingerprint = getConversationFingerprint(conversationText);
+    if (isWarmSummaryUsable(warmSummary, fingerprint)) return;
+
+    clearWarmSummary();
+    const now = Date.now();
+    const record = {
+      fingerprint,
+      startedAt: now,
+      expiresAt: now + WARM_SUMMARY_TTL_MS,
+      summary: null,
+      promise: null
+    };
+
+    record.promise = summarizeWithBackend(conversationText)
+      .then((summary) => {
+        if (warmSummary === record && Date.now() <= record.expiresAt) {
+          record.summary = summary;
+        }
+        return summary;
+      })
+      .catch((error) => {
+        if (warmSummary === record) {
+          logTransferDebug(`Warm summary failed. ${error.message}`);
+          clearWarmSummary();
+        }
+        return null;
+      });
+
+    warmSummary = record;
+    warmSummaryExpireTimer = window.setTimeout(() => {
+      if (warmSummary === record) clearWarmSummary();
+    }, WARM_SUMMARY_TTL_MS);
+  }
+
+  function isWarmSummaryUsable(record, fingerprint) {
+    return Boolean(record && record.fingerprint === fingerprint && Date.now() <= record.expiresAt);
+  }
+
+  function clearWarmSummary() {
+    if (warmSummaryStartTimer) {
+      clearTimeout(warmSummaryStartTimer);
+      warmSummaryStartTimer = null;
+    }
+
+    if (warmSummaryExpireTimer) {
+      clearTimeout(warmSummaryExpireTimer);
+      warmSummaryExpireTimer = null;
+    }
+
+    warmSummary = null;
+  }
+
+  function getConversationFingerprint(text) {
+    const cleaned = cleanText(text);
+    return `${cleaned.length}:${cleaned.slice(0, 180)}:${cleaned.slice(-220)}`;
   }
 
   function prepareDestinationTab(destinationId) {
@@ -1386,6 +1485,7 @@
     positionDestinationSheet();
     resetDestinationTiles(sheet);
     animateDestinationTiles(sheet);
+    scheduleWarmSummary();
     if (window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) {
       sheet.style.opacity = "1";
       sheet.style.transform = "translate3d(0,0,0) scale(1)";
@@ -1482,8 +1582,9 @@
     isRunning = true;
     clearRunningResetTimer();
     runningResetTimer = setTimeout(resetRunningFlag, RUNNING_AUTO_RESET_MS);
+    const warmSummaryRecord = warmSummary;
     const preparedDestinationPromise = prepareDestinationTab(destinationId);
-    runContextFlow(destinationId, preparedDestinationPromise);
+    runContextFlow(destinationId, preparedDestinationPromise, warmSummaryRecord);
   }
 
   function ensureFloatingOverlay() {
