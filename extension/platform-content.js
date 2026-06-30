@@ -22,8 +22,8 @@
   const DEFAULT_MAX_COMPOSER_WIDTH = 1320;
   const DESTINATION_TITLE_TEXT = "Where to continue?";
   const DESTINATION_HELPER_TEXT = "Context goes straight into the input box";
-  const NO_CONVERSATION_ERROR_TITLE = "No text to summarize yet";
-  const NO_CONVERSATION_ERROR_MESSAGE = "This chat is still a blank canvas. Drop a message first, then I'll bottle the context.";
+  const NO_CONVERSATION_ERROR_TITLE = "Chat khaali hai";
+  const NO_CONVERSATION_ERROR_MESSAGE = "Arre, pehle kuch baat toh karo. Khaali chat se main kya uthau?";
   const MIN_FALLBACK_CONVERSATION_CHARS = 120;
   const PASTE_RETRY_TIMEOUT_MS = 14000;
   const PASTE_RETRY_INTERVAL_MS = 180;
@@ -325,10 +325,10 @@
 
   startFloatingButtonMonitoring();
 
-  async function runContextFlow(destinationId, preparedDestinationPromise = null, warmSummaryRecord = null) {
+  async function runContextFlow(destinationId, preparedDestinationPromise = null, warmSummaryRecord = null, scrapedConversationText = null) {
     try {
       const destination = getPlatform(destinationId);
-      const conversationText = scrapeConversationText();
+      const conversationText = scrapedConversationText || scrapeConversationText();
       if (isHandoffOverlayVisible()) {
         setHandoffStatus("Summarizing context");
       } else {
@@ -1403,13 +1403,23 @@
   function startDestinationTransfer(destinationId) {
     hideDestinationSheet();
     if (isRunning) return;
+
+    let conversationText;
+    try {
+      conversationText = scrapeConversationText();
+    } catch (error) {
+      clearWarmSummary();
+      showErrorOverlay(error.message);
+      return;
+    }
+
     isRunning = true;
     clearRunningResetTimer();
     runningResetTimer = setTimeout(resetRunningFlag, RUNNING_AUTO_RESET_MS);
     showOverlay(destinationId);
     const warmSummaryRecord = warmSummary;
     const preparedDestinationPromise = prepareDestinationTab(destinationId);
-    runContextFlow(destinationId, preparedDestinationPromise, warmSummaryRecord);
+    runContextFlow(destinationId, preparedDestinationPromise, warmSummaryRecord, conversationText);
   }
 
   function ensureFloatingOverlay() {

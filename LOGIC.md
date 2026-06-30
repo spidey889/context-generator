@@ -112,7 +112,7 @@ The transcript is prefixed with the source platform name, such as `Gemini conver
 
 If structured message scraping does not produce a useful transcript, the fallback reads visible text from `main`, role-main, conversation/chat/thread/message-list containers, and finally a combined set of detected message turns. It removes extension-owned UI text before measuring fallback content. Empty start screens are rejected so the extension does not send sidebar, placeholder, or landing-page text to Mistral.
 
-When no useful chat text exists, the transfer stops before calling the backend and shows a polished in-page error: `No text to summarize yet`. The message tells the user the chat is still a blank canvas and to send a message first.
+When no useful chat text exists, the transfer stops before opening/preparing a destination tab or calling the backend and shows a polished in-page error: `Chat khaali hai`. The message nudges the user to send something first.
 
 The backend conversation input is capped at 80,000 characters to keep handoffs fast. If the page text is longer than that, the script keeps the first 16,000 characters and the recent tail, with an omission marker in the middle.
 
