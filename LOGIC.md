@@ -92,7 +92,7 @@ Future rule: do not move the ChatGPT button back into ChatGPT's composer DOM and
 
 The scraper runs before the overlay is shown, so extension UI text is not included in the backend input.
 
-Each platform has its own likely conversation selectors. Examples include Claude response/user-message selectors, ChatGPT `data-message-author-role` conversation turns, Gemini user/model response elements, Grok message elements, and DeepSeek markdown/message elements.
+Each platform has its own likely conversation selectors. Examples include Claude response/user-message selectors, ChatGPT `data-message-author-role` conversation turns, Gemini user/model response elements, Grok message elements, and DeepSeek markdown/message elements. The scraper also keeps a generic fallback selector set for message/conversation/chat/article/markdown containers so minor platform DOM renames are less likely to produce a false "no text" error.
 
 For each candidate element, the script skips extension-owned nodes, reads `innerText` or `textContent`, cleans whitespace, and assigns a rough role:
 
@@ -110,7 +110,7 @@ Claude: ...
 
 The transcript is prefixed with the source platform name, such as `Gemini conversation:`.
 
-If structured message scraping does not produce a useful transcript, the fallback reads visible text from `main`, then conversation-looking containers, then chat-looking containers. Empty start screens are rejected so the extension does not send sidebar, placeholder, or landing-page text to Mistral.
+If structured message scraping does not produce a useful transcript, the fallback reads visible text from `main`, role-main, conversation/chat/thread/message-list containers, and finally a combined set of detected message turns. It removes extension-owned UI text before measuring fallback content. Empty start screens are rejected so the extension does not send sidebar, placeholder, or landing-page text to Mistral.
 
 When no useful chat text exists, the transfer stops before calling the backend and shows a polished in-page error: `No text to summarize yet`. The message tells the user the chat is still a blank canvas and to send a message first.
 

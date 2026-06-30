@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-06-30-send-resilience";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-06-30-scrape-resilience";
   const BUBBLE_ID = "context-generator-bubble";
   const OVERLAY_ID = "context-generator-overlay";
   const DESTINATION_SHEET_ID = "context-generator-destination-sheet";
@@ -30,6 +30,28 @@
   const PASTE_VERIFY_TIMEOUT_MS = 1600;
   const SEND_VERIFY_TIMEOUT_MS = 4500;
   const SEND_SETTLE_TIMEOUT_MS = 1200;
+  const GENERIC_CONVERSATION_SELECTORS = [
+    "[data-message-author-role]",
+    "[data-testid*='conversation' i]",
+    "[data-testid*='message' i]",
+    "[data-testid*='chat' i]",
+    "[data-role*='message' i]",
+    "[class*='message' i]",
+    "[class*='markdown' i]",
+    "article"
+  ];
+  const FALLBACK_CONVERSATION_ROOT_SELECTORS = [
+    "main",
+    "[role='main']",
+    "[data-testid*='conversation' i]",
+    "[data-testid*='chat' i]",
+    "[data-testid*='thread' i]",
+    "[class*='conversation' i]",
+    "[class*='messages' i]",
+    "[class*='message-list' i]",
+    "[class*='thread' i]",
+    "[class*='chat' i]"
+  ];
   const CAP_CONTEXT_SITE_URL = "https://spidey889.github.io/context-generator";
   const EXTENSION_ASSET_BASE_URL = getRuntimeAssetBaseUrl();
   const BUBBLE_ICON_URL = getExtensionAssetUrl("bubble-icon.png");
@@ -777,6 +799,22 @@
     return String(text || "").replace(/\s+/g, " ").trim();
   }
 
+  function getCleanVisibleText(element) {
+    if (!element) return "";
+    const clone = element.cloneNode(true);
+    clone.querySelectorAll?.([
+      `#${BUBBLE_ID}`,
+      `#${OVERLAY_ID}`,
+      `#${DESTINATION_SHEET_ID}`,
+      "#context-generator-styles",
+      "#context-generator-error-overlay",
+      "#context-generator-fallback-modal",
+      "[data-context-generator-owned='true']"
+    ].join(",")).forEach((node) => node.remove());
+
+    return cleanText(clone.innerText || clone.textContent || "");
+  }
+
   function scrapeConversationText() {
     const turns = getConversationTurns().filter((turn) => isUsefulConversationTurn(turn));
     const transcript = turns
@@ -797,13 +835,13 @@
   }
 
   function getConversationTurns() {
-    const selectors = [...currentPlatform.conversationSelectors, "[data-message-author-role]"];
+    const selectors = [...currentPlatform.conversationSelectors, ...GENERIC_CONVERSATION_SELECTORS];
     const candidates = [];
 
-    document.querySelectorAll(selectors.join(",")).forEach((element) => {
-      if (isContextGeneratorNode(element) || !isVisible(element)) return;
+    document.querySelectorAll([...new Set(selectors)].join(",")).forEach((element) => {
+      if (!isConversationCandidateElement(element)) return;
 
-      const text = cleanText(element.innerText || element.textContent || "");
+      const text = getCleanVisibleText(element);
       if (!text || text.length < 2) return;
 
       candidates.push({
@@ -849,16 +887,21 @@
   }
 
   function scrapeMainConversationText() {
-    const roots = [
-      document.querySelector("main"),
-      document.querySelector("[data-testid*='conversation' i]"),
-      document.querySelector("[class*='conversation' i]"),
-      document.querySelector("[class*='chat' i]")
-    ].filter(Boolean);
+    const roots = FALLBACK_CONVERSATION_ROOT_SELECTORS
+      .flatMap((selector) => Array.from(document.querySelectorAll(selector)))
+      .filter((element, index, all) => all.indexOf(element) === index && isVisible(element) && !isContextGeneratorNode(element));
 
-    return roots
-      .map((element) => cleanText(element.innerText || element.textContent || ""))
-      .find((text) => isUsefulFallbackConversationText(text)) || "";
+    const rootText = roots
+      .map((element) => getCleanVisibleText(element))
+      .find((text) => isUsefulFallbackConversationText(text));
+
+    if (rootText) return rootText;
+
+    const combinedText = getConversationTurns()
+      .map((turn) => turn.text)
+      .join("\n\n");
+
+    return isUsefulFallbackConversationText(combinedText) ? combinedText : "";
   }
 
   function isUsefulFallbackConversationText(text) {
@@ -884,6 +927,13 @@
       "how can i help",
       "what are you working on"
     ].some((emptyText) => cleaned.includes(emptyText) && cleaned.length < 700);
+  }
+
+  function isConversationCandidateElement(element) {
+    if (!element || isContextGeneratorNode(element) || !isVisible(element)) return false;
+    if (element.matches("input, textarea, button, select, [role='button'], [contenteditable='true']")) return false;
+    if (element.closest("nav, header, footer, aside, menu")) return false;
+    return true;
   }
 
   function limitConversationText(text) {
