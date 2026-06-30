@@ -180,9 +180,9 @@ For contenteditable editors, it targets the first paragraph if one exists, other
 
 After pasting, it verifies that a normalized leading sample of the summary is present in the editor. If verification fails, it shows an "Auto-paste failed" modal with a copy button and returns an error to the background worker.
 
-Once paste verification passes, it waits for an enabled Send button. It searches platform-specific send selectors, then buttons in the input/composer area, then visible page buttons. It ignores disabled buttons and obvious non-send controls such as Stop, Cancel, Attach, Upload, Voice, Mic, New, and Menu. It accepts buttons whose metadata mentions send/submit or enabled submit buttons.
+Once paste verification passes, it waits for an enabled Send button. It searches platform-specific send selectors, then buttons in the input/composer area, then visible page buttons. It ignores disabled buttons and obvious non-send controls such as Stop, Cancel, Attach, Upload, Voice, Mic, New, and Menu. It accepts buttons whose metadata mentions send/submit or enabled submit buttons, then scores candidates by composer/form proximity so page-level utility buttons do not beat the real chat send control.
 
-When it finds the send button, it clicks it automatically. This auto-send behavior applies to all five platforms as destinations.
+When it finds the send button, it clicks it automatically. If the editor still appears unsent after the click settles, it tries a nearby form submit and an Enter-key fallback, then clicks a refreshed send button if the page re-rendered the control. These fallback attempts write quiet console debug messages for future failure investigation. This auto-send behavior applies to all five platforms as destinations.
 
 ## Badges, Overlays, And Error Handling
 

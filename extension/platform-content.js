@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-06-30-transfer-resilience";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-06-30-send-resilience";
   const BUBBLE_ID = "context-generator-bubble";
   const OVERLAY_ID = "context-generator-overlay";
   const DESTINATION_SHEET_ID = "context-generator-destination-sheet";
@@ -29,6 +29,7 @@
   const PASTE_RETRY_INTERVAL_MS = 300;
   const PASTE_VERIFY_TIMEOUT_MS = 1600;
   const SEND_VERIFY_TIMEOUT_MS = 4500;
+  const SEND_SETTLE_TIMEOUT_MS = 1200;
   const CAP_CONTEXT_SITE_URL = "https://spidey889.github.io/context-generator";
   const EXTENSION_ASSET_BASE_URL = getRuntimeAssetBaseUrl();
   const BUBBLE_ICON_URL = getExtensionAssetUrl("bubble-icon.png");
@@ -400,8 +401,8 @@
     const trimmedText = text.trim();
 
     if (destination.retryPaste) {
-      const sendButton = await pasteAndFindSendButtonWithRetry(trimmedText, destination);
-      clickSendButton(sendButton);
+      const { input, sendButton } = await pasteAndFindSendButtonWithRetry(trimmedText, destination);
+      await submitContext(input, sendButton, destination, trimmedText);
       return;
     }
 
@@ -419,7 +420,7 @@
     }
 
     const sendButton = await waitForElement(() => findSendButton(input, destination), 10000, `${destination.name} send button`);
-    clickSendButton(sendButton);
+    await submitContext(input, sendButton, destination, trimmedText);
   }
 
   async function pasteAndFindSendButtonWithRetry(text, destination) {
@@ -445,7 +446,8 @@
             });
 
             if (sendButton) {
-              return sendButton;
+              const currentInput = input.isConnected ? input : findReadyPlatformInput(destination);
+              return { input: currentInput || input, sendButton };
             }
           } else {
             lastError = new Error(`Paste operation failed to populate the ${destination.name} editor.`);
@@ -515,25 +517,26 @@
 
   function findSendButton(input, platform = currentPlatform) {
     const scopedRoot = input?.closest("form") || findComposerSurfaceElement(input);
-    const scopedButtons = scopedRoot ? Array.from(scopedRoot.querySelectorAll("button")) : [];
+    const scopedButtons = scopedRoot ? Array.from(scopedRoot.querySelectorAll("button, [role='button']")) : [];
     const selectorButtons = (platform.sendSelectors || [])
       .flatMap((selector) => Array.from(document.querySelectorAll(selector)));
-    const pageButtons = Array.from(document.querySelectorAll("button"));
+    const pageButtons = Array.from(document.querySelectorAll("button, [role='button']"));
     const buttons = [...selectorButtons, ...scopedButtons, ...pageButtons].filter((button, index, all) => {
       return all.indexOf(button) === index && button.id !== BUBBLE_ID && isVisible(button) && !isDisabled(button);
     });
 
-    const labeledSendButton = buttons.find((button) => {
+    const labeledSendButtons = buttons.filter((button) => {
       const label = getElementLabel(button, true);
       if (/\b(stop|cancel|attach|upload|voice|mic|microphone|new|menu)\b/.test(label)) return false;
       return /\b(send|submit)\b/.test(label) || button.type === "submit";
     });
 
+    const labeledSendButton = pickBestSendButton(labeledSendButtons, input, scopedRoot);
     if (labeledSendButton) return labeledSendButton;
 
-    const submitButton = scopedButtons.find((button) => {
+    const submitButton = pickBestSendButton(scopedButtons.filter((button) => {
       return button.id !== BUBBLE_ID && isVisible(button) && !isDisabled(button) && button.type === "submit";
-    });
+    }), input, scopedRoot);
 
     if (submitButton) return submitButton;
 
@@ -546,6 +549,37 @@
     }
 
     return null;
+  }
+
+  function pickBestSendButton(buttons, input, scopedRoot) {
+    if (!buttons.length) return null;
+
+    return buttons
+      .map((button) => ({ button, score: scoreSendButtonCandidate(button, input, scopedRoot) }))
+      .sort((a, b) => b.score - a.score)[0].button;
+  }
+
+  function scoreSendButtonCandidate(button, input, scopedRoot) {
+    const buttonRect = button.getBoundingClientRect();
+    const inputRect = input?.getBoundingClientRect();
+    const label = getElementLabel(button, true);
+    let score = 0;
+
+    if (scopedRoot?.contains(button)) score += 140;
+    if (input?.closest("form")?.contains(button)) score += 80;
+    if (button.type === "submit") score += 36;
+    if (/\b(send|submit)\b/.test(label)) score += 48;
+
+    if (inputRect) {
+      const verticalDistance = Math.abs((buttonRect.top + buttonRect.bottom) / 2 - (inputRect.top + inputRect.bottom) / 2);
+      const horizontalDistance = Math.abs(buttonRect.right - inputRect.right);
+      score -= verticalDistance / 4;
+      score -= horizontalDistance / 18;
+      if (buttonRect.bottom >= inputRect.top - 24 && buttonRect.top <= inputRect.bottom + 80) score += 54;
+      if (buttonRect.left >= inputRect.left - 24) score += 18;
+    }
+
+    return score;
   }
 
   function setEditorText(element, text) {
@@ -619,6 +653,95 @@
     });
 
     button.click();
+  }
+
+  async function submitContext(input, sendButton, destination, text) {
+    clickSendButton(sendButton);
+    if (await waitForSendToStart(input, sendButton, text, SEND_SETTLE_TIMEOUT_MS)) return;
+
+    logTransferDebug(`${destination.name} send click did not appear to submit; trying form submit fallback.`);
+    submitClosestForm(input, sendButton);
+    if (await waitForSendToStart(input, sendButton, text, SEND_SETTLE_TIMEOUT_MS)) return;
+
+    logTransferDebug(`${destination.name} form submit fallback did not appear to submit; trying Enter key fallback.`);
+    pressEnterToSend(input);
+    if (await waitForSendToStart(input, sendButton, text, SEND_SETTLE_TIMEOUT_MS)) return;
+
+    const currentInput = input?.isConnected ? input : findReadyPlatformInput(destination);
+    const currentButton = currentInput ? findSendButton(currentInput, destination) : null;
+    if (currentButton && currentButton !== sendButton) {
+      logTransferDebug(`${destination.name} send control changed; clicking the refreshed send button.`);
+      clickSendButton(currentButton);
+      await waitForSendToStart(currentInput, currentButton, text, SEND_SETTLE_TIMEOUT_MS);
+    }
+  }
+
+  function logTransferDebug(message) {
+    console.debug("[Context Generator Transfer]", message);
+  }
+
+  function submitClosestForm(input, sendButton) {
+    const form = input?.closest("form") || sendButton?.closest("form");
+    if (!form) return;
+
+    try {
+      if (sendButton instanceof HTMLButtonElement && sendButton.type === "submit" && form.contains(sendButton)) {
+        form.requestSubmit(sendButton);
+      } else {
+        form.requestSubmit();
+      }
+    } catch {
+      form.dispatchEvent(new SubmitEvent("submit", { bubbles: true, cancelable: true, submitter: sendButton }));
+    }
+  }
+
+  function pressEnterToSend(input) {
+    const target = input?.querySelector?.("p") || input;
+    if (!target) return;
+
+    target.focus?.();
+    ["keydown", "keypress", "keyup"].forEach((eventName) => {
+      target.dispatchEvent(new KeyboardEvent(eventName, {
+        bubbles: true,
+        cancelable: true,
+        key: "Enter",
+        code: "Enter",
+        keyCode: 13,
+        which: 13
+      }));
+    });
+  }
+
+  function waitForSendToStart(input, sendButton, text, timeoutMs) {
+    const startedAt = Date.now();
+
+    return new Promise((resolve) => {
+      const tick = () => {
+        if (hasSendStarted(input, sendButton, text)) {
+          resolve(true);
+          return;
+        }
+
+        if (Date.now() - startedAt > timeoutMs) {
+          resolve(false);
+          return;
+        }
+
+        setTimeout(tick, 120);
+      };
+
+      tick();
+    });
+  }
+
+  function hasSendStarted(input, sendButton, text) {
+    if (input && !input.isConnected) return true;
+    if (input && !editorContainsText(input, text)) return true;
+    if (sendButton && !sendButton.isConnected) return true;
+    if (sendButton && isDisabled(sendButton)) return true;
+
+    const label = sendButton ? getElementLabel(sendButton, true) : "";
+    return /\b(stop|cancel|generating|responding)\b/.test(label);
   }
 
   function waitForEditorText(element, text, timeoutMs) {
