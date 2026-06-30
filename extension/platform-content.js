@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-07-01-serif-handoff";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-07-01-empty-copy-english";
   const BUBBLE_ID = "context-generator-bubble";
   const OVERLAY_ID = "context-generator-overlay";
   const DESTINATION_SHEET_ID = "context-generator-destination-sheet";
@@ -22,8 +22,8 @@
   const DEFAULT_MAX_COMPOSER_WIDTH = 1320;
   const DESTINATION_TITLE_TEXT = "Where to continue?";
   const DESTINATION_HELPER_TEXT = "Context goes straight into the input box";
-  const NO_CONVERSATION_ERROR_TITLE = "Chat khaali hai";
-  const NO_CONVERSATION_ERROR_MESSAGE = "Arre, pehle kuch baat toh karo. Khaali chat se main kya uthau?";
+  const NO_CONVERSATION_ERROR_TITLE = "Nothing to carry yet";
+  const NO_CONVERSATION_ERROR_MESSAGE = "Chat is empty. Send one message first, then I'll pack the context.";
   const MIN_FALLBACK_CONVERSATION_CHARS = 120;
   const PASTE_RETRY_TIMEOUT_MS = 14000;
   const PASTE_RETRY_INTERVAL_MS = 180;
