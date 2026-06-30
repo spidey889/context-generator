@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-07-01-faster-handoff";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-07-01-shimmer-handoff";
   const BUBBLE_ID = "context-generator-bubble";
   const OVERLAY_ID = "context-generator-overlay";
   const DESTINATION_SHEET_ID = "context-generator-destination-sheet";
@@ -1423,20 +1423,24 @@
         "z-index:2147483647",
         "left:50%",
         "top:46%",
-        "width:min(342px,calc(100vw - 34px))",
+        "width:min(340px,calc(100vw - 32px))",
+        "height:144px",
+        "min-height:144px",
+        "max-height:144px",
         "box-sizing:border-box",
-        "padding:14px",
-        "border-radius:17px",
-        "border:1px solid rgba(255,255,255,0.12)",
-        "background:linear-gradient(180deg,#090909 0%,#050505 66%,#020202 100%)",
-        "color:#f7f7f7",
-        "box-shadow:0 22px 70px rgba(0,0,0,0.48), 0 0 0 1px rgba(0,0,0,0.78), inset 0 1px 0 rgba(255,255,255,0.075)",
+        "padding:18px 18px 16px",
+        "border-radius:16px",
+        "border:1px solid rgba(214,214,214,0.12)",
+        "background:linear-gradient(180deg,#030303 0%,#000000 58%,#030303 100%)",
+        "color:#b9b9b9",
+        "box-shadow:0 24px 70px rgba(0,0,0,0.62), 0 0 0 1px rgba(0,0,0,0.88), inset 0 1px 0 rgba(255,255,255,0.045)",
         "transform:translate3d(-50%,-50%,0) scale(0.98)",
         "opacity:0",
         "flex-direction:column",
-        "gap:11px",
+        "justify-content:center",
+        "gap:14px",
         "overflow:hidden",
-        "backdrop-filter:blur(18px)",
+        "backdrop-filter:blur(20px)",
         "font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif",
         "letter-spacing:0",
         "will-change:transform,opacity",
@@ -1448,19 +1452,19 @@
         "position:absolute",
         "inset:-1px",
         "pointer-events:none",
-        "background:radial-gradient(circle at 12% 8%,rgba(255,255,255,0.08),transparent 30%),radial-gradient(circle at 88% 92%,rgba(25,195,125,0.12),transparent 34%)",
-        "opacity:0.86"
+        "background:linear-gradient(180deg,rgba(255,255,255,0.055),transparent 36%,rgba(255,255,255,0.025) 100%)",
+        "opacity:0.72"
       ].join(";");
 
       const topRow = document.createElement("div");
-      topRow.style.cssText = "position:relative;z-index:1;display:flex;align-items:center;gap:10px";
+      topRow.style.cssText = "position:relative;z-index:1;display:flex;align-items:center;justify-content:center;text-align:center";
 
       const mark = document.createElement("div");
       mark.style.cssText = [
         "width:34px",
         "height:34px",
         "border-radius:12px",
-        "display:flex",
+        "display:none",
         "align-items:center",
         "justify-content:center",
         "flex:0 0 auto",
@@ -1480,16 +1484,16 @@
       mark.appendChild(markDot);
 
       const copy = document.createElement("div");
-      copy.style.cssText = "min-width:0;display:flex;flex-direction:column;gap:3px;flex:1";
+      copy.style.cssText = "min-width:0;display:flex;flex-direction:column;align-items:center;gap:5px;flex:1";
 
       const title = document.createElement("div");
       title.id = "context-generator-overlay-title";
-      title.style.cssText = "font-family:Georgia,'Times New Roman',serif;font-size:15px;font-weight:500;line-height:1.08;color:#ffffff;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;text-rendering:geometricPrecision";
+      title.style.cssText = "font-size:14.5px;font-weight:620;line-height:1.12;color:#c9c9c9;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;text-rendering:geometricPrecision";
       title.textContent = "Carrying context";
 
       const quote = document.createElement("div");
       quote.id = "context-generator-overlay-quote";
-      quote.style.cssText = "font-size:11px;font-weight:520;line-height:1.28;color:rgba(255,255,255,0.54);white-space:nowrap;overflow:hidden;text-overflow:ellipsis";
+      quote.style.cssText = "font-size:11px;font-weight:500;line-height:1.28;color:#7f7f7f;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%";
       quote.textContent = HANDOFF_QUOTES[0];
 
       copy.appendChild(title);
@@ -1501,14 +1505,14 @@
       statusShell.style.cssText = [
         "position:relative",
         "z-index:1",
-        "height:33px",
-        "border-radius:11px",
-        "border:1px solid rgba(255,255,255,0.085)",
-        "background:rgba(255,255,255,0.04)",
+        "height:38px",
+        "border-radius:12px",
+        "border:0",
+        "background:transparent",
         "display:flex",
         "align-items:center",
-        "gap:9px",
-        "padding:0 10px",
+        "justify-content:center",
+        "padding:0 12px",
         "box-sizing:border-box",
         "overflow:hidden"
       ].join(";");
@@ -1518,37 +1522,47 @@
         styleSheet.id = "context-generator-styles";
         styleSheet.dataset.contextGeneratorOwned = "true";
         styleSheet.textContent = `
-          @keyframes contextSpinner{0%{transform:rotate(0deg)}100%{transform:rotate(360deg)}}
-          @keyframes contextGeneratorStatusSlide{0%{opacity:0;transform:translate3d(0,-9px,0)}100%{opacity:1;transform:translate3d(0,0,0)}}
-          @keyframes contextGeneratorProgressSweep{0%{transform:translate3d(-115%,0,0)}100%{transform:translate3d(115%,0,0)}}
+          @keyframes contextGeneratorStatusShimmer{
+            0%{opacity:0;transform:translate3d(0,12px,0);background-position:125% 50%;filter:blur(0.2px)}
+            16%{opacity:1;transform:translate3d(0,0,0);filter:blur(0)}
+            58%{opacity:1;transform:translate3d(0,0,0);background-position:0% 50%}
+            82%{opacity:1;transform:translate3d(0,0,0);background-position:-35% 50%}
+            100%{opacity:0;transform:translate3d(0,-11px,0);background-position:-80% 50%;filter:blur(0.15px)}
+          }
           @media (prefers-reduced-motion: reduce){
             #context-generator-text{animation:none!important}
-            #context-generator-progress-sweep{animation:none!important}
           }
         `;
         document.head.appendChild(styleSheet);
       }
 
-      const spinner = document.createElement("div");
-      spinner.style.cssText = "width:13px;height:13px;border:1.5px solid rgba(255,255,255,0.16);border-top-color:rgba(255,255,255,0.86);border-radius:50%;animation:contextSpinner 0.76s linear infinite;flex:0 0 auto";
       const textSpan = document.createElement("span");
       textSpan.id = "context-generator-text";
       textSpan.textContent = "Summarizing context";
-      textSpan.style.cssText = "display:block;min-width:0;flex:1;font-size:12px;font-weight:650;line-height:1.1;color:rgba(255,255,255,0.86);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;animation:contextGeneratorStatusSlide 0.26s cubic-bezier(0.16,1,0.3,1) both";
-      statusShell.appendChild(spinner);
+      textSpan.style.cssText = [
+        "display:block",
+        "width:100%",
+        "min-width:0",
+        "font-size:13px",
+        "font-weight:660",
+        "line-height:1.15",
+        "text-align:center",
+        "white-space:nowrap",
+        "overflow:hidden",
+        "text-overflow:ellipsis",
+        "color:transparent",
+        "background-image:linear-gradient(100deg,#7f7f7f 0%,#a9a9a9 28%,#d6d6d6 45%,#9f9f9f 62%,#6f6f6f 100%)",
+        "background-size:240% 100%",
+        "background-position:125% 50%",
+        "-webkit-background-clip:text",
+        "background-clip:text",
+        "animation:contextGeneratorStatusShimmer 1.34s cubic-bezier(0.16,1,0.3,1) both"
+      ].join(";");
       statusShell.appendChild(textSpan);
-
-      const progress = document.createElement("div");
-      progress.style.cssText = "position:relative;z-index:1;height:3px;border-radius:999px;background:rgba(255,255,255,0.07);overflow:hidden";
-      const progressSweep = document.createElement("div");
-      progressSweep.id = "context-generator-progress-sweep";
-      progressSweep.style.cssText = "height:100%;width:58%;border-radius:999px;background:linear-gradient(90deg,transparent,rgba(255,255,255,0.72),transparent);animation:contextGeneratorProgressSweep 1.45s cubic-bezier(0.4,0,0.2,1) infinite";
-      progress.appendChild(progressSweep);
 
       overlay.appendChild(glow);
       overlay.appendChild(topRow);
       overlay.appendChild(statusShell);
-      overlay.appendChild(progress);
       document.body.appendChild(overlay);
     }
   }
@@ -1624,7 +1638,7 @@
     textSpan.style.animation = "none";
     textSpan.textContent = text;
     void textSpan.offsetWidth;
-    textSpan.style.animation = "contextGeneratorStatusSlide 0.26s cubic-bezier(0.16,1,0.3,1) both";
+    textSpan.style.animation = "contextGeneratorStatusShimmer 1.34s cubic-bezier(0.16,1,0.3,1) both";
   }
 
   function stopHandoffStatusCycle() {
