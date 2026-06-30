@@ -6,8 +6,8 @@ This Chrome extension automates context handoff between Claude, ChatGPT, Gemini,
 2. Click the Cap Context button in the input bar.
 3. It sends the conversation to the Vercel/Mistral summarization backend.
 4. Choose one of the other AI platforms.
-5. It opens that platform in a new tab.
-6. It pastes the summary into the message input.
+5. It opens that platform in a background tab and shows a compact progress card.
+6. It pastes the summary into the message input, then focuses that tab.
 7. Review it and send manually.
 
 ## Install

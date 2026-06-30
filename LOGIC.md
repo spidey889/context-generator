@@ -55,7 +55,7 @@ ChatGPT is the exception. Its Cap Context button is mounted on the page root and
 
 For Claude and Gemini, the button sits on the right side of the composer. The script tries to find the platform's right-side action button cluster by scanning visible buttons inside or near the composer. If it finds that cluster, it shifts the cluster left by the bubble slot width so the Cap Context button has room. It only shifts a real control cluster or button, never the whole composer. It remembers the original transform on the shifted cluster and restores it if the input disappears or the anchor changes.
 
-Clicking the button opens a destination picker titled `Where to continue?`. The picker lists all supported platforms except the current one, and its helper line is always `Context goes straight into the input box`. Opening the picker also starts a silent warm summary after the sheet has rendered. It does not show the summarizing overlay and does not inject any prompt into the source AI. The warm summary is only reused if the user clicks a tile soon after and the current scraped chat still matches; otherwise it is discarded and the transfer falls back to a fresh summary. Each tile immediately opens and warms the selected platform tab, starts or reuses the backend summary flow in parallel, then pastes the summary into the already-open destination input. The user manually reviews and sends it.
+Clicking the button opens a destination picker titled `Where to continue?`. The picker lists all supported platforms except the current one, and its helper line is always `Context goes straight into the input box`. Opening the picker also starts a silent warm summary after the sheet has rendered. It does not show the handoff popup and does not inject any prompt into the source AI. The warm summary is only reused if the user clicks a tile soon after and the current scraped chat still matches; otherwise it is discarded and the transfer falls back to a fresh summary. Each tile immediately opens and warms the selected platform tab in the background, shows a compact centered source-page handoff popup, starts or reuses the backend summary flow in parallel, then pastes the summary into the already-open destination input. After paste succeeds, the background worker focuses the destination tab. The user manually reviews and sends it.
 
 ## Composer Placement Strategy
 
@@ -122,7 +122,7 @@ There is one summary path: Vercel/Mistral backend summarization. The extension n
 
 When the destination picker opens, `platform-content.js` waits a tiny tick so the sheet stays instant, then silently scrapes the current platform conversation and sends `SUMMARIZE_WITH_BACKEND` to the background worker as a warm summary request. The warm result is short-lived and keyed to a lightweight conversation fingerprint, so chat changes or time passing make it unusable.
 
-When a transfer starts, `platform-content.js` scrapes the current platform conversation, shows the `Summarizing with Mistral...` overlay, and uses the warm summary only if its fingerprint still matches. If the warm summary is missing, stale, failed, or not ready, the transfer uses the normal fresh `SUMMARIZE_WITH_BACKEND` path. The background worker retries transient backend failures before reporting an error to the source page.
+When a transfer starts, `platform-content.js` shows a compact centered handoff popup on the source page with a randomized short line and an animated status line such as `Summarizing context`, `Compacting the useful bits`, and `Preparing ChatGPT`. It uses the warm summary only if its fingerprint still matches. If the warm summary is missing, stale, failed, or not ready, the transfer uses the normal fresh `SUMMARIZE_WITH_BACKEND` path. The background worker retries transient backend failures before reporting an error to the source page.
 
 The background worker calls:
 
@@ -172,7 +172,7 @@ Mistral API failures return 502 after retryable attempts are exhausted. Empty Mi
 
 After the backend summary returns text, `platform-content.js` sends `TRANSFER_TO_DESTINATION` to the background worker with the selected destination id, summary text, and the pre-opened destination tab id when one exists.
 
-The background worker validates the destination, opens the destination URL immediately for destination-picker clicks, waits for the tab status to become complete, then repeatedly injects `platform-content.js` and retries the `PASTE_CONTEXT` message until the destination content script is reachable or the delivery timeout expires. If no pre-opened tab exists, or if that tab disappears, it falls back to creating a new destination tab. The same retry delivery helper is used when the extension icon starts a source-side transfer, so a hydrated page that has not attached the content-script listener yet does not fail immediately.
+The background worker validates the destination, opens the destination URL immediately in a background tab for destination-picker clicks, waits for the tab status to become complete, then repeatedly injects `platform-content.js` and retries the `PASTE_CONTEXT` message until the destination content script is reachable or the delivery timeout expires. If no pre-opened tab exists, or if that tab disappears, it falls back to creating a new destination tab. After paste succeeds, it activates the destination tab and focuses its window. The same retry delivery helper is used when the extension icon starts a source-side transfer, so a hydrated page that has not attached the content-script listener yet does not fail immediately.
 
 The destination tab receives `PASTE_CONTEXT`, finds the destination input with that platform's input selectors, and writes the summary into the editor.
 
@@ -192,7 +192,7 @@ The background worker sets the extension badge to:
 - `OK` after a destination paste succeeds.
 - `ERR` for transfer errors.
 
-The source page shows a small overlay above the floating button while work is running. It displays `Summarizing with Mistral...`.
+The source page shows the compact centered handoff popup while picker-started transfer work is running. The popup cycles through short status lines so the wait feels active without prompting the source AI.
 
 If the source-side flow throws, the script resets the running flag, hides the overlay, shows a red "Transfer Failed" overlay on the source page, and notifies the background worker.
 

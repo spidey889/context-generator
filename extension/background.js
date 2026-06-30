@@ -183,14 +183,15 @@ async function transferToDestination(destinationId, text, preparedTabId = null) 
   }
 
   let pasteResult;
+  let destinationTabId;
 
   try {
-    const destinationTabId = preparedTabId || await createDestinationTab(destination);
+    destinationTabId = preparedTabId || await createDestinationTab(destination);
     pasteResult = await pasteIntoDestinationTab(destinationTabId, destinationId, destination, text.trim());
   } catch (error) {
     if (!preparedTabId) throw error;
 
-    const destinationTabId = await createDestinationTab(destination);
+    destinationTabId = await createDestinationTab(destination, { active: false });
     pasteResult = await pasteIntoDestinationTab(destinationTabId, destinationId, destination, text.trim());
   }
 
@@ -198,6 +199,7 @@ async function transferToDestination(destinationId, text, preparedTabId = null) 
     throw new Error(pasteResult?.error || `Could not paste into ${destination.name}.`);
   }
 
+  await activateDestinationTab(destinationTabId);
   await setBadge("OK", "#1f8f4d", 2500);
 }
 
@@ -207,14 +209,28 @@ async function prepareDestination(destinationId) {
     throw new Error("Unknown AI destination.");
   }
 
-  const destinationTabId = await createDestinationTab(destination);
+  const destinationTabId = await createDestinationTab(destination, { active: false });
   warmDestinationTab(destinationTabId, destination);
   return destinationTabId;
 }
 
-async function createDestinationTab(destination) {
-  const destinationTab = await chrome.tabs.create({ url: destination.url, active: true });
+async function createDestinationTab(destination, options = {}) {
+  const destinationTab = await chrome.tabs.create({
+    url: destination.url,
+    active: options.active !== false
+  });
   return destinationTab.id;
+}
+
+async function activateDestinationTab(tabId) {
+  try {
+    const tab = await chrome.tabs.update(tabId, { active: true });
+    if (tab?.windowId) {
+      await chrome.windows.update(tab.windowId, { focused: true });
+    }
+  } catch (error) {
+    console.debug("[Context Generator Relay] Destination activation skipped:", error?.message || error);
+  }
 }
 
 async function pasteIntoDestinationTab(tabId, destinationId, destination, text) {

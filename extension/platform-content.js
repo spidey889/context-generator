@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-06-30-paste-only";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-07-01-handoff-popup";
   const BUBBLE_ID = "context-generator-bubble";
   const OVERLAY_ID = "context-generator-overlay";
   const DESTINATION_SHEET_ID = "context-generator-destination-sheet";
@@ -30,6 +30,23 @@
   const PASTE_VERIFY_TIMEOUT_MS = 1600;
   const WARM_SUMMARY_TTL_MS = 30000;
   const WARM_SUMMARY_START_DELAY_MS = 90;
+  const HANDOFF_STATUS_INTERVAL_MS = 1450;
+  const HANDOFF_QUOTES = [
+    "Good context beats a cold start.",
+    "Tiny bridge, cleaner next reply.",
+    "Packing the useful parts only.",
+    "Your next AI gets the good bits.",
+    "No stale baggage, just signal.",
+    "Making the handoff feel instant."
+  ];
+  const HANDOFF_STATUS_STEPS = [
+    "Summarizing context",
+    "Compacting the useful bits",
+    "Preparing {destination}",
+    "Warming the destination tab",
+    "Polishing the handoff",
+    "Pasting context into {destination}"
+  ];
   const GENERIC_CONVERSATION_SELECTORS = [
     "[data-message-author-role]",
     "[data-testid*='conversation' i]",
@@ -263,6 +280,8 @@
   let warmSummary = null;
   let warmSummaryStartTimer = null;
   let warmSummaryExpireTimer = null;
+  let handoffStatusTimer = null;
+  let handoffStatusIndex = 0;
 
   function cleanupContextGeneratorNodes() {
     [
@@ -308,17 +327,24 @@
 
   async function runContextFlow(destinationId, preparedDestinationPromise = null, warmSummaryRecord = null) {
     try {
+      const destination = getPlatform(destinationId);
       const conversationText = scrapeConversationText();
-      showOverlay();
+      if (isHandoffOverlayVisible()) {
+        setHandoffStatus("Summarizing context");
+      } else {
+        showOverlay(destinationId);
+      }
       const summary = await getSummaryForTransfer(conversationText, warmSummaryRecord);
+      setHandoffStatus(`Preparing ${destination?.name || "destination"}`);
       const preparedDestination = preparedDestinationPromise ? await preparedDestinationPromise : null;
-      resetRunningFlag();
+      setHandoffStatus(`Pasting context into ${destination?.name || "destination"}`);
       await notifyBackground({
         type: "TRANSFER_TO_DESTINATION",
         destination: destinationId,
         text: summary,
         preparedTabId: preparedDestination?.tabId || null
       });
+      resetRunningFlag();
     } catch (error) {
       resetRunningFlag();
       showErrorOverlay(error.message);
@@ -1380,6 +1406,7 @@
     isRunning = true;
     clearRunningResetTimer();
     runningResetTimer = setTimeout(resetRunningFlag, RUNNING_AUTO_RESET_MS);
+    showOverlay(destinationId);
     const warmSummaryRecord = warmSummary;
     const preparedDestinationPromise = prepareDestinationTab(destinationId);
     runContextFlow(destinationId, preparedDestinationPromise, warmSummaryRecord);
@@ -1393,50 +1420,160 @@
       overlay.style.cssText = [
         "display:none",
         "position:fixed",
-        "z-index:999999",
-        "padding:8px 12px",
-        "border-radius:6px",
-        "background:#1f2937",
-        "color:#fff",
-        "font-size:12px",
-        "box-shadow:0 4px 12px rgba(0,0,0,0.2)",
-        "white-space:nowrap",
+        "z-index:2147483647",
+        "left:50%",
+        "top:46%",
+        "width:min(342px,calc(100vw - 34px))",
+        "box-sizing:border-box",
+        "padding:14px",
+        "border-radius:17px",
+        "border:1px solid rgba(255,255,255,0.12)",
+        "background:linear-gradient(180deg,#090909 0%,#050505 66%,#020202 100%)",
+        "color:#f7f7f7",
+        "box-shadow:0 22px 70px rgba(0,0,0,0.48), 0 0 0 1px rgba(0,0,0,0.78), inset 0 1px 0 rgba(255,255,255,0.075)",
+        "transform:translate3d(-50%,-50%,0) scale(0.98)",
+        "opacity:0",
+        "flex-direction:column",
+        "gap:11px",
+        "overflow:hidden",
+        "backdrop-filter:blur(18px)",
+        "font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif",
+        "letter-spacing:0",
+        "will-change:transform,opacity",
+        "transition:opacity 0.16s cubic-bezier(0.16,1,0.3,1), transform 0.18s cubic-bezier(0.16,1,0.3,1)"
+      ].join(";");
+
+      const glow = document.createElement("div");
+      glow.style.cssText = [
+        "position:absolute",
+        "inset:-1px",
+        "pointer-events:none",
+        "background:radial-gradient(circle at 12% 8%,rgba(255,255,255,0.08),transparent 30%),radial-gradient(circle at 88% 92%,rgba(25,195,125,0.12),transparent 34%)",
+        "opacity:0.86"
+      ].join(";");
+
+      const topRow = document.createElement("div");
+      topRow.style.cssText = "position:relative;z-index:1;display:flex;align-items:center;gap:10px";
+
+      const mark = document.createElement("div");
+      mark.style.cssText = [
+        "width:34px",
+        "height:34px",
+        "border-radius:12px",
+        "display:flex",
         "align-items:center",
-        "gap:6px",
-        "font-family:-apple-system,BlinkMacSystemFont,sans-serif"
+        "justify-content:center",
+        "flex:0 0 auto",
+        "background:linear-gradient(180deg,rgba(255,255,255,0.11),rgba(255,255,255,0.035))",
+        "border:1px solid rgba(255,255,255,0.12)",
+        "box-shadow:inset 0 1px 0 rgba(255,255,255,0.08)"
+      ].join(";");
+
+      const markDot = document.createElement("div");
+      markDot.style.cssText = [
+        "width:13px",
+        "height:13px",
+        "border-radius:999px",
+        "background:#ffffff",
+        "box-shadow:0 0 0 5px rgba(255,255,255,0.06),0 0 18px rgba(255,255,255,0.34)"
+      ].join(";");
+      mark.appendChild(markDot);
+
+      const copy = document.createElement("div");
+      copy.style.cssText = "min-width:0;display:flex;flex-direction:column;gap:3px;flex:1";
+
+      const title = document.createElement("div");
+      title.id = "context-generator-overlay-title";
+      title.style.cssText = "font-family:Georgia,'Times New Roman',serif;font-size:15px;font-weight:500;line-height:1.08;color:#ffffff;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;text-rendering:geometricPrecision";
+      title.textContent = "Carrying context";
+
+      const quote = document.createElement("div");
+      quote.id = "context-generator-overlay-quote";
+      quote.style.cssText = "font-size:11px;font-weight:520;line-height:1.28;color:rgba(255,255,255,0.54);white-space:nowrap;overflow:hidden;text-overflow:ellipsis";
+      quote.textContent = HANDOFF_QUOTES[0];
+
+      copy.appendChild(title);
+      copy.appendChild(quote);
+      topRow.appendChild(mark);
+      topRow.appendChild(copy);
+
+      const statusShell = document.createElement("div");
+      statusShell.style.cssText = [
+        "position:relative",
+        "z-index:1",
+        "height:33px",
+        "border-radius:11px",
+        "border:1px solid rgba(255,255,255,0.085)",
+        "background:rgba(255,255,255,0.04)",
+        "display:flex",
+        "align-items:center",
+        "gap:9px",
+        "padding:0 10px",
+        "box-sizing:border-box",
+        "overflow:hidden"
       ].join(";");
 
       if (!document.getElementById("context-generator-styles")) {
         const styleSheet = document.createElement("style");
         styleSheet.id = "context-generator-styles";
         styleSheet.dataset.contextGeneratorOwned = "true";
-        styleSheet.textContent = `@keyframes contextSpinner{0%{transform:rotate(0deg)}100%{transform:rotate(360deg)}}`;
+        styleSheet.textContent = `
+          @keyframes contextSpinner{0%{transform:rotate(0deg)}100%{transform:rotate(360deg)}}
+          @keyframes contextGeneratorStatusSlide{0%{opacity:0;transform:translate3d(0,-9px,0)}100%{opacity:1;transform:translate3d(0,0,0)}}
+          @keyframes contextGeneratorProgressSweep{0%{transform:translate3d(-115%,0,0)}100%{transform:translate3d(115%,0,0)}}
+          @media (prefers-reduced-motion: reduce){
+            #context-generator-text{animation:none!important}
+            #context-generator-progress-sweep{animation:none!important}
+          }
+        `;
         document.head.appendChild(styleSheet);
       }
 
       const spinner = document.createElement("div");
-      spinner.style.cssText = "width:12px;height:12px;border:2px solid rgba(255,255,255,0.3);border-top:2px solid #fff;border-radius:50%;animation:contextSpinner 0.8s linear infinite";
+      spinner.style.cssText = "width:13px;height:13px;border:1.5px solid rgba(255,255,255,0.16);border-top-color:rgba(255,255,255,0.86);border-radius:50%;animation:contextSpinner 0.76s linear infinite;flex:0 0 auto";
       const textSpan = document.createElement("span");
       textSpan.id = "context-generator-text";
-      textSpan.textContent = "Summarizing with Mistral...";
-      overlay.appendChild(spinner);
-      overlay.appendChild(textSpan);
+      textSpan.textContent = "Summarizing context";
+      textSpan.style.cssText = "display:block;min-width:0;flex:1;font-size:12px;font-weight:650;line-height:1.1;color:rgba(255,255,255,0.86);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;animation:contextGeneratorStatusSlide 0.26s cubic-bezier(0.16,1,0.3,1) both";
+      statusShell.appendChild(spinner);
+      statusShell.appendChild(textSpan);
+
+      const progress = document.createElement("div");
+      progress.style.cssText = "position:relative;z-index:1;height:3px;border-radius:999px;background:rgba(255,255,255,0.07);overflow:hidden";
+      const progressSweep = document.createElement("div");
+      progressSweep.id = "context-generator-progress-sweep";
+      progressSweep.style.cssText = "height:100%;width:58%;border-radius:999px;background:linear-gradient(90deg,transparent,rgba(255,255,255,0.72),transparent);animation:contextGeneratorProgressSweep 1.45s cubic-bezier(0.4,0,0.2,1) infinite";
+      progress.appendChild(progressSweep);
+
+      overlay.appendChild(glow);
+      overlay.appendChild(topRow);
+      overlay.appendChild(statusShell);
+      overlay.appendChild(progress);
       document.body.appendChild(overlay);
     }
   }
 
-  function showOverlay() {
+  function showOverlay(destinationId = null) {
+    ensureFloatingOverlay();
     const overlay = document.getElementById(OVERLAY_ID);
-    const textSpan = document.getElementById("context-generator-text");
+    const title = document.getElementById("context-generator-overlay-title");
+    const quote = document.getElementById("context-generator-overlay-quote");
     const bubble = document.getElementById(BUBBLE_ID);
+    const destination = destinationId ? getPlatform(destinationId) : null;
 
-    if (overlay && textSpan && bubble) {
-      const rect = bubble.getBoundingClientRect();
-      overlay.style.position = "fixed";
-      overlay.style.top = `${rect.top - 45}px`;
-      overlay.style.left = `${rect.left - 80}px`;
+    if (overlay) {
+      if (title) {
+        title.textContent = destination ? `${currentPlatform.name} to ${destination.name}` : "Carrying context";
+      }
+      if (quote) {
+        quote.textContent = getRandomHandoffQuote();
+      }
+      startHandoffStatusCycle(destination?.name || "destination");
       overlay.style.display = "flex";
-      textSpan.textContent = "Summarizing with Mistral...";
+      requestAnimationFrame(() => {
+        overlay.style.opacity = "1";
+        overlay.style.transform = "translate3d(-50%,-50%,0) scale(1)";
+      });
     }
 
     if (bubble) {
@@ -1450,7 +1587,10 @@
     const overlay = document.getElementById(OVERLAY_ID);
     const bubble = document.getElementById(BUBBLE_ID);
 
+    stopHandoffStatusCycle();
     if (overlay) {
+      overlay.style.opacity = "0";
+      overlay.style.transform = "translate3d(-50%,-50%,0) scale(0.98)";
       overlay.style.display = "none";
     }
     if (bubble) {
@@ -1458,6 +1598,44 @@
       bubble.style.opacity = "1";
       bubble.style.cursor = "pointer";
     }
+  }
+
+  function isHandoffOverlayVisible() {
+    const overlay = document.getElementById(OVERLAY_ID);
+    return Boolean(overlay && overlay.style.display !== "none");
+  }
+
+  function startHandoffStatusCycle(destinationName) {
+    stopHandoffStatusCycle();
+    const steps = HANDOFF_STATUS_STEPS.map((step) => step.replace("{destination}", destinationName));
+    handoffStatusIndex = 0;
+    setHandoffStatus(steps[handoffStatusIndex]);
+
+    handoffStatusTimer = window.setInterval(() => {
+      handoffStatusIndex = (handoffStatusIndex + 1) % steps.length;
+      setHandoffStatus(steps[handoffStatusIndex]);
+    }, HANDOFF_STATUS_INTERVAL_MS);
+  }
+
+  function setHandoffStatus(text) {
+    const textSpan = document.getElementById("context-generator-text");
+    if (!textSpan || !text) return;
+
+    textSpan.style.animation = "none";
+    textSpan.textContent = text;
+    void textSpan.offsetWidth;
+    textSpan.style.animation = "contextGeneratorStatusSlide 0.26s cubic-bezier(0.16,1,0.3,1) both";
+  }
+
+  function stopHandoffStatusCycle() {
+    if (handoffStatusTimer) {
+      clearInterval(handoffStatusTimer);
+      handoffStatusTimer = null;
+    }
+  }
+
+  function getRandomHandoffQuote() {
+    return HANDOFF_QUOTES[Math.floor(Math.random() * HANDOFF_QUOTES.length)] || HANDOFF_QUOTES[0];
   }
 
   function showErrorOverlay(message) {
@@ -1686,7 +1864,7 @@
 
     const desc = document.getElementById("context-generator-fallback-desc");
     if (desc) {
-      desc.textContent = `We couldn't automatically paste and send the context in ${destinationName}. Please copy it below and paste it manually:`;
+      desc.textContent = `We couldn't paste the context into ${destinationName}. Please copy it below and paste it manually:`;
     }
 
     const textarea = document.getElementById("context-generator-fallback-text");
