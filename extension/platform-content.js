@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-07-02-sheet-open-summary";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-07-02-pill-border-tile-motion";
   const BUBBLE_ID = "context-generator-bubble";
   const OVERLAY_ID = "context-generator-overlay";
   const ONBOARDING_ID = "context-generator-onboarding";
@@ -1141,9 +1141,9 @@
       `max-width:${BUBBLE_SIZE}px`,
       `max-height:${BUBBLE_SIZE}px`,
       "border-radius:9999px",
-      "background:rgba(6,6,6,0.08)",
-      "border:1px solid rgba(255,255,255,0.24)",
-      "box-shadow:0 0 0 1px rgba(0,0,0,0.2), 0 0 12px rgba(255,255,255,0.14), inset 0 1px 0 rgba(255,255,255,0.14)",
+      "background:transparent",
+      "border:0",
+      "box-shadow:none",
       "box-sizing:border-box",
       "cursor:pointer",
       "padding:0",
@@ -1153,7 +1153,7 @@
       "justify-content:center",
       "overflow:hidden",
       "contain:layout style paint",
-      "transition:filter 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease",
+      "transition:filter 0.15s ease",
       "pointer-events:auto"
     ].join(";");
 
@@ -1911,9 +1911,10 @@
       "height:19px",
       "padding:0 7px",
       "border-radius:999px",
-      "border:1px solid rgba(255,255,255,0.12)",
-      "background:rgba(255,255,255,0.045)",
-      "color:rgba(255,255,255,0.68)",
+      "border:1px solid rgba(255,255,255,0.24)",
+      "background:rgba(255,255,255,0.052)",
+      "box-shadow:0 0 0 1px rgba(0,0,0,0.28), 0 0 12px rgba(255,255,255,0.11), inset 0 1px 0 rgba(255,255,255,0.16)",
+      "color:rgba(255,255,255,0.74)",
       "font-size:10px",
       "font-weight:500",
       "line-height:19px",
@@ -2012,6 +2013,9 @@
       spinner.className = "context-generator-tile-spinner";
       spinner.setAttribute("aria-hidden", "true");
 
+      const setButtonActive = () => {
+        button.style.transform = "translateY(-1px) scale(1.025)";
+      };
       const setButtonIdle = () => {
         button.style.background = "linear-gradient(180deg, #121212 0%, #0b0b0b 58%, #050505 100%)";
         button.style.borderColor = "rgba(255,255,255,0.115)";
@@ -2029,7 +2033,9 @@
       button.appendChild(logoWrap);
       button.appendChild(copy);
       button.appendChild(spinner);
+      button.addEventListener("mouseenter", setButtonActive);
       button.addEventListener("mouseleave", setButtonIdle);
+      button.addEventListener("focus", setButtonActive);
       button.addEventListener("blur", setButtonIdle);
       button.addEventListener("click", (event) => {
         event.preventDefault();
