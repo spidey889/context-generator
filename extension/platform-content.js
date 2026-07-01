@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-07-02-empty-message-count";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-07-02-fast-transfer";
   const BUBBLE_ID = "context-generator-bubble";
   const OVERLAY_ID = "context-generator-overlay";
   const ONBOARDING_ID = "context-generator-onboarding";
@@ -329,6 +329,11 @@
   }
 
   chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+    if (message?.type === "CONTEXT_GENERATOR_PING") {
+      sendResponse({ ok: true });
+      return false;
+    }
+
     if (message?.type === "PASTE_CONTEXT") {
       pasteIntoPlatform(message.text, message.destination)
         .then(() => sendResponse({ ok: true }))
@@ -358,17 +363,23 @@
   startFloatingButtonMonitoring();
 
   async function runContextFlow(destinationId, preparedDestinationPromise = null, warmSummaryRecord = null, scrapedConversationText = null) {
+    const timing = createTransferTiming(destinationId);
     try {
       const destination = getPlatform(destinationId);
       const conversationText = scrapedConversationText || await scrapeConversationTextWhenReady();
+      markTransferTiming(timing, "capture");
+      const destinationPrepPromise = preparedDestinationPromise || prepareDestinationTab(destinationId);
+      markTransferTiming(timing, "destination warmup started");
       if (isHandoffOverlayVisible()) {
         setHandoffStatus("Summarizing context");
       } else {
         showOverlay(destinationId);
       }
       const summary = await getSummaryForTransfer(conversationText, warmSummaryRecord);
+      markTransferTiming(timing, "summary ready");
       setHandoffStatus(`Preparing ${destination?.name || "destination"}`);
-      const preparedDestination = preparedDestinationPromise ? await preparedDestinationPromise : null;
+      const preparedDestination = destinationPrepPromise ? await destinationPrepPromise : null;
+      markTransferTiming(timing, "destination ready");
       setHandoffStatus(`Pasting context into ${destination?.name || "destination"}`);
       await notifyBackground({
         type: "TRANSFER_TO_DESTINATION",
@@ -376,8 +387,12 @@
         text: summary,
         preparedTabId: preparedDestination?.tabId || null
       });
+      markTransferTiming(timing, "pasted");
+      logTransferTiming(timing);
       resetRunningFlag();
     } catch (error) {
+      markTransferTiming(timing, `failed: ${error.message}`);
+      logTransferTiming(timing);
       resetRunningFlag();
       showErrorOverlay(error.message);
       await notifyBackground({ type: "CONTEXT_TRANSFER_ERROR", error: error.message }).catch(() => {});
@@ -423,19 +438,20 @@
     }, WARM_SUMMARY_START_DELAY_MS);
   }
 
-  function startWarmSummary() {
+  function startWarmSummary(conversationText = null) {
     if (isRunning) return;
 
-    let conversationText;
-    try {
-      conversationText = scrapeConversationText();
-    } catch (error) {
-      logTransferDebug(`Warm summary skipped. ${error.message}`);
-      return;
+    if (!conversationText) {
+      try {
+        conversationText = scrapeConversationText();
+      } catch (error) {
+        logTransferDebug(`Warm summary skipped. ${error.message}`);
+        return null;
+      }
     }
 
     const fingerprint = getConversationFingerprint(conversationText);
-    if (isWarmSummaryUsable(warmSummary, fingerprint)) return;
+    if (isWarmSummaryUsable(warmSummary, fingerprint)) return warmSummary;
 
     clearWarmSummary();
     const now = Date.now();
@@ -466,6 +482,19 @@
     warmSummaryExpireTimer = window.setTimeout(() => {
       if (warmSummary === record) clearWarmSummary();
     }, WARM_SUMMARY_TTL_MS);
+    return record;
+  }
+
+  function ensureWarmSummaryForConversation(conversationText) {
+    const fingerprint = getConversationFingerprint(conversationText);
+    if (isWarmSummaryUsable(warmSummary, fingerprint)) return warmSummary;
+
+    if (warmSummaryStartTimer) {
+      clearTimeout(warmSummaryStartTimer);
+      warmSummaryStartTimer = null;
+    }
+
+    return startWarmSummary(conversationText);
   }
 
   function isWarmSummaryUsable(record, fingerprint) {
@@ -499,6 +528,32 @@
       logTransferDebug(`Destination pre-open failed; falling back to normal transfer. ${error.message}`);
       return null;
     });
+  }
+
+  function createTransferTiming(destinationId) {
+    return {
+      destinationId,
+      startedAt: getNow(),
+      marks: []
+    };
+  }
+
+  function markTransferTiming(timing, label) {
+    if (!timing) return;
+    timing.marks.push({ label, at: getNow() });
+  }
+
+  function logTransferTiming(timing) {
+    if (!timing?.marks?.length) return;
+    const parts = timing.marks.map((mark, index) => {
+      const previous = index === 0 ? timing.startedAt : timing.marks[index - 1].at;
+      return `${mark.label} +${Math.round(mark.at - previous)}ms`;
+    });
+    logTransferDebug(`Transfer timing (${timing.destinationId}): ${parts.join(" | ")}`);
+  }
+
+  function getNow() {
+    return window.performance?.now?.() || Date.now();
   }
 
   async function notifyBackground(message) {
@@ -2136,6 +2191,7 @@
     positionDestinationSheet();
     resetDestinationTiles(sheet);
     animateDestinationTiles(sheet);
+    warmDestinationConnections();
     scheduleWarmSummary();
     if (window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) {
       sheet.style.opacity = "1";
@@ -2160,6 +2216,37 @@
       sheet.style.transform = "translate3d(0,2px,0) scale(0.996)";
       sheet.style.display = "none";
       delete sheet.dataset.contextGeneratorPositionLocked;
+    }
+  }
+
+  function warmDestinationConnections() {
+    const head = document.head || document.documentElement;
+    if (!head) return;
+
+    Object.entries(PLATFORMS)
+      .filter(([id]) => id !== currentPlatform.id)
+      .forEach(([id, platform]) => {
+        const origin = getUrlOrigin(platform.url);
+        if (!origin) return;
+
+        const idValue = `context-generator-preconnect-${id}`;
+        if (document.getElementById(idValue)) return;
+
+        const link = document.createElement("link");
+        link.id = idValue;
+        link.dataset.contextGeneratorOwned = "true";
+        link.rel = "preconnect";
+        link.href = origin;
+        link.crossOrigin = "anonymous";
+        head.appendChild(link);
+      });
+  }
+
+  function getUrlOrigin(url) {
+    try {
+      return new URL(url).origin;
+    } catch {
+      return "";
     }
   }
 
@@ -2255,11 +2342,11 @@
       return;
     }
 
+    const warmSummaryRecord = ensureWarmSummaryForConversation(conversationText);
     isRunning = true;
     clearRunningResetTimer();
     runningResetTimer = setTimeout(resetRunningFlag, RUNNING_AUTO_RESET_MS);
     showOverlay(destinationId);
-    const warmSummaryRecord = warmSummary;
     const preparedDestinationPromise = prepareDestinationTab(destinationId);
     runContextFlow(destinationId, preparedDestinationPromise, warmSummaryRecord, conversationText);
   }

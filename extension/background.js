@@ -3,11 +3,15 @@ const SUMMARY_BACKEND_URL = "https://context-generator-five.vercel.app/api/summa
 const PLATFORM_CONTENT_SCRIPT = "platform-content.js";
 const SOURCE_MESSAGE_TIMEOUT_MS = 12000;
 const DESTINATION_MESSAGE_TIMEOUT_MS = 30000;
-const MESSAGE_RETRY_INTERVAL_MS = 220;
+const MESSAGE_RETRY_INTERVAL_MS = 120;
 const DESTINATION_WARMUP_TIMEOUT_MS = 9000;
 const SUMMARY_BACKEND_ATTEMPTS = 2;
 const SUMMARY_BACKEND_RETRY_INTERVAL_MS = 450;
 const SUMMARY_BACKEND_TIMEOUT_MS = 22000;
+const SUMMARY_CACHE_TTL_MS = 120000;
+const SUMMARY_CACHE_MAX_ENTRIES = 8;
+const summaryCache = new Map();
+const summaryInflight = new Map();
 const DESTINATIONS = {
   claude: {
     name: "Claude",
@@ -127,10 +131,31 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
 });
 
 async function summarizeWithBackend(conversation) {
-  if (!conversation?.trim()) {
+  const conversationText = conversation?.trim();
+  if (!conversationText) {
     throw new Error("AI conversation text could not be captured.");
   }
 
+  const cachedSummary = getCachedSummary(conversationText);
+  if (cachedSummary) return cachedSummary;
+
+  const inFlightSummary = summaryInflight.get(conversationText);
+  if (inFlightSummary) return inFlightSummary;
+
+  const summaryPromise = fetchSummaryFromBackend(conversationText)
+    .then((summary) => {
+      cacheSummary(conversationText, summary);
+      return summary;
+    })
+    .finally(() => {
+      summaryInflight.delete(conversationText);
+    });
+
+  summaryInflight.set(conversationText, summaryPromise);
+  return summaryPromise;
+}
+
+async function fetchSummaryFromBackend(conversationText) {
   let lastError = null;
 
   for (let attempt = 1; attempt <= SUMMARY_BACKEND_ATTEMPTS; attempt += 1) {
@@ -141,7 +166,7 @@ async function summarizeWithBackend(conversation) {
       const response = await fetch(SUMMARY_BACKEND_URL, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ conversation: conversation.trim() }),
+        body: JSON.stringify({ conversation: conversationText }),
         signal: controller.signal
       });
 
@@ -166,6 +191,32 @@ async function summarizeWithBackend(conversation) {
   }
 
   throw lastError || new Error("Backup summarizer failed.");
+}
+
+function getCachedSummary(conversationText) {
+  const cached = summaryCache.get(conversationText);
+  if (!cached) return "";
+
+  if (Date.now() > cached.expiresAt) {
+    summaryCache.delete(conversationText);
+    return "";
+  }
+
+  return cached.summary;
+}
+
+function cacheSummary(conversationText, summary) {
+  if (!summary?.trim()) return;
+
+  summaryCache.set(conversationText, {
+    summary: summary.trim(),
+    expiresAt: Date.now() + SUMMARY_CACHE_TTL_MS
+  });
+
+  while (summaryCache.size > SUMMARY_CACHE_MAX_ENTRIES) {
+    const oldestKey = summaryCache.keys().next().value;
+    summaryCache.delete(oldestKey);
+  }
 }
 
 function isRetryableSummaryStatus(status) {
@@ -274,11 +325,20 @@ async function warmDestinationTab(tabId, destination) {
   try {
     const startedAt = Date.now();
     while (Date.now() - startedAt <= DESTINATION_WARMUP_TIMEOUT_MS) {
-      if (await ensureContentScript(tabId, destination.contentScript)) return;
+      if (await ensureContentScript(tabId, destination.contentScript) && await pingTab(tabId)) return;
       await delay(MESSAGE_RETRY_INTERVAL_MS);
     }
   } catch (error) {
     console.debug("[Context Generator Relay] Destination warmup skipped:", error?.message || error);
+  }
+}
+
+async function pingTab(tabId) {
+  try {
+    const response = await sendMessage(tabId, { type: "CONTEXT_GENERATOR_PING" });
+    return response?.ok === true;
+  } catch {
+    return false;
   }
 }
 
@@ -317,6 +377,18 @@ async function sendMessageWhenReady(tabId, message, contentScript, timeoutMs, na
   let lastError = null;
 
   while (Date.now() - startedAt <= timeoutMs) {
+    try {
+      const response = await sendMessage(tabId, message);
+      if (response !== undefined) return response;
+      lastError = new Error(`No response from ${name}.`);
+    } catch (error) {
+      lastError = error;
+      if (!isRetryableMessageError(error)) {
+        throw error;
+      }
+    }
+
+    if (Date.now() - startedAt > timeoutMs) break;
     await ensureContentScript(tabId, contentScript);
 
     try {
