@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-07-02-transfer-perf-trace";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-07-02-warm-summary-schedule";
   const BUBBLE_ID = "context-generator-bubble";
   const OVERLAY_ID = "context-generator-overlay";
   const ONBOARDING_ID = "context-generator-onboarding";
@@ -470,6 +470,10 @@
     const record = startWarmSummary(null, trace);
     if (!record) activeTransferTrace = null;
     return record;
+  }
+
+  function scheduleWarmSummary() {
+    return startSheetOpenWarmSummary();
   }
 
   function startWarmSummary(conversationText = null, trace = null) {
@@ -2238,7 +2242,7 @@
       return;
     }
 
-    startSheetOpenWarmSummary();
+    scheduleWarmSummary();
 
     const sheet = ensureDestinationSheet();
     if (destinationSheetAnimationFrame) cancelAnimationFrame(destinationSheetAnimationFrame);
