@@ -1,9 +1,9 @@
-# Cap Context Extension
+# Cap-Context Extension
 
 This Chrome extension automates context handoff between Claude, ChatGPT, Gemini, Grok, and DeepSeek:
 
 1. Open a supported AI chat.
-2. Click the Cap Context button in the input bar.
+2. Click the Cap-Context button in the input bar.
 3. It sends the conversation to the Vercel/Mistral summarization backend.
 4. Choose one of the other AI platforms.
 5. It opens that platform in a background tab and shows a compact progress card.

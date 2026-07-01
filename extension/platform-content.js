@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-07-02-gemini-stable-button";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-07-02-cap-context-clean-tabs";
   const BUBBLE_ID = "context-generator-bubble";
   const OVERLAY_ID = "context-generator-overlay";
   const ONBOARDING_ID = "context-generator-onboarding";
@@ -562,7 +562,7 @@
       response = await chrome.runtime.sendMessage(message);
     } catch (error) {
       if (isExtensionContextInvalidated(error)) {
-        throw new Error("Extension was reloaded. Refresh this AI tab once, then try Cap Context again.");
+        throw new Error("Extension was reloaded. Refresh this AI tab once, then try Cap-Context again.");
       }
       throw error;
     }
@@ -1158,9 +1158,9 @@
       `max-width:${BUBBLE_SIZE}px`,
       `max-height:${BUBBLE_SIZE}px`,
       "border-radius:9999px",
-      "background:transparent",
-      "border:0",
-      "box-shadow:none",
+      "background:rgba(6,6,6,0.08)",
+      "border:1px solid rgba(255,255,255,0.24)",
+      "box-shadow:0 0 0 1px rgba(0,0,0,0.2), 0 0 12px rgba(255,255,255,0.14), inset 0 1px 0 rgba(255,255,255,0.14)",
       "box-sizing:border-box",
       "cursor:pointer",
       "padding:0",
@@ -1170,7 +1170,7 @@
       "justify-content:center",
       "overflow:hidden",
       "contain:layout style paint",
-      "transition:filter 0.15s ease",
+      "transition:filter 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease",
       "pointer-events:auto"
     ].join(";");
 
@@ -1721,7 +1721,7 @@
     dismiss.type = "button";
     dismiss.className = "context-generator-onboarding-dismiss";
     dismiss.textContent = "OK";
-    dismiss.setAttribute("aria-label", "Dismiss Cap Context tip");
+    dismiss.setAttribute("aria-label", "Dismiss Cap-Context tip");
     dismiss.addEventListener("click", (event) => {
       event.preventDefault();
       event.stopPropagation();
@@ -1830,20 +1830,6 @@
     const style = document.createElement("style");
     style.id = DESTINATION_SHEET_STYLE_ID;
     style.textContent = `
-      @keyframes contextGeneratorTileShine {
-        0%, 34% {
-          opacity: 0;
-          transform: translate3d(-150%, 0, 0) skewX(-18deg);
-        }
-        44% {
-          opacity: var(--context-generator-shine-opacity, 0.055);
-        }
-        62%, 100% {
-          opacity: 0;
-          transform: translate3d(420%, 0, 0) skewX(-18deg);
-        }
-      }
-
       @keyframes contextGeneratorTileIn {
         from {
           opacity: 0;
@@ -1857,17 +1843,6 @@
         }
       }
 
-      @keyframes contextGeneratorTileAuraDrift {
-        from {
-          transform: translate3d(-2px, 0, 0) scaleX(0.98);
-          filter: blur(9px);
-        }
-        to {
-          transform: translate3d(3px, 0, 0) scaleX(1.04);
-          filter: blur(11px);
-        }
-      }
-
       @keyframes contextGeneratorSpinnerSpin {
         to {
           transform: rotate(360deg);
@@ -1878,31 +1853,8 @@
         animation: contextGeneratorTileIn 0.18s cubic-bezier(0.16, 1, 0.3, 1) both;
       }
 
-      .context-generator-tile-shine {
-        position: absolute;
-        top: -2px;
-        bottom: -2px;
-        left: -52px;
-        width: 46px;
-        z-index: 1;
-        pointer-events: none;
-        background: linear-gradient(90deg, transparent, rgba(255,255,255,0.07), rgba(255,255,255,0.14), transparent);
-        filter: blur(0.25px);
-        opacity: 0;
-        transform: translate3d(-150%, 0, 0) skewX(-18deg);
-        animation: none;
-      }
-
       .context-generator-tile-aura {
         animation: none;
-      }
-
-      .context-generator-destination-tile[data-context-generator-hover="true"] .context-generator-tile-aura {
-        animation: contextGeneratorTileAuraDrift 2.8s ease-in-out infinite alternate;
-      }
-
-      .context-generator-destination-tile[data-context-generator-hover="true"] .context-generator-tile-shine {
-        animation: contextGeneratorTileShine 3.8s cubic-bezier(0.16, 1, 0.3, 1) infinite;
       }
 
       .context-generator-tile-spinner {
@@ -1920,13 +1872,8 @@
 
       @media (prefers-reduced-motion: reduce) {
         .context-generator-destination-tile.context-generator-tile-enter,
-        .context-generator-tile-aura,
-        .context-generator-tile-shine {
+        .context-generator-tile-aura {
           animation: none;
-        }
-
-        .context-generator-tile-shine {
-          opacity: 0;
         }
 
         .context-generator-tile-spinner {
@@ -1975,8 +1922,8 @@
     title.style.cssText = "font-family:Georgia,'Times New Roman',serif;font-size:14px;font-weight:500;letter-spacing:0;color:#ffffff;line-height:1.02;text-rendering:geometricPrecision";
     const badge = document.createElement("button");
     badge.type = "button";
-    badge.textContent = "Cap Context";
-    badge.setAttribute("aria-label", "Open Cap Context site");
+    badge.textContent = "Cap-Context";
+    badge.setAttribute("aria-label", "Open Cap-Context site");
     badge.style.cssText = [
       "height:19px",
       "padding:0 7px",
@@ -2016,7 +1963,6 @@
       button.className = "context-generator-destination-tile";
       button.dataset.contextGeneratorAccent = option.accent;
       button.dataset.contextGeneratorDetail = option.detail;
-      button.dataset.contextGeneratorHover = "false";
       button.style.cssText = [
         "width:100%",
         "height:48px",
@@ -2037,8 +1983,7 @@
         "overflow:hidden",
         "isolation:isolate",
         "box-shadow:inset 0 1px 0 rgba(255,255,255,0.075), inset 0 -1px 0 rgba(0,0,0,0.54), 0 1px 0 rgba(255,255,255,0.02)",
-        "--context-generator-shine-opacity:0.13",
-        "transition:background 0.13s ease, border-color 0.13s ease, box-shadow 0.13s ease, transform 0.13s ease"
+        "transition:transform 0.13s ease"
       ].join(";");
 
       const aura = document.createElement("span");
@@ -2058,10 +2003,6 @@
         "transform:translate3d(0,0,0) scaleX(1)",
         "transition:opacity 0.16s ease, left 0.16s ease, right 0.16s ease, width 0.16s ease, border-radius 0.16s ease, background 0.16s ease"
       ].join(";");
-
-      const shine = document.createElement("span");
-      shine.className = "context-generator-tile-shine";
-      shine.style.animationDelay = `${index * 0.18}s`;
 
       const logoWrap = document.createElement("div");
       logoWrap.style.cssText = "width:26px;height:26px;display:flex;align-items:center;justify-content:center;flex:0 0 auto;opacity:0.96;position:relative;z-index:2";
@@ -2088,26 +2029,10 @@
       spinner.className = "context-generator-tile-spinner";
       spinner.setAttribute("aria-hidden", "true");
 
-      const setButtonActive = () => {
-        button.dataset.contextGeneratorHover = "true";
-        button.style.background = "linear-gradient(180deg, #151515 0%, #0d0d0d 58%, #050505 100%)";
-        button.style.borderColor = `${option.accent}72`;
-        button.style.boxShadow = `inset 0 1px 0 rgba(255,255,255,0.1), inset 0 -1px 0 rgba(0,0,0,0.58), 0 0 0 1px ${option.accent}24, -9px 0 22px ${option.accent}12, 0 8px 18px rgba(0,0,0,0.3)`;
-        button.style.setProperty("--context-generator-shine-opacity", "0.16");
-        aura.style.left = "-2px";
-        aura.style.right = "12px";
-        aura.style.width = "auto";
-        aura.style.borderRadius = "11px";
-        aura.style.background = `radial-gradient(ellipse at 5% 52%, ${option.accent}58 0, ${option.accent}35 24%, ${option.accent}16 52%, ${option.accent}05 74%, transparent 92%), linear-gradient(90deg, ${option.accent}42 0%, ${option.accent}24 24%, ${option.accent}0c 54%, transparent 88%)`;
-        aura.style.opacity = "0.46";
-        button.style.transform = "translateY(-1px)";
-      };
       const setButtonIdle = () => {
-        button.dataset.contextGeneratorHover = "false";
         button.style.background = "linear-gradient(180deg, #121212 0%, #0b0b0b 58%, #050505 100%)";
         button.style.borderColor = "rgba(255,255,255,0.115)";
         button.style.boxShadow = "inset 0 1px 0 rgba(255,255,255,0.075), inset 0 -1px 0 rgba(0,0,0,0.54), 0 1px 0 rgba(255,255,255,0.02)";
-        button.style.setProperty("--context-generator-shine-opacity", "0.13");
         aura.style.left = "9px";
         aura.style.right = "auto";
         aura.style.width = "30px";
@@ -2118,13 +2043,10 @@
       };
 
       button.appendChild(aura);
-      button.appendChild(shine);
       button.appendChild(logoWrap);
       button.appendChild(copy);
       button.appendChild(spinner);
-      button.addEventListener("mouseenter", setButtonActive);
       button.addEventListener("mouseleave", setButtonIdle);
-      button.addEventListener("focus", setButtonActive);
       button.addEventListener("blur", setButtonIdle);
       button.addEventListener("click", (event) => {
         event.preventDefault();
@@ -2304,13 +2226,11 @@
       const accent = tile.dataset.contextGeneratorAccent || "#ffffff";
       const aura = tile.querySelector(".context-generator-tile-aura");
       tile.dataset.contextGeneratorLoading = "false";
-      tile.dataset.contextGeneratorHover = "false";
       tile.removeAttribute("aria-busy");
       tile.style.pointerEvents = "";
       tile.style.background = "linear-gradient(180deg, #121212 0%, #0b0b0b 58%, #050505 100%)";
       tile.style.borderColor = "rgba(255,255,255,0.115)";
       tile.style.boxShadow = "inset 0 1px 0 rgba(255,255,255,0.075), inset 0 -1px 0 rgba(0,0,0,0.54), 0 1px 0 rgba(255,255,255,0.02)";
-      tile.style.setProperty("--context-generator-shine-opacity", "0.13");
       tile.style.transform = "translateY(0)";
       if (aura) {
         aura.style.left = "9px";
