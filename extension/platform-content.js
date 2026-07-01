@@ -1316,11 +1316,13 @@
       "padding-bottom:1px",
       "border-top:1px solid rgba(255,255,255,0.065)",
       "color:rgba(255,255,255,0.42)",
+      "font-family:Georgia,'Times New Roman',serif",
       "font-size:9.5px",
       "font-weight:500",
       "line-height:1.35",
       "letter-spacing:0",
       "text-align:center",
+      "text-rendering:geometricPrecision",
       "white-space:nowrap",
       "overflow:hidden",
       "text-overflow:ellipsis"
