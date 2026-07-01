@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-07-01-conversation-retry";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-07-02-empty-message-count";
   const BUBBLE_ID = "context-generator-bubble";
   const OVERLAY_ID = "context-generator-overlay";
   const ONBOARDING_ID = "context-generator-onboarding";
@@ -789,7 +789,12 @@
   }
 
   function scrapeConversationText() {
-    const turns = getConversationTurns().filter((turn) => isUsefulConversationTurn(turn));
+    const messageTurns = getConversationTurns().filter((turn) => isDetectedConversationMessage(turn));
+    if (messageTurns.length === 0) {
+      throw new Error(NO_CONVERSATION_ERROR_MESSAGE);
+    }
+
+    const turns = messageTurns.filter((turn) => isUsefulConversationTurn(turn));
     const transcript = turns
       .map((turn) => `${turn.role}: ${turn.text}`)
       .join("\n\n")
@@ -804,7 +809,15 @@
       return limitConversationText(`${currentPlatform.name} conversation:\n\n${fallbackText}`);
     }
 
-    throw new Error(NO_CONVERSATION_ERROR_MESSAGE);
+    const detectedTranscript = messageTurns
+      .map((turn) => `${turn.role}: ${turn.text}`)
+      .join("\n\n")
+      .trim();
+    if (detectedTranscript) {
+      return limitConversationText(`${currentPlatform.name} conversation:\n\n${detectedTranscript}`);
+    }
+
+    throw new Error("Chat messages were found, but their text could not be captured yet. Try again in a moment.");
   }
 
   async function scrapeConversationTextWhenReady(timeoutMs = CONVERSATION_SCRAPE_RETRY_TIMEOUT_MS) {
@@ -944,7 +957,16 @@
 
     const text = cleanText(turn.text);
     if (text.length < 3) return false;
+    if (hasExplicitConversationRole(turn)) return true;
     return !isEmptyConversationText(text);
+  }
+
+  function isDetectedConversationMessage(turn) {
+    if (!turn?.text) return false;
+
+    const text = cleanText(turn.text);
+    if (text.length < 3) return false;
+    return hasExplicitConversationRole(turn) || !isEmptyConversationText(text);
   }
 
   function scrapeMainConversationText(turns = getConversationTurns()) {
