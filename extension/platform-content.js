@@ -1,7 +1,9 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-07-01-tile-hover-color";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-07-01-onboarding-nudge";
   const BUBBLE_ID = "context-generator-bubble";
   const OVERLAY_ID = "context-generator-overlay";
+  const ONBOARDING_ID = "context-generator-onboarding";
+  const ONBOARDING_STYLE_ID = "context-generator-onboarding-styles";
   const DESTINATION_SHEET_ID = "context-generator-destination-sheet";
   const DESTINATION_SHEET_STYLE_ID = "context-generator-destination-sheet-styles";
 
@@ -22,6 +24,10 @@
   const DEFAULT_MAX_COMPOSER_WIDTH = 1320;
   const DESTINATION_TITLE_TEXT = "Where to continue?";
   const DESTINATION_HELPER_TEXT = "Context goes straight into the input box";
+  const ONBOARDING_STORAGE_KEY = "context-generator-onboarding-dismissed-v1";
+  const ONBOARDING_TITLE_TEXT = "Tiny bridge, big memory";
+  const ONBOARDING_BODY_TEXT = "Tap the bubble when this chat deserves a carry-on. I'll pack the useful bits into another AI's input, ready for your review.";
+  const ONBOARDING_SHOW_DELAY_MS = 650;
   const NO_CONVERSATION_ERROR_TITLE = "Nothing to carry yet";
   const NO_CONVERSATION_ERROR_MESSAGE = "Chat is empty. Send one message first, then I'll pack the context.";
   const MIN_FALLBACK_CONVERSATION_CHARS = 120;
@@ -302,11 +308,15 @@
   let warmSummaryExpireTimer = null;
   let handoffStatusTimer = null;
   let handoffStatusIndex = 0;
+  let onboardingTimer = null;
+  let onboardingDismissedThisSession = false;
 
   function cleanupContextGeneratorNodes() {
     [
       BUBBLE_ID,
       OVERLAY_ID,
+      ONBOARDING_ID,
+      ONBOARDING_STYLE_ID,
       DESTINATION_SHEET_ID,
       DESTINATION_SHEET_STYLE_ID,
       "context-generator-styles",
@@ -764,6 +774,8 @@
     clone.querySelectorAll?.([
       `#${BUBBLE_ID}`,
       `#${OVERLAY_ID}`,
+      `#${ONBOARDING_ID}`,
+      `#${ONBOARDING_STYLE_ID}`,
       `#${DESTINATION_SHEET_ID}`,
       "#context-generator-styles",
       "#context-generator-error-overlay",
@@ -939,6 +951,7 @@
 
     if (!input) {
       if (existingBubble) existingBubble.style.display = "none";
+      hideOnboardingNudge();
       hideDestinationSheet();
       releaseBubbleSlot();
       releaseComposerSurface();
@@ -961,6 +974,7 @@
     const composerSurface = findComposerSurfaceElement(input);
     if (!composerSurface) {
       bubble.style.display = "none";
+      hideOnboardingNudge();
       return bubble;
     }
 
@@ -1030,10 +1044,352 @@
       event.preventDefault();
       event.stopPropagation();
       if (isRunning) return;
+      dismissOnboardingNudge();
       toggleDestinationSheet();
     });
 
     return bubble;
+  }
+
+  function ensureOnboardingStyles() {
+    if (document.getElementById(ONBOARDING_STYLE_ID)) return;
+
+    const style = document.createElement("style");
+    style.id = ONBOARDING_STYLE_ID;
+    style.dataset.contextGeneratorOwned = "true";
+    style.textContent = `
+      @keyframes contextGeneratorOnboardingIn {
+        from {
+          opacity: 0;
+          transform: translate3d(0, 6px, 0) scale(0.98);
+        }
+        to {
+          opacity: 1;
+          transform: translate3d(0, 0, 0) scale(1);
+        }
+      }
+
+      @keyframes contextGeneratorGuideBob {
+        from {
+          transform: translate3d(0, -1px, 0) rotate(-2deg);
+        }
+        to {
+          transform: translate3d(0, 2px, 0) rotate(2deg);
+        }
+      }
+
+      @keyframes contextGeneratorGuidePoint {
+        from {
+          transform: translate3d(0, 0, 0) rotate(-10deg);
+        }
+        to {
+          transform: translate3d(4px, 0, 0) rotate(-7deg);
+        }
+      }
+
+      #${ONBOARDING_ID} {
+        position: fixed;
+        z-index: 2147483646;
+        width: min(268px, calc(100vw - 28px));
+        box-sizing: border-box;
+        display: none;
+        align-items: center;
+        gap: 10px;
+        padding: 10px 10px 10px 11px;
+        border-radius: 16px;
+        border: 1px solid rgba(255,255,255,0.13);
+        background: linear-gradient(145deg, #101010 0%, #15151d 62%, #080808 100%);
+        color: #ffffff;
+        box-shadow: 0 18px 42px rgba(0,0,0,0.36), inset 0 1px 0 rgba(255,255,255,0.08);
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+        animation: contextGeneratorOnboardingIn 0.22s cubic-bezier(0.16, 1, 0.3, 1) both;
+      }
+
+      .context-generator-onboarding-guide {
+        position: relative;
+        width: 42px;
+        height: 42px;
+        flex: 0 0 auto;
+        border-radius: 16px 16px 15px 9px;
+        background: radial-gradient(circle at 28% 22%, rgba(255,255,255,0.9), rgba(255,255,255,0.18) 18%, transparent 28%), linear-gradient(145deg, #f7f4ee, #c9fff0 56%, #9bd8ff);
+        box-shadow: 0 8px 18px rgba(0,0,0,0.22), inset 0 1px 0 rgba(255,255,255,0.7);
+        animation: contextGeneratorGuideBob 1.25s ease-in-out infinite alternate;
+      }
+
+      .context-generator-onboarding-eye {
+        position: absolute;
+        top: 16px;
+        width: 4px;
+        height: 4px;
+        border-radius: 999px;
+        background: #161616;
+      }
+
+      .context-generator-onboarding-eye-left {
+        left: 13px;
+      }
+
+      .context-generator-onboarding-eye-right {
+        left: 25px;
+      }
+
+      .context-generator-onboarding-smile {
+        position: absolute;
+        left: 16px;
+        top: 24px;
+        width: 10px;
+        height: 5px;
+        border-bottom: 2px solid rgba(22,22,22,0.82);
+        border-radius: 0 0 999px 999px;
+      }
+
+      .context-generator-onboarding-hand {
+        position: absolute;
+        top: 18px;
+        right: -20px;
+        width: 28px;
+        height: 7px;
+        border-radius: 999px;
+        background: linear-gradient(90deg, #f7f4ee, #ffffff);
+        box-shadow: 0 3px 8px rgba(0,0,0,0.18);
+        transform-origin: 3px 50%;
+        animation: contextGeneratorGuidePoint 0.82s ease-in-out infinite alternate;
+      }
+
+      .context-generator-onboarding-hand::after {
+        content: "";
+        position: absolute;
+        right: -3px;
+        top: -2px;
+        width: 9px;
+        height: 9px;
+        border-radius: 999px;
+        background: #ffffff;
+      }
+
+      #${ONBOARDING_ID}[data-context-generator-point="left"] .context-generator-onboarding-guide {
+        order: 0;
+      }
+
+      #${ONBOARDING_ID}[data-context-generator-point="left"] .context-generator-onboarding-hand {
+        left: -20px;
+        right: auto;
+        transform-origin: 25px 50%;
+        animation-name: contextGeneratorGuidePointLeft;
+      }
+
+      @keyframes contextGeneratorGuidePointLeft {
+        from {
+          transform: translate3d(0, 0, 0) rotate(190deg);
+        }
+        to {
+          transform: translate3d(-4px, 0, 0) rotate(187deg);
+        }
+      }
+
+      #${ONBOARDING_ID}[data-context-generator-point="right"] .context-generator-onboarding-guide {
+        order: 2;
+      }
+
+      .context-generator-onboarding-copy {
+        min-width: 0;
+        flex: 1;
+      }
+
+      .context-generator-onboarding-title {
+        font-family: Georgia, 'Times New Roman', serif;
+        font-size: 13px;
+        font-weight: 600;
+        line-height: 1.12;
+        letter-spacing: 0;
+        color: #ffffff;
+        text-rendering: geometricPrecision;
+      }
+
+      .context-generator-onboarding-body {
+        margin-top: 4px;
+        font-size: 11.5px;
+        font-weight: 500;
+        line-height: 1.35;
+        letter-spacing: 0;
+        color: rgba(255,255,255,0.68);
+      }
+
+      .context-generator-onboarding-dismiss {
+        flex: 0 0 auto;
+        align-self: flex-start;
+        width: 24px;
+        height: 24px;
+        border-radius: 999px;
+        border: 1px solid rgba(255,255,255,0.11);
+        background: rgba(255,255,255,0.06);
+        color: rgba(255,255,255,0.76);
+        cursor: pointer;
+        font: inherit;
+        font-size: 12px;
+        font-weight: 700;
+        line-height: 22px;
+        padding: 0;
+      }
+
+      .context-generator-onboarding-dismiss:hover {
+        background: rgba(255,255,255,0.1);
+        color: #ffffff;
+      }
+
+      @media (prefers-reduced-motion: reduce) {
+        #${ONBOARDING_ID},
+        .context-generator-onboarding-guide,
+        .context-generator-onboarding-hand {
+          animation: none;
+        }
+      }
+    `;
+    (document.head || document.documentElement).appendChild(style);
+  }
+
+  function createOnboardingNudge() {
+    ensureOnboardingStyles();
+
+    const nudge = document.createElement("div");
+    nudge.id = ONBOARDING_ID;
+    nudge.dataset.contextGeneratorOwned = "true";
+    nudge.setAttribute("role", "note");
+    nudge.setAttribute("aria-live", "polite");
+
+    const guide = document.createElement("div");
+    guide.className = "context-generator-onboarding-guide";
+    guide.setAttribute("aria-hidden", "true");
+
+    const leftEye = document.createElement("span");
+    leftEye.className = "context-generator-onboarding-eye context-generator-onboarding-eye-left";
+    const rightEye = document.createElement("span");
+    rightEye.className = "context-generator-onboarding-eye context-generator-onboarding-eye-right";
+    const smile = document.createElement("span");
+    smile.className = "context-generator-onboarding-smile";
+    const hand = document.createElement("span");
+    hand.className = "context-generator-onboarding-hand";
+    guide.appendChild(leftEye);
+    guide.appendChild(rightEye);
+    guide.appendChild(smile);
+    guide.appendChild(hand);
+
+    const copy = document.createElement("div");
+    copy.className = "context-generator-onboarding-copy";
+    const title = document.createElement("div");
+    title.className = "context-generator-onboarding-title";
+    title.textContent = ONBOARDING_TITLE_TEXT;
+    const body = document.createElement("div");
+    body.className = "context-generator-onboarding-body";
+    body.textContent = ONBOARDING_BODY_TEXT;
+    copy.appendChild(title);
+    copy.appendChild(body);
+
+    const dismiss = document.createElement("button");
+    dismiss.type = "button";
+    dismiss.className = "context-generator-onboarding-dismiss";
+    dismiss.textContent = "OK";
+    dismiss.setAttribute("aria-label", "Dismiss Cap Context tip");
+    dismiss.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      dismissOnboardingNudge();
+    });
+
+    nudge.appendChild(guide);
+    nudge.appendChild(copy);
+    nudge.appendChild(dismiss);
+    nudge.addEventListener("click", (event) => event.stopPropagation());
+    document.body.appendChild(nudge);
+    return nudge;
+  }
+
+  function maybeShowOnboardingNudge(bubble) {
+    if (!bubble || isOnboardingDismissed() || isRunning || isDestinationSheetOpen()) return;
+    if (bubble.style.display === "none") {
+      hideOnboardingNudge();
+      return;
+    }
+
+    const visibleNudge = document.getElementById(ONBOARDING_ID);
+    if (visibleNudge && visibleNudge.style.display !== "none") {
+      positionOnboardingNudge(visibleNudge, bubble);
+      return;
+    }
+
+    if (onboardingTimer) {
+      const nudge = document.getElementById(ONBOARDING_ID);
+      if (nudge && nudge.style.display !== "none") positionOnboardingNudge(nudge, bubble);
+      return;
+    }
+
+    onboardingTimer = window.setTimeout(() => {
+      onboardingTimer = null;
+      if (isOnboardingDismissed() || isRunning || isDestinationSheetOpen()) return;
+
+      const currentBubble = document.getElementById(BUBBLE_ID);
+      if (!currentBubble || currentBubble.style.display === "none") return;
+
+      const nudge = document.getElementById(ONBOARDING_ID) || createOnboardingNudge();
+      positionOnboardingNudge(nudge, currentBubble);
+      nudge.style.display = "flex";
+    }, ONBOARDING_SHOW_DELAY_MS);
+  }
+
+  function positionOnboardingNudge(nudge, bubble) {
+    const bubbleRect = bubble.getBoundingClientRect();
+    if (!bubbleRect.width || !bubbleRect.height) return;
+
+    const margin = 12;
+    const gap = 14;
+    const nudgeWidth = Math.min(268, window.innerWidth - margin * 2);
+    const nudgeHeight = nudge.offsetHeight || 92;
+    const canSitLeft = bubbleRect.left - gap - nudgeWidth >= margin;
+    const left = canSitLeft
+      ? bubbleRect.left - gap - nudgeWidth
+      : Math.min(window.innerWidth - nudgeWidth - margin, bubbleRect.right + gap);
+    const top = Math.max(
+      margin,
+      Math.min(
+        bubbleRect.top + bubbleRect.height / 2 - nudgeHeight / 2,
+        window.innerHeight - nudgeHeight - margin
+      )
+    );
+
+    nudge.dataset.contextGeneratorPoint = canSitLeft ? "right" : "left";
+    nudge.style.left = `${Math.round(left)}px`;
+    nudge.style.top = `${Math.round(top)}px`;
+  }
+
+  function hideOnboardingNudge() {
+    if (onboardingTimer) {
+      clearTimeout(onboardingTimer);
+      onboardingTimer = null;
+    }
+
+    const nudge = document.getElementById(ONBOARDING_ID);
+    if (nudge) nudge.style.display = "none";
+  }
+
+  function dismissOnboardingNudge() {
+    onboardingDismissedThisSession = true;
+    hideOnboardingNudge();
+
+    try {
+      window.localStorage?.setItem(ONBOARDING_STORAGE_KEY, "true");
+    } catch (_error) {
+      // Some AI pages lock storage; the session flag still prevents repeat nags.
+    }
+  }
+
+  function isOnboardingDismissed() {
+    if (onboardingDismissedThisSession) return true;
+
+    try {
+      return window.localStorage?.getItem(ONBOARDING_STORAGE_KEY) === "true";
+    } catch (_error) {
+      return false;
+    }
   }
 
   function ensureDestinationSheetStyles() {
@@ -1370,6 +1726,7 @@
   }
 
   function toggleDestinationSheet() {
+    hideOnboardingNudge();
     const sheet = ensureDestinationSheet();
     if (sheet.style.display === "block") {
       hideDestinationSheet();
@@ -2007,12 +2364,14 @@
       bubble.style.right = "auto";
       bubble.style.top = `${placement.top}px`;
       bubble.style.display = "flex";
+      maybeShowOnboardingNudge(bubble);
       return;
     }
 
     const composerSurface = findComposerSurfaceElement(input);
     if (!composerSurface) {
       bubble.style.display = "none";
+      hideOnboardingNudge();
       return;
     }
 
@@ -2030,6 +2389,7 @@
       composerRect.top > window.innerHeight
     ) {
       bubble.style.display = "none";
+      hideOnboardingNudge();
       return;
     }
 
@@ -2042,6 +2402,7 @@
       bubble.style.right = "auto";
       bubble.style.top = `${grokPlacement.top}px`;
       bubble.style.display = "flex";
+      maybeShowOnboardingNudge(bubble);
       return;
     }
 
@@ -2053,6 +2414,7 @@
         bubble.style.right = "auto";
         bubble.style.top = `${deepSeekPlacement.top}px`;
         bubble.style.display = "flex";
+        maybeShowOnboardingNudge(bubble);
         return;
       }
     }
@@ -2083,6 +2445,7 @@
     bubble.style.right = `${right}px`;
     bubble.style.top = `${Math.round(top)}px`;
     bubble.style.display = "flex";
+    maybeShowOnboardingNudge(bubble);
   }
 
   function findComposerActionButton(input, composerRect) {
@@ -2713,9 +3076,11 @@
     return node instanceof Element && (
       node.id === BUBBLE_ID ||
       node.id === OVERLAY_ID ||
+      node.id === ONBOARDING_ID ||
+      node.id === ONBOARDING_STYLE_ID ||
       node.id === "context-generator-styles" ||
       node.dataset.contextGeneratorOwned === "true" ||
-      Boolean(node.closest?.(`#${BUBBLE_ID}, #${OVERLAY_ID}, #context-generator-styles, #${DESTINATION_SHEET_ID}`))
+      Boolean(node.closest?.(`#${BUBBLE_ID}, #${OVERLAY_ID}, #${ONBOARDING_ID}, #context-generator-styles, #${DESTINATION_SHEET_ID}`))
     );
   }
 
