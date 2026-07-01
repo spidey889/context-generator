@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-07-01-empty-chat-guard";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-07-01-tile-hover-color";
   const BUBBLE_ID = "context-generator-bubble";
   const OVERLAY_ID = "context-generator-overlay";
   const DESTINATION_SHEET_ID = "context-generator-destination-sheet";
@@ -1069,6 +1069,17 @@
         }
       }
 
+      @keyframes contextGeneratorTileAuraDrift {
+        from {
+          transform: translate3d(-7%, 0, 0) scaleX(0.96);
+          filter: blur(8px);
+        }
+        to {
+          transform: translate3d(2%, 0, 0) scaleX(1.04);
+          filter: blur(10px);
+        }
+      }
+
       @keyframes contextGeneratorSpinnerSpin {
         to {
           transform: rotate(360deg);
@@ -1091,7 +1102,18 @@
         filter: blur(0.25px);
         opacity: 0;
         transform: translate3d(-150%, 0, 0) skewX(-18deg);
-        animation: contextGeneratorTileShine 7.2s cubic-bezier(0.16, 1, 0.3, 1) infinite;
+      }
+
+      .context-generator-tile-aura {
+        animation: none;
+      }
+
+      .context-generator-destination-tile[data-context-generator-hover="true"] .context-generator-tile-aura {
+        animation: contextGeneratorTileAuraDrift 1.8s ease-in-out infinite alternate;
+      }
+
+      .context-generator-destination-tile[data-context-generator-hover="true"] .context-generator-tile-shine {
+        animation: contextGeneratorTileShine 2.8s cubic-bezier(0.16, 1, 0.3, 1) infinite;
       }
 
       .context-generator-tile-spinner {
@@ -1109,6 +1131,7 @@
 
       @media (prefers-reduced-motion: reduce) {
         .context-generator-destination-tile.context-generator-tile-enter,
+        .context-generator-tile-aura,
         .context-generator-tile-shine {
           animation: none;
         }
@@ -1202,11 +1225,13 @@
       const button = document.createElement("button");
       button.type = "button";
       button.className = "context-generator-destination-tile";
+      button.dataset.contextGeneratorAccent = option.accent;
       button.dataset.contextGeneratorDetail = option.detail;
+      button.dataset.contextGeneratorHover = "false";
       button.style.cssText = [
         "width:100%",
         "height:48px",
-        "border:1px solid rgba(255,255,255,0.105)",
+        `border:1px solid ${option.accent}26`,
         "border-radius:11px",
         "background:linear-gradient(180deg, #121212 0%, #0b0b0b 58%, #050505 100%)",
         "color:#ffffff",
@@ -1222,18 +1247,21 @@
         "position:relative",
         "overflow:hidden",
         "isolation:isolate",
-        "box-shadow:inset 0 1px 0 rgba(255,255,255,0.075), inset 0 -1px 0 rgba(0,0,0,0.54), 0 1px 0 rgba(255,255,255,0.02)",
+        `box-shadow:inset 0 1px 0 rgba(255,255,255,0.075), inset 0 -1px 0 rgba(0,0,0,0.54), 0 0 0 1px ${option.accent}06, 0 1px 0 rgba(255,255,255,0.02)`,
         "transition:background 0.13s ease, border-color 0.13s ease, box-shadow 0.13s ease, transform 0.13s ease"
       ].join(";");
 
       const aura = document.createElement("span");
+      aura.className = "context-generator-tile-aura";
       aura.style.cssText = [
         "position:absolute",
         "inset:-1px",
         "z-index:0",
         "pointer-events:none",
-        `background:radial-gradient(circle at 18% 50%, ${option.accent}1a 0, transparent 42%), linear-gradient(135deg, rgba(255,255,255,0.045), transparent 45%)`,
-        "opacity:0.22",
+        `background:radial-gradient(circle at 10% 50%, ${option.accent}40 0, transparent 38%), linear-gradient(90deg, ${option.accent}52 0%, ${option.accent}30 22%, ${option.accent}12 48%, ${option.accent}05 68%, transparent 88%)`,
+        "opacity:0",
+        "filter:blur(8px)",
+        "transform:translate3d(-7%,0,0) scaleX(0.96)",
         "transition:opacity 0.14s ease"
       ].join(";");
 
@@ -1267,17 +1295,19 @@
       spinner.setAttribute("aria-hidden", "true");
 
       const setButtonActive = () => {
+        button.dataset.contextGeneratorHover = "true";
         button.style.background = "linear-gradient(180deg, #171717 0%, #0e0e0e 58%, #050505 100%)";
-        button.style.borderColor = "rgba(255,255,255,0.18)";
-        button.style.boxShadow = `inset 0 1px 0 rgba(255,255,255,0.1), inset 0 -1px 0 rgba(0,0,0,0.58), 0 0 0 1px ${option.accent}18, 0 8px 18px rgba(0,0,0,0.32)`;
-        aura.style.opacity = "0.42";
+        button.style.borderColor = `${option.accent}78`;
+        button.style.boxShadow = `inset 0 1px 0 rgba(255,255,255,0.1), inset 0 -1px 0 rgba(0,0,0,0.58), 0 0 0 1px ${option.accent}26, -10px 0 24px ${option.accent}12, 0 8px 18px rgba(0,0,0,0.32)`;
+        aura.style.opacity = "0.5";
         button.style.transform = "translateY(-1px)";
       };
       const setButtonIdle = () => {
+        button.dataset.contextGeneratorHover = "false";
         button.style.background = "linear-gradient(180deg, #121212 0%, #0b0b0b 58%, #050505 100%)";
-        button.style.borderColor = "rgba(255,255,255,0.105)";
-        button.style.boxShadow = "inset 0 1px 0 rgba(255,255,255,0.075), inset 0 -1px 0 rgba(0,0,0,0.54), 0 1px 0 rgba(255,255,255,0.02)";
-        aura.style.opacity = "0.22";
+        button.style.borderColor = `${option.accent}26`;
+        button.style.boxShadow = `inset 0 1px 0 rgba(255,255,255,0.075), inset 0 -1px 0 rgba(0,0,0,0.54), 0 0 0 1px ${option.accent}06, 0 1px 0 rgba(255,255,255,0.02)`;
+        aura.style.opacity = "0";
         button.style.transform = "translateY(0)";
       };
 
@@ -1432,10 +1462,17 @@
 
   function resetDestinationTiles(sheet) {
     sheet.querySelectorAll(".context-generator-destination-tile").forEach((tile) => {
+      const accent = tile.dataset.contextGeneratorAccent || "#ffffff";
+      const aura = tile.querySelector(".context-generator-tile-aura");
       tile.dataset.contextGeneratorLoading = "false";
+      tile.dataset.contextGeneratorHover = "false";
       tile.removeAttribute("aria-busy");
       tile.style.pointerEvents = "";
+      tile.style.background = "linear-gradient(180deg, #121212 0%, #0b0b0b 58%, #050505 100%)";
+      tile.style.borderColor = `${accent}26`;
+      tile.style.boxShadow = `inset 0 1px 0 rgba(255,255,255,0.075), inset 0 -1px 0 rgba(0,0,0,0.54), 0 0 0 1px ${accent}06, 0 1px 0 rgba(255,255,255,0.02)`;
       tile.style.transform = "translateY(0)";
+      if (aura) aura.style.opacity = "0";
       const detail = tile.querySelector(".context-generator-tile-detail");
       const spinner = tile.querySelector(".context-generator-tile-spinner");
       if (detail && tile.dataset.contextGeneratorDetail) {
