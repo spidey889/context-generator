@@ -27,7 +27,8 @@ const DESTINATIONS = {
   grok: {
     name: "Grok",
     url: "https://grok.com/",
-    contentScript: PLATFORM_CONTENT_SCRIPT
+    contentScript: PLATFORM_CONTENT_SCRIPT,
+    focusBeforePaste: true
   },
   deepseek: {
     name: "DeepSeek",
@@ -196,11 +197,14 @@ async function transferToDestination(destinationId, text, preparedTabId = null) 
 
   try {
     destinationTabId = preparedTabId || await createDestinationTab(destination);
+    if (destination.focusBeforePaste) {
+      await activateDestinationTab(destinationTabId);
+    }
     pasteResult = await pasteIntoDestinationTab(destinationTabId, destinationId, destination, text.trim());
   } catch (error) {
     if (!preparedTabId) throw error;
 
-    destinationTabId = await createDestinationTab(destination, { active: false });
+    destinationTabId = await createDestinationTab(destination, { active: destination.focusBeforePaste === true });
     pasteResult = await pasteIntoDestinationTab(destinationTabId, destinationId, destination, text.trim());
   }
 
