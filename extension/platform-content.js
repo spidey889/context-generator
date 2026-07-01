@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-07-01-ambient-tile-color";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-07-01-transfer-retry";
   const BUBBLE_ID = "context-generator-bubble";
   const OVERLAY_ID = "context-generator-overlay";
   const ONBOARDING_ID = "context-generator-onboarding";
@@ -51,7 +51,7 @@
     "try asking",
     "suggested prompts"
   ];
-  const PASTE_RETRY_TIMEOUT_MS = 14000;
+  const PASTE_RETRY_TIMEOUT_MS = 22000;
   const PASTE_RETRY_INTERVAL_MS = 180;
   const PASTE_VERIFY_TIMEOUT_MS = 1000;
   const WARM_SUMMARY_TTL_MS = 30000;

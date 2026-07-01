@@ -2,7 +2,7 @@ const CHATGPT_URL = "https://chatgpt.com/";
 const SUMMARY_BACKEND_URL = "https://context-generator-five.vercel.app/api/summarize";
 const PLATFORM_CONTENT_SCRIPT = "platform-content.js";
 const SOURCE_MESSAGE_TIMEOUT_MS = 12000;
-const DESTINATION_MESSAGE_TIMEOUT_MS = 18000;
+const DESTINATION_MESSAGE_TIMEOUT_MS = 30000;
 const MESSAGE_RETRY_INTERVAL_MS = 220;
 const DESTINATION_WARMUP_TIMEOUT_MS = 9000;
 const SUMMARY_BACKEND_ATTEMPTS = 2;
@@ -192,6 +192,7 @@ async function transferToDestination(destinationId, text, preparedTabId = null) 
     throw new Error("Unknown AI destination.");
   }
 
+  const trimmedText = text.trim();
   let pasteResult;
   let destinationTabId;
 
@@ -200,12 +201,21 @@ async function transferToDestination(destinationId, text, preparedTabId = null) 
     if (destination.focusBeforePaste) {
       await activateDestinationTab(destinationTabId);
     }
-    pasteResult = await pasteIntoDestinationTab(destinationTabId, destinationId, destination, text.trim());
+    pasteResult = await pasteIntoDestinationTab(destinationTabId, destinationId, destination, trimmedText);
   } catch (error) {
     if (!preparedTabId) throw error;
 
     destinationTabId = await createDestinationTab(destination, { active: destination.focusBeforePaste === true });
-    pasteResult = await pasteIntoDestinationTab(destinationTabId, destinationId, destination, text.trim());
+    pasteResult = await pasteIntoDestinationTab(destinationTabId, destinationId, destination, trimmedText);
+  }
+
+  if (!pasteResult?.ok && preparedTabId) {
+    console.debug(
+      "[Context Generator Relay] Prepared destination paste failed; retrying in a fresh tab:",
+      pasteResult?.error || "No paste response."
+    );
+    destinationTabId = await createDestinationTab(destination, { active: destination.focusBeforePaste === true });
+    pasteResult = await pasteIntoDestinationTab(destinationTabId, destinationId, destination, trimmedText);
   }
 
   if (!pasteResult?.ok) {
