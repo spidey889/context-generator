@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-07-02-fast-transfer";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-07-02-gemini-stable-button";
   const BUBBLE_ID = "context-generator-bubble";
   const OVERLAY_ID = "context-generator-overlay";
   const ONBOARDING_ID = "context-generator-onboarding";
@@ -2909,6 +2909,21 @@
       }
     }
 
+    if (currentPlatform.id === "gemini") {
+      const geminiPlacement = getGeminiBubblePlacement(
+        composerRect,
+        findComposerActionButton(input, composerRect)
+      );
+      releaseBubbleSlot();
+      bubble.style.left = "auto";
+      bubble.style.right = `${geminiPlacement.right}px`;
+      bubble.style.top = "auto";
+      bubble.style.bottom = `${geminiPlacement.bottom}px`;
+      bubble.style.display = "flex";
+      maybeShowOnboardingNudge(bubble);
+      return;
+    }
+
     const actionBtn = findComposerActionButton(input, composerRect);
     let anchorTop = composerRect.bottom - BUBBLE_SIZE - BUBBLE_GAP;
 
@@ -3283,6 +3298,37 @@
 
   function getDeepSeekFallbackBubblePlacement(composerRect) {
     return getBottomRightRowBubblePlacement(composerRect, 104);
+  }
+
+  function getGeminiBubblePlacement(composerRect, actionBtn) {
+    const maxRight = Math.max(BUBBLE_GAP, composerRect.width - BUBBLE_SIZE - BUBBLE_GAP);
+    const maxBottom = Math.max(BUBBLE_GAP, composerRect.height - BUBBLE_SIZE - BUBBLE_GAP);
+    const fallback = {
+      right: Math.round(Math.min(maxRight, BUBBLE_SLOT_WIDTH)),
+      bottom: Math.round(Math.min(maxBottom, 16))
+    };
+
+    if (!actionBtn) return fallback;
+
+    const actionRect = actionBtn.getBoundingClientRect();
+    if (actionRect.width <= 0 || actionRect.height <= 0) return fallback;
+
+    const right = Math.max(
+      BUBBLE_GAP,
+      Math.min(maxRight, composerRect.right - actionRect.left + BUBBLE_GAP)
+    );
+    const bottom = Math.max(
+      BUBBLE_GAP,
+      Math.min(
+        maxBottom,
+        composerRect.bottom - actionRect.bottom + (actionRect.height - BUBBLE_SIZE) / 2
+      )
+    );
+
+    return {
+      right: Math.round(right),
+      bottom: Math.round(bottom)
+    };
   }
 
   function getBubblePlacementBesideRect(targetRect, composerRect, left) {
