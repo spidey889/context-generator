@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-07-01-empty-copy-english";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-07-01-empty-chat-guard";
   const BUBBLE_ID = "context-generator-bubble";
   const OVERLAY_ID = "context-generator-overlay";
   const DESTINATION_SHEET_ID = "context-generator-destination-sheet";
@@ -25,6 +25,26 @@
   const NO_CONVERSATION_ERROR_TITLE = "Nothing to carry yet";
   const NO_CONVERSATION_ERROR_MESSAGE = "Chat is empty. Send one message first, then I'll pack the context.";
   const MIN_FALLBACK_CONVERSATION_CHARS = 120;
+  const EMPTY_START_SCREEN_TEXTS = [
+    "the mic is yours",
+    "start chatting",
+    "message chatgpt",
+    "message claude",
+    "message deepseek",
+    "ask gemini",
+    "ask grok",
+    "ask anything",
+    "ask me anything",
+    "new chat",
+    "what can i help with",
+    "what can i help you with",
+    "how can i help",
+    "how can i help you today",
+    "what are you working on",
+    "where should we begin",
+    "try asking",
+    "suggested prompts"
+  ];
   const PASTE_RETRY_TIMEOUT_MS = 14000;
   const PASTE_RETRY_INTERVAL_MS = 180;
   const PASTE_VERIFY_TIMEOUT_MS = 1000;
@@ -761,11 +781,11 @@
       .join("\n\n")
       .trim();
 
-    if (transcript) {
+    if (transcript && isUsefulConversationTranscript(turns)) {
       return limitConversationText(`${currentPlatform.name} conversation:\n\n${transcript}`);
     }
 
-    const fallbackText = scrapeMainConversationText();
+    const fallbackText = hasFallbackConversationEvidence(turns) ? scrapeMainConversationText(turns) : "";
     if (isUsefulFallbackConversationText(fallbackText)) {
       return limitConversationText(`${currentPlatform.name} conversation:\n\n${fallbackText}`);
     }
@@ -817,6 +837,22 @@
     return "Message";
   }
 
+  function isUsefulConversationTranscript(turns) {
+    if (!turns.length) return false;
+    if (turns.some(hasExplicitConversationRole)) return true;
+    if (turns.length < 2) return false;
+
+    return !isEmptyConversationText(turns.map((turn) => turn.text).join("\n\n"));
+  }
+
+  function hasFallbackConversationEvidence(turns) {
+    return turns.some(hasExplicitConversationRole);
+  }
+
+  function hasExplicitConversationRole(turn) {
+    return turn?.role === "User" || turn?.role === currentPlatform.name;
+  }
+
   function isUsefulConversationTurn(turn) {
     if (!turn?.text) return false;
 
@@ -825,7 +861,7 @@
     return !isEmptyConversationText(text);
   }
 
-  function scrapeMainConversationText() {
+  function scrapeMainConversationText(turns = getConversationTurns()) {
     const roots = FALLBACK_CONVERSATION_ROOT_SELECTORS
       .flatMap((selector) => Array.from(document.querySelectorAll(selector)))
       .filter((element, index, all) => all.indexOf(element) === index && isVisible(element) && !isContextGeneratorNode(element));
@@ -836,7 +872,7 @@
 
     if (rootText) return rootText;
 
-    const combinedText = getConversationTurns()
+    const combinedText = turns
       .map((turn) => turn.text)
       .join("\n\n");
 
@@ -856,23 +892,30 @@
     const cleaned = cleanText(text).toLowerCase();
     if (!cleaned) return true;
 
-    return [
-      "the mic is yours",
-      "start chatting",
-      "message deepseek",
-      "ask gemini",
-      "new chat",
-      "what can i help with",
-      "how can i help",
-      "what are you working on"
-    ].some((emptyText) => cleaned.includes(emptyText) && cleaned.length < 700);
+    return EMPTY_START_SCREEN_TEXTS.some((emptyText) => cleaned.includes(emptyText) && cleaned.length < 900);
   }
 
   function isConversationCandidateElement(element) {
     if (!element || isContextGeneratorNode(element) || !isVisible(element)) return false;
     if (element.matches("input, textarea, button, select, [role='button'], [contenteditable='true']")) return false;
     if (element.closest("nav, header, footer, aside, menu")) return false;
+    if (isLikelyPromptSuggestionElement(element)) return false;
     return true;
+  }
+
+  function isLikelyPromptSuggestionElement(element) {
+    return Boolean(element.closest?.([
+      "[aria-label*='suggest' i]",
+      "[data-testid*='suggest' i]",
+      "[data-test-id*='suggest' i]",
+      "[class*='suggest' i]",
+      "[data-testid*='starter' i]",
+      "[data-test-id*='starter' i]",
+      "[class*='starter' i]",
+      "[data-testid*='example' i]",
+      "[data-test-id*='example' i]",
+      "[class*='example' i]"
+    ].join(",")));
   }
 
   function limitConversationText(text) {
@@ -2724,6 +2767,7 @@
       element.getAttribute("placeholder"),
       element.getAttribute("data-placeholder"),
       element.getAttribute("role"),
+      element.localName,
       element.id,
       element.className
     ];

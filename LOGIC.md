@@ -100,7 +100,7 @@ For each candidate element, the script skips extension-owned nodes, reads `inner
 - The current platform name when metadata mentions assistant, model, response, Claude, ChatGPT, Gemini, Grok, DeepSeek, or bot.
 - `Message` otherwise.
 
-Candidates are sorted in document order. Nested duplicates and identical text duplicates are removed. If at least two useful turns are found, the transcript becomes blocks like:
+Candidates are sorted in document order. Nested duplicates and identical text duplicates are removed. A transcript is accepted when it has explicit user/assistant role evidence, or when multiple generic turns survive the empty-screen filters. It becomes blocks like:
 
 ```text
 User: ...
@@ -110,7 +110,7 @@ Claude: ...
 
 The transcript is prefixed with the source platform name, such as `Gemini conversation:`.
 
-If structured message scraping does not produce a useful transcript, the fallback reads visible text from `main`, role-main, conversation/chat/thread/message-list containers, and finally a combined set of detected message turns. It removes extension-owned UI text before measuring fallback content. Empty start screens are rejected so the extension does not send sidebar, placeholder, or landing-page text to Mistral.
+If structured message scraping does not produce a useful transcript, the fallback reads visible text from `main`, role-main, conversation/chat/thread/message-list containers, and finally a combined set of detected message turns. The fallback only runs after at least one explicit role-backed turn was detected, so broad start-screen text cannot trigger a transfer by itself. It removes extension-owned UI text before measuring fallback content. Empty start screens are rejected so the extension does not send sidebar, placeholder, or landing-page text to Mistral.
 
 When no useful chat text exists, the transfer stops before opening/preparing a destination tab or calling the backend and shows a polished in-page error: `Nothing to carry yet`. The message nudges the user to send something first.
 
