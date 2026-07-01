@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-07-01-mascot-polish";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-07-01-conversation-retry";
   const BUBBLE_ID = "context-generator-bubble";
   const OVERLAY_ID = "context-generator-overlay";
   const ONBOARDING_ID = "context-generator-onboarding";
@@ -31,6 +31,8 @@
   const NO_CONVERSATION_ERROR_TITLE = "Nothing to carry yet";
   const NO_CONVERSATION_ERROR_MESSAGE = "Chat is empty. Send one message first, then I'll pack the context.";
   const MIN_FALLBACK_CONVERSATION_CHARS = 120;
+  const CONVERSATION_SCRAPE_RETRY_TIMEOUT_MS = 1800;
+  const CONVERSATION_SCRAPE_RETRY_INTERVAL_MS = 140;
   const EMPTY_START_SCREEN_TEXTS = [
     "the mic is yours",
     "start chatting",
@@ -358,7 +360,7 @@
   async function runContextFlow(destinationId, preparedDestinationPromise = null, warmSummaryRecord = null, scrapedConversationText = null) {
     try {
       const destination = getPlatform(destinationId);
-      const conversationText = scrapedConversationText || scrapeConversationText();
+      const conversationText = scrapedConversationText || await scrapeConversationTextWhenReady();
       if (isHandoffOverlayVisible()) {
         setHandoffStatus("Summarizing context");
       } else {
@@ -803,6 +805,78 @@
     }
 
     throw new Error(NO_CONVERSATION_ERROR_MESSAGE);
+  }
+
+  async function scrapeConversationTextWhenReady(timeoutMs = CONVERSATION_SCRAPE_RETRY_TIMEOUT_MS) {
+    const startedAt = Date.now();
+    let lastEmptyError = null;
+
+    while (Date.now() - startedAt <= timeoutMs) {
+      try {
+        return scrapeConversationText();
+      } catch (error) {
+        if (!isNoConversationError(error)) throw error;
+        lastEmptyError = error;
+      }
+
+      const remainingMs = timeoutMs - (Date.now() - startedAt);
+      if (remainingMs <= 0) break;
+      await waitForConversationContentSignal(Math.min(CONVERSATION_SCRAPE_RETRY_INTERVAL_MS, remainingMs));
+    }
+
+    throw lastEmptyError || new Error(NO_CONVERSATION_ERROR_MESSAGE);
+  }
+
+  function isNoConversationError(error) {
+    return error?.message === NO_CONVERSATION_ERROR_MESSAGE;
+  }
+
+  function waitForConversationContentSignal(timeoutMs) {
+    const root = document.body || document.documentElement;
+    if (!root || typeof MutationObserver === "undefined") return delay(timeoutMs);
+
+    return new Promise((resolve) => {
+      let observer = null;
+      let timer = null;
+      let settled = false;
+      const finish = () => {
+        if (settled) return;
+        settled = true;
+        if (timer) clearTimeout(timer);
+        observer?.disconnect();
+        resolve();
+      };
+
+      timer = setTimeout(finish, timeoutMs);
+      observer = new MutationObserver((mutations) => {
+        if (mutations.every(isOwnDomMutation)) return;
+        if (mutations.some(hasConversationMutationSignal)) finish();
+      });
+      observer.observe(root, { childList: true, subtree: true, characterData: true });
+    });
+  }
+
+  function hasConversationMutationSignal(mutation) {
+    if (mutation.type === "characterData") {
+      return isPotentialConversationNode(mutation.target?.parentElement);
+    }
+
+    return [mutation.target, ...mutation.addedNodes]
+      .some((node) => isPotentialConversationNode(node));
+  }
+
+  function isPotentialConversationNode(node) {
+    if (!(node instanceof Element) || isContextGeneratorNode(node)) return false;
+    const selectors = getConversationReadinessSelectors();
+    return Boolean(node.matches?.(selectors) || node.closest?.(selectors));
+  }
+
+  function getConversationReadinessSelectors() {
+    return [
+      ...currentPlatform.conversationSelectors,
+      ...GENERIC_CONVERSATION_SELECTORS,
+      ...FALLBACK_CONVERSATION_ROOT_SELECTORS
+    ].join(",");
   }
 
   function getConversationTurns() {
@@ -2146,13 +2220,13 @@
     });
   }
 
-  function startDestinationTransfer(destinationId) {
+  async function startDestinationTransfer(destinationId) {
     hideDestinationSheet();
     if (isRunning) return;
 
     let conversationText;
     try {
-      conversationText = scrapeConversationText();
+      conversationText = await scrapeConversationTextWhenReady();
     } catch (error) {
       clearWarmSummary();
       showErrorOverlay(error.message);
