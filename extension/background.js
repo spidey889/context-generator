@@ -88,8 +88,8 @@ chrome.action.onClicked.addListener(async (tab) => {
 
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (message?.type === "SUMMARIZE_WITH_BACKEND") {
-    summarizeWithBackend(message.conversation)
-      .then((summary) => sendResponse({ ok: true, summary }))
+    summarizeWithBackend(message.conversation, message.transferId)
+      .then((result) => sendResponse({ ok: true, summary: result.summary, timing: result.timing }))
       .catch((error) => {
         console.error("[Context Generator Relay]", error);
         setBadge("ERR", "#b42318", 5000);
@@ -100,8 +100,8 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   }
 
   if (message?.type === "TRANSFER_TO_DESTINATION") {
-    transferToDestination(message.destination, message.text, message.preparedTabId)
-      .then(() => sendResponse({ ok: true }))
+    transferToDestination(message.destination, message.text, message.preparedTabId, message.transferId)
+      .then((result) => sendResponse({ ok: true, timing: result?.timing || null, marks: result?.marks || [] }))
       .catch((error) => {
         console.error("[Context Generator Relay]", error);
         setBadge("ERR", "#b42318", 5000);
@@ -112,8 +112,8 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   }
 
   if (message?.type === "PREPARE_DESTINATION") {
-    prepareDestination(message.destination)
-      .then((tabId) => sendResponse({ ok: true, tabId }))
+    prepareDestination(message.destination, message.transferId)
+      .then((result) => sendResponse({ ok: true, tabId: result.tabId, timing: result.timing }))
       .catch((error) => {
         console.error("[Context Generator Relay]", error);
         sendResponse({ ok: false, error: error.message });
@@ -130,22 +130,31 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   return false;
 });
 
-async function summarizeWithBackend(conversation) {
+async function summarizeWithBackend(conversation, transferId = null) {
   const conversationText = conversation?.trim();
   if (!conversationText) {
     throw new Error("AI conversation text could not be captured.");
   }
 
   const cachedSummary = getCachedSummary(conversationText);
-  if (cachedSummary) return cachedSummary;
+  if (cachedSummary) {
+    logPerf(transferId, "summary cache hit", { chars: cachedSummary.length });
+    return {
+      summary: cachedSummary,
+      timing: { source: "cache", summaryMs: 0, chars: cachedSummary.length }
+    };
+  }
 
   const inFlightSummary = summaryInflight.get(conversationText);
-  if (inFlightSummary) return inFlightSummary;
+  if (inFlightSummary) {
+    logPerf(transferId, "summary inflight join", { chars: conversationText.length });
+    return inFlightSummary;
+  }
 
-  const summaryPromise = fetchSummaryFromBackend(conversationText)
-    .then((summary) => {
-      cacheSummary(conversationText, summary);
-      return summary;
+  const summaryPromise = fetchSummaryFromBackend(conversationText, transferId)
+    .then((result) => {
+      cacheSummary(conversationText, result.summary);
+      return result;
     })
     .finally(() => {
       summaryInflight.delete(conversationText);
@@ -155,27 +164,49 @@ async function summarizeWithBackend(conversation) {
   return summaryPromise;
 }
 
-async function fetchSummaryFromBackend(conversationText) {
+async function fetchSummaryFromBackend(conversationText, transferId = null) {
   let lastError = null;
+  const summaryStartedAt = nowMs();
+  logPerf(transferId, "summary backend request start", { chars: conversationText.length });
 
   for (let attempt = 1; attempt <= SUMMARY_BACKEND_ATTEMPTS; attempt += 1) {
     let timeout = null;
     try {
       const controller = new AbortController();
       timeout = setTimeout(() => controller.abort(), SUMMARY_BACKEND_TIMEOUT_MS);
+      const fetchStartedAt = nowMs();
       const response = await fetch(SUMMARY_BACKEND_URL, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ conversation: conversationText }),
         signal: controller.signal
       });
+      const fetchMs = Math.round(nowMs() - fetchStartedAt);
 
       if (!response.ok) {
         lastError = new Error("Backup summarizer failed.");
+        logPerf(transferId, "summary backend response error", { status: response.status, fetchMs, attempt });
         if (!isRetryableSummaryStatus(response.status)) throw lastError;
       } else {
+        const parseStartedAt = nowMs();
         const data = await response.json();
-        if (data.summary?.trim()) return data.summary.trim();
+        const parseMs = Math.round(nowMs() - parseStartedAt);
+        if (data.summary?.trim()) {
+          const summary = data.summary.trim();
+          const summaryMs = Math.round(nowMs() - summaryStartedAt);
+          const timing = {
+            source: "backend",
+            status: response.status,
+            attempt,
+            summaryMs,
+            fetchMs,
+            parseMs,
+            chars: summary.length,
+            backend: data.timing || null
+          };
+          logPerf(transferId, "summary backend response done", timing);
+          return { summary, timing };
+        }
         lastError = new Error("Backup summarizer returned no summary.");
       }
     } catch (error) {
@@ -233,11 +264,12 @@ function isRetryableSummaryError(error) {
   );
 }
 
-async function transferToDestination(destinationId, text, preparedTabId = null) {
+async function transferToDestination(destinationId, text, preparedTabId = null, transferId = null) {
   if (!text?.trim()) {
     throw new Error("Context summary text was not available.");
   }
 
+  const trace = createBackgroundTrace(transferId);
   const destination = DESTINATIONS[destinationId];
   if (!destination) {
     throw new Error("Unknown AI destination.");
@@ -248,16 +280,31 @@ async function transferToDestination(destinationId, text, preparedTabId = null) 
   let destinationTabId;
 
   try {
-    destinationTabId = preparedTabId || await createDestinationTab(destination);
-    if (destination.focusBeforePaste) {
-      await activateDestinationTab(destinationTabId);
+    if (preparedTabId) {
+      destinationTabId = preparedTabId;
+      markBackgroundTrace(trace, "prepared tab reused", { tabId: destinationTabId, destination: destinationId });
+    } else {
+      markBackgroundTrace(trace, "tab open start", { destination: destinationId, active: destination.focusBeforePaste === true });
+      destinationTabId = await createDestinationTab(destination);
+      markBackgroundTrace(trace, "tab open done", { tabId: destinationTabId });
     }
-    pasteResult = await pasteIntoDestinationTab(destinationTabId, destinationId, destination, trimmedText);
+    if (destination.focusBeforePaste) {
+      markBackgroundTrace(trace, "tab activate before paste start", { tabId: destinationTabId });
+      await activateDestinationTab(destinationTabId);
+      markBackgroundTrace(trace, "tab activate before paste done", { tabId: destinationTabId });
+    }
+    markBackgroundTrace(trace, "paste message start", { tabId: destinationTabId, destination: destinationId });
+    pasteResult = await pasteIntoDestinationTab(destinationTabId, destinationId, destination, trimmedText, transferId, trace);
+    markBackgroundTrace(trace, "paste message done", { tabId: destinationTabId, responseTiming: pasteResult?.timing || null });
   } catch (error) {
     if (!preparedTabId) throw error;
 
+    markBackgroundTrace(trace, "fresh fallback tab open start", { destination: destinationId });
     destinationTabId = await createDestinationTab(destination, { active: destination.focusBeforePaste === true });
-    pasteResult = await pasteIntoDestinationTab(destinationTabId, destinationId, destination, trimmedText);
+    markBackgroundTrace(trace, "fresh fallback tab open done", { tabId: destinationTabId });
+    markBackgroundTrace(trace, "fresh fallback paste start", { tabId: destinationTabId });
+    pasteResult = await pasteIntoDestinationTab(destinationTabId, destinationId, destination, trimmedText, transferId, trace);
+    markBackgroundTrace(trace, "fresh fallback paste done", { tabId: destinationTabId, responseTiming: pasteResult?.timing || null });
   }
 
   if (!pasteResult?.ok && preparedTabId) {
@@ -265,27 +312,48 @@ async function transferToDestination(destinationId, text, preparedTabId = null) 
       "[Context Generator Relay] Prepared destination paste failed; retrying in a fresh tab:",
       pasteResult?.error || "No paste response."
     );
+    markBackgroundTrace(trace, "prepared paste failed; fresh tab open start", { error: pasteResult?.error || "No paste response." });
     destinationTabId = await createDestinationTab(destination, { active: destination.focusBeforePaste === true });
-    pasteResult = await pasteIntoDestinationTab(destinationTabId, destinationId, destination, trimmedText);
+    markBackgroundTrace(trace, "prepared paste failed; fresh tab open done", { tabId: destinationTabId });
+    markBackgroundTrace(trace, "prepared paste failed; fresh paste start", { tabId: destinationTabId });
+    pasteResult = await pasteIntoDestinationTab(destinationTabId, destinationId, destination, trimmedText, transferId, trace);
+    markBackgroundTrace(trace, "prepared paste failed; fresh paste done", { tabId: destinationTabId, responseTiming: pasteResult?.timing || null });
   }
 
   if (!pasteResult?.ok) {
     throw new Error(pasteResult?.error || `Could not paste into ${destination.name}.`);
   }
 
+  markBackgroundTrace(trace, "final tab activate start", { tabId: destinationTabId });
   await activateDestinationTab(destinationTabId);
+  markBackgroundTrace(trace, "final tab activate done", { tabId: destinationTabId });
   await setBadge("OK", "#1f8f4d", 2500);
+  return {
+    timing: {
+      totalMs: Math.round(nowMs() - trace.startedAt),
+      tabId: destinationTabId,
+      paste: pasteResult?.timing || null
+    },
+    marks: trace.marks
+  };
 }
 
-async function prepareDestination(destinationId) {
+async function prepareDestination(destinationId, transferId = null) {
+  const startedAt = nowMs();
   const destination = DESTINATIONS[destinationId];
   if (!destination) {
     throw new Error("Unknown AI destination.");
   }
 
+  logPerf(transferId, "tab open start", { destination: destinationId, active: false });
   const destinationTabId = await createDestinationTab(destination, { active: false });
-  warmDestinationTab(destinationTabId, destination);
-  return destinationTabId;
+  const openMs = Math.round(nowMs() - startedAt);
+  logPerf(transferId, "tab open done", { destination: destinationId, tabId: destinationTabId, openMs });
+  warmDestinationTab(destinationTabId, destination, transferId);
+  return {
+    tabId: destinationTabId,
+    timing: { openMs, tabId: destinationTabId }
+  };
 }
 
 async function createDestinationTab(destination, options = {}) {
@@ -307,27 +375,38 @@ async function activateDestinationTab(tabId) {
   }
 }
 
-async function pasteIntoDestinationTab(tabId, destinationId, destination, text) {
+async function pasteIntoDestinationTab(tabId, destinationId, destination, text, transferId = null, trace = null) {
   return sendMessageWhenReady(
     tabId,
     {
       type: "PASTE_CONTEXT",
       destination: destinationId,
-      text
+      text,
+      transferId
     },
     destination.contentScript,
     DESTINATION_MESSAGE_TIMEOUT_MS,
-    destination.name
+    destination.name,
+    transferId,
+    trace
   );
 }
 
-async function warmDestinationTab(tabId, destination) {
+async function warmDestinationTab(tabId, destination, transferId = null) {
   try {
     const startedAt = Date.now();
     while (Date.now() - startedAt <= DESTINATION_WARMUP_TIMEOUT_MS) {
-      if (await ensureContentScript(tabId, destination.contentScript) && await pingTab(tabId)) return;
+      if (await ensureContentScript(tabId, destination.contentScript) && await pingTab(tabId)) {
+        logPerf(transferId, "tab ready", {
+          tabId,
+          destination: destination.name,
+          readyMs: Date.now() - startedAt
+        });
+        return;
+      }
       await delay(MESSAGE_RETRY_INTERVAL_MS);
     }
+    logPerf(transferId, "tab ready timeout", { tabId, destination: destination.name, timeoutMs: DESTINATION_WARMUP_TIMEOUT_MS });
   } catch (error) {
     console.debug("[Context Generator Relay] Destination warmup skipped:", error?.message || error);
   }
@@ -372,14 +451,21 @@ function sendMessage(tabId, message) {
   return chrome.tabs.sendMessage(tabId, message);
 }
 
-async function sendMessageWhenReady(tabId, message, contentScript, timeoutMs, name) {
+async function sendMessageWhenReady(tabId, message, contentScript, timeoutMs, name, transferId = null, trace = null) {
   const startedAt = Date.now();
   let lastError = null;
+  let attempts = 0;
 
   while (Date.now() - startedAt <= timeoutMs) {
+    attempts += 1;
     try {
       const response = await sendMessage(tabId, message);
-      if (response !== undefined) return response;
+      if (response !== undefined) {
+        const readyMs = Date.now() - startedAt;
+        logPerf(transferId, "tab ready/message response", { tabId, name, readyMs, attempts });
+        markBackgroundTrace(trace, "tab ready/message response", { tabId, readyMs, attempts });
+        return response;
+      }
       lastError = new Error(`No response from ${name}.`);
     } catch (error) {
       lastError = error;
@@ -389,11 +475,17 @@ async function sendMessageWhenReady(tabId, message, contentScript, timeoutMs, na
     }
 
     if (Date.now() - startedAt > timeoutMs) break;
+    markBackgroundTrace(trace, "content script inject attempt", { tabId, attempts });
     await ensureContentScript(tabId, contentScript);
 
     try {
       const response = await sendMessage(tabId, message);
-      if (response !== undefined) return response;
+      if (response !== undefined) {
+        const readyMs = Date.now() - startedAt;
+        logPerf(transferId, "tab ready/message response after inject", { tabId, name, readyMs, attempts });
+        markBackgroundTrace(trace, "tab ready/message response after inject", { tabId, readyMs, attempts });
+        return response;
+      }
       lastError = new Error(`No response from ${name}.`);
     } catch (error) {
       lastError = error;
@@ -479,6 +571,43 @@ async function setBadge(text, color, timeoutMs) {
 
 function clearBadge() {
   chrome.action.setBadgeText({ text: "" });
+}
+
+function createBackgroundTrace(transferId) {
+  return {
+    id: transferId,
+    startedAt: nowMs(),
+    lastAt: null,
+    marks: []
+  };
+}
+
+function markBackgroundTrace(trace, label, detail = null) {
+  if (!trace) return;
+  const at = nowMs();
+  const previous = trace.lastAt || trace.startedAt;
+  const mark = {
+    label,
+    deltaMs: Math.round(at - previous),
+    totalMs: Math.round(at - trace.startedAt),
+    detail: detail || null
+  };
+  trace.lastAt = at;
+  trace.marks.push(mark);
+  logPerf(trace.id, label, {
+    totalMs: mark.totalMs,
+    deltaMs: mark.deltaMs,
+    ...(detail || {})
+  });
+}
+
+function logPerf(transferId, label, detail = null) {
+  const suffix = detail ? ` ${JSON.stringify(detail)}` : "";
+  console.debug(`[Context Generator Perf ${transferId || "no-trace"}] ${label}${suffix}`);
+}
+
+function nowMs() {
+  return globalThis.performance?.now?.() || Date.now();
 }
 
 function delay(timeoutMs) {

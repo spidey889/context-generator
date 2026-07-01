@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-07-02-pill-hover-border";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-07-02-transfer-perf-trace";
   const BUBBLE_ID = "context-generator-bubble";
   const OVERLAY_ID = "context-generator-overlay";
   const ONBOARDING_ID = "context-generator-onboarding";
@@ -12,6 +12,12 @@
   }
 
   cleanupContextGeneratorNodes();
+
+  const extensionRuntime = getExtensionRuntime();
+  if (!extensionRuntime) {
+    console.warn("[Context Generator] Extension runtime is unavailable; skipping content script startup.");
+    return;
+  }
 
   window.__contextGeneratorPlatformLoaded = CONTENT_SCRIPT_LOAD_ID;
 
@@ -310,6 +316,8 @@
   let handoffStatusIndex = 0;
   let onboardingTimer = null;
   let onboardingDismissedThisSession = false;
+  let activeTransferTrace = null;
+  let transferTraceSequence = 0;
 
   function cleanupContextGeneratorNodes() {
     [
@@ -326,15 +334,21 @@
     ].forEach((id) => document.getElementById(id)?.remove());
   }
 
-  chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+  extensionRuntime.onMessage.addListener((message, _sender, sendResponse) => {
     if (message?.type === "CONTEXT_GENERATOR_PING") {
       sendResponse({ ok: true });
       return false;
     }
 
     if (message?.type === "PASTE_CONTEXT") {
-      pasteIntoPlatform(message.text, message.destination)
-        .then(() => sendResponse({ ok: true }))
+      const pasteStartedAt = getNow();
+      logTransferPerf(message.transferId, "destination paste start", { destination: message.destination });
+      pasteIntoPlatform(message.text, message.destination, message.transferId)
+        .then(() => {
+          const pasteMs = Math.round(getNow() - pasteStartedAt);
+          logTransferPerf(message.transferId, "destination paste done", { destination: message.destination, pasteMs });
+          sendResponse({ ok: true, timing: { pasteMs } });
+        })
         .catch((error) => sendResponse({ ok: false, error: error.message }));
 
       return true;
@@ -351,7 +365,9 @@
       clearRunningResetTimer();
       runningResetTimer = setTimeout(resetRunningFlag, RUNNING_AUTO_RESET_MS);
       sendResponse({ ok: true });
-      runContextFlow(destination);
+      const trace = createTransferTrace(destination, "extension icon");
+      markTransferTrace(trace, "click", { source: "extension icon" });
+      runContextFlow(destination, null, null, null, trace);
       return false;
     }
 
@@ -360,83 +376,110 @@
 
   startFloatingButtonMonitoring();
 
-  async function runContextFlow(destinationId, preparedDestinationPromise = null, warmSummaryRecord = null, scrapedConversationText = null) {
-    const timing = createTransferTiming(destinationId);
+  async function runContextFlow(destinationId, preparedDestinationPromise = null, warmSummaryRecord = null, scrapedConversationText = null, trace = null) {
+    const transferTrace = trace || createTransferTrace(destinationId, "transfer");
+    transferTrace.destinationId = destinationId;
     try {
       const destination = getPlatform(destinationId);
-      const conversationText = scrapedConversationText || await scrapeConversationTextWhenReady();
-      markTransferTiming(timing, "capture");
-      const destinationPrepPromise = preparedDestinationPromise || prepareDestinationTab(destinationId);
-      markTransferTiming(timing, "destination warmup started");
+      let conversationText = scrapedConversationText;
+      if (!conversationText) {
+        markTransferTrace(transferTrace, "capture start");
+        conversationText = await scrapeConversationTextWhenReady();
+        markTransferTrace(transferTrace, "capture done", { chars: conversationText.length });
+      }
+      const destinationPrepPromise = preparedDestinationPromise || prepareDestinationTab(destinationId, transferTrace);
       if (isHandoffOverlayVisible()) {
         setHandoffStatus("Summarizing context");
       } else {
         showOverlay(destinationId);
       }
-      const summary = await getSummaryForTransfer(conversationText, warmSummaryRecord);
-      markTransferTiming(timing, "summary ready");
+      const summary = await getSummaryForTransfer(conversationText, warmSummaryRecord, transferTrace);
+      markTransferTrace(transferTrace, "summary available", { chars: summary.length });
       setHandoffStatus(`Preparing ${destination?.name || "destination"}`);
       const preparedDestination = destinationPrepPromise ? await destinationPrepPromise : null;
-      markTransferTiming(timing, "destination ready");
+      markTransferTrace(transferTrace, "tab open done", {
+        tabId: preparedDestination?.tabId || null,
+        background: preparedDestination?.timing || null
+      });
       setHandoffStatus(`Pasting context into ${destination?.name || "destination"}`);
-      await notifyBackground({
+      markTransferTrace(transferTrace, "paste request start");
+      const pasteResponse = await notifyBackground({
         type: "TRANSFER_TO_DESTINATION",
         destination: destinationId,
         text: summary,
-        preparedTabId: preparedDestination?.tabId || null
+        preparedTabId: preparedDestination?.tabId || null,
+        transferId: transferTrace.id
       });
-      markTransferTiming(timing, "pasted");
-      logTransferTiming(timing);
+      appendBackgroundMarks(transferTrace, pasteResponse?.marks);
+      markTransferTrace(transferTrace, "paste done", pasteResponse?.timing || null);
+      finishTransferTrace(transferTrace);
       resetRunningFlag();
     } catch (error) {
-      markTransferTiming(timing, `failed: ${error.message}`);
-      logTransferTiming(timing);
+      markTransferTrace(transferTrace, `failed: ${error.message}`);
+      finishTransferTrace(transferTrace);
       resetRunningFlag();
       showErrorOverlay(error.message);
       await notifyBackground({ type: "CONTEXT_TRANSFER_ERROR", error: error.message }).catch(() => {});
     }
   }
 
-  async function summarizeWithBackend(conversationText) {
+  async function summarizeWithBackend(conversationText, trace = null) {
+    markTransferTrace(trace, "summary start", { chars: conversationText.length });
     const response = await notifyBackground({
       type: "SUMMARIZE_WITH_BACKEND",
-      conversation: conversationText
+      conversation: conversationText,
+      transferId: trace?.id || null
     });
 
     if (!response?.summary?.trim()) {
       throw new Error("Backup summarizer returned no summary.");
     }
 
+    markTransferTrace(trace, "summary done", {
+      chars: response.summary.trim().length,
+      background: response.timing || null
+    });
     return response.summary.trim();
   }
 
-  async function getSummaryForTransfer(conversationText, warmSummaryRecord = null) {
+  async function getSummaryForTransfer(conversationText, warmSummaryRecord = null, trace = null) {
     const fingerprint = getConversationFingerprint(conversationText);
     const candidate = warmSummaryRecord || warmSummary;
 
     if (isWarmSummaryUsable(candidate, fingerprint)) {
       const summary = candidate.summary || await candidate.promise;
       if (summary && isWarmSummaryUsable(candidate, fingerprint)) {
+        markTransferTrace(trace || candidate.trace, "summary reused", {
+          source: candidate.summary ? "completed warm summary" : "warm summary promise",
+          chars: summary.length
+        });
         clearWarmSummary();
         return summary;
       }
     }
 
     if (candidate) clearWarmSummary();
-    return summarizeWithBackend(conversationText);
+    return summarizeWithBackend(conversationText, trace);
   }
 
   function startSheetOpenWarmSummary() {
     if (isRunning) return;
-    return startWarmSummary();
+    const trace = createTransferTrace(null, "Cap-Context button");
+    activeTransferTrace = trace;
+    markTransferTrace(trace, "click", { source: "Cap-Context button" });
+    const record = startWarmSummary(null, trace);
+    if (!record) activeTransferTrace = null;
+    return record;
   }
 
-  function startWarmSummary(conversationText = null) {
+  function startWarmSummary(conversationText = null, trace = null) {
     if (isRunning) return;
 
     if (!conversationText) {
       try {
+        markTransferTrace(trace, "capture start");
         conversationText = scrapeConversationText();
+        markTransferTrace(trace, "capture done", { chars: conversationText.length });
       } catch (error) {
         logTransferDebug(`Warm summary skipped. ${error.message}`);
         return null;
@@ -453,10 +496,11 @@
       startedAt: now,
       expiresAt: now + WARM_SUMMARY_TTL_MS,
       summary: null,
-      promise: null
+      promise: null,
+      trace
     };
 
-    record.promise = summarizeWithBackend(conversationText)
+    record.promise = summarizeWithBackend(conversationText, trace)
       .then((summary) => {
         if (warmSummary === record && Date.now() <= record.expiresAt) {
           record.summary = summary;
@@ -478,11 +522,11 @@
     return record;
   }
 
-  function ensureWarmSummaryForConversation(conversationText) {
+  function ensureWarmSummaryForConversation(conversationText, trace = null) {
     const fingerprint = getConversationFingerprint(conversationText);
     if (isWarmSummaryUsable(warmSummary, fingerprint)) return warmSummary;
 
-    return startWarmSummary(conversationText);
+    return startWarmSummary(conversationText, trace);
   }
 
   function isWarmSummaryUsable(record, fingerprint) {
@@ -503,36 +547,101 @@
     return `${cleaned.length}:${cleaned.slice(0, 180)}:${cleaned.slice(-220)}`;
   }
 
-  function prepareDestinationTab(destinationId) {
+  function prepareDestinationTab(destinationId, trace = null) {
+    markTransferTrace(trace, "tab open start", { destination: destinationId });
     return notifyBackground({
       type: "PREPARE_DESTINATION",
-      destination: destinationId
+      destination: destinationId,
+      transferId: trace?.id || null
+    }).then((response) => {
+      markTransferTrace(trace, "tab open response", {
+        tabId: response?.tabId || null,
+        background: response?.timing || null
+      });
+      return response;
     }).catch((error) => {
       logTransferDebug(`Destination pre-open failed; falling back to normal transfer. ${error.message}`);
       return null;
     });
   }
 
-  function createTransferTiming(destinationId) {
+  function createTransferTrace(destinationId, source) {
+    transferTraceSequence += 1;
+    const id = `${Date.now().toString(36)}-${transferTraceSequence}`;
     return {
+      id,
+      source,
       destinationId,
       startedAt: getNow(),
-      marks: []
+      lastAt: null,
+      marks: [],
+      completed: false
     };
   }
 
-  function markTransferTiming(timing, label) {
-    if (!timing) return;
-    timing.marks.push({ label, at: getNow() });
+  function markTransferTrace(trace, label, detail = null) {
+    if (!trace) return;
+    const now = getNow();
+    const previous = trace.lastAt || trace.startedAt;
+    const mark = {
+      label,
+      at: now,
+      deltaMs: Math.round(now - previous),
+      totalMs: Math.round(now - trace.startedAt),
+      detail
+    };
+    trace.lastAt = now;
+    trace.marks.push(mark);
+    logTransferPerf(trace.id, label, {
+      totalMs: mark.totalMs,
+      deltaMs: mark.deltaMs,
+      ...formatTraceDetail(detail)
+    });
   }
 
-  function logTransferTiming(timing) {
-    if (!timing?.marks?.length) return;
-    const parts = timing.marks.map((mark, index) => {
-      const previous = index === 0 ? timing.startedAt : timing.marks[index - 1].at;
-      return `${mark.label} +${Math.round(mark.at - previous)}ms`;
+  function finishTransferTrace(trace) {
+    if (!trace || trace.completed) return;
+    trace.completed = true;
+    const rows = trace.marks.map((mark) => ({
+      step: mark.label,
+      deltaMs: mark.deltaMs,
+      totalMs: mark.totalMs,
+      detail: JSON.stringify(formatTraceDetail(mark.detail))
+    }));
+    console.debug(`[Context Generator Perf ${trace.id}] total ${Math.round(getNow() - trace.startedAt)}ms`, rows);
+    if (activeTransferTrace === trace) {
+      activeTransferTrace = null;
+    }
+  }
+
+  function formatTraceDetail(detail) {
+    if (!detail || typeof detail !== "object") return {};
+    return Object.fromEntries(Object.entries(detail).filter(([, value]) => value !== undefined && value !== null));
+  }
+
+  function logTransferPerf(id, label, detail = null) {
+    const suffix = detail ? ` ${JSON.stringify(formatTraceDetail(detail))}` : "";
+    console.debug(`[Context Generator Perf ${id || "no-trace"}] ${label}${suffix}`);
+  }
+
+  function getActiveTransferTraceForConversation(conversationText) {
+    const fingerprint = getConversationFingerprint(conversationText);
+    if (isWarmSummaryUsable(warmSummary, fingerprint) && warmSummary.trace) {
+      return warmSummary.trace;
+    }
+    if (activeTransferTrace) return activeTransferTrace;
+    return createTransferTrace(null, "destination tile");
+  }
+
+  function appendBackgroundMarks(trace, marks = []) {
+    if (!trace || !Array.isArray(marks)) return;
+    marks.forEach((mark) => {
+      logTransferPerf(trace.id, `background: ${mark.label}`, {
+        totalMs: mark.totalMs,
+        deltaMs: mark.deltaMs,
+        ...(mark.detail || {})
+      });
     });
-    logTransferDebug(`Transfer timing (${timing.destinationId}): ${parts.join(" | ")}`);
   }
 
   function getNow() {
@@ -542,7 +651,7 @@
   async function notifyBackground(message) {
     let response;
     try {
-      response = await chrome.runtime.sendMessage(message);
+      response = await extensionRuntime.sendMessage(message);
     } catch (error) {
       if (isExtensionContextInvalidated(error)) {
         throw new Error("Extension was reloaded. Refresh this AI tab once, then try Cap-Context again.");
@@ -558,9 +667,19 @@
 
   function getRuntimeAssetBaseUrl() {
     try {
-      return globalThis.chrome?.runtime?.getURL?.("") || "";
+      return extensionRuntime?.getURL?.("") || "";
     } catch (_error) {
       return "";
+    }
+  }
+
+  function getExtensionRuntime() {
+    try {
+      const runtime = globalThis.chrome?.runtime;
+      if (!runtime?.onMessage?.addListener || !runtime?.sendMessage) return null;
+      return runtime;
+    } catch (_error) {
+      return null;
     }
   }
 
@@ -594,7 +713,7 @@
     return platform ? { ...platform, id: platformId } : null;
   }
 
-  async function pasteIntoPlatform(text, destinationId) {
+  async function pasteIntoPlatform(text, destinationId, transferId = null) {
     const destination = getPlatform(destinationId) || currentPlatform;
     if (!destination) {
       throw new Error("This AI destination is not supported.");
@@ -607,7 +726,7 @@
     const trimmedText = text.trim();
 
     if (destination.retryPaste) {
-      await pasteWithRetry(trimmedText, destination);
+      await pasteWithRetry(trimmedText, destination, transferId);
       return;
     }
 
@@ -617,6 +736,7 @@
       throw new Error(`${destination.name} message input element could not be found.`);
     }
 
+    logTransferPerf(transferId, "destination input ready", { destination: destination.name });
     setEditorText(input, trimmedText);
 
     if (!editorContainsText(input, trimmedText)) {
@@ -627,15 +747,23 @@
     input.focus?.();
   }
 
-  async function pasteWithRetry(text, destination) {
+  async function pasteWithRetry(text, destination, transferId = null) {
     const startedAt = Date.now();
     let sawInput = false;
+    let loggedInputReady = false;
     let lastError = null;
 
     while (Date.now() - startedAt <= PASTE_RETRY_TIMEOUT_MS) {
       const input = findReadyPlatformInput(destination);
       if (input) {
         sawInput = true;
+        if (!loggedInputReady) {
+          loggedInputReady = true;
+          logTransferPerf(transferId, "destination input ready", {
+            destination: destination.name,
+            readyMs: Date.now() - startedAt
+          });
+        }
 
         try {
           setEditorText(input, text);
@@ -2260,22 +2388,30 @@
     hideDestinationSheet();
     if (isRunning) return;
 
+    const trace = activeTransferTrace || warmSummary?.trace || createTransferTrace(destinationId, "destination tile");
+    trace.destinationId = destinationId;
+    markTransferTrace(trace, "destination click", { destination: destinationId });
+
     let conversationText;
     try {
+      markTransferTrace(trace, "capture start");
       conversationText = await scrapeConversationTextWhenReady();
+      markTransferTrace(trace, "capture done", { chars: conversationText.length });
     } catch (error) {
       clearWarmSummary();
+      markTransferTrace(trace, `failed: ${error.message}`);
+      finishTransferTrace(trace);
       showErrorOverlay(error.message);
       return;
     }
 
-    const warmSummaryRecord = ensureWarmSummaryForConversation(conversationText);
+    const warmSummaryRecord = ensureWarmSummaryForConversation(conversationText, trace);
     isRunning = true;
     clearRunningResetTimer();
     runningResetTimer = setTimeout(resetRunningFlag, RUNNING_AUTO_RESET_MS);
     showOverlay(destinationId);
-    const preparedDestinationPromise = prepareDestinationTab(destinationId);
-    runContextFlow(destinationId, preparedDestinationPromise, warmSummaryRecord, conversationText);
+    const preparedDestinationPromise = prepareDestinationTab(destinationId, trace);
+    runContextFlow(destinationId, preparedDestinationPromise, warmSummaryRecord, conversationText, trace);
   }
 
   function ensureFloatingOverlay() {

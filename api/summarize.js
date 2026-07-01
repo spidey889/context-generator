@@ -1,6 +1,8 @@
 const MISTRAL_MAX_ATTEMPTS = 2;
 const MISTRAL_RETRY_INTERVAL_MS = 450;
 const MISTRAL_TIMEOUT_MS = 18000;
+const MISTRAL_MODEL = process.env.MISTRAL_MODEL || "ministral-3b-2512";
+const MISTRAL_MAX_TOKENS = Number(process.env.MISTRAL_MAX_TOKENS || 650);
 
 module.exports = async function handler(req, res) {
   res.setHeader("Access-Control-Allow-Origin", "*");
@@ -35,7 +37,10 @@ module.exports = async function handler(req, res) {
     return res.status(400).json({ error: "Missing conversation text" });
   }
 
+  const startedAt = Date.now();
+
   try {
+    const mistralStartedAt = Date.now();
     const mistralResponse = await fetchWithRetry("https://api.mistral.ai/v1/chat/completions", {
       method: "POST",
       headers: {
@@ -43,33 +48,23 @@ module.exports = async function handler(req, res) {
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        model: "mistral-small-latest",
+        model: MISTRAL_MODEL,
         temperature: 0.2,
-        max_tokens: 900,
+        max_tokens: MISTRAL_MAX_TOKENS,
         messages: [
           {
             role: "system",
-            content: `Summarize conversations for continuation by another AI assistant. Return the summary in exactly this format:
-╔══════════════════════════════════════════╗
-║         CONTEXT CARRY — READY TO PASTE        ║
-╚══════════════════════════════════════════╝
-🧠 WHO I AM
-[2-3 lines: user's name if mentioned, what they're building, their background/role]
-🎯 WHAT WE WERE DOING
-[2-4 lines: the main goal or task of this conversation]
-📍 WHERE WE LEFT OFF
-[2-3 lines: the exact point the conversation stopped — last decision made, last thing discussed]
-✅ DECISIONS MADE
-[Bullet list of every important decision, choice, or conclusion reached]
-⚠️ OPEN QUESTIONS
-[Bullet list of things still unresolved or mid-discussion — if none, write "None"]
-📦 KEY CONTEXT
-[Any important details the new AI must know to help properly — tools being used, constraints, preferences, style, tone, etc.]
-🔁 NEXT STEP
-[One clear sentence: exactly what the user needs to do or ask next]
----
-💬 PASTE THIS AT THE TOP OF YOUR NEW CHAT
-Then write: "Continue from where we left off."`,
+            content: `Summarize conversations for continuation by another AI assistant.
+Return only this compact, information-dense structure:
+CONTEXT CARRY - READY TO PASTE
+WHO I AM: 2-3 lines if known.
+WHAT WE WERE DOING: 2-4 specific lines.
+WHERE WE LEFT OFF: 2-3 lines with the last decision/action.
+DECISIONS MADE: bullets, only important decisions.
+OPEN QUESTIONS: bullets, or "None".
+KEY CONTEXT: constraints, tools, repo paths, preferences, exact strings, gotchas.
+NEXT STEP: one clear sentence.
+Keep it rich enough to continue the work, but under 350 words. No intro.`,
           },
           {
             role: "user",
@@ -78,6 +73,7 @@ Then write: "Continue from where we left off."`,
         ],
       }),
     });
+    const mistralMs = Date.now() - mistralStartedAt;
 
     if (!mistralResponse.ok) {
       const details = await mistralResponse.text();
@@ -92,7 +88,17 @@ Then write: "Continue from where we left off."`,
       return res.status(502).json({ error: "Mistral returned an empty summary" });
     }
 
-    return res.status(200).json({ summary });
+    return res.status(200).json({
+      summary,
+      timing: {
+        totalMs: Date.now() - startedAt,
+        mistralMs,
+        model: MISTRAL_MODEL,
+        maxTokens: MISTRAL_MAX_TOKENS,
+        inputChars: conversation.length,
+        outputChars: summary.length
+      }
+    });
   } catch (error) {
     console.error("Summarize error:", error);
     return res.status(500).json({ error: "Unexpected summarization error" });
