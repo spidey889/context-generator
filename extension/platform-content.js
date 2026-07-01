@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-07-01-subtle-logo-color";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-07-01-mascot-polish";
   const BUBBLE_ID = "context-generator-bubble";
   const OVERLAY_ID = "context-generator-overlay";
   const ONBOARDING_ID = "context-generator-onboarding";
@@ -24,9 +24,9 @@
   const DEFAULT_MAX_COMPOSER_WIDTH = 1320;
   const DESTINATION_TITLE_TEXT = "Where to continue?";
   const DESTINATION_HELPER_TEXT = "Context goes straight into the input box";
-  const ONBOARDING_STORAGE_KEY = "context-generator-onboarding-dismissed-v1";
-  const ONBOARDING_TITLE_TEXT = "Tiny bridge, big memory";
-  const ONBOARDING_BODY_TEXT = "Tap the bubble when this chat deserves a carry-on. I'll pack the useful bits into another AI's input, ready for your review.";
+  const ONBOARDING_STORAGE_KEY = "context-generator-onboarding-dismissed-v2";
+  const ONBOARDING_TITLE_TEXT = "Transfer chat context";
+  const ONBOARDING_BODY_TEXT = "From this button.";
   const ONBOARDING_SHOW_DELAY_MS = 650;
   const NO_CONVERSATION_ERROR_TITLE = "Nothing to carry yet";
   const NO_CONVERSATION_ERROR_MESSAGE = "Chat is empty. Send one message first, then I'll pack the context.";
@@ -1069,34 +1069,17 @@
         }
       }
 
-      @keyframes contextGeneratorGuideBob {
-        from {
-          transform: translate3d(0, -1px, 0) rotate(-2deg);
-        }
-        to {
-          transform: translate3d(0, 2px, 0) rotate(2deg);
-        }
-      }
-
-      @keyframes contextGeneratorGuidePoint {
-        from {
-          transform: translate3d(0, 0, 0) rotate(-10deg);
-        }
-        to {
-          transform: translate3d(4px, 0, 0) rotate(-7deg);
-        }
-      }
-
       #${ONBOARDING_ID} {
         position: fixed;
         z-index: 2147483646;
-        width: min(268px, calc(100vw - 28px));
+        width: min(286px, calc(100vw - 28px));
         box-sizing: border-box;
         display: none;
         align-items: center;
-        gap: 10px;
-        padding: 10px 10px 10px 11px;
-        border-radius: 16px;
+        gap: 9px;
+        min-height: 106px;
+        padding: 10px 38px 10px 11px;
+        border-radius: 18px;
         border: 1px solid rgba(255,255,255,0.13);
         background: linear-gradient(145deg, #101010 0%, #15151d 62%, #080808 100%);
         color: #ffffff;
@@ -1105,105 +1088,348 @@
         animation: contextGeneratorOnboardingIn 0.22s cubic-bezier(0.16, 1, 0.3, 1) both;
       }
 
-      .context-generator-onboarding-guide {
+      @keyframes contextGeneratorPuppetFloat {
+        0%, 100% {
+          transform: translate3d(0, 0, 0) rotate(-1deg);
+        }
+        50% {
+          transform: translate3d(0, -3px, 0) rotate(1deg);
+        }
+      }
+
+      @keyframes contextGeneratorPuppetPoint {
+        0%, 100% {
+          transform: rotate(-12deg) translate3d(0, 0, 0);
+        }
+        50% {
+          transform: rotate(-5deg) translate3d(5px, -1px, 0);
+        }
+      }
+
+      @keyframes contextGeneratorPuppetWave {
+        0%, 100% {
+          transform: rotate(28deg);
+        }
+        50% {
+          transform: rotate(34deg);
+        }
+      }
+
+      @keyframes contextGeneratorPuppetBlink {
+        0%, 88%, 92%, 100% {
+          transform: scaleY(1);
+        }
+        90% {
+          transform: scaleY(0.18);
+        }
+      }
+
+      .context-generator-onboarding-puppet-wrap {
         position: relative;
-        width: 42px;
-        height: 42px;
+        width: 82px;
+        height: 96px;
         flex: 0 0 auto;
-        border-radius: 16px 16px 15px 9px;
-        background: radial-gradient(circle at 28% 22%, rgba(255,255,255,0.9), rgba(255,255,255,0.18) 18%, transparent 28%), linear-gradient(145deg, #f7f4ee, #c9fff0 56%, #9bd8ff);
-        box-shadow: 0 8px 18px rgba(0,0,0,0.22), inset 0 1px 0 rgba(255,255,255,0.7);
-        animation: contextGeneratorGuideBob 1.25s ease-in-out infinite alternate;
+        transform-origin: 50% 82%;
       }
 
-      .context-generator-onboarding-eye {
+      #${ONBOARDING_ID}[data-context-generator-point="right"] .context-generator-onboarding-puppet-wrap {
+        order: 2;
+        margin-left: 2px;
+      }
+
+      #${ONBOARDING_ID}[data-context-generator-point="left"] .context-generator-onboarding-puppet-wrap {
+        order: 0;
+        margin-right: 2px;
+        transform: scaleX(-1);
+      }
+
+      .context-generator-puppet {
         position: absolute;
-        top: 16px;
-        width: 4px;
-        height: 4px;
-        border-radius: 999px;
-        background: #161616;
+        left: 3px;
+        top: 1px;
+        width: 78px;
+        height: 92px;
+        filter: drop-shadow(0 8px 12px rgba(0,0,0,0.22));
+        animation: contextGeneratorPuppetFloat 2.15s ease-in-out infinite;
       }
 
-      .context-generator-onboarding-eye-left {
+      .context-generator-puppet-shadow {
+        position: absolute;
+        left: 16px;
+        bottom: 0;
+        width: 48px;
+        height: 8px;
+        border-radius: 999px;
+        background: rgba(0,0,0,0.24);
+        filter: blur(2px);
+      }
+
+      .context-generator-puppet-body {
+        position: absolute;
+        left: 25px;
+        top: 44px;
+        width: 31px;
+        height: 34px;
+        border-radius: 15px 15px 13px 13px;
+        background: linear-gradient(145deg, #343640 0%, #191a20 68%, #0b0c11 100%);
+        box-shadow: inset 0 1px 0 rgba(255,255,255,0.28), inset -6px -10px 14px rgba(0,0,0,0.26), 0 8px 16px rgba(0,0,0,0.2);
+      }
+
+      .context-generator-puppet-body::after {
+        content: "";
+        position: absolute;
+        left: 13px;
+        top: 5px;
+        width: 6px;
+        height: 21px;
+        border-radius: 999px;
+        background: linear-gradient(180deg, #7ff5d5, #26baa1);
+        box-shadow: 0 0 10px rgba(75,240,203,0.18);
+      }
+
+      .context-generator-puppet-neck {
+        position: absolute;
+        left: 35px;
+        top: 37px;
+        width: 11px;
+        height: 11px;
+        border-radius: 0 0 8px 8px;
+        background: linear-gradient(180deg, #f7c9aa, #e7a77f);
+      }
+
+      .context-generator-puppet-head {
+        position: absolute;
+        left: 18px;
+        top: 7px;
+        width: 44px;
+        height: 38px;
+        border-radius: 48% 52% 44% 46%;
+        background: radial-gradient(circle at 32% 24%, rgba(255,255,255,0.78), transparent 16%), linear-gradient(145deg, #ffe2c9 0%, #f3b98f 100%);
+        box-shadow: inset -6px -8px 12px rgba(147,78,47,0.14), inset 1px 1px 0 rgba(255,255,255,0.44), 0 6px 12px rgba(0,0,0,0.2);
+      }
+
+      .context-generator-puppet-hair {
+        position: absolute;
+        left: 2px;
+        top: -5px;
+        width: 39px;
+        height: 18px;
+        border-radius: 999px 999px 12px 10px;
+        background: linear-gradient(145deg, #50525d 0%, #202128 48%, #0d0e13 100%);
+        box-shadow: inset 6px 4px 7px rgba(255,255,255,0.08), inset -5px -5px 8px rgba(0,0,0,0.32);
+        transform: rotate(-5deg);
+      }
+
+      .context-generator-puppet-hair::after {
+        content: "";
+        position: absolute;
+        right: -4px;
+        top: 8px;
+        width: 13px;
+        height: 15px;
+        border-radius: 999px 999px 8px 999px;
+        background: linear-gradient(145deg, #25262d, #0f1015);
+        transform: rotate(18deg);
+      }
+
+      .context-generator-puppet-strand {
+        position: absolute;
+        top: 9px;
+        width: 12px;
+        height: 16px;
+        border-radius: 999px 999px 4px 999px;
+        background: linear-gradient(145deg, #383a43, #101116);
+        transform-origin: 50% 0;
+      }
+
+      .context-generator-puppet-strand-one {
+        left: 6px;
+        transform: rotate(16deg);
+      }
+
+      .context-generator-puppet-strand-two {
+        left: 18px;
+        top: 8px;
+        height: 15px;
+        transform: rotate(-4deg);
+      }
+
+      .context-generator-puppet-strand-three {
+        left: 29px;
+        top: 9px;
+        height: 13px;
+        transform: rotate(-22deg);
+      }
+
+      .context-generator-puppet-eye {
+        position: absolute;
+        top: 18px;
+        width: 5px;
+        height: 6px;
+        border-radius: 999px;
+        background: radial-gradient(circle at 35% 28%, #ffffff 0 1.2px, #17171d 1.6px);
+        transform-origin: 50% 50%;
+        box-shadow: 0 1px 0 rgba(255,255,255,0.16);
+        animation: contextGeneratorPuppetBlink 5.2s ease-in-out infinite;
+      }
+
+      .context-generator-puppet-eye-left {
         left: 13px;
       }
 
-      .context-generator-onboarding-eye-right {
-        left: 25px;
+      .context-generator-puppet-eye-right {
+        left: 27px;
       }
 
-      .context-generator-onboarding-smile {
+      .context-generator-puppet-brow {
+        position: absolute;
+        top: 14px;
+        width: 9px;
+        height: 2px;
+        border-radius: 999px;
+        background: rgba(31,26,25,0.54);
+      }
+
+      .context-generator-puppet-brow-left {
+        left: 11px;
+        transform: rotate(-9deg);
+      }
+
+      .context-generator-puppet-brow-right {
+        left: 25px;
+        transform: rotate(7deg);
+      }
+
+      .context-generator-puppet-cheek {
+        position: absolute;
+        top: 25px;
+        width: 8px;
+        height: 4px;
+        border-radius: 999px;
+        background: rgba(255,110,128,0.22);
+      }
+
+      .context-generator-puppet-cheek-left {
+        left: 7px;
+      }
+
+      .context-generator-puppet-cheek-right {
+        right: 7px;
+      }
+
+      .context-generator-puppet-smile {
         position: absolute;
         left: 16px;
-        top: 24px;
-        width: 10px;
-        height: 5px;
-        border-bottom: 2px solid rgba(22,22,22,0.82);
+        top: 27px;
+        width: 12px;
+        height: 6px;
+        border-bottom: 2px solid rgba(23,23,29,0.72);
         border-radius: 0 0 999px 999px;
       }
 
-      .context-generator-onboarding-hand {
+      .context-generator-puppet-arm {
         position: absolute;
-        top: 18px;
-        right: -20px;
-        width: 28px;
+        height: 8px;
+        border-radius: 999px;
+        background: linear-gradient(90deg, #f0b58b, #ffe2c7 62%, #fff3e2);
+        box-shadow: inset 0 1px 0 rgba(255,255,255,0.44), 0 3px 7px rgba(0,0,0,0.16);
+      }
+
+      .context-generator-puppet-arm-back {
+        left: 9px;
+        top: 57px;
+        width: 29px;
+        transform-origin: 27px 50%;
+        transform: rotate(28deg);
+        animation: contextGeneratorPuppetWave 1.7s ease-in-out infinite;
+      }
+
+      .context-generator-puppet-arm-point {
+        left: 48px;
+        top: 49px;
+        width: 41px;
+        transform-origin: 4px 50%;
+        animation: contextGeneratorPuppetPoint 0.95s ease-in-out infinite;
+      }
+
+      .context-generator-puppet-hand {
+        position: absolute;
+        right: -5px;
+        top: -3px;
+        width: 13px;
+        height: 13px;
+        border-radius: 999px;
+        background: radial-gradient(circle at 35% 30%, #ffffff, #ffe1c5 74%);
+        box-shadow: inset -2px -2px 4px rgba(176,92,54,0.1);
+      }
+
+      .context-generator-puppet-finger {
+        position: absolute;
+        right: -13px;
+        top: 3px;
+        width: 18px;
+        height: 5px;
+        border-radius: 999px;
+        background: linear-gradient(90deg, #ffe1c5, #fff4e7);
+        box-shadow: 4px 0 9px rgba(255,255,255,0.18);
+      }
+
+      .context-generator-puppet-rest-hand {
+        position: absolute;
+        left: -5px;
+        top: -3px;
+        width: 12px;
+        height: 12px;
+        border-radius: 999px;
+        background: radial-gradient(circle at 35% 30%, #ffffff, #ffe1c5 74%);
+        box-shadow: inset -2px -2px 4px rgba(176,92,54,0.1);
+      }
+
+      .context-generator-puppet-leg {
+        position: absolute;
+        top: 74px;
+        width: 8px;
+        height: 15px;
+        border-radius: 999px;
+        background: linear-gradient(180deg, #22242c, #0f1015);
+      }
+
+      .context-generator-puppet-leg-left {
+        left: 30px;
+        transform: rotate(6deg);
+      }
+
+      .context-generator-puppet-leg-right {
+        left: 44px;
+        transform: rotate(-6deg);
+      }
+
+      .context-generator-puppet-shoe {
+        position: absolute;
+        left: -5px;
+        bottom: -3px;
+        width: 17px;
         height: 7px;
-        border-radius: 999px;
-        background: linear-gradient(90deg, #f7f4ee, #ffffff);
-        box-shadow: 0 3px 8px rgba(0,0,0,0.18);
-        transform-origin: 3px 50%;
-        animation: contextGeneratorGuidePoint 0.82s ease-in-out infinite alternate;
-      }
-
-      .context-generator-onboarding-hand::after {
-        content: "";
-        position: absolute;
-        right: -3px;
-        top: -2px;
-        width: 9px;
-        height: 9px;
-        border-radius: 999px;
-        background: #ffffff;
-      }
-
-      #${ONBOARDING_ID}[data-context-generator-point="left"] .context-generator-onboarding-guide {
-        order: 0;
-      }
-
-      #${ONBOARDING_ID}[data-context-generator-point="left"] .context-generator-onboarding-hand {
-        left: -20px;
-        right: auto;
-        transform-origin: 25px 50%;
-        animation-name: contextGeneratorGuidePointLeft;
-      }
-
-      @keyframes contextGeneratorGuidePointLeft {
-        from {
-          transform: translate3d(0, 0, 0) rotate(190deg);
-        }
-        to {
-          transform: translate3d(-4px, 0, 0) rotate(187deg);
-        }
-      }
-
-      #${ONBOARDING_ID}[data-context-generator-point="right"] .context-generator-onboarding-guide {
-        order: 2;
+        border-radius: 999px 999px 7px 7px;
+        background: linear-gradient(180deg, #3d4049, #111217);
+        box-shadow: inset 0 1px 0 rgba(255,255,255,0.16);
       }
 
       .context-generator-onboarding-copy {
         min-width: 0;
         flex: 1;
+        order: 1;
       }
 
       .context-generator-onboarding-title {
         font-family: Georgia, 'Times New Roman', serif;
-        font-size: 13px;
+        font-size: 12.4px;
         font-weight: 600;
         line-height: 1.12;
         letter-spacing: 0;
         color: #ffffff;
         text-rendering: geometricPrecision;
+        white-space: nowrap;
       }
 
       .context-generator-onboarding-body {
@@ -1216,8 +1442,9 @@
       }
 
       .context-generator-onboarding-dismiss {
-        flex: 0 0 auto;
-        align-self: flex-start;
+        position: absolute;
+        right: 8px;
+        top: 8px;
         width: 24px;
         height: 24px;
         border-radius: 999px;
@@ -1239,8 +1466,9 @@
 
       @media (prefers-reduced-motion: reduce) {
         #${ONBOARDING_ID},
-        .context-generator-onboarding-guide,
-        .context-generator-onboarding-hand {
+        .context-generator-puppet,
+        .context-generator-puppet-arm,
+        .context-generator-puppet-eye {
           animation: none;
         }
       }
@@ -1257,22 +1485,75 @@
     nudge.setAttribute("role", "note");
     nudge.setAttribute("aria-live", "polite");
 
-    const guide = document.createElement("div");
-    guide.className = "context-generator-onboarding-guide";
-    guide.setAttribute("aria-hidden", "true");
+    const puppetWrap = document.createElement("div");
+    puppetWrap.className = "context-generator-onboarding-puppet-wrap";
+    puppetWrap.setAttribute("aria-hidden", "true");
 
-    const leftEye = document.createElement("span");
-    leftEye.className = "context-generator-onboarding-eye context-generator-onboarding-eye-left";
-    const rightEye = document.createElement("span");
-    rightEye.className = "context-generator-onboarding-eye context-generator-onboarding-eye-right";
-    const smile = document.createElement("span");
-    smile.className = "context-generator-onboarding-smile";
+    const puppet = document.createElement("div");
+    puppet.className = "context-generator-puppet";
+
+    const shadow = document.createElement("span");
+    shadow.className = "context-generator-puppet-shadow";
+    const backArm = document.createElement("span");
+    backArm.className = "context-generator-puppet-arm context-generator-puppet-arm-back";
+    const restHand = document.createElement("span");
+    restHand.className = "context-generator-puppet-rest-hand";
+    backArm.appendChild(restHand);
+    const bodyShape = document.createElement("span");
+    bodyShape.className = "context-generator-puppet-body";
+    const neck = document.createElement("span");
+    neck.className = "context-generator-puppet-neck";
+
+    const head = document.createElement("span");
+    head.className = "context-generator-puppet-head";
+    [
+      "context-generator-puppet-hair",
+      "context-generator-puppet-strand context-generator-puppet-strand-one",
+      "context-generator-puppet-strand context-generator-puppet-strand-two",
+      "context-generator-puppet-strand context-generator-puppet-strand-three",
+      "context-generator-puppet-brow context-generator-puppet-brow-left",
+      "context-generator-puppet-brow context-generator-puppet-brow-right",
+      "context-generator-puppet-eye context-generator-puppet-eye-left",
+      "context-generator-puppet-eye context-generator-puppet-eye-right",
+      "context-generator-puppet-cheek context-generator-puppet-cheek-left",
+      "context-generator-puppet-cheek context-generator-puppet-cheek-right",
+      "context-generator-puppet-smile"
+    ].forEach((className) => {
+      const part = document.createElement("span");
+      part.className = className;
+      head.appendChild(part);
+    });
+
+    const pointArm = document.createElement("span");
+    pointArm.className = "context-generator-puppet-arm context-generator-puppet-arm-point";
     const hand = document.createElement("span");
-    hand.className = "context-generator-onboarding-hand";
-    guide.appendChild(leftEye);
-    guide.appendChild(rightEye);
-    guide.appendChild(smile);
-    guide.appendChild(hand);
+    hand.className = "context-generator-puppet-hand";
+    const finger = document.createElement("span");
+    finger.className = "context-generator-puppet-finger";
+    pointArm.appendChild(hand);
+    pointArm.appendChild(finger);
+
+    const leftLeg = document.createElement("span");
+    leftLeg.className = "context-generator-puppet-leg context-generator-puppet-leg-left";
+    const leftShoe = document.createElement("span");
+    leftShoe.className = "context-generator-puppet-shoe";
+    leftLeg.appendChild(leftShoe);
+
+    const rightLeg = document.createElement("span");
+    rightLeg.className = "context-generator-puppet-leg context-generator-puppet-leg-right";
+    const rightShoe = document.createElement("span");
+    rightShoe.className = "context-generator-puppet-shoe";
+    rightLeg.appendChild(rightShoe);
+
+    puppet.appendChild(shadow);
+    puppet.appendChild(backArm);
+    puppet.appendChild(leftLeg);
+    puppet.appendChild(rightLeg);
+    puppet.appendChild(bodyShape);
+    puppet.appendChild(neck);
+    puppet.appendChild(head);
+    puppet.appendChild(pointArm);
+    puppetWrap.appendChild(puppet);
 
     const copy = document.createElement("div");
     copy.className = "context-generator-onboarding-copy";
@@ -1296,7 +1577,7 @@
       dismissOnboardingNudge();
     });
 
-    nudge.appendChild(guide);
+    nudge.appendChild(puppetWrap);
     nudge.appendChild(copy);
     nudge.appendChild(dismiss);
     nudge.addEventListener("click", (event) => event.stopPropagation());
@@ -1342,8 +1623,8 @@
 
     const margin = 12;
     const gap = 14;
-    const nudgeWidth = Math.min(268, window.innerWidth - margin * 2);
-    const nudgeHeight = nudge.offsetHeight || 92;
+    const nudgeWidth = Math.min(286, window.innerWidth - margin * 2);
+    const nudgeHeight = nudge.offsetHeight || 106;
     const canSitLeft = bubbleRect.left - gap - nudgeWidth >= margin;
     const left = canSitLeft
       ? bubbleRect.left - gap - nudgeWidth
@@ -1427,12 +1708,12 @@
 
       @keyframes contextGeneratorTileAuraDrift {
         from {
-          transform: translate3d(-5%, 0, 0) scaleX(0.98);
-          filter: blur(10px);
+          transform: translate3d(-2px, 0, 0) scaleX(0.98);
+          filter: blur(9px);
         }
         to {
-          transform: translate3d(1.5%, 0, 0) scaleX(1.03);
-          filter: blur(12px);
+          transform: translate3d(3px, 0, 0) scaleX(1.04);
+          filter: blur(11px);
         }
       }
 
@@ -1661,7 +1942,7 @@
         button.style.background = "linear-gradient(180deg, #151515 0%, #0d0d0d 58%, #050505 100%)";
         button.style.borderColor = `${option.accent}72`;
         button.style.boxShadow = `inset 0 1px 0 rgba(255,255,255,0.1), inset 0 -1px 0 rgba(0,0,0,0.58), 0 0 0 1px ${option.accent}24, -9px 0 22px ${option.accent}12, 0 8px 18px rgba(0,0,0,0.3)`;
-        button.style.setProperty("--context-generator-shine-opacity", "0.13");
+        button.style.setProperty("--context-generator-shine-opacity", "0.16");
         aura.style.left = "-2px";
         aura.style.right = "12px";
         aura.style.width = "auto";
