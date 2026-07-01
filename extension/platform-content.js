@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-07-02-pill-border-tile-motion";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-07-02-pill-hover-border";
   const BUBBLE_ID = "context-generator-bubble";
   const OVERLAY_ID = "context-generator-overlay";
   const ONBOARDING_ID = "context-generator-onboarding";
@@ -1911,10 +1911,10 @@
       "height:19px",
       "padding:0 7px",
       "border-radius:999px",
-      "border:1px solid rgba(255,255,255,0.24)",
-      "background:rgba(255,255,255,0.052)",
-      "box-shadow:0 0 0 1px rgba(0,0,0,0.28), 0 0 12px rgba(255,255,255,0.11), inset 0 1px 0 rgba(255,255,255,0.16)",
-      "color:rgba(255,255,255,0.74)",
+      "border:1px solid transparent",
+      "background:rgba(255,255,255,0.035)",
+      "box-shadow:none",
+      "color:rgba(255,255,255,0.68)",
       "font-size:10px",
       "font-weight:500",
       "line-height:19px",
@@ -1925,6 +1925,22 @@
       "outline:0",
       "transition:border-color 0.14s ease, background 0.14s ease, box-shadow 0.14s ease, color 0.14s ease"
     ].join(";");
+    const setBadgeActive = () => {
+      badge.style.borderColor = "rgba(255,255,255,0.24)";
+      badge.style.background = "rgba(255,255,255,0.052)";
+      badge.style.boxShadow = "0 0 0 1px rgba(0,0,0,0.28), 0 0 12px rgba(255,255,255,0.11), inset 0 1px 0 rgba(255,255,255,0.16)";
+      badge.style.color = "rgba(255,255,255,0.74)";
+    };
+    const setBadgeIdle = () => {
+      badge.style.borderColor = "transparent";
+      badge.style.background = "rgba(255,255,255,0.035)";
+      badge.style.boxShadow = "none";
+      badge.style.color = "rgba(255,255,255,0.68)";
+    };
+    badge.addEventListener("mouseenter", setBadgeActive);
+    badge.addEventListener("mouseleave", setBadgeIdle);
+    badge.addEventListener("focus", setBadgeActive);
+    badge.addEventListener("blur", setBadgeIdle);
     badge.addEventListener("click", (event) => {
       event.preventDefault();
       event.stopPropagation();
