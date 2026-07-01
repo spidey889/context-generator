@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-07-01-onboarding-nudge";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-07-01-ambient-tile-color";
   const BUBBLE_ID = "context-generator-bubble";
   const OVERLAY_ID = "context-generator-overlay";
   const ONBOARDING_ID = "context-generator-onboarding";
@@ -1399,16 +1399,16 @@
     style.id = DESTINATION_SHEET_STYLE_ID;
     style.textContent = `
       @keyframes contextGeneratorTileShine {
-        0%, 16% {
+        0%, 30% {
           opacity: 0;
           transform: translate3d(-150%, 0, 0) skewX(-18deg);
         }
-        24% {
-          opacity: 0.22;
+        39% {
+          opacity: 0.075;
         }
-        40%, 100% {
+        58%, 100% {
           opacity: 0;
-          transform: translate3d(380%, 0, 0) skewX(-18deg);
+          transform: translate3d(420%, 0, 0) skewX(-18deg);
         }
       }
 
@@ -1427,12 +1427,12 @@
 
       @keyframes contextGeneratorTileAuraDrift {
         from {
-          transform: translate3d(-7%, 0, 0) scaleX(0.96);
-          filter: blur(8px);
+          transform: translate3d(-5%, 0, 0) scaleX(0.98);
+          filter: blur(10px);
         }
         to {
-          transform: translate3d(2%, 0, 0) scaleX(1.04);
-          filter: blur(10px);
+          transform: translate3d(1.5%, 0, 0) scaleX(1.03);
+          filter: blur(12px);
         }
       }
 
@@ -1458,18 +1458,19 @@
         filter: blur(0.25px);
         opacity: 0;
         transform: translate3d(-150%, 0, 0) skewX(-18deg);
+        animation: contextGeneratorTileShine 8.8s cubic-bezier(0.16, 1, 0.3, 1) infinite;
       }
 
       .context-generator-tile-aura {
-        animation: none;
+        animation: contextGeneratorTileAuraDrift 4.8s ease-in-out infinite alternate;
       }
 
       .context-generator-destination-tile[data-context-generator-hover="true"] .context-generator-tile-aura {
-        animation: contextGeneratorTileAuraDrift 1.8s ease-in-out infinite alternate;
+        animation-duration: 3s;
       }
 
       .context-generator-destination-tile[data-context-generator-hover="true"] .context-generator-tile-shine {
-        animation: contextGeneratorTileShine 2.8s cubic-bezier(0.16, 1, 0.3, 1) infinite;
+        animation-duration: 5.2s;
       }
 
       .context-generator-tile-spinner {
@@ -1587,7 +1588,7 @@
       button.style.cssText = [
         "width:100%",
         "height:48px",
-        `border:1px solid ${option.accent}26`,
+        `border:1px solid ${option.accent}30`,
         "border-radius:11px",
         "background:linear-gradient(180deg, #121212 0%, #0b0b0b 58%, #050505 100%)",
         "color:#ffffff",
@@ -1603,7 +1604,7 @@
         "position:relative",
         "overflow:hidden",
         "isolation:isolate",
-        `box-shadow:inset 0 1px 0 rgba(255,255,255,0.075), inset 0 -1px 0 rgba(0,0,0,0.54), 0 0 0 1px ${option.accent}06, 0 1px 0 rgba(255,255,255,0.02)`,
+        `box-shadow:inset 0 1px 0 rgba(255,255,255,0.075), inset 0 -1px 0 rgba(0,0,0,0.54), 0 0 0 1px ${option.accent}08, -5px 0 16px ${option.accent}07, 0 1px 0 rgba(255,255,255,0.02)`,
         "transition:background 0.13s ease, border-color 0.13s ease, box-shadow 0.13s ease, transform 0.13s ease"
       ].join(";");
 
@@ -1614,11 +1615,11 @@
         "inset:-1px",
         "z-index:0",
         "pointer-events:none",
-        `background:radial-gradient(circle at 10% 50%, ${option.accent}40 0, transparent 38%), linear-gradient(90deg, ${option.accent}52 0%, ${option.accent}30 22%, ${option.accent}12 48%, ${option.accent}05 68%, transparent 88%)`,
-        "opacity:0",
-        "filter:blur(8px)",
-        "transform:translate3d(-7%,0,0) scaleX(0.96)",
-        "transition:opacity 0.14s ease"
+        `background:radial-gradient(ellipse at -4% 52%, ${option.accent}34 0, ${option.accent}1f 28%, transparent 62%), linear-gradient(90deg, ${option.accent}2b 0%, ${option.accent}18 25%, ${option.accent}09 54%, ${option.accent}03 73%, transparent 90%)`,
+        "opacity:0.18",
+        "filter:blur(10px)",
+        "transform:translate3d(-5%,0,0) scaleX(0.98)",
+        "transition:opacity 0.18s ease"
       ].join(";");
 
       const shine = document.createElement("span");
@@ -1652,18 +1653,18 @@
 
       const setButtonActive = () => {
         button.dataset.contextGeneratorHover = "true";
-        button.style.background = "linear-gradient(180deg, #171717 0%, #0e0e0e 58%, #050505 100%)";
-        button.style.borderColor = `${option.accent}78`;
-        button.style.boxShadow = `inset 0 1px 0 rgba(255,255,255,0.1), inset 0 -1px 0 rgba(0,0,0,0.58), 0 0 0 1px ${option.accent}26, -10px 0 24px ${option.accent}12, 0 8px 18px rgba(0,0,0,0.32)`;
-        aura.style.opacity = "0.5";
+        button.style.background = "linear-gradient(180deg, #151515 0%, #0d0d0d 58%, #050505 100%)";
+        button.style.borderColor = `${option.accent}58`;
+        button.style.boxShadow = `inset 0 1px 0 rgba(255,255,255,0.1), inset 0 -1px 0 rgba(0,0,0,0.58), 0 0 0 1px ${option.accent}18, -7px 0 20px ${option.accent}0e, 0 8px 18px rgba(0,0,0,0.3)`;
+        aura.style.opacity = "0.28";
         button.style.transform = "translateY(-1px)";
       };
       const setButtonIdle = () => {
         button.dataset.contextGeneratorHover = "false";
         button.style.background = "linear-gradient(180deg, #121212 0%, #0b0b0b 58%, #050505 100%)";
-        button.style.borderColor = `${option.accent}26`;
-        button.style.boxShadow = `inset 0 1px 0 rgba(255,255,255,0.075), inset 0 -1px 0 rgba(0,0,0,0.54), 0 0 0 1px ${option.accent}06, 0 1px 0 rgba(255,255,255,0.02)`;
-        aura.style.opacity = "0";
+        button.style.borderColor = `${option.accent}30`;
+        button.style.boxShadow = `inset 0 1px 0 rgba(255,255,255,0.075), inset 0 -1px 0 rgba(0,0,0,0.54), 0 0 0 1px ${option.accent}08, -5px 0 16px ${option.accent}07, 0 1px 0 rgba(255,255,255,0.02)`;
+        aura.style.opacity = "0.18";
         button.style.transform = "translateY(0)";
       };
 
@@ -1826,10 +1827,10 @@
       tile.removeAttribute("aria-busy");
       tile.style.pointerEvents = "";
       tile.style.background = "linear-gradient(180deg, #121212 0%, #0b0b0b 58%, #050505 100%)";
-      tile.style.borderColor = `${accent}26`;
-      tile.style.boxShadow = `inset 0 1px 0 rgba(255,255,255,0.075), inset 0 -1px 0 rgba(0,0,0,0.54), 0 0 0 1px ${accent}06, 0 1px 0 rgba(255,255,255,0.02)`;
+      tile.style.borderColor = `${accent}30`;
+      tile.style.boxShadow = `inset 0 1px 0 rgba(255,255,255,0.075), inset 0 -1px 0 rgba(0,0,0,0.54), 0 0 0 1px ${accent}08, -5px 0 16px ${accent}07, 0 1px 0 rgba(255,255,255,0.02)`;
       tile.style.transform = "translateY(0)";
-      if (aura) aura.style.opacity = "0";
+      if (aura) aura.style.opacity = "0.18";
       const detail = tile.querySelector(".context-generator-tile-detail");
       const spinner = tile.querySelector(".context-generator-tile-spinner");
       if (detail && tile.dataset.contextGeneratorDetail) {
