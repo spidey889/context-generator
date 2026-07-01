@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-07-01-transfer-retry";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-07-01-subtle-logo-color";
   const BUBBLE_ID = "context-generator-bubble";
   const OVERLAY_ID = "context-generator-overlay";
   const ONBOARDING_ID = "context-generator-onboarding";
@@ -1399,14 +1399,14 @@
     style.id = DESTINATION_SHEET_STYLE_ID;
     style.textContent = `
       @keyframes contextGeneratorTileShine {
-        0%, 30% {
+        0%, 34% {
           opacity: 0;
           transform: translate3d(-150%, 0, 0) skewX(-18deg);
         }
-        39% {
-          opacity: 0.075;
+        44% {
+          opacity: var(--context-generator-shine-opacity, 0.055);
         }
-        58%, 100% {
+        62%, 100% {
           opacity: 0;
           transform: translate3d(420%, 0, 0) skewX(-18deg);
         }
@@ -1458,19 +1458,19 @@
         filter: blur(0.25px);
         opacity: 0;
         transform: translate3d(-150%, 0, 0) skewX(-18deg);
-        animation: contextGeneratorTileShine 8.8s cubic-bezier(0.16, 1, 0.3, 1) infinite;
+        animation: none;
       }
 
       .context-generator-tile-aura {
-        animation: contextGeneratorTileAuraDrift 4.8s ease-in-out infinite alternate;
+        animation: none;
       }
 
       .context-generator-destination-tile[data-context-generator-hover="true"] .context-generator-tile-aura {
-        animation-duration: 3s;
+        animation: contextGeneratorTileAuraDrift 2.8s ease-in-out infinite alternate;
       }
 
       .context-generator-destination-tile[data-context-generator-hover="true"] .context-generator-tile-shine {
-        animation-duration: 5.2s;
+        animation: contextGeneratorTileShine 3.8s cubic-bezier(0.16, 1, 0.3, 1) infinite;
       }
 
       .context-generator-tile-spinner {
@@ -1588,7 +1588,7 @@
       button.style.cssText = [
         "width:100%",
         "height:48px",
-        `border:1px solid ${option.accent}30`,
+        "border:1px solid rgba(255,255,255,0.115)",
         "border-radius:11px",
         "background:linear-gradient(180deg, #121212 0%, #0b0b0b 58%, #050505 100%)",
         "color:#ffffff",
@@ -1604,7 +1604,8 @@
         "position:relative",
         "overflow:hidden",
         "isolation:isolate",
-        `box-shadow:inset 0 1px 0 rgba(255,255,255,0.075), inset 0 -1px 0 rgba(0,0,0,0.54), 0 0 0 1px ${option.accent}08, -5px 0 16px ${option.accent}07, 0 1px 0 rgba(255,255,255,0.02)`,
+        "box-shadow:inset 0 1px 0 rgba(255,255,255,0.075), inset 0 -1px 0 rgba(0,0,0,0.54), 0 1px 0 rgba(255,255,255,0.02)",
+        "--context-generator-shine-opacity:0.13",
         "transition:background 0.13s ease, border-color 0.13s ease, box-shadow 0.13s ease, transform 0.13s ease"
       ].join(";");
 
@@ -1612,14 +1613,18 @@
       aura.className = "context-generator-tile-aura";
       aura.style.cssText = [
         "position:absolute",
-        "inset:-1px",
+        "left:9px",
+        "top:10px",
+        "bottom:10px",
+        "width:30px",
         "z-index:0",
         "pointer-events:none",
-        `background:radial-gradient(ellipse at -4% 52%, ${option.accent}34 0, ${option.accent}1f 28%, transparent 62%), linear-gradient(90deg, ${option.accent}2b 0%, ${option.accent}18 25%, ${option.accent}09 54%, ${option.accent}03 73%, transparent 90%)`,
-        "opacity:0.18",
-        "filter:blur(10px)",
-        "transform:translate3d(-5%,0,0) scaleX(0.98)",
-        "transition:opacity 0.18s ease"
+        "border-radius:999px",
+        `background:radial-gradient(ellipse at 22% 50%, ${option.accent}24 0, ${option.accent}12 36%, ${option.accent}04 61%, transparent 80%)`,
+        "opacity:0.14",
+        "filter:blur(6px)",
+        "transform:translate3d(0,0,0) scaleX(1)",
+        "transition:opacity 0.16s ease, left 0.16s ease, right 0.16s ease, width 0.16s ease, border-radius 0.16s ease, background 0.16s ease"
       ].join(";");
 
       const shine = document.createElement("span");
@@ -1654,17 +1659,29 @@
       const setButtonActive = () => {
         button.dataset.contextGeneratorHover = "true";
         button.style.background = "linear-gradient(180deg, #151515 0%, #0d0d0d 58%, #050505 100%)";
-        button.style.borderColor = `${option.accent}58`;
-        button.style.boxShadow = `inset 0 1px 0 rgba(255,255,255,0.1), inset 0 -1px 0 rgba(0,0,0,0.58), 0 0 0 1px ${option.accent}18, -7px 0 20px ${option.accent}0e, 0 8px 18px rgba(0,0,0,0.3)`;
-        aura.style.opacity = "0.28";
+        button.style.borderColor = `${option.accent}72`;
+        button.style.boxShadow = `inset 0 1px 0 rgba(255,255,255,0.1), inset 0 -1px 0 rgba(0,0,0,0.58), 0 0 0 1px ${option.accent}24, -9px 0 22px ${option.accent}12, 0 8px 18px rgba(0,0,0,0.3)`;
+        button.style.setProperty("--context-generator-shine-opacity", "0.13");
+        aura.style.left = "-2px";
+        aura.style.right = "12px";
+        aura.style.width = "auto";
+        aura.style.borderRadius = "11px";
+        aura.style.background = `radial-gradient(ellipse at 5% 52%, ${option.accent}58 0, ${option.accent}35 24%, ${option.accent}16 52%, ${option.accent}05 74%, transparent 92%), linear-gradient(90deg, ${option.accent}42 0%, ${option.accent}24 24%, ${option.accent}0c 54%, transparent 88%)`;
+        aura.style.opacity = "0.46";
         button.style.transform = "translateY(-1px)";
       };
       const setButtonIdle = () => {
         button.dataset.contextGeneratorHover = "false";
         button.style.background = "linear-gradient(180deg, #121212 0%, #0b0b0b 58%, #050505 100%)";
-        button.style.borderColor = `${option.accent}30`;
-        button.style.boxShadow = `inset 0 1px 0 rgba(255,255,255,0.075), inset 0 -1px 0 rgba(0,0,0,0.54), 0 0 0 1px ${option.accent}08, -5px 0 16px ${option.accent}07, 0 1px 0 rgba(255,255,255,0.02)`;
-        aura.style.opacity = "0.18";
+        button.style.borderColor = "rgba(255,255,255,0.115)";
+        button.style.boxShadow = "inset 0 1px 0 rgba(255,255,255,0.075), inset 0 -1px 0 rgba(0,0,0,0.54), 0 1px 0 rgba(255,255,255,0.02)";
+        button.style.setProperty("--context-generator-shine-opacity", "0.13");
+        aura.style.left = "9px";
+        aura.style.right = "auto";
+        aura.style.width = "30px";
+        aura.style.borderRadius = "999px";
+        aura.style.background = `radial-gradient(ellipse at 22% 50%, ${option.accent}24 0, ${option.accent}12 36%, ${option.accent}04 61%, transparent 80%)`;
+        aura.style.opacity = "0.14";
         button.style.transform = "translateY(0)";
       };
 
@@ -1827,10 +1844,18 @@
       tile.removeAttribute("aria-busy");
       tile.style.pointerEvents = "";
       tile.style.background = "linear-gradient(180deg, #121212 0%, #0b0b0b 58%, #050505 100%)";
-      tile.style.borderColor = `${accent}30`;
-      tile.style.boxShadow = `inset 0 1px 0 rgba(255,255,255,0.075), inset 0 -1px 0 rgba(0,0,0,0.54), 0 0 0 1px ${accent}08, -5px 0 16px ${accent}07, 0 1px 0 rgba(255,255,255,0.02)`;
+      tile.style.borderColor = "rgba(255,255,255,0.115)";
+      tile.style.boxShadow = "inset 0 1px 0 rgba(255,255,255,0.075), inset 0 -1px 0 rgba(0,0,0,0.54), 0 1px 0 rgba(255,255,255,0.02)";
+      tile.style.setProperty("--context-generator-shine-opacity", "0.13");
       tile.style.transform = "translateY(0)";
-      if (aura) aura.style.opacity = "0.18";
+      if (aura) {
+        aura.style.left = "9px";
+        aura.style.right = "auto";
+        aura.style.width = "30px";
+        aura.style.borderRadius = "999px";
+        aura.style.background = `radial-gradient(ellipse at 22% 50%, ${accent}24 0, ${accent}12 36%, ${accent}04 61%, transparent 80%)`;
+        aura.style.opacity = "0.14";
+      }
       const detail = tile.querySelector(".context-generator-tile-detail");
       const spinner = tile.querySelector(".context-generator-tile-spinner");
       if (detail && tile.dataset.contextGeneratorDetail) {
