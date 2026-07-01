@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-07-02-cap-context-clean-tabs";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-07-02-sheet-open-summary";
   const BUBBLE_ID = "context-generator-bubble";
   const OVERLAY_ID = "context-generator-overlay";
   const ONBOARDING_ID = "context-generator-onboarding";
@@ -57,7 +57,6 @@
   const PASTE_RETRY_INTERVAL_MS = 180;
   const PASTE_VERIFY_TIMEOUT_MS = 1000;
   const WARM_SUMMARY_TTL_MS = 30000;
-  const WARM_SUMMARY_START_DELAY_MS = 0;
   const HANDOFF_STATUS_INTERVAL_MS = 1850;
   const HANDOFF_QUOTES = [
     "Good context beats a cold start.",
@@ -306,7 +305,6 @@
   let floatingButtonObserver = null;
   let floatingButtonMonitoringDisabled = false;
   let warmSummary = null;
-  let warmSummaryStartTimer = null;
   let warmSummaryExpireTimer = null;
   let handoffStatusTimer = null;
   let handoffStatusIndex = 0;
@@ -428,14 +426,9 @@
     return summarizeWithBackend(conversationText);
   }
 
-  function scheduleWarmSummary() {
+  function startSheetOpenWarmSummary() {
     if (isRunning) return;
-    if (warmSummaryStartTimer) clearTimeout(warmSummaryStartTimer);
-
-    warmSummaryStartTimer = window.setTimeout(() => {
-      warmSummaryStartTimer = null;
-      startWarmSummary();
-    }, WARM_SUMMARY_START_DELAY_MS);
+    return startWarmSummary();
   }
 
   function startWarmSummary(conversationText = null) {
@@ -489,11 +482,6 @@
     const fingerprint = getConversationFingerprint(conversationText);
     if (isWarmSummaryUsable(warmSummary, fingerprint)) return warmSummary;
 
-    if (warmSummaryStartTimer) {
-      clearTimeout(warmSummaryStartTimer);
-      warmSummaryStartTimer = null;
-    }
-
     return startWarmSummary(conversationText);
   }
 
@@ -502,11 +490,6 @@
   }
 
   function clearWarmSummary() {
-    if (warmSummaryStartTimer) {
-      clearTimeout(warmSummaryStartTimer);
-      warmSummaryStartTimer = null;
-    }
-
     if (warmSummaryExpireTimer) {
       clearTimeout(warmSummaryExpireTimer);
       warmSummaryExpireTimer = null;
@@ -2099,12 +2082,15 @@
 
   function toggleDestinationSheet() {
     hideOnboardingNudge();
-    const sheet = ensureDestinationSheet();
-    if (sheet.style.display === "block") {
+    const existingSheet = document.getElementById(DESTINATION_SHEET_ID);
+    if (existingSheet?.style.display === "block") {
       hideDestinationSheet();
       return;
     }
 
+    startSheetOpenWarmSummary();
+
+    const sheet = ensureDestinationSheet();
     if (destinationSheetAnimationFrame) cancelAnimationFrame(destinationSheetAnimationFrame);
     sheet.style.opacity = "0";
     sheet.style.transform = "translate3d(0,2px,0) scale(0.996)";
@@ -2114,7 +2100,6 @@
     resetDestinationTiles(sheet);
     animateDestinationTiles(sheet);
     warmDestinationConnections();
-    scheduleWarmSummary();
     if (window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) {
       sheet.style.opacity = "1";
       sheet.style.transform = "translate3d(0,0,0) scale(1)";
