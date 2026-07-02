@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-07-02-instant-empty-chat";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-07-02-error-popup-10s";
   const BUBBLE_ID = "context-generator-bubble";
   const OVERLAY_ID = "context-generator-overlay";
   const ONBOARDING_ID = "context-generator-onboarding";
@@ -2781,7 +2781,7 @@
     clearTimeout(errorDiv.contextGeneratorHideTimer);
     errorDiv.contextGeneratorHideTimer = setTimeout(() => {
       errorDiv.style.display = "none";
-    }, isNoConversationError ? 6500 : 8000);
+    }, 10000);
   }
 
   function showFallbackModal(text, destinationName) {
