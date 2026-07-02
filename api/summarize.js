@@ -41,6 +41,8 @@ const CONTEXT_CARRY_SECTIONS = [
   { title: "KEY CONTEXT", heading: "📦 KEY CONTEXT" },
   { title: "NEXT STEP", heading: "🔁 NEXT STEP" }
 ];
+const DESTINATION_CONFIRMATION_INSTRUCTION =
+  'Reply only: "Context loaded. Let\'s pick up right where you left off." Then wait for the user.';
 
 module.exports = async function handler(req, res) {
   res.setHeader("Access-Control-Allow-Origin", "*");
@@ -104,7 +106,7 @@ Hard rules:
 - Keep total output under 400 words.
 - If a section has no information, write "None" under that exact section.
 - Do not add the closing footer from SKILL.md: no "PASTE THIS AT THE TOP OF YOUR NEW CHAT" and no "Continue from where we left off."
-- In the 🔁 NEXT STEP section, tell the destination AI to briefly confirm the context is loaded, e.g. "Context loaded. Let's pick up right where you left off.", before continuing.
+- The 🔁 NEXT STEP section must be exactly: ${DESTINATION_CONFIRMATION_INSTRUCTION}
 
 Required template:
 ${CONTEXT_CARRY_TEMPLATE}`,
@@ -271,6 +273,7 @@ function normalizeContextCarrySections(text) {
   } else if (introLines.length && !sections.get("KEY CONTEXT")) {
     sections.set("KEY CONTEXT", introLines.join("\n").trim());
   }
+  sections.set("NEXT STEP", DESTINATION_CONFIRMATION_INSTRUCTION);
 
   return CONTEXT_CARRY_SECTIONS
     .map((section) => `${section.heading}\n${sections.get(section.title)?.trim() || "None"}`)
@@ -286,7 +289,10 @@ function getContextCarrySectionMatch(line) {
     .replace(/^[-*]\s+/, "")
     .replace(/^(?:🧠|🎯|📍|✅|⚠️|⚠|📦|🔁)\s*/u, "")
     .trim();
-  const normalized = withoutMarkdown.replace(/\s+/g, " ").toUpperCase();
+  const normalized = withoutMarkdown
+    .replace(/^[^\p{L}\p{N}]+/u, "")
+    .replace(/\s+/g, " ")
+    .toUpperCase();
 
   for (const section of CONTEXT_CARRY_SECTIONS) {
     if (normalized === section.title) {
