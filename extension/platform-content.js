@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-07-02-claude-voice-overlay";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-07-02-claude-inline-voice-slot";
   const BUBBLE_ID = "context-generator-bubble";
   const OVERLAY_ID = "context-generator-overlay";
   const ONBOARDING_ID = "context-generator-onboarding";
@@ -318,6 +318,7 @@
   let isRunning = false;
   let runningResetTimer = null;
   let reservedActionCluster = null;
+  let reservedClaudeInlineControls = [];
   let reservedComposerSurface = null;
   let destinationSheetAnimationFrame = null;
   let floatingButtonFrame = null;
@@ -3568,8 +3569,12 @@
     }
 
     if (currentPlatform.id === "claude") {
-      const claudePlacement = getClaudeBubblePlacement(composerRect);
-      releaseBubbleSlot();
+      const claudePlacement = getClaudeBubblePlacement(composerRect, input);
+      if (claudePlacement.anchorControl) {
+        reserveClaudeInlineBubbleSlot(claudePlacement.anchorControl, claudePlacement.controls, input, composerRect);
+      } else {
+        releaseBubbleSlot();
+      }
       setBubbleStylesIfChanged(bubble, {
         left: `${claudePlacement.left}px`,
         right: "auto",
@@ -3641,25 +3646,32 @@
     });
   }
 
-  function getClaudeBubblePlacement(composerRect) {
+  function getClaudeBubblePlacement(composerRect, input = null) {
     const controls = getClaudeComposerControlCandidates(composerRect);
-    const voiceModeControl = findClaudeVoiceModeControl(controls);
+    const anchorControl = findClaudeVoiceModeControl(controls) || findClaudeInlineFallbackControl(controls);
 
-    if (voiceModeControl) {
-      const voicePlacement = findClaudeClearBubblePlacement(composerRect, controls, {
-        preferredLeft: voiceModeControl.rect.right - composerRect.left + BUBBLE_GAP,
-        preferredTop: getBubblePlacementBesideRect(voiceModeControl.rect, composerRect, BUBBLE_GAP).top,
-        scanDirection: "right"
-      });
+    if (anchorControl) {
+      const activeShift = isClaudeInlineSlotActive(anchorControl, input, composerRect) ? 0 : BUBBLE_SLOT_WIDTH;
+      const left = clampNumber(
+        anchorControl.rect.right - composerRect.left - activeShift + BUBBLE_GAP,
+        BUBBLE_GAP,
+        Math.max(BUBBLE_GAP, composerRect.width - BUBBLE_SIZE - BUBBLE_GAP)
+      );
+      const top = getBubblePlacementBesideRect(anchorControl.rect, composerRect, left).top;
 
-      if (voicePlacement) return voicePlacement;
+      return {
+        left: Math.round(left),
+        top,
+        anchorControl,
+        controls
+      };
     }
 
-    return findClaudeClearBubblePlacement(composerRect, controls, {
-      preferredLeft: composerRect.width - BUBBLE_SIZE - 16,
-      preferredTop: getClaudeSafeFallbackTop(composerRect, controls),
-      scanDirection: "left"
-    }) || getClaudeLastResortBubblePlacement(composerRect, controls);
+    return {
+      ...getBottomRightRowBubblePlacement(composerRect, 16),
+      anchorControl: null,
+      controls
+    };
   }
 
   function getClaudeComposerControlCandidates(composerRect) {
@@ -3693,6 +3705,7 @@
         let score = 0;
         if (/\bvoice\s*mode\b/.test(control.label)) score += 260;
         if (/\b(voice|speak|speech|talk|dictation|audio)\b/.test(control.label)) score += 160;
+        if (control.rect.width <= 64 && control.rect.right >= getRightmostControlEdge(controls) - 4) score += 90;
         if (/\b(send|submit|attach|upload|file|project|sidebar|side bar|menu|navigation|toggle|model)\b/.test(control.label)) {
           score -= 260;
         }
@@ -3709,115 +3722,28 @@
       })[0] || null;
   }
 
-  function findClaudeClearBubblePlacement(composerRect, controls, options) {
-    const maxLeft = Math.max(BUBBLE_GAP, composerRect.width - BUBBLE_SIZE - BUBBLE_GAP);
-    const maxTop = Math.max(BUBBLE_GAP, composerRect.height - BUBBLE_SIZE - BUBBLE_GAP);
-    const preferredLeft = clampNumber(options.preferredLeft, BUBBLE_GAP, maxLeft);
-    const topCandidates = getClaudeBubbleTopCandidates(composerRect, controls, options.preferredTop, maxTop);
-    const leftCandidates = getClaudeBubbleLeftCandidates(preferredLeft, maxLeft, options.scanDirection);
-    const avoidRects = getClaudeControlAvoidRects(composerRect, controls);
-
-    for (const top of topCandidates) {
-      for (const left of leftCandidates) {
-        const placement = { left, top };
-        if (isClaudeBubblePlacementClear(placement, avoidRects)) {
-          return {
-            left: Math.round(left),
-            top: Math.round(top)
-          };
-        }
-      }
-    }
-
-    return null;
+  function findClaudeInlineFallbackControl(controls) {
+    return controls
+      .filter((control) => {
+        return (
+          control.rect.width <= 72 &&
+          !/\b(attach|upload|file|project|sidebar|side bar|menu|navigation|toggle|model)\b/.test(control.label)
+        );
+      })
+      .sort((a, b) => b.rect.right - a.rect.right)[0] || null;
   }
 
-  function getClaudeBubbleTopCandidates(composerRect, controls, preferredTop, maxTop) {
-    const rowTop = getClaudeComposerControlRowTop(composerRect) - composerRect.top;
-    const minControlTop = controls.length
-      ? Math.min(...controls.map(({ rect }) => rect.top - composerRect.top))
-      : rowTop;
-
-    return uniqueRoundedNumbers([
-      preferredTop,
-      composerRect.height - BUBBLE_SIZE - 16,
-      minControlTop - BUBBLE_SIZE - BUBBLE_GAP,
-      rowTop - BUBBLE_SIZE - BUBBLE_GAP,
-      composerRect.height * 0.5 - BUBBLE_SIZE / 2,
-      BUBBLE_GAP
-    ].map((top) => clampNumber(top, BUBBLE_GAP, maxTop)));
+  function getRightmostControlEdge(controls) {
+    return controls.reduce((right, control) => Math.max(right, control.rect.right), 0);
   }
 
-  function getClaudeBubbleLeftCandidates(preferredLeft, maxLeft, scanDirection) {
-    const candidates = [];
-    const start = Math.round(preferredLeft);
-    const step = 4;
+  function isClaudeInlineSlotActive(anchorControl, input, composerRect) {
+    if (!anchorControl) return false;
+    if (reservedClaudeInlineControls.includes(anchorControl.element)) return true;
+    if (reservedActionCluster?.contains?.(anchorControl.element)) return true;
 
-    if (scanDirection === "right") {
-      for (let left = start; left <= maxLeft; left += step) candidates.push(left);
-      return uniqueRoundedNumbers(candidates);
-    }
-
-    for (let left = start; left >= BUBBLE_GAP; left -= step) candidates.push(left);
-    for (let left = start + step; left <= maxLeft; left += step) candidates.push(left);
-    return uniqueRoundedNumbers(candidates);
-  }
-
-  function getClaudeControlAvoidRects(composerRect, controls) {
-    const padding = 6;
-
-    return controls.map(({ rect }) => ({
-      left: rect.left - composerRect.left - padding,
-      right: rect.right - composerRect.left + padding,
-      top: rect.top - composerRect.top - padding,
-      bottom: rect.bottom - composerRect.top + padding
-    }));
-  }
-
-  function isClaudeBubblePlacementClear(placement, avoidRects) {
-    const bubbleRect = {
-      left: placement.left,
-      right: placement.left + BUBBLE_SIZE,
-      top: placement.top,
-      bottom: placement.top + BUBBLE_SIZE
-    };
-
-    return avoidRects.every((avoidRect) => !doRectsIntersect(bubbleRect, avoidRect));
-  }
-
-  function getClaudeSafeFallbackTop(composerRect, controls) {
-    const maxTop = Math.max(BUBBLE_GAP, composerRect.height - BUBBLE_SIZE - BUBBLE_GAP);
-    const minControlTop = controls.length
-      ? Math.min(...controls.map(({ rect }) => rect.top - composerRect.top))
-      : composerRect.height - 16;
-
-    return clampNumber(minControlTop - BUBBLE_SIZE - BUBBLE_GAP, BUBBLE_GAP, maxTop);
-  }
-
-  function getClaudeLastResortBubblePlacement(composerRect, controls) {
-    const maxLeft = Math.max(BUBBLE_GAP, composerRect.width - BUBBLE_SIZE - BUBBLE_GAP);
-    const maxTop = Math.max(BUBBLE_GAP, composerRect.height - BUBBLE_SIZE - BUBBLE_GAP);
-    const avoidRects = getClaudeControlAvoidRects(composerRect, controls);
-    let bestPlacement = { left: maxLeft, top: BUBBLE_GAP };
-    let bestOverlap = Infinity;
-
-    for (let top = BUBBLE_GAP; top <= maxTop; top += 4) {
-      for (let left = maxLeft; left >= BUBBLE_GAP; left -= 4) {
-        const bubbleRect = { left, right: left + BUBBLE_SIZE, top, bottom: top + BUBBLE_SIZE };
-        const overlap = avoidRects.reduce((sum, avoidRect) => sum + getRectOverlapArea(bubbleRect, avoidRect), 0);
-        if (overlap < bestOverlap) {
-          bestOverlap = overlap;
-          bestPlacement = { left, top };
-          if (overlap === 0) break;
-        }
-      }
-      if (bestOverlap === 0) break;
-    }
-
-    return {
-      left: Math.round(bestPlacement.left),
-      top: Math.round(bestPlacement.top)
-    };
+    const cluster = findClaudeRightControlCluster(anchorControl.element, input, composerRect);
+    return Boolean(cluster && reservedActionCluster === cluster);
   }
 
   function getClaudeComposerControlRowTop(composerRect) {
@@ -4215,25 +4141,6 @@
     return Math.min(Math.max(value, min), max);
   }
 
-  function uniqueRoundedNumbers(values) {
-    return [...new Set(values.map((value) => Math.round(value)))];
-  }
-
-  function doRectsIntersect(first, second) {
-    return (
-      first.left < second.right &&
-      first.right > second.left &&
-      first.top < second.bottom &&
-      first.bottom > second.top
-    );
-  }
-
-  function getRectOverlapArea(first, second) {
-    const width = Math.max(0, Math.min(first.right, second.right) - Math.max(first.left, second.left));
-    const height = Math.max(0, Math.min(first.bottom, second.bottom) - Math.max(first.top, second.top));
-    return width * height;
-  }
-
   function getDeepSeekComposerButtonCandidates(composerRect) {
     const rowTop = composerRect.bottom - Math.max(64, composerRect.height * 0.55);
 
@@ -4421,10 +4328,15 @@
 
   function reserveBubbleSlot(actionBtn, input) {
     const cluster = findActionCluster(actionBtn, input);
+    reserveBubbleSlotForCluster(cluster);
+  }
+
+  function reserveBubbleSlotForCluster(cluster) {
     if (!cluster) return;
 
+    releaseClaudeInlineControlSlots();
     if (reservedActionCluster && reservedActionCluster !== cluster) {
-      releaseBubbleSlot();
+      releaseActionClusterSlot();
     }
 
     if (!cluster.hasAttribute("data-context-generator-original-transform")) {
@@ -4432,9 +4344,101 @@
     }
 
     const originalTransform = cluster.getAttribute("data-context-generator-original-transform") || "";
-    cluster.style.transform = `${originalTransform} translateX(-${BUBBLE_SLOT_WIDTH}px)`.trim();
-    cluster.style.willChange = "transform";
+    const targetTransform = `${originalTransform} translateX(-${BUBBLE_SLOT_WIDTH}px)`.trim();
+    if (cluster.style.transform !== targetTransform) {
+      cluster.style.transform = targetTransform;
+    }
+    if (cluster.style.willChange !== "transform") {
+      cluster.style.willChange = "transform";
+    }
     reservedActionCluster = cluster;
+  }
+
+  function reserveClaudeInlineBubbleSlot(anchorControl, controls, input, composerRect) {
+    if (reservedActionCluster?.contains?.(anchorControl.element)) {
+      reserveBubbleSlotForCluster(reservedActionCluster);
+      return;
+    }
+
+    const cluster = findClaudeRightControlCluster(anchorControl.element, input, composerRect);
+    if (cluster && cluster !== anchorControl.element) {
+      reserveBubbleSlotForCluster(cluster);
+      return;
+    }
+
+    reserveClaudeInlineControls(getClaudeInlineControlsToShift(controls, anchorControl));
+  }
+
+  function reserveClaudeInlineControls(controls) {
+    const elements = [...new Set(controls.map((control) => control.element).filter(Boolean))];
+
+    if (reservedActionCluster) {
+      releaseActionClusterSlot();
+    }
+
+    reservedClaudeInlineControls
+      .filter((element) => !elements.includes(element))
+      .forEach(restoreReservedTransform);
+
+    elements.forEach((element) => {
+      if (!element.hasAttribute("data-context-generator-original-transform")) {
+        element.setAttribute("data-context-generator-original-transform", element.style.transform || "");
+      }
+
+      const originalTransform = element.getAttribute("data-context-generator-original-transform") || "";
+      const targetTransform = `${originalTransform} translateX(-${BUBBLE_SLOT_WIDTH}px)`.trim();
+      if (element.style.transform !== targetTransform) {
+        element.style.transform = targetTransform;
+      }
+      if (element.style.willChange !== "transform") {
+        element.style.willChange = "transform";
+      }
+    });
+
+    reservedClaudeInlineControls = elements;
+  }
+
+  function getClaudeInlineControlsToShift(controls, anchorControl) {
+    const anchorCenterY = anchorControl.rect.top + anchorControl.rect.height / 2;
+    const minLeft = anchorControl.rect.left - 260;
+
+    return controls.filter((control) => {
+      const centerY = control.rect.top + control.rect.height / 2;
+      if (Math.abs(centerY - anchorCenterY) > 28) return false;
+      if (control.rect.right < minLeft) return false;
+      return !/\b(attach|upload|file|project|sidebar|side bar|menu|navigation|toggle)\b/.test(control.label);
+    });
+  }
+
+  function findClaudeRightControlCluster(controlElement, input, composerRect) {
+    if (!controlElement || !composerRect) return null;
+
+    let node = controlElement.parentElement;
+    let cluster = controlElement;
+
+    while (node && node !== document.body) {
+      if (input && node.contains(input)) break;
+
+      const rect = node.getBoundingClientRect();
+      const isRightSideCluster = (
+        rect.width > 0 &&
+        rect.width <= Math.min(420, composerRect.width * 0.72) &&
+        rect.height > 0 &&
+        rect.height <= 96 &&
+        rect.left >= composerRect.left + composerRect.width * 0.45 &&
+        rect.right <= composerRect.right + 24 &&
+        rect.top >= getClaudeComposerControlRowTop(composerRect) - 24 &&
+        rect.bottom <= composerRect.bottom + 18
+      );
+
+      if (isRightSideCluster) {
+        cluster = node;
+      }
+
+      node = node.parentElement;
+    }
+
+    return cluster;
   }
 
   function findActionCluster(actionBtn, input) {
@@ -4451,13 +4455,31 @@
   }
 
   function releaseBubbleSlot() {
+    releaseActionClusterSlot();
+    releaseClaudeInlineControlSlots();
+  }
+
+  function releaseActionClusterSlot() {
     if (!reservedActionCluster) return;
 
-    const originalTransform = reservedActionCluster.getAttribute("data-context-generator-original-transform") || "";
-    reservedActionCluster.style.transform = originalTransform;
-    reservedActionCluster.style.willChange = "";
-    reservedActionCluster.removeAttribute("data-context-generator-original-transform");
+    restoreReservedTransform(reservedActionCluster);
     reservedActionCluster = null;
+  }
+
+  function releaseClaudeInlineControlSlots() {
+    if (!reservedClaudeInlineControls.length) return;
+
+    reservedClaudeInlineControls.forEach(restoreReservedTransform);
+    reservedClaudeInlineControls = [];
+  }
+
+  function restoreReservedTransform(element) {
+    if (!element) return;
+
+    const originalTransform = element.getAttribute("data-context-generator-original-transform") || "";
+    element.style.transform = originalTransform;
+    element.style.willChange = "";
+    element.removeAttribute("data-context-generator-original-transform");
   }
 
   function scheduleFloatingButtonUpdate() {

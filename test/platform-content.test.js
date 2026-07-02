@@ -206,7 +206,7 @@ test("startup clears stale Claude placement transform reservations", () => {
   assert.equal(shiftedActionRow.hasAttribute("data-context-generator-original-transform"), false);
 });
 
-test("Claude bubble anchors to the right side of voice mode when clear", () => {
+test("Claude bubble fills the inline slot to the right of voice mode", () => {
   const voiceMode = new FakeElement({
     tag: "button",
     attrs: { "aria-label": "Voice mode" },
@@ -215,32 +215,51 @@ test("Claude bubble anchors to the right side of voice mode when clear", () => {
   const hooks = loadPlatformContent([voiceMode], "claude.ai");
   const placement = hooks.getClaudeBubblePlacement(getClaudeComposerRect());
 
-  assert.equal(placement.left, 644);
+  assert.equal(placement.anchorControl.element, voiceMode);
+  assert.equal(placement.left, 588);
   assert.equal(placement.top, 63);
 });
 
-test("Claude bubble fallback avoids crowded native composer controls", () => {
-  const voiceMode = new FakeElement({
+test("Claude bubble uses the rightmost small control when voice mode is unlabeled", () => {
+  const mic = new FakeElement({
     tag: "button",
-    attrs: { "aria-label": "Voice mode" },
+    attrs: { "aria-label": "Microphone" },
+    rect: { left: 656, right: 692, top: 166, bottom: 202, width: 36, height: 36 }
+  });
+  const unlabeledVoiceMode = new FakeElement({
+    tag: "button",
     rect: { left: 700, right: 736, top: 166, bottom: 202, width: 36, height: 36 }
   });
-  const send = new FakeElement({
+  const hooks = loadPlatformContent([mic, unlabeledVoiceMode], "claude.ai");
+  const placement = hooks.getClaudeBubblePlacement(getClaudeComposerRect());
+
+  assert.equal(placement.anchorControl.element, unlabeledVoiceMode);
+  assert.equal(placement.left, 588);
+  assert.equal(placement.top, 63);
+});
+
+test("Claude inline slot avoids shifted native composer controls", () => {
+  const model = new FakeElement({
     tag: "button",
-    attrs: { "aria-label": "Send message" },
-    rect: { left: 746, right: 782, top: 166, bottom: 202, width: 36, height: 36 }
+    attrs: { "aria-label": "Model selector" },
+    rect: { left: 520, right: 640, top: 166, bottom: 202, width: 120, height: 36 }
   });
   const mic = new FakeElement({
     tag: "button",
     attrs: { "aria-label": "Microphone" },
     rect: { left: 656, right: 692, top: 166, bottom: 202, width: 36, height: 36 }
   });
-  const hooks = loadPlatformContent([mic, voiceMode, send], "claude.ai");
+  const voiceMode = new FakeElement({
+    tag: "button",
+    attrs: { "aria-label": "Voice mode" },
+    rect: { left: 700, right: 736, top: 166, bottom: 202, width: 36, height: 36 }
+  });
+  const hooks = loadPlatformContent([model, mic, voiceMode], "claude.ai");
   const placement = hooks.getClaudeBubblePlacement(getClaudeComposerRect());
   const bubbleRect = localPlacementToPageRect(placement, getClaudeComposerRect());
 
-  [mic, voiceMode, send].forEach((control) => {
-    assert.equal(rectsIntersect(bubbleRect, control.getBoundingClientRect()), false);
+  [model, mic, voiceMode].forEach((control) => {
+    assert.equal(rectsIntersect(bubbleRect, shiftedLeft(control.getBoundingClientRect(), 56)), false);
   });
 });
 
@@ -264,4 +283,12 @@ function rectsIntersect(first, second) {
     first.top < second.bottom &&
     first.bottom > second.top
   );
+}
+
+function shiftedLeft(rect, amount) {
+  return {
+    ...rect,
+    left: rect.left - amount,
+    right: rect.right - amount
+  };
 }
