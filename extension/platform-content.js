@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-07-02-claude-broke-copy";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-07-02-handoff-countdown";
   const BUBBLE_ID = "context-generator-bubble";
   const OVERLAY_ID = "context-generator-overlay";
   const ONBOARDING_ID = "context-generator-onboarding";
@@ -68,6 +68,12 @@
   const PASTE_VERIFY_TIMEOUT_MS = 1000;
   const WARM_SUMMARY_TTL_MS = 30000;
   const HANDOFF_STATUS_INTERVAL_MS = 1850;
+  const HANDOFF_COUNTDOWN_ID = "context-generator-handoff-countdown";
+  const HANDOFF_COUNTDOWN_STORAGE_KEY = "context-generator-handoff-transfer-ms-v1";
+  const HANDOFF_COUNTDOWN_DEFAULT_MS = 8800;
+  const HANDOFF_COUNTDOWN_BUFFER_MS = 800;
+  const HANDOFF_COUNTDOWN_MIN_MS = 3000;
+  const HANDOFF_COUNTDOWN_MAX_MS = 18000;
   const HANDOFF_QUOTES = [
     "Good context beats a cold start.",
     "Tiny bridge, cleaner next reply.",
@@ -317,6 +323,8 @@
   let warmSummary = null;
   let warmSummaryExpireTimer = null;
   let handoffStatusTimer = null;
+  let handoffCountdownTimer = null;
+  let handoffCountdownHideTimer = null;
   let handoffStatusIndex = 0;
   let onboardingTimer = null;
   let onboardingDismissedThisSession = false;
@@ -639,15 +647,34 @@
   function finishTransferTrace(trace) {
     if (!trace || trace.completed) return;
     trace.completed = true;
+    const totalMs = Math.round(getNow() - trace.startedAt);
     const rows = trace.marks.map((mark) => ({
       step: mark.label,
       deltaMs: mark.deltaMs,
       totalMs: mark.totalMs,
       detail: JSON.stringify(formatTraceDetail(mark.detail))
     }));
-    console.debug(`[Context Generator Perf ${trace.id}] total ${Math.round(getNow() - trace.startedAt)}ms`, rows);
+    console.debug(`[Context Generator Perf ${trace.id}] total ${totalMs}ms`, rows);
+    if (trace.marks.some((mark) => mark.label === "paste done")) {
+      rememberHandoffTransferDuration(totalMs);
+    }
     if (activeTransferTrace === trace) {
       activeTransferTrace = null;
+    }
+  }
+
+  function rememberHandoffTransferDuration(totalMs) {
+    if (!Number.isFinite(totalMs) || totalMs <= 0) return;
+
+    try {
+      const previous = JSON.parse(window.localStorage?.getItem(HANDOFF_COUNTDOWN_STORAGE_KEY) || "[]");
+      const samples = (Array.isArray(previous) ? previous : [])
+        .filter((value) => Number.isFinite(value) && value > 0)
+        .slice(-7);
+      samples.push(totalMs);
+      window.localStorage?.setItem(HANDOFF_COUNTDOWN_STORAGE_KEY, JSON.stringify(samples));
+    } catch (_error) {
+      // Storage can be locked by host pages; the countdown falls back to the default.
     }
   }
 
@@ -2773,9 +2800,39 @@
       ].join(";");
       statusShell.appendChild(textSpan);
 
+      const countdown = document.createElement("div");
+      countdown.id = HANDOFF_COUNTDOWN_ID;
+      countdown.setAttribute("aria-label", "Estimated seconds remaining");
+      countdown.style.cssText = [
+        "position:absolute",
+        "z-index:2",
+        "right:24px",
+        "bottom:20px",
+        "display:none",
+        "align-items:center",
+        "justify-content:center",
+        "min-width:34px",
+        "height:24px",
+        "padding:0 9px",
+        "box-sizing:border-box",
+        "border-radius:999px",
+        "border:1px solid rgba(255,255,255,0.085)",
+        "background:rgba(255,255,255,0.045)",
+        "box-shadow:inset 0 1px 0 rgba(255,255,255,0.045)",
+        "color:rgba(255,255,255,0.48)",
+        "font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif",
+        "font-size:11px",
+        "font-weight:650",
+        "line-height:1",
+        "letter-spacing:0",
+        "opacity:0",
+        "transition:opacity 160ms ease"
+      ].join(";");
+
       overlay.appendChild(glow);
       overlay.appendChild(topRow);
       overlay.appendChild(statusShell);
+      overlay.appendChild(countdown);
       document.body.appendChild(overlay);
     }
   }
@@ -2792,6 +2849,7 @@
         quote.textContent = getRandomHandoffQuote();
       }
       startHandoffStatusCycle(destination?.name || "destination");
+      startHandoffCountdown();
       overlay.style.display = "flex";
       requestAnimationFrame(() => {
         overlay.style.opacity = "1";
@@ -2811,6 +2869,7 @@
     const bubble = document.getElementById(BUBBLE_ID);
 
     stopHandoffStatusCycle();
+    stopHandoffCountdown();
     if (overlay) {
       overlay.style.opacity = "0";
       overlay.style.transform = "translate3d(-50%,-50%,0) scale(0.98)";
@@ -2850,10 +2909,87 @@
     textSpan.style.animation = "contextGeneratorStatusShimmer 1.72s cubic-bezier(0.16,1,0.3,1) both";
   }
 
+  function startHandoffCountdown() {
+    stopHandoffCountdown();
+    const countdown = document.getElementById(HANDOFF_COUNTDOWN_ID);
+    if (!countdown) return;
+
+    const startMs = getHandoffCountdownStartMs();
+    const startedAt = getNow();
+    countdown.style.display = "inline-flex";
+    countdown.style.opacity = "1";
+
+    const updateCountdown = () => {
+      const remainingMs = startMs - (getNow() - startedAt);
+      if (remainingMs <= 0) {
+        hideHandoffCountdown(countdown);
+        return;
+      }
+
+      countdown.textContent = `${Math.max(1, Math.ceil(remainingMs / 1000))}s`;
+    };
+
+    updateCountdown();
+    handoffCountdownTimer = window.setInterval(updateCountdown, 250);
+  }
+
+  function getHandoffCountdownStartMs() {
+    const averageMs = getAverageHandoffTransferMs();
+    return Math.max(
+      HANDOFF_COUNTDOWN_MIN_MS,
+      Math.min(HANDOFF_COUNTDOWN_MAX_MS, averageMs - HANDOFF_COUNTDOWN_BUFFER_MS)
+    );
+  }
+
+  function getAverageHandoffTransferMs() {
+    try {
+      const samples = JSON.parse(window.localStorage?.getItem(HANDOFF_COUNTDOWN_STORAGE_KEY) || "[]");
+      const usableSamples = (Array.isArray(samples) ? samples : []).filter((value) => Number.isFinite(value) && value > 0);
+      if (usableSamples.length > 0) {
+        return usableSamples.reduce((sum, value) => sum + value, 0) / usableSamples.length;
+      }
+    } catch (_error) {
+      // Storage can be locked by host pages; the countdown falls back to the default.
+    }
+
+    return HANDOFF_COUNTDOWN_DEFAULT_MS;
+  }
+
+  function hideHandoffCountdown(countdown = document.getElementById(HANDOFF_COUNTDOWN_ID)) {
+    if (handoffCountdownTimer) {
+      clearInterval(handoffCountdownTimer);
+      handoffCountdownTimer = null;
+    }
+    if (!countdown) return;
+
+    countdown.style.opacity = "0";
+    handoffCountdownHideTimer = window.setTimeout(() => {
+      countdown.style.display = "none";
+      handoffCountdownHideTimer = null;
+    }, 170);
+  }
+
   function stopHandoffStatusCycle() {
     if (handoffStatusTimer) {
       clearInterval(handoffStatusTimer);
       handoffStatusTimer = null;
+    }
+  }
+
+  function stopHandoffCountdown() {
+    if (handoffCountdownTimer) {
+      clearInterval(handoffCountdownTimer);
+      handoffCountdownTimer = null;
+    }
+    if (handoffCountdownHideTimer) {
+      clearTimeout(handoffCountdownHideTimer);
+      handoffCountdownHideTimer = null;
+    }
+
+    const countdown = document.getElementById(HANDOFF_COUNTDOWN_ID);
+    if (countdown) {
+      countdown.style.opacity = "0";
+      countdown.style.display = "none";
     }
   }
 
