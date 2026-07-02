@@ -205,3 +205,63 @@ test("startup clears stale Claude placement transform reservations", () => {
   assert.equal(shiftedActionRow.style.willChange, "");
   assert.equal(shiftedActionRow.hasAttribute("data-context-generator-original-transform"), false);
 });
+
+test("Claude bubble anchors to the right side of voice mode when clear", () => {
+  const voiceMode = new FakeElement({
+    tag: "button",
+    attrs: { "aria-label": "Voice mode" },
+    rect: { left: 700, right: 736, top: 166, bottom: 202, width: 36, height: 36 }
+  });
+  const hooks = loadPlatformContent([voiceMode], "claude.ai");
+  const placement = hooks.getClaudeBubblePlacement(getClaudeComposerRect());
+
+  assert.equal(placement.left, 644);
+  assert.equal(placement.top, 63);
+});
+
+test("Claude bubble fallback avoids crowded native composer controls", () => {
+  const voiceMode = new FakeElement({
+    tag: "button",
+    attrs: { "aria-label": "Voice mode" },
+    rect: { left: 700, right: 736, top: 166, bottom: 202, width: 36, height: 36 }
+  });
+  const send = new FakeElement({
+    tag: "button",
+    attrs: { "aria-label": "Send message" },
+    rect: { left: 746, right: 782, top: 166, bottom: 202, width: 36, height: 36 }
+  });
+  const mic = new FakeElement({
+    tag: "button",
+    attrs: { "aria-label": "Microphone" },
+    rect: { left: 656, right: 692, top: 166, bottom: 202, width: 36, height: 36 }
+  });
+  const hooks = loadPlatformContent([mic, voiceMode, send], "claude.ai");
+  const placement = hooks.getClaudeBubblePlacement(getClaudeComposerRect());
+  const bubbleRect = localPlacementToPageRect(placement, getClaudeComposerRect());
+
+  [mic, voiceMode, send].forEach((control) => {
+    assert.equal(rectsIntersect(bubbleRect, control.getBoundingClientRect()), false);
+  });
+});
+
+function getClaudeComposerRect() {
+  return { left: 100, right: 900, top: 100, bottom: 220, width: 800, height: 120 };
+}
+
+function localPlacementToPageRect(placement, composerRect) {
+  return {
+    left: composerRect.left + placement.left,
+    right: composerRect.left + placement.left + 42,
+    top: composerRect.top + placement.top,
+    bottom: composerRect.top + placement.top + 42
+  };
+}
+
+function rectsIntersect(first, second) {
+  return (
+    first.left < second.right &&
+    first.right > second.left &&
+    first.top < second.bottom &&
+    first.bottom > second.top
+  );
+}

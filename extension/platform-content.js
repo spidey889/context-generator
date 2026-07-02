@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-07-02-claude-no-native-shift";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-07-02-claude-voice-overlay";
   const BUBBLE_ID = "context-generator-bubble";
   const OVERLAY_ID = "context-generator-overlay";
   const ONBOARDING_ID = "context-generator-onboarding";
@@ -411,7 +411,8 @@
       getConversationRole,
       editorContainsText,
       getVerificationSamples,
-      normalizeVerificationText
+      normalizeVerificationText,
+      getClaudeBubblePlacement
     });
   } else {
     startFloatingButtonMonitoring();
@@ -3569,11 +3570,13 @@
     if (currentPlatform.id === "claude") {
       const claudePlacement = getClaudeBubblePlacement(composerRect);
       releaseBubbleSlot();
-      bubble.style.left = `${claudePlacement.left}px`;
-      bubble.style.right = "auto";
-      bubble.style.top = `${claudePlacement.top}px`;
-      bubble.style.bottom = "auto";
-      bubble.style.display = "flex";
+      setBubbleStylesIfChanged(bubble, {
+        left: `${claudePlacement.left}px`,
+        right: "auto",
+        top: `${claudePlacement.top}px`,
+        bottom: "auto",
+        display: "flex"
+      });
       maybeShowOnboardingNudge(bubble);
       return;
     }
@@ -3639,48 +3642,186 @@
   }
 
   function getClaudeBubblePlacement(composerRect) {
-    const anchorButton = getClaudeComposerButtonCandidates(composerRect)
-      .filter(({ button }) => {
-        const label = getElementLabel(button, true);
-        return !/\b(attach|upload|file|project|sidebar|side bar|menu|navigation|toggle)\b/.test(label);
-      })
-      .at(-1);
+    const controls = getClaudeComposerControlCandidates(composerRect);
+    const voiceModeControl = findClaudeVoiceModeControl(controls);
 
-    if (anchorButton) {
-      const rightOfAnchor = anchorButton.rect.right - composerRect.left + BUBBLE_GAP;
-      const maxLeft = composerRect.width - BUBBLE_SIZE - BUBBLE_GAP;
-      if (rightOfAnchor <= maxLeft) {
-        return getBubblePlacementBesideRect(anchorButton.rect, composerRect, rightOfAnchor);
-      }
+    if (voiceModeControl) {
+      const voicePlacement = findClaudeClearBubblePlacement(composerRect, controls, {
+        preferredLeft: voiceModeControl.rect.right - composerRect.left + BUBBLE_GAP,
+        preferredTop: getBubblePlacementBesideRect(voiceModeControl.rect, composerRect, BUBBLE_GAP).top,
+        scanDirection: "right"
+      });
 
-      const leftOfAnchor = anchorButton.rect.left - composerRect.left - BUBBLE_SIZE - BUBBLE_GAP;
-      if (leftOfAnchor >= BUBBLE_GAP) {
-        return getBubblePlacementBesideRect(anchorButton.rect, composerRect, leftOfAnchor);
-      }
+      if (voicePlacement) return voicePlacement;
     }
 
-    return getBottomRightRowBubblePlacement(composerRect, 16);
+    return findClaudeClearBubblePlacement(composerRect, controls, {
+      preferredLeft: composerRect.width - BUBBLE_SIZE - 16,
+      preferredTop: getClaudeSafeFallbackTop(composerRect, controls),
+      scanDirection: "left"
+    }) || getClaudeLastResortBubblePlacement(composerRect, controls);
   }
 
-  function getClaudeComposerButtonCandidates(composerRect) {
-    const rowTop = composerRect.bottom - Math.max(64, composerRect.height * 0.58);
+  function getClaudeComposerControlCandidates(composerRect) {
+    const rowTop = getClaudeComposerControlRowTop(composerRect);
 
     return Array.from(document.querySelectorAll("button, [role='button'], [tabindex='0']"))
-      .filter((button) => button.id !== BUBBLE_ID && !isContextGeneratorNode(button) && isVisible(button))
-      .map((button) => ({ button, rect: button.getBoundingClientRect() }))
+      .filter((element) => element.id !== BUBBLE_ID && !isContextGeneratorNode(element) && isVisible(element))
+      .map((element) => ({
+        element,
+        label: getElementLabel(element, true),
+        rect: element.getBoundingClientRect()
+      }))
       .filter(({ rect }) => {
         return (
           rect.width > 0 &&
-          rect.width <= 180 &&
+          rect.width <= 280 &&
           rect.height > 0 &&
-          rect.height <= 76 &&
-          rect.left >= composerRect.left + composerRect.width * 0.35 &&
+          rect.height <= 84 &&
+          rect.left >= composerRect.left - 12 &&
           rect.right <= composerRect.right + 16 &&
           rect.top >= rowTop &&
           rect.bottom <= composerRect.bottom + 16
         );
       })
       .sort((a, b) => a.rect.left - b.rect.left);
+  }
+
+  function findClaudeVoiceModeControl(controls) {
+    return controls
+      .map((control) => {
+        let score = 0;
+        if (/\bvoice\s*mode\b/.test(control.label)) score += 260;
+        if (/\b(voice|speak|speech|talk|dictation|audio)\b/.test(control.label)) score += 160;
+        if (/\b(send|submit|attach|upload|file|project|sidebar|side bar|menu|navigation|toggle|model)\b/.test(control.label)) {
+          score -= 260;
+        }
+        if (/\b(mic|microphone)\b/.test(control.label) && !/\bvoice\b/.test(control.label)) {
+          score -= 80;
+        }
+
+        return { ...control, score };
+      })
+      .filter(({ score }) => score >= 160)
+      .sort((a, b) => {
+        if (b.score !== a.score) return b.score - a.score;
+        return b.rect.right - a.rect.right;
+      })[0] || null;
+  }
+
+  function findClaudeClearBubblePlacement(composerRect, controls, options) {
+    const maxLeft = Math.max(BUBBLE_GAP, composerRect.width - BUBBLE_SIZE - BUBBLE_GAP);
+    const maxTop = Math.max(BUBBLE_GAP, composerRect.height - BUBBLE_SIZE - BUBBLE_GAP);
+    const preferredLeft = clampNumber(options.preferredLeft, BUBBLE_GAP, maxLeft);
+    const topCandidates = getClaudeBubbleTopCandidates(composerRect, controls, options.preferredTop, maxTop);
+    const leftCandidates = getClaudeBubbleLeftCandidates(preferredLeft, maxLeft, options.scanDirection);
+    const avoidRects = getClaudeControlAvoidRects(composerRect, controls);
+
+    for (const top of topCandidates) {
+      for (const left of leftCandidates) {
+        const placement = { left, top };
+        if (isClaudeBubblePlacementClear(placement, avoidRects)) {
+          return {
+            left: Math.round(left),
+            top: Math.round(top)
+          };
+        }
+      }
+    }
+
+    return null;
+  }
+
+  function getClaudeBubbleTopCandidates(composerRect, controls, preferredTop, maxTop) {
+    const rowTop = getClaudeComposerControlRowTop(composerRect) - composerRect.top;
+    const minControlTop = controls.length
+      ? Math.min(...controls.map(({ rect }) => rect.top - composerRect.top))
+      : rowTop;
+
+    return uniqueRoundedNumbers([
+      preferredTop,
+      composerRect.height - BUBBLE_SIZE - 16,
+      minControlTop - BUBBLE_SIZE - BUBBLE_GAP,
+      rowTop - BUBBLE_SIZE - BUBBLE_GAP,
+      composerRect.height * 0.5 - BUBBLE_SIZE / 2,
+      BUBBLE_GAP
+    ].map((top) => clampNumber(top, BUBBLE_GAP, maxTop)));
+  }
+
+  function getClaudeBubbleLeftCandidates(preferredLeft, maxLeft, scanDirection) {
+    const candidates = [];
+    const start = Math.round(preferredLeft);
+    const step = 4;
+
+    if (scanDirection === "right") {
+      for (let left = start; left <= maxLeft; left += step) candidates.push(left);
+      return uniqueRoundedNumbers(candidates);
+    }
+
+    for (let left = start; left >= BUBBLE_GAP; left -= step) candidates.push(left);
+    for (let left = start + step; left <= maxLeft; left += step) candidates.push(left);
+    return uniqueRoundedNumbers(candidates);
+  }
+
+  function getClaudeControlAvoidRects(composerRect, controls) {
+    const padding = 6;
+
+    return controls.map(({ rect }) => ({
+      left: rect.left - composerRect.left - padding,
+      right: rect.right - composerRect.left + padding,
+      top: rect.top - composerRect.top - padding,
+      bottom: rect.bottom - composerRect.top + padding
+    }));
+  }
+
+  function isClaudeBubblePlacementClear(placement, avoidRects) {
+    const bubbleRect = {
+      left: placement.left,
+      right: placement.left + BUBBLE_SIZE,
+      top: placement.top,
+      bottom: placement.top + BUBBLE_SIZE
+    };
+
+    return avoidRects.every((avoidRect) => !doRectsIntersect(bubbleRect, avoidRect));
+  }
+
+  function getClaudeSafeFallbackTop(composerRect, controls) {
+    const maxTop = Math.max(BUBBLE_GAP, composerRect.height - BUBBLE_SIZE - BUBBLE_GAP);
+    const minControlTop = controls.length
+      ? Math.min(...controls.map(({ rect }) => rect.top - composerRect.top))
+      : composerRect.height - 16;
+
+    return clampNumber(minControlTop - BUBBLE_SIZE - BUBBLE_GAP, BUBBLE_GAP, maxTop);
+  }
+
+  function getClaudeLastResortBubblePlacement(composerRect, controls) {
+    const maxLeft = Math.max(BUBBLE_GAP, composerRect.width - BUBBLE_SIZE - BUBBLE_GAP);
+    const maxTop = Math.max(BUBBLE_GAP, composerRect.height - BUBBLE_SIZE - BUBBLE_GAP);
+    const avoidRects = getClaudeControlAvoidRects(composerRect, controls);
+    let bestPlacement = { left: maxLeft, top: BUBBLE_GAP };
+    let bestOverlap = Infinity;
+
+    for (let top = BUBBLE_GAP; top <= maxTop; top += 4) {
+      for (let left = maxLeft; left >= BUBBLE_GAP; left -= 4) {
+        const bubbleRect = { left, right: left + BUBBLE_SIZE, top, bottom: top + BUBBLE_SIZE };
+        const overlap = avoidRects.reduce((sum, avoidRect) => sum + getRectOverlapArea(bubbleRect, avoidRect), 0);
+        if (overlap < bestOverlap) {
+          bestOverlap = overlap;
+          bestPlacement = { left, top };
+          if (overlap === 0) break;
+        }
+      }
+      if (bestOverlap === 0) break;
+    }
+
+    return {
+      left: Math.round(bestPlacement.left),
+      top: Math.round(bestPlacement.top)
+    };
+  }
+
+  function getClaudeComposerControlRowTop(composerRect) {
+    return composerRect.bottom - Math.max(72, composerRect.height * 0.62);
   }
 
   function findChatGptModelSelectorButton(composerSurface, composerRect) {
@@ -4059,6 +4200,38 @@
       left: Math.round(left),
       top: Math.round(top)
     };
+  }
+
+  function setBubbleStylesIfChanged(bubble, styles) {
+    Object.entries(styles).forEach(([property, value]) => {
+      if (bubble.style[property] !== value) {
+        bubble.style[property] = value;
+      }
+    });
+  }
+
+  function clampNumber(value, min, max) {
+    if (!Number.isFinite(value)) return min;
+    return Math.min(Math.max(value, min), max);
+  }
+
+  function uniqueRoundedNumbers(values) {
+    return [...new Set(values.map((value) => Math.round(value)))];
+  }
+
+  function doRectsIntersect(first, second) {
+    return (
+      first.left < second.right &&
+      first.right > second.left &&
+      first.top < second.bottom &&
+      first.bottom > second.top
+    );
+  }
+
+  function getRectOverlapArea(first, second) {
+    const width = Math.max(0, Math.min(first.right, second.right) - Math.max(first.left, second.left));
+    const height = Math.max(0, Math.min(first.bottom, second.bottom) - Math.max(first.top, second.top));
+    return width * height;
   }
 
   function getDeepSeekComposerButtonCandidates(composerRect) {
