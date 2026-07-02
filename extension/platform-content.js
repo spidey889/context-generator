@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-07-02-warm-summary-schedule";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-07-02-instant-empty-chat";
   const BUBBLE_ID = "context-generator-bubble";
   const OVERLAY_ID = "context-generator-overlay";
   const ONBOARDING_ID = "context-generator-onboarding";
@@ -37,7 +37,7 @@
   const NO_CONVERSATION_ERROR_TITLE = "Nothing to carry yet";
   const NO_CONVERSATION_ERROR_MESSAGE = "Chat is empty. Send one message first, then I'll pack the context.";
   const MIN_FALLBACK_CONVERSATION_CHARS = 120;
-  const CONVERSATION_SCRAPE_RETRY_TIMEOUT_MS = 1800;
+  const CONVERSATION_SCRAPE_RETRY_TIMEOUT_MS = 0;
   const CONVERSATION_SCRAPE_RETRY_INTERVAL_MS = 140;
   const EMPTY_START_SCREEN_TEXTS = [
     "the mic is yours",
