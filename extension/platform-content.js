@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-07-02-claude-limit-nudge";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-07-02-transfer-copy-fallback";
   const BUBBLE_ID = "context-generator-bubble";
   const OVERLAY_ID = "context-generator-overlay";
   const ONBOARDING_ID = "context-generator-onboarding";
@@ -38,6 +38,8 @@
   const ONBOARDING_SHOW_DELAY_MS = 650;
   const NO_CONVERSATION_ERROR_TITLE = "Nothing to carry yet";
   const NO_CONVERSATION_ERROR_MESSAGE = "Chat is empty. Send one message first, then I'll pack the context.";
+  const SUMMARY_RETRY_ERROR_TITLE = "Try again";
+  const SUMMARY_RETRY_ERROR_MESSAGE = "Try again right now. We might have made a mistake. It almost never happens the second time.";
   const MIN_FALLBACK_CONVERSATION_CHARS = 120;
   const CONVERSATION_SCRAPE_RETRY_TIMEOUT_MS = 0;
   const CONVERSATION_SCRAPE_RETRY_INTERVAL_MS = 140;
@@ -382,10 +384,13 @@
   async function runContextFlow(destinationId, preparedDestinationPromise = null, warmSummaryRecord = null, scrapedConversationText = null, trace = null) {
     const transferTrace = trace || createTransferTrace(destinationId, "transfer");
     transferTrace.destinationId = destinationId;
+    let transferStage = "capture";
+    let summary = "";
     try {
       const destination = getPlatform(destinationId);
       let conversationText = scrapedConversationText;
       if (!conversationText) {
+        transferStage = "capture";
         markTransferTrace(transferTrace, "capture start");
         conversationText = await scrapeConversationTextWhenReady();
         markTransferTrace(transferTrace, "capture done", { chars: conversationText.length });
@@ -396,9 +401,11 @@
       } else {
         showOverlay(destinationId);
       }
-      const summary = await getSummaryForTransfer(conversationText, warmSummaryRecord, transferTrace);
+      transferStage = "summary";
+      summary = await getSummaryForTransfer(conversationText, warmSummaryRecord, transferTrace);
       markTransferTrace(transferTrace, "summary available", { chars: summary.length });
       setHandoffStatus(`Preparing ${destination?.name || "destination"}`);
+      transferStage = "destination";
       const preparedDestination = destinationPrepPromise ? await destinationPrepPromise : null;
       markTransferTrace(transferTrace, "tab open done", {
         tabId: preparedDestination?.tabId || null,
@@ -406,6 +413,7 @@
       });
       setHandoffStatus(`Pasting context into ${destination?.name || "destination"}`);
       markTransferTrace(transferTrace, "paste request start");
+      transferStage = "paste";
       const pasteResponse = await notifyBackground({
         type: "TRANSFER_TO_DESTINATION",
         destination: destinationId,
@@ -421,9 +429,31 @@
       markTransferTrace(transferTrace, `failed: ${error.message}`);
       finishTransferTrace(transferTrace);
       resetRunningFlag();
-      showErrorOverlay(error.message);
+      showContextTransferFailure(error, {
+        destinationId,
+        stage: transferStage,
+        summary
+      });
       await notifyBackground({ type: "CONTEXT_TRANSFER_ERROR", error: error.message }).catch(() => {});
     }
+  }
+
+  function showContextTransferFailure(error, details = {}) {
+    const stage = details.stage || "transfer";
+    const summary = details.summary?.trim?.() || "";
+    const destinationName = getPlatform(details.destinationId)?.name || "the destination";
+
+    if (stage === "summary") {
+      showErrorOverlay(SUMMARY_RETRY_ERROR_MESSAGE);
+      return;
+    }
+
+    if (summary) {
+      showFallbackModal(summary, destinationName);
+      return;
+    }
+
+    showErrorOverlay(error?.message || "Transfer failed. Please try again.");
   }
 
   async function summarizeWithBackend(conversationText, trace = null) {
@@ -2833,6 +2863,7 @@
 
   function showErrorOverlay(message) {
     const isNoConversationError = message === NO_CONVERSATION_ERROR_MESSAGE;
+    const isSummaryRetryError = message === SUMMARY_RETRY_ERROR_MESSAGE;
     let errorDiv = document.getElementById("context-generator-error-overlay");
     if (!errorDiv) {
       errorDiv = document.createElement("div");
@@ -2931,12 +2962,16 @@
 
     const title = document.getElementById("context-generator-error-title");
     if (title) {
-      title.textContent = isNoConversationError ? NO_CONVERSATION_ERROR_TITLE : "Transfer failed";
+      title.textContent = isNoConversationError
+        ? NO_CONVERSATION_ERROR_TITLE
+        : isSummaryRetryError
+          ? SUMMARY_RETRY_ERROR_TITLE
+          : "Transfer failed";
     }
 
     const mark = document.getElementById("context-generator-error-mark");
     if (mark) {
-      mark.textContent = isNoConversationError ? "i" : "!";
+      mark.textContent = isNoConversationError || isSummaryRetryError ? "i" : "!";
     }
 
     const textSpan = document.getElementById("context-generator-error-text");
@@ -2973,6 +3008,7 @@
     if (!modal) {
       modal = document.createElement("div");
       modal.id = "context-generator-fallback-modal";
+      modal.dataset.contextGeneratorOwned = "true";
       modal.style.position = "fixed";
       modal.style.zIndex = "99999999";
       modal.style.top = "0";
@@ -3045,8 +3081,9 @@
       dismissBtn.style.cursor = "pointer";
 
       copyBtn.addEventListener("click", async () => {
+        const currentText = textarea.value || "";
         try {
-          await navigator.clipboard.writeText(text);
+          await navigator.clipboard.writeText(currentText);
           copyBtn.textContent = "Copied!";
           copyBtn.style.backgroundColor = "#10b981";
           setTimeout(() => {

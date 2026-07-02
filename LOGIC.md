@@ -148,7 +148,7 @@ It expects:
 { "summary": "..." }
 ```
 
-If the backend request fails or returns no summary, the transfer fails and the extension shows an error.
+If the backend request fails or returns no summary, the transfer stops before paste and shows a calm retry message: `Try again right now. We might have made a mistake. It almost never happens the second time.` There is no manual copy box in this case because no summary exists yet.
 
 ## How The Vercel/Mistral Backend Works
 
@@ -186,7 +186,7 @@ For textarea/input editors, it uses the native value setter and dispatches input
 
 For contenteditable editors, it targets the first paragraph if one exists, otherwise the editor itself. It selects the current contents, calls `document.execCommand("insertText")`, retries with select-all if needed, and falls back to assigning `textContent` if insertion still fails. It dispatches beforeinput, input, and change events afterward so React/ProseMirror-style editors notice the update.
 
-After pasting, it verifies that a normalized leading sample of the summary is present in the editor. If verification fails, it shows an "Auto-paste failed" modal with a copy button and returns an error to the background worker.
+After pasting, it verifies that a normalized leading sample of the summary is present in the editor. If verification fails, it shows an "Auto-paste failed" modal with a copy button and returns an error to the background worker. The source page also keeps the generated summary in scope during the transfer, so any destination/open/paste failure after summarization shows the same manual copy modal instead of only a generic transfer error.
 
 Once paste verification passes, the flow stops. It does not search for Send buttons, click Send, submit forms, or press Enter on any destination platform. The pasted summary stays in the input box for the user to review and send manually.
 
@@ -200,7 +200,7 @@ The background worker sets the extension badge to:
 
 The source page shows the compact centered handoff popup while picker-started transfer work is running. The popup cycles through short status lines so the wait feels active without prompting the source AI.
 
-If the source-side flow throws, the script resets the running flag, hides the overlay, shows a red "Transfer Failed" overlay on the source page, and notifies the background worker. Error popups auto-hide after 8 seconds and slide/fade back to the right.
+If the source-side flow throws before a summary exists, the script resets the running flag, hides the overlay, and shows either the empty-chat nudge or the friendly summarizer retry message. If the failure happens after a summary exists, it shows the manual copy modal with the current summary so the user can still paste it by hand. Error popups auto-hide after 8 seconds and slide/fade back to the right.
 
 If destination paste fails, the destination page shows a manual copy modal with the summary.
 
