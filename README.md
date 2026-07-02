@@ -1,75 +1,94 @@
-# 🧠 Context Generator
+# Context Generator
 
-**Hit your AI limit mid-conversation? Don't lose your progress.**
+Move a long AI conversation into another AI without rebuilding the context by hand.
 
-`/context-generator` summarizes your entire chat into a clean, portable block you can paste into any AI and continue exactly where you left off.
+Context Generator is a Chrome/Brave extension that reads the chat you are currently in, creates a compact "Context Carry" summary, opens the AI destination you choose, and pastes the summary into the destination input box for you to review and send.
 
-Works with Claude, ChatGPT, Gemini, or any AI.
+## What It Does
 
----
+- Adds a Cap-Context button inside supported AI chat pages.
+- Lets you pick where to continue: Claude, ChatGPT, Gemini, Grok, or DeepSeek.
+- Scrapes the current conversation before any extension UI is shown, so extension text is not included.
+- Sends the conversation to the backend summarizer.
+- Opens the destination AI and pastes the generated context into its composer.
+- Leaves the final send action to you.
 
-## The Problem
+## Current Flow
 
-You're deep into a conversation — building something, planning something, solving something. Then you hit the free limit. You switch to another AI and have to explain everything from scratch. Annoying.
+1. Open a supported AI chat.
+2. Click the Cap-Context bubble near the chat input.
+3. Pick the destination AI from the picker.
+4. The extension generates a portable context summary.
+5. The destination tab opens and the summary is pasted into the input box.
+6. Review the pasted context, then send it manually.
 
-## The Fix
+If auto-paste fails, the extension shows a manual copy fallback with the generated context so you can still paste it yourself.
 
-Before you hit the limit, type `/generate-context`. The AI compresses everything important into one clean block. Copy it. Paste it into your new chat. Continue.
+## Supported Sites
 
----
+- Claude: `https://claude.ai`
+- ChatGPT: `https://chatgpt.com` and OpenAI-hosted ChatGPT pages
+- Gemini: `https://gemini.google.com`
+- Grok: `https://grok.com`
+- DeepSeek: `https://chat.deepseek.com`
 
-## How To Use
+## Install For Local Development
 
-### Option 1 — Drag & Drop (Easiest)
-1. Download `SKILL.md` from the repo
-2. Go to [claude.ai](https://claude.ai) → click **Customize**
-3. Drag & drop the file there
-4. Type `/context-generator` in any chat
+1. Clone this repo.
+2. Open Brave or Chrome and go to `chrome://extensions`.
+3. Enable Developer mode.
+4. Click "Load unpacked".
+5. Select the `extension` folder from this repo.
+6. Open a supported AI chat page and refresh it if it was already open.
 
-### Option 2 — Manual (Any AI)
-1. Open `SKILL.md` → copy all contents
-2. Paste at the start of any new chat
-3. Type `/context-generator` when needed
+The unpacked extension should be loaded from:
 
- ---  
-## When To Use It
-
-- You're at ~90% of your context/message limit
-- You want to switch from Claude → ChatGPT (or vice versa)
-- You want to save progress before closing a long chat
-- You're handing off a conversation to someone else
-
----
-
-## What The Output Looks Like
-
-```
-🧠 WHO I AM
-🎯 WHAT WE WERE DOING
-📍 WHERE WE LEFT OFF
-✅ DECISIONS MADE
-⚠️ OPEN QUESTIONS
-📦 KEY CONTEXT
-🔁 NEXT STEP
+```text
+extension/
 ```
 
-Clean. Specific. Under 400 words. Ready to paste.
+## Backend
 
----
+The extension calls the Vercel API endpoint in `api/summarize.js`. That endpoint uses Mistral to normalize the conversation into the Context Carry format before returning it to the extension.
 
-## Files
+For deployment, configure:
 
-| File | What it is |
-|------|-----------|
-| `skill.md` | The skill/prompt — this is what you actually install |
-| `README.md` | This file |
+```text
+MISTRAL_API_KEY
+```
 
----
+## Development
+
+Run the regression tests:
+
+```bash
+npm test
+```
+
+The test suite covers the core pieces most likely to regress:
+
+- Summary normalization
+- Conversation scraping edge cases
+- Paste verification logic
+
+## Project Layout
+
+| Path | Purpose |
+| --- | --- |
+| `extension/manifest.json` | Extension manifest, host permissions, and MV3 service worker config |
+| `extension/background.js` | Tab orchestration, backend summary requests, and destination messaging |
+| `extension/platform-content.js` | In-page button, picker, scraping, paste behavior, and fallback UI |
+| `extension/README.md` | Extension-specific usage notes |
+| `api/summarize.js` | Vercel summarization endpoint |
+| `test/` | Minimal Node regression tests |
+| `OLD_README.md` | Archived README for the earlier manual prompt/skill version |
+
+## Privacy Notes
+
+Conversation text is sent to the configured backend only when you start a transfer. The extension does not send messages on your behalf, does not click the destination send button, and does not submit the pasted summary automatically.
 
 ## Contributing
 
-Open source. If you improve the prompt or find a better structure, open a PR.
-
----
+Issues and PRs are welcome. Keep changes scoped, test the transfer flow when touching extension behavior, and avoid automatic-send behavior.
 
 Made by [@spidey889](https://github.com/spidey889).
