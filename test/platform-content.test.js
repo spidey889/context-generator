@@ -216,7 +216,7 @@ test("Claude bubble fills the inline slot to the right of voice mode", () => {
   const placement = hooks.getClaudeBubblePlacement(getClaudeComposerRect());
 
   assert.equal(placement.anchorControl.element, voiceMode);
-  assert.equal(placement.left, 660);
+  assert.equal(placement.left, 664);
   assert.equal(placement.top, 63);
   assert.equal(placement.inlineShift, 0);
 });
@@ -235,7 +235,7 @@ test("Claude bubble uses the rightmost small control when voice mode is unlabele
   const placement = hooks.getClaudeBubblePlacement(getClaudeComposerRect());
 
   assert.equal(placement.anchorControl.element, unlabeledVoiceMode);
-  assert.equal(placement.left, 660);
+  assert.equal(placement.left, 664);
   assert.equal(placement.top, 63);
   assert.equal(placement.inlineShift, 0);
 });
@@ -288,8 +288,8 @@ test("Claude crowded row shifts only small voice-side controls", () => {
   const shiftedControls = hooks.getClaudeInlineControlsToShift(placement.controls, placement.anchorControl);
 
   assert.equal(placement.anchorControl.element, voiceMode);
-  assert.equal(placement.left, 738);
-  assert.equal(placement.inlineShift, 66);
+  assert.equal(placement.left, 754);
+  assert.equal(placement.inlineShift, 54);
   assert.equal(shiftedControls.length, 2);
   assert.equal(shiftedControls[0].element, mic);
   assert.equal(shiftedControls[1].element, voiceMode);
@@ -313,8 +313,8 @@ test("Claude typed-state send button does not shift the model selector", () => {
   const shiftedControls = hooks.getClaudeInlineControlsToShift(placement.controls, placement.anchorControl);
 
   assert.equal(placement.anchorControl.element, send);
-  assert.equal(placement.left, 738);
-  assert.equal(placement.inlineShift, 66);
+  assert.equal(placement.left, 754);
+  assert.equal(placement.inlineShift, 54);
   assert.equal(shiftedControls.length, 1);
   assert.equal(shiftedControls[0].element, send);
   assert.equal(shiftedControls.some((control) => control.element === model), false);
