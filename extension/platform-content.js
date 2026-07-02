@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-07-02-claude-wide-row-shift";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-07-02-claude-model-safe-inline";
   const BUBBLE_ID = "context-generator-bubble";
   const OVERLAY_ID = "context-generator-overlay";
   const ONBOARDING_ID = "context-generator-onboarding";
@@ -25,8 +25,9 @@
   const BUBBLE_SIZE = 42;
   const BUBBLE_GAP = 8;
   const BUBBLE_SLOT_WIDTH = BUBBLE_SIZE + BUBBLE_GAP + 6;
-  const CLAUDE_INLINE_SLOT_WIDTH = BUBBLE_SIZE + 98;
-  const CLAUDE_INLINE_BUBBLE_GAP = 44;
+  const CLAUDE_INLINE_SLOT_WIDTH = BUBBLE_SIZE + 62;
+  const CLAUDE_INLINE_BUBBLE_GAP = 24;
+  const CLAUDE_INLINE_RIGHT_MARGIN = 20;
   const DESTINATION_SHEET_WIDTH = 296;
   const RUNNING_AUTO_RESET_MS = 60000;
   const MAX_BACKEND_CONVERSATION_CHARS = 80000;
@@ -321,6 +322,7 @@
   let runningResetTimer = null;
   let reservedActionCluster = null;
   let reservedClaudeInlineControls = [];
+  let reservedClaudeInlineShift = 0;
   let reservedComposerSurface = null;
   let destinationSheetAnimationFrame = null;
   let floatingButtonFrame = null;
@@ -416,7 +418,8 @@
       editorContainsText,
       getVerificationSamples,
       normalizeVerificationText,
-      getClaudeBubblePlacement
+      getClaudeBubblePlacement,
+      getClaudeInlineControlsToShift
     });
   } else {
     startFloatingButtonMonitoring();
@@ -3608,7 +3611,7 @@
     if (currentPlatform.id === "claude") {
       const claudePlacement = getClaudeBubblePlacement(composerRect, input);
       if (claudePlacement.anchorControl) {
-        reserveClaudeInlineBubbleSlot(claudePlacement.anchorControl, claudePlacement.controls, input, composerRect);
+        reserveClaudeInlineBubbleSlot(claudePlacement.anchorControl, claudePlacement.controls, input, composerRect, claudePlacement.inlineShift);
       } else {
         releaseBubbleSlot();
       }
@@ -3688,17 +3691,28 @@
     const anchorControl = findClaudeVoiceModeControl(controls) || findClaudeInlineFallbackControl(controls);
 
     if (anchorControl) {
-      const activeShift = isClaudeInlineSlotActive(anchorControl, input, composerRect) ? 0 : CLAUDE_INLINE_SLOT_WIDTH;
-      const left = clampNumber(
-        anchorControl.rect.right - composerRect.left - activeShift + CLAUDE_INLINE_BUBBLE_GAP,
+      const activeShift = getClaudeInlineActiveShift(anchorControl);
+      const anchorRight = anchorControl.rect.right + activeShift;
+      const maxLeft = Math.max(
         BUBBLE_GAP,
-        Math.max(BUBBLE_GAP, composerRect.width - BUBBLE_SIZE - BUBBLE_GAP)
+        composerRect.width - BUBBLE_SIZE - CLAUDE_INLINE_RIGHT_MARGIN
+      );
+      const preferredLeft = anchorRight - composerRect.left + CLAUDE_INLINE_BUBBLE_GAP;
+      const inlineShift = Math.min(
+        CLAUDE_INLINE_SLOT_WIDTH,
+        Math.max(0, preferredLeft - maxLeft)
+      );
+      const left = clampNumber(
+        anchorRight - composerRect.left - inlineShift + CLAUDE_INLINE_BUBBLE_GAP,
+        BUBBLE_GAP,
+        maxLeft
       );
       const top = getBubblePlacementBesideRect(anchorControl.rect, composerRect, left).top;
 
       return {
         left: Math.round(left),
         top,
+        inlineShift: Math.round(inlineShift),
         anchorControl,
         controls
       };
@@ -3706,6 +3720,7 @@
 
     return {
       ...getBottomRightRowBubblePlacement(composerRect, 16),
+      inlineShift: 0,
       anchorControl: null,
       controls
     };
@@ -3774,9 +3789,9 @@
     return controls.reduce((right, control) => Math.max(right, control.rect.right), 0);
   }
 
-  function isClaudeInlineSlotActive(anchorControl, input, composerRect) {
-    if (!anchorControl) return false;
-    return reservedClaudeInlineControls.includes(anchorControl.element);
+  function getClaudeInlineActiveShift(anchorControl) {
+    if (!anchorControl) return 0;
+    return reservedClaudeInlineControls.includes(anchorControl.element) ? reservedClaudeInlineShift : 0;
   }
 
   function getClaudeComposerControlRowTop(composerRect) {
@@ -4387,12 +4402,18 @@
     reservedActionCluster = cluster;
   }
 
-  function reserveClaudeInlineBubbleSlot(anchorControl, controls, input, composerRect) {
-    reserveClaudeInlineControls(getClaudeInlineControlsToShift(controls, anchorControl));
+  function reserveClaudeInlineBubbleSlot(anchorControl, controls, input, composerRect, inlineShift = 0) {
+    reserveClaudeInlineControls(getClaudeInlineControlsToShift(controls, anchorControl), inlineShift);
   }
 
-  function reserveClaudeInlineControls(controls) {
+  function reserveClaudeInlineControls(controls, inlineShift = CLAUDE_INLINE_SLOT_WIDTH) {
     const elements = [...new Set(controls.map((control) => control.element).filter(Boolean))];
+    const shift = Math.max(0, Math.round(inlineShift));
+
+    if (shift <= 0 || elements.length === 0) {
+      releaseClaudeInlineControlSlots();
+      return;
+    }
 
     if (reservedActionCluster) {
       releaseActionClusterSlot();
@@ -4408,7 +4429,7 @@
       }
 
       const originalTransform = element.getAttribute("data-context-generator-original-transform") || "";
-      const targetTransform = `${originalTransform} translateX(-${CLAUDE_INLINE_SLOT_WIDTH}px)`.trim();
+      const targetTransform = `${originalTransform} translateX(-${shift}px)`.trim();
       if (element.style.transform !== targetTransform) {
         element.style.transform = targetTransform;
       }
@@ -4418,17 +4439,25 @@
     });
 
     reservedClaudeInlineControls = elements;
+    reservedClaudeInlineShift = shift;
   }
 
   function getClaudeInlineControlsToShift(controls, anchorControl) {
     const anchorCenterY = anchorControl.rect.top + anchorControl.rect.height / 2;
-    const minLeft = anchorControl.rect.left - 260;
+    const minLeft = anchorControl.rect.left - 160;
 
     return controls.filter((control) => {
       const centerY = control.rect.top + control.rect.height / 2;
       if (Math.abs(centerY - anchorCenterY) > 28) return false;
       if (control.rect.right < minLeft) return false;
-      return !/\b(attach|upload|file|project|sidebar|side bar|menu|navigation|toggle)\b/.test(control.label);
+      if (/\b(attach|upload|file|project|sidebar|side bar|menu|navigation|toggle|model|sonnet|opus|haiku)\b/.test(control.label)) {
+        return false;
+      }
+      return (
+        control === anchorControl ||
+        control.rect.width <= 84 ||
+        /\b(send|submit|mic|microphone|voice|speak|speech|talk|dictation|audio)\b/.test(control.label)
+      );
     });
   }
 
@@ -4462,6 +4491,7 @@
 
     reservedClaudeInlineControls.forEach(restoreReservedTransform);
     reservedClaudeInlineControls = [];
+    reservedClaudeInlineShift = 0;
   }
 
   function restoreReservedTransform(element) {

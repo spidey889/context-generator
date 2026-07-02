@@ -216,8 +216,9 @@ test("Claude bubble fills the inline slot to the right of voice mode", () => {
   const placement = hooks.getClaudeBubblePlacement(getClaudeComposerRect());
 
   assert.equal(placement.anchorControl.element, voiceMode);
-  assert.equal(placement.left, 540);
+  assert.equal(placement.left, 660);
   assert.equal(placement.top, 63);
+  assert.equal(placement.inlineShift, 0);
 });
 
 test("Claude bubble uses the rightmost small control when voice mode is unlabeled", () => {
@@ -234,11 +235,12 @@ test("Claude bubble uses the rightmost small control when voice mode is unlabele
   const placement = hooks.getClaudeBubblePlacement(getClaudeComposerRect());
 
   assert.equal(placement.anchorControl.element, unlabeledVoiceMode);
-  assert.equal(placement.left, 540);
+  assert.equal(placement.left, 660);
   assert.equal(placement.top, 63);
+  assert.equal(placement.inlineShift, 0);
 });
 
-test("Claude inline slot avoids shifted native composer controls", () => {
+test("Claude inline slot keeps the normal model row unshifted", () => {
   const model = new FakeElement({
     tag: "button",
     attrs: { "aria-label": "Model selector" },
@@ -258,30 +260,64 @@ test("Claude inline slot avoids shifted native composer controls", () => {
   const placement = hooks.getClaudeBubblePlacement(getClaudeComposerRect());
   const bubbleRect = localPlacementToPageRect(placement, getClaudeComposerRect());
 
+  assert.equal(placement.inlineShift, 0);
   [model, mic, voiceMode].forEach((control) => {
-    assert.equal(rectsIntersect(bubbleRect, shiftedLeft(control.getBoundingClientRect(), 140)), false);
+    assert.equal(rectsIntersect(bubbleRect, control.getBoundingClientRect()), false);
   });
 });
 
-test("Claude typed-state send button shifts with the model controls", () => {
+test("Claude crowded row shifts only small voice-side controls", () => {
   const model = new FakeElement({
     tag: "button",
+    text: "Sonnet 5 Medium",
     attrs: { "aria-label": "Model selector" },
-    rect: { left: 520, right: 640, top: 166, bottom: 202, width: 120, height: 36 }
+    rect: { left: 672, right: 792, top: 166, bottom: 202, width: 120, height: 36 }
+  });
+  const mic = new FakeElement({
+    tag: "button",
+    attrs: { "aria-label": "Microphone" },
+    rect: { left: 800, right: 836, top: 166, bottom: 202, width: 36, height: 36 }
+  });
+  const voiceMode = new FakeElement({
+    tag: "button",
+    attrs: { "aria-label": "Voice mode" },
+    rect: { left: 844, right: 880, top: 166, bottom: 202, width: 36, height: 36 }
+  });
+  const hooks = loadPlatformContent([model, mic, voiceMode], "claude.ai");
+  const placement = hooks.getClaudeBubblePlacement(getClaudeComposerRect());
+  const shiftedControls = hooks.getClaudeInlineControlsToShift(placement.controls, placement.anchorControl);
+
+  assert.equal(placement.anchorControl.element, voiceMode);
+  assert.equal(placement.left, 738);
+  assert.equal(placement.inlineShift, 66);
+  assert.equal(shiftedControls.length, 2);
+  assert.equal(shiftedControls[0].element, mic);
+  assert.equal(shiftedControls[1].element, voiceMode);
+  assert.equal(shiftedControls.some((control) => control.element === model), false);
+});
+
+test("Claude typed-state send button does not shift the model selector", () => {
+  const model = new FakeElement({
+    tag: "button",
+    text: "Sonnet 5 Medium",
+    attrs: { "aria-label": "Model selector" },
+    rect: { left: 672, right: 792, top: 166, bottom: 202, width: 120, height: 36 }
   });
   const send = new FakeElement({
     tag: "button",
     attrs: { "aria-label": "Send message" },
-    rect: { left: 700, right: 736, top: 166, bottom: 202, width: 36, height: 36 }
+    rect: { left: 844, right: 880, top: 166, bottom: 202, width: 36, height: 36 }
   });
   const hooks = loadPlatformContent([model, send], "claude.ai");
   const placement = hooks.getClaudeBubblePlacement(getClaudeComposerRect());
-  const bubbleRect = localPlacementToPageRect(placement, getClaudeComposerRect());
+  const shiftedControls = hooks.getClaudeInlineControlsToShift(placement.controls, placement.anchorControl);
 
   assert.equal(placement.anchorControl.element, send);
-  [model, send].forEach((control) => {
-    assert.equal(rectsIntersect(bubbleRect, shiftedLeft(control.getBoundingClientRect(), 140)), false);
-  });
+  assert.equal(placement.left, 738);
+  assert.equal(placement.inlineShift, 66);
+  assert.equal(shiftedControls.length, 1);
+  assert.equal(shiftedControls[0].element, send);
+  assert.equal(shiftedControls.some((control) => control.element === model), false);
 });
 
 function getClaudeComposerRect() {
@@ -304,12 +340,4 @@ function rectsIntersect(first, second) {
     first.top < second.bottom &&
     first.bottom > second.top
   );
-}
-
-function shiftedLeft(rect, amount) {
-  return {
-    ...rect,
-    left: rect.left - amount,
-    right: rect.right - amount
-  };
 }
