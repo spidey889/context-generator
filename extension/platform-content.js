@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-07-02-error-popup-10s";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-07-02-error-popup-8s-slide";
   const BUBBLE_ID = "context-generator-bubble";
   const OVERLAY_ID = "context-generator-overlay";
   const ONBOARDING_ID = "context-generator-onboarding";
@@ -2689,6 +2689,9 @@
         "box-shadow:0 18px 44px rgba(0,0,0,0.38), inset 0 1px 0 rgba(255,255,255,0.06)",
         "font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif",
         "display:none",
+        "opacity:0",
+        "transform:translate3d(24px,0,0)",
+        "transition:opacity 260ms ease,transform 260ms ease",
         "flex-direction:column",
         "gap:12px",
         "overflow:hidden"
@@ -2750,7 +2753,7 @@
         "line-height:28px"
       ].join(";");
       closeBtn.addEventListener("click", () => {
-        errorDiv.style.display = "none";
+        hideErrorOverlay(errorDiv);
       });
 
       header.appendChild(mark);
@@ -2777,11 +2780,28 @@
       textSpan.textContent = message;
     }
 
-    errorDiv.style.display = "flex";
     clearTimeout(errorDiv.contextGeneratorHideTimer);
+    clearTimeout(errorDiv.contextGeneratorDisplayTimer);
+    errorDiv.style.display = "flex";
+    errorDiv.style.opacity = "0";
+    errorDiv.style.transform = "translate3d(24px,0,0)";
+    requestAnimationFrame(() => {
+      errorDiv.style.opacity = "1";
+      errorDiv.style.transform = "translate3d(0,0,0)";
+    });
     errorDiv.contextGeneratorHideTimer = setTimeout(() => {
+      hideErrorOverlay(errorDiv);
+    }, 8000);
+  }
+
+  function hideErrorOverlay(errorDiv = document.getElementById("context-generator-error-overlay")) {
+    if (!errorDiv) return;
+    clearTimeout(errorDiv.contextGeneratorDisplayTimer);
+    errorDiv.style.opacity = "0";
+    errorDiv.style.transform = "translate3d(-28px,0,0)";
+    errorDiv.contextGeneratorDisplayTimer = setTimeout(() => {
       errorDiv.style.display = "none";
-    }, 10000);
+    }, 280);
   }
 
   function showFallbackModal(text, destinationName) {

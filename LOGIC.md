@@ -198,7 +198,7 @@ The background worker sets the extension badge to:
 
 The source page shows the compact centered handoff popup while picker-started transfer work is running. The popup cycles through short status lines so the wait feels active without prompting the source AI.
 
-If the source-side flow throws, the script resets the running flag, hides the overlay, shows a red "Transfer Failed" overlay on the source page, and notifies the background worker. Error popups auto-hide after 10 seconds.
+If the source-side flow throws, the script resets the running flag, hides the overlay, shows a red "Transfer Failed" overlay on the source page, and notifies the background worker. Error popups auto-hide after 8 seconds with a short slide/fade.
 
 If destination paste fails, the destination page shows a manual copy modal with the summary.
 
