@@ -229,3 +229,4 @@ If destination paste fails, the destination page shows a manual copy modal with 
 - 2026-07-02: Post-summary transfer/open/paste failures show the manual copy modal with the generated context. This replaced the generic source-page `Transfer failed` path when the summary already exists.
 - 2026-07-02: The backend now forces the exact `SKILL.md` boxed Context Carry template and strips the old paste-instruction footer. This replaced the simplified/free-form Mistral prompt.
 - 2026-07-02: The summarizer model is fixed to `ministral-3b-2512`. This replaced the `MISTRAL_MODEL` environment override so deployments cannot silently switch models.
+- 2026-07-02: Free-form live summaries after the template fix were Vercel deployment drift, not prompt drift. The live alias `context-generator-five.vercel.app` belongs to the Vercel project `context-generator`; relink/deploy that project and verify with a direct POST before editing the prompt again.
