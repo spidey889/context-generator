@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-07-02-claude-roomy-inline-slot";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-07-02-claude-wide-inline-slot";
   const BUBBLE_ID = "context-generator-bubble";
   const OVERLAY_ID = "context-generator-overlay";
   const ONBOARDING_ID = "context-generator-onboarding";
@@ -25,8 +25,8 @@
   const BUBBLE_SIZE = 42;
   const BUBBLE_GAP = 8;
   const BUBBLE_SLOT_WIDTH = BUBBLE_SIZE + BUBBLE_GAP + 6;
-  const CLAUDE_INLINE_SLOT_WIDTH = BUBBLE_SIZE + 30;
-  const CLAUDE_INLINE_BUBBLE_GAP = 16;
+  const CLAUDE_INLINE_SLOT_WIDTH = BUBBLE_SIZE + 62;
+  const CLAUDE_INLINE_BUBBLE_GAP = 28;
   const DESTINATION_SHEET_WIDTH = 296;
   const RUNNING_AUTO_RESET_MS = 60000;
   const MAX_BACKEND_CONVERSATION_CHARS = 80000;
