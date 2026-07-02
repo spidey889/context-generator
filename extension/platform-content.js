@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-07-02-handoff-countdown";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-07-02-handoff-20s-copy";
   const BUBBLE_ID = "context-generator-bubble";
   const OVERLAY_ID = "context-generator-overlay";
   const ONBOARDING_ID = "context-generator-onboarding";
@@ -69,26 +69,22 @@
   const WARM_SUMMARY_TTL_MS = 30000;
   const HANDOFF_STATUS_INTERVAL_MS = 1850;
   const HANDOFF_COUNTDOWN_ID = "context-generator-handoff-countdown";
-  const HANDOFF_COUNTDOWN_STORAGE_KEY = "context-generator-handoff-transfer-ms-v1";
-  const HANDOFF_COUNTDOWN_DEFAULT_MS = 8800;
-  const HANDOFF_COUNTDOWN_BUFFER_MS = 800;
-  const HANDOFF_COUNTDOWN_MIN_MS = 3000;
-  const HANDOFF_COUNTDOWN_MAX_MS = 18000;
+  const HANDOFF_COUNTDOWN_FIXED_MS = 20000;
   const HANDOFF_QUOTES = [
-    "Good context beats a cold start.",
-    "Tiny bridge, cleaner next reply.",
-    "Packing the useful parts only.",
-    "Your next AI gets the good bits.",
-    "No stale baggage, just signal.",
-    "Making the handoff feel instant."
+    "I don't like waiting 20 seconds either.",
+    "The wait is for better context.",
+    "A few seconds now saves re-explaining later.",
+    "Better context, cleaner next reply.",
+    "Holding the useful bits together.",
+    "Worth it when the next AI starts warm."
   ];
   const HANDOFF_STATUS_STEPS = [
-    "Summarizing context",
-    "Compacting the useful bits",
-    "Preparing {destination}",
-    "Warming the destination tab",
-    "Polishing the handoff",
-    "Pasting context into {destination}"
+    "I don't like waiting either",
+    "This is for better context",
+    "Keeping the thread intact",
+    "Saving you the re-explain",
+    "Making the next reply sharper",
+    "Almost ready"
   ];
   const GENERIC_CONVERSATION_SELECTORS = [
     "[data-message-author-role]",
@@ -655,26 +651,8 @@
       detail: JSON.stringify(formatTraceDetail(mark.detail))
     }));
     console.debug(`[Context Generator Perf ${trace.id}] total ${totalMs}ms`, rows);
-    if (trace.marks.some((mark) => mark.label === "paste done")) {
-      rememberHandoffTransferDuration(totalMs);
-    }
     if (activeTransferTrace === trace) {
       activeTransferTrace = null;
-    }
-  }
-
-  function rememberHandoffTransferDuration(totalMs) {
-    if (!Number.isFinite(totalMs) || totalMs <= 0) return;
-
-    try {
-      const previous = JSON.parse(window.localStorage?.getItem(HANDOFF_COUNTDOWN_STORAGE_KEY) || "[]");
-      const samples = (Array.isArray(previous) ? previous : [])
-        .filter((value) => Number.isFinite(value) && value > 0)
-        .slice(-7);
-      samples.push(totalMs);
-      window.localStorage?.setItem(HANDOFF_COUNTDOWN_STORAGE_KEY, JSON.stringify(samples));
-    } catch (_error) {
-      // Storage can be locked by host pages; the countdown falls back to the default.
     }
   }
 
@@ -2914,7 +2892,7 @@
     const countdown = document.getElementById(HANDOFF_COUNTDOWN_ID);
     if (!countdown) return;
 
-    const startMs = getHandoffCountdownStartMs();
+    const startMs = HANDOFF_COUNTDOWN_FIXED_MS;
     const startedAt = getNow();
     countdown.style.display = "inline-flex";
     countdown.style.opacity = "1";
@@ -2931,28 +2909,6 @@
 
     updateCountdown();
     handoffCountdownTimer = window.setInterval(updateCountdown, 250);
-  }
-
-  function getHandoffCountdownStartMs() {
-    const averageMs = getAverageHandoffTransferMs();
-    return Math.max(
-      HANDOFF_COUNTDOWN_MIN_MS,
-      Math.min(HANDOFF_COUNTDOWN_MAX_MS, averageMs - HANDOFF_COUNTDOWN_BUFFER_MS)
-    );
-  }
-
-  function getAverageHandoffTransferMs() {
-    try {
-      const samples = JSON.parse(window.localStorage?.getItem(HANDOFF_COUNTDOWN_STORAGE_KEY) || "[]");
-      const usableSamples = (Array.isArray(samples) ? samples : []).filter((value) => Number.isFinite(value) && value > 0);
-      if (usableSamples.length > 0) {
-        return usableSamples.reduce((sum, value) => sum + value, 0) / usableSamples.length;
-      }
-    } catch (_error) {
-      // Storage can be locked by host pages; the countdown falls back to the default.
-    }
-
-    return HANDOFF_COUNTDOWN_DEFAULT_MS;
   }
 
   function hideHandoffCountdown(countdown = document.getElementById(HANDOFF_COUNTDOWN_ID)) {
