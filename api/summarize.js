@@ -64,6 +64,7 @@ DECISIONS MADE: bullets, only important decisions.
 OPEN QUESTIONS: bullets, or "None".
 KEY CONTEXT: constraints, tools, repo paths, preferences, exact strings, gotchas.
 NEXT STEP: one clear sentence.
+DESTINATION AI: Briefly confirm you have the context, e.g. "Context loaded. Let's pick up right where you left off.", instead of giving a long response right away.
 Keep it rich enough to continue the work, but under 350 words. No intro.`,
           },
           {
