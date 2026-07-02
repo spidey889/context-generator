@@ -65,7 +65,7 @@
   ],
   "browser_specific_settings": {
     "gecko": {
-      "id": "capcontext@yourdomain.com",
+      "id": "{8f4d7c20-9f3b-4b7e-9c11-2f4cbe2d41a9}",
       "data_collection_permissions": { "required": ["personalCommunications"] }
     }
   }
