@@ -21,7 +21,8 @@
     "https://context-generator-five.vercel.app/*"
   ],
   "background": {
-    "service_worker": "background.js"
+    "service_worker": "background.js",
+    "scripts": ["background.js"]
   },
   "action": {
     "default_title": "Carry context to another AI",
@@ -61,5 +62,6 @@
         "https://chat.deepseek.com/*"
       ]
     }
-  ]
+  ],
+  "browser_specific_settings": { "gecko": { "id": "capcontext@yourdomain.com" } }
 }
