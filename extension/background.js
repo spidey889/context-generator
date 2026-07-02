@@ -21,7 +21,10 @@ const DESTINATIONS = {
   chatgpt: {
     name: "ChatGPT",
     url: CHATGPT_URL,
-    contentScript: PLATFORM_CONTENT_SCRIPT
+    contentScript: PLATFORM_CONTENT_SCRIPT,
+    focusBeforePaste: true,
+    messageTimeoutMs: 45000,
+    warmupTimeoutMs: 12000
   },
   gemini: {
     name: "Gemini",
@@ -385,7 +388,7 @@ async function pasteIntoDestinationTab(tabId, destinationId, destination, text, 
       transferId
     },
     destination.contentScript,
-    DESTINATION_MESSAGE_TIMEOUT_MS,
+    destination.messageTimeoutMs || DESTINATION_MESSAGE_TIMEOUT_MS,
     destination.name,
     transferId,
     trace
@@ -395,7 +398,8 @@ async function pasteIntoDestinationTab(tabId, destinationId, destination, text, 
 async function warmDestinationTab(tabId, destination, transferId = null) {
   try {
     const startedAt = Date.now();
-    while (Date.now() - startedAt <= DESTINATION_WARMUP_TIMEOUT_MS) {
+    const timeoutMs = destination.warmupTimeoutMs || DESTINATION_WARMUP_TIMEOUT_MS;
+    while (Date.now() - startedAt <= timeoutMs) {
       if (await ensureContentScript(tabId, destination.contentScript) && await pingTab(tabId)) {
         logPerf(transferId, "tab ready", {
           tabId,
@@ -406,7 +410,7 @@ async function warmDestinationTab(tabId, destination, transferId = null) {
       }
       await delay(MESSAGE_RETRY_INTERVAL_MS);
     }
-    logPerf(transferId, "tab ready timeout", { tabId, destination: destination.name, timeoutMs: DESTINATION_WARMUP_TIMEOUT_MS });
+    logPerf(transferId, "tab ready timeout", { tabId, destination: destination.name, timeoutMs });
   } catch (error) {
     console.debug("[Context Generator Relay] Destination warmup skipped:", error?.message || error);
   }

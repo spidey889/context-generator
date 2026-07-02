@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-07-02-handoff-20s-copy";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-07-02-claude-chatgpt-reliable";
   const BUBBLE_ID = "context-generator-bubble";
   const OVERLAY_ID = "context-generator-overlay";
   const ONBOARDING_ID = "context-generator-onboarding";
@@ -42,6 +42,7 @@
   const SUMMARY_RETRY_ERROR_MESSAGE = "Try again right now. We might have made a mistake. It almost never happens the second time.";
   const MIN_FALLBACK_CONVERSATION_CHARS = 120;
   const CONVERSATION_SCRAPE_RETRY_TIMEOUT_MS = 0;
+  const CLAUDE_CONVERSATION_SCRAPE_RETRY_TIMEOUT_MS = 1800;
   const CONVERSATION_SCRAPE_RETRY_INTERVAL_MS = 140;
   const EMPTY_START_SCREEN_TEXTS = [
     "the mic is yours",
@@ -64,8 +65,10 @@
     "suggested prompts"
   ];
   const PASTE_RETRY_TIMEOUT_MS = 22000;
+  const CHATGPT_PASTE_RETRY_TIMEOUT_MS = 32000;
   const PASTE_RETRY_INTERVAL_MS = 180;
   const PASTE_VERIFY_TIMEOUT_MS = 1000;
+  const CHATGPT_PASTE_VERIFY_TIMEOUT_MS = 1500;
   const WARM_SUMMARY_TTL_MS = 30000;
   const HANDOFF_STATUS_INTERVAL_MS = 1850;
   const HANDOFF_COUNTDOWN_ID = "context-generator-handoff-countdown";
@@ -147,6 +150,8 @@
       logoSize: 21,
       logo: "logos/gptwhitedownload__1_-removebg-preview.png",
       retryPaste: true,
+      pasteRetryTimeoutMs: CHATGPT_PASTE_RETRY_TIMEOUT_MS,
+      pasteVerifyTimeoutMs: CHATGPT_PASTE_VERIFY_TIMEOUT_MS,
       maxComposerWidth: 1120,
       composerSelectors: [
         "form",
@@ -779,7 +784,7 @@
     }
 
     logTransferPerf(transferId, "destination input ready", { destination: destination.name });
-    setEditorText(input, trimmedText);
+    setEditorText(input, trimmedText, destination);
 
     if (!editorContainsText(input, trimmedText)) {
       showFallbackModal(trimmedText, destination.name);
@@ -791,11 +796,13 @@
 
   async function pasteWithRetry(text, destination, transferId = null) {
     const startedAt = Date.now();
+    const retryTimeoutMs = destination.pasteRetryTimeoutMs || PASTE_RETRY_TIMEOUT_MS;
+    const verifyTimeoutMs = destination.pasteVerifyTimeoutMs || PASTE_VERIFY_TIMEOUT_MS;
     let sawInput = false;
     let loggedInputReady = false;
     let lastError = null;
 
-    while (Date.now() - startedAt <= PASTE_RETRY_TIMEOUT_MS) {
+    while (Date.now() - startedAt <= retryTimeoutMs) {
       const input = findReadyPlatformInput(destination);
       if (input) {
         sawInput = true;
@@ -808,9 +815,9 @@
         }
 
         try {
-          setEditorText(input, text);
+          setEditorText(input, text, destination);
 
-          if (await waitForEditorText(input, text, PASTE_VERIFY_TIMEOUT_MS)) {
+          if (await waitForEditorText(input, text, verifyTimeoutMs)) {
             input.focus?.();
             return input;
           } else {
@@ -879,7 +886,7 @@
     return score;
   }
 
-  function setEditorText(element, text) {
+  function setEditorText(element, text, destination = currentPlatform) {
     element.click();
     element.focus();
 
@@ -887,6 +894,11 @@
       const valueSetter = Object.getOwnPropertyDescriptor(element.constructor.prototype, "value")?.set;
       valueSetter?.call(element, text);
       dispatchEditorEvents(element, text);
+      return;
+    }
+
+    if (destination?.id === "chatgpt") {
+      setChatGptEditorText(element, text);
       return;
     }
 
@@ -918,6 +930,73 @@
 
     dispatchEditorEvents(target, text);
     if (target !== element) dispatchEditorEvents(element, text);
+  }
+
+  function setChatGptEditorText(element, text) {
+    selectEditorContents(element);
+    dispatchBeforeInputPasteEvent(element, text);
+
+    if (!editorContainsText(element, text)) {
+      selectEditorContents(element);
+      dispatchClipboardPasteEvent(element, text);
+    }
+
+    if (!editorContainsText(element, text)) {
+      selectEditorContents(element);
+      document.execCommand("insertText", false, text);
+    }
+
+    if (!editorContainsText(element, text)) {
+      document.execCommand("selectAll", false, null);
+      document.execCommand("insertText", false, text);
+    }
+
+    if (!editorContainsText(element, text)) {
+      element.textContent = text;
+    }
+
+    dispatchEditorEvents(element, text);
+  }
+
+  function selectEditorContents(element) {
+    const selection = window.getSelection();
+    const range = document.createRange();
+    range.selectNodeContents(element);
+    selection.removeAllRanges();
+    selection.addRange(range);
+  }
+
+  function dispatchBeforeInputPasteEvent(element, text) {
+    try {
+      element.dispatchEvent(new InputEvent("beforeinput", {
+        bubbles: true,
+        cancelable: true,
+        inputType: "insertFromPaste",
+        data: text
+      }));
+    } catch {
+      element.dispatchEvent(new Event("beforeinput", { bubbles: true, cancelable: true }));
+    }
+  }
+
+  function dispatchClipboardPasteEvent(element, text) {
+    let clipboardData = null;
+    try {
+      clipboardData = new DataTransfer();
+      clipboardData.setData("text/plain", text);
+    } catch (_error) {
+      return;
+    }
+
+    try {
+      element.dispatchEvent(new ClipboardEvent("paste", {
+        bubbles: true,
+        cancelable: true,
+        clipboardData
+      }));
+    } catch (_error) {
+      // Some browsers ignore synthetic clipboard payloads. execCommand fallback follows.
+    }
   }
 
   function dispatchEditorEvents(element, text) {
@@ -968,10 +1047,23 @@
   }
 
   function editorContainsText(element, text) {
-    const expected = normalizeVerificationText(text);
+    const samples = getVerificationSamples(text);
     const actual = normalizeVerificationText(getElementText(element));
-    const sample = expected.slice(0, Math.min(24, expected.length));
-    return Boolean(sample && actual.includes(sample));
+    return samples.some((sample) => actual.includes(sample));
+  }
+
+  function getVerificationSamples(text) {
+    const expected = normalizeVerificationText(text);
+    const samples = [
+      expected.slice(0, Math.min(24, expected.length)),
+      expected.replace(/^[^a-z0-9]+/i, "").slice(0, 24)
+    ];
+
+    ["CONTEXT CARRY", "WHO I AM", "WHAT WE WERE DOING"].forEach((anchor) => {
+      if (expected.includes(anchor)) samples.push(anchor);
+    });
+
+    return [...new Set(samples.filter((sample) => sample && sample.length >= 8))];
   }
 
   function normalizeVerificationText(text) {
@@ -1029,7 +1121,7 @@
     throw new Error("Chat messages were found, but their text could not be captured yet. Try again in a moment.");
   }
 
-  async function scrapeConversationTextWhenReady(timeoutMs = CONVERSATION_SCRAPE_RETRY_TIMEOUT_MS) {
+  async function scrapeConversationTextWhenReady(timeoutMs = getConversationScrapeRetryTimeout()) {
     const startedAt = Date.now();
     let lastEmptyError = null;
 
@@ -1051,6 +1143,12 @@
 
   function isNoConversationError(error) {
     return error?.message === NO_CONVERSATION_ERROR_MESSAGE;
+  }
+
+  function getConversationScrapeRetryTimeout() {
+    return currentPlatform.id === "claude"
+      ? CLAUDE_CONVERSATION_SCRAPE_RETRY_TIMEOUT_MS
+      : CONVERSATION_SCRAPE_RETRY_TIMEOUT_MS;
   }
 
   function waitForConversationContentSignal(timeoutMs) {
