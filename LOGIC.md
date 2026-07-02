@@ -164,7 +164,9 @@ https://api.mistral.ai/v1/chat/completions
 
 The default model is `ministral-3b-2512`, with `MISTRAL_MODEL` available as an environment override. Temperature is `0.2`, and output is capped at `650` tokens by default through `MISTRAL_MAX_TOKENS` so long generations do not make the handoff feel stuck. The endpoint returns timing metadata with the summary, including total backend time, Mistral time, model, max tokens, input characters, and output characters.
 
-The system prompt tells Mistral to summarize the conversation for another AI assistant and to return the context-carry structure. The final line tells the destination AI to briefly confirm it has the context, such as `Context loaded. Let's pick up right where you left off.`, instead of giving a long response right away. The user message contains the scraped conversation text.
+The system prompt tells Mistral to summarize the conversation for another AI assistant and to return the context-carry structure. The backend normalizes every returned summary so it starts with the exact brand header `CONTEXT CARRY — READY TO PASTE`, even if Mistral omits it or uses a plain hyphen. The final line tells the destination AI to briefly confirm it has the context, such as `Context loaded. Let's pick up right where you left off.`, instead of giving a long response right away. The user message contains the scraped conversation text.
+
+Before returning the summary to the extension, the backend strips any closing instructional footer that starts with `PASTE THIS AT THE TOP OF YOUR NEW CHAT` or `Continue from where we left off`, so the destination input only receives the clean context carry content.
 
 The function returns the first choice message content as:
 
