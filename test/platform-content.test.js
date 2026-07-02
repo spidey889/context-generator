@@ -263,7 +263,7 @@ test("Claude normal row nudges model left and mic/voice right", () => {
   const modelControls = hooks.getClaudeModelControlsToNudge(placement.controls, placement.anchorControl);
 
   assert.equal(placement.inlineShift, 0);
-  assert.equal(hooks.getClaudeControlTargetOffset(modelControls[0], placement.inlineShift), -14);
+  assert.equal(hooks.getClaudeControlTargetOffset(modelControls[0], placement.inlineShift), -24);
   assert.equal(hooks.getClaudeControlTargetOffset(shiftedControls[0], placement.inlineShift), 12);
   assert.equal(hooks.getClaudeControlTargetOffset(shiftedControls[1], placement.inlineShift), 12);
   [model, mic, voiceMode].forEach((control) => {
