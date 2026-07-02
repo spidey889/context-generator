@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-07-02-error-popup-8s-slide";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-07-02-error-popup-slide-back";
   const BUBBLE_ID = "context-generator-bubble";
   const OVERLAY_ID = "context-generator-overlay";
   const ONBOARDING_ID = "context-generator-onboarding";
@@ -2798,7 +2798,7 @@
     if (!errorDiv) return;
     clearTimeout(errorDiv.contextGeneratorDisplayTimer);
     errorDiv.style.opacity = "0";
-    errorDiv.style.transform = "translate3d(-28px,0,0)";
+    errorDiv.style.transform = "translate3d(24px,0,0)";
     errorDiv.contextGeneratorDisplayTimer = setTimeout(() => {
       errorDiv.style.display = "none";
     }, 280);
