@@ -59,7 +59,7 @@ Clicking the button opens a destination picker titled `Where to continue?`. The 
 
 The first time the Cap-Context bubble appears on a supported platform, the content script can show a small onboarding nudge near the bubble. It uses a CSS-only full-body puppet with matched arms/hands, legs, shoes, shaped hair strands, brows, eye highlights, face detail, premium graphite/silver shading, and a pointing-arm animation aimed at the button. The copy stays short: `Transfer chat context` and `From this button.` The nudge is marked as extension-owned DOM, is excluded from scraping, hides when the picker opens, and stores a `localStorage` dismissed flag after the user clicks the bubble or the nudge's `OK` button.
 
-On Claude only, the content script also watches visible alert/banner-style page text for message-limit language. When Claude itself shows the user has hit the limit, a small Cap-Context-connected nudge appears next to the bubble and opens the destination picker when tapped.
+On Claude only, the content script also watches visible alert/banner-style page text for message-limit language. When Claude itself shows the user has hit the limit, a small Cap-Context-connected nudge appears next to the bubble and opens the destination picker when tapped. The nudge intentionally says `Claude's also broke by message 20`.
 
 ## Composer Placement Strategy
 

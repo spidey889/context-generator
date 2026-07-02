@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-07-02-transfer-copy-fallback";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-07-02-claude-broke-copy";
   const BUBBLE_ID = "context-generator-bubble";
   const OVERLAY_ID = "context-generator-overlay";
   const ONBOARDING_ID = "context-generator-onboarding";
@@ -34,7 +34,7 @@
   const ONBOARDING_STORAGE_KEY = "context-generator-onboarding-dismissed-v2";
   const ONBOARDING_TITLE_TEXT = "Transfer chat context";
   const ONBOARDING_BODY_TEXT = "From this button.";
-  const CLAUDE_LIMIT_NUDGE_TEXT = "Claude's brilliant. Claude also taps out around message 20. We've got you covered. Tap to continue in another AI with context.";
+  const CLAUDE_LIMIT_NUDGE_TEXT = "Claude's brilliant. Claude's also broke by message 20. We've got you covered. Tap to continue in another AI with context.";
   const ONBOARDING_SHOW_DELAY_MS = 650;
   const NO_CONVERSATION_ERROR_TITLE = "Nothing to carry yet";
   const NO_CONVERSATION_ERROR_MESSAGE = "Chat is empty. Send one message first, then I'll pack the context.";
@@ -2047,7 +2047,7 @@
     ].join(";");
 
     const firstLine = document.createElement("span");
-    firstLine.textContent = "Claude's brilliant. Claude also taps out around message 20.";
+    firstLine.textContent = "Claude's brilliant. Claude's also broke by message 20.";
     firstLine.style.fontWeight = "760";
 
     const secondLine = document.createElement("span");
