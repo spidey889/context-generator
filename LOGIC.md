@@ -216,3 +216,16 @@ If destination paste fails, the destination page shows a manual copy modal with 
 - Destination transfer is paste-only. The script intentionally avoids all automatic send/submit/Enter behavior after the summary reaches the input box.
 - Scraping intentionally happens before the overlay is shown, so extension overlay text is not sent to Mistral.
 - After reloading the unpacked extension, already-open AI tabs may still have a stale content script. The script avoids crashing on delayed asset URL lookups and shows a refresh-this-tab error if a runtime message hits an invalidated extension context.
+
+## Past Decisions
+
+[Codex: keep adding short entries here after major changes, fixes, reversions, or model/prompt decisions. Write what changed, what worked, and what got replaced. Keep it short.]
+
+- 2026-06-29: ChatGPT button moved to a page-root fixed position anchored near the model selector. This replaced fragile composer-DOM mounting that made the button disappear or get clipped.
+- 2026-06-29: Destination tile glass/shape experiments were reverted. Keep the restrained tile styling and avoid collateral edits to Grok placement helpers when changing visuals.
+- 2026-07-01: Stale-tab crashes after unpacked-extension reloads were handled with runtime guards, cached asset URLs, and a versioned content-script load id. This replaced the plain loaded flag that blocked fresh scripts.
+- 2026-07-01: Transfer speed work added trace logs, destination pre-open/warmup, warm-summary reuse, in-flight dedupe, and short summary cache. This replaced the slower serial handoff path.
+- 2026-07-02: Empty chats now stop immediately with `Nothing to carry yet`, before opening a destination tab or calling the backend. This replaced waiting/retrying on truly empty start screens.
+- 2026-07-02: Post-summary transfer/open/paste failures show the manual copy modal with the generated context. This replaced the generic source-page `Transfer failed` path when the summary already exists.
+- 2026-07-02: The backend now forces the exact `SKILL.md` boxed Context Carry template and strips the old paste-instruction footer. This replaced the simplified/free-form Mistral prompt.
+- 2026-07-02: The summarizer model is fixed to `ministral-3b-2512`. This replaced the `MISTRAL_MODEL` environment override so deployments cannot silently switch models.
