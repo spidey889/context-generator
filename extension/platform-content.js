@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-07-02-claude-wide-inline-slot";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-07-02-claude-wide-row-shift";
   const BUBBLE_ID = "context-generator-bubble";
   const OVERLAY_ID = "context-generator-overlay";
   const ONBOARDING_ID = "context-generator-onboarding";
@@ -25,8 +25,8 @@
   const BUBBLE_SIZE = 42;
   const BUBBLE_GAP = 8;
   const BUBBLE_SLOT_WIDTH = BUBBLE_SIZE + BUBBLE_GAP + 6;
-  const CLAUDE_INLINE_SLOT_WIDTH = BUBBLE_SIZE + 62;
-  const CLAUDE_INLINE_BUBBLE_GAP = 28;
+  const CLAUDE_INLINE_SLOT_WIDTH = BUBBLE_SIZE + 98;
+  const CLAUDE_INLINE_BUBBLE_GAP = 44;
   const DESTINATION_SHEET_WIDTH = 296;
   const RUNNING_AUTO_RESET_MS = 60000;
   const MAX_BACKEND_CONVERSATION_CHARS = 80000;
@@ -3776,11 +3776,7 @@
 
   function isClaudeInlineSlotActive(anchorControl, input, composerRect) {
     if (!anchorControl) return false;
-    if (reservedClaudeInlineControls.includes(anchorControl.element)) return true;
-    if (reservedActionCluster?.contains?.(anchorControl.element)) return true;
-
-    const cluster = findClaudeRightControlCluster(anchorControl.element, input, composerRect);
-    return Boolean(cluster && reservedActionCluster === cluster);
+    return reservedClaudeInlineControls.includes(anchorControl.element);
   }
 
   function getClaudeComposerControlRowTop(composerRect) {
@@ -4392,17 +4388,6 @@
   }
 
   function reserveClaudeInlineBubbleSlot(anchorControl, controls, input, composerRect) {
-    if (reservedActionCluster?.contains?.(anchorControl.element)) {
-      reserveBubbleSlotForCluster(reservedActionCluster, CLAUDE_INLINE_SLOT_WIDTH);
-      return;
-    }
-
-    const cluster = findClaudeRightControlCluster(anchorControl.element, input, composerRect);
-    if (cluster && cluster !== anchorControl.element) {
-      reserveBubbleSlotForCluster(cluster, CLAUDE_INLINE_SLOT_WIDTH);
-      return;
-    }
-
     reserveClaudeInlineControls(getClaudeInlineControlsToShift(controls, anchorControl));
   }
 
@@ -4445,37 +4430,6 @@
       if (control.rect.right < minLeft) return false;
       return !/\b(attach|upload|file|project|sidebar|side bar|menu|navigation|toggle)\b/.test(control.label);
     });
-  }
-
-  function findClaudeRightControlCluster(controlElement, input, composerRect) {
-    if (!controlElement || !composerRect) return null;
-
-    let node = controlElement.parentElement;
-    let cluster = controlElement;
-
-    while (node && node !== document.body) {
-      if (input && node.contains(input)) break;
-
-      const rect = node.getBoundingClientRect();
-      const isRightSideCluster = (
-        rect.width > 0 &&
-        rect.width <= Math.min(420, composerRect.width * 0.72) &&
-        rect.height > 0 &&
-        rect.height <= 96 &&
-        rect.left >= composerRect.left + composerRect.width * 0.45 &&
-        rect.right <= composerRect.right + 24 &&
-        rect.top >= getClaudeComposerControlRowTop(composerRect) - 24 &&
-        rect.bottom <= composerRect.bottom + 18
-      );
-
-      if (isRightSideCluster) {
-        cluster = node;
-      }
-
-      node = node.parentElement;
-    }
-
-    return cluster;
   }
 
   function findActionCluster(actionBtn, input) {

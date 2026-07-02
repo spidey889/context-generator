@@ -65,7 +65,7 @@ On Claude only, the content script also watches visible alert/banner-style page 
 
 Claude, ChatGPT, Gemini, Grok, and DeepSeek intentionally do not use the shared native-control shifting path. Their composers re-render and resize often, so moving their native action clusters with `transform` can cause flicker, jumping, or broken-looking UI.
 
-For Claude, `updateFloatingButtonPosition()` calls the Claude-specific branch before the old shared placement path. It keeps Cap-Context mounted on the composer surface with absolute coordinates, anchors to the bottom-row voice mode control when possible, shifts Claude's right-side controls left by a 104px inline lane, and places Cap-Context in the freed slot with a 28px visual gap after the anchor. If the voice mode label is missing, it uses the rightmost small control in the same row so the bubble stays linear with the native buttons.
+For Claude, `updateFloatingButtonPosition()` calls the Claude-specific branch before the old shared placement path. It keeps Cap-Context mounted on the composer surface with absolute coordinates, anchors to the bottom-row voice mode control when possible, shifts the detected right-side row controls left by a 140px inline lane, and places Cap-Context in the freed slot with a 44px visual gap after the anchor. If typing makes Claude replace mic/voice with the send button, send may be used as the row baseline, but the whole detected row is shifted together so send does not collide with the model selector.
 
 For ChatGPT, `ensureFloatingButton()` and `updateFloatingButtonPosition()` take the ChatGPT-specific branch before the normal composer-surface path. That branch releases any old reserved action slot, releases any old reserved composer surface, appends the button to the page root, and switches it to fixed positioning. It then scans the page for the bottom-right intelligence/model selector (`Instant`, `Medium`, or `High`) and places Cap-Context immediately to the left of that selector. If the selector cannot be detected yet, it falls back to the composer/form/input rectangle and clamps the button inside the viewport. This means the button still appears while ChatGPT is hydrating or reshuffling its composer DOM.
 
@@ -79,7 +79,7 @@ Composer scoring also gives ChatGPT and DeepSeek a bonus for candidates that inc
 
 ## Claude Voice-Mode Overlay Rule, July 2 2026
 
-Claude placement should stay Claude-only, composer-surface mounted, and absolute-positioned. Do not append Cap-Context to Claude's action row. The preferred visual order is model controls, mic, voice mode, then Cap-Context on the same horizontal line. To make room, the Claude branch may shift the right-side composer control wrapper, or the right-side controls themselves, left by the Claude-specific 104px inline lane. Keep the gap after voice mode roomy enough that Claude's mic/voice controls do not look stacked or squeezed. If the voice mode button cannot be detected by label, use the rightmost small composer-row control as the anchor instead of moving the bubble above the row.
+Claude placement should stay Claude-only, composer-surface mounted, and absolute-positioned. Do not append Cap-Context to Claude's action row. The preferred visual order is model controls, mic, voice mode, then Cap-Context on the same horizontal line. To make room, the Claude branch shifts detected right-side row controls themselves left by the Claude-specific 140px inline lane instead of shifting a parent wrapper that might only contain send. Keep the gap after voice mode roomy enough that Claude's mic/voice controls do not look stacked or squeezed. If the voice mode button cannot be detected by label, use the rightmost small composer-row control as the baseline instead of moving the bubble above the row.
 
 ## ChatGPT Button Fix, June 29 2026
 
@@ -219,7 +219,7 @@ If destination paste fails, the destination page shows a manual copy modal with 
 ## Tricky Parts
 
 - Each AI platform has a different editor DOM, so input detection is platform-specific but still scored generically.
-- The floating button has to track each platform's composer without transforming native controls. Claude, ChatGPT, Gemini, Grok, and DeepSeek should keep their own action rows in place.
+- The floating button has to track each platform's composer without breaking native controls. Claude is the deliberate exception that shifts detected right-side row controls left to create a stable inline slot; ChatGPT, Gemini, Grok, and DeepSeek should keep their native action rows in place.
 - The MutationObserver would loop forever if it reacted to its own UI. The script marks owned nodes and ignores mutations that are only caused by the extension.
 - Conversation scraping is best-effort. It tries structured message turns first, then falls back to page text when a platform changes its markup.
 - Programmatic pasting into modern AI editors is finicky. The script uses native setters, `execCommand("insertText")`, retries, direct `textContent` fallback, and synthetic beforeinput/input/change events.
@@ -249,4 +249,4 @@ If destination paste fails, the destination page shows a manual copy modal with 
 - 2026-07-02: Claude placement now anchors Cap-Context to the right side of the voice mode control when safe, then falls back to a collision-checked composer overlay slot. This replaces the generic rightmost action-row anchor that could crowd the mic and voice controls.
 - 2026-07-02: Claude placement now deliberately creates an inline row slot by shifting the right-side composer controls left and placing Cap-Context after voice mode. This replaces the above-row collision fallback that made the bubble float near the upper-right of the composer.
 - 2026-07-02: Claude's limit nudge is now dismissed for the current visible limit banner after the user clicks the bubble/nudge or focuses the composer. This replaces the repeated re-show behavior caused by Claude's own limit banner remaining visible.
-- 2026-07-02: Claude inline placement now uses a wide 104px lane and 28px post-anchor gap. This replaces the earlier 72px lane that still left Claude's mic/voice controls looking crowded beside Cap-Context.
+- 2026-07-02: Claude inline placement now shifts detected row controls themselves by a 140px lane with a 44px post-anchor gap. This replaces wrapper shifting and the earlier 104px lane, which could make Claude's typed-state send button collide with the model selector.

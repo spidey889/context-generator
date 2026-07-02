@@ -216,7 +216,7 @@ test("Claude bubble fills the inline slot to the right of voice mode", () => {
   const placement = hooks.getClaudeBubblePlacement(getClaudeComposerRect());
 
   assert.equal(placement.anchorControl.element, voiceMode);
-  assert.equal(placement.left, 560);
+  assert.equal(placement.left, 540);
   assert.equal(placement.top, 63);
 });
 
@@ -234,7 +234,7 @@ test("Claude bubble uses the rightmost small control when voice mode is unlabele
   const placement = hooks.getClaudeBubblePlacement(getClaudeComposerRect());
 
   assert.equal(placement.anchorControl.element, unlabeledVoiceMode);
-  assert.equal(placement.left, 560);
+  assert.equal(placement.left, 540);
   assert.equal(placement.top, 63);
 });
 
@@ -259,7 +259,28 @@ test("Claude inline slot avoids shifted native composer controls", () => {
   const bubbleRect = localPlacementToPageRect(placement, getClaudeComposerRect());
 
   [model, mic, voiceMode].forEach((control) => {
-    assert.equal(rectsIntersect(bubbleRect, shiftedLeft(control.getBoundingClientRect(), 104)), false);
+    assert.equal(rectsIntersect(bubbleRect, shiftedLeft(control.getBoundingClientRect(), 140)), false);
+  });
+});
+
+test("Claude typed-state send button shifts with the model controls", () => {
+  const model = new FakeElement({
+    tag: "button",
+    attrs: { "aria-label": "Model selector" },
+    rect: { left: 520, right: 640, top: 166, bottom: 202, width: 120, height: 36 }
+  });
+  const send = new FakeElement({
+    tag: "button",
+    attrs: { "aria-label": "Send message" },
+    rect: { left: 700, right: 736, top: 166, bottom: 202, width: 36, height: 36 }
+  });
+  const hooks = loadPlatformContent([model, send], "claude.ai");
+  const placement = hooks.getClaudeBubblePlacement(getClaudeComposerRect());
+  const bubbleRect = localPlacementToPageRect(placement, getClaudeComposerRect());
+
+  assert.equal(placement.anchorControl.element, send);
+  [model, send].forEach((control) => {
+    assert.equal(rectsIntersect(bubbleRect, shiftedLeft(control.getBoundingClientRect(), 140)), false);
   });
 });
 
