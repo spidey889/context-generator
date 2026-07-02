@@ -1,0 +1,181 @@
+const assert = require("node:assert/strict");
+const fs = require("node:fs");
+const path = require("node:path");
+const test = require("node:test");
+const vm = require("node:vm");
+
+const SOURCE_PATH = path.join(__dirname, "..", "extension", "platform-content.js");
+
+let nextOrder = 1;
+
+class FakeElement {
+  constructor({ tag = "div", text = "", attrs = {}, rect = null } = {}) {
+    this.localName = tag;
+    this.textContent = text;
+    this.innerText = text;
+    this.value = "";
+    this.id = attrs.id || "";
+    this.className = attrs.class || "";
+    this.dataset = {};
+    this.style = {};
+    this.attrs = { ...attrs };
+    this.children = [];
+    this.parentElement = null;
+    this.order = nextOrder;
+    nextOrder += 1;
+    this.rect = rect || { width: 320, height: 80, top: 0, left: 0, right: 320, bottom: 80 };
+  }
+
+  getAttribute(name) {
+    return this.attrs[name] ?? null;
+  }
+
+  hasAttribute(name) {
+    return Object.prototype.hasOwnProperty.call(this.attrs, name);
+  }
+
+  matches(selector) {
+    if (/input|textarea|button|select/.test(selector) && /^(input|textarea|button|select)$/.test(this.localName)) {
+      return true;
+    }
+    if (selector.includes("[contenteditable='true']") && this.attrs.contenteditable === "true") {
+      return true;
+    }
+    return false;
+  }
+
+  closest() {
+    return null;
+  }
+
+  contains(node) {
+    return node === this || this.children.some((child) => child.contains(node));
+  }
+
+  compareDocumentPosition(other) {
+    return this.order > other.order ? 2 : 4;
+  }
+
+  cloneNode() {
+    return new FakeElement({
+      tag: this.localName,
+      text: this.textContent,
+      attrs: { ...this.attrs },
+      rect: { ...this.rect }
+    });
+  }
+
+  querySelectorAll() {
+    return [];
+  }
+
+  getBoundingClientRect() {
+    return this.rect;
+  }
+
+  remove() {}
+}
+
+function loadPlatformContent(elements = [], hostname = "chatgpt.com") {
+  nextOrder = 1;
+  let hooks = null;
+  const document = {
+    body: new FakeElement({ tag: "body" }),
+    documentElement: new FakeElement({ tag: "html" }),
+    activeElement: null,
+    getElementById: () => null,
+    querySelectorAll: () => elements,
+    addEventListener: () => {},
+    removeEventListener: () => {}
+  };
+  const window = {
+    location: { hostname },
+    __CONTEXT_GENERATOR_TEST_HOOKS__: {
+      register(value) {
+        hooks = value;
+      }
+    },
+    getComputedStyle: () => ({ display: "block", visibility: "visible" }),
+    performance: { now: () => 0 },
+    addEventListener: () => {},
+    removeEventListener: () => {},
+    setTimeout,
+    clearTimeout
+  };
+  const chrome = {
+    runtime: {
+      onMessage: { addListener: () => {} },
+      sendMessage: async () => ({ ok: true }),
+      getURL: (assetPath) => `chrome-extension://test/${assetPath}`
+    }
+  };
+  const sandbox = {
+    console,
+    document,
+    window,
+    chrome,
+    Element: FakeElement,
+    Node: { DOCUMENT_POSITION_PRECEDING: 2 },
+    setTimeout,
+    clearTimeout
+  };
+
+  vm.createContext(sandbox);
+  vm.runInContext(fs.readFileSync(SOURCE_PATH, "utf8"), sandbox, { filename: SOURCE_PATH });
+  assert.ok(hooks, "platform-content test hooks were registered");
+  return hooks;
+}
+
+test("conversation scraping rejects an empty chat", () => {
+  const hooks = loadPlatformContent([]);
+
+  assert.throws(
+    () => hooks.scrapeConversationText(),
+    /Chat is empty\. Send one message first/
+  );
+});
+
+test("conversation scraping preserves detected user and assistant roles", () => {
+  const userTurn = new FakeElement({
+    text: "Please make the fallback modal better.",
+    attrs: { "data-message-author-role": "user" }
+  });
+  const assistantTurn = new FakeElement({
+    text: "I will update the modal and add focused tests.",
+    attrs: { "data-message-author-role": "assistant" }
+  });
+  const hooks = loadPlatformContent([userTurn, assistantTurn]);
+
+  assert.equal(hooks.getConversationRole(userTurn), "User");
+  assert.equal(hooks.getConversationRole(assistantTurn), "ChatGPT");
+
+  const transcript = hooks.scrapeConversationText();
+  assert.match(transcript, /^ChatGPT conversation:/);
+  assert.match(transcript, /User: Please make the fallback modal better\./);
+  assert.match(transcript, /ChatGPT: I will update the modal and add focused tests\./);
+});
+
+test("paste verification accepts stable context anchors when box characters differ", () => {
+  const hooks = loadPlatformContent([]);
+  const expected = [
+    "CONTEXT CARRY - READY TO PASTE",
+    "",
+    "WHO I AM",
+    "Building Context Generator.",
+    "",
+    "WHAT WE WERE DOING",
+    "Testing paste verification."
+  ].join("\n");
+  const editor = new FakeElement({
+    text: "CONTEXT CARRY READY TO PASTE\n\nWHO I AM\nBuilding Context Generator."
+  });
+
+  assert.equal(hooks.editorContainsText(editor, expected), true);
+});
+
+test("paste verification rejects unrelated editor text", () => {
+  const hooks = loadPlatformContent([]);
+  const editor = new FakeElement({ text: "A blank new chat input" });
+
+  assert.equal(hooks.editorContainsText(editor, "CONTEXT CARRY\n\nWHO I AM\nProject details"), false);
+});

@@ -388,7 +388,17 @@
     return false;
   });
 
-  startFloatingButtonMonitoring();
+  if (window.__CONTEXT_GENERATOR_TEST_HOOKS__?.register) {
+    window.__CONTEXT_GENERATOR_TEST_HOOKS__.register({
+      scrapeConversationText,
+      getConversationRole,
+      editorContainsText,
+      getVerificationSamples,
+      normalizeVerificationText
+    });
+  } else {
+    startFloatingButtonMonitoring();
+  }
 
   async function runContextFlow(destinationId, preparedDestinationPromise = null, warmSummaryRecord = null, scrapedConversationText = null, trace = null) {
     const transferTrace = trace || createTransferTrace(destinationId, "transfer");
@@ -3199,118 +3209,247 @@
       modal = document.createElement("div");
       modal.id = "context-generator-fallback-modal";
       modal.dataset.contextGeneratorOwned = "true";
-      modal.style.position = "fixed";
-      modal.style.zIndex = "99999999";
-      modal.style.top = "0";
-      modal.style.left = "0";
-      modal.style.width = "100%";
-      modal.style.height = "100%";
-      modal.style.backgroundColor = "rgba(0, 0, 0, 0.6)";
-      modal.style.display = "flex";
-      modal.style.alignItems = "center";
-      modal.style.justifyContent = "center";
-      modal.style.fontFamily = "-apple-system, BlinkMacSystemFont, sans-serif";
+      modal.setAttribute("role", "dialog");
+      modal.setAttribute("aria-modal", "true");
+      modal.setAttribute("aria-labelledby", "context-generator-fallback-title");
+      modal.setAttribute("aria-describedby", "context-generator-fallback-desc");
+      modal.style.cssText = [
+        "position:fixed",
+        "z-index:2147483647",
+        "inset:0",
+        "display:flex",
+        "align-items:center",
+        "justify-content:center",
+        "box-sizing:border-box",
+        "padding:18px",
+        "background:rgba(0,0,0,0.68)",
+        "backdrop-filter:blur(12px)",
+        "font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif"
+      ].join(";");
 
       const content = document.createElement("div");
-      content.style.backgroundColor = "#2f2f2f";
-      content.style.color = "#ffffff";
-      content.style.padding = "24px";
-      content.style.borderRadius = "12px";
-      content.style.maxWidth = "500px";
-      content.style.width = "90%";
-      content.style.boxShadow = "0 8px 32px rgba(0, 0, 0, 0.4)";
-      content.style.display = "flex";
-      content.style.flexDirection = "column";
-      content.style.gap = "16px";
+      content.style.cssText = [
+        "position:relative",
+        "width:min(560px,100%)",
+        "box-sizing:border-box",
+        "display:flex",
+        "flex-direction:column",
+        "gap:16px",
+        "padding:26px",
+        "border-radius:26px",
+        "border:1px solid rgba(255,255,255,0.14)",
+        "background:linear-gradient(180deg,#171719 0%,#101012 58%,#09090b 100%)",
+        "color:#f5f5f5",
+        "box-shadow:0 28px 84px rgba(0,0,0,0.58),0 0 0 1px rgba(0,0,0,0.72),inset 0 1px 0 rgba(255,255,255,0.08)",
+        "overflow:hidden"
+      ].join(";");
+
+      const accent = document.createElement("div");
+      accent.style.cssText = [
+        "position:absolute",
+        "inset:-1px",
+        "pointer-events:none",
+        "background:radial-gradient(circle at 50% -18%,rgba(255,255,255,0.12),transparent 36%),linear-gradient(180deg,rgba(255,255,255,0.045),transparent 48%)"
+      ].join(";");
+
+      const header = document.createElement("div");
+      header.style.cssText = "position:relative;z-index:1;display:flex;align-items:flex-start;justify-content:space-between;gap:16px";
+
+      const copyWrap = document.createElement("div");
+      copyWrap.style.cssText = "display:flex;flex-direction:column;gap:7px;min-width:0";
 
       const title = document.createElement("div");
-      title.style.fontSize = "18px";
-      title.style.fontWeight = "bold";
-      title.textContent = "Auto-paste failed";
+      title.id = "context-generator-fallback-title";
+      title.style.cssText = [
+        "font-family:Georgia,'Times New Roman',serif",
+        "font-size:22px",
+        "font-weight:500",
+        "line-height:1.1",
+        "letter-spacing:0",
+        "color:#ffffff"
+      ].join(";");
+      title.textContent = "Context is ready to copy";
 
       const desc = document.createElement("div");
       desc.id = "context-generator-fallback-desc";
-      desc.style.fontSize = "14px";
-      desc.style.color = "#c5c5c5";
+      desc.style.cssText = [
+        "font-size:13px",
+        "line-height:1.5",
+        "color:rgba(255,255,255,0.64)",
+        "max-width:430px"
+      ].join(";");
+
+      const dismissBtn = document.createElement("button");
+      dismissBtn.id = "context-generator-fallback-dismiss";
+      dismissBtn.type = "button";
+      dismissBtn.textContent = "Close";
+      dismissBtn.style.cssText = [
+        "height:32px",
+        "padding:0 12px",
+        "border-radius:999px",
+        "border:1px solid rgba(255,255,255,0.14)",
+        "background:rgba(255,255,255,0.045)",
+        "color:rgba(255,255,255,0.72)",
+        "font-size:12px",
+        "font-weight:650",
+        "cursor:pointer"
+      ].join(";");
 
       const textarea = document.createElement("textarea");
       textarea.id = "context-generator-fallback-text";
       textarea.readOnly = true;
-      textarea.style.height = "150px";
-      textarea.style.backgroundColor = "#1e1e1e";
-      textarea.style.color = "#d4d4d4";
-      textarea.style.border = "1px solid #4f4f4f";
-      textarea.style.borderRadius = "6px";
-      textarea.style.padding = "10px";
-      textarea.style.fontFamily = "monospace";
-      textarea.style.fontSize = "12px";
-      textarea.style.resize = "none";
+      textarea.setAttribute("aria-label", "Generated context to copy");
+      textarea.style.cssText = [
+        "position:relative",
+        "z-index:1",
+        "height:min(230px,38vh)",
+        "min-height:150px",
+        "box-sizing:border-box",
+        "resize:vertical",
+        "padding:14px",
+        "border-radius:14px",
+        "border:1px solid rgba(255,255,255,0.13)",
+        "background:rgba(0,0,0,0.34)",
+        "box-shadow:inset 0 1px 0 rgba(255,255,255,0.04)",
+        "color:#f0f0f0",
+        "font-family:'SFMono-Regular',Consolas,'Liberation Mono',monospace",
+        "font-size:12px",
+        "line-height:1.5",
+        "outline:none"
+      ].join(";");
 
       const buttonContainer = document.createElement("div");
-      buttonContainer.style.display = "flex";
-      buttonContainer.style.justifyContent = "flex-end";
-      buttonContainer.style.gap = "10px";
+      buttonContainer.style.cssText = "position:relative;z-index:1;display:flex;justify-content:flex-end;gap:10px;flex-wrap:wrap";
 
       const copyBtn = document.createElement("button");
+      copyBtn.id = "context-generator-fallback-copy";
+      copyBtn.type = "button";
       copyBtn.textContent = "Copy Context";
-      copyBtn.style.padding = "8px 16px";
-      copyBtn.style.borderRadius = "6px";
-      copyBtn.style.border = "none";
-      copyBtn.style.backgroundColor = "#d97706";
-      copyBtn.style.color = "#ffffff";
-      copyBtn.style.cursor = "pointer";
-      copyBtn.style.fontWeight = "bold";
+      copyBtn.style.cssText = [
+        "height:38px",
+        "padding:0 16px",
+        "border-radius:999px",
+        "border:1px solid rgba(255,255,255,0.18)",
+        "background:linear-gradient(180deg,#f5f5f5,#d8d8d8)",
+        "box-shadow:0 10px 24px rgba(0,0,0,0.24),inset 0 1px 0 rgba(255,255,255,0.7)",
+        "color:#111114",
+        "font-size:13px",
+        "font-weight:750",
+        "cursor:pointer"
+      ].join(";");
 
-      const dismissBtn = document.createElement("button");
-      dismissBtn.textContent = "Dismiss";
-      dismissBtn.style.padding = "8px 16px";
-      dismissBtn.style.borderRadius = "6px";
-      dismissBtn.style.border = "1px solid #5f5f5f";
-      dismissBtn.style.backgroundColor = "transparent";
-      dismissBtn.style.color = "#ffffff";
-      dismissBtn.style.cursor = "pointer";
+      const setFocusStyle = (button, active) => {
+        button.style.outline = active ? "2px solid rgba(255,255,255,0.42)" : "none";
+        button.style.outlineOffset = active ? "3px" : "0";
+      };
 
       copyBtn.addEventListener("click", async () => {
         const currentText = textarea.value || "";
         try {
+          if (!navigator.clipboard?.writeText) throw new Error("Clipboard API unavailable.");
           await navigator.clipboard.writeText(currentText);
           copyBtn.textContent = "Copied!";
-          copyBtn.style.backgroundColor = "#10b981";
+          copyBtn.style.background = "linear-gradient(180deg,#69e6a2,#21b36b)";
+          copyBtn.style.color = "#07150d";
           setTimeout(() => {
+            if (!copyBtn.isConnected) return;
             copyBtn.textContent = "Copy Context";
-            copyBtn.style.backgroundColor = "#d97706";
+            copyBtn.style.background = "linear-gradient(180deg,#f5f5f5,#d8d8d8)";
+            copyBtn.style.color = "#111114";
           }, 2000);
         } catch (err) {
           textarea.select();
           document.execCommand("copy");
           copyBtn.textContent = "Copied!";
-          copyBtn.style.backgroundColor = "#10b981";
+          copyBtn.style.background = "linear-gradient(180deg,#69e6a2,#21b36b)";
+          copyBtn.style.color = "#07150d";
         }
       });
 
-      dismissBtn.addEventListener("click", () => {
+      const closeModal = () => {
+        document.removeEventListener("keydown", modal.contextGeneratorKeydownHandler);
+        const previousFocus = modal.contextGeneratorPreviousFocus;
         modal.remove();
-      });
+        setTimeout(() => previousFocus?.focus?.({ preventScroll: true }), 0);
+      };
 
-      buttonContainer.appendChild(dismissBtn);
-      buttonContainer.appendChild(copyBtn);
-      content.appendChild(title);
-      content.appendChild(desc);
+      modal.contextGeneratorKeydownHandler = (event) => {
+        if (event.key === "Escape") {
+          event.preventDefault();
+          closeModal();
+          return;
+        }
+
+        if (event.key !== "Tab") return;
+
+        const focusable = Array.from(modal.querySelectorAll("button, textarea"))
+          .filter((node) => !node.disabled && node.offsetParent !== null);
+        if (!focusable.length) return;
+
+        const first = focusable[0];
+        const last = focusable[focusable.length - 1];
+        if (event.shiftKey && document.activeElement === first) {
+          event.preventDefault();
+          last.focus();
+        } else if (!event.shiftKey && document.activeElement === last) {
+          event.preventDefault();
+          first.focus();
+        }
+      };
+
+      modal.contextGeneratorClose = closeModal;
+      modal.addEventListener("click", (event) => {
+        if (event.target === modal) closeModal();
+      });
+      content.addEventListener("click", (event) => event.stopPropagation());
+      [copyBtn, dismissBtn].forEach((button) => {
+        button.addEventListener("focus", () => setFocusStyle(button, true));
+        button.addEventListener("blur", () => setFocusStyle(button, false));
+      });
+      dismissBtn.addEventListener("click", closeModal);
+
+      copyWrap.appendChild(title);
+      copyWrap.appendChild(desc);
+      header.appendChild(copyWrap);
+      header.appendChild(dismissBtn);
+
+      content.appendChild(accent);
+      content.appendChild(header);
       content.appendChild(textarea);
       content.appendChild(buttonContainer);
+      buttonContainer.appendChild(copyBtn);
       modal.appendChild(content);
       document.body.appendChild(modal);
+      document.addEventListener("keydown", modal.contextGeneratorKeydownHandler);
+    } else {
+      modal.style.display = "flex";
+      if (!modal.contextGeneratorKeydownHandler) {
+        modal.contextGeneratorKeydownHandler = (event) => {
+          if (event.key === "Escape") {
+            event.preventDefault();
+            modal.contextGeneratorClose?.();
+          }
+        };
+        document.addEventListener("keydown", modal.contextGeneratorKeydownHandler);
+      }
     }
+
+    modal.contextGeneratorPreviousFocus = document.activeElement;
 
     const desc = document.getElementById("context-generator-fallback-desc");
     if (desc) {
-      desc.textContent = `We couldn't paste the context into ${destinationName}. Please copy it below and paste it manually:`;
+      desc.textContent = `Auto-paste did not land in ${destinationName}. The context is safe here - copy it, paste it into the message box, then send when ready.`;
     }
 
     const textarea = document.getElementById("context-generator-fallback-text");
     if (textarea) {
       textarea.value = text;
+      textarea.scrollTop = 0;
     }
+
+    setTimeout(() => {
+      document.getElementById("context-generator-fallback-copy")?.focus?.({ preventScroll: true });
+    }, 0);
   }
 
   function updateFloatingButtonPosition() {

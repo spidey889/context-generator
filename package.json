@@ -1,0 +1,7 @@
+{
+  "name": "context-generator",
+  "private": true,
+  "scripts": {
+    "test": "node --test"
+  }
+}

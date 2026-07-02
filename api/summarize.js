@@ -44,7 +44,7 @@ const CONTEXT_CARRY_SECTIONS = [
 const DESTINATION_CONFIRMATION_INSTRUCTION =
   'Reply only: "Context loaded. Let\'s pick up right where you left off." Then wait for the user.';
 
-module.exports = async function handler(req, res) {
+async function handler(req, res) {
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
   res.setHeader("Access-Control-Allow-Headers", "Content-Type");
@@ -148,6 +148,13 @@ ${CONTEXT_CARRY_TEMPLATE}`,
     console.error("Summarize error:", error);
     return res.status(500).json({ error: "Unexpected summarization error" });
   }
+}
+
+module.exports = handler;
+module.exports.__test = {
+  normalizeContextCarrySummary,
+  normalizeContextCarrySections,
+  stripContextCarryFooter
 };
 
 async function fetchWithRetry(url, options) {
