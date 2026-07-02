@@ -9,20 +9,20 @@
     "128": "icon128.png"
   },
   "permissions": [
-    "activeTab", // required to start a handoff from the user-selected active AI tab.
-    "scripting", // required to inject/reinject platform-content.js into supported AI tabs.
-    "tabs" // required to open, warm, focus, and message destination AI tabs.
+    "activeTab",
+    "scripting",
+    "tabs"
   ],
   "host_permissions": [
-    "https://*.claude.ai/*", // required to show the button, scrape Claude chats, and paste summaries into Claude.
-    "https://chatgpt.com/*", // required to show the button, scrape ChatGPT chats, and paste summaries into ChatGPT.
-    "https://*.chatgpt.com/*", // required for ChatGPT subdomains that host the same chat experience.
-    "https://openai.com/*", // required for OpenAI-hosted ChatGPT pages that use the OpenAI domain.
-    "https://*.openai.com/*", // required for OpenAI subdomains that can host ChatGPT pages.
-    "https://gemini.google.com/*", // required to show the button, scrape Gemini chats, and paste summaries into Gemini.
-    "https://grok.com/*", // required to show the button, scrape Grok chats, and paste summaries into Grok.
-    "https://chat.deepseek.com/*", // required to show the button, scrape DeepSeek chats, and paste summaries into DeepSeek.
-    "https://context-generator-five.vercel.app/*" // required for background requests to the summarization backend.
+    "https://*.claude.ai/*",
+    "https://chatgpt.com/*",
+    "https://*.chatgpt.com/*",
+    "https://openai.com/*",
+    "https://*.openai.com/*",
+    "https://gemini.google.com/*",
+    "https://grok.com/*",
+    "https://chat.deepseek.com/*",
+    "https://context-generator-five.vercel.app/*"
   ],
   "background": {
     "service_worker": "background.js"

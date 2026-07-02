@@ -69,6 +69,7 @@
   const PASTE_RETRY_INTERVAL_MS = 180;
   const PASTE_VERIFY_TIMEOUT_MS = 1000;
   const CHATGPT_PASTE_VERIFY_TIMEOUT_MS = 1500;
+  const CHATGPT_PASTE_STABILITY_MS = 550;
   const WARM_SUMMARY_TTL_MS = 30000;
   const HANDOFF_STATUS_INTERVAL_MS = 1850;
   const HANDOFF_COUNTDOWN_ID = "context-generator-handoff-countdown";
@@ -152,6 +153,7 @@
       retryPaste: true,
       pasteRetryTimeoutMs: CHATGPT_PASTE_RETRY_TIMEOUT_MS,
       pasteVerifyTimeoutMs: CHATGPT_PASTE_VERIFY_TIMEOUT_MS,
+      pasteStabilityMs: CHATGPT_PASTE_STABILITY_MS,
       maxComposerWidth: 1120,
       composerSelectors: [
         "form",
@@ -808,6 +810,7 @@
     const startedAt = Date.now();
     const retryTimeoutMs = destination.pasteRetryTimeoutMs || PASTE_RETRY_TIMEOUT_MS;
     const verifyTimeoutMs = destination.pasteVerifyTimeoutMs || PASTE_VERIFY_TIMEOUT_MS;
+    const stabilityMs = destination.pasteStabilityMs || 0;
     let sawInput = false;
     let loggedInputReady = false;
     let lastError = null;
@@ -828,6 +831,13 @@
           setEditorText(input, text, destination);
 
           if (await waitForEditorText(input, text, verifyTimeoutMs)) {
+            if (stabilityMs > 0) {
+              await delay(stabilityMs);
+              if (!editorContainsText(input, text)) {
+                lastError = new Error(`${destination.name} editor cleared the pasted context after first insert.`);
+                continue;
+              }
+            }
             input.focus?.();
             return input;
           } else {

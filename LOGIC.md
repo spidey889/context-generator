@@ -184,6 +184,8 @@ The background worker validates the destination, opens the destination URL immed
 
 Claude-to-ChatGPT is the priority transfer route. On Claude, conversation capture waits briefly for delayed message DOM before showing an empty-chat failure. On ChatGPT, the destination tab is focused before paste, gets a longer message/paste window, and uses a ChatGPT-specific paste path with paste-like events, `execCommand`, and direct DOM fallback. Paste verification uses stable text anchors such as `CONTEXT CARRY`, `WHO I AM`, and `WHAT WE WERE DOING`, so the transfer is not marked failed just because box drawing characters render differently in the editor.
 
+The first ChatGPT paste after opening or reloading the extension is treated as unstable. ChatGPT can briefly expose a composer, accept inserted text, then clear that DOM during hydration. The background worker gives ChatGPT a tiny focus-settle delay before paste, and the destination content script requires pasted context to remain present for a short stability window before returning success. If the text is wiped, the same transfer retries paste instead of making the first user attempt look blank.
+
 The destination tab receives `PASTE_CONTEXT`, finds the destination input with that platform's input selectors, and writes the summary into the editor.
 
 For textarea/input editors, it uses the native value setter and dispatches input/change events.
@@ -235,3 +237,4 @@ If destination paste fails, the destination page shows a manual copy modal with 
 - 2026-07-02: The destination confirmation is now enforced by backend normalization, not just by the Mistral prompt. This replaced preserving Mistral's generated `NEXT STEP`, which could still make the destination AI start answering immediately.
 - 2026-07-02: Claude-to-ChatGPT reliability became the main transfer priority. Claude capture now has a short DOM retry, ChatGPT focuses before paste, and ChatGPT paste verification uses stable context anchors instead of only leading box characters.
 - 2026-07-02: Added a minimal Node test runner with focused coverage for summary normalization, conversation scraping, and paste verification. The manual copy fallback modal was polished with clearer copy, Escape/backdrop close, focus restore, and initial focus on the copy action.
+- 2026-07-02: First-run ChatGPT paste can be wiped by page hydration after a quick successful insert. ChatGPT now has a small activation settle and paste-stability check that retries if the editor clears the context.

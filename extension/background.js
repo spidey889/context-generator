@@ -23,6 +23,7 @@ const DESTINATIONS = {
     url: CHATGPT_URL,
     contentScript: PLATFORM_CONTENT_SCRIPT,
     focusBeforePaste: true,
+    activationSettleMs: 350,
     messageTimeoutMs: 45000,
     warmupTimeoutMs: 12000
   },
@@ -295,6 +296,11 @@ async function transferToDestination(destinationId, text, preparedTabId = null, 
       markBackgroundTrace(trace, "tab activate before paste start", { tabId: destinationTabId });
       await activateDestinationTab(destinationTabId);
       markBackgroundTrace(trace, "tab activate before paste done", { tabId: destinationTabId });
+      if (destination.activationSettleMs) {
+        markBackgroundTrace(trace, "tab activation settle start", { tabId: destinationTabId, settleMs: destination.activationSettleMs });
+        await delay(destination.activationSettleMs);
+        markBackgroundTrace(trace, "tab activation settle done", { tabId: destinationTabId });
+      }
     }
     markBackgroundTrace(trace, "paste message start", { tabId: destinationTabId, destination: destinationId });
     pasteResult = await pasteIntoDestinationTab(destinationTabId, destinationId, destination, trimmedText, transferId, trace);
