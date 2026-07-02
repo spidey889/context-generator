@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-07-02-claude-limit-nudge-dismiss";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-07-02-claude-roomy-inline-slot";
   const BUBBLE_ID = "context-generator-bubble";
   const OVERLAY_ID = "context-generator-overlay";
   const ONBOARDING_ID = "context-generator-onboarding";
@@ -25,6 +25,8 @@
   const BUBBLE_SIZE = 42;
   const BUBBLE_GAP = 8;
   const BUBBLE_SLOT_WIDTH = BUBBLE_SIZE + BUBBLE_GAP + 6;
+  const CLAUDE_INLINE_SLOT_WIDTH = BUBBLE_SIZE + 30;
+  const CLAUDE_INLINE_BUBBLE_GAP = 16;
   const DESTINATION_SHEET_WIDTH = 296;
   const RUNNING_AUTO_RESET_MS = 60000;
   const MAX_BACKEND_CONVERSATION_CHARS = 80000;
@@ -3686,9 +3688,9 @@
     const anchorControl = findClaudeVoiceModeControl(controls) || findClaudeInlineFallbackControl(controls);
 
     if (anchorControl) {
-      const activeShift = isClaudeInlineSlotActive(anchorControl, input, composerRect) ? 0 : BUBBLE_SLOT_WIDTH;
+      const activeShift = isClaudeInlineSlotActive(anchorControl, input, composerRect) ? 0 : CLAUDE_INLINE_SLOT_WIDTH;
       const left = clampNumber(
-        anchorControl.rect.right - composerRect.left - activeShift + BUBBLE_GAP,
+        anchorControl.rect.right - composerRect.left - activeShift + CLAUDE_INLINE_BUBBLE_GAP,
         BUBBLE_GAP,
         Math.max(BUBBLE_GAP, composerRect.width - BUBBLE_SIZE - BUBBLE_GAP)
       );
@@ -4366,7 +4368,7 @@
     reserveBubbleSlotForCluster(cluster);
   }
 
-  function reserveBubbleSlotForCluster(cluster) {
+  function reserveBubbleSlotForCluster(cluster, slotWidth = BUBBLE_SLOT_WIDTH) {
     if (!cluster) return;
 
     releaseClaudeInlineControlSlots();
@@ -4379,7 +4381,7 @@
     }
 
     const originalTransform = cluster.getAttribute("data-context-generator-original-transform") || "";
-    const targetTransform = `${originalTransform} translateX(-${BUBBLE_SLOT_WIDTH}px)`.trim();
+    const targetTransform = `${originalTransform} translateX(-${slotWidth}px)`.trim();
     if (cluster.style.transform !== targetTransform) {
       cluster.style.transform = targetTransform;
     }
@@ -4391,13 +4393,13 @@
 
   function reserveClaudeInlineBubbleSlot(anchorControl, controls, input, composerRect) {
     if (reservedActionCluster?.contains?.(anchorControl.element)) {
-      reserveBubbleSlotForCluster(reservedActionCluster);
+      reserveBubbleSlotForCluster(reservedActionCluster, CLAUDE_INLINE_SLOT_WIDTH);
       return;
     }
 
     const cluster = findClaudeRightControlCluster(anchorControl.element, input, composerRect);
     if (cluster && cluster !== anchorControl.element) {
-      reserveBubbleSlotForCluster(cluster);
+      reserveBubbleSlotForCluster(cluster, CLAUDE_INLINE_SLOT_WIDTH);
       return;
     }
 
@@ -4421,7 +4423,7 @@
       }
 
       const originalTransform = element.getAttribute("data-context-generator-original-transform") || "";
-      const targetTransform = `${originalTransform} translateX(-${BUBBLE_SLOT_WIDTH}px)`.trim();
+      const targetTransform = `${originalTransform} translateX(-${CLAUDE_INLINE_SLOT_WIDTH}px)`.trim();
       if (element.style.transform !== targetTransform) {
         element.style.transform = targetTransform;
       }

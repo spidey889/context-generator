@@ -216,7 +216,7 @@ test("Claude bubble fills the inline slot to the right of voice mode", () => {
   const placement = hooks.getClaudeBubblePlacement(getClaudeComposerRect());
 
   assert.equal(placement.anchorControl.element, voiceMode);
-  assert.equal(placement.left, 588);
+  assert.equal(placement.left, 580);
   assert.equal(placement.top, 63);
 });
 
@@ -234,7 +234,7 @@ test("Claude bubble uses the rightmost small control when voice mode is unlabele
   const placement = hooks.getClaudeBubblePlacement(getClaudeComposerRect());
 
   assert.equal(placement.anchorControl.element, unlabeledVoiceMode);
-  assert.equal(placement.left, 588);
+  assert.equal(placement.left, 580);
   assert.equal(placement.top, 63);
 });
 
@@ -259,7 +259,7 @@ test("Claude inline slot avoids shifted native composer controls", () => {
   const bubbleRect = localPlacementToPageRect(placement, getClaudeComposerRect());
 
   [model, mic, voiceMode].forEach((control) => {
-    assert.equal(rectsIntersect(bubbleRect, shiftedLeft(control.getBoundingClientRect(), 56)), false);
+    assert.equal(rectsIntersect(bubbleRect, shiftedLeft(control.getBoundingClientRect(), 72)), false);
   });
 });
 
