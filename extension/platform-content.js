@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-07-02-claude-inline-voice-slot";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-07-02-claude-limit-nudge-dismiss";
   const BUBBLE_ID = "context-generator-bubble";
   const OVERLAY_ID = "context-generator-overlay";
   const ONBOARDING_ID = "context-generator-onboarding";
@@ -332,6 +332,7 @@
   let handoffStatusIndex = 0;
   let onboardingTimer = null;
   let onboardingDismissedThisSession = false;
+  let claudeLimitNudgeDismissedUntilLimitClears = false;
   let activeTransferTrace = null;
   let transferTraceSequence = 0;
 
@@ -1486,7 +1487,7 @@
       event.stopPropagation();
       if (isRunning) return;
       dismissOnboardingNudge();
-      hideClaudeLimitNudge();
+      dismissClaudeLimitNudge();
       toggleDestinationSheet();
     });
 
@@ -2122,7 +2123,22 @@
     }
 
     const bubble = document.getElementById(BUBBLE_ID);
-    if (!bubble || bubble.style.display === "none" || !isVisible(bubble) || !isClaudeLimitVisible()) {
+    const claudeLimitVisible = isClaudeLimitVisible();
+    if (!claudeLimitVisible) {
+      claudeLimitNudgeDismissedUntilLimitClears = false;
+    }
+
+    if (
+      !bubble ||
+      bubble.style.display === "none" ||
+      !isVisible(bubble) ||
+      !claudeLimitVisible ||
+      claudeLimitNudgeDismissedUntilLimitClears ||
+      isClaudeComposerFocusTarget(document.activeElement)
+    ) {
+      if (claudeLimitVisible && isClaudeComposerFocusTarget(document.activeElement)) {
+        dismissClaudeLimitNudge();
+      }
       hideClaudeLimitNudge();
       return;
     }
@@ -2200,7 +2216,7 @@
     nudge.addEventListener("click", (event) => {
       event.preventDefault();
       event.stopPropagation();
-      hideClaudeLimitNudge();
+      dismissClaudeLimitNudge();
       if (!isDestinationSheetOpen()) toggleDestinationSheet();
     });
 
@@ -2237,6 +2253,15 @@
     nudge.style.display = "none";
   }
 
+  function dismissClaudeLimitNudge() {
+    const nudge = document.getElementById(CLAUDE_LIMIT_NUDGE_ID);
+    const nudgeVisible = nudge && nudge.style.display !== "none";
+    if (currentPlatform.id === "claude" && (nudgeVisible || isClaudeLimitVisible())) {
+      claudeLimitNudgeDismissedUntilLimitClears = true;
+    }
+    hideClaudeLimitNudge();
+  }
+
   function isClaudeLimitVisible() {
     const selectors = [
       "[role='alert']",
@@ -2270,6 +2295,16 @@
       /(?:try again|come back).{0,36}(?:later|tomorrow)/,
       /(?:messages|usage).{0,36}(?:reset|resets|available)/
     ].some((pattern) => pattern.test(normalized));
+  }
+
+  function isClaudeComposerFocusTarget(target) {
+    if (currentPlatform.id !== "claude" || !(target instanceof Element)) return false;
+
+    const input = findPlatformInput();
+    return Boolean(
+      input &&
+      (target === input || input.contains(target) || target.closest?.("textarea,[contenteditable='true']") === input)
+    );
   }
 
   function ensureDestinationSheetStyles() {
@@ -4532,7 +4567,7 @@
 
     window.addEventListener("resize", scheduleFloatingButtonUpdate);
     document.addEventListener("visibilitychange", scheduleFloatingButtonUpdate);
-    document.addEventListener("focusin", scheduleFloatingButtonUpdate);
+    document.addEventListener("focusin", handleFloatingButtonFocusIn);
     scheduleFloatingButtonUpdate();
   }
 
@@ -4549,7 +4584,14 @@
 
     window.removeEventListener("resize", scheduleFloatingButtonUpdate);
     document.removeEventListener("visibilitychange", scheduleFloatingButtonUpdate);
-    document.removeEventListener("focusin", scheduleFloatingButtonUpdate);
+    document.removeEventListener("focusin", handleFloatingButtonFocusIn);
+  }
+
+  function handleFloatingButtonFocusIn(event) {
+    if (isClaudeComposerFocusTarget(event.target)) {
+      dismissClaudeLimitNudge();
+    }
+    scheduleFloatingButtonUpdate();
   }
 
   function resetRunningFlag() {
