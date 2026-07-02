@@ -1,9 +1,10 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-07-02-error-popup-slide-back";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-07-02-claude-limit-nudge";
   const BUBBLE_ID = "context-generator-bubble";
   const OVERLAY_ID = "context-generator-overlay";
   const ONBOARDING_ID = "context-generator-onboarding";
   const ONBOARDING_STYLE_ID = "context-generator-onboarding-styles";
+  const CLAUDE_LIMIT_NUDGE_ID = "context-generator-claude-limit-nudge";
   const DESTINATION_SHEET_ID = "context-generator-destination-sheet";
   const DESTINATION_SHEET_STYLE_ID = "context-generator-destination-sheet-styles";
 
@@ -33,6 +34,7 @@
   const ONBOARDING_STORAGE_KEY = "context-generator-onboarding-dismissed-v2";
   const ONBOARDING_TITLE_TEXT = "Transfer chat context";
   const ONBOARDING_BODY_TEXT = "From this button.";
+  const CLAUDE_LIMIT_NUDGE_TEXT = "Claude's brilliant. Claude also taps out around message 20. We've got you covered. Tap to continue in another AI with context.";
   const ONBOARDING_SHOW_DELAY_MS = 650;
   const NO_CONVERSATION_ERROR_TITLE = "Nothing to carry yet";
   const NO_CONVERSATION_ERROR_MESSAGE = "Chat is empty. Send one message first, then I'll pack the context.";
@@ -325,6 +327,7 @@
       OVERLAY_ID,
       ONBOARDING_ID,
       ONBOARDING_STYLE_ID,
+      CLAUDE_LIMIT_NUDGE_ID,
       DESTINATION_SHEET_ID,
       DESTINATION_SHEET_STYLE_ID,
       "context-generator-styles",
@@ -948,6 +951,7 @@
       `#${OVERLAY_ID}`,
       `#${ONBOARDING_ID}`,
       `#${ONBOARDING_STYLE_ID}`,
+      `#${CLAUDE_LIMIT_NUDGE_ID}`,
       `#${DESTINATION_SHEET_ID}`,
       "#context-generator-styles",
       "#context-generator-error-overlay",
@@ -1218,6 +1222,7 @@
     if (!input) {
       if (existingBubble) existingBubble.style.display = "none";
       hideOnboardingNudge();
+      hideClaudeLimitNudge();
       hideDestinationSheet();
       releaseBubbleSlot();
       releaseComposerSurface();
@@ -1311,6 +1316,7 @@
       event.stopPropagation();
       if (isRunning) return;
       dismissOnboardingNudge();
+      hideClaudeLimitNudge();
       toggleDestinationSheet();
     });
 
@@ -1939,6 +1945,163 @@
     }
   }
 
+  function updateClaudeLimitNudge() {
+    if (currentPlatform.id !== "claude" || isRunning || isDestinationSheetOpen()) {
+      hideClaudeLimitNudge();
+      return;
+    }
+
+    const bubble = document.getElementById(BUBBLE_ID);
+    if (!bubble || bubble.style.display === "none" || !isVisible(bubble) || !isClaudeLimitVisible()) {
+      hideClaudeLimitNudge();
+      return;
+    }
+
+    const nudge = document.getElementById(CLAUDE_LIMIT_NUDGE_ID) || createClaudeLimitNudge();
+    const wasHidden = nudge.style.display === "none" || nudge.dataset.contextGeneratorVisible !== "true";
+    nudge.style.display = "flex";
+    positionClaudeLimitNudge(nudge, bubble);
+    if (wasHidden) {
+      nudge.dataset.contextGeneratorVisible = "true";
+      nudge.style.opacity = "0";
+      nudge.style.transform = nudge.dataset.contextGeneratorPoint === "right" ? "translate3d(8px,0,0)" : "translate3d(-8px,0,0)";
+      requestAnimationFrame(() => {
+        nudge.style.opacity = "1";
+        nudge.style.transform = "translate3d(0,0,0)";
+      });
+    }
+  }
+
+  function createClaudeLimitNudge() {
+    const nudge = document.createElement("button");
+    nudge.id = CLAUDE_LIMIT_NUDGE_ID;
+    nudge.type = "button";
+    nudge.dataset.contextGeneratorOwned = "true";
+    nudge.setAttribute("aria-label", CLAUDE_LIMIT_NUDGE_TEXT);
+    nudge.style.cssText = [
+      "display:none",
+      "position:fixed",
+      "z-index:2147483647",
+      "width:min(306px,calc(100vw - 24px))",
+      "box-sizing:border-box",
+      "padding:13px 14px",
+      "border:1px solid rgba(255,255,255,0.14)",
+      "border-radius:16px",
+      "background:linear-gradient(145deg,#121212 0%,#181820 58%,#0d0d12 100%)",
+      "box-shadow:0 18px 42px rgba(0,0,0,0.34),inset 0 1px 0 rgba(255,255,255,0.07)",
+      "color:#fff",
+      "font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif",
+      "font-size:13px",
+      "font-weight:580",
+      "line-height:1.38",
+      "letter-spacing:0",
+      "text-align:left",
+      "cursor:pointer",
+      "gap:7px",
+      "flex-direction:column",
+      "transition:opacity 220ms ease,transform 220ms ease",
+      "overflow:visible"
+    ].join(";");
+
+    const tail = document.createElement("span");
+    tail.dataset.contextGeneratorLimitTail = "true";
+    tail.style.cssText = [
+      "position:absolute",
+      "width:12px",
+      "height:12px",
+      "background:#15151b",
+      "border-top:1px solid rgba(255,255,255,0.14)",
+      "border-right:1px solid rgba(255,255,255,0.14)",
+      "transform:rotate(45deg)",
+      "top:calc(50% - 6px)"
+    ].join(";");
+
+    const firstLine = document.createElement("span");
+    firstLine.textContent = "Claude's brilliant. Claude also taps out around message 20.";
+    firstLine.style.fontWeight = "760";
+
+    const secondLine = document.createElement("span");
+    secondLine.textContent = "We've got you covered. Tap to continue in another AI with context.";
+    secondLine.style.color = "rgba(255,255,255,0.74)";
+
+    nudge.appendChild(tail);
+    nudge.appendChild(firstLine);
+    nudge.appendChild(secondLine);
+    nudge.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      hideClaudeLimitNudge();
+      if (!isDestinationSheetOpen()) toggleDestinationSheet();
+    });
+
+    document.body.appendChild(nudge);
+    return nudge;
+  }
+
+  function positionClaudeLimitNudge(nudge, bubble) {
+    const bubbleRect = bubble.getBoundingClientRect();
+    const margin = 12;
+    const gap = 12;
+    const nudgeWidth = Math.min(306, window.innerWidth - margin * 2);
+    const nudgeHeight = nudge.offsetHeight || 92;
+    const canSitLeft = bubbleRect.left - gap - nudgeWidth >= margin;
+    const left = canSitLeft
+      ? bubbleRect.left - gap - nudgeWidth
+      : Math.min(window.innerWidth - nudgeWidth - margin, bubbleRect.right + gap);
+    const top = Math.max(margin, Math.min(bubbleRect.top + bubbleRect.height / 2 - nudgeHeight / 2, window.innerHeight - nudgeHeight - margin));
+    const tail = nudge.querySelector("[data-context-generator-limit-tail='true']");
+
+    nudge.dataset.contextGeneratorPoint = canSitLeft ? "right" : "left";
+    nudge.style.left = `${Math.round(left)}px`;
+    nudge.style.top = `${Math.round(top)}px`;
+    if (tail) {
+      tail.style.right = canSitLeft ? "-6px" : "auto";
+      tail.style.left = canSitLeft ? "auto" : "-6px";
+    }
+  }
+
+  function hideClaudeLimitNudge() {
+    const nudge = document.getElementById(CLAUDE_LIMIT_NUDGE_ID);
+    if (!nudge) return;
+    nudge.dataset.contextGeneratorVisible = "false";
+    nudge.style.display = "none";
+  }
+
+  function isClaudeLimitVisible() {
+    const selectors = [
+      "[role='alert']",
+      "[role='status']",
+      "[aria-live]",
+      "[data-testid*='limit' i]",
+      "[data-testid*='error' i]",
+      "[class*='limit' i]",
+      "[class*='error' i]",
+      "[class*='toast' i]",
+      "[class*='banner' i]",
+      "[class*='modal' i]",
+      "[class*='popover' i]"
+    ].join(",");
+
+    return Array.from(document.querySelectorAll(selectors)).some((element) => {
+      if (isContextGeneratorNode(element) || !isVisible(element)) return false;
+      return isClaudeLimitText(element.innerText || element.textContent || "");
+    });
+  }
+
+  function isClaudeLimitText(text) {
+    const normalized = cleanText(text).toLowerCase();
+    if (!normalized || normalized.length > 700) return false;
+
+    return [
+      /(?:message|usage|rate|conversation).{0,36}limit/,
+      /limit.{0,36}(?:reached|reset|resets|later|tomorrow|messages|usage)/,
+      /(?:reached|hit).{0,36}(?:message|usage|rate)?.{0,20}limit/,
+      /out of.{0,36}(?:messages|usage|prompts)/,
+      /(?:try again|come back).{0,36}(?:later|tomorrow)/,
+      /(?:messages|usage).{0,36}(?:reset|resets|available)/
+    ].some((pattern) => pattern.test(normalized));
+  }
+
   function ensureDestinationSheetStyles() {
     if (document.getElementById(DESTINATION_SHEET_STYLE_ID)) return;
 
@@ -2236,6 +2399,7 @@
 
   function toggleDestinationSheet() {
     hideOnboardingNudge();
+    hideClaudeLimitNudge();
     const existingSheet = document.getElementById(DESTINATION_SHEET_ID);
     if (existingSheet?.style.display === "block") {
       hideDestinationSheet();
@@ -3685,6 +3849,7 @@
       if (isDestinationSheetOpen()) return;
       try {
         ensureFloatingButton();
+        updateClaudeLimitNudge();
       } catch (error) {
         if (isExtensionContextInvalidated(error)) {
           disableFloatingButtonMonitoring();
@@ -3701,9 +3866,10 @@
       node.id === OVERLAY_ID ||
       node.id === ONBOARDING_ID ||
       node.id === ONBOARDING_STYLE_ID ||
+      node.id === CLAUDE_LIMIT_NUDGE_ID ||
       node.id === "context-generator-styles" ||
       node.dataset.contextGeneratorOwned === "true" ||
-      Boolean(node.closest?.(`#${BUBBLE_ID}, #${OVERLAY_ID}, #${ONBOARDING_ID}, #context-generator-styles, #${DESTINATION_SHEET_ID}`))
+      Boolean(node.closest?.(`#${BUBBLE_ID}, #${OVERLAY_ID}, #${ONBOARDING_ID}, #${CLAUDE_LIMIT_NUDGE_ID}, #context-generator-styles, #${DESTINATION_SHEET_ID}`))
     );
   }
 
