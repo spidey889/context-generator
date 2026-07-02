@@ -41,7 +41,7 @@ When button placement behavior changes, bump `CONTENT_SCRIPT_LOAD_ID`. Otherwise
 
 ## How The Button Is Placed
 
-`platform-content.js` uses the shared composer placement system for Claude, with platform-specific placement for ChatGPT, Gemini, Grok, and DeepSeek. Each platform has input selectors for its editor.
+`platform-content.js` uses platform-specific placement for Claude, ChatGPT, Gemini, Grok, and DeepSeek. Each platform has input selectors for its editor.
 
 The script watches the page with a `MutationObserver`, plus listeners for resize, visibility changes, and focus changes. When the AI page changes its DOM, the script schedules one `requestAnimationFrame` update. It ignores mutations caused by the extension's own button, overlay, fallback modal, and destination sheet so it does not chase itself.
 
@@ -53,7 +53,7 @@ The floating button is a clean 42px button with `bubble-icon.png` inside it and 
 
 ChatGPT is the exception. Its Cap-Context button is mounted on the page root and uses `position: fixed`, because ChatGPT's composer wrappers re-render, clip unknown children, and sometimes do not expose a stable composer surface during hydration.
 
-For Claude, the button sits on the right side of the composer. The script tries to find the platform's right-side action button cluster by scanning visible buttons inside or near the composer. If it finds that cluster, it shifts the cluster left by the bubble slot width so the Cap-Context button has room. It only shifts a real control cluster or button, never the whole composer. It remembers the original transform on the shifted cluster and restores it if the input disappears or the anchor changes.
+For Claude, the button sits on the right side of the composer without moving Claude-owned controls. The script scans the bottom composer action row only to choose a visual anchor, then places Cap-Context beside that anchor or in a bottom-right fallback slot. It does not reserve space by transforming Claude's native attach, project/sidebar, model, mic, voice, or send controls. On startup, the content script also restores any old `data-context-generator-original-transform` reservation left by a stale injected script.
 
 Clicking the button opens a destination picker titled `Where to continue?`. The picker lists all supported platforms except the current one, and its helper line is always `Context goes straight into the input box`. The `Cap-Context` pill in the sheet header keeps the subtle light border hidden at rest and shows it only on hover/focus. Destination tiles keep neutral edges at rest with only a tiny static platform-color glow tucked behind the logo, extending just past it; hover/focus keeps the small scale-up motion but no longer adds platform-color border lighting, haze, or shine. The same click that opens the picker immediately starts a silent warm summary before the sheet is built or animated. It does not show the handoff popup and does not inject any prompt into the source AI. The warm summary is only reused if the user clicks a tile soon after and the current scraped chat still matches; otherwise it is discarded and the transfer falls back to a fresh summary. Each tile immediately opens and warms the selected platform tab in the background, shows a compact centered source-page handoff popup, starts or reuses the backend summary flow in parallel, then pastes the summary into the already-open destination input. After paste succeeds, the background worker focuses the destination tab. The user manually reviews and sends it.
 
@@ -63,7 +63,9 @@ On Claude only, the content script also watches visible alert/banner-style page 
 
 ## Composer Placement Strategy
 
-ChatGPT, Gemini, Grok, and DeepSeek intentionally do not use the shared native-control shifting path. Their composers re-render and resize often, so moving their native action clusters with `transform` can cause flicker, jumping, or broken-looking UI.
+Claude, ChatGPT, Gemini, Grok, and DeepSeek intentionally do not use the shared native-control shifting path. Their composers re-render and resize often, so moving their native action clusters with `transform` can cause flicker, jumping, or broken-looking UI.
+
+For Claude, `updateFloatingButtonPosition()` calls the Claude-specific branch before the old shared placement path. It releases any reserved action slot, leaves Claude's own controls untouched, and places Cap-Context beside the right-side composer action row when there is room. If no reliable anchor is visible, it falls back to the bottom-right composer slot without transforming anything.
 
 For ChatGPT, `ensureFloatingButton()` and `updateFloatingButtonPosition()` take the ChatGPT-specific branch before the normal composer-surface path. That branch releases any old reserved action slot, releases any old reserved composer surface, appends the button to the page root, and switches it to fixed positioning. It then scans the page for the bottom-right intelligence/model selector (`Instant`, `Medium`, or `High`) and places Cap-Context immediately to the left of that selector. If the selector cannot be detected yet, it falls back to the composer/form/input rectangle and clamps the button inside the viewport. This means the button still appears while ChatGPT is hydrating or reshuffling its composer DOM.
 
@@ -213,7 +215,7 @@ If destination paste fails, the destination page shows a manual copy modal with 
 ## Tricky Parts
 
 - Each AI platform has a different editor DOM, so input detection is platform-specific but still scored generically.
-- The floating button has to live inside each platform's composer so it tracks the input, but it also has to reserve space by shifting the native action cluster left.
+- The floating button has to track each platform's composer without transforming native controls. Claude, ChatGPT, Gemini, Grok, and DeepSeek should keep their own action rows in place.
 - The MutationObserver would loop forever if it reacted to its own UI. The script marks owned nodes and ignores mutations that are only caused by the extension.
 - Conversation scraping is best-effort. It tries structured message turns first, then falls back to page text when a platform changes its markup.
 - Programmatic pasting into modern AI editors is finicky. The script uses native setters, `execCommand("insertText")`, retries, direct `textContent` fallback, and synthetic beforeinput/input/change events.
@@ -239,3 +241,4 @@ If destination paste fails, the destination page shows a manual copy modal with 
 - 2026-07-02: Added a minimal Node test runner with focused coverage for summary normalization, conversation scraping, and paste verification. The manual copy fallback modal was polished with clearer copy, Escape/backdrop close, focus restore, and initial focus on the copy action.
 - 2026-07-02: First-run ChatGPT paste can be wiped by page hydration after a quick successful insert. ChatGPT now has a small activation settle and paste-stability check that retries if the editor clears the context.
 - 2026-07-02: Root README now describes the extension-first product flow, while the old manual prompt/skill README is archived in `OLD_README.md`.
+- 2026-07-02: Claude button placement no longer shifts native action clusters. It now restores old transform reservations on startup and places Cap-Context beside Claude's action row, so the attach plus and sidebar/project controls stay untouched.

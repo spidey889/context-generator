@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-07-02-claude-chatgpt-reliable";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-07-02-claude-no-native-shift";
   const BUBBLE_ID = "context-generator-bubble";
   const OVERLAY_ID = "context-generator-overlay";
   const ONBOARDING_ID = "context-generator-onboarding";
@@ -335,6 +335,8 @@
   let transferTraceSequence = 0;
 
   function cleanupContextGeneratorNodes() {
+    cleanupContextGeneratorReservations();
+
     [
       BUBBLE_ID,
       OVERLAY_ID,
@@ -348,6 +350,19 @@
       "context-generator-error-mark",
       "context-generator-fallback-modal"
     ].forEach((id) => document.getElementById(id)?.remove());
+  }
+
+  function cleanupContextGeneratorReservations() {
+    document.querySelectorAll("[data-context-generator-original-transform]").forEach((element) => {
+      element.style.transform = element.getAttribute("data-context-generator-original-transform") || "";
+      element.style.willChange = "";
+      element.removeAttribute("data-context-generator-original-transform");
+    });
+
+    document.querySelectorAll("[data-context-generator-original-position]").forEach((element) => {
+      element.style.position = element.getAttribute("data-context-generator-original-position") || "";
+      element.removeAttribute("data-context-generator-original-position");
+    });
   }
 
   extensionRuntime.onMessage.addListener((message, _sender, sendResponse) => {
@@ -3551,6 +3566,18 @@
       return;
     }
 
+    if (currentPlatform.id === "claude") {
+      const claudePlacement = getClaudeBubblePlacement(composerRect);
+      releaseBubbleSlot();
+      bubble.style.left = `${claudePlacement.left}px`;
+      bubble.style.right = "auto";
+      bubble.style.top = `${claudePlacement.top}px`;
+      bubble.style.bottom = "auto";
+      bubble.style.display = "flex";
+      maybeShowOnboardingNudge(bubble);
+      return;
+    }
+
     const actionBtn = findComposerActionButton(input, composerRect);
     let anchorTop = composerRect.bottom - BUBBLE_SIZE - BUBBLE_GAP;
 
@@ -3609,6 +3636,51 @@
       }
       return buttonRect.left > rightmostRect.left ? button : rightmost;
     });
+  }
+
+  function getClaudeBubblePlacement(composerRect) {
+    const anchorButton = getClaudeComposerButtonCandidates(composerRect)
+      .filter(({ button }) => {
+        const label = getElementLabel(button, true);
+        return !/\b(attach|upload|file|project|sidebar|side bar|menu|navigation|toggle)\b/.test(label);
+      })
+      .at(-1);
+
+    if (anchorButton) {
+      const rightOfAnchor = anchorButton.rect.right - composerRect.left + BUBBLE_GAP;
+      const maxLeft = composerRect.width - BUBBLE_SIZE - BUBBLE_GAP;
+      if (rightOfAnchor <= maxLeft) {
+        return getBubblePlacementBesideRect(anchorButton.rect, composerRect, rightOfAnchor);
+      }
+
+      const leftOfAnchor = anchorButton.rect.left - composerRect.left - BUBBLE_SIZE - BUBBLE_GAP;
+      if (leftOfAnchor >= BUBBLE_GAP) {
+        return getBubblePlacementBesideRect(anchorButton.rect, composerRect, leftOfAnchor);
+      }
+    }
+
+    return getBottomRightRowBubblePlacement(composerRect, 16);
+  }
+
+  function getClaudeComposerButtonCandidates(composerRect) {
+    const rowTop = composerRect.bottom - Math.max(64, composerRect.height * 0.58);
+
+    return Array.from(document.querySelectorAll("button, [role='button'], [tabindex='0']"))
+      .filter((button) => button.id !== BUBBLE_ID && !isContextGeneratorNode(button) && isVisible(button))
+      .map((button) => ({ button, rect: button.getBoundingClientRect() }))
+      .filter(({ rect }) => {
+        return (
+          rect.width > 0 &&
+          rect.width <= 180 &&
+          rect.height > 0 &&
+          rect.height <= 76 &&
+          rect.left >= composerRect.left + composerRect.width * 0.35 &&
+          rect.right <= composerRect.right + 16 &&
+          rect.top >= rowTop &&
+          rect.bottom <= composerRect.bottom + 16
+        );
+      })
+      .sort((a, b) => a.rect.left - b.rect.left);
   }
 
   function findChatGptModelSelectorButton(composerSurface, composerRect) {

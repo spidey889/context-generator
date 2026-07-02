@@ -34,6 +34,18 @@ class FakeElement {
     return Object.prototype.hasOwnProperty.call(this.attrs, name);
   }
 
+  setAttribute(name, value) {
+    this.attrs[name] = String(value);
+    if (name === "id") this.id = String(value);
+    if (name === "class") this.className = String(value);
+  }
+
+  removeAttribute(name) {
+    delete this.attrs[name];
+    if (name === "id") this.id = "";
+    if (name === "class") this.className = "";
+  }
+
   matches(selector) {
     if (/input|textarea|button|select/.test(selector) && /^(input|textarea|button|select)$/.test(this.localName)) {
       return true;
@@ -178,4 +190,18 @@ test("paste verification rejects unrelated editor text", () => {
   const editor = new FakeElement({ text: "A blank new chat input" });
 
   assert.equal(hooks.editorContainsText(editor, "CONTEXT CARRY\n\nWHO I AM\nProject details"), false);
+});
+
+test("startup clears stale Claude placement transform reservations", () => {
+  const shiftedActionRow = new FakeElement({
+    attrs: { "data-context-generator-original-transform": "" }
+  });
+  shiftedActionRow.style.transform = "translateX(-56px)";
+  shiftedActionRow.style.willChange = "transform";
+
+  loadPlatformContent([shiftedActionRow], "claude.ai");
+
+  assert.equal(shiftedActionRow.style.transform, "");
+  assert.equal(shiftedActionRow.style.willChange, "");
+  assert.equal(shiftedActionRow.hasAttribute("data-context-generator-original-transform"), false);
 });
