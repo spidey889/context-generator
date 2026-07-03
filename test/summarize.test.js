@@ -49,10 +49,11 @@ test("backend prompt profiles scale summary size to the captured chat", () => {
   assert.equal(getSummaryProfile("x".repeat(4000)).id, "small");
   assert.equal(getSummaryProfile("x".repeat(20000)).id, "medium");
   assert.equal(getSummaryProfile("x".repeat(90000)).id, "large");
-  assert.equal(getSummaryProfile("x".repeat(500)).model, "ministral-3b-2512");
+  assert.equal(getSummaryProfile("x".repeat(500)).model, "local-direct");
+  assert.equal(getSummaryProfile("x".repeat(4000)).model, "ministral-3b-2512");
   assert.equal(getSummaryProfile("x".repeat(20000)).model, "ministral-3b-2512");
   assert.equal(getSummaryProfile("x".repeat(90000)).model, "mistral-large-2512");
-  assert.equal(getSummaryProfile("x".repeat(500)).maxTokens, 700);
+  assert.equal(getSummaryProfile("x".repeat(500)).maxTokens, 0);
   assert.equal(getSummaryProfile("x".repeat(90000)).maxTokens, 4200);
   assert.match(getContextCarryTemplate(getSummaryProfile("x".repeat(500))), /WHAT WE WERE DOING\n\[2-3 lines/);
   assert.match(getContextCarryTemplate(getSummaryProfile("x".repeat(90000))), /KEY CONTEXT\n\[350-500 words/);
@@ -136,13 +137,13 @@ test("backend forwards a 160k conversation to Mistral and reports the same input
   }
 });
 
-test("backend keeps short chats fast and avoids expansion", async () => {
+test("backend keeps tiny chats local and avoids Mistral", async () => {
   const originalFetch = global.fetch;
   const originalApiKey = process.env.MISTRAL_API_KEY;
   const conversation = "User: Firefox manifest setting?\nAssistant: Use the exact setting you can defend.";
   const requests = [];
 
-  process.env.MISTRAL_API_KEY = "test-key";
+  delete process.env.MISTRAL_API_KEY;
   global.fetch = async (_url, options) => {
     requests.push(JSON.parse(options.body));
     return {
@@ -164,14 +165,60 @@ test("backend keeps short chats fast and avoids expansion", async () => {
     await summarize({ method: "POST", body: { conversation } }, res);
 
     assert.equal(res.statusCode, 200);
+    assert.equal(requests.length, 0);
+    assert.equal(res.payload.timing.profile, "tiny");
+    assert.equal(res.payload.timing.model, "local-direct");
+    assert.equal(res.payload.timing.maxTokens, 0);
+    assert.equal(res.payload.timing.targetWords, 120);
+    assert.equal(res.payload.timing.mistralMs, 0);
+    assert.equal(res.payload.timing.mistralPasses, 0);
+    assert.equal(res.payload.timing.expansion.attempted, false);
+    assert.match(res.payload.summary, /> User: Firefox manifest setting\?/);
+    assert.match(res.payload.summary, /> Assistant: Use the exact setting you can defend\./);
+  } finally {
+    global.fetch = originalFetch;
+    if (originalApiKey === undefined) {
+      delete process.env.MISTRAL_API_KEY;
+    } else {
+      process.env.MISTRAL_API_KEY = originalApiKey;
+    }
+  }
+});
+
+test("backend sends small chats to the fast Mistral model", async () => {
+  const originalFetch = global.fetch;
+  const originalApiKey = process.env.MISTRAL_API_KEY;
+  const conversation = "small context ".repeat(200);
+  const requests = [];
+
+  process.env.MISTRAL_API_KEY = "test-key";
+  global.fetch = async (_url, options) => {
+    requests.push(JSON.parse(options.body));
+    return {
+      ok: true,
+      status: 200,
+      json: async () => ({
+        choices: [{
+          message: {
+            content: makeContextCarrySummary("small", 180)
+          }
+        }]
+      })
+    };
+  };
+
+  const res = createMockResponse();
+
+  try {
+    await summarize({ method: "POST", body: { conversation } }, res);
+
+    assert.equal(res.statusCode, 200);
     assert.equal(requests.length, 1);
     assert.equal(requests[0].model, "ministral-3b-2512");
-    assert.equal(requests[0].max_tokens, 700);
-    assert.equal(res.payload.timing.profile, "tiny");
+    assert.equal(requests[0].max_tokens, 1000);
+    assert.equal(res.payload.timing.profile, "small");
     assert.equal(res.payload.timing.model, "ministral-3b-2512");
-    assert.equal(res.payload.timing.targetWords, 180);
     assert.equal(res.payload.timing.mistralPasses, 1);
-    assert.equal(res.payload.timing.expansion.attempted, false);
   } finally {
     global.fetch = originalFetch;
     if (originalApiKey === undefined) {

@@ -2,18 +2,20 @@ const MISTRAL_MAX_ATTEMPTS = 2;
 const MISTRAL_RETRY_INTERVAL_MS = 450;
 const MISTRAL_TIMEOUT_MS = 80000;
 const MISTRAL_CHAT_COMPLETIONS_URL = "https://api.mistral.ai/v1/chat/completions";
+const LOCAL_DIRECT_MODEL = "local-direct";
 const MISTRAL_FAST_MODEL = "ministral-3b-2512";
 const MISTRAL_QUALITY_MODEL = "mistral-large-2512";
 const SUMMARY_PROFILES = [
   {
     id: "tiny",
-    model: MISTRAL_FAST_MODEL,
+    model: LOCAL_DIRECT_MODEL,
     maxInputChars: 1200,
-    targetWords: 180,
+    targetWords: 120,
     minWords: 0,
-    maxTokens: 700,
+    maxTokens: 0,
+    directCarry: true,
     allowExpansion: false,
-    sectionBudget: "WHO I AM 1 short line; WHAT WE WERE DOING 2-3 lines; WHERE WE LEFT OFF 1-2 lines; DECISIONS MADE 0-3 bullets; OPEN QUESTIONS 0-2 bullets; KEY CONTEXT 2-4 dense bullets; NEXT STEP exactly as instructed.",
+    sectionBudget: "Local direct carry; preserve the exact short chat instead of stretching it into a generated summary.",
     templateHints: {
       who: "1 short line: user/project only if present",
       doing: "2-3 lines: the immediate task and why it matters",
@@ -110,11 +112,6 @@ async function handler(req, res) {
     return res.status(405).json({ error: "Method not allowed" });
   }
 
-  const apiKey = process.env.MISTRAL_API_KEY;
-  if (!apiKey) {
-    return res.status(500).json({ error: "MISTRAL_API_KEY is not configured" });
-  }
-
   let body = req.body || {};
   if (typeof req.body === "string") {
     try {
@@ -132,6 +129,38 @@ async function handler(req, res) {
 
   const startedAt = Date.now();
   const summaryProfile = getSummaryProfile(conversation);
+
+  if (summaryProfile.directCarry) {
+    const summary = buildDirectContextCarrySummary(conversation);
+    const expansion = {
+      attempted: false,
+      used: false,
+      error: null
+    };
+
+    return res.status(200).json({
+      summary,
+      timing: {
+        totalMs: Date.now() - startedAt,
+        mistralMs: 0,
+        model: summaryProfile.model,
+        profile: summaryProfile.id,
+        maxTokens: summaryProfile.maxTokens,
+        targetWords: summaryProfile.targetWords,
+        minWords: summaryProfile.minWords,
+        summaryWordCount: countWords(summary),
+        mistralPasses: 0,
+        expansion,
+        inputChars: conversation.length,
+        outputChars: summary.length
+      }
+    });
+  }
+
+  const apiKey = process.env.MISTRAL_API_KEY;
+  if (!apiKey) {
+    return res.status(500).json({ error: "MISTRAL_API_KEY is not configured" });
+  }
 
   try {
     const mistralStartedAt = Date.now();
@@ -321,6 +350,49 @@ function shouldExpandSummary(_conversation, wordCount, profile = SUMMARY_PROFILE
 function getSummaryProfile(conversation) {
   const inputChars = String(conversation || "").length;
   return SUMMARY_PROFILES.find((profile) => inputChars <= profile.maxInputChars) || SUMMARY_PROFILES[SUMMARY_PROFILES.length - 1];
+}
+
+function buildDirectContextCarrySummary(conversation) {
+  const excerpt = formatDirectConversationExcerpt(conversation);
+
+  return [
+    CONTEXT_CARRY_BOX_HEADER,
+    "",
+    CONTEXT_CARRY_SECTIONS[0].heading,
+    "None unless stated in the source excerpt.",
+    "",
+    CONTEXT_CARRY_SECTIONS[1].heading,
+    "This was a short captured chat, so the backend preserved the exact source text instead of stretching it into a generated summary.",
+    "",
+    CONTEXT_CARRY_SECTIONS[2].heading,
+    "Continue from the exact source excerpt below.",
+    "",
+    CONTEXT_CARRY_SECTIONS[3].heading,
+    "None unless stated in the source excerpt.",
+    "",
+    CONTEXT_CARRY_SECTIONS[4].heading,
+    "None unless stated in the source excerpt.",
+    "",
+    CONTEXT_CARRY_SECTIONS[5].heading,
+    "- Exact source text:",
+    excerpt,
+    "",
+    CONTEXT_CARRY_SECTIONS[6].heading,
+    DESTINATION_CONFIRMATION_INSTRUCTION
+  ].join("\n");
+}
+
+function formatDirectConversationExcerpt(conversation) {
+  const normalized = String(conversation || "")
+    .replace(/\r\n/g, "\n")
+    .replace(/\r/g, "\n")
+    .trim();
+  const excerpt = normalized || "[Captured chat was empty after trimming whitespace.]";
+
+  return excerpt
+    .split("\n")
+    .map((line) => `> ${line}`)
+    .join("\n");
 }
 
 function getContextCarryTemplate(profile) {
