@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-07-03-claude-model-overflow";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-07-03-claude-sonnet-further-left";
   const BUBBLE_ID = "context-generator-bubble";
   const OVERLAY_ID = "context-generator-overlay";
   const ONBOARDING_ID = "context-generator-onboarding";
@@ -28,7 +28,7 @@
   const CLAUDE_INLINE_SLOT_WIDTH = BUBBLE_SIZE + 62;
   const CLAUDE_INLINE_BUBBLE_GAP = 28;
   const CLAUDE_INLINE_RIGHT_MARGIN = 4;
-  const CLAUDE_MODEL_LEFT_NUDGE = 24;
+  const CLAUDE_MODEL_LEFT_NUDGE = 34;
   const CLAUDE_SIDE_CONTROL_RIGHT_NUDGE = 12;
   const DESTINATION_SHEET_WIDTH = 296;
   const RUNNING_AUTO_RESET_MS = 60000;
