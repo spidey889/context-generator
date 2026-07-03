@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-07-03-claude-final-small-nudge";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-07-03-claude-purple-left-tiny";
   const BUBBLE_ID = "context-generator-bubble";
   const OVERLAY_ID = "context-generator-overlay";
   const ONBOARDING_ID = "context-generator-onboarding";
@@ -26,7 +26,7 @@
   const BUBBLE_GAP = 8;
   const BUBBLE_SLOT_WIDTH = BUBBLE_SIZE + BUBBLE_GAP + 6;
   const CLAUDE_INLINE_SLOT_WIDTH = BUBBLE_SIZE + 62;
-  const CLAUDE_INLINE_BUBBLE_GAP = 26;
+  const CLAUDE_INLINE_BUBBLE_GAP = 22;
   const CLAUDE_INLINE_RIGHT_MARGIN = 4;
   const CLAUDE_MODEL_LEFT_NUDGE = 48;
   const CLAUDE_SIDE_CONTROL_RIGHT_NUDGE = 52;
