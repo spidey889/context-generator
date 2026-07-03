@@ -182,6 +182,31 @@ test("conversation limiter keeps a richer 160k payload inside the cap", () => {
   assert.match(limited, /TAIL-DETAILS$/);
 });
 
+test("in-flight warm summary is reused even after its freshness window passes", async () => {
+  const hooks = loadPlatformContent([]);
+  const conversation = "ChatGPT conversation:\n\nUser: " + "Keep the warm summary result.";
+  const record = {
+    fingerprint: hooks.getConversationFingerprint(conversation),
+    startedAt: Date.now() - 120000,
+    expiresAt: Date.now() - 1,
+    summary: null,
+    promise: Promise.resolve("CONTEXT CARRY\n\nWHO I AM\nWarm summary result"),
+    settled: false,
+    trace: null
+  };
+
+  const summary = await hooks.getSummaryForTransfer(conversation, record, null);
+
+  assert.match(summary, /Warm summary result/);
+});
+
+test("transfer safety window covers long quality summaries", () => {
+  const source = fs.readFileSync(SOURCE_PATH, "utf8");
+
+  assert.match(source, /const RUNNING_AUTO_RESET_MS = 240000/);
+  assert.match(source, /const WARM_SUMMARY_TTL_MS = 180000/);
+});
+
 test("paste verification accepts stable context anchors when box characters differ", () => {
   const hooks = loadPlatformContent([]);
   const expected = [

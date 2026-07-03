@@ -31,7 +31,7 @@
   const CLAUDE_MODEL_LEFT_NUDGE = 48;
   const CLAUDE_SIDE_CONTROL_RIGHT_NUDGE = 52;
   const DESTINATION_SHEET_WIDTH = 296;
-  const RUNNING_AUTO_RESET_MS = 60000;
+  const RUNNING_AUTO_RESET_MS = 240000;
   const MAX_BACKEND_CONVERSATION_CHARS = 160000;
   const BACKEND_CONVERSATION_HEAD_CHARS = 32000;
   const BACKEND_CONVERSATION_OMISSION_MARKER = "[...middle of conversation omitted to fit the backup summarizer...]";
@@ -77,7 +77,7 @@
   const PASTE_VERIFY_TIMEOUT_MS = 1000;
   const CHATGPT_PASTE_VERIFY_TIMEOUT_MS = 1500;
   const CHATGPT_PASTE_STABILITY_MS = 550;
-  const WARM_SUMMARY_TTL_MS = 30000;
+  const WARM_SUMMARY_TTL_MS = 180000;
   const HANDOFF_STATUS_INTERVAL_MS = 1850;
   const HANDOFF_COUNTDOWN_ID = "context-generator-handoff-countdown";
   const HANDOFF_COUNTDOWN_FIXED_MS = 20000;
@@ -433,6 +433,8 @@
       getGeminiBubblePlacement,
       findGeminiModelSelectorButton,
       limitConversationText,
+      getConversationFingerprint,
+      getSummaryForTransfer,
       getClaudeInlineControlsToShift,
       getClaudeModelControlsToNudge,
       getClaudeControlTargetOffset,
@@ -542,7 +544,7 @@
 
     if (isWarmSummaryUsable(candidate, fingerprint)) {
       const summary = candidate.summary || await candidate.promise;
-      if (summary && isWarmSummaryUsable(candidate, fingerprint)) {
+      if (summary && candidate.fingerprint === fingerprint) {
         markTransferTrace(trace || candidate.trace, "summary reused", {
           source: candidate.summary ? "completed warm summary" : "warm summary promise",
           chars: summary.length
@@ -595,17 +597,20 @@
       expiresAt: now + WARM_SUMMARY_TTL_MS,
       summary: null,
       promise: null,
+      settled: false,
       trace
     };
 
     record.promise = summarizeWithBackend(conversationText, trace)
       .then((summary) => {
+        record.settled = true;
         if (warmSummary === record && Date.now() <= record.expiresAt) {
           record.summary = summary;
         }
         return summary;
       })
       .catch((error) => {
+        record.settled = true;
         if (warmSummary === record) {
           logTransferDebug(`Warm summary failed. ${error.message}`);
           clearWarmSummary();
@@ -628,7 +633,11 @@
   }
 
   function isWarmSummaryUsable(record, fingerprint) {
-    return Boolean(record && record.fingerprint === fingerprint && Date.now() <= record.expiresAt);
+    return Boolean(
+      record &&
+      record.fingerprint === fingerprint &&
+      (Date.now() <= record.expiresAt || (record.promise && !record.settled))
+    );
   }
 
   function clearWarmSummary() {
