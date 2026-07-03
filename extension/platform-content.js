@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-07-02-claude-sonnet-left";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-07-03-claude-model-overflow";
   const BUBBLE_ID = "context-generator-bubble";
   const OVERLAY_ID = "context-generator-overlay";
   const ONBOARDING_ID = "context-generator-onboarding";
@@ -326,6 +326,7 @@
   let reservedClaudeInlineControls = [];
   let reservedClaudeInlineShift = 0;
   let reservedClaudeControlOffsets = new Map();
+  let reservedClaudeOverflowElements = [];
   let reservedComposerSurface = null;
   let destinationSheetAnimationFrame = null;
   let floatingButtonFrame = null;
@@ -366,6 +367,11 @@
       element.style.transform = element.getAttribute("data-context-generator-original-transform") || "";
       element.style.willChange = "";
       element.removeAttribute("data-context-generator-original-transform");
+    });
+
+    document.querySelectorAll("[data-context-generator-original-overflow]").forEach((element) => {
+      element.style.overflow = element.getAttribute("data-context-generator-original-overflow") || "";
+      element.removeAttribute("data-context-generator-original-overflow");
     });
 
     document.querySelectorAll("[data-context-generator-original-position]").forEach((element) => {
@@ -424,7 +430,8 @@
       getClaudeBubblePlacement,
       getClaudeInlineControlsToShift,
       getClaudeModelControlsToNudge,
-      getClaudeControlTargetOffset
+      getClaudeControlTargetOffset,
+      reserveClaudeInlineBubbleSlot
     });
   } else {
     startFloatingButtonMonitoring();
@@ -4431,6 +4438,7 @@
     });
 
     const elements = [...offsetEntries.keys()].filter((element) => offsetEntries.get(element) !== 0);
+    const overflowElements = getClaudeModelOverflowElements(modelControls);
 
     if (elements.length === 0) {
       releaseClaudeInlineControlSlots();
@@ -4444,6 +4452,12 @@
     reservedClaudeInlineControls
       .filter((element) => !elements.includes(element))
       .forEach(restoreReservedTransform);
+
+    reservedClaudeOverflowElements
+      .filter((element) => !overflowElements.includes(element))
+      .forEach(restoreReservedOverflow);
+
+    overflowElements.forEach(reserveClaudeModelOverflow);
 
     elements.forEach((element) => {
       if (!element.hasAttribute("data-context-generator-original-transform")) {
@@ -4464,6 +4478,33 @@
     reservedClaudeInlineControls = elements;
     reservedClaudeInlineShift = shift;
     reservedClaudeControlOffsets = offsetEntries;
+    reservedClaudeOverflowElements = overflowElements;
+  }
+
+  function getClaudeModelOverflowElements(modelControls) {
+    const elements = [];
+
+    modelControls.forEach((control) => {
+      let node = control.element;
+      let depth = 0;
+
+      while (node && node !== document.body && depth < 4) {
+        if (!elements.includes(node)) elements.push(node);
+        node = node.parentElement;
+        depth += 1;
+      }
+    });
+
+    return elements;
+  }
+
+  function reserveClaudeModelOverflow(element) {
+    if (!element.hasAttribute("data-context-generator-original-overflow")) {
+      element.setAttribute("data-context-generator-original-overflow", element.style.overflow || "");
+    }
+    if (element.style.overflow !== "visible") {
+      element.style.overflow = "visible";
+    }
   }
 
   function getClaudeControlTargetOffset(control, inlineShift = 0) {
@@ -4540,9 +4581,11 @@
     if (!reservedClaudeInlineControls.length) return;
 
     reservedClaudeInlineControls.forEach(restoreReservedTransform);
+    reservedClaudeOverflowElements.forEach(restoreReservedOverflow);
     reservedClaudeInlineControls = [];
     reservedClaudeInlineShift = 0;
     reservedClaudeControlOffsets = new Map();
+    reservedClaudeOverflowElements = [];
   }
 
   function restoreReservedTransform(element) {
@@ -4552,6 +4595,14 @@
     element.style.transform = originalTransform;
     element.style.willChange = "";
     element.removeAttribute("data-context-generator-original-transform");
+  }
+
+  function restoreReservedOverflow(element) {
+    if (!element) return;
+
+    const originalOverflow = element.getAttribute("data-context-generator-original-overflow") || "";
+    element.style.overflow = originalOverflow;
+    element.removeAttribute("data-context-generator-original-overflow");
   }
 
   function scheduleFloatingButtonUpdate() {

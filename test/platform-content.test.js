@@ -271,6 +271,43 @@ test("Claude normal row nudges model left and mic/voice right", () => {
   });
 });
 
+test("Claude model nudge keeps the label from clipping", () => {
+  const modelClipParent = new FakeElement({
+    rect: { left: 520, right: 640, top: 166, bottom: 202, width: 120, height: 36 }
+  });
+  modelClipParent.style.overflow = "hidden";
+
+  const model = new FakeElement({
+    tag: "button",
+    text: "Sonnet 5 Medium",
+    attrs: { "aria-label": "Model selector" },
+    rect: { left: 520, right: 640, top: 166, bottom: 202, width: 120, height: 36 }
+  });
+  model.parentElement = modelClipParent;
+  modelClipParent.children = [model];
+
+  const mic = new FakeElement({
+    tag: "button",
+    attrs: { "aria-label": "Microphone" },
+    rect: { left: 656, right: 692, top: 166, bottom: 202, width: 36, height: 36 }
+  });
+  const voiceMode = new FakeElement({
+    tag: "button",
+    attrs: { "aria-label": "Voice mode" },
+    rect: { left: 700, right: 736, top: 166, bottom: 202, width: 36, height: 36 }
+  });
+  const hooks = loadPlatformContent([model, mic, voiceMode], "claude.ai");
+  model.style.overflow = "hidden";
+  const placement = hooks.getClaudeBubblePlacement(getClaudeComposerRect());
+
+  hooks.reserveClaudeInlineBubbleSlot(placement.anchorControl, placement.controls, null, getClaudeComposerRect(), placement.inlineShift);
+
+  assert.equal(model.style.overflow, "visible");
+  assert.equal(modelClipParent.style.overflow, "visible");
+  assert.equal(model.getAttribute("data-context-generator-original-overflow"), "hidden");
+  assert.equal(modelClipParent.getAttribute("data-context-generator-original-overflow"), "hidden");
+});
+
 test("Claude crowded row shifts only small voice-side controls", () => {
   const model = new FakeElement({
     tag: "button",
