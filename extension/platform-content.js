@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-07-03-claude-even-side-spacing";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-07-03-claude-side-controls-right";
   const BUBBLE_ID = "context-generator-bubble";
   const OVERLAY_ID = "context-generator-overlay";
   const ONBOARDING_ID = "context-generator-onboarding";
@@ -26,10 +26,10 @@
   const BUBBLE_GAP = 8;
   const BUBBLE_SLOT_WIDTH = BUBBLE_SIZE + BUBBLE_GAP + 6;
   const CLAUDE_INLINE_SLOT_WIDTH = BUBBLE_SIZE + 62;
-  const CLAUDE_INLINE_BUBBLE_GAP = 20;
+  const CLAUDE_INLINE_BUBBLE_GAP = 4;
   const CLAUDE_INLINE_RIGHT_MARGIN = 4;
   const CLAUDE_MODEL_LEFT_NUDGE = 34;
-  const CLAUDE_SIDE_CONTROL_RIGHT_NUDGE = 20;
+  const CLAUDE_SIDE_CONTROL_RIGHT_NUDGE = 44;
   const DESTINATION_SHEET_WIDTH = 296;
   const RUNNING_AUTO_RESET_MS = 60000;
   const MAX_BACKEND_CONVERSATION_CHARS = 80000;
