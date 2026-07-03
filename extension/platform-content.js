@@ -32,7 +32,9 @@
   const CLAUDE_SIDE_CONTROL_RIGHT_NUDGE = 52;
   const DESTINATION_SHEET_WIDTH = 296;
   const RUNNING_AUTO_RESET_MS = 60000;
-  const MAX_BACKEND_CONVERSATION_CHARS = 80000;
+  const MAX_BACKEND_CONVERSATION_CHARS = 160000;
+  const BACKEND_CONVERSATION_HEAD_CHARS = 32000;
+  const BACKEND_CONVERSATION_OMISSION_MARKER = "[...middle of conversation omitted to fit the backup summarizer...]";
   const DEFAULT_MAX_COMPOSER_WIDTH = 1320;
   const DESTINATION_TITLE_TEXT = "Where to continue?";
   const DESTINATION_HELPER_TEXT = "Context goes straight into the input box";
@@ -430,6 +432,7 @@
       getClaudeBubblePlacement,
       getGeminiBubblePlacement,
       findGeminiModelSelectorButton,
+      limitConversationText,
       getClaudeInlineControlsToShift,
       getClaudeModelControlsToNudge,
       getClaudeControlTargetOffset,
@@ -1396,11 +1399,15 @@
       return cleaned;
     }
 
-    const headLength = 16000;
-    const tailLength = MAX_BACKEND_CONVERSATION_CHARS - headLength;
+    const separatorLength = 4;
+    const headLength = BACKEND_CONVERSATION_HEAD_CHARS;
+    const tailLength = Math.max(
+      0,
+      MAX_BACKEND_CONVERSATION_CHARS - headLength - BACKEND_CONVERSATION_OMISSION_MARKER.length - separatorLength
+    );
     return [
       cleaned.slice(0, headLength),
-      "[...middle of conversation omitted to fit the backup summarizer...]",
+      BACKEND_CONVERSATION_OMISSION_MARKER,
       cleaned.slice(-tailLength)
     ].join("\n\n");
   }

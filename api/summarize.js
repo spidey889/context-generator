@@ -2,7 +2,7 @@ const MISTRAL_MAX_ATTEMPTS = 2;
 const MISTRAL_RETRY_INTERVAL_MS = 450;
 const MISTRAL_TIMEOUT_MS = 30000;
 const MISTRAL_MODEL = "mistral-large-2512";
-const MISTRAL_MAX_TOKENS = Number(process.env.MISTRAL_MAX_TOKENS || 900);
+const MISTRAL_MAX_TOKENS = Number(process.env.MISTRAL_MAX_TOKENS || 1200);
 const CONTEXT_CARRY_TITLE = "CONTEXT CARRY — READY TO PASTE";
 const CONTEXT_CARRY_BOX_HEADER = [
   "╔══════════════════════════════════════════╗",
@@ -103,9 +103,14 @@ Hard rules:
 - Keep every section heading exactly, including the emoji and capitalization.
 - Do not rename, reorder, remove, or add sections.
 - Replace bracket instructions with concrete, continuation-ready content from the conversation.
-- Aim for 650-750 words when the conversation has enough useful context; stay shorter for simple or short chats.
+- Aim for 850-1000 useful words when the conversation has enough real context; stay shorter only for simple or short chats.
+- Make the result feel like a serious handoff to another capable AI, not a thin executive summary.
 - Preserve exact names, files, APIs, model IDs, commands, error text, copy requirements, constraints, and latest working state when they matter.
 - Prioritize what helps the next AI continue without re-asking the user or repeating work.
+- For coding/product chats, include the concrete repo/app/platform, exact files/functions/constants, commands run, errors seen, tests or verification, deployment state, and user constraints.
+- The KEY CONTEXT section should usually be the densest section. Use compact bullets there when that preserves more specifics.
+- Do not invent, correct, or infer project facts. If the transcript is unclear, say what is uncertain instead of guessing.
+- Avoid broad labels like "security discussion", "early development", or platform names unless the transcript actually supports them.
 - Do not pad or write generic filler; every line should carry useful context.
 - If a section has no information, write "None" under that exact section.
 - Do not add the closing footer from SKILL.md: no "PASTE THIS AT THE TOP OF YOUR NEW CHAT" and no "Continue from where we left off."
@@ -116,7 +121,7 @@ ${CONTEXT_CARRY_TEMPLATE}`,
           },
           {
             role: "user",
-            content: `Summarize this conversation so another AI can continue helping the user:\n\n${conversation}`,
+            content: `Create a dense continuation handoff from this conversation. Another AI should be able to continue the exact work without asking the user to repeat context:\n\n${conversation}`,
           },
         ],
       }),

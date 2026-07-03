@@ -1,9 +1,12 @@
 const assert = require("node:assert/strict");
+const fs = require("node:fs");
+const path = require("node:path");
 const test = require("node:test");
 
 const summarize = require("../api/summarize.js");
 
 const { normalizeContextCarrySummary, stripContextCarryFooter } = summarize.__test;
+const SUMMARIZE_SOURCE = fs.readFileSync(path.join(__dirname, "..", "api", "summarize.js"), "utf8");
 
 test("normalizes summary into the required Context Carry shape", () => {
   const raw = [
@@ -32,6 +35,14 @@ test("normalizes summary into the required Context Carry shape", () => {
     normalized,
     /Reply only: "Context loaded\. Let's pick up right where you left off\." Then wait for the user\./
   );
+});
+
+test("backend prompt defaults favor a richer continuation handoff", () => {
+  assert.match(SUMMARIZE_SOURCE, /MISTRAL_MAX_TOKENS\s*=\s*Number\(process\.env\.MISTRAL_MAX_TOKENS \|\| 1200\)/);
+  assert.match(SUMMARIZE_SOURCE, /Aim for 850-1000 useful words/);
+  assert.match(SUMMARIZE_SOURCE, /serious handoff to another capable AI/);
+  assert.match(SUMMARIZE_SOURCE, /Do not invent, correct, or infer project facts/);
+  assert.match(SUMMARIZE_SOURCE, /Create a dense continuation handoff/);
 });
 
 test("puts free-form model output into KEY CONTEXT instead of returning loose text", () => {

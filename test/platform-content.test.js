@@ -167,6 +167,21 @@ test("conversation scraping preserves detected user and assistant roles", () => 
   assert.match(transcript, /ChatGPT: I will update the modal and add focused tests\./);
 });
 
+test("conversation limiter keeps a richer 160k payload inside the cap", () => {
+  const hooks = loadPlatformContent([]);
+  const longConversation = [
+    "a".repeat(50000),
+    "b".repeat(150000),
+    "TAIL-DETAILS"
+  ].join("");
+  const limited = hooks.limitConversationText(longConversation);
+
+  assert.equal(limited.length, 160000);
+  assert.match(limited, /^a{32000}\n\n/);
+  assert.match(limited, /\[\.\.\.middle of conversation omitted to fit the backup summarizer\.\.\.\]/);
+  assert.match(limited, /TAIL-DETAILS$/);
+});
+
 test("paste verification accepts stable context anchors when box characters differ", () => {
   const hooks = loadPlatformContent([]);
   const expected = [
@@ -331,13 +346,13 @@ test("Claude crowded row shifts only small voice-side controls", () => {
 
   assert.equal(placement.anchorControl.element, voiceMode);
   assert.equal(placement.left, 754);
-  assert.equal(placement.inlineShift, 124);
+  assert.equal(placement.inlineShift, 104);
   assert.equal(shiftedControls.length, 2);
   assert.equal(shiftedControls[0].element, mic);
   assert.equal(shiftedControls[1].element, voiceMode);
   assert.equal(shiftedControls.some((control) => control.element === model), false);
-  assert.equal(hooks.getClaudeControlTargetOffset(shiftedControls[0], placement.inlineShift), -72);
-  assert.equal(hooks.getClaudeControlTargetOffset(shiftedControls[1], placement.inlineShift), -72);
+  assert.equal(hooks.getClaudeControlTargetOffset(shiftedControls[0], placement.inlineShift), -52);
+  assert.equal(hooks.getClaudeControlTargetOffset(shiftedControls[1], placement.inlineShift), -52);
 });
 
 test("Claude typed-state send button does not shift the model selector", () => {
@@ -358,11 +373,11 @@ test("Claude typed-state send button does not shift the model selector", () => {
 
   assert.equal(placement.anchorControl.element, send);
   assert.equal(placement.left, 754);
-  assert.equal(placement.inlineShift, 124);
+  assert.equal(placement.inlineShift, 104);
   assert.equal(shiftedControls.length, 1);
   assert.equal(shiftedControls[0].element, send);
   assert.equal(shiftedControls.some((control) => control.element === model), false);
-  assert.equal(hooks.getClaudeControlTargetOffset(shiftedControls[0], placement.inlineShift), -72);
+  assert.equal(hooks.getClaudeControlTargetOffset(shiftedControls[0], placement.inlineShift), -52);
 });
 
 test("Gemini bubble anchors to the left of the Flash selector", () => {
