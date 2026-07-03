@@ -49,6 +49,9 @@ test("backend prompt profiles scale summary size to the captured chat", () => {
   assert.equal(getSummaryProfile("x".repeat(4000)).id, "small");
   assert.equal(getSummaryProfile("x".repeat(20000)).id, "medium");
   assert.equal(getSummaryProfile("x".repeat(90000)).id, "large");
+  assert.equal(getSummaryProfile("x".repeat(500)).model, "ministral-3b-2512");
+  assert.equal(getSummaryProfile("x".repeat(20000)).model, "ministral-3b-2512");
+  assert.equal(getSummaryProfile("x".repeat(90000)).model, "mistral-large-2512");
   assert.equal(getSummaryProfile("x".repeat(500)).maxTokens, 700);
   assert.equal(getSummaryProfile("x".repeat(90000)).maxTokens, 4200);
   assert.match(getContextCarryTemplate(getSummaryProfile("x".repeat(500))), /WHAT WE WERE DOING\n\[2-3 lines/);
@@ -116,6 +119,7 @@ test("backend forwards a 160k conversation to Mistral and reports the same input
 
     assert.equal(res.statusCode, 200);
     assert.equal(capturedRequest.url, "https://api.mistral.ai/v1/chat/completions");
+    assert.equal(capturedRequest.body.model, "mistral-large-2512");
     assert.equal(capturedRequest.body.max_tokens, 4200);
     assert.equal(capturedRequest.body.messages[1].content.slice(-160000), conversation);
     assert.equal(res.payload.timing.profile, "large");
@@ -161,8 +165,10 @@ test("backend keeps short chats fast and avoids expansion", async () => {
 
     assert.equal(res.statusCode, 200);
     assert.equal(requests.length, 1);
+    assert.equal(requests[0].model, "ministral-3b-2512");
     assert.equal(requests[0].max_tokens, 700);
     assert.equal(res.payload.timing.profile, "tiny");
+    assert.equal(res.payload.timing.model, "ministral-3b-2512");
     assert.equal(res.payload.timing.targetWords, 180);
     assert.equal(res.payload.timing.mistralPasses, 1);
     assert.equal(res.payload.timing.expansion.attempted, false);

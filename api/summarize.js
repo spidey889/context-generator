@@ -2,10 +2,12 @@ const MISTRAL_MAX_ATTEMPTS = 2;
 const MISTRAL_RETRY_INTERVAL_MS = 450;
 const MISTRAL_TIMEOUT_MS = 80000;
 const MISTRAL_CHAT_COMPLETIONS_URL = "https://api.mistral.ai/v1/chat/completions";
-const MISTRAL_MODEL = "mistral-large-2512";
+const MISTRAL_FAST_MODEL = "ministral-3b-2512";
+const MISTRAL_QUALITY_MODEL = "mistral-large-2512";
 const SUMMARY_PROFILES = [
   {
     id: "tiny",
+    model: MISTRAL_FAST_MODEL,
     maxInputChars: 1200,
     targetWords: 180,
     minWords: 0,
@@ -23,6 +25,7 @@ const SUMMARY_PROFILES = [
   },
   {
     id: "small",
+    model: MISTRAL_FAST_MODEL,
     maxInputChars: 8000,
     targetWords: 350,
     minWords: 0,
@@ -40,6 +43,7 @@ const SUMMARY_PROFILES = [
   },
   {
     id: "medium",
+    model: MISTRAL_FAST_MODEL,
     maxInputChars: 60000,
     targetWords: 700,
     minWords: 0,
@@ -57,6 +61,7 @@ const SUMMARY_PROFILES = [
   },
   {
     id: "large",
+    model: MISTRAL_QUALITY_MODEL,
     maxInputChars: Infinity,
     targetWords: 1200,
     minWords: 1100,
@@ -189,7 +194,7 @@ async function handler(req, res) {
       timing: {
         totalMs: Date.now() - startedAt,
         mistralMs,
-        model: MISTRAL_MODEL,
+        model: summaryProfile.model,
         profile: summaryProfile.id,
         maxTokens: summaryProfile.maxTokens,
         targetWords: summaryProfile.targetWords,
@@ -226,7 +231,7 @@ function requestMistralSummary(apiKey, messages, profile) {
       "Content-Type": "application/json",
     },
     body: JSON.stringify({
-      model: MISTRAL_MODEL,
+      model: profile.model,
       temperature: 0.1,
       max_tokens: profile.maxTokens,
       messages,
