@@ -1,9 +1,12 @@
 const MISTRAL_MAX_ATTEMPTS = 2;
 const MISTRAL_RETRY_INTERVAL_MS = 450;
-const MISTRAL_TIMEOUT_MS = 70000;
+const MISTRAL_TIMEOUT_MS = 80000;
+const MISTRAL_CHAT_COMPLETIONS_URL = "https://api.mistral.ai/v1/chat/completions";
 const MISTRAL_MODEL = "mistral-large-2512";
 const CONTEXT_CARRY_TARGET_WORDS = 1200;
-const MISTRAL_MAX_TOKENS = Number(process.env.MISTRAL_MAX_TOKENS || 3200);
+const CONTEXT_CARRY_MIN_WORDS = 1100;
+const SUMMARY_EXPANSION_MIN_INPUT_CHARS = 4000;
+const MISTRAL_MAX_TOKENS = Number(process.env.MISTRAL_MAX_TOKENS || 4200);
 const CONTEXT_CARRY_TITLE = "CONTEXT CARRY — READY TO PASTE";
 const CONTEXT_CARRY_BOX_HEADER = [
   "╔══════════════════════════════════════════╗",
@@ -82,20 +85,147 @@ async function handler(req, res) {
 
   try {
     const mistralStartedAt = Date.now();
-    const mistralResponse = await fetchWithRetry("https://api.mistral.ai/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
+    const mistralResponse = await requestMistralSummary(apiKey, getInitialSummaryMessages(conversation));
+
+    if (!mistralResponse.ok) {
+      const details = await mistralResponse.text();
+      console.error("Mistral API error:", details);
+      return res.status(502).json({ error: "Failed to summarize conversation" });
+    }
+
+    const data = await mistralResponse.json();
+    let summary = normalizeContextCarrySummary(data.choices?.[0]?.message?.content);
+
+    if (!summary) {
+      return res.status(502).json({ error: "Mistral returned an empty summary" });
+    }
+
+    const expansion = {
+      attempted: false,
+      used: false,
+      error: null
+    };
+    let summaryWordCount = countWords(summary);
+
+    if (shouldExpandSummary(conversation, summaryWordCount)) {
+      expansion.attempted = true;
+      try {
+        const expansionResponse = await requestMistralSummary(
+          apiKey,
+          getExpansionSummaryMessages(conversation, summary, summaryWordCount)
+        );
+
+        if (expansionResponse.ok) {
+          const expansionData = await expansionResponse.json();
+          const expandedSummary = normalizeContextCarrySummary(expansionData.choices?.[0]?.message?.content);
+          const expandedWordCount = countWords(expandedSummary);
+          expansion.wordCount = expandedWordCount;
+
+          if (expandedSummary && expandedWordCount > summaryWordCount) {
+            summary = expandedSummary;
+            summaryWordCount = expandedWordCount;
+            expansion.used = true;
+          }
+        } else {
+          expansion.error = await expansionResponse.text();
+          console.error("Mistral expansion error:", expansion.error);
+        }
+      } catch (error) {
+        expansion.error = error?.message || "Expansion request failed";
+        console.error("Mistral expansion failed:", error);
+      }
+    }
+
+    const mistralMs = Date.now() - mistralStartedAt;
+
+    return res.status(200).json({
+      summary,
+      timing: {
+        totalMs: Date.now() - startedAt,
+        mistralMs,
         model: MISTRAL_MODEL,
-        temperature: 0.1,
-        max_tokens: MISTRAL_MAX_TOKENS,
-        messages: [
-          {
-            role: "system",
-            content: `You are the context-generator backend summarizer.
+        maxTokens: MISTRAL_MAX_TOKENS,
+        targetWords: CONTEXT_CARRY_TARGET_WORDS,
+        minWords: CONTEXT_CARRY_MIN_WORDS,
+        summaryWordCount,
+        mistralPasses: expansion.attempted ? 2 : 1,
+        expansion,
+        inputChars: conversation.length,
+        outputChars: summary.length
+      }
+    });
+  } catch (error) {
+    console.error("Summarize error:", error);
+    return res.status(500).json({ error: "Unexpected summarization error" });
+  }
+}
+
+module.exports = handler;
+module.exports.__test = {
+  normalizeContextCarrySummary,
+  normalizeContextCarrySections,
+  stripContextCarryFooter,
+  countWords,
+  shouldExpandSummary
+};
+
+function requestMistralSummary(apiKey, messages) {
+  return fetchWithRetry(MISTRAL_CHAT_COMPLETIONS_URL, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      model: MISTRAL_MODEL,
+      temperature: 0.1,
+      max_tokens: MISTRAL_MAX_TOKENS,
+      messages,
+    }),
+  });
+}
+
+function getInitialSummaryMessages(conversation) {
+  return [
+    {
+      role: "system",
+      content: getSummarySystemPrompt(),
+    },
+    {
+      role: "user",
+      content: `Create a dense continuation handoff from this conversation. Another AI should be able to continue the exact work without asking the user to repeat context:\n\n${conversation}`,
+    },
+  ];
+}
+
+function getExpansionSummaryMessages(conversation, draftSummary, wordCount) {
+  return [
+    {
+      role: "system",
+      content: getSummarySystemPrompt(),
+    },
+    {
+      role: "user",
+      content: `The previous Context Carry was too short at about ${wordCount} words. Rewrite it into a fuller ${CONTEXT_CARRY_TARGET_WORDS}-word continuation handoff.
+
+Rules for this rewrite:
+- Output only the final Context Carry block.
+- Preserve the exact template and NEXT STEP instruction.
+- Expand KEY CONTEXT first, then DECISIONS MADE and OPEN QUESTIONS.
+- Include concrete details from the original conversation, not generic filler.
+- Target 1150-1300 words if the source conversation has enough real information.
+
+Previous draft:
+${draftSummary}
+
+Original conversation:
+${conversation}`,
+    },
+  ];
+}
+
+function getSummarySystemPrompt() {
+  return `You are the context-generator backend summarizer.
 Your output must match the Context Generator SKILL.md template exactly.
 
 Hard rules:
@@ -123,54 +253,16 @@ Hard rules:
 - Before finalizing, silently check the total word count. If it is below 1100 words for a substantial conversation, expand KEY CONTEXT, DECISIONS MADE, and OPEN QUESTIONS with concrete details from the transcript.
 
 Required template:
-${CONTEXT_CARRY_TEMPLATE}`,
-          },
-          {
-            role: "user",
-            content: `Create a dense continuation handoff from this conversation. Another AI should be able to continue the exact work without asking the user to repeat context:\n\n${conversation}`,
-          },
-        ],
-      }),
-    });
-    const mistralMs = Date.now() - mistralStartedAt;
-
-    if (!mistralResponse.ok) {
-      const details = await mistralResponse.text();
-      console.error("Mistral API error:", details);
-      return res.status(502).json({ error: "Failed to summarize conversation" });
-    }
-
-    const data = await mistralResponse.json();
-    const summary = normalizeContextCarrySummary(data.choices?.[0]?.message?.content);
-
-    if (!summary) {
-      return res.status(502).json({ error: "Mistral returned an empty summary" });
-    }
-
-    return res.status(200).json({
-      summary,
-      timing: {
-        totalMs: Date.now() - startedAt,
-        mistralMs,
-        model: MISTRAL_MODEL,
-        maxTokens: MISTRAL_MAX_TOKENS,
-        targetWords: CONTEXT_CARRY_TARGET_WORDS,
-        inputChars: conversation.length,
-        outputChars: summary.length
-      }
-    });
-  } catch (error) {
-    console.error("Summarize error:", error);
-    return res.status(500).json({ error: "Unexpected summarization error" });
-  }
+${CONTEXT_CARRY_TEMPLATE}`;
 }
 
-module.exports = handler;
-module.exports.__test = {
-  normalizeContextCarrySummary,
-  normalizeContextCarrySections,
-  stripContextCarryFooter
-};
+function countWords(text) {
+  return String(text || "").trim().split(/\s+/).filter(Boolean).length;
+}
+
+function shouldExpandSummary(conversation, wordCount) {
+  return conversation.length >= SUMMARY_EXPANSION_MIN_INPUT_CHARS && wordCount > 0 && wordCount < CONTEXT_CARRY_MIN_WORDS;
+}
 
 async function fetchWithRetry(url, options) {
   let lastError = null;
