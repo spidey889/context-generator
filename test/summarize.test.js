@@ -5,7 +5,14 @@ const test = require("node:test");
 
 const summarize = require("../api/summarize.js");
 
-const { normalizeContextCarrySummary, stripContextCarryFooter, countWords, shouldExpandSummary } = summarize.__test;
+const {
+  normalizeContextCarrySummary,
+  stripContextCarryFooter,
+  countWords,
+  shouldExpandSummary,
+  getSummaryProfile,
+  getContextCarryTemplate
+} = summarize.__test;
 const SUMMARIZE_SOURCE = fs.readFileSync(path.join(__dirname, "..", "api", "summarize.js"), "utf8");
 
 test("normalizes summary into the required Context Carry shape", () => {
@@ -37,14 +44,17 @@ test("normalizes summary into the required Context Carry shape", () => {
   );
 });
 
-test("backend prompt defaults favor a richer continuation handoff", () => {
-  assert.match(SUMMARIZE_SOURCE, /CONTEXT_CARRY_TARGET_WORDS\s*=\s*1200/);
-  assert.match(SUMMARIZE_SOURCE, /MISTRAL_MAX_TOKENS\s*=\s*Number\(process\.env\.MISTRAL_MAX_TOKENS \|\| 4200\)/);
-  assert.match(SUMMARIZE_SOURCE, /WHO I AM\n\[80-140 words/);
-  assert.match(SUMMARIZE_SOURCE, /KEY CONTEXT\n\[350-500 words/);
-  assert.match(SUMMARIZE_SOURCE, /substantial multi-turn conversation should not be under 1000 words/);
-  assert.match(SUMMARIZE_SOURCE, /Do not be concise when useful continuation context exists/);
-  assert.match(SUMMARIZE_SOURCE, /silently check the total word count/);
+test("backend prompt profiles scale summary size to the captured chat", () => {
+  assert.equal(getSummaryProfile("x".repeat(500)).id, "tiny");
+  assert.equal(getSummaryProfile("x".repeat(4000)).id, "small");
+  assert.equal(getSummaryProfile("x".repeat(20000)).id, "medium");
+  assert.equal(getSummaryProfile("x".repeat(90000)).id, "large");
+  assert.equal(getSummaryProfile("x".repeat(500)).maxTokens, 700);
+  assert.equal(getSummaryProfile("x".repeat(90000)).maxTokens, 4200);
+  assert.match(getContextCarryTemplate(getSummaryProfile("x".repeat(500))), /WHAT WE WERE DOING\n\[2-3 lines/);
+  assert.match(getContextCarryTemplate(getSummaryProfile("x".repeat(90000))), /KEY CONTEXT\n\[350-500 words/);
+  assert.match(SUMMARIZE_SOURCE, /Do not duplicate or pad short chats/);
+  assert.match(SUMMARIZE_SOURCE, /Use the .* profile/);
   assert.match(SUMMARIZE_SOURCE, /serious handoff to another capable AI/);
   assert.match(SUMMARIZE_SOURCE, /OPEN QUESTIONS should include unresolved risks/);
   assert.match(SUMMARIZE_SOURCE, /Do not invent, correct, or infer project facts/);
@@ -108,6 +118,7 @@ test("backend forwards a 160k conversation to Mistral and reports the same input
     assert.equal(capturedRequest.url, "https://api.mistral.ai/v1/chat/completions");
     assert.equal(capturedRequest.body.max_tokens, 4200);
     assert.equal(capturedRequest.body.messages[1].content.slice(-160000), conversation);
+    assert.equal(res.payload.timing.profile, "large");
     assert.equal(res.payload.timing.inputChars, 160000);
     assert.equal(res.payload.timing.maxTokens, 4200);
     assert.equal(res.payload.timing.targetWords, 1200);
@@ -121,10 +132,54 @@ test("backend forwards a 160k conversation to Mistral and reports the same input
   }
 });
 
+test("backend keeps short chats fast and avoids expansion", async () => {
+  const originalFetch = global.fetch;
+  const originalApiKey = process.env.MISTRAL_API_KEY;
+  const conversation = "User: Firefox manifest setting?\nAssistant: Use the exact setting you can defend.";
+  const requests = [];
+
+  process.env.MISTRAL_API_KEY = "test-key";
+  global.fetch = async (_url, options) => {
+    requests.push(JSON.parse(options.body));
+    return {
+      ok: true,
+      status: 200,
+      json: async () => ({
+        choices: [{
+          message: {
+            content: makeContextCarrySummary("short", 90)
+          }
+        }]
+      })
+    };
+  };
+
+  const res = createMockResponse();
+
+  try {
+    await summarize({ method: "POST", body: { conversation } }, res);
+
+    assert.equal(res.statusCode, 200);
+    assert.equal(requests.length, 1);
+    assert.equal(requests[0].max_tokens, 700);
+    assert.equal(res.payload.timing.profile, "tiny");
+    assert.equal(res.payload.timing.targetWords, 180);
+    assert.equal(res.payload.timing.mistralPasses, 1);
+    assert.equal(res.payload.timing.expansion.attempted, false);
+  } finally {
+    global.fetch = originalFetch;
+    if (originalApiKey === undefined) {
+      delete process.env.MISTRAL_API_KEY;
+    } else {
+      process.env.MISTRAL_API_KEY = originalApiKey;
+    }
+  }
+});
+
 test("backend expands substantial summaries that come back below the word floor", async () => {
   const originalFetch = global.fetch;
   const originalApiKey = process.env.MISTRAL_API_KEY;
-  const conversation = "substantial context ".repeat(500);
+  const conversation = "substantial context ".repeat(4000);
   const shortSummary = makeContextCarrySummary("short", 120);
   const expandedSummary = makeContextCarrySummary("expanded", 1120);
   const requests = [];
@@ -169,9 +224,12 @@ test("backend expands substantial summaries that come back below the word floor"
 });
 
 test("summary expansion only applies to substantial short summaries", () => {
-  assert.equal(shouldExpandSummary("tiny chat", 200), false);
-  assert.equal(shouldExpandSummary("substantial ".repeat(500), 1200), false);
-  assert.equal(shouldExpandSummary("substantial ".repeat(500), 700), true);
+  const largeConversation = "substantial context ".repeat(4000);
+
+  assert.equal(shouldExpandSummary("tiny chat", 200, getSummaryProfile("tiny chat")), false);
+  assert.equal(shouldExpandSummary(largeConversation, 1200, getSummaryProfile(largeConversation)), false);
+  assert.equal(shouldExpandSummary(largeConversation, 700, getSummaryProfile(largeConversation)), true);
+  assert.equal(shouldExpandSummary("medium ".repeat(2000), 400, getSummaryProfile("medium ".repeat(2000))), false);
 });
 
 test("puts free-form model output into KEY CONTEXT instead of returning loose text", () => {

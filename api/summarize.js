@@ -3,10 +3,76 @@ const MISTRAL_RETRY_INTERVAL_MS = 450;
 const MISTRAL_TIMEOUT_MS = 80000;
 const MISTRAL_CHAT_COMPLETIONS_URL = "https://api.mistral.ai/v1/chat/completions";
 const MISTRAL_MODEL = "mistral-large-2512";
-const CONTEXT_CARRY_TARGET_WORDS = 1200;
-const CONTEXT_CARRY_MIN_WORDS = 1100;
-const SUMMARY_EXPANSION_MIN_INPUT_CHARS = 4000;
-const MISTRAL_MAX_TOKENS = Number(process.env.MISTRAL_MAX_TOKENS || 4200);
+const SUMMARY_PROFILES = [
+  {
+    id: "tiny",
+    maxInputChars: 1200,
+    targetWords: 180,
+    minWords: 0,
+    maxTokens: 700,
+    allowExpansion: false,
+    sectionBudget: "WHO I AM 1 short line; WHAT WE WERE DOING 2-3 lines; WHERE WE LEFT OFF 1-2 lines; DECISIONS MADE 0-3 bullets; OPEN QUESTIONS 0-2 bullets; KEY CONTEXT 2-4 dense bullets; NEXT STEP exactly as instructed.",
+    templateHints: {
+      who: "1 short line: user/project only if present",
+      doing: "2-3 lines: the immediate task and why it matters",
+      left: "1-2 lines: exact stopping point",
+      decisions: "0-3 bullets: only real decisions",
+      questions: "0-2 bullets, or None",
+      context: "2-4 dense bullets: exact details worth carrying"
+    }
+  },
+  {
+    id: "small",
+    maxInputChars: 8000,
+    targetWords: 350,
+    minWords: 0,
+    maxTokens: 1000,
+    allowExpansion: false,
+    sectionBudget: "WHO I AM 30-60 words; WHAT WE WERE DOING 60-90; WHERE WE LEFT OFF 40-70; DECISIONS MADE 3-6 compact bullets; OPEN QUESTIONS 1-4 bullets or None; KEY CONTEXT 80-140 words in compact bullets; NEXT STEP exactly as instructed.",
+    templateHints: {
+      who: "30-60 words: user/project/preferences that matter",
+      doing: "60-90 words: actual task and concrete direction",
+      left: "40-70 words: latest state and next validation point",
+      decisions: "3-6 compact bullets if available",
+      questions: "1-4 compact bullets, or None",
+      context: "80-140 words in compact bullets: files, constraints, exact copy, commands, risks"
+    }
+  },
+  {
+    id: "medium",
+    maxInputChars: 60000,
+    targetWords: 700,
+    minWords: 0,
+    maxTokens: 1900,
+    allowExpansion: false,
+    sectionBudget: "WHO I AM 50-90 words; WHAT WE WERE DOING 110-160; WHERE WE LEFT OFF 80-120; DECISIONS MADE 5-9 compact bullets; OPEN QUESTIONS 2-6 bullets or None; KEY CONTEXT 180-280 words in dense bullets; NEXT STEP exactly as instructed.",
+    templateHints: {
+      who: "50-90 words: durable user/project context",
+      doing: "110-160 words: task, product/repo/platform, attempts, direction",
+      left: "80-120 words: latest state, blocker, next validation",
+      decisions: "5-9 compact bullets preserving tradeoffs",
+      questions: "2-6 compact bullets, or None",
+      context: "180-280 words in dense bullets: files, functions, commands, errors, tests, deployment state, constraints"
+    }
+  },
+  {
+    id: "large",
+    maxInputChars: Infinity,
+    targetWords: 1200,
+    minWords: 1100,
+    maxTokens: 4200,
+    allowExpansion: true,
+    sectionBudget: "WHO I AM 80-140 words; WHAT WE WERE DOING 170-240; WHERE WE LEFT OFF 120-180; DECISIONS MADE 180-280; OPEN QUESTIONS 100-180; KEY CONTEXT 350-500; NEXT STEP exactly as instructed.",
+    templateHints: {
+      who: "80-140 words: user's name if mentioned, what they are building or trying to do, role/background/preferences that matter, and any durable context the next AI must know",
+      doing: "170-240 words: the actual task, product/repo/platform, why it mattered, what was tried or discussed, and the concrete direction the user wanted",
+      left: "120-180 words: exact stopping point, latest state, latest user instruction, current blocker or next validation point",
+      decisions: "180-280 words in compact bullets: every important decision, tradeoff, deferred choice, accepted risk, rejected option, and reason when available",
+      questions: "100-180 words in compact bullets: unresolved risks, validation gaps, review concerns, things deferred by the user, or None only when truly nothing remains",
+      context: "350-500 words in dense bullets: exact files, functions, constants, commands, errors, tests, deployment state, APIs, model IDs, payload sizes, user constraints, tone/copy requirements, and anything that prevents repeating work"
+    }
+  }
+];
 const CONTEXT_CARRY_TITLE = "CONTEXT CARRY — READY TO PASTE";
 const CONTEXT_CARRY_BOX_HEADER = [
   "╔══════════════════════════════════════════╗",
@@ -14,28 +80,6 @@ const CONTEXT_CARRY_BOX_HEADER = [
   "╚══════════════════════════════════════════╝"
 ].join("\n");
 const CONTEXT_CARRY_HEADER_PATTERN = /(?:^|\n)\s*(?:#{1,6}\s*)?(?:\*\*)?CONTEXT\s+CARRY\s*(?:—|–|-|--)\s*READY\s+TO\s+PASTE(?:\*\*)?\s*:?\s*/i;
-const CONTEXT_CARRY_TEMPLATE = `${CONTEXT_CARRY_BOX_HEADER}
-
-🧠 WHO I AM
-[80-140 words: user's name if mentioned, what they are building or trying to do, role/background/preferences that matter, and any durable context the next AI must know]
-
-🎯 WHAT WE WERE DOING
-[170-240 words: the actual task, product/repo/platform, why it mattered, what was tried or discussed, and the concrete direction the user wanted]
-
-📍 WHERE WE LEFT OFF
-[120-180 words: exact stopping point, latest state, latest user instruction, current blocker or next validation point]
-
-✅ DECISIONS MADE
-[180-280 words in compact bullets: every important decision, tradeoff, deferred choice, accepted risk, rejected option, and reason when available]
-
-⚠️ OPEN QUESTIONS
-[100-180 words in compact bullets: unresolved risks, validation gaps, review concerns, things deferred by the user, or "None" only when truly nothing remains]
-
-📦 KEY CONTEXT
-[350-500 words in dense bullets: exact files, functions, constants, commands, errors, tests, deployment state, APIs, model IDs, payload sizes, user constraints, tone/copy requirements, and anything that prevents repeating work]
-
-🔁 NEXT STEP
-[One clear sentence: exactly what the user needs to do or ask next]`;
 const CONTEXT_CARRY_SECTIONS = [
   { title: "WHO I AM", heading: "🧠 WHO I AM" },
   { title: "WHAT WE WERE DOING", heading: "🎯 WHAT WE WERE DOING" },
@@ -82,10 +126,11 @@ async function handler(req, res) {
   }
 
   const startedAt = Date.now();
+  const summaryProfile = getSummaryProfile(conversation);
 
   try {
     const mistralStartedAt = Date.now();
-    const mistralResponse = await requestMistralSummary(apiKey, getInitialSummaryMessages(conversation));
+    const mistralResponse = await requestMistralSummary(apiKey, getInitialSummaryMessages(conversation, summaryProfile), summaryProfile);
 
     if (!mistralResponse.ok) {
       const details = await mistralResponse.text();
@@ -107,12 +152,13 @@ async function handler(req, res) {
     };
     let summaryWordCount = countWords(summary);
 
-    if (shouldExpandSummary(conversation, summaryWordCount)) {
+    if (shouldExpandSummary(conversation, summaryWordCount, summaryProfile)) {
       expansion.attempted = true;
       try {
         const expansionResponse = await requestMistralSummary(
           apiKey,
-          getExpansionSummaryMessages(conversation, summary, summaryWordCount)
+          getExpansionSummaryMessages(conversation, summary, summaryWordCount, summaryProfile),
+          summaryProfile
         );
 
         if (expansionResponse.ok) {
@@ -144,9 +190,10 @@ async function handler(req, res) {
         totalMs: Date.now() - startedAt,
         mistralMs,
         model: MISTRAL_MODEL,
-        maxTokens: MISTRAL_MAX_TOKENS,
-        targetWords: CONTEXT_CARRY_TARGET_WORDS,
-        minWords: CONTEXT_CARRY_MIN_WORDS,
+        profile: summaryProfile.id,
+        maxTokens: summaryProfile.maxTokens,
+        targetWords: summaryProfile.targetWords,
+        minWords: summaryProfile.minWords,
         summaryWordCount,
         mistralPasses: expansion.attempted ? 2 : 1,
         expansion,
@@ -166,10 +213,12 @@ module.exports.__test = {
   normalizeContextCarrySections,
   stripContextCarryFooter,
   countWords,
-  shouldExpandSummary
+  shouldExpandSummary,
+  getSummaryProfile,
+  getContextCarryTemplate
 };
 
-function requestMistralSummary(apiKey, messages) {
+function requestMistralSummary(apiKey, messages, profile) {
   return fetchWithRetry(MISTRAL_CHAT_COMPLETIONS_URL, {
     method: "POST",
     headers: {
@@ -179,17 +228,17 @@ function requestMistralSummary(apiKey, messages) {
     body: JSON.stringify({
       model: MISTRAL_MODEL,
       temperature: 0.1,
-      max_tokens: MISTRAL_MAX_TOKENS,
+      max_tokens: profile.maxTokens,
       messages,
     }),
   });
 }
 
-function getInitialSummaryMessages(conversation) {
+function getInitialSummaryMessages(conversation, profile) {
   return [
     {
       role: "system",
-      content: getSummarySystemPrompt(),
+      content: getSummarySystemPrompt(profile),
     },
     {
       role: "user",
@@ -198,22 +247,22 @@ function getInitialSummaryMessages(conversation) {
   ];
 }
 
-function getExpansionSummaryMessages(conversation, draftSummary, wordCount) {
+function getExpansionSummaryMessages(conversation, draftSummary, wordCount, profile) {
   return [
     {
       role: "system",
-      content: getSummarySystemPrompt(),
+      content: getSummarySystemPrompt(profile),
     },
     {
       role: "user",
-      content: `The previous Context Carry was too short at about ${wordCount} words. Rewrite it into a fuller ${CONTEXT_CARRY_TARGET_WORDS}-word continuation handoff.
+      content: `The previous Context Carry was too short at about ${wordCount} words. Rewrite it into a fuller ${profile.targetWords}-word continuation handoff.
 
 Rules for this rewrite:
 - Output only the final Context Carry block.
 - Preserve the exact template and NEXT STEP instruction.
 - Expand KEY CONTEXT first, then DECISIONS MADE and OPEN QUESTIONS.
 - Include concrete details from the original conversation, not generic filler.
-- Target 1150-1300 words if the source conversation has enough real information.
+- Target ${Math.max(profile.minWords, profile.targetWords - 100)}-${profile.targetWords + 100} words if the source conversation has enough real information.
 
 Previous draft:
 ${draftSummary}
@@ -224,7 +273,7 @@ ${conversation}`,
   ];
 }
 
-function getSummarySystemPrompt() {
+function getSummarySystemPrompt(profile) {
   return `You are the context-generator backend summarizer.
 Your output must match the Context Generator SKILL.md template exactly.
 
@@ -234,13 +283,13 @@ Hard rules:
 - Keep every section heading exactly, including the emoji and capitalization.
 - Do not rename, reorder, remove, or add sections.
 - Replace bracket instructions with concrete, continuation-ready content from the conversation.
-- Target about ${CONTEXT_CARRY_TARGET_WORDS} useful words when the conversation has enough real context. A substantial multi-turn conversation should not be under 1000 words.
-- Do not be concise when useful continuation context exists. Use the token budget to preserve specifics.
+- Target about ${profile.targetWords} useful words for this conversation size. Do not duplicate or pad short chats.
+- Use the ${profile.id} profile. Section budget: ${profile.sectionBudget}
+- Do not be concise when useful continuation context exists, but do not manufacture detail when the chat itself is short.
 - Make the result feel like a serious handoff to another capable AI, not a thin executive summary.
 - Preserve exact names, files, APIs, model IDs, commands, error text, copy requirements, constraints, and latest working state when they matter.
 - Prioritize what helps the next AI continue without re-asking the user or repeating work.
 - For coding/product chats, include the concrete repo/app/platform, exact files/functions/constants, commands run, errors seen, tests or verification, deployment state, and user constraints.
-- Use this section budget for substantial chats: WHO I AM 80-140 words; WHAT WE WERE DOING 170-240; WHERE WE LEFT OFF 120-180; DECISIONS MADE 180-280; OPEN QUESTIONS 100-180; KEY CONTEXT 350-500; NEXT STEP exactly as instructed.
 - The KEY CONTEXT section should usually be the densest section. Use compact bullets there when that preserves more specifics, and include at least 6 bullets when enough details exist.
 - DECISIONS MADE should preserve tradeoffs and deferred choices, not only final choices.
 - OPEN QUESTIONS should include unresolved risks, review concerns, validation gaps, or decisions deferred by the user. Write "None" only when the transcript truly leaves no unresolved issue.
@@ -250,18 +299,49 @@ Hard rules:
 - If a section has no information, write "None" under that exact section.
 - Do not add the closing footer from SKILL.md: no "PASTE THIS AT THE TOP OF YOUR NEW CHAT" and no "Continue from where we left off."
 - The 🔁 NEXT STEP section must be exactly: ${DESTINATION_CONFIRMATION_INSTRUCTION}
-- Before finalizing, silently check the total word count. If it is below 1100 words for a substantial conversation, expand KEY CONTEXT, DECISIONS MADE, and OPEN QUESTIONS with concrete details from the transcript.
+- Before finalizing, silently check the total word count. If this is a large profile and the output is below ${profile.minWords || 0} words, expand KEY CONTEXT, DECISIONS MADE, and OPEN QUESTIONS with concrete details from the transcript.
 
 Required template:
-${CONTEXT_CARRY_TEMPLATE}`;
+${getContextCarryTemplate(profile)}`;
 }
 
 function countWords(text) {
   return String(text || "").trim().split(/\s+/).filter(Boolean).length;
 }
 
-function shouldExpandSummary(conversation, wordCount) {
-  return conversation.length >= SUMMARY_EXPANSION_MIN_INPUT_CHARS && wordCount > 0 && wordCount < CONTEXT_CARRY_MIN_WORDS;
+function shouldExpandSummary(_conversation, wordCount, profile = SUMMARY_PROFILES[SUMMARY_PROFILES.length - 1]) {
+  return Boolean(profile.allowExpansion && profile.minWords > 0 && wordCount > 0 && wordCount < profile.minWords);
+}
+
+function getSummaryProfile(conversation) {
+  const inputChars = String(conversation || "").length;
+  return SUMMARY_PROFILES.find((profile) => inputChars <= profile.maxInputChars) || SUMMARY_PROFILES[SUMMARY_PROFILES.length - 1];
+}
+
+function getContextCarryTemplate(profile) {
+  const hints = profile.templateHints;
+  return `${CONTEXT_CARRY_BOX_HEADER}
+
+🧠 WHO I AM
+[${hints.who}]
+
+🎯 WHAT WE WERE DOING
+[${hints.doing}]
+
+📍 WHERE WE LEFT OFF
+[${hints.left}]
+
+✅ DECISIONS MADE
+[${hints.decisions}]
+
+⚠️ OPEN QUESTIONS
+[${hints.questions}]
+
+📦 KEY CONTEXT
+[${hints.context}]
+
+🔁 NEXT STEP
+[One clear sentence: exactly what the user needs to do or ask next]`;
 }
 
 async function fetchWithRetry(url, options) {
