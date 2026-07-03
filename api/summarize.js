@@ -1,8 +1,8 @@
 const MISTRAL_MAX_ATTEMPTS = 2;
 const MISTRAL_RETRY_INTERVAL_MS = 450;
-const MISTRAL_TIMEOUT_MS = 18000;
-const MISTRAL_MODEL = "ministral-3b-2512";
-const MISTRAL_MAX_TOKENS = Number(process.env.MISTRAL_MAX_TOKENS || 650);
+const MISTRAL_TIMEOUT_MS = 30000;
+const MISTRAL_MODEL = "mistral-large-2512";
+const MISTRAL_MAX_TOKENS = Number(process.env.MISTRAL_MAX_TOKENS || 900);
 const CONTEXT_CARRY_TITLE = "CONTEXT CARRY — READY TO PASTE";
 const CONTEXT_CARRY_BOX_HEADER = [
   "╔══════════════════════════════════════════╗",
@@ -102,8 +102,11 @@ Hard rules:
 - Start with the boxed header exactly as shown in the template.
 - Keep every section heading exactly, including the emoji and capitalization.
 - Do not rename, reorder, remove, or add sections.
-- Replace bracket instructions with concise real content from the conversation.
-- Keep total output under 400 words.
+- Replace bracket instructions with concrete, continuation-ready content from the conversation.
+- Aim for 650-750 words when the conversation has enough useful context; stay shorter for simple or short chats.
+- Preserve exact names, files, APIs, model IDs, commands, error text, copy requirements, constraints, and latest working state when they matter.
+- Prioritize what helps the next AI continue without re-asking the user or repeating work.
+- Do not pad or write generic filler; every line should carry useful context.
 - If a section has no information, write "None" under that exact section.
 - Do not add the closing footer from SKILL.md: no "PASTE THIS AT THE TOP OF YOUR NEW CHAT" and no "Continue from where we left off."
 - The 🔁 NEXT STEP section must be exactly: ${DESTINATION_CONFIRMATION_INSTRUCTION}
