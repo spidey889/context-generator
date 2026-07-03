@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-07-03-claude-purple-right-plus12";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-07-03-gemini-flash-left";
   const BUBBLE_ID = "context-generator-bubble";
   const OVERLAY_ID = "context-generator-overlay";
   const ONBOARDING_ID = "context-generator-onboarding";
@@ -428,6 +428,8 @@
       getVerificationSamples,
       normalizeVerificationText,
       getClaudeBubblePlacement,
+      getGeminiBubblePlacement,
+      findGeminiModelSelectorButton,
       getClaudeInlineControlsToShift,
       getClaudeModelControlsToNudge,
       getClaudeControlTargetOffset,
@@ -3606,9 +3608,12 @@
     }
 
     if (currentPlatform.id === "gemini") {
+      const geminiAnchor =
+        findGeminiModelSelectorButton(composerRect) ||
+        findComposerActionButton(input, composerRect);
       const geminiPlacement = getGeminiBubblePlacement(
         composerRect,
-        findComposerActionButton(input, composerRect)
+        geminiAnchor
       );
       releaseBubbleSlot();
       bubble.style.left = "auto";
@@ -4125,6 +4130,47 @@
 
   function getDeepSeekFallbackBubblePlacement(composerRect) {
     return getBottomRightRowBubblePlacement(composerRect, 104);
+  }
+
+  function findGeminiModelSelectorButton(composerRect) {
+    if (!composerRect) return null;
+
+    const rowTop = composerRect.bottom - Math.max(64, composerRect.height * 0.65);
+
+    return Array.from(document.querySelectorAll("button, [role='button'], [tabindex='0'], [aria-label], [title], span"))
+      .filter((element) => element.id !== BUBBLE_ID && !isContextGeneratorNode(element) && isVisible(element))
+      .map((element) => {
+        const rect = element.getBoundingClientRect();
+        const label = getElementLabel(element, true);
+        const text = (element.innerText || element.textContent || "").toLowerCase();
+        let score = 0;
+
+        if (/\bflash\b/.test(text)) score += 220;
+        if (/\bflash\b/.test(label)) score += 220;
+        if (/\b(model|gemini|pro|thinking)\b/.test(label)) score += 36;
+        if (rect.left >= composerRect.left + composerRect.width * 0.45) score += 16;
+        if (rect.width >= 24 && rect.width <= 180) score += 10;
+        if (/\b(send|submit|voice|mic|microphone|attach|upload|image|gallery|add)\b/.test(label)) score -= 260;
+
+        return { element, rect, score };
+      })
+      .filter(({ rect, score }) => {
+        return (
+          score >= 180 &&
+          rect.width > 0 &&
+          rect.width <= 180 &&
+          rect.height > 0 &&
+          rect.height <= 72 &&
+          rect.left >= composerRect.left + composerRect.width * 0.35 &&
+          rect.right <= composerRect.right + 12 &&
+          rect.top >= rowTop &&
+          rect.bottom <= composerRect.bottom + 12
+        );
+      })
+      .sort((a, b) => {
+        if (b.score !== a.score) return b.score - a.score;
+        return a.rect.left - b.rect.left;
+      })[0]?.element || null;
   }
 
   function getGeminiBubblePlacement(composerRect, actionBtn) {

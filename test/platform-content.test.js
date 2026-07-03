@@ -365,6 +365,27 @@ test("Claude typed-state send button does not shift the model selector", () => {
   assert.equal(hooks.getClaudeControlTargetOffset(shiftedControls[0], placement.inlineShift), -72);
 });
 
+test("Gemini bubble anchors to the left of the Flash selector", () => {
+  const flash = new FakeElement({
+    tag: "button",
+    text: "Flash",
+    attrs: { "aria-label": "Gemini Flash model selector" },
+    rect: { left: 700, right: 770, top: 166, bottom: 202, width: 70, height: 36 }
+  });
+  const mic = new FakeElement({
+    tag: "button",
+    attrs: { "aria-label": "Microphone" },
+    rect: { left: 790, right: 826, top: 166, bottom: 202, width: 36, height: 36 }
+  });
+  const hooks = loadPlatformContent([flash, mic], "gemini.google.com");
+  const anchor = hooks.findGeminiModelSelectorButton(getClaudeComposerRect());
+  const placement = hooks.getGeminiBubblePlacement(getClaudeComposerRect(), anchor);
+
+  assert.equal(anchor, flash);
+  assert.equal(placement.right, 208);
+  assert.equal(placement.bottom, 15);
+});
+
 function getClaudeComposerRect() {
   return { left: 100, right: 900, top: 100, bottom: 220, width: 800, height: 120 };
 }
