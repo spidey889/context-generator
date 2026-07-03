@@ -518,7 +518,7 @@
   }
 
   async function summarizeWithBackend(conversationText, trace = null) {
-    markTransferTrace(trace, "summary start", { chars: conversationText.length });
+    markTransferTrace(trace, "summary start", { chars: conversationText.length, inputChars: conversationText.length });
     const response = await notifyBackground({
       type: "SUMMARIZE_WITH_BACKEND",
       conversation: conversationText,

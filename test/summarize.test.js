@@ -38,11 +38,84 @@ test("normalizes summary into the required Context Carry shape", () => {
 });
 
 test("backend prompt defaults favor a richer continuation handoff", () => {
-  assert.match(SUMMARIZE_SOURCE, /MISTRAL_MAX_TOKENS\s*=\s*Number\(process\.env\.MISTRAL_MAX_TOKENS \|\| 1200\)/);
-  assert.match(SUMMARIZE_SOURCE, /Aim for 850-1000 useful words/);
+  assert.match(SUMMARIZE_SOURCE, /CONTEXT_CARRY_TARGET_WORDS\s*=\s*1200/);
+  assert.match(SUMMARIZE_SOURCE, /MISTRAL_MAX_TOKENS\s*=\s*Number\(process\.env\.MISTRAL_MAX_TOKENS \|\| 2200\)/);
+  assert.match(SUMMARIZE_SOURCE, /substantial multi-turn conversation should not be under 1000 words/);
+  assert.match(SUMMARIZE_SOURCE, /Do not be concise when useful continuation context exists/);
   assert.match(SUMMARIZE_SOURCE, /serious handoff to another capable AI/);
+  assert.match(SUMMARIZE_SOURCE, /OPEN QUESTIONS should include unresolved risks/);
   assert.match(SUMMARIZE_SOURCE, /Do not invent, correct, or infer project facts/);
   assert.match(SUMMARIZE_SOURCE, /Create a dense continuation handoff/);
+});
+
+test("backend forwards a 160k conversation to Mistral and reports the same input size", async () => {
+  const originalFetch = global.fetch;
+  const originalApiKey = process.env.MISTRAL_API_KEY;
+  const conversation = "x".repeat(160000);
+  let capturedRequest = null;
+
+  process.env.MISTRAL_API_KEY = "test-key";
+  global.fetch = async (url, options) => {
+    capturedRequest = {
+      url,
+      body: JSON.parse(options.body)
+    };
+    return {
+      ok: true,
+      status: 200,
+      json: async () => ({
+        choices: [{
+          message: {
+            content: [
+              "CONTEXT CARRY - READY TO PASTE",
+              "",
+              "WHO I AM",
+              "Testing payload size.",
+              "",
+              "WHAT WE WERE DOING",
+              "Verifying the backend forwards the full conversation.",
+              "",
+              "WHERE WE LEFT OFF",
+              "The request reached the mocked Mistral endpoint.",
+              "",
+              "DECISIONS MADE",
+              "- Keep the full 160k payload.",
+              "",
+              "OPEN QUESTIONS",
+              "None",
+              "",
+              "KEY CONTEXT",
+              "- The exact payload length matters.",
+              "",
+              "NEXT STEP",
+              "Continue testing."
+            ].join("\n")
+          }
+        }]
+      })
+    };
+  };
+
+  const res = createMockResponse();
+
+  try {
+    await summarize({ method: "POST", body: { conversation } }, res);
+
+    assert.equal(res.statusCode, 200);
+    assert.equal(capturedRequest.url, "https://api.mistral.ai/v1/chat/completions");
+    assert.equal(capturedRequest.body.max_tokens, 2200);
+    assert.equal(capturedRequest.body.messages[1].content.slice(-160000), conversation);
+    assert.equal(res.payload.timing.inputChars, 160000);
+    assert.equal(res.payload.timing.maxTokens, 2200);
+    assert.equal(res.payload.timing.targetWords, 1200);
+  } finally {
+    global.fetch = originalFetch;
+    if (originalApiKey === undefined) {
+      delete process.env.MISTRAL_API_KEY;
+    } else {
+      process.env.MISTRAL_API_KEY = originalApiKey;
+    }
+  }
 });
 
 test("puts free-form model output into KEY CONTEXT instead of returning loose text", () => {
@@ -64,3 +137,22 @@ test("strips old copy-paste footer lines", () => {
 
   assert.equal(cleaned, "WHO I AM\nSomeone building Context Generator.");
 });
+
+function createMockResponse() {
+  return {
+    statusCode: null,
+    payload: null,
+    setHeader() {},
+    status(code) {
+      this.statusCode = code;
+      return this;
+    },
+    json(payload) {
+      this.payload = payload;
+      return payload;
+    },
+    end() {
+      return this;
+    }
+  };
+}

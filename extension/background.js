@@ -7,7 +7,7 @@ const MESSAGE_RETRY_INTERVAL_MS = 120;
 const DESTINATION_WARMUP_TIMEOUT_MS = 9000;
 const SUMMARY_BACKEND_ATTEMPTS = 2;
 const SUMMARY_BACKEND_RETRY_INTERVAL_MS = 450;
-const SUMMARY_BACKEND_TIMEOUT_MS = 35000;
+const SUMMARY_BACKEND_TIMEOUT_MS = 60000;
 const SUMMARY_CACHE_TTL_MS = 120000;
 const SUMMARY_CACHE_MAX_ENTRIES = 8;
 const summaryCache = new Map();
@@ -171,7 +171,7 @@ async function summarizeWithBackend(conversation, transferId = null) {
 async function fetchSummaryFromBackend(conversationText, transferId = null) {
   let lastError = null;
   const summaryStartedAt = nowMs();
-  logPerf(transferId, "summary backend request start", { chars: conversationText.length });
+  logPerf(transferId, "summary backend request start", { chars: conversationText.length, inputChars: conversationText.length });
 
   for (let attempt = 1; attempt <= SUMMARY_BACKEND_ATTEMPTS; attempt += 1) {
     let timeout = null;
@@ -206,6 +206,8 @@ async function fetchSummaryFromBackend(conversationText, transferId = null) {
             fetchMs,
             parseMs,
             chars: summary.length,
+            requestChars: conversationText.length,
+            backendInputChars: data.timing?.inputChars || null,
             backend: data.timing || null
           };
           logPerf(transferId, "summary backend response done", timing);

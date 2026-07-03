@@ -1,8 +1,9 @@
 const MISTRAL_MAX_ATTEMPTS = 2;
 const MISTRAL_RETRY_INTERVAL_MS = 450;
-const MISTRAL_TIMEOUT_MS = 30000;
+const MISTRAL_TIMEOUT_MS = 50000;
 const MISTRAL_MODEL = "mistral-large-2512";
-const MISTRAL_MAX_TOKENS = Number(process.env.MISTRAL_MAX_TOKENS || 1200);
+const CONTEXT_CARRY_TARGET_WORDS = 1200;
+const MISTRAL_MAX_TOKENS = Number(process.env.MISTRAL_MAX_TOKENS || 2200);
 const CONTEXT_CARRY_TITLE = "CONTEXT CARRY — READY TO PASTE";
 const CONTEXT_CARRY_BOX_HEADER = [
   "╔══════════════════════════════════════════╗",
@@ -103,12 +104,16 @@ Hard rules:
 - Keep every section heading exactly, including the emoji and capitalization.
 - Do not rename, reorder, remove, or add sections.
 - Replace bracket instructions with concrete, continuation-ready content from the conversation.
-- Aim for 850-1000 useful words when the conversation has enough real context; stay shorter only for simple or short chats.
+- Target about ${CONTEXT_CARRY_TARGET_WORDS} useful words when the conversation has enough real context. A substantial multi-turn conversation should not be under 1000 words.
+- Do not be concise when useful continuation context exists. Use the token budget to preserve specifics.
 - Make the result feel like a serious handoff to another capable AI, not a thin executive summary.
 - Preserve exact names, files, APIs, model IDs, commands, error text, copy requirements, constraints, and latest working state when they matter.
 - Prioritize what helps the next AI continue without re-asking the user or repeating work.
 - For coding/product chats, include the concrete repo/app/platform, exact files/functions/constants, commands run, errors seen, tests or verification, deployment state, and user constraints.
-- The KEY CONTEXT section should usually be the densest section. Use compact bullets there when that preserves more specifics.
+- Use this section budget for substantial chats: WHO I AM 80-140 words; WHAT WE WERE DOING 170-240; WHERE WE LEFT OFF 120-180; DECISIONS MADE 180-280; OPEN QUESTIONS 100-180; KEY CONTEXT 350-500; NEXT STEP exactly as instructed.
+- The KEY CONTEXT section should usually be the densest section. Use compact bullets there when that preserves more specifics, and include at least 6 bullets when enough details exist.
+- DECISIONS MADE should preserve tradeoffs and deferred choices, not only final choices.
+- OPEN QUESTIONS should include unresolved risks, review concerns, validation gaps, or decisions deferred by the user. Write "None" only when the transcript truly leaves no unresolved issue.
 - Do not invent, correct, or infer project facts. If the transcript is unclear, say what is uncertain instead of guessing.
 - Avoid broad labels like "security discussion", "early development", or platform names unless the transcript actually supports them.
 - Do not pad or write generic filler; every line should carry useful context.
@@ -148,6 +153,7 @@ ${CONTEXT_CARRY_TEMPLATE}`,
         mistralMs,
         model: MISTRAL_MODEL,
         maxTokens: MISTRAL_MAX_TOKENS,
+        targetWords: CONTEXT_CARRY_TARGET_WORDS,
         inputChars: conversation.length,
         outputChars: summary.length
       }
