@@ -264,8 +264,8 @@ test("Claude normal row nudges model left and mic/voice right", () => {
 
   assert.equal(placement.inlineShift, 0);
   assert.equal(hooks.getClaudeControlTargetOffset(modelControls[0], placement.inlineShift), -34);
-  assert.equal(hooks.getClaudeControlTargetOffset(shiftedControls[0], placement.inlineShift), 12);
-  assert.equal(hooks.getClaudeControlTargetOffset(shiftedControls[1], placement.inlineShift), 12);
+  assert.equal(hooks.getClaudeControlTargetOffset(shiftedControls[0], placement.inlineShift), 20);
+  assert.equal(hooks.getClaudeControlTargetOffset(shiftedControls[1], placement.inlineShift), 20);
   [model, mic, voiceMode].forEach((control) => {
     assert.equal(rectsIntersect(bubbleRect, control.getBoundingClientRect()), false);
   });
@@ -336,8 +336,8 @@ test("Claude crowded row shifts only small voice-side controls", () => {
   assert.equal(shiftedControls[0].element, mic);
   assert.equal(shiftedControls[1].element, voiceMode);
   assert.equal(shiftedControls.some((control) => control.element === model), false);
-  assert.equal(hooks.getClaudeControlTargetOffset(shiftedControls[0], placement.inlineShift), -54);
-  assert.equal(hooks.getClaudeControlTargetOffset(shiftedControls[1], placement.inlineShift), -54);
+  assert.equal(hooks.getClaudeControlTargetOffset(shiftedControls[0], placement.inlineShift), -46);
+  assert.equal(hooks.getClaudeControlTargetOffset(shiftedControls[1], placement.inlineShift), -46);
 });
 
 test("Claude typed-state send button does not shift the model selector", () => {
@@ -362,7 +362,7 @@ test("Claude typed-state send button does not shift the model selector", () => {
   assert.equal(shiftedControls.length, 1);
   assert.equal(shiftedControls[0].element, send);
   assert.equal(shiftedControls.some((control) => control.element === model), false);
-  assert.equal(hooks.getClaudeControlTargetOffset(shiftedControls[0], placement.inlineShift), -54);
+  assert.equal(hooks.getClaudeControlTargetOffset(shiftedControls[0], placement.inlineShift), -46);
 });
 
 function getClaudeComposerRect() {
