@@ -39,9 +39,12 @@ test("normalizes summary into the required Context Carry shape", () => {
 
 test("backend prompt defaults favor a richer continuation handoff", () => {
   assert.match(SUMMARIZE_SOURCE, /CONTEXT_CARRY_TARGET_WORDS\s*=\s*1200/);
-  assert.match(SUMMARIZE_SOURCE, /MISTRAL_MAX_TOKENS\s*=\s*Number\(process\.env\.MISTRAL_MAX_TOKENS \|\| 2200\)/);
+  assert.match(SUMMARIZE_SOURCE, /MISTRAL_MAX_TOKENS\s*=\s*Number\(process\.env\.MISTRAL_MAX_TOKENS \|\| 3200\)/);
+  assert.match(SUMMARIZE_SOURCE, /WHO I AM\n\[80-140 words/);
+  assert.match(SUMMARIZE_SOURCE, /KEY CONTEXT\n\[350-500 words/);
   assert.match(SUMMARIZE_SOURCE, /substantial multi-turn conversation should not be under 1000 words/);
   assert.match(SUMMARIZE_SOURCE, /Do not be concise when useful continuation context exists/);
+  assert.match(SUMMARIZE_SOURCE, /silently check the total word count/);
   assert.match(SUMMARIZE_SOURCE, /serious handoff to another capable AI/);
   assert.match(SUMMARIZE_SOURCE, /OPEN QUESTIONS should include unresolved risks/);
   assert.match(SUMMARIZE_SOURCE, /Do not invent, correct, or infer project facts/);
@@ -103,10 +106,10 @@ test("backend forwards a 160k conversation to Mistral and reports the same input
 
     assert.equal(res.statusCode, 200);
     assert.equal(capturedRequest.url, "https://api.mistral.ai/v1/chat/completions");
-    assert.equal(capturedRequest.body.max_tokens, 2200);
+    assert.equal(capturedRequest.body.max_tokens, 3200);
     assert.equal(capturedRequest.body.messages[1].content.slice(-160000), conversation);
     assert.equal(res.payload.timing.inputChars, 160000);
-    assert.equal(res.payload.timing.maxTokens, 2200);
+    assert.equal(res.payload.timing.maxTokens, 3200);
     assert.equal(res.payload.timing.targetWords, 1200);
   } finally {
     global.fetch = originalFetch;

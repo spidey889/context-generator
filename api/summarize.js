@@ -1,9 +1,9 @@
 const MISTRAL_MAX_ATTEMPTS = 2;
 const MISTRAL_RETRY_INTERVAL_MS = 450;
-const MISTRAL_TIMEOUT_MS = 50000;
+const MISTRAL_TIMEOUT_MS = 70000;
 const MISTRAL_MODEL = "mistral-large-2512";
 const CONTEXT_CARRY_TARGET_WORDS = 1200;
-const MISTRAL_MAX_TOKENS = Number(process.env.MISTRAL_MAX_TOKENS || 2200);
+const MISTRAL_MAX_TOKENS = Number(process.env.MISTRAL_MAX_TOKENS || 3200);
 const CONTEXT_CARRY_TITLE = "CONTEXT CARRY — READY TO PASTE";
 const CONTEXT_CARRY_BOX_HEADER = [
   "╔══════════════════════════════════════════╗",
@@ -14,22 +14,22 @@ const CONTEXT_CARRY_HEADER_PATTERN = /(?:^|\n)\s*(?:#{1,6}\s*)?(?:\*\*)?CONTEXT\
 const CONTEXT_CARRY_TEMPLATE = `${CONTEXT_CARRY_BOX_HEADER}
 
 🧠 WHO I AM
-[2-3 lines: user's name if mentioned, what they're building, their background/role]
+[80-140 words: user's name if mentioned, what they are building or trying to do, role/background/preferences that matter, and any durable context the next AI must know]
 
 🎯 WHAT WE WERE DOING
-[2-4 lines: the main goal or task of this conversation]
+[170-240 words: the actual task, product/repo/platform, why it mattered, what was tried or discussed, and the concrete direction the user wanted]
 
 📍 WHERE WE LEFT OFF
-[2-3 lines: the exact point the conversation stopped — last decision made, last thing discussed]
+[120-180 words: exact stopping point, latest state, latest user instruction, current blocker or next validation point]
 
 ✅ DECISIONS MADE
-[Bullet list of every important decision, choice, or conclusion reached]
+[180-280 words in compact bullets: every important decision, tradeoff, deferred choice, accepted risk, rejected option, and reason when available]
 
 ⚠️ OPEN QUESTIONS
-[Bullet list of things still unresolved or mid-discussion — if none, write "None"]
+[100-180 words in compact bullets: unresolved risks, validation gaps, review concerns, things deferred by the user, or "None" only when truly nothing remains]
 
 📦 KEY CONTEXT
-[Any important details the new AI must know to help properly — tools being used, constraints, preferences, style, tone, etc.]
+[350-500 words in dense bullets: exact files, functions, constants, commands, errors, tests, deployment state, APIs, model IDs, payload sizes, user constraints, tone/copy requirements, and anything that prevents repeating work]
 
 🔁 NEXT STEP
 [One clear sentence: exactly what the user needs to do or ask next]`;
@@ -120,6 +120,7 @@ Hard rules:
 - If a section has no information, write "None" under that exact section.
 - Do not add the closing footer from SKILL.md: no "PASTE THIS AT THE TOP OF YOUR NEW CHAT" and no "Continue from where we left off."
 - The 🔁 NEXT STEP section must be exactly: ${DESTINATION_CONFIRMATION_INSTRUCTION}
+- Before finalizing, silently check the total word count. If it is below 1100 words for a substantial conversation, expand KEY CONTEXT, DECISIONS MADE, and OPEN QUESTIONS with concrete details from the transcript.
 
 Required template:
 ${CONTEXT_CARRY_TEMPLATE}`,
