@@ -529,6 +529,10 @@
   }
 
   async function summarizeWithBackend(conversationText, trace = null) {
+    return (await requestBackendSummary(conversationText, trace)).summary;
+  }
+
+  async function requestBackendSummary(conversationText, trace = null) {
     markTransferTrace(trace, "summary start", { chars: conversationText.length, inputChars: conversationText.length });
     const response = await notifyBackground({
       type: "SUMMARIZE_WITH_BACKEND",
@@ -540,11 +544,13 @@
       throw new Error("Backup summarizer returned no summary.");
     }
 
+    const summary = response.summary.trim();
+    const timing = response.timing || null;
     markTransferTrace(trace, "summary done", {
-      chars: response.summary.trim().length,
-      background: response.timing || null
+      chars: summary.length,
+      background: timing
     });
-    return response.summary.trim();
+    return { summary, timing };
   }
 
   async function getSummaryForTransfer(conversationText, warmSummaryRecord = null, trace = null) {
@@ -554,7 +560,15 @@
     if (isWarmSummaryUsable(candidate, fingerprint)) {
       const summary = candidate.summary || await candidate.promise;
       if (summary && candidate.fingerprint === fingerprint) {
-        markTransferTrace(trace || candidate.trace, "summary reused", {
+        const targetTrace = trace || candidate.trace;
+        const summaryTiming = candidate.summaryTiming || getSummaryTimingFromTrace(candidate.trace);
+        if (targetTrace && summaryTiming && !getSummaryTimingFromTrace(targetTrace)) {
+          markTransferTrace(targetTrace, "summary done", {
+            chars: summary.length,
+            background: summaryTiming
+          });
+        }
+        markTransferTrace(targetTrace, "summary reused", {
           source: candidate.summary ? "completed warm summary" : "warm summary promise",
           chars: summary.length
         });
@@ -605,14 +619,17 @@
       startedAt: now,
       expiresAt: now + WARM_SUMMARY_TTL_MS,
       summary: null,
+      summaryTiming: null,
       promise: null,
       settled: false,
       trace
     };
 
-    record.promise = summarizeWithBackend(conversationText, trace)
-      .then((summary) => {
+    record.promise = requestBackendSummary(conversationText, trace)
+      .then((result) => {
         record.settled = true;
+        const summary = result.summary;
+        record.summaryTiming = result.timing;
         if (warmSummary === record && Date.now() <= record.expiresAt) {
           record.summary = summary;
         }
@@ -910,6 +927,7 @@
   }
 
   function getSummaryTimingFromTrace(trace) {
+    if (!trace?.marks) return null;
     const summaryDone = [...trace.marks].reverse().find((mark) => mark.label === "summary done");
     return summaryDone?.detail?.background || null;
   }

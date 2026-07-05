@@ -238,6 +238,46 @@ test("in-flight warm summary is reused even after its freshness window passes", 
   assert.match(summary, /Warm summary result/);
 });
 
+test("reused warm summary carries backend timing into the transfer trace", async () => {
+  const hooks = loadPlatformContent([]);
+  const conversation = "ChatGPT conversation:\n\nUser: Keep timing metadata.";
+  const trace = {
+    id: "test-trace",
+    startedAt: 0,
+    lastAt: null,
+    marks: []
+  };
+  const record = {
+    fingerprint: hooks.getConversationFingerprint(conversation),
+    startedAt: Date.now(),
+    expiresAt: Date.now() + 10000,
+    summary: "CONTEXT CARRY\n\nWHO I AM\nWarm summary with timing",
+    summaryTiming: {
+      source: "backend",
+      requestChars: conversation.length,
+      backendInputChars: conversation.length,
+      chars: 55,
+      backend: {
+        inputChars: conversation.length,
+        outputChars: 55,
+        model: "ministral-3b-2512",
+        profile: "small",
+        summaryWordCount: 8
+      }
+    },
+    promise: Promise.resolve("CONTEXT CARRY\n\nWHO I AM\nWarm summary with timing"),
+    settled: true,
+    trace: null
+  };
+
+  const summary = await hooks.getSummaryForTransfer(conversation, record, trace);
+
+  assert.match(summary, /Warm summary with timing/);
+  assert.equal(trace.marks[0].label, "summary done");
+  assert.equal(trace.marks[0].detail.background.backend.model, "ministral-3b-2512");
+  assert.equal(trace.marks[1].label, "summary reused");
+});
+
 test("transfer safety window covers long quality summaries", () => {
   const source = fs.readFileSync(SOURCE_PATH, "utf8");
 
