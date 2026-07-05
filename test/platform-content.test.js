@@ -311,14 +311,20 @@ test("Claude scraping does not stop at explicit wrapper chunks when many loaded 
   assert.match(transcript, /Claude: Loaded turn 78/);
 });
 
-function createVirtualizedChatElements({ label, makeTurn, windowSize = 12, scrollStride = windowSize }) {
+function createVirtualizedChatElements({
+  label,
+  makeTurn,
+  totalTurns = 78,
+  windowSize = 12,
+  scrollStride = windowSize,
+  scrollHeight = 4800
+}) {
   const elements = [];
-  const totalTurns = 78;
   const scrollableRoot = new FakeElement({
     text: `Scrollable ${label} chat root`,
     attrs: { role: "main" }
   });
-  scrollableRoot.scrollHeight = 4800;
+  scrollableRoot.scrollHeight = scrollHeight;
   scrollableRoot.clientHeight = 600;
   scrollableRoot.scrollTop = 0;
   elements.push(scrollableRoot);
@@ -407,6 +413,32 @@ test("transfer capture sweeps virtualized long chats across supported platforms"
     assert.match(transcript, /User: Virtualized turn 1/);
     assert.match(transcript, new RegExp(`${platformName}: Virtualized turn 78`));
   }
+});
+
+test("Claude sweep captures long-message chats that need more than the old scroll limit", async () => {
+  const longText = "Long Claude message detail ".repeat(16).trim();
+  const { elements } = createVirtualizedChatElements({
+    label: "Claude",
+    totalTurns: 82,
+    windowSize: 8,
+    scrollStride: 1,
+    scrollHeight: 31000,
+    makeTurn: (index) => new FakeElement({
+      text: `Slow virtualized Claude turn ${index}. ${longText}`,
+      attrs: index % 2 ? { "data-testid": "user-message" } : { class: "font-claude-response" }
+    })
+  });
+  const hooks = loadPlatformContent(elements, "claude.ai");
+  const initialTranscript = hooks.scrapeConversationText();
+  assert.equal((initialTranscript.match(/(?:User|Claude): Slow virtualized Claude turn/g) || []).length, 8);
+
+  await hooks.prepareSourceForCapture();
+  const transcript = await hooks.scrapeConversationTextWhenReady();
+
+  assert.equal((transcript.match(/(?:User|Claude): Slow virtualized Claude turn/g) || []).length, 82);
+  assert.match(transcript, /User: Slow virtualized Claude turn 1/);
+  assert.match(transcript, /Claude: Slow virtualized Claude turn 82/);
+  assert.ok(transcript.length > 28000, "fixture should represent a long-message Claude chat");
 });
 
 test("ChatGPT sweep handles eight-turn virtualized windows on a large app scroll root", async () => {

@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-07-05-anchored-virtual-sweep";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-07-05-long-message-sweep";
   const BUBBLE_ID = "context-generator-bubble";
   const OVERLAY_ID = "context-generator-overlay";
   const ONBOARDING_ID = "context-generator-onboarding";
@@ -58,7 +58,7 @@
   const SOURCE_SCROLL_STABLE_SAMPLE_COUNT = 3;
   const VIRTUAL_SWEEP_PLATFORM_IDS = new Set(["claude", "chatgpt", "gemini", "grok", "deepseek"]);
   const VIRTUAL_SWEEP_MIN_TURNS = 8;
-  const VIRTUAL_SWEEP_MAX_SCROLLS = 48;
+  const VIRTUAL_SWEEP_MAX_SCROLLS = 160;
   const VIRTUAL_SWEEP_STALE_SCROLLS = 3;
   const VIRTUAL_SWEEP_STEP_RATIO = 0.5;
   const VIRTUAL_SWEEP_SETTLE_MS = 360;
