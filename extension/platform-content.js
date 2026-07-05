@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-07-05-source-scroll-analysis";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-07-05-scroll-stabilize";
   const BUBBLE_ID = "context-generator-bubble";
   const OVERLAY_ID = "context-generator-overlay";
   const ONBOARDING_ID = "context-generator-onboarding";
@@ -52,6 +52,9 @@
   const CONVERSATION_SCRAPE_RETRY_TIMEOUT_MS = 0;
   const CLAUDE_CONVERSATION_SCRAPE_RETRY_TIMEOUT_MS = 1800;
   const CONVERSATION_SCRAPE_RETRY_INTERVAL_MS = 140;
+  const SOURCE_SCROLL_STABLE_TIMEOUT_MS = 1400;
+  const SOURCE_SCROLL_STABLE_INTERVAL_MS = 120;
+  const SOURCE_SCROLL_STABLE_SAMPLE_COUNT = 2;
   const EMPTY_START_SCREEN_TEXTS = [
     "the mic is yours",
     "start chatting",
@@ -461,7 +464,7 @@
         } else {
           showOverlay(destinationId);
         }
-        prepareSourceForCapture();
+        await prepareSourceForCapture();
         transferStage = "capture";
         markTransferTrace(transferTrace, "capture start");
         conversationText = await scrapeConversationTextWhenReady();
@@ -722,9 +725,34 @@
     });
   }
 
-  function prepareSourceForCapture() {
+  async function prepareSourceForCapture() {
     getSourceScrollTargets().forEach(scrollElementToTopInstantly);
     scrollWindowToTopInstantly();
+    await waitForMessageCountToStabilize();
+  }
+
+  async function waitForMessageCountToStabilize(timeoutMs = SOURCE_SCROLL_STABLE_TIMEOUT_MS) {
+    const startedAt = Date.now();
+    let lastCount = getDetectedConversationMessageCount();
+    let stableSamples = 0;
+
+    while (Date.now() - startedAt < timeoutMs) {
+      const remainingMs = timeoutMs - (Date.now() - startedAt);
+      await delay(Math.min(SOURCE_SCROLL_STABLE_INTERVAL_MS, Math.max(0, remainingMs)));
+
+      const nextCount = getDetectedConversationMessageCount();
+      if (nextCount === lastCount) {
+        stableSamples += 1;
+        if (stableSamples >= SOURCE_SCROLL_STABLE_SAMPLE_COUNT) return;
+      } else {
+        lastCount = nextCount;
+        stableSamples = 0;
+      }
+    }
+  }
+
+  function getDetectedConversationMessageCount() {
+    return getConversationTurns().filter((turn) => isDetectedConversationMessage(turn)).length;
   }
 
   function getSourceScrollTargets() {
@@ -3067,7 +3095,7 @@
     runningResetTimer = setTimeout(resetRunningFlag, RUNNING_AUTO_RESET_MS);
     showOverlay(destinationId);
     setHandoffStatus("Reading source chat");
-    prepareSourceForCapture();
+    await prepareSourceForCapture();
 
     let conversationText;
     try {

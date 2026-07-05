@@ -204,7 +204,7 @@ test("conversation limiter keeps a richer 160k payload inside the cap", () => {
   assert.match(limited, /TAIL-DETAILS$/);
 });
 
-test("source capture prep scrolls conversation containers to the top instantly", () => {
+test("source capture prep scrolls conversation containers to the top instantly", async () => {
   const scrollableRoot = new FakeElement({
     text: "Scrollable chat root",
     attrs: { role: "main" }
@@ -214,10 +214,52 @@ test("source capture prep scrolls conversation containers to the top instantly",
   scrollableRoot.scrollTop = 740;
   const hooks = loadPlatformContent([scrollableRoot]);
 
-  hooks.prepareSourceForCapture();
+  await hooks.prepareSourceForCapture();
 
   assert.equal(scrollableRoot.scrollTop, 0);
   assert.equal(scrollableRoot.scrollCalls[0].behavior, "instant");
+});
+
+test("source capture prep waits until delayed older messages finish loading", async () => {
+  const elements = [];
+  const scrollableRoot = new FakeElement({ text: "Scrollable chat root" });
+  scrollableRoot.scrollHeight = 2200;
+  scrollableRoot.clientHeight = 500;
+  scrollableRoot.scrollTop = 900;
+  elements.push(scrollableRoot);
+
+  for (let index = 21; index <= 24; index += 1) {
+    elements.push(new FakeElement({
+      text: `Visible message ${index}`,
+      attrs: { "data-message-author-role": index % 2 ? "user" : "assistant" }
+    }));
+  }
+
+  let loadedOlderMessages = false;
+  const originalScrollTo = scrollableRoot.scrollTo.bind(scrollableRoot);
+  scrollableRoot.scrollTo = (...args) => {
+    originalScrollTo(...args);
+    if (loadedOlderMessages) return;
+    loadedOlderMessages = true;
+    setTimeout(() => {
+      for (let index = 1; index <= 20; index += 1) {
+        elements.push(new FakeElement({
+          text: `Older message ${index}`,
+          attrs: { "data-message-author-role": index % 2 ? "user" : "assistant" }
+        }));
+      }
+    }, 180);
+  };
+
+  const hooks = loadPlatformContent(elements);
+
+  await hooks.prepareSourceForCapture();
+  const transcript = hooks.scrapeConversationText();
+
+  assert.match(transcript, /Older message 1/);
+  assert.match(transcript, /Older message 20/);
+  assert.match(transcript, /Visible message 24/);
+  assert.equal((transcript.match(/(?:Older|Visible) message/g) || []).length, 24);
 });
 
 test("in-flight warm summary is reused even after its freshness window passes", async () => {

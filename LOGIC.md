@@ -104,7 +104,7 @@ Future rule: do not move the ChatGPT button back into ChatGPT's composer DOM and
 
 ## How Conversation Scraping Works
 
-For picker-started transfers, the handoff popup is shown before capture, then the source page is instantly scrolled to the top so older messages have the existing scrape window to load before scraping. The scraper still removes extension-owned DOM before reading text, so popup text is not included in the backend input.
+For picker-started transfers, the handoff popup is shown before capture, then the source page is instantly scrolled to the top. After the scroll, the script samples the detected message-turn count until it stops increasing for a short bounded window, so older messages loaded by the top-scroll are included before scraping starts. The scraper still removes extension-owned DOM before reading text, so popup text is not included in the backend input.
 
 Each platform has its own likely conversation selectors. Examples include Claude response/user-message selectors, ChatGPT `data-message-author-role` conversation turns, Gemini user/model response elements, Grok message elements, and DeepSeek markdown/message elements. The scraper also keeps a generic fallback selector set for message/conversation/chat/article/markdown containers so minor platform DOM renames are less likely to produce a false "no text" error.
 
@@ -285,3 +285,4 @@ If destination paste fails, the destination page shows a manual copy modal with 
 - 2026-07-05: Added the latest-run analysis page at `/analysis`, backed by one privacy-safe `chrome.storage.local` transfer receipt and a GitHub Pages bridge content script. Backend timing now forwards Mistral token usage, including aggregate usage across expansion passes.
 - 2026-07-05: Picker-started transfers now show the handoff popup, instantly scroll the source chat to the top, and then scrape using the existing retry window. The analysis page also shows detected vs captured/sent message turns from the existing scrape metrics.
 - 2026-07-05: Reused warm summaries now carry their saved backend timing into the final transfer trace before `summary reused` is logged. This keeps Last Run model/profile/backend input/output/word-count fields populated for completed warm-summary reuse transfers.
+- 2026-07-05: Source top-scroll now waits for detected message-turn count to stabilize before scraping. A real extension long-chat check with delayed older-message loading captured 24/24 turns in Last Run after the scroll.
