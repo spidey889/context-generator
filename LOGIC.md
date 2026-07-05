@@ -7,6 +7,8 @@ This document explains how the Chrome extension works right now. It is written f
 - `extension/manifest.json` registers the extension, host permissions, the background service worker, and the shared platform content script on all supported AI sites.
 - `extension/background.js` coordinates tab creation, content script injection, backend summarization, badge state, and messages between pages.
 - `extension/platform-content.js` owns the Cap-Context button, destination picker, conversation scraping, backend summary request, and destination paste behavior for every supported platform.
+- `extension/analysis-bridge.js` runs only on the GitHub Pages analysis route and exposes the latest saved transfer metrics from extension storage to the page.
+- `analysis/index.html` is the GitHub Pages analysis UI at `/context-generator/analysis`.
 - `api/summarize.js` is the Vercel serverless endpoint that calls Mistral.
 
 The old split content scripts were removed. There is no longer a separate Claude launcher script, ChatGPT paste script, or generic AI destination paste script.
@@ -202,6 +204,14 @@ After pasting, it verifies that a normalized leading sample of the summary is pr
 
 Once paste verification passes, the flow stops. It does not search for Send buttons, click Send, submit forms, or press Enter on any destination platform. The pasted summary stays in the input box for the user to review and send manually.
 
+## Latest Run Analysis Page
+
+The extension saves one latest transfer receipt in `chrome.storage.local` under `context-generator-last-transfer-stats-v1` when a transfer trace finishes. This receipt intentionally stores only metrics and labels, not the scraped conversation text or generated summary. It includes source/destination, status, capture counts, capped/sent characters, backend-received characters, summary output characters, model/profile, word count, Mistral pass count, token usage when the backend returns it, paste timing, total timing, and sanitized timeline marks.
+
+The public GitHub Pages UI lives at `analysis/index.html`, published as `https://spidey889.github.io/context-generator/analysis`. Because a normal web page cannot read extension storage directly, `extension/analysis-bridge.js` is registered only for that GitHub Pages route. The page sends a `postMessage` request, the bridge reads `chrome.storage.local`, and the bridge posts the latest metrics back. The page has a demo-only `?demo=1` mode for visual smoke checks, but the normal route shows only real saved extension data or an empty state.
+
+The backend includes Mistral `usage` metadata in its timing payload. Tiny local-direct summaries report zero API tokens. Mistral summaries report prompt, completion, total, and cached tokens when available; if an expansion pass runs, usage is totaled across both Mistral calls and the expansion call's own usage is nested under `expansion.usage`.
+
 ## Badges, Overlays, And Error Handling
 
 The background worker sets the extension badge to:
@@ -272,3 +282,4 @@ If destination paste fails, the destination page shows a manual copy modal with 
 - 2026-07-03: Long handoffs appeared to stall for about two minutes because the picker-open warm summary could take longer than its old 30 second freshness window. The destination click then awaited that in-flight warm summary, discarded it as expired after it finally returned, and started a second full backend summary before paste. Warm summaries now stay usable while in flight, resolved warm results are accepted once a destination click has claimed them, the completed warm-summary TTL is 180 seconds, the source overlay auto-reset is 240 seconds, and the background backend timeout is 190 seconds so it no longer aborts before the 180 second Vercel function ceiling.
 - 2026-07-03: Summary speed was improved with adaptive backend profiles. Tiny chats now use a local direct Context Carry with the exact source text and no Mistral call. Small/medium chats use smaller output caps, one Mistral pass, and `ministral-3b-2512`; the `mistral-large-2512` 1,200-word plus expansion path is reserved for large conversations over 60k characters.
 - 2026-07-03: Live production probe after the tiny direct-carry deploy returned `profile: tiny`, `model: local-direct`, `mistralMs: 0`, `mistralPasses: 0`, `summaryWordCount: 148`, and 969ms wall time for a 284-character chat. The same probe shape for a 14,220-character medium chat returned `model: ministral-3b-2512`, `summaryWordCount: 462`, `mistralMs: 7074`, and 7.6 seconds wall time.
+- 2026-07-05: Added the latest-run analysis page at `/analysis`, backed by one privacy-safe `chrome.storage.local` transfer receipt and a GitHub Pages bridge content script. Backend timing now forwards Mistral token usage, including aggregate usage across expansion passes.

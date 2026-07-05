@@ -152,7 +152,8 @@ async function handler(req, res) {
         mistralPasses: 0,
         expansion,
         inputChars: conversation.length,
-        outputChars: summary.length
+        outputChars: summary.length,
+        usage: createZeroUsage()
       }
     });
   }
@@ -173,6 +174,7 @@ async function handler(req, res) {
     }
 
     const data = await mistralResponse.json();
+    const initialUsage = normalizeMistralUsage(data.usage);
     let summary = normalizeContextCarrySummary(data.choices?.[0]?.message?.content);
 
     if (!summary) {
@@ -182,8 +184,10 @@ async function handler(req, res) {
     const expansion = {
       attempted: false,
       used: false,
-      error: null
+      error: null,
+      usage: null
     };
+    let totalUsage = initialUsage;
     let summaryWordCount = countWords(summary);
 
     if (shouldExpandSummary(conversation, summaryWordCount, summaryProfile)) {
@@ -197,6 +201,9 @@ async function handler(req, res) {
 
         if (expansionResponse.ok) {
           const expansionData = await expansionResponse.json();
+          const expansionUsage = normalizeMistralUsage(expansionData.usage);
+          expansion.usage = expansionUsage;
+          totalUsage = addMistralUsage(totalUsage, expansionUsage);
           const expandedSummary = normalizeContextCarrySummary(expansionData.choices?.[0]?.message?.content);
           const expandedWordCount = countWords(expandedSummary);
           expansion.wordCount = expandedWordCount;
@@ -232,7 +239,8 @@ async function handler(req, res) {
         mistralPasses: expansion.attempted ? 2 : 1,
         expansion,
         inputChars: conversation.length,
-        outputChars: summary.length
+        outputChars: summary.length,
+        usage: totalUsage
       }
     });
   } catch (error) {
@@ -345,6 +353,47 @@ function countWords(text) {
 
 function shouldExpandSummary(_conversation, wordCount, profile = SUMMARY_PROFILES[SUMMARY_PROFILES.length - 1]) {
   return Boolean(profile.allowExpansion && profile.minWords > 0 && wordCount > 0 && wordCount < profile.minWords);
+}
+
+function createZeroUsage() {
+  return {
+    promptTokens: 0,
+    completionTokens: 0,
+    totalTokens: 0,
+    cachedTokens: 0
+  };
+}
+
+function normalizeMistralUsage(usage) {
+  if (!usage || typeof usage !== "object") return null;
+
+  return {
+    promptTokens: normalizeTokenCount(usage.prompt_tokens),
+    completionTokens: normalizeTokenCount(usage.completion_tokens),
+    totalTokens: normalizeTokenCount(usage.total_tokens),
+    cachedTokens: normalizeTokenCount(usage.prompt_tokens_details?.cached_tokens)
+  };
+}
+
+function normalizeTokenCount(value) {
+  return Number.isFinite(value) ? value : null;
+}
+
+function addMistralUsage(left, right) {
+  if (!left) return right || null;
+  if (!right) return left;
+
+  return {
+    promptTokens: addTokenCounts(left.promptTokens, right.promptTokens),
+    completionTokens: addTokenCounts(left.completionTokens, right.completionTokens),
+    totalTokens: addTokenCounts(left.totalTokens, right.totalTokens),
+    cachedTokens: addTokenCounts(left.cachedTokens, right.cachedTokens)
+  };
+}
+
+function addTokenCounts(left, right) {
+  if (left === null && right === null) return null;
+  return (left || 0) + (right || 0);
 }
 
 function getSummaryProfile(conversation) {

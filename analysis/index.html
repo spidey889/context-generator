@@ -1,0 +1,776 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Context Generator Analysis</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #080808;
+      --panel: #111112;
+      --panel-2: #171719;
+      --line: rgba(255, 255, 255, 0.11);
+      --line-strong: rgba(255, 255, 255, 0.2);
+      --text: #f4f1ea;
+      --muted: #a7a29a;
+      --soft: #706c65;
+      --green: #52d273;
+      --teal: #43d3bf;
+      --amber: #f4bd50;
+      --coral: #ff7b62;
+      --violet: #a98cff;
+      --shadow: 0 24px 70px rgba(0, 0, 0, 0.42);
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      min-height: 100vh;
+      margin: 0;
+      background:
+        linear-gradient(135deg, rgba(67, 211, 191, 0.16), transparent 34%),
+        linear-gradient(225deg, rgba(255, 123, 98, 0.12), transparent 32%),
+        linear-gradient(180deg, rgba(255, 255, 255, 0.045), transparent 24rem),
+        var(--bg);
+      color: var(--text);
+    }
+
+    button {
+      font: inherit;
+    }
+
+    .shell {
+      width: min(1180px, calc(100vw - 32px));
+      margin: 0 auto;
+      padding: 28px 0 48px;
+    }
+
+    .topbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      min-height: 48px;
+      margin-bottom: 30px;
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      min-width: 0;
+    }
+
+    .brand img {
+      width: 38px;
+      height: 38px;
+      object-fit: contain;
+      filter: drop-shadow(0 12px 24px rgba(86, 90, 221, 0.28));
+    }
+
+    .brand-text {
+      display: grid;
+      gap: 2px;
+      min-width: 0;
+    }
+
+    .brand-title {
+      font-size: 16px;
+      font-weight: 720;
+      letter-spacing: 0;
+      white-space: nowrap;
+    }
+
+    .brand-subtitle,
+    .status {
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.3;
+    }
+
+    .actions {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+    }
+
+    .status {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      min-height: 34px;
+      padding: 0 11px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: rgba(255, 255, 255, 0.04);
+    }
+
+    .dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--amber);
+      box-shadow: 0 0 0 4px rgba(244, 189, 80, 0.12);
+    }
+
+    .dot.good {
+      background: var(--green);
+      box-shadow: 0 0 0 4px rgba(82, 210, 115, 0.12);
+    }
+
+    .dot.off {
+      background: var(--soft);
+      box-shadow: none;
+    }
+
+    .refresh {
+      min-height: 34px;
+      padding: 0 12px;
+      border: 1px solid var(--line-strong);
+      border-radius: 8px;
+      background: #f4f1ea;
+      color: #111112;
+      cursor: pointer;
+    }
+
+    .hero {
+      display: grid;
+      grid-template-columns: minmax(0, 1.25fr) minmax(280px, 0.75fr);
+      gap: 18px;
+      align-items: stretch;
+      margin-bottom: 18px;
+    }
+
+    .summary-band,
+    .side-band,
+    .metrics,
+    .timeline {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: linear-gradient(180deg, rgba(255, 255, 255, 0.07), rgba(255, 255, 255, 0.035));
+      box-shadow: var(--shadow);
+    }
+
+    .summary-band {
+      min-height: 254px;
+      padding: 24px;
+      display: grid;
+      align-content: space-between;
+      gap: 24px;
+      overflow: hidden;
+      position: relative;
+    }
+
+    .summary-band::after {
+      content: "";
+      position: absolute;
+      inset: auto 0 0;
+      height: 3px;
+      background: linear-gradient(90deg, var(--teal), var(--amber), var(--coral), var(--violet));
+    }
+
+    .eyebrow {
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 680;
+      letter-spacing: 0;
+      text-transform: uppercase;
+    }
+
+    h1 {
+      margin: 6px 0 0;
+      font-size: clamp(34px, 6vw, 68px);
+      line-height: 0.96;
+      letter-spacing: 0;
+    }
+
+    .route {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      flex-wrap: wrap;
+      margin-top: 16px;
+      color: var(--muted);
+      font-size: 14px;
+    }
+
+    .route strong {
+      color: var(--text);
+      font-size: 15px;
+    }
+
+    .arrow {
+      color: var(--amber);
+    }
+
+    .hero-footer {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 10px;
+    }
+
+    .mini {
+      min-height: 72px;
+      padding: 12px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: rgba(0, 0, 0, 0.22);
+    }
+
+    .mini span,
+    .metric span,
+    .side-item span {
+      display: block;
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.25;
+    }
+
+    .mini strong {
+      display: block;
+      margin-top: 8px;
+      font-size: 20px;
+      line-height: 1.05;
+      overflow-wrap: anywhere;
+    }
+
+    .side-band {
+      padding: 18px;
+      display: grid;
+      gap: 14px;
+      align-content: start;
+    }
+
+    .side-title {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: 10px;
+      padding-bottom: 8px;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .side-title strong {
+      font-size: 15px;
+    }
+
+    .side-title span {
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .side-item {
+      display: grid;
+      gap: 6px;
+      padding: 11px 0;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+    }
+
+    .side-item:last-child {
+      border-bottom: 0;
+      padding-bottom: 0;
+    }
+
+    .side-item strong {
+      font-size: 15px;
+      line-height: 1.25;
+      overflow-wrap: anywhere;
+    }
+
+    .metrics {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 1px;
+      margin-bottom: 18px;
+      overflow: hidden;
+      background: var(--line);
+    }
+
+    .metric {
+      min-height: 136px;
+      padding: 18px;
+      background: var(--panel);
+      display: grid;
+      align-content: space-between;
+      gap: 16px;
+    }
+
+    .metric strong {
+      font-size: clamp(24px, 3.4vw, 38px);
+      line-height: 1;
+      letter-spacing: 0;
+      overflow-wrap: anywhere;
+    }
+
+    .metric small {
+      color: var(--soft);
+      font-size: 12px;
+      line-height: 1.35;
+    }
+
+    .accent-teal strong { color: var(--teal); }
+    .accent-green strong { color: var(--green); }
+    .accent-amber strong { color: var(--amber); }
+    .accent-coral strong { color: var(--coral); }
+    .accent-violet strong { color: var(--violet); }
+
+    .timeline {
+      padding: 20px;
+      background: rgba(17, 17, 18, 0.9);
+    }
+
+    .section-head {
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      align-items: baseline;
+      margin-bottom: 14px;
+    }
+
+    .section-head h2 {
+      margin: 0;
+      font-size: 18px;
+      letter-spacing: 0;
+    }
+
+    .section-head span {
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .timeline-list {
+      display: grid;
+      gap: 8px;
+    }
+
+    .step {
+      display: grid;
+      grid-template-columns: 140px minmax(0, 1fr) 96px;
+      gap: 12px;
+      align-items: center;
+      min-height: 48px;
+      padding: 10px 12px;
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      border-radius: 8px;
+      background: rgba(255, 255, 255, 0.035);
+    }
+
+    .step-time {
+      color: var(--amber);
+      font-variant-numeric: tabular-nums;
+      font-size: 13px;
+    }
+
+    .step-label {
+      display: grid;
+      gap: 5px;
+      min-width: 0;
+    }
+
+    .step-label strong {
+      font-size: 14px;
+      overflow-wrap: anywhere;
+    }
+
+    .chips {
+      display: flex;
+      gap: 6px;
+      flex-wrap: wrap;
+    }
+
+    .chip {
+      max-width: 100%;
+      padding: 3px 6px;
+      border-radius: 6px;
+      background: rgba(255, 255, 255, 0.08);
+      color: var(--muted);
+      font-size: 11px;
+      overflow-wrap: anywhere;
+    }
+
+    .step-total {
+      color: var(--muted);
+      text-align: right;
+      font-size: 12px;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .empty {
+      min-height: 340px;
+      display: grid;
+      place-items: center;
+      text-align: center;
+      padding: 38px;
+      border: 1px dashed var(--line-strong);
+      border-radius: 8px;
+      background: rgba(255, 255, 255, 0.035);
+      color: var(--muted);
+    }
+
+    .empty strong {
+      display: block;
+      margin-bottom: 8px;
+      color: var(--text);
+      font-size: 22px;
+    }
+
+    @media (max-width: 860px) {
+      .hero {
+        grid-template-columns: 1fr;
+      }
+
+      .metrics {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+    }
+
+    @media (max-width: 620px) {
+      .shell {
+        width: min(100vw - 20px, 1180px);
+        padding-top: 18px;
+      }
+
+      .topbar {
+        align-items: flex-start;
+        flex-direction: column;
+      }
+
+      .actions {
+        width: 100%;
+        justify-content: space-between;
+      }
+
+      .hero-footer,
+      .metrics {
+        grid-template-columns: 1fr;
+      }
+
+      .summary-band {
+        padding: 18px;
+      }
+
+      .step {
+        grid-template-columns: 1fr;
+        gap: 6px;
+      }
+
+      .step-total {
+        text-align: left;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main class="shell">
+    <header class="topbar">
+      <div class="brand">
+        <img src="../extension/bubble-icon.png" alt="">
+        <div class="brand-text">
+          <div class="brand-title">Context Generator</div>
+          <div class="brand-subtitle">Analysis</div>
+        </div>
+      </div>
+      <div class="actions">
+        <div class="status" id="bridgeStatus"><span class="dot off"></span><span>Waiting</span></div>
+        <button class="refresh" id="refreshButton" type="button">Refresh</button>
+      </div>
+    </header>
+
+    <div id="app" aria-live="polite"></div>
+  </main>
+
+  <script>
+    const STORAGE_REQUEST_SOURCE = "context-generator-analysis-page";
+    const STORAGE_BRIDGE_SOURCE = "context-generator-analysis-bridge";
+    const app = document.getElementById("app");
+    const bridgeStatus = document.getElementById("bridgeStatus");
+    const refreshButton = document.getElementById("refreshButton");
+    const demoMode = new URLSearchParams(location.search).has("demo");
+    const postTargetOrigin = location.protocol === "file:" || location.origin === "null" ? "*" : location.origin;
+
+    let bridgeReady = false;
+
+    refreshButton.addEventListener("click", () => {
+      if (demoMode) {
+        renderStats(getDemoStats());
+        return;
+      }
+      requestStats();
+    });
+
+    window.addEventListener("message", (event) => {
+      if (event.source !== window || event.data?.source !== STORAGE_BRIDGE_SOURCE) return;
+
+      if (event.data.type === "BRIDGE_READY") {
+        bridgeReady = true;
+        setBridgeStatus("Connected", "good");
+        requestStats();
+      }
+
+      if (event.data.type === "LAST_TRANSFER_STATS") {
+        render(event.data.payload);
+      }
+    });
+
+    if (demoMode) {
+      setBridgeStatus("Demo", "good");
+      renderStats(getDemoStats());
+    } else {
+      requestStats();
+      setTimeout(() => {
+        if (!bridgeReady) {
+          setBridgeStatus("Offline", "off");
+          render(null);
+        }
+      }, 900);
+    }
+
+    function requestStats() {
+      window.postMessage({
+        source: STORAGE_REQUEST_SOURCE,
+        type: "REQUEST_LAST_TRANSFER_STATS"
+      }, postTargetOrigin);
+    }
+
+    function render(stats) {
+      if (!stats) {
+        app.innerHTML = `
+          <section class="empty">
+            <div>
+              <strong>No transfer receipt yet</strong>
+              <span>The next completed Cap-Context run will appear here.</span>
+            </div>
+          </section>
+        `;
+        return;
+      }
+
+      renderStats(stats);
+    }
+
+    function renderStats(stats) {
+      const route = `${stats.source?.name || "Source"} -> ${stats.destination?.name || "Destination"}`;
+      const usage = stats.summary?.usage || {};
+      const capture = stats.capture || {};
+      const summary = stats.summary || {};
+      const integrity = getIntegrityLabel(summary.requestChars, summary.backendInputChars);
+
+      app.innerHTML = `
+        <section class="hero">
+          <div class="summary-band">
+            <div>
+              <div class="eyebrow">Latest run</div>
+              <h1>${escapeHtml(formatDuration(stats.totalMs))}</h1>
+              <div class="route">
+                <strong>${escapeHtml(stats.source?.name || "Source")}</strong>
+                <span class="arrow">-></span>
+                <strong>${escapeHtml(stats.destination?.name || "Destination")}</strong>
+                <span>${escapeHtml(formatDate(stats.completedAt))}</span>
+              </div>
+            </div>
+            <div class="hero-footer">
+              ${mini("Status", stats.status === "completed" ? "Completed" : "Failed")}
+              ${mini("Model", summary.model || "n/a")}
+              ${mini("Profile", summary.profile || "n/a")}
+            </div>
+          </div>
+
+          <aside class="side-band">
+            <div class="side-title">
+              <strong>Receipt</strong>
+              <span>${escapeHtml(stats.transferId || "")}</span>
+            </div>
+            ${sideItem("Route", route)}
+            ${sideItem("Backend match", integrity)}
+            ${sideItem("Capture path", capture.method || "unknown")}
+            ${sideItem("Expansion", getExpansionLabel(summary.expansion))}
+          </aside>
+        </section>
+
+        <section class="metrics">
+          ${metric("Raw found", formatNumber(capture.rawCandidateChars), "Candidate message characters", "accent-teal")}
+          ${metric("Scraped", formatNumber(capture.cleanedChars), `${formatNumber(capture.messageTurnCount)} turns detected`, "accent-green")}
+          ${metric("Sent", formatNumber(capture.sentChars), capture.capped ? `Capped at ${formatNumber(capture.capChars)}` : "No cap hit", "accent-amber")}
+          ${metric("Backend got", formatNumber(summary.backendInputChars), `Request: ${formatNumber(summary.requestChars)}`, "accent-coral")}
+          ${metric("Summary", formatNumber(summary.outputChars), `${formatNumber(summary.summaryWordCount)} words`, "accent-violet")}
+          ${metric("Tokens", formatNumber(usage.totalTokens), `${formatNumber(usage.promptTokens)} in / ${formatNumber(usage.completionTokens)} out`, "accent-green")}
+          ${metric("Summary time", formatDuration(summary.summaryMs), `Mistral: ${formatDuration(summary.mistralMs)}`, "accent-amber")}
+          ${metric("Paste time", formatDuration(stats.destinationTiming?.pasteMs), `Total: ${formatDuration(stats.totalMs)}`, "accent-teal")}
+        </section>
+
+        <section class="timeline">
+          <div class="section-head">
+            <h2>Timeline</h2>
+            <span>${escapeHtml(formatNumber(stats.timeline?.length || 0))} marks</span>
+          </div>
+          <div class="timeline-list">
+            ${(stats.timeline || []).map(timelineStep).join("")}
+          </div>
+        </section>
+      `;
+    }
+
+    function mini(label, value) {
+      return `<div class="mini"><span>${escapeHtml(label)}</span><strong>${escapeHtml(value)}</strong></div>`;
+    }
+
+    function sideItem(label, value) {
+      return `<div class="side-item"><span>${escapeHtml(label)}</span><strong>${escapeHtml(value || "n/a")}</strong></div>`;
+    }
+
+    function metric(label, value, detail, accent) {
+      return `
+        <div class="metric ${accent}">
+          <span>${escapeHtml(label)}</span>
+          <strong>${escapeHtml(value)}</strong>
+          <small>${escapeHtml(detail)}</small>
+        </div>
+      `;
+    }
+
+    function timelineStep(step) {
+      const chips = Object.entries(step.detail || {})
+        .filter(([, value]) => value !== null && value !== undefined && value !== "")
+        .slice(0, 5)
+        .map(([key, value]) => `<span class="chip">${escapeHtml(key)}: ${escapeHtml(formatDetailValue(value))}</span>`)
+        .join("");
+
+      return `
+        <div class="step">
+          <div class="step-time">+${escapeHtml(formatDuration(step.deltaMs))}</div>
+          <div class="step-label">
+            <strong>${escapeHtml(step.label)}</strong>
+            <div class="chips">${chips}</div>
+          </div>
+          <div class="step-total">${escapeHtml(formatDuration(step.totalMs))}</div>
+        </div>
+      `;
+    }
+
+    function setBridgeStatus(text, tone) {
+      bridgeStatus.innerHTML = `<span class="dot ${tone || ""}"></span><span>${escapeHtml(text)}</span>`;
+    }
+
+    function getIntegrityLabel(sent, received) {
+      if (sent === null || sent === undefined || received === null || received === undefined) return "Unknown";
+      return Number(sent) === Number(received) ? "Sent equals backend received" : "Mismatch";
+    }
+
+    function getExpansionLabel(expansion) {
+      if (!expansion) return "n/a";
+      if (!expansion.attempted) return "Not needed";
+      return expansion.used ? "Used" : "Tried, not used";
+    }
+
+    function formatNumber(value) {
+      if (value === null || value === undefined || value === "") return "n/a";
+      const number = Number(value);
+      if (!Number.isFinite(number)) return "n/a";
+      return new Intl.NumberFormat("en-US").format(number);
+    }
+
+    function formatDuration(value) {
+      if (value === null || value === undefined || value === "") return "n/a";
+      const ms = Number(value);
+      if (!Number.isFinite(ms)) return "n/a";
+      if (ms < 1000) return `${Math.round(ms)}ms`;
+      if (ms < 60000) return `${(ms / 1000).toFixed(ms < 10000 ? 1 : 0)}s`;
+      const minutes = Math.floor(ms / 60000);
+      const seconds = Math.round((ms % 60000) / 1000);
+      return `${minutes}m ${seconds}s`;
+    }
+
+    function formatDate(value) {
+      if (!value) return "";
+      const date = new Date(value);
+      if (Number.isNaN(date.getTime())) return "";
+      return new Intl.DateTimeFormat("en-US", {
+        month: "short",
+        day: "numeric",
+        hour: "numeric",
+        minute: "2-digit"
+      }).format(date);
+    }
+
+    function formatDetailValue(value) {
+      if (typeof value === "number") return formatNumber(value);
+      if (typeof value === "boolean") return value ? "yes" : "no";
+      if (typeof value === "object") return JSON.stringify(value);
+      return String(value);
+    }
+
+    function escapeHtml(value) {
+      return String(value ?? "")
+        .replaceAll("&", "&amp;")
+        .replaceAll("<", "&lt;")
+        .replaceAll(">", "&gt;")
+        .replaceAll('"', "&quot;")
+        .replaceAll("'", "&#039;");
+    }
+
+    function getDemoStats() {
+      return {
+        version: 1,
+        transferId: "demo-7n2",
+        status: "completed",
+        source: { id: "claude", name: "Claude" },
+        destination: { id: "chatgpt", name: "ChatGPT" },
+        startedAt: new Date(Date.now() - 14200).toISOString(),
+        completedAt: new Date().toISOString(),
+        totalMs: 14200,
+        capture: {
+          method: "structured",
+          messageTurnCount: 32,
+          usefulTurnCount: 32,
+          rawCandidateChars: 48210,
+          transcriptChars: 47980,
+          cleanedChars: 48142,
+          sentChars: 48142,
+          capped: false,
+          capChars: 160000
+        },
+        summary: {
+          source: "backend",
+          summaryMs: 7630,
+          fetchMs: 7410,
+          parseMs: 18,
+          outputChars: 6902,
+          requestChars: 48142,
+          backendInputChars: 48142,
+          backendTotalMs: 7202,
+          mistralMs: 7074,
+          model: "ministral-3b-2512",
+          profile: "medium",
+          maxTokens: 1900,
+          targetWords: 700,
+          summaryWordCount: 462,
+          mistralPasses: 1,
+          expansion: { attempted: false, used: false },
+          usage: {
+            promptTokens: 13240,
+            completionTokens: 1180,
+            totalTokens: 14420,
+            cachedTokens: 0
+          }
+        },
+        destinationTiming: { totalMs: 2540, pasteMs: 620, tabId: 144 },
+        timeline: [
+          { label: "click", deltaMs: 0, totalMs: 0, detail: { source: "Cap-Context button" } },
+          { label: "capture start", deltaMs: 12, totalMs: 12, detail: {} },
+          { label: "capture done", deltaMs: 240, totalMs: 252, detail: { sentChars: 48142, messageTurnCount: 32 } },
+          { label: "summary start", deltaMs: 20, totalMs: 272, detail: { inputChars: 48142 } },
+          { label: "summary done", deltaMs: 7630, totalMs: 7902, detail: { chars: 6902 } },
+          { label: "paste request start", deltaMs: 1800, totalMs: 9702, detail: {} },
+          { label: "paste done", deltaMs: 2498, totalMs: 12200, detail: { pasteMs: 620 } }
+        ]
+      };
+    }
+  </script>
+</body>
+</html>

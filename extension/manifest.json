@@ -11,6 +11,7 @@
   "permissions": [
     "activeTab",
     "scripting",
+    "storage",
     "tabs"
   ],
   "host_permissions": [
@@ -22,6 +23,7 @@
     "https://gemini.google.com/*",
     "https://grok.com/*",
     "https://chat.deepseek.com/*",
+    "https://spidey889.github.io/context-generator/analysis*",
     "https://context-generator-five.vercel.app/*"
   ],
   "background": {
@@ -48,6 +50,13 @@
         "https://chat.deepseek.com/*"
       ],
       "js": ["platform-content.js"],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": [
+        "https://spidey889.github.io/context-generator/analysis*"
+      ],
+      "js": ["analysis-bridge.js"],
       "run_at": "document_idle"
     }
   ],

@@ -7,6 +7,7 @@
   const CLAUDE_LIMIT_NUDGE_ID = "context-generator-claude-limit-nudge";
   const DESTINATION_SHEET_ID = "context-generator-destination-sheet";
   const DESTINATION_SHEET_STYLE_ID = "context-generator-destination-sheet-styles";
+  const LAST_TRANSFER_STATS_STORAGE_KEY = "context-generator-last-transfer-stats-v1";
 
   if (window.__contextGeneratorPlatformLoaded === CONTENT_SCRIPT_LOAD_ID) {
     return;
@@ -345,6 +346,7 @@
   let claudeLimitNudgeDismissedUntilLimitClears = false;
   let activeTransferTrace = null;
   let transferTraceSequence = 0;
+  let lastConversationCaptureMetrics = null;
 
   function cleanupContextGeneratorNodes() {
     cleanupContextGeneratorReservations();
@@ -456,7 +458,7 @@
         transferStage = "capture";
         markTransferTrace(transferTrace, "capture start");
         conversationText = await scrapeConversationTextWhenReady();
-        markTransferTrace(transferTrace, "capture done", { chars: conversationText.length });
+        markCaptureDone(transferTrace, conversationText);
       }
       const destinationPrepPromise = preparedDestinationPromise || prepareDestinationTab(destinationId, transferTrace);
       if (isHandoffOverlayVisible()) {
@@ -579,7 +581,7 @@
       try {
         markTransferTrace(trace, "capture start");
         conversationText = scrapeConversationText();
-        markTransferTrace(trace, "capture done", { chars: conversationText.length });
+        markCaptureDone(trace, conversationText);
       } catch (error) {
         logTransferDebug(`Warm summary skipped. ${error.message}`);
         return null;
@@ -678,12 +680,22 @@
     return {
       id,
       source,
+      sourcePlatformId: currentPlatform.id,
+      sourcePlatformName: currentPlatform.name,
       destinationId,
       startedAt: getNow(),
+      startedAtEpoch: Date.now(),
       lastAt: null,
       marks: [],
       completed: false
     };
+  }
+
+  function markCaptureDone(trace, conversationText) {
+    markTransferTrace(trace, "capture done", {
+      chars: conversationText.length,
+      ...getConversationCaptureMetrics(conversationText)
+    });
   }
 
   function markTransferTrace(trace, label, detail = null) {
@@ -710,6 +722,7 @@
     if (!trace || trace.completed) return;
     trace.completed = true;
     const totalMs = Math.round(getNow() - trace.startedAt);
+    persistLatestTransferStats(trace, totalMs);
     const rows = trace.marks.map((mark) => ({
       step: mark.label,
       deltaMs: mark.deltaMs,
@@ -750,6 +763,125 @@
         ...(mark.detail || {})
       });
     });
+  }
+
+  function persistLatestTransferStats(trace, totalMs) {
+    const storage = chrome?.storage?.local;
+    if (!storage?.set) return;
+
+    const stats = buildLatestTransferStats(trace, totalMs);
+    const setResult = storage.set({ [LAST_TRANSFER_STATS_STORAGE_KEY]: stats });
+    if (setResult?.catch) {
+      setResult.catch((error) => {
+        console.debug("[Context Generator] Could not save latest analysis stats:", error?.message || error);
+      });
+    }
+  }
+
+  function buildLatestTransferStats(trace, totalMs) {
+    const summaryTiming = getSummaryTimingFromTrace(trace);
+    const backendTiming = summaryTiming?.backend || null;
+    const captureDetail = getMarkDetail(trace, "capture done") || {};
+    const pasteDetail = getMarkDetail(trace, "paste done") || {};
+    const failureMark = trace.marks.find((mark) => mark.label.startsWith("failed:"));
+
+    return {
+      version: 1,
+      transferId: trace.id,
+      status: failureMark ? "failed" : "completed",
+      failure: failureMark?.label.replace(/^failed:\s*/, "") || null,
+      source: {
+        id: trace.sourcePlatformId,
+        name: trace.sourcePlatformName
+      },
+      destination: {
+        id: trace.destinationId || null,
+        name: trace.destinationId ? getPlatform(trace.destinationId)?.name || trace.destinationId : null
+      },
+      startedAt: new Date(trace.startedAtEpoch || Date.now()).toISOString(),
+      completedAt: new Date().toISOString(),
+      totalMs,
+      capture: {
+        method: captureDetail.method || null,
+        messageTurnCount: captureDetail.messageTurnCount ?? null,
+        usefulTurnCount: captureDetail.usefulTurnCount ?? null,
+        rawCandidateChars: captureDetail.rawCandidateChars ?? null,
+        transcriptChars: captureDetail.transcriptChars ?? null,
+        cleanedChars: captureDetail.cleanedChars ?? null,
+        sentChars: captureDetail.sentChars ?? captureDetail.chars ?? null,
+        capped: captureDetail.capped === true,
+        capChars: captureDetail.capChars || MAX_BACKEND_CONVERSATION_CHARS
+      },
+      summary: {
+        source: summaryTiming?.source || null,
+        summaryMs: summaryTiming?.summaryMs ?? null,
+        fetchMs: summaryTiming?.fetchMs ?? null,
+        parseMs: summaryTiming?.parseMs ?? null,
+        outputChars: summaryTiming?.chars ?? backendTiming?.outputChars ?? null,
+        requestChars: summaryTiming?.requestChars ?? null,
+        backendInputChars: summaryTiming?.backendInputChars ?? backendTiming?.inputChars ?? null,
+        backendTotalMs: backendTiming?.totalMs ?? null,
+        mistralMs: backendTiming?.mistralMs ?? null,
+        model: backendTiming?.model || null,
+        profile: backendTiming?.profile || null,
+        maxTokens: backendTiming?.maxTokens ?? null,
+        targetWords: backendTiming?.targetWords ?? null,
+        minWords: backendTiming?.minWords ?? null,
+        summaryWordCount: backendTiming?.summaryWordCount ?? null,
+        mistralPasses: backendTiming?.mistralPasses ?? null,
+        expansion: sanitizeExpansionForStats(backendTiming?.expansion),
+        usage: normalizeUsageForStats(backendTiming?.usage)
+      },
+      destinationTiming: {
+        totalMs: pasteDetail.totalMs ?? null,
+        pasteMs: pasteDetail.paste?.pasteMs ?? pasteDetail.pasteMs ?? null,
+        tabId: pasteDetail.tabId ?? null
+      },
+      timeline: trace.marks.map((mark) => ({
+        label: mark.label,
+        deltaMs: mark.deltaMs,
+        totalMs: mark.totalMs,
+        detail: sanitizeTraceDetail(formatTraceDetail(mark.detail))
+      }))
+    };
+  }
+
+  function getSummaryTimingFromTrace(trace) {
+    const summaryDone = [...trace.marks].reverse().find((mark) => mark.label === "summary done");
+    return summaryDone?.detail?.background || null;
+  }
+
+  function getMarkDetail(trace, label) {
+    return [...trace.marks].reverse().find((mark) => mark.label === label)?.detail || null;
+  }
+
+  function sanitizeExpansionForStats(expansion) {
+    if (!expansion || typeof expansion !== "object") return null;
+    return {
+      attempted: expansion.attempted === true,
+      used: expansion.used === true,
+      wordCount: expansion.wordCount ?? null,
+      error: expansion.error ? "Expansion failed" : null,
+      usage: normalizeUsageForStats(expansion.usage)
+    };
+  }
+
+  function normalizeUsageForStats(usage) {
+    if (!usage || typeof usage !== "object") return null;
+    return {
+      promptTokens: usage.promptTokens ?? null,
+      completionTokens: usage.completionTokens ?? null,
+      totalTokens: usage.totalTokens ?? null,
+      cachedTokens: usage.cachedTokens ?? null
+    };
+  }
+
+  function sanitizeTraceDetail(detail) {
+    if (!detail || typeof detail !== "object") return {};
+    const sanitized = { ...detail };
+    delete sanitized.backend;
+    delete sanitized.background;
+    return sanitized;
   }
 
   function getNow() {
@@ -1165,18 +1297,31 @@
     }
 
     const turns = messageTurns.filter((turn) => isUsefulConversationTurn(turn));
+    const baseMetrics = {
+      messageTurnCount: messageTurns.length,
+      usefulTurnCount: turns.length,
+      rawCandidateChars: messageTurns.reduce((total, turn) => total + turn.text.length, 0)
+    };
     const transcript = turns
       .map((turn) => `${turn.role}: ${turn.text}`)
       .join("\n\n")
       .trim();
 
     if (transcript && isUsefulConversationTranscript(turns)) {
-      return limitConversationText(`${currentPlatform.name} conversation:\n\n${transcript}`);
+      return createConversationCapture(`${currentPlatform.name} conversation:\n\n${transcript}`, {
+        ...baseMetrics,
+        method: "structured",
+        transcriptChars: transcript.length
+      });
     }
 
     const fallbackText = hasFallbackConversationEvidence(turns) ? scrapeMainConversationText(turns) : "";
     if (isUsefulFallbackConversationText(fallbackText)) {
-      return limitConversationText(`${currentPlatform.name} conversation:\n\n${fallbackText}`);
+      return createConversationCapture(`${currentPlatform.name} conversation:\n\n${fallbackText}`, {
+        ...baseMetrics,
+        method: "fallback",
+        transcriptChars: fallbackText.length
+      });
     }
 
     const detectedTranscript = messageTurns
@@ -1184,10 +1329,46 @@
       .join("\n\n")
       .trim();
     if (detectedTranscript) {
-      return limitConversationText(`${currentPlatform.name} conversation:\n\n${detectedTranscript}`);
+      return createConversationCapture(`${currentPlatform.name} conversation:\n\n${detectedTranscript}`, {
+        ...baseMetrics,
+        method: "detected",
+        usefulTurnCount: messageTurns.length,
+        transcriptChars: detectedTranscript.length
+      });
     }
 
     throw new Error("Chat messages were found, but their text could not be captured yet. Try again in a moment.");
+  }
+
+  function createConversationCapture(text, metrics = {}) {
+    const cleaned = cleanText(text);
+    const limited = limitConversationText(cleaned);
+    lastConversationCaptureMetrics = {
+      ...metrics,
+      cleanedChars: cleaned.length,
+      sentChars: limited.length,
+      capped: cleaned.length > MAX_BACKEND_CONVERSATION_CHARS,
+      capChars: MAX_BACKEND_CONVERSATION_CHARS
+    };
+    return limited;
+  }
+
+  function getConversationCaptureMetrics(conversationText) {
+    if (lastConversationCaptureMetrics?.sentChars === conversationText.length) {
+      return lastConversationCaptureMetrics;
+    }
+
+    return {
+      method: "unknown",
+      messageTurnCount: null,
+      usefulTurnCount: null,
+      rawCandidateChars: null,
+      transcriptChars: null,
+      cleanedChars: conversationText.length,
+      sentChars: conversationText.length,
+      capped: conversationText.length >= MAX_BACKEND_CONVERSATION_CHARS,
+      capChars: MAX_BACKEND_CONVERSATION_CHARS
+    };
   }
 
   async function scrapeConversationTextWhenReady(timeoutMs = getConversationScrapeRetryTimeout()) {
@@ -2804,7 +2985,7 @@
     try {
       markTransferTrace(trace, "capture start");
       conversationText = await scrapeConversationTextWhenReady();
-      markTransferTrace(trace, "capture done", { chars: conversationText.length });
+      markCaptureDone(trace, conversationText);
     } catch (error) {
       clearWarmSummary();
       markTransferTrace(trace, `failed: ${error.message}`);

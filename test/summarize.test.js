@@ -81,32 +81,15 @@ test("backend forwards a 160k conversation to Mistral and reports the same input
       ok: true,
       status: 200,
       json: async () => ({
+        usage: {
+          prompt_tokens: 1200,
+          completion_tokens: 320,
+          total_tokens: 1520,
+          prompt_tokens_details: { cached_tokens: 64 }
+        },
         choices: [{
           message: {
-            content: [
-              "CONTEXT CARRY - READY TO PASTE",
-              "",
-              "WHO I AM",
-              "Testing payload size.",
-              "",
-              "WHAT WE WERE DOING",
-              "Verifying the backend forwards the full conversation.",
-              "",
-              "WHERE WE LEFT OFF",
-              "The request reached the mocked Mistral endpoint.",
-              "",
-              "DECISIONS MADE",
-              "- Keep the full 160k payload.",
-              "",
-              "OPEN QUESTIONS",
-              "None",
-              "",
-              "KEY CONTEXT",
-              "- The exact payload length matters.",
-              "",
-              "NEXT STEP",
-              "Continue testing."
-            ].join("\n")
+            content: makeContextCarrySummary("payload", 1200)
           }
         }]
       })
@@ -127,6 +110,12 @@ test("backend forwards a 160k conversation to Mistral and reports the same input
     assert.equal(res.payload.timing.inputChars, 160000);
     assert.equal(res.payload.timing.maxTokens, 4200);
     assert.equal(res.payload.timing.targetWords, 1200);
+    assert.deepEqual(res.payload.timing.usage, {
+      promptTokens: 1200,
+      completionTokens: 320,
+      totalTokens: 1520,
+      cachedTokens: 64
+    });
   } finally {
     global.fetch = originalFetch;
     if (originalApiKey === undefined) {
@@ -173,6 +162,12 @@ test("backend keeps tiny chats local and avoids Mistral", async () => {
     assert.equal(res.payload.timing.mistralMs, 0);
     assert.equal(res.payload.timing.mistralPasses, 0);
     assert.equal(res.payload.timing.expansion.attempted, false);
+    assert.deepEqual(res.payload.timing.usage, {
+      promptTokens: 0,
+      completionTokens: 0,
+      totalTokens: 0,
+      cachedTokens: 0
+    });
     assert.match(res.payload.summary, /> User: Firefox manifest setting\?/);
     assert.match(res.payload.summary, /> Assistant: Use the exact setting you can defend\./);
   } finally {
@@ -244,6 +239,9 @@ test("backend expands substantial summaries that come back below the word floor"
       ok: true,
       status: 200,
       json: async () => ({
+        usage: requests.length === 1
+          ? { prompt_tokens: 900, completion_tokens: 180, total_tokens: 1080 }
+          : { prompt_tokens: 1100, completion_tokens: 840, total_tokens: 1940 },
         choices: [{
           message: {
             content: requests.length === 1 ? shortSummary : expandedSummary
@@ -265,6 +263,18 @@ test("backend expands substantial summaries that come back below the word floor"
     assert.equal(res.payload.timing.expansion.used, true);
     assert.equal(countWords(res.payload.summary) >= 1100, true);
     assert.equal(res.payload.timing.summaryWordCount, countWords(res.payload.summary));
+    assert.deepEqual(res.payload.timing.usage, {
+      promptTokens: 2000,
+      completionTokens: 1020,
+      totalTokens: 3020,
+      cachedTokens: null
+    });
+    assert.deepEqual(res.payload.timing.expansion.usage, {
+      promptTokens: 1100,
+      completionTokens: 840,
+      totalTokens: 1940,
+      cachedTokens: null
+    });
     assert.match(res.payload.summary, /expanded/);
   } finally {
     global.fetch = originalFetch;
