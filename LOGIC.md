@@ -112,6 +112,8 @@ July 5 2026 later note: Claude long-message chats can need far more scroll movem
 
 July 5 2026 stale-retry note: If Claude appears to stop around the same character count even with a high sweep cap, check the stale-window exit before raising the cap again. Claude now gets 10 stale retries and a longer 1.4 second slow-window wait. Normal successful sweep moves are faster because the loop waits only until the rendered message window changes instead of always waiting for a full settle window.
 
+July 6 2026 speed note: After accurate Claude sweeps still took too long on 200+ turn chats, the successful-move path was made more aggressive without removing the bounded sweep. The pixel step moved from a half viewport to 0.6 viewport, window-change polling is shorter, and collapsed "show more" expansion no longer runs inside every poll tick. Claude also tries to advance from the last rendered message boundary before falling back to the pixel step, so virtualized chats can move by rendered batches when the site exposes the next window that way. Keep the slow Claude stale retry as the safety path for delayed batches.
+
 Each platform has its own likely conversation selectors. Examples include Claude response/user-message selectors, ChatGPT `data-message-author-role` conversation turns, Gemini user/model response elements, Grok message elements, and DeepSeek markdown/message elements. The scraper also keeps a generic fallback selector set for message/conversation/chat/article/markdown containers so minor platform DOM renames are less likely to produce a false "no text" error.
 
 For each candidate element, the script skips extension-owned nodes, reads `innerText` or `textContent`, cleans whitespace, and assigns a rough role:

@@ -450,6 +450,51 @@ test("Claude sweep captures long-message chats that need more than the old scrol
   assert.ok(transcript.length > 28000, "fixture should represent a long-message Claude chat");
 });
 
+test("Claude sweep advances by rendered message boundary when the next virtual batch is available", async () => {
+  const elements = [];
+  const totalTurns = 40;
+  const windowSize = 8;
+  let boundaryAdvances = 0;
+  const transcriptHost = new FakeElement({
+    text: "Rendered Claude messages",
+    attrs: { role: "main" }
+  });
+  elements.push(transcriptHost);
+
+  const renderWindow = (startIndex) => {
+    const windowTurns = [];
+    for (let index = startIndex + 1; index <= Math.min(totalTurns, startIndex + windowSize); index += 1) {
+      const turn = new FakeElement({
+        text: `Boundary-loaded Claude turn ${index}`,
+        attrs: index % 2 ? { "data-testid": "user-message" } : { class: "font-claude-response" }
+      });
+      turn.parentElement = transcriptHost;
+      turn.onScrollIntoView = () => {
+        if (index !== startIndex + windowSize) return;
+        boundaryAdvances += 1;
+        renderWindow(Math.min(totalTurns - windowSize, startIndex + windowSize));
+      };
+      windowTurns.push(turn);
+    }
+
+    transcriptHost.children = windowTurns;
+    transcriptHost.textContent = windowTurns.map((turn) => turn.textContent).join("\n");
+    transcriptHost.innerText = transcriptHost.textContent;
+    elements.splice(1, elements.length - 1, ...windowTurns);
+  };
+  renderWindow(0);
+
+  const hooks = loadPlatformContent(elements, "claude.ai");
+
+  await hooks.prepareSourceForCapture();
+  const transcript = await hooks.scrapeConversationTextWhenReady();
+
+  assert.equal((transcript.match(/(?:User|Claude): Boundary-loaded Claude turn/g) || []).length, 40);
+  assert.match(transcript, /User: Boundary-loaded Claude turn 1/);
+  assert.match(transcript, /Claude: Boundary-loaded Claude turn 40/);
+  assert.ok(boundaryAdvances > 0, "Claude sweep should use rendered boundary advances");
+});
+
 test("Claude sweep waits through slow virtualized batches before declaring stale", async () => {
   const { elements } = createVirtualizedChatElements({
     label: "Claude",

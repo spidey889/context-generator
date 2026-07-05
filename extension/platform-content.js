@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-07-05-claude-stale-retry-sweep";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-07-06-faster-virtual-sweep";
   const BUBBLE_ID = "context-generator-bubble";
   const OVERLAY_ID = "context-generator-overlay";
   const ONBOARDING_ID = "context-generator-onboarding";
@@ -61,12 +61,13 @@
   const VIRTUAL_SWEEP_MAX_SCROLLS = 480;
   const VIRTUAL_SWEEP_STALE_SCROLLS = 3;
   const CLAUDE_VIRTUAL_SWEEP_STALE_SCROLLS = 10;
-  const VIRTUAL_SWEEP_STEP_RATIO = 0.5;
+  const VIRTUAL_SWEEP_STEP_RATIO = 0.6;
   const VIRTUAL_SWEEP_SETTLE_MS = 360;
   const VIRTUAL_SWEEP_STABLE_SAMPLE_COUNT = 2;
-  const VIRTUAL_SWEEP_CHANGE_POLL_MS = 80;
-  const VIRTUAL_SWEEP_FAST_CHANGE_TIMEOUT_MS = 180;
-  const VIRTUAL_SWEEP_SLOW_CHANGE_TIMEOUT_MS = 480;
+  const VIRTUAL_SWEEP_CHANGE_POLL_MS = 40;
+  const VIRTUAL_SWEEP_ANCHOR_CHANGE_TIMEOUT_MS = 80;
+  const VIRTUAL_SWEEP_FAST_CHANGE_TIMEOUT_MS = 120;
+  const VIRTUAL_SWEEP_SLOW_CHANGE_TIMEOUT_MS = 360;
   const CLAUDE_VIRTUAL_SWEEP_SLOW_CHANGE_TIMEOUT_MS = 1400;
   const COLLAPSED_CONVERSATION_EXPAND_RE = /\b(?:show|see|read|view)\s+(?:more|full|all)\b|\bcontinue\s+(?:reading|message|response)\b|\bexpand\b/i;
   const COLLAPSED_CONVERSATION_EXPAND_EXCLUDE_RE = /\b(?:continue generating|regenerate|send|submit|stop generating|new chat|settings|menu|voice|microphone)\b/i;
@@ -1729,16 +1730,35 @@
       const added = collectRenderedConversationTurns(collectedTurns);
       if (scrolls >= VIRTUAL_SWEEP_MAX_SCROLLS) break;
 
-      const step = Math.round(getSourceViewportHeight() * getVirtualSweepStepRatio());
       const beforeWindowSignature = getRenderedConversationWindowSignature();
-      scrollSourceConversationByInstantly(step);
+      let afterWindowSignature = beforeWindowSignature;
+      let triedBoundaryAdvance = false;
+
+      if (shouldPreferBoundarySweepAdvance()) {
+        triedBoundaryAdvance = scrollRenderedConversationBoundaryIntoView();
+        if (triedBoundaryAdvance) {
+          afterWindowSignature = await waitForRenderedConversationWindowChange(
+            beforeWindowSignature,
+            VIRTUAL_SWEEP_ANCHOR_CHANGE_TIMEOUT_MS
+          );
+        }
+      }
+
+      if (afterWindowSignature === beforeWindowSignature) {
+        const step = Math.round(getSourceViewportHeight() * getVirtualSweepStepRatio());
+        scrollSourceConversationByInstantly(step);
+        afterWindowSignature = await waitForRenderedConversationWindowChange(
+          beforeWindowSignature,
+          VIRTUAL_SWEEP_FAST_CHANGE_TIMEOUT_MS
+        );
+      }
+
       scrolls += 1;
 
-      let afterWindowSignature = await waitForRenderedConversationWindowChange(
-        beforeWindowSignature,
-        VIRTUAL_SWEEP_FAST_CHANGE_TIMEOUT_MS
-      );
-      if (afterWindowSignature === beforeWindowSignature && scrollRenderedConversationBoundaryIntoView()) {
+      if (
+        afterWindowSignature === beforeWindowSignature &&
+        (triedBoundaryAdvance || scrollRenderedConversationBoundaryIntoView())
+      ) {
         afterWindowSignature = await waitForRenderedConversationWindowChange(
           beforeWindowSignature,
           getVirtualSweepSlowChangeTimeout()
@@ -1786,6 +1806,10 @@
     return VIRTUAL_SWEEP_STEP_RATIO;
   }
 
+  function shouldPreferBoundarySweepAdvance() {
+    return currentPlatform.id === "claude";
+  }
+
   function getVirtualSweepStaleScrollLimit() {
     return currentPlatform.id === "claude" ? CLAUDE_VIRTUAL_SWEEP_STALE_SCROLLS : VIRTUAL_SWEEP_STALE_SCROLLS;
   }
@@ -1804,7 +1828,6 @@
     while (Date.now() - startedAt < timeoutMs) {
       const remainingMs = timeoutMs - (Date.now() - startedAt);
       await delay(Math.min(VIRTUAL_SWEEP_CHANGE_POLL_MS, Math.max(0, remainingMs)));
-      await expandCollapsedConversationContent(1);
       nextSignature = getRenderedConversationWindowSignature();
       if (nextSignature !== previousSignature) return nextSignature;
     }
