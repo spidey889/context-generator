@@ -106,6 +106,8 @@ Future rule: do not move the ChatGPT button back into ChatGPT's composer DOM and
 
 For picker-started transfers, the handoff popup is shown before capture, then the source page is instantly scrolled to the top. After the scroll, the script samples the detected message-turn count until it stops increasing for a short bounded window, so older messages loaded by the top-scroll are included before scraping starts. The scraper still removes extension-owned DOM before reading text, so popup text is not included in the backend input.
 
+July 5 2026: The virtualized long-chat sweep must trigger when only eight turns are visible, because ChatGPT can render long conversations in eight-turn windows. The transfer path starts from the top-rendered window, collects it, then scrolls downward with overlapping half-viewport steps until the source scroll root cannot move further or the bounded safety limit is hit. Keep the threshold at or below eight unless the ChatGPT regression is updated with new real evidence.
+
 Each platform has its own likely conversation selectors. Examples include Claude response/user-message selectors, ChatGPT `data-message-author-role` conversation turns, Gemini user/model response elements, Grok message elements, and DeepSeek markdown/message elements. The scraper also keeps a generic fallback selector set for message/conversation/chat/article/markdown containers so minor platform DOM renames are less likely to produce a false "no text" error.
 
 For each candidate element, the script skips extension-owned nodes, reads `innerText` or `textContent`, cleans whitespace, and assigns a rough role:

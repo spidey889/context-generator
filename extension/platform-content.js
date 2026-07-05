@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-07-05-chatgpt-scroll-root";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-07-05-eight-turn-sweep";
   const BUBBLE_ID = "context-generator-bubble";
   const OVERLAY_ID = "context-generator-overlay";
   const ONBOARDING_ID = "context-generator-onboarding";
@@ -57,10 +57,10 @@
   const SOURCE_SCROLL_STABLE_INTERVAL_MS = 140;
   const SOURCE_SCROLL_STABLE_SAMPLE_COUNT = 3;
   const VIRTUAL_SWEEP_PLATFORM_IDS = new Set(["claude", "chatgpt", "gemini", "grok", "deepseek"]);
-  const VIRTUAL_SWEEP_MIN_TURNS = 10;
+  const VIRTUAL_SWEEP_MIN_TURNS = 8;
   const VIRTUAL_SWEEP_MAX_SCROLLS = 48;
   const VIRTUAL_SWEEP_STALE_SCROLLS = 3;
-  const VIRTUAL_SWEEP_STEP_RATIO = 0.68;
+  const VIRTUAL_SWEEP_STEP_RATIO = 0.5;
   const VIRTUAL_SWEEP_SETTLE_MS = 360;
   const VIRTUAL_SWEEP_STABLE_SAMPLE_COUNT = 2;
   const COLLAPSED_CONVERSATION_EXPAND_RE = /\b(?:show|see|read|view)\s+(?:more|full|all)\b|\bcontinue\s+(?:reading|message|response)\b|\bexpand\b/i;

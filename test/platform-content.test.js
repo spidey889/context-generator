@@ -304,8 +304,9 @@ test("Claude scraping does not stop at explicit wrapper chunks when many loaded 
   assert.match(transcript, /Claude: Loaded turn 78/);
 });
 
-function createVirtualizedChatElements({ label, makeTurn }) {
+function createVirtualizedChatElements({ label, makeTurn, windowSize = 12, scrollStride = windowSize }) {
   const elements = [];
+  const totalTurns = 78;
   const scrollableRoot = new FakeElement({
     text: `Scrollable ${label} chat root`,
     attrs: { role: "main" }
@@ -317,7 +318,7 @@ function createVirtualizedChatElements({ label, makeTurn }) {
 
   const renderWindow = (startIndex) => {
     const windowTurns = [];
-    for (let index = startIndex + 1; index <= Math.min(78, startIndex + 12); index += 1) {
+    for (let index = startIndex + 1; index <= Math.min(totalTurns, startIndex + windowSize); index += 1) {
       const turn = makeTurn(index);
       turn.parentElement = scrollableRoot;
       windowTurns.push(turn);
@@ -332,7 +333,7 @@ function createVirtualizedChatElements({ label, makeTurn }) {
   const originalScrollTo = scrollableRoot.scrollTo.bind(scrollableRoot);
   scrollableRoot.scrollTo = (...args) => {
     originalScrollTo(...args);
-    const startIndex = Math.min(66, Math.floor(scrollableRoot.scrollTop / 360) * 12);
+    const startIndex = Math.min(totalTurns - windowSize, Math.floor(scrollableRoot.scrollTop / 360) * scrollStride);
     renderWindow(startIndex);
   };
   renderWindow(0);
@@ -401,8 +402,10 @@ test("transfer capture sweeps virtualized long chats across supported platforms"
   }
 });
 
-test("ChatGPT sweep uses a large app scroll root even when it is not a message ancestor", async () => {
+test("ChatGPT sweep handles eight-turn virtualized windows on a large app scroll root", async () => {
   const elements = [];
+  const totalTurns = 78;
+  const windowSize = 8;
   const appScrollRoot = new FakeElement({
     text: "ChatGPT scroll root",
     attrs: { class: "relative flex-1 overflow-y-auto chat-scroll-area" },
@@ -429,7 +432,7 @@ test("ChatGPT sweep uses a large app scroll root even when it is not a message a
   };
   const renderWindow = (startIndex) => {
     const windowTurns = [];
-    for (let index = startIndex + 1; index <= Math.min(78, startIndex + 12); index += 1) {
+    for (let index = startIndex + 1; index <= Math.min(totalTurns, startIndex + windowSize); index += 1) {
       windowTurns.push(makeTurn(index));
     }
 
@@ -442,12 +445,14 @@ test("ChatGPT sweep uses a large app scroll root even when it is not a message a
   const originalScrollTo = appScrollRoot.scrollTo.bind(appScrollRoot);
   appScrollRoot.scrollTo = (...args) => {
     originalScrollTo(...args);
-    const startIndex = Math.min(66, Math.floor(appScrollRoot.scrollTop / 360) * 12);
+    const startIndex = Math.min(totalTurns - windowSize, Math.floor(appScrollRoot.scrollTop / 360) * windowSize);
     renderWindow(startIndex);
   };
   renderWindow(0);
 
   const hooks = loadPlatformContent(elements, "chatgpt.com");
+  const initialTranscript = hooks.scrapeConversationText();
+  assert.equal((initialTranscript.match(/(?:User|ChatGPT): Detached virtualized GPT turn/g) || []).length, 8);
 
   await hooks.prepareSourceForCapture();
   const transcript = await hooks.scrapeConversationTextWhenReady();
