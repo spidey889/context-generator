@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-07-05-scroll-stabilize";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-07-05-scrape-accuracy";
   const BUBBLE_ID = "context-generator-bubble";
   const OVERLAY_ID = "context-generator-overlay";
   const ONBOARDING_ID = "context-generator-onboarding";
@@ -52,9 +52,12 @@
   const CONVERSATION_SCRAPE_RETRY_TIMEOUT_MS = 0;
   const CLAUDE_CONVERSATION_SCRAPE_RETRY_TIMEOUT_MS = 1800;
   const CONVERSATION_SCRAPE_RETRY_INTERVAL_MS = 140;
-  const SOURCE_SCROLL_STABLE_TIMEOUT_MS = 1400;
-  const SOURCE_SCROLL_STABLE_INTERVAL_MS = 120;
-  const SOURCE_SCROLL_STABLE_SAMPLE_COUNT = 2;
+  const SOURCE_SCROLL_STABLE_TIMEOUT_MS = 1800;
+  const SOURCE_SCROLL_LONG_STABLE_TIMEOUT_MS = 4500;
+  const SOURCE_SCROLL_STABLE_INTERVAL_MS = 140;
+  const SOURCE_SCROLL_STABLE_SAMPLE_COUNT = 3;
+  const COLLAPSED_CONVERSATION_EXPAND_RE = /\b(?:show|see|read|view)\s+(?:more|full|all)\b|\bcontinue\s+(?:reading|message|response)\b|\bexpand\b/i;
+  const COLLAPSED_CONVERSATION_EXPAND_EXCLUDE_RE = /\b(?:continue generating|regenerate|send|submit|stop generating|new chat|settings|menu|voice|microphone)\b/i;
   const EMPTY_START_SCREEN_TEXTS = [
     "the mic is yours",
     "start chatting",
@@ -441,6 +444,9 @@
       getConversationFingerprint,
       getSummaryForTransfer,
       prepareSourceForCapture,
+      waitForConversationCaptureToSettle,
+      expandCollapsedConversationContent,
+      getConversationTurns,
       getClaudeInlineControlsToShift,
       getClaudeModelControlsToNudge,
       getClaudeControlTargetOffset,
@@ -726,33 +732,118 @@
   }
 
   async function prepareSourceForCapture() {
-    getSourceScrollTargets().forEach(scrollElementToTopInstantly);
-    scrollWindowToTopInstantly();
-    await waitForMessageCountToStabilize();
+    scrollSourceConversationToTop();
+    await waitForConversationCaptureToSettle();
+    const expandedCount = await expandCollapsedConversationContent();
+    if (expandedCount > 0) {
+      await waitForConversationCaptureToSettle(Math.min(1200, getSourceScrollStableTimeout()));
+    }
   }
 
-  async function waitForMessageCountToStabilize(timeoutMs = SOURCE_SCROLL_STABLE_TIMEOUT_MS) {
+  async function waitForConversationCaptureToSettle(timeoutMs = getSourceScrollStableTimeout()) {
     const startedAt = Date.now();
-    let lastCount = getDetectedConversationMessageCount();
+    let lastSnapshot = getConversationReadinessSnapshot();
     let stableSamples = 0;
 
     while (Date.now() - startedAt < timeoutMs) {
       const remainingMs = timeoutMs - (Date.now() - startedAt);
       await delay(Math.min(SOURCE_SCROLL_STABLE_INTERVAL_MS, Math.max(0, remainingMs)));
+      scrollSourceConversationToTop();
 
-      const nextCount = getDetectedConversationMessageCount();
-      if (nextCount === lastCount) {
+      const expandedCount = await expandCollapsedConversationContent();
+      const nextSnapshot = getConversationReadinessSnapshot();
+      if (expandedCount === 0 && isConversationReadinessStable(lastSnapshot, nextSnapshot)) {
         stableSamples += 1;
         if (stableSamples >= SOURCE_SCROLL_STABLE_SAMPLE_COUNT) return;
       } else {
-        lastCount = nextCount;
+        lastSnapshot = nextSnapshot;
         stableSamples = 0;
       }
     }
   }
 
+  function getSourceScrollStableTimeout() {
+    return currentPlatform.id === "claude" || currentPlatform.id === "chatgpt"
+      ? SOURCE_SCROLL_LONG_STABLE_TIMEOUT_MS
+      : SOURCE_SCROLL_STABLE_TIMEOUT_MS;
+  }
+
+  function getConversationReadinessSnapshot() {
+    const messageTurns = getConversationTurns().filter((turn) => isDetectedConversationMessage(turn));
+    const scrollState = getSourceScrollState();
+    return {
+      count: messageTurns.length,
+      chars: messageTurns.reduce((total, turn) => total + turn.text.length, 0),
+      scrollHeight: scrollState.scrollHeight,
+      scrollTop: scrollState.scrollTop
+    };
+  }
+
+  function isConversationReadinessStable(previous, next) {
+    return (
+      previous.count === next.count &&
+      previous.chars === next.chars &&
+      previous.scrollHeight === next.scrollHeight &&
+      next.scrollTop <= 2
+    );
+  }
+
   function getDetectedConversationMessageCount() {
     return getConversationTurns().filter((turn) => isDetectedConversationMessage(turn)).length;
+  }
+
+  function scrollSourceConversationToTop() {
+    getSourceScrollTargets().forEach(scrollElementToTopInstantly);
+    scrollWindowToTopInstantly();
+  }
+
+  function getSourceScrollState() {
+    return getSourceScrollTargets().reduce((state, element) => {
+      state.scrollHeight += Number(element.scrollHeight || 0);
+      state.scrollTop += Number(element.scrollTop || 0);
+      return state;
+    }, { scrollHeight: 0, scrollTop: Math.max(0, Number(window.scrollY || 0)) });
+  }
+
+  async function expandCollapsedConversationContent(maxRounds = 3) {
+    let expandedCount = 0;
+
+    for (let round = 0; round < maxRounds; round += 1) {
+      const expanders = getCollapsedConversationExpanders();
+      if (!expanders.length) break;
+
+      expanders.slice(0, 30).forEach((element) => {
+        try {
+          element.click?.();
+          expandedCount += 1;
+        } catch (error) {
+          console.debug("[Context Generator] Could not expand collapsed conversation text:", error?.message || error);
+        }
+      });
+
+      await delay(80);
+    }
+
+    return expandedCount;
+  }
+
+  function getCollapsedConversationExpanders() {
+    return Array.from(document.querySelectorAll("button, [role='button'], summary"))
+      .filter((element, index, all) => all.indexOf(element) === index && isCollapsedConversationExpander(element));
+  }
+
+  function isCollapsedConversationExpander(element) {
+    if (!(element instanceof Element) || !isVisible(element) || isContextGeneratorNode(element)) return false;
+    if (element.closest("nav, header, footer, aside, menu")) return false;
+
+    const label = getElementLabel(element, true);
+    if (!COLLAPSED_CONVERSATION_EXPAND_RE.test(label)) return false;
+    if (COLLAPSED_CONVERSATION_EXPAND_EXCLUDE_RE.test(label)) return false;
+
+    return Boolean(
+      element.closest(getConversationReadinessSelectors()) ||
+      element.closest("main, [role='main']")
+    );
   }
 
   function getSourceScrollTargets() {
@@ -1575,14 +1666,31 @@
       });
     });
 
-    candidates.sort((a, b) => {
+    const messageCandidates = candidates.filter((candidate) => !isBroadConversationWrapperCandidate(candidate, candidates));
+
+    messageCandidates.sort((a, b) => {
       if (a.element === b.element) return 0;
       return a.element.compareDocumentPosition(b.element) & Node.DOCUMENT_POSITION_PRECEDING ? 1 : -1;
     });
 
     let turns = [];
-    candidates.forEach((candidate) => {
-      if (turns.some((turn) => turn.text === candidate.text || turn.element.contains(candidate.element))) {
+    messageCandidates.forEach((candidate) => {
+      const sameTextTurn = turns.find((turn) => turn.text === candidate.text);
+      if (sameTextTurn) {
+        if (!isConversationCandidatePreferred(candidate, sameTextTurn, messageCandidates)) return;
+        turns = turns.filter((turn) => turn !== sameTextTurn);
+      }
+
+      const containingTurn = turns.find((turn) => turn.element !== candidate.element && turn.element.contains(candidate.element));
+      if (containingTurn) {
+        if (!isConversationCandidatePreferred(candidate, containingTurn, messageCandidates)) {
+          return;
+        }
+        turns = turns.filter((turn) => turn !== containingTurn);
+      }
+
+      const containedTurns = turns.filter((turn) => candidate.element !== turn.element && candidate.element.contains(turn.element));
+      if (containedTurns.length && shouldKeepContainedConversationTurns(candidate, containedTurns, messageCandidates)) {
         return;
       }
 
@@ -1591,6 +1699,60 @@
     });
 
     return turns.map(({ role, text }) => ({ role, text }));
+  }
+
+  function isBroadConversationWrapperCandidate(candidate, candidates) {
+    const nestedCandidates = getNestedConversationCandidates(candidate, candidates);
+    if (nestedCandidates.length < 2) return false;
+    if (hasExplicitConversationRole(candidate) && !isGenericConversationContainer(candidate.element)) return false;
+
+    const explicitNestedCount = nestedCandidates.filter(hasExplicitConversationRole).length;
+    const nestedChars = nestedCandidates.reduce((total, nested) => total + nested.text.length, 0);
+    const nestedCoverage = candidate.text.length ? nestedChars / candidate.text.length : 0;
+
+    return explicitNestedCount >= 2 || (isGenericConversationContainer(candidate.element) && nestedCoverage >= 0.45);
+  }
+
+  function getNestedConversationCandidates(candidate, candidates) {
+    const seenTexts = new Set();
+    return candidates.filter((other) => {
+      if (other.element === candidate.element || !candidate.element.contains(other.element)) return false;
+      if (!other.text || other.text.length < 3 || other.text === candidate.text) return false;
+      if (seenTexts.has(other.text)) return false;
+      seenTexts.add(other.text);
+      return true;
+    });
+  }
+
+  function isGenericConversationContainer(element) {
+    const label = getElementLabel(element);
+    return /\b(?:main|conversation|conversations|thread|threads|chat|chats|messages|message-list|list|feed|transcript|scroll)\b/.test(label);
+  }
+
+  function shouldKeepContainedConversationTurns(candidate, containedTurns, candidates) {
+    if (isBroadConversationWrapperCandidate(candidate, candidates)) return true;
+    if (!hasExplicitConversationRole(candidate) && containedTurns.some(hasExplicitConversationRole)) return true;
+    if (!hasExplicitConversationRole(candidate) && containedTurns.length >= 2) return true;
+    return false;
+  }
+
+  function isConversationCandidatePreferred(candidate, existing, candidates) {
+    if (isBroadConversationWrapperCandidate(existing, candidates) && !isBroadConversationWrapperCandidate(candidate, candidates)) {
+      return true;
+    }
+
+    const candidateScore = getConversationCandidateScore(candidate, candidates);
+    const existingScore = getConversationCandidateScore(existing, candidates);
+    return candidateScore > existingScore;
+  }
+
+  function getConversationCandidateScore(candidate, candidates) {
+    let score = 0;
+    if (hasExplicitConversationRole(candidate)) score += 40;
+    if (!isGenericConversationContainer(candidate.element)) score += 12;
+    if (isBroadConversationWrapperCandidate(candidate, candidates)) score -= 35;
+    score -= Math.min(20, getNestedConversationCandidates(candidate, candidates).length * 4);
+    return score;
   }
 
   function getConversationRole(element) {

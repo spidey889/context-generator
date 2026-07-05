@@ -26,6 +26,8 @@ class FakeElement {
     this.scrollHeight = 0;
     this.clientHeight = 0;
     this.scrollCalls = [];
+    this.clicks = 0;
+    this.onClick = null;
     this.order = nextOrder;
     nextOrder += 1;
     this.rect = rect || { width: 320, height: 80, top: 0, left: 0, right: 320, bottom: 80 };
@@ -52,16 +54,43 @@ class FakeElement {
   }
 
   matches(selector) {
-    if (/input|textarea|button|select/.test(selector) && /^(input|textarea|button|select)$/.test(this.localName)) {
-      return true;
+    return selector
+      .split(",")
+      .map((part) => part.trim())
+      .filter(Boolean)
+      .some((part) => this.matchesSingle(part));
+  }
+
+  matchesSingle(selector) {
+    if (selector === "*") return true;
+    if (/^[a-z][a-z0-9-]*$/i.test(selector)) return this.localName === selector.toLowerCase();
+    if (selector.startsWith(".")) {
+      return String(this.className || "").split(/\s+/).includes(selector.slice(1));
     }
-    if (selector.includes("[contenteditable='true']") && this.attrs.contenteditable === "true") {
-      return true;
+    if (selector === "[data-message-author-role]") return this.hasAttribute("data-message-author-role");
+    if (selector === "[role='button']") return this.getAttribute("role") === "button";
+    if (selector === "[role='main']") return this.getAttribute("role") === "main";
+    if (selector.includes("[contenteditable='true']")) return this.attrs.contenteditable === "true";
+
+    const attrMatch = selector.match(/^\[([^\]*^=]+)([*^]?=)'([^']+)'(?: i)?\]$/);
+    if (attrMatch) {
+      const [, attrName, operator, expected] = attrMatch;
+      const actual = String(this.getAttribute(attrName) || "");
+      if (!operator) return this.hasAttribute(attrName);
+      if (operator === "*=") return actual.toLowerCase().includes(expected.toLowerCase());
+      if (operator === "^=") return actual.toLowerCase().startsWith(expected.toLowerCase());
+      return actual.toLowerCase() === expected.toLowerCase();
     }
+
     return false;
   }
 
-  closest() {
+  closest(selector) {
+    let node = this;
+    while (node) {
+      if (node.matches(selector)) return node;
+      node = node.parentElement;
+    }
     return null;
   }
 
@@ -100,6 +129,11 @@ class FakeElement {
 
     this.scrollLeft = optionsOrX ?? this.scrollLeft;
     this.scrollTop = y ?? this.scrollTop;
+  }
+
+  click() {
+    this.clicks += 1;
+    this.onClick?.();
   }
 
   remove() {}
@@ -189,6 +223,63 @@ test("conversation scraping preserves detected user and assistant roles", () => 
   assert.match(transcript, /ChatGPT: I will update the modal and add focused tests\./);
 });
 
+test("Claude scraping keeps child message turns instead of a broad wrapper blob", () => {
+  const wrapper = new FakeElement({
+    text: [
+      "Please keep every turn separate.",
+      "I will preserve the first assistant turn.",
+      "Now add the older messages too.",
+      "I will keep the second assistant turn."
+    ].join("\n"),
+    attrs: { class: "messages conversation-scroll" }
+  });
+  const turns = [
+    new FakeElement({ text: "Please keep every turn separate.", attrs: { "data-testid": "user-message" } }),
+    new FakeElement({ text: "I will preserve the first assistant turn.", attrs: { class: "font-claude-response" } }),
+    new FakeElement({ text: "Now add the older messages too.", attrs: { "data-testid": "user-message" } }),
+    new FakeElement({ text: "I will keep the second assistant turn.", attrs: { class: "font-claude-response" } })
+  ];
+  wrapper.children = turns;
+  turns.forEach((turn) => {
+    turn.parentElement = wrapper;
+  });
+
+  const hooks = loadPlatformContent([wrapper, ...turns], "claude.ai");
+  const transcript = hooks.scrapeConversationText();
+
+  assert.match(transcript, /^Claude conversation:/);
+  assert.equal((transcript.match(/(?:User|Claude):/g) || []).length, 4);
+  assert.match(transcript, /User: Please keep every turn separate\./);
+  assert.match(transcript, /Claude: I will keep the second assistant turn\./);
+});
+
+test("collapsed conversation previews are expanded before capture", async () => {
+  const assistantTurn = new FakeElement({
+    text: "Short preview",
+    attrs: { class: "font-claude-response" }
+  });
+  const showMore = new FakeElement({
+    tag: "button",
+    text: "Show more",
+    attrs: { "aria-label": "Show more" }
+  });
+  showMore.parentElement = assistantTurn;
+  assistantTurn.children = [showMore];
+  showMore.onClick = () => {
+    assistantTurn.textContent = "Full expanded assistant response with the important hidden details.";
+    assistantTurn.innerText = assistantTurn.textContent;
+    showMore.rect = { width: 0, height: 0, top: 0, left: 0, right: 0, bottom: 0 };
+  };
+
+  const hooks = loadPlatformContent([assistantTurn, showMore], "claude.ai");
+
+  assert.equal(await hooks.expandCollapsedConversationContent(), 1);
+  const transcript = hooks.scrapeConversationText();
+
+  assert.match(transcript, /Full expanded assistant response with the important hidden details/);
+  assert.equal(showMore.clicks, 1);
+});
+
 test("conversation limiter keeps a richer 160k payload inside the cap", () => {
   const hooks = loadPlatformContent([]);
   const longConversation = [
@@ -260,6 +351,38 @@ test("source capture prep waits until delayed older messages finish loading", as
   assert.match(transcript, /Older message 20/);
   assert.match(transcript, /Visible message 24/);
   assert.equal((transcript.match(/(?:Older|Visible) message/g) || []).length, 24);
+});
+
+test("source capture prep waits when message characters grow without a new turn", async () => {
+  const scrollableRoot = new FakeElement({ text: "Scrollable chat root" });
+  scrollableRoot.scrollHeight = 1800;
+  scrollableRoot.clientHeight = 500;
+  scrollableRoot.scrollTop = 800;
+
+  const assistantTurn = new FakeElement({
+    text: "Partial assistant response",
+    attrs: { "data-message-author-role": "assistant" }
+  });
+  const elements = [scrollableRoot, assistantTurn];
+  const originalScrollTo = scrollableRoot.scrollTo.bind(scrollableRoot);
+  let expanded = false;
+  scrollableRoot.scrollTo = (...args) => {
+    originalScrollTo(...args);
+    if (expanded) return;
+    expanded = true;
+    setTimeout(() => {
+      assistantTurn.textContent = "Partial assistant response plus older loaded details that arrive after the first scroll.";
+      assistantTurn.innerText = assistantTurn.textContent;
+      scrollableRoot.scrollHeight = 2400;
+    }, 180);
+  };
+
+  const hooks = loadPlatformContent(elements);
+
+  await hooks.prepareSourceForCapture();
+  const transcript = hooks.scrapeConversationText();
+
+  assert.match(transcript, /older loaded details that arrive after the first scroll/);
 });
 
 test("in-flight warm summary is reused even after its freshness window passes", async () => {
