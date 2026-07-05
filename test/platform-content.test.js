@@ -317,9 +317,12 @@ function createVirtualizedChatElements({
   totalTurns = 78,
   windowSize = 12,
   scrollStride = windowSize,
-  scrollHeight = 4800
+  scrollHeight = 4800,
+  stalledScrollsBeforeRender = 0
 }) {
   const elements = [];
+  let delayedScrolls = 0;
+  let renderedStartIndex = 0;
   const scrollableRoot = new FakeElement({
     text: `Scrollable ${label} chat root`,
     attrs: { role: "main" }
@@ -347,6 +350,12 @@ function createVirtualizedChatElements({
   scrollableRoot.scrollTo = (...args) => {
     originalScrollTo(...args);
     const startIndex = Math.min(totalTurns - windowSize, Math.floor(scrollableRoot.scrollTop / 360) * scrollStride);
+    if (startIndex !== renderedStartIndex && delayedScrolls < stalledScrollsBeforeRender) {
+      delayedScrolls += 1;
+      return;
+    }
+    delayedScrolls = 0;
+    renderedStartIndex = startIndex;
     renderWindow(startIndex);
   };
   renderWindow(0);
@@ -439,6 +448,29 @@ test("Claude sweep captures long-message chats that need more than the old scrol
   assert.match(transcript, /User: Slow virtualized Claude turn 1/);
   assert.match(transcript, /Claude: Slow virtualized Claude turn 82/);
   assert.ok(transcript.length > 28000, "fixture should represent a long-message Claude chat");
+});
+
+test("Claude sweep waits through slow virtualized batches before declaring stale", async () => {
+  const { elements } = createVirtualizedChatElements({
+    label: "Claude",
+    totalTurns: 16,
+    windowSize: 8,
+    scrollStride: 1,
+    scrollHeight: 9000,
+    stalledScrollsBeforeRender: 5,
+    makeTurn: (index) => new FakeElement({
+      text: `Slow loading Claude batch turn ${index}`,
+      attrs: index % 2 ? { "data-testid": "user-message" } : { class: "font-claude-response" }
+    })
+  });
+  const hooks = loadPlatformContent(elements, "claude.ai");
+
+  await hooks.prepareSourceForCapture();
+  const transcript = await hooks.scrapeConversationTextWhenReady();
+
+  assert.equal((transcript.match(/(?:User|Claude): Slow loading Claude batch turn/g) || []).length, 16);
+  assert.match(transcript, /User: Slow loading Claude batch turn 1/);
+  assert.match(transcript, /Claude: Slow loading Claude batch turn 16/);
 });
 
 test("ChatGPT sweep handles eight-turn virtualized windows on a large app scroll root", async () => {
@@ -791,7 +823,8 @@ test("transfer safety window covers long quality summaries", () => {
   const source = fs.readFileSync(SOURCE_PATH, "utf8");
 
   assert.match(source, /const RUNNING_AUTO_RESET_MS = 240000/);
-  assert.match(source, /const WARM_SUMMARY_TTL_MS = 180000/);
+  assert.match(source, /const WARM_SUMMARY_EXPIRES_AT = Number\.POSITIVE_INFINITY/);
+  assert.doesNotMatch(source, /warmSummaryExpireTimer\s*=\s*window\.setTimeout/);
 });
 
 test("paste verification accepts stable context anchors when box characters differ", () => {
