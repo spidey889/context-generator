@@ -111,8 +111,16 @@ class FakeElement {
     });
   }
 
-  querySelectorAll() {
-    return [];
+  querySelectorAll(selector = "*") {
+    const matches = [];
+    const visit = (node) => {
+      node.children.forEach((child) => {
+        if (child.matches(selector)) matches.push(child);
+        visit(child);
+      });
+    };
+    visit(this);
+    return matches;
   }
 
   getBoundingClientRect() {
@@ -391,6 +399,63 @@ test("transfer capture sweeps virtualized long chats across supported platforms"
     assert.match(transcript, /User: Virtualized turn 1/);
     assert.match(transcript, new RegExp(`${platformName}: Virtualized turn 78`));
   }
+});
+
+test("ChatGPT sweep uses a large app scroll root even when it is not a message ancestor", async () => {
+  const elements = [];
+  const appScrollRoot = new FakeElement({
+    text: "ChatGPT scroll root",
+    attrs: { class: "relative flex-1 overflow-y-auto chat-scroll-area" },
+    rect: { width: 980, height: 640, top: 0, left: 0, right: 980, bottom: 640 }
+  });
+  appScrollRoot.scrollHeight = 4800;
+  appScrollRoot.clientHeight = 600;
+  appScrollRoot.scrollTop = 0;
+  elements.push(appScrollRoot);
+
+  const transcriptHost = new FakeElement({
+    text: "Rendered ChatGPT messages",
+    attrs: { class: "conversation-turns" }
+  });
+  elements.push(transcriptHost);
+
+  const makeTurn = (index) => {
+    const turn = new FakeElement({
+      text: `Detached virtualized GPT turn ${index}`,
+      attrs: { "data-message-author-role": index % 2 ? "user" : "assistant" }
+    });
+    turn.parentElement = transcriptHost;
+    return turn;
+  };
+  const renderWindow = (startIndex) => {
+    const windowTurns = [];
+    for (let index = startIndex + 1; index <= Math.min(78, startIndex + 12); index += 1) {
+      windowTurns.push(makeTurn(index));
+    }
+
+    transcriptHost.children = windowTurns;
+    transcriptHost.textContent = windowTurns.map((turn) => turn.textContent).join("\n");
+    transcriptHost.innerText = transcriptHost.textContent;
+    elements.splice(2, elements.length - 2, ...windowTurns);
+  };
+
+  const originalScrollTo = appScrollRoot.scrollTo.bind(appScrollRoot);
+  appScrollRoot.scrollTo = (...args) => {
+    originalScrollTo(...args);
+    const startIndex = Math.min(66, Math.floor(appScrollRoot.scrollTop / 360) * 12);
+    renderWindow(startIndex);
+  };
+  renderWindow(0);
+
+  const hooks = loadPlatformContent(elements, "chatgpt.com");
+
+  await hooks.prepareSourceForCapture();
+  const transcript = await hooks.scrapeConversationTextWhenReady();
+
+  assert.equal((transcript.match(/(?:User|ChatGPT): Detached virtualized GPT turn/g) || []).length, 78);
+  assert.match(transcript, /User: Detached virtualized GPT turn 1/);
+  assert.match(transcript, /ChatGPT: Detached virtualized GPT turn 78/);
+  assert.equal(appScrollRoot.scrollCalls.some((call) => Number(call?.top || 0) > 0), true);
 });
 
 test("short chats skip the virtualized sweep on supported platforms", async () => {

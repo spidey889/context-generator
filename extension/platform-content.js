@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-07-05-platform-sweep";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-07-05-chatgpt-scroll-root";
   const BUBBLE_ID = "context-generator-bubble";
   const OVERLAY_ID = "context-generator-overlay";
   const ONBOARDING_ID = "context-generator-onboarding";
@@ -127,6 +127,21 @@
     "[data-testid*='conversation' i]",
     "[data-testid*='chat' i]",
     "[data-testid*='thread' i]",
+    "[class*='conversation' i]",
+    "[class*='messages' i]",
+    "[class*='message-list' i]",
+    "[class*='thread' i]",
+    "[class*='chat' i]"
+  ];
+  const SOURCE_SCROLL_ROOT_SELECTORS = [
+    "main",
+    "[role='main']",
+    "[class*='overflow-y-auto' i]",
+    "[class*='overflow-auto' i]",
+    "[class*='scroll' i]",
+    "[data-testid*='conversation' i]",
+    "[data-testid*='thread' i]",
+    "[data-testid*='chat' i]",
     "[class*='conversation' i]",
     "[class*='messages' i]",
     "[class*='message-list' i]",
@@ -979,11 +994,19 @@
       document.documentElement,
       document.body
     ];
+    const rootSelectors = [
+      ...SOURCE_SCROLL_ROOT_SELECTORS,
+      ...FALLBACK_CONVERSATION_ROOT_SELECTORS
+    ];
     const selectors = [
       ...currentPlatform.conversationSelectors,
       ...GENERIC_CONVERSATION_SELECTORS,
       ...FALLBACK_CONVERSATION_ROOT_SELECTORS
     ];
+
+    document.querySelectorAll([...new Set(rootSelectors)].join(",")).forEach((element) => {
+      if (isLikelySourceScrollRoot(element)) roots.push(element);
+    });
 
     document.querySelectorAll([...new Set(selectors)].join(",")).forEach((element) => {
       let node = element;
@@ -994,6 +1017,17 @@
     });
 
     return roots.filter((element, index, all) => element && all.indexOf(element) === index);
+  }
+
+  function isLikelySourceScrollRoot(element) {
+    if (!isScrollableSourceElement(element)) return false;
+    if (element.closest("nav, header, footer, aside, menu")) return false;
+
+    const rect = element.getBoundingClientRect?.();
+    if (rect && (rect.height < 160 || rect.width < 260)) return false;
+
+    const label = getElementLabel(element);
+    return /\b(?:main|conversation|conversations|thread|threads|chat|chats|messages|message-list|transcript|scroll|overflow)\b/.test(label);
   }
 
   function isScrollableSourceElement(element) {
