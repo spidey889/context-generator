@@ -296,10 +296,10 @@ test("Claude scraping does not stop at explicit wrapper chunks when many loaded 
   assert.match(transcript, /Claude: Loaded turn 78/);
 });
 
-test("Claude transfer capture sweeps virtualized long chats across rendered windows", async () => {
+function createVirtualizedChatElements({ label, makeTurn }) {
   const elements = [];
   const scrollableRoot = new FakeElement({
-    text: "Scrollable Claude chat root",
+    text: `Scrollable ${label} chat root`,
     attrs: { role: "main" }
   });
   scrollableRoot.scrollHeight = 4800;
@@ -307,10 +307,6 @@ test("Claude transfer capture sweeps virtualized long chats across rendered wind
   scrollableRoot.scrollTop = 0;
   elements.push(scrollableRoot);
 
-  const makeTurn = (index) => new FakeElement({
-    text: `Virtualized turn ${index}`,
-    attrs: index % 2 ? { "data-testid": "user-message" } : { class: "font-claude-response" }
-  });
   const renderWindow = (startIndex) => {
     const windowTurns = [];
     for (let index = startIndex + 1; index <= Math.min(78, startIndex + 12); index += 1) {
@@ -328,52 +324,124 @@ test("Claude transfer capture sweeps virtualized long chats across rendered wind
   const originalScrollTo = scrollableRoot.scrollTo.bind(scrollableRoot);
   scrollableRoot.scrollTo = (...args) => {
     originalScrollTo(...args);
-    const startIndex = Math.min(66, Math.floor(scrollableRoot.scrollTop / 360) * 6);
+    const startIndex = Math.min(66, Math.floor(scrollableRoot.scrollTop / 360) * 12);
     renderWindow(startIndex);
   };
   renderWindow(0);
 
-  const hooks = loadPlatformContent(elements, "claude.ai");
+  return { elements, scrollableRoot };
+}
 
-  await hooks.prepareSourceForCapture();
-  const transcript = await hooks.scrapeConversationTextWhenReady();
+test("transfer capture sweeps virtualized long chats across supported platforms", async () => {
+  const cases = [
+    {
+      hostname: "claude.ai",
+      platformName: "Claude",
+      makeTurn: (index) => new FakeElement({
+        text: `Virtualized turn ${index}`,
+        attrs: index % 2 ? { "data-testid": "user-message" } : { class: "font-claude-response" }
+      })
+    },
+    {
+      hostname: "chatgpt.com",
+      platformName: "ChatGPT",
+      makeTurn: (index) => new FakeElement({
+        text: `Virtualized turn ${index}`,
+        attrs: { "data-message-author-role": index % 2 ? "user" : "assistant" }
+      })
+    },
+    {
+      hostname: "gemini.google.com",
+      platformName: "Gemini",
+      makeTurn: (index) => new FakeElement({
+        tag: index % 2 ? "user-query" : "model-response",
+        text: `Virtualized turn ${index}`
+      })
+    },
+    {
+      hostname: "grok.com",
+      platformName: "Grok",
+      makeTurn: (index) => new FakeElement({
+        text: `Virtualized turn ${index}`,
+        attrs: { "data-testid": index % 2 ? "user-message" : "assistant-message" }
+      })
+    },
+    {
+      hostname: "chat.deepseek.com",
+      platformName: "DeepSeek",
+      makeTurn: (index) => new FakeElement({
+        text: `Virtualized turn ${index}`,
+        attrs: { class: "ds-markdown", "data-role": index % 2 ? "user" : "assistant" }
+      })
+    }
+  ];
 
-  assert.equal((transcript.match(/(?:User|Claude): Virtualized turn/g) || []).length, 78);
-  assert.match(transcript, /User: Virtualized turn 1/);
-  assert.match(transcript, /Claude: Virtualized turn 78/);
+  for (const { hostname, platformName, makeTurn } of cases) {
+    const { elements } = createVirtualizedChatElements({ label: platformName, makeTurn });
+    const hooks = loadPlatformContent(elements, hostname);
+
+    await hooks.prepareSourceForCapture();
+    const transcript = await hooks.scrapeConversationTextWhenReady();
+
+    assert.equal(
+      (transcript.match(new RegExp(`(?:User|${platformName}): Virtualized turn`, "g")) || []).length,
+      78,
+      `${platformName} should capture every virtualized turn`
+    );
+    assert.match(transcript, /User: Virtualized turn 1/);
+    assert.match(transcript, new RegExp(`${platformName}: Virtualized turn 78`));
+  }
 });
 
-test("Claude short chats skip the virtualized sweep", async () => {
-  const elements = [];
-  const scrollableRoot = new FakeElement({
-    text: "Scrollable Claude chat root",
-    attrs: { role: "main" }
-  });
-  scrollableRoot.scrollHeight = 2400;
-  scrollableRoot.clientHeight = 600;
-  scrollableRoot.scrollTop = 0;
-  elements.push(scrollableRoot);
+test("short chats skip the virtualized sweep on supported platforms", async () => {
+  const cases = [
+    { hostname: "claude.ai", platformName: "Claude" },
+    { hostname: "chatgpt.com", platformName: "ChatGPT" },
+    { hostname: "gemini.google.com", platformName: "Gemini" },
+    { hostname: "grok.com", platformName: "Grok" },
+    { hostname: "chat.deepseek.com", platformName: "DeepSeek" }
+  ];
 
-  for (let index = 1; index <= 4; index += 1) {
-    const turn = new FakeElement({
-      text: `Short turn ${index}`,
-      attrs: index % 2 ? { "data-testid": "user-message" } : { class: "font-claude-response" }
+  for (const { hostname, platformName } of cases) {
+    const elements = [];
+    const scrollableRoot = new FakeElement({
+      text: `Scrollable ${platformName} chat root`,
+      attrs: { role: "main" }
     });
-    turn.parentElement = scrollableRoot;
-    scrollableRoot.children.push(turn);
-    elements.push(turn);
+    scrollableRoot.scrollHeight = 2400;
+    scrollableRoot.clientHeight = 600;
+    scrollableRoot.scrollTop = 0;
+    elements.push(scrollableRoot);
+
+    for (let index = 1; index <= 4; index += 1) {
+      const turn = new FakeElement({
+        text: `Short turn ${index}`,
+        attrs: { "data-message-author-role": index % 2 ? "user" : "assistant" }
+      });
+      turn.parentElement = scrollableRoot;
+      scrollableRoot.children.push(turn);
+      elements.push(turn);
+    }
+    scrollableRoot.textContent = scrollableRoot.children.map((turn) => turn.textContent).join("\n");
+    scrollableRoot.innerText = scrollableRoot.textContent;
+
+    const hooks = loadPlatformContent(elements, hostname);
+
+    await hooks.prepareSourceForCapture();
+    scrollableRoot.scrollCalls = [];
+    const transcript = await hooks.scrapeConversationTextWhenReady();
+
+    assert.equal(
+      (transcript.match(new RegExp(`(?:User|${platformName}): Short turn`, "g")) || []).length,
+      4,
+      `${platformName} should capture the short chat`
+    );
+    assert.equal(
+      scrollableRoot.scrollCalls.some((call) => Number(call?.top || 0) > 0),
+      false,
+      `${platformName} should not scroll downward for short chats`
+    );
   }
-  scrollableRoot.textContent = scrollableRoot.children.map((turn) => turn.textContent).join("\n");
-  scrollableRoot.innerText = scrollableRoot.textContent;
-
-  const hooks = loadPlatformContent(elements, "claude.ai");
-
-  await hooks.prepareSourceForCapture();
-  scrollableRoot.scrollCalls = [];
-  const transcript = await hooks.scrapeConversationTextWhenReady();
-
-  assert.equal((transcript.match(/(?:User|Claude): Short turn/g) || []).length, 4);
-  assert.equal(scrollableRoot.scrollCalls.some((call) => Number(call?.top || 0) > 0), false);
 });
 
 test("collapsed conversation previews are expanded before capture", async () => {

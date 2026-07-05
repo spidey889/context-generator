@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-07-05-claude-sweep";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-07-05-platform-sweep";
   const BUBBLE_ID = "context-generator-bubble";
   const OVERLAY_ID = "context-generator-overlay";
   const ONBOARDING_ID = "context-generator-onboarding";
@@ -56,12 +56,13 @@
   const SOURCE_SCROLL_LONG_STABLE_TIMEOUT_MS = 4500;
   const SOURCE_SCROLL_STABLE_INTERVAL_MS = 140;
   const SOURCE_SCROLL_STABLE_SAMPLE_COUNT = 3;
-  const CLAUDE_VIRTUAL_SWEEP_MIN_TURNS = 10;
-  const CLAUDE_VIRTUAL_SWEEP_MAX_SCROLLS = 48;
-  const CLAUDE_VIRTUAL_SWEEP_STALE_SCROLLS = 3;
-  const CLAUDE_VIRTUAL_SWEEP_STEP_RATIO = 0.68;
-  const CLAUDE_VIRTUAL_SWEEP_SETTLE_MS = 360;
-  const CLAUDE_VIRTUAL_SWEEP_STABLE_SAMPLE_COUNT = 2;
+  const VIRTUAL_SWEEP_PLATFORM_IDS = new Set(["claude", "chatgpt", "gemini", "grok", "deepseek"]);
+  const VIRTUAL_SWEEP_MIN_TURNS = 10;
+  const VIRTUAL_SWEEP_MAX_SCROLLS = 48;
+  const VIRTUAL_SWEEP_STALE_SCROLLS = 3;
+  const VIRTUAL_SWEEP_STEP_RATIO = 0.68;
+  const VIRTUAL_SWEEP_SETTLE_MS = 360;
+  const VIRTUAL_SWEEP_STABLE_SAMPLE_COUNT = 2;
   const COLLAPSED_CONVERSATION_EXPAND_RE = /\b(?:show|see|read|view)\s+(?:more|full|all)\b|\bcontinue\s+(?:reading|message|response)\b|\bexpand\b/i;
   const COLLAPSED_CONVERSATION_EXPAND_EXCLUDE_RE = /\b(?:continue generating|regenerate|send|submit|stop generating|new chat|settings|menu|voice|microphone)\b/i;
   const EMPTY_START_SCREEN_TEXTS = [
@@ -899,8 +900,8 @@
   }
 
   async function waitForConversationWindowToSettle(
-    timeoutMs = CLAUDE_VIRTUAL_SWEEP_SETTLE_MS,
-    stableSampleCount = CLAUDE_VIRTUAL_SWEEP_STABLE_SAMPLE_COUNT
+    timeoutMs = VIRTUAL_SWEEP_SETTLE_MS,
+    stableSampleCount = VIRTUAL_SWEEP_STABLE_SAMPLE_COUNT
   ) {
     const startedAt = Date.now();
     let lastSnapshot = getConversationReadinessSnapshot();
@@ -1623,8 +1624,8 @@
 
   async function scrapeConversationTextForTransfer() {
     const initialCapture = scrapeConversationText();
-    if (!shouldSweepClaudeVirtualConversation()) return initialCapture;
-    return scrapeClaudeVirtualConversation(initialCapture);
+    if (!shouldSweepVirtualConversation()) return initialCapture;
+    return scrapeVirtualConversation(initialCapture);
   }
 
   function createConversationCaptureFromMessageTurns(messageTurns, metrics = {}) {
@@ -1677,14 +1678,14 @@
     throw new Error("Chat messages were found, but their text could not be captured yet. Try again in a moment.");
   }
 
-  function shouldSweepClaudeVirtualConversation() {
+  function shouldSweepVirtualConversation() {
     return (
-      currentPlatform.id === "claude" &&
-      Number(lastConversationCaptureMetrics?.messageTurnCount || 0) >= CLAUDE_VIRTUAL_SWEEP_MIN_TURNS
+      VIRTUAL_SWEEP_PLATFORM_IDS.has(currentPlatform.id) &&
+      Number(lastConversationCaptureMetrics?.messageTurnCount || 0) >= VIRTUAL_SWEEP_MIN_TURNS
     );
   }
 
-  async function scrapeClaudeVirtualConversation(initialCapture) {
+  async function scrapeVirtualConversation(initialCapture) {
     const initialMetrics = lastConversationCaptureMetrics || {};
     const collectedTurns = new Map();
     let scrolls = 0;
@@ -1693,20 +1694,20 @@
     while (true) {
       const expandedCount = await expandCollapsedConversationContent();
       if (expandedCount > 0) {
-        await waitForConversationWindowToSettle(Math.min(600, CLAUDE_VIRTUAL_SWEEP_SETTLE_MS));
+        await waitForConversationWindowToSettle(Math.min(600, VIRTUAL_SWEEP_SETTLE_MS));
       }
 
       const added = collectRenderedConversationTurns(collectedTurns);
       const remaining = getSourceScrollRemaining();
-      if (remaining <= 4 || scrolls >= CLAUDE_VIRTUAL_SWEEP_MAX_SCROLLS) break;
+      if (remaining <= 4 || scrolls >= VIRTUAL_SWEEP_MAX_SCROLLS) break;
 
-      const step = Math.round(getSourceViewportHeight() * CLAUDE_VIRTUAL_SWEEP_STEP_RATIO);
+      const step = Math.round(getSourceViewportHeight() * VIRTUAL_SWEEP_STEP_RATIO);
       const moved = scrollSourceConversationByInstantly(step);
       scrolls += 1;
 
       if (!moved && added === 0) {
         staleScrolls += 1;
-        if (staleScrolls >= CLAUDE_VIRTUAL_SWEEP_STALE_SCROLLS) break;
+        if (staleScrolls >= VIRTUAL_SWEEP_STALE_SCROLLS) break;
       } else {
         staleScrolls = 0;
       }
