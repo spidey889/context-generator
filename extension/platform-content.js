@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-07-05-scrape-accuracy";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-07-05-claude-sweep";
   const BUBBLE_ID = "context-generator-bubble";
   const OVERLAY_ID = "context-generator-overlay";
   const ONBOARDING_ID = "context-generator-onboarding";
@@ -56,6 +56,12 @@
   const SOURCE_SCROLL_LONG_STABLE_TIMEOUT_MS = 4500;
   const SOURCE_SCROLL_STABLE_INTERVAL_MS = 140;
   const SOURCE_SCROLL_STABLE_SAMPLE_COUNT = 3;
+  const CLAUDE_VIRTUAL_SWEEP_MIN_TURNS = 10;
+  const CLAUDE_VIRTUAL_SWEEP_MAX_SCROLLS = 48;
+  const CLAUDE_VIRTUAL_SWEEP_STALE_SCROLLS = 3;
+  const CLAUDE_VIRTUAL_SWEEP_STEP_RATIO = 0.68;
+  const CLAUDE_VIRTUAL_SWEEP_SETTLE_MS = 360;
+  const CLAUDE_VIRTUAL_SWEEP_STABLE_SAMPLE_COUNT = 2;
   const COLLAPSED_CONVERSATION_EXPAND_RE = /\b(?:show|see|read|view)\s+(?:more|full|all)\b|\bcontinue\s+(?:reading|message|response)\b|\bexpand\b/i;
   const COLLAPSED_CONVERSATION_EXPAND_EXCLUDE_RE = /\b(?:continue generating|regenerate|send|submit|stop generating|new chat|settings|menu|voice|microphone)\b/i;
   const EMPTY_START_SCREEN_TEXTS = [
@@ -447,6 +453,8 @@
       waitForConversationCaptureToSettle,
       expandCollapsedConversationContent,
       getConversationTurns,
+      scrapeConversationTextWhenReady,
+      scrapeConversationTextForTransfer,
       getClaudeInlineControlsToShift,
       getClaudeModelControlsToNudge,
       getClaudeControlTargetOffset,
@@ -464,6 +472,7 @@
     try {
       const destination = getPlatform(destinationId);
       let conversationText = scrapedConversationText;
+      let destinationPrepPromise = preparedDestinationPromise;
       if (!conversationText) {
         if (isHandoffOverlayVisible()) {
           setHandoffStatus("Reading source chat");
@@ -471,12 +480,15 @@
           showOverlay(destinationId);
         }
         await prepareSourceForCapture();
+        if (!destinationPrepPromise && getDetectedConversationMessageCount() > 0) {
+          destinationPrepPromise = prepareDestinationTab(destinationId, transferTrace);
+        }
         transferStage = "capture";
         markTransferTrace(transferTrace, "capture start");
         conversationText = await scrapeConversationTextWhenReady();
         markCaptureDone(transferTrace, conversationText);
       }
-      const destinationPrepPromise = preparedDestinationPromise || prepareDestinationTab(destinationId, transferTrace);
+      destinationPrepPromise = destinationPrepPromise || prepareDestinationTab(destinationId, transferTrace);
       if (isHandoffOverlayVisible()) {
         setHandoffStatus("Summarizing context");
       } else {
@@ -801,8 +813,122 @@
     return getSourceScrollTargets().reduce((state, element) => {
       state.scrollHeight += Number(element.scrollHeight || 0);
       state.scrollTop += Number(element.scrollTop || 0);
+      state.clientHeight += Number(element.clientHeight || 0);
       return state;
-    }, { scrollHeight: 0, scrollTop: Math.max(0, Number(window.scrollY || 0)) });
+    }, {
+      scrollHeight: 0,
+      scrollTop: Math.max(0, Number(window.scrollY || 0)),
+      clientHeight: Math.max(0, Number(window.innerHeight || 0))
+    });
+  }
+
+  function getSourceScrollRemaining() {
+    const elementRemaining = getSourceScrollTargets().reduce((remaining, element) => {
+      const maxTop = getElementMaxScrollTop(element);
+      const currentTop = Math.max(0, Number(element.scrollTop || 0));
+      return Math.max(remaining, maxTop - currentTop);
+    }, 0);
+
+    return Math.max(elementRemaining, getWindowScrollRemaining());
+  }
+
+  function getElementMaxScrollTop(element) {
+    return Math.max(0, Number(element?.scrollHeight || 0) - Number(element?.clientHeight || 0));
+  }
+
+  function getWindowScrollRemaining() {
+    const documentHeight = Math.max(
+      Number(document.documentElement?.scrollHeight || 0),
+      Number(document.body?.scrollHeight || 0)
+    );
+    const viewportHeight = Number(window.innerHeight || document.documentElement?.clientHeight || 0);
+    if (!documentHeight || !viewportHeight) return 0;
+    return Math.max(0, documentHeight - viewportHeight - Math.max(0, Number(window.scrollY || 0)));
+  }
+
+  function getSourceViewportHeight() {
+    const targetHeight = getSourceScrollTargets().reduce((height, element) => {
+      return Math.max(height, Number(element.clientHeight || 0));
+    }, 0);
+    return Math.max(360, targetHeight || Number(window.innerHeight || 0) || 720);
+  }
+
+  function scrollSourceConversationByInstantly(deltaY) {
+    let moved = false;
+    getSourceScrollTargets().forEach((element) => {
+      if (scrollElementByInstantly(element, deltaY)) moved = true;
+    });
+    if (scrollWindowByInstantly(deltaY)) moved = true;
+    return moved;
+  }
+
+  function scrollElementByInstantly(element, deltaY) {
+    const maxTop = getElementMaxScrollTop(element);
+    const currentTop = Math.max(0, Number(element.scrollTop || 0));
+    if (maxTop <= 0 || currentTop >= maxTop - 1) return false;
+
+    const nextTop = Math.min(maxTop, currentTop + Math.max(1, Number(deltaY || 0)));
+    try {
+      element.scrollTo?.({ top: nextTop, left: element.scrollLeft || 0, behavior: "instant" });
+    } catch {
+      try {
+        element.scrollTo?.(element.scrollLeft || 0, nextTop);
+      } catch {}
+    }
+    if (Math.abs(Number(element.scrollTop || 0) - nextTop) > 1) {
+      try {
+        element.scrollTop = nextTop;
+      } catch {}
+    }
+
+    return Math.abs(Number(element.scrollTop || 0) - currentTop) > 1;
+  }
+
+  function scrollWindowByInstantly(deltaY) {
+    if (getWindowScrollRemaining() <= 1) return false;
+    const currentTop = Math.max(0, Number(window.scrollY || 0));
+    const nextTop = currentTop + Math.max(1, Number(deltaY || 0));
+    try {
+      window.scrollTo?.({ top: nextTop, left: window.scrollX || 0, behavior: "instant" });
+    } catch {
+      try {
+        window.scrollTo?.(window.scrollX || 0, nextTop);
+      } catch {}
+    }
+    return Math.abs(Number(window.scrollY || 0) - currentTop) > 1;
+  }
+
+  async function waitForConversationWindowToSettle(
+    timeoutMs = CLAUDE_VIRTUAL_SWEEP_SETTLE_MS,
+    stableSampleCount = CLAUDE_VIRTUAL_SWEEP_STABLE_SAMPLE_COUNT
+  ) {
+    const startedAt = Date.now();
+    let lastSnapshot = getConversationReadinessSnapshot();
+    let stableSamples = 0;
+
+    while (Date.now() - startedAt < timeoutMs) {
+      const remainingMs = timeoutMs - (Date.now() - startedAt);
+      await delay(Math.min(SOURCE_SCROLL_STABLE_INTERVAL_MS, Math.max(0, remainingMs)));
+
+      const expandedCount = await expandCollapsedConversationContent();
+      const nextSnapshot = getConversationReadinessSnapshot();
+      if (expandedCount === 0 && isConversationWindowStable(lastSnapshot, nextSnapshot)) {
+        stableSamples += 1;
+        if (stableSamples >= stableSampleCount) return;
+      } else {
+        lastSnapshot = nextSnapshot;
+        stableSamples = 0;
+      }
+    }
+  }
+
+  function isConversationWindowStable(previous, next) {
+    return (
+      previous.count === next.count &&
+      previous.chars === next.chars &&
+      previous.scrollHeight === next.scrollHeight &&
+      previous.scrollTop === next.scrollTop
+    );
   }
 
   async function expandCollapsedConversationContent(maxRounds = 3) {
@@ -1492,12 +1618,23 @@
 
   function scrapeConversationText() {
     const messageTurns = getConversationTurns().filter((turn) => isDetectedConversationMessage(turn));
+    return createConversationCaptureFromMessageTurns(messageTurns);
+  }
+
+  async function scrapeConversationTextForTransfer() {
+    const initialCapture = scrapeConversationText();
+    if (!shouldSweepClaudeVirtualConversation()) return initialCapture;
+    return scrapeClaudeVirtualConversation(initialCapture);
+  }
+
+  function createConversationCaptureFromMessageTurns(messageTurns, metrics = {}) {
     if (messageTurns.length === 0) {
       throw new Error(NO_CONVERSATION_ERROR_MESSAGE);
     }
 
     const turns = messageTurns.filter((turn) => isUsefulConversationTurn(turn));
     const baseMetrics = {
+      ...metrics,
       messageTurnCount: messageTurns.length,
       usefulTurnCount: turns.length,
       rawCandidateChars: messageTurns.reduce((total, turn) => total + turn.text.length, 0)
@@ -1510,7 +1647,7 @@
     if (transcript && isUsefulConversationTranscript(turns)) {
       return createConversationCapture(`${currentPlatform.name} conversation:\n\n${transcript}`, {
         ...baseMetrics,
-        method: "structured",
+        method: baseMetrics.method || "structured",
         transcriptChars: transcript.length
       });
     }
@@ -1519,7 +1656,7 @@
     if (isUsefulFallbackConversationText(fallbackText)) {
       return createConversationCapture(`${currentPlatform.name} conversation:\n\n${fallbackText}`, {
         ...baseMetrics,
-        method: "fallback",
+        method: baseMetrics.method || "fallback",
         transcriptChars: fallbackText.length
       });
     }
@@ -1531,13 +1668,82 @@
     if (detectedTranscript) {
       return createConversationCapture(`${currentPlatform.name} conversation:\n\n${detectedTranscript}`, {
         ...baseMetrics,
-        method: "detected",
+        method: baseMetrics.method || "detected",
         usefulTurnCount: messageTurns.length,
         transcriptChars: detectedTranscript.length
       });
     }
 
     throw new Error("Chat messages were found, but their text could not be captured yet. Try again in a moment.");
+  }
+
+  function shouldSweepClaudeVirtualConversation() {
+    return (
+      currentPlatform.id === "claude" &&
+      Number(lastConversationCaptureMetrics?.messageTurnCount || 0) >= CLAUDE_VIRTUAL_SWEEP_MIN_TURNS
+    );
+  }
+
+  async function scrapeClaudeVirtualConversation(initialCapture) {
+    const initialMetrics = lastConversationCaptureMetrics || {};
+    const collectedTurns = new Map();
+    let scrolls = 0;
+    let staleScrolls = 0;
+
+    while (true) {
+      const expandedCount = await expandCollapsedConversationContent();
+      if (expandedCount > 0) {
+        await waitForConversationWindowToSettle(Math.min(600, CLAUDE_VIRTUAL_SWEEP_SETTLE_MS));
+      }
+
+      const added = collectRenderedConversationTurns(collectedTurns);
+      const remaining = getSourceScrollRemaining();
+      if (remaining <= 4 || scrolls >= CLAUDE_VIRTUAL_SWEEP_MAX_SCROLLS) break;
+
+      const step = Math.round(getSourceViewportHeight() * CLAUDE_VIRTUAL_SWEEP_STEP_RATIO);
+      const moved = scrollSourceConversationByInstantly(step);
+      scrolls += 1;
+
+      if (!moved && added === 0) {
+        staleScrolls += 1;
+        if (staleScrolls >= CLAUDE_VIRTUAL_SWEEP_STALE_SCROLLS) break;
+      } else {
+        staleScrolls = 0;
+      }
+
+      await waitForConversationWindowToSettle();
+    }
+
+    const sweptTurns = Array.from(collectedTurns.values());
+    if (sweptTurns.length <= Number(initialMetrics.messageTurnCount || 0)) {
+      return initialCapture;
+    }
+
+    return createConversationCaptureFromMessageTurns(sweptTurns, {
+      method: "sweep",
+      sweepScrolls: scrolls,
+      sweepTurnCount: sweptTurns.length,
+      initialRenderedTurnCount: initialMetrics.messageTurnCount || null,
+      initialRawCandidateChars: initialMetrics.rawCandidateChars || null
+    });
+  }
+
+  function collectRenderedConversationTurns(collectedTurns) {
+    let added = 0;
+    getConversationTurns()
+      .filter((turn) => isDetectedConversationMessage(turn))
+      .forEach((turn) => {
+        const normalizedText = cleanText(turn.text);
+        const signature = getConversationTurnSignature(turn.role, normalizedText);
+        if (collectedTurns.has(signature)) return;
+        collectedTurns.set(signature, { role: turn.role, text: normalizedText });
+        added += 1;
+      });
+    return added;
+  }
+
+  function getConversationTurnSignature(role, text) {
+    return `${role || "Message"}\u0001${text || ""}`;
   }
 
   function createConversationCapture(text, metrics = {}) {
@@ -1577,7 +1783,7 @@
 
     while (Date.now() - startedAt <= timeoutMs) {
       try {
-        return scrapeConversationText();
+        return await scrapeConversationTextForTransfer();
       } catch (error) {
         if (!isNoConversationError(error)) throw error;
         lastEmptyError = error;
@@ -3273,6 +3479,10 @@
     showOverlay(destinationId);
     setHandoffStatus("Reading source chat");
     await prepareSourceForCapture();
+    let preparedDestinationPromise = null;
+    if (getDetectedConversationMessageCount() > 0) {
+      preparedDestinationPromise = prepareDestinationTab(destinationId, trace);
+    }
 
     let conversationText;
     try {
@@ -3289,7 +3499,7 @@
     }
 
     const warmSummaryRecord = ensureWarmSummaryForConversation(conversationText, trace);
-    const preparedDestinationPromise = prepareDestinationTab(destinationId, trace);
+    preparedDestinationPromise = preparedDestinationPromise || prepareDestinationTab(destinationId, trace);
     runContextFlow(destinationId, preparedDestinationPromise, warmSummaryRecord, conversationText, trace);
   }
 

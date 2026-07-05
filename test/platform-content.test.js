@@ -164,9 +164,16 @@ function loadPlatformContent(elements = [], hostname = "chatgpt.com") {
     performance: { now: () => 0 },
     addEventListener: () => {},
     removeEventListener: () => {},
-    scrollTo: () => {
-      window.scrollY = 0;
+    scrollTo: (optionsOrX, y) => {
+      if (typeof optionsOrX === "object") {
+        window.scrollX = optionsOrX.left ?? window.scrollX;
+        window.scrollY = optionsOrX.top ?? window.scrollY;
+        return;
+      }
+      window.scrollX = optionsOrX ?? window.scrollX;
+      window.scrollY = y ?? window.scrollY;
     },
+    innerHeight: 720,
     setTimeout,
     clearTimeout
   };
@@ -287,6 +294,86 @@ test("Claude scraping does not stop at explicit wrapper chunks when many loaded 
   assert.equal((transcript.match(/(?:User|Claude): Loaded turn/g) || []).length, 78);
   assert.match(transcript, /User: Loaded turn 1/);
   assert.match(transcript, /Claude: Loaded turn 78/);
+});
+
+test("Claude transfer capture sweeps virtualized long chats across rendered windows", async () => {
+  const elements = [];
+  const scrollableRoot = new FakeElement({
+    text: "Scrollable Claude chat root",
+    attrs: { role: "main" }
+  });
+  scrollableRoot.scrollHeight = 4800;
+  scrollableRoot.clientHeight = 600;
+  scrollableRoot.scrollTop = 0;
+  elements.push(scrollableRoot);
+
+  const makeTurn = (index) => new FakeElement({
+    text: `Virtualized turn ${index}`,
+    attrs: index % 2 ? { "data-testid": "user-message" } : { class: "font-claude-response" }
+  });
+  const renderWindow = (startIndex) => {
+    const windowTurns = [];
+    for (let index = startIndex + 1; index <= Math.min(78, startIndex + 12); index += 1) {
+      const turn = makeTurn(index);
+      turn.parentElement = scrollableRoot;
+      windowTurns.push(turn);
+    }
+
+    scrollableRoot.children = windowTurns;
+    scrollableRoot.textContent = windowTurns.map((turn) => turn.textContent).join("\n");
+    scrollableRoot.innerText = scrollableRoot.textContent;
+    elements.splice(1, elements.length - 1, ...windowTurns);
+  };
+
+  const originalScrollTo = scrollableRoot.scrollTo.bind(scrollableRoot);
+  scrollableRoot.scrollTo = (...args) => {
+    originalScrollTo(...args);
+    const startIndex = Math.min(66, Math.floor(scrollableRoot.scrollTop / 360) * 6);
+    renderWindow(startIndex);
+  };
+  renderWindow(0);
+
+  const hooks = loadPlatformContent(elements, "claude.ai");
+
+  await hooks.prepareSourceForCapture();
+  const transcript = await hooks.scrapeConversationTextWhenReady();
+
+  assert.equal((transcript.match(/(?:User|Claude): Virtualized turn/g) || []).length, 78);
+  assert.match(transcript, /User: Virtualized turn 1/);
+  assert.match(transcript, /Claude: Virtualized turn 78/);
+});
+
+test("Claude short chats skip the virtualized sweep", async () => {
+  const elements = [];
+  const scrollableRoot = new FakeElement({
+    text: "Scrollable Claude chat root",
+    attrs: { role: "main" }
+  });
+  scrollableRoot.scrollHeight = 2400;
+  scrollableRoot.clientHeight = 600;
+  scrollableRoot.scrollTop = 0;
+  elements.push(scrollableRoot);
+
+  for (let index = 1; index <= 4; index += 1) {
+    const turn = new FakeElement({
+      text: `Short turn ${index}`,
+      attrs: index % 2 ? { "data-testid": "user-message" } : { class: "font-claude-response" }
+    });
+    turn.parentElement = scrollableRoot;
+    scrollableRoot.children.push(turn);
+    elements.push(turn);
+  }
+  scrollableRoot.textContent = scrollableRoot.children.map((turn) => turn.textContent).join("\n");
+  scrollableRoot.innerText = scrollableRoot.textContent;
+
+  const hooks = loadPlatformContent(elements, "claude.ai");
+
+  await hooks.prepareSourceForCapture();
+  scrollableRoot.scrollCalls = [];
+  const transcript = await hooks.scrapeConversationTextWhenReady();
+
+  assert.equal((transcript.match(/(?:User|Claude): Short turn/g) || []).length, 4);
+  assert.equal(scrollableRoot.scrollCalls.some((call) => Number(call?.top || 0) > 0), false);
 });
 
 test("collapsed conversation previews are expanded before capture", async () => {
