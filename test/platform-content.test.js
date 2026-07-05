@@ -253,6 +253,42 @@ test("Claude scraping keeps child message turns instead of a broad wrapper blob"
   assert.match(transcript, /Claude: I will keep the second assistant turn\./);
 });
 
+test("Claude scraping does not stop at explicit wrapper chunks when many loaded turns exist", () => {
+  const elements = [];
+  let turnNumber = 1;
+
+  for (let chunkIndex = 0; chunkIndex < 12; chunkIndex += 1) {
+    const chunkTurns = [];
+    const turnsInChunk = chunkIndex < 6 ? 7 : 6;
+    const wrapper = new FakeElement({
+      attrs: { class: "assistant-message chunk-wrapper" }
+    });
+
+    for (let localIndex = 0; localIndex < turnsInChunk; localIndex += 1) {
+      const isUser = turnNumber % 2 === 1;
+      const turn = new FakeElement({
+        text: `Loaded turn ${turnNumber}`,
+        attrs: isUser ? { "data-testid": "user-message" } : { class: "font-claude-response" }
+      });
+      turn.parentElement = wrapper;
+      chunkTurns.push(turn);
+      turnNumber += 1;
+    }
+
+    wrapper.children = chunkTurns;
+    wrapper.textContent = chunkTurns.map((turn) => turn.textContent).join("\n");
+    wrapper.innerText = wrapper.textContent;
+    elements.push(wrapper, ...chunkTurns);
+  }
+
+  const hooks = loadPlatformContent(elements, "claude.ai");
+  const transcript = hooks.scrapeConversationText();
+
+  assert.equal((transcript.match(/(?:User|Claude): Loaded turn/g) || []).length, 78);
+  assert.match(transcript, /User: Loaded turn 1/);
+  assert.match(transcript, /Claude: Loaded turn 78/);
+});
+
 test("collapsed conversation previews are expanded before capture", async () => {
   const assistantTurn = new FakeElement({
     text: "Short preview",

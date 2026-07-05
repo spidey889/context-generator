@@ -1704,13 +1704,28 @@
   function isBroadConversationWrapperCandidate(candidate, candidates) {
     const nestedCandidates = getNestedConversationCandidates(candidate, candidates);
     if (nestedCandidates.length < 2) return false;
-    if (hasExplicitConversationRole(candidate) && !isGenericConversationContainer(candidate.element)) return false;
 
-    const explicitNestedCount = nestedCandidates.filter(hasExplicitConversationRole).length;
+    const explicitNestedCandidates = nestedCandidates.filter(hasExplicitConversationRole);
+    const explicitNestedCount = explicitNestedCandidates.length;
+    const nestedRoles = new Set(explicitNestedCandidates.map((nested) => nested.role));
+    const candidateHasExplicitRole = hasExplicitConversationRole(candidate);
+    const containsMixedNestedRoles = nestedRoles.size > 1;
+    const containsDifferentNestedRole = candidateHasExplicitRole && nestedRoles.size > 0 && !nestedRoles.has(candidate.role);
     const nestedChars = nestedCandidates.reduce((total, nested) => total + nested.text.length, 0);
     const nestedCoverage = candidate.text.length ? nestedChars / candidate.text.length : 0;
 
-    return explicitNestedCount >= 2 || (isGenericConversationContainer(candidate.element) && nestedCoverage >= 0.45);
+    if (
+      explicitNestedCount >= 2 &&
+      (!candidateHasExplicitRole || containsMixedNestedRoles || containsDifferentNestedRole)
+    ) {
+      return true;
+    }
+
+    if (candidateHasExplicitRole && explicitNestedCount >= 6 && nestedCoverage >= 0.75) {
+      return true;
+    }
+
+    return isGenericConversationContainer(candidate.element) && nestedCoverage >= 0.45;
   }
 
   function getNestedConversationCandidates(candidate, candidates) {
