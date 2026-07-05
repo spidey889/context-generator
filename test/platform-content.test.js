@@ -26,8 +26,10 @@ class FakeElement {
     this.scrollHeight = 0;
     this.clientHeight = 0;
     this.scrollCalls = [];
+    this.scrollIntoViewCalls = [];
     this.clicks = 0;
     this.onClick = null;
+    this.onScrollIntoView = null;
     this.order = nextOrder;
     nextOrder += 1;
     this.rect = rect || { width: 320, height: 80, top: 0, left: 0, right: 320, bottom: 80 };
@@ -137,6 +139,11 @@ class FakeElement {
 
     this.scrollLeft = optionsOrX ?? this.scrollLeft;
     this.scrollTop = y ?? this.scrollTop;
+  }
+
+  scrollIntoView(options) {
+    this.scrollIntoViewCalls.push(options);
+    this.onScrollIntoView?.(options, this);
   }
 
   click() {
@@ -461,6 +468,50 @@ test("ChatGPT sweep handles eight-turn virtualized windows on a large app scroll
   assert.match(transcript, /User: Detached virtualized GPT turn 1/);
   assert.match(transcript, /ChatGPT: Detached virtualized GPT turn 78/);
   assert.equal(appScrollRoot.scrollCalls.some((call) => Number(call?.top || 0) > 0), true);
+});
+
+test("ChatGPT sweep advances from rendered message anchors when scroll roots do not expose the next batch", async () => {
+  const elements = [];
+  const totalTurns = 78;
+  const windowSize = 8;
+  const transcriptHost = new FakeElement({
+    text: "Rendered ChatGPT messages",
+    attrs: { class: "conversation-turns" }
+  });
+  elements.push(transcriptHost);
+
+  const renderWindow = (startIndex) => {
+    const windowTurns = [];
+    for (let index = startIndex + 1; index <= Math.min(totalTurns, startIndex + windowSize); index += 1) {
+      const turn = new FakeElement({
+        text: `Anchor-loaded GPT turn ${index}`,
+        attrs: { "data-message-author-role": index % 2 ? "user" : "assistant" }
+      });
+      turn.parentElement = transcriptHost;
+      turn.onScrollIntoView = () => {
+        if (index !== startIndex + windowSize) return;
+        renderWindow(Math.min(totalTurns - windowSize, startIndex + windowSize));
+      };
+      windowTurns.push(turn);
+    }
+
+    transcriptHost.children = windowTurns;
+    transcriptHost.textContent = windowTurns.map((turn) => turn.textContent).join("\n");
+    transcriptHost.innerText = transcriptHost.textContent;
+    elements.splice(1, elements.length - 1, ...windowTurns);
+  };
+  renderWindow(0);
+
+  const hooks = loadPlatformContent(elements, "chatgpt.com");
+  const initialTranscript = hooks.scrapeConversationText();
+  assert.equal((initialTranscript.match(/(?:User|ChatGPT): Anchor-loaded GPT turn/g) || []).length, 8);
+
+  await hooks.prepareSourceForCapture();
+  const transcript = await hooks.scrapeConversationTextWhenReady();
+
+  assert.equal((transcript.match(/(?:User|ChatGPT): Anchor-loaded GPT turn/g) || []).length, 78);
+  assert.match(transcript, /User: Anchor-loaded GPT turn 1/);
+  assert.match(transcript, /ChatGPT: Anchor-loaded GPT turn 78/);
 });
 
 test("short chats skip the virtualized sweep on supported platforms", async () => {

@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-07-05-eight-turn-sweep";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-07-05-anchored-virtual-sweep";
   const BUBBLE_ID = "context-generator-bubble";
   const OVERLAY_ID = "context-generator-overlay";
   const ONBOARDING_ID = "context-generator-onboarding";
@@ -1732,21 +1732,27 @@
       }
 
       const added = collectRenderedConversationTurns(collectedTurns);
-      const remaining = getSourceScrollRemaining();
-      if (remaining <= 4 || scrolls >= VIRTUAL_SWEEP_MAX_SCROLLS) break;
+      if (scrolls >= VIRTUAL_SWEEP_MAX_SCROLLS) break;
 
       const step = Math.round(getSourceViewportHeight() * VIRTUAL_SWEEP_STEP_RATIO);
-      const moved = scrollSourceConversationByInstantly(step);
+      const beforeWindowSignature = getRenderedConversationWindowSignature();
+      scrollSourceConversationByInstantly(step);
       scrolls += 1;
 
-      if (!moved && added === 0) {
+      await waitForConversationWindowToSettle();
+      let afterWindowSignature = getRenderedConversationWindowSignature();
+      if (afterWindowSignature === beforeWindowSignature && scrollRenderedConversationBoundaryIntoView()) {
+        await waitForConversationWindowToSettle();
+        afterWindowSignature = getRenderedConversationWindowSignature();
+      }
+
+      const windowChanged = afterWindowSignature !== beforeWindowSignature;
+      if (!windowChanged && added === 0) {
         staleScrolls += 1;
         if (staleScrolls >= VIRTUAL_SWEEP_STALE_SCROLLS) break;
       } else {
         staleScrolls = 0;
       }
-
-      await waitForConversationWindowToSettle();
     }
 
     const sweptTurns = Array.from(collectedTurns.values());
@@ -1775,6 +1781,30 @@
         added += 1;
       });
     return added;
+  }
+
+  function scrollRenderedConversationBoundaryIntoView() {
+    const turns = getConversationTurns().filter((turn) => isDetectedConversationMessage(turn));
+    const anchor = turns[turns.length - 1]?.element;
+    if (!anchor?.scrollIntoView) return false;
+
+    try {
+      anchor.scrollIntoView({ block: "start", inline: "nearest", behavior: "instant" });
+    } catch {
+      try {
+        anchor.scrollIntoView(false);
+      } catch {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  function getRenderedConversationWindowSignature() {
+    return getConversationTurns()
+      .filter((turn) => isDetectedConversationMessage(turn))
+      .map((turn) => getConversationTurnSignature(turn.role, cleanText(turn.text)))
+      .join("\u0002");
   }
 
   function getConversationTurnSignature(role, text) {
@@ -1939,7 +1969,7 @@
       turns.push(candidate);
     });
 
-    return turns.map(({ role, text }) => ({ role, text }));
+    return turns.map(({ element, role, text }) => ({ element, role, text }));
   }
 
   function isBroadConversationWrapperCandidate(candidate, candidates) {
