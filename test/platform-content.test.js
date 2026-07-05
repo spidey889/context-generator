@@ -21,6 +21,11 @@ class FakeElement {
     this.attrs = { ...attrs };
     this.children = [];
     this.parentElement = null;
+    this.scrollTop = 0;
+    this.scrollLeft = 0;
+    this.scrollHeight = 0;
+    this.clientHeight = 0;
+    this.scrollCalls = [];
     this.order = nextOrder;
     nextOrder += 1;
     this.rect = rect || { width: 320, height: 80, top: 0, left: 0, right: 320, bottom: 80 };
@@ -85,6 +90,18 @@ class FakeElement {
     return this.rect;
   }
 
+  scrollTo(optionsOrX, y) {
+    this.scrollCalls.push(optionsOrX);
+    if (typeof optionsOrX === "object") {
+      this.scrollTop = optionsOrX.top ?? this.scrollTop;
+      this.scrollLeft = optionsOrX.left ?? this.scrollLeft;
+      return;
+    }
+
+    this.scrollLeft = optionsOrX ?? this.scrollLeft;
+    this.scrollTop = y ?? this.scrollTop;
+  }
+
   remove() {}
 }
 
@@ -102,6 +119,8 @@ function loadPlatformContent(elements = [], hostname = "chatgpt.com") {
   };
   const window = {
     location: { hostname },
+    scrollX: 0,
+    scrollY: 400,
     __CONTEXT_GENERATOR_TEST_HOOKS__: {
       register(value) {
         hooks = value;
@@ -111,6 +130,9 @@ function loadPlatformContent(elements = [], hostname = "chatgpt.com") {
     performance: { now: () => 0 },
     addEventListener: () => {},
     removeEventListener: () => {},
+    scrollTo: () => {
+      window.scrollY = 0;
+    },
     setTimeout,
     clearTimeout
   };
@@ -180,6 +202,22 @@ test("conversation limiter keeps a richer 160k payload inside the cap", () => {
   assert.match(limited, /^a{32000}\n\n/);
   assert.match(limited, /\[\.\.\.middle of conversation omitted to fit the backup summarizer\.\.\.\]/);
   assert.match(limited, /TAIL-DETAILS$/);
+});
+
+test("source capture prep scrolls conversation containers to the top instantly", () => {
+  const scrollableRoot = new FakeElement({
+    text: "Scrollable chat root",
+    attrs: { role: "main" }
+  });
+  scrollableRoot.scrollHeight = 1800;
+  scrollableRoot.clientHeight = 500;
+  scrollableRoot.scrollTop = 740;
+  const hooks = loadPlatformContent([scrollableRoot]);
+
+  hooks.prepareSourceForCapture();
+
+  assert.equal(scrollableRoot.scrollTop, 0);
+  assert.equal(scrollableRoot.scrollCalls[0].behavior, "instant");
 });
 
 test("in-flight warm summary is reused even after its freshness window passes", async () => {

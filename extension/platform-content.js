@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-07-03-gemini-flash-left";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-07-05-source-scroll-analysis";
   const BUBBLE_ID = "context-generator-bubble";
   const OVERLAY_ID = "context-generator-overlay";
   const ONBOARDING_ID = "context-generator-onboarding";
@@ -437,6 +437,7 @@
       limitConversationText,
       getConversationFingerprint,
       getSummaryForTransfer,
+      prepareSourceForCapture,
       getClaudeInlineControlsToShift,
       getClaudeModelControlsToNudge,
       getClaudeControlTargetOffset,
@@ -455,6 +456,12 @@
       const destination = getPlatform(destinationId);
       let conversationText = scrapedConversationText;
       if (!conversationText) {
+        if (isHandoffOverlayVisible()) {
+          setHandoffStatus("Reading source chat");
+        } else {
+          showOverlay(destinationId);
+        }
+        prepareSourceForCapture();
         transferStage = "capture";
         markTransferTrace(transferTrace, "capture start");
         conversationText = await scrapeConversationTextWhenReady();
@@ -696,6 +703,62 @@
       chars: conversationText.length,
       ...getConversationCaptureMetrics(conversationText)
     });
+  }
+
+  function prepareSourceForCapture() {
+    getSourceScrollTargets().forEach(scrollElementToTopInstantly);
+    scrollWindowToTopInstantly();
+  }
+
+  function getSourceScrollTargets() {
+    const roots = [
+      document.scrollingElement,
+      document.documentElement,
+      document.body
+    ];
+    const selectors = [
+      ...currentPlatform.conversationSelectors,
+      ...GENERIC_CONVERSATION_SELECTORS,
+      ...FALLBACK_CONVERSATION_ROOT_SELECTORS
+    ];
+
+    document.querySelectorAll([...new Set(selectors)].join(",")).forEach((element) => {
+      let node = element;
+      while (node && node !== document.body && node !== document.documentElement) {
+        if (isScrollableSourceElement(node)) roots.push(node);
+        node = node.parentElement;
+      }
+    });
+
+    return roots.filter((element, index, all) => element && all.indexOf(element) === index);
+  }
+
+  function isScrollableSourceElement(element) {
+    if (!(element instanceof Element) || isContextGeneratorNode(element)) return false;
+    const scrollHeight = Number(element.scrollHeight || 0);
+    const clientHeight = Number(element.clientHeight || 0);
+    return scrollHeight > clientHeight + 4;
+  }
+
+  function scrollElementToTopInstantly(element) {
+    try {
+      element.scrollTop = 0;
+      element.scrollTo?.({ top: 0, left: element.scrollLeft || 0, behavior: "instant" });
+    } catch {
+      try {
+        element.scrollTo?.(element.scrollLeft || 0, 0);
+      } catch {}
+    }
+  }
+
+  function scrollWindowToTopInstantly() {
+    try {
+      window.scrollTo?.({ top: 0, left: window.scrollX || 0, behavior: "instant" });
+    } catch {
+      try {
+        window.scrollTo?.(window.scrollX || 0, 0);
+      } catch {}
+    }
   }
 
   function markTransferTrace(trace, label, detail = null) {
@@ -2981,6 +3044,13 @@
     trace.destinationId = destinationId;
     markTransferTrace(trace, "destination click", { destination: destinationId });
 
+    isRunning = true;
+    clearRunningResetTimer();
+    runningResetTimer = setTimeout(resetRunningFlag, RUNNING_AUTO_RESET_MS);
+    showOverlay(destinationId);
+    setHandoffStatus("Reading source chat");
+    prepareSourceForCapture();
+
     let conversationText;
     try {
       markTransferTrace(trace, "capture start");
@@ -2990,15 +3060,12 @@
       clearWarmSummary();
       markTransferTrace(trace, `failed: ${error.message}`);
       finishTransferTrace(trace);
+      resetRunningFlag();
       showErrorOverlay(error.message);
       return;
     }
 
     const warmSummaryRecord = ensureWarmSummaryForConversation(conversationText, trace);
-    isRunning = true;
-    clearRunningResetTimer();
-    runningResetTimer = setTimeout(resetRunningFlag, RUNNING_AUTO_RESET_MS);
-    showOverlay(destinationId);
     const preparedDestinationPromise = prepareDestinationTab(destinationId, trace);
     runContextFlow(destinationId, preparedDestinationPromise, warmSummaryRecord, conversationText, trace);
   }

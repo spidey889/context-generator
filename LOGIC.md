@@ -104,7 +104,7 @@ Future rule: do not move the ChatGPT button back into ChatGPT's composer DOM and
 
 ## How Conversation Scraping Works
 
-The scraper runs before the overlay is shown, so extension UI text is not included in the backend input.
+For picker-started transfers, the handoff popup is shown before capture, then the source page is instantly scrolled to the top so older messages have the existing scrape window to load before scraping. The scraper still removes extension-owned DOM before reading text, so popup text is not included in the backend input.
 
 Each platform has its own likely conversation selectors. Examples include Claude response/user-message selectors, ChatGPT `data-message-author-role` conversation turns, Gemini user/model response elements, Grok message elements, and DeepSeek markdown/message elements. The scraper also keeps a generic fallback selector set for message/conversation/chat/article/markdown containers so minor platform DOM renames are less likely to produce a false "no text" error.
 
@@ -206,7 +206,7 @@ Once paste verification passes, the flow stops. It does not search for Send butt
 
 ## Latest Run Analysis Page
 
-The extension saves one latest transfer receipt in `chrome.storage.local` under `context-generator-last-transfer-stats-v1` when a transfer trace finishes. This receipt intentionally stores only metrics and labels, not the scraped conversation text or generated summary. It includes source/destination, status, capture counts, capped/sent characters, backend-received characters, summary output characters, model/profile, word count, Mistral pass count, token usage when the backend returns it, paste timing, total timing, and sanitized timeline marks.
+The extension saves one latest transfer receipt in `chrome.storage.local` under `context-generator-last-transfer-stats-v1` when a transfer trace finishes. This receipt intentionally stores only metrics and labels, not the scraped conversation text or generated summary. It includes source/destination, status, detected/captured message turn counts, capped/sent characters, backend-received characters, summary output characters, model/profile, word count, Mistral pass count, token usage when the backend returns it, paste timing, total timing, and sanitized timeline marks.
 
 The public GitHub Pages UI lives at `analysis/index.html`, published as `https://spidey889.github.io/context-generator/analysis`. Because a normal web page cannot read extension storage directly, `extension/analysis-bridge.js` is registered only for that GitHub Pages route. The page sends a `postMessage` request, the bridge reads `chrome.storage.local`, and the bridge posts the latest metrics back. The page has a demo-only `?demo=1` mode for visual smoke checks, but the normal route shows only real saved extension data or an empty state.
 
@@ -234,7 +234,7 @@ If destination paste fails, the destination page shows a manual copy modal with 
 - Conversation scraping is best-effort. It tries structured message turns first, then falls back to page text when a platform changes its markup.
 - Programmatic pasting into modern AI editors is finicky. The script uses native setters, `execCommand("insertText")`, retries, direct `textContent` fallback, and synthetic beforeinput/input/change events.
 - Destination transfer is paste-only. The script intentionally avoids all automatic send/submit/Enter behavior after the summary reaches the input box.
-- Scraping intentionally happens before the overlay is shown, so extension overlay text is not sent to Mistral.
+- Picker-started transfers show the overlay before capture, but scraping removes extension-owned DOM so overlay text is still not sent to Mistral.
 - After reloading the unpacked extension, already-open AI tabs may still have a stale content script. The script avoids crashing on delayed asset URL lookups and shows a refresh-this-tab error if a runtime message hits an invalidated extension context.
 
 ## Past Decisions
@@ -283,3 +283,4 @@ If destination paste fails, the destination page shows a manual copy modal with 
 - 2026-07-03: Summary speed was improved with adaptive backend profiles. Tiny chats now use a local direct Context Carry with the exact source text and no Mistral call. Small/medium chats use smaller output caps, one Mistral pass, and `ministral-3b-2512`; the `mistral-large-2512` 1,200-word plus expansion path is reserved for large conversations over 60k characters.
 - 2026-07-03: Live production probe after the tiny direct-carry deploy returned `profile: tiny`, `model: local-direct`, `mistralMs: 0`, `mistralPasses: 0`, `summaryWordCount: 148`, and 969ms wall time for a 284-character chat. The same probe shape for a 14,220-character medium chat returned `model: ministral-3b-2512`, `summaryWordCount: 462`, `mistralMs: 7074`, and 7.6 seconds wall time.
 - 2026-07-05: Added the latest-run analysis page at `/analysis`, backed by one privacy-safe `chrome.storage.local` transfer receipt and a GitHub Pages bridge content script. Backend timing now forwards Mistral token usage, including aggregate usage across expansion passes.
+- 2026-07-05: Picker-started transfers now show the handoff popup, instantly scroll the source chat to the top, and then scrape using the existing retry window. The analysis page also shows detected vs captured/sent message turns from the existing scrape metrics.

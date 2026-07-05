@@ -589,14 +589,15 @@
             ${sideItem("Route", route)}
             ${sideItem("Backend match", integrity)}
             ${sideItem("Capture path", capture.method || "unknown")}
+            ${sideItem("Message turns", formatTurnSummary(capture))}
             ${sideItem("Expansion", getExpansionLabel(summary.expansion))}
           </aside>
         </section>
 
         <section class="metrics">
           ${metric("Raw found", formatNumber(capture.rawCandidateChars), "Candidate message characters", "accent-teal")}
-          ${metric("Scraped", formatNumber(capture.cleanedChars), `${formatNumber(capture.messageTurnCount)} turns detected`, "accent-green")}
-          ${metric("Sent", formatNumber(capture.sentChars), capture.capped ? `Capped at ${formatNumber(capture.capChars)}` : "No cap hit", "accent-amber")}
+          ${metric("Scraped", formatNumber(capture.cleanedChars), formatTurnSummary(capture), "accent-green")}
+          ${metric("Sent", formatNumber(capture.sentChars), capture.capped ? `Capped at ${formatNumber(capture.capChars)}; ${formatNumber(capture.usefulTurnCount)} turns captured` : `${formatNumber(capture.usefulTurnCount)} turns captured/sent`, "accent-amber")}
           ${metric("Backend got", formatNumber(summary.backendInputChars), `Request: ${formatNumber(summary.requestChars)}`, "accent-coral")}
           ${metric("Summary", formatNumber(summary.outputChars), `${formatNumber(summary.summaryWordCount)} words`, "accent-violet")}
           ${metric("Tokens", formatNumber(usage.totalTokens), `${formatNumber(usage.promptTokens)} in / ${formatNumber(usage.completionTokens)} out`, "accent-green")}
@@ -666,6 +667,10 @@
       if (!expansion) return "n/a";
       if (!expansion.attempted) return "Not needed";
       return expansion.used ? "Used" : "Tried, not used";
+    }
+
+    function formatTurnSummary(capture) {
+      return `${formatNumber(capture.messageTurnCount)} detected / ${formatNumber(capture.usefulTurnCount)} captured/sent`;
     }
 
     function formatNumber(value) {
