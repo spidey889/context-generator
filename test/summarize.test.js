@@ -11,6 +11,7 @@ const {
   countWords,
   shouldExpandSummary,
   getSummaryProfile,
+  getMistralModelSelection,
   getContextCarryTemplate
 } = summarize.__test;
 const SUMMARIZE_SOURCE = fs.readFileSync(path.join(__dirname, "..", "api", "summarize.js"), "utf8");
@@ -49,10 +50,6 @@ test("backend prompt profiles scale summary size to the captured chat", () => {
   assert.equal(getSummaryProfile("x".repeat(4000)).id, "small");
   assert.equal(getSummaryProfile("x".repeat(20000)).id, "medium");
   assert.equal(getSummaryProfile("x".repeat(90000)).id, "large");
-  assert.equal(getSummaryProfile("x".repeat(500)).model, "local-direct");
-  assert.equal(getSummaryProfile("x".repeat(4000)).model, "ministral-3b-2512");
-  assert.equal(getSummaryProfile("x".repeat(20000)).model, "ministral-3b-2512");
-  assert.equal(getSummaryProfile("x".repeat(90000)).model, "mistral-large-2512");
   assert.equal(getSummaryProfile("x".repeat(500)).maxTokens, 0);
   assert.equal(getSummaryProfile("x".repeat(90000)).maxTokens, 4200);
   assert.match(getContextCarryTemplate(getSummaryProfile("x".repeat(500))), /WHAT WE WERE DOING\n\[2-3 lines/);
@@ -65,9 +62,29 @@ test("backend prompt profiles scale summary size to the captured chat", () => {
   assert.match(SUMMARIZE_SOURCE, /Create a dense continuation handoff/);
 });
 
+test("mistral model routing uses the 20k threshold without changing summary profiles", () => {
+  const restoreMistralModel = setTemporaryEnv("MISTRAL_MODEL", undefined);
+
+  try {
+    const thresholdChat = "x".repeat(20000);
+    const overThresholdChat = "x".repeat(20001);
+    const overThresholdProfile = getSummaryProfile(overThresholdChat);
+
+    assert.equal(getMistralModelSelection(thresholdChat).model, "ministral-3b-2512");
+    assert.equal(getMistralModelSelection(overThresholdChat).model, "mistral-large-2512");
+    assert.match(getMistralModelSelection(overThresholdChat).reason, /20001 > threshold 20000/);
+    assert.equal(overThresholdProfile.id, "medium");
+    assert.equal(overThresholdProfile.maxTokens, 1900);
+    assert.equal(overThresholdProfile.allowExpansion, false);
+  } finally {
+    restoreMistralModel();
+  }
+});
+
 test("backend forwards a 160k conversation to Mistral and reports the same input size", async () => {
   const originalFetch = global.fetch;
   const originalApiKey = process.env.MISTRAL_API_KEY;
+  const restoreMistralModel = setTemporaryEnv("MISTRAL_MODEL", undefined);
   const conversation = "x".repeat(160000);
   let capturedRequest = null;
 
@@ -107,6 +124,10 @@ test("backend forwards a 160k conversation to Mistral and reports the same input
     assert.equal(capturedRequest.body.max_tokens, 4200);
     assert.equal(capturedRequest.body.messages[1].content.slice(-160000), conversation);
     assert.equal(res.payload.timing.profile, "large");
+    assert.equal(res.payload.timing.model, "mistral-large-2512");
+    assert.equal(res.payload.timing.modelThresholdChars, 20000);
+    assert.equal(res.payload.timing.modelOverride, false);
+    assert.match(res.payload.timing.modelReason, /160000 > threshold 20000/);
     assert.equal(res.payload.timing.inputChars, 160000);
     assert.equal(res.payload.timing.maxTokens, 4200);
     assert.equal(res.payload.timing.targetWords, 1200);
@@ -117,6 +138,7 @@ test("backend forwards a 160k conversation to Mistral and reports the same input
       cachedTokens: 64
     });
   } finally {
+    restoreMistralModel();
     global.fetch = originalFetch;
     if (originalApiKey === undefined) {
       delete process.env.MISTRAL_API_KEY;
@@ -183,6 +205,7 @@ test("backend keeps tiny chats local and avoids Mistral", async () => {
 test("backend sends small chats to the fast Mistral model", async () => {
   const originalFetch = global.fetch;
   const originalApiKey = process.env.MISTRAL_API_KEY;
+  const restoreMistralModel = setTemporaryEnv("MISTRAL_MODEL", undefined);
   const conversation = "small context ".repeat(200);
   const requests = [];
 
@@ -215,6 +238,101 @@ test("backend sends small chats to the fast Mistral model", async () => {
     assert.equal(res.payload.timing.model, "ministral-3b-2512");
     assert.equal(res.payload.timing.mistralPasses, 1);
   } finally {
+    restoreMistralModel();
+    global.fetch = originalFetch;
+    if (originalApiKey === undefined) {
+      delete process.env.MISTRAL_API_KEY;
+    } else {
+      process.env.MISTRAL_API_KEY = originalApiKey;
+    }
+  }
+});
+
+test("backend sends over-threshold medium chats to the quality model without changing profile limits", async () => {
+  const originalFetch = global.fetch;
+  const originalApiKey = process.env.MISTRAL_API_KEY;
+  const restoreMistralModel = setTemporaryEnv("MISTRAL_MODEL", undefined);
+  const conversation = "x".repeat(20001);
+  const requests = [];
+
+  process.env.MISTRAL_API_KEY = "test-key";
+  global.fetch = async (_url, options) => {
+    requests.push(JSON.parse(options.body));
+    return {
+      ok: true,
+      status: 200,
+      json: async () => ({
+        choices: [{
+          message: {
+            content: makeContextCarrySummary("medium", 520)
+          }
+        }]
+      })
+    };
+  };
+
+  const res = createMockResponse();
+
+  try {
+    await summarize({ method: "POST", body: { conversation } }, res);
+
+    assert.equal(res.statusCode, 200);
+    assert.equal(requests.length, 1);
+    assert.equal(requests[0].model, "mistral-large-2512");
+    assert.equal(requests[0].max_tokens, 1900);
+    assert.equal(res.payload.timing.profile, "medium");
+    assert.equal(res.payload.timing.model, "mistral-large-2512");
+    assert.equal(res.payload.timing.targetWords, 700);
+    assert.equal(res.payload.timing.mistralPasses, 1);
+    assert.match(res.payload.timing.modelReason, /20001 > threshold 20000/);
+  } finally {
+    restoreMistralModel();
+    global.fetch = originalFetch;
+    if (originalApiKey === undefined) {
+      delete process.env.MISTRAL_API_KEY;
+    } else {
+      process.env.MISTRAL_API_KEY = originalApiKey;
+    }
+  }
+});
+
+test("backend honors an explicit MISTRAL_MODEL override", async () => {
+  const originalFetch = global.fetch;
+  const originalApiKey = process.env.MISTRAL_API_KEY;
+  const restoreMistralModel = setTemporaryEnv("MISTRAL_MODEL", "custom-mistral-test");
+  const conversation = "override context ".repeat(2200);
+  const requests = [];
+
+  process.env.MISTRAL_API_KEY = "test-key";
+  global.fetch = async (_url, options) => {
+    requests.push(JSON.parse(options.body));
+    return {
+      ok: true,
+      status: 200,
+      json: async () => ({
+        choices: [{
+          message: {
+            content: makeContextCarrySummary("override", 520)
+          }
+        }]
+      })
+    };
+  };
+
+  const res = createMockResponse();
+
+  try {
+    await summarize({ method: "POST", body: { conversation } }, res);
+
+    assert.equal(res.statusCode, 200);
+    assert.equal(requests.length, 1);
+    assert.equal(requests[0].model, "custom-mistral-test");
+    assert.equal(res.payload.timing.model, "custom-mistral-test");
+    assert.equal(res.payload.timing.modelOverride, true);
+    assert.equal(res.payload.timing.modelThresholdChars, 20000);
+    assert.match(res.payload.timing.modelReason, /MISTRAL_MODEL override set/);
+  } finally {
+    restoreMistralModel();
     global.fetch = originalFetch;
     if (originalApiKey === undefined) {
       delete process.env.MISTRAL_API_KEY;
@@ -341,6 +459,23 @@ function makeContextCarrySummary(word, wordCount) {
     "NEXT STEP",
     "Continue."
   ].join("\n");
+}
+
+function setTemporaryEnv(name, value) {
+  const original = process.env[name];
+  if (value === undefined) {
+    delete process.env[name];
+  } else {
+    process.env[name] = value;
+  }
+
+  return () => {
+    if (original === undefined) {
+      delete process.env[name];
+    } else {
+      process.env[name] = original;
+    }
+  };
 }
 
 function createMockResponse() {

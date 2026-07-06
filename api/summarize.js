@@ -5,10 +5,10 @@ const MISTRAL_CHAT_COMPLETIONS_URL = "https://api.mistral.ai/v1/chat/completions
 const LOCAL_DIRECT_MODEL = "local-direct";
 const MISTRAL_FAST_MODEL = "ministral-3b-2512";
 const MISTRAL_QUALITY_MODEL = "mistral-large-2512";
+const MISTRAL_MODEL_ROUTING_THRESHOLD_CHARS = 20000;
 const SUMMARY_PROFILES = [
   {
     id: "tiny",
-    model: LOCAL_DIRECT_MODEL,
     maxInputChars: 1200,
     targetWords: 120,
     minWords: 0,
@@ -27,7 +27,6 @@ const SUMMARY_PROFILES = [
   },
   {
     id: "small",
-    model: MISTRAL_FAST_MODEL,
     maxInputChars: 8000,
     targetWords: 350,
     minWords: 0,
@@ -45,7 +44,6 @@ const SUMMARY_PROFILES = [
   },
   {
     id: "medium",
-    model: MISTRAL_FAST_MODEL,
     maxInputChars: 60000,
     targetWords: 700,
     minWords: 0,
@@ -63,7 +61,6 @@ const SUMMARY_PROFILES = [
   },
   {
     id: "large",
-    model: MISTRAL_QUALITY_MODEL,
     maxInputChars: Infinity,
     targetWords: 1200,
     minWords: 1100,
@@ -128,9 +125,12 @@ async function handler(req, res) {
   }
 
   const startedAt = Date.now();
+  const inputChars = conversation.length;
   const summaryProfile = getSummaryProfile(conversation);
 
   if (summaryProfile.directCarry) {
+    const modelSelection = getLocalDirectModelSelection(conversation);
+    logModelSelection(modelSelection);
     const summary = buildDirectContextCarrySummary(conversation);
     const expansion = {
       attempted: false,
@@ -143,7 +143,7 @@ async function handler(req, res) {
       timing: {
         totalMs: Date.now() - startedAt,
         mistralMs: 0,
-        model: summaryProfile.model,
+        ...getModelSelectionTiming(modelSelection),
         profile: summaryProfile.id,
         maxTokens: summaryProfile.maxTokens,
         targetWords: summaryProfile.targetWords,
@@ -151,7 +151,7 @@ async function handler(req, res) {
         summaryWordCount: countWords(summary),
         mistralPasses: 0,
         expansion,
-        inputChars: conversation.length,
+        inputChars,
         outputChars: summary.length,
         usage: createZeroUsage()
       }
@@ -164,8 +164,15 @@ async function handler(req, res) {
   }
 
   try {
+    const modelSelection = getMistralModelSelection(conversation);
+    logModelSelection(modelSelection);
     const mistralStartedAt = Date.now();
-    const mistralResponse = await requestMistralSummary(apiKey, getInitialSummaryMessages(conversation, summaryProfile), summaryProfile);
+    const mistralResponse = await requestMistralSummary(
+      apiKey,
+      getInitialSummaryMessages(conversation, summaryProfile),
+      summaryProfile,
+      modelSelection.model
+    );
 
     if (!mistralResponse.ok) {
       const details = await mistralResponse.text();
@@ -196,7 +203,8 @@ async function handler(req, res) {
         const expansionResponse = await requestMistralSummary(
           apiKey,
           getExpansionSummaryMessages(conversation, summary, summaryWordCount, summaryProfile),
-          summaryProfile
+          summaryProfile,
+          modelSelection.model
         );
 
         if (expansionResponse.ok) {
@@ -230,7 +238,7 @@ async function handler(req, res) {
       timing: {
         totalMs: Date.now() - startedAt,
         mistralMs,
-        model: summaryProfile.model,
+        ...getModelSelectionTiming(modelSelection),
         profile: summaryProfile.id,
         maxTokens: summaryProfile.maxTokens,
         targetWords: summaryProfile.targetWords,
@@ -238,7 +246,7 @@ async function handler(req, res) {
         summaryWordCount,
         mistralPasses: expansion.attempted ? 2 : 1,
         expansion,
-        inputChars: conversation.length,
+        inputChars,
         outputChars: summary.length,
         usage: totalUsage
       }
@@ -257,10 +265,11 @@ module.exports.__test = {
   countWords,
   shouldExpandSummary,
   getSummaryProfile,
+  getMistralModelSelection,
   getContextCarryTemplate
 };
 
-function requestMistralSummary(apiKey, messages, profile) {
+function requestMistralSummary(apiKey, messages, profile, model) {
   return fetchWithRetry(MISTRAL_CHAT_COMPLETIONS_URL, {
     method: "POST",
     headers: {
@@ -268,7 +277,7 @@ function requestMistralSummary(apiKey, messages, profile) {
       "Content-Type": "application/json",
     },
     body: JSON.stringify({
-      model: profile.model,
+      model,
       temperature: 0.1,
       max_tokens: profile.maxTokens,
       messages,
@@ -353,6 +362,70 @@ function countWords(text) {
 
 function shouldExpandSummary(_conversation, wordCount, profile = SUMMARY_PROFILES[SUMMARY_PROFILES.length - 1]) {
   return Boolean(profile.allowExpansion && profile.minWords > 0 && wordCount > 0 && wordCount < profile.minWords);
+}
+
+function getLocalDirectModelSelection(conversation) {
+  const inputChars = String(conversation || "").length;
+  return {
+    model: LOCAL_DIRECT_MODEL,
+    reason: `inputChars ${inputChars} uses local direct carry before Mistral routing; threshold ${MISTRAL_MODEL_ROUTING_THRESHOLD_CHARS}`,
+    inputChars,
+    thresholdChars: MISTRAL_MODEL_ROUTING_THRESHOLD_CHARS,
+    override: false
+  };
+}
+
+function getMistralModelSelection(conversation) {
+  const inputChars = String(conversation || "").length;
+  const overrideModel = String(process.env.MISTRAL_MODEL || "").trim();
+
+  if (overrideModel) {
+    return {
+      model: overrideModel,
+      reason: `MISTRAL_MODEL override set; inputChars ${inputChars}, threshold ${MISTRAL_MODEL_ROUTING_THRESHOLD_CHARS}`,
+      inputChars,
+      thresholdChars: MISTRAL_MODEL_ROUTING_THRESHOLD_CHARS,
+      override: true
+    };
+  }
+
+  if (inputChars <= MISTRAL_MODEL_ROUTING_THRESHOLD_CHARS) {
+    return {
+      model: MISTRAL_FAST_MODEL,
+      reason: `inputChars ${inputChars} <= threshold ${MISTRAL_MODEL_ROUTING_THRESHOLD_CHARS}; using fast model`,
+      inputChars,
+      thresholdChars: MISTRAL_MODEL_ROUTING_THRESHOLD_CHARS,
+      override: false
+    };
+  }
+
+  return {
+    model: MISTRAL_QUALITY_MODEL,
+    reason: `inputChars ${inputChars} > threshold ${MISTRAL_MODEL_ROUTING_THRESHOLD_CHARS}; using quality model`,
+    inputChars,
+    thresholdChars: MISTRAL_MODEL_ROUTING_THRESHOLD_CHARS,
+    override: false
+  };
+}
+
+function getModelSelectionTiming(selection) {
+  return {
+    model: selection.model,
+    modelReason: selection.reason,
+    modelInputChars: selection.inputChars,
+    modelThresholdChars: selection.thresholdChars,
+    modelOverride: selection.override
+  };
+}
+
+function logModelSelection(selection) {
+  console.info("[Context Generator] Summary model selected:", {
+    model: selection.model,
+    reason: selection.reason,
+    inputChars: selection.inputChars,
+    thresholdChars: selection.thresholdChars,
+    override: selection.override
+  });
 }
 
 function createZeroUsage() {

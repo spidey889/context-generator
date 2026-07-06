@@ -588,6 +588,7 @@
             </div>
             ${sideItem("Route", route)}
             ${sideItem("Backend match", integrity)}
+            ${sideItem("Model route", getModelRoutingLabel(summary))}
             ${sideItem("Capture path", capture.method || "unknown")}
             ${sideItem("Message turns", formatTurnSummary(capture))}
             ${sideItem("Expansion", getExpansionLabel(summary.expansion))}
@@ -667,6 +668,16 @@
       if (!expansion) return "n/a";
       if (!expansion.attempted) return "Not needed";
       return expansion.used ? "Used" : "Tried, not used";
+    }
+
+    function getModelRoutingLabel(summary) {
+      if (!summary) return "n/a";
+      if (summary.modelOverride) return `Override: ${summary.model || "custom model"}`;
+      if (summary.modelInputChars !== null && summary.modelInputChars !== undefined && summary.modelThresholdChars) {
+        const comparator = Number(summary.modelInputChars) <= Number(summary.modelThresholdChars) ? "<=" : ">";
+        return `${formatNumber(summary.modelInputChars)} chars ${comparator} ${formatNumber(summary.modelThresholdChars)}`;
+      }
+      return summary.modelReason || "n/a";
     }
 
     function formatTurnSummary(capture) {
@@ -750,7 +761,11 @@
           backendInputChars: 48142,
           backendTotalMs: 7202,
           mistralMs: 7074,
-          model: "ministral-3b-2512",
+          model: "mistral-large-2512",
+          modelReason: "inputChars 48142 > threshold 20000; using quality model",
+          modelInputChars: 48142,
+          modelThresholdChars: 20000,
+          modelOverride: false,
           profile: "medium",
           maxTokens: 1900,
           targetWords: 700,
