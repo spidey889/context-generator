@@ -1178,6 +1178,12 @@
         backendInputChars: summaryTiming?.backendInputChars ?? backendTiming?.inputChars ?? null,
         backendTotalMs: backendTiming?.totalMs ?? null,
         mistralMs: backendTiming?.mistralMs ?? null,
+        groqMs: backendTiming?.groqMs ?? null,
+        providerMs: backendTiming?.providerMs ?? null,
+        providerPasses: backendTiming?.providerPasses ?? null,
+        servedBy: backendTiming?.servedBy || backendTiming?.provider || null,
+        provider: backendTiming?.provider || backendTiming?.servedBy || null,
+        primaryModel: backendTiming?.primaryModel || null,
         model: backendTiming?.model || null,
         modelReason: backendTiming?.modelReason || null,
         modelInputChars: backendTiming?.modelInputChars ?? null,
@@ -1190,6 +1196,7 @@
         summaryWordCount: backendTiming?.summaryWordCount ?? null,
         mistralPasses: backendTiming?.mistralPasses ?? null,
         expansion: sanitizeExpansionForStats(backendTiming?.expansion),
+        fallback: sanitizeFallbackForStats(backendTiming?.fallback),
         usage: normalizeUsageForStats(backendTiming?.usage)
       },
       destinationTiming: {
@@ -1224,6 +1231,17 @@
       wordCount: expansion.wordCount ?? null,
       error: expansion.error ? "Expansion failed" : null,
       usage: normalizeUsageForStats(expansion.usage)
+    };
+  }
+
+  function sanitizeFallbackForStats(fallback) {
+    if (!fallback || typeof fallback !== "object") return null;
+    return {
+      attempted: fallback.attempted === true,
+      used: fallback.used === true,
+      servedBy: fallback.servedBy || null,
+      model: fallback.model || null,
+      reason: fallback.reason || null
     };
   }
 

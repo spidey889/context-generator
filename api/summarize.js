@@ -2,10 +2,24 @@ const MISTRAL_MAX_ATTEMPTS = 2;
 const MISTRAL_RETRY_INTERVAL_MS = 450;
 const MISTRAL_TIMEOUT_MS = 80000;
 const MISTRAL_CHAT_COMPLETIONS_URL = "https://api.mistral.ai/v1/chat/completions";
+const GROQ_CHAT_COMPLETIONS_URL = "https://api.groq.com/openai/v1/chat/completions";
 const LOCAL_DIRECT_MODEL = "local-direct";
 const MISTRAL_FAST_MODEL = "ministral-3b-2512";
 const MISTRAL_QUALITY_MODEL = "mistral-large-2512";
 const MISTRAL_MODEL_ROUTING_THRESHOLD_CHARS = 20000;
+const GROQ_FALLBACK_MODEL = "llama-3.1-8b-instant";
+const SUMMARY_PROVIDERS = {
+  mistral: {
+    id: "mistral",
+    label: "Mistral",
+    url: MISTRAL_CHAT_COMPLETIONS_URL
+  },
+  groq: {
+    id: "groq",
+    label: "Groq",
+    url: GROQ_CHAT_COMPLETIONS_URL
+  }
+};
 const SUMMARY_PROFILES = [
   {
     id: "tiny",
@@ -143,6 +157,12 @@ async function handler(req, res) {
       timing: {
         totalMs: Date.now() - startedAt,
         mistralMs: 0,
+        groqMs: 0,
+        providerMs: 0,
+        providerPasses: 0,
+        servedBy: LOCAL_DIRECT_MODEL,
+        provider: LOCAL_DIRECT_MODEL,
+        primaryModel: LOCAL_DIRECT_MODEL,
         ...getModelSelectionTiming(modelSelection),
         profile: summaryProfile.id,
         maxTokens: summaryProfile.maxTokens,
@@ -151,6 +171,7 @@ async function handler(req, res) {
         summaryWordCount: countWords(summary),
         mistralPasses: 0,
         expansion,
+        fallback: createFallbackMetadata(),
         inputChars,
         outputChars: summary.length,
         usage: createZeroUsage()
@@ -158,102 +179,46 @@ async function handler(req, res) {
     });
   }
 
-  const apiKey = process.env.MISTRAL_API_KEY;
-  if (!apiKey) {
-    return res.status(500).json({ error: "MISTRAL_API_KEY is not configured" });
-  }
-
   try {
     const modelSelection = getMistralModelSelection(conversation);
     logModelSelection(modelSelection);
-    const mistralStartedAt = Date.now();
-    const mistralResponse = await requestMistralSummary(
-      apiKey,
-      getInitialSummaryMessages(conversation, summaryProfile),
-      summaryProfile,
-      modelSelection.model
-    );
-
-    if (!mistralResponse.ok) {
-      const details = await mistralResponse.text();
-      console.error("Mistral API error:", details);
-      return res.status(502).json({ error: "Failed to summarize conversation" });
-    }
-
-    const data = await mistralResponse.json();
-    const initialUsage = normalizeMistralUsage(data.usage);
-    let summary = normalizeContextCarrySummary(data.choices?.[0]?.message?.content);
-
-    if (!summary) {
-      return res.status(502).json({ error: "Mistral returned an empty summary" });
-    }
-
-    const expansion = {
-      attempted: false,
-      used: false,
-      error: null,
-      usage: null
-    };
-    let totalUsage = initialUsage;
-    let summaryWordCount = countWords(summary);
-
-    if (shouldExpandSummary(conversation, summaryWordCount, summaryProfile)) {
-      expansion.attempted = true;
-      try {
-        const expansionResponse = await requestMistralSummary(
-          apiKey,
-          getExpansionSummaryMessages(conversation, summary, summaryWordCount, summaryProfile),
-          summaryProfile,
-          modelSelection.model
-        );
-
-        if (expansionResponse.ok) {
-          const expansionData = await expansionResponse.json();
-          const expansionUsage = normalizeMistralUsage(expansionData.usage);
-          expansion.usage = expansionUsage;
-          totalUsage = addMistralUsage(totalUsage, expansionUsage);
-          const expandedSummary = normalizeContextCarrySummary(expansionData.choices?.[0]?.message?.content);
-          const expandedWordCount = countWords(expandedSummary);
-          expansion.wordCount = expandedWordCount;
-
-          if (expandedSummary && expandedWordCount > summaryWordCount) {
-            summary = expandedSummary;
-            summaryWordCount = expandedWordCount;
-            expansion.used = true;
-          }
-        } else {
-          expansion.error = await expansionResponse.text();
-          console.error("Mistral expansion error:", expansion.error);
-        }
-      } catch (error) {
-        expansion.error = error?.message || "Expansion request failed";
-        console.error("Mistral expansion failed:", error);
-      }
-    }
-
-    const mistralMs = Date.now() - mistralStartedAt;
+    const providerResult = await createSummaryWithFallback({
+      conversation,
+      profile: summaryProfile,
+      modelSelection,
+      mistralApiKey: process.env.MISTRAL_API_KEY,
+      groqApiKey: process.env.GROQ_API_KEY
+    });
 
     return res.status(200).json({
-      summary,
+      summary: providerResult.summary,
       timing: {
         totalMs: Date.now() - startedAt,
-        mistralMs,
+        mistralMs: providerResult.mistralMs,
+        groqMs: providerResult.groqMs,
+        providerMs: providerResult.providerMs,
+        providerPasses: providerResult.providerPasses,
+        servedBy: providerResult.provider,
+        provider: providerResult.provider,
+        primaryModel: modelSelection.model,
         ...getModelSelectionTiming(modelSelection),
+        model: providerResult.model,
         profile: summaryProfile.id,
         maxTokens: summaryProfile.maxTokens,
         targetWords: summaryProfile.targetWords,
         minWords: summaryProfile.minWords,
-        summaryWordCount,
-        mistralPasses: expansion.attempted ? 2 : 1,
-        expansion,
+        summaryWordCount: providerResult.summaryWordCount,
+        mistralPasses: providerResult.providerPasses,
+        expansion: providerResult.expansion,
+        fallback: providerResult.fallback,
         inputChars,
-        outputChars: summary.length,
-        usage: totalUsage
+        outputChars: providerResult.summary.length,
+        usage: providerResult.usage
       }
     });
   } catch (error) {
     console.error("Summarize error:", error);
-    return res.status(500).json({ error: "Unexpected summarization error" });
+    return res.status(error.statusCode || 500).json({ error: error.publicMessage || "Unexpected summarization error" });
   }
 }
 
@@ -269,8 +234,161 @@ module.exports.__test = {
   getContextCarryTemplate
 };
 
-function requestMistralSummary(apiKey, messages, profile, model) {
-  return fetchWithRetry(MISTRAL_CHAT_COMPLETIONS_URL, {
+async function createSummaryWithFallback({ conversation, profile, modelSelection, mistralApiKey, groqApiKey }) {
+  const initialMessages = getInitialSummaryMessages(conversation, profile);
+  let mistralMs = 0;
+  let mistralFailure = null;
+
+  if (mistralApiKey) {
+    const mistralStartedAt = Date.now();
+    try {
+      const result = await createSummaryWithProvider({
+        provider: SUMMARY_PROVIDERS.mistral,
+        apiKey: mistralApiKey,
+        conversation,
+        profile,
+        model: modelSelection.model,
+        initialMessages
+      });
+
+      return {
+        ...result,
+        mistralMs: result.providerMs,
+        groqMs: 0,
+        fallback: createFallbackMetadata()
+      };
+    } catch (error) {
+      mistralMs = Date.now() - mistralStartedAt;
+      mistralFailure = error;
+      console.error("Mistral summary failed; trying Groq fallback:", getProviderFailureLog(error));
+    }
+  } else {
+    mistralFailure = createProviderError(
+      SUMMARY_PROVIDERS.mistral,
+      "MISTRAL_API_KEY is not configured",
+      500
+    );
+  }
+
+  if (!groqApiKey) {
+    throw createHttpError(
+      getProviderFailureStatus(mistralFailure),
+      mistralApiKey ? "Failed to summarize conversation" : "MISTRAL_API_KEY is not configured"
+    );
+  }
+
+  const fallback = createFallbackMetadata({
+    attempted: true,
+    reason: getProviderFailureReason(mistralFailure),
+    model: GROQ_FALLBACK_MODEL
+  });
+
+  try {
+    const result = await createSummaryWithProvider({
+      provider: SUMMARY_PROVIDERS.groq,
+      apiKey: groqApiKey,
+      conversation,
+      profile,
+      model: GROQ_FALLBACK_MODEL,
+      initialMessages
+    });
+
+    return {
+      ...result,
+      mistralMs,
+      groqMs: result.providerMs,
+      fallback: {
+        ...fallback,
+        used: true,
+        servedBy: SUMMARY_PROVIDERS.groq.id
+      }
+    };
+  } catch (error) {
+    console.error("Groq fallback failed:", getProviderFailureLog(error));
+    throw createHttpError(getProviderFailureStatus(error), "Failed to summarize conversation");
+  }
+}
+
+async function createSummaryWithProvider({ provider, apiKey, conversation, profile, model, initialMessages }) {
+  const providerStartedAt = Date.now();
+  const initialResponse = await requestProviderSummary(provider, apiKey, initialMessages, profile, model);
+
+  if (!initialResponse.ok) {
+    const details = await readResponseText(initialResponse);
+    throw createProviderError(
+      provider,
+      `${provider.label} API error ${initialResponse.status}`,
+      502,
+      details
+    );
+  }
+
+  const data = await readResponseJson(initialResponse, provider);
+  const initialUsage = normalizeProviderUsage(data.usage);
+  let summary = normalizeContextCarrySummary(data.choices?.[0]?.message?.content);
+
+  if (!summary) {
+    throw createProviderError(provider, `${provider.label} returned an empty summary`, 502);
+  }
+
+  const expansion = {
+    attempted: false,
+    used: false,
+    error: null,
+    usage: null
+  };
+  let totalUsage = initialUsage;
+  let summaryWordCount = countWords(summary);
+
+  if (shouldExpandSummary(conversation, summaryWordCount, profile)) {
+    expansion.attempted = true;
+    try {
+      const expansionResponse = await requestProviderSummary(
+        provider,
+        apiKey,
+        getExpansionSummaryMessages(conversation, summary, summaryWordCount, profile),
+        profile,
+        model
+      );
+
+      if (expansionResponse.ok) {
+        const expansionData = await readResponseJson(expansionResponse, provider);
+        const expansionUsage = normalizeProviderUsage(expansionData.usage);
+        expansion.usage = expansionUsage;
+        totalUsage = addProviderUsage(totalUsage, expansionUsage);
+        const expandedSummary = normalizeContextCarrySummary(expansionData.choices?.[0]?.message?.content);
+        const expandedWordCount = countWords(expandedSummary);
+        expansion.wordCount = expandedWordCount;
+
+        if (expandedSummary && expandedWordCount > summaryWordCount) {
+          summary = expandedSummary;
+          summaryWordCount = expandedWordCount;
+          expansion.used = true;
+        }
+      } else {
+        expansion.error = await readResponseText(expansionResponse);
+        console.error(`${provider.label} expansion error:`, expansion.error);
+      }
+    } catch (error) {
+      expansion.error = error?.message || "Expansion request failed";
+      console.error(`${provider.label} expansion failed:`, error);
+    }
+  }
+
+  return {
+    summary,
+    provider: provider.id,
+    model,
+    providerMs: Date.now() - providerStartedAt,
+    providerPasses: expansion.attempted ? 2 : 1,
+    expansion,
+    summaryWordCount,
+    usage: totalUsage
+  };
+}
+
+function requestProviderSummary(provider, apiKey, messages, profile, model) {
+  return fetchWithRetry(provider.url, {
     method: "POST",
     headers: {
       Authorization: `Bearer ${apiKey}`,
@@ -428,6 +546,71 @@ function logModelSelection(selection) {
   });
 }
 
+function createFallbackMetadata(overrides = {}) {
+  return {
+    attempted: false,
+    used: false,
+    servedBy: null,
+    model: null,
+    reason: null,
+    ...overrides
+  };
+}
+
+function createProviderError(provider, publicMessage, statusCode = 502, details = null) {
+  const error = new Error(publicMessage);
+  error.provider = provider.id;
+  error.publicMessage = publicMessage;
+  error.statusCode = statusCode;
+  error.details = details;
+  return error;
+}
+
+function createHttpError(statusCode, publicMessage) {
+  const error = new Error(publicMessage);
+  error.publicMessage = publicMessage;
+  error.statusCode = statusCode;
+  return error;
+}
+
+function getProviderFailureStatus(error) {
+  return error?.statusCode || 502;
+}
+
+function getProviderFailureReason(error) {
+  return error?.publicMessage || error?.message || "Primary provider failed";
+}
+
+function getProviderFailureLog(error) {
+  return {
+    provider: error?.provider || null,
+    message: getProviderFailureReason(error),
+    statusCode: error?.statusCode || null,
+    details: error?.details || null
+  };
+}
+
+async function readResponseText(response) {
+  try {
+    return await response.text();
+  } catch {
+    return "";
+  }
+}
+
+async function readResponseJson(response, provider) {
+  try {
+    return await response.json();
+  } catch (error) {
+    throw createProviderError(
+      provider,
+      `${provider.label} returned invalid JSON`,
+      502,
+      error?.message || null
+    );
+  }
+}
+
 function createZeroUsage() {
   return {
     promptTokens: 0,
@@ -437,7 +620,7 @@ function createZeroUsage() {
   };
 }
 
-function normalizeMistralUsage(usage) {
+function normalizeProviderUsage(usage) {
   if (!usage || typeof usage !== "object") return null;
 
   return {
@@ -452,7 +635,7 @@ function normalizeTokenCount(value) {
   return Number.isFinite(value) ? value : null;
 }
 
-function addMistralUsage(left, right) {
+function addProviderUsage(left, right) {
   if (!left) return right || null;
   if (!right) return left;
 
@@ -551,7 +734,7 @@ async function fetchWithRetry(url, options) {
     const timeout = setTimeout(() => controller.abort(), MISTRAL_TIMEOUT_MS);
     try {
       const response = await fetch(url, { ...options, signal: controller.signal });
-      if (response.ok || !isRetryableMistralStatus(response.status) || attempt === MISTRAL_MAX_ATTEMPTS) {
+      if (response.ok || !isRetryableProviderStatus(response.status) || attempt === MISTRAL_MAX_ATTEMPTS) {
         return response;
       }
     } catch (error) {
@@ -567,7 +750,7 @@ async function fetchWithRetry(url, options) {
   throw lastError || new Error("Mistral request failed");
 }
 
-function isRetryableMistralStatus(status) {
+function isRetryableProviderStatus(status) {
   return status === 429 || status === 500 || status === 502 || status === 503 || status === 504;
 }
 

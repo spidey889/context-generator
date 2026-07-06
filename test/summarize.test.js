@@ -124,7 +124,10 @@ test("backend forwards a 160k conversation to Mistral and reports the same input
     assert.equal(capturedRequest.body.max_tokens, 4200);
     assert.equal(capturedRequest.body.messages[1].content.slice(-160000), conversation);
     assert.equal(res.payload.timing.profile, "large");
+    assert.equal(res.payload.timing.servedBy, "mistral");
+    assert.equal(res.payload.timing.provider, "mistral");
     assert.equal(res.payload.timing.model, "mistral-large-2512");
+    assert.equal(res.payload.timing.primaryModel, "mistral-large-2512");
     assert.equal(res.payload.timing.modelThresholdChars, 20000);
     assert.equal(res.payload.timing.modelOverride, false);
     assert.match(res.payload.timing.modelReason, /160000 > threshold 20000/);
@@ -178,7 +181,9 @@ test("backend keeps tiny chats local and avoids Mistral", async () => {
     assert.equal(res.statusCode, 200);
     assert.equal(requests.length, 0);
     assert.equal(res.payload.timing.profile, "tiny");
+    assert.equal(res.payload.timing.servedBy, "local-direct");
     assert.equal(res.payload.timing.model, "local-direct");
+    assert.equal(res.payload.timing.fallback.attempted, false);
     assert.equal(res.payload.timing.maxTokens, 0);
     assert.equal(res.payload.timing.targetWords, 120);
     assert.equal(res.payload.timing.mistralMs, 0);
@@ -235,7 +240,9 @@ test("backend sends small chats to the fast Mistral model", async () => {
     assert.equal(requests[0].model, "ministral-3b-2512");
     assert.equal(requests[0].max_tokens, 1000);
     assert.equal(res.payload.timing.profile, "small");
+    assert.equal(res.payload.timing.servedBy, "mistral");
     assert.equal(res.payload.timing.model, "ministral-3b-2512");
+    assert.equal(res.payload.timing.fallback.attempted, false);
     assert.equal(res.payload.timing.mistralPasses, 1);
   } finally {
     restoreMistralModel();
@@ -339,6 +346,148 @@ test("backend honors an explicit MISTRAL_MODEL override", async () => {
     } else {
       process.env.MISTRAL_API_KEY = originalApiKey;
     }
+  }
+});
+
+test("backend falls back to Groq after Mistral rate limits and keeps the same prompt", async () => {
+  const originalFetch = global.fetch;
+  const restoreApiKey = setTemporaryEnv("MISTRAL_API_KEY", "test-mistral-key");
+  const restoreGroqKey = setTemporaryEnv("GROQ_API_KEY", "test-groq-key");
+  const restoreMistralModel = setTemporaryEnv("MISTRAL_MODEL", "custom-mistral-test");
+  const conversation = "fallback context ".repeat(260);
+  const mistralRequests = [];
+  const groqRequests = [];
+
+  global.fetch = async (url, options) => {
+    const body = JSON.parse(options.body);
+
+    if (url === "https://api.mistral.ai/v1/chat/completions") {
+      mistralRequests.push(body);
+      return {
+        ok: false,
+        status: 429,
+        text: async () => "rate limited"
+      };
+    }
+
+    if (url === "https://api.groq.com/openai/v1/chat/completions") {
+      groqRequests.push(body);
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({
+          usage: {
+            prompt_tokens: 700,
+            completion_tokens: 220,
+            total_tokens: 920
+          },
+          choices: [{
+            message: {
+              content: makeContextCarrySummary("groq", 260)
+            }
+          }]
+        })
+      };
+    }
+
+    throw new Error(`Unexpected URL ${url}`);
+  };
+
+  const res = createMockResponse();
+
+  try {
+    await summarize({ method: "POST", body: { conversation } }, res);
+
+    assert.equal(res.statusCode, 200);
+    assert.equal(mistralRequests.length, 2);
+    assert.equal(groqRequests.length, 1);
+    assert.equal(mistralRequests[0].model, "custom-mistral-test");
+    assert.equal(groqRequests[0].model, "llama-3.1-8b-instant");
+    assert.equal(groqRequests[0].max_tokens, mistralRequests[0].max_tokens);
+    assert.deepEqual(groqRequests[0].messages, mistralRequests[0].messages);
+    assert.equal(res.payload.timing.servedBy, "groq");
+    assert.equal(res.payload.timing.provider, "groq");
+    assert.equal(res.payload.timing.model, "llama-3.1-8b-instant");
+    assert.equal(res.payload.timing.primaryModel, "custom-mistral-test");
+    assert.equal(res.payload.timing.modelOverride, true);
+    assert.equal(res.payload.timing.fallback.attempted, true);
+    assert.equal(res.payload.timing.fallback.used, true);
+    assert.equal(res.payload.timing.fallback.servedBy, "groq");
+    assert.equal(res.payload.timing.fallback.model, "llama-3.1-8b-instant");
+    assert.match(res.payload.timing.fallback.reason, /Mistral API error 429/);
+    assert.deepEqual(res.payload.timing.usage, {
+      promptTokens: 700,
+      completionTokens: 220,
+      totalTokens: 920,
+      cachedTokens: null
+    });
+  } finally {
+    restoreMistralModel();
+    restoreGroqKey();
+    restoreApiKey();
+    global.fetch = originalFetch;
+  }
+});
+
+test("backend falls back to Groq when Mistral returns an empty summary", async () => {
+  const originalFetch = global.fetch;
+  const restoreApiKey = setTemporaryEnv("MISTRAL_API_KEY", "test-mistral-key");
+  const restoreGroqKey = setTemporaryEnv("GROQ_API_KEY", "test-groq-key");
+  const restoreMistralModel = setTemporaryEnv("MISTRAL_MODEL", undefined);
+  const conversation = "empty summary fallback ".repeat(180);
+  const requests = [];
+
+  global.fetch = async (url, options) => {
+    const body = JSON.parse(options.body);
+    requests.push({ url, body });
+
+    if (url === "https://api.mistral.ai/v1/chat/completions") {
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({
+          choices: [{ message: { content: "" } }]
+        })
+      };
+    }
+
+    if (url === "https://api.groq.com/openai/v1/chat/completions") {
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({
+          choices: [{
+            message: {
+              content: makeContextCarrySummary("groq-empty", 260)
+            }
+          }]
+        })
+      };
+    }
+
+    throw new Error(`Unexpected URL ${url}`);
+  };
+
+  const res = createMockResponse();
+
+  try {
+    await summarize({ method: "POST", body: { conversation } }, res);
+
+    assert.equal(res.statusCode, 200);
+    assert.equal(requests.length, 2);
+    assert.equal(requests[0].body.model, "ministral-3b-2512");
+    assert.equal(requests[1].body.model, "llama-3.1-8b-instant");
+    assert.deepEqual(requests[1].body.messages, requests[0].body.messages);
+    assert.equal(res.payload.timing.servedBy, "groq");
+    assert.equal(res.payload.timing.primaryModel, "ministral-3b-2512");
+    assert.equal(res.payload.timing.model, "llama-3.1-8b-instant");
+    assert.equal(res.payload.timing.fallback.used, true);
+    assert.match(res.payload.timing.fallback.reason, /Mistral returned an empty summary/);
+  } finally {
+    restoreMistralModel();
+    restoreGroqKey();
+    restoreApiKey();
+    global.fetch = originalFetch;
   }
 });
 

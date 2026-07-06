@@ -588,6 +588,7 @@
             </div>
             ${sideItem("Route", route)}
             ${sideItem("Backend match", integrity)}
+            ${sideItem("Served by", formatBackendLabel(summary))}
             ${sideItem("Model route", getModelRoutingLabel(summary))}
             ${sideItem("Capture path", capture.method || "unknown")}
             ${sideItem("Message turns", formatTurnSummary(capture))}
@@ -602,7 +603,7 @@
           ${metric("Backend got", formatNumber(summary.backendInputChars), `Request: ${formatNumber(summary.requestChars)}`, "accent-coral")}
           ${metric("Summary", formatNumber(summary.outputChars), `${formatNumber(summary.summaryWordCount)} words`, "accent-violet")}
           ${metric("Tokens", formatNumber(usage.totalTokens), `${formatNumber(usage.promptTokens)} in / ${formatNumber(usage.completionTokens)} out`, "accent-green")}
-          ${metric("Summary time", formatDuration(summary.summaryMs), `Mistral: ${formatDuration(summary.mistralMs)}`, "accent-amber")}
+          ${metric("Summary time", formatDuration(summary.summaryMs), `${formatBackendLabel(summary)}: ${formatDuration(summary.providerMs ?? summary.mistralMs)}`, "accent-amber")}
           ${metric("Paste time", formatDuration(stats.destinationTiming?.pasteMs), `Total: ${formatDuration(stats.totalMs)}`, "accent-teal")}
         </section>
 
@@ -672,12 +673,20 @@
 
     function getModelRoutingLabel(summary) {
       if (!summary) return "n/a";
-      if (summary.modelOverride) return `Override: ${summary.model || "custom model"}`;
+      if (summary.modelOverride) return `Override: ${summary.primaryModel || summary.model || "custom model"}`;
       if (summary.modelInputChars !== null && summary.modelInputChars !== undefined && summary.modelThresholdChars) {
         const comparator = Number(summary.modelInputChars) <= Number(summary.modelThresholdChars) ? "<=" : ">";
         return `${formatNumber(summary.modelInputChars)} chars ${comparator} ${formatNumber(summary.modelThresholdChars)}`;
       }
       return summary.modelReason || "n/a";
+    }
+
+    function formatBackendLabel(summary) {
+      const provider = summary?.servedBy || summary?.provider;
+      if (provider === "mistral") return "Mistral";
+      if (provider === "groq") return "Groq";
+      if (provider === "local-direct") return "Local";
+      return provider || "n/a";
     }
 
     function formatTurnSummary(capture) {
@@ -761,6 +770,12 @@
           backendInputChars: 48142,
           backendTotalMs: 7202,
           mistralMs: 7074,
+          groqMs: 0,
+          providerMs: 7074,
+          providerPasses: 1,
+          servedBy: "mistral",
+          provider: "mistral",
+          primaryModel: "mistral-large-2512",
           model: "mistral-large-2512",
           modelReason: "inputChars 48142 > threshold 20000; using quality model",
           modelInputChars: 48142,
@@ -772,6 +787,7 @@
           summaryWordCount: 462,
           mistralPasses: 1,
           expansion: { attempted: false, used: false },
+          fallback: { attempted: false, used: false },
           usage: {
             promptTokens: 13240,
             completionTokens: 1180,
