@@ -62,17 +62,17 @@ test("backend prompt profiles scale summary size to the captured chat", () => {
   assert.match(SUMMARIZE_SOURCE, /Create a dense continuation handoff/);
 });
 
-test("mistral model routing uses the 20k threshold without changing summary profiles", () => {
-  const restoreMistralModel = setTemporaryEnv("MISTRAL_MODEL", undefined);
+test("mistral model routing always starts with medium 3.5 without changing summary profiles", () => {
+  const restoreMistralModel = setTemporaryEnv("MISTRAL_MODEL", "custom-mistral-test");
 
   try {
     const thresholdChat = "x".repeat(20000);
     const overThresholdChat = "x".repeat(20001);
     const overThresholdProfile = getSummaryProfile(overThresholdChat);
 
-    assert.equal(getMistralModelSelection(thresholdChat).model, "ministral-3b-2512");
-    assert.equal(getMistralModelSelection(overThresholdChat).model, "mistral-large-2512");
-    assert.match(getMistralModelSelection(overThresholdChat).reason, /20001 > threshold 20000/);
+    assert.equal(getMistralModelSelection(thresholdChat).model, "mistral-medium-2604");
+    assert.equal(getMistralModelSelection(overThresholdChat).model, "mistral-medium-2604");
+    assert.match(getMistralModelSelection(overThresholdChat).reason, /fixed Mistral priority chain/);
     assert.equal(overThresholdProfile.id, "medium");
     assert.equal(overThresholdProfile.maxTokens, 1900);
     assert.equal(overThresholdProfile.allowExpansion, false);
@@ -120,17 +120,17 @@ test("backend forwards a 160k conversation to Mistral and reports the same input
 
     assert.equal(res.statusCode, 200);
     assert.equal(capturedRequest.url, "https://api.mistral.ai/v1/chat/completions");
-    assert.equal(capturedRequest.body.model, "mistral-large-2512");
+    assert.equal(capturedRequest.body.model, "mistral-medium-2604");
     assert.equal(capturedRequest.body.max_tokens, 4200);
     assert.equal(capturedRequest.body.messages[1].content.slice(-160000), conversation);
     assert.equal(res.payload.timing.profile, "large");
     assert.equal(res.payload.timing.servedBy, "mistral");
     assert.equal(res.payload.timing.provider, "mistral");
-    assert.equal(res.payload.timing.model, "mistral-large-2512");
-    assert.equal(res.payload.timing.primaryModel, "mistral-large-2512");
-    assert.equal(res.payload.timing.modelThresholdChars, 20000);
+    assert.equal(res.payload.timing.model, "mistral-medium-2604");
+    assert.equal(res.payload.timing.primaryModel, "mistral-medium-2604");
+    assert.equal(res.payload.timing.modelThresholdChars, null);
     assert.equal(res.payload.timing.modelOverride, false);
-    assert.match(res.payload.timing.modelReason, /160000 > threshold 20000/);
+    assert.match(res.payload.timing.modelReason, /served as the first model/);
     assert.equal(res.payload.timing.inputChars, 160000);
     assert.equal(res.payload.timing.maxTokens, 4200);
     assert.equal(res.payload.timing.targetWords, 1200);
@@ -207,7 +207,7 @@ test("backend keeps tiny chats local and avoids Mistral", async () => {
   }
 });
 
-test("backend sends small chats to the fast Mistral model", async () => {
+test("backend sends small generated chats to medium 3.5 first", async () => {
   const originalFetch = global.fetch;
   const originalApiKey = process.env.MISTRAL_API_KEY;
   const restoreMistralModel = setTemporaryEnv("MISTRAL_MODEL", undefined);
@@ -237,11 +237,11 @@ test("backend sends small chats to the fast Mistral model", async () => {
 
     assert.equal(res.statusCode, 200);
     assert.equal(requests.length, 1);
-    assert.equal(requests[0].model, "ministral-3b-2512");
+    assert.equal(requests[0].model, "mistral-medium-2604");
     assert.equal(requests[0].max_tokens, 1000);
     assert.equal(res.payload.timing.profile, "small");
     assert.equal(res.payload.timing.servedBy, "mistral");
-    assert.equal(res.payload.timing.model, "ministral-3b-2512");
+    assert.equal(res.payload.timing.model, "mistral-medium-2604");
     assert.equal(res.payload.timing.fallback.attempted, false);
     assert.equal(res.payload.timing.mistralPasses, 1);
   } finally {
@@ -255,7 +255,7 @@ test("backend sends small chats to the fast Mistral model", async () => {
   }
 });
 
-test("backend sends over-threshold medium chats to the quality model without changing profile limits", async () => {
+test("backend sends medium chats to medium 3.5 without changing profile limits", async () => {
   const originalFetch = global.fetch;
   const originalApiKey = process.env.MISTRAL_API_KEY;
   const restoreMistralModel = setTemporaryEnv("MISTRAL_MODEL", undefined);
@@ -285,13 +285,13 @@ test("backend sends over-threshold medium chats to the quality model without cha
 
     assert.equal(res.statusCode, 200);
     assert.equal(requests.length, 1);
-    assert.equal(requests[0].model, "mistral-large-2512");
+    assert.equal(requests[0].model, "mistral-medium-2604");
     assert.equal(requests[0].max_tokens, 1900);
     assert.equal(res.payload.timing.profile, "medium");
-    assert.equal(res.payload.timing.model, "mistral-large-2512");
+    assert.equal(res.payload.timing.model, "mistral-medium-2604");
     assert.equal(res.payload.timing.targetWords, 700);
     assert.equal(res.payload.timing.mistralPasses, 1);
-    assert.match(res.payload.timing.modelReason, /20001 > threshold 20000/);
+    assert.match(res.payload.timing.modelReason, /served as the first model/);
   } finally {
     restoreMistralModel();
     global.fetch = originalFetch;
@@ -303,7 +303,7 @@ test("backend sends over-threshold medium chats to the quality model without cha
   }
 });
 
-test("backend honors an explicit MISTRAL_MODEL override", async () => {
+test("backend fixed chain takes precedence over MISTRAL_MODEL", async () => {
   const originalFetch = global.fetch;
   const originalApiKey = process.env.MISTRAL_API_KEY;
   const restoreMistralModel = setTemporaryEnv("MISTRAL_MODEL", "custom-mistral-test");
@@ -333,11 +333,11 @@ test("backend honors an explicit MISTRAL_MODEL override", async () => {
 
     assert.equal(res.statusCode, 200);
     assert.equal(requests.length, 1);
-    assert.equal(requests[0].model, "custom-mistral-test");
-    assert.equal(res.payload.timing.model, "custom-mistral-test");
-    assert.equal(res.payload.timing.modelOverride, true);
-    assert.equal(res.payload.timing.modelThresholdChars, 20000);
-    assert.match(res.payload.timing.modelReason, /MISTRAL_MODEL override set/);
+    assert.equal(requests[0].model, "mistral-medium-2604");
+    assert.equal(res.payload.timing.model, "mistral-medium-2604");
+    assert.equal(res.payload.timing.modelOverride, false);
+    assert.equal(res.payload.timing.modelThresholdChars, null);
+    assert.match(res.payload.timing.modelReason, /served as the first model/);
   } finally {
     restoreMistralModel();
     global.fetch = originalFetch;
@@ -346,6 +346,59 @@ test("backend honors an explicit MISTRAL_MODEL override", async () => {
     } else {
       process.env.MISTRAL_API_KEY = originalApiKey;
     }
+  }
+});
+
+test("backend falls back from medium 3.5 to large and reports the serving model", async () => {
+  const originalFetch = global.fetch;
+  const restoreApiKey = setTemporaryEnv("MISTRAL_API_KEY", "test-mistral-key");
+  const conversation = "model fallback context ".repeat(180);
+  const requests = [];
+
+  global.fetch = async (_url, options) => {
+    const body = JSON.parse(options.body);
+    requests.push(body);
+
+    if (body.model === "mistral-medium-2604") {
+      return {
+        ok: false,
+        status: 400,
+        text: async () => "medium unavailable"
+      };
+    }
+
+    return {
+      ok: true,
+      status: 200,
+      json: async () => ({
+        choices: [{
+          message: {
+            content: makeContextCarrySummary("large-fallback", 260)
+          }
+        }]
+      })
+    };
+  };
+
+  const res = createMockResponse();
+
+  try {
+    await summarize({ method: "POST", body: { conversation } }, res);
+
+    assert.equal(res.statusCode, 200);
+    assert.deepEqual(requests.map((request) => request.model), [
+      "mistral-medium-2604",
+      "mistral-large-2512"
+    ]);
+    assert.equal(res.payload.timing.model, "mistral-large-2512");
+    assert.deepEqual(res.payload.timing.mistralModelsTried, [
+      "mistral-medium-2604",
+      "mistral-large-2512"
+    ]);
+    assert.match(res.payload.timing.modelReason, /mistral-medium-2604 failed; fell back to mistral-large-2512/);
+  } finally {
+    restoreApiKey();
+    global.fetch = originalFetch;
   }
 });
 
@@ -399,17 +452,20 @@ test("backend falls back to Groq after Mistral rate limits and keeps the same pr
     await summarize({ method: "POST", body: { conversation } }, res);
 
     assert.equal(res.statusCode, 200);
-    assert.equal(mistralRequests.length, 2);
+    assert.equal(mistralRequests.length, 6);
     assert.equal(groqRequests.length, 1);
-    assert.equal(mistralRequests[0].model, "custom-mistral-test");
+    assert.deepEqual(
+      mistralRequests.filter((_, index) => index % 2 === 0).map((request) => request.model),
+      ["mistral-medium-2604", "mistral-large-2512", "ministral-3b-2512"]
+    );
     assert.equal(groqRequests[0].model, "llama-3.1-8b-instant");
     assert.equal(groqRequests[0].max_tokens, mistralRequests[0].max_tokens);
     assert.deepEqual(groqRequests[0].messages, mistralRequests[0].messages);
     assert.equal(res.payload.timing.servedBy, "groq");
     assert.equal(res.payload.timing.provider, "groq");
     assert.equal(res.payload.timing.model, "llama-3.1-8b-instant");
-    assert.equal(res.payload.timing.primaryModel, "custom-mistral-test");
-    assert.equal(res.payload.timing.modelOverride, true);
+    assert.equal(res.payload.timing.primaryModel, "mistral-medium-2604");
+    assert.equal(res.payload.timing.modelOverride, false);
     assert.equal(res.payload.timing.fallback.attempted, true);
     assert.equal(res.payload.timing.fallback.used, true);
     assert.equal(res.payload.timing.fallback.servedBy, "groq");
@@ -474,12 +530,16 @@ test("backend falls back to Groq when Mistral returns an empty summary", async (
     await summarize({ method: "POST", body: { conversation } }, res);
 
     assert.equal(res.statusCode, 200);
-    assert.equal(requests.length, 2);
-    assert.equal(requests[0].body.model, "ministral-3b-2512");
-    assert.equal(requests[1].body.model, "llama-3.1-8b-instant");
-    assert.deepEqual(requests[1].body.messages, requests[0].body.messages);
+    assert.equal(requests.length, 4);
+    assert.deepEqual(requests.slice(0, 3).map((request) => request.body.model), [
+      "mistral-medium-2604",
+      "mistral-large-2512",
+      "ministral-3b-2512"
+    ]);
+    assert.equal(requests[3].body.model, "llama-3.1-8b-instant");
+    assert.deepEqual(requests[3].body.messages, requests[0].body.messages);
     assert.equal(res.payload.timing.servedBy, "groq");
-    assert.equal(res.payload.timing.primaryModel, "ministral-3b-2512");
+    assert.equal(res.payload.timing.primaryModel, "mistral-medium-2604");
     assert.equal(res.payload.timing.model, "llama-3.1-8b-instant");
     assert.equal(res.payload.timing.fallback.used, true);
     assert.match(res.payload.timing.fallback.reason, /Mistral returned an empty summary/);

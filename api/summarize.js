@@ -4,8 +4,9 @@ const MISTRAL_TIMEOUT_MS = 80000;
 const MISTRAL_CHAT_COMPLETIONS_URL = "https://api.mistral.ai/v1/chat/completions";
 const GROQ_CHAT_COMPLETIONS_URL = "https://api.groq.com/openai/v1/chat/completions";
 const LOCAL_DIRECT_MODEL = "local-direct";
-const MISTRAL_FAST_MODEL = "ministral-3b-2512";
-const MISTRAL_QUALITY_MODEL = "mistral-large-2512";
+const MISTRAL_PRIMARY_MODEL = "mistral-medium-2604";
+const MISTRAL_FALLBACK_MODELS = ["mistral-large-2512", "ministral-3b-2512"];
+const MISTRAL_MODEL_CHAIN = [MISTRAL_PRIMARY_MODEL, ...MISTRAL_FALLBACK_MODELS];
 const MISTRAL_MODEL_ROUTING_THRESHOLD_CHARS = 20000;
 const GROQ_FALLBACK_MODEL = "llama-3.1-8b-instant";
 const SUMMARY_PROVIDERS = {
@@ -203,6 +204,8 @@ async function handler(req, res) {
         primaryModel: modelSelection.model,
         ...getModelSelectionTiming(modelSelection),
         model: providerResult.model,
+        modelReason: providerResult.modelReason,
+        mistralModelsTried: providerResult.mistralModelsTried,
         profile: summaryProfile.id,
         maxTokens: summaryProfile.maxTokens,
         targetWords: summaryProfile.targetWords,
@@ -238,29 +241,52 @@ async function createSummaryWithFallback({ conversation, profile, modelSelection
   const initialMessages = getInitialSummaryMessages(conversation, profile);
   let mistralMs = 0;
   let mistralFailure = null;
+  const mistralModelsTried = [];
 
   if (mistralApiKey) {
-    const mistralStartedAt = Date.now();
-    try {
-      const result = await createSummaryWithProvider({
-        provider: SUMMARY_PROVIDERS.mistral,
-        apiKey: mistralApiKey,
-        conversation,
-        profile,
-        model: modelSelection.model,
-        initialMessages
-      });
+    for (const [index, model] of MISTRAL_MODEL_CHAIN.entries()) {
+      const mistralStartedAt = Date.now();
+      mistralModelsTried.push(model);
 
-      return {
-        ...result,
-        mistralMs: result.providerMs,
-        groqMs: 0,
-        fallback: createFallbackMetadata()
-      };
-    } catch (error) {
-      mistralMs = Date.now() - mistralStartedAt;
-      mistralFailure = error;
-      console.error("Mistral summary failed; trying Groq fallback:", getProviderFailureLog(error));
+      try {
+        const result = await createSummaryWithProvider({
+          provider: SUMMARY_PROVIDERS.mistral,
+          apiKey: mistralApiKey,
+          conversation,
+          profile,
+          model,
+          initialMessages
+        });
+        const failedModels = mistralModelsTried.slice(0, -1);
+        const modelReason = failedModels.length
+          ? `${failedModels.join(" -> ")} failed; fell back to ${model}`
+          : `${model} served as the first model in the fixed Mistral chain`;
+
+        console.info("[Context Generator] Summary served:", {
+          provider: SUMMARY_PROVIDERS.mistral.id,
+          model,
+          reason: modelReason
+        });
+
+        return {
+          ...result,
+          modelReason,
+          mistralModelsTried,
+          mistralMs: mistralMs + result.providerMs,
+          groqMs: 0,
+          fallback: createFallbackMetadata()
+        };
+      } catch (error) {
+        mistralMs += Date.now() - mistralStartedAt;
+        mistralFailure = error;
+        const nextModel = MISTRAL_MODEL_CHAIN[index + 1];
+        console.error(
+          nextModel
+            ? `[Context Generator] ${model} failed; falling back to ${nextModel}:`
+            : `[Context Generator] ${model} failed; Mistral chain exhausted, trying Groq fallback:`,
+          getProviderFailureLog(error)
+        );
+      }
     }
   } else {
     mistralFailure = createProviderError(
@@ -295,6 +321,8 @@ async function createSummaryWithFallback({ conversation, profile, modelSelection
 
     return {
       ...result,
+      modelReason: `${MISTRAL_MODEL_CHAIN.join(" -> ")} failed; fell back to ${GROQ_FALLBACK_MODEL}`,
+      mistralModelsTried,
       mistralMs,
       groqMs: result.providerMs,
       fallback: {
@@ -495,33 +523,12 @@ function getLocalDirectModelSelection(conversation) {
 
 function getMistralModelSelection(conversation) {
   const inputChars = String(conversation || "").length;
-  const overrideModel = String(process.env.MISTRAL_MODEL || "").trim();
-
-  if (overrideModel) {
-    return {
-      model: overrideModel,
-      reason: `MISTRAL_MODEL override set; inputChars ${inputChars}, threshold ${MISTRAL_MODEL_ROUTING_THRESHOLD_CHARS}`,
-      inputChars,
-      thresholdChars: MISTRAL_MODEL_ROUTING_THRESHOLD_CHARS,
-      override: true
-    };
-  }
-
-  if (inputChars <= MISTRAL_MODEL_ROUTING_THRESHOLD_CHARS) {
-    return {
-      model: MISTRAL_FAST_MODEL,
-      reason: `inputChars ${inputChars} <= threshold ${MISTRAL_MODEL_ROUTING_THRESHOLD_CHARS}; using fast model`,
-      inputChars,
-      thresholdChars: MISTRAL_MODEL_ROUTING_THRESHOLD_CHARS,
-      override: false
-    };
-  }
 
   return {
-    model: MISTRAL_QUALITY_MODEL,
-    reason: `inputChars ${inputChars} > threshold ${MISTRAL_MODEL_ROUTING_THRESHOLD_CHARS}; using quality model`,
+    model: MISTRAL_PRIMARY_MODEL,
+    reason: `fixed Mistral priority chain starts with ${MISTRAL_PRIMARY_MODEL} for every generated summary`,
     inputChars,
-    thresholdChars: MISTRAL_MODEL_ROUTING_THRESHOLD_CHARS,
+    thresholdChars: null,
     override: false
   };
 }
