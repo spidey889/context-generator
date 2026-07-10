@@ -7,7 +7,6 @@ const LOCAL_DIRECT_MODEL = "local-direct";
 const MISTRAL_PRIMARY_MODEL = "mistral-medium-2604";
 const MISTRAL_FALLBACK_MODELS = ["mistral-large-2512", "ministral-3b-2512"];
 const MISTRAL_MODEL_CHAIN = [MISTRAL_PRIMARY_MODEL, ...MISTRAL_FALLBACK_MODELS];
-const MISTRAL_MODEL_ROUTING_THRESHOLD_CHARS = 20000;
 const GROQ_FALLBACK_MODEL = "llama-3.1-8b-instant";
 const SUMMARY_PROVIDERS = {
   mistral: {
@@ -514,9 +513,9 @@ function getLocalDirectModelSelection(conversation) {
   const inputChars = String(conversation || "").length;
   return {
     model: LOCAL_DIRECT_MODEL,
-    reason: `inputChars ${inputChars} uses local direct carry before Mistral routing; threshold ${MISTRAL_MODEL_ROUTING_THRESHOLD_CHARS}`,
+    reason: `inputChars ${inputChars} uses the unchanged tiny local-direct profile before the fixed Mistral chain`,
     inputChars,
-    thresholdChars: MISTRAL_MODEL_ROUTING_THRESHOLD_CHARS,
+    thresholdChars: null,
     override: false
   };
 }

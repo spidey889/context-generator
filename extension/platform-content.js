@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-07-06-faster-virtual-sweep";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-07-10-model-fallback-receipt";
   const BUBBLE_ID = "context-generator-bubble";
   const OVERLAY_ID = "context-generator-overlay";
   const ONBOARDING_ID = "context-generator-onboarding";
@@ -1186,6 +1186,7 @@
         primaryModel: backendTiming?.primaryModel || null,
         model: backendTiming?.model || null,
         modelReason: backendTiming?.modelReason || null,
+        mistralModelsTried: sanitizeModelChainForStats(backendTiming?.mistralModelsTried),
         modelInputChars: backendTiming?.modelInputChars ?? null,
         modelThresholdChars: backendTiming?.modelThresholdChars ?? null,
         modelOverride: backendTiming?.modelOverride === true,
@@ -1243,6 +1244,14 @@
       model: fallback.model || null,
       reason: fallback.reason || null
     };
+  }
+
+  function sanitizeModelChainForStats(models) {
+    if (!Array.isArray(models)) return [];
+    return models
+      .filter((model) => typeof model === "string" && model.trim())
+      .slice(0, 3)
+      .map((model) => model.trim());
   }
 
   function normalizeUsageForStats(usage) {

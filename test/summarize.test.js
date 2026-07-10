@@ -183,6 +183,8 @@ test("backend keeps tiny chats local and avoids Mistral", async () => {
     assert.equal(res.payload.timing.profile, "tiny");
     assert.equal(res.payload.timing.servedBy, "local-direct");
     assert.equal(res.payload.timing.model, "local-direct");
+    assert.equal(res.payload.timing.modelThresholdChars, null);
+    assert.doesNotMatch(res.payload.timing.modelReason, /20000/);
     assert.equal(res.payload.timing.fallback.attempted, false);
     assert.equal(res.payload.timing.maxTokens, 0);
     assert.equal(res.payload.timing.targetWords, 120);

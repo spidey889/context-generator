@@ -589,7 +589,8 @@
             ${sideItem("Route", route)}
             ${sideItem("Backend match", integrity)}
             ${sideItem("Served by", formatBackendLabel(summary))}
-            ${sideItem("Model route", getModelRoutingLabel(summary))}
+            ${sideItem("Primary model", summary.servedBy === "local-direct" ? "local-direct" : "mistral-medium-2604")}
+            ${sideItem("Fallback log", getModelFallbackLabel(summary))}
             ${sideItem("Capture path", capture.method || "unknown")}
             ${sideItem("Message turns", formatTurnSummary(capture))}
             ${sideItem("Expansion", getExpansionLabel(summary.expansion))}
@@ -671,14 +672,25 @@
       return expansion.used ? "Used" : "Tried, not used";
     }
 
-    function getModelRoutingLabel(summary) {
+    function getModelFallbackLabel(summary) {
       if (!summary) return "n/a";
-      if (summary.modelOverride) return `Override: ${summary.primaryModel || summary.model || "custom model"}`;
-      if (summary.modelInputChars !== null && summary.modelInputChars !== undefined && summary.modelThresholdChars) {
-        const comparator = Number(summary.modelInputChars) <= Number(summary.modelThresholdChars) ? "<=" : ">";
-        return `${formatNumber(summary.modelInputChars)} chars ${comparator} ${formatNumber(summary.modelThresholdChars)}`;
+      const tried = Array.isArray(summary.mistralModelsTried) ? summary.mistralModelsTried.filter(Boolean) : [];
+      const servedModel = summary.model || summary.fallback?.model || null;
+
+      if (summary.fallback?.used && servedModel) {
+        const failedChain = tried.length ? tried.join(" -> ") : summary.primaryModel || "Mistral";
+        return `${failedChain} failed -> ${servedModel} served`;
       }
-      return summary.modelReason || "n/a";
+
+      if (tried.length > 1 && servedModel) {
+        return `${tried.slice(0, -1).join(" -> ")} failed -> ${servedModel} served`;
+      }
+
+      if (tried.length === 1) return `Not used - ${tried[0]} served first`;
+      if (summary.servedBy === "local-direct") return "Not used - tiny local-direct profile";
+      return summary.modelReason && !/threshold\s+20000/i.test(summary.modelReason)
+        ? summary.modelReason
+        : "Not recorded - run a new transfer";
     }
 
     function formatBackendLabel(summary) {
@@ -775,11 +787,12 @@
           providerPasses: 1,
           servedBy: "mistral",
           provider: "mistral",
-          primaryModel: "mistral-large-2512",
+          primaryModel: "mistral-medium-2604",
           model: "mistral-large-2512",
-          modelReason: "inputChars 48142 > threshold 20000; using quality model",
+          modelReason: "mistral-medium-2604 failed; fell back to mistral-large-2512",
+          mistralModelsTried: ["mistral-medium-2604", "mistral-large-2512"],
           modelInputChars: 48142,
-          modelThresholdChars: 20000,
+          modelThresholdChars: null,
           modelOverride: false,
           profile: "medium",
           maxTokens: 1900,

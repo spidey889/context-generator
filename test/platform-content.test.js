@@ -872,6 +872,13 @@ test("transfer safety window covers long quality summaries", () => {
   assert.doesNotMatch(source, /warmSummaryExpireTimer\s*=\s*window\.setTimeout/);
 });
 
+test("latest-run receipt preserves the Mistral fallback chain", () => {
+  const source = fs.readFileSync(SOURCE_PATH, "utf8");
+
+  assert.match(source, /mistralModelsTried:\s*sanitizeModelChainForStats/);
+  assert.match(source, /function sanitizeModelChainForStats/);
+});
+
 test("paste verification accepts stable context anchors when box characters differ", () => {
   const hooks = loadPlatformContent([]);
   const expected = [
