@@ -576,7 +576,7 @@
             </div>
             <div class="hero-footer">
               ${mini("Status", stats.status === "completed" ? "Completed" : "Failed")}
-              ${mini("Model", summary.model || "n/a")}
+              ${mini("Model", formatModelDisplayName(summary.model))}
               ${mini("Profile", summary.profile || "n/a")}
             </div>
           </div>
@@ -589,7 +589,7 @@
             ${sideItem("Route", route)}
             ${sideItem("Backend match", integrity)}
             ${sideItem("Served by", formatBackendLabel(summary))}
-            ${sideItem("Primary model", summary.servedBy === "local-direct" ? "local-direct" : "mistral-medium-2604")}
+            ${sideItem("Primary model", formatModelDisplayName(summary.servedBy === "local-direct" ? "local-direct" : "mistral-medium-2604"))}
             ${sideItem("Fallback log", getModelFallbackLabel(summary))}
             ${sideItem("Capture path", capture.method || "unknown")}
             ${sideItem("Message turns", formatTurnSummary(capture))}
@@ -678,19 +678,27 @@
       const servedModel = summary.model || summary.fallback?.model || null;
 
       if (summary.fallback?.used && servedModel) {
-        const failedChain = tried.length ? tried.join(" -> ") : summary.primaryModel || "Mistral";
-        return `${failedChain} failed -> ${servedModel} served`;
+        const failedChain = tried.length
+          ? tried.map(formatModelDisplayName).join(" -> ")
+          : formatModelDisplayName(summary.primaryModel || "Mistral");
+        return `${failedChain} failed -> ${formatModelDisplayName(servedModel)} served`;
       }
 
       if (tried.length > 1 && servedModel) {
-        return `${tried.slice(0, -1).join(" -> ")} failed -> ${servedModel} served`;
+        return `${tried.slice(0, -1).map(formatModelDisplayName).join(" -> ")} failed -> ${formatModelDisplayName(servedModel)} served`;
       }
 
-      if (tried.length === 1) return `Not used - ${tried[0]} served first`;
+      if (tried.length === 1) return `Not used - ${formatModelDisplayName(tried[0])} served first`;
       if (summary.servedBy === "local-direct") return "Not used - tiny local-direct profile";
       return summary.modelReason && !/threshold\s+20000/i.test(summary.modelReason)
         ? summary.modelReason
         : "Not recorded - run a new transfer";
+    }
+
+    function formatModelDisplayName(model) {
+      if (!model) return "n/a";
+      if (model === "mistral-medium-2604") return "mistral-medium-3-5";
+      return model;
     }
 
     function formatBackendLabel(summary) {

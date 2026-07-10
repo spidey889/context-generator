@@ -13,3 +13,11 @@ test("analysis receipt shows fixed primary model and fallback log", () => {
   assert.doesNotMatch(ANALYSIS_SOURCE, /sideItem\("Model route"/);
   assert.doesNotMatch(ANALYSIS_SOURCE, /chars \$\{comparator\}/);
 });
+
+test("analysis displays the Medium 3.5 name instead of its API snapshot ID", () => {
+  assert.match(ANALYSIS_SOURCE, /function formatModelDisplayName/);
+  assert.match(ANALYSIS_SOURCE, /model === "mistral-medium-2604"/);
+  assert.match(ANALYSIS_SOURCE, /return "mistral-medium-3-5"/);
+  assert.match(ANALYSIS_SOURCE, /mini\("Model", formatModelDisplayName\(summary\.model\)\)/);
+  assert.match(ANALYSIS_SOURCE, /tried\.map\(formatModelDisplayName\)/);
+});
