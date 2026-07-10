@@ -1,6 +1,5 @@
-.vercel
-.env*
 node_modules/
 package-lock.json
 api/mcp.mjs
+extension/chrome.zip
 *Backup authentication codes.txt
