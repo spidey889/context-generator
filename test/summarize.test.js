@@ -122,6 +122,8 @@ test("backend forwards a 160k conversation to Mistral and reports the same input
     assert.equal(capturedRequest.url, "https://api.mistral.ai/v1/chat/completions");
     assert.equal(capturedRequest.body.model, "mistral-medium-2604");
     assert.equal(capturedRequest.body.max_tokens, 4200);
+    assert.match(capturedRequest.body.prompt_cache_key, /^capcontext-summary-v1-large-mistral-medium-2604$/);
+    assert.equal(capturedRequest.body.prediction, undefined);
     assert.equal(capturedRequest.body.messages[1].content.slice(-160000), conversation);
     assert.equal(res.payload.timing.profile, "large");
     assert.equal(res.payload.timing.servedBy, "mistral");
@@ -134,6 +136,7 @@ test("backend forwards a 160k conversation to Mistral and reports the same input
     assert.equal(res.payload.timing.inputChars, 160000);
     assert.equal(res.payload.timing.maxTokens, 4200);
     assert.equal(res.payload.timing.targetWords, 1200);
+    assert.equal(res.payload.timing.qualityFloorMet, true);
     assert.deepEqual(res.payload.timing.usage, {
       promptTokens: 1200,
       completionTokens: 320,
@@ -454,13 +457,16 @@ test("backend falls back to Groq after Mistral rate limits and keeps the same pr
     await summarize({ method: "POST", body: { conversation } }, res);
 
     assert.equal(res.statusCode, 200);
-    assert.equal(mistralRequests.length, 6);
+    assert.equal(mistralRequests.length, 2);
     assert.equal(groqRequests.length, 1);
-    assert.deepEqual(
-      mistralRequests.filter((_, index) => index % 2 === 0).map((request) => request.model),
-      ["mistral-medium-2604", "mistral-large-2512", "ministral-3b-2512"]
-    );
+    assert.deepEqual(mistralRequests.map((request) => request.model), [
+      "mistral-medium-2604",
+      "mistral-medium-2604"
+    ]);
+    assert.ok(mistralRequests.every((request) => request.prompt_cache_key));
     assert.equal(groqRequests[0].model, "llama-3.1-8b-instant");
+    assert.equal(groqRequests[0].prompt_cache_key, undefined);
+    assert.equal(groqRequests[0].prediction, undefined);
     assert.equal(groqRequests[0].max_tokens, mistralRequests[0].max_tokens);
     assert.deepEqual(groqRequests[0].messages, mistralRequests[0].messages);
     assert.equal(res.payload.timing.servedBy, "groq");
@@ -553,6 +559,52 @@ test("backend falls back to Groq when Mistral returns an empty summary", async (
   }
 });
 
+test("backend advances to the next model after a timed-out Mistral attempt", async () => {
+  const originalFetch = global.fetch;
+  const restoreApiKey = setTemporaryEnv("MISTRAL_API_KEY", "test-mistral-key");
+  const conversation = "timeout fallback context ".repeat(180);
+  const requests = [];
+
+  global.fetch = async (_url, options) => {
+    const body = JSON.parse(options.body);
+    requests.push(body);
+
+    if (body.model === "mistral-medium-2604") {
+      const error = new Error("request timed out");
+      error.name = "AbortError";
+      throw error;
+    }
+
+    return {
+      ok: true,
+      status: 200,
+      json: async () => ({
+        choices: [{
+          message: {
+            content: makeContextCarrySummary("timeout-fallback", 260)
+          }
+        }]
+      })
+    };
+  };
+
+  const res = createMockResponse();
+
+  try {
+    await summarize({ method: "POST", body: { conversation } }, res);
+
+    assert.equal(res.statusCode, 200);
+    assert.deepEqual(requests.map((request) => request.model), [
+      "mistral-medium-2604",
+      "mistral-large-2512"
+    ]);
+    assert.equal(res.payload.timing.model, "mistral-large-2512");
+  } finally {
+    restoreApiKey();
+    global.fetch = originalFetch;
+  }
+});
+
 test("backend expands substantial summaries that come back below the word floor", async () => {
   const originalFetch = global.fetch;
   const originalApiKey = process.env.MISTRAL_API_KEY;
@@ -587,9 +639,22 @@ test("backend expands substantial summaries that come back below the word floor"
 
     assert.equal(res.statusCode, 200);
     assert.equal(requests.length, 2);
+    assert.equal(requests[1].prompt_cache_key, requests[0].prompt_cache_key);
+    assert.deepEqual(
+      requests[1].messages.slice(0, requests[0].messages.length),
+      requests[0].messages
+    );
+    assert.equal(requests[1].messages[requests[0].messages.length].role, "assistant");
+    assert.equal(
+      requests[1].prediction.content,
+      requests[1].messages[requests[0].messages.length].content
+    );
+    assert.equal(requests[1].prediction.type, "content");
     assert.equal(res.payload.timing.mistralPasses, 2);
     assert.equal(res.payload.timing.expansion.attempted, true);
     assert.equal(res.payload.timing.expansion.used, true);
+    assert.equal(res.payload.timing.expansion.predictedOutput, true);
+    assert.equal(res.payload.timing.qualityFloorMet, true);
     assert.equal(countWords(res.payload.summary) >= 1100, true);
     assert.equal(res.payload.timing.summaryWordCount, countWords(res.payload.summary));
     assert.deepEqual(res.payload.timing.usage, {

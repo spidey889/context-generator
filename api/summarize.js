@@ -8,6 +8,7 @@ const MISTRAL_PRIMARY_MODEL = "mistral-medium-2604";
 const MISTRAL_FALLBACK_MODELS = ["mistral-large-2512", "ministral-3b-2512"];
 const MISTRAL_MODEL_CHAIN = [MISTRAL_PRIMARY_MODEL, ...MISTRAL_FALLBACK_MODELS];
 const GROQ_FALLBACK_MODEL = "llama-3.1-8b-instant";
+const MISTRAL_PROMPT_CACHE_VERSION = "capcontext-summary-v1";
 const SUMMARY_PROVIDERS = {
   mistral: {
     id: "mistral",
@@ -197,6 +198,7 @@ async function handler(req, res) {
         mistralMs: providerResult.mistralMs,
         groqMs: providerResult.groqMs,
         providerMs: providerResult.providerMs,
+        initialMs: providerResult.initialMs,
         providerPasses: providerResult.providerPasses,
         servedBy: providerResult.provider,
         provider: providerResult.provider,
@@ -212,6 +214,8 @@ async function handler(req, res) {
         summaryWordCount: providerResult.summaryWordCount,
         mistralPasses: providerResult.providerPasses,
         expansion: providerResult.expansion,
+        finishReason: providerResult.finishReason,
+        qualityFloorMet: providerResult.qualityFloorMet,
         fallback: providerResult.fallback,
         inputChars,
         outputChars: providerResult.summary.length,
@@ -279,12 +283,16 @@ async function createSummaryWithFallback({ conversation, profile, modelSelection
         mistralMs += Date.now() - mistralStartedAt;
         mistralFailure = error;
         const nextModel = MISTRAL_MODEL_CHAIN[index + 1];
+        const providerRateLimited = error?.providerStatus === 429;
         console.error(
-          nextModel
+          providerRateLimited
+            ? `[Context Generator] ${model} rate-limited; trying Groq fallback:`
+            : nextModel
             ? `[Context Generator] ${model} failed; falling back to ${nextModel}:`
             : `[Context Generator] ${model} failed; Mistral chain exhausted, trying Groq fallback:`,
           getProviderFailureLog(error)
         );
+        if (providerRateLimited) break;
       }
     }
   } else {
@@ -338,7 +346,17 @@ async function createSummaryWithFallback({ conversation, profile, modelSelection
 
 async function createSummaryWithProvider({ provider, apiKey, conversation, profile, model, initialMessages }) {
   const providerStartedAt = Date.now();
-  const initialResponse = await requestProviderSummary(provider, apiKey, initialMessages, profile, model);
+  const promptCacheKey = getProviderPromptCacheKey(provider, model, profile);
+  const initialStartedAt = Date.now();
+  const initialResponse = await requestProviderSummary(
+    provider,
+    apiKey,
+    initialMessages,
+    profile,
+    model,
+    { promptCacheKey }
+  );
+  const initialMs = Date.now() - initialStartedAt;
 
   if (!initialResponse.ok) {
     const details = await readResponseText(initialResponse);
@@ -346,11 +364,13 @@ async function createSummaryWithProvider({ provider, apiKey, conversation, profi
       provider,
       `${provider.label} API error ${initialResponse.status}`,
       502,
-      details
+      details,
+      initialResponse.status
     );
   }
 
   const data = await readResponseJson(initialResponse, provider);
+  const finishReason = data.choices?.[0]?.finish_reason || null;
   const initialUsage = normalizeProviderUsage(data.usage);
   let summary = normalizeContextCarrySummary(data.choices?.[0]?.message?.content);
 
@@ -362,24 +382,34 @@ async function createSummaryWithProvider({ provider, apiKey, conversation, profi
     attempted: false,
     used: false,
     error: null,
-    usage: null
+    usage: null,
+    ms: 0,
+    finishReason: null,
+    predictedOutput: false
   };
   let totalUsage = initialUsage;
   let summaryWordCount = countWords(summary);
 
   if (shouldExpandSummary(conversation, summaryWordCount, profile)) {
     expansion.attempted = true;
+    const expansionStartedAt = Date.now();
     try {
       const expansionResponse = await requestProviderSummary(
         provider,
         apiKey,
-        getExpansionSummaryMessages(conversation, summary, summaryWordCount, profile),
+        getExpansionSummaryMessages(initialMessages, summary, summaryWordCount, profile),
         profile,
-        model
+        model,
+        {
+          promptCacheKey,
+          predictedOutput: summary
+        }
       );
+      expansion.predictedOutput = provider.id === SUMMARY_PROVIDERS.mistral.id;
 
       if (expansionResponse.ok) {
         const expansionData = await readResponseJson(expansionResponse, provider);
+        expansion.finishReason = expansionData.choices?.[0]?.finish_reason || null;
         const expansionUsage = normalizeProviderUsage(expansionData.usage);
         expansion.usage = expansionUsage;
         totalUsage = addProviderUsage(totalUsage, expansionUsage);
@@ -399,6 +429,8 @@ async function createSummaryWithProvider({ provider, apiKey, conversation, profi
     } catch (error) {
       expansion.error = error?.message || "Expansion request failed";
       console.error(`${provider.label} expansion failed:`, error);
+    } finally {
+      expansion.ms = Date.now() - expansionStartedAt;
     }
   }
 
@@ -407,26 +439,41 @@ async function createSummaryWithProvider({ provider, apiKey, conversation, profi
     provider: provider.id,
     model,
     providerMs: Date.now() - providerStartedAt,
+    initialMs,
     providerPasses: expansion.attempted ? 2 : 1,
     expansion,
+    finishReason,
     summaryWordCount,
+    qualityFloorMet: profile.minWords <= 0 || summaryWordCount >= profile.minWords,
     usage: totalUsage
   };
 }
 
-function requestProviderSummary(provider, apiKey, messages, profile, model) {
+function requestProviderSummary(provider, apiKey, messages, profile, model, options = {}) {
+  const body = {
+    model,
+    temperature: 0.1,
+    max_tokens: profile.maxTokens,
+    messages,
+  };
+
+  if (provider.id === SUMMARY_PROVIDERS.mistral.id) {
+    if (options.promptCacheKey) body.prompt_cache_key = options.promptCacheKey;
+    if (options.predictedOutput) {
+      body.prediction = {
+        type: "content",
+        content: options.predictedOutput
+      };
+    }
+  }
+
   return fetchWithRetry(provider.url, {
     method: "POST",
     headers: {
       Authorization: `Bearer ${apiKey}`,
       "Content-Type": "application/json",
     },
-    body: JSON.stringify({
-      model,
-      temperature: 0.1,
-      max_tokens: profile.maxTokens,
-      messages,
-    }),
+    body: JSON.stringify(body),
   });
 }
 
@@ -443,11 +490,12 @@ function getInitialSummaryMessages(conversation, profile) {
   ];
 }
 
-function getExpansionSummaryMessages(conversation, draftSummary, wordCount, profile) {
+function getExpansionSummaryMessages(initialMessages, draftSummary, wordCount, profile) {
   return [
+    ...initialMessages,
     {
-      role: "system",
-      content: getSummarySystemPrompt(profile),
+      role: "assistant",
+      content: draftSummary
     },
     {
       role: "user",
@@ -459,14 +507,14 @@ Rules for this rewrite:
 - Expand KEY CONTEXT first, then DECISIONS MADE and OPEN QUESTIONS.
 - Include concrete details from the original conversation, not generic filler.
 - Target ${Math.max(profile.minWords, profile.targetWords - 100)}-${profile.targetWords + 100} words if the source conversation has enough real information.
-
-Previous draft:
-${draftSummary}
-
-Original conversation:
-${conversation}`,
+The full source conversation and previous draft are already present above; do not ask for them again.`,
     },
   ];
+}
+
+function getProviderPromptCacheKey(provider, model, profile) {
+  if (provider.id !== SUMMARY_PROVIDERS.mistral.id) return null;
+  return `${MISTRAL_PROMPT_CACHE_VERSION}-${profile.id}-${model}`;
 }
 
 function getSummarySystemPrompt(profile) {
@@ -563,12 +611,13 @@ function createFallbackMetadata(overrides = {}) {
   };
 }
 
-function createProviderError(provider, publicMessage, statusCode = 502, details = null) {
+function createProviderError(provider, publicMessage, statusCode = 502, details = null, providerStatus = null) {
   const error = new Error(publicMessage);
   error.provider = provider.id;
   error.publicMessage = publicMessage;
   error.statusCode = statusCode;
   error.details = details;
+  error.providerStatus = providerStatus;
   return error;
 }
 
@@ -592,6 +641,7 @@ function getProviderFailureLog(error) {
     provider: error?.provider || null,
     message: getProviderFailureReason(error),
     statusCode: error?.statusCode || null,
+    providerStatus: error?.providerStatus || null,
     details: error?.details || null
   };
 }
@@ -745,6 +795,7 @@ async function fetchWithRetry(url, options) {
       }
     } catch (error) {
       lastError = error;
+      if (error?.name === "AbortError") throw error;
       if (attempt === MISTRAL_MAX_ATTEMPTS) throw error;
     } finally {
       clearTimeout(timeout);

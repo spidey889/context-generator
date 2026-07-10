@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-07-10-model-fallback-receipt";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-07-10-speed-pass";
   const BUBBLE_ID = "context-generator-bubble";
   const OVERLAY_ID = "context-generator-overlay";
   const ONBOARDING_ID = "context-generator-onboarding";
@@ -64,10 +64,11 @@
   const VIRTUAL_SWEEP_STEP_RATIO = 0.6;
   const VIRTUAL_SWEEP_SETTLE_MS = 360;
   const VIRTUAL_SWEEP_STABLE_SAMPLE_COUNT = 2;
-  const VIRTUAL_SWEEP_CHANGE_POLL_MS = 40;
-  const VIRTUAL_SWEEP_ANCHOR_CHANGE_TIMEOUT_MS = 80;
+  const VIRTUAL_SWEEP_CHANGE_POLL_MS = 16;
+  const VIRTUAL_SWEEP_ANCHOR_CHANGE_TIMEOUT_MS = 32;
   const VIRTUAL_SWEEP_FAST_CHANGE_TIMEOUT_MS = 120;
   const VIRTUAL_SWEEP_SLOW_CHANGE_TIMEOUT_MS = 360;
+  const CLAUDE_VIRTUAL_SWEEP_PROGRESS_CHANGE_TIMEOUT_MS = 240;
   const CLAUDE_VIRTUAL_SWEEP_SLOW_CHANGE_TIMEOUT_MS = 1400;
   const COLLAPSED_CONVERSATION_EXPAND_RE = /\b(?:show|see|read|view)\s+(?:more|full|all)\b|\bcontinue\s+(?:reading|message|response)\b|\bexpand\b/i;
   const COLLAPSED_CONVERSATION_EXPAND_EXCLUDE_RE = /\b(?:continue generating|regenerate|send|submit|stop generating|new chat|settings|menu|voice|microphone)\b/i;
@@ -380,6 +381,7 @@
   let activeTransferTrace = null;
   let transferTraceSequence = 0;
   let lastConversationCaptureMetrics = null;
+  let sourceScrollTargetsCache = null;
 
   function cleanupContextGeneratorNodes() {
     cleanupContextGeneratorReservations();
@@ -499,6 +501,9 @@
           setHandoffStatus("Reading source chat");
         } else {
           showOverlay(destinationId);
+        }
+        if (!destinationPrepPromise && getDetectedConversationMessageCount() > 0) {
+          destinationPrepPromise = prepareDestinationTab(destinationId, transferTrace);
         }
         await prepareSourceForCapture();
         if (!destinationPrepPromise && getDetectedConversationMessageCount() > 0) {
@@ -649,6 +654,23 @@
         logTransferDebug(`Warm summary skipped. ${error.message}`);
         return null;
       }
+
+      if (shouldSweepVirtualConversation()) {
+        const record = {
+          fingerprint: getConversationFingerprint(conversationText),
+          startedAt: Date.now(),
+          expiresAt: WARM_SUMMARY_EXPIRES_AT,
+          summary: null,
+          summaryTiming: null,
+          promise: null,
+          settled: true,
+          deferred: true,
+          trace
+        };
+        warmSummary = record;
+        logTransferDebug("Warm summary deferred until the full virtualized chat is captured.");
+        return record;
+      }
     }
 
     const fingerprint = getConversationFingerprint(conversationText);
@@ -663,6 +685,7 @@
       summaryTiming: null,
       promise: null,
       settled: false,
+      deferred: false,
       trace
     };
 
@@ -699,6 +722,7 @@
   function isWarmSummaryUsable(record, fingerprint) {
     return Boolean(
       record &&
+      !record.deferred &&
       record.fingerprint === fingerprint &&
       (Date.now() <= record.expiresAt || (record.promise && !record.settled))
     );
@@ -756,6 +780,7 @@
   }
 
   async function prepareSourceForCapture() {
+    sourceScrollTargetsCache = null;
     scrollSourceConversationToTop();
     await waitForConversationCaptureToSettle();
     const expandedCount = await expandCollapsedConversationContent();
@@ -985,6 +1010,13 @@
   }
 
   function getSourceScrollTargets() {
+    if (
+      sourceScrollTargetsCache?.length &&
+      sourceScrollTargetsCache.every((element) => element?.isConnected !== false)
+    ) {
+      return sourceScrollTargetsCache;
+    }
+
     const roots = [
       document.scrollingElement,
       document.documentElement,
@@ -1012,7 +1044,8 @@
       }
     });
 
-    return roots.filter((element, index, all) => element && all.indexOf(element) === index);
+    sourceScrollTargetsCache = roots.filter((element, index, all) => element && all.indexOf(element) === index);
+    return sourceScrollTargetsCache;
   }
 
   function isLikelySourceScrollRoot(element) {
@@ -1749,8 +1782,11 @@
   async function scrapeVirtualConversation(initialCapture) {
     const initialMetrics = lastConversationCaptureMetrics || {};
     const collectedTurns = new Map();
+    const sweepStartedAt = Date.now();
     let scrolls = 0;
     let staleScrolls = 0;
+    let totalStaleScrolls = 0;
+    let terminalQuietChecks = 0;
 
     while (true) {
       const expandedCount = await expandCollapsedConversationContent();
@@ -1758,15 +1794,17 @@
         await waitForConversationWindowToSettle(Math.min(600, VIRTUAL_SWEEP_SETTLE_MS));
       }
 
-      const added = collectRenderedConversationTurns(collectedTurns);
+      const renderedSnapshot = getRenderedConversationSnapshot();
+      const added = collectRenderedConversationTurns(collectedTurns, renderedSnapshot.turns);
       if (scrolls >= VIRTUAL_SWEEP_MAX_SCROLLS) break;
 
-      const beforeWindowSignature = getRenderedConversationWindowSignature();
+      const beforeWindowSignature = renderedSnapshot.signature;
       let afterWindowSignature = beforeWindowSignature;
       let triedBoundaryAdvance = false;
+      let pixelMoved = false;
 
       if (shouldPreferBoundarySweepAdvance()) {
-        triedBoundaryAdvance = scrollRenderedConversationBoundaryIntoView();
+        triedBoundaryAdvance = scrollRenderedConversationBoundaryIntoView(renderedSnapshot.anchor);
         if (triedBoundaryAdvance) {
           afterWindowSignature = await waitForRenderedConversationWindowChange(
             beforeWindowSignature,
@@ -1777,7 +1815,7 @@
 
       if (afterWindowSignature === beforeWindowSignature) {
         const step = Math.round(getSourceViewportHeight() * getVirtualSweepStepRatio());
-        scrollSourceConversationByInstantly(step);
+        pixelMoved = scrollSourceConversationByInstantly(step);
         afterWindowSignature = await waitForRenderedConversationWindowChange(
           beforeWindowSignature,
           VIRTUAL_SWEEP_FAST_CHANGE_TIMEOUT_MS
@@ -1786,19 +1824,27 @@
 
       scrolls += 1;
 
-      if (
-        afterWindowSignature === beforeWindowSignature &&
-        (triedBoundaryAdvance || scrollRenderedConversationBoundaryIntoView())
-      ) {
+      if (afterWindowSignature === beforeWindowSignature) {
+        if (!triedBoundaryAdvance) {
+          scrollRenderedConversationBoundaryIntoView(renderedSnapshot.anchor);
+        }
         afterWindowSignature = await waitForRenderedConversationWindowChange(
           beforeWindowSignature,
-          getVirtualSweepSlowChangeTimeout()
+          pixelMoved
+            ? getVirtualSweepProgressChangeTimeout()
+            : getVirtualSweepTerminalQuietTimeout()
         );
+
+        if (afterWindowSignature === beforeWindowSignature && !pixelMoved) {
+          terminalQuietChecks += 1;
+          break;
+        }
       }
 
       const windowChanged = afterWindowSignature !== beforeWindowSignature;
       if (!windowChanged && added === 0) {
         staleScrolls += 1;
+        totalStaleScrolls += 1;
         if (staleScrolls >= getVirtualSweepStaleScrollLimit()) break;
       } else {
         staleScrolls = 0;
@@ -1806,30 +1852,38 @@
     }
 
     const sweptTurns = Array.from(collectedTurns.values());
+    const sweepMetrics = {
+      sweepAttempted: true,
+      sweepScrolls: scrolls,
+      sweepTurnCount: sweptTurns.length,
+      sweepMs: Date.now() - sweepStartedAt,
+      sweepStaleScrolls: totalStaleScrolls,
+      sweepTerminalQuietChecks: terminalQuietChecks,
+      initialRenderedTurnCount: initialMetrics.messageTurnCount || null,
+      initialRawCandidateChars: initialMetrics.rawCandidateChars || null
+    };
     if (sweptTurns.length <= Number(initialMetrics.messageTurnCount || 0)) {
+      lastConversationCaptureMetrics = {
+        ...initialMetrics,
+        ...sweepMetrics
+      };
       return initialCapture;
     }
 
     return createConversationCaptureFromMessageTurns(sweptTurns, {
       method: "sweep",
-      sweepScrolls: scrolls,
-      sweepTurnCount: sweptTurns.length,
-      initialRenderedTurnCount: initialMetrics.messageTurnCount || null,
-      initialRawCandidateChars: initialMetrics.rawCandidateChars || null
+      ...sweepMetrics
     });
   }
 
-  function collectRenderedConversationTurns(collectedTurns) {
+  function collectRenderedConversationTurns(collectedTurns, renderedTurns = getRenderedConversationSnapshot().turns) {
     let added = 0;
-    getConversationTurns()
-      .filter((turn) => isDetectedConversationMessage(turn))
-      .forEach((turn) => {
-        const normalizedText = cleanText(turn.text);
-        const signature = getConversationTurnSignature(turn.role, normalizedText);
-        if (collectedTurns.has(signature)) return;
-        collectedTurns.set(signature, { role: turn.role, text: normalizedText });
-        added += 1;
-      });
+    renderedTurns.forEach((turn) => {
+      const signature = getConversationTurnSignature(turn.role, turn.text);
+      if (collectedTurns.has(signature)) return;
+      collectedTurns.set(signature, { role: turn.role, text: turn.text });
+      added += 1;
+    });
     return added;
   }
 
@@ -1845,7 +1899,13 @@
     return currentPlatform.id === "claude" ? CLAUDE_VIRTUAL_SWEEP_STALE_SCROLLS : VIRTUAL_SWEEP_STALE_SCROLLS;
   }
 
-  function getVirtualSweepSlowChangeTimeout() {
+  function getVirtualSweepProgressChangeTimeout() {
+    return currentPlatform.id === "claude"
+      ? CLAUDE_VIRTUAL_SWEEP_PROGRESS_CHANGE_TIMEOUT_MS
+      : VIRTUAL_SWEEP_SLOW_CHANGE_TIMEOUT_MS;
+  }
+
+  function getVirtualSweepTerminalQuietTimeout() {
     return currentPlatform.id === "claude"
       ? CLAUDE_VIRTUAL_SWEEP_SLOW_CHANGE_TIMEOUT_MS
       : VIRTUAL_SWEEP_SLOW_CHANGE_TIMEOUT_MS;
@@ -1866,9 +1926,7 @@
     return nextSignature;
   }
 
-  function scrollRenderedConversationBoundaryIntoView() {
-    const turns = getConversationTurns().filter((turn) => isDetectedConversationMessage(turn));
-    const anchor = turns[turns.length - 1]?.element;
+  function scrollRenderedConversationBoundaryIntoView(anchor = getRenderedConversationSnapshot().anchor) {
     if (!anchor?.scrollIntoView) return false;
 
     try {
@@ -1883,11 +1941,22 @@
     return true;
   }
 
-  function getRenderedConversationWindowSignature() {
-    return getConversationTurns()
+  function getRenderedConversationSnapshot() {
+    const turns = getConversationTurns()
       .filter((turn) => isDetectedConversationMessage(turn))
-      .map((turn) => getConversationTurnSignature(turn.role, cleanText(turn.text)))
-      .join("\u0002");
+      .map((turn) => ({ ...turn, text: cleanText(turn.text) }));
+
+    return {
+      turns,
+      anchor: turns[turns.length - 1]?.element || null,
+      signature: turns
+        .map((turn) => getConversationTurnSignature(turn.role, turn.text))
+        .join("\u0002")
+    };
+  }
+
+  function getRenderedConversationWindowSignature() {
+    return getRenderedConversationSnapshot().signature;
   }
 
   function getConversationTurnSignature(role, text) {
@@ -3626,9 +3695,12 @@
     runningResetTimer = setTimeout(resetRunningFlag, RUNNING_AUTO_RESET_MS);
     showOverlay(destinationId);
     setHandoffStatus("Reading source chat");
-    await prepareSourceForCapture();
     let preparedDestinationPromise = null;
     if (getDetectedConversationMessageCount() > 0) {
+      preparedDestinationPromise = prepareDestinationTab(destinationId, trace);
+    }
+    await prepareSourceForCapture();
+    if (!preparedDestinationPromise && getDetectedConversationMessageCount() > 0) {
       preparedDestinationPromise = prepareDestinationTab(destinationId, trace);
     }
 

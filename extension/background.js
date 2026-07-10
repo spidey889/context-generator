@@ -7,7 +7,8 @@ const MESSAGE_RETRY_INTERVAL_MS = 120;
 const DESTINATION_WARMUP_TIMEOUT_MS = 9000;
 const SUMMARY_BACKEND_ATTEMPTS = 2;
 const SUMMARY_BACKEND_RETRY_INTERVAL_MS = 450;
-const SUMMARY_BACKEND_TIMEOUT_MS = 190000;
+const SUMMARY_BACKEND_TIMEOUT_MS = 175000;
+const SUMMARY_BACKEND_RETRY_BUDGET_MS = 10000;
 const SUMMARY_CACHE_TTL_MS = 120000;
 const SUMMARY_CACHE_MAX_ENTRIES = 8;
 const summaryCache = new Map();
@@ -223,6 +224,7 @@ async function fetchSummaryFromBackend(conversationText, transferId = null) {
     }
 
     if (attempt < SUMMARY_BACKEND_ATTEMPTS) {
+      if (nowMs() - summaryStartedAt >= SUMMARY_BACKEND_RETRY_BUDGET_MS) break;
       await delay(SUMMARY_BACKEND_RETRY_INTERVAL_MS * attempt);
     }
   }
@@ -408,6 +410,14 @@ async function warmDestinationTab(tabId, destination, transferId = null) {
     const startedAt = Date.now();
     const timeoutMs = destination.warmupTimeoutMs || DESTINATION_WARMUP_TIMEOUT_MS;
     while (Date.now() - startedAt <= timeoutMs) {
+      if (await pingTab(tabId)) {
+        logPerf(transferId, "tab ready", {
+          tabId,
+          destination: destination.name,
+          readyMs: Date.now() - startedAt
+        });
+        return;
+      }
       if (await ensureContentScript(tabId, destination.contentScript) && await pingTab(tabId)) {
         logPerf(transferId, "tab ready", {
           tabId,
