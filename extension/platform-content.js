@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-07-10-destination-sheet-polish";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-07-10-model-fallback-receipt";
   const BUBBLE_ID = "context-generator-bubble";
   const OVERLAY_ID = "context-generator-overlay";
   const ONBOARDING_ID = "context-generator-onboarding";
@@ -31,7 +31,7 @@
   const CLAUDE_INLINE_RIGHT_MARGIN = 4;
   const CLAUDE_MODEL_LEFT_NUDGE = 48;
   const CLAUDE_SIDE_CONTROL_RIGHT_NUDGE = 52;
-  const DESTINATION_SHEET_WIDTH = 376;
+  const DESTINATION_SHEET_WIDTH = 296;
   const RUNNING_AUTO_RESET_MS = 240000;
   const MAX_BACKEND_CONVERSATION_CHARS = 160000;
   const BACKEND_CONVERSATION_HEAD_CHARS = 32000;
@@ -3209,23 +3209,6 @@
         animation: contextGeneratorSpinnerSpin 0.7s linear infinite;
       }
 
-      #${DESTINATION_SHEET_ID} .context-generator-destination-tile:focus-visible {
-        border-color: rgba(255,255,255,0.26) !important;
-        box-shadow: inset 0 1px 0 rgba(255,255,255,0.1), 0 0 0 3px rgba(255,255,255,0.09) !important;
-      }
-
-      @media (max-width: 520px) {
-        #${DESTINATION_SHEET_ID} {
-          width: calc(100vw - 24px) !important;
-          max-height: calc(100vh - 24px) !important;
-          left: 12px !important;
-          right: auto !important;
-          top: auto !important;
-          bottom: max(12px, env(safe-area-inset-bottom)) !important;
-          transform-origin: bottom center !important;
-        }
-      }
-
       @media (prefers-reduced-motion: reduce) {
         .context-generator-destination-tile.context-generator-tile-enter,
         .context-generator-tile-aura {
@@ -3255,12 +3238,12 @@
       "z-index:2147483647",
       `width:${DESTINATION_SHEET_WIDTH}px`,
       "box-sizing:border-box",
-      "padding:14px",
-      "border-radius:20px",
-      "border:1px solid rgba(255,255,255,0.14)",
-      "background:linear-gradient(180deg,rgba(29,29,31,0.985) 0%,rgba(18,18,20,0.99) 52%,rgba(10,10,11,0.995) 100%)",
-      "box-shadow:0 24px 64px rgba(0,0,0,0.62), 0 4px 18px rgba(0,0,0,0.44), inset 0 1px 0 rgba(255,255,255,0.09)",
-      "backdrop-filter:blur(22px) saturate(1.08)",
+      "padding:9px",
+      "border-radius:15px",
+      "border:1px solid rgba(255,255,255,0.12)",
+      "background:linear-gradient(180deg,#080808 0%,#050505 58%,#020202 100%)",
+      "box-shadow:0 16px 38px rgba(0,0,0,0.58), 0 0 0 1px rgba(0,0,0,0.72), inset 0 1px 0 rgba(255,255,255,0.07)",
+      "backdrop-filter:blur(16px)",
       "color:#f5f5f5",
       "font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif",
       "overflow:hidden",
@@ -3272,38 +3255,28 @@
     ].join(";");
 
     const header = document.createElement("div");
-    header.style.cssText = "padding:2px 2px 14px;display:flex;align-items:flex-start;justify-content:space-between;gap:14px";
-    const headingGroup = document.createElement("div");
-    headingGroup.style.cssText = "min-width:0;display:flex;flex-direction:column;gap:5px";
-    const kicker = document.createElement("div");
-    kicker.textContent = "CAP CONTEXT";
-    kicker.style.cssText = "font-size:9.5px;font-weight:750;line-height:1;letter-spacing:0.14em;color:rgba(255,255,255,0.46)";
+    header.style.cssText = "padding:0 1px 8px;display:flex;align-items:center;justify-content:space-between;gap:10px";
     const title = document.createElement("div");
     title.textContent = DESTINATION_TITLE_TEXT;
-    title.style.cssText = "font-size:18px;font-weight:690;letter-spacing:-0.025em;color:#ffffff;line-height:1.12;text-wrap:balance";
-    const helper = document.createElement("div");
-    helper.textContent = DESTINATION_HELPER_TEXT;
-    helper.style.cssText = "font-size:11.5px;font-weight:450;line-height:1.35;color:rgba(255,255,255,0.54);white-space:nowrap;overflow:hidden;text-overflow:ellipsis";
-    headingGroup.appendChild(kicker);
-    headingGroup.appendChild(title);
-    headingGroup.appendChild(helper);
+    title.style.cssText = "font-family:Georgia,'Times New Roman',serif;font-size:14px;font-weight:500;letter-spacing:0;color:#ffffff;line-height:1.02;text-rendering:geometricPrecision";
     const badge = document.createElement("button");
     badge.type = "button";
     badge.textContent = "Cap-Context";
     badge.setAttribute("aria-label", "Open Cap-Context site");
     badge.style.cssText = [
-      "height:24px",
-      "padding:0 9px",
+      "height:19px",
+      "padding:0 7px",
       "border-radius:999px",
       "border:1px solid transparent",
       "background:rgba(255,255,255,0.035)",
       "box-shadow:none",
       "color:rgba(255,255,255,0.68)",
-      "font-size:10.5px",
-      "font-weight:600",
-      "line-height:24px",
+      "font-size:10px",
+      "font-weight:500",
+      "line-height:19px",
       "letter-spacing:0",
-      "font-family:inherit",
+      "font-family:Georgia,'Times New Roman',serif",
+      "text-rendering:geometricPrecision",
       "cursor:pointer",
       "outline:0",
       "transition:border-color 0.14s ease, background 0.14s ease, box-shadow 0.14s ease, color 0.14s ease"
@@ -3329,7 +3302,7 @@
       event.stopPropagation();
       window.location.assign(CAP_CONTEXT_SITE_URL);
     });
-    header.appendChild(headingGroup);
+    header.appendChild(title);
     header.appendChild(badge);
     sheet.appendChild(header);
 
@@ -3338,7 +3311,7 @@
       .map(([id, platform]) => ({ ...platform, id }));
 
     const grid = document.createElement("div");
-    grid.style.cssText = "display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:9px";
+    grid.style.cssText = "display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px";
 
     options.forEach((option, index) => {
       const button = document.createElement("button");
@@ -3348,15 +3321,15 @@
       button.dataset.contextGeneratorDetail = option.detail;
       button.style.cssText = [
         "width:100%",
-        "height:66px",
-        "border:1px solid rgba(255,255,255,0.11)",
-        "border-radius:14px",
-        "background:linear-gradient(180deg,rgba(255,255,255,0.055) 0%,rgba(255,255,255,0.022) 100%)",
+        "height:48px",
+        "border:1px solid rgba(255,255,255,0.115)",
+        "border-radius:11px",
+        "background:linear-gradient(180deg, #121212 0%, #0b0b0b 58%, #050505 100%)",
         "color:#ffffff",
         "display:flex",
         "align-items:center",
-        "gap:10px",
-        "padding:0 12px",
+        "gap:7px",
+        "padding:0 8px",
         "box-sizing:border-box",
         "cursor:pointer",
         "text-align:left",
@@ -3365,30 +3338,30 @@
         "position:relative",
         "overflow:hidden",
         "isolation:isolate",
-        "box-shadow:inset 0 1px 0 rgba(255,255,255,0.065), 0 1px 1px rgba(0,0,0,0.32)",
-        "transition:transform 0.15s cubic-bezier(0.16,1,0.3,1), border-color 0.15s ease, background 0.15s ease, box-shadow 0.15s ease"
+        "box-shadow:inset 0 1px 0 rgba(255,255,255,0.075), inset 0 -1px 0 rgba(0,0,0,0.54), 0 1px 0 rgba(255,255,255,0.02)",
+        "transition:transform 0.13s ease"
       ].join(";");
 
       const aura = document.createElement("span");
       aura.className = "context-generator-tile-aura";
       aura.style.cssText = [
         "position:absolute",
-        "left:10px",
-        "top:12px",
-        "bottom:12px",
-        "width:38px",
+        "left:9px",
+        "top:10px",
+        "bottom:10px",
+        "width:30px",
         "z-index:0",
         "pointer-events:none",
         "border-radius:999px",
         `background:radial-gradient(ellipse at 22% 50%, ${option.accent}24 0, ${option.accent}12 36%, ${option.accent}04 61%, transparent 80%)`,
-        "opacity:0.24",
-        "filter:blur(8px)",
+        "opacity:0.14",
+        "filter:blur(6px)",
         "transform:translate3d(0,0,0) scaleX(1)",
         "transition:opacity 0.16s ease, left 0.16s ease, right 0.16s ease, width 0.16s ease, border-radius 0.16s ease, background 0.16s ease"
       ].join(";");
 
       const logoWrap = document.createElement("div");
-      logoWrap.style.cssText = "width:34px;height:34px;display:flex;align-items:center;justify-content:center;flex:0 0 auto;opacity:0.98;position:relative;z-index:2";
+      logoWrap.style.cssText = "width:26px;height:26px;display:flex;align-items:center;justify-content:center;flex:0 0 auto;opacity:0.96;position:relative;z-index:2";
       const logo = document.createElement("img");
       logo.src = getExtensionAssetUrl(option.logo);
       logo.alt = "";
@@ -3400,11 +3373,11 @@
       copy.style.cssText = "display:flex;flex-direction:column;gap:1px;min-width:0;flex:1;position:relative;z-index:2";
       const name = document.createElement("div");
       name.textContent = option.name;
-      name.style.cssText = "font-size:13px;font-weight:720;line-height:1.2;color:#ffffff;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;letter-spacing:-0.01em";
+      name.style.cssText = "font-size:11.5px;font-weight:740;line-height:1.18;color:#ffffff;white-space:nowrap;overflow:hidden;text-overflow:ellipsis";
       const detail = document.createElement("div");
       detail.className = "context-generator-tile-detail";
       detail.textContent = option.detail;
-      detail.style.cssText = "font-size:10.5px;font-weight:500;line-height:1.3;color:rgba(255,255,255,0.5);white-space:nowrap;overflow:hidden;text-overflow:ellipsis";
+      detail.style.cssText = "font-size:9.5px;font-weight:500;line-height:1.28;color:rgba(255,255,255,0.5);white-space:nowrap;overflow:hidden;text-overflow:ellipsis";
       copy.appendChild(name);
       copy.appendChild(detail);
 
@@ -3413,22 +3386,18 @@
       spinner.setAttribute("aria-hidden", "true");
 
       const setButtonActive = () => {
-        button.style.background = "linear-gradient(180deg,rgba(255,255,255,0.09) 0%,rgba(255,255,255,0.04) 100%)";
-        button.style.borderColor = "rgba(255,255,255,0.19)";
-        button.style.boxShadow = "inset 0 1px 0 rgba(255,255,255,0.1), 0 8px 18px rgba(0,0,0,0.24)";
-        aura.style.opacity = "0.42";
-        button.style.transform = "translateY(-2px)";
+        button.style.transform = "translateY(-1px) scale(1.025)";
       };
       const setButtonIdle = () => {
-        button.style.background = "linear-gradient(180deg,rgba(255,255,255,0.055) 0%,rgba(255,255,255,0.022) 100%)";
-        button.style.borderColor = "rgba(255,255,255,0.11)";
-        button.style.boxShadow = "inset 0 1px 0 rgba(255,255,255,0.065), 0 1px 1px rgba(0,0,0,0.32)";
-        aura.style.left = "10px";
+        button.style.background = "linear-gradient(180deg, #121212 0%, #0b0b0b 58%, #050505 100%)";
+        button.style.borderColor = "rgba(255,255,255,0.115)";
+        button.style.boxShadow = "inset 0 1px 0 rgba(255,255,255,0.075), inset 0 -1px 0 rgba(0,0,0,0.54), 0 1px 0 rgba(255,255,255,0.02)";
+        aura.style.left = "9px";
         aura.style.right = "auto";
-        aura.style.width = "38px";
+        aura.style.width = "30px";
         aura.style.borderRadius = "999px";
         aura.style.background = `radial-gradient(ellipse at 22% 50%, ${option.accent}24 0, ${option.accent}12 36%, ${option.accent}04 61%, transparent 80%)`;
-        aura.style.opacity = "0.24";
+        aura.style.opacity = "0.14";
         button.style.transform = "translateY(0)";
       };
 
@@ -3459,19 +3428,20 @@
     sheet.appendChild(grid);
 
     const footer = document.createElement("div");
-    footer.textContent = "Pastes only · You review before sending";
+    footer.textContent = DESTINATION_HELPER_TEXT;
     footer.style.cssText = [
-      "margin:12px 2px 1px",
-      "padding-top:10px",
+      "margin:9px 1px 1px",
+      "padding-top:7px",
       "padding-bottom:1px",
       "border-top:1px solid rgba(255,255,255,0.065)",
-      "color:rgba(255,255,255,0.47)",
-      "font-family:inherit",
-      "font-size:10.5px",
-      "font-weight:520",
+      "color:rgba(255,255,255,0.42)",
+      "font-family:Georgia,'Times New Roman',serif",
+      "font-size:9.5px",
+      "font-weight:500",
       "line-height:1.35",
       "letter-spacing:0",
       "text-align:center",
+      "text-rendering:geometricPrecision",
       "white-space:nowrap",
       "overflow:hidden",
       "text-overflow:ellipsis"
@@ -3622,17 +3592,17 @@
       tile.dataset.contextGeneratorLoading = "false";
       tile.removeAttribute("aria-busy");
       tile.style.pointerEvents = "";
-      tile.style.background = "linear-gradient(180deg,rgba(255,255,255,0.055) 0%,rgba(255,255,255,0.022) 100%)";
-      tile.style.borderColor = "rgba(255,255,255,0.11)";
-      tile.style.boxShadow = "inset 0 1px 0 rgba(255,255,255,0.065), 0 1px 1px rgba(0,0,0,0.32)";
+      tile.style.background = "linear-gradient(180deg, #121212 0%, #0b0b0b 58%, #050505 100%)";
+      tile.style.borderColor = "rgba(255,255,255,0.115)";
+      tile.style.boxShadow = "inset 0 1px 0 rgba(255,255,255,0.075), inset 0 -1px 0 rgba(0,0,0,0.54), 0 1px 0 rgba(255,255,255,0.02)";
       tile.style.transform = "translateY(0)";
       if (aura) {
-        aura.style.left = "10px";
+        aura.style.left = "9px";
         aura.style.right = "auto";
-        aura.style.width = "38px";
+        aura.style.width = "30px";
         aura.style.borderRadius = "999px";
         aura.style.background = `radial-gradient(ellipse at 22% 50%, ${accent}24 0, ${accent}12 36%, ${accent}04 61%, transparent 80%)`;
-        aura.style.opacity = "0.24";
+        aura.style.opacity = "0.14";
       }
       const detail = tile.querySelector(".context-generator-tile-detail");
       const spinner = tile.querySelector(".context-generator-tile-spinner");
