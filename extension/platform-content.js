@@ -94,7 +94,6 @@
   const PASTE_VERIFY_TIMEOUT_MS = 1000;
   const CHATGPT_PASTE_VERIFY_TIMEOUT_MS = 1500;
   const CHATGPT_PASTE_STABILITY_MS = 550;
-  const WARM_SUMMARY_EXPIRES_AT = Number.POSITIVE_INFINITY;
   const HANDOFF_STATUS_INTERVAL_MS = 1850;
   const HANDOFF_COUNTDOWN_ID = "context-generator-handoff-countdown";
   const HANDOFF_COUNTDOWN_FIXED_MS = 20000;
@@ -392,7 +391,6 @@
   let floatingButtonFrame = null;
   let floatingButtonObserver = null;
   let floatingButtonMonitoringDisabled = false;
-  let warmSummary = null;
   let handoffStatusTimer = null;
   let handoffCountdownTimer = null;
   let handoffCountdownHideTimer = null;
@@ -400,7 +398,6 @@
   let onboardingTimer = null;
   let onboardingDismissedThisSession = false;
   let claudeLimitNudgeDismissedUntilLimitClears = false;
-  let activeTransferTrace = null;
   let transferTraceSequence = 0;
   let lastConversationCaptureMetrics = null;
   let sourceScrollTargetsCache = null;
@@ -474,7 +471,7 @@
       sendResponse({ ok: true });
       const trace = createTransferTrace(destination, "extension icon");
       markTransferTrace(trace, "click", { source: "extension icon" });
-      runContextFlow(destination, null, null, null, trace);
+      runContextFlow(destination, null, null, trace);
       return false;
     }
 
@@ -492,8 +489,6 @@
       getGeminiBubblePlacement,
       findGeminiModelSelectorButton,
       limitConversationText,
-      getConversationFingerprint,
-      getSummaryForTransfer,
       prepareSourceForCapture,
       waitForConversationCaptureToSettle,
       expandCollapsedConversationContent,
@@ -510,7 +505,7 @@
     startFloatingButtonMonitoring();
   }
 
-  async function runContextFlow(destinationId, preparedDestinationPromise = null, warmSummaryRecord = null, scrapedConversationText = null, trace = null) {
+  async function runContextFlow(destinationId, preparedDestinationPromise = null, scrapedConversationText = null, trace = null) {
     const transferTrace = trace || createTransferTrace(destinationId, "transfer");
     transferTrace.destinationId = destinationId;
     let transferStage = "capture";
@@ -544,7 +539,7 @@
         showOverlay(destinationId);
       }
       transferStage = "summary";
-      summary = await getSummaryForTransfer(conversationText, warmSummaryRecord, transferTrace);
+      summary = await summarizeWithBackend(conversationText, transferTrace);
       markTransferTrace(transferTrace, "summary available", { chars: summary.length });
       setHandoffStatus(`Preparing ${destination?.name || "destination"}`);
       transferStage = "destination";
@@ -621,143 +616,6 @@
       background: timing
     });
     return { summary, timing };
-  }
-
-  async function getSummaryForTransfer(conversationText, warmSummaryRecord = null, trace = null) {
-    const fingerprint = getConversationFingerprint(conversationText);
-    const candidate = warmSummaryRecord || warmSummary;
-
-    if (isWarmSummaryUsable(candidate, fingerprint)) {
-      const summary = candidate.summary || await candidate.promise;
-      if (summary && candidate.fingerprint === fingerprint) {
-        const targetTrace = trace || candidate.trace;
-        const summaryTiming = candidate.summaryTiming || getSummaryTimingFromTrace(candidate.trace);
-        if (targetTrace && summaryTiming && !getSummaryTimingFromTrace(targetTrace)) {
-          markTransferTrace(targetTrace, "summary done", {
-            chars: summary.length,
-            background: summaryTiming
-          });
-        }
-        markTransferTrace(targetTrace, "summary reused", {
-          source: candidate.summary ? "completed warm summary" : "warm summary promise",
-          chars: summary.length
-        });
-        clearWarmSummary();
-        return summary;
-      }
-    }
-
-    if (candidate) clearWarmSummary();
-    return summarizeWithBackend(conversationText, trace);
-  }
-
-  function startSheetOpenWarmSummary() {
-    if (isRunning) return;
-    const trace = createTransferTrace(null, "Cap-Context button");
-    activeTransferTrace = trace;
-    markTransferTrace(trace, "click", { source: "Cap-Context button" });
-    const record = startWarmSummary(null, trace);
-    if (!record) activeTransferTrace = null;
-    return record;
-  }
-
-  function scheduleWarmSummary() {
-    return startSheetOpenWarmSummary();
-  }
-
-  function startWarmSummary(conversationText = null, trace = null) {
-    if (isRunning) return;
-
-    if (!conversationText) {
-      try {
-        markTransferTrace(trace, "capture start");
-        conversationText = scrapeConversationText();
-        markCaptureDone(trace, conversationText);
-      } catch (error) {
-        logTransferDebug(`Warm summary skipped. ${error.message}`);
-        return null;
-      }
-
-      if (shouldSweepVirtualConversation()) {
-        const record = {
-          fingerprint: getConversationFingerprint(conversationText),
-          startedAt: Date.now(),
-          expiresAt: WARM_SUMMARY_EXPIRES_AT,
-          summary: null,
-          summaryTiming: null,
-          promise: null,
-          settled: true,
-          deferred: true,
-          trace
-        };
-        warmSummary = record;
-        logTransferDebug("Warm summary deferred until the full virtualized chat is captured.");
-        return record;
-      }
-    }
-
-    const fingerprint = getConversationFingerprint(conversationText);
-    if (isWarmSummaryUsable(warmSummary, fingerprint)) return warmSummary;
-
-    clearWarmSummary();
-    const record = {
-      fingerprint,
-      startedAt: Date.now(),
-      expiresAt: WARM_SUMMARY_EXPIRES_AT,
-      summary: null,
-      summaryTiming: null,
-      promise: null,
-      settled: false,
-      deferred: false,
-      trace
-    };
-
-    record.promise = requestBackendSummary(conversationText, trace)
-      .then((result) => {
-        record.settled = true;
-        const summary = result.summary;
-        record.summaryTiming = result.timing;
-        if (warmSummary === record) {
-          record.summary = summary;
-        }
-        return summary;
-      })
-      .catch((error) => {
-        record.settled = true;
-        if (warmSummary === record) {
-          logTransferDebug(`Warm summary failed. ${error.message}`);
-          clearWarmSummary();
-        }
-        return null;
-      });
-
-    warmSummary = record;
-    return record;
-  }
-
-  function ensureWarmSummaryForConversation(conversationText, trace = null) {
-    const fingerprint = getConversationFingerprint(conversationText);
-    if (isWarmSummaryUsable(warmSummary, fingerprint)) return warmSummary;
-
-    return startWarmSummary(conversationText, trace);
-  }
-
-  function isWarmSummaryUsable(record, fingerprint) {
-    return Boolean(
-      record &&
-      !record.deferred &&
-      record.fingerprint === fingerprint &&
-      (Date.now() <= record.expiresAt || (record.promise && !record.settled))
-    );
-  }
-
-  function clearWarmSummary() {
-    warmSummary = null;
-  }
-
-  function getConversationFingerprint(text) {
-    const cleaned = cleanText(text);
-    return `${cleaned.length}:${cleaned.slice(0, 180)}:${cleaned.slice(-220)}`;
   }
 
   function prepareDestinationTab(destinationId, trace = null) {
@@ -1142,9 +1000,6 @@
       detail: JSON.stringify(formatTraceDetail(mark.detail))
     }));
     console.debug(`[Context Generator Perf ${trace.id}] total ${totalMs}ms`, rows);
-    if (activeTransferTrace === trace) {
-      activeTransferTrace = null;
-    }
   }
 
   function formatTraceDetail(detail) {
@@ -1155,15 +1010,6 @@
   function logTransferPerf(id, label, detail = null) {
     const suffix = detail ? ` ${JSON.stringify(formatTraceDetail(detail))}` : "";
     console.debug(`[Context Generator Perf ${id || "no-trace"}] ${label}${suffix}`);
-  }
-
-  function getActiveTransferTraceForConversation(conversationText) {
-    const fingerprint = getConversationFingerprint(conversationText);
-    if (isWarmSummaryUsable(warmSummary, fingerprint) && warmSummary.trace) {
-      return warmSummary.trace;
-    }
-    if (activeTransferTrace) return activeTransferTrace;
-    return createTransferTrace(null, "destination tile");
   }
 
   function appendBackgroundMarks(trace, marks = []) {
@@ -3527,8 +3373,6 @@
       return;
     }
 
-    scheduleWarmSummary();
-
     const sheet = ensureDestinationSheet();
     if (destinationSheetAnimationFrame) cancelAnimationFrame(destinationSheetAnimationFrame);
     sheet.style.opacity = "0";
@@ -3677,7 +3521,7 @@
     hideDestinationSheet();
     if (isRunning) return;
 
-    const trace = activeTransferTrace || warmSummary?.trace || createTransferTrace(destinationId, "destination tile");
+    const trace = createTransferTrace(destinationId, "destination tile");
     trace.destinationId = destinationId;
     markTransferTrace(trace, "destination click", { destination: destinationId });
 
@@ -3701,7 +3545,6 @@
       conversationText = await scrapeConversationTextWhenReady();
       markCaptureDone(trace, conversationText);
     } catch (error) {
-      clearWarmSummary();
       markTransferTrace(trace, `failed: ${error.message}`);
       finishTransferTrace(trace);
       resetRunningFlag();
@@ -3709,9 +3552,8 @@
       return;
     }
 
-    const warmSummaryRecord = ensureWarmSummaryForConversation(conversationText, trace);
     preparedDestinationPromise = preparedDestinationPromise || prepareDestinationTab(destinationId, trace);
-    runContextFlow(destinationId, preparedDestinationPromise, warmSummaryRecord, conversationText, trace);
+    runContextFlow(destinationId, preparedDestinationPromise, conversationText, trace);
   }
 
   function ensureFloatingOverlay() {

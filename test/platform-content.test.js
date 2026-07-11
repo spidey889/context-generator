@@ -912,70 +912,21 @@ test("source capture prep waits when message characters grow without a new turn"
   assert.match(transcript, /older loaded details that arrive after the first scroll/);
 });
 
-test("in-flight warm summary is reused even after its freshness window passes", async () => {
-  const hooks = loadPlatformContent([]);
-  const conversation = "ChatGPT conversation:\n\nUser: " + "Keep the warm summary result.";
-  const record = {
-    fingerprint: hooks.getConversationFingerprint(conversation),
-    startedAt: Date.now() - 120000,
-    expiresAt: Date.now() - 1,
-    summary: null,
-    promise: Promise.resolve("CONTEXT CARRY\n\nWHO I AM\nWarm summary result"),
-    settled: false,
-    trace: null
-  };
+test("opening the destination picker does not scrape or summarize", () => {
+  const source = fs.readFileSync(SOURCE_PATH, "utf8");
+  const pickerStart = source.indexOf("function toggleDestinationSheet()");
+  const pickerEnd = source.indexOf("function warmDestinationConnections()", pickerStart);
+  const pickerSource = source.slice(pickerStart, pickerEnd);
 
-  const summary = await hooks.getSummaryForTransfer(conversation, record, null);
-
-  assert.match(summary, /Warm summary result/);
-});
-
-test("reused warm summary carries backend timing into the transfer trace", async () => {
-  const hooks = loadPlatformContent([]);
-  const conversation = "ChatGPT conversation:\n\nUser: Keep timing metadata.";
-  const trace = {
-    id: "test-trace",
-    startedAt: 0,
-    lastAt: null,
-    marks: []
-  };
-  const record = {
-    fingerprint: hooks.getConversationFingerprint(conversation),
-    startedAt: Date.now(),
-    expiresAt: Date.now() + 10000,
-    summary: "CONTEXT CARRY\n\nWHO I AM\nWarm summary with timing",
-    summaryTiming: {
-      source: "backend",
-      requestChars: conversation.length,
-      backendInputChars: conversation.length,
-      chars: 55,
-      backend: {
-        inputChars: conversation.length,
-        outputChars: 55,
-        model: "ministral-3b-2512",
-        profile: "small",
-        summaryWordCount: 8
-      }
-    },
-    promise: Promise.resolve("CONTEXT CARRY\n\nWHO I AM\nWarm summary with timing"),
-    settled: true,
-    trace: null
-  };
-
-  const summary = await hooks.getSummaryForTransfer(conversation, record, trace);
-
-  assert.match(summary, /Warm summary with timing/);
-  assert.equal(trace.marks[0].label, "summary done");
-  assert.equal(trace.marks[0].detail.background.backend.model, "ministral-3b-2512");
-  assert.equal(trace.marks[1].label, "summary reused");
+  assert.ok(pickerStart >= 0 && pickerEnd > pickerStart);
+  assert.doesNotMatch(source, /warmSummary|scheduleWarmSummary|startWarmSummary|ensureWarmSummaryForConversation/);
+  assert.doesNotMatch(pickerSource, /scrapeConversation|requestBackendSummary|summarizeWithBackend/);
 });
 
 test("transfer safety window covers long quality summaries", () => {
   const source = fs.readFileSync(SOURCE_PATH, "utf8");
 
   assert.match(source, /const RUNNING_AUTO_RESET_MS = 240000/);
-  assert.match(source, /const WARM_SUMMARY_EXPIRES_AT = Number\.POSITIVE_INFINITY/);
-  assert.doesNotMatch(source, /warmSummaryExpireTimer\s*=\s*window\.setTimeout/);
 });
 
 test("latest-run receipt preserves the Mistral fallback chain", () => {
