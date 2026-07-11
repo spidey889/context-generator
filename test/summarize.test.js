@@ -7,6 +7,8 @@ const summarize = require("../api/summarize.js");
 
 const {
   normalizeContextCarrySummary,
+  validateContextCarrySummary,
+  getMinimumValidSummaryWords,
   stripContextCarryFooter,
   countWords,
   getSummaryProfile,
@@ -18,15 +20,7 @@ const SUMMARIZE_SOURCE = fs.readFileSync(path.join(__dirname, "..", "api", "summ
 test("normalizes summary into the required Context Carry shape", () => {
   const raw = [
     "```markdown",
-    "# Context Carry - Ready to Paste",
-    "WHO I AM",
-    "Building a browser extension.",
-    "",
-    "WHAT WE WERE DOING",
-    "Adding regression tests.",
-    "",
-    "NEXT STEP",
-    "Keep coding.",
+    makeContextCarrySummary("normalize", 90),
     "---",
     "PASTE THIS AT THE TOP OF YOUR NEW CHAT",
     "```"
@@ -35,8 +29,8 @@ test("normalizes summary into the required Context Carry shape", () => {
   const normalized = normalizeContextCarrySummary(raw);
 
   assert.match(normalized, /CONTEXT CARRY/);
-  assert.match(normalized, /WHO I AM\nBuilding a browser extension\./);
-  assert.match(normalized, /WHAT WE WERE DOING\nAdding regression tests\./);
+  assert.match(normalized, /WHO I AM\nnormalize0 normalize1/);
+  assert.match(normalized, /WHAT WE WERE DOING\nDetailed work remains preserved\./);
   assert.doesNotMatch(normalized, /PASTE THIS AT THE TOP/i);
   assert.match(
     normalized,
@@ -558,6 +552,50 @@ test("backend falls back to Groq when Mistral returns an empty summary", async (
   }
 });
 
+test("backend advances through the existing model chain when validation rejects output", async () => {
+  const originalFetch = global.fetch;
+  const restoreApiKey = setTemporaryEnv("MISTRAL_API_KEY", "test-mistral-key");
+  const conversation = "validation fallback context ".repeat(180);
+  const requests = [];
+
+  global.fetch = async (_url, options) => {
+    const body = JSON.parse(options.body);
+    requests.push(body);
+    return {
+      ok: true,
+      status: 200,
+      json: async () => ({
+        choices: [{
+          message: {
+            content: requests.length === 1
+              ? "I'm sorry, but I cannot create that summary."
+              : makeContextCarrySummary("validated-fallback", 180)
+          }
+        }]
+      })
+    };
+  };
+
+  const res = createMockResponse();
+
+  try {
+    await summarize({ method: "POST", body: { conversation } }, res);
+
+    assert.equal(res.statusCode, 200);
+    assert.equal(requests.length, 2);
+    assert.deepEqual(requests.map((request) => request.model), [
+      "mistral-medium-2604",
+      "mistral-large-2512"
+    ]);
+    assert.equal(res.payload.timing.model, "mistral-large-2512");
+    assert.match(res.payload.timing.modelReason, /mistral-medium-2604 failed/);
+    assert.match(res.payload.summary, /validated-fallback/);
+  } finally {
+    restoreApiKey();
+    global.fetch = originalFetch;
+  }
+});
+
 test("backend advances to the next model after a timed-out Mistral attempt", async () => {
   const originalFetch = global.fetch;
   const restoreApiKey = setTemporaryEnv("MISTRAL_API_KEY", "test-mistral-key");
@@ -608,7 +646,7 @@ test("backend returns the first large summary without a second expansion request
   const originalFetch = global.fetch;
   const originalApiKey = process.env.MISTRAL_API_KEY;
   const conversation = "substantial context ".repeat(4000);
-  const shortSummary = makeContextCarrySummary("short", 120);
+  const shortSummary = makeContextCarrySummary("short", 220);
   const requests = [];
 
   process.env.MISTRAL_API_KEY = "test-key";
@@ -660,12 +698,34 @@ test("backend returns the first large summary without a second expansion request
   }
 });
 
-test("puts free-form model output into KEY CONTEXT instead of returning loose text", () => {
+test("normalizer refuses to disguise free-form output as a valid Context Carry", () => {
   const normalized = normalizeContextCarrySummary("User is debugging paste reliability.");
 
-  assert.match(normalized, /WHO I AM\nNone/);
-  assert.match(normalized, /KEY CONTEXT\nUser is debugging paste reliability\./);
-  assert.match(normalized, /NEXT STEP\nReply only:/);
+  assert.equal(normalized, "");
+});
+
+test("deterministic validation rejects malformed, empty, short, and refusal output", () => {
+  const smallProfile = getSummaryProfile("x".repeat(4000));
+  const valid = makeContextCarrySummary("valid", 90);
+  const missingSection = valid.replace(/WHERE WE LEFT OFF[\s\S]*?DECISIONS MADE/, "DECISIONS MADE");
+  const emptyImportant = valid.replace("Detailed work remains preserved.", "None");
+  const tooShort = makeContextCarrySummary("tiny", 3);
+  const refusal = valid
+    .replace(/WHO I AM[\s\S]*?WHAT WE WERE DOING/, "WHO I AM\nI'm sorry, but I cannot provide that summary.\n\nWHAT WE WERE DOING")
+    .replace(/WHAT WE WERE DOING[\s\S]*?WHERE WE LEFT OFF/, "WHAT WE WERE DOING\nRequest failed because the service is unavailable.\n\nWHERE WE LEFT OFF");
+  const apiError = valid
+    .replace(/WHO I AM[\s\S]*?WHAT WE WERE DOING/, "WHO I AM\nAPI error 503: service unavailable.\n\nWHAT WE WERE DOING")
+    .replace(/WHAT WE WERE DOING[\s\S]*?WHERE WE LEFT OFF/, "WHAT WE WERE DOING\nRequest failed because the service is unavailable.\n\nWHERE WE LEFT OFF");
+
+  assert.equal(validateContextCarrySummary(valid, smallProfile).ok, true);
+  assert.match(validateContextCarrySummary(missingSection, smallProfile).reason, /required sections/);
+  assert.match(validateContextCarrySummary(emptyImportant, smallProfile).reason, /WHAT WE WERE DOING is empty/);
+  assert.match(validateContextCarrySummary(tooShort, smallProfile).reason, /suspiciously short/);
+  assert.match(validateContextCarrySummary(refusal, smallProfile).reason, /refusal/);
+  assert.match(validateContextCarrySummary(apiError, smallProfile).reason, /API error/);
+  assert.equal(getMinimumValidSummaryWords(smallProfile), 80);
+  assert.equal(getMinimumValidSummaryWords(getSummaryProfile("x".repeat(20000))), 140);
+  assert.equal(getMinimumValidSummaryWords(getSummaryProfile("x".repeat(90000))), 200);
 });
 
 test("strips old copy-paste footer lines", () => {
@@ -689,10 +749,10 @@ function makeContextCarrySummary(word, wordCount) {
     words,
     "",
     "WHAT WE WERE DOING",
-    "Details preserved.",
+    "Detailed work remains preserved.",
     "",
     "WHERE WE LEFT OFF",
-    "Ready for continuation.",
+    "Ready for exact continuation.",
     "",
     "DECISIONS MADE",
     "- Continue.",
@@ -701,10 +761,10 @@ function makeContextCarrySummary(word, wordCount) {
     "None",
     "",
     "KEY CONTEXT",
-    "- Useful context.",
+    "- Useful concrete context remains available.",
     "",
     "NEXT STEP",
-    "Continue."
+    'Reply only: "Context loaded. Let\'s pick up right where you left off." Then wait for the user.'
   ].join("\n");
 }
 

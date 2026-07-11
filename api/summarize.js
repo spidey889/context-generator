@@ -104,6 +104,14 @@ const CONTEXT_CARRY_SECTIONS = [
   { title: "KEY CONTEXT", heading: "📦 KEY CONTEXT" },
   { title: "NEXT STEP", heading: "🔁 NEXT STEP" }
 ];
+const IMPORTANT_CONTEXT_CARRY_SECTIONS = new Set([
+  "WHO I AM",
+  "WHAT WE WERE DOING",
+  "WHERE WE LEFT OFF",
+  "KEY CONTEXT"
+]);
+const SUSPICIOUS_SUMMARY_ERROR_PATTERN = /^(?:error\b|api\s+error\b|request\s+failed\b|service\s+unavailable\b|internal\s+server\s+error\b|rate\s+limit(?:ed)?\b|invalid\s+request\b|unauthorized\b|forbidden\b)/i;
+const SUSPICIOUS_SUMMARY_REFUSAL_PATTERN = /^(?:i(?:'m|\s+am)\s+(?:sorry|unable)\b|i\s+(?:can't|cannot|won't)\b|sorry[, ]|as\s+an\s+ai\b)/i;
 const DESTINATION_CONFIRMATION_INSTRUCTION =
   'Reply only: "Context loaded. Let\'s pick up right where you left off." Then wait for the user.';
 
@@ -228,6 +236,8 @@ module.exports = handler;
 module.exports.__test = {
   normalizeContextCarrySummary,
   normalizeContextCarrySections,
+  validateContextCarrySummary,
+  getMinimumValidSummaryWords,
   stripContextCarryFooter,
   countWords,
   getSummaryProfile,
@@ -364,10 +374,20 @@ async function createSummaryWithProvider({ provider, apiKey, profile, model, ini
   const data = await readResponseJson(initialResponse, provider);
   const finishReason = data.choices?.[0]?.finish_reason || null;
   const initialUsage = normalizeProviderUsage(data.usage);
-  const summary = normalizeContextCarrySummary(data.choices?.[0]?.message?.content);
+  const rawSummary = String(data.choices?.[0]?.message?.content || "");
 
-  if (!summary) {
+  if (!rawSummary.trim()) {
     throw createProviderError(provider, `${provider.label} returned an empty summary`, 502);
+  }
+
+  const validation = validateContextCarrySummary(rawSummary, profile);
+  if (!validation.ok) {
+    throw createProviderError(provider, `${provider.label} returned an invalid summary: ${validation.reason}`, 502);
+  }
+
+  const summary = normalizeContextCarrySummary(rawSummary);
+  if (!summary) {
+    throw createProviderError(provider, `${provider.label} returned an invalid summary: normalization failed`, 502);
   }
 
   const expansion = {
@@ -720,7 +740,7 @@ function normalizeContextCarrySummary(text) {
   if (!withoutFooter.trim()) return "";
   const normalizedBody = normalizeContextCarrySections(body);
 
-  return normalizedBody ? `${CONTEXT_CARRY_BOX_HEADER}\n\n${normalizedBody}` : CONTEXT_CARRY_BOX_HEADER;
+  return normalizedBody ? `${CONTEXT_CARRY_BOX_HEADER}\n\n${normalizedBody}` : "";
 }
 
 function stripExistingContextCarryHeader(text) {
@@ -767,13 +787,31 @@ function stripContextCarryFooter(text) {
 }
 
 function normalizeContextCarrySections(text) {
+  const parsed = parseContextCarrySections(text);
+  if (!hasEveryRequiredSectionOnceInOrder(parsed)) return "";
+
+  return CONTEXT_CARRY_SECTIONS
+    .map((section) => {
+      const content = section.title === "NEXT STEP"
+        ? DESTINATION_CONFIRMATION_INSTRUCTION
+        : parsed.sections.get(section.title)?.trim() || "";
+      return `${section.heading}\n${content}`;
+    })
+    .join("\n\n")
+    .trim();
+}
+
+function parseContextCarrySections(text) {
   const sections = new Map();
   const introLines = [];
+  const order = [];
+  const duplicates = new Set();
   let currentSection = null;
   let currentLines = [];
 
   const flushSection = () => {
     if (!currentSection) return;
+    if (sections.has(currentSection.title)) duplicates.add(currentSection.title);
     sections.set(currentSection.title, currentLines.join("\n").trim());
     currentSection = null;
     currentLines = [];
@@ -786,6 +824,7 @@ function normalizeContextCarrySections(text) {
     if (headingMatch) {
       flushSection();
       currentSection = headingMatch.section;
+      order.push(headingMatch.section.title);
       currentLines = headingMatch.inlineContent ? [headingMatch.inlineContent] : [];
       return;
     }
@@ -798,18 +837,97 @@ function normalizeContextCarrySections(text) {
   });
   flushSection();
 
-  if (!sections.size) {
-    sections.set("KEY CONTEXT", text.trim() || "None");
-    sections.set("NEXT STEP", "Context loaded. Let's pick up right where you left off.");
-  } else if (introLines.length && !sections.get("KEY CONTEXT")) {
-    sections.set("KEY CONTEXT", introLines.join("\n").trim());
-  }
-  sections.set("NEXT STEP", DESTINATION_CONFIRMATION_INSTRUCTION);
+  return { sections, order, duplicates, introLines };
+}
 
-  return CONTEXT_CARRY_SECTIONS
-    .map((section) => `${section.heading}\n${sections.get(section.title)?.trim() || "None"}`)
-    .join("\n\n")
-    .trim();
+function hasEveryRequiredSectionOnceInOrder(parsed) {
+  const expectedOrder = CONTEXT_CARRY_SECTIONS.map((section) => section.title);
+  return (
+    parsed.duplicates.size === 0 &&
+    parsed.order.length === expectedOrder.length &&
+    parsed.order.every((title, index) => title === expectedOrder[index])
+  );
+}
+
+function validateContextCarrySummary(text, profile) {
+  const withoutFence = stripWrappingCodeFence(String(text || ""));
+  const withoutFooter = stripContextCarryFooter(withoutFence);
+  if (!withoutFooter.trim()) return { ok: false, reason: "empty output" };
+  if (!hasContextCarryHeader(withoutFooter)) return { ok: false, reason: "missing Context Carry header" };
+
+  const body = stripExistingContextCarryHeader(withoutFooter);
+  const parsed = parseContextCarrySections(body);
+  if (parsed.duplicates.size) {
+    return { ok: false, reason: `duplicate section: ${Array.from(parsed.duplicates)[0]}` };
+  }
+  if (!hasEveryRequiredSectionOnceInOrder(parsed)) {
+    return { ok: false, reason: "required sections are missing or out of order" };
+  }
+  if (parsed.introLines.some((line) => line.trim())) {
+    return { ok: false, reason: "unexpected content outside required sections" };
+  }
+
+  for (const title of IMPORTANT_CONTEXT_CARRY_SECTIONS) {
+    if (!isMeaningfulSummaryContent(parsed.sections.get(title))) {
+      return { ok: false, reason: `${title} is empty or contains no meaningful content` };
+    }
+  }
+
+  const nextStep = normalizeValidationWhitespace(parsed.sections.get("NEXT STEP"));
+  if (nextStep !== normalizeValidationWhitespace(DESTINATION_CONFIRMATION_INSTRUCTION)) {
+    return { ok: false, reason: "NEXT STEP does not match the required instruction" };
+  }
+
+  const substantiveBodies = CONTEXT_CARRY_SECTIONS
+    .filter((section) => section.title !== "NEXT STEP")
+    .map((section) => parsed.sections.get(section.title)?.trim() || "")
+    .filter((content) => content && !/^none\.?$/i.test(content));
+  const refusalSections = substantiveBodies.filter((content) => {
+    return countWords(content) <= 40 && SUSPICIOUS_SUMMARY_REFUSAL_PATTERN.test(stripListPrefix(content));
+  });
+  if (refusalSections.length) {
+    return { ok: false, reason: "output appears to contain a refusal instead of a summary" };
+  }
+
+  const errorSections = substantiveBodies.filter((content) => {
+    return countWords(content) <= 40 && SUSPICIOUS_SUMMARY_ERROR_PATTERN.test(stripListPrefix(content));
+  });
+  if (errorSections.length >= 2) {
+    return { ok: false, reason: "output appears to contain an API error instead of a summary" };
+  }
+
+  const actualWordCount = countWords(substantiveBodies.join(" "));
+  const minimumWords = getMinimumValidSummaryWords(profile);
+  if (actualWordCount < minimumWords) {
+    return { ok: false, reason: `suspiciously short output (${actualWordCount} words; minimum ${minimumWords})` };
+  }
+
+  return { ok: true, reason: null, actualWordCount, minimumWords };
+}
+
+function hasContextCarryHeader(text) {
+  return CONTEXT_CARRY_HEADER_PATTERN.test(text) || text.split(/\r?\n/).some((line) => {
+    return /CONTEXT\s+CARRY\s*(?:â€”|â€“|-|--)?\s*READY\s+TO\s+PASTE/i.test(line);
+  });
+}
+
+function isMeaningfulSummaryContent(content) {
+  const cleaned = stripListPrefix(String(content || "").trim());
+  if (!cleaned || /^none\.?$/i.test(cleaned)) return false;
+  if (/^\[[\s\S]*\]$/.test(cleaned)) return false;
+  return countWords(cleaned) >= 3 && /[\p{L}\p{N}]/u.test(cleaned);
+}
+
+function stripListPrefix(content) {
+  return String(content || "").replace(/^(?:[-*+]\s+|\d+[.)]\s+)/, "").trim();
+}
+
+function normalizeValidationWhitespace(content) {
+  return String(content || "").trim().replace(/\s+/g, " ");
+}
+
+function getMinimumValidSummaryWords(profile = SUMMARY_PROFILES[1]) {
+  return Math.max(80, Math.min(200, Math.floor(Number(profile?.targetWords || 0) * 0.2)));
 }
 
 function getContextCarrySectionMatch(line) {
