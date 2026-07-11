@@ -67,6 +67,14 @@ Run the regression tests:
 npm test
 ```
 
+Run the complete release gate, including live summary accuracy and latency:
+
+```bash
+npm run gate
+```
+
+The versioned cases in `evaluation/cases.json` require at least 90% expected-fact recall, zero forbidden/incorrect facts, valid Context Carry structure, complete DOM capture, and per-case plus total latency budgets. `npm test` runs the deterministic capture gate; `npm run eval` sends the same cases to `EVAL_ENDPOINT` or the production endpoint by default. GitHub Actions also runs the complete gate after pushes to `master`, daily, and on demand.
+
 The test suite covers the core pieces most likely to regress:
 
 - Endpoint security, limits, prompt isolation, and provider fallback
@@ -85,6 +93,8 @@ The test suite covers the core pieces most likely to regress:
 | `api/summarize.js` | Vercel summarization endpoint |
 | `api/request-security.js` | Endpoint CORS, schema, size, rate, and concurrency controls |
 | `test/` | Minimal Node regression tests |
+| `evaluation/cases.json` | Versioned accuracy, capture, and latency evaluation set |
+| `scripts/run-regression-eval.js` | Live summary regression scorer |
 | `LOGIC.md` | Current production architecture and behavior |
 | `CHANGELOG.md` | Historical decisions and replaced approaches |
 | `PRIVACY.md` | Current data handling and privacy policy |

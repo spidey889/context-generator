@@ -1,0 +1,85 @@
+{
+  "version": 1,
+  "thresholds": {
+    "minimumFactRecall": 0.9,
+    "maximumIncorrectFacts": 0,
+    "maximumTotalMs": 90000
+  },
+  "cases": [
+    {
+      "id": "small-product-handoff",
+      "platform": "chatgpt.com",
+      "maxLatencyMs": 30000,
+      "paddingRepeat": 6,
+      "paddingText": "Background implementation note: the existing release checklist includes lint, unit tests, packaging, artifact review, and manual destination verification. These details are context, not a replacement for the requested evaluation gate.",
+      "turns": [
+        { "role": "user", "text": "Project Atlas is a Brave extension. The production branch is master and the release endpoint is https://atlas.example/api/carry. Preserve the exact 160,000-character server limit." },
+        { "role": "assistant", "text": "Understood. I will keep the server limit at 160,000 characters and avoid changing runtime code." },
+        { "role": "user", "text": "Decision: use Pinecone only for search, not authentication. The unresolved task is adding a deterministic regression gate. Do not rename Project Atlas." },
+        { "role": "assistant", "text": "The next step is to add the regression gate while keeping Pinecone limited to search." },
+        { "role": "user", "text": "Extra implementation context: the gate must measure retained facts, incorrect facts, complete capture, and transfer latency. It must run from one command before release." }
+      ],
+      "requiredFacts": [
+        "Project Atlas",
+        "Brave extension",
+        "master",
+        "https://atlas.example/api/carry",
+        "160,000",
+        "Pinecone",
+        "search",
+        "deterministic regression gate",
+        "retained facts",
+        "incorrect facts",
+        "complete capture",
+        "transfer latency"
+      ],
+      "forbiddenFacts": [
+        "Project Apollo",
+        "Chrome-only extension",
+        "main branch",
+        "Pinecone for authentication",
+        "80,000-character"
+      ]
+    },
+    {
+      "id": "medium-incident-handoff",
+      "platform": "claude.ai",
+      "maxLatencyMs": 60000,
+      "paddingRepeat": 48,
+      "paddingText": "Worker trace context: the export queue accepts jobs, renders invoices successfully, and reaches the upload phase before the oversized CSV timeout. Monitoring continues to show healthy database writes and no customer-data corruption.",
+      "turns": [
+        { "role": "user", "text": "Incident ORBIT-427 affects the billing export worker in eu-west-1. It began at 14:35 UTC after commit 7ac91ef. Customer data is intact." },
+        { "role": "assistant", "text": "The worker is timing out while uploading CSV files larger than 24 MB. Database writes and invoice generation are healthy." },
+        { "role": "user", "text": "We rejected increasing the global timeout. The accepted mitigation is multipart uploads with 8 MB parts and at most 3 concurrent parts." },
+        { "role": "assistant", "text": "Rollback is not approved because 7ac91ef also contains the required tax fix. I will preserve that constraint." },
+        { "role": "user", "text": "Owner is Mira. The open question is whether retry jitter should be 250-750 ms or 500-1500 ms. Next validation uses fixture enterprise-2026-07.csv." },
+        { "role": "assistant", "text": "Current status: implementation has not started. Next step is a focused multipart-upload patch and a test using enterprise-2026-07.csv." },
+        { "role": "user", "text": "Keep these exact facts in the handoff. Do not claim data loss, do not approve rollback, and do not change the incident region." }
+      ],
+      "requiredFacts": [
+        "ORBIT-427",
+        "billing export worker",
+        "eu-west-1",
+        "14:35 UTC",
+        "7ac91ef",
+        ["Customer data is intact", "no customer-data corruption", "no data loss"],
+        "24 MB",
+        "multipart uploads",
+        "8 MB",
+        "3 concurrent",
+        "Mira",
+        "250-750 ms",
+        "500-1500 ms",
+        "enterprise-2026-07.csv",
+        "implementation has not started"
+      ],
+      "forbiddenFacts": [
+        "data was lost",
+        "rollback is approved",
+        "ORBIT-999",
+        "16 MB parts",
+        "owner is Alex"
+      ]
+    }
+  ]
+}

@@ -2,6 +2,8 @@
   "name": "context-generator",
   "private": true,
   "scripts": {
-    "test": "node --test"
+    "test": "node --test",
+    "eval": "node scripts/run-regression-eval.js",
+    "gate": "npm test && npm run eval"
   }
 }

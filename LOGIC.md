@@ -12,6 +12,9 @@ This is the single source of truth for current production behavior. Historical d
 - `api/summarize.js`: profiles, isolated provider prompt, fallback chain, output validation, normalization, and timing.
 - `vercel.json`: 180-second summary-function ceiling.
 - `test/`: Node regression coverage.
+- `evaluation/cases.json`: versioned conversations, expected facts, forbidden facts, and latency thresholds.
+- `scripts/run-regression-eval.js`: live endpoint scorer for summary accuracy, structure, and latency.
+- `.github/workflows/regression-gate.yml`: complete gate after pushes to `master`, daily, and on demand.
 
 Production deploys from `master` to `https://context-generator-five.vercel.app/api/summarize`.
 
@@ -99,4 +102,8 @@ The sanitized receipt powers the GitHub Pages analysis view through `analysis-br
 
 ## Verification Contract
 
-`npm test` covers endpoint security and limits, picker/preconnect privacy, one-job background behavior, prompt isolation, profiles and routing, 160,000-character forwarding, timeout budgets, fallbacks and validation, absence of expansion, full-middle capture, duplicate turns, structural roles, removal of broad DOM fallback, virtualized capture, paste verification, placement, and analysis receipts.
+`npm test` covers endpoint security and limits, picker/preconnect privacy, one-job background behavior, prompt isolation, profiles and routing, 160,000-character forwarding, timeout budgets, fallbacks and validation, absence of expansion, full-middle capture, duplicate turns, structural roles, removal of broad DOM fallback, virtualized capture, paste verification, placement, and analysis receipts. It also loads the versioned evaluation set through the real capture hooks and fails on any lost turn, changed turn count, or fixture capture above 250 ms.
+
+`npm run eval` sends the versioned evaluation transcripts through `EVAL_ENDPOINT`, defaulting to production. It fails below 90% required-fact recall, on any forbidden/incorrect fact, invalid Context Carry structure, a per-case latency over 30 seconds for the small case or 60 seconds for the medium case, or more than 90 seconds total. Required facts may define explicit equivalent phrases so harmless paraphrases do not create false failures.
+
+`npm run gate` runs both layers and is the release command. GitHub Actions runs the same command after pushes to `master`, daily, and on demand to catch release regressions and later production drift.

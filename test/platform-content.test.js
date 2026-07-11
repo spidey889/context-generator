@@ -1159,6 +1159,32 @@ test("Gemini bubble anchors to the left of the Flash selector", () => {
   assert.equal(placement.bottom, 15);
 });
 
+test("versioned evaluation set gates capture completeness and fixture latency", () => {
+  const evaluation = JSON.parse(
+    fs.readFileSync(path.join(__dirname, "..", "evaluation", "cases.json"), "utf8")
+  );
+
+  for (const testCase of evaluation.cases) {
+    const elements = testCase.turns.map((turn) => new FakeElement({
+      text: turn.text,
+      attrs: { "data-message-author-role": turn.role }
+    }));
+    const startedAt = process.hrtime.bigint();
+    const transcript = loadPlatformContent(elements, testCase.platform).scrapeConversationText();
+    const captureMs = Number(process.hrtime.bigint() - startedAt) / 1e6;
+
+    for (const turn of testCase.turns) {
+      assert.ok(transcript.includes(turn.text), testCase.id + " lost a captured turn");
+    }
+    assert.equal(
+      (transcript.match(/^(?:User|Claude|ChatGPT): /gm) || []).length,
+      testCase.turns.length,
+      testCase.id + " changed the captured turn count"
+    );
+    assert.ok(captureMs <= 250, testCase.id + " capture took " + captureMs.toFixed(1) + "ms");
+  }
+});
+
 function getClaudeComposerRect() {
   return { left: 100, right: 900, top: 100, bottom: 220, width: 800, height: 120 };
 }

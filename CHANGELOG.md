@@ -6,6 +6,7 @@ Historical production decisions and useful implementation context live here. Cur
 
 [Codex: keep adding short entries here after major changes, fixes, reversions, or model/prompt decisions. Write what changed, what worked, and what got replaced. Keep it short.]
 
+- 2026-07-12: Added a versioned regression evaluation set and one-command release gate. Deterministic tests now measure full turn capture and fixture capture time, while the live endpoint scorer measures required-fact recall, forbidden facts, Context Carry structure, and per-case/total latency. The initial production-calibrated floor is 90% fact recall with zero incorrect facts; GitHub Actions runs the complete gate after pushes to `master`, daily, and on demand.
 - 2026-06-29: ChatGPT button moved to a page-root fixed position anchored near the model selector. This replaced fragile composer-DOM mounting that made the button disappear or get clipped.
 - 2026-06-29: Destination tile glass/shape experiments were reverted. Keep the restrained tile styling and avoid collateral edits to Grok placement helpers when changing visuals.
 - 2026-07-01: Stale-tab crashes after unpacked-extension reloads were handled with runtime guards, cached asset URLs, and a versioned content-script load id. This replaced the plain loaded flag that blocked fresh scripts.
