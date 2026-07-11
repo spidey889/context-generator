@@ -66,7 +66,17 @@ function isTrustedExtensionRequest(req) {
   const extensionOrigin = isAllowedExtensionOrigin(origin);
   const originMayBeSuppressedByExtensionRuntime = !origin || origin === "null";
 
-  return clientMarker === CLIENT_HEADER_VALUE && (extensionOrigin || originMayBeSuppressedByExtensionRuntime);
+  if (extensionOrigin) {
+    // Keep already-running pre-security Chrome/Firefox workers compatible. The
+    // marker is public and adds no authentication value when the browser has
+    // already supplied an extension-only Origin.
+    return !clientMarker || clientMarker === CLIENT_HEADER_VALUE;
+  }
+
+  // Firefox can suppress Origin for privileged extension requests. In that
+  // case the public marker is still required to reject ordinary originless
+  // HTTP clients before rate limiting and provider work.
+  return originMayBeSuppressedByExtensionRuntime && clientMarker === CLIENT_HEADER_VALUE;
 }
 
 function validateSummarizeRequest(req) {

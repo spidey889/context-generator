@@ -48,6 +48,14 @@ test("preflight is limited to POST and the two required extension headers", () =
   })), true);
   assert.equal(isValidPreflightRequest(makeRequest({
     method: "OPTIONS",
+    headers: {
+      origin: CHROME_ORIGIN,
+      "access-control-request-method": "POST",
+      "access-control-request-headers": "content-type"
+    }
+  })), true);
+  assert.equal(isValidPreflightRequest(makeRequest({
+    method: "OPTIONS",
     headers: { origin: CHROME_ORIGIN, "access-control-request-method": "DELETE" }
   })), false);
   assert.equal(isValidPreflightRequest(makeRequest({
@@ -60,15 +68,47 @@ test("preflight is limited to POST and the two required extension headers", () =
   })), false);
 });
 
-test("client compatibility marker allows extension requests but is not treated as a secret", () => {
+test("extension origins remain compatible with workers started before the client marker shipped", () => {
   assert.equal(isTrustedExtensionRequest(makeRequest()), true);
   assert.equal(isTrustedExtensionRequest(makeRequest({ headers: { origin: FIREFOX_ORIGIN } })), true);
+  assert.equal(isTrustedExtensionRequest(makeRequest({
+    headers: { origin: CHROME_ORIGIN, "x-cap-context-client": "" }
+  })), true);
+  assert.equal(isTrustedExtensionRequest(makeRequest({
+    headers: { origin: FIREFOX_ORIGIN, "x-cap-context-client": "" }
+  })), true);
   assert.equal(isTrustedExtensionRequest(makeRequest({ headers: { origin: "null" } })), true);
   assert.equal(isTrustedExtensionRequest(makeRequest({ headers: { origin: "" } })), true);
+  assert.equal(isTrustedExtensionRequest(makeRequest({
+    headers: { origin: "null", "x-cap-context-client": "" }
+  })), false);
+  assert.equal(isTrustedExtensionRequest(makeRequest({
+    headers: { origin: "", "x-cap-context-client": "" }
+  })), false);
   assert.equal(isTrustedExtensionRequest(makeRequest({ headers: { origin: "https://attacker.example" } })), false);
   assert.equal(isTrustedExtensionRequest(makeRequest({
     headers: { origin: CHROME_ORIGIN, "x-cap-context-client": "wrong" }
   })), false);
+});
+
+test("summary endpoint accepts the exact pre-marker Chrome worker request shape", async () => {
+  resetRequestSecurityForTests();
+  const req = makeRequest({
+    body: { conversation: "User: continue this short chat" },
+    headers: {
+      origin: CHROME_ORIGIN,
+      "content-type": "application/json",
+      "x-cap-context-client": "",
+      "x-forwarded-for": "198.51.100.77"
+    }
+  });
+  const res = createMockResponse();
+
+  await summarize(req, res);
+
+  assert.equal(res.statusCode, 200);
+  assert.equal(res.payload.timing.provider, "local-direct");
+  assert.equal(res.payload.timing.inputChars, 30);
 });
 
 test("backend schema accepts exactly one conversation string at the canonical limit", () => {
