@@ -29,7 +29,6 @@ const SUMMARY_PROFILES = [
     minWords: 0,
     maxTokens: 0,
     directCarry: true,
-    allowExpansion: false,
     sectionBudget: "Local direct carry; preserve the exact short chat instead of stretching it into a generated summary.",
     templateHints: {
       who: "1 short line: user/project only if present",
@@ -46,7 +45,6 @@ const SUMMARY_PROFILES = [
     targetWords: 350,
     minWords: 0,
     maxTokens: 1000,
-    allowExpansion: false,
     sectionBudget: "WHO I AM 30-60 words; WHAT WE WERE DOING 60-90; WHERE WE LEFT OFF 40-70; DECISIONS MADE 3-6 compact bullets; OPEN QUESTIONS 1-4 bullets or None; KEY CONTEXT 80-140 words in compact bullets; NEXT STEP exactly as instructed.",
     templateHints: {
       who: "30-60 words: user/project/preferences that matter",
@@ -63,7 +61,6 @@ const SUMMARY_PROFILES = [
     targetWords: 700,
     minWords: 0,
     maxTokens: 1900,
-    allowExpansion: false,
     sectionBudget: "WHO I AM 50-90 words; WHAT WE WERE DOING 110-160; WHERE WE LEFT OFF 80-120; DECISIONS MADE 5-9 compact bullets; OPEN QUESTIONS 2-6 bullets or None; KEY CONTEXT 180-280 words in dense bullets; NEXT STEP exactly as instructed.",
     templateHints: {
       who: "50-90 words: durable user/project context",
@@ -80,7 +77,6 @@ const SUMMARY_PROFILES = [
     targetWords: 1200,
     minWords: 1100,
     maxTokens: 4200,
-    allowExpansion: true,
     sectionBudget: "WHO I AM 80-140 words; WHAT WE WERE DOING 170-240; WHERE WE LEFT OFF 120-180; DECISIONS MADE 180-280; OPEN QUESTIONS 100-180; KEY CONTEXT 350-500; NEXT STEP exactly as instructed.",
     templateHints: {
       who: "80-140 words: user's name if mentioned, what they are building or trying to do, role/background/preferences that matter, and any durable context the next AI must know",
@@ -234,7 +230,6 @@ module.exports.__test = {
   normalizeContextCarrySections,
   stripContextCarryFooter,
   countWords,
-  shouldExpandSummary,
   getSummaryProfile,
   getMistralModelSelection,
   getContextCarryTemplate
@@ -255,7 +250,6 @@ async function createSummaryWithFallback({ conversation, profile, modelSelection
         const result = await createSummaryWithProvider({
           provider: SUMMARY_PROVIDERS.mistral,
           apiKey: mistralApiKey,
-          conversation,
           profile,
           model,
           initialMessages
@@ -320,7 +314,6 @@ async function createSummaryWithFallback({ conversation, profile, modelSelection
     const result = await createSummaryWithProvider({
       provider: SUMMARY_PROVIDERS.groq,
       apiKey: groqApiKey,
-      conversation,
       profile,
       model: GROQ_FALLBACK_MODEL,
       initialMessages
@@ -344,9 +337,8 @@ async function createSummaryWithFallback({ conversation, profile, modelSelection
   }
 }
 
-async function createSummaryWithProvider({ provider, apiKey, conversation, profile, model, initialMessages }) {
+async function createSummaryWithProvider({ provider, apiKey, profile, model, initialMessages }) {
   const providerStartedAt = Date.now();
-  const promptCacheKey = getProviderPromptCacheKey(provider, model, profile);
   const initialStartedAt = Date.now();
   const initialResponse = await requestProviderSummary(
     provider,
@@ -354,7 +346,7 @@ async function createSummaryWithProvider({ provider, apiKey, conversation, profi
     initialMessages,
     profile,
     model,
-    { promptCacheKey }
+    { promptCacheKey: getProviderPromptCacheKey(provider, model, profile) }
   );
   const initialMs = Date.now() - initialStartedAt;
 
@@ -372,7 +364,7 @@ async function createSummaryWithProvider({ provider, apiKey, conversation, profi
   const data = await readResponseJson(initialResponse, provider);
   const finishReason = data.choices?.[0]?.finish_reason || null;
   const initialUsage = normalizeProviderUsage(data.usage);
-  let summary = normalizeContextCarrySummary(data.choices?.[0]?.message?.content);
+  const summary = normalizeContextCarrySummary(data.choices?.[0]?.message?.content);
 
   if (!summary) {
     throw createProviderError(provider, `${provider.label} returned an empty summary`, 502);
@@ -387,52 +379,7 @@ async function createSummaryWithProvider({ provider, apiKey, conversation, profi
     finishReason: null,
     predictedOutput: false
   };
-  let totalUsage = initialUsage;
-  let summaryWordCount = countWords(summary);
-
-  if (shouldExpandSummary(conversation, summaryWordCount, profile)) {
-    expansion.attempted = true;
-    const expansionStartedAt = Date.now();
-    try {
-      const expansionResponse = await requestProviderSummary(
-        provider,
-        apiKey,
-        getExpansionSummaryMessages(initialMessages, summary, summaryWordCount, profile),
-        profile,
-        model,
-        {
-          promptCacheKey,
-          predictedOutput: summary
-        }
-      );
-      expansion.predictedOutput = provider.id === SUMMARY_PROVIDERS.mistral.id;
-
-      if (expansionResponse.ok) {
-        const expansionData = await readResponseJson(expansionResponse, provider);
-        expansion.finishReason = expansionData.choices?.[0]?.finish_reason || null;
-        const expansionUsage = normalizeProviderUsage(expansionData.usage);
-        expansion.usage = expansionUsage;
-        totalUsage = addProviderUsage(totalUsage, expansionUsage);
-        const expandedSummary = normalizeContextCarrySummary(expansionData.choices?.[0]?.message?.content);
-        const expandedWordCount = countWords(expandedSummary);
-        expansion.wordCount = expandedWordCount;
-
-        if (expandedSummary && expandedWordCount > summaryWordCount) {
-          summary = expandedSummary;
-          summaryWordCount = expandedWordCount;
-          expansion.used = true;
-        }
-      } else {
-        expansion.error = await readResponseText(expansionResponse);
-        console.error(`${provider.label} expansion error:`, expansion.error);
-      }
-    } catch (error) {
-      expansion.error = error?.message || "Expansion request failed";
-      console.error(`${provider.label} expansion failed:`, error);
-    } finally {
-      expansion.ms = Date.now() - expansionStartedAt;
-    }
-  }
+  const summaryWordCount = countWords(summary);
 
   return {
     summary,
@@ -440,12 +387,12 @@ async function createSummaryWithProvider({ provider, apiKey, conversation, profi
     model,
     providerMs: Date.now() - providerStartedAt,
     initialMs,
-    providerPasses: expansion.attempted ? 2 : 1,
+    providerPasses: 1,
     expansion,
     finishReason,
     summaryWordCount,
     qualityFloorMet: profile.minWords <= 0 || summaryWordCount >= profile.minWords,
-    usage: totalUsage
+    usage: initialUsage
   };
 }
 
@@ -459,12 +406,6 @@ function requestProviderSummary(provider, apiKey, messages, profile, model, opti
 
   if (provider.id === SUMMARY_PROVIDERS.mistral.id) {
     if (options.promptCacheKey) body.prompt_cache_key = options.promptCacheKey;
-    if (options.predictedOutput) {
-      body.prediction = {
-        type: "content",
-        content: options.predictedOutput
-      };
-    }
   }
 
   return fetchWithRetry(provider.url, {
@@ -486,28 +427,6 @@ function getInitialSummaryMessages(conversation, profile) {
     {
       role: "user",
       content: `Create a dense continuation handoff from this conversation. Another AI should be able to continue the exact work without asking the user to repeat context:\n\n${conversation}`,
-    },
-  ];
-}
-
-function getExpansionSummaryMessages(initialMessages, draftSummary, wordCount, profile) {
-  return [
-    ...initialMessages,
-    {
-      role: "assistant",
-      content: draftSummary
-    },
-    {
-      role: "user",
-      content: `The previous Context Carry was too short at about ${wordCount} words. Rewrite it into a fuller ${profile.targetWords}-word continuation handoff.
-
-Rules for this rewrite:
-- Output only the final Context Carry block.
-- Preserve the exact template and NEXT STEP instruction.
-- Expand KEY CONTEXT first, then DECISIONS MADE and OPEN QUESTIONS.
-- Include concrete details from the original conversation, not generic filler.
-- Target ${Math.max(profile.minWords, profile.targetWords - 100)}-${profile.targetWords + 100} words if the source conversation has enough real information.
-The full source conversation and previous draft are already present above; do not ask for them again.`,
     },
   ];
 }
@@ -551,10 +470,6 @@ ${getContextCarryTemplate(profile)}`;
 
 function countWords(text) {
   return String(text || "").trim().split(/\s+/).filter(Boolean).length;
-}
-
-function shouldExpandSummary(_conversation, wordCount, profile = SUMMARY_PROFILES[SUMMARY_PROFILES.length - 1]) {
-  return Boolean(profile.allowExpansion && profile.minWords > 0 && wordCount > 0 && wordCount < profile.minWords);
 }
 
 function getLocalDirectModelSelection(conversation) {
@@ -689,23 +604,6 @@ function normalizeProviderUsage(usage) {
 
 function normalizeTokenCount(value) {
   return Number.isFinite(value) ? value : null;
-}
-
-function addProviderUsage(left, right) {
-  if (!left) return right || null;
-  if (!right) return left;
-
-  return {
-    promptTokens: addTokenCounts(left.promptTokens, right.promptTokens),
-    completionTokens: addTokenCounts(left.completionTokens, right.completionTokens),
-    totalTokens: addTokenCounts(left.totalTokens, right.totalTokens),
-    cachedTokens: addTokenCounts(left.cachedTokens, right.cachedTokens)
-  };
-}
-
-function addTokenCounts(left, right) {
-  if (left === null && right === null) return null;
-  return (left || 0) + (right || 0);
 }
 
 function getSummaryProfile(conversation) {

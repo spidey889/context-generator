@@ -9,7 +9,6 @@ const {
   normalizeContextCarrySummary,
   stripContextCarryFooter,
   countWords,
-  shouldExpandSummary,
   getSummaryProfile,
   getMistralModelSelection,
   getContextCarryTemplate
@@ -75,7 +74,7 @@ test("mistral model routing always starts with medium 3.5 without changing summa
     assert.match(getMistralModelSelection(overThresholdChat).reason, /fixed Mistral priority chain/);
     assert.equal(overThresholdProfile.id, "medium");
     assert.equal(overThresholdProfile.maxTokens, 1900);
-    assert.equal(overThresholdProfile.allowExpansion, false);
+    assert.equal(overThresholdProfile.minWords, 0);
   } finally {
     restoreMistralModel();
   }
@@ -605,12 +604,11 @@ test("backend advances to the next model after a timed-out Mistral attempt", asy
   }
 });
 
-test("backend expands substantial summaries that come back below the word floor", async () => {
+test("backend returns the first large summary without a second expansion request", async () => {
   const originalFetch = global.fetch;
   const originalApiKey = process.env.MISTRAL_API_KEY;
   const conversation = "substantial context ".repeat(4000);
   const shortSummary = makeContextCarrySummary("short", 120);
-  const expandedSummary = makeContextCarrySummary("expanded", 1120);
   const requests = [];
 
   process.env.MISTRAL_API_KEY = "test-key";
@@ -620,12 +618,10 @@ test("backend expands substantial summaries that come back below the word floor"
       ok: true,
       status: 200,
       json: async () => ({
-        usage: requests.length === 1
-          ? { prompt_tokens: 900, completion_tokens: 180, total_tokens: 1080 }
-          : { prompt_tokens: 1100, completion_tokens: 840, total_tokens: 1940 },
+        usage: { prompt_tokens: 900, completion_tokens: 180, total_tokens: 1080 },
         choices: [{
           message: {
-            content: requests.length === 1 ? shortSummary : expandedSummary
+            content: shortSummary
           }
         }]
       })
@@ -638,38 +634,22 @@ test("backend expands substantial summaries that come back below the word floor"
     await summarize({ method: "POST", body: { conversation } }, res);
 
     assert.equal(res.statusCode, 200);
-    assert.equal(requests.length, 2);
-    assert.equal(requests[1].prompt_cache_key, requests[0].prompt_cache_key);
-    assert.deepEqual(
-      requests[1].messages.slice(0, requests[0].messages.length),
-      requests[0].messages
-    );
-    assert.equal(requests[1].messages[requests[0].messages.length].role, "assistant");
-    assert.equal(
-      requests[1].prediction.content,
-      requests[1].messages[requests[0].messages.length].content
-    );
-    assert.equal(requests[1].prediction.type, "content");
-    assert.equal(res.payload.timing.mistralPasses, 2);
-    assert.equal(res.payload.timing.expansion.attempted, true);
-    assert.equal(res.payload.timing.expansion.used, true);
-    assert.equal(res.payload.timing.expansion.predictedOutput, true);
-    assert.equal(res.payload.timing.qualityFloorMet, true);
-    assert.equal(countWords(res.payload.summary) >= 1100, true);
+    assert.equal(requests.length, 1);
+    assert.equal(requests[0].prediction, undefined);
+    assert.equal(res.payload.timing.mistralPasses, 1);
+    assert.equal(res.payload.timing.expansion.attempted, false);
+    assert.equal(res.payload.timing.expansion.used, false);
+    assert.equal(res.payload.timing.expansion.predictedOutput, false);
+    assert.equal(res.payload.timing.qualityFloorMet, false);
     assert.equal(res.payload.timing.summaryWordCount, countWords(res.payload.summary));
     assert.deepEqual(res.payload.timing.usage, {
-      promptTokens: 2000,
-      completionTokens: 1020,
-      totalTokens: 3020,
+      promptTokens: 900,
+      completionTokens: 180,
+      totalTokens: 1080,
       cachedTokens: null
     });
-    assert.deepEqual(res.payload.timing.expansion.usage, {
-      promptTokens: 1100,
-      completionTokens: 840,
-      totalTokens: 1940,
-      cachedTokens: null
-    });
-    assert.match(res.payload.summary, /expanded/);
+    assert.equal(res.payload.timing.expansion.usage, null);
+    assert.match(res.payload.summary, /short/);
   } finally {
     global.fetch = originalFetch;
     if (originalApiKey === undefined) {
@@ -678,15 +658,6 @@ test("backend expands substantial summaries that come back below the word floor"
       process.env.MISTRAL_API_KEY = originalApiKey;
     }
   }
-});
-
-test("summary expansion only applies to substantial short summaries", () => {
-  const largeConversation = "substantial context ".repeat(4000);
-
-  assert.equal(shouldExpandSummary("tiny chat", 200, getSummaryProfile("tiny chat")), false);
-  assert.equal(shouldExpandSummary(largeConversation, 1200, getSummaryProfile(largeConversation)), false);
-  assert.equal(shouldExpandSummary(largeConversation, 700, getSummaryProfile(largeConversation)), true);
-  assert.equal(shouldExpandSummary("medium ".repeat(2000), 400, getSummaryProfile("medium ".repeat(2000))), false);
 });
 
 test("puts free-form model output into KEY CONTEXT instead of returning loose text", () => {
