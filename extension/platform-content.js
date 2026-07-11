@@ -33,9 +33,6 @@
   const CLAUDE_SIDE_CONTROL_RIGHT_NUDGE = 52;
   const DESTINATION_SHEET_WIDTH = 296;
   const RUNNING_AUTO_RESET_MS = 240000;
-  const MAX_BACKEND_CONVERSATION_CHARS = 160000;
-  const BACKEND_CONVERSATION_HEAD_CHARS = 32000;
-  const BACKEND_CONVERSATION_OMISSION_MARKER = "[...middle of conversation omitted to fit the backup summarizer...]";
   const DEFAULT_MAX_COMPOSER_WIDTH = 1320;
   const DESTINATION_TITLE_TEXT = "Where to continue?";
   const DESTINATION_HELPER_TEXT = "Context goes straight into the input box";
@@ -48,7 +45,6 @@
   const NO_CONVERSATION_ERROR_MESSAGE = "Chat is empty. Send one message first, then I'll pack the context.";
   const SUMMARY_RETRY_ERROR_TITLE = "Try again";
   const SUMMARY_RETRY_ERROR_MESSAGE = "Try again right now. We might have made a mistake. It almost never happens the second time.";
-  const MIN_FALLBACK_CONVERSATION_CHARS = 120;
   const CONVERSATION_SCRAPE_RETRY_TIMEOUT_MS = 0;
   const CLAUDE_CONVERSATION_SCRAPE_RETRY_TIMEOUT_MS = 1800;
   const CONVERSATION_SCRAPE_RETRY_INTERVAL_MS = 140;
@@ -182,6 +178,12 @@
         "[data-testid*='assistant-message' i]",
         "[data-message-author-role]",
         ".font-claude-response"
+      ],
+      userRoleSelectors: ["[data-testid*='user-message' i]", "[data-message-author-role='user']"],
+      assistantRoleSelectors: [
+        "[data-testid*='assistant-message' i]",
+        "[data-message-author-role='assistant']",
+        ".font-claude-response"
       ]
     },
     chatgpt: {
@@ -224,7 +226,9 @@
         "[data-testid^='conversation-turn']",
         "article",
         ".markdown"
-      ]
+      ],
+      userRoleSelectors: ["[data-message-author-role='user']"],
+      assistantRoleSelectors: ["[data-message-author-role='assistant']"]
     },
     gemini: {
       name: "Gemini",
@@ -266,7 +270,9 @@
         "[data-test-id*='conversation' i]",
         "[class*='query-text' i]",
         "[class*='response-content' i]"
-      ]
+      ],
+      userRoleSelectors: ["user-query", "[class*='query-text' i]", "[data-role='user']"],
+      assistantRoleSelectors: ["model-response", "[class*='response-content' i]", "[data-role='model']"]
     },
     grok: {
       name: "Grok",
@@ -304,6 +310,16 @@
         "[data-testid*='message' i]",
         "[class*='message' i]",
         "article"
+      ],
+      userRoleSelectors: [
+        "[data-message-author-role='user']",
+        "[data-role='user']",
+        "[data-testid*='user-message' i]"
+      ],
+      assistantRoleSelectors: [
+        "[data-message-author-role='assistant']",
+        "[data-role='assistant']",
+        "[data-testid*='assistant-message' i]"
       ]
     },
     deepseek: {
@@ -349,6 +365,12 @@
         "[class*='message' i]",
         "[class*='chat-item' i]",
         "[data-role]"
+      ],
+      userRoleSelectors: ["[data-role='user']", "[data-message-author-role='user']"],
+      assistantRoleSelectors: [
+        "[data-role='assistant']",
+        "[data-role='model']",
+        "[data-message-author-role='assistant']"
       ]
     }
   };
@@ -476,6 +498,7 @@
       waitForConversationCaptureToSettle,
       expandCollapsedConversationContent,
       getConversationTurns,
+      collectRenderedConversationTurns,
       scrapeConversationTextWhenReady,
       scrapeConversationTextForTransfer,
       getClaudeInlineControlsToShift,
@@ -1199,7 +1222,7 @@
         cleanedChars: captureDetail.cleanedChars ?? null,
         sentChars: captureDetail.sentChars ?? captureDetail.chars ?? null,
         capped: captureDetail.capped === true,
-        capChars: captureDetail.capChars || MAX_BACKEND_CONVERSATION_CHARS
+        capChars: captureDetail.capChars ?? null
       },
       summary: {
         source: summaryTiming?.source || null,
@@ -1712,7 +1735,7 @@
   }
 
   function scrapeConversationText() {
-    const messageTurns = getConversationTurns().filter((turn) => isDetectedConversationMessage(turn));
+    const messageTurns = getConversationTurns();
     return createConversationCaptureFromMessageTurns(messageTurns);
   }
 
@@ -1730,7 +1753,8 @@
     const turns = messageTurns.filter((turn) => isUsefulConversationTurn(turn));
     const baseMetrics = {
       ...metrics,
-      messageTurnCount: messageTurns.length,
+      candidateTurnCount: messageTurns.length,
+      messageTurnCount: turns.length,
       usefulTurnCount: turns.length,
       rawCandidateChars: messageTurns.reduce((total, turn) => total + turn.text.length, 0)
     };
@@ -1747,29 +1771,7 @@
       });
     }
 
-    const fallbackText = hasFallbackConversationEvidence(turns) ? scrapeMainConversationText(turns) : "";
-    if (isUsefulFallbackConversationText(fallbackText)) {
-      return createConversationCapture(`${currentPlatform.name} conversation:\n\n${fallbackText}`, {
-        ...baseMetrics,
-        method: baseMetrics.method || "fallback",
-        transcriptChars: fallbackText.length
-      });
-    }
-
-    const detectedTranscript = messageTurns
-      .map((turn) => `${turn.role}: ${turn.text}`)
-      .join("\n\n")
-      .trim();
-    if (detectedTranscript) {
-      return createConversationCapture(`${currentPlatform.name} conversation:\n\n${detectedTranscript}`, {
-        ...baseMetrics,
-        method: baseMetrics.method || "detected",
-        usefulTurnCount: messageTurns.length,
-        transcriptChars: detectedTranscript.length
-      });
-    }
-
-    throw new Error("Chat messages were found, but their text could not be captured yet. Try again in a moment.");
+    throw new Error("Chat messages were found, but their user/assistant roles could not be verified. Try again in a moment.");
   }
 
   function shouldSweepVirtualConversation() {
@@ -1781,7 +1783,7 @@
 
   async function scrapeVirtualConversation(initialCapture) {
     const initialMetrics = lastConversationCaptureMetrics || {};
-    const collectedTurns = new Map();
+    const collectedTurns = [];
     const sweepStartedAt = Date.now();
     let scrolls = 0;
     let staleScrolls = 0;
@@ -1851,7 +1853,7 @@
       }
     }
 
-    const sweptTurns = Array.from(collectedTurns.values());
+    const sweptTurns = collectedTurns;
     const sweepMetrics = {
       sweepAttempted: true,
       sweepScrolls: scrolls,
@@ -1877,14 +1879,27 @@
   }
 
   function collectRenderedConversationTurns(collectedTurns, renderedTurns = getRenderedConversationSnapshot().turns) {
-    let added = 0;
-    renderedTurns.forEach((turn) => {
-      const signature = getConversationTurnSignature(turn.role, turn.text);
-      if (collectedTurns.has(signature)) return;
-      collectedTurns.set(signature, { role: turn.role, text: turn.text });
-      added += 1;
-    });
-    return added;
+    const normalizedTurns = renderedTurns.map((turn) => ({
+      role: turn.role,
+      text: cleanText(turn.text)
+    }));
+    const overlap = getConversationWindowOverlap(collectedTurns, normalizedTurns);
+    const newTurns = normalizedTurns.slice(overlap);
+    collectedTurns.push(...newTurns);
+    return newTurns.length;
+  }
+
+  function getConversationWindowOverlap(collectedTurns, renderedTurns) {
+    const maxOverlap = Math.min(collectedTurns.length, renderedTurns.length);
+    for (let overlap = maxOverlap; overlap > 0; overlap -= 1) {
+      const collectedStart = collectedTurns.length - overlap;
+      const matches = renderedTurns.slice(0, overlap).every((turn, index) => {
+        return getConversationTurnSignature(turn.role, turn.text) ===
+          getConversationTurnSignature(collectedTurns[collectedStart + index].role, collectedTurns[collectedStart + index].text);
+      });
+      if (matches) return overlap;
+    }
+    return 0;
   }
 
   function getVirtualSweepStepRatio() {
@@ -1965,15 +1980,14 @@
 
   function createConversationCapture(text, metrics = {}) {
     const cleaned = cleanText(text);
-    const limited = limitConversationText(cleaned);
     lastConversationCaptureMetrics = {
       ...metrics,
       cleanedChars: cleaned.length,
-      sentChars: limited.length,
-      capped: cleaned.length > MAX_BACKEND_CONVERSATION_CHARS,
-      capChars: MAX_BACKEND_CONVERSATION_CHARS
+      sentChars: cleaned.length,
+      capped: false,
+      capChars: null
     };
-    return limited;
+    return cleaned;
   }
 
   function getConversationCaptureMetrics(conversationText) {
@@ -1989,8 +2003,8 @@
       transcriptChars: null,
       cleanedChars: conversationText.length,
       sentChars: conversationText.length,
-      capped: conversationText.length >= MAX_BACKEND_CONVERSATION_CHARS,
-      capChars: MAX_BACKEND_CONVERSATION_CHARS
+      capped: false,
+      capChars: null
     };
   }
 
@@ -2098,12 +2112,6 @@
 
     let turns = [];
     messageCandidates.forEach((candidate) => {
-      const sameTextTurn = turns.find((turn) => turn.text === candidate.text);
-      if (sameTextTurn) {
-        if (!isConversationCandidatePreferred(candidate, sameTextTurn, messageCandidates)) return;
-        turns = turns.filter((turn) => turn !== sameTextTurn);
-      }
-
       const containingTurn = turns.find((turn) => turn.element !== candidate.element && turn.element.contains(candidate.element));
       if (containingTurn) {
         if (!isConversationCandidatePreferred(candidate, containingTurn, messageCandidates)) {
@@ -2194,12 +2202,42 @@
   }
 
   function getConversationRole(element) {
-    const label = getElementLabel(element);
-    if (/\b(user|human|you|me|query)\b/.test(label)) return "User";
-    if (/\b(assistant|model|response|claude|chatgpt|gemini|grok|deepseek|bot)\b/.test(label)) {
-      return currentPlatform.name;
+    let node = element;
+    let depth = 0;
+
+    while (node && depth < 8) {
+      const authorRole = cleanText(node.getAttribute?.("data-message-author-role") || "").toLowerCase();
+      const dataRole = cleanText(node.getAttribute?.("data-role") || "").toLowerCase();
+      if (["user", "human"].includes(authorRole) || ["user", "human"].includes(dataRole)) return "User";
+      if (["assistant", "model", "bot"].includes(authorRole) || ["assistant", "model", "bot"].includes(dataRole)) {
+        return currentPlatform.name;
+      }
+
+      if (matchesAnyConversationRoleSelector(node, currentPlatform.userRoleSelectors)) return "User";
+      if (matchesAnyConversationRoleSelector(node, currentPlatform.assistantRoleSelectors)) return currentPlatform.name;
+
+      const semanticLabel = [
+        node.getAttribute?.("data-testid"),
+        node.getAttribute?.("data-test-id"),
+        node.getAttribute?.("aria-label"),
+        node.localName,
+        node.id,
+        node.className
+      ].filter(Boolean).join(" ").toLowerCase();
+
+      if (/\b(?:user|human|query|prompt)\b/.test(semanticLabel)) return "User";
+      if (/\b(?:assistant|model|response|bot|claude|chatgpt|gemini|grok|deepseek)\b/.test(semanticLabel)) {
+        return currentPlatform.name;
+      }
+
+      node = node.parentElement;
+      depth += 1;
     }
     return "Message";
+  }
+
+  function matchesAnyConversationRoleSelector(element, selectors = []) {
+    return selectors.some((selector) => element.matches?.(selector));
   }
 
   function isUsefulConversationTranscript(turns) {
@@ -2208,10 +2246,6 @@
     if (turns.length < 2) return false;
 
     return !isEmptyConversationText(turns.map((turn) => turn.text).join("\n\n"));
-  }
-
-  function hasFallbackConversationEvidence(turns) {
-    return turns.some(hasExplicitConversationRole);
   }
 
   function hasExplicitConversationRole(turn) {
@@ -2223,8 +2257,7 @@
 
     const text = cleanText(turn.text);
     if (text.length < 3) return false;
-    if (hasExplicitConversationRole(turn)) return true;
-    return !isEmptyConversationText(text);
+    return hasExplicitConversationRole(turn) && !isEmptyConversationText(text);
   }
 
   function isDetectedConversationMessage(turn) {
@@ -2232,34 +2265,7 @@
 
     const text = cleanText(turn.text);
     if (text.length < 3) return false;
-    return hasExplicitConversationRole(turn) || !isEmptyConversationText(text);
-  }
-
-  function scrapeMainConversationText(turns = getConversationTurns()) {
-    const roots = FALLBACK_CONVERSATION_ROOT_SELECTORS
-      .flatMap((selector) => Array.from(document.querySelectorAll(selector)))
-      .filter((element, index, all) => all.indexOf(element) === index && isVisible(element) && !isContextGeneratorNode(element));
-
-    const rootText = roots
-      .map((element) => getCleanVisibleText(element))
-      .find((text) => isUsefulFallbackConversationText(text));
-
-    if (rootText) return rootText;
-
-    const combinedText = turns
-      .map((turn) => turn.text)
-      .join("\n\n");
-
-    return isUsefulFallbackConversationText(combinedText) ? combinedText : "";
-  }
-
-  function isUsefulFallbackConversationText(text) {
-    const cleaned = cleanText(text);
-    if (cleaned.length < MIN_FALLBACK_CONVERSATION_CHARS) return false;
-    if (isEmptyConversationText(cleaned)) return false;
-
-    const words = cleaned.split(/\s+/).filter(Boolean);
-    return words.length >= 18;
+    return hasExplicitConversationRole(turn);
   }
 
   function isEmptyConversationText(text) {
@@ -2293,22 +2299,7 @@
   }
 
   function limitConversationText(text) {
-    const cleaned = cleanText(text);
-    if (cleaned.length <= MAX_BACKEND_CONVERSATION_CHARS) {
-      return cleaned;
-    }
-
-    const separatorLength = 4;
-    const headLength = BACKEND_CONVERSATION_HEAD_CHARS;
-    const tailLength = Math.max(
-      0,
-      MAX_BACKEND_CONVERSATION_CHARS - headLength - BACKEND_CONVERSATION_OMISSION_MARKER.length - separatorLength
-    );
-    return [
-      cleaned.slice(0, headLength),
-      BACKEND_CONVERSATION_OMISSION_MARKER,
-      cleaned.slice(-tailLength)
-    ].join("\n\n");
+    return cleanText(text);
   }
 
   function ensureFloatingButton() {

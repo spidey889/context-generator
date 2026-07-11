@@ -245,6 +245,108 @@ test("conversation scraping preserves detected user and assistant roles", () => 
   assert.match(transcript, /ChatGPT: I will update the modal and add focused tests\./);
 });
 
+test("role detection uses structural evidence instead of you or me labels", () => {
+  const vagueYouLabel = new FakeElement({
+    text: "Account navigation",
+    attrs: { "aria-label": "You" }
+  });
+  const vagueMeLabel = new FakeElement({
+    text: "Profile menu",
+    attrs: { class: "me menu-item" }
+  });
+  const deepSeekMarkdown = new FakeElement({
+    text: "Keep the exact role from the parent message container.",
+    attrs: { class: "ds-markdown" }
+  });
+  const deepSeekUserContainer = new FakeElement({ attrs: { "data-role": "user" } });
+  deepSeekUserContainer.children = [deepSeekMarkdown];
+  deepSeekMarkdown.parentElement = deepSeekUserContainer;
+
+  const chatGptHooks = loadPlatformContent([vagueYouLabel, vagueMeLabel]);
+  const deepSeekHooks = loadPlatformContent([deepSeekUserContainer, deepSeekMarkdown], "chat.deepseek.com");
+
+  assert.equal(chatGptHooks.getConversationRole(vagueYouLabel), "Message");
+  assert.equal(chatGptHooks.getConversationRole(vagueMeLabel), "Message");
+  assert.equal(deepSeekHooks.getConversationRole(deepSeekMarkdown), "User");
+});
+
+test("conversation scraping preserves separate turns with identical text", () => {
+  const repeatedText = "Please retry that exact operation.";
+  const firstUserTurn = new FakeElement({
+    text: repeatedText,
+    attrs: { "data-message-author-role": "user" }
+  });
+  const assistantTurn = new FakeElement({
+    text: "I retried it and the same result occurred.",
+    attrs: { "data-message-author-role": "assistant" }
+  });
+  const secondUserTurn = new FakeElement({
+    text: repeatedText,
+    attrs: { "data-message-author-role": "user" }
+  });
+  const hooks = loadPlatformContent([firstUserTurn, assistantTurn, secondUserTurn]);
+
+  const transcript = hooks.scrapeConversationText();
+
+  assert.equal((transcript.match(/User: Please retry that exact operation\./g) || []).length, 2);
+  assert.equal(hooks.getConversationTurns().length, 3);
+});
+
+test("virtual window merging preserves repeated turns while removing only window overlap", () => {
+  const hooks = loadPlatformContent([]);
+  const collected = [];
+  const firstWindow = [
+    { role: "User", text: "Repeat this." },
+    { role: "ChatGPT", text: "First answer." },
+    { role: "User", text: "Repeat this." }
+  ];
+  const secondWindow = [
+    { role: "ChatGPT", text: "First answer." },
+    { role: "User", text: "Repeat this." },
+    { role: "ChatGPT", text: "Second answer." }
+  ];
+
+  assert.equal(hooks.collectRenderedConversationTurns(collected, firstWindow), 3);
+  assert.equal(hooks.collectRenderedConversationTurns(collected, secondWindow), 1);
+  assert.equal(collected.length, 4);
+  assert.equal(collected.filter((turn) => turn.role === "User" && turn.text === "Repeat this.").length, 2);
+});
+
+test("conversation scraping never falls back to unrelated main-page text", () => {
+  const pageRoot = new FakeElement({
+    text: "Settings New chat Upgrade plan Recent conversations Account navigation",
+    attrs: { role: "main" }
+  });
+  const userTurn = new FakeElement({
+    text: "Only this user message belongs in the transcript.",
+    attrs: { "data-message-author-role": "user" }
+  });
+  const assistantTurn = new FakeElement({
+    text: "Only this assistant response belongs in the transcript.",
+    attrs: { "data-message-author-role": "assistant" }
+  });
+  const hooks = loadPlatformContent([pageRoot, userTurn, assistantTurn]);
+
+  const transcript = hooks.scrapeConversationText();
+
+  assert.doesNotMatch(transcript, /Settings|Upgrade plan|Account navigation/);
+  assert.match(transcript, /User: Only this user message belongs/);
+  assert.match(transcript, /ChatGPT: Only this assistant response belongs/);
+});
+
+test("unverified page-like content fails instead of becoming conversation context", () => {
+  const pageRoot = new FakeElement({
+    text: "Settings New chat Upgrade plan Recent conversations Account navigation with enough page copy to look substantial.",
+    attrs: { role: "main" }
+  });
+  const hooks = loadPlatformContent([pageRoot]);
+
+  assert.throws(
+    () => hooks.scrapeConversationText(),
+    /user\/assistant roles could not be verified/
+  );
+});
+
 test("Claude scraping keeps child message turns instead of a broad wrapper blob", () => {
   const wrapper = new FakeElement({
     text: [
@@ -701,19 +803,23 @@ test("collapsed conversation previews are expanded before capture", async () => 
   assert.equal(showMore.clicks, 1);
 });
 
-test("conversation limiter keeps a richer 160k payload inside the cap", () => {
-  const hooks = loadPlatformContent([]);
+test("conversation transport preserves the complete middle beyond the old 160k cap", () => {
   const longConversation = [
     "a".repeat(50000),
+    "MIDDLE-DETAILS-THAT-MUST-SURVIVE",
     "b".repeat(150000),
     "TAIL-DETAILS"
   ].join("");
-  const limited = hooks.limitConversationText(longConversation);
+  const userTurn = new FakeElement({
+    text: longConversation,
+    attrs: { "data-message-author-role": "user" }
+  });
+  const hooks = loadPlatformContent([userTurn]);
+  const transported = hooks.scrapeConversationText();
 
-  assert.equal(limited.length, 160000);
-  assert.match(limited, /^a{32000}\n\n/);
-  assert.match(limited, /\[\.\.\.middle of conversation omitted to fit the backup summarizer\.\.\.\]/);
-  assert.match(limited, /TAIL-DETAILS$/);
+  assert.ok(transported.length > 200000);
+  assert.match(transported, /MIDDLE-DETAILS-THAT-MUST-SURVIVE/);
+  assert.match(transported, /TAIL-DETAILS$/);
 });
 
 test("source capture prep scrolls conversation containers to the top instantly", async () => {
