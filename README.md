@@ -9,7 +9,7 @@ Context Generator is a Chrome/Brave extension that reads the chat you are curren
 - Adds a Cap-Context button inside supported AI chat pages.
 - Lets you pick where to continue: Claude, ChatGPT, Gemini, Grok, or DeepSeek.
 - Captures only role-verified chat turns after you choose a destination; extension UI and unrelated page text are excluded.
-- Sends up to 160,000 captured conversation characters to one backend summary job.
+- Sends up to 210,000 captured conversation characters to one backend summary job.
 - Opens the destination AI and pastes the generated context into its composer.
 - Leaves the final send action to you.
 

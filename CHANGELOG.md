@@ -6,6 +6,7 @@ Historical production decisions and useful implementation context live here. Cur
 
 [Codex: keep adding short entries here after major changes, fixes, reversions, or model/prompt decisions. Write what changed, what worked, and what got replaced. Keep it short.]
 
+- 2026-07-12: Raised the canonical backend conversation limit from 160,000 to 210,000 characters and the matching UTF-8 ceiling from 640,000 to 840,000 bytes. Capture still does not truncate; over-limit requests fail visibly, and regression coverage now proves the full 210,000-character transcript reaches the summarizer.
 - 2026-07-12: Added a versioned regression evaluation set and one-command release gate. Deterministic tests now measure full turn capture and fixture capture time, while the live endpoint scorer measures required-fact recall, forbidden facts, Context Carry structure, and per-case/total latency. The initial production-calibrated floor is 90% fact recall with zero incorrect facts; GitHub Actions runs the complete gate after pushes to `master`, daily, and on demand.
 - 2026-06-29: ChatGPT button moved to a page-root fixed position anchored near the model selector. This replaced fragile composer-DOM mounting that made the button disappear or get clipped.
 - 2026-06-29: Destination tile glass/shape experiments were reverted. Keep the restrained tile styling and avoid collateral edits to Grok placement helpers when changing visuals.

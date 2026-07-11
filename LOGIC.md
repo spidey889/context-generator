@@ -43,7 +43,7 @@ Capture accepts platform-specific message elements only when the author is verif
 
 The scraper excludes extension DOM, rejects empty or role-unverified chats, prefers real child turns over broad wrappers, preserves separate identical turns, and merges virtualized windows by positional overlap. It never falls back to broad page, `main`, thread, chat, or conversation text. Short chats use the rendered one-shot path; long rendered chats may use a bounded multi-window sweep that restores the original scroll position.
 
-Capture preserves the complete middle and applies no character truncation. The serialized transcript contains role-labeled turns only. The backend separately rejects input above 160,000 characters rather than silently shortening it.
+Capture preserves the complete middle and applies no character truncation. The serialized transcript contains role-labeled turns only. The backend separately rejects input above 210,000 characters rather than silently shortening it.
 
 ## Summary Profiles And Provider Chain
 
@@ -53,7 +53,7 @@ Tiny input at or below 1,200 characters uses `local-direct`: the backend builds 
 | --- | ---: | ---: | ---: |
 | `small` | 1,201–8,000 | about 350 words | 1,000 tokens |
 | `medium` | 8,001–60,000 | about 700 words | 1,900 tokens |
-| `large` | 60,001–160,000 | about 1,200 words | 4,200 tokens |
+| `large` | 60,001–210,000 | about 1,200 words | 4,200 tokens |
 
 The large profile reports a 1,100-word quality-floor diagnostic, but that value is passive. The expansion pass is removed; no short result triggers a second expansion request.
 
@@ -80,7 +80,7 @@ Only `POST` and valid extension preflight `OPTIONS` are accepted. CORS reflects 
 
 Valid extension-origin requests may omit the public `X-Cap-Context-Client: cap-context-extension/1` compatibility marker for already-running workers. Originless or `Origin: null` Firefox requests require it. The marker is compatibility metadata, not authentication.
 
-Before provider work, JSON must contain exactly one non-empty string field, `conversation`. The endpoint rejects extra fields, invalid JSON/types, non-JSON content, request bodies above 1,000,000 bytes, conversations above 160,000 JavaScript characters, and conversation UTF-8 payloads above 640,000 bytes.
+Before provider work, JSON must contain exactly one non-empty string field, `conversation`. The endpoint rejects extra fields, invalid JSON/types, non-JSON content, request bodies above 1,000,000 bytes, conversations above 210,000 JavaScript characters, and conversation UTF-8 payloads above 840,000 bytes.
 
 Instance-local controls allow 8 requests per observed client IP per minute, 40 per hour, and 8 concurrent jobs per warm function instance. They are not a global durable quota. Provider errors become bounded safe messages; raw provider response bodies are not exposed or logged.
 
@@ -102,7 +102,7 @@ The sanitized receipt powers the GitHub Pages analysis view through `analysis-br
 
 ## Verification Contract
 
-`npm test` covers endpoint security and limits, picker/preconnect privacy, one-job background behavior, prompt isolation, profiles and routing, 160,000-character forwarding, timeout budgets, fallbacks and validation, absence of expansion, full-middle capture, duplicate turns, structural roles, removal of broad DOM fallback, virtualized capture, paste verification, placement, and analysis receipts. It also loads the versioned evaluation set through the real capture hooks and fails on any lost turn, changed turn count, or fixture capture above 250 ms.
+`npm test` covers endpoint security and limits, picker/preconnect privacy, one-job background behavior, prompt isolation, profiles and routing, 210,000-character forwarding, timeout budgets, fallbacks and validation, absence of expansion, full-middle capture, duplicate turns, structural roles, removal of broad DOM fallback, virtualized capture, paste verification, placement, and analysis receipts. It also loads the versioned evaluation set through the real capture hooks and fails on any lost turn, changed turn count, or fixture capture above 250 ms.
 
 `npm run eval` sends the versioned evaluation transcripts through `EVAL_ENDPOINT`, defaulting to production. It fails below 90% required-fact recall, on any forbidden/incorrect fact, invalid Context Carry structure, a per-case latency over 30 seconds for the small case or 60 seconds for the medium case, or more than 90 seconds total. Required facts may define explicit equivalent phrases so harmless paraphrases do not create false failures.
 

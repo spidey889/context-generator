@@ -116,7 +116,7 @@ test("backend schema accepts exactly one conversation string at the canonical li
     body: { conversation: "x".repeat(MAX_CONVERSATION_CHARS) }
   }));
   assert.equal(exactLimit.ok, true);
-  assert.equal(exactLimit.conversation.length, 160000);
+  assert.equal(exactLimit.conversation.length, 210000);
 
   for (const body of [
     null,

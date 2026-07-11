@@ -13,8 +13,8 @@
       "paddingRepeat": 6,
       "paddingText": "Background implementation note: the existing release checklist includes lint, unit tests, packaging, artifact review, and manual destination verification. These details are context, not a replacement for the requested evaluation gate.",
       "turns": [
-        { "role": "user", "text": "Project Atlas is a Brave extension. The production branch is master and the release endpoint is https://atlas.example/api/carry. Preserve the exact 160,000-character server limit." },
-        { "role": "assistant", "text": "Understood. I will keep the server limit at 160,000 characters and avoid changing runtime code." },
+        { "role": "user", "text": "Project Atlas is a Brave extension. The production branch is master and the release endpoint is https://atlas.example/api/carry. Preserve the exact 210,000-character server limit." },
+        { "role": "assistant", "text": "Understood. I will keep the server limit at 210,000 characters and avoid changing runtime code." },
         { "role": "user", "text": "Decision: use Pinecone only for search, not authentication. The unresolved task is adding a deterministic regression gate. Do not rename Project Atlas." },
         { "role": "assistant", "text": "The next step is to add the regression gate while keeping Pinecone limited to search." },
         { "role": "user", "text": "Extra implementation context: the gate must measure retained facts, incorrect facts, complete capture, and transfer latency. It must run from one command before release." }
@@ -24,7 +24,7 @@
         "Brave extension",
         "master",
         "https://atlas.example/api/carry",
-        "160,000",
+        "210,000",
         "Pinecone",
         "search",
         "deterministic regression gate",

@@ -90,11 +90,11 @@ test("mistral model routing always starts with medium 3.5 without changing summa
   }
 });
 
-test("backend forwards a 160k conversation to Mistral and reports the same input size", async () => {
+test("backend forwards a 210k conversation to Mistral and reports the same input size", async () => {
   const originalFetch = global.fetch;
   const originalApiKey = process.env.MISTRAL_API_KEY;
   const restoreMistralModel = setTemporaryEnv("MISTRAL_MODEL", undefined);
-  const conversation = "x".repeat(160000);
+  const conversation = "x".repeat(210000);
   let capturedRequest = null;
 
   process.env.MISTRAL_API_KEY = "test-key";
@@ -147,7 +147,7 @@ test("backend forwards a 160k conversation to Mistral and reports the same input
     assert.equal(res.payload.timing.modelThresholdChars, null);
     assert.equal(res.payload.timing.modelOverride, false);
     assert.match(res.payload.timing.modelReason, /served as the first model/);
-    assert.equal(res.payload.timing.inputChars, 160000);
+    assert.equal(res.payload.timing.inputChars, 210000);
     assert.equal(res.payload.timing.maxTokens, 4200);
     assert.equal(res.payload.timing.targetWords, 1200);
     assert.equal(res.payload.timing.qualityFloorMet, true);

@@ -13,7 +13,7 @@ Cap-Context carries the useful parts of one AI chat into another AI without send
 
 If auto-paste fails, Cap-Context shows a manual copy dialog with the generated context so you can still paste it yourself.
 
-Opening or cancelling the picker does not capture or upload conversation text. The backend accepts conversations up to 160,000 characters; larger captures are rejected rather than silently truncated.
+Opening or cancelling the picker does not capture or upload conversation text. The backend accepts conversations up to 210,000 characters; larger captures are rejected rather than silently truncated.
 
 ## Install
 
