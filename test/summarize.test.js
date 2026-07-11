@@ -368,6 +368,21 @@ test("backend fixed chain takes precedence over MISTRAL_MODEL", async () => {
   }
 });
 
+test("validator accepts the exact boxed Unicode header requested from providers", () => {
+  const boxedSummary = makeContextCarrySummary("boxed", 90).replace(
+    "CONTEXT CARRY - READY TO PASTE",
+    [
+      "╔══════════════════════════════════════════╗",
+      "║         CONTEXT CARRY — READY TO PASTE        ║",
+      "╚══════════════════════════════════════════╝"
+    ].join("\n")
+  );
+  const profile = getSummaryProfile("x".repeat(4000));
+
+  assert.equal(validateContextCarrySummary(boxedSummary, profile).ok, true);
+  assert.match(normalizeContextCarrySummary(boxedSummary), /CONTEXT CARRY — READY TO PASTE/);
+});
+
 test("provider fallback budgets keep the complete chain below the Vercel ceiling", () => {
   const budgets = [
     getProviderRequestBudgetMs("mistral-medium-2604"),
