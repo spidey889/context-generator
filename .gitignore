@@ -5,3 +5,4 @@ package-lock.json
 api/mcp.mjs
 extension/chrome.zip
 *Backup authentication codes.txt
+memory.md

@@ -1,6 +1,6 @@
 const MISTRAL_MAX_ATTEMPTS = 2;
 const MISTRAL_RETRY_INTERVAL_MS = 450;
-const MISTRAL_TIMEOUT_MS = 80000;
+const PROVIDER_ATTEMPT_TIMEOUT_MS = 80000;
 const MISTRAL_CHAT_COMPLETIONS_URL = "https://api.mistral.ai/v1/chat/completions";
 const GROQ_CHAT_COMPLETIONS_URL = "https://api.groq.com/openai/v1/chat/completions";
 const LOCAL_DIRECT_MODEL = "local-direct";
@@ -8,6 +8,12 @@ const MISTRAL_PRIMARY_MODEL = "mistral-medium-2604";
 const MISTRAL_FALLBACK_MODELS = ["mistral-large-2512", "ministral-3b-2512"];
 const MISTRAL_MODEL_CHAIN = [MISTRAL_PRIMARY_MODEL, ...MISTRAL_FALLBACK_MODELS];
 const GROQ_FALLBACK_MODEL = "llama-3.1-8b-instant";
+const PROVIDER_REQUEST_BUDGETS_MS = {
+  [MISTRAL_PRIMARY_MODEL]: 55000,
+  "mistral-large-2512": 40000,
+  "ministral-3b-2512": 25000,
+  [GROQ_FALLBACK_MODEL]: 15000
+};
 const MISTRAL_PROMPT_CACHE_VERSION = "capcontext-summary-v1";
 const SUMMARY_PROVIDERS = {
   mistral: {
@@ -238,6 +244,7 @@ module.exports.__test = {
   normalizeContextCarrySections,
   validateContextCarrySummary,
   getMinimumValidSummaryWords,
+  getProviderRequestBudgetMs,
   stripContextCarryFooter,
   countWords,
   getSummaryProfile,
@@ -435,7 +442,7 @@ function requestProviderSummary(provider, apiKey, messages, profile, model, opti
       "Content-Type": "application/json",
     },
     body: JSON.stringify(body),
-  });
+  }, getProviderRequestBudgetMs(model));
 }
 
 function getInitialSummaryMessages(conversation, profile) {
@@ -700,14 +707,20 @@ function getContextCarryTemplate(profile) {
 [One clear sentence: exactly what the user needs to do or ask next]`;
 }
 
-async function fetchWithRetry(url, options) {
+async function fetchWithRetry(url, options, requestBudgetMs) {
   let lastError = null;
+  let lastResponse = null;
+  const deadline = Date.now() + requestBudgetMs;
 
   for (let attempt = 1; attempt <= MISTRAL_MAX_ATTEMPTS; attempt += 1) {
+    const remainingMs = deadline - Date.now();
+    if (remainingMs <= 0) break;
+
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), MISTRAL_TIMEOUT_MS);
+    const timeout = setTimeout(() => controller.abort(), Math.min(PROVIDER_ATTEMPT_TIMEOUT_MS, remainingMs));
     try {
       const response = await fetch(url, { ...options, signal: controller.signal });
+      lastResponse = response;
       if (response.ok || !isRetryableProviderStatus(response.status) || attempt === MISTRAL_MAX_ATTEMPTS) {
         return response;
       }
@@ -719,10 +732,23 @@ async function fetchWithRetry(url, options) {
       clearTimeout(timeout);
     }
 
-    await delay(MISTRAL_RETRY_INTERVAL_MS * attempt);
+    const retryDelayMs = Math.min(MISTRAL_RETRY_INTERVAL_MS * attempt, Math.max(0, deadline - Date.now()));
+    if (retryDelayMs <= 0) break;
+    await delay(retryDelayMs);
   }
 
-  throw lastError || new Error("Mistral request failed");
+  if (lastResponse) return lastResponse;
+  throw lastError || createTimeoutError();
+}
+
+function createTimeoutError() {
+  const error = new Error("Provider request budget exhausted");
+  error.name = "AbortError";
+  return error;
+}
+
+function getProviderRequestBudgetMs(model) {
+  return PROVIDER_REQUEST_BUDGETS_MS[model] || 15000;
 }
 
 function isRetryableProviderStatus(status) {

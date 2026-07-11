@@ -5,10 +5,7 @@ const SOURCE_MESSAGE_TIMEOUT_MS = 12000;
 const DESTINATION_MESSAGE_TIMEOUT_MS = 30000;
 const MESSAGE_RETRY_INTERVAL_MS = 120;
 const DESTINATION_WARMUP_TIMEOUT_MS = 9000;
-const SUMMARY_BACKEND_ATTEMPTS = 2;
-const SUMMARY_BACKEND_RETRY_INTERVAL_MS = 450;
-const SUMMARY_BACKEND_TIMEOUT_MS = 175000;
-const SUMMARY_BACKEND_RETRY_BUDGET_MS = 10000;
+const SUMMARY_BACKEND_TIMEOUT_MS = 150000;
 const SUMMARY_CACHE_TTL_MS = 120000;
 const SUMMARY_CACHE_MAX_ENTRIES = 8;
 const summaryCache = new Map();
@@ -170,66 +167,49 @@ async function summarizeWithBackend(conversation, transferId = null) {
 }
 
 async function fetchSummaryFromBackend(conversationText, transferId = null) {
-  let lastError = null;
   const summaryStartedAt = nowMs();
   logPerf(transferId, "summary backend request start", { chars: conversationText.length, inputChars: conversationText.length });
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), SUMMARY_BACKEND_TIMEOUT_MS);
 
-  for (let attempt = 1; attempt <= SUMMARY_BACKEND_ATTEMPTS; attempt += 1) {
-    let timeout = null;
-    try {
-      const controller = new AbortController();
-      timeout = setTimeout(() => controller.abort(), SUMMARY_BACKEND_TIMEOUT_MS);
-      const fetchStartedAt = nowMs();
-      const response = await fetch(SUMMARY_BACKEND_URL, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ conversation: conversationText }),
-        signal: controller.signal
-      });
-      const fetchMs = Math.round(nowMs() - fetchStartedAt);
+  try {
+    const fetchStartedAt = nowMs();
+    const response = await fetch(SUMMARY_BACKEND_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ conversation: conversationText }),
+      signal: controller.signal
+    });
+    const fetchMs = Math.round(nowMs() - fetchStartedAt);
 
-      if (!response.ok) {
-        lastError = new Error("Backup summarizer failed.");
-        logPerf(transferId, "summary backend response error", { status: response.status, fetchMs, attempt });
-        if (!isRetryableSummaryStatus(response.status)) throw lastError;
-      } else {
-        const parseStartedAt = nowMs();
-        const data = await response.json();
-        const parseMs = Math.round(nowMs() - parseStartedAt);
-        if (data.summary?.trim()) {
-          const summary = data.summary.trim();
-          const summaryMs = Math.round(nowMs() - summaryStartedAt);
-          const timing = {
-            source: "backend",
-            status: response.status,
-            attempt,
-            summaryMs,
-            fetchMs,
-            parseMs,
-            chars: summary.length,
-            requestChars: conversationText.length,
-            backendInputChars: data.timing?.inputChars || null,
-            backend: data.timing || null
-          };
-          logPerf(transferId, "summary backend response done", timing);
-          return { summary, timing };
-        }
-        lastError = new Error("Backup summarizer returned no summary.");
-      }
-    } catch (error) {
-      lastError = error;
-      if (!isRetryableSummaryError(error)) throw error;
-    } finally {
-      if (timeout) clearTimeout(timeout);
+    if (!response.ok) {
+      logPerf(transferId, "summary backend response error", { status: response.status, fetchMs, attempt: 1 });
+      throw new Error("Backup summarizer failed.");
     }
 
-    if (attempt < SUMMARY_BACKEND_ATTEMPTS) {
-      if (nowMs() - summaryStartedAt >= SUMMARY_BACKEND_RETRY_BUDGET_MS) break;
-      await delay(SUMMARY_BACKEND_RETRY_INTERVAL_MS * attempt);
-    }
+    const parseStartedAt = nowMs();
+    const data = await response.json();
+    const parseMs = Math.round(nowMs() - parseStartedAt);
+    if (!data.summary?.trim()) throw new Error("Backup summarizer returned no summary.");
+
+    const summary = data.summary.trim();
+    const timing = {
+      source: "backend",
+      status: response.status,
+      attempt: 1,
+      summaryMs: Math.round(nowMs() - summaryStartedAt),
+      fetchMs,
+      parseMs,
+      chars: summary.length,
+      requestChars: conversationText.length,
+      backendInputChars: data.timing?.inputChars || null,
+      backend: data.timing || null
+    };
+    logPerf(transferId, "summary backend response done", timing);
+    return { summary, timing };
+  } finally {
+    clearTimeout(timeout);
   }
-
-  throw lastError || new Error("Backup summarizer failed.");
 }
 
 function getCachedSummary(conversationText) {
@@ -256,20 +236,6 @@ function cacheSummary(conversationText, summary) {
     const oldestKey = summaryCache.keys().next().value;
     summaryCache.delete(oldestKey);
   }
-}
-
-function isRetryableSummaryStatus(status) {
-  return status === 429 || status === 500 || status === 502 || status === 503 || status === 504;
-}
-
-function isRetryableSummaryError(error) {
-  const message = String(error?.message || error || "");
-  return (
-    error?.name === "TypeError" ||
-    error?.name === "AbortError" ||
-    message.includes("Failed to fetch") ||
-    message.includes("NetworkError")
-  );
 }
 
 async function transferToDestination(destinationId, text, preparedTabId = null, transferId = null) {

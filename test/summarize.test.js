@@ -9,6 +9,7 @@ const {
   normalizeContextCarrySummary,
   validateContextCarrySummary,
   getMinimumValidSummaryWords,
+  getProviderRequestBudgetMs,
   stripContextCarryFooter,
   countWords,
   getSummaryProfile,
@@ -345,6 +346,19 @@ test("backend fixed chain takes precedence over MISTRAL_MODEL", async () => {
       process.env.MISTRAL_API_KEY = originalApiKey;
     }
   }
+});
+
+test("provider fallback budgets keep the complete chain below the Vercel ceiling", () => {
+  const budgets = [
+    getProviderRequestBudgetMs("mistral-medium-2604"),
+    getProviderRequestBudgetMs("mistral-large-2512"),
+    getProviderRequestBudgetMs("ministral-3b-2512"),
+    getProviderRequestBudgetMs("llama-3.1-8b-instant")
+  ];
+
+  assert.deepEqual(budgets, [55000, 40000, 25000, 15000]);
+  assert.equal(budgets.reduce((total, budget) => total + budget, 0), 135000);
+  assert.ok(budgets.reduce((total, budget) => total + budget, 0) < 180000);
 });
 
 test("backend falls back from medium 3.5 to large and reports the serving model", async () => {
