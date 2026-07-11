@@ -7,11 +7,13 @@ Cap-Context carries the useful parts of one AI chat into another AI without send
 1. Open a supported AI chat on Claude, ChatGPT, Gemini, Grok, or DeepSeek.
 2. Click the Cap-Context bubble in the message composer.
 3. Pick where you want to continue from the destination picker.
-4. Cap-Context summarizes the current conversation through the Vercel/Mistral backend.
+4. Cap-Context captures role-verified turns and sends one summary job to the Vercel backend. Tiny chats are carried locally; generated summaries use Mistral with an optional Groq fallback.
 5. It opens or prepares the destination tab, pastes the context into the message box, and focuses that tab.
 6. Review the pasted context, then send it manually when you are ready.
 
 If auto-paste fails, Cap-Context shows a manual copy dialog with the generated context so you can still paste it yourself.
+
+Opening or cancelling the picker does not capture or upload conversation text. The backend accepts conversations up to 160,000 characters; larger captures are rejected rather than silently truncated.
 
 ## Install
 

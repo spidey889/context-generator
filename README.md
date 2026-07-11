@@ -8,8 +8,8 @@ Context Generator is a Chrome/Brave extension that reads the chat you are curren
 
 - Adds a Cap-Context button inside supported AI chat pages.
 - Lets you pick where to continue: Claude, ChatGPT, Gemini, Grok, or DeepSeek.
-- Scrapes the current conversation before any extension UI is shown, so extension text is not included.
-- Sends the conversation to the backend summarizer.
+- Captures only role-verified chat turns after you choose a destination; extension UI and unrelated page text are excluded.
+- Sends up to 160,000 captured conversation characters to one backend summary job.
 - Opens the destination AI and pastes the generated context into its composer.
 - Leaves the final send action to you.
 
@@ -49,13 +49,15 @@ extension/
 
 ## Backend
 
-The extension calls the Vercel API endpoint in `api/summarize.js`. That endpoint uses Mistral to normalize the conversation into the Context Carry format before returning it to the extension.
+The extension calls the Vercel API endpoint in `api/summarize.js`. Tiny chats are carried locally by the backend without a provider call. Generated summaries use a fixed Mistral model chain and can fall back to Groq. Provider output must pass deterministic Context Carry validation before it is returned to the extension.
 
 For deployment, configure:
 
 ```text
 MISTRAL_API_KEY
 ```
+
+Optionally configure `GROQ_API_KEY` for the final fallback provider.
 
 ## Development
 
@@ -67,9 +69,10 @@ npm test
 
 The test suite covers the core pieces most likely to regress:
 
-- Summary normalization
-- Conversation scraping edge cases
-- Paste verification logic
+- Endpoint security, limits, prompt isolation, and provider fallback
+- Summary profiles, validation, normalization, and timeout budgets
+- Conversation capture, role detection, virtualized chats, and privacy boundaries
+- Background job deduplication, paste verification, and analysis receipts
 
 ## Project Layout
 
@@ -80,12 +83,16 @@ The test suite covers the core pieces most likely to regress:
 | `extension/platform-content.js` | In-page button, picker, scraping, paste behavior, and fallback UI |
 | `extension/README.md` | Extension-specific usage notes |
 | `api/summarize.js` | Vercel summarization endpoint |
+| `api/request-security.js` | Endpoint CORS, schema, size, rate, and concurrency controls |
 | `test/` | Minimal Node regression tests |
+| `LOGIC.md` | Current production architecture and behavior |
+| `CHANGELOG.md` | Historical decisions and replaced approaches |
+| `PRIVACY.md` | Current data handling and privacy policy |
 | `OLD_README.md` | Archived README for the earlier manual prompt/skill version |
 
 ## Privacy Notes
 
-Conversation text is sent to the configured backend only when you start a transfer. The extension does not send messages on your behalf, does not click the destination send button, and does not submit the pasted summary automatically.
+Opening or cancelling the picker does not capture or upload chat text. Conversation text is sent only after you select a destination, and generated summaries may be processed by Mistral or the configured Groq fallback. The extension does not send messages on your behalf, click the destination send button, or submit the pasted summary automatically. See [PRIVACY.md](PRIVACY.md) for details.
 
 ## Contributing
 

@@ -11,7 +11,8 @@ This Privacy Policy explains how Cap Context ("we", "our", or "us") handles user
 
 ## Data Retention and Security
 
-- **Temporary Processing**: We do not permanently store or intentionally log chat content. Conversation text is processed for the duration of the summary request and returned to the extension.
+- **Temporary Processing**: We do not permanently store or intentionally log chat content. Conversation text is processed for the duration of the summary request and returned to the extension. The background worker may keep a recent exact summary in memory for up to two minutes; this disappears with the worker and is not persistent storage.
+- **Local Diagnostics**: The extension stores one latest-run receipt in browser extension storage for the analysis page. It contains transfer timing, counts, provider/model/fallback details, token usage, and status, but not the captured transcript or generated summary.
 - **Abuse Protection**: The backend temporarily processes ordinary request metadata, such as an IP address supplied by the hosting platform, to enforce rate limits and protect the public service from automated abuse. This metadata is not used for advertising.
 
 ## Data Sharing and Sale
