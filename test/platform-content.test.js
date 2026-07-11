@@ -917,10 +917,14 @@ test("opening the destination picker does not scrape or summarize", () => {
   const pickerStart = source.indexOf("function toggleDestinationSheet()");
   const pickerEnd = source.indexOf("function warmDestinationConnections()", pickerStart);
   const pickerSource = source.slice(pickerStart, pickerEnd);
+  const preconnectEnd = source.indexOf("function getUrlOrigin(", pickerEnd);
+  const preconnectSource = source.slice(pickerEnd, preconnectEnd);
 
-  assert.ok(pickerStart >= 0 && pickerEnd > pickerStart);
-  assert.doesNotMatch(source, /warmSummary|scheduleWarmSummary|startWarmSummary|ensureWarmSummaryForConversation/);
+  assert.ok(pickerStart >= 0 && pickerEnd > pickerStart && preconnectEnd > pickerEnd);
+  assert.doesNotMatch(source, /warmSummary|scheduleWarmSummary|startWarmSummary|ensureWarmSummaryForConversation|conversationFingerprint/);
   assert.doesNotMatch(pickerSource, /scrapeConversation|requestBackendSummary|summarizeWithBackend/);
+  assert.match(preconnectSource, /link\.rel = "preconnect"/);
+  assert.doesNotMatch(preconnectSource, /conversation|scrape|summar|fetch\(|sendMessage|notifyBackground/);
 });
 
 test("transfer safety window covers long quality summaries", () => {

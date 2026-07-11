@@ -581,6 +581,10 @@
     const destinationName = getPlatform(details.destinationId)?.name || "the destination";
 
     if (stage === "summary") {
+      if (["conversation_too_large", "request_too_large", "rate_limited", "service_busy", "client_not_allowed"].includes(error?.code)) {
+        showErrorOverlay(error.message);
+        return;
+      }
       showErrorOverlay(SUMMARY_RETRY_ERROR_MESSAGE);
       return;
     }
@@ -1190,7 +1194,10 @@
     }
 
     if (response && response.ok === false) {
-      throw new Error(response.error || "Unknown background error");
+      const error = new Error(response.error || "Unknown background error");
+      error.code = response.code || null;
+      error.status = response.status || null;
+      throw error;
     }
     return response;
   }

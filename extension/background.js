@@ -1,5 +1,6 @@
 const CHATGPT_URL = "https://chatgpt.com/";
 const SUMMARY_BACKEND_URL = "https://context-generator-five.vercel.app/api/summarize";
+const SUMMARY_CLIENT_HEADER = "cap-context-extension/1";
 const PLATFORM_CONTENT_SCRIPT = "platform-content.js";
 const SOURCE_MESSAGE_TIMEOUT_MS = 12000;
 const DESTINATION_MESSAGE_TIMEOUT_MS = 30000;
@@ -95,7 +96,12 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       .catch((error) => {
         console.error("[Context Generator Relay]", error);
         setBadge("ERR", "#b42318", 5000);
-        sendResponse({ ok: false, error: error.message });
+        sendResponse({
+          ok: false,
+          error: error.message,
+          code: error.code || null,
+          status: error.status || null
+        });
       });
 
     return true;
@@ -176,7 +182,10 @@ async function fetchSummaryFromBackend(conversationText, transferId = null) {
     const fetchStartedAt = nowMs();
     const response = await fetch(SUMMARY_BACKEND_URL, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Content-Type": "application/json",
+        "X-Cap-Context-Client": SUMMARY_CLIENT_HEADER
+      },
       body: JSON.stringify({ conversation: conversationText }),
       signal: controller.signal
     });
@@ -184,7 +193,7 @@ async function fetchSummaryFromBackend(conversationText, transferId = null) {
 
     if (!response.ok) {
       logPerf(transferId, "summary backend response error", { status: response.status, fetchMs, attempt: 1 });
-      throw new Error("Backup summarizer failed.");
+      throw await createSummaryBackendError(response);
     }
 
     const parseStartedAt = nowMs();
@@ -210,6 +219,31 @@ async function fetchSummaryFromBackend(conversationText, transferId = null) {
   } finally {
     clearTimeout(timeout);
   }
+}
+
+async function createSummaryBackendError(response) {
+  let payload = null;
+  try {
+    payload = await response.json();
+  } catch {
+    // Error bodies are optional; never expose an unparsed provider or platform response.
+  }
+
+  const code = typeof payload?.code === "string" ? payload.code : "summary_failed";
+  const safeBackendMessage = typeof payload?.error === "string" && payload.error.length <= 240
+    ? payload.error
+    : "";
+  const publicMessages = {
+    conversation_too_large: safeBackendMessage || "This conversation is too large for Cap Context to transfer.",
+    request_too_large: "This conversation is too large for Cap Context to transfer.",
+    rate_limited: "Too many transfers were started from this network. Wait a moment, then try again.",
+    service_busy: "Cap Context is busy right now. Wait a moment, then try again.",
+    client_not_allowed: "This Cap Context extension version could not access the summary service."
+  };
+  const error = new Error(publicMessages[code] || "Cap Context could not create the summary. Please try again.");
+  error.code = code;
+  error.status = response.status;
+  return error;
 }
 
 function getCachedSummary(conversationText) {
