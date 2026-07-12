@@ -496,6 +496,9 @@
       collectRenderedConversationTurns,
       scrapeConversationTextWhenReady,
       scrapeConversationTextForTransfer,
+      createTransferTrace,
+      markCaptureDone,
+      buildLatestTransferStats,
       getClaudeInlineControlsToShift,
       getClaudeModelControlsToNudge,
       getClaudeControlTargetOffset,
@@ -658,6 +661,7 @@
   }
 
   function markCaptureDone(trace, conversationText) {
+    if (trace) trace.rawScrapedText = conversationText;
     markTransferTrace(trace, "capture done", {
       chars: conversationText.length,
       ...getConversationCaptureMetrics(conversationText)
@@ -1063,6 +1067,7 @@
       startedAt: new Date(trace.startedAtEpoch || Date.now()).toISOString(),
       completedAt: new Date().toISOString(),
       totalMs,
+      rawScrapedText: typeof trace.rawScrapedText === "string" ? trace.rawScrapedText : null,
       capture: {
         method: captureDetail.method || null,
         messageTurnCount: captureDetail.messageTurnCount ?? null,

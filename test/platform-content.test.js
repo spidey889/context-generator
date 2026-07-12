@@ -1047,6 +1047,17 @@ test("latest-run receipt preserves the Mistral fallback chain", () => {
   assert.match(source, /function sanitizeModelChainForStats/);
 });
 
+test("latest-run receipt preserves the exact raw scraped text", () => {
+  const hooks = loadPlatformContent([]);
+  const exactText = "Claude conversation:\n\nUser: Keep <tags>, & symbols, 'quotes', and line breaks.\n\nClaude: Exactly.";
+  const trace = hooks.createTransferTrace("chatgpt", "test");
+
+  hooks.markCaptureDone(trace, exactText);
+  const stats = hooks.buildLatestTransferStats(trace, 25);
+
+  assert.equal(stats.rawScrapedText, exactText);
+});
+
 test("paste verification accepts stable context anchors when box characters differ", () => {
   const hooks = loadPlatformContent([]);
   const expected = [

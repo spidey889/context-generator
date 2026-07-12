@@ -21,3 +21,11 @@ test("analysis displays the Medium 3.5 name instead of its API snapshot ID", () 
   assert.match(ANALYSIS_SOURCE, /mini\("Model", formatModelDisplayName\(summary\.model\)\)/);
   assert.match(ANALYSIS_SOURCE, /tried\.map\(formatModelDisplayName\)/);
 });
+
+test("analysis keeps exact raw scraped text behind a collapsed gear control", () => {
+  assert.match(ANALYSIS_SOURCE, /id="rawScrapeButton"/);
+  assert.match(ANALYSIS_SOURCE, /id="rawScrapePanel" hidden/);
+  assert.match(ANALYSIS_SOURCE, /rawScrapedText\.textContent = rawText/);
+  assert.match(ANALYSIS_SOURCE, /Stored locally and replaced by the next transfer/);
+  assert.doesNotMatch(ANALYSIS_SOURCE, /escapeHtml\(stats\.rawScrapedText\)/);
+});

@@ -139,6 +139,29 @@
       cursor: pointer;
     }
 
+    .gear {
+      width: 34px;
+      height: 34px;
+      padding: 0;
+      border: 1px solid var(--line-strong);
+      border-radius: 8px;
+      background: rgba(255, 255, 255, 0.05);
+      color: var(--text);
+      cursor: pointer;
+      font-size: 17px;
+      line-height: 1;
+    }
+
+    .gear:hover,
+    .gear[aria-expanded="true"] {
+      background: rgba(255, 255, 255, 0.11);
+    }
+
+    .gear:disabled {
+      opacity: 0.38;
+      cursor: not-allowed;
+    }
+
     .hero {
       display: grid;
       grid-template-columns: minmax(0, 1.25fr) minmax(280px, 0.75fr);
@@ -325,6 +348,37 @@
       background: rgba(17, 17, 18, 0.9);
     }
 
+    .raw-panel {
+      margin-bottom: 18px;
+      padding: 20px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: rgba(17, 17, 18, 0.96);
+      box-shadow: var(--shadow);
+    }
+
+    .raw-note {
+      margin: -4px 0 14px;
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.45;
+    }
+
+    .raw-text {
+      max-height: 68vh;
+      margin: 0;
+      padding: 16px;
+      overflow: auto;
+      border: 1px solid rgba(255, 255, 255, 0.09);
+      border-radius: 8px;
+      background: #09090a;
+      color: #ddd9d1;
+      font: 12px/1.55 ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace;
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
+      user-select: text;
+    }
+
     .section-head {
       display: flex;
       justify-content: space-between;
@@ -478,6 +532,7 @@
       </div>
       <div class="actions">
         <div class="status" id="bridgeStatus"><span class="dot off"></span><span>Waiting</span></div>
+        <button class="gear" id="rawScrapeButton" type="button" aria-label="Show raw scraped text" aria-expanded="false" title="Raw scraped text" disabled>&#9881;</button>
         <button class="refresh" id="refreshButton" type="button">Refresh</button>
       </div>
     </header>
@@ -490,11 +545,19 @@
     const STORAGE_BRIDGE_SOURCE = "context-generator-analysis-bridge";
     const app = document.getElementById("app");
     const bridgeStatus = document.getElementById("bridgeStatus");
+    const rawScrapeButton = document.getElementById("rawScrapeButton");
     const refreshButton = document.getElementById("refreshButton");
     const demoMode = new URLSearchParams(location.search).has("demo");
     const postTargetOrigin = location.protocol === "file:" || location.origin === "null" ? "*" : location.origin;
 
     let bridgeReady = false;
+    let rawScrapeOpen = false;
+
+    rawScrapeButton.addEventListener("click", () => {
+      if (rawScrapeButton.disabled) return;
+      rawScrapeOpen = !rawScrapeOpen;
+      updateRawScrapePanel();
+    });
 
     refreshButton.addEventListener("click", () => {
       if (demoMode) {
@@ -540,6 +603,9 @@
 
     function render(stats) {
       if (!stats) {
+        rawScrapeOpen = false;
+        rawScrapeButton.disabled = true;
+        rawScrapeButton.setAttribute("aria-expanded", "false");
         app.innerHTML = `
           <section class="empty">
             <div>
@@ -560,6 +626,7 @@
       const capture = stats.capture || {};
       const summary = stats.summary || {};
       const integrity = getIntegrityLabel(summary.requestChars, summary.backendInputChars);
+      const rawText = typeof stats.rawScrapedText === "string" ? stats.rawScrapedText : "";
 
       app.innerHTML = `
         <section class="hero">
@@ -608,6 +675,15 @@
           ${metric("Paste time", formatDuration(stats.destinationTiming?.pasteMs), `Total: ${formatDuration(stats.totalMs)}`, "accent-teal")}
         </section>
 
+        <section class="raw-panel" id="rawScrapePanel" hidden>
+          <div class="section-head">
+            <h2>Raw scraped text</h2>
+            <span>${escapeHtml(formatNumber(rawText.length))} characters</span>
+          </div>
+          <p class="raw-note">Exact latest captured transcript sent to the backend. Stored locally and replaced by the next transfer.</p>
+          <pre class="raw-text" id="rawScrapedText"></pre>
+        </section>
+
         <section class="timeline">
           <div class="section-head">
             <h2>Timeline</h2>
@@ -618,6 +694,19 @@
           </div>
         </section>
       `;
+
+      const rawScrapedText = document.getElementById("rawScrapedText");
+      if (rawScrapedText) rawScrapedText.textContent = rawText;
+      rawScrapeButton.disabled = !rawText;
+      if (!rawText) rawScrapeOpen = false;
+      updateRawScrapePanel();
+    }
+
+    function updateRawScrapePanel() {
+      const panel = document.getElementById("rawScrapePanel");
+      rawScrapeButton.setAttribute("aria-expanded", rawScrapeOpen ? "true" : "false");
+      rawScrapeButton.setAttribute("aria-label", rawScrapeOpen ? "Hide raw scraped text" : "Show raw scraped text");
+      if (panel) panel.hidden = !rawScrapeOpen;
     }
 
     function mini(label, value) {
@@ -769,6 +858,7 @@
         startedAt: new Date(Date.now() - 14200).toISOString(),
         completedAt: new Date().toISOString(),
         totalMs: 14200,
+        rawScrapedText: "Claude conversation:\n\nUser: Keep this exact captured text.\n\nClaude: It is shown without additional processing.",
         capture: {
           method: "structured",
           messageTurnCount: 32,
