@@ -270,7 +270,7 @@ test("role detection uses structural evidence instead of you or me labels", () =
   assert.equal(deepSeekHooks.getConversationRole(deepSeekMarkdown), "User");
 });
 
-test("conversation scraping preserves separate turns with identical text", () => {
+test("final capture safety removes exact duplicate role and text turns", () => {
   const repeatedText = "Please retry that exact operation.";
   const firstUserTurn = new FakeElement({
     text: repeatedText,
@@ -288,11 +288,11 @@ test("conversation scraping preserves separate turns with identical text", () =>
 
   const transcript = hooks.scrapeConversationText();
 
-  assert.equal((transcript.match(/User: Please retry that exact operation\./g) || []).length, 2);
+  assert.equal((transcript.match(/User: Please retry that exact operation\./g) || []).length, 1);
   assert.equal(hooks.getConversationTurns().length, 3);
 });
 
-test("virtual window merging preserves repeated turns while removing only window overlap", () => {
+test("sequence merge keeps positional duplicates until the final capture safety pass", () => {
   const hooks = loadPlatformContent([]);
   const collected = [];
   const firstWindow = [
@@ -310,6 +310,18 @@ test("virtual window merging preserves repeated turns while removing only window
   assert.equal(hooks.collectRenderedConversationTurns(collected, secondWindow), 1);
   assert.equal(collected.length, 4);
   assert.equal(collected.filter((turn) => turn.role === "User" && turn.text === "Repeat this.").length, 2);
+});
+
+test("sequence alignment does not confuse numeric message prefixes", () => {
+  const hooks = loadPlatformContent([]);
+  const collected = [{ role: "User", text: "Boundary-loaded diagnostic turn 1" }];
+
+  const added = hooks.collectRenderedConversationTurns(collected, [
+    { role: "User", text: "Boundary-loaded diagnostic turn 10" }
+  ]);
+
+  assert.equal(added, 1);
+  assert.equal(collected.length, 2);
 });
 
 test("virtual sweep does not append the same 38 turns when one rendered response grows between snapshots", () => {
@@ -346,6 +358,58 @@ test("virtual sweep merges sliding windows when an overlapping response becomes 
 
   assert.equal(collected.length, 13);
   assert.match(collected[6].text, /Additional Markdown content rendered after scrolling\.$/);
+});
+
+test("virtual sweep inserts a new turn between matching interior blocks", () => {
+  const hooks = loadPlatformContent([], "claude.ai");
+  const canonicalTurns = Array.from({ length: 38 }, (_, index) => ({
+    role: index % 2 === 0 ? "User" : "Claude",
+    text: `Exact diagnostic turn ${index + 1}.`
+  }));
+  const collected = canonicalTurns.filter((_, index) => index !== 18).map((turn) => ({ ...turn }));
+  const interiorSnapshot = canonicalTurns.slice(10, 27).map((turn) => ({ ...turn }));
+
+  const added = hooks.collectRenderedConversationTurns(collected, interiorSnapshot);
+
+  assert.equal(added, 1);
+  assert.deepEqual(JSON.parse(JSON.stringify(collected)), canonicalTurns);
+});
+
+test("virtual sweep reduces 18 overlapping snapshots and 315 entries to the canonical 38-turn sequence", () => {
+  const hooks = loadPlatformContent([], "claude.ai");
+  const canonicalTurns = Array.from({ length: 38 }, (_, index) => ({
+    role: index % 2 === 0 ? "User" : "Claude",
+    text: `Trace-shaped exact turn ${index + 1}.`
+  }));
+  const starts = [0, 4, 8, 12, 16, 20, 18, 14, 10, 6, 2, 5, 9, 13, 17, 21, 15, 11];
+  const snapshots = starts.map((start, index) => {
+    const length = index % 2 === 0 ? 18 : 17;
+    return canonicalTurns.slice(start, Math.min(38, start + length)).map((turn) => ({ ...turn }));
+  });
+  const collected = [];
+
+  assert.equal(snapshots.length, 18);
+  assert.equal(snapshots.reduce((total, snapshot) => total + snapshot.length, 0), 315);
+
+  snapshots.forEach((snapshot) => hooks.collectRenderedConversationTurns(collected, snapshot));
+
+  assert.equal(collected.length, 38);
+  assert.deepEqual(JSON.parse(JSON.stringify(collected)), canonicalTurns);
+});
+
+test("final capture safety reduces 315 role-tagged entries to 38 exact role and text identities", () => {
+  const elements = Array.from({ length: 315 }, (_, index) => {
+    const turnIndex = index % 38;
+    return new FakeElement({
+      text: `Exact diagnostic turn ${turnIndex + 1}.`,
+      attrs: { "data-message-author-role": turnIndex % 2 === 0 ? "user" : "assistant" }
+    });
+  });
+  const hooks = loadPlatformContent(elements, "claude.ai");
+
+  const transcript = hooks.scrapeConversationText();
+
+  assert.equal((transcript.match(/(?:User|Claude): Exact diagnostic turn/g) || []).length, 38);
 });
 
 test("conversation scraping never falls back to unrelated main-page text", () => {

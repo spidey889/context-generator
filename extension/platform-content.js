@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-07-12-claude-snapshot-merge-fix";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-07-12-sequence-merge-fix";
   const BUBBLE_ID = "context-generator-bubble";
   const OVERLAY_ID = "context-generator-overlay";
   const ONBOARDING_ID = "context-generator-onboarding";
@@ -1608,11 +1608,12 @@
       throw new Error(NO_CONVERSATION_ERROR_MESSAGE);
     }
 
-    const turns = messageTurns.filter((turn) => isUsefulConversationTurn(turn));
+    const usefulTurns = messageTurns.filter((turn) => isUsefulConversationTurn(turn));
+    const turns = removeExactDuplicateConversationTurns(usefulTurns);
     const baseMetrics = {
       ...metrics,
       candidateTurnCount: messageTurns.length,
-      messageTurnCount: turns.length,
+      messageTurnCount: usefulTurns.length,
       usefulTurnCount: turns.length,
       rawCandidateChars: messageTurns.reduce((total, turn) => total + turn.text.length, 0)
     };
@@ -1741,35 +1742,115 @@
       role: turn.role,
       text: cleanText(turn.text)
     }));
-    const overlap = getConversationWindowOverlap(collectedTurns, normalizedTurns);
-    if (overlap > 0) {
-      const collectedStart = collectedTurns.length - overlap;
-      for (let index = 0; index < overlap; index += 1) {
-        const collectedTurn = collectedTurns[collectedStart + index];
-        const renderedTurn = normalizedTurns[index];
-        if (renderedTurn.text.length > collectedTurn.text.length) {
-          collectedTurn.text = renderedTurn.text;
+    if (!normalizedTurns.length) return 0;
+    if (!collectedTurns.length) {
+      collectedTurns.push(...normalizedTurns);
+      return normalizedTurns.length;
+    }
+
+    const matches = getConversationSequenceMatches(collectedTurns, normalizedTurns);
+    if (!matches.length) {
+      const newTurns = getNovelConversationTurns(collectedTurns, normalizedTurns);
+      collectedTurns.push(...newTurns);
+      return newTurns.length;
+    }
+
+    let inserted = 0;
+    let previousRenderedIndex = -1;
+    let lastMatchedCollectedIndex = -1;
+
+    for (const match of matches) {
+      const unmatched = normalizedTurns.slice(previousRenderedIndex + 1, match.renderedIndex);
+      const newTurns = getNovelConversationTurns(collectedTurns, unmatched);
+      const insertAt = match.collectedIndex + inserted;
+      if (newTurns.length) {
+        collectedTurns.splice(insertAt, 0, ...newTurns);
+        inserted += newTurns.length;
+      }
+
+      const collectedTurn = collectedTurns[match.collectedIndex + inserted];
+      const renderedTurn = normalizedTurns[match.renderedIndex];
+      if (renderedTurn.text.length > collectedTurn.text.length) {
+        collectedTurn.text = renderedTurn.text;
+      }
+
+      previousRenderedIndex = match.renderedIndex;
+      lastMatchedCollectedIndex = match.collectedIndex + inserted;
+    }
+
+    const trailing = normalizedTurns.slice(previousRenderedIndex + 1);
+    const trailingNewTurns = getNovelConversationTurns(collectedTurns, trailing);
+    if (trailingNewTurns.length) {
+      collectedTurns.splice(lastMatchedCollectedIndex + 1, 0, ...trailingNewTurns);
+      inserted += trailingNewTurns.length;
+    }
+
+    return inserted;
+  }
+
+  function getConversationSequenceMatches(collectedTurns, renderedTurns) {
+    // Virtualized snapshots can repeat interior blocks around a newly rendered
+    // turn. LCS supplies ordered anchors across the whole accumulated sequence.
+    const collectedLength = collectedTurns.length;
+    const renderedLength = renderedTurns.length;
+    const lengths = Array.from(
+      { length: collectedLength + 1 },
+      () => new Uint32Array(renderedLength + 1)
+    );
+
+    for (let collectedIndex = 1; collectedIndex <= collectedLength; collectedIndex += 1) {
+      for (let renderedIndex = 1; renderedIndex <= renderedLength; renderedIndex += 1) {
+        if (areConversationTurnSnapshotsCompatible(
+          collectedTurns[collectedIndex - 1],
+          renderedTurns[renderedIndex - 1]
+        )) {
+          lengths[collectedIndex][renderedIndex] = lengths[collectedIndex - 1][renderedIndex - 1] + 1;
+        } else {
+          lengths[collectedIndex][renderedIndex] = Math.max(
+            lengths[collectedIndex - 1][renderedIndex],
+            lengths[collectedIndex][renderedIndex - 1]
+          );
         }
       }
     }
-    const newTurns = normalizedTurns.slice(overlap);
-    collectedTurns.push(...newTurns);
-    return newTurns.length;
+
+    const matches = [];
+    let collectedIndex = collectedLength;
+    let renderedIndex = renderedLength;
+    while (collectedIndex > 0 && renderedIndex > 0) {
+      if (
+        areConversationTurnSnapshotsCompatible(
+          collectedTurns[collectedIndex - 1],
+          renderedTurns[renderedIndex - 1]
+        ) &&
+        lengths[collectedIndex][renderedIndex] === lengths[collectedIndex - 1][renderedIndex - 1] + 1
+      ) {
+        matches.push({
+          collectedIndex: collectedIndex - 1,
+          renderedIndex: renderedIndex - 1
+        });
+        collectedIndex -= 1;
+        renderedIndex -= 1;
+      } else if (lengths[collectedIndex - 1][renderedIndex] >= lengths[collectedIndex][renderedIndex - 1]) {
+        collectedIndex -= 1;
+      } else {
+        renderedIndex -= 1;
+      }
+    }
+
+    return matches.reverse();
   }
 
-  function getConversationWindowOverlap(collectedTurns, renderedTurns) {
-    const maxOverlap = Math.min(collectedTurns.length, renderedTurns.length);
-    for (let overlap = maxOverlap; overlap > 0; overlap -= 1) {
-      const collectedStart = collectedTurns.length - overlap;
-      const matches = renderedTurns.slice(0, overlap).every((turn, index) => {
-        return areConversationTurnSnapshotsCompatible(
-          collectedTurns[collectedStart + index],
-          turn
-        );
-      });
-      if (matches) return overlap;
-    }
-    return 0;
+  function getNovelConversationTurns(collectedTurns, renderedTurns) {
+    const existingSignatures = new Set(
+      collectedTurns.map((turn) => getConversationTurnSignature(turn.role, turn.text))
+    );
+    return renderedTurns.filter((turn) => {
+      const signature = getConversationTurnSignature(turn.role, turn.text);
+      if (existingSignatures.has(signature)) return false;
+      existingSignatures.add(signature);
+      return true;
+    });
   }
 
   function areConversationTurnSnapshotsCompatible(first, second) {
@@ -1781,7 +1862,21 @@
 
     const shorter = firstText.length <= secondText.length ? firstText : secondText;
     const longer = firstText.length <= secondText.length ? secondText : firstText;
-    return shorter.length >= 24 && longer.includes(shorter);
+    return shorter.length >= 24 && containsWholeRenderedTurn(longer, shorter);
+  }
+
+  function containsWholeRenderedTurn(longer, shorter) {
+    let matchIndex = longer.indexOf(shorter);
+    while (matchIndex >= 0) {
+      const before = matchIndex > 0 ? longer[matchIndex - 1] : "";
+      const afterIndex = matchIndex + shorter.length;
+      const after = afterIndex < longer.length ? longer[afterIndex] : "";
+      if ((!before || !/[\p{L}\p{N}]/u.test(before)) && (!after || !/[\p{L}\p{N}]/u.test(after))) {
+        return true;
+      }
+      matchIndex = longer.indexOf(shorter, matchIndex + 1);
+    }
+    return false;
   }
 
   function getVirtualSweepStepRatio() {
@@ -1858,6 +1953,18 @@
 
   function getConversationTurnSignature(role, text) {
     return `${role || "Message"}\u0001${text || ""}`;
+  }
+
+  function removeExactDuplicateConversationTurns(turns) {
+    // This is deliberately independent of snapshot merging: no exact role+text
+    // duplicate is allowed into the serialized backend payload.
+    const seen = new Set();
+    return turns.filter((turn) => {
+      const signature = getConversationTurnSignature(turn.role, cleanText(turn.text));
+      if (seen.has(signature)) return false;
+      seen.add(signature);
+      return true;
+    });
   }
 
   function createConversationCapture(text, metrics = {}) {
