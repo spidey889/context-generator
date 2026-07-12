@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-07-10-speed-pass";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-07-12-claude-snapshot-merge-fix";
   const BUBBLE_ID = "context-generator-bubble";
   const OVERLAY_ID = "context-generator-overlay";
   const ONBOARDING_ID = "context-generator-onboarding";
@@ -1737,6 +1737,16 @@
       text: cleanText(turn.text)
     }));
     const overlap = getConversationWindowOverlap(collectedTurns, normalizedTurns);
+    if (overlap > 0) {
+      const collectedStart = collectedTurns.length - overlap;
+      for (let index = 0; index < overlap; index += 1) {
+        const collectedTurn = collectedTurns[collectedStart + index];
+        const renderedTurn = normalizedTurns[index];
+        if (renderedTurn.text.length > collectedTurn.text.length) {
+          collectedTurn.text = renderedTurn.text;
+        }
+      }
+    }
     const newTurns = normalizedTurns.slice(overlap);
     collectedTurns.push(...newTurns);
     return newTurns.length;
@@ -1747,12 +1757,26 @@
     for (let overlap = maxOverlap; overlap > 0; overlap -= 1) {
       const collectedStart = collectedTurns.length - overlap;
       const matches = renderedTurns.slice(0, overlap).every((turn, index) => {
-        return getConversationTurnSignature(turn.role, turn.text) ===
-          getConversationTurnSignature(collectedTurns[collectedStart + index].role, collectedTurns[collectedStart + index].text);
+        return areConversationTurnSnapshotsCompatible(
+          collectedTurns[collectedStart + index],
+          turn
+        );
       });
       if (matches) return overlap;
     }
     return 0;
+  }
+
+  function areConversationTurnSnapshotsCompatible(first, second) {
+    if ((first?.role || "Message") !== (second?.role || "Message")) return false;
+
+    const firstText = cleanText(first?.text || "");
+    const secondText = cleanText(second?.text || "");
+    if (firstText === secondText) return true;
+
+    const shorter = firstText.length <= secondText.length ? firstText : secondText;
+    const longer = firstText.length <= secondText.length ? secondText : firstText;
+    return shorter.length >= 24 && longer.includes(shorter);
   }
 
   function getVirtualSweepStepRatio() {
@@ -1988,6 +2012,7 @@
   function isBroadConversationWrapperCandidate(candidate, candidates) {
     const nestedCandidates = getNestedConversationCandidates(candidate, candidates);
     if (nestedCandidates.length < 2) return false;
+    if (isSingleRoleClaudeMessageWrapper(candidate, nestedCandidates)) return false;
 
     const explicitNestedCandidates = nestedCandidates.filter(hasExplicitConversationRole);
     const explicitNestedCount = explicitNestedCandidates.length;
@@ -2036,6 +2061,13 @@
   }
 
   function isConversationCandidatePreferred(candidate, existing, candidates) {
+    if (
+      existing.element.contains(candidate.element) &&
+      isSingleRoleClaudeMessageWrapper(existing, getNestedConversationCandidates(existing, candidates))
+    ) {
+      return false;
+    }
+
     if (isBroadConversationWrapperCandidate(existing, candidates) && !isBroadConversationWrapperCandidate(candidate, candidates)) {
       return true;
     }
@@ -2052,6 +2084,24 @@
     if (isBroadConversationWrapperCandidate(candidate, candidates)) score -= 35;
     score -= Math.min(20, getNestedConversationCandidates(candidate, candidates).length * 4);
     return score;
+  }
+
+  function isSingleRoleClaudeMessageWrapper(candidate, nestedCandidates) {
+    if (currentPlatform.id !== "claude" || !hasExplicitConversationRole(candidate)) return false;
+
+    const testId = cleanText(
+      candidate.element.getAttribute?.("data-testid") ||
+      candidate.element.getAttribute?.("data-test-id") ||
+      ""
+    ).toLowerCase();
+    if (!/^(?:user|assistant)[-_ ]?message$/.test(testId)) return false;
+
+    // Claude's message boundary owns its rendered Markdown fragments. Descendants
+    // inherit the same role, but they are paragraphs/code blocks, not chat turns.
+    const explicitNestedCandidates = nestedCandidates.filter(hasExplicitConversationRole);
+    if (!explicitNestedCandidates.length) return false;
+    if (explicitNestedCandidates.some((nested) => nested.role !== candidate.role)) return false;
+    return true;
   }
 
   function getConversationRole(element) {

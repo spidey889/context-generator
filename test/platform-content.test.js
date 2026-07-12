@@ -312,6 +312,42 @@ test("virtual window merging preserves repeated turns while removing only window
   assert.equal(collected.filter((turn) => turn.role === "User" && turn.text === "Repeat this.").length, 2);
 });
 
+test("virtual sweep does not append the same 38 turns when one rendered response grows between snapshots", () => {
+  const hooks = loadPlatformContent([], "claude.ai");
+  const collected = [];
+  const baseTurns = Array.from({ length: 38 }, (_, index) => ({
+    role: index % 2 === 0 ? "User" : "Claude",
+    text: `${index % 2 === 0 ? "Question" : "Answer"} for real turn ${index + 1}.`
+  }));
+
+  for (let snapshot = 1; snapshot <= 7; snapshot += 1) {
+    const renderedTurns = baseTurns.map((turn) => ({ ...turn }));
+    renderedTurns[17].text = `Answer for real turn 18. ${"Newly rendered detail. ".repeat(snapshot)}`.trim();
+    hooks.collectRenderedConversationTurns(collected, renderedTurns);
+  }
+
+  assert.equal(collected.length, 38);
+  assert.match(collected[17].text, /Newly rendered detail\.(?: Newly rendered detail\.){6}$/);
+});
+
+test("virtual sweep merges sliding windows when an overlapping response becomes richer", () => {
+  const hooks = loadPlatformContent([], "claude.ai");
+  const collected = [];
+  const turns = Array.from({ length: 13 }, (_, index) => ({
+    role: index % 2 === 0 ? "User" : "Claude",
+    text: `${index % 2 === 0 ? "Question" : "Answer"} for sliding turn ${index + 1}.`
+  }));
+  const firstWindow = turns.slice(0, 8).map((turn) => ({ ...turn }));
+  const secondWindow = turns.slice(5, 13).map((turn) => ({ ...turn }));
+  secondWindow[1].text += " Additional Markdown content rendered after scrolling.";
+
+  hooks.collectRenderedConversationTurns(collected, firstWindow);
+  hooks.collectRenderedConversationTurns(collected, secondWindow);
+
+  assert.equal(collected.length, 13);
+  assert.match(collected[6].text, /Additional Markdown content rendered after scrolling\.$/);
+});
+
 test("conversation scraping never falls back to unrelated main-page text", () => {
   const pageRoot = new FakeElement({
     text: "Settings New chat Upgrade plan Recent conversations Account navigation",
@@ -375,6 +411,77 @@ test("Claude scraping keeps child message turns instead of a broad wrapper blob"
   assert.equal((transcript.match(/(?:User|Claude):/g) || []).length, 4);
   assert.match(transcript, /User: Please keep every turn separate\./);
   assert.match(transcript, /Claude: I will keep the second assistant turn\./);
+});
+
+test("Claude counts one role-bearing assistant wrapper as one turn instead of its paragraph fragments", () => {
+  const userTurn = new FakeElement({
+    text: "Explain the investigation in detail.",
+    attrs: { "data-testid": "user-message" }
+  });
+  const assistantWrapper = new FakeElement({
+    attrs: { "data-testid": "assistant-message", class: "assistant-message" }
+  });
+  const paragraphs = Array.from({ length: 10 }, (_, index) => new FakeElement({
+    text: `Assistant paragraph ${index + 1} with distinct investigation detail.`,
+    attrs: { class: "font-claude-response" }
+  }));
+  assistantWrapper.children = paragraphs;
+  assistantWrapper.textContent = paragraphs.map((paragraph) => paragraph.textContent).join("\n");
+  assistantWrapper.innerText = assistantWrapper.textContent;
+  paragraphs.forEach((paragraph) => {
+    paragraph.parentElement = assistantWrapper;
+  });
+
+  const hooks = loadPlatformContent([userTurn, assistantWrapper, ...paragraphs], "claude.ai");
+  const turns = hooks.getConversationTurns();
+  const transcript = hooks.scrapeConversationText();
+
+  assert.equal(turns.length, 2);
+  assert.equal((transcript.match(/Claude:/g) || []).length, 1);
+  assert.match(transcript, /Assistant paragraph 1/);
+  assert.match(transcript, /Assistant paragraph 10/);
+});
+
+test("Claude keeps a 38-turn chat at 38 turns when its DOM exposes 299 message candidates", () => {
+  const elements = [];
+  let fragmentNumber = 1;
+
+  for (let turnNumber = 1; turnNumber <= 38; turnNumber += 1) {
+    const isUser = turnNumber % 2 === 1;
+    const wrapper = new FakeElement({
+      attrs: { "data-testid": isUser ? "user-message" : "assistant-message" }
+    });
+    const fragmentCount = isUser ? 0 : (turnNumber === 38 ? 9 : 14);
+    const fragments = Array.from({ length: fragmentCount }, () => new FakeElement({
+      text: `Rendered assistant fragment ${fragmentNumber++} with unique hidden-candidate detail.`,
+      attrs: { class: "font-claude-response" }
+    }));
+
+    if (isUser) {
+      wrapper.textContent = `Real user turn ${turnNumber}`;
+      wrapper.innerText = wrapper.textContent;
+    } else {
+      wrapper.children = fragments;
+      wrapper.textContent = fragments.map((fragment) => fragment.textContent).join("\n");
+      wrapper.innerText = wrapper.textContent;
+      fragments.forEach((fragment) => {
+        fragment.parentElement = wrapper;
+      });
+    }
+
+    elements.push(wrapper, ...fragments);
+  }
+
+  assert.equal(elements.length, 299, "fixture must reproduce the reported DOM-candidate inflation");
+
+  const hooks = loadPlatformContent(elements, "claude.ai");
+  const turns = hooks.getConversationTurns();
+  const transcript = hooks.scrapeConversationText();
+
+  assert.equal(turns.length, 38);
+  assert.equal((transcript.match(/(?:User|Claude):/g) || []).length, 38);
+  assert.match(transcript, /User: Real user turn 37/);
+  assert.match(transcript, /Rendered assistant fragment 261/);
 });
 
 test("Claude scraping does not stop at explicit wrapper chunks when many loaded turns exist", () => {
