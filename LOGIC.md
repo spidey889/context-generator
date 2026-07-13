@@ -26,8 +26,8 @@ One shared content script handles source and destination behavior. A versioned l
 
 ## Current Transfer Flow
 
-1. Opening the picker is UI-only. It does not scrape, fingerprint, summarize, or transmit chat content. Content-free preconnect hints may be added for destination origins.
-2. After destination selection, the source shows the handoff popup and checks for real message turns.
+1. Opening the picker is UI-only. It enters with a short opacity-and-transform transition, but does not scrape, fingerprint, summarize, or transmit chat content. Content-free preconnect hints may be added for destination origins.
+2. After destination selection, the source shows the handoff popup with the same short entrance treatment and checks for real message turns.
 3. When at least one source turn is synchronously visible, the chosen destination opens inactive and warms while capture continues. If the quick check is empty, tab creation waits for confirmed content.
 4. Capture scrolls to the top, waits within bounded stability windows for delayed turns, expands safe reading controls, and sweeps virtualized windows only for long rendered chats.
 5. The content script sends one `SUMMARIZE_WITH_BACKEND` message. The background worker sends the backend summary job exactly once.

@@ -32,6 +32,8 @@
   const CLAUDE_MODEL_LEFT_NUDGE = 48;
   const CLAUDE_SIDE_CONTROL_RIGHT_NUDGE = 52;
   const DESTINATION_SHEET_WIDTH = 296;
+  const DESTINATION_SHEET_CLOSED_TRANSFORM = "translate3d(0,8px,0) scale(0.985)";
+  const HANDOFF_OVERLAY_CLOSED_TRANSFORM = "translate3d(-50%,-50%,0) translateY(10px) scale(0.985)";
   const RUNNING_AUTO_RESET_MS = 240000;
   const DEFAULT_MAX_COMPOSER_WIDTH = 1320;
   const DESTINATION_TITLE_TEXT = "Where to continue?";
@@ -3326,10 +3328,10 @@
       "font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif",
       "overflow:hidden",
       "opacity:0",
-      "transform:translate3d(0,2px,0) scale(0.996)",
+      `transform:${DESTINATION_SHEET_CLOSED_TRANSFORM}`,
       "transform-origin:bottom right",
       "will-change:transform,opacity",
-      "transition:opacity 0.14s cubic-bezier(0.16,1,0.3,1), transform 0.16s cubic-bezier(0.16,1,0.3,1)"
+      "transition:opacity 0.18s cubic-bezier(0.16,1,0.3,1), transform 0.22s cubic-bezier(0.16,1,0.3,1)"
     ].join(";");
 
     const header = document.createElement("div");
@@ -3548,7 +3550,7 @@
     const sheet = ensureDestinationSheet();
     if (destinationSheetAnimationFrame) cancelAnimationFrame(destinationSheetAnimationFrame);
     sheet.style.opacity = "0";
-    sheet.style.transform = "translate3d(0,2px,0) scale(0.996)";
+    sheet.style.transform = DESTINATION_SHEET_CLOSED_TRANSFORM;
     sheet.style.display = "block";
     delete sheet.dataset.contextGeneratorPositionLocked;
     positionDestinationSheet();
@@ -3575,7 +3577,7 @@
         destinationSheetAnimationFrame = null;
       }
       sheet.style.opacity = "0";
-      sheet.style.transform = "translate3d(0,2px,0) scale(0.996)";
+      sheet.style.transform = DESTINATION_SHEET_CLOSED_TRANSFORM;
       sheet.style.display = "none";
       delete sheet.dataset.contextGeneratorPositionLocked;
     }
@@ -3750,7 +3752,7 @@
         "background:linear-gradient(180deg,#171719 0%,#101012 52%,#0b0b0d 100%)",
         "color:#b9b9b9",
         "box-shadow:0 26px 76px rgba(0,0,0,0.55), 0 0 0 1px rgba(0,0,0,0.7), inset 0 1px 0 rgba(255,255,255,0.075), inset 0 -1px 0 rgba(255,255,255,0.025)",
-        "transform:translate3d(-50%,-50%,0) scale(0.98)",
+        `transform:${HANDOFF_OVERLAY_CLOSED_TRANSFORM}`,
         "opacity:0",
         "flex-direction:column",
         "justify-content:center",
@@ -3760,7 +3762,7 @@
         "font-family:'Iowan Old Style','New York',Georgia,'Times New Roman',serif",
         "letter-spacing:0",
         "will-change:transform,opacity",
-        "transition:opacity 0.16s cubic-bezier(0.16,1,0.3,1), transform 0.18s cubic-bezier(0.16,1,0.3,1)"
+        "transition:opacity 0.18s cubic-bezier(0.16,1,0.3,1), transform 0.22s cubic-bezier(0.16,1,0.3,1)"
       ].join(";");
 
       const glow = document.createElement("div");
@@ -3940,10 +3942,15 @@
       startHandoffStatusCycle(destination?.name || "destination");
       startHandoffCountdown();
       overlay.style.display = "flex";
-      requestAnimationFrame(() => {
+      if (window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) {
         overlay.style.opacity = "1";
-        overlay.style.transform = "translate3d(-50%,-50%,0) scale(1)";
-      });
+        overlay.style.transform = "translate3d(-50%,-50%,0) translateY(0) scale(1)";
+      } else {
+        requestAnimationFrame(() => {
+          overlay.style.opacity = "1";
+          overlay.style.transform = "translate3d(-50%,-50%,0) translateY(0) scale(1)";
+        });
+      }
     }
 
     if (bubble) {
@@ -3961,7 +3968,7 @@
     stopHandoffCountdown();
     if (overlay) {
       overlay.style.opacity = "0";
-      overlay.style.transform = "translate3d(-50%,-50%,0) scale(0.98)";
+      overlay.style.transform = HANDOFF_OVERLAY_CLOSED_TRANSFORM;
       overlay.style.display = "none";
     }
     if (bubble) {
