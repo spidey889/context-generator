@@ -1703,7 +1703,10 @@
       }
 
       const windowChanged = afterWindowSignature !== beforeWindowSignature;
-      if (!windowChanged && added === 0) {
+      // Claude can keep the same virtualized turn nodes mounted while scrolling through one message taller than
+      // the viewport. Physical movement is still progress there; counting it as stale can stop before later turns mount.
+      const advancedWithinRenderedClaudeMessage = currentPlatform.id === "claude" && pixelMoved;
+      if (!windowChanged && added === 0 && !advancedWithinRenderedClaudeMessage) {
         staleScrolls += 1;
         totalStaleScrolls += 1;
         if (staleScrolls >= getVirtualSweepStaleScrollLimit()) break;

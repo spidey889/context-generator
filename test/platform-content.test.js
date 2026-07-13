@@ -723,6 +723,65 @@ test("Claude sweep captures long-message chats that need more than the old scrol
   assert.ok(transcript.length > 28000, "fixture should represent a long-message Claude chat");
 });
 
+test("Claude sweep crosses one oversized rendered message before concluding capture is complete", async () => {
+  const elements = [];
+  const totalTurns = 24;
+  const windowSize = 12;
+  const nextWindowScrollTop = 3961;
+  const oversizedLines = Array.from(
+    { length: 220 },
+    (_, index) => `Rendered oversized-message line ${index + 1}`
+  );
+  let renderedSecondWindow = false;
+  const scrollableRoot = new FakeElement({
+    text: "Scrollable Claude chat with one oversized message",
+    attrs: { role: "main" }
+  });
+  scrollableRoot.scrollHeight = 5200;
+  scrollableRoot.clientHeight = 600;
+  scrollableRoot.scrollTop = 0;
+  elements.push(scrollableRoot);
+
+  const renderWindow = (startIndex) => {
+    const windowTurns = [];
+    for (let index = startIndex + 1; index <= Math.min(totalTurns, startIndex + windowSize); index += 1) {
+      const text = index === 6
+        ? `Oversized Claude turn ${index}\n${oversizedLines.join("\n")}`
+        : `Normal Claude turn ${index}`;
+      const turn = new FakeElement({
+        text,
+        attrs: index % 2 ? { "data-testid": "user-message" } : { class: "font-claude-response" }
+      });
+      turn.parentElement = scrollableRoot;
+      windowTurns.push(turn);
+    }
+
+    scrollableRoot.children = windowTurns;
+    scrollableRoot.textContent = windowTurns.map((turn) => turn.textContent).join("\n");
+    scrollableRoot.innerText = scrollableRoot.textContent;
+    elements.splice(1, elements.length - 1, ...windowTurns);
+  };
+
+  const originalScrollTo = scrollableRoot.scrollTo.bind(scrollableRoot);
+  scrollableRoot.scrollTo = (...args) => {
+    originalScrollTo(...args);
+    if (!renderedSecondWindow && scrollableRoot.scrollTop >= nextWindowScrollTop) {
+      renderedSecondWindow = true;
+      renderWindow(windowSize);
+    }
+  };
+  renderWindow(0);
+
+  const hooks = loadPlatformContent(elements, "claude.ai");
+  await hooks.prepareSourceForCapture();
+  const transcript = await hooks.scrapeConversationTextWhenReady();
+
+  assert.equal(oversizedLines.length, 220, "fixture must include a 200+ rendered-line message");
+  assert.equal((transcript.match(/(?:User|Claude): (?:Normal|Oversized) Claude turn/g) || []).length, 24);
+  assert.match(transcript, /User: Normal Claude turn 1/);
+  assert.match(transcript, /Claude: Normal Claude turn 24/);
+});
+
 test("Claude sweep advances by rendered message boundary when the next virtual batch is available", async () => {
   const elements = [];
   const totalTurns = 40;
