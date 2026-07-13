@@ -99,13 +99,18 @@
   const HANDOFF_STATUS_INTERVAL_MS = 1850;
   const HANDOFF_COUNTDOWN_ID = "context-generator-handoff-countdown";
   const HANDOFF_COUNTDOWN_FIXED_MS = 20000;
+  // Historical quote attributions are easy to get wrong; keep this pool tied to authoritative records.
   const HANDOFF_QUOTES = [
-    "I don't like waiting 20 seconds either.",
-    "The wait is for better context.",
-    "A few seconds now saves re-explaining later.",
-    "Better context, cleaner next reply.",
-    "Holding the useful bits together.",
-    "Worth it when the next AI starts warm."
+    "Failure is an option here. — Elon Musk",
+    "You've got to find what you love. — Steve Jobs",
+    "Imagination is more important than knowledge. — Albert Einstein",
+    "What I cannot create, I do not understand. — Richard Feynman",
+    "We become just by doing just acts. — Aristotle",
+    "To live defeated and without glory is to die every day. — Napoleon",
+    "If I were not Alexander, I would be Diogenes. — Alexander",
+    "Pressure is a privilege. — Billie Jean King",
+    "One giant leap for mankind. — Neil Armstrong",
+    "To thine own self be true. — William Shakespeare"
   ];
   const HANDOFF_STATUS_STEPS = [
     "I don't like waiting either",
@@ -3807,7 +3812,7 @@
       const quote = document.createElement("div");
       quote.id = "context-generator-overlay-quote";
       quote.style.cssText = [
-        "font-size:18px",
+        "font-size:16px",
         "font-weight:500",
         "line-height:1.32",
         "white-space:nowrap",
