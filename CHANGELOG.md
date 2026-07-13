@@ -6,6 +6,7 @@ Historical production decisions and useful implementation context live here. Cur
 
 [Codex: keep adding short entries here after major changes, fixes, reversions, or model/prompt decisions. Write what changed, what worked, and what got replaced. Keep it short.]
 
+- 2026-07-13: Increased the handoff popup's fixed visual countdown from 20 seconds to 30 seconds. Capture, summarization, destination preparation, and paste timing remain unchanged.
 - 2026-07-13: Replaced the handoff popup's small fixed opener with a once-per-transfer random pool of ten source-verified quotes spanning entrepreneurs, scientists, philosophers, conquerors, sports, space, and literature. The larger rotating transfer-status line and all transfer behavior remain unchanged.
 - 2026-07-13: The destination picker and source-page handoff popup now enter with a clearer ease-out opacity/transform motion lasting up to 220ms instead of their nearly imperceptible 2px/160ms-style snap. Transfer sequencing and all capture, summary, and paste timing remain unchanged.
 - 2026-07-12: Replaced virtual sweep edge-overlap merging after a real 38-turn Claude trace contained 315 role-tagged entries but only 38 exact role+text identities across 18 snapshots. Capture now sequence-aligns each snapshot against all accumulated turns, inserts new turns between matched interior blocks, and applies a final exact role+text dedupe before backend submission. This supersedes the earlier suffix/prefix overlap fix and deliberately collapses separately rendered identical role+text turns as a safety guarantee.

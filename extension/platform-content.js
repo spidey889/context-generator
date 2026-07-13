@@ -98,7 +98,7 @@
   const CHATGPT_PASTE_STABILITY_MS = 550;
   const HANDOFF_STATUS_INTERVAL_MS = 1850;
   const HANDOFF_COUNTDOWN_ID = "context-generator-handoff-countdown";
-  const HANDOFF_COUNTDOWN_FIXED_MS = 20000;
+  const HANDOFF_COUNTDOWN_FIXED_MS = 30000;
   // Historical quote attributions are easy to get wrong; keep this pool tied to authoritative records.
   const HANDOFF_QUOTES = [
     "Failure is an option here. — Elon Musk",
