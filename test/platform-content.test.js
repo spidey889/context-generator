@@ -1442,6 +1442,10 @@ test("latest-run receipt preserves the exact raw scraped text", () => {
   const stats = hooks.buildLatestTransferStats(trace, 25);
 
   assert.equal(stats.rawScrapedText, exactText);
+  assert.equal(
+    Date.parse(stats.rawScrapedTextExpiresAt) - Date.parse(stats.completedAt),
+    24 * 60 * 60 * 1000
+  );
 });
 
 test("paste verification accepts stable context anchors when box characters differ", () => {

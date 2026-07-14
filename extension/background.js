@@ -9,6 +9,9 @@ const DESTINATION_WARMUP_TIMEOUT_MS = 9000;
 const SUMMARY_BACKEND_TIMEOUT_MS = 150000;
 const SUMMARY_CACHE_TTL_MS = 120000;
 const SUMMARY_CACHE_MAX_ENTRIES = 8;
+const LAST_TRANSFER_STATS_STORAGE_KEY = "context-generator-last-transfer-stats-v1";
+const RAW_TRANSCRIPT_RETENTION_MS = 24 * 60 * 60 * 1000;
+const RAW_TRANSCRIPT_EXPIRY_ALARM = "expire-latest-run-raw-transcript";
 const summaryCache = new Map();
 const summaryInflight = new Map();
 const DESTINATIONS = {
@@ -53,13 +56,82 @@ const DESTINATION_HOSTS = {
 
 chrome.runtime.onInstalled.addListener(() => {
   injectIntoOpenSupportedTabs();
+  scheduleStoredRawTranscriptExpiry();
 });
 
 chrome.runtime.onStartup.addListener(() => {
   injectIntoOpenSupportedTabs();
+  scheduleStoredRawTranscriptExpiry();
+});
+
+chrome.storage.onChanged.addListener((changes, areaName) => {
+  if (areaName !== "local" || !changes[LAST_TRANSFER_STATS_STORAGE_KEY]) return;
+  scheduleRawTranscriptExpiry(changes[LAST_TRANSFER_STATS_STORAGE_KEY].newValue || null);
+});
+
+chrome.alarms.onAlarm.addListener((alarm) => {
+  if (alarm?.name === RAW_TRANSCRIPT_EXPIRY_ALARM) expireStoredRawTranscript();
 });
 
 injectIntoOpenSupportedTabs();
+scheduleStoredRawTranscriptExpiry();
+
+async function scheduleStoredRawTranscriptExpiry() {
+  try {
+    const result = await chrome.storage.local.get(LAST_TRANSFER_STATS_STORAGE_KEY);
+    await scheduleRawTranscriptExpiry(result?.[LAST_TRANSFER_STATS_STORAGE_KEY] || null);
+  } catch (error) {
+    console.debug("[Context Generator] Could not schedule raw transcript expiry:", error?.message || error);
+  }
+}
+
+async function scheduleRawTranscriptExpiry(stats) {
+  const expiresAt = getRawTranscriptExpiryEpoch(stats);
+  if (!expiresAt) {
+    await chrome.alarms.clear(RAW_TRANSCRIPT_EXPIRY_ALARM);
+    return;
+  }
+
+  if (expiresAt <= Date.now()) {
+    await expireStoredRawTranscript();
+    return;
+  }
+
+  chrome.alarms.create(RAW_TRANSCRIPT_EXPIRY_ALARM, { when: expiresAt });
+}
+
+async function expireStoredRawTranscript() {
+  try {
+    const result = await chrome.storage.local.get(LAST_TRANSFER_STATS_STORAGE_KEY);
+    const stats = result?.[LAST_TRANSFER_STATS_STORAGE_KEY];
+    const expiresAt = getRawTranscriptExpiryEpoch(stats);
+    if (!expiresAt) return;
+
+    if (expiresAt > Date.now()) {
+      chrome.alarms.create(RAW_TRANSCRIPT_EXPIRY_ALARM, { when: expiresAt });
+      return;
+    }
+
+    // Preserve the receipt as-is and remove only the sensitive, short-lived payload.
+    const retainedStats = { ...stats };
+    delete retainedStats.rawScrapedText;
+    delete retainedStats.rawScrapedTextExpiresAt;
+    await chrome.storage.local.set({ [LAST_TRANSFER_STATS_STORAGE_KEY]: retainedStats });
+  } catch (error) {
+    console.debug("[Context Generator] Could not expire raw transcript:", error?.message || error);
+  }
+}
+
+function getRawTranscriptExpiryEpoch(stats) {
+  if (!stats || typeof stats.rawScrapedText !== "string" || !stats.rawScrapedText) return null;
+
+  const explicitExpiry = Date.parse(stats.rawScrapedTextExpiresAt || "");
+  if (Number.isFinite(explicitExpiry)) return explicitExpiry;
+
+  // Receipts created before expiry metadata existed still receive the same 24-hour limit.
+  const completedAt = Date.parse(stats.completedAt || "");
+  return Number.isFinite(completedAt) ? completedAt + RAW_TRANSCRIPT_RETENTION_MS : Date.now();
+}
 
 chrome.action.onClicked.addListener(async (tab) => {
   try {

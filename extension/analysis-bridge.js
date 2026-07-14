@@ -2,6 +2,7 @@
   const STORAGE_KEY = "context-generator-last-transfer-stats-v1";
   const PAGE_SOURCE = "context-generator-analysis-page";
   const BRIDGE_SOURCE = "context-generator-analysis-bridge";
+  const RAW_TRANSCRIPT_RETENTION_MS = 24 * 60 * 60 * 1000;
 
   if (window.__contextGeneratorAnalysisBridgeLoaded) return;
   window.__contextGeneratorAnalysisBridgeLoaded = true;
@@ -23,9 +24,34 @@
   function readLastTransferStats() {
     return new Promise((resolve) => {
       chrome.storage.local.get(STORAGE_KEY, (result) => {
-        resolve(result?.[STORAGE_KEY] || null);
+        const stats = result?.[STORAGE_KEY] || null;
+        const retainedStats = withoutExpiredRawTranscript(stats);
+        if (retainedStats === stats) {
+          resolve(stats);
+          return;
+        }
+
+        chrome.storage.local.set({ [STORAGE_KEY]: retainedStats }, () => resolve(retainedStats));
       });
     });
+  }
+
+  function withoutExpiredRawTranscript(stats) {
+    if (!stats || typeof stats.rawScrapedText !== "string" || !stats.rawScrapedText) return stats;
+
+    const explicitExpiry = Date.parse(stats.rawScrapedTextExpiresAt || "");
+    const completedAt = Date.parse(stats.completedAt || "");
+    const expiresAt = Number.isFinite(explicitExpiry)
+      ? explicitExpiry
+      : Number.isFinite(completedAt)
+        ? completedAt + RAW_TRANSCRIPT_RETENTION_MS
+        : 0;
+    if (expiresAt > Date.now()) return stats;
+
+    const retainedStats = { ...stats };
+    delete retainedStats.rawScrapedText;
+    delete retainedStats.rawScrapedTextExpiresAt;
+    return retainedStats;
   }
 
   function postStats(stats) {

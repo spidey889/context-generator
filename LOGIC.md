@@ -88,7 +88,7 @@ Instance-local controls allow 8 requests per observed client IP per minute, 40 p
 
 Chat text leaves the source page only after destination selection. It goes to the Cap Context backend and, for generated summaries, Mistral or the configured Groq fallback. The backend does not intentionally persist or log transcripts; the extension locally retains the latest captured transcript as described below.
 
-The exact-summary cache and in-flight map are memory-only. One latest-run receipt is stored in `chrome.storage.local`; it contains counts, timing, provider/model/fallback metadata, token usage, status, and the exact captured transcript sent to the backend. The next transfer replaces the whole receipt. The connected analysis page receives this local receipt and exposes the transcript only inside a collapsed raw-text panel; it does not include the generated summary. Picker open/close, preconnect, and destination warming do not include chat content. Pasted text is never automatically submitted.
+The exact-summary cache and in-flight map are memory-only. One latest-run receipt is stored in `chrome.storage.local`; it contains counts, timing, provider/model/fallback metadata, token usage, status, and initially the exact captured transcript sent to the backend. A persistent extension alarm removes only the raw transcript and its expiry marker after 24 hours; all other receipt diagnostics remain until the next transfer replaces the receipt. The analysis bridge also enforces this expiry when reading the receipt in case a delayed browser alarm has not run yet. The connected analysis page exposes an available transcript only inside a collapsed raw-text panel; it does not include the generated summary. Picker open/close, preconnect, and destination warming do not include chat content. Pasted text is never automatically submitted.
 
 ## UI, Placement, And Paste
 
@@ -98,7 +98,7 @@ First-use and Claude-limit nudges are extension-owned and excluded from capture.
 
 ## Latest Run Analysis
 
-The latest-run receipt powers the GitHub Pages analysis view through `analysis-bridge.js`. It reports end-to-end/capture/backend/paste timing, turn counts, backend input/output sizes, profile, model/fallback details, token usage, status, and—behind a collapsed gear control—the complete exact captured transcript. Old receipts without raw text keep the control disabled until a fresh transfer.
+The latest-run receipt powers the GitHub Pages analysis view through `analysis-bridge.js`. It reports end-to-end/capture/backend/paste timing, turn counts, backend input/output sizes, profile, model/fallback details, token usage, and status for the life of the receipt. Behind a collapsed gear control, the complete exact captured transcript is available only during its first 24 hours. Expired and older receipts without raw text keep the control disabled until a fresh transfer.
 
 ## Verification Contract
 

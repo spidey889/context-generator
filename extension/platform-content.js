@@ -8,6 +8,7 @@
   const DESTINATION_SHEET_ID = "context-generator-destination-sheet";
   const DESTINATION_SHEET_STYLE_ID = "context-generator-destination-sheet-styles";
   const LAST_TRANSFER_STATS_STORAGE_KEY = "context-generator-last-transfer-stats-v1";
+  const RAW_TRANSCRIPT_RETENTION_MS = 24 * 60 * 60 * 1000;
 
   if (window.__contextGeneratorPlatformLoaded === CONTENT_SCRIPT_LOAD_ID) {
     return;
@@ -1059,6 +1060,8 @@
     const captureDetail = getMarkDetail(trace, "capture done") || {};
     const pasteDetail = getMarkDetail(trace, "paste done") || {};
     const failureMark = trace.marks.find((mark) => mark.label.startsWith("failed:"));
+    const completedAtEpoch = Date.now();
+    const rawScrapedText = typeof trace.rawScrapedText === "string" ? trace.rawScrapedText : null;
 
     return {
       version: 1,
@@ -1074,9 +1077,12 @@
         name: trace.destinationId ? getPlatform(trace.destinationId)?.name || trace.destinationId : null
       },
       startedAt: new Date(trace.startedAtEpoch || Date.now()).toISOString(),
-      completedAt: new Date().toISOString(),
+      completedAt: new Date(completedAtEpoch).toISOString(),
       totalMs,
-      rawScrapedText: typeof trace.rawScrapedText === "string" ? trace.rawScrapedText : null,
+      rawScrapedText,
+      rawScrapedTextExpiresAt: rawScrapedText
+        ? new Date(completedAtEpoch + RAW_TRANSCRIPT_RETENTION_MS).toISOString()
+        : null,
       capture: {
         method: captureDetail.method || null,
         messageTurnCount: captureDetail.messageTurnCount ?? null,

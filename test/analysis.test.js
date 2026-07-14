@@ -26,6 +26,6 @@ test("analysis keeps exact raw scraped text behind a collapsed gear control", ()
   assert.match(ANALYSIS_SOURCE, /id="rawScrapeButton"/);
   assert.match(ANALYSIS_SOURCE, /id="rawScrapePanel" hidden/);
   assert.match(ANALYSIS_SOURCE, /rawScrapedText\.textContent = rawText/);
-  assert.match(ANALYSIS_SOURCE, /Stored locally and replaced by the next transfer/);
+  assert.match(ANALYSIS_SOURCE, /Stored locally for 24 hours or until the next transfer/);
   assert.doesNotMatch(ANALYSIS_SOURCE, /escapeHtml\(stats\.rawScrapedText\)/);
 });

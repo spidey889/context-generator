@@ -4,6 +4,7 @@ const path = require("node:path");
 const test = require("node:test");
 
 const source = fs.readFileSync(path.join(__dirname, "..", "extension", "background.js"), "utf8");
+const manifest = JSON.parse(fs.readFileSync(path.join(__dirname, "..", "extension", "manifest.json"), "utf8"));
 
 test("extension sends each summary job to the backend only once", () => {
   assert.match(source, /const SUMMARY_BACKEND_TIMEOUT_MS = 150000/);
@@ -29,4 +30,12 @@ test("backend errors expose only bounded user-safe messages", () => {
   assert.match(source, /rate_limited/);
   assert.match(source, /payload\.error\.length <= 240/);
   assert.doesNotMatch(source, /response\.text\(\)/);
+});
+
+test("latest-run raw transcript expires without deleting diagnostic metadata", () => {
+  assert.ok(manifest.permissions.includes("alarms"));
+  assert.match(source, /const RAW_TRANSCRIPT_RETENTION_MS = 24 \* 60 \* 60 \* 1000/);
+  assert.match(source, /delete retainedStats\.rawScrapedText/);
+  assert.match(source, /delete retainedStats\.rawScrapedTextExpiresAt/);
+  assert.doesNotMatch(source, /chrome\.storage\.local\.remove\(LAST_TRANSFER_STATS_STORAGE_KEY\)/);
 });
