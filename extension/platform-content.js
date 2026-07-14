@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-07-14-exclude-composer-capture";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-07-14-shared-empty-retry";
   const BUBBLE_ID = "context-generator-bubble";
   const OVERLAY_ID = "context-generator-overlay";
   const ONBOARDING_ID = "context-generator-onboarding";
@@ -47,7 +47,7 @@
   const NO_CONVERSATION_ERROR_MESSAGE = "Chat is empty. Send one message first, then I'll pack the context.";
   const SUMMARY_RETRY_ERROR_TITLE = "Try again";
   const SUMMARY_RETRY_ERROR_MESSAGE = "Try again right now. We might have made a mistake. It almost never happens the second time.";
-  const CONVERSATION_SCRAPE_RETRY_TIMEOUT_MS = 0;
+  const CONVERSATION_SCRAPE_RETRY_TIMEOUT_MS = 1800;
   const CLAUDE_CONVERSATION_SCRAPE_RETRY_TIMEOUT_MS = 1800;
   const CONVERSATION_SCRAPE_RETRY_INTERVAL_MS = 140;
   const SOURCE_SCROLL_STABLE_TIMEOUT_MS = 1800;
