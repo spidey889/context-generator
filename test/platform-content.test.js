@@ -248,6 +248,31 @@ test("conversation scraping rejects an empty chat", () => {
   );
 });
 
+test("empty chats are rejected before handoff UI or destination preparation", () => {
+  const source = fs.readFileSync(SOURCE_PATH, "utf8");
+  const pickerStart = source.indexOf("async function startDestinationTransfer(destinationId)");
+  const pickerEnd = source.indexOf("function ensureFloatingOverlay()", pickerStart);
+  const pickerSource = source.slice(pickerStart, pickerEnd);
+  const pickerEmptyGuard = pickerSource.indexOf("getDetectedConversationMessageCount() === 0");
+
+  assert.ok(pickerStart >= 0 && pickerEnd > pickerStart);
+  assert.ok(pickerEmptyGuard >= 0, "picker transfer must check for zero real messages");
+  assert.ok(pickerEmptyGuard < pickerSource.indexOf("showOverlay(destinationId)"));
+  assert.ok(pickerEmptyGuard < pickerSource.indexOf("prepareDestinationTab(destinationId, trace)"));
+  assert.match(pickerSource.slice(pickerEmptyGuard), /showErrorOverlay\(NO_CONVERSATION_ERROR_MESSAGE\)/);
+
+  const flowStart = source.indexOf("async function runContextFlow(");
+  const flowEnd = source.indexOf("function showContextTransferFailure(", flowStart);
+  const flowSource = source.slice(flowStart, flowEnd);
+  const flowEmptyGuard = flowSource.indexOf("getDetectedConversationMessageCount() === 0");
+
+  assert.ok(flowStart >= 0 && flowEnd > flowStart);
+  assert.ok(flowEmptyGuard >= 0, "toolbar transfer must check for zero real messages");
+  assert.ok(flowEmptyGuard < flowSource.indexOf("showOverlay(destinationId)"));
+  assert.ok(flowEmptyGuard < flowSource.indexOf("prepareDestinationTab(destinationId, transferTrace)"));
+  assert.match(flowSource.slice(flowEmptyGuard), /NO_CONVERSATION_ERROR_MESSAGE/);
+});
+
 test("conversation scraping preserves detected user and assistant roles", () => {
   const userTurn = new FakeElement({
     text: "Please make the fallback modal better.",

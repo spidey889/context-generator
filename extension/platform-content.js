@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-07-14-chatgpt-host-scope";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-07-14-empty-chat-precheck";
   const BUBBLE_ID = "context-generator-bubble";
   const OVERLAY_ID = "context-generator-overlay";
   const ONBOARDING_ID = "context-generator-onboarding";
@@ -524,6 +524,9 @@
       let conversationText = scrapedConversationText;
       let destinationPrepPromise = preparedDestinationPromise;
       if (!conversationText) {
+        if (getDetectedConversationMessageCount() === 0) {
+          throw new Error(NO_CONVERSATION_ERROR_MESSAGE);
+        }
         if (isHandoffOverlayVisible()) {
           setHandoffStatus("Reading source chat");
         } else {
@@ -3809,6 +3812,10 @@
   async function startDestinationTransfer(destinationId) {
     hideDestinationSheet();
     if (isRunning) return;
+    if (getDetectedConversationMessageCount() === 0) {
+      showErrorOverlay(NO_CONVERSATION_ERROR_MESSAGE);
+      return;
+    }
 
     const trace = createTransferTrace(destinationId, "destination tile");
     trace.destinationId = destinationId;
