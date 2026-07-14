@@ -131,7 +131,7 @@ test("backend forwards a 210k conversation to Mistral and reports the same input
     assert.equal(capturedRequest.url, "https://api.mistral.ai/v1/chat/completions");
     assert.equal(capturedRequest.body.model, "mistral-medium-2604");
     assert.equal(capturedRequest.body.max_tokens, 4200);
-    assert.match(capturedRequest.body.prompt_cache_key, /^capcontext-summary-v1-large-mistral-medium-2604$/);
+    assert.match(capturedRequest.body.prompt_cache_key, /^capcontext-summary-v2-large-mistral-medium-2604$/);
     assert.equal(capturedRequest.body.prediction, undefined);
     const transcriptEnvelope = JSON.parse(capturedRequest.body.messages[1].content);
     assert.deepEqual(transcriptEnvelope, {

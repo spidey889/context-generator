@@ -155,6 +155,18 @@ class FakeElement {
   remove() {}
 }
 
+class FakeHTMLTextAreaElement {
+  static [Symbol.hasInstance](element) {
+    return element?.localName === "textarea";
+  }
+}
+
+class FakeHTMLInputElement {
+  static [Symbol.hasInstance](element) {
+    return element?.localName === "input";
+  }
+}
+
 function loadPlatformContent(elements = [], hostname = "chatgpt.com", { expectSupported = true } = {}) {
   nextOrder = 1;
   let hooks = null;
@@ -163,7 +175,10 @@ function loadPlatformContent(elements = [], hostname = "chatgpt.com", { expectSu
     documentElement: new FakeElement({ tag: "html" }),
     activeElement: null,
     getElementById: () => null,
-    querySelectorAll: () => elements,
+    querySelectorAll: (selector = "*") => {
+      const isEditorSelector = /contenteditable|textarea|prompt-textarea|grokinput|grok-input|chat-input/i.test(selector);
+      return isEditorSelector ? elements.filter((element) => element.matches(selector)) : elements;
+    },
     addEventListener: () => {},
     removeEventListener: () => {}
   };
@@ -206,6 +221,8 @@ function loadPlatformContent(elements = [], hostname = "chatgpt.com", { expectSu
     window,
     chrome,
     Element: FakeElement,
+    HTMLTextAreaElement: FakeHTMLTextAreaElement,
+    HTMLInputElement: FakeHTMLInputElement,
     Node: { DOCUMENT_POSITION_PRECEDING: 2 },
     setTimeout,
     clearTimeout
@@ -271,6 +288,37 @@ test("empty chats are rejected before handoff UI or destination preparation", ()
   assert.ok(flowEmptyGuard < flowSource.indexOf("showOverlay(destinationId)"));
   assert.ok(flowEmptyGuard < flowSource.indexOf("prepareDestinationTab(destinationId, transferTrace)"));
   assert.match(flowSource.slice(flowEmptyGuard), /NO_CONVERSATION_ERROR_MESSAGE/);
+});
+
+test("handoff status rotation preserves only real transfer stages", () => {
+  const source = fs.readFileSync(SOURCE_PATH, "utf8");
+  const fillerPhrases = [
+    "I don't like waiting either",
+    "This is for better context",
+    "Keeping the thread intact",
+    "Saving you the re-explain",
+    "Making the next reply sharper",
+    "Almost ready"
+  ];
+
+  for (const phrase of fillerPhrases) {
+    assert.equal(source.includes(phrase), false, `removed filler must stay absent: ${phrase}`);
+  }
+
+  for (const stage of ["Reading source chat", "Summarizing context", "Preparing ${destination?.name || \"destination\"}", "Pasting context into ${destination?.name || \"destination\"}"]) {
+    assert.equal(source.includes(stage), true, `real transfer stage must remain: ${stage}`);
+  }
+
+  const cycleStart = source.indexOf("function startHandoffStatusCycle()");
+  const cycleEnd = source.indexOf("function setHandoffStatus(text)", cycleStart);
+  const cycleSource = source.slice(cycleStart, cycleEnd);
+
+  assert.ok(cycleStart >= 0 && cycleEnd > cycleStart);
+  assert.match(cycleSource, /window\.setInterval/);
+  assert.match(cycleSource, /HANDOFF_STATUS_INTERVAL_MS/);
+  assert.match(cycleSource, /currentStatus/);
+  assert.match(cycleSource, /setHandoffStatus\(currentStatus\)/);
+  assert.match(source, /contextGeneratorStatusShimmer 1\.72s cubic-bezier\(0\.16,1,0\.3,1\) both/);
 });
 
 test("Grok empty-state prompt is not counted or captured as a real message", () => {

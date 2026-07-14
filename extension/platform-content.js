@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-07-14-local-size-guard";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-07-14-real-stage-handoff";
   const BUBBLE_ID = "context-generator-bubble";
   const OVERLAY_ID = "context-generator-overlay";
   const ONBOARDING_ID = "context-generator-onboarding";
@@ -113,14 +113,6 @@
     "Pressure is a privilege. — Billie Jean King",
     "One giant leap for mankind. — Neil Armstrong",
     "To thine own self be true. — William Shakespeare"
-  ];
-  const HANDOFF_STATUS_STEPS = [
-    "I don't like waiting either",
-    "This is for better context",
-    "Keeping the thread intact",
-    "Saving you the re-explain",
-    "Making the next reply sharper",
-    "Almost ready"
   ];
   const GENERIC_CONVERSATION_SELECTORS = [
     "[data-message-author-role]",
@@ -404,7 +396,6 @@
   let handoffStatusTimer = null;
   let handoffCountdownTimer = null;
   let handoffCountdownHideTimer = null;
-  let handoffStatusIndex = 0;
   let onboardingTimer = null;
   let onboardingDismissedThisSession = false;
   let claudeLimitNudgeDismissedUntilLimitClears = false;
@@ -532,11 +523,10 @@
         if (getDetectedConversationMessageCount() === 0) {
           throw new Error(NO_CONVERSATION_ERROR_MESSAGE);
         }
-        if (isHandoffOverlayVisible()) {
-          setHandoffStatus("Reading source chat");
-        } else {
+        if (!isHandoffOverlayVisible()) {
           showOverlay(destinationId);
         }
+        setHandoffStatus("Reading source chat");
         if (!destinationPrepPromise && getDetectedConversationMessageCount() > 0) {
           destinationPrepPromise = prepareDestinationTab(destinationId, transferTrace);
         }
@@ -550,11 +540,10 @@
         markCaptureDone(transferTrace, conversationText);
       }
       destinationPrepPromise = destinationPrepPromise || prepareDestinationTab(destinationId, transferTrace);
-      if (isHandoffOverlayVisible()) {
-        setHandoffStatus("Summarizing context");
-      } else {
+      if (!isHandoffOverlayVisible()) {
         showOverlay(destinationId);
       }
+      setHandoffStatus("Summarizing context");
       transferStage = "summary";
       summary = await summarizeWithBackend(conversationText, transferTrace);
       markTransferTrace(transferTrace, "summary available", { chars: summary.length });
@@ -4082,13 +4071,12 @@
     const overlay = document.getElementById(OVERLAY_ID);
     const quote = document.getElementById("context-generator-overlay-quote");
     const bubble = document.getElementById(BUBBLE_ID);
-    const destination = destinationId ? getPlatform(destinationId) : null;
 
     if (overlay) {
       if (quote) {
         quote.textContent = getRandomHandoffQuote();
       }
-      startHandoffStatusCycle(destination?.name || "destination");
+      startHandoffStatusCycle();
       startHandoffCountdown();
       overlay.style.display = "flex";
       if (window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) {
@@ -4132,15 +4120,12 @@
     return Boolean(overlay && overlay.style.display !== "none");
   }
 
-  function startHandoffStatusCycle(destinationName) {
+  function startHandoffStatusCycle() {
     stopHandoffStatusCycle();
-    const steps = HANDOFF_STATUS_STEPS.map((step) => step.replace("{destination}", destinationName));
-    handoffStatusIndex = 0;
-    setHandoffStatus(steps[handoffStatusIndex]);
-
+    // Preserve the existing cadence and transition without replacing real progress with filler copy.
     handoffStatusTimer = window.setInterval(() => {
-      handoffStatusIndex = (handoffStatusIndex + 1) % steps.length;
-      setHandoffStatus(steps[handoffStatusIndex]);
+      const currentStatus = document.getElementById("context-generator-text")?.textContent;
+      setHandoffStatus(currentStatus);
     }, HANDOFF_STATUS_INTERVAL_MS);
   }
 
