@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-07-14-grok-empty-state";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-07-14-exclude-composer-capture";
   const BUBBLE_ID = "context-generator-bubble";
   const OVERLAY_ID = "context-generator-overlay";
   const ONBOARDING_ID = "context-generator-onboarding";
@@ -2210,9 +2210,10 @@
   function getConversationTurns() {
     const selectors = [...currentPlatform.conversationSelectors, ...GENERIC_CONVERSATION_SELECTORS];
     const candidates = [];
+    const platformInput = findPlatformInput();
 
     document.querySelectorAll([...new Set(selectors)].join(",")).forEach((element) => {
-      if (!isConversationCandidateElement(element)) return;
+      if (!isConversationCandidateElement(element, platformInput)) return;
 
       const text = getCleanVisibleText(element);
       if (!text || text.length < 2) return;
@@ -2422,9 +2423,17 @@
     return EMPTY_START_SCREEN_TEXTS.some((emptyText) => cleaned.includes(emptyText) && cleaned.length < 900);
   }
 
-  function isConversationCandidateElement(element) {
+  function isConversationCandidateElement(element, platformInput = null) {
     if (!element || isContextGeneratorNode(element) || !isVisible(element)) return false;
     if (element.matches("input, textarea, button, select, [role='button'], [contenteditable='true']")) return false;
+    // Animated composer prompts can live in message-shaped wrappers or child spans.
+    // Neither the active input nor any DOM that owns/belongs to it is conversation history.
+    if (
+      platformInput &&
+      (element === platformInput || element.contains(platformInput) || platformInput.contains(element))
+    ) {
+      return false;
+    }
     if (element.closest("nav, header, footer, aside, menu")) return false;
     if (isLikelyPromptSuggestionElement(element)) return false;
     return true;
