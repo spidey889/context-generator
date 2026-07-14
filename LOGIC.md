@@ -4,6 +4,7 @@ This is the single source of truth for current production behavior. Historical d
 
 ## Production Surface
 
+- `index.html`: dependency-free Cap Context marketing site served from the repository root on Vercel and GitHub Pages.
 - `extension/manifest.json`: Manifest V3 registration, supported hosts, service worker, shared content script, analysis bridge, permissions, and assets.
 - `extension/platform-content.js`: in-page button/picker, capture, handoff UI, paste logic, manual-copy fallback, and latest-run receipt.
 - `extension/background.js`: tab orchestration, one backend summary job per transfer, identical-job deduplication, short exact-summary cache, and paste relay.
@@ -17,6 +18,14 @@ This is the single source of truth for current production behavior. Historical d
 - `.github/workflows/regression-gate.yml`: complete gate after pushes to `master`, daily, and on demand.
 
 Production deploys from `master` to `https://context-generator-five.vercel.app/api/summarize`.
+
+## Marketing Website
+
+The repository-root `index.html` is the current Cap Context marketing page. It uses only relative asset paths so the same file works at the Vercel root and the GitHub Pages `/context-generator/` path. The page has no build step, external font request, autoplay video, or runtime API dependency; below-fold images are lazy-loaded and the motion system respects reduced-motion preferences.
+
+The page markets the current browser extension rather than the replaced Claude `SKILL.md` flow. Its install funnel downloads the lightweight `cap-context-extension.zip`, directs Brave or Chrome users to the browser extensions page, and tells them to load the extracted folder unpacked. The archive contains the contents of `extension/` with `manifest.json` at its root; regenerate it whenever tracked extension code or assets change. The site does not claim a browser-store listing. The interactive handoff console is an illustrative, local-only UI demo and never reads a conversation or starts a transfer.
+
+Marketing claims mirror production behavior: Claude, ChatGPT, Gemini, Grok, and DeepSeek support; up to 210,000 captured characters; no chat capture while only browsing the picker; provider processing after destination selection; local raw-transcript diagnostics for up to 24 hours; and no automatic Send action. The previous homepage is preserved unchanged as `index.legacy-2026-07-15.html` and is not loaded for visitors.
 
 ## Platforms And Startup
 
