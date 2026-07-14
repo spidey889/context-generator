@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-07-14-faster-paced-sweep";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-07-14-chatgpt-host-scope";
   const BUBBLE_ID = "context-generator-bubble";
   const OVERLAY_ID = "context-generator-overlay";
   const ONBOARDING_ID = "context-generator-onboarding";
@@ -194,7 +194,8 @@
       name: "ChatGPT",
       detail: "OpenAI",
       host: "chatgpt.com",
-      alternateHosts: ["openai.com"],
+      // Legacy ChatGPT lived here; ordinary openai.com pages are not ChatGPT surfaces.
+      alternateHosts: ["chat.openai.com"],
       url: "https://chatgpt.com/",
       accent: "#19c37d",
       logoSize: 21,
@@ -1251,8 +1252,12 @@
   }
 
   function hostMatches(hostname, platform) {
-    const hosts = [platform.host, ...(platform.alternateHosts || [])];
-    return hosts.some((host) => hostname === host || hostname.endsWith(`.${host}`));
+    if (hostname === platform.host || hostname.endsWith(`.${platform.host}`)) {
+      return true;
+    }
+
+    // Alternate hosts are explicit legacy surfaces, not wildcard domain families.
+    return (platform.alternateHosts || []).includes(hostname);
   }
 
   function getPlatform(platformId) {

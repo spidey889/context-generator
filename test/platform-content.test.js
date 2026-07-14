@@ -5,6 +5,7 @@ const test = require("node:test");
 const vm = require("node:vm");
 
 const SOURCE_PATH = path.join(__dirname, "..", "extension", "platform-content.js");
+const MANIFEST_PATH = path.join(__dirname, "..", "extension", "manifest.json");
 
 let nextOrder = 1;
 
@@ -154,7 +155,7 @@ class FakeElement {
   remove() {}
 }
 
-function loadPlatformContent(elements = [], hostname = "chatgpt.com") {
+function loadPlatformContent(elements = [], hostname = "chatgpt.com", { expectSupported = true } = {}) {
   nextOrder = 1;
   let hooks = null;
   const document = {
@@ -212,9 +213,31 @@ function loadPlatformContent(elements = [], hostname = "chatgpt.com") {
 
   vm.createContext(sandbox);
   vm.runInContext(fs.readFileSync(SOURCE_PATH, "utf8"), sandbox, { filename: SOURCE_PATH });
-  assert.ok(hooks, "platform-content test hooks were registered");
+  if (expectSupported) {
+    assert.ok(hooks, "platform-content test hooks were registered");
+  }
   return hooks;
 }
+
+test("ChatGPT startup excludes ordinary OpenAI pages", () => {
+  const manifest = JSON.parse(fs.readFileSync(MANIFEST_PATH, "utf8"));
+  const platformContent = manifest.content_scripts.find((entry) => entry.js.includes("platform-content.js"));
+  const platformResources = manifest.web_accessible_resources.find((entry) => entry.resources.includes("bubble-icon.png"));
+  const matchGroups = [manifest.host_permissions, platformContent.matches, platformResources.matches];
+
+  for (const matches of matchGroups) {
+    assert.ok(matches.includes("https://chatgpt.com/*"));
+    assert.ok(matches.includes("https://*.chatgpt.com/*"));
+    assert.ok(matches.includes("https://chat.openai.com/*"));
+    assert.equal(matches.includes("https://openai.com/*"), false);
+    assert.equal(matches.includes("https://*.openai.com/*"), false);
+  }
+
+  assert.equal(loadPlatformContent([], "openai.com", { expectSupported: false }), null);
+  assert.equal(loadPlatformContent([], "www.openai.com", { expectSupported: false }), null);
+  assert.equal(loadPlatformContent([], "auth.chat.openai.com", { expectSupported: false }), null);
+  assert.ok(loadPlatformContent([], "chat.openai.com"));
+});
 
 test("conversation scraping rejects an empty chat", () => {
   const hooks = loadPlatformContent([]);

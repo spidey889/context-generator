@@ -20,7 +20,7 @@ Production deploys from `master` to `https://context-generator-five.vercel.app/a
 
 ## Platforms And Startup
 
-Cap Context supports Claude, ChatGPT/OpenAI-hosted ChatGPT pages, Gemini, Grok, and DeepSeek. The picker lists all supported platforms except the source. The toolbar action transfers directly: ChatGPT defaults to Claude; other sources default to ChatGPT.
+Cap Context supports Claude, ChatGPT, Gemini, Grok, and DeepSeek. ChatGPT content-script permissions and startup detection are limited to `chatgpt.com`, its existing subdomain coverage, and the legacy `chat.openai.com` ChatGPT host; ordinary `openai.com` pages and unrelated OpenAI subdomains are excluded. The picker lists all supported platforms except the source. The toolbar action transfers directly: ChatGPT defaults to Claude; other sources default to ChatGPT.
 
 One shared content script handles source and destination behavior. A versioned load id, runtime guards, cached asset URLs, and stale UI/style cleanup make unpacked-extension reloads safe.
 
