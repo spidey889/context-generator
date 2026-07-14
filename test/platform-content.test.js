@@ -636,7 +636,7 @@ function createVirtualizedChatElements({
   return { elements, scrollableRoot };
 }
 
-test("transfer capture sweeps virtualized long chats across supported platforms", async () => {
+test("transfer capture sweeps virtualized chats even when the first rendered window is below the old threshold", async () => {
   const cases = [
     {
       hostname: "claude.ai",
@@ -681,8 +681,20 @@ test("transfer capture sweeps virtualized long chats across supported platforms"
   ];
 
   for (const { hostname, platformName, makeTurn } of cases) {
-    const { elements } = createVirtualizedChatElements({ label: platformName, makeTurn });
+    const { elements } = createVirtualizedChatElements({
+      label: platformName,
+      makeTurn,
+      windowSize: 4,
+      scrollHeight: 8000
+    });
     const hooks = loadPlatformContent(elements, hostname);
+
+    const initialTranscript = hooks.scrapeConversationText();
+    assert.equal(
+      (initialTranscript.match(new RegExp(`(?:User|${platformName}): Virtualized turn`, "g")) || []).length,
+      4,
+      `${platformName} fixture must begin below the old eight-turn sweep threshold`
+    );
 
     await hooks.prepareSourceForCapture();
     const transcript = await hooks.scrapeConversationTextWhenReady();
@@ -955,7 +967,7 @@ test("ChatGPT sweep advances from rendered message anchors when scroll roots do 
   assert.match(transcript, /ChatGPT: Anchor-loaded GPT turn 78/);
 });
 
-test("short chats skip the virtualized sweep on supported platforms", async () => {
+test("short chats use the same sweep and exit when there is no more content to capture", async () => {
   const cases = [
     { hostname: "claude.ai", platformName: "Claude" },
     { hostname: "chatgpt.com", platformName: "ChatGPT" },
@@ -970,7 +982,7 @@ test("short chats skip the virtualized sweep on supported platforms", async () =
       text: `Scrollable ${platformName} chat root`,
       attrs: { role: "main" }
     });
-    scrollableRoot.scrollHeight = 2400;
+    scrollableRoot.scrollHeight = 600;
     scrollableRoot.clientHeight = 600;
     scrollableRoot.scrollTop = 0;
     elements.push(scrollableRoot);
@@ -991,6 +1003,9 @@ test("short chats skip the virtualized sweep on supported platforms", async () =
 
     await hooks.prepareSourceForCapture();
     scrollableRoot.scrollCalls = [];
+    scrollableRoot.children.forEach((turn) => {
+      turn.scrollIntoViewCalls = [];
+    });
     const transcript = await hooks.scrapeConversationTextWhenReady();
 
     assert.equal(
@@ -1001,7 +1016,12 @@ test("short chats skip the virtualized sweep on supported platforms", async () =
     assert.equal(
       scrollableRoot.scrollCalls.some((call) => Number(call?.top || 0) > 0),
       false,
-      `${platformName} should not scroll downward for short chats`
+      `${platformName} should not scroll downward when no scroll range remains`
+    );
+    assert.equal(
+      scrollableRoot.children.some((turn) => turn.scrollIntoViewCalls.length > 0),
+      true,
+      `${platformName} should still probe the rendered boundary before finishing`
     );
   }
 });

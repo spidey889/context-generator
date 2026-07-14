@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-07-12-sequence-merge-fix";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-07-14-scroll-driven-sweep";
   const BUBBLE_ID = "context-generator-bubble";
   const OVERLAY_ID = "context-generator-overlay";
   const ONBOARDING_ID = "context-generator-onboarding";
@@ -54,8 +54,6 @@
   const SOURCE_SCROLL_LONG_STABLE_TIMEOUT_MS = 4500;
   const SOURCE_SCROLL_STABLE_INTERVAL_MS = 140;
   const SOURCE_SCROLL_STABLE_SAMPLE_COUNT = 3;
-  const VIRTUAL_SWEEP_PLATFORM_IDS = new Set(["claude", "chatgpt", "gemini", "grok", "deepseek"]);
-  const VIRTUAL_SWEEP_MIN_TURNS = 8;
   const VIRTUAL_SWEEP_MAX_SCROLLS = 480;
   const VIRTUAL_SWEEP_STALE_SCROLLS = 3;
   const CLAUDE_VIRTUAL_SWEEP_STALE_SCROLLS = 10;
@@ -1606,7 +1604,8 @@
 
   async function scrapeConversationTextForTransfer() {
     const initialCapture = scrapeConversationText();
-    if (!shouldSweepVirtualConversation()) return initialCapture;
+    // Every chat enters the same capture loop. The loop itself decides when it is done from
+    // real scroll movement, rendered-window changes, and bounded terminal quiet checks.
     return scrapeVirtualConversation(initialCapture);
   }
 
@@ -1638,13 +1637,6 @@
     }
 
     throw new Error("Chat messages were found, but their user/assistant roles could not be verified. Try again in a moment.");
-  }
-
-  function shouldSweepVirtualConversation() {
-    return (
-      VIRTUAL_SWEEP_PLATFORM_IDS.has(currentPlatform.id) &&
-      Number(lastConversationCaptureMetrics?.messageTurnCount || 0) >= VIRTUAL_SWEEP_MIN_TURNS
-    );
   }
 
   async function scrapeVirtualConversation(initialCapture) {

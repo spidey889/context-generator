@@ -6,6 +6,7 @@ Historical production decisions and useful implementation context live here. Cur
 
 [Codex: keep adding short entries here after major changes, fixes, reversions, or model/prompt decisions. Write what changed, what worked, and what got replaced. Keep it short.]
 
+- 2026-07-14: Removed the fixed eight-initial-turn gate that incorrectly routed virtualized long chats with small first windows into the old one-shot path. Every chat now enters the same bounded rendered-window sweep and exits according to actual scroll movement, rendered-content changes, stale limits, and terminal quiet; deterministic coverage starts every supported platform with only four visible turns and still captures all 78 available turns, while truly non-scrollable four-turn chats exit without downward scrolling.
 - 2026-07-13: Increased the handoff popup's fixed visual countdown from 20 seconds to 30 seconds. Capture, summarization, destination preparation, and paste timing remain unchanged.
 - 2026-07-13: Replaced the handoff popup's small fixed opener with a once-per-transfer random pool of ten source-verified quotes spanning entrepreneurs, scientists, philosophers, conquerors, sports, space, and literature. The larger rotating transfer-status line and all transfer behavior remain unchanged.
 - 2026-07-13: The destination picker and source-page handoff popup now enter with a clearer ease-out opacity/transform motion lasting up to 220ms instead of their nearly imperceptible 2px/160ms-style snap. Transfer sequencing and all capture, summary, and paste timing remain unchanged.
