@@ -709,6 +709,59 @@ test("transfer capture sweeps virtualized chats even when the first rendered win
   }
 });
 
+test("transfer capture keeps fuller swept text when the turn count matches the quick capture", async () => {
+  const elements = [];
+  const scrollableRoot = new FakeElement({
+    text: "Scrollable ChatGPT chat root",
+    attrs: { role: "main" }
+  });
+  scrollableRoot.scrollHeight = 1800;
+  scrollableRoot.clientHeight = 600;
+  scrollableRoot.scrollTop = 0;
+  elements.push(scrollableRoot);
+
+  const userTurn = new FakeElement({
+    text: "Explain why equal message counts can still hide a more complete capture.",
+    attrs: { "data-message-author-role": "user" }
+  });
+  const truncatedAnswer = "The sweep answer begins with this stable rendered sentence.";
+  const completeAnswer = `${truncatedAnswer} It also includes the details that were cut off during the quick first look.`;
+  const assistantTurn = new FakeElement({
+    text: truncatedAnswer,
+    attrs: { "data-message-author-role": "assistant" }
+  });
+  userTurn.parentElement = scrollableRoot;
+  assistantTurn.parentElement = scrollableRoot;
+  scrollableRoot.children = [userTurn, assistantTurn];
+  elements.push(userTurn, assistantTurn);
+
+  const updateRootText = () => {
+    scrollableRoot.textContent = scrollableRoot.children.map((turn) => turn.textContent).join("\n");
+    scrollableRoot.innerText = scrollableRoot.textContent;
+  };
+  updateRootText();
+
+  const originalScrollTo = scrollableRoot.scrollTo.bind(scrollableRoot);
+  scrollableRoot.scrollTo = (...args) => {
+    originalScrollTo(...args);
+    if (scrollableRoot.scrollTop <= 0) return;
+    assistantTurn.textContent = completeAnswer;
+    assistantTurn.innerText = completeAnswer;
+    updateRootText();
+  };
+
+  const hooks = loadPlatformContent(elements, "chatgpt.com");
+  const initialTranscript = hooks.scrapeConversationText();
+  assert.match(initialTranscript, new RegExp(truncatedAnswer.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+  assert.doesNotMatch(initialTranscript, /details that were cut off/);
+
+  await hooks.prepareSourceForCapture();
+  const transcript = await hooks.scrapeConversationTextWhenReady();
+
+  assert.equal((transcript.match(/(?:User|ChatGPT):/g) || []).length, 2);
+  assert.match(transcript, /details that were cut off during the quick first look/);
+});
+
 test("virtual sweep gives the rendered page time to settle between scroll advances", async () => {
   const { elements, scrollableRoot } = createVirtualizedChatElements({
     label: "ChatGPT",

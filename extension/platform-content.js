@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-07-14-paced-sweep-diagnostics";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-07-14-fuller-sweep-selection";
   const BUBBLE_ID = "context-generator-bubble";
   const OVERLAY_ID = "context-generator-overlay";
   const ONBOARDING_ID = "context-generator-onboarding";
@@ -1601,10 +1601,11 @@
   }
 
   async function scrapeConversationTextForTransfer() {
-    const initialCapture = scrapeConversationText();
+    const initialMessageTurns = getConversationTurns();
+    const initialCapture = createConversationCaptureFromMessageTurns(initialMessageTurns);
     // Every chat enters the same capture loop. The loop itself decides when it is done from
     // real scroll movement, rendered-window changes, and bounded terminal quiet checks.
-    return scrapeVirtualConversation(initialCapture);
+    return scrapeVirtualConversation(initialCapture, initialMessageTurns);
   }
 
   function createConversationCaptureFromMessageTurns(messageTurns, metrics = {}) {
@@ -1637,7 +1638,7 @@
     throw new Error("Chat messages were found, but their user/assistant roles could not be verified. Try again in a moment.");
   }
 
-  async function scrapeVirtualConversation(initialCapture) {
+  async function scrapeVirtualConversation(initialCapture, initialMessageTurns) {
     const initialMetrics = lastConversationCaptureMetrics || {};
     const collectedTurns = [];
     const sweepStartedAt = Date.now();
@@ -1773,7 +1774,9 @@
       elapsedMs: sweepMetrics.sweepMs,
       ...getVirtualSweepScrollLogState()
     });
-    if (sweptTurns.length <= Number(initialMetrics.messageTurnCount || 0)) {
+    const initialTurns = getComparableConversationTurns(initialMessageTurns);
+    const preferredTurns = chooseMoreCompleteConversationTurns(initialTurns, sweptTurns);
+    if (areConversationTurnListsIdentical(preferredTurns, initialTurns)) {
       lastConversationCaptureMetrics = {
         ...initialMetrics,
         ...sweepMetrics
@@ -1781,10 +1784,35 @@
       return initialCapture;
     }
 
-    return createConversationCaptureFromMessageTurns(sweptTurns, {
+    return createConversationCaptureFromMessageTurns(preferredTurns, {
       method: "sweep",
       ...sweepMetrics
     });
+  }
+
+  function getComparableConversationTurns(messageTurns = []) {
+    const usefulTurns = messageTurns
+      .filter((turn) => isUsefulConversationTurn(turn))
+      .map((turn) => ({ role: turn.role, text: cleanText(turn.text) }));
+    return removeExactDuplicateConversationTurns(usefulTurns);
+  }
+
+  function chooseMoreCompleteConversationTurns(initialTurns, sweptTurns) {
+    // Start with the exact turns used by the quick capture, then apply the existing sequence alignment.
+    // Matched turns are only replaced when the swept text is longer, so the final choice cannot downgrade text.
+    const preferredTurns = initialTurns.map((turn) => ({ ...turn }));
+    collectRenderedConversationTurns(preferredTurns, getComparableConversationTurns(sweptTurns));
+    return preferredTurns;
+  }
+
+  function areConversationTurnListsIdentical(first, second) {
+    return (
+      first.length === second.length &&
+      first.every((turn, index) => (
+        getConversationTurnSignature(turn.role, turn.text) ===
+        getConversationTurnSignature(second[index]?.role, second[index]?.text)
+      ))
+    );
   }
 
   function collectRenderedConversationTurns(collectedTurns, renderedTurns = getRenderedConversationSnapshot().turns) {
