@@ -22,7 +22,7 @@ const PROVIDER_REQUEST_BUDGETS_MS = {
   "ministral-3b-2512": 25000,
   [GROQ_FALLBACK_MODEL]: 15000
 };
-const MISTRAL_PROMPT_CACHE_VERSION = "capcontext-summary-v2";
+const MISTRAL_PROMPT_CACHE_VERSION = "capcontext-summary-v3";
 const SUMMARY_PROVIDERS = {
   mistral: {
     id: "mistral",
@@ -96,7 +96,7 @@ const SUMMARY_PROFILES = [
       who: "80-140 words: user's name if mentioned, what they are building or trying to do, role/background/preferences that matter, and any durable context the next AI must know",
       doing: "170-240 words: the actual task, product/repo/platform, why it mattered, what was tried or discussed, and the concrete direction the user wanted",
       left: "120-180 words: exact stopping point, latest state, latest user instruction, current blocker or next validation point",
-      decisions: "180-280 words in compact bullets: every important decision, tradeoff, deferred choice, accepted risk, rejected option, and reason when available",
+      decisions: "180-280 words in compact bullets: every important user-made or user-accepted decision, user-deferred choice, accepted tradeoff, accepted risk, and reason when available",
       questions: "100-180 words in compact bullets: unresolved risks, validation gaps, review concerns, things deferred by the user, or None only when truly nothing remains",
       context: "350-500 words in dense bullets: exact files, functions, constants, commands, errors, tests, deployment state, APIs, model IDs, payload sizes, user constraints, tone/copy requirements, and anything that prevents repeating work"
     }
@@ -289,7 +289,8 @@ module.exports.__test = {
   countWords,
   getSummaryProfile,
   getMistralModelSelection,
-  getContextCarryTemplate
+  getContextCarryTemplate,
+  getSummarySystemPrompt
 };
 
 async function createSummaryWithFallback({ conversation, profile, modelSelection, mistralApiKey, groqApiKey }) {
@@ -531,7 +532,11 @@ Hard rules:
 - Use "None" only when the transcript genuinely contains no useful information for that section after that careful search.
 - WHAT WE WERE DOING, WHERE WE LEFT OFF, and KEY CONTEXT must always contain strong, grounded content from the transcript; never write "None" for those sections.
 - The KEY CONTEXT section should usually be the densest section. Use compact bullets there when that preserves more specifics, and include at least 6 bullets when enough details exist.
-- DECISIONS MADE should preserve tradeoffs and deferred choices, not only final choices.
+- Treat assistant suggestions, recommendations, possibilities, and proposed options as unconfirmed unless the user clearly accepts or confirms them. Never present an unaccepted assistant proposal as a decision or current project state.
+- If the user rejects an assistant proposal, do not list that proposal in DECISIONS MADE. Mention it elsewhere only when it still matters, and label it explicitly as rejected.
+- When the user later changes an earlier decision, or older and newer project states conflict, use the latest user-confirmed decision or state as the current truth.
+- Mention an older state only when it still matters for continuation, and label it explicitly as replaced, rejected, changed, or historical.
+- DECISIONS MADE must contain only decisions actually made by the user or clearly accepted or confirmed by the user, including choices the user deliberately deferred and tradeoffs the user accepted.
 - OPEN QUESTIONS should include unresolved risks, review concerns, validation gaps, or decisions deferred by the user. Write "None" only when the transcript truly leaves no unresolved issue.
 - Do not invent, correct, or infer project facts. If the transcript is unclear, say what is uncertain instead of guessing.
 - Avoid broad labels like "security discussion", "early development", or platform names unless the transcript actually supports them.

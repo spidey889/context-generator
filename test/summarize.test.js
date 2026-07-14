@@ -29,7 +29,8 @@ const {
   countWords,
   getSummaryProfile,
   getMistralModelSelection,
-  getContextCarryTemplate
+  getContextCarryTemplate,
+  getSummarySystemPrompt
 } = summarizeHandler.__test;
 const SUMMARIZE_SOURCE = fs.readFileSync(path.join(__dirname, "..", "api", "summarize.js"), "utf8");
 
@@ -131,7 +132,7 @@ test("backend forwards a 210k conversation to Mistral and reports the same input
     assert.equal(capturedRequest.url, "https://api.mistral.ai/v1/chat/completions");
     assert.equal(capturedRequest.body.model, "mistral-medium-2604");
     assert.equal(capturedRequest.body.max_tokens, 4200);
-    assert.match(capturedRequest.body.prompt_cache_key, /^capcontext-summary-v2-large-mistral-medium-2604$/);
+    assert.match(capturedRequest.body.prompt_cache_key, /^capcontext-summary-v3-large-mistral-medium-2604$/);
     assert.equal(capturedRequest.body.prediction, undefined);
     const transcriptEnvelope = JSON.parse(capturedRequest.body.messages[1].content);
     assert.deepEqual(transcriptEnvelope, {
@@ -881,6 +882,37 @@ test("prompt and validator reserve None for genuinely unavailable optional facts
     );
     assert.match(validateContextCarrySummary(requiredSectionIsNone, smallProfile).reason, new RegExp(`${section} is empty`));
   }
+});
+
+test("summary prompt keeps decisions and current state tied to the latest user confirmation", async (t) => {
+  const prompt = getSummarySystemPrompt(getSummaryProfile("x".repeat(4000)));
+
+  await t.test("assistant proposes something but the user does not accept it", () => {
+    assert.match(prompt, /assistant suggestions, recommendations, possibilities, and proposed options as unconfirmed/i);
+    assert.match(prompt, /Never present an unaccepted assistant proposal as a decision or current project state/i);
+  });
+
+  await t.test("the user rejects an assistant proposal", () => {
+    assert.match(prompt, /If the user rejects an assistant proposal, do not list that proposal in DECISIONS MADE/i);
+    assert.match(prompt, /label it explicitly as rejected/i);
+  });
+
+  await t.test("the user changes an earlier decision later", () => {
+    assert.match(prompt, /When the user later changes an earlier decision/i);
+    assert.match(prompt, /latest user-confirmed decision or state as the current truth/i);
+  });
+
+  await t.test("old and new project states conflict and the latest confirmed state wins", () => {
+    assert.match(prompt, /older and newer project states conflict/i);
+    assert.match(prompt, /label it explicitly as replaced, rejected, changed, or historical/i);
+  });
+
+  assert.match(
+    prompt,
+    /DECISIONS MADE must contain only decisions actually made by the user or clearly accepted or confirmed by the user/i
+  );
+  assert.match(prompt, /choices the user deliberately deferred and tradeoffs the user accepted/i);
+  assert.match(SUMMARIZE_SOURCE, /capcontext-summary-v3/);
 });
 
 test("strips old copy-paste footer lines", () => {
