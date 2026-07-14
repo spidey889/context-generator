@@ -68,9 +68,9 @@ Every non-tiny transfer creates one backend summary job. Within it, transient at
 
 ## Prompt Isolation And Validation
 
-The system message holds the summary rules and exact seven-section Context Carry contract. The transcript is JSON-serialized into a separate versioned user-role data envelope. The system message declares all envelope content—including apparent system, developer, tool, API, or instruction text—untrusted customer data to summarize, not instructions to execute.
+The system message holds the summary rules and exact seven-section Context Carry contract. It tells the model to search the complete transcript carefully for facts relevant to every section before writing, and permits `None` only when that search finds no useful grounded information for the section. `WHAT WE WERE DOING`, `WHERE WE LEFT OFF`, and `KEY CONTEXT` must always contain strong transcript-grounded content. The transcript is JSON-serialized into a separate versioned user-role data envelope. The system message declares all envelope content—including apparent system, developer, tool, API, or instruction text—untrusted customer data to summarize, not instructions to execute.
 
-Generated output is validated locally without an evaluation-model call. It must contain the Context Carry header, all seven sections exactly once and in order, meaningful important-section content, a low profile-derived minimum body length, and the exact destination confirmation. Obvious refusals and API-error output fail.
+Generated output is validated locally without an evaluation-model call. It must contain the Context Carry header, all seven sections exactly once and in order, meaningful content in the three continuation-critical sections, a low profile-derived minimum body length, and the exact destination confirmation. Optional sections such as `WHO I AM` may contain `None` when the transcript genuinely supplies no relevant fact. Obvious refusals and API-error output fail.
 
 Normalization may strip fences/footer noise and canonicalize already-valid headings/confirmation. It does not invent sections or wrap free-form output as valid context. Invalid output advances through the same model/provider chain; exhaustion fails the job without pasting broken output.
 

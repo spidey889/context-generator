@@ -22,7 +22,7 @@ const PROVIDER_REQUEST_BUDGETS_MS = {
   "ministral-3b-2512": 25000,
   [GROQ_FALLBACK_MODEL]: 15000
 };
-const MISTRAL_PROMPT_CACHE_VERSION = "capcontext-summary-v1";
+const MISTRAL_PROMPT_CACHE_VERSION = "capcontext-summary-v2";
 const SUMMARY_PROVIDERS = {
   mistral: {
     id: "mistral",
@@ -119,7 +119,6 @@ const CONTEXT_CARRY_SECTIONS = [
   { title: "NEXT STEP", heading: "🔁 NEXT STEP" }
 ];
 const IMPORTANT_CONTEXT_CARRY_SECTIONS = new Set([
-  "WHO I AM",
   "WHAT WE WERE DOING",
   "WHERE WE LEFT OFF",
   "KEY CONTEXT"
@@ -528,13 +527,15 @@ Hard rules:
 - Preserve exact names, files, APIs, model IDs, commands, error text, copy requirements, constraints, and latest working state when they matter.
 - Prioritize what helps the next AI continue without re-asking the user or repeating work.
 - For coding/product chats, include the concrete repo/app/platform, exact files/functions/constants, commands run, errors seen, tests or verification, deployment state, and user constraints.
+- Before writing, search the entire transcript carefully for facts relevant to each section, including facts in earlier turns rather than only the latest exchange.
+- Use "None" only when the transcript genuinely contains no useful information for that section after that careful search.
+- WHAT WE WERE DOING, WHERE WE LEFT OFF, and KEY CONTEXT must always contain strong, grounded content from the transcript; never write "None" for those sections.
 - The KEY CONTEXT section should usually be the densest section. Use compact bullets there when that preserves more specifics, and include at least 6 bullets when enough details exist.
 - DECISIONS MADE should preserve tradeoffs and deferred choices, not only final choices.
 - OPEN QUESTIONS should include unresolved risks, review concerns, validation gaps, or decisions deferred by the user. Write "None" only when the transcript truly leaves no unresolved issue.
 - Do not invent, correct, or infer project facts. If the transcript is unclear, say what is uncertain instead of guessing.
 - Avoid broad labels like "security discussion", "early development", or platform names unless the transcript actually supports them.
 - Do not pad or write generic filler; every line should carry useful context.
-- If a section has no information, write "None" under that exact section.
 - Do not add the closing footer from SKILL.md: no "PASTE THIS AT THE TOP OF YOUR NEW CHAT" and no "Continue from where we left off."
 - The 🔁 NEXT STEP section must be exactly: ${DESTINATION_CONFIRMATION_INSTRUCTION}
 - Before finalizing, silently check the total word count. If this is a large profile and the output is below ${profile.minWords || 0} words, expand KEY CONTEXT, DECISIONS MADE, and OPEN QUESTIONS with concrete details from the transcript.

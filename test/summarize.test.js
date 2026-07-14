@@ -854,6 +854,35 @@ test("deterministic validation rejects malformed, empty, short, and refusal outp
   assert.equal(getMinimumValidSummaryWords(getSummaryProfile("x".repeat(90000))), 200);
 });
 
+test("prompt and validator reserve None for genuinely unavailable optional facts", () => {
+  const smallProfile = getSummaryProfile("x".repeat(4000));
+  const detailWords = Array.from({ length: 90 }, (_, index) => `grounded${index}`).join(" ");
+  const optionalWhoIsNone = makeContextCarrySummary("grounded", 90)
+    .replace(`WHO I AM\n${detailWords}`, "WHO I AM\nNone")
+    .replace(
+      "- Useful concrete context remains available.",
+      `- Useful concrete context remains available. ${detailWords}`
+    );
+
+  assert.match(SUMMARIZE_SOURCE, /search the entire transcript carefully for facts relevant to each section/i);
+  assert.match(SUMMARIZE_SOURCE, /Use "None" only when the transcript genuinely contains no useful information/i);
+  assert.match(SUMMARIZE_SOURCE, /WHAT WE WERE DOING, WHERE WE LEFT OFF, and KEY CONTEXT must always contain strong, grounded content/i);
+  assert.equal(validateContextCarrySummary(optionalWhoIsNone, smallProfile).ok, true);
+
+  for (const section of ["WHAT WE WERE DOING", "WHERE WE LEFT OFF", "KEY CONTEXT"]) {
+    const nextSection = {
+      "WHAT WE WERE DOING": "WHERE WE LEFT OFF",
+      "WHERE WE LEFT OFF": "DECISIONS MADE",
+      "KEY CONTEXT": "NEXT STEP"
+    }[section];
+    const requiredSectionIsNone = optionalWhoIsNone.replace(
+      new RegExp(`${section}\\n[\\s\\S]*?\\n\\n${nextSection}`),
+      `${section}\nNone\n\n${nextSection}`
+    );
+    assert.match(validateContextCarrySummary(requiredSectionIsNone, smallProfile).reason, new RegExp(`${section} is empty`));
+  }
+});
+
 test("strips old copy-paste footer lines", () => {
   const cleaned = stripContextCarryFooter([
     "WHO I AM",
