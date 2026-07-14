@@ -6,6 +6,7 @@ Historical production decisions and useful implementation context live here. Cur
 
 [Codex: keep adding short entries here after major changes, fixes, reversions, or model/prompt decisions. Write what changed, what worked, and what got replaced. Keep it short.]
 
+- 2026-07-14: Fixed Grok's empty new-chat prompt, `What's on your mind?`, being treated as a real user message and transferred to another platform. Synchronous message detection now applies the same known-empty-text filter as final capture, so Grok empty chats use the existing `Nothing to carry yet` path without opening a destination tab.
 - 2026-07-14: Moved the existing structurally verified message-count check ahead of handoff UI/countdown startup for both picker and toolbar transfers. Zero-message chats now show `Nothing to carry yet` immediately and never open a destination tab; positive-count capture, summarization, transfer, and paste behavior are unchanged.
 - 2026-07-14: Restricted ChatGPT manifest access and content-script startup detection to `chatgpt.com` plus the exact legacy `chat.openai.com` host. Removed the broad `openai.com` and `*.openai.com` matches that caused Cap Context to appear on ordinary OpenAI marketing pages; placement, capture, transfer, summary, and paste behavior are unchanged.
 - 2026-07-14: Promoted `todo.md` from an ignored owner-local tracker to a shared, version-controlled project tracker so known unresolved issues persist on GitHub. Its explicit warning remains: entries are documentation, not instructions for Codex to execute automatically.

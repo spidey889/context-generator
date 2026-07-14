@@ -273,6 +273,21 @@ test("empty chats are rejected before handoff UI or destination preparation", ()
   assert.match(flowSource.slice(flowEmptyGuard), /NO_CONVERSATION_ERROR_MESSAGE/);
 });
 
+test("Grok empty-state prompt is not counted or captured as a real message", () => {
+  const emptyPrompt = new FakeElement({
+    text: "What's on your mind?",
+    attrs: { "data-testid": "user-message" }
+  });
+  const hooks = loadPlatformContent([emptyPrompt], "grok.com");
+
+  assert.equal(hooks.getConversationRole(emptyPrompt), "User");
+  assert.equal(hooks.getDetectedConversationMessageCount(), 0);
+  assert.throws(
+    () => hooks.scrapeConversationText(),
+    /Chat is empty\. Send one message first/
+  );
+});
+
 test("conversation scraping preserves detected user and assistant roles", () => {
   const userTurn = new FakeElement({
     text: "Please make the fallback modal better.",

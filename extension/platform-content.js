@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-07-14-empty-chat-precheck";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-07-14-grok-empty-state";
   const BUBBLE_ID = "context-generator-bubble";
   const OVERLAY_ID = "context-generator-overlay";
   const ONBOARDING_ID = "context-generator-onboarding";
@@ -81,6 +81,7 @@
     "new chat",
     "what can i help with",
     "what can i help you with",
+    "what's on your mind",
     "how can i help",
     "how can i help you today",
     "what are you working on",
@@ -499,6 +500,7 @@
       waitForConversationCaptureToSettle,
       expandCollapsedConversationContent,
       getConversationTurns,
+      getDetectedConversationMessageCount,
       collectRenderedConversationTurns,
       scrapeConversationTextWhenReady,
       scrapeConversationTextForTransfer,
@@ -1624,6 +1626,13 @@
     }
 
     const usefulTurns = messageTurns.filter((turn) => isUsefulConversationTurn(turn));
+    if (
+      usefulTurns.length === 0 &&
+      messageTurns.some(hasExplicitConversationRole) &&
+      messageTurns.every((turn) => isEmptyConversationText(turn.text))
+    ) {
+      throw new Error(NO_CONVERSATION_ERROR_MESSAGE);
+    }
     const turns = removeExactDuplicateConversationTurns(usefulTurns);
     const baseMetrics = {
       ...metrics,
@@ -2403,11 +2412,11 @@
 
     const text = cleanText(turn.text);
     if (text.length < 3) return false;
-    return hasExplicitConversationRole(turn);
+    return hasExplicitConversationRole(turn) && !isEmptyConversationText(text);
   }
 
   function isEmptyConversationText(text) {
-    const cleaned = cleanText(text).toLowerCase();
+    const cleaned = cleanText(text).toLowerCase().replace(/\u2019/g, "'");
     if (!cleaned) return true;
 
     return EMPTY_START_SCREEN_TEXTS.some((emptyText) => cleaned.includes(emptyText) && cleaned.length < 900);
