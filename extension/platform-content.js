@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-07-14-shared-empty-retry";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-07-14-local-size-guard";
   const BUBBLE_ID = "context-generator-bubble";
   const OVERLAY_ID = "context-generator-overlay";
   const ONBOARDING_ID = "context-generator-onboarding";
@@ -47,6 +47,9 @@
   const NO_CONVERSATION_ERROR_MESSAGE = "Chat is empty. Send one message first, then I'll pack the context.";
   const SUMMARY_RETRY_ERROR_TITLE = "Try again";
   const SUMMARY_RETRY_ERROR_MESSAGE = "Try again right now. We might have made a mistake. It almost never happens the second time.";
+  // Keep this aligned with api/request-security.js so unsupported captures never leave the extension.
+  const MAX_BACKEND_CONVERSATION_CHARS = 210000;
+  const OVERSIZED_CONVERSATION_ERROR_MESSAGE = "Conversation exceeds the supported 210,000 character limit";
   const CONVERSATION_SCRAPE_RETRY_TIMEOUT_MS = 1800;
   const CLAUDE_CONVERSATION_SCRAPE_RETRY_TIMEOUT_MS = 1800;
   const CONVERSATION_SCRAPE_RETRY_INTERVAL_MS = 140;
@@ -616,6 +619,12 @@
   }
 
   async function requestBackendSummary(conversationText, trace = null) {
+    if (conversationText.length > MAX_BACKEND_CONVERSATION_CHARS) {
+      const error = new Error(OVERSIZED_CONVERSATION_ERROR_MESSAGE);
+      error.code = "conversation_too_large";
+      throw error;
+    }
+
     markTransferTrace(trace, "summary start", { chars: conversationText.length, inputChars: conversationText.length });
     const response = await notifyBackground({
       type: "SUMMARIZE_WITH_BACKEND",
