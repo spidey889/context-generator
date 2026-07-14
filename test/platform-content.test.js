@@ -790,7 +790,7 @@ test("virtual sweep gives the rendered page time to settle between scroll advanc
   assert.equal((transcript.match(/(?:User|ChatGPT): Paced virtualized turn/g) || []).length, 16);
   assert.ok(gaps.length >= 2, "fixture should require multiple downward scroll advances");
   assert.ok(
-    gaps.every((gap) => gap >= 100),
+    gaps.every((gap) => gap >= 250),
     `each scroll advance should leave a real render window; observed gaps: ${gaps.join(", ")}ms`
   );
 });
@@ -818,11 +818,11 @@ test("physical scroll movement prevents a premature stale exit on non-Claude cha
   assert.match(transcript, /ChatGPT: Delayed tall-message turn 16/);
 });
 
-test("Claude sweep captures long-message chats that need more than the old scroll limit", async () => {
-  const longText = "Long Claude message detail ".repeat(16).trim();
-  const { elements } = createVirtualizedChatElements({
+test("Claude sweep captures a real-scale 78-turn long chat with paced advances", async () => {
+  const longText = "Long Claude message detail ".repeat(28).trim();
+  const { elements, scrollableRoot } = createVirtualizedChatElements({
     label: "Claude",
-    totalTurns: 82,
+    totalTurns: 78,
     windowSize: 8,
     scrollStride: 1,
     scrollHeight: 31000,
@@ -836,12 +836,35 @@ test("Claude sweep captures long-message chats that need more than the old scrol
   assert.equal((initialTranscript.match(/(?:User|Claude): Slow virtualized Claude turn/g) || []).length, 8);
 
   await hooks.prepareSourceForCapture();
+  const advanceTimes = [];
+  const virtualizedScrollTo = scrollableRoot.scrollTo.bind(scrollableRoot);
+  scrollableRoot.scrollTo = (...args) => {
+    const beforeTop = scrollableRoot.scrollTop;
+    virtualizedScrollTo(...args);
+    if (scrollableRoot.scrollTop > beforeTop) advanceTimes.push(Date.now());
+  };
+  const captureStartedAt = Date.now();
   const transcript = await hooks.scrapeConversationTextWhenReady();
+  const captureMs = Date.now() - captureStartedAt;
+  const advanceGaps = advanceTimes.slice(1).map((time, index) => time - advanceTimes[index]);
+  console.log("real-scale sweep metrics", {
+    turns: 78,
+    chars: transcript.length,
+    steps: advanceTimes.length,
+    captureMs,
+    minStepGapMs: Math.min(...advanceGaps),
+    averageStepGapMs: Math.round(advanceGaps.reduce((total, gap) => total + gap, 0) / advanceGaps.length)
+  });
 
-  assert.equal((transcript.match(/(?:User|Claude): Slow virtualized Claude turn/g) || []).length, 82);
+  assert.equal((transcript.match(/(?:User|Claude): Slow virtualized Claude turn/g) || []).length, 78);
   assert.match(transcript, /User: Slow virtualized Claude turn 1/);
-  assert.match(transcript, /Claude: Slow virtualized Claude turn 82/);
-  assert.ok(transcript.length > 28000, "fixture should represent a long-message Claude chat");
+  assert.match(transcript, /Claude: Slow virtualized Claude turn 78/);
+  assert.ok(transcript.length > 60000, "fixture should represent a 60k-character long chat");
+  assert.ok(advanceTimes.length <= 62, `adaptive overlap steps should keep this sweep at 62 advances or fewer; saw ${advanceTimes.length}`);
+  assert.ok(
+    advanceGaps.every((gap) => gap >= 250),
+    `real-scale sweep must preserve the paced render window; observed gaps: ${advanceGaps.join(", ")}ms`
+  );
 });
 
 test("Claude sweep crosses one oversized rendered message before concluding capture is complete", async () => {

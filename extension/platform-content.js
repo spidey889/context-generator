@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-07-14-fuller-sweep-selection";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-07-14-faster-paced-sweep";
   const BUBBLE_ID = "context-generator-bubble";
   const OVERLAY_ID = "context-generator-overlay";
   const ONBOARDING_ID = "context-generator-onboarding";
@@ -58,6 +58,8 @@
   const VIRTUAL_SWEEP_STALE_SCROLLS = 3;
   const CLAUDE_VIRTUAL_SWEEP_STALE_SCROLLS = 10;
   const VIRTUAL_SWEEP_STEP_RATIO = 0.6;
+  const VIRTUAL_SWEEP_OVERLAP_STEP_RATIO = 0.9;
+  const VIRTUAL_SWEEP_MIN_ORDERED_OVERLAP_RATIO = 0.5;
   const VIRTUAL_SWEEP_SETTLE_MS = 360;
   const VIRTUAL_SWEEP_STABLE_SAMPLE_COUNT = 2;
   const VIRTUAL_SWEEP_CHANGE_POLL_MS = 16;
@@ -1647,6 +1649,7 @@
     let totalStaleScrolls = 0;
     let terminalQuietChecks = 0;
     let exitReason = "other";
+    let useLargerOverlapStep = false;
 
     logVirtualSweep("start", {
       initialRenderedTurnCount: initialMetrics.messageTurnCount || 0,
@@ -1673,7 +1676,8 @@
       let settleMs = 0;
       const stepNumber = scrolls + 1;
       const beforeScrollState = getVirtualSweepScrollLogState();
-      const step = Math.round(getSourceViewportHeight() * getVirtualSweepStepRatio());
+      const stepRatio = getVirtualSweepStepRatio(useLargerOverlapStep);
+      const step = Math.round(getSourceViewportHeight() * stepRatio);
 
       pixelMoved = scrollSourceConversationByInstantly(step);
       if (pixelMoved) {
@@ -1725,6 +1729,15 @@
       }
 
       const windowChanged = afterWindowSignature !== beforeWindowSignature;
+      if (windowChanged) {
+        const afterRenderedSnapshot = getRenderedConversationSnapshot();
+        useLargerOverlapStep = hasSafeOrderedConversationWindowOverlap(
+          renderedSnapshot.turns,
+          afterRenderedSnapshot.turns
+        );
+      } else {
+        useLargerOverlapStep = false;
+      }
       // Any platform can keep the same turn mounted while traversing one response taller than the viewport.
       // Successful physical movement is real progress even when the rendered turn signature is unchanged.
       if (!windowChanged && added === 0 && !pixelMoved) {
@@ -1747,6 +1760,9 @@
         detectedTurnCount: getDetectedConversationMessageCount(),
         staleScrolls,
         settleMs,
+        stepPixels: step,
+        stepRatio,
+        nextStepRatio: getVirtualSweepStepRatio(useLargerOverlapStep),
         beforeScrollTop: beforeScrollState.scrollTop,
         ...getVirtualSweepScrollLogState()
       });
@@ -1957,8 +1973,20 @@
     return false;
   }
 
-  function getVirtualSweepStepRatio() {
-    return VIRTUAL_SWEEP_STEP_RATIO;
+  function getVirtualSweepStepRatio(useLargerOverlapStep = false) {
+    return useLargerOverlapStep ? VIRTUAL_SWEEP_OVERLAP_STEP_RATIO : VIRTUAL_SWEEP_STEP_RATIO;
+  }
+
+  function hasSafeOrderedConversationWindowOverlap(beforeTurns, afterTurns) {
+    const comparisonLength = Math.min(beforeTurns.length, afterTurns.length);
+    if (comparisonLength < 2) return false;
+
+    const matches = getConversationSequenceMatches(beforeTurns, afterTurns);
+    const hasPositionalShift = matches.some((match) => match.collectedIndex !== match.renderedIndex);
+    return (
+      hasPositionalShift &&
+      matches.length / comparisonLength >= VIRTUAL_SWEEP_MIN_ORDERED_OVERLAP_RATIO
+    );
   }
 
   function getVirtualSweepStaleScrollLimit() {
