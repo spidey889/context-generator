@@ -709,6 +709,62 @@ test("transfer capture sweeps virtualized chats even when the first rendered win
   }
 });
 
+test("virtual sweep gives the rendered page time to settle between scroll advances", async () => {
+  const { elements, scrollableRoot } = createVirtualizedChatElements({
+    label: "ChatGPT",
+    totalTurns: 16,
+    windowSize: 4,
+    scrollHeight: 3200,
+    makeTurn: (index) => new FakeElement({
+      text: `Paced virtualized turn ${index}`,
+      attrs: { "data-message-author-role": index % 2 ? "user" : "assistant" }
+    })
+  });
+  const hooks = loadPlatformContent(elements, "chatgpt.com");
+
+  await hooks.prepareSourceForCapture();
+  const positiveScrollTimes = [];
+  const virtualizedScrollTo = scrollableRoot.scrollTo.bind(scrollableRoot);
+  scrollableRoot.scrollTo = (...args) => {
+    const requestedTop = typeof args[0] === "object" ? Number(args[0]?.top || 0) : Number(args[1] || 0);
+    if (requestedTop > Number(scrollableRoot.scrollTop || 0)) positiveScrollTimes.push(Date.now());
+    virtualizedScrollTo(...args);
+  };
+
+  const transcript = await hooks.scrapeConversationTextWhenReady();
+  const gaps = positiveScrollTimes.slice(1).map((time, index) => time - positiveScrollTimes[index]);
+
+  assert.equal((transcript.match(/(?:User|ChatGPT): Paced virtualized turn/g) || []).length, 16);
+  assert.ok(gaps.length >= 2, "fixture should require multiple downward scroll advances");
+  assert.ok(
+    gaps.every((gap) => gap >= 100),
+    `each scroll advance should leave a real render window; observed gaps: ${gaps.join(", ")}ms`
+  );
+});
+
+test("physical scroll movement prevents a premature stale exit on non-Claude chats", async () => {
+  const { elements } = createVirtualizedChatElements({
+    label: "ChatGPT",
+    totalTurns: 16,
+    windowSize: 8,
+    scrollStride: 1,
+    scrollHeight: 9000,
+    stalledScrollsBeforeRender: 5,
+    makeTurn: (index) => new FakeElement({
+      text: `Delayed tall-message turn ${index}`,
+      attrs: { "data-message-author-role": index % 2 ? "user" : "assistant" }
+    })
+  });
+  const hooks = loadPlatformContent(elements, "chatgpt.com");
+
+  await hooks.prepareSourceForCapture();
+  const transcript = await hooks.scrapeConversationTextWhenReady();
+
+  assert.equal((transcript.match(/(?:User|ChatGPT): Delayed tall-message turn/g) || []).length, 16);
+  assert.match(transcript, /User: Delayed tall-message turn 1/);
+  assert.match(transcript, /ChatGPT: Delayed tall-message turn 16/);
+});
+
 test("Claude sweep captures long-message chats that need more than the old scroll limit", async () => {
   const longText = "Long Claude message detail ".repeat(16).trim();
   const { elements } = createVirtualizedChatElements({

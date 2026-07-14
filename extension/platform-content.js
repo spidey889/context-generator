@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-07-14-scroll-driven-sweep";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-07-14-paced-sweep-diagnostics";
   const BUBBLE_ID = "context-generator-bubble";
   const OVERLAY_ID = "context-generator-overlay";
   const ONBOARDING_ID = "context-generator-onboarding";
@@ -61,11 +61,9 @@
   const VIRTUAL_SWEEP_SETTLE_MS = 360;
   const VIRTUAL_SWEEP_STABLE_SAMPLE_COUNT = 2;
   const VIRTUAL_SWEEP_CHANGE_POLL_MS = 16;
-  const VIRTUAL_SWEEP_ANCHOR_CHANGE_TIMEOUT_MS = 32;
-  const VIRTUAL_SWEEP_FAST_CHANGE_TIMEOUT_MS = 120;
   const VIRTUAL_SWEEP_SLOW_CHANGE_TIMEOUT_MS = 360;
-  const CLAUDE_VIRTUAL_SWEEP_PROGRESS_CHANGE_TIMEOUT_MS = 240;
   const CLAUDE_VIRTUAL_SWEEP_SLOW_CHANGE_TIMEOUT_MS = 1400;
+  const VIRTUAL_SWEEP_DEBUG_LOGGING = true;
   const COLLAPSED_CONVERSATION_EXPAND_RE = /\b(?:show|see|read|view)\s+(?:more|full|all)\b|\bcontinue\s+(?:reading|message|response)\b|\bexpand\b/i;
   const COLLAPSED_CONVERSATION_EXPAND_EXCLUDE_RE = /\b(?:continue generating|regenerate|send|submit|stop generating|new chat|settings|menu|voice|microphone)\b/i;
   const EMPTY_START_SCREEN_TEXTS = [
@@ -1647,6 +1645,12 @@
     let staleScrolls = 0;
     let totalStaleScrolls = 0;
     let terminalQuietChecks = 0;
+    let exitReason = "other";
+
+    logVirtualSweep("start", {
+      initialRenderedTurnCount: initialMetrics.messageTurnCount || 0,
+      ...getVirtualSweepScrollLogState()
+    });
 
     while (true) {
       const expandedCount = await expandCollapsedConversationContent();
@@ -1656,62 +1660,97 @@
 
       const renderedSnapshot = getRenderedConversationSnapshot();
       const added = collectRenderedConversationTurns(collectedTurns, renderedSnapshot.turns);
-      if (scrolls >= VIRTUAL_SWEEP_MAX_SCROLLS) break;
+      if (scrolls >= VIRTUAL_SWEEP_MAX_SCROLLS) {
+        exitReason = "max-advances-reached";
+        break;
+      }
 
       const beforeWindowSignature = renderedSnapshot.signature;
       let afterWindowSignature = beforeWindowSignature;
       let triedBoundaryAdvance = false;
       let pixelMoved = false;
+      let settleMs = 0;
+      const stepNumber = scrolls + 1;
+      const beforeScrollState = getVirtualSweepScrollLogState();
+      const step = Math.round(getSourceViewportHeight() * getVirtualSweepStepRatio());
 
-      if (shouldPreferBoundarySweepAdvance()) {
-        triedBoundaryAdvance = scrollRenderedConversationBoundaryIntoView(renderedSnapshot.anchor);
-        if (triedBoundaryAdvance) {
-          afterWindowSignature = await waitForRenderedConversationWindowChange(
-            beforeWindowSignature,
-            VIRTUAL_SWEEP_ANCHOR_CHANGE_TIMEOUT_MS
-          );
-        }
-      }
-
-      if (afterWindowSignature === beforeWindowSignature) {
-        const step = Math.round(getSourceViewportHeight() * getVirtualSweepStepRatio());
-        pixelMoved = scrollSourceConversationByInstantly(step);
-        afterWindowSignature = await waitForRenderedConversationWindowChange(
-          beforeWindowSignature,
-          VIRTUAL_SWEEP_FAST_CHANGE_TIMEOUT_MS
-        );
+      pixelMoved = scrollSourceConversationByInstantly(step);
+      if (pixelMoved) {
+        const settleStartedAt = Date.now();
+        // This minimum stability window is intentional. Signature changes can happen synchronously after a
+        // scroll, but the real page still needs time to mount and finish rendering the new virtualized window.
+        await waitForConversationWindowToSettle();
+        settleMs += Date.now() - settleStartedAt;
+        afterWindowSignature = getRenderedConversationWindowSignature();
       }
 
       scrolls += 1;
 
-      if (afterWindowSignature === beforeWindowSignature) {
-        if (!triedBoundaryAdvance) {
-          scrollRenderedConversationBoundaryIntoView(renderedSnapshot.anchor);
+      if (!pixelMoved && afterWindowSignature === beforeWindowSignature) {
+        triedBoundaryAdvance = scrollRenderedConversationBoundaryIntoView(renderedSnapshot.anchor);
+        if (triedBoundaryAdvance) {
+          const settleStartedAt = Date.now();
+          await waitForConversationWindowToSettle();
+          settleMs += Date.now() - settleStartedAt;
+          afterWindowSignature = getRenderedConversationWindowSignature();
         }
+      }
+
+      if (afterWindowSignature === beforeWindowSignature && !pixelMoved) {
+        const quietStartedAt = Date.now();
         afterWindowSignature = await waitForRenderedConversationWindowChange(
           beforeWindowSignature,
-          pixelMoved
-            ? getVirtualSweepProgressChangeTimeout()
-            : getVirtualSweepTerminalQuietTimeout()
+          getVirtualSweepTerminalQuietTimeout()
         );
-
+        settleMs += Date.now() - quietStartedAt;
         if (afterWindowSignature === beforeWindowSignature && !pixelMoved) {
           terminalQuietChecks += 1;
+          exitReason = triedBoundaryAdvance ? "quiet-check-passed" : "no-scroll-movement";
+          logVirtualSweep("step", {
+            step: stepNumber,
+            advancement: triedBoundaryAdvance ? "boundary" : "none",
+            pixelMoved,
+            windowChanged: false,
+            addedTurnCount: added,
+            collectedTurnCount: collectedTurns.length,
+            detectedTurnCount: getDetectedConversationMessageCount(),
+            staleScrolls,
+            settleMs,
+            beforeScrollTop: beforeScrollState.scrollTop,
+            ...getVirtualSweepScrollLogState()
+          });
           break;
         }
       }
 
       const windowChanged = afterWindowSignature !== beforeWindowSignature;
-      // Claude can keep the same virtualized turn nodes mounted while scrolling through one message taller than
-      // the viewport. Physical movement is still progress there; counting it as stale can stop before later turns mount.
-      const advancedWithinRenderedClaudeMessage = currentPlatform.id === "claude" && pixelMoved;
-      if (!windowChanged && added === 0 && !advancedWithinRenderedClaudeMessage) {
+      // Any platform can keep the same turn mounted while traversing one response taller than the viewport.
+      // Successful physical movement is real progress even when the rendered turn signature is unchanged.
+      if (!windowChanged && added === 0 && !pixelMoved) {
         staleScrolls += 1;
         totalStaleScrolls += 1;
-        if (staleScrolls >= getVirtualSweepStaleScrollLimit()) break;
+        if (staleScrolls >= getVirtualSweepStaleScrollLimit()) {
+          exitReason = "stale-limit-hit";
+        }
       } else {
         staleScrolls = 0;
       }
+
+      logVirtualSweep("step", {
+        step: stepNumber,
+        advancement: pixelMoved ? "pixel" : (triedBoundaryAdvance ? "boundary" : "none"),
+        pixelMoved,
+        windowChanged,
+        addedTurnCount: added,
+        collectedTurnCount: collectedTurns.length,
+        detectedTurnCount: getDetectedConversationMessageCount(),
+        staleScrolls,
+        settleMs,
+        beforeScrollTop: beforeScrollState.scrollTop,
+        ...getVirtualSweepScrollLogState()
+      });
+
+      if (exitReason === "stale-limit-hit") break;
     }
 
     const sweptTurns = collectedTurns;
@@ -1725,6 +1764,15 @@
       initialRenderedTurnCount: initialMetrics.messageTurnCount || null,
       initialRawCandidateChars: initialMetrics.rawCandidateChars || null
     };
+    logVirtualSweep("exit", {
+      reason: exitReason,
+      scrolls,
+      collectedTurnCount: sweptTurns.length,
+      staleScrolls: totalStaleScrolls,
+      terminalQuietChecks,
+      elapsedMs: sweepMetrics.sweepMs,
+      ...getVirtualSweepScrollLogState()
+    });
     if (sweptTurns.length <= Number(initialMetrics.messageTurnCount || 0)) {
       lastConversationCaptureMetrics = {
         ...initialMetrics,
@@ -1885,24 +1933,33 @@
     return VIRTUAL_SWEEP_STEP_RATIO;
   }
 
-  function shouldPreferBoundarySweepAdvance() {
-    return currentPlatform.id === "claude";
-  }
-
   function getVirtualSweepStaleScrollLimit() {
     return currentPlatform.id === "claude" ? CLAUDE_VIRTUAL_SWEEP_STALE_SCROLLS : VIRTUAL_SWEEP_STALE_SCROLLS;
-  }
-
-  function getVirtualSweepProgressChangeTimeout() {
-    return currentPlatform.id === "claude"
-      ? CLAUDE_VIRTUAL_SWEEP_PROGRESS_CHANGE_TIMEOUT_MS
-      : VIRTUAL_SWEEP_SLOW_CHANGE_TIMEOUT_MS;
   }
 
   function getVirtualSweepTerminalQuietTimeout() {
     return currentPlatform.id === "claude"
       ? CLAUDE_VIRTUAL_SWEEP_SLOW_CHANGE_TIMEOUT_MS
       : VIRTUAL_SWEEP_SLOW_CHANGE_TIMEOUT_MS;
+  }
+
+  function getVirtualSweepScrollLogState() {
+    const state = getSourceScrollState();
+    return {
+      scrollTop: Math.round(state.scrollTop),
+      scrollHeight: Math.round(state.scrollHeight),
+      clientHeight: Math.round(state.clientHeight),
+      scrollRemaining: Math.round(getSourceScrollRemaining())
+    };
+  }
+
+  function logVirtualSweep(event, detail = {}) {
+    if (!VIRTUAL_SWEEP_DEBUG_LOGGING || window.__CONTEXT_GENERATOR_TEST_HOOKS__) return;
+    console.info("[Context Generator Sweep]", {
+      event,
+      platform: currentPlatform.id,
+      ...detail
+    });
   }
 
   async function waitForRenderedConversationWindowChange(previousSignature, timeoutMs) {
