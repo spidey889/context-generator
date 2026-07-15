@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-07-15-handoff-jet-black";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-07-15-handoff-live-progress";
   const BUBBLE_ID = "context-generator-bubble";
   const OVERLAY_ID = "context-generator-overlay";
   const ONBOARDING_ID = "context-generator-onboarding";
@@ -101,12 +101,18 @@
   const CHATGPT_PASTE_STABILITY_MS = 550;
   const HANDOFF_COUNTDOWN_ID = "context-generator-handoff-countdown";
   const HANDOFF_COUNTDOWN_FIXED_MS = 30000;
-  // Progress advances only from real pipeline marks; never infer progress from elapsed time.
+  // Stage completion still comes only from real pipeline marks. In-stage line motion is display-only:
+  // capture reads the sweep's existing scroll diagnostics, while summary creeps below completion.
   const HANDOFF_STAGES = [
     { id: "capture", label: "Capturing chat" },
     { id: "summary", label: "Summarizing" },
     { id: "paste", label: "Pasting into destination" }
   ];
+  const HANDOFF_CAPTURE_LINE_MIN = 0.04;
+  const HANDOFF_CAPTURE_LINE_MAX = 0.94;
+  const HANDOFF_ACTIVITY_LINE_START = 0.05;
+  const HANDOFF_ACTIVITY_LINE_MAX = 0.9;
+  const HANDOFF_ACTIVITY_LINE_DURATION_MS = 30000;
   const GENERIC_CONVERSATION_SELECTORS = [
     "[data-message-author-role]",
     "[data-testid*='conversation' i]",
@@ -388,6 +394,8 @@
   let floatingButtonMonitoringDisabled = false;
   let handoffCountdownTimer = null;
   let handoffCountdownHideTimer = null;
+  let handoffActivityProgressFrame = null;
+  let handoffCaptureProgressFrame = null;
   let onboardingTimer = null;
   let onboardingDismissedThisSession = false;
   let claudeLimitNudgeDismissedUntilLimitClears = false;
@@ -1726,6 +1734,8 @@
         if (afterWindowSignature === beforeWindowSignature && !pixelMoved) {
           terminalQuietChecks += 1;
           exitReason = triedBoundaryAdvance ? "quiet-check-passed" : "no-scroll-movement";
+          const afterScrollState = getVirtualSweepScrollLogState();
+          reportHandoffCaptureProgress(afterScrollState);
           logVirtualSweep("step", {
             step: stepNumber,
             advancement: triedBoundaryAdvance ? "boundary" : "none",
@@ -1737,7 +1747,7 @@
             staleScrolls,
             settleMs,
             beforeScrollTop: beforeScrollState.scrollTop,
-            ...getVirtualSweepScrollLogState()
+            ...afterScrollState
           });
           break;
         }
@@ -1765,6 +1775,8 @@
         staleScrolls = 0;
       }
 
+      const afterScrollState = getVirtualSweepScrollLogState();
+      reportHandoffCaptureProgress(afterScrollState);
       logVirtualSweep("step", {
         step: stepNumber,
         advancement: pixelMoved ? "pixel" : (triedBoundaryAdvance ? "boundary" : "none"),
@@ -1779,7 +1791,7 @@
         stepRatio,
         nextStepRatio: getVirtualSweepStepRatio(useLargerOverlapStep),
         beforeScrollTop: beforeScrollState.scrollTop,
-        ...getVirtualSweepScrollLogState()
+        ...afterScrollState
       });
 
       if (exitReason === "stale-limit-hit") break;
@@ -4040,16 +4052,13 @@
           #context-generator-handoff-progress .context-generator-handoff-stage:not(:last-child)::before{
             background:rgba(255,255,255,0.11);
           }
-          /* Completion starts the fill, but its duration never gates the transfer pipeline. */
+          /* The line follows live display progress; its motion never gates the transfer pipeline. */
           #context-generator-handoff-progress .context-generator-handoff-stage:not(:last-child)::after{
             background:linear-gradient(90deg,rgba(139,112,230,0.58),rgba(184,165,247,0.82));
             box-shadow:3px 0 8px rgba(149,123,235,0.24);
-            transform:scaleX(0);
+            transform:scaleX(var(--context-generator-stage-progress,0));
             transform-origin:left center;
-            transition:transform 1.35s cubic-bezier(0.22,0.72,0.22,1);
-          }
-          #context-generator-handoff-progress .context-generator-handoff-stage[data-state="complete"]::after{
-            transform:scaleX(1);
+            transition:transform var(--context-generator-stage-progress-duration,1.35s) var(--context-generator-stage-progress-easing,cubic-bezier(0.22,0.72,0.22,1));
           }
           #context-generator-handoff-progress .context-generator-handoff-stage-marker{
             position:relative;
@@ -4175,6 +4184,7 @@
     const bubble = document.getElementById(BUBBLE_ID);
 
     stopHandoffCountdown();
+    stopHandoffLiveProgress();
     if (overlay) {
       overlay.style.opacity = "0";
       overlay.style.transform = HANDOFF_OVERLAY_CLOSED_TRANSFORM;
@@ -4226,6 +4236,87 @@
     return "Capturing chat";
   }
 
+  function getHandoffCaptureLineProgress(scrollState = {}) {
+    const traveled = Math.max(0, Number(scrollState.scrollTop || 0));
+    const remaining = Math.max(0, Number(scrollState.scrollRemaining || 0));
+    const total = traveled + remaining;
+    const realRatio = total > 0 ? traveled / total : 0;
+    return Math.min(
+      HANDOFF_CAPTURE_LINE_MAX,
+      HANDOFF_CAPTURE_LINE_MIN + (HANDOFF_CAPTURE_LINE_MAX - HANDOFF_CAPTURE_LINE_MIN) * realRatio
+    );
+  }
+
+  function setHandoffStageLineProgress(stageId, value) {
+    if (stageId === "paste") return;
+    const progress = document.getElementById("context-generator-handoff-progress");
+    const stageElement = progress?.querySelector(`[data-context-generator-stage='${stageId}']`);
+    if (!stageElement) return;
+
+    const normalized = Math.max(0, Math.min(1, Number(value || 0)));
+    stageElement.style.setProperty("--context-generator-stage-progress", normalized.toFixed(4));
+    stageElement.dataset.contextGeneratorLineProgress = normalized.toFixed(4);
+  }
+
+  function reportHandoffCaptureProgress(scrollState) {
+    if (!isHandoffOverlayVisible()) return;
+    const lineProgress = getHandoffCaptureLineProgress(scrollState);
+    if (handoffCaptureProgressFrame) window.cancelAnimationFrame?.(handoffCaptureProgressFrame);
+
+    const applyProgress = () => {
+      handoffCaptureProgressFrame = null;
+      const captureStage = document.querySelector(
+        "#context-generator-handoff-progress [data-context-generator-stage='capture']"
+      );
+      if (captureStage?.dataset.state === "active") {
+        setHandoffStageLineProgress("capture", lineProgress);
+      }
+    };
+
+    if (window.requestAnimationFrame) {
+      handoffCaptureProgressFrame = window.requestAnimationFrame(applyProgress);
+    } else {
+      applyProgress();
+    }
+  }
+
+  function startHandoffActivityProgress(stageId) {
+    stopHandoffActivityProgress();
+    if (stageId !== "summary" || window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) return;
+    if (!window.requestAnimationFrame) return;
+
+    // Two frames let the 5% start paint before the long transition begins.
+    handoffActivityProgressFrame = window.requestAnimationFrame(() => {
+      handoffActivityProgressFrame = window.requestAnimationFrame(() => {
+        handoffActivityProgressFrame = null;
+        const stageElement = document.querySelector(
+          `#context-generator-handoff-progress [data-context-generator-stage='${stageId}']`
+        );
+        if (!stageElement || stageElement.dataset.state !== "active" || !isHandoffOverlayVisible()) return;
+        stageElement.style.setProperty(
+          "--context-generator-stage-progress-duration",
+          `${HANDOFF_ACTIVITY_LINE_DURATION_MS}ms`
+        );
+        stageElement.style.setProperty("--context-generator-stage-progress-easing", "linear");
+        setHandoffStageLineProgress(stageId, HANDOFF_ACTIVITY_LINE_MAX);
+      });
+    });
+  }
+
+  function stopHandoffActivityProgress() {
+    if (!handoffActivityProgressFrame) return;
+    window.cancelAnimationFrame?.(handoffActivityProgressFrame);
+    handoffActivityProgressFrame = null;
+  }
+
+  function stopHandoffLiveProgress() {
+    stopHandoffActivityProgress();
+    if (handoffCaptureProgressFrame) {
+      window.cancelAnimationFrame?.(handoffCaptureProgressFrame);
+      handoffCaptureProgressFrame = null;
+    }
+  }
+
   function setHandoffProgress(stageId, phase = "active", destinationName = null) {
     const overlay = document.getElementById(OVERLAY_ID);
     const progress = document.getElementById("context-generator-handoff-progress");
@@ -4235,6 +4326,7 @@
     const resolvedDestinationName = destinationName
       || overlay?.dataset.contextGeneratorDestinationName
       || "destination";
+    stopHandoffActivityProgress();
     const stages = getHandoffProgressState(stageId, phase, resolvedDestinationName);
     const stageElements = progress.querySelectorAll(".context-generator-handoff-stage");
 
@@ -4245,6 +4337,19 @@
       const label = stageElement.querySelector(".context-generator-handoff-stage-label");
 
       stageElement.dataset.state = stage.state;
+      stageElement.style.setProperty("--context-generator-stage-progress-duration", "1.35s");
+      stageElement.style.setProperty(
+        "--context-generator-stage-progress-easing",
+        "cubic-bezier(0.22,0.72,0.22,1)"
+      );
+      setHandoffStageLineProgress(
+        stage.id,
+        stage.state === "complete"
+          ? 1
+          : (stage.state === "active" && stage.id === "capture"
+            ? HANDOFF_CAPTURE_LINE_MIN
+            : (stage.state === "active" && stage.id === "summary" ? HANDOFF_ACTIVITY_LINE_START : 0))
+      );
       stageElement.setAttribute("aria-label", `${stage.label}, ${stage.state}`);
       if (stage.state === "active") {
         stageElement.setAttribute("aria-current", "step");
@@ -4265,6 +4370,7 @@
       statusText.style.animation = "contextGeneratorHeadlineIn 340ms cubic-bezier(0.16,1,0.3,1) both";
     }
     progress.setAttribute("aria-label", `Transfer progress: ${currentStatus}`);
+    if (phase === "active") startHandoffActivityProgress(stageId);
   }
 
   function startHandoffCountdown() {

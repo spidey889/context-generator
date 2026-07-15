@@ -33,7 +33,8 @@ test("handoff motion is restrained and remains driven by real status changes", (
   assert.match(source, /@keyframes contextGeneratorHeadlineIn/);
   assert.match(source, /statusText\.textContent !== currentStatus/);
   assert.match(source, /contextGeneratorHeadlineIn 340ms cubic-bezier/);
-  assert.match(source, /transition:transform 1\.35s cubic-bezier/);
+  assert.match(source, /transition:transform var\(--context-generator-stage-progress-duration,1\.35s\)/);
+  assert.match(source, /startHandoffActivityProgress\(stageId\)/);
   assert.doesNotMatch(source, /contextGeneratorProgressPulse/);
   assert.match(source, /prefers-reduced-motion: reduce/);
 });
