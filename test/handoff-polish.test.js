@@ -25,6 +25,11 @@ test("handoff polish creates one clear header, headline, and progress hierarchy"
   assert.match(overlaySource, /HANDOFF_SCRIM_ID[\s\S]*pointer-events:none[\s\S]*background:rgba\(0,0,0,0\.09\)/);
   assert.match(overlaySource, /context-generator-handoff-stage-progress-head/);
   assert.match(overlaySource, /width:4px/);
+  assert.match(overlaySource, /contextGeneratorSummaryDotHop/);
+  assert.match(overlaySource, /context-generator-summary-activity-dot/);
+  assert.match(overlaySource, /width:5px/);
+  assert.match(overlaySource, /animation-delay:140ms/);
+  assert.match(overlaySource, /animation-delay:280ms/);
   assert.doesNotMatch(overlaySource, /#F0D7FF|#DDB5F5|#FFFFEB|#050505|#7459d6|rgba\((?:126,94,228|151,125,244)/);
   assert.match(overlaySource, /"justify-content:flex-start"/);
   assert.match(overlaySource, /"font-size:29px"[\s\S]*"font-family:Georgia,'Times New Roman',serif"/);
@@ -40,6 +45,7 @@ test("handoff motion is restrained and remains driven by real status changes", (
   assert.match(source, /contextGeneratorHeadlineIn 340ms cubic-bezier/);
   assert.match(source, /transition:width var\(--context-generator-stage-progress-duration,1\.35s\)/);
   assert.match(source, /startHandoffActivityProgress\(stageId\)/);
+  assert.match(source, /summaryActivity\.dataset\.active = String\(stageId === "summary" && phase === "active"\)/);
   assert.doesNotMatch(source, /contextGeneratorProgressPulse/);
   assert.match(source, /prefers-reduced-motion: reduce/);
 });

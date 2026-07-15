@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-07-15-handoff-head-scrim";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-07-15-summary-bouncing-dots";
   const BUBBLE_ID = "context-generator-bubble";
   const OVERLAY_ID = "context-generator-overlay";
   const HANDOFF_SCRIM_ID = "context-generator-handoff-scrim";
@@ -4094,7 +4094,6 @@
       statusText.id = "context-generator-text";
       statusText.setAttribute("aria-live", "polite");
       statusText.setAttribute("aria-atomic", "true");
-      statusText.textContent = "Capturing chat";
       statusText.style.cssText = [
         "position:relative",
         "z-index:1",
@@ -4113,6 +4112,22 @@
         "text-rendering:geometricPrecision",
         "will-change:transform,opacity"
       ].join(";");
+
+      const statusLabel = document.createElement("span");
+      statusLabel.id = "context-generator-text-label";
+      statusLabel.textContent = "Capturing chat";
+      statusText.appendChild(statusLabel);
+
+      const summaryActivity = document.createElement("span");
+      summaryActivity.className = "context-generator-summary-activity";
+      summaryActivity.dataset.active = "false";
+      summaryActivity.setAttribute("aria-hidden", "true");
+      for (let index = 0; index < 3; index += 1) {
+        const dot = document.createElement("span");
+        dot.className = "context-generator-summary-activity-dot";
+        summaryActivity.appendChild(dot);
+      }
+      statusText.appendChild(summaryActivity);
 
       const progress = document.createElement("div");
       progress.id = "context-generator-handoff-progress";
@@ -4173,6 +4188,36 @@
             from{opacity:0.18;transform:translate3d(0,6px,0)}
             to{opacity:1;transform:translate3d(0,0,0)}
           }
+          @keyframes contextGeneratorSummaryDotHop{
+            0%,55%,100%{opacity:0.46;transform:translate3d(0,0,0)}
+            24%{opacity:1;transform:translate3d(0,-4px,0)}
+          }
+          #context-generator-text .context-generator-summary-activity{
+            display:none;
+            flex:0 0 auto;
+            height:12px;
+            margin:0 0 1px 6px;
+            align-items:center;
+            gap:3px;
+            pointer-events:none;
+          }
+          #context-generator-text .context-generator-summary-activity[data-active="true"]{
+            display:inline-flex;
+          }
+          #context-generator-text .context-generator-summary-activity-dot{
+            display:block;
+            width:5px;
+            height:5px;
+            border-radius:999px;
+            background:#9A7ADC;
+            box-shadow:0 0 6px rgba(154,122,220,0.34);
+            opacity:0.46;
+            transform:translate3d(0,0,0);
+            animation:contextGeneratorSummaryDotHop 900ms cubic-bezier(0.45,0,0.55,1) infinite;
+            will-change:transform,opacity;
+          }
+          #context-generator-text .context-generator-summary-activity-dot:nth-child(2){animation-delay:140ms}
+          #context-generator-text .context-generator-summary-activity-dot:nth-child(3){animation-delay:280ms}
           #context-generator-handoff-progress .context-generator-handoff-stage{
             position:relative;
             min-width:0;
@@ -4272,6 +4317,7 @@
           }
           @media (prefers-reduced-motion: reduce){
             #context-generator-text{animation:none!important}
+            #context-generator-text .context-generator-summary-activity-dot{animation:none!important;opacity:0.72}
             #context-generator-handoff-progress .context-generator-handoff-stage-connector-fill,
             #context-generator-handoff-progress .context-generator-handoff-stage-progress-head{transition:none!important}
           }
@@ -4499,7 +4545,9 @@
     const overlay = document.getElementById(OVERLAY_ID);
     const progress = document.getElementById("context-generator-handoff-progress");
     const statusText = document.getElementById("context-generator-text");
-    if (!progress || !statusText) return;
+    const statusLabel = document.getElementById("context-generator-text-label");
+    const summaryActivity = statusText?.querySelector(".context-generator-summary-activity");
+    if (!progress || !statusText || !statusLabel || !summaryActivity) return;
 
     const resolvedDestinationName = destinationName
       || overlay?.dataset.contextGeneratorDestinationName
@@ -4539,10 +4587,11 @@
     });
 
     const currentStatus = getHandoffProgressStatusText(stageId, phase, resolvedDestinationName);
-    const shouldAnimateHeadline = statusText.textContent !== currentStatus
+    const shouldAnimateHeadline = statusLabel.textContent !== currentStatus
       && !window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
     statusText.style.animation = "none";
-    statusText.textContent = currentStatus;
+    statusLabel.textContent = currentStatus;
+    summaryActivity.dataset.active = String(stageId === "summary" && phase === "active");
     if (shouldAnimateHeadline) {
       void statusText.offsetWidth;
       statusText.style.animation = "contextGeneratorHeadlineIn 340ms cubic-bezier(0.16,1,0.3,1) both";
