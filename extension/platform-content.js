@@ -403,6 +403,7 @@
   let transferTraceSequence = 0;
   let lastConversationCaptureMetrics = null;
   let sourceScrollTargetsCache = null;
+  let chatGptConversationScrollRootCache = null;
 
   function cleanupContextGeneratorNodes() {
     cleanupContextGeneratorReservations();
@@ -684,6 +685,7 @@
 
   async function prepareSourceForCapture() {
     sourceScrollTargetsCache = null;
+    chatGptConversationScrollRootCache = null;
     scrollSourceConversationToTop();
     await waitForConversationCaptureToSettle();
     const expandedCount = await expandCollapsedConversationContent();
@@ -745,11 +747,27 @@
   }
 
   function scrollSourceConversationToTop() {
+    const chatGptRoot = getChatGptConversationScrollRoot();
+    if (chatGptRoot) {
+      scrollElementToTopInstantly(chatGptRoot);
+      if (isDocumentScrollRoot(chatGptRoot)) scrollWindowToTopInstantly();
+      return;
+    }
+
     getSourceScrollTargets().forEach(scrollElementToTopInstantly);
     scrollWindowToTopInstantly();
   }
 
   function getSourceScrollState() {
+    const chatGptRoot = getChatGptConversationScrollRoot();
+    if (chatGptRoot) {
+      return {
+        scrollHeight: Number(chatGptRoot.scrollHeight || 0),
+        scrollTop: Math.max(0, Number(chatGptRoot.scrollTop || 0)),
+        clientHeight: Math.max(0, Number(chatGptRoot.clientHeight || 0))
+      };
+    }
+
     return getSourceScrollTargets().reduce((state, element) => {
       state.scrollHeight += Number(element.scrollHeight || 0);
       state.scrollTop += Number(element.scrollTop || 0);
@@ -763,6 +781,14 @@
   }
 
   function getSourceScrollRemaining() {
+    const chatGptRoot = getChatGptConversationScrollRoot();
+    if (chatGptRoot) {
+      return Math.max(
+        0,
+        getElementMaxScrollTop(chatGptRoot) - Math.max(0, Number(chatGptRoot.scrollTop || 0))
+      );
+    }
+
     const elementRemaining = getSourceScrollTargets().reduce((remaining, element) => {
       const maxTop = getElementMaxScrollTop(element);
       const currentTop = Math.max(0, Number(element.scrollTop || 0));
@@ -787,6 +813,11 @@
   }
 
   function getSourceViewportHeight() {
+    const chatGptRoot = getChatGptConversationScrollRoot();
+    if (chatGptRoot) {
+      return Math.max(360, Number(chatGptRoot.clientHeight || 0) || Number(window.innerHeight || 0) || 720);
+    }
+
     const targetHeight = getSourceScrollTargets().reduce((height, element) => {
       return Math.max(height, Number(element.clientHeight || 0));
     }, 0);
@@ -794,6 +825,12 @@
   }
 
   function scrollSourceConversationByInstantly(deltaY) {
+    const chatGptRoot = getChatGptConversationScrollRoot();
+    if (chatGptRoot) {
+      if (scrollElementByInstantly(chatGptRoot, deltaY)) return true;
+      return isDocumentScrollRoot(chatGptRoot) && scrollWindowByInstantly(deltaY);
+    }
+
     let moved = false;
     getSourceScrollTargets().forEach((element) => {
       if (scrollElementByInstantly(element, deltaY)) moved = true;
@@ -949,6 +986,78 @@
 
     sourceScrollTargetsCache = roots.filter((element, index, all) => element && all.indexOf(element) === index);
     return sourceScrollTargetsCache;
+  }
+
+  function getChatGptConversationScrollRoot() {
+    if (currentPlatform.id !== "chatgpt") return null;
+    if (
+      chatGptConversationScrollRootCache?.isConnected !== false &&
+      isScrollableSourceElement(chatGptConversationScrollRootCache)
+    ) {
+      return chatGptConversationScrollRootCache;
+    }
+
+    const supportedRoots = new Map();
+    getConversationTurns().forEach((turn) => {
+      let node = turn.element?.parentElement;
+      let depth = 0;
+      while (node && node !== document.body && node !== document.documentElement) {
+        if (isScrollableSourceElement(node)) {
+          const support = supportedRoots.get(node) || { count: 0, totalDepth: 0 };
+          support.count += 1;
+          support.totalDepth += depth;
+          supportedRoots.set(node, support);
+        }
+        node = node.parentElement;
+        depth += 1;
+      }
+    });
+
+    const ancestorRoot = [...supportedRoots.entries()]
+      .sort((left, right) => {
+        const supportDifference = right[1].count - left[1].count;
+        if (supportDifference) return supportDifference;
+        const leftAverageDepth = left[1].totalDepth / left[1].count;
+        const rightAverageDepth = right[1].totalDepth / right[1].count;
+        if (leftAverageDepth !== rightAverageDepth) return leftAverageDepth - rightAverageDepth;
+        return getElementMaxScrollTop(right[0]) - getElementMaxScrollTop(left[0]);
+      })[0]?.[0];
+
+    if (ancestorRoot) {
+      chatGptConversationScrollRootCache = ancestorRoot;
+      return ancestorRoot;
+    }
+
+    // ChatGPT can render turns in a detached virtualizer subtree. In that case, prefer an app-sized
+    // scroller over broad page candidates; using the tallest candidate caused top/middle/bottom jumps.
+    const viewportHeight = Math.max(
+      360,
+      Number(window.innerHeight || document.documentElement?.clientHeight || 0) || 720
+    );
+    const candidates = getSourceScrollTargets().filter(isScrollableSourceElement);
+    const appSizedCandidates = candidates.filter((element) => {
+      const clientHeight = Number(element.clientHeight || 0);
+      return clientHeight >= 160 && clientHeight <= viewportHeight * 1.5;
+    });
+    const fallbackRoot = (appSizedCandidates.length ? appSizedCandidates : candidates)
+      .sort((left, right) => {
+        const scrollRangeDifference = getElementMaxScrollTop(right) - getElementMaxScrollTop(left);
+        if (scrollRangeDifference) return scrollRangeDifference;
+        return (
+          Math.abs(Number(left.clientHeight || 0) - viewportHeight) -
+          Math.abs(Number(right.clientHeight || 0) - viewportHeight)
+        );
+      })[0] || null;
+
+    chatGptConversationScrollRootCache = fallbackRoot;
+    return fallbackRoot;
+  }
+
+  function isDocumentScrollRoot(element) {
+    return Boolean(
+      element &&
+      (element === document.scrollingElement || element === document.documentElement || element === document.body)
+    );
   }
 
   function isLikelySourceScrollRoot(element) {
