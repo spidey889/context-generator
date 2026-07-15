@@ -1527,14 +1527,16 @@ test("opening the destination picker does not scrape or summarize", () => {
 test("transfer safety window covers long quality summaries", () => {
   const source = fs.readFileSync(SOURCE_PATH, "utf8");
 
-  assert.match(source, /const RUNNING_AUTO_RESET_MS = 240000/);
+  assert.match(source, /const RUNNING_AUTO_RESET_MS = 300000/);
 });
 
-test("latest-run receipt preserves the Mistral fallback chain", () => {
+test("latest-run receipt preserves the complete provider fallback chain", () => {
   const source = fs.readFileSync(SOURCE_PATH, "utf8");
 
+  assert.match(source, /modelsTried:\s*sanitizeModelChainForStats/);
   assert.match(source, /mistralModelsTried:\s*sanitizeModelChainForStats/);
   assert.match(source, /function sanitizeModelChainForStats/);
+  assert.match(source, /\.slice\(0, 5\)/);
 });
 
 test("latest-run receipt preserves the exact raw scraped text", () => {

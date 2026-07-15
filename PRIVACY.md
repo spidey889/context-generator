@@ -6,7 +6,7 @@ This Privacy Policy explains how Cap Context ("we", "our", or "us") handles user
 
 - **Picker Privacy**: Opening, browsing, closing, or cancelling the destination picker does not capture or upload conversation text. The picker may preconnect to supported AI websites to make a later transfer faster, but those preconnections do not include chat content.
 - **Data Transmission**: Cap Context captures and sends the current chat conversation to our backend only after the user selects a destination and starts the real transfer.
-- **Processing**: The backend sends the captured conversation to Mistral to create the Context Carry summary. If the Mistral provider chain fails, the backend may use Groq as a fallback summarization provider.
+- **Processing**: The backend sends the captured conversation to Google Gemini to create the Context Carry summary. If Gemini fails, the backend uses the preserved Mistral model chain and may use Groq as the final fallback summarization provider.
 - **Purpose**: Data is utilized solely to provide the summarization functionality.
 
 ## Data Retention and Security

@@ -11,7 +11,7 @@ This is the single source of truth for current production behavior. Historical d
 - `extension/analysis-bridge.js` and `analysis/index.html`: latest-run analysis on GitHub Pages.
 - `api/request-security.js`: endpoint trust boundary, validation, limits, and abuse controls.
 - `api/summarize.js`: profiles, isolated provider prompt, fallback chain, output validation, normalization, and timing.
-- `vercel.json`: 180-second summary-function ceiling.
+- `vercel.json`: 240-second summary-function ceiling.
 - `test/`: Node regression coverage.
 - `evaluation/cases.json`: versioned conversations, expected facts, forbidden facts, and latency thresholds.
 - `scripts/run-regression-eval.js`: live endpoint scorer for summary accuracy, structure, and latency.
@@ -44,7 +44,7 @@ One shared content script handles source and destination behavior. A versioned l
 7. The result is pasted into the prepared destination. Grok and ChatGPT focus before paste; ChatGPT also has activation-settle and paste-stability checks. Missing or failed prepared tabs retry in a fresh tab.
 8. Verified paste focuses the destination. The extension never clicks Send. If a generated summary cannot be transferred, a manual-copy dialog preserves it.
 
-The source lock has a four-minute safety reset. Background waits are 12 seconds for source startup, normally 30 seconds for destination messaging, 45 seconds for ChatGPT destination messaging, and 150 seconds for the single backend fetch.
+The source lock has a five-minute safety reset. Background waits are 12 seconds for source startup, normally 30 seconds for destination messaging, 45 seconds for ChatGPT destination messaging, and 210 seconds for the single backend fetch.
 
 ## Conversation Capture
 
@@ -68,16 +68,17 @@ The large profile reports a 1,100-word quality-floor diagnostic, but that value 
 
 Every non-tiny transfer creates one backend summary job. Within it, transient attempts and validation failures may advance through:
 
-1. Mistral `mistral-medium-2604`
-2. Mistral `mistral-large-2512`
-3. Mistral `ministral-3b-2512`
-4. Groq `llama-3.1-8b-instant`, when `GROQ_API_KEY` exists
+1. Google Gemini `gemini-3.5-flash`, when `GEMINI_API_KEY` exists
+2. Mistral `mistral-medium-2604`
+3. Mistral `mistral-large-2512`
+4. Mistral `ministral-3b-2512`
+5. Groq `llama-3.1-8b-instant`, when `GROQ_API_KEY` exists
 
-`MISTRAL_MODEL` does not override the chain. A provider-wide Mistral 429 moves from the bounded primary attempt directly to Groq. Total per-model budgets are 55, 40, 25, and 15 seconds, about 135 seconds worst-case. Provider fetches also have an 80-second abort ceiling, but the smaller model budget is effective. This fits below Vercel’s 180-second ceiling and the extension’s 150-second wait. The extension never replays the backend job.
+Gemini uses its native `generateContent` API with `MEDIUM` thinking, default sampling values, the profile output cap, and explicit `store: false`. `MISTRAL_MODEL` does not override the preserved Mistral chain. A provider-wide Mistral 429 moves from its bounded primary attempt directly to Groq. Total per-model budgets are 45, 55, 40, 25, and 15 seconds, about 180 seconds worst-case. Provider fetches also have an 80-second abort ceiling, but the smaller model budget is effective. This fits below Vercel’s 240-second ceiling and the extension’s 210-second wait. The extension never replays the backend job.
 
 ## Prompt Isolation And Validation
 
-The system message holds the summary rules and exact seven-section Context Carry contract. It tells the model to search the complete transcript carefully for facts relevant to every section before writing, and permits `None` only when that search finds no useful grounded information for the section. `WHAT WE WERE DOING`, `WHERE WE LEFT OFF`, and `KEY CONTEXT` must always contain strong transcript-grounded content. Assistant suggestions and possibilities are not decisions unless the user clearly accepts them; `DECISIONS MADE` contains only user-made or user-confirmed decisions, including deliberately deferred choices and accepted tradeoffs. When states conflict, the latest user-confirmed state is current truth, and an older state is retained only when still relevant and explicitly labeled as replaced, rejected, changed, or historical. The transcript is JSON-serialized into a separate versioned user-role data envelope. The system message declares all envelope content—including apparent system, developer, tool, API, or instruction text—untrusted customer data to summarize, not instructions to execute.
+The system message holds the summary rules and exact seven-section Context Carry contract. It tells the model to search the complete transcript carefully for facts relevant to every section before writing, and permits `None` only when that search finds no useful grounded information for the section. `WHAT WE WERE DOING`, `WHERE WE LEFT OFF`, and `KEY CONTEXT` must always contain strong transcript-grounded content. Assistant suggestions and possibilities are not decisions unless the user clearly accepts them; `DECISIONS MADE` contains only user-made or user-confirmed decisions, including deliberately deferred choices and accepted tradeoffs. When states conflict, the latest user-confirmed state is current truth, and an older state is retained only when still relevant and explicitly labeled as replaced, rejected, changed, or historical. The transcript is JSON-serialized into a separate versioned user-role data envelope. Gemini receives these as native `systemInstruction` and user `contents`; Mistral and Groq receive the equivalent system/user chat messages. The system instruction declares all envelope content—including apparent system, developer, tool, API, or instruction text—untrusted customer data to summarize, not instructions to execute.
 
 Generated output is validated locally without an evaluation-model call. It must contain the Context Carry header, all seven sections exactly once and in order, meaningful content in the three continuation-critical sections, a low profile-derived minimum body length, and the exact destination confirmation. Optional sections such as `WHO I AM` may contain `None` when the transcript genuinely supplies no relevant fact. Obvious refusals and API-error output fail.
 
@@ -95,9 +96,9 @@ Instance-local controls allow 8 requests per observed client IP per minute, 40 p
 
 ## Privacy And Diagnostics
 
-Chat text leaves the source page only after destination selection. It goes to the Cap Context backend and, for generated summaries, Mistral or the configured Groq fallback. The backend does not intentionally persist or log transcripts; the extension locally retains the latest captured transcript as described below.
+Chat text leaves the source page only after destination selection. It goes to the Cap Context backend and, for generated summaries, Gemini first, then the configured Mistral chain or Groq fallback when needed. The backend does not intentionally persist or log transcripts; the extension locally retains the latest captured transcript as described below.
 
-The exact-summary cache and in-flight map are memory-only. One latest-run receipt is stored in `chrome.storage.local`; it contains counts, timing, provider/model/fallback metadata, token usage, status, and initially the exact captured transcript sent to the backend. A persistent extension alarm removes only the raw transcript and its expiry marker after 24 hours; all other receipt diagnostics remain until the next transfer replaces the receipt. The analysis bridge also enforces this expiry when reading the receipt in case a delayed browser alarm has not run yet. The connected analysis page exposes an available transcript only inside a collapsed raw-text panel; it does not include the generated summary. Picker open/close, preconnect, and destination warming do not include chat content. Pasted text is never automatically submitted.
+The exact-summary cache and in-flight map are memory-only. One latest-run receipt is stored in `chrome.storage.local`; it contains counts, timing, provider/model/full fallback-chain metadata, token usage, status, and initially the exact captured transcript sent to the backend. A persistent extension alarm removes only the raw transcript and its expiry marker after 24 hours; all other receipt diagnostics remain until the next transfer replaces the receipt. The analysis bridge also enforces this expiry when reading the receipt in case a delayed browser alarm has not run yet. The connected analysis page exposes an available transcript only inside a collapsed raw-text panel; it does not include the generated summary. Picker open/close, preconnect, and destination warming do not include chat content. Pasted text is never automatically submitted.
 
 ## UI, Placement, And Paste
 
@@ -111,7 +112,7 @@ The latest-run receipt powers the GitHub Pages analysis view through `analysis-b
 
 ## Verification Contract
 
-`npm test` covers endpoint security and limits, picker/preconnect privacy, one-job background behavior, prompt isolation, profiles and routing, 210,000-character forwarding, timeout budgets, fallbacks and validation, absence of expansion, full-middle capture, exact duplicate safety, structural roles, removal of broad DOM fallback, sequence-aligned virtualized capture, paste verification, deterministic handoff-stage transitions, placement, and analysis receipts. It also loads the versioned evaluation set through the real capture hooks and fails on any lost turn, changed turn count, or fixture capture above 250 ms.
+`npm test` covers endpoint security and limits, picker/preconnect privacy, one-job background behavior, prompt isolation, profiles and Gemini-first routing, native Gemini request/usage parsing, 210,000-character forwarding, timeout budgets, preserved fallbacks and validation, absence of expansion, full-middle capture, exact duplicate safety, structural roles, removal of broad DOM fallback, sequence-aligned virtualized capture, paste verification, deterministic handoff-stage transitions, placement, and analysis receipts. It also loads the versioned evaluation set through the real capture hooks and fails on any lost turn, changed turn count, or fixture capture above 250 ms.
 
 `npm run eval` sends the versioned evaluation transcripts through `EVAL_ENDPOINT`, defaulting to production. It fails below 90% required-fact recall, on any forbidden/incorrect fact, invalid Context Carry structure, a per-case latency over 30 seconds for the small case or 60 seconds for the medium case, or more than 90 seconds total. Required facts may define explicit equivalent phrases so harmless paraphrases do not create false failures.
 

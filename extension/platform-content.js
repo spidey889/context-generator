@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-07-15-summary-line-faster";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-07-16-gemini-primary";
   const BUBBLE_ID = "context-generator-bubble";
   const OVERLAY_ID = "context-generator-overlay";
   const HANDOFF_SCRIM_ID = "context-generator-handoff-scrim";
@@ -36,7 +36,7 @@
   const DESTINATION_SHEET_WIDTH = 296;
   const DESTINATION_SHEET_CLOSED_TRANSFORM = "translate3d(0,8px,0) scale(0.985)";
   const HANDOFF_OVERLAY_CLOSED_TRANSFORM = "translate3d(-50%,-50%,0) translateY(10px) scale(0.985)";
-  const RUNNING_AUTO_RESET_MS = 240000;
+  const RUNNING_AUTO_RESET_MS = 300000;
   const DEFAULT_MAX_COMPOSER_WIDTH = 1320;
   const DESTINATION_TITLE_TEXT = "Where to continue?";
   const DESTINATION_HELPER_TEXT = "Context goes straight into the input box";
@@ -1216,6 +1216,7 @@
         requestChars: summaryTiming?.requestChars ?? null,
         backendInputChars: summaryTiming?.backendInputChars ?? backendTiming?.inputChars ?? null,
         backendTotalMs: backendTiming?.totalMs ?? null,
+        geminiMs: backendTiming?.geminiMs ?? null,
         mistralMs: backendTiming?.mistralMs ?? null,
         groqMs: backendTiming?.groqMs ?? null,
         providerMs: backendTiming?.providerMs ?? null,
@@ -1225,6 +1226,7 @@
         primaryModel: backendTiming?.primaryModel || null,
         model: backendTiming?.model || null,
         modelReason: backendTiming?.modelReason || null,
+        modelsTried: sanitizeModelChainForStats(backendTiming?.modelsTried),
         mistralModelsTried: sanitizeModelChainForStats(backendTiming?.mistralModelsTried),
         modelInputChars: backendTiming?.modelInputChars ?? null,
         modelThresholdChars: backendTiming?.modelThresholdChars ?? null,
@@ -1289,7 +1291,7 @@
     if (!Array.isArray(models)) return [];
     return models
       .filter((model) => typeof model === "string" && model.trim())
-      .slice(0, 3)
+      .slice(0, 5)
       .map((model) => model.trim());
   }
 

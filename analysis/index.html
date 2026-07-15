@@ -656,7 +656,7 @@
             ${sideItem("Route", route)}
             ${sideItem("Backend match", integrity)}
             ${sideItem("Served by", formatBackendLabel(summary))}
-            ${sideItem("Primary model", formatModelDisplayName(summary.servedBy === "local-direct" ? "local-direct" : "mistral-medium-2604"))}
+            ${sideItem("Primary model", getPrimaryModelLabel(summary))}
             ${sideItem("Fallback log", getModelFallbackLabel(summary))}
             ${sideItem("Capture path", capture.method || "unknown")}
             ${sideItem("Message turns", formatTurnSummary(capture))}
@@ -763,7 +763,10 @@
 
     function getModelFallbackLabel(summary) {
       if (!summary) return "n/a";
-      const tried = Array.isArray(summary.mistralModelsTried) ? summary.mistralModelsTried.filter(Boolean) : [];
+      const recordedChain = Array.isArray(summary.modelsTried) && summary.modelsTried.length
+        ? summary.modelsTried
+        : summary.mistralModelsTried;
+      const tried = Array.isArray(recordedChain) ? recordedChain.filter(Boolean) : [];
       const servedModel = summary.model || summary.fallback?.model || null;
 
       if (summary.fallback?.used && servedModel) {
@@ -784,14 +787,25 @@
         : "Not recorded - run a new transfer";
     }
 
+    function getPrimaryModelLabel(summary) {
+      if (!summary) return "n/a";
+      if (summary.servedBy === "local-direct") return "local-direct";
+      const recordedPrimary = summary.primaryModel
+        || summary.modelsTried?.[0]
+        || summary.mistralModelsTried?.[0];
+      return formatModelDisplayName(recordedPrimary || "Not recorded");
+    }
+
     function formatModelDisplayName(model) {
       if (!model) return "n/a";
+      if (model === "gemini-3.5-flash") return "Gemini 3.5 Flash";
       if (model === "mistral-medium-2604") return "mistral-medium-3-5";
       return model;
     }
 
     function formatBackendLabel(summary) {
       const provider = summary?.servedBy || summary?.provider;
+      if (provider === "gemini") return "Google Gemini";
       if (provider === "mistral") return "Mistral";
       if (provider === "groq") return "Groq";
       if (provider === "local-direct") return "Local";
@@ -879,16 +893,18 @@
           requestChars: 48142,
           backendInputChars: 48142,
           backendTotalMs: 7202,
-          mistralMs: 7074,
+          geminiMs: 7074,
+          mistralMs: 0,
           groqMs: 0,
           providerMs: 7074,
           providerPasses: 1,
-          servedBy: "mistral",
-          provider: "mistral",
-          primaryModel: "mistral-medium-2604",
-          model: "mistral-large-2512",
-          modelReason: "mistral-medium-2604 failed; fell back to mistral-large-2512",
-          mistralModelsTried: ["mistral-medium-2604", "mistral-large-2512"],
+          servedBy: "gemini",
+          provider: "gemini",
+          primaryModel: "gemini-3.5-flash",
+          model: "gemini-3.5-flash",
+          modelReason: "gemini-3.5-flash served as the primary model",
+          modelsTried: ["gemini-3.5-flash"],
+          mistralModelsTried: [],
           modelInputChars: 48142,
           modelThresholdChars: null,
           modelOverride: false,

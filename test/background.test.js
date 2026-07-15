@@ -7,7 +7,7 @@ const source = fs.readFileSync(path.join(__dirname, "..", "extension", "backgrou
 const manifest = JSON.parse(fs.readFileSync(path.join(__dirname, "..", "extension", "manifest.json"), "utf8"));
 
 test("extension sends each summary job to the backend only once", () => {
-  assert.match(source, /const SUMMARY_BACKEND_TIMEOUT_MS = 150000/);
+  assert.match(source, /const SUMMARY_BACKEND_TIMEOUT_MS = 210000/);
   assert.doesNotMatch(source, /SUMMARY_BACKEND_ATTEMPTS|SUMMARY_BACKEND_RETRY_BUDGET_MS/);
   assert.equal((source.match(/fetch\(SUMMARY_BACKEND_URL/g) || []).length, 1);
 });

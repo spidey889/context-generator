@@ -43,7 +43,7 @@ test("handoff polish creates one clear header, headline, and progress hierarchy"
 
 test("handoff motion is restrained and remains driven by real status changes", () => {
   assert.match(source, /@keyframes contextGeneratorHeadlineIn/);
-  assert.match(source, /statusText\.textContent !== currentStatus/);
+  assert.match(source, /statusLabel\.textContent !== currentStatus/);
   assert.match(source, /contextGeneratorHeadlineIn 340ms cubic-bezier/);
   assert.match(source, /transition:width var\(--context-generator-stage-progress-duration,1\.35s\)/);
   assert.match(source, /startHandoffActivityProgress\(stageId\)/);

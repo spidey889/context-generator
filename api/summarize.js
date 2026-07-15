@@ -1,4 +1,4 @@
-const MISTRAL_MAX_ATTEMPTS = 2;
+const PROVIDER_MAX_ATTEMPTS = 2;
 const {
   applyCorsHeaders,
   isValidPreflightRequest,
@@ -7,8 +7,10 @@ const {
   consumeRateLimit,
   acquireRequestSlot
 } = require("./request-security");
-const MISTRAL_RETRY_INTERVAL_MS = 450;
+const PROVIDER_RETRY_INTERVAL_MS = 450;
 const PROVIDER_ATTEMPT_TIMEOUT_MS = 80000;
+const GEMINI_PRIMARY_MODEL = "gemini-3.5-flash";
+const GEMINI_GENERATE_CONTENT_URL = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_PRIMARY_MODEL}:generateContent`;
 const MISTRAL_CHAT_COMPLETIONS_URL = "https://api.mistral.ai/v1/chat/completions";
 const GROQ_CHAT_COMPLETIONS_URL = "https://api.groq.com/openai/v1/chat/completions";
 const LOCAL_DIRECT_MODEL = "local-direct";
@@ -17,6 +19,7 @@ const MISTRAL_FALLBACK_MODELS = ["mistral-large-2512", "ministral-3b-2512"];
 const MISTRAL_MODEL_CHAIN = [MISTRAL_PRIMARY_MODEL, ...MISTRAL_FALLBACK_MODELS];
 const GROQ_FALLBACK_MODEL = "llama-3.1-8b-instant";
 const PROVIDER_REQUEST_BUDGETS_MS = {
+  [GEMINI_PRIMARY_MODEL]: 45000,
   [MISTRAL_PRIMARY_MODEL]: 55000,
   "mistral-large-2512": 40000,
   "ministral-3b-2512": 25000,
@@ -24,6 +27,11 @@ const PROVIDER_REQUEST_BUDGETS_MS = {
 };
 const MISTRAL_PROMPT_CACHE_VERSION = "capcontext-summary-v3";
 const SUMMARY_PROVIDERS = {
+  gemini: {
+    id: "gemini",
+    label: "Gemini",
+    url: GEMINI_GENERATE_CONTENT_URL
+  },
   mistral: {
     id: "mistral",
     label: "Mistral",
@@ -199,6 +207,7 @@ async function handleSummary(conversation, res) {
       summary,
       timing: {
         totalMs: Date.now() - startedAt,
+        geminiMs: 0,
         mistralMs: 0,
         groqMs: 0,
         providerMs: 0,
@@ -215,6 +224,8 @@ async function handleSummary(conversation, res) {
         mistralPasses: 0,
         expansion,
         fallback: createFallbackMetadata(),
+        modelsTried: [],
+        mistralModelsTried: [],
         inputChars,
         outputChars: summary.length,
         usage: createZeroUsage()
@@ -223,12 +234,14 @@ async function handleSummary(conversation, res) {
   }
 
   try {
-    const modelSelection = getMistralModelSelection(conversation);
+    const geminiApiKey = process.env.GEMINI_API_KEY;
+    const modelSelection = getGeneratedModelSelection(conversation, Boolean(geminiApiKey));
     logModelSelection(modelSelection);
     const providerResult = await createSummaryWithFallback({
       conversation,
       profile: summaryProfile,
       modelSelection,
+      geminiApiKey,
       mistralApiKey: process.env.MISTRAL_API_KEY,
       groqApiKey: process.env.GROQ_API_KEY
     });
@@ -237,6 +250,7 @@ async function handleSummary(conversation, res) {
       summary: providerResult.summary,
       timing: {
         totalMs: Date.now() - startedAt,
+        geminiMs: providerResult.geminiMs,
         mistralMs: providerResult.mistralMs,
         groqMs: providerResult.groqMs,
         providerMs: providerResult.providerMs,
@@ -248,13 +262,15 @@ async function handleSummary(conversation, res) {
         ...getModelSelectionTiming(modelSelection),
         model: providerResult.model,
         modelReason: providerResult.modelReason,
+        modelsTried: providerResult.modelsTried,
         mistralModelsTried: providerResult.mistralModelsTried,
         profile: summaryProfile.id,
         maxTokens: summaryProfile.maxTokens,
         targetWords: summaryProfile.targetWords,
         minWords: summaryProfile.minWords,
         summaryWordCount: providerResult.summaryWordCount,
-        mistralPasses: providerResult.providerPasses,
+        geminiPasses: providerResult.provider === SUMMARY_PROVIDERS.gemini.id ? providerResult.providerPasses : 0,
+        mistralPasses: providerResult.provider === SUMMARY_PROVIDERS.mistral.id ? providerResult.providerPasses : 0,
         expansion: providerResult.expansion,
         finishReason: providerResult.finishReason,
         qualityFloorMet: providerResult.qualityFloorMet,
@@ -288,20 +304,72 @@ module.exports.__test = {
   stripContextCarryFooter,
   countWords,
   getSummaryProfile,
+  getGeneratedModelSelection,
   getMistralModelSelection,
   getContextCarryTemplate,
   getSummarySystemPrompt
 };
 
-async function createSummaryWithFallback({ conversation, profile, modelSelection, mistralApiKey, groqApiKey }) {
+async function createSummaryWithFallback({
+  conversation,
+  profile,
+  modelSelection,
+  geminiApiKey,
+  mistralApiKey,
+  groqApiKey
+}) {
   const initialMessages = getInitialSummaryMessages(conversation, profile);
+  const modelsTried = [];
+  const mistralModelsTried = [];
+  let geminiMs = 0;
   let mistralMs = 0;
   let mistralFailure = null;
-  const mistralModelsTried = [];
+  let lastProviderFailure = null;
+
+  if (geminiApiKey) {
+    const geminiStartedAt = Date.now();
+    modelsTried.push(GEMINI_PRIMARY_MODEL);
+
+    try {
+      const result = await createSummaryWithProvider({
+        provider: SUMMARY_PROVIDERS.gemini,
+        apiKey: geminiApiKey,
+        profile,
+        model: GEMINI_PRIMARY_MODEL,
+        initialMessages
+      });
+      const modelReason = `${GEMINI_PRIMARY_MODEL} served as the primary model`;
+
+      console.info("[Context Generator] Summary served:", {
+        provider: SUMMARY_PROVIDERS.gemini.id,
+        model: GEMINI_PRIMARY_MODEL,
+        reason: modelReason
+      });
+
+      return {
+        ...result,
+        modelReason,
+        modelsTried,
+        mistralModelsTried,
+        geminiMs: result.providerMs,
+        mistralMs: 0,
+        groqMs: 0,
+        fallback: createFallbackMetadata()
+      };
+    } catch (error) {
+      geminiMs = Date.now() - geminiStartedAt;
+      lastProviderFailure = error;
+      console.error(
+        `[Context Generator] ${GEMINI_PRIMARY_MODEL} failed; falling back to ${MISTRAL_PRIMARY_MODEL}:`,
+        getProviderFailureLog(error)
+      );
+    }
+  }
 
   if (mistralApiKey) {
     for (const [index, model] of MISTRAL_MODEL_CHAIN.entries()) {
       const mistralStartedAt = Date.now();
+      modelsTried.push(model);
       mistralModelsTried.push(model);
 
       try {
@@ -312,7 +380,7 @@ async function createSummaryWithFallback({ conversation, profile, modelSelection
           model,
           initialMessages
         });
-        const failedModels = mistralModelsTried.slice(0, -1);
+        const failedModels = modelsTried.slice(0, -1);
         const modelReason = failedModels.length
           ? `${failedModels.join(" -> ")} failed; fell back to ${model}`
           : `${model} served as the first model in the fixed Mistral chain`;
@@ -326,14 +394,25 @@ async function createSummaryWithFallback({ conversation, profile, modelSelection
         return {
           ...result,
           modelReason,
+          modelsTried,
           mistralModelsTried,
+          geminiMs,
           mistralMs: mistralMs + result.providerMs,
           groqMs: 0,
-          fallback: createFallbackMetadata()
+          fallback: failedModels.length
+            ? createFallbackMetadata({
+                attempted: true,
+                used: true,
+                servedBy: SUMMARY_PROVIDERS.mistral.id,
+                model,
+                reason: getProviderFailureReason(lastProviderFailure)
+              })
+            : createFallbackMetadata()
         };
       } catch (error) {
         mistralMs += Date.now() - mistralStartedAt;
         mistralFailure = error;
+        lastProviderFailure = error;
         const nextModel = MISTRAL_MODEL_CHAIN[index + 1];
         const providerRateLimited = error?.providerStatus === 429;
         console.error(
@@ -353,21 +432,23 @@ async function createSummaryWithFallback({ conversation, profile, modelSelection
       "MISTRAL_API_KEY is not configured",
       500
     );
+    lastProviderFailure = mistralFailure;
   }
 
   if (!groqApiKey) {
     throw createHttpError(
-      getProviderFailureStatus(mistralFailure),
-      mistralApiKey ? "Failed to summarize conversation" : "MISTRAL_API_KEY is not configured"
+      getProviderFailureStatus(lastProviderFailure),
+      geminiApiKey || mistralApiKey ? "Failed to summarize conversation" : "No summary provider API key is configured"
     );
   }
 
   const fallback = createFallbackMetadata({
     attempted: true,
-    reason: getProviderFailureReason(mistralFailure),
+    reason: getProviderFailureReason(lastProviderFailure),
     model: GROQ_FALLBACK_MODEL
   });
 
+  modelsTried.push(GROQ_FALLBACK_MODEL);
   try {
     const result = await createSummaryWithProvider({
       provider: SUMMARY_PROVIDERS.groq,
@@ -379,8 +460,10 @@ async function createSummaryWithFallback({ conversation, profile, modelSelection
 
     return {
       ...result,
-      modelReason: `${MISTRAL_MODEL_CHAIN.join(" -> ")} failed; fell back to ${GROQ_FALLBACK_MODEL}`,
+      modelReason: `${modelsTried.slice(0, -1).join(" -> ")} failed; fell back to ${GROQ_FALLBACK_MODEL}`,
+      modelsTried,
       mistralModelsTried,
+      geminiMs,
       mistralMs,
       groqMs: result.providerMs,
       fallback: {
@@ -418,9 +501,9 @@ async function createSummaryWithProvider({ provider, apiKey, profile, model, ini
   }
 
   const data = await readResponseJson(initialResponse, provider);
-  const finishReason = data.choices?.[0]?.finish_reason || null;
-  const initialUsage = normalizeProviderUsage(data.usage);
-  const rawSummary = String(data.choices?.[0]?.message?.content || "");
+  const finishReason = getProviderFinishReason(provider, data);
+  const initialUsage = normalizeProviderUsage(provider, data);
+  const rawSummary = getProviderSummaryText(provider, data);
 
   if (!rawSummary.trim()) {
     throw createProviderError(provider, `${provider.label} returned an empty summary`, 502);
@@ -463,12 +546,16 @@ async function createSummaryWithProvider({ provider, apiKey, profile, model, ini
 }
 
 function requestProviderSummary(provider, apiKey, messages, profile, model, options = {}) {
-  const body = {
-    model,
-    temperature: 0.1,
-    max_tokens: profile.maxTokens,
-    messages,
+  const body = getProviderRequestBody(provider, messages, profile, model);
+  const headers = {
+    "Content-Type": "application/json"
   };
+
+  if (provider.id === SUMMARY_PROVIDERS.gemini.id) {
+    headers["x-goog-api-key"] = apiKey;
+  } else {
+    headers.Authorization = `Bearer ${apiKey}`;
+  }
 
   if (provider.id === SUMMARY_PROVIDERS.mistral.id) {
     if (options.promptCacheKey) body.prompt_cache_key = options.promptCacheKey;
@@ -476,12 +563,62 @@ function requestProviderSummary(provider, apiKey, messages, profile, model, opti
 
   return fetchWithRetry(provider.url, {
     method: "POST",
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify(body),
+    headers,
+    body: JSON.stringify(body)
   }, getProviderRequestBudgetMs(model));
+}
+
+function getProviderRequestBody(provider, messages, profile, model) {
+  if (provider.id === SUMMARY_PROVIDERS.gemini.id) {
+    const systemMessage = messages.find((message) => message.role === "system");
+    const userMessage = messages.find((message) => message.role === "user");
+
+    // Gemini 3.x is tuned for its default sampling values. Keep the same trust
+    // boundary as the chat-completions providers without sending temperature.
+    return {
+      systemInstruction: {
+        parts: [{ text: String(systemMessage?.content || "") }]
+      },
+      contents: [{
+        role: "user",
+        parts: [{ text: String(userMessage?.content || "") }]
+      }],
+      generationConfig: {
+        maxOutputTokens: profile.maxTokens,
+        thinkingConfig: {
+          thinkingLevel: "MEDIUM"
+        }
+      },
+      store: false
+    };
+  }
+
+  return {
+    model,
+    temperature: 0.1,
+    max_tokens: profile.maxTokens,
+    messages
+  };
+}
+
+function getProviderFinishReason(provider, data) {
+  if (provider.id === SUMMARY_PROVIDERS.gemini.id) {
+    return data.candidates?.[0]?.finishReason || null;
+  }
+  return data.choices?.[0]?.finish_reason || null;
+}
+
+function getProviderSummaryText(provider, data) {
+  if (provider.id === SUMMARY_PROVIDERS.gemini.id) {
+    const parts = Array.isArray(data.candidates?.[0]?.content?.parts)
+      ? data.candidates[0].content.parts
+      : [];
+    return parts
+      .filter((part) => part?.thought !== true)
+      .map((part) => typeof part?.text === "string" ? part.text : "")
+      .join("");
+  }
+  return String(data.choices?.[0]?.message?.content || "");
 }
 
 function getInitialSummaryMessages(conversation, profile) {
@@ -576,6 +713,19 @@ function getMistralModelSelection(conversation) {
   };
 }
 
+function getGeneratedModelSelection(conversation, geminiConfigured) {
+  const inputChars = String(conversation || "").length;
+  if (!geminiConfigured) return getMistralModelSelection(conversation);
+
+  return {
+    model: GEMINI_PRIMARY_MODEL,
+    reason: `generated summaries start with ${GEMINI_PRIMARY_MODEL} before the preserved Mistral and Groq fallbacks`,
+    inputChars,
+    thresholdChars: null,
+    override: false
+  };
+}
+
 function getModelSelectionTiming(selection) {
   return {
     model: selection.model,
@@ -661,7 +811,21 @@ function createZeroUsage() {
   };
 }
 
-function normalizeProviderUsage(usage) {
+function normalizeProviderUsage(provider, data) {
+  if (provider.id === SUMMARY_PROVIDERS.gemini.id) {
+    const usage = data?.usageMetadata;
+    if (!usage || typeof usage !== "object") return null;
+    const outputTokens = addTokenCounts(usage.candidatesTokenCount, usage.thoughtsTokenCount);
+
+    return {
+      promptTokens: normalizeTokenCount(usage.promptTokenCount),
+      completionTokens: outputTokens,
+      totalTokens: normalizeTokenCount(usage.totalTokenCount),
+      cachedTokens: normalizeTokenCount(usage.cachedContentTokenCount)
+    };
+  }
+
+  const usage = data?.usage;
   if (!usage || typeof usage !== "object") return null;
 
   return {
@@ -670,6 +834,11 @@ function normalizeProviderUsage(usage) {
     totalTokens: normalizeTokenCount(usage.total_tokens),
     cachedTokens: normalizeTokenCount(usage.prompt_tokens_details?.cached_tokens)
   };
+}
+
+function addTokenCounts(...values) {
+  const counts = values.filter((value) => Number.isFinite(value));
+  return counts.length ? counts.reduce((total, value) => total + value, 0) : null;
 }
 
 function normalizeTokenCount(value) {
@@ -755,7 +924,7 @@ async function fetchWithRetry(url, options, requestBudgetMs) {
   let lastResponse = null;
   const deadline = Date.now() + requestBudgetMs;
 
-  for (let attempt = 1; attempt <= MISTRAL_MAX_ATTEMPTS; attempt += 1) {
+  for (let attempt = 1; attempt <= PROVIDER_MAX_ATTEMPTS; attempt += 1) {
     const remainingMs = deadline - Date.now();
     if (remainingMs <= 0) break;
 
@@ -764,18 +933,18 @@ async function fetchWithRetry(url, options, requestBudgetMs) {
     try {
       const response = await fetch(url, { ...options, signal: controller.signal });
       lastResponse = response;
-      if (response.ok || !isRetryableProviderStatus(response.status) || attempt === MISTRAL_MAX_ATTEMPTS) {
+      if (response.ok || !isRetryableProviderStatus(response.status) || attempt === PROVIDER_MAX_ATTEMPTS) {
         return response;
       }
     } catch (error) {
       lastError = error;
       if (error?.name === "AbortError") throw error;
-      if (attempt === MISTRAL_MAX_ATTEMPTS) throw error;
+      if (attempt === PROVIDER_MAX_ATTEMPTS) throw error;
     } finally {
       clearTimeout(timeout);
     }
 
-    const retryDelayMs = Math.min(MISTRAL_RETRY_INTERVAL_MS * attempt, Math.max(0, deadline - Date.now()));
+    const retryDelayMs = Math.min(PROVIDER_RETRY_INTERVAL_MS * attempt, Math.max(0, deadline - Date.now()));
     if (retryDelayMs <= 0) break;
     await delay(retryDelayMs);
   }

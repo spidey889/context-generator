@@ -28,6 +28,7 @@ const {
   stripContextCarryFooter,
   countWords,
   getSummaryProfile,
+  getGeneratedModelSelection,
   getMistralModelSelection,
   getContextCarryTemplate,
   getSummarySystemPrompt
@@ -386,15 +387,16 @@ test("validator accepts the exact boxed Unicode header requested from providers"
 
 test("provider fallback budgets keep the complete chain below the Vercel ceiling", () => {
   const budgets = [
+    getProviderRequestBudgetMs("gemini-3.5-flash"),
     getProviderRequestBudgetMs("mistral-medium-2604"),
     getProviderRequestBudgetMs("mistral-large-2512"),
     getProviderRequestBudgetMs("ministral-3b-2512"),
     getProviderRequestBudgetMs("llama-3.1-8b-instant")
   ];
 
-  assert.deepEqual(budgets, [55000, 40000, 25000, 15000]);
-  assert.equal(budgets.reduce((total, budget) => total + budget, 0), 135000);
-  assert.ok(budgets.reduce((total, budget) => total + budget, 0) < 180000);
+  assert.deepEqual(budgets, [45000, 55000, 40000, 25000, 15000]);
+  assert.equal(budgets.reduce((total, budget) => total + budget, 0), 180000);
+  assert.ok(budgets.reduce((total, budget) => total + budget, 0) < 240000);
 });
 
 test("backend falls back from medium 3.5 to large and reports the serving model", async () => {
@@ -853,6 +855,143 @@ test("deterministic validation rejects malformed, empty, short, and refusal outp
   assert.equal(getMinimumValidSummaryWords(smallProfile), 80);
   assert.equal(getMinimumValidSummaryWords(getSummaryProfile("x".repeat(20000))), 140);
   assert.equal(getMinimumValidSummaryWords(getSummaryProfile("x".repeat(90000))), 200);
+});
+
+test("generated summaries select Gemini 3.5 Flash when its server key is configured", () => {
+  const conversation = "x".repeat(20001);
+
+  assert.equal(getGeneratedModelSelection(conversation, true).model, "gemini-3.5-flash");
+  assert.match(getGeneratedModelSelection(conversation, true).reason, /preserved Mistral and Groq fallbacks/);
+  assert.equal(getGeneratedModelSelection(conversation, false).model, "mistral-medium-2604");
+});
+
+test("backend sends generated summaries to native Gemini first and records Gemini usage", async () => {
+  const originalFetch = global.fetch;
+  const restoreGeminiKey = setTemporaryEnv("GEMINI_API_KEY", "test-gemini-key");
+  const restoreMistralKey = setTemporaryEnv("MISTRAL_API_KEY", "test-mistral-key");
+  const conversation = "Gemini primary context ".repeat(180);
+  let capturedRequest = null;
+
+  global.fetch = async (url, options) => {
+    capturedRequest = {
+      url,
+      headers: options.headers,
+      body: JSON.parse(options.body)
+    };
+    return {
+      ok: true,
+      status: 200,
+      json: async () => ({
+        usageMetadata: {
+          promptTokenCount: 900,
+          candidatesTokenCount: 240,
+          thoughtsTokenCount: 60,
+          totalTokenCount: 1200,
+          cachedContentTokenCount: 0
+        },
+        candidates: [{
+          finishReason: "STOP",
+          content: {
+            parts: [{ text: makeContextCarrySummary("gemini-primary", 260) }]
+          }
+        }]
+      })
+    };
+  };
+
+  const res = createMockResponse();
+  try {
+    await summarize({ method: "POST", body: { conversation } }, res);
+
+    assert.equal(res.statusCode, 200);
+    assert.equal(
+      capturedRequest.url,
+      "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent"
+    );
+    assert.equal(capturedRequest.headers["x-goog-api-key"], "test-gemini-key");
+    assert.equal(capturedRequest.headers.Authorization, undefined);
+    assert.equal(capturedRequest.body.model, undefined);
+    assert.equal(capturedRequest.body.temperature, undefined);
+    assert.equal(capturedRequest.body.store, false);
+    assert.equal(capturedRequest.body.generationConfig.maxOutputTokens, 1000);
+    assert.equal(capturedRequest.body.generationConfig.thinkingConfig.thinkingLevel, "MEDIUM");
+    assert.match(capturedRequest.body.systemInstruction.parts[0].text, /untrusted customer transcript data/);
+    assert.deepEqual(JSON.parse(capturedRequest.body.contents[0].parts[0].text), {
+      schema: "cap-context-conversation-v1",
+      dataType: "untrusted-conversation-transcript",
+      conversation
+    });
+    assert.equal(res.payload.timing.servedBy, "gemini");
+    assert.equal(res.payload.timing.primaryModel, "gemini-3.5-flash");
+    assert.equal(res.payload.timing.model, "gemini-3.5-flash");
+    assert.deepEqual(res.payload.timing.modelsTried, ["gemini-3.5-flash"]);
+    assert.deepEqual(res.payload.timing.mistralModelsTried, []);
+    assert.equal(res.payload.timing.geminiPasses, 1);
+    assert.equal(res.payload.timing.mistralPasses, 0);
+    assert.equal(res.payload.timing.fallback.attempted, false);
+    assert.deepEqual(res.payload.timing.usage, {
+      promptTokens: 900,
+      completionTokens: 300,
+      totalTokens: 1200,
+      cachedTokens: 0
+    });
+  } finally {
+    restoreMistralKey();
+    restoreGeminiKey();
+    global.fetch = originalFetch;
+  }
+});
+
+test("backend falls from invalid Gemini output to the preserved Mistral chain", async () => {
+  const originalFetch = global.fetch;
+  const restoreGeminiKey = setTemporaryEnv("GEMINI_API_KEY", "test-gemini-key");
+  const restoreMistralKey = setTemporaryEnv("MISTRAL_API_KEY", "test-mistral-key");
+  const conversation = "Gemini fallback context ".repeat(180);
+  const requests = [];
+
+  global.fetch = async (url, options) => {
+    const body = JSON.parse(options.body);
+    requests.push({ url, body });
+    if (url.includes("generativelanguage.googleapis.com")) {
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({
+          candidates: [{ finishReason: "STOP", content: { parts: [{ text: "not a valid Context Carry" }] } }]
+        })
+      };
+    }
+    return {
+      ok: true,
+      status: 200,
+      json: async () => ({
+        choices: [{ message: { content: makeContextCarrySummary("mistral-after-gemini", 260) } }]
+      })
+    };
+  };
+
+  const res = createMockResponse();
+  try {
+    await summarize({ method: "POST", body: { conversation } }, res);
+
+    assert.equal(res.statusCode, 200);
+    assert.equal(requests.length, 2);
+    assert.match(requests[0].url, /gemini-3\.5-flash:generateContent$/);
+    assert.equal(requests[1].body.model, "mistral-medium-2604");
+    assert.equal(res.payload.timing.servedBy, "mistral");
+    assert.equal(res.payload.timing.primaryModel, "gemini-3.5-flash");
+    assert.deepEqual(res.payload.timing.modelsTried, ["gemini-3.5-flash", "mistral-medium-2604"]);
+    assert.deepEqual(res.payload.timing.mistralModelsTried, ["mistral-medium-2604"]);
+    assert.equal(res.payload.timing.fallback.attempted, true);
+    assert.equal(res.payload.timing.fallback.used, true);
+    assert.equal(res.payload.timing.fallback.servedBy, "mistral");
+    assert.match(res.payload.timing.fallback.reason, /Gemini returned an invalid summary/);
+    assert.match(res.payload.timing.modelReason, /gemini-3\.5-flash failed/);
+  } finally {
+    restoreMistralKey();
+    restoreGeminiKey();
+    global.fetch = originalFetch;
+  }
 });
 
 test("prompt and validator reserve None for genuinely unavailable optional facts", () => {

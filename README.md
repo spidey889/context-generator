@@ -49,11 +49,12 @@ extension/
 
 ## Backend
 
-The extension calls the Vercel API endpoint in `api/summarize.js`. Tiny chats are carried locally by the backend without a provider call. Generated summaries use a fixed Mistral model chain and can fall back to Groq. Provider output must pass deterministic Context Carry validation before it is returned to the extension.
+The extension calls the Vercel API endpoint in `api/summarize.js`. Tiny chats are carried locally by the backend without a provider call. Generated summaries use Gemini 3.5 Flash first, then the fixed Mistral model chain and optional Groq fallback. Provider output must pass deterministic Context Carry validation before it is returned to the extension.
 
 For deployment, configure:
 
 ```text
+GEMINI_API_KEY
 MISTRAL_API_KEY
 ```
 
@@ -102,7 +103,7 @@ The test suite covers the core pieces most likely to regress:
 
 ## Privacy Notes
 
-Opening or cancelling the picker does not capture or upload chat text. Conversation text is sent only after you select a destination, and generated summaries may be processed by Mistral or the configured Groq fallback. The extension does not send messages on your behalf, click the destination send button, or submit the pasted summary automatically. See [PRIVACY.md](PRIVACY.md) for details.
+Opening or cancelling the picker does not capture or upload chat text. Conversation text is sent only after you select a destination, and generated summaries may be processed by Gemini, Mistral, or the configured Groq fallback. The extension does not send messages on your behalf, click the destination send button, or submit the pasted summary automatically. See [PRIVACY.md](PRIVACY.md) for details.
 
 ## Contributing
 
