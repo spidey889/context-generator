@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-07-15-handoff-progress";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-07-15-handoff-progress-motion";
   const BUBBLE_ID = "context-generator-bubble";
   const OVERLAY_ID = "context-generator-overlay";
   const ONBOARDING_ID = "context-generator-onboarding";
@@ -3955,11 +3955,13 @@
         "position:relative",
         "z-index:1",
         "font-size:23px",
-        "font-weight:700",
+        "font-family:Georgia,'Times New Roman',serif",
+        "font-weight:500",
         "line-height:1.15",
         "text-align:center",
         "color:#f7f5ff",
-        "letter-spacing:-0.02em"
+        "letter-spacing:-0.025em",
+        "text-rendering:geometricPrecision"
       ].join(";");
 
       const progress = document.createElement("div");
@@ -4015,6 +4017,7 @@
             color:rgba(255,255,255,0.34);
             text-align:center;
           }
+          #context-generator-handoff-progress .context-generator-handoff-stage:not(:last-child)::before,
           #context-generator-handoff-progress .context-generator-handoff-stage:not(:last-child)::after{
             content:"";
             position:absolute;
@@ -4023,11 +4026,20 @@
             left:calc(50% + 18px);
             right:calc(-50% + 18px);
             height:1px;
+          }
+          #context-generator-handoff-progress .context-generator-handoff-stage:not(:last-child)::before{
             background:rgba(255,255,255,0.11);
-            transition:background 160ms ease;
+          }
+          /* Completion starts the fill, but its duration never gates the transfer pipeline. */
+          #context-generator-handoff-progress .context-generator-handoff-stage:not(:last-child)::after{
+            background:linear-gradient(90deg,rgba(145,116,255,0.42),rgba(190,173,255,0.82));
+            box-shadow:4px 0 9px rgba(150,121,255,0.28);
+            transform:scaleX(0);
+            transform-origin:left center;
+            transition:transform 1.35s cubic-bezier(0.22,0.72,0.22,1);
           }
           #context-generator-handoff-progress .context-generator-handoff-stage[data-state="complete"]::after{
-            background:rgba(170,148,255,0.48);
+            transform:scaleX(1);
           }
           #context-generator-handoff-progress .context-generator-handoff-stage-marker{
             position:relative;
@@ -4076,6 +4088,7 @@
           }
           @media (prefers-reduced-motion: reduce){
             #context-generator-handoff-progress .context-generator-handoff-stage-marker{animation:none!important}
+            #context-generator-handoff-progress .context-generator-handoff-stage::after{transition:none!important}
           }
         `;
         document.head.appendChild(styleSheet);
