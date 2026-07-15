@@ -33,7 +33,7 @@ test("handoff uses the sheet serif only for its live headline", () => {
 });
 
 test("handoff connectors accept live fractional progress without gating pipeline state", () => {
-  assert.match(source, /handoff-stage:not\(:last-child\)::before[\s\S]*background:rgba\(255,255,255,0\.11\)/);
+  assert.match(source, /handoff-stage:not\(:last-child\)::before[\s\S]*background:rgba\(32,29,27,0\.14\)/);
   assert.match(source, /handoff-stage:not\(:last-child\)::after[\s\S]*transform:scaleX\(var\(--context-generator-stage-progress,0\)\)[\s\S]*transition:transform var\(--context-generator-stage-progress-duration,1\.35s\)/);
   assert.match(source, /reportHandoffCaptureProgress\(afterScrollState\)/);
   assert.match(source, /line follows live display progress; its motion never gates the transfer pipeline/);

@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-07-15-handoff-live-progress";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-07-15-handoff-wispr-palette";
   const BUBBLE_ID = "context-generator-bubble";
   const OVERLAY_ID = "context-generator-overlay";
   const ONBOARDING_ID = "context-generator-onboarding";
@@ -3898,10 +3898,10 @@
         "box-sizing:border-box",
         "padding:22px 28px",
         "border-radius:24px",
-        "border:1px solid rgba(232,230,240,0.13)",
-        "background:#050505",
-        "color:#b9b9b9",
-        "box-shadow:0 28px 82px rgba(0,0,0,0.5),0 8px 24px rgba(0,0,0,0.28),0 0 0 1px rgba(0,0,0,0.64),inset 0 1px 0 rgba(255,255,255,0.075),inset 0 -1px 0 rgba(255,255,255,0.018)",
+        "border:1px solid rgba(29,26,24,0.22)",
+        "background:#FFFFEB",
+        "color:#625d58",
+        "box-shadow:0 28px 82px rgba(33,27,19,0.24),0 8px 24px rgba(33,27,19,0.14),0 0 0 1px rgba(255,255,255,0.72),inset 0 1px 0 rgba(255,255,255,0.78)",
         `transform:${HANDOFF_OVERLAY_CLOSED_TRANSFORM}`,
         "opacity:0",
         "flex-direction:column",
@@ -3920,8 +3920,8 @@
         "position:absolute",
         "inset:-1px",
         "pointer-events:none",
-        "background:linear-gradient(180deg,rgba(255,255,255,0.035),transparent 34%)",
-        "opacity:0.8"
+        "background:linear-gradient(180deg,rgba(255,255,255,0.48),transparent 34%)",
+        "opacity:0.7"
       ].join(";");
 
       const brand = document.createElement("div");
@@ -3936,7 +3936,7 @@
         "align-items:center",
         "justify-content:flex-start",
         "gap:7px",
-        "color:rgba(245,243,250,0.66)",
+        "color:rgba(32,29,27,0.62)",
         "font-size:12.5px",
         "font-weight:620",
         "letter-spacing:0"
@@ -3953,7 +3953,7 @@
         "width:24px",
         "height:24px",
         "object-fit:contain",
-        "filter:drop-shadow(0 3px 9px rgba(111,76,255,0.22))"
+        "filter:drop-shadow(0 3px 9px rgba(158,105,188,0.2))"
       ].join(";");
 
       const brandText = document.createElement("span");
@@ -3979,7 +3979,7 @@
         "line-height:1.08",
         "text-align:center",
         "text-wrap:balance",
-        "color:#f2f0f6",
+        "color:#171514",
         "letter-spacing:-0.035em",
         "text-rendering:geometricPrecision",
         "will-change:transform,opacity"
@@ -4036,7 +4036,7 @@
             align-items:center;
             gap:8px;
             padding:0 5px;
-            color:rgba(239,237,244,0.46);
+            color:rgba(32,29,27,0.48);
             text-align:center;
           }
           #context-generator-handoff-progress .context-generator-handoff-stage:not(:last-child)::before,
@@ -4050,12 +4050,12 @@
             height:1px;
           }
           #context-generator-handoff-progress .context-generator-handoff-stage:not(:last-child)::before{
-            background:rgba(255,255,255,0.11);
+            background:rgba(32,29,27,0.14);
           }
           /* The line follows live display progress; its motion never gates the transfer pipeline. */
           #context-generator-handoff-progress .context-generator-handoff-stage:not(:last-child)::after{
-            background:linear-gradient(90deg,rgba(139,112,230,0.58),rgba(184,165,247,0.82));
-            box-shadow:3px 0 8px rgba(149,123,235,0.24);
+            background:linear-gradient(90deg,#DDB5F5,#F0D7FF);
+            box-shadow:3px 0 8px rgba(195,145,222,0.34);
             transform:scaleX(var(--context-generator-stage-progress,0));
             transform-origin:left center;
             transition:transform var(--context-generator-stage-progress-duration,1.35s) var(--context-generator-stage-progress-easing,cubic-bezier(0.22,0.72,0.22,1));
@@ -4069,10 +4069,10 @@
             align-items:center;
             justify-content:center;
             box-sizing:border-box;
-            border:1px solid rgba(255,255,255,0.15);
+            border:1px solid rgba(29,26,24,0.18);
             border-radius:999px;
-            background:rgba(255,255,255,0.025);
-            color:rgba(245,243,249,0.44);
+            background:rgba(255,255,255,0.42);
+            color:rgba(32,29,27,0.48);
             font-size:10.5px;
             font-weight:700;
             transition:background 180ms ease,border-color 180ms ease,color 180ms ease,box-shadow 180ms ease;
@@ -4085,25 +4085,25 @@
             transition:color 180ms ease,font-weight 180ms ease;
           }
           #context-generator-handoff-progress .context-generator-handoff-stage[data-state="active"]{
-            color:#f4f2f7;
+            color:#171514;
           }
           #context-generator-handoff-progress .context-generator-handoff-stage[data-state="active"] .context-generator-handoff-stage-marker{
-            border-color:rgba(193,177,248,0.78);
-            background:#7459d6;
-            color:#fff;
-            box-shadow:0 0 0 3px rgba(126,95,224,0.13),0 5px 14px rgba(65,44,139,0.24),inset 0 1px 0 rgba(255,255,255,0.2);
+            border-color:rgba(29,25,30,0.32);
+            background:#F0D7FF;
+            color:#211d23;
+            box-shadow:0 0 0 3px rgba(240,215,255,0.55),0 5px 14px rgba(109,73,126,0.15),inset 0 1px 0 rgba(255,255,255,0.55);
           }
           #context-generator-handoff-progress .context-generator-handoff-stage[data-state="active"] .context-generator-handoff-stage-label{
-            color:#fff;
+            color:#171514;
             font-weight:680;
           }
           #context-generator-handoff-progress .context-generator-handoff-stage[data-state="complete"]{
-            color:rgba(219,211,242,0.72);
+            color:rgba(66,49,74,0.64);
           }
           #context-generator-handoff-progress .context-generator-handoff-stage[data-state="complete"] .context-generator-handoff-stage-marker{
-            border-color:rgba(174,153,239,0.38);
-            background:rgba(119,91,211,0.16);
-            color:#d8cff5;
+            border-color:rgba(92,61,108,0.18);
+            background:rgba(240,215,255,0.62);
+            color:#60456d;
           }
           @media (prefers-reduced-motion: reduce){
             #context-generator-text{animation:none!important}
@@ -4127,10 +4127,10 @@
         "padding:0 8px",
         "box-sizing:border-box",
         "border-radius:999px",
-        "border:1px solid rgba(255,255,255,0.075)",
-        "background:rgba(255,255,255,0.032)",
-        "box-shadow:inset 0 1px 0 rgba(255,255,255,0.035)",
-        "color:rgba(242,240,246,0.46)",
+        "border:1px solid rgba(29,26,24,0.12)",
+        "background:rgba(255,255,255,0.4)",
+        "box-shadow:inset 0 1px 0 rgba(255,255,255,0.7)",
+        "color:rgba(32,29,27,0.5)",
         "font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif",
         "font-size:10.5px",
         "font-weight:620",
