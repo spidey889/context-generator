@@ -1,7 +1,8 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-07-15-handoff-amethyst";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-07-15-handoff-head-scrim";
   const BUBBLE_ID = "context-generator-bubble";
   const OVERLAY_ID = "context-generator-overlay";
+  const HANDOFF_SCRIM_ID = "context-generator-handoff-scrim";
   const ONBOARDING_ID = "context-generator-onboarding";
   const ONBOARDING_STYLE_ID = "context-generator-onboarding-styles";
   const CLAUDE_LIMIT_NUDGE_ID = "context-generator-claude-limit-nudge";
@@ -409,6 +410,7 @@
     [
       BUBBLE_ID,
       OVERLAY_ID,
+      HANDOFF_SCRIM_ID,
       ONBOARDING_ID,
       ONBOARDING_STYLE_ID,
       CLAUDE_LIMIT_NUDGE_ID,
@@ -3881,6 +3883,24 @@
   }
 
   function ensureFloatingOverlay() {
+    if (!document.getElementById(HANDOFF_SCRIM_ID)) {
+      const scrim = document.createElement("div");
+      scrim.id = HANDOFF_SCRIM_ID;
+      scrim.dataset.contextGeneratorOwned = "true";
+      scrim.setAttribute("aria-hidden", "true");
+      scrim.style.cssText = [
+        "display:none",
+        "position:fixed",
+        "z-index:2147483646",
+        "inset:0",
+        "pointer-events:none",
+        "background:rgba(0,0,0,0.09)",
+        "opacity:0",
+        "transition:opacity 180ms cubic-bezier(0.16,1,0.3,1)"
+      ].join(";");
+      document.body.appendChild(scrim);
+    }
+
     if (!document.getElementById(OVERLAY_ID)) {
       const overlay = document.createElement("div");
       overlay.id = OVERLAY_ID;
@@ -4006,6 +4026,22 @@
         stageElement.dataset.state = "upcoming";
         stageElement.setAttribute("role", "listitem");
 
+        if (index < HANDOFF_STAGES.length - 1) {
+          const connector = document.createElement("span");
+          connector.className = "context-generator-handoff-stage-connector";
+          connector.setAttribute("aria-hidden", "true");
+
+          const connectorFill = document.createElement("span");
+          connectorFill.className = "context-generator-handoff-stage-connector-fill";
+
+          const progressHead = document.createElement("span");
+          progressHead.className = "context-generator-handoff-stage-progress-head";
+
+          connector.appendChild(connectorFill);
+          connector.appendChild(progressHead);
+          stageElement.appendChild(connector);
+        }
+
         const marker = document.createElement("span");
         marker.className = "context-generator-handoff-stage-marker";
         marker.textContent = String(index + 1);
@@ -4039,26 +4075,46 @@
             color:rgba(239,237,244,0.46);
             text-align:center;
           }
-          #context-generator-handoff-progress .context-generator-handoff-stage:not(:last-child)::before,
-          #context-generator-handoff-progress .context-generator-handoff-stage:not(:last-child)::after{
-            content:"";
+          #context-generator-handoff-progress .context-generator-handoff-stage-connector{
             position:absolute;
             z-index:0;
-            top:12px;
+            top:11px;
             left:calc(50% + 17px);
             right:calc(-50% + 17px);
-            height:1px;
-          }
-          #context-generator-handoff-progress .context-generator-handoff-stage:not(:last-child)::before{
+            height:2px;
+            overflow:visible;
+            border-radius:999px;
             background:rgba(255,255,255,0.11);
           }
           /* The line follows live display progress; its motion never gates the transfer pipeline. */
-          #context-generator-handoff-progress .context-generator-handoff-stage:not(:last-child)::after{
+          #context-generator-handoff-progress .context-generator-handoff-stage-connector-fill{
+            position:absolute;
+            inset:0 auto 0 0;
+            width:var(--context-generator-stage-progress-position,0%);
+            border-radius:inherit;
             background:linear-gradient(90deg,#6F579D,#9A7ADC);
-            box-shadow:3px 0 8px rgba(141,108,207,0.32);
-            transform:scaleX(var(--context-generator-stage-progress,0));
-            transform-origin:left center;
-            transition:transform var(--context-generator-stage-progress-duration,1.35s) var(--context-generator-stage-progress-easing,cubic-bezier(0.22,0.72,0.22,1));
+            box-shadow:2px 0 7px rgba(141,108,207,0.3);
+            transition:width var(--context-generator-stage-progress-duration,1.35s) var(--context-generator-stage-progress-easing,cubic-bezier(0.22,0.72,0.22,1));
+          }
+          #context-generator-handoff-progress .context-generator-handoff-stage-progress-head{
+            position:absolute;
+            z-index:1;
+            top:50%;
+            left:var(--context-generator-stage-progress-position,0%);
+            width:4px;
+            height:4px;
+            border-radius:999px;
+            background:#A98BE2;
+            box-shadow:0 0 0 2px rgba(141,108,207,0.14),0 0 8px rgba(169,139,226,0.72);
+            opacity:0;
+            transform:translate(-50%,-50%);
+            transition:left var(--context-generator-stage-progress-duration,1.35s) var(--context-generator-stage-progress-easing,cubic-bezier(0.22,0.72,0.22,1)),opacity 160ms ease;
+          }
+          #context-generator-handoff-progress .context-generator-handoff-stage[data-state="active"] .context-generator-handoff-stage-progress-head{
+            opacity:1;
+          }
+          #context-generator-handoff-progress .context-generator-handoff-stage[data-state="complete"] .context-generator-handoff-stage-progress-head{
+            opacity:0;
           }
           #context-generator-handoff-progress .context-generator-handoff-stage-marker{
             position:relative;
@@ -4107,7 +4163,8 @@
           }
           @media (prefers-reduced-motion: reduce){
             #context-generator-text{animation:none!important}
-            #context-generator-handoff-progress .context-generator-handoff-stage::after{transition:none!important}
+            #context-generator-handoff-progress .context-generator-handoff-stage-connector-fill,
+            #context-generator-handoff-progress .context-generator-handoff-stage-progress-head{transition:none!important}
           }
         `;
         document.head.appendChild(styleSheet);
@@ -4153,6 +4210,7 @@
   function showOverlay(destinationId = null) {
     ensureFloatingOverlay();
     const overlay = document.getElementById(OVERLAY_ID);
+    const scrim = document.getElementById(HANDOFF_SCRIM_ID);
     const bubble = document.getElementById(BUBBLE_ID);
 
     if (overlay) {
@@ -4161,13 +4219,16 @@
       setHandoffProgress("capture", "active", destinationName);
       startHandoffCountdown();
       overlay.style.display = "flex";
+      if (scrim) scrim.style.display = "block";
       if (window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) {
         overlay.style.opacity = "1";
         overlay.style.transform = "translate3d(-50%,-50%,0) translateY(0) scale(1)";
+        if (scrim) scrim.style.opacity = "1";
       } else {
         requestAnimationFrame(() => {
           overlay.style.opacity = "1";
           overlay.style.transform = "translate3d(-50%,-50%,0) translateY(0) scale(1)";
+          if (scrim) scrim.style.opacity = "1";
         });
       }
     }
@@ -4181,6 +4242,7 @@
 
   function hideOverlay() {
     const overlay = document.getElementById(OVERLAY_ID);
+    const scrim = document.getElementById(HANDOFF_SCRIM_ID);
     const bubble = document.getElementById(BUBBLE_ID);
 
     stopHandoffCountdown();
@@ -4189,6 +4251,10 @@
       overlay.style.opacity = "0";
       overlay.style.transform = HANDOFF_OVERLAY_CLOSED_TRANSFORM;
       overlay.style.display = "none";
+    }
+    if (scrim) {
+      scrim.style.opacity = "0";
+      scrim.style.display = "none";
     }
     if (bubble) {
       bubble.disabled = false;
@@ -4254,7 +4320,10 @@
     if (!stageElement) return;
 
     const normalized = Math.max(0, Math.min(1, Number(value || 0)));
-    stageElement.style.setProperty("--context-generator-stage-progress", normalized.toFixed(4));
+    stageElement.style.setProperty(
+      "--context-generator-stage-progress-position",
+      `${(normalized * 100).toFixed(2)}%`
+    );
     stageElement.dataset.contextGeneratorLineProgress = normalized.toFixed(4);
   }
 
@@ -5962,12 +6031,13 @@
     return node instanceof Element && (
       node.id === BUBBLE_ID ||
       node.id === OVERLAY_ID ||
+      node.id === HANDOFF_SCRIM_ID ||
       node.id === ONBOARDING_ID ||
       node.id === ONBOARDING_STYLE_ID ||
       node.id === CLAUDE_LIMIT_NUDGE_ID ||
       node.id === "context-generator-styles" ||
       node.dataset.contextGeneratorOwned === "true" ||
-      Boolean(node.closest?.(`#${BUBBLE_ID}, #${OVERLAY_ID}, #${ONBOARDING_ID}, #${CLAUDE_LIMIT_NUDGE_ID}, #context-generator-styles, #${DESTINATION_SHEET_ID}`))
+      Boolean(node.closest?.(`#${BUBBLE_ID}, #${OVERLAY_ID}, #${HANDOFF_SCRIM_ID}, #${ONBOARDING_ID}, #${CLAUDE_LIMIT_NUDGE_ID}, #context-generator-styles, #${DESTINATION_SHEET_ID}`))
     );
   }
 
