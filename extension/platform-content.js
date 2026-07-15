@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-07-15-handoff-soft-graphite";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-07-15-handoff-amethyst";
   const BUBBLE_ID = "context-generator-bubble";
   const OVERLAY_ID = "context-generator-overlay";
   const ONBOARDING_ID = "context-generator-onboarding";
@@ -3953,7 +3953,7 @@
         "width:24px",
         "height:24px",
         "object-fit:contain",
-        "filter:drop-shadow(0 3px 9px rgba(196,148,224,0.2))"
+        "filter:drop-shadow(0 3px 9px rgba(141,108,207,0.22))"
       ].join(";");
 
       const brandText = document.createElement("span");
@@ -4054,8 +4054,8 @@
           }
           /* The line follows live display progress; its motion never gates the transfer pipeline. */
           #context-generator-handoff-progress .context-generator-handoff-stage:not(:last-child)::after{
-            background:linear-gradient(90deg,#DDB5F5,#F0D7FF);
-            box-shadow:3px 0 8px rgba(195,145,222,0.34);
+            background:linear-gradient(90deg,#6F579D,#9A7ADC);
+            box-shadow:3px 0 8px rgba(141,108,207,0.32);
             transform:scaleX(var(--context-generator-stage-progress,0));
             transform-origin:left center;
             transition:transform var(--context-generator-stage-progress-duration,1.35s) var(--context-generator-stage-progress-easing,cubic-bezier(0.22,0.72,0.22,1));
@@ -4088,22 +4088,22 @@
             color:#f4f2f7;
           }
           #context-generator-handoff-progress .context-generator-handoff-stage[data-state="active"] .context-generator-handoff-stage-marker{
-            border-color:rgba(240,215,255,0.78);
-            background:#F0D7FF;
-            color:#211d23;
-            box-shadow:0 0 0 3px rgba(240,215,255,0.13),0 5px 14px rgba(143,97,164,0.22),inset 0 1px 0 rgba(255,255,255,0.55);
+            border-color:rgba(190,165,232,0.72);
+            background:#8D6CCF;
+            color:#fff;
+            box-shadow:0 0 0 3px rgba(141,108,207,0.16),0 5px 14px rgba(72,51,111,0.28),inset 0 1px 0 rgba(255,255,255,0.16);
           }
           #context-generator-handoff-progress .context-generator-handoff-stage[data-state="active"] .context-generator-handoff-stage-label{
             color:#fff;
             font-weight:680;
           }
           #context-generator-handoff-progress .context-generator-handoff-stage[data-state="complete"]{
-            color:rgba(232,216,240,0.72);
+            color:rgba(200,183,229,0.72);
           }
           #context-generator-handoff-progress .context-generator-handoff-stage[data-state="complete"] .context-generator-handoff-stage-marker{
-            border-color:rgba(240,215,255,0.38);
-            background:rgba(240,215,255,0.12);
-            color:#F0D7FF;
+            border-color:rgba(164,137,216,0.34);
+            background:rgba(141,108,207,0.14);
+            color:#C8B6E9;
           }
           @media (prefers-reduced-motion: reduce){
             #context-generator-text{animation:none!important}
