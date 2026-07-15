@@ -13,12 +13,19 @@ function getOverlaySource() {
 
 test("handoff polish creates one clear header, headline, and progress hierarchy", () => {
   const overlaySource = getOverlaySource();
+  const countdownStart = overlaySource.indexOf("const countdown =");
+  const countdownEnd = overlaySource.indexOf("overlay.appendChild(glow)", countdownStart);
+  const countdownSource = overlaySource.slice(countdownStart, countdownEnd);
 
   assert.match(overlaySource, /"height:228px"/);
   assert.match(overlaySource, /"border-radius:24px"/);
+  assert.match(overlaySource, /"background:#050505"/);
+  assert.doesNotMatch(overlaySource, /rgba\((?:126,94,228|151,125,244)/);
   assert.match(overlaySource, /"justify-content:flex-start"/);
   assert.match(overlaySource, /"font-size:29px"[\s\S]*"font-family:Georgia,'Times New Roman',serif"/);
-  assert.match(overlaySource, /"right:28px"[\s\S]*"top:23px"/);
+  assert.match(countdownSource, /"margin-left:auto"/);
+  assert.match(countdownSource, /brand\.appendChild\(countdown\)/);
+  assert.doesNotMatch(countdownSource, /"position:absolute"|"right:28px"|"top:23px"/);
   assert.doesNotMatch(overlaySource, /"bottom:20px"/);
 });
 

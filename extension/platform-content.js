@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-07-15-handoff-polish";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-07-15-handoff-jet-black";
   const BUBBLE_ID = "context-generator-bubble";
   const OVERLAY_ID = "context-generator-overlay";
   const ONBOARDING_ID = "context-generator-onboarding";
@@ -3887,7 +3887,7 @@
         "padding:22px 28px",
         "border-radius:24px",
         "border:1px solid rgba(232,230,240,0.13)",
-        "background:radial-gradient(circle at 8% -8%,rgba(126,94,228,0.11),transparent 29%),linear-gradient(145deg,#161619 0%,#0e0e11 62%,#09090b 100%)",
+        "background:#050505",
         "color:#b9b9b9",
         "box-shadow:0 28px 82px rgba(0,0,0,0.5),0 8px 24px rgba(0,0,0,0.28),0 0 0 1px rgba(0,0,0,0.64),inset 0 1px 0 rgba(255,255,255,0.075),inset 0 -1px 0 rgba(255,255,255,0.018)",
         `transform:${HANDOFF_OVERLAY_CLOSED_TRANSFORM}`,
@@ -3908,8 +3908,8 @@
         "position:absolute",
         "inset:-1px",
         "pointer-events:none",
-        "background:radial-gradient(circle at 28px 20px,rgba(151,125,244,0.12),transparent 74px),linear-gradient(180deg,rgba(255,255,255,0.043),transparent 38%)",
-        "opacity:0.9"
+        "background:linear-gradient(180deg,rgba(255,255,255,0.035),transparent 34%)",
+        "opacity:0.8"
       ].join(";");
 
       const brand = document.createElement("div");
@@ -3924,7 +3924,6 @@
         "align-items:center",
         "justify-content:flex-start",
         "gap:7px",
-        "padding-right:48px",
         "color:rgba(245,243,250,0.66)",
         "font-size:12.5px",
         "font-weight:620",
@@ -4109,11 +4108,9 @@
       countdown.id = HANDOFF_COUNTDOWN_ID;
       countdown.setAttribute("aria-label", "Estimated seconds remaining");
       countdown.style.cssText = [
-        "position:absolute",
-        "z-index:2",
-        "right:28px",
-        "top:23px",
         "display:none",
+        "margin-left:auto",
+        "flex:0 0 auto",
         "align-items:center",
         "justify-content:center",
         "min-width:32px",
@@ -4134,12 +4131,12 @@
         "opacity:0",
         "transition:opacity 160ms ease"
       ].join(";");
+      brand.appendChild(countdown);
 
       overlay.appendChild(glow);
       overlay.appendChild(brand);
       overlay.appendChild(statusText);
       overlay.appendChild(progress);
-      overlay.appendChild(countdown);
       document.body.appendChild(overlay);
     }
   }
