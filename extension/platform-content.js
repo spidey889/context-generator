@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-07-14-real-stage-handoff";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-07-15-handoff-progress";
   const BUBBLE_ID = "context-generator-bubble";
   const OVERLAY_ID = "context-generator-overlay";
   const ONBOARDING_ID = "context-generator-onboarding";
@@ -99,21 +99,13 @@
   const PASTE_VERIFY_TIMEOUT_MS = 1000;
   const CHATGPT_PASTE_VERIFY_TIMEOUT_MS = 1500;
   const CHATGPT_PASTE_STABILITY_MS = 550;
-  const HANDOFF_STATUS_INTERVAL_MS = 1850;
   const HANDOFF_COUNTDOWN_ID = "context-generator-handoff-countdown";
   const HANDOFF_COUNTDOWN_FIXED_MS = 30000;
-  // Historical quote attributions are easy to get wrong; keep this pool tied to authoritative records.
-  const HANDOFF_QUOTES = [
-    "Failure is an option here. — Elon Musk",
-    "You've got to find what you love. — Steve Jobs",
-    "Imagination is more important than knowledge. — Albert Einstein",
-    "What I cannot create, I do not understand. — Richard Feynman",
-    "We become just by doing just acts. — Aristotle",
-    "To live defeated and without glory is to die every day. — Napoleon",
-    "If I were not Alexander, I would be Diogenes. — Alexander",
-    "Pressure is a privilege. — Billie Jean King",
-    "One giant leap for mankind. — Neil Armstrong",
-    "To thine own self be true. — William Shakespeare"
+  // Progress advances only from real pipeline marks; never infer progress from elapsed time.
+  const HANDOFF_STAGES = [
+    { id: "capture", label: "Capturing chat" },
+    { id: "summary", label: "Summarizing" },
+    { id: "paste", label: "Pasting into destination" }
   ];
   const GENERIC_CONVERSATION_SELECTORS = [
     "[data-message-author-role]",
@@ -394,7 +386,6 @@
   let floatingButtonFrame = null;
   let floatingButtonObserver = null;
   let floatingButtonMonitoringDisabled = false;
-  let handoffStatusTimer = null;
   let handoffCountdownTimer = null;
   let handoffCountdownHideTimer = null;
   let onboardingTimer = null;
@@ -505,7 +496,9 @@
       getClaudeInlineControlsToShift,
       getClaudeModelControlsToNudge,
       getClaudeControlTargetOffset,
-      reserveClaudeInlineBubbleSlot
+      reserveClaudeInlineBubbleSlot,
+      getHandoffProgressState,
+      getHandoffProgressStatusText
     });
   } else {
     startFloatingButtonMonitoring();
@@ -517,7 +510,6 @@
     let transferStage = "capture";
     let summary = "";
     try {
-      const destination = getPlatform(destinationId);
       let conversationText = scrapedConversationText;
       let destinationPrepPromise = preparedDestinationPromise;
       if (!conversationText) {
@@ -527,7 +519,6 @@
         if (!isHandoffOverlayVisible()) {
           showOverlay(destinationId);
         }
-        setHandoffStatus("Reading source chat");
         if (!destinationPrepPromise && getDetectedConversationMessageCount() > 0) {
           destinationPrepPromise = prepareDestinationTab(destinationId, transferTrace);
         }
@@ -537,6 +528,7 @@
         }
         transferStage = "capture";
         markTransferTrace(transferTrace, "capture start");
+        setHandoffProgress("capture", "active");
         conversationText = await scrapeConversationTextWhenReady();
         markCaptureDone(transferTrace, conversationText);
       }
@@ -544,19 +536,18 @@
       if (!isHandoffOverlayVisible()) {
         showOverlay(destinationId);
       }
-      setHandoffStatus("Summarizing context");
       transferStage = "summary";
       summary = await summarizeWithBackend(conversationText, transferTrace);
       markTransferTrace(transferTrace, "summary available", { chars: summary.length });
-      setHandoffStatus(`Preparing ${destination?.name || "destination"}`);
+      setHandoffProgress("summary", "done");
       transferStage = "destination";
       const preparedDestination = destinationPrepPromise ? await destinationPrepPromise : null;
       markTransferTrace(transferTrace, "tab open done", {
         tabId: preparedDestination?.tabId || null,
         background: preparedDestination?.timing || null
       });
-      setHandoffStatus(`Pasting context into ${destination?.name || "destination"}`);
       markTransferTrace(transferTrace, "paste request start");
+      setHandoffProgress("paste", "active");
       transferStage = "paste";
       const pasteResponse = await notifyBackground({
         type: "TRANSFER_TO_DESTINATION",
@@ -567,6 +558,7 @@
       });
       appendBackgroundMarks(transferTrace, pasteResponse?.marks);
       markTransferTrace(transferTrace, "paste done", pasteResponse?.timing || null);
+      setHandoffProgress("paste", "done");
       finishTransferTrace(transferTrace);
       resetRunningFlag();
     } catch (error) {
@@ -616,6 +608,7 @@
     }
 
     markTransferTrace(trace, "summary start", { chars: conversationText.length, inputChars: conversationText.length });
+    setHandoffProgress("summary", "active");
     const response = await notifyBackground({
       type: "SUMMARIZE_WITH_BACKEND",
       conversation: conversationText,
@@ -676,6 +669,7 @@
       chars: conversationText.length,
       ...getConversationCaptureMetrics(conversationText)
     });
+    setHandoffProgress("capture", "done");
   }
 
   async function prepareSourceForCapture() {
@@ -3847,7 +3841,6 @@
     clearRunningResetTimer();
     runningResetTimer = setTimeout(resetRunningFlag, RUNNING_AUTO_RESET_MS);
     showOverlay(destinationId);
-    setHandoffStatus("Reading source chat");
     let preparedDestinationPromise = null;
     if (getDetectedConversationMessageCount() > 0) {
       preparedDestinationPromise = prepareDestinationTab(destinationId, trace);
@@ -3860,6 +3853,7 @@
     let conversationText;
     try {
       markTransferTrace(trace, "capture start");
+      setHandoffProgress("capture", "active");
       conversationText = await scrapeConversationTextWhenReady();
       markCaptureDone(trace, conversationText);
     } catch (error) {
@@ -3890,7 +3884,7 @@
         "min-height:240px",
         "max-height:240px",
         "box-sizing:border-box",
-        "padding:36px 40px 32px",
+        "padding:26px 32px 24px",
         "border-radius:30px",
         "border:1px solid rgba(226,226,226,0.135)",
         "background:linear-gradient(180deg,#171719 0%,#101012 52%,#0b0b0d 100%)",
@@ -3900,10 +3894,10 @@
         "opacity:0",
         "flex-direction:column",
         "justify-content:center",
-        "gap:30px",
+        "gap:16px",
         "overflow:hidden",
         "backdrop-filter:blur(20px)",
-        "font-family:'Iowan Old Style','New York',Georgia,'Times New Roman',serif",
+        "font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif",
         "letter-spacing:0",
         "will-change:transform,opacity",
         "transition:opacity 0.18s cubic-bezier(0.16,1,0.3,1), transform 0.22s cubic-bezier(0.16,1,0.3,1)"
@@ -3918,122 +3912,174 @@
         "opacity:0.78"
       ].join(";");
 
-      const topRow = document.createElement("div");
-      topRow.style.cssText = "position:relative;z-index:1;display:flex;align-items:center;justify-content:center;text-align:center";
-
-      const mark = document.createElement("div");
-      mark.style.cssText = [
-        "width:34px",
-        "height:34px",
-        "border-radius:12px",
-        "display:none",
-        "align-items:center",
-        "justify-content:center",
-        "flex:0 0 auto",
-        "background:linear-gradient(180deg,rgba(255,255,255,0.11),rgba(255,255,255,0.035))",
-        "border:1px solid rgba(255,255,255,0.12)",
-        "box-shadow:inset 0 1px 0 rgba(255,255,255,0.08)"
-      ].join(";");
-
-      const markDot = document.createElement("div");
-      markDot.style.cssText = [
-        "width:13px",
-        "height:13px",
-        "border-radius:999px",
-        "background:#ffffff",
-        "box-shadow:0 0 0 5px rgba(255,255,255,0.06),0 0 18px rgba(255,255,255,0.34)"
-      ].join(";");
-      mark.appendChild(markDot);
-
-      const copy = document.createElement("div");
-      copy.style.cssText = "min-width:0;display:flex;flex-direction:column;align-items:center;gap:0;flex:1";
-
-      const quote = document.createElement("div");
-      quote.id = "context-generator-overlay-quote";
-      quote.style.cssText = [
-        "font-size:16px",
-        "font-weight:500",
-        "line-height:1.32",
-        "white-space:nowrap",
-        "overflow:hidden",
-        "text-overflow:ellipsis",
-        "max-width:100%",
-        "color:transparent",
-        "background-image:linear-gradient(100deg,#858585 0%,#bdbdbd 30%,#ededed 46%,#b1b1b1 62%,#757575 100%)",
-        "background-size:220% 100%",
-        "-webkit-background-clip:text",
-        "background-clip:text",
-        "animation:contextGeneratorQuoteShimmer 5.2s linear infinite"
-      ].join(";");
-      quote.textContent = HANDOFF_QUOTES[0];
-
-      copy.appendChild(quote);
-      topRow.appendChild(mark);
-      topRow.appendChild(copy);
-
-      const statusShell = document.createElement("div");
-      statusShell.style.cssText = [
+      const brand = document.createElement("div");
+      brand.id = "context-generator-overlay-brand";
+      brand.style.cssText = [
         "position:relative",
         "z-index:1",
-        "height:64px",
-        "border-radius:22px",
-        "border:0",
-        "background:transparent",
         "display:flex",
         "align-items:center",
         "justify-content:center",
-        "padding:0 22px",
-        "box-sizing:border-box",
-        "overflow:hidden"
+        "gap:8px",
+        "color:rgba(255,255,255,0.72)",
+        "font-size:13px",
+        "font-weight:650",
+        "letter-spacing:0.01em"
       ].join(";");
+
+      const brandIcon = document.createElement("img");
+      brandIcon.id = "context-generator-overlay-brand-icon";
+      brandIcon.src = BUBBLE_ICON_URL;
+      brandIcon.alt = "";
+      brandIcon.width = 28;
+      brandIcon.height = 28;
+      brandIcon.style.cssText = [
+        "display:block",
+        "width:28px",
+        "height:28px",
+        "object-fit:contain",
+        "filter:drop-shadow(0 4px 12px rgba(111,76,255,0.24))"
+      ].join(";");
+
+      const brandText = document.createElement("span");
+      brandText.textContent = "Cap Context";
+      brand.appendChild(brandIcon);
+      brand.appendChild(brandText);
+
+      const statusText = document.createElement("div");
+      statusText.id = "context-generator-text";
+      statusText.setAttribute("aria-live", "polite");
+      statusText.setAttribute("aria-atomic", "true");
+      statusText.textContent = "Capturing chat";
+      statusText.style.cssText = [
+        "position:relative",
+        "z-index:1",
+        "font-size:23px",
+        "font-weight:700",
+        "line-height:1.15",
+        "text-align:center",
+        "color:#f7f5ff",
+        "letter-spacing:-0.02em"
+      ].join(";");
+
+      const progress = document.createElement("div");
+      progress.id = "context-generator-handoff-progress";
+      progress.setAttribute("role", "list");
+      progress.setAttribute("aria-label", "Transfer progress");
+      progress.style.cssText = [
+        "position:relative",
+        "z-index:1",
+        "display:grid",
+        "grid-template-columns:repeat(3,minmax(0,1fr))",
+        "width:100%",
+        "align-items:start"
+      ].join(";");
+
+      HANDOFF_STAGES.forEach((stage, index) => {
+        const stageElement = document.createElement("div");
+        stageElement.className = "context-generator-handoff-stage";
+        stageElement.dataset.contextGeneratorStage = stage.id;
+        stageElement.dataset.state = "upcoming";
+        stageElement.setAttribute("role", "listitem");
+
+        const marker = document.createElement("span");
+        marker.className = "context-generator-handoff-stage-marker";
+        marker.textContent = String(index + 1);
+
+        const label = document.createElement("span");
+        label.className = "context-generator-handoff-stage-label";
+        label.textContent = stage.label;
+
+        stageElement.appendChild(marker);
+        stageElement.appendChild(label);
+        progress.appendChild(stageElement);
+      });
 
       if (!document.getElementById("context-generator-styles")) {
         const styleSheet = document.createElement("style");
         styleSheet.id = "context-generator-styles";
         styleSheet.dataset.contextGeneratorOwned = "true";
         styleSheet.textContent = `
-          @keyframes contextGeneratorQuoteShimmer{
-            0%{background-position:145% 50%}
-            100%{background-position:-115% 50%}
+          @keyframes contextGeneratorProgressPulse{
+            0%,100%{box-shadow:0 0 0 3px rgba(132,100,255,0.13),0 5px 16px rgba(82,52,204,0.18)}
+            50%{box-shadow:0 0 0 5px rgba(132,100,255,0.07),0 5px 20px rgba(82,52,204,0.28)}
           }
-          @keyframes contextGeneratorStatusShimmer{
-            0%{opacity:0;transform:translate3d(0,14px,0);background-position:122% 50%;filter:blur(0.2px)}
-            18%{opacity:1;transform:translate3d(0,0,0);filter:blur(0)}
-            56%{opacity:1;transform:translate3d(0,0,0);background-position:0% 50%}
-            84%{opacity:1;transform:translate3d(0,0,0);background-position:-42% 50%}
-            100%{opacity:0;transform:translate3d(0,-13px,0);background-position:-88% 50%;filter:blur(0.15px)}
+          #context-generator-handoff-progress .context-generator-handoff-stage{
+            position:relative;
+            min-width:0;
+            display:flex;
+            flex-direction:column;
+            align-items:center;
+            gap:7px;
+            padding:0 5px;
+            color:rgba(255,255,255,0.34);
+            text-align:center;
+          }
+          #context-generator-handoff-progress .context-generator-handoff-stage:not(:last-child)::after{
+            content:"";
+            position:absolute;
+            z-index:0;
+            top:13px;
+            left:calc(50% + 18px);
+            right:calc(-50% + 18px);
+            height:1px;
+            background:rgba(255,255,255,0.11);
+            transition:background 160ms ease;
+          }
+          #context-generator-handoff-progress .context-generator-handoff-stage[data-state="complete"]::after{
+            background:rgba(170,148,255,0.48);
+          }
+          #context-generator-handoff-progress .context-generator-handoff-stage-marker{
+            position:relative;
+            z-index:1;
+            display:flex;
+            width:26px;
+            height:26px;
+            align-items:center;
+            justify-content:center;
+            box-sizing:border-box;
+            border:1px solid rgba(255,255,255,0.12);
+            border-radius:999px;
+            background:#121216;
+            color:rgba(255,255,255,0.38);
+            font-size:11px;
+            font-weight:750;
+            transition:background 160ms ease,border-color 160ms ease,color 160ms ease,box-shadow 160ms ease;
+          }
+          #context-generator-handoff-progress .context-generator-handoff-stage-label{
+            min-height:29px;
+            font-size:12px;
+            font-weight:550;
+            line-height:1.22;
+            transition:color 160ms ease,font-weight 160ms ease;
+          }
+          #context-generator-handoff-progress .context-generator-handoff-stage[data-state="active"]{
+            color:#f7f5ff;
+          }
+          #context-generator-handoff-progress .context-generator-handoff-stage[data-state="active"] .context-generator-handoff-stage-marker{
+            border-color:rgba(190,173,255,0.72);
+            background:linear-gradient(180deg,#8b6cff,#6f4ce8);
+            color:#fff;
+            animation:contextGeneratorProgressPulse 1.9s ease-in-out infinite;
+          }
+          #context-generator-handoff-progress .context-generator-handoff-stage[data-state="active"] .context-generator-handoff-stage-label{
+            color:#fff;
+            font-weight:750;
+          }
+          #context-generator-handoff-progress .context-generator-handoff-stage[data-state="complete"]{
+            color:rgba(218,208,255,0.7);
+          }
+          #context-generator-handoff-progress .context-generator-handoff-stage[data-state="complete"] .context-generator-handoff-stage-marker{
+            border-color:rgba(170,148,255,0.36);
+            background:rgba(121,88,239,0.18);
+            color:#d8ceff;
           }
           @media (prefers-reduced-motion: reduce){
-            #context-generator-text{animation:none!important}
-            #context-generator-overlay-quote{animation:none!important}
+            #context-generator-handoff-progress .context-generator-handoff-stage-marker{animation:none!important}
           }
         `;
         document.head.appendChild(styleSheet);
       }
-
-      const textSpan = document.createElement("span");
-      textSpan.id = "context-generator-text";
-      textSpan.textContent = "Summarizing context";
-      textSpan.style.cssText = [
-        "display:block",
-        "width:100%",
-        "min-width:0",
-        "font-size:30px",
-        "font-weight:500",
-        "line-height:1.18",
-        "text-align:center",
-        "white-space:nowrap",
-        "overflow:hidden",
-        "text-overflow:ellipsis",
-        "color:transparent",
-        "background-image:linear-gradient(100deg,#8a8a8a 0%,#c6c6c6 28%,#f1f1f1 44%,#b6b6b6 60%,#747474 100%)",
-        "background-size:220% 100%",
-        "background-position:125% 50%",
-        "-webkit-background-clip:text",
-        "background-clip:text",
-        "animation:contextGeneratorStatusShimmer 1.72s cubic-bezier(0.16,1,0.3,1) both"
-      ].join(";");
-      statusShell.appendChild(textSpan);
 
       const countdown = document.createElement("div");
       countdown.id = HANDOFF_COUNTDOWN_ID;
@@ -4065,8 +4111,9 @@
       ].join(";");
 
       overlay.appendChild(glow);
-      overlay.appendChild(topRow);
-      overlay.appendChild(statusShell);
+      overlay.appendChild(brand);
+      overlay.appendChild(statusText);
+      overlay.appendChild(progress);
       overlay.appendChild(countdown);
       document.body.appendChild(overlay);
     }
@@ -4075,14 +4122,12 @@
   function showOverlay(destinationId = null) {
     ensureFloatingOverlay();
     const overlay = document.getElementById(OVERLAY_ID);
-    const quote = document.getElementById("context-generator-overlay-quote");
     const bubble = document.getElementById(BUBBLE_ID);
 
     if (overlay) {
-      if (quote) {
-        quote.textContent = getRandomHandoffQuote();
-      }
-      startHandoffStatusCycle();
+      const destinationName = getPlatform(destinationId)?.name || "destination";
+      overlay.dataset.contextGeneratorDestinationName = destinationName;
+      setHandoffProgress("capture", "active", destinationName);
       startHandoffCountdown();
       overlay.style.display = "flex";
       if (window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) {
@@ -4107,7 +4152,6 @@
     const overlay = document.getElementById(OVERLAY_ID);
     const bubble = document.getElementById(BUBBLE_ID);
 
-    stopHandoffStatusCycle();
     stopHandoffCountdown();
     if (overlay) {
       overlay.style.opacity = "0";
@@ -4126,23 +4170,72 @@
     return Boolean(overlay && overlay.style.display !== "none");
   }
 
-  function startHandoffStatusCycle() {
-    stopHandoffStatusCycle();
-    // Preserve the existing cadence and transition without replacing real progress with filler copy.
-    handoffStatusTimer = window.setInterval(() => {
-      const currentStatus = document.getElementById("context-generator-text")?.textContent;
-      setHandoffStatus(currentStatus);
-    }, HANDOFF_STATUS_INTERVAL_MS);
+  function getHandoffProgressState(stageId, phase = "active", destinationName = "destination") {
+    const requestedIndex = HANDOFF_STAGES.findIndex((stage) => stage.id === stageId);
+    const currentIndex = requestedIndex >= 0 ? requestedIndex : 0;
+    const currentIsDone = phase === "done";
+
+    return HANDOFF_STAGES.map((stage, index) => {
+      let state = "upcoming";
+      if (index < currentIndex || (index === currentIndex && currentIsDone)) {
+        state = "complete";
+      } else if (index === currentIndex) {
+        state = "active";
+      }
+
+      return {
+        id: stage.id,
+        label: stage.id === "paste" ? `Pasting into ${destinationName || "destination"}` : stage.label,
+        state
+      };
+    });
   }
 
-  function setHandoffStatus(text) {
-    const textSpan = document.getElementById("context-generator-text");
-    if (!textSpan || !text) return;
+  function getHandoffProgressStatusText(stageId, phase = "active", destinationName = "destination") {
+    const safeDestinationName = destinationName || "destination";
+    if (phase === "done") {
+      if (stageId === "capture") return "Chat captured";
+      if (stageId === "summary") return "Summary ready";
+      if (stageId === "paste") return `Pasted into ${safeDestinationName}`;
+    }
 
-    textSpan.style.animation = "none";
-    textSpan.textContent = text;
-    void textSpan.offsetWidth;
-    textSpan.style.animation = "contextGeneratorStatusShimmer 1.72s cubic-bezier(0.16,1,0.3,1) both";
+    if (stageId === "summary") return "Summarizing";
+    if (stageId === "paste") return `Pasting into ${safeDestinationName}`;
+    return "Capturing chat";
+  }
+
+  function setHandoffProgress(stageId, phase = "active", destinationName = null) {
+    const overlay = document.getElementById(OVERLAY_ID);
+    const progress = document.getElementById("context-generator-handoff-progress");
+    const statusText = document.getElementById("context-generator-text");
+    if (!progress || !statusText) return;
+
+    const resolvedDestinationName = destinationName
+      || overlay?.dataset.contextGeneratorDestinationName
+      || "destination";
+    const stages = getHandoffProgressState(stageId, phase, resolvedDestinationName);
+    const stageElements = progress.querySelectorAll(".context-generator-handoff-stage");
+
+    stages.forEach((stage, index) => {
+      const stageElement = stageElements[index];
+      if (!stageElement) return;
+      const marker = stageElement.querySelector(".context-generator-handoff-stage-marker");
+      const label = stageElement.querySelector(".context-generator-handoff-stage-label");
+
+      stageElement.dataset.state = stage.state;
+      stageElement.setAttribute("aria-label", `${stage.label}, ${stage.state}`);
+      if (stage.state === "active") {
+        stageElement.setAttribute("aria-current", "step");
+      } else {
+        stageElement.removeAttribute("aria-current");
+      }
+      if (marker) marker.textContent = stage.state === "complete" ? "✓" : String(index + 1);
+      if (label) label.textContent = stage.label;
+    });
+
+    const currentStatus = getHandoffProgressStatusText(stageId, phase, resolvedDestinationName);
+    statusText.textContent = currentStatus;
+    progress.setAttribute("aria-label", `Transfer progress: ${currentStatus}`);
   }
 
   function startHandoffCountdown() {
@@ -4183,13 +4276,6 @@
     }, 170);
   }
 
-  function stopHandoffStatusCycle() {
-    if (handoffStatusTimer) {
-      clearInterval(handoffStatusTimer);
-      handoffStatusTimer = null;
-    }
-  }
-
   function stopHandoffCountdown() {
     if (handoffCountdownTimer) {
       clearInterval(handoffCountdownTimer);
@@ -4205,10 +4291,6 @@
       countdown.style.opacity = "0";
       countdown.style.display = "none";
     }
-  }
-
-  function getRandomHandoffQuote() {
-    return HANDOFF_QUOTES[Math.floor(Math.random() * HANDOFF_QUOTES.length)] || HANDOFF_QUOTES[0];
   }
 
   function showErrorOverlay(message) {

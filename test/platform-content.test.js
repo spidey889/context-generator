@@ -290,7 +290,32 @@ test("empty chats are rejected before handoff UI or destination preparation", ()
   assert.match(flowSource.slice(flowEmptyGuard), /NO_CONVERSATION_ERROR_MESSAGE/);
 });
 
-test("handoff status rotation preserves only real transfer stages", () => {
+test("handoff progress state advances deterministically through the three real stages", () => {
+  const hooks = loadPlatformContent([]);
+  const getState = (stage, phase) => JSON.parse(JSON.stringify(
+    hooks.getHandoffProgressState(stage, phase, "ChatGPT")
+  ));
+
+  assert.deepEqual(getState("capture", "active"), [
+    { id: "capture", label: "Capturing chat", state: "active" },
+    { id: "summary", label: "Summarizing", state: "upcoming" },
+    { id: "paste", label: "Pasting into ChatGPT", state: "upcoming" }
+  ]);
+  assert.deepEqual(getState("capture", "done").map(({ state }) => state), ["complete", "upcoming", "upcoming"]);
+  assert.deepEqual(getState("summary", "active").map(({ state }) => state), ["complete", "active", "upcoming"]);
+  assert.deepEqual(getState("summary", "done").map(({ state }) => state), ["complete", "complete", "upcoming"]);
+  assert.deepEqual(getState("paste", "active").map(({ state }) => state), ["complete", "complete", "active"]);
+  assert.deepEqual(getState("paste", "done").map(({ state }) => state), ["complete", "complete", "complete"]);
+
+  assert.equal(hooks.getHandoffProgressStatusText("capture", "active", "ChatGPT"), "Capturing chat");
+  assert.equal(hooks.getHandoffProgressStatusText("capture", "done", "ChatGPT"), "Chat captured");
+  assert.equal(hooks.getHandoffProgressStatusText("summary", "active", "ChatGPT"), "Summarizing");
+  assert.equal(hooks.getHandoffProgressStatusText("summary", "done", "ChatGPT"), "Summary ready");
+  assert.equal(hooks.getHandoffProgressStatusText("paste", "active", "ChatGPT"), "Pasting into ChatGPT");
+  assert.equal(hooks.getHandoffProgressStatusText("paste", "done", "ChatGPT"), "Pasted into ChatGPT");
+});
+
+test("handoff progress is branded and wired only to real pipeline events", () => {
   const source = fs.readFileSync(SOURCE_PATH, "utf8");
   const fillerPhrases = [
     "I don't like waiting either",
@@ -305,20 +330,22 @@ test("handoff status rotation preserves only real transfer stages", () => {
     assert.equal(source.includes(phrase), false, `removed filler must stay absent: ${phrase}`);
   }
 
-  for (const stage of ["Reading source chat", "Summarizing context", "Preparing ${destination?.name || \"destination\"}", "Pasting context into ${destination?.name || \"destination\"}"]) {
-    assert.equal(source.includes(stage), true, `real transfer stage must remain: ${stage}`);
-  }
+  const overlayStart = source.indexOf("function ensureFloatingOverlay()");
+  const overlayEnd = source.indexOf("function startHandoffCountdown()", overlayStart);
+  const overlaySource = source.slice(overlayStart, overlayEnd);
 
-  const cycleStart = source.indexOf("function startHandoffStatusCycle()");
-  const cycleEnd = source.indexOf("function setHandoffStatus(text)", cycleStart);
-  const cycleSource = source.slice(cycleStart, cycleEnd);
+  assert.ok(overlayStart >= 0 && overlayEnd > overlayStart);
+  assert.match(overlaySource, /brandIcon\.src = BUBBLE_ICON_URL/);
+  assert.match(overlaySource, /brandText\.textContent = "Cap Context"/);
+  assert.doesNotMatch(overlaySource, /Math\.random|setInterval|startHandoffStatusCycle/);
+  assert.doesNotMatch(source, /HANDOFF_STATUS_INTERVAL_MS|HANDOFF_QUOTES|setHandoffStatus/);
 
-  assert.ok(cycleStart >= 0 && cycleEnd > cycleStart);
-  assert.match(cycleSource, /window\.setInterval/);
-  assert.match(cycleSource, /HANDOFF_STATUS_INTERVAL_MS/);
-  assert.match(cycleSource, /currentStatus/);
-  assert.match(cycleSource, /setHandoffStatus\(currentStatus\)/);
-  assert.match(source, /contextGeneratorStatusShimmer 1\.72s cubic-bezier\(0\.16,1,0\.3,1\) both/);
+  assert.match(source, /markTransferTrace\([^\n]+"capture start"\);\s*setHandoffProgress\("capture", "active"\)/);
+  assert.match(source, /markTransferTrace\(trace, "capture done", \{[\s\S]{0,240}setHandoffProgress\("capture", "done"\)/);
+  assert.match(source, /markTransferTrace\(trace, "summary start", \{[^\n]+\);\s*setHandoffProgress\("summary", "active"\)/);
+  assert.match(source, /markTransferTrace\(transferTrace, "summary available", \{ chars: summary\.length \}\);\s*setHandoffProgress\("summary", "done"\)/);
+  assert.match(source, /markTransferTrace\(transferTrace, "paste request start"\);\s*setHandoffProgress\("paste", "active"\)/);
+  assert.match(source, /markTransferTrace\(transferTrace, "paste done", pasteResponse\?\.timing \|\| null\);\s*setHandoffProgress\("paste", "done"\)/);
 });
 
 test("Grok empty-state prompt is not counted or captured as a real message", () => {
