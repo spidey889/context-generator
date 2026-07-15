@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-07-15-handoff-wispr-palette";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-07-15-handoff-soft-graphite";
   const BUBBLE_ID = "context-generator-bubble";
   const OVERLAY_ID = "context-generator-overlay";
   const ONBOARDING_ID = "context-generator-onboarding";
@@ -3898,10 +3898,10 @@
         "box-sizing:border-box",
         "padding:22px 28px",
         "border-radius:24px",
-        "border:1px solid rgba(29,26,24,0.22)",
-        "background:#FFFFEB",
-        "color:#625d58",
-        "box-shadow:0 28px 82px rgba(33,27,19,0.24),0 8px 24px rgba(33,27,19,0.14),0 0 0 1px rgba(255,255,255,0.72),inset 0 1px 0 rgba(255,255,255,0.78)",
+        "border:1px solid rgba(238,235,244,0.13)",
+        "background:#151517",
+        "color:#b9b7bd",
+        "box-shadow:0 28px 82px rgba(0,0,0,0.42),0 8px 24px rgba(0,0,0,0.25),0 0 0 1px rgba(0,0,0,0.48),inset 0 1px 0 rgba(255,255,255,0.07),inset 0 -1px 0 rgba(255,255,255,0.018)",
         `transform:${HANDOFF_OVERLAY_CLOSED_TRANSFORM}`,
         "opacity:0",
         "flex-direction:column",
@@ -3920,8 +3920,8 @@
         "position:absolute",
         "inset:-1px",
         "pointer-events:none",
-        "background:linear-gradient(180deg,rgba(255,255,255,0.48),transparent 34%)",
-        "opacity:0.7"
+        "background:linear-gradient(180deg,rgba(255,255,255,0.045),transparent 36%)",
+        "opacity:0.85"
       ].join(";");
 
       const brand = document.createElement("div");
@@ -3936,7 +3936,7 @@
         "align-items:center",
         "justify-content:flex-start",
         "gap:7px",
-        "color:rgba(32,29,27,0.62)",
+        "color:rgba(245,243,250,0.67)",
         "font-size:12.5px",
         "font-weight:620",
         "letter-spacing:0"
@@ -3953,7 +3953,7 @@
         "width:24px",
         "height:24px",
         "object-fit:contain",
-        "filter:drop-shadow(0 3px 9px rgba(158,105,188,0.2))"
+        "filter:drop-shadow(0 3px 9px rgba(196,148,224,0.2))"
       ].join(";");
 
       const brandText = document.createElement("span");
@@ -3979,7 +3979,7 @@
         "line-height:1.08",
         "text-align:center",
         "text-wrap:balance",
-        "color:#171514",
+        "color:#f2f0f6",
         "letter-spacing:-0.035em",
         "text-rendering:geometricPrecision",
         "will-change:transform,opacity"
@@ -4036,7 +4036,7 @@
             align-items:center;
             gap:8px;
             padding:0 5px;
-            color:rgba(32,29,27,0.48);
+            color:rgba(239,237,244,0.46);
             text-align:center;
           }
           #context-generator-handoff-progress .context-generator-handoff-stage:not(:last-child)::before,
@@ -4050,7 +4050,7 @@
             height:1px;
           }
           #context-generator-handoff-progress .context-generator-handoff-stage:not(:last-child)::before{
-            background:rgba(32,29,27,0.14);
+            background:rgba(255,255,255,0.11);
           }
           /* The line follows live display progress; its motion never gates the transfer pipeline. */
           #context-generator-handoff-progress .context-generator-handoff-stage:not(:last-child)::after{
@@ -4069,10 +4069,10 @@
             align-items:center;
             justify-content:center;
             box-sizing:border-box;
-            border:1px solid rgba(29,26,24,0.18);
+            border:1px solid rgba(255,255,255,0.15);
             border-radius:999px;
-            background:rgba(255,255,255,0.42);
-            color:rgba(32,29,27,0.48);
+            background:rgba(255,255,255,0.025);
+            color:rgba(245,243,249,0.44);
             font-size:10.5px;
             font-weight:700;
             transition:background 180ms ease,border-color 180ms ease,color 180ms ease,box-shadow 180ms ease;
@@ -4085,25 +4085,25 @@
             transition:color 180ms ease,font-weight 180ms ease;
           }
           #context-generator-handoff-progress .context-generator-handoff-stage[data-state="active"]{
-            color:#171514;
+            color:#f4f2f7;
           }
           #context-generator-handoff-progress .context-generator-handoff-stage[data-state="active"] .context-generator-handoff-stage-marker{
-            border-color:rgba(29,25,30,0.32);
+            border-color:rgba(240,215,255,0.78);
             background:#F0D7FF;
             color:#211d23;
-            box-shadow:0 0 0 3px rgba(240,215,255,0.55),0 5px 14px rgba(109,73,126,0.15),inset 0 1px 0 rgba(255,255,255,0.55);
+            box-shadow:0 0 0 3px rgba(240,215,255,0.13),0 5px 14px rgba(143,97,164,0.22),inset 0 1px 0 rgba(255,255,255,0.55);
           }
           #context-generator-handoff-progress .context-generator-handoff-stage[data-state="active"] .context-generator-handoff-stage-label{
-            color:#171514;
+            color:#fff;
             font-weight:680;
           }
           #context-generator-handoff-progress .context-generator-handoff-stage[data-state="complete"]{
-            color:rgba(66,49,74,0.64);
+            color:rgba(232,216,240,0.72);
           }
           #context-generator-handoff-progress .context-generator-handoff-stage[data-state="complete"] .context-generator-handoff-stage-marker{
-            border-color:rgba(92,61,108,0.18);
-            background:rgba(240,215,255,0.62);
-            color:#60456d;
+            border-color:rgba(240,215,255,0.38);
+            background:rgba(240,215,255,0.12);
+            color:#F0D7FF;
           }
           @media (prefers-reduced-motion: reduce){
             #context-generator-text{animation:none!important}
@@ -4127,10 +4127,10 @@
         "padding:0 8px",
         "box-sizing:border-box",
         "border-radius:999px",
-        "border:1px solid rgba(29,26,24,0.12)",
-        "background:rgba(255,255,255,0.4)",
-        "box-shadow:inset 0 1px 0 rgba(255,255,255,0.7)",
-        "color:rgba(32,29,27,0.5)",
+        "border:1px solid rgba(255,255,255,0.075)",
+        "background:rgba(255,255,255,0.032)",
+        "box-shadow:inset 0 1px 0 rgba(255,255,255,0.035)",
+        "color:rgba(242,240,246,0.46)",
         "font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif",
         "font-size:10.5px",
         "font-weight:620",
