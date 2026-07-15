@@ -82,7 +82,7 @@ The system message holds the summary rules and exact seven-section Context Carry
 
 Generated output is validated locally without an evaluation-model call. It must contain the Context Carry header, all seven sections exactly once and in order, meaningful content in the three continuation-critical sections, a low profile-derived minimum body length, and the exact destination confirmation. Optional sections such as `WHO I AM` may contain `None` when the transcript genuinely supplies no relevant fact. Obvious refusals and API-error output fail.
 
-Normalization may strip fences/footer noise and canonicalize already-valid headings/confirmation. It does not invent sections or wrap free-form output as valid context. Invalid output advances through the same model/provider chain; exhaustion fails the job without pasting broken output.
+Normalization may strip fences/footer noise and canonicalize already-valid headings/confirmation, including harmless ordered-list prefixes that a provider adds before all seven headings. It does not invent sections or wrap free-form output as valid context. Invalid output advances through the same model/provider chain; exhaustion fails the job without pasting broken output.
 
 ## Endpoint Security And Limits
 

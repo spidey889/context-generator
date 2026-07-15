@@ -25,7 +25,7 @@ const PROVIDER_REQUEST_BUDGETS_MS = {
   "ministral-3b-2512": 25000,
   [GROQ_FALLBACK_MODEL]: 15000
 };
-const MISTRAL_PROMPT_CACHE_VERSION = "capcontext-summary-v3";
+const MISTRAL_PROMPT_CACHE_VERSION = "capcontext-summary-v4";
 const SUMMARY_PROVIDERS = {
   gemini: {
     id: "gemini",
@@ -511,7 +511,12 @@ async function createSummaryWithProvider({ provider, apiKey, profile, model, ini
 
   const validation = validateContextCarrySummary(rawSummary, profile);
   if (!validation.ok) {
-    throw createProviderError(provider, `${provider.label} returned an invalid summary: ${validation.reason}`, 502);
+    const finishDetail = finishReason ? `; finish reason ${finishReason}` : "";
+    throw createProviderError(
+      provider,
+      `${provider.label} returned an invalid summary: ${validation.reason}${finishDetail}`,
+      502
+    );
   }
 
   const summary = normalizeContextCarrySummary(rawSummary);
@@ -657,6 +662,7 @@ Hard rules:
 - Start with the boxed header exactly as shown in the template.
 - Keep every section heading exactly, including the emoji and capitalization.
 - Do not rename, reorder, remove, or add sections.
+- Copy each section heading as its own standalone line exactly as shown. Do not number it or prefix it with a bullet.
 - Replace bracket instructions with concrete, continuation-ready content from the conversation.
 - Target about ${profile.targetWords} useful words for this conversation size. Do not duplicate or pad short chats.
 - Use the ${profile.id} profile. Section budget: ${profile.sectionBudget}
@@ -1099,7 +1105,10 @@ function validateContextCarrySummary(text, profile) {
     return { ok: false, reason: `duplicate section: ${Array.from(parsed.duplicates)[0]}` };
   }
   if (!hasEveryRequiredSectionOnceInOrder(parsed)) {
-    return { ok: false, reason: "required sections are missing or out of order" };
+    return {
+      ok: false,
+      reason: `required sections are missing or out of order (recognized ${parsed.order.length}/${CONTEXT_CARRY_SECTIONS.length})`
+    };
   }
   if (parsed.introLines.some((line) => line.trim())) {
     return { ok: false, reason: "unexpected content outside required sections" };
@@ -1175,8 +1184,9 @@ function getContextCarrySectionMatch(line) {
   const withoutMarkdown = line
     .trim()
     .replace(/^#{1,6}\s*/, "")
+    .replace(/^(?:\d+[.)]|[-*+])\s+/, "")
+    .replace(/^#{1,6}\s*/, "")
     .replace(/^\*\*(.*)\*\*$/, "$1")
-    .replace(/^[-*]\s+/, "")
     .replace(/^(?:🧠|🎯|📍|✅|⚠️|⚠|📦|🔁)\s*/u, "")
     .trim();
   const normalized = withoutMarkdown

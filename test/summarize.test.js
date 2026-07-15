@@ -133,7 +133,7 @@ test("backend forwards a 210k conversation to Mistral and reports the same input
     assert.equal(capturedRequest.url, "https://api.mistral.ai/v1/chat/completions");
     assert.equal(capturedRequest.body.model, "mistral-medium-2604");
     assert.equal(capturedRequest.body.max_tokens, 4200);
-    assert.match(capturedRequest.body.prompt_cache_key, /^capcontext-summary-v3-large-mistral-medium-2604$/);
+    assert.match(capturedRequest.body.prompt_cache_key, /^capcontext-summary-v4-large-mistral-medium-2604$/);
     assert.equal(capturedRequest.body.prediction, undefined);
     const transcriptEnvelope = JSON.parse(capturedRequest.body.messages[1].content);
     assert.deepEqual(transcriptEnvelope, {
@@ -857,6 +857,28 @@ test("deterministic validation rejects malformed, empty, short, and refusal outp
   assert.equal(getMinimumValidSummaryWords(getSummaryProfile("x".repeat(90000))), 200);
 });
 
+test("validator canonicalizes numbered provider headings without weakening section requirements", () => {
+  const profile = getSummaryProfile("x".repeat(4000));
+  const headings = [
+    "WHO I AM",
+    "WHAT WE WERE DOING",
+    "WHERE WE LEFT OFF",
+    "DECISIONS MADE",
+    "OPEN QUESTIONS",
+    "KEY CONTEXT",
+    "NEXT STEP"
+  ];
+  let numbered = makeContextCarrySummary("numbered", 90);
+  headings.forEach((heading, index) => {
+    numbered = numbered.replace(`\n${heading}\n`, `\n${index + 1}. ${heading}\n`);
+  });
+
+  assert.equal(validateContextCarrySummary(numbered, profile).ok, true);
+  const normalized = normalizeContextCarrySummary(numbered);
+  assert.doesNotMatch(normalized, /^\d+[.)]\s+/m);
+  headings.forEach((heading) => assert.match(normalized, new RegExp(`(?:^|\\n)[^\\n]*${heading}\\n`)));
+});
+
 test("generated summaries select Gemini 3.5 Flash when its server key is configured", () => {
   const conversation = "x".repeat(20001);
 
@@ -1051,7 +1073,8 @@ test("summary prompt keeps decisions and current state tied to the latest user c
     /DECISIONS MADE must contain only decisions actually made by the user or clearly accepted or confirmed by the user/i
   );
   assert.match(prompt, /choices the user deliberately deferred and tradeoffs the user accepted/i);
-  assert.match(SUMMARIZE_SOURCE, /capcontext-summary-v3/);
+  assert.match(SUMMARIZE_SOURCE, /capcontext-summary-v4/);
+  assert.match(SUMMARIZE_SOURCE, /Do not number it or prefix it with a bullet/);
 });
 
 test("strips old copy-paste footer lines", () => {
