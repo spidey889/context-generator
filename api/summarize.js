@@ -10,6 +10,7 @@ const {
 const PROVIDER_RETRY_INTERVAL_MS = 450;
 const PROVIDER_ATTEMPT_TIMEOUT_MS = 80000;
 const GEMINI_PRIMARY_MODEL = "gemini-3.5-flash";
+const GEMINI_THINKING_TOKEN_ALLOWANCE = 4000;
 const GEMINI_GENERATE_CONTENT_URL = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_PRIMARY_MODEL}:generateContent`;
 const MISTRAL_CHAT_COMPLETIONS_URL = "https://api.mistral.ai/v1/chat/completions";
 const GROQ_CHAT_COMPLETIONS_URL = "https://api.groq.com/openai/v1/chat/completions";
@@ -590,7 +591,9 @@ function getProviderRequestBody(provider, messages, profile, model) {
         parts: [{ text: String(userMessage?.content || "") }]
       }],
       generationConfig: {
-        maxOutputTokens: profile.maxTokens,
+        // Gemini counts hidden reasoning against the generation allowance. Keep
+        // the visible profile target intact while reserving room to reach all sections.
+        maxOutputTokens: profile.maxTokens + GEMINI_THINKING_TOKEN_ALLOWANCE,
         thinkingConfig: {
           thinkingLevel: "MEDIUM"
         }

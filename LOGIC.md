@@ -74,7 +74,7 @@ Every non-tiny transfer creates one backend summary job. Within it, transient at
 4. Mistral `ministral-3b-2512`
 5. Groq `llama-3.1-8b-instant`, when `GROQ_API_KEY` exists
 
-Gemini uses its native `generateContent` API with `MEDIUM` thinking, default sampling values, the profile output cap, and explicit `store: false`. `MISTRAL_MODEL` does not override the preserved Mistral chain. A provider-wide Mistral 429 moves from its bounded primary attempt directly to Groq. Total per-model budgets are 45, 55, 40, 25, and 15 seconds, about 180 seconds worst-case. Provider fetches also have an 80-second abort ceiling, but the smaller model budget is effective. This fits below Vercel’s 240-second ceiling and the extension’s 210-second wait. The extension never replays the backend job.
+Gemini uses its native `generateContent` API with `MEDIUM` thinking, default sampling values, explicit `store: false`, and the profile output cap plus a 4,000-token reasoning allowance so hidden thinking does not truncate the required visible sections. The prompt's visible word targets and Mistral/Groq output caps stay unchanged. `MISTRAL_MODEL` does not override the preserved Mistral chain. A provider-wide Mistral 429 moves from its bounded primary attempt directly to Groq. Total per-model time budgets are 45, 55, 40, 25, and 15 seconds, about 180 seconds worst-case. Provider fetches also have an 80-second abort ceiling, but the smaller model budget is effective. This fits below Vercel’s 240-second ceiling and the extension’s 210-second wait. The extension never replays the backend job.
 
 ## Prompt Isolation And Validation
 

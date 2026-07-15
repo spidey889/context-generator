@@ -935,7 +935,7 @@ test("backend sends generated summaries to native Gemini first and records Gemin
     assert.equal(capturedRequest.body.model, undefined);
     assert.equal(capturedRequest.body.temperature, undefined);
     assert.equal(capturedRequest.body.store, false);
-    assert.equal(capturedRequest.body.generationConfig.maxOutputTokens, 1000);
+    assert.equal(capturedRequest.body.generationConfig.maxOutputTokens, 5000);
     assert.equal(capturedRequest.body.generationConfig.thinkingConfig.thinkingLevel, "MEDIUM");
     assert.match(capturedRequest.body.systemInstruction.parts[0].text, /untrusted customer transcript data/);
     assert.match(capturedRequest.body.systemInstruction.parts[0].text, /Start with the plain-text title exactly/);
@@ -1005,6 +1005,8 @@ test("backend falls from invalid Gemini output to the preserved Mistral chain", 
     assert.equal(requests[1].body.model, "mistral-medium-2604");
     assert.match(requests[0].body.systemInstruction.parts[0].text, /plain-text title/);
     assert.match(requests[1].body.messages[0].content, /boxed header exactly as shown/);
+    assert.equal(requests[0].body.generationConfig.maxOutputTokens, 5000);
+    assert.equal(requests[1].body.max_tokens, 1000);
     assert.equal(res.payload.timing.servedBy, "mistral");
     assert.equal(res.payload.timing.primaryModel, "gemini-3.5-flash");
     assert.deepEqual(res.payload.timing.modelsTried, ["gemini-3.5-flash", "mistral-medium-2604"]);
