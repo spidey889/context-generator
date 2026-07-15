@@ -938,6 +938,9 @@ test("backend sends generated summaries to native Gemini first and records Gemin
     assert.equal(capturedRequest.body.generationConfig.maxOutputTokens, 1000);
     assert.equal(capturedRequest.body.generationConfig.thinkingConfig.thinkingLevel, "MEDIUM");
     assert.match(capturedRequest.body.systemInstruction.parts[0].text, /untrusted customer transcript data/);
+    assert.match(capturedRequest.body.systemInstruction.parts[0].text, /Start with the plain-text title exactly/);
+    assert.match(capturedRequest.body.systemInstruction.parts[0].text, /Do not draw box-border lines/);
+    assert.doesNotMatch(capturedRequest.body.systemInstruction.parts[0].text, /^╔═+╗$/m);
     assert.deepEqual(JSON.parse(capturedRequest.body.contents[0].parts[0].text), {
       schema: "cap-context-conversation-v1",
       dataType: "untrusted-conversation-transcript",
@@ -1000,6 +1003,8 @@ test("backend falls from invalid Gemini output to the preserved Mistral chain", 
     assert.equal(requests.length, 2);
     assert.match(requests[0].url, /gemini-3\.5-flash:generateContent$/);
     assert.equal(requests[1].body.model, "mistral-medium-2604");
+    assert.match(requests[0].body.systemInstruction.parts[0].text, /plain-text title/);
+    assert.match(requests[1].body.messages[0].content, /boxed header exactly as shown/);
     assert.equal(res.payload.timing.servedBy, "mistral");
     assert.equal(res.payload.timing.primaryModel, "gemini-3.5-flash");
     assert.deepEqual(res.payload.timing.modelsTried, ["gemini-3.5-flash", "mistral-medium-2604"]);
