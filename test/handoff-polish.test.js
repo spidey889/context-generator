@@ -27,9 +27,11 @@ test("handoff polish creates one clear header, headline, and progress hierarchy"
   assert.match(overlaySource, /width:4px/);
   assert.match(overlaySource, /contextGeneratorSummaryDotHop/);
   assert.match(overlaySource, /context-generator-summary-activity-dot/);
-  assert.match(overlaySource, /width:5px/);
-  assert.match(overlaySource, /animation-delay:140ms/);
-  assert.match(overlaySource, /animation-delay:280ms/);
+  assert.match(overlaySource, /dot\.textContent = "\."/);
+  assert.match(overlaySource, /color:#f2f0f6/);
+  assert.match(overlaySource, /contextGeneratorSummaryDotHop 1800ms/);
+  assert.match(overlaySource, /animation-delay:220ms/);
+  assert.match(overlaySource, /animation-delay:440ms/);
   assert.doesNotMatch(overlaySource, /#F0D7FF|#DDB5F5|#FFFFEB|#050505|#7459d6|rgba\((?:126,94,228|151,125,244)/);
   assert.match(overlaySource, /"justify-content:flex-start"/);
   assert.match(overlaySource, /"font-size:29px"[\s\S]*"font-family:Georgia,'Times New Roman',serif"/);

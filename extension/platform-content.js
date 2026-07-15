@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-07-15-summary-bouncing-dots";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-07-15-summary-ellipsis-refined";
   const BUBBLE_ID = "context-generator-bubble";
   const OVERLAY_ID = "context-generator-overlay";
   const HANDOFF_SCRIM_ID = "context-generator-handoff-scrim";
@@ -4125,6 +4125,7 @@
       for (let index = 0; index < 3; index += 1) {
         const dot = document.createElement("span");
         dot.className = "context-generator-summary-activity-dot";
+        dot.textContent = ".";
         summaryActivity.appendChild(dot);
       }
       statusText.appendChild(summaryActivity);
@@ -4189,35 +4190,36 @@
             to{opacity:1;transform:translate3d(0,0,0)}
           }
           @keyframes contextGeneratorSummaryDotHop{
-            0%,55%,100%{opacity:0.46;transform:translate3d(0,0,0)}
-            24%{opacity:1;transform:translate3d(0,-4px,0)}
+            0%,48%,100%{opacity:0.54;transform:translate3d(0,0,0)}
+            18%{opacity:1;transform:translate3d(0,-3px,0)}
           }
           #context-generator-text .context-generator-summary-activity{
             display:none;
             flex:0 0 auto;
-            height:12px;
-            margin:0 0 1px 6px;
-            align-items:center;
-            gap:3px;
+            position:relative;
+            top:1px;
+            margin-left:1px;
+            align-items:baseline;
+            gap:0;
+            color:#f2f0f6;
+            font:inherit;
+            line-height:inherit;
+            letter-spacing:0;
             pointer-events:none;
           }
           #context-generator-text .context-generator-summary-activity[data-active="true"]{
             display:inline-flex;
           }
           #context-generator-text .context-generator-summary-activity-dot{
-            display:block;
-            width:5px;
-            height:5px;
-            border-radius:999px;
-            background:#9A7ADC;
-            box-shadow:0 0 6px rgba(154,122,220,0.34);
-            opacity:0.46;
+            display:inline-block;
+            color:inherit;
+            opacity:0.54;
             transform:translate3d(0,0,0);
-            animation:contextGeneratorSummaryDotHop 900ms cubic-bezier(0.45,0,0.55,1) infinite;
+            animation:contextGeneratorSummaryDotHop 1800ms cubic-bezier(0.45,0,0.55,1) infinite;
             will-change:transform,opacity;
           }
-          #context-generator-text .context-generator-summary-activity-dot:nth-child(2){animation-delay:140ms}
-          #context-generator-text .context-generator-summary-activity-dot:nth-child(3){animation-delay:280ms}
+          #context-generator-text .context-generator-summary-activity-dot:nth-child(2){animation-delay:220ms}
+          #context-generator-text .context-generator-summary-activity-dot:nth-child(3){animation-delay:440ms}
           #context-generator-handoff-progress .context-generator-handoff-stage{
             position:relative;
             min-width:0;
