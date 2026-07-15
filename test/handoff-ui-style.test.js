@@ -54,7 +54,7 @@ test("capture connector progress follows real scraper distance and reserves comp
 test("summary connector creeps below completion while real events remain authoritative", () => {
   assert.match(source, /HANDOFF_ACTIVITY_LINE_START = 0\.05/);
   assert.match(source, /HANDOFF_ACTIVITY_LINE_MAX = 0\.9/);
-  assert.match(source, /HANDOFF_ACTIVITY_LINE_DURATION_MS = 30000/);
+  assert.match(source, /HANDOFF_ACTIVITY_LINE_DURATION_MS = 12000/);
   assert.match(source, /setHandoffStageLineProgress\(stageId, HANDOFF_ACTIVITY_LINE_MAX\)/);
   assert.match(source, /stage\.state === "complete"\s*\? 1/);
   assert.doesNotMatch(source.slice(

@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-07-15-summary-ellipsis-refined";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-07-15-summary-line-faster";
   const BUBBLE_ID = "context-generator-bubble";
   const OVERLAY_ID = "context-generator-overlay";
   const HANDOFF_SCRIM_ID = "context-generator-handoff-scrim";
@@ -113,7 +113,7 @@
   const HANDOFF_CAPTURE_LINE_MAX = 0.94;
   const HANDOFF_ACTIVITY_LINE_START = 0.05;
   const HANDOFF_ACTIVITY_LINE_MAX = 0.9;
-  const HANDOFF_ACTIVITY_LINE_DURATION_MS = 30000;
+  const HANDOFF_ACTIVITY_LINE_DURATION_MS = 12000;
   const GENERIC_CONVERSATION_SELECTORS = [
     "[data-message-author-role]",
     "[data-testid*='conversation' i]",
