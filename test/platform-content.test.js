@@ -346,10 +346,10 @@ test("handoff progress is branded and wired only to real pipeline events", () =>
   assert.match(overlaySource, /brandIcon\.src = BUBBLE_ICON_URL/);
   assert.match(overlaySource, /brandText\.textContent = "Cap Context"/);
   assert.match(source, /const HANDOFF_REASSURANCE_TEXT = "Almost done, don't cancel now"/);
-  assert.match(
-    source,
-    /if \(remainingMs <= 0\) \{\s*hideHandoffCountdown\(countdown\);[\s\S]{0,700}countdown\.textContent = HANDOFF_REASSURANCE_TEXT/
-  );
+  assert.match(source, /reassurance\.textContent = HANDOFF_REASSURANCE_TEXT/);
+  assert.match(source, /countdown\.style\.display = "none";\s*showHandoffReassurance\(\)/);
+  assert.match(source, /font-family:Georgia,'Times New Roman',serif/);
+  assert.doesNotMatch(source, /countdown\.textContent = HANDOFF_REASSURANCE_TEXT/);
   assert.doesNotMatch(overlaySource, /Math\.random|setInterval|startHandoffStatusCycle/);
   assert.doesNotMatch(source, /HANDOFF_STATUS_INTERVAL_MS|HANDOFF_QUOTES|setHandoffStatus/);
 

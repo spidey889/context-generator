@@ -101,6 +101,7 @@
   const CHATGPT_PASTE_STABILITY_MS = 550;
   const HANDOFF_COUNTDOWN_ID = "context-generator-handoff-countdown";
   const HANDOFF_COUNTDOWN_FIXED_MS = 30000;
+  const HANDOFF_REASSURANCE_ID = "context-generator-handoff-reassurance";
   const HANDOFF_REASSURANCE_TEXT = "Almost done, don't cancel now";
   // Stage completion still comes only from real pipeline marks. In-stage line motion is display-only:
   // capture reads the sweep's existing scroll diagnostics, while summary creeps below completion.
@@ -4181,6 +4182,34 @@
       }
       statusText.appendChild(summaryActivity);
 
+      const reassurance = document.createElement("span");
+      reassurance.id = HANDOFF_REASSURANCE_ID;
+      reassurance.textContent = HANDOFF_REASSURANCE_TEXT;
+      reassurance.setAttribute("aria-live", "polite");
+      reassurance.setAttribute("aria-hidden", "true");
+      reassurance.style.cssText = [
+        "position:absolute",
+        "z-index:1",
+        "left:50%",
+        "top:calc(100% + 3px)",
+        "width:max-content",
+        "max-width:calc(100vw - 80px)",
+        "overflow:hidden",
+        "text-overflow:ellipsis",
+        "white-space:nowrap",
+        "color:rgba(248,246,251,0.9)",
+        "font-family:Georgia,'Times New Roman',serif",
+        "font-size:12.5px",
+        "font-weight:500",
+        "line-height:1.15",
+        "letter-spacing:0",
+        "opacity:0",
+        "visibility:hidden",
+        "transform:translate3d(-50%,2px,0)",
+        "transition:opacity 160ms ease,transform 160ms ease"
+      ].join(";");
+      statusText.appendChild(reassurance);
+
       const progress = document.createElement("div");
       progress.id = "context-generator-handoff-progress";
       progress.setAttribute("role", "list");
@@ -4371,6 +4400,7 @@
           @media (prefers-reduced-motion: reduce){
             #context-generator-text{animation:none!important}
             #context-generator-text .context-generator-summary-activity-dot{animation:none!important;opacity:0.72}
+            #${HANDOFF_REASSURANCE_ID}{transition:none!important}
             #context-generator-handoff-progress .context-generator-handoff-stage-connector-fill,
             #context-generator-handoff-progress .context-generator-handoff-stage-progress-head{transition:none!important}
           }
@@ -4402,7 +4432,6 @@
         "line-height:1",
         "letter-spacing:0",
         "font-variant-numeric:tabular-nums",
-        "white-space:nowrap",
         "opacity:0",
         "transition:opacity 160ms ease"
       ].join(";");
@@ -4688,13 +4717,30 @@
 
     countdown.style.opacity = "0";
     handoffCountdownHideTimer = window.setTimeout(() => {
-      // Reuse the countdown slot after it expires so the card never grows or shifts.
-      countdown.textContent = HANDOFF_REASSURANCE_TEXT;
-      countdown.setAttribute("aria-label", HANDOFF_REASSURANCE_TEXT);
-      countdown.style.display = "inline-flex";
-      countdown.style.opacity = "1";
+      countdown.style.display = "none";
+      showHandoffReassurance();
       handoffCountdownHideTimer = null;
     }, 170);
+  }
+
+  function showHandoffReassurance() {
+    const reassurance = document.getElementById(HANDOFF_REASSURANCE_ID);
+    if (!reassurance || !isHandoffOverlayVisible()) return;
+
+    reassurance.setAttribute("aria-hidden", "false");
+    reassurance.style.visibility = "visible";
+    reassurance.style.opacity = "1";
+    reassurance.style.transform = "translate3d(-50%,0,0)";
+  }
+
+  function hideHandoffReassurance() {
+    const reassurance = document.getElementById(HANDOFF_REASSURANCE_ID);
+    if (!reassurance) return;
+
+    reassurance.setAttribute("aria-hidden", "true");
+    reassurance.style.opacity = "0";
+    reassurance.style.visibility = "hidden";
+    reassurance.style.transform = "translate3d(-50%,2px,0)";
   }
 
   function stopHandoffCountdown() {
@@ -4712,6 +4758,7 @@
       countdown.style.opacity = "0";
       countdown.style.display = "none";
     }
+    hideHandoffReassurance();
   }
 
   function showErrorOverlay(message) {
