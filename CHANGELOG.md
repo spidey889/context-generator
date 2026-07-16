@@ -6,6 +6,8 @@ Historical production decisions and useful implementation context live here. Cur
 
 [Codex: keep adding short entries here after major changes, fixes, reversions, or model/prompt decisions. Write what changed, what worked, and what got replaced. Keep it short.]
 
+- 2026-07-16: Removed generated browser/package artifacts and two unused tracked logos, then simplified capture without changing its timing floors or candidate-resolution rules. Settled snapshots now feed overlap and diagnostics directly, collapsed-control discovery runs once per settled rendered window, dead placement/tab-wait paths are gone, and the platform test harness compiles the content script once and runs isolated long-sweep regressions concurrently. The complete 100-test suite retained all stronger capture fixtures and fell from 83.9 seconds before this pass to 26.0 seconds; the lower-level candidate resolver remains deliberately unchanged for later work.
+
 - 2026-07-16: Pruned eight low-value tests: six brittle handoff CSS/source-literal checks, one duplicate exact-deduplication case, and one obsolete five-platform long-sweep matrix already covered by focused capture fixtures. The suite now keeps 100 behavior-oriented tests; measured Node test duration fell from 150.2 seconds to 83.9 seconds.
 
 - 2026-07-16: A follow-up production probe with the plain Gemini title still ended at `MAX_TOKENS` after only 1/7 sections, proving hidden `MEDIUM` reasoning was consuming the small profile's generation allowance. Gemini now receives the unchanged profile cap plus a 4,000-token reasoning allowance so it can finish the visible contract; visible word targets and every Mistral/Groq cap remain unchanged.

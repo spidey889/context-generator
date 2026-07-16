@@ -4,6 +4,9 @@ node_modules/
 package-lock.json
 api/mcp.mjs
 extension/chrome.zip
+extension/firefox.zip
+/chrome*.zip
+/.live-site-profile/
 *Backup authentication codes.txt
 memory.md
 OLD_README.md

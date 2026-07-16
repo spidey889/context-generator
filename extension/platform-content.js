@@ -53,7 +53,6 @@
   const MAX_BACKEND_CONVERSATION_CHARS = 210000;
   const OVERSIZED_CONVERSATION_ERROR_MESSAGE = "Conversation exceeds the supported 210,000 character limit";
   const CONVERSATION_SCRAPE_RETRY_TIMEOUT_MS = 1800;
-  const CLAUDE_CONVERSATION_SCRAPE_RETRY_TIMEOUT_MS = 1800;
   const CONVERSATION_SCRAPE_RETRY_INTERVAL_MS = 140;
   const SOURCE_SCROLL_STABLE_TIMEOUT_MS = 1800;
   const SOURCE_SCROLL_LONG_STABLE_TIMEOUT_MS = 4500;
@@ -726,6 +725,10 @@
     const messageTurns = getConversationTurns().filter((turn) => isDetectedConversationMessage(turn));
     const scrollState = getSourceScrollState();
     return {
+      turns: messageTurns,
+      signature: messageTurns
+        .map((turn) => getConversationTurnSignature(turn.role, cleanText(turn.text)))
+        .join("\u0002"),
       count: messageTurns.length,
       chars: messageTurns.reduce((total, turn) => total + turn.text.length, 0),
       scrollHeight: scrollState.scrollHeight,
@@ -881,22 +884,25 @@
   ) {
     const startedAt = Date.now();
     let lastSnapshot = getConversationReadinessSnapshot();
+    let latestSnapshot = lastSnapshot;
     let stableSamples = 0;
 
     while (Date.now() - startedAt < timeoutMs) {
       const remainingMs = timeoutMs - (Date.now() - startedAt);
       await delay(Math.min(SOURCE_SCROLL_STABLE_INTERVAL_MS, Math.max(0, remainingMs)));
 
-      const expandedCount = await expandCollapsedConversationContent();
       const nextSnapshot = getConversationReadinessSnapshot();
-      if (expandedCount === 0 && isConversationWindowStable(lastSnapshot, nextSnapshot)) {
+      latestSnapshot = nextSnapshot;
+      if (isConversationWindowStable(lastSnapshot, nextSnapshot)) {
         stableSamples += 1;
-        if (stableSamples >= stableSampleCount) return;
+        if (stableSamples >= stableSampleCount) return nextSnapshot;
       } else {
         lastSnapshot = nextSnapshot;
         stableSamples = 0;
       }
     }
+
+    return latestSnapshot;
   }
 
   function isConversationWindowStable(previous, next) {
@@ -1807,6 +1813,7 @@
 
       const beforeWindowSignature = renderedSnapshot.signature;
       let afterWindowSignature = beforeWindowSignature;
+      let afterRenderedSnapshot = renderedSnapshot;
       let triedBoundaryAdvance = false;
       let pixelMoved = false;
       let settleMs = 0;
@@ -1820,9 +1827,9 @@
         const settleStartedAt = Date.now();
         // This minimum stability window is intentional. Signature changes can happen synchronously after a
         // scroll, but the real page still needs time to mount and finish rendering the new virtualized window.
-        await waitForConversationWindowToSettle();
+        afterRenderedSnapshot = await waitForConversationWindowToSettle();
         settleMs += Date.now() - settleStartedAt;
-        afterWindowSignature = getRenderedConversationWindowSignature();
+        afterWindowSignature = afterRenderedSnapshot.signature;
       }
 
       scrolls += 1;
@@ -1831,18 +1838,19 @@
         triedBoundaryAdvance = scrollRenderedConversationBoundaryIntoView(renderedSnapshot.anchor);
         if (triedBoundaryAdvance) {
           const settleStartedAt = Date.now();
-          await waitForConversationWindowToSettle();
+          afterRenderedSnapshot = await waitForConversationWindowToSettle();
           settleMs += Date.now() - settleStartedAt;
-          afterWindowSignature = getRenderedConversationWindowSignature();
+          afterWindowSignature = afterRenderedSnapshot.signature;
         }
       }
 
       if (afterWindowSignature === beforeWindowSignature && !pixelMoved) {
         const quietStartedAt = Date.now();
-        afterWindowSignature = await waitForRenderedConversationWindowChange(
+        afterRenderedSnapshot = await waitForRenderedConversationWindowChange(
           beforeWindowSignature,
           getVirtualSweepTerminalQuietTimeout()
         );
+        afterWindowSignature = afterRenderedSnapshot.signature;
         settleMs += Date.now() - quietStartedAt;
         if (afterWindowSignature === beforeWindowSignature && !pixelMoved) {
           terminalQuietChecks += 1;
@@ -1856,7 +1864,7 @@
             windowChanged: false,
             addedTurnCount: added,
             collectedTurnCount: collectedTurns.length,
-            detectedTurnCount: getDetectedConversationMessageCount(),
+            detectedTurnCount: afterRenderedSnapshot.turns.length,
             staleScrolls,
             settleMs,
             beforeScrollTop: beforeScrollState.scrollTop,
@@ -1868,7 +1876,6 @@
 
       const windowChanged = afterWindowSignature !== beforeWindowSignature;
       if (windowChanged) {
-        const afterRenderedSnapshot = getRenderedConversationSnapshot();
         useLargerOverlapStep = hasSafeOrderedConversationWindowOverlap(
           renderedSnapshot.turns,
           afterRenderedSnapshot.turns
@@ -1897,7 +1904,7 @@
         windowChanged,
         addedTurnCount: added,
         collectedTurnCount: collectedTurns.length,
-        detectedTurnCount: getDetectedConversationMessageCount(),
+        detectedTurnCount: afterRenderedSnapshot.turns.length,
         staleScrolls,
         settleMs,
         stepPixels: step,
@@ -2160,17 +2167,17 @@
 
   async function waitForRenderedConversationWindowChange(previousSignature, timeoutMs) {
     const startedAt = Date.now();
-    let nextSignature = getRenderedConversationWindowSignature();
-    if (nextSignature !== previousSignature) return nextSignature;
+    let nextSnapshot = getRenderedConversationSnapshot();
+    if (nextSnapshot.signature !== previousSignature) return nextSnapshot;
 
     while (Date.now() - startedAt < timeoutMs) {
       const remainingMs = timeoutMs - (Date.now() - startedAt);
       await delay(Math.min(VIRTUAL_SWEEP_CHANGE_POLL_MS, Math.max(0, remainingMs)));
-      nextSignature = getRenderedConversationWindowSignature();
-      if (nextSignature !== previousSignature) return nextSignature;
+      nextSnapshot = getRenderedConversationSnapshot();
+      if (nextSnapshot.signature !== previousSignature) return nextSnapshot;
     }
 
-    return nextSignature;
+    return nextSnapshot;
   }
 
   function scrollRenderedConversationBoundaryIntoView(anchor = getRenderedConversationSnapshot().anchor) {
@@ -2200,10 +2207,6 @@
         .map((turn) => getConversationTurnSignature(turn.role, turn.text))
         .join("\u0002")
     };
-  }
-
-  function getRenderedConversationWindowSignature() {
-    return getRenderedConversationSnapshot().signature;
   }
 
   function getConversationTurnSignature(role, text) {
@@ -2252,7 +2255,7 @@
     };
   }
 
-  async function scrapeConversationTextWhenReady(timeoutMs = getConversationScrapeRetryTimeout()) {
+  async function scrapeConversationTextWhenReady(timeoutMs = CONVERSATION_SCRAPE_RETRY_TIMEOUT_MS) {
     const startedAt = Date.now();
     let lastEmptyError = null;
 
@@ -2274,12 +2277,6 @@
 
   function isNoConversationError(error) {
     return error?.message === NO_CONVERSATION_ERROR_MESSAGE;
-  }
-
-  function getConversationScrapeRetryTimeout() {
-    return currentPlatform.id === "claude"
-      ? CLAUDE_CONVERSATION_SCRAPE_RETRY_TIMEOUT_MS
-      : CONVERSATION_SCRAPE_RETRY_TIMEOUT_MS;
   }
 
   function waitForConversationContentSignal(timeoutMs) {
@@ -5506,29 +5503,6 @@
     };
   }
 
-  function getChatGptBubblePlacement(composerRect, composerSurface = null) {
-    const modelButton = composerSurface ? findChatGptModelSelectorButton(composerSurface, composerRect) : null;
-    if (modelButton) {
-      const modelRect = modelButton.getBoundingClientRect();
-      const left = modelRect.left - composerRect.left - BUBBLE_SIZE - BUBBLE_GAP;
-      if (left >= BUBBLE_GAP) {
-        return getBubblePlacementBesideRect(modelRect, composerRect, left);
-      }
-    }
-
-    const rowButtons = getChatGptComposerButtonCandidates(composerRect);
-    const actionButton = rowButtons[rowButtons.length - 1];
-
-    if (actionButton) {
-      const left = actionButton.rect.left - composerRect.left - BUBBLE_SIZE - BUBBLE_GAP;
-      if (left >= BUBBLE_GAP) {
-        return getBubblePlacementBesideRect(actionButton.rect, composerRect, left);
-      }
-    }
-
-    return getBottomRightRowBubblePlacement(composerRect, 64);
-  }
-
   function getChatGptComposerButtonCandidates(composerRect) {
     const rowTop = composerRect.bottom - Math.max(60, composerRect.height * 0.55);
 
@@ -5611,27 +5585,6 @@
         if (b.score !== a.score) return b.score - a.score;
         return b.rect.left - a.rect.left;
       })[0]?.button || null;
-  }
-
-  function getGrokComposerButtonCandidates(composerRect) {
-    const rowTop = composerRect.bottom - Math.max(62, composerRect.height * 0.58);
-
-    return Array.from(document.querySelectorAll("button, [role='button'], [tabindex='0']"))
-      .filter((button) => button.id !== BUBBLE_ID && !isContextGeneratorNode(button) && isVisible(button))
-      .map((button) => ({ button, rect: button.getBoundingClientRect() }))
-      .filter(({ rect }) => {
-        return (
-          rect.width > 0 &&
-          rect.width <= 88 &&
-          rect.height > 0 &&
-          rect.height <= 72 &&
-          rect.left >= composerRect.left + composerRect.width * 0.35 &&
-          rect.right <= composerRect.right + 12 &&
-          rect.top >= rowTop &&
-          rect.bottom <= composerRect.bottom + 12
-        );
-      })
-      .sort((a, b) => a.rect.left - b.rect.left);
   }
 
   function getDeepSeekBubblePlacement(composerRect) {

@@ -618,42 +618,6 @@ function getPlatformFromUrl(url) {
   }
 }
 
-function waitForTabLoaded(tabId, name = "destination") {
-  return new Promise((resolve, reject) => {
-    if (!tabId) {
-      reject(new Error("Missing tab id."));
-      return;
-    }
-
-    const timeout = setTimeout(() => {
-      chrome.tabs.onUpdated.removeListener(listener);
-      reject(new Error(`Timed out waiting for ${name} to load.`));
-    }, 30000);
-
-    const listener = (updatedTabId, info) => {
-      if (updatedTabId === tabId && info.status === "complete") {
-        clearTimeout(timeout);
-        chrome.tabs.onUpdated.removeListener(listener);
-        resolve();
-      }
-    };
-
-    chrome.tabs.onUpdated.addListener(listener);
-
-    chrome.tabs.get(tabId).then((tab) => {
-      if (tab.status === "complete") {
-        clearTimeout(timeout);
-        chrome.tabs.onUpdated.removeListener(listener);
-        resolve();
-      }
-    }).catch((error) => {
-      clearTimeout(timeout);
-      chrome.tabs.onUpdated.removeListener(listener);
-      reject(error);
-    });
-  });
-}
-
 async function setBadge(text, color, timeoutMs) {
   await chrome.action.setBadgeBackgroundColor({ color });
   await chrome.action.setBadgeText({ text });

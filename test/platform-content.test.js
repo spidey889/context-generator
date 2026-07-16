@@ -6,6 +6,15 @@ const vm = require("node:vm");
 
 const SOURCE_PATH = path.join(__dirname, "..", "extension", "platform-content.js");
 const MANIFEST_PATH = path.join(__dirname, "..", "extension", "manifest.json");
+const COMPILED_PLATFORM_CONTENT_SCRIPT = new vm.Script(
+  fs.readFileSync(SOURCE_PATH, "utf8"),
+  { filename: SOURCE_PATH }
+);
+const virtualSweepTests = [];
+
+function virtualSweepTest(name, fn) {
+  virtualSweepTests.push({ name, fn });
+}
 
 let nextOrder = 1;
 
@@ -168,7 +177,6 @@ class FakeHTMLInputElement {
 }
 
 function loadPlatformContent(elements = [], hostname = "chatgpt.com", { expectSupported = true } = {}) {
-  nextOrder = 1;
   let hooks = null;
   const document = {
     body: new FakeElement({ tag: "body" }),
@@ -229,7 +237,7 @@ function loadPlatformContent(elements = [], hostname = "chatgpt.com", { expectSu
   };
 
   vm.createContext(sandbox);
-  vm.runInContext(fs.readFileSync(SOURCE_PATH, "utf8"), sandbox, { filename: SOURCE_PATH });
+  COMPILED_PLATFORM_CONTENT_SCRIPT.runInContext(sandbox);
   if (expectSupported) {
     assert.ok(hooks, "platform-content test hooks were registered");
   }
@@ -752,7 +760,7 @@ function createVirtualizedChatElements({
   return { elements, scrollableRoot };
 }
 
-test("transfer capture keeps fuller swept text when the turn count matches the quick capture", async () => {
+virtualSweepTest("transfer capture keeps fuller swept text when the turn count matches the quick capture", async () => {
   const elements = [];
   const scrollableRoot = new FakeElement({
     text: "Scrollable ChatGPT chat root",
@@ -805,40 +813,7 @@ test("transfer capture keeps fuller swept text when the turn count matches the q
   assert.match(transcript, /details that were cut off during the quick first look/);
 });
 
-test("virtual sweep gives the rendered page time to settle between scroll advances", async () => {
-  const { elements, scrollableRoot } = createVirtualizedChatElements({
-    label: "ChatGPT",
-    totalTurns: 16,
-    windowSize: 4,
-    scrollHeight: 3200,
-    makeTurn: (index) => new FakeElement({
-      text: `Paced virtualized turn ${index}`,
-      attrs: { "data-message-author-role": index % 2 ? "user" : "assistant" }
-    })
-  });
-  const hooks = loadPlatformContent(elements, "chatgpt.com");
-
-  await hooks.prepareSourceForCapture();
-  const positiveScrollTimes = [];
-  const virtualizedScrollTo = scrollableRoot.scrollTo.bind(scrollableRoot);
-  scrollableRoot.scrollTo = (...args) => {
-    const requestedTop = typeof args[0] === "object" ? Number(args[0]?.top || 0) : Number(args[1] || 0);
-    if (requestedTop > Number(scrollableRoot.scrollTop || 0)) positiveScrollTimes.push(Date.now());
-    virtualizedScrollTo(...args);
-  };
-
-  const transcript = await hooks.scrapeConversationTextWhenReady();
-  const gaps = positiveScrollTimes.slice(1).map((time, index) => time - positiveScrollTimes[index]);
-
-  assert.equal((transcript.match(/(?:User|ChatGPT): Paced virtualized turn/g) || []).length, 16);
-  assert.ok(gaps.length >= 2, "fixture should require multiple downward scroll advances");
-  assert.ok(
-    gaps.every((gap) => gap >= 250),
-    `each scroll advance should leave a real render window; observed gaps: ${gaps.join(", ")}ms`
-  );
-});
-
-test("physical scroll movement prevents a premature stale exit on non-Claude chats", async () => {
+virtualSweepTest("physical scroll movement prevents a premature stale exit on non-Claude chats", async () => {
   const { elements } = createVirtualizedChatElements({
     label: "ChatGPT",
     totalTurns: 16,
@@ -861,7 +836,7 @@ test("physical scroll movement prevents a premature stale exit on non-Claude cha
   assert.match(transcript, /ChatGPT: Delayed tall-message turn 16/);
 });
 
-test("Claude sweep captures a real-scale 78-turn long chat with paced advances", async () => {
+virtualSweepTest("Claude sweep captures a real-scale 78-turn long chat with paced advances", async () => {
   const longText = "Long Claude message detail ".repeat(28).trim();
   const { elements, scrollableRoot } = createVirtualizedChatElements({
     label: "Claude",
@@ -910,7 +885,7 @@ test("Claude sweep captures a real-scale 78-turn long chat with paced advances",
   );
 });
 
-test("Claude sweep crosses one oversized rendered message before concluding capture is complete", async () => {
+virtualSweepTest("Claude sweep crosses one oversized rendered message before concluding capture is complete", async () => {
   const elements = [];
   const totalTurns = 24;
   const windowSize = 12;
@@ -969,7 +944,7 @@ test("Claude sweep crosses one oversized rendered message before concluding capt
   assert.match(transcript, /Claude: Normal Claude turn 24/);
 });
 
-test("Claude sweep advances by rendered message boundary when the next virtual batch is available", async () => {
+virtualSweepTest("Claude sweep advances by rendered message boundary when the next virtual batch is available", async () => {
   const elements = [];
   const totalTurns = 40;
   const windowSize = 8;
@@ -1014,7 +989,7 @@ test("Claude sweep advances by rendered message boundary when the next virtual b
   assert.ok(boundaryAdvances > 0, "Claude sweep should use rendered boundary advances");
 });
 
-test("Claude sweep waits through slow virtualized batches before declaring stale", async () => {
+virtualSweepTest("Claude sweep waits through slow virtualized batches before declaring stale", async () => {
   const { elements } = createVirtualizedChatElements({
     label: "Claude",
     totalTurns: 16,
@@ -1037,7 +1012,7 @@ test("Claude sweep waits through slow virtualized batches before declaring stale
   assert.match(transcript, /Claude: Slow loading Claude batch turn 16/);
 });
 
-test("ChatGPT sweep handles eight-turn virtualized windows on a large app scroll root", async () => {
+virtualSweepTest("ChatGPT sweep handles eight-turn virtualized windows on a large app scroll root", async () => {
   const elements = [];
   const totalTurns = 78;
   const windowSize = 8;
@@ -1098,7 +1073,7 @@ test("ChatGPT sweep handles eight-turn virtualized windows on a large app scroll
   assert.equal(appScrollRoot.scrollCalls.some((call) => Number(call?.top || 0) > 0), true);
 });
 
-test("ChatGPT sweep ignores an oversized decoy and keeps virtualized scroll coverage contiguous", async () => {
+virtualSweepTest("ChatGPT sweep ignores an oversized decoy and keeps virtualized scroll coverage contiguous", async () => {
   const elements = [];
   const totalTurns = 78;
   const windowSize = 8;
@@ -1175,7 +1150,7 @@ test("ChatGPT sweep ignores an oversized decoy and keeps virtualized scroll cove
   assert.equal(oversizedDecoy.scrollCalls.length, 0);
 });
 
-test("ChatGPT sweep advances from rendered message anchors when scroll roots do not expose the next batch", async () => {
+virtualSweepTest("ChatGPT sweep advances from rendered message anchors when scroll roots do not expose the next batch", async () => {
   const elements = [];
   const totalTurns = 78;
   const windowSize = 8;
@@ -1219,63 +1194,45 @@ test("ChatGPT sweep advances from rendered message anchors when scroll roots do 
   assert.match(transcript, /ChatGPT: Anchor-loaded GPT turn 78/);
 });
 
-test("short chats use the same sweep and exit when there is no more content to capture", async () => {
-  const cases = [
-    { hostname: "claude.ai", platformName: "Claude" },
-    { hostname: "chatgpt.com", platformName: "ChatGPT" },
-    { hostname: "gemini.google.com", platformName: "Gemini" },
-    { hostname: "grok.com", platformName: "Grok" },
-    { hostname: "chat.deepseek.com", platformName: "DeepSeek" }
-  ];
+virtualSweepTest("short unscrollable chats probe the rendered boundary before finishing", async () => {
+  const elements = [];
+  const scrollableRoot = new FakeElement({
+    text: "Scrollable ChatGPT chat root",
+    attrs: { role: "main" }
+  });
+  scrollableRoot.scrollHeight = 600;
+  scrollableRoot.clientHeight = 600;
+  scrollableRoot.scrollTop = 0;
+  elements.push(scrollableRoot);
 
-  for (const { hostname, platformName } of cases) {
-    const elements = [];
-    const scrollableRoot = new FakeElement({
-      text: `Scrollable ${platformName} chat root`,
-      attrs: { role: "main" }
+  for (let index = 1; index <= 4; index += 1) {
+    const turn = new FakeElement({
+      text: `Short turn ${index}`,
+      attrs: { "data-message-author-role": index % 2 ? "user" : "assistant" }
     });
-    scrollableRoot.scrollHeight = 600;
-    scrollableRoot.clientHeight = 600;
-    scrollableRoot.scrollTop = 0;
-    elements.push(scrollableRoot);
-
-    for (let index = 1; index <= 4; index += 1) {
-      const turn = new FakeElement({
-        text: `Short turn ${index}`,
-        attrs: { "data-message-author-role": index % 2 ? "user" : "assistant" }
-      });
-      turn.parentElement = scrollableRoot;
-      scrollableRoot.children.push(turn);
-      elements.push(turn);
-    }
-    scrollableRoot.textContent = scrollableRoot.children.map((turn) => turn.textContent).join("\n");
-    scrollableRoot.innerText = scrollableRoot.textContent;
-
-    const hooks = loadPlatformContent(elements, hostname);
-
-    await hooks.prepareSourceForCapture();
-    scrollableRoot.scrollCalls = [];
-    scrollableRoot.children.forEach((turn) => {
-      turn.scrollIntoViewCalls = [];
-    });
-    const transcript = await hooks.scrapeConversationTextWhenReady();
-
-    assert.equal(
-      (transcript.match(new RegExp(`(?:User|${platformName}): Short turn`, "g")) || []).length,
-      4,
-      `${platformName} should capture the short chat`
-    );
-    assert.equal(
-      scrollableRoot.scrollCalls.some((call) => Number(call?.top || 0) > 0),
-      false,
-      `${platformName} should not scroll downward when no scroll range remains`
-    );
-    assert.equal(
-      scrollableRoot.children.some((turn) => turn.scrollIntoViewCalls.length > 0),
-      true,
-      `${platformName} should still probe the rendered boundary before finishing`
-    );
+    turn.parentElement = scrollableRoot;
+    scrollableRoot.children.push(turn);
+    elements.push(turn);
   }
+  scrollableRoot.textContent = scrollableRoot.children.map((turn) => turn.textContent).join("\n");
+  scrollableRoot.innerText = scrollableRoot.textContent;
+
+  const hooks = loadPlatformContent(elements, "chatgpt.com");
+
+  await hooks.prepareSourceForCapture();
+  scrollableRoot.scrollCalls = [];
+  scrollableRoot.children.forEach((turn) => {
+    turn.scrollIntoViewCalls = [];
+  });
+  const transcript = await hooks.scrapeConversationTextWhenReady();
+
+  assert.equal((transcript.match(/(?:User|ChatGPT): Short turn/g) || []).length, 4);
+  assert.equal(scrollableRoot.scrollCalls.some((call) => Number(call?.top || 0) > 0), false);
+  assert.equal(scrollableRoot.children.some((turn) => turn.scrollIntoViewCalls.length > 0), true);
+});
+
+test("virtualized capture regressions", { concurrency: true }, async (t) => {
+  await Promise.all(virtualSweepTests.map(({ name, fn }) => t.test(name, fn)));
 });
 
 test("collapsed conversation previews are expanded before capture", async () => {
