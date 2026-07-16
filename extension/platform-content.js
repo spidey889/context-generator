@@ -101,6 +101,7 @@
   const CHATGPT_PASTE_STABILITY_MS = 550;
   const HANDOFF_COUNTDOWN_ID = "context-generator-handoff-countdown";
   const HANDOFF_COUNTDOWN_FIXED_MS = 30000;
+  const HANDOFF_REASSURANCE_TEXT = "Almost done, don't cancel now";
   // Stage completion still comes only from real pipeline marks. In-stage line motion is display-only:
   // capture reads the sweep's existing scroll diagnostics, while summary creeps below completion.
   const HANDOFF_STAGES = [
@@ -4401,6 +4402,7 @@
         "line-height:1",
         "letter-spacing:0",
         "font-variant-numeric:tabular-nums",
+        "white-space:nowrap",
         "opacity:0",
         "transition:opacity 160ms ease"
       ].join(";");
@@ -4659,6 +4661,7 @@
 
     const startMs = HANDOFF_COUNTDOWN_FIXED_MS;
     const startedAt = getNow();
+    countdown.setAttribute("aria-label", "Estimated seconds remaining");
     countdown.style.display = "inline-flex";
     countdown.style.opacity = "1";
 
@@ -4685,7 +4688,11 @@
 
     countdown.style.opacity = "0";
     handoffCountdownHideTimer = window.setTimeout(() => {
-      countdown.style.display = "none";
+      // Reuse the countdown slot after it expires so the card never grows or shifts.
+      countdown.textContent = HANDOFF_REASSURANCE_TEXT;
+      countdown.setAttribute("aria-label", HANDOFF_REASSURANCE_TEXT);
+      countdown.style.display = "inline-flex";
+      countdown.style.opacity = "1";
       handoffCountdownHideTimer = null;
     }, 170);
   }

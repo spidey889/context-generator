@@ -6,6 +6,8 @@ Historical production decisions and useful implementation context live here. Cur
 
 [Codex: keep adding short entries here after major changes, fixes, reversions, or model/prompt decisions. Write what changed, what worked, and what got replaced. Keep it short.]
 
+- 2026-07-16: Long handoffs now replace the expired 30-second header countdown with the exact reassurance `Almost done, don't cancel now`. It reuses the countdown slot until the handoff closes, so there is no new countdown, stage logic, layout row, or effect on capture, summary, and paste timing.
+
 - 2026-07-16: Replaced repeated pairwise `Element.contains()` checks in conversation candidate resolution with one candidate DOM parent-to-child map and cached ancestor/descendant lookups. Wrapper classification, scoring, ordering, and final deduplication rules are unchanged. The required regressions stayed exactly 315-to-38 and 299-to-38; their focused runtimes improved from 117.6ms/328.5ms to 54.9ms/28.1ms respectively. This is isolated from the earlier capture/test cleanup.
 
 - 2026-07-16: Removed generated browser/package artifacts and two unused tracked logos, then simplified capture without changing its timing floors or candidate-resolution rules. Settled snapshots now feed overlap and diagnostics directly, collapsed-control discovery runs once per settled rendered window, dead placement/tab-wait paths are gone, and the platform test harness compiles the content script once and runs isolated long-sweep regressions concurrently. The complete 100-test suite retained all stronger capture fixtures and fell from 83.9 seconds before this pass to 26.0 seconds; the lower-level candidate resolver remains deliberately unchanged for later work.
