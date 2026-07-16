@@ -4182,34 +4182,6 @@
       }
       statusText.appendChild(summaryActivity);
 
-      const reassurance = document.createElement("span");
-      reassurance.id = HANDOFF_REASSURANCE_ID;
-      reassurance.textContent = HANDOFF_REASSURANCE_TEXT;
-      reassurance.setAttribute("aria-live", "polite");
-      reassurance.setAttribute("aria-hidden", "true");
-      reassurance.style.cssText = [
-        "position:absolute",
-        "z-index:1",
-        "left:50%",
-        "top:calc(100% + 3px)",
-        "width:max-content",
-        "max-width:calc(100vw - 80px)",
-        "overflow:hidden",
-        "text-overflow:ellipsis",
-        "white-space:nowrap",
-        "color:rgba(248,246,251,0.9)",
-        "font-family:Georgia,'Times New Roman',serif",
-        "font-size:12.5px",
-        "font-weight:500",
-        "line-height:1.15",
-        "letter-spacing:0",
-        "opacity:0",
-        "visibility:hidden",
-        "transform:translate3d(-50%,2px,0)",
-        "transition:opacity 160ms ease,transform 160ms ease"
-      ].join(";");
-      statusText.appendChild(reassurance);
-
       const progress = document.createElement("div");
       progress.id = "context-generator-handoff-progress";
       progress.setAttribute("role", "list");
@@ -4436,6 +4408,30 @@
         "transition:opacity 160ms ease"
       ].join(";");
       brand.appendChild(countdown);
+
+      const reassurance = document.createElement("span");
+      reassurance.id = HANDOFF_REASSURANCE_ID;
+      reassurance.textContent = HANDOFF_REASSURANCE_TEXT;
+      reassurance.setAttribute("aria-live", "polite");
+      reassurance.setAttribute("aria-hidden", "true");
+      reassurance.style.cssText = [
+        "display:none",
+        "margin-left:auto",
+        "flex:0 0 auto",
+        "align-items:center",
+        "white-space:nowrap",
+        "color:rgba(250,248,252,0.94)",
+        "font-family:Georgia,'Times New Roman',serif",
+        "font-size:14px",
+        "font-weight:500",
+        "line-height:1",
+        "letter-spacing:0",
+        "opacity:0",
+        "visibility:hidden",
+        "transform:translate3d(0,2px,0)",
+        "transition:opacity 160ms ease,transform 160ms ease"
+      ].join(";");
+      brand.appendChild(reassurance);
 
       overlay.appendChild(glow);
       overlay.appendChild(brand);
@@ -4728,9 +4724,10 @@
     if (!reassurance || !isHandoffOverlayVisible()) return;
 
     reassurance.setAttribute("aria-hidden", "false");
+    reassurance.style.display = "inline-flex";
     reassurance.style.visibility = "visible";
     reassurance.style.opacity = "1";
-    reassurance.style.transform = "translate3d(-50%,0,0)";
+    reassurance.style.transform = "translate3d(0,0,0)";
   }
 
   function hideHandoffReassurance() {
@@ -4740,7 +4737,8 @@
     reassurance.setAttribute("aria-hidden", "true");
     reassurance.style.opacity = "0";
     reassurance.style.visibility = "hidden";
-    reassurance.style.transform = "translate3d(-50%,2px,0)";
+    reassurance.style.display = "none";
+    reassurance.style.transform = "translate3d(0,2px,0)";
   }
 
   function stopHandoffCountdown() {

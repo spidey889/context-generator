@@ -6,6 +6,8 @@ Historical production decisions and useful implementation context live here. Cur
 
 [Codex: keep adding short entries here after major changes, fixes, reversions, or model/prompt decisions. Write what changed, what worked, and what got replaced. Keep it short.]
 
+- 2026-07-16: Moved the no-pill long-handoff reassurance from below the live summary headline back to the countdown's exact top-right header slot after the timer expires, and increased its Georgia size from 12.5px to 14px for visibility. Card dimensions and transfer behavior remain unchanged.
+
 - 2026-07-16: Refined the long-handoff reassurance after visual feedback. The expired countdown now disappears normally; `Almost done, don't cancel now` appears separately below the live headline with no pill, using the destination sheet's small Georgia face and stronger whitish contrast. Transfer timing and layout dimensions remain unchanged.
 
 - 2026-07-16: Long handoffs now replace the expired 30-second header countdown with the exact reassurance `Almost done, don't cancel now`. It reuses the countdown slot until the handoff closes, so there is no new countdown, stage logic, layout row, or effect on capture, summary, and paste timing.
