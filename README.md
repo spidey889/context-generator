@@ -85,6 +85,14 @@ Run deterministic regression coverage:
 npm test
 ```
 
+Run the real installed-extension handoff smoke in a new isolated Brave window:
+
+```bash
+npm run test:extension-smoke
+```
+
+The smoke uses controlled local ChatGPT and Claude fixtures plus a stub summary endpoint. It loads the actual Manifest V3 extension and verifies capture, exactly one backend request, destination paste, and the no-auto-send boundary without using live accounts or production APIs. Set `BRAVE_PATH` only when Brave is installed outside its normal system location.
+
 Run the complete gate, including live summary accuracy and latency evaluation:
 
 ```bash
@@ -108,6 +116,7 @@ The versioned cases in `evaluation/cases.json` enforce expected-fact recall, zer
 | `test/` | Deterministic Node regression coverage |
 | `evaluation/cases.json` | Versioned summary, capture, accuracy, and latency cases |
 | `scripts/run-regression-eval.js` | Live endpoint regression scorer |
+| `scripts/run-extension-smoke.js` | Installed Brave extension end-to-end handoff smoke |
 | `LOGIC.md` | Source of truth for current production architecture and behavior |
 | `CHANGELOG.md` | Meaningful historical decisions and replaced approaches |
 | `PRIVACY.md` | Current data-handling and privacy policy |

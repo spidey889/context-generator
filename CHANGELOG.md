@@ -6,6 +6,8 @@ Historical production decisions and useful implementation context live here. Cur
 
 [Codex: keep adding short entries here after major changes, fixes, reversions, or model/prompt decisions. Write what changed, what worked, and what got replaced. Keep it short.]
 
+- 2026-07-16: Added an opt-in real Brave installed-extension smoke test without slowing the deterministic suite. It launches a new isolated profile, loads a temporary test-mapped copy of the actual Manifest V3 extension, drives a controlled ChatGPT-to-Claude handoff through the bubble and picker, stubs the backend locally, and requires both source turns, exactly one summary POST, exact destination paste, and zero Send clicks. Live accounts and production APIs are not touched.
+
 - 2026-07-16: Refreshed the root README around the current Cap Context product instead of the older generic Context Generator description. It now leads with the Chrome Web Store release, exact supported hosts and transfer boundaries, current 210k capture behavior, Gemini-first fallback chain, 24-hour local raw-transcript expiry, present project layout, and a separate unpacked-development path.
 
 - 2026-07-16: Promoted the verified Chrome Web Store listing to the marketing site's primary install path. Header, mobile menu, hero, install panel, FAQ, final CTA, footer, metadata, and root README now direct visitors to the official listing for Chrome and Brave; the obsolete visitor-facing ZIP, Developer mode, and Load unpacked funnel plus its dead switcher/copy script were removed. The tracked ZIP remains available as a release/developer artifact.

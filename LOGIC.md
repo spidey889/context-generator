@@ -15,6 +15,7 @@ This is the single source of truth for current production behavior. Historical d
 - `test/`: Node regression coverage.
 - `evaluation/cases.json`: versioned conversations, expected facts, forbidden facts, and latency thresholds.
 - `scripts/run-regression-eval.js`: live endpoint scorer for summary accuracy, structure, and latency.
+- `scripts/run-extension-smoke.js`: opt-in isolated Brave smoke for the actual Manifest V3 service worker, content scripts, capture, one backend request, destination paste, and no-auto-send boundary.
 - `.github/workflows/regression-gate.yml`: complete gate after pushes to `master`, daily, and on demand.
 
 Production deploys from `master` to `https://context-generator-five.vercel.app/api/summarize`.
@@ -115,6 +116,8 @@ The latest-run receipt powers the GitHub Pages analysis view through `analysis-b
 ## Verification Contract
 
 `npm test` covers endpoint security and limits, picker/preconnect privacy, one-job background behavior, prompt isolation, profiles and Gemini-first routing, native Gemini request/usage parsing, 210,000-character forwarding, timeout budgets, preserved fallbacks and validation, absence of expansion, full-middle capture, exact duplicate safety, structural roles, removal of broad DOM fallback, sequence-aligned virtualized capture, paste verification, deterministic handoff-stage transitions, placement, and analysis receipts. It also loads the versioned evaluation set through the real capture hooks and fails on any lost turn, changed turn count, or fixture capture above 250 ms.
+
+`npm run test:extension-smoke` is intentionally separate from the deterministic suite. It launches a new isolated Brave profile with a temporary copy of the real unpacked extension, adds only test-local host mappings to that copy, serves controlled ChatGPT and Claude fixture pages plus a stub summary endpoint, and verifies the complete browser path: bubble and picker, role-verified capture, exactly one backend POST, service-worker tab relay, exact destination paste, and zero Send clicks. It never uses live AI accounts or the production summary API.
 
 `npm run eval` sends the versioned evaluation transcripts through `EVAL_ENDPOINT`, defaulting to production. It fails below 90% required-fact recall, on any forbidden/incorrect fact, invalid Context Carry structure, a per-case latency over 30 seconds for the small case or 60 seconds for the medium case, or more than 90 seconds total. Required facts may define explicit equivalent phrases so harmless paraphrases do not create false failures.
 

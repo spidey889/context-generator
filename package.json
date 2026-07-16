@@ -3,6 +3,7 @@
   "private": true,
   "scripts": {
     "test": "node --test",
+    "test:extension-smoke": "node scripts/run-extension-smoke.js",
     "eval": "node scripts/run-regression-eval.js",
     "gate": "npm test && npm run eval"
   }
