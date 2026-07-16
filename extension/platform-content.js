@@ -488,6 +488,7 @@
       scrapeConversationText,
       getConversationRole,
       editorContainsText,
+      formatFirefoxContentEditableHtml,
       getVerificationSamples,
       normalizeVerificationText,
       getClaudeBubblePlacement,
@@ -1542,6 +1543,15 @@
       return;
     }
 
+    // Firefox flattens newlines passed to insertText in contenteditable editors.
+    if (isFirefoxBrowser()) {
+      selectEditorContents(element);
+      if (document.execCommand("insertHTML", false, formatFirefoxContentEditableHtml(text))) {
+        dispatchEditorEvents(element, text);
+        return;
+      }
+    }
+
     if (destination?.id === "chatgpt") {
       setChatGptEditorText(element, text);
       return;
@@ -1609,6 +1619,18 @@
     range.selectNodeContents(element);
     selection.removeAllRanges();
     selection.addRange(range);
+  }
+
+  function isFirefoxBrowser() {
+    return /\bFirefox\//i.test(navigator.userAgent || "");
+  }
+
+  function formatFirefoxContentEditableHtml(text) {
+    return text
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/\r\n?|\n/g, "<br>");
   }
 
   function dispatchBeforeInputPasteEvent(element, text) {

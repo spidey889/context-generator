@@ -6,6 +6,8 @@ Historical production decisions and useful implementation context live here. Cur
 
 [Codex: keep adding short entries here after major changes, fixes, reversions, or model/prompt decisions. Write what changed, what worked, and what got replaced. Keep it short.]
 
+- 2026-07-16: Fixed Firefox contenteditable paste collapsing Context Carry line breaks by inserting escaped HTML with explicit `<br>` elements only on Firefox. Chrome/Brave contenteditable paste and textarea/input paste behavior remain unchanged.
+
 - 2026-07-16: The live production regression evaluator now retries a case once only when its first provider response misses an accuracy, structure, incorrect-fact, or latency gate, then evaluates the stronger attempt. This keeps persistent failures blocking while preventing one transient provider response from failing every unrelated push.
 
 - 2026-07-16: Added an opt-in real Brave installed-extension smoke test without slowing the deterministic suite. It launches a new isolated profile, loads a temporary test-mapped copy of the actual Manifest V3 extension, drives a controlled ChatGPT-to-Claude handoff through the bubble and picker, stubs the backend locally, and requires both source turns, exactly one summary POST, exact destination paste, and zero Send clicks. Live accounts and production APIs are not touched.

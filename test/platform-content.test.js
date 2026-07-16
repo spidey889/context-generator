@@ -1446,6 +1446,15 @@ test("paste verification rejects unrelated editor text", () => {
   assert.equal(hooks.editorContainsText(editor, "CONTEXT CARRY\n\nWHO I AM\nProject details"), false);
 });
 
+test("Firefox contenteditable paste preserves line breaks without treating text as HTML", () => {
+  const hooks = loadPlatformContent([]);
+
+  assert.equal(
+    hooks.formatFirefoxContentEditableHtml("Heading\n\nUse <code> & continue"),
+    "Heading<br><br>Use &lt;code&gt; &amp; continue"
+  );
+});
+
 test("startup clears stale Claude placement transform reservations", () => {
   const shiftedActionRow = new FakeElement({
     attrs: { "data-context-generator-original-transform": "" }

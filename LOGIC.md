@@ -107,7 +107,7 @@ The exact-summary cache and in-flight map are memory-only. One latest-run receip
 
 Placement is platform-specific: Claude anchors beside its voice controls; ChatGPT mounts fixed at the page root near its model selector; Gemini anchors near `Flash`; Grok anchors near its mode selector; DeepSeek anchors near attachment. Each retains bounded editor/composer positioning fallbacks for hydration or selector drift. Those UI fallbacks are not conversation-capture fallbacks.
 
-First-use and Claude-limit nudges are extension-owned and excluded from capture. Paste uses platform editor selectors, native setters/events, contenteditable insertion paths, and stable Context Carry anchors. ChatGPT adds hydration stability checks. Manual copy is the final recovery path after summary generation.
+First-use and Claude-limit nudges are extension-owned and excluded from capture. Paste uses platform editor selectors, native setters/events, contenteditable insertion paths, and stable Context Carry anchors. Firefox contenteditable paste uses escaped HTML line breaks so summary spacing survives Firefox's newline handling; Chrome/Brave contenteditable behavior and native textarea/input setters remain unchanged. ChatGPT adds hydration stability checks. Manual copy is the final recovery path after summary generation.
 
 ## Latest Run Analysis
 
