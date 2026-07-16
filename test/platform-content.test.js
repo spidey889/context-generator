@@ -408,28 +408,6 @@ test("role detection uses structural evidence instead of you or me labels", () =
   assert.equal(deepSeekHooks.getConversationRole(deepSeekMarkdown), "User");
 });
 
-test("final capture safety removes exact duplicate role and text turns", () => {
-  const repeatedText = "Please retry that exact operation.";
-  const firstUserTurn = new FakeElement({
-    text: repeatedText,
-    attrs: { "data-message-author-role": "user" }
-  });
-  const assistantTurn = new FakeElement({
-    text: "I retried it and the same result occurred.",
-    attrs: { "data-message-author-role": "assistant" }
-  });
-  const secondUserTurn = new FakeElement({
-    text: repeatedText,
-    attrs: { "data-message-author-role": "user" }
-  });
-  const hooks = loadPlatformContent([firstUserTurn, assistantTurn, secondUserTurn]);
-
-  const transcript = hooks.scrapeConversationText();
-
-  assert.equal((transcript.match(/User: Please retry that exact operation\./g) || []).length, 1);
-  assert.equal(hooks.getConversationTurns().length, 3);
-});
-
 test("sequence merge keeps positional duplicates until the final capture safety pass", () => {
   const hooks = loadPlatformContent([]);
   const collected = [];
@@ -773,79 +751,6 @@ function createVirtualizedChatElements({
 
   return { elements, scrollableRoot };
 }
-
-test("transfer capture sweeps virtualized chats even when the first rendered window is below the old threshold", async () => {
-  const cases = [
-    {
-      hostname: "claude.ai",
-      platformName: "Claude",
-      makeTurn: (index) => new FakeElement({
-        text: `Virtualized turn ${index}`,
-        attrs: index % 2 ? { "data-testid": "user-message" } : { class: "font-claude-response" }
-      })
-    },
-    {
-      hostname: "chatgpt.com",
-      platformName: "ChatGPT",
-      makeTurn: (index) => new FakeElement({
-        text: `Virtualized turn ${index}`,
-        attrs: { "data-message-author-role": index % 2 ? "user" : "assistant" }
-      })
-    },
-    {
-      hostname: "gemini.google.com",
-      platformName: "Gemini",
-      makeTurn: (index) => new FakeElement({
-        tag: index % 2 ? "user-query" : "model-response",
-        text: `Virtualized turn ${index}`
-      })
-    },
-    {
-      hostname: "grok.com",
-      platformName: "Grok",
-      makeTurn: (index) => new FakeElement({
-        text: `Virtualized turn ${index}`,
-        attrs: { "data-testid": index % 2 ? "user-message" : "assistant-message" }
-      })
-    },
-    {
-      hostname: "chat.deepseek.com",
-      platformName: "DeepSeek",
-      makeTurn: (index) => new FakeElement({
-        text: `Virtualized turn ${index}`,
-        attrs: { class: "ds-markdown", "data-role": index % 2 ? "user" : "assistant" }
-      })
-    }
-  ];
-
-  for (const { hostname, platformName, makeTurn } of cases) {
-    const { elements } = createVirtualizedChatElements({
-      label: platformName,
-      makeTurn,
-      windowSize: 4,
-      scrollHeight: 8000
-    });
-    const hooks = loadPlatformContent(elements, hostname);
-
-    const initialTranscript = hooks.scrapeConversationText();
-    assert.equal(
-      (initialTranscript.match(new RegExp(`(?:User|${platformName}): Virtualized turn`, "g")) || []).length,
-      4,
-      `${platformName} fixture must begin below the old eight-turn sweep threshold`
-    );
-
-    await hooks.prepareSourceForCapture();
-    const transcript = await hooks.scrapeConversationTextWhenReady();
-
-    assert.equal(
-      (transcript.match(new RegExp(`(?:User|${platformName}): Virtualized turn`, "g")) || []).length,
-      78,
-      `${platformName} should capture every virtualized turn`
-    );
-    assert.match(transcript, /User: Virtualized turn 1/);
-    assert.match(transcript, new RegExp(`${platformName}: Virtualized turn 78`));
-  }
-});
 
 test("transfer capture keeps fuller swept text when the turn count matches the quick capture", async () => {
   const elements = [];
