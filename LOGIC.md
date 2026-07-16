@@ -25,7 +25,7 @@ The repository-root `index.html` is the current Cap Context marketing page. It u
 
 The page markets the current browser extension rather than the replaced Claude `SKILL.md` flow. Its primary install funnel links directly to the official Chrome Web Store listing for both Chrome and Brave; the header, hero, install panel, FAQ, final CTA, and footer all use that store path. The tracked `cap-context-extension.zip` remains a release/developer artifact rather than the visitor-facing install path; it contains the contents of `extension/` with `manifest.json` at its root and must still be regenerated whenever tracked extension code or assets change. The interactive handoff console is an illustrative, local-only UI demo and never reads a conversation or starts a transfer.
 
-Marketing claims mirror production behavior: Claude, ChatGPT, Gemini, Grok, and DeepSeek support; up to 210,000 captured characters; no chat capture while only browsing the picker; provider processing after destination selection; local raw-transcript diagnostics for up to 24 hours; and no automatic Send action. The previous homepage is preserved unchanged as `index.legacy-2026-07-15.html` and is not loaded for visitors.
+Marketing claims mirror production behavior: Claude, ChatGPT, Gemini, Grok, and DeepSeek support; up to 210,000 captured characters; no chat capture while only browsing the picker; provider processing after destination selection; local raw-transcript diagnostics for up to 24 hours; and no automatic Send action. The dead pre-redesign homepage and its 31 MB video are removed from the deployed repository and remain recoverable from Git history.
 
 ## Platforms And Startup
 
