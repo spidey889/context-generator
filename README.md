@@ -32,6 +32,10 @@ If auto-paste fails, the extension shows a manual copy fallback with the generat
 - Grok: `https://grok.com`
 - DeepSeek: `https://chat.deepseek.com`
 
+## Install
+
+Install Cap Context from the [Chrome Web Store](https://chromewebstore.google.com/detail/cap-context/lpkaciijlhckkdhbgidbjfkldigghnjf). The same listing works in Chrome and Brave and receives normal browser-managed updates.
+
 ## Install For Local Development
 
 1. Clone this repo.

@@ -6,6 +6,8 @@ Historical production decisions and useful implementation context live here. Cur
 
 [Codex: keep adding short entries here after major changes, fixes, reversions, or model/prompt decisions. Write what changed, what worked, and what got replaced. Keep it short.]
 
+- 2026-07-16: Promoted the verified Chrome Web Store listing to the marketing site's primary install path. Header, mobile menu, hero, install panel, FAQ, final CTA, footer, metadata, and root README now direct visitors to the official listing for Chrome and Brave; the obsolete visitor-facing ZIP, Developer mode, and Load unpacked funnel plus its dead switcher/copy script were removed. The tracked ZIP remains available as a release/developer artifact.
+
 - 2026-07-16: Moved the no-pill long-handoff reassurance from below the live summary headline back to the countdown's exact top-right header slot after the timer expires, and increased its Georgia size from 12.5px to 14px for visibility. Card dimensions and transfer behavior remain unchanged.
 
 - 2026-07-16: Refined the long-handoff reassurance after visual feedback. The expired countdown now disappears normally; `Almost done, don't cancel now` appears separately below the live headline with no pill, using the destination sheet's small Georgia face and stronger whitish contrast. Transfer timing and layout dimensions remain unchanged.
