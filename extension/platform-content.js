@@ -4079,37 +4079,46 @@
         "box-sizing:border-box",
         "padding:22px 28px",
         "border-radius:24px",
-        "border:1px solid rgba(238,235,244,0.13)",
-        "background:#151517",
+        "border:1px solid rgba(255,255,255,0.16)",
+        "background:linear-gradient(180deg,#17191b 0%,#101113 48%,#0a0b0c 100%)",
         "color:#b9b7bd",
-        "box-shadow:0 28px 82px rgba(0,0,0,0.42),0 8px 24px rgba(0,0,0,0.25),0 0 0 1px rgba(0,0,0,0.48),inset 0 1px 0 rgba(255,255,255,0.07),inset 0 -1px 0 rgba(255,255,255,0.018)",
+        "box-shadow:0 38px 110px rgba(0,0,0,0.62),0 14px 38px rgba(0,0,0,0.38),0 0 0 1px rgba(0,0,0,0.62),inset 0 1px 0 rgba(255,255,255,0.12),inset 0 -1px 0 rgba(255,255,255,0.018)",
         `transform:${HANDOFF_OVERLAY_CLOSED_TRANSFORM}`,
         "opacity:0",
         "flex-direction:column",
         "justify-content:center",
         "gap:18px",
         "overflow:hidden",
-        "backdrop-filter:blur(22px)",
+        "isolation:isolate",
+        "backdrop-filter:blur(26px)",
         "font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif",
         "letter-spacing:0",
         "will-change:transform,opacity",
         "transition:opacity 0.18s cubic-bezier(0.16,1,0.3,1), transform 0.22s cubic-bezier(0.16,1,0.3,1)"
       ].join(";");
 
+      // The masked light field stays inside the upper card, independent of host-page colors.
+      const lightFlow = document.createElement("div");
+      lightFlow.id = "context-generator-handoff-lightflow";
+      lightFlow.setAttribute("aria-hidden", "true");
+
       const glow = document.createElement("div");
+      glow.id = "context-generator-handoff-surface";
       glow.style.cssText = [
         "position:absolute",
-        "inset:-1px",
+        "z-index:0",
+        "inset:0",
         "pointer-events:none",
-        "background:linear-gradient(180deg,rgba(255,255,255,0.045),transparent 36%)",
-        "opacity:0.85"
+        "background:linear-gradient(180deg,rgba(255,255,255,0.075),rgba(255,255,255,0.012) 30%,transparent 54%),linear-gradient(104deg,rgba(255,255,255,0.035),transparent 32%,rgba(255,255,255,0.018) 68%,transparent)",
+        "box-shadow:inset 0 1px 0 rgba(255,255,255,0.09),inset 0 -1px 0 rgba(255,255,255,0.016)",
+        "opacity:0.96"
       ].join(";");
 
       const brand = document.createElement("div");
       brand.id = "context-generator-overlay-brand";
       brand.style.cssText = [
         "position:relative",
-        "z-index:1",
+        "z-index:2",
         "display:flex",
         "width:100%",
         "min-height:24px",
@@ -4117,7 +4126,7 @@
         "align-items:center",
         "justify-content:flex-start",
         "gap:7px",
-        "color:rgba(245,243,250,0.67)",
+        "color:rgba(245,245,243,0.78)",
         "font-size:12.5px",
         "font-weight:620",
         "letter-spacing:0"
@@ -4134,7 +4143,7 @@
         "width:24px",
         "height:24px",
         "object-fit:contain",
-        "filter:drop-shadow(0 3px 9px rgba(141,108,207,0.22))"
+        "filter:grayscale(1) saturate(0) brightness(1.5) contrast(0.88) drop-shadow(0 3px 10px rgba(255,255,255,0.12))"
       ].join(";");
 
       const brandText = document.createElement("span");
@@ -4148,7 +4157,7 @@
       statusText.setAttribute("aria-atomic", "true");
       statusText.style.cssText = [
         "position:relative",
-        "z-index:1",
+        "z-index:2",
         "display:flex",
         "min-height:34px",
         "align-items:center",
@@ -4159,7 +4168,8 @@
         "line-height:1.08",
         "text-align:center",
         "text-wrap:balance",
-        "color:#f2f0f6",
+        "color:#f2f1ee",
+        "text-shadow:0 2px 22px rgba(0,0,0,0.52)",
         "letter-spacing:-0.035em",
         "text-rendering:geometricPrecision",
         "will-change:transform,opacity"
@@ -4188,7 +4198,7 @@
       progress.setAttribute("aria-label", "Transfer progress");
       progress.style.cssText = [
         "position:relative",
-        "z-index:1",
+        "z-index:2",
         "display:grid",
         "grid-template-columns:repeat(3,minmax(0,1fr))",
         "width:calc(100% - 8px)",
@@ -4241,9 +4251,71 @@
             from{opacity:0.18;transform:translate3d(0,6px,0)}
             to{opacity:1;transform:translate3d(0,0,0)}
           }
+          @keyframes contextGeneratorLightFlowDrift{
+            0%{opacity:0.72;transform:translate3d(-2.5%,-1%,0) scale(1.03) rotate(-0.6deg)}
+            50%{opacity:0.92;transform:translate3d(1.5%,2%,0) scale(1.08) rotate(0.8deg)}
+            100%{opacity:0.78;transform:translate3d(4.5%,-0.5%,0) scale(1.04) rotate(-0.2deg)}
+          }
+          @keyframes contextGeneratorLightRibbonDrift{
+            0%{opacity:0.38;transform:translate3d(4%,0,0) scale(1.05) rotate(1deg)}
+            52%{opacity:0.58;transform:translate3d(-3%,3%,0) scale(1.12) rotate(-1.4deg)}
+            100%{opacity:0.42;transform:translate3d(1%,-1%,0) scale(1.06) rotate(0.4deg)}
+          }
           @keyframes contextGeneratorSummaryDotHop{
             0%,48%,100%{opacity:0.54;transform:translate3d(0,0,0)}
             18%{opacity:1;transform:translate3d(0,-3px,0)}
+          }
+          #context-generator-handoff-lightflow{
+            --context-generator-light-stage-x:-3%;
+            position:absolute;
+            z-index:0;
+            top:-48px;
+            right:-72px;
+            left:-72px;
+            height:178px;
+            overflow:hidden;
+            pointer-events:none;
+            background:radial-gradient(ellipse 28% 30% at 14% 24%,rgba(255,255,255,0.16) 0%,rgba(196,199,201,0.055) 48%,transparent 76%),radial-gradient(ellipse 42% 28% at 73% 6%,rgba(255,255,255,0.15) 0%,rgba(180,184,186,0.045) 50%,transparent 78%),linear-gradient(116deg,transparent 9%,rgba(255,255,255,0.075) 22%,transparent 38%,rgba(226,228,229,0.055) 58%,transparent 76%);
+            opacity:0.91;
+            filter:blur(9px) grayscale(1);
+            -webkit-mask-image:linear-gradient(to bottom,#000 0%,#000 44%,rgba(0,0,0,0.72) 68%,transparent 100%);
+            mask-image:linear-gradient(to bottom,#000 0%,#000 44%,rgba(0,0,0,0.72) 68%,transparent 100%);
+            transform:translate3d(var(--context-generator-light-stage-x),0,0) scale(1.02);
+            transition:transform 1200ms cubic-bezier(0.16,1,0.3,1),opacity 420ms ease;
+            will-change:transform,opacity;
+          }
+          #context-generator-handoff-lightflow::before,
+          #context-generator-handoff-lightflow::after{
+            content:"";
+            position:absolute;
+            inset:-18px -24px;
+            border-radius:48%;
+            transform-origin:center;
+            will-change:transform,opacity;
+          }
+          #context-generator-handoff-lightflow::before{
+            background:radial-gradient(ellipse 31% 52% at 5% 7%,rgba(255,255,255,0.62) 0%,rgba(219,221,222,0.2) 32%,transparent 70%),radial-gradient(ellipse 40% 44% at 42% -8%,rgba(255,255,255,0.4) 0%,rgba(190,193,196,0.12) 35%,transparent 72%),radial-gradient(ellipse 36% 50% at 96% 3%,rgba(242,244,245,0.5) 0%,rgba(174,178,181,0.14) 34%,transparent 70%);
+            animation:contextGeneratorLightFlowDrift 21s cubic-bezier(0.45,0,0.55,1) infinite alternate;
+          }
+          #context-generator-handoff-lightflow::after{
+            background:conic-gradient(from 212deg at 17% 4%,transparent 0deg,rgba(255,255,255,0.22) 22deg,rgba(148,152,156,0.08) 38deg,transparent 62deg),radial-gradient(ellipse 52% 24% at 67% 8%,rgba(255,255,255,0.24) 0%,rgba(184,187,190,0.07) 48%,transparent 76%),linear-gradient(114deg,transparent 12%,rgba(255,255,255,0.12) 24%,transparent 38%,rgba(211,214,216,0.1) 56%,transparent 72%);
+            mix-blend-mode:screen;
+            animation:contextGeneratorLightRibbonDrift 17s cubic-bezier(0.45,0,0.55,1) infinite alternate;
+          }
+          #${OVERLAY_ID}[data-context-generator-handoff-stage="summary"] #context-generator-handoff-lightflow{
+            --context-generator-light-stage-x:0%;
+            opacity:0.92;
+          }
+          #${OVERLAY_ID}[data-context-generator-handoff-stage="paste"] #context-generator-handoff-lightflow{
+            --context-generator-light-stage-x:3%;
+            opacity:0.9;
+          }
+          #context-generator-handoff-surface::after{
+            content:"";
+            position:absolute;
+            inset:0;
+            border-radius:inherit;
+            background:linear-gradient(180deg,transparent 0%,rgba(8,9,10,0.06) 44%,rgba(8,9,10,0.48) 72%,rgba(8,9,10,0.7) 100%);
           }
           #context-generator-text .context-generator-summary-activity{
             display:none;
@@ -4253,7 +4325,7 @@
             margin-left:1px;
             align-items:baseline;
             gap:0;
-            color:#f2f0f6;
+            color:#f2f1ee;
             font:inherit;
             line-height:inherit;
             letter-spacing:0;
@@ -4280,7 +4352,7 @@
             align-items:center;
             gap:8px;
             padding:0 5px;
-            color:rgba(239,237,244,0.46);
+            color:rgba(232,233,232,0.48);
             text-align:center;
           }
           #context-generator-handoff-progress .context-generator-handoff-stage-connector{
@@ -4300,8 +4372,8 @@
             inset:0 auto 0 0;
             width:var(--context-generator-stage-progress-position,0%);
             border-radius:inherit;
-            background:linear-gradient(90deg,#6F579D,#9A7ADC);
-            box-shadow:2px 0 7px rgba(141,108,207,0.3);
+            background:linear-gradient(90deg,#686c70,#c7cacc 58%,#f1f2f2);
+            box-shadow:2px 0 8px rgba(238,240,240,0.26);
             transition:width var(--context-generator-stage-progress-duration,1.35s) var(--context-generator-stage-progress-easing,cubic-bezier(0.22,0.72,0.22,1));
           }
           #context-generator-handoff-progress .context-generator-handoff-stage-progress-head{
@@ -4312,8 +4384,8 @@
             width:4px;
             height:4px;
             border-radius:999px;
-            background:#A98BE2;
-            box-shadow:0 0 0 2px rgba(141,108,207,0.14),0 0 8px rgba(169,139,226,0.72);
+            background:#f4f5f4;
+            box-shadow:0 0 0 2px rgba(255,255,255,0.12),0 0 9px rgba(240,242,242,0.62);
             opacity:0;
             transform:translate(-50%,-50%);
             transition:left var(--context-generator-stage-progress-duration,1.35s) var(--context-generator-stage-progress-easing,cubic-bezier(0.22,0.72,0.22,1)),opacity 160ms ease;
@@ -4349,30 +4421,33 @@
             transition:color 180ms ease,font-weight 180ms ease;
           }
           #context-generator-handoff-progress .context-generator-handoff-stage[data-state="active"]{
-            color:#f4f2f7;
+            color:#f3f3f1;
           }
           #context-generator-handoff-progress .context-generator-handoff-stage[data-state="active"] .context-generator-handoff-stage-marker{
-            border-color:rgba(190,165,232,0.72);
-            background:#8D6CCF;
-            color:#fff;
-            box-shadow:0 0 0 3px rgba(141,108,207,0.16),0 5px 14px rgba(72,51,111,0.28),inset 0 1px 0 rgba(255,255,255,0.16);
+            border-color:rgba(255,255,255,0.72);
+            background:linear-gradient(145deg,#f1f2f2,#91969a);
+            color:#111315;
+            box-shadow:0 0 0 3px rgba(255,255,255,0.1),0 6px 18px rgba(0,0,0,0.34),0 0 14px rgba(255,255,255,0.11),inset 0 1px 0 rgba(255,255,255,0.52);
           }
           #context-generator-handoff-progress .context-generator-handoff-stage[data-state="active"] .context-generator-handoff-stage-label{
             color:#fff;
             font-weight:680;
           }
           #context-generator-handoff-progress .context-generator-handoff-stage[data-state="complete"]{
-            color:rgba(200,183,229,0.72);
+            color:rgba(220,222,221,0.68);
           }
           #context-generator-handoff-progress .context-generator-handoff-stage[data-state="complete"] .context-generator-handoff-stage-marker{
-            border-color:rgba(164,137,216,0.34);
-            background:rgba(141,108,207,0.14);
-            color:#C8B6E9;
+            border-color:rgba(255,255,255,0.24);
+            background:rgba(255,255,255,0.09);
+            color:#d9dbda;
           }
           @media (prefers-reduced-motion: reduce){
             #context-generator-text{animation:none!important}
             #context-generator-text .context-generator-summary-activity-dot{animation:none!important;opacity:0.72}
             #${HANDOFF_REASSURANCE_ID}{transition:none!important}
+            #context-generator-handoff-lightflow,
+            #context-generator-handoff-lightflow::before,
+            #context-generator-handoff-lightflow::after{animation:none!important;transition:none!important;transform:none!important}
             #context-generator-handoff-progress .context-generator-handoff-stage-connector-fill,
             #context-generator-handoff-progress .context-generator-handoff-stage-progress-head{transition:none!important}
           }
@@ -4433,6 +4508,7 @@
       ].join(";");
       brand.appendChild(reassurance);
 
+      overlay.appendChild(lightFlow);
       overlay.appendChild(glow);
       overlay.appendChild(brand);
       overlay.appendChild(statusText);
@@ -4631,6 +4707,11 @@
     const resolvedDestinationName = destinationName
       || overlay?.dataset.contextGeneratorDestinationName
       || "destination";
+    if (overlay) {
+      // Decorative upper light shifts with real stages without creating fake progress.
+      overlay.dataset.contextGeneratorHandoffStage = stageId;
+      overlay.dataset.contextGeneratorHandoffPhase = phase;
+    }
     stopHandoffActivityProgress();
     const stages = getHandoffProgressState(stageId, phase, resolvedDestinationName);
     const stageElements = progress.querySelectorAll(".context-generator-handoff-stage");
