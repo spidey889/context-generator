@@ -6,6 +6,8 @@ Historical production decisions and useful implementation context live here. Cur
 
 [Codex: keep adding short entries here after major changes, fixes, reversions, or model/prompt decisions. Write what changed, what worked, and what got replaced. Keep it short.]
 
+- 2026-07-16: Replaced the monochrome handoff treatment with the supplied Willow-inspired color direction. The card now uses a violet-to-periwinkle body, deep purple lower depth, warm cream and muted rose cloud light at the upper left, frosted blue light at the upper right, a pearl-white Cap Context icon, and coordinated lavender/white progress states. Geometry, copy, motion rules, progress truth, and transfer behavior are unchanged.
+
 - 2026-07-16: Reworked the handoff card into a restrained monochrome treatment after the colored aurora experiment looked too generic. Organic white, silver, and smoke light now flows only across the upper half of a deeper black surface, the lower progress area stays clean, and the icon and progress accents use the same grayscale palette. Card geometry, copy, transfer timing, progress truth, host-page independence, and reduced-motion behavior remain intact.
 
 - 2026-07-16: The live production regression evaluator now retries a case once only when its first provider response misses an accuracy, structure, incorrect-fact, or latency gate, then evaluates the stronger attempt. This keeps persistent failures blocking while preventing one transient provider response from failing every unrelated push.
