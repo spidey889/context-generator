@@ -4079,46 +4079,37 @@
         "box-sizing:border-box",
         "padding:22px 28px",
         "border-radius:24px",
-        "border:1px solid rgba(247,242,255,0.27)",
-        "background:radial-gradient(ellipse 88% 110% at 16% 116%,rgba(79,35,158,0.96) 0%,rgba(78,43,145,0.7) 46%,transparent 76%),linear-gradient(142deg,#766b9e 0%,#65548f 36%,#58418f 68%,#586d9b 100%)",
+        "border:1px solid rgba(238,235,244,0.13)",
+        "background:#151517",
         "color:#b9b7bd",
-        "box-shadow:0 38px 110px rgba(18,8,40,0.58),0 14px 38px rgba(28,15,58,0.34),0 0 54px rgba(109,75,178,0.17),0 0 0 1px rgba(35,17,69,0.34),inset 0 1px 0 rgba(255,255,255,0.22),inset 0 -1px 0 rgba(255,255,255,0.05)",
+        "box-shadow:0 28px 82px rgba(0,0,0,0.42),0 8px 24px rgba(0,0,0,0.25),0 0 0 1px rgba(0,0,0,0.48),inset 0 1px 0 rgba(255,255,255,0.07),inset 0 -1px 0 rgba(255,255,255,0.018)",
         `transform:${HANDOFF_OVERLAY_CLOSED_TRANSFORM}`,
         "opacity:0",
         "flex-direction:column",
         "justify-content:center",
         "gap:18px",
         "overflow:hidden",
-        "isolation:isolate",
-        "backdrop-filter:blur(26px) saturate(112%)",
+        "backdrop-filter:blur(22px)",
         "font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif",
         "letter-spacing:0",
         "will-change:transform,opacity",
         "transition:opacity 0.18s cubic-bezier(0.16,1,0.3,1), transform 0.22s cubic-bezier(0.16,1,0.3,1)"
       ].join(";");
 
-      // The masked light field stays inside the upper card, independent of host-page colors.
-      const lightFlow = document.createElement("div");
-      lightFlow.id = "context-generator-handoff-lightflow";
-      lightFlow.setAttribute("aria-hidden", "true");
-
       const glow = document.createElement("div");
-      glow.id = "context-generator-handoff-surface";
       glow.style.cssText = [
         "position:absolute",
-        "z-index:0",
-        "inset:0",
+        "inset:-1px",
         "pointer-events:none",
-        "background:linear-gradient(180deg,rgba(255,255,255,0.12),rgba(255,255,255,0.025) 34%,transparent 58%),linear-gradient(108deg,rgba(255,246,226,0.07),transparent 34%,rgba(208,227,242,0.055) 70%,transparent)",
-        "box-shadow:inset 0 1px 0 rgba(255,255,255,0.15),inset 0 -1px 0 rgba(255,255,255,0.035)",
-        "opacity:0.96"
+        "background:linear-gradient(180deg,rgba(255,255,255,0.045),transparent 36%)",
+        "opacity:0.85"
       ].join(";");
 
       const brand = document.createElement("div");
       brand.id = "context-generator-overlay-brand";
       brand.style.cssText = [
         "position:relative",
-        "z-index:2",
+        "z-index:1",
         "display:flex",
         "width:100%",
         "min-height:24px",
@@ -4126,7 +4117,7 @@
         "align-items:center",
         "justify-content:flex-start",
         "gap:7px",
-        "color:rgba(255,253,255,0.88)",
+        "color:rgba(245,243,250,0.67)",
         "font-size:12.5px",
         "font-weight:620",
         "letter-spacing:0"
@@ -4143,7 +4134,7 @@
         "width:24px",
         "height:24px",
         "object-fit:contain",
-        "filter:grayscale(1) saturate(0) brightness(1.85) contrast(0.78) drop-shadow(0 3px 10px rgba(56,25,104,0.24))"
+        "filter:drop-shadow(0 3px 9px rgba(141,108,207,0.22))"
       ].join(";");
 
       const brandText = document.createElement("span");
@@ -4157,7 +4148,7 @@
       statusText.setAttribute("aria-atomic", "true");
       statusText.style.cssText = [
         "position:relative",
-        "z-index:2",
+        "z-index:1",
         "display:flex",
         "min-height:34px",
         "align-items:center",
@@ -4168,8 +4159,7 @@
         "line-height:1.08",
         "text-align:center",
         "text-wrap:balance",
-        "color:#fffdfd",
-        "text-shadow:0 2px 24px rgba(45,22,85,0.46)",
+        "color:#f2f0f6",
         "letter-spacing:-0.035em",
         "text-rendering:geometricPrecision",
         "will-change:transform,opacity"
@@ -4198,7 +4188,7 @@
       progress.setAttribute("aria-label", "Transfer progress");
       progress.style.cssText = [
         "position:relative",
-        "z-index:2",
+        "z-index:1",
         "display:grid",
         "grid-template-columns:repeat(3,minmax(0,1fr))",
         "width:calc(100% - 8px)",
@@ -4251,71 +4241,9 @@
             from{opacity:0.18;transform:translate3d(0,6px,0)}
             to{opacity:1;transform:translate3d(0,0,0)}
           }
-          @keyframes contextGeneratorLightFlowDrift{
-            0%{opacity:0.72;transform:translate3d(-2.5%,-1%,0) scale(1.03) rotate(-0.6deg)}
-            50%{opacity:0.92;transform:translate3d(1.5%,2%,0) scale(1.08) rotate(0.8deg)}
-            100%{opacity:0.78;transform:translate3d(4.5%,-0.5%,0) scale(1.04) rotate(-0.2deg)}
-          }
-          @keyframes contextGeneratorLightRibbonDrift{
-            0%{opacity:0.38;transform:translate3d(4%,0,0) scale(1.05) rotate(1deg)}
-            52%{opacity:0.58;transform:translate3d(-3%,3%,0) scale(1.12) rotate(-1.4deg)}
-            100%{opacity:0.42;transform:translate3d(1%,-1%,0) scale(1.06) rotate(0.4deg)}
-          }
           @keyframes contextGeneratorSummaryDotHop{
             0%,48%,100%{opacity:0.54;transform:translate3d(0,0,0)}
             18%{opacity:1;transform:translate3d(0,-3px,0)}
-          }
-          #context-generator-handoff-lightflow{
-            --context-generator-light-stage-x:-3%;
-            position:absolute;
-            z-index:0;
-            top:-48px;
-            right:-72px;
-            left:-72px;
-            height:178px;
-            overflow:hidden;
-            pointer-events:none;
-            background:radial-gradient(ellipse 32% 42% at 8% 8%,rgba(249,246,218,0.9) 0%,rgba(214,178,200,0.38) 36%,transparent 74%),radial-gradient(ellipse 43% 36% at 52% -5%,rgba(246,241,215,0.68) 0%,rgba(208,178,198,0.25) 42%,transparent 76%),radial-gradient(ellipse 46% 44% at 99% 5%,rgba(216,237,238,0.78) 0%,rgba(130,172,198,0.3) 42%,transparent 76%),linear-gradient(116deg,transparent 8%,rgba(255,239,222,0.16) 22%,transparent 39%,rgba(213,229,244,0.13) 61%,transparent 78%);
-            opacity:0.94;
-            filter:blur(10px) saturate(116%);
-            -webkit-mask-image:linear-gradient(to bottom,#000 0%,#000 44%,rgba(0,0,0,0.72) 68%,transparent 100%);
-            mask-image:linear-gradient(to bottom,#000 0%,#000 44%,rgba(0,0,0,0.72) 68%,transparent 100%);
-            transform:translate3d(var(--context-generator-light-stage-x),0,0) scale(1.02);
-            transition:transform 1200ms cubic-bezier(0.16,1,0.3,1),opacity 420ms ease;
-            will-change:transform,opacity;
-          }
-          #context-generator-handoff-lightflow::before,
-          #context-generator-handoff-lightflow::after{
-            content:"";
-            position:absolute;
-            inset:-18px -24px;
-            border-radius:48%;
-            transform-origin:center;
-            will-change:transform,opacity;
-          }
-          #context-generator-handoff-lightflow::before{
-            background:radial-gradient(ellipse 31% 54% at 4% 8%,rgba(234,245,238,0.72) 0%,rgba(152,196,211,0.24) 34%,transparent 70%),radial-gradient(ellipse 42% 46% at 41% -7%,rgba(255,242,215,0.55) 0%,rgba(211,165,195,0.22) 38%,transparent 73%),radial-gradient(ellipse 38% 52% at 97% 4%,rgba(226,241,242,0.64) 0%,rgba(132,164,202,0.23) 36%,transparent 72%);
-            animation:contextGeneratorLightFlowDrift 21s cubic-bezier(0.45,0,0.55,1) infinite alternate;
-          }
-          #context-generator-handoff-lightflow::after{
-            background:conic-gradient(from 212deg at 17% 4%,transparent 0deg,rgba(255,250,232,0.34) 22deg,rgba(205,171,198,0.14) 40deg,transparent 64deg),radial-gradient(ellipse 54% 25% at 68% 8%,rgba(226,235,244,0.3) 0%,rgba(157,170,210,0.1) 48%,transparent 77%),linear-gradient(114deg,transparent 12%,rgba(255,236,220,0.17) 24%,transparent 39%,rgba(216,232,244,0.15) 57%,transparent 73%);
-            mix-blend-mode:screen;
-            animation:contextGeneratorLightRibbonDrift 17s cubic-bezier(0.45,0,0.55,1) infinite alternate;
-          }
-          #${OVERLAY_ID}[data-context-generator-handoff-stage="summary"] #context-generator-handoff-lightflow{
-            --context-generator-light-stage-x:0%;
-            opacity:0.92;
-          }
-          #${OVERLAY_ID}[data-context-generator-handoff-stage="paste"] #context-generator-handoff-lightflow{
-            --context-generator-light-stage-x:3%;
-            opacity:0.9;
-          }
-          #context-generator-handoff-surface::after{
-            content:"";
-            position:absolute;
-            inset:0;
-            border-radius:inherit;
-            background:linear-gradient(180deg,transparent 0%,rgba(74,45,128,0.04) 44%,rgba(56,29,112,0.18) 72%,rgba(42,21,89,0.29) 100%);
           }
           #context-generator-text .context-generator-summary-activity{
             display:none;
@@ -4325,7 +4253,7 @@
             margin-left:1px;
             align-items:baseline;
             gap:0;
-            color:#fffdfd;
+            color:#f2f0f6;
             font:inherit;
             line-height:inherit;
             letter-spacing:0;
@@ -4352,7 +4280,7 @@
             align-items:center;
             gap:8px;
             padding:0 5px;
-            color:rgba(250,246,255,0.57);
+            color:rgba(239,237,244,0.46);
             text-align:center;
           }
           #context-generator-handoff-progress .context-generator-handoff-stage-connector{
@@ -4364,7 +4292,7 @@
             height:2px;
             overflow:visible;
             border-radius:999px;
-            background:rgba(248,244,255,0.18);
+            background:rgba(255,255,255,0.11);
           }
           /* The line follows live display progress; its motion never gates the transfer pipeline. */
           #context-generator-handoff-progress .context-generator-handoff-stage-connector-fill{
@@ -4372,8 +4300,8 @@
             inset:0 auto 0 0;
             width:var(--context-generator-stage-progress-position,0%);
             border-radius:inherit;
-            background:linear-gradient(90deg,#cbb9ee,#f8f1ff 58%,#c8def1);
-            box-shadow:2px 0 9px rgba(244,235,255,0.42);
+            background:linear-gradient(90deg,#6F579D,#9A7ADC);
+            box-shadow:2px 0 7px rgba(141,108,207,0.3);
             transition:width var(--context-generator-stage-progress-duration,1.35s) var(--context-generator-stage-progress-easing,cubic-bezier(0.22,0.72,0.22,1));
           }
           #context-generator-handoff-progress .context-generator-handoff-stage-progress-head{
@@ -4384,8 +4312,8 @@
             width:4px;
             height:4px;
             border-radius:999px;
-            background:#fffaff;
-            box-shadow:0 0 0 2px rgba(255,255,255,0.17),0 0 10px rgba(248,235,255,0.76);
+            background:#A98BE2;
+            box-shadow:0 0 0 2px rgba(141,108,207,0.14),0 0 8px rgba(169,139,226,0.72);
             opacity:0;
             transform:translate(-50%,-50%);
             transition:left var(--context-generator-stage-progress-duration,1.35s) var(--context-generator-stage-progress-easing,cubic-bezier(0.22,0.72,0.22,1)),opacity 160ms ease;
@@ -4405,10 +4333,10 @@
             align-items:center;
             justify-content:center;
             box-sizing:border-box;
-            border:1px solid rgba(255,250,255,0.22);
+            border:1px solid rgba(255,255,255,0.15);
             border-radius:999px;
-            background:rgba(255,255,255,0.07);
-            color:rgba(255,250,255,0.56);
+            background:rgba(255,255,255,0.025);
+            color:rgba(245,243,249,0.44);
             font-size:10.5px;
             font-weight:700;
             transition:background 180ms ease,border-color 180ms ease,color 180ms ease,box-shadow 180ms ease;
@@ -4421,33 +4349,30 @@
             transition:color 180ms ease,font-weight 180ms ease;
           }
           #context-generator-handoff-progress .context-generator-handoff-stage[data-state="active"]{
-            color:#fffaff;
+            color:#f4f2f7;
           }
           #context-generator-handoff-progress .context-generator-handoff-stage[data-state="active"] .context-generator-handoff-stage-marker{
-            border-color:rgba(255,255,255,0.84);
-            background:linear-gradient(145deg,#fffaff,#ddd0f3);
-            color:#4d3194;
-            box-shadow:0 0 0 3px rgba(255,255,255,0.13),0 6px 18px rgba(45,19,91,0.28),0 0 16px rgba(244,229,255,0.24),inset 0 1px 0 rgba(255,255,255,0.62);
+            border-color:rgba(190,165,232,0.72);
+            background:#8D6CCF;
+            color:#fff;
+            box-shadow:0 0 0 3px rgba(141,108,207,0.16),0 5px 14px rgba(72,51,111,0.28),inset 0 1px 0 rgba(255,255,255,0.16);
           }
           #context-generator-handoff-progress .context-generator-handoff-stage[data-state="active"] .context-generator-handoff-stage-label{
             color:#fff;
             font-weight:680;
           }
           #context-generator-handoff-progress .context-generator-handoff-stage[data-state="complete"]{
-            color:rgba(255,247,255,0.76);
+            color:rgba(200,183,229,0.72);
           }
           #context-generator-handoff-progress .context-generator-handoff-stage[data-state="complete"] .context-generator-handoff-stage-marker{
-            border-color:rgba(255,250,255,0.34);
-            background:rgba(255,255,255,0.16);
-            color:#fff8ff;
+            border-color:rgba(164,137,216,0.34);
+            background:rgba(141,108,207,0.14);
+            color:#C8B6E9;
           }
           @media (prefers-reduced-motion: reduce){
             #context-generator-text{animation:none!important}
             #context-generator-text .context-generator-summary-activity-dot{animation:none!important;opacity:0.72}
             #${HANDOFF_REASSURANCE_ID}{transition:none!important}
-            #context-generator-handoff-lightflow,
-            #context-generator-handoff-lightflow::before,
-            #context-generator-handoff-lightflow::after{animation:none!important;transition:none!important;transform:none!important}
             #context-generator-handoff-progress .context-generator-handoff-stage-connector-fill,
             #context-generator-handoff-progress .context-generator-handoff-stage-progress-head{transition:none!important}
           }
@@ -4469,10 +4394,10 @@
         "padding:0 8px",
         "box-sizing:border-box",
         "border-radius:999px",
-        "border:1px solid rgba(255,255,255,0.18)",
-        "background:rgba(255,255,255,0.1)",
-        "box-shadow:inset 0 1px 0 rgba(255,255,255,0.11)",
-        "color:rgba(255,250,255,0.72)",
+        "border:1px solid rgba(255,255,255,0.075)",
+        "background:rgba(255,255,255,0.032)",
+        "box-shadow:inset 0 1px 0 rgba(255,255,255,0.035)",
+        "color:rgba(242,240,246,0.46)",
         "font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif",
         "font-size:10.5px",
         "font-weight:620",
@@ -4508,7 +4433,6 @@
       ].join(";");
       brand.appendChild(reassurance);
 
-      overlay.appendChild(lightFlow);
       overlay.appendChild(glow);
       overlay.appendChild(brand);
       overlay.appendChild(statusText);
@@ -4707,11 +4631,6 @@
     const resolvedDestinationName = destinationName
       || overlay?.dataset.contextGeneratorDestinationName
       || "destination";
-    if (overlay) {
-      // Decorative upper light shifts with real stages without creating fake progress.
-      overlay.dataset.contextGeneratorHandoffStage = stageId;
-      overlay.dataset.contextGeneratorHandoffPhase = phase;
-    }
     stopHandoffActivityProgress();
     const stages = getHandoffProgressState(stageId, phase, resolvedDestinationName);
     const stageElements = progress.querySelectorAll(".context-generator-handoff-stage");
