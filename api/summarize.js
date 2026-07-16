@@ -298,7 +298,6 @@ async function handleSummary(conversation, res) {
 module.exports = handler;
 module.exports.__test = {
   normalizeContextCarrySummary,
-  normalizeContextCarrySections,
   validateContextCarrySummary,
   getMinimumValidSummaryWords,
   getProviderRequestBudgetMs,

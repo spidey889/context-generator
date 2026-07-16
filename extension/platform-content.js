@@ -489,20 +489,15 @@
       getConversationRole,
       editorContainsText,
       formatFirefoxContentEditableHtml,
-      getVerificationSamples,
-      normalizeVerificationText,
       getClaudeBubblePlacement,
       getGeminiBubblePlacement,
       findGeminiModelSelectorButton,
-      limitConversationText,
       prepareSourceForCapture,
-      waitForConversationCaptureToSettle,
       expandCollapsedConversationContent,
       getConversationTurns,
       getDetectedConversationMessageCount,
       collectRenderedConversationTurns,
       scrapeConversationTextWhenReady,
-      scrapeConversationTextForTransfer,
       createTransferTrace,
       markCaptureDone,
       buildLatestTransferStats,
@@ -2647,10 +2642,6 @@
       "[data-test-id*='example' i]",
       "[class*='example' i]"
     ].join(",")));
-  }
-
-  function limitConversationText(text) {
-    return cleanText(text);
   }
 
   function ensureFloatingButton() {

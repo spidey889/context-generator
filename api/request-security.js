@@ -242,12 +242,8 @@ function resetRequestSecurityForTests() {
 
 module.exports = {
   MAX_CONVERSATION_CHARS,
-  MAX_CONVERSATION_BYTES,
   MAX_REQUEST_BYTES,
-  CLIENT_HEADER_NAME,
-  CLIENT_HEADER_VALUE,
   RATE_LIMIT_MAX_PER_MINUTE,
-  RATE_LIMIT_MAX_PER_HOUR,
   RATE_LIMIT_MAX_CONCURRENT,
   applyCorsHeaders,
   isValidPreflightRequest,
