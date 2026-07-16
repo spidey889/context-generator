@@ -1,116 +1,123 @@
-# Context Generator
+# Cap Context
 
-Move a long AI conversation into another AI without rebuilding the context by hand.
+Switch models. Keep the thread.
 
-Context Generator is a Chrome/Brave extension that reads the chat you are currently in, creates a compact "Context Carry" summary, opens the AI destination you choose, and pastes the summary into the destination input box for you to review and send.
+Cap Context is a Chrome and Brave extension that carries the useful context from one AI conversation into another. It captures the current chat after you choose a destination, creates a structured Context Carry, opens the destination AI, and pastes the handoff for you to review. It never presses Send.
 
-## What It Does
+[Install from the Chrome Web Store](https://chromewebstore.google.com/detail/cap-context/lpkaciijlhckkdhbgidbjfkldigghnjf) · [Visit the website](https://context-generator-five.vercel.app/) · [Read the privacy policy](PRIVACY.md)
 
-- Adds a Cap-Context button inside supported AI chat pages.
-- Lets you pick where to continue: Claude, ChatGPT, Gemini, Grok, or DeepSeek.
-- Captures only role-verified chat turns after you choose a destination; extension UI and unrelated page text are excluded.
-- Sends up to 210,000 captured conversation characters to one backend summary job.
-- Opens the destination AI and pastes the generated context into its composer.
-- Leaves the final send action to you.
-
-## Current Flow
-
-1. Open a supported AI chat.
-2. Click the Cap-Context bubble near the chat input.
-3. Pick the destination AI from the picker.
-4. The extension generates a portable context summary.
-5. The destination tab opens and the summary is pasted into the input box.
-6. Review the pasted context, then send it manually.
-
-If auto-paste fails, the extension shows a manual copy fallback with the generated context so you can still paste it yourself.
-
-## Supported Sites
+## Supported AI Platforms
 
 - Claude: `https://claude.ai`
-- ChatGPT: `https://chatgpt.com` and OpenAI-hosted ChatGPT pages
+- ChatGPT: `https://chatgpt.com` and the legacy `https://chat.openai.com` host
 - Gemini: `https://gemini.google.com`
 - Grok: `https://grok.com`
 - DeepSeek: `https://chat.deepseek.com`
 
+## How It Works
+
+1. Open a supported AI conversation.
+2. Click the Cap Context bubble near the composer.
+3. Choose where you want to continue.
+4. Cap Context captures the role-verified conversation and creates one portable summary.
+5. The destination opens with the Context Carry pasted into its composer.
+6. Review it and press Send yourself.
+
+Opening or closing the destination picker is UI-only. Capture and provider processing begin only after a destination is selected. If automatic paste fails, the generated Context Carry remains available in a manual-copy dialog.
+
+## Current Behavior
+
+- Captures role-verified user and assistant turns while excluding extension UI, composers, empty-state prompts, and unrelated page content.
+- Handles virtualized long conversations without silently removing the middle.
+- Accepts up to 210,000 captured JavaScript characters; larger conversations stop with a visible error before a summary request is sent.
+- Runs one backend summary job per transfer, with short exact-result deduplication and caching in the extension service worker.
+- Shows real Capturing, Summarizing, and Pasting stages during a handoff. Display-only progress never gates the actual transfer.
+- Focuses the destination after verified paste but never submits the message automatically.
+- Stores one latest-run diagnostic receipt locally. Its raw captured transcript expires after 24 hours while non-transcript diagnostics remain until the next transfer.
+
+## Summary Pipeline
+
+Chats at or below 1,200 characters use the exact local-direct Context Carry path without calling an AI provider. Generated summaries use this fallback order:
+
+1. Gemini `gemini-3.5-flash`, when `GEMINI_API_KEY` is configured
+2. Mistral `mistral-medium-2604`
+3. Mistral `mistral-large-2512`
+4. Mistral `ministral-3b-2512`
+5. Groq `llama-3.1-8b-instant`, when `GROQ_API_KEY` is configured
+
+Every generated result must pass deterministic validation for the complete seven-section Context Carry contract before it can be pasted. Invalid or failed output advances through the existing fallback chain.
+
 ## Install
 
-Install Cap Context from the [Chrome Web Store](https://chromewebstore.google.com/detail/cap-context/lpkaciijlhckkdhbgidbjfkldigghnjf). The same listing works in Chrome and Brave and receives normal browser-managed updates.
+Install the current release from the [Chrome Web Store](https://chromewebstore.google.com/detail/cap-context/lpkaciijlhckkdhbgidbjfkldigghnjf). The same listing works in Chrome and Brave and receives browser-managed updates.
 
-## Install For Local Development
+### Local development
 
-1. Clone this repo.
-2. Open Brave or Chrome and go to `chrome://extensions`.
+1. Clone this repository.
+2. Open `chrome://extensions` in Chrome or `brave://extensions` in Brave.
 3. Enable Developer mode.
-4. Click "Load unpacked".
-5. Select the `extension` folder from this repo.
-6. Open a supported AI chat page and refresh it if it was already open.
+4. Click **Load unpacked**.
+5. Select this repository's `extension` folder.
+6. Open or refresh a supported AI chat.
 
-The unpacked extension should be loaded from:
+The unpacked extension folder is:
 
 ```text
 extension/
 ```
 
-## Backend
+## Backend Configuration
 
-The extension calls the Vercel API endpoint in `api/summarize.js`. Tiny chats are carried locally by the backend without a provider call. Generated summaries use Gemini 3.5 Flash first, then the fixed Mistral model chain and optional Groq fallback. Provider output must pass deterministic Context Carry validation before it is returned to the extension.
-
-For deployment, configure:
+The extension calls the Vercel endpoint implemented in `api/summarize.js`. Configure:
 
 ```text
 GEMINI_API_KEY
 MISTRAL_API_KEY
 ```
 
-Optionally configure `GROQ_API_KEY` for the final fallback provider.
+`GROQ_API_KEY` is optional and enables the final provider fallback.
 
 ## Development
 
-Run the regression tests:
+Run deterministic regression coverage:
 
 ```bash
 npm test
 ```
 
-Run the complete release gate, including live summary accuracy and latency:
+Run the complete gate, including live summary accuracy and latency evaluation:
 
 ```bash
 npm run gate
 ```
 
-The versioned cases in `evaluation/cases.json` require at least 90% expected-fact recall, zero forbidden/incorrect facts, valid Context Carry structure, complete DOM capture, and per-case plus total latency budgets. `npm test` runs the deterministic capture gate; `npm run eval` sends the same cases to `EVAL_ENDPOINT` or the production endpoint by default. GitHub Actions also runs the complete gate after pushes to `master`, daily, and on demand.
-
-The test suite covers the core pieces most likely to regress:
-
-- Endpoint security, limits, prompt isolation, and provider fallback
-- Summary profiles, validation, normalization, and timeout budgets
-- Conversation capture, role detection, virtualized chats, and privacy boundaries
-- Background job deduplication, paste verification, and analysis receipts
+The versioned cases in `evaluation/cases.json` enforce expected-fact recall, zero forbidden facts, valid Context Carry structure, complete DOM capture, and latency budgets. GitHub Actions runs the complete gate after pushes to `master`, daily, and on demand.
 
 ## Project Layout
 
 | Path | Purpose |
 | --- | --- |
-| `extension/manifest.json` | Extension manifest, host permissions, and MV3 service worker config |
-| `extension/background.js` | Tab orchestration, backend summary requests, and destination messaging |
-| `extension/platform-content.js` | In-page button, picker, scraping, paste behavior, and fallback UI |
-| `extension/README.md` | Extension-specific usage notes |
-| `api/summarize.js` | Vercel summarization endpoint |
-| `api/request-security.js` | Endpoint CORS, schema, size, rate, and concurrency controls |
-| `test/` | Minimal Node regression tests |
-| `evaluation/cases.json` | Versioned accuracy, capture, and latency evaluation set |
-| `scripts/run-regression-eval.js` | Live summary regression scorer |
-| `LOGIC.md` | Current production architecture and behavior |
-| `CHANGELOG.md` | Historical decisions and replaced approaches |
-| `PRIVACY.md` | Current data handling and privacy policy |
-| `OLD_README.md` | Archived README for the earlier manual prompt/skill version |
+| `index.html` | Current dependency-free marketing site |
+| `extension/manifest.json` | Manifest V3 registration, permissions, scripts, and assets |
+| `extension/platform-content.js` | Picker, capture, handoff UI, paste behavior, and manual fallback |
+| `extension/background.js` | Tab orchestration, summary jobs, caching, receipts, and paste relay |
+| `extension/analysis-bridge.js` | Secure bridge to the latest-run analysis page |
+| `analysis/index.html` | Local latest-run diagnostics UI |
+| `api/summarize.js` | Summary profiles, provider chain, validation, and normalization |
+| `api/request-security.js` | Endpoint method, origin, schema, size, rate, and concurrency controls |
+| `test/` | Deterministic Node regression coverage |
+| `evaluation/cases.json` | Versioned summary, capture, accuracy, and latency cases |
+| `scripts/run-regression-eval.js` | Live endpoint regression scorer |
+| `LOGIC.md` | Source of truth for current production architecture and behavior |
+| `CHANGELOG.md` | Meaningful historical decisions and replaced approaches |
+| `PRIVACY.md` | Current data-handling and privacy policy |
 
-## Privacy Notes
+## Privacy
 
-Opening or cancelling the picker does not capture or upload chat text. Conversation text is sent only after you select a destination, and generated summaries may be processed by Gemini, Mistral, or the configured Groq fallback. The extension does not send messages on your behalf, click the destination send button, or submit the pasted summary automatically. See [PRIVACY.md](PRIVACY.md) for details.
+Chat text leaves the source page only after you select a destination. The backend does not intentionally log or permanently store transcripts. Generated summaries may be processed by Gemini, Mistral, or the configured Groq fallback. Pasted text is never submitted automatically. See [PRIVACY.md](PRIVACY.md) for the full details.
 
 ## Contributing
 
-Issues and PRs are welcome. Keep changes scoped, test the transfer flow when touching extension behavior, and avoid automatic-send behavior.
+Issues and pull requests are welcome. Keep changes scoped, preserve the no-auto-send boundary, and update `LOGIC.md` when production behavior changes.
 
 Made by [@spidey889](https://github.com/spidey889).
