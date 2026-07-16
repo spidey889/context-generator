@@ -2345,7 +2345,10 @@
       });
     });
 
-    const messageCandidates = candidates.filter((candidate) => !isBroadConversationWrapperCandidate(candidate, candidates));
+    const containmentMap = buildConversationCandidateContainmentMap(candidates);
+    const messageCandidates = candidates.filter((candidate) => (
+      !isBroadConversationWrapperCandidate(candidate, containmentMap)
+    ));
 
     messageCandidates.sort((a, b) => {
       if (a.element === b.element) return 0;
@@ -2354,28 +2357,74 @@
 
     let turns = [];
     messageCandidates.forEach((candidate) => {
-      const containingTurn = turns.find((turn) => turn.element !== candidate.element && turn.element.contains(candidate.element));
+      const containingTurn = turns.find((turn) => containmentMap.contains(turn, candidate));
       if (containingTurn) {
-        if (!isConversationCandidatePreferred(candidate, containingTurn, messageCandidates)) {
+        if (!isConversationCandidatePreferred(candidate, containingTurn, containmentMap)) {
           return;
         }
         turns = turns.filter((turn) => turn !== containingTurn);
       }
 
-      const containedTurns = turns.filter((turn) => candidate.element !== turn.element && candidate.element.contains(turn.element));
-      if (containedTurns.length && shouldKeepContainedConversationTurns(candidate, containedTurns, messageCandidates)) {
+      const containedTurns = turns.filter((turn) => containmentMap.contains(candidate, turn));
+      if (containedTurns.length && shouldKeepContainedConversationTurns(candidate, containedTurns, containmentMap)) {
         return;
       }
 
-      turns = turns.filter((turn) => !candidate.element.contains(turn.element));
+      turns = turns.filter((turn) => !containmentMap.contains(candidate, turn));
       turns.push(candidate);
     });
 
     return turns.map(({ element, role, text }) => ({ element, role, text }));
   }
 
-  function isBroadConversationWrapperCandidate(candidate, candidates) {
-    const nestedCandidates = getNestedConversationCandidates(candidate, candidates);
+  function buildConversationCandidateContainmentMap(candidates) {
+    const candidateByElement = new Map(candidates.map((candidate) => [candidate.element, candidate]));
+    const parentByCandidate = new Map();
+    const childrenByCandidate = new Map(candidates.map((candidate) => [candidate, []]));
+
+    // Walk each candidate's DOM ancestry once to find its nearest candidate parent.
+    // All later containment decisions use the derived lookup tables instead of
+    // rechecking every candidate pair with Element.contains().
+    candidates.forEach((candidate) => {
+      let parentElement = candidate.element.parentElement;
+      while (parentElement && !candidateByElement.has(parentElement)) {
+        parentElement = parentElement.parentElement;
+      }
+
+      const parentCandidate = candidateByElement.get(parentElement);
+      if (!parentCandidate) return;
+      parentByCandidate.set(candidate, parentCandidate);
+      childrenByCandidate.get(parentCandidate).push(candidate);
+    });
+
+    const ancestorsByCandidate = new Map();
+    const descendantsByCandidate = new Map();
+    const indexCandidateTree = (candidate, ancestors) => {
+      ancestorsByCandidate.set(candidate, new Set(ancestors));
+      const descendants = [];
+      childrenByCandidate.get(candidate).forEach((child) => {
+        indexCandidateTree(child, [...ancestors, candidate]);
+        descendants.push(child, ...descendantsByCandidate.get(child));
+      });
+      descendantsByCandidate.set(candidate, descendants);
+    };
+
+    candidates
+      .filter((candidate) => !parentByCandidate.has(candidate))
+      .forEach((candidate) => indexCandidateTree(candidate, []));
+
+    return {
+      contains(parent, child) {
+        return parent !== child && Boolean(ancestorsByCandidate.get(child)?.has(parent));
+      },
+      getDescendants(candidate) {
+        return descendantsByCandidate.get(candidate) || [];
+      }
+    };
+  }
+
+  function isBroadConversationWrapperCandidate(candidate, containmentMap) {
+    const nestedCandidates = getNestedConversationCandidates(candidate, containmentMap);
     if (nestedCandidates.length < 2) return false;
     if (isSingleRoleClaudeMessageWrapper(candidate, nestedCandidates)) return false;
 
@@ -2402,10 +2451,9 @@
     return isGenericConversationContainer(candidate.element) && nestedCoverage >= 0.45;
   }
 
-  function getNestedConversationCandidates(candidate, candidates) {
+  function getNestedConversationCandidates(candidate, containmentMap) {
     const seenTexts = new Set();
-    return candidates.filter((other) => {
-      if (other.element === candidate.element || !candidate.element.contains(other.element)) return false;
+    return containmentMap.getDescendants(candidate).filter((other) => {
       if (!other.text || other.text.length < 3 || other.text === candidate.text) return false;
       if (seenTexts.has(other.text)) return false;
       seenTexts.add(other.text);
@@ -2418,36 +2466,39 @@
     return /\b(?:main|conversation|conversations|thread|threads|chat|chats|messages|message-list|list|feed|transcript|scroll)\b/.test(label);
   }
 
-  function shouldKeepContainedConversationTurns(candidate, containedTurns, candidates) {
-    if (isBroadConversationWrapperCandidate(candidate, candidates)) return true;
+  function shouldKeepContainedConversationTurns(candidate, containedTurns, containmentMap) {
+    if (isBroadConversationWrapperCandidate(candidate, containmentMap)) return true;
     if (!hasExplicitConversationRole(candidate) && containedTurns.some(hasExplicitConversationRole)) return true;
     if (!hasExplicitConversationRole(candidate) && containedTurns.length >= 2) return true;
     return false;
   }
 
-  function isConversationCandidatePreferred(candidate, existing, candidates) {
+  function isConversationCandidatePreferred(candidate, existing, containmentMap) {
     if (
-      existing.element.contains(candidate.element) &&
-      isSingleRoleClaudeMessageWrapper(existing, getNestedConversationCandidates(existing, candidates))
+      containmentMap.contains(existing, candidate) &&
+      isSingleRoleClaudeMessageWrapper(existing, getNestedConversationCandidates(existing, containmentMap))
     ) {
       return false;
     }
 
-    if (isBroadConversationWrapperCandidate(existing, candidates) && !isBroadConversationWrapperCandidate(candidate, candidates)) {
+    if (
+      isBroadConversationWrapperCandidate(existing, containmentMap) &&
+      !isBroadConversationWrapperCandidate(candidate, containmentMap)
+    ) {
       return true;
     }
 
-    const candidateScore = getConversationCandidateScore(candidate, candidates);
-    const existingScore = getConversationCandidateScore(existing, candidates);
+    const candidateScore = getConversationCandidateScore(candidate, containmentMap);
+    const existingScore = getConversationCandidateScore(existing, containmentMap);
     return candidateScore > existingScore;
   }
 
-  function getConversationCandidateScore(candidate, candidates) {
+  function getConversationCandidateScore(candidate, containmentMap) {
     let score = 0;
     if (hasExplicitConversationRole(candidate)) score += 40;
     if (!isGenericConversationContainer(candidate.element)) score += 12;
-    if (isBroadConversationWrapperCandidate(candidate, candidates)) score -= 35;
-    score -= Math.min(20, getNestedConversationCandidates(candidate, candidates).length * 4);
+    if (isBroadConversationWrapperCandidate(candidate, containmentMap)) score -= 35;
+    score -= Math.min(20, getNestedConversationCandidates(candidate, containmentMap).length * 4);
     return score;
   }
 
