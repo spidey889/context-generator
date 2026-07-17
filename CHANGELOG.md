@@ -6,6 +6,8 @@ Keep an entry only when it explains the current architecture, a safety boundary,
 
 ## Durable History
 
+- 2026-07-17: Fixed the remaining ChatGPT long-chat under-capture after stored production receipts proved final deduplication was deleting turns after the sweep found them. ChatGPT now carries stable `conversation-turn-*` ids through virtual-window alignment and final serialization, preserving intentionally repeated text from distinct messages while still collapsing repeated DOM copies of the same message. The regression covers a virtualized 40-turn repeated-text chat and keeps the existing 315-entry inflation safety behavior for platforms without stable ids.
+
 - 2026-07-16: Fixed Firefox contenteditable paste collapsing Context Carry line breaks by inserting escaped HTML with explicit `<br>` elements only on Firefox. Chrome/Brave contenteditable paste and textarea/input paste remain unchanged.
 
 - 2026-07-16: Added the isolated Brave installed-extension smoke test. It exercises the real Manifest V3 worker and content scripts against controlled ChatGPT and Claude fixtures, requires one backend request and exact destination paste, and verifies that Send is never clicked.

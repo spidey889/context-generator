@@ -421,6 +421,60 @@ test("role detection uses structural evidence instead of you or me labels", () =
   assert.equal(deepSeekHooks.getConversationRole(deepSeekMarkdown), "User");
 });
 
+test("ChatGPT capture preserves identical text from distinct conversation turns", () => {
+  const elements = [
+    new FakeElement({
+      text: "Repeat this exact request.",
+      attrs: { "data-testid": "conversation-turn-1", "data-message-author-role": "user" }
+    }),
+    new FakeElement({
+      text: "Repeated exact response.",
+      attrs: { "data-testid": "conversation-turn-2", "data-message-author-role": "assistant" }
+    }),
+    new FakeElement({
+      text: "Repeat this exact request.",
+      attrs: { "data-testid": "conversation-turn-3", "data-message-author-role": "user" }
+    }),
+    new FakeElement({
+      text: "Repeated exact response.",
+      attrs: { "data-testid": "conversation-turn-4", "data-message-author-role": "assistant" }
+    })
+  ];
+  const hooks = loadPlatformContent(elements);
+
+  const transcript = hooks.scrapeConversationText();
+
+  assert.equal((transcript.match(/User: Repeat this exact request\./g) || []).length, 2);
+  assert.equal((transcript.match(/ChatGPT: Repeated exact response\./g) || []).length, 2);
+});
+
+test("ChatGPT capture collapses duplicate DOM copies of the same conversation turn", () => {
+  const elements = [
+    new FakeElement({
+      text: "One real request.",
+      attrs: { "data-testid": "conversation-turn-1", "data-message-author-role": "user" }
+    }),
+    new FakeElement({
+      text: "One real request.",
+      attrs: { "data-testid": "conversation-turn-1", "data-message-author-role": "user" }
+    }),
+    new FakeElement({
+      text: "One real response.",
+      attrs: { "data-testid": "conversation-turn-2", "data-message-author-role": "assistant" }
+    }),
+    new FakeElement({
+      text: "One real response.",
+      attrs: { "data-testid": "conversation-turn-2", "data-message-author-role": "assistant" }
+    })
+  ];
+  const hooks = loadPlatformContent(elements);
+
+  const transcript = hooks.scrapeConversationText();
+
+  assert.equal((transcript.match(/User: One real request\./g) || []).length, 1);
+  assert.equal((transcript.match(/ChatGPT: One real response\./g) || []).length, 1);
+});
+
 test("sequence merge keeps positional duplicates until the final capture safety pass", () => {
   const hooks = loadPlatformContent([]);
   const collected = [];
@@ -1076,6 +1130,30 @@ virtualSweepTest("ChatGPT sweep handles eight-turn virtualized windows on a larg
   assert.match(transcript, /User: Detached virtualized GPT turn 1/);
   assert.match(transcript, /ChatGPT: Detached virtualized GPT turn 78/);
   assert.equal(appScrollRoot.scrollCalls.some((call) => Number(call?.top || 0) > 0), true);
+});
+
+virtualSweepTest("ChatGPT sweep preserves a 40-turn chat with intentionally repeated text", async () => {
+  const { elements } = createVirtualizedChatElements({
+    label: "ChatGPT",
+    totalTurns: 40,
+    windowSize: 8,
+    scrollStride: 4,
+    scrollHeight: 3600,
+    makeTurn: (index) => new FakeElement({
+      text: index % 2 ? "Repeat this exact request." : "Repeated exact response.",
+      attrs: {
+        "data-testid": `conversation-turn-${index}`,
+        "data-message-author-role": index % 2 ? "user" : "assistant"
+      }
+    })
+  });
+  const hooks = loadPlatformContent(elements, "chatgpt.com");
+
+  await hooks.prepareSourceForCapture();
+  const transcript = await hooks.scrapeConversationTextWhenReady();
+
+  assert.equal((transcript.match(/User: Repeat this exact request\./g) || []).length, 20);
+  assert.equal((transcript.match(/ChatGPT: Repeated exact response\./g) || []).length, 20);
 });
 
 virtualSweepTest("ChatGPT sweep ignores an oversized decoy and keeps virtualized scroll coverage contiguous", async () => {

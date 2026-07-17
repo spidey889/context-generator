@@ -52,7 +52,7 @@ Every chat enters the same bounded rendered-window sweep; there is no initial tu
 
 ChatGPT resolves one authoritative conversation scroll root from rendered-turn ancestry, with an app-sized largest-range fallback for detached virtualizers. Other platforms retain the shared scroll-target path. Movement, step size, remaining distance, and diagnostics use the chosen geometry.
 
-Settled virtual windows are sequence-aligned against all accumulated turns so interior additions and sliding windows merge in position. Final selection starts from the quick capture, merges swept turns into that baseline, replaces a matched turn only with longer text, and cannot downgrade it with a shorter rendering. Immediately before serialization, a safety pass removes every later exact duplicate with the same role and text.
+Settled virtual windows are sequence-aligned against all accumulated turns so interior additions and sliding windows merge in position. Final selection starts from the quick capture, merges swept turns into that baseline, replaces a matched turn only with longer text, and cannot downgrade it with a shorter rendering. ChatGPT carries its stable `conversation-turn-*` identity through snapshot alignment and final serialization: repeated text from different turn ids is preserved, while repeated renderings of the same turn id collapse. Platforms without a stable turn id retain the conservative exact role-and-text safety pass.
 
 Capture preserves the complete middle, leaves the source at its final capture position, and serializes role-labeled turns only. The extension and backend independently enforce the 210,000-character limit. Sweep diagnostics record start, each advance, geometry/turn counts, and the final exit reason.
 

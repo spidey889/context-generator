@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-07-16-gemini-primary";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-07-17-chatgpt-turn-identity";
   const BUBBLE_ID = "context-generator-bubble";
   const OVERLAY_ID = "context-generator-overlay";
   const HANDOFF_SCRIM_ID = "context-generator-handoff-scrim";
@@ -152,6 +152,7 @@
     "[class*='thread' i]",
     "[class*='chat' i]"
   ];
+  const CHATGPT_CONVERSATION_TURN_SELECTOR = "[data-testid^='conversation-turn']";
   const CAP_CONTEXT_SITE_URL = "https://spidey889.github.io/context-generator";
   const EXTENSION_ASSET_BASE_URL = getRuntimeAssetBaseUrl();
   const BUBBLE_ICON_URL = getExtensionAssetUrl("bubble-icon.png");
@@ -725,7 +726,7 @@
     return {
       turns: messageTurns,
       signature: messageTurns
-        .map((turn) => getConversationTurnSignature(turn.role, cleanText(turn.text)))
+        .map(getConversationTurnSnapshotSignature)
         .join("\u0002"),
       count: messageTurns.length,
       chars: messageTurns.reduce((total, turn) => total + turn.text.length, 0),
@@ -1975,7 +1976,11 @@
   function getComparableConversationTurns(messageTurns = []) {
     const usefulTurns = messageTurns
       .filter((turn) => isUsefulConversationTurn(turn))
-      .map((turn) => ({ role: turn.role, text: cleanText(turn.text) }));
+      .map((turn) => {
+        const comparable = { role: turn.role, text: cleanText(turn.text) };
+        if (turn.sourceId) comparable.sourceId = turn.sourceId;
+        return comparable;
+      });
     return removeExactDuplicateConversationTurns(usefulTurns);
   }
 
@@ -1991,17 +1996,18 @@
     return (
       first.length === second.length &&
       first.every((turn, index) => (
-        getConversationTurnSignature(turn.role, turn.text) ===
-        getConversationTurnSignature(second[index]?.role, second[index]?.text)
+        getConversationTurnSnapshotSignature(turn) ===
+        getConversationTurnSnapshotSignature(second[index])
       ))
     );
   }
 
   function collectRenderedConversationTurns(collectedTurns, renderedTurns = getRenderedConversationSnapshot().turns) {
-    const normalizedTurns = renderedTurns.map((turn) => ({
-      role: turn.role,
-      text: cleanText(turn.text)
-    }));
+    const normalizedTurns = renderedTurns.map((turn) => {
+      const normalized = { role: turn.role, text: cleanText(turn.text) };
+      if (turn.sourceId) normalized.sourceId = turn.sourceId;
+      return normalized;
+    });
     if (!normalizedTurns.length) return 0;
     if (!collectedTurns.length) {
       collectedTurns.push(...normalizedTurns);
@@ -2103,10 +2109,10 @@
 
   function getNovelConversationTurns(collectedTurns, renderedTurns) {
     const existingSignatures = new Set(
-      collectedTurns.map((turn) => getConversationTurnSignature(turn.role, turn.text))
+      collectedTurns.map(getConversationTurnIdentitySignature)
     );
     return renderedTurns.filter((turn) => {
-      const signature = getConversationTurnSignature(turn.role, turn.text);
+      const signature = getConversationTurnIdentitySignature(turn);
       if (existingSignatures.has(signature)) return false;
       existingSignatures.add(signature);
       return true;
@@ -2115,6 +2121,10 @@
 
   function areConversationTurnSnapshotsCompatible(first, second) {
     if ((first?.role || "Message") !== (second?.role || "Message")) return false;
+
+    const firstSourceId = cleanText(first?.sourceId || "");
+    const secondSourceId = cleanText(second?.sourceId || "");
+    if (firstSourceId && secondSourceId) return firstSourceId === secondSourceId;
 
     const firstText = cleanText(first?.text || "");
     const secondText = cleanText(second?.text || "");
@@ -2223,7 +2233,7 @@
       turns,
       anchor: turns[turns.length - 1]?.element || null,
       signature: turns
-        .map((turn) => getConversationTurnSignature(turn.role, turn.text))
+        .map(getConversationTurnSnapshotSignature)
         .join("\u0002")
     };
   }
@@ -2232,12 +2242,24 @@
     return `${role || "Message"}\u0001${text || ""}`;
   }
 
+  function getConversationTurnIdentitySignature(turn) {
+    const sourceId = cleanText(turn?.sourceId || "");
+    return sourceId
+      ? `${turn?.role || "Message"}\u0001source:${sourceId}`
+      : getConversationTurnSignature(turn?.role, cleanText(turn?.text || ""));
+  }
+
+  function getConversationTurnSnapshotSignature(turn) {
+    return `${getConversationTurnIdentitySignature(turn)}\u0001${cleanText(turn?.text || "")}`;
+  }
+
   function removeExactDuplicateConversationTurns(turns) {
-    // This is deliberately independent of snapshot merging: no exact role+text
-    // duplicate is allowed into the serialized backend payload.
+    // ChatGPT exposes stable turn ids. They distinguish a real repeated message
+    // from another DOM copy of the same message; platforms without stable ids
+    // retain the conservative exact role+text safety pass.
     const seen = new Set();
     return turns.filter((turn) => {
-      const signature = getConversationTurnSignature(turn.role, cleanText(turn.text));
+      const signature = getConversationTurnIdentitySignature(turn);
       if (seen.has(signature)) return false;
       seen.add(signature);
       return true;
@@ -2357,11 +2379,14 @@
       const text = getCleanVisibleText(element);
       if (!text || text.length < 2) return;
 
-      candidates.push({
+      const candidate = {
         element,
         role: getConversationRole(element),
         text
-      });
+      };
+      const sourceId = getConversationTurnSourceId(element);
+      if (sourceId) candidate.sourceId = sourceId;
+      candidates.push(candidate);
     });
 
     const containmentMap = buildConversationCandidateContainmentMap(candidates);
@@ -2393,7 +2418,23 @@
       turns.push(candidate);
     });
 
-    return turns.map(({ element, role, text }) => ({ element, role, text }));
+    return turns.map(({ element, role, text, sourceId }) => {
+      const turn = { element, role, text };
+      if (sourceId) turn.sourceId = sourceId;
+      return turn;
+    });
+  }
+
+  function getConversationTurnSourceId(element) {
+    if (currentPlatform.id !== "chatgpt") return "";
+
+    const turnBoundary = element?.closest?.(CHATGPT_CONVERSATION_TURN_SELECTOR);
+    const testId = cleanText(turnBoundary?.getAttribute?.("data-testid") || "");
+    if (testId) return `testid:${testId.toLowerCase()}`;
+
+    const messageBoundary = element?.closest?.("[data-message-id]");
+    const messageId = cleanText(messageBoundary?.getAttribute?.("data-message-id") || "");
+    return messageId ? `message:${messageId}` : "";
   }
 
   function buildConversationCandidateContainmentMap(candidates) {
