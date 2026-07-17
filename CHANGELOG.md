@@ -6,6 +6,8 @@ Keep an entry only when it explains the current architecture, a safety boundary,
 
 ## Durable History
 
+- 2026-07-17: Added a ChatGPT-only diagnostic that logs the complete DOM ancestor chain from one structural conversation turn through `<html>`, including `tagName`, `className`, `scrollHeight`, `clientHeight`, and computed `overflowY`. Capture behavior is unchanged.
+
 - 2026-07-17: Added ChatGPT-only before/after console diagnostics around the existing scroll-to-top call. Each log records the selected root element plus `scrollHeight`, `clientHeight`, and `scrollTop`; scrolling and scraping behavior are unchanged.
 
 - 2026-07-17: Fixed ChatGPT capture staying at the bottom and sending only the mounted virtual window. The ChatGPT-only root resolver now derives ancestry exclusively from structural conversation-turn or author-role markers; generic message/chat UI candidates no longer influence the selected scroller. Claude and the shared multi-target path remain unchanged.

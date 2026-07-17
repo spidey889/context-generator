@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-07-17-chatgpt-scroll-root-diagnostics";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-07-17-chatgpt-ancestor-chain-diagnostics";
   const BUBBLE_ID = "context-generator-bubble";
   const OVERLAY_ID = "context-generator-overlay";
   const HANDOFF_SCRIM_ID = "context-generator-handoff-scrim";
@@ -1020,8 +1020,11 @@
       return chatGptConversationScrollRootCache;
     }
 
+    const structuralTurnElements = getChatGptStructuralTurnElements();
+    logChatGptConversationAncestorChain(structuralTurnElements[0]);
+
     const supportedRoots = new Map();
-    getChatGptStructuralTurnElements().forEach((turnElement) => {
+    structuralTurnElements.forEach((turnElement) => {
       let node = turnElement.parentElement;
       let depth = 0;
       while (node && node !== document.body && node !== document.documentElement) {
@@ -1074,6 +1077,26 @@
 
     chatGptConversationScrollRootCache = fallbackRoot;
     return fallbackRoot;
+  }
+
+  function logChatGptConversationAncestorChain(turnElement) {
+    if (!(turnElement instanceof Element)) return;
+
+    const ancestors = [];
+    let node = turnElement;
+    while (node instanceof Element) {
+      ancestors.push({
+        tagName: node.tagName,
+        className: String(node.className || ""),
+        scrollHeight: Number(node.scrollHeight || 0),
+        clientHeight: Number(node.clientHeight || 0),
+        overflowY: window.getComputedStyle(node).overflowY
+      });
+      if (node === document.documentElement) break;
+      node = node.parentElement;
+    }
+
+    console.info("[Cap Context][ChatGPT conversation ancestor chain]", ancestors);
   }
 
   function getChatGptStructuralTurnElements() {
