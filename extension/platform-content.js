@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-07-17-chatgpt-structural-scroll-root";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-07-17-chatgpt-scroll-root-diagnostics";
   const BUBBLE_ID = "context-generator-bubble";
   const OVERLAY_ID = "context-generator-overlay";
   const HANDOFF_SCRIM_ID = "context-generator-handoff-scrim";
@@ -751,8 +751,26 @@
   function scrollSourceConversationToTop() {
     const chatGptRoot = getChatGptConversationScrollRoot();
     if (chatGptRoot) {
+      console.info("[Cap Context][ChatGPT scroll-to-top] before", {
+        element: chatGptRoot,
+        tagName: chatGptRoot.tagName,
+        id: chatGptRoot.id || "",
+        className: String(chatGptRoot.className || ""),
+        scrollHeight: Number(chatGptRoot.scrollHeight || 0),
+        clientHeight: Number(chatGptRoot.clientHeight || 0),
+        scrollTop: Number(chatGptRoot.scrollTop || 0)
+      });
       scrollElementToTopInstantly(chatGptRoot);
       if (isDocumentScrollRoot(chatGptRoot)) scrollWindowToTopInstantly();
+      console.info("[Cap Context][ChatGPT scroll-to-top] after", {
+        element: chatGptRoot,
+        tagName: chatGptRoot.tagName,
+        id: chatGptRoot.id || "",
+        className: String(chatGptRoot.className || ""),
+        scrollHeight: Number(chatGptRoot.scrollHeight || 0),
+        clientHeight: Number(chatGptRoot.clientHeight || 0),
+        scrollTop: Number(chatGptRoot.scrollTop || 0)
+      });
       return;
     }
 
