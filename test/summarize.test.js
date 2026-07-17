@@ -133,7 +133,7 @@ test("backend forwards a 210k conversation to Mistral and reports the same input
     assert.equal(capturedRequest.url, "https://api.mistral.ai/v1/chat/completions");
     assert.equal(capturedRequest.body.model, "mistral-medium-2604");
     assert.equal(capturedRequest.body.max_tokens, 4200);
-    assert.match(capturedRequest.body.prompt_cache_key, /^capcontext-summary-v4-large-mistral-medium-2604$/);
+    assert.match(capturedRequest.body.prompt_cache_key, /^capcontext-summary-v5-large-mistral-medium-2604$/);
     assert.equal(capturedRequest.body.prediction, undefined);
     const transcriptEnvelope = JSON.parse(capturedRequest.body.messages[1].content);
     assert.deepEqual(transcriptEnvelope, {
@@ -893,8 +893,10 @@ test("backend sends generated summaries to native Gemini first and records Gemin
   const restoreMistralKey = setTemporaryEnv("MISTRAL_API_KEY", "test-mistral-key");
   const conversation = "Gemini primary context ".repeat(180);
   let capturedRequest = null;
+  let requestCount = 0;
 
   global.fetch = async (url, options) => {
+    requestCount += 1;
     capturedRequest = {
       url,
       headers: options.headers,
@@ -954,6 +956,10 @@ test("backend sends generated summaries to native Gemini first and records Gemin
     assert.equal(res.payload.timing.geminiPasses, 1);
     assert.equal(res.payload.timing.mistralPasses, 0);
     assert.equal(res.payload.timing.fallback.attempted, false);
+    assert.equal(requestCount, 1, "deterministic evaluation must not add a model request");
+    assert.equal(res.payload.timing.evaluation.passed, true);
+    assert.equal(res.payload.timing.evaluation.mode, "deterministic");
+    assert.equal(res.payload.timing.evaluation.unsupportedCount, 0);
     assert.deepEqual(res.payload.timing.usage, {
       promptTokens: 900,
       completionTokens: 300,
@@ -1023,6 +1029,90 @@ test("backend falls from invalid Gemini output to the preserved Mistral chain", 
   }
 });
 
+test("deterministic grounding failure advances through the existing model chain", async () => {
+  const originalFetch = global.fetch;
+  const restoreGeminiKey = setTemporaryEnv("GEMINI_API_KEY", undefined);
+  const restoreMistralKey = setTemporaryEnv("MISTRAL_API_KEY", "test-mistral-key");
+  const restoreGroqKey = setTemporaryEnv("GROQ_API_KEY", undefined);
+  const conversation = "User: Continue work in `api/summarize.js` and run `npm test`. ".repeat(45);
+  const requests = [];
+
+  global.fetch = async (_url, options) => {
+    const body = JSON.parse(options.body);
+    requests.push(body);
+    const supportedPath = requests.length === 1 ? "api/invented.js" : "api/summarize.js";
+    const content = makeContextCarrySummary("developer-grounding", 180).replace(
+      "- Useful concrete context remains available.",
+      `- Continue in \`${supportedPath}\` and run \`npm test\`.`
+    );
+    return {
+      ok: true,
+      status: 200,
+      json: async () => ({
+        choices: [{ finish_reason: "stop", message: { content } }]
+      })
+    };
+  };
+
+  const res = createMockResponse();
+  try {
+    await summarize({ method: "POST", body: { conversation } }, res);
+
+    assert.equal(res.statusCode, 200);
+    assert.equal(requests.length, 2);
+    assert.deepEqual(requests.map((request) => request.model), ["mistral-medium-2604", "mistral-large-2512"]);
+    assert.match(res.payload.timing.fallback.reason, /unsupported developer facts \(filePath\)/);
+    assert.equal(res.payload.timing.evaluation.passed, true);
+    assert.equal(res.payload.timing.evaluation.unsupportedCount, 0);
+    assert.match(res.payload.summary, /api\/summarize\.js/);
+    assert.doesNotMatch(res.payload.summary, /api\/invented\.js/);
+  } finally {
+    restoreGroqKey();
+    restoreMistralKey();
+    restoreGeminiKey();
+    global.fetch = originalFetch;
+  }
+});
+
+test("token-limited output advances through the existing model chain", async () => {
+  const originalFetch = global.fetch;
+  const restoreGeminiKey = setTemporaryEnv("GEMINI_API_KEY", undefined);
+  const restoreMistralKey = setTemporaryEnv("MISTRAL_API_KEY", "test-mistral-key");
+  const restoreGroqKey = setTemporaryEnv("GROQ_API_KEY", undefined);
+  const conversation = "User: Continue the developer handoff without losing speed. ".repeat(50);
+  const requests = [];
+
+  global.fetch = async (_url, options) => {
+    requests.push(JSON.parse(options.body));
+    return {
+      ok: true,
+      status: 200,
+      json: async () => ({
+        choices: [{
+          finish_reason: requests.length === 1 ? "length" : "stop",
+          message: { content: makeContextCarrySummary("finish-reason", 180) }
+        }]
+      })
+    };
+  };
+
+  const res = createMockResponse();
+  try {
+    await summarize({ method: "POST", body: { conversation } }, res);
+
+    assert.equal(res.statusCode, 200);
+    assert.equal(requests.length, 2);
+    assert.match(res.payload.timing.fallback.reason, /stopped at its token limit/);
+    assert.equal(res.payload.timing.finishReason, "stop");
+    assert.equal(res.payload.timing.evaluation.cutoffDetected, false);
+  } finally {
+    restoreGroqKey();
+    restoreMistralKey();
+    restoreGeminiKey();
+    global.fetch = originalFetch;
+  }
+});
+
 test("prompt and validator reserve None for genuinely unavailable optional facts", () => {
   const smallProfile = getSummaryProfile("x".repeat(4000));
   const detailWords = Array.from({ length: 90 }, (_, index) => `grounded${index}`).join(" ");
@@ -1080,7 +1170,11 @@ test("summary prompt keeps decisions and current state tied to the latest user c
     /DECISIONS MADE must contain only decisions actually made by the user or clearly accepted or confirmed by the user/i
   );
   assert.match(prompt, /choices the user deliberately deferred and tradeoffs the user accepted/i);
-  assert.match(SUMMARIZE_SOURCE, /capcontext-summary-v4/);
+  assert.match(SUMMARIZE_SOURCE, /capcontext-summary-v5/);
+  assert.match(prompt, /file paths, URLs, APIs, model IDs, versions, commands, error text and codes/i);
+  assert.match(prompt, /Never invent or silently rewrite a technical identifier/i);
+  assert.match(prompt, /Your output must match the required template below exactly/i);
+  assert.doesNotMatch(prompt, /match the Context Generator SKILL\.md template/i);
   assert.match(SUMMARIZE_SOURCE, /Do not number it or prefix it with a bullet/);
 });
 

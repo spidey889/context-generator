@@ -1241,6 +1241,7 @@
         minWords: backendTiming?.minWords ?? null,
         summaryWordCount: backendTiming?.summaryWordCount ?? null,
         mistralPasses: backendTiming?.mistralPasses ?? null,
+        evaluation: sanitizeEvaluationForStats(backendTiming?.evaluation),
         expansion: sanitizeExpansionForStats(backendTiming?.expansion),
         fallback: sanitizeFallbackForStats(backendTiming?.fallback),
         usage: normalizeUsageForStats(backendTiming?.usage)
@@ -1614,6 +1615,32 @@
     range.selectNodeContents(element);
     selection.removeAllRanges();
     selection.addRange(range);
+  }
+
+  function sanitizeEvaluationForStats(evaluation) {
+    if (!evaluation || typeof evaluation !== "object") return null;
+    return {
+      version: evaluation.version || null,
+      mode: evaluation.mode || null,
+      passed: evaluation.passed === true,
+      score: evaluation.score ?? null,
+      evaluatorMs: evaluation.evaluatorMs ?? null,
+      cutoffDetected: evaluation.cutoffDetected === true,
+      unsupportedCount: evaluation.unsupportedCount ?? null,
+      unsupportedKinds: Array.isArray(evaluation.unsupportedKinds)
+        ? evaluation.unsupportedKinds.slice(0, 8)
+        : [],
+      warningCount: evaluation.warningCount ?? null,
+      warningKinds: Array.isArray(evaluation.warningKinds)
+        ? evaluation.warningKinds.slice(0, 8)
+        : [],
+      missingLatestUserFactCount: evaluation.missingLatestUserFactCount ?? null,
+      missingLatestUserKinds: Array.isArray(evaluation.missingLatestUserKinds)
+        ? evaluation.missingLatestUserKinds.slice(0, 8)
+        : [],
+      skipped: evaluation.skipped === true,
+      reason: evaluation.reason || null
+    };
   }
 
   function isFirefoxBrowser() {

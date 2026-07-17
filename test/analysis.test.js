@@ -30,6 +30,14 @@ test("analysis displays Gemini as the primary provider and model", () => {
   assert.match(ANALYSIS_SOURCE, /return "Google Gemini"/);
 });
 
+test("analysis displays deterministic developer grounding without exposing claims", () => {
+  assert.match(ANALYSIS_SOURCE, /mini\("Grounding", getEvaluationStatus\(summary\.evaluation\)\)/);
+  assert.match(ANALYSIS_SOURCE, /sideItem\("Developer check", getEvaluationDetail\(summary\.evaluation\)\)/);
+  assert.match(ANALYSIS_SOURCE, /metric\("Evaluation", formatEvaluationScore\(summary\.evaluation\)/);
+  assert.match(ANALYSIS_SOURCE, /missingLatestUserFactCount/);
+  assert.doesNotMatch(ANALYSIS_SOURCE, /unsupportedFacts/);
+});
+
 test("analysis keeps exact raw scraped text behind a collapsed gear control", () => {
   assert.match(ANALYSIS_SOURCE, /id="rawScrapeButton"/);
   assert.match(ANALYSIS_SOURCE, /id="rawScrapePanel" hidden/);

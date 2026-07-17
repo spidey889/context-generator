@@ -645,6 +645,7 @@
               ${mini("Status", stats.status === "completed" ? "Completed" : "Failed")}
               ${mini("Model", formatModelDisplayName(summary.model))}
               ${mini("Profile", summary.profile || "n/a")}
+              ${mini("Grounding", getEvaluationStatus(summary.evaluation))}
             </div>
           </div>
 
@@ -660,6 +661,7 @@
             ${sideItem("Fallback log", getModelFallbackLabel(summary))}
             ${sideItem("Capture path", capture.method || "unknown")}
             ${sideItem("Message turns", formatTurnSummary(capture))}
+            ${sideItem("Developer check", getEvaluationDetail(summary.evaluation))}
             ${sideItem("Expansion", getExpansionLabel(summary.expansion))}
           </aside>
         </section>
@@ -670,6 +672,7 @@
           ${metric("Sent", formatNumber(capture.sentChars), capture.capped ? `Capped at ${formatNumber(capture.capChars)}; ${formatNumber(capture.usefulTurnCount)} turns captured` : `${formatNumber(capture.usefulTurnCount)} turns captured/sent`, "accent-amber")}
           ${metric("Backend got", formatNumber(summary.backendInputChars), `Request: ${formatNumber(summary.requestChars)}`, "accent-coral")}
           ${metric("Summary", formatNumber(summary.outputChars), `${formatNumber(summary.summaryWordCount)} words`, "accent-violet")}
+          ${metric("Evaluation", formatEvaluationScore(summary.evaluation), `Local check: ${formatDuration(summary.evaluation?.evaluatorMs)}`, "accent-coral")}
           ${metric("Tokens", formatNumber(usage.totalTokens), `${formatNumber(usage.promptTokens)} in / ${formatNumber(usage.completionTokens)} out`, "accent-green")}
           ${metric("Summary time", formatDuration(summary.summaryMs), `${formatBackendLabel(summary)}: ${formatDuration(summary.providerMs ?? summary.mistralMs)}`, "accent-amber")}
           ${metric("Paste time", formatDuration(stats.destinationTiming?.pasteMs), `Total: ${formatDuration(stats.totalMs)}`, "accent-teal")}
@@ -785,6 +788,31 @@
       return summary.modelReason && !/threshold\s+20000/i.test(summary.modelReason)
         ? summary.modelReason
         : "Not recorded - run a new transfer";
+    }
+
+    function getEvaluationStatus(evaluation) {
+      if (!evaluation) return "n/a";
+      if (evaluation.skipped) return "Exact local carry";
+      return evaluation.passed ? "Passed" : "Failed";
+    }
+
+    function formatEvaluationScore(evaluation) {
+      if (!evaluation) return "n/a";
+      if (evaluation.skipped) return "Exact";
+      return evaluation.score === null || evaluation.score === undefined
+        ? getEvaluationStatus(evaluation)
+        : `${formatNumber(evaluation.score)}/100`;
+    }
+
+    function getEvaluationDetail(evaluation) {
+      if (!evaluation) return "Not recorded - run a new transfer";
+      if (evaluation.skipped) return evaluation.reason || "Exact local carry";
+      const details = [`${getEvaluationStatus(evaluation)} at ${formatEvaluationScore(evaluation)}`];
+      if (evaluation.warningCount) details.push(`${formatNumber(evaluation.warningCount)} warning(s)`);
+      if (evaluation.missingLatestUserFactCount) {
+        details.push(`${formatNumber(evaluation.missingLatestUserFactCount)} latest-user fact(s) not carried`);
+      }
+      return details.join(" - ");
     }
 
     function getPrimaryModelLabel(summary) {

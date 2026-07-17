@@ -1406,6 +1406,15 @@ test("latest-run receipt preserves the complete provider fallback chain", () => 
   assert.match(source, /\.slice\(0, 5\)/);
 });
 
+test("latest-run receipt preserves bounded deterministic evaluation metadata", () => {
+  const source = fs.readFileSync(SOURCE_PATH, "utf8");
+
+  assert.match(source, /evaluation:\s*sanitizeEvaluationForStats/);
+  assert.match(source, /function sanitizeEvaluationForStats/);
+  assert.match(source, /unsupportedKinds\.slice\(0, 8\)/);
+  assert.match(source, /missingLatestUserKinds\.slice\(0, 8\)/);
+});
+
 test("latest-run receipt preserves the exact raw scraped text", () => {
   const hooks = loadPlatformContent([]);
   const exactText = "Claude conversation:\n\nUser: Keep <tags>, & symbols, 'quotes', and line breaks.\n\nClaude: Exactly.";

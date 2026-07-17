@@ -6,6 +6,8 @@ Keep an entry only when it explains the current architecture, a safety boundary,
 
 ## Durable History
 
+- 2026-07-17: Added a no-LLM developer grounding evaluator after generated-summary normalization. It locally verifies high-confidence URLs, file paths, commands, commits, versions, model IDs, error codes, and code identifiers against the transcript, rejects token-limited output, and routes only high-confidence failures through the existing provider fallback chain. Ambiguous number and latest-user coverage findings remain diagnostic so normal transfers keep one provider call and near-zero added latency. The prompt now uses its embedded template directly and explicitly preserves exact developer state.
+
 - 2026-07-16: Fixed Firefox contenteditable paste collapsing Context Carry line breaks by inserting escaped HTML with explicit `<br>` elements only on Firefox. Chrome/Brave contenteditable paste and textarea/input paste remain unchanged.
 
 - 2026-07-16: Added the isolated Brave installed-extension smoke test. It exercises the real Manifest V3 worker and content scripts against controlled ChatGPT and Claude fixtures, requires one backend request and exact destination paste, and verifies that Send is never clicked.

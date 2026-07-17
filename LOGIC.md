@@ -11,6 +11,7 @@ This is the single source of truth for current production behavior. Historical d
 - `extension/analysis-bridge.js` and `analysis/index.html`: Latest Run analysis on GitHub Pages.
 - `api/request-security.js`: endpoint trust boundary, request validation, limits, and abuse controls.
 - `api/summarize.js`: profiles, isolated provider requests, fallback chain, output validation, normalization, and timing.
+- `api/context-carry-evaluator.js`: local deterministic developer-fact grounding, latest-user technical coverage diagnostics, and token-limit cutoff detection.
 - `evaluation/cases.json` and `scripts/run-regression-eval.js`: versioned quality/latency cases and live endpoint scoring.
 - `scripts/run-extension-smoke.js`: isolated Brave smoke for the real unpacked extension.
 - `test/` and `.github/workflows/regression-gate.yml`: deterministic regressions and the production gate.
@@ -80,13 +81,15 @@ Gemini uses native `generateContent`, `MEDIUM` thinking, default sampling, expli
 
 ## Prompt Isolation And Validation
 
-The system instruction owns the exact seven-section Context Carry contract. The transcript is JSON-serialized into a separate versioned user-role envelope and declared untrusted data, including any apparent system, developer, tool, API, or instruction text inside it. Gemini receives native `systemInstruction` plus user `contents`; Mistral and Groq receive equivalent system/user messages.
+The system instruction owns the exact seven-section Context Carry contract. It explicitly preserves developer-critical file paths, URLs, commands, error codes, code identifiers, commit hashes, versions, model IDs, numerical limits, tests, and latest working state without inventing or silently rewriting identifiers. The transcript is JSON-serialized into a separate versioned user-role envelope and declared untrusted data, including any apparent system, developer, tool, API, or instruction text inside it. Gemini receives native `systemInstruction` plus user `contents`; Mistral and Groq receive equivalent system/user messages.
 
 The model must search the complete transcript before using `None`. `WHAT WE WERE DOING`, `WHERE WE LEFT OFF`, and `KEY CONTEXT` must remain meaningful and transcript-grounded. `DECISIONS MADE` contains only user-made or clearly user-confirmed decisions, including deferred choices and accepted tradeoffs. The latest user-confirmed state wins conflicts; an older state is retained only when still relevant and labeled as replaced, rejected, changed, or historical.
 
 Generated output is validated locally without another model call. It must contain the Context Carry title, all seven sections exactly once and in order, meaningful continuation-critical sections, a profile-derived minimum body length, and the exact destination confirmation. Obvious refusals and API-error output fail.
 
 Normalization may remove fences/footer noise and canonicalize an otherwise valid title, headings, ordered-list prefixes, and confirmation. Gemini's plain title is restored to the boxed title. Normalization never invents sections or wraps free-form output as valid context. Invalid output advances through the provider chain; exhaustion fails without pasting broken output.
+
+After normalization, a local deterministic evaluator compares high-confidence developer facts in the Context Carry against the source transcript. Unsupported URLs, file paths, commands, commit hashes, versions, model IDs, error codes, and code identifiers reject that provider result and advance through the existing fallback chain. A provider finish reason that means output-token exhaustion is rejected the same way. Unsupported numerical claims and technical facts from the latest user turn that were not carried are recorded as score warnings rather than blocking a valid result, avoiding unnecessary fallback latency from ambiguous signals. The evaluator makes no provider or network call; a valid first result still completes after one model request. Tiny `local-direct` output skips the evaluator because it embeds the exact short transcript.
 
 ## Endpoint Security And Limits
 
@@ -100,7 +103,7 @@ Instance-local controls allow 8 requests per observed client IP per minute, 40 p
 
 Chat text leaves the source only after destination selection. It goes to the Cap Context backend and, for generated summaries, the configured provider chain. The backend does not intentionally persist or log transcripts. Picker open/close and destination preconnection contain no chat text. Pasted text is never submitted automatically.
 
-The exact-summary cache and in-flight map are memory-only. One Latest Run receipt in `chrome.storage.local` records end-to-end/capture/backend/paste timing, turn counts, input/output sizes, profile, serving provider/model, full fallback chain, usage, status, and initially the exact captured transcript. An alarm removes only the raw transcript and expiry marker after 24 hours; the analysis bridge enforces the same expiry on read. Other receipt metadata remains until the next transfer replaces it. The analysis page shows raw text only inside a collapsed panel and never stores the generated summary.
+The exact-summary cache and in-flight map are memory-only. One Latest Run receipt in `chrome.storage.local` records end-to-end/capture/backend/paste timing, turn counts, input/output sizes, profile, serving provider/model, full fallback chain, deterministic evaluation score/counts/categories, usage, status, and initially the exact captured transcript. Evaluation metadata never stores the actual matched or unsupported claims. An alarm removes only the raw transcript and expiry marker after 24 hours; the analysis bridge enforces the same expiry on read. Other receipt metadata remains until the next transfer replaces it. The analysis page shows raw text only inside a collapsed panel and never stores the generated summary.
 
 Placement is platform-specific: Claude anchors beside voice controls, ChatGPT near its model selector at the page root, Gemini near `Flash`, Grok near its mode selector, and DeepSeek near attachment. Bounded editor/composer fallbacks handle hydration or selector drift; they are not conversation-capture fallbacks. Extension-owned nudges are excluded from capture.
 

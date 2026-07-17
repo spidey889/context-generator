@@ -31,6 +31,7 @@ Opening or closing the destination picker is UI-only. Capture and provider proce
 - Handles virtualized long conversations without silently removing the middle.
 - Accepts up to 210,000 captured JavaScript characters; larger conversations stop with a visible error before a summary request is sent.
 - Runs one backend summary job per transfer, with short exact-result deduplication and caching in the extension service worker.
+- Checks generated handoffs locally for unsupported developer facts and token-limit cutoff without making another model call.
 - Shows real Capturing, Summarizing, and Pasting stages during a handoff. Display-only progress never gates the actual transfer.
 - Focuses the destination after verified paste but never submits the message automatically.
 - Stores one latest-run diagnostic receipt locally. Its raw captured transcript expires after 24 hours while non-transcript diagnostics remain until the next transfer.
@@ -45,7 +46,7 @@ Chats at or below 1,200 characters use the exact local-direct Context Carry path
 4. Mistral `ministral-3b-2512`
 5. Groq `llama-3.1-8b-instant`, when `GROQ_API_KEY` is configured
 
-Every generated result must pass deterministic validation for the complete seven-section Context Carry contract before it can be pasted. Invalid or failed output advances through the existing fallback chain.
+Every generated result must pass deterministic validation for the complete seven-section Context Carry contract before it can be pasted. A local no-LLM evaluator also verifies high-confidence file paths, URLs, commands, commits, versions, model IDs, error codes, and code identifiers against the captured transcript. Invalid, cut-off, or high-confidence ungrounded output advances through the existing fallback chain without adding a second model call to the normal success path.
 
 ## Install
 
@@ -112,6 +113,7 @@ The versioned cases in `evaluation/cases.json` enforce expected-fact recall, zer
 | `extension/analysis-bridge.js` | Secure bridge to the latest-run analysis page |
 | `analysis/index.html` | Local latest-run diagnostics UI |
 | `api/summarize.js` | Summary profiles, provider chain, validation, and normalization |
+| `api/context-carry-evaluator.js` | Fast deterministic developer-fact grounding and cutoff checks |
 | `api/request-security.js` | Endpoint method, origin, schema, size, rate, and concurrency controls |
 | `test/` | Deterministic Node regression coverage |
 | `evaluation/cases.json` | Versioned summary, capture, accuracy, and latency cases |
