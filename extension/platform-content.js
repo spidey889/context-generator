@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-07-17-chatgpt-ancestor-chain-diagnostics";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-07-17-chatgpt-overflow-scroll-root";
   const BUBBLE_ID = "context-generator-bubble";
   const OVERLAY_ID = "context-generator-overlay";
   const HANDOFF_SCRIM_ID = "context-generator-handoff-scrim";
@@ -1015,68 +1015,32 @@
     if (currentPlatform.id !== "chatgpt") return null;
     if (
       chatGptConversationScrollRootCache?.isConnected !== false &&
-      isScrollableSourceElement(chatGptConversationScrollRootCache)
+      hasChatGptScrollableOverflow(chatGptConversationScrollRootCache)
     ) {
       return chatGptConversationScrollRootCache;
     }
 
     const structuralTurnElements = getChatGptStructuralTurnElements();
     logChatGptConversationAncestorChain(structuralTurnElements[0]);
+    const authoritativeRoot = findNearestChatGptScrollableAncestor(structuralTurnElements[0]);
+    chatGptConversationScrollRootCache = authoritativeRoot;
+    return authoritativeRoot;
+  }
 
-    const supportedRoots = new Map();
-    structuralTurnElements.forEach((turnElement) => {
-      let node = turnElement.parentElement;
-      let depth = 0;
-      while (node && node !== document.body && node !== document.documentElement) {
-        if (isScrollableSourceElement(node)) {
-          const support = supportedRoots.get(node) || { count: 0, totalDepth: 0 };
-          support.count += 1;
-          support.totalDepth += depth;
-          supportedRoots.set(node, support);
-        }
-        node = node.parentElement;
-        depth += 1;
-      }
-    });
-
-    const ancestorRoot = [...supportedRoots.entries()]
-      .sort((left, right) => {
-        const supportDifference = right[1].count - left[1].count;
-        if (supportDifference) return supportDifference;
-        const leftAverageDepth = left[1].totalDepth / left[1].count;
-        const rightAverageDepth = right[1].totalDepth / right[1].count;
-        if (leftAverageDepth !== rightAverageDepth) return leftAverageDepth - rightAverageDepth;
-        return getElementMaxScrollTop(right[0]) - getElementMaxScrollTop(left[0]);
-      })[0]?.[0];
-
-    if (ancestorRoot) {
-      chatGptConversationScrollRootCache = ancestorRoot;
-      return ancestorRoot;
+  function findNearestChatGptScrollableAncestor(turnElement) {
+    let node = turnElement?.parentElement || null;
+    while (node instanceof Element) {
+      if (hasChatGptScrollableOverflow(node)) return node;
+      if (node === document.documentElement) break;
+      node = node.parentElement;
     }
+    return null;
+  }
 
-    // ChatGPT can render turns in a detached virtualizer subtree. In that case, prefer an app-sized
-    // scroller over broad page candidates; using the tallest candidate caused top/middle/bottom jumps.
-    const viewportHeight = Math.max(
-      360,
-      Number(window.innerHeight || document.documentElement?.clientHeight || 0) || 720
-    );
-    const candidates = getSourceScrollTargets().filter(isScrollableSourceElement);
-    const appSizedCandidates = candidates.filter((element) => {
-      const clientHeight = Number(element.clientHeight || 0);
-      return clientHeight >= 160 && clientHeight <= viewportHeight * 1.5;
-    });
-    const fallbackRoot = (appSizedCandidates.length ? appSizedCandidates : candidates)
-      .sort((left, right) => {
-        const scrollRangeDifference = getElementMaxScrollTop(right) - getElementMaxScrollTop(left);
-        if (scrollRangeDifference) return scrollRangeDifference;
-        return (
-          Math.abs(Number(left.clientHeight || 0) - viewportHeight) -
-          Math.abs(Number(right.clientHeight || 0) - viewportHeight)
-        );
-      })[0] || null;
-
-    chatGptConversationScrollRootCache = fallbackRoot;
-    return fallbackRoot;
+  function hasChatGptScrollableOverflow(element) {
+    if (!(element instanceof Element) || isContextGeneratorNode(element)) return false;
+    const overflowY = String(window.getComputedStyle(element).overflowY || "").toLowerCase();
+    return overflowY === "auto" || overflowY === "scroll";
   }
 
   function logChatGptConversationAncestorChain(turnElement) {

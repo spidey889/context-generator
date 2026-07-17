@@ -6,6 +6,8 @@ Keep an entry only when it explains the current architecture, a safety boundary,
 
 ## Durable History
 
+- 2026-07-17: Replaced ChatGPT's size-based scroll-root heuristic with the real DOM rule confirmed from a 300-turn conversation: walk upward from a structural conversation turn and select the nearest ancestor whose computed `overflow-y` is `auto` or `scroll`. Large `overflow-y: visible` ancestors are explicitly ignored. This is ChatGPT-only; Claude and every shared platform path remain unchanged.
+
 - 2026-07-17: Added a ChatGPT-only diagnostic that logs the complete DOM ancestor chain from one structural conversation turn through `<html>`, including `tagName`, `className`, `scrollHeight`, `clientHeight`, and computed `overflowY`. Capture behavior is unchanged.
 
 - 2026-07-17: Added ChatGPT-only before/after console diagnostics around the existing scroll-to-top call. Each log records the selected root element plus `scrollHeight`, `clientHeight`, and `scrollTop`; scrolling and scraping behavior are unchanged.

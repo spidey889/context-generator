@@ -199,7 +199,14 @@ function loadPlatformContent(elements = [], hostname = "chatgpt.com", { expectSu
         hooks = value;
       }
     },
-    getComputedStyle: () => ({ display: "block", visibility: "visible" }),
+    getComputedStyle: (element) => {
+      const className = String(element?.className || "");
+      const overflowY = element?.getAttribute?.("data-overflow-y")
+        || (className.includes("overflow-y-auto") ? "auto" : "")
+        || (className.includes("overflow-y-scroll") ? "scroll" : "")
+        || "visible";
+      return { display: "block", visibility: "visible", overflowY };
+    },
     performance: { now: () => 0 },
     addEventListener: () => {},
     removeEventListener: () => {},
@@ -781,7 +788,7 @@ function createVirtualizedChatElements({
   let renderedStartIndex = 0;
   const scrollableRoot = new FakeElement({
     text: `Scrollable ${label} chat root`,
-    attrs: { role: "main" }
+    attrs: { role: "main", "data-overflow-y": "auto" }
   });
   scrollableRoot.scrollHeight = scrollHeight;
   scrollableRoot.clientHeight = 600;
@@ -823,7 +830,7 @@ virtualSweepTest("transfer capture keeps fuller swept text when the turn count m
   const elements = [];
   const scrollableRoot = new FakeElement({
     text: "Scrollable ChatGPT chat root",
-    attrs: { role: "main" }
+    attrs: { role: "main", "data-overflow-y": "auto" }
   });
   scrollableRoot.scrollHeight = 1800;
   scrollableRoot.clientHeight = 600;
@@ -1089,6 +1096,8 @@ virtualSweepTest("ChatGPT sweep handles eight-turn virtualized windows on a larg
     text: "Rendered ChatGPT messages",
     attrs: { class: "conversation-turns" }
   });
+  transcriptHost.parentElement = appScrollRoot;
+  appScrollRoot.children = [transcriptHost];
   elements.push(transcriptHost);
 
   const makeTurn = (index) => {
@@ -1182,6 +1191,8 @@ virtualSweepTest("ChatGPT sweep ignores an oversized decoy and keeps virtualized
     text: "Detached rendered ChatGPT messages",
     attrs: { class: "conversation-turns" }
   });
+  transcriptHost.parentElement = appScrollRoot;
+  appScrollRoot.children = [transcriptHost];
   elements.push(transcriptHost);
 
   const makeTurn = (index) => {
@@ -1283,6 +1294,56 @@ virtualSweepTest("ChatGPT top reset ignores generic message candidates outside t
 
   assert.equal(conversationRoot.scrollTop, 0);
   assert.equal(genericMessageRoot.scrollTop, 1200);
+});
+
+virtualSweepTest("ChatGPT top reset skips large visible-overflow ancestors for the nearest auto-overflow root", async () => {
+  const authoritativeRoot = new FakeElement({
+    text: "Real ChatGPT scroll root",
+    attrs: { class: "group/scroll-root", "data-overflow-y": "auto" }
+  });
+  authoritativeRoot.scrollHeight = 320000;
+  authoritativeRoot.clientHeight = 700;
+  authoritativeRoot.scrollTop = 310000;
+
+  const largeVisibleOuter = new FakeElement({
+    text: "Large visible outer ancestor",
+    attrs: { class: "conversation-shell", "data-overflow-y": "visible" }
+  });
+  largeVisibleOuter.scrollHeight = 620000;
+  largeVisibleOuter.clientHeight = 900;
+  largeVisibleOuter.scrollTop = 220000;
+  largeVisibleOuter.parentElement = authoritativeRoot;
+  authoritativeRoot.children = [largeVisibleOuter];
+
+  const largeVisibleInner = new FakeElement({
+    text: "Large visible inner ancestor",
+    attrs: { class: "conversation-turns", "data-overflow-y": "visible" }
+  });
+  largeVisibleInner.scrollHeight = 480000;
+  largeVisibleInner.clientHeight = 800;
+  largeVisibleInner.scrollTop = 180000;
+  largeVisibleInner.parentElement = largeVisibleOuter;
+  largeVisibleOuter.children = [largeVisibleInner];
+
+  const turn = new FakeElement({
+    text: "A real structural ChatGPT turn",
+    attrs: {
+      "data-testid": "conversation-turn-300",
+      "data-message-author-role": "user"
+    }
+  });
+  turn.parentElement = largeVisibleInner;
+  largeVisibleInner.children = [turn];
+
+  const hooks = loadPlatformContent(
+    [authoritativeRoot, largeVisibleOuter, largeVisibleInner, turn],
+    "chatgpt.com"
+  );
+  await hooks.prepareSourceForCapture();
+
+  assert.equal(authoritativeRoot.scrollTop, 0);
+  assert.equal(largeVisibleOuter.scrollTop, 220000);
+  assert.equal(largeVisibleInner.scrollTop, 180000);
 });
 
 virtualSweepTest("ChatGPT sweep advances from rendered message anchors when scroll roots do not expose the next batch", async () => {
