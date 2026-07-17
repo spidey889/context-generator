@@ -1233,6 +1233,58 @@ virtualSweepTest("ChatGPT sweep ignores an oversized decoy and keeps virtualized
   assert.equal(oversizedDecoy.scrollCalls.length, 0);
 });
 
+virtualSweepTest("ChatGPT top reset ignores generic message candidates outside the structural conversation", async () => {
+  const elements = [];
+  const genericMessageRoot = new FakeElement({
+    text: "Generic message panel",
+    attrs: { class: "overflow-y-auto chat-scroll-area" },
+    rect: { width: 420, height: 600, top: 0, left: 0, right: 420, bottom: 600 }
+  });
+  genericMessageRoot.scrollHeight = 5000;
+  genericMessageRoot.clientHeight = 600;
+  genericMessageRoot.scrollTop = 1200;
+  elements.push(genericMessageRoot);
+
+  for (let index = 1; index <= 12; index += 1) {
+    const genericCandidate = new FakeElement({
+      text: `Generic UI message ${index}`,
+      attrs: { class: "message-card" }
+    });
+    genericCandidate.parentElement = genericMessageRoot;
+    genericMessageRoot.children.push(genericCandidate);
+    elements.push(genericCandidate);
+  }
+
+  const conversationRoot = new FakeElement({
+    text: "Structural ChatGPT conversation",
+    attrs: { class: "group/scroll-root overflow-y-auto" },
+    rect: { width: 980, height: 640, top: 0, left: 0, right: 980, bottom: 640 }
+  });
+  conversationRoot.scrollHeight = 4800;
+  conversationRoot.clientHeight = 600;
+  conversationRoot.scrollTop = 4200;
+  elements.push(conversationRoot);
+
+  for (let index = 1; index <= 4; index += 1) {
+    const turn = new FakeElement({
+      text: `Structural GPT turn ${index}`,
+      attrs: {
+        "data-testid": `conversation-turn-${index}`,
+        "data-message-author-role": index % 2 ? "user" : "assistant"
+      }
+    });
+    turn.parentElement = conversationRoot;
+    conversationRoot.children.push(turn);
+    elements.push(turn);
+  }
+
+  const hooks = loadPlatformContent(elements, "chatgpt.com");
+  await hooks.prepareSourceForCapture();
+
+  assert.equal(conversationRoot.scrollTop, 0);
+  assert.equal(genericMessageRoot.scrollTop, 1200);
+});
+
 virtualSweepTest("ChatGPT sweep advances from rendered message anchors when scroll roots do not expose the next batch", async () => {
   const elements = [];
   const totalTurns = 78;

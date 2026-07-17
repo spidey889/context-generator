@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-07-17-chatgpt-turn-identity";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-07-17-chatgpt-structural-scroll-root";
   const BUBBLE_ID = "context-generator-bubble";
   const OVERLAY_ID = "context-generator-overlay";
   const HANDOFF_SCRIM_ID = "context-generator-handoff-scrim";
@@ -1003,8 +1003,8 @@
     }
 
     const supportedRoots = new Map();
-    getConversationTurns().forEach((turn) => {
-      let node = turn.element?.parentElement;
+    getChatGptStructuralTurnElements().forEach((turnElement) => {
+      let node = turnElement.parentElement;
       let depth = 0;
       while (node && node !== document.body && node !== document.documentElement) {
         if (isScrollableSourceElement(node)) {
@@ -1056,6 +1056,24 @@
 
     chatGptConversationScrollRootCache = fallbackRoot;
     return fallbackRoot;
+  }
+
+  function getChatGptStructuralTurnElements() {
+    const structuralSelector = [
+      CHATGPT_CONVERSATION_TURN_SELECTOR,
+      "[data-message-author-role='user']",
+      "[data-message-author-role='assistant']"
+    ].join(",");
+    const seen = new Set();
+
+    return Array.from(document.querySelectorAll(structuralSelector))
+      .filter((element) => element.matches?.(structuralSelector) && !isContextGeneratorNode(element))
+      .map((element) => element.closest?.(CHATGPT_CONVERSATION_TURN_SELECTOR) || element)
+      .filter((element) => {
+        if (!element || seen.has(element)) return false;
+        seen.add(element);
+        return true;
+      });
   }
 
   function isDocumentScrollRoot(element) {
