@@ -85,6 +85,12 @@ Run deterministic regression coverage:
 npm test
 ```
 
+Run the deliberately slow real-scale capture pacing regression separately:
+
+```bash
+npm run test:slow
+```
+
 Run the real installed-extension handoff smoke in a new isolated Brave window:
 
 ```bash
@@ -93,7 +99,7 @@ npm run test:extension-smoke
 
 The smoke uses controlled local ChatGPT and Claude fixtures plus a stub summary endpoint. It loads the actual Manifest V3 extension and verifies capture, exactly one backend request, destination paste, and the no-auto-send boundary without using live accounts or production APIs. Set `BRAVE_PATH` only when Brave is installed outside its normal system location.
 
-Run the complete gate, including live summary accuracy and latency evaluation:
+Run the complete release gate, including the slow pacing regression plus live summary accuracy and latency evaluation:
 
 ```bash
 npm run gate

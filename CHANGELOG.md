@@ -6,6 +6,8 @@ Keep an entry only when it explains the current architecture, a safety boundary,
 
 ## Durable History
 
+- 2026-07-17: Removed the obsolete ChatGPT rendered-anchor sweep regression that modeled a conversation without the confirmed overflow scroll-root ancestor. The 78-turn Claude pacing regression moved out of `npm test` into `npm run test:slow`; `npm run gate` still runs both suites before live evaluation.
+
 - 2026-07-17: Finalized the ChatGPT-only scroll-root rule confirmed from a 300-turn conversation: walk upward from a structural conversation turn and select the nearest ancestor whose computed `overflow-y` is `auto` or `scroll`. Selection does not use generic candidates, `scrollHeight`, `clientHeight`, or element size, and large `overflow-y: visible` ancestors are ignored. The superseded broad-selector and size-heuristic regressions were removed in favor of one deterministic suite covering both allowed overflow values and the nearest-ancestor rule. Claude and every shared platform path remain unchanged.
 
 - 2026-07-17: Added a ChatGPT-only diagnostic that logs the complete DOM ancestor chain from one structural conversation turn through `<html>`, including `tagName`, `className`, `scrollHeight`, `clientHeight`, and computed `overflowY`. Capture behavior is unchanged.

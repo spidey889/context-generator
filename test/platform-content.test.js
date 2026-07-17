@@ -902,7 +902,7 @@ virtualSweepTest("physical scroll movement prevents a premature stale exit on no
   assert.match(transcript, /ChatGPT: Delayed tall-message turn 16/);
 });
 
-virtualSweepTest("Claude sweep captures a real-scale 78-turn long chat with paced advances", async () => {
+test("slow/release: Claude sweep captures a real-scale 78-turn long chat with paced advances", async () => {
   const longText = "Long Claude message detail ".repeat(28).trim();
   const { elements, scrollableRoot } = createVirtualizedChatElements({
     label: "Claude",
@@ -1164,50 +1164,6 @@ virtualSweepTest("ChatGPT scroll root is the nearest auto or scroll ancestor of 
     assert.equal(largeVisibleInner.scrollTop, 180000, `${overflowY} case selected a visible inner decoy`);
     assert.equal(fartherScrollableAncestor.scrollTop, 400000, `${overflowY} case did not select the nearest scroller`);
   }
-});
-
-virtualSweepTest("ChatGPT sweep advances from rendered message anchors when scroll roots do not expose the next batch", async () => {
-  const elements = [];
-  const totalTurns = 78;
-  const windowSize = 8;
-  const transcriptHost = new FakeElement({
-    text: "Rendered ChatGPT messages",
-    attrs: { class: "conversation-turns" }
-  });
-  elements.push(transcriptHost);
-
-  const renderWindow = (startIndex) => {
-    const windowTurns = [];
-    for (let index = startIndex + 1; index <= Math.min(totalTurns, startIndex + windowSize); index += 1) {
-      const turn = new FakeElement({
-        text: `Anchor-loaded GPT turn ${index}`,
-        attrs: { "data-message-author-role": index % 2 ? "user" : "assistant" }
-      });
-      turn.parentElement = transcriptHost;
-      turn.onScrollIntoView = () => {
-        if (index !== startIndex + windowSize) return;
-        renderWindow(Math.min(totalTurns - windowSize, startIndex + windowSize));
-      };
-      windowTurns.push(turn);
-    }
-
-    transcriptHost.children = windowTurns;
-    transcriptHost.textContent = windowTurns.map((turn) => turn.textContent).join("\n");
-    transcriptHost.innerText = transcriptHost.textContent;
-    elements.splice(1, elements.length - 1, ...windowTurns);
-  };
-  renderWindow(0);
-
-  const hooks = loadPlatformContent(elements, "chatgpt.com");
-  const initialTranscript = hooks.scrapeConversationText();
-  assert.equal((initialTranscript.match(/(?:User|ChatGPT): Anchor-loaded GPT turn/g) || []).length, 8);
-
-  await hooks.prepareSourceForCapture();
-  const transcript = await hooks.scrapeConversationTextWhenReady();
-
-  assert.equal((transcript.match(/(?:User|ChatGPT): Anchor-loaded GPT turn/g) || []).length, 78);
-  assert.match(transcript, /User: Anchor-loaded GPT turn 1/);
-  assert.match(transcript, /ChatGPT: Anchor-loaded GPT turn 78/);
 });
 
 virtualSweepTest("short unscrollable chats probe the rendered boundary before finishing", async () => {
