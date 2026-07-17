@@ -6,13 +6,11 @@ Keep an entry only when it explains the current architecture, a safety boundary,
 
 ## Durable History
 
-- 2026-07-17: Replaced ChatGPT's size-based scroll-root heuristic with the real DOM rule confirmed from a 300-turn conversation: walk upward from a structural conversation turn and select the nearest ancestor whose computed `overflow-y` is `auto` or `scroll`. Large `overflow-y: visible` ancestors are explicitly ignored. This is ChatGPT-only; Claude and every shared platform path remain unchanged.
+- 2026-07-17: Finalized the ChatGPT-only scroll-root rule confirmed from a 300-turn conversation: walk upward from a structural conversation turn and select the nearest ancestor whose computed `overflow-y` is `auto` or `scroll`. Selection does not use generic candidates, `scrollHeight`, `clientHeight`, or element size, and large `overflow-y: visible` ancestors are ignored. The superseded broad-selector and size-heuristic regressions were removed in favor of one deterministic suite covering both allowed overflow values and the nearest-ancestor rule. Claude and every shared platform path remain unchanged.
 
 - 2026-07-17: Added a ChatGPT-only diagnostic that logs the complete DOM ancestor chain from one structural conversation turn through `<html>`, including `tagName`, `className`, `scrollHeight`, `clientHeight`, and computed `overflowY`. Capture behavior is unchanged.
 
 - 2026-07-17: Added ChatGPT-only before/after console diagnostics around the existing scroll-to-top call. Each log records the selected root element plus `scrollHeight`, `clientHeight`, and `scrollTop`; scrolling and scraping behavior are unchanged.
-
-- 2026-07-17: Fixed ChatGPT capture staying at the bottom and sending only the mounted virtual window. The ChatGPT-only root resolver now derives ancestry exclusively from structural conversation-turn or author-role markers; generic message/chat UI candidates no longer influence the selected scroller. Claude and the shared multi-target path remain unchanged.
 
 - 2026-07-17: Fixed the remaining ChatGPT long-chat under-capture after stored production receipts proved final deduplication was deleting turns after the sweep found them. ChatGPT now carries stable `conversation-turn-*` ids through virtual-window alignment and final serialization, preserving intentionally repeated text from distinct messages while still collapsing repeated DOM copies of the same message. The regression covers a virtualized 40-turn repeated-text chat and keeps the existing 315-entry inflation safety behavior for platforms without stable ids.
 
@@ -29,8 +27,6 @@ Keep an entry only when it explains the current architecture, a safety boundary,
 - 2026-07-16: Conversation candidate containment moved from repeated pairwise DOM checks to a cached parent-to-child index. Wrapper selection, ordering, role rules, and final exact-deduplication behavior were deliberately preserved.
 
 - 2026-07-15: The handoff popup replaced random/filler presentation with three deterministic stages driven only by real capture, summary, and paste events. Display-only progress cannot complete a stage or gate transfer work.
-
-- 2026-07-15: Fixed ChatGPT long-chat under-capture caused by an oversized page scroll candidate. ChatGPT now uses one authoritative conversation scroll root for movement, step size, remaining distance, and diagnostics; other platforms retain the shared scroll-target path.
 
 - 2026-07-15: Rebuilt the repository-root marketing site as a dependency-free extension landing page. The previous site remains archived as `index.legacy-2026-07-15.html`; the current page uses relative assets and has no runtime API dependency.
 
