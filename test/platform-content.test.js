@@ -1417,6 +1417,66 @@ test("latest-run receipt preserves the complete provider fallback chain", () => 
   assert.match(source, /\.slice\(0, 5\)/);
 });
 
+test("latest-run cache receipt preserves original provider metadata", () => {
+  const hooks = loadPlatformContent([]);
+  const trace = hooks.createTransferTrace("chatgpt", "cache test");
+  trace.marks.push({
+    label: "summary done",
+    deltaMs: 0,
+    totalMs: 0,
+    detail: {
+      chars: 1200,
+      background: {
+        source: "cache",
+        cacheHit: true,
+        cacheAgeMs: 1500,
+        originalSource: "backend",
+        originalSummaryMs: 8200,
+        summaryMs: 0,
+        chars: 1200,
+        backend: {
+          inputChars: 24000,
+          servedBy: "mistral",
+          provider: "mistral",
+          primaryModel: "gemini-3.5-flash",
+          model: "mistral-medium-2604",
+          modelsTried: ["gemini-3.5-flash", "mistral-medium-2604"],
+          mistralModelsTried: ["mistral-medium-2604"],
+          fallback: {
+            attempted: true,
+            used: true,
+            servedBy: "mistral",
+            model: "mistral-medium-2604",
+            reason: "Gemini failed validation"
+          },
+          usage: { promptTokens: 6000, completionTokens: 800, totalTokens: 6800, cachedTokens: 0 }
+        }
+      }
+    }
+  });
+
+  const stats = hooks.buildLatestTransferStats(trace, 50);
+
+  assert.equal(stats.summary.source, "cache");
+  assert.equal(stats.summary.cacheHit, true);
+  assert.equal(stats.summary.summaryMs, 0);
+  assert.equal(stats.summary.originalSummaryMs, 8200);
+  assert.equal(stats.summary.servedBy, "mistral");
+  assert.equal(stats.summary.model, "mistral-medium-2604");
+  assert.deepEqual(
+    JSON.parse(JSON.stringify(stats.summary.modelsTried)),
+    ["gemini-3.5-flash", "mistral-medium-2604"]
+  );
+  assert.equal(stats.summary.fallback.used, true);
+  assert.equal(stats.summary.fallback.servedBy, "mistral");
+  assert.deepEqual(JSON.parse(JSON.stringify(stats.summary.usage)), {
+    promptTokens: 6000,
+    completionTokens: 800,
+    totalTokens: 6800,
+    cachedTokens: 0
+  });
+});
+
 test("latest-run receipt preserves the exact raw scraped text", () => {
   const hooks = loadPlatformContent([]);
   const exactText = "Claude conversation:\n\nUser: Keep <tags>, & symbols, 'quotes', and line breaks.\n\nClaude: Exactly.";

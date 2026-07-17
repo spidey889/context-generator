@@ -37,3 +37,10 @@ test("analysis keeps exact raw scraped text behind a collapsed gear control", ()
   assert.match(ANALYSIS_SOURCE, /Stored locally for 24 hours or until the next transfer/);
   assert.doesNotMatch(ANALYSIS_SOURCE, /escapeHtml\(stats\.rawScrapedText\)/);
 });
+
+test("analysis labels cached receipt data as original generation metadata", () => {
+  assert.match(ANALYSIS_SOURCE, /sideItem\("Summary source"/);
+  assert.match(ANALYSIS_SOURCE, /Cache \(original generation metadata\)/);
+  assert.match(ANALYSIS_SOURCE, /out from original generation/);
+  assert.match(ANALYSIS_SOURCE, /Cache hit; original/);
+});

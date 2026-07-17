@@ -627,6 +627,13 @@
       const summary = stats.summary || {};
       const integrity = getIntegrityLabel(summary.requestChars, summary.backendInputChars);
       const rawText = typeof stats.rawScrapedText === "string" ? stats.rawScrapedText : "";
+      const cacheHit = summary.cacheHit === true || summary.source === "cache";
+      const usageDetail = cacheHit
+        ? `${formatNumber(usage.promptTokens)} in / ${formatNumber(usage.completionTokens)} out from original generation`
+        : `${formatNumber(usage.promptTokens)} in / ${formatNumber(usage.completionTokens)} out`;
+      const summaryTimingDetail = cacheHit
+        ? `Cache hit; original ${formatBackendLabel(summary)}: ${formatDuration(summary.originalSummaryMs)}`
+        : `${formatBackendLabel(summary)}: ${formatDuration(summary.providerMs ?? summary.mistralMs)}`;
 
       app.innerHTML = `
         <section class="hero">
@@ -655,6 +662,7 @@
             </div>
             ${sideItem("Route", route)}
             ${sideItem("Backend match", integrity)}
+            ${sideItem("Summary source", cacheHit ? "Cache (original generation metadata)" : "Fresh generation")}
             ${sideItem("Served by", formatBackendLabel(summary))}
             ${sideItem("Primary model", getPrimaryModelLabel(summary))}
             ${sideItem("Fallback log", getModelFallbackLabel(summary))}
@@ -670,8 +678,8 @@
           ${metric("Sent", formatNumber(capture.sentChars), capture.capped ? `Capped at ${formatNumber(capture.capChars)}; ${formatNumber(capture.usefulTurnCount)} turns captured` : `${formatNumber(capture.usefulTurnCount)} turns captured/sent`, "accent-amber")}
           ${metric("Backend got", formatNumber(summary.backendInputChars), `Request: ${formatNumber(summary.requestChars)}`, "accent-coral")}
           ${metric("Summary", formatNumber(summary.outputChars), `${formatNumber(summary.summaryWordCount)} words`, "accent-violet")}
-          ${metric("Tokens", formatNumber(usage.totalTokens), `${formatNumber(usage.promptTokens)} in / ${formatNumber(usage.completionTokens)} out`, "accent-green")}
-          ${metric("Summary time", formatDuration(summary.summaryMs), `${formatBackendLabel(summary)}: ${formatDuration(summary.providerMs ?? summary.mistralMs)}`, "accent-amber")}
+          ${metric("Tokens", formatNumber(usage.totalTokens), usageDetail, "accent-green")}
+          ${metric("Summary time", formatDuration(summary.summaryMs), summaryTimingDetail, "accent-amber")}
           ${metric("Paste time", formatDuration(stats.destinationTiming?.pasteMs), `Total: ${formatDuration(stats.totalMs)}`, "accent-teal")}
         </section>
 

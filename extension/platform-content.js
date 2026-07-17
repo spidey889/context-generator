@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-07-17-chatgpt-overflow-scroll-root";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-07-17-cache-receipt-metadata";
   const BUBBLE_ID = "context-generator-bubble";
   const OVERLAY_ID = "context-generator-overlay";
   const HANDOFF_SCRIM_ID = "context-generator-handoff-scrim";
@@ -1237,6 +1237,10 @@
       },
       summary: {
         source: summaryTiming?.source || null,
+        cacheHit: summaryTiming?.cacheHit === true,
+        cacheAgeMs: summaryTiming?.cacheAgeMs ?? null,
+        originalSource: summaryTiming?.originalSource || null,
+        originalSummaryMs: summaryTiming?.originalSummaryMs ?? null,
         summaryMs: summaryTiming?.summaryMs ?? null,
         fetchMs: summaryTiming?.fetchMs ?? null,
         parseMs: summaryTiming?.parseMs ?? null,

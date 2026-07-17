@@ -216,13 +216,17 @@ async function summarizeWithBackend(conversation, transferId = null) {
     throw new Error("AI conversation text could not be captured.");
   }
 
-  const cachedSummary = getCachedSummary(conversationText);
-  if (cachedSummary) {
-    logPerf(transferId, "summary cache hit", { chars: cachedSummary.length });
-    return {
-      summary: cachedSummary,
-      timing: { source: "cache", summaryMs: 0, chars: cachedSummary.length }
-    };
+  const cachedEntry = getCachedSummaryEntry(conversationText);
+  if (cachedEntry) {
+    const cachedResult = createCacheHitSummaryResult(cachedEntry);
+    if (cachedResult) {
+      logPerf(transferId, "summary cache hit", {
+        chars: cachedResult.summary.length,
+        cacheAgeMs: cachedResult.timing.cacheAgeMs
+      });
+      return cachedResult;
+    }
+    summaryCache.delete(conversationText);
   }
 
   const inFlightSummary = summaryInflight.get(conversationText);
@@ -233,7 +237,7 @@ async function summarizeWithBackend(conversation, transferId = null) {
 
   const summaryPromise = fetchSummaryFromBackend(conversationText, transferId)
     .then((result) => {
-      cacheSummary(conversationText, result.summary);
+      cacheSummaryResult(conversationText, result);
       return result;
     })
     .finally(() => {
@@ -318,24 +322,54 @@ async function createSummaryBackendError(response) {
   return error;
 }
 
-function getCachedSummary(conversationText) {
+function getCachedSummaryEntry(conversationText) {
   const cached = summaryCache.get(conversationText);
-  if (!cached) return "";
+  if (!cached) return null;
 
   if (Date.now() > cached.expiresAt) {
     summaryCache.delete(conversationText);
-    return "";
+    return null;
   }
 
-  return cached.summary;
+  return cached;
 }
 
-function cacheSummary(conversationText, summary) {
-  if (!summary?.trim()) return;
+function createCacheHitSummaryResult(cachedEntry) {
+  const summary = cachedEntry?.result?.summary?.trim();
+  if (!summary) return null;
 
+  const originalTiming = cachedEntry.result.timing && typeof cachedEntry.result.timing === "object"
+    ? cachedEntry.result.timing
+    : {};
+  return {
+    summary,
+    timing: {
+      ...originalTiming,
+      source: "cache",
+      cacheHit: true,
+      cacheAgeMs: Math.max(0, Date.now() - cachedEntry.cachedAt),
+      originalSource: originalTiming.source || null,
+      originalSummaryMs: originalTiming.summaryMs ?? null,
+      summaryMs: 0,
+      fetchMs: 0,
+      parseMs: 0,
+      chars: summary.length
+    }
+  };
+}
+
+function cacheSummaryResult(conversationText, result) {
+  const summary = result?.summary?.trim();
+  if (!summary) return;
+
+  const cachedAt = Date.now();
   summaryCache.set(conversationText, {
-    summary: summary.trim(),
-    expiresAt: Date.now() + SUMMARY_CACHE_TTL_MS
+    result: {
+      summary,
+      timing: result.timing && typeof result.timing === "object" ? result.timing : null
+    },
+    cachedAt,
+    expiresAt: cachedAt + SUMMARY_CACHE_TTL_MS
   });
 
   while (summaryCache.size > SUMMARY_CACHE_MAX_ENTRIES) {
