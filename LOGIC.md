@@ -25,6 +25,8 @@ The root `index.html` uses relative assets, has no build step or runtime API dep
 
 Marketing claims must match production: Claude, ChatGPT, Gemini, Grok, and DeepSeek support; a 350,000-character conversation limit; no capture or provider processing before destination selection; 24-hour local raw-transcript diagnostics; and no automatic Send action. `index.legacy-2026-07-15.html` is an inactive archive. `cap-context-extension.zip` is a release/developer artifact, must contain the contents of `extension/` with `manifest.json` at its root, and must be regenerated after tracked extension changes.
 
+Cap Context source is proprietary and all rights are reserved. Public-facing surfaces must not describe the source as publicly reusable, invite public code contributions, or present the GitHub repository as a source-install path. The privacy policy remains publicly linked, and normal use of the officially distributed extension remains separate from source-code reuse rights.
+
 ## Platforms And Startup
 
 Cap Context supports Claude, ChatGPT, Gemini, Grok, and DeepSeek. ChatGPT access is limited to `chatgpt.com`, its subdomains, and the legacy `chat.openai.com`; ordinary `openai.com` pages are excluded. The picker lists every supported destination except the source. The toolbar action defaults ChatGPT to Claude and every other source to ChatGPT.

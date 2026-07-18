@@ -53,9 +53,9 @@ Every generated result must pass deterministic validation for the complete seven
 
 Install the current release from the [Chrome Web Store](https://chromewebstore.google.com/detail/cap-context/lpkaciijlhckkdhbgidbjfkldigghnjf). The same listing works in Chrome and Brave and receives browser-managed updates.
 
-### Local development
+### Authorized development
 
-1. Clone this repository.
+1. Use an authorized checkout of this repository.
 2. Open `chrome://extensions` in Chrome or `brave://extensions` in Brave.
 3. Enable Developer mode.
 4. Click **Load unpacked**.
@@ -127,8 +127,8 @@ The versioned cases in `evaluation/cases.json` enforce expected-fact recall, zer
 
 Chat text leaves the source page only after you select a destination. The backend does not intentionally log or permanently store transcripts. Generated summaries may be processed by Gemini, Mistral, or the configured Groq fallback. Metadata-only transfer analytics records a random install ID, route, timestamp, character count, outcome, last closed-list pipeline stage, safe failure category, and extension version; it never includes chat text, generated summaries, URLs, stack traces, or provider response bodies. Pasted text is never submitted automatically. See [PRIVACY.md](PRIVACY.md) for the full details.
 
-## Contributing
+## License
 
-Issues and pull requests are welcome. Keep changes scoped, preserve the no-auto-send boundary, and update `LOGIC.md` when production behavior changes.
+Cap Context is proprietary software. No permission is granted to copy, modify, redistribute, sublicense, sell, or create derivative works without prior written permission. See [LICENSE](LICENSE).
 
-Made by [@spidey889](https://github.com/spidey889).
+Copyright © 2026 Vinit Rajpurohit. All rights reserved.

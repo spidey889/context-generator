@@ -25,3 +25,7 @@ Each transfer attempt also sends metadata-only operational telemetry: random ins
 4. Select this `extension` folder.
 
 Sign in to both the source and destination AI sites before using the handoff.
+
+## License
+
+Cap Context is proprietary software. All rights are reserved; see the repository `LICENSE` file.

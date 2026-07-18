@@ -1,5 +1,7 @@
 # Changelog
 
+- 2026-07-18: Changed future Cap Context source releases from the previous permissive license to proprietary, all-rights-reserved distribution. Removed public-source, repository-stars, and contribution messaging from the current site, archived site, and repository documentation; marked the package unlicensed for npm reuse. Copies already received under the earlier license keep the permissions previously granted to those copies.
+
 - 2026-07-18: Split anonymous usage reporting into two simple protected views. `user_daily_usage` now answers only how many transfers each User N made per UTC day, while `user_transfer_activity` connects that label to one row per attempt with timestamp, route, individual chat character count, outcome, and safe failure reason. Removed confusing daily character arrays and totals without changing telemetry collection or storing conversation content.
 
 - 2026-07-18: Added a deliberately small PMF-era usage layer on top of metadata-only telemetry. Each anonymous extension install is automatically assigned a stable internal `User N` label, and a protected UTC daily view shows only transfer-attempt count, per-chat character counts, and total characters. There is still no login, user profile, first-seen/last-seen tracking, or public analytics access.
