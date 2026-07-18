@@ -1,5 +1,7 @@
 # Changelog
 
+- 2026-07-18: Split anonymous usage reporting into two simple protected views. `user_daily_usage` now answers only how many transfers each User N made per UTC day, while `user_transfer_activity` connects that label to one row per attempt with timestamp, route, individual chat character count, outcome, and safe failure reason. Removed confusing daily character arrays and totals without changing telemetry collection or storing conversation content.
+
 - 2026-07-18: Added a deliberately small PMF-era usage layer on top of metadata-only telemetry. Each anonymous extension install is automatically assigned a stable internal `User N` label, and a protected UTC daily view shows only transfer-attempt count, per-chat character counts, and total characters. There is still no login, user profile, first-seen/last-seen tracking, or public analytics access.
 
 - 2026-07-18: Expanded centralized transfer telemetry with a closed, monotonic `last_stage` diagnostic across intent, capture, summary request/response/completion, paste, and final completion. The streamed-summary heartbeat now records `summary_response_started` as soon as response headers arrive; an atomic Postgres upsert retains the furthest stored stage even if a stale terminal update arrives later. Both Supabase migrations and Edge Function v5 were deployed, strict validation rejects unknown stages or content fields, and a metadata-only live synthetic sequence confirmed the terminal failure kept `summary_response_started` before its row was removed.

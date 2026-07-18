@@ -21,6 +21,10 @@ const DAILY_USAGE_MIGRATION_SOURCE = fs.readFileSync(
   path.join(ROOT, "supabase", "migrations", "20260718164011_add_anonymous_user_daily_usage.sql"),
   "utf8"
 );
+const TRANSFER_ACTIVITY_MIGRATION_SOURCE = fs.readFileSync(
+  path.join(ROOT, "supabase", "migrations", "20260718172212_add_user_transfer_activity_view.sql"),
+  "utf8"
+);
 const MANIFEST = JSON.parse(fs.readFileSync(path.join(ROOT, "extension", "manifest.json"), "utf8"));
 
 function loadTelemetryBackground(fetchImpl, initialStorage = {}) {
@@ -292,4 +296,35 @@ test("Supabase maps anonymous installs to User N and exposes only simple daily u
   assert.match(DAILY_USAGE_MIGRATION_SOURCE, /revoke all privileges on table public\.analytics_users/);
   assert.match(DAILY_USAGE_MIGRATION_SOURCE, /revoke all privileges on table public\.user_daily_usage/);
   assert.match(DAILY_USAGE_MIGRATION_SOURCE, /grant select on table public\.user_daily_usage to service_role/);
+});
+
+test("Supabase connects User N to one row per transfer and keeps daily usage count-only", () => {
+  assert.match(TRANSFER_ACTIVITY_MIGRATION_SOURCE, /drop view if exists public\.user_daily_usage/);
+  assert.match(TRANSFER_ACTIVITY_MIGRATION_SOURCE, /create view public\.user_daily_usage\s+with \(security_invoker = true\)/);
+
+  const dailyViewSource = TRANSFER_ACTIVITY_MIGRATION_SOURCE.slice(
+    TRANSFER_ACTIVITY_MIGRATION_SOURCE.indexOf("create view public.user_daily_usage"),
+    TRANSFER_ACTIVITY_MIGRATION_SOURCE.indexOf("comment on view public.user_daily_usage")
+  );
+  assert.match(dailyViewSource, /count\(\*\) as transfer_count/);
+  assert.doesNotMatch(dailyViewSource, /array_agg|sum\(|character_count|total_characters/);
+
+  assert.match(TRANSFER_ACTIVITY_MIGRATION_SOURCE, /create view public\.user_transfer_activity\s+with \(security_invoker = true\)/);
+  const activityViewSource = TRANSFER_ACTIVITY_MIGRATION_SOURCE.slice(
+    TRANSFER_ACTIVITY_MIGRATION_SOURCE.indexOf("create view public.user_transfer_activity"),
+    TRANSFER_ACTIVITY_MIGRATION_SOURCE.indexOf("comment on view public.user_transfer_activity")
+  );
+  assert.match(activityViewSource, /'User ' \|\| users\.user_id::text as user_name/);
+  assert.match(activityViewSource, /events\.attempted_at/);
+  assert.match(activityViewSource, /events\.source_platform/);
+  assert.match(activityViewSource, /events\.destination_platform/);
+  assert.match(activityViewSource, /events\.character_count/);
+  assert.match(activityViewSource, /events\.status/);
+  assert.match(activityViewSource, /events\.failure_reason/);
+  assert.match(activityViewSource, /events\.install_id = users\.install_id/);
+
+  const activitySelectSource = activityViewSource.slice(0, activityViewSource.indexOf("from public.analytics_users"));
+  assert.doesNotMatch(activitySelectSource, /install_id|conversation|summary|total_characters/);
+  assert.match(TRANSFER_ACTIVITY_MIGRATION_SOURCE, /revoke all privileges on table public\.user_transfer_activity/);
+  assert.match(TRANSFER_ACTIVITY_MIGRATION_SOURCE, /grant select on table public\.user_transfer_activity to service_role/);
 });
