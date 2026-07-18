@@ -7,6 +7,7 @@ const DESTINATION_MESSAGE_TIMEOUT_MS = 30000;
 const MESSAGE_RETRY_INTERVAL_MS = 120;
 const DESTINATION_WARMUP_TIMEOUT_MS = 9000;
 const SUMMARY_BACKEND_TIMEOUT_MS = 210000;
+const SUMMARY_SERVICE_WORKER_KEEPALIVE_MS = 25000;
 const SUMMARY_CACHE_TTL_MS = 120000;
 const SUMMARY_CACHE_MAX_ENTRIES = 8;
 const LAST_TRANSFER_STATS_STORAGE_KEY = "context-generator-last-transfer-stats-v1";
@@ -448,6 +449,7 @@ async function fetchSummaryFromBackend(conversationText, transferId = null) {
   logPerf(transferId, "summary backend request start", { chars: conversationText.length, inputChars: conversationText.length });
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), SUMMARY_BACKEND_TIMEOUT_MS);
+  const stopServiceWorkerKeepAlive = startSummaryServiceWorkerKeepAlive();
 
   try {
     const fetchStartedAt = nowMs();
@@ -470,6 +472,9 @@ async function fetchSummaryFromBackend(conversationText, transferId = null) {
     const parseStartedAt = nowMs();
     const data = await response.json();
     const parseMs = Math.round(nowMs() - parseStartedAt);
+    if (data?.ok === false || (data?.code && !data?.summary?.trim())) {
+      throw createSummaryBackendPayloadError(data, data?.status || response.status);
+    }
     if (!data.summary?.trim()) throw new Error("Backup summarizer returned no summary.");
 
     const summary = data.summary.trim();
@@ -489,7 +494,30 @@ async function fetchSummaryFromBackend(conversationText, transferId = null) {
     return { summary, timing };
   } finally {
     clearTimeout(timeout);
+    stopServiceWorkerKeepAlive();
   }
+}
+
+function startSummaryServiceWorkerKeepAlive() {
+  let stopped = false;
+  let keepAliveTimer = null;
+
+  const pingRuntime = () => {
+    if (stopped) return;
+    try {
+      // Chromium resets the MV3 worker idle timer when an extension API call begins.
+      chrome.runtime.getPlatformInfo?.(() => void chrome.runtime.lastError);
+    } catch {
+      // Firefox and test shims may not expose this optional API; the streamed response still remains valid.
+    }
+    keepAliveTimer = setTimeout(pingRuntime, SUMMARY_SERVICE_WORKER_KEEPALIVE_MS);
+  };
+
+  keepAliveTimer = setTimeout(pingRuntime, SUMMARY_SERVICE_WORKER_KEEPALIVE_MS);
+  return () => {
+    stopped = true;
+    if (keepAliveTimer) clearTimeout(keepAliveTimer);
+  };
 }
 
 async function createSummaryBackendError(response) {
@@ -500,6 +528,10 @@ async function createSummaryBackendError(response) {
     // Error bodies are optional; never expose an unparsed provider or platform response.
   }
 
+  return createSummaryBackendPayloadError(payload, response.status);
+}
+
+function createSummaryBackendPayloadError(payload, status) {
   const code = typeof payload?.code === "string" ? payload.code : "summary_failed";
   const safeBackendMessage = typeof payload?.error === "string" && payload.error.length <= 240
     ? payload.error
@@ -513,7 +545,7 @@ async function createSummaryBackendError(response) {
   };
   const error = new Error(publicMessages[code] || "Cap Context could not create the summary. Please try again.");
   error.code = code;
-  error.status = response.status;
+  error.status = Number(status) || 500;
   return error;
 }
 

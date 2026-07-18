@@ -40,7 +40,7 @@ Opening or closing the destination picker is UI-only. Capture and provider proce
 Chats at or below 1,200 characters use the exact local-direct Context Carry path without calling an AI provider. Generated summaries use this fallback order:
 
 1. Gemini `gemini-3.5-flash`, when `GEMINI_API_KEY` is configured
-2. Mistral `mistral-medium-2604`
+2. Mistral `mistral-medium-3-5`
 3. Mistral `mistral-large-2512`
 4. Mistral `ministral-3b-2512`
 5. Groq `llama-3.1-8b-instant`, when `GROQ_API_KEY` is configured

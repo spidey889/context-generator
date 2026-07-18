@@ -21,6 +21,7 @@ function summarize(req, res) {
 }
 
 const {
+  createLongSummaryResponse,
   normalizeContextCarrySummary,
   validateContextCarrySummary,
   getMinimumValidSummaryWords,
@@ -34,6 +35,7 @@ const {
   getSummarySystemPrompt
 } = summarizeHandler.__test;
 const SUMMARIZE_SOURCE = fs.readFileSync(path.join(__dirname, "..", "api", "summarize.js"), "utf8");
+const BACKGROUND_SOURCE = fs.readFileSync(path.join(__dirname, "..", "extension", "background.js"), "utf8");
 
 test("normalizes summary into the required Context Carry shape", () => {
   const raw = [
@@ -73,6 +75,30 @@ test("backend prompt profiles scale summary size to the captured chat", () => {
   assert.match(SUMMARIZE_SOURCE, /untrusted customer transcript data/);
 });
 
+test("long summaries stream JSON-safe heartbeats and preserve errors after headers are sent", () => {
+  const res = createStreamingMockResponse();
+  const responseChannel = createLongSummaryResponse(res, {
+    heartbeatIntervalMs: 60000,
+    heartbeatChunk: "  \n"
+  });
+
+  assert.equal(responseChannel.writeHeartbeat(), true);
+  assert.equal(res.statusCode, 200);
+  assert.equal(res.headers["content-type"], "application/json; charset=utf-8");
+  assert.equal(res.headers["x-cap-context-stream"], "heartbeat-v1");
+  responseChannel.send(504, { code: "summary_failed", error: "Provider timed out" });
+
+  assert.deepEqual(JSON.parse(res.body), {
+    code: "summary_failed",
+    error: "Provider timed out",
+    ok: false,
+    status: 504
+  });
+  assert.match(BACKGROUND_SOURCE, /SUMMARY_SERVICE_WORKER_KEEPALIVE_MS = 25000/);
+  assert.match(BACKGROUND_SOURCE, /chrome\.runtime\.getPlatformInfo/);
+  assert.match(BACKGROUND_SOURCE, /data\?\.ok === false/);
+});
+
 test("mistral model routing always starts with medium 3.5 without changing summary profiles", () => {
   const restoreMistralModel = setTemporaryEnv("MISTRAL_MODEL", "custom-mistral-test");
 
@@ -81,8 +107,8 @@ test("mistral model routing always starts with medium 3.5 without changing summa
     const overThresholdChat = "x".repeat(20001);
     const overThresholdProfile = getSummaryProfile(overThresholdChat);
 
-    assert.equal(getMistralModelSelection(thresholdChat).model, "mistral-medium-2604");
-    assert.equal(getMistralModelSelection(overThresholdChat).model, "mistral-medium-2604");
+    assert.equal(getMistralModelSelection(thresholdChat).model, "mistral-medium-3-5");
+    assert.equal(getMistralModelSelection(overThresholdChat).model, "mistral-medium-3-5");
     assert.match(getMistralModelSelection(overThresholdChat).reason, /fixed Mistral priority chain/);
     assert.equal(overThresholdProfile.id, "medium");
     assert.equal(overThresholdProfile.maxTokens, 1900);
@@ -131,9 +157,9 @@ test("backend forwards a 210k conversation to Mistral and reports the same input
 
     assert.equal(res.statusCode, 200);
     assert.equal(capturedRequest.url, "https://api.mistral.ai/v1/chat/completions");
-    assert.equal(capturedRequest.body.model, "mistral-medium-2604");
+    assert.equal(capturedRequest.body.model, "mistral-medium-3-5");
     assert.equal(capturedRequest.body.max_tokens, 4200);
-    assert.match(capturedRequest.body.prompt_cache_key, /^capcontext-summary-v4-large-mistral-medium-2604$/);
+    assert.match(capturedRequest.body.prompt_cache_key, /^capcontext-summary-v4-large-mistral-medium-3-5$/);
     assert.equal(capturedRequest.body.prediction, undefined);
     const transcriptEnvelope = JSON.parse(capturedRequest.body.messages[1].content);
     assert.deepEqual(transcriptEnvelope, {
@@ -144,8 +170,8 @@ test("backend forwards a 210k conversation to Mistral and reports the same input
     assert.equal(res.payload.timing.profile, "large");
     assert.equal(res.payload.timing.servedBy, "mistral");
     assert.equal(res.payload.timing.provider, "mistral");
-    assert.equal(res.payload.timing.model, "mistral-medium-2604");
-    assert.equal(res.payload.timing.primaryModel, "mistral-medium-2604");
+    assert.equal(res.payload.timing.model, "mistral-medium-3-5");
+    assert.equal(res.payload.timing.primaryModel, "mistral-medium-3-5");
     assert.equal(res.payload.timing.modelThresholdChars, null);
     assert.equal(res.payload.timing.modelOverride, false);
     assert.match(res.payload.timing.modelReason, /served as the first model/);
@@ -258,11 +284,11 @@ test("backend sends small generated chats to medium 3.5 first", async () => {
 
     assert.equal(res.statusCode, 200);
     assert.equal(requests.length, 1);
-    assert.equal(requests[0].model, "mistral-medium-2604");
+    assert.equal(requests[0].model, "mistral-medium-3-5");
     assert.equal(requests[0].max_tokens, 1000);
     assert.equal(res.payload.timing.profile, "small");
     assert.equal(res.payload.timing.servedBy, "mistral");
-    assert.equal(res.payload.timing.model, "mistral-medium-2604");
+    assert.equal(res.payload.timing.model, "mistral-medium-3-5");
     assert.equal(res.payload.timing.fallback.attempted, false);
     assert.equal(res.payload.timing.mistralPasses, 1);
   } finally {
@@ -306,10 +332,10 @@ test("backend sends medium chats to medium 3.5 without changing profile limits",
 
     assert.equal(res.statusCode, 200);
     assert.equal(requests.length, 1);
-    assert.equal(requests[0].model, "mistral-medium-2604");
+    assert.equal(requests[0].model, "mistral-medium-3-5");
     assert.equal(requests[0].max_tokens, 1900);
     assert.equal(res.payload.timing.profile, "medium");
-    assert.equal(res.payload.timing.model, "mistral-medium-2604");
+    assert.equal(res.payload.timing.model, "mistral-medium-3-5");
     assert.equal(res.payload.timing.targetWords, 700);
     assert.equal(res.payload.timing.mistralPasses, 1);
     assert.match(res.payload.timing.modelReason, /served as the first model/);
@@ -354,8 +380,8 @@ test("backend fixed chain takes precedence over MISTRAL_MODEL", async () => {
 
     assert.equal(res.statusCode, 200);
     assert.equal(requests.length, 1);
-    assert.equal(requests[0].model, "mistral-medium-2604");
-    assert.equal(res.payload.timing.model, "mistral-medium-2604");
+    assert.equal(requests[0].model, "mistral-medium-3-5");
+    assert.equal(res.payload.timing.model, "mistral-medium-3-5");
     assert.equal(res.payload.timing.modelOverride, false);
     assert.equal(res.payload.timing.modelThresholdChars, null);
     assert.match(res.payload.timing.modelReason, /served as the first model/);
@@ -388,7 +414,7 @@ test("validator accepts the exact boxed Unicode header requested from providers"
 test("provider fallback budgets keep the complete chain below the Vercel ceiling", () => {
   const budgets = [
     getProviderRequestBudgetMs("gemini-3.5-flash"),
-    getProviderRequestBudgetMs("mistral-medium-2604"),
+    getProviderRequestBudgetMs("mistral-medium-3-5"),
     getProviderRequestBudgetMs("mistral-large-2512"),
     getProviderRequestBudgetMs("ministral-3b-2512"),
     getProviderRequestBudgetMs("llama-3.1-8b-instant")
@@ -409,7 +435,7 @@ test("backend falls back from medium 3.5 to large and reports the serving model"
     const body = JSON.parse(options.body);
     requests.push(body);
 
-    if (body.model === "mistral-medium-2604") {
+    if (body.model === "mistral-medium-3-5") {
       return {
         ok: false,
         status: 400,
@@ -437,15 +463,15 @@ test("backend falls back from medium 3.5 to large and reports the serving model"
 
     assert.equal(res.statusCode, 200);
     assert.deepEqual(requests.map((request) => request.model), [
-      "mistral-medium-2604",
+      "mistral-medium-3-5",
       "mistral-large-2512"
     ]);
     assert.equal(res.payload.timing.model, "mistral-large-2512");
     assert.deepEqual(res.payload.timing.mistralModelsTried, [
-      "mistral-medium-2604",
+      "mistral-medium-3-5",
       "mistral-large-2512"
     ]);
-    assert.match(res.payload.timing.modelReason, /mistral-medium-2604 failed; fell back to mistral-large-2512/);
+    assert.match(res.payload.timing.modelReason, /mistral-medium-3-5 failed; fell back to mistral-large-2512/);
   } finally {
     restoreApiKey();
     global.fetch = originalFetch;
@@ -505,8 +531,8 @@ test("backend falls back to Groq after Mistral rate limits and keeps the same pr
     assert.equal(mistralRequests.length, 2);
     assert.equal(groqRequests.length, 1);
     assert.deepEqual(mistralRequests.map((request) => request.model), [
-      "mistral-medium-2604",
-      "mistral-medium-2604"
+      "mistral-medium-3-5",
+      "mistral-medium-3-5"
     ]);
     assert.ok(mistralRequests.every((request) => request.prompt_cache_key));
     assert.equal(groqRequests[0].model, "llama-3.1-8b-instant");
@@ -517,7 +543,7 @@ test("backend falls back to Groq after Mistral rate limits and keeps the same pr
     assert.equal(res.payload.timing.servedBy, "groq");
     assert.equal(res.payload.timing.provider, "groq");
     assert.equal(res.payload.timing.model, "llama-3.1-8b-instant");
-    assert.equal(res.payload.timing.primaryModel, "mistral-medium-2604");
+    assert.equal(res.payload.timing.primaryModel, "mistral-medium-3-5");
     assert.equal(res.payload.timing.modelOverride, false);
     assert.equal(res.payload.timing.fallback.attempted, true);
     assert.equal(res.payload.timing.fallback.used, true);
@@ -585,14 +611,14 @@ test("backend falls back to Groq when Mistral returns an empty summary", async (
     assert.equal(res.statusCode, 200);
     assert.equal(requests.length, 4);
     assert.deepEqual(requests.slice(0, 3).map((request) => request.body.model), [
-      "mistral-medium-2604",
+      "mistral-medium-3-5",
       "mistral-large-2512",
       "ministral-3b-2512"
     ]);
     assert.equal(requests[3].body.model, "llama-3.1-8b-instant");
     assert.deepEqual(requests[3].body.messages, requests[0].body.messages);
     assert.equal(res.payload.timing.servedBy, "groq");
-    assert.equal(res.payload.timing.primaryModel, "mistral-medium-2604");
+    assert.equal(res.payload.timing.primaryModel, "mistral-medium-3-5");
     assert.equal(res.payload.timing.model, "llama-3.1-8b-instant");
     assert.equal(res.payload.timing.fallback.used, true);
     assert.match(res.payload.timing.fallback.reason, /Mistral returned an empty summary/);
@@ -636,11 +662,11 @@ test("backend advances through the existing model chain when validation rejects 
     assert.equal(res.statusCode, 200);
     assert.equal(requests.length, 2);
     assert.deepEqual(requests.map((request) => request.model), [
-      "mistral-medium-2604",
+      "mistral-medium-3-5",
       "mistral-large-2512"
     ]);
     assert.equal(res.payload.timing.model, "mistral-large-2512");
-    assert.match(res.payload.timing.modelReason, /mistral-medium-2604 failed/);
+    assert.match(res.payload.timing.modelReason, /mistral-medium-3-5 failed/);
     assert.match(res.payload.summary, /validated-fallback/);
   } finally {
     restoreApiKey();
@@ -658,7 +684,7 @@ test("backend advances to the next model after a timed-out Mistral attempt", asy
     const body = JSON.parse(options.body);
     requests.push(body);
 
-    if (body.model === "mistral-medium-2604") {
+    if (body.model === "mistral-medium-3-5") {
       const error = new Error("request timed out");
       error.name = "AbortError";
       throw error;
@@ -684,7 +710,7 @@ test("backend advances to the next model after a timed-out Mistral attempt", asy
 
     assert.equal(res.statusCode, 200);
     assert.deepEqual(requests.map((request) => request.model), [
-      "mistral-medium-2604",
+      "mistral-medium-3-5",
       "mistral-large-2512"
     ]);
     assert.equal(res.payload.timing.model, "mistral-large-2512");
@@ -884,7 +910,7 @@ test("generated summaries select Gemini 3.5 Flash when its server key is configu
 
   assert.equal(getGeneratedModelSelection(conversation, true).model, "gemini-3.5-flash");
   assert.match(getGeneratedModelSelection(conversation, true).reason, /preserved Mistral and Groq fallbacks/);
-  assert.equal(getGeneratedModelSelection(conversation, false).model, "mistral-medium-2604");
+  assert.equal(getGeneratedModelSelection(conversation, false).model, "mistral-medium-3-5");
 });
 
 test("backend sends generated summaries to native Gemini first and records Gemini usage", async () => {
@@ -1002,15 +1028,15 @@ test("backend falls from invalid Gemini output to the preserved Mistral chain", 
     assert.equal(res.statusCode, 200);
     assert.equal(requests.length, 2);
     assert.match(requests[0].url, /gemini-3\.5-flash:generateContent$/);
-    assert.equal(requests[1].body.model, "mistral-medium-2604");
+    assert.equal(requests[1].body.model, "mistral-medium-3-5");
     assert.match(requests[0].body.systemInstruction.parts[0].text, /plain-text title/);
     assert.match(requests[1].body.messages[0].content, /boxed header exactly as shown/);
     assert.equal(requests[0].body.generationConfig.maxOutputTokens, 5000);
     assert.equal(requests[1].body.max_tokens, 1000);
     assert.equal(res.payload.timing.servedBy, "mistral");
     assert.equal(res.payload.timing.primaryModel, "gemini-3.5-flash");
-    assert.deepEqual(res.payload.timing.modelsTried, ["gemini-3.5-flash", "mistral-medium-2604"]);
-    assert.deepEqual(res.payload.timing.mistralModelsTried, ["mistral-medium-2604"]);
+    assert.deepEqual(res.payload.timing.modelsTried, ["gemini-3.5-flash", "mistral-medium-3-5"]);
+    assert.deepEqual(res.payload.timing.mistralModelsTried, ["mistral-medium-3-5"]);
     assert.equal(res.payload.timing.fallback.attempted, true);
     assert.equal(res.payload.timing.fallback.used, true);
     assert.equal(res.payload.timing.fallback.servedBy, "mistral");
@@ -1156,6 +1182,41 @@ function createMockResponse() {
     },
     end() {
       return this;
+    }
+  };
+}
+
+function createStreamingMockResponse() {
+  const chunks = [];
+  return {
+    statusCode: null,
+    headers: {},
+    writableEnded: false,
+    destroyed: false,
+    setHeader(name, value) {
+      this.headers[String(name).toLowerCase()] = value;
+    },
+    flushHeaders() {},
+    once() {},
+    status(code) {
+      this.statusCode = code;
+      return this;
+    },
+    json(payload) {
+      this.payload = payload;
+      return payload;
+    },
+    write(chunk) {
+      chunks.push(String(chunk));
+      return true;
+    },
+    end(chunk = "") {
+      if (chunk) chunks.push(String(chunk));
+      this.writableEnded = true;
+      return this;
+    },
+    get body() {
+      return chunks.join("");
     }
   };
 }

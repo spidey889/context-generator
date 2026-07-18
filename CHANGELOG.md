@@ -6,6 +6,8 @@ Keep an entry only when it explains the current architecture, a safety boundary,
 
 ## Durable History
 
+- 2026-07-18: Hardened long generated summaries against Chromium Manifest V3 worker suspension. The backend now emits JSON-safe whitespace heartbeats after 15 seconds and every 15 seconds thereafter, while the worker makes a harmless runtime API call every 25 seconds until the response finishes. Streamed failures preserve their real status in the JSON body and still map to the existing public error path. The Mistral primary fallback was also corrected from the nonexistent `mistral-medium-2604` alias to the official `mistral-medium-3-5` API model; provider budgets, the explicit 240-second Vercel maximum, the 210-second client abort, capture, and paste behavior remain unchanged.
+
 - 2026-07-18: Added centralized metadata-only transfer telemetry. Every icon or picker attempt queues a Supabase `started` event before early guards and later upserts the same UUID as succeeded or failed with a closed-list safe reason. A persistent random install UUID and ordered local outbox provide install-level aggregation and startup retry without blocking transfer work. The Edge Function rejects extra fields, so raw chats, summaries, URLs, timelines, and full JavaScript errors never enter telemetry; direct anonymous Data API access to `transfer_events` was removed.
 
 - 2026-07-17: The two-minute extension summary cache now retains the complete original summary result instead of text alone. Cache hits report zero current summary latency but preserve provider, model, fallback chain, provider timing, and token usage as explicitly labeled original-generation metadata in Latest Run, preventing repeated transfers from replacing those fields with dashes.

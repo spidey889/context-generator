@@ -9,13 +9,15 @@ const {
 } = require("./request-security");
 const PROVIDER_RETRY_INTERVAL_MS = 450;
 const PROVIDER_ATTEMPT_TIMEOUT_MS = 80000;
+const SUMMARY_HEARTBEAT_INTERVAL_MS = 15000;
+const SUMMARY_HEARTBEAT_CHUNK = `\n${" ".repeat(2048)}\n`;
 const GEMINI_PRIMARY_MODEL = "gemini-3.5-flash";
 const GEMINI_THINKING_TOKEN_ALLOWANCE = 4000;
 const GEMINI_GENERATE_CONTENT_URL = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_PRIMARY_MODEL}:generateContent`;
 const MISTRAL_CHAT_COMPLETIONS_URL = "https://api.mistral.ai/v1/chat/completions";
 const GROQ_CHAT_COMPLETIONS_URL = "https://api.groq.com/openai/v1/chat/completions";
 const LOCAL_DIRECT_MODEL = "local-direct";
-const MISTRAL_PRIMARY_MODEL = "mistral-medium-2604";
+const MISTRAL_PRIMARY_MODEL = "mistral-medium-3-5";
 const MISTRAL_FALLBACK_MODELS = ["mistral-large-2512", "ministral-3b-2512"];
 const MISTRAL_MODEL_CHAIN = [MISTRAL_PRIMARY_MODEL, ...MISTRAL_FALLBACK_MODELS];
 const GROQ_FALLBACK_MODEL = "llama-3.1-8b-instant";
@@ -182,14 +184,16 @@ async function handler(req, res) {
     });
   }
 
+  const responseChannel = createLongSummaryResponse(res);
   try {
-    return await handleSummary(validation.conversation, res);
+    return await handleSummary(validation.conversation, responseChannel);
   } finally {
+    responseChannel.close();
     releaseSlot();
   }
 }
 
-async function handleSummary(conversation, res) {
+async function handleSummary(conversation, responseChannel) {
   const startedAt = Date.now();
   const inputChars = conversation.length;
   const summaryProfile = getSummaryProfile(conversation);
@@ -204,7 +208,7 @@ async function handleSummary(conversation, res) {
       error: null
     };
 
-    return res.status(200).json({
+    return responseChannel.send(200, {
       summary,
       timing: {
         totalMs: Date.now() - startedAt,
@@ -247,7 +251,7 @@ async function handleSummary(conversation, res) {
       groqApiKey: process.env.GROQ_API_KEY
     });
 
-    return res.status(200).json({
+    return responseChannel.send(200, {
       summary: providerResult.summary,
       timing: {
         totalMs: Date.now() - startedAt,
@@ -288,15 +292,71 @@ async function handleSummary(conversation, res) {
       statusCode: error?.statusCode || 500,
       providerStatus: error?.providerStatus || null
     });
-    return res.status(error.statusCode || 500).json({
+    return responseChannel.send(error.statusCode || 500, {
       code: "summary_failed",
       error: error.publicMessage || "Unexpected summarization error"
     });
   }
 }
 
+function createLongSummaryResponse(res, options = {}) {
+  const heartbeatIntervalMs = options.heartbeatIntervalMs || SUMMARY_HEARTBEAT_INTERVAL_MS;
+  const heartbeatChunk = options.heartbeatChunk || SUMMARY_HEARTBEAT_CHUNK;
+  const canStream = typeof res?.write === "function" && typeof res?.end === "function";
+  let streamStarted = false;
+  let closed = false;
+  let heartbeatTimer = null;
+
+  const writeHeartbeat = () => {
+    if (!canStream || closed || res.writableEnded || res.destroyed) return false;
+
+    if (!streamStarted) {
+      // Leading JSON whitespace lets Vercel flush bytes without changing the final response shape.
+      res.statusCode = 200;
+      res.setHeader("Content-Type", "application/json; charset=utf-8");
+      res.setHeader("Cache-Control", "no-store, no-transform");
+      res.setHeader("X-Cap-Context-Stream", "heartbeat-v1");
+      if (typeof res.flushHeaders === "function") res.flushHeaders();
+      streamStarted = true;
+    }
+
+    res.write(heartbeatChunk);
+    return true;
+  };
+
+  if (canStream) {
+    heartbeatTimer = setInterval(writeHeartbeat, heartbeatIntervalMs);
+    if (typeof heartbeatTimer?.unref === "function") heartbeatTimer.unref();
+  }
+
+  const close = () => {
+    if (closed) return;
+    closed = true;
+    if (heartbeatTimer) clearInterval(heartbeatTimer);
+    heartbeatTimer = null;
+  };
+
+  if (typeof res?.once === "function") res.once("close", close);
+
+  return {
+    send(statusCode, payload) {
+      close();
+      if (!streamStarted) return res.status(statusCode).json(payload);
+
+      // HTTP headers are already committed after the first heartbeat, so preserve failures in the JSON body.
+      const finalPayload = statusCode >= 400
+        ? { ...payload, ok: false, status: statusCode }
+        : payload;
+      return res.end(JSON.stringify(finalPayload));
+    },
+    close,
+    writeHeartbeat
+  };
+}
+
 module.exports = handler;
 module.exports.__test = {
+  createLongSummaryResponse,
   normalizeContextCarrySummary,
   validateContextCarrySummary,
   getMinimumValidSummaryWords,
