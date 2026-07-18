@@ -23,6 +23,16 @@ const TELEMETRY_RETRY_DELAY_MINUTES = 5;
 const TELEMETRY_MAX_CHARACTER_COUNT = 2147483647;
 const TELEMETRY_PLATFORMS = new Set(["claude", "chatgpt", "gemini", "grok", "deepseek"]);
 const TELEMETRY_STATUSES = new Set(["started", "succeeded", "failed"]);
+const TELEMETRY_STAGES = new Set([
+  "intent_started",
+  "capture_started",
+  "capture_completed",
+  "summary_request_started",
+  "summary_response_started",
+  "summary_completed",
+  "paste_started",
+  "completed"
+]);
 const TELEMETRY_FAILURE_REASONS = new Set([
   "no_conversation",
   "conversation_too_large",
@@ -39,6 +49,7 @@ const TELEMETRY_FAILURE_REASONS = new Set([
 ]);
 const summaryCache = new Map();
 const summaryInflight = new Map();
+const activeTransferTelemetry = new Map();
 let telemetryInstallIdPromise = null;
 let telemetryWorkChain = Promise.resolve();
 const DESTINATIONS = {
@@ -178,8 +189,9 @@ function enqueueTelemetryWork(work) {
 async function recordTransferTelemetry(event) {
   const sanitizedEvent = sanitizeTransferTelemetryEvent(event);
   if (!sanitizedEvent) return;
+  activeTransferTelemetry.set(sanitizedEvent.attemptId, sanitizedEvent);
 
-  return enqueueTelemetryWork(async () => {
+  const work = enqueueTelemetryWork(async () => {
     const installId = await getOrCreateTelemetryInstallId();
     const payload = {
       attempt_id: sanitizedEvent.attemptId,
@@ -189,6 +201,7 @@ async function recordTransferTelemetry(event) {
       destination_platform: sanitizedEvent.destinationPlatform,
       character_count: sanitizedEvent.characterCount,
       status: sanitizedEvent.status,
+      last_stage: sanitizedEvent.lastStage,
       failure_reason: sanitizedEvent.failureReason,
       extension_version: chrome.runtime.getManifest?.().version || null
     };
@@ -196,6 +209,26 @@ async function recordTransferTelemetry(event) {
     await appendTelemetryOutbox(payload);
     await flushTelemetryOutbox();
   });
+
+  if (sanitizedEvent.status === "succeeded" || sanitizedEvent.status === "failed") {
+    work.finally(() => {
+      if (activeTransferTelemetry.get(sanitizedEvent.attemptId)?.status !== "started") {
+        activeTransferTelemetry.delete(sanitizedEvent.attemptId);
+      }
+    }).catch(() => {});
+  }
+  return work;
+}
+
+function recordKnownTransferTelemetryStage(attemptId, lastStage) {
+  const active = activeTransferTelemetry.get(attemptId);
+  if (!active || active.status !== "started" || !TELEMETRY_STAGES.has(lastStage)) return;
+  recordTransferTelemetry({
+    ...active,
+    status: "started",
+    lastStage,
+    failureReason: null
+  }).catch(() => {});
 }
 
 function sanitizeTransferTelemetryEvent(event) {
@@ -204,6 +237,9 @@ function sanitizeTransferTelemetryEvent(event) {
   if (!TELEMETRY_PLATFORMS.has(event.sourcePlatform)) return null;
   if (!TELEMETRY_PLATFORMS.has(event.destinationPlatform)) return null;
   if (!TELEMETRY_STATUSES.has(event.status)) return null;
+  if (!TELEMETRY_STAGES.has(event.lastStage)) return null;
+  if (event.status === "succeeded" && event.lastStage !== "completed") return null;
+  if (event.status !== "succeeded" && event.lastStage === "completed") return null;
 
   const attemptedAtEpoch = Date.parse(event.attemptedAt || "");
   if (!Number.isFinite(attemptedAtEpoch)) return null;
@@ -225,6 +261,7 @@ function sanitizeTransferTelemetryEvent(event) {
     destinationPlatform: event.destinationPlatform,
     characterCount,
     status: event.status,
+    lastStage: event.lastStage,
     failureReason
   };
 }
@@ -416,6 +453,7 @@ async function summarizeWithBackend(conversation, transferId = null) {
   if (cachedEntry) {
     const cachedResult = createCacheHitSummaryResult(cachedEntry);
     if (cachedResult) {
+      recordKnownTransferTelemetryStage(transferId, "summary_response_started");
       logPerf(transferId, "summary cache hit", {
         chars: cachedResult.summary.length,
         cacheAgeMs: cachedResult.timing.cacheAgeMs
@@ -428,7 +466,10 @@ async function summarizeWithBackend(conversation, transferId = null) {
   const inFlightSummary = summaryInflight.get(conversationText);
   if (inFlightSummary) {
     logPerf(transferId, "summary inflight join", { chars: conversationText.length });
-    return inFlightSummary;
+    return inFlightSummary.then((result) => {
+      recordKnownTransferTelemetryStage(transferId, "summary_response_started");
+      return result;
+    });
   }
 
   const summaryPromise = fetchSummaryFromBackend(conversationText, transferId)
@@ -462,6 +503,7 @@ async function fetchSummaryFromBackend(conversationText, transferId = null) {
       body: JSON.stringify({ conversation: conversationText }),
       signal: controller.signal
     });
+    recordKnownTransferTelemetryStage(transferId, "summary_response_started");
     const fetchMs = Math.round(nowMs() - fetchStartedAt);
 
     if (!response.ok) {

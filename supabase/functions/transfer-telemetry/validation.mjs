@@ -1,5 +1,16 @@
 export const TELEMETRY_PLATFORMS = new Set(["claude", "chatgpt", "gemini", "grok", "deepseek"]);
 export const TELEMETRY_STATUSES = new Set(["started", "succeeded", "failed"]);
+export const TELEMETRY_STAGE_ORDER = [
+  "intent_started",
+  "capture_started",
+  "capture_completed",
+  "summary_request_started",
+  "summary_response_started",
+  "summary_completed",
+  "paste_started",
+  "completed"
+];
+export const TELEMETRY_STAGES = new Set(TELEMETRY_STAGE_ORDER);
 export const TELEMETRY_MAX_CHARACTER_COUNT = 2147483647;
 export const TELEMETRY_FAILURE_REASONS = new Set([
   "no_conversation",
@@ -24,6 +35,7 @@ const TELEMETRY_KEYS = new Set([
   "destination_platform",
   "character_count",
   "status",
+  "last_stage",
   "failure_reason",
   "extension_version"
 ]);
@@ -35,6 +47,9 @@ export function validateTelemetryPayload(input) {
   if (!TELEMETRY_PLATFORMS.has(input.source_platform)) return null;
   if (!TELEMETRY_PLATFORMS.has(input.destination_platform)) return null;
   if (!TELEMETRY_STATUSES.has(input.status)) return null;
+  if (!TELEMETRY_STAGES.has(input.last_stage)) return null;
+  if (input.status === "succeeded" && input.last_stage !== "completed") return null;
+  if (input.status !== "succeeded" && input.last_stage === "completed") return null;
 
   const attemptedAt = Date.parse(input.attempted_at || "");
   if (!Number.isFinite(attemptedAt)) return null;
@@ -60,9 +75,17 @@ export function validateTelemetryPayload(input) {
     destination_platform: input.destination_platform,
     character_count: characterCount,
     status: input.status,
+    last_stage: input.last_stage,
     failure_reason: failureReason,
     extension_version: input.extension_version
   };
+}
+
+export function selectLatestTelemetryStage(existingStage, incomingStage) {
+  if (!TELEMETRY_STAGES.has(incomingStage)) return null;
+  const existingIndex = TELEMETRY_STAGE_ORDER.indexOf(existingStage);
+  const incomingIndex = TELEMETRY_STAGE_ORDER.indexOf(incomingStage);
+  return existingIndex > incomingIndex ? existingStage : incomingStage;
 }
 
 function isUuid(value) {

@@ -13,6 +13,10 @@ const EDGE_FUNCTION_SOURCE = fs.readFileSync(
   "utf8"
 );
 const VALIDATION_PATH = path.join(ROOT, "supabase", "functions", "transfer-telemetry", "validation.mjs");
+const PROGRESS_MIGRATION_SOURCE = fs.readFileSync(
+  path.join(ROOT, "supabase", "migrations", "20260718113749_atomically_preserve_transfer_event_progress.sql"),
+  "utf8"
+);
 const MANIFEST = JSON.parse(fs.readFileSync(path.join(ROOT, "extension", "manifest.json"), "utf8"));
 
 function loadTelemetryBackground(fetchImpl, initialStorage = {}) {
@@ -105,6 +109,7 @@ function makeEvent(overrides = {}) {
     destinationPlatform: "chatgpt",
     characterCount: null,
     status: "started",
+    lastStage: "intent_started",
     failureReason: null,
     ...overrides
   };
@@ -136,7 +141,7 @@ test("telemetry reuses one install id and sends only the metadata allowlist", as
     summary: "SENSITIVE_SUMMARY",
     error: "SENSITIVE_ERROR"
   });
-  const succeeded = makeEvent({ status: "succeeded", characterCount: 54321 });
+  const succeeded = makeEvent({ status: "succeeded", lastStage: "completed", characterCount: 54321 });
   await background.sendTelemetry(started);
   await background.sendTelemetry(succeeded);
 
@@ -151,12 +156,16 @@ test("telemetry reuses one install id and sends only the metadata allowlist", as
     "extension_version",
     "failure_reason",
     "install_id",
+    "last_stage",
     "source_platform",
     "status"
   ]);
   const serialized = JSON.stringify(requests);
   assert.doesNotMatch(serialized, /SENSITIVE_RAW_CHAT|SENSITIVE_SUMMARY|SENSITIVE_ERROR/);
-  assert.deepEqual(requests.map(({ status }) => status), ["started", "succeeded"]);
+  assert.deepEqual(requests.map(({ status, last_stage: lastStage }) => [status, lastStage]), [
+    ["started", "intent_started"],
+    ["succeeded", "completed"]
+  ]);
   assert.deepEqual(background.storage["context-generator-telemetry-outbox-v1"], []);
 });
 
@@ -172,26 +181,35 @@ test("failed delivery keeps ordered operations and startup retries them", async 
   await background.drain();
 
   await background.sendTelemetry(makeEvent());
+  await background.sendTelemetry(makeEvent({ lastStage: "capture_started" }));
+  await background.sendTelemetry(makeEvent({ lastStage: "capture_completed", characterCount: 1200 }));
   await background.sendTelemetry(makeEvent({
     status: "failed",
     characterCount: 1200,
+    lastStage: "summary_response_started",
     failureReason: "summary_service_busy"
   }));
-  assert.equal(background.storage["context-generator-telemetry-outbox-v1"].length, 2);
+  assert.equal(background.storage["context-generator-telemetry-outbox-v1"].length, 4);
 
   online = true;
   background.listeners.startup();
   await background.drain();
 
   const delivered = requests.filter((request) => request.online).map((request) => request.payload);
-  assert.deepEqual(delivered.map(({ status }) => status), ["started", "failed"]);
-  assert.equal(delivered[0].attempt_id, delivered[1].attempt_id);
-  assert.equal(delivered[1].failure_reason, "summary_service_busy");
+  assert.deepEqual(delivered.map(({ last_stage: lastStage }) => lastStage), [
+    "intent_started",
+    "capture_started",
+    "capture_completed",
+    "summary_response_started"
+  ]);
+  assert.ok(delivered.every(({ attempt_id: attemptId }) => attemptId === delivered[0].attempt_id));
+  assert.equal(delivered[3].status, "failed");
+  assert.equal(delivered[3].failure_reason, "summary_service_busy");
   assert.deepEqual(background.storage["context-generator-telemetry-outbox-v1"], []);
 });
 
-test("Supabase payload validation rejects content and arbitrary failures", async () => {
-  const { validateTelemetryPayload } = await import(pathToFileURL(VALIDATION_PATH).href);
+test("Supabase payload validation rejects content, unknown stages, and arbitrary failures", async () => {
+  const { selectLatestTelemetryStage, validateTelemetryPayload } = await import(pathToFileURL(VALIDATION_PATH).href);
   const valid = {
     attempt_id: "11111111-1111-4111-8111-111111111111",
     install_id: "22222222-2222-4222-8222-222222222222",
@@ -200,6 +218,7 @@ test("Supabase payload validation rejects content and arbitrary failures", async
     destination_platform: "chatgpt",
     character_count: 50,
     status: "failed",
+    last_stage: "paste_started",
     failure_reason: "paste_failed",
     extension_version: "1.3.0"
   };
@@ -208,12 +227,28 @@ test("Supabase payload validation rejects content and arbitrary failures", async
   assert.equal(validateTelemetryPayload({ ...valid, conversation: "raw chat" }), null);
   assert.equal(validateTelemetryPayload({ ...valid, summary: "generated summary" }), null);
   assert.equal(validateTelemetryPayload({ ...valid, error: "full JS error" }), null);
+  assert.equal(validateTelemetryPayload({ ...valid, last_stage: "provider_response_body_received" }), null);
+  assert.equal(validateTelemetryPayload({ ...valid, status: "succeeded", failure_reason: null }), null);
+  assert.equal(validateTelemetryPayload({ ...valid, last_stage: "completed" }), null);
   assert.equal(validateTelemetryPayload({ ...valid, failure_reason: "provider said secret detail" }), null);
   assert.equal(validateTelemetryPayload({
     ...valid,
     character_count: 210001,
     failure_reason: "conversation_too_large"
   }).character_count, 210001);
+  assert.equal(selectLatestTelemetryStage("summary_response_started", "capture_completed"), "summary_response_started");
+  assert.equal(selectLatestTelemetryStage("capture_completed", "summary_completed"), "summary_completed");
+});
+
+test("transfer flow emits each closed telemetry stage without attaching content", () => {
+  assert.match(PLATFORM_SOURCE, /startTransferTelemetry\(trace\);[\s\S]*?if \(isRunning\)/);
+  assert.match(PLATFORM_SOURCE, /advanceTransferTelemetryStage\(transferTrace, "capture_started"\);\s*await prepareSourceForCapture/);
+  assert.match(PLATFORM_SOURCE, /advanceTransferTelemetryStage\(trace, "capture_completed"\)/);
+  assert.match(PLATFORM_SOURCE, /advanceTransferTelemetryStage\(trace, "summary_request_started"\)/);
+  assert.match(BACKGROUND_SOURCE, /recordKnownTransferTelemetryStage\(transferId, "summary_response_started"\)/);
+  assert.match(PLATFORM_SOURCE, /advanceTransferTelemetryStage\(trace, "summary_completed"\)/);
+  assert.match(PLATFORM_SOURCE, /advanceTransferTelemetryStage\(transferTrace, "paste_started"\)/);
+  assert.match(PLATFORM_SOURCE, /trace\.telemetryLastStage = "completed"/);
 });
 
 test("Supabase ingestion is write-only, authenticated by publishable key, and covered by host permission", () => {
@@ -221,7 +256,10 @@ test("Supabase ingestion is write-only, authenticated by publishable key, and co
   assert.match(EDGE_FUNCTION_SOURCE, /request\.headers\.get\("apikey"\)/);
   assert.match(EDGE_FUNCTION_SOURCE, /SUPABASE_PUBLISHABLE_KEYS/);
   assert.match(EDGE_FUNCTION_SOURCE, /SUPABASE_SERVICE_ROLE_KEY/);
-  assert.match(EDGE_FUNCTION_SOURCE, /existing\?\.status === "succeeded"/);
-  assert.match(EDGE_FUNCTION_SOURCE, /\.upsert\(\{ \.\.\.payload, updated_at:/);
+  assert.match(EDGE_FUNCTION_SOURCE, /\.rpc\("record_transfer_event"/);
+  assert.match(PROGRESS_MIGRATION_SOURCE, /on conflict \(attempt_id\) do update/);
+  assert.match(PROGRESS_MIGRATION_SOURCE, /array_position\(stage_order, excluded\.last_stage\)/);
+  assert.match(PROGRESS_MIGRATION_SOURCE, /revoke all on function public\.record_transfer_event/);
+  assert.match(PROGRESS_MIGRATION_SOURCE, /to service_role/);
   assert.doesNotMatch(EDGE_FUNCTION_SOURCE, /console\.|conversation|summary|error\.message/);
 });

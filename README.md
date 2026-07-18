@@ -123,7 +123,7 @@ The versioned cases in `evaluation/cases.json` enforce expected-fact recall, zer
 
 ## Privacy
 
-Chat text leaves the source page only after you select a destination. The backend does not intentionally log or permanently store transcripts. Generated summaries may be processed by Gemini, Mistral, or the configured Groq fallback. Metadata-only transfer analytics records a random install ID, route, timestamp, character count, outcome, safe failure category, and extension version; it never includes chat text or generated summaries. Pasted text is never submitted automatically. See [PRIVACY.md](PRIVACY.md) for the full details.
+Chat text leaves the source page only after you select a destination. The backend does not intentionally log or permanently store transcripts. Generated summaries may be processed by Gemini, Mistral, or the configured Groq fallback. Metadata-only transfer analytics records a random install ID, route, timestamp, character count, outcome, last closed-list pipeline stage, safe failure category, and extension version; it never includes chat text, generated summaries, URLs, stack traces, or provider response bodies. Pasted text is never submitted automatically. See [PRIVACY.md](PRIVACY.md) for the full details.
 
 ## Contributing
 

@@ -26,21 +26,19 @@ Deno.serve(async (request: Request) => {
       Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || "",
       { auth: { persistSession: false, autoRefreshToken: false } }
     );
-    if (payload.status === "started") {
-      const { data: existing, error: lookupError } = await supabase
-        .from("transfer_events")
-        .select("status")
-        .eq("attempt_id", payload.attempt_id)
-        .maybeSingle();
-      if (lookupError) return jsonResponse({ error: "Telemetry unavailable" }, 503, headers);
-      if (existing?.status === "succeeded" || existing?.status === "failed") {
-        return new Response(null, { status: 204, headers });
-      }
-    }
-
     const { error } = await supabase
-      .from("transfer_events")
-      .upsert({ ...payload, updated_at: new Date().toISOString() }, { onConflict: "attempt_id" });
+      .rpc("record_transfer_event", {
+        p_attempt_id: payload.attempt_id,
+        p_install_id: payload.install_id,
+        p_attempted_at: payload.attempted_at,
+        p_source_platform: payload.source_platform,
+        p_destination_platform: payload.destination_platform,
+        p_character_count: payload.character_count,
+        p_status: payload.status,
+        p_last_stage: payload.last_stage,
+        p_failure_reason: payload.failure_reason,
+        p_extension_version: payload.extension_version
+      });
 
     if (error) return jsonResponse({ error: "Telemetry unavailable" }, 503, headers);
     return new Response(null, { status: 204, headers });

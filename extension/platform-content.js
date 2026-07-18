@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-07-18-central-transfer-telemetry";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-07-18-transfer-stage-telemetry";
   const BUBBLE_ID = "context-generator-bubble";
   const OVERLAY_ID = "context-generator-overlay";
   const HANDOFF_SCRIM_ID = "context-generator-handoff-scrim";
@@ -11,6 +11,16 @@
   const LAST_TRANSFER_STATS_STORAGE_KEY = "context-generator-last-transfer-stats-v1";
   const RAW_TRANSCRIPT_RETENTION_MS = 24 * 60 * 60 * 1000;
   const TRANSFER_TELEMETRY_MESSAGE_TYPE = "RECORD_TRANSFER_TELEMETRY";
+  const TRANSFER_TELEMETRY_STAGES = [
+    "intent_started",
+    "capture_started",
+    "capture_completed",
+    "summary_request_started",
+    "summary_response_started",
+    "summary_completed",
+    "paste_started",
+    "completed"
+  ];
 
   if (window.__contextGeneratorPlatformLoaded === CONTENT_SCRIPT_LOAD_ID) {
     return;
@@ -536,6 +546,7 @@
         if (!destinationPrepPromise && getDetectedConversationMessageCount() > 0) {
           destinationPrepPromise = prepareDestinationTab(destinationId, transferTrace);
         }
+        advanceTransferTelemetryStage(transferTrace, "capture_started");
         await prepareSourceForCapture();
         if (!destinationPrepPromise && getDetectedConversationMessageCount() > 0) {
           destinationPrepPromise = prepareDestinationTab(destinationId, transferTrace);
@@ -563,6 +574,7 @@
       markTransferTrace(transferTrace, "paste request start");
       setHandoffProgress("paste", "active");
       transferStage = "paste";
+      advanceTransferTelemetryStage(transferTrace, "paste_started");
       const pasteResponse = await notifyBackground({
         type: "TRANSFER_TO_DESTINATION",
         destination: destinationId,
@@ -621,6 +633,7 @@
       throw error;
     }
 
+    advanceTransferTelemetryStage(trace, "summary_request_started");
     markTransferTrace(trace, "summary start", { chars: conversationText.length, inputChars: conversationText.length });
     setHandoffProgress("summary", "active");
     const response = await notifyBackground({
@@ -639,6 +652,7 @@
       chars: summary.length,
       background: timing
     });
+    advanceTransferTelemetryStage(trace, "summary_completed");
     return { summary, timing };
   }
 
@@ -685,6 +699,7 @@
       chars: conversationText.length,
       ...getConversationCaptureMetrics(conversationText)
     });
+    advanceTransferTelemetryStage(trace, "capture_completed");
     setHandoffProgress("capture", "done");
   }
 
@@ -1187,20 +1202,20 @@
   function startTransferTelemetry(trace) {
     if (!trace || trace.telemetryStarted) return;
     trace.telemetryStarted = true;
-    sendTransferTelemetry({
-      attemptId: trace.id,
-      attemptedAt: new Date(trace.startedAtEpoch).toISOString(),
-      sourcePlatform: trace.sourcePlatformId,
-      destinationPlatform: trace.destinationId,
-      characterCount: null,
-      status: "started",
-      failureReason: null
-    });
+    trace.telemetryLastStage = "intent_started";
+    sendTransferTelemetrySnapshot(trace, "started", null);
   }
 
-  function finishTransferTelemetry(trace, status, failureReason) {
-    if (!trace || trace.telemetryFinished) return;
-    trace.telemetryFinished = true;
+  function advanceTransferTelemetryStage(trace, lastStage) {
+    if (!trace?.telemetryStarted || trace.telemetryFinished) return;
+    const currentIndex = TRANSFER_TELEMETRY_STAGES.indexOf(trace.telemetryLastStage);
+    const nextIndex = TRANSFER_TELEMETRY_STAGES.indexOf(lastStage);
+    if (nextIndex < 0 || nextIndex <= currentIndex) return;
+    trace.telemetryLastStage = lastStage;
+    sendTransferTelemetrySnapshot(trace, "started", null);
+  }
+
+  function sendTransferTelemetrySnapshot(trace, status, failureReason) {
     sendTransferTelemetry({
       attemptId: trace.id,
       attemptedAt: new Date(trace.startedAtEpoch).toISOString(),
@@ -1208,8 +1223,16 @@
       destinationPlatform: trace.destinationId,
       characterCount: trace.telemetryCharacterCount ?? (failureReason === "no_conversation" ? 0 : null),
       status,
+      lastStage: trace.telemetryLastStage,
       failureReason: status === "failed" ? failureReason : null
     });
+  }
+
+  function finishTransferTelemetry(trace, status, failureReason) {
+    if (!trace || trace.telemetryFinished) return;
+    trace.telemetryFinished = true;
+    if (status === "succeeded") trace.telemetryLastStage = "completed";
+    sendTransferTelemetrySnapshot(trace, status, failureReason);
   }
 
   function sendTransferTelemetry(event) {
@@ -4183,6 +4206,7 @@
     if (getDetectedConversationMessageCount() > 0) {
       preparedDestinationPromise = prepareDestinationTab(destinationId, trace);
     }
+    advanceTransferTelemetryStage(trace, "capture_started");
     await prepareSourceForCapture();
     if (!preparedDestinationPromise && getDetectedConversationMessageCount() > 0) {
       preparedDestinationPromise = prepareDestinationTab(destinationId, trace);
