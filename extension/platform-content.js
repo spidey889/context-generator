@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-07-17-cache-receipt-metadata";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-07-18-central-transfer-telemetry";
   const BUBBLE_ID = "context-generator-bubble";
   const OVERLAY_ID = "context-generator-overlay";
   const HANDOFF_SCRIM_ID = "context-generator-handoff-scrim";
@@ -10,6 +10,7 @@
   const DESTINATION_SHEET_STYLE_ID = "context-generator-destination-sheet-styles";
   const LAST_TRANSFER_STATS_STORAGE_KEY = "context-generator-last-transfer-stats-v1";
   const RAW_TRANSCRIPT_RETENTION_MS = 24 * 60 * 60 * 1000;
+  const TRANSFER_TELEMETRY_MESSAGE_TYPE = "RECORD_TRANSFER_TELEMETRY";
 
   if (window.__contextGeneratorPlatformLoaded === CONTENT_SCRIPT_LOAD_ID) {
     return;
@@ -402,7 +403,6 @@
   let onboardingTimer = null;
   let onboardingDismissedThisSession = false;
   let claudeLimitNudgeDismissedUntilLimitClears = false;
-  let transferTraceSequence = 0;
   let lastConversationCaptureMetrics = null;
   let sourceScrollTargetsCache = null;
   let chatGptConversationScrollRootCache = null;
@@ -465,17 +465,20 @@
     }
 
     if (message?.type === "START_CONTEXT_TRANSFER") {
+      const destination = message.destination || getDefaultDestinationId();
+      const trace = createTransferTrace(destination, "extension icon");
+      startTransferTelemetry(trace);
       if (isRunning) {
+        markTransferTrace(trace, "failed: Context transfer is already running.");
+        finishTransferTrace(trace, "unknown_failure");
         sendResponse({ ok: false, error: "Context transfer is already running." });
         return false;
       }
 
-      const destination = message.destination || getDefaultDestinationId();
       isRunning = true;
       clearRunningResetTimer();
       runningResetTimer = setTimeout(resetRunningFlag, RUNNING_AUTO_RESET_MS);
       sendResponse({ ok: true });
-      const trace = createTransferTrace(destination, "extension icon");
       markTransferTrace(trace, "click", { source: "extension icon" });
       runContextFlow(destination, null, null, trace);
       return false;
@@ -502,6 +505,7 @@
       createTransferTrace,
       markCaptureDone,
       buildLatestTransferStats,
+      getSafeTelemetryFailureReason,
       getClaudeInlineControlsToShift,
       getClaudeModelControlsToNudge,
       getClaudeControlTargetOffset,
@@ -516,6 +520,7 @@
   async function runContextFlow(destinationId, preparedDestinationPromise = null, scrapedConversationText = null, trace = null) {
     const transferTrace = trace || createTransferTrace(destinationId, "transfer");
     transferTrace.destinationId = destinationId;
+    startTransferTelemetry(transferTrace);
     let transferStage = "capture";
     let summary = "";
     try {
@@ -572,7 +577,7 @@
       resetRunningFlag();
     } catch (error) {
       markTransferTrace(transferTrace, `failed: ${error.message}`);
-      finishTransferTrace(transferTrace);
+      finishTransferTrace(transferTrace, getSafeTelemetryFailureReason(error, transferStage));
       resetRunningFlag();
       showContextTransferFailure(error, {
         destinationId,
@@ -656,8 +661,7 @@
   }
 
   function createTransferTrace(destinationId, source) {
-    transferTraceSequence += 1;
-    const id = `${Date.now().toString(36)}-${transferTraceSequence}`;
+    const id = crypto.randomUUID();
     return {
       id,
       source,
@@ -673,7 +677,10 @@
   }
 
   function markCaptureDone(trace, conversationText) {
-    if (trace) trace.rawScrapedText = conversationText;
+    if (trace) {
+      trace.rawScrapedText = conversationText;
+      trace.telemetryCharacterCount = conversationText.length;
+    }
     markTransferTrace(trace, "capture done", {
       chars: conversationText.length,
       ...getConversationCaptureMetrics(conversationText)
@@ -1147,11 +1154,17 @@
     });
   }
 
-  function finishTransferTrace(trace) {
+  function finishTransferTrace(trace, telemetryFailureReason = null) {
     if (!trace || trace.completed) return;
     trace.completed = true;
     const totalMs = Math.round(getNow() - trace.startedAt);
     persistLatestTransferStats(trace, totalMs);
+    const failed = trace.marks.some((mark) => mark.label.startsWith("failed:"));
+    finishTransferTelemetry(
+      trace,
+      failed ? "failed" : "succeeded",
+      failed ? telemetryFailureReason || "unknown_failure" : null
+    );
     const rows = trace.marks.map((mark) => ({
       step: mark.label,
       deltaMs: mark.deltaMs,
@@ -1169,6 +1182,68 @@
   function logTransferPerf(id, label, detail = null) {
     const suffix = detail ? ` ${JSON.stringify(formatTraceDetail(detail))}` : "";
     console.debug(`[Context Generator Perf ${id || "no-trace"}] ${label}${suffix}`);
+  }
+
+  function startTransferTelemetry(trace) {
+    if (!trace || trace.telemetryStarted) return;
+    trace.telemetryStarted = true;
+    sendTransferTelemetry({
+      attemptId: trace.id,
+      attemptedAt: new Date(trace.startedAtEpoch).toISOString(),
+      sourcePlatform: trace.sourcePlatformId,
+      destinationPlatform: trace.destinationId,
+      characterCount: null,
+      status: "started",
+      failureReason: null
+    });
+  }
+
+  function finishTransferTelemetry(trace, status, failureReason) {
+    if (!trace || trace.telemetryFinished) return;
+    trace.telemetryFinished = true;
+    sendTransferTelemetry({
+      attemptId: trace.id,
+      attemptedAt: new Date(trace.startedAtEpoch).toISOString(),
+      sourcePlatform: trace.sourcePlatformId,
+      destinationPlatform: trace.destinationId,
+      characterCount: trace.telemetryCharacterCount ?? (failureReason === "no_conversation" ? 0 : null),
+      status,
+      failureReason: status === "failed" ? failureReason : null
+    });
+  }
+
+  function sendTransferTelemetry(event) {
+    try {
+      const delivery = extensionRuntime.sendMessage({
+        type: TRANSFER_TELEMETRY_MESSAGE_TYPE,
+        event
+      });
+      delivery?.catch?.(() => {});
+    } catch {
+      // Telemetry must never interrupt or alter a transfer.
+    }
+  }
+
+  function getSafeTelemetryFailureReason(error, stage = "transfer") {
+    const codeReasons = {
+      conversation_too_large: "conversation_too_large",
+      request_too_large: "conversation_too_large",
+      rate_limited: "summary_rate_limited",
+      service_busy: "summary_service_busy",
+      client_not_allowed: "summary_access_denied",
+      destination_open_failed: "destination_open_failed",
+      paste_failed: "paste_failed"
+    };
+    if (codeReasons[error?.code]) return codeReasons[error.code];
+    if (isNoConversationError(error)) return "no_conversation";
+    if (isExtensionContextInvalidated(error) || error?.message === "Extension was reloaded. Refresh this AI tab once, then try Cap-Context again.") {
+      return "extension_reloaded";
+    }
+    if (stage === "capture") return "capture_failed";
+    if (stage === "summary") return "summary_failed";
+    if (stage === "destination") return "destination_open_failed";
+    if (stage === "paste") return "paste_failed";
+    return "unknown_failure";
   }
 
   function appendBackgroundMarks(trace, marks = []) {
@@ -4083,14 +4158,21 @@
 
   async function startDestinationTransfer(destinationId) {
     hideDestinationSheet();
-    if (isRunning) return;
+    const trace = createTransferTrace(destinationId, "destination tile");
+    trace.destinationId = destinationId;
+    startTransferTelemetry(trace);
+    if (isRunning) {
+      markTransferTrace(trace, "failed: Context transfer is already running.");
+      finishTransferTrace(trace, "unknown_failure");
+      return;
+    }
     if (getDetectedConversationMessageCount() === 0) {
+      markTransferTrace(trace, `failed: ${NO_CONVERSATION_ERROR_MESSAGE}`);
+      finishTransferTrace(trace, "no_conversation");
       showErrorOverlay(NO_CONVERSATION_ERROR_MESSAGE);
       return;
     }
 
-    const trace = createTransferTrace(destinationId, "destination tile");
-    trace.destinationId = destinationId;
     markTransferTrace(trace, "destination click", { destination: destinationId });
 
     isRunning = true;
@@ -4114,7 +4196,7 @@
       markCaptureDone(trace, conversationText);
     } catch (error) {
       markTransferTrace(trace, `failed: ${error.message}`);
-      finishTransferTrace(trace);
+      finishTransferTrace(trace, getSafeTelemetryFailureReason(error, "capture"));
       resetRunningFlag();
       showErrorOverlay(error.message);
       return;

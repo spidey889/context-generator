@@ -9,6 +9,8 @@ This is the single source of truth for current production behavior. Historical d
 - `extension/platform-content.js`: picker, capture, handoff UI, paste, manual-copy recovery, placement, and Latest Run receipt creation.
 - `extension/background.js`: tab orchestration, one backend job per transfer, identical-job deduplication, short result cache, receipt expiry alarm, and paste relay.
 - `extension/analysis-bridge.js` and `analysis/index.html`: Latest Run analysis on GitHub Pages.
+- `supabase/functions/transfer-telemetry`: strict metadata-only transfer ingestion into Supabase.
+- `supabase/migrations/`: production database changes, including keeping `transfer_events` unavailable through the anonymous Data API.
 - `api/request-security.js`: endpoint trust boundary, request validation, limits, and abuse controls.
 - `api/summarize.js`: profiles, isolated provider requests, fallback chain, output validation, normalization, and timing.
 - `evaluation/cases.json` and `scripts/run-regression-eval.js`: versioned quality/latency cases and live endpoint scoring.
@@ -32,7 +34,7 @@ One shared content script handles source and destination behavior. A versioned l
 ## Transfer Flow
 
 1. Opening the picker is UI-only. It may add content-free preconnect hints, but it does not scrape, fingerprint, summarize, or transmit chat text.
-2. Destination selection first requires at least one structurally verified real message. A zero-turn chat shows `Nothing to carry yet` without handoff UI, countdown, or destination tab.
+2. Every icon-triggered or picker-triggered transfer intent creates a random attempt id and queues a metadata-only `started` event before the running-transfer and empty-chat guards. A zero-turn chat then records `failed / no_conversation` and shows `Nothing to carry yet` without handoff UI, countdown, or destination tab.
 3. A valid transfer shows the handoff card and opens the destination inactive while capture continues. Its `Capturing chat`, `Summarizing`, and `Pasting into <destination>` states advance only from real pipeline marks. Capture progress uses existing sweep geometry; summary activity is display-only and capped below completion until the real summary-done mark. The fixed 30-second countdown becomes `Almost done, don't cancel now` after expiry. UI animation never gates work.
 4. Capture prepares the source, performs the bounded rendered-window sweep described below, and serializes role-labeled turns without truncation.
 5. Input above 210,000 characters stops locally before `SUMMARIZE_WITH_BACKEND`; in-limit input creates one backend summary job.
@@ -100,6 +102,10 @@ Instance-local controls allow 8 requests per observed client IP per minute, 40 p
 
 Chat text leaves the source only after destination selection. It goes to the Cap Context backend and, for generated summaries, the configured provider chain. The backend does not intentionally persist or log transcripts. Picker open/close and destination preconnection contain no chat text. Pasted text is never submitted automatically.
 
+Central transfer telemetry uses one random UUID stored in `chrome.storage.local` for the lifetime of the installation and one random UUID per attempt. It sends only the install id, attempt id and timestamp, source/destination ids, captured character count when known, `started`/`succeeded`/`failed` status, one closed-list failure reason, and extension version. Raw chat text, generated summaries, URLs, arbitrary JavaScript errors, and receipt timelines are never added to telemetry. Started and terminal operations are stored in an ordered local outbox before delivery; Supabase failures are silent to the transfer, remain queued, and retry on the next worker startup or retry alarm.
+
+The `transfer-telemetry` Supabase Edge Function accepts only the exact metadata schema, authenticates the configured public extension key, enforces UUID/platform/status/failure/size limits, and upserts by attempt id through its server-side role. The underlying `transfer_events` table has RLS enabled and no anonymous Data API grants or policies, so public clients cannot bypass the function validator or read global events.
+
 The exact-result cache and in-flight map are memory-only. One Latest Run receipt in `chrome.storage.local` records end-to-end/capture/backend/paste timing, turn counts, input/output sizes, profile, serving provider/model, full fallback chain, usage, status, and initially the exact captured transcript. Cache-served receipts retain the original generation metadata, label it as cached, and record zero current summary latency. An alarm removes only the raw transcript and expiry marker after 24 hours; the analysis bridge enforces the same expiry on read. Other receipt metadata remains until the next transfer replaces it. The analysis page shows raw text only inside a collapsed panel and never stores the generated summary.
 
 Placement is platform-specific: Claude anchors beside voice controls, ChatGPT near its model selector at the page root, Gemini near `Flash`, Grok near its mode selector, and DeepSeek near attachment. Bounded editor/composer fallbacks handle hydration or selector drift; they are not conversation-capture fallbacks. Extension-owned nudges are excluded from capture.
@@ -108,7 +114,7 @@ Paste uses platform editor selectors, native setters/events, contenteditable ins
 
 ## Verification Contract
 
-- `npm test`: deterministic security, privacy, capture, provider, validation, paste, placement, handoff, and receipt regressions. It also loads the versioned capture fixtures and fails on lost/changed turns or fixture latency regressions.
+- `npm test`: deterministic security, privacy, telemetry/outbox, capture, provider, validation, paste, placement, handoff, and receipt regressions. It also loads the versioned capture fixtures and fails on lost/changed turns or fixture latency regressions.
 - `npm run test:extension-smoke`: isolated Brave end-to-end check of the unpacked extension against controlled fixtures and a stub backend; it never uses live accounts or production AI APIs.
 - `npm run eval`: live endpoint scoring. A failed case retries once; the stronger attempt must meet 90% required-fact recall, zero forbidden facts, valid structure, 30-second small/60-second medium latency, and a 90-second selected-case total.
 - `npm run gate`: release command combining deterministic tests and live evaluation. GitHub Actions runs it after `master` pushes, daily, and on demand.

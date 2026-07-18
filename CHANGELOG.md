@@ -6,6 +6,8 @@ Keep an entry only when it explains the current architecture, a safety boundary,
 
 ## Durable History
 
+- 2026-07-18: Added centralized metadata-only transfer telemetry. Every icon or picker attempt queues a Supabase `started` event before early guards and later upserts the same UUID as succeeded or failed with a closed-list safe reason. A persistent random install UUID and ordered local outbox provide install-level aggregation and startup retry without blocking transfer work. The Edge Function rejects extra fields, so raw chats, summaries, URLs, timelines, and full JavaScript errors never enter telemetry; direct anonymous Data API access to `transfer_events` was removed.
+
 - 2026-07-17: The two-minute extension summary cache now retains the complete original summary result instead of text alone. Cache hits report zero current summary latency but preserve provider, model, fallback chain, provider timing, and token usage as explicitly labeled original-generation metadata in Latest Run, preventing repeated transfers from replacing those fields with dashes.
 
 - 2026-07-17: Finalized the ChatGPT-only scroll-root rule confirmed from a 300-turn conversation: walk upward from a structural conversation turn and select the nearest ancestor whose computed `overflow-y` is `auto` or `scroll`. Selection does not use generic candidates, `scrollHeight`, `clientHeight`, or element size, and large `overflow-y: visible` ancestors are ignored. The superseded broad-selector and size-heuristic regressions were removed in favor of one deterministic suite covering both allowed overflow values and the nearest-ancestor rule. Claude and every shared platform path remain unchanged.

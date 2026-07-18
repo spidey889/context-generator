@@ -24,7 +24,8 @@
     "https://grok.com/*",
     "https://chat.deepseek.com/*",
     "https://spidey889.github.io/context-generator/analysis*",
-    "https://context-generator-five.vercel.app/*"
+    "https://context-generator-five.vercel.app/*",
+    "https://iqkzynzxbmemhtiupwwu.supabase.co/*"
   ],
   "background": {
   "service_worker": "background.js",

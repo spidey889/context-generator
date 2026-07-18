@@ -3,6 +3,7 @@ const fs = require("node:fs");
 const path = require("node:path");
 const test = require("node:test");
 const vm = require("node:vm");
+const { webcrypto } = require("node:crypto");
 
 const SOURCE_PATH = path.join(__dirname, "..", "extension", "platform-content.js");
 const MANIFEST_PATH = path.join(__dirname, "..", "extension", "manifest.json");
@@ -235,6 +236,7 @@ function loadPlatformContent(elements = [], hostname = "chatgpt.com", { expectSu
     document,
     window,
     chrome,
+    crypto: webcrypto,
     Element: FakeElement,
     HTMLTextAreaElement: FakeHTMLTextAreaElement,
     HTMLInputElement: FakeHTMLInputElement,
@@ -289,6 +291,7 @@ test("empty chats are rejected before handoff UI or destination preparation", ()
 
   assert.ok(pickerStart >= 0 && pickerEnd > pickerStart);
   assert.ok(pickerEmptyGuard >= 0, "picker transfer must check for zero real messages");
+  assert.ok(pickerSource.indexOf("startTransferTelemetry(trace)") < pickerEmptyGuard);
   assert.ok(pickerEmptyGuard < pickerSource.indexOf("showOverlay(destinationId)"));
   assert.ok(pickerEmptyGuard < pickerSource.indexOf("prepareDestinationTab(destinationId, trace)"));
   assert.match(pickerSource.slice(pickerEmptyGuard), /showErrorOverlay\(NO_CONVERSATION_ERROR_MESSAGE\)/);
@@ -300,9 +303,21 @@ test("empty chats are rejected before handoff UI or destination preparation", ()
 
   assert.ok(flowStart >= 0 && flowEnd > flowStart);
   assert.ok(flowEmptyGuard >= 0, "toolbar transfer must check for zero real messages");
+  assert.ok(flowSource.indexOf("startTransferTelemetry(transferTrace)") < flowEmptyGuard);
   assert.ok(flowEmptyGuard < flowSource.indexOf("showOverlay(destinationId)"));
   assert.ok(flowEmptyGuard < flowSource.indexOf("prepareDestinationTab(destinationId, transferTrace)"));
   assert.match(flowSource.slice(flowEmptyGuard), /NO_CONVERSATION_ERROR_MESSAGE/);
+});
+
+test("telemetry maps failures to the closed non-sensitive reason list", () => {
+  const hooks = loadPlatformContent([]);
+
+  assert.equal(hooks.getSafeTelemetryFailureReason({ code: "rate_limited" }, "summary"), "summary_rate_limited");
+  assert.equal(hooks.getSafeTelemetryFailureReason({ code: "service_busy" }, "summary"), "summary_service_busy");
+  assert.equal(hooks.getSafeTelemetryFailureReason({ code: "client_not_allowed" }, "summary"), "summary_access_denied");
+  assert.equal(hooks.getSafeTelemetryFailureReason(new Error("private provider detail"), "capture"), "capture_failed");
+  assert.equal(hooks.getSafeTelemetryFailureReason(new Error("private provider detail"), "summary"), "summary_failed");
+  assert.equal(hooks.getSafeTelemetryFailureReason(new Error("private provider detail"), "paste"), "paste_failed");
 });
 
 test("handoff progress state advances deterministically through the three real stages", () => {

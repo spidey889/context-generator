@@ -12,8 +12,34 @@ const SUMMARY_CACHE_MAX_ENTRIES = 8;
 const LAST_TRANSFER_STATS_STORAGE_KEY = "context-generator-last-transfer-stats-v1";
 const RAW_TRANSCRIPT_RETENTION_MS = 24 * 60 * 60 * 1000;
 const RAW_TRANSCRIPT_EXPIRY_ALARM = "expire-latest-run-raw-transcript";
+const TELEMETRY_ENDPOINT_URL = "https://iqkzynzxbmemhtiupwwu.supabase.co/functions/v1/transfer-telemetry";
+const TELEMETRY_PUBLISHABLE_KEY = "sb_publishable_i2OMxkNqpds6Ts9WCR2qLA_RAVm1jES";
+const TELEMETRY_INSTALL_ID_STORAGE_KEY = "context-generator-install-id-v1";
+const TELEMETRY_OUTBOX_STORAGE_KEY = "context-generator-telemetry-outbox-v1";
+const TELEMETRY_RETRY_ALARM = "retry-transfer-telemetry";
+const TELEMETRY_REQUEST_TIMEOUT_MS = 8000;
+const TELEMETRY_RETRY_DELAY_MINUTES = 5;
+const TELEMETRY_MAX_CHARACTER_COUNT = 2147483647;
+const TELEMETRY_PLATFORMS = new Set(["claude", "chatgpt", "gemini", "grok", "deepseek"]);
+const TELEMETRY_STATUSES = new Set(["started", "succeeded", "failed"]);
+const TELEMETRY_FAILURE_REASONS = new Set([
+  "no_conversation",
+  "conversation_too_large",
+  "capture_failed",
+  "summary_rate_limited",
+  "summary_service_busy",
+  "summary_access_denied",
+  "summary_failed",
+  "destination_open_failed",
+  "paste_failed",
+  "extension_reloaded",
+  "client_interrupted",
+  "unknown_failure"
+]);
 const summaryCache = new Map();
 const summaryInflight = new Map();
+let telemetryInstallIdPromise = null;
+let telemetryWorkChain = Promise.resolve();
 const DESTINATIONS = {
   claude: {
     name: "Claude",
@@ -57,11 +83,13 @@ const DESTINATION_HOSTS = {
 chrome.runtime.onInstalled.addListener(() => {
   injectIntoOpenSupportedTabs();
   scheduleStoredRawTranscriptExpiry();
+  initializeTelemetryDelivery();
 });
 
 chrome.runtime.onStartup.addListener(() => {
   injectIntoOpenSupportedTabs();
   scheduleStoredRawTranscriptExpiry();
+  initializeTelemetryDelivery();
 });
 
 chrome.storage.onChanged.addListener((changes, areaName) => {
@@ -71,10 +99,12 @@ chrome.storage.onChanged.addListener((changes, areaName) => {
 
 chrome.alarms.onAlarm.addListener((alarm) => {
   if (alarm?.name === RAW_TRANSCRIPT_EXPIRY_ALARM) expireStoredRawTranscript();
+  if (alarm?.name === TELEMETRY_RETRY_ALARM) initializeTelemetryDelivery();
 });
 
 injectIntoOpenSupportedTabs();
 scheduleStoredRawTranscriptExpiry();
+initializeTelemetryDelivery();
 
 async function scheduleStoredRawTranscriptExpiry() {
   try {
@@ -133,6 +163,164 @@ function getRawTranscriptExpiryEpoch(stats) {
   return Number.isFinite(completedAt) ? completedAt + RAW_TRANSCRIPT_RETENTION_MS : Date.now();
 }
 
+function initializeTelemetryDelivery() {
+  getOrCreateTelemetryInstallId().catch(() => {});
+  enqueueTelemetryWork(() => flushTelemetryOutbox()).catch(() => {});
+}
+
+function enqueueTelemetryWork(work) {
+  const next = telemetryWorkChain.catch(() => {}).then(work);
+  telemetryWorkChain = next.catch(() => {});
+  return next;
+}
+
+async function recordTransferTelemetry(event) {
+  const sanitizedEvent = sanitizeTransferTelemetryEvent(event);
+  if (!sanitizedEvent) return;
+
+  return enqueueTelemetryWork(async () => {
+    const installId = await getOrCreateTelemetryInstallId();
+    const payload = {
+      attempt_id: sanitizedEvent.attemptId,
+      install_id: installId,
+      attempted_at: sanitizedEvent.attemptedAt,
+      source_platform: sanitizedEvent.sourcePlatform,
+      destination_platform: sanitizedEvent.destinationPlatform,
+      character_count: sanitizedEvent.characterCount,
+      status: sanitizedEvent.status,
+      failure_reason: sanitizedEvent.failureReason,
+      extension_version: chrome.runtime.getManifest?.().version || null
+    };
+
+    await appendTelemetryOutbox(payload);
+    await flushTelemetryOutbox();
+  });
+}
+
+function sanitizeTransferTelemetryEvent(event) {
+  if (!event || typeof event !== "object") return null;
+  if (!isUuid(event.attemptId)) return null;
+  if (!TELEMETRY_PLATFORMS.has(event.sourcePlatform)) return null;
+  if (!TELEMETRY_PLATFORMS.has(event.destinationPlatform)) return null;
+  if (!TELEMETRY_STATUSES.has(event.status)) return null;
+
+  const attemptedAtEpoch = Date.parse(event.attemptedAt || "");
+  if (!Number.isFinite(attemptedAtEpoch)) return null;
+
+  const characterCount = event.characterCount === null || event.characterCount === undefined
+    ? null
+    : Number(event.characterCount);
+  if (characterCount !== null && (!Number.isInteger(characterCount) || characterCount < 0 || characterCount > TELEMETRY_MAX_CHARACTER_COUNT)) {
+    return null;
+  }
+
+  const failureReason = event.status === "failed" ? event.failureReason : null;
+  if (event.status === "failed" && !TELEMETRY_FAILURE_REASONS.has(failureReason)) return null;
+
+  return {
+    attemptId: event.attemptId,
+    attemptedAt: new Date(attemptedAtEpoch).toISOString(),
+    sourcePlatform: event.sourcePlatform,
+    destinationPlatform: event.destinationPlatform,
+    characterCount,
+    status: event.status,
+    failureReason
+  };
+}
+
+async function getOrCreateTelemetryInstallId() {
+  if (telemetryInstallIdPromise) return telemetryInstallIdPromise;
+
+  telemetryInstallIdPromise = (async () => {
+    const stored = await chrome.storage.local.get(TELEMETRY_INSTALL_ID_STORAGE_KEY);
+    const existing = stored?.[TELEMETRY_INSTALL_ID_STORAGE_KEY];
+    if (isUuid(existing)) return existing;
+
+    const installId = createTelemetryUuid();
+    await chrome.storage.local.set({ [TELEMETRY_INSTALL_ID_STORAGE_KEY]: installId });
+    return installId;
+  })();
+
+  try {
+    return await telemetryInstallIdPromise;
+  } catch (error) {
+    telemetryInstallIdPromise = null;
+    throw error;
+  }
+}
+
+async function appendTelemetryOutbox(payload) {
+  const stored = await chrome.storage.local.get(TELEMETRY_OUTBOX_STORAGE_KEY);
+  const outbox = Array.isArray(stored?.[TELEMETRY_OUTBOX_STORAGE_KEY])
+    ? stored[TELEMETRY_OUTBOX_STORAGE_KEY]
+    : [];
+  outbox.push({ deliveryId: createTelemetryUuid(), payload });
+  await chrome.storage.local.set({ [TELEMETRY_OUTBOX_STORAGE_KEY]: outbox });
+}
+
+async function flushTelemetryOutbox() {
+  while (true) {
+    const stored = await chrome.storage.local.get(TELEMETRY_OUTBOX_STORAGE_KEY);
+    const outbox = Array.isArray(stored?.[TELEMETRY_OUTBOX_STORAGE_KEY])
+      ? stored[TELEMETRY_OUTBOX_STORAGE_KEY]
+      : [];
+    const next = outbox[0];
+
+    if (!next?.deliveryId || !next?.payload) {
+      if (outbox.length) {
+        await chrome.storage.local.set({ [TELEMETRY_OUTBOX_STORAGE_KEY]: outbox.slice(1) });
+        continue;
+      }
+      await chrome.alarms.clear(TELEMETRY_RETRY_ALARM);
+      return;
+    }
+
+    if (!await deliverTelemetryPayload(next.payload)) {
+      chrome.alarms.create(TELEMETRY_RETRY_ALARM, { delayInMinutes: TELEMETRY_RETRY_DELAY_MINUTES });
+      return;
+    }
+
+    const refreshed = await chrome.storage.local.get(TELEMETRY_OUTBOX_STORAGE_KEY);
+    const currentOutbox = Array.isArray(refreshed?.[TELEMETRY_OUTBOX_STORAGE_KEY])
+      ? refreshed[TELEMETRY_OUTBOX_STORAGE_KEY]
+      : [];
+    await chrome.storage.local.set({
+      [TELEMETRY_OUTBOX_STORAGE_KEY]: currentOutbox.filter((entry) => entry?.deliveryId !== next.deliveryId)
+    });
+  }
+}
+
+async function deliverTelemetryPayload(payload) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), TELEMETRY_REQUEST_TIMEOUT_MS);
+
+  try {
+    const response = await fetch(TELEMETRY_ENDPOINT_URL, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        apikey: TELEMETRY_PUBLISHABLE_KEY
+      },
+      body: JSON.stringify(payload),
+      signal: controller.signal
+    });
+    return response.ok;
+  } catch {
+    return false;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+function isUuid(value) {
+  return typeof value === "string"
+    && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
+}
+
+function createTelemetryUuid() {
+  return crypto.randomUUID();
+}
+
 chrome.action.onClicked.addListener(async (tab) => {
   try {
     clearBadge();
@@ -162,6 +350,13 @@ chrome.action.onClicked.addListener(async (tab) => {
 });
 
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+  if (message?.type === "RECORD_TRANSFER_TELEMETRY") {
+    recordTransferTelemetry(message.event)
+      .then(() => sendResponse({ ok: true }))
+      .catch(() => sendResponse({ ok: false }));
+    return true;
+  }
+
   if (message?.type === "SUMMARIZE_WITH_BACKEND") {
     summarizeWithBackend(message.conversation, message.transferId)
       .then((result) => sendResponse({ ok: true, summary: result.summary, timing: result.timing }))
@@ -185,7 +380,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       .catch((error) => {
         console.error("[Context Generator Relay]", error);
         setBadge("ERR", "#b42318", 5000);
-        sendResponse({ ok: false, error: error.message });
+        sendResponse({ ok: false, error: error.message, code: error.code || "paste_failed" });
       });
 
     return true;
@@ -380,13 +575,17 @@ function cacheSummaryResult(conversationText, result) {
 
 async function transferToDestination(destinationId, text, preparedTabId = null, transferId = null) {
   if (!text?.trim()) {
-    throw new Error("Context summary text was not available.");
+    const error = new Error("Context summary text was not available.");
+    error.code = "paste_failed";
+    throw error;
   }
 
   const trace = createBackgroundTrace(transferId);
   const destination = DESTINATIONS[destinationId];
   if (!destination) {
-    throw new Error("Unknown AI destination.");
+    const error = new Error("Unknown AI destination.");
+    error.code = "destination_open_failed";
+    throw error;
   }
 
   const trimmedText = text.trim();
@@ -440,7 +639,9 @@ async function transferToDestination(destinationId, text, preparedTabId = null, 
   }
 
   if (!pasteResult?.ok) {
-    throw new Error(pasteResult?.error || `Could not paste into ${destination.name}.`);
+    const error = new Error(pasteResult?.error || `Could not paste into ${destination.name}.`);
+    error.code = "paste_failed";
+    throw error;
   }
 
   markBackgroundTrace(trace, "final tab activate start", { tabId: destinationTabId });
@@ -476,11 +677,16 @@ async function prepareDestination(destinationId, transferId = null) {
 }
 
 async function createDestinationTab(destination, options = {}) {
-  const destinationTab = await chrome.tabs.create({
-    url: destination.url,
-    active: options.active !== false
-  });
-  return destinationTab.id;
+  try {
+    const destinationTab = await chrome.tabs.create({
+      url: destination.url,
+      active: options.active !== false
+    });
+    return destinationTab.id;
+  } catch (error) {
+    error.code = error.code || "destination_open_failed";
+    throw error;
+  }
 }
 
 async function activateDestinationTab(tabId) {
@@ -495,20 +701,25 @@ async function activateDestinationTab(tabId) {
 }
 
 async function pasteIntoDestinationTab(tabId, destinationId, destination, text, transferId = null, trace = null) {
-  return sendMessageWhenReady(
-    tabId,
-    {
-      type: "PASTE_CONTEXT",
-      destination: destinationId,
-      text,
-      transferId
-    },
-    destination.contentScript,
-    destination.messageTimeoutMs || DESTINATION_MESSAGE_TIMEOUT_MS,
-    destination.name,
-    transferId,
-    trace
-  );
+  try {
+    return await sendMessageWhenReady(
+      tabId,
+      {
+        type: "PASTE_CONTEXT",
+        destination: destinationId,
+        text,
+        transferId
+      },
+      destination.contentScript,
+      destination.messageTimeoutMs || DESTINATION_MESSAGE_TIMEOUT_MS,
+      destination.name,
+      transferId,
+      trace
+    );
+  } catch (error) {
+    error.code = error.code || "paste_failed";
+    throw error;
+  }
 }
 
 async function warmDestinationTab(tabId, destination, transferId = null) {
