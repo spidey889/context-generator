@@ -360,6 +360,7 @@ test("telemetry maps failures to the closed non-sensitive reason list", () => {
   assert.equal(hooks.getSafeTelemetryFailureReason({ code: "client_not_allowed" }, "summary"), "summary_access_denied");
   assert.equal(hooks.getSafeTelemetryFailureReason(new Error("private provider detail"), "capture"), "capture_failed");
   assert.equal(hooks.getSafeTelemetryFailureReason(new Error("private provider detail"), "summary"), "summary_failed");
+  assert.equal(hooks.getSafeTelemetryFailureReason({ code: "user_cancelled" }, "summary"), "user_cancelled");
   assert.equal(hooks.getSafeTelemetryFailureReason(new Error("private provider detail"), "paste"), "paste_failed");
 });
 

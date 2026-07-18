@@ -25,6 +25,10 @@ const TRANSFER_ACTIVITY_MIGRATION_SOURCE = fs.readFileSync(
   path.join(ROOT, "supabase", "migrations", "20260718172212_add_user_transfer_activity_view.sql"),
   "utf8"
 );
+const USER_CANCELLED_MIGRATION_SOURCE = fs.readFileSync(
+  path.join(ROOT, "supabase", "migrations", "20260718175852_add_user_cancelled_failure_reason.sql"),
+  "utf8"
+);
 const MANIFEST = JSON.parse(fs.readFileSync(path.join(ROOT, "extension", "manifest.json"), "utf8"));
 
 function loadTelemetryBackground(fetchImpl, initialStorage = {}) {
@@ -79,6 +83,7 @@ function loadTelemetryBackground(fetchImpl, initialStorage = {}) {
       },
       tabs: {
         create: async () => ({}),
+        onRemoved: createEvent("tabRemoved"),
         query: async () => [],
         sendMessage: async () => ({}),
         update: async () => ({})
@@ -93,11 +98,11 @@ function loadTelemetryBackground(fetchImpl, initialStorage = {}) {
   return {
     storage,
     listeners,
-    async sendTelemetry(event) {
+    async sendTelemetry(event, sourceTabId = 7) {
       return new Promise((resolve, reject) => {
         const keepsChannelOpen = listeners.message(
           { type: "RECORD_TRANSFER_TELEMETRY", event },
-          {},
+          { tab: { id: sourceTabId } },
           resolve
         );
         if (keepsChannelOpen !== true) reject(new Error("telemetry listener did not keep the channel open"));
@@ -216,6 +221,24 @@ test("failed delivery keeps ordered operations and startup retries them", async 
   assert.deepEqual(background.storage["context-generator-telemetry-outbox-v1"], []);
 });
 
+test("closing the source tab records an in-flight transfer as user cancelled", async () => {
+  const requests = [];
+  const background = loadTelemetryBackground(async (_url, options) => {
+    requests.push(JSON.parse(options.body));
+    return { ok: true };
+  });
+  await background.drain();
+
+  await background.sendTelemetry(makeEvent({ lastStage: "summary_request_started" }), 42);
+  background.listeners.tabRemoved(42, { isWindowClosing: false });
+  await background.drain();
+
+  assert.equal(requests.at(-1).status, "failed");
+  assert.equal(requests.at(-1).failure_reason, "user_cancelled");
+  assert.equal(requests.at(-1).last_stage, "summary_request_started");
+  assert.equal(requests.at(-1).character_count, null);
+});
+
 test("Supabase payload validation rejects content, unknown stages, and arbitrary failures", async () => {
   const { selectLatestTelemetryStage, validateTelemetryPayload } = await import(pathToFileURL(VALIDATION_PATH).href);
   const valid = {
@@ -239,6 +262,10 @@ test("Supabase payload validation rejects content, unknown stages, and arbitrary
   assert.equal(validateTelemetryPayload({ ...valid, status: "succeeded", failure_reason: null }), null);
   assert.equal(validateTelemetryPayload({ ...valid, last_stage: "completed" }), null);
   assert.equal(validateTelemetryPayload({ ...valid, failure_reason: "provider said secret detail" }), null);
+  assert.deepEqual(
+    validateTelemetryPayload({ ...valid, failure_reason: "user_cancelled" }),
+    { ...valid, failure_reason: "user_cancelled" }
+  );
   assert.equal(validateTelemetryPayload({
     ...valid,
     character_count: 210001,
@@ -327,4 +354,15 @@ test("Supabase connects User N to one row per transfer and keeps daily usage cou
   assert.doesNotMatch(activitySelectSource, /install_id|conversation|summary|total_characters/);
   assert.match(TRANSFER_ACTIVITY_MIGRATION_SOURCE, /revoke all privileges on table public\.user_transfer_activity/);
   assert.match(TRANSFER_ACTIVITY_MIGRATION_SOURCE, /grant select on table public\.user_transfer_activity to service_role/);
+});
+
+test("user cancellation stays a closed metadata-only failure reason", () => {
+  assert.match(BACKGROUND_SOURCE, /"user_cancelled"/);
+  assert.match(EDGE_FUNCTION_SOURCE, /validation\.mjs/);
+  assert.match(USER_CANCELLED_MIGRATION_SOURCE, /drop constraint if exists transfer_events_failure_reason_check/);
+  assert.match(USER_CANCELLED_MIGRATION_SOURCE, /'user_cancelled'::text/);
+  assert.doesNotMatch(
+    USER_CANCELLED_MIGRATION_SOURCE,
+    /raw_chat|generated_summary|provider_response_body|error_message|stack_trace|page_url/
+  );
 });

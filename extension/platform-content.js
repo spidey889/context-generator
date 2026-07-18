@@ -1256,7 +1256,8 @@
       service_busy: "summary_service_busy",
       client_not_allowed: "summary_access_denied",
       destination_open_failed: "destination_open_failed",
-      paste_failed: "paste_failed"
+      paste_failed: "paste_failed",
+      user_cancelled: "user_cancelled"
     };
     if (codeReasons[error?.code]) return codeReasons[error.code];
     if (isNoConversationError(error)) return "no_conversation";

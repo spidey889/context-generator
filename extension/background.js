@@ -45,11 +45,13 @@ const TELEMETRY_FAILURE_REASONS = new Set([
   "paste_failed",
   "extension_reloaded",
   "client_interrupted",
+  "user_cancelled",
   "unknown_failure"
 ]);
 const summaryCache = new Map();
 const summaryInflight = new Map();
 const activeTransferTelemetry = new Map();
+const activeTransferSourceTabs = new Map();
 let telemetryInstallIdPromise = null;
 let telemetryWorkChain = Promise.resolve();
 const DESTINATIONS = {
@@ -104,6 +106,10 @@ chrome.runtime.onStartup.addListener(() => {
   injectIntoOpenSupportedTabs();
   scheduleStoredRawTranscriptExpiry();
   initializeTelemetryDelivery();
+});
+
+chrome.tabs.onRemoved?.addListener((tabId) => {
+  recordUserCancelledTransfersForTab(tabId);
 });
 
 chrome.storage.onChanged.addListener((changes, areaName) => {
@@ -188,10 +194,13 @@ function enqueueTelemetryWork(work) {
   return next;
 }
 
-async function recordTransferTelemetry(event) {
+async function recordTransferTelemetry(event, sourceTabId = null) {
   const sanitizedEvent = sanitizeTransferTelemetryEvent(event);
   if (!sanitizedEvent) return;
   activeTransferTelemetry.set(sanitizedEvent.attemptId, sanitizedEvent);
+  if (Number.isInteger(sourceTabId)) {
+    activeTransferSourceTabs.set(sanitizedEvent.attemptId, sourceTabId);
+  }
 
   const work = enqueueTelemetryWork(async () => {
     const installId = await getOrCreateTelemetryInstallId();
@@ -216,10 +225,27 @@ async function recordTransferTelemetry(event) {
     work.finally(() => {
       if (activeTransferTelemetry.get(sanitizedEvent.attemptId)?.status !== "started") {
         activeTransferTelemetry.delete(sanitizedEvent.attemptId);
+        activeTransferSourceTabs.delete(sanitizedEvent.attemptId);
       }
     }).catch(() => {});
   }
   return work;
+}
+
+function recordUserCancelledTransfersForTab(tabId) {
+  for (const [attemptId, sourceTabId] of activeTransferSourceTabs.entries()) {
+    if (sourceTabId !== tabId) continue;
+    const active = activeTransferTelemetry.get(attemptId);
+    if (!active || active.status !== "started") continue;
+
+    // Closing the source tab is the one unambiguous user-side cancellation
+    // signal available after a transfer has started.
+    recordTransferTelemetry({
+      ...active,
+      status: "failed",
+      failureReason: "user_cancelled"
+    }).catch(() => {});
+  }
 }
 
 function recordKnownTransferTelemetryStage(attemptId, lastStage) {
@@ -389,9 +415,9 @@ chrome.action.onClicked.addListener(async (tab) => {
   }
 });
 
-chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message?.type === "RECORD_TRANSFER_TELEMETRY") {
-    recordTransferTelemetry(message.event)
+    recordTransferTelemetry(message.event, sender?.tab?.id)
       .then(() => sendResponse({ ok: true }))
       .catch(() => sendResponse({ ok: false }));
     return true;

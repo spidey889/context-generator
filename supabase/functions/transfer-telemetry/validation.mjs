@@ -24,6 +24,7 @@ export const TELEMETRY_FAILURE_REASONS = new Set([
   "paste_failed",
   "extension_reloaded",
   "client_interrupted",
+  "user_cancelled",
   "unknown_failure"
 ]);
 
