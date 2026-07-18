@@ -47,7 +47,8 @@
   const DESTINATION_SHEET_WIDTH = 296;
   const DESTINATION_SHEET_CLOSED_TRANSFORM = "translate3d(0,8px,0) scale(0.985)";
   const HANDOFF_OVERLAY_CLOSED_TRANSFORM = "translate3d(-50%,-50%,0) translateY(10px) scale(0.985)";
-  const RUNNING_AUTO_RESET_MS = 300000;
+  // Covers the 210-second summary ceiling plus one prepared and one fresh paste attempt.
+  const RUNNING_AUTO_RESET_MS = 360000;
   const DEFAULT_MAX_COMPOSER_WIDTH = 1320;
   const DESTINATION_TITLE_TEXT = "Where to continue?";
   const DESTINATION_HELPER_TEXT = "Context goes straight into the input box";
@@ -1538,7 +1539,6 @@
 
     const input = await waitForElement(() => findPlatformInput(destination), 15000, `${destination.name} message input`);
     if (!input) {
-      showFallbackModal(trimmedText, destination.name);
       throw new Error(`${destination.name} message input element could not be found.`);
     }
 
@@ -1546,7 +1546,6 @@
     setEditorText(input, trimmedText, destination);
 
     if (!editorContainsText(input, trimmedText)) {
-      showFallbackModal(trimmedText, destination.name);
       throw new Error(`Paste operation failed to populate the ${destination.name} editor.`);
     }
 
@@ -1597,8 +1596,6 @@
 
       await delay(PASTE_RETRY_INTERVAL_MS);
     }
-
-    showFallbackModal(text, destination.name);
 
     if (!sawInput) {
       throw new Error(`${destination.name} message input element could not be found.`);
@@ -4201,33 +4198,31 @@
     isRunning = true;
     clearRunningResetTimer();
     runningResetTimer = setTimeout(resetRunningFlag, RUNNING_AUTO_RESET_MS);
-    showOverlay(destinationId);
-    let preparedDestinationPromise = null;
-    if (getDetectedConversationMessageCount() > 0) {
-      preparedDestinationPromise = prepareDestinationTab(destinationId, trace);
-    }
-    advanceTransferTelemetryStage(trace, "capture_started");
-    await prepareSourceForCapture();
-    if (!preparedDestinationPromise && getDetectedConversationMessageCount() > 0) {
-      preparedDestinationPromise = prepareDestinationTab(destinationId, trace);
-    }
-
-    let conversationText;
     try {
+      showOverlay(destinationId);
+      let preparedDestinationPromise = null;
+      if (getDetectedConversationMessageCount() > 0) {
+        preparedDestinationPromise = prepareDestinationTab(destinationId, trace);
+      }
+      advanceTransferTelemetryStage(trace, "capture_started");
+      await prepareSourceForCapture();
+      if (!preparedDestinationPromise && getDetectedConversationMessageCount() > 0) {
+        preparedDestinationPromise = prepareDestinationTab(destinationId, trace);
+      }
+
       markTransferTrace(trace, "capture start");
       setHandoffProgress("capture", "active");
-      conversationText = await scrapeConversationTextWhenReady();
+      const conversationText = await scrapeConversationTextWhenReady();
       markCaptureDone(trace, conversationText);
+
+      preparedDestinationPromise = preparedDestinationPromise || prepareDestinationTab(destinationId, trace);
+      runContextFlow(destinationId, preparedDestinationPromise, conversationText, trace);
     } catch (error) {
       markTransferTrace(trace, `failed: ${error.message}`);
       finishTransferTrace(trace, getSafeTelemetryFailureReason(error, "capture"));
       resetRunningFlag();
       showErrorOverlay(error.message);
-      return;
     }
-
-    preparedDestinationPromise = preparedDestinationPromise || prepareDestinationTab(destinationId, trace);
-    runContextFlow(destinationId, preparedDestinationPromise, conversationText, trace);
   }
 
   function ensureFloatingOverlay() {
@@ -5230,25 +5225,37 @@
 
       copyBtn.addEventListener("click", async () => {
         const currentText = textarea.value || "";
+        let copied = false;
         try {
           if (!navigator.clipboard?.writeText) throw new Error("Clipboard API unavailable.");
           await navigator.clipboard.writeText(currentText);
-          copyBtn.textContent = "Copied!";
-          copyBtn.style.background = "linear-gradient(180deg,#69e6a2,#21b36b)";
-          copyBtn.style.color = "#07150d";
-          setTimeout(() => {
-            if (!copyBtn.isConnected) return;
-            copyBtn.textContent = "Copy Context";
-            copyBtn.style.background = "linear-gradient(180deg,#f5f5f5,#d8d8d8)";
-            copyBtn.style.color = "#111114";
-          }, 2000);
-        } catch (err) {
+          copied = true;
+        } catch (_error) {
+          textarea.focus();
           textarea.select();
-          document.execCommand("copy");
-          copyBtn.textContent = "Copied!";
-          copyBtn.style.background = "linear-gradient(180deg,#69e6a2,#21b36b)";
-          copyBtn.style.color = "#07150d";
+          try {
+            copied = document.execCommand("copy") === true;
+          } catch {
+            copied = false;
+          }
         }
+
+        if (!copied) {
+          copyBtn.textContent = "Select text and copy manually";
+          copyBtn.style.background = "linear-gradient(180deg,#ffd980,#e8ad37)";
+          copyBtn.style.color = "#211500";
+          return;
+        }
+
+        copyBtn.textContent = "Copied!";
+        copyBtn.style.background = "linear-gradient(180deg,#69e6a2,#21b36b)";
+        copyBtn.style.color = "#07150d";
+        setTimeout(() => {
+          if (!copyBtn.isConnected) return;
+          copyBtn.textContent = "Copy Context";
+          copyBtn.style.background = "linear-gradient(180deg,#f5f5f5,#d8d8d8)";
+          copyBtn.style.color = "#111114";
+        }, 2000);
       });
 
       const closeModal = () => {

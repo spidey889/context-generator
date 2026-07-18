@@ -23,6 +23,30 @@ test("extension enforces the 350k client cap before backend summary", () => {
   assert.match(PLATFORM_CONTENT_SOURCE, /supported 350,000 character limit/);
 });
 
+test("manual copy waits until background destination recovery is exhausted", () => {
+  const pasteStart = PLATFORM_CONTENT_SOURCE.indexOf("async function pasteIntoPlatform(");
+  const pasteEnd = PLATFORM_CONTENT_SOURCE.indexOf("function findPlatformInput(", pasteStart);
+  const pasteSource = PLATFORM_CONTENT_SOURCE.slice(pasteStart, pasteEnd);
+  const failureStart = PLATFORM_CONTENT_SOURCE.indexOf("function showContextTransferFailure(");
+  const failureEnd = PLATFORM_CONTENT_SOURCE.indexOf("async function summarizeWithBackend(", failureStart);
+  const failureSource = PLATFORM_CONTENT_SOURCE.slice(failureStart, failureEnd);
+
+  assert.ok(pasteStart >= 0 && pasteEnd > pasteStart);
+  assert.doesNotMatch(pasteSource, /showFallbackModal\(/);
+  assert.match(failureSource, /if \(summary\) \{\s*showFallbackModal\(summary, destinationName\)/);
+});
+
+test("manual copy never reports success when both clipboard methods fail", () => {
+  const modalStart = PLATFORM_CONTENT_SOURCE.indexOf("function showFallbackModal(");
+  const modalEnd = PLATFORM_CONTENT_SOURCE.indexOf("function updateFloatingButtonPosition(", modalStart);
+  const modalSource = PLATFORM_CONTENT_SOURCE.slice(modalStart, modalEnd);
+
+  assert.ok(modalStart >= 0 && modalEnd > modalStart);
+  assert.match(modalSource, /let copied = false/);
+  assert.match(modalSource, /copied = document\.execCommand\("copy"\) === true/);
+  assert.match(modalSource, /if \(!copied\) \{[\s\S]*Select text and copy manually/);
+});
+
 let nextOrder = 1;
 
 class FakeElement {
@@ -313,6 +337,19 @@ test("empty chats are rejected before handoff UI or destination preparation", ()
   assert.ok(flowEmptyGuard < flowSource.indexOf("showOverlay(destinationId)"));
   assert.ok(flowEmptyGuard < flowSource.indexOf("prepareDestinationTab(destinationId, transferTrace)"));
   assert.match(flowSource.slice(flowEmptyGuard), /NO_CONVERSATION_ERROR_MESSAGE/);
+});
+
+test("picker capture preparation failures release the transfer lock immediately", () => {
+  const pickerStart = PLATFORM_CONTENT_SOURCE.indexOf("async function startDestinationTransfer(destinationId)");
+  const pickerEnd = PLATFORM_CONTENT_SOURCE.indexOf("function ensureFloatingOverlay()", pickerStart);
+  const pickerSource = PLATFORM_CONTENT_SOURCE.slice(pickerStart, pickerEnd);
+  const captureTry = pickerSource.indexOf("try {");
+  const preparation = pickerSource.indexOf("await prepareSourceForCapture()");
+  const reset = pickerSource.indexOf("resetRunningFlag()", preparation);
+
+  assert.ok(captureTry >= 0 && preparation > captureTry);
+  assert.ok(reset > preparation);
+  assert.match(pickerSource.slice(preparation), /catch \(error\) \{[\s\S]*resetRunningFlag\(\)/);
 });
 
 test("telemetry maps failures to the closed non-sensitive reason list", () => {
@@ -1426,7 +1463,7 @@ test("opening the destination picker does not scrape or summarize", () => {
 test("transfer safety window covers long quality summaries", () => {
   const source = fs.readFileSync(SOURCE_PATH, "utf8");
 
-  assert.match(source, /const RUNNING_AUTO_RESET_MS = 300000/);
+  assert.match(source, /const RUNNING_AUTO_RESET_MS = 360000/);
 });
 
 test("latest-run receipt preserves the complete provider fallback chain", () => {

@@ -39,10 +39,10 @@ One shared content script handles source and destination behavior. A versioned l
 4. Capture prepares the source, performs the bounded rendered-window sweep described below, and serializes role-labeled turns without truncation.
 5. Input above 350,000 characters stops locally before `SUMMARIZE_WITH_BACKEND`; in-limit input creates one backend summary job.
 6. Identical concurrent jobs may share one in-flight promise. Up to eight exact summary results are cached in service-worker memory for two minutes, including their original provider/model/fallback/usage metadata. A cache hit reports zero current summary latency while retaining and explicitly labeling the original generation metadata. This is not warm summarization.
-7. The result is pasted into the prepared destination. Missing or failed prepared tabs retry in a fresh destination tab. ChatGPT adds activation settling and post-paste stability verification.
-8. Verified paste focuses the editor but never clicks Send. If generated context cannot be transferred, the manual-copy dialog preserves it.
+7. Before reuse, a prepared tab is re-read and must still match the selected destination; a missing, navigated-away, or failed prepared tab gets exactly one fresh correct destination. Normal and recovery ChatGPT pastes share the same activation settling and post-paste stability verification.
+8. Verified paste focuses the editor but never clicks Send. Destination content scripts do not show recovery UI while another paste attempt is pending. Only after automatic recovery is exhausted does the source show one manual-copy dialog; if both clipboard APIs fail, it selects the preserved text and explicitly asks for manual copying instead of falsely reporting success.
 
-The source lock resets after five minutes. Background waits are 12 seconds for source startup, normally 30 seconds for destination messaging, 45 seconds for ChatGPT destination messaging, and 210 seconds for the single backend request.
+Picker capture preparation and scraping share one failure boundary, so either error immediately releases the source lock and replaces the handoff UI with the real failure. The source lock's six-minute safety reset covers the 210-second summary ceiling plus prepared and fresh paste attempts. Background waits are 12 seconds for source startup, normally 30 seconds for destination messaging, 45 seconds for ChatGPT destination messaging, and 210 seconds for the single backend request.
 
 ## Conversation Capture
 

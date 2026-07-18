@@ -84,12 +84,14 @@ const DESTINATIONS = {
     contentScript: PLATFORM_CONTENT_SCRIPT
   }
 };
-const DESTINATION_HOSTS = {
-  claude: ["claude.ai"],
-  chatgpt: ["chatgpt.com", "openai.com"],
-  gemini: ["gemini.google.com"],
-  grok: ["grok.com"],
-  deepseek: ["chat.deepseek.com"]
+// Keep these rules aligned with manifest host access. Ordinary OpenAI pages are
+// not ChatGPT surfaces, even though activeTab could otherwise inject into them.
+const DESTINATION_HOST_RULES = {
+  claude: { domains: ["claude.ai"] },
+  chatgpt: { domains: ["chatgpt.com"], exact: ["chat.openai.com"] },
+  gemini: { exact: ["gemini.google.com"] },
+  grok: { exact: ["grok.com"] },
+  deepseek: { exact: ["chat.deepseek.com"] }
 };
 
 chrome.runtime.onInstalled.addListener(() => {
@@ -663,53 +665,60 @@ async function transferToDestination(destinationId, text, preparedTabId = null, 
   }
 
   const trimmedText = text.trim();
-  let pasteResult;
-  let destinationTabId;
+  let pasteResult = null;
+  let destinationTabId = null;
+  let preparedAttempted = false;
 
-  try {
-    if (preparedTabId) {
-      destinationTabId = preparedTabId;
-      markBackgroundTrace(trace, "prepared tab reused", { tabId: destinationTabId, destination: destinationId });
-    } else {
-      markBackgroundTrace(trace, "tab open start", { destination: destinationId, active: destination.focusBeforePaste === true });
-      destinationTabId = await createDestinationTab(destination);
-      markBackgroundTrace(trace, "tab open done", { tabId: destinationTabId });
+  if (preparedTabId && await isPreparedDestinationTabUsable(preparedTabId, destinationId)) {
+    preparedAttempted = true;
+    destinationTabId = preparedTabId;
+    markBackgroundTrace(trace, "prepared tab reused", { tabId: destinationTabId, destination: destinationId });
+    try {
+      pasteResult = await pasteIntoDestinationWithActivation(
+        destinationTabId,
+        destinationId,
+        destination,
+        trimmedText,
+        transferId,
+        trace
+      );
+    } catch (error) {
+      pasteResult = { ok: false, error: error?.message || "Prepared destination paste failed." };
     }
-    if (destination.focusBeforePaste) {
-      markBackgroundTrace(trace, "tab activate before paste start", { tabId: destinationTabId });
-      await activateDestinationTab(destinationTabId);
-      markBackgroundTrace(trace, "tab activate before paste done", { tabId: destinationTabId });
-      if (destination.activationSettleMs) {
-        markBackgroundTrace(trace, "tab activation settle start", { tabId: destinationTabId, settleMs: destination.activationSettleMs });
-        await delay(destination.activationSettleMs);
-        markBackgroundTrace(trace, "tab activation settle done", { tabId: destinationTabId });
-      }
-    }
-    markBackgroundTrace(trace, "paste message start", { tabId: destinationTabId, destination: destinationId });
-    pasteResult = await pasteIntoDestinationTab(destinationTabId, destinationId, destination, trimmedText, transferId, trace);
-    markBackgroundTrace(trace, "paste message done", { tabId: destinationTabId, responseTiming: pasteResult?.timing || null });
-  } catch (error) {
-    if (!preparedTabId) throw error;
-
-    markBackgroundTrace(trace, "fresh fallback tab open start", { destination: destinationId });
-    destinationTabId = await createDestinationTab(destination, { active: destination.focusBeforePaste === true });
-    markBackgroundTrace(trace, "fresh fallback tab open done", { tabId: destinationTabId });
-    markBackgroundTrace(trace, "fresh fallback paste start", { tabId: destinationTabId });
-    pasteResult = await pasteIntoDestinationTab(destinationTabId, destinationId, destination, trimmedText, transferId, trace);
-    markBackgroundTrace(trace, "fresh fallback paste done", { tabId: destinationTabId, responseTiming: pasteResult?.timing || null });
+  } else if (preparedTabId) {
+    markBackgroundTrace(trace, "prepared tab rejected", {
+      tabId: preparedTabId,
+      destination: destinationId,
+      reason: "missing_or_navigated"
+    });
   }
 
-  if (!pasteResult?.ok && preparedTabId) {
-    console.debug(
-      "[Context Generator Relay] Prepared destination paste failed; retrying in a fresh tab:",
-      pasteResult?.error || "No paste response."
+  if (!pasteResult?.ok) {
+    const recoveringPreparedTab = Boolean(preparedTabId);
+    if (preparedAttempted) {
+      console.debug(
+        "[Context Generator Relay] Prepared destination paste failed; retrying in one fresh tab:",
+        pasteResult?.error || "No paste response."
+      );
+    }
+    const openLabel = recoveringPreparedTab ? "fresh fallback tab" : "tab";
+    markBackgroundTrace(trace, `${openLabel} open start`, {
+      destination: destinationId,
+      active: destination.focusBeforePaste === true,
+      previousError: preparedAttempted ? pasteResult?.error || "No paste response." : null
+    });
+    destinationTabId = await createDestinationTab(destination, {
+      active: recoveringPreparedTab ? destination.focusBeforePaste === true : true
+    });
+    markBackgroundTrace(trace, `${openLabel} open done`, { tabId: destinationTabId });
+    pasteResult = await pasteIntoDestinationWithActivation(
+      destinationTabId,
+      destinationId,
+      destination,
+      trimmedText,
+      transferId,
+      trace
     );
-    markBackgroundTrace(trace, "prepared paste failed; fresh tab open start", { error: pasteResult?.error || "No paste response." });
-    destinationTabId = await createDestinationTab(destination, { active: destination.focusBeforePaste === true });
-    markBackgroundTrace(trace, "prepared paste failed; fresh tab open done", { tabId: destinationTabId });
-    markBackgroundTrace(trace, "prepared paste failed; fresh paste start", { tabId: destinationTabId });
-    pasteResult = await pasteIntoDestinationTab(destinationTabId, destinationId, destination, trimmedText, transferId, trace);
-    markBackgroundTrace(trace, "prepared paste failed; fresh paste done", { tabId: destinationTabId, responseTiming: pasteResult?.timing || null });
   }
 
   if (!pasteResult?.ok) {
@@ -730,6 +739,41 @@ async function transferToDestination(destinationId, text, preparedTabId = null, 
     },
     marks: trace.marks
   };
+}
+
+async function isPreparedDestinationTabUsable(tabId, destinationId) {
+  try {
+    const tab = await chrome.tabs.get(tabId);
+    const currentOrPendingUrl = tab?.pendingUrl || tab?.url || "";
+    return getPlatformFromUrl(currentOrPendingUrl) === destinationId;
+  } catch {
+    return false;
+  }
+}
+
+async function pasteIntoDestinationWithActivation(
+  tabId,
+  destinationId,
+  destination,
+  text,
+  transferId,
+  trace
+) {
+  if (destination.focusBeforePaste) {
+    markBackgroundTrace(trace, "tab activate before paste start", { tabId });
+    await activateDestinationTab(tabId);
+    markBackgroundTrace(trace, "tab activate before paste done", { tabId });
+    if (destination.activationSettleMs) {
+      markBackgroundTrace(trace, "tab activation settle start", { tabId, settleMs: destination.activationSettleMs });
+      await delay(destination.activationSettleMs);
+      markBackgroundTrace(trace, "tab activation settle done", { tabId });
+    }
+  }
+
+  markBackgroundTrace(trace, "paste message start", { tabId, destination: destinationId });
+  const pasteResult = await pasteIntoDestinationTab(tabId, destinationId, destination, text, transferId, trace);
+  markBackgroundTrace(trace, "paste message done", { tabId, responseTiming: pasteResult?.timing || null });
+  return pasteResult;
 }
 
 async function prepareDestination(destinationId, transferId = null) {
@@ -929,8 +973,9 @@ function getPlatformFromUrl(url) {
 
   try {
     const hostname = new URL(url).hostname;
-    return Object.entries(DESTINATION_HOSTS).find(([, hosts]) => {
-      return hosts.some((host) => hostname === host || hostname.endsWith(`.${host}`));
+    return Object.entries(DESTINATION_HOST_RULES).find(([, rules]) => {
+      if ((rules.exact || []).includes(hostname)) return true;
+      return (rules.domains || []).some((host) => hostname === host || hostname.endsWith(`.${host}`));
     })?.[0] || null;
   } catch {
     return null;

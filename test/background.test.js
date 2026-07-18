@@ -72,6 +72,110 @@ function loadBackgroundForSummaryTest(fetchImpl) {
   };
 }
 
+function loadBackgroundForTransferTest({
+  preparedTab,
+  sendMessageImpl,
+  firstCreatedTabId = 100
+} = {}) {
+  let messageListener = null;
+  let nextCreatedTabId = firstCreatedTabId;
+  const operations = {
+    created: [],
+    gotten: [],
+    sent: [],
+    updated: []
+  };
+  const event = { addListener: () => {} };
+  const fastSetTimeout = (callback, _delay, ...args) => setTimeout(callback, 0, ...args);
+  const sandbox = {
+    AbortController,
+    URL,
+    clearTimeout,
+    console: { debug() {}, error() {}, log() {}, warn() {} },
+    fetch: async () => { throw new Error("fetch is not expected in transfer tests"); },
+    performance: { now: () => Date.now() },
+    setTimeout: fastSetTimeout,
+    chrome: {
+      action: {
+        onClicked: event,
+        setBadgeBackgroundColor: async () => {},
+        setBadgeText: async () => {}
+      },
+      alarms: {
+        clear: async () => true,
+        create: () => {},
+        onAlarm: event
+      },
+      runtime: {
+        onInstalled: event,
+        onStartup: event,
+        onMessage: {
+          addListener(listener) {
+            messageListener = listener;
+          }
+        }
+      },
+      scripting: { executeScript: async () => {} },
+      storage: {
+        local: {
+          get: async () => ({}),
+          set: async () => {}
+        },
+        onChanged: event
+      },
+      tabs: {
+        create: async (options) => {
+          const tab = { id: nextCreatedTabId++, url: options.url, windowId: 1 };
+          operations.created.push({ options, tab });
+          return tab;
+        },
+        get: async (tabId) => {
+          operations.gotten.push(tabId);
+          if (!preparedTab) throw new Error(`No tab with id: ${tabId}`);
+          return preparedTab;
+        },
+        query: async () => [],
+        sendMessage: async (tabId, message) => {
+          operations.sent.push({ tabId, message });
+          return sendMessageImpl ? sendMessageImpl(tabId, message) : { ok: true };
+        },
+        update: async (tabId, options) => {
+          operations.updated.push({ tabId, options });
+          return { id: tabId, windowId: 1 };
+        }
+      },
+      windows: { update: async () => ({}) }
+    }
+  };
+
+  vm.createContext(sandbox);
+  new vm.Script(`${source}\n;globalThis.__backgroundTestHooks = { getPlatformFromUrl };`, {
+    filename: "extension/background.js"
+  }).runInContext(sandbox);
+  assert.ok(messageListener, "background transfer listener was registered");
+
+  return {
+    operations,
+    getPlatformFromUrl: sandbox.__backgroundTestHooks.getPlatformFromUrl,
+    sendTransfer(destination, preparedTabId = null) {
+      return new Promise((resolve, reject) => {
+        const keepsChannelOpen = messageListener(
+          {
+            type: "TRANSFER_TO_DESTINATION",
+            destination,
+            text: "CONTEXT CARRY — READY TO PASTE\nUseful transfer context",
+            preparedTabId,
+            transferId: "transfer-test"
+          },
+          {},
+          resolve
+        );
+        if (keepsChannelOpen !== true) reject(new Error("transfer listener did not keep the response channel open"));
+      });
+    }
+  };
+}
+
 test("extension sends each summary job to the backend only once", () => {
   assert.match(source, /const SUMMARY_BACKEND_TIMEOUT_MS = 210000/);
   assert.doesNotMatch(source, /SUMMARY_BACKEND_ATTEMPTS|SUMMARY_BACKEND_RETRY_BUDGET_MS/);
@@ -89,6 +193,66 @@ test("destination preconnect and warmup never include conversation content", () 
   assert.match(warmupSource, /pingTab\(tabId\)/);
   assert.match(source, /sendMessage\(tabId, \{ type: "CONTEXT_GENERATOR_PING" \}\)/);
   assert.doesNotMatch(warmupSource, /SUMMARIZE_WITH_BACKEND|conversationText|summary|PASTE_CONTEXT/);
+});
+
+test("prepared destination is reused only while it remains on the selected platform", async () => {
+  const harness = loadBackgroundForTransferTest({
+    preparedTab: { id: 41, url: "https://example.com/user-navigated-away", windowId: 1 },
+    sendMessageImpl: async () => ({ ok: true })
+  });
+
+  const response = await harness.sendTransfer("chatgpt", 41);
+
+  assert.equal(response.ok, true);
+  assert.deepEqual(harness.operations.gotten, [41]);
+  assert.equal(harness.operations.created.length, 1);
+  assert.equal(harness.operations.sent.some(({ tabId }) => tabId === 41), false);
+  assert.deepEqual(harness.operations.sent.map(({ tabId }) => tabId), [100]);
+});
+
+test("prepared-tab recovery opens at most one fresh destination", async () => {
+  const harness = loadBackgroundForTransferTest({
+    preparedTab: { id: 41, url: "https://chatgpt.com/", windowId: 1 },
+    sendMessageImpl: async (tabId) => {
+      if (tabId === 41) throw new Error("Prepared tab message failed");
+      return { ok: false, error: "Fresh editor unavailable" };
+    }
+  });
+
+  const response = await harness.sendTransfer("chatgpt", 41);
+
+  assert.equal(response.ok, false);
+  assert.equal(harness.operations.created.length, 1);
+  assert.deepEqual(harness.operations.sent.map(({ tabId }) => tabId), [41, 100]);
+});
+
+test("fresh ChatGPT recovery uses the same activation settle as the normal path", async () => {
+  const harness = loadBackgroundForTransferTest({
+    preparedTab: { id: 41, url: "https://chatgpt.com/", windowId: 1 },
+    sendMessageImpl: async (tabId) => {
+      if (tabId === 41) throw new Error("Prepared tab message failed");
+      return { ok: true, timing: { pasteMs: 5 } };
+    }
+  });
+
+  const response = await harness.sendTransfer("chatgpt", 41);
+
+  assert.equal(response.ok, true);
+  assert.equal(harness.operations.created.length, 1);
+  const freshOpenIndex = response.marks.findIndex(({ label }) => label === "fresh fallback tab open done");
+  const recoveryMarks = response.marks.slice(freshOpenIndex + 1).map(({ label }) => label);
+  assert.ok(freshOpenIndex >= 0);
+  assert.ok(recoveryMarks.includes("tab activation settle start"));
+  assert.ok(recoveryMarks.includes("tab activation settle done"));
+});
+
+test("ordinary OpenAI pages are never classified as ChatGPT", () => {
+  const harness = loadBackgroundForTransferTest();
+
+  assert.equal(harness.getPlatformFromUrl("https://chatgpt.com/c/123"), "chatgpt");
+  assert.equal(harness.getPlatformFromUrl("https://chat.openai.com/c/123"), "chatgpt");
+  assert.equal(harness.getPlatformFromUrl("https://platform.openai.com/docs"), null);
+  assert.equal(harness.getPlatformFromUrl("https://openai.com/research"), null);
 });
 
 test("backend errors expose only bounded user-safe messages", () => {
