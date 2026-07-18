@@ -1,6 +1,8 @@
-const MAX_CONVERSATION_CHARS = 210000;
-const MAX_CONVERSATION_BYTES = 840000;
-const MAX_REQUEST_BYTES = 1000000;
+const MAX_CONVERSATION_CHARS = 350000;
+const MAX_CONVERSATION_BYTES = 1400000;
+// JSON escaping can make the request body larger than the UTF-8 transcript.
+// Keep enough headroom for the full conversation while staying below Vercel's 4.5 MB body limit.
+const MAX_REQUEST_BYTES = 2200000;
 const CLIENT_HEADER_NAME = "x-cap-context-client";
 const CLIENT_HEADER_VALUE = "cap-context-extension/1";
 const RATE_LIMIT_MINUTE_MS = 60000;
@@ -242,6 +244,7 @@ function resetRequestSecurityForTests() {
 
 module.exports = {
   MAX_CONVERSATION_CHARS,
+  MAX_CONVERSATION_BYTES,
   MAX_REQUEST_BYTES,
   RATE_LIMIT_MAX_PER_MINUTE,
   RATE_LIMIT_MAX_CONCURRENT,

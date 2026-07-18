@@ -4,6 +4,7 @@ const test = require("node:test");
 const summarize = require("../api/summarize.js");
 const {
   MAX_CONVERSATION_CHARS,
+  MAX_CONVERSATION_BYTES,
   MAX_REQUEST_BYTES,
   RATE_LIMIT_MAX_PER_MINUTE,
   RATE_LIMIT_MAX_CONCURRENT,
@@ -112,11 +113,25 @@ test("summary endpoint accepts the exact pre-marker Chrome worker request shape"
 });
 
 test("backend schema accepts exactly one conversation string at the canonical limit", () => {
+  assert.equal(MAX_CONVERSATION_CHARS, 350000);
+  assert.equal(MAX_CONVERSATION_BYTES, 1400000);
+  assert.equal(MAX_REQUEST_BYTES, 2200000);
+
   const exactLimit = validateSummarizeRequest(makeRequest({
     body: { conversation: "x".repeat(MAX_CONVERSATION_CHARS) }
   }));
   assert.equal(exactLimit.ok, true);
-  assert.equal(exactLimit.conversation.length, 210000);
+  assert.equal(exactLimit.conversation.length, 350000);
+
+  const multibyteLimit = validateSummarizeRequest(makeRequest({
+    body: { conversation: "漢".repeat(MAX_CONVERSATION_CHARS) }
+  }));
+  assert.equal(multibyteLimit.ok, true);
+
+  const jsonEscapedLimit = validateSummarizeRequest(makeRequest({
+    body: { conversation: "\u0001".repeat(MAX_CONVERSATION_CHARS) }
+  }));
+  assert.equal(jsonEscapedLimit.ok, true);
 
   for (const body of [
     null,

@@ -61,8 +61,8 @@
   const SUMMARY_RETRY_ERROR_TITLE = "Try again";
   const SUMMARY_RETRY_ERROR_MESSAGE = "Try again right now. We might have made a mistake. It almost never happens the second time.";
   // Keep this aligned with api/request-security.js so unsupported captures never leave the extension.
-  const MAX_BACKEND_CONVERSATION_CHARS = 210000;
-  const OVERSIZED_CONVERSATION_ERROR_MESSAGE = "Conversation exceeds the supported 210,000 character limit";
+  const MAX_BACKEND_CONVERSATION_CHARS = 350000;
+  const OVERSIZED_CONVERSATION_ERROR_MESSAGE = "Conversation exceeds the supported 350,000 character limit";
   const CONVERSATION_SCRAPE_RETRY_TIMEOUT_MS = 1800;
   const CONVERSATION_SCRAPE_RETRY_INTERVAL_MS = 140;
   const SOURCE_SCROLL_STABLE_TIMEOUT_MS = 1800;

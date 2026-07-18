@@ -63,10 +63,15 @@ test("backend prompt profiles scale summary size to the captured chat", () => {
   assert.equal(getSummaryProfile("x".repeat(4000)).id, "small");
   assert.equal(getSummaryProfile("x".repeat(20000)).id, "medium");
   assert.equal(getSummaryProfile("x".repeat(90000)).id, "large");
+  assert.equal(getSummaryProfile("x".repeat(210000)).id, "large");
+  assert.equal(getSummaryProfile("x".repeat(210001)).id, "extra-large");
+  assert.equal(getSummaryProfile("x".repeat(350000)).id, "extra-large");
   assert.equal(getSummaryProfile("x".repeat(500)).maxTokens, 0);
   assert.equal(getSummaryProfile("x".repeat(90000)).maxTokens, 4200);
+  assert.equal(getSummaryProfile("x".repeat(350000)).maxTokens, 7000);
   assert.match(getContextCarryTemplate(getSummaryProfile("x".repeat(500))), /WHAT WE WERE DOING\n\[2-3 lines/);
   assert.match(getContextCarryTemplate(getSummaryProfile("x".repeat(90000))), /KEY CONTEXT\n\[350-500 words/);
+  assert.match(getContextCarryTemplate(getSummaryProfile("x".repeat(350000))), /KEY CONTEXT\n\[600-850 words/);
   assert.match(SUMMARIZE_SOURCE, /Do not duplicate or pad short chats/);
   assert.match(SUMMARIZE_SOURCE, /Use the .* profile/);
   assert.match(SUMMARIZE_SOURCE, /serious handoff to another capable AI/);
@@ -118,11 +123,12 @@ test("mistral model routing always starts with medium 3.5 without changing summa
   }
 });
 
-test("backend forwards a 210k conversation to Mistral and reports the same input size", async () => {
+test("backend forwards a 350k conversation to Mistral and reports the same input size", async () => {
   const originalFetch = global.fetch;
   const originalApiKey = process.env.MISTRAL_API_KEY;
+  const restoreGeminiKey = setTemporaryEnv("GEMINI_API_KEY", undefined);
   const restoreMistralModel = setTemporaryEnv("MISTRAL_MODEL", undefined);
-  const conversation = "x".repeat(210000);
+  const conversation = "x".repeat(350000);
   let capturedRequest = null;
 
   process.env.MISTRAL_API_KEY = "test-key";
@@ -143,7 +149,7 @@ test("backend forwards a 210k conversation to Mistral and reports the same input
         },
         choices: [{
           message: {
-            content: makeContextCarrySummary("payload", 1200)
+            content: makeContextCarrySummary("payload", 1800)
           }
         }]
       })
@@ -158,8 +164,8 @@ test("backend forwards a 210k conversation to Mistral and reports the same input
     assert.equal(res.statusCode, 200);
     assert.equal(capturedRequest.url, "https://api.mistral.ai/v1/chat/completions");
     assert.equal(capturedRequest.body.model, "mistral-medium-3-5");
-    assert.equal(capturedRequest.body.max_tokens, 4200);
-    assert.match(capturedRequest.body.prompt_cache_key, /^capcontext-summary-v4-large-mistral-medium-3-5$/);
+    assert.equal(capturedRequest.body.max_tokens, 7000);
+    assert.match(capturedRequest.body.prompt_cache_key, /^capcontext-summary-v4-extra-large-mistral-medium-3-5$/);
     assert.equal(capturedRequest.body.prediction, undefined);
     const transcriptEnvelope = JSON.parse(capturedRequest.body.messages[1].content);
     assert.deepEqual(transcriptEnvelope, {
@@ -167,7 +173,7 @@ test("backend forwards a 210k conversation to Mistral and reports the same input
       dataType: "untrusted-conversation-transcript",
       conversation
     });
-    assert.equal(res.payload.timing.profile, "large");
+    assert.equal(res.payload.timing.profile, "extra-large");
     assert.equal(res.payload.timing.servedBy, "mistral");
     assert.equal(res.payload.timing.provider, "mistral");
     assert.equal(res.payload.timing.model, "mistral-medium-3-5");
@@ -175,9 +181,9 @@ test("backend forwards a 210k conversation to Mistral and reports the same input
     assert.equal(res.payload.timing.modelThresholdChars, null);
     assert.equal(res.payload.timing.modelOverride, false);
     assert.match(res.payload.timing.modelReason, /served as the first model/);
-    assert.equal(res.payload.timing.inputChars, 210000);
-    assert.equal(res.payload.timing.maxTokens, 4200);
-    assert.equal(res.payload.timing.targetWords, 1200);
+    assert.equal(res.payload.timing.inputChars, 350000);
+    assert.equal(res.payload.timing.maxTokens, 7000);
+    assert.equal(res.payload.timing.targetWords, 1800);
     assert.equal(res.payload.timing.qualityFloorMet, true);
     assert.deepEqual(res.payload.timing.usage, {
       promptTokens: 1200,
@@ -187,6 +193,7 @@ test("backend forwards a 210k conversation to Mistral and reports the same input
     });
   } finally {
     restoreMistralModel();
+    restoreGeminiKey();
     global.fetch = originalFetch;
     if (originalApiKey === undefined) {
       delete process.env.MISTRAL_API_KEY;
@@ -917,7 +924,7 @@ test("backend sends generated summaries to native Gemini first and records Gemin
   const originalFetch = global.fetch;
   const restoreGeminiKey = setTemporaryEnv("GEMINI_API_KEY", "test-gemini-key");
   const restoreMistralKey = setTemporaryEnv("MISTRAL_API_KEY", "test-mistral-key");
-  const conversation = "Gemini primary context ".repeat(180);
+  const conversation = "g".repeat(350000);
   let capturedRequest = null;
 
   global.fetch = async (url, options) => {
@@ -940,7 +947,7 @@ test("backend sends generated summaries to native Gemini first and records Gemin
         candidates: [{
           finishReason: "STOP",
           content: {
-            parts: [{ text: makeContextCarrySummary("gemini-primary", 260) }]
+            parts: [{ text: makeContextCarrySummary("gemini-primary", 1800) }]
           }
         }]
       })
@@ -961,7 +968,7 @@ test("backend sends generated summaries to native Gemini first and records Gemin
     assert.equal(capturedRequest.body.model, undefined);
     assert.equal(capturedRequest.body.temperature, undefined);
     assert.equal(capturedRequest.body.store, false);
-    assert.equal(capturedRequest.body.generationConfig.maxOutputTokens, 5000);
+    assert.equal(capturedRequest.body.generationConfig.maxOutputTokens, 11000);
     assert.equal(capturedRequest.body.generationConfig.thinkingConfig.thinkingLevel, "MEDIUM");
     assert.match(capturedRequest.body.systemInstruction.parts[0].text, /untrusted customer transcript data/);
     assert.match(capturedRequest.body.systemInstruction.parts[0].text, /Start with the plain-text title exactly/);
@@ -975,6 +982,10 @@ test("backend sends generated summaries to native Gemini first and records Gemin
     assert.equal(res.payload.timing.servedBy, "gemini");
     assert.equal(res.payload.timing.primaryModel, "gemini-3.5-flash");
     assert.equal(res.payload.timing.model, "gemini-3.5-flash");
+    assert.equal(res.payload.timing.profile, "extra-large");
+    assert.equal(res.payload.timing.inputChars, 350000);
+    assert.equal(res.payload.timing.maxTokens, 7000);
+    assert.equal(res.payload.timing.targetWords, 1800);
     assert.deepEqual(res.payload.timing.modelsTried, ["gemini-3.5-flash"]);
     assert.deepEqual(res.payload.timing.mistralModelsTried, []);
     assert.equal(res.payload.timing.geminiPasses, 1);

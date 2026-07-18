@@ -23,7 +23,7 @@ Production deploys from `master` to `https://context-generator-five.vercel.app/a
 
 The root `index.html` uses relative assets, has no build step or runtime API dependency, lazy-loads below-fold images, and respects reduced motion. Its public install path is the Chrome Web Store for Chrome and Brave. The interactive handoff console is local illustration only and never captures a conversation or starts a transfer.
 
-Marketing claims must match production: Claude, ChatGPT, Gemini, Grok, and DeepSeek support; a 210,000-character conversation limit; no capture or provider processing before destination selection; 24-hour local raw-transcript diagnostics; and no automatic Send action. `index.legacy-2026-07-15.html` is an inactive archive. `cap-context-extension.zip` is a release/developer artifact, must contain the contents of `extension/` with `manifest.json` at its root, and must be regenerated after tracked extension changes.
+Marketing claims must match production: Claude, ChatGPT, Gemini, Grok, and DeepSeek support; a 350,000-character conversation limit; no capture or provider processing before destination selection; 24-hour local raw-transcript diagnostics; and no automatic Send action. `index.legacy-2026-07-15.html` is an inactive archive. `cap-context-extension.zip` is a release/developer artifact, must contain the contents of `extension/` with `manifest.json` at its root, and must be regenerated after tracked extension changes.
 
 ## Platforms And Startup
 
@@ -37,7 +37,7 @@ One shared content script handles source and destination behavior. A versioned l
 2. Every icon-triggered or picker-triggered transfer intent creates a random attempt id and queues a metadata-only `started / intent_started` event before the running-transfer and empty-chat guards. A zero-turn chat then records `failed / no_conversation` while retaining `intent_started` as its last stage, and shows `Nothing to carry yet` without handoff UI, countdown, or destination tab.
 3. A valid transfer shows the handoff card and opens the destination inactive while capture continues. Its `Capturing chat`, `Summarizing`, and `Pasting into <destination>` states advance only from real pipeline marks. Capture progress uses existing sweep geometry; summary activity is display-only and capped below completion until the real summary-done mark. The fixed 30-second countdown becomes `Almost done, don't cancel now` after expiry. UI animation never gates work.
 4. Capture prepares the source, performs the bounded rendered-window sweep described below, and serializes role-labeled turns without truncation.
-5. Input above 210,000 characters stops locally before `SUMMARIZE_WITH_BACKEND`; in-limit input creates one backend summary job.
+5. Input above 350,000 characters stops locally before `SUMMARIZE_WITH_BACKEND`; in-limit input creates one backend summary job.
 6. Identical concurrent jobs may share one in-flight promise. Up to eight exact summary results are cached in service-worker memory for two minutes, including their original provider/model/fallback/usage metadata. A cache hit reports zero current summary latency while retaining and explicitly labeling the original generation metadata. This is not warm summarization.
 7. The result is pasted into the prepared destination. Missing or failed prepared tabs retry in a fresh destination tab. ChatGPT adds activation settling and post-paste stability verification.
 8. Verified paste focuses the editor but never clicks Send. If generated context cannot be transferred, the manual-copy dialog preserves it.
@@ -56,7 +56,7 @@ ChatGPT resolves one authoritative conversation scroll root by walking upward fr
 
 Settled virtual windows are sequence-aligned against all accumulated turns so interior additions and sliding windows merge in position. Final selection starts from the quick capture, merges swept turns into that baseline, replaces a matched turn only with longer text, and cannot downgrade it with a shorter rendering. ChatGPT carries its stable `conversation-turn-*` identity through snapshot alignment and final serialization: repeated text from different turn ids is preserved, while repeated renderings of the same turn id collapse. Platforms without a stable turn id retain the conservative exact role-and-text safety pass.
 
-Capture preserves the complete middle, leaves the source at its final capture position, and serializes role-labeled turns only. The extension and backend independently enforce the 210,000-character limit. Sweep diagnostics record start, each advance, geometry/turn counts, and the final exit reason.
+Capture preserves the complete middle, leaves the source at its final capture position, and serializes role-labeled turns only. The extension and backend independently enforce the 350,000-character limit. Sweep diagnostics record start, each advance, geometry/turn counts, and the final exit reason.
 
 ## Summary Profiles And Provider Chain
 
@@ -67,8 +67,9 @@ Input at or below 1,200 characters uses `local-direct`: the backend builds the C
 | `small` | 1,201-8,000 | about 350 words | 1,000 tokens |
 | `medium` | 8,001-60,000 | about 700 words | 1,900 tokens |
 | `large` | 60,001-210,000 | about 1,200 words | 4,200 tokens |
+| `extra-large` | 210,001-350,000 | about 1,800 words | 7,000 tokens |
 
-The large profile's 1,100-word quality floor is diagnostic only. There is no expansion pass.
+The large and extra-large profiles' 1,100- and 1,600-word quality floors are diagnostic only. There is no expansion pass.
 
 Each non-tiny transfer creates one backend job. Transient failures and invalid output may advance through:
 
@@ -96,7 +97,7 @@ Normalization may remove fences/footer noise and canonicalize an otherwise valid
 
 Only `POST` and valid extension preflight `OPTIONS` are accepted. CORS reflects syntactically valid `chrome-extension://` and `moz-extension://` origins only. Valid extension-origin requests may omit `X-Cap-Context-Client: cap-context-extension/1` for compatibility with already-running workers; originless or `Origin: null` Firefox requests require it. The marker is compatibility metadata, not authentication.
 
-JSON must contain exactly one non-empty string field, `conversation`. The endpoint rejects extra fields, invalid JSON/types, non-JSON content, bodies above 1,000,000 bytes, conversations above 210,000 JavaScript characters, and conversation UTF-8 payloads above 840,000 bytes before provider work.
+JSON must contain exactly one non-empty string field, `conversation`. The endpoint rejects extra fields, invalid JSON/types, non-JSON content, bodies above 2,200,000 bytes, conversations above 350,000 JavaScript characters, and conversation UTF-8 payloads above 1,400,000 bytes before provider work.
 
 Instance-local controls allow 8 requests per observed client IP per minute, 40 per hour, and 8 concurrent jobs per warm function instance. They are not a global durable quota. Provider failures become bounded public messages; raw provider response bodies are not exposed or logged.
 

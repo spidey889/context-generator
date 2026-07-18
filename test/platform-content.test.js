@@ -7,8 +7,9 @@ const { webcrypto } = require("node:crypto");
 
 const SOURCE_PATH = path.join(__dirname, "..", "extension", "platform-content.js");
 const MANIFEST_PATH = path.join(__dirname, "..", "extension", "manifest.json");
+const PLATFORM_CONTENT_SOURCE = fs.readFileSync(SOURCE_PATH, "utf8");
 const COMPILED_PLATFORM_CONTENT_SCRIPT = new vm.Script(
-  fs.readFileSync(SOURCE_PATH, "utf8"),
+  PLATFORM_CONTENT_SOURCE,
   { filename: SOURCE_PATH }
 );
 const virtualSweepTests = [];
@@ -16,6 +17,11 @@ const virtualSweepTests = [];
 function virtualSweepTest(name, fn) {
   virtualSweepTests.push({ name, fn });
 }
+
+test("extension enforces the 350k client cap before backend summary", () => {
+  assert.match(PLATFORM_CONTENT_SOURCE, /MAX_BACKEND_CONVERSATION_CHARS = 350000/);
+  assert.match(PLATFORM_CONTENT_SOURCE, /supported 350,000 character limit/);
+});
 
 let nextOrder = 1;
 

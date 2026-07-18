@@ -98,7 +98,7 @@ const SUMMARY_PROFILES = [
   },
   {
     id: "large",
-    maxInputChars: Infinity,
+    maxInputChars: 210000,
     targetWords: 1200,
     minWords: 1100,
     maxTokens: 4200,
@@ -110,6 +110,22 @@ const SUMMARY_PROFILES = [
       decisions: "180-280 words in compact bullets: every important user-made or user-accepted decision, user-deferred choice, accepted tradeoff, accepted risk, and reason when available",
       questions: "100-180 words in compact bullets: unresolved risks, validation gaps, review concerns, things deferred by the user, or None only when truly nothing remains",
       context: "350-500 words in dense bullets: exact files, functions, constants, commands, errors, tests, deployment state, APIs, model IDs, payload sizes, user constraints, tone/copy requirements, and anything that prevents repeating work"
+    }
+  },
+  {
+    id: "extra-large",
+    maxInputChars: Infinity,
+    targetWords: 1800,
+    minWords: 1600,
+    maxTokens: 7000,
+    sectionBudget: "WHO I AM 100-180 words; WHAT WE WERE DOING 260-360; WHERE WE LEFT OFF 180-260; DECISIONS MADE 260-400; OPEN QUESTIONS 160-260; KEY CONTEXT 600-850; NEXT STEP exactly as instructed.",
+    templateHints: {
+      who: "100-180 words: user's name if mentioned, what they are building or trying to do, role/background/preferences that matter, and any durable context the next AI must know",
+      doing: "260-360 words: the actual task, product/repo/platform, why it mattered, what was tried or discussed, and the concrete direction the user wanted",
+      left: "180-260 words: exact stopping point, latest state, latest user instruction, current blocker or next validation point",
+      decisions: "260-400 words in compact bullets: every important user-made or user-accepted decision, user-deferred choice, accepted tradeoff, accepted risk, and reason when available",
+      questions: "160-260 words in compact bullets: unresolved risks, validation gaps, review concerns, things deferred by the user, or None only when truly nothing remains",
+      context: "600-850 words in dense bullets: exact files, functions, constants, commands, errors, tests, deployment state, APIs, model IDs, payload sizes, user constraints, tone/copy requirements, and anything that prevents repeating work"
     }
   }
 ];
@@ -753,7 +769,7 @@ ${headerRule}
 - Do not pad or write generic filler; every line should carry useful context.
 - Do not add the closing footer from SKILL.md: no "PASTE THIS AT THE TOP OF YOUR NEW CHAT" and no "Continue from where we left off."
 - The 🔁 NEXT STEP section must be exactly: ${DESTINATION_CONFIRMATION_INSTRUCTION}
-- Before finalizing, silently check the total word count. If this is a large profile and the output is below ${profile.minWords || 0} words, expand KEY CONTEXT, DECISIONS MADE, and OPEN QUESTIONS with concrete details from the transcript.
+- Before finalizing, silently check the total word count. If this profile has a non-zero minimum and the output is below ${profile.minWords || 0} words, expand KEY CONTEXT, DECISIONS MADE, and OPEN QUESTIONS with concrete details from the transcript.
 
 Required template:
 ${getContextCarryTemplate(profile, options)}`;

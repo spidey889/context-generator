@@ -29,7 +29,7 @@ Opening or closing the destination picker is UI-only. Capture and provider proce
 
 - Captures role-verified user and assistant turns while excluding extension UI, composers, empty-state prompts, and unrelated page content.
 - Handles virtualized long conversations without silently removing the middle.
-- Accepts up to 210,000 captured JavaScript characters; larger conversations stop with a visible error before a summary request is sent.
+- Accepts up to 350,000 captured JavaScript characters; larger conversations stop with a visible error before a summary request is sent.
 - Runs one backend summary job per transfer, with short exact-result deduplication and caching in the extension service worker.
 - Shows real Capturing, Summarizing, and Pasting stages during a handoff. Display-only progress never gates the actual transfer.
 - Focuses the destination after verified paste but never submits the message automatically.
@@ -44,6 +44,8 @@ Chats at or below 1,200 characters use the exact local-direct Context Carry path
 3. Mistral `mistral-large-2512`
 4. Mistral `ministral-3b-2512`
 5. Groq `llama-3.1-8b-instant`, when `GROQ_API_KEY` is configured
+
+Conversations above 210,000 characters use the extra-large profile, targeting about 1,800 words with a 7,000-token visible output cap.
 
 Every generated result must pass deterministic validation for the complete seven-section Context Carry contract before it can be pasted. Invalid or failed output advances through the existing fallback chain.
 
