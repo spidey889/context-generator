@@ -17,6 +17,10 @@ const PROGRESS_MIGRATION_SOURCE = fs.readFileSync(
   path.join(ROOT, "supabase", "migrations", "20260718113749_atomically_preserve_transfer_event_progress.sql"),
   "utf8"
 );
+const DAILY_USAGE_MIGRATION_SOURCE = fs.readFileSync(
+  path.join(ROOT, "supabase", "migrations", "20260718164011_add_anonymous_user_daily_usage.sql"),
+  "utf8"
+);
 const MANIFEST = JSON.parse(fs.readFileSync(path.join(ROOT, "extension", "manifest.json"), "utf8"));
 
 function loadTelemetryBackground(fetchImpl, initialStorage = {}) {
@@ -262,4 +266,30 @@ test("Supabase ingestion is write-only, authenticated by publishable key, and co
   assert.match(PROGRESS_MIGRATION_SOURCE, /revoke all on function public\.record_transfer_event/);
   assert.match(PROGRESS_MIGRATION_SOURCE, /to service_role/);
   assert.doesNotMatch(EDGE_FUNCTION_SOURCE, /console\.|conversation|summary|error\.message/);
+});
+
+test("Supabase maps anonymous installs to User N and exposes only simple daily usage metadata", () => {
+  assert.match(DAILY_USAGE_MIGRATION_SOURCE, /create table public\.analytics_users/);
+  assert.match(DAILY_USAGE_MIGRATION_SOURCE, /user_id bigint generated always as identity primary key/);
+  assert.match(DAILY_USAGE_MIGRATION_SOURCE, /install_id text not null unique/);
+  assert.match(DAILY_USAGE_MIGRATION_SOURCE, /after insert on public\.transfer_events/);
+  assert.match(DAILY_USAGE_MIGRATION_SOURCE, /on conflict \(install_id\) do nothing/);
+  assert.match(DAILY_USAGE_MIGRATION_SOURCE, /order by existing\.first_received_at, existing\.install_id/);
+  assert.match(DAILY_USAGE_MIGRATION_SOURCE, /create view public\.user_daily_usage\s+with \(security_invoker = true\)/);
+
+  const viewSource = DAILY_USAGE_MIGRATION_SOURCE.slice(
+    DAILY_USAGE_MIGRATION_SOURCE.indexOf("create view public.user_daily_usage"),
+    DAILY_USAGE_MIGRATION_SOURCE.indexOf("comment on view public.user_daily_usage")
+  );
+  assert.match(viewSource, /'User ' \|\| users\.user_id::text as user_name/);
+  assert.match(viewSource, /at time zone 'UTC'/);
+  assert.match(viewSource, /count\(\*\) as transfer_count/);
+  assert.match(viewSource, /array_agg\(events\.character_count/);
+  assert.match(viewSource, /sum\(events\.character_count\)/);
+  assert.doesNotMatch(viewSource, /install_id\s+as|first_seen|last_seen|conversation|summary/);
+
+  assert.match(DAILY_USAGE_MIGRATION_SOURCE, /alter table public\.analytics_users enable row level security/);
+  assert.match(DAILY_USAGE_MIGRATION_SOURCE, /revoke all privileges on table public\.analytics_users/);
+  assert.match(DAILY_USAGE_MIGRATION_SOURCE, /revoke all privileges on table public\.user_daily_usage/);
+  assert.match(DAILY_USAGE_MIGRATION_SOURCE, /grant select on table public\.user_daily_usage to service_role/);
 });
