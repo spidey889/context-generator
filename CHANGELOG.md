@@ -1,5 +1,7 @@
 # Changelog
 
+- 2026-07-19: Removed the remaining Grok-only floating-button jump during staged large-paste reflow. Grok now retains its previously verified outer composer while the editor and container geometry are briefly out of sync, and a Grok-only resize observer keeps placement aligned as the composer settles. Other platforms retain their existing composer selection and monitoring behavior; the regression simulates the transient inner-first reflow rather than only the final expanded state.
+
 - 2026-07-19: Fixed Grok-only floating-button placement after large pastes. Grok's expanded composer may now remain the placement surface up to 720px tall instead of being rejected by the shared 260px candidate limit and falling back to an inner editor. Claude, ChatGPT, Gemini, and DeepSeek retain their existing height boundary; a deterministic tall-composer regression now verifies Grok stays anchored beside its speed selector.
 
 - 2026-07-18: Added the closed telemetry failure reason `user_cancelled`. Closing the source AI tab during an active transfer now finalizes that attempt with this reason and preserves its last pipeline stage, separating a clear user-side cancellation from provider, timeout, reload, and other technical failures. No raw error or conversation data is added.

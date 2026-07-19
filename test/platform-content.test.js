@@ -209,6 +209,22 @@ class FakeHTMLInputElement {
 
 function loadPlatformContent(elements = [], hostname = "chatgpt.com", { expectSupported = true } = {}) {
   let hooks = null;
+  const resizeObservers = [];
+  class TestResizeObserver {
+    constructor(callback) {
+      this.callback = callback;
+      this.observed = [];
+      resizeObservers.push(this);
+    }
+
+    observe(element) {
+      this.observed.push(element);
+    }
+
+    disconnect() {
+      this.observed = [];
+    }
+  }
   const document = {
     body: new FakeElement({ tag: "body" }),
     documentElement: new FakeElement({ tag: "html" }),
@@ -266,12 +282,14 @@ function loadPlatformContent(elements = [], hostname = "chatgpt.com", { expectSu
     console,
     document,
     window,
+    getComputedStyle: window.getComputedStyle,
     chrome,
     crypto: webcrypto,
     Element: FakeElement,
     HTMLTextAreaElement: FakeHTMLTextAreaElement,
     HTMLInputElement: FakeHTMLInputElement,
     Node: { DOCUMENT_POSITION_PRECEDING: 2 },
+    ResizeObserver: TestResizeObserver,
     setTimeout,
     clearTimeout
   };
@@ -280,6 +298,7 @@ function loadPlatformContent(elements = [], hostname = "chatgpt.com", { expectSu
   COMPILED_PLATFORM_CONTENT_SCRIPT.runInContext(sandbox);
   if (expectSupported) {
     assert.ok(hooks, "platform-content test hooks were registered");
+    hooks.resizeObservers = resizeObservers;
   }
   return hooks;
 }
@@ -1811,6 +1830,43 @@ test("Grok keeps an expanded post-paste composer as the bubble placement surface
   assert.equal(surface, expandedComposer);
   assert.equal(placement.left, 570);
   assert.equal(placement.top, 457);
+});
+
+test("Grok retains its outer composer while a large paste reflows in stages", () => {
+  const input = new FakeElement({
+    attrs: { contenteditable: "true", role: "textbox" },
+    rect: { left: 160, right: 840, top: 150, bottom: 230, width: 680, height: 80 }
+  });
+  const editorWrap = new FakeElement({
+    rect: { left: 140, right: 860, top: 130, bottom: 250, width: 720, height: 120 }
+  });
+  const composer = new FakeElement({
+    rect: { left: 100, right: 1000, top: 100, bottom: 260, width: 900, height: 160 }
+  });
+  const fastSelector = new FakeElement({
+    tag: "button",
+    text: "Fast",
+    rect: { left: 720, right: 790, top: 210, bottom: 246, width: 70, height: 36 }
+  });
+
+  input.parentElement = editorWrap;
+  editorWrap.children = [input];
+  editorWrap.parentElement = composer;
+  composer.children = [editorWrap, fastSelector];
+  fastSelector.parentElement = composer;
+
+  const hooks = loadPlatformContent([input, editorWrap, composer, fastSelector], "grok.com");
+  assert.equal(hooks.findComposerSurfaceElement(input), composer);
+  hooks.reserveComposerSurface(composer);
+  hooks.syncGrokPlacementResizeMonitoring(input, composer);
+
+  // Grok grows the editor first. The outer composer is momentarily too short
+  // for the shared containment check, while the inner wrapper already fits.
+  input.rect = { left: 160, right: 840, top: 150, bottom: 550, width: 680, height: 400 };
+  editorWrap.rect = { left: 140, right: 860, top: 130, bottom: 570, width: 720, height: 440 };
+
+  assert.equal(hooks.findComposerSurfaceElement(input), composer);
+  assert.deepEqual(hooks.resizeObservers.at(-1).observed, [input, composer]);
 });
 
 test("versioned evaluation set gates capture completeness and fixture latency", () => {
