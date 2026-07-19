@@ -1,5 +1,7 @@
 # Changelog
 
+- 2026-07-19: Fixed Grok-only floating-button placement after large pastes. Grok's expanded composer may now remain the placement surface up to 720px tall instead of being rejected by the shared 260px candidate limit and falling back to an inner editor. Claude, ChatGPT, Gemini, and DeepSeek retain their existing height boundary; a deterministic tall-composer regression now verifies Grok stays anchored beside its speed selector.
+
 - 2026-07-18: Added the closed telemetry failure reason `user_cancelled`. Closing the source AI tab during an active transfer now finalizes that attempt with this reason and preserves its last pipeline stage, separating a clear user-side cancellation from provider, timeout, reload, and other technical failures. No raw error or conversation data is added.
 
 - 2026-07-18: Changed future Cap Context source releases from the previous permissive license to proprietary, all-rights-reserved distribution. Removed public-source, repository-stars, and contribution messaging from the current site, archived site, and repository documentation; marked the package unlicensed for npm reuse. Copies already received under the earlier license keep the permissions previously granted to those copies.

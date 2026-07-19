@@ -251,6 +251,7 @@ function loadPlatformContent(elements = [], hostname = "chatgpt.com", { expectSu
       window.scrollY = y ?? window.scrollY;
     },
     innerHeight: 720,
+    innerWidth: 1280,
     setTimeout,
     clearTimeout
   };
@@ -1777,6 +1778,39 @@ test("Gemini bubble anchors to the left of the Flash selector", () => {
   assert.equal(anchor, flash);
   assert.equal(placement.right, 208);
   assert.equal(placement.bottom, 15);
+});
+
+test("Grok keeps an expanded post-paste composer as the bubble placement surface", () => {
+  const input = new FakeElement({
+    attrs: { contenteditable: "true", role: "textbox" },
+    rect: { left: 160, right: 840, top: 150, bottom: 550, width: 680, height: 400 }
+  });
+  const editorWrap = new FakeElement({
+    rect: { left: 140, right: 860, top: 130, bottom: 570, width: 720, height: 440 }
+  });
+  const expandedComposer = new FakeElement({
+    rect: { left: 100, right: 1000, top: 100, bottom: 620, width: 900, height: 520 }
+  });
+  const fastSelector = new FakeElement({
+    tag: "button",
+    text: "Fast",
+    attrs: { "aria-label": "Speed selector" },
+    rect: { left: 720, right: 790, top: 560, bottom: 596, width: 70, height: 36 }
+  });
+
+  input.parentElement = editorWrap;
+  editorWrap.children = [input];
+  editorWrap.parentElement = expandedComposer;
+  expandedComposer.children = [editorWrap, fastSelector];
+  fastSelector.parentElement = expandedComposer;
+
+  const hooks = loadPlatformContent([input, editorWrap, expandedComposer, fastSelector], "grok.com");
+  const surface = hooks.findComposerSurfaceElement(input);
+  const placement = hooks.getGrokBubblePlacement(surface.getBoundingClientRect());
+
+  assert.equal(surface, expandedComposer);
+  assert.equal(placement.left, 570);
+  assert.equal(placement.top, 457);
 });
 
 test("versioned evaluation set gates capture completeness and fixture latency", () => {

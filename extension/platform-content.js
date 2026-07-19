@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-07-18-transfer-stage-telemetry";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-07-19-grok-tall-composer";
   const BUBBLE_ID = "context-generator-bubble";
   const OVERLAY_ID = "context-generator-overlay";
   const HANDOFF_SCRIM_ID = "context-generator-handoff-scrim";
@@ -298,6 +298,9 @@
       logoSize: 24,
       logo: "logos/grokwhitedownload__1_-removebg-preview.png",
       retryPaste: true,
+      // Grok expands the whole composer after large pastes; the shared 260px cap
+      // would reject that real surface and anchor the bubble to an inner editor.
+      maxComposerHeight: 720,
       inputSelectors: [
         "[data-testid='grokInput'][contenteditable='true']",
         "[data-testid='grok-input'][contenteditable='true']",
@@ -507,6 +510,8 @@
       getClaudeBubblePlacement,
       getGeminiBubblePlacement,
       findGeminiModelSelectorButton,
+      getGrokBubblePlacement,
+      findComposerSurfaceElement,
       prepareSourceForCapture,
       expandCollapsedConversationContent,
       getConversationTurns,
@@ -6125,11 +6130,12 @@
     if (!element || !rect || !inputRect || isContextGeneratorNode(element)) return false;
 
     const maxWidth = getMaxComposerSurfaceWidth();
+    const maxHeight = currentPlatform.maxComposerHeight || 260;
     return (
       rect.width >= 280 &&
       rect.width <= maxWidth &&
       rect.height >= 40 &&
-      rect.height <= 260 &&
+      rect.height <= maxHeight &&
       rect.left <= inputRect.left + 96 &&
       rect.right >= inputRect.right - 18 &&
       rect.top <= inputRect.top + 80 &&
