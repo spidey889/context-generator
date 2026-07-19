@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-07-19-grok-stable-composer";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-07-19-deepseek-stable-composer";
   const BUBBLE_ID = "context-generator-bubble";
   const OVERLAY_ID = "context-generator-overlay";
   const HANDOFF_SCRIM_ID = "context-generator-handoff-scrim";
@@ -350,6 +350,8 @@
       logo: "logos/deepseek-download__1_-removebg-preview.png",
       retryPaste: true,
       maxComposerWidth: 1140,
+      // DeepSeek also expands the whole composer after large pastes.
+      maxComposerHeight: 720,
       composerSelectors: [
         "div[class*='input-container' i]",
         "div[class*='chat-input' i]",
@@ -411,6 +413,8 @@
   let floatingButtonObserver = null;
   let grokPlacementResizeObserver = null;
   let grokPlacementResizeTargets = [];
+  let deepSeekPlacementResizeObserver = null;
+  let deepSeekPlacementResizeTargets = [];
   let floatingButtonMonitoringDisabled = false;
   let handoffCountdownTimer = null;
   let handoffCountdownHideTimer = null;
@@ -516,6 +520,7 @@
       findComposerSurfaceElement,
       reserveComposerSurface,
       syncGrokPlacementResizeMonitoring,
+      syncDeepSeekPlacementResizeMonitoring,
       prepareSourceForCapture,
       expandCollapsedConversationContent,
       getConversationTurns,
@@ -5359,6 +5364,7 @@
     const input = findPlatformInput();
     if (!bubble || !input) {
       stopGrokPlacementResizeMonitoring();
+      stopDeepSeekPlacementResizeMonitoring();
       return;
     }
 
@@ -5389,6 +5395,7 @@
 
     reserveComposerSurface(composerSurface);
     syncGrokPlacementResizeMonitoring(input, composerSurface);
+    syncDeepSeekPlacementResizeMonitoring(input, composerSurface);
 
     if (currentPlatform.id !== "chatgpt" && bubble.parentElement !== composerSurface) {
       composerSurface.appendChild(bubble);
@@ -6090,6 +6097,9 @@
     const retainedGrokSurface = getRetainedGrokComposerSurface(input);
     if (retainedGrokSurface) return retainedGrokSurface;
 
+    const retainedDeepSeekSurface = getRetainedDeepSeekComposerSurface(input);
+    if (retainedDeepSeekSurface) return retainedDeepSeekSurface;
+
     const candidates = getPlatformComposerCandidates(input, inputRect);
     let node = input.parentElement;
 
@@ -6116,6 +6126,29 @@
   function getRetainedGrokComposerSurface(input) {
     if (
       currentPlatform.id !== "grok" ||
+      !reservedComposerSurface ||
+      !reservedComposerSurface.contains?.(input) ||
+      isContextGeneratorNode(reservedComposerSurface)
+    ) {
+      return null;
+    }
+
+    const rect = reservedComposerSurface.getBoundingClientRect();
+    const maxWidth = getMaxComposerSurfaceWidth();
+    const maxHeight = currentPlatform.maxComposerHeight || 260;
+    return (
+      rect.width >= 280 &&
+      rect.width <= maxWidth &&
+      rect.height >= 40 &&
+      rect.height <= maxHeight &&
+      rect.bottom >= 0 &&
+      rect.top <= window.innerHeight
+    ) ? reservedComposerSurface : null;
+  }
+
+  function getRetainedDeepSeekComposerSurface(input) {
+    if (
+      currentPlatform.id !== "deepseek" ||
       !reservedComposerSurface ||
       !reservedComposerSurface.contains?.(input) ||
       isContextGeneratorNode(reservedComposerSurface)
@@ -6268,6 +6301,32 @@
     grokPlacementResizeObserver?.disconnect();
     grokPlacementResizeObserver = null;
     grokPlacementResizeTargets = [];
+  }
+
+  function syncDeepSeekPlacementResizeMonitoring(input, composerSurface) {
+    if (currentPlatform.id !== "deepseek" || typeof ResizeObserver === "undefined") {
+      stopDeepSeekPlacementResizeMonitoring();
+      return;
+    }
+
+    const nextTargets = [input, composerSurface].filter((element, index, all) => {
+      return element && all.indexOf(element) === index;
+    });
+    const targetsUnchanged =
+      nextTargets.length === deepSeekPlacementResizeTargets.length &&
+      nextTargets.every((element, index) => element === deepSeekPlacementResizeTargets[index]);
+    if (targetsUnchanged) return;
+
+    stopDeepSeekPlacementResizeMonitoring();
+    deepSeekPlacementResizeObserver = new ResizeObserver(() => scheduleFloatingButtonUpdate());
+    nextTargets.forEach((element) => deepSeekPlacementResizeObserver.observe(element));
+    deepSeekPlacementResizeTargets = nextTargets;
+  }
+
+  function stopDeepSeekPlacementResizeMonitoring() {
+    deepSeekPlacementResizeObserver?.disconnect();
+    deepSeekPlacementResizeObserver = null;
+    deepSeekPlacementResizeTargets = [];
   }
 
   function reserveBubbleSlot(actionBtn, input) {
@@ -6554,6 +6613,7 @@
       floatingButtonObserver = null;
     }
     stopGrokPlacementResizeMonitoring();
+    stopDeepSeekPlacementResizeMonitoring();
 
     window.removeEventListener("resize", scheduleFloatingButtonUpdate);
     document.removeEventListener("visibilitychange", scheduleFloatingButtonUpdate);

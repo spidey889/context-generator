@@ -1869,6 +1869,72 @@ test("Grok retains its outer composer while a large paste reflows in stages", ()
   assert.deepEqual(hooks.resizeObservers.at(-1).observed, [input, composer]);
 });
 
+test("DeepSeek keeps an expanded post-paste composer as the bubble placement surface", () => {
+  const input = new FakeElement({
+    attrs: { contenteditable: "true", role: "textbox" },
+    rect: { left: 160, right: 840, top: 150, bottom: 550, width: 680, height: 400 }
+  });
+  const editorWrap = new FakeElement({
+    rect: { left: 140, right: 860, top: 130, bottom: 570, width: 720, height: 440 }
+  });
+  const expandedComposer = new FakeElement({
+    rect: { left: 100, right: 1000, top: 100, bottom: 620, width: 900, height: 520 }
+  });
+  const attach = new FakeElement({
+    tag: "button",
+    attrs: { "aria-label": "Attach file" },
+    rect: { left: 720, right: 756, top: 560, bottom: 596, width: 36, height: 36 }
+  });
+  const send = new FakeElement({
+    tag: "button",
+    attrs: { "aria-label": "Send message" },
+    rect: { left: 780, right: 816, top: 560, bottom: 596, width: 36, height: 36 }
+  });
+
+  input.parentElement = editorWrap;
+  editorWrap.children = [input];
+  editorWrap.parentElement = expandedComposer;
+  expandedComposer.children = [editorWrap, attach, send];
+  attach.parentElement = expandedComposer;
+  send.parentElement = expandedComposer;
+
+  const hooks = loadPlatformContent([input, editorWrap, expandedComposer, attach, send], "chat.deepseek.com");
+  assert.equal(hooks.findComposerSurfaceElement(input), expandedComposer);
+});
+
+test("DeepSeek retains its outer composer while a large paste reflows in stages", () => {
+  const input = new FakeElement({
+    attrs: { contenteditable: "true", role: "textbox" },
+    rect: { left: 160, right: 840, top: 150, bottom: 230, width: 680, height: 80 }
+  });
+  const editorWrap = new FakeElement({
+    rect: { left: 140, right: 860, top: 130, bottom: 250, width: 720, height: 120 }
+  });
+  const composer = new FakeElement({
+    rect: { left: 100, right: 1000, top: 100, bottom: 260, width: 900, height: 160 }
+  });
+  const attach = new FakeElement({ tag: "button", attrs: { "aria-label": "Attach file" } });
+  const send = new FakeElement({ tag: "button", attrs: { "aria-label": "Send message" } });
+
+  input.parentElement = editorWrap;
+  editorWrap.children = [input];
+  editorWrap.parentElement = composer;
+  composer.children = [editorWrap, attach, send];
+  attach.parentElement = composer;
+  send.parentElement = composer;
+
+  const hooks = loadPlatformContent([input, editorWrap, composer, attach, send], "chat.deepseek.com");
+  assert.equal(hooks.findComposerSurfaceElement(input), composer);
+  hooks.reserveComposerSurface(composer);
+  hooks.syncDeepSeekPlacementResizeMonitoring(input, composer);
+
+  input.rect = { left: 160, right: 840, top: 150, bottom: 550, width: 680, height: 400 };
+  editorWrap.rect = { left: 140, right: 860, top: 130, bottom: 570, width: 720, height: 440 };
+
+  assert.equal(hooks.findComposerSurfaceElement(input), composer);
+  assert.deepEqual(hooks.resizeObservers.at(-1).observed, [input, composer]);
+});
+
 test("versioned evaluation set gates capture completeness and fixture latency", () => {
   const evaluation = JSON.parse(
     fs.readFileSync(path.join(__dirname, "..", "evaluation", "cases.json"), "utf8")

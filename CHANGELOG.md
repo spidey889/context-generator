@@ -1,5 +1,7 @@
 # Changelog
 
+- 2026-07-19: Applied the proven large-paste placement stabilization to DeepSeek only. DeepSeek now accepts its expanded composer up to 720px, retains the verified outer surface while editor/container geometry is briefly out of sync, and observes DeepSeek input/composer resizing during reflow. Grok's existing stabilization is unchanged, and Claude, ChatGPT, and Gemini retain their previous limits and monitoring paths; deterministic regressions cover both settled-tall and transient DeepSeek states.
+
 - 2026-07-19: Removed the remaining Grok-only floating-button jump during staged large-paste reflow. Grok now retains its previously verified outer composer while the editor and container geometry are briefly out of sync, and a Grok-only resize observer keeps placement aligned as the composer settles. Other platforms retain their existing composer selection and monitoring behavior; the regression simulates the transient inner-first reflow rather than only the final expanded state.
 
 - 2026-07-19: Fixed Grok-only floating-button placement after large pastes. Grok's expanded composer may now remain the placement surface up to 720px tall instead of being rejected by the shared 260px candidate limit and falling back to an inner editor. Claude, ChatGPT, Gemini, and DeepSeek retain their existing height boundary; a deterministic tall-composer regression now verifies Grok stays anchored beside its speed selector.
