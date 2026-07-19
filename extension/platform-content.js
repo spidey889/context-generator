@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-07-19-chatgpt-stable-composer";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-07-19-chatgpt-live-model-anchor";
   const BUBBLE_ID = "context-generator-bubble";
   const OVERLAY_ID = "context-generator-overlay";
   const HANDOFF_SCRIM_ID = "context-generator-handoff-scrim";
@@ -5664,12 +5664,29 @@
     return composerRect.bottom - Math.max(72, composerRect.height * 0.62);
   }
 
-  function findChatGptModelSelectorButton(composerSurface, composerRect) {
+  function findChatGptModelSelectorButton(composerSurface, composerRect, inputRect = null) {
     const root = composerSurface || document;
-    const rowTop = composerRect ? composerRect.bottom - Math.max(64, composerRect.height * 0.65) : window.innerHeight * 0.45;
-    const rowBottom = composerRect ? composerRect.bottom + 16 : window.innerHeight - BUBBLE_GAP;
-    const scopeLeft = composerRect ? composerRect.left - 12 : window.innerWidth * 0.22;
-    const scopeRight = composerRect ? composerRect.right + 12 : window.innerWidth - BUBBLE_GAP;
+    const hasInputScope = !composerRect && inputRect?.width > 0 && inputRect?.height > 0;
+    const rowTop = composerRect
+      ? composerRect.bottom - Math.max(64, composerRect.height * 0.65)
+      : hasInputScope
+        ? Math.max(BUBBLE_GAP, inputRect.bottom - 112)
+        : window.innerHeight * 0.45;
+    const rowBottom = composerRect
+      ? composerRect.bottom + 16
+      : hasInputScope
+        ? Math.min(window.innerHeight - BUBBLE_GAP, inputRect.bottom + 112)
+        : window.innerHeight - BUBBLE_GAP;
+    const scopeLeft = composerRect
+      ? composerRect.left - 12
+      : hasInputScope
+        ? Math.max(BUBBLE_GAP, inputRect.left - 96)
+        : window.innerWidth * 0.22;
+    const scopeRight = composerRect
+      ? composerRect.right + 12
+      : hasInputScope
+        ? Math.min(window.innerWidth - BUBBLE_GAP, inputRect.right + 96)
+        : window.innerWidth - BUBBLE_GAP;
 
     return Array.from(root.querySelectorAll("button, [role='button']"))
       .filter((button) => button.id !== BUBBLE_ID && !isContextGeneratorNode(button) && isVisible(button))
@@ -5752,7 +5769,12 @@
 
   function getChatGptFixedBubblePlacement(input) {
     const composerRect = getChatGptPlacementRect(input);
-    const modelButton = findChatGptModelSelectorButton(document, composerRect);
+    const inputRect = input.getBoundingClientRect();
+    // The input and model control move together during paste reflow. Search
+    // that live row first so a stale inner composer cannot exclude High.
+    const modelButton =
+      findChatGptModelSelectorButton(document, null, inputRect) ||
+      findChatGptModelSelectorButton(document, composerRect, inputRect);
 
     if (modelButton) {
       return getFixedBubblePlacementBesideRect(modelButton.getBoundingClientRect());
@@ -5770,7 +5792,6 @@
       return clampFixedBubblePlacement(composerRect.left + fallback.left, composerRect.top + fallback.top);
     }
 
-    const inputRect = input.getBoundingClientRect();
     return clampFixedBubblePlacement(
       inputRect.right - BUBBLE_SIZE - 112,
       inputRect.top + (inputRect.height - BUBBLE_SIZE) / 2
