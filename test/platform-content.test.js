@@ -1799,6 +1799,85 @@ test("Gemini bubble anchors to the left of the Flash selector", () => {
   assert.equal(placement.bottom, 15);
 });
 
+test("Gemini bubble anchors to the left of the Pro selector", () => {
+  const pro = new FakeElement({
+    tag: "button",
+    text: "Pro",
+    attrs: { "aria-label": "Gemini Pro model selector" },
+    rect: { left: 700, right: 750, top: 166, bottom: 202, width: 50, height: 36 }
+  });
+  const mic = new FakeElement({
+    tag: "button",
+    attrs: { "aria-label": "Microphone" },
+    rect: { left: 790, right: 826, top: 166, bottom: 202, width: 36, height: 36 }
+  });
+  const hooks = loadPlatformContent([pro, mic], "gemini.google.com");
+  const anchor = hooks.findGeminiModelSelectorButton(getClaudeComposerRect());
+  const placement = hooks.getGeminiBubblePlacement(getClaudeComposerRect(), anchor);
+
+  assert.equal(anchor, pro);
+  assert.equal(placement.right, 208);
+  assert.equal(placement.bottom, 15);
+});
+
+test("Gemini keeps an expanded post-paste composer as the bubble placement surface", () => {
+  const input = new FakeElement({
+    attrs: { contenteditable: "true", role: "textbox" },
+    rect: { left: 160, right: 840, top: 150, bottom: 550, width: 680, height: 400 }
+  });
+  const editorWrap = new FakeElement({
+    rect: { left: 140, right: 860, top: 130, bottom: 570, width: 720, height: 440 }
+  });
+  const expandedComposer = new FakeElement({
+    rect: { left: 100, right: 1000, top: 100, bottom: 620, width: 900, height: 520 }
+  });
+  const pro = new FakeElement({ tag: "button", text: "Pro" });
+  const mic = new FakeElement({ tag: "button", attrs: { "aria-label": "Microphone" } });
+
+  input.parentElement = editorWrap;
+  editorWrap.children = [input];
+  editorWrap.parentElement = expandedComposer;
+  expandedComposer.children = [editorWrap, pro, mic];
+  pro.parentElement = expandedComposer;
+  mic.parentElement = expandedComposer;
+
+  const hooks = loadPlatformContent([input, editorWrap, expandedComposer, pro, mic], "gemini.google.com");
+  assert.equal(hooks.findComposerSurfaceElement(input), expandedComposer);
+});
+
+test("Gemini retains its outer composer while a large paste reflows in stages", () => {
+  const input = new FakeElement({
+    attrs: { contenteditable: "true", role: "textbox" },
+    rect: { left: 160, right: 840, top: 150, bottom: 230, width: 680, height: 80 }
+  });
+  const editorWrap = new FakeElement({
+    rect: { left: 140, right: 860, top: 130, bottom: 250, width: 720, height: 120 }
+  });
+  const composer = new FakeElement({
+    rect: { left: 100, right: 1000, top: 100, bottom: 260, width: 900, height: 160 }
+  });
+  const pro = new FakeElement({ tag: "button", text: "Pro" });
+  const mic = new FakeElement({ tag: "button", attrs: { "aria-label": "Microphone" } });
+
+  input.parentElement = editorWrap;
+  editorWrap.children = [input];
+  editorWrap.parentElement = composer;
+  composer.children = [editorWrap, pro, mic];
+  pro.parentElement = composer;
+  mic.parentElement = composer;
+
+  const hooks = loadPlatformContent([input, editorWrap, composer, pro, mic], "gemini.google.com");
+  assert.equal(hooks.findComposerSurfaceElement(input), composer);
+  hooks.reserveComposerSurface(composer);
+  hooks.syncGeminiPlacementResizeMonitoring(input, composer);
+
+  input.rect = { left: 160, right: 840, top: 150, bottom: 550, width: 680, height: 400 };
+  editorWrap.rect = { left: 140, right: 860, top: 130, bottom: 570, width: 720, height: 440 };
+
+  assert.equal(hooks.findComposerSurfaceElement(input), composer);
+  assert.deepEqual(hooks.resizeObservers.at(-1).observed, [input, composer]);
+});
+
 test("Grok keeps an expanded post-paste composer as the bubble placement surface", () => {
   const input = new FakeElement({
     attrs: { contenteditable: "true", role: "textbox" },

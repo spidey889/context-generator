@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-07-19-deepseek-stable-composer";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-07-19-gemini-pro-stable-composer";
   const BUBBLE_ID = "context-generator-bubble";
   const OVERLAY_ID = "context-generator-overlay";
   const HANDOFF_SCRIM_ID = "context-generator-handoff-scrim";
@@ -255,6 +255,7 @@
       logo: "logos/gemini-download__1_-removebg-preview.png",
       retryPaste: true,
       maxComposerWidth: 1080,
+      maxComposerHeight: 720,
       composerSelectors: [
         "div[class*='input-area-container' i]",
         "div[class*='input-area' i]",
@@ -415,6 +416,8 @@
   let grokPlacementResizeTargets = [];
   let deepSeekPlacementResizeObserver = null;
   let deepSeekPlacementResizeTargets = [];
+  let geminiPlacementResizeObserver = null;
+  let geminiPlacementResizeTargets = [];
   let floatingButtonMonitoringDisabled = false;
   let handoffCountdownTimer = null;
   let handoffCountdownHideTimer = null;
@@ -521,6 +524,7 @@
       reserveComposerSurface,
       syncGrokPlacementResizeMonitoring,
       syncDeepSeekPlacementResizeMonitoring,
+      syncGeminiPlacementResizeMonitoring,
       prepareSourceForCapture,
       expandCollapsedConversationContent,
       getConversationTurns,
@@ -5365,6 +5369,7 @@
     if (!bubble || !input) {
       stopGrokPlacementResizeMonitoring();
       stopDeepSeekPlacementResizeMonitoring();
+      stopGeminiPlacementResizeMonitoring();
       return;
     }
 
@@ -5396,6 +5401,7 @@
     reserveComposerSurface(composerSurface);
     syncGrokPlacementResizeMonitoring(input, composerSurface);
     syncDeepSeekPlacementResizeMonitoring(input, composerSurface);
+    syncGeminiPlacementResizeMonitoring(input, composerSurface);
 
     if (currentPlatform.id !== "chatgpt" && bubble.parentElement !== composerSurface) {
       composerSurface.appendChild(bubble);
@@ -5933,8 +5939,8 @@
         const text = (element.innerText || element.textContent || "").toLowerCase();
         let score = 0;
 
-        if (/\bflash\b/.test(text)) score += 220;
-        if (/\bflash\b/.test(label)) score += 220;
+        if (/\b(?:flash|pro)\b/.test(text)) score += 220;
+        if (/\b(?:flash|pro)\b/.test(label)) score += 220;
         if (/\b(model|gemini|pro|thinking)\b/.test(label)) score += 36;
         if (rect.left >= composerRect.left + composerRect.width * 0.45) score += 16;
         if (rect.width >= 24 && rect.width <= 180) score += 10;
@@ -6100,6 +6106,9 @@
     const retainedDeepSeekSurface = getRetainedDeepSeekComposerSurface(input);
     if (retainedDeepSeekSurface) return retainedDeepSeekSurface;
 
+    const retainedGeminiSurface = getRetainedGeminiComposerSurface(input);
+    if (retainedGeminiSurface) return retainedGeminiSurface;
+
     const candidates = getPlatformComposerCandidates(input, inputRect);
     let node = input.parentElement;
 
@@ -6149,6 +6158,29 @@
   function getRetainedDeepSeekComposerSurface(input) {
     if (
       currentPlatform.id !== "deepseek" ||
+      !reservedComposerSurface ||
+      !reservedComposerSurface.contains?.(input) ||
+      isContextGeneratorNode(reservedComposerSurface)
+    ) {
+      return null;
+    }
+
+    const rect = reservedComposerSurface.getBoundingClientRect();
+    const maxWidth = getMaxComposerSurfaceWidth();
+    const maxHeight = currentPlatform.maxComposerHeight || 260;
+    return (
+      rect.width >= 280 &&
+      rect.width <= maxWidth &&
+      rect.height >= 40 &&
+      rect.height <= maxHeight &&
+      rect.bottom >= 0 &&
+      rect.top <= window.innerHeight
+    ) ? reservedComposerSurface : null;
+  }
+
+  function getRetainedGeminiComposerSurface(input) {
+    if (
+      currentPlatform.id !== "gemini" ||
       !reservedComposerSurface ||
       !reservedComposerSurface.contains?.(input) ||
       isContextGeneratorNode(reservedComposerSurface)
@@ -6327,6 +6359,32 @@
     deepSeekPlacementResizeObserver?.disconnect();
     deepSeekPlacementResizeObserver = null;
     deepSeekPlacementResizeTargets = [];
+  }
+
+  function syncGeminiPlacementResizeMonitoring(input, composerSurface) {
+    if (currentPlatform.id !== "gemini" || typeof ResizeObserver === "undefined") {
+      stopGeminiPlacementResizeMonitoring();
+      return;
+    }
+
+    const nextTargets = [input, composerSurface].filter((element, index, all) => {
+      return element && all.indexOf(element) === index;
+    });
+    const targetsUnchanged =
+      nextTargets.length === geminiPlacementResizeTargets.length &&
+      nextTargets.every((element, index) => element === geminiPlacementResizeTargets[index]);
+    if (targetsUnchanged) return;
+
+    stopGeminiPlacementResizeMonitoring();
+    geminiPlacementResizeObserver = new ResizeObserver(() => scheduleFloatingButtonUpdate());
+    nextTargets.forEach((element) => geminiPlacementResizeObserver.observe(element));
+    geminiPlacementResizeTargets = nextTargets;
+  }
+
+  function stopGeminiPlacementResizeMonitoring() {
+    geminiPlacementResizeObserver?.disconnect();
+    geminiPlacementResizeObserver = null;
+    geminiPlacementResizeTargets = [];
   }
 
   function reserveBubbleSlot(actionBtn, input) {
@@ -6614,6 +6672,7 @@
     }
     stopGrokPlacementResizeMonitoring();
     stopDeepSeekPlacementResizeMonitoring();
+    stopGeminiPlacementResizeMonitoring();
 
     window.removeEventListener("resize", scheduleFloatingButtonUpdate);
     document.removeEventListener("visibilitychange", scheduleFloatingButtonUpdate);
