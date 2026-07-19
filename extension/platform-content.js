@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-07-19-claude-stable-composer";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-07-19-chatgpt-stable-composer";
   const BUBBLE_ID = "context-generator-bubble";
   const OVERLAY_ID = "context-generator-overlay";
   const HANDOFF_SCRIM_ID = "context-generator-handoff-scrim";
@@ -216,6 +216,7 @@
       pasteVerifyTimeoutMs: CHATGPT_PASTE_VERIFY_TIMEOUT_MS,
       pasteStabilityMs: CHATGPT_PASTE_STABILITY_MS,
       maxComposerWidth: 1120,
+      maxComposerHeight: 720,
       composerSelectors: [
         "form",
         "div[class*='composer' i]",
@@ -421,6 +422,9 @@
   let geminiPlacementResizeTargets = [];
   let claudePlacementResizeObserver = null;
   let claudePlacementResizeTargets = [];
+  let chatGptPlacementSurface = null;
+  let chatGptPlacementResizeObserver = null;
+  let chatGptPlacementResizeTargets = [];
   let floatingButtonMonitoringDisabled = false;
   let handoffCountdownTimer = null;
   let handoffCountdownHideTimer = null;
@@ -5374,6 +5378,7 @@
       stopDeepSeekPlacementResizeMonitoring();
       stopGeminiPlacementResizeMonitoring();
       stopClaudePlacementResizeMonitoring();
+      clearChatGptPlacementResizeMonitoring();
       return;
     }
 
@@ -5773,12 +5778,24 @@
   }
 
   function getChatGptPlacementRect(input) {
-    const composerSurface = findComposerSurfaceElement(input);
+    const composerSurface = getRetainedChatGptPlacementSurface(input) || findComposerSurfaceElement(input);
     const composerRect = composerSurface?.getBoundingClientRect();
-    if (isUsableChatGptPlacementRect(composerRect)) return composerRect;
+    if (isUsableChatGptPlacementRect(composerRect)) {
+      chatGptPlacementSurface = composerSurface;
+      syncChatGptPlacementResizeMonitoring(input, composerSurface);
+      return composerRect;
+    }
 
-    const formRect = input.closest("form")?.getBoundingClientRect();
-    if (isUsableChatGptPlacementRect(formRect)) return formRect;
+    const form = input.closest("form");
+    const formRect = form?.getBoundingClientRect();
+    if (isUsableChatGptPlacementRect(formRect)) {
+      chatGptPlacementSurface = form;
+      syncChatGptPlacementResizeMonitoring(input, form);
+      return formRect;
+    }
+
+    chatGptPlacementSurface = null;
+    syncChatGptPlacementResizeMonitoring(input, null);
 
     const inputRect = input.getBoundingClientRect();
     if (!inputRect || inputRect.width <= 0 || inputRect.height <= 0) return null;
@@ -5799,6 +5816,29 @@
       width: right - left,
       height: bottom - top
     };
+  }
+
+  function getRetainedChatGptPlacementSurface(input) {
+    if (
+      currentPlatform.id !== "chatgpt" ||
+      !chatGptPlacementSurface ||
+      !chatGptPlacementSurface.contains?.(input) ||
+      isContextGeneratorNode(chatGptPlacementSurface)
+    ) {
+      return null;
+    }
+
+    const rect = chatGptPlacementSurface.getBoundingClientRect();
+    const maxWidth = getMaxComposerSurfaceWidth();
+    const maxHeight = currentPlatform.maxComposerHeight || 260;
+    return (
+      rect.width >= 280 &&
+      rect.width <= maxWidth &&
+      rect.height >= 40 &&
+      rect.height <= maxHeight &&
+      rect.bottom >= 0 &&
+      rect.top <= window.innerHeight
+    ) ? chatGptPlacementSurface : null;
   }
 
   function isUsableChatGptPlacementRect(rect) {
@@ -6444,6 +6484,37 @@
     claudePlacementResizeTargets = [];
   }
 
+  function syncChatGptPlacementResizeMonitoring(input, composerSurface) {
+    if (currentPlatform.id !== "chatgpt" || typeof ResizeObserver === "undefined") {
+      stopChatGptPlacementResizeMonitoring();
+      return;
+    }
+
+    const nextTargets = [input, composerSurface].filter((element, index, all) => {
+      return element && all.indexOf(element) === index;
+    });
+    const targetsUnchanged =
+      nextTargets.length === chatGptPlacementResizeTargets.length &&
+      nextTargets.every((element, index) => element === chatGptPlacementResizeTargets[index]);
+    if (targetsUnchanged) return;
+
+    stopChatGptPlacementResizeMonitoring();
+    chatGptPlacementResizeObserver = new ResizeObserver(() => scheduleFloatingButtonUpdate());
+    nextTargets.forEach((element) => chatGptPlacementResizeObserver.observe(element));
+    chatGptPlacementResizeTargets = nextTargets;
+  }
+
+  function stopChatGptPlacementResizeMonitoring() {
+    chatGptPlacementResizeObserver?.disconnect();
+    chatGptPlacementResizeObserver = null;
+    chatGptPlacementResizeTargets = [];
+  }
+
+  function clearChatGptPlacementResizeMonitoring() {
+    stopChatGptPlacementResizeMonitoring();
+    chatGptPlacementSurface = null;
+  }
+
   function reserveBubbleSlot(actionBtn, input) {
     const cluster = findActionCluster(actionBtn, input);
     reserveBubbleSlotForCluster(cluster);
@@ -6731,6 +6802,7 @@
     stopDeepSeekPlacementResizeMonitoring();
     stopGeminiPlacementResizeMonitoring();
     stopClaudePlacementResizeMonitoring();
+    clearChatGptPlacementResizeMonitoring();
 
     window.removeEventListener("resize", scheduleFloatingButtonUpdate);
     document.removeEventListener("visibilitychange", scheduleFloatingButtonUpdate);
