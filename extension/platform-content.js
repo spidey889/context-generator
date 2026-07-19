@@ -82,7 +82,6 @@
   const VIRTUAL_SWEEP_SLOW_CHANGE_TIMEOUT_MS = 360;
   const CLAUDE_VIRTUAL_SWEEP_SLOW_CHANGE_TIMEOUT_MS = 1400;
   const VIRTUAL_SWEEP_DEBUG_LOGGING = true;
-  const CHATGPT_PLACEMENT_DEBUG_LOGGING = true;
   const COLLAPSED_CONVERSATION_EXPAND_RE = /\b(?:show|see|read|view)\s+(?:more|full|all)\b|\bcontinue\s+(?:reading|message|response)\b|\bexpand\b/i;
   const COLLAPSED_CONVERSATION_EXPAND_EXCLUDE_RE = /\b(?:continue generating|regenerate|send|submit|stop generating|new chat|settings|menu|voice|microphone)\b/i;
   const EMPTY_START_SCREEN_TEXTS = [
@@ -426,7 +425,6 @@
   let chatGptPlacementSurface = null;
   let chatGptPlacementResizeObserver = null;
   let chatGptPlacementResizeTargets = [];
-  let chatGptPlacementDebugSequence = 0;
   let floatingButtonMonitoringDisabled = false;
   let handoffCountdownTimer = null;
   let handoffCountdownHideTimer = null;
@@ -5385,7 +5383,6 @@
     }
 
     if (currentPlatform.id === "chatgpt") {
-      const debugId = ++chatGptPlacementDebugSequence;
       releaseBubbleSlot();
       releaseComposerSurface();
       const floatingRoot = getFloatingButtonRoot();
@@ -5394,19 +5391,11 @@
       }
 
       setBubbleFixedMode(bubble);
-      logChatGptPlacement(debugId, "update-start", {
-        input: getChatGptPlacementDebugElement(input),
-        retainedSurface: getChatGptPlacementDebugElement(chatGptPlacementSurface)
-      });
-      const placement = getChatGptFixedBubblePlacement(input, debugId);
+      const placement = getChatGptFixedBubblePlacement(input);
       bubble.style.left = `${placement.left}px`;
       bubble.style.right = "auto";
       bubble.style.top = `${placement.top}px`;
       bubble.style.display = "flex";
-      logChatGptPlacement(debugId, "position-applied", {
-        placement,
-        bubble: getChatGptPlacementDebugElement(bubble)
-      });
       maybeShowOnboardingNudge(bubble);
       return;
     }
@@ -5675,8 +5664,10 @@
     return composerRect.bottom - Math.max(72, composerRect.height * 0.62);
   }
 
-  function findChatGptModelSelectorButton(composerSurface, composerRect, inputRect = null, debugId = 0, scopeName = "unknown") {
-    const root = composerSurface || document;
+  function findChatGptModelSelectorButton(input, composerSurface, composerRect, inputRect = null) {
+    const root = getChatGptComposerControlRoot(input, composerSurface);
+    if (!root) return null;
+
     const hasInputScope = !composerRect && inputRect?.width > 0 && inputRect?.height > 0;
     const rowTop = composerRect
       ? composerRect.bottom - Math.max(64, composerRect.height * 0.65)
@@ -5699,9 +5690,7 @@
         ? Math.min(window.innerWidth - BUBBLE_GAP, inputRect.right + 96)
         : window.innerWidth - BUBBLE_GAP;
 
-    const evaluated = Array.from(root.querySelectorAll("button, [role='button'], [tabindex='0'], [aria-label], [title], span"))
-      .map(getChatGptModelAnchorElement)
-      .filter((element, index, all) => all.indexOf(element) === index)
+    return Array.from(root.querySelectorAll("button"))
       .filter((button) => button.id !== BUBBLE_ID && !isContextGeneratorNode(button) && isVisible(button))
       .map((button) => {
         const rect = button.getBoundingClientRect();
@@ -5717,7 +5706,10 @@
         if (rect.width >= 48 && rect.width <= 140) score += 12;
         if (/\b(send|voice|mic|microphone|attach|upload|tools|image|canvas)\b/.test(label)) score -= 120;
 
-        const eligible = (
+        return { button, rect, score };
+      })
+      .filter(({ rect, score }) => {
+        return (
           score >= 120 &&
           rect.width > 0 &&
           rect.height > 0 &&
@@ -5727,83 +5719,17 @@
           rect.top >= rowTop &&
           rect.bottom <= rowBottom
         );
-        return { button, rect, label, text, score, eligible };
-      });
-    const selected = evaluated
-      .filter(({ eligible }) => eligible)
+      })
       .sort((a, b) => {
         if (b.score !== a.score) return b.score - a.score;
         return b.rect.left - a.rect.left;
-      })[0] || null;
-
-    logChatGptPlacement(debugId, "model-selector-scan", {
-      scope: scopeName,
-      bounds: { rowTop, rowBottom, scopeLeft, scopeRight },
-      composerRect: getChatGptPlacementDebugRect(composerRect),
-      inputRect: getChatGptPlacementDebugRect(inputRect),
-      candidates: evaluated
-        .filter(({ text, label, rect }) => {
-          return /\b(instant|medium|high)\b/.test(text) || /\b(model|intelligence|reasoning|thinking)\b/.test(label) || (
-            rect.left >= scopeLeft &&
-            rect.right <= scopeRight &&
-            rect.top >= rowTop - 80 &&
-            rect.bottom <= rowBottom + 80
-          );
-        })
-        .slice(0, 40)
-        .map(({ button, rect, label, text, score, eligible }) => ({
-          element: getChatGptPlacementDebugElement(button),
-          rect: getChatGptPlacementDebugRect(rect),
-          label: label.slice(0, 160),
-          text: text.slice(0, 160),
-          score,
-          eligible
-        })),
-      selected: selected ? {
-        element: getChatGptPlacementDebugElement(selected.button),
-        rect: getChatGptPlacementDebugRect(selected.rect),
-        label: selected.label.slice(0, 160),
-        text: selected.text.slice(0, 160),
-        score: selected.score
-      } : null
-    });
-
-    return selected?.button || null;
+      })[0]?.button || null;
   }
 
-  function getChatGptModelAnchorElement(element) {
-    const interactive = element.closest?.("button, [role='button'], [tabindex='0']");
-    const interactiveRect = interactive?.getBoundingClientRect();
-    if (
-      interactiveRect &&
-      interactiveRect.width > 0 &&
-      interactiveRect.width <= 180 &&
-      interactiveRect.height > 0 &&
-      interactiveRect.height <= 56
-    ) {
-      return interactive;
-    }
-
-    // Current ChatGPT can render High as text inside a control-like div with
-    // no button role. Use the nearest compact parent so fixed placement is
-    // centered on the full control instead of the text span's baseline.
-    let node = element.parentElement;
-    let depth = 0;
-    while (node && depth < 3) {
-      const rect = node.getBoundingClientRect();
-      if (
-        rect.width >= 48 &&
-        rect.width <= 180 &&
-        rect.height >= 28 &&
-        rect.height <= 56
-      ) {
-        return node;
-      }
-      node = node.parentElement;
-      depth += 1;
-    }
-
-    return element;
+  function getChatGptComposerControlRoot(input, composerSurface) {
+    const inputForm = input.closest("form");
+    if (inputForm?.contains(input)) return inputForm;
+    return composerSurface?.contains?.(input) ? composerSurface : null;
   }
 
   function setBubbleAbsoluteMode(bubble) {
@@ -5849,55 +5775,39 @@
     }
   }
 
-  function getChatGptFixedBubblePlacement(input, debugId = 0) {
-    const composerRect = getChatGptPlacementRect(input, debugId);
+  function getChatGptFixedBubblePlacement(input) {
+    const composerRect = getChatGptPlacementRect(input);
     const inputRect = input.getBoundingClientRect();
-    // The input and model control move together during paste reflow. Search
-    // that live row first so a stale inner composer cannot exclude High.
+    const composerSurface = getRetainedChatGptPlacementSurface(input);
+    // Search only actual buttons that share the editor's form or verified
+    // composer surface. Streaming response text must never become an anchor.
     const modelButton =
-      findChatGptModelSelectorButton(document, null, inputRect, debugId, "live-input-row") ||
-      findChatGptModelSelectorButton(document, composerRect, inputRect, debugId, "composer-fallback");
+      findChatGptModelSelectorButton(input, composerSurface, null, inputRect) ||
+      findChatGptModelSelectorButton(input, composerSurface, composerRect, inputRect);
 
     if (modelButton) {
-      const placement = getFixedBubblePlacementBesideRect(modelButton.getBoundingClientRect());
-      logChatGptPlacement(debugId, "placement-choice", {
-        path: "model-selector",
-        anchor: getChatGptPlacementDebugElement(modelButton),
-        placement
-      });
-      return placement;
+      return getFixedBubblePlacementBesideRect(modelButton.getBoundingClientRect());
     }
 
     if (composerRect) {
-      const rowButtons = getChatGptComposerButtonCandidates(composerRect);
+      const rowButtons = getChatGptComposerButtonCandidates(input, composerSurface, composerRect);
       const actionButton = rowButtons[rowButtons.length - 1];
 
       if (actionButton) {
-        const placement = getFixedBubblePlacementBesideRect(actionButton.rect);
-        logChatGptPlacement(debugId, "placement-choice", {
-          path: "composer-action-fallback",
-          anchor: getChatGptPlacementDebugElement(actionButton.button),
-          anchorRect: getChatGptPlacementDebugRect(actionButton.rect),
-          placement
-        });
-        return placement;
+        return getFixedBubblePlacementBesideRect(actionButton.rect);
       }
 
       const fallback = getBottomRightRowBubblePlacement(composerRect, 64);
-      const placement = clampFixedBubblePlacement(composerRect.left + fallback.left, composerRect.top + fallback.top);
-      logChatGptPlacement(debugId, "placement-choice", { path: "composer-corner-fallback", placement });
-      return placement;
+      return clampFixedBubblePlacement(composerRect.left + fallback.left, composerRect.top + fallback.top);
     }
 
-    const placement = clampFixedBubblePlacement(
+    return clampFixedBubblePlacement(
       inputRect.right - BUBBLE_SIZE - 112,
       inputRect.top + (inputRect.height - BUBBLE_SIZE) / 2
     );
-    logChatGptPlacement(debugId, "placement-choice", { path: "input-rect-fallback", placement });
-    return placement;
   }
 
-  function getChatGptPlacementRect(input, debugId = 0) {
+  function getChatGptPlacementRect(input) {
     const retainedSurface = getRetainedChatGptPlacementSurface(input);
     const detectedSurface = retainedSurface ? null : findComposerSurfaceElement(input);
     const composerSurface = retainedSurface || detectedSurface;
@@ -5905,11 +5815,6 @@
     if (isUsableChatGptPlacementRect(composerRect)) {
       chatGptPlacementSurface = composerSurface;
       syncChatGptPlacementResizeMonitoring(input, composerSurface);
-      logChatGptPlacement(debugId, "placement-rect", {
-        path: retainedSurface ? "retained-surface" : "detected-surface",
-        surface: getChatGptPlacementDebugElement(composerSurface),
-        rect: getChatGptPlacementDebugRect(composerRect)
-      });
       return composerRect;
     }
 
@@ -5918,11 +5823,6 @@
     if (isUsableChatGptPlacementRect(formRect)) {
       chatGptPlacementSurface = form;
       syncChatGptPlacementResizeMonitoring(input, form);
-      logChatGptPlacement(debugId, "placement-rect", {
-        path: "form-fallback",
-        surface: getChatGptPlacementDebugElement(form),
-        rect: getChatGptPlacementDebugRect(formRect)
-      });
       return formRect;
     }
 
@@ -5940,57 +5840,13 @@
     const top = Math.max(BUBBLE_GAP, inputRect.top - 18);
     const bottom = Math.min(window.innerHeight - BUBBLE_GAP, Math.max(inputRect.bottom + 70, top + 96));
 
-    const syntheticRect = {
+    return {
       left,
       right,
       top,
       bottom,
       width: right - left,
       height: bottom - top
-    };
-    logChatGptPlacement(debugId, "placement-rect", {
-      path: "synthetic-input-fallback",
-      input: getChatGptPlacementDebugElement(input),
-      rect: getChatGptPlacementDebugRect(syntheticRect)
-    });
-    return syntheticRect;
-  }
-
-  function logChatGptPlacement(debugId, event, detail = {}) {
-    if (!CHATGPT_PLACEMENT_DEBUG_LOGGING || currentPlatform.id !== "chatgpt") return;
-    console.info("[Cap Context][ChatGPT placement]", JSON.stringify({
-      debugId,
-      event,
-      timestamp: Math.round(performance.now()),
-      ...detail
-    }));
-  }
-
-  function getChatGptPlacementDebugRect(rect) {
-    if (!rect) return null;
-    return {
-      left: Math.round(rect.left),
-      right: Math.round(rect.right),
-      top: Math.round(rect.top),
-      bottom: Math.round(rect.bottom),
-      width: Math.round(rect.width),
-      height: Math.round(rect.height)
-    };
-  }
-
-  function getChatGptPlacementDebugElement(element) {
-    if (!element) return null;
-    const rect = element.getBoundingClientRect?.();
-    return {
-      tag: element.localName || element.tagName?.toLowerCase?.() || "unknown",
-      id: element.id || "",
-      className: typeof element.className === "string" ? element.className.slice(0, 180) : "",
-      role: element.getAttribute?.("role") || "",
-      testId: element.getAttribute?.("data-testid") || "",
-      ariaLabel: element.getAttribute?.("aria-label") || "",
-      title: element.getAttribute?.("title") || "",
-      text: (element.innerText || element.textContent || "").trim().replace(/\s+/g, " ").slice(0, 180),
-      rect: getChatGptPlacementDebugRect(rect)
     };
   }
 
@@ -6048,10 +5904,13 @@
     };
   }
 
-  function getChatGptComposerButtonCandidates(composerRect) {
+  function getChatGptComposerButtonCandidates(input, composerSurface, composerRect) {
+    const root = getChatGptComposerControlRoot(input, composerSurface);
+    if (!root) return [];
+
     const rowTop = composerRect.bottom - Math.max(60, composerRect.height * 0.55);
 
-    return Array.from(document.querySelectorAll("button, [role='button']"))
+    return Array.from(root.querySelectorAll("button"))
       .filter((button) => button.id !== BUBBLE_ID && !isContextGeneratorNode(button) && isVisible(button))
       .map((button) => ({ button, rect: button.getBoundingClientRect() }))
       .filter(({ rect }) => {
