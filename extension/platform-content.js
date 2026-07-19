@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-07-19-chatgpt-live-model-anchor";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-07-19-chatgpt-model-control-anchor";
   const BUBBLE_ID = "context-generator-bubble";
   const OVERLAY_ID = "context-generator-overlay";
   const HANDOFF_SCRIM_ID = "context-generator-handoff-scrim";
@@ -5688,7 +5688,9 @@
         ? Math.min(window.innerWidth - BUBBLE_GAP, inputRect.right + 96)
         : window.innerWidth - BUBBLE_GAP;
 
-    return Array.from(root.querySelectorAll("button, [role='button']"))
+    return Array.from(root.querySelectorAll("button, [role='button'], [tabindex='0'], [aria-label], [title], span"))
+      .map(getChatGptModelAnchorElement)
+      .filter((element, index, all) => all.indexOf(element) === index)
       .filter((button) => button.id !== BUBBLE_ID && !isContextGeneratorNode(button) && isVisible(button))
       .map((button) => {
         const rect = button.getBoundingClientRect();
@@ -5722,6 +5724,41 @@
         if (b.score !== a.score) return b.score - a.score;
         return b.rect.left - a.rect.left;
       })[0]?.button || null;
+  }
+
+  function getChatGptModelAnchorElement(element) {
+    const interactive = element.closest?.("button, [role='button'], [tabindex='0']");
+    const interactiveRect = interactive?.getBoundingClientRect();
+    if (
+      interactiveRect &&
+      interactiveRect.width > 0 &&
+      interactiveRect.width <= 180 &&
+      interactiveRect.height > 0 &&
+      interactiveRect.height <= 56
+    ) {
+      return interactive;
+    }
+
+    // Current ChatGPT can render High as text inside a control-like div with
+    // no button role. Use the nearest compact parent so fixed placement is
+    // centered on the full control instead of the text span's baseline.
+    let node = element.parentElement;
+    let depth = 0;
+    while (node && depth < 3) {
+      const rect = node.getBoundingClientRect();
+      if (
+        rect.width >= 48 &&
+        rect.width <= 180 &&
+        rect.height >= 28 &&
+        rect.height <= 56
+      ) {
+        return node;
+      }
+      node = node.parentElement;
+      depth += 1;
+    }
+
+    return element;
   }
 
   function setBubbleAbsoluteMode(bubble) {
