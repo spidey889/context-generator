@@ -82,7 +82,6 @@
   const VIRTUAL_SWEEP_SLOW_CHANGE_TIMEOUT_MS = 360;
   const CLAUDE_VIRTUAL_SWEEP_SLOW_CHANGE_TIMEOUT_MS = 1400;
   const VIRTUAL_SWEEP_DEBUG_LOGGING = true;
-  const CHATGPT_PLACEMENT_TRIGGER_DEBUG_LOGGING = true;
   const COLLAPSED_CONVERSATION_EXPAND_RE = /\b(?:show|see|read|view)\s+(?:more|full|all)\b|\bcontinue\s+(?:reading|message|response)\b|\bexpand\b/i;
   const COLLAPSED_CONVERSATION_EXPAND_EXCLUDE_RE = /\b(?:continue generating|regenerate|send|submit|stop generating|new chat|settings|menu|voice|microphone)\b/i;
   const EMPTY_START_SCREEN_TEXTS = [
@@ -426,11 +425,8 @@
   let chatGptPlacementSurface = null;
   let chatGptPlacementResizeObserver = null;
   let chatGptPlacementResizeTargets = [];
-  let chatGptPlacementDebugMutationObserver = null;
-  let chatGptPlacementDebugMutationRoot = null;
-  let floatingButtonUpdateDebugSequence = 0;
-  let floatingButtonPendingDebugTriggers = [];
-  let activeFloatingButtonUpdateDebug = null;
+  let chatGptPlacementMutationObserver = null;
+  let chatGptPlacementMutationRoot = null;
   let floatingButtonMonitoringDisabled = false;
   let handoffCountdownTimer = null;
   let handoffCountdownHideTimer = null;
@@ -5402,13 +5398,6 @@
       bubble.style.right = "auto";
       bubble.style.top = `${placement.top}px`;
       bubble.style.display = "flex";
-      logChatGptPlacementTrigger("placement-applied", {
-        update: activeFloatingButtonUpdateDebug,
-        placement,
-        input: getChatGptPlacementTriggerDebugElement(input),
-        surface: getChatGptPlacementTriggerDebugElement(chatGptPlacementSurface),
-        bubble: getChatGptPlacementTriggerDebugElement(bubble)
-      });
       maybeShowOnboardingNudge(bubble);
       return;
     }
@@ -6533,13 +6522,12 @@
   }
 
   function syncChatGptPlacementResizeMonitoring(input, composerSurface) {
+    syncChatGptPlacementMutationMonitoring(input, composerSurface);
+
     if (currentPlatform.id !== "chatgpt" || typeof ResizeObserver === "undefined") {
       stopChatGptPlacementResizeMonitoring();
-      stopChatGptPlacementDebugMutationMonitoring();
       return;
     }
-
-    syncChatGptPlacementDebugMutationMonitoring(input, composerSurface);
 
     const nextTargets = [input, composerSurface].filter((element, index, all) => {
       return element && all.indexOf(element) === index;
@@ -6550,15 +6538,7 @@
     if (targetsUnchanged) return;
 
     stopChatGptPlacementResizeMonitoring();
-    chatGptPlacementResizeObserver = new ResizeObserver((entries) => {
-      logChatGptPlacementTrigger("resize-observer", {
-        entries: entries.map((entry) => ({
-          target: getChatGptPlacementTriggerDebugElement(entry.target),
-          contentRect: getChatGptPlacementTriggerDebugRect(entry.contentRect)
-        }))
-      });
-      scheduleFloatingButtonUpdate("chatgpt-resize-observer");
-    });
+    chatGptPlacementResizeObserver = new ResizeObserver(() => scheduleFloatingButtonUpdate());
     nextTargets.forEach((element) => chatGptPlacementResizeObserver.observe(element));
     chatGptPlacementResizeTargets = nextTargets;
   }
@@ -6571,32 +6551,26 @@
 
   function clearChatGptPlacementResizeMonitoring() {
     stopChatGptPlacementResizeMonitoring();
-    stopChatGptPlacementDebugMutationMonitoring();
+    stopChatGptPlacementMutationMonitoring();
     chatGptPlacementSurface = null;
   }
 
-  function syncChatGptPlacementDebugMutationMonitoring(input, composerSurface) {
+  function syncChatGptPlacementMutationMonitoring(input, composerSurface) {
     if (
-      !CHATGPT_PLACEMENT_TRIGGER_DEBUG_LOGGING ||
       currentPlatform.id !== "chatgpt" ||
       typeof MutationObserver === "undefined"
     ) {
-      stopChatGptPlacementDebugMutationMonitoring();
+      stopChatGptPlacementMutationMonitoring();
       return;
     }
 
     const root = getChatGptComposerControlRoot(input, composerSurface) || input;
-    if (root === chatGptPlacementDebugMutationRoot) return;
+    if (root === chatGptPlacementMutationRoot) return;
 
-    stopChatGptPlacementDebugMutationMonitoring();
-    chatGptPlacementDebugMutationRoot = root;
-    chatGptPlacementDebugMutationObserver = new MutationObserver((mutations) => {
-      logChatGptPlacementTrigger("composer-mutation-not-scheduled", {
-        root: getChatGptPlacementTriggerDebugElement(root),
-        mutations: summarizeChatGptPlacementMutations(mutations)
-      });
-    });
-    chatGptPlacementDebugMutationObserver.observe(root, {
+    stopChatGptPlacementMutationMonitoring();
+    chatGptPlacementMutationRoot = root;
+    chatGptPlacementMutationObserver = new MutationObserver(() => scheduleFloatingButtonUpdate());
+    chatGptPlacementMutationObserver.observe(root, {
       attributes: true,
       characterData: true,
       subtree: true,
@@ -6604,10 +6578,10 @@
     });
   }
 
-  function stopChatGptPlacementDebugMutationMonitoring() {
-    chatGptPlacementDebugMutationObserver?.disconnect();
-    chatGptPlacementDebugMutationObserver = null;
-    chatGptPlacementDebugMutationRoot = null;
+  function stopChatGptPlacementMutationMonitoring() {
+    chatGptPlacementMutationObserver?.disconnect();
+    chatGptPlacementMutationObserver = null;
+    chatGptPlacementMutationRoot = null;
   }
 
   function reserveBubbleSlot(actionBtn, input) {
@@ -6828,43 +6802,14 @@
     element.removeAttribute("data-context-generator-original-overflow");
   }
 
-  function scheduleFloatingButtonUpdate(trigger = "unspecified") {
-    const triggerName = getFloatingButtonUpdateTriggerName(trigger);
-    if (floatingButtonMonitoringDisabled) {
-      logChatGptPlacementTrigger("update-skipped", { trigger: triggerName, reason: "monitoring-disabled" });
-      return;
-    }
-    if (isDestinationSheetOpen()) {
-      logChatGptPlacementTrigger("update-skipped", { trigger: triggerName, reason: "destination-sheet-open" });
-      return;
-    }
-    if (!floatingButtonPendingDebugTriggers.includes(triggerName)) {
-      floatingButtonPendingDebugTriggers.push(triggerName);
-    }
-    if (floatingButtonFrame) {
-      logChatGptPlacementTrigger("update-coalesced", {
-        trigger: triggerName,
-        pendingTriggers: [...floatingButtonPendingDebugTriggers]
-      });
-      return;
-    }
-    logChatGptPlacementTrigger("update-scheduled", { trigger: triggerName });
+  function scheduleFloatingButtonUpdate() {
+    if (floatingButtonMonitoringDisabled) return;
+    if (isDestinationSheetOpen()) return;
+    if (floatingButtonFrame) return;
     floatingButtonFrame = requestAnimationFrame(() => {
       floatingButtonFrame = null;
-      const update = {
-        id: ++floatingButtonUpdateDebugSequence,
-        triggers: floatingButtonPendingDebugTriggers.splice(0)
-      };
-      if (floatingButtonMonitoringDisabled) {
-        logChatGptPlacementTrigger("update-cancelled", { update, reason: "monitoring-disabled" });
-        return;
-      }
-      if (isDestinationSheetOpen()) {
-        logChatGptPlacementTrigger("update-cancelled", { update, reason: "destination-sheet-open" });
-        return;
-      }
-      activeFloatingButtonUpdateDebug = update;
-      logChatGptPlacementTrigger("update-running", { update });
+      if (floatingButtonMonitoringDisabled) return;
+      if (isDestinationSheetOpen()) return;
       try {
         ensureFloatingButton();
         updateClaudeLimitNudge();
@@ -6874,16 +6819,8 @@
           return;
         }
         throw error;
-      } finally {
-        activeFloatingButtonUpdateDebug = null;
       }
     });
-  }
-
-  function getFloatingButtonUpdateTriggerName(trigger) {
-    if (typeof trigger === "string") return trigger;
-    if (trigger?.type) return `event:${trigger.type}`;
-    return "unspecified";
   }
 
   function isContextGeneratorNode(node) {
@@ -6909,26 +6846,15 @@
     if (floatingButtonObserver) floatingButtonObserver.disconnect();
     floatingButtonObserver = new MutationObserver((mutations) => {
       if (floatingButtonMonitoringDisabled) return;
-      const ownOnly = mutations.every(isOwnDomMutation);
-      logChatGptPlacementTrigger("document-child-list-observer", {
-        ownOnly,
-        mutations: summarizeChatGptPlacementMutations(mutations)
-      });
-      if (ownOnly) return;
-      scheduleFloatingButtonUpdate("document-child-list-mutation");
+      if (mutations.every(isOwnDomMutation)) return;
+      scheduleFloatingButtonUpdate();
     });
     floatingButtonObserver.observe(document.body || document.documentElement, { childList: true, subtree: true });
 
     window.addEventListener("resize", scheduleFloatingButtonUpdate);
     document.addEventListener("visibilitychange", scheduleFloatingButtonUpdate);
     document.addEventListener("focusin", handleFloatingButtonFocusIn);
-    document.addEventListener("click", handleChatGptPlacementDebugSignal, true);
-    document.addEventListener("beforeinput", handleChatGptPlacementDebugSignal, true);
-    document.addEventListener("input", handleChatGptPlacementDebugSignal, true);
-    document.addEventListener("paste", handleChatGptPlacementDebugSignal, true);
-    document.addEventListener("scroll", handleChatGptPlacementDebugSignal, true);
-    document.addEventListener("transitionend", handleChatGptPlacementDebugSignal, true);
-    scheduleFloatingButtonUpdate("monitoring-start");
+    scheduleFloatingButtonUpdate();
   }
 
   function disableFloatingButtonMonitoring() {
@@ -6950,100 +6876,13 @@
     window.removeEventListener("resize", scheduleFloatingButtonUpdate);
     document.removeEventListener("visibilitychange", scheduleFloatingButtonUpdate);
     document.removeEventListener("focusin", handleFloatingButtonFocusIn);
-    document.removeEventListener("click", handleChatGptPlacementDebugSignal, true);
-    document.removeEventListener("beforeinput", handleChatGptPlacementDebugSignal, true);
-    document.removeEventListener("input", handleChatGptPlacementDebugSignal, true);
-    document.removeEventListener("paste", handleChatGptPlacementDebugSignal, true);
-    document.removeEventListener("scroll", handleChatGptPlacementDebugSignal, true);
-    document.removeEventListener("transitionend", handleChatGptPlacementDebugSignal, true);
   }
 
   function handleFloatingButtonFocusIn(event) {
     if (isClaudeComposerFocusTarget(event.target)) {
       dismissClaudeLimitNudge();
     }
-    logChatGptPlacementTrigger("focusin", {
-      target: getChatGptPlacementTriggerDebugElement(event.target)
-    });
-    scheduleFloatingButtonUpdate("focusin");
-  }
-
-  function handleChatGptPlacementDebugSignal(event) {
-    if (!CHATGPT_PLACEMENT_TRIGGER_DEBUG_LOGGING || currentPlatform.id !== "chatgpt") return;
-    const input = findPlatformInput();
-    const target = event.target instanceof Element ? event.target : null;
-    const composerRoot = input ? getChatGptComposerControlRoot(input, chatGptPlacementSurface) : null;
-    const affectsInput = Boolean(
-      input && target && (target === input || input.contains(target) || target.contains(input))
-    );
-    const affectsComposer = Boolean(composerRoot && target && composerRoot.contains(target));
-    if (!/^(?:click|scroll)$/.test(event.type) && !affectsInput && !affectsComposer) return;
-
-    logChatGptPlacementTrigger(`${event.type}-event-not-scheduled`, {
-      affectsInput,
-      affectsComposer,
-      inputType: event.inputType || "",
-      target: getChatGptPlacementTriggerDebugElement(target),
-      input: getChatGptPlacementTriggerDebugElement(input)
-    });
-  }
-
-  function logChatGptPlacementTrigger(event, detail = {}) {
-    if (!CHATGPT_PLACEMENT_TRIGGER_DEBUG_LOGGING || currentPlatform.id !== "chatgpt") return;
-    console.info("[Cap Context][ChatGPT placement trigger]", JSON.stringify({
-      event,
-      timestamp: Math.round(performance.now()),
-      ...detail
-    }));
-  }
-
-  function summarizeChatGptPlacementMutations(mutations) {
-    const counts = mutations.reduce((result, mutation) => {
-      result[mutation.type] = (result[mutation.type] || 0) + 1;
-      return result;
-    }, {});
-    return {
-      counts,
-      samples: mutations.slice(0, 8).map((mutation) => ({
-        type: mutation.type,
-        attributeName: mutation.attributeName || "",
-        target: getChatGptPlacementTriggerDebugElement(mutation.target),
-        addedElements: [...mutation.addedNodes].filter((node) => node instanceof Element).length,
-        addedTextNodes: [...mutation.addedNodes].filter((node) => node.nodeType === Node.TEXT_NODE).length,
-        removedElements: [...mutation.removedNodes].filter((node) => node instanceof Element).length,
-        removedTextNodes: [...mutation.removedNodes].filter((node) => node.nodeType === Node.TEXT_NODE).length
-      }))
-    };
-  }
-
-  function getChatGptPlacementTriggerDebugRect(rect) {
-    if (!rect) return null;
-    return {
-      left: Math.round(rect.left),
-      right: Math.round(rect.right),
-      top: Math.round(rect.top),
-      bottom: Math.round(rect.bottom),
-      width: Math.round(rect.width),
-      height: Math.round(rect.height)
-    };
-  }
-
-  function getChatGptPlacementTriggerDebugElement(node) {
-    const element = node instanceof Element ? node : node?.parentElement;
-    if (!element) return null;
-    const rect = element.getBoundingClientRect?.();
-    const includeText = rect && rect.width <= 420 && rect.height <= 180;
-    return {
-      tag: element.localName || element.tagName?.toLowerCase?.() || "unknown",
-      id: element.id || "",
-      className: typeof element.className === "string" ? element.className.slice(0, 140) : "",
-      testId: element.getAttribute?.("data-testid") || "",
-      ariaLabel: element.getAttribute?.("aria-label") || "",
-      text: includeText
-        ? (element.innerText || element.textContent || "").trim().replace(/\s+/g, " ").slice(0, 100)
-        : "",
-      rect: getChatGptPlacementTriggerDebugRect(rect)
-    };
+    scheduleFloatingButtonUpdate();
   }
 
   function resetRunningFlag() {
