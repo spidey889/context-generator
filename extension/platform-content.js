@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-07-19-gemini-pro-stable-composer";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-07-19-claude-stable-composer";
   const BUBBLE_ID = "context-generator-bubble";
   const OVERLAY_ID = "context-generator-overlay";
   const HANDOFF_SCRIM_ID = "context-generator-handoff-scrim";
@@ -179,6 +179,7 @@
       logoSize: 24,
       logo: "logos/claude2download__1_-removebg-preview.png",
       retryPaste: true,
+      maxComposerHeight: 720,
       inputSelectors: [
         "textarea",
         "[contenteditable='true'][data-placeholder]",
@@ -418,6 +419,8 @@
   let deepSeekPlacementResizeTargets = [];
   let geminiPlacementResizeObserver = null;
   let geminiPlacementResizeTargets = [];
+  let claudePlacementResizeObserver = null;
+  let claudePlacementResizeTargets = [];
   let floatingButtonMonitoringDisabled = false;
   let handoffCountdownTimer = null;
   let handoffCountdownHideTimer = null;
@@ -5370,6 +5373,7 @@
       stopGrokPlacementResizeMonitoring();
       stopDeepSeekPlacementResizeMonitoring();
       stopGeminiPlacementResizeMonitoring();
+      stopClaudePlacementResizeMonitoring();
       return;
     }
 
@@ -5402,6 +5406,7 @@
     syncGrokPlacementResizeMonitoring(input, composerSurface);
     syncDeepSeekPlacementResizeMonitoring(input, composerSurface);
     syncGeminiPlacementResizeMonitoring(input, composerSurface);
+    syncClaudePlacementResizeMonitoring(input, composerSurface);
 
     if (currentPlatform.id !== "chatgpt" && bubble.parentElement !== composerSurface) {
       composerSurface.appendChild(bubble);
@@ -6109,6 +6114,9 @@
     const retainedGeminiSurface = getRetainedGeminiComposerSurface(input);
     if (retainedGeminiSurface) return retainedGeminiSurface;
 
+    const retainedClaudeSurface = getRetainedClaudeComposerSurface(input);
+    if (retainedClaudeSurface) return retainedClaudeSurface;
+
     const candidates = getPlatformComposerCandidates(input, inputRect);
     let node = input.parentElement;
 
@@ -6181,6 +6189,29 @@
   function getRetainedGeminiComposerSurface(input) {
     if (
       currentPlatform.id !== "gemini" ||
+      !reservedComposerSurface ||
+      !reservedComposerSurface.contains?.(input) ||
+      isContextGeneratorNode(reservedComposerSurface)
+    ) {
+      return null;
+    }
+
+    const rect = reservedComposerSurface.getBoundingClientRect();
+    const maxWidth = getMaxComposerSurfaceWidth();
+    const maxHeight = currentPlatform.maxComposerHeight || 260;
+    return (
+      rect.width >= 280 &&
+      rect.width <= maxWidth &&
+      rect.height >= 40 &&
+      rect.height <= maxHeight &&
+      rect.bottom >= 0 &&
+      rect.top <= window.innerHeight
+    ) ? reservedComposerSurface : null;
+  }
+
+  function getRetainedClaudeComposerSurface(input) {
+    if (
+      currentPlatform.id !== "claude" ||
       !reservedComposerSurface ||
       !reservedComposerSurface.contains?.(input) ||
       isContextGeneratorNode(reservedComposerSurface)
@@ -6385,6 +6416,32 @@
     geminiPlacementResizeObserver?.disconnect();
     geminiPlacementResizeObserver = null;
     geminiPlacementResizeTargets = [];
+  }
+
+  function syncClaudePlacementResizeMonitoring(input, composerSurface) {
+    if (currentPlatform.id !== "claude" || typeof ResizeObserver === "undefined") {
+      stopClaudePlacementResizeMonitoring();
+      return;
+    }
+
+    const nextTargets = [input, composerSurface].filter((element, index, all) => {
+      return element && all.indexOf(element) === index;
+    });
+    const targetsUnchanged =
+      nextTargets.length === claudePlacementResizeTargets.length &&
+      nextTargets.every((element, index) => element === claudePlacementResizeTargets[index]);
+    if (targetsUnchanged) return;
+
+    stopClaudePlacementResizeMonitoring();
+    claudePlacementResizeObserver = new ResizeObserver(() => scheduleFloatingButtonUpdate());
+    nextTargets.forEach((element) => claudePlacementResizeObserver.observe(element));
+    claudePlacementResizeTargets = nextTargets;
+  }
+
+  function stopClaudePlacementResizeMonitoring() {
+    claudePlacementResizeObserver?.disconnect();
+    claudePlacementResizeObserver = null;
+    claudePlacementResizeTargets = [];
   }
 
   function reserveBubbleSlot(actionBtn, input) {
@@ -6673,6 +6730,7 @@
     stopGrokPlacementResizeMonitoring();
     stopDeepSeekPlacementResizeMonitoring();
     stopGeminiPlacementResizeMonitoring();
+    stopClaudePlacementResizeMonitoring();
 
     window.removeEventListener("resize", scheduleFloatingButtonUpdate);
     document.removeEventListener("visibilitychange", scheduleFloatingButtonUpdate);
