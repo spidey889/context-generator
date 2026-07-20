@@ -3,9 +3,10 @@
   "private": true,
   "license": "UNLICENSED",
   "scripts": {
-    "test": "node --test",
+    "test": "node --test --test-skip-pattern=\"^slow/release:\"",
+    "test:slow": "node --test --test-name-pattern=\"^slow/release:\" test/platform-content.test.js",
     "test:extension-smoke": "node scripts/run-extension-smoke.js",
     "eval": "node scripts/run-regression-eval.js",
-    "gate": "npm test && npm run eval"
+    "gate": "npm test && npm run test:slow && npm run eval"
   }
 }
