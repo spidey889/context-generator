@@ -17,12 +17,8 @@ const PROGRESS_MIGRATION_SOURCE = fs.readFileSync(
   path.join(ROOT, "supabase", "migrations", "20260718113749_atomically_preserve_transfer_event_progress.sql"),
   "utf8"
 );
-const DAILY_USAGE_MIGRATION_SOURCE = fs.readFileSync(
-  path.join(ROOT, "supabase", "migrations", "20260718164011_add_anonymous_user_daily_usage.sql"),
-  "utf8"
-);
-const TRANSFER_ACTIVITY_MIGRATION_SOURCE = fs.readFileSync(
-  path.join(ROOT, "supabase", "migrations", "20260718172212_add_user_transfer_activity_view.sql"),
+const SIMPLE_USERS_MIGRATION_SOURCE = fs.readFileSync(
+  path.join(ROOT, "supabase", "migrations", "20260720101219_add_simple_users_table.sql"),
   "utf8"
 );
 const USER_CANCELLED_MIGRATION_SOURCE = fs.readFileSync(
@@ -299,61 +295,33 @@ test("Supabase ingestion is write-only, authenticated by publishable key, and co
   assert.doesNotMatch(EDGE_FUNCTION_SOURCE, /console\.|conversation|summary|error\.message/);
 });
 
-test("Supabase maps anonymous installs to User N and exposes only simple daily usage metadata", () => {
-  assert.match(DAILY_USAGE_MIGRATION_SOURCE, /create table public\.analytics_users/);
-  assert.match(DAILY_USAGE_MIGRATION_SOURCE, /user_id bigint generated always as identity primary key/);
-  assert.match(DAILY_USAGE_MIGRATION_SOURCE, /install_id text not null unique/);
-  assert.match(DAILY_USAGE_MIGRATION_SOURCE, /after insert on public\.transfer_events/);
-  assert.match(DAILY_USAGE_MIGRATION_SOURCE, /on conflict \(install_id\) do nothing/);
-  assert.match(DAILY_USAGE_MIGRATION_SOURCE, /order by existing\.first_received_at, existing\.install_id/);
-  assert.match(DAILY_USAGE_MIGRATION_SOURCE, /create view public\.user_daily_usage\s+with \(security_invoker = true\)/);
-
-  const viewSource = DAILY_USAGE_MIGRATION_SOURCE.slice(
-    DAILY_USAGE_MIGRATION_SOURCE.indexOf("create view public.user_daily_usage"),
-    DAILY_USAGE_MIGRATION_SOURCE.indexOf("comment on view public.user_daily_usage")
-  );
-  assert.match(viewSource, /'User ' \|\| users\.user_id::text as user_name/);
-  assert.match(viewSource, /at time zone 'UTC'/);
-  assert.match(viewSource, /count\(\*\) as transfer_count/);
-  assert.match(viewSource, /array_agg\(events\.character_count/);
-  assert.match(viewSource, /sum\(events\.character_count\)/);
-  assert.doesNotMatch(viewSource, /install_id\s+as|first_seen|last_seen|conversation|summary/);
-
-  assert.match(DAILY_USAGE_MIGRATION_SOURCE, /alter table public\.analytics_users enable row level security/);
-  assert.match(DAILY_USAGE_MIGRATION_SOURCE, /revoke all privileges on table public\.analytics_users/);
-  assert.match(DAILY_USAGE_MIGRATION_SOURCE, /revoke all privileges on table public\.user_daily_usage/);
-  assert.match(DAILY_USAGE_MIGRATION_SOURCE, /grant select on table public\.user_daily_usage to service_role/);
+test("Supabase replaces the old usage views with one aggregate users table", () => {
+  assert.match(SIMPLE_USERS_MIGRATION_SOURCE, /drop view if exists public\.user_daily_usage/);
+  assert.match(SIMPLE_USERS_MIGRATION_SOURCE, /drop trigger if exists transfer_events_register_analytics_user on public\.transfer_events/);
+  assert.match(SIMPLE_USERS_MIGRATION_SOURCE, /drop function if exists public\.register_analytics_user\(\)/);
+  assert.match(SIMPLE_USERS_MIGRATION_SOURCE, /drop table if exists public\.analytics_users/);
+  assert.match(SIMPLE_USERS_MIGRATION_SOURCE, /create table public\.users/);
+  assert.match(SIMPLE_USERS_MIGRATION_SOURCE, /user_no bigint generated always as identity primary key/);
+  assert.match(SIMPLE_USERS_MIGRATION_SOURCE, /install_id text not null unique/);
+  assert.match(SIMPLE_USERS_MIGRATION_SOURCE, /total_summaries bigint not null default 0/);
+  assert.match(SIMPLE_USERS_MIGRATION_SOURCE, /today_summaries bigint not null default 0/);
+  assert.match(SIMPLE_USERS_MIGRATION_SOURCE, /today_date date not null default \(now\(\) at time zone 'utc'\)::date/);
+  assert.match(SIMPLE_USERS_MIGRATION_SOURCE, /alter table public\.users enable row level security/);
+  assert.match(SIMPLE_USERS_MIGRATION_SOURCE, /revoke all privileges on table public\.users/);
+  assert.match(SIMPLE_USERS_MIGRATION_SOURCE, /grant select on table public\.users to service_role/);
+  assert.doesNotMatch(SIMPLE_USERS_MIGRATION_SOURCE, /create view public\.user_daily_usage|create view public\.user_transfer_activity/);
 });
 
-test("Supabase connects User N to one row per transfer and keeps daily usage count-only", () => {
-  assert.match(TRANSFER_ACTIVITY_MIGRATION_SOURCE, /drop view if exists public\.user_daily_usage/);
-  assert.match(TRANSFER_ACTIVITY_MIGRATION_SOURCE, /create view public\.user_daily_usage\s+with \(security_invoker = true\)/);
-
-  const dailyViewSource = TRANSFER_ACTIVITY_MIGRATION_SOURCE.slice(
-    TRANSFER_ACTIVITY_MIGRATION_SOURCE.indexOf("create view public.user_daily_usage"),
-    TRANSFER_ACTIVITY_MIGRATION_SOURCE.indexOf("comment on view public.user_daily_usage")
-  );
-  assert.match(dailyViewSource, /count\(\*\) as transfer_count/);
-  assert.doesNotMatch(dailyViewSource, /array_agg|sum\(|character_count|total_characters/);
-
-  assert.match(TRANSFER_ACTIVITY_MIGRATION_SOURCE, /create view public\.user_transfer_activity\s+with \(security_invoker = true\)/);
-  const activityViewSource = TRANSFER_ACTIVITY_MIGRATION_SOURCE.slice(
-    TRANSFER_ACTIVITY_MIGRATION_SOURCE.indexOf("create view public.user_transfer_activity"),
-    TRANSFER_ACTIVITY_MIGRATION_SOURCE.indexOf("comment on view public.user_transfer_activity")
-  );
-  assert.match(activityViewSource, /'User ' \|\| users\.user_id::text as user_name/);
-  assert.match(activityViewSource, /events\.attempted_at/);
-  assert.match(activityViewSource, /events\.source_platform/);
-  assert.match(activityViewSource, /events\.destination_platform/);
-  assert.match(activityViewSource, /events\.character_count/);
-  assert.match(activityViewSource, /events\.status/);
-  assert.match(activityViewSource, /events\.failure_reason/);
-  assert.match(activityViewSource, /events\.install_id = users\.install_id/);
-
-  const activitySelectSource = activityViewSource.slice(0, activityViewSource.indexOf("from public.analytics_users"));
-  assert.doesNotMatch(activitySelectSource, /install_id|conversation|summary|total_characters/);
-  assert.match(TRANSFER_ACTIVITY_MIGRATION_SOURCE, /revoke all privileges on table public\.user_transfer_activity/);
-  assert.match(TRANSFER_ACTIVITY_MIGRATION_SOURCE, /grant select on table public\.user_transfer_activity to service_role/);
+test("Supabase counts each transfer once when it first succeeds", () => {
+  assert.match(SIMPLE_USERS_MIGRATION_SOURCE, /create or replace function public\.record_user_summary\(\)/);
+  assert.match(SIMPLE_USERS_MIGRATION_SOURCE, /insert into public\.users \(install_id, total_summaries, today_summaries, today_date\)/);
+  assert.match(SIMPLE_USERS_MIGRATION_SOURCE, /total_summaries = public\.users\.total_summaries \+ 1/);
+  assert.match(SIMPLE_USERS_MIGRATION_SOURCE, /when public\.users\.today_date = today then public\.users\.today_summaries \+ 1/);
+  assert.match(SIMPLE_USERS_MIGRATION_SOURCE, /else 1/);
+  assert.match(SIMPLE_USERS_MIGRATION_SOURCE, /after insert on public\.transfer_events[\s\S]*when \(new\.status = 'succeeded'\)/);
+  assert.match(SIMPLE_USERS_MIGRATION_SOURCE, /after update on public\.transfer_events[\s\S]*when \(new\.status = 'succeeded' and old\.status is distinct from 'succeeded'\)/);
+  assert.match(SIMPLE_USERS_MIGRATION_SOURCE, /revoke all on function public\.record_user_summary\(\)/);
+  assert.match(SIMPLE_USERS_MIGRATION_SOURCE, /grant execute on function public\.record_user_summary\(\) to service_role/);
 });
 
 test("user cancellation stays a closed metadata-only failure reason", () => {

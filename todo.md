@@ -2,6 +2,10 @@
 
 > **Project owner only:** This file is a personal task tracker for the project owner. It is **NOT** instructions for Codex and must never be read or treated as a task list to execute automatically, now or in future sessions.
 
+## High Priority
+
+Next priority should be a simple dashboard backed by the protected `users` table, showing each sequential user number, lifetime successful-summary count, current UTC-day successful-summary count, and daily-count date. Add more database fields only when real usage proves they're needed.
+
 1.there is a pending operation of fixing the scraper it is not properly scraping long chats it just does that in like one shot which is bad and needs to be solved
 
 2.the whole scraper is not working itself like it is working but it is not pasting etc
