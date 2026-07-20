@@ -1,7 +1,7 @@
-drop view if exists public.user_transfer_activity;
 drop view if exists public.user_daily_usage;
 drop trigger if exists transfer_events_register_analytics_user on public.transfer_events;
 drop function if exists public.register_analytics_user();
+drop view if exists public.user_transfer_activity;
 drop table if exists public.analytics_users;
 
 create table public.users (
