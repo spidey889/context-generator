@@ -1,3 +1,4 @@
+drop view if exists public.user_transfer_activity;
 drop view if exists public.user_daily_usage;
 drop trigger if exists transfer_events_register_analytics_user on public.transfer_events;
 drop function if exists public.register_analytics_user();
@@ -17,7 +18,7 @@ comment on table public.users is
 alter table public.users enable row level security;
 
 revoke all privileges on table public.users from public, anon, authenticated, service_role;
-grant select on table public.users to service_role;
+grant select, insert, update on table public.users to service_role;
 
 revoke all privileges on sequence public.users_user_no_seq from public, anon, authenticated, service_role;
 grant usage on sequence public.users_user_no_seq to service_role;
