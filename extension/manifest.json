@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "cap context",
   "description": "Carry conversation context between Claude, ChatGPT, Gemini, Grok, and DeepSeek.",
-  "version": "1.3.0",
+  "version": "1.4.0",
   "icons": {
     "16": "icon16.png",
     "48": "icon48.png",

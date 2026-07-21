@@ -1,5 +1,7 @@
 # Changelog
 
+- 2026-07-21: Regenerated `cap-context-extension.zip` from the current version 1.4.0 extension and removed the stray nested `extension/chrome(3).zip` archive. The release ZIP keeps `manifest.json` at its root and contains no nested ZIP files.
+
 - 2026-07-19: Consolidated the five platform-specific floating-button fixes into durable placement invariants in `LOGIC.md`: Claude voice-control sensitivity, ChatGPT's verified-button fixed-position and style-reflow monitoring, Gemini `Pro`/`Flash` anchoring, Grok expanded-composer retention, and DeepSeek expanded-composer retention. Future placement changes must remain scoped to the named platform rather than copying one provider's placement architecture onto another.
 
 - 2026-07-19: Fixed the ChatGPT large-paste button remaining at stale coordinates until a later click. Trigger diagnostics confirmed that ChatGPT's composer reflowed through style/class and text-only mutations that the global child-list observer deliberately ignored; because the observed boxes did not necessarily resize, no final recalculation followed the intermediate placement. ChatGPT now observes those mutations inside only its verified composer/form root and schedules the existing coalesced fixed-position update. Removed all temporary placement-trigger logging. Other platforms are unchanged. Per explicit request, no automated or browser tests were run.
