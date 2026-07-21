@@ -126,7 +126,7 @@
   const HANDOFF_CAPTURE_LINE_MAX = 0.94;
   const HANDOFF_ACTIVITY_LINE_START = 0.05;
   const HANDOFF_ACTIVITY_LINE_MAX = 0.9;
-  const HANDOFF_ACTIVITY_LINE_DURATION_MS = 12000;
+  const HANDOFF_SUMMARY_LINE_DURATION_MS = 20000;
   const GENERIC_CONVERSATION_SELECTORS = [
     "[data-message-author-role]",
     "[data-testid*='conversation' i]",
@@ -4808,7 +4808,7 @@
         if (!stageElement || stageElement.dataset.state !== "active" || !isHandoffOverlayVisible()) return;
         stageElement.style.setProperty(
           "--context-generator-stage-progress-duration",
-          `${HANDOFF_ACTIVITY_LINE_DURATION_MS}ms`
+          `${HANDOFF_SUMMARY_LINE_DURATION_MS}ms`
         );
         stageElement.style.setProperty("--context-generator-stage-progress-easing", "linear");
         setHandoffStageLineProgress(stageId, HANDOFF_ACTIVITY_LINE_MAX);

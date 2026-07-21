@@ -438,6 +438,9 @@ test("handoff progress is branded and wired only to real pipeline events", () =>
   assert.doesNotMatch(source, /countdown\.textContent = HANDOFF_REASSURANCE_TEXT/);
   assert.doesNotMatch(overlaySource, /Math\.random|setInterval|startHandoffStatusCycle/);
   assert.doesNotMatch(source, /HANDOFF_STATUS_INTERVAL_MS|HANDOFF_QUOTES|setHandoffStatus/);
+  assert.match(source, /const HANDOFF_SUMMARY_LINE_DURATION_MS = 20000/);
+  assert.match(source, /if \(stageId !== "summary"[^\n]+return/);
+  assert.match(source, /`\$\{HANDOFF_SUMMARY_LINE_DURATION_MS\}ms`/);
 
   assert.match(source, /markTransferTrace\([^\n]+"capture start"\);\s*setHandoffProgress\("capture", "active"\)/);
   assert.match(source, /markTransferTrace\(trace, "capture done", \{[\s\S]{0,240}setHandoffProgress\("capture", "done"\)/);
