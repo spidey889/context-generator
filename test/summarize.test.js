@@ -70,8 +70,10 @@ test("backend prompt profiles scale summary size to the captured chat", () => {
   assert.equal(getSummaryProfile("x".repeat(90000)).maxTokens, 4200);
   assert.equal(getSummaryProfile("x".repeat(350000)).maxTokens, 7000);
   assert.match(getContextCarryTemplate(getSummaryProfile("x".repeat(500))), /WHAT WE WERE DOING\n\[2-3 lines/);
-  assert.match(getContextCarryTemplate(getSummaryProfile("x".repeat(90000))), /KEY CONTEXT\n\[350-500 words/);
-  assert.match(getContextCarryTemplate(getSummaryProfile("x".repeat(350000))), /KEY CONTEXT\n\[600-850 words/);
+  assert.match(getContextCarryTemplate(getSummaryProfile("x".repeat(90000))), /WORKING STATE\n\[140-220 words/);
+  assert.match(getContextCarryTemplate(getSummaryProfile("x".repeat(90000))), /KEY CONTEXT\n\[250-380 words/);
+  assert.match(getContextCarryTemplate(getSummaryProfile("x".repeat(350000))), /WORKING STATE\n\[220-340 words/);
+  assert.match(getContextCarryTemplate(getSummaryProfile("x".repeat(350000))), /KEY CONTEXT\n\[420-650 words/);
   assert.match(SUMMARIZE_SOURCE, /Do not duplicate or pad short chats/);
   assert.match(SUMMARIZE_SOURCE, /Use the .* profile/);
   assert.match(SUMMARIZE_SOURCE, /serious handoff to another capable AI/);
@@ -165,7 +167,7 @@ test("backend forwards a 350k conversation to Mistral and reports the same input
     assert.equal(capturedRequest.url, "https://api.mistral.ai/v1/chat/completions");
     assert.equal(capturedRequest.body.model, "mistral-medium-3-5");
     assert.equal(capturedRequest.body.max_tokens, 7000);
-    assert.match(capturedRequest.body.prompt_cache_key, /^capcontext-summary-v4-extra-large-mistral-medium-3-5$/);
+    assert.match(capturedRequest.body.prompt_cache_key, /^capcontext-summary-v5-extra-large-mistral-medium-3-5$/);
     assert.equal(capturedRequest.body.prediction, undefined);
     const transcriptEnvelope = JSON.parse(capturedRequest.body.messages[1].content);
     assert.deepEqual(transcriptEnvelope, {
@@ -896,6 +898,7 @@ test("validator canonicalizes numbered provider headings without weakening secti
     "WHO I AM",
     "WHAT WE WERE DOING",
     "WHERE WE LEFT OFF",
+    "WORKING STATE",
     "DECISIONS MADE",
     "OPEN QUESTIONS",
     "KEY CONTEXT",
@@ -1072,13 +1075,16 @@ test("prompt and validator reserve None for genuinely unavailable optional facts
 
   assert.match(SUMMARIZE_SOURCE, /search the entire transcript carefully for facts relevant to each section/i);
   assert.match(SUMMARIZE_SOURCE, /Use "None" only when the transcript genuinely contains no useful information/i);
-  assert.match(SUMMARIZE_SOURCE, /WHAT WE WERE DOING, WHERE WE LEFT OFF, and KEY CONTEXT must always contain strong, grounded content/i);
+  assert.match(SUMMARIZE_SOURCE, /WHAT WE WERE DOING, WHERE WE LEFT OFF, WORKING STATE, and KEY CONTEXT must always contain strong, grounded content/i);
+  assert.match(SUMMARIZE_SOURCE, /WORKING STATE is the latest operational snapshot/i);
+  assert.match(SUMMARIZE_SOURCE, /distinguish verified or deployed state from planned, claimed, uncommitted, or untested state/i);
   assert.equal(validateContextCarrySummary(optionalWhoIsNone, smallProfile).ok, true);
 
-  for (const section of ["WHAT WE WERE DOING", "WHERE WE LEFT OFF", "KEY CONTEXT"]) {
+  for (const section of ["WHAT WE WERE DOING", "WHERE WE LEFT OFF", "WORKING STATE", "KEY CONTEXT"]) {
     const nextSection = {
       "WHAT WE WERE DOING": "WHERE WE LEFT OFF",
-      "WHERE WE LEFT OFF": "DECISIONS MADE",
+      "WHERE WE LEFT OFF": "WORKING STATE",
+      "WORKING STATE": "DECISIONS MADE",
       "KEY CONTEXT": "NEXT STEP"
     }[section];
     const requiredSectionIsNone = optionalWhoIsNone.replace(
@@ -1117,7 +1123,7 @@ test("summary prompt keeps decisions and current state tied to the latest user c
     /DECISIONS MADE must contain only decisions actually made by the user or clearly accepted or confirmed by the user/i
   );
   assert.match(prompt, /choices the user deliberately deferred and tradeoffs the user accepted/i);
-  assert.match(SUMMARIZE_SOURCE, /capcontext-summary-v4/);
+  assert.match(SUMMARIZE_SOURCE, /capcontext-summary-v5/);
   assert.match(SUMMARIZE_SOURCE, /Do not number it or prefix it with a bullet/);
 });
 
@@ -1146,6 +1152,9 @@ function makeContextCarrySummary(word, wordCount) {
     "",
     "WHERE WE LEFT OFF",
     "Ready for exact continuation.",
+    "",
+    "WORKING STATE",
+    "- Implementation state is preserved.",
     "",
     "DECISIONS MADE",
     "- Continue.",

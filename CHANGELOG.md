@@ -1,5 +1,7 @@
 # Changelog
 
+- 2026-07-21: Added `WORKING STATE` to the generated Context Carry contract as a required operational snapshot between `WHERE WE LEFT OFF` and `DECISIONS MADE`. It separates completed from pending work, preserves exact artifacts and results, distinguishes verified or deployed state from planned, claimed, uncommitted, or untested work, and explicitly records when a chat was discussion-only. Profile guidance was rebalanced so `KEY CONTEXT` remains focused on durable facts and constraints, deterministic validation now requires all eight sections, and the Mistral prompt-cache version moved to v5.
+
 - 2026-07-21: Regenerated `cap-context-extension.zip` from the current version 1.4.0 extension and removed the stray nested `extension/chrome(3).zip` archive. The release ZIP keeps `manifest.json` at its root and contains no nested ZIP files.
 
 - 2026-07-19: Consolidated the five platform-specific floating-button fixes into durable placement invariants in `LOGIC.md`: Claude voice-control sensitivity, ChatGPT's verified-button fixed-position and style-reflow monitoring, Gemini `Pro`/`Flash` anchoring, Grok expanded-composer retention, and DeepSeek expanded-composer retention. Future placement changes must remain scoped to the named platform rather than copying one provider's placement architecture onto another.

@@ -28,7 +28,7 @@ const PROVIDER_REQUEST_BUDGETS_MS = {
   "ministral-3b-2512": 25000,
   [GROQ_FALLBACK_MODEL]: 15000
 };
-const MISTRAL_PROMPT_CACHE_VERSION = "capcontext-summary-v4";
+const MISTRAL_PROMPT_CACHE_VERSION = "capcontext-summary-v5";
 const SUMMARY_PROVIDERS = {
   gemini: {
     id: "gemini",
@@ -59,6 +59,7 @@ const SUMMARY_PROFILES = [
       who: "1 short line: user/project only if present",
       doing: "2-3 lines: the immediate task and why it matters",
       left: "1-2 lines: exact stopping point",
+      working: "1-3 bullets: latest concrete state, or say that no work was executed",
       decisions: "0-3 bullets: only real decisions",
       questions: "0-2 bullets, or None",
       context: "2-4 dense bullets: exact details worth carrying"
@@ -70,14 +71,15 @@ const SUMMARY_PROFILES = [
     targetWords: 350,
     minWords: 0,
     maxTokens: 1000,
-    sectionBudget: "WHO I AM 30-60 words; WHAT WE WERE DOING 60-90; WHERE WE LEFT OFF 40-70; DECISIONS MADE 3-6 compact bullets; OPEN QUESTIONS 1-4 bullets or None; KEY CONTEXT 80-140 words in compact bullets; NEXT STEP exactly as instructed.",
+    sectionBudget: "WHO I AM 30-60 words; WHAT WE WERE DOING 60-90; WHERE WE LEFT OFF 40-70; WORKING STATE 40-70 words in compact bullets; DECISIONS MADE 3-6 compact bullets; OPEN QUESTIONS 1-4 bullets or None; KEY CONTEXT 60-110 words in compact bullets; NEXT STEP exactly as instructed.",
     templateHints: {
       who: "30-60 words: user/project/preferences that matter",
       doing: "60-90 words: actual task and concrete direction",
       left: "40-70 words: latest state and next validation point",
+      working: "40-70 words in compact bullets: completed and pending work, exact artifacts, and verification state",
       decisions: "3-6 compact bullets if available",
       questions: "1-4 compact bullets, or None",
-      context: "80-140 words in compact bullets: files, constraints, exact copy, commands, risks"
+      context: "60-110 words in compact bullets: durable constraints, exact copy, risks, and facts needed for continuation"
     }
   },
   {
@@ -86,14 +88,15 @@ const SUMMARY_PROFILES = [
     targetWords: 700,
     minWords: 0,
     maxTokens: 1900,
-    sectionBudget: "WHO I AM 50-90 words; WHAT WE WERE DOING 110-160; WHERE WE LEFT OFF 80-120; DECISIONS MADE 5-9 compact bullets; OPEN QUESTIONS 2-6 bullets or None; KEY CONTEXT 180-280 words in dense bullets; NEXT STEP exactly as instructed.",
+    sectionBudget: "WHO I AM 50-90 words; WHAT WE WERE DOING 110-160; WHERE WE LEFT OFF 80-120; WORKING STATE 70-120 words in compact bullets; DECISIONS MADE 5-9 compact bullets; OPEN QUESTIONS 2-6 bullets or None; KEY CONTEXT 130-220 words in dense bullets; NEXT STEP exactly as instructed.",
     templateHints: {
       who: "50-90 words: durable user/project context",
       doing: "110-160 words: task, product/repo/platform, attempts, direction",
       left: "80-120 words: latest state, blocker, next validation",
+      working: "70-120 words in compact bullets: completed versus pending work, exact files/branches/URLs/commands/errors, and test or deployment status",
       decisions: "5-9 compact bullets preserving tradeoffs",
       questions: "2-6 compact bullets, or None",
-      context: "180-280 words in dense bullets: files, functions, commands, errors, tests, deployment state, constraints"
+      context: "130-220 words in dense bullets: durable functions, constraints, risks, requirements, and facts that prevent repeated work"
     }
   },
   {
@@ -102,14 +105,15 @@ const SUMMARY_PROFILES = [
     targetWords: 1200,
     minWords: 1100,
     maxTokens: 4200,
-    sectionBudget: "WHO I AM 80-140 words; WHAT WE WERE DOING 170-240; WHERE WE LEFT OFF 120-180; DECISIONS MADE 180-280; OPEN QUESTIONS 100-180; KEY CONTEXT 350-500; NEXT STEP exactly as instructed.",
+    sectionBudget: "WHO I AM 80-140 words; WHAT WE WERE DOING 170-240; WHERE WE LEFT OFF 120-180; WORKING STATE 140-220 words; DECISIONS MADE 180-280; OPEN QUESTIONS 100-180; KEY CONTEXT 250-380; NEXT STEP exactly as instructed.",
     templateHints: {
       who: "80-140 words: user's name if mentioned, what they are building or trying to do, role/background/preferences that matter, and any durable context the next AI must know",
       doing: "170-240 words: the actual task, product/repo/platform, why it mattered, what was tried or discussed, and the concrete direction the user wanted",
       left: "120-180 words: exact stopping point, latest state, latest user instruction, current blocker or next validation point",
+      working: "140-220 words in dense bullets: completed versus pending work, exact files/branches/URLs/commands/errors, changed or uncommitted artifacts, and what was tested, deployed, or remains unverified",
       decisions: "180-280 words in compact bullets: every important user-made or user-accepted decision, user-deferred choice, accepted tradeoff, accepted risk, and reason when available",
       questions: "100-180 words in compact bullets: unresolved risks, validation gaps, review concerns, things deferred by the user, or None only when truly nothing remains",
-      context: "350-500 words in dense bullets: exact files, functions, constants, commands, errors, tests, deployment state, APIs, model IDs, payload sizes, user constraints, tone/copy requirements, and anything that prevents repeating work"
+      context: "250-380 words in dense bullets: durable functions, constants, APIs, model IDs, payload sizes, user constraints, tone/copy requirements, risks, and anything that prevents repeating work"
     }
   },
   {
@@ -118,14 +122,15 @@ const SUMMARY_PROFILES = [
     targetWords: 1800,
     minWords: 1600,
     maxTokens: 7000,
-    sectionBudget: "WHO I AM 100-180 words; WHAT WE WERE DOING 260-360; WHERE WE LEFT OFF 180-260; DECISIONS MADE 260-400; OPEN QUESTIONS 160-260; KEY CONTEXT 600-850; NEXT STEP exactly as instructed.",
+    sectionBudget: "WHO I AM 100-180 words; WHAT WE WERE DOING 260-360; WHERE WE LEFT OFF 180-260; WORKING STATE 220-340 words; DECISIONS MADE 260-400; OPEN QUESTIONS 160-260; KEY CONTEXT 420-650; NEXT STEP exactly as instructed.",
     templateHints: {
       who: "100-180 words: user's name if mentioned, what they are building or trying to do, role/background/preferences that matter, and any durable context the next AI must know",
       doing: "260-360 words: the actual task, product/repo/platform, why it mattered, what was tried or discussed, and the concrete direction the user wanted",
       left: "180-260 words: exact stopping point, latest state, latest user instruction, current blocker or next validation point",
+      working: "220-340 words in dense bullets: completed versus pending work, exact files/branches/URLs/commands/errors, changed or uncommitted artifacts, and what was tested, deployed, or remains unverified",
       decisions: "260-400 words in compact bullets: every important user-made or user-accepted decision, user-deferred choice, accepted tradeoff, accepted risk, and reason when available",
       questions: "160-260 words in compact bullets: unresolved risks, validation gaps, review concerns, things deferred by the user, or None only when truly nothing remains",
-      context: "600-850 words in dense bullets: exact files, functions, constants, commands, errors, tests, deployment state, APIs, model IDs, payload sizes, user constraints, tone/copy requirements, and anything that prevents repeating work"
+      context: "420-650 words in dense bullets: durable functions, constants, APIs, model IDs, payload sizes, user constraints, tone/copy requirements, risks, and anything that prevents repeating work"
     }
   }
 ];
@@ -140,6 +145,7 @@ const CONTEXT_CARRY_SECTIONS = [
   { title: "WHO I AM", heading: "🧠 WHO I AM" },
   { title: "WHAT WE WERE DOING", heading: "🎯 WHAT WE WERE DOING" },
   { title: "WHERE WE LEFT OFF", heading: "📍 WHERE WE LEFT OFF" },
+  { title: "WORKING STATE", heading: "🛠️ WORKING STATE" },
   { title: "DECISIONS MADE", heading: "✅ DECISIONS MADE" },
   { title: "OPEN QUESTIONS", heading: "⚠️ OPEN QUESTIONS" },
   { title: "KEY CONTEXT", heading: "📦 KEY CONTEXT" },
@@ -148,6 +154,7 @@ const CONTEXT_CARRY_SECTIONS = [
 const IMPORTANT_CONTEXT_CARRY_SECTIONS = new Set([
   "WHAT WE WERE DOING",
   "WHERE WE LEFT OFF",
+  "WORKING STATE",
   "KEY CONTEXT"
 ]);
 const SUSPICIOUS_SUMMARY_ERROR_PATTERN = /^(?:error\b|api\s+error\b|request\s+failed\b|service\s+unavailable\b|internal\s+server\s+error\b|rate\s+limit(?:ed)?\b|invalid\s+request\b|unauthorized\b|forbidden\b)/i;
@@ -756,7 +763,9 @@ ${headerRule}
 - For coding/product chats, include the concrete repo/app/platform, exact files/functions/constants, commands run, errors seen, tests or verification, deployment state, and user constraints.
 - Before writing, search the entire transcript carefully for facts relevant to each section, including facts in earlier turns rather than only the latest exchange.
 - Use "None" only when the transcript genuinely contains no useful information for that section after that careful search.
-- WHAT WE WERE DOING, WHERE WE LEFT OFF, and KEY CONTEXT must always contain strong, grounded content from the transcript; never write "None" for those sections.
+- WHAT WE WERE DOING, WHERE WE LEFT OFF, WORKING STATE, and KEY CONTEXT must always contain strong, grounded content from the transcript; never write "None" for those sections.
+- WORKING STATE is the latest operational snapshot. Separate completed from pending work, preserve exact artifacts and results when present, and distinguish verified or deployed state from planned, claimed, uncommitted, or untested state. For discussion-only chats, state clearly that no implementation or verification occurred.
+- Keep durable facts, constraints, and background in KEY CONTEXT instead of duplicating the operational snapshot from WORKING STATE.
 - The KEY CONTEXT section should usually be the densest section. Use compact bullets there when that preserves more specifics, and include at least 6 bullets when enough details exist.
 - Treat assistant suggestions, recommendations, possibilities, and proposed options as unconfirmed unless the user clearly accepts or confirms them. Never present an unaccepted assistant proposal as a decision or current project state.
 - If the user rejects an assistant proposal, do not list that proposal in DECISIONS MADE. Mention it elsewhere only when it still matters, and label it explicitly as rejected.
@@ -769,7 +778,7 @@ ${headerRule}
 - Do not pad or write generic filler; every line should carry useful context.
 - Do not add the closing footer from SKILL.md: no "PASTE THIS AT THE TOP OF YOUR NEW CHAT" and no "Continue from where we left off."
 - The 🔁 NEXT STEP section must be exactly: ${DESTINATION_CONFIRMATION_INSTRUCTION}
-- Before finalizing, silently check the total word count. If this profile has a non-zero minimum and the output is below ${profile.minWords || 0} words, expand KEY CONTEXT, DECISIONS MADE, and OPEN QUESTIONS with concrete details from the transcript.
+- Before finalizing, silently check the total word count. If this profile has a non-zero minimum and the output is below ${profile.minWords || 0} words, expand WORKING STATE, KEY CONTEXT, DECISIONS MADE, and OPEN QUESTIONS with concrete details from the transcript.
 
 Required template:
 ${getContextCarryTemplate(profile, options)}`;
@@ -955,16 +964,19 @@ function buildDirectContextCarrySummary(conversation) {
     "Continue from the exact source excerpt below.",
     "",
     CONTEXT_CARRY_SECTIONS[3].heading,
-    "None unless stated in the source excerpt.",
+    "Use the exact source excerpt in KEY CONTEXT below as the authoritative working state; this local-direct carry does not infer additional implementation or verification status.",
     "",
     CONTEXT_CARRY_SECTIONS[4].heading,
     "None unless stated in the source excerpt.",
     "",
     CONTEXT_CARRY_SECTIONS[5].heading,
+    "None unless stated in the source excerpt.",
+    "",
+    CONTEXT_CARRY_SECTIONS[6].heading,
     "- Exact source text:",
     excerpt,
     "",
-    CONTEXT_CARRY_SECTIONS[6].heading,
+    CONTEXT_CARRY_SECTIONS[7].heading,
     DESTINATION_CONFIRMATION_INSTRUCTION
   ].join("\n");
 }
@@ -995,6 +1007,9 @@ function getContextCarryTemplate(profile, options = {}) {
 
 📍 WHERE WE LEFT OFF
 [${hints.left}]
+
+🛠️ WORKING STATE
+[${hints.working}]
 
 ✅ DECISIONS MADE
 [${hints.decisions}]
