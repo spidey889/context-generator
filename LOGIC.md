@@ -62,7 +62,7 @@ Capture preserves the complete middle, leaves the source at its final capture po
 
 ## Summary Profiles And Provider Chain
 
-Input at or below 1,200 characters uses `local-direct`: the backend builds the Context Carry locally from the exact short transcript and calls no provider.
+Input at or below 1,200 characters uses `local-direct`: the backend calls no provider and produces a compact handoff containing only the Context Carry title, `CONVERSATION SO FAR`, the exact short transcript, and the destination confirmation. It does not pad tiny chats with generated-summary sections or backend/template language.
 
 | Profile | Input characters | Target | Output cap |
 | --- | ---: | ---: | ---: |

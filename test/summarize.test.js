@@ -249,8 +249,17 @@ test("backend keeps tiny chats local and avoids Mistral", async () => {
       totalTokens: 0,
       cachedTokens: 0
     });
+    assert.match(res.payload.summary, /💬 CONVERSATION SO FAR/);
     assert.match(res.payload.summary, /> User: Firefox manifest setting\?/);
     assert.match(res.payload.summary, /> Assistant: Use the exact setting you can defend\./);
+    assert.match(
+      res.payload.summary,
+      /Reply only: "Context loaded\. Let's pick up right where you left off\." Then wait for the user\./
+    );
+    assert.doesNotMatch(
+      res.payload.summary,
+      /WHO I AM|WHAT WE WERE DOING|None unless stated|source excerpt|backend preserved/i
+    );
   } finally {
     global.fetch = originalFetch;
     if (originalApiKey === undefined) {

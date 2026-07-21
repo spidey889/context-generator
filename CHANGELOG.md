@@ -1,5 +1,7 @@
 # Changelog
 
+- 2026-07-21: Simplified the tiny `local-direct` handoff. Chats at or below 1,200 characters now show only `CONVERSATION SO FAR`, the exact quoted exchange, and the destination confirmation instead of seven mostly empty generated-summary sections or backend/template wording. Tiny chats still make no provider call, while all generated-summary profiles remain unchanged.
+
 - 2026-07-21: Regenerated `cap-context-extension.zip` from the current version 1.4.0 extension and removed the stray nested `extension/chrome(3).zip` archive. The release ZIP keeps `manifest.json` at its root and contains no nested ZIP files.
 
 - 2026-07-19: Consolidated the five platform-specific floating-button fixes into durable placement invariants in `LOGIC.md`: Claude voice-control sensitivity, ChatGPT's verified-button fixed-position and style-reflow monitoring, Gemini `Pro`/`Flash` anchoring, Grok expanded-composer retention, and DeepSeek expanded-composer retention. Future placement changes must remain scoped to the named platform rather than copying one provider's placement architecture onto another.
