@@ -9,21 +9,17 @@
     "128": "icon128.png"
   },
   "permissions": [
-    "activeTab",
     "alarms",
     "scripting",
-    "storage",
-    "tabs"
+    "storage"
   ],
   "host_permissions": [
     "https://*.claude.ai/*",
-    "https://chatgpt.com/*",
     "https://*.chatgpt.com/*",
     "https://chat.openai.com/*",
     "https://gemini.google.com/*",
     "https://grok.com/*",
     "https://chat.deepseek.com/*",
-    "https://spidey889.github.io/context-generator/analysis*",
     "https://context-generator-five.vercel.app/*",
     "https://iqkzynzxbmemhtiupwwu.supabase.co/*"
   ],
@@ -43,7 +39,6 @@
     {
       "matches": [
         "https://*.claude.ai/*",
-        "https://chatgpt.com/*",
         "https://*.chatgpt.com/*",
         "https://chat.openai.com/*",
         "https://gemini.google.com/*",
@@ -66,7 +61,6 @@
       "resources": ["icon16.png", "icon48.png", "icon128.png", "bubble-icon.png", "logos/*.png"],
       "matches": [
         "https://*.claude.ai/*",
-        "https://chatgpt.com/*",
         "https://*.chatgpt.com/*",
         "https://chat.openai.com/*",
         "https://gemini.google.com/*",

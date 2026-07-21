@@ -1,5 +1,7 @@
 # Changelog
 
+- 2026-07-21: Reduced extension permissions without changing supported sites or transfer behavior. Removed redundant `activeTab` and `tabs` grants, relying on existing supported-site host access for matching tab URLs while retaining normal tab creation, activation, messaging, and removal events. Removed the duplicate exact `chatgpt.com` patterns because the wildcard already covers the root and subdomains, and removed the GitHub analysis page from `host_permissions` while keeping its narrow static content-script match.
+
 - 2026-07-21: Slowed only the handoff card's display-only `Summarizing` connector from 12 to 20 seconds so it does not visually rush toward the paste step. Capture still follows real sweep geometry, summary completion still comes only from the backend's real completion mark, and the animation never delays a faster transfer.
 
 - 2026-07-21: Simplified the tiny `local-direct` handoff. Chats at or below 1,200 characters now show only `CONVERSATION SO FAR`, the exact quoted exchange, and the destination confirmation instead of seven mostly empty generated-summary sections or backend/template wording. Tiny chats still make no provider call, while all generated-summary profiles remain unchanged.

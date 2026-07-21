@@ -87,7 +87,7 @@ const DESTINATIONS = {
   }
 };
 // Keep these rules aligned with manifest host access. Ordinary OpenAI pages are
-// not ChatGPT surfaces, even though activeTab could otherwise inject into them.
+// not ChatGPT surfaces and must never receive programmatic injection.
 const DESTINATION_HOST_RULES = {
   claude: { domains: ["claude.ai"] },
   chatgpt: { domains: ["chatgpt.com"], exact: ["chat.openai.com"] },

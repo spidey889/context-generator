@@ -33,6 +33,8 @@ Cap Context supports Claude, ChatGPT, Gemini, Grok, and DeepSeek. ChatGPT access
 
 One shared content script handles source and destination behavior. A versioned load id, runtime guards, cached asset URLs, and stale UI/style cleanup make unpacked-extension reloads safe.
 
+The manifest requests only `alarms`, `scripting`, and `storage`. Supported-site host access supplies the matching tab URL visibility needed by `chrome.tabs`; the broader `tabs` permission and temporary `activeTab` grant are intentionally absent. The GitHub analysis bridge retains its narrow static content-script match without a duplicate host permission, and the ChatGPT wildcard covers both `chatgpt.com` and its subdomains.
+
 ## Transfer Flow
 
 1. Opening the picker is UI-only. It may add content-free preconnect hints, but it does not scrape, fingerprint, summarize, or transmit chat text.

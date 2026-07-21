@@ -306,16 +306,22 @@ function loadPlatformContent(elements = [], hostname = "chatgpt.com", { expectSu
 test("ChatGPT startup excludes ordinary OpenAI pages", () => {
   const manifest = JSON.parse(fs.readFileSync(MANIFEST_PATH, "utf8"));
   const platformContent = manifest.content_scripts.find((entry) => entry.js.includes("platform-content.js"));
+  const analysisContent = manifest.content_scripts.find((entry) => entry.js.includes("analysis-bridge.js"));
   const platformResources = manifest.web_accessible_resources.find((entry) => entry.resources.includes("bubble-icon.png"));
   const matchGroups = [manifest.host_permissions, platformContent.matches, platformResources.matches];
 
   for (const matches of matchGroups) {
-    assert.ok(matches.includes("https://chatgpt.com/*"));
+    assert.equal(matches.includes("https://chatgpt.com/*"), false);
     assert.ok(matches.includes("https://*.chatgpt.com/*"));
     assert.ok(matches.includes("https://chat.openai.com/*"));
     assert.equal(matches.includes("https://openai.com/*"), false);
     assert.equal(matches.includes("https://*.openai.com/*"), false);
   }
+
+  assert.equal(manifest.permissions.includes("activeTab"), false);
+  assert.equal(manifest.permissions.includes("tabs"), false);
+  assert.equal(manifest.host_permissions.includes("https://spidey889.github.io/context-generator/analysis*"), false);
+  assert.ok(analysisContent.matches.includes("https://spidey889.github.io/context-generator/analysis*"));
 
   assert.equal(loadPlatformContent([], "openai.com", { expectSupported: false }), null);
   assert.equal(loadPlatformContent([], "www.openai.com", { expectSupported: false }), null);
