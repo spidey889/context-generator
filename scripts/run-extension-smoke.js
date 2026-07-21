@@ -445,15 +445,27 @@ async function run() {
     assert.match(capturedConversation, new RegExp(ASSISTANT_SENTINEL.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
     process.stdout.write("✓ Capture reached the stub backend exactly once with both conversation turns.\n");
 
-    const destinationTarget = await waitFor(async () => {
+    const destinationResult = await waitFor(async () => {
       const targets = await getTargets(devToolsPort);
-      return targets.find((target) => target.type === "page" && target.url.startsWith(`${origin}/destination`));
-    }, "the controlled destination page");
-    destinationSession = await CdpSession.connect(destinationTarget.webSocketDebuggerUrl);
-    const pastedValue = await waitFor(
-      () => destinationSession.evaluate('document.querySelector("textarea")?.value || ""'),
-      "the destination paste"
-    );
+      const destinationTargets = targets.filter(
+        (target) => target.type === "page" && target.url.startsWith(`${origin}/destination`)
+      );
+
+      for (const target of destinationTargets) {
+        const candidateSession = await CdpSession.connect(target.webSocketDebuggerUrl);
+        try {
+          const value = await candidateSession.evaluate('document.querySelector("textarea")?.value || ""');
+          if (value === SUMMARY_TEXT) return { session: candidateSession, value };
+        } catch {
+          // A recovery tab can still be navigating; retry it on the next poll.
+        }
+        candidateSession.close();
+      }
+
+      return null;
+    }, "the destination paste");
+    destinationSession = destinationResult.session;
+    const pastedValue = destinationResult.value;
     assert.equal(pastedValue, SUMMARY_TEXT);
     await new Promise((resolve) => setTimeout(resolve, 350));
     const sendClicks = await destinationSession.evaluate("window.__capContextSmokeSendClicks");

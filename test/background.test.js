@@ -75,7 +75,8 @@ function loadBackgroundForSummaryTest(fetchImpl) {
 function loadBackgroundForTransferTest({
   preparedTab,
   sendMessageImpl,
-  firstCreatedTabId = 100
+  firstCreatedTabId = 100,
+  useRealTimers = false
 } = {}) {
   let messageListener = null;
   let nextCreatedTabId = firstCreatedTabId;
@@ -94,7 +95,7 @@ function loadBackgroundForTransferTest({
     console: { debug() {}, error() {}, log() {}, warn() {} },
     fetch: async () => { throw new Error("fetch is not expected in transfer tests"); },
     performance: { now: () => Date.now() },
-    setTimeout: fastSetTimeout,
+    setTimeout: useRealTimers ? setTimeout : fastSetTimeout,
     chrome: {
       action: {
         onClicked: event,
@@ -149,7 +150,7 @@ function loadBackgroundForTransferTest({
   };
 
   vm.createContext(sandbox);
-  new vm.Script(`${source}\n;globalThis.__backgroundTestHooks = { getPlatformFromUrl };`, {
+  new vm.Script(`${source}\n;globalThis.__backgroundTestHooks = { getPlatformFromUrl, sendMessageWhenReady };`, {
     filename: "extension/background.js"
   }).runInContext(sandbox);
   assert.ok(messageListener, "background transfer listener was registered");
@@ -157,6 +158,7 @@ function loadBackgroundForTransferTest({
   return {
     operations,
     getPlatformFromUrl: sandbox.__backgroundTestHooks.getPlatformFromUrl,
+    sendMessageWhenReady: sandbox.__backgroundTestHooks.sendMessageWhenReady,
     sendTransfer(destination, preparedTabId = null) {
       return new Promise((resolve, reject) => {
         const keepsChannelOpen = messageListener(
@@ -175,6 +177,27 @@ function loadBackgroundForTransferTest({
     }
   };
 }
+
+test("destination messaging enforces its deadline while a response is still pending", async () => {
+  const harness = loadBackgroundForTransferTest({
+    sendMessageImpl: () => new Promise(() => {}),
+    useRealTimers: true
+  });
+  const startedAt = Date.now();
+
+  await assert.rejects(
+    harness.sendMessageWhenReady(
+      41,
+      { type: "PASTE_CONTEXT", destination: "claude", text: "context" },
+      "platform-content.js",
+      40,
+      "Claude"
+    ),
+    (error) => error?.code === "message_timeout" && error.message === "Timed out connecting to Claude."
+  );
+
+  assert.ok(Date.now() - startedAt < 500, "The in-flight destination response must not outlive its deadline.");
+});
 
 test("extension sends each summary job to the backend only once", () => {
   assert.match(source, /const SUMMARY_BACKEND_TIMEOUT_MS = 210000/);

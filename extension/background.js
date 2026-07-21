@@ -936,13 +936,14 @@ function sendMessage(tabId, message) {
 
 async function sendMessageWhenReady(tabId, message, contentScript, timeoutMs, name, transferId = null, trace = null) {
   const startedAt = Date.now();
+  const deadline = startedAt + timeoutMs;
   let lastError = null;
   let attempts = 0;
 
-  while (Date.now() - startedAt <= timeoutMs) {
+  while (Date.now() <= deadline) {
     attempts += 1;
     try {
-      const response = await sendMessage(tabId, message);
+      const response = await sendMessageBeforeDeadline(tabId, message, deadline, name);
       if (response !== undefined) {
         const readyMs = Date.now() - startedAt;
         logPerf(transferId, "tab ready/message response", { tabId, name, readyMs, attempts });
@@ -957,12 +958,12 @@ async function sendMessageWhenReady(tabId, message, contentScript, timeoutMs, na
       }
     }
 
-    if (Date.now() - startedAt > timeoutMs) break;
+    if (Date.now() > deadline) break;
     markBackgroundTrace(trace, "content script inject attempt", { tabId, attempts });
     await ensureContentScript(tabId, contentScript);
 
     try {
-      const response = await sendMessage(tabId, message);
+      const response = await sendMessageBeforeDeadline(tabId, message, deadline, name);
       if (response !== undefined) {
         const readyMs = Date.now() - startedAt;
         logPerf(transferId, "tab ready/message response after inject", { tabId, name, readyMs, attempts });
@@ -982,6 +983,29 @@ async function sendMessageWhenReady(tabId, message, contentScript, timeoutMs, na
 
   const detail = lastError?.message ? ` Last error: ${lastError.message}` : "";
   throw new Error(`Timed out connecting to ${name}.${detail}`);
+}
+
+async function sendMessageBeforeDeadline(tabId, message, deadline, name) {
+  const remainingMs = deadline - Date.now();
+  if (remainingMs <= 0) throw createMessageTimeoutError(name);
+
+  let timeout = null;
+  try {
+    return await Promise.race([
+      sendMessage(tabId, message),
+      new Promise((_, reject) => {
+        timeout = setTimeout(() => reject(createMessageTimeoutError(name)), remainingMs);
+      })
+    ]);
+  } finally {
+    if (timeout) clearTimeout(timeout);
+  }
+}
+
+function createMessageTimeoutError(name) {
+  const error = new Error(`Timed out connecting to ${name}.`);
+  error.code = "message_timeout";
+  return error;
 }
 
 function isRetryableMessageError(error) {

@@ -1,5 +1,7 @@
 # Changelog
 
+- 2026-07-21: Enforced destination message deadlines across already-delivered content-script requests instead of checking the clock only between connection attempts, preventing a hung paste listener from outliving the 30-second default or 45-second ChatGPT wait. Added a focused pending-response timeout regression. The isolated Brave smoke now checks every controlled destination tab for the exact pasted summary, so prepared-tab recovery cannot leave it attached to an earlier empty tab and produce a false 45-second failure.
+
 - 2026-07-21: Reduced extension permissions without changing supported sites or transfer behavior. Removed redundant `activeTab` and `tabs` grants, relying on existing supported-site host access for matching tab URLs while retaining normal tab creation, activation, messaging, and removal events. Removed the duplicate exact `chatgpt.com` patterns because the wildcard already covers the root and subdomains, and removed the GitHub analysis page from `host_permissions` while keeping its narrow static content-script match.
 
 - 2026-07-21: Slowed only the handoff card's display-only `Summarizing` connector from 12 to 20 seconds so it does not visually rush toward the paste step. Capture still follows real sweep geometry, summary completion still comes only from the backend's real completion mark, and the animation never delays a faster transfer.
