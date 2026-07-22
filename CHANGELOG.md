@@ -1,5 +1,7 @@
 # Changelog
 
+- 2026-07-22: Prepared the Chrome Web Store release as extension version 1.4.1. Regenerated the tracked release archive from the final extension source and verified the deterministic suite, installed-extension transfer smoke, manifest/version alignment, root archive layout, and absence of nested ZIP files.
+
 - 2026-07-22: Removed the handoff card's redundant "Live handoff" eyebrow, restored completed ticks to brand purple, and shifted the surface and ambient glow toward a more neutral near-black. Transfer behavior and timing are unchanged. Per explicit request, no automated or browser tests were run.
 
 - 2026-07-22: Polished the handoff card without changing transfer logic or timing. The compact dark surface now has clearer status hierarchy, a subtle top spotlight, stronger depth, a refined progress rail, a restrained active-stage halo, and muted green completion states. The earlier rejected broad multicolor treatment was deliberately not revisited; reduced-motion behavior remains supported. Per explicit request, no automated or browser tests were run.
