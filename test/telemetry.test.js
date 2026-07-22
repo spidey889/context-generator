@@ -13,6 +13,9 @@ const EDGE_FUNCTION_SOURCE = fs.readFileSync(
   "utf8"
 );
 const VALIDATION_PATH = path.join(ROOT, "supabase", "functions", "transfer-telemetry", "validation.mjs");
+const VERCEL_TELEMETRY_SOURCE = fs.readFileSync(path.join(ROOT, "api", "telemetry.js"), "utf8");
+const VERCEL_VALIDATION = require(path.join(ROOT, "api", "telemetry-validation.js"));
+const VERCEL_TELEMETRY_HANDLER = require(path.join(ROOT, "api", "telemetry.js"));
 const PROGRESS_MIGRATION_SOURCE = fs.readFileSync(
   path.join(ROOT, "supabase", "migrations", "20260718113749_atomically_preserve_transfer_event_progress.sql"),
   "utf8"
@@ -132,6 +135,64 @@ function makeEvent(overrides = {}) {
   };
 }
 
+function makeTelemetryPayload(overrides = {}) {
+  return {
+    attempt_id: "11111111-1111-4111-8111-111111111111",
+    install_id: "22222222-2222-4222-8222-222222222222",
+    attempted_at: "2026-07-18T10:00:00.000Z",
+    source_platform: "claude",
+    destination_platform: "chatgpt",
+    character_count: 50,
+    status: "failed",
+    last_stage: "paste_started",
+    failure_reason: "paste_failed",
+    extension_version: "1.4.0",
+    ...overrides
+  };
+}
+
+function createMockResponse() {
+  const headers = {};
+  return {
+    headers,
+    statusCode: null,
+    body: null,
+    ended: false,
+    setHeader(name, value) {
+      headers[name.toLowerCase()] = value;
+    },
+    status(statusCode) {
+      this.statusCode = statusCode;
+      return this;
+    },
+    json(body) {
+      this.body = body;
+      this.ended = true;
+      return this;
+    },
+    end() {
+      this.ended = true;
+      return this;
+    }
+  };
+}
+
+async function invokeTelemetryHandler(body, options = {}) {
+  const req = {
+    method: options.method || "POST",
+    headers: {
+      origin: "chrome-extension://abcdefghijklmnopabcdefghijklmnop",
+      "content-type": "application/json",
+      "x-cap-context-client": "cap-context-extension/1",
+      ...options.headers
+    },
+    body
+  };
+  const res = createMockResponse();
+  await VERCEL_TELEMETRY_HANDLER(req, res);
+  return res;
+}
+
 test("both transfer entry points start telemetry before early exits", () => {
   const iconStart = PLATFORM_SOURCE.indexOf('if (message?.type === "START_CONTEXT_TRANSFER")');
   const iconEnd = PLATFORM_SOURCE.indexOf("return false;", PLATFORM_SOURCE.indexOf("runContextFlow", iconStart));
@@ -213,6 +274,21 @@ test("telemetry keeps one install id across summaries, browser restarts, and ext
   assert.deepEqual(updatedWorker.storage["context-generator-telemetry-outbox-v1"], []);
 });
 
+test("extension sends telemetry only to the Vercel backend without Supabase credentials", async () => {
+  const requests = [];
+  const background = loadTelemetryBackground(async (url, options) => {
+    requests.push({ url, options });
+    return { ok: true };
+  });
+  await background.drain();
+  await background.sendTelemetry(makeEvent());
+
+  assert.equal(requests.length, 1);
+  assert.equal(requests[0].url, "https://context-generator-five.vercel.app/api/telemetry");
+  assert.equal(requests[0].options.headers["X-Cap-Context-Client"], "cap-context-extension/1");
+  assert.equal(requests[0].options.headers.apikey, undefined);
+});
+
 test("failed delivery keeps ordered operations and startup retries them", async () => {
   let online = false;
   const requests = [];
@@ -272,18 +348,7 @@ test("closing the source tab records an in-flight transfer as user cancelled", a
 
 test("Supabase payload validation rejects content, unknown stages, and arbitrary failures", async () => {
   const { selectLatestTelemetryStage, validateTelemetryPayload } = await import(pathToFileURL(VALIDATION_PATH).href);
-  const valid = {
-    attempt_id: "11111111-1111-4111-8111-111111111111",
-    install_id: "22222222-2222-4222-8222-222222222222",
-    attempted_at: "2026-07-18T10:00:00.000Z",
-    source_platform: "claude",
-    destination_platform: "chatgpt",
-    character_count: 50,
-    status: "failed",
-    last_stage: "paste_started",
-    failure_reason: "paste_failed",
-    extension_version: "1.3.0"
-  };
+  const valid = makeTelemetryPayload({ extension_version: "1.3.0" });
 
   assert.deepEqual(validateTelemetryPayload(valid), valid);
   assert.equal(validateTelemetryPayload({ ...valid, conversation: "raw chat" }), null);
@@ -306,6 +371,87 @@ test("Supabase payload validation rejects content, unknown stages, and arbitrary
   assert.equal(selectLatestTelemetryStage("capture_completed", "summary_completed"), "summary_completed");
 });
 
+test("Vercel and Supabase enforce the same metadata-only telemetry schema", async () => {
+  const { validateTelemetryPayload: validateSupabasePayload } = await import(pathToFileURL(VALIDATION_PATH).href);
+  const candidates = [
+    makeTelemetryPayload(),
+    makeTelemetryPayload({ status: "succeeded", last_stage: "completed", failure_reason: null }),
+    makeTelemetryPayload({ conversation: "raw chat" }),
+    makeTelemetryPayload({ summary: "generated summary" }),
+    makeTelemetryPayload({ last_stage: "unknown_stage" }),
+    makeTelemetryPayload({ failure_reason: "arbitrary detail" })
+  ];
+
+  for (const candidate of candidates) {
+    assert.deepEqual(VERCEL_VALIDATION.validateTelemetryPayload(candidate), validateSupabasePayload(candidate));
+  }
+});
+
+test("Vercel forwards valid telemetry with server-only Supabase credentials", async (t) => {
+  const originalFetch = global.fetch;
+  const originalUrl = process.env.SUPABASE_TELEMETRY_FUNCTION_URL;
+  const originalKey = process.env.SUPABASE_TELEMETRY_PUBLISHABLE_KEY;
+  t.after(() => {
+    global.fetch = originalFetch;
+    if (originalUrl === undefined) delete process.env.SUPABASE_TELEMETRY_FUNCTION_URL;
+    else process.env.SUPABASE_TELEMETRY_FUNCTION_URL = originalUrl;
+    if (originalKey === undefined) delete process.env.SUPABASE_TELEMETRY_PUBLISHABLE_KEY;
+    else process.env.SUPABASE_TELEMETRY_PUBLISHABLE_KEY = originalKey;
+  });
+
+  process.env.SUPABASE_TELEMETRY_FUNCTION_URL = "https://example.supabase.co/functions/v1/transfer-telemetry";
+  process.env.SUPABASE_TELEMETRY_PUBLISHABLE_KEY = "server-only-key";
+  const upstreamRequests = [];
+  global.fetch = async (url, options) => {
+    upstreamRequests.push({ url, options });
+    return { ok: true };
+  };
+
+  const payload = makeTelemetryPayload();
+  const res = await invokeTelemetryHandler(payload);
+
+  assert.equal(res.statusCode, 204);
+  assert.equal(upstreamRequests.length, 1);
+  assert.equal(upstreamRequests[0].url, process.env.SUPABASE_TELEMETRY_FUNCTION_URL);
+  assert.equal(upstreamRequests[0].options.headers.apikey, "server-only-key");
+  assert.deepEqual(JSON.parse(upstreamRequests[0].options.body), payload);
+});
+
+test("Vercel rejects telemetry content fields before contacting Supabase", async (t) => {
+  const originalFetch = global.fetch;
+  t.after(() => { global.fetch = originalFetch; });
+  let upstreamCalls = 0;
+  global.fetch = async () => {
+    upstreamCalls += 1;
+    return { ok: true };
+  };
+
+  const res = await invokeTelemetryHandler(makeTelemetryPayload({ conversation: "raw chat" }));
+  assert.equal(res.statusCode, 400);
+  assert.equal(res.body.code, "invalid_schema");
+  assert.equal(upstreamCalls, 0);
+});
+
+test("Vercel returns a retryable failure when Supabase delivery fails", async (t) => {
+  const originalFetch = global.fetch;
+  const originalUrl = process.env.SUPABASE_TELEMETRY_FUNCTION_URL;
+  const originalKey = process.env.SUPABASE_TELEMETRY_PUBLISHABLE_KEY;
+  t.after(() => {
+    global.fetch = originalFetch;
+    if (originalUrl === undefined) delete process.env.SUPABASE_TELEMETRY_FUNCTION_URL;
+    else process.env.SUPABASE_TELEMETRY_FUNCTION_URL = originalUrl;
+    if (originalKey === undefined) delete process.env.SUPABASE_TELEMETRY_PUBLISHABLE_KEY;
+    else process.env.SUPABASE_TELEMETRY_PUBLISHABLE_KEY = originalKey;
+  });
+  process.env.SUPABASE_TELEMETRY_FUNCTION_URL = "https://example.supabase.co/functions/v1/transfer-telemetry";
+  process.env.SUPABASE_TELEMETRY_PUBLISHABLE_KEY = "server-only-key";
+  global.fetch = async () => ({ ok: false, status: 500 });
+
+  const res = await invokeTelemetryHandler(makeTelemetryPayload());
+  assert.equal(res.statusCode, 503);
+  assert.equal(res.body.code, "telemetry_unavailable");
+});
+
 test("transfer flow emits each closed telemetry stage without attaching content", () => {
   assert.match(PLATFORM_SOURCE, /startTransferTelemetry\(trace\);[\s\S]*?if \(isRunning\)/);
   assert.match(PLATFORM_SOURCE, /advanceTransferTelemetryStage\(transferTrace, "capture_started"\);\s*await prepareSourceForCapture/);
@@ -317,8 +463,14 @@ test("transfer flow emits each closed telemetry stage without attaching content"
   assert.match(PLATFORM_SOURCE, /trace\.telemetryLastStage = "completed"/);
 });
 
-test("Supabase ingestion is write-only, authenticated by publishable key, and covered by host permission", () => {
-  assert.ok(MANIFEST.host_permissions.includes("https://iqkzynzxbmemhtiupwwu.supabase.co/*"));
+test("telemetry is routed through Vercel while Supabase remains server-side and write-only", () => {
+  assert.ok(MANIFEST.host_permissions.includes("https://context-generator-five.vercel.app/*"));
+  assert.ok(!MANIFEST.host_permissions.some((permission) => permission.includes("supabase.co")));
+  assert.doesNotMatch(BACKGROUND_SOURCE, /supabase\.co|sb_publishable_|TELEMETRY_PUBLISHABLE_KEY/);
+  assert.match(BACKGROUND_SOURCE, /https:\/\/context-generator-five\.vercel\.app\/api\/telemetry/);
+  assert.match(VERCEL_TELEMETRY_SOURCE, /SUPABASE_TELEMETRY_FUNCTION_URL/);
+  assert.match(VERCEL_TELEMETRY_SOURCE, /SUPABASE_TELEMETRY_PUBLISHABLE_KEY/);
+  assert.match(VERCEL_TELEMETRY_SOURCE, /apikey: upstreamKey/);
   assert.match(EDGE_FUNCTION_SOURCE, /request\.headers\.get\("apikey"\)/);
   assert.match(EDGE_FUNCTION_SOURCE, /SUPABASE_PUBLISHABLE_KEYS/);
   assert.match(EDGE_FUNCTION_SOURCE, /SUPABASE_SERVICE_ROLE_KEY/);

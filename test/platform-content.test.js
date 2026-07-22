@@ -311,9 +311,9 @@ test("ChatGPT startup excludes ordinary OpenAI pages", () => {
   const matchGroups = [manifest.host_permissions, platformContent.matches, platformResources.matches];
 
   for (const matches of matchGroups) {
-    assert.equal(matches.includes("https://chatgpt.com/*"), false);
-    assert.ok(matches.includes("https://*.chatgpt.com/*"));
-    assert.ok(matches.includes("https://chat.openai.com/*"));
+    assert.ok(matches.includes("https://chatgpt.com/*"));
+    assert.equal(matches.includes("https://*.chatgpt.com/*"), false);
+    assert.equal(matches.includes("https://chat.openai.com/*"), false);
     assert.equal(matches.includes("https://openai.com/*"), false);
     assert.equal(matches.includes("https://*.openai.com/*"), false);
   }

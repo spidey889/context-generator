@@ -1,5 +1,7 @@
 # Changelog
 
+- 2026-07-22: Moved metadata-only transfer telemetry from direct extension-to-Supabase delivery to `Extension -> Vercel -> Supabase`. The extension no longer contains the Supabase URL or publishable key and no longer requests Supabase host access. The new Vercel route repeats the strict closed-schema validation before forwarding with server-only environment variables; the existing install UUID, ordered outbox, retry behavior, Supabase Edge Function, database aggregation, summary flow, and analysis tool remain unchanged.
+
 - 2026-07-22: Changed the protected `users` aggregate counter from insert-first `ON CONFLICT` behavior to a concurrency-safe update-first path. Existing installs now update their row without consuming `user_no` identity values; only a genuinely new `install_id` inserts a row. Existing rows and sequence state are preserved, and deterministic coverage now verifies the same locally stored install UUID survives summaries, browser/service-worker restarts, and extension updates.
 
 - 2026-07-22: Fixed tiny `local-direct` carries dropping one- or two-character messages such as `hi`. Tiny provider-free transfers now preserve both explicit sides of the exchange in `CONVERSATION SO FAR`; generated-summary profiles and their capture filtering remain unchanged.

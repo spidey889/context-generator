@@ -13,8 +13,7 @@ const SUMMARY_CACHE_MAX_ENTRIES = 8;
 const LAST_TRANSFER_STATS_STORAGE_KEY = "context-generator-last-transfer-stats-v1";
 const RAW_TRANSCRIPT_RETENTION_MS = 24 * 60 * 60 * 1000;
 const RAW_TRANSCRIPT_EXPIRY_ALARM = "expire-latest-run-raw-transcript";
-const TELEMETRY_ENDPOINT_URL = "https://iqkzynzxbmemhtiupwwu.supabase.co/functions/v1/transfer-telemetry";
-const TELEMETRY_PUBLISHABLE_KEY = "sb_publishable_i2OMxkNqpds6Ts9WCR2qLA_RAVm1jES";
+const TELEMETRY_ENDPOINT_URL = "https://context-generator-five.vercel.app/api/telemetry";
 const TELEMETRY_INSTALL_ID_STORAGE_KEY = "context-generator-install-id-v1";
 const TELEMETRY_OUTBOX_STORAGE_KEY = "context-generator-telemetry-outbox-v1";
 const TELEMETRY_RETRY_ALARM = "retry-transfer-telemetry";
@@ -365,7 +364,7 @@ async function deliverTelemetryPayload(payload) {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        apikey: TELEMETRY_PUBLISHABLE_KEY
+        "X-Cap-Context-Client": SUMMARY_CLIENT_HEADER
       },
       body: JSON.stringify(payload),
       signal: controller.signal

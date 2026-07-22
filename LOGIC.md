@@ -9,7 +9,8 @@ This is the single source of truth for current production behavior. Historical d
 - `extension/platform-content.js`: picker, capture, handoff UI, paste, manual-copy recovery, placement, and Latest Run receipt creation.
 - `extension/background.js`: tab orchestration, one backend job per transfer, identical-job deduplication, short result cache, receipt expiry alarm, and paste relay.
 - `extension/analysis-bridge.js` and `analysis/index.html`: Latest Run analysis on GitHub Pages.
-- `supabase/functions/transfer-telemetry`: strict metadata-only transfer ingestion into Supabase.
+- `api/telemetry.js` and `api/telemetry-validation.js`: strict metadata-only Vercel telemetry boundary and server-side forwarding.
+- `supabase/functions/transfer-telemetry`: second strict validation boundary and service-role ingestion into Supabase.
 - `supabase/migrations/`: production database changes, including keeping telemetry unavailable through the anonymous Data API and maintaining the protected aggregate `users` table.
 - `api/request-security.js`: endpoint trust boundary, request validation, limits, and abuse controls.
 - `api/summarize.js`: profiles, isolated provider requests, fallback chain, output validation, normalization, and timing.
@@ -17,7 +18,7 @@ This is the single source of truth for current production behavior. Historical d
 - `scripts/run-extension-smoke.js`: isolated Brave smoke for the real unpacked extension.
 - `test/` and `.github/workflows/regression-gate.yml`: deterministic regressions and the production gate.
 
-Production deploys from `master` to `https://context-generator-five.vercel.app/api/summarize`. `vercel.json` gives the summary function a 240-second ceiling.
+Production deploys from `master` to `https://context-generator-five.vercel.app`. Summaries use `/api/summarize`, telemetry uses `/api/telemetry`, and `vercel.json` gives only the summary function a 240-second ceiling.
 
 ## Marketing Website
 
@@ -113,9 +114,9 @@ Central transfer telemetry uses one random UUID stored in `chrome.storage.local`
 
 While an attempt is active, the background associates it with the source tab. If that source tab is closed before completion, the attempt is finalized as `failed / user_cancelled` while retaining its last recorded stage. Provider failures, request timeouts, extension reloads, and other technical failures do not use this category.
 
-Raw chat text, generated summaries, URLs, arbitrary JavaScript errors, provider response bodies, and receipt timelines are never added to telemetry. Every stage and terminal operation is stored in an ordered local outbox before delivery; Supabase failures are silent to the transfer, remain queued, and retry on the next worker startup or retry alarm.
+Raw chat text, generated summaries, URLs, arbitrary JavaScript errors, provider response bodies, and receipt timelines are never added to telemetry. Every stage and terminal operation is stored in an ordered local outbox before delivery; Vercel or Supabase failures are silent to the transfer, remain queued, and retry on the next worker startup or retry alarm.
 
-The `transfer-telemetry` Supabase Edge Function accepts only the exact metadata schema, authenticates the configured public extension key, enforces UUID/platform/status/stage/failure/size limits, and calls a service-role-only Postgres function that atomically upserts by attempt id. Stage updates are monotonic: a late retry may apply a terminal outcome but cannot replace a newer stored stage with an older one. The underlying `transfer_events` table has RLS enabled and no anonymous Data API grants or policies, so public clients cannot bypass the function validator or read global events.
+The extension sends telemetry only to the existing Vercel backend and contains no Supabase URL, key, or host permission. Vercel accepts only trusted extension requests, applies the exact closed metadata schema and 4 KB limit, then uses server-only environment variables to forward the normalized payload to the `transfer-telemetry` Supabase Edge Function. The Edge Function independently validates the same schema, authenticates the server-held publishable key, and calls a service-role-only Postgres function that atomically upserts by attempt id. Stage updates are monotonic: a late retry may apply a terminal outcome but cannot replace a newer stored stage with an older one. The underlying `transfer_events` table has RLS enabled and no anonymous Data API grants or policies, so public clients cannot bypass either validator or read global events.
 
 The protected `users` table contains one row per browser or extension install after that install's first successful summary. Its identity-backed `user_no` is assigned in first-success order, and it stores only the install id, lifetime successful-summary count, current UTC-day successful-summary count, and the UTC date for that daily count. Insert and status-transition triggers increment these aggregates only when a transfer first becomes `succeeded`. The counter function takes a per-install transaction lock, updates an existing `install_id` first, and inserts only when no row exists, so repeat summaries never consume identity sequence values. Its `security invoker` execution is backed by narrowly scoped `service_role` select, insert, and update grants. A Postgres Cron job resets stale daily counts at 00:00 UTC, while the trigger independently resets a stale row if a successful transfer arrives before or after that job. The table has RLS enabled, is unavailable to public, anonymous, and authenticated clients, and contains no conversation content, account, name, email, route, character count, failure detail, or per-transfer activity.
 
