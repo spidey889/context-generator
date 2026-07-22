@@ -25,13 +25,17 @@ const USERS_COUNTER_FIX_MIGRATION_SOURCE = fs.readFileSync(
   path.join(ROOT, "supabase", "migrations", "20260720105251_fix_users_counter_permissions_and_daily_reset.sql"),
   "utf8"
 );
+const USERS_UPDATE_FIRST_MIGRATION_SOURCE = fs.readFileSync(
+  path.join(ROOT, "supabase", "migrations", "20260722065035_update_user_summary_before_insert.sql"),
+  "utf8"
+);
 const USER_CANCELLED_MIGRATION_SOURCE = fs.readFileSync(
   path.join(ROOT, "supabase", "migrations", "20260718175852_add_user_cancelled_failure_reason.sql"),
   "utf8"
 );
 const MANIFEST = JSON.parse(fs.readFileSync(path.join(ROOT, "extension", "manifest.json"), "utf8"));
 
-function loadTelemetryBackground(fetchImpl, initialStorage = {}) {
+function loadTelemetryBackground(fetchImpl, initialStorage = {}, manifestVersion = "1.3.0") {
   const storage = structuredClone(initialStorage);
   const listeners = {};
   let uuidSequence = 1;
@@ -63,7 +67,7 @@ function loadTelemetryBackground(fetchImpl, initialStorage = {}) {
         onAlarm: createEvent("alarm")
       },
       runtime: {
-        getManifest: () => ({ version: "1.3.0" }),
+        getManifest: () => ({ version: manifestVersion }),
         onInstalled: createEvent("installed"),
         onStartup: createEvent("startup"),
         onMessage: createEvent("message")
@@ -141,13 +145,14 @@ test("both transfer entry points start telemetry before early exits", () => {
   assert.ok(pickerSource.indexOf("startTransferTelemetry(trace)") < pickerSource.indexOf("getDetectedConversationMessageCount() === 0"));
 });
 
-test("telemetry reuses one install id and sends only the metadata allowlist", async () => {
+test("telemetry keeps one install id across summaries, browser restarts, and extension updates", async () => {
   const requests = [];
-  const background = loadTelemetryBackground(async (_url, options) => {
+  const deliver = async (_url, options) => {
     requests.push(JSON.parse(options.body));
     return { ok: true };
-  });
-  await background.drain();
+  };
+  const firstWorker = loadTelemetryBackground(deliver);
+  await firstWorker.drain();
 
   const started = makeEvent({
     conversation: "SENSITIVE_RAW_CHAT",
@@ -155,12 +160,36 @@ test("telemetry reuses one install id and sends only the metadata allowlist", as
     error: "SENSITIVE_ERROR"
   });
   const succeeded = makeEvent({ status: "succeeded", lastStage: "completed", characterCount: 54321 });
-  await background.sendTelemetry(started);
-  await background.sendTelemetry(succeeded);
+  await firstWorker.sendTelemetry(started);
+  await firstWorker.sendTelemetry(succeeded);
 
-  assert.equal(requests.length, 2);
-  assert.equal(requests[0].install_id, requests[1].install_id);
-  assert.equal(background.storage["context-generator-install-id-v1"], requests[0].install_id);
+  const installId = requests[0].install_id;
+  const restartedWorker = loadTelemetryBackground(deliver, firstWorker.storage);
+  await restartedWorker.drain();
+  await restartedWorker.sendTelemetry(makeEvent({
+    attemptId: "22222222-2222-4222-8222-222222222222",
+    status: "succeeded",
+    lastStage: "completed",
+    characterCount: 600
+  }));
+
+  const updatedWorker = loadTelemetryBackground(deliver, restartedWorker.storage, "1.4.0");
+  await updatedWorker.drain();
+  updatedWorker.listeners.installed({ reason: "update" });
+  await updatedWorker.drain();
+  await updatedWorker.sendTelemetry(makeEvent({
+    attemptId: "33333333-3333-4333-8333-333333333333",
+    status: "succeeded",
+    lastStage: "completed",
+    characterCount: 700
+  }));
+
+  assert.equal(requests.length, 4);
+  assert.ok(requests.every((request) => request.install_id === installId));
+  assert.equal(firstWorker.storage["context-generator-install-id-v1"], installId);
+  assert.equal(restartedWorker.storage["context-generator-install-id-v1"], installId);
+  assert.equal(updatedWorker.storage["context-generator-install-id-v1"], installId);
+  assert.equal(requests.at(-1).extension_version, "1.4.0");
   assert.deepEqual(Object.keys(requests[0]).sort(), [
     "attempt_id",
     "attempted_at",
@@ -177,9 +206,11 @@ test("telemetry reuses one install id and sends only the metadata allowlist", as
   assert.doesNotMatch(serialized, /SENSITIVE_RAW_CHAT|SENSITIVE_SUMMARY|SENSITIVE_ERROR/);
   assert.deepEqual(requests.map(({ status, last_stage: lastStage }) => [status, lastStage]), [
     ["started", "intent_started"],
+    ["succeeded", "completed"],
+    ["succeeded", "completed"],
     ["succeeded", "completed"]
   ]);
-  assert.deepEqual(background.storage["context-generator-telemetry-outbox-v1"], []);
+  assert.deepEqual(updatedWorker.storage["context-generator-telemetry-outbox-v1"], []);
 });
 
 test("failed delivery keeps ordered operations and startup retries them", async () => {
@@ -317,12 +348,19 @@ test("Supabase replaces the old usage views with one aggregate users table", () 
   assert.doesNotMatch(SIMPLE_USERS_MIGRATION_SOURCE, /create view public\.user_daily_usage|create view public\.user_transfer_activity/);
 });
 
-test("Supabase counts each transfer once when it first succeeds", () => {
+test("Supabase updates an existing user before inserting a new installation", () => {
   assert.match(SIMPLE_USERS_MIGRATION_SOURCE, /create or replace function public\.record_user_summary\(\)/);
-  assert.match(SIMPLE_USERS_MIGRATION_SOURCE, /insert into public\.users \(install_id, total_summaries, today_summaries, today_date\)/);
-  assert.match(SIMPLE_USERS_MIGRATION_SOURCE, /total_summaries = public\.users\.total_summaries \+ 1/);
-  assert.match(SIMPLE_USERS_MIGRATION_SOURCE, /when public\.users\.today_date = today then public\.users\.today_summaries \+ 1/);
-  assert.match(SIMPLE_USERS_MIGRATION_SOURCE, /else 1/);
+  assert.match(USERS_UPDATE_FIRST_MIGRATION_SOURCE, /pg_advisory_xact_lock/);
+  assert.match(USERS_UPDATE_FIRST_MIGRATION_SOURCE, /update public\.users as existing/);
+  assert.match(USERS_UPDATE_FIRST_MIGRATION_SOURCE, /where existing\.install_id = new\.install_id/);
+  assert.match(USERS_UPDATE_FIRST_MIGRATION_SOURCE, /if found then\s+return new;/);
+  assert.match(USERS_UPDATE_FIRST_MIGRATION_SOURCE, /insert into public\.users \(install_id, total_summaries, today_summaries, today_date\)/);
+  assert.ok(
+    USERS_UPDATE_FIRST_MIGRATION_SOURCE.indexOf("update public.users as existing") <
+    USERS_UPDATE_FIRST_MIGRATION_SOURCE.indexOf("insert into public.users")
+  );
+  assert.doesNotMatch(USERS_UPDATE_FIRST_MIGRATION_SOURCE, /on conflict/i);
+  assert.doesNotMatch(USERS_UPDATE_FIRST_MIGRATION_SOURCE, /login|environment|first_seen_at|last_seen_at/i);
   assert.match(SIMPLE_USERS_MIGRATION_SOURCE, /after insert on public\.transfer_events[\s\S]*when \(new\.status = 'succeeded'\)/);
   assert.match(SIMPLE_USERS_MIGRATION_SOURCE, /after update on public\.transfer_events[\s\S]*when \(new\.status = 'succeeded' and old\.status is distinct from 'succeeded'\)/);
   assert.match(SIMPLE_USERS_MIGRATION_SOURCE, /revoke all on function public\.record_user_summary\(\)/);

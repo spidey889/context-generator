@@ -1,5 +1,7 @@
 # Changelog
 
+- 2026-07-22: Changed the protected `users` aggregate counter from insert-first `ON CONFLICT` behavior to a concurrency-safe update-first path. Existing installs now update their row without consuming `user_no` identity values; only a genuinely new `install_id` inserts a row. Existing rows and sequence state are preserved, and deterministic coverage now verifies the same locally stored install UUID survives summaries, browser/service-worker restarts, and extension updates.
+
 - 2026-07-22: Fixed tiny `local-direct` carries dropping one- or two-character messages such as `hi`. Tiny provider-free transfers now preserve both explicit sides of the exchange in `CONVERSATION SO FAR`; generated-summary profiles and their capture filtering remain unchanged.
 
 - 2026-07-22: Increased the handoff card countdown from 30 to 40 seconds and made its numbers easier to notice with a brighter neutral-white treatment. A briefly tried purple highlight was removed because it looked too decorative; transfer behavior remains unchanged.
