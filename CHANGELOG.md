@@ -1,6 +1,6 @@
 # Changelog
 
-- 2026-07-22: Increased the handoff card countdown from 30 to 40 seconds and strengthened the timer pill's purple background, border, glow, and text contrast so the remaining time is easier to notice without changing transfer behavior.
+- 2026-07-22: Increased the handoff card countdown from 30 to 40 seconds and made its numbers easier to notice with a brighter neutral-white treatment. A briefly tried purple highlight was removed because it looked too decorative; transfer behavior remains unchanged.
 
 - 2026-07-21: Enforced destination message deadlines across already-delivered content-script requests instead of checking the clock only between connection attempts, preventing a hung paste listener from outliving the 30-second default or 45-second ChatGPT wait. Added a focused pending-response timeout regression. The isolated Brave smoke now checks every controlled destination tab for the exact pasted summary, so prepared-tab recovery cannot leave it attached to an earlier empty tab and produce a false 45-second failure.
 
