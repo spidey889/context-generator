@@ -14,9 +14,8 @@
     "storage"
   ],
   "host_permissions": [
-    "https://*.claude.ai/*",
-    "https://*.chatgpt.com/*",
-    "https://chat.openai.com/*",
+    "https://claude.ai/*",
+    "https://chatgpt.com/*",
     "https://gemini.google.com/*",
     "https://grok.com/*",
     "https://chat.deepseek.com/*",
@@ -38,9 +37,8 @@
   "content_scripts": [
     {
       "matches": [
-        "https://*.claude.ai/*",
-        "https://*.chatgpt.com/*",
-        "https://chat.openai.com/*",
+        "https://claude.ai/*",
+        "https://chatgpt.com/*",
         "https://gemini.google.com/*",
         "https://grok.com/*",
         "https://chat.deepseek.com/*"
@@ -60,9 +58,8 @@
     {
       "resources": ["icon16.png", "icon48.png", "icon128.png", "bubble-icon.png", "logos/*.png"],
       "matches": [
-        "https://*.claude.ai/*",
-        "https://*.chatgpt.com/*",
-        "https://chat.openai.com/*",
+        "https://claude.ai/*",
+        "https://chatgpt.com/*",
         "https://gemini.google.com/*",
         "https://grok.com/*",
         "https://chat.deepseek.com/*"
