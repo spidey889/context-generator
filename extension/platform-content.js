@@ -4313,7 +4313,8 @@
         "z-index:2147483646",
         "inset:0",
         "pointer-events:none",
-        "background:rgba(0,0,0,0.09)",
+        "background:rgba(8,7,11,0.24)",
+        "backdrop-filter:blur(1.5px)",
         "opacity:0",
         "transition:opacity 180ms cubic-bezier(0.16,1,0.3,1)"
       ].join(";");
@@ -4331,23 +4332,24 @@
         "left:50%",
         "top:46%",
         "width:min(548px,calc(100vw - 32px))",
-        "height:228px",
-        "min-height:228px",
-        "max-height:228px",
+        "height:244px",
+        "min-height:244px",
+        "max-height:244px",
         "box-sizing:border-box",
-        "padding:22px 28px",
+        "padding:20px 28px 22px",
         "border-radius:24px",
-        "border:1px solid rgba(238,235,244,0.13)",
-        "background:#151517",
+        "border:1px solid rgba(232,225,242,0.17)",
+        "background:#141416",
         "color:#b9b7bd",
-        "box-shadow:0 28px 82px rgba(0,0,0,0.42),0 8px 24px rgba(0,0,0,0.25),0 0 0 1px rgba(0,0,0,0.48),inset 0 1px 0 rgba(255,255,255,0.07),inset 0 -1px 0 rgba(255,255,255,0.018)",
+        "box-shadow:0 34px 96px rgba(0,0,0,0.48),0 12px 32px rgba(0,0,0,0.28),0 0 48px rgba(92,68,137,0.10),0 0 0 1px rgba(0,0,0,0.52),inset 0 1px 0 rgba(255,255,255,0.085),inset 0 -1px 0 rgba(255,255,255,0.02)",
         `transform:${HANDOFF_OVERLAY_CLOSED_TRANSFORM}`,
         "opacity:0",
         "flex-direction:column",
-        "justify-content:center",
-        "gap:18px",
+        "justify-content:space-between",
+        "gap:0",
         "overflow:hidden",
-        "backdrop-filter:blur(22px)",
+        "isolation:isolate",
+        "backdrop-filter:blur(28px) saturate(1.08)",
         "font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif",
         "letter-spacing:0",
         "will-change:transform,opacity",
@@ -4357,10 +4359,12 @@
       const glow = document.createElement("div");
       glow.style.cssText = [
         "position:absolute",
-        "inset:-1px",
+        "inset:0",
         "pointer-events:none",
-        "background:linear-gradient(180deg,rgba(255,255,255,0.045),transparent 36%)",
-        "opacity:0.85"
+        "border-radius:inherit",
+        "background:radial-gradient(ellipse 72% 58% at 50% -8%,rgba(170,142,218,0.16),transparent 66%),linear-gradient(180deg,rgba(255,255,255,0.045),transparent 34%)",
+        "box-shadow:inset 0 0 0 1px rgba(255,255,255,0.018)",
+        "opacity:1"
       ].join(";");
 
       const brand = document.createElement("div");
@@ -4370,35 +4374,68 @@
         "z-index:1",
         "display:flex",
         "width:100%",
-        "min-height:24px",
+        "min-height:30px",
         "box-sizing:border-box",
         "align-items:center",
         "justify-content:flex-start",
-        "gap:7px",
-        "color:rgba(245,243,250,0.67)",
+        "gap:9px",
+        "color:rgba(245,243,250,0.76)",
         "font-size:12.5px",
-        "font-weight:620",
-        "letter-spacing:0"
+        "font-weight:650",
+        "letter-spacing:0.01em"
       ].join(";");
 
       const brandIcon = document.createElement("img");
       brandIcon.id = "context-generator-overlay-brand-icon";
       brandIcon.src = BUBBLE_ICON_URL;
       brandIcon.alt = "";
-      brandIcon.width = 24;
-      brandIcon.height = 24;
+      brandIcon.width = 28;
+      brandIcon.height = 28;
       brandIcon.style.cssText = [
         "display:block",
-        "width:24px",
-        "height:24px",
+        "width:28px",
+        "height:28px",
+        "box-sizing:border-box",
+        "padding:3px",
+        "border:1px solid rgba(185,158,228,0.20)",
+        "border-radius:9px",
+        "background:rgba(141,108,207,0.11)",
         "object-fit:contain",
-        "filter:drop-shadow(0 3px 9px rgba(141,108,207,0.22))"
+        "filter:drop-shadow(0 4px 10px rgba(141,108,207,0.25))"
       ].join(";");
 
       const brandText = document.createElement("span");
       brandText.textContent = "Cap Context";
       brand.appendChild(brandIcon);
       brand.appendChild(brandText);
+
+      const statusGroup = document.createElement("div");
+      statusGroup.id = "context-generator-status-group";
+      statusGroup.style.cssText = [
+        "position:relative",
+        "z-index:1",
+        "display:flex",
+        "flex-direction:column",
+        "align-items:center",
+        "justify-content:center",
+        "gap:5px",
+        "width:100%"
+      ].join(";");
+
+      const statusKicker = document.createElement("div");
+      statusKicker.id = "context-generator-status-kicker";
+      statusKicker.textContent = "Live handoff";
+      statusKicker.setAttribute("aria-hidden", "true");
+      statusKicker.style.cssText = [
+        "color:rgba(190,168,227,0.72)",
+        "font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif",
+        "font-size:9.5px",
+        "font-weight:760",
+        "line-height:1",
+        "letter-spacing:0.14em",
+        "text-transform:uppercase"
+      ].join(";");
+      statusGroup.appendChild(statusKicker);
 
       const statusText = document.createElement("div");
       statusText.id = "context-generator-text";
@@ -4408,10 +4445,10 @@
         "position:relative",
         "z-index:1",
         "display:flex",
-        "min-height:34px",
+        "min-height:36px",
         "align-items:center",
         "justify-content:center",
-        "font-size:29px",
+        "font-size:30px",
         "font-family:Georgia,'Times New Roman',serif",
         "font-weight:500",
         "line-height:1.08",
@@ -4439,6 +4476,7 @@
         summaryActivity.appendChild(dot);
       }
       statusText.appendChild(summaryActivity);
+      statusGroup.appendChild(statusText);
 
       const progress = document.createElement("div");
       progress.id = "context-generator-handoff-progress";
@@ -4449,8 +4487,11 @@
         "z-index:1",
         "display:grid",
         "grid-template-columns:repeat(3,minmax(0,1fr))",
-        "width:calc(100% - 8px)",
+        "width:100%",
         "margin:0 auto",
+        "padding:14px 2px 0",
+        "box-sizing:border-box",
+        "border-top:1px solid rgba(255,255,255,0.075)",
         "align-items:start"
       ].join(";");
 
@@ -4503,6 +4544,10 @@
             0%,48%,100%{opacity:0.54;transform:translate3d(0,0,0)}
             18%{opacity:1;transform:translate3d(0,-3px,0)}
           }
+          @keyframes contextGeneratorStageHalo{
+            0%,100%{opacity:0.22;transform:scale(0.9)}
+            50%{opacity:0.62;transform:scale(1.08)}
+          }
           #context-generator-text .context-generator-summary-activity{
             display:none;
             flex:0 0 auto;
@@ -4536,7 +4581,7 @@
             display:flex;
             flex-direction:column;
             align-items:center;
-            gap:8px;
+            gap:7px;
             padding:0 5px;
             color:rgba(239,237,244,0.46);
             text-align:center;
@@ -4544,13 +4589,14 @@
           #context-generator-handoff-progress .context-generator-handoff-stage-connector{
             position:absolute;
             z-index:0;
-            top:11px;
-            left:calc(50% + 17px);
-            right:calc(-50% + 17px);
+            top:12px;
+            left:calc(50% + 19px);
+            right:calc(-50% + 19px);
             height:2px;
             overflow:visible;
             border-radius:999px;
-            background:rgba(255,255,255,0.11);
+            background:rgba(255,255,255,0.095);
+            box-shadow:inset 0 1px 0 rgba(255,255,255,0.035);
           }
           /* The line follows live display progress; its motion never gates the transfer pipeline. */
           #context-generator-handoff-progress .context-generator-handoff-stage-connector-fill{
@@ -4558,8 +4604,8 @@
             inset:0;
             width:100%;
             border-radius:inherit;
-            background:linear-gradient(90deg,#6F579D,#9A7ADC);
-            box-shadow:2px 0 7px rgba(141,108,207,0.3);
+            background:linear-gradient(90deg,#755BA8,#AE8BE4);
+            box-shadow:2px 0 9px rgba(159,125,216,0.36);
             transform:scaleX(var(--context-generator-stage-progress-ratio,0));
             transform-origin:left center;
             transition:transform var(--context-generator-stage-progress-duration,1.35s) var(--context-generator-stage-progress-easing,linear);
@@ -4581,11 +4627,11 @@
             position:absolute;
             top:50%;
             left:0;
-            width:4px;
-            height:4px;
+            width:5px;
+            height:5px;
             border-radius:999px;
-            background:#A98BE2;
-            box-shadow:0 0 0 2px rgba(141,108,207,0.14),0 0 8px rgba(169,139,226,0.72);
+            background:#C1A6ED;
+            box-shadow:0 0 0 2px rgba(141,108,207,0.15),0 0 10px rgba(187,154,234,0.78);
             transform:translate(-50%,-50%);
           }
           #context-generator-handoff-progress .context-generator-handoff-stage[data-state="active"] .context-generator-handoff-stage-progress-head{
@@ -4598,51 +4644,67 @@
             position:relative;
             z-index:1;
             display:flex;
-            width:24px;
-            height:24px;
+            width:26px;
+            height:26px;
             align-items:center;
             justify-content:center;
             box-sizing:border-box;
-            border:1px solid rgba(255,255,255,0.15);
+            border:1px solid rgba(255,255,255,0.16);
             border-radius:999px;
-            background:rgba(255,255,255,0.025);
+            background:rgba(255,255,255,0.035);
             color:rgba(245,243,249,0.44);
-            font-size:10.5px;
+            font-size:10px;
             font-weight:700;
             transition:background 180ms ease,border-color 180ms ease,color 180ms ease,box-shadow 180ms ease;
           }
+          #context-generator-handoff-progress .context-generator-handoff-stage-marker::after{
+            content:"";
+            position:absolute;
+            inset:-5px;
+            z-index:-1;
+            border:1px solid rgba(169,139,226,0.46);
+            border-radius:999px;
+            opacity:0;
+            transform:scale(0.9);
+          }
           #context-generator-handoff-progress .context-generator-handoff-stage-label{
             min-height:30px;
-            font-size:12px;
-            font-weight:580;
+            font-size:11.5px;
+            font-weight:600;
             line-height:1.22;
-            transition:color 180ms ease,font-weight 180ms ease;
+            letter-spacing:0.005em;
+            transition:color 180ms ease,font-weight 180ms ease,opacity 180ms ease;
           }
           #context-generator-handoff-progress .context-generator-handoff-stage[data-state="active"]{
             color:#f4f2f7;
           }
           #context-generator-handoff-progress .context-generator-handoff-stage[data-state="active"] .context-generator-handoff-stage-marker{
-            border-color:rgba(190,165,232,0.72);
-            background:#8D6CCF;
+            border-color:rgba(210,190,241,0.78);
+            background:linear-gradient(145deg,#9B7BD7,#7456AD);
             color:#fff;
-            box-shadow:0 0 0 3px rgba(141,108,207,0.16),0 5px 14px rgba(72,51,111,0.28),inset 0 1px 0 rgba(255,255,255,0.16);
+            box-shadow:0 0 0 3px rgba(141,108,207,0.15),0 6px 16px rgba(63,43,98,0.34),inset 0 1px 0 rgba(255,255,255,0.22);
+          }
+          #context-generator-handoff-progress .context-generator-handoff-stage[data-state="active"] .context-generator-handoff-stage-marker::after{
+            animation:contextGeneratorStageHalo 2400ms cubic-bezier(0.45,0,0.55,1) infinite;
           }
           #context-generator-handoff-progress .context-generator-handoff-stage[data-state="active"] .context-generator-handoff-stage-label{
             color:#fff;
             font-weight:680;
           }
           #context-generator-handoff-progress .context-generator-handoff-stage[data-state="complete"]{
-            color:rgba(200,183,229,0.72);
+            color:rgba(194,213,199,0.78);
           }
           #context-generator-handoff-progress .context-generator-handoff-stage[data-state="complete"] .context-generator-handoff-stage-marker{
-            border-color:rgba(164,137,216,0.34);
-            background:rgba(141,108,207,0.14);
-            color:#C8B6E9;
+            border-color:rgba(145,205,164,0.28);
+            background:rgba(96,164,118,0.13);
+            color:#B8DFC4;
+            box-shadow:inset 0 1px 0 rgba(255,255,255,0.055);
           }
           @media (prefers-reduced-motion: reduce){
             #context-generator-text{animation:none!important}
             #context-generator-text .context-generator-summary-activity-dot{animation:none!important;opacity:0.72}
             #${HANDOFF_REASSURANCE_ID}{transition:none!important}
+            #context-generator-handoff-progress .context-generator-handoff-stage-marker::after{animation:none!important}
             #context-generator-handoff-progress .context-generator-handoff-stage-connector-fill,
             #context-generator-handoff-progress .context-generator-handoff-stage-progress-head{transition:none!important}
           }
@@ -4705,7 +4767,7 @@
 
       overlay.appendChild(glow);
       overlay.appendChild(brand);
-      overlay.appendChild(statusText);
+      overlay.appendChild(statusGroup);
       overlay.appendChild(progress);
       document.body.appendChild(overlay);
     }
