@@ -1,5 +1,7 @@
 # Changelog
 
+- 2026-07-22: Fixed two regressions in the fast provider-free handoff. Tiny `local-direct` transfers now finish the capture connector before starting the summary connector instead of advancing both lines together. Restored ChatGPT/Grok's required focus-before-paste invariant without restoring the early reveal: their source completion line and tick now finish first, then the destination activates and performs the verified paste; destinations that reliably paste inactive retain the post-paste reveal. Added focused ordering and activation regressions.
+
 - 2026-07-22: Corrected the final handoff timing to match the intended visual sequence exactly. When verified paste arrives mid-connector, the remaining line now glides continuously to the destination over one full second, paints the completed destination tick, and activates the destination immediately afterward. Connector fill and progress-head movement now use compositor transforms to avoid layout-driven stutter. Per explicit request, no automated or browser tests were run.
 
 - 2026-07-22: Corrected the final handoff ordering so the user stays on the source AI throughout capture, summary, and verified paste. Removed the destination-side completion-card workaround from the previous pass: ChatGPT, Grok, and every other destination now remain inactive until the source connector finishes, the completed tick is shown, and the destination tab is revalidated and activated. Post-paste stability checks, recovery, and no-auto-send behavior remain unchanged.

@@ -64,6 +64,9 @@
   // Keep this aligned with api/request-security.js so unsupported captures never leave the extension.
   const MAX_BACKEND_CONVERSATION_CHARS = 350000;
   const TINY_DIRECT_PROFILE_MAX_CHARS = 1200;
+  // ChatGPT and Grok do not reliably hydrate or retain composer inserts while inactive.
+  // Their source-side completion cue must finish before the background performs the focused paste.
+  const FOCUSED_PASTE_DESTINATIONS = new Set(["chatgpt", "grok"]);
   const OVERSIZED_CONVERSATION_ERROR_MESSAGE = "Conversation exceeds the supported 350,000 character limit";
   const CONVERSATION_SCRAPE_RETRY_TIMEOUT_MS = 1800;
   const CONVERSATION_SCRAPE_RETRY_INTERVAL_MS = 140;
@@ -128,6 +131,7 @@
   const HANDOFF_ACTIVITY_LINE_START = 0.05;
   const HANDOFF_ACTIVITY_LINE_MAX = 0.9;
   const HANDOFF_SUMMARY_LINE_DURATION_MS = 20000;
+  const HANDOFF_TINY_STAGE_LINE_DURATION_MS = 320;
   const HANDOFF_FINAL_LINE_DURATION_MS = 1000;
   const GENERIC_CONVERSATION_SELECTORS = [
     "[data-message-author-role]",
@@ -605,22 +609,28 @@
       setHandoffProgress("paste", "active");
       transferStage = "paste";
       advanceTransferTelemetryStage(transferTrace, "paste_started");
+      const requiresFocusedPaste = FOCUSED_PASTE_DESTINATIONS.has(destinationId);
+      if (requiresFocusedPaste) {
+        await completeHandoffForDestinationReveal();
+      }
       const pasteResponse = await notifyBackground({
         type: "TRANSFER_TO_DESTINATION",
         destination: destinationId,
         text: summary,
         preparedTabId: preparedDestination?.tabId || null,
         transferId: transferTrace.id,
-        deferFinalActivation: true
+        deferFinalActivation: !requiresFocusedPaste
       });
       appendBackgroundMarks(transferTrace, pasteResponse?.marks);
       markTransferTrace(transferTrace, "paste done", pasteResponse?.timing || null);
-      await completeHandoffAfterPaste();
-      await notifyBackground({
-        type: "ACTIVATE_DESTINATION_TAB",
-        destination: destinationId,
-        tabId: pasteResponse?.timing?.tabId || null
-      });
+      if (!requiresFocusedPaste) {
+        await completeHandoffForDestinationReveal();
+        await notifyBackground({
+          type: "ACTIVATE_DESTINATION_TAB",
+          destination: destinationId,
+          tabId: pasteResponse?.timing?.tabId || null
+        });
+      }
       finishTransferTrace(transferTrace);
       resetRunningFlag();
     } catch (error) {
@@ -671,6 +681,11 @@
 
     advanceTransferTelemetryStage(trace, "summary_request_started");
     markTransferTrace(trace, "summary start", { chars: conversationText.length, inputChars: conversationText.length });
+    if (conversationText.length <= TINY_DIRECT_PROFILE_MAX_CHARS) {
+      // local-direct can return in the same visual beat as capture. Finish the
+      // first connector before allowing the summary connector to begin.
+      await completeHandoffStageLine("capture", HANDOFF_TINY_STAGE_LINE_DURATION_MS);
+    }
     setHandoffProgress("summary", "active");
     const response = await notifyBackground({
       type: "SUMMARIZE_WITH_BACKEND",
@@ -4935,36 +4950,40 @@
     if (phase === "active") startHandoffActivityProgress(stageId);
   }
 
-  async function completeHandoffAfterPaste() {
-    stopHandoffActivityProgress();
+  async function completeHandoffStageLine(stageId, durationMs) {
     const reducedMotion = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
-    const summaryStage = document.querySelector(
-      "#context-generator-handoff-progress [data-context-generator-stage='summary']"
+    const stageElement = document.querySelector(
+      `#context-generator-handoff-progress [data-context-generator-stage='${stageId}']`
     );
+    if (!stageElement) return;
 
-    if (summaryStage) {
-      const connector = summaryStage.querySelector(".context-generator-handoff-stage-connector");
-      const fill = summaryStage.querySelector(".context-generator-handoff-stage-connector-fill");
-      const connectorWidth = connector?.getBoundingClientRect?.().width || 0;
-      const renderedWidth = fill?.getBoundingClientRect?.().width || 0;
-      const renderedProgress = connectorWidth > 0
-        ? Math.max(0, Math.min(1, renderedWidth / connectorWidth))
-        : Number(summaryStage.dataset.contextGeneratorLineProgress || HANDOFF_ACTIVITY_LINE_MAX);
+    const connector = stageElement.querySelector(".context-generator-handoff-stage-connector");
+    const fill = stageElement.querySelector(".context-generator-handoff-stage-connector-fill");
+    const connectorWidth = connector?.getBoundingClientRect?.().width || 0;
+    const renderedWidth = fill?.getBoundingClientRect?.().width || 0;
+    const renderedProgress = connectorWidth > 0
+      ? Math.max(0, Math.min(1, renderedWidth / connectorWidth))
+      : Number(stageElement.dataset.contextGeneratorLineProgress || 0);
+    if (renderedProgress >= 0.999) return;
 
-      // Retarget from the line's rendered position so a mid-transition paste
-      // finishes continuously instead of jumping or restarting its easing curve.
-      summaryStage.style.setProperty("--context-generator-stage-progress-duration", "0ms");
-      setHandoffStageLineProgress("summary", renderedProgress);
-      void summaryStage.offsetWidth;
-      summaryStage.style.setProperty(
-        "--context-generator-stage-progress-duration",
-        reducedMotion ? "0ms" : `${HANDOFF_FINAL_LINE_DURATION_MS}ms`
-      );
-      summaryStage.style.setProperty("--context-generator-stage-progress-easing", "linear");
-      setHandoffStageLineProgress("summary", 1);
-    }
+    // Retarget from the rendered position so completion never jumps or restarts.
+    stageElement.style.setProperty("--context-generator-stage-progress-duration", "0ms");
+    setHandoffStageLineProgress(stageId, renderedProgress);
+    void stageElement.offsetWidth;
+    stageElement.style.setProperty(
+      "--context-generator-stage-progress-duration",
+      reducedMotion ? "0ms" : `${durationMs}ms`
+    );
+    stageElement.style.setProperty("--context-generator-stage-progress-easing", "linear");
+    setHandoffStageLineProgress(stageId, 1);
 
-    if (!reducedMotion) await delay(HANDOFF_FINAL_LINE_DURATION_MS);
+    if (!reducedMotion) await delay(durationMs);
+  }
+
+  async function completeHandoffForDestinationReveal() {
+    stopHandoffActivityProgress();
+    await completeHandoffStageLine("summary", HANDOFF_FINAL_LINE_DURATION_MS);
+
     setHandoffProgress("paste", "done");
     // Let the completed tick reach the screen before the background activates
     // the destination. Two frames guarantee at least one painted completion state.

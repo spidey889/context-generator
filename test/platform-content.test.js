@@ -448,20 +448,36 @@ test("handoff progress is branded and wired only to real pipeline events", () =>
   assert.doesNotMatch(overlaySource, /Math\.random|setInterval|startHandoffStatusCycle/);
   assert.doesNotMatch(source, /HANDOFF_STATUS_INTERVAL_MS|HANDOFF_QUOTES|setHandoffStatus/);
   assert.match(source, /const HANDOFF_SUMMARY_LINE_DURATION_MS = 20000/);
-  assert.match(source, /const HANDOFF_FINAL_LINE_DURATION_MS = 700/);
-  assert.match(source, /const HANDOFF_FINAL_TICK_HOLD_MS = 300/);
+  assert.match(source, /const HANDOFF_TINY_STAGE_LINE_DURATION_MS = 320/);
+  assert.match(source, /const HANDOFF_FINAL_LINE_DURATION_MS = 1000/);
+  assert.doesNotMatch(source, /HANDOFF_FINAL_TICK_HOLD_MS/);
   assert.match(source, /if \(stageId !== "summary"[^\n]+return/);
   assert.match(source, /`\$\{HANDOFF_SUMMARY_LINE_DURATION_MS\}ms`/);
   assert.match(overlaySource, /stage-progress-easing,linear/);
+  assert.match(overlaySource, /transform:scaleX\(var\(--context-generator-stage-progress-ratio,0\)\)/);
+
+  const summaryRequestStart = source.indexOf("async function requestBackendSummary(");
+  const summaryRequestEnd = source.indexOf("function prepareDestinationTab(", summaryRequestStart);
+  const summaryRequestSource = source.slice(summaryRequestStart, summaryRequestEnd);
+  const tinyCaptureFinishIndex = summaryRequestSource.indexOf('await completeHandoffStageLine("capture"');
+  const summaryActiveIndex = summaryRequestSource.indexOf('setHandoffProgress("summary", "active")');
+  const summaryRequestIndex = summaryRequestSource.indexOf('type: "SUMMARIZE_WITH_BACKEND"');
+  assert.ok(
+    tinyCaptureFinishIndex >= 0
+      && tinyCaptureFinishIndex < summaryActiveIndex
+      && summaryActiveIndex < summaryRequestIndex
+  );
 
   assert.match(source, /markTransferTrace\([^\n]+"capture start"\);\s*setHandoffProgress\("capture", "active"\)/);
   assert.match(source, /markTransferTrace\(trace, "capture done", \{[\s\S]{0,240}setHandoffProgress\("capture", "done"\)/);
-  assert.match(source, /markTransferTrace\(trace, "summary start", \{[^\n]+\);\s*setHandoffProgress\("summary", "active"\)/);
+  assert.match(source, /markTransferTrace\(trace, "summary start", \{[^\n]+\)/);
+  assert.match(source, /setHandoffProgress\("summary", "active"\)/);
   assert.match(source, /markTransferTrace\(transferTrace, "summary available", \{ chars: summary\.length \}\);\s*setHandoffProgress\("summary", "done"\)/);
   assert.match(source, /markTransferTrace\(transferTrace, "paste request start"\);\s*setHandoffProgress\("paste", "active"\)/);
-  assert.match(source, /deferFinalActivation: true/);
-  assert.match(source, /markTransferTrace\(transferTrace, "paste done", pasteResponse\?\.timing \|\| null\);[\s\S]{0,260}await completeHandoffAfterPaste\(\)/);
-  assert.match(source, /await completeHandoffAfterPaste\(\);[\s\S]{0,260}type: "ACTIVATE_DESTINATION_TAB"/);
+  assert.match(source, /const requiresFocusedPaste = FOCUSED_PASTE_DESTINATIONS\.has\(destinationId\)/);
+  assert.match(source, /if \(requiresFocusedPaste\) \{\s*await completeHandoffForDestinationReveal\(\)/);
+  assert.match(source, /deferFinalActivation: !requiresFocusedPaste/);
+  assert.match(source, /if \(!requiresFocusedPaste\) \{\s*await completeHandoffForDestinationReveal\(\);[\s\S]{0,260}type: "ACTIVATE_DESTINATION_TAB"/);
   assert.doesNotMatch(source, /showHandoffCompletion|showPasteCompletionOverlay/);
 });
 

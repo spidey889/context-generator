@@ -724,8 +724,7 @@ async function transferToDestination(
         destination,
         trimmedText,
         transferId,
-        trace,
-        deferFinalActivation
+        trace
       );
     } catch (error) {
       pasteResult = { ok: false, error: error?.message || "Prepared destination paste failed." };
@@ -765,8 +764,7 @@ async function transferToDestination(
       destination,
       trimmedText,
       transferId,
-      trace,
-      deferFinalActivation
+      trace
     );
   }
 
@@ -810,10 +808,11 @@ async function pasteIntoDestinationWithActivation(
   destination,
   text,
   transferId,
-  trace,
-  deferFinalActivation = false
+  trace
 ) {
-  if (destination.focusBeforePaste && !deferFinalActivation) {
+  // Focus is a paste prerequisite on these destinations, independent of whether
+  // final activation is deferred. Callers sequence the source completion cue first.
+  if (destination.focusBeforePaste) {
     markBackgroundTrace(trace, "tab activate before paste start", { tabId });
     await activateDestinationTab(tabId);
     markBackgroundTrace(trace, "tab activate before paste done", { tabId });
