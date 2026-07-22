@@ -128,6 +128,8 @@
   const HANDOFF_ACTIVITY_LINE_START = 0.05;
   const HANDOFF_ACTIVITY_LINE_MAX = 0.9;
   const HANDOFF_SUMMARY_LINE_DURATION_MS = 20000;
+  const HANDOFF_FINAL_LINE_DURATION_MS = 700;
+  const HANDOFF_FINAL_TICK_HOLD_MS = 300;
   const GENERIC_CONVERSATION_SELECTORS = [
     "[data-message-author-role]",
     "[data-testid*='conversation' i]",
@@ -485,14 +487,25 @@
 
     if (message?.type === "PASTE_CONTEXT") {
       const pasteStartedAt = getNow();
+      const showCompletionHere = message.showHandoffCompletion === true;
+      if (showCompletionHere) {
+        showPasteCompletionOverlay(message.destination);
+      }
       logTransferPerf(message.transferId, "destination paste start", { destination: message.destination });
       pasteIntoPlatform(message.text, message.destination, message.transferId)
-        .then(() => {
+        .then(async () => {
           const pasteMs = Math.round(getNow() - pasteStartedAt);
           logTransferPerf(message.transferId, "destination paste done", { destination: message.destination, pasteMs });
-          sendResponse({ ok: true, timing: { pasteMs } });
+          if (showCompletionHere) {
+            await completeHandoffAfterPaste();
+            hideOverlay();
+          }
+          sendResponse({ ok: true, timing: { pasteMs, handoffCompletionShown: showCompletionHere } });
         })
-        .catch((error) => sendResponse({ ok: false, error: error.message }));
+        .catch((error) => {
+          if (showCompletionHere) hideOverlay();
+          sendResponse({ ok: false, error: error.message });
+        });
 
       return true;
     }
@@ -609,11 +622,19 @@
         destination: destinationId,
         text: summary,
         preparedTabId: preparedDestination?.tabId || null,
-        transferId: transferTrace.id
+        transferId: transferTrace.id,
+        deferFinalActivation: true
       });
       appendBackgroundMarks(transferTrace, pasteResponse?.marks);
       markTransferTrace(transferTrace, "paste done", pasteResponse?.timing || null);
-      setHandoffProgress("paste", "done");
+      if (pasteResponse?.timing?.paste?.handoffCompletionShown !== true) {
+        await completeHandoffAfterPaste();
+      }
+      await notifyBackground({
+        type: "ACTIVATE_DESTINATION_TAB",
+        destination: destinationId,
+        tabId: pasteResponse?.timing?.tabId || null
+      });
       finishTransferTrace(transferTrace);
       resetRunningFlag();
     } catch (error) {
@@ -4538,7 +4559,7 @@
             border-radius:inherit;
             background:linear-gradient(90deg,#6F579D,#9A7ADC);
             box-shadow:2px 0 7px rgba(141,108,207,0.3);
-            transition:width var(--context-generator-stage-progress-duration,1.35s) var(--context-generator-stage-progress-easing,cubic-bezier(0.22,0.72,0.22,1));
+            transition:width var(--context-generator-stage-progress-duration,1.35s) var(--context-generator-stage-progress-easing,linear);
           }
           #context-generator-handoff-progress .context-generator-handoff-stage-progress-head{
             position:absolute;
@@ -4552,7 +4573,7 @@
             box-shadow:0 0 0 2px rgba(141,108,207,0.14),0 0 8px rgba(169,139,226,0.72);
             opacity:0;
             transform:translate(-50%,-50%);
-            transition:left var(--context-generator-stage-progress-duration,1.35s) var(--context-generator-stage-progress-easing,cubic-bezier(0.22,0.72,0.22,1)),opacity 160ms ease;
+            transition:left var(--context-generator-stage-progress-duration,1.35s) var(--context-generator-stage-progress-easing,linear),opacity 160ms ease;
           }
           #context-generator-handoff-progress .context-generator-handoff-stage[data-state="active"] .context-generator-handoff-stage-progress-head{
             opacity:1;
@@ -4879,10 +4900,7 @@
 
       stageElement.dataset.state = stage.state;
       stageElement.style.setProperty("--context-generator-stage-progress-duration", "1.35s");
-      stageElement.style.setProperty(
-        "--context-generator-stage-progress-easing",
-        "cubic-bezier(0.22,0.72,0.22,1)"
-      );
+      stageElement.style.setProperty("--context-generator-stage-progress-easing", "linear");
       setHandoffStageLineProgress(
         stage.id,
         stage.state === "complete"
@@ -4913,6 +4931,55 @@
     }
     progress.setAttribute("aria-label", `Transfer progress: ${currentStatus}`);
     if (phase === "active") startHandoffActivityProgress(stageId);
+  }
+
+  async function completeHandoffAfterPaste() {
+    stopHandoffActivityProgress();
+    const reducedMotion = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
+    const summaryStage = document.querySelector(
+      "#context-generator-handoff-progress [data-context-generator-stage='summary']"
+    );
+
+    if (summaryStage) {
+      const connector = summaryStage.querySelector(".context-generator-handoff-stage-connector");
+      const fill = summaryStage.querySelector(".context-generator-handoff-stage-connector-fill");
+      const connectorWidth = connector?.getBoundingClientRect?.().width || 0;
+      const renderedWidth = fill?.getBoundingClientRect?.().width || 0;
+      const renderedProgress = connectorWidth > 0
+        ? Math.max(0, Math.min(1, renderedWidth / connectorWidth))
+        : Number(summaryStage.dataset.contextGeneratorLineProgress || HANDOFF_ACTIVITY_LINE_MAX);
+
+      // Retarget from the line's rendered position so a mid-transition paste
+      // finishes continuously instead of jumping or restarting its easing curve.
+      summaryStage.style.setProperty("--context-generator-stage-progress-duration", "0ms");
+      setHandoffStageLineProgress("summary", renderedProgress);
+      void summaryStage.offsetWidth;
+      summaryStage.style.setProperty(
+        "--context-generator-stage-progress-duration",
+        reducedMotion ? "0ms" : `${HANDOFF_FINAL_LINE_DURATION_MS}ms`
+      );
+      summaryStage.style.setProperty("--context-generator-stage-progress-easing", "linear");
+      setHandoffStageLineProgress("summary", 1);
+    }
+
+    if (!reducedMotion) await delay(HANDOFF_FINAL_LINE_DURATION_MS);
+    setHandoffProgress("paste", "done");
+    if (!reducedMotion) await delay(HANDOFF_FINAL_TICK_HOLD_MS);
+  }
+
+  function showPasteCompletionOverlay(destinationId) {
+    showOverlay(destinationId);
+    setHandoffProgress("paste", "active");
+    const summaryStage = document.querySelector(
+      "#context-generator-handoff-progress [data-context-generator-stage='summary']"
+    );
+    if (!summaryStage) return;
+
+    // The destination may need to be active before a reliable paste. Cover it
+    // with the same handoff state, parked just below completion, until paste succeeds.
+    summaryStage.style.setProperty("--context-generator-stage-progress-duration", "0ms");
+    setHandoffStageLineProgress("summary", HANDOFF_ACTIVITY_LINE_MAX);
+    void summaryStage.offsetWidth;
   }
 
   function startHandoffCountdown() {

@@ -448,15 +448,23 @@ test("handoff progress is branded and wired only to real pipeline events", () =>
   assert.doesNotMatch(overlaySource, /Math\.random|setInterval|startHandoffStatusCycle/);
   assert.doesNotMatch(source, /HANDOFF_STATUS_INTERVAL_MS|HANDOFF_QUOTES|setHandoffStatus/);
   assert.match(source, /const HANDOFF_SUMMARY_LINE_DURATION_MS = 20000/);
+  assert.match(source, /const HANDOFF_FINAL_LINE_DURATION_MS = 700/);
+  assert.match(source, /const HANDOFF_FINAL_TICK_HOLD_MS = 300/);
   assert.match(source, /if \(stageId !== "summary"[^\n]+return/);
   assert.match(source, /`\$\{HANDOFF_SUMMARY_LINE_DURATION_MS\}ms`/);
+  assert.match(overlaySource, /stage-progress-easing,linear/);
 
   assert.match(source, /markTransferTrace\([^\n]+"capture start"\);\s*setHandoffProgress\("capture", "active"\)/);
   assert.match(source, /markTransferTrace\(trace, "capture done", \{[\s\S]{0,240}setHandoffProgress\("capture", "done"\)/);
   assert.match(source, /markTransferTrace\(trace, "summary start", \{[^\n]+\);\s*setHandoffProgress\("summary", "active"\)/);
   assert.match(source, /markTransferTrace\(transferTrace, "summary available", \{ chars: summary\.length \}\);\s*setHandoffProgress\("summary", "done"\)/);
   assert.match(source, /markTransferTrace\(transferTrace, "paste request start"\);\s*setHandoffProgress\("paste", "active"\)/);
-  assert.match(source, /markTransferTrace\(transferTrace, "paste done", pasteResponse\?\.timing \|\| null\);\s*setHandoffProgress\("paste", "done"\)/);
+  assert.match(source, /deferFinalActivation: true/);
+  assert.match(source, /markTransferTrace\(transferTrace, "paste done", pasteResponse\?\.timing \|\| null\);[\s\S]{0,260}await completeHandoffAfterPaste\(\)/);
+  assert.match(source, /await completeHandoffAfterPaste\(\);[\s\S]{0,260}type: "ACTIVATE_DESTINATION_TAB"/);
+  assert.match(source, /showHandoffCompletion === true[\s\S]{0,240}showPasteCompletionOverlay\(message\.destination\)/);
+  assert.match(source, /showHandoffCompletion === true[\s\S]{0,800}await completeHandoffAfterPaste\(\);\s*hideOverlay\(\)/);
+  assert.match(source, /function showPasteCompletionOverlay[\s\S]{0,600}setHandoffStageLineProgress\("summary", HANDOFF_ACTIVITY_LINE_MAX\)/);
 });
 
 test("Grok empty-state prompt is not counted or captured as a real message", () => {

@@ -440,7 +440,13 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
 
   if (message?.type === "TRANSFER_TO_DESTINATION") {
-    transferToDestination(message.destination, message.text, message.preparedTabId, message.transferId)
+    transferToDestination(
+      message.destination,
+      message.text,
+      message.preparedTabId,
+      message.transferId,
+      message.deferFinalActivation === true
+    )
       .then((result) => sendResponse({ ok: true, timing: result?.timing || null, marks: result?.marks || [] }))
       .catch((error) => {
         console.error("[Context Generator Relay]", error);
@@ -448,6 +454,13 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         sendResponse({ ok: false, error: error.message, code: error.code || "paste_failed" });
       });
 
+    return true;
+  }
+
+  if (message?.type === "ACTIVATE_DESTINATION_TAB") {
+    activateVerifiedDestinationTab(message.tabId, message.destination)
+      .then(() => sendResponse({ ok: true }))
+      .catch((error) => sendResponse({ ok: false, error: error.message, code: "destination_open_failed" }));
     return true;
   }
 
@@ -674,7 +687,13 @@ function cacheSummaryResult(conversationText, result) {
   }
 }
 
-async function transferToDestination(destinationId, text, preparedTabId = null, transferId = null) {
+async function transferToDestination(
+  destinationId,
+  text,
+  preparedTabId = null,
+  transferId = null,
+  deferFinalActivation = false
+) {
   if (!text?.trim()) {
     const error = new Error("Context summary text was not available.");
     error.code = "paste_failed";
@@ -705,7 +724,8 @@ async function transferToDestination(destinationId, text, preparedTabId = null, 
         destination,
         trimmedText,
         transferId,
-        trace
+        trace,
+        deferFinalActivation && destination.focusBeforePaste === true
       );
     } catch (error) {
       pasteResult = { ok: false, error: error?.message || "Prepared destination paste failed." };
@@ -733,7 +753,9 @@ async function transferToDestination(destinationId, text, preparedTabId = null, 
       previousError: preparedAttempted ? pasteResult?.error || "No paste response." : null
     });
     destinationTabId = await createDestinationTab(destination, {
-      active: recoveringPreparedTab ? destination.focusBeforePaste === true : true
+      active: deferFinalActivation
+        ? destination.focusBeforePaste === true
+        : (recoveringPreparedTab ? destination.focusBeforePaste === true : true)
     });
     markBackgroundTrace(trace, `${openLabel} open done`, { tabId: destinationTabId });
     pasteResult = await pasteIntoDestinationWithActivation(
@@ -742,7 +764,8 @@ async function transferToDestination(destinationId, text, preparedTabId = null, 
       destination,
       trimmedText,
       transferId,
-      trace
+      trace,
+      deferFinalActivation && destination.focusBeforePaste === true
     );
   }
 
@@ -752,9 +775,13 @@ async function transferToDestination(destinationId, text, preparedTabId = null, 
     throw error;
   }
 
-  markBackgroundTrace(trace, "final tab activate start", { tabId: destinationTabId });
-  await activateDestinationTab(destinationTabId);
-  markBackgroundTrace(trace, "final tab activate done", { tabId: destinationTabId });
+  if (!deferFinalActivation) {
+    markBackgroundTrace(trace, "final tab activate start", { tabId: destinationTabId });
+    await activateDestinationTab(destinationTabId);
+    markBackgroundTrace(trace, "final tab activate done", { tabId: destinationTabId });
+  } else {
+    markBackgroundTrace(trace, "final tab activation deferred", { tabId: destinationTabId });
+  }
   await setBadge("OK", "#1f8f4d", 2500);
   return {
     timing: {
@@ -782,7 +809,8 @@ async function pasteIntoDestinationWithActivation(
   destination,
   text,
   transferId,
-  trace
+  trace,
+  showHandoffCompletion = false
 ) {
   if (destination.focusBeforePaste) {
     markBackgroundTrace(trace, "tab activate before paste start", { tabId });
@@ -796,7 +824,15 @@ async function pasteIntoDestinationWithActivation(
   }
 
   markBackgroundTrace(trace, "paste message start", { tabId, destination: destinationId });
-  const pasteResult = await pasteIntoDestinationTab(tabId, destinationId, destination, text, transferId, trace);
+  const pasteResult = await pasteIntoDestinationTab(
+    tabId,
+    destinationId,
+    destination,
+    text,
+    transferId,
+    trace,
+    showHandoffCompletion
+  );
   markBackgroundTrace(trace, "paste message done", { tabId, responseTiming: pasteResult?.timing || null });
   return pasteResult;
 }
@@ -843,7 +879,25 @@ async function activateDestinationTab(tabId) {
   }
 }
 
-async function pasteIntoDestinationTab(tabId, destinationId, destination, text, transferId = null, trace = null) {
+async function activateVerifiedDestinationTab(tabId, destinationId) {
+  if (!Number.isInteger(tabId) || !DESTINATIONS[destinationId]) {
+    throw new Error("Destination tab was not available.");
+  }
+  if (!await isPreparedDestinationTabUsable(tabId, destinationId)) {
+    throw new Error("Destination tab changed before activation.");
+  }
+  await activateDestinationTab(tabId);
+}
+
+async function pasteIntoDestinationTab(
+  tabId,
+  destinationId,
+  destination,
+  text,
+  transferId = null,
+  trace = null,
+  showHandoffCompletion = false
+) {
   try {
     return await sendMessageWhenReady(
       tabId,
@@ -851,7 +905,8 @@ async function pasteIntoDestinationTab(tabId, destinationId, destination, text, 
         type: "PASTE_CONTEXT",
         destination: destinationId,
         text,
-        transferId
+        transferId,
+        showHandoffCompletion
       },
       destination.contentScript,
       destination.messageTimeoutMs || DESTINATION_MESSAGE_TIMEOUT_MS,

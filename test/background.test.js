@@ -159,7 +159,7 @@ function loadBackgroundForTransferTest({
     operations,
     getPlatformFromUrl: sandbox.__backgroundTestHooks.getPlatformFromUrl,
     sendMessageWhenReady: sandbox.__backgroundTestHooks.sendMessageWhenReady,
-    sendTransfer(destination, preparedTabId = null) {
+    sendTransfer(destination, preparedTabId = null, deferFinalActivation = false) {
       return new Promise((resolve, reject) => {
         const keepsChannelOpen = messageListener(
           {
@@ -167,12 +167,23 @@ function loadBackgroundForTransferTest({
             destination,
             text: "CONTEXT CARRY — READY TO PASTE\nUseful transfer context",
             preparedTabId,
-            transferId: "transfer-test"
+            transferId: "transfer-test",
+            deferFinalActivation
           },
           {},
           resolve
         );
         if (keepsChannelOpen !== true) reject(new Error("transfer listener did not keep the response channel open"));
+      });
+    },
+    activateDestination(destination, tabId) {
+      return new Promise((resolve, reject) => {
+        const keepsChannelOpen = messageListener(
+          { type: "ACTIVATE_DESTINATION_TAB", destination, tabId },
+          {},
+          resolve
+        );
+        if (keepsChannelOpen !== true) reject(new Error("activation listener did not keep the response channel open"));
       });
     }
   };
@@ -267,6 +278,46 @@ test("fresh ChatGPT recovery uses the same activation settle as the normal path"
   assert.ok(freshOpenIndex >= 0);
   assert.ok(recoveryMarks.includes("tab activation settle start"));
   assert.ok(recoveryMarks.includes("tab activation settle done"));
+});
+
+test("successful paste defers destination activation until the completion UI finishes", async () => {
+  const harness = loadBackgroundForTransferTest({
+    preparedTab: { id: 41, url: "https://claude.ai/new", windowId: 1 },
+    sendMessageImpl: async () => ({ ok: true, timing: { pasteMs: 5 } })
+  });
+
+  const response = await harness.sendTransfer("claude", 41, true);
+
+  assert.equal(response.ok, true);
+  assert.equal(response.timing.tabId, 41);
+  assert.equal(response.marks.at(-1).label, "final tab activation deferred");
+  assert.equal(harness.operations.updated.length, 0);
+  assert.equal(harness.operations.sent[0].message.showHandoffCompletion, false);
+
+  const activation = await harness.activateDestination("claude", 41);
+  assert.equal(activation.ok, true);
+  assert.deepEqual(
+    JSON.parse(JSON.stringify(harness.operations.updated)),
+    [{ tabId: 41, options: { active: true } }]
+  );
+});
+
+test("focus-required destinations show completion over the destination after paste", async () => {
+  const harness = loadBackgroundForTransferTest({
+    preparedTab: { id: 41, url: "https://chatgpt.com/", windowId: 1 },
+    sendMessageImpl: async () => ({
+      ok: true,
+      timing: { pasteMs: 5, handoffCompletionShown: true }
+    })
+  });
+
+  const response = await harness.sendTransfer("chatgpt", 41, true);
+
+  assert.equal(response.ok, true);
+  assert.equal(harness.operations.sent[0].message.showHandoffCompletion, true);
+  assert.equal(response.timing.paste.handoffCompletionShown, true);
+  assert.equal(harness.operations.updated.length, 1, "only the reliability-required pre-paste activation should run");
+  assert.equal(response.marks.at(-1).label, "final tab activation deferred");
 });
 
 test("ordinary OpenAI pages are never classified as ChatGPT", () => {

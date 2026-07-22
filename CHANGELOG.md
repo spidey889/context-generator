@@ -1,5 +1,7 @@
 # Changelog
 
+- 2026-07-22: Synchronized the handoff card's final progress with real paste success. Any remaining connector distance now finishes smoothly over 700 ms, the completed tick stays visible for 300 ms, and only then is the verified destination revealed. Connector motion is linear to remove the previous stop-and-go easing. ChatGPT and Grok retain their required pre-paste activation and stability behavior, but the completion card covers the destination until the tick so the page is revealed in the same order; capture, summary, paste, recovery, and no-auto-send behavior are unchanged.
+
 - 2026-07-22: Replaced Gemini 3.5 Flash with the newly released stable `gemini-3.6-flash` as the first generated-summary provider. The native `generateContent` request keeps `MEDIUM` thinking, default sampling without deprecated sampling parameters, explicit non-storage, the existing reasoning allowance, and the complete Mistral/Groq fallback chain; tiny `local-direct` carries remain provider-free.
 
 - 2026-07-22: Moved metadata-only transfer telemetry from direct extension-to-Supabase delivery to `Extension -> Vercel -> Supabase`. The extension no longer contains the Supabase URL or publishable key and no longer requests Supabase host access. The new Vercel route repeats the strict closed-schema validation before forwarding with server-only environment variables; the existing install UUID, ordered outbox, retry behavior, Supabase Edge Function, database aggregation, summary flow, and analysis tool remain unchanged.
