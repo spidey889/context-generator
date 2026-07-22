@@ -725,7 +725,7 @@ async function transferToDestination(
         trimmedText,
         transferId,
         trace,
-        deferFinalActivation && destination.focusBeforePaste === true
+        deferFinalActivation
       );
     } catch (error) {
       pasteResult = { ok: false, error: error?.message || "Prepared destination paste failed." };
@@ -747,15 +747,16 @@ async function transferToDestination(
       );
     }
     const openLabel = recoveringPreparedTab ? "fresh fallback tab" : "tab";
+    const activateFreshTab = deferFinalActivation
+      ? false
+      : (recoveringPreparedTab ? destination.focusBeforePaste === true : true);
     markBackgroundTrace(trace, `${openLabel} open start`, {
       destination: destinationId,
-      active: destination.focusBeforePaste === true,
+      active: activateFreshTab,
       previousError: preparedAttempted ? pasteResult?.error || "No paste response." : null
     });
     destinationTabId = await createDestinationTab(destination, {
-      active: deferFinalActivation
-        ? destination.focusBeforePaste === true
-        : (recoveringPreparedTab ? destination.focusBeforePaste === true : true)
+      active: activateFreshTab
     });
     markBackgroundTrace(trace, `${openLabel} open done`, { tabId: destinationTabId });
     pasteResult = await pasteIntoDestinationWithActivation(
@@ -765,7 +766,7 @@ async function transferToDestination(
       trimmedText,
       transferId,
       trace,
-      deferFinalActivation && destination.focusBeforePaste === true
+      deferFinalActivation
     );
   }
 
@@ -810,9 +811,9 @@ async function pasteIntoDestinationWithActivation(
   text,
   transferId,
   trace,
-  showHandoffCompletion = false
+  deferFinalActivation = false
 ) {
-  if (destination.focusBeforePaste) {
+  if (destination.focusBeforePaste && !deferFinalActivation) {
     markBackgroundTrace(trace, "tab activate before paste start", { tabId });
     await activateDestinationTab(tabId);
     markBackgroundTrace(trace, "tab activate before paste done", { tabId });
@@ -830,8 +831,7 @@ async function pasteIntoDestinationWithActivation(
     destination,
     text,
     transferId,
-    trace,
-    showHandoffCompletion
+    trace
   );
   markBackgroundTrace(trace, "paste message done", { tabId, responseTiming: pasteResult?.timing || null });
   return pasteResult;
@@ -895,8 +895,7 @@ async function pasteIntoDestinationTab(
   destination,
   text,
   transferId = null,
-  trace = null,
-  showHandoffCompletion = false
+  trace = null
 ) {
   try {
     return await sendMessageWhenReady(
@@ -905,8 +904,7 @@ async function pasteIntoDestinationTab(
         type: "PASTE_CONTEXT",
         destination: destinationId,
         text,
-        transferId,
-        showHandoffCompletion
+        transferId
       },
       destination.contentScript,
       destination.messageTimeoutMs || DESTINATION_MESSAGE_TIMEOUT_MS,

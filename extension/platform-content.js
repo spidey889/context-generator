@@ -487,25 +487,14 @@
 
     if (message?.type === "PASTE_CONTEXT") {
       const pasteStartedAt = getNow();
-      const showCompletionHere = message.showHandoffCompletion === true;
-      if (showCompletionHere) {
-        showPasteCompletionOverlay(message.destination);
-      }
       logTransferPerf(message.transferId, "destination paste start", { destination: message.destination });
       pasteIntoPlatform(message.text, message.destination, message.transferId)
-        .then(async () => {
+        .then(() => {
           const pasteMs = Math.round(getNow() - pasteStartedAt);
           logTransferPerf(message.transferId, "destination paste done", { destination: message.destination, pasteMs });
-          if (showCompletionHere) {
-            await completeHandoffAfterPaste();
-            hideOverlay();
-          }
-          sendResponse({ ok: true, timing: { pasteMs, handoffCompletionShown: showCompletionHere } });
+          sendResponse({ ok: true, timing: { pasteMs } });
         })
-        .catch((error) => {
-          if (showCompletionHere) hideOverlay();
-          sendResponse({ ok: false, error: error.message });
-        });
+        .catch((error) => sendResponse({ ok: false, error: error.message }));
 
       return true;
     }
@@ -627,9 +616,7 @@
       });
       appendBackgroundMarks(transferTrace, pasteResponse?.marks);
       markTransferTrace(transferTrace, "paste done", pasteResponse?.timing || null);
-      if (pasteResponse?.timing?.paste?.handoffCompletionShown !== true) {
-        await completeHandoffAfterPaste();
-      }
+      await completeHandoffAfterPaste();
       await notifyBackground({
         type: "ACTIVATE_DESTINATION_TAB",
         destination: destinationId,
@@ -4965,21 +4952,6 @@
     if (!reducedMotion) await delay(HANDOFF_FINAL_LINE_DURATION_MS);
     setHandoffProgress("paste", "done");
     if (!reducedMotion) await delay(HANDOFF_FINAL_TICK_HOLD_MS);
-  }
-
-  function showPasteCompletionOverlay(destinationId) {
-    showOverlay(destinationId);
-    setHandoffProgress("paste", "active");
-    const summaryStage = document.querySelector(
-      "#context-generator-handoff-progress [data-context-generator-stage='summary']"
-    );
-    if (!summaryStage) return;
-
-    // The destination may need to be active before a reliable paste. Cover it
-    // with the same handoff state, parked just below completion, until paste succeeds.
-    summaryStage.style.setProperty("--context-generator-stage-progress-duration", "0ms");
-    setHandoffStageLineProgress("summary", HANDOFF_ACTIVITY_LINE_MAX);
-    void summaryStage.offsetWidth;
   }
 
   function startHandoffCountdown() {

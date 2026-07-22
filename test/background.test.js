@@ -292,7 +292,7 @@ test("successful paste defers destination activation until the completion UI fin
   assert.equal(response.timing.tabId, 41);
   assert.equal(response.marks.at(-1).label, "final tab activation deferred");
   assert.equal(harness.operations.updated.length, 0);
-  assert.equal(harness.operations.sent[0].message.showHandoffCompletion, false);
+  assert.equal("showHandoffCompletion" in harness.operations.sent[0].message, false);
 
   const activation = await harness.activateDestination("claude", 41);
   assert.equal(activation.ok, true);
@@ -302,22 +302,23 @@ test("successful paste defers destination activation until the completion UI fin
   );
 });
 
-test("focus-required destinations show completion over the destination after paste", async () => {
+test("focus-required destinations also stay inactive until source completion", async () => {
   const harness = loadBackgroundForTransferTest({
     preparedTab: { id: 41, url: "https://chatgpt.com/", windowId: 1 },
-    sendMessageImpl: async () => ({
-      ok: true,
-      timing: { pasteMs: 5, handoffCompletionShown: true }
-    })
+    sendMessageImpl: async () => ({ ok: true, timing: { pasteMs: 5 } })
   });
 
   const response = await harness.sendTransfer("chatgpt", 41, true);
 
   assert.equal(response.ok, true);
-  assert.equal(harness.operations.sent[0].message.showHandoffCompletion, true);
-  assert.equal(response.timing.paste.handoffCompletionShown, true);
-  assert.equal(harness.operations.updated.length, 1, "only the reliability-required pre-paste activation should run");
+  assert.equal(harness.operations.updated.length, 0, "destination must not activate before the source tick");
+  assert.equal("showHandoffCompletion" in harness.operations.sent[0].message, false);
+  assert.equal(response.marks.some(({ label }) => label === "tab activate before paste start"), false);
   assert.equal(response.marks.at(-1).label, "final tab activation deferred");
+
+  const activation = await harness.activateDestination("chatgpt", 41);
+  assert.equal(activation.ok, true);
+  assert.equal(harness.operations.updated.length, 1);
 });
 
 test("ordinary OpenAI pages are never classified as ChatGPT", () => {

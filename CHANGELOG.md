@@ -1,5 +1,7 @@
 # Changelog
 
+- 2026-07-22: Corrected the final handoff ordering so the user stays on the source AI throughout capture, summary, and verified paste. Removed the destination-side completion-card workaround from the previous pass: ChatGPT, Grok, and every other destination now remain inactive until the source connector finishes, the completed tick is shown, and the destination tab is revalidated and activated. Post-paste stability checks, recovery, and no-auto-send behavior remain unchanged.
+
 - 2026-07-22: Synchronized the handoff card's final progress with real paste success. Any remaining connector distance now finishes smoothly over 700 ms, the completed tick stays visible for 300 ms, and only then is the verified destination revealed. Connector motion is linear to remove the previous stop-and-go easing. ChatGPT and Grok retain their required pre-paste activation and stability behavior, but the completion card covers the destination until the tick so the page is revealed in the same order; capture, summary, paste, recovery, and no-auto-send behavior are unchanged.
 
 - 2026-07-22: Replaced Gemini 3.5 Flash with the newly released stable `gemini-3.6-flash` as the first generated-summary provider. The native `generateContent` request keeps `MEDIUM` thinking, default sampling without deprecated sampling parameters, explicit non-storage, the existing reasoning allowance, and the complete Mistral/Groq fallback chain; tiny `local-direct` carries remain provider-free.

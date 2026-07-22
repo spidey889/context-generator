@@ -462,9 +462,7 @@ test("handoff progress is branded and wired only to real pipeline events", () =>
   assert.match(source, /deferFinalActivation: true/);
   assert.match(source, /markTransferTrace\(transferTrace, "paste done", pasteResponse\?\.timing \|\| null\);[\s\S]{0,260}await completeHandoffAfterPaste\(\)/);
   assert.match(source, /await completeHandoffAfterPaste\(\);[\s\S]{0,260}type: "ACTIVATE_DESTINATION_TAB"/);
-  assert.match(source, /showHandoffCompletion === true[\s\S]{0,240}showPasteCompletionOverlay\(message\.destination\)/);
-  assert.match(source, /showHandoffCompletion === true[\s\S]{0,800}await completeHandoffAfterPaste\(\);\s*hideOverlay\(\)/);
-  assert.match(source, /function showPasteCompletionOverlay[\s\S]{0,600}setHandoffStageLineProgress\("summary", HANDOFF_ACTIVITY_LINE_MAX\)/);
+  assert.doesNotMatch(source, /showHandoffCompletion|showPasteCompletionOverlay/);
 });
 
 test("Grok empty-state prompt is not counted or captured as a real message", () => {
