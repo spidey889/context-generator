@@ -128,8 +128,7 @@
   const HANDOFF_ACTIVITY_LINE_START = 0.05;
   const HANDOFF_ACTIVITY_LINE_MAX = 0.9;
   const HANDOFF_SUMMARY_LINE_DURATION_MS = 20000;
-  const HANDOFF_FINAL_LINE_DURATION_MS = 700;
-  const HANDOFF_FINAL_TICK_HOLD_MS = 300;
+  const HANDOFF_FINAL_LINE_DURATION_MS = 1000;
   const GENERIC_CONVERSATION_SELECTORS = [
     "[data-message-author-role]",
     "[data-testid*='conversation' i]",
@@ -4541,26 +4540,38 @@
           /* The line follows live display progress; its motion never gates the transfer pipeline. */
           #context-generator-handoff-progress .context-generator-handoff-stage-connector-fill{
             position:absolute;
-            inset:0 auto 0 0;
-            width:var(--context-generator-stage-progress-position,0%);
+            inset:0;
+            width:100%;
             border-radius:inherit;
             background:linear-gradient(90deg,#6F579D,#9A7ADC);
             box-shadow:2px 0 7px rgba(141,108,207,0.3);
-            transition:width var(--context-generator-stage-progress-duration,1.35s) var(--context-generator-stage-progress-easing,linear);
+            transform:scaleX(var(--context-generator-stage-progress-ratio,0));
+            transform-origin:left center;
+            transition:transform var(--context-generator-stage-progress-duration,1.35s) var(--context-generator-stage-progress-easing,linear);
+            will-change:transform;
           }
           #context-generator-handoff-progress .context-generator-handoff-stage-progress-head{
             position:absolute;
             z-index:1;
+            inset:0 auto auto 0;
+            width:100%;
+            height:2px;
+            opacity:0;
+            transform:translate3d(var(--context-generator-stage-progress-position,0%),0,0);
+            transition:transform var(--context-generator-stage-progress-duration,1.35s) var(--context-generator-stage-progress-easing,linear),opacity 160ms ease;
+            will-change:transform;
+          }
+          #context-generator-handoff-progress .context-generator-handoff-stage-progress-head::after{
+            content:"";
+            position:absolute;
             top:50%;
-            left:var(--context-generator-stage-progress-position,0%);
+            left:0;
             width:4px;
             height:4px;
             border-radius:999px;
             background:#A98BE2;
             box-shadow:0 0 0 2px rgba(141,108,207,0.14),0 0 8px rgba(169,139,226,0.72);
-            opacity:0;
             transform:translate(-50%,-50%);
-            transition:left var(--context-generator-stage-progress-duration,1.35s) var(--context-generator-stage-progress-easing,linear),opacity 160ms ease;
           }
           #context-generator-handoff-progress .context-generator-handoff-stage[data-state="active"] .context-generator-handoff-stage-progress-head{
             opacity:1;
@@ -4802,6 +4813,10 @@
       "--context-generator-stage-progress-position",
       `${(normalized * 100).toFixed(2)}%`
     );
+    stageElement.style.setProperty(
+      "--context-generator-stage-progress-ratio",
+      normalized.toFixed(4)
+    );
     stageElement.dataset.contextGeneratorLineProgress = normalized.toFixed(4);
   }
 
@@ -4951,7 +4966,13 @@
 
     if (!reducedMotion) await delay(HANDOFF_FINAL_LINE_DURATION_MS);
     setHandoffProgress("paste", "done");
-    if (!reducedMotion) await delay(HANDOFF_FINAL_TICK_HOLD_MS);
+    // Let the completed tick reach the screen before the background activates
+    // the destination. Two frames guarantee at least one painted completion state.
+    if (window.requestAnimationFrame) {
+      await new Promise((resolve) => {
+        window.requestAnimationFrame(() => window.requestAnimationFrame(resolve));
+      });
+    }
   }
 
   function startHandoffCountdown() {
