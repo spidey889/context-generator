@@ -112,7 +112,7 @@
   const CHATGPT_PASTE_VERIFY_TIMEOUT_MS = 1500;
   const CHATGPT_PASTE_STABILITY_MS = 550;
   const HANDOFF_COUNTDOWN_ID = "context-generator-handoff-countdown";
-  const HANDOFF_COUNTDOWN_FIXED_MS = 30000;
+  const HANDOFF_COUNTDOWN_FIXED_MS = 40000;
   const HANDOFF_REASSURANCE_ID = "context-generator-handoff-reassurance";
   const HANDOFF_REASSURANCE_TEXT = "Almost done, don't cancel now";
   // Stage completion still comes only from real pipeline marks. In-stage line motion is display-only:
@@ -4604,10 +4604,10 @@
         "padding:0 8px",
         "box-sizing:border-box",
         "border-radius:999px",
-        "border:1px solid rgba(255,255,255,0.075)",
-        "background:rgba(255,255,255,0.032)",
-        "box-shadow:inset 0 1px 0 rgba(255,255,255,0.035)",
-        "color:rgba(242,240,246,0.46)",
+        "border:1px solid rgba(167,128,255,0.32)",
+        "background:rgba(128,82,219,0.15)",
+        "box-shadow:inset 0 1px 0 rgba(255,255,255,0.08),0 0 12px rgba(128,82,219,0.12)",
+        "color:rgba(248,245,255,0.88)",
         "font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif",
         "font-size:10.5px",
         "font-weight:620",
