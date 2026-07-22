@@ -63,6 +63,7 @@
   const SUMMARY_RETRY_ERROR_MESSAGE = "Try again right now. We might have made a mistake. It almost never happens the second time.";
   // Keep this aligned with api/request-security.js so unsupported captures never leave the extension.
   const MAX_BACKEND_CONVERSATION_CHARS = 350000;
+  const TINY_DIRECT_PROFILE_MAX_CHARS = 1200;
   const OVERSIZED_CONVERSATION_ERROR_MESSAGE = "Conversation exceeds the supported 350,000 character limit";
   const CONVERSATION_SCRAPE_RETRY_TIMEOUT_MS = 1800;
   const CONVERSATION_SCRAPE_RETRY_INTERVAL_MS = 140;
@@ -1920,7 +1921,10 @@
       throw new Error(NO_CONVERSATION_ERROR_MESSAGE);
     }
 
-    const usefulTurns = messageTurns.filter((turn) => isUsefulConversationTurn(turn));
+    const includeShortExplicitTurns = fitsTinyDirectProfile(messageTurns);
+    const usefulTurns = messageTurns.filter((turn) => (
+      isUsefulConversationTurn(turn, includeShortExplicitTurns)
+    ));
     if (
       usefulTurns.length === 0 &&
       messageTurns.some(hasExplicitConversationRole) &&
@@ -2107,8 +2111,13 @@
       elapsedMs: sweepMetrics.sweepMs,
       ...getVirtualSweepScrollLogState()
     });
-    const initialTurns = getComparableConversationTurns(initialMessageTurns);
-    const preferredTurns = chooseMoreCompleteConversationTurns(initialTurns, sweptTurns);
+    const includeShortExplicitTurns = fitsTinyDirectProfile([...initialMessageTurns, ...sweptTurns]);
+    const initialTurns = getComparableConversationTurns(initialMessageTurns, includeShortExplicitTurns);
+    const preferredTurns = chooseMoreCompleteConversationTurns(
+      initialTurns,
+      sweptTurns,
+      includeShortExplicitTurns
+    );
     if (areConversationTurnListsIdentical(preferredTurns, initialTurns)) {
       lastConversationCaptureMetrics = {
         ...initialMetrics,
@@ -2123,9 +2132,9 @@
     });
   }
 
-  function getComparableConversationTurns(messageTurns = []) {
+  function getComparableConversationTurns(messageTurns = [], includeShortExplicitTurns = false) {
     const usefulTurns = messageTurns
-      .filter((turn) => isUsefulConversationTurn(turn))
+      .filter((turn) => isUsefulConversationTurn(turn, includeShortExplicitTurns))
       .map((turn) => {
         const comparable = { role: turn.role, text: cleanText(turn.text) };
         if (turn.sourceId) comparable.sourceId = turn.sourceId;
@@ -2134,11 +2143,14 @@
     return removeExactDuplicateConversationTurns(usefulTurns);
   }
 
-  function chooseMoreCompleteConversationTurns(initialTurns, sweptTurns) {
+  function chooseMoreCompleteConversationTurns(initialTurns, sweptTurns, includeShortExplicitTurns = false) {
     // Start with the exact turns used by the quick capture, then apply the existing sequence alignment.
     // Matched turns are only replaced when the swept text is longer, so the final choice cannot downgrade text.
     const preferredTurns = initialTurns.map((turn) => ({ ...turn }));
-    collectRenderedConversationTurns(preferredTurns, getComparableConversationTurns(sweptTurns));
+    collectRenderedConversationTurns(
+      preferredTurns,
+      getComparableConversationTurns(sweptTurns, includeShortExplicitTurns)
+    );
     return preferredTurns;
   }
 
@@ -2781,11 +2793,25 @@
     return turn?.role === "User" || turn?.role === currentPlatform.name;
   }
 
-  function isUsefulConversationTurn(turn) {
+  function fitsTinyDirectProfile(turns = []) {
+    const explicitTurns = removeExactDuplicateConversationTurns(
+      turns.filter((turn) => turn?.text && hasExplicitConversationRole(turn) && !isEmptyConversationText(turn.text))
+    );
+    const transcript = explicitTurns
+      .map((turn) => `${turn.role}: ${cleanText(turn.text)}`)
+      .join("\n\n")
+      .trim();
+    if (!transcript) return false;
+
+    // The provider-free tiny carry should not lose genuine one- or two-character replies such as "hi".
+    return `${currentPlatform.name} conversation:\n\n${transcript}`.length <= TINY_DIRECT_PROFILE_MAX_CHARS;
+  }
+
+  function isUsefulConversationTurn(turn, includeShortExplicitTurns = false) {
     if (!turn?.text) return false;
 
     const text = cleanText(turn.text);
-    if (text.length < 3) return false;
+    if (text.length < (includeShortExplicitTurns ? 1 : 3)) return false;
     return hasExplicitConversationRole(turn) && !isEmptyConversationText(text);
   }
 

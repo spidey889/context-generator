@@ -64,7 +64,7 @@ Capture preserves the complete middle, leaves the source at its final capture po
 
 ## Summary Profiles And Provider Chain
 
-Input at or below 1,200 characters uses `local-direct`: the backend calls no provider and produces a compact handoff containing only the Context Carry title, `CONVERSATION SO FAR`, the exact short transcript, and the destination confirmation. It does not pad tiny chats with generated-summary sections or backend/template language.
+Input at or below 1,200 characters uses `local-direct`: the backend calls no provider and produces a compact handoff containing only the Context Carry title, `CONVERSATION SO FAR`, the exact short transcript, and the destination confirmation. Explicit user or assistant turns as short as one character are preserved for this tiny profile, so exchanges such as `hi` plus its reply retain both sides. Generated-summary profiles keep the existing minimum turn-length behavior. The tiny carry does not pad chats with generated-summary sections or backend/template language.
 
 | Profile | Input characters | Target | Output cap |
 | --- | ---: | ---: | ---: |
