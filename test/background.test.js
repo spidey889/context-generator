@@ -298,9 +298,9 @@ test("summary cache preserves original result metadata and labels cache hits", a
   const backendTiming = {
     servedBy: "mistral",
     provider: "mistral",
-    primaryModel: "gemini-3.5-flash",
+    primaryModel: "gemini-3.6-flash",
     model: "mistral-medium-2604",
-    modelsTried: ["gemini-3.5-flash", "mistral-medium-2604"],
+    modelsTried: ["gemini-3.6-flash", "mistral-medium-2604"],
     mistralModelsTried: ["mistral-medium-2604"],
     providerMs: 812,
     fallback: {

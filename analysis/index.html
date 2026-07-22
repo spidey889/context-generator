@@ -806,6 +806,8 @@
 
     function formatModelDisplayName(model) {
       if (!model) return "n/a";
+      if (model === "gemini-3.6-flash") return "Gemini 3.6 Flash";
+      // Preserve readable labels for receipts generated before the 3.6 migration.
       if (model === "gemini-3.5-flash") return "Gemini 3.5 Flash";
       if (model === "mistral-medium-2604") return "mistral-medium-3-5";
       return model;
@@ -908,10 +910,10 @@
           providerPasses: 1,
           servedBy: "gemini",
           provider: "gemini",
-          primaryModel: "gemini-3.5-flash",
-          model: "gemini-3.5-flash",
-          modelReason: "gemini-3.5-flash served as the primary model",
-          modelsTried: ["gemini-3.5-flash"],
+          primaryModel: "gemini-3.6-flash",
+          model: "gemini-3.6-flash",
+          modelReason: "gemini-3.6-flash served as the primary model",
+          modelsTried: ["gemini-3.6-flash"],
           mistralModelsTried: [],
           modelInputChars: 48142,
           modelThresholdChars: null,

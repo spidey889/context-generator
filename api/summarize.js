@@ -11,7 +11,7 @@ const PROVIDER_RETRY_INTERVAL_MS = 450;
 const PROVIDER_ATTEMPT_TIMEOUT_MS = 80000;
 const SUMMARY_HEARTBEAT_INTERVAL_MS = 15000;
 const SUMMARY_HEARTBEAT_CHUNK = `\n${" ".repeat(2048)}\n`;
-const GEMINI_PRIMARY_MODEL = "gemini-3.5-flash";
+const GEMINI_PRIMARY_MODEL = "gemini-3.6-flash";
 const GEMINI_THINKING_TOKEN_ALLOWANCE = 4000;
 const GEMINI_GENERATE_CONTENT_URL = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_PRIMARY_MODEL}:generateContent`;
 const MISTRAL_CHAT_COMPLETIONS_URL = "https://api.mistral.ai/v1/chat/completions";
@@ -655,8 +655,8 @@ function getProviderRequestBody(provider, messages, profile, model) {
     const systemMessage = messages.find((message) => message.role === "system");
     const userMessage = messages.find((message) => message.role === "user");
 
-    // Gemini 3.x is tuned for its default sampling values. Keep the same trust
-    // boundary as the chat-completions providers without sending temperature.
+    // Gemini 3.6 Flash deprecates explicit sampling parameters. Keep its default
+    // sampling while preserving the same trust boundary as chat-completions providers.
     return {
       systemInstruction: {
         parts: [{ text: String(systemMessage?.content || "") }]

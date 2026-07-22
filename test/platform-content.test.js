@@ -1485,9 +1485,9 @@ test("latest-run cache receipt preserves original provider metadata", () => {
           inputChars: 24000,
           servedBy: "mistral",
           provider: "mistral",
-          primaryModel: "gemini-3.5-flash",
+          primaryModel: "gemini-3.6-flash",
           model: "mistral-medium-2604",
-          modelsTried: ["gemini-3.5-flash", "mistral-medium-2604"],
+          modelsTried: ["gemini-3.6-flash", "mistral-medium-2604"],
           mistralModelsTried: ["mistral-medium-2604"],
           fallback: {
             attempted: true,
@@ -1512,7 +1512,7 @@ test("latest-run cache receipt preserves original provider metadata", () => {
   assert.equal(stats.summary.model, "mistral-medium-2604");
   assert.deepEqual(
     JSON.parse(JSON.stringify(stats.summary.modelsTried)),
-    ["gemini-3.5-flash", "mistral-medium-2604"]
+    ["gemini-3.6-flash", "mistral-medium-2604"]
   );
   assert.equal(stats.summary.fallback.used, true);
   assert.equal(stats.summary.fallback.servedBy, "mistral");

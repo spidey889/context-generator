@@ -24,6 +24,9 @@ test("analysis displays the Medium 3.5 name instead of its API snapshot ID", () 
 });
 
 test("analysis displays Gemini as the primary provider and model", () => {
+  assert.match(ANALYSIS_SOURCE, /model === "gemini-3\.6-flash"/);
+  assert.match(ANALYSIS_SOURCE, /return "Gemini 3\.6 Flash"/);
+  // Older locally stored receipts should remain readable after the migration.
   assert.match(ANALYSIS_SOURCE, /model === "gemini-3\.5-flash"/);
   assert.match(ANALYSIS_SOURCE, /return "Gemini 3\.5 Flash"/);
   assert.match(ANALYSIS_SOURCE, /provider === "gemini"/);

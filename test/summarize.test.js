@@ -429,7 +429,7 @@ test("validator accepts the exact boxed Unicode header requested from providers"
 
 test("provider fallback budgets keep the complete chain below the Vercel ceiling", () => {
   const budgets = [
-    getProviderRequestBudgetMs("gemini-3.5-flash"),
+    getProviderRequestBudgetMs("gemini-3.6-flash"),
     getProviderRequestBudgetMs("mistral-medium-3-5"),
     getProviderRequestBudgetMs("mistral-large-2512"),
     getProviderRequestBudgetMs("ministral-3b-2512"),
@@ -921,10 +921,10 @@ test("validator canonicalizes numbered provider headings without weakening secti
   headings.forEach((heading) => assert.match(normalized, new RegExp(`(?:^|\\n)[^\\n]*${heading}\\n`)));
 });
 
-test("generated summaries select Gemini 3.5 Flash when its server key is configured", () => {
+test("generated summaries select Gemini 3.6 Flash when its server key is configured", () => {
   const conversation = "x".repeat(20001);
 
-  assert.equal(getGeneratedModelSelection(conversation, true).model, "gemini-3.5-flash");
+  assert.equal(getGeneratedModelSelection(conversation, true).model, "gemini-3.6-flash");
   assert.match(getGeneratedModelSelection(conversation, true).reason, /preserved Mistral and Groq fallbacks/);
   assert.equal(getGeneratedModelSelection(conversation, false).model, "mistral-medium-3-5");
 });
@@ -970,7 +970,7 @@ test("backend sends generated summaries to native Gemini first and records Gemin
     assert.equal(res.statusCode, 200);
     assert.equal(
       capturedRequest.url,
-      "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent"
+      "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent"
     );
     assert.equal(capturedRequest.headers["x-goog-api-key"], "test-gemini-key");
     assert.equal(capturedRequest.headers.Authorization, undefined);
@@ -979,6 +979,9 @@ test("backend sends generated summaries to native Gemini first and records Gemin
     assert.equal(capturedRequest.body.store, false);
     assert.equal(capturedRequest.body.generationConfig.maxOutputTokens, 11000);
     assert.equal(capturedRequest.body.generationConfig.thinkingConfig.thinkingLevel, "MEDIUM");
+    assert.equal(capturedRequest.body.generationConfig.temperature, undefined);
+    assert.equal(capturedRequest.body.generationConfig.topP, undefined);
+    assert.equal(capturedRequest.body.generationConfig.topK, undefined);
     assert.match(capturedRequest.body.systemInstruction.parts[0].text, /untrusted customer transcript data/);
     assert.match(capturedRequest.body.systemInstruction.parts[0].text, /Start with the plain-text title exactly/);
     assert.match(capturedRequest.body.systemInstruction.parts[0].text, /Do not draw box-border lines/);
@@ -989,13 +992,13 @@ test("backend sends generated summaries to native Gemini first and records Gemin
       conversation
     });
     assert.equal(res.payload.timing.servedBy, "gemini");
-    assert.equal(res.payload.timing.primaryModel, "gemini-3.5-flash");
-    assert.equal(res.payload.timing.model, "gemini-3.5-flash");
+    assert.equal(res.payload.timing.primaryModel, "gemini-3.6-flash");
+    assert.equal(res.payload.timing.model, "gemini-3.6-flash");
     assert.equal(res.payload.timing.profile, "extra-large");
     assert.equal(res.payload.timing.inputChars, 350000);
     assert.equal(res.payload.timing.maxTokens, 7000);
     assert.equal(res.payload.timing.targetWords, 1800);
-    assert.deepEqual(res.payload.timing.modelsTried, ["gemini-3.5-flash"]);
+    assert.deepEqual(res.payload.timing.modelsTried, ["gemini-3.6-flash"]);
     assert.deepEqual(res.payload.timing.mistralModelsTried, []);
     assert.equal(res.payload.timing.geminiPasses, 1);
     assert.equal(res.payload.timing.mistralPasses, 0);
@@ -1047,21 +1050,21 @@ test("backend falls from invalid Gemini output to the preserved Mistral chain", 
 
     assert.equal(res.statusCode, 200);
     assert.equal(requests.length, 2);
-    assert.match(requests[0].url, /gemini-3\.5-flash:generateContent$/);
+    assert.match(requests[0].url, /gemini-3\.6-flash:generateContent$/);
     assert.equal(requests[1].body.model, "mistral-medium-3-5");
     assert.match(requests[0].body.systemInstruction.parts[0].text, /plain-text title/);
     assert.match(requests[1].body.messages[0].content, /boxed header exactly as shown/);
     assert.equal(requests[0].body.generationConfig.maxOutputTokens, 5000);
     assert.equal(requests[1].body.max_tokens, 1000);
     assert.equal(res.payload.timing.servedBy, "mistral");
-    assert.equal(res.payload.timing.primaryModel, "gemini-3.5-flash");
-    assert.deepEqual(res.payload.timing.modelsTried, ["gemini-3.5-flash", "mistral-medium-3-5"]);
+    assert.equal(res.payload.timing.primaryModel, "gemini-3.6-flash");
+    assert.deepEqual(res.payload.timing.modelsTried, ["gemini-3.6-flash", "mistral-medium-3-5"]);
     assert.deepEqual(res.payload.timing.mistralModelsTried, ["mistral-medium-3-5"]);
     assert.equal(res.payload.timing.fallback.attempted, true);
     assert.equal(res.payload.timing.fallback.used, true);
     assert.equal(res.payload.timing.fallback.servedBy, "mistral");
     assert.match(res.payload.timing.fallback.reason, /Gemini returned an invalid summary/);
-    assert.match(res.payload.timing.modelReason, /gemini-3\.5-flash failed/);
+    assert.match(res.payload.timing.modelReason, /gemini-3\.6-flash failed/);
   } finally {
     restoreMistralKey();
     restoreGeminiKey();
