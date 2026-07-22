@@ -1,5 +1,7 @@
 # Changelog
 
+- 2026-07-22: Removed the handoff card's redundant "Live handoff" eyebrow, restored completed ticks to brand purple, and shifted the surface and ambient glow toward a more neutral near-black. Transfer behavior and timing are unchanged. Per explicit request, no automated or browser tests were run.
+
 - 2026-07-22: Polished the handoff card without changing transfer logic or timing. The compact dark surface now has clearer status hierarchy, a subtle top spotlight, stronger depth, a refined progress rail, a restrained active-stage halo, and muted green completion states. The earlier rejected broad multicolor treatment was deliberately not revisited; reduced-motion behavior remains supported. Per explicit request, no automated or browser tests were run.
 
 - 2026-07-22: Fixed two regressions in the fast provider-free handoff. Tiny `local-direct` transfers now finish the capture connector before starting the summary connector instead of advancing both lines together. Restored ChatGPT/Grok's required focus-before-paste invariant without restoring the early reveal: their source completion line and tick now finish first, then the destination activates and performs the verified paste; destinations that reliably paste inactive retain the post-paste reveal. Added focused ordering and activation regressions.

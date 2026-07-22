@@ -49,7 +49,7 @@ The manifest requests only `alarms`, `scripting`, and `storage`. Supported-site 
 
 Picker capture preparation and scraping share one failure boundary, so either error immediately releases the source lock and replaces the handoff UI with the real failure. The source lock's six-minute safety reset covers the 210-second summary ceiling plus prepared and fresh paste attempts. Background waits are 12 seconds for source startup, normally 30 seconds for destination messaging, 45 seconds for ChatGPT destination messaging, and 210 seconds for the single backend request. Destination message deadlines cover both connection retries and an already-delivered message awaiting its content-script response, so a hung destination listener cannot silently outlive the configured wait.
 
-The handoff card uses a restrained dark presentation with one clear live-status headline, a compact three-stage rail, brand-purple active progress, and muted green completion states. Surface depth, the active-stage halo, and reduced-motion handling are visual only; they do not alter stage timing or transfer behavior.
+The handoff card uses a restrained near-black presentation with one clear live-status headline, a compact three-stage rail, and brand-purple active and completed states. Surface depth, the active-stage halo, and reduced-motion handling are visual only; they do not alter stage timing or transfer behavior.
 
 ## Conversation Capture
 

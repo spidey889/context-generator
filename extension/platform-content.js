@@ -4338,10 +4338,10 @@
         "box-sizing:border-box",
         "padding:20px 28px 22px",
         "border-radius:24px",
-        "border:1px solid rgba(232,225,242,0.17)",
-        "background:#141416",
+        "border:1px solid rgba(236,233,240,0.14)",
+        "background:#111112",
         "color:#b9b7bd",
-        "box-shadow:0 34px 96px rgba(0,0,0,0.48),0 12px 32px rgba(0,0,0,0.28),0 0 48px rgba(92,68,137,0.10),0 0 0 1px rgba(0,0,0,0.52),inset 0 1px 0 rgba(255,255,255,0.085),inset 0 -1px 0 rgba(255,255,255,0.02)",
+        "box-shadow:0 34px 96px rgba(0,0,0,0.52),0 12px 32px rgba(0,0,0,0.30),0 0 48px rgba(92,68,137,0.04),0 0 0 1px rgba(0,0,0,0.56),inset 0 1px 0 rgba(255,255,255,0.075),inset 0 -1px 0 rgba(255,255,255,0.018)",
         `transform:${HANDOFF_OVERLAY_CLOSED_TRANSFORM}`,
         "opacity:0",
         "flex-direction:column",
@@ -4362,7 +4362,7 @@
         "inset:0",
         "pointer-events:none",
         "border-radius:inherit",
-        "background:radial-gradient(ellipse 72% 58% at 50% -8%,rgba(170,142,218,0.16),transparent 66%),linear-gradient(180deg,rgba(255,255,255,0.045),transparent 34%)",
+        "background:radial-gradient(ellipse 72% 58% at 50% -8%,rgba(170,142,218,0.075),transparent 66%),linear-gradient(180deg,rgba(255,255,255,0.035),transparent 34%)",
         "box-shadow:inset 0 0 0 1px rgba(255,255,255,0.018)",
         "opacity:1"
       ].join(";");
@@ -4418,24 +4418,9 @@
         "flex-direction:column",
         "align-items:center",
         "justify-content:center",
-        "gap:5px",
+        "gap:0",
         "width:100%"
       ].join(";");
-
-      const statusKicker = document.createElement("div");
-      statusKicker.id = "context-generator-status-kicker";
-      statusKicker.textContent = "Live handoff";
-      statusKicker.setAttribute("aria-hidden", "true");
-      statusKicker.style.cssText = [
-        "color:rgba(190,168,227,0.72)",
-        "font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif",
-        "font-size:9.5px",
-        "font-weight:760",
-        "line-height:1",
-        "letter-spacing:0.14em",
-        "text-transform:uppercase"
-      ].join(";");
-      statusGroup.appendChild(statusKicker);
 
       const statusText = document.createElement("div");
       statusText.id = "context-generator-text";
@@ -4692,12 +4677,12 @@
             font-weight:680;
           }
           #context-generator-handoff-progress .context-generator-handoff-stage[data-state="complete"]{
-            color:rgba(194,213,199,0.78);
+            color:rgba(200,183,229,0.72);
           }
           #context-generator-handoff-progress .context-generator-handoff-stage[data-state="complete"] .context-generator-handoff-stage-marker{
-            border-color:rgba(145,205,164,0.28);
-            background:rgba(96,164,118,0.13);
-            color:#B8DFC4;
+            border-color:rgba(164,137,216,0.34);
+            background:rgba(141,108,207,0.14);
+            color:#C8B6E9;
             box-shadow:inset 0 1px 0 rgba(255,255,255,0.055);
           }
           @media (prefers-reduced-motion: reduce){
