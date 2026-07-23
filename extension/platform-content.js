@@ -91,6 +91,8 @@
   const PASTED_CONTENT_TITLE_RE = /^\s*pasted\s+(?:content|text)\s*$/i;
   const PASTED_CONTENT_BADGE_RE = /^\s*pasted\s*$/i;
   const PASTED_CONTENT_PANEL_TIMEOUT_MS = 1000;
+  const PASTED_CONTENT_VIRTUAL_SETTLE_TIMEOUT_MS = 600;
+  const PASTED_CONTENT_VIRTUAL_MAX_SCROLLS = 250;
   const EMPTY_START_SCREEN_TEXTS = [
     "the mic is yours",
     "start chatting",
@@ -1050,7 +1052,7 @@
         }
         if (!panel) continue;
 
-        const fullText = getPastedContentPanelText(panel);
+        const fullText = await getPastedContentPanelText(panel);
         if (fullText.length < 2) continue;
 
         capturedPastedContent.push({
@@ -1172,7 +1174,10 @@
     );
   }
 
-  function getPastedContentPanelText(panel) {
+  async function getPastedContentPanelText(panel) {
+    const virtualizedText = await scrapeVirtualizedPastedContentPanel(panel);
+    if (virtualizedText !== null) return virtualizedText;
+
     const payloadCandidates = Array.from(panel.querySelectorAll(
       "pre, code, textarea, [class*='whitespace-pre' i], [class*='font-mono' i], [data-testid*='content' i]"
     ))
@@ -1192,6 +1197,129 @@
     return [...payloadCandidates, panelText]
       .filter(Boolean)
       .sort((first, second) => second.length - first.length)[0] || "";
+  }
+
+  async function scrapeVirtualizedPastedContentPanel(panel) {
+    let renderedRows = getRenderedPastedContentRows(panel);
+    if (!renderedRows.length) return null;
+
+    const scrollRoot = findPastedContentScrollRoot(panel, renderedRows[0]);
+    const capturedRows = new Map();
+    const collectRows = () => {
+      getRenderedPastedContentRows(panel).forEach((row) => {
+        const index = cleanText(row.getAttribute?.("data-index") || "");
+        if (!index) return;
+        const text = cleanText(getElementText(row));
+        const previous = capturedRows.get(index);
+        if (previous === undefined || text.length > previous.length) {
+          capturedRows.set(index, text);
+        }
+      });
+    };
+
+    if (!scrollRoot) {
+      collectRows();
+      return joinPastedContentRows(capturedRows);
+    }
+
+    let signature = getPastedContentRowSignature(panel);
+    setPastedContentScrollTop(scrollRoot, 0);
+    await waitForPastedContentRowsToSettle(panel, signature);
+
+    for (let scrolls = 0; scrolls < PASTED_CONTENT_VIRTUAL_MAX_SCROLLS; scrolls += 1) {
+      collectRows();
+      const maxScrollTop = Math.max(
+        0,
+        Number(scrollRoot.scrollHeight || 0) - Number(scrollRoot.clientHeight || 0)
+      );
+      const currentScrollTop = Number(scrollRoot.scrollTop || 0);
+      if (currentScrollTop >= maxScrollTop - 1) break;
+
+      const step = Math.max(1, Math.floor(Number(scrollRoot.clientHeight || 1) * 0.8));
+      const nextScrollTop = Math.min(maxScrollTop, currentScrollTop + step);
+      signature = getPastedContentRowSignature(panel);
+      setPastedContentScrollTop(scrollRoot, nextScrollTop);
+      await waitForPastedContentRowsToSettle(panel, signature);
+    }
+
+    collectRows();
+    return joinPastedContentRows(capturedRows);
+  }
+
+  function getRenderedPastedContentRows(panel) {
+    return Array.from(panel.querySelectorAll("[data-index]"))
+      .filter((row) => isVisible(row) && !isContextGeneratorNode(row));
+  }
+
+  function findPastedContentScrollRoot(panel, row) {
+    let node = row?.parentElement || null;
+    while (node && panel.contains(node)) {
+      const overflowY = String(window.getComputedStyle(node).overflowY || "").toLowerCase();
+      if (
+        overflowY === "auto" ||
+        overflowY === "scroll" ||
+        Number(node.scrollHeight || 0) > Number(node.clientHeight || 0) + 1
+      ) {
+        return node;
+      }
+      if (node === panel) break;
+      node = node.parentElement;
+    }
+    return null;
+  }
+
+  function setPastedContentScrollTop(scrollRoot, top) {
+    if (typeof scrollRoot.scrollTo === "function") {
+      scrollRoot.scrollTo({ top, left: Number(scrollRoot.scrollLeft || 0), behavior: "auto" });
+      return;
+    }
+    scrollRoot.scrollTop = top;
+  }
+
+  async function waitForPastedContentRowsToSettle(panel, previousSignature) {
+    const startedAt = Date.now();
+    let lastSignature = previousSignature;
+    let stableSamples = 0;
+    let changed = false;
+
+    while (Date.now() - startedAt <= PASTED_CONTENT_VIRTUAL_SETTLE_TIMEOUT_MS) {
+      await delay(40);
+      const signature = getPastedContentRowSignature(panel);
+      if (signature !== previousSignature) changed = true;
+      if (signature === lastSignature) {
+        stableSamples += 1;
+      } else {
+        lastSignature = signature;
+        stableSamples = 0;
+      }
+      if ((changed && stableSamples >= 2) || (!changed && stableSamples >= 3)) return;
+    }
+  }
+
+  function getPastedContentRowSignature(panel) {
+    return getRenderedPastedContentRows(panel)
+      .map((row) => {
+        const index = cleanText(row.getAttribute?.("data-index") || "");
+        const text = cleanText(getElementText(row));
+        return `${index}:${text.length}:${text.slice(0, 24)}:${text.slice(-24)}`;
+      })
+      .join("|");
+  }
+
+  function joinPastedContentRows(rows) {
+    return cleanText(
+      Array.from(rows.entries())
+        .sort(([firstIndex], [secondIndex]) => {
+          const firstNumber = Number(firstIndex);
+          const secondNumber = Number(secondIndex);
+          if (Number.isFinite(firstNumber) && Number.isFinite(secondNumber)) {
+            return firstNumber - secondNumber;
+          }
+          return firstIndex.localeCompare(secondIndex, undefined, { numeric: true });
+        })
+        .map(([, text]) => text)
+        .join("\n")
+    );
   }
 
   function isPastedContentPanelChromeLine(line) {

@@ -114,6 +114,8 @@ class FakeElement {
     if (selector === "[role='button']") return this.getAttribute("role") === "button";
     if (selector === "[role='main']") return this.getAttribute("role") === "main";
     if (selector.includes("[contenteditable='true']")) return this.attrs.contenteditable === "true";
+    const existsMatch = selector.match(/^\[([a-z0-9_-]+)\]$/i);
+    if (existsMatch) return this.hasAttribute(existsMatch[1]);
 
     const attrMatch = selector.match(/^\[([^\]*^=]+)([*^]?=)'([^']+)'(?: i)?\]$/);
     if (attrMatch) {
@@ -1370,7 +1372,10 @@ test("Claude and ChatGPT attach expanded pasted content to the owning user turn"
   ];
 
   for (const testCase of cases) {
-    const fullPayload = `${testCase.platformName}-FULL-PASTE-${"x".repeat(1600)}`;
+    const virtualRowTexts = Array.from({ length: 6 }, (_, index) => (
+      `${testCase.platformName}-PASTE-ROW-${index}-${String(index).repeat(300)}`
+    ));
+    const fullPayload = virtualRowTexts.join("\n");
     const cardPreview = "Collapsed preview\nPASTED";
     const targetText = `Target user message before the paste.\n${cardPreview}`;
     const precedingUser = new FakeElement({
@@ -1387,10 +1392,22 @@ test("Claude and ChatGPT attach expanded pasted content to the owning user turn"
     const pastedBadge = new FakeElement({ text: "PASTED" });
     const detailPanel = new FakeElement({
       attrs: { role: "dialog" },
-      text: `Pasted content\n4.64 KB • 41 lines • Formatting may be inconsistent from source\n${fullPayload}\nClose`
+      text: "Pasted content\n4.64 KB • 41 lines • Formatting may be inconsistent from source"
     });
     const detailTitle = new FakeElement({ tag: "h2", text: "Pasted content" });
-    const detailPayload = new FakeElement({ tag: "pre", text: fullPayload });
+    const virtualList = new FakeElement({
+      attrs: { "data-overflow-y": "auto" },
+      text: ""
+    });
+    virtualList.clientHeight = 100;
+    virtualList.scrollHeight = 500;
+    const virtualRows = virtualRowTexts.map((text, index) => new FakeElement({
+      text,
+      attrs: {
+        "data-index": String(index),
+        style: `position: absolute; transform: translateY(${index * 100}px)`
+      }
+    }));
     const closeDetail = new FakeElement({
       tag: "button",
       text: "Close",
@@ -1409,20 +1426,52 @@ test("Claude and ChatGPT attach expanded pasted content to the owning user turn"
     pastedCard.parentElement = targetInner;
     pastedCard.children = [pastedBadge];
     pastedBadge.parentElement = pastedCard;
-    detailPanel.children = [detailTitle, detailPayload, closeDetail];
-    [detailTitle, detailPayload, closeDetail].forEach((element) => {
+    detailPanel.children = [detailTitle, virtualList, closeDetail];
+    [detailTitle, virtualList, closeDetail].forEach((element) => {
       element.parentElement = detailPanel;
     });
-    [detailPanel, detailTitle, detailPayload, closeDetail].forEach((element) => {
+    virtualRows.forEach((row) => {
+      row.parentElement = virtualList;
+      row.rect = { ...hiddenRect };
+    });
+    [detailPanel, detailTitle, virtualList, closeDetail].forEach((element) => {
       element.rect = { ...hiddenRect };
     });
+    const renderVirtualRows = (scrollTop) => {
+      const firstIndex = Math.min(
+        virtualRows.length - 2,
+        Math.max(0, Math.floor(Number(scrollTop || 0) / 80))
+      );
+      virtualRows.forEach((row) => {
+        row.rect = { ...hiddenRect };
+      });
+      virtualList.children = virtualRows.slice(firstIndex, firstIndex + 2);
+      virtualList.children.forEach((row) => {
+        row.rect = { ...visibleRect };
+      });
+      virtualList.textContent = virtualList.children.map((row) => row.textContent).join("\n");
+      virtualList.innerText = virtualList.textContent;
+      detailPanel.textContent = [
+        "Pasted content",
+        "4.64 KB • 41 lines • Formatting may be inconsistent from source",
+        virtualList.textContent,
+        "Close"
+      ].join("\n");
+      detailPanel.innerText = detailPanel.textContent;
+    };
+    const virtualScrollTo = virtualList.scrollTo.bind(virtualList);
+    virtualList.scrollTo = (...args) => {
+      virtualScrollTo(...args);
+      renderVirtualRows(virtualList.scrollTop);
+    };
     pastedCard.onClick = () => {
-      [detailPanel, detailTitle, detailPayload, closeDetail].forEach((element) => {
+      [detailPanel, detailTitle, virtualList, closeDetail].forEach((element) => {
         element.rect = { ...visibleRect };
       });
+      renderVirtualRows(0);
     };
     closeDetail.onClick = () => {
-      [detailPanel, detailTitle, detailPayload, closeDetail].forEach((element) => {
+      [detailPanel, detailTitle, virtualList, closeDetail, ...virtualRows].forEach((element) => {
         element.rect = { ...hiddenRect };
       });
     };
@@ -1433,7 +1482,6 @@ test("Claude and ChatGPT attach expanded pasted content to the owning user turn"
       targetInner,
       detailPanel,
       detailTitle,
-      detailPayload,
       closeDetail,
       assistantTurn
     ], testCase.hostname);
@@ -1452,6 +1500,7 @@ test("Claude and ChatGPT attach expanded pasted content to the owning user turn"
     assert.ok(transcript.length > 1200);
     assert.equal(pastedCard.clicks, 1);
     assert.equal(closeDetail.clicks, 1);
+    assert.equal(virtualList.scrollCalls.some((call) => Number(call?.top || 0) > 0), true);
   }
 });
 
