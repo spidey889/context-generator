@@ -1113,12 +1113,18 @@
         isConversationCandidateElement(turn, findPlatformInput())
       ))
       .forEach((turn) => {
-        const candidates = Array.from(turn.querySelectorAll("*"));
-        // Claude can put the role-bearing <p> inside the labeled paste button.
+        const scannedCandidates = [turn, ...Array.from(turn.querySelectorAll("*"))];
+        const candidates = new Set(scannedCandidates);
+        // Claude exposes the inner <p> as the message candidate while its aria label
+        // lives on that candidate's closest parent button.
+        scannedCandidates.forEach((candidate) => {
+          const parentButton = candidate.closest?.("button");
+          if (parentButton) candidates.add(parentButton);
+        });
         const interactiveAncestor = turn.closest?.(PASTED_CONTENT_CARD_INTERACTIVE_SELECTOR);
-        if (interactiveAncestor) candidates.unshift(interactiveAncestor);
+        if (interactiveAncestor) candidates.add(interactiveAncestor);
 
-        candidates
+        Array.from(candidates)
           .filter(isPastedContentCardMarker)
           .forEach((marker) => {
             const interactive = marker.closest?.(PASTED_CONTENT_CARD_INTERACTIVE_SELECTOR);

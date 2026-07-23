@@ -1354,14 +1354,15 @@ test("Claude and ChatGPT attach expanded pasted content to the owning user turn"
     {
       hostname: "claude.ai",
       platformName: "Claude",
-      targetOuterAttrs: {},
-      targetInnerAttrs: { "data-testid": "user-message" },
+      targetOuterAttrs: { "data-testid": "user-message" },
+      targetInnerAttrs: {},
       targetInnerTag: "p",
       precedingAttrs: { "data-testid": "user-message" },
       assistantAttrs: { class: "font-claude-response" },
       cardAttrs: { "aria-label": "Pasted Text, pasted, 41 lines" },
       cardPreview: "Collapsed Claude paste preview",
-      cardWrapsUserTurn: true,
+      cardWrapsCandidate: true,
+      candidateListOmitsButton: true,
       hasBadge: false
     },
     {
@@ -1374,7 +1375,8 @@ test("Claude and ChatGPT attach expanded pasted content to the owning user turn"
       assistantAttrs: { "data-message-author-role": "assistant" },
       cardAttrs: { "aria-label": "Pasted content" },
       cardPreview: "Collapsed preview\nPASTED",
-      cardWrapsUserTurn: false,
+      cardWrapsCandidate: false,
+      candidateListOmitsButton: false,
       hasBadge: true
     }
   ];
@@ -1432,7 +1434,7 @@ test("Claude and ChatGPT attach expanded pasted content to the owning user turn"
     const hiddenRect = { width: 0, height: 0, top: 0, left: 0, right: 0, bottom: 0 };
     const visibleRect = { width: 620, height: 520, top: 80, left: 620, right: 1240, bottom: 600 };
 
-    if (testCase.cardWrapsUserTurn) {
+    if (testCase.cardWrapsCandidate) {
       targetOuter.children = [pastedCard];
       pastedCard.parentElement = targetOuter;
       pastedCard.children = [targetInner];
@@ -1446,6 +1448,12 @@ test("Claude and ChatGPT attach expanded pasted content to the owning user turn"
       pastedCard.children = pastedBadge ? [pastedBadge] : [];
     }
     if (pastedBadge) pastedBadge.parentElement = pastedCard;
+    if (testCase.candidateListOmitsButton) {
+      const defaultQuerySelectorAll = targetOuter.querySelectorAll.bind(targetOuter);
+      targetOuter.querySelectorAll = (selector = "*") => (
+        selector === "*" ? [targetInner] : defaultQuerySelectorAll(selector)
+      );
+    }
     detailPanel.children = [detailTitle, virtualList, closeDetail];
     [detailTitle, virtualList, closeDetail].forEach((element) => {
       element.parentElement = detailPanel;
