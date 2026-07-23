@@ -1048,10 +1048,29 @@
 
       let panel = findVisiblePastedContentPanel(turn);
       try {
+        const panelWasAlreadyOpen = Boolean(panel);
+        let clickDispatched = false;
         if (!panel) {
+          const canDispatchClick = typeof card.click === "function";
           card.click?.();
+          clickDispatched = canDispatchClick;
           panel = await waitForPastedContentPanel(turn);
         }
+        console.log("[Context Generator][Pasted content debug] click dispatch result", {
+          platform: currentPlatform.id,
+          button: card,
+          ariaLabel: cleanText(card.getAttribute?.("aria-label") || ""),
+          attempt: attempts + 1,
+          clickDispatched,
+          panelWasAlreadyOpen
+        });
+        console.log("[Context Generator][Pasted content debug] panel open result", {
+          platform: currentPlatform.id,
+          button: card,
+          clickDispatched,
+          panelOpened: Boolean(panel),
+          panelOpenedAfterClick: clickDispatched && Boolean(panel)
+        });
         if (!panel) continue;
 
         const fullText = await getPastedContentPanelText(panel);
@@ -1119,7 +1138,14 @@
     if (!(element instanceof Element) || !isVisible(element) || isContextGeneratorNode(element)) return false;
 
     const ariaLabel = cleanText(element.getAttribute?.("aria-label") || "");
-    if (currentPlatform.id === "claude" && CLAUDE_PASTED_TEXT_BUTTON_LABEL_RE.test(ariaLabel)) {
+    const matchesPastedTextAriaLabel = CLAUDE_PASTED_TEXT_BUTTON_LABEL_RE.test(ariaLabel);
+    console.log("[Context Generator][Pasted content debug] candidate aria match", {
+      platform: currentPlatform.id,
+      candidate: element,
+      ariaLabel,
+      matchesPastedTextAriaLabel
+    });
+    if (currentPlatform.id === "claude" && matchesPastedTextAriaLabel) {
       return true;
     }
 
