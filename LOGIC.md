@@ -20,6 +20,8 @@ This is the single source of truth for current production behavior. Historical d
 
 Production deploys from `master` to `https://context-generator-five.vercel.app`. Summaries use `/api/summarize`, telemetry uses `/api/telemetry`, and `vercel.json` gives only the summary function a 240-second ceiling.
 
+The merged Claude/ChatGPT pasted-content capture work is retained under the descriptive branch `pasted-content-fix` for easy historical lookup. Its former temporary name `coppppy` is no longer used.
+
 ## Marketing Website
 
 The root `index.html` uses relative assets, has no build step or runtime API dependency, lazy-loads below-fold images, and respects reduced motion. Its public install path is the Chrome Web Store for Chrome and Brave. The interactive handoff console is local illustration only and never captures a conversation or starts a transfer.
