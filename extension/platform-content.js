@@ -88,6 +88,9 @@
   const VIRTUAL_SWEEP_DEBUG_LOGGING = true;
   const COLLAPSED_CONVERSATION_EXPAND_RE = /\b(?:show|see|read|view)\s+(?:more|full|all)\b|\bcontinue\s+(?:reading|message|response)\b|\bexpand\b/i;
   const COLLAPSED_CONVERSATION_EXPAND_EXCLUDE_RE = /\b(?:continue generating|regenerate|send|submit|stop generating|new chat|settings|menu|voice|microphone)\b/i;
+  const PASTED_CONTENT_TITLE_RE = /^\s*pasted\s+(?:content|text)\s*$/i;
+  const PASTED_CONTENT_BADGE_RE = /^\s*pasted\s*$/i;
+  const PASTED_CONTENT_PANEL_TIMEOUT_MS = 1000;
   const EMPTY_START_SCREEN_TEXTS = [
     "the mic is yours",
     "start chatting",
@@ -428,6 +431,10 @@
   let geminiPlacementResizeTargets = [];
   let claudePlacementResizeObserver = null;
   let claudePlacementResizeTargets = [];
+  const pastedContentCardAttempts = new WeakMap();
+  // Detail panels are portaled outside the message DOM. Keep their payload tied
+  // to the inner user node, then rejoin it to whichever containing turn wins.
+  const capturedPastedContent = [];
   let chatGptPlacementSurface = null;
   let chatGptPlacementResizeObserver = null;
   let chatGptPlacementResizeTargets = [];
@@ -1005,7 +1012,7 @@
   }
 
   async function expandCollapsedConversationContent(maxRounds = 3) {
-    let expandedCount = 0;
+    let expandedCount = await capturePastedConversationCards();
 
     for (let round = 0; round < maxRounds; round += 1) {
       const expanders = getCollapsedConversationExpanders();
@@ -1024,6 +1031,201 @@
     }
 
     return expandedCount;
+  }
+
+  async function capturePastedConversationCards() {
+    if (currentPlatform.id !== "claude" && currentPlatform.id !== "chatgpt") return 0;
+
+    let capturedCount = 0;
+    for (const { turn, card } of getPastedConversationCards()) {
+      const attempts = pastedContentCardAttempts.get(card) || 0;
+      if (attempts >= 2 || capturedPastedContent.some((entry) => entry.card === card)) continue;
+      pastedContentCardAttempts.set(card, attempts + 1);
+
+      let panel = findVisiblePastedContentPanel(turn);
+      try {
+        if (!panel) {
+          card.click?.();
+          panel = await waitForPastedContentPanel(turn);
+        }
+        if (!panel) continue;
+
+        const fullText = getPastedContentPanelText(panel);
+        if (fullText.length < 2) continue;
+
+        capturedPastedContent.push({
+          turn,
+          card,
+          previewText: cleanText(getElementText(card)),
+          fullText
+        });
+        capturedCount += 1;
+      } catch (error) {
+        console.debug("[Context Generator] Could not capture pasted content:", error?.message || error);
+      } finally {
+        if (panel && isVisible(panel)) {
+          try {
+            await closePastedContentPanel(panel);
+          } catch (error) {
+            console.debug("[Context Generator] Could not close pasted-content panel:", error?.message || error);
+          }
+        }
+      }
+    }
+
+    return capturedCount;
+  }
+
+  function getPastedConversationCards() {
+    const userSelector = currentPlatform.userRoleSelectors?.join(",");
+    if (!userSelector) return [];
+
+    const seenCards = new Set();
+    const results = [];
+    Array.from(document.querySelectorAll(userSelector))
+      .filter((turn) => (
+        turn.matches?.(userSelector) &&
+        isVisible(turn) &&
+        getConversationRole(turn) === "User" &&
+        isConversationCandidateElement(turn, findPlatformInput())
+      ))
+      .forEach((turn) => {
+        Array.from(turn.querySelectorAll("*"))
+          .filter(isPastedContentCardMarker)
+          .forEach((marker) => {
+            const interactive = marker.closest?.("button, [role='button'], [tabindex='0']");
+            const card = interactive && turn.contains(interactive) ? interactive : marker;
+            if (seenCards.has(card)) return;
+            seenCards.add(card);
+            results.push({ turn, card });
+          });
+      });
+    return results;
+  }
+
+  function isPastedContentCardMarker(element) {
+    if (!(element instanceof Element) || !isVisible(element) || isContextGeneratorNode(element)) return false;
+
+    const metadata = cleanText([
+      element.getAttribute?.("aria-label"),
+      element.getAttribute?.("title"),
+      element.getAttribute?.("data-testid"),
+      element.getAttribute?.("data-test-id")
+    ].filter(Boolean).join(" ")).replace(/[-_]+/g, " ");
+    if (PASTED_CONTENT_TITLE_RE.test(metadata)) return true;
+
+    const text = cleanText(getElementText(element));
+    if (PASTED_CONTENT_TITLE_RE.test(text) || PASTED_CONTENT_BADGE_RE.test(text)) return true;
+    if (!element.matches?.("button, [role='button'], [tabindex='0']")) return false;
+    return text.split("\n").slice(-3).some((line) => PASTED_CONTENT_BADGE_RE.test(cleanText(line)));
+  }
+
+  async function waitForPastedContentPanel(turn) {
+    const startedAt = Date.now();
+    while (Date.now() - startedAt <= PASTED_CONTENT_PANEL_TIMEOUT_MS) {
+      const panel = findVisiblePastedContentPanel(turn);
+      if (panel) return panel;
+      await delay(40);
+    }
+    return null;
+  }
+
+  function findVisiblePastedContentPanel(turn) {
+    const titles = Array.from(document.querySelectorAll(
+      "h1, h2, h3, h4, h5, h6, [role='heading'], [data-testid*='paste' i], [aria-label*='pasted content' i], [aria-label*='pasted text' i]"
+    )).filter((element) => (
+      !turn.contains(element) &&
+      isVisible(element) &&
+      isPastedContentPanelTitle(element)
+    ));
+
+    for (const title of titles) {
+      let fallback = null;
+      let node = title.parentElement;
+      while (node && node !== document.body && node !== document.documentElement) {
+        if (!turn.contains(node) && isVisible(node) && cleanText(getElementText(node)).length >= 40) {
+          fallback ||= node;
+          if (
+            node.matches?.("dialog, [role='dialog'], [aria-modal='true'], aside") ||
+            findPastedContentCloseControl(node)
+          ) {
+            return node;
+          }
+        }
+        node = node.parentElement;
+      }
+      if (fallback) return fallback;
+    }
+    return null;
+  }
+
+  function isPastedContentPanelTitle(element) {
+    const metadata = cleanText([
+      element.getAttribute?.("aria-label"),
+      element.getAttribute?.("title"),
+      element.getAttribute?.("data-testid"),
+      element.getAttribute?.("data-test-id")
+    ].filter(Boolean).join(" ")).replace(/[-_]+/g, " ");
+    return (
+      PASTED_CONTENT_TITLE_RE.test(metadata) ||
+      PASTED_CONTENT_TITLE_RE.test(cleanText(getElementText(element)))
+    );
+  }
+
+  function getPastedContentPanelText(panel) {
+    const payloadCandidates = Array.from(panel.querySelectorAll(
+      "pre, code, textarea, [class*='whitespace-pre' i], [class*='font-mono' i], [data-testid*='content' i]"
+    ))
+      .filter((element) => (
+        isVisible(element) &&
+        !element.matches?.("button, [role='button']") &&
+        !isPastedContentPanelTitle(element)
+      ))
+      .map((element) => cleanText(getElementText(element)))
+      .filter(Boolean)
+      .sort((first, second) => second.length - first.length);
+
+    const lines = cleanText(getElementText(panel)).split("\n");
+    while (lines.length && isPastedContentPanelChromeLine(lines[0])) lines.shift();
+    while (lines.length && /^(?:copy|close|dismiss)$/i.test(cleanText(lines.at(-1)))) lines.pop();
+    const panelText = cleanText(lines.join("\n"));
+    return [...payloadCandidates, panelText]
+      .filter(Boolean)
+      .sort((first, second) => second.length - first.length)[0] || "";
+  }
+
+  function isPastedContentPanelChromeLine(line) {
+    const text = cleanText(line);
+    return (
+      PASTED_CONTENT_TITLE_RE.test(text) ||
+      /^(?:copy|close|dismiss)$/i.test(text) ||
+      /\bformatting may be inconsistent from source\b/i.test(text) ||
+      /^\d+(?:\.\d+)?\s*(?:kb|mb)\b.*\blines?\b/i.test(text)
+    );
+  }
+
+  function findPastedContentCloseControl(panel) {
+    return Array.from(panel.querySelectorAll("button, [role='button']"))
+      .find((element) => (
+        isVisible(element) &&
+        /\b(?:close|dismiss)\b/i.test(getElementLabel(element, true))
+      )) || null;
+  }
+
+  async function closePastedContentPanel(panel) {
+    const closeControl = findPastedContentCloseControl(panel);
+    if (closeControl) {
+      closeControl.click?.();
+      await delay(60);
+    }
+    if (isVisible(panel)) {
+      try {
+        document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", code: "Escape", bubbles: true }));
+      } catch (error) {
+        console.debug("[Context Generator] Could not close pasted-content panel:", error?.message || error);
+      }
+      await delay(60);
+    }
   }
 
   function getCollapsedConversationExpanders() {
@@ -2560,12 +2762,13 @@
     document.querySelectorAll([...new Set(selectors)].join(",")).forEach((element) => {
       if (!isConversationCandidateElement(element, platformInput)) return;
 
-      const text = getCleanVisibleText(element);
+      const role = getConversationRole(element);
+      const text = attachCapturedPastedContent(element, role, getCleanVisibleText(element));
       if (!text || text.length < 2) return;
 
       const candidate = {
         element,
-        role: getConversationRole(element),
+        role,
         text
       };
       const sourceId = getConversationTurnSourceId(element);
@@ -2607,6 +2810,33 @@
       if (sourceId) turn.sourceId = sourceId;
       return turn;
     });
+  }
+
+  function attachCapturedPastedContent(element, role, originalText) {
+    if (
+      role !== "User" ||
+      (currentPlatform.id !== "claude" && currentPlatform.id !== "chatgpt") ||
+      capturedPastedContent.length === 0
+    ) {
+      return originalText;
+    }
+
+    let text = originalText;
+    capturedPastedContent
+      .filter(({ turn }) => (
+        element === turn ||
+        element.contains?.(turn) ||
+        turn.contains?.(element)
+      ))
+      .forEach(({ previewText, fullText }) => {
+        if (previewText && text.includes(previewText)) {
+          text = cleanText(text.replace(previewText, ""));
+        }
+        if (!text.includes(fullText)) {
+          text = cleanText([text, fullText].filter(Boolean).join("\n\n"));
+        }
+      });
+    return text;
   }
 
   function getConversationTurnSourceId(element) {

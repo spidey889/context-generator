@@ -1347,6 +1347,114 @@ test("collapsed conversation previews are expanded before capture", async () => 
   assert.equal(showMore.clicks, 1);
 });
 
+test("Claude and ChatGPT attach expanded pasted content to the owning user turn", async () => {
+  const cases = [
+    {
+      hostname: "claude.ai",
+      platformName: "Claude",
+      targetOuterAttrs: { "data-testid": "user-message" },
+      targetInnerAttrs: { "data-message-author-role": "user" },
+      precedingAttrs: { "data-testid": "user-message" },
+      assistantAttrs: { class: "font-claude-response" },
+      cardAttrs: {}
+    },
+    {
+      hostname: "chatgpt.com",
+      platformName: "ChatGPT",
+      targetOuterAttrs: { "data-testid": "conversation-turn-2" },
+      targetInnerAttrs: { "data-message-author-role": "user" },
+      precedingAttrs: { "data-message-author-role": "user" },
+      assistantAttrs: { "data-message-author-role": "assistant" },
+      cardAttrs: { "aria-label": "Pasted content" }
+    }
+  ];
+
+  for (const testCase of cases) {
+    const fullPayload = `${testCase.platformName}-FULL-PASTE-${"x".repeat(1600)}`;
+    const cardPreview = "Collapsed preview\nPASTED";
+    const targetText = `Target user message before the paste.\n${cardPreview}`;
+    const precedingUser = new FakeElement({
+      text: "Earlier user message that must remain separate.",
+      attrs: testCase.precedingAttrs
+    });
+    const targetOuter = new FakeElement({ text: targetText, attrs: testCase.targetOuterAttrs });
+    const targetInner = new FakeElement({ text: targetText, attrs: testCase.targetInnerAttrs });
+    const pastedCard = new FakeElement({
+      tag: "button",
+      text: cardPreview,
+      attrs: testCase.cardAttrs
+    });
+    const pastedBadge = new FakeElement({ text: "PASTED" });
+    const detailPanel = new FakeElement({
+      attrs: { role: "dialog" },
+      text: `Pasted content\n4.64 KB • 41 lines • Formatting may be inconsistent from source\n${fullPayload}\nClose`
+    });
+    const detailTitle = new FakeElement({ tag: "h2", text: "Pasted content" });
+    const detailPayload = new FakeElement({ tag: "pre", text: fullPayload });
+    const closeDetail = new FakeElement({
+      tag: "button",
+      text: "Close",
+      attrs: { "aria-label": "Close pasted content" }
+    });
+    const assistantTurn = new FakeElement({
+      text: "Assistant response after the pasted content.",
+      attrs: testCase.assistantAttrs
+    });
+    const hiddenRect = { width: 0, height: 0, top: 0, left: 0, right: 0, bottom: 0 };
+    const visibleRect = { width: 620, height: 520, top: 80, left: 620, right: 1240, bottom: 600 };
+
+    targetOuter.children = [targetInner];
+    targetInner.parentElement = targetOuter;
+    targetInner.children = [pastedCard];
+    pastedCard.parentElement = targetInner;
+    pastedCard.children = [pastedBadge];
+    pastedBadge.parentElement = pastedCard;
+    detailPanel.children = [detailTitle, detailPayload, closeDetail];
+    [detailTitle, detailPayload, closeDetail].forEach((element) => {
+      element.parentElement = detailPanel;
+    });
+    [detailPanel, detailTitle, detailPayload, closeDetail].forEach((element) => {
+      element.rect = { ...hiddenRect };
+    });
+    pastedCard.onClick = () => {
+      [detailPanel, detailTitle, detailPayload, closeDetail].forEach((element) => {
+        element.rect = { ...visibleRect };
+      });
+    };
+    closeDetail.onClick = () => {
+      [detailPanel, detailTitle, detailPayload, closeDetail].forEach((element) => {
+        element.rect = { ...hiddenRect };
+      });
+    };
+
+    const hooks = loadPlatformContent([
+      precedingUser,
+      targetOuter,
+      targetInner,
+      detailPanel,
+      detailTitle,
+      detailPayload,
+      closeDetail,
+      assistantTurn
+    ], testCase.hostname);
+
+    assert.equal(await hooks.expandCollapsedConversationContent(), 1);
+    const transcript = hooks.scrapeConversationText();
+    const earlierIndex = transcript.indexOf("Earlier user message that must remain separate.");
+    const targetIndex = transcript.indexOf("Target user message before the paste.");
+    const payloadIndex = transcript.indexOf(fullPayload);
+    const assistantIndex = transcript.indexOf("Assistant response after the pasted content.");
+
+    assert.ok(earlierIndex >= 0 && earlierIndex < targetIndex);
+    assert.ok(targetIndex < payloadIndex && payloadIndex < assistantIndex);
+    assert.equal(transcript.split(fullPayload).length - 1, 1);
+    assert.doesNotMatch(transcript, /Collapsed preview\nPASTED/);
+    assert.ok(transcript.length > 1200);
+    assert.equal(pastedCard.clicks, 1);
+    assert.equal(closeDetail.clicks, 1);
+  }
+});
+
 test("conversation transport preserves the complete middle beyond the old 160k cap", () => {
   const longConversation = [
     "a".repeat(50000),
