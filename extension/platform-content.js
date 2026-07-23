@@ -443,7 +443,7 @@
   let geminiPlacementResizeTargets = [];
   let claudePlacementResizeObserver = null;
   let claudePlacementResizeTargets = [];
-  const pastedContentCardAttempts = new WeakMap();
+  let pastedContentCardAttempts = new WeakMap();
   // Detail panels are portaled outside the message DOM. Keep their payload tied
   // to the inner user node, then rejoin it to whichever containing turn wins.
   const capturedPastedContent = [];
@@ -776,6 +776,10 @@
   async function prepareSourceForCapture() {
     sourceScrollTargetsCache = null;
     chatGptConversationScrollRootCache = null;
+    // Captured panel text belongs only to one transfer. Reset both collections so
+    // repeated transfers or SPA chat changes cannot reuse stale card associations.
+    capturedPastedContent.length = 0;
+    pastedContentCardAttempts = new WeakMap();
     scrollSourceConversationToTop();
     await waitForConversationCaptureToSettle();
     const expandedCount = await expandCollapsedConversationContent();

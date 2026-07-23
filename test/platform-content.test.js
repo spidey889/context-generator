@@ -336,7 +336,7 @@ test("conversation scraping rejects an empty chat", () => {
 
   assert.throws(
     () => hooks.scrapeConversationText(),
-    /Chat is empty\. Send one message first/
+    /Send a message first, then try again\./
   );
 });
 
@@ -494,7 +494,7 @@ test("Grok empty-state prompt is not counted or captured as a real message", () 
   assert.equal(hooks.getDetectedConversationMessageCount(), 0);
   assert.throws(
     () => hooks.scrapeConversationText(),
-    /Chat is empty\. Send one message first/
+    /Send a message first, then try again\./
   );
 });
 
@@ -1568,6 +1568,16 @@ test("Claude and ChatGPT attach expanded pasted content to the owning user turn"
     assert.equal(pastedCard.clicks, 1);
     assert.equal(closeDetail.clicks, 1);
     assert.equal(virtualList.scrollCalls.some((call) => Number(call?.top || 0) > 0), true);
+
+    if (testCase.hostname === "chatgpt.com") {
+      for (let transfer = 0; transfer < 2; transfer += 1) {
+        await hooks.prepareSourceForCapture();
+        const repeatedTranscript = hooks.scrapeConversationText();
+        assert.equal(repeatedTranscript.split(fullPayload).length - 1, 1);
+      }
+      assert.equal(pastedCard.clicks, 3);
+      assert.equal(closeDetail.clicks, 3);
+    }
   }
 });
 
