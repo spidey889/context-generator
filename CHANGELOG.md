@@ -1,5 +1,7 @@
 # Changelog
 
+- 2026-07-23: Fixed the final pasted-content attachment gap on `coppppy`. Claude could successfully read every virtualized panel row but then remount the card/message DOM when the panel closed, leaving the accepted payload tied to a discarded node and absent from the raw transcript. Captured cards now retain a stable accessible-label occurrence, resolve the current live button, and reconcile the payload against the final selected user turns before serialization. The existing focused Claude/ChatGPT fixture now reproduces the Claude remount and proves the full payload remains in its original conversation position. Temporary pasted-content console diagnostics were removed.
+
 - 2026-07-22: Prepared the Chrome Web Store release as extension version 1.4.1. Regenerated the tracked release archive from the final extension source and verified the deterministic suite, installed-extension transfer smoke, manifest/version alignment, root archive layout, and absence of nested ZIP files.
 
 - 2026-07-22: Removed the handoff card's redundant "Live handoff" eyebrow, restored completed ticks to brand purple, and shifted the surface and ambient glow toward a more neutral near-black. Transfer behavior and timing are unchanged. Per explicit request, no automated or browser tests were run.

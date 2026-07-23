@@ -1361,9 +1361,10 @@ test("Claude and ChatGPT attach expanded pasted content to the owning user turn"
       assistantAttrs: { class: "font-claude-response" },
       cardAttrs: { "aria-label": "Pasted Text, pasted, 41 lines" },
       cardPreview: "Collapsed Claude paste preview",
-      cardIsStandalone: true,
+      cardIsStandalone: false,
       cardWrapsCandidate: false,
       rowTextLivesInDescendant: true,
+      remountCardAfterClose: true,
       hasBadge: false
     },
     {
@@ -1379,6 +1380,7 @@ test("Claude and ChatGPT attach expanded pasted content to the owning user turn"
       cardIsStandalone: false,
       cardWrapsCandidate: false,
       rowTextLivesInDescendant: false,
+      remountCardAfterClose: false,
       hasBadge: true
     }
   ];
@@ -1509,25 +1511,50 @@ test("Claude and ChatGPT attach expanded pasted content to the owning user turn"
       });
       renderVirtualRows(0);
     };
-    closeDetail.onClick = () => {
-      [detailPanel, detailTitle, virtualList, closeDetail, ...virtualRows].forEach((element) => {
-        element.rect = { ...hiddenRect };
-      });
-    };
-
-    const hooks = loadPlatformContent([
+    const pageElements = [
       precedingUser,
       targetOuter,
       targetInner,
-      ...(testCase.cardIsStandalone ? [pastedCard] : []),
+      pastedCard,
       detailPanel,
       detailTitle,
       closeDetail,
       assistantTurn
-    ], testCase.hostname);
+    ];
+    closeDetail.onClick = () => {
+      [detailPanel, detailTitle, virtualList, closeDetail, ...virtualRows].forEach((element) => {
+        element.rect = { ...hiddenRect };
+      });
+      if (testCase.remountCardAfterClose) {
+        const replacementOuter = new FakeElement({ text: targetText, attrs: testCase.targetOuterAttrs });
+        const replacementInner = new FakeElement({
+          tag: testCase.targetInnerTag,
+          text: targetText,
+          attrs: testCase.targetInnerAttrs
+        });
+        const replacementCard = new FakeElement({
+          tag: "button",
+          text: cardPreview,
+          attrs: testCase.cardAttrs
+        });
+        replacementOuter.order = targetOuter.order;
+        replacementInner.order = targetInner.order;
+        replacementCard.order = pastedCard.order;
+        replacementOuter.children = [replacementInner];
+        replacementInner.parentElement = replacementOuter;
+        replacementInner.children = [replacementCard];
+        replacementCard.parentElement = replacementInner;
+        const targetStart = pageElements.indexOf(targetOuter);
+        pageElements.splice(targetStart, 3, replacementOuter, replacementInner, replacementCard);
+      }
+    };
+
+    const hooks = loadPlatformContent(pageElements, testCase.hostname);
 
     assert.equal(await hooks.expandCollapsedConversationContent(), 1);
-    const transcript = await hooks.scrapeConversationTextWhenReady();
+    const transcript = testCase.remountCardAfterClose
+      ? hooks.scrapeConversationText()
+      : await hooks.scrapeConversationTextWhenReady();
     const earlierIndex = transcript.indexOf("Earlier user message that must remain separate.");
     const targetIndex = transcript.indexOf("Target user message before the paste.");
     const payloadIndex = transcript.indexOf(fullPayload);

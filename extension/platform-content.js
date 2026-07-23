@@ -1049,50 +1049,28 @@
     if (currentPlatform.id !== "claude" && currentPlatform.id !== "chatgpt") return 0;
 
     let capturedCount = 0;
-    for (const { turn, card, standalone = false } of getPastedConversationCards()) {
+    for (const { turn, card } of getPastedConversationCards()) {
       const attempts = pastedContentCardAttempts.get(card) || 0;
       if (attempts >= 2 || capturedPastedContent.some((entry) => entry.card === card)) continue;
       pastedContentCardAttempts.set(card, attempts + 1);
 
       let panel = findVisiblePastedContentPanel(turn);
       try {
-        const panelWasAlreadyOpen = Boolean(panel);
-        let clickDispatched = false;
         if (!panel) {
-          const canDispatchClick = typeof card.click === "function";
           card.click?.();
-          clickDispatched = canDispatchClick;
           panel = await waitForPastedContentPanel(turn);
         }
-        console.log("[Context Generator][Pasted content debug] click dispatch result", {
-          platform: currentPlatform.id,
-          button: card,
-          ariaLabel: cleanText(card.getAttribute?.("aria-label") || ""),
-          attempt: attempts + 1,
-          clickDispatched,
-          panelWasAlreadyOpen
-        });
-        console.log("[Context Generator][Pasted content debug] panel open result", {
-          platform: currentPlatform.id,
-          button: card,
-          clickDispatched,
-          panelOpened: Boolean(panel),
-          panelOpenedAfterClick: clickDispatched && Boolean(panel)
-        });
         if (!panel) continue;
 
         const fullText = await getPastedContentPanelText(panel);
-        console.log("[Context Generator][Pasted content debug] text capture result", {
-          platform: currentPlatform.id,
-          capturedCharacters: fullText.length,
-          accepted: fullText.length >= 2
-        });
         if (fullText.length < 2) continue;
 
+        const cardAriaLabel = cleanText(card.getAttribute?.("aria-label") || "");
         capturedPastedContent.push({
           turn,
           card,
-          standalone,
+          cardAriaLabel,
+          cardOccurrence: getPastedContentCardOccurrence(card, cardAriaLabel),
           previewText: cleanText(getElementText(card)),
           fullText
         });
@@ -1130,7 +1108,7 @@
     const addCard = (turn, card) => {
       if (!turn || !card || seenCards.has(card)) return;
       seenCards.add(card);
-      results.push({ turn, card, standalone: turn === card });
+      results.push({ turn, card });
     };
 
     userTurns.forEach((turn) => {
@@ -1185,6 +1163,16 @@
     return card;
   }
 
+  function getPastedContentCardOccurrence(card, ariaLabel) {
+    if (!ariaLabel) return 0;
+    const matchingCards = Array.from(document.querySelectorAll("button[aria-label]"))
+      .filter((candidate) => (
+        candidate instanceof Element &&
+        cleanText(candidate.getAttribute?.("aria-label") || "") === ariaLabel
+      ));
+    return Math.max(0, matchingCards.indexOf(card));
+  }
+
   function isPastedContentCardMarker(element) {
     if (!(element instanceof Element) || !isVisible(element) || isContextGeneratorNode(element)) return false;
 
@@ -1193,15 +1181,6 @@
     const closestAriaButton = element.closest?.("button[aria-label]");
     const closestAriaButtonLabel = cleanText(closestAriaButton?.getAttribute?.("aria-label") || "");
     const closestAriaButtonMatchesPastedText = CLAUDE_PASTED_TEXT_BUTTON_LABEL_RE.test(closestAriaButtonLabel);
-    console.log("[Context Generator][Pasted content debug] candidate aria match", {
-      platform: currentPlatform.id,
-      candidate: element,
-      ariaLabel,
-      matchesPastedTextAriaLabel,
-      closestAriaButton,
-      closestAriaButtonLabel,
-      closestAriaButtonMatchesPastedText
-    });
     if (currentPlatform.id === "claude" && (
       matchesPastedTextAriaLabel ||
       closestAriaButtonMatchesPastedText
@@ -3046,28 +3025,72 @@
       return turn;
     });
 
-    if (currentPlatform.id === "claude") {
-      capturedPastedContent
-        .filter(({ standalone }) => standalone)
-        .forEach(({ card, fullText }) => {
-          const alreadyAttached = selectedTurns.some(({ element, text }) => (
-            text.includes(fullText) ||
-            element === card ||
-            element.contains?.(card) ||
-            card.contains?.(element)
-          ));
-          if (!alreadyAttached) {
-            selectedTurns.push({ element: card, role: "User", text: fullText });
-          }
-        });
+    return reconcileCapturedPastedContent(selectedTurns);
+  }
 
-      selectedTurns.sort((a, b) => {
-        if (a.element === b.element) return 0;
-        return a.element.compareDocumentPosition(b.element) & Node.DOCUMENT_POSITION_PRECEDING ? 1 : -1;
-      });
+  function reconcileCapturedPastedContent(selectedTurns) {
+    if (
+      (currentPlatform.id !== "claude" && currentPlatform.id !== "chatgpt") ||
+      capturedPastedContent.length === 0
+    ) {
+      return selectedTurns;
     }
 
-    return selectedTurns;
+    const reconciledTurns = selectedTurns.map((turn) => ({ ...turn }));
+    capturedPastedContent.forEach((entry) => {
+      if (reconciledTurns.some(({ text }) => text.includes(entry.fullText))) return;
+
+      // Claude can remount the card/message boundary after the detail panel closes.
+      // Resolve the current button by its accessible label and occurrence before
+      // attaching, so accepted panel text cannot remain tied to discarded DOM nodes.
+      const liveCard = resolveLivePastedContentCard(entry);
+      const owner = reconciledTurns.find(({ element, role }) => (
+        role === "User" &&
+        (
+          element === liveCard ||
+          element.contains?.(liveCard) ||
+          liveCard?.contains?.(element) ||
+          element === entry.turn ||
+          element.contains?.(entry.turn) ||
+          entry.turn?.contains?.(element)
+        )
+      ));
+
+      if (owner) {
+        let ownerText = owner.text;
+        if (entry.previewText && ownerText.includes(entry.previewText)) {
+          ownerText = cleanText(ownerText.replace(entry.previewText, ""));
+        }
+        owner.text = cleanText([ownerText, entry.fullText].filter(Boolean).join("\n\n"));
+        return;
+      }
+
+      reconciledTurns.push({
+        element: liveCard || entry.card,
+        role: "User",
+        text: entry.fullText
+      });
+    });
+
+    reconciledTurns.sort((a, b) => {
+      if (a.element === b.element) return 0;
+      return a.element.compareDocumentPosition(b.element) & Node.DOCUMENT_POSITION_PRECEDING ? 1 : -1;
+    });
+    return reconciledTurns;
+  }
+
+  function resolveLivePastedContentCard(entry) {
+    const ariaLabel = entry.cardAriaLabel;
+    if (!ariaLabel) return entry.card;
+
+    const matchingCards = Array.from(document.querySelectorAll("button[aria-label]"))
+      .filter((candidate) => (
+        candidate instanceof Element &&
+        isVisible(candidate) &&
+        cleanText(candidate.getAttribute?.("aria-label") || "") === ariaLabel
+      ));
+    if (matchingCards.includes(entry.card)) return entry.card;
+    return matchingCards[entry.cardOccurrence] || matchingCards[0] || entry.card;
   }
 
   function attachCapturedPastedContent(element, role, originalText) {
