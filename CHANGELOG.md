@@ -76,6 +76,8 @@ Keep an entry only when it explains the current architecture, a safety boundary,
 
 ## Durable History
 
+- 2026-07-23: Inserted `gemini-3.5-flash` between primary `gemini-3.6-flash` and the preserved Mistral/Groq chain. Gemini 3.6 failures, including 429 quota or throttle responses, now try Gemini 3.5 with the same key and native request contract before moving to Mistral Medium; the complete provider budget remains below the Vercel function ceiling.
+
 - 2026-07-18: Hardened destination recovery end to end. A prepared tab is now reused only if its current or pending URL still matches the selected AI; otherwise Cap Context opens one fresh correct destination without touching the navigated-away tab. Prepared failures can create at most one fresh retry, and ChatGPT recovery now receives the same activation settle as its normal paste path. Premature destination-side copy dialogs were removed so one source-side manual-copy fallback appears only after recovery is exhausted, failed clipboard fallbacks no longer claim success, picker capture-preparation errors release the transfer lock immediately, the safety lock covers six minutes, and background ChatGPT detection no longer treats ordinary `openai.com` pages as chats.
 
 - 2026-07-18: Raised the canonical conversation capacity from 210,000 to 350,000 JavaScript characters without transcript truncation. The extension and backend enforce the same character limit; backend guards now allow up to 1,400,000 UTF-8 transcript bytes and 2,200,000 JSON request bytes. Chats from 210,001 through 350,000 characters use a new `extra-large` profile targeting about 1,800 words with a 7,000-token visible output cap, while existing profiles, provider routing, retries, and time budgets remain unchanged.

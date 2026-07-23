@@ -12,8 +12,10 @@ const PROVIDER_ATTEMPT_TIMEOUT_MS = 80000;
 const SUMMARY_HEARTBEAT_INTERVAL_MS = 15000;
 const SUMMARY_HEARTBEAT_CHUNK = `\n${" ".repeat(2048)}\n`;
 const GEMINI_PRIMARY_MODEL = "gemini-3.6-flash";
+const GEMINI_FALLBACK_MODEL = "gemini-3.5-flash";
+const GEMINI_MODEL_CHAIN = [GEMINI_PRIMARY_MODEL, GEMINI_FALLBACK_MODEL];
 const GEMINI_THINKING_TOKEN_ALLOWANCE = 4000;
-const GEMINI_GENERATE_CONTENT_URL = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_PRIMARY_MODEL}:generateContent`;
+const GEMINI_GENERATE_CONTENT_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/models";
 const MISTRAL_CHAT_COMPLETIONS_URL = "https://api.mistral.ai/v1/chat/completions";
 const GROQ_CHAT_COMPLETIONS_URL = "https://api.groq.com/openai/v1/chat/completions";
 const LOCAL_DIRECT_MODEL = "local-direct";
@@ -23,6 +25,7 @@ const MISTRAL_MODEL_CHAIN = [MISTRAL_PRIMARY_MODEL, ...MISTRAL_FALLBACK_MODELS];
 const GROQ_FALLBACK_MODEL = "llama-3.1-8b-instant";
 const PROVIDER_REQUEST_BUDGETS_MS = {
   [GEMINI_PRIMARY_MODEL]: 45000,
+  [GEMINI_FALLBACK_MODEL]: 45000,
   [MISTRAL_PRIMARY_MODEL]: 55000,
   "mistral-large-2512": 40000,
   "ministral-3b-2512": 25000,
@@ -33,7 +36,7 @@ const SUMMARY_PROVIDERS = {
   gemini: {
     id: "gemini",
     label: "Gemini",
-    url: GEMINI_GENERATE_CONTENT_URL
+    url: GEMINI_GENERATE_CONTENT_BASE_URL
   },
   mistral: {
     id: "mistral",
@@ -404,42 +407,56 @@ async function createSummaryWithFallback({
   let lastProviderFailure = null;
 
   if (geminiApiKey) {
-    const geminiStartedAt = Date.now();
-    modelsTried.push(GEMINI_PRIMARY_MODEL);
+    for (const [index, model] of GEMINI_MODEL_CHAIN.entries()) {
+      const geminiStartedAt = Date.now();
+      modelsTried.push(model);
 
-    try {
-      const result = await createSummaryWithProvider({
-        provider: SUMMARY_PROVIDERS.gemini,
-        apiKey: geminiApiKey,
-        profile,
-        model: GEMINI_PRIMARY_MODEL,
-        initialMessages: geminiMessages
-      });
-      const modelReason = `${GEMINI_PRIMARY_MODEL} served as the primary model`;
+      try {
+        const result = await createSummaryWithProvider({
+          provider: SUMMARY_PROVIDERS.gemini,
+          apiKey: geminiApiKey,
+          profile,
+          model,
+          initialMessages: geminiMessages
+        });
+        const failedModels = modelsTried.slice(0, -1);
+        const modelReason = failedModels.length
+          ? `${failedModels.join(" -> ")} failed; fell back to ${model}`
+          : `${model} served as the primary model`;
 
-      console.info("[Context Generator] Summary served:", {
-        provider: SUMMARY_PROVIDERS.gemini.id,
-        model: GEMINI_PRIMARY_MODEL,
-        reason: modelReason
-      });
+        console.info("[Context Generator] Summary served:", {
+          provider: SUMMARY_PROVIDERS.gemini.id,
+          model,
+          reason: modelReason
+        });
 
-      return {
-        ...result,
-        modelReason,
-        modelsTried,
-        mistralModelsTried,
-        geminiMs: result.providerMs,
-        mistralMs: 0,
-        groqMs: 0,
-        fallback: createFallbackMetadata()
-      };
-    } catch (error) {
-      geminiMs = Date.now() - geminiStartedAt;
-      lastProviderFailure = error;
-      console.error(
-        `[Context Generator] ${GEMINI_PRIMARY_MODEL} failed; falling back to ${MISTRAL_PRIMARY_MODEL}:`,
-        getProviderFailureLog(error)
-      );
+        return {
+          ...result,
+          modelReason,
+          modelsTried,
+          mistralModelsTried,
+          geminiMs: geminiMs + result.providerMs,
+          mistralMs: 0,
+          groqMs: 0,
+          fallback: failedModels.length
+            ? createFallbackMetadata({
+                attempted: true,
+                used: true,
+                servedBy: SUMMARY_PROVIDERS.gemini.id,
+                model,
+                reason: getProviderFailureReason(lastProviderFailure)
+              })
+            : createFallbackMetadata()
+        };
+      } catch (error) {
+        geminiMs += Date.now() - geminiStartedAt;
+        lastProviderFailure = error;
+        const nextModel = GEMINI_MODEL_CHAIN[index + 1] || MISTRAL_PRIMARY_MODEL;
+        console.error(
+          `[Context Generator] ${model} failed; falling back to ${nextModel}:`,
+          getProviderFailureLog(error)
+        );
+      }
     }
   }
 
@@ -643,7 +660,10 @@ function requestProviderSummary(provider, apiKey, messages, profile, model, opti
     if (options.promptCacheKey) body.prompt_cache_key = options.promptCacheKey;
   }
 
-  return fetchWithRetry(provider.url, {
+  const providerUrl = provider.id === SUMMARY_PROVIDERS.gemini.id
+    ? `${GEMINI_GENERATE_CONTENT_BASE_URL}/${model}:generateContent`
+    : provider.url;
+  return fetchWithRetry(providerUrl, {
     method: "POST",
     headers,
     body: JSON.stringify(body)
@@ -655,8 +675,8 @@ function getProviderRequestBody(provider, messages, profile, model) {
     const systemMessage = messages.find((message) => message.role === "system");
     const userMessage = messages.find((message) => message.role === "user");
 
-    // Gemini 3.6 Flash deprecates explicit sampling parameters. Keep its default
-    // sampling while preserving the same trust boundary as chat-completions providers.
+    // Gemini Flash models use default sampling to avoid deprecated parameters
+    // while preserving the same trust boundary as chat-completions providers.
     return {
       systemInstruction: {
         parts: [{ text: String(systemMessage?.content || "") }]
@@ -808,7 +828,7 @@ function getGeneratedModelSelection(conversation, geminiConfigured) {
 
   return {
     model: GEMINI_PRIMARY_MODEL,
-    reason: `generated summaries start with ${GEMINI_PRIMARY_MODEL} before the preserved Mistral and Groq fallbacks`,
+    reason: `generated summaries start with ${GEMINI_PRIMARY_MODEL}, then ${GEMINI_FALLBACK_MODEL}, before the preserved Mistral and Groq fallbacks`,
     inputChars,
     thresholdChars: null,
     override: false

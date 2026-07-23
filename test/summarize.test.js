@@ -430,14 +430,15 @@ test("validator accepts the exact boxed Unicode header requested from providers"
 test("provider fallback budgets keep the complete chain below the Vercel ceiling", () => {
   const budgets = [
     getProviderRequestBudgetMs("gemini-3.6-flash"),
+    getProviderRequestBudgetMs("gemini-3.5-flash"),
     getProviderRequestBudgetMs("mistral-medium-3-5"),
     getProviderRequestBudgetMs("mistral-large-2512"),
     getProviderRequestBudgetMs("ministral-3b-2512"),
     getProviderRequestBudgetMs("llama-3.1-8b-instant")
   ];
 
-  assert.deepEqual(budgets, [45000, 55000, 40000, 25000, 15000]);
-  assert.equal(budgets.reduce((total, budget) => total + budget, 0), 180000);
+  assert.deepEqual(budgets, [45000, 45000, 55000, 40000, 25000, 15000]);
+  assert.equal(budgets.reduce((total, budget) => total + budget, 0), 225000);
   assert.ok(budgets.reduce((total, budget) => total + budget, 0) < 240000);
 });
 
@@ -1016,6 +1017,59 @@ test("backend sends generated summaries to native Gemini first and records Gemin
   }
 });
 
+test("backend falls from a rate-limited Gemini 3.6 Flash to Gemini 3.5 Flash", async () => {
+  const originalFetch = global.fetch;
+  const restoreGeminiKey = setTemporaryEnv("GEMINI_API_KEY", "test-gemini-key");
+  const restoreMistralKey = setTemporaryEnv("MISTRAL_API_KEY", "test-mistral-key");
+  const conversation = "Gemini rate-limit fallback context ".repeat(180);
+  const requests = [];
+
+  global.fetch = async (url, options) => {
+    requests.push({ url, body: JSON.parse(options.body) });
+    if (url.includes("gemini-3.6-flash")) {
+      return {
+        ok: false,
+        status: 429,
+        json: async () => ({ error: { message: "quota exhausted" } })
+      };
+    }
+    return {
+      ok: true,
+      status: 200,
+      json: async () => ({
+        candidates: [{
+          finishReason: "STOP",
+          content: { parts: [{ text: makeContextCarrySummary("gemini-fallback", 260) }] }
+        }]
+      })
+    };
+  };
+
+  const res = createMockResponse();
+  try {
+    await summarize({ method: "POST", body: { conversation } }, res);
+
+    assert.equal(res.statusCode, 200);
+    assert.equal(requests.length, 3);
+    assert.match(requests[0].url, /gemini-3\.6-flash:generateContent$/);
+    assert.match(requests[1].url, /gemini-3\.6-flash:generateContent$/);
+    assert.match(requests[2].url, /gemini-3\.5-flash:generateContent$/);
+    assert.equal(res.payload.timing.servedBy, "gemini");
+    assert.equal(res.payload.timing.primaryModel, "gemini-3.6-flash");
+    assert.equal(res.payload.timing.model, "gemini-3.5-flash");
+    assert.deepEqual(res.payload.timing.modelsTried, ["gemini-3.6-flash", "gemini-3.5-flash"]);
+    assert.equal(res.payload.timing.fallback.attempted, true);
+    assert.equal(res.payload.timing.fallback.used, true);
+    assert.equal(res.payload.timing.fallback.servedBy, "gemini");
+    assert.equal(res.payload.timing.fallback.model, "gemini-3.5-flash");
+    assert.match(res.payload.timing.fallback.reason, /Gemini API error 429/);
+  } finally {
+    restoreMistralKey();
+    restoreGeminiKey();
+    global.fetch = originalFetch;
+  }
+});
+
 test("backend falls from invalid Gemini output to the preserved Mistral chain", async () => {
   const originalFetch = global.fetch;
   const restoreGeminiKey = setTemporaryEnv("GEMINI_API_KEY", "test-gemini-key");
@@ -1049,22 +1103,32 @@ test("backend falls from invalid Gemini output to the preserved Mistral chain", 
     await summarize({ method: "POST", body: { conversation } }, res);
 
     assert.equal(res.statusCode, 200);
-    assert.equal(requests.length, 2);
+    assert.equal(requests.length, 3);
     assert.match(requests[0].url, /gemini-3\.6-flash:generateContent$/);
-    assert.equal(requests[1].body.model, "mistral-medium-3-5");
+    assert.match(requests[1].url, /gemini-3\.5-flash:generateContent$/);
+    assert.equal(requests[2].body.model, "mistral-medium-3-5");
     assert.match(requests[0].body.systemInstruction.parts[0].text, /plain-text title/);
-    assert.match(requests[1].body.messages[0].content, /boxed header exactly as shown/);
+    assert.match(requests[1].body.systemInstruction.parts[0].text, /plain-text title/);
+    assert.match(requests[2].body.messages[0].content, /boxed header exactly as shown/);
     assert.equal(requests[0].body.generationConfig.maxOutputTokens, 5000);
-    assert.equal(requests[1].body.max_tokens, 1000);
+    assert.equal(requests[1].body.generationConfig.maxOutputTokens, 5000);
+    assert.equal(requests[2].body.max_tokens, 1000);
     assert.equal(res.payload.timing.servedBy, "mistral");
     assert.equal(res.payload.timing.primaryModel, "gemini-3.6-flash");
-    assert.deepEqual(res.payload.timing.modelsTried, ["gemini-3.6-flash", "mistral-medium-3-5"]);
+    assert.deepEqual(res.payload.timing.modelsTried, [
+      "gemini-3.6-flash",
+      "gemini-3.5-flash",
+      "mistral-medium-3-5"
+    ]);
     assert.deepEqual(res.payload.timing.mistralModelsTried, ["mistral-medium-3-5"]);
     assert.equal(res.payload.timing.fallback.attempted, true);
     assert.equal(res.payload.timing.fallback.used, true);
     assert.equal(res.payload.timing.fallback.servedBy, "mistral");
     assert.match(res.payload.timing.fallback.reason, /Gemini returned an invalid summary/);
-    assert.match(res.payload.timing.modelReason, /gemini-3\.6-flash failed/);
+    assert.match(
+      res.payload.timing.modelReason,
+      /gemini-3\.6-flash -> gemini-3\.5-flash failed; fell back to mistral-medium-3-5/
+    );
   } finally {
     restoreMistralKey();
     restoreGeminiKey();

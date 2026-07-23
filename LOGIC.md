@@ -81,12 +81,13 @@ The large and extra-large profiles' 1,100- and 1,600-word quality floors are dia
 Each non-tiny transfer creates one backend job. Transient failures and invalid output may advance through:
 
 1. Gemini `gemini-3.6-flash`, when `GEMINI_API_KEY` exists
-2. Mistral `mistral-medium-3-5`
-3. Mistral `mistral-large-2512`
-4. Mistral `ministral-3b-2512`
-5. Groq `llama-3.1-8b-instant`, when `GROQ_API_KEY` exists
+2. Gemini `gemini-3.5-flash`, using the same Gemini key
+3. Mistral `mistral-medium-3-5`
+4. Mistral `mistral-large-2512`
+5. Mistral `ministral-3b-2512`
+6. Groq `llama-3.1-8b-instant`, when `GROQ_API_KEY` exists
 
-Gemini 3.6 Flash uses native `generateContent`, `MEDIUM` thinking, default sampling with no deprecated sampling parameters, explicit non-storage, and the profile cap plus a 4,000-token reasoning allowance. `MISTRAL_MODEL` does not override the chain. A provider-wide Mistral 429 skips directly to optional Groq. Per-model budgets are 45, 55, 40, 25, and 15 seconds; provider fetches also have an 80-second abort ceiling. The extension never replays the backend job.
+Both Gemini Flash models use native `generateContent`, `MEDIUM` thinking, default sampling with no deprecated sampling parameters, explicit non-storage, and the profile cap plus a 4,000-token reasoning allowance. Any Gemini 3.6 failure, including a 429 quota or throttle response, advances to Gemini 3.5 before Mistral. `MISTRAL_MODEL` does not override the chain. A provider-wide Mistral 429 skips directly to optional Groq. Per-model budgets are 45, 45, 55, 40, 25, and 15 seconds; provider fetches also have an 80-second abort ceiling. The extension never replays the backend job.
 
 The Vercel function has an explicit 240-second maximum and the extension aborts at 210 seconds. If provider work is still running after 15 seconds, the backend streams JSON-safe whitespace heartbeats every 15 seconds before the final JSON object. The Manifest V3 worker also calls a harmless extension runtime API every 25 seconds while that request is active. This prevents Chromium from suspending a valid long summary job during a silent fetch; after headers are committed, backend failures retain their real status inside the JSON body and the extension converts them back into the existing typed public errors.
 
