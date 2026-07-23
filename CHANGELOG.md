@@ -76,6 +76,8 @@ Keep an entry only when it explains the current architecture, a safety boundary,
 
 ## Durable History
 
+- 2026-07-23: Added a direct Claude marker fallback on `coppppy`: when a scanned element's own `aria-label` is empty, the matcher now checks `element.closest("button[aria-label]")` against the same `Pasted Text` prefix before rejecting it. Temporary diagnostics report both the element-level and closest-button label/match results.
+
 - 2026-07-23: Corrected the Claude pasted-card candidate expansion on `coppppy`: checking only the user turn's own ancestor was insufficient when the scanned candidate list exposed an inner `<p>`. Every scanned node now contributes its closest parent `<button>` before marker matching. The focused fixture first reproduced the false-only `<p>` diagnostic, then verified the real `Pasted Text, pasted, 41 lines` button matched, received the click, opened the panel, and preserved the existing virtual row merge.
 
 - 2026-07-23: Fixed Claude pasted-card discovery on `coppppy` after live diagnostics confirmed that the role-bearing user `<p>` sits inside the real `button[aria-label^="Pasted Text"]`. Candidate discovery now includes that nearest interactive ancestor and resolves it back to the same user turn; the temporary console diagnostics were removed. The focused fixture pins this parent-button DOM shape while preserving the existing virtual scroll/merge logic and ChatGPT behavior.

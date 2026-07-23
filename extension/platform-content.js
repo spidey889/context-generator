@@ -1145,13 +1145,22 @@
 
     const ariaLabel = cleanText(element.getAttribute?.("aria-label") || "");
     const matchesPastedTextAriaLabel = CLAUDE_PASTED_TEXT_BUTTON_LABEL_RE.test(ariaLabel);
+    const closestAriaButton = element.closest?.("button[aria-label]");
+    const closestAriaButtonLabel = cleanText(closestAriaButton?.getAttribute?.("aria-label") || "");
+    const closestAriaButtonMatchesPastedText = CLAUDE_PASTED_TEXT_BUTTON_LABEL_RE.test(closestAriaButtonLabel);
     console.log("[Context Generator][Pasted content debug] candidate aria match", {
       platform: currentPlatform.id,
       candidate: element,
       ariaLabel,
-      matchesPastedTextAriaLabel
+      matchesPastedTextAriaLabel,
+      closestAriaButton,
+      closestAriaButtonLabel,
+      closestAriaButtonMatchesPastedText
     });
-    if (currentPlatform.id === "claude" && matchesPastedTextAriaLabel) {
+    if (currentPlatform.id === "claude" && (
+      matchesPastedTextAriaLabel ||
+      closestAriaButtonMatchesPastedText
+    )) {
       return true;
     }
 
