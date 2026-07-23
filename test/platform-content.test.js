@@ -1361,8 +1361,8 @@ test("Claude and ChatGPT attach expanded pasted content to the owning user turn"
       assistantAttrs: { class: "font-claude-response" },
       cardAttrs: { "aria-label": "Pasted Text, pasted, 41 lines" },
       cardPreview: "Collapsed Claude paste preview",
-      cardWrapsCandidate: true,
-      candidateListOmitsButton: true,
+      cardIsStandalone: true,
+      cardWrapsCandidate: false,
       hasBadge: false
     },
     {
@@ -1375,8 +1375,8 @@ test("Claude and ChatGPT attach expanded pasted content to the owning user turn"
       assistantAttrs: { "data-message-author-role": "assistant" },
       cardAttrs: { "aria-label": "Pasted content" },
       cardPreview: "Collapsed preview\nPASTED",
+      cardIsStandalone: false,
       cardWrapsCandidate: false,
-      candidateListOmitsButton: false,
       hasBadge: true
     }
   ];
@@ -1387,7 +1387,9 @@ test("Claude and ChatGPT attach expanded pasted content to the owning user turn"
     ));
     const fullPayload = virtualRowTexts.join("\n");
     const cardPreview = testCase.cardPreview;
-    const targetText = `Target user message before the paste.\n${cardPreview}`;
+    const targetText = testCase.cardIsStandalone
+      ? "Target user message before the paste."
+      : `Target user message before the paste.\n${cardPreview}`;
     const precedingUser = new FakeElement({
       text: "Earlier user message that must remain separate.",
       attrs: testCase.precedingAttrs
@@ -1434,7 +1436,12 @@ test("Claude and ChatGPT attach expanded pasted content to the owning user turn"
     const hiddenRect = { width: 0, height: 0, top: 0, left: 0, right: 0, bottom: 0 };
     const visibleRect = { width: 620, height: 520, top: 80, left: 620, right: 1240, bottom: 600 };
 
-    if (testCase.cardWrapsCandidate) {
+    if (testCase.cardIsStandalone) {
+      targetOuter.children = [targetInner];
+      targetInner.parentElement = targetOuter;
+      targetInner.children = [];
+      pastedCard.children = pastedBadge ? [pastedBadge] : [];
+    } else if (testCase.cardWrapsCandidate) {
       targetOuter.children = [pastedCard];
       pastedCard.parentElement = targetOuter;
       pastedCard.children = [targetInner];
@@ -1448,12 +1455,6 @@ test("Claude and ChatGPT attach expanded pasted content to the owning user turn"
       pastedCard.children = pastedBadge ? [pastedBadge] : [];
     }
     if (pastedBadge) pastedBadge.parentElement = pastedCard;
-    if (testCase.candidateListOmitsButton) {
-      const defaultQuerySelectorAll = targetOuter.querySelectorAll.bind(targetOuter);
-      targetOuter.querySelectorAll = (selector = "*") => (
-        selector === "*" ? [targetInner] : defaultQuerySelectorAll(selector)
-      );
-    }
     detailPanel.children = [detailTitle, virtualList, closeDetail];
     [detailTitle, virtualList, closeDetail].forEach((element) => {
       element.parentElement = detailPanel;
@@ -1508,6 +1509,7 @@ test("Claude and ChatGPT attach expanded pasted content to the owning user turn"
       precedingUser,
       targetOuter,
       targetInner,
+      ...(testCase.cardIsStandalone ? [pastedCard] : []),
       detailPanel,
       detailTitle,
       closeDetail,

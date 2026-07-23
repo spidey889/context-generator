@@ -1041,7 +1041,7 @@
     if (currentPlatform.id !== "claude" && currentPlatform.id !== "chatgpt") return 0;
 
     let capturedCount = 0;
-    for (const { turn, card } of getPastedConversationCards()) {
+    for (const { turn, card, standalone = false } of getPastedConversationCards()) {
       const attempts = pastedContentCardAttempts.get(card) || 0;
       if (attempts >= 2 || capturedPastedContent.some((entry) => entry.card === card)) continue;
       pastedContentCardAttempts.set(card, attempts + 1);
@@ -1079,6 +1079,7 @@
         capturedPastedContent.push({
           turn,
           card,
+          standalone,
           previewText: cleanText(getElementText(card)),
           fullText
         });
@@ -1105,39 +1106,70 @@
 
     const seenCards = new Set();
     const results = [];
-    Array.from(document.querySelectorAll(userSelector))
+    const userTurns = Array.from(document.querySelectorAll(userSelector))
       .filter((turn) => (
         turn.matches?.(userSelector) &&
         isVisible(turn) &&
         getConversationRole(turn) === "User" &&
         isConversationCandidateElement(turn, findPlatformInput())
-      ))
-      .forEach((turn) => {
-        const scannedCandidates = [turn, ...Array.from(turn.querySelectorAll("*"))];
-        const candidates = new Set(scannedCandidates);
-        // Claude exposes the inner <p> as the message candidate while its aria label
-        // lives on that candidate's closest parent button.
-        scannedCandidates.forEach((candidate) => {
-          const parentButton = candidate.closest?.("button");
-          if (parentButton) candidates.add(parentButton);
-        });
-        const interactiveAncestor = turn.closest?.(PASTED_CONTENT_CARD_INTERACTIVE_SELECTOR);
-        if (interactiveAncestor) candidates.add(interactiveAncestor);
+      ));
 
-        Array.from(candidates)
-          .filter(isPastedContentCardMarker)
-          .forEach((marker) => {
-            const interactive = marker.closest?.(PASTED_CONTENT_CARD_INTERACTIVE_SELECTOR);
-            const card = interactive && (
-              turn.contains(interactive) ||
-              interactive.contains?.(turn)
-            ) ? interactive : marker;
-            if (seenCards.has(card)) return;
-            seenCards.add(card);
-            results.push({ turn, card });
-          });
+    const addCard = (turn, card) => {
+      if (!turn || !card || seenCards.has(card)) return;
+      seenCards.add(card);
+      results.push({ turn, card, standalone: turn === card });
+    };
+
+    userTurns.forEach((turn) => {
+      const scannedCandidates = [turn, ...Array.from(turn.querySelectorAll("*"))];
+      const candidates = new Set(scannedCandidates);
+      // Claude exposes the inner <p> as the message candidate while its aria label
+      // lives on that candidate's closest parent button.
+      scannedCandidates.forEach((candidate) => {
+        const parentButton = candidate.closest?.("button");
+        if (parentButton) candidates.add(parentButton);
       });
+      const interactiveAncestor = turn.closest?.(PASTED_CONTENT_CARD_INTERACTIVE_SELECTOR);
+      if (interactiveAncestor) candidates.add(interactiveAncestor);
+
+      Array.from(candidates)
+        .filter(isPastedContentCardMarker)
+        .forEach((marker) => {
+          const interactive = marker.closest?.(PASTED_CONTENT_CARD_INTERACTIVE_SELECTOR);
+          const card = interactive && (
+            turn.contains(interactive) ||
+            interactive.contains?.(turn)
+          ) ? interactive : marker;
+          addCard(turn, card);
+        });
+    });
+
+    if (currentPlatform.id === "claude") {
+      Array.from(document.querySelectorAll("button[aria-label]"))
+        .filter((element) => (
+          element instanceof Element &&
+          element.localName === "button" &&
+          element.hasAttribute?.("aria-label")
+        ))
+        .filter(isPastedContentCardMarker)
+        .forEach((card) => {
+          addCard(findPastedContentOwningUserTurn(card, userTurns), card);
+        });
+    }
+
     return results;
+  }
+
+  function findPastedContentOwningUserTurn(card, userTurns) {
+    const directlyRelatedTurn = userTurns.find((turn) => (
+      turn === card ||
+      turn.contains?.(card) ||
+      card.contains?.(turn)
+    ));
+    if (directlyRelatedTurn) return directlyRelatedTurn;
+
+    // A standalone Claude paste card is itself a user turn even without role metadata.
+    return card;
   }
 
   function isPastedContentCardMarker(element) {
@@ -2989,11 +3021,34 @@
       turns.push(candidate);
     });
 
-    return turns.map(({ element, role, text, sourceId }) => {
+    const selectedTurns = turns.map(({ element, role, text, sourceId }) => {
       const turn = { element, role, text };
       if (sourceId) turn.sourceId = sourceId;
       return turn;
     });
+
+    if (currentPlatform.id === "claude") {
+      capturedPastedContent
+        .filter(({ standalone }) => standalone)
+        .forEach(({ card, fullText }) => {
+          const alreadyAttached = selectedTurns.some(({ element, text }) => (
+            text.includes(fullText) ||
+            element === card ||
+            element.contains?.(card) ||
+            card.contains?.(element)
+          ));
+          if (!alreadyAttached) {
+            selectedTurns.push({ element: card, role: "User", text: fullText });
+          }
+        });
+
+      selectedTurns.sort((a, b) => {
+        if (a.element === b.element) return 0;
+        return a.element.compareDocumentPosition(b.element) & Node.DOCUMENT_POSITION_PRECEDING ? 1 : -1;
+      });
+    }
+
+    return selectedTurns;
   }
 
   function attachCapturedPastedContent(element, role, originalText) {

@@ -76,6 +76,8 @@ Keep an entry only when it explains the current architecture, a safety boundary,
 
 ## Durable History
 
+- 2026-07-23: Fixed the actual standalone Claude pasted-card shape on `coppppy`. Discovery now queries the page directly for visible `button[aria-label]` controls and runs the `Pasted Text` matcher on those buttons instead of depending on role-selected message paragraphs. If Claude supplies no related user-role boundary, the recovered full payload is inserted as a standalone user turn at the button's document position. The focused fixture reproduces unrelated normal `<p>` candidates plus a separate paste button and verifies match, click, virtual-row merge, close, and transcript ordering.
+
 - 2026-07-23: Added a direct Claude marker fallback on `coppppy`: when a scanned element's own `aria-label` is empty, the matcher now checks `element.closest("button[aria-label]")` against the same `Pasted Text` prefix before rejecting it. Temporary diagnostics report both the element-level and closest-button label/match results.
 
 - 2026-07-23: Corrected the Claude pasted-card candidate expansion on `coppppy`: checking only the user turn's own ancestor was insufficient when the scanned candidate list exposed an inner `<p>`. Every scanned node now contributes its closest parent `<button>` before marker matching. The focused fixture first reproduced the false-only `<p>` diagnostic, then verified the real `Pasted Text, pasted, 41 lines` button matched, received the click, opened the panel, and preserved the existing virtual row merge.
