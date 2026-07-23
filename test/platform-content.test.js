@@ -1363,6 +1363,7 @@ test("Claude and ChatGPT attach expanded pasted content to the owning user turn"
       cardPreview: "Collapsed Claude paste preview",
       cardIsStandalone: true,
       cardWrapsCandidate: false,
+      rowTextLivesInDescendant: true,
       hasBadge: false
     },
     {
@@ -1377,6 +1378,7 @@ test("Claude and ChatGPT attach expanded pasted content to the owning user turn"
       cardPreview: "Collapsed preview\nPASTED",
       cardIsStandalone: false,
       cardWrapsCandidate: false,
+      rowTextLivesInDescendant: false,
       hasBadge: true
     }
   ];
@@ -1417,13 +1419,21 @@ test("Claude and ChatGPT attach expanded pasted content to the owning user turn"
     });
     virtualList.clientHeight = 100;
     virtualList.scrollHeight = 500;
-    const virtualRows = virtualRowTexts.map((text, index) => new FakeElement({
-      text,
-      attrs: {
-        "data-index": String(index),
-        style: `position: absolute; transform: translateY(${index * 100}px)`
+    const virtualRows = virtualRowTexts.map((text, index) => {
+      const row = new FakeElement({
+        text: testCase.rowTextLivesInDescendant ? "" : text,
+        attrs: {
+          "data-index": String(index),
+          style: `position: absolute; transform: translateY(${index * 100}px)`
+        }
+      });
+      if (testCase.rowTextLivesInDescendant) {
+        const content = new FakeElement({ tag: "pre", text });
+        row.children = [content];
+        content.parentElement = row;
       }
-    }));
+      return row;
+    });
     const closeDetail = new FakeElement({
       tag: "button",
       text: "Close",
@@ -1517,7 +1527,7 @@ test("Claude and ChatGPT attach expanded pasted content to the owning user turn"
     ], testCase.hostname);
 
     assert.equal(await hooks.expandCollapsedConversationContent(), 1);
-    const transcript = hooks.scrapeConversationText();
+    const transcript = await hooks.scrapeConversationTextWhenReady();
     const earlierIndex = transcript.indexOf("Earlier user message that must remain separate.");
     const targetIndex = transcript.indexOf("Target user message before the paste.");
     const payloadIndex = transcript.indexOf(fullPayload);

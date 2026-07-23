@@ -92,6 +92,14 @@
   const PASTED_CONTENT_BADGE_RE = /^\s*pasted\s*$/i;
   const CLAUDE_PASTED_TEXT_BUTTON_LABEL_RE = /^\s*pasted\s+text\b/i;
   const PASTED_CONTENT_CARD_INTERACTIVE_SELECTOR = "button, [role='button'], [tabindex='0']";
+  const PASTED_CONTENT_PAYLOAD_SELECTOR = [
+    "pre",
+    "code",
+    "textarea",
+    "[class*='whitespace-pre' i]",
+    "[class*='font-mono' i]",
+    "[data-testid*='content' i]"
+  ].join(",");
   const PASTED_CONTENT_PANEL_TIMEOUT_MS = 1000;
   const PASTED_CONTENT_VIRTUAL_SETTLE_TIMEOUT_MS = 600;
   const PASTED_CONTENT_VIRTUAL_MAX_SCROLLS = 250;
@@ -1074,6 +1082,11 @@
         if (!panel) continue;
 
         const fullText = await getPastedContentPanelText(panel);
+        console.log("[Context Generator][Pasted content debug] text capture result", {
+          platform: currentPlatform.id,
+          capturedCharacters: fullText.length,
+          accepted: fullText.length >= 2
+        });
         if (fullText.length < 2) continue;
 
         capturedPastedContent.push({
@@ -1264,11 +1277,9 @@
 
   async function getPastedContentPanelText(panel) {
     const virtualizedText = await scrapeVirtualizedPastedContentPanel(panel);
-    if (virtualizedText !== null) return virtualizedText;
+    if (virtualizedText?.length >= 2) return virtualizedText;
 
-    const payloadCandidates = Array.from(panel.querySelectorAll(
-      "pre, code, textarea, [class*='whitespace-pre' i], [class*='font-mono' i], [data-testid*='content' i]"
-    ))
+    const payloadCandidates = Array.from(panel.querySelectorAll(PASTED_CONTENT_PAYLOAD_SELECTOR))
       .filter((element) => (
         isVisible(element) &&
         !element.matches?.("button, [role='button']") &&
@@ -1297,7 +1308,7 @@
       getRenderedPastedContentRows(panel).forEach((row) => {
         const index = cleanText(row.getAttribute?.("data-index") || "");
         if (!index) return;
-        const text = cleanText(getElementText(row));
+        const text = getPastedContentRowText(row);
         const previous = capturedRows.get(index);
         if (previous === undefined || text.length > previous.length) {
           capturedRows.set(index, text);
@@ -1337,6 +1348,14 @@
   function getRenderedPastedContentRows(panel) {
     return Array.from(panel.querySelectorAll("[data-index]"))
       .filter((row) => isVisible(row) && !isContextGeneratorNode(row));
+  }
+
+  function getPastedContentRowText(row) {
+    return [row, ...Array.from(row.querySelectorAll?.(PASTED_CONTENT_PAYLOAD_SELECTOR) || [])]
+      .filter((element) => !element.matches?.("button, [role='button']"))
+      .map((element) => cleanText(getElementText(element)))
+      .filter(Boolean)
+      .sort((first, second) => second.length - first.length)[0] || "";
   }
 
   function findPastedContentScrollRoot(panel, row) {
@@ -1388,7 +1407,7 @@
     return getRenderedPastedContentRows(panel)
       .map((row) => {
         const index = cleanText(row.getAttribute?.("data-index") || "");
-        const text = cleanText(getElementText(row));
+        const text = getPastedContentRowText(row);
         return `${index}:${text.length}:${text.slice(0, 24)}:${text.slice(-24)}`;
       })
       .join("|");
