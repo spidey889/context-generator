@@ -1354,12 +1354,14 @@ test("Claude and ChatGPT attach expanded pasted content to the owning user turn"
     {
       hostname: "claude.ai",
       platformName: "Claude",
-      targetOuterAttrs: { "data-testid": "user-message" },
-      targetInnerAttrs: { "data-message-author-role": "user" },
+      targetOuterAttrs: {},
+      targetInnerAttrs: { "data-testid": "user-message" },
+      targetInnerTag: "p",
       precedingAttrs: { "data-testid": "user-message" },
       assistantAttrs: { class: "font-claude-response" },
       cardAttrs: { "aria-label": "Pasted Text, pasted, 41 lines" },
       cardPreview: "Collapsed Claude paste preview",
+      cardWrapsUserTurn: true,
       hasBadge: false
     },
     {
@@ -1367,10 +1369,12 @@ test("Claude and ChatGPT attach expanded pasted content to the owning user turn"
       platformName: "ChatGPT",
       targetOuterAttrs: { "data-testid": "conversation-turn-2" },
       targetInnerAttrs: { "data-message-author-role": "user" },
+      targetInnerTag: "div",
       precedingAttrs: { "data-message-author-role": "user" },
       assistantAttrs: { "data-message-author-role": "assistant" },
       cardAttrs: { "aria-label": "Pasted content" },
       cardPreview: "Collapsed preview\nPASTED",
+      cardWrapsUserTurn: false,
       hasBadge: true
     }
   ];
@@ -1387,7 +1391,11 @@ test("Claude and ChatGPT attach expanded pasted content to the owning user turn"
       attrs: testCase.precedingAttrs
     });
     const targetOuter = new FakeElement({ text: targetText, attrs: testCase.targetOuterAttrs });
-    const targetInner = new FakeElement({ text: targetText, attrs: testCase.targetInnerAttrs });
+    const targetInner = new FakeElement({
+      tag: testCase.targetInnerTag,
+      text: targetText,
+      attrs: testCase.targetInnerAttrs
+    });
     const pastedCard = new FakeElement({
       tag: "button",
       text: cardPreview,
@@ -1424,11 +1432,19 @@ test("Claude and ChatGPT attach expanded pasted content to the owning user turn"
     const hiddenRect = { width: 0, height: 0, top: 0, left: 0, right: 0, bottom: 0 };
     const visibleRect = { width: 620, height: 520, top: 80, left: 620, right: 1240, bottom: 600 };
 
-    targetOuter.children = [targetInner];
-    targetInner.parentElement = targetOuter;
-    targetInner.children = [pastedCard];
-    pastedCard.parentElement = targetInner;
-    pastedCard.children = pastedBadge ? [pastedBadge] : [];
+    if (testCase.cardWrapsUserTurn) {
+      targetOuter.children = [pastedCard];
+      pastedCard.parentElement = targetOuter;
+      pastedCard.children = [targetInner];
+      targetInner.parentElement = pastedCard;
+      targetInner.children = [];
+    } else {
+      targetOuter.children = [targetInner];
+      targetInner.parentElement = targetOuter;
+      targetInner.children = [pastedCard];
+      pastedCard.parentElement = targetInner;
+      pastedCard.children = pastedBadge ? [pastedBadge] : [];
+    }
     if (pastedBadge) pastedBadge.parentElement = pastedCard;
     detailPanel.children = [detailTitle, virtualList, closeDetail];
     [detailTitle, virtualList, closeDetail].forEach((element) => {

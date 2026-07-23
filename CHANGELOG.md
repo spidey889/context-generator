@@ -76,6 +76,8 @@ Keep an entry only when it explains the current architecture, a safety boundary,
 
 ## Durable History
 
+- 2026-07-23: Fixed Claude pasted-card discovery on `coppppy` after live diagnostics confirmed that the role-bearing user `<p>` sits inside the real `button[aria-label^="Pasted Text"]`. Candidate discovery now includes that nearest interactive ancestor and resolves it back to the same user turn; the temporary console diagnostics were removed. The focused fixture pins this parent-button DOM shape while preserving the existing virtual scroll/merge logic and ChatGPT behavior.
+
 - 2026-07-23: Fixed Claude pasted-card opening on `coppppy` by matching the real button's `aria-label` prefix (`Pasted Text`, including labels such as `Pasted Text, pasted, 41 lines`). The existing virtual-panel fixture now removes Claude's generic `PASTED` badge fallback and requires this exact real-page label shape; ChatGPT and all other platforms are unchanged.
 
 - 2026-07-23: Fixed the `coppppy` branch's pasted-content capture for the real virtualized detail panel. The panel-local scraper now scrolls the nearest overflow container from top to bottom, waits for each rendered window to settle, and merges recycled `[data-index]` rows in index order before closing the panel. The existing single Claude/ChatGPT fixture now renders only two of six absolute-positioned rows at a time and requires the complete ordered payload.

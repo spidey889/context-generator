@@ -91,6 +91,7 @@
   const PASTED_CONTENT_TITLE_RE = /^\s*pasted\s+(?:content|text)\s*$/i;
   const PASTED_CONTENT_BADGE_RE = /^\s*pasted\s*$/i;
   const CLAUDE_PASTED_TEXT_BUTTON_LABEL_RE = /^\s*pasted\s+text\b/i;
+  const PASTED_CONTENT_CARD_INTERACTIVE_SELECTOR = "button, [role='button'], [tabindex='0']";
   const PASTED_CONTENT_PANEL_TIMEOUT_MS = 1000;
   const PASTED_CONTENT_VIRTUAL_SETTLE_TIMEOUT_MS = 600;
   const PASTED_CONTENT_VIRTUAL_MAX_SCROLLS = 250;
@@ -1047,12 +1048,6 @@
 
       let panel = findVisiblePastedContentPanel(turn);
       try {
-        console.log("[Context Generator][Pasted content debug] click/open decision", {
-          platform: currentPlatform.id,
-          ariaLabel: cleanText(card.getAttribute?.("aria-label") || ""),
-          attempt: attempts + 1,
-          willAttemptClick: !panel
-        });
         if (!panel) {
           card.click?.();
           panel = await waitForPastedContentPanel(turn);
@@ -1099,11 +1094,19 @@
         isConversationCandidateElement(turn, findPlatformInput())
       ))
       .forEach((turn) => {
-        Array.from(turn.querySelectorAll("*"))
+        const candidates = Array.from(turn.querySelectorAll("*"));
+        // Claude can put the role-bearing <p> inside the labeled paste button.
+        const interactiveAncestor = turn.closest?.(PASTED_CONTENT_CARD_INTERACTIVE_SELECTOR);
+        if (interactiveAncestor) candidates.unshift(interactiveAncestor);
+
+        candidates
           .filter(isPastedContentCardMarker)
           .forEach((marker) => {
-            const interactive = marker.closest?.("button, [role='button'], [tabindex='0']");
-            const card = interactive && turn.contains(interactive) ? interactive : marker;
+            const interactive = marker.closest?.(PASTED_CONTENT_CARD_INTERACTIVE_SELECTOR);
+            const card = interactive && (
+              turn.contains(interactive) ||
+              interactive.contains?.(turn)
+            ) ? interactive : marker;
             if (seenCards.has(card)) return;
             seenCards.add(card);
             results.push({ turn, card });
@@ -1113,19 +1116,10 @@
   }
 
   function isPastedContentCardMarker(element) {
-    if (!(element instanceof Element)) return false;
+    if (!(element instanceof Element) || !isVisible(element) || isContextGeneratorNode(element)) return false;
 
     const ariaLabel = cleanText(element.getAttribute?.("aria-label") || "");
-    const matchesPastedTextAriaLabel = CLAUDE_PASTED_TEXT_BUTTON_LABEL_RE.test(ariaLabel);
-    console.log("[Context Generator][Pasted content debug] candidate check", {
-      platform: currentPlatform.id,
-      element,
-      ariaLabel,
-      matchesPastedTextAriaLabel
-    });
-
-    if (!isVisible(element) || isContextGeneratorNode(element)) return false;
-    if (currentPlatform.id === "claude" && matchesPastedTextAriaLabel) {
+    if (currentPlatform.id === "claude" && CLAUDE_PASTED_TEXT_BUTTON_LABEL_RE.test(ariaLabel)) {
       return true;
     }
 
@@ -1139,7 +1133,7 @@
 
     const text = cleanText(getElementText(element));
     if (PASTED_CONTENT_TITLE_RE.test(text) || PASTED_CONTENT_BADGE_RE.test(text)) return true;
-    if (!element.matches?.("button, [role='button'], [tabindex='0']")) return false;
+    if (!element.matches?.(PASTED_CONTENT_CARD_INTERACTIVE_SELECTOR)) return false;
     return text.split("\n").slice(-3).some((line) => PASTED_CONTENT_BADGE_RE.test(cleanText(line)));
   }
 
