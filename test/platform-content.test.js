@@ -1358,7 +1358,9 @@ test("Claude and ChatGPT attach expanded pasted content to the owning user turn"
       targetInnerAttrs: { "data-message-author-role": "user" },
       precedingAttrs: { "data-testid": "user-message" },
       assistantAttrs: { class: "font-claude-response" },
-      cardAttrs: {}
+      cardAttrs: { "aria-label": "Pasted Text, pasted, 41 lines" },
+      cardPreview: "Collapsed Claude paste preview",
+      hasBadge: false
     },
     {
       hostname: "chatgpt.com",
@@ -1367,7 +1369,9 @@ test("Claude and ChatGPT attach expanded pasted content to the owning user turn"
       targetInnerAttrs: { "data-message-author-role": "user" },
       precedingAttrs: { "data-message-author-role": "user" },
       assistantAttrs: { "data-message-author-role": "assistant" },
-      cardAttrs: { "aria-label": "Pasted content" }
+      cardAttrs: { "aria-label": "Pasted content" },
+      cardPreview: "Collapsed preview\nPASTED",
+      hasBadge: true
     }
   ];
 
@@ -1376,7 +1380,7 @@ test("Claude and ChatGPT attach expanded pasted content to the owning user turn"
       `${testCase.platformName}-PASTE-ROW-${index}-${String(index).repeat(300)}`
     ));
     const fullPayload = virtualRowTexts.join("\n");
-    const cardPreview = "Collapsed preview\nPASTED";
+    const cardPreview = testCase.cardPreview;
     const targetText = `Target user message before the paste.\n${cardPreview}`;
     const precedingUser = new FakeElement({
       text: "Earlier user message that must remain separate.",
@@ -1389,7 +1393,7 @@ test("Claude and ChatGPT attach expanded pasted content to the owning user turn"
       text: cardPreview,
       attrs: testCase.cardAttrs
     });
-    const pastedBadge = new FakeElement({ text: "PASTED" });
+    const pastedBadge = testCase.hasBadge ? new FakeElement({ text: "PASTED" }) : null;
     const detailPanel = new FakeElement({
       attrs: { role: "dialog" },
       text: "Pasted content\n4.64 KB • 41 lines • Formatting may be inconsistent from source"
@@ -1424,8 +1428,8 @@ test("Claude and ChatGPT attach expanded pasted content to the owning user turn"
     targetInner.parentElement = targetOuter;
     targetInner.children = [pastedCard];
     pastedCard.parentElement = targetInner;
-    pastedCard.children = [pastedBadge];
-    pastedBadge.parentElement = pastedCard;
+    pastedCard.children = pastedBadge ? [pastedBadge] : [];
+    if (pastedBadge) pastedBadge.parentElement = pastedCard;
     detailPanel.children = [detailTitle, virtualList, closeDetail];
     [detailTitle, virtualList, closeDetail].forEach((element) => {
       element.parentElement = detailPanel;
@@ -1496,7 +1500,7 @@ test("Claude and ChatGPT attach expanded pasted content to the owning user turn"
     assert.ok(earlierIndex >= 0 && earlierIndex < targetIndex);
     assert.ok(targetIndex < payloadIndex && payloadIndex < assistantIndex);
     assert.equal(transcript.split(fullPayload).length - 1, 1);
-    assert.doesNotMatch(transcript, /Collapsed preview\nPASTED/);
+    assert.equal(transcript.includes(cardPreview), false);
     assert.ok(transcript.length > 1200);
     assert.equal(pastedCard.clicks, 1);
     assert.equal(closeDetail.clicks, 1);

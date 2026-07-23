@@ -76,6 +76,8 @@ Keep an entry only when it explains the current architecture, a safety boundary,
 
 ## Durable History
 
+- 2026-07-23: Fixed Claude pasted-card opening on `coppppy` by matching the real button's `aria-label` prefix (`Pasted Text`, including labels such as `Pasted Text, pasted, 41 lines`). The existing virtual-panel fixture now removes Claude's generic `PASTED` badge fallback and requires this exact real-page label shape; ChatGPT and all other platforms are unchanged.
+
 - 2026-07-23: Fixed the `coppppy` branch's pasted-content capture for the real virtualized detail panel. The panel-local scraper now scrolls the nearest overflow container from top to bottom, waits for each rendered window to settle, and merges recycled `[data-index]` rows in index order before closing the panel. The existing single Claude/ChatGPT fixture now renders only two of six absolute-positioned rows at a time and requires the complete ordered payload.
 
 - 2026-07-23: On the isolated `coppppy` branch, added a second, narrower Claude/ChatGPT pasted-content capture implementation. It recognizes the nested `PASTED` badge as well as labeled controls, associates recovered detail-panel text with a canonical containing user-message boundary instead of one exact inner DOM node, and closes the panel before normal scraping resumes. One deterministic fixture covers both platforms and the prior outer-boundary failure shape; summary routing, local-direct formatting, fallback behavior, and all other platform scrapers remain unchanged.

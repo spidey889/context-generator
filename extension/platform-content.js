@@ -90,6 +90,7 @@
   const COLLAPSED_CONVERSATION_EXPAND_EXCLUDE_RE = /\b(?:continue generating|regenerate|send|submit|stop generating|new chat|settings|menu|voice|microphone)\b/i;
   const PASTED_CONTENT_TITLE_RE = /^\s*pasted\s+(?:content|text)\s*$/i;
   const PASTED_CONTENT_BADGE_RE = /^\s*pasted\s*$/i;
+  const CLAUDE_PASTED_TEXT_BUTTON_LABEL_RE = /^\s*pasted\s+text\b/i;
   const PASTED_CONTENT_PANEL_TIMEOUT_MS = 1000;
   const PASTED_CONTENT_VIRTUAL_SETTLE_TIMEOUT_MS = 600;
   const PASTED_CONTENT_VIRTUAL_MAX_SCROLLS = 250;
@@ -1108,8 +1109,13 @@
   function isPastedContentCardMarker(element) {
     if (!(element instanceof Element) || !isVisible(element) || isContextGeneratorNode(element)) return false;
 
+    const ariaLabel = cleanText(element.getAttribute?.("aria-label") || "");
+    if (currentPlatform.id === "claude" && CLAUDE_PASTED_TEXT_BUTTON_LABEL_RE.test(ariaLabel)) {
+      return true;
+    }
+
     const metadata = cleanText([
-      element.getAttribute?.("aria-label"),
+      ariaLabel,
       element.getAttribute?.("title"),
       element.getAttribute?.("data-testid"),
       element.getAttribute?.("data-test-id")
