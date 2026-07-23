@@ -57,8 +57,8 @@
   const ONBOARDING_BODY_TEXT = "From this button.";
   const CLAUDE_LIMIT_NUDGE_TEXT = "Claude's brilliant. Claude's also broke by message 20. We've got you covered. Tap to continue in another AI with context.";
   const ONBOARDING_SHOW_DELAY_MS = 650;
-  const NO_CONVERSATION_ERROR_TITLE = "Nothing to carry yet";
-  const NO_CONVERSATION_ERROR_MESSAGE = "Chat is empty. Send one message first, then I'll pack the context.";
+  const NO_CONVERSATION_ERROR_TITLE = "Chat is empty";
+  const NO_CONVERSATION_ERROR_MESSAGE = "Send a message first, then try again.";
   const SUMMARY_RETRY_ERROR_TITLE = "Try again";
   const SUMMARY_RETRY_ERROR_MESSAGE = "Try again right now. We might have made a mistake. It almost never happens the second time.";
   // Keep this aligned with api/request-security.js so unsupported captures never leave the extension.
