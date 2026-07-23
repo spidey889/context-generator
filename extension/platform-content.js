@@ -1047,6 +1047,12 @@
 
       let panel = findVisiblePastedContentPanel(turn);
       try {
+        console.log("[Context Generator][Pasted content debug] click/open decision", {
+          platform: currentPlatform.id,
+          ariaLabel: cleanText(card.getAttribute?.("aria-label") || ""),
+          attempt: attempts + 1,
+          willAttemptClick: !panel
+        });
         if (!panel) {
           card.click?.();
           panel = await waitForPastedContentPanel(turn);
@@ -1107,10 +1113,19 @@
   }
 
   function isPastedContentCardMarker(element) {
-    if (!(element instanceof Element) || !isVisible(element) || isContextGeneratorNode(element)) return false;
+    if (!(element instanceof Element)) return false;
 
     const ariaLabel = cleanText(element.getAttribute?.("aria-label") || "");
-    if (currentPlatform.id === "claude" && CLAUDE_PASTED_TEXT_BUTTON_LABEL_RE.test(ariaLabel)) {
+    const matchesPastedTextAriaLabel = CLAUDE_PASTED_TEXT_BUTTON_LABEL_RE.test(ariaLabel);
+    console.log("[Context Generator][Pasted content debug] candidate check", {
+      platform: currentPlatform.id,
+      element,
+      ariaLabel,
+      matchesPastedTextAriaLabel
+    });
+
+    if (!isVisible(element) || isContextGeneratorNode(element)) return false;
+    if (currentPlatform.id === "claude" && matchesPastedTextAriaLabel) {
       return true;
     }
 
