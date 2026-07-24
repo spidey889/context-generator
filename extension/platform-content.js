@@ -4208,6 +4208,28 @@
         animation: none;
       }
 
+      .context-generator-destination-tile::after {
+        content: "→";
+        flex: 0 0 auto;
+        position: relative;
+        z-index: 2;
+        color: rgba(255,255,255,0.34);
+        font-size: 15px;
+        line-height: 1;
+        transform: translate3d(-2px,0,0);
+        transition: color 0.16s ease, transform 0.16s cubic-bezier(0.16,1,0.3,1);
+      }
+
+      .context-generator-destination-tile:hover::after,
+      .context-generator-destination-tile:focus-visible::after {
+        color: rgba(255,255,255,0.82);
+        transform: translate3d(1px,0,0);
+      }
+
+      .context-generator-destination-tile[aria-busy="true"]::after {
+        display: none;
+      }
+
       .context-generator-tile-spinner {
         display: none;
         width: 12px;
