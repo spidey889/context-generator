@@ -1,5 +1,7 @@
 # Changelog
 
+- 2026-07-24: Prepared extension release 1.4.2 with the smoother destination picker and handoff interaction, then regenerated the tracked release archive from the matching extension source.
+
 - 2026-07-23: Renamed the retained merged feature branch from the temporary `coppppy` to the descriptive `pasted-content-fix` so its purpose is immediately clear in future branch lists.
 
 - 2026-07-23: Fixed the final pasted-content attachment gap on `pasted-content-fix`. Claude could successfully read every virtualized panel row but then remount the card/message DOM when the panel closed, leaving the accepted payload tied to a discarded node and absent from the raw transcript. Captured cards now retain a stable accessible-label occurrence, resolve the current live button, and reconcile the payload against the final selected user turns before serialization. Per-transfer state now resets before every capture so repeated transfers and SPA chat changes cannot reuse stale card payloads or attempt counters. The existing focused Claude/ChatGPT fixture reproduces the Claude remount, preserves the full payload in its original conversation position, and covers three consecutive captures. Temporary pasted-content console diagnostics were removed.
