@@ -85,7 +85,6 @@
   const VIRTUAL_SWEEP_CHANGE_POLL_MS = 16;
   const VIRTUAL_SWEEP_SLOW_CHANGE_TIMEOUT_MS = 360;
   const CLAUDE_VIRTUAL_SWEEP_SLOW_CHANGE_TIMEOUT_MS = 1400;
-  const VIRTUAL_SWEEP_DEBUG_LOGGING = true;
   const COLLAPSED_CONVERSATION_EXPAND_RE = /\b(?:show|see|read|view)\s+(?:more|full|all)\b|\bcontinue\s+(?:reading|message|response)\b|\bexpand\b/i;
   const COLLAPSED_CONVERSATION_EXPAND_EXCLUDE_RE = /\b(?:continue generating|regenerate|send|submit|stop generating|new chat|settings|menu|voice|microphone)\b/i;
   const PASTED_CONTENT_TITLE_RE = /^\s*pasted\s+(?:content|text)\s*$/i;
@@ -509,11 +508,9 @@
 
     if (message?.type === "PASTE_CONTEXT") {
       const pasteStartedAt = getNow();
-      logTransferPerf(message.transferId, "destination paste start", { destination: message.destination });
       pasteIntoPlatform(message.text, message.destination, message.transferId)
         .then(() => {
           const pasteMs = Math.round(getNow() - pasteStartedAt);
-          logTransferPerf(message.transferId, "destination paste done", { destination: message.destination, pasteMs });
           sendResponse({ ok: true, timing: { pasteMs } });
         })
         .catch((error) => sendResponse({ ok: false, error: error.message }));
@@ -640,7 +637,6 @@
         transferId: transferTrace.id,
         deferFinalActivation: !requiresFocusedPaste
       });
-      appendBackgroundMarks(transferTrace, pasteResponse?.marks);
       markTransferTrace(transferTrace, "paste done", pasteResponse?.timing || null);
       if (!requiresFocusedPaste) {
         await completeHandoffForDestinationReveal();
@@ -738,8 +734,7 @@
         background: response?.timing || null
       });
       return response;
-    }).catch((error) => {
-      logTransferDebug(`Destination pre-open failed; falling back to normal transfer. ${error.message}`);
+    }).catch(() => {
       return null;
     });
   }
@@ -847,26 +842,8 @@
   function scrollSourceConversationToTop() {
     const chatGptRoot = getChatGptConversationScrollRoot();
     if (chatGptRoot) {
-      console.info("[Cap Context][ChatGPT scroll-to-top] before", {
-        element: chatGptRoot,
-        tagName: chatGptRoot.tagName,
-        id: chatGptRoot.id || "",
-        className: String(chatGptRoot.className || ""),
-        scrollHeight: Number(chatGptRoot.scrollHeight || 0),
-        clientHeight: Number(chatGptRoot.clientHeight || 0),
-        scrollTop: Number(chatGptRoot.scrollTop || 0)
-      });
       scrollElementToTopInstantly(chatGptRoot);
       if (isDocumentScrollRoot(chatGptRoot)) scrollWindowToTopInstantly();
-      console.info("[Cap Context][ChatGPT scroll-to-top] after", {
-        element: chatGptRoot,
-        tagName: chatGptRoot.tagName,
-        id: chatGptRoot.id || "",
-        className: String(chatGptRoot.className || ""),
-        scrollHeight: Number(chatGptRoot.scrollHeight || 0),
-        clientHeight: Number(chatGptRoot.clientHeight || 0),
-        scrollTop: Number(chatGptRoot.scrollTop || 0)
-      });
       return;
     }
 
@@ -1514,7 +1491,6 @@
     }
 
     const structuralTurnElements = getChatGptStructuralTurnElements();
-    logChatGptConversationAncestorChain(structuralTurnElements[0]);
     const authoritativeRoot = findNearestChatGptScrollableAncestor(structuralTurnElements[0]);
     chatGptConversationScrollRootCache = authoritativeRoot;
     return authoritativeRoot;
@@ -1534,26 +1510,6 @@
     if (!(element instanceof Element) || isContextGeneratorNode(element)) return false;
     const overflowY = String(window.getComputedStyle(element).overflowY || "").toLowerCase();
     return overflowY === "auto" || overflowY === "scroll";
-  }
-
-  function logChatGptConversationAncestorChain(turnElement) {
-    if (!(turnElement instanceof Element)) return;
-
-    const ancestors = [];
-    let node = turnElement;
-    while (node instanceof Element) {
-      ancestors.push({
-        tagName: node.tagName,
-        className: String(node.className || ""),
-        scrollHeight: Number(node.scrollHeight || 0),
-        clientHeight: Number(node.clientHeight || 0),
-        overflowY: window.getComputedStyle(node).overflowY
-      });
-      if (node === document.documentElement) break;
-      node = node.parentElement;
-    }
-
-    console.info("[Cap Context][ChatGPT conversation ancestor chain]", ancestors);
   }
 
   function getChatGptStructuralTurnElements() {
@@ -1633,11 +1589,6 @@
     };
     trace.lastAt = now;
     trace.marks.push(mark);
-    logTransferPerf(trace.id, label, {
-      totalMs: mark.totalMs,
-      deltaMs: mark.deltaMs,
-      ...formatTraceDetail(detail)
-    });
   }
 
   function finishTransferTrace(trace, telemetryFailureReason = null) {
@@ -1651,23 +1602,11 @@
       failed ? "failed" : "succeeded",
       failed ? telemetryFailureReason || "unknown_failure" : null
     );
-    const rows = trace.marks.map((mark) => ({
-      step: mark.label,
-      deltaMs: mark.deltaMs,
-      totalMs: mark.totalMs,
-      detail: JSON.stringify(formatTraceDetail(mark.detail))
-    }));
-    console.debug(`[Context Generator Perf ${trace.id}] total ${totalMs}ms`, rows);
   }
 
   function formatTraceDetail(detail) {
     if (!detail || typeof detail !== "object") return {};
     return Object.fromEntries(Object.entries(detail).filter(([, value]) => value !== undefined && value !== null));
-  }
-
-  function logTransferPerf(id, label, detail = null) {
-    const suffix = detail ? ` ${JSON.stringify(formatTraceDetail(detail))}` : "";
-    console.debug(`[Context Generator Perf ${id || "no-trace"}] ${label}${suffix}`);
   }
 
   function startTransferTelemetry(trace) {
@@ -1739,17 +1678,6 @@
     if (stage === "destination") return "destination_open_failed";
     if (stage === "paste") return "paste_failed";
     return "unknown_failure";
-  }
-
-  function appendBackgroundMarks(trace, marks = []) {
-    if (!trace || !Array.isArray(marks)) return;
-    marks.forEach((mark) => {
-      logTransferPerf(trace.id, `background: ${mark.label}`, {
-        totalMs: mark.totalMs,
-        deltaMs: mark.deltaMs,
-        ...(mark.detail || {})
-      });
-    });
   }
 
   function persistLatestTransferStats(trace, totalMs) {
@@ -2013,7 +1941,6 @@
       throw new Error(`${destination.name} message input element could not be found.`);
     }
 
-    logTransferPerf(transferId, "destination input ready", { destination: destination.name });
     setEditorText(input, trimmedText, destination);
 
     if (!editorContainsText(input, trimmedText)) {
@@ -2029,21 +1956,12 @@
     const verifyTimeoutMs = destination.pasteVerifyTimeoutMs || PASTE_VERIFY_TIMEOUT_MS;
     const stabilityMs = destination.pasteStabilityMs || 0;
     let sawInput = false;
-    let loggedInputReady = false;
     let lastError = null;
 
     while (Date.now() - startedAt <= retryTimeoutMs) {
       const input = findReadyPlatformInput(destination);
       if (input) {
         sawInput = true;
-        if (!loggedInputReady) {
-          loggedInputReady = true;
-          logTransferPerf(transferId, "destination input ready", {
-            destination: destination.name,
-            readyMs: Date.now() - startedAt
-          });
-        }
-
         try {
           setEditorText(input, text, destination);
 
@@ -2276,10 +2194,6 @@
     element.dispatchEvent(new Event("change", { bubbles: true }));
   }
 
-  function logTransferDebug(message) {
-    console.debug("[Context Generator Transfer]", message);
-  }
-
   function waitForEditorText(element, text, timeoutMs) {
     const startedAt = Date.now();
 
@@ -2409,11 +2323,6 @@
     let exitReason = "other";
     let useLargerOverlapStep = false;
 
-    logVirtualSweep("start", {
-      initialRenderedTurnCount: initialMetrics.messageTurnCount || 0,
-      ...getVirtualSweepScrollLogState()
-    });
-
     while (true) {
       const expandedCount = await expandCollapsedConversationContent();
       if (expandedCount > 0) {
@@ -2432,19 +2341,14 @@
       let afterRenderedSnapshot = renderedSnapshot;
       let triedBoundaryAdvance = false;
       let pixelMoved = false;
-      let settleMs = 0;
-      const stepNumber = scrolls + 1;
-      const beforeScrollState = getVirtualSweepScrollLogState();
       const stepRatio = getVirtualSweepStepRatio(useLargerOverlapStep);
       const step = Math.round(getSourceViewportHeight() * stepRatio);
 
       pixelMoved = scrollSourceConversationByInstantly(step);
       if (pixelMoved) {
-        const settleStartedAt = Date.now();
         // This minimum stability window is intentional. Signature changes can happen synchronously after a
         // scroll, but the real page still needs time to mount and finish rendering the new virtualized window.
         afterRenderedSnapshot = await waitForConversationWindowToSettle();
-        settleMs += Date.now() - settleStartedAt;
         afterWindowSignature = afterRenderedSnapshot.signature;
       }
 
@@ -2453,39 +2357,22 @@
       if (!pixelMoved && afterWindowSignature === beforeWindowSignature) {
         triedBoundaryAdvance = scrollRenderedConversationBoundaryIntoView(renderedSnapshot.anchor);
         if (triedBoundaryAdvance) {
-          const settleStartedAt = Date.now();
           afterRenderedSnapshot = await waitForConversationWindowToSettle();
-          settleMs += Date.now() - settleStartedAt;
           afterWindowSignature = afterRenderedSnapshot.signature;
         }
       }
 
       if (afterWindowSignature === beforeWindowSignature && !pixelMoved) {
-        const quietStartedAt = Date.now();
         afterRenderedSnapshot = await waitForRenderedConversationWindowChange(
           beforeWindowSignature,
           getVirtualSweepTerminalQuietTimeout()
         );
         afterWindowSignature = afterRenderedSnapshot.signature;
-        settleMs += Date.now() - quietStartedAt;
         if (afterWindowSignature === beforeWindowSignature && !pixelMoved) {
           terminalQuietChecks += 1;
           exitReason = triedBoundaryAdvance ? "quiet-check-passed" : "no-scroll-movement";
           const afterScrollState = getVirtualSweepScrollLogState();
           reportHandoffCaptureProgress(afterScrollState);
-          logVirtualSweep("step", {
-            step: stepNumber,
-            advancement: triedBoundaryAdvance ? "boundary" : "none",
-            pixelMoved,
-            windowChanged: false,
-            addedTurnCount: added,
-            collectedTurnCount: collectedTurns.length,
-            detectedTurnCount: afterRenderedSnapshot.turns.length,
-            staleScrolls,
-            settleMs,
-            beforeScrollTop: beforeScrollState.scrollTop,
-            ...afterScrollState
-          });
           break;
         }
       }
@@ -2513,22 +2400,6 @@
 
       const afterScrollState = getVirtualSweepScrollLogState();
       reportHandoffCaptureProgress(afterScrollState);
-      logVirtualSweep("step", {
-        step: stepNumber,
-        advancement: pixelMoved ? "pixel" : (triedBoundaryAdvance ? "boundary" : "none"),
-        pixelMoved,
-        windowChanged,
-        addedTurnCount: added,
-        collectedTurnCount: collectedTurns.length,
-        detectedTurnCount: afterRenderedSnapshot.turns.length,
-        staleScrolls,
-        settleMs,
-        stepPixels: step,
-        stepRatio,
-        nextStepRatio: getVirtualSweepStepRatio(useLargerOverlapStep),
-        beforeScrollTop: beforeScrollState.scrollTop,
-        ...afterScrollState
-      });
 
       if (exitReason === "stale-limit-hit") break;
     }
@@ -2544,15 +2415,6 @@
       initialRenderedTurnCount: initialMetrics.messageTurnCount || null,
       initialRawCandidateChars: initialMetrics.rawCandidateChars || null
     };
-    logVirtualSweep("exit", {
-      reason: exitReason,
-      scrolls,
-      collectedTurnCount: sweptTurns.length,
-      staleScrolls: totalStaleScrolls,
-      terminalQuietChecks,
-      elapsedMs: sweepMetrics.sweepMs,
-      ...getVirtualSweepScrollLogState()
-    });
     const includeShortExplicitTurns = fitsTinyDirectProfile([...initialMessageTurns, ...sweptTurns]);
     const initialTurns = getComparableConversationTurns(initialMessageTurns, includeShortExplicitTurns);
     const preferredTurns = chooseMoreCompleteConversationTurns(
@@ -2787,15 +2649,6 @@
       clientHeight: Math.round(state.clientHeight),
       scrollRemaining: Math.round(getSourceScrollRemaining())
     };
-  }
-
-  function logVirtualSweep(event, detail = {}) {
-    if (!VIRTUAL_SWEEP_DEBUG_LOGGING || window.__CONTEXT_GENERATOR_TEST_HOOKS__) return;
-    console.info("[Context Generator Sweep]", {
-      event,
-      platform: currentPlatform.id,
-      ...detail
-    });
   }
 
   async function waitForRenderedConversationWindowChange(previousSignature, timeoutMs) {

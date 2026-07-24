@@ -80,6 +80,8 @@ Keep an entry only when it explains the current architecture, a safety boundary,
 
 ## Durable History
 
+- 2026-07-24: Removed production console noise left from capture and transfer diagnostics. ChatGPT ancestor/root inspection, per-step virtual-sweep output, transfer debug messages, and duplicate console performance traces no longer run; genuine failure warnings remain, and the same timing and sweep metadata continues to be stored in Latest Run.
+
 - 2026-07-23: Fixed post-scroll pasted-content extraction on `coppppy`. Virtual `[data-index]` wrappers can scroll correctly while exposing their readable payload only through nested `pre`, `code`, textarea, mono, or content nodes; row capture now selects the longest meaningful descendant text and uses it for settling and indexed merging. Empty virtual output no longer blocks the existing panel fallback. The focused fixture reproduces successful open/scroll with empty wrapper text, captures roughly 1,900 characters, closes the panel, and verifies the payload survives the real transfer scraper into raw conversation text.
 
 - 2026-07-23: Fixed the actual standalone Claude pasted-card shape on `coppppy`. Discovery now queries the page directly for visible `button[aria-label]` controls and runs the `Pasted Text` matcher on those buttons instead of depending on role-selected message paragraphs. If Claude supplies no related user-role boundary, the recovered full payload is inserted as a standalone user turn at the button's document position. The focused fixture reproduces unrelated normal `<p>` candidates plus a separate paste button and verifies match, click, virtual-row merge, close, and transcript ordering.

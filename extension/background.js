@@ -494,10 +494,6 @@ async function summarizeWithBackend(conversation, transferId = null) {
     const cachedResult = createCacheHitSummaryResult(cachedEntry);
     if (cachedResult) {
       recordKnownTransferTelemetryStage(transferId, "summary_response_started");
-      logPerf(transferId, "summary cache hit", {
-        chars: cachedResult.summary.length,
-        cacheAgeMs: cachedResult.timing.cacheAgeMs
-      });
       return cachedResult;
     }
     summaryCache.delete(conversationText);
@@ -505,7 +501,6 @@ async function summarizeWithBackend(conversation, transferId = null) {
 
   const inFlightSummary = summaryInflight.get(conversationText);
   if (inFlightSummary) {
-    logPerf(transferId, "summary inflight join", { chars: conversationText.length });
     return inFlightSummary.then((result) => {
       recordKnownTransferTelemetryStage(transferId, "summary_response_started");
       return result;
@@ -527,7 +522,6 @@ async function summarizeWithBackend(conversation, transferId = null) {
 
 async function fetchSummaryFromBackend(conversationText, transferId = null) {
   const summaryStartedAt = nowMs();
-  logPerf(transferId, "summary backend request start", { chars: conversationText.length, inputChars: conversationText.length });
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), SUMMARY_BACKEND_TIMEOUT_MS);
   const stopServiceWorkerKeepAlive = startSummaryServiceWorkerKeepAlive();
@@ -547,7 +541,6 @@ async function fetchSummaryFromBackend(conversationText, transferId = null) {
     const fetchMs = Math.round(nowMs() - fetchStartedAt);
 
     if (!response.ok) {
-      logPerf(transferId, "summary backend response error", { status: response.status, fetchMs, attempt: 1 });
       throw await createSummaryBackendError(response);
     }
 
@@ -572,7 +565,6 @@ async function fetchSummaryFromBackend(conversationText, transferId = null) {
       backendInputChars: data.timing?.inputChars || null,
       backend: data.timing || null
     };
-    logPerf(transferId, "summary backend response done", timing);
     return { summary, timing };
   } finally {
     clearTimeout(timeout);
@@ -843,10 +835,8 @@ async function prepareDestination(destinationId, transferId = null) {
     throw new Error("Unknown AI destination.");
   }
 
-  logPerf(transferId, "tab open start", { destination: destinationId, active: false });
   const destinationTabId = await createDestinationTab(destination, { active: false });
   const openMs = Math.round(nowMs() - startedAt);
-  logPerf(transferId, "tab open done", { destination: destinationId, tabId: destinationTabId, openMs });
   warmDestinationTab(destinationTabId, destination, transferId);
   return {
     tabId: destinationTabId,
@@ -923,24 +913,13 @@ async function warmDestinationTab(tabId, destination, transferId = null) {
     const timeoutMs = destination.warmupTimeoutMs || DESTINATION_WARMUP_TIMEOUT_MS;
     while (Date.now() - startedAt <= timeoutMs) {
       if (await pingTab(tabId)) {
-        logPerf(transferId, "tab ready", {
-          tabId,
-          destination: destination.name,
-          readyMs: Date.now() - startedAt
-        });
         return;
       }
       if (await ensureContentScript(tabId, destination.contentScript) && await pingTab(tabId)) {
-        logPerf(transferId, "tab ready", {
-          tabId,
-          destination: destination.name,
-          readyMs: Date.now() - startedAt
-        });
         return;
       }
       await delay(MESSAGE_RETRY_INTERVAL_MS);
     }
-    logPerf(transferId, "tab ready timeout", { tabId, destination: destination.name, timeoutMs });
   } catch (error) {
     console.debug("[Context Generator Relay] Destination warmup skipped:", error?.message || error);
   }
@@ -997,7 +976,6 @@ async function sendMessageWhenReady(tabId, message, contentScript, timeoutMs, na
       const response = await sendMessageBeforeDeadline(tabId, message, deadline, name);
       if (response !== undefined) {
         const readyMs = Date.now() - startedAt;
-        logPerf(transferId, "tab ready/message response", { tabId, name, readyMs, attempts });
         markBackgroundTrace(trace, "tab ready/message response", { tabId, readyMs, attempts });
         return response;
       }
@@ -1017,7 +995,6 @@ async function sendMessageWhenReady(tabId, message, contentScript, timeoutMs, na
       const response = await sendMessageBeforeDeadline(tabId, message, deadline, name);
       if (response !== undefined) {
         const readyMs = Date.now() - startedAt;
-        logPerf(transferId, "tab ready/message response after inject", { tabId, name, readyMs, attempts });
         markBackgroundTrace(trace, "tab ready/message response after inject", { tabId, readyMs, attempts });
         return response;
       }
@@ -1117,16 +1094,6 @@ function markBackgroundTrace(trace, label, detail = null) {
   };
   trace.lastAt = at;
   trace.marks.push(mark);
-  logPerf(trace.id, label, {
-    totalMs: mark.totalMs,
-    deltaMs: mark.deltaMs,
-    ...(detail || {})
-  });
-}
-
-function logPerf(transferId, label, detail = null) {
-  const suffix = detail ? ` ${JSON.stringify(detail)}` : "";
-  console.debug(`[Context Generator Perf ${transferId || "no-trace"}] ${label}${suffix}`);
 }
 
 function nowMs() {
