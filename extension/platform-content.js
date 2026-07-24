@@ -47,6 +47,9 @@
   const CLAUDE_SIDE_CONTROL_RIGHT_NUDGE = 52;
   const DESTINATION_SHEET_WIDTH = 296;
   const DESTINATION_SHEET_CLOSED_TRANSFORM = "translate3d(0,8px,0) scale(0.985)";
+  const DESTINATION_SHEET_EXIT_MS = 160;
+  const DESTINATION_TRANSFER_PRESS_MS = 85;
+  const DESTINATION_HANDOFF_OVERLAP_MS = 95;
   const HANDOFF_OVERLAY_CLOSED_TRANSFORM = "translate3d(-50%,-50%,0) translateY(10px) scale(0.985)";
   // Covers the 210-second summary ceiling plus one prepared and one fresh paste attempt.
   const RUNNING_AUTO_RESET_MS = 360000;
@@ -433,6 +436,8 @@
   let reservedClaudeOverflowElements = [];
   let reservedComposerSurface = null;
   let destinationSheetAnimationFrame = null;
+  let destinationSheetHideTimer = null;
+  let destinationBackdropHideTimer = null;
   let floatingButtonFrame = null;
   let floatingButtonObserver = null;
   let grokPlacementResizeObserver = null;
@@ -3329,7 +3334,9 @@
       "justify-content:center",
       "overflow:hidden",
       "contain:layout style paint",
-      "transition:filter 0.15s ease",
+      "transform:translate3d(0,0,0) scale(1)",
+      "transform-origin:center",
+      "transition:filter 0.15s ease,transform 0.12s cubic-bezier(0.16,1,0.3,1)",
       "pointer-events:auto"
     ].join(";");
 
@@ -3349,6 +3356,16 @@
     });
     bubble.addEventListener("mouseleave", () => {
       bubble.style.filter = "none";
+      bubble.style.transform = "translate3d(0,0,0) scale(1)";
+    });
+    bubble.addEventListener("pointerdown", () => {
+      if (!bubble.disabled) bubble.style.transform = "translate3d(0,0,0) scale(0.91)";
+    });
+    bubble.addEventListener("pointerup", () => {
+      bubble.style.transform = "translate3d(0,0,0) scale(1)";
+    });
+    bubble.addEventListener("pointercancel", () => {
+      bubble.style.transform = "translate3d(0,0,0) scale(1)";
     });
     bubble.addEventListener("click", (event) => {
       event.preventDefault();
@@ -4534,6 +4551,10 @@
 
     const sheet = ensureDestinationSheet();
     const backdrop = ensureDestinationSheetBackdrop();
+    clearTimeout(destinationSheetHideTimer);
+    clearTimeout(destinationBackdropHideTimer);
+    destinationSheetHideTimer = null;
+    destinationBackdropHideTimer = null;
     if (destinationSheetAnimationFrame) cancelAnimationFrame(destinationSheetAnimationFrame);
     backdrop.style.display = "block";
     backdrop.style.pointerEvents = "auto";
@@ -4560,9 +4581,14 @@
     });
   }
 
-  function hideDestinationSheet() {
+  function hideDestinationSheet({ immediate = false, preserveBackdrop = false } = {}) {
     const sheet = document.getElementById(DESTINATION_SHEET_ID);
     const backdrop = document.getElementById(DESTINATION_SHEET_BACKDROP_ID);
+    const reducedMotion = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
+    const shouldAnimate = !immediate && !reducedMotion;
+
+    clearTimeout(destinationSheetHideTimer);
+    destinationSheetHideTimer = null;
     if (sheet) {
       if (destinationSheetAnimationFrame) {
         cancelAnimationFrame(destinationSheetAnimationFrame);
@@ -4570,14 +4596,52 @@
       }
       sheet.style.opacity = "0";
       sheet.style.transform = DESTINATION_SHEET_CLOSED_TRANSFORM;
-      sheet.style.display = "none";
       delete sheet.dataset.contextGeneratorPositionLocked;
+      if (shouldAnimate && sheet.style.display === "block") {
+        destinationSheetHideTimer = window.setTimeout(() => {
+          sheet.style.display = "none";
+          destinationSheetHideTimer = null;
+        }, DESTINATION_SHEET_EXIT_MS);
+      } else {
+        sheet.style.display = "none";
+      }
     }
-    if (backdrop) {
-      backdrop.style.opacity = "0";
-      backdrop.style.pointerEvents = "none";
+
+    if (!preserveBackdrop) {
+      releaseDestinationSheetBackdrop({ immediate });
+    }
+  }
+
+  function releaseDestinationSheetBackdrop({ immediate = false } = {}) {
+    const backdrop = document.getElementById(DESTINATION_SHEET_BACKDROP_ID);
+    if (!backdrop) return;
+
+    const reducedMotion = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
+    clearTimeout(destinationBackdropHideTimer);
+    destinationBackdropHideTimer = null;
+    backdrop.style.opacity = "0";
+    backdrop.style.pointerEvents = "none";
+    if (!immediate && !reducedMotion && backdrop.style.display === "block") {
+      destinationBackdropHideTimer = window.setTimeout(() => {
+        backdrop.style.display = "none";
+        destinationBackdropHideTimer = null;
+      }, DESTINATION_SHEET_EXIT_MS);
+    } else {
       backdrop.style.display = "none";
     }
+  }
+
+  async function transitionDestinationSheetToHandoff() {
+    if (window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) {
+      hideDestinationSheet({ immediate: true });
+      return;
+    }
+
+    // Let the pressed tile register, then overlap the sheet exit with the
+    // handoff entrance so the user sees one continuous transition.
+    await delay(DESTINATION_TRANSFER_PRESS_MS);
+    hideDestinationSheet({ preserveBackdrop: true });
+    await delay(DESTINATION_HANDOFF_OVERLAP_MS);
   }
 
   function warmDestinationConnections() {
@@ -4689,7 +4753,6 @@
   }
 
   async function startDestinationTransfer(destinationId) {
-    hideDestinationSheet();
     const trace = createTransferTrace(destinationId, "destination tile");
     trace.destinationId = destinationId;
     startTransferTelemetry(trace);
@@ -4701,6 +4764,8 @@
     if (getDetectedConversationMessageCount() === 0) {
       markTransferTrace(trace, `failed: ${NO_CONVERSATION_ERROR_MESSAGE}`);
       finishTransferTrace(trace, "no_conversation");
+      hideDestinationSheet();
+      await delay(DESTINATION_SHEET_EXIT_MS);
       showErrorOverlay(NO_CONVERSATION_ERROR_MESSAGE);
       return;
     }
@@ -4711,7 +4776,9 @@
     clearRunningResetTimer();
     runningResetTimer = setTimeout(resetRunningFlag, RUNNING_AUTO_RESET_MS);
     try {
+      await transitionDestinationSheetToHandoff();
       showOverlay(destinationId);
+      releaseDestinationSheetBackdrop();
       let preparedDestinationPromise = null;
       if (getDetectedConversationMessageCount() > 0) {
         preparedDestinationPromise = prepareDestinationTab(destinationId, trace);
@@ -4961,6 +5028,10 @@
             from{opacity:0.18;transform:translate3d(0,6px,0)}
             to{opacity:1;transform:translate3d(0,0,0)}
           }
+          @keyframes contextGeneratorHandoffContentIn{
+            from{opacity:0;transform:translate3d(0,7px,0)}
+            to{opacity:1;transform:translate3d(0,0,0)}
+          }
           @keyframes contextGeneratorSummaryDotHop{
             0%,48%,100%{opacity:0.54;transform:translate3d(0,0,0)}
             18%{opacity:1;transform:translate3d(0,-3px,0)}
@@ -4982,6 +5053,15 @@
             line-height:inherit;
             letter-spacing:0;
             pointer-events:none;
+          }
+          #${OVERLAY_ID}.context-generator-handoff-entering #context-generator-overlay-brand{
+            animation:contextGeneratorHandoffContentIn 300ms cubic-bezier(0.16,1,0.3,1) 35ms both;
+          }
+          #${OVERLAY_ID}.context-generator-handoff-entering #context-generator-status-group{
+            animation:contextGeneratorHandoffContentIn 340ms cubic-bezier(0.16,1,0.3,1) 75ms both;
+          }
+          #${OVERLAY_ID}.context-generator-handoff-entering #context-generator-handoff-progress{
+            animation:contextGeneratorHandoffContentIn 380ms cubic-bezier(0.16,1,0.3,1) 115ms both;
           }
           #context-generator-text .context-generator-summary-activity[data-active="true"]{
             display:inline-flex;
@@ -5123,6 +5203,9 @@
           }
           @media (prefers-reduced-motion: reduce){
             #context-generator-text{animation:none!important}
+            #${OVERLAY_ID}.context-generator-handoff-entering #context-generator-overlay-brand,
+            #${OVERLAY_ID}.context-generator-handoff-entering #context-generator-status-group,
+            #${OVERLAY_ID}.context-generator-handoff-entering #context-generator-handoff-progress{animation:none!important}
             #context-generator-text .context-generator-summary-activity-dot{animation:none!important;opacity:0.72}
             #${HANDOFF_REASSURANCE_ID}{transition:none!important}
             #context-generator-handoff-progress .context-generator-handoff-stage-marker::after{animation:none!important}
@@ -5205,13 +5288,21 @@
       overlay.dataset.contextGeneratorDestinationName = destinationName;
       setHandoffProgress("capture", "active", destinationName);
       startHandoffCountdown();
+      overlay.classList.remove("context-generator-handoff-entering");
+      overlay.style.opacity = "0";
+      overlay.style.transform = HANDOFF_OVERLAY_CLOSED_TRANSFORM;
       overlay.style.display = "flex";
-      if (scrim) scrim.style.display = "block";
+      if (scrim) {
+        scrim.style.opacity = "0";
+        scrim.style.display = "block";
+      }
       if (window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) {
         overlay.style.opacity = "1";
         overlay.style.transform = "translate3d(-50%,-50%,0) translateY(0) scale(1)";
         if (scrim) scrim.style.opacity = "1";
       } else {
+        void overlay.offsetWidth;
+        overlay.classList.add("context-generator-handoff-entering");
         requestAnimationFrame(() => {
           overlay.style.opacity = "1";
           overlay.style.transform = "translate3d(-50%,-50%,0) translateY(0) scale(1)";
@@ -5235,6 +5326,7 @@
     stopHandoffCountdown();
     stopHandoffLiveProgress();
     if (overlay) {
+      overlay.classList.remove("context-generator-handoff-entering");
       overlay.style.opacity = "0";
       overlay.style.transform = HANDOFF_OVERLAY_CLOSED_TRANSFORM;
       overlay.style.display = "none";

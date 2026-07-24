@@ -1715,6 +1715,18 @@ test("destination picker blurs and releases the page background", () => {
   assert.match(pickerSource, /backdrop\.style\.display = "none"/);
 });
 
+test("destination choice overlaps the picker exit with the handoff entrance", () => {
+  const transitionStart = PLATFORM_CONTENT_SOURCE.indexOf("async function transitionDestinationSheetToHandoff(");
+  const transitionEnd = PLATFORM_CONTENT_SOURCE.indexOf("function warmDestinationConnections()", transitionStart);
+  const transitionSource = PLATFORM_CONTENT_SOURCE.slice(transitionStart, transitionEnd);
+  const transferStart = PLATFORM_CONTENT_SOURCE.indexOf("async function startDestinationTransfer(");
+  const transferEnd = PLATFORM_CONTENT_SOURCE.indexOf("function ensureFloatingOverlay()", transferStart);
+  const transferSource = PLATFORM_CONTENT_SOURCE.slice(transferStart, transferEnd);
+
+  assert.match(transitionSource, /await delay\(DESTINATION_TRANSFER_PRESS_MS\)[\s\S]*hideDestinationSheet\(\{ preserveBackdrop: true \}\)[\s\S]*await delay\(DESTINATION_HANDOFF_OVERLAP_MS\)/);
+  assert.match(transferSource, /await transitionDestinationSheetToHandoff\(\)[\s\S]*showOverlay\(destinationId\)[\s\S]*releaseDestinationSheetBackdrop\(\)/);
+});
+
 test("transfer safety window covers long quality summaries", () => {
   const source = fs.readFileSync(SOURCE_PATH, "utf8");
 

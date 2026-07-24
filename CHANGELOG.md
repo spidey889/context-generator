@@ -80,6 +80,8 @@ Keep an entry only when it explains the current architecture, a safety boundary,
 
 ## Durable History
 
+- 2026-07-24: Smoothed the full destination-to-handoff interaction without changing transfer logic: the floating button now has press feedback, picker dismissal animates instead of disappearing, a selected card briefly acknowledges the click, picker and handoff backdrops crossfade, and the handoff brand/status/progress enter in a restrained stagger with reduced-motion support.
+
 - 2026-07-24: Added a dedicated destination-picker backdrop that softly blurs and dims the AI page while the compact model sheet is open. The backdrop sits below the sheet, closes with outside click or Escape, respects reduced motion, is removed before transfer UI begins, and does not change picker privacy or destination behavior.
 
 - 2026-07-24: Increased only Gemini's per-profile generation ceilings so long summaries have more visible-output room and profile-scaled reasoning headroom while retaining `MEDIUM` thinking. Small, medium, large, and extra-large Gemini requests now allow 6,500, 9,000, 14,000, and 20,000 total tokens respectively; Mistral and Groq remain on their existing 1,000, 1,900, 4,200, and 7,000 caps.
