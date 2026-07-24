@@ -80,6 +80,8 @@ Keep an entry only when it explains the current architecture, a safety boundary,
 
 ## Durable History
 
+- 2026-07-24: Increased only Gemini's per-profile generation ceilings so long summaries have more visible-output room and profile-scaled reasoning headroom while retaining `MEDIUM` thinking. Small, medium, large, and extra-large Gemini requests now allow 6,500, 9,000, 14,000, and 20,000 total tokens respectively; Mistral and Groq remain on their existing 1,000, 1,900, 4,200, and 7,000 caps.
+
 - 2026-07-24: Tightened summary-header validation so Unicode top or bottom border lines cannot satisfy the Context Carry header requirement without the real `CONTEXT CARRY — READY TO PASTE` title. The canonical Unicode boxed header remains accepted, with regressions covering both the valid box and border-only rejection.
 
 - 2026-07-24: Reworded the summarizer system prompt to reference the required template embedded later in the same prompt instead of implying that providers receive an external `SKILL.md`. Rotated the Mistral prompt-cache key to v5; every other prompt instruction and the provider request shape remain unchanged.

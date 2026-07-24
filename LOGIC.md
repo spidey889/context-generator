@@ -73,12 +73,12 @@ Claude and ChatGPT capture also handles collapsed `Pasted content` cards inside 
 
 Input at or below 1,200 characters uses `local-direct`: the backend calls no provider and produces a compact handoff containing only the Context Carry title, `CONVERSATION SO FAR`, the exact short transcript, and the destination confirmation. Explicit user or assistant turns as short as one character are preserved for this tiny profile, so exchanges such as `hi` plus its reply retain both sides. Generated-summary profiles keep the existing minimum turn-length behavior. The tiny carry does not pad chats with generated-summary sections or backend/template language.
 
-| Profile | Input characters | Target | Output cap |
-| --- | ---: | ---: | ---: |
-| `small` | 1,201-8,000 | about 350 words | 1,000 tokens |
-| `medium` | 8,001-60,000 | about 700 words | 1,900 tokens |
-| `large` | 60,001-210,000 | about 1,200 words | 4,200 tokens |
-| `extra-large` | 210,001-350,000 | about 1,800 words | 7,000 tokens |
+| Profile | Input characters | Target | Mistral/Groq cap | Gemini summary allowance | Gemini reasoning headroom | Gemini total cap |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| `small` | 1,201-8,000 | about 350 words | 1,000 tokens | 1,500 tokens | 5,000 tokens | 6,500 tokens |
+| `medium` | 8,001-60,000 | about 700 words | 1,900 tokens | 3,000 tokens | 6,000 tokens | 9,000 tokens |
+| `large` | 60,001-210,000 | about 1,200 words | 4,200 tokens | 6,000 tokens | 8,000 tokens | 14,000 tokens |
+| `extra-large` | 210,001-350,000 | about 1,800 words | 7,000 tokens | 10,000 tokens | 10,000 tokens | 20,000 tokens |
 
 The large and extra-large profiles' 1,100- and 1,600-word quality floors are diagnostic only. There is no expansion pass.
 
@@ -91,7 +91,7 @@ Each non-tiny transfer creates one backend job. Transient failures and invalid o
 5. Mistral `ministral-3b-2512`
 6. Groq `llama-3.1-8b-instant`, when `GROQ_API_KEY` exists
 
-Both Gemini Flash models use native `generateContent`, `MEDIUM` thinking, default sampling with no deprecated sampling parameters, explicit non-storage, and the profile cap plus a 4,000-token reasoning allowance. Any Gemini 3.6 failure, including a 429 quota or throttle response, advances to Gemini 3.5 before Mistral. `MISTRAL_MODEL` does not override the chain. A provider-wide Mistral 429 skips directly to optional Groq. Per-model budgets are 45, 45, 55, 40, 25, and 15 seconds; provider fetches also have an 80-second abort ceiling. The extension never replays the backend job.
+Both Gemini Flash models use native `generateContent`, `MEDIUM` thinking, default sampling with no deprecated sampling parameters, explicit non-storage, and the Gemini-only per-profile generation budgets shown above. The summary allowance and reasoning headroom are combined into the request's `maxOutputTokens`; Mistral and Groq continue using only their unchanged shared profile caps. Any Gemini 3.6 failure, including a 429 quota or throttle response, advances to Gemini 3.5 before Mistral. `MISTRAL_MODEL` does not override the chain. A provider-wide Mistral 429 skips directly to optional Groq. Per-model budgets are 45, 45, 55, 40, 25, and 15 seconds; provider fetches also have an 80-second abort ceiling. The extension never replays the backend job.
 
 The Vercel function has an explicit 240-second maximum and the extension aborts at 210 seconds. If provider work is still running after 15 seconds, the backend streams JSON-safe whitespace heartbeats every 15 seconds before the final JSON object. The Manifest V3 worker also calls a harmless extension runtime API every 25 seconds while that request is active. This prevents Chromium from suspending a valid long summary job during a silent fetch; after headers are committed, backend failures retain their real status inside the JSON body and the extension converts them back into the existing typed public errors.
 

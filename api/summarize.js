@@ -14,7 +14,6 @@ const SUMMARY_HEARTBEAT_CHUNK = `\n${" ".repeat(2048)}\n`;
 const GEMINI_PRIMARY_MODEL = "gemini-3.6-flash";
 const GEMINI_FALLBACK_MODEL = "gemini-3.5-flash";
 const GEMINI_MODEL_CHAIN = [GEMINI_PRIMARY_MODEL, GEMINI_FALLBACK_MODEL];
-const GEMINI_THINKING_TOKEN_ALLOWANCE = 4000;
 const GEMINI_GENERATE_CONTENT_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/models";
 const MISTRAL_CHAT_COMPLETIONS_URL = "https://api.mistral.ai/v1/chat/completions";
 const GROQ_CHAT_COMPLETIONS_URL = "https://api.groq.com/openai/v1/chat/completions";
@@ -139,6 +138,12 @@ const CONTEXT_CARRY_BOX_HEADER = [
   "╚══════════════════════════════════════════╝"
 ].join("\n");
 const CONTEXT_CARRY_HEADER_PATTERN = /(?:^|\n)\s*(?:#{1,6}\s*)?(?:\*\*)?CONTEXT\s+CARRY\s*(?:—|–|-|--)\s*READY\s+TO\s+PASTE(?:\*\*)?\s*:?\s*/i;
+const GEMINI_PROFILE_GENERATION_BUDGETS = {
+  small: { summaryTokens: 1500, reasoningTokens: 5000 },
+  medium: { summaryTokens: 3000, reasoningTokens: 6000 },
+  large: { summaryTokens: 6000, reasoningTokens: 8000 },
+  "extra-large": { summaryTokens: 10000, reasoningTokens: 10000 }
+};
 const CONTEXT_CARRY_SECTIONS = [
   { title: "WHO I AM", heading: "🧠 WHO I AM" },
   { title: "WHAT WE WERE DOING", heading: "🎯 WHAT WE WERE DOING" },
@@ -380,6 +385,7 @@ module.exports.__test = {
   validateContextCarrySummary,
   getMinimumValidSummaryWords,
   getProviderRequestBudgetMs,
+  getGeminiGenerationBudget,
   stripContextCarryFooter,
   countWords,
   getSummaryProfile,
@@ -674,6 +680,7 @@ function getProviderRequestBody(provider, messages, profile, model) {
   if (provider.id === SUMMARY_PROVIDERS.gemini.id) {
     const systemMessage = messages.find((message) => message.role === "system");
     const userMessage = messages.find((message) => message.role === "user");
+    const generationBudget = getGeminiGenerationBudget(profile);
 
     // Gemini Flash models use default sampling to avoid deprecated parameters
     // while preserving the same trust boundary as chat-completions providers.
@@ -686,9 +693,9 @@ function getProviderRequestBody(provider, messages, profile, model) {
         parts: [{ text: String(userMessage?.content || "") }]
       }],
       generationConfig: {
-        // Gemini counts hidden reasoning against the generation allowance. Keep
-        // the visible profile target intact while reserving room to reach all sections.
-        maxOutputTokens: profile.maxTokens + GEMINI_THINKING_TOKEN_ALLOWANCE,
+        // Gemini counts hidden reasoning against the generation allowance. These
+        // Gemini-only totals leave Mistral and Groq on the shared profile caps.
+        maxOutputTokens: generationBudget.maxOutputTokens,
         thinkingConfig: {
           thinkingLevel: "MEDIUM"
         }
@@ -702,6 +709,18 @@ function getProviderRequestBody(provider, messages, profile, model) {
     temperature: 0.1,
     max_tokens: profile.maxTokens,
     messages
+  };
+}
+
+function getGeminiGenerationBudget(profile) {
+  const configuredBudget = GEMINI_PROFILE_GENERATION_BUDGETS[profile?.id];
+  if (!configuredBudget) {
+    throw new Error(`Missing Gemini generation budget for summary profile: ${profile?.id || "unknown"}`);
+  }
+
+  return {
+    ...configuredBudget,
+    maxOutputTokens: configuredBudget.summaryTokens + configuredBudget.reasoningTokens
   };
 }
 

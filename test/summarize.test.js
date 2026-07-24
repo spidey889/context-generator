@@ -26,6 +26,7 @@ const {
   validateContextCarrySummary,
   getMinimumValidSummaryWords,
   getProviderRequestBudgetMs,
+  getGeminiGenerationBudget,
   stripContextCarryFooter,
   countWords,
   getSummaryProfile,
@@ -78,6 +79,21 @@ test("backend prompt profiles scale summary size to the captured chat", () => {
   assert.match(SUMMARIZE_SOURCE, /OPEN QUESTIONS should include unresolved risks/);
   assert.match(SUMMARIZE_SOURCE, /Do not invent, correct, or infer project facts/);
   assert.match(SUMMARIZE_SOURCE, /untrusted customer transcript data/);
+});
+
+test("Gemini generation budgets scale independently of Mistral and Groq profile caps", () => {
+  const expectedBudgets = [
+    ["x".repeat(4000), 1000, { summaryTokens: 1500, reasoningTokens: 5000, maxOutputTokens: 6500 }],
+    ["x".repeat(20000), 1900, { summaryTokens: 3000, reasoningTokens: 6000, maxOutputTokens: 9000 }],
+    ["x".repeat(90000), 4200, { summaryTokens: 6000, reasoningTokens: 8000, maxOutputTokens: 14000 }],
+    ["x".repeat(350000), 7000, { summaryTokens: 10000, reasoningTokens: 10000, maxOutputTokens: 20000 }]
+  ];
+
+  expectedBudgets.forEach(([conversation, fallbackMaxTokens, expectedGeminiBudget]) => {
+    const profile = getSummaryProfile(conversation);
+    assert.equal(profile.maxTokens, fallbackMaxTokens);
+    assert.deepEqual(getGeminiGenerationBudget(profile), expectedGeminiBudget);
+  });
 });
 
 test("long summaries stream JSON-safe heartbeats and preserve errors after headers are sent", () => {
@@ -994,7 +1010,7 @@ test("backend sends generated summaries to native Gemini first and records Gemin
     assert.equal(capturedRequest.body.model, undefined);
     assert.equal(capturedRequest.body.temperature, undefined);
     assert.equal(capturedRequest.body.store, false);
-    assert.equal(capturedRequest.body.generationConfig.maxOutputTokens, 11000);
+    assert.equal(capturedRequest.body.generationConfig.maxOutputTokens, 20000);
     assert.equal(capturedRequest.body.generationConfig.thinkingConfig.thinkingLevel, "MEDIUM");
     assert.equal(capturedRequest.body.generationConfig.temperature, undefined);
     assert.equal(capturedRequest.body.generationConfig.topP, undefined);
@@ -1126,8 +1142,8 @@ test("backend falls from invalid Gemini output to the preserved Mistral chain", 
     assert.match(requests[0].body.systemInstruction.parts[0].text, /plain-text title/);
     assert.match(requests[1].body.systemInstruction.parts[0].text, /plain-text title/);
     assert.match(requests[2].body.messages[0].content, /boxed header exactly as shown/);
-    assert.equal(requests[0].body.generationConfig.maxOutputTokens, 5000);
-    assert.equal(requests[1].body.generationConfig.maxOutputTokens, 5000);
+    assert.equal(requests[0].body.generationConfig.maxOutputTokens, 6500);
+    assert.equal(requests[1].body.generationConfig.maxOutputTokens, 6500);
     assert.equal(requests[2].body.max_tokens, 1000);
     assert.equal(res.payload.timing.servedBy, "mistral");
     assert.equal(res.payload.timing.primaryModel, "gemini-3.6-flash");
