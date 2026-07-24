@@ -427,6 +427,22 @@ test("validator accepts the exact boxed Unicode header requested from providers"
   assert.match(normalizeContextCarrySummary(boxedSummary), /CONTEXT CARRY — READY TO PASTE/);
 });
 
+test("validator rejects box borders without the Context Carry title", () => {
+  const borderOnlySummary = makeContextCarrySummary("border-only", 90).replace(
+    "CONTEXT CARRY - READY TO PASTE",
+    [
+      "╔══════════════════════════════════════════╗",
+      "╚══════════════════════════════════════════╝"
+    ].join("\n")
+  );
+  const profile = getSummaryProfile("x".repeat(4000));
+
+  assert.deepEqual(
+    validateContextCarrySummary(borderOnlySummary, profile),
+    { ok: false, reason: "missing Context Carry header" }
+  );
+});
+
 test("provider fallback budgets keep the complete chain below the Vercel ceiling", () => {
   const budgets = [
     getProviderRequestBudgetMs("gemini-3.6-flash"),

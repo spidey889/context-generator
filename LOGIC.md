@@ -101,7 +101,7 @@ The system instruction owns the exact seven-section Context Carry contract. The 
 
 The model must search the complete transcript before using `None`. `WHAT WE WERE DOING`, `WHERE WE LEFT OFF`, and `KEY CONTEXT` must remain meaningful and transcript-grounded. `DECISIONS MADE` contains only user-made or clearly user-confirmed decisions, including deferred choices and accepted tradeoffs. The latest user-confirmed state wins conflicts; an older state is retained only when still relevant and labeled as replaced, rejected, changed, or historical.
 
-Generated output is validated locally without another model call. It must contain the Context Carry title, all seven sections exactly once and in order, meaningful continuation-critical sections, a profile-derived minimum body length, and the exact destination confirmation. Obvious refusals and API-error output fail.
+Generated output is validated locally without another model call. It must contain the real `CONTEXT CARRY — READY TO PASTE` title, all seven sections exactly once and in order, meaningful continuation-critical sections, a profile-derived minimum body length, and the exact destination confirmation. Unicode box-border lines alone do not satisfy the title requirement, while the canonical boxed header remains valid. Obvious refusals and API-error output fail.
 
 Normalization may remove fences/footer noise and canonicalize an otherwise valid title, headings, ordered-list prefixes, and confirmation. Gemini's plain title is restored to the boxed title. Normalization never invents sections or wraps free-form output as valid context. Invalid output advances through the provider chain; exhaustion fails without pasting broken output.
 

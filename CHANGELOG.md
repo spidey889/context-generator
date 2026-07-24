@@ -80,6 +80,8 @@ Keep an entry only when it explains the current architecture, a safety boundary,
 
 ## Durable History
 
+- 2026-07-24: Tightened summary-header validation so Unicode top or bottom border lines cannot satisfy the Context Carry header requirement without the real `CONTEXT CARRY — READY TO PASTE` title. The canonical Unicode boxed header remains accepted, with regressions covering both the valid box and border-only rejection.
+
 - 2026-07-24: Reworded the summarizer system prompt to reference the required template embedded later in the same prompt instead of implying that providers receive an external `SKILL.md`. Rotated the Mistral prompt-cache key to v5; every other prompt instruction and the provider request shape remain unchanged.
 
 - 2026-07-24: Removed production console noise left from capture and transfer diagnostics. ChatGPT ancestor/root inspection, per-step virtual-sweep output, transfer debug messages, and duplicate console performance traces no longer run; genuine failure warnings remain, and the same timing and sweep metadata continues to be stored in Latest Run.

@@ -1241,12 +1241,9 @@ function validateContextCarrySummary(text, profile) {
 }
 
 function hasContextCarryHeader(text) {
-  return CONTEXT_CARRY_HEADER_PATTERN.test(text) || text.split(/\r?\n/).some((line) => {
-    return (
-      isContextCarryBoxLine(line) ||
-      /CONTEXT\s+CARRY\s*(?:—|–|-|--)?\s*READY\s+TO\s+PASTE/i.test(line)
-    );
-  });
+  return CONTEXT_CARRY_HEADER_PATTERN.test(text) || text.split(/\r?\n/).some((line) => (
+    /CONTEXT\s+CARRY\s*(?:—|–|-|--)?\s*READY\s+TO\s+PASTE/i.test(line)
+  ));
 }
 
 function isMeaningfulSummaryContent(content) {
