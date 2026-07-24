@@ -96,6 +96,16 @@ test("Gemini generation budgets scale independently of Mistral and Groq profile 
   });
 });
 
+test("Gemini budgets switch at exact profile boundaries", () => {
+  [
+    [8000, 6500], [8001, 9000],
+    [60000, 9000], [60001, 14000],
+    [210000, 14000], [210001, 20000]
+  ].forEach(([inputChars, maxOutputTokens]) => {
+    assert.equal(getGeminiGenerationBudget(getSummaryProfile("x".repeat(inputChars))).maxOutputTokens, maxOutputTokens);
+  });
+});
+
 test("long summaries stream JSON-safe heartbeats and preserve errors after headers are sent", () => {
   const res = createStreamingMockResponse();
   const responseChannel = createLongSummaryResponse(res, {
