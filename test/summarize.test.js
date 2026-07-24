@@ -165,7 +165,7 @@ test("backend forwards a 350k conversation to Mistral and reports the same input
     assert.equal(capturedRequest.url, "https://api.mistral.ai/v1/chat/completions");
     assert.equal(capturedRequest.body.model, "mistral-medium-3-5");
     assert.equal(capturedRequest.body.max_tokens, 7000);
-    assert.match(capturedRequest.body.prompt_cache_key, /^capcontext-summary-v4-extra-large-mistral-medium-3-5$/);
+    assert.match(capturedRequest.body.prompt_cache_key, /^capcontext-summary-v5-extra-large-mistral-medium-3-5$/);
     assert.equal(capturedRequest.body.prediction, undefined);
     const transcriptEnvelope = JSON.parse(capturedRequest.body.messages[1].content);
     assert.deepEqual(transcriptEnvelope, {
@@ -1193,7 +1193,9 @@ test("summary prompt keeps decisions and current state tied to the latest user c
     /DECISIONS MADE must contain only decisions actually made by the user or clearly accepted or confirmed by the user/i
   );
   assert.match(prompt, /choices the user deliberately deferred and tradeoffs the user accepted/i);
-  assert.match(SUMMARIZE_SOURCE, /capcontext-summary-v4/);
+  assert.match(prompt, /Your output must match the required template shown below exactly\./);
+  assert.doesNotMatch(prompt, /Context Generator SKILL\.md template/);
+  assert.match(SUMMARIZE_SOURCE, /capcontext-summary-v5/);
   assert.match(SUMMARIZE_SOURCE, /Do not number it or prefix it with a bullet/);
 });
 
