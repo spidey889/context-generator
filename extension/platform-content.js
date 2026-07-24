@@ -7,6 +7,7 @@
   const ONBOARDING_STYLE_ID = "context-generator-onboarding-styles";
   const CLAUDE_LIMIT_NUDGE_ID = "context-generator-claude-limit-nudge";
   const DESTINATION_SHEET_ID = "context-generator-destination-sheet";
+  const DESTINATION_SHEET_BACKDROP_ID = "context-generator-destination-backdrop";
   const DESTINATION_SHEET_STYLE_ID = "context-generator-destination-sheet-styles";
   const LAST_TRANSFER_STATS_STORAGE_KEY = "context-generator-last-transfer-stats-v1";
   const RAW_TRANSCRIPT_RETENTION_MS = 24 * 60 * 60 * 1000;
@@ -474,6 +475,7 @@
       ONBOARDING_STYLE_ID,
       CLAUDE_LIMIT_NUDGE_ID,
       DESTINATION_SHEET_ID,
+      DESTINATION_SHEET_BACKDROP_ID,
       DESTINATION_SHEET_STYLE_ID,
       "context-generator-styles",
       "context-generator-error-overlay",
@@ -2250,6 +2252,7 @@
       `#${ONBOARDING_STYLE_ID}`,
       `#${CLAUDE_LIMIT_NUDGE_ID}`,
       `#${DESTINATION_SHEET_ID}`,
+      `#${DESTINATION_SHEET_BACKDROP_ID}`,
       "#context-generator-styles",
       "#context-generator-error-overlay",
       "#context-generator-fallback-modal",
@@ -4233,6 +4236,7 @@
   }
 
   function ensureDestinationSheet() {
+    ensureDestinationSheetBackdrop();
     let sheet = document.getElementById(DESTINATION_SHEET_ID);
     if (sheet) return sheet;
 
@@ -4467,6 +4471,36 @@
     return sheet;
   }
 
+  function ensureDestinationSheetBackdrop() {
+    let backdrop = document.getElementById(DESTINATION_SHEET_BACKDROP_ID);
+    if (backdrop) return backdrop;
+
+    backdrop = document.createElement("div");
+    backdrop.id = DESTINATION_SHEET_BACKDROP_ID;
+    backdrop.dataset.contextGeneratorOwned = "true";
+    backdrop.setAttribute("aria-hidden", "true");
+    backdrop.style.cssText = [
+      "display:none",
+      "position:fixed",
+      "z-index:2147483646",
+      "inset:0",
+      "pointer-events:none",
+      "background:rgba(8,7,11,0.20)",
+      "backdrop-filter:blur(6px) saturate(0.9)",
+      "-webkit-backdrop-filter:blur(6px) saturate(0.9)",
+      "opacity:0",
+      "will-change:opacity",
+      "transition:opacity 0.18s cubic-bezier(0.16,1,0.3,1)"
+    ].join(";");
+    backdrop.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      hideDestinationSheet();
+    });
+    document.body.appendChild(backdrop);
+    return backdrop;
+  }
+
   function toggleDestinationSheet() {
     hideOnboardingNudge();
     hideClaudeLimitNudge();
@@ -4477,7 +4511,11 @@
     }
 
     const sheet = ensureDestinationSheet();
+    const backdrop = ensureDestinationSheetBackdrop();
     if (destinationSheetAnimationFrame) cancelAnimationFrame(destinationSheetAnimationFrame);
+    backdrop.style.display = "block";
+    backdrop.style.pointerEvents = "auto";
+    backdrop.style.opacity = "0";
     sheet.style.opacity = "0";
     sheet.style.transform = DESTINATION_SHEET_CLOSED_TRANSFORM;
     sheet.style.display = "block";
@@ -4487,11 +4525,13 @@
     animateDestinationTiles(sheet);
     warmDestinationConnections();
     if (window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) {
+      backdrop.style.opacity = "1";
       sheet.style.opacity = "1";
       sheet.style.transform = "translate3d(0,0,0) scale(1)";
       return;
     }
     destinationSheetAnimationFrame = requestAnimationFrame(() => {
+      backdrop.style.opacity = "1";
       sheet.style.opacity = "1";
       sheet.style.transform = "translate3d(0,0,0) scale(1)";
       destinationSheetAnimationFrame = null;
@@ -4500,6 +4540,7 @@
 
   function hideDestinationSheet() {
     const sheet = document.getElementById(DESTINATION_SHEET_ID);
+    const backdrop = document.getElementById(DESTINATION_SHEET_BACKDROP_ID);
     if (sheet) {
       if (destinationSheetAnimationFrame) {
         cancelAnimationFrame(destinationSheetAnimationFrame);
@@ -4509,6 +4550,11 @@
       sheet.style.transform = DESTINATION_SHEET_CLOSED_TRANSFORM;
       sheet.style.display = "none";
       delete sheet.dataset.contextGeneratorPositionLocked;
+    }
+    if (backdrop) {
+      backdrop.style.opacity = "0";
+      backdrop.style.pointerEvents = "none";
+      backdrop.style.display = "none";
     }
   }
 
@@ -7351,9 +7397,10 @@
       node.id === ONBOARDING_ID ||
       node.id === ONBOARDING_STYLE_ID ||
       node.id === CLAUDE_LIMIT_NUDGE_ID ||
+      node.id === DESTINATION_SHEET_BACKDROP_ID ||
       node.id === "context-generator-styles" ||
       node.dataset.contextGeneratorOwned === "true" ||
-      Boolean(node.closest?.(`#${BUBBLE_ID}, #${OVERLAY_ID}, #${HANDOFF_SCRIM_ID}, #${ONBOARDING_ID}, #${CLAUDE_LIMIT_NUDGE_ID}, #context-generator-styles, #${DESTINATION_SHEET_ID}`))
+      Boolean(node.closest?.(`#${BUBBLE_ID}, #${OVERLAY_ID}, #${HANDOFF_SCRIM_ID}, #${ONBOARDING_ID}, #${CLAUDE_LIMIT_NUDGE_ID}, #context-generator-styles, #${DESTINATION_SHEET_ID}, #${DESTINATION_SHEET_BACKDROP_ID}`))
     );
   }
 

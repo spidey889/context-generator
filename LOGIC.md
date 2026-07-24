@@ -34,6 +34,8 @@ Cap Context source is proprietary and all rights are reserved. Public-facing sur
 
 Cap Context supports Claude, ChatGPT, Gemini, Grok, and DeepSeek. ChatGPT access is limited to `chatgpt.com`, its subdomains, and the legacy `chat.openai.com`; ordinary `openai.com` pages are excluded. The picker lists every supported destination except the source. The toolbar action defaults ChatGPT to Claude and every other source to ChatGPT.
 
+Opening the destination picker places a soft six-pixel blur and neutral dim layer over the page behind it, keeping attention on the model choices without changing the compact sheet itself. Clicking that backdrop, clicking elsewhere, pressing Escape, or starting a transfer removes it together with the picker.
+
 One shared content script handles source and destination behavior. A versioned load id, runtime guards, cached asset URLs, and stale UI/style cleanup make unpacked-extension reloads safe.
 
 The manifest requests only `alarms`, `scripting`, and `storage`. Supported-site host access supplies the matching tab URL visibility needed by `chrome.tabs`; the broader `tabs` permission and temporary `activeTab` grant are intentionally absent. The GitHub analysis bridge retains its narrow static content-script match without a duplicate host permission, and the ChatGPT wildcard covers both `chatgpt.com` and its subdomains.

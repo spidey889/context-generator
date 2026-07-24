@@ -1705,6 +1705,16 @@ test("opening the destination picker does not scrape or summarize", () => {
   assert.doesNotMatch(preconnectSource, /conversation|scrape|summar|fetch\(|sendMessage|notifyBackground/);
 });
 
+test("destination picker blurs and releases the page background", () => {
+  const pickerStart = PLATFORM_CONTENT_SOURCE.indexOf("function ensureDestinationSheetBackdrop()");
+  const pickerEnd = PLATFORM_CONTENT_SOURCE.indexOf("function warmDestinationConnections()", pickerStart);
+  const pickerSource = PLATFORM_CONTENT_SOURCE.slice(pickerStart, pickerEnd);
+
+  assert.match(pickerSource, /backdrop-filter:blur\(6px\)/);
+  assert.match(pickerSource, /backdrop\.style\.display = "block"/);
+  assert.match(pickerSource, /backdrop\.style\.display = "none"/);
+});
+
 test("transfer safety window covers long quality summaries", () => {
   const source = fs.readFileSync(SOURCE_PATH, "utf8");
 
