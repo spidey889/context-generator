@@ -2,7 +2,7 @@
 
 Move an AI conversation to Claude, ChatGPT, Gemini, Grok, or DeepSeek without starting over.
 
-[Install from the Chrome Web Store](https://chromewebstore.google.com/detail/cap-context/lpkaciijlhckkdhbgidbjfkldigghnjf) · [Download the ZIP](cap-context-extension.zip) · [Visit the website](https://context-generator-five.vercel.app/)
+[Install from the Chrome Web Store](https://chromewebstore.google.com/detail/cap-context/lpkaciijlhckkdhbgidbjfkldigghnjf) · [Download the ZIP](cap-context-extension.zip) · [Visit the website](https://context-generator-five.vercel.app/).
 
 ## Install
 
