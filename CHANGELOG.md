@@ -1,5 +1,7 @@
 # Changelog
 
+- 2026-09-06: Repaired the hosted production regression gate after clean GitHub checkouts exposed that the licensing test still required `OLD_README.md`, even though that local archive was deliberately untracked and ignored. The test now covers only tracked public surfaces, matching the repository's intentional file boundary and preventing local-only files from masking CI failures.
+
 - 2026-09-06: Fixed a false live-evaluation failure for exact numeric ranges. Gemini preserved the required `250-750 ms` and `500-1500 ms` values using typographic en dashes, but the gate compared only ASCII hyphens and incorrectly reported both facts missing. Evaluation normalization now treats common Unicode dash variants as equivalent during fact matching, with focused regression coverage; generated summaries are not rewritten.
 
 - 2026-07-24: Prepared extension release 1.4.2 with the smoother destination picker and handoff interaction, then regenerated the tracked release archive from the matching extension source.
