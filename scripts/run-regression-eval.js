@@ -28,6 +28,8 @@ function normalize(value) {
     .toLocaleLowerCase("en-US")
     .replace(/[’‘]/g, "'")
     .replace(/[“”]/g, '"')
+    // Providers often typeset ASCII transcript ranges with typographic dashes.
+    .replace(/[\u2010-\u2015\u2212]/g, "-")
     .replace(/\s+/g, " ")
     .trim();
 }
@@ -142,7 +144,11 @@ async function main() {
   }
 }
 
-main().catch((error) => {
-  console.error(error);
-  process.exitCode = 1;
-});
+if (require.main === module) {
+  main().catch((error) => {
+    console.error(error);
+    process.exitCode = 1;
+  });
+}
+
+module.exports = { containsFact, normalize };
