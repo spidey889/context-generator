@@ -1,5 +1,7 @@
 # Changelog
 
+- 2026-09-06: Polished the restored privacy page without changing its overall direction. Replaced the mismatched mint contact-email button with a clearer violet action and interaction states, made the email safe on narrow screens, increased small navigation targets, and improved text wrapping for headings and dense policy copy.
+
 - 2026-09-06: Added a dedicated, responsive GitHub Pages privacy-policy experience while preserving the current policy wording in `PRIVACY.md`. The new page uses the existing Cap Context visual language, adds clear in-page navigation and print styling, and replaces the homepage's raw Markdown policy links without adding a framework or dependency.
 
 - 2026-09-06: Limited the production regression workflow's `GITHUB_TOKEN` to read-only repository contents. The gate only checks out and tests the code, so it no longer inherits unrelated token permissions from repository settings.

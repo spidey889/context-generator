@@ -126,7 +126,7 @@
       display: inline-flex;
       align-items: center;
       gap: 8px;
-      min-height: 42px;
+      min-height: 44px;
       padding: 0 14px;
       border: 1px solid var(--line-dark);
       border-radius: 11px;
@@ -206,6 +206,7 @@
       font-size: clamp(3.6rem, 8.2vw, 7.4rem);
       line-height: 0.88;
       letter-spacing: -0.075em;
+      text-wrap: balance;
     }
 
     h1 em {
@@ -220,6 +221,7 @@
       color: #bdb9c5;
       font-size: clamp(1.08rem, 1.7vw, 1.28rem);
       line-height: 1.65;
+      text-wrap: pretty;
     }
 
     .commitments {
@@ -290,7 +292,9 @@
     .toc a {
       display: grid;
       grid-template-columns: 30px 1fr;
+      align-items: center;
       gap: 8px;
+      min-height: 44px;
       padding: 10px 0;
       color: #6f6b75;
       font-size: 0.91rem;
@@ -337,6 +341,7 @@
       font-size: clamp(2.25rem, 5vw, 4.5rem);
       line-height: 0.98;
       letter-spacing: -0.055em;
+      text-wrap: balance;
     }
 
     .policy-list {
@@ -356,6 +361,7 @@
       color: #4e4b54;
       font-size: 1rem;
       line-height: 1.72;
+      text-wrap: pretty;
     }
 
     .policy-list li::before {
@@ -412,19 +418,37 @@
       z-index: 1;
       display: inline-flex;
       align-items: center;
+      justify-content: center;
+      gap: 10px;
+      max-width: 100%;
       min-height: 48px;
       padding: 0 18px;
+      border: 1px solid rgba(255, 255, 255, 0.18);
       border-radius: 11px;
-      color: var(--night);
-      background: var(--mint);
+      color: #fff;
+      background: var(--violet-strong);
       font-weight: 780;
+      overflow-wrap: anywhere;
+      text-align: center;
       text-decoration: none;
-      transition: transform 160ms ease, box-shadow 160ms ease;
+      transition: transform 160ms ease, background-color 160ms ease, box-shadow 160ms ease;
+    }
+
+    .contact-card a::after {
+      content: "↗";
+      flex: 0 0 auto;
+      font-size: 1rem;
     }
 
     .contact-card a:hover {
       transform: translateY(-2px);
-      box-shadow: 0 10px 28px rgba(141, 231, 193, 0.2);
+      background: #9b6df8;
+      box-shadow: 0 12px 30px rgba(141, 92, 246, 0.3);
+    }
+
+    .contact-card a:active {
+      transform: translateY(0);
+      box-shadow: 0 5px 16px rgba(141, 92, 246, 0.24);
     }
 
     .site-footer {
@@ -638,7 +662,12 @@
       .contact-card a {
         min-height: 0;
         padding: 0;
+        border: 0;
         background: none;
+      }
+
+      .contact-card a::after {
+        display: none;
       }
     }
   </style>
