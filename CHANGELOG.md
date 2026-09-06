@@ -1,5 +1,7 @@
 # Changelog
 
+- 2026-09-07: Separated the How it works section from the surrounding near-black sections with a muted plum surface, clearer body copy, brighter purple labels, and slightly stronger dividers. The section remains low-glare while regaining a distinct visual chapter.
+
 - 2026-09-07: Reduced homepage reading friction by shortening the hero explanation to one direct sentence and replacing the bright white How it works panel with a softer charcoal reading surface. Added a slow purple shimmer to the hero's emphasized `everything` only; reduced-motion users receive the same word as a static gradient.
 
 - 2026-09-07: Polished homepage interactions while preserving the approved visual direction. Navigation and footer links now have clearer hover feedback and 44-pixel touch targets, buttons acknowledge press input, the smallest mobile header stays uncluttered, external store actions announce their new-tab behavior, and the static handoff cue has explicit illustration semantics. Keyboard focus and reduced-motion support remain intact.

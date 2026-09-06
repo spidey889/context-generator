@@ -24,12 +24,12 @@
       color-scheme: dark;
       --night: #0c0b0f;
       --surface: #151319;
-      --paper: #151319;
-      --ink: #f4f1f7;
+      --paper: #211d27;
+      --ink: #faf7fc;
       --muted: #aaa5b0;
-      --muted-dark: #aaa5b0;
+      --muted-dark: #beb7c3;
       --line: rgba(255, 255, 255, 0.11);
-      --line-dark: rgba(255, 255, 255, 0.1);
+      --line-dark: rgba(255, 255, 255, 0.13);
       --purple: #b998ff;
       --purple-deep: #8c60ec;
       --max: 1120px;
@@ -88,6 +88,7 @@
 
     .section { padding: clamp(80px, 9vw, 112px) 0; }
     .paper { color: var(--ink); border-block: 1px solid var(--line-dark); background: var(--paper); }
+    .paper .kicker, .paper .step-number { color: var(--purple); }
     .section-head { display: grid; grid-template-columns: 0.72fr 1fr; gap: 80px; align-items: end; padding-bottom: 54px; border-bottom: 1px solid var(--line-dark); }
     .kicker { margin: 0 0 18px; color: var(--purple-deep); font-size: 0.68rem; font-weight: 800; letter-spacing: 0.13em; text-transform: uppercase; }
     h2 { margin: 0; font-size: clamp(2.6rem, 5vw, 4.4rem); line-height: 0.98; letter-spacing: -0.055em; }
