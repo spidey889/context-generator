@@ -1,5 +1,7 @@
 # Changelog
 
+- 2026-09-06: Refreshed the production regression workflow from the Node 20-based v4 checkout/setup actions to their current v6 releases while keeping the project's tested runtime on Node 22. This removes GitHub's action-runtime deprecation warnings without changing the regression gate itself.
+
 - 2026-09-06: Strengthened generated-summary fidelity after the medium live regression case still variably dropped explicit continuation facts. When the user marks a fact set for exact retention, the prompt now requires every item to survive, specifically preserving competing options, numeric values and ranges, safety or integrity statements, and implementation state. Rotated the Mistral prompt-cache key to v6 and added deterministic prompt-contract coverage.
 
 - 2026-09-06: Repaired the hosted production regression gate after clean GitHub checkouts exposed that the licensing test still required `OLD_README.md`, even though that local archive was deliberately untracked and ignored. The test now covers only tracked public surfaces, matching the repository's intentional file boundary and preventing local-only files from masking CI failures.
