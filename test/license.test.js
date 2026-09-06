@@ -13,6 +13,7 @@ test("repository and public website declare proprietary source terms", () => {
     read("README.md"),
     read("extension/README.md"),
     read("index.html"),
+    read("privacy.html"),
     read("index.legacy-2026-07-15.html")
   ].join("\n");
 

@@ -1,0 +1,739 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Learn how Cap Context handles conversation data, transfer analytics, local diagnostics, retention, and security.">
+  <meta name="theme-color" content="#09090d">
+  <meta name="color-scheme" content="dark light">
+  <meta property="og:type" content="website">
+  <meta property="og:title" content="Privacy Policy — Cap Context">
+  <meta property="og:description" content="Clear details about how Cap Context handles your data.">
+  <meta property="og:url" content="https://spidey889.github.io/context-generator/privacy.html">
+  <link rel="canonical" href="https://spidey889.github.io/context-generator/privacy.html">
+  <link rel="icon" type="image/png" href="extension/icon48.png">
+  <title>Privacy Policy — Cap Context</title>
+  <style>
+    :root {
+      --night: #09090d;
+      --night-soft: #111117;
+      --paper: #f5f3ed;
+      --paper-deep: #ebe8df;
+      --ink: #17161c;
+      --ink-soft: #64616b;
+      --line: rgba(23, 22, 28, 0.13);
+      --line-dark: rgba(255, 255, 255, 0.11);
+      --violet: #a87cff;
+      --violet-deep: #7442dd;
+      --mint: #8de7c1;
+      --amber: #ffcb6b;
+      --container: 1180px;
+      --sans: "Segoe UI Variable", "Segoe UI", Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+      --serif: Iowan Old Style, Baskerville, "Times New Roman", serif;
+      --mono: "Cascadia Code", "SFMono-Regular", Consolas, monospace;
+    }
+
+    *,
+    *::before,
+    *::after {
+      box-sizing: border-box;
+    }
+
+    html {
+      scroll-behavior: smooth;
+      scroll-padding-top: 110px;
+    }
+
+    body {
+      margin: 0;
+      min-width: 320px;
+      color: #f8f7fb;
+      background: var(--night);
+      font-family: var(--sans);
+      -webkit-font-smoothing: antialiased;
+      text-rendering: optimizeLegibility;
+    }
+
+    ::selection {
+      color: var(--night);
+      background: var(--mint);
+    }
+
+    a {
+      color: inherit;
+    }
+
+    .skip-link {
+      position: fixed;
+      z-index: 1000;
+      top: 12px;
+      left: 12px;
+      padding: 10px 14px;
+      border-radius: 9px;
+      color: var(--night);
+      background: #fff;
+      transform: translateY(-160%);
+      transition: transform 160ms ease;
+    }
+
+    .skip-link:focus {
+      transform: translateY(0);
+    }
+
+    :focus-visible {
+      outline: 2px solid var(--violet);
+      outline-offset: 4px;
+    }
+
+    .container {
+      width: min(var(--container), calc(100% - 40px));
+      margin-inline: auto;
+    }
+
+    .site-header {
+      position: relative;
+      z-index: 10;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      min-height: 82px;
+      border-bottom: 1px solid var(--line-dark);
+    }
+
+    .brand {
+      display: inline-flex;
+      align-items: center;
+      gap: 11px;
+      color: #fff;
+      font-size: 1rem;
+      font-weight: 760;
+      letter-spacing: -0.025em;
+      text-decoration: none;
+    }
+
+    .brand img {
+      width: 36px;
+      height: 36px;
+      filter: drop-shadow(0 8px 18px rgba(168, 124, 255, 0.34));
+    }
+
+    .brand span span {
+      color: #9f9ba8;
+      font-weight: 520;
+    }
+
+    .home-link {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      min-height: 42px;
+      padding: 0 14px;
+      border: 1px solid var(--line-dark);
+      border-radius: 11px;
+      color: #d8d5df;
+      font-size: 0.9rem;
+      font-weight: 680;
+      text-decoration: none;
+      transition: border-color 160ms ease, color 160ms ease, transform 160ms ease;
+    }
+
+    .home-link:hover {
+      color: #fff;
+      border-color: rgba(168, 124, 255, 0.55);
+      transform: translateY(-1px);
+    }
+
+    .hero {
+      position: relative;
+      overflow: hidden;
+      padding: 96px 0 112px;
+    }
+
+    .hero::before {
+      content: "";
+      position: absolute;
+      inset: -260px -180px auto 42%;
+      width: 720px;
+      height: 720px;
+      border-radius: 50%;
+      background: radial-gradient(circle, rgba(116, 66, 221, 0.23), rgba(116, 66, 221, 0) 68%);
+      pointer-events: none;
+    }
+
+    .hero::after {
+      content: "";
+      position: absolute;
+      inset: 0;
+      opacity: 0.24;
+      background-image: radial-gradient(rgba(255, 255, 255, 0.26) 0.7px, transparent 0.7px);
+      background-size: 22px 22px;
+      mask-image: linear-gradient(to right, transparent 4%, #000 45%, transparent 90%);
+      pointer-events: none;
+    }
+
+    .hero-grid {
+      position: relative;
+      z-index: 1;
+      display: grid;
+      grid-template-columns: minmax(0, 1.15fr) minmax(320px, 0.85fr);
+      align-items: end;
+      gap: 80px;
+    }
+
+    .eyebrow {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin: 0 0 22px;
+      color: var(--mint);
+      font-family: var(--mono);
+      font-size: 0.76rem;
+      font-weight: 700;
+      letter-spacing: 0.11em;
+      text-transform: uppercase;
+    }
+
+    .eyebrow::before {
+      content: "";
+      width: 26px;
+      height: 1px;
+      background: currentColor;
+    }
+
+    h1 {
+      max-width: 760px;
+      margin: 0;
+      font-size: clamp(3.6rem, 8.2vw, 7.4rem);
+      line-height: 0.88;
+      letter-spacing: -0.075em;
+    }
+
+    h1 em {
+      color: var(--violet);
+      font-family: var(--serif);
+      font-weight: 500;
+    }
+
+    .hero-intro {
+      max-width: 600px;
+      margin: 32px 0 0;
+      color: #bdb9c5;
+      font-size: clamp(1.08rem, 1.7vw, 1.28rem);
+      line-height: 1.65;
+    }
+
+    .commitments {
+      margin: 0;
+      padding: 0;
+      list-style: none;
+      border-top: 1px solid var(--line-dark);
+    }
+
+    .commitments li {
+      display: grid;
+      grid-template-columns: 46px 1fr;
+      align-items: center;
+      gap: 14px;
+      min-height: 76px;
+      border-bottom: 1px solid var(--line-dark);
+      color: #d7d3de;
+      font-size: 0.98rem;
+      font-weight: 620;
+    }
+
+    .commitments strong {
+      color: var(--violet);
+      font-family: var(--serif);
+      font-size: 1.8rem;
+      font-style: italic;
+      font-weight: 500;
+    }
+
+    .policy-wrap {
+      position: relative;
+      color: var(--ink);
+      background: var(--paper);
+      border-radius: 34px 34px 0 0;
+      box-shadow: 0 -28px 90px rgba(0, 0, 0, 0.24);
+    }
+
+    .policy-layout {
+      display: grid;
+      grid-template-columns: 240px minmax(0, 760px);
+      justify-content: space-between;
+      gap: 90px;
+      padding-top: 100px;
+      padding-bottom: 120px;
+    }
+
+    .toc {
+      position: sticky;
+      top: 36px;
+      align-self: start;
+    }
+
+    .toc-label {
+      margin: 0 0 18px;
+      color: #89848f;
+      font-family: var(--mono);
+      font-size: 0.72rem;
+      font-weight: 700;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+    }
+
+    .toc nav {
+      display: grid;
+      gap: 6px;
+    }
+
+    .toc a {
+      display: grid;
+      grid-template-columns: 30px 1fr;
+      gap: 8px;
+      padding: 10px 0;
+      color: #6f6b75;
+      font-size: 0.91rem;
+      font-weight: 650;
+      line-height: 1.35;
+      text-decoration: none;
+      transition: color 160ms ease, transform 160ms ease;
+    }
+
+    .toc a span {
+      color: #aaa5ae;
+      font-family: var(--mono);
+      font-size: 0.72rem;
+    }
+
+    .toc a:hover {
+      color: var(--violet-deep);
+      transform: translateX(3px);
+    }
+
+    .policy-section {
+      position: relative;
+      padding: 0 0 82px;
+    }
+
+    .policy-section + .policy-section {
+      padding-top: 82px;
+      border-top: 1px solid var(--line);
+    }
+
+    .section-kicker {
+      margin: 0 0 14px;
+      color: var(--violet-deep);
+      font-family: var(--mono);
+      font-size: 0.75rem;
+      font-weight: 760;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+    }
+
+    h2 {
+      max-width: 660px;
+      margin: 0 0 42px;
+      font-size: clamp(2.25rem, 5vw, 4.5rem);
+      line-height: 0.98;
+      letter-spacing: -0.055em;
+    }
+
+    .policy-list {
+      display: grid;
+      gap: 18px;
+      margin: 0;
+      padding: 0;
+      list-style: none;
+    }
+
+    .policy-list li {
+      position: relative;
+      padding: 24px 26px 25px 58px;
+      border: 1px solid var(--line);
+      border-radius: 17px;
+      background: rgba(255, 255, 255, 0.42);
+      color: #4e4b54;
+      font-size: 1rem;
+      line-height: 1.72;
+    }
+
+    .policy-list li::before {
+      content: "";
+      position: absolute;
+      top: 30px;
+      left: 27px;
+      width: 10px;
+      height: 10px;
+      border: 2px solid var(--violet-deep);
+      border-radius: 50%;
+      box-shadow: 0 0 0 5px rgba(116, 66, 221, 0.08);
+    }
+
+    .policy-list strong {
+      color: var(--ink);
+      font-weight: 760;
+    }
+
+    .contact-card {
+      position: relative;
+      overflow: hidden;
+      padding: clamp(28px, 5vw, 48px);
+      border-radius: 24px;
+      color: #fff;
+      background: var(--night-soft);
+      box-shadow: 0 22px 60px rgba(44, 35, 61, 0.16);
+    }
+
+    .contact-card::after {
+      content: "@";
+      position: absolute;
+      right: 24px;
+      bottom: -48px;
+      color: rgba(168, 124, 255, 0.1);
+      font-family: var(--serif);
+      font-size: 12rem;
+      line-height: 1;
+      pointer-events: none;
+    }
+
+    .contact-card p {
+      position: relative;
+      z-index: 1;
+      max-width: 560px;
+      margin: 0 0 28px;
+      color: #bcb8c4;
+      font-size: 1.05rem;
+      line-height: 1.7;
+    }
+
+    .contact-card a {
+      position: relative;
+      z-index: 1;
+      display: inline-flex;
+      align-items: center;
+      min-height: 48px;
+      padding: 0 18px;
+      border-radius: 11px;
+      color: var(--night);
+      background: var(--mint);
+      font-weight: 780;
+      text-decoration: none;
+      transition: transform 160ms ease, box-shadow 160ms ease;
+    }
+
+    .contact-card a:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 10px 28px rgba(141, 231, 193, 0.2);
+    }
+
+    .site-footer {
+      color: #aaa6b2;
+      background: var(--paper);
+    }
+
+    .footer-inner {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 24px;
+      min-height: 110px;
+      border-top: 1px solid var(--line);
+      color: #76717b;
+      font-size: 0.88rem;
+    }
+
+    .footer-inner a {
+      color: var(--ink);
+      font-weight: 700;
+      text-decoration: none;
+    }
+
+    .footer-inner a:hover {
+      color: var(--violet-deep);
+    }
+
+    @media (max-width: 900px) {
+      .hero {
+        padding: 74px 0 90px;
+      }
+
+      .hero-grid {
+        grid-template-columns: 1fr;
+        gap: 54px;
+      }
+
+      .commitments {
+        max-width: 560px;
+      }
+
+      .policy-layout {
+        grid-template-columns: 1fr;
+        gap: 64px;
+        padding-top: 72px;
+      }
+
+      .toc {
+        position: static;
+        padding-bottom: 28px;
+        border-bottom: 1px solid var(--line);
+      }
+
+      .toc nav {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+    }
+
+    @media (max-width: 620px) {
+      .container {
+        width: min(100% - 28px, var(--container));
+      }
+
+      .site-header {
+        min-height: 72px;
+      }
+
+      .brand span span {
+        display: none;
+      }
+
+      .home-link {
+        width: 42px;
+        padding: 0;
+        justify-content: center;
+        font-size: 0;
+      }
+
+      .home-link span {
+        font-size: 1.1rem;
+      }
+
+      .hero {
+        padding: 58px 0 76px;
+      }
+
+      h1 {
+        font-size: clamp(3.5rem, 20vw, 5.4rem);
+      }
+
+      .hero-intro {
+        margin-top: 26px;
+      }
+
+      .policy-wrap {
+        border-radius: 24px 24px 0 0;
+      }
+
+      .policy-layout {
+        padding-top: 54px;
+        padding-bottom: 80px;
+      }
+
+      .toc nav {
+        grid-template-columns: 1fr;
+      }
+
+      .policy-section {
+        padding-bottom: 58px;
+      }
+
+      .policy-section + .policy-section {
+        padding-top: 58px;
+      }
+
+      h2 {
+        margin-bottom: 30px;
+      }
+
+      .policy-list li {
+        padding: 21px 20px 22px 48px;
+      }
+
+      .policy-list li::before {
+        top: 27px;
+        left: 22px;
+      }
+
+      .footer-inner {
+        align-items: flex-start;
+        flex-direction: column;
+        justify-content: center;
+      }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      html {
+        scroll-behavior: auto;
+      }
+
+      *,
+      *::before,
+      *::after {
+        transition-duration: 0.01ms !important;
+      }
+    }
+
+    @media print {
+      body,
+      .policy-wrap,
+      .site-footer {
+        color: #000;
+        background: #fff;
+      }
+
+      .site-header,
+      .hero::before,
+      .hero::after,
+      .toc,
+      .site-footer {
+        display: none;
+      }
+
+      .hero {
+        padding: 36px 0;
+      }
+
+      h1,
+      h1 em,
+      .hero-intro,
+      .eyebrow {
+        color: #000;
+      }
+
+      .hero-grid,
+      .policy-layout {
+        display: block;
+      }
+
+      .commitments {
+        display: none;
+      }
+
+      .policy-layout {
+        padding: 0;
+      }
+
+      .policy-section,
+      .policy-section + .policy-section {
+        padding: 28px 0;
+      }
+
+      .policy-list li {
+        break-inside: avoid;
+        background: #fff;
+      }
+
+      .contact-card {
+        color: #000;
+        background: #fff;
+        border: 1px solid #bbb;
+        box-shadow: none;
+      }
+
+      .contact-card p,
+      .contact-card a {
+        color: #000;
+      }
+
+      .contact-card a {
+        min-height: 0;
+        padding: 0;
+        background: none;
+      }
+    }
+  </style>
+</head>
+<body>
+  <a class="skip-link" href="#policy">Skip to policy</a>
+
+  <header class="site-header container" aria-label="Privacy page header">
+    <a class="brand" href="index.html" aria-label="Cap Context home">
+      <img src="extension/bubble-icon.png" width="36" height="36" alt="">
+      <span>Cap Context <span>/ privacy</span></span>
+    </a>
+    <a class="home-link" href="index.html"><span aria-hidden="true">←</span> Back to home</a>
+  </header>
+
+  <main>
+    <section class="hero" aria-labelledby="page-title">
+      <div class="container hero-grid">
+        <div>
+          <p class="eyebrow">Privacy policy</p>
+          <h1 id="page-title">Privacy,<br><em>without the fog.</em></h1>
+          <p class="hero-intro">This Privacy Policy explains how Cap Context ("we", "our", or "us") handles user data.</p>
+        </div>
+        <ul class="commitments" aria-label="Privacy commitments">
+          <li><strong>01</strong><span>No sale of user data</span></li>
+          <li><strong>02</strong><span>No advertising use</span></li>
+          <li><strong>03</strong><span>No intentional backend storage of chat content</span></li>
+        </ul>
+      </div>
+    </section>
+
+    <div class="policy-wrap" id="policy">
+      <div class="container policy-layout">
+        <aside class="toc" aria-label="Policy contents">
+          <p class="toc-label">On this page</p>
+          <nav>
+            <a href="#collection"><span>01</span> Collection &amp; use</a>
+            <a href="#retention"><span>02</span> Retention &amp; security</a>
+            <a href="#sharing"><span>03</span> Sharing &amp; sale</a>
+            <a href="#contact"><span>04</span> Contact us</a>
+          </nav>
+        </aside>
+
+        <article>
+          <section class="policy-section" id="collection">
+            <p class="section-kicker">Section 01</p>
+            <h2>Information collection and use</h2>
+            <ul class="policy-list">
+              <li><strong>Picker Privacy:</strong> Opening, browsing, closing, or cancelling the destination picker does not capture or upload conversation text. The picker may preconnect to supported AI websites to make a later transfer faster, but those preconnections do not include chat content.</li>
+              <li><strong>Data Transmission:</strong> Cap Context captures and sends the current chat conversation to our backend only after the user selects a destination and starts the real transfer.</li>
+              <li><strong>Processing:</strong> The backend sends the captured conversation to Google Gemini to create the Context Carry summary. If Gemini fails, the backend uses the preserved Mistral model chain and may use Groq as the final fallback summarization provider.</li>
+              <li><strong>Purpose:</strong> Conversation data is used to provide summarization. Metadata-only transfer analytics is used to measure usage and diagnose transfer reliability.</li>
+              <li><strong>Transfer Analytics:</strong> Each transfer attempt sends metadata to our Supabase analytics system: a random extension-install identifier, a random attempt identifier, timestamp, source and destination platform, captured character count when known, success or failure status, the last predefined pipeline stage reached, a predefined non-sensitive failure category, and extension version. The closed stages cover intent, capture, summary request/response/completion, paste, and completion. Telemetry never includes chat text, generated summaries, page URLs, stack traces, arbitrary error messages, or provider response bodies. The random install identifier is created once in local extension storage and is not tied to a Cap Context account, name, email address, or AI account. After an install's first successful summary, one protected internal <code>users</code> row assigns it a sequential number and tracks only its lifetime successful-summary count, current UTC-day successful-summary count, and the UTC date for that daily count. This does not create a user account or identify the person, and the aggregate row contains no per-transfer activity or conversation content.</li>
+              <li><strong>User Cancellation:</strong> If the source AI tab is closed while a transfer is active, telemetry may classify the attempt as <code>user_cancelled</code>. This records only the safe category and last pipeline stage, not what the user was doing or any conversation content.</li>
+            </ul>
+          </section>
+
+          <section class="policy-section" id="retention">
+            <p class="section-kicker">Section 02</p>
+            <h2>Data retention and security</h2>
+            <ul class="policy-list">
+              <li><strong>Temporary Backend Processing:</strong> The backend does not permanently store or intentionally log chat content. Conversation text is processed for the duration of the summary request and returned to the extension. The background worker may keep a recent exact summary in memory for up to two minutes; this disappears with the worker and is not persistent storage. Local extension retention is described below.</li>
+              <li><strong>Local Diagnostics:</strong> The extension stores one latest-run receipt in browser extension storage for the connected analysis page. It contains transfer timing, counts, provider/model/fallback details, token usage, status, and the exact captured transcript sent to the backend, but not the generated summary. The raw transcript and its expiry marker are removed after 24 hours, while the remaining diagnostics stay until the next transfer replaces the receipt. The transcript stays collapsed behind the analysis page's raw-text control until the user opens it.</li>
+              <li><strong>Telemetry Delivery:</strong> Undelivered metadata-only telemetry is kept in local extension storage and retried after the extension starts again. A telemetry outage never blocks or changes the transfer itself.</li>
+              <li><strong>Abuse Protection:</strong> The backend temporarily processes ordinary request metadata, such as an IP address supplied by the hosting platform, to enforce rate limits and protect the public service from automated abuse. This metadata is not used for advertising.</li>
+            </ul>
+          </section>
+
+          <section class="policy-section" id="sharing">
+            <p class="section-kicker">Section 03</p>
+            <h2>Data sharing and sale</h2>
+            <ul class="policy-list">
+              <li><strong>No Sale of Data:</strong> We do not sell user data to third parties.</li>
+              <li><strong>No Advertising:</strong> We do not use user data for advertising purposes.</li>
+            </ul>
+          </section>
+
+          <section class="policy-section" id="contact">
+            <p class="section-kicker">Section 04</p>
+            <h2>Contact us</h2>
+            <div class="contact-card">
+              <p>If you have any questions or feedback regarding this policy, please contact us at:</p>
+              <a href="mailto:spreadzapp@gmail.com">spreadzapp@gmail.com</a>
+            </div>
+          </section>
+        </article>
+      </div>
+    </div>
+  </main>
+
+  <footer class="site-footer">
+    <div class="container footer-inner">
+      <span>© 2026 Cap Context. All rights reserved.</span>
+      <a href="index.html">Return to Cap Context</a>
+    </div>
+  </footer>
+</body>
+</html>

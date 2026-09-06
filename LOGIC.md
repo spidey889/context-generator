@@ -149,6 +149,8 @@ Paste uses platform editor selectors, native setters/events, contenteditable ins
 
 ## Verification Contract
 
+The GitHub Pages site serves the product homepage from `index.html` and the styled policy page from `privacy.html`. `PRIVACY.md` remains the plain-text policy source, and public homepage links direct readers to the HTML policy experience.
+
 - `npm test`: fast deterministic security, privacy, telemetry/outbox, capture, provider, validation, paste, placement, handoff, receipt, and tracked public-surface licensing regressions. Every required test input must exist in a fresh Git checkout; ignored local-only archives are not release-gate dependencies. It also loads the versioned capture fixtures and fails on lost/changed turns or fixture latency regressions.
 - `npm run test:slow`: the isolated real-scale 78-turn Claude capture pacing regression. It stays out of the regular development loop but remains mandatory in the release gate.
 - `npm run test:extension-smoke`: isolated Brave end-to-end check of the unpacked extension against controlled fixtures and a stub backend; it never uses live accounts or production AI APIs.
