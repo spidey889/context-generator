@@ -24,12 +24,12 @@
       color-scheme: dark;
       --night: #0c0b0f;
       --surface: #151319;
-      --paper: #f5f2eb;
-      --ink: #19171d;
+      --paper: #151319;
+      --ink: #f4f1f7;
       --muted: #aaa5b0;
-      --muted-dark: #6d6872;
+      --muted-dark: #aaa5b0;
       --line: rgba(255, 255, 255, 0.11);
-      --line-dark: rgba(25, 23, 29, 0.12);
+      --line-dark: rgba(255, 255, 255, 0.1);
       --purple: #b998ff;
       --purple-deep: #8c60ec;
       --max: 1120px;
@@ -45,7 +45,7 @@
     img { display: block; max-width: 100%; }
     :focus-visible { outline: 2px solid var(--purple); outline-offset: 4px; }
     .container { width: min(var(--max), calc(100% - 48px)); margin-inline: auto; }
-    .skip-link { position: fixed; z-index: 100; top: 12px; left: 12px; min-height: 44px; padding: 10px 14px; border-radius: 8px; color: var(--night); background: var(--paper); transform: translateY(-160%); transition: transform 160ms ease; }
+    .skip-link { position: fixed; z-index: 100; top: 12px; left: 12px; min-height: 44px; padding: 10px 14px; border-radius: 8px; color: var(--night); background: #f5f2eb; transform: translateY(-160%); transition: transform 160ms ease; }
     .skip-link:focus { transform: translateY(0); }
 
     .site-header { position: absolute; z-index: 10; top: 0; left: 0; width: 100%; }
@@ -71,7 +71,7 @@
     h1, h2, h3 { text-wrap: balance; }
     p { text-wrap: pretty; }
     h1 { max-width: 1000px; margin: 0 auto; font-size: clamp(3.8rem, 7.4vw, 6.6rem); font-weight: 650; line-height: 0.96; letter-spacing: -0.06em; }
-    h1 em { color: var(--purple); font-family: var(--serif); font-weight: 500; }
+    h1 em { color: transparent; background: linear-gradient(105deg, #9f70ff 12%, #c2a7ff 36%, #f2ebff 50%, #c2a7ff 64%, #9f70ff 88%); background-size: 220% 100%; background-clip: text; -webkit-background-clip: text; font-family: var(--serif); font-weight: 500; animation: hero-shimmer 5.5s ease-in-out infinite; }
     .hero-copy { max-width: 590px; margin: 30px auto 0; color: #b8b3bd; font-size: clamp(1rem, 2vw, 1.12rem); line-height: 1.7; }
     .hero-actions { display: flex; justify-content: center; gap: 10px; margin-top: 34px; }
     .platforms { display: flex; flex-wrap: wrap; justify-content: center; gap: 10px 20px; margin: 38px 0 0; padding: 0; color: #9a949f; font-size: 0.78rem; font-weight: 650; list-style: none; }
@@ -87,7 +87,7 @@
     .handoff-mark img { width: 31px; height: 31px; }
 
     .section { padding: clamp(80px, 9vw, 112px) 0; }
-    .paper { color: var(--ink); background: var(--paper); }
+    .paper { color: var(--ink); border-block: 1px solid var(--line-dark); background: var(--paper); }
     .section-head { display: grid; grid-template-columns: 0.72fr 1fr; gap: 80px; align-items: end; padding-bottom: 54px; border-bottom: 1px solid var(--line-dark); }
     .kicker { margin: 0 0 18px; color: var(--purple-deep); font-size: 0.68rem; font-weight: 800; letter-spacing: 0.13em; text-transform: uppercase; }
     h2 { margin: 0; font-size: clamp(2.6rem, 5vw, 4.4rem); line-height: 0.98; letter-spacing: -0.055em; }
@@ -112,6 +112,11 @@
     .footer-inner { display: flex; align-items: center; justify-content: space-between; gap: 24px; color: #938d99; font-size: 0.76rem; }
     .footer-links { display: flex; gap: 20px; }
     .footer-links a { display: inline-flex; align-items: center; min-height: 44px; transition: color 160ms ease; }
+
+    @keyframes hero-shimmer {
+      0%, 68%, 100% { background-position: 100% 50%; }
+      34% { background-position: 0 50%; }
+    }
 
     @media (max-width: 760px) {
       .container { width: min(100% - 32px, var(--max)); }
@@ -141,7 +146,7 @@
     }
     @media (prefers-reduced-motion: reduce) {
       html { scroll-behavior: auto; }
-      *, *::before, *::after { scroll-behavior: auto !important; transition-duration: 0.01ms !important; }
+      *, *::before, *::after { scroll-behavior: auto !important; animation: none !important; transition-duration: 0.01ms !important; }
     }
   </style>
 </head>
@@ -163,7 +168,7 @@
       <div class="container hero-inner">
         <p class="eyebrow">Continuity for AI</p>
         <h1>Switch AIs without re-explaining <em>everything.</em></h1>
-        <p class="hero-copy">Cap Context moves the decisions, constraints, open questions, and next step from one AI chat into another.</p>
+        <p class="hero-copy">Move the context that matters into your next AI chat.</p>
         <div class="hero-actions">
           <a class="button button-primary" href="https://chromewebstore.google.com/detail/cap-context/lpkaciijlhckkdhbgidbjfkldigghnjf" target="_blank" rel="noreferrer" aria-label="Add Cap Context to Chrome for free (opens in a new tab)">Add to Chrome — Free ↗</a>
           <a class="button button-quiet" href="#how">See how it works ↓</a>

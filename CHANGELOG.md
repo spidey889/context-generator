@@ -1,5 +1,7 @@
 # Changelog
 
+- 2026-09-07: Reduced homepage reading friction by shortening the hero explanation to one direct sentence and replacing the bright white How it works panel with a softer charcoal reading surface. Added a slow purple shimmer to the hero's emphasized `everything` only; reduced-motion users receive the same word as a static gradient.
+
 - 2026-09-07: Polished homepage interactions while preserving the approved visual direction. Navigation and footer links now have clearer hover feedback and 44-pixel touch targets, buttons acknowledge press input, the smallest mobile header stays uncluttered, external store actions announce their new-tab behavior, and the static handoff cue has explicit illustration semantics. Keyboard focus and reduced-motion support remain intact.
 
 - 2026-09-07: Polished the restored centered homepage without changing its structure or visual direction. Reduced the oversized desktop and mobile headline scales, tightened hero and section spacing, improved supporting-copy and label contrast, simplified button and handoff-card radii, and balanced the control section columns. The page remains self-contained and dependency-free.
