@@ -24,7 +24,7 @@ The merged Claude/ChatGPT pasted-content capture work is retained under the desc
 
 ## Marketing Website
 
-The root `index.html` uses relative assets, has no build step or runtime API dependency, lazy-loads below-fold images, and respects reduced motion. Its public install path is the Chrome Web Store for Chrome and Brave. The interactive handoff console is local illustration only and never captures a conversation or starts a transfer.
+The root `index.html` is a deliberately streamlined, dependency-free marketing page: hero and platform support, the interactive handoff illustration, a short workflow and privacy explanation, a compact FAQ, and one final install action. It uses relative assets, has no build step or runtime API dependency, lazy-loads below-fold images, and respects reduced motion. Repeated proof metrics and a second full install walkthrough are intentionally omitted so the page does not restate claims or calls to action already made elsewhere. Its public install path is the Chrome Web Store for Chrome and Brave. The interactive handoff console is local illustration only and never captures a conversation or starts a transfer.
 
 Marketing claims must match production: Claude, ChatGPT, Gemini, Grok, and DeepSeek support; a 350,000-character conversation limit; no capture or provider processing before destination selection; 24-hour local raw-transcript diagnostics; and no automatic Send action. `index.legacy-2026-07-15.html` is an inactive archive. `cap-context-extension.zip` is a release/developer artifact, must contain the contents of `extension/` with `manifest.json` at its root, and must be regenerated after tracked extension changes.
 
@@ -149,7 +149,7 @@ Paste uses platform editor selectors, native setters/events, contenteditable ins
 
 ## Verification Contract
 
-The GitHub Pages site serves the product homepage from `index.html` and the styled policy page from `privacy.html`. `PRIVACY.md` remains the plain-text policy source, and public homepage links direct readers to the HTML policy experience.
+The GitHub Pages site serves the product homepage from `index.html` and the styled policy page from `privacy.html`. The policy hero uses EB Garamond for its editorial regular/italic display treatment, while the contact-email action stays light purple in every interaction state. `PRIVACY.md` remains the plain-text policy source, and public homepage links direct readers to the HTML policy experience.
 
 - `npm test`: fast deterministic security, privacy, telemetry/outbox, capture, provider, validation, paste, placement, handoff, receipt, and tracked public-surface licensing regressions. Every required test input must exist in a fresh Git checkout; ignored local-only archives are not release-gate dependencies. It also loads the versioned capture fixtures and fails on lost/changed turns or fixture latency regressions.
 - `npm run test:slow`: the isolated real-scale 78-turn Claude capture pacing regression. It stays out of the regular development loop but remains mandatory in the release gate.

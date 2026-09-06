@@ -1,5 +1,7 @@
 # Changelog
 
+- 2026-09-06: Simplified the public homepage by removing the repeated proof strip, the second full installation walkthrough, two redundant FAQ entries, and excess vertical spacing while retaining the interactive demo and core product, workflow, privacy, and install story. Refined the privacy hero with the reference site's EB Garamond regular/italic treatment, and fixed the contact email's undefined color variable so its base, hover, and pressed states consistently stay light purple.
+
 - 2026-09-06: Polished the restored privacy page without changing its overall direction. Replaced the mismatched mint contact-email button with a clearer violet action and interaction states, made the email safe on narrow screens, increased small navigation targets, and improved text wrapping for headings and dense policy copy.
 
 - 2026-09-06: Added a dedicated, responsive GitHub Pages privacy-policy experience while preserving the current policy wording in `PRIVACY.md`. The new page uses the existing Cap Context visual language, adds clear in-page navigation and print styling, and replaces the homepage's raw Markdown policy links without adding a framework or dependency.

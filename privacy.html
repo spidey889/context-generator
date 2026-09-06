@@ -12,6 +12,9 @@
   <meta property="og:url" content="https://spidey889.github.io/context-generator/privacy.html">
   <link rel="canonical" href="https://spidey889.github.io/context-generator/privacy.html">
   <link rel="icon" type="image/png" href="extension/icon48.png">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=EB+Garamond:ital,wght@0,400;1,400&amp;display=swap" rel="stylesheet">
   <title>Privacy Policy — Cap Context</title>
   <style>
     :root {
@@ -29,7 +32,7 @@
       --amber: #ffcb6b;
       --container: 1180px;
       --sans: "Segoe UI Variable", "Segoe UI", Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
-      --serif: Iowan Old Style, Baskerville, "Times New Roman", serif;
+      --serif: "EB Garamond", Iowan Old Style, Baskerville, "Times New Roman", serif;
       --mono: "Cascadia Code", "SFMono-Regular", Consolas, monospace;
     }
 
@@ -203,16 +206,18 @@
     h1 {
       max-width: 760px;
       margin: 0;
+      font-family: var(--serif);
       font-size: clamp(3.6rem, 8.2vw, 7.4rem);
+      font-weight: 400;
       line-height: 0.88;
-      letter-spacing: -0.075em;
+      letter-spacing: -0.055em;
       text-wrap: balance;
     }
 
     h1 em {
       color: var(--violet);
-      font-family: var(--serif);
-      font-weight: 500;
+      font-weight: 400;
+      font-style: italic;
     }
 
     .hero-intro {
@@ -425,8 +430,8 @@
       padding: 0 18px;
       border: 1px solid rgba(255, 255, 255, 0.18);
       border-radius: 11px;
-      color: #fff;
-      background: var(--violet-strong);
+      color: var(--night);
+      background: var(--violet);
       font-weight: 780;
       overflow-wrap: anywhere;
       text-align: center;
@@ -442,13 +447,14 @@
 
     .contact-card a:hover {
       transform: translateY(-2px);
-      background: #9b6df8;
-      box-shadow: 0 12px 30px rgba(141, 92, 246, 0.3);
+      background: var(--violet);
+      box-shadow: 0 12px 30px rgba(168, 124, 255, 0.3);
     }
 
     .contact-card a:active {
       transform: translateY(0);
-      box-shadow: 0 5px 16px rgba(141, 92, 246, 0.24);
+      background: var(--violet);
+      box-shadow: 0 5px 16px rgba(168, 124, 255, 0.24);
     }
 
     .site-footer {
