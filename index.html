@@ -21,6 +21,7 @@
   <title>Cap Context — Switch AIs without re-explaining everything.</title>
   <style>
     :root {
+      color-scheme: dark;
       --night: #0c0b0f;
       --surface: #151319;
       --paper: #f5f2eb;
@@ -40,22 +41,24 @@
     html { scroll-behavior: smooth; scroll-padding-top: 88px; }
     body { margin: 0; min-width: 0; color: #f8f6fb; background: var(--night); font-family: var(--sans); -webkit-font-smoothing: antialiased; text-rendering: optimizeLegibility; }
     ::selection { color: var(--night); background: var(--purple); }
-    a { color: inherit; text-decoration: none; }
+    a { color: inherit; text-decoration: none; touch-action: manipulation; }
     img { display: block; max-width: 100%; }
     :focus-visible { outline: 2px solid var(--purple); outline-offset: 4px; }
     .container { width: min(var(--max), calc(100% - 48px)); margin-inline: auto; }
-    .skip-link { position: fixed; z-index: 100; top: 12px; left: 12px; padding: 10px 14px; border-radius: 8px; color: var(--night); background: var(--paper); transform: translateY(-160%); }
+    .skip-link { position: fixed; z-index: 100; top: 12px; left: 12px; min-height: 44px; padding: 10px 14px; border-radius: 8px; color: var(--night); background: var(--paper); transform: translateY(-160%); transition: transform 160ms ease; }
     .skip-link:focus { transform: translateY(0); }
 
     .site-header { position: absolute; z-index: 10; top: 0; left: 0; width: 100%; }
     .nav { display: flex; align-items: center; justify-content: space-between; min-height: 82px; border-bottom: 1px solid var(--line); }
-    .brand { display: inline-flex; align-items: center; gap: 10px; font-size: 0.95rem; font-weight: 760; letter-spacing: -0.025em; }
+    .brand { display: inline-flex; align-items: center; gap: 10px; min-height: 44px; font-size: 0.95rem; font-weight: 760; letter-spacing: -0.025em; }
     .brand img { width: 32px; height: 32px; }
     .nav-links { display: flex; align-items: center; gap: 26px; color: var(--muted); font-size: 0.82rem; font-weight: 650; }
-    .nav-links a { transition: color 160ms ease; }
-    .nav-links a:hover { color: #fff; }
+    .nav-links a { display: inline-flex; align-items: center; min-height: 44px; transition: color 160ms ease; }
+    .nav-links > a:not(.button), .footer-links a { text-underline-offset: 5px; text-decoration-thickness: 1px; }
+    .nav-links > a:not(.button):hover, .footer-links a:hover { color: #fff; text-decoration: underline; text-decoration-color: rgba(185, 152, 255, 0.72); }
     .button { display: inline-flex; align-items: center; justify-content: center; min-height: 48px; padding: 0 20px; border: 1px solid transparent; border-radius: 8px; font-size: 0.84rem; font-weight: 740; letter-spacing: -0.01em; transition: transform 160ms ease, background 160ms ease; }
     .button:hover { transform: translateY(-1px); }
+    .button:active { transform: translateY(1px); }
     .button-primary { color: var(--night); background: var(--purple); }
     .button-primary:hover { color: var(--night) !important; background: #c6adff; }
     .button-quiet { color: #f6f3f8; border-color: var(--line); background: rgba(255, 255, 255, 0.025); }
@@ -108,14 +111,14 @@
     .site-footer { padding: 28px 0; border-top: 1px solid var(--line); }
     .footer-inner { display: flex; align-items: center; justify-content: space-between; gap: 24px; color: #938d99; font-size: 0.76rem; }
     .footer-links { display: flex; gap: 20px; }
-    .footer-links a:hover { color: #fff; }
+    .footer-links a { display: inline-flex; align-items: center; min-height: 44px; transition: color 160ms ease; }
 
     @media (max-width: 760px) {
       .container { width: min(100% - 32px, var(--max)); }
       .nav { min-height: 72px; }
       .nav-links > a:first-child { display: none; }
       .nav-links { gap: 14px; }
-      .nav-links .button { min-height: 40px; padding: 0 14px; }
+      .nav-links .button { min-height: 44px; padding: 0 14px; }
       .hero { min-height: 0; padding: 144px 0 80px; }
       h1 { font-size: clamp(3rem, 14.5vw, 4.3rem); line-height: 0.98; }
       .hero-copy { margin-top: 26px; }
@@ -131,6 +134,10 @@
       .step:last-child { border-bottom: 0; }
       .step-number { margin-bottom: 28px; }
       .footer-inner { align-items: flex-start; flex-direction: column; }
+      .footer-links { flex-wrap: wrap; row-gap: 0; }
+    }
+    @media (max-width: 360px) {
+      .nav-links > a[href="privacy.html"] { display: none; }
     }
     @media (prefers-reduced-motion: reduce) {
       html { scroll-behavior: auto; }
@@ -146,7 +153,7 @@
       <nav class="nav-links" aria-label="Primary navigation">
         <a href="#how">How it works</a>
         <a href="privacy.html">Privacy</a>
-        <a class="button button-primary" href="https://chromewebstore.google.com/detail/cap-context/lpkaciijlhckkdhbgidbjfkldigghnjf" target="_blank" rel="noreferrer">Add to Chrome ↗</a>
+        <a class="button button-primary" href="https://chromewebstore.google.com/detail/cap-context/lpkaciijlhckkdhbgidbjfkldigghnjf" target="_blank" rel="noreferrer" aria-label="Add Cap Context to Chrome (opens in a new tab)">Add to Chrome ↗</a>
       </nav>
     </div>
   </header>
@@ -158,7 +165,7 @@
         <h1>Switch AIs without re-explaining <em>everything.</em></h1>
         <p class="hero-copy">Cap Context moves the decisions, constraints, open questions, and next step from one AI chat into another.</p>
         <div class="hero-actions">
-          <a class="button button-primary" href="https://chromewebstore.google.com/detail/cap-context/lpkaciijlhckkdhbgidbjfkldigghnjf" target="_blank" rel="noreferrer">Add to Chrome — Free ↗</a>
+          <a class="button button-primary" href="https://chromewebstore.google.com/detail/cap-context/lpkaciijlhckkdhbgidbjfkldigghnjf" target="_blank" rel="noreferrer" aria-label="Add Cap Context to Chrome for free (opens in a new tab)">Add to Chrome — Free ↗</a>
           <a class="button button-quiet" href="#how">See how it works ↓</a>
         </div>
         <ul class="platforms" aria-label="Supported AI platforms">
@@ -168,7 +175,7 @@
           <li><img src="logos/grokwhitedownload__1_-removebg-preview.png" width="18" height="18" alt="">Grok</li>
           <li><img src="logos/deepseek-download__1_-removebg-preview.png" width="18" height="18" alt="">DeepSeek</li>
         </ul>
-        <div class="handoff" aria-label="A Context Carry moving from Claude to ChatGPT">
+        <div class="handoff" role="img" aria-label="A Context Carry moving from Claude to ChatGPT, ready to review">
           <div class="handoff-side"><img src="logos/claude2download__1_-removebg-preview.png" width="28" height="28" alt=""><span><strong>Claude</strong><small>Conversation</small></span></div>
           <span class="handoff-mark" aria-hidden="true"><img src="extension/bubble-icon.png" width="31" height="31" alt=""></span>
           <div class="handoff-side"><img src="logos/gptwhitedownload__1_-removebg-preview.png" width="28" height="28" alt=""><span><strong>ChatGPT</strong><small>Context ready to review</small></span></div>
@@ -197,7 +204,7 @@
           <h2>Context without losing <em>control.</em></h2>
           <p class="control-copy">Browsing destinations captures nothing. A transfer starts only after you choose where to continue, and the final handoff always waits for your review.</p>
           <div class="control-actions">
-            <a class="button button-primary" href="https://chromewebstore.google.com/detail/cap-context/lpkaciijlhckkdhbgidbjfkldigghnjf" target="_blank" rel="noreferrer">Add to Chrome — Free ↗</a>
+            <a class="button button-primary" href="https://chromewebstore.google.com/detail/cap-context/lpkaciijlhckkdhbgidbjfkldigghnjf" target="_blank" rel="noreferrer" aria-label="Add Cap Context to Chrome for free (opens in a new tab)">Add to Chrome — Free ↗</a>
             <a class="button button-quiet" href="privacy.html">Read the privacy policy</a>
           </div>
         </div>
@@ -214,7 +221,7 @@
     <div class="container footer-inner">
       <span>Cap Context · Built by Vinit Rajpurohit · 2026</span>
       <nav class="footer-links" aria-label="Footer links">
-        <a href="https://chromewebstore.google.com/detail/cap-context/lpkaciijlhckkdhbgidbjfkldigghnjf" target="_blank" rel="noreferrer">Chrome Web Store</a>
+        <a href="https://chromewebstore.google.com/detail/cap-context/lpkaciijlhckkdhbgidbjfkldigghnjf" target="_blank" rel="noreferrer" aria-label="Open Cap Context in the Chrome Web Store (opens in a new tab)">Chrome Web Store</a>
         <a href="privacy.html">Privacy</a>
         <a href="LICENSE">License</a>
       </nav>

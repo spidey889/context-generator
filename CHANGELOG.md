@@ -1,5 +1,7 @@
 # Changelog
 
+- 2026-09-07: Polished homepage interactions while preserving the approved visual direction. Navigation and footer links now have clearer hover feedback and 44-pixel touch targets, buttons acknowledge press input, the smallest mobile header stays uncluttered, external store actions announce their new-tab behavior, and the static handoff cue has explicit illustration semantics. Keyboard focus and reduced-motion support remain intact.
+
 - 2026-09-07: Polished the restored centered homepage without changing its structure or visual direction. Reduced the oversized desktop and mobile headline scales, tightened hero and section spacing, improved supporting-copy and label contrast, simplified button and handoff-card radii, and balanced the control section columns. The page remains self-contained and dependency-free.
 
 - 2026-09-06: Rebuilt the public homepage as a 15 KB, three-part static experience with no JavaScript: one focused hero and handoff cue, one concise three-step explanation, and one control/privacy section with the final install action. Removed the interactive demo, menus, FAQ, proof strip, repeated installation walkthrough, reveal system, and ornamental UI that duplicated the core story. Also refined the privacy hero with the reference site's EB Garamond regular/italic treatment and fixed the contact email's undefined color variable so its base, hover, and pressed states consistently stay light purple.
