@@ -1,5 +1,7 @@
 # Changelog
 
+- 2026-09-06: Limited the production regression workflow's `GITHUB_TOKEN` to read-only repository contents. The gate only checks out and tests the code, so it no longer inherits unrelated token permissions from repository settings.
+
 - 2026-09-06: Refreshed the production regression workflow from the Node 20-based v4 checkout/setup actions to their current v6 releases while keeping the project's tested runtime on Node 22. This removes GitHub's action-runtime deprecation warnings without changing the regression gate itself.
 
 - 2026-09-06: Strengthened generated-summary fidelity after the medium live regression case still variably dropped explicit continuation facts. When the user marks a fact set for exact retention, the prompt now requires every item to survive, specifically preserving competing options, numeric values and ranges, safety or integrity statements, and implementation state. Rotated the Mistral prompt-cache key to v6 and added deterministic prompt-contract coverage.
