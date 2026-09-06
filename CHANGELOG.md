@@ -1,5 +1,7 @@
 # Changelog
 
+- 2026-09-07: Polished the restored centered homepage without changing its structure or visual direction. Reduced the oversized desktop and mobile headline scales, tightened hero and section spacing, improved supporting-copy and label contrast, simplified button and handoff-card radii, and balanced the control section columns. The page remains self-contained and dependency-free.
+
 - 2026-09-06: Rebuilt the public homepage as a 15 KB, three-part static experience with no JavaScript: one focused hero and handoff cue, one concise three-step explanation, and one control/privacy section with the final install action. Removed the interactive demo, menus, FAQ, proof strip, repeated installation walkthrough, reveal system, and ornamental UI that duplicated the core story. Also refined the privacy hero with the reference site's EB Garamond regular/italic treatment and fixed the contact email's undefined color variable so its base, hover, and pressed states consistently stay light purple.
 
 - 2026-09-06: Polished the restored privacy page without changing its overall direction. Replaced the mismatched mint contact-email button with a clearer violet action and interaction states, made the email safe on narrow screens, increased small navigation targets, and improved text wrapping for headings and dense policy copy.
