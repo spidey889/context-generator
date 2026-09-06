@@ -1,5 +1,7 @@
 # Changelog
 
+- 2026-09-06: Strengthened generated-summary fidelity after the medium live regression case still variably dropped explicit continuation facts. When the user marks a fact set for exact retention, the prompt now requires every item to survive, specifically preserving competing options, numeric values and ranges, safety or integrity statements, and implementation state. Rotated the Mistral prompt-cache key to v6 and added deterministic prompt-contract coverage.
+
 - 2026-09-06: Repaired the hosted production regression gate after clean GitHub checkouts exposed that the licensing test still required `OLD_README.md`, even though that local archive was deliberately untracked and ignored. The test now covers only tracked public surfaces, matching the repository's intentional file boundary and preventing local-only files from masking CI failures.
 
 - 2026-09-06: Fixed a false live-evaluation failure for exact numeric ranges. Gemini preserved the required `250-750 ms` and `500-1500 ms` values using typographic en dashes, but the gate compared only ASCII hyphens and incorrectly reported both facts missing. Evaluation normalization now treats common Unicode dash variants as equivalent during fact matching, with focused regression coverage; generated summaries are not rewritten.

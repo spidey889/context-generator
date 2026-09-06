@@ -30,7 +30,7 @@ const PROVIDER_REQUEST_BUDGETS_MS = {
   "ministral-3b-2512": 25000,
   [GROQ_FALLBACK_MODEL]: 15000
 };
-const MISTRAL_PROMPT_CACHE_VERSION = "capcontext-summary-v5";
+const MISTRAL_PROMPT_CACHE_VERSION = "capcontext-summary-v6";
 const SUMMARY_PROVIDERS = {
   gemini: {
     id: "gemini",
@@ -791,6 +791,7 @@ ${headerRule}
 - Do not be concise when useful continuation context exists, but do not manufacture detail when the chat itself is short.
 - Make the result feel like a serious handoff to another capable AI, not a thin executive summary.
 - Preserve exact names, files, APIs, model IDs, commands, error text, copy requirements, constraints, and latest working state when they matter.
+- When the user explicitly asks to keep or preserve a set of exact facts, include every fact in that set. Preserve competing options, exact numeric values and ranges, safety or integrity statements, and implementation state without collapsing, generalizing, or silently dropping them.
 - Prioritize what helps the next AI continue without re-asking the user or repeating work.
 - For coding/product chats, include the concrete repo/app/platform, exact files/functions/constants, commands run, errors seen, tests or verification, deployment state, and user constraints.
 - Before writing, search the entire transcript carefully for facts relevant to each section, including facts in earlier turns rather than only the latest exchange.
