@@ -1,5 +1,7 @@
 # Changelog
 
+- 2026-09-06: Redesigned the standalone privacy page as an intentionally separate visual experience instead of extending the main site's dark product theme. The new direction is light, playful, minimalist, and editorial, with a compact human-readable summary, candy-color accents, softer policy typography, and less card-heavy reading flow; the policy meaning and GitHub Pages architecture are unchanged.
+
 - 2026-09-06: Added a dedicated, responsive GitHub Pages privacy-policy experience while preserving the current policy wording in `PRIVACY.md`. The new page uses the existing Cap Context visual language, adds clear in-page navigation and print styling, and replaces the homepage's raw Markdown policy links without adding a framework or dependency.
 
 - 2026-09-06: Limited the production regression workflow's `GITHUB_TOKEN` to read-only repository contents. The gate only checks out and tests the code, so it no longer inherits unrelated token permissions from repository settings.
