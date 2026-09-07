@@ -43,10 +43,10 @@
   const CLAUDE_INLINE_SLOT_WIDTH = BUBBLE_SIZE + 62;
   const CLAUDE_INLINE_BUBBLE_GAP = 46;
   const CLAUDE_INLINE_RIGHT_MARGIN = 4;
-  // At 38px, the non-transparent orb artwork ends about 7px inside the 42px
-  // button box. The fresh composer may use that inset to align the visible orb
-  // with Claude's original rightmost control edge without crossing its border.
-  const CLAUDE_BUBBLE_ARTWORK_RIGHT_INSET = 7;
+  // At 38px, the non-transparent orb artwork begins and ends about 7px inside
+  // the 42px button box. Placement diagnostics use the visible edge so the
+  // gap to Claude's voice controls matches what the user actually sees.
+  const CLAUDE_BUBBLE_ARTWORK_EDGE_INSET = 7;
   const CLAUDE_BUBBLE_ARTWORK_CENTER_Y_OFFSET = -0.5;
   const CLAUDE_PLACEMENT_DEBUG_QUERY = "__cap_context_debug_placement";
   const CLAUDE_MODEL_LEFT_NUDGE = 48;
@@ -6324,11 +6324,7 @@
       const anchorNudge = getClaudeControlTargetOffset(anchorControl, 0);
       const maxLeft = Math.max(
         BUBBLE_GAP,
-        composerRect.width - BUBBLE_SIZE - (
-          isFreshEmptyComposer
-            ? -CLAUDE_BUBBLE_ARTWORK_RIGHT_INSET
-            : CLAUDE_INLINE_RIGHT_MARGIN
-        )
+        composerRect.width - BUBBLE_SIZE - CLAUDE_INLINE_RIGHT_MARGIN
       );
       const preferredLeft = baseAnchorRight + anchorNudge - composerRect.left + CLAUDE_INLINE_BUBBLE_GAP;
       const inlineShift = Math.min(
@@ -6462,7 +6458,6 @@
 
     const bubbleRect = bubble.getBoundingClientRect();
     const anchorRect = placement.anchorControl.element.getBoundingClientRect();
-    const nativeAnchorRight = anchorRect.right - getClaudeCurrentControlOffset(placement.anchorControl);
     const round = (value) => Math.round(value * 100) / 100;
     const diagnostics = {
       route: window.location.pathname,
@@ -6476,7 +6471,7 @@
       anchor: {
         label: placement.anchorControl.label,
         centerY: round(anchorRect.top + anchorRect.height / 2),
-        nativeRight: round(nativeAnchorRight)
+        right: round(anchorRect.right)
       },
       bubble: {
         left: round(bubbleRect.left),
@@ -6490,7 +6485,7 @@
           bubbleRect.top + bubbleRect.height / 2 + CLAUDE_BUBBLE_ARTWORK_CENTER_Y_OFFSET
           - (anchorRect.top + anchorRect.height / 2)
         ),
-        visibleRight: round(bubbleRect.right - CLAUDE_BUBBLE_ARTWORK_RIGHT_INSET - nativeAnchorRight)
+        visibleGapX: round(bubbleRect.left + CLAUDE_BUBBLE_ARTWORK_EDGE_INSET - anchorRect.right)
       }
     };
     const signature = JSON.stringify(diagnostics);

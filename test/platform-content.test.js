@@ -1920,7 +1920,7 @@ test("Claude bubble stays vertically centered in the shallow live composer", () 
   assert.equal(bubbleCenter, controlCenter);
 });
 
-test("Claude fresh page aligns the visible orb artwork with the native row endpoint", () => {
+test("Claude fresh page keeps the visible orb connected to the voice controls", () => {
   const composerRect = { left: 600, right: 1224, top: 367.5, bottom: 461.5, width: 624, height: 94 };
   const input = new FakeElement({
     attrs: { contenteditable: "true", role: "textbox", "aria-label": "Write your prompt to Claude" },
@@ -1934,13 +1934,15 @@ test("Claude fresh page aligns the visible orb artwork with the native row endpo
   const hooks = loadPlatformContent([input, voiceMode], "claude.ai", { pathname: "/new" });
   const placement = hooks.getClaudeBubblePlacement(composerRect, input);
   const bubbleRect = localPlacementToPageRect(placement, composerRect);
-  const visibleArtworkRight = bubbleRect.right - 7;
+  const shiftedAnchorRight = voiceMode.rect.right
+    + hooks.getClaudeControlTargetOffset(placement.anchorControl, placement.inlineShift);
+  const visibleArtworkGap = bubbleRect.left + 7 - shiftedAnchorRight;
   const visibleArtworkCenterY = bubbleRect.top + 42 / 2 - 0.5;
   const controlCenterY = voiceMode.rect.top + voiceMode.rect.height / 2;
 
-  assert.equal(placement.left, 589);
+  assert.equal(placement.left, 578);
   assert.equal(placement.top, 57.5);
-  assert.equal(visibleArtworkRight, voiceMode.rect.right);
+  assert.equal(visibleArtworkGap, 13);
   assert.equal(visibleArtworkCenterY, controlCenterY);
 });
 

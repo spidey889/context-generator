@@ -22,6 +22,7 @@ const SUMMARY_TEXT = [
 ].join("\n");
 const SMOKE_PLATFORM_QUERY = "__cap_context_smoke_platform";
 const SMOKE_TIMEOUT_MS = Number(process.env.CAP_CONTEXT_SMOKE_TIMEOUT_MS || 45000);
+const CLAUDE_PLACEMENT_SCREENSHOT_PATH = process.env.CAP_CONTEXT_CLAUDE_PLACEMENT_SCREENSHOT || "";
 
 class CdpSession {
   constructor(socket) {
@@ -492,7 +493,13 @@ async function run() {
     process.stdout.write(`ℹ Claude page-load geometry ${JSON.stringify(claudePlacementDiagnostics)}\n`);
     assert.equal(claudePlacementDiagnostics.state, "fresh-empty");
     assert.equal(claudePlacementDiagnostics.deltas.visibleCenterY, 0);
-    assert.equal(claudePlacementDiagnostics.deltas.visibleRight, 0);
+    assert.equal(claudePlacementDiagnostics.deltas.visibleGapX, 13);
+    if (CLAUDE_PLACEMENT_SCREENSHOT_PATH) {
+      const screenshot = await claudePlacementSession.call("Page.captureScreenshot", { format: "png" });
+      await fs.promises.mkdir(path.dirname(CLAUDE_PLACEMENT_SCREENSHOT_PATH), { recursive: true });
+      await fs.promises.writeFile(CLAUDE_PLACEMENT_SCREENSHOT_PATH, Buffer.from(screenshot.data, "base64"));
+      process.stdout.write(`ℹ Claude placement screenshot ${CLAUDE_PLACEMENT_SCREENSHOT_PATH}\n`);
+    }
     const claudeEmptyAlignment = await claudePlacementSession.evaluate(`(() => {
       const bubble = document.getElementById("context-generator-bubble").getBoundingClientRect();
       const voice = document.getElementById("voice").getBoundingClientRect();
