@@ -55,7 +55,7 @@
   const RUNNING_AUTO_RESET_MS = 360000;
   const DEFAULT_MAX_COMPOSER_WIDTH = 1320;
   const DESTINATION_TITLE_TEXT = "Where to continue?";
-  const DESTINATION_HELPER_TEXT = "Pasted into the input — you press Send";
+  const DESTINATION_HELPER_TEXT = "Context goes straight into the input box";
   const ONBOARDING_STORAGE_KEY = "context-generator-onboarding-dismissed-v2";
   const ONBOARDING_TITLE_TEXT = "Transfer chat context";
   const ONBOARDING_BODY_TEXT = "From this button.";
@@ -4259,21 +4259,6 @@
         outline-offset: 2px;
       }
 
-      .context-generator-destination-about:focus-visible {
-        outline: 2px solid rgba(190,162,233,0.72) !important;
-        outline-offset: 2px;
-      }
-
-      .context-generator-destination-helper::before {
-        content: "";
-        width: 6px;
-        height: 6px;
-        flex: 0 0 auto;
-        border-radius: 999px;
-        background: #9d7ad7;
-        box-shadow: 0 0 0 3px rgba(157,122,215,0.1), 0 0 12px rgba(157,122,215,0.38);
-      }
-
       @media (max-width: 390px) {
         .context-generator-destination-grid {
           grid-template-columns: 1fr !important;
@@ -4356,7 +4341,7 @@
     const header = document.createElement("div");
     header.style.cssText = "padding:0 1px 11px;display:flex;flex-direction:column;align-items:flex-start;gap:0";
     const topLine = document.createElement("div");
-    topLine.style.cssText = "width:100%;display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:11px";
+    topLine.style.cssText = "width:100%;display:flex;align-items:center;justify-content:flex-start;gap:10px;margin-bottom:11px";
     const brandLockup = document.createElement("div");
     brandLockup.style.cssText = "display:flex;align-items:center;gap:8px;color:rgba(247,244,250,0.76);font-size:11.5px;font-weight:650;line-height:1";
     const brandIcon = document.createElement("img");
@@ -4373,52 +4358,8 @@
     title.id = "context-generator-destination-title";
     title.className = "context-generator-destination-title";
     title.textContent = DESTINATION_TITLE_TEXT;
-    title.style.cssText = "font-family:Georgia,'Times New Roman',serif;font-size:14px;font-weight:500;letter-spacing:0;color:#ffffff;line-height:1.02;text-rendering:geometricPrecision";
-    const badge = document.createElement("button");
-    badge.type = "button";
-    badge.className = "context-generator-destination-about";
-    badge.textContent = "About ↗";
-    badge.setAttribute("aria-label", "Open Cap-Context site");
-    badge.style.cssText = [
-      "height:26px",
-      "padding:0 10px",
-      "border-radius:999px",
-      "border:1px solid transparent",
-      "background:rgba(255,255,255,0.045)",
-      "box-shadow:none",
-      "color:rgba(255,255,255,0.68)",
-      "font-size:10.5px",
-      "font-weight:600",
-      "line-height:26px",
-      "letter-spacing:0",
-      "font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif",
-      "cursor:pointer",
-      "outline:0",
-      "transition:border-color 0.14s ease, background 0.14s ease, box-shadow 0.14s ease, color 0.14s ease"
-    ].join(";");
-    const setBadgeActive = () => {
-      badge.style.borderColor = "rgba(255,255,255,0.24)";
-      badge.style.background = "rgba(255,255,255,0.052)";
-      badge.style.boxShadow = "0 0 0 1px rgba(0,0,0,0.28), 0 0 12px rgba(255,255,255,0.11), inset 0 1px 0 rgba(255,255,255,0.16)";
-      badge.style.color = "rgba(255,255,255,0.74)";
-    };
-    const setBadgeIdle = () => {
-      badge.style.borderColor = "transparent";
-      badge.style.background = "rgba(255,255,255,0.035)";
-      badge.style.boxShadow = "none";
-      badge.style.color = "rgba(255,255,255,0.68)";
-    };
-    badge.addEventListener("mouseenter", setBadgeActive);
-    badge.addEventListener("mouseleave", setBadgeIdle);
-    badge.addEventListener("focus", setBadgeActive);
-    badge.addEventListener("blur", setBadgeIdle);
-    badge.addEventListener("click", (event) => {
-      event.preventDefault();
-      event.stopPropagation();
-      window.location.assign(CAP_CONTEXT_SITE_URL);
-    });
+    title.style.cssText = "font-family:Georgia,'Times New Roman',serif;font-size:18px;font-weight:500;letter-spacing:-0.015em;color:#ffffff;line-height:1.05;text-rendering:geometricPrecision";
     topLine.appendChild(brandLockup);
-    topLine.appendChild(badge);
     header.appendChild(topLine);
     header.appendChild(title);
     sheet.appendChild(header);
@@ -4556,7 +4497,7 @@
       "display:flex",
       "align-items:center",
       "justify-content:flex-start",
-      "gap:8px",
+      "gap:0",
       "margin:12px 2px 1px",
       "padding-top:9px",
       "border-top:1px solid rgba(255,255,255,0.065)",
