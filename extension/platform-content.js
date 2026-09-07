@@ -43,6 +43,12 @@
   const CLAUDE_INLINE_SLOT_WIDTH = BUBBLE_SIZE + 62;
   const CLAUDE_INLINE_BUBBLE_GAP = 46;
   const CLAUDE_INLINE_RIGHT_MARGIN = 4;
+  // At 38px, the non-transparent orb artwork ends about 7px inside the 42px
+  // button box. The fresh composer may use that inset to align the visible orb
+  // with Claude's original rightmost control edge without crossing its border.
+  const CLAUDE_BUBBLE_ARTWORK_RIGHT_INSET = 7;
+  const CLAUDE_BUBBLE_ARTWORK_CENTER_Y_OFFSET = -0.5;
+  const CLAUDE_PLACEMENT_DEBUG_QUERY = "__cap_context_debug_placement";
   const CLAUDE_MODEL_LEFT_NUDGE = 48;
   const CLAUDE_SIDE_CONTROL_RIGHT_NUDGE = 52;
   const DESTINATION_SHEET_WIDTH = 352;
@@ -459,6 +465,7 @@
   let chatGptPlacementResizeTargets = [];
   let chatGptPlacementMutationObserver = null;
   let chatGptPlacementMutationRoot = null;
+  let lastClaudePlacementDebugSignature = "";
   let floatingButtonMonitoringDisabled = false;
   let handoffCountdownTimer = null;
   let handoffCountdownHideTimer = null;
@@ -6241,6 +6248,7 @@
         bottom: "auto",
         display: "flex"
       });
+      maybeLogClaudePlacementDiagnostics(bubble, claudePlacement, composerRect, input);
       maybeShowOnboardingNudge(bubble);
       return;
     }
@@ -6308,6 +6316,7 @@
   function getClaudeBubblePlacement(composerRect, input = null) {
     const controls = getClaudeComposerControlCandidates(composerRect);
     const anchorControl = findClaudeVoiceModeControl(controls) || findClaudeInlineFallbackControl(controls);
+    const isFreshEmptyComposer = isClaudeFreshEmptyComposer(input);
 
     if (anchorControl) {
       const currentOffset = getClaudeCurrentControlOffset(anchorControl);
@@ -6315,7 +6324,11 @@
       const anchorNudge = getClaudeControlTargetOffset(anchorControl, 0);
       const maxLeft = Math.max(
         BUBBLE_GAP,
-        composerRect.width - BUBBLE_SIZE - CLAUDE_INLINE_RIGHT_MARGIN
+        composerRect.width - BUBBLE_SIZE - (
+          isFreshEmptyComposer
+            ? -CLAUDE_BUBBLE_ARTWORK_RIGHT_INSET
+            : CLAUDE_INLINE_RIGHT_MARGIN
+        )
       );
       const preferredLeft = baseAnchorRight + anchorNudge - composerRect.left + CLAUDE_INLINE_BUBBLE_GAP;
       const inlineShift = Math.min(
@@ -6327,7 +6340,11 @@
         BUBBLE_GAP,
         maxLeft
       );
-      const top = getClaudeBubbleTop(anchorControl.rect, composerRect);
+      const top = getClaudeBubbleTop(
+        anchorControl.rect,
+        composerRect,
+        isFreshEmptyComposer ? -CLAUDE_BUBBLE_ARTWORK_CENTER_Y_OFFSET : 0
+      );
 
       return {
         left: Math.round(left),
@@ -6418,17 +6435,68 @@
     return composerRect.bottom - Math.max(72, composerRect.height * 0.62);
   }
 
-  function getClaudeBubbleTop(targetRect, composerRect) {
-    const centeredTop = targetRect.top + (targetRect.height - BUBBLE_SIZE) / 2 - composerRect.top;
+  function isClaudeFreshEmptyComposer(input) {
+    if (window.location.pathname !== "/new" || !input) return false;
+    const value = /^(input|textarea)$/.test(input.localName || "")
+      ? input.value
+      : input.innerText || input.textContent;
+    return String(value || "").trim() === "";
+  }
+
+  function getClaudeBubbleTop(targetRect, composerRect, opticalNudge = 0) {
+    const centeredTop = targetRect.top + (targetRect.height - BUBBLE_SIZE) / 2 - composerRect.top + opticalNudge;
     // Claude's control row can sit flush with the bottom of a shallower inner
     // surface. Allow only the natural half-height overflow needed to keep the
     // larger Cap Context bubble centered on the native control.
-    const bottomOverflow = Math.max(0, (BUBBLE_SIZE - targetRect.height) / 2);
+    const bottomOverflow = Math.max(0, (BUBBLE_SIZE - targetRect.height) / 2 + opticalNudge);
     const maxTop = Math.max(
       BUBBLE_GAP,
       composerRect.height - BUBBLE_SIZE + bottomOverflow
     );
-    return Math.round(clampNumber(centeredTop, BUBBLE_GAP, maxTop));
+    return Math.round(clampNumber(centeredTop, BUBBLE_GAP, maxTop) * 2) / 2;
+  }
+
+  function maybeLogClaudePlacementDiagnostics(bubble, placement, composerRect, input) {
+    const search = new URLSearchParams(window.location.search || "");
+    if (search.get(CLAUDE_PLACEMENT_DEBUG_QUERY) !== "1" || !placement.anchorControl) return;
+
+    const bubbleRect = bubble.getBoundingClientRect();
+    const anchorRect = placement.anchorControl.element.getBoundingClientRect();
+    const nativeAnchorRight = anchorRect.right - getClaudeCurrentControlOffset(placement.anchorControl);
+    const round = (value) => Math.round(value * 100) / 100;
+    const diagnostics = {
+      route: window.location.pathname,
+      state: isClaudeFreshEmptyComposer(input) ? "fresh-empty" : "other",
+      composer: {
+        left: round(composerRect.left),
+        top: round(composerRect.top),
+        right: round(composerRect.right),
+        bottom: round(composerRect.bottom)
+      },
+      anchor: {
+        label: placement.anchorControl.label,
+        centerY: round(anchorRect.top + anchorRect.height / 2),
+        nativeRight: round(nativeAnchorRight)
+      },
+      bubble: {
+        left: round(bubbleRect.left),
+        top: round(bubbleRect.top),
+        right: round(bubbleRect.right),
+        bottom: round(bubbleRect.bottom)
+      },
+      deltas: {
+        boxCenterY: round(bubbleRect.top + bubbleRect.height / 2 - (anchorRect.top + anchorRect.height / 2)),
+        visibleCenterY: round(
+          bubbleRect.top + bubbleRect.height / 2 + CLAUDE_BUBBLE_ARTWORK_CENTER_Y_OFFSET
+          - (anchorRect.top + anchorRect.height / 2)
+        ),
+        visibleRight: round(bubbleRect.right - CLAUDE_BUBBLE_ARTWORK_RIGHT_INSET - nativeAnchorRight)
+      }
+    };
+    const signature = JSON.stringify(diagnostics);
+    if (signature === lastClaudePlacementDebugSignature) return;
+    lastClaudePlacementDebugSignature = signature;
+    console.debug("[Context Generator] Claude placement", signature);
   }
 
   function findChatGptModelSelectorButton(input, composerSurface, composerRect, inputRect = null) {

@@ -209,7 +209,7 @@ class FakeHTMLInputElement {
   }
 }
 
-function loadPlatformContent(elements = [], hostname = "chatgpt.com", { expectSupported = true } = {}) {
+function loadPlatformContent(elements = [], hostname = "chatgpt.com", { expectSupported = true, pathname = "/", search = "" } = {}) {
   let hooks = null;
   const resizeObservers = [];
   const mutationObservers = [];
@@ -256,7 +256,7 @@ function loadPlatformContent(elements = [], hostname = "chatgpt.com", { expectSu
     removeEventListener: () => {}
   };
   const window = {
-    location: { hostname },
+    location: { hostname, pathname, search },
     scrollX: 0,
     scrollY: 400,
     __CONTEXT_GENERATOR_TEST_HOOKS__: {
@@ -1918,6 +1918,49 @@ test("Claude bubble stays vertically centered in the shallow live composer", () 
 
   assert.equal(placement.top, 57);
   assert.equal(bubbleCenter, controlCenter);
+});
+
+test("Claude fresh page aligns the visible orb artwork with the native row endpoint", () => {
+  const composerRect = { left: 600, right: 1224, top: 367.5, bottom: 461.5, width: 624, height: 94 };
+  const input = new FakeElement({
+    attrs: { contenteditable: "true", role: "textbox", "aria-label": "Write your prompt to Claude" },
+    rect: { left: 620, right: 1204, top: 383.5, bottom: 423.5, width: 584, height: 40 }
+  });
+  const voiceMode = new FakeElement({
+    tag: "button",
+    attrs: { "aria-label": "Voice input" },
+    rect: { left: 1204, right: 1224, top: 429.5, bottom: 461.5, width: 20, height: 32 }
+  });
+  const hooks = loadPlatformContent([input, voiceMode], "claude.ai", { pathname: "/new" });
+  const placement = hooks.getClaudeBubblePlacement(composerRect, input);
+  const bubbleRect = localPlacementToPageRect(placement, composerRect);
+  const visibleArtworkRight = bubbleRect.right - 7;
+  const visibleArtworkCenterY = bubbleRect.top + 42 / 2 - 0.5;
+  const controlCenterY = voiceMode.rect.top + voiceMode.rect.height / 2;
+
+  assert.equal(placement.left, 589);
+  assert.equal(placement.top, 57.5);
+  assert.equal(visibleArtworkRight, voiceMode.rect.right);
+  assert.equal(visibleArtworkCenterY, controlCenterY);
+});
+
+test("Claude typed new-chat state keeps the existing placement for the later fix", () => {
+  const composerRect = { left: 600, right: 1224, top: 367.5, bottom: 461.5, width: 624, height: 94 };
+  const input = new FakeElement({
+    text: "hello",
+    attrs: { contenteditable: "true", role: "textbox", "aria-label": "Write your prompt to Claude" },
+    rect: { left: 620, right: 1204, top: 383.5, bottom: 423.5, width: 584, height: 40 }
+  });
+  const send = new FakeElement({
+    tag: "button",
+    attrs: { "aria-label": "Send message" },
+    rect: { left: 1204, right: 1224, top: 429.5, bottom: 461.5, width: 20, height: 32 }
+  });
+  const hooks = loadPlatformContent([input, send], "claude.ai", { pathname: "/new" });
+  const placement = hooks.getClaudeBubblePlacement(composerRect, input);
+
+  assert.equal(placement.left, 578);
+  assert.equal(placement.top, 57);
 });
 
 test("Claude bubble uses the rightmost small control when voice mode is unlabeled", () => {

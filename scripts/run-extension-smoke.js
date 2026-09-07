@@ -220,10 +220,10 @@ function claudePlacementFixture() {
     form{position:fixed;left:50%;bottom:80px;width:800px;height:94px;transform:translateX(-50%);background:#242424;border-radius:18px}
     [contenteditable]{position:absolute;left:20px;right:20px;top:16px;min-height:40px;outline:none}
     button{position:absolute;bottom:0;width:36px;height:32px}
-    #model{right:160px;width:120px}
-    #dictate{right:60px}
-    #voice{right:16px}
-    #send{right:16px}
+    #model{right:55px;width:109px}
+    #dictate{right:15px;width:32px}
+    #voice{right:0;width:20px}
+    #send{right:0}
     .send-state{visibility:hidden;pointer-events:none}
     form.has-text .voice-state{visibility:hidden;pointer-events:none}
     form.has-text .send-state{visibility:visible;pointer-events:auto}
@@ -302,7 +302,7 @@ async function startFixtureServer() {
       response.end(sourceFixture());
       return;
     }
-    if (url.pathname === "/claude-placement") {
+    if (url.pathname === "/new") {
       response.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
       response.end(claudePlacementFixture());
       return;
@@ -468,7 +468,7 @@ async function run() {
     }
     process.stdout.write("✓ Brave loaded the unpacked extension on the controlled source page.\n");
 
-    const claudePlacementUrl = `${origin}/claude-placement?${SMOKE_PLATFORM_QUERY}=claude`;
+    const claudePlacementUrl = `${origin}/new?${SMOKE_PLATFORM_QUERY}=claude&__cap_context_debug_placement=1`;
     await browserSession.call("Target.createTarget", { url: claudePlacementUrl });
     const claudePlacementTarget = await waitFor(async () => {
       const targets = await getTargets(devToolsPort);
@@ -481,13 +481,28 @@ async function run() {
       document.getElementById("context-generator-bubble") &&
       getComputedStyle(document.getElementById("context-generator-bubble")).display !== "none"
     )`), "the Claude placement bubble");
+    const claudePlacementDiagnostics = await waitFor(() => {
+      const event = claudePlacementSession.getRecentEvents().find((candidate) => {
+        return candidate.method === "Runtime.consoleAPICalled"
+          && candidate.params?.args?.[0]?.value === "[Context Generator] Claude placement";
+      });
+      const serialized = event?.params?.args?.[1]?.value;
+      return serialized ? JSON.parse(serialized) : null;
+    }, "Claude's page-load placement diagnostics");
+    process.stdout.write(`ℹ Claude page-load geometry ${JSON.stringify(claudePlacementDiagnostics)}\n`);
+    assert.equal(claudePlacementDiagnostics.state, "fresh-empty");
+    assert.equal(claudePlacementDiagnostics.deltas.visibleCenterY, 0);
+    assert.equal(claudePlacementDiagnostics.deltas.visibleRight, 0);
     const claudeEmptyAlignment = await claudePlacementSession.evaluate(`(() => {
       const bubble = document.getElementById("context-generator-bubble").getBoundingClientRect();
       const voice = document.getElementById("voice").getBoundingClientRect();
-      return Math.abs((bubble.top + bubble.height / 2) - (voice.top + voice.height / 2));
+      return Math.abs((bubble.top + bubble.height / 2 - 0.5) - (voice.top + voice.height / 2));
     })()`);
     assert.ok(claudeEmptyAlignment <= 1, `Claude's empty-state bubble was ${claudeEmptyAlignment}px above its control row.`);
-    await claudePlacementSession.evaluate('document.getElementById("claude-composer").classList.add("has-text")');
+    await claudePlacementSession.evaluate(`(() => {
+      document.querySelector("[contenteditable]").textContent = "hello";
+      document.getElementById("claude-composer").classList.add("has-text");
+    })()`);
     const claudePlacement = await waitFor(() => claudePlacementSession.evaluate(`(() => {
       const bubble = document.getElementById("context-generator-bubble")?.getBoundingClientRect();
       const send = document.getElementById("send")?.getBoundingClientRect();
