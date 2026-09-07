@@ -45,7 +45,7 @@
   const CLAUDE_INLINE_RIGHT_MARGIN = 4;
   const CLAUDE_MODEL_LEFT_NUDGE = 48;
   const CLAUDE_SIDE_CONTROL_RIGHT_NUDGE = 52;
-  const DESTINATION_SHEET_WIDTH = 420;
+  const DESTINATION_SHEET_WIDTH = 352;
   const DESTINATION_SHEET_CLOSED_TRANSFORM = "translate3d(0,8px,0) scale(0.985)";
   const DESTINATION_SHEET_EXIT_MS = 160;
   const DESTINATION_TRANSFER_PRESS_MS = 85;
@@ -4280,12 +4280,8 @@
           gap: 8px !important;
         }
 
-        .context-generator-destination-title {
-          font-size: 26px !important;
-        }
-
         .context-generator-destination-tile {
-          height: 68px !important;
+          height: 60px !important;
         }
       }
 
@@ -4338,8 +4334,8 @@
       "z-index:2147483647",
       `width:min(${DESTINATION_SHEET_WIDTH}px,calc(100vw - 20px))`,
       "box-sizing:border-box",
-      "padding:16px",
-      "border-radius:24px",
+      "padding:12px",
+      "border-radius:19px",
       "border:1px solid rgba(236,229,246,0.17)",
       "background:radial-gradient(ellipse 68% 48% at 88% -8%,rgba(145,112,199,0.18),transparent 72%),radial-gradient(ellipse 55% 48% at -8% 110%,rgba(82,57,128,0.15),transparent 74%),linear-gradient(180deg,#111012 0%,#0c0b0e 58%,#09080b 100%)",
       "box-shadow:0 34px 88px rgba(0,0,0,0.58),0 14px 34px rgba(0,0,0,0.34),0 0 54px rgba(104,76,154,0.1),0 0 0 1px rgba(0,0,0,0.6),inset 0 1px 0 rgba(255,255,255,0.09)",
@@ -4358,9 +4354,9 @@
     ].join(";");
 
     const header = document.createElement("div");
-    header.style.cssText = "padding:1px 2px 15px;display:flex;flex-direction:column;align-items:flex-start;gap:0";
+    header.style.cssText = "padding:0 1px 11px;display:flex;flex-direction:column;align-items:flex-start;gap:0";
     const topLine = document.createElement("div");
-    topLine.style.cssText = "width:100%;display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:17px";
+    topLine.style.cssText = "width:100%;display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:11px";
     const brandLockup = document.createElement("div");
     brandLockup.style.cssText = "display:flex;align-items:center;gap:8px;color:rgba(247,244,250,0.76);font-size:11.5px;font-weight:650;line-height:1";
     const brandIcon = document.createElement("img");
@@ -4377,10 +4373,7 @@
     title.id = "context-generator-destination-title";
     title.className = "context-generator-destination-title";
     title.textContent = DESTINATION_TITLE_TEXT;
-    title.style.cssText = "font-family:Georgia,'Times New Roman',serif;font-size:28px;font-weight:500;letter-spacing:-0.035em;color:#f4f1f7;line-height:1.05;text-rendering:geometricPrecision;text-wrap:balance";
-    const subtitle = document.createElement("div");
-    subtitle.textContent = "Choose the AI that should pick up this conversation.";
-    subtitle.style.cssText = "margin-top:7px;color:rgba(240,236,245,0.62);font-size:12px;font-weight:500;line-height:1.42;letter-spacing:0";
+    title.style.cssText = "font-family:Georgia,'Times New Roman',serif;font-size:14px;font-weight:500;letter-spacing:0;color:#ffffff;line-height:1.02;text-rendering:geometricPrecision";
     const badge = document.createElement("button");
     badge.type = "button";
     badge.className = "context-generator-destination-about";
@@ -4428,7 +4421,6 @@
     topLine.appendChild(badge);
     header.appendChild(topLine);
     header.appendChild(title);
-    header.appendChild(subtitle);
     sheet.appendChild(header);
 
     const options = Object.entries(PLATFORMS)
@@ -4437,7 +4429,7 @@
 
     const grid = document.createElement("div");
     grid.className = "context-generator-destination-grid";
-    grid.style.cssText = "display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px";
+    grid.style.cssText = "display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px";
 
     options.forEach((option, index) => {
       const button = document.createElement("button");
@@ -4448,15 +4440,15 @@
       button.setAttribute("aria-label", `Continue in ${option.name}`);
       button.style.cssText = [
         "width:100%",
-        "height:76px",
+        "height:60px",
         "border:1px solid rgba(255,255,255,0.1)",
-        "border-radius:17px",
+        "border-radius:14px",
         "background:linear-gradient(180deg,rgba(255,255,255,0.05),rgba(255,255,255,0.022))",
         "color:#ffffff",
         "display:flex",
         "align-items:center",
-        "gap:11px",
-        "padding:0 12px",
+        "gap:8px",
+        "padding:0 9px",
         "box-sizing:border-box",
         "cursor:pointer",
         "text-align:left",
@@ -4487,7 +4479,7 @@
       ].join(";");
 
       const logoWrap = document.createElement("div");
-      logoWrap.style.cssText = "width:40px;height:40px;display:flex;align-items:center;justify-content:center;box-sizing:border-box;flex:0 0 auto;opacity:0.98;position:relative;z-index:2;border:1px solid rgba(255,255,255,0.075);border-radius:12px;background:rgba(4,4,5,0.28);box-shadow:inset 0 1px 0 rgba(255,255,255,0.045)";
+      logoWrap.style.cssText = "width:34px;height:34px;display:flex;align-items:center;justify-content:center;box-sizing:border-box;flex:0 0 auto;opacity:0.98;position:relative;z-index:2;border:1px solid rgba(255,255,255,0.075);border-radius:10px;background:rgba(4,4,5,0.28);box-shadow:inset 0 1px 0 rgba(255,255,255,0.045)";
       const logo = document.createElement("img");
       logo.src = getExtensionAssetUrl(option.logo);
       logo.alt = "";
@@ -4499,11 +4491,11 @@
       copy.style.cssText = "display:flex;flex-direction:column;gap:4px;min-width:0;flex:1;position:relative;z-index:2";
       const name = document.createElement("div");
       name.textContent = option.name;
-      name.style.cssText = "font-size:13px;font-weight:720;line-height:1.15;color:#f8f6fa;white-space:nowrap;overflow:hidden;text-overflow:ellipsis";
+      name.style.cssText = "font-size:12px;font-weight:720;line-height:1.15;color:#f8f6fa;white-space:nowrap;overflow:hidden;text-overflow:ellipsis";
       const detail = document.createElement("div");
       detail.className = "context-generator-tile-detail";
       detail.textContent = option.detail;
-      detail.style.cssText = "font-size:11px;font-weight:520;line-height:1.25;color:rgba(238,234,242,0.56);white-space:nowrap;overflow:hidden;text-overflow:ellipsis";
+      detail.style.cssText = "font-size:10px;font-weight:520;line-height:1.25;color:rgba(238,234,242,0.56);white-space:nowrap;overflow:hidden;text-overflow:ellipsis";
       copy.appendChild(name);
       copy.appendChild(detail);
 
@@ -4565,8 +4557,8 @@
       "align-items:center",
       "justify-content:flex-start",
       "gap:8px",
-      "margin:15px 3px 1px",
-      "padding-top:12px",
+      "margin:12px 2px 1px",
+      "padding-top:9px",
       "border-top:1px solid rgba(255,255,255,0.065)",
       "color:rgba(240,236,244,0.58)",
       "font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif",
