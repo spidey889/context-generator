@@ -4816,8 +4816,8 @@
         "z-index:2147483646",
         "inset:0",
         "pointer-events:none",
-        "background:rgba(8,7,11,0.24)",
-        "backdrop-filter:blur(1.5px)",
+        "background:rgba(7,6,10,0.38)",
+        "backdrop-filter:blur(4px) saturate(0.84)",
         "opacity:0",
         "transition:opacity 180ms cubic-bezier(0.16,1,0.3,1)"
       ].join(";");
@@ -4833,18 +4833,18 @@
         "position:fixed",
         "z-index:2147483647",
         "left:50%",
-        "top:46%",
-        "width:min(548px,calc(100vw - 32px))",
-        "height:244px",
-        "min-height:244px",
-        "max-height:244px",
+        "top:47%",
+        "width:min(580px,calc(100vw - 32px))",
+        "height:286px",
+        "min-height:286px",
+        "max-height:286px",
         "box-sizing:border-box",
-        "padding:20px 28px 22px",
-        "border-radius:24px",
-        "border:1px solid rgba(236,233,240,0.14)",
-        "background:#111112",
+        "padding:20px 22px 22px",
+        "border-radius:30px",
+        "border:1px solid rgba(236,229,246,0.18)",
+        "background:radial-gradient(ellipse 70% 66% at 88% -10%,rgba(146,116,204,0.18),transparent 68%),radial-gradient(ellipse 52% 72% at -8% 110%,rgba(83,58,129,0.16),transparent 72%),#111012",
         "color:#b9b7bd",
-        "box-shadow:0 34px 96px rgba(0,0,0,0.52),0 12px 32px rgba(0,0,0,0.30),0 0 48px rgba(92,68,137,0.04),0 0 0 1px rgba(0,0,0,0.56),inset 0 1px 0 rgba(255,255,255,0.075),inset 0 -1px 0 rgba(255,255,255,0.018)",
+        "box-shadow:0 42px 120px rgba(0,0,0,0.58),0 14px 38px rgba(0,0,0,0.34),0 0 72px rgba(112,82,165,0.12),0 0 0 1px rgba(0,0,0,0.62),inset 0 1px 0 rgba(255,255,255,0.10),inset 0 -1px 0 rgba(255,255,255,0.025)",
         `transform:${HANDOFF_OVERLAY_CLOSED_TRANSFORM}`,
         "opacity:0",
         "flex-direction:column",
@@ -4860,13 +4860,14 @@
       ].join(";");
 
       const glow = document.createElement("div");
+      glow.className = "context-generator-handoff-atmosphere";
       glow.style.cssText = [
         "position:absolute",
         "inset:0",
         "pointer-events:none",
         "border-radius:inherit",
-        "background:radial-gradient(ellipse 72% 58% at 50% -8%,rgba(170,142,218,0.075),transparent 66%),linear-gradient(180deg,rgba(255,255,255,0.035),transparent 34%)",
-        "box-shadow:inset 0 0 0 1px rgba(255,255,255,0.018)",
+        "background:radial-gradient(ellipse 52% 52% at 68% 8%,rgba(211,194,237,0.10),transparent 72%),linear-gradient(180deg,rgba(255,255,255,0.045),transparent 36%)",
+        "box-shadow:inset 0 0 0 1px rgba(255,255,255,0.022)",
         "opacity:1"
       ].join(";");
 
@@ -4877,7 +4878,8 @@
         "z-index:1",
         "display:flex",
         "width:100%",
-        "min-height:30px",
+        "min-height:32px",
+        "padding:0 5px",
         "box-sizing:border-box",
         "align-items:center",
         "justify-content:flex-start",
@@ -4896,15 +4898,16 @@
       brandIcon.height = 28;
       brandIcon.style.cssText = [
         "display:block",
-        "width:28px",
-        "height:28px",
+        "width:30px",
+        "height:30px",
         "box-sizing:border-box",
         "padding:3px",
         "border:1px solid rgba(185,158,228,0.20)",
-        "border-radius:9px",
-        "background:rgba(141,108,207,0.11)",
+        "border-radius:10px",
+        "background:linear-gradient(145deg,rgba(189,158,238,0.20),rgba(102,72,155,0.12))",
         "object-fit:contain",
-        "filter:drop-shadow(0 4px 10px rgba(141,108,207,0.25))"
+        "box-shadow:inset 0 1px 0 rgba(255,255,255,0.10),0 8px 20px rgba(74,48,121,0.26)",
+        "filter:drop-shadow(0 4px 10px rgba(141,108,207,0.20))"
       ].join(";");
 
       const brandText = document.createElement("span");
@@ -4919,10 +4922,12 @@
         "z-index:1",
         "display:flex",
         "flex-direction:column",
-        "align-items:center",
+        "align-items:flex-start",
         "justify-content:center",
-        "gap:0",
-        "width:100%"
+        "gap:5px",
+        "width:100%",
+        "padding:2px 10px 0",
+        "box-sizing:border-box"
       ].join(";");
 
       const statusText = document.createElement("div");
@@ -4933,17 +4938,17 @@
         "position:relative",
         "z-index:1",
         "display:flex",
-        "min-height:36px",
+        "min-height:42px",
         "align-items:center",
-        "justify-content:center",
-        "font-size:30px",
+        "justify-content:flex-start",
+        "font-size:34px",
         "font-family:Georgia,'Times New Roman',serif",
         "font-weight:500",
         "line-height:1.08",
-        "text-align:center",
+        "text-align:left",
         "text-wrap:balance",
         "color:#f2f0f6",
-        "letter-spacing:-0.035em",
+        "letter-spacing:-0.04em",
         "text-rendering:geometricPrecision",
         "will-change:transform,opacity"
       ].join(";");
@@ -4977,9 +4982,12 @@
         "grid-template-columns:repeat(3,minmax(0,1fr))",
         "width:100%",
         "margin:0 auto",
-        "padding:14px 2px 0",
+        "padding:16px 8px 8px",
         "box-sizing:border-box",
-        "border-top:1px solid rgba(255,255,255,0.075)",
+        "border:1px solid rgba(255,255,255,0.085)",
+        "border-radius:19px",
+        "background:linear-gradient(180deg,rgba(255,255,255,0.055),rgba(255,255,255,0.026))",
+        "box-shadow:inset 0 1px 0 rgba(255,255,255,0.045),0 12px 28px rgba(0,0,0,0.13)",
         "align-items:start"
       ].join(";");
 
@@ -5040,6 +5048,45 @@
             0%,100%{opacity:0.22;transform:scale(0.9)}
             50%{opacity:0.62;transform:scale(1.08)}
           }
+          @keyframes contextGeneratorAuroraDrift{
+            0%,100%{opacity:0.62;transform:translate3d(0,0,0) scale(1)}
+            50%{opacity:0.88;transform:translate3d(-12px,7px,0) scale(1.06)}
+          }
+          #${OVERLAY_ID} .context-generator-handoff-atmosphere::before,
+          #${OVERLAY_ID} .context-generator-handoff-atmosphere::after{
+            content:"";
+            position:absolute;
+            border-radius:999px;
+            pointer-events:none;
+            filter:blur(18px);
+            will-change:transform,opacity;
+          }
+          #${OVERLAY_ID} .context-generator-handoff-atmosphere::before{
+            width:260px;
+            height:118px;
+            right:-54px;
+            top:-58px;
+            background:radial-gradient(ellipse,rgba(190,158,237,0.30),rgba(101,78,158,0.08) 54%,transparent 73%);
+            transform:rotate(-9deg);
+            animation:contextGeneratorAuroraDrift 7200ms cubic-bezier(0.45,0,0.55,1) infinite;
+          }
+          #${OVERLAY_ID} .context-generator-handoff-atmosphere::after{
+            width:190px;
+            height:110px;
+            left:-72px;
+            bottom:-64px;
+            background:radial-gradient(ellipse,rgba(104,73,164,0.25),transparent 72%);
+          }
+          #context-generator-status-group::before{
+            content:"CONTEXT TRANSFER";
+            display:block;
+            color:rgba(216,202,237,0.48);
+            font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
+            font-size:9.5px;
+            font-weight:720;
+            line-height:1;
+            letter-spacing:0.16em;
+          }
           #context-generator-text .context-generator-summary-activity{
             display:none;
             flex:0 0 auto;
@@ -5090,9 +5137,9 @@
           #context-generator-handoff-progress .context-generator-handoff-stage-connector{
             position:absolute;
             z-index:0;
-            top:12px;
-            left:calc(50% + 19px);
-            right:calc(-50% + 19px);
+            top:13px;
+            left:calc(50% + 20px);
+            right:calc(-50% + 20px);
             height:2px;
             overflow:visible;
             border-radius:999px;
@@ -5145,8 +5192,8 @@
             position:relative;
             z-index:1;
             display:flex;
-            width:26px;
-            height:26px;
+            width:28px;
+            height:28px;
             align-items:center;
             justify-content:center;
             box-sizing:border-box;
@@ -5170,7 +5217,7 @@
           }
           #context-generator-handoff-progress .context-generator-handoff-stage-label{
             min-height:30px;
-            font-size:11.5px;
+            font-size:11.75px;
             font-weight:600;
             line-height:1.22;
             letter-spacing:0.005em;
@@ -5209,6 +5256,7 @@
             #context-generator-text .context-generator-summary-activity-dot{animation:none!important;opacity:0.72}
             #${HANDOFF_REASSURANCE_ID}{transition:none!important}
             #context-generator-handoff-progress .context-generator-handoff-stage-marker::after{animation:none!important}
+            #${OVERLAY_ID} .context-generator-handoff-atmosphere::before{animation:none!important}
             #context-generator-handoff-progress .context-generator-handoff-stage-connector-fill,
             #context-generator-handoff-progress .context-generator-handoff-stage-progress-head{transition:none!important}
           }
