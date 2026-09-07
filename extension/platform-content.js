@@ -45,7 +45,7 @@
   const CLAUDE_INLINE_RIGHT_MARGIN = 4;
   const CLAUDE_MODEL_LEFT_NUDGE = 48;
   const CLAUDE_SIDE_CONTROL_RIGHT_NUDGE = 52;
-  const DESTINATION_SHEET_WIDTH = 296;
+  const DESTINATION_SHEET_WIDTH = 420;
   const DESTINATION_SHEET_CLOSED_TRANSFORM = "translate3d(0,8px,0) scale(0.985)";
   const DESTINATION_SHEET_EXIT_MS = 160;
   const DESTINATION_TRANSFER_PRESS_MS = 85;
@@ -55,7 +55,7 @@
   const RUNNING_AUTO_RESET_MS = 360000;
   const DEFAULT_MAX_COMPOSER_WIDTH = 1320;
   const DESTINATION_TITLE_TEXT = "Where to continue?";
-  const DESTINATION_HELPER_TEXT = "Context goes straight into the input box";
+  const DESTINATION_HELPER_TEXT = "Pasted into the input — you press Send";
   const ONBOARDING_STORAGE_KEY = "context-generator-onboarding-dismissed-v2";
   const ONBOARDING_TITLE_TEXT = "Transfer chat context";
   const ONBOARDING_BODY_TEXT = "From this button.";
@@ -4227,20 +4227,66 @@
 
       .context-generator-destination-tile::after {
         content: "→";
+        display: flex;
+        width: 28px;
+        height: 28px;
+        align-items: center;
+        justify-content: center;
+        box-sizing: border-box;
         flex: 0 0 auto;
         position: relative;
         z-index: 2;
-        color: rgba(255,255,255,0.34);
-        font-size: 15px;
+        border: 1px solid rgba(255,255,255,0.08);
+        border-radius: 999px;
+        background: rgba(255,255,255,0.025);
+        color: rgba(255,255,255,0.38);
+        font-size: 14px;
         line-height: 1;
-        transform: translate3d(-2px,0,0);
-        transition: color 0.16s ease, transform 0.16s cubic-bezier(0.16,1,0.3,1);
+        transform: translate3d(0,0,0);
+        transition: color 0.16s ease, transform 0.16s cubic-bezier(0.16,1,0.3,1), border-color 0.16s ease, background 0.16s ease;
       }
 
       .context-generator-destination-tile:hover::after,
       .context-generator-destination-tile:focus-visible::after {
-        color: rgba(255,255,255,0.82);
-        transform: translate3d(1px,0,0);
+        border-color: rgba(255,255,255,0.16);
+        background: rgba(255,255,255,0.07);
+        color: rgba(255,255,255,0.9);
+        transform: translate3d(2px,0,0);
+      }
+
+      .context-generator-destination-tile:focus-visible {
+        outline: 2px solid rgba(190,162,233,0.78) !important;
+        outline-offset: 2px;
+      }
+
+      .context-generator-destination-about:focus-visible {
+        outline: 2px solid rgba(190,162,233,0.72) !important;
+        outline-offset: 2px;
+      }
+
+      .context-generator-destination-helper::before {
+        content: "";
+        width: 6px;
+        height: 6px;
+        flex: 0 0 auto;
+        border-radius: 999px;
+        background: #9d7ad7;
+        box-shadow: 0 0 0 3px rgba(157,122,215,0.1), 0 0 12px rgba(157,122,215,0.38);
+      }
+
+      @media (max-width: 390px) {
+        .context-generator-destination-grid {
+          grid-template-columns: 1fr !important;
+          gap: 8px !important;
+        }
+
+        .context-generator-destination-title {
+          font-size: 26px !important;
+        }
+
+        .context-generator-destination-tile {
+          height: 68px !important;
+        }
       }
 
       .context-generator-destination-tile[aria-busy="true"]::after {
@@ -4284,21 +4330,26 @@
     sheet = document.createElement("div");
     sheet.id = DESTINATION_SHEET_ID;
     sheet.dataset.contextGeneratorOwned = "true";
+    sheet.setAttribute("role", "dialog");
+    sheet.setAttribute("aria-labelledby", "context-generator-destination-title");
     sheet.style.cssText = [
       "display:none",
       "position:fixed",
       "z-index:2147483647",
-      `width:${DESTINATION_SHEET_WIDTH}px`,
+      `width:min(${DESTINATION_SHEET_WIDTH}px,calc(100vw - 20px))`,
       "box-sizing:border-box",
-      "padding:9px",
-      "border-radius:15px",
-      "border:1px solid rgba(255,255,255,0.12)",
-      "background:linear-gradient(180deg,#080808 0%,#050505 58%,#020202 100%)",
-      "box-shadow:0 16px 38px rgba(0,0,0,0.58), 0 0 0 1px rgba(0,0,0,0.72), inset 0 1px 0 rgba(255,255,255,0.07)",
-      "backdrop-filter:blur(16px)",
+      "padding:16px",
+      "border-radius:24px",
+      "border:1px solid rgba(236,229,246,0.17)",
+      "background:radial-gradient(ellipse 68% 48% at 88% -8%,rgba(145,112,199,0.18),transparent 72%),radial-gradient(ellipse 55% 48% at -8% 110%,rgba(82,57,128,0.15),transparent 74%),linear-gradient(180deg,#111012 0%,#0c0b0e 58%,#09080b 100%)",
+      "box-shadow:0 34px 88px rgba(0,0,0,0.58),0 14px 34px rgba(0,0,0,0.34),0 0 54px rgba(104,76,154,0.1),0 0 0 1px rgba(0,0,0,0.6),inset 0 1px 0 rgba(255,255,255,0.09)",
+      "backdrop-filter:blur(24px) saturate(1.06)",
       "color:#f5f5f5",
       "font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif",
-      "overflow:hidden",
+      "max-height:calc(100vh - 20px)",
+      "overflow-x:hidden",
+      "overflow-y:auto",
+      "scrollbar-width:thin",
       "opacity:0",
       `transform:${DESTINATION_SHEET_CLOSED_TRANSFORM}`,
       "transform-origin:bottom right",
@@ -4307,28 +4358,47 @@
     ].join(";");
 
     const header = document.createElement("div");
-    header.style.cssText = "padding:0 1px 8px;display:flex;align-items:center;justify-content:space-between;gap:10px";
+    header.style.cssText = "padding:1px 2px 15px;display:flex;flex-direction:column;align-items:flex-start;gap:0";
+    const topLine = document.createElement("div");
+    topLine.style.cssText = "width:100%;display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:17px";
+    const brandLockup = document.createElement("div");
+    brandLockup.style.cssText = "display:flex;align-items:center;gap:8px;color:rgba(247,244,250,0.76);font-size:11.5px;font-weight:650;line-height:1";
+    const brandIcon = document.createElement("img");
+    brandIcon.src = BUBBLE_ICON_URL;
+    brandIcon.alt = "";
+    brandIcon.width = 26;
+    brandIcon.height = 26;
+    brandIcon.style.cssText = "display:block;width:26px;height:26px;box-sizing:border-box;padding:3px;border:1px solid rgba(185,158,228,0.2);border-radius:9px;background:linear-gradient(145deg,rgba(189,158,238,0.18),rgba(102,72,155,0.1));box-shadow:inset 0 1px 0 rgba(255,255,255,0.08),0 7px 18px rgba(74,48,121,0.2);object-fit:contain";
+    const brandName = document.createElement("span");
+    brandName.textContent = "Cap Context";
+    brandLockup.appendChild(brandIcon);
+    brandLockup.appendChild(brandName);
     const title = document.createElement("div");
+    title.id = "context-generator-destination-title";
+    title.className = "context-generator-destination-title";
     title.textContent = DESTINATION_TITLE_TEXT;
-    title.style.cssText = "font-family:Georgia,'Times New Roman',serif;font-size:14px;font-weight:500;letter-spacing:0;color:#ffffff;line-height:1.02;text-rendering:geometricPrecision";
+    title.style.cssText = "font-family:Georgia,'Times New Roman',serif;font-size:28px;font-weight:500;letter-spacing:-0.035em;color:#f4f1f7;line-height:1.05;text-rendering:geometricPrecision;text-wrap:balance";
+    const subtitle = document.createElement("div");
+    subtitle.textContent = "Choose the AI that should pick up this conversation.";
+    subtitle.style.cssText = "margin-top:7px;color:rgba(240,236,245,0.62);font-size:12px;font-weight:500;line-height:1.42;letter-spacing:0";
     const badge = document.createElement("button");
     badge.type = "button";
-    badge.textContent = "Cap-Context";
+    badge.className = "context-generator-destination-about";
+    badge.textContent = "About ↗";
     badge.setAttribute("aria-label", "Open Cap-Context site");
     badge.style.cssText = [
-      "height:19px",
-      "padding:0 7px",
+      "height:26px",
+      "padding:0 10px",
       "border-radius:999px",
       "border:1px solid transparent",
-      "background:rgba(255,255,255,0.035)",
+      "background:rgba(255,255,255,0.045)",
       "box-shadow:none",
       "color:rgba(255,255,255,0.68)",
-      "font-size:10px",
-      "font-weight:500",
-      "line-height:19px",
+      "font-size:10.5px",
+      "font-weight:600",
+      "line-height:26px",
       "letter-spacing:0",
-      "font-family:Georgia,'Times New Roman',serif",
-      "text-rendering:geometricPrecision",
+      "font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif",
       "cursor:pointer",
       "outline:0",
       "transition:border-color 0.14s ease, background 0.14s ease, box-shadow 0.14s ease, color 0.14s ease"
@@ -4354,8 +4424,11 @@
       event.stopPropagation();
       window.location.assign(CAP_CONTEXT_SITE_URL);
     });
+    topLine.appendChild(brandLockup);
+    topLine.appendChild(badge);
+    header.appendChild(topLine);
     header.appendChild(title);
-    header.appendChild(badge);
+    header.appendChild(subtitle);
     sheet.appendChild(header);
 
     const options = Object.entries(PLATFORMS)
@@ -4363,7 +4436,8 @@
       .map(([id, platform]) => ({ ...platform, id }));
 
     const grid = document.createElement("div");
-    grid.style.cssText = "display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px";
+    grid.className = "context-generator-destination-grid";
+    grid.style.cssText = "display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px";
 
     options.forEach((option, index) => {
       const button = document.createElement("button");
@@ -4371,49 +4445,49 @@
       button.className = "context-generator-destination-tile";
       button.dataset.contextGeneratorAccent = option.accent;
       button.dataset.contextGeneratorDetail = option.detail;
+      button.setAttribute("aria-label", `Continue in ${option.name}`);
       button.style.cssText = [
         "width:100%",
-        "height:48px",
-        "border:1px solid rgba(255,255,255,0.115)",
-        "border-radius:11px",
-        "background:linear-gradient(180deg, #121212 0%, #0b0b0b 58%, #050505 100%)",
+        "height:76px",
+        "border:1px solid rgba(255,255,255,0.1)",
+        "border-radius:17px",
+        "background:linear-gradient(180deg,rgba(255,255,255,0.05),rgba(255,255,255,0.022))",
         "color:#ffffff",
         "display:flex",
         "align-items:center",
-        "gap:7px",
-        "padding:0 8px",
+        "gap:11px",
+        "padding:0 12px",
         "box-sizing:border-box",
         "cursor:pointer",
         "text-align:left",
         "font:inherit",
-        "outline:0",
         "position:relative",
         "overflow:hidden",
         "isolation:isolate",
-        "box-shadow:inset 0 1px 0 rgba(255,255,255,0.075), inset 0 -1px 0 rgba(0,0,0,0.54), 0 1px 0 rgba(255,255,255,0.02)",
-        "transition:transform 0.13s ease"
+        "box-shadow:inset 0 1px 0 rgba(255,255,255,0.055),inset 0 -1px 0 rgba(0,0,0,0.3),0 8px 20px rgba(0,0,0,0.08)",
+        "transition:transform 0.16s cubic-bezier(0.16,1,0.3,1),border-color 0.16s ease,background 0.16s ease,box-shadow 0.16s ease"
       ].join(";");
 
       const aura = document.createElement("span");
       aura.className = "context-generator-tile-aura";
       aura.style.cssText = [
         "position:absolute",
-        "left:9px",
-        "top:10px",
-        "bottom:10px",
-        "width:30px",
+        "left:-24px",
+        "top:-30px",
+        "bottom:-30px",
+        "width:130px",
         "z-index:0",
         "pointer-events:none",
         "border-radius:999px",
-        `background:radial-gradient(ellipse at 22% 50%, ${option.accent}24 0, ${option.accent}12 36%, ${option.accent}04 61%, transparent 80%)`,
-        "opacity:0.14",
-        "filter:blur(6px)",
+        `background:radial-gradient(ellipse at 30% 50%, ${option.accent}34 0, ${option.accent}16 40%, transparent 72%)`,
+        "opacity:0.24",
+        "filter:blur(10px)",
         "transform:translate3d(0,0,0) scaleX(1)",
         "transition:opacity 0.16s ease, left 0.16s ease, right 0.16s ease, width 0.16s ease, border-radius 0.16s ease, background 0.16s ease"
       ].join(";");
 
       const logoWrap = document.createElement("div");
-      logoWrap.style.cssText = "width:26px;height:26px;display:flex;align-items:center;justify-content:center;flex:0 0 auto;opacity:0.96;position:relative;z-index:2";
+      logoWrap.style.cssText = "width:40px;height:40px;display:flex;align-items:center;justify-content:center;box-sizing:border-box;flex:0 0 auto;opacity:0.98;position:relative;z-index:2;border:1px solid rgba(255,255,255,0.075);border-radius:12px;background:rgba(4,4,5,0.28);box-shadow:inset 0 1px 0 rgba(255,255,255,0.045)";
       const logo = document.createElement("img");
       logo.src = getExtensionAssetUrl(option.logo);
       logo.alt = "";
@@ -4422,14 +4496,14 @@
       logoWrap.appendChild(logo);
 
       const copy = document.createElement("div");
-      copy.style.cssText = "display:flex;flex-direction:column;gap:1px;min-width:0;flex:1;position:relative;z-index:2";
+      copy.style.cssText = "display:flex;flex-direction:column;gap:4px;min-width:0;flex:1;position:relative;z-index:2";
       const name = document.createElement("div");
       name.textContent = option.name;
-      name.style.cssText = "font-size:11.5px;font-weight:740;line-height:1.18;color:#ffffff;white-space:nowrap;overflow:hidden;text-overflow:ellipsis";
+      name.style.cssText = "font-size:13px;font-weight:720;line-height:1.15;color:#f8f6fa;white-space:nowrap;overflow:hidden;text-overflow:ellipsis";
       const detail = document.createElement("div");
       detail.className = "context-generator-tile-detail";
       detail.textContent = option.detail;
-      detail.style.cssText = "font-size:9.5px;font-weight:500;line-height:1.28;color:rgba(255,255,255,0.5);white-space:nowrap;overflow:hidden;text-overflow:ellipsis";
+      detail.style.cssText = "font-size:11px;font-weight:520;line-height:1.25;color:rgba(238,234,242,0.56);white-space:nowrap;overflow:hidden;text-overflow:ellipsis";
       copy.appendChild(name);
       copy.appendChild(detail);
 
@@ -4438,18 +4512,22 @@
       spinner.setAttribute("aria-hidden", "true");
 
       const setButtonActive = () => {
-        button.style.transform = "translateY(-1px) scale(1.025)";
+        button.style.background = `linear-gradient(135deg,${option.accent}1f,rgba(255,255,255,0.045) 64%,rgba(255,255,255,0.02))`;
+        button.style.borderColor = `${option.accent}66`;
+        button.style.boxShadow = `inset 0 1px 0 rgba(255,255,255,0.09),0 12px 30px rgba(0,0,0,0.16),0 0 24px ${option.accent}14`;
+        aura.style.opacity = "0.48";
+        button.style.transform = "translateY(-2px)";
       };
       const setButtonIdle = () => {
-        button.style.background = "linear-gradient(180deg, #121212 0%, #0b0b0b 58%, #050505 100%)";
-        button.style.borderColor = "rgba(255,255,255,0.115)";
-        button.style.boxShadow = "inset 0 1px 0 rgba(255,255,255,0.075), inset 0 -1px 0 rgba(0,0,0,0.54), 0 1px 0 rgba(255,255,255,0.02)";
-        aura.style.left = "9px";
+        button.style.background = "linear-gradient(180deg,rgba(255,255,255,0.05),rgba(255,255,255,0.022))";
+        button.style.borderColor = "rgba(255,255,255,0.1)";
+        button.style.boxShadow = "inset 0 1px 0 rgba(255,255,255,0.055),inset 0 -1px 0 rgba(0,0,0,0.3),0 8px 20px rgba(0,0,0,0.08)";
+        aura.style.left = "-24px";
         aura.style.right = "auto";
-        aura.style.width = "30px";
+        aura.style.width = "130px";
         aura.style.borderRadius = "999px";
-        aura.style.background = `radial-gradient(ellipse at 22% 50%, ${option.accent}24 0, ${option.accent}12 36%, ${option.accent}04 61%, transparent 80%)`;
-        aura.style.opacity = "0.14";
+        aura.style.background = `radial-gradient(ellipse at 30% 50%, ${option.accent}34 0, ${option.accent}16 40%, transparent 72%)`;
+        aura.style.opacity = "0.24";
         button.style.transform = "translateY(0)";
       };
 
@@ -4480,20 +4558,23 @@
     sheet.appendChild(grid);
 
     const footer = document.createElement("div");
+    footer.className = "context-generator-destination-helper";
     footer.textContent = DESTINATION_HELPER_TEXT;
     footer.style.cssText = [
-      "margin:9px 1px 1px",
-      "padding-top:7px",
-      "padding-bottom:1px",
+      "display:flex",
+      "align-items:center",
+      "justify-content:flex-start",
+      "gap:8px",
+      "margin:15px 3px 1px",
+      "padding-top:12px",
       "border-top:1px solid rgba(255,255,255,0.065)",
-      "color:rgba(255,255,255,0.42)",
-      "font-family:Georgia,'Times New Roman',serif",
-      "font-size:9.5px",
-      "font-weight:500",
+      "color:rgba(240,236,244,0.58)",
+      "font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif",
+      "font-size:11.5px",
+      "font-weight:540",
       "line-height:1.35",
       "letter-spacing:0",
-      "text-align:center",
-      "text-rendering:geometricPrecision",
+      "text-align:left",
       "white-space:nowrap",
       "overflow:hidden",
       "text-overflow:ellipsis"
@@ -4524,9 +4605,9 @@
       "z-index:2147483646",
       "inset:0",
       "pointer-events:none",
-      "background:rgba(8,7,11,0.20)",
-      "backdrop-filter:blur(6px) saturate(0.9)",
-      "-webkit-backdrop-filter:blur(6px) saturate(0.9)",
+      "background:rgba(7,6,10,0.34)",
+      "backdrop-filter:blur(7px) saturate(0.86)",
+      "-webkit-backdrop-filter:blur(7px) saturate(0.86)",
       "opacity:0",
       "will-change:opacity",
       "transition:opacity 0.18s cubic-bezier(0.16,1,0.3,1)"
@@ -4688,12 +4769,13 @@
 
     const bubbleRect = bubble.getBoundingClientRect();
     const margin = 10;
-    const sheetHeight = sheet.offsetHeight || 164;
+    const sheetWidth = Math.min(DESTINATION_SHEET_WIDTH, window.innerWidth - margin * 2);
+    const sheetHeight = sheet.offsetHeight || 330;
     const left = Math.max(
       margin,
       Math.min(
-        bubbleRect.right - DESTINATION_SHEET_WIDTH,
-        window.innerWidth - DESTINATION_SHEET_WIDTH - margin
+        bubbleRect.right - sheetWidth,
+        window.innerWidth - sheetWidth - margin
       )
     );
     const preferredTop = bubbleRect.top - sheetHeight - margin;
@@ -4731,17 +4813,17 @@
       tile.dataset.contextGeneratorLoading = "false";
       tile.removeAttribute("aria-busy");
       tile.style.pointerEvents = "";
-      tile.style.background = "linear-gradient(180deg, #121212 0%, #0b0b0b 58%, #050505 100%)";
-      tile.style.borderColor = "rgba(255,255,255,0.115)";
-      tile.style.boxShadow = "inset 0 1px 0 rgba(255,255,255,0.075), inset 0 -1px 0 rgba(0,0,0,0.54), 0 1px 0 rgba(255,255,255,0.02)";
+      tile.style.background = "linear-gradient(180deg,rgba(255,255,255,0.05),rgba(255,255,255,0.022))";
+      tile.style.borderColor = "rgba(255,255,255,0.1)";
+      tile.style.boxShadow = "inset 0 1px 0 rgba(255,255,255,0.055),inset 0 -1px 0 rgba(0,0,0,0.3),0 8px 20px rgba(0,0,0,0.08)";
       tile.style.transform = "translateY(0)";
       if (aura) {
-        aura.style.left = "9px";
+        aura.style.left = "-24px";
         aura.style.right = "auto";
-        aura.style.width = "30px";
+        aura.style.width = "130px";
         aura.style.borderRadius = "999px";
-        aura.style.background = `radial-gradient(ellipse at 22% 50%, ${accent}24 0, ${accent}12 36%, ${accent}04 61%, transparent 80%)`;
-        aura.style.opacity = "0.14";
+        aura.style.background = `radial-gradient(ellipse at 30% 50%, ${accent}34 0, ${accent}16 40%, transparent 72%)`;
+        aura.style.opacity = "0.24";
       }
       const detail = tile.querySelector(".context-generator-tile-detail");
       const spinner = tile.querySelector(".context-generator-tile-spinner");

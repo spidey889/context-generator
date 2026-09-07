@@ -31,6 +31,8 @@ Public claims must remain accurate: five supported AI platforms, a 350,000-chara
 6. Claude, Gemini, and DeepSeek can paste while inactive. ChatGPT and Grok activate only after the source completion cue, then perform their required focused paste.
 7. Paste is verified and leaves the composer focused. Cap Context never presses Send. Exhausted recovery produces one manual-copy fallback with truthful clipboard failure handling.
 
+The destination picker is a compact dark-glass decision surface anchored to the Cap Context bubble. It presents a clear question, four alternate AI destinations in a two-column grid, full-tile hover and keyboard focus feedback, a truthful user-controlled Send reassurance, and a one-column layout on narrow viewports. Opening it remains UI-only and does not capture chat content.
+
 The handoff is presented as a dark glass transfer capsule: a restrained ambient aurora establishes the brand moment, the live status remains the primary focal point, and a quiet divider separates it from the three real pipeline stages. The motion is decorative only, uses transform and opacity, and is disabled for reduced-motion users.
 
 The source lock has a six-minute safety reset. Background waits are 12 seconds for source startup, normally 30 seconds for destination messaging, 45 seconds for ChatGPT messaging, and 210 seconds for the backend request.

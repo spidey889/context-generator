@@ -1710,7 +1710,13 @@ test("destination picker blurs and releases the page background", () => {
   const pickerEnd = PLATFORM_CONTENT_SOURCE.indexOf("function warmDestinationConnections()", pickerStart);
   const pickerSource = PLATFORM_CONTENT_SOURCE.slice(pickerStart, pickerEnd);
 
-  assert.match(pickerSource, /backdrop-filter:blur\(6px\)/);
+  assert.match(pickerSource, /backdrop-filter:blur\(7px\)/);
+  assert.match(PLATFORM_CONTENT_SOURCE, /width:min\(\$\{DESTINATION_SHEET_WIDTH\}px,calc\(100vw - 20px\)\)/);
+  assert.match(PLATFORM_CONTENT_SOURCE, /sheetWidth = Math\.min\(DESTINATION_SHEET_WIDTH, window\.innerWidth - margin \* 2\)/);
+  assert.match(PLATFORM_CONTENT_SOURCE, /@media \(max-width: 390px\)/);
+  assert.match(PLATFORM_CONTENT_SOURCE, /context-generator-destination-tile:focus-visible/);
+  assert.match(PLATFORM_CONTENT_SOURCE, /Pasted into the input — you press Send/);
+  assert.match(PLATFORM_CONTENT_SOURCE, /button\.setAttribute\("aria-label", `Continue in \$\{option\.name\}`\)/);
   assert.match(pickerSource, /backdrop\.style\.display = "block"/);
   assert.match(pickerSource, /backdrop\.style\.display = "none"/);
 });

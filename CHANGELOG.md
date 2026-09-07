@@ -4,6 +4,8 @@ This is a condensed record of meaningful product and architecture changes. Git h
 
 ## 2026-09-07
 
+- Rewrote the README with a warmer, lightly witty user-facing voice while keeping installation and usage instructions intact, and preserved the previous version as `OLD_README_2.md`.
+- Rebuilt the destination picker as a larger dark-glass decision surface with clearer hierarchy, stronger platform identity, whole-tile hover and keyboard focus feedback, a truthful user-controlled Send reassurance, and an intentional one-column narrow-screen layout.
 - Redesigned the in-page handoff as a deeper dark-glass transfer capsule with restrained aurora lighting, editorial status hierarchy, and a quiet divider above the three-stage progress display. Kept all progress tied to the existing real capture, summary, and paste events and preserved reduced-motion behavior.
 - Restored and polished the minimal three-section homepage: centered the core story, simplified its copy, added a restrained shimmer to `everything`, improved link and touch behavior, and gave How it works a distinct low-glare plum surface.
 - Added a responsive HTML privacy experience and refined its typography, contact action, narrow-screen behavior, and public links.
