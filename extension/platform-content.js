@@ -4365,12 +4365,8 @@
     const title = document.createElement("div");
     title.id = "context-generator-destination-title";
     title.className = "context-generator-destination-title";
-    title.style.cssText = "font-family:'Cap Context EB Garamond',Georgia,'Times New Roman',serif;font-size:18px;font-weight:400;letter-spacing:-0.015em;color:#ffffff;line-height:1.05;text-rendering:geometricPrecision";
-    title.appendChild(document.createTextNode("Where to "));
-    const italicTitleWord = document.createElement("span");
-    italicTitleWord.textContent = "continue?";
-    italicTitleWord.style.fontStyle = "italic";
-    title.appendChild(italicTitleWord);
+    title.textContent = DESTINATION_TITLE_TEXT;
+    title.style.cssText = "font-family:'Cap Context EB Garamond',Georgia,'Times New Roman',serif;font-size:18px;font-style:italic;font-weight:400;letter-spacing:-0.015em;color:#ffffff;line-height:1.05;text-rendering:geometricPrecision";
     topLine.appendChild(brandLockup);
     header.appendChild(topLine);
     header.appendChild(title);
