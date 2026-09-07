@@ -492,7 +492,7 @@ async function run() {
     }, "Claude's page-load placement diagnostics");
     process.stdout.write(`ℹ Claude page-load geometry ${JSON.stringify(claudePlacementDiagnostics)}\n`);
     assert.equal(claudePlacementDiagnostics.state, "fresh-empty");
-    assert.equal(claudePlacementDiagnostics.deltas.visibleCenterY, 0);
+    assert.equal(claudePlacementDiagnostics.deltas.visibleCenterY, -1);
     assert.equal(claudePlacementDiagnostics.deltas.visibleGapX, 13);
     if (CLAUDE_PLACEMENT_SCREENSHOT_PATH) {
       const screenshot = await claudePlacementSession.call("Page.captureScreenshot", { format: "png" });

@@ -1941,9 +1941,9 @@ test("Claude fresh page keeps the visible orb connected to the voice controls", 
   const controlCenterY = voiceMode.rect.top + voiceMode.rect.height / 2;
 
   assert.equal(placement.left, 578);
-  assert.equal(placement.top, 57.5);
+  assert.equal(placement.top, 56.5);
   assert.equal(visibleArtworkGap, 13);
-  assert.equal(visibleArtworkCenterY, controlCenterY);
+  assert.equal(visibleArtworkCenterY, controlCenterY - 1);
 });
 
 test("Claude typed new-chat state keeps the existing placement for the later fix", () => {

@@ -4,7 +4,7 @@ This is a condensed record of meaningful product and architecture changes. Git h
 
 ## 2026-09-08
 
-- Refined the Cap Context orb on Claude's untouched `/new` composer using measured PNG artwork bounds: its visible center matches the native control row, and live visual review corrected the horizontal target to a connected 13px gap from the voice dropdown instead of the composer edge. Added opt-in geometry logs plus unit and isolated-Brave coverage, while leaving typed and existing-chat placement unchanged for later work.
+- Refined the Cap Context orb on Claude's untouched `/new` composer using measured PNG artwork bounds: it sits 1px above the exact optical center for a slightly more upbeat stance, while live visual review keeps a connected 13px gap from the voice dropdown. Added opt-in geometry logs plus unit and isolated-Brave coverage, while leaving typed and existing-chat placement unchanged for later work.
 - Fixed the Cap Context bubble sitting above Claude's control row and overlapping Send after typing. Claude placement now centers the bubble against its native controls and reacts when its stable composer swaps Voice and Send through visibility-only DOM changes; the isolated Brave smoke test covers both states.
 
 ## 2026-09-07

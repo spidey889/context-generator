@@ -48,6 +48,7 @@
   // gap to Claude's voice controls matches what the user actually sees.
   const CLAUDE_BUBBLE_ARTWORK_EDGE_INSET = 7;
   const CLAUDE_BUBBLE_ARTWORK_CENTER_Y_OFFSET = -0.5;
+  const CLAUDE_FRESH_BUBBLE_Y_NUDGE = -0.5;
   const CLAUDE_PLACEMENT_DEBUG_QUERY = "__cap_context_debug_placement";
   const CLAUDE_MODEL_LEFT_NUDGE = 48;
   const CLAUDE_SIDE_CONTROL_RIGHT_NUDGE = 52;
@@ -6339,7 +6340,7 @@
       const top = getClaudeBubbleTop(
         anchorControl.rect,
         composerRect,
-        isFreshEmptyComposer ? -CLAUDE_BUBBLE_ARTWORK_CENTER_Y_OFFSET : 0
+        isFreshEmptyComposer ? CLAUDE_FRESH_BUBBLE_Y_NUDGE : 0
       );
 
       return {
