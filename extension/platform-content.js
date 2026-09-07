@@ -8,7 +8,6 @@
   const CLAUDE_LIMIT_NUDGE_ID = "context-generator-claude-limit-nudge";
   const DESTINATION_SHEET_ID = "context-generator-destination-sheet";
   const DESTINATION_SHEET_BACKDROP_ID = "context-generator-destination-backdrop";
-  const DESTINATION_MIST_ID = "context-generator-destination-mist";
   const DESTINATION_SHEET_STYLE_ID = "context-generator-destination-sheet-styles";
   const LAST_TRANSFER_STATS_STORAGE_KEY = "context-generator-last-transfer-stats-v1";
   const RAW_TRANSCRIPT_RETENTION_MS = 24 * 60 * 60 * 1000;
@@ -4234,51 +4233,6 @@
         }
       }
 
-      @keyframes contextGeneratorMistDriftA {
-        0%, 100% { transform: translate3d(-7px, 5px, 0) rotate(-7deg) scale(0.88); opacity: 0.2; }
-        48% { transform: translate3d(7px, -5px, 0) rotate(5deg) scale(1.08); opacity: 0.55; }
-      }
-
-      @keyframes contextGeneratorMistDriftB {
-        0%, 100% { transform: translate3d(8px, 7px, 0) rotate(8deg) scale(0.92); opacity: 0.16; }
-        52% { transform: translate3d(-8px, -7px, 0) rotate(-5deg) scale(1.04); opacity: 0.44; }
-      }
-
-      @keyframes contextGeneratorMistDriftC {
-        0%, 100% { transform: translate3d(-2px, 8px, 0) scale(0.78); opacity: 0.12; }
-        45% { transform: translate3d(3px, -9px, 0) scale(1.1); opacity: 0.38; }
-      }
-
-      .context-generator-mist-wisp {
-        position: absolute;
-        pointer-events: none;
-        border-radius: 50%;
-        mix-blend-mode: screen;
-        opacity: 0.28;
-        will-change: transform, opacity;
-      }
-
-      .context-generator-mist-wisp:nth-child(1) {
-        inset: 2px 12px 8px 5px;
-        background: radial-gradient(ellipse at 58% 54%, rgba(177,132,245,0.36) 0%, rgba(123,78,199,0.2) 31%, transparent 72%);
-        filter: blur(8px);
-        animation: contextGeneratorMistDriftA 3.4s ease-in-out infinite;
-      }
-
-      .context-generator-mist-wisp:nth-child(2) {
-        inset: 10px 2px 1px 20px;
-        background: radial-gradient(ellipse at 42% 48%, rgba(134,91,211,0.3) 0%, rgba(91,54,157,0.15) 40%, transparent 74%);
-        filter: blur(10px);
-        animation: contextGeneratorMistDriftB 4.1s ease-in-out infinite;
-      }
-
-      .context-generator-mist-wisp:nth-child(3) {
-        inset: 1px 25px 18px 17px;
-        background: radial-gradient(ellipse, rgba(218,191,255,0.28) 0%, rgba(151,105,221,0.1) 44%, transparent 76%);
-        filter: blur(6px);
-        animation: contextGeneratorMistDriftC 2.9s ease-in-out infinite;
-      }
-
       .context-generator-destination-tile.context-generator-tile-enter {
         animation: contextGeneratorTileIn 0.18s cubic-bezier(0.16, 1, 0.3, 1) both;
       }
@@ -4349,10 +4303,6 @@
 
         .context-generator-tile-spinner {
           animation: none;
-        }
-
-        .context-generator-mist-wisp {
-          animation: none !important;
         }
       }
     `;
@@ -4612,38 +4562,6 @@
     return backdrop;
   }
 
-  function ensureDestinationMist() {
-    let mist = document.getElementById(DESTINATION_MIST_ID);
-    if (mist) return mist;
-
-    mist = document.createElement("div");
-    mist.id = DESTINATION_MIST_ID;
-    mist.className = "context-generator-destination-mist";
-    mist.dataset.contextGeneratorOwned = "true";
-    mist.setAttribute("aria-hidden", "true");
-    mist.style.cssText = [
-      "display:none",
-      "position:fixed",
-      "z-index:2147483647",
-      "width:82px",
-      "height:68px",
-      "pointer-events:none",
-      "overflow:visible",
-      "opacity:0",
-      "transform:translate3d(0,5px,0) scale(0.9)",
-      "transform-origin:center",
-      "will-change:transform,opacity",
-      "transition:opacity 0.24s ease,transform 0.34s cubic-bezier(0.16,1,0.3,1)"
-    ].join(";");
-    for (let index = 0; index < 3; index += 1) {
-      const wisp = document.createElement("span");
-      wisp.className = "context-generator-mist-wisp";
-      mist.appendChild(wisp);
-    }
-    document.body.appendChild(mist);
-    return mist;
-  }
-
   function toggleDestinationSheet() {
     hideOnboardingNudge();
     hideClaudeLimitNudge();
@@ -4655,7 +4573,6 @@
 
     const sheet = ensureDestinationSheet();
     const backdrop = ensureDestinationSheetBackdrop();
-    const mist = ensureDestinationMist();
     clearTimeout(destinationSheetHideTimer);
     clearTimeout(destinationBackdropHideTimer);
     destinationSheetHideTimer = null;
@@ -4669,10 +4586,6 @@
     sheet.style.display = "block";
     delete sheet.dataset.contextGeneratorPositionLocked;
     positionDestinationSheet();
-    positionDestinationMist();
-    mist.style.display = "block";
-    mist.style.opacity = "0";
-    mist.style.transform = "translate3d(0,5px,0) scale(0.9)";
     resetDestinationTiles(sheet);
     animateDestinationTiles(sheet);
     warmDestinationConnections();
@@ -4680,16 +4593,12 @@
       backdrop.style.opacity = "1";
       sheet.style.opacity = "1";
       sheet.style.transform = "translate3d(0,0,0) scale(1)";
-      mist.style.opacity = "0.7";
-      mist.style.transform = "translate3d(0,0,0) scale(1)";
       return;
     }
     destinationSheetAnimationFrame = requestAnimationFrame(() => {
       backdrop.style.opacity = "1";
       sheet.style.opacity = "1";
       sheet.style.transform = "translate3d(0,0,0) scale(1)";
-      mist.style.opacity = "0.7";
-      mist.style.transform = "translate3d(0,0,0) scale(1)";
       destinationSheetAnimationFrame = null;
     });
   }
@@ -4697,7 +4606,6 @@
   function hideDestinationSheet({ immediate = false, preserveBackdrop = false } = {}) {
     const sheet = document.getElementById(DESTINATION_SHEET_ID);
     const backdrop = document.getElementById(DESTINATION_SHEET_BACKDROP_ID);
-    const mist = document.getElementById(DESTINATION_MIST_ID);
     const reducedMotion = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
     const shouldAnimate = !immediate && !reducedMotion;
 
@@ -4718,17 +4626,6 @@
         }, DESTINATION_SHEET_EXIT_MS);
       } else {
         sheet.style.display = "none";
-      }
-    }
-    if (mist) {
-      mist.style.opacity = "0";
-      mist.style.transform = "translate3d(0,5px,0) scale(0.9)";
-      if (shouldAnimate && mist.style.display === "block") {
-        window.setTimeout(() => {
-          if (mist.style.opacity === "0") mist.style.display = "none";
-        }, DESTINATION_SHEET_EXIT_MS);
-      } else {
-        mist.style.display = "none";
       }
     }
 
@@ -4829,26 +4726,6 @@
     sheet.style.top = `${Math.round(Math.min(top, window.innerHeight - sheetHeight - margin))}px`;
     sheet.style.transformOrigin = preferredTop >= margin ? "bottom right" : "top right";
     sheet.dataset.contextGeneratorPositionLocked = "true";
-  }
-
-  function positionDestinationMist() {
-    const mist = document.getElementById(DESTINATION_MIST_ID);
-    const sheet = document.getElementById(DESTINATION_SHEET_ID);
-    const bubble = document.getElementById(BUBBLE_ID);
-    if (!mist || !sheet || !bubble) return;
-
-    const bubbleRect = bubble.getBoundingClientRect();
-    const sheetLeft = Number.parseFloat(sheet.style.left);
-    const sheetTop = Number.parseFloat(sheet.style.top);
-    if (!Number.isFinite(sheetLeft) || !Number.isFinite(sheetTop)) return;
-
-    const sheetBottom = sheetTop + sheet.offsetHeight;
-    const sheetIsAbove = sheetBottom <= bubbleRect.top + 2;
-    const connectionY = sheetIsAbove
-      ? (sheetBottom + bubbleRect.top) / 2
-      : (bubbleRect.bottom + sheetTop) / 2;
-    mist.style.left = `${Math.round(bubbleRect.left + bubbleRect.width / 2 - 41)}px`;
-    mist.style.top = `${Math.round(connectionY - 34)}px`;
   }
 
   function animateDestinationTiles(sheet) {
