@@ -1,4 +1,5 @@
 .vercel
+.gstack/
 .env*
 node_modules/
 package-lock.json
@@ -9,4 +10,3 @@ extension/firefox.zip
 /.live-site-profile/
 *Backup authentication codes.txt
 memory.md
-OLD_README.md
