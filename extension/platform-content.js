@@ -4228,17 +4228,11 @@
       .context-generator-destination-tile::after {
         content: "→";
         display: flex;
-        width: 28px;
-        height: 28px;
         align-items: center;
         justify-content: center;
-        box-sizing: border-box;
         flex: 0 0 auto;
         position: relative;
         z-index: 2;
-        border: 1px solid rgba(255,255,255,0.08);
-        border-radius: 999px;
-        background: rgba(255,255,255,0.025);
         color: rgba(255,255,255,0.38);
         font-size: 14px;
         line-height: 1;
@@ -4248,8 +4242,6 @@
 
       .context-generator-destination-tile:hover::after,
       .context-generator-destination-tile:focus-visible::after {
-        border-color: rgba(255,255,255,0.16);
-        background: rgba(255,255,255,0.07);
         color: rgba(255,255,255,0.9);
         transform: translate3d(2px,0,0);
       }
