@@ -55,7 +55,7 @@
   ],
   "web_accessible_resources": [
     {
-      "resources": ["icon16.png", "icon48.png", "icon128.png", "bubble-icon.png", "logos/*.png"],
+      "resources": ["icon16.png", "icon48.png", "icon128.png", "bubble-icon.png", "logos/*.png", "fonts/*.woff2"],
       "matches": [
         "https://claude.ai/*",
         "https://chatgpt.com/*",

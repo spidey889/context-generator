@@ -4198,6 +4198,14 @@
     const style = document.createElement("style");
     style.id = DESTINATION_SHEET_STYLE_ID;
     style.textContent = `
+      @font-face {
+        font-family: "Cap Context EB Garamond";
+        src: url("${chrome.runtime.getURL("fonts/EBGaramond-Regular.woff2")}") format("woff2");
+        font-style: normal;
+        font-weight: 400;
+        font-display: swap;
+      }
+
       @keyframes contextGeneratorTileIn {
         from {
           opacity: 0;
@@ -4350,7 +4358,7 @@
     title.id = "context-generator-destination-title";
     title.className = "context-generator-destination-title";
     title.textContent = DESTINATION_TITLE_TEXT;
-    title.style.cssText = "font-family:Georgia,'Times New Roman',serif;font-size:18px;font-weight:500;letter-spacing:-0.015em;color:#ffffff;line-height:1.05;text-rendering:geometricPrecision";
+    title.style.cssText = "font-family:'Cap Context EB Garamond',Georgia,'Times New Roman',serif;font-size:18px;font-weight:400;letter-spacing:-0.015em;color:#ffffff;line-height:1.05;text-rendering:geometricPrecision";
     topLine.appendChild(brandLockup);
     header.appendChild(topLine);
     header.appendChild(title);
