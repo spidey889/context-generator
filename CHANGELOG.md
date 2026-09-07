@@ -4,7 +4,6 @@ This is a condensed record of meaningful product and architecture changes. Git h
 
 ## 2026-09-07
 
-- Added a restrained animated purple mist bridge between the Cap Context bubble and destination picker, with a static reduced-motion treatment.
 - Rewrote the README with a warmer, lightly witty user-facing voice while keeping installation and usage instructions intact, and preserved the previous version as `OLD_README_2.md`.
 - Rebuilt the destination picker as a compact dark-glass decision surface with a stronger title, left-aligned Cap Context mark, stronger platform identity, whole-tile hover and keyboard focus feedback, restored input-box helper copy, and an intentional one-column narrow-screen layout.
 - Redesigned the in-page handoff as a deeper dark-glass transfer capsule with restrained aurora lighting, editorial status hierarchy, and a quiet divider above the three-stage progress display. Kept all progress tied to the existing real capture, summary, and paste events and preserved reduced-motion behavior.
