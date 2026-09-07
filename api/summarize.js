@@ -11,9 +11,11 @@ const PROVIDER_RETRY_INTERVAL_MS = 450;
 const PROVIDER_ATTEMPT_TIMEOUT_MS = 80000;
 const SUMMARY_HEARTBEAT_INTERVAL_MS = 15000;
 const SUMMARY_HEARTBEAT_CHUNK = `\n${" ".repeat(2048)}\n`;
-const GEMINI_PRIMARY_MODEL = "gemini-3.6-flash";
-const GEMINI_FALLBACK_MODEL = "gemini-3.5-flash";
-const GEMINI_MODEL_CHAIN = [GEMINI_PRIMARY_MODEL, GEMINI_FALLBACK_MODEL];
+const GEMINI_PRIMARY_MODEL = "gemini-3.8-flash";
+const GEMINI_FALLBACK_MODELS = ["gemini-3.7-flash", "gemini-3.6-flash", "gemini-3.5-flash"];
+const GEMINI_MODEL_CHAIN = [GEMINI_PRIMARY_MODEL, ...GEMINI_FALLBACK_MODELS];
+// Keep the expanded Gemini chain inside the original end-to-end provider budget.
+const GEMINI_CHAIN_BUDGET_MS = 90000;
 const GEMINI_GENERATE_CONTENT_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/models";
 const MISTRAL_CHAT_COMPLETIONS_URL = "https://api.mistral.ai/v1/chat/completions";
 const GROQ_CHAT_COMPLETIONS_URL = "https://api.groq.com/openai/v1/chat/completions";
@@ -24,7 +26,7 @@ const MISTRAL_MODEL_CHAIN = [MISTRAL_PRIMARY_MODEL, ...MISTRAL_FALLBACK_MODELS];
 const GROQ_FALLBACK_MODEL = "llama-3.1-8b-instant";
 const PROVIDER_REQUEST_BUDGETS_MS = {
   [GEMINI_PRIMARY_MODEL]: 45000,
-  [GEMINI_FALLBACK_MODEL]: 45000,
+  ...Object.fromEntries(GEMINI_FALLBACK_MODELS.map((model) => [model, 45000])),
   [MISTRAL_PRIMARY_MODEL]: 55000,
   "mistral-large-2512": 40000,
   "ministral-3b-2512": 25000,
@@ -385,6 +387,7 @@ module.exports.__test = {
   validateContextCarrySummary,
   getMinimumValidSummaryWords,
   getProviderRequestBudgetMs,
+  GEMINI_CHAIN_BUDGET_MS,
   getGeminiGenerationBudget,
   stripContextCarryFooter,
   countWords,
@@ -413,7 +416,10 @@ async function createSummaryWithFallback({
   let lastProviderFailure = null;
 
   if (geminiApiKey) {
+    const geminiDeadline = Date.now() + GEMINI_CHAIN_BUDGET_MS;
     for (const [index, model] of GEMINI_MODEL_CHAIN.entries()) {
+      const remainingGeminiBudgetMs = geminiDeadline - Date.now();
+      if (remainingGeminiBudgetMs <= 0) break;
       const geminiStartedAt = Date.now();
       modelsTried.push(model);
 
@@ -423,7 +429,8 @@ async function createSummaryWithFallback({
           apiKey: geminiApiKey,
           profile,
           model,
-          initialMessages: geminiMessages
+          initialMessages: geminiMessages,
+          requestBudgetMs: Math.min(getProviderRequestBudgetMs(model), remainingGeminiBudgetMs)
         });
         const failedModels = modelsTried.slice(0, -1);
         const modelReason = failedModels.length
@@ -578,7 +585,7 @@ async function createSummaryWithFallback({
   }
 }
 
-async function createSummaryWithProvider({ provider, apiKey, profile, model, initialMessages }) {
+async function createSummaryWithProvider({ provider, apiKey, profile, model, initialMessages, requestBudgetMs }) {
   const providerStartedAt = Date.now();
   const initialStartedAt = Date.now();
   const initialResponse = await requestProviderSummary(
@@ -587,7 +594,7 @@ async function createSummaryWithProvider({ provider, apiKey, profile, model, ini
     initialMessages,
     profile,
     model,
-    { promptCacheKey: getProviderPromptCacheKey(provider, model, profile) }
+    { promptCacheKey: getProviderPromptCacheKey(provider, model, profile), requestBudgetMs }
   );
   const initialMs = Date.now() - initialStartedAt;
 
@@ -673,7 +680,7 @@ function requestProviderSummary(provider, apiKey, messages, profile, model, opti
     method: "POST",
     headers,
     body: JSON.stringify(body)
-  }, getProviderRequestBudgetMs(model));
+  }, options.requestBudgetMs ?? getProviderRequestBudgetMs(model));
 }
 
 function getProviderRequestBody(provider, messages, profile, model) {
@@ -848,7 +855,7 @@ function getGeneratedModelSelection(conversation, geminiConfigured) {
 
   return {
     model: GEMINI_PRIMARY_MODEL,
-    reason: `generated summaries start with ${GEMINI_PRIMARY_MODEL}, then ${GEMINI_FALLBACK_MODEL}, before the preserved Mistral and Groq fallbacks`,
+    reason: `generated summaries try ${GEMINI_MODEL_CHAIN.join(", then ")}, before the preserved Mistral and Groq fallbacks`,
     inputChars,
     thresholdChars: null,
     override: false

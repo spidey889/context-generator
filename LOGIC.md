@@ -58,7 +58,7 @@ Chats at or below 1,200 characters use provider-free `local-direct` output. Larg
 | Large | 60,001-210,000 | ~1,200 words | 4,200 | 14,000 |
 | Extra-large | 210,001-350,000 | ~1,800 words | 7,000 | 20,000 |
 
-Generated summaries try `gemini-3.6-flash`, `gemini-3.5-flash`, `mistral-medium-3-5`, `mistral-large-2512`, `ministral-3b-2512`, then optional Groq `llama-3.1-8b-instant`. Per-model budgets are 45, 45, 55, 40, 25, and 15 seconds. Provider fetches have an 80-second abort ceiling; the Vercel function allows 240 seconds and the extension aborts at 210 seconds. The backend streams whitespace heartbeats every 15 seconds after the first 15 seconds, while the worker performs a harmless runtime call every 25 seconds.
+Generated summaries try `gemini-3.8-flash`, `gemini-3.7-flash`, `gemini-3.6-flash`, `gemini-3.5-flash`, `mistral-medium-3-5`, `mistral-large-2512`, `ministral-3b-2512`, then optional Groq `llama-3.1-8b-instant`. Each Gemini request may use up to 45 seconds, with 90 seconds shared across the Gemini family; Mistral/Groq budgets are 55, 40, 25, and 15 seconds. Provider fetches have an 80-second abort ceiling; the Vercel function allows 240 seconds and the extension aborts at 210 seconds. The backend streams whitespace heartbeats every 15 seconds after the first 15 seconds, while the worker performs a harmless runtime call every 25 seconds.
 
 The transcript is JSON-serialized as untrusted user data. Output must contain the exact Context Carry title, all seven sections once and in order, meaningful continuation state, sufficient profile-based length, and the destination confirmation. Normalization may repair formatting but cannot invent sections or facts. Invalid output advances to the next provider.
 
