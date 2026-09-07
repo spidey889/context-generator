@@ -4494,7 +4494,7 @@
       "padding-top:9px",
       "border-top:1px solid rgba(255,255,255,0.065)",
       "color:rgba(240,236,244,0.58)",
-      "font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif",
+      "font-family:Georgia,'Times New Roman',serif",
       "font-size:11.5px",
       "font-weight:540",
       "line-height:1.35",
