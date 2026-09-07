@@ -4,7 +4,7 @@ This is a condensed record of meaningful product and architecture changes. Git h
 
 ## 2026-09-07
 
-- Redesigned the in-page handoff as a deeper dark-glass transfer capsule with restrained aurora lighting, editorial status hierarchy, and a dedicated translucent three-stage progress tray. Kept all progress tied to the existing real capture, summary, and paste events and preserved reduced-motion behavior.
+- Redesigned the in-page handoff as a deeper dark-glass transfer capsule with restrained aurora lighting, editorial status hierarchy, and a quiet divider above the three-stage progress display. Kept all progress tied to the existing real capture, summary, and paste events and preserved reduced-motion behavior.
 - Restored and polished the minimal three-section homepage: centered the core story, simplified its copy, added a restrained shimmer to `everything`, improved link and touch behavior, and gave How it works a distinct low-glare plum surface.
 - Added a responsive HTML privacy experience and refined its typography, contact action, narrow-screen behavior, and public links.
 - Updated the regression workflow to current checkout/setup actions with read-only permissions. Fixed clean-checkout licensing coverage and typographic-dash matching in live evaluation.

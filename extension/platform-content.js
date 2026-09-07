@@ -4982,12 +4982,9 @@
         "grid-template-columns:repeat(3,minmax(0,1fr))",
         "width:100%",
         "margin:0 auto",
-        "padding:16px 8px 8px",
+        "padding:16px 2px 0",
         "box-sizing:border-box",
-        "border:1px solid rgba(255,255,255,0.085)",
-        "border-radius:19px",
-        "background:linear-gradient(180deg,rgba(255,255,255,0.055),rgba(255,255,255,0.026))",
-        "box-shadow:inset 0 1px 0 rgba(255,255,255,0.045),0 12px 28px rgba(0,0,0,0.13)",
+        "border-top:1px solid rgba(255,255,255,0.09)",
         "align-items:start"
       ].join(";");
 
