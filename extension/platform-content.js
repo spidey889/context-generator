@@ -48,7 +48,7 @@
   // gap to Claude's voice controls matches what the user actually sees.
   const CLAUDE_BUBBLE_ARTWORK_EDGE_INSET = 7;
   const CLAUDE_BUBBLE_ARTWORK_CENTER_Y_OFFSET = -0.5;
-  const CLAUDE_FRESH_BUBBLE_Y_NUDGE = -0.5;
+  const CLAUDE_EMPTY_COMPOSER_Y_NUDGE = -0.5;
   const CLAUDE_PLACEMENT_DEBUG_QUERY = "__cap_context_debug_placement";
   const CLAUDE_MODEL_LEFT_NUDGE = 48;
   const CLAUDE_SIDE_CONTROL_RIGHT_NUDGE = 52;
@@ -6318,6 +6318,7 @@
     const controls = getClaudeComposerControlCandidates(composerRect);
     const anchorControl = findClaudeVoiceModeControl(controls) || findClaudeInlineFallbackControl(controls);
     const isFreshEmptyComposer = isClaudeFreshEmptyComposer(input);
+    const shouldLiftEmptyComposer = isFreshEmptyComposer || isClaudeExistingChatEmptyComposer(input);
 
     if (anchorControl) {
       const currentOffset = getClaudeCurrentControlOffset(anchorControl);
@@ -6340,7 +6341,7 @@
       const top = getClaudeBubbleTop(
         anchorControl.rect,
         composerRect,
-        isFreshEmptyComposer ? CLAUDE_FRESH_BUBBLE_Y_NUDGE : 0
+        shouldLiftEmptyComposer ? CLAUDE_EMPTY_COMPOSER_Y_NUDGE : 0
       );
 
       return {
@@ -6433,7 +6434,15 @@
   }
 
   function isClaudeFreshEmptyComposer(input) {
-    if (window.location.pathname !== "/new" || !input) return false;
+    return window.location.pathname === "/new" && isClaudeComposerEmpty(input);
+  }
+
+  function isClaudeExistingChatEmptyComposer(input) {
+    return window.location.pathname.startsWith("/chat/") && isClaudeComposerEmpty(input);
+  }
+
+  function isClaudeComposerEmpty(input) {
+    if (!input) return false;
     const value = /^(input|textarea)$/.test(input.localName || "")
       ? input.value
       : input.innerText || input.textContent;
@@ -6462,7 +6471,9 @@
     const round = (value) => Math.round(value * 100) / 100;
     const diagnostics = {
       route: window.location.pathname,
-      state: isClaudeFreshEmptyComposer(input) ? "fresh-empty" : "other",
+      state: isClaudeFreshEmptyComposer(input)
+        ? "fresh-empty"
+        : isClaudeExistingChatEmptyComposer(input) ? "existing-chat-empty" : "other",
       composer: {
         left: round(composerRect.left),
         top: round(composerRect.top),

@@ -500,6 +500,25 @@ async function run() {
       await fs.promises.writeFile(CLAUDE_PLACEMENT_SCREENSHOT_PATH, Buffer.from(screenshot.data, "base64"));
       process.stdout.write(`ℹ Claude placement screenshot ${CLAUDE_PLACEMENT_SCREENSHOT_PATH}\n`);
     }
+    await claudePlacementSession.evaluate(`(() => {
+      history.replaceState(null, "", "/chat/smoke?${SMOKE_PLATFORM_QUERY}=claude&__cap_context_debug_placement=1");
+      document.getElementById("claude-composer").classList.add("existing-chat");
+    })()`);
+    const claudeExistingChatDiagnostics = await waitFor(() => {
+      const events = claudePlacementSession.getRecentEvents().slice().reverse();
+      for (const event of events) {
+        if (event.method !== "Runtime.consoleAPICalled"
+          || event.params?.args?.[0]?.value !== "[Context Generator] Claude placement") continue;
+        const serialized = event.params?.args?.[1]?.value;
+        if (!serialized) continue;
+        const diagnostics = JSON.parse(serialized);
+        if (diagnostics.route === "/chat/smoke") return diagnostics;
+      }
+      return null;
+    }, "Claude's existing-chat placement diagnostics");
+    assert.equal(claudeExistingChatDiagnostics.state, "existing-chat-empty");
+    assert.equal(claudeExistingChatDiagnostics.deltas.visibleCenterY, -1);
+    assert.equal(claudeExistingChatDiagnostics.deltas.visibleGapX, 13);
     const claudeEmptyAlignment = await claudePlacementSession.evaluate(`(() => {
       const bubble = document.getElementById("context-generator-bubble").getBoundingClientRect();
       const voice = document.getElementById("voice").getBoundingClientRect();
