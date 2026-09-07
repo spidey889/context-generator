@@ -448,6 +448,8 @@
   let geminiPlacementResizeTargets = [];
   let claudePlacementResizeObserver = null;
   let claudePlacementResizeTargets = [];
+  let claudePlacementMutationObserver = null;
+  let claudePlacementMutationRoot = null;
   let pastedContentCardAttempts = new WeakMap();
   // Detail panels are portaled outside the message DOM. Keep their payload tied
   // to the inner user node, then rejoin it to whichever containing turn wins.
@@ -563,6 +565,7 @@
       syncGrokPlacementResizeMonitoring,
       syncDeepSeekPlacementResizeMonitoring,
       syncGeminiPlacementResizeMonitoring,
+      syncClaudePlacementResizeMonitoring,
       prepareSourceForCapture,
       expandCollapsedConversationContent,
       getConversationTurns,
@@ -3270,6 +3273,7 @@
       hideDestinationSheet();
       releaseBubbleSlot();
       releaseComposerSurface();
+      clearClaudePlacementMonitoring();
       return existingBubble;
     }
 
@@ -6127,7 +6131,7 @@
       stopGrokPlacementResizeMonitoring();
       stopDeepSeekPlacementResizeMonitoring();
       stopGeminiPlacementResizeMonitoring();
-      stopClaudePlacementResizeMonitoring();
+      clearClaudePlacementMonitoring();
       clearChatGptPlacementResizeMonitoring();
       return;
     }
@@ -6323,7 +6327,7 @@
         BUBBLE_GAP,
         maxLeft
       );
-      const top = getBubblePlacementBesideRect(anchorControl.rect, composerRect, left).top;
+      const top = getClaudeBubbleTop(anchorControl.rect, composerRect);
 
       return {
         left: Math.round(left),
@@ -6412,6 +6416,19 @@
 
   function getClaudeComposerControlRowTop(composerRect) {
     return composerRect.bottom - Math.max(72, composerRect.height * 0.62);
+  }
+
+  function getClaudeBubbleTop(targetRect, composerRect) {
+    const centeredTop = targetRect.top + (targetRect.height - BUBBLE_SIZE) / 2 - composerRect.top;
+    // Claude's control row can sit flush with the bottom of a shallower inner
+    // surface. Allow only the natural half-height overflow needed to keep the
+    // larger Cap Context bubble centered on the native control.
+    const bottomOverflow = Math.max(0, (BUBBLE_SIZE - targetRect.height) / 2);
+    const maxTop = Math.max(
+      BUBBLE_GAP,
+      composerRect.height - BUBBLE_SIZE + bottomOverflow
+    );
+    return Math.round(clampNumber(centeredTop, BUBBLE_GAP, maxTop));
   }
 
   function findChatGptModelSelectorButton(input, composerSurface, composerRect, inputRect = null) {
@@ -7244,6 +7261,8 @@
   }
 
   function syncClaudePlacementResizeMonitoring(input, composerSurface) {
+    syncClaudePlacementMutationMonitoring(input, composerSurface);
+
     if (currentPlatform.id !== "claude" || typeof ResizeObserver === "undefined") {
       stopClaudePlacementResizeMonitoring();
       return;
@@ -7267,6 +7286,44 @@
     claudePlacementResizeObserver?.disconnect();
     claudePlacementResizeObserver = null;
     claudePlacementResizeTargets = [];
+  }
+
+  function syncClaudePlacementMutationMonitoring(input, composerSurface) {
+    if (
+      currentPlatform.id !== "claude" ||
+      typeof MutationObserver === "undefined"
+    ) {
+      stopClaudePlacementMutationMonitoring();
+      return;
+    }
+
+    const root = composerSurface?.contains?.(input) ? composerSurface : input;
+    if (!root || root === claudePlacementMutationRoot) return;
+
+    stopClaudePlacementMutationMonitoring();
+    claudePlacementMutationRoot = root;
+    // Claude keeps Voice and Send mounted, then swaps their visibility through
+    // ancestor classes without changing composer geometry or child nodes.
+    claudePlacementMutationObserver = new MutationObserver((mutations) => {
+      if (mutations.every(isOwnDomMutation)) return;
+      scheduleFloatingButtonUpdate();
+    });
+    claudePlacementMutationObserver.observe(root, {
+      attributes: true,
+      subtree: true,
+      attributeFilter: ["class", "style", "aria-hidden", "hidden", "data-state"]
+    });
+  }
+
+  function stopClaudePlacementMutationMonitoring() {
+    claudePlacementMutationObserver?.disconnect();
+    claudePlacementMutationObserver = null;
+    claudePlacementMutationRoot = null;
+  }
+
+  function clearClaudePlacementMonitoring() {
+    stopClaudePlacementResizeMonitoring();
+    stopClaudePlacementMutationMonitoring();
   }
 
   function syncChatGptPlacementResizeMonitoring(input, composerSurface) {
@@ -7619,7 +7676,7 @@
     stopGrokPlacementResizeMonitoring();
     stopDeepSeekPlacementResizeMonitoring();
     stopGeminiPlacementResizeMonitoring();
-    stopClaudePlacementResizeMonitoring();
+    clearClaudePlacementMonitoring();
     clearChatGptPlacementResizeMonitoring();
 
     window.removeEventListener("resize", scheduleFloatingButtonUpdate);

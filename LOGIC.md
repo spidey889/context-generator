@@ -76,7 +76,7 @@ One Latest Run receipt in `chrome.storage.local` keeps timing, size, profile, pr
 
 ## Placement and Paste
 
-Placement is intentionally platform-specific: Claude near voice controls, ChatGPT as a fixed bubble left of the model selector, Gemini left of Pro/Flash, Grok beside its mode selector, and DeepSeek near attachment controls. Keep placement fixes scoped to their platform.
+Placement is intentionally platform-specific: Claude centered beside its voice controls, ChatGPT as a fixed bubble left of the model selector, Gemini left of Pro/Flash, Grok beside its mode selector, and DeepSeek near attachment controls. Claude also watches class and style changes inside its stable composer because Voice and Send can swap visibility without resizing or remounting the DOM; that refresh keeps the active control clear of the bubble. Keep placement fixes scoped to their platform.
 
 Paste uses native setters/events, contenteditable insertion, and stability checks. Firefox alone converts contenteditable line breaks to escaped HTML `<br>` elements. Chrome/Brave and textarea/input paths remain unchanged.
 

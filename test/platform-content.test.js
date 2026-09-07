@@ -212,6 +212,7 @@ class FakeHTMLInputElement {
 function loadPlatformContent(elements = [], hostname = "chatgpt.com", { expectSupported = true } = {}) {
   let hooks = null;
   const resizeObservers = [];
+  const mutationObservers = [];
   class TestResizeObserver {
     constructor(callback) {
       this.callback = callback;
@@ -221,6 +222,21 @@ function loadPlatformContent(elements = [], hostname = "chatgpt.com", { expectSu
 
     observe(element) {
       this.observed.push(element);
+    }
+
+    disconnect() {
+      this.observed = [];
+    }
+  }
+  class TestMutationObserver {
+    constructor(callback) {
+      this.callback = callback;
+      this.observed = [];
+      mutationObservers.push(this);
+    }
+
+    observe(element, options) {
+      this.observed.push({ element, options });
     }
 
     disconnect() {
@@ -291,6 +307,7 @@ function loadPlatformContent(elements = [], hostname = "chatgpt.com", { expectSu
     HTMLTextAreaElement: FakeHTMLTextAreaElement,
     HTMLInputElement: FakeHTMLInputElement,
     Node: { DOCUMENT_POSITION_PRECEDING: 2 },
+    MutationObserver: TestMutationObserver,
     ResizeObserver: TestResizeObserver,
     setTimeout,
     clearTimeout
@@ -300,6 +317,7 @@ function loadPlatformContent(elements = [], hostname = "chatgpt.com", { expectSu
   COMPILED_PLATFORM_CONTENT_SCRIPT.runInContext(sandbox);
   if (expectSupported) {
     assert.ok(hooks, "platform-content test hooks were registered");
+    hooks.mutationObservers = mutationObservers;
     hooks.resizeObservers = resizeObservers;
   }
   return hooks;
@@ -1886,6 +1904,22 @@ test("Claude bubble fills the inline slot to the right of voice mode", () => {
   assert.equal(placement.inlineShift, 0);
 });
 
+test("Claude bubble stays vertically centered in the shallow live composer", () => {
+  const composerRect = { left: 100, right: 900, top: 100, bottom: 194, width: 800, height: 94 };
+  const voiceMode = new FakeElement({
+    tag: "button",
+    attrs: { "aria-label": "Voice mode" },
+    rect: { left: 844, right: 880, top: 162, bottom: 194, width: 36, height: 32 }
+  });
+  const hooks = loadPlatformContent([voiceMode], "claude.ai");
+  const placement = hooks.getClaudeBubblePlacement(composerRect);
+  const bubbleCenter = composerRect.top + placement.top + 42 / 2;
+  const controlCenter = (voiceMode.rect.top + voiceMode.rect.bottom) / 2;
+
+  assert.equal(placement.top, 57);
+  assert.equal(bubbleCenter, controlCenter);
+});
+
 test("Claude bubble uses the rightmost small control when voice mode is unlabeled", () => {
   const mic = new FakeElement({
     tag: "button",
@@ -2028,6 +2062,29 @@ test("Claude typed-state send button does not shift the model selector", () => {
   assert.equal(shiftedControls[0].element, send);
   assert.equal(shiftedControls.some((control) => control.element === model), false);
   assert.equal(hooks.getClaudeControlTargetOffset(shiftedControls[0], placement.inlineShift), -52);
+});
+
+test("Claude watches control visibility changes inside a stable composer", () => {
+  const input = new FakeElement({
+    attrs: { contenteditable: "true", role: "textbox" },
+    rect: { left: 160, right: 840, top: 150, bottom: 230, width: 680, height: 80 }
+  });
+  const composer = new FakeElement({
+    rect: { left: 100, right: 1000, top: 100, bottom: 260, width: 900, height: 160 }
+  });
+  input.parentElement = composer;
+  composer.children = [input];
+
+  const hooks = loadPlatformContent([input, composer], "claude.ai");
+  hooks.syncClaudePlacementResizeMonitoring(input, composer);
+
+  const observation = hooks.mutationObservers.at(-1).observed[0];
+  assert.equal(observation.element, composer);
+  assert.deepEqual(JSON.parse(JSON.stringify(observation.options)), {
+    attributes: true,
+    subtree: true,
+    attributeFilter: ["class", "style", "aria-hidden", "hidden", "data-state"]
+  });
 });
 
 test("Gemini bubble anchors to the left of the Flash selector", () => {

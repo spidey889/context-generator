@@ -209,6 +209,40 @@ function sourceFixture() {
 </html>`;
 }
 
+function claudePlacementFixture() {
+  return `<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Cap Context Claude placement smoke</title>
+  <style>
+    body{margin:0;min-height:100vh;background:#151515;color:#f7f7f7;font:16px system-ui}
+    form{position:fixed;left:50%;bottom:80px;width:800px;height:94px;transform:translateX(-50%);background:#242424;border-radius:18px}
+    [contenteditable]{position:absolute;left:20px;right:20px;top:16px;min-height:40px;outline:none}
+    button{position:absolute;bottom:0;width:36px;height:32px}
+    #model{right:160px;width:120px}
+    #dictate{right:60px}
+    #voice{right:16px}
+    #send{right:16px}
+    .send-state{visibility:hidden;pointer-events:none}
+    form.has-text .voice-state{visibility:hidden;pointer-events:none}
+    form.has-text .send-state{visibility:visible;pointer-events:auto}
+  </style>
+</head>
+<body>
+  <form id="claude-composer">
+    <div aria-label="Write your prompt to Claude" contenteditable="true" role="textbox"></div>
+    <button id="model" type="button" aria-label="Model selector">Sonnet</button>
+    <div class="voice-state">
+      <button id="dictate" type="button" aria-label="Dictate"></button>
+      <button id="voice" type="button" aria-label="Voice input"></button>
+    </div>
+    <div class="send-state"><button id="send" type="button" aria-label="Send message"></button></div>
+  </form>
+</body>
+</html>`;
+}
+
 function destinationFixture() {
   return `<!doctype html>
 <html lang="en">
@@ -266,6 +300,11 @@ async function startFixtureServer() {
     if (url.pathname === "/source") {
       response.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
       response.end(sourceFixture());
+      return;
+    }
+    if (url.pathname === "/claude-placement") {
+      response.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
+      response.end(claudePlacementFixture());
       return;
     }
     if (url.pathname === "/destination") {
@@ -347,6 +386,7 @@ async function run() {
   let braveProcess = null;
   let browserSession = null;
   let sourceSession = null;
+  let claudePlacementSession = null;
   let destinationSession = null;
   let browserOutput = "";
 
@@ -428,6 +468,40 @@ async function run() {
     }
     process.stdout.write("✓ Brave loaded the unpacked extension on the controlled source page.\n");
 
+    const claudePlacementUrl = `${origin}/claude-placement?${SMOKE_PLATFORM_QUERY}=claude`;
+    await browserSession.call("Target.createTarget", { url: claudePlacementUrl });
+    const claudePlacementTarget = await waitFor(async () => {
+      const targets = await getTargets(devToolsPort);
+      return targets.find((target) => target.type === "page" && target.url.startsWith(claudePlacementUrl));
+    }, "the Claude placement fixture");
+    claudePlacementSession = await CdpSession.connect(claudePlacementTarget.webSocketDebuggerUrl);
+    await claudePlacementSession.call("Runtime.enable");
+    await claudePlacementSession.call("Page.reload", { ignoreCache: true });
+    await waitFor(() => claudePlacementSession.evaluate(`Boolean(
+      document.getElementById("context-generator-bubble") &&
+      getComputedStyle(document.getElementById("context-generator-bubble")).display !== "none"
+    )`), "the Claude placement bubble");
+    const claudeEmptyAlignment = await claudePlacementSession.evaluate(`(() => {
+      const bubble = document.getElementById("context-generator-bubble").getBoundingClientRect();
+      const voice = document.getElementById("voice").getBoundingClientRect();
+      return Math.abs((bubble.top + bubble.height / 2) - (voice.top + voice.height / 2));
+    })()`);
+    assert.ok(claudeEmptyAlignment <= 1, `Claude's empty-state bubble was ${claudeEmptyAlignment}px above its control row.`);
+    await claudePlacementSession.evaluate('document.getElementById("claude-composer").classList.add("has-text")');
+    const claudePlacement = await waitFor(() => claudePlacementSession.evaluate(`(() => {
+      const bubble = document.getElementById("context-generator-bubble")?.getBoundingClientRect();
+      const send = document.getElementById("send")?.getBoundingClientRect();
+      if (!bubble || !send || getComputedStyle(document.getElementById("send")).visibility !== "visible") return null;
+      const intersects = bubble.left < send.right && bubble.right > send.left && bubble.top < send.bottom && bubble.bottom > send.top;
+      const sendTransform = document.getElementById("send").style.transform;
+      return !intersects && sendTransform.includes("translateX(-52px)")
+        ? { intersects, sendTransform }
+        : null;
+    })()`), "Claude's typed-state placement refresh");
+    assert.equal(claudePlacement.intersects, false, "The Cap Context bubble must not cover Claude's Send button.");
+    assert.match(claudePlacement.sendTransform, /translateX\(-52px\)/);
+    process.stdout.write("✓ Claude's bubble stays centered and its Voice-to-Send swap remains clear of Send.\n");
+
     const clickResult = await sourceSession.evaluate(`(() => {
       const bubble = document.getElementById("context-generator-bubble");
       bubble.click();
@@ -478,6 +552,7 @@ async function run() {
     throw error;
   } finally {
     destinationSession?.close();
+    claudePlacementSession?.close();
     sourceSession?.close();
     if (browserSession) {
       try {

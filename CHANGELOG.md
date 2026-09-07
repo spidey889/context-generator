@@ -2,6 +2,10 @@
 
 This is a condensed record of meaningful product and architecture changes. Git history contains the detailed implementation trail.
 
+## 2026-09-08
+
+- Fixed the Cap Context bubble sitting above Claude's control row and overlapping Send after typing. Claude placement now centers the bubble against its native controls and reacts when its stable composer swaps Voice and Send through visibility-only DOM changes; the isolated Brave smoke test covers both states.
+
 ## 2026-09-07
 
 - Added Gemini 3.8 Flash and Gemini 3.7 Flash ahead of Gemini 3.6 Flash in the summary fallback chain, with a shared Gemini-family deadline that preserves the existing backend time ceiling.
