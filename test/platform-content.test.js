@@ -1965,7 +1965,7 @@ test("Claude typed new-chat state keeps the existing placement for the later fix
   assert.equal(placement.top, 57);
 });
 
-test("Claude empty existing chat gets the same restrained optical lift", () => {
+test("Claude empty existing chat lifts the orb above the low native controls", () => {
   const composerRect = { left: 600, right: 1224, top: 367.5, bottom: 461.5, width: 624, height: 94 };
   const input = new FakeElement({
     attrs: { contenteditable: "true", role: "textbox", "aria-label": "Write your prompt to Claude" },
@@ -1980,7 +1980,7 @@ test("Claude empty existing chat gets the same restrained optical lift", () => {
   const placement = hooks.getClaudeBubblePlacement(composerRect, input);
 
   assert.equal(placement.left, 578);
-  assert.equal(placement.top, 56.5);
+  assert.equal(placement.top, 50.5);
 });
 
 test("Claude bubble uses the rightmost small control when voice mode is unlabeled", () => {
