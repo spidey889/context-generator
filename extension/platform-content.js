@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-09-08-dead-code-cleanup-v5";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-09-08-claude-stable-anchor-v6";
   const BUBBLE_ID = "context-generator-bubble";
   const OVERLAY_ID = "context-generator-overlay";
   const HANDOFF_SCRIM_ID = "context-generator-handoff-scrim";
@@ -47,6 +47,7 @@
   const CLAUDE_EXISTING_CHAT_COMPOSER_Y_NUDGE = -20.5;
   const CLAUDE_PLACEMENT_DEBUG_QUERY = "__cap_context_debug_placement";
   const CLAUDE_PLACEMENT_DEBUG_SESSION_KEY = "cap-context-debug-claude-placement";
+  const CLAUDE_TRANSIENT_PLACEMENT_GRACE_MS = 700;
   const CLAUDE_MAX_COMPOSER_HORIZONTAL_PADDING = 160;
   const CLAUDE_MODEL_LEFT_NUDGE = 48;
   const CLAUDE_SIDE_CONTROL_RIGHT_NUDGE = 52;
@@ -464,6 +465,8 @@
   let chatGptPlacementMutationObserver = null;
   let chatGptPlacementMutationRoot = null;
   let lastClaudePlacementDebugSignature = "";
+  let lastClaudeStablePlacementAt = 0;
+  let claudePlacementGraceTimer = null;
   let pendingFloatingButtonReasons = new Set();
   let floatingButtonMonitoringDisabled = false;
   let handoffCountdownTimer = null;
@@ -563,6 +566,7 @@
       editorContainsText,
       formatFirefoxContentEditableHtml,
       getClaudeBubblePlacement,
+      getClaudeFixedBubblePlacement,
       getGeminiBubblePlacement,
       findGeminiModelSelectorButton,
       getGrokBubblePlacement,
@@ -3274,6 +3278,9 @@
     const existingBubble = document.getElementById(BUBBLE_ID);
 
     if (!input) {
+      if (retainClaudeStablePlacement(existingBubble, recalculationReason, "editor-missing")) {
+        return existingBubble;
+      }
       if (existingBubble) existingBubble.style.display = "none";
       hideOnboardingNudge();
       hideClaudeLimitNudge();
@@ -3304,8 +3311,18 @@
 
     const composerSurface = findComposerSurfaceElement(input);
     if (!composerSurface) {
+      if (currentPlatform.id === "claude") {
+        syncClaudePlacementResizeMonitoring(input, findClaudePendingMonitoringSurface(input));
+      }
+      if (retainClaudeStablePlacement(bubble, recalculationReason, "anchor-surface-pending", input)) {
+        return bubble;
+      }
       bubble.style.display = "none";
       hideOnboardingNudge();
+      if (currentPlatform.id === "claude") {
+        releaseBubbleSlot();
+        releaseComposerSurface();
+      }
       maybeLogClaudePlacementDiagnostics({
         reason: recalculationReason,
         outcome: "surface-missing",
@@ -3317,8 +3334,9 @@
 
     reserveComposerSurface(composerSurface);
 
-    if (currentPlatform.id !== "chatgpt" && bubble.parentElement !== composerSurface) {
-      composerSurface.appendChild(bubble);
+    const bubbleRoot = currentPlatform.id === "claude" ? getFloatingButtonRoot() : composerSurface;
+    if (currentPlatform.id !== "chatgpt" && bubble.parentElement !== bubbleRoot) {
+      bubbleRoot.appendChild(bubble);
     }
 
     ensureFloatingOverlay();
@@ -6146,6 +6164,9 @@
     const bubble = document.getElementById(BUBBLE_ID);
     const input = findPlatformInput();
     if (!bubble || !input) {
+      if (retainClaudeStablePlacement(bubble, recalculationReason, !bubble ? "orb-missing" : "editor-missing", input)) {
+        return;
+      }
       stopGrokPlacementResizeMonitoring();
       stopDeepSeekPlacementResizeMonitoring();
       stopGeminiPlacementResizeMonitoring();
@@ -6180,8 +6201,18 @@
 
     const composerSurface = findComposerSurfaceElement(input);
     if (!composerSurface) {
+      if (currentPlatform.id === "claude") {
+        syncClaudePlacementResizeMonitoring(input, findClaudePendingMonitoringSurface(input));
+      }
+      if (retainClaudeStablePlacement(bubble, recalculationReason, "anchor-surface-pending", input)) {
+        return;
+      }
       bubble.style.display = "none";
       hideOnboardingNudge();
+      if (currentPlatform.id === "claude") {
+        releaseBubbleSlot();
+        releaseComposerSurface();
+      }
       maybeLogClaudePlacementDiagnostics({
         reason: recalculationReason,
         outcome: "surface-missing",
@@ -6197,8 +6228,9 @@
     syncGeminiPlacementResizeMonitoring(input, composerSurface);
     syncClaudePlacementResizeMonitoring(input, composerSurface);
 
-    if (currentPlatform.id !== "chatgpt" && bubble.parentElement !== composerSurface) {
-      composerSurface.appendChild(bubble);
+    const bubbleRoot = currentPlatform.id === "claude" ? getFloatingButtonRoot() : composerSurface;
+    if (currentPlatform.id !== "chatgpt" && bubble.parentElement !== bubbleRoot) {
+      bubbleRoot.appendChild(bubble);
     }
 
     const composerRect = composerSurface.getBoundingClientRect();
@@ -6208,8 +6240,16 @@
       composerRect.bottom < 0 ||
       composerRect.top > window.innerHeight
     ) {
+      if (retainClaudeStablePlacement(bubble, recalculationReason, "surface-geometry-pending", input, composerSurface, composerRect)) {
+        return;
+      }
       bubble.style.display = "none";
       hideOnboardingNudge();
+      if (currentPlatform.id === "claude") {
+        releaseBubbleSlot();
+        releaseComposerSurface();
+        clearClaudePlacementMonitoring();
+      }
       maybeLogClaudePlacementDiagnostics({
         reason: recalculationReason,
         outcome: "surface-transient-geometry",
@@ -6266,19 +6306,32 @@
     }
 
     if (currentPlatform.id === "claude") {
-      const claudePlacement = getClaudeBubblePlacement(composerRect, input);
-      if (claudePlacement.anchorControl) {
-        reserveClaudeInlineBubbleSlot(claudePlacement.anchorControl, claudePlacement.controls, input, composerRect, claudePlacement.inlineShift);
-      } else {
-        releaseBubbleSlot();
+      const claudePlacement = getClaudeBubblePlacement(composerRect, input, composerSurface);
+      if (!claudePlacement.anchorControl) {
+        if (!retainClaudeStablePlacement(bubble, recalculationReason, "anchor-pending", input, composerSurface, composerRect)) {
+          bubble.style.display = "none";
+          releaseBubbleSlot();
+        }
+        return;
       }
+      reserveClaudeInlineBubbleSlot(
+        claudePlacement.anchorControl,
+        claudePlacement.reservationControls,
+        input,
+        composerRect,
+        claudePlacement.inlineShift
+      );
+      clearClaudePlacementGraceTimer();
+      setBubbleFixedMode(bubble);
+      const fixedPlacement = getClaudeFixedBubblePlacement(claudePlacement, composerRect);
       setBubbleStylesIfChanged(bubble, {
-        left: `${claudePlacement.left}px`,
+        left: `${fixedPlacement.left}px`,
         right: "auto",
-        top: `${claudePlacement.top}px`,
+        top: `${fixedPlacement.top}px`,
         bottom: "auto",
         display: "flex"
       });
+      lastClaudeStablePlacementAt = Date.now();
       maybeLogClaudePlacementDiagnostics({
         reason: recalculationReason,
         outcome: "placed",
@@ -6352,9 +6405,10 @@
     });
   }
 
-  function getClaudeBubblePlacement(composerRect, input = null) {
-    const controls = getClaudeComposerControlCandidates(composerRect);
+  function getClaudeBubblePlacement(composerRect, input = null, composerSurface = null) {
+    const controls = getClaudeComposerControlCandidates(composerRect, composerSurface);
     const anchorControl = findClaudeVoiceModeControl(controls) || findClaudeInlineFallbackControl(controls);
+    const reservationControls = getClaudeMountedReservationControls(composerSurface, controls);
     const isFreshEmptyComposer = isClaudeFreshEmptyComposer(input);
     const isExistingChatComposer = window.location.pathname.startsWith("/chat/");
     const emptyComposerNudge = isExistingChatComposer
@@ -6390,23 +6444,61 @@
         top,
         inlineShift: Math.round(inlineShift),
         anchorControl,
-        controls
+        controls,
+        reservationControls
       };
     }
 
     return {
-      ...getBottomRightRowBubblePlacement(composerRect, 16),
       inlineShift: 0,
       anchorControl: null,
-      controls
+      controls,
+      reservationControls
     };
   }
 
-  function getClaudeComposerControlCandidates(composerRect) {
+  function getClaudeMountedReservationControls(composerSurface, visibleControls) {
+    if (!composerSurface) return visibleControls;
+
+    const mountedControls = Array.from(composerSurface.querySelectorAll("button, [role='button'], [tabindex='0']"))
+      .filter((element) => element.id !== BUBBLE_ID && !isContextGeneratorNode(element) && element.isConnected)
+      .map((element) => ({
+        element,
+        label: getElementLabel(element, true),
+        rect: element.getBoundingClientRect()
+      }))
+      .filter((control) => {
+        return (
+          control.rect.width > 0 &&
+          control.rect.width <= 280 &&
+          control.rect.height > 0 &&
+          control.rect.height <= 84 &&
+          /\b(model|sonnet|opus|haiku|send|submit|mic|microphone|voice|speak|speech|talk|dictation|audio)\b/.test(control.label)
+        );
+      });
+
+    return [...visibleControls, ...mountedControls].filter((control, index, all) => {
+      return all.findIndex((candidate) => candidate.element === control.element) === index;
+    });
+  }
+
+  function getClaudeFixedBubblePlacement(localPlacement, composerRect) {
+    return clampFixedBubblePlacement(
+      composerRect.left + localPlacement.left,
+      composerRect.top + localPlacement.top
+    );
+  }
+
+  function getClaudeComposerControlCandidates(composerRect, composerSurface = null) {
     const rowTop = getClaudeComposerControlRowTop(composerRect);
 
     return Array.from(document.querySelectorAll("button, [role='button'], [tabindex='0']"))
-      .filter((element) => element.id !== BUBBLE_ID && !isContextGeneratorNode(element) && isVisible(element))
+      .filter((element) => (
+        element.id !== BUBBLE_ID &&
+        !isContextGeneratorNode(element) &&
+        (!composerSurface || composerSurface.contains?.(element)) &&
+        isVisible(element)
+      ))
       .map((element) => ({
         element,
         label: getElementLabel(element, true),
@@ -6537,7 +6629,7 @@
     const signature = JSON.stringify(diagnostics);
     if (signature === lastClaudePlacementDebugSignature) return;
     lastClaudePlacementDebugSignature = signature;
-    console.debug("[Cap Context][Claude placement]", diagnostics);
+    console.info("[Cap Context][Claude placement]", diagnostics);
   }
 
   function isClaudePlacementDebugEnabled() {
@@ -7157,11 +7249,29 @@
 
     const form = input.closest("form");
     const formRect = form?.getBoundingClientRect();
-    if (formRect && isComposerSurfaceCandidate(form, formRect, inputRect)) {
+    if (
+      formRect &&
+      isComposerSurfaceCandidate(form, formRect, inputRect) &&
+      (currentPlatform.id !== "claude" || isClaudeAnchorSurfaceCandidate(form, formRect))
+    ) {
       return form;
     }
 
-    return input.parentElement;
+    return currentPlatform.id === "claude" ? null : input.parentElement;
+  }
+
+  function findClaudePendingMonitoringSurface(input) {
+    let node = input?.parentElement || null;
+    const fallback = node || input;
+    let depth = 0;
+
+    while (node && node !== document.body && depth < 8) {
+      if (node.querySelectorAll?.("button, [role='button'], [tabindex='0']").length) return node;
+      node = node.parentElement;
+      depth += 1;
+    }
+
+    return fallback;
   }
 
   function getRetainedGrokComposerSurface(input) {
@@ -7254,7 +7364,8 @@
       rect.height <= maxHeight &&
       rect.bottom >= 0 &&
       rect.top <= window.innerHeight &&
-      isClaudeComposerSurfaceHorizontallyAligned(rect, inputRect)
+      isClaudeComposerSurfaceHorizontallyAligned(rect, inputRect) &&
+      isClaudeAnchorSurfaceCandidate(reservedComposerSurface, rect)
     ) ? reservedComposerSurface : null;
   }
 
@@ -7320,14 +7431,28 @@
   }
 
   function pickComposerSurfaceCandidate(candidates, input) {
-    if (!candidates.length) return null;
+    const eligibleCandidates = currentPlatform.id === "claude"
+      ? candidates.filter((candidate) => isClaudeAnchorSurfaceCandidate(candidate.node, candidate.rect))
+      : candidates;
+    if (!eligibleCandidates.length) return null;
 
-    return candidates
+    return eligibleCandidates
       .map((candidate) => ({
         ...candidate,
         score: scoreComposerSurfaceCandidate(candidate, input)
       }))
       .sort((a, b) => b.score - a.score)[0].node;
+  }
+
+  function isClaudeAnchorSurfaceCandidate(surface, surfaceRect) {
+    if (!surface || !surfaceRect) return false;
+    const controls = getClaudeComposerControlCandidates(surfaceRect, surface);
+    const hasClaudeSideControl = controls.some((control) => {
+      return /\b(send|submit|mic|microphone|voice|speak|speech|talk|dictation|audio)\b/.test(control.label);
+    });
+    return hasClaudeSideControl && Boolean(
+      findClaudeVoiceModeControl(controls) || findClaudeInlineFallbackControl(controls)
+    );
   }
 
   function scoreComposerSurfaceCandidate(candidate, input) {
@@ -7836,6 +7961,55 @@
     });
   }
 
+  function retainClaudeStablePlacement(
+    bubble,
+    reason,
+    outcome,
+    input = null,
+    composerSurface = null,
+    composerRect = null
+  ) {
+    if (
+      currentPlatform.id !== "claude" ||
+      !bubble ||
+      !lastClaudeStablePlacementAt ||
+      Date.now() - lastClaudeStablePlacementAt > CLAUDE_TRANSIENT_PLACEMENT_GRACE_MS
+    ) {
+      clearClaudePlacementGraceTimer();
+      return false;
+    }
+
+    const floatingRoot = getFloatingButtonRoot();
+    if (bubble.parentElement !== floatingRoot) floatingRoot.appendChild(bubble);
+    setBubbleFixedMode(bubble);
+    bubble.style.display = "flex";
+    if (!claudePlacementGraceTimer) {
+      const remainingGrace = Math.max(
+        0,
+        CLAUDE_TRANSIENT_PLACEMENT_GRACE_MS - (Date.now() - lastClaudeStablePlacementAt)
+      );
+      claudePlacementGraceTimer = setTimeout(() => {
+        claudePlacementGraceTimer = null;
+        scheduleFloatingButtonUpdate("claude-grace-expired");
+      }, remainingGrace);
+    }
+    maybeLogClaudePlacementDiagnostics({
+      reason,
+      outcome: `retained:${outcome}`,
+      bubble,
+      input,
+      composerSurface,
+      composerRect
+    });
+    return true;
+  }
+
+  function clearClaudePlacementGraceTimer() {
+    if (!claudePlacementGraceTimer) return;
+    clearTimeout(claudePlacementGraceTimer);
+    claudePlacementGraceTimer = null;
+  }
+
   function normalizeFloatingButtonUpdateReason(reason) {
     if (typeof reason === "string" && reason) return reason;
     if (reason?.type) return reason.type;
@@ -7891,6 +8065,7 @@
     stopDeepSeekPlacementResizeMonitoring();
     stopGeminiPlacementResizeMonitoring();
     clearClaudePlacementMonitoring();
+    clearClaudePlacementGraceTimer();
     clearChatGptPlacementResizeMonitoring();
 
     window.removeEventListener("resize", scheduleFloatingButtonUpdate);

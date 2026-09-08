@@ -210,7 +210,13 @@ class FakeHTMLInputElement {
   }
 }
 
-function loadPlatformContent(elements = [], hostname = "chatgpt.com", { expectSupported = true, pathname = "/", search = "" } = {}) {
+function loadPlatformContent(elements = [], hostname = "chatgpt.com", {
+  expectSupported = true,
+  pathname = "/",
+  search = "",
+  innerWidth = 1280,
+  innerHeight = 720
+} = {}) {
   let hooks = null;
   const debugLogs = [];
   const sessionValues = new Map();
@@ -273,7 +279,11 @@ function loadPlatformContent(elements = [], hostname = "chatgpt.com", { expectSu
         || (className.includes("overflow-y-auto") ? "auto" : "")
         || (className.includes("overflow-y-scroll") ? "scroll" : "")
         || "visible";
-      return { display: "block", visibility: "visible", overflowY };
+      return {
+        display: element?.getAttribute?.("data-display") || "block",
+        visibility: element?.getAttribute?.("data-visibility") || "visible",
+        overflowY
+      };
     },
     performance: { now: () => 0 },
     addEventListener: () => {},
@@ -287,8 +297,8 @@ function loadPlatformContent(elements = [], hostname = "chatgpt.com", { expectSu
       window.scrollX = optionsOrX ?? window.scrollX;
       window.scrollY = y ?? window.scrollY;
     },
-    innerHeight: 720,
-    innerWidth: 1280,
+    innerHeight,
+    innerWidth,
     setTimeout,
     clearTimeout
   };
@@ -305,7 +315,11 @@ function loadPlatformContent(elements = [], hostname = "chatgpt.com", { expectSu
     }
   };
   const sandbox = {
-    console: { ...console, debug: (...args) => debugLogs.push(args) },
+    console: {
+      ...console,
+      debug: (...args) => debugLogs.push(args),
+      info: (...args) => debugLogs.push(args)
+    },
     document,
     window,
     getComputedStyle: window.getComputedStyle,
@@ -2111,9 +2125,21 @@ test("Claude rejects a page-sized ancestor as the composer surface", () => {
   const pageContainer = new FakeElement({
     rect: { left: 306, right: 1477, top: 48, bottom: 718, width: 1171, height: 670 }
   });
-  const model = new FakeElement({ tag: "button", attrs: { "aria-label": "Model: Sonnet 5 Extra" } });
-  const mic = new FakeElement({ tag: "button", attrs: { "aria-label": "Dictate" } });
-  const voice = new FakeElement({ tag: "button", attrs: { "aria-label": "Voice input" } });
+  const model = new FakeElement({
+    tag: "button",
+    attrs: { "aria-label": "Model: Sonnet 5 Extra" },
+    rect: { left: 900, right: 1009, top: 385, bottom: 417, width: 109, height: 32 }
+  });
+  const mic = new FakeElement({
+    tag: "button",
+    attrs: { "aria-label": "Dictate" },
+    rect: { left: 1080, right: 1112, top: 385, bottom: 417, width: 32, height: 32 }
+  });
+  const voice = new FakeElement({
+    tag: "button",
+    attrs: { "aria-label": "Voice input" },
+    rect: { left: 1120, right: 1152, top: 385, bottom: 417, width: 32, height: 32 }
+  });
 
   input.parentElement = compactComposer;
   compactComposer.children = [input, model, mic, voice];
@@ -2131,6 +2157,104 @@ test("Claude rejects a page-sized ancestor as the composer surface", () => {
 
   hooks.reserveComposerSurface(pageContainer);
   assert.equal(hooks.findComposerSurfaceElement(input), compactComposer);
+});
+
+test("Claude selects the surface whose geometry actually contains the visible control row", () => {
+  const input = new FakeElement({
+    attrs: { contenteditable: "true", role: "textbox", "aria-label": "Write your prompt to Claude" },
+    rect: { left: 180, right: 780, top: 300, bottom: 350, width: 600, height: 50 }
+  });
+  const overflowingInner = new FakeElement({
+    rect: { left: 150, right: 800, top: 280, bottom: 390, width: 650, height: 110 }
+  });
+  const realComposer = new FakeElement({
+    tag: "form",
+    rect: { left: 100, right: 860, top: 260, bottom: 410, width: 760, height: 150 }
+  });
+  const mic = new FakeElement({
+    tag: "button",
+    attrs: { "aria-label": "Microphone" },
+    rect: { left: 808, right: 840, top: 360, bottom: 392, width: 32, height: 32 }
+  });
+  input.parentElement = overflowingInner;
+  overflowingInner.children = [input, mic];
+  overflowingInner.parentElement = realComposer;
+  mic.parentElement = overflowingInner;
+  realComposer.children = [overflowingInner];
+
+  const hooks = loadPlatformContent([input, overflowingInner, realComposer, mic], "claude.ai", { pathname: "/chat/example" });
+
+  assert.equal(hooks.findComposerSurfaceElement(input), realComposer);
+  const placement = hooks.getClaudeBubblePlacement(realComposer.rect, input, realComposer);
+  assert.equal(placement.anchorControl.element, mic);
+});
+
+test("Claude null-anchor state waits instead of producing a bottom-right placement", () => {
+  const input = new FakeElement({
+    attrs: { contenteditable: "true", role: "textbox" },
+    rect: { left: 160, right: 840, top: 150, bottom: 230, width: 680, height: 80 }
+  });
+  const hooks = loadPlatformContent([input], "claude.ai", { pathname: "/chat/example" });
+  const placement = hooks.getClaudeBubblePlacement(getClaudeComposerRect(), input);
+
+  assert.equal(placement.anchorControl, null);
+  assert.equal(Object.hasOwn(placement, "left"), false);
+  assert.equal(Object.hasOwn(placement, "top"), false);
+});
+
+test("Claude anchored placement remains inside a narrow refreshed chat viewport", () => {
+  const composerRect = { left: 64, right: 783, top: 480, bottom: 600, width: 719, height: 120 };
+  const input = new FakeElement({
+    attrs: { contenteditable: "true", role: "textbox" },
+    rect: { left: 84, right: 763, top: 496, bottom: 548, width: 679, height: 52 }
+  });
+  const composer = new FakeElement({ tag: "form", rect: composerRect });
+  const mic = new FakeElement({
+    tag: "button",
+    attrs: { "aria-label": "Microphone" },
+    rect: { left: 731, right: 763, top: 552, bottom: 584, width: 32, height: 32 }
+  });
+  composer.children = [input, mic];
+  input.parentElement = composer;
+  mic.parentElement = composer;
+
+  const hooks = loadPlatformContent(
+    [input, composer, mic],
+    "claude.ai",
+    { pathname: "/chat/example", innerWidth: 847 }
+  );
+  const localPlacement = hooks.getClaudeBubblePlacement(composerRect, input, composer);
+  const fixedPlacement = hooks.getClaudeFixedBubblePlacement(localPlacement, composerRect);
+
+  assert.equal(localPlacement.anchorControl.element, mic);
+  assert.ok(fixedPlacement.left >= composerRect.left);
+  assert.ok(fixedPlacement.left + 42 <= composerRect.right);
+  assert.ok(fixedPlacement.left + 42 <= 847 - 8);
+});
+
+test("Claude reserves a hidden mounted Send control before the Voice-to-Send swap", () => {
+  const composerRect = getClaudeComposerRect();
+  const input = new FakeElement({ attrs: { contenteditable: "true", role: "textbox" } });
+  const composer = new FakeElement({ tag: "form", rect: composerRect });
+  const voice = new FakeElement({
+    tag: "button",
+    attrs: { "aria-label": "Voice mode" },
+    rect: { left: 810, right: 842, top: 170, bottom: 202, width: 32, height: 32 }
+  });
+  const send = new FakeElement({
+    tag: "button",
+    attrs: { "aria-label": "Send message", "data-visibility": "hidden" },
+    rect: { left: 810, right: 842, top: 170, bottom: 202, width: 32, height: 32 }
+  });
+  composer.children = [input, voice, send];
+  [input, voice, send].forEach((element) => { element.parentElement = composer; });
+
+  const hooks = loadPlatformContent([input, composer, voice, send], "claude.ai", { pathname: "/new" });
+  const placement = hooks.getClaudeBubblePlacement(composerRect, input, composer);
+
+  assert.equal(placement.anchorControl.element, voice);
+  assert.equal(placement.controls.some((control) => control.element === send), false);
+  assert.equal(placement.reservationControls.some((control) => control.element === send), true);
 });
 
 test("Gemini bubble anchors to the left of the Flash selector", () => {
