@@ -4,6 +4,8 @@ This is a condensed record of meaningful product and architecture changes. Git h
 
 ## 2026-09-08
 
+- Reworked `LOGIC.md` into a current-code operational guide for agents, covering runtime ownership, invariants, message/storage contracts, capture and summary behavior, synchronized change surfaces, known risks, and focused verification paths.
+- Fixed Claude's native mic/voice controls and Cap Context orb escaping the composer and flickering during hydration. The surface detector now rejects page-sized ancestors horizontally while retaining tall real composers, and unit plus Chromium smoke fixtures cover the misleading-ancestor layout. The smoke runner now proves MV3 startup through content injection and the full transfer instead of requiring an ephemeral service-worker DevTools target.
 - Refined the Cap Context orb on Claude's empty `/new` and existing-chat composers using measured PNG artwork bounds: it sits 1px above the exact optical center for a slightly more upbeat stance, while live visual review keeps a connected 13px gap from the voice dropdown. Added opt-in geometry logs plus unit and isolated-Brave coverage, while leaving typed placement unchanged for later work.
 - Fixed the Cap Context bubble sitting above Claude's control row and overlapping Send after typing. Claude placement now centers the bubble against its native controls and reacts when its stable composer swaps Voice and Send through visibility-only DOM changes; the isolated Brave smoke test covers both states.
 
