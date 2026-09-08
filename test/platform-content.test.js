@@ -2150,6 +2150,39 @@ test("Claude watches control visibility changes inside a stable composer", () =>
   });
 });
 
+test("Claude rejects a page-sized ancestor as the composer surface", () => {
+  const input = new FakeElement({
+    attrs: { contenteditable: "true", role: "textbox", "aria-label": "Write your prompt to Claude" },
+    rect: { left: 588, right: 1204, top: 336, bottom: 358, width: 616, height: 22 }
+  });
+  const compactComposer = new FakeElement({
+    rect: { left: 572, right: 1212, top: 323, bottom: 433, width: 640, height: 110 }
+  });
+  const pageContainer = new FakeElement({
+    rect: { left: 306, right: 1477, top: 48, bottom: 718, width: 1171, height: 670 }
+  });
+  const model = new FakeElement({ tag: "button", attrs: { "aria-label": "Model: Sonnet 5 Extra" } });
+  const mic = new FakeElement({ tag: "button", attrs: { "aria-label": "Dictate" } });
+  const voice = new FakeElement({ tag: "button", attrs: { "aria-label": "Voice input" } });
+
+  input.parentElement = compactComposer;
+  compactComposer.children = [input, model, mic, voice];
+  [model, mic, voice].forEach((control) => {
+    control.parentElement = compactComposer;
+  });
+  compactComposer.parentElement = pageContainer;
+  pageContainer.children = [compactComposer];
+
+  const hooks = loadPlatformContent(
+    [input, compactComposer, pageContainer, model, mic, voice],
+    "claude.ai",
+    { pathname: "/new" }
+  );
+
+  hooks.reserveComposerSurface(pageContainer);
+  assert.equal(hooks.findComposerSurfaceElement(input), compactComposer);
+});
+
 test("Gemini bubble anchors to the left of the Flash selector", () => {
   const flash = new FakeElement({
     tag: "button",

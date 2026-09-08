@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-07-19-chatgpt-model-control-anchor";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-09-08-claude-composer-bounds";
   const BUBBLE_ID = "context-generator-bubble";
   const OVERLAY_ID = "context-generator-overlay";
   const HANDOFF_SCRIM_ID = "context-generator-handoff-scrim";
@@ -50,6 +50,7 @@
   const CLAUDE_BUBBLE_ARTWORK_CENTER_Y_OFFSET = -0.5;
   const CLAUDE_EMPTY_COMPOSER_Y_NUDGE = -0.5;
   const CLAUDE_PLACEMENT_DEBUG_QUERY = "__cap_context_debug_placement";
+  const CLAUDE_MAX_COMPOSER_HORIZONTAL_PADDING = 160;
   const CLAUDE_MODEL_LEFT_NUDGE = 48;
   const CLAUDE_SIDE_CONTROL_RIGHT_NUDGE = 52;
   const DESTINATION_SHEET_WIDTH = 352;
@@ -7137,6 +7138,7 @@
     }
 
     const rect = reservedComposerSurface.getBoundingClientRect();
+    const inputRect = input.getBoundingClientRect();
     const maxWidth = getMaxComposerSurfaceWidth();
     const maxHeight = currentPlatform.maxComposerHeight || 260;
     return (
@@ -7145,7 +7147,8 @@
       rect.height >= 40 &&
       rect.height <= maxHeight &&
       rect.bottom >= 0 &&
-      rect.top <= window.innerHeight
+      rect.top <= window.innerHeight &&
+      isClaudeComposerSurfaceHorizontallyAligned(rect, inputRect)
     ) ? reservedComposerSurface : null;
   }
 
@@ -7189,8 +7192,21 @@
       rect.left <= inputRect.left + 96 &&
       rect.right >= inputRect.right - 18 &&
       rect.top <= inputRect.top + 80 &&
-      rect.bottom >= inputRect.bottom - 18
+      rect.bottom >= inputRect.bottom - 18 &&
+      isClaudeComposerSurfaceHorizontallyAligned(rect, inputRect)
     );
+  }
+
+  function isClaudeComposerSurfaceHorizontallyAligned(rect, inputRect) {
+    if (currentPlatform.id !== "claude") return true;
+
+    // Claude's real composer stays close to the editor horizontally, even when
+    // a large paste makes it tall. Reject page-sized ancestors so their phantom
+    // width cannot push the native voice controls and our orb beyond the border.
+    const horizontalPadding =
+      Math.max(0, inputRect.left - rect.left) +
+      Math.max(0, rect.right - inputRect.right);
+    return horizontalPadding <= CLAUDE_MAX_COMPOSER_HORIZONTAL_PADDING;
   }
 
   function getMaxComposerSurfaceWidth() {

@@ -218,6 +218,7 @@ function claudePlacementFixture() {
   <title>Cap Context Claude placement smoke</title>
   <style>
     body{margin:0;min-height:100vh;background:#151515;color:#f7f7f7;font:16px system-ui}
+    #claude-page{position:fixed;inset:48px 12px 0}
     form{position:fixed;left:50%;bottom:80px;width:800px;height:94px;transform:translateX(-50%);background:#242424;border-radius:18px}
     [contenteditable]{position:absolute;left:20px;right:20px;top:16px;min-height:40px;outline:none}
     button{position:absolute;bottom:0;width:36px;height:32px}
@@ -231,15 +232,17 @@ function claudePlacementFixture() {
   </style>
 </head>
 <body>
-  <form id="claude-composer">
-    <div aria-label="Write your prompt to Claude" contenteditable="true" role="textbox"></div>
-    <button id="model" type="button" aria-label="Model selector">Sonnet</button>
-    <div class="voice-state">
-      <button id="dictate" type="button" aria-label="Dictate"></button>
-      <button id="voice" type="button" aria-label="Voice input"></button>
-    </div>
-    <div class="send-state"><button id="send" type="button" aria-label="Send message"></button></div>
-  </form>
+  <div id="claude-page">
+    <form id="claude-composer">
+      <div aria-label="Write your prompt to Claude" contenteditable="true" role="textbox"></div>
+      <button id="model" type="button" aria-label="Model selector">Sonnet</button>
+      <div class="voice-state">
+        <button id="dictate" type="button" aria-label="Dictate"></button>
+        <button id="voice" type="button" aria-label="Voice input"></button>
+      </div>
+      <div class="send-state"><button id="send" type="button" aria-label="Send message"></button></div>
+    </form>
+  </div>
 </body>
 </html>`;
 }
@@ -413,10 +416,8 @@ async function run() {
 
     const devToolsPort = await readDevToolsPort(profileRoot);
     browserSession = await CdpSession.connect(await getBrowserWebSocketUrl(devToolsPort));
-    await waitFor(async () => {
-      const targets = await getTargets(devToolsPort);
-      return targets.find((target) => target.type === "service_worker" && target.url.endsWith("/background.js"));
-    }, "the installed extension service worker", 15000);
+    // MV3 workers may suspend before DevTools enumerates them. The injected
+    // bubble and full transfer below prove both content and worker startup.
     const sourceTarget = await waitFor(async () => {
       const targets = await getTargets(devToolsPort);
       return targets.find((target) => target.type === "page" && target.url.startsWith(`${origin}/source`));
@@ -494,6 +495,20 @@ async function run() {
     assert.equal(claudePlacementDiagnostics.state, "fresh-empty");
     assert.equal(claudePlacementDiagnostics.deltas.visibleCenterY, -1);
     assert.equal(claudePlacementDiagnostics.deltas.visibleGapX, 13);
+    const claudeEmptyBounds = await claudePlacementSession.evaluate(`(() => {
+      const composer = document.getElementById("claude-composer").getBoundingClientRect();
+      const bubble = document.getElementById("context-generator-bubble").getBoundingClientRect();
+      const dictate = document.getElementById("dictate").getBoundingClientRect();
+      const voice = document.getElementById("voice").getBoundingClientRect();
+      const inside = (rect) => rect.left >= composer.left && rect.right <= composer.right
+        && rect.top >= composer.top && rect.bottom <= composer.bottom;
+      return { bubbleInside: inside(bubble), dictateInside: inside(dictate), voiceInside: inside(voice) };
+    })()`);
+    assert.deepEqual(claudeEmptyBounds, {
+      bubbleInside: true,
+      dictateInside: true,
+      voiceInside: true
+    });
     if (CLAUDE_PLACEMENT_SCREENSHOT_PATH) {
       const screenshot = await claudePlacementSession.call("Page.captureScreenshot", { format: "png" });
       await fs.promises.mkdir(path.dirname(CLAUDE_PLACEMENT_SCREENSHOT_PATH), { recursive: true });
