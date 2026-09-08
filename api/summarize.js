@@ -32,7 +32,7 @@ const PROVIDER_REQUEST_BUDGETS_MS = {
   "ministral-3b-2512": 25000,
   [GROQ_FALLBACK_MODEL]: 15000
 };
-const MISTRAL_PROMPT_CACHE_VERSION = "capcontext-summary-v6";
+const MISTRAL_PROMPT_CACHE_VERSION = "capcontext-summary-v7";
 const SUMMARY_PROVIDERS = {
   gemini: {
     id: "gemini",
@@ -799,6 +799,7 @@ ${headerRule}
 - Make the result feel like a serious handoff to another capable AI, not a thin executive summary.
 - Preserve exact names, files, APIs, model IDs, commands, error text, copy requirements, constraints, and latest working state when they matter.
 - When the user explicitly asks to keep or preserve a set of exact facts, include every fact in that set. Preserve competing options, exact numeric values and ranges, safety or integrity statements, and implementation state without collapsing, generalizing, or silently dropping them.
+- In that exact-fact case, make a silent checklist from the full transcript before drafting, then verify every requested fact appears in the output. Pay special attention to negative integrity facts (for example, no data loss), explicit current implementation status (including work not started), owners, regions, identifiers, rejected actions, and unresolved alternatives.
 - Prioritize what helps the next AI continue without re-asking the user or repeating work.
 - For coding/product chats, include the concrete repo/app/platform, exact files/functions/constants, commands run, errors seen, tests or verification, deployment state, and user constraints.
 - Before writing, search the entire transcript carefully for facts relevant to each section, including facts in earlier turns rather than only the latest exchange.
@@ -816,6 +817,7 @@ ${headerRule}
 - Do not pad or write generic filler; every line should carry useful context.
 - Do not add the closing footer from SKILL.md: no "PASTE THIS AT THE TOP OF YOUR NEW CHAT" and no "Continue from where we left off."
 - The 🔁 NEXT STEP section must be exactly: ${DESTINATION_CONFIRMATION_INSTRUCTION}
+- Before finalizing, recheck any user-requested exact-fact checklist against the completed output and add every omitted item to the appropriate section without changing its meaning.
 - Before finalizing, silently check the total word count. If this profile has a non-zero minimum and the output is below ${profile.minWords || 0} words, expand KEY CONTEXT, DECISIONS MADE, and OPEN QUESTIONS with concrete details from the transcript.
 
 Required template:
