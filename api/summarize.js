@@ -14,22 +14,23 @@ const SUMMARY_HEARTBEAT_CHUNK = `\n${" ".repeat(2048)}\n`;
 const GEMINI_PRIMARY_MODEL = "gemini-3.8-flash";
 const GEMINI_FALLBACK_MODELS = ["gemini-3.7-flash", "gemini-3.6-flash", "gemini-3.5-flash"];
 const GEMINI_MODEL_CHAIN = [GEMINI_PRIMARY_MODEL, ...GEMINI_FALLBACK_MODELS];
-// Keep the expanded Gemini chain inside the original end-to-end provider budget.
-const GEMINI_CHAIN_BUDGET_MS = 90000;
+// Reserve enough of the extension's 210-second deadline for every non-Gemini
+// fallback plus response parsing/transport overhead.
+const GEMINI_CHAIN_BUDGET_MS = 60000;
 const GEMINI_GENERATE_CONTENT_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/models";
 const MISTRAL_CHAT_COMPLETIONS_URL = "https://api.mistral.ai/v1/chat/completions";
 const GROQ_CHAT_COMPLETIONS_URL = "https://api.groq.com/openai/v1/chat/completions";
 const LOCAL_DIRECT_MODEL = "local-direct";
 const MISTRAL_PRIMARY_MODEL = "mistral-medium-3-5";
-const MISTRAL_FALLBACK_MODELS = ["mistral-large-2512", "ministral-3b-2512"];
+const MISTRAL_FALLBACK_MODELS = ["mistral-large-3-25-12", "ministral-3-3b-25-12"];
 const MISTRAL_MODEL_CHAIN = [MISTRAL_PRIMARY_MODEL, ...MISTRAL_FALLBACK_MODELS];
 const GROQ_FALLBACK_MODEL = "llama-3.1-8b-instant";
 const PROVIDER_REQUEST_BUDGETS_MS = {
   [GEMINI_PRIMARY_MODEL]: 45000,
   ...Object.fromEntries(GEMINI_FALLBACK_MODELS.map((model) => [model, 45000])),
   [MISTRAL_PRIMARY_MODEL]: 55000,
-  "mistral-large-2512": 40000,
-  "ministral-3b-2512": 25000,
+  "mistral-large-3-25-12": 40000,
+  "ministral-3-3b-25-12": 25000,
   [GROQ_FALLBACK_MODEL]: 15000
 };
 const MISTRAL_PROMPT_CACHE_VERSION = "capcontext-summary-v7";

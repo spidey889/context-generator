@@ -470,22 +470,22 @@ test("validator rejects box borders without the Context Carry title", () => {
   );
 });
 
-test("provider fallback budgets keep the complete chain below the Vercel ceiling", () => {
+test("provider fallback budgets keep the complete chain below the extension deadline", () => {
   const budgets = [
     getProviderRequestBudgetMs("gemini-3.8-flash"),
     getProviderRequestBudgetMs("gemini-3.7-flash"),
     getProviderRequestBudgetMs("gemini-3.6-flash"),
     getProviderRequestBudgetMs("gemini-3.5-flash"),
     getProviderRequestBudgetMs("mistral-medium-3-5"),
-    getProviderRequestBudgetMs("mistral-large-2512"),
-    getProviderRequestBudgetMs("ministral-3b-2512"),
+    getProviderRequestBudgetMs("mistral-large-3-25-12"),
+    getProviderRequestBudgetMs("ministral-3-3b-25-12"),
     getProviderRequestBudgetMs("llama-3.1-8b-instant")
   ];
 
   assert.deepEqual(budgets, [45000, 45000, 45000, 45000, 55000, 40000, 25000, 15000]);
   const completeChainBudget = GEMINI_CHAIN_BUDGET_MS + budgets.slice(4).reduce((total, budget) => total + budget, 0);
-  assert.equal(completeChainBudget, 225000);
-  assert.ok(completeChainBudget < 240000);
+  assert.equal(completeChainBudget, 195000);
+  assert.ok(completeChainBudget <= 210000 - 15000);
 });
 
 test("backend falls back from medium 3.5 to large and reports the serving model", async () => {
@@ -527,14 +527,14 @@ test("backend falls back from medium 3.5 to large and reports the serving model"
     assert.equal(res.statusCode, 200);
     assert.deepEqual(requests.map((request) => request.model), [
       "mistral-medium-3-5",
-      "mistral-large-2512"
+      "mistral-large-3-25-12"
     ]);
-    assert.equal(res.payload.timing.model, "mistral-large-2512");
+    assert.equal(res.payload.timing.model, "mistral-large-3-25-12");
     assert.deepEqual(res.payload.timing.mistralModelsTried, [
       "mistral-medium-3-5",
-      "mistral-large-2512"
+      "mistral-large-3-25-12"
     ]);
-    assert.match(res.payload.timing.modelReason, /mistral-medium-3-5 failed; fell back to mistral-large-2512/);
+    assert.match(res.payload.timing.modelReason, /mistral-medium-3-5 failed; fell back to mistral-large-3-25-12/);
   } finally {
     restoreApiKey();
     global.fetch = originalFetch;
@@ -675,8 +675,8 @@ test("backend falls back to Groq when Mistral returns an empty summary", async (
     assert.equal(requests.length, 4);
     assert.deepEqual(requests.slice(0, 3).map((request) => request.body.model), [
       "mistral-medium-3-5",
-      "mistral-large-2512",
-      "ministral-3b-2512"
+      "mistral-large-3-25-12",
+      "ministral-3-3b-25-12"
     ]);
     assert.equal(requests[3].body.model, "llama-3.1-8b-instant");
     assert.deepEqual(requests[3].body.messages, requests[0].body.messages);
@@ -726,9 +726,9 @@ test("backend advances through the existing model chain when validation rejects 
     assert.equal(requests.length, 2);
     assert.deepEqual(requests.map((request) => request.model), [
       "mistral-medium-3-5",
-      "mistral-large-2512"
+      "mistral-large-3-25-12"
     ]);
-    assert.equal(res.payload.timing.model, "mistral-large-2512");
+    assert.equal(res.payload.timing.model, "mistral-large-3-25-12");
     assert.match(res.payload.timing.modelReason, /mistral-medium-3-5 failed/);
     assert.match(res.payload.summary, /validated-fallback/);
   } finally {
@@ -774,9 +774,9 @@ test("backend advances to the next model after a timed-out Mistral attempt", asy
     assert.equal(res.statusCode, 200);
     assert.deepEqual(requests.map((request) => request.model), [
       "mistral-medium-3-5",
-      "mistral-large-2512"
+      "mistral-large-3-25-12"
     ]);
-    assert.equal(res.payload.timing.model, "mistral-large-2512");
+    assert.equal(res.payload.timing.model, "mistral-large-3-25-12");
   } finally {
     restoreApiKey();
     global.fetch = originalFetch;

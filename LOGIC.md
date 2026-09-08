@@ -155,11 +155,11 @@ Generated provider order:
 
 ```text
 Gemini 3.8 Flash -> 3.7 Flash -> 3.6 Flash -> 3.5 Flash
--> Mistral Medium 3.5 -> Mistral Large 2512 -> Ministral 3B 2512
+-> Mistral Medium 3.5 -> Mistral Large 3 (25.12) -> Ministral 3 3B (25.12)
 -> optional Groq Llama 3.1 8B Instant
 ```
 
-- Gemini is skipped without `GEMINI_API_KEY`. Its four models share one 90-second family deadline; each model is capped at 45 seconds.
+- Gemini is skipped without `GEMINI_API_KEY`. Its four models share one 60-second family deadline; each model is capped at 45 seconds. This reserves 15 seconds of overhead beneath the extension's 210-second deadline even if every later fallback exhausts its budget.
 - Mistral is skipped without `MISTRAL_API_KEY`. Model budgets are 55, 40, and 25 seconds. A Mistral HTTP 429 jumps directly to Groq.
 - Groq is optional via `GROQ_API_KEY` and has 15 seconds.
 - Retryable provider calls get at most two attempts within the model budget, an 80-second per-attempt ceiling, and a 450 ms retry interval.
@@ -259,7 +259,6 @@ Do not claim these are fixed without a reproduction and regression test:
 
 - Live long ChatGPT chats have under-captured despite deterministic virtual-window fixtures passing.
 - The six-minute source lock can reset without cancelling active work.
-- Worst-case provider budgets reach 225 seconds while the extension aborts at 210 seconds.
 - Summary validation is structural, not grounded; large output may pass at 200 substantive words and finish reason is informational.
 - The telemetry outbox is unbounded, active cancellation state is worker-memory-only, and Vercel's Supabase fetch has no explicit timeout.
 - A destination prepared before capture/summary failure may remain open unused.
