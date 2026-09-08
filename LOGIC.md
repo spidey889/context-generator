@@ -19,6 +19,7 @@ Use evidence in this order: the owner's current request and project instructions
 - `extension/manifest.json` currently reports version `1.4.2` and contains both Chromium and Firefox background declarations. The current branch includes post-1.4.2 Claude placement work, so the manifest number does not prove the Web Store or ZIP contains the checkout's behavior.
 - Production web/API URL: `https://context-generator-five.vercel.app`. The analysis bridge and canonical site links currently use `https://spidey889.github.io/context-generator`.
 - Release warning verified 2026-09-08: `cap-context-extension.zip` is stale relative to `extension/`. It is missing both EBGaramond fonts and contains older `manifest.json` and `platform-content.js` files. Do not publish it until rebuilt and compared again.
+- `SKILL.md`, `index.legacy-2026-07-15.html`, and its dated demo video are retained reference artifacts by owner request, not production entry points. The legacy page reuses the canonical logos under `extension/logos/`.
 
 ## Non-Negotiable Invariants
 
@@ -172,7 +173,7 @@ Gemini 3.8 Flash -> 3.7 Flash -> 3.6 Flash -> 3.5 Flash
 
 ### Prompt and validation
 
-Providers receive a system prompt and a user JSON envelope with schema `cap-context-conversation-v1` and data type `untrusted-conversation-transcript`. `getSummarySystemPrompt()` and `getContextCarryTemplate()` are the complete backend prompt contract; the retired standalone skill template is preserved only in Git history.
+Providers receive a system prompt and a user JSON envelope with schema `cap-context-conversation-v1` and data type `untrusted-conversation-transcript`. `getSummarySystemPrompt()` and `getContextCarryTemplate()` are the complete backend prompt contract; the retained standalone `SKILL.md` is a reference artifact and is not read by the backend.
 
 Generated output requires the exact title and all seven sections once and in order: WHO I AM, WHAT WE WERE DOING, WHERE WE LEFT OFF, DECISIONS MADE, OPEN QUESTIONS, KEY CONTEXT, NEXT STEP. The three core continuation sections must be meaningful, and NEXT STEP must match the exact destination instruction.
 
@@ -246,7 +247,7 @@ Paste uses native setters/events plus stability checks. Firefox alone converts c
 
 ## Common Wrong Assumptions
 
-- The retired standalone skill is not the backend prompt. The provider sees only the strings assembled in `api/summarize.js`.
+- The retained standalone `SKILL.md` is not the backend prompt. The provider sees only the strings assembled in `api/summarize.js`.
 - The profile's `minWords` is not the acceptance floor; use `getMinimumValidSummaryWords()` to understand validation.
 - A structurally valid Context Carry is not proven factually grounded because the validator never sees the source transcript.
 - A passing fake-DOM capture test does not prove a current live site DOM works; capture regressions require a real DOM trace and then a fixture.

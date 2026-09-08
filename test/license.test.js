@@ -13,7 +13,8 @@ test("repository and public website declare proprietary source terms", () => {
     read("README.md"),
     read("extension/README.md"),
     read("index.html"),
-    read("privacy.html")
+    read("privacy.html"),
+    read("index.legacy-2026-07-15.html")
   ].join("\n");
 
   assert.match(license, /All rights reserved\./);
@@ -29,7 +30,7 @@ test("repository and public website declare proprietary source terms", () => {
 });
 
 test("public website image references resolve to tracked assets", () => {
-  for (const page of ["index.html", "privacy.html", "analysis/index.html"]) {
+  for (const page of ["index.html", "privacy.html", "analysis/index.html", "index.legacy-2026-07-15.html"]) {
     const source = read(page);
     const pageDirectory = path.dirname(path.join(ROOT, page));
     const imageSources = [...source.matchAll(/<img\b[^>]*\bsrc="([^"]+)"/gi)]
