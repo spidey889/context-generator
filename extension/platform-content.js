@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-09-08-claude-chat-orb-lift";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-09-08-claude-chat-orb-lift-v2";
   const BUBBLE_ID = "context-generator-bubble";
   const OVERLAY_ID = "context-generator-overlay";
   const HANDOFF_SCRIM_ID = "context-generator-handoff-scrim";
@@ -49,7 +49,7 @@
   const CLAUDE_BUBBLE_ARTWORK_EDGE_INSET = 7;
   const CLAUDE_BUBBLE_ARTWORK_CENTER_Y_OFFSET = -0.5;
   const CLAUDE_EMPTY_COMPOSER_Y_NUDGE = -0.5;
-  const CLAUDE_EXISTING_CHAT_EMPTY_COMPOSER_Y_NUDGE = -6.5;
+  const CLAUDE_EXISTING_CHAT_COMPOSER_Y_NUDGE = -8.5;
   const CLAUDE_PLACEMENT_DEBUG_QUERY = "__cap_context_debug_placement";
   const CLAUDE_MAX_COMPOSER_HORIZONTAL_PADDING = 160;
   const CLAUDE_MODEL_LEFT_NUDGE = 48;
@@ -6320,9 +6320,9 @@
     const controls = getClaudeComposerControlCandidates(composerRect);
     const anchorControl = findClaudeVoiceModeControl(controls) || findClaudeInlineFallbackControl(controls);
     const isFreshEmptyComposer = isClaudeFreshEmptyComposer(input);
-    const isExistingChatEmptyComposer = isClaudeExistingChatEmptyComposer(input);
-    const emptyComposerNudge = isExistingChatEmptyComposer
-      ? CLAUDE_EXISTING_CHAT_EMPTY_COMPOSER_Y_NUDGE
+    const isExistingChatComposer = window.location.pathname.startsWith("/chat/");
+    const emptyComposerNudge = isExistingChatComposer
+      ? CLAUDE_EXISTING_CHAT_COMPOSER_Y_NUDGE
       : isFreshEmptyComposer ? CLAUDE_EMPTY_COMPOSER_Y_NUDGE : 0;
 
     if (anchorControl) {
