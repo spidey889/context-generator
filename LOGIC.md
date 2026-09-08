@@ -222,7 +222,7 @@ The protected `users` table creates a row on an install's first successful trans
 
 ## Placement and Paste
 
-- Claude: fixed to the stable page root but measured beside a composer-local Voice/Send/mic anchor. A surface is accepted only when it contains the editor and an eligible visible control whose geometry fits that surface; null-anchor states never fall back to a synthetic bottom-right position. The last anchored viewport position survives a bounded 700 ms hydration/remount gap, and hidden mounted Voice/Send controls reserve the same slot before their visibility swap. Existing optical tuning remains unchanged after a valid anchor is found.
+- Claude: fixed to the stable page root but measured beside a composer-local Voice/Send/mic anchor. A surface is accepted only when it contains the editor and an eligible visible control whose geometry fits that surface; null-anchor states never fall back to a synthetic bottom-right position. The last anchored viewport position survives a bounded 700 ms hydration/remount gap. SPA pathname changes force fresh route-specific alignment, and Voice/Send visibility mutations reserve the newly visible control synchronously before its first paint. Existing optical tuning remains unchanged after a valid anchor is found.
 - Claude composer surfaces must remain horizontally close to the editor. `CLAUDE_MAX_COMPOSER_HORIZONTAL_PADDING` is 160 px across the combined left and right padding. Reject page-sized ancestors beyond this bound so phantom width cannot push mic/voice controls and the orb outside the composer or make placement oscillate during hydration. Apply this check to both retained and newly scored surfaces while still allowing tall real composers.
 - ChatGPT: fixed left of the model selector; retains its last usable surface and requires focused paste.
 - Gemini: left of the Pro/Flash selector; retains the outer composer during large-paste expansion.
@@ -242,7 +242,7 @@ Paste uses native setters/events plus stability checks. Firefox alone converts c
 - Model/profile routing: provider constants/budgets, prompts, Latest Run labels, evaluation expectations, this file, `memory.md`, `extension/README.md`.
 - Telemetry fields/stages/failures: source/background sanitizers, Vercel validator, Supabase validator, SQL constraints/functions, privacy wording, tests. Free-form telemetry fields are forbidden.
 - Latest Run receipt: producer, background expiry, bridge, analysis renderer, privacy wording, analysis tests.
-- Any content-script change: update `CONTENT_SCRIPT_LOAD_ID` so open tabs replace stale code, and retain stale-node/reservation cleanup. Current value: `platform-content-2026-09-08-claude-stable-anchor-v6`.
+- Any content-script change: update `CONTENT_SCRIPT_LOAD_ID` so open tabs replace stale code, and retain stale-node/reservation cleanup. Current value: `platform-content-2026-09-08-claude-placement-polish-v7`.
 - Extension release: bump `extension/manifest.json`, rebuild the ZIP with `manifest.json` at its root, hash-compare every file against `extension/`, then test the unpacked folder in a new Brave window.
 
 ## Common Wrong Assumptions

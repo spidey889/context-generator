@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-09-08-claude-stable-anchor-v6";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-09-08-claude-placement-polish-v7";
   const BUBBLE_ID = "context-generator-bubble";
   const OVERLAY_ID = "context-generator-overlay";
   const HANDOFF_SCRIM_ID = "context-generator-handoff-scrim";
@@ -48,6 +48,7 @@
   const CLAUDE_PLACEMENT_DEBUG_QUERY = "__cap_context_debug_placement";
   const CLAUDE_PLACEMENT_DEBUG_SESSION_KEY = "cap-context-debug-claude-placement";
   const CLAUDE_TRANSIENT_PLACEMENT_GRACE_MS = 700;
+  const CLAUDE_PATHNAME_POLL_MS = 80;
   const CLAUDE_MAX_COMPOSER_HORIZONTAL_PADDING = 160;
   const CLAUDE_MODEL_LEFT_NUDGE = 48;
   const CLAUDE_SIDE_CONTROL_RIGHT_NUDGE = 52;
@@ -467,6 +468,8 @@
   let lastClaudePlacementDebugSignature = "";
   let lastClaudeStablePlacementAt = 0;
   let claudePlacementGraceTimer = null;
+  let lastClaudePlacementPathname = window.location.pathname;
+  let claudePathnamePollTimer = null;
   let pendingFloatingButtonReasons = new Set();
   let floatingButtonMonitoringDisabled = false;
   let handoffCountdownTimer = null;
@@ -576,6 +579,7 @@
       syncDeepSeekPlacementResizeMonitoring,
       syncGeminiPlacementResizeMonitoring,
       syncClaudePlacementResizeMonitoring,
+      checkClaudePlacementPathname,
       prepareSourceForCapture,
       expandCollapsedConversationContent,
       getConversationTurns,
@@ -7632,9 +7636,12 @@
     stopClaudePlacementMutationMonitoring();
     claudePlacementMutationRoot = root;
     // Claude keeps Voice and Send mounted, then swaps their visibility through
-    // ancestor classes without changing composer geometry or child nodes.
+    // ancestor classes without changing composer geometry or child nodes. Apply
+    // the native-control reservation in this microtask so the newly visible
+    // control cannot paint once underneath the orb while the full update waits.
     claudePlacementMutationObserver = new MutationObserver((mutations) => {
       if (mutations.every(isOwnDomMutation)) return;
+      syncClaudeInlineReservationBeforePaint(input, composerSurface);
       const attributes = mutations.map((mutation) => mutation.attributeName).filter(Boolean);
       scheduleFloatingButtonUpdate(`claude-attribute:${[...new Set(attributes)].sort().join("+") || "unknown"}`);
     });
@@ -7961,6 +7968,21 @@
     });
   }
 
+  function syncClaudeInlineReservationBeforePaint(input, composerSurface) {
+    if (currentPlatform.id !== "claude" || !input || !composerSurface) return false;
+    const composerRect = composerSurface.getBoundingClientRect();
+    const placement = getClaudeBubblePlacement(composerRect, input, composerSurface);
+    if (!placement.anchorControl) return false;
+    reserveClaudeInlineBubbleSlot(
+      placement.anchorControl,
+      placement.reservationControls,
+      input,
+      composerRect,
+      placement.inlineShift
+    );
+    return true;
+  }
+
   function retainClaudeStablePlacement(
     bubble,
     reason,
@@ -8048,7 +8070,39 @@
     window.addEventListener("resize", scheduleFloatingButtonUpdate);
     document.addEventListener("visibilitychange", scheduleFloatingButtonUpdate);
     document.addEventListener("focusin", handleFloatingButtonFocusIn);
+    startClaudePathnameMonitoring();
     scheduleFloatingButtonUpdate("monitor-start");
+  }
+
+  function startClaudePathnameMonitoring() {
+    if (currentPlatform.id !== "claude" || claudePathnamePollTimer) return;
+    lastClaudePlacementPathname = window.location.pathname;
+    // Navigation API covers Chromium SPA transitions immediately. The small
+    // pathname poll is the cross-browser fallback because pushState emits no
+    // standard event and extension isolated worlds cannot reliably wrap it.
+    window.navigation?.addEventListener?.("navigate", handleClaudeNavigation);
+    window.addEventListener("popstate", handleClaudeNavigation);
+    claudePathnamePollTimer = setInterval(checkClaudePlacementPathname, CLAUDE_PATHNAME_POLL_MS);
+  }
+
+  function handleClaudeNavigation() {
+    scheduleFloatingButtonUpdate("claude-route");
+  }
+
+  function checkClaudePlacementPathname() {
+    if (currentPlatform.id !== "claude") return false;
+    const pathname = window.location.pathname;
+    if (pathname === lastClaudePlacementPathname) return false;
+    lastClaudePlacementPathname = pathname;
+    scheduleFloatingButtonUpdate("claude-pathname");
+    return true;
+  }
+
+  function stopClaudePathnameMonitoring() {
+    window.navigation?.removeEventListener?.("navigate", handleClaudeNavigation);
+    window.removeEventListener("popstate", handleClaudeNavigation);
+    if (claudePathnamePollTimer) clearInterval(claudePathnamePollTimer);
+    claudePathnamePollTimer = null;
   }
 
   function disableFloatingButtonMonitoring() {
@@ -8066,6 +8120,7 @@
     stopGeminiPlacementResizeMonitoring();
     clearClaudePlacementMonitoring();
     clearClaudePlacementGraceTimer();
+    stopClaudePathnameMonitoring();
     clearChatGptPlacementResizeMonitoring();
 
     window.removeEventListener("resize", scheduleFloatingButtonUpdate);

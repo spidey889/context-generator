@@ -222,6 +222,7 @@ function loadPlatformContent(elements = [], hostname = "chatgpt.com", {
   const sessionValues = new Map();
   const resizeObservers = [];
   const mutationObservers = [];
+  const animationFrameCallbacks = [];
   class TestResizeObserver {
     constructor(callback) {
       this.callback = callback;
@@ -299,6 +300,11 @@ function loadPlatformContent(elements = [], hostname = "chatgpt.com", {
     },
     innerHeight,
     innerWidth,
+    requestAnimationFrame: (callback) => {
+      animationFrameCallbacks.push(callback);
+      return animationFrameCallbacks.length;
+    },
+    cancelAnimationFrame: () => {},
     setTimeout,
     clearTimeout
   };
@@ -332,6 +338,8 @@ function loadPlatformContent(elements = [], hostname = "chatgpt.com", {
     URLSearchParams,
     MutationObserver: TestMutationObserver,
     ResizeObserver: TestResizeObserver,
+    requestAnimationFrame: window.requestAnimationFrame,
+    cancelAnimationFrame: window.cancelAnimationFrame,
     setTimeout,
     clearTimeout
   };
@@ -343,6 +351,8 @@ function loadPlatformContent(elements = [], hostname = "chatgpt.com", {
     hooks.mutationObservers = mutationObservers;
     hooks.resizeObservers = resizeObservers;
     hooks.debugLogs = debugLogs;
+    hooks.window = window;
+    hooks.animationFrameCallbacks = animationFrameCallbacks;
   }
   return hooks;
 }
@@ -1947,6 +1957,16 @@ test("Claude existing chat always lifts the orb above the low native controls", 
   assert.equal(placement.top, 36.5);
 });
 
+test("Claude detects the /new to /chat route change and schedules fresh alignment", () => {
+  const hooks = loadPlatformContent([], "claude.ai", { pathname: "/new" });
+
+  assert.equal(hooks.checkClaudePlacementPathname(), false);
+  hooks.window.location.pathname = "/chat/example";
+
+  assert.equal(hooks.checkClaudePlacementPathname(), true);
+  assert.equal(hooks.animationFrameCallbacks.length, 1);
+});
+
 test("Claude bubble uses the rightmost small control when voice mode is unlabeled", () => {
   const mic = new FakeElement({
     tag: "button",
@@ -2255,6 +2275,48 @@ test("Claude reserves a hidden mounted Send control before the Voice-to-Send swa
   assert.equal(placement.anchorControl.element, voice);
   assert.equal(placement.controls.some((control) => control.element === send), false);
   assert.equal(placement.reservationControls.some((control) => control.element === send), true);
+});
+
+test("Claude shifts a newly visible Mic synchronously before the full placement frame", () => {
+  const composerRect = getClaudeComposerRect();
+  const input = new FakeElement({ attrs: { contenteditable: "true", role: "textbox" } });
+  const composer = new FakeElement({ tag: "form", rect: composerRect });
+  const send = new FakeElement({
+    tag: "button",
+    attrs: { "aria-label": "Send message" },
+    rect: { left: 844, right: 880, top: 166, bottom: 202, width: 36, height: 36 }
+  });
+  const mic = new FakeElement({
+    tag: "button",
+    attrs: { "aria-label": "Microphone", "data-visibility": "hidden" },
+    rect: { left: 844, right: 844, top: 166, bottom: 166, width: 0, height: 0 }
+  });
+  composer.children = [input, send, mic];
+  [input, send, mic].forEach((element) => { element.parentElement = composer; });
+
+  const hooks = loadPlatformContent([input, composer, send, mic], "claude.ai", { pathname: "/chat/example" });
+  const sendPlacement = hooks.getClaudeBubblePlacement(composerRect, input, composer);
+  hooks.reserveClaudeInlineBubbleSlot(
+    sendPlacement.anchorControl,
+    sendPlacement.reservationControls,
+    input,
+    composerRect,
+    sendPlacement.inlineShift
+  );
+
+  assert.equal(mic.style.transform, "");
+  send.attrs["data-visibility"] = "hidden";
+  mic.attrs["data-visibility"] = "visible";
+  mic.rect = { left: 844, right: 880, top: 166, bottom: 202, width: 36, height: 36 };
+  hooks.syncClaudePlacementResizeMonitoring(input, composer);
+  hooks.mutationObservers.at(-1).callback([{
+    target: mic,
+    attributeName: "class",
+    addedNodes: [],
+    removedNodes: []
+  }]);
+  assert.equal(mic.style.transform, "translateX(-52px)");
+  assert.equal(hooks.animationFrameCallbacks.length, 1);
 });
 
 test("Gemini bubble anchors to the left of the Flash selector", () => {
