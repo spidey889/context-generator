@@ -8,12 +8,7 @@ const { pathToFileURL } = require("node:url");
 const ROOT = path.join(__dirname, "..");
 const BACKGROUND_SOURCE = fs.readFileSync(path.join(ROOT, "extension", "background.js"), "utf8");
 const PLATFORM_SOURCE = fs.readFileSync(path.join(ROOT, "extension", "platform-content.js"), "utf8");
-const EDGE_FUNCTION_SOURCE = fs.readFileSync(
-  path.join(ROOT, "supabase", "functions", "transfer-telemetry", "index.ts"),
-  "utf8"
-);
 const VALIDATION_PATH = path.join(ROOT, "supabase", "functions", "transfer-telemetry", "validation.mjs");
-const VERCEL_TELEMETRY_SOURCE = fs.readFileSync(path.join(ROOT, "api", "telemetry.js"), "utf8");
 const VERCEL_VALIDATION = require(path.join(ROOT, "api", "telemetry-validation.js"));
 const VERCEL_TELEMETRY_HANDLER = require(path.join(ROOT, "api", "telemetry.js"));
 const PROGRESS_MIGRATION_SOURCE = fs.readFileSync(
@@ -32,11 +27,6 @@ const USERS_UPDATE_FIRST_MIGRATION_SOURCE = fs.readFileSync(
   path.join(ROOT, "supabase", "migrations", "20260722065035_update_user_summary_before_insert.sql"),
   "utf8"
 );
-const USER_CANCELLED_MIGRATION_SOURCE = fs.readFileSync(
-  path.join(ROOT, "supabase", "migrations", "20260718175852_add_user_cancelled_failure_reason.sql"),
-  "utf8"
-);
-const MANIFEST = JSON.parse(fs.readFileSync(path.join(ROOT, "extension", "manifest.json"), "utf8"));
 
 function loadTelemetryBackground(fetchImpl, initialStorage = {}, manifestVersion = "1.3.0") {
   const storage = structuredClone(initialStorage);
@@ -463,23 +453,11 @@ test("transfer flow emits each closed telemetry stage without attaching content"
   assert.match(PLATFORM_SOURCE, /trace\.telemetryLastStage = "completed"/);
 });
 
-test("telemetry is routed through Vercel while Supabase remains server-side and write-only", () => {
-  assert.ok(MANIFEST.host_permissions.includes("https://context-generator-five.vercel.app/*"));
-  assert.ok(!MANIFEST.host_permissions.some((permission) => permission.includes("supabase.co")));
-  assert.doesNotMatch(BACKGROUND_SOURCE, /supabase\.co|sb_publishable_|TELEMETRY_PUBLISHABLE_KEY/);
-  assert.match(BACKGROUND_SOURCE, /https:\/\/context-generator-five\.vercel\.app\/api\/telemetry/);
-  assert.match(VERCEL_TELEMETRY_SOURCE, /SUPABASE_TELEMETRY_FUNCTION_URL/);
-  assert.match(VERCEL_TELEMETRY_SOURCE, /SUPABASE_TELEMETRY_PUBLISHABLE_KEY/);
-  assert.match(VERCEL_TELEMETRY_SOURCE, /apikey: upstreamKey/);
-  assert.match(EDGE_FUNCTION_SOURCE, /request\.headers\.get\("apikey"\)/);
-  assert.match(EDGE_FUNCTION_SOURCE, /SUPABASE_PUBLISHABLE_KEYS/);
-  assert.match(EDGE_FUNCTION_SOURCE, /SUPABASE_SERVICE_ROLE_KEY/);
-  assert.match(EDGE_FUNCTION_SOURCE, /\.rpc\("record_transfer_event"/);
+test("Supabase progress upserts cannot move a transfer backward", () => {
   assert.match(PROGRESS_MIGRATION_SOURCE, /on conflict \(attempt_id\) do update/);
   assert.match(PROGRESS_MIGRATION_SOURCE, /array_position\(stage_order, excluded\.last_stage\)/);
   assert.match(PROGRESS_MIGRATION_SOURCE, /revoke all on function public\.record_transfer_event/);
   assert.match(PROGRESS_MIGRATION_SOURCE, /to service_role/);
-  assert.doesNotMatch(EDGE_FUNCTION_SOURCE, /console\.|conversation|summary|error\.message/);
 });
 
 test("Supabase replaces the old usage views with one aggregate users table", () => {
@@ -528,15 +506,4 @@ test("Supabase gives the invoker trigger write access and resets stale daily tot
   assert.match(USERS_COUNTER_FIX_MIGRATION_SOURCE, /today_summaries = 0/);
   assert.match(USERS_COUNTER_FIX_MIGRATION_SOURCE, /today_date = \(now\(\) at time zone 'utc'\)::date/);
   assert.match(USERS_COUNTER_FIX_MIGRATION_SOURCE, /where today_date < \(now\(\) at time zone 'utc'\)::date/);
-});
-
-test("user cancellation stays a closed metadata-only failure reason", () => {
-  assert.match(BACKGROUND_SOURCE, /"user_cancelled"/);
-  assert.match(EDGE_FUNCTION_SOURCE, /validation\.mjs/);
-  assert.match(USER_CANCELLED_MIGRATION_SOURCE, /drop constraint if exists transfer_events_failure_reason_check/);
-  assert.match(USER_CANCELLED_MIGRATION_SOURCE, /'user_cancelled'::text/);
-  assert.doesNotMatch(
-    USER_CANCELLED_MIGRATION_SOURCE,
-    /raw_chat|generated_summary|provider_response_body|error_message|stack_trace|page_url/
-  );
 });

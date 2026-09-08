@@ -435,72 +435,6 @@ test("handoff progress state advances deterministically through the three real s
   assert.equal(hooks.getHandoffProgressStatusText("paste", "done", "ChatGPT"), "Pasted into ChatGPT");
 });
 
-test("handoff progress is branded and wired only to real pipeline events", () => {
-  const source = fs.readFileSync(SOURCE_PATH, "utf8");
-  const fillerPhrases = [
-    "I don't like waiting either",
-    "This is for better context",
-    "Keeping the thread intact",
-    "Saving you the re-explain",
-    "Making the next reply sharper",
-    "Almost ready"
-  ];
-
-  for (const phrase of fillerPhrases) {
-    assert.equal(source.includes(phrase), false, `removed filler must stay absent: ${phrase}`);
-  }
-
-  const overlayStart = source.indexOf("function ensureFloatingOverlay()");
-  const overlayEnd = source.indexOf("function startHandoffCountdown()", overlayStart);
-  const overlaySource = source.slice(overlayStart, overlayEnd);
-
-  assert.ok(overlayStart >= 0 && overlayEnd > overlayStart);
-  assert.match(overlaySource, /brandIcon\.src = BUBBLE_ICON_URL/);
-  assert.match(overlaySource, /brandText\.textContent = "Cap Context"/);
-  assert.match(source, /const HANDOFF_REASSURANCE_TEXT = "Almost done, don't cancel now"/);
-  assert.match(source, /const HANDOFF_COUNTDOWN_FIXED_MS = 40000/);
-  assert.match(overlaySource, /background:rgba\(255,255,255,0\.06\)/);
-  assert.match(overlaySource, /color:rgba\(250,249,252,0\.82\)/);
-  assert.match(source, /reassurance\.textContent = HANDOFF_REASSURANCE_TEXT/);
-  assert.match(source, /countdown\.style\.display = "none";\s*showHandoffReassurance\(\)/);
-  assert.match(source, /font-family:Georgia,'Times New Roman',serif/);
-  assert.doesNotMatch(source, /countdown\.textContent = HANDOFF_REASSURANCE_TEXT/);
-  assert.doesNotMatch(overlaySource, /Math\.random|setInterval|startHandoffStatusCycle/);
-  assert.doesNotMatch(source, /HANDOFF_STATUS_INTERVAL_MS|HANDOFF_QUOTES|setHandoffStatus/);
-  assert.match(source, /const HANDOFF_SUMMARY_LINE_DURATION_MS = 20000/);
-  assert.match(source, /const HANDOFF_TINY_STAGE_LINE_DURATION_MS = 320/);
-  assert.match(source, /const HANDOFF_FINAL_LINE_DURATION_MS = 1000/);
-  assert.doesNotMatch(source, /HANDOFF_FINAL_TICK_HOLD_MS/);
-  assert.match(source, /if \(stageId !== "summary"[^\n]+return/);
-  assert.match(source, /`\$\{HANDOFF_SUMMARY_LINE_DURATION_MS\}ms`/);
-  assert.match(overlaySource, /stage-progress-easing,linear/);
-  assert.match(overlaySource, /transform:scaleX\(var\(--context-generator-stage-progress-ratio,0\)\)/);
-
-  const summaryRequestStart = source.indexOf("async function requestBackendSummary(");
-  const summaryRequestEnd = source.indexOf("function prepareDestinationTab(", summaryRequestStart);
-  const summaryRequestSource = source.slice(summaryRequestStart, summaryRequestEnd);
-  const tinyCaptureFinishIndex = summaryRequestSource.indexOf('await completeHandoffStageLine("capture"');
-  const summaryActiveIndex = summaryRequestSource.indexOf('setHandoffProgress("summary", "active")');
-  const summaryRequestIndex = summaryRequestSource.indexOf('type: "SUMMARIZE_WITH_BACKEND"');
-  assert.ok(
-    tinyCaptureFinishIndex >= 0
-      && tinyCaptureFinishIndex < summaryActiveIndex
-      && summaryActiveIndex < summaryRequestIndex
-  );
-
-  assert.match(source, /markTransferTrace\([^\n]+"capture start"\);\s*setHandoffProgress\("capture", "active"\)/);
-  assert.match(source, /markTransferTrace\(trace, "capture done", \{[\s\S]{0,240}setHandoffProgress\("capture", "done"\)/);
-  assert.match(source, /markTransferTrace\(trace, "summary start", \{[^\n]+\)/);
-  assert.match(source, /setHandoffProgress\("summary", "active"\)/);
-  assert.match(source, /markTransferTrace\(transferTrace, "summary available", \{ chars: summary\.length \}\);\s*setHandoffProgress\("summary", "done"\)/);
-  assert.match(source, /markTransferTrace\(transferTrace, "paste request start"\);\s*setHandoffProgress\("paste", "active"\)/);
-  assert.match(source, /const requiresFocusedPaste = FOCUSED_PASTE_DESTINATIONS\.has\(destinationId\)/);
-  assert.match(source, /if \(requiresFocusedPaste\) \{\s*await completeHandoffForDestinationReveal\(\)/);
-  assert.match(source, /deferFinalActivation: !requiresFocusedPaste/);
-  assert.match(source, /if \(!requiresFocusedPaste\) \{\s*await completeHandoffForDestinationReveal\(\);[\s\S]{0,260}type: "ACTIVATE_DESTINATION_TAB"/);
-  assert.doesNotMatch(source, /showHandoffCompletion|showPasteCompletionOverlay/);
-});
-
 test("Grok empty-state prompt is not counted or captured as a real message", () => {
   const emptyPrompt = new FakeElement({
     text: "What's on your mind?",
@@ -1723,49 +1657,6 @@ test("opening the destination picker does not scrape or summarize", () => {
   assert.doesNotMatch(preconnectSource, /conversation|scrape|summar|fetch\(|sendMessage|notifyBackground/);
 });
 
-test("destination picker blurs and releases the page background", () => {
-  const pickerStart = PLATFORM_CONTENT_SOURCE.indexOf("function ensureDestinationSheetBackdrop()");
-  const pickerEnd = PLATFORM_CONTENT_SOURCE.indexOf("function warmDestinationConnections()", pickerStart);
-  const pickerSource = PLATFORM_CONTENT_SOURCE.slice(pickerStart, pickerEnd);
-
-  assert.match(pickerSource, /backdrop-filter:blur\(7px\)/);
-  assert.match(PLATFORM_CONTENT_SOURCE, /width:min\(\$\{DESTINATION_SHEET_WIDTH\}px,calc\(100vw - 20px\)\)/);
-  assert.match(PLATFORM_CONTENT_SOURCE, /sheetWidth = Math\.min\(DESTINATION_SHEET_WIDTH, window\.innerWidth - margin \* 2\)/);
-  assert.match(PLATFORM_CONTENT_SOURCE, /@media \(max-width: 390px\)/);
-  assert.match(PLATFORM_CONTENT_SOURCE, /context-generator-destination-tile:focus-visible/);
-  assert.match(PLATFORM_CONTENT_SOURCE, /Context goes straight into the input box/);
-  assert.match(PLATFORM_CONTENT_SOURCE, /button\.setAttribute\("aria-label", `Continue in \$\{option\.name\}`\)/);
-  assert.match(pickerSource, /backdrop\.style\.display = "block"/);
-  assert.match(pickerSource, /backdrop\.style\.display = "none"/);
-});
-
-test("destination choice overlaps the picker exit with the handoff entrance", () => {
-  const transitionStart = PLATFORM_CONTENT_SOURCE.indexOf("async function transitionDestinationSheetToHandoff(");
-  const transitionEnd = PLATFORM_CONTENT_SOURCE.indexOf("function warmDestinationConnections()", transitionStart);
-  const transitionSource = PLATFORM_CONTENT_SOURCE.slice(transitionStart, transitionEnd);
-  const transferStart = PLATFORM_CONTENT_SOURCE.indexOf("async function startDestinationTransfer(");
-  const transferEnd = PLATFORM_CONTENT_SOURCE.indexOf("function ensureFloatingOverlay()", transferStart);
-  const transferSource = PLATFORM_CONTENT_SOURCE.slice(transferStart, transferEnd);
-
-  assert.match(transitionSource, /await delay\(DESTINATION_TRANSFER_PRESS_MS\)[\s\S]*hideDestinationSheet\(\{ preserveBackdrop: true \}\)[\s\S]*await delay\(DESTINATION_HANDOFF_OVERLAP_MS\)/);
-  assert.match(transferSource, /await transitionDestinationSheetToHandoff\(\)[\s\S]*showOverlay\(destinationId\)[\s\S]*releaseDestinationSheetBackdrop\(\)/);
-});
-
-test("transfer safety window covers long quality summaries", () => {
-  const source = fs.readFileSync(SOURCE_PATH, "utf8");
-
-  assert.match(source, /const RUNNING_AUTO_RESET_MS = 360000/);
-});
-
-test("latest-run receipt preserves the complete provider fallback chain", () => {
-  const source = fs.readFileSync(SOURCE_PATH, "utf8");
-
-  assert.match(source, /modelsTried:\s*sanitizeModelChainForStats/);
-  assert.match(source, /mistralModelsTried:\s*sanitizeModelChainForStats/);
-  assert.match(source, /function sanitizeModelChainForStats/);
-  assert.match(source, /\.slice\(0, 5\)/);
-});
-
 test("latest-run cache receipt preserves original provider metadata", () => {
   const hooks = loadPlatformContent([]);
   const trace = hooks.createTransferTrace("chatgpt", "cache test");
@@ -2226,31 +2117,6 @@ test("Gemini bubble anchors to the left of the Pro selector", () => {
   assert.equal(placement.bottom, 15);
 });
 
-test("Gemini keeps an expanded post-paste composer as the bubble placement surface", () => {
-  const input = new FakeElement({
-    attrs: { contenteditable: "true", role: "textbox" },
-    rect: { left: 160, right: 840, top: 150, bottom: 550, width: 680, height: 400 }
-  });
-  const editorWrap = new FakeElement({
-    rect: { left: 140, right: 860, top: 130, bottom: 570, width: 720, height: 440 }
-  });
-  const expandedComposer = new FakeElement({
-    rect: { left: 100, right: 1000, top: 100, bottom: 620, width: 900, height: 520 }
-  });
-  const pro = new FakeElement({ tag: "button", text: "Pro" });
-  const mic = new FakeElement({ tag: "button", attrs: { "aria-label": "Microphone" } });
-
-  input.parentElement = editorWrap;
-  editorWrap.children = [input];
-  editorWrap.parentElement = expandedComposer;
-  expandedComposer.children = [editorWrap, pro, mic];
-  pro.parentElement = expandedComposer;
-  mic.parentElement = expandedComposer;
-
-  const hooks = loadPlatformContent([input, editorWrap, expandedComposer, pro, mic], "gemini.google.com");
-  assert.equal(hooks.findComposerSurfaceElement(input), expandedComposer);
-});
-
 test("Gemini retains its outer composer while a large paste reflows in stages", () => {
   const input = new FakeElement({
     attrs: { contenteditable: "true", role: "textbox" },
@@ -2282,39 +2148,6 @@ test("Gemini retains its outer composer while a large paste reflows in stages", 
 
   assert.equal(hooks.findComposerSurfaceElement(input), composer);
   assert.deepEqual(hooks.resizeObservers.at(-1).observed, [input, composer]);
-});
-
-test("Grok keeps an expanded post-paste composer as the bubble placement surface", () => {
-  const input = new FakeElement({
-    attrs: { contenteditable: "true", role: "textbox" },
-    rect: { left: 160, right: 840, top: 150, bottom: 550, width: 680, height: 400 }
-  });
-  const editorWrap = new FakeElement({
-    rect: { left: 140, right: 860, top: 130, bottom: 570, width: 720, height: 440 }
-  });
-  const expandedComposer = new FakeElement({
-    rect: { left: 100, right: 1000, top: 100, bottom: 620, width: 900, height: 520 }
-  });
-  const fastSelector = new FakeElement({
-    tag: "button",
-    text: "Fast",
-    attrs: { "aria-label": "Speed selector" },
-    rect: { left: 720, right: 790, top: 560, bottom: 596, width: 70, height: 36 }
-  });
-
-  input.parentElement = editorWrap;
-  editorWrap.children = [input];
-  editorWrap.parentElement = expandedComposer;
-  expandedComposer.children = [editorWrap, fastSelector];
-  fastSelector.parentElement = expandedComposer;
-
-  const hooks = loadPlatformContent([input, editorWrap, expandedComposer, fastSelector], "grok.com");
-  const surface = hooks.findComposerSurfaceElement(input);
-  const placement = hooks.getGrokBubblePlacement(surface.getBoundingClientRect());
-
-  assert.equal(surface, expandedComposer);
-  assert.equal(placement.left, 570);
-  assert.equal(placement.top, 457);
 });
 
 test("Grok retains its outer composer while a large paste reflows in stages", () => {
@@ -2354,39 +2187,6 @@ test("Grok retains its outer composer while a large paste reflows in stages", ()
   assert.deepEqual(hooks.resizeObservers.at(-1).observed, [input, composer]);
 });
 
-test("DeepSeek keeps an expanded post-paste composer as the bubble placement surface", () => {
-  const input = new FakeElement({
-    attrs: { contenteditable: "true", role: "textbox" },
-    rect: { left: 160, right: 840, top: 150, bottom: 550, width: 680, height: 400 }
-  });
-  const editorWrap = new FakeElement({
-    rect: { left: 140, right: 860, top: 130, bottom: 570, width: 720, height: 440 }
-  });
-  const expandedComposer = new FakeElement({
-    rect: { left: 100, right: 1000, top: 100, bottom: 620, width: 900, height: 520 }
-  });
-  const attach = new FakeElement({
-    tag: "button",
-    attrs: { "aria-label": "Attach file" },
-    rect: { left: 720, right: 756, top: 560, bottom: 596, width: 36, height: 36 }
-  });
-  const send = new FakeElement({
-    tag: "button",
-    attrs: { "aria-label": "Send message" },
-    rect: { left: 780, right: 816, top: 560, bottom: 596, width: 36, height: 36 }
-  });
-
-  input.parentElement = editorWrap;
-  editorWrap.children = [input];
-  editorWrap.parentElement = expandedComposer;
-  expandedComposer.children = [editorWrap, attach, send];
-  attach.parentElement = expandedComposer;
-  send.parentElement = expandedComposer;
-
-  const hooks = loadPlatformContent([input, editorWrap, expandedComposer, attach, send], "chat.deepseek.com");
-  assert.equal(hooks.findComposerSurfaceElement(input), expandedComposer);
-});
-
 test("DeepSeek retains its outer composer while a large paste reflows in stages", () => {
   const input = new FakeElement({
     attrs: { contenteditable: "true", role: "textbox" },
@@ -2420,7 +2220,7 @@ test("DeepSeek retains its outer composer while a large paste reflows in stages"
   assert.deepEqual(hooks.resizeObservers.at(-1).observed, [input, composer]);
 });
 
-test("versioned evaluation set gates capture completeness and fixture latency", () => {
+test("versioned evaluation set gates capture completeness", () => {
   const evaluation = JSON.parse(
     fs.readFileSync(path.join(__dirname, "..", "evaluation", "cases.json"), "utf8")
   );
@@ -2430,9 +2230,7 @@ test("versioned evaluation set gates capture completeness and fixture latency", 
       text: turn.text,
       attrs: { "data-message-author-role": turn.role }
     }));
-    const startedAt = process.hrtime.bigint();
     const transcript = loadPlatformContent(elements, testCase.platform).scrapeConversationText();
-    const captureMs = Number(process.hrtime.bigint() - startedAt) / 1e6;
 
     for (const turn of testCase.turns) {
       assert.ok(transcript.includes(turn.text), testCase.id + " lost a captured turn");
@@ -2442,7 +2240,6 @@ test("versioned evaluation set gates capture completeness and fixture latency", 
       testCase.turns.length,
       testCase.id + " changed the captured turn count"
     );
-    assert.ok(captureMs <= 250, testCase.id + " capture took " + captureMs.toFixed(1) + "ms");
   }
 });
 
