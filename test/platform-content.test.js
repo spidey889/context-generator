@@ -58,6 +58,7 @@ class FakeElement {
     this.id = attrs.id || "";
     this.className = attrs.class || "";
     this.dataset = {};
+    this.isConnected = true;
     this.style = {};
     this.attrs = { ...attrs };
     this.children = [];
@@ -211,6 +212,8 @@ class FakeHTMLInputElement {
 
 function loadPlatformContent(elements = [], hostname = "chatgpt.com", { expectSupported = true, pathname = "/", search = "" } = {}) {
   let hooks = null;
+  const debugLogs = [];
+  const sessionValues = new Map();
   const resizeObservers = [];
   const mutationObservers = [];
   class TestResizeObserver {
@@ -289,6 +292,11 @@ function loadPlatformContent(elements = [], hostname = "chatgpt.com", { expectSu
     setTimeout,
     clearTimeout
   };
+  window.sessionStorage = {
+    getItem: (key) => sessionValues.get(key) ?? null,
+    setItem: (key, value) => sessionValues.set(key, String(value)),
+    removeItem: (key) => sessionValues.delete(key)
+  };
   const chrome = {
     runtime: {
       onMessage: { addListener: () => {} },
@@ -297,7 +305,7 @@ function loadPlatformContent(elements = [], hostname = "chatgpt.com", { expectSu
     }
   };
   const sandbox = {
-    console,
+    console: { ...console, debug: (...args) => debugLogs.push(args) },
     document,
     window,
     getComputedStyle: window.getComputedStyle,
@@ -307,6 +315,7 @@ function loadPlatformContent(elements = [], hostname = "chatgpt.com", { expectSu
     HTMLTextAreaElement: FakeHTMLTextAreaElement,
     HTMLInputElement: FakeHTMLInputElement,
     Node: { DOCUMENT_POSITION_PRECEDING: 2 },
+    URLSearchParams,
     MutationObserver: TestMutationObserver,
     ResizeObserver: TestResizeObserver,
     setTimeout,
@@ -319,6 +328,7 @@ function loadPlatformContent(elements = [], hostname = "chatgpt.com", { expectSu
     assert.ok(hooks, "platform-content test hooks were registered");
     hooks.mutationObservers = mutationObservers;
     hooks.resizeObservers = resizeObservers;
+    hooks.debugLogs = debugLogs;
   }
   return hooks;
 }
@@ -1835,6 +1845,54 @@ test("Claude fresh page keeps the visible orb connected to the voice controls", 
   assert.equal(placement.top, 56.5);
   assert.equal(visibleArtworkGap, 13);
   assert.equal(visibleArtworkCenterY, controlCenterY - 1);
+});
+
+test("Claude placement debug logs are opt-in, concise, and deduplicated", () => {
+  const composerRect = { left: 600, right: 1224, top: 367.5, bottom: 461.5, width: 624, height: 94 };
+  const input = new FakeElement({
+    attrs: { contenteditable: "true", role: "textbox", "aria-label": "Write your prompt to Claude" },
+    rect: { left: 620, right: 1200, top: 380, bottom: 420, width: 580, height: 40 }
+  });
+  const composer = new FakeElement({ attrs: { "data-testid": "composer" }, rect: composerRect });
+  const mic = new FakeElement({ tag: "button", attrs: { "aria-label": "Microphone" }, rect: { left: 1080, right: 1112, top: 415, bottom: 447, width: 32, height: 32 } });
+  const voice = new FakeElement({ tag: "button", attrs: { "aria-label": "Voice mode" }, rect: { left: 1120, right: 1152, top: 415, bottom: 447, width: 32, height: 32 } });
+  const send = new FakeElement({ tag: "button", attrs: { "aria-label": "Send message" }, rect: { left: 1160, right: 1192, top: 415, bottom: 447, width: 32, height: 32 } });
+  const bubble = new FakeElement({ tag: "button", attrs: { id: "context-generator-bubble" }, rect: { left: 1160, right: 1202, top: 410, bottom: 452, width: 42, height: 42 } });
+  composer.children = [input, mic, voice, send];
+  [input, mic, voice, send].forEach((element) => { element.parentElement = composer; });
+
+  const hooks = loadPlatformContent(
+    [input, composer, mic, voice, send],
+    "claude.ai",
+    { pathname: "/new", search: "?__cap_context_debug_placement=1" }
+  );
+  const details = {
+    reason: "monitor-start",
+    outcome: "placed",
+    bubble,
+    input,
+    composerSurface: composer,
+    composerRect,
+    placement: { anchorControl: { element: voice, label: "voice mode" } }
+  };
+
+  hooks.maybeLogClaudePlacementDiagnostics(details);
+  hooks.maybeLogClaudePlacementDiagnostics(details);
+
+  assert.equal(hooks.debugLogs.length, 1);
+  const [prefix, diagnostic] = hooks.debugLogs[0];
+  assert.equal(prefix, "[Cap Context][Claude placement]");
+  assert.equal(diagnostic.path, "/new");
+  assert.equal(diagnostic.reason, "monitor-start");
+  assert.equal(diagnostic.state, "fresh-new-empty");
+  assert.deepEqual({ ...diagnostic.editor.rect }, { x: 620, y: 380, w: 580, h: 40 });
+  assert.equal(diagnostic.surface.node, "div[data-testid=composer]");
+  assert.equal(diagnostic.anchor.label, "Voice mode");
+  assert.equal(diagnostic.anchor.selectedAs, "voice-mode");
+  assert.equal(diagnostic.mic.label, "Microphone");
+  assert.equal(diagnostic.send.label, "Send message");
+  assert.equal(diagnostic.orb.connected, true);
+  assert.equal(diagnostic.orb.visible, true);
 });
 
 test("Claude typed new-chat state keeps the existing placement for the later fix", () => {
