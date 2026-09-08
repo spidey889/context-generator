@@ -874,7 +874,7 @@ ${headerRule}
 - Do not invent, correct, or infer project facts. If the transcript is unclear, say what is uncertain instead of guessing.
 - Avoid broad labels like "security discussion", "early development", or platform names unless the transcript actually supports them.
 - Do not pad or write generic filler; every line should carry useful context.
-- Do not add the closing footer from SKILL.md: no "PASTE THIS AT THE TOP OF YOUR NEW CHAT" and no "Continue from where we left off."
+- Do not add the retired skill-template footer: no "PASTE THIS AT THE TOP OF YOUR NEW CHAT" and no "Continue from where we left off."
 - The 🔁 NEXT STEP section must be exactly: ${DESTINATION_CONFIRMATION_INSTRUCTION}
 - Before finalizing, recheck any user-requested exact-fact checklist against the completed output and add every omitted item to the appropriate section without changing its meaning.
 - Before finalizing, silently check the total word count. If this profile has a non-zero minimum and the output is below ${profile.minWords || 0} words, expand KEY CONTEXT, DECISIONS MADE, and OPEN QUESTIONS with concrete details from the transcript.
@@ -961,17 +961,6 @@ function createProviderError(provider, publicMessage, statusCode = 502, provider
   error.statusCode = statusCode;
   error.providerStatus = providerStatus;
   return error;
-}
-
-function createHttpError(statusCode, publicMessage) {
-  const error = new Error(publicMessage);
-  error.publicMessage = publicMessage;
-  error.statusCode = statusCode;
-  return error;
-}
-
-function getProviderFailureStatus(error) {
-  return error?.statusCode || 502;
 }
 
 function getProviderFailureReason(error) {

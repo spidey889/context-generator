@@ -25,6 +25,7 @@ Write entries in past tense and describe the resulting behavior, not every imple
 
 ### 2026-09-08
 
+- Removed verified dead code and retired skill-era artifacts, consolidated the public site onto the extension's canonical logo assets, centralized duplicate Vercel request parsing without changing endpoint contracts, and brought the Brave smoke's placement-diagnostic assertions back in sync with the production diagnostic schema. The separately deployed Vercel and Supabase telemetry validators remain intentionally duplicated and parity-tested.
 - Restored transfer reliability during Gemini-family congestion and provider-wide outages: corrected the two dated Mistral fallback IDs to their documented forms, reduced the shared Gemini window so the complete 195-second provider allowance stays 15 seconds inside the extension's 210-second deadline, and added a terminal provider-free fallback that carries the complete untruncated transcript when every remote model fails.
 - Refocused public and project documentation on cross-AI continuity, structured context, and preserved decisions instead of foregrounding a secondary interaction detail.
 - Strengthened exact-fact handoffs with a full-transcript checklist and final omission check for protected integrity, implementation-state, ownership, region, identifier, rejected-action, and unresolved-option facts. Bumped the Mistral prompt-cache version so the stronger contract takes effect immediately, and made the live gate's existing single retry cover transient endpoint/provider failures as well as low-quality responses.

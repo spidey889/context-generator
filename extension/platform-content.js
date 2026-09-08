@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-09-08-claude-placement-debug-v4";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-09-08-dead-code-cleanup-v5";
   const BUBBLE_ID = "context-generator-bubble";
   const OVERLAY_ID = "context-generator-overlay";
   const HANDOFF_SCRIM_ID = "context-generator-handoff-scrim";
@@ -43,11 +43,6 @@
   const CLAUDE_INLINE_SLOT_WIDTH = BUBBLE_SIZE + 62;
   const CLAUDE_INLINE_BUBBLE_GAP = 46;
   const CLAUDE_INLINE_RIGHT_MARGIN = 4;
-  // At 38px, the non-transparent orb artwork begins and ends about 7px inside
-  // the 42px button box. Placement diagnostics use the visible edge so the
-  // gap to Claude's voice controls matches what the user actually sees.
-  const CLAUDE_BUBBLE_ARTWORK_EDGE_INSET = 7;
-  const CLAUDE_BUBBLE_ARTWORK_CENTER_Y_OFFSET = -0.5;
   const CLAUDE_EMPTY_COMPOSER_Y_NUDGE = -0.5;
   const CLAUDE_EXISTING_CHAT_COMPOSER_Y_NUDGE = -20.5;
   const CLAUDE_PLACEMENT_DEBUG_QUERY = "__cap_context_debug_placement";
@@ -199,7 +194,6 @@
     "[class*='chat' i]"
   ];
   const CHATGPT_CONVERSATION_TURN_SELECTOR = "[data-testid^='conversation-turn']";
-  const CAP_CONTEXT_SITE_URL = "https://spidey889.github.io/context-generator";
   const EXTENSION_ASSET_BASE_URL = getRuntimeAssetBaseUrl();
   const BUBBLE_ICON_URL = getExtensionAssetUrl("bubble-icon.png");
 
@@ -6482,10 +6476,6 @@
 
   function isClaudeFreshEmptyComposer(input) {
     return window.location.pathname === "/new" && isClaudeComposerEmpty(input);
-  }
-
-  function isClaudeExistingChatEmptyComposer(input) {
-    return window.location.pathname.startsWith("/chat/") && isClaudeComposerEmpty(input);
   }
 
   function isClaudeComposerEmpty(input) {

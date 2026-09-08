@@ -377,6 +377,19 @@ async function getBrowserWebSocketUrl(devToolsPort) {
   return (await response.json()).webSocketDebuggerUrl;
 }
 
+async function readConsoleArgument(session, argument) {
+  if (!argument) return null;
+  if (Object.prototype.hasOwnProperty.call(argument, "value")) return argument.value;
+  if (!argument.objectId) return null;
+
+  const response = await session.call("Runtime.callFunctionOn", {
+    objectId: argument.objectId,
+    functionDeclaration: "function () { return this; }",
+    returnByValue: true
+  });
+  return response.result?.value ?? null;
+}
+
 function appendProcessOutput(current, chunk) {
   return `${current}${chunk}`.slice(-8000);
 }
@@ -483,18 +496,16 @@ async function run() {
       document.getElementById("context-generator-bubble") &&
       getComputedStyle(document.getElementById("context-generator-bubble")).display !== "none"
     )`), "the Claude placement bubble");
-    const claudePlacementDiagnostics = await waitFor(() => {
+    const claudePlacementDiagnostics = await waitFor(async () => {
       const event = claudePlacementSession.getRecentEvents().find((candidate) => {
         return candidate.method === "Runtime.consoleAPICalled"
-          && candidate.params?.args?.[0]?.value === "[Context Generator] Claude placement";
+          && candidate.params?.args?.[0]?.value === "[Cap Context][Claude placement]";
       });
-      const serialized = event?.params?.args?.[1]?.value;
-      return serialized ? JSON.parse(serialized) : null;
+      return readConsoleArgument(claudePlacementSession, event?.params?.args?.[1]);
     }, "Claude's page-load placement diagnostics");
     process.stdout.write(`ℹ Claude page-load geometry ${JSON.stringify(claudePlacementDiagnostics)}\n`);
-    assert.equal(claudePlacementDiagnostics.state, "fresh-empty");
-    assert.equal(claudePlacementDiagnostics.deltas.visibleCenterY, -1);
-    assert.equal(claudePlacementDiagnostics.deltas.visibleGapX, 13);
+    assert.equal(claudePlacementDiagnostics.path, "/new");
+    assert.equal(claudePlacementDiagnostics.state, "fresh-new-empty");
     const claudeEmptyBounds = await claudePlacementSession.evaluate(`(() => {
       const composer = document.getElementById("claude-composer").getBoundingClientRect();
       const bubble = document.getElementById("context-generator-bubble").getBoundingClientRect();
@@ -519,21 +530,17 @@ async function run() {
       history.replaceState(null, "", "/chat/smoke?${SMOKE_PLATFORM_QUERY}=claude&__cap_context_debug_placement=1");
       document.getElementById("claude-composer").classList.add("existing-chat");
     })()`);
-    const claudeExistingChatDiagnostics = await waitFor(() => {
+    const claudeExistingChatDiagnostics = await waitFor(async () => {
       const events = claudePlacementSession.getRecentEvents().slice().reverse();
       for (const event of events) {
         if (event.method !== "Runtime.consoleAPICalled"
-          || event.params?.args?.[0]?.value !== "[Context Generator] Claude placement") continue;
-        const serialized = event.params?.args?.[1]?.value;
-        if (!serialized) continue;
-        const diagnostics = JSON.parse(serialized);
-        if (diagnostics.route === "/chat/smoke") return diagnostics;
+          || event.params?.args?.[0]?.value !== "[Cap Context][Claude placement]") continue;
+        const diagnostics = await readConsoleArgument(claudePlacementSession, event.params?.args?.[1]);
+        if (diagnostics.path === "/chat/smoke") return diagnostics;
       }
       return null;
     }, "Claude's existing-chat placement diagnostics");
-    assert.equal(claudeExistingChatDiagnostics.state, "existing-chat-empty");
-    assert.equal(claudeExistingChatDiagnostics.deltas.visibleCenterY, -1);
-    assert.equal(claudeExistingChatDiagnostics.deltas.visibleGapX, 13);
+    assert.equal(claudeExistingChatDiagnostics.state, "chat-empty");
     const claudeEmptyAlignment = await claudePlacementSession.evaluate(`(() => {
       const bubble = document.getElementById("context-generator-bubble").getBoundingClientRect();
       const voice = document.getElementById("voice").getBoundingClientRect();

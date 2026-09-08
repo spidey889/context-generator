@@ -13,6 +13,7 @@ const RATE_LIMIT_MAX_CONCURRENT = 8;
 const RATE_LIMIT_ENTRY_TTL_MS = 2 * RATE_LIMIT_HOUR_MS;
 const RATE_LIMIT_MAX_ENTRIES = 5000;
 const RATE_LIMIT_STATE_KEY = Symbol.for("cap-context.request-security.v1");
+const { getHeader, invalid, parseBoundedJsonBody } = require("./request-validation");
 
 function getRateLimitState() {
   if (!globalThis[RATE_LIMIT_STATE_KEY]) {
@@ -92,28 +93,9 @@ function validateSummarizeRequest(req) {
     return invalid(413, "request_too_large", "Request payload is too large");
   }
 
-  let body = req.body;
-  let requestBytes = 0;
-  if (typeof body === "string") {
-    requestBytes = Buffer.byteLength(body, "utf8");
-    if (requestBytes > MAX_REQUEST_BYTES) {
-      return invalid(413, "request_too_large", "Request payload is too large");
-    }
-    try {
-      body = JSON.parse(body);
-    } catch {
-      return invalid(400, "invalid_json", "Invalid JSON body");
-    }
-  } else {
-    try {
-      requestBytes = Buffer.byteLength(JSON.stringify(body ?? null), "utf8");
-    } catch {
-      return invalid(400, "invalid_json", "Invalid JSON body");
-    }
-    if (requestBytes > MAX_REQUEST_BYTES) {
-      return invalid(413, "request_too_large", "Request payload is too large");
-    }
-  }
+  const parsed = parseBoundedJsonBody(req, MAX_REQUEST_BYTES, "Request payload");
+  if (!parsed.ok) return parsed;
+  const { body, requestBytes } = parsed;
 
   if (!body || typeof body !== "object" || Array.isArray(body)) {
     return invalid(400, "invalid_schema", "JSON body must be an object");
@@ -217,21 +199,6 @@ function pruneRateLimitState(state, now) {
 function getClientKey(req) {
   const forwardedFor = getHeader(req, "x-forwarded-for").split(",")[0]?.trim();
   return forwardedFor || req.socket?.remoteAddress || "unknown-client";
-}
-
-function getHeader(req, name) {
-  const headers = req.headers || {};
-  const directValue = headers[name] ?? headers[name.toLowerCase()];
-  const matchingKey = directValue === undefined
-    ? Object.keys(headers).find((key) => key.toLowerCase() === name.toLowerCase())
-    : null;
-  const value = directValue ?? (matchingKey ? headers[matchingKey] : undefined);
-  if (Array.isArray(value)) return String(value[0] || "").trim();
-  return String(value || "").trim();
-}
-
-function invalid(status, code, error) {
-  return { ok: false, status, code, error };
 }
 
 function resetRequestSecurityForTests() {

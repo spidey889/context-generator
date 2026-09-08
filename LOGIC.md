@@ -172,7 +172,7 @@ Gemini 3.8 Flash -> 3.7 Flash -> 3.6 Flash -> 3.5 Flash
 
 ### Prompt and validation
 
-Providers receive a system prompt and a user JSON envelope with schema `cap-context-conversation-v1` and data type `untrusted-conversation-transcript`. Repository `SKILL.md` is not sent to providers; `getSummarySystemPrompt()` and `getContextCarryTemplate()` are the real backend contract.
+Providers receive a system prompt and a user JSON envelope with schema `cap-context-conversation-v1` and data type `untrusted-conversation-transcript`. `getSummarySystemPrompt()` and `getContextCarryTemplate()` are the complete backend prompt contract; the retired standalone skill template is preserved only in Git history.
 
 Generated output requires the exact title and all seven sections once and in order: WHO I AM, WHAT WE WERE DOING, WHERE WE LEFT OFF, DECISIONS MADE, OPEN QUESTIONS, KEY CONTEXT, NEXT STEP. The three core continuation sections must be meaningful, and NEXT STEP must match the exact destination instruction.
 
@@ -194,6 +194,7 @@ Do not overstate current quality enforcement:
 - Limits: 2.2 MB JSON request, 350,000 JavaScript characters, 1.4 MB transcript UTF-8, 8 requests/minute and 40/hour per forwarded IP, and 8 concurrent jobs per warm server instance.
 - Rate/concurrency state is process-local, not a durable global limiter.
 - Responses are `no-store`; provider error bodies are not exposed.
+- Both Vercel endpoints share bounded JSON parsing and case-insensitive header handling through `api/request-validation.js`. The Vercel and Supabase telemetry payload validators intentionally remain separate because they run in different deployment bundles; parity tests enforce their shared closed schema.
 
 ## Telemetry, Storage, and Analysis
 
@@ -240,12 +241,12 @@ Paste uses native setters/events plus stability checks. Firefox alone converts c
 - Model/profile routing: provider constants/budgets, prompts, Latest Run labels, evaluation expectations, this file, `memory.md`, `extension/README.md`.
 - Telemetry fields/stages/failures: source/background sanitizers, Vercel validator, Supabase validator, SQL constraints/functions, privacy wording, tests. Free-form telemetry fields are forbidden.
 - Latest Run receipt: producer, background expiry, bridge, analysis renderer, privacy wording, analysis tests.
-- Any content-script change: update `CONTENT_SCRIPT_LOAD_ID` so open tabs replace stale code, and retain stale-node/reservation cleanup. Current value: `platform-content-2026-09-08-claude-placement-debug-v4`.
+- Any content-script change: update `CONTENT_SCRIPT_LOAD_ID` so open tabs replace stale code, and retain stale-node/reservation cleanup. Current value: `platform-content-2026-09-08-dead-code-cleanup-v5`.
 - Extension release: bump `extension/manifest.json`, rebuild the ZIP with `manifest.json` at its root, hash-compare every file against `extension/`, then test the unpacked folder in a new Brave window.
 
 ## Common Wrong Assumptions
 
-- `SKILL.md` is not the backend prompt. The provider sees the strings assembled in `api/summarize.js`.
+- The retired standalone skill is not the backend prompt. The provider sees only the strings assembled in `api/summarize.js`.
 - The profile's `minWords` is not the acceptance floor; use `getMinimumValidSummaryWords()` to understand validation.
 - A structurally valid Context Carry is not proven factually grounded because the validator never sees the source transcript.
 - A passing fake-DOM capture test does not prove a current live site DOM works; capture regressions require a real DOM trace and then a fixture.
@@ -274,7 +275,7 @@ Do not claim these are fixed without a reproduction and regression test:
 
 ## Verification Matrix
 
-Latest local verification on 2026-09-08: `npm test` passed 156/156. `npm run test:extension-smoke` loaded the unpacked extension and reached Claude placement, then failed the `bubbleInside` assertion described in Known Current Risks.
+Latest local verification on 2026-09-08: `npm test` passed 149/149, and a focused run that included the slow Claude capture passed 131/131. `npm run test:extension-smoke` loaded the unpacked extension, read the current placement diagnostics, then failed the pre-existing `bubbleInside` assertion described in Known Current Risks.
 
 | Change | Focused check | Broader check |
 | --- | --- | --- |

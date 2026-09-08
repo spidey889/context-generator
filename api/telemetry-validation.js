@@ -27,6 +27,7 @@ const TELEMETRY_FAILURE_REASONS = new Set([
 ]);
 const TELEMETRY_MAX_CHARACTER_COUNT = 2147483647;
 const TELEMETRY_MAX_REQUEST_BYTES = 4096;
+const { getHeader, invalid, parseBoundedJsonBody } = require("./request-validation");
 const TELEMETRY_KEYS = new Set([
   "attempt_id",
   "install_id",
@@ -51,28 +52,9 @@ function validateTelemetryRequest(req) {
     return invalid(413, "request_too_large", "Telemetry payload is too large");
   }
 
-  let body = req.body;
-  let requestBytes;
-  if (typeof body === "string") {
-    requestBytes = Buffer.byteLength(body, "utf8");
-    if (requestBytes > TELEMETRY_MAX_REQUEST_BYTES) {
-      return invalid(413, "request_too_large", "Telemetry payload is too large");
-    }
-    try {
-      body = JSON.parse(body);
-    } catch {
-      return invalid(400, "invalid_json", "Invalid JSON body");
-    }
-  } else {
-    try {
-      requestBytes = Buffer.byteLength(JSON.stringify(body ?? null), "utf8");
-    } catch {
-      return invalid(400, "invalid_json", "Invalid JSON body");
-    }
-    if (requestBytes > TELEMETRY_MAX_REQUEST_BYTES) {
-      return invalid(413, "request_too_large", "Telemetry payload is too large");
-    }
-  }
+  const parsed = parseBoundedJsonBody(req, TELEMETRY_MAX_REQUEST_BYTES, "Telemetry payload");
+  if (!parsed.ok) return parsed;
+  const { body, requestBytes } = parsed;
 
   const payload = validateTelemetryPayload(body);
   if (!payload) return invalid(400, "invalid_schema", "Invalid telemetry payload");
@@ -120,24 +102,9 @@ function validateTelemetryPayload(input) {
   };
 }
 
-function getHeader(req, name) {
-  const headers = req.headers || {};
-  const directValue = headers[name] ?? headers[name.toLowerCase()];
-  const matchingKey = directValue === undefined
-    ? Object.keys(headers).find((key) => key.toLowerCase() === name.toLowerCase())
-    : null;
-  const value = directValue ?? (matchingKey ? headers[matchingKey] : undefined);
-  if (Array.isArray(value)) return String(value[0] || "").trim();
-  return String(value || "").trim();
-}
-
 function isUuid(value) {
   return typeof value === "string"
     && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
-}
-
-function invalid(status, code, error) {
-  return { ok: false, status, code, error };
 }
 
 module.exports = {
