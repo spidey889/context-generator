@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-09-08-claude-placement-polish-v7";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-09-08-claude-chat-optical-align-v8";
   const BUBBLE_ID = "context-generator-bubble";
   const OVERLAY_ID = "context-generator-overlay";
   const HANDOFF_SCRIM_ID = "context-generator-handoff-scrim";
@@ -44,7 +44,9 @@
   const CLAUDE_INLINE_BUBBLE_GAP = 46;
   const CLAUDE_INLINE_RIGHT_MARGIN = 4;
   const CLAUDE_EMPTY_COMPOSER_Y_NUDGE = -0.5;
-  const CLAUDE_EXISTING_CHAT_COMPOSER_Y_NUDGE = -20.5;
+  // Claude's docked composer control hitbox sits below the visible mic glyph.
+  // Align the orb artwork to the glyph rather than the button box center.
+  const CLAUDE_EXISTING_CHAT_COMPOSER_Y_NUDGE = -27;
   const CLAUDE_PLACEMENT_DEBUG_QUERY = "__cap_context_debug_placement";
   const CLAUDE_PLACEMENT_DEBUG_SESSION_KEY = "cap-context-debug-claude-placement";
   const CLAUDE_TRANSIENT_PLACEMENT_GRACE_MS = 700;

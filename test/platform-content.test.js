@@ -1938,7 +1938,7 @@ test("Claude typed new-chat state keeps the existing placement for the later fix
   assert.equal(placement.top, 57);
 });
 
-test("Claude existing chat always lifts the orb above the low native controls", () => {
+test("Claude existing chat aligns the orb artwork with the docked mic row", () => {
   const composerRect = { left: 600, right: 1224, top: 367.5, bottom: 461.5, width: 624, height: 94 };
   const input = new FakeElement({
     text: "Claude may retain editor text briefly",
@@ -1954,7 +1954,7 @@ test("Claude existing chat always lifts the orb above the low native controls", 
   const placement = hooks.getClaudeBubblePlacement(composerRect, input);
 
   assert.equal(placement.left, 578);
-  assert.equal(placement.top, 36.5);
+  assert.equal(placement.top, 30);
 });
 
 test("Claude detects the /new to /chat route change and schedules fresh alignment", () => {
