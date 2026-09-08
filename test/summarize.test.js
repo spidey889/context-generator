@@ -888,7 +888,7 @@ test("captured prompt injections stay inside the untrusted transcript data envel
   }
 });
 
-test("provider error bodies are never read, logged, or returned to callers", async () => {
+test("provider exhaustion preserves the exact transcript locally without reading error bodies", async () => {
   const originalFetch = global.fetch;
   const restoreMistralKey = setTemporaryEnv("MISTRAL_API_KEY", "test-mistral-key");
   const restoreGroqKey = setTemporaryEnv("GROQ_API_KEY", undefined);
@@ -911,9 +911,15 @@ test("provider error bodies are never read, logged, or returned to callers", asy
       body: { conversation: `User: private context\n${"Keep this confidential. ".repeat(80)}` }
     }, res);
 
-    assert.equal(res.statusCode, 502);
+    assert.equal(res.statusCode, 200);
     assert.equal(responseTextReads, 0);
-    assert.equal(res.payload.code, "summary_failed");
+    assert.equal(res.payload.timing.servedBy, "local-direct");
+    assert.equal(res.payload.timing.model, "local-direct");
+    assert.equal(res.payload.timing.fallback.used, true);
+    assert.equal(res.payload.timing.fallback.servedBy, "local-direct");
+    assert.match(res.payload.summary, /💬 CONVERSATION SO FAR/);
+    assert.match(res.payload.summary, /> User: private context/);
+    assert.match(res.payload.summary, /> Keep this confidential\./);
     assert.doesNotMatch(JSON.stringify(res.payload), new RegExp(privateProviderBody));
   } finally {
     restoreMistralKey();

@@ -544,10 +544,14 @@ async function createSummaryWithFallback({
   }
 
   if (!groqApiKey) {
-    throw createHttpError(
-      getProviderFailureStatus(lastProviderFailure),
-      geminiApiKey || mistralApiKey ? "Failed to summarize conversation" : "No summary provider API key is configured"
-    );
+    return createEmergencyDirectCarryResult({
+      conversation,
+      modelsTried,
+      mistralModelsTried,
+      geminiMs,
+      mistralMs,
+      lastProviderFailure
+    });
   }
 
   const fallback = createFallbackMetadata({
@@ -557,6 +561,7 @@ async function createSummaryWithFallback({
   });
 
   modelsTried.push(GROQ_FALLBACK_MODEL);
+  const groqStartedAt = Date.now();
   try {
     const result = await createSummaryWithProvider({
       provider: SUMMARY_PROVIDERS.groq,
@@ -582,8 +587,61 @@ async function createSummaryWithFallback({
     };
   } catch (error) {
     console.error("Groq fallback failed:", getProviderFailureLog(error));
-    throw createHttpError(getProviderFailureStatus(error), "Failed to summarize conversation");
+    return createEmergencyDirectCarryResult({
+      conversation,
+      modelsTried,
+      mistralModelsTried,
+      geminiMs,
+      mistralMs,
+      groqMs: Date.now() - groqStartedAt,
+      lastProviderFailure: error
+    });
   }
+}
+
+function createEmergencyDirectCarryResult({
+  conversation,
+  modelsTried,
+  mistralModelsTried,
+  geminiMs,
+  mistralMs,
+  groqMs = 0,
+  lastProviderFailure
+}) {
+  const summary = buildDirectContextCarrySummary(conversation);
+  const attemptedChain = modelsTried.length ? modelsTried.join(" -> ") : "No remote provider";
+
+  console.warn("[Context Generator] Remote providers exhausted; preserving the exact transcript locally.");
+  return {
+    summary,
+    provider: LOCAL_DIRECT_MODEL,
+    model: LOCAL_DIRECT_MODEL,
+    providerMs: 0,
+    initialMs: 0,
+    providerPasses: 0,
+    expansion: {
+      attempted: false,
+      used: false,
+      error: null
+    },
+    finishReason: null,
+    summaryWordCount: countWords(summary),
+    qualityFloorMet: true,
+    usage: createZeroUsage(),
+    modelReason: `${attemptedChain} failed; preserved the complete transcript with ${LOCAL_DIRECT_MODEL}`,
+    modelsTried,
+    mistralModelsTried,
+    geminiMs,
+    mistralMs,
+    groqMs,
+    fallback: createFallbackMetadata({
+      attempted: true,
+      used: true,
+      servedBy: LOCAL_DIRECT_MODEL,
+      model: LOCAL_DIRECT_MODEL,
+      reason: getProviderFailureReason(lastProviderFailure)
+    })
+  };
 }
 
 async function createSummaryWithProvider({ provider, apiKey, profile, model, initialMessages, requestBudgetMs }) {

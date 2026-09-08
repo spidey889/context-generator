@@ -157,11 +157,13 @@ Generated provider order:
 Gemini 3.8 Flash -> 3.7 Flash -> 3.6 Flash -> 3.5 Flash
 -> Mistral Medium 3.5 -> Mistral Large 3 (25.12) -> Ministral 3 3B (25.12)
 -> optional Groq Llama 3.1 8B Instant
+-> emergency local-direct exact transcript
 ```
 
 - Gemini is skipped without `GEMINI_API_KEY`. Its four models share one 60-second family deadline; each model is capped at 45 seconds. This reserves 15 seconds of overhead beneath the extension's 210-second deadline even if every later fallback exhausts its budget.
 - Mistral is skipped without `MISTRAL_API_KEY`. Model budgets are 55, 40, and 25 seconds. A Mistral HTTP 429 jumps directly to Groq.
 - Groq is optional via `GROQ_API_KEY` and has 15 seconds.
+- If every configured remote provider fails or no provider key is available, the backend returns the complete captured transcript through the provider-free `local-direct` format. It never truncates the transcript; the transfer remains usable during a provider-wide outage, though it is not compressed.
 - Retryable provider calls get at most two attempts within the model budget, an 80-second per-attempt ceiling, and a 450 ms retry interval.
 - Gemini uses `thinkingLevel: MEDIUM`. Mistral prompt-cache keys use `capcontext-summary-v7-<profile>-<model>`; v7 adds an explicit full-transcript checklist and final omission check for user-protected exact facts, especially integrity and implementation-state details.
 - Vercel allows 240 seconds; the extension aborts the backend call at 210 seconds and calls an extension API every 25 seconds to keep the MV3 worker alive.
