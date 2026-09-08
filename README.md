@@ -10,8 +10,6 @@ You already had the conversation. Cap Context helps you carry the useful parts t
 
 Cap Context prepares your conversation for another AI and places it in the new message box. No copy-paste marathon. No opening with “Okay, so here’s the whole story.”
 
-You review what is there and press Send when you are ready. Cap Context never sends anything for you.
-
 ## Get Cap Context
 
 ### Chrome Web Store
@@ -34,9 +32,9 @@ That is the most technical this README gets.
 2. Select the Cap Context button near the message box.
 3. Pick where you want the conversation to go.
 4. Let Cap Context prepare and paste the context.
-5. Give it a quick look, then press Send when you are ready.
+5. Continue with the new AI from the prepared handoff.
 
-Cap Context handles the context. You keep the final say.
+Cap Context handles the handoff so you can stay focused on the work.
 
 ## One small thing
 

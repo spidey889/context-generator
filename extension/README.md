@@ -1,6 +1,6 @@
 # Cap-Context Extension
 
-Cap-Context carries the useful parts of one AI chat into another AI without sending the message for you.
+Cap-Context carries the useful parts of one AI chat into another so you can continue without explaining everything again.
 
 ## How It Works
 
@@ -9,7 +9,7 @@ Cap-Context carries the useful parts of one AI chat into another AI without send
 3. Pick where you want to continue from the destination picker.
 4. Cap-Context captures role-verified turns and sends one summary job to the Vercel backend. Tiny chats are carried locally; generated summaries try Gemini 3.8, 3.7, 3.6, and 3.5 Flash before the Mistral chain and optional Groq fallback.
 5. It opens or prepares the destination tab, pastes the context into the message box, and focuses that tab.
-6. Review the pasted context, then send it manually when you are ready.
+6. Continue in the destination chat with the prepared context.
 
 If auto-paste fails, Cap-Context shows a manual copy dialog with the generated context so you can still paste it yourself.
 

@@ -25,6 +25,7 @@ Write entries in past tense and describe the resulting behavior, not every imple
 
 ### 2026-09-08
 
+- Refocused public and project documentation on cross-AI continuity, structured context, and preserved decisions instead of foregrounding a secondary interaction detail.
 - Strengthened exact-fact handoffs with a full-transcript checklist and final omission check for protected integrity, implementation-state, ownership, region, identifier, rejected-action, and unresolved-option facts. Bumped the Mistral prompt-cache version so the stronger contract takes effect immediately, and made the live gate's existing single retry cover transient endpoint/provider failures as well as low-quality responses.
 - Stabilized Claude composer placement across fresh and existing chats. The final implementation rejects page-sized false composer surfaces, keeps native mic/voice controls inside the real composer, reacts to Voice/Send visibility swaps, and applies separate optical tuning for `/new` and `/chat/...` layouts. Added focused placement tests, opt-in geometry diagnostics, and an installed-extension smoke assertion.
 - Rebuilt `LOGIC.md` as the agent-facing production guide, including evidence priority, invariants, runtime ownership, platform and message contracts, capture and summary behavior, verification commands, current risks, and a definition of done. Corrected the provider description in the extension README.
@@ -73,7 +74,7 @@ The manifest still reports 1.4.2. These post-release source changes must not be 
 
 - Evolved the original Claude-to-ChatGPT relay into destination selection across Claude, ChatGPT, Gemini, Grok, and DeepSeek, with platform-specific composer discovery, placement, paste activation, and retry behavior.
 - Added the Vercel summarization backend, exact Context Carry normalization and destination-confirmation instruction, size-based model routing, Groq fallback, and the Mistral fallback chain used before Gemini became primary.
-- Stopped automatic submission on 2026-06-30. Since then, Cap Context has pasted and focused the destination composer but has not pressed Send; do not restore the earlier auto-send experiment.
+- Replaced the earlier automatic-submission experiment with the current user-reviewed composer handoff.
 - Added prepared-destination recovery, instant empty-chat rejection, user-facing failure overlays, and a manual-copy fallback.
 - Added the local Latest Run analysis page with provider chain, timing, turn count, and captured-transcript diagnostics.
 - Established `master` as the canonical production branch and kept local credentials, MCP configuration, memory notes, and personal task tracking out of shipped source.
