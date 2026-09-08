@@ -1939,22 +1939,24 @@ test("Claude typed new-chat state keeps the existing placement for the later fix
 });
 
 test("Claude existing chat aligns the orb artwork with the docked mic row", () => {
-  const composerRect = { left: 600, right: 1224, top: 367.5, bottom: 461.5, width: 624, height: 94 };
+  const composerRect = { left: 316, right: 900, top: 668, bottom: 716, width: 584, height: 48 };
   const input = new FakeElement({
-    text: "Claude may retain editor text briefly",
     attrs: { contenteditable: "true", role: "textbox", "aria-label": "Write your prompt to Claude" },
-    rect: { left: 620, right: 1204, top: 383.5, bottom: 423.5, width: 584, height: 40 }
+    rect: { left: 336, right: 780, top: 676, bottom: 708, width: 444, height: 32 }
   });
   const voiceMode = new FakeElement({
     tag: "button",
     attrs: { "aria-label": "Voice input" },
-    rect: { left: 1204, right: 1224, top: 429.5, bottom: 461.5, width: 20, height: 32 }
+    rect: { left: 820, right: 840, top: 676, bottom: 708, width: 20, height: 32 }
   });
   const hooks = loadPlatformContent([input, voiceMode], "claude.ai", { pathname: "/chat/example" });
   const placement = hooks.getClaudeBubblePlacement(composerRect, input);
+  const orbCenterY = composerRect.top + placement.top + 42 / 2;
+  const controlCenterY = voiceMode.rect.top + voiceMode.rect.height / 2;
 
-  assert.equal(placement.left, 578);
-  assert.equal(placement.top, 30);
+  assert.equal(placement.top, 3);
+  assert.equal(orbCenterY, controlCenterY);
+  assert.ok(composerRect.top + placement.top + 42 <= composerRect.bottom);
 });
 
 test("Claude detects the /new to /chat route change and schedules fresh alignment", () => {
