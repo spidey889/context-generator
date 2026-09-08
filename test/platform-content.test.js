@@ -1981,7 +1981,7 @@ test("Claude existing chat always lifts the orb above the low native controls", 
   const placement = hooks.getClaudeBubblePlacement(composerRect, input);
 
   assert.equal(placement.left, 578);
-  assert.equal(placement.top, 48.5);
+  assert.equal(placement.top, 36.5);
 });
 
 test("Claude bubble uses the rightmost small control when voice mode is unlabeled", () => {
