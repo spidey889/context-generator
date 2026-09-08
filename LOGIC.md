@@ -1,16 +1,22 @@
 # Cap Context Production Logic
 
-This is the agent-facing source of truth for the current production architecture. Use `CHANGELOG.md` for history. `backafter15day.md` is a dated audit whose findings must be reverified, and `todo.md` is the owner's personal tracker—not an instruction queue.
+This is the agent-facing source of truth for the current checkout and its intended production behavior. `master` remains the deployed production baseline until a feature branch is merged. Use `CHANGELOG.md` for history. `backafter15day.md` is a dated audit whose findings must be reverified, and `todo.md` is the owner's personal tracker—not an instruction queue.
 
 When code and this file disagree, verify the behavior in code and tests, then update this file in the same change.
+
+### Evidence priority
+
+Use evidence in this order: the owner's current request and project instructions; current production code; tests that prove the behavior; this file; `CHANGELOG.md`; dated audits and notes. A test proves only the case it models, and a changelog entry proves what changed—not necessarily what remains true after later commits.
 
 ## Agent Quick Start
 
 - Work only from `C:\Users\vinit\Desktop\context-generator` unless the owner explicitly says otherwise.
 - `master` is the production branch; the remote is `https://github.com/spidey889/context-generator.git`.
+- Before describing a feature branch as live, compare it with production using `git log master..HEAD --oneline` and `git diff master...HEAD --stat`.
 - Preserve unrelated working-tree changes and stage only files owned by the task.
 - The extension has no build step. Load Brave's unpacked extension from `extension/`, not from the ZIP.
-- `extension/manifest.json` currently reports version `1.4.2` and contains both Chromium and Firefox background declarations.
+- Use Node 22 for tests and scripts. The project intentionally has no tracked lockfile or runtime npm dependency list; tests and smoke tooling use Node built-ins and Node's global WebSocket.
+- `extension/manifest.json` currently reports version `1.4.2` and contains both Chromium and Firefox background declarations. The current branch includes post-1.4.2 Claude placement work, so the manifest number does not prove the Web Store or ZIP contains the checkout's behavior.
 - Production web/API URL: `https://context-generator-five.vercel.app`. The analysis bridge and canonical site links currently use `https://spidey889.github.io/context-generator`.
 - Release warning verified 2026-09-08: `cap-context-extension.zip` is stale relative to `extension/`. It is missing both EBGaramond fonts and contains older `manifest.json` and `platform-content.js` files. Do not publish it until rebuilt and compared again.
 
@@ -42,6 +48,18 @@ When code and this file disagree, verify the behavior in code and tests, then up
 | Browser smoke/live quality | `scripts/`, `evaluation/` | `run-extension-smoke.js`, `run-regression-eval.js` | npm scripts below |
 
 `extension/platform-content.js` is a large shared page-lifecycle script. It owns platform selectors, observers, timers, reservations, capture state, and transfer UI. Add characterization tests before extracting or broadly refactoring it.
+
+## Platform Behavior Matrix
+
+| Platform | Shipped host | Full pasted-card capture | Stable turn ID | Paste activation | Placement contract |
+| --- | --- | --- | --- | --- | --- |
+| Claude | `claude.ai` | Yes | No; exact role+text fallback | May paste inactive | Composer-local beside voice controls; `/new` and `/chat/` have separate vertical tuning |
+| ChatGPT | `chatgpt.com` | Yes | Yes, from structural turn/message IDs | Focus first, settle 350 ms | Fixed left of the model selector |
+| Gemini | `gemini.google.com` | No | No; exact role+text fallback | May paste inactive | Left of Pro/Flash selector |
+| Grok | `grok.com` | No | No; exact role+text fallback | Focus first | Beside mode/speed selector |
+| DeepSeek | `chat.deepseek.com` | No | No; exact role+text fallback | May paste inactive | Near attachment/input controls |
+
+JavaScript still recognizes exact legacy `chat.openai.com`, but the shipped manifest does not grant or inject on that host. Do not describe it as supported without changing and testing the manifest contract.
 
 ## End-to-End Transfer
 
@@ -200,7 +218,7 @@ The protected `users` table creates a row on an install's first successful trans
 
 ## Placement and Paste
 
-- Claude: absolute beside the voice controls. Empty `/new` and `/chat/...` composers use a total one-pixel optical lift based on the orb's transparent inset; typed states remain separately tuned.
+- Claude: absolute beside the voice controls. An empty `/new` composer places the visible artwork center one pixel above its native control. Every existing-chat `/chat/...` composer—whether its editor is empty or briefly retains text—uses `CLAUDE_EXISTING_CHAT_COMPOSER_Y_NUDGE = -20.5`, placing the visible orb center 21 px above the low native-control center. Typed `/new` remains separately tuned with no extra route nudge.
 - Claude composer surfaces must remain horizontally close to the editor. `CLAUDE_MAX_COMPOSER_HORIZONTAL_PADDING` is 160 px across the combined left and right padding. Reject page-sized ancestors beyond this bound so phantom width cannot push mic/voice controls and the orb outside the composer or make placement oscillate during hydration. Apply this check to both retained and newly scored surfaces while still allowing tall real composers.
 - ChatGPT: fixed left of the model selector; retains its last usable surface and requires focused paste.
 - Gemini: left of the Pro/Flash selector; retains the outer composer during large-paste expansion.
@@ -220,8 +238,20 @@ Paste uses native setters/events plus stability checks. Firefox alone converts c
 - Model/profile routing: provider constants/budgets, prompts, Latest Run labels, evaluation expectations, this file, `memory.md`, `extension/README.md`.
 - Telemetry fields/stages/failures: source/background sanitizers, Vercel validator, Supabase validator, SQL constraints/functions, privacy wording, tests. Free-form telemetry fields are forbidden.
 - Latest Run receipt: producer, background expiry, bridge, analysis renderer, privacy wording, analysis tests.
-- Any content-script change: update `CONTENT_SCRIPT_LOAD_ID` so open tabs replace stale code, and retain stale-node/reservation cleanup.
+- Any content-script change: update `CONTENT_SCRIPT_LOAD_ID` so open tabs replace stale code, and retain stale-node/reservation cleanup. Current value: `platform-content-2026-09-08-claude-chat-orb-lift-v3`.
 - Extension release: bump `extension/manifest.json`, rebuild the ZIP with `manifest.json` at its root, hash-compare every file against `extension/`, then test the unpacked folder in a new Brave window.
+
+## Common Wrong Assumptions
+
+- `SKILL.md` is not the backend prompt. The provider sees the strings assembled in `api/summarize.js`.
+- The profile's `minWords` is not the acceptance floor; use `getMinimumValidSummaryWords()` to understand validation.
+- A structurally valid Context Carry is not proven factually grounded because the validator never sees the source transcript.
+- A passing fake-DOM capture test does not prove a current live site DOM works; capture regressions require a real DOM trace and then a fixture.
+- A visible destination tab does not prove paste is safe; prepared tabs are revalidated by platform immediately before use.
+- A successful summary is not a successful transfer. Terminal success occurs only at the `completed` telemetry stage after paste.
+- `chrome.storage.local` is persistent, but the summary cache, in-flight deduplication, active transfer maps, and page `isRunning` flag are memory-only.
+- The analysis page cannot read extension storage directly; it depends on the GitHub Pages-matched bridge and the `window.postMessage` contract.
+- Manifest version, Web Store version, unpacked `extension/`, and checked-in ZIP are separate release states. Verify each instead of assuming they match.
 
 ## Known Current Risks
 
@@ -237,14 +267,17 @@ Do not claim these are fixed without a reproduction and regression test:
 - Browser packaging uses one hybrid Chromium/Firefox manifest while automation is Brave-only.
 - Website tests have no visual regression coverage.
 - The checked-in ZIP is stale, as noted above.
+- The 2026-09-08 isolated Brave smoke reaches the controlled Claude page but currently fails its new full-button containment assertion: the 42 px bubble box ends 4.5 px below the composer (`658.1` vs `653.6`) while the dictate and voice controls remain inside. The code intentionally permits limited box overflow to center the larger bubble on a shorter native control, so resolve whether the test should measure visible artwork or placement should change before calling the branch release-ready.
 
-`backafter15day.md` has deeper evidence, but recheck it against current code. For example, its stale content-script-ID finding is now superseded by `platform-content-2026-09-08-claude-composer-bounds`.
+`backafter15day.md` has deeper evidence, but recheck it against current code. For example, its stale content-script-ID finding is now superseded by `platform-content-2026-09-08-claude-chat-orb-lift-v3`, and the smoke no longer requires catching an ephemeral service-worker DevTools target.
 
 ## Verification Matrix
 
+Latest local verification on 2026-09-08: `npm test` passed 156/156. `npm run test:extension-smoke` loaded the unpacked extension and reached Claude placement, then failed the `bubbleInside` assertion described in Known Current Risks.
+
 | Change | Focused check | Broader check |
 | --- | --- | --- |
-| Capture, pasted cards, placement, picker/handoff | `node --test test/platform-content.test.js --test-skip-pattern="^slow/release:"` | `npm run test:slow`; Brave smoke for real extension/UI work |
+| Capture, pasted cards, placement, picker/handoff | `node --test --test-skip-pattern="^slow/release:" test/platform-content.test.js` | `npm run test:slow`; Brave smoke for real extension/UI work |
 | Background messages, destination recovery, cache | `node --test test/background.test.js` | `npm test` |
 | Summary prompt/routing/validation | `node --test test/summarize.test.js test/request-security.test.js` | `npm run eval` for quality/provider changes |
 | Telemetry/Supabase | `node --test test/telemetry.test.js` | `npm test` plus schema/grant review |
@@ -254,8 +287,18 @@ Do not claim these are fixed without a reproduction and regression test:
 
 - `npm test`: deterministic suite excluding the named slow release capture.
 - `npm run test:slow`: paced 78-turn Claude capture regression.
-- `npm run test:extension-smoke`: isolated Brave profile, unpacked extension, controlled ChatGPT-source/Claude-destination fixtures, stub backend. Use a new window/profile, never the owner's main browser.
+- `npm run test:extension-smoke`: isolated Brave profile, unpacked extension, controlled ChatGPT-source/Claude-destination fixtures, stub backend, and Claude placement bounds. The injected bubble and full transfer prove content-script/background startup without requiring an ephemeral service-worker DevTools target. Use a new window/profile, never the owner's main browser.
 - `npm run eval`: live production-endpoint quality/latency evaluation with one retry for a failed case.
 - `npm run gate`: fast tests, slow capture, live evaluation; it does not include Brave smoke.
 
 GitHub Actions runs the gate on `master`, daily at 06:17 UTC, and manually using Node 22, read-only repository permissions, and an eight-minute job timeout.
+
+## Definition of Done for an Agent Change
+
+1. Reproduce or identify the exact contract being changed; do not code from a broad symptom alone.
+2. Make the smallest platform/subsystem-scoped change that preserves the invariants above.
+3. Add or update a regression that would fail without the change, then run the focused command from the matrix.
+4. Run broader checks in proportion to risk. Browser UI/DOM changes need the isolated Brave smoke when the environment supports it; provider-quality changes need the live evaluation.
+5. Update every duplicated contract surface, `LOGIC.md`, and a meaningful `CHANGELOG.md` entry. Do not treat `todo.md` as release documentation.
+6. For extension releases, bump the manifest deliberately and rebuild/compare the ZIP. For ordinary source changes, do not silently publish or overwrite release artifacts.
+7. Review `git diff --check` and `git status`, stage only task-owned files, commit, and push the current branch.
