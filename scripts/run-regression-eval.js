@@ -100,12 +100,24 @@ function preferResult(first, second) {
   return first;
 }
 
-async function evaluateCaseWithRetry(testCase) {
-  const first = await evaluateCase(testCase);
+async function evaluateCaseWithRetry(testCase, evaluator = evaluateCase, retryDelayMs = 1000) {
+  let first;
+  try {
+    first = await evaluator(testCase);
+  } catch (firstError) {
+    // The gate already tolerates one variable provider-quality result. Apply the
+    // same bounded policy to transient endpoint/provider failures, but never a third try.
+    if (retryDelayMs > 0) await new Promise((resolve) => setTimeout(resolve, retryDelayMs));
+    try {
+      return { ...(await evaluator(testCase)), attempts: 2 };
+    } catch (secondError) {
+      throw new AggregateError([firstError, secondError], `${testCase.id}: evaluation failed twice`);
+    }
+  }
   if (failureCount(first) === 0) return { ...first, attempts: 1 };
 
   // Live providers vary; require a failed case to reproduce once before blocking production.
-  const second = await evaluateCase(testCase);
+  const second = await evaluator(testCase);
   return { ...preferResult(first, second), attempts: 2 };
 }
 
@@ -151,4 +163,4 @@ if (require.main === module) {
   });
 }
 
-module.exports = { containsFact, normalize };
+module.exports = { containsFact, evaluateCaseWithRetry, normalize };

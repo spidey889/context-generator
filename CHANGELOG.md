@@ -25,7 +25,7 @@ Write entries in past tense and describe the resulting behavior, not every imple
 
 ### 2026-09-08
 
-- Strengthened exact-fact handoffs with a full-transcript checklist and final omission check for protected integrity, implementation-state, ownership, region, identifier, rejected-action, and unresolved-option facts. Bumped the Mistral prompt-cache version so the stronger contract takes effect immediately.
+- Strengthened exact-fact handoffs with a full-transcript checklist and final omission check for protected integrity, implementation-state, ownership, region, identifier, rejected-action, and unresolved-option facts. Bumped the Mistral prompt-cache version so the stronger contract takes effect immediately, and made the live gate's existing single retry cover transient endpoint/provider failures as well as low-quality responses.
 - Stabilized Claude composer placement across fresh and existing chats. The final implementation rejects page-sized false composer surfaces, keeps native mic/voice controls inside the real composer, reacts to Voice/Send visibility swaps, and applies separate optical tuning for `/new` and `/chat/...` layouts. Added focused placement tests, opt-in geometry diagnostics, and an installed-extension smoke assertion.
 - Rebuilt `LOGIC.md` as the agent-facing production guide, including evidence priority, invariants, runtime ownership, platform and message contracts, capture and summary behavior, verification commands, current risks, and a definition of done. Corrected the provider description in the extension README.
 

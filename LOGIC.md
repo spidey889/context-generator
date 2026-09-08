@@ -288,7 +288,7 @@ Latest local verification on 2026-09-08: `npm test` passed 156/156. `npm run tes
 - `npm test`: deterministic suite excluding the named slow release capture.
 - `npm run test:slow`: paced 78-turn Claude capture regression.
 - `npm run test:extension-smoke`: isolated Brave profile, unpacked extension, controlled ChatGPT-source/Claude-destination fixtures, stub backend, and Claude placement bounds. The injected bubble and full transfer prove content-script/background startup without requiring an ephemeral service-worker DevTools target. Use a new window/profile, never the owner's main browser.
-- `npm run eval`: live production-endpoint quality/latency evaluation with one retry for a failed case.
+- `npm run eval`: live production-endpoint quality/latency evaluation with one retry for a failed quality case or transient request/provider error; two failures still block the gate.
 - `npm run gate`: fast tests, slow capture, live evaluation; it does not include Brave smoke.
 
 GitHub Actions runs the gate on `master`, daily at 06:17 UTC, and manually using Node 22, read-only repository permissions, and an eight-minute job timeout.
