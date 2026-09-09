@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-09-09-claude-independent-translate-v13";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-09-09-claude-switch-cluster-v14";
   const BUBBLE_ID = "context-generator-bubble";
   const OVERLAY_ID = "context-generator-overlay";
   const HANDOFF_SCRIM_ID = "context-generator-handoff-scrim";
@@ -606,6 +606,7 @@
       getClaudeInlineControlsToShift,
       getClaudeModelControlsToNudge,
       getClaudeControlTargetOffset,
+      findClaudeControlSwitchCluster,
       reserveClaudeInlineBubbleSlot,
       maybeLogClaudePlacementDiagnostics,
       getClaudeControlDebugSnapshot,
@@ -6705,6 +6706,7 @@
 
   function describeClaudeDebugControl(element) {
     const label = getElementLabel(element, true);
+    const reservationTarget = getClaudeReservedTranslationTarget(element);
     let computedStyle = null;
     try {
       computedStyle = window.getComputedStyle(element);
@@ -6716,8 +6718,10 @@
       id: getClaudeControlDebugId(element),
       kind: getClaudeDebugAnchorKind({ label }),
       ...describeClaudeDebugNode(element, null, element.getAttribute?.("aria-label") || element.getAttribute?.("title") || ""),
-      reserved: element.hasAttribute("data-context-generator-original-translate"),
+      reserved: Boolean(reservationTarget),
       offset: reservedClaudeControlOffsets.get(element) || 0,
+      reservationTargetId: getClaudeControlDebugId(reservationTarget),
+      reservationTargetTranslate: reservationTarget?.style.translate || "",
       inlineTranslate: element.style.translate || "",
       originalTranslate: element.getAttribute("data-context-generator-original-translate") || "",
       computedTranslate: computedStyle?.translate || "",
@@ -7891,25 +7895,40 @@
     reserveClaudeInlineControls(
       getClaudeInlineControlsToShift(controls, anchorControl),
       getClaudeModelControlsToNudge(controls, anchorControl),
-      inlineShift
+      inlineShift,
+      input
     );
   }
 
-  function reserveClaudeInlineControls(sideControls, modelControls = [], inlineShift = CLAUDE_INLINE_SLOT_WIDTH) {
+  function reserveClaudeInlineControls(
+    sideControls,
+    modelControls = [],
+    inlineShift = CLAUDE_INLINE_SLOT_WIDTH,
+    input = null
+  ) {
     const shift = Math.max(0, Math.round(inlineShift));
-    const offsetEntries = new Map();
+    const reservationOffsets = new Map();
+    const controlOffsets = new Map();
 
     modelControls.forEach((control) => {
       if (!control.element) return;
-      offsetEntries.set(control.element, getClaudeControlTargetOffset(control, shift));
+      const offset = getClaudeControlTargetOffset(control, shift);
+      reservationOffsets.set(control.element, offset);
+      controlOffsets.set(control.element, offset);
     });
 
+    const switchCluster = findClaudeControlSwitchCluster(sideControls, input);
     sideControls.forEach((control) => {
       if (!control.element) return;
-      offsetEntries.set(control.element, getClaudeControlTargetOffset(control, shift));
+      const offset = getClaudeControlTargetOffset(control, shift);
+      controlOffsets.set(control.element, offset);
+      if (!switchCluster) reservationOffsets.set(control.element, offset);
     });
+    if (switchCluster && sideControls.length > 0) {
+      reservationOffsets.set(switchCluster, getClaudeControlTargetOffset(sideControls[0], shift));
+    }
 
-    const elements = [...offsetEntries.keys()].filter((element) => offsetEntries.get(element) !== 0);
+    const elements = [...reservationOffsets.keys()].filter((element) => reservationOffsets.get(element) !== 0);
     const overflowElements = getClaudeModelOverflowElements(modelControls);
 
     if (elements.length === 0) {
@@ -7936,7 +7955,7 @@
         element.setAttribute("data-context-generator-original-translate", element.style.translate || "");
       }
 
-      const offset = offsetEntries.get(element) || 0;
+      const offset = reservationOffsets.get(element) || 0;
       const targetTranslate = `${offset}px 0px`;
       // Keep Cap Context's offset independent from Claude's animated transform.
       // Overriding transform or transition can strand Claude's outgoing visual
@@ -7948,8 +7967,35 @@
 
     reservedClaudeInlineControls = elements;
     reservedClaudeInlineShift = shift;
-    reservedClaudeControlOffsets = offsetEntries;
+    reservedClaudeControlOffsets = controlOffsets;
     reservedClaudeOverflowElements = overflowElements;
+  }
+
+  function findClaudeControlSwitchCluster(sideControls, input = null) {
+    const elements = sideControls
+      .map((control) => control.element)
+      .filter((element, index, all) => element && element.isConnected && all.indexOf(element) === index);
+    if (elements.length === 0) return null;
+
+    let node = elements[0].parentElement;
+    let depth = 0;
+    while (node && node !== document.body && depth < 10) {
+      if (input && node.contains?.(input)) break;
+      if (elements.every((element) => node.contains?.(element))) {
+        const rect = node.getBoundingClientRect();
+        const style = window.getComputedStyle(node);
+        if (
+          style.display === "grid" &&
+          rect.width > 0 && rect.width <= 280 &&
+          rect.height > 0 && rect.height <= 84
+        ) {
+          return node;
+        }
+      }
+      node = node.parentElement;
+      depth += 1;
+    }
+    return null;
   }
 
   function getClaudeModelOverflowElements(modelControls) {
@@ -8077,6 +8123,17 @@
 
     element.style.translate = element.getAttribute("data-context-generator-original-translate") || "";
     element.removeAttribute("data-context-generator-original-translate");
+  }
+
+  function getClaudeReservedTranslationTarget(element) {
+    let node = element;
+    let depth = 0;
+    while (node && node !== document.body && depth < 10) {
+      if (node.hasAttribute?.("data-context-generator-original-translate")) return node;
+      node = node.parentElement;
+      depth += 1;
+    }
+    return null;
   }
 
   function restoreReservedOverflow(element) {

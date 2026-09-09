@@ -2303,6 +2303,10 @@ test("Claude logs the remounted Mic reservation before and after the mutation", 
   const composerRect = getClaudeComposerRect();
   const input = new FakeElement({ attrs: { contenteditable: "true", role: "textbox" } });
   const composer = new FakeElement({ tag: "form", rect: composerRect });
+  const switchCluster = new FakeElement({
+    attrs: { "data-display": "grid" },
+    rect: { left: 797, right: 880, top: 166, bottom: 198, width: 83, height: 32 }
+  });
   const send = new FakeElement({
     tag: "button",
     attrs: { "aria-label": "Send message" },
@@ -2313,8 +2317,11 @@ test("Claude logs the remounted Mic reservation before and after the mutation", 
     attrs: { "aria-label": "Microphone" },
     rect: { left: 844, right: 880, top: 166, bottom: 202, width: 36, height: 36 }
   });
-  composer.children = [input, send];
-  [input, send].forEach((element) => { element.parentElement = composer; });
+  composer.children = [input, switchCluster];
+  input.parentElement = composer;
+  switchCluster.parentElement = composer;
+  switchCluster.children = [send];
+  send.parentElement = switchCluster;
 
   const hooks = loadPlatformContent(
     [input, composer, send, mic],
@@ -2334,17 +2341,18 @@ test("Claude logs the remounted Mic reservation before and after the mutation", 
   );
 
   assert.equal(mic.style.transform, "scale(0.96)");
-  composer.children = [input, mic];
-  mic.parentElement = composer;
+  switchCluster.children = [mic];
+  mic.parentElement = switchCluster;
   send.parentElement = null;
   hooks.syncClaudePlacementResizeMonitoring(input, composer);
   hooks.mutationObservers.at(-1).callback([{
-    target: composer,
+    target: switchCluster,
     attributeName: null,
     addedNodes: [mic],
     removedNodes: [send]
   }]);
-  assert.equal(mic.style.translate, "-52px 0px");
+  assert.equal(switchCluster.style.translate, "-52px 0px");
+  assert.equal(mic.style.translate || "", "");
   assert.equal(mic.style.transform, "scale(0.96)");
   assert.equal(mic.style.transition, "transform 150ms ease");
   assert.equal(mic.style.willChange, "transform");
@@ -2353,10 +2361,14 @@ test("Claude logs the remounted Mic reservation before and after the mutation", 
   assert.equal(prefix, "[Cap Context][Claude controls]");
   const beforeMic = diagnostic.before.controls.find((control) => control.kind === "mic");
   const afterMic = diagnostic.after.controls.find((control) => control.kind === "mic");
-  assert.equal(beforeMic.reserved, false);
+  assert.equal(beforeMic.reserved, true);
+  assert.equal(beforeMic.offset, 0);
+  assert.equal(beforeMic.reservationTargetTranslate, "-52px 0px");
   assert.equal(beforeMic.inlineTransform, "scale(0.96)");
   assert.equal(afterMic.reserved, true);
-  assert.equal(afterMic.inlineTranslate, "-52px 0px");
+  assert.equal(afterMic.offset, -52);
+  assert.equal(afterMic.inlineTranslate, "");
+  assert.equal(afterMic.reservationTargetTranslate, "-52px 0px");
   assert.equal(afterMic.inlineTransform, "scale(0.96)");
   assert.equal(afterMic.inlineTransition, "transform 150ms ease");
   assert.equal(diagnostic.mutations[0].type, "childList");
@@ -2371,6 +2383,10 @@ test("Claude preserves native control animation during a populated-editor Voice 
     attrs: { contenteditable: "true", role: "textbox" }
   });
   const composer = new FakeElement({ tag: "form", rect: composerRect });
+  const switchCluster = new FakeElement({
+    attrs: { "data-display": "grid" },
+    rect: { left: 797, right: 884, top: 166, bottom: 198, width: 87, height: 32 }
+  });
   const mic = new FakeElement({
     tag: "button",
     attrs: { "aria-label": "Microphone" },
@@ -2386,11 +2402,14 @@ test("Claude preserves native control animation during a populated-editor Voice 
     attrs: { "aria-label": "Voice mode" },
     rect: { left: 852, right: 884, top: 166, bottom: 198, width: 32, height: 32 }
   });
-  composer.children = [input, mic, voice, voiceMode];
-  composer.children.forEach((element) => { element.parentElement = composer; });
+  composer.children = [input, switchCluster];
+  input.parentElement = composer;
+  switchCluster.parentElement = composer;
+  switchCluster.children = [mic, voice, voiceMode];
+  switchCluster.children.forEach((element) => { element.parentElement = switchCluster; });
 
   const hooks = loadPlatformContent(
-    [input, composer, mic, voice, voiceMode],
+    [input, composer, switchCluster, mic, voice, voiceMode],
     "claude.ai",
     { pathname: "/chat/example" }
   );
@@ -2409,8 +2428,9 @@ test("Claude preserves native control animation during a populated-editor Voice 
   );
 
   assert.equal(placement.anchorControl.element, voiceMode);
+  assert.equal(switchCluster.style.translate, "-52px 0px");
   [mic, voice, voiceMode].forEach((control) => {
-    assert.equal(control.style.translate, "-52px 0px");
+    assert.equal(control.style.translate || "", "");
     assert.equal(control.style.transform, "scale(0.98)");
     assert.equal(control.style.transition, "transform 150ms ease");
     assert.equal(control.style.willChange, "transform");
