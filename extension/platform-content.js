@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-09-09-claude-control-debug-v12";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-09-09-claude-independent-translate-v13";
   const BUBBLE_ID = "context-generator-bubble";
   const OVERLAY_ID = "context-generator-overlay";
   const HANDOFF_SCRIM_ID = "context-generator-handoff-scrim";
@@ -515,6 +515,12 @@
         element.style.transition = element.getAttribute("data-context-generator-original-transition") || "";
         element.removeAttribute("data-context-generator-original-transition");
       }
+    });
+
+    document.querySelectorAll("[data-context-generator-original-translate]").forEach((element) => {
+      element.style.translate = element.getAttribute("data-context-generator-original-translate") || "";
+      element.style.willChange = "";
+      element.removeAttribute("data-context-generator-original-translate");
     });
 
     document.querySelectorAll("[data-context-generator-original-overflow]").forEach((element) => {
@@ -6684,7 +6690,8 @@
           element.id !== BUBBLE_ID &&
           !isContextGeneratorNode(element) &&
           (/\b(model|sonnet|opus|haiku|send|submit|mic|microphone|voice|speak|speech|talk|dictation|audio)\b/.test(label) ||
-            element.hasAttribute("data-context-generator-original-transform"))
+            element.hasAttribute("data-context-generator-original-transform") ||
+            element.hasAttribute("data-context-generator-original-translate"))
         );
       });
 
@@ -6709,8 +6716,11 @@
       id: getClaudeControlDebugId(element),
       kind: getClaudeDebugAnchorKind({ label }),
       ...describeClaudeDebugNode(element, null, element.getAttribute?.("aria-label") || element.getAttribute?.("title") || ""),
-      reserved: element.hasAttribute("data-context-generator-original-transform"),
+      reserved: element.hasAttribute("data-context-generator-original-translate"),
       offset: reservedClaudeControlOffsets.get(element) || 0,
+      inlineTranslate: element.style.translate || "",
+      originalTranslate: element.getAttribute("data-context-generator-original-translate") || "",
+      computedTranslate: computedStyle?.translate || "",
       inlineTransform: element.style.transform || "",
       originalTransform: element.getAttribute("data-context-generator-original-transform") || "",
       computedTransform: computedStyle?.transform || "",
@@ -7913,7 +7923,7 @@
 
     reservedClaudeInlineControls
       .filter((element) => !elements.includes(element))
-      .forEach(restoreReservedTransform);
+      .forEach(restoreReservedTranslate);
 
     reservedClaudeOverflowElements
       .filter((element) => !overflowElements.includes(element))
@@ -7922,26 +7932,17 @@
     overflowElements.forEach(reserveClaudeModelOverflow);
 
     elements.forEach((element) => {
-      if (!element.hasAttribute("data-context-generator-original-transform")) {
-        element.setAttribute("data-context-generator-original-transform", element.style.transform || "");
-      }
-      if (!element.hasAttribute("data-context-generator-original-transition")) {
-        element.setAttribute("data-context-generator-original-transition", element.style.transition || "");
+      if (!element.hasAttribute("data-context-generator-original-translate")) {
+        element.setAttribute("data-context-generator-original-translate", element.style.translate || "");
       }
 
-      const originalTransform = element.getAttribute("data-context-generator-original-transform") || "";
       const offset = offsetEntries.get(element) || 0;
-      const targetTransform = `${originalTransform} translateX(${offset}px)`.trim();
-      // Claude applies its own transform transition to remounted Mic/Send
-      // controls. The reserved slot must snap into place before first paint.
-      if (element.style.transition !== "none") {
-        element.style.transition = "none";
-      }
-      if (element.style.transform !== targetTransform) {
-        element.style.transform = targetTransform;
-      }
-      if (element.style.willChange !== "transform") {
-        element.style.willChange = "transform";
+      const targetTranslate = `${offset}px 0px`;
+      // Keep Cap Context's offset independent from Claude's animated transform.
+      // Overriding transform or transition can strand Claude's outgoing visual
+      // layer when the editor and control DOM update in separate React commits.
+      if (element.style.translate !== targetTranslate) {
+        element.style.translate = targetTranslate;
       }
     });
 
@@ -8050,7 +8051,7 @@
   function releaseClaudeInlineControlSlots() {
     if (!reservedClaudeInlineControls.length) return;
 
-    reservedClaudeInlineControls.forEach(restoreReservedTransform);
+    reservedClaudeInlineControls.forEach(restoreReservedTranslate);
     reservedClaudeOverflowElements.forEach(restoreReservedOverflow);
     reservedClaudeInlineControls = [];
     reservedClaudeInlineShift = 0;
@@ -8069,6 +8070,13 @@
       element.style.transition = element.getAttribute("data-context-generator-original-transition") || "";
       element.removeAttribute("data-context-generator-original-transition");
     }
+  }
+
+  function restoreReservedTranslate(element) {
+    if (!element) return;
+
+    element.style.translate = element.getAttribute("data-context-generator-original-translate") || "";
+    element.removeAttribute("data-context-generator-original-translate");
   }
 
   function restoreReservedOverflow(element) {

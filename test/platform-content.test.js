@@ -284,6 +284,7 @@ function loadPlatformContent(elements = [], hostname = "chatgpt.com", {
         display: element?.getAttribute?.("data-display") || "block",
         visibility: element?.getAttribute?.("data-visibility") || "visible",
         opacity: element?.getAttribute?.("data-opacity") || "1",
+        translate: element?.style?.translate || "none",
         transform: element?.style?.transform || "none",
         transition: element?.style?.transition || "all 0s ease 0s",
         overflowY
@@ -1813,14 +1814,22 @@ test("startup clears stale Claude placement transform reservations", () => {
   shiftedActionRow.style.transform = "translateX(-56px)";
   shiftedActionRow.style.transition = "none";
   shiftedActionRow.style.willChange = "transform";
+  const translatedClaudeControl = new FakeElement({
+    attrs: { "data-context-generator-original-translate": "2px 0px" }
+  });
+  translatedClaudeControl.style.translate = "-52px 0px";
+  translatedClaudeControl.style.willChange = "translate";
 
-  loadPlatformContent([shiftedActionRow], "claude.ai");
+  loadPlatformContent([shiftedActionRow, translatedClaudeControl], "claude.ai");
 
   assert.equal(shiftedActionRow.style.transform, "");
   assert.equal(shiftedActionRow.style.transition, "transform 150ms ease");
   assert.equal(shiftedActionRow.style.willChange, "");
   assert.equal(shiftedActionRow.hasAttribute("data-context-generator-original-transform"), false);
   assert.equal(shiftedActionRow.hasAttribute("data-context-generator-original-transition"), false);
+  assert.equal(translatedClaudeControl.style.translate, "2px 0px");
+  assert.equal(translatedClaudeControl.style.willChange, "");
+  assert.equal(translatedClaudeControl.hasAttribute("data-context-generator-original-translate"), false);
 });
 
 test("Claude bubble fills the inline slot to the right of voice mode", () => {
@@ -2304,7 +2313,6 @@ test("Claude logs the remounted Mic reservation before and after the mutation", 
     attrs: { "aria-label": "Microphone" },
     rect: { left: 844, right: 880, top: 166, bottom: 202, width: 36, height: 36 }
   });
-  mic.style.transition = "transform 150ms ease";
   composer.children = [input, send];
   [input, send].forEach((element) => { element.parentElement = composer; });
 
@@ -2313,6 +2321,9 @@ test("Claude logs the remounted Mic reservation before and after the mutation", 
     "claude.ai",
     { pathname: "/chat/example", search: "?__cap_context_debug_placement=1" }
   );
+  mic.style.transition = "transform 150ms ease";
+  mic.style.transform = "scale(0.96)";
+  mic.style.willChange = "transform";
   const sendPlacement = hooks.getClaudeBubblePlacement(composerRect, input, composer);
   hooks.reserveClaudeInlineBubbleSlot(
     sendPlacement.anchorControl,
@@ -2322,7 +2333,7 @@ test("Claude logs the remounted Mic reservation before and after the mutation", 
     sendPlacement.inlineShift
   );
 
-  assert.equal(mic.style.transform, "");
+  assert.equal(mic.style.transform, "scale(0.96)");
   composer.children = [input, mic];
   mic.parentElement = composer;
   send.parentElement = null;
@@ -2333,21 +2344,77 @@ test("Claude logs the remounted Mic reservation before and after the mutation", 
     addedNodes: [mic],
     removedNodes: [send]
   }]);
-  assert.equal(mic.style.transform, "translateX(-52px)");
-  assert.equal(mic.style.transition, "none");
+  assert.equal(mic.style.translate, "-52px 0px");
+  assert.equal(mic.style.transform, "scale(0.96)");
+  assert.equal(mic.style.transition, "transform 150ms ease");
+  assert.equal(mic.style.willChange, "transform");
   assert.equal(hooks.animationFrameCallbacks.length, 1);
   const [prefix, diagnostic] = hooks.debugLogs.at(-1);
   assert.equal(prefix, "[Cap Context][Claude controls]");
   const beforeMic = diagnostic.before.controls.find((control) => control.kind === "mic");
   const afterMic = diagnostic.after.controls.find((control) => control.kind === "mic");
   assert.equal(beforeMic.reserved, false);
-  assert.equal(beforeMic.inlineTransform, "");
+  assert.equal(beforeMic.inlineTransform, "scale(0.96)");
   assert.equal(afterMic.reserved, true);
-  assert.equal(afterMic.inlineTransform, "translateX(-52px)");
-  assert.equal(afterMic.inlineTransition, "none");
+  assert.equal(afterMic.inlineTranslate, "-52px 0px");
+  assert.equal(afterMic.inlineTransform, "scale(0.96)");
+  assert.equal(afterMic.inlineTransition, "transform 150ms ease");
   assert.equal(diagnostic.mutations[0].type, "childList");
   assert.equal(diagnostic.mutations[0].added.length, 1);
   assert.equal(diagnostic.mutations[0].removed.length, 1);
+});
+
+test("Claude preserves native control animation during a populated-editor Voice mismatch", () => {
+  const composerRect = getClaudeComposerRect();
+  const input = new FakeElement({
+    text: "stale editor text",
+    attrs: { contenteditable: "true", role: "textbox" }
+  });
+  const composer = new FakeElement({ tag: "form", rect: composerRect });
+  const mic = new FakeElement({
+    tag: "button",
+    attrs: { "aria-label": "Microphone" },
+    rect: { left: 792, right: 824, top: 166, bottom: 198, width: 32, height: 32 }
+  });
+  const voice = new FakeElement({
+    tag: "button",
+    attrs: { "aria-label": "Voice options" },
+    rect: { left: 828, right: 848, top: 166, bottom: 198, width: 20, height: 32 }
+  });
+  const voiceMode = new FakeElement({
+    tag: "button",
+    attrs: { "aria-label": "Voice mode" },
+    rect: { left: 852, right: 884, top: 166, bottom: 198, width: 32, height: 32 }
+  });
+  composer.children = [input, mic, voice, voiceMode];
+  composer.children.forEach((element) => { element.parentElement = composer; });
+
+  const hooks = loadPlatformContent(
+    [input, composer, mic, voice, voiceMode],
+    "claude.ai",
+    { pathname: "/chat/example" }
+  );
+  [mic, voice, voiceMode].forEach((control) => {
+    control.style.transform = "scale(0.98)";
+    control.style.transition = "transform 150ms ease";
+    control.style.willChange = "transform";
+  });
+  const placement = hooks.getClaudeBubblePlacement(composerRect, input, composer);
+  hooks.reserveClaudeInlineBubbleSlot(
+    placement.anchorControl,
+    placement.reservationControls,
+    input,
+    composerRect,
+    placement.inlineShift
+  );
+
+  assert.equal(placement.anchorControl.element, voiceMode);
+  [mic, voice, voiceMode].forEach((control) => {
+    assert.equal(control.style.translate, "-52px 0px");
+    assert.equal(control.style.transform, "scale(0.98)");
+    assert.equal(control.style.transition, "transform 150ms ease");
+    assert.equal(control.style.willChange, "transform");
+  });
 });
 
 test("Gemini bubble anchors to the left of the Flash selector", () => {
