@@ -25,7 +25,7 @@ Write entries in past tense and describe the resulting behavior, not every imple
 
 ### 2026-09-09
 
-- Reworked the orb-to-picker-to-handoff motion as one continuous interaction: the picker now has clearer open/close state and focus behavior, destination selection holds while alternatives recede, the handoff surface expands from the picker's measured position, the detached orb leaves during transfer, and handoff/error exits animate instead of disappearing abruptly. Reduced-motion behavior remains immediate.
+- Reworked the orb-to-picker-to-handoff motion as one continuous interaction: the picker now has clearer open/close state and focus behavior, destination selection holds while alternatives recede, the handoff surface expands from the picker's measured position, the detached orb leaves during transfer, and handoff/error exits animate instead of disappearing abruptly. Follow-up micro-polish clarified review-before-send behavior, made wait estimates deliberately approximate, kept stage headlines readable through transitions, and removed duplicate assistive announcements. Reduced-motion behavior remains immediate.
 
 ### 2026-09-08
 

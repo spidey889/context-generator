@@ -506,10 +506,25 @@ test("destination picker exposes dialog state and restores the trigger on dismis
   assert.match(sheetSource, /sheet\.setAttribute\("aria-hidden", "true"\)/);
   assert.match(sheetSource, /event\.key !== "Tab"/);
   assert.match(sheetSource, /focusableTiles\[nextIndex\]\.focus/);
+  assert.match(sheetSource, /detail\.textContent = "Opening…"/);
+  assert.match(sheetSource, /tile\.setAttribute\("aria-disabled", "true"\)/);
   assert.match(toggleAndHideSource, /bubble\.setAttribute\("aria-expanded", "true"\)/);
   assert.match(toggleAndHideSource, /sheet\.focus\?\.\(\{ preventScroll: true \}\)/);
   assert.match(toggleAndHideSource, /document\.activeElement === bubble/);
   assert.match(toggleAndHideSource, /bubble\.focus\?\.\(\{ preventScroll: true \}\)/);
+});
+
+test("picker and handoff microcopy stays calm, transparent, and deliberately approximate", () => {
+  const source = fs.readFileSync(SOURCE_PATH, "utf8");
+
+  assert.match(source, /Pastes into the input — you review before sending/);
+  assert.match(source, /Still working — your context is safe/);
+  assert.match(source, /countdown\.textContent = `~\$\{Math\.max/);
+  assert.doesNotMatch(source, /detail\.textContent = "Opening\.\.\."/);
+  assert.match(source, /overlay\.setAttribute\("role", "group"\)/);
+  assert.doesNotMatch(source, /overlay\.setAttribute\("role", "status"\)/);
+  assert.match(source, /from\{opacity:0\.36;transform:translate3d\(0,5px,0\)\}/);
+  assert.doesNotMatch(source, /contextGeneratorHandoffContentIn 380ms[^;]+115ms/);
 });
 
 test("Grok empty-state prompt is not counted or captured as a real message", () => {

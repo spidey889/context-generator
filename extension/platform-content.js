@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-09-09-picker-handoff-motion-v16";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-09-09-picker-handoff-details-v17";
   const BUBBLE_ID = "context-generator-bubble";
   const OVERLAY_ID = "context-generator-overlay";
   const HANDOFF_SCRIM_ID = "context-generator-handoff-scrim";
@@ -61,7 +61,7 @@
   const RUNNING_AUTO_RESET_MS = 360000;
   const DEFAULT_MAX_COMPOSER_WIDTH = 1320;
   const DESTINATION_TITLE_TEXT = "Where to continue?";
-  const DESTINATION_HELPER_TEXT = "Context goes straight into the input box";
+  const DESTINATION_HELPER_TEXT = "Pastes into the input — you review before sending";
   const ONBOARDING_STORAGE_KEY = "context-generator-onboarding-dismissed-v2";
   const ONBOARDING_TITLE_TEXT = "Transfer chat context";
   const ONBOARDING_BODY_TEXT = "From this button.";
@@ -142,7 +142,7 @@
   const HANDOFF_COUNTDOWN_ID = "context-generator-handoff-countdown";
   const HANDOFF_COUNTDOWN_FIXED_MS = 40000;
   const HANDOFF_REASSURANCE_ID = "context-generator-handoff-reassurance";
-  const HANDOFF_REASSURANCE_TEXT = "Almost done, don't cancel now";
+  const HANDOFF_REASSURANCE_TEXT = "Still working — your context is safe";
   // Stage completion still comes only from real pipeline marks. In-stage line motion is display-only:
   // capture reads the sweep's existing scroll diagnostics, while summary creeps below completion.
   const HANDOFF_STAGES = [
@@ -4563,7 +4563,12 @@
           else tile.dataset.contextGeneratorDismissed = "true";
         });
         spinner.style.display = "block";
-        detail.textContent = "Opening...";
+        sheet.setAttribute("aria-busy", "true");
+        sheet.querySelectorAll(".context-generator-destination-tile").forEach((tile) => {
+          tile.tabIndex = -1;
+          tile.setAttribute("aria-disabled", "true");
+        });
+        detail.textContent = "Opening…";
         startDestinationTransfer(option.id);
       });
 
@@ -4609,7 +4614,7 @@
       if (event.key !== "Tab") return;
 
       const focusableTiles = [...sheet.querySelectorAll(".context-generator-destination-tile")]
-        .filter((tile) => !tile.disabled && tile.dataset.contextGeneratorLoading !== "true");
+        .filter((tile) => !tile.disabled && tile.getAttribute("aria-disabled") !== "true");
       if (focusableTiles.length === 0) return;
       const focusedIndex = focusableTiles.indexOf(document.activeElement);
       const nextIndex = event.shiftKey
@@ -4879,6 +4884,7 @@
 
   function resetDestinationTiles(sheet) {
     delete sheet.dataset.contextGeneratorPhase;
+    sheet.removeAttribute("aria-busy");
     sheet.querySelectorAll(".context-generator-destination-tile").forEach((tile) => {
       const accent = tile.dataset.contextGeneratorAccent || "#ffffff";
       const aura = tile.querySelector(".context-generator-tile-aura");
@@ -4886,6 +4892,8 @@
       delete tile.dataset.contextGeneratorSelected;
       delete tile.dataset.contextGeneratorDismissed;
       tile.removeAttribute("aria-busy");
+      tile.removeAttribute("aria-disabled");
+      tile.tabIndex = 0;
       tile.style.pointerEvents = "";
       tile.style.background = "linear-gradient(180deg,rgba(255,255,255,0.05),rgba(255,255,255,0.022))";
       tile.style.borderColor = "rgba(255,255,255,0.1)";
@@ -4984,8 +4992,8 @@
       const overlay = document.createElement("div");
       overlay.id = OVERLAY_ID;
       overlay.dataset.contextGeneratorOwned = "true";
-      overlay.setAttribute("role", "status");
-      overlay.setAttribute("aria-live", "polite");
+      overlay.setAttribute("role", "group");
+      overlay.setAttribute("aria-label", "Context transfer status");
       overlay.setAttribute("aria-hidden", "true");
       overlay.style.cssText = [
         "display:none",
@@ -5189,11 +5197,11 @@
         styleSheet.dataset.contextGeneratorOwned = "true";
         styleSheet.textContent = `
           @keyframes contextGeneratorHeadlineIn{
-            from{opacity:0.18;transform:translate3d(0,6px,0)}
+            from{opacity:0.62;transform:translate3d(0,4px,0)}
             to{opacity:1;transform:translate3d(0,0,0)}
           }
           @keyframes contextGeneratorHandoffContentIn{
-            from{opacity:0;transform:translate3d(0,7px,0)}
+            from{opacity:0.36;transform:translate3d(0,5px,0)}
             to{opacity:1;transform:translate3d(0,0,0)}
           }
           @keyframes contextGeneratorSummaryDotHop{
@@ -5258,13 +5266,13 @@
             pointer-events:none;
           }
           #${OVERLAY_ID}.context-generator-handoff-entering #context-generator-overlay-brand{
-            animation:contextGeneratorHandoffContentIn 300ms cubic-bezier(0.16,1,0.3,1) 35ms both;
+            animation:contextGeneratorHandoffContentIn 300ms cubic-bezier(0.16,1,0.3,1) both;
           }
           #${OVERLAY_ID}.context-generator-handoff-entering #context-generator-status-group{
-            animation:contextGeneratorHandoffContentIn 340ms cubic-bezier(0.16,1,0.3,1) 75ms both;
+            animation:contextGeneratorHandoffContentIn 340ms cubic-bezier(0.16,1,0.3,1) 20ms both;
           }
           #${OVERLAY_ID}.context-generator-handoff-entering #context-generator-handoff-progress{
-            animation:contextGeneratorHandoffContentIn 380ms cubic-bezier(0.16,1,0.3,1) 115ms both;
+            animation:contextGeneratorHandoffContentIn 380ms cubic-bezier(0.16,1,0.3,1) 45ms both;
           }
           #context-generator-text .context-generator-summary-activity[data-active="true"]{
             display:inline-flex;
@@ -5287,7 +5295,7 @@
             align-items:center;
             gap:7px;
             padding:0 5px;
-            color:rgba(239,237,244,0.46);
+            color:rgba(239,237,244,0.54);
             text-align:center;
           }
           #context-generator-handoff-progress .context-generator-handoff-stage-connector{
@@ -5422,7 +5430,7 @@
 
       const countdown = document.createElement("div");
       countdown.id = HANDOFF_COUNTDOWN_ID;
-      countdown.setAttribute("aria-label", "Estimated seconds remaining");
+      countdown.setAttribute("aria-label", "Estimated time remaining");
       countdown.style.cssText = [
         "display:none",
         "margin-left:auto",
@@ -5828,7 +5836,7 @@
 
     const startMs = HANDOFF_COUNTDOWN_FIXED_MS;
     const startedAt = getNow();
-    countdown.setAttribute("aria-label", "Estimated seconds remaining");
+    countdown.setAttribute("aria-label", "Estimated time remaining");
     countdown.style.display = "inline-flex";
     countdown.style.opacity = "1";
 
@@ -5839,7 +5847,7 @@
         return;
       }
 
-      countdown.textContent = `${Math.max(1, Math.ceil(remainingMs / 1000))}s`;
+      countdown.textContent = `~${Math.max(1, Math.ceil(remainingMs / 1000))}s`;
     };
 
     updateCountdown();
