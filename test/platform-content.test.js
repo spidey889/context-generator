@@ -2131,6 +2131,7 @@ test("Claude watches control visibility changes inside a stable composer", () =>
   assert.equal(observation.element, composer);
   assert.deepEqual(JSON.parse(JSON.stringify(observation.options)), {
     attributes: true,
+    childList: true,
     subtree: true,
     attributeFilter: ["class", "style", "aria-hidden", "hidden", "data-state"]
   });
@@ -2279,7 +2280,7 @@ test("Claude reserves a hidden mounted Send control before the Voice-to-Send swa
   assert.equal(placement.reservationControls.some((control) => control.element === send), true);
 });
 
-test("Claude shifts a newly visible Mic synchronously before the full placement frame", () => {
+test("Claude shifts a remounted Mic synchronously before the full placement frame", () => {
   const composerRect = getClaudeComposerRect();
   const input = new FakeElement({ attrs: { contenteditable: "true", role: "textbox" } });
   const composer = new FakeElement({ tag: "form", rect: composerRect });
@@ -2290,11 +2291,11 @@ test("Claude shifts a newly visible Mic synchronously before the full placement 
   });
   const mic = new FakeElement({
     tag: "button",
-    attrs: { "aria-label": "Microphone", "data-visibility": "hidden" },
-    rect: { left: 844, right: 844, top: 166, bottom: 166, width: 0, height: 0 }
+    attrs: { "aria-label": "Microphone" },
+    rect: { left: 844, right: 880, top: 166, bottom: 202, width: 36, height: 36 }
   });
-  composer.children = [input, send, mic];
-  [input, send, mic].forEach((element) => { element.parentElement = composer; });
+  composer.children = [input, send];
+  [input, send].forEach((element) => { element.parentElement = composer; });
 
   const hooks = loadPlatformContent([input, composer, send, mic], "claude.ai", { pathname: "/chat/example" });
   const sendPlacement = hooks.getClaudeBubblePlacement(composerRect, input, composer);
@@ -2307,15 +2308,15 @@ test("Claude shifts a newly visible Mic synchronously before the full placement 
   );
 
   assert.equal(mic.style.transform, "");
-  send.attrs["data-visibility"] = "hidden";
-  mic.attrs["data-visibility"] = "visible";
-  mic.rect = { left: 844, right: 880, top: 166, bottom: 202, width: 36, height: 36 };
+  composer.children = [input, mic];
+  mic.parentElement = composer;
+  send.parentElement = null;
   hooks.syncClaudePlacementResizeMonitoring(input, composer);
   hooks.mutationObservers.at(-1).callback([{
-    target: mic,
-    attributeName: "class",
-    addedNodes: [],
-    removedNodes: []
+    target: composer,
+    attributeName: null,
+    addedNodes: [mic],
+    removedNodes: [send]
   }]);
   assert.equal(mic.style.transform, "translateX(-52px)");
   assert.equal(hooks.animationFrameCallbacks.length, 1);

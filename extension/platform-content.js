@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-09-09-claude-chat-clamp-fix-v9";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-09-09-claude-control-remount-v10";
   const BUBBLE_ID = "context-generator-bubble";
   const OVERLAY_ID = "context-generator-overlay";
   const HANDOFF_SCRIM_ID = "context-generator-handoff-scrim";
@@ -7637,10 +7637,9 @@
 
     stopClaudePlacementMutationMonitoring();
     claudePlacementMutationRoot = root;
-    // Claude keeps Voice and Send mounted, then swaps their visibility through
-    // ancestor classes without changing composer geometry or child nodes. Apply
-    // the native-control reservation in this microtask so the newly visible
-    // control cannot paint once underneath the orb while the full update waits.
+    // Claude may either toggle visibility or remount Send/Mic. Apply the native
+    // control reservation in this microtask so the newly visible control cannot
+    // paint once underneath the orb while the full update waits.
     claudePlacementMutationObserver = new MutationObserver((mutations) => {
       if (mutations.every(isOwnDomMutation)) return;
       syncClaudeInlineReservationBeforePaint(input, composerSurface);
@@ -7649,6 +7648,7 @@
     });
     claudePlacementMutationObserver.observe(root, {
       attributes: true,
+      childList: true,
       subtree: true,
       attributeFilter: ["class", "style", "aria-hidden", "hidden", "data-state"]
     });
