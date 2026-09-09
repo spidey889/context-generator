@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-09-09-claude-switch-cluster-v14";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-09-09-claude-diagnostics-cleanup-v15";
   const BUBBLE_ID = "context-generator-bubble";
   const OVERLAY_ID = "context-generator-overlay";
   const HANDOFF_SCRIM_ID = "context-generator-handoff-scrim";
@@ -45,8 +45,6 @@
   const CLAUDE_INLINE_RIGHT_MARGIN = 4;
   const CLAUDE_EMPTY_COMPOSER_Y_NUDGE = -0.5;
   const CLAUDE_EXISTING_CHAT_COMPOSER_Y_NUDGE = -5;
-  const CLAUDE_PLACEMENT_DEBUG_QUERY = "__cap_context_debug_placement";
-  const CLAUDE_PLACEMENT_DEBUG_SESSION_KEY = "cap-context-debug-claude-placement";
   const CLAUDE_TRANSIENT_PLACEMENT_GRACE_MS = 700;
   const CLAUDE_PATHNAME_POLL_MS = 80;
   const CLAUDE_MAX_COMPOSER_HORIZONTAL_PADDING = 160;
@@ -465,10 +463,6 @@
   let chatGptPlacementResizeTargets = [];
   let chatGptPlacementMutationObserver = null;
   let chatGptPlacementMutationRoot = null;
-  let lastClaudePlacementDebugSignature = "";
-  let lastClaudeControlDebugSignature = "";
-  let nextClaudeControlDebugId = 1;
-  const claudeControlDebugIds = new WeakMap();
   let lastClaudeStablePlacementAt = 0;
   let claudePlacementGraceTimer = null;
   let lastClaudePlacementPathname = window.location.pathname;
@@ -608,8 +602,6 @@
       getClaudeControlTargetOffset,
       findClaudeControlSwitchCluster,
       reserveClaudeInlineBubbleSlot,
-      maybeLogClaudePlacementDiagnostics,
-      getClaudeControlDebugSnapshot,
       getHandoffProgressState,
       getHandoffProgressStatusText
     });
@@ -3297,7 +3289,7 @@
     const existingBubble = document.getElementById(BUBBLE_ID);
 
     if (!input) {
-      if (retainClaudeStablePlacement(existingBubble, recalculationReason, "editor-missing")) {
+      if (retainClaudeStablePlacement(existingBubble)) {
         return existingBubble;
       }
       if (existingBubble) existingBubble.style.display = "none";
@@ -3307,11 +3299,6 @@
       releaseBubbleSlot();
       releaseComposerSurface();
       clearClaudePlacementMonitoring();
-      maybeLogClaudePlacementDiagnostics({
-        reason: recalculationReason,
-        outcome: "editor-missing",
-        bubble: existingBubble
-      });
       return existingBubble;
     }
 
@@ -3333,7 +3320,7 @@
       if (currentPlatform.id === "claude") {
         syncClaudePlacementResizeMonitoring(input, findClaudePendingMonitoringSurface(input));
       }
-      if (retainClaudeStablePlacement(bubble, recalculationReason, "anchor-surface-pending", input)) {
+      if (retainClaudeStablePlacement(bubble)) {
         return bubble;
       }
       bubble.style.display = "none";
@@ -3342,12 +3329,6 @@
         releaseBubbleSlot();
         releaseComposerSurface();
       }
-      maybeLogClaudePlacementDiagnostics({
-        reason: recalculationReason,
-        outcome: "surface-missing",
-        bubble,
-        input
-      });
       return bubble;
     }
 
@@ -6183,7 +6164,7 @@
     const bubble = document.getElementById(BUBBLE_ID);
     const input = findPlatformInput();
     if (!bubble || !input) {
-      if (retainClaudeStablePlacement(bubble, recalculationReason, !bubble ? "orb-missing" : "editor-missing", input)) {
+      if (retainClaudeStablePlacement(bubble)) {
         return;
       }
       stopGrokPlacementResizeMonitoring();
@@ -6191,12 +6172,6 @@
       stopGeminiPlacementResizeMonitoring();
       clearClaudePlacementMonitoring();
       clearChatGptPlacementResizeMonitoring();
-      maybeLogClaudePlacementDiagnostics({
-        reason: recalculationReason,
-        outcome: !bubble ? "orb-missing" : "editor-missing",
-        bubble,
-        input
-      });
       return;
     }
 
@@ -6223,7 +6198,7 @@
       if (currentPlatform.id === "claude") {
         syncClaudePlacementResizeMonitoring(input, findClaudePendingMonitoringSurface(input));
       }
-      if (retainClaudeStablePlacement(bubble, recalculationReason, "anchor-surface-pending", input)) {
+      if (retainClaudeStablePlacement(bubble)) {
         return;
       }
       bubble.style.display = "none";
@@ -6232,12 +6207,6 @@
         releaseBubbleSlot();
         releaseComposerSurface();
       }
-      maybeLogClaudePlacementDiagnostics({
-        reason: recalculationReason,
-        outcome: "surface-missing",
-        bubble,
-        input
-      });
       return;
     }
 
@@ -6259,7 +6228,7 @@
       composerRect.bottom < 0 ||
       composerRect.top > window.innerHeight
     ) {
-      if (retainClaudeStablePlacement(bubble, recalculationReason, "surface-geometry-pending", input, composerSurface, composerRect)) {
+      if (retainClaudeStablePlacement(bubble)) {
         return;
       }
       bubble.style.display = "none";
@@ -6269,14 +6238,6 @@
         releaseComposerSurface();
         clearClaudePlacementMonitoring();
       }
-      maybeLogClaudePlacementDiagnostics({
-        reason: recalculationReason,
-        outcome: "surface-transient-geometry",
-        bubble,
-        input,
-        composerSurface,
-        composerRect
-      });
       return;
     }
 
@@ -6327,7 +6288,7 @@
     if (currentPlatform.id === "claude") {
       const claudePlacement = getClaudeBubblePlacement(composerRect, input, composerSurface);
       if (!claudePlacement.anchorControl) {
-        if (!retainClaudeStablePlacement(bubble, recalculationReason, "anchor-pending", input, composerSurface, composerRect)) {
+        if (!retainClaudeStablePlacement(bubble)) {
           bubble.style.display = "none";
           releaseBubbleSlot();
         }
@@ -6351,15 +6312,6 @@
         display: "flex"
       });
       lastClaudeStablePlacementAt = Date.now();
-      maybeLogClaudePlacementDiagnostics({
-        reason: recalculationReason,
-        outcome: "placed",
-        bubble,
-        input,
-        composerSurface,
-        composerRect,
-        placement: claudePlacement
-      });
       maybeShowOnboardingNudge(bubble);
       return;
     }
@@ -6610,230 +6562,6 @@
     // Optical alignment may intentionally cross the local surface edge. Apply
     // it after the legacy local bound; fixed-root placement is viewport-clamped.
     return Math.round((clampNumber(centeredTop, BUBBLE_GAP, maxTop) + opticalNudge) * 2) / 2;
-  }
-
-  function maybeLogClaudePlacementDiagnostics({
-    reason,
-    outcome,
-    bubble = null,
-    input = null,
-    composerSurface = null,
-    composerRect = null,
-    placement = null
-  } = {}) {
-    if (currentPlatform.id !== "claude" || !isClaudePlacementDebugEnabled()) return;
-
-    const controls = getClaudeDebugControls(composerSurface, placement?.anchorControl?.element);
-    const diagnostics = {
-      path: window.location.pathname,
-      reason: reason || "unknown",
-      state: !input
-        ? "editor-missing"
-        : isClaudeFreshEmptyComposer(input)
-          ? "fresh-new-empty"
-          : window.location.pathname === "/new"
-            ? "new-typing"
-            : window.location.pathname.startsWith("/chat/")
-              ? isClaudeComposerEmpty(input) ? "chat-empty" : "chat-editor-populated"
-              : "other",
-      outcome: outcome || "measured",
-      editor: describeClaudeDebugNode(input),
-      surface: describeClaudeDebugNode(composerSurface, composerRect),
-      anchor: placement?.anchorControl ? {
-        ...describeClaudeDebugNode(placement.anchorControl.element),
-        selectedAs: getClaudeDebugAnchorKind(placement.anchorControl)
-      } : null,
-      mic: describeClaudeDebugNode(controls.mic),
-      voice: describeClaudeDebugNode(controls.voice),
-      send: describeClaudeDebugNode(controls.send),
-      orb: describeClaudeDebugNode(bubble)
-    };
-    const signature = JSON.stringify(diagnostics);
-    if (signature === lastClaudePlacementDebugSignature) return;
-    lastClaudePlacementDebugSignature = signature;
-    console.info("[Cap Context][Claude placement]", diagnostics);
-  }
-
-  function isClaudePlacementDebugEnabled() {
-    const queryValue = new URLSearchParams(window.location.search || "").get(CLAUDE_PLACEMENT_DEBUG_QUERY);
-    try {
-      if (queryValue === "1") window.sessionStorage?.setItem(CLAUDE_PLACEMENT_DEBUG_SESSION_KEY, "1");
-      if (queryValue === "0") window.sessionStorage?.removeItem(CLAUDE_PLACEMENT_DEBUG_SESSION_KEY);
-      return queryValue === "1" || window.sessionStorage?.getItem(CLAUDE_PLACEMENT_DEBUG_SESSION_KEY) === "1";
-    } catch (_error) {
-      return queryValue === "1";
-    }
-  }
-
-  function getClaudeDebugControls(composerSurface, selectedAnchor) {
-    const candidates = composerSurface
-      ? Array.from(composerSurface.querySelectorAll("button, [role='button'], [tabindex='0']"))
-      : [];
-    if (selectedAnchor && !candidates.includes(selectedAnchor)) candidates.push(selectedAnchor);
-
-    const findControl = (pattern) => candidates.find((element) => pattern.test(getElementLabel(element, true))) || null;
-    return {
-      mic: findControl(/\b(mic|microphone|dictat(?:e|ion))\b/i),
-      voice: findControl(/\b(voice|speak|speech|talk|audio)\b/i),
-      send: findControl(/\b(send|submit)\b/i)
-    };
-  }
-
-  function getClaudeControlDebugSnapshot(input, composerSurface) {
-    if (!composerSurface) return null;
-
-    const composerRect = composerSurface.getBoundingClientRect();
-    const placement = getClaudeBubblePlacement(composerRect, input, composerSurface);
-    const elements = Array.from(composerSurface.querySelectorAll("button, [role='button'], [tabindex='0']"))
-      .filter((element) => {
-        const label = getElementLabel(element, true);
-        return (
-          element.id !== BUBBLE_ID &&
-          !isContextGeneratorNode(element) &&
-          (/\b(model|sonnet|opus|haiku|send|submit|mic|microphone|voice|speak|speech|talk|dictation|audio)\b/.test(label) ||
-            element.hasAttribute("data-context-generator-original-transform") ||
-            element.hasAttribute("data-context-generator-original-translate"))
-        );
-      });
-
-    return {
-      anchorId: getClaudeControlDebugId(placement.anchorControl?.element),
-      anchorKind: placement.anchorControl ? getClaudeDebugAnchorKind(placement.anchorControl) : null,
-      inlineShift: placement.inlineShift || 0,
-      controls: elements.map(describeClaudeDebugControl)
-    };
-  }
-
-  function describeClaudeDebugControl(element) {
-    const label = getElementLabel(element, true);
-    const reservationTarget = getClaudeReservedTranslationTarget(element);
-    let computedStyle = null;
-    try {
-      computedStyle = window.getComputedStyle(element);
-    } catch (_error) {
-      computedStyle = null;
-    }
-
-    return {
-      id: getClaudeControlDebugId(element),
-      kind: getClaudeDebugAnchorKind({ label }),
-      ...describeClaudeDebugNode(element, null, element.getAttribute?.("aria-label") || element.getAttribute?.("title") || ""),
-      reserved: Boolean(reservationTarget),
-      offset: reservedClaudeControlOffsets.get(element) || 0,
-      reservationTargetId: getClaudeControlDebugId(reservationTarget),
-      reservationTargetTranslate: reservationTarget?.style.translate || "",
-      inlineTranslate: element.style.translate || "",
-      originalTranslate: element.getAttribute("data-context-generator-original-translate") || "",
-      computedTranslate: computedStyle?.translate || "",
-      inlineTransform: element.style.transform || "",
-      originalTransform: element.getAttribute("data-context-generator-original-transform") || "",
-      computedTransform: computedStyle?.transform || "",
-      inlineTransition: element.style.transition || "",
-      computedTransition: computedStyle?.transition || "",
-      opacity: computedStyle?.opacity || "",
-      display: computedStyle?.display || "",
-      visibility: computedStyle?.visibility || ""
-    };
-  }
-
-  function getClaudeControlDebugId(element) {
-    if (!element) return null;
-    if (!claudeControlDebugIds.has(element)) {
-      claudeControlDebugIds.set(element, nextClaudeControlDebugId);
-      nextClaudeControlDebugId += 1;
-    }
-    return claudeControlDebugIds.get(element);
-  }
-
-  function maybeLogClaudeControlTransitionDiagnostics({ mutations, input, composerSurface, before, reservationApplied }) {
-    if (currentPlatform.id !== "claude" || !isClaudePlacementDebugEnabled()) return;
-
-    const diagnostics = {
-      path: window.location.pathname,
-      state: isClaudeComposerEmpty(input) ? "empty" : "populated",
-      mutations: mutations.map((mutation) => ({
-        type: mutation.type || (mutation.attributeName ? "attributes" : "childList"),
-        attribute: mutation.attributeName || "",
-        targetId: getClaudeControlDebugId(mutation.target),
-        added: describeClaudeDebugMutationNodes(mutation.addedNodes),
-        removed: describeClaudeDebugMutationNodes(mutation.removedNodes)
-      })),
-      reservationApplied,
-      before,
-      after: getClaudeControlDebugSnapshot(input, composerSurface)
-    };
-    const signature = JSON.stringify(diagnostics);
-    if (signature === lastClaudeControlDebugSignature) return;
-    lastClaudeControlDebugSignature = signature;
-    console.info("[Cap Context][Claude controls]", diagnostics);
-  }
-
-  function describeClaudeDebugMutationNodes(nodes) {
-    const changedControls = [];
-    Array.from(nodes || []).forEach((node) => {
-      if (!(node instanceof Element)) return;
-      const candidates = [node, ...Array.from(node.querySelectorAll?.("button, [role='button'], [tabindex='0']") || [])];
-      candidates.forEach((element) => {
-        const label = getElementLabel(element, true);
-        if (!/\b(send|submit|mic|microphone|voice|speak|speech|talk|dictation|audio)\b/.test(label)) return;
-        if (changedControls.some((control) => control.id === getClaudeControlDebugId(element))) return;
-        changedControls.push({
-          id: getClaudeControlDebugId(element),
-          kind: getClaudeDebugAnchorKind({ label }),
-          label: element.getAttribute?.("aria-label") || element.getAttribute?.("title") || ""
-        });
-      });
-    });
-    return changedControls;
-  }
-
-  function getClaudeDebugAnchorKind(anchorControl) {
-    const label = anchorControl?.label || "";
-    if (/\bvoice\s*mode\b/i.test(label)) return "voice-mode";
-    if (/\b(voice|speak|speech|talk|audio)\b/i.test(label)) return "voice";
-    if (/\b(mic|microphone|dictat(?:e|ion))\b/i.test(label)) return "mic";
-    if (/\b(send|submit)\b/i.test(label)) return "send";
-    return "rightmost-small-control";
-  }
-
-  function describeClaudeDebugNode(element, knownRect = null, knownLabel = "") {
-    if (!element) return null;
-
-    let rect = knownRect;
-    try {
-      rect ||= element.getBoundingClientRect();
-    } catch (_error) {
-      rect = null;
-    }
-
-    let visible = false;
-    try {
-      visible = isVisible(element);
-    } catch (_error) {
-      visible = false;
-    }
-
-    return {
-      node: [
-        element.localName,
-        element.id ? `#${element.id}` : "",
-        element.getAttribute?.("data-testid") ? `[data-testid=${element.getAttribute("data-testid")}]` : "",
-        element.getAttribute?.("role") ? `[role=${element.getAttribute("role")}]` : ""
-      ].filter(Boolean).join(""),
-      label: knownLabel || element.getAttribute?.("aria-label") || element.getAttribute?.("title") || "",
-      rect: rect ? {
-        x: roundClaudeDebugNumber(rect.left),
-        y: roundClaudeDebugNumber(rect.top),
-        w: roundClaudeDebugNumber(rect.width),
-        h: roundClaudeDebugNumber(rect.height)
-      } : null,
-      connected: element.isConnected === true,
-      visible
-    };
-  }
-
-  function roundClaudeDebugNumber(value) {
-    return Number.isFinite(value) ? Math.round(value * 10) / 10 : null;
   }
 
   function findChatGptModelSelectorButton(input, composerSurface, composerRect, inputRect = null) {
@@ -7767,17 +7495,7 @@
     // paint once underneath the orb while the full update waits.
     claudePlacementMutationObserver = new MutationObserver((mutations) => {
       if (mutations.every(isOwnDomMutation)) return;
-      const debugBefore = isClaudePlacementDebugEnabled()
-        ? getClaudeControlDebugSnapshot(input, composerSurface)
-        : null;
-      const reservationApplied = syncClaudeInlineReservationBeforePaint(input, composerSurface);
-      maybeLogClaudeControlTransitionDiagnostics({
-        mutations,
-        input,
-        composerSurface,
-        before: debugBefore,
-        reservationApplied
-      });
+      syncClaudeInlineReservationBeforePaint(input, composerSurface);
       const attributes = mutations.map((mutation) => mutation.attributeName).filter(Boolean);
       scheduleFloatingButtonUpdate(`claude-attribute:${[...new Set(attributes)].sort().join("+") || "unknown"}`);
     });
@@ -8183,14 +7901,7 @@
     return true;
   }
 
-  function retainClaudeStablePlacement(
-    bubble,
-    reason,
-    outcome,
-    input = null,
-    composerSurface = null,
-    composerRect = null
-  ) {
+  function retainClaudeStablePlacement(bubble) {
     if (
       currentPlatform.id !== "claude" ||
       !bubble ||
@@ -8215,14 +7926,6 @@
         scheduleFloatingButtonUpdate("claude-grace-expired");
       }, remainingGrace);
     }
-    maybeLogClaudePlacementDiagnostics({
-      reason,
-      outcome: `retained:${outcome}`,
-      bubble,
-      input,
-      composerSurface,
-      composerRect
-    });
     return true;
   }
 

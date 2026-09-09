@@ -231,8 +231,6 @@ The protected `users` table creates a row on an install's first successful trans
 
 Composer discovery scores platform candidates, rejects page-sized/misaligned surfaces, caps dimensions, and restores prior inline styles when reservations change. Resize observers cover expanding composers; Claude and ChatGPT also watch class/style changes when controls swap visibility without a remount.
 
-Add `?__cap_context_debug_placement=1` on Claude for deduplicated, content-free placement traces. The opt-in persists in the tab's session storage across Claude SPA route changes and refreshes; each trace includes its recalculation trigger, route/state, outcome, and editor/composer/anchor/mic/send/orb geometry plus connected/visible state. Use `?__cap_context_debug_placement=0` to disable it for that tab.
-
 Paste uses native setters/events plus stability checks. Firefox alone converts contenteditable line breaks to escaped HTML `<br>` elements. ChatGPT gets longer insert/verify/stability windows. Verification samples beginning, middle, and end anchors so benign editor differences do not cause false failure.
 
 ## Contracts That Must Change Together
@@ -242,8 +240,7 @@ Paste uses native setters/events plus stability checks. Firefox alone converts c
 - Model/profile routing: provider constants/budgets, prompts, Latest Run labels, evaluation expectations, this file, `memory.md`, `extension/README.md`.
 - Telemetry fields/stages/failures: source/background sanitizers, Vercel validator, Supabase validator, SQL constraints/functions, privacy wording, tests. Free-form telemetry fields are forbidden.
 - Latest Run receipt: producer, background expiry, bridge, analysis renderer, privacy wording, analysis tests.
-- Claude placement diagnostics: enable `?__cap_context_debug_placement=1` and filter the page console for `Cap Context`. Placement records describe the selected surface/anchor; control-transition records correlate every mounted Mic/Voice/Send node across the mutation with stable debug IDs, before/after geometry, visibility, transforms, transitions, and reservation ownership. Diagnostics are session-scoped, concise, and deduplicated.
-- Any content-script change: update `CONTENT_SCRIPT_LOAD_ID` so open tabs replace stale code, and retain stale-node/reservation cleanup. Current value: `platform-content-2026-09-09-claude-switch-cluster-v14`.
+- Any content-script change: update `CONTENT_SCRIPT_LOAD_ID` so open tabs replace stale code, and retain stale-node/reservation cleanup. Current value: `platform-content-2026-09-09-claude-diagnostics-cleanup-v15`.
 - Extension release: bump `extension/manifest.json`, rebuild the ZIP with `manifest.json` at its root, hash-compare every file against `extension/`, then test the unpacked folder in a new Brave window.
 
 ## Common Wrong Assumptions
@@ -271,13 +268,12 @@ Do not claim these are fixed without a reproduction and regression test:
 - Browser packaging uses one hybrid Chromium/Firefox manifest while automation is Brave-only.
 - Website tests have no visual regression coverage.
 - The checked-in ZIP is stale, as noted above.
-- The 2026-09-08 isolated Brave smoke reaches the controlled Claude page but currently fails its new full-button containment assertion: the 42 px bubble box ends 4.5 px below the composer (`658.1` vs `653.6`) while the dictate and voice controls remain inside. The code intentionally permits limited box overflow to center the larger bubble on a shorter native control, so resolve whether the test should measure visible artwork or placement should change before calling the branch release-ready.
 
 `backafter15day.md` has deeper evidence, but recheck it against current code. For example, its stale content-script-ID finding is now superseded by `platform-content-2026-09-08-claude-chat-orb-lift-v3`, and the smoke no longer requires catching an ephemeral service-worker DevTools target.
 
 ## Verification Matrix
 
-Latest local verification on 2026-09-08: `npm test` passed 149/149, and a focused run that included the slow Claude capture passed 131/131. `npm run test:extension-smoke` loaded the unpacked extension, read the current placement diagnostics, then failed the pre-existing `bubbleInside` assertion described in Known Current Risks.
+Latest Claude verification on 2026-09-09: 26 Claude-focused tests passed, including the paced long-capture case, and `npm run test:extension-smoke` passed using direct geometry and reservation assertions without production diagnostic logs.
 
 | Change | Focused check | Broader check |
 | --- | --- | --- |

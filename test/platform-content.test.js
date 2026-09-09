@@ -218,7 +218,6 @@ function loadPlatformContent(elements = [], hostname = "chatgpt.com", {
   innerHeight = 720
 } = {}) {
   let hooks = null;
-  const debugLogs = [];
   const sessionValues = new Map();
   const resizeObservers = [];
   const mutationObservers = [];
@@ -327,8 +326,8 @@ function loadPlatformContent(elements = [], hostname = "chatgpt.com", {
   const sandbox = {
     console: {
       ...console,
-      debug: (...args) => debugLogs.push(args),
-      info: (...args) => debugLogs.push(args)
+      debug: () => {},
+      info: () => {}
     },
     document,
     window,
@@ -354,7 +353,6 @@ function loadPlatformContent(elements = [], hostname = "chatgpt.com", {
     assert.ok(hooks, "platform-content test hooks were registered");
     hooks.mutationObservers = mutationObservers;
     hooks.resizeObservers = resizeObservers;
-    hooks.debugLogs = debugLogs;
     hooks.window = window;
     hooks.animationFrameCallbacks = animationFrameCallbacks;
   }
@@ -1889,55 +1887,6 @@ test("Claude fresh page keeps the visible orb connected to the voice controls", 
   assert.equal(visibleArtworkCenterY, controlCenterY - 1);
 });
 
-test("Claude placement debug logs are opt-in, concise, and deduplicated", () => {
-  const composerRect = { left: 600, right: 1224, top: 367.5, bottom: 461.5, width: 624, height: 94 };
-  const input = new FakeElement({
-    attrs: { contenteditable: "true", role: "textbox", "aria-label": "Write your prompt to Claude" },
-    rect: { left: 620, right: 1200, top: 380, bottom: 420, width: 580, height: 40 }
-  });
-  const composer = new FakeElement({ attrs: { "data-testid": "composer" }, rect: composerRect });
-  const mic = new FakeElement({ tag: "button", attrs: { "aria-label": "Microphone" }, rect: { left: 1080, right: 1112, top: 415, bottom: 447, width: 32, height: 32 } });
-  const voice = new FakeElement({ tag: "button", attrs: { "aria-label": "Voice mode" }, rect: { left: 1120, right: 1152, top: 415, bottom: 447, width: 32, height: 32 } });
-  const send = new FakeElement({ tag: "button", attrs: { "aria-label": "Send message" }, rect: { left: 1160, right: 1192, top: 415, bottom: 447, width: 32, height: 32 } });
-  const bubble = new FakeElement({ tag: "button", attrs: { id: "context-generator-bubble" }, rect: { left: 1160, right: 1202, top: 410, bottom: 452, width: 42, height: 42 } });
-  composer.children = [input, mic, voice, send];
-  [input, mic, voice, send].forEach((element) => { element.parentElement = composer; });
-
-  const hooks = loadPlatformContent(
-    [input, composer, mic, voice, send],
-    "claude.ai",
-    { pathname: "/new", search: "?__cap_context_debug_placement=1" }
-  );
-  const details = {
-    reason: "monitor-start",
-    outcome: "placed",
-    bubble,
-    input,
-    composerSurface: composer,
-    composerRect,
-    placement: { anchorControl: { element: voice, label: "voice mode" } }
-  };
-
-  hooks.maybeLogClaudePlacementDiagnostics(details);
-  hooks.maybeLogClaudePlacementDiagnostics(details);
-
-  assert.equal(hooks.debugLogs.length, 1);
-  const [prefix, diagnostic] = hooks.debugLogs[0];
-  assert.equal(prefix, "[Cap Context][Claude placement]");
-  assert.equal(diagnostic.path, "/new");
-  assert.equal(diagnostic.reason, "monitor-start");
-  assert.equal(diagnostic.state, "fresh-new-empty");
-  assert.deepEqual({ ...diagnostic.editor.rect }, { x: 620, y: 380, w: 580, h: 40 });
-  assert.equal(diagnostic.surface.node, "div[data-testid=composer]");
-  assert.equal(diagnostic.anchor.label, "Voice mode");
-  assert.equal(diagnostic.anchor.selectedAs, "voice-mode");
-  assert.equal(diagnostic.mic.label, "Microphone");
-  assert.equal(diagnostic.voice.label, "Voice mode");
-  assert.equal(diagnostic.send.label, "Send message");
-  assert.equal(diagnostic.orb.connected, true);
-  assert.equal(diagnostic.orb.visible, true);
-});
-
 test("Claude typed new-chat state keeps the existing placement for the later fix", () => {
   const composerRect = { left: 600, right: 1224, top: 367.5, bottom: 461.5, width: 624, height: 94 };
   const input = new FakeElement({
@@ -2299,7 +2248,7 @@ test("Claude reserves a hidden mounted Send control before the Voice-to-Send swa
   assert.equal(placement.reservationControls.some((control) => control.element === send), true);
 });
 
-test("Claude logs the remounted Mic reservation before and after the mutation", () => {
+test("Claude keeps the stable switch-cluster reservation when Mic remounts", () => {
   const composerRect = getClaudeComposerRect();
   const input = new FakeElement({ attrs: { contenteditable: "true", role: "textbox" } });
   const composer = new FakeElement({ tag: "form", rect: composerRect });
@@ -2326,7 +2275,7 @@ test("Claude logs the remounted Mic reservation before and after the mutation", 
   const hooks = loadPlatformContent(
     [input, composer, send, mic],
     "claude.ai",
-    { pathname: "/chat/example", search: "?__cap_context_debug_placement=1" }
+    { pathname: "/chat/example" }
   );
   mic.style.transition = "transform 150ms ease";
   mic.style.transform = "scale(0.96)";
@@ -2357,23 +2306,6 @@ test("Claude logs the remounted Mic reservation before and after the mutation", 
   assert.equal(mic.style.transition, "transform 150ms ease");
   assert.equal(mic.style.willChange, "transform");
   assert.equal(hooks.animationFrameCallbacks.length, 1);
-  const [prefix, diagnostic] = hooks.debugLogs.at(-1);
-  assert.equal(prefix, "[Cap Context][Claude controls]");
-  const beforeMic = diagnostic.before.controls.find((control) => control.kind === "mic");
-  const afterMic = diagnostic.after.controls.find((control) => control.kind === "mic");
-  assert.equal(beforeMic.reserved, true);
-  assert.equal(beforeMic.offset, 0);
-  assert.equal(beforeMic.reservationTargetTranslate, "-52px 0px");
-  assert.equal(beforeMic.inlineTransform, "scale(0.96)");
-  assert.equal(afterMic.reserved, true);
-  assert.equal(afterMic.offset, -52);
-  assert.equal(afterMic.inlineTranslate, "");
-  assert.equal(afterMic.reservationTargetTranslate, "-52px 0px");
-  assert.equal(afterMic.inlineTransform, "scale(0.96)");
-  assert.equal(afterMic.inlineTransition, "transform 150ms ease");
-  assert.equal(diagnostic.mutations[0].type, "childList");
-  assert.equal(diagnostic.mutations[0].added.length, 1);
-  assert.equal(diagnostic.mutations[0].removed.length, 1);
 });
 
 test("Claude preserves native control animation during a populated-editor Voice mismatch", () => {

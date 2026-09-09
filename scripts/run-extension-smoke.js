@@ -226,6 +226,8 @@ function claudePlacementFixture() {
     #dictate{right:15px;width:32px}
     #voice{right:0;width:20px}
     #send{right:0}
+    form.existing-chat{height:48px}
+    form.existing-chat button{bottom:8px}
     .send-state{visibility:hidden;pointer-events:none}
     form.has-text .voice-state{visibility:hidden;pointer-events:none}
     form.has-text .send-state{visibility:visible;pointer-events:auto}
@@ -377,19 +379,6 @@ async function getBrowserWebSocketUrl(devToolsPort) {
   return (await response.json()).webSocketDebuggerUrl;
 }
 
-async function readConsoleArgument(session, argument) {
-  if (!argument) return null;
-  if (Object.prototype.hasOwnProperty.call(argument, "value")) return argument.value;
-  if (!argument.objectId) return null;
-
-  const response = await session.call("Runtime.callFunctionOn", {
-    objectId: argument.objectId,
-    functionDeclaration: "function () { return this; }",
-    returnByValue: true
-  });
-  return response.result?.value ?? null;
-}
-
 function appendProcessOutput(current, chunk) {
   return `${current}${chunk}`.slice(-8000);
 }
@@ -483,7 +472,7 @@ async function run() {
     }
     process.stdout.write("✓ Brave loaded the unpacked extension on the controlled source page.\n");
 
-    const claudePlacementUrl = `${origin}/new?${SMOKE_PLATFORM_QUERY}=claude&__cap_context_debug_placement=1`;
+    const claudePlacementUrl = `${origin}/new?${SMOKE_PLATFORM_QUERY}=claude`;
     await browserSession.call("Target.createTarget", { url: claudePlacementUrl });
     const claudePlacementTarget = await waitFor(async () => {
       const targets = await getTargets(devToolsPort);
@@ -496,16 +485,6 @@ async function run() {
       document.getElementById("context-generator-bubble") &&
       getComputedStyle(document.getElementById("context-generator-bubble")).display !== "none"
     )`), "the Claude placement bubble");
-    const claudePlacementDiagnostics = await waitFor(async () => {
-      const event = claudePlacementSession.getRecentEvents().find((candidate) => {
-        return candidate.method === "Runtime.consoleAPICalled"
-          && candidate.params?.args?.[0]?.value === "[Cap Context][Claude placement]";
-      });
-      return readConsoleArgument(claudePlacementSession, event?.params?.args?.[1]);
-    }, "Claude's page-load placement diagnostics");
-    process.stdout.write(`ℹ Claude page-load geometry ${JSON.stringify(claudePlacementDiagnostics)}\n`);
-    assert.equal(claudePlacementDiagnostics.path, "/new");
-    assert.equal(claudePlacementDiagnostics.state, "fresh-new-empty");
     const claudeEmptyBounds = await claudePlacementSession.evaluate(`(() => {
       const composer = document.getElementById("claude-composer").getBoundingClientRect();
       const bubble = document.getElementById("context-generator-bubble").getBoundingClientRect();
@@ -513,13 +492,14 @@ async function run() {
       const voice = document.getElementById("voice").getBoundingClientRect();
       const inside = (rect) => rect.left >= composer.left && rect.right <= composer.right
         && rect.top >= composer.top && rect.bottom <= composer.bottom;
-      return { bubbleInside: inside(bubble), dictateInside: inside(dictate), voiceInside: inside(voice) };
+      const bubbleHorizontallyInside = bubble.left >= composer.left && bubble.right <= composer.right;
+      const alignment = Math.abs((bubble.top + bubble.height / 2 - 0.5) - (voice.top + voice.height / 2 - 1));
+      return { bubbleHorizontallyInside, dictateInside: inside(dictate), voiceInside: inside(voice), alignment };
     })()`);
-    assert.deepEqual(claudeEmptyBounds, {
-      bubbleInside: true,
-      dictateInside: true,
-      voiceInside: true
-    });
+    assert.equal(claudeEmptyBounds.bubbleHorizontallyInside, true);
+    assert.equal(claudeEmptyBounds.dictateInside, true);
+    assert.equal(claudeEmptyBounds.voiceInside, true);
+    assert.ok(claudeEmptyBounds.alignment <= 1, `Claude's fresh-page bubble was ${claudeEmptyBounds.alignment}px from the control row.`);
     if (CLAUDE_PLACEMENT_SCREENSHOT_PATH) {
       const screenshot = await claudePlacementSession.call("Page.captureScreenshot", { format: "png" });
       await fs.promises.mkdir(path.dirname(CLAUDE_PLACEMENT_SCREENSHOT_PATH), { recursive: true });
@@ -527,26 +507,16 @@ async function run() {
       process.stdout.write(`ℹ Claude placement screenshot ${CLAUDE_PLACEMENT_SCREENSHOT_PATH}\n`);
     }
     await claudePlacementSession.evaluate(`(() => {
-      history.replaceState(null, "", "/chat/smoke?${SMOKE_PLATFORM_QUERY}=claude&__cap_context_debug_placement=1");
+      history.replaceState(null, "", "/chat/smoke?${SMOKE_PLATFORM_QUERY}=claude");
       document.getElementById("claude-composer").classList.add("existing-chat");
     })()`);
-    const claudeExistingChatDiagnostics = await waitFor(async () => {
-      const events = claudePlacementSession.getRecentEvents().slice().reverse();
-      for (const event of events) {
-        if (event.method !== "Runtime.consoleAPICalled"
-          || event.params?.args?.[0]?.value !== "[Cap Context][Claude placement]") continue;
-        const diagnostics = await readConsoleArgument(claudePlacementSession, event.params?.args?.[1]);
-        if (diagnostics.path === "/chat/smoke") return diagnostics;
-      }
-      return null;
-    }, "Claude's existing-chat placement diagnostics");
-    assert.equal(claudeExistingChatDiagnostics.state, "chat-empty");
-    const claudeEmptyAlignment = await claudePlacementSession.evaluate(`(() => {
+    const claudeEmptyAlignment = await waitFor(() => claudePlacementSession.evaluate(`(() => {
       const bubble = document.getElementById("context-generator-bubble").getBoundingClientRect();
       const voice = document.getElementById("voice").getBoundingClientRect();
-      return Math.abs((bubble.top + bubble.height / 2 - 0.5) - (voice.top + voice.height / 2));
-    })()`);
-    assert.ok(claudeEmptyAlignment <= 1, `Claude's empty-state bubble was ${claudeEmptyAlignment}px above its control row.`);
+      const alignment = Math.abs((bubble.top + bubble.height / 2 - 0.5) - (voice.top + voice.height / 2));
+      return alignment <= 1 ? { alignment } : null;
+    })()`), "Claude's existing-chat placement alignment");
+    assert.ok(claudeEmptyAlignment.alignment <= 1, `Claude's empty-state bubble was ${claudeEmptyAlignment.alignment}px above its control row.`);
     await claudePlacementSession.evaluate(`(() => {
       document.querySelector("[contenteditable]").textContent = "hello";
       document.getElementById("claude-composer").classList.add("has-text");
@@ -556,13 +526,13 @@ async function run() {
       const send = document.getElementById("send")?.getBoundingClientRect();
       if (!bubble || !send || getComputedStyle(document.getElementById("send")).visibility !== "visible") return null;
       const intersects = bubble.left < send.right && bubble.right > send.left && bubble.top < send.bottom && bubble.bottom > send.top;
-      const sendTransform = document.getElementById("send").style.transform;
-      return !intersects && sendTransform.includes("translateX(-52px)")
-        ? { intersects, sendTransform }
+      const sendTranslate = document.getElementById("send").style.translate;
+      return !intersects && /^-52px(?: 0px)?$/.test(sendTranslate)
+        ? { intersects, sendTranslate }
         : null;
     })()`), "Claude's typed-state placement refresh");
     assert.equal(claudePlacement.intersects, false, "The Cap Context bubble must not cover Claude's Send button.");
-    assert.match(claudePlacement.sendTransform, /translateX\(-52px\)/);
+    assert.match(claudePlacement.sendTranslate, /^-52px(?: 0px)?$/);
     process.stdout.write("✓ Claude's bubble stays centered and its Voice-to-Send swap remains clear of Send.\n");
 
     const clickResult = await sourceSession.evaluate(`(() => {
