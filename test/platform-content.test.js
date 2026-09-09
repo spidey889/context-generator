@@ -1802,16 +1802,22 @@ test("Firefox contenteditable paste preserves line breaks without treating text 
 
 test("startup clears stale Claude placement transform reservations", () => {
   const shiftedActionRow = new FakeElement({
-    attrs: { "data-context-generator-original-transform": "" }
+    attrs: {
+      "data-context-generator-original-transform": "",
+      "data-context-generator-original-transition": "transform 150ms ease"
+    }
   });
   shiftedActionRow.style.transform = "translateX(-56px)";
+  shiftedActionRow.style.transition = "none";
   shiftedActionRow.style.willChange = "transform";
 
   loadPlatformContent([shiftedActionRow], "claude.ai");
 
   assert.equal(shiftedActionRow.style.transform, "");
+  assert.equal(shiftedActionRow.style.transition, "transform 150ms ease");
   assert.equal(shiftedActionRow.style.willChange, "");
   assert.equal(shiftedActionRow.hasAttribute("data-context-generator-original-transform"), false);
+  assert.equal(shiftedActionRow.hasAttribute("data-context-generator-original-transition"), false);
 });
 
 test("Claude bubble fills the inline slot to the right of voice mode", () => {
@@ -2294,6 +2300,7 @@ test("Claude shifts a remounted Mic synchronously before the full placement fram
     attrs: { "aria-label": "Microphone" },
     rect: { left: 844, right: 880, top: 166, bottom: 202, width: 36, height: 36 }
   });
+  mic.style.transition = "transform 150ms ease";
   composer.children = [input, send];
   [input, send].forEach((element) => { element.parentElement = composer; });
 
@@ -2319,6 +2326,7 @@ test("Claude shifts a remounted Mic synchronously before the full placement fram
     removedNodes: [send]
   }]);
   assert.equal(mic.style.transform, "translateX(-52px)");
+  assert.equal(mic.style.transition, "none");
   assert.equal(hooks.animationFrameCallbacks.length, 1);
 });
 

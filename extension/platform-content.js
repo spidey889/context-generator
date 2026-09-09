@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-09-09-claude-control-remount-v10";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-09-09-claude-control-snap-v11";
   const BUBBLE_ID = "context-generator-bubble";
   const OVERLAY_ID = "context-generator-overlay";
   const HANDOFF_SCRIM_ID = "context-generator-handoff-scrim";
@@ -508,6 +508,10 @@
       element.style.transform = element.getAttribute("data-context-generator-original-transform") || "";
       element.style.willChange = "";
       element.removeAttribute("data-context-generator-original-transform");
+      if (element.hasAttribute("data-context-generator-original-transition")) {
+        element.style.transition = element.getAttribute("data-context-generator-original-transition") || "";
+        element.removeAttribute("data-context-generator-original-transition");
+      }
     });
 
     document.querySelectorAll("[data-context-generator-original-overflow]").forEach((element) => {
@@ -7804,10 +7808,18 @@
       if (!element.hasAttribute("data-context-generator-original-transform")) {
         element.setAttribute("data-context-generator-original-transform", element.style.transform || "");
       }
+      if (!element.hasAttribute("data-context-generator-original-transition")) {
+        element.setAttribute("data-context-generator-original-transition", element.style.transition || "");
+      }
 
       const originalTransform = element.getAttribute("data-context-generator-original-transform") || "";
       const offset = offsetEntries.get(element) || 0;
       const targetTransform = `${originalTransform} translateX(${offset}px)`.trim();
+      // Claude applies its own transform transition to remounted Mic/Send
+      // controls. The reserved slot must snap into place before first paint.
+      if (element.style.transition !== "none") {
+        element.style.transition = "none";
+      }
       if (element.style.transform !== targetTransform) {
         element.style.transform = targetTransform;
       }
@@ -7936,6 +7948,10 @@
     element.style.transform = originalTransform;
     element.style.willChange = "";
     element.removeAttribute("data-context-generator-original-transform");
+    if (element.hasAttribute("data-context-generator-original-transition")) {
+      element.style.transition = element.getAttribute("data-context-generator-original-transition") || "";
+      element.removeAttribute("data-context-generator-original-transition");
+    }
   }
 
   function restoreReservedOverflow(element) {
