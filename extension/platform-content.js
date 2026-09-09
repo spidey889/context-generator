@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-09-09-picker-handoff-details-v17";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-09-09-static-destination-tiles-v18";
   const BUBBLE_ID = "context-generator-bubble";
   const OVERLAY_ID = "context-generator-overlay";
   const HANDOFF_SCRIM_ID = "context-generator-handoff-scrim";
@@ -4683,7 +4683,6 @@
     delete sheet.dataset.contextGeneratorPositionLocked;
     positionDestinationSheet();
     resetDestinationTiles(sheet);
-    animateDestinationTiles(sheet);
     warmDestinationConnections();
     const bubble = document.getElementById(BUBBLE_ID);
     if (bubble) {
