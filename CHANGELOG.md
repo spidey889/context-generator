@@ -23,6 +23,10 @@ Write entries in past tense and describe the resulting behavior, not every imple
 
 ## Unreleased on `master` after extension 1.4.2
 
+### 2026-09-09
+
+- Reworked the orb-to-picker-to-handoff motion as one continuous interaction: the picker now has clearer open/close state and focus behavior, destination selection holds while alternatives recede, the handoff surface expands from the picker's measured position, the detached orb leaves during transfer, and handoff/error exits animate instead of disappearing abruptly. Reduced-motion behavior remains immediate.
+
 ### 2026-09-08
 
 - Retained the standalone skill, legacy homepage, and its dated demo video as non-production reference artifacts by owner request; the legacy page now reuses the extension's canonical logo assets instead of restoring duplicate logo files.

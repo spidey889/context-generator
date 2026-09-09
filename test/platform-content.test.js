@@ -471,6 +471,47 @@ test("handoff progress state advances deterministically through the three real s
   assert.equal(hooks.getHandoffProgressStatusText("paste", "done", "ChatGPT"), "Pasted into ChatGPT");
 });
 
+test("picker selection morphs into handoff and both surfaces keep animated exits", () => {
+  const source = fs.readFileSync(SOURCE_PATH, "utf8");
+  const transitionStart = source.indexOf("async function transitionDestinationSheetToHandoff()");
+  const transitionEnd = source.indexOf("function warmDestinationConnections()", transitionStart);
+  const transitionSource = source.slice(transitionStart, transitionEnd);
+  const overlayStart = source.indexOf("function showOverlay(destinationId = null)");
+  const overlayEnd = source.indexOf("function isHandoffOverlayVisible()", overlayStart);
+  const overlaySource = source.slice(overlayStart, overlayEnd);
+
+  assert.ok(transitionStart >= 0 && transitionEnd > transitionStart);
+  assert.match(transitionSource, /pendingHandoffOrigin = sheetRect/);
+  assert.match(transitionSource, /hideDestinationSheet\(\{ preserveBackdrop: true, restoreFocus: false \}\)/);
+  assert.match(overlaySource, /overlay\.style\.transform = getHandoffStartTransform\(overlay\)/);
+  assert.match(overlaySource, /bubble\.style\.opacity = "0"/);
+  assert.match(overlaySource, /handoffOverlayHideTimer = window\.setTimeout/);
+  assert.match(overlaySource, /HANDOFF_OVERLAY_EXIT_MS/);
+  assert.ok(
+    overlaySource.indexOf('overlay.style.opacity = "0"') < overlaySource.indexOf('overlay.style.display = "none"'),
+    "handoff should begin its visual exit before display is removed"
+  );
+});
+
+test("destination picker exposes dialog state and restores the trigger on dismissal", () => {
+  const source = fs.readFileSync(SOURCE_PATH, "utf8");
+  const sheetStart = source.indexOf("function ensureDestinationSheet()");
+  const sheetEnd = source.indexOf("function ensureDestinationSheetBackdrop()", sheetStart);
+  const sheetSource = source.slice(sheetStart, sheetEnd);
+  const toggleStart = source.indexOf("function toggleDestinationSheet()");
+  const hideEnd = source.indexOf("function releaseDestinationSheetBackdrop()", toggleStart);
+  const toggleAndHideSource = source.slice(toggleStart, hideEnd);
+
+  assert.match(sheetSource, /sheet\.setAttribute\("aria-modal", "true"\)/);
+  assert.match(sheetSource, /sheet\.setAttribute\("aria-hidden", "true"\)/);
+  assert.match(sheetSource, /event\.key !== "Tab"/);
+  assert.match(sheetSource, /focusableTiles\[nextIndex\]\.focus/);
+  assert.match(toggleAndHideSource, /bubble\.setAttribute\("aria-expanded", "true"\)/);
+  assert.match(toggleAndHideSource, /sheet\.focus\?\.\(\{ preventScroll: true \}\)/);
+  assert.match(toggleAndHideSource, /document\.activeElement === bubble/);
+  assert.match(toggleAndHideSource, /bubble\.focus\?\.\(\{ preventScroll: true \}\)/);
+});
+
 test("Grok empty-state prompt is not counted or captured as a real message", () => {
   const emptyPrompt = new FakeElement({
     text: "What's on your mind?",

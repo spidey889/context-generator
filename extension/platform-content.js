@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-09-09-claude-diagnostics-cleanup-v15";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-09-09-picker-handoff-motion-v16";
   const BUBBLE_ID = "context-generator-bubble";
   const OVERLAY_ID = "context-generator-overlay";
   const HANDOFF_SCRIM_ID = "context-generator-handoff-scrim";
@@ -51,11 +51,12 @@
   const CLAUDE_MODEL_LEFT_NUDGE = 48;
   const CLAUDE_SIDE_CONTROL_RIGHT_NUDGE = 52;
   const DESTINATION_SHEET_WIDTH = 352;
-  const DESTINATION_SHEET_CLOSED_TRANSFORM = "translate3d(0,8px,0) scale(0.985)";
-  const DESTINATION_SHEET_EXIT_MS = 160;
-  const DESTINATION_TRANSFER_PRESS_MS = 85;
-  const DESTINATION_HANDOFF_OVERLAP_MS = 95;
+  const DESTINATION_SHEET_CLOSED_TRANSFORM = "translate3d(0,12px,0) scale(0.96)";
+  const DESTINATION_SHEET_EXIT_MS = 200;
+  const DESTINATION_TRANSFER_PRESS_MS = 150;
+  const DESTINATION_HANDOFF_OVERLAP_MS = 40;
   const HANDOFF_OVERLAY_CLOSED_TRANSFORM = "translate3d(-50%,-50%,0) translateY(10px) scale(0.985)";
+  const HANDOFF_OVERLAY_EXIT_MS = 220;
   // Covers the 210-second summary ceiling plus one prepared and one fresh paste attempt.
   const RUNNING_AUTO_RESET_MS = 360000;
   const DEFAULT_MAX_COMPOSER_WIDTH = 1320;
@@ -442,6 +443,9 @@
   let destinationSheetAnimationFrame = null;
   let destinationSheetHideTimer = null;
   let destinationBackdropHideTimer = null;
+  let pendingHandoffOrigin = null;
+  let handoffOverlayHideTimer = null;
+  let handoffScrimHideTimer = null;
   let floatingButtonFrame = null;
   let floatingButtonObserver = null;
   let grokPlacementResizeObserver = null;
@@ -3350,6 +3354,8 @@
     bubble.type = "button";
     bubble.title = DESTINATION_TITLE_TEXT;
     bubble.setAttribute("aria-label", DESTINATION_TITLE_TEXT);
+    bubble.setAttribute("aria-expanded", "false");
+    bubble.setAttribute("aria-controls", DESTINATION_SHEET_ID);
     bubble.dataset.contextGeneratorOwned = "true";
     bubble.style.cssText = [
       "display:none",
@@ -3376,7 +3382,7 @@
       "contain:layout style paint",
       "transform:translate3d(0,0,0) scale(1)",
       "transform-origin:center",
-      "transition:filter 0.15s ease,transform 0.12s cubic-bezier(0.16,1,0.3,1)",
+      "transition:opacity 0.2s ease,filter 0.18s ease,transform 0.24s cubic-bezier(0.22,1,0.36,1)",
       "pointer-events:auto"
     ].join(";");
 
@@ -4257,8 +4263,8 @@
       @keyframes contextGeneratorTileIn {
         from {
           opacity: 0;
-          transform: translate3d(0, 3px, 0) scale(0.992);
-          filter: brightness(0.96);
+          transform: translate3d(0, 7px, 0) scale(0.97);
+          filter: brightness(0.9);
         }
         to {
           opacity: 1;
@@ -4274,7 +4280,24 @@
       }
 
       .context-generator-destination-tile.context-generator-tile-enter {
-        animation: contextGeneratorTileIn 0.18s cubic-bezier(0.16, 1, 0.3, 1) both;
+        animation: contextGeneratorTileIn 0.26s cubic-bezier(0.22, 1, 0.36, 1) both;
+      }
+
+      #${DESTINATION_SHEET_ID}[data-context-generator-phase="choosing"] .context-generator-destination-tile {
+        pointer-events: none;
+      }
+
+      #${DESTINATION_SHEET_ID}[data-context-generator-phase="choosing"] .context-generator-destination-tile[data-context-generator-dismissed="true"] {
+        opacity: 0.28;
+        transform: translate3d(0,2px,0) scale(0.975);
+        filter: saturate(0.55);
+      }
+
+      #${DESTINATION_SHEET_ID}[data-context-generator-phase="choosing"] .context-generator-destination-tile[data-context-generator-selected="true"] {
+        border-color: rgba(210,190,241,0.62) !important;
+        background: linear-gradient(135deg,rgba(155,123,215,0.2),rgba(255,255,255,0.055)) !important;
+        box-shadow: inset 0 1px 0 rgba(255,255,255,0.11),0 12px 30px rgba(0,0,0,0.22),0 0 28px rgba(141,108,207,0.16) !important;
+        transform: translate3d(0,0,0) scale(0.985) !important;
       }
 
       .context-generator-tile-aura {
@@ -4344,6 +4367,10 @@
         .context-generator-tile-spinner {
           animation: none;
         }
+
+        #${DESTINATION_SHEET_ID} .context-generator-destination-tile {
+          transition: none !important;
+        }
       }
     `;
     (document.head || document.documentElement).appendChild(style);
@@ -4360,6 +4387,9 @@
     sheet.id = DESTINATION_SHEET_ID;
     sheet.dataset.contextGeneratorOwned = "true";
     sheet.setAttribute("role", "dialog");
+    sheet.setAttribute("aria-modal", "true");
+    sheet.setAttribute("aria-hidden", "true");
+    sheet.tabIndex = -1;
     sheet.setAttribute("aria-labelledby", "context-generator-destination-title");
     sheet.style.cssText = [
       "display:none",
@@ -4378,12 +4408,13 @@
       "max-height:calc(100vh - 20px)",
       "overflow-x:hidden",
       "overflow-y:auto",
+      "outline:none",
       "scrollbar-width:thin",
       "opacity:0",
       `transform:${DESTINATION_SHEET_CLOSED_TRANSFORM}`,
       "transform-origin:bottom right",
       "will-change:transform,opacity",
-      "transition:opacity 0.18s cubic-bezier(0.16,1,0.3,1), transform 0.22s cubic-bezier(0.16,1,0.3,1)"
+      "transition:opacity 0.2s ease, transform 0.3s cubic-bezier(0.22,1,0.36,1)"
     ].join(";");
 
     const header = document.createElement("div");
@@ -4446,7 +4477,7 @@
         "overflow:hidden",
         "isolation:isolate",
         "box-shadow:inset 0 1px 0 rgba(255,255,255,0.055),inset 0 -1px 0 rgba(0,0,0,0.3),0 8px 20px rgba(0,0,0,0.08)",
-        "transition:transform 0.16s cubic-bezier(0.16,1,0.3,1),border-color 0.16s ease,background 0.16s ease,box-shadow 0.16s ease"
+        "transition:opacity 0.18s ease,filter 0.18s ease,transform 0.24s cubic-bezier(0.22,1,0.36,1),border-color 0.18s ease,background 0.18s ease,box-shadow 0.18s ease"
       ].join(";");
 
       const aura = document.createElement("span");
@@ -4526,10 +4557,13 @@
         if (button.dataset.contextGeneratorLoading === "true") return;
         button.dataset.contextGeneratorLoading = "true";
         button.setAttribute("aria-busy", "true");
-        button.style.pointerEvents = "none";
+        sheet.dataset.contextGeneratorPhase = "choosing";
+        sheet.querySelectorAll(".context-generator-destination-tile").forEach((tile) => {
+          if (tile === button) tile.dataset.contextGeneratorSelected = "true";
+          else tile.dataset.contextGeneratorDismissed = "true";
+        });
         spinner.style.display = "block";
         detail.textContent = "Opening...";
-        button.style.transform = "scale(0.985)";
         startDestinationTransfer(option.id);
       });
 
@@ -4566,7 +4600,23 @@
     document.body.appendChild(sheet);
     document.addEventListener("click", hideDestinationSheet);
     document.addEventListener("keydown", (event) => {
-      if (event.key === "Escape") hideDestinationSheet();
+      if (!isDestinationSheetOpen()) return;
+      if (event.key === "Escape") {
+        event.preventDefault();
+        hideDestinationSheet();
+        return;
+      }
+      if (event.key !== "Tab") return;
+
+      const focusableTiles = [...sheet.querySelectorAll(".context-generator-destination-tile")]
+        .filter((tile) => !tile.disabled && tile.dataset.contextGeneratorLoading !== "true");
+      if (focusableTiles.length === 0) return;
+      const focusedIndex = focusableTiles.indexOf(document.activeElement);
+      const nextIndex = event.shiftKey
+        ? (focusedIndex <= 0 ? focusableTiles.length - 1 : focusedIndex - 1)
+        : (focusedIndex < 0 || focusedIndex === focusableTiles.length - 1 ? 0 : focusedIndex + 1);
+      event.preventDefault();
+      focusableTiles[nextIndex].focus?.({ preventScroll: true });
     });
 
     return sheet;
@@ -4591,7 +4641,7 @@
       "-webkit-backdrop-filter:blur(7px) saturate(0.86)",
       "opacity:0",
       "will-change:opacity",
-      "transition:opacity 0.18s cubic-bezier(0.16,1,0.3,1)"
+      "transition:opacity 0.24s ease"
     ].join(";");
     backdrop.addEventListener("click", (event) => {
       event.preventDefault();
@@ -4621,6 +4671,7 @@
     backdrop.style.display = "block";
     backdrop.style.pointerEvents = "auto";
     backdrop.style.opacity = "0";
+    sheet.setAttribute("aria-hidden", "false");
     sheet.style.opacity = "0";
     sheet.style.transform = DESTINATION_SHEET_CLOSED_TRANSFORM;
     sheet.style.display = "block";
@@ -4629,10 +4680,17 @@
     resetDestinationTiles(sheet);
     animateDestinationTiles(sheet);
     warmDestinationConnections();
+    const bubble = document.getElementById(BUBBLE_ID);
+    if (bubble) {
+      bubble.setAttribute("aria-expanded", "true");
+      bubble.style.filter = "brightness(1.14) drop-shadow(0 3px 9px rgba(92,57,145,0.38))";
+      bubble.style.transform = "translate3d(0,0,0) scale(0.94)";
+    }
     if (window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) {
       backdrop.style.opacity = "1";
       sheet.style.opacity = "1";
       sheet.style.transform = "translate3d(0,0,0) scale(1)";
+      sheet.focus?.({ preventScroll: true });
       return;
     }
     destinationSheetAnimationFrame = requestAnimationFrame(() => {
@@ -4640,10 +4698,18 @@
       sheet.style.opacity = "1";
       sheet.style.transform = "translate3d(0,0,0) scale(1)";
       destinationSheetAnimationFrame = null;
+      window.setTimeout(() => {
+        if (
+          isDestinationSheetOpen()
+          && (document.activeElement === bubble || document.activeElement === document.body)
+        ) {
+          sheet.focus?.({ preventScroll: true });
+        }
+      }, 180);
     });
   }
 
-  function hideDestinationSheet({ immediate = false, preserveBackdrop = false } = {}) {
+  function hideDestinationSheet({ immediate = false, preserveBackdrop = false, restoreFocus = true } = {}) {
     const sheet = document.getElementById(DESTINATION_SHEET_ID);
     const backdrop = document.getElementById(DESTINATION_SHEET_BACKDROP_ID);
     const reducedMotion = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
@@ -4652,6 +4718,7 @@
     clearTimeout(destinationSheetHideTimer);
     destinationSheetHideTimer = null;
     if (sheet) {
+      sheet.setAttribute("aria-hidden", "true");
       if (destinationSheetAnimationFrame) {
         cancelAnimationFrame(destinationSheetAnimationFrame);
         destinationSheetAnimationFrame = null;
@@ -4671,6 +4738,18 @@
 
     if (!preserveBackdrop) {
       releaseDestinationSheetBackdrop({ immediate });
+    }
+
+    const bubble = document.getElementById(BUBBLE_ID);
+    if (bubble) {
+      bubble.setAttribute("aria-expanded", "false");
+      if (restoreFocus) {
+        bubble.style.filter = "none";
+        bubble.style.transform = "translate3d(0,0,0) scale(1)";
+        if (!isRunning) {
+          window.setTimeout(() => bubble.focus?.({ preventScroll: true }), shouldAnimate ? DESTINATION_SHEET_EXIT_MS : 0);
+        }
+      }
     }
   }
 
@@ -4695,14 +4774,25 @@
 
   async function transitionDestinationSheetToHandoff() {
     if (window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) {
-      hideDestinationSheet({ immediate: true });
+      pendingHandoffOrigin = null;
+      hideDestinationSheet({ immediate: true, restoreFocus: false });
       return;
     }
 
-    // Let the pressed tile register, then overlap the sheet exit with the
-    // handoff entrance so the user sees one continuous transition.
+    // Preserve the picker's on-screen geometry so the larger handoff surface
+    // can expand from the same place instead of popping into the viewport center.
     await delay(DESTINATION_TRANSFER_PRESS_MS);
-    hideDestinationSheet({ preserveBackdrop: true });
+    const sheet = document.getElementById(DESTINATION_SHEET_ID);
+    const sheetRect = sheet?.getBoundingClientRect?.();
+    pendingHandoffOrigin = sheetRect
+      ? {
+          centerX: sheetRect.left + sheetRect.width / 2,
+          centerY: sheetRect.top + sheetRect.height / 2,
+          width: sheetRect.width,
+          height: sheetRect.height
+        }
+      : null;
+    hideDestinationSheet({ preserveBackdrop: true, restoreFocus: false });
     await delay(DESTINATION_HANDOFF_OVERLAP_MS);
   }
 
@@ -4788,10 +4878,13 @@
   }
 
   function resetDestinationTiles(sheet) {
+    delete sheet.dataset.contextGeneratorPhase;
     sheet.querySelectorAll(".context-generator-destination-tile").forEach((tile) => {
       const accent = tile.dataset.contextGeneratorAccent || "#ffffff";
       const aura = tile.querySelector(".context-generator-tile-aura");
       tile.dataset.contextGeneratorLoading = "false";
+      delete tile.dataset.contextGeneratorSelected;
+      delete tile.dataset.contextGeneratorDismissed;
       tile.removeAttribute("aria-busy");
       tile.style.pointerEvents = "";
       tile.style.background = "linear-gradient(180deg,rgba(255,255,255,0.05),rgba(255,255,255,0.022))";
@@ -4882,7 +4975,7 @@
         "background:rgba(7,6,10,0.38)",
         "backdrop-filter:blur(4px) saturate(0.84)",
         "opacity:0",
-        "transition:opacity 180ms cubic-bezier(0.16,1,0.3,1)"
+        "transition:opacity 240ms ease"
       ].join(";");
       document.body.appendChild(scrim);
     }
@@ -4891,6 +4984,9 @@
       const overlay = document.createElement("div");
       overlay.id = OVERLAY_ID;
       overlay.dataset.contextGeneratorOwned = "true";
+      overlay.setAttribute("role", "status");
+      overlay.setAttribute("aria-live", "polite");
+      overlay.setAttribute("aria-hidden", "true");
       overlay.style.cssText = [
         "display:none",
         "position:fixed",
@@ -4919,7 +5015,7 @@
         "font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif",
         "letter-spacing:0",
         "will-change:transform,opacity",
-        "transition:opacity 0.18s cubic-bezier(0.16,1,0.3,1), transform 0.22s cubic-bezier(0.16,1,0.3,1)"
+        "transition:opacity 0.24s ease, transform 0.36s cubic-bezier(0.22,1,0.36,1)"
       ].join(";");
 
       const glow = document.createElement("div");
@@ -5392,14 +5488,21 @@
     const bubble = document.getElementById(BUBBLE_ID);
 
     if (overlay) {
+      clearTimeout(handoffOverlayHideTimer);
+      clearTimeout(handoffScrimHideTimer);
+      handoffOverlayHideTimer = null;
+      handoffScrimHideTimer = null;
       const destinationName = getPlatform(destinationId)?.name || "destination";
       overlay.dataset.contextGeneratorDestinationName = destinationName;
+      overlay.setAttribute("aria-hidden", "false");
+      overlay.setAttribute("aria-busy", "true");
       setHandoffProgress("capture", "active", destinationName);
       startHandoffCountdown();
       overlay.classList.remove("context-generator-handoff-entering");
       overlay.style.opacity = "0";
-      overlay.style.transform = HANDOFF_OVERLAY_CLOSED_TRANSFORM;
       overlay.style.display = "flex";
+      overlay.style.transform = getHandoffStartTransform(overlay);
+      pendingHandoffOrigin = null;
       if (scrim) {
         scrim.style.opacity = "0";
         scrim.style.display = "block";
@@ -5421,32 +5524,73 @@
 
     if (bubble) {
       bubble.disabled = true;
-      bubble.style.opacity = "0.5";
+      bubble.setAttribute("aria-expanded", "false");
+      bubble.style.opacity = "0";
+      bubble.style.transform = "translate3d(0,0,0) scale(0.82)";
       bubble.style.cursor = "not-allowed";
+      bubble.style.pointerEvents = "none";
     }
   }
 
-  function hideOverlay() {
+  function getHandoffStartTransform(overlay) {
+    if (!pendingHandoffOrigin) return HANDOFF_OVERLAY_CLOSED_TRANSFORM;
+
+    const finalCenterX = window.innerWidth / 2;
+    const finalCenterY = window.innerHeight * 0.47;
+    const overlayWidth = overlay.offsetWidth || 580;
+    const widthRatio = pendingHandoffOrigin.width / overlayWidth;
+    const scale = Math.max(0.72, Math.min(0.9, widthRatio));
+    const offsetX = Math.round(pendingHandoffOrigin.centerX - finalCenterX);
+    const offsetY = Math.round(pendingHandoffOrigin.centerY - finalCenterY);
+    return `translate3d(calc(-50% + ${offsetX}px),calc(-50% + ${offsetY}px),0) scale(${scale.toFixed(3)})`;
+  }
+
+  function hideOverlay({ immediate = false } = {}) {
     const overlay = document.getElementById(OVERLAY_ID);
     const scrim = document.getElementById(HANDOFF_SCRIM_ID);
     const bubble = document.getElementById(BUBBLE_ID);
+    const reducedMotion = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
+    const shouldAnimate = !immediate && !reducedMotion;
 
     stopHandoffCountdown();
     stopHandoffLiveProgress();
+    clearTimeout(handoffOverlayHideTimer);
+    clearTimeout(handoffScrimHideTimer);
+    handoffOverlayHideTimer = null;
+    handoffScrimHideTimer = null;
     if (overlay) {
       overlay.classList.remove("context-generator-handoff-entering");
+      overlay.setAttribute("aria-hidden", "true");
+      overlay.setAttribute("aria-busy", "false");
       overlay.style.opacity = "0";
       overlay.style.transform = HANDOFF_OVERLAY_CLOSED_TRANSFORM;
-      overlay.style.display = "none";
+      if (shouldAnimate && overlay.style.display === "flex") {
+        handoffOverlayHideTimer = window.setTimeout(() => {
+          overlay.style.display = "none";
+          handoffOverlayHideTimer = null;
+        }, HANDOFF_OVERLAY_EXIT_MS);
+      } else {
+        overlay.style.display = "none";
+      }
     }
     if (scrim) {
       scrim.style.opacity = "0";
-      scrim.style.display = "none";
+      if (shouldAnimate && scrim.style.display === "block") {
+        handoffScrimHideTimer = window.setTimeout(() => {
+          scrim.style.display = "none";
+          handoffScrimHideTimer = null;
+        }, HANDOFF_OVERLAY_EXIT_MS);
+      } else {
+        scrim.style.display = "none";
+      }
     }
     if (bubble) {
       bubble.disabled = false;
       bubble.style.opacity = "1";
+      bubble.style.filter = "none";
+      bubble.style.transform = "translate3d(0,0,0) scale(1)";
       bubble.style.cursor = "pointer";
+      bubble.style.pointerEvents = "auto";
     }
   }
 
