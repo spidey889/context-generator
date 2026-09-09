@@ -1,6 +1,6 @@
 # Claude Placement Logs and Debugging History
 
-This is a historical debugging record, not production logic or code to restore verbatim. The current behavior belongs in [`LOGIC.md`](../../LOGIC.md); verify this note against current code before reusing any technique.
+This is a historical debugging record, not production logic or code to restore verbatim. The current behavior belongs in [`LOGIC.md`](../../LOGIC.md); verify this note against current code before reusing any technique. The latest verified composer hierarchy is recorded separately in [`claude-last-known-dom.md`](claude-last-known-dom.md).
 
 ## Incident summary
 
