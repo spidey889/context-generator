@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-09-09-static-destination-tiles-v18";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-09-09-restored-transfer-copy-v19";
   const BUBBLE_ID = "context-generator-bubble";
   const OVERLAY_ID = "context-generator-overlay";
   const HANDOFF_SCRIM_ID = "context-generator-handoff-scrim";
@@ -61,7 +61,7 @@
   const RUNNING_AUTO_RESET_MS = 360000;
   const DEFAULT_MAX_COMPOSER_WIDTH = 1320;
   const DESTINATION_TITLE_TEXT = "Where to continue?";
-  const DESTINATION_HELPER_TEXT = "Pastes into the input — you review before sending";
+  const DESTINATION_HELPER_TEXT = "Context goes straight into the input box";
   const ONBOARDING_STORAGE_KEY = "context-generator-onboarding-dismissed-v2";
   const ONBOARDING_TITLE_TEXT = "Transfer chat context";
   const ONBOARDING_BODY_TEXT = "From this button.";
@@ -142,7 +142,7 @@
   const HANDOFF_COUNTDOWN_ID = "context-generator-handoff-countdown";
   const HANDOFF_COUNTDOWN_FIXED_MS = 40000;
   const HANDOFF_REASSURANCE_ID = "context-generator-handoff-reassurance";
-  const HANDOFF_REASSURANCE_TEXT = "Still working — your context is safe";
+  const HANDOFF_REASSURANCE_TEXT = "Almost done, don't cancel now";
   // Stage completion still comes only from real pipeline marks. In-stage line motion is display-only:
   // capture reads the sweep's existing scroll diagnostics, while summary creeps below completion.
   const HANDOFF_STAGES = [

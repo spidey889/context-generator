@@ -514,11 +514,11 @@ test("destination picker exposes dialog state and restores the trigger on dismis
   assert.match(toggleAndHideSource, /bubble\.focus\?\.\(\{ preventScroll: true \}\)/);
 });
 
-test("picker and handoff microcopy stays calm, transparent, and deliberately approximate", () => {
+test("picker and handoff microcopy keeps the direct transfer guidance", () => {
   const source = fs.readFileSync(SOURCE_PATH, "utf8");
 
-  assert.match(source, /Pastes into the input — you review before sending/);
-  assert.match(source, /Still working — your context is safe/);
+  assert.match(source, /Context goes straight into the input box/);
+  assert.match(source, /Almost done, don't cancel now/);
   assert.match(source, /countdown\.textContent = `~\$\{Math\.max/);
   assert.doesNotMatch(source, /detail\.textContent = "Opening\.\.\."/);
   assert.match(source, /overlay\.setAttribute\("role", "group"\)/);
