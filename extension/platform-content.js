@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-09-09-claude-control-snap-v11";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-09-09-claude-control-debug-v12";
   const BUBBLE_ID = "context-generator-bubble";
   const OVERLAY_ID = "context-generator-overlay";
   const HANDOFF_SCRIM_ID = "context-generator-handoff-scrim";
@@ -466,6 +466,9 @@
   let chatGptPlacementMutationObserver = null;
   let chatGptPlacementMutationRoot = null;
   let lastClaudePlacementDebugSignature = "";
+  let lastClaudeControlDebugSignature = "";
+  let nextClaudeControlDebugId = 1;
+  const claudeControlDebugIds = new WeakMap();
   let lastClaudeStablePlacementAt = 0;
   let claudePlacementGraceTimer = null;
   let lastClaudePlacementPathname = window.location.pathname;
@@ -599,6 +602,7 @@
       getClaudeControlTargetOffset,
       reserveClaudeInlineBubbleSlot,
       maybeLogClaudePlacementDiagnostics,
+      getClaudeControlDebugSnapshot,
       getHandoffProgressState,
       getHandoffProgressStatusText
     });
@@ -6633,6 +6637,7 @@
         selectedAs: getClaudeDebugAnchorKind(placement.anchorControl)
       } : null,
       mic: describeClaudeDebugNode(controls.mic),
+      voice: describeClaudeDebugNode(controls.voice),
       send: describeClaudeDebugNode(controls.send),
       orb: describeClaudeDebugNode(bubble)
     };
@@ -6662,8 +6667,110 @@
     const findControl = (pattern) => candidates.find((element) => pattern.test(getElementLabel(element, true))) || null;
     return {
       mic: findControl(/\b(mic|microphone|dictat(?:e|ion))\b/i),
+      voice: findControl(/\b(voice|speak|speech|talk|audio)\b/i),
       send: findControl(/\b(send|submit)\b/i)
     };
+  }
+
+  function getClaudeControlDebugSnapshot(input, composerSurface) {
+    if (!composerSurface) return null;
+
+    const composerRect = composerSurface.getBoundingClientRect();
+    const placement = getClaudeBubblePlacement(composerRect, input, composerSurface);
+    const elements = Array.from(composerSurface.querySelectorAll("button, [role='button'], [tabindex='0']"))
+      .filter((element) => {
+        const label = getElementLabel(element, true);
+        return (
+          element.id !== BUBBLE_ID &&
+          !isContextGeneratorNode(element) &&
+          (/\b(model|sonnet|opus|haiku|send|submit|mic|microphone|voice|speak|speech|talk|dictation|audio)\b/.test(label) ||
+            element.hasAttribute("data-context-generator-original-transform"))
+        );
+      });
+
+    return {
+      anchorId: getClaudeControlDebugId(placement.anchorControl?.element),
+      anchorKind: placement.anchorControl ? getClaudeDebugAnchorKind(placement.anchorControl) : null,
+      inlineShift: placement.inlineShift || 0,
+      controls: elements.map(describeClaudeDebugControl)
+    };
+  }
+
+  function describeClaudeDebugControl(element) {
+    const label = getElementLabel(element, true);
+    let computedStyle = null;
+    try {
+      computedStyle = window.getComputedStyle(element);
+    } catch (_error) {
+      computedStyle = null;
+    }
+
+    return {
+      id: getClaudeControlDebugId(element),
+      kind: getClaudeDebugAnchorKind({ label }),
+      ...describeClaudeDebugNode(element, null, element.getAttribute?.("aria-label") || element.getAttribute?.("title") || ""),
+      reserved: element.hasAttribute("data-context-generator-original-transform"),
+      offset: reservedClaudeControlOffsets.get(element) || 0,
+      inlineTransform: element.style.transform || "",
+      originalTransform: element.getAttribute("data-context-generator-original-transform") || "",
+      computedTransform: computedStyle?.transform || "",
+      inlineTransition: element.style.transition || "",
+      computedTransition: computedStyle?.transition || "",
+      opacity: computedStyle?.opacity || "",
+      display: computedStyle?.display || "",
+      visibility: computedStyle?.visibility || ""
+    };
+  }
+
+  function getClaudeControlDebugId(element) {
+    if (!element) return null;
+    if (!claudeControlDebugIds.has(element)) {
+      claudeControlDebugIds.set(element, nextClaudeControlDebugId);
+      nextClaudeControlDebugId += 1;
+    }
+    return claudeControlDebugIds.get(element);
+  }
+
+  function maybeLogClaudeControlTransitionDiagnostics({ mutations, input, composerSurface, before, reservationApplied }) {
+    if (currentPlatform.id !== "claude" || !isClaudePlacementDebugEnabled()) return;
+
+    const diagnostics = {
+      path: window.location.pathname,
+      state: isClaudeComposerEmpty(input) ? "empty" : "populated",
+      mutations: mutations.map((mutation) => ({
+        type: mutation.type || (mutation.attributeName ? "attributes" : "childList"),
+        attribute: mutation.attributeName || "",
+        targetId: getClaudeControlDebugId(mutation.target),
+        added: describeClaudeDebugMutationNodes(mutation.addedNodes),
+        removed: describeClaudeDebugMutationNodes(mutation.removedNodes)
+      })),
+      reservationApplied,
+      before,
+      after: getClaudeControlDebugSnapshot(input, composerSurface)
+    };
+    const signature = JSON.stringify(diagnostics);
+    if (signature === lastClaudeControlDebugSignature) return;
+    lastClaudeControlDebugSignature = signature;
+    console.info("[Cap Context][Claude controls]", diagnostics);
+  }
+
+  function describeClaudeDebugMutationNodes(nodes) {
+    const changedControls = [];
+    Array.from(nodes || []).forEach((node) => {
+      if (!(node instanceof Element)) return;
+      const candidates = [node, ...Array.from(node.querySelectorAll?.("button, [role='button'], [tabindex='0']") || [])];
+      candidates.forEach((element) => {
+        const label = getElementLabel(element, true);
+        if (!/\b(send|submit|mic|microphone|voice|speak|speech|talk|dictation|audio)\b/.test(label)) return;
+        if (changedControls.some((control) => control.id === getClaudeControlDebugId(element))) return;
+        changedControls.push({
+          id: getClaudeControlDebugId(element),
+          kind: getClaudeDebugAnchorKind({ label }),
+          label: element.getAttribute?.("aria-label") || element.getAttribute?.("title") || ""
+        });
+      });
+    });
+    return changedControls;
   }
 
   function getClaudeDebugAnchorKind(anchorControl) {
@@ -7646,7 +7753,17 @@
     // paint once underneath the orb while the full update waits.
     claudePlacementMutationObserver = new MutationObserver((mutations) => {
       if (mutations.every(isOwnDomMutation)) return;
-      syncClaudeInlineReservationBeforePaint(input, composerSurface);
+      const debugBefore = isClaudePlacementDebugEnabled()
+        ? getClaudeControlDebugSnapshot(input, composerSurface)
+        : null;
+      const reservationApplied = syncClaudeInlineReservationBeforePaint(input, composerSurface);
+      maybeLogClaudeControlTransitionDiagnostics({
+        mutations,
+        input,
+        composerSurface,
+        before: debugBefore,
+        reservationApplied
+      });
       const attributes = mutations.map((mutation) => mutation.attributeName).filter(Boolean);
       scheduleFloatingButtonUpdate(`claude-attribute:${[...new Set(attributes)].sort().join("+") || "unknown"}`);
     });

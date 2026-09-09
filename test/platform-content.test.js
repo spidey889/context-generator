@@ -283,6 +283,9 @@ function loadPlatformContent(elements = [], hostname = "chatgpt.com", {
       return {
         display: element?.getAttribute?.("data-display") || "block",
         visibility: element?.getAttribute?.("data-visibility") || "visible",
+        opacity: element?.getAttribute?.("data-opacity") || "1",
+        transform: element?.style?.transform || "none",
+        transition: element?.style?.transition || "all 0s ease 0s",
         overflowY
       };
     },
@@ -1920,6 +1923,7 @@ test("Claude placement debug logs are opt-in, concise, and deduplicated", () => 
   assert.equal(diagnostic.anchor.label, "Voice mode");
   assert.equal(diagnostic.anchor.selectedAs, "voice-mode");
   assert.equal(diagnostic.mic.label, "Microphone");
+  assert.equal(diagnostic.voice.label, "Voice mode");
   assert.equal(diagnostic.send.label, "Send message");
   assert.equal(diagnostic.orb.connected, true);
   assert.equal(diagnostic.orb.visible, true);
@@ -2286,7 +2290,7 @@ test("Claude reserves a hidden mounted Send control before the Voice-to-Send swa
   assert.equal(placement.reservationControls.some((control) => control.element === send), true);
 });
 
-test("Claude shifts a remounted Mic synchronously before the full placement frame", () => {
+test("Claude logs the remounted Mic reservation before and after the mutation", () => {
   const composerRect = getClaudeComposerRect();
   const input = new FakeElement({ attrs: { contenteditable: "true", role: "textbox" } });
   const composer = new FakeElement({ tag: "form", rect: composerRect });
@@ -2304,7 +2308,11 @@ test("Claude shifts a remounted Mic synchronously before the full placement fram
   composer.children = [input, send];
   [input, send].forEach((element) => { element.parentElement = composer; });
 
-  const hooks = loadPlatformContent([input, composer, send, mic], "claude.ai", { pathname: "/chat/example" });
+  const hooks = loadPlatformContent(
+    [input, composer, send, mic],
+    "claude.ai",
+    { pathname: "/chat/example", search: "?__cap_context_debug_placement=1" }
+  );
   const sendPlacement = hooks.getClaudeBubblePlacement(composerRect, input, composer);
   hooks.reserveClaudeInlineBubbleSlot(
     sendPlacement.anchorControl,
@@ -2328,6 +2336,18 @@ test("Claude shifts a remounted Mic synchronously before the full placement fram
   assert.equal(mic.style.transform, "translateX(-52px)");
   assert.equal(mic.style.transition, "none");
   assert.equal(hooks.animationFrameCallbacks.length, 1);
+  const [prefix, diagnostic] = hooks.debugLogs.at(-1);
+  assert.equal(prefix, "[Cap Context][Claude controls]");
+  const beforeMic = diagnostic.before.controls.find((control) => control.kind === "mic");
+  const afterMic = diagnostic.after.controls.find((control) => control.kind === "mic");
+  assert.equal(beforeMic.reserved, false);
+  assert.equal(beforeMic.inlineTransform, "");
+  assert.equal(afterMic.reserved, true);
+  assert.equal(afterMic.inlineTransform, "translateX(-52px)");
+  assert.equal(afterMic.inlineTransition, "none");
+  assert.equal(diagnostic.mutations[0].type, "childList");
+  assert.equal(diagnostic.mutations[0].added.length, 1);
+  assert.equal(diagnostic.mutations[0].removed.length, 1);
 });
 
 test("Gemini bubble anchors to the left of the Flash selector", () => {

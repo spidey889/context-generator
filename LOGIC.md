@@ -242,7 +242,8 @@ Paste uses native setters/events plus stability checks. Firefox alone converts c
 - Model/profile routing: provider constants/budgets, prompts, Latest Run labels, evaluation expectations, this file, `memory.md`, `extension/README.md`.
 - Telemetry fields/stages/failures: source/background sanitizers, Vercel validator, Supabase validator, SQL constraints/functions, privacy wording, tests. Free-form telemetry fields are forbidden.
 - Latest Run receipt: producer, background expiry, bridge, analysis renderer, privacy wording, analysis tests.
-- Any content-script change: update `CONTENT_SCRIPT_LOAD_ID` so open tabs replace stale code, and retain stale-node/reservation cleanup. Current value: `platform-content-2026-09-09-claude-control-snap-v11`.
+- Claude placement diagnostics: enable `?__cap_context_debug_placement=1` and filter the page console for `Cap Context`. Placement records describe the selected surface/anchor; control-transition records correlate every mounted Mic/Voice/Send node across the mutation with stable debug IDs, before/after geometry, visibility, transforms, transitions, and reservation ownership. Diagnostics are session-scoped, concise, and deduplicated.
+- Any content-script change: update `CONTENT_SCRIPT_LOAD_ID` so open tabs replace stale code, and retain stale-node/reservation cleanup. Current value: `platform-content-2026-09-09-claude-control-debug-v12`.
 - Extension release: bump `extension/manifest.json`, rebuild the ZIP with `manifest.json` at its root, hash-compare every file against `extension/`, then test the unpacked folder in a new Brave window.
 
 ## Common Wrong Assumptions
