@@ -286,7 +286,7 @@
       padding: 16px;
       display: grid;
       grid-template-columns: repeat(2, minmax(0, 1fr));
-      grid-template-rows: auto repeat(3, minmax(0, 1fr));
+      grid-template-rows: auto minmax(120px, 0.75fr) minmax(280px, 1.6fr) minmax(110px, 0.75fr);
       gap: 10px;
     }
 
@@ -332,6 +332,12 @@
     .side-item--fallback {
       background: rgba(228, 192, 122, 0.065);
       border-color: rgba(228, 192, 122, 0.2);
+    }
+
+    .side-item--fallback strong {
+      font-size: 15px;
+      line-height: 1.55;
+      white-space: pre-line;
     }
 
     .side-item strong {
@@ -713,7 +719,7 @@
             </div>
             ${sideItem("Input check", integrity)}
             ${sideItem("Served by", formatBackendLabel(summary))}
-            ${sideItem("Fallback log", getModelFallbackLabel(summary), "fallback")}
+            ${sideItem("Model path", getModelFallbackLabel(summary), "fallback")}
             ${sideItem("Message turns", formatTurnSummary(capture), "turns")}
           </aside>
         </section>
@@ -820,26 +826,27 @@
       const skipped = Array.isArray(summary.geminiModelsSkipped)
         ? summary.geminiModelsSkipped
           .filter((entry) => entry?.model && entry?.status)
-          .map((entry) => `${formatModelDisplayName(entry.model)} skipped (${String(entry.status).replaceAll("_", " ")})`)
+          .map((entry) => `${formatModelDisplayName(entry.model)} — ${String(entry.status).replaceAll("_", " ")}`)
         : [];
       const servedIndex = servedModel ? tried.lastIndexOf(servedModel) : -1;
       const failedModels = servedIndex >= 0 ? tried.slice(0, servedIndex) : tried;
       const route = [
-        ...failedModels.map((model) => `${formatModelDisplayName(model)} failed`),
-        ...(servedModel ? [`${formatModelDisplayName(servedModel)} served`] : [])
-      ].join(" -> ");
-      const skippedLabel = skipped.length ? `Skipped today: ${skipped.join(", ")}. ` : "";
+        ...failedModels.map((model) => `${formatModelDisplayName(model)} — failed`),
+        ...(servedModel ? [`${formatModelDisplayName(servedModel)} — served`] : [])
+      ].join("\n");
+      const skippedLabel = skipped.length ? `Skipped today\n${skipped.join("\n")}\n\n` : "";
+      const routeLabel = route ? `Tried this run\n${route}` : "";
 
       if (summary.fallback?.used && servedModel) {
-        return `${skippedLabel}${route || `${formatModelDisplayName(servedModel)} served`}`;
+        return `${skippedLabel}${routeLabel || `${formatModelDisplayName(servedModel)} — served`}`;
       }
 
       if (tried.length > 1 && servedModel) {
-        return `${skippedLabel}${route}`;
+        return `${skippedLabel}${routeLabel}`;
       }
 
-      if (tried.length === 1) return `Not used - ${formatModelDisplayName(tried[0])} served first`;
-      if (summary.servedBy === "local-direct") return "Not used - tiny local-direct profile";
+      if (tried.length === 1) return `${formatModelDisplayName(tried[0])} served first\nNo fallback needed`;
+      if (summary.servedBy === "local-direct") return "Local fallback served\nNo provider model needed";
       return summary.modelReason && !/threshold\s+20000/i.test(summary.modelReason)
         ? summary.modelReason
         : "Not recorded - run a new transfer";
@@ -849,7 +856,9 @@
       if (!model) return "n/a";
       const geminiFlash = String(model).match(/^gemini-(\d+(?:\.\d+)?)-flash$/i);
       if (geminiFlash) return `Gemini ${geminiFlash[1]} Flash`;
-      if (model === "mistral-medium-2604") return "mistral-medium-3-5";
+      if (model === "mistral-medium-2604" || model === "mistral-medium-3-5") return "Mistral Medium 3.5";
+      if (model === "llama-3.1-8b-instant") return "Llama 3.1 8B Instant";
+      if (model === "local-direct") return "Local fallback";
       return model;
     }
 

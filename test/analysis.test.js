@@ -18,11 +18,11 @@ test("analysis receipt shows the served model and does not report it as failed",
 
   assert.match(ANALYSIS_SOURCE, /mini\("Served model"/);
   assert.doesNotMatch(ANALYSIS_SOURCE, /sideItem\("Primary model"/);
-  assert.match(ANALYSIS_SOURCE, /sideItem\("Fallback log", getModelFallbackLabel\(summary\), "fallback"\)/);
+  assert.match(ANALYSIS_SOURCE, /sideItem\("Model path", getModelFallbackLabel\(summary\), "fallback"\)/);
   assert.equal(formatModelDisplayName("gemini-3.8-flash"), "Gemini 3.8 Flash");
   assert.equal(
     getModelFallbackLabel(summary),
-    "Gemini 3.8 Flash failed -> Gemini 3.7 Flash failed -> Gemini 3.6 Flash served"
+    "Tried this run\nGemini 3.8 Flash — failed\nGemini 3.7 Flash — failed\nGemini 3.6 Flash — served"
   );
   assert.doesNotMatch(getModelFallbackLabel(summary), /Gemini 3\.6 Flash failed/);
 });
@@ -37,7 +37,36 @@ test("analysis receipt carries Gemini health skips from the backend", () => {
       geminiModelsSkipped: [{ model: "gemini-3.8-flash", status: "bad_mood" }],
       fallback: { used: true, model: "gemini-3.7-flash" }
     }),
-    "Skipped today: Gemini 3.8 Flash skipped (bad mood). Gemini 3.7 Flash served"
+    "Skipped today\nGemini 3.8 Flash — bad mood\n\nTried this run\nGemini 3.7 Flash — served"
+  );
+});
+
+test("analysis formats a long provider failure chain as readable lines", () => {
+  const { getModelFallbackLabel } = loadModelHelpers();
+  assert.match(ANALYSIS_SOURCE, /grid-template-rows: auto minmax\(120px, 0\.75fr\) minmax\(280px, 1\.6fr\)/);
+  assert.match(ANALYSIS_SOURCE, /white-space: pre-line/);
+  assert.equal(
+    getModelFallbackLabel({
+      model: "local-direct",
+      modelsTried: ["gemini-3.6-flash", "gemini-3.5-flash", "mistral-medium-2604", "llama-3.1-8b-instant", "local-direct"],
+      geminiModelsSkipped: [
+        { model: "gemini-3.8-flash", status: "exhausted" },
+        { model: "gemini-3.7-flash", status: "bad_mood" }
+      ],
+      fallback: { used: true, model: "local-direct" }
+    }),
+    [
+      "Skipped today",
+      "Gemini 3.8 Flash — exhausted",
+      "Gemini 3.7 Flash — bad mood",
+      "",
+      "Tried this run",
+      "Gemini 3.6 Flash — failed",
+      "Gemini 3.5 Flash — failed",
+      "Mistral Medium 3.5 — failed",
+      "Llama 3.1 8B Instant — failed",
+      "Local fallback — served"
+    ].join("\n")
   );
 });
 
