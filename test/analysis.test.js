@@ -57,6 +57,7 @@ test("analysis keeps cached metrics tied to the original generation", () => {
 
 test("analysis receipt keeps only useful non-duplicate details", () => {
   assert.match(ANALYSIS_SOURCE, /sideItem\("Input check", integrity\)/);
+  assert.match(ANALYSIS_SOURCE, /sideItem\("Message turns", formatTurnSummary\(capture\), "turns"\)/);
   assert.match(ANALYSIS_SOURCE, /Complete - all sent text received/);
   assert.doesNotMatch(ANALYSIS_SOURCE, /sideItem\("Route"/);
   assert.doesNotMatch(ANALYSIS_SOURCE, /sideItem\("Capture path"/);

@@ -1,5 +1,7 @@
 # Changelog
 
+- 2026-09-12: Restored the spacious Latest Run hero height after receipt cleanup and distributed the remaining receipt details evenly instead of shrinking both cards.
+
 - 2026-09-12: Simplified the analysis receipt by removing duplicate route, summary-source, capture-path, and expansion rows; renamed backend match to the clearer input check.
 
 - 2026-09-12: Polished the analysis Latest Run layout with a more balanced two-column receipt, clearer fallback emphasis, and calmer card hierarchy without changing receipt behavior.

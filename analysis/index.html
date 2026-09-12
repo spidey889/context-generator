@@ -167,6 +167,7 @@
       grid-template-columns: minmax(0, 1.25fr) minmax(280px, 0.75fr);
       gap: 18px;
       align-items: stretch;
+      min-height: clamp(520px, 68vh, 720px);
       margin-bottom: 18px;
     }
 
@@ -270,8 +271,8 @@
       padding: 16px;
       display: grid;
       grid-template-columns: repeat(2, minmax(0, 1fr));
+      grid-template-rows: auto repeat(3, minmax(0, 1fr));
       gap: 10px;
-      align-content: start;
     }
 
     .side-title {
@@ -299,6 +300,7 @@
 
     .side-item {
       display: grid;
+      align-content: center;
       gap: 6px;
       min-width: 0;
       padding: 12px;
@@ -307,8 +309,12 @@
       background: rgba(0, 0, 0, 0.18);
     }
 
-    .side-item--fallback {
+    .side-item--fallback,
+    .side-item--turns {
       grid-column: 1 / -1;
+    }
+
+    .side-item--fallback {
       background: rgba(244, 189, 80, 0.055);
     }
 
@@ -489,6 +495,15 @@
     @media (max-width: 860px) {
       .hero {
         grid-template-columns: 1fr;
+        min-height: 0;
+      }
+
+      .summary-band {
+        min-height: 360px;
+      }
+
+      .side-band {
+        grid-template-rows: auto;
       }
 
       .metrics {
@@ -521,7 +536,8 @@
         grid-template-columns: 1fr;
       }
 
-      .side-item--fallback {
+      .side-item--fallback,
+      .side-item--turns {
         grid-column: auto;
       }
 
@@ -682,7 +698,7 @@
             ${sideItem("Input check", integrity)}
             ${sideItem("Served by", formatBackendLabel(summary))}
             ${sideItem("Fallback log", getModelFallbackLabel(summary), "fallback")}
-            ${sideItem("Message turns", formatTurnSummary(capture))}
+            ${sideItem("Message turns", formatTurnSummary(capture), "turns")}
           </aside>
         </section>
 
