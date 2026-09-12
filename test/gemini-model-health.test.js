@@ -16,8 +16,8 @@ const {
 } = summarizeHandler.__test;
 
 const HEALTH_ENV = {
-  UPSTASH_REDIS_REST_URL: "https://health-test.upstash.io",
-  UPSTASH_REDIS_REST_TOKEN: "test-token"
+  KV_REST_API_URL: "https://health-test.upstash.io",
+  KV_REST_API_TOKEN: "test-token"
 };
 
 test("Pacific health day changes at the correct summer and winter midnights", () => {
@@ -25,6 +25,18 @@ test("Pacific health day changes at the correct summer and winter midnights", ()
   assert.equal(getPacificDateKey(new Date("2026-09-12T07:00:00Z")), "2026-09-12");
   assert.equal(getPacificDateKey(new Date("2026-12-12T07:59:59Z")), "2026-12-11");
   assert.equal(getPacificDateKey(new Date("2026-12-12T08:00:00Z")), "2026-12-12");
+});
+
+test("legacy Upstash variable names remain supported", async () => {
+  const health = createGeminiModelHealth({
+    env: {
+      UPSTASH_REDIS_REST_URL: "https://health-test.upstash.io",
+      UPSTASH_REDIS_REST_TOKEN: "test-token"
+    },
+    fetchImpl: createFakeUpstash().fetch
+  });
+
+  assert.equal((await health.beginAttempt("gemini-3.8-flash")).tracking, "shared");
 });
 
 test("a Gemini model becomes exhausted after 20 successes and resets on the next Pacific day", async () => {

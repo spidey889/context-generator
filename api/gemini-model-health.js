@@ -82,8 +82,8 @@ function createGeminiModelHealth(options = {}) {
   const now = options.now || (() => new Date());
   const fetchImpl = options.fetchImpl || ((...args) => fetch(...args));
   const explicitlyDisabled = String(env.GEMINI_MODEL_HEALTH_ENABLED || "").toLowerCase() === "false";
-  const redisUrl = String(env.UPSTASH_REDIS_REST_URL || "").replace(/\/+$/, "");
-  const redisToken = String(env.UPSTASH_REDIS_REST_TOKEN || "");
+  const redisUrl = String(env.KV_REST_API_URL || env.UPSTASH_REDIS_REST_URL || "").replace(/\/+$/, "");
+  const redisToken = String(env.KV_REST_API_TOKEN || env.UPSTASH_REDIS_REST_TOKEN || "");
   const configured = !explicitlyDisabled && redisUrl.startsWith("https://") && Boolean(redisToken);
   let warned = false;
 

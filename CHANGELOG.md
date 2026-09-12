@@ -25,7 +25,7 @@ Write entries in past tense and describe the resulting behavior, not every imple
 
 ### 2026-09-12
 
-- Added shared daily Gemini model health for Vercel deployments. With Upstash Redis connected, each model is skipped until the next Pacific day after 20 successful summaries, three consecutive failed attempts, or an explicit daily-quota response. Gemini rate limits now move directly to the next model instead of retrying the same one. The store contains model-only counters and timestamps, fails open to the existing provider chain, and has a documented Vercel setup and off switch.
+- Added shared daily Gemini model health for Vercel deployments. With Upstash Redis connected through its current `KV_REST_API_*` variables or older `UPSTASH_REDIS_REST_*` aliases, each model is skipped until the next Pacific day after 20 successful summaries, three consecutive failed attempts, or an explicit daily-quota response. Gemini rate limits now move directly to the next model instead of retrying the same one. The store contains model-only counters and timestamps, fails open to the existing provider chain, and has a documented Vercel setup and off switch.
 
 ### 2026-09-09
 

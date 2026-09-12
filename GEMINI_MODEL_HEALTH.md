@@ -29,7 +29,7 @@ Vercel Functions can scale across instances and deployments, so function memory 
 
 1. Open the Cap Context project in Vercel.
 2. Open **Storage** or **Marketplace**, add **Upstash Redis**, and connect it to this project.
-3. Confirm the Production environment receives both `UPSTASH_REDIS_REST_URL` and `UPSTASH_REDIS_REST_TOKEN`.
+3. Confirm the Production environment receives both `KV_REST_API_URL` and `KV_REST_API_TOKEN`. The older `UPSTASH_REDIS_REST_URL` and `UPSTASH_REDIS_REST_TOKEN` names are also accepted.
 4. Keep the token server-side. Never create a `NEXT_PUBLIC_` or extension copy of it.
 5. Redeploy Production after connecting the database; environment changes do not alter an already-running deployment.
 6. Confirm the Function logs contain `Gemini health updated` after a generated summary.
@@ -38,7 +38,7 @@ Official references: [Redis on Vercel](https://vercel.com/docs/redis) and [Upsta
 
 No npm Redis package is required. The backend uses Upstash's HTTPS API directly, keeping the repository's dependency-free runtime design.
 
-The feature activates automatically only when both Redis variables exist. If either variable is missing, Redis times out, or Redis returns an error, Cap Context fails open and uses the existing provider order. Summarization must never fail because health tracking failed.
+The feature activates automatically only when a supported Redis URL/token pair exists. If either value is missing, Redis times out, or Redis returns an error, Cap Context fails open and uses the existing provider order. Summarization must never fail because health tracking failed.
 
 Emergency off switch: add `GEMINI_MODEL_HEALTH_ENABLED=false` to Vercel and redeploy. This disables only health tracking; it does not disable Gemini or the existing fallback chain.
 
