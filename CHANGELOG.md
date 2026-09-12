@@ -23,6 +23,10 @@ Write entries in past tense and describe the resulting behavior, not every imple
 
 ## Unreleased on `master` after extension 1.4.2
 
+### 2026-09-12
+
+- Added shared daily Gemini model health for Vercel deployments. With Upstash Redis connected, each model is skipped until the next Pacific day after 20 successful summaries, three consecutive failed attempts, or an explicit daily-quota response. Gemini rate limits now move directly to the next model instead of retrying the same one. The store contains model-only counters and timestamps, fails open to the existing provider chain, and has a documented Vercel setup and off switch.
+
 ### 2026-09-09
 
 - Reworked the orb-to-picker-to-handoff motion as one continuous interaction: the picker now has clearer open/close state and focus behavior, destination selection holds while alternatives recede, the handoff surface expands from the picker's measured position, the detached orb leaves during transfer, and handoff/error exits animate instead of disappearing abruptly. Follow-up micro-polish clarified review-before-send behavior, made wait estimates deliberately approximate, kept stage headlines readable through transitions, and removed duplicate assistive announcements. Reduced-motion behavior remains immediate.

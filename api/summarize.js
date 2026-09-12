@@ -7,6 +7,7 @@ const {
   consumeRateLimit,
   acquireRequestSlot
 } = require("./request-security");
+const { createGeminiModelHealth } = require("./gemini-model-health");
 const PROVIDER_RETRY_INTERVAL_MS = 450;
 const PROVIDER_ATTEMPT_TIMEOUT_MS = 80000;
 const SUMMARY_HEARTBEAT_INTERVAL_MS = 15000;
@@ -257,6 +258,7 @@ async function handleSummary(conversation, responseChannel) {
         expansion,
         fallback: createFallbackMetadata(),
         modelsTried: [],
+        geminiModelsSkipped: [],
         mistralModelsTried: [],
         inputChars,
         outputChars: summary.length,
@@ -295,6 +297,7 @@ async function handleSummary(conversation, responseChannel) {
         model: providerResult.model,
         modelReason: providerResult.modelReason,
         modelsTried: providerResult.modelsTried,
+        geminiModelsSkipped: providerResult.geminiModelsSkipped,
         mistralModelsTried: providerResult.mistralModelsTried,
         profile: summaryProfile.id,
         maxTokens: summaryProfile.maxTokens,
@@ -393,6 +396,8 @@ module.exports.__test = {
   stripContextCarryFooter,
   countWords,
   getSummaryProfile,
+  createSummaryWithFallback,
+  readProviderErrorMetadata,
   getGeneratedModelSelection,
   getMistralModelSelection,
   getContextCarryTemplate,
@@ -405,11 +410,13 @@ async function createSummaryWithFallback({
   modelSelection,
   geminiApiKey,
   mistralApiKey,
-  groqApiKey
+  groqApiKey,
+  geminiModelHealth = createGeminiModelHealth()
 }) {
   const fallbackMessages = getInitialSummaryMessages(conversation, profile);
   const geminiMessages = getInitialSummaryMessages(conversation, profile, { plainHeader: true });
   const modelsTried = [];
+  const geminiModelsSkipped = [];
   const mistralModelsTried = [];
   let geminiMs = 0;
   let mistralMs = 0;
@@ -419,6 +426,18 @@ async function createSummaryWithFallback({
   if (geminiApiKey) {
     const geminiDeadline = Date.now() + GEMINI_CHAIN_BUDGET_MS;
     for (const [index, model] of GEMINI_MODEL_CHAIN.entries()) {
+      const healthBeforeRequest = await geminiModelHealth.beginAttempt(model);
+      if (!healthBeforeRequest.available) {
+        geminiModelsSkipped.push({ model, status: healthBeforeRequest.status });
+        lastProviderFailure = lastProviderFailure || createProviderError(
+          SUMMARY_PROVIDERS.gemini,
+          `${model} skipped for the current Pacific day because its health is ${healthBeforeRequest.status}`,
+          502
+        );
+        logGeminiHealth(model, healthBeforeRequest, "skipped");
+        continue;
+      }
+
       const remainingGeminiBudgetMs = geminiDeadline - Date.now();
       if (remainingGeminiBudgetMs <= 0) break;
       const geminiStartedAt = Date.now();
@@ -433,8 +452,13 @@ async function createSummaryWithFallback({
           initialMessages: geminiMessages,
           requestBudgetMs: Math.min(getProviderRequestBudgetMs(model), remainingGeminiBudgetMs)
         });
+        const healthAfterSuccess = await geminiModelHealth.recordSuccess(model);
+        logGeminiHealth(model, healthAfterSuccess, "success");
         const failedModels = modelsTried.slice(0, -1);
-        const modelReason = failedModels.length
+        const skippedReason = formatSkippedGeminiModels(geminiModelsSkipped);
+        const modelReason = skippedReason
+          ? `${skippedReason}; ${model} served the summary`
+          : failedModels.length
           ? `${failedModels.join(" -> ")} failed; fell back to ${model}`
           : `${model} served as the primary model`;
 
@@ -448,11 +472,12 @@ async function createSummaryWithFallback({
           ...result,
           modelReason,
           modelsTried,
+          geminiModelsSkipped,
           mistralModelsTried,
           geminiMs: geminiMs + result.providerMs,
           mistralMs: 0,
           groqMs: 0,
-          fallback: failedModels.length
+          fallback: failedModels.length || geminiModelsSkipped.length
             ? createFallbackMetadata({
                 attempted: true,
                 used: true,
@@ -465,6 +490,10 @@ async function createSummaryWithFallback({
       } catch (error) {
         geminiMs += Date.now() - geminiStartedAt;
         lastProviderFailure = error;
+        const healthAfterFailure = await geminiModelHealth.recordFailure(model, {
+          dailyQuotaExhausted: error?.providerDailyQuota === true
+        });
+        logGeminiHealth(model, healthAfterFailure, "failure");
         const nextModel = GEMINI_MODEL_CHAIN[index + 1] || MISTRAL_PRIMARY_MODEL;
         console.error(
           `[Context Generator] ${model} failed; falling back to ${nextModel}:`,
@@ -489,7 +518,10 @@ async function createSummaryWithFallback({
           initialMessages: fallbackMessages
         });
         const failedModels = modelsTried.slice(0, -1);
-        const modelReason = failedModels.length
+        const skippedReason = formatSkippedGeminiModels(geminiModelsSkipped);
+        const modelReason = skippedReason
+          ? `${skippedReason}; ${failedModels.length ? `${failedModels.join(" -> ")} failed; ` : ""}fell back to ${model}`
+          : failedModels.length
           ? `${failedModels.join(" -> ")} failed; fell back to ${model}`
           : `${model} served as the first model in the fixed Mistral chain`;
 
@@ -503,11 +535,12 @@ async function createSummaryWithFallback({
           ...result,
           modelReason,
           modelsTried,
+          geminiModelsSkipped,
           mistralModelsTried,
           geminiMs,
           mistralMs: mistralMs + result.providerMs,
           groqMs: 0,
-          fallback: failedModels.length
+          fallback: failedModels.length || geminiModelsSkipped.length
             ? createFallbackMetadata({
                 attempted: true,
                 used: true,
@@ -547,6 +580,7 @@ async function createSummaryWithFallback({
     return createEmergencyDirectCarryResult({
       conversation,
       modelsTried,
+      geminiModelsSkipped,
       mistralModelsTried,
       geminiMs,
       mistralMs,
@@ -575,6 +609,7 @@ async function createSummaryWithFallback({
       ...result,
       modelReason: `${modelsTried.slice(0, -1).join(" -> ")} failed; fell back to ${GROQ_FALLBACK_MODEL}`,
       modelsTried,
+      geminiModelsSkipped,
       mistralModelsTried,
       geminiMs,
       mistralMs,
@@ -590,6 +625,7 @@ async function createSummaryWithFallback({
     return createEmergencyDirectCarryResult({
       conversation,
       modelsTried,
+      geminiModelsSkipped,
       mistralModelsTried,
       geminiMs,
       mistralMs,
@@ -602,6 +638,7 @@ async function createSummaryWithFallback({
 function createEmergencyDirectCarryResult({
   conversation,
   modelsTried,
+  geminiModelsSkipped,
   mistralModelsTried,
   geminiMs,
   mistralMs,
@@ -609,7 +646,8 @@ function createEmergencyDirectCarryResult({
   lastProviderFailure
 }) {
   const summary = buildDirectContextCarrySummary(conversation);
-  const attemptedChain = modelsTried.length ? modelsTried.join(" -> ") : "No remote provider";
+  const skippedReason = formatSkippedGeminiModels(geminiModelsSkipped);
+  const attemptedChain = modelsTried.length ? modelsTried.join(" -> ") : skippedReason || "No remote provider";
 
   console.warn("[Context Generator] Remote providers exhausted; preserving the exact transcript locally.");
   return {
@@ -630,6 +668,7 @@ function createEmergencyDirectCarryResult({
     usage: createZeroUsage(),
     modelReason: `${attemptedChain} failed; preserved the complete transcript with ${LOCAL_DIRECT_MODEL}`,
     modelsTried,
+    geminiModelsSkipped,
     mistralModelsTried,
     geminiMs,
     mistralMs,
@@ -658,12 +697,16 @@ async function createSummaryWithProvider({ provider, apiKey, profile, model, ini
   const initialMs = Date.now() - initialStartedAt;
 
   if (!initialResponse.ok) {
-    throw createProviderError(
+    const providerErrorMetadata = await readProviderErrorMetadata(initialResponse);
+    const error = createProviderError(
       provider,
       `${provider.label} API error ${initialResponse.status}`,
       502,
       initialResponse.status
     );
+    error.providerCode = providerErrorMetadata.code;
+    error.providerDailyQuota = providerErrorMetadata.dailyQuota;
+    throw error;
   }
 
   const data = await readResponseJson(initialResponse, provider);
@@ -739,7 +782,11 @@ function requestProviderSummary(provider, apiKey, messages, profile, model, opti
     method: "POST",
     headers,
     body: JSON.stringify(body)
-  }, options.requestBudgetMs ?? getProviderRequestBudgetMs(model));
+  }, options.requestBudgetMs ?? getProviderRequestBudgetMs(model), {
+    // A Gemini 429 should move to the next model immediately. Other transient
+    // failures retain the existing bounded retry.
+    retryRateLimits: provider.id !== SUMMARY_PROVIDERS.gemini.id
+  });
 }
 
 function getProviderRequestBody(provider, messages, profile, model) {
@@ -972,8 +1019,51 @@ function getProviderFailureLog(error) {
     provider: error?.provider || null,
     message: getProviderFailureReason(error),
     statusCode: error?.statusCode || null,
-    providerStatus: error?.providerStatus || null
+    providerStatus: error?.providerStatus || null,
+    providerCode: error?.providerCode || null,
+    providerDailyQuota: error?.providerDailyQuota === true
   };
+}
+
+function formatSkippedGeminiModels(skippedModels) {
+  return skippedModels
+    .map(({ model, status }) => `${model} skipped (${status})`)
+    .join("; ");
+}
+
+function logGeminiHealth(model, health, outcome) {
+  if (!health || health.tracking === "disabled" || health.tracking === "unavailable") return;
+  console.info("[Context Generator] Gemini health updated:", {
+    model,
+    outcome,
+    status: health.status,
+    successes: health.successes,
+    failures: health.failures,
+    consecutiveFailures: health.consecutiveFailures,
+    attempts: health.attempts,
+    pacificDate: health.pacificDate,
+    tracking: health.tracking
+  });
+}
+
+async function readProviderErrorMetadata(response) {
+  try {
+    const payload = await response.json();
+    const providerError = payload?.error && typeof payload.error === "object" ? payload.error : {};
+    const code = typeof providerError.code === "string"
+      ? providerError.code.toLowerCase()
+      : typeof providerError.status === "string"
+      ? providerError.status.toLowerCase()
+      : null;
+    // Inspect quota identifiers only to distinguish a daily reset from a short
+    // rate limit. The provider body is never logged, returned, or persisted.
+    const quotaHints = JSON.stringify(providerError.details || []).slice(0, 8192);
+    const dailyQuota = code === "quota_exceeded"
+      || /(?:\brpd\b|requests?.{0,16}per.{0,16}day|per[_ .-]?day)/i.test(quotaHints);
+    return { code, dailyQuota };
+  } catch {
+    return { code: null, dailyQuota: false };
+  }
 }
 
 async function readResponseJson(response, provider) {
@@ -1090,7 +1180,7 @@ function getContextCarryTemplate(profile, options = {}) {
 [One clear sentence: exactly what the user needs to do or ask next]`;
 }
 
-async function fetchWithRetry(url, options, requestBudgetMs) {
+async function fetchWithRetry(url, options, requestBudgetMs, retryOptions = {}) {
   let lastError = null;
   let lastResponse = null;
   const deadline = Date.now() + requestBudgetMs;
@@ -1104,7 +1194,9 @@ async function fetchWithRetry(url, options, requestBudgetMs) {
     try {
       const response = await fetch(url, { ...options, signal: controller.signal });
       lastResponse = response;
-      if (response.ok || !isRetryableProviderStatus(response.status) || attempt === PROVIDER_MAX_ATTEMPTS) {
+      const retryableStatus = isRetryableProviderStatus(response.status)
+        && (response.status !== 429 || retryOptions.retryRateLimits !== false);
+      if (response.ok || !retryableStatus || attempt === PROVIDER_MAX_ATTEMPTS) {
         return response;
       }
     } catch (error) {

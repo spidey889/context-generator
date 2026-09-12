@@ -1102,10 +1102,9 @@ test("backend falls from a rate-limited Gemini 3.8 Flash to Gemini 3.7 Flash", a
     await summarize({ method: "POST", body: { conversation } }, res);
 
     assert.equal(res.statusCode, 200);
-    assert.equal(requests.length, 3);
+    assert.equal(requests.length, 2);
     assert.match(requests[0].url, /gemini-3\.8-flash:generateContent$/);
-    assert.match(requests[1].url, /gemini-3\.8-flash:generateContent$/);
-    assert.match(requests[2].url, /gemini-3\.7-flash:generateContent$/);
+    assert.match(requests[1].url, /gemini-3\.7-flash:generateContent$/);
     assert.equal(res.payload.timing.servedBy, "gemini");
     assert.equal(res.payload.timing.primaryModel, "gemini-3.8-flash");
     assert.equal(res.payload.timing.model, "gemini-3.7-flash");

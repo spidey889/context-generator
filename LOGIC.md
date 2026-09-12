@@ -163,6 +163,7 @@ Gemini 3.8 Flash -> 3.7 Flash -> 3.6 Flash -> 3.5 Flash
 ```
 
 - Gemini is skipped without `GEMINI_API_KEY`. Its four models share one 60-second family deadline; each model is capped at 45 seconds. This reserves 15 seconds of overhead beneath the extension's 210-second deadline even if every later fallback exhausts its budget.
+- When Vercel has `UPSTASH_REDIS_REST_URL` and `UPSTASH_REDIS_REST_TOKEN`, each Gemini model uses a shared Pacific-day health record. Twenty successful summaries mark it `exhausted`; three consecutive failed summary attempts mark it `bad_mood`; either status skips that model until the next Pacific day. An explicit daily-quota response also marks it exhausted immediately. Gemini 429 responses move directly to the next model instead of retrying the same model. Redis stores only model counters/status/timestamps, and storage trouble fails open to the normal provider order. See `GEMINI_MODEL_HEALTH.md` for production setup and diagnosis.
 - Mistral is skipped without `MISTRAL_API_KEY`. Model budgets are 55, 40, and 25 seconds. A Mistral HTTP 429 jumps directly to Groq.
 - Groq is optional via `GROQ_API_KEY` and has 15 seconds.
 - If every configured remote provider fails or no provider key is available, the backend returns the complete captured transcript through the provider-free `local-direct` format. It never truncates the transcript; the transfer remains usable during a provider-wide outage, though it is not compressed.
@@ -282,7 +283,7 @@ Latest Claude verification on 2026-09-09: 26 Claude-focused tests passed, includ
 | --- | --- | --- |
 | Capture, pasted cards, placement, picker/handoff | `node --test --test-skip-pattern="^slow/release:" test/platform-content.test.js` | `npm run test:slow`; Brave smoke for real extension/UI work |
 | Background messages, destination recovery, cache | `node --test test/background.test.js` | `npm test` |
-| Summary prompt/routing/validation | `node --test test/summarize.test.js test/request-security.test.js` | `npm run eval` for quality/provider changes |
+| Summary prompt/routing/validation | `node --test test/summarize.test.js test/request-security.test.js`; model health: `node --test test/gemini-model-health.test.js` | `npm run eval` for quality/provider changes |
 | Telemetry/Supabase | `node --test test/telemetry.test.js` | `npm test` plus schema/grant review |
 | Latest Run analysis | `node --test test/analysis.test.js` | Open GitHub Pages analysis with extension loaded |
 | Website/privacy | `node --test test/license.test.js` | Manual desktop/mobile, keyboard, reduced-motion, link review |
