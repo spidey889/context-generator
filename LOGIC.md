@@ -210,7 +210,7 @@ Do not overstate current quality enforcement:
 | `expire-latest-run-raw-transcript` | Alarm that removes only raw transcript fields |
 | `retry-transfer-telemetry` | Alarm that retries delivery after five minutes |
 
-The receipt records transfer/capture timings, counts, sizes, profile, serving provider/model, attempted chain, fallback, finish reason, token usage, status, and exact captured text. It deliberately does not store the generated summary. Background expiry and the analysis bridge both remove expired raw text.
+The receipt records transfer/capture timings, counts, sizes, profile, the model that actually served, attempted and health-skipped models, fallback, finish reason, token usage, status, and exact captured text. Latest Run labels the serving model directly and excludes it from the failed portion of the fallback log. It deliberately does not store the generated summary. Background expiry and the analysis bridge both remove expired raw text.
 
 Closed telemetry stages are: `intent_started`, `capture_started`, `capture_completed`, `summary_request_started`, `summary_response_started`, `summary_completed`, `paste_started`, `completed`.
 

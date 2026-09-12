@@ -650,7 +650,7 @@
             </div>
             <div class="hero-footer">
               ${mini("Status", stats.status === "completed" ? "Completed" : "Failed")}
-              ${mini("Model", formatModelDisplayName(summary.model))}
+              ${mini("Served model", formatModelDisplayName(summary.model))}
               ${mini("Profile", summary.profile || "n/a")}
             </div>
           </div>
@@ -664,7 +664,6 @@
             ${sideItem("Backend match", integrity)}
             ${sideItem("Summary source", cacheHit ? "Cache (original generation metadata)" : "Fresh generation")}
             ${sideItem("Served by", formatBackendLabel(summary))}
-            ${sideItem("Primary model", getPrimaryModelLabel(summary))}
             ${sideItem("Fallback log", getModelFallbackLabel(summary))}
             ${sideItem("Capture path", capture.method || "unknown")}
             ${sideItem("Message turns", formatTurnSummary(capture))}
@@ -776,16 +775,25 @@
         : summary.mistralModelsTried;
       const tried = Array.isArray(recordedChain) ? recordedChain.filter(Boolean) : [];
       const servedModel = summary.model || summary.fallback?.model || null;
+      const skipped = Array.isArray(summary.geminiModelsSkipped)
+        ? summary.geminiModelsSkipped
+          .filter((entry) => entry?.model && entry?.status)
+          .map((entry) => `${formatModelDisplayName(entry.model)} skipped (${String(entry.status).replaceAll("_", " ")})`)
+        : [];
+      const servedIndex = servedModel ? tried.lastIndexOf(servedModel) : -1;
+      const failedModels = servedIndex >= 0 ? tried.slice(0, servedIndex) : tried;
+      const route = [
+        ...failedModels.map((model) => `${formatModelDisplayName(model)} failed`),
+        ...(servedModel ? [`${formatModelDisplayName(servedModel)} served`] : [])
+      ].join(" -> ");
+      const skippedLabel = skipped.length ? `Skipped today: ${skipped.join(", ")}. ` : "";
 
       if (summary.fallback?.used && servedModel) {
-        const failedChain = tried.length
-          ? tried.map(formatModelDisplayName).join(" -> ")
-          : formatModelDisplayName(summary.primaryModel || "Mistral");
-        return `${failedChain} failed -> ${formatModelDisplayName(servedModel)} served`;
+        return `${skippedLabel}${route || `${formatModelDisplayName(servedModel)} served`}`;
       }
 
       if (tried.length > 1 && servedModel) {
-        return `${tried.slice(0, -1).map(formatModelDisplayName).join(" -> ")} failed -> ${formatModelDisplayName(servedModel)} served`;
+        return `${skippedLabel}${route}`;
       }
 
       if (tried.length === 1) return `Not used - ${formatModelDisplayName(tried[0])} served first`;
@@ -795,20 +803,10 @@
         : "Not recorded - run a new transfer";
     }
 
-    function getPrimaryModelLabel(summary) {
-      if (!summary) return "n/a";
-      if (summary.servedBy === "local-direct") return "local-direct";
-      const recordedPrimary = summary.primaryModel
-        || summary.modelsTried?.[0]
-        || summary.mistralModelsTried?.[0];
-      return formatModelDisplayName(recordedPrimary || "Not recorded");
-    }
-
     function formatModelDisplayName(model) {
       if (!model) return "n/a";
-      if (model === "gemini-3.6-flash") return "Gemini 3.6 Flash";
-      // Preserve readable labels for receipts generated before the 3.6 migration.
-      if (model === "gemini-3.5-flash") return "Gemini 3.5 Flash";
+      const geminiFlash = String(model).match(/^gemini-(\d+(?:\.\d+)?)-flash$/i);
+      if (geminiFlash) return `Gemini ${geminiFlash[1]} Flash`;
       if (model === "mistral-medium-2604") return "mistral-medium-3-5";
       return model;
     }

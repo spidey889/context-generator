@@ -1793,6 +1793,7 @@
         model: backendTiming?.model || null,
         modelReason: backendTiming?.modelReason || null,
         modelsTried: sanitizeModelChainForStats(backendTiming?.modelsTried),
+        geminiModelsSkipped: sanitizeGeminiModelsSkippedForStats(backendTiming?.geminiModelsSkipped),
         mistralModelsTried: sanitizeModelChainForStats(backendTiming?.mistralModelsTried),
         modelInputChars: backendTiming?.modelInputChars ?? null,
         modelThresholdChars: backendTiming?.modelThresholdChars ?? null,
@@ -1859,6 +1860,15 @@
       .filter((model) => typeof model === "string" && model.trim())
       .slice(0, 5)
       .map((model) => model.trim());
+  }
+
+  function sanitizeGeminiModelsSkippedForStats(entries) {
+    if (!Array.isArray(entries)) return [];
+    return entries
+      .filter((entry) => entry && typeof entry.model === "string" && ["bad_mood", "exhausted"].includes(entry.status))
+      .slice(0, 4)
+      .map((entry) => ({ model: entry.model.trim(), status: entry.status }))
+      .filter((entry) => entry.model);
   }
 
   function normalizeUsageForStats(usage) {
