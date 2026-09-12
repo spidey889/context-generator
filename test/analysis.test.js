@@ -18,7 +18,7 @@ test("analysis receipt shows the served model and does not report it as failed",
 
   assert.match(ANALYSIS_SOURCE, /mini\("Served model"/);
   assert.doesNotMatch(ANALYSIS_SOURCE, /sideItem\("Primary model"/);
-  assert.match(ANALYSIS_SOURCE, /sideItem\("Fallback log", getModelFallbackLabel\(summary\)\)/);
+  assert.match(ANALYSIS_SOURCE, /sideItem\("Fallback log", getModelFallbackLabel\(summary\), "fallback"\)/);
   assert.equal(formatModelDisplayName("gemini-3.8-flash"), "Gemini 3.8 Flash");
   assert.equal(
     getModelFallbackLabel(summary),
@@ -49,11 +49,18 @@ test("analysis keeps exact raw scraped text behind a collapsed gear control", ()
   assert.doesNotMatch(ANALYSIS_SOURCE, /escapeHtml\(stats\.rawScrapedText\)/);
 });
 
-test("analysis labels cached receipt data as original generation metadata", () => {
-  assert.match(ANALYSIS_SOURCE, /sideItem\("Summary source"/);
-  assert.match(ANALYSIS_SOURCE, /Cache \(original generation metadata\)/);
+test("analysis keeps cached metrics tied to the original generation", () => {
+  assert.doesNotMatch(ANALYSIS_SOURCE, /sideItem\("Summary source"/);
   assert.match(ANALYSIS_SOURCE, /out from original generation/);
   assert.match(ANALYSIS_SOURCE, /Cache hit; original/);
+});
+
+test("analysis receipt keeps only useful non-duplicate details", () => {
+  assert.match(ANALYSIS_SOURCE, /sideItem\("Input check", integrity\)/);
+  assert.match(ANALYSIS_SOURCE, /Complete - all sent text received/);
+  assert.doesNotMatch(ANALYSIS_SOURCE, /sideItem\("Route"/);
+  assert.doesNotMatch(ANALYSIS_SOURCE, /sideItem\("Capture path"/);
+  assert.doesNotMatch(ANALYSIS_SOURCE, /sideItem\("Expansion"/);
 });
 
 function loadModelHelpers() {

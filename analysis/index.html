@@ -307,7 +307,7 @@
       background: rgba(0, 0, 0, 0.18);
     }
 
-    .side-item:nth-child(6) {
+    .side-item--fallback {
       grid-column: 1 / -1;
       background: rgba(244, 189, 80, 0.055);
     }
@@ -521,7 +521,7 @@
         grid-template-columns: 1fr;
       }
 
-      .side-item:nth-child(6) {
+      .side-item--fallback {
         grid-column: auto;
       }
 
@@ -641,7 +641,6 @@
     }
 
     function renderStats(stats) {
-      const route = `${stats.source?.name || "Source"} -> ${stats.destination?.name || "Destination"}`;
       const usage = stats.summary?.usage || {};
       const capture = stats.capture || {};
       const summary = stats.summary || {};
@@ -680,14 +679,10 @@
               <strong>Receipt</strong>
               <span>${escapeHtml(stats.transferId || "")}</span>
             </div>
-            ${sideItem("Route", route)}
-            ${sideItem("Backend match", integrity)}
-            ${sideItem("Summary source", cacheHit ? "Cache (original generation metadata)" : "Fresh generation")}
+            ${sideItem("Input check", integrity)}
             ${sideItem("Served by", formatBackendLabel(summary))}
-            ${sideItem("Fallback log", getModelFallbackLabel(summary))}
-            ${sideItem("Capture path", capture.method || "unknown")}
+            ${sideItem("Fallback log", getModelFallbackLabel(summary), "fallback")}
             ${sideItem("Message turns", formatTurnSummary(capture))}
-            ${sideItem("Expansion", getExpansionLabel(summary.expansion))}
           </aside>
         </section>
 
@@ -740,8 +735,9 @@
       return `<div class="mini"><span>${escapeHtml(label)}</span><strong>${escapeHtml(value)}</strong></div>`;
     }
 
-    function sideItem(label, value) {
-      return `<div class="side-item"><span>${escapeHtml(label)}</span><strong>${escapeHtml(value || "n/a")}</strong></div>`;
+    function sideItem(label, value, modifier = "") {
+      const modifierClass = modifier ? ` side-item--${modifier}` : "";
+      return `<div class="side-item${modifierClass}"><span>${escapeHtml(label)}</span><strong>${escapeHtml(value || "n/a")}</strong></div>`;
     }
 
     function metric(label, value, detail, accent) {
@@ -779,13 +775,7 @@
 
     function getIntegrityLabel(sent, received) {
       if (sent === null || sent === undefined || received === null || received === undefined) return "Unknown";
-      return Number(sent) === Number(received) ? "Sent equals backend received" : "Mismatch";
-    }
-
-    function getExpansionLabel(expansion) {
-      if (!expansion) return "n/a";
-      if (!expansion.attempted) return "Not needed";
-      return expansion.used ? "Used" : "Tried, not used";
+      return Number(sent) === Number(received) ? "Complete - all sent text received" : "Mismatch - some text may be missing";
     }
 
     function getModelFallbackLabel(summary) {
