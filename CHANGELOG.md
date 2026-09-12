@@ -1,5 +1,7 @@
 # Changelog
 
+- 2026-09-12: Fixed provider rate-limit retries to honor `Retry-After`, with a one-second minimum for HTTP 429 responses, instead of retrying Mistral inside its one-request-per-second window.
+
 - 2026-09-12: Stopped rejecting otherwise valid Groq summaries solely because the model paraphrased NEXT STEP; normalization still replaces that section with the trusted exact destination instruction.
 
 - 2026-09-12: Replaced the retired Groq Llama 3.1 fallback with Groq Compound Mini for its larger free-tier token allowance and active production availability.

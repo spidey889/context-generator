@@ -1183,6 +1183,7 @@ function getContextCarryTemplate(profile, options = {}) {
 async function fetchWithRetry(url, options, requestBudgetMs, retryOptions = {}) {
   let lastError = null;
   let lastResponse = null;
+  let retryAfterMs = 0;
   const deadline = Date.now() + requestBudgetMs;
 
   for (let attempt = 1; attempt <= PROVIDER_MAX_ATTEMPTS; attempt += 1) {
@@ -1194,6 +1195,9 @@ async function fetchWithRetry(url, options, requestBudgetMs, retryOptions = {}) 
     try {
       const response = await fetch(url, { ...options, signal: controller.signal });
       lastResponse = response;
+      retryAfterMs = response.status === 429
+        ? getRetryAfterMs(response.headers?.get?.("retry-after")) || 1000
+        : 0;
       const retryableStatus = isRetryableProviderStatus(response.status)
         && (response.status !== 429 || retryOptions.retryRateLimits !== false);
       if (response.ok || !retryableStatus || attempt === PROVIDER_MAX_ATTEMPTS) {
@@ -1207,13 +1211,24 @@ async function fetchWithRetry(url, options, requestBudgetMs, retryOptions = {}) 
       clearTimeout(timeout);
     }
 
-    const retryDelayMs = Math.min(PROVIDER_RETRY_INTERVAL_MS * attempt, Math.max(0, deadline - Date.now()));
+    const retryDelayMs = Math.min(
+      Math.max(PROVIDER_RETRY_INTERVAL_MS * attempt, retryAfterMs),
+      Math.max(0, deadline - Date.now())
+    );
     if (retryDelayMs <= 0) break;
     await delay(retryDelayMs);
   }
 
   if (lastResponse) return lastResponse;
   throw lastError || createTimeoutError();
+}
+
+function getRetryAfterMs(value) {
+  const seconds = Number(value);
+  if (Number.isFinite(seconds) && seconds >= 0) return Math.ceil(seconds * 1000);
+
+  const retryAt = Date.parse(String(value || ""));
+  return Number.isFinite(retryAt) ? Math.max(0, retryAt - Date.now()) : 0;
 }
 
 function createTimeoutError() {
