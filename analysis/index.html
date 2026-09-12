@@ -188,6 +188,9 @@
       gap: 24px;
       overflow: hidden;
       position: relative;
+      background:
+        radial-gradient(circle at 14% 12%, rgba(67, 211, 191, 0.13), transparent 38%),
+        linear-gradient(155deg, rgba(255, 255, 255, 0.075), rgba(255, 255, 255, 0.025));
     }
 
     .summary-band::after {
@@ -243,7 +246,7 @@
       padding: 12px;
       border: 1px solid var(--line);
       border-radius: 8px;
-      background: rgba(0, 0, 0, 0.22);
+      background: rgba(0, 0, 0, 0.3);
     }
 
     .mini span,
@@ -264,18 +267,20 @@
     }
 
     .side-band {
-      padding: 18px;
+      padding: 16px;
       display: grid;
-      gap: 14px;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 10px;
       align-content: start;
     }
 
     .side-title {
+      grid-column: 1 / -1;
       display: flex;
       align-items: baseline;
       justify-content: space-between;
       gap: 10px;
-      padding-bottom: 8px;
+      padding: 2px 2px 10px;
       border-bottom: 1px solid var(--line);
     }
 
@@ -286,23 +291,30 @@
     .side-title span {
       color: var(--muted);
       font-size: 12px;
+      max-width: 62%;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
     }
 
     .side-item {
       display: grid;
       gap: 6px;
-      padding: 11px 0;
-      border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+      min-width: 0;
+      padding: 12px;
+      border: 1px solid rgba(255, 255, 255, 0.075);
+      border-radius: 7px;
+      background: rgba(0, 0, 0, 0.18);
     }
 
-    .side-item:last-child {
-      border-bottom: 0;
-      padding-bottom: 0;
+    .side-item:nth-child(6) {
+      grid-column: 1 / -1;
+      background: rgba(244, 189, 80, 0.055);
     }
 
     .side-item strong {
       font-size: 15px;
-      line-height: 1.25;
+      line-height: 1.35;
       overflow-wrap: anywhere;
     }
 
@@ -503,6 +515,14 @@
       .hero-footer,
       .metrics {
         grid-template-columns: 1fr;
+      }
+
+      .side-band {
+        grid-template-columns: 1fr;
+      }
+
+      .side-item:nth-child(6) {
+        grid-column: auto;
       }
 
       .summary-band {

@@ -1,5 +1,7 @@
 # Changelog
 
+- 2026-09-12: Polished the analysis Latest Run layout with a more balanced two-column receipt, clearer fallback emphasis, and calmer card hierarchy without changing receipt behavior.
+
 This file records durable product, architecture, security, release, and workflow changes. It is historical context, not the source of truth for current behavior; agents must use `LOGIC.md` for the current production contract and Git history for commit-level detail.
 
 ## How agents should maintain this file
