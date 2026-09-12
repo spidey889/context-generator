@@ -1377,10 +1377,8 @@ function validateContextCarrySummary(text, profile) {
     }
   }
 
-  const nextStep = normalizeValidationWhitespace(parsed.sections.get("NEXT STEP"));
-  if (nextStep !== normalizeValidationWhitespace(DESTINATION_CONFIRMATION_INSTRUCTION)) {
-    return { ok: false, reason: "NEXT STEP does not match the required instruction" };
-  }
+  // Normalization replaces provider-written NEXT STEP content with the trusted
+  // destination instruction, so wording differences here are safe to accept.
 
   const substantiveBodies = CONTEXT_CARRY_SECTIONS
     .filter((section) => section.title !== "NEXT STEP")
@@ -1424,10 +1422,6 @@ function isMeaningfulSummaryContent(content) {
 
 function stripListPrefix(content) {
   return String(content || "").replace(/^(?:[-*+]\s+|\d+[.)]\s+)/, "").trim();
-}
-
-function normalizeValidationWhitespace(content) {
-  return String(content || "").trim().replace(/\s+/g, " ");
 }
 
 function getMinimumValidSummaryWords(profile = SUMMARY_PROFILES[1]) {

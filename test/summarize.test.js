@@ -974,6 +974,20 @@ test("validator canonicalizes numbered provider headings without weakening secti
   headings.forEach((heading) => assert.match(normalized, new RegExp(`(?:^|\\n)[^\\n]*${heading}\\n`)));
 });
 
+test("normalizer safely replaces provider-written NEXT STEP wording", () => {
+  const profile = getSummaryProfile("x".repeat(4000));
+  const providerWording = makeContextCarrySummary("provider wording", 90).replace(
+    'Reply only: "Context loaded. Let\'s pick up right where you left off." Then wait for the user.',
+    "Continue from the transferred context."
+  );
+
+  assert.equal(validateContextCarrySummary(providerWording, profile).ok, true);
+  assert.match(
+    normalizeContextCarrySummary(providerWording),
+    /Reply only: "Context loaded\. Let's pick up right where you left off\." Then wait for the user\.$/
+  );
+});
+
 test("generated summaries select Gemini 3.8 Flash when its server key is configured", () => {
   const conversation = "x".repeat(20001);
 

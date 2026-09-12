@@ -1,5 +1,7 @@
 # Changelog
 
+- 2026-09-12: Stopped rejecting otherwise valid Groq summaries solely because the model paraphrased NEXT STEP; normalization still replaces that section with the trusted exact destination instruction.
+
 - 2026-09-12: Replaced the retired Groq Llama 3.1 fallback with Groq Compound Mini for its larger free-tier token allowance and active production availability.
 
 - 2026-09-12: Replaced the unreadable one-line fallback log with a vertical model path that separates daily skips from models tried in the current run and formats provider model names for people instead of internal IDs.
