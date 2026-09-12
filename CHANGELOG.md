@@ -1,5 +1,7 @@
 # Changelog
 
+- 2026-09-12: Replaced the retired Groq Llama 3.1 fallback with Groq Compound Mini for its larger free-tier token allowance and active production availability.
+
 - 2026-09-12: Replaced the unreadable one-line fallback log with a vertical model path that separates daily skips from models tried in the current run and formats provider model names for people instead of internal IDs.
 
 - 2026-09-12: Replaced the analysis page's blue treatment with a two-tone plum-and-gold upper atmosphere that fades into black, and reduced lower metrics to a restrained warm palette without using a green/red combination.

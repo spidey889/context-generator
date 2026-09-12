@@ -479,7 +479,7 @@ test("provider fallback budgets keep the complete chain below the extension dead
     getProviderRequestBudgetMs("mistral-medium-3-5"),
     getProviderRequestBudgetMs("mistral-large-3-25-12"),
     getProviderRequestBudgetMs("ministral-3-3b-25-12"),
-    getProviderRequestBudgetMs("llama-3.1-8b-instant")
+    getProviderRequestBudgetMs("groq/compound-mini")
   ];
 
   assert.deepEqual(budgets, [45000, 45000, 45000, 45000, 55000, 40000, 25000, 15000]);
@@ -598,20 +598,20 @@ test("backend falls back to Groq after Mistral rate limits and keeps the same pr
       "mistral-medium-3-5"
     ]);
     assert.ok(mistralRequests.every((request) => request.prompt_cache_key));
-    assert.equal(groqRequests[0].model, "llama-3.1-8b-instant");
+    assert.equal(groqRequests[0].model, "groq/compound-mini");
     assert.equal(groqRequests[0].prompt_cache_key, undefined);
     assert.equal(groqRequests[0].prediction, undefined);
     assert.equal(groqRequests[0].max_tokens, mistralRequests[0].max_tokens);
     assert.deepEqual(groqRequests[0].messages, mistralRequests[0].messages);
     assert.equal(res.payload.timing.servedBy, "groq");
     assert.equal(res.payload.timing.provider, "groq");
-    assert.equal(res.payload.timing.model, "llama-3.1-8b-instant");
+    assert.equal(res.payload.timing.model, "groq/compound-mini");
     assert.equal(res.payload.timing.primaryModel, "mistral-medium-3-5");
     assert.equal(res.payload.timing.modelOverride, false);
     assert.equal(res.payload.timing.fallback.attempted, true);
     assert.equal(res.payload.timing.fallback.used, true);
     assert.equal(res.payload.timing.fallback.servedBy, "groq");
-    assert.equal(res.payload.timing.fallback.model, "llama-3.1-8b-instant");
+    assert.equal(res.payload.timing.fallback.model, "groq/compound-mini");
     assert.match(res.payload.timing.fallback.reason, /Mistral API error 429/);
     assert.deepEqual(res.payload.timing.usage, {
       promptTokens: 700,
@@ -678,11 +678,11 @@ test("backend falls back to Groq when Mistral returns an empty summary", async (
       "mistral-large-3-25-12",
       "ministral-3-3b-25-12"
     ]);
-    assert.equal(requests[3].body.model, "llama-3.1-8b-instant");
+    assert.equal(requests[3].body.model, "groq/compound-mini");
     assert.deepEqual(requests[3].body.messages, requests[0].body.messages);
     assert.equal(res.payload.timing.servedBy, "groq");
     assert.equal(res.payload.timing.primaryModel, "mistral-medium-3-5");
-    assert.equal(res.payload.timing.model, "llama-3.1-8b-instant");
+    assert.equal(res.payload.timing.model, "groq/compound-mini");
     assert.equal(res.payload.timing.fallback.used, true);
     assert.match(res.payload.timing.fallback.reason, /Mistral returned an empty summary/);
   } finally {

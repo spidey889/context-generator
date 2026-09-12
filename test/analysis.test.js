@@ -48,7 +48,7 @@ test("analysis formats a long provider failure chain as readable lines", () => {
   assert.equal(
     getModelFallbackLabel({
       model: "local-direct",
-      modelsTried: ["gemini-3.6-flash", "gemini-3.5-flash", "mistral-medium-2604", "llama-3.1-8b-instant", "local-direct"],
+      modelsTried: ["gemini-3.6-flash", "gemini-3.5-flash", "mistral-medium-2604", "groq/compound-mini", "local-direct"],
       geminiModelsSkipped: [
         { model: "gemini-3.8-flash", status: "exhausted" },
         { model: "gemini-3.7-flash", status: "bad_mood" }
@@ -64,7 +64,7 @@ test("analysis formats a long provider failure chain as readable lines", () => {
       "Gemini 3.6 Flash — failed",
       "Gemini 3.5 Flash — failed",
       "Mistral Medium 3.5 — failed",
-      "Llama 3.1 8B Instant — failed",
+      "Groq Compound Mini — failed",
       "Local fallback — served"
     ].join("\n")
   );

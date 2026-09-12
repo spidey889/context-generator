@@ -25,7 +25,7 @@ const LOCAL_DIRECT_MODEL = "local-direct";
 const MISTRAL_PRIMARY_MODEL = "mistral-medium-3-5";
 const MISTRAL_FALLBACK_MODELS = ["mistral-large-3-25-12", "ministral-3-3b-25-12"];
 const MISTRAL_MODEL_CHAIN = [MISTRAL_PRIMARY_MODEL, ...MISTRAL_FALLBACK_MODELS];
-const GROQ_FALLBACK_MODEL = "llama-3.1-8b-instant";
+const GROQ_FALLBACK_MODEL = "groq/compound-mini";
 const PROVIDER_REQUEST_BUDGETS_MS = {
   [GEMINI_PRIMARY_MODEL]: 45000,
   ...Object.fromEntries(GEMINI_FALLBACK_MODELS.map((model) => [model, 45000])),
