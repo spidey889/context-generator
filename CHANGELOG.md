@@ -1,5 +1,7 @@
 # Changelog
 
+- 2026-09-12: Reworked the analysis page for readability with a neutral blue-gray background, wider receipt column, brighter supporting text, calmer metric colors, and accessible 44px controls while preserving the roomy layout.
+
 - 2026-09-12: Restored the spacious Latest Run hero height after receipt cleanup and distributed the remaining receipt details evenly instead of shrinking both cards.
 
 - 2026-09-12: Simplified the analysis receipt by removing duplicate route, summary-source, capture-path, and expansion rows; renamed backend match to the clearer input check.
