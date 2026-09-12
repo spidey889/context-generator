@@ -1,5 +1,7 @@
 # Changelog
 
+- 2026-09-12: Replaced the analysis page's blue treatment with a two-tone plum-and-gold upper atmosphere that fades into black, and reduced lower metrics to a restrained warm palette without using a green/red combination.
+
 - 2026-09-12: Reworked the analysis page for readability with a neutral blue-gray background, wider receipt column, brighter supporting text, calmer metric colors, and accessible 44px controls while preserving the roomy layout.
 
 - 2026-09-12: Restored the spacious Latest Run hero height after receipt cleanup and distributed the remaining receipt details evenly instead of shrinking both cards.
