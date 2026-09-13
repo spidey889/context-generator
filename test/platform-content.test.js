@@ -502,6 +502,35 @@ test("native popovers do not discard a still-visible verified composer", () => {
   }
 });
 
+test("native modal editors cannot replace the verified chat composer", () => {
+  for (const hostname of ["claude.ai", "chatgpt.com", "gemini.google.com", "grok.com", "chat.deepseek.com"]) {
+    const composer = new FakeElement({ tag: "form" });
+    const input = new FakeElement({
+      attrs: { contenteditable: "true", role: "textbox" },
+      rect: { left: 240, right: 920, top: 620, bottom: 672, width: 680, height: 52 }
+    });
+    const modal = new FakeElement({ attrs: { role: "dialog" } });
+    const modalInput = new FakeElement({
+      tag: "textarea",
+      attrs: { "data-display": "none", placeholder: "Settings notes" },
+      rect: { left: 300, right: 980, top: 560, bottom: 680, width: 680, height: 120 }
+    });
+    composer.children = [input];
+    input.parentElement = composer;
+    modal.children = [modalInput];
+    modalInput.parentElement = modal;
+    const hooks = loadPlatformContent([composer, input, modal, modalInput], hostname);
+
+    assert.equal(hooks.findPlatformInput(), input);
+    composer.setAttribute("aria-hidden", "true");
+    modalInput.setAttribute("data-display", "block");
+    assert.equal(hooks.findPlatformInput(), input, `${hostname} should keep its verified composer`);
+
+    input.isConnected = false;
+    assert.equal(hooks.findPlatformInput(), null, `${hostname} should reject the modal editor`);
+  }
+});
+
 test("picker selection morphs into handoff and both surfaces keep animated exits", () => {
   const source = fs.readFileSync(SOURCE_PATH, "utf8");
   const transitionStart = source.indexOf("async function transitionDestinationSheetToHandoff()");

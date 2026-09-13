@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-09-13-remount-stability-v26";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-09-13-modal-composer-filter-v27";
   const BUBBLE_ID = "context-generator-bubble";
   const OVERLAY_ID = "context-generator-overlay";
   const HANDOFF_SCRIM_ID = "context-generator-handoff-scrim";
@@ -2056,10 +2056,19 @@
     const candidates = selectors
       .flatMap((selector) => Array.from(document.querySelectorAll(selector)))
       .filter((element, index, all) => {
-        return all.indexOf(element) === index && isVisible(element) && !element.closest("[aria-hidden='true']");
+        return (
+          all.indexOf(element) === index &&
+          isVisible(element) &&
+          !element.closest("[aria-hidden='true']") &&
+          !isContextGeneratorNode(element)
+        );
       });
 
+    // Settings and native modal editors share the same textarea/contenteditable
+    // primitives as chat composers. Never let a newly mounted overlay replace
+    // the page composer; an already verified input remains eligible below.
     const selectedInput = candidates
+      .filter((element) => !isModalEditorCandidate(element))
       .map((element) => ({ element, score: scoreInputCandidate(element) }))
       .sort((a, b) => b.score - a.score)[0]?.element || null;
 
@@ -2081,6 +2090,10 @@
 
     if (platform.id === currentPlatform.id) retainedPlatformInput = null;
     return null;
+  }
+
+  function isModalEditorCandidate(element) {
+    return Boolean(element?.closest?.("dialog, [role='dialog'], [aria-modal='true']"));
   }
 
   function findReadyPlatformInput(platform = currentPlatform) {

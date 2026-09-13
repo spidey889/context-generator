@@ -241,7 +241,7 @@ Composer discovery scores platform candidates, rejects page-sized/misaligned sur
 
 Paste uses native setters/events plus stability checks. Firefox alone converts contenteditable line breaks to escaped HTML `<br>` elements. ChatGPT gets longer insert/verify/stability windows. Verification samples beginning, middle, and end anchors so benign editor differences do not cause false failure.
 
-Native menus and popovers may temporarily mark the background application `aria-hidden` without visually removing its composer. Placement retains only the last verified, connected, geometrically visible input through that state; removed or visually hidden composers still make Cap Context hide normally.
+Native menus and popovers may temporarily mark the background application `aria-hidden` without visually removing its composer. Placement retains only the last verified, connected, geometrically visible input through that state; removed or visually hidden composers still make Cap Context hide normally. Newly mounted textareas/contenteditables inside native dialogs are excluded from composer selection, so settings editors cannot replace the verified chat input.
 
 ## Contracts That Must Change Together
 
@@ -250,7 +250,7 @@ Native menus and popovers may temporarily mark the background application `aria-
 - Model/profile routing: provider constants/budgets, prompts, Latest Run labels, evaluation expectations, this file, `memory.md`, `extension/README.md`.
 - Telemetry fields/stages/failures: source/background sanitizers, Vercel validator, Supabase validator, SQL constraints/functions, privacy wording, tests. Free-form telemetry fields are forbidden.
 - Latest Run receipt: producer, background expiry, bridge, analysis renderer, privacy wording, analysis tests.
-- Any content-script change: update `CONTENT_SCRIPT_LOAD_ID` so open tabs replace stale code, and retain stale-node/reservation cleanup. Current value: `platform-content-2026-09-13-remount-stability-v26`.
+- Any content-script change: update `CONTENT_SCRIPT_LOAD_ID` so open tabs replace stale code, and retain stale-node/reservation cleanup. Current value: `platform-content-2026-09-13-modal-composer-filter-v27`.
 - Extension release: bump `extension/manifest.json`, rebuild the ZIP with `manifest.json` at its root, hash-compare every file against `extension/`, then test the unpacked folder in a new Brave window.
 
 ## Common Wrong Assumptions
