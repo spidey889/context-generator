@@ -7,7 +7,7 @@ Cap Context uses OrcaRouter only as a best-effort free fallback between Gemini a
 - Environment variable: `ORCAROUTER_API_KEY`
 - Endpoint: `https://api.orcarouter.ai/v1/chat/completions`
 - Model: `orcarouter/free`
-- Budget: 25 seconds total, including one bounded retry for temporary server/network failure
+- Budget: 45 seconds total, including one bounded retry for temporary server/network failure
 - HTTP 429: move immediately to Mistral without retrying OrcaRouter
 - Missing key or any OrcaRouter failure: fail open to the existing Mistral, Groq, and local fallbacks
 

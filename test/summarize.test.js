@@ -490,9 +490,9 @@ test("provider fallback budgets keep the complete chain below the extension dead
     getProviderRequestBudgetMs("groq/compound-mini")
   ];
 
-  assert.deepEqual(budgets, [45000, 45000, 45000, 45000, 25000, 55000, 15000]);
+  assert.deepEqual(budgets, [45000, 45000, 45000, 45000, 45000, 55000, 15000]);
   const completeChainBudget = GEMINI_CHAIN_BUDGET_MS + budgets.slice(4).reduce((total, budget) => total + budget, 0);
-  assert.equal(completeChainBudget, 155000);
+  assert.equal(completeChainBudget, 175000);
   assert.ok(completeChainBudget <= 210000 - 15000);
 });
 

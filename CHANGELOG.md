@@ -1,6 +1,6 @@
 # Changelog
 
-- 2026-09-13: Added OrcaRouter's strictly free `orcarouter/free` route between Gemini and Mistral. The integration uses a dedicated Vercel secret, a 25-second budget, immediate fallback on free-tier 429 responses, complete Latest Run provider/model reporting, and no path to OrcaRouter's paid automatic models. The full remote-provider allowance remains 155 seconds inside the extension deadline.
+- 2026-09-13: Added OrcaRouter's strictly free `orcarouter/free` route between Gemini and Mistral. The integration uses a dedicated Vercel secret, a 45-second budget, immediate fallback on free-tier 429 responses, complete Latest Run provider/model reporting, and no path to OrcaRouter's paid automatic models. The full remote-provider allowance remains 175 seconds inside the extension deadline.
 
 - 2026-09-13: Removed `mistral-large-2512` from the active route after production repeatedly returned HTTP 403 code 1910, confirming the Free-tier key cannot access it even though the Limits page displays a theoretical rate limit. `ministral-14b-2512` is now the sole Mistral model, avoiding a failed request on every transfer.
 
