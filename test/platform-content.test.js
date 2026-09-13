@@ -493,11 +493,14 @@ test("picker selection morphs into handoff and both surfaces keep animated exits
   );
 });
 
-test("destination picker restores trigger focus without overriding outside page clicks", () => {
+test("destination picker preserves outside page focus on every supported platform", () => {
   const source = fs.readFileSync(SOURCE_PATH, "utf8");
   const sheetStart = source.indexOf("function ensureDestinationSheet()");
   const sheetEnd = source.indexOf("function ensureDestinationSheetBackdrop()", sheetStart);
   const sheetSource = source.slice(sheetStart, sheetEnd);
+  const outsideClickStart = sheetSource.indexOf('document.addEventListener("click"');
+  const outsideClickEnd = sheetSource.indexOf('document.addEventListener("keydown"', outsideClickStart);
+  const outsideClickSource = sheetSource.slice(outsideClickStart, outsideClickEnd);
   const toggleStart = source.indexOf("function toggleDestinationSheet()");
   const hideEnd = source.indexOf("function releaseDestinationSheetBackdrop()", toggleStart);
   const toggleAndHideSource = source.slice(toggleStart, hideEnd);
@@ -507,9 +510,10 @@ test("destination picker restores trigger focus without overriding outside page 
   assert.match(sheetSource, /event\.key !== "Tab"/);
   assert.match(sheetSource, /focusableTiles\[nextIndex\]\.focus/);
   assert.match(
-    sheetSource,
+    outsideClickSource,
     /document\.addEventListener\("click", \(\) => \{\s+if \(!isDestinationSheetOpen\(\)\) return;[\s\S]*?hideDestinationSheet\(\{ restoreFocus: false \}\);\s+\}\)/
   );
+  assert.doesNotMatch(outsideClickSource, /currentPlatform|claude|chatgpt|gemini|grok|deepseek/);
   assert.match(sheetSource, /detail\.textContent = "Opening…"/);
   assert.match(sheetSource, /tile\.setAttribute\("aria-disabled", "true"\)/);
   assert.match(toggleAndHideSource, /bubble\.setAttribute\("aria-expanded", "true"\)/);
