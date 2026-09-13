@@ -140,7 +140,7 @@ test("long summaries stream JSON-safe heartbeats and preserve errors after heade
   assert.match(BACKGROUND_SOURCE, /data\?\.ok === false/);
 });
 
-test("mistral model routing always starts with medium 3.5 without changing summary profiles", () => {
+test("mistral model routing always starts with Mistral Large 3 without changing summary profiles", () => {
   const restoreMistralModel = setTemporaryEnv("MISTRAL_MODEL", "custom-mistral-test");
 
   try {
@@ -148,8 +148,8 @@ test("mistral model routing always starts with medium 3.5 without changing summa
     const overThresholdChat = "x".repeat(20001);
     const overThresholdProfile = getSummaryProfile(overThresholdChat);
 
-    assert.equal(getMistralModelSelection(thresholdChat).model, "mistral-medium-3-5");
-    assert.equal(getMistralModelSelection(overThresholdChat).model, "mistral-medium-3-5");
+    assert.equal(getMistralModelSelection(thresholdChat).model, "mistral-large-2512");
+    assert.equal(getMistralModelSelection(overThresholdChat).model, "mistral-large-2512");
     assert.match(getMistralModelSelection(overThresholdChat).reason, /fixed Mistral priority chain/);
     assert.equal(overThresholdProfile.id, "medium");
     assert.equal(overThresholdProfile.maxTokens, 1900);
@@ -199,9 +199,9 @@ test("backend forwards a 350k conversation to Mistral and reports the same input
 
     assert.equal(res.statusCode, 200);
     assert.equal(capturedRequest.url, "https://api.mistral.ai/v1/chat/completions");
-    assert.equal(capturedRequest.body.model, "mistral-medium-3-5");
+    assert.equal(capturedRequest.body.model, "mistral-large-2512");
     assert.equal(capturedRequest.body.max_tokens, 7000);
-    assert.match(capturedRequest.body.prompt_cache_key, /^capcontext-summary-v7-extra-large-mistral-medium-3-5$/);
+    assert.match(capturedRequest.body.prompt_cache_key, /^capcontext-summary-v7-extra-large-mistral-large-2512$/);
     assert.equal(capturedRequest.body.prediction, undefined);
     const transcriptEnvelope = JSON.parse(capturedRequest.body.messages[1].content);
     assert.deepEqual(transcriptEnvelope, {
@@ -212,8 +212,8 @@ test("backend forwards a 350k conversation to Mistral and reports the same input
     assert.equal(res.payload.timing.profile, "extra-large");
     assert.equal(res.payload.timing.servedBy, "mistral");
     assert.equal(res.payload.timing.provider, "mistral");
-    assert.equal(res.payload.timing.model, "mistral-medium-3-5");
-    assert.equal(res.payload.timing.primaryModel, "mistral-medium-3-5");
+    assert.equal(res.payload.timing.model, "mistral-large-2512");
+    assert.equal(res.payload.timing.primaryModel, "mistral-large-2512");
     assert.equal(res.payload.timing.modelThresholdChars, null);
     assert.equal(res.payload.timing.modelOverride, false);
     assert.match(res.payload.timing.modelReason, /served as the first model/);
@@ -306,7 +306,7 @@ test("backend keeps tiny chats local and avoids Mistral", async () => {
   }
 });
 
-test("backend sends small generated chats to medium 3.5 first", async () => {
+test("backend sends small generated chats to Mistral Large 3 first", async () => {
   const originalFetch = global.fetch;
   const originalApiKey = process.env.MISTRAL_API_KEY;
   const restoreMistralModel = setTemporaryEnv("MISTRAL_MODEL", undefined);
@@ -336,11 +336,11 @@ test("backend sends small generated chats to medium 3.5 first", async () => {
 
     assert.equal(res.statusCode, 200);
     assert.equal(requests.length, 1);
-    assert.equal(requests[0].model, "mistral-medium-3-5");
+    assert.equal(requests[0].model, "mistral-large-2512");
     assert.equal(requests[0].max_tokens, 1000);
     assert.equal(res.payload.timing.profile, "small");
     assert.equal(res.payload.timing.servedBy, "mistral");
-    assert.equal(res.payload.timing.model, "mistral-medium-3-5");
+    assert.equal(res.payload.timing.model, "mistral-large-2512");
     assert.equal(res.payload.timing.fallback.attempted, false);
     assert.equal(res.payload.timing.mistralPasses, 1);
   } finally {
@@ -354,7 +354,7 @@ test("backend sends small generated chats to medium 3.5 first", async () => {
   }
 });
 
-test("backend sends medium chats to medium 3.5 without changing profile limits", async () => {
+test("backend sends medium chats to Mistral Large 3 without changing profile limits", async () => {
   const originalFetch = global.fetch;
   const originalApiKey = process.env.MISTRAL_API_KEY;
   const restoreMistralModel = setTemporaryEnv("MISTRAL_MODEL", undefined);
@@ -384,10 +384,10 @@ test("backend sends medium chats to medium 3.5 without changing profile limits",
 
     assert.equal(res.statusCode, 200);
     assert.equal(requests.length, 1);
-    assert.equal(requests[0].model, "mistral-medium-3-5");
+    assert.equal(requests[0].model, "mistral-large-2512");
     assert.equal(requests[0].max_tokens, 1900);
     assert.equal(res.payload.timing.profile, "medium");
-    assert.equal(res.payload.timing.model, "mistral-medium-3-5");
+    assert.equal(res.payload.timing.model, "mistral-large-2512");
     assert.equal(res.payload.timing.targetWords, 700);
     assert.equal(res.payload.timing.mistralPasses, 1);
     assert.match(res.payload.timing.modelReason, /served as the first model/);
@@ -432,8 +432,8 @@ test("backend fixed chain takes precedence over MISTRAL_MODEL", async () => {
 
     assert.equal(res.statusCode, 200);
     assert.equal(requests.length, 1);
-    assert.equal(requests[0].model, "mistral-medium-3-5");
-    assert.equal(res.payload.timing.model, "mistral-medium-3-5");
+    assert.equal(requests[0].model, "mistral-large-2512");
+    assert.equal(res.payload.timing.model, "mistral-large-2512");
     assert.equal(res.payload.timing.modelOverride, false);
     assert.equal(res.payload.timing.modelThresholdChars, null);
     assert.match(res.payload.timing.modelReason, /served as the first model/);
@@ -485,8 +485,8 @@ test("provider fallback budgets keep the complete chain below the extension dead
     getProviderRequestBudgetMs("gemini-3.7-flash"),
     getProviderRequestBudgetMs("gemini-3.6-flash"),
     getProviderRequestBudgetMs("gemini-3.5-flash"),
-    getProviderRequestBudgetMs("mistral-medium-3-5"),
-    getProviderRequestBudgetMs("ministral-3b-2512"),
+    getProviderRequestBudgetMs("mistral-large-2512"),
+    getProviderRequestBudgetMs("ministral-14b-2512"),
     getProviderRequestBudgetMs("groq/compound-mini")
   ];
 
@@ -496,7 +496,7 @@ test("provider fallback budgets keep the complete chain below the extension dead
   assert.ok(completeChainBudget <= 210000 - 15000);
 });
 
-test("backend falls back from medium 3.5 to Ministral 3B and reports the serving model", async () => {
+test("backend falls back from Mistral Large 3 to Ministral 14B and reports the serving model", async () => {
   const originalFetch = global.fetch;
   const restoreApiKey = setTemporaryEnv("MISTRAL_API_KEY", "test-mistral-key");
   const conversation = "model fallback context ".repeat(180);
@@ -506,7 +506,7 @@ test("backend falls back from medium 3.5 to Ministral 3B and reports the serving
     const body = JSON.parse(options.body);
     requests.push(body);
 
-    if (body.model === "mistral-medium-3-5") {
+    if (body.model === "mistral-large-2512") {
       return {
         ok: false,
         status: 400,
@@ -534,15 +534,15 @@ test("backend falls back from medium 3.5 to Ministral 3B and reports the serving
 
     assert.equal(res.statusCode, 200);
     assert.deepEqual(requests.map((request) => request.model), [
-      "mistral-medium-3-5",
-      "ministral-3b-2512"
+      "mistral-large-2512",
+      "ministral-14b-2512"
     ]);
-    assert.equal(res.payload.timing.model, "ministral-3b-2512");
+    assert.equal(res.payload.timing.model, "ministral-14b-2512");
     assert.deepEqual(res.payload.timing.mistralModelsTried, [
-      "mistral-medium-3-5",
-      "ministral-3b-2512"
+      "mistral-large-2512",
+      "ministral-14b-2512"
     ]);
-    assert.match(res.payload.timing.modelReason, /mistral-medium-3-5 failed; fell back to ministral-3b-2512/);
+    assert.match(res.payload.timing.modelReason, /mistral-large-2512 failed; fell back to ministral-14b-2512/);
   } finally {
     restoreApiKey();
     global.fetch = originalFetch;
@@ -602,8 +602,8 @@ test("backend falls back to Groq after Mistral rate limits and keeps the same pr
     assert.equal(mistralRequests.length, 2);
     assert.equal(groqRequests.length, 1);
     assert.deepEqual(mistralRequests.map((request) => request.model), [
-      "mistral-medium-3-5",
-      "ministral-3b-2512"
+      "mistral-large-2512",
+      "ministral-14b-2512"
     ]);
     assert.ok(mistralRequests.every((request) => request.prompt_cache_key));
     assert.equal(groqRequests[0].model, "groq/compound-mini");
@@ -614,7 +614,7 @@ test("backend falls back to Groq after Mistral rate limits and keeps the same pr
     assert.equal(res.payload.timing.servedBy, "groq");
     assert.equal(res.payload.timing.provider, "groq");
     assert.equal(res.payload.timing.model, "groq/compound-mini");
-    assert.equal(res.payload.timing.primaryModel, "mistral-medium-3-5");
+    assert.equal(res.payload.timing.primaryModel, "mistral-large-2512");
     assert.equal(res.payload.timing.modelOverride, false);
     assert.equal(res.payload.timing.fallback.attempted, true);
     assert.equal(res.payload.timing.fallback.used, true);
@@ -682,13 +682,13 @@ test("backend falls back to Groq when Mistral returns an empty summary", async (
     assert.equal(res.statusCode, 200);
     assert.equal(requests.length, 3);
     assert.deepEqual(requests.slice(0, 2).map((request) => request.body.model), [
-      "mistral-medium-3-5",
-      "ministral-3b-2512"
+      "mistral-large-2512",
+      "ministral-14b-2512"
     ]);
     assert.equal(requests[2].body.model, "groq/compound-mini");
     assert.deepEqual(requests[2].body.messages, requests[0].body.messages);
     assert.equal(res.payload.timing.servedBy, "groq");
-    assert.equal(res.payload.timing.primaryModel, "mistral-medium-3-5");
+    assert.equal(res.payload.timing.primaryModel, "mistral-large-2512");
     assert.equal(res.payload.timing.model, "groq/compound-mini");
     assert.equal(res.payload.timing.fallback.used, true);
     assert.match(res.payload.timing.fallback.reason, /Mistral returned an empty summary/);
@@ -732,11 +732,11 @@ test("backend advances through the existing model chain when validation rejects 
     assert.equal(res.statusCode, 200);
     assert.equal(requests.length, 2);
     assert.deepEqual(requests.map((request) => request.model), [
-      "mistral-medium-3-5",
-      "ministral-3b-2512"
+      "mistral-large-2512",
+      "ministral-14b-2512"
     ]);
-    assert.equal(res.payload.timing.model, "ministral-3b-2512");
-    assert.match(res.payload.timing.modelReason, /mistral-medium-3-5 failed/);
+    assert.equal(res.payload.timing.model, "ministral-14b-2512");
+    assert.match(res.payload.timing.modelReason, /mistral-large-2512 failed/);
     assert.match(res.payload.summary, /validated-fallback/);
   } finally {
     restoreApiKey();
@@ -754,7 +754,7 @@ test("backend advances to the next model after a timed-out Mistral attempt", asy
     const body = JSON.parse(options.body);
     requests.push(body);
 
-    if (body.model === "mistral-medium-3-5") {
+    if (body.model === "mistral-large-2512") {
       const error = new Error("request timed out");
       error.name = "AbortError";
       throw error;
@@ -780,10 +780,10 @@ test("backend advances to the next model after a timed-out Mistral attempt", asy
 
     assert.equal(res.statusCode, 200);
     assert.deepEqual(requests.map((request) => request.model), [
-      "mistral-medium-3-5",
-      "ministral-3b-2512"
+      "mistral-large-2512",
+      "ministral-14b-2512"
     ]);
-    assert.equal(res.payload.timing.model, "ministral-3b-2512");
+    assert.equal(res.payload.timing.model, "ministral-14b-2512");
   } finally {
     restoreApiKey();
     global.fetch = originalFetch;
@@ -1000,7 +1000,7 @@ test("generated summaries select Gemini 3.8 Flash when its server key is configu
 
   assert.equal(getGeneratedModelSelection(conversation, true).model, "gemini-3.8-flash");
   assert.match(getGeneratedModelSelection(conversation, true).reason, /preserved Mistral and Groq fallbacks/);
-  assert.equal(getGeneratedModelSelection(conversation, false).model, "mistral-medium-3-5");
+  assert.equal(getGeneratedModelSelection(conversation, false).model, "mistral-large-2512");
 });
 
 test("backend sends generated summaries to native Gemini first and records Gemini usage", async () => {
@@ -1180,7 +1180,7 @@ test("backend falls from invalid Gemini output to the preserved Mistral chain", 
     assert.match(requests[1].url, /gemini-3\.7-flash:generateContent$/);
     assert.match(requests[2].url, /gemini-3\.6-flash:generateContent$/);
     assert.match(requests[3].url, /gemini-3\.5-flash:generateContent$/);
-    assert.equal(requests[4].body.model, "mistral-medium-3-5");
+    assert.equal(requests[4].body.model, "mistral-large-2512");
     assert.match(requests[0].body.systemInstruction.parts[0].text, /plain-text title/);
     assert.match(requests[1].body.systemInstruction.parts[0].text, /plain-text title/);
     assert.match(requests[4].body.messages[0].content, /boxed header exactly as shown/);
@@ -1194,16 +1194,16 @@ test("backend falls from invalid Gemini output to the preserved Mistral chain", 
       "gemini-3.7-flash",
       "gemini-3.6-flash",
       "gemini-3.5-flash",
-      "mistral-medium-3-5"
+      "mistral-large-2512"
     ]);
-    assert.deepEqual(res.payload.timing.mistralModelsTried, ["mistral-medium-3-5"]);
+    assert.deepEqual(res.payload.timing.mistralModelsTried, ["mistral-large-2512"]);
     assert.equal(res.payload.timing.fallback.attempted, true);
     assert.equal(res.payload.timing.fallback.used, true);
     assert.equal(res.payload.timing.fallback.servedBy, "mistral");
     assert.match(res.payload.timing.fallback.reason, /Gemini returned an invalid summary/);
     assert.match(
       res.payload.timing.modelReason,
-      /gemini-3\.8-flash -> gemini-3\.7-flash -> gemini-3\.6-flash -> gemini-3\.5-flash failed; fell back to mistral-medium-3-5/
+      /gemini-3\.8-flash -> gemini-3\.7-flash -> gemini-3\.6-flash -> gemini-3\.5-flash failed; fell back to mistral-large-2512/
     );
   } finally {
     restoreMistralKey();
