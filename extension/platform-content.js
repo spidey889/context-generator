@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-09-13-fullscreen-focus-v25";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-09-13-remount-stability-v26";
   const BUBBLE_ID = "context-generator-bubble";
   const OVERLAY_ID = "context-generator-overlay";
   const HANDOFF_SCRIM_ID = "context-generator-handoff-scrim";
@@ -46,6 +46,8 @@
   const CLAUDE_EMPTY_COMPOSER_Y_NUDGE = -0.5;
   const CLAUDE_EXISTING_CHAT_COMPOSER_Y_NUDGE = -5;
   const CLAUDE_TRANSIENT_PLACEMENT_GRACE_MS = 700;
+  const TRANSIENT_COMPOSER_PLACEMENT_GRACE_MS = 700;
+  const TRANSIENT_COMPOSER_PLACEMENT_PLATFORMS = new Set(["gemini", "grok", "deepseek"]);
   const CLAUDE_PATHNAME_POLL_MS = 80;
   const CLAUDE_MAX_COMPOSER_HORIZONTAL_PADDING = 160;
   const CLAUDE_MODEL_LEFT_NUDGE = 48;
@@ -470,6 +472,8 @@
   let retainedPlatformInput = null;
   let lastClaudeStablePlacementAt = 0;
   let claudePlacementGraceTimer = null;
+  let transientComposerPlacement = null;
+  let transientComposerPlacementGraceTimer = null;
   let lastClaudePlacementPathname = window.location.pathname;
   let claudePathnamePollTimer = null;
   let pendingFloatingButtonReasons = new Set();
@@ -593,6 +597,8 @@
       syncDeepSeekPlacementResizeMonitoring,
       syncGeminiPlacementResizeMonitoring,
       syncClaudePlacementResizeMonitoring,
+      recordTransientComposerPlacement,
+      retainTransientComposerPlacement,
       checkClaudePlacementPathname,
       prepareSourceForCapture,
       expandCollapsedConversationContent,
@@ -3325,12 +3331,14 @@
 
   function ensureFloatingButton(recalculationReason = "direct") {
     const input = findPlatformInput();
-    const existingBubble = document.getElementById(BUBBLE_ID);
+    const existingBubble = document.getElementById(BUBBLE_ID) || transientComposerPlacement?.bubble || null;
 
     if (!input) {
       if (retainClaudeStablePlacement(existingBubble)) {
         return existingBubble;
       }
+      const retainedBubble = retainTransientComposerPlacement(existingBubble);
+      if (retainedBubble) return retainedBubble;
       if (existingBubble) existingBubble.style.display = "none";
       hideOnboardingNudge();
       hideClaudeLimitNudge();
@@ -3364,6 +3372,8 @@
       if (retainClaudeStablePlacement(bubble)) {
         return bubble;
       }
+      const retainedBubble = retainTransientComposerPlacement(bubble);
+      if (retainedBubble) return retainedBubble;
       bubble.style.display = "none";
       hideOnboardingNudge();
       if (currentPlatform.id === "claude") {
@@ -6354,12 +6364,13 @@
   }
 
   function updateFloatingButtonPosition(recalculationReason = "direct") {
-    const bubble = document.getElementById(BUBBLE_ID);
+    const bubble = document.getElementById(BUBBLE_ID) || transientComposerPlacement?.bubble || null;
     const input = findPlatformInput();
     if (!bubble || !input) {
       if (retainClaudeStablePlacement(bubble)) {
         return;
       }
+      if (retainTransientComposerPlacement(bubble)) return;
       stopGrokPlacementResizeMonitoring();
       stopDeepSeekPlacementResizeMonitoring();
       stopGeminiPlacementResizeMonitoring();
@@ -6394,6 +6405,7 @@
       if (retainClaudeStablePlacement(bubble)) {
         return;
       }
+      if (retainTransientComposerPlacement(bubble)) return;
       bubble.style.display = "none";
       hideOnboardingNudge();
       if (currentPlatform.id === "claude") {
@@ -6424,6 +6436,7 @@
       if (retainClaudeStablePlacement(bubble)) {
         return;
       }
+      if (retainTransientComposerPlacement(bubble)) return;
       bubble.style.display = "none";
       hideOnboardingNudge();
       if (currentPlatform.id === "claude") {
@@ -6443,6 +6456,11 @@
       bubble.style.right = "auto";
       bubble.style.top = `${grokPlacement.top}px`;
       bubble.style.display = "flex";
+      recordTransientComposerPlacement(
+        bubble,
+        composerRect.left + grokPlacement.left,
+        composerRect.top + grokPlacement.top
+      );
       maybeShowOnboardingNudge(bubble);
       return;
     }
@@ -6455,6 +6473,11 @@
         bubble.style.right = "auto";
         bubble.style.top = `${deepSeekPlacement.top}px`;
         bubble.style.display = "flex";
+        recordTransientComposerPlacement(
+          bubble,
+          composerRect.left + deepSeekPlacement.left,
+          composerRect.top + deepSeekPlacement.top
+        );
         maybeShowOnboardingNudge(bubble);
         return;
       }
@@ -6474,6 +6497,11 @@
       bubble.style.top = "auto";
       bubble.style.bottom = `${geminiPlacement.bottom}px`;
       bubble.style.display = "flex";
+      recordTransientComposerPlacement(
+        bubble,
+        composerRect.right - geminiPlacement.right - BUBBLE_SIZE,
+        composerRect.bottom - geminiPlacement.bottom - BUBBLE_SIZE
+      );
       maybeShowOnboardingNudge(bubble);
       return;
     }
@@ -8124,6 +8152,68 @@
     return true;
   }
 
+  function recordTransientComposerPlacement(bubble, left, top) {
+    if (!TRANSIENT_COMPOSER_PLACEMENT_PLATFORMS.has(currentPlatform.id) || !bubble) return;
+    clearTransientComposerPlacementGraceTimer();
+    transientComposerPlacement = {
+      bubble,
+      left: Math.round(left),
+      top: Math.round(top),
+      recordedAt: Date.now()
+    };
+  }
+
+  function retainTransientComposerPlacement(bubble) {
+    if (
+      !TRANSIENT_COMPOSER_PLACEMENT_PLATFORMS.has(currentPlatform.id) ||
+      !transientComposerPlacement ||
+      Date.now() - transientComposerPlacement.recordedAt > TRANSIENT_COMPOSER_PLACEMENT_GRACE_MS
+    ) {
+      clearTransientComposerPlacement();
+      return null;
+    }
+
+    const retainedBubble = bubble || transientComposerPlacement.bubble;
+    if (!retainedBubble) {
+      clearTransientComposerPlacement();
+      return null;
+    }
+
+    const floatingRoot = getFloatingButtonRoot();
+    if (retainedBubble.parentElement !== floatingRoot) floatingRoot.appendChild(retainedBubble);
+    setBubbleFixedMode(retainedBubble);
+    setBubbleStylesIfChanged(retainedBubble, {
+      left: `${transientComposerPlacement.left}px`,
+      right: "auto",
+      top: `${transientComposerPlacement.top}px`,
+      bottom: "auto",
+      display: "flex"
+    });
+
+    if (!transientComposerPlacementGraceTimer) {
+      const remainingGrace = Math.max(
+        0,
+        TRANSIENT_COMPOSER_PLACEMENT_GRACE_MS - (Date.now() - transientComposerPlacement.recordedAt)
+      );
+      transientComposerPlacementGraceTimer = setTimeout(() => {
+        transientComposerPlacementGraceTimer = null;
+        scheduleFloatingButtonUpdate("composer-remount-grace-expired");
+      }, remainingGrace);
+    }
+    return retainedBubble;
+  }
+
+  function clearTransientComposerPlacementGraceTimer() {
+    if (!transientComposerPlacementGraceTimer) return;
+    clearTimeout(transientComposerPlacementGraceTimer);
+    transientComposerPlacementGraceTimer = null;
+  }
+
+  function clearTransientComposerPlacement() {
+    clearTransientComposerPlacementGraceTimer();
+    transientComposerPlacement = null;
+  }
+
   function clearClaudePlacementGraceTimer() {
     if (!claudePlacementGraceTimer) return;
     clearTimeout(claudePlacementGraceTimer);
@@ -8218,6 +8308,7 @@
     stopGeminiPlacementResizeMonitoring();
     clearClaudePlacementMonitoring();
     clearClaudePlacementGraceTimer();
+    clearTransientComposerPlacement();
     stopClaudePathnameMonitoring();
     clearChatGptPlacementResizeMonitoring();
 

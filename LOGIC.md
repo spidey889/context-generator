@@ -235,6 +235,7 @@ The protected `users` table creates a row on an install's first successful trans
 - Gemini: left of the Pro/Flash selector; retains the outer composer during large-paste expansion.
 - Grok: beside whichever visible Fast, Build, Auto, Expert, Heavy, or thinking-mode selector is active; retains the outer composer and requires focused paste.
 - DeepSeek: near attachment/input controls; retains the outer composer during expansion.
+- Gemini, Grok, and DeepSeek keep the last verified viewport placement for up to 700 ms when composer discovery temporarily fails. Because their normal orb is composer-owned, the grace path temporarily moves it to the page root; a valid remounted composer immediately reclaims it and recalculates from current geometry. Persistent loss still hides the orb after the bound.
 
 Composer discovery scores platform candidates, rejects page-sized/misaligned surfaces, caps dimensions, and restores prior inline styles when reservations change. Resize observers cover expanding composers; Claude and ChatGPT also watch class/style changes when controls swap visibility without a remount.
 
@@ -249,7 +250,7 @@ Native menus and popovers may temporarily mark the background application `aria-
 - Model/profile routing: provider constants/budgets, prompts, Latest Run labels, evaluation expectations, this file, `memory.md`, `extension/README.md`.
 - Telemetry fields/stages/failures: source/background sanitizers, Vercel validator, Supabase validator, SQL constraints/functions, privacy wording, tests. Free-form telemetry fields are forbidden.
 - Latest Run receipt: producer, background expiry, bridge, analysis renderer, privacy wording, analysis tests.
-- Any content-script change: update `CONTENT_SCRIPT_LOAD_ID` so open tabs replace stale code, and retain stale-node/reservation cleanup. Current value: `platform-content-2026-09-13-fullscreen-focus-v25`.
+- Any content-script change: update `CONTENT_SCRIPT_LOAD_ID` so open tabs replace stale code, and retain stale-node/reservation cleanup. Current value: `platform-content-2026-09-13-remount-stability-v26`.
 - Extension release: bump `extension/manifest.json`, rebuild the ZIP with `manifest.json` at its root, hash-compare every file against `extension/`, then test the unpacked folder in a new Brave window.
 
 ## Common Wrong Assumptions

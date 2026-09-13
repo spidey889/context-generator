@@ -196,6 +196,16 @@ class FakeElement {
   }
 
   remove() {}
+
+  appendChild(child) {
+    if (child.parentElement) {
+      child.parentElement.children = child.parentElement.children.filter((element) => element !== child);
+    }
+    this.children.push(child);
+    child.parentElement = this;
+    child.isConnected = this.isConnected;
+    return child;
+  }
 }
 
 class FakeHTMLTextAreaElement {
@@ -354,6 +364,7 @@ function loadPlatformContent(elements = [], hostname = "chatgpt.com", {
     hooks.mutationObservers = mutationObservers;
     hooks.resizeObservers = resizeObservers;
     hooks.window = window;
+    hooks.document = document;
     hooks.animationFrameCallbacks = animationFrameCallbacks;
   }
   return hooks;
@@ -549,6 +560,24 @@ test("composer lifecycle cleanup never restores focus to the orb", () => {
   const ensureSource = source.slice(ensureStart, ensureEnd);
 
   assert.match(ensureSource, /if \(!input\)[\s\S]*hideDestinationSheet\(\{ restoreFocus: false \}\)/);
+});
+
+test("Gemini, Grok, and DeepSeek retain the last viewport placement during a composer remount", () => {
+  for (const hostname of ["gemini.google.com", "grok.com", "chat.deepseek.com"]) {
+    const hooks = loadPlatformContent([], hostname);
+    const bubble = new FakeElement({ tag: "button" });
+
+    hooks.recordTransientComposerPlacement(bubble, 712.4, 618.6);
+    bubble.isConnected = false;
+    const retainedBubble = hooks.retainTransientComposerPlacement(null);
+
+    assert.equal(retainedBubble, bubble);
+    assert.equal(bubble.parentElement, hooks.document.body);
+    assert.equal(bubble.style.position, "fixed");
+    assert.equal(bubble.style.left, "712px");
+    assert.equal(bubble.style.top, "619px");
+    assert.equal(bubble.style.display, "flex");
+  }
 });
 
 test("picker and handoff microcopy keeps the direct transfer guidance", () => {

@@ -1,5 +1,7 @@
 # Changelog
 
+- 2026-09-13: Stabilized Gemini, Grok, and DeepSeek placement across transient composer remounts. Their composer-owned orb now holds its last verified viewport position through a bounded 700 ms discovery gap, then immediately reattaches and recalculates when the live composer returns; persistent loss still hides it normally.
+
 - 2026-09-13: Prevented F11 fullscreen resize/reflow from focusing the Cap Context orb. Composer-lifecycle cleanup now closes stale picker UI without trigger-focus restoration, while explicit keyboard, backdrop, and orb dismissals retain their intended focus behavior.
 
 - 2026-09-13: Fixed Grok Build and Heavy mode placement by recognizing the complete visible mode set and reusing the existing correct Fast-mode anchor path instead of falling back onto the active control.
