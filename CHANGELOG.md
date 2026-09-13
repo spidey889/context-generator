@@ -65,7 +65,7 @@ Write entries in past tense and describe the resulting behavior, not every imple
 
 ### 2026-09-13
 
-- Added an isolated visual trial that sends a brief, subtle shimmer across the idle Cap Context orb roughly every 10 seconds. It pauses during hover, press, transfer, and picker-open states, respects reduced-motion preferences, and leaves placement, sizing, interaction, focus behavior, and existing motion unchanged.
+- Added an isolated visual trial that sends a brief, subtle shimmer across the idle Cap Context orb artwork roughly every 10 seconds. The sheen is alpha-clipped to the orb instead of appearing over its transparent surroundings. It pauses during hover, press, transfer, and picker-open states, respects reduced-motion preferences, and leaves placement, sizing, interaction, focus behavior, and existing motion unchanged.
 
 ### 2026-09-12
 

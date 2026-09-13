@@ -3478,20 +3478,19 @@
     style.dataset.contextGeneratorOwned = "true";
     style.textContent = `
       @keyframes contextGeneratorBubbleShimmer {
-        0%, 2% { transform: translate3d(-115%, 0, 0) rotate(18deg); opacity: 0; }
-        3% { opacity: 0.32; }
-        9% { transform: translate3d(285%, 0, 0) rotate(18deg); opacity: 0; }
-        100% { transform: translate3d(285%, 0, 0) rotate(18deg); opacity: 0; }
+        0%, 2% { background-position: 180% 0; opacity: 0; }
+        3% { opacity: 0.26; }
+        9% { background-position: -80% 0; opacity: 0; }
+        100% { background-position: -80% 0; opacity: 0; }
       }
 
       #${BUBBLE_ID} .context-generator-bubble-shimmer {
         position: absolute;
-        inset: -20% auto -20% -35%;
-        width: 32%;
-        border-radius: 9999px;
-        background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.72), transparent);
-        filter: blur(1.5px);
-        mix-blend-mode: screen;
+        inset: 2px;
+        background: linear-gradient(108deg, transparent 34%, rgba(255, 255, 255, 0.72) 48%, transparent 62%);
+        background-size: 250% 100%;
+        -webkit-mask: url("${BUBBLE_ICON_URL}") center / contain no-repeat;
+        mask: url("${BUBBLE_ICON_URL}") center / contain no-repeat;
         pointer-events: none;
         opacity: 0;
         animation: contextGeneratorBubbleShimmer 10s ease-in-out infinite;
