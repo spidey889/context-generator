@@ -2650,6 +2650,21 @@ test("Gemini bubble anchors to the left of the Pro selector", () => {
   assert.equal(placement.bottom, 15);
 });
 
+test("Gemini placement does not require an English model label", () => {
+  const model = new FakeElement({
+    tag: "button",
+    text: "Avanzado",
+    rect: { left: 700, right: 790, top: 166, bottom: 202, width: 90, height: 36 }
+  });
+  const mic = new FakeElement({
+    tag: "button",
+    rect: { left: 804, right: 840, top: 166, bottom: 202, width: 36, height: 36 }
+  });
+  const hooks = loadPlatformContent([model, mic], "gemini.google.com");
+
+  assert.equal(hooks.findGeminiModelSelectorButton(getClaudeComposerRect()), model);
+});
+
 test("Grok bubble keeps the Fast placement across every visible mode", () => {
   const composerRect = getClaudeComposerRect();
 
@@ -2670,6 +2685,82 @@ test("Grok bubble keeps the Fast placement across every visible mode", () => {
 
     assert.equal(placement.left, 550, `${mode} should anchor before its visible selector`);
     assert.equal(placement.top, 63);
+  }
+});
+
+test("Grok placement does not require an English mode label", () => {
+  const composerRect = getClaudeComposerRect();
+  const selector = new FakeElement({
+    tag: "button",
+    text: "Construir",
+    rect: { left: 700, right: 790, top: 166, bottom: 202, width: 90, height: 36 }
+  });
+  const mic = new FakeElement({
+    tag: "button",
+    rect: { left: 804, right: 840, top: 166, bottom: 202, width: 36, height: 36 }
+  });
+  const hooks = loadPlatformContent([selector, mic], "grok.com");
+
+  assert.equal(hooks.getGrokBubblePlacement(composerRect).left, 550);
+});
+
+test("DeepSeek anchors before the complete visible right-side control row", () => {
+  const composerRect = getClaudeComposerRect();
+  const firstControl = new FakeElement({
+    tag: "button",
+    rect: { left: 650, right: 720, top: 166, bottom: 202, width: 70, height: 36 }
+  });
+  const middleControl = new FakeElement({
+    tag: "button",
+    rect: { left: 748, right: 784, top: 166, bottom: 202, width: 36, height: 36 }
+  });
+  const lastControl = new FakeElement({
+    tag: "button",
+    rect: { left: 804, right: 840, top: 166, bottom: 202, width: 36, height: 36 }
+  });
+  const hooks = loadPlatformContent(
+    [lastControl, firstControl, middleControl],
+    "chat.deepseek.com"
+  );
+
+  assert.equal(hooks.getDeepSeekBubblePlacement(composerRect).left, 500);
+});
+
+test("Gemini, Grok, and DeepSeek observe control-only composer changes", () => {
+  const providers = [
+    ["gemini.google.com", "syncGeminiPlacementResizeMonitoring"],
+    ["grok.com", "syncGrokPlacementResizeMonitoring"],
+    ["chat.deepseek.com", "syncDeepSeekPlacementResizeMonitoring"]
+  ];
+
+  for (const [hostname, syncHook] of providers) {
+    const input = new FakeElement({ attrs: { contenteditable: "true", role: "textbox" } });
+    const composer = new FakeElement({ rect: getClaudeComposerRect() });
+    input.parentElement = composer;
+    composer.children = [input];
+    const hooks = loadPlatformContent([input, composer], hostname);
+
+    hooks[syncHook](input, composer);
+
+    const observation = hooks.mutationObservers.at(-1).observed[0];
+    assert.equal(observation.element, composer);
+    assert.deepEqual(JSON.parse(JSON.stringify(observation.options)), {
+      attributes: true,
+      characterData: true,
+      childList: true,
+      subtree: true,
+      attributeFilter: [
+        "class",
+        "style",
+        "aria-expanded",
+        "aria-hidden",
+        "aria-pressed",
+        "aria-selected",
+        "hidden",
+        "data-state",
+        "disabled"
+      ]
+    });
   }
 });
 

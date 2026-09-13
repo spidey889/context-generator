@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-09-13-valid-surface-only-v28";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-09-13-adaptive-control-row-v29";
   const BUBBLE_ID = "context-generator-bubble";
   const OVERLAY_ID = "context-generator-overlay";
   const HANDOFF_SCRIM_ID = "context-generator-handoff-scrim";
@@ -456,6 +456,8 @@
   let deepSeekPlacementResizeTargets = [];
   let geminiPlacementResizeObserver = null;
   let geminiPlacementResizeTargets = [];
+  let providerControlMutationObserver = null;
+  let providerControlMutationRoot = null;
   let claudePlacementResizeObserver = null;
   let claudePlacementResizeTargets = [];
   let claudePlacementMutationObserver = null;
@@ -589,6 +591,7 @@
       getGeminiBubblePlacement,
       findGeminiModelSelectorButton,
       getGrokBubblePlacement,
+      getDeepSeekBubblePlacement,
       getChatGptFixedBubblePlacement,
       findPlatformInput,
       findComposerSurfaceElement,
@@ -6387,6 +6390,7 @@
       stopGrokPlacementResizeMonitoring();
       stopDeepSeekPlacementResizeMonitoring();
       stopGeminiPlacementResizeMonitoring();
+      stopProviderControlMutationMonitoring();
       clearClaudePlacementMonitoring();
       clearChatGptPlacementResizeMonitoring();
       return;
@@ -6419,6 +6423,7 @@
         return;
       }
       if (retainTransientComposerPlacement(bubble)) return;
+      stopProviderControlMutationMonitoring();
       bubble.style.display = "none";
       hideOnboardingNudge();
       if (currentPlatform.id === "claude") {
@@ -7065,77 +7070,26 @@
   }
 
   function getGrokBubblePlacement(composerRect) {
-    const speedButton = findGrokSpeedSelectorButton(composerRect);
-    if (speedButton) {
-      const speedRect = speedButton.getBoundingClientRect();
-      const left = speedRect.left - composerRect.left - BUBBLE_SIZE - BUBBLE_GAP;
+    const controlRowStart = getGrokComposerButtonCandidates(composerRect)[0];
+    if (controlRowStart) {
+      const left = controlRowStart.rect.left - composerRect.left - BUBBLE_SIZE - BUBBLE_GAP;
       if (left >= BUBBLE_GAP) {
-        return getBubblePlacementBesideRect(speedRect, composerRect, left);
-      }
-    }
-
-    const safeButtons = getGrokComposerButtonCandidates(composerRect).filter(({ button }) => {
-      const label = getElementLabel(button, true);
-      return !/\b(send|submit|voice|mic|microphone)\b/.test(label);
-    });
-    const anchorButton = safeButtons[safeButtons.length - 1];
-
-    if (anchorButton) {
-      const left = anchorButton.rect.left - composerRect.left - BUBBLE_SIZE - BUBBLE_GAP;
-      if (left >= BUBBLE_GAP) {
-        return getBubblePlacementBesideRect(anchorButton.rect, composerRect, left);
+        return getBubblePlacementBesideRect(controlRowStart.rect, composerRect, left);
       }
     }
 
     return getBottomRightRowBubblePlacement(composerRect, 186);
   }
 
-  function findGrokSpeedSelectorButton(composerRect) {
-    const rowTop = composerRect.bottom - Math.max(64, composerRect.height * 0.65);
-
-    return Array.from(document.querySelectorAll("button, [role='button'], [tabindex='0']"))
-      .filter((button) => button.id !== BUBBLE_ID && !isContextGeneratorNode(button) && isVisible(button))
-      .map((button) => {
-        const rect = button.getBoundingClientRect();
-        const label = getElementLabel(button, true);
-        const text = (button.innerText || button.textContent || "").toLowerCase();
-        let score = 0;
-
-        if (/\b(fast|build|auto|expert|heavy|think|thinking)\b/.test(text)) score += 180;
-        if (/\b(mode|speed|model|reasoning|thinking)\b/.test(label)) score += 36;
-        if (rect.left >= composerRect.left + composerRect.width * 0.55) score += 22;
-        if (rect.width >= 42 && rect.width <= 150) score += 12;
-        if (/\b(send|submit|voice|mic|microphone|attach|upload|image|search)\b/.test(label)) score -= 180;
-
-        return { button, rect, score };
-      })
-      .filter(({ rect, score }) => {
-        return (
-          score >= 120 &&
-          rect.width > 0 &&
-          rect.height > 0 &&
-          rect.height <= 56 &&
-          rect.left >= composerRect.left + composerRect.width * 0.45 &&
-          rect.right <= composerRect.right + 12 &&
-          rect.top >= rowTop &&
-          rect.bottom <= composerRect.bottom + 12
-        );
-      })
-      .sort((a, b) => {
-        if (b.score !== a.score) return b.score - a.score;
-        return b.rect.left - a.rect.left;
-      })[0]?.button || null;
-  }
-
   function getDeepSeekBubblePlacement(composerRect) {
     const rowButtons = getDeepSeekComposerButtonCandidates(composerRect);
     if (rowButtons.length < 2) return getDeepSeekFallbackBubblePlacement(composerRect);
 
-    const pinButton = rowButtons[rowButtons.length - 2];
-    const left = pinButton.rect.left - composerRect.left - BUBBLE_SIZE - BUBBLE_GAP;
+    const controlRowStart = rowButtons[0];
+    const left = controlRowStart.rect.left - composerRect.left - BUBBLE_SIZE - BUBBLE_GAP;
     if (left < BUBBLE_GAP) return getDeepSeekFallbackBubblePlacement(composerRect);
 
-    return getBubblePlacementBesideRect(pinButton.rect, composerRect, left);
+    return getBubblePlacementBesideRect(controlRowStart.rect, composerRect, left);
   }
 
   function getDeepSeekFallbackBubblePlacement(composerRect) {
@@ -7147,26 +7101,11 @@
 
     const rowTop = composerRect.bottom - Math.max(64, composerRect.height * 0.65);
 
-    return Array.from(document.querySelectorAll("button, [role='button'], [tabindex='0'], [aria-label], [title], span"))
+    return Array.from(document.querySelectorAll("button, [role='button'], [tabindex='0']"))
       .filter((element) => element.id !== BUBBLE_ID && !isContextGeneratorNode(element) && isVisible(element))
-      .map((element) => {
-        const rect = element.getBoundingClientRect();
-        const label = getElementLabel(element, true);
-        const text = (element.innerText || element.textContent || "").toLowerCase();
-        let score = 0;
-
-        if (/\b(?:flash|pro)\b/.test(text)) score += 220;
-        if (/\b(?:flash|pro)\b/.test(label)) score += 220;
-        if (/\b(model|gemini|pro|thinking)\b/.test(label)) score += 36;
-        if (rect.left >= composerRect.left + composerRect.width * 0.45) score += 16;
-        if (rect.width >= 24 && rect.width <= 180) score += 10;
-        if (/\b(send|submit|voice|mic|microphone|attach|upload|image|gallery|add)\b/.test(label)) score -= 260;
-
-        return { element, rect, score };
-      })
-      .filter(({ rect, score }) => {
+      .map((element) => ({ element, rect: element.getBoundingClientRect() }))
+      .filter(({ rect }) => {
         return (
-          score >= 180 &&
           rect.width > 0 &&
           rect.width <= 180 &&
           rect.height > 0 &&
@@ -7177,10 +7116,7 @@
           rect.bottom <= composerRect.bottom + 12
         );
       })
-      .sort((a, b) => {
-        if (b.score !== a.score) return b.score - a.score;
-        return a.rect.left - b.rect.left;
-      })[0]?.element || null;
+      .sort((a, b) => a.rect.left - b.rect.left)[0]?.element || null;
   }
 
   function getGeminiBubblePlacement(composerRect, actionBtn) {
@@ -7284,20 +7220,18 @@
 
     return Array.from(document.querySelectorAll("button, [role='button'], [tabindex='0']"))
       .filter((button) => {
-        const label = getElementLabel(button, true);
         return (
           button.id !== BUBBLE_ID &&
           !isContextGeneratorNode(button) &&
           isVisible(button) &&
-          !isDisabled(button) &&
-          !/\b(stop|cancel|attach|upload|voice|mic|microphone|new|menu|profile|account|model|mode)\b/.test(label)
+          !isDisabled(button)
         );
       })
       .map((button) => ({ button, rect: button.getBoundingClientRect() }))
       .filter(({ rect }) => {
         return (
           rect.width > 0 &&
-          rect.width <= 84 &&
+          rect.width <= 180 &&
           rect.height > 0 &&
           rect.height <= 76 &&
           rect.left >= composerRect.left + composerRect.width * 0.45 &&
@@ -7602,7 +7536,13 @@
   }
 
   function syncGrokPlacementResizeMonitoring(input, composerSurface) {
-    if (currentPlatform.id !== "grok" || typeof ResizeObserver === "undefined") {
+    if (currentPlatform.id !== "grok") {
+      stopGrokPlacementResizeMonitoring();
+      return;
+    }
+
+    syncProviderControlMutationMonitoring(input, composerSurface);
+    if (typeof ResizeObserver === "undefined") {
       stopGrokPlacementResizeMonitoring();
       return;
     }
@@ -7628,7 +7568,13 @@
   }
 
   function syncDeepSeekPlacementResizeMonitoring(input, composerSurface) {
-    if (currentPlatform.id !== "deepseek" || typeof ResizeObserver === "undefined") {
+    if (currentPlatform.id !== "deepseek") {
+      stopDeepSeekPlacementResizeMonitoring();
+      return;
+    }
+
+    syncProviderControlMutationMonitoring(input, composerSurface);
+    if (typeof ResizeObserver === "undefined") {
       stopDeepSeekPlacementResizeMonitoring();
       return;
     }
@@ -7654,7 +7600,13 @@
   }
 
   function syncGeminiPlacementResizeMonitoring(input, composerSurface) {
-    if (currentPlatform.id !== "gemini" || typeof ResizeObserver === "undefined") {
+    if (currentPlatform.id !== "gemini") {
+      stopGeminiPlacementResizeMonitoring();
+      return;
+    }
+
+    syncProviderControlMutationMonitoring(input, composerSurface);
+    if (typeof ResizeObserver === "undefined") {
       stopGeminiPlacementResizeMonitoring();
       return;
     }
@@ -7677,6 +7629,58 @@
     geminiPlacementResizeObserver?.disconnect();
     geminiPlacementResizeObserver = null;
     geminiPlacementResizeTargets = [];
+  }
+
+  function syncProviderControlMutationMonitoring(input, composerSurface) {
+    if (
+      !["grok", "deepseek", "gemini"].includes(currentPlatform.id) ||
+      typeof MutationObserver === "undefined"
+    ) {
+      stopProviderControlMutationMonitoring();
+      return;
+    }
+
+    const root = composerSurface?.contains?.(input) ? composerSurface : input;
+    if (!root || root === providerControlMutationRoot) return;
+
+    stopProviderControlMutationMonitoring();
+    providerControlMutationRoot = root;
+    providerControlMutationObserver = new MutationObserver((mutations) => {
+      const hasRelevantControlChange = mutations.some((mutation) => {
+        if (isOwnDomMutation(mutation)) return false;
+        if (mutation.type !== "characterData") return true;
+        // Button text can change without resizing the composer. Ignore editor
+        // text mutations so ordinary typing does not schedule placement work.
+        return !input.contains?.(mutation.target) && Boolean(
+          mutation.target.parentElement?.closest?.("button, [role='button'], [tabindex='0']")
+        );
+      });
+      if (!hasRelevantControlChange) return;
+      scheduleFloatingButtonUpdate("provider-control-change");
+    });
+    providerControlMutationObserver.observe(root, {
+      attributes: true,
+      characterData: true,
+      childList: true,
+      subtree: true,
+      attributeFilter: [
+        "class",
+        "style",
+        "aria-expanded",
+        "aria-hidden",
+        "aria-pressed",
+        "aria-selected",
+        "hidden",
+        "data-state",
+        "disabled"
+      ]
+    });
+  }
+
+  function stopProviderControlMutationMonitoring() {
+    providerControlMutationObserver?.disconnect();
+    providerControlMutationObserver = null;
+    providerControlMutationRoot = null;
   }
 
   function syncClaudePlacementResizeMonitoring(input, composerSurface) {
