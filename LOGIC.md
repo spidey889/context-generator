@@ -82,7 +82,6 @@ The toolbar action skips the picker. It defaults to Claude when the source is Ch
 Important sequencing:
 
 - The orb, destination picker, and handoff card form one visual transition. The orb exposes dialog state; keyboard/backdrop dismissal restores trigger focus, while clicking a page control preserves focus on that control. A chosen tile holds long enough to register, and the handoff card expands from the picker's measured screen position. Reduced-motion users receive the same state changes without movement.
-- While idle, the orb has a brief, low-opacity shimmer clipped to the orb artwork roughly every 10 seconds. The isolated decorative layer pauses during hover, press, transfer, and picker-open states, and is disabled when reduced motion is requested; it does not affect placement, sizing, focus, or interaction.
 - `isRunning` is page-local with a six-minute safety reset. The reset clears UI/state but does not abort ongoing capture, fetch, or paste work.
 - Picker-path telemetry starts before empty-chat validation so early exits are recorded safely.
 - Destination warmup and network preconnects never contain conversation text.

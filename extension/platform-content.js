@@ -5,7 +5,6 @@
   const HANDOFF_SCRIM_ID = "context-generator-handoff-scrim";
   const ONBOARDING_ID = "context-generator-onboarding";
   const ONBOARDING_STYLE_ID = "context-generator-onboarding-styles";
-  const BUBBLE_SHIMMER_STYLE_ID = "context-generator-bubble-shimmer-styles";
   const CLAUDE_LIMIT_NUDGE_ID = "context-generator-claude-limit-nudge";
   const DESTINATION_SHEET_ID = "context-generator-destination-sheet";
   const DESTINATION_SHEET_BACKDROP_ID = "context-generator-destination-backdrop";
@@ -495,7 +494,6 @@
       HANDOFF_SCRIM_ID,
       ONBOARDING_ID,
       ONBOARDING_STYLE_ID,
-      BUBBLE_SHIMMER_STYLE_ID,
       CLAUDE_LIMIT_NUDGE_ID,
       DESTINATION_SHEET_ID,
       DESTINATION_SHEET_BACKDROP_ID,
@@ -3386,8 +3384,6 @@
   }
 
   function createFloatingButton() {
-    ensureBubbleShimmerStyles();
-
     const bubble = document.createElement("button");
     bubble.id = BUBBLE_ID;
     bubble.type = "button";
@@ -3436,12 +3432,6 @@
     icon.draggable = false;
     bubble.appendChild(icon);
 
-    // Kept as a standalone decorative layer so this visual trial is easy to remove.
-    const shimmer = document.createElement("span");
-    shimmer.className = "context-generator-bubble-shimmer";
-    shimmer.setAttribute("aria-hidden", "true");
-    bubble.appendChild(shimmer);
-
     bubble.addEventListener("mouseenter", () => {
       bubble.style.filter = "brightness(1.12) drop-shadow(0 2px 6px rgba(0,0,0,0.25))";
     });
@@ -3468,47 +3458,6 @@
     });
 
     return bubble;
-  }
-
-  function ensureBubbleShimmerStyles() {
-    if (document.getElementById(BUBBLE_SHIMMER_STYLE_ID)) return;
-
-    const style = document.createElement("style");
-    style.id = BUBBLE_SHIMMER_STYLE_ID;
-    style.dataset.contextGeneratorOwned = "true";
-    style.textContent = `
-      @keyframes contextGeneratorBubbleShimmer {
-        0%, 2% { background-position: 180% 0; opacity: 0; }
-        3% { opacity: 0.26; }
-        9% { background-position: -80% 0; opacity: 0; }
-        100% { background-position: -80% 0; opacity: 0; }
-      }
-
-      #${BUBBLE_ID} .context-generator-bubble-shimmer {
-        position: absolute;
-        inset: 2px;
-        background: linear-gradient(108deg, transparent 34%, rgba(255, 255, 255, 0.72) 48%, transparent 62%);
-        background-size: 250% 100%;
-        -webkit-mask: url("${BUBBLE_ICON_URL}") center / contain no-repeat;
-        mask: url("${BUBBLE_ICON_URL}") center / contain no-repeat;
-        pointer-events: none;
-        opacity: 0;
-        animation: contextGeneratorBubbleShimmer 10s ease-in-out infinite;
-      }
-
-      #${BUBBLE_ID}:hover .context-generator-bubble-shimmer,
-      #${BUBBLE_ID}:active .context-generator-bubble-shimmer,
-      #${BUBBLE_ID}:disabled .context-generator-bubble-shimmer,
-      #${BUBBLE_ID}[aria-expanded="true"] .context-generator-bubble-shimmer {
-        animation-play-state: paused;
-        opacity: 0;
-      }
-
-      @media (prefers-reduced-motion: reduce) {
-        #${BUBBLE_ID} .context-generator-bubble-shimmer { animation: none; }
-      }
-    `;
-    (document.head || document.documentElement).appendChild(style);
   }
 
   function ensureOnboardingStyles() {
