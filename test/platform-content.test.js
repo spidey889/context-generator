@@ -471,6 +471,26 @@ test("handoff progress state advances deterministically through the three real s
   assert.equal(hooks.getHandoffProgressStatusText("paste", "done", "ChatGPT"), "Pasted into ChatGPT");
 });
 
+test("native popovers do not discard a still-visible verified composer", () => {
+  for (const hostname of ["claude.ai", "chatgpt.com", "gemini.google.com", "grok.com", "chat.deepseek.com"]) {
+    const composer = new FakeElement({ tag: "form" });
+    const input = new FakeElement({
+      attrs: { contenteditable: "true", role: "textbox" },
+      rect: { left: 240, right: 920, top: 620, bottom: 672, width: 680, height: 52 }
+    });
+    composer.children = [input];
+    input.parentElement = composer;
+    const hooks = loadPlatformContent([composer, input], hostname);
+
+    assert.equal(hooks.findPlatformInput(), input);
+    composer.setAttribute("aria-hidden", "true");
+    assert.equal(hooks.findPlatformInput(), input, `${hostname} should retain its visible composer`);
+
+    input.isConnected = false;
+    assert.equal(hooks.findPlatformInput(), null, `${hostname} should reject a removed composer`);
+  }
+});
+
 test("picker selection morphs into handoff and both surfaces keep animated exits", () => {
   const source = fs.readFileSync(SOURCE_PATH, "utf8");
   const transitionStart = source.indexOf("async function transitionDestinationSheetToHandoff()");

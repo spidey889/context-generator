@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-09-13-chatgpt-free-placement-v22";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-09-13-native-menu-visibility-v23";
   const BUBBLE_ID = "context-generator-bubble";
   const OVERLAY_ID = "context-generator-overlay";
   const HANDOFF_SCRIM_ID = "context-generator-handoff-scrim";
@@ -467,6 +467,7 @@
   let chatGptPlacementResizeTargets = [];
   let chatGptPlacementMutationObserver = null;
   let chatGptPlacementMutationRoot = null;
+  let retainedPlatformInput = null;
   let lastClaudeStablePlacementAt = 0;
   let claudePlacementGraceTimer = null;
   let lastClaudePlacementPathname = window.location.pathname;
@@ -585,6 +586,7 @@
       findGeminiModelSelectorButton,
       getGrokBubblePlacement,
       getChatGptFixedBubblePlacement,
+      findPlatformInput,
       findComposerSurfaceElement,
       reserveComposerSurface,
       syncGrokPlacementResizeMonitoring,
@@ -2051,9 +2053,28 @@
         return all.indexOf(element) === index && isVisible(element) && !element.closest("[aria-hidden='true']");
       });
 
-    return candidates
+    const selectedInput = candidates
       .map((element) => ({ element, score: scoreInputCandidate(element) }))
       .sort((a, b) => b.score - a.score)[0]?.element || null;
+
+    if (selectedInput) {
+      if (platform.id === currentPlatform.id) retainedPlatformInput = selectedInput;
+      return selectedInput;
+    }
+
+    // Native modal/popover systems may aria-hide the background application
+    // while leaving its composer visibly mounted. Keep only the already-verified
+    // input; removed or geometrically hidden composers still fail closed.
+    if (
+      platform.id === currentPlatform.id &&
+      retainedPlatformInput?.isConnected &&
+      isVisible(retainedPlatformInput)
+    ) {
+      return retainedPlatformInput;
+    }
+
+    if (platform.id === currentPlatform.id) retainedPlatformInput = null;
+    return null;
   }
 
   function findReadyPlatformInput(platform = currentPlatform) {
