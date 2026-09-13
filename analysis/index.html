@@ -856,7 +856,20 @@
       if (!model) return "n/a";
       const geminiFlash = String(model).match(/^gemini-(\d+(?:\.\d+)?)-flash$/i);
       if (geminiFlash) return `Gemini ${geminiFlash[1]} Flash`;
-      if (model === "orcarouter/free") return "OrcaRouter Free";
+      if (model === "orcarouter/free") return "Orca / Model not recorded";
+      const orcaDeepSeek = String(model).match(/^deepseek\/deepseek-v([\d.-]+)-(.+?)(?:-free)?$/i);
+      if (orcaDeepSeek) {
+        const variant = orcaDeepSeek[2].replace(/-free$/i, "").replaceAll("-", " ");
+        return `Orca / DeepSeek V${orcaDeepSeek[1].replaceAll("-", ".")} ${titleWords(variant)}`;
+      }
+      const orcaGlm = String(model).match(/^(?:z-ai|zai|zhipu|thudm)\/glm-(.+?)(?:-free)?$/i);
+      if (orcaGlm) {
+        const parts = orcaGlm[1].replace(/-free$/i, "").split("-");
+        const version = parts.length > 1 && parts[0].match(/^\d+$/) && parts[1].match(/^\d+$/)
+          ? `${parts.shift()}.${parts.shift()}`
+          : parts.shift();
+        return `Orca / GLM ${version}${parts.length ? ` ${titleWords(parts.join(" "))}` : ""}`;
+      }
       if (model === "mistral-medium-2604" || model === "mistral-medium-3-5") return "Mistral Medium 3.5";
       if (model === "mistral-large-2512" || model === "mistral-large-3-25-12") return "Mistral Large 3";
       if (model === "ministral-14b-2512") return "Ministral 3 14B";
@@ -865,6 +878,10 @@
       if (model === "llama-3.1-8b-instant") return "Llama 3.1 8B Instant";
       if (model === "local-direct") return "Local fallback";
       return model;
+    }
+
+    function titleWords(value) {
+      return String(value || "").replace(/\b\w/g, (letter) => letter.toUpperCase());
     }
 
     function formatBackendLabel(summary) {

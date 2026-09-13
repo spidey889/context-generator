@@ -10,6 +10,7 @@ Cap Context uses OrcaRouter only as a best-effort free fallback between Gemini a
 - Budget: 45 seconds total, including one bounded retry for temporary server/network failure
 - HTTP 429: move immediately to Mistral without retrying OrcaRouter
 - Missing key or any OrcaRouter failure: fail open to the existing Mistral, Groq, and local fallbacks
+- Successful calls record the concrete model from `X-Orca-Resolved-Model`; the router alias is never presented as the serving model when Orca supplies that header
 
 Never replace `orcarouter/free` with `orcarouter/auto` without a separate cost decision. The free alias never uses wallet credit or falls through to a paid model. OrcaRouter does not publish fixed free limits: it can reject by minute, UTC day, available free capacity, or per-request prompt size. This is why Cap Context treats it as opportunistic capacity rather than a dependable primary provider.
 

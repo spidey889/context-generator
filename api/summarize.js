@@ -534,17 +534,20 @@ async function createSummaryWithFallback({
         model: ORCAROUTER_FREE_MODEL,
         initialMessages: fallbackMessages
       });
+      // The router alias is only the request target. Keep the concrete model
+      // OrcaRouter reports so Latest Run shows what actually produced the text.
+      modelsTried[modelsTried.length - 1] = result.model;
       const failedModels = modelsTried.slice(0, -1);
       const skippedReason = formatSkippedGeminiModels(geminiModelsSkipped);
       const modelReason = skippedReason
-        ? `${skippedReason}; ${failedModels.length ? `${failedModels.join(" -> ")} failed; ` : ""}fell back to ${ORCAROUTER_FREE_MODEL}`
+        ? `${skippedReason}; ${failedModels.length ? `${failedModels.join(" -> ")} failed; ` : ""}fell back to ${result.model}`
         : failedModels.length
-        ? `${failedModels.join(" -> ")} failed; fell back to ${ORCAROUTER_FREE_MODEL}`
-        : `${ORCAROUTER_FREE_MODEL} served as the first configured remote model`;
+        ? `${failedModels.join(" -> ")} failed; fell back to ${result.model}`
+        : `${result.model} served through OrcaRouter as the first configured remote model`;
 
       console.info("[Context Generator] Summary served:", {
         provider: SUMMARY_PROVIDERS.orcarouter.id,
-        model: ORCAROUTER_FREE_MODEL,
+        model: result.model,
         reason: modelReason
       });
 
@@ -563,7 +566,7 @@ async function createSummaryWithFallback({
               attempted: true,
               used: true,
               servedBy: SUMMARY_PROVIDERS.orcarouter.id,
-              model: ORCAROUTER_FREE_MODEL,
+              model: result.model,
               reason: getProviderFailureReason(lastProviderFailure)
             })
           : createFallbackMetadata()
@@ -787,6 +790,7 @@ async function createSummaryWithProvider({ provider, apiKey, profile, model, ini
   }
 
   const data = await readResponseJson(initialResponse, provider);
+  const resolvedModel = getResolvedProviderModel(provider, initialResponse, model);
   const finishReason = getProviderFinishReason(provider, data);
   const initialUsage = normalizeProviderUsage(provider, data);
   const rawSummary = getProviderSummaryText(provider, data);
@@ -824,7 +828,7 @@ async function createSummaryWithProvider({ provider, apiKey, profile, model, ini
   return {
     summary,
     provider: provider.id,
-    model,
+    model: resolvedModel,
     providerMs: Date.now() - providerStartedAt,
     initialMs,
     providerPasses: 1,
@@ -1033,6 +1037,15 @@ function getMistralModelSelection(conversation) {
     thresholdChars: null,
     override: false
   };
+}
+
+function getResolvedProviderModel(provider, response, requestedModel) {
+  if (provider.id !== SUMMARY_PROVIDERS.orcarouter.id) return requestedModel;
+
+  const resolvedModel = response.headers?.get?.("x-orca-resolved-model");
+  return typeof resolvedModel === "string" && /^[a-z0-9._/-]{1,160}$/i.test(resolvedModel)
+    ? resolvedModel
+    : requestedModel;
 }
 
 function getOrcaRouterModelSelection(conversation) {

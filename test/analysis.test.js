@@ -20,7 +20,9 @@ test("analysis receipt shows the served model and does not report it as failed",
   assert.doesNotMatch(ANALYSIS_SOURCE, /sideItem\("Primary model"/);
   assert.match(ANALYSIS_SOURCE, /sideItem\("Model path", getModelFallbackLabel\(summary\), "fallback"\)/);
   assert.equal(formatModelDisplayName("gemini-3.8-flash"), "Gemini 3.8 Flash");
-  assert.equal(formatModelDisplayName("orcarouter/free"), "OrcaRouter Free");
+  assert.equal(formatModelDisplayName("orcarouter/free"), "Orca / Model not recorded");
+  assert.equal(formatModelDisplayName("deepseek/deepseek-v4-flash-free"), "Orca / DeepSeek V4 Flash");
+  assert.equal(formatModelDisplayName("z-ai/glm-5-2-free"), "Orca / GLM 5.2");
   assert.equal(
     getModelFallbackLabel(summary),
     "Tried this run\nGemini 3.8 Flash — failed\nGemini 3.7 Flash — failed\nGemini 3.6 Flash — served"
@@ -66,7 +68,7 @@ test("analysis formats a long provider failure chain as readable lines", () => {
       "Tried this run",
       "Gemini 3.6 Flash — failed",
       "Gemini 3.5 Flash — failed",
-      "OrcaRouter Free — failed",
+    "Orca / Model not recorded — failed",
       "Mistral Medium 3.5 — failed",
       "Groq Compound Mini — failed",
       "Local fallback — served"

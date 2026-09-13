@@ -509,6 +509,11 @@ test("backend uses only OrcaRouter Free before Mistral", async () => {
     return {
       ok: true,
       status: 200,
+      headers: {
+        get: (name) => name.toLowerCase() === "x-orca-resolved-model"
+          ? "deepseek/deepseek-v4-flash-free"
+          : null
+      },
       json: async () => ({
         usage: { prompt_tokens: 500, completion_tokens: 200, total_tokens: 700 },
         choices: [{ message: { content: makeContextCarrySummary("orca-free", 260) } }]
@@ -524,9 +529,9 @@ test("backend uses only OrcaRouter Free before Mistral", async () => {
     assert.equal(capturedRequest.headers.Authorization, "Bearer test-orca-key");
     assert.equal(capturedRequest.body.model, "orcarouter/free");
     assert.equal(res.payload.timing.servedBy, "orcarouter");
-    assert.equal(res.payload.timing.model, "orcarouter/free");
+    assert.equal(res.payload.timing.model, "deepseek/deepseek-v4-flash-free");
     assert.equal(res.payload.timing.primaryModel, "orcarouter/free");
-    assert.deepEqual(res.payload.timing.modelsTried, ["orcarouter/free"]);
+    assert.deepEqual(res.payload.timing.modelsTried, ["deepseek/deepseek-v4-flash-free"]);
   } finally {
     restoreMistralKey();
     restoreOrcaKey();
