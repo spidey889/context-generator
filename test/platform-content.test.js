@@ -2301,6 +2301,28 @@ test("Claude rejects a page-sized ancestor as the composer surface", () => {
   assert.equal(hooks.findComposerSurfaceElement(input), compactComposer);
 });
 
+test("composer discovery rejects an unvalidated inner editor wrapper", () => {
+  for (const hostname of ["chatgpt.com", "gemini.google.com", "grok.com", "chat.deepseek.com"]) {
+    const input = new FakeElement({
+      attrs: { contenteditable: "true", role: "textbox" },
+      rect: { left: 240, right: 920, top: 620, bottom: 672, width: 680, height: 52 }
+    });
+    const innerWrapper = new FakeElement({
+      rect: { left: 250, right: 900, top: 625, bottom: 668, width: 650, height: 43 }
+    });
+    input.parentElement = innerWrapper;
+    innerWrapper.children = [input];
+
+    const hooks = loadPlatformContent([innerWrapper, input], hostname);
+
+    assert.equal(
+      hooks.findComposerSurfaceElement(input),
+      null,
+      `${hostname} should reject the inner editor wrapper`
+    );
+  }
+});
+
 test("Claude selects the surface whose geometry actually contains the visible control row", () => {
   const input = new FakeElement({
     attrs: { contenteditable: "true", role: "textbox", "aria-label": "Write your prompt to Claude" },

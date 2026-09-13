@@ -1,5 +1,7 @@
 # Changelog
 
+- 2026-09-13: Removed the unvalidated input-parent composer fallback. Surface discovery now fails closed when no scored and validated ancestor or form qualifies, preventing inner editor wrappers from becoming placement or retained-reservation roots.
+
 - 2026-09-13: Prevented settings and native modal textareas/contenteditables from replacing the verified chat composer. Shared input discovery now excludes new dialog-owned editors while preserving the already verified composer through native overlay states.
 
 - 2026-09-13: Stabilized Gemini, Grok, and DeepSeek placement across transient composer remounts. Their composer-owned orb now holds its last verified viewport position through a bounded 700 ms discovery gap, then immediately reattaches and recalculates when the live composer returns; persistent loss still hides it normally.

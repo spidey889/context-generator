@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-09-13-modal-composer-filter-v27";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-09-13-valid-surface-only-v28";
   const BUBBLE_ID = "context-generator-bubble";
   const OVERLAY_ID = "context-generator-overlay";
   const HANDOFF_SCRIM_ID = "context-generator-handoff-scrim";
@@ -7352,7 +7352,9 @@
       return form;
     }
 
-    return currentPlatform.id === "claude" ? null : input.parentElement;
+    // Every parent and ancestor has already passed through surface validation.
+    // If none qualified, fail closed instead of anchoring to an editor wrapper.
+    return null;
   }
 
   function findClaudePendingMonitoringSurface(input) {
