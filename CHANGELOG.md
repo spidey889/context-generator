@@ -67,7 +67,7 @@ Write entries in past tense and describe the resulting behavior, not every imple
 
 ### 2026-09-13
 
-- Tried and removed an isolated idle-orb shimmer after the visual treatment did not read naturally. Deferred a future artwork-clipped version to `todo.md`; production retains the existing orb appearance and animations.
+- Tried and removed an isolated idle-orb shimmer after the visual treatment did not read naturally. Production retains the existing orb appearance and animations.
 
 ### 2026-09-12
 
