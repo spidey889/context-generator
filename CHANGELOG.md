@@ -1,5 +1,7 @@
 # Changelog
 
+- 2026-09-13: Fixed ChatGPT free-plan placement so Cap Context anchors before the complete visible right-side control row instead of occupying the mic slot when the paid reasoning control is absent. Paid placement remains anchored to the reasoning control.
+
 - 2026-09-13: Fixed Cap Context stealing focus from native controls and composers across ChatGPT, Gemini, Grok, and DeepSeek. Their shared outside-click path now dismisses an open destination picker without refocusing the Cap Context button, while keyboard and backdrop dismissal retain trigger-focus restoration. Updated the content-script load identity so the corrected shared behavior is loaded consistently.
 
 - 2026-09-13: Raised OrcaRouter's request budget from 45 to 60 seconds and confirmed its current free GLM route displays as `Orca / GLM 5.3 Flash`.

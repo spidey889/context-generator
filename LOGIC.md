@@ -231,7 +231,7 @@ The protected `users` table creates a row on an install's first successful trans
 - Claude composer surfaces must remain horizontally close to the editor. `CLAUDE_MAX_COMPOSER_HORIZONTAL_PADDING` is 160 px across the combined left and right padding. Reject page-sized ancestors beyond this bound so phantom width cannot push mic/voice controls and the orb outside the composer or make placement oscillate during hydration. Apply this check to both retained and newly scored surfaces while still allowing tall real composers.
 - Latest live DOM verification on 2026-09-09 found one compact 83×32 `display: grid` switch cluster inside the editor-owning composer. It contained the hidden Send branch and visible Dictate/Voice/Voice-mode branch; individual state buttons remained unmodified while the cluster owned the shared `translate`. These class names are evidence, not selectors or a compatibility contract.
 - Claude debugging references live in `docs/debugging/`: `claude-last-known-dom.md` records the latest verified hierarchy, geometry, stable/transient nodes, observers, and negative-route check; `claude-placement-logs.md` records the incident evidence, discarded approaches, and future instrumentation guidance. Treat both as dated history; this file and production code remain authoritative.
-- ChatGPT: fixed left of the model selector; retains its last usable surface and requires focused paste.
+- ChatGPT: fixed left of the paid reasoning selector when present; otherwise fixed left of the complete visible right-side control row so free-plan mic/voice controls stay unobstructed. Retains its last usable surface and requires focused paste.
 - Gemini: left of the Pro/Flash selector; retains the outer composer during large-paste expansion.
 - Grok: beside the mode/speed selector; retains the outer composer and requires focused paste.
 - DeepSeek: near attachment/input controls; retains the outer composer during expansion.
@@ -247,7 +247,7 @@ Paste uses native setters/events plus stability checks. Firefox alone converts c
 - Model/profile routing: provider constants/budgets, prompts, Latest Run labels, evaluation expectations, this file, `memory.md`, `extension/README.md`.
 - Telemetry fields/stages/failures: source/background sanitizers, Vercel validator, Supabase validator, SQL constraints/functions, privacy wording, tests. Free-form telemetry fields are forbidden.
 - Latest Run receipt: producer, background expiry, bridge, analysis renderer, privacy wording, analysis tests.
-- Any content-script change: update `CONTENT_SCRIPT_LOAD_ID` so open tabs replace stale code, and retain stale-node/reservation cleanup. Current value: `platform-content-2026-09-13-shared-focus-dismiss-v21`.
+- Any content-script change: update `CONTENT_SCRIPT_LOAD_ID` so open tabs replace stale code, and retain stale-node/reservation cleanup. Current value: `platform-content-2026-09-13-chatgpt-free-placement-v22`.
 - Extension release: bump `extension/manifest.json`, rebuild the ZIP with `manifest.json` at its root, hash-compare every file against `extension/`, then test the unpacked folder in a new Brave window.
 
 ## Common Wrong Assumptions

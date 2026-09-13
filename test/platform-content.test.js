@@ -2433,6 +2433,72 @@ test("Claude preserves native control animation during a populated-editor Voice 
   });
 });
 
+function getChatGptComposerPlacement(controls) {
+  const composerRect = { left: 642, right: 1602, top: 920, bottom: 986, width: 960, height: 66 };
+  const composer = new FakeElement({ tag: "form", rect: composerRect });
+  const input = new FakeElement({
+    attrs: { contenteditable: "true", role: "textbox" },
+    rect: { left: 708, right: 1368, top: 932, bottom: 974, width: 660, height: 42 }
+  });
+  composer.children = [input, ...controls];
+  composer.children.forEach((element) => { element.parentElement = composer; });
+
+  const hooks = loadPlatformContent(
+    [composer, input, ...controls],
+    "chatgpt.com",
+    { innerWidth: 1920, innerHeight: 1080 }
+  );
+  return hooks.getChatGptFixedBubblePlacement(input);
+}
+
+test("ChatGPT paid placement remains left of the reasoning control", () => {
+  const high = new FakeElement({
+    tag: "button",
+    text: "High",
+    attrs: { "aria-label": "Reasoning effort" },
+    rect: { left: 1400, right: 1466, top: 936, bottom: 972, width: 66, height: 36 }
+  });
+  const mic = new FakeElement({
+    tag: "button",
+    attrs: { "aria-label": "Microphone" },
+    rect: { left: 1478, right: 1514, top: 936, bottom: 972, width: 36, height: 36 }
+  });
+  const voice = new FakeElement({
+    tag: "button",
+    attrs: { "aria-label": "Voice mode" },
+    rect: { left: 1548, right: 1592, top: 932, bottom: 976, width: 44, height: 44 }
+  });
+
+  const placement = getChatGptComposerPlacement([high, mic, voice]);
+
+  assert.equal(placement.left, 1350);
+  assert.equal(placement.top, 933);
+});
+
+test("ChatGPT free placement stays left of the complete visible control row", () => {
+  const think = new FakeElement({
+    tag: "button",
+    text: "Think",
+    attrs: { "aria-label": "Thinking" },
+    rect: { left: 1390, right: 1482, top: 936, bottom: 972, width: 92, height: 36 }
+  });
+  const mic = new FakeElement({
+    tag: "button",
+    attrs: { "aria-label": "Microphone" },
+    rect: { left: 1498, right: 1534, top: 936, bottom: 972, width: 36, height: 36 }
+  });
+  const voice = new FakeElement({
+    tag: "button",
+    attrs: { "aria-label": "Voice mode" },
+    rect: { left: 1548, right: 1592, top: 932, bottom: 976, width: 44, height: 44 }
+  });
+  const placement = getChatGptComposerPlacement([think, mic, voice]);
+
+  assert.equal(placement.left, 1340);
+  assert.equal(placement.top, 933);
+  assert.ok(placement.left + 42 <= think.rect.left);
+});
+
 test("Gemini bubble anchors to the left of the Flash selector", () => {
   const flash = new FakeElement({
     tag: "button",

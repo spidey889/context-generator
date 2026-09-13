@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-09-13-shared-focus-dismiss-v21";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-09-13-chatgpt-free-placement-v22";
   const BUBBLE_ID = "context-generator-bubble";
   const OVERLAY_ID = "context-generator-overlay";
   const HANDOFF_SCRIM_ID = "context-generator-handoff-scrim";
@@ -584,6 +584,7 @@
       getGeminiBubblePlacement,
       findGeminiModelSelectorButton,
       getGrokBubblePlacement,
+      getChatGptFixedBubblePlacement,
       findComposerSurfaceElement,
       reserveComposerSurface,
       syncGrokPlacementResizeMonitoring,
@@ -6860,10 +6861,12 @@
 
     if (composerRect) {
       const rowButtons = getChatGptComposerButtonCandidates(input, composerSurface, composerRect);
-      const actionButton = rowButtons[rowButtons.length - 1];
+      // Free plans have no reasoning selector. Anchor before the whole visible
+      // control row (including wider pills such as Think), not beside Voice.
+      const leftmostControl = rowButtons[0];
 
-      if (actionButton) {
-        return getFixedBubblePlacementBesideRect(actionButton.rect);
+      if (leftmostControl) {
+        return getFixedBubblePlacementBesideRect(leftmostControl.rect);
       }
 
       const fallback = getBottomRightRowBubblePlacement(composerRect, 64);
@@ -6985,7 +6988,7 @@
       .filter(({ rect }) => {
         return (
           rect.width > 0 &&
-          rect.width <= 84 &&
+          rect.width <= 180 &&
           rect.height > 0 &&
           rect.height <= 72 &&
           rect.left >= composerRect.left + composerRect.width * 0.45 &&
