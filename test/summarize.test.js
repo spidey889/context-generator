@@ -477,8 +477,8 @@ test("provider fallback budgets keep the complete chain below the extension dead
     getProviderRequestBudgetMs("gemini-3.6-flash"),
     getProviderRequestBudgetMs("gemini-3.5-flash"),
     getProviderRequestBudgetMs("mistral-medium-3-5"),
-    getProviderRequestBudgetMs("mistral-large-3-25-12"),
-    getProviderRequestBudgetMs("ministral-3-3b-25-12"),
+    getProviderRequestBudgetMs("mistral-large-2512"),
+    getProviderRequestBudgetMs("ministral-3b-2512"),
     getProviderRequestBudgetMs("groq/compound-mini")
   ];
 
@@ -527,14 +527,14 @@ test("backend falls back from medium 3.5 to large and reports the serving model"
     assert.equal(res.statusCode, 200);
     assert.deepEqual(requests.map((request) => request.model), [
       "mistral-medium-3-5",
-      "mistral-large-3-25-12"
+      "mistral-large-2512"
     ]);
-    assert.equal(res.payload.timing.model, "mistral-large-3-25-12");
+    assert.equal(res.payload.timing.model, "mistral-large-2512");
     assert.deepEqual(res.payload.timing.mistralModelsTried, [
       "mistral-medium-3-5",
-      "mistral-large-3-25-12"
+      "mistral-large-2512"
     ]);
-    assert.match(res.payload.timing.modelReason, /mistral-medium-3-5 failed; fell back to mistral-large-3-25-12/);
+    assert.match(res.payload.timing.modelReason, /mistral-medium-3-5 failed; fell back to mistral-large-2512/);
   } finally {
     restoreApiKey();
     global.fetch = originalFetch;
@@ -591,11 +591,15 @@ test("backend falls back to Groq after Mistral rate limits and keeps the same pr
     await summarize({ method: "POST", body: { conversation } }, res);
 
     assert.equal(res.statusCode, 200);
-    assert.equal(mistralRequests.length, 2);
+    assert.equal(mistralRequests.length, 6);
     assert.equal(groqRequests.length, 1);
     assert.deepEqual(mistralRequests.map((request) => request.model), [
       "mistral-medium-3-5",
-      "mistral-medium-3-5"
+      "mistral-medium-3-5",
+      "mistral-large-2512",
+      "mistral-large-2512",
+      "ministral-3b-2512",
+      "ministral-3b-2512"
     ]);
     assert.ok(mistralRequests.every((request) => request.prompt_cache_key));
     assert.equal(groqRequests[0].model, "groq/compound-mini");
@@ -675,8 +679,8 @@ test("backend falls back to Groq when Mistral returns an empty summary", async (
     assert.equal(requests.length, 4);
     assert.deepEqual(requests.slice(0, 3).map((request) => request.body.model), [
       "mistral-medium-3-5",
-      "mistral-large-3-25-12",
-      "ministral-3-3b-25-12"
+      "mistral-large-2512",
+      "ministral-3b-2512"
     ]);
     assert.equal(requests[3].body.model, "groq/compound-mini");
     assert.deepEqual(requests[3].body.messages, requests[0].body.messages);
@@ -726,9 +730,9 @@ test("backend advances through the existing model chain when validation rejects 
     assert.equal(requests.length, 2);
     assert.deepEqual(requests.map((request) => request.model), [
       "mistral-medium-3-5",
-      "mistral-large-3-25-12"
+      "mistral-large-2512"
     ]);
-    assert.equal(res.payload.timing.model, "mistral-large-3-25-12");
+    assert.equal(res.payload.timing.model, "mistral-large-2512");
     assert.match(res.payload.timing.modelReason, /mistral-medium-3-5 failed/);
     assert.match(res.payload.summary, /validated-fallback/);
   } finally {
@@ -774,9 +778,9 @@ test("backend advances to the next model after a timed-out Mistral attempt", asy
     assert.equal(res.statusCode, 200);
     assert.deepEqual(requests.map((request) => request.model), [
       "mistral-medium-3-5",
-      "mistral-large-3-25-12"
+      "mistral-large-2512"
     ]);
-    assert.equal(res.payload.timing.model, "mistral-large-3-25-12");
+    assert.equal(res.payload.timing.model, "mistral-large-2512");
   } finally {
     restoreApiKey();
     global.fetch = originalFetch;

@@ -1,5 +1,7 @@
 # Changelog
 
+- 2026-09-13: Corrected the Mistral fallback API IDs and made model-specific HTTP 429 responses advance to the next Mistral model instead of incorrectly skipping the whole provider.
+
 - 2026-09-12: Fixed provider rate-limit retries to honor `Retry-After`, with a one-second minimum for HTTP 429 responses, instead of retrying Mistral inside its one-request-per-second window.
 
 - 2026-09-12: Stopped rejecting otherwise valid Groq summaries solely because the model paraphrased NEXT STEP; normalization still replaces that section with the trusted exact destination instruction.

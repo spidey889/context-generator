@@ -857,6 +857,8 @@
       const geminiFlash = String(model).match(/^gemini-(\d+(?:\.\d+)?)-flash$/i);
       if (geminiFlash) return `Gemini ${geminiFlash[1]} Flash`;
       if (model === "mistral-medium-2604" || model === "mistral-medium-3-5") return "Mistral Medium 3.5";
+      if (model === "mistral-large-2512" || model === "mistral-large-3-25-12") return "Mistral Large 3";
+      if (model === "ministral-3b-2512" || model === "ministral-3-3b-25-12") return "Ministral 3 3B";
       if (model === "groq/compound-mini") return "Groq Compound Mini";
       if (model === "llama-3.1-8b-instant") return "Llama 3.1 8B Instant";
       if (model === "local-direct") return "Local fallback";

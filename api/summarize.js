@@ -23,15 +23,15 @@ const MISTRAL_CHAT_COMPLETIONS_URL = "https://api.mistral.ai/v1/chat/completions
 const GROQ_CHAT_COMPLETIONS_URL = "https://api.groq.com/openai/v1/chat/completions";
 const LOCAL_DIRECT_MODEL = "local-direct";
 const MISTRAL_PRIMARY_MODEL = "mistral-medium-3-5";
-const MISTRAL_FALLBACK_MODELS = ["mistral-large-3-25-12", "ministral-3-3b-25-12"];
+const MISTRAL_FALLBACK_MODELS = ["mistral-large-2512", "ministral-3b-2512"];
 const MISTRAL_MODEL_CHAIN = [MISTRAL_PRIMARY_MODEL, ...MISTRAL_FALLBACK_MODELS];
 const GROQ_FALLBACK_MODEL = "groq/compound-mini";
 const PROVIDER_REQUEST_BUDGETS_MS = {
   [GEMINI_PRIMARY_MODEL]: 45000,
   ...Object.fromEntries(GEMINI_FALLBACK_MODELS.map((model) => [model, 45000])),
   [MISTRAL_PRIMARY_MODEL]: 55000,
-  "mistral-large-3-25-12": 40000,
-  "ministral-3-3b-25-12": 25000,
+  "mistral-large-2512": 40000,
+  "ministral-3b-2512": 25000,
   [GROQ_FALLBACK_MODEL]: 15000
 };
 const MISTRAL_PROMPT_CACHE_VERSION = "capcontext-summary-v7";
@@ -555,16 +555,12 @@ async function createSummaryWithFallback({
         mistralFailure = error;
         lastProviderFailure = error;
         const nextModel = MISTRAL_MODEL_CHAIN[index + 1];
-        const providerRateLimited = error?.providerStatus === 429;
         console.error(
-          providerRateLimited
-            ? `[Context Generator] ${model} rate-limited; trying Groq fallback:`
-            : nextModel
+          nextModel
             ? `[Context Generator] ${model} failed; falling back to ${nextModel}:`
             : `[Context Generator] ${model} failed; Mistral chain exhausted, trying Groq fallback:`,
           getProviderFailureLog(error)
         );
-        if (providerRateLimited) break;
       }
     }
   } else {
