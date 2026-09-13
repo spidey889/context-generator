@@ -23,14 +23,13 @@ const MISTRAL_CHAT_COMPLETIONS_URL = "https://api.mistral.ai/v1/chat/completions
 const GROQ_CHAT_COMPLETIONS_URL = "https://api.groq.com/openai/v1/chat/completions";
 const LOCAL_DIRECT_MODEL = "local-direct";
 const MISTRAL_PRIMARY_MODEL = "mistral-medium-3-5";
-const MISTRAL_FALLBACK_MODELS = ["mistral-large-2512", "ministral-3b-2512"];
+const MISTRAL_FALLBACK_MODELS = ["ministral-3b-2512"];
 const MISTRAL_MODEL_CHAIN = [MISTRAL_PRIMARY_MODEL, ...MISTRAL_FALLBACK_MODELS];
 const GROQ_FALLBACK_MODEL = "groq/compound-mini";
 const PROVIDER_REQUEST_BUDGETS_MS = {
   [GEMINI_PRIMARY_MODEL]: 45000,
   ...Object.fromEntries(GEMINI_FALLBACK_MODELS.map((model) => [model, 45000])),
   [MISTRAL_PRIMARY_MODEL]: 55000,
-  "mistral-large-2512": 40000,
   "ministral-3b-2512": 25000,
   [GROQ_FALLBACK_MODEL]: 15000
 };
@@ -779,9 +778,9 @@ function requestProviderSummary(provider, apiKey, messages, profile, model, opti
     headers,
     body: JSON.stringify(body)
   }, options.requestBudgetMs ?? getProviderRequestBudgetMs(model), {
-    // A Gemini 429 should move to the next model immediately. Other transient
-    // failures retain the existing bounded retry.
-    retryRateLimits: provider.id !== SUMMARY_PROVIDERS.gemini.id
+    // Gemini and Mistral have model-specific limits and fallback models, so a
+    // 429 should advance immediately instead of waiting inside the same model.
+    retryRateLimits: provider.id === SUMMARY_PROVIDERS.groq.id
   });
 }
 
@@ -1045,7 +1044,13 @@ function logGeminiHealth(model, health, outcome) {
 async function readProviderErrorMetadata(response) {
   try {
     const payload = await response.json();
-    const providerError = payload?.error && typeof payload.error === "object" ? payload.error : {};
+    // Gemini nests error metadata, while Mistral returns the same fields at the
+    // response root. Read both shapes without retaining or logging the body.
+    const providerError = payload?.error && typeof payload.error === "object"
+      ? payload.error
+      : payload && typeof payload === "object"
+      ? payload
+      : {};
     const code = typeof providerError.code === "string"
       ? providerError.code.toLowerCase()
       : typeof providerError.status === "string"

@@ -1,5 +1,7 @@
 # Changelog
 
+- 2026-09-13: Removed Mistral Large 3 from the active fallback chain after production proved the API key consistently receives HTTP 403 for it. Mistral 429 responses now move immediately from Medium 3.5 to Ministral 3 3B instead of waiting on a same-model retry, and safe error-code parsing now supports Mistral's root-level error format.
+
 - 2026-09-13: Corrected the Mistral fallback API IDs and made model-specific HTTP 429 responses advance to the next Mistral model instead of incorrectly skipping the whole provider.
 
 - 2026-09-12: Fixed provider rate-limit retries to honor `Retry-After`, with a one-second minimum for HTTP 429 responses, instead of retrying Mistral inside its one-request-per-second window.
