@@ -493,7 +493,7 @@ test("picker selection morphs into handoff and both surfaces keep animated exits
   );
 });
 
-test("destination picker exposes dialog state and restores the trigger on dismissal", () => {
+test("destination picker restores trigger focus without overriding outside page clicks", () => {
   const source = fs.readFileSync(SOURCE_PATH, "utf8");
   const sheetStart = source.indexOf("function ensureDestinationSheet()");
   const sheetEnd = source.indexOf("function ensureDestinationSheetBackdrop()", sheetStart);
@@ -506,6 +506,10 @@ test("destination picker exposes dialog state and restores the trigger on dismis
   assert.match(sheetSource, /sheet\.setAttribute\("aria-hidden", "true"\)/);
   assert.match(sheetSource, /event\.key !== "Tab"/);
   assert.match(sheetSource, /focusableTiles\[nextIndex\]\.focus/);
+  assert.match(
+    sheetSource,
+    /document\.addEventListener\("click", \(\) => \{\s+if \(!isDestinationSheetOpen\(\)\) return;[\s\S]*?hideDestinationSheet\(\{ restoreFocus: false \}\);\s+\}\)/
+  );
   assert.match(sheetSource, /detail\.textContent = "Opening…"/);
   assert.match(sheetSource, /tile\.setAttribute\("aria-disabled", "true"\)/);
   assert.match(toggleAndHideSource, /bubble\.setAttribute\("aria-expanded", "true"\)/);

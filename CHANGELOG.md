@@ -1,5 +1,7 @@
 # Changelog
 
+- 2026-09-13: Fixed Cap Context stealing focus from ChatGPT controls and the composer. Outside page clicks now dismiss an open destination picker without refocusing the Cap Context button, while keyboard and backdrop dismissal retain trigger-focus restoration.
+
 - 2026-09-13: Raised OrcaRouter's request budget from 45 to 60 seconds and confirmed its current free GLM route displays as `Orca / GLM 5.3 Flash`.
 
 - 2026-09-13: Latest Run now records and displays OrcaRouter's concrete resolved model from `X-Orca-Resolved-Model`, including readable Orca / DeepSeek and Orca / GLM names, instead of presenting the `orcarouter/free` request alias as the serving model.

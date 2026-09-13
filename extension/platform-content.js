@@ -4616,7 +4616,12 @@
 
     sheet.addEventListener("click", (event) => event.stopPropagation());
     document.body.appendChild(sheet);
-    document.addEventListener("click", hideDestinationSheet);
+    document.addEventListener("click", () => {
+      if (!isDestinationSheetOpen()) return;
+      // The page control the user clicked now owns focus. Only keyboard/backdrop
+      // dismissals should return focus to the Cap Context trigger.
+      hideDestinationSheet({ restoreFocus: false });
+    });
     document.addEventListener("keydown", (event) => {
       if (!isDestinationSheetOpen()) return;
       if (event.key === "Escape") {
