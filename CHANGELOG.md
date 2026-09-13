@@ -1,5 +1,7 @@
 # Changelog
 
+- 2026-09-13: Raised OrcaRouter's request budget from 45 to 60 seconds and confirmed its current free GLM route displays as `Orca / GLM 5.3 Flash`.
+
 - 2026-09-13: Latest Run now records and displays OrcaRouter's concrete resolved model from `X-Orca-Resolved-Model`, including readable Orca / DeepSeek and Orca / GLM names, instead of presenting the `orcarouter/free` request alias as the serving model.
 
 - 2026-09-13: Added OrcaRouter's strictly free `orcarouter/free` route between Gemini and Mistral. The integration uses a dedicated Vercel secret, a 45-second budget, immediate fallback on free-tier 429 responses, complete Latest Run provider/model reporting, and no path to OrcaRouter's paid automatic models. The full remote-provider allowance remains 175 seconds inside the extension deadline.
