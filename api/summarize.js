@@ -22,15 +22,14 @@ const GEMINI_GENERATE_CONTENT_BASE_URL = "https://generativelanguage.googleapis.
 const MISTRAL_CHAT_COMPLETIONS_URL = "https://api.mistral.ai/v1/chat/completions";
 const GROQ_CHAT_COMPLETIONS_URL = "https://api.groq.com/openai/v1/chat/completions";
 const LOCAL_DIRECT_MODEL = "local-direct";
-const MISTRAL_PRIMARY_MODEL = "mistral-large-2512";
-const MISTRAL_FALLBACK_MODELS = ["ministral-14b-2512"];
+const MISTRAL_PRIMARY_MODEL = "ministral-14b-2512";
+const MISTRAL_FALLBACK_MODELS = [];
 const MISTRAL_MODEL_CHAIN = [MISTRAL_PRIMARY_MODEL, ...MISTRAL_FALLBACK_MODELS];
 const GROQ_FALLBACK_MODEL = "groq/compound-mini";
 const PROVIDER_REQUEST_BUDGETS_MS = {
   [GEMINI_PRIMARY_MODEL]: 45000,
   ...Object.fromEntries(GEMINI_FALLBACK_MODELS.map((model) => [model, 45000])),
   [MISTRAL_PRIMARY_MODEL]: 55000,
-  "ministral-14b-2512": 25000,
   [GROQ_FALLBACK_MODEL]: 15000
 };
 const MISTRAL_PROMPT_CACHE_VERSION = "capcontext-summary-v7";

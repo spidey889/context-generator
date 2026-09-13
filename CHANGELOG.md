@@ -1,5 +1,7 @@
 # Changelog
 
+- 2026-09-13: Removed `mistral-large-2512` from the active route after production repeatedly returned HTTP 403 code 1910, confirming the Free-tier key cannot access it even though the Limits page displays a theoretical rate limit. `ministral-14b-2512` is now the sole Mistral model, avoiding a failed request on every transfer.
+
 - 2026-09-13: Replaced the Mistral route with the user-selected two-model chain: `mistral-large-2512` first, then `ministral-14b-2512`. Medium 3.5 and Ministral 3B are no longer active models.
 
 - 2026-09-13: Removed Mistral Large 3 from the active fallback chain after production proved the API key consistently receives HTTP 403 for it. Mistral 429 responses now move immediately from Medium 3.5 to Ministral 3 3B instead of waiting on a same-model retry, and safe error-code parsing now supports Mistral's root-level error format.
