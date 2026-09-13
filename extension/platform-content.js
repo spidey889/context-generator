@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-09-09-restored-transfer-copy-v19";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-09-13-orcarouter-receipt-v20";
   const BUBBLE_ID = "context-generator-bubble";
   const OVERLAY_ID = "context-generator-overlay";
   const HANDOFF_SCRIM_ID = "context-generator-handoff-scrim";
@@ -1783,6 +1783,7 @@
         backendInputChars: summaryTiming?.backendInputChars ?? backendTiming?.inputChars ?? null,
         backendTotalMs: backendTiming?.totalMs ?? null,
         geminiMs: backendTiming?.geminiMs ?? null,
+        orcaMs: backendTiming?.orcaMs ?? null,
         mistralMs: backendTiming?.mistralMs ?? null,
         groqMs: backendTiming?.groqMs ?? null,
         providerMs: backendTiming?.providerMs ?? null,
@@ -1858,7 +1859,9 @@
     if (!Array.isArray(models)) return [];
     return models
       .filter((model) => typeof model === "string" && model.trim())
-      .slice(0, 5)
+      // Preserve the complete bounded backend chain in Latest Run. The current
+      // maximum is Gemini (4) + OrcaRouter + Mistral + Groq + local fallback.
+      .slice(0, 8)
       .map((model) => model.trim());
   }
 

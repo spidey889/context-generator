@@ -91,7 +91,7 @@ test("backend prompt profiles scale summary size to the captured chat", () => {
   assert.match(SUMMARIZE_SOURCE, /untrusted customer transcript data/);
 });
 
-test("Gemini generation budgets scale independently of Mistral and Groq profile caps", () => {
+test("Gemini generation budgets scale independently of Orca, Mistral, and Groq profile caps", () => {
   const expectedBudgets = [
     ["x".repeat(4000), 1000, { summaryTokens: 1500, reasoningTokens: 5000, maxOutputTokens: 6500 }],
     ["x".repeat(20000), 1900, { summaryTokens: 3000, reasoningTokens: 6000, maxOutputTokens: 9000 }],
@@ -485,14 +485,100 @@ test("provider fallback budgets keep the complete chain below the extension dead
     getProviderRequestBudgetMs("gemini-3.7-flash"),
     getProviderRequestBudgetMs("gemini-3.6-flash"),
     getProviderRequestBudgetMs("gemini-3.5-flash"),
+    getProviderRequestBudgetMs("orcarouter/free"),
     getProviderRequestBudgetMs("ministral-14b-2512"),
     getProviderRequestBudgetMs("groq/compound-mini")
   ];
 
-  assert.deepEqual(budgets, [45000, 45000, 45000, 45000, 55000, 15000]);
+  assert.deepEqual(budgets, [45000, 45000, 45000, 45000, 25000, 55000, 15000]);
   const completeChainBudget = GEMINI_CHAIN_BUDGET_MS + budgets.slice(4).reduce((total, budget) => total + budget, 0);
-  assert.equal(completeChainBudget, 130000);
+  assert.equal(completeChainBudget, 155000);
   assert.ok(completeChainBudget <= 210000 - 15000);
+});
+
+test("backend uses only OrcaRouter Free before Mistral", async () => {
+  const originalFetch = global.fetch;
+  const restoreGeminiKey = setTemporaryEnv("GEMINI_API_KEY", undefined);
+  const restoreOrcaKey = setTemporaryEnv("ORCAROUTER_API_KEY", "test-orca-key");
+  const restoreMistralKey = setTemporaryEnv("MISTRAL_API_KEY", "test-mistral-key");
+  const conversation = "OrcaRouter free route context ".repeat(180);
+  let capturedRequest = null;
+
+  global.fetch = async (url, options) => {
+    capturedRequest = { url, headers: options.headers, body: JSON.parse(options.body) };
+    return {
+      ok: true,
+      status: 200,
+      json: async () => ({
+        usage: { prompt_tokens: 500, completion_tokens: 200, total_tokens: 700 },
+        choices: [{ message: { content: makeContextCarrySummary("orca-free", 260) } }]
+      })
+    };
+  };
+
+  const res = createMockResponse();
+  try {
+    await summarize({ method: "POST", body: { conversation } }, res);
+
+    assert.equal(capturedRequest.url, "https://api.orcarouter.ai/v1/chat/completions");
+    assert.equal(capturedRequest.headers.Authorization, "Bearer test-orca-key");
+    assert.equal(capturedRequest.body.model, "orcarouter/free");
+    assert.equal(res.payload.timing.servedBy, "orcarouter");
+    assert.equal(res.payload.timing.model, "orcarouter/free");
+    assert.equal(res.payload.timing.primaryModel, "orcarouter/free");
+    assert.deepEqual(res.payload.timing.modelsTried, ["orcarouter/free"]);
+  } finally {
+    restoreMistralKey();
+    restoreOrcaKey();
+    restoreGeminiKey();
+    global.fetch = originalFetch;
+  }
+});
+
+test("OrcaRouter free-tier 429 falls through immediately without retrying", async () => {
+  const originalFetch = global.fetch;
+  const restoreGeminiKey = setTemporaryEnv("GEMINI_API_KEY", undefined);
+  const restoreOrcaKey = setTemporaryEnv("ORCAROUTER_API_KEY", "test-orca-key");
+  const restoreMistralKey = setTemporaryEnv("MISTRAL_API_KEY", "test-mistral-key");
+  const conversation = "OrcaRouter prompt-cap fallback ".repeat(180);
+  const requests = [];
+
+  global.fetch = async (url, options) => {
+    const body = JSON.parse(options.body);
+    requests.push({ url, body });
+    if (url === "https://api.orcarouter.ai/v1/chat/completions") {
+      return {
+        ok: false,
+        status: 429,
+        headers: { get: () => null },
+        json: async () => ({ error: { code: "free_rate_limited" } })
+      };
+    }
+    return {
+      ok: true,
+      status: 200,
+      json: async () => ({
+        choices: [{ message: { content: makeContextCarrySummary("mistral-after-orca", 260) } }]
+      })
+    };
+  };
+
+  const res = createMockResponse();
+  try {
+    await summarize({ method: "POST", body: { conversation } }, res);
+
+    assert.equal(requests.length, 2);
+    assert.equal(requests[0].body.model, "orcarouter/free");
+    assert.equal(requests[1].body.model, "ministral-14b-2512");
+    assert.equal(res.payload.timing.servedBy, "mistral");
+    assert.deepEqual(res.payload.timing.modelsTried, ["orcarouter/free", "ministral-14b-2512"]);
+    assert.match(res.payload.timing.fallback.reason, /OrcaRouter API error 429/);
+  } finally {
+    restoreMistralKey();
+    restoreOrcaKey();
+    restoreGeminiKey();
+    global.fetch = originalFetch;
+  }
 });
 
 test("backend falls back to Groq after Mistral rate limits and keeps the same prompt", async () => {
@@ -943,7 +1029,8 @@ test("generated summaries select Gemini 3.8 Flash when its server key is configu
   const conversation = "x".repeat(20001);
 
   assert.equal(getGeneratedModelSelection(conversation, true).model, "gemini-3.8-flash");
-  assert.match(getGeneratedModelSelection(conversation, true).reason, /preserved Mistral and Groq fallbacks/);
+  assert.match(getGeneratedModelSelection(conversation, true).reason, /then OrcaRouter Free, Mistral, and Groq/);
+  assert.equal(getGeneratedModelSelection(conversation, false, true).model, "orcarouter/free");
   assert.equal(getGeneratedModelSelection(conversation, false).model, "ministral-14b-2512");
 });
 

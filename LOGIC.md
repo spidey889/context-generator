@@ -143,7 +143,7 @@ Claude and ChatGPT additionally open recognized pasted-content cards, read norma
 
 Input length selects output guidance and budgets, not the starting generated model.
 
-| Profile | Input chars | Target | Mistral/Groq cap | Gemini summary + reasoning | Real validator floor |
+| Profile | Input chars | Target | Orca/Mistral/Groq cap | Gemini summary + reasoning | Real validator floor |
 | --- | ---: | ---: | ---: | ---: | ---: |
 | Tiny | 0-1,200 | exact local carry | 0 | provider-free | n/a |
 | Small | 1,201-8,000 | ~350 words | 1,000 | 1,500 + 5,000 = 6,500 | 80 substantive words |
@@ -157,17 +157,19 @@ Generated provider order:
 
 ```text
 Gemini 3.8 Flash -> 3.7 Flash -> 3.6 Flash -> 3.5 Flash
--> Mistral Medium 3.5 -> Mistral Large 3 (25.12) -> Ministral 3 3B (25.12)
+-> OrcaRouter Free
+-> Ministral 3 14B (25.12)
 -> optional Groq Compound Mini
 -> emergency local-direct exact transcript
 ```
 
 - Gemini is skipped without `GEMINI_API_KEY`. Its four models share one 60-second family deadline; each model is capped at 45 seconds. This reserves 15 seconds of overhead beneath the extension's 210-second deadline even if every later fallback exhausts its budget.
 - When Vercel has `KV_REST_API_URL` and `KV_REST_API_TOKEN` (or the older `UPSTASH_REDIS_REST_*` aliases), each Gemini model uses a shared Pacific-day health record. Twenty successful summaries mark it `exhausted`; three consecutive failed summary attempts mark it `bad_mood`; either status skips that model until the next Pacific day. An explicit daily-quota response also marks it exhausted immediately. Gemini 429 responses move directly to the next model instead of retrying the same model. Redis stores only model counters/status/timestamps, and storage trouble fails open to the normal provider order. See `GEMINI_MODEL_HEALTH.md` for production setup and diagnosis.
+- OrcaRouter is skipped without `ORCAROUTER_API_KEY`. It calls only `orcarouter/free` through the OpenAI-compatible chat-completions endpoint, never the paid automatic router. Its 25-second budget keeps the complete configured provider allowance at 155 seconds. Any HTTP 429 advances immediately to Mistral so an unpublished free prompt cap, minute limit, or UTC-day limit cannot stall or repeatedly hit the service. OrcaRouter receives the same untrusted transcript envelope and exact output contract as the other chat-completions providers.
 - Mistral is skipped without `MISTRAL_API_KEY`. The only active Mistral model is Ministral 3 14B with a 55-second budget. Mistral Large 3 is excluded because the production Free-tier key consistently receives HTTP 403 code 1910 for it. A 14B HTTP 429 advances immediately to Groq instead of retrying the same model.
 - Groq is optional via `GROQ_API_KEY`, uses `groq/compound-mini`, and has 15 seconds.
 - If every configured remote provider fails or no provider key is available, the backend returns the complete captured transcript through the provider-free `local-direct` format. It never truncates the transcript; the transfer remains usable during a provider-wide outage, though it is not compressed.
-- Retryable provider calls get at most two attempts within the model budget and an 80-second per-attempt ceiling. Ordinary retries wait 450 ms. Gemini and Mistral move to their next model immediately on HTTP 429; Groq honors `Retry-After` or waits at least one second.
+- Retryable provider calls get at most two attempts within the model budget and an 80-second per-attempt ceiling. Ordinary retries wait 450 ms. Gemini, OrcaRouter Free, and Mistral move immediately to their next fallback on HTTP 429; Groq honors `Retry-After` or waits at least one second.
 - Gemini uses `thinkingLevel: MEDIUM`. Mistral prompt-cache keys use `capcontext-summary-v7-<profile>-<model>`; v7 adds an explicit full-transcript checklist and final omission check for user-protected exact facts, especially integrity and implementation-state details.
 - Vercel allows 240 seconds; the extension aborts the backend call at 210 seconds and calls an extension API every 25 seconds to keep the MV3 worker alive.
 - The backend emits JSON-safe whitespace heartbeats every 15 seconds after the first 15 seconds.
@@ -244,7 +246,7 @@ Paste uses native setters/events plus stability checks. Firefox alone converts c
 - Model/profile routing: provider constants/budgets, prompts, Latest Run labels, evaluation expectations, this file, `memory.md`, `extension/README.md`.
 - Telemetry fields/stages/failures: source/background sanitizers, Vercel validator, Supabase validator, SQL constraints/functions, privacy wording, tests. Free-form telemetry fields are forbidden.
 - Latest Run receipt: producer, background expiry, bridge, analysis renderer, privacy wording, analysis tests.
-- Any content-script change: update `CONTENT_SCRIPT_LOAD_ID` so open tabs replace stale code, and retain stale-node/reservation cleanup. Current value: `platform-content-2026-09-09-restored-transfer-copy-v19`.
+- Any content-script change: update `CONTENT_SCRIPT_LOAD_ID` so open tabs replace stale code, and retain stale-node/reservation cleanup. Current value: `platform-content-2026-09-13-orcarouter-receipt-v20`.
 - Extension release: bump `extension/manifest.json`, rebuild the ZIP with `manifest.json` at its root, hash-compare every file against `extension/`, then test the unpacked folder in a new Brave window.
 
 ## Common Wrong Assumptions

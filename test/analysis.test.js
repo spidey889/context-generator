@@ -20,6 +20,7 @@ test("analysis receipt shows the served model and does not report it as failed",
   assert.doesNotMatch(ANALYSIS_SOURCE, /sideItem\("Primary model"/);
   assert.match(ANALYSIS_SOURCE, /sideItem\("Model path", getModelFallbackLabel\(summary\), "fallback"\)/);
   assert.equal(formatModelDisplayName("gemini-3.8-flash"), "Gemini 3.8 Flash");
+  assert.equal(formatModelDisplayName("orcarouter/free"), "OrcaRouter Free");
   assert.equal(
     getModelFallbackLabel(summary),
     "Tried this run\nGemini 3.8 Flash — failed\nGemini 3.7 Flash — failed\nGemini 3.6 Flash — served"
@@ -45,10 +46,12 @@ test("analysis formats a long provider failure chain as readable lines", () => {
   const { getModelFallbackLabel } = loadModelHelpers();
   assert.match(ANALYSIS_SOURCE, /grid-template-rows: auto minmax\(120px, 0\.75fr\) minmax\(280px, 1\.6fr\)/);
   assert.match(ANALYSIS_SOURCE, /white-space: pre-line/);
+  assert.match(PLATFORM_SOURCE, /orcaMs: backendTiming\?\.orcaMs/);
+  assert.match(PLATFORM_SOURCE, /\.slice\(0, 8\)/);
   assert.equal(
     getModelFallbackLabel({
       model: "local-direct",
-      modelsTried: ["gemini-3.6-flash", "gemini-3.5-flash", "mistral-medium-2604", "groq/compound-mini", "local-direct"],
+      modelsTried: ["gemini-3.6-flash", "gemini-3.5-flash", "orcarouter/free", "mistral-medium-2604", "groq/compound-mini", "local-direct"],
       geminiModelsSkipped: [
         { model: "gemini-3.8-flash", status: "exhausted" },
         { model: "gemini-3.7-flash", status: "bad_mood" }
@@ -63,6 +66,7 @@ test("analysis formats a long provider failure chain as readable lines", () => {
       "Tried this run",
       "Gemini 3.6 Flash — failed",
       "Gemini 3.5 Flash — failed",
+      "OrcaRouter Free — failed",
       "Mistral Medium 3.5 — failed",
       "Groq Compound Mini — failed",
       "Local fallback — served"

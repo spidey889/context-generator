@@ -856,6 +856,7 @@
       if (!model) return "n/a";
       const geminiFlash = String(model).match(/^gemini-(\d+(?:\.\d+)?)-flash$/i);
       if (geminiFlash) return `Gemini ${geminiFlash[1]} Flash`;
+      if (model === "orcarouter/free") return "OrcaRouter Free";
       if (model === "mistral-medium-2604" || model === "mistral-medium-3-5") return "Mistral Medium 3.5";
       if (model === "mistral-large-2512" || model === "mistral-large-3-25-12") return "Mistral Large 3";
       if (model === "ministral-14b-2512") return "Ministral 3 14B";
@@ -869,6 +870,7 @@
     function formatBackendLabel(summary) {
       const provider = summary?.servedBy || summary?.provider;
       if (provider === "gemini") return "Google Gemini";
+      if (provider === "orcarouter") return "OrcaRouter";
       if (provider === "mistral") return "Mistral";
       if (provider === "groq") return "Groq";
       if (provider === "local-direct") return "Local";
