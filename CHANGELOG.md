@@ -1,5 +1,7 @@
 # Changelog
 
+- 2026-09-13: Added explicit content-script instance teardown for reinjection. A new version now retires the previous instance before startup by removing its runtime and DOM listeners, disconnecting owned observers, cancelling timers, intervals, and animation frames, restoring reservations, and removing owned UI.
+
 - 2026-09-13: Made Gemini, Grok, and DeepSeek placement react to composer control mutations that do not resize the composer. Their anchors now follow the left edge of the visible right-side control row, removing Grok/Gemini English-name matching and DeepSeek's penultimate-button assumption.
 
 - 2026-09-13: Removed the unvalidated input-parent composer fallback. Surface discovery now fails closed when no scored and validated ancestor or form qualifies, preventing inner editor wrappers from becoming placement or retained-reservation roots.

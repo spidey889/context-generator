@@ -1,5 +1,6 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-09-13-adaptive-control-row-v29";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-09-13-instance-cleanup-v30";
+  const INSTANCE_TEARDOWN_KEY = "__contextGeneratorPlatformTeardown";
   const BUBBLE_ID = "context-generator-bubble";
   const OVERLAY_ID = "context-generator-overlay";
   const HANDOFF_SCRIM_ID = "context-generator-handoff-scrim";
@@ -25,6 +26,15 @@
 
   if (window.__contextGeneratorPlatformLoaded === CONTENT_SCRIPT_LOAD_ID) {
     return;
+  }
+
+  const previousInstanceTeardown = window[INSTANCE_TEARDOWN_KEY];
+  if (typeof previousInstanceTeardown === "function") {
+    try {
+      previousInstanceTeardown();
+    } catch (error) {
+      console.warn("[Context Generator] Previous content-script cleanup failed.", error);
+    }
   }
 
   cleanupContextGeneratorNodes();
@@ -490,6 +500,133 @@
   let lastConversationCaptureMetrics = null;
   let sourceScrollTargetsCache = null;
   let chatGptConversationScrollRootCache = null;
+  let instanceActive = true;
+  const ownedTimeouts = new Set();
+  const ownedIntervals = new Set();
+  const ownedAnimationFrames = new Set();
+  const ownedObservers = new Set();
+  const ownedEventListeners = [];
+
+  function setTimeout(callback, delayMs, ...args) {
+    if (!instanceActive) return null;
+    let timer = null;
+    timer = window.setTimeout((...callbackArgs) => {
+      ownedTimeouts.delete(timer);
+      if (instanceActive) callback(...callbackArgs);
+    }, delayMs, ...args);
+    ownedTimeouts.add(timer);
+    return timer;
+  }
+
+  function clearTimeout(timer) {
+    if (timer == null) return;
+    ownedTimeouts.delete(timer);
+    window.clearTimeout(timer);
+  }
+
+  function setInterval(callback, delayMs, ...args) {
+    if (!instanceActive) return null;
+    const timer = window.setInterval((...callbackArgs) => {
+      if (instanceActive) callback(...callbackArgs);
+    }, delayMs, ...args);
+    ownedIntervals.add(timer);
+    return timer;
+  }
+
+  function clearInterval(timer) {
+    if (timer == null) return;
+    ownedIntervals.delete(timer);
+    window.clearInterval(timer);
+  }
+
+  function requestAnimationFrame(callback) {
+    if (!instanceActive) return null;
+    let frame = null;
+    frame = window.requestAnimationFrame((timestamp) => {
+      ownedAnimationFrames.delete(frame);
+      if (instanceActive) callback(timestamp);
+    });
+    ownedAnimationFrames.add(frame);
+    return frame;
+  }
+
+  function cancelAnimationFrame(frame) {
+    if (frame == null) return;
+    ownedAnimationFrames.delete(frame);
+    window.cancelAnimationFrame(frame);
+  }
+
+  function createOwnedObserver(ObserverType, callback) {
+    const observer = new ObserverType(callback);
+    const nativeDisconnect = observer.disconnect.bind(observer);
+    observer.disconnect = () => {
+      ownedObservers.delete(observer);
+      nativeDisconnect();
+    };
+    ownedObservers.add(observer);
+    return observer;
+  }
+
+  function addOwnedEventListener(target, type, listener, options) {
+    const alreadyRegistered = ownedEventListeners.some((entry) => (
+      entry.target === target &&
+      entry.type === type &&
+      entry.listener === listener &&
+      entry.options === options
+    ));
+    if (!target?.addEventListener || alreadyRegistered) return;
+    target.addEventListener(type, listener, options);
+    ownedEventListeners.push({ target, type, listener, options });
+  }
+
+  function removeOwnedEventListener(target, type, listener, options) {
+    target?.removeEventListener?.(type, listener, options);
+    const index = ownedEventListeners.findIndex((entry) => (
+      entry.target === target &&
+      entry.type === type &&
+      entry.listener === listener &&
+      entry.options === options
+    ));
+    if (index >= 0) ownedEventListeners.splice(index, 1);
+  }
+
+  function clearOwnedLifecycleResources() {
+    [...ownedObservers].forEach((observer) => observer.disconnect());
+    [...ownedTimeouts].forEach((timer) => window.clearTimeout(timer));
+    [...ownedIntervals].forEach((timer) => window.clearInterval(timer));
+    [...ownedAnimationFrames].forEach((frame) => window.cancelAnimationFrame(frame));
+    ownedTimeouts.clear();
+    ownedIntervals.clear();
+    ownedAnimationFrames.clear();
+    ownedEventListeners.splice(0).forEach(({ target, type, listener, options }) => {
+      target?.removeEventListener?.(type, listener, options);
+    });
+  }
+
+  function teardownContextGeneratorInstance() {
+    if (!instanceActive) return;
+    instanceActive = false;
+    extensionRuntime.onMessage.removeListener?.(handleRuntimeMessage);
+    disableFloatingButtonMonitoring();
+    clearOwnedLifecycleResources();
+    cleanupContextGeneratorNodes();
+    if (window[INSTANCE_TEARDOWN_KEY] === teardownContextGeneratorInstance) {
+      delete window[INSTANCE_TEARDOWN_KEY];
+    }
+    if (window.__contextGeneratorPlatformLoaded === CONTENT_SCRIPT_LOAD_ID) {
+      delete window.__contextGeneratorPlatformLoaded;
+    }
+  }
+
+  function getOwnedLifecycleResourceCounts() {
+    return {
+      timeouts: ownedTimeouts.size,
+      intervals: ownedIntervals.size,
+      animationFrames: ownedAnimationFrames.size,
+      observers: ownedObservers.size,
+      eventListeners: ownedEventListeners.length
+    };
+  }
 
   function cleanupContextGeneratorNodes() {
     cleanupContextGeneratorReservations();
@@ -539,7 +676,7 @@
     });
   }
 
-  extensionRuntime.onMessage.addListener((message, _sender, sendResponse) => {
+  function handleRuntimeMessage(message, _sender, sendResponse) {
     if (message?.type === "CONTEXT_GENERATOR_PING") {
       sendResponse({ ok: true });
       return false;
@@ -578,7 +715,10 @@
     }
 
     return false;
-  });
+  }
+
+  extensionRuntime.onMessage.addListener(handleRuntimeMessage);
+  window[INSTANCE_TEARDOWN_KEY] = teardownContextGeneratorInstance;
 
   if (window.__CONTEXT_GENERATOR_TEST_HOOKS__?.register) {
     window.__CONTEXT_GENERATOR_TEST_HOOKS__.register({
@@ -618,6 +758,10 @@
       getClaudeControlTargetOffset,
       findClaudeControlSwitchCluster,
       reserveClaudeInlineBubbleSlot,
+      startFloatingButtonMonitoring,
+      teardownContextGeneratorInstance,
+      getOwnedLifecycleResourceCounts,
+      delay,
       getHandoffProgressState,
       getHandoffProgressStatusText
     });
@@ -2888,7 +3032,7 @@
       };
 
       timer = setTimeout(finish, timeoutMs);
-      observer = new MutationObserver((mutations) => {
+      observer = createOwnedObserver(MutationObserver, (mutations) => {
         if (mutations.every(isOwnDomMutation)) return;
         if (mutations.some(hasConversationMutationSignal)) finish();
       });
@@ -3460,23 +3604,23 @@
     icon.draggable = false;
     bubble.appendChild(icon);
 
-    bubble.addEventListener("mouseenter", () => {
+    addOwnedEventListener(bubble, "mouseenter", () => {
       bubble.style.filter = "brightness(1.12) drop-shadow(0 2px 6px rgba(0,0,0,0.25))";
     });
-    bubble.addEventListener("mouseleave", () => {
+    addOwnedEventListener(bubble, "mouseleave", () => {
       bubble.style.filter = "none";
       bubble.style.transform = "translate3d(0,0,0) scale(1)";
     });
-    bubble.addEventListener("pointerdown", () => {
+    addOwnedEventListener(bubble, "pointerdown", () => {
       if (!bubble.disabled) bubble.style.transform = "translate3d(0,0,0) scale(0.91)";
     });
-    bubble.addEventListener("pointerup", () => {
+    addOwnedEventListener(bubble, "pointerup", () => {
       bubble.style.transform = "translate3d(0,0,0) scale(1)";
     });
-    bubble.addEventListener("pointercancel", () => {
+    addOwnedEventListener(bubble, "pointercancel", () => {
       bubble.style.transform = "translate3d(0,0,0) scale(1)";
     });
-    bubble.addEventListener("click", (event) => {
+    addOwnedEventListener(bubble, "click", (event) => {
       event.preventDefault();
       event.stopPropagation();
       if (isRunning) return;
@@ -4008,7 +4152,7 @@
     dismiss.className = "context-generator-onboarding-dismiss";
     dismiss.textContent = "OK";
     dismiss.setAttribute("aria-label", "Dismiss Cap-Context tip");
-    dismiss.addEventListener("click", (event) => {
+    addOwnedEventListener(dismiss, "click", (event) => {
       event.preventDefault();
       event.stopPropagation();
       dismissOnboardingNudge();
@@ -4017,7 +4161,7 @@
     nudge.appendChild(puppetWrap);
     nudge.appendChild(copy);
     nudge.appendChild(dismiss);
-    nudge.addEventListener("click", (event) => event.stopPropagation());
+    addOwnedEventListener(nudge, "click", (event) => event.stopPropagation());
     document.body.appendChild(nudge);
     return nudge;
   }
@@ -4041,7 +4185,7 @@
       return;
     }
 
-    onboardingTimer = window.setTimeout(() => {
+    onboardingTimer = setTimeout(() => {
       onboardingTimer = null;
       if (isOnboardingDismissed() || isRunning || isDestinationSheetOpen()) return;
 
@@ -4207,7 +4351,7 @@
     nudge.appendChild(tail);
     nudge.appendChild(firstLine);
     nudge.appendChild(secondLine);
-    nudge.addEventListener("click", (event) => {
+    addOwnedEventListener(nudge, "click", (event) => {
       event.preventDefault();
       event.stopPropagation();
       dismissClaudeLimitNudge();
@@ -4610,11 +4754,11 @@
       button.appendChild(logoWrap);
       button.appendChild(copy);
       button.appendChild(spinner);
-      button.addEventListener("mouseenter", setButtonActive);
-      button.addEventListener("mouseleave", setButtonIdle);
-      button.addEventListener("focus", setButtonActive);
-      button.addEventListener("blur", setButtonIdle);
-      button.addEventListener("click", (event) => {
+      addOwnedEventListener(button, "mouseenter", setButtonActive);
+      addOwnedEventListener(button, "mouseleave", setButtonIdle);
+      addOwnedEventListener(button, "focus", setButtonActive);
+      addOwnedEventListener(button, "blur", setButtonIdle);
+      addOwnedEventListener(button, "click", (event) => {
         event.preventDefault();
         event.stopPropagation();
         if (button.dataset.contextGeneratorLoading === "true") return;
@@ -4664,15 +4808,15 @@
     ].join(";");
     sheet.appendChild(footer);
 
-    sheet.addEventListener("click", (event) => event.stopPropagation());
+    addOwnedEventListener(sheet, "click", (event) => event.stopPropagation());
     document.body.appendChild(sheet);
-    document.addEventListener("click", () => {
+    addOwnedEventListener(document, "click", () => {
       if (!isDestinationSheetOpen()) return;
       // The page control the user clicked now owns focus. Only keyboard/backdrop
       // dismissals should return focus to the Cap Context trigger.
       hideDestinationSheet({ restoreFocus: false });
     });
-    document.addEventListener("keydown", (event) => {
+    addOwnedEventListener(document, "keydown", (event) => {
       if (!isDestinationSheetOpen()) return;
       if (event.key === "Escape") {
         event.preventDefault();
@@ -4716,7 +4860,7 @@
       "will-change:opacity",
       "transition:opacity 0.24s ease"
     ].join(";");
-    backdrop.addEventListener("click", (event) => {
+    addOwnedEventListener(backdrop, "click", (event) => {
       event.preventDefault();
       event.stopPropagation();
       hideDestinationSheet();
@@ -4770,7 +4914,7 @@
       sheet.style.opacity = "1";
       sheet.style.transform = "translate3d(0,0,0) scale(1)";
       destinationSheetAnimationFrame = null;
-      window.setTimeout(() => {
+      setTimeout(() => {
         if (
           isDestinationSheetOpen()
           && (document.activeElement === bubble || document.activeElement === document.body)
@@ -4799,7 +4943,7 @@
       sheet.style.transform = DESTINATION_SHEET_CLOSED_TRANSFORM;
       delete sheet.dataset.contextGeneratorPositionLocked;
       if (shouldAnimate && sheet.style.display === "block") {
-        destinationSheetHideTimer = window.setTimeout(() => {
+        destinationSheetHideTimer = setTimeout(() => {
           sheet.style.display = "none";
           destinationSheetHideTimer = null;
         }, DESTINATION_SHEET_EXIT_MS);
@@ -4819,7 +4963,7 @@
         bubble.style.filter = "none";
         bubble.style.transform = "translate3d(0,0,0) scale(1)";
         if (!isRunning) {
-          window.setTimeout(() => bubble.focus?.({ preventScroll: true }), shouldAnimate ? DESTINATION_SHEET_EXIT_MS : 0);
+          setTimeout(() => bubble.focus?.({ preventScroll: true }), shouldAnimate ? DESTINATION_SHEET_EXIT_MS : 0);
         }
       }
     }
@@ -4835,7 +4979,7 @@
     backdrop.style.opacity = "0";
     backdrop.style.pointerEvents = "none";
     if (!immediate && !reducedMotion && backdrop.style.display === "block") {
-      destinationBackdropHideTimer = window.setTimeout(() => {
+      destinationBackdropHideTimer = setTimeout(() => {
         backdrop.style.display = "none";
         destinationBackdropHideTimer = null;
       }, DESTINATION_SHEET_EXIT_MS);
@@ -4941,7 +5085,7 @@
       tile.classList.add("context-generator-tile-enter");
     });
 
-    window.setTimeout(() => {
+    setTimeout(() => {
       tiles.forEach((tile) => {
         tile.classList.remove("context-generator-tile-enter");
         tile.style.animationDelay = "";
@@ -5640,7 +5784,7 @@
       overlay.style.opacity = "0";
       overlay.style.transform = HANDOFF_OVERLAY_CLOSED_TRANSFORM;
       if (shouldAnimate && overlay.style.display === "flex") {
-        handoffOverlayHideTimer = window.setTimeout(() => {
+        handoffOverlayHideTimer = setTimeout(() => {
           overlay.style.display = "none";
           handoffOverlayHideTimer = null;
         }, HANDOFF_OVERLAY_EXIT_MS);
@@ -5651,7 +5795,7 @@
     if (scrim) {
       scrim.style.opacity = "0";
       if (shouldAnimate && scrim.style.display === "block") {
-        handoffScrimHideTimer = window.setTimeout(() => {
+        handoffScrimHideTimer = setTimeout(() => {
           scrim.style.display = "none";
           handoffScrimHideTimer = null;
         }, HANDOFF_OVERLAY_EXIT_MS);
@@ -5740,7 +5884,7 @@
   function reportHandoffCaptureProgress(scrollState) {
     if (!isHandoffOverlayVisible()) return;
     const lineProgress = getHandoffCaptureLineProgress(scrollState);
-    if (handoffCaptureProgressFrame) window.cancelAnimationFrame?.(handoffCaptureProgressFrame);
+    if (handoffCaptureProgressFrame) cancelAnimationFrame(handoffCaptureProgressFrame);
 
     const applyProgress = () => {
       handoffCaptureProgressFrame = null;
@@ -5753,7 +5897,7 @@
     };
 
     if (window.requestAnimationFrame) {
-      handoffCaptureProgressFrame = window.requestAnimationFrame(applyProgress);
+      handoffCaptureProgressFrame = requestAnimationFrame(applyProgress);
     } else {
       applyProgress();
     }
@@ -5765,8 +5909,8 @@
     if (!window.requestAnimationFrame) return;
 
     // Two frames let the 5% start paint before the long transition begins.
-    handoffActivityProgressFrame = window.requestAnimationFrame(() => {
-      handoffActivityProgressFrame = window.requestAnimationFrame(() => {
+    handoffActivityProgressFrame = requestAnimationFrame(() => {
+      handoffActivityProgressFrame = requestAnimationFrame(() => {
         handoffActivityProgressFrame = null;
         const stageElement = document.querySelector(
           `#context-generator-handoff-progress [data-context-generator-stage='${stageId}']`
@@ -5784,14 +5928,14 @@
 
   function stopHandoffActivityProgress() {
     if (!handoffActivityProgressFrame) return;
-    window.cancelAnimationFrame?.(handoffActivityProgressFrame);
+    cancelAnimationFrame(handoffActivityProgressFrame);
     handoffActivityProgressFrame = null;
   }
 
   function stopHandoffLiveProgress() {
     stopHandoffActivityProgress();
     if (handoffCaptureProgressFrame) {
-      window.cancelAnimationFrame?.(handoffCaptureProgressFrame);
+      cancelAnimationFrame(handoffCaptureProgressFrame);
       handoffCaptureProgressFrame = null;
     }
   }
@@ -5891,7 +6035,7 @@
     // the destination. Two frames guarantee at least one painted completion state.
     if (window.requestAnimationFrame) {
       await new Promise((resolve) => {
-        window.requestAnimationFrame(() => window.requestAnimationFrame(resolve));
+        requestAnimationFrame(() => requestAnimationFrame(resolve));
       });
     }
   }
@@ -5918,7 +6062,7 @@
     };
 
     updateCountdown();
-    handoffCountdownTimer = window.setInterval(updateCountdown, 250);
+    handoffCountdownTimer = setInterval(updateCountdown, 250);
   }
 
   function hideHandoffCountdown(countdown = document.getElementById(HANDOFF_COUNTDOWN_ID)) {
@@ -5929,7 +6073,7 @@
     if (!countdown) return;
 
     countdown.style.opacity = "0";
-    handoffCountdownHideTimer = window.setTimeout(() => {
+    handoffCountdownHideTimer = setTimeout(() => {
       countdown.style.display = "none";
       showHandoffReassurance();
       handoffCountdownHideTimer = null;
@@ -6062,7 +6206,7 @@
         "font-weight:650",
         "line-height:28px"
       ].join(";");
-      closeBtn.addEventListener("click", () => {
+      addOwnedEventListener(closeBtn, "click", () => {
         hideErrorOverlay(errorDiv);
       });
 
@@ -6258,7 +6402,7 @@
         button.style.outlineOffset = active ? "3px" : "0";
       };
 
-      copyBtn.addEventListener("click", async () => {
+      addOwnedEventListener(copyBtn, "click", async () => {
         const currentText = textarea.value || "";
         let copied = false;
         try {
@@ -6294,7 +6438,7 @@
       });
 
       const closeModal = () => {
-        document.removeEventListener("keydown", modal.contextGeneratorKeydownHandler);
+        removeOwnedEventListener(document, "keydown", modal.contextGeneratorKeydownHandler);
         const previousFocus = modal.contextGeneratorPreviousFocus;
         modal.remove();
         setTimeout(() => previousFocus?.focus?.({ preventScroll: true }), 0);
@@ -6325,15 +6469,15 @@
       };
 
       modal.contextGeneratorClose = closeModal;
-      modal.addEventListener("click", (event) => {
+      addOwnedEventListener(modal, "click", (event) => {
         if (event.target === modal) closeModal();
       });
-      content.addEventListener("click", (event) => event.stopPropagation());
+      addOwnedEventListener(content, "click", (event) => event.stopPropagation());
       [copyBtn, dismissBtn].forEach((button) => {
-        button.addEventListener("focus", () => setFocusStyle(button, true));
-        button.addEventListener("blur", () => setFocusStyle(button, false));
+        addOwnedEventListener(button, "focus", () => setFocusStyle(button, true));
+        addOwnedEventListener(button, "blur", () => setFocusStyle(button, false));
       });
-      dismissBtn.addEventListener("click", closeModal);
+      addOwnedEventListener(dismissBtn, "click", closeModal);
 
       copyWrap.appendChild(title);
       copyWrap.appendChild(desc);
@@ -6347,7 +6491,7 @@
       buttonContainer.appendChild(copyBtn);
       modal.appendChild(content);
       document.body.appendChild(modal);
-      document.addEventListener("keydown", modal.contextGeneratorKeydownHandler);
+      addOwnedEventListener(document, "keydown", modal.contextGeneratorKeydownHandler);
     } else {
       modal.style.display = "flex";
       if (!modal.contextGeneratorKeydownHandler) {
@@ -6357,7 +6501,7 @@
             modal.contextGeneratorClose?.();
           }
         };
-        document.addEventListener("keydown", modal.contextGeneratorKeydownHandler);
+        addOwnedEventListener(document, "keydown", modal.contextGeneratorKeydownHandler);
       }
     }
 
@@ -7556,7 +7700,7 @@
     if (targetsUnchanged) return;
 
     stopGrokPlacementResizeMonitoring();
-    grokPlacementResizeObserver = new ResizeObserver(() => scheduleFloatingButtonUpdate());
+    grokPlacementResizeObserver = createOwnedObserver(ResizeObserver, () => scheduleFloatingButtonUpdate());
     nextTargets.forEach((element) => grokPlacementResizeObserver.observe(element));
     grokPlacementResizeTargets = nextTargets;
   }
@@ -7588,7 +7732,7 @@
     if (targetsUnchanged) return;
 
     stopDeepSeekPlacementResizeMonitoring();
-    deepSeekPlacementResizeObserver = new ResizeObserver(() => scheduleFloatingButtonUpdate());
+    deepSeekPlacementResizeObserver = createOwnedObserver(ResizeObserver, () => scheduleFloatingButtonUpdate());
     nextTargets.forEach((element) => deepSeekPlacementResizeObserver.observe(element));
     deepSeekPlacementResizeTargets = nextTargets;
   }
@@ -7620,7 +7764,7 @@
     if (targetsUnchanged) return;
 
     stopGeminiPlacementResizeMonitoring();
-    geminiPlacementResizeObserver = new ResizeObserver(() => scheduleFloatingButtonUpdate());
+    geminiPlacementResizeObserver = createOwnedObserver(ResizeObserver, () => scheduleFloatingButtonUpdate());
     nextTargets.forEach((element) => geminiPlacementResizeObserver.observe(element));
     geminiPlacementResizeTargets = nextTargets;
   }
@@ -7645,7 +7789,7 @@
 
     stopProviderControlMutationMonitoring();
     providerControlMutationRoot = root;
-    providerControlMutationObserver = new MutationObserver((mutations) => {
+    providerControlMutationObserver = createOwnedObserver(MutationObserver, (mutations) => {
       const hasRelevantControlChange = mutations.some((mutation) => {
         if (isOwnDomMutation(mutation)) return false;
         if (mutation.type !== "characterData") return true;
@@ -7700,7 +7844,7 @@
     if (targetsUnchanged) return;
 
     stopClaudePlacementResizeMonitoring();
-    claudePlacementResizeObserver = new ResizeObserver((entries) => {
+    claudePlacementResizeObserver = createOwnedObserver(ResizeObserver, (entries) => {
       const resized = entries.map((entry) => {
         if (entry.target === input) return "editor";
         if (entry.target === composerSurface) return "surface";
@@ -7735,7 +7879,7 @@
     // Claude may either toggle visibility or remount Send/Mic. Apply the native
     // control reservation in this microtask so the newly visible control cannot
     // paint once underneath the orb while the full update waits.
-    claudePlacementMutationObserver = new MutationObserver((mutations) => {
+    claudePlacementMutationObserver = createOwnedObserver(MutationObserver, (mutations) => {
       if (mutations.every(isOwnDomMutation)) return;
       syncClaudeInlineReservationBeforePaint(input, composerSurface);
       const attributes = mutations.map((mutation) => mutation.attributeName).filter(Boolean);
@@ -7777,7 +7921,7 @@
     if (targetsUnchanged) return;
 
     stopChatGptPlacementResizeMonitoring();
-    chatGptPlacementResizeObserver = new ResizeObserver(() => scheduleFloatingButtonUpdate());
+    chatGptPlacementResizeObserver = createOwnedObserver(ResizeObserver, () => scheduleFloatingButtonUpdate());
     nextTargets.forEach((element) => chatGptPlacementResizeObserver.observe(element));
     chatGptPlacementResizeTargets = nextTargets;
   }
@@ -7808,7 +7952,7 @@
 
     stopChatGptPlacementMutationMonitoring();
     chatGptPlacementMutationRoot = root;
-    chatGptPlacementMutationObserver = new MutationObserver(() => scheduleFloatingButtonUpdate());
+    chatGptPlacementMutationObserver = createOwnedObserver(MutationObserver, () => scheduleFloatingButtonUpdate());
     chatGptPlacementMutationObserver.observe(root, {
       attributes: true,
       characterData: true,
@@ -8267,16 +8411,16 @@
 
   function startFloatingButtonMonitoring() {
     if (floatingButtonObserver) floatingButtonObserver.disconnect();
-    floatingButtonObserver = new MutationObserver((mutations) => {
+    floatingButtonObserver = createOwnedObserver(MutationObserver, (mutations) => {
       if (floatingButtonMonitoringDisabled) return;
       if (mutations.every(isOwnDomMutation)) return;
       scheduleFloatingButtonUpdate("document-childlist");
     });
     floatingButtonObserver.observe(document.body || document.documentElement, { childList: true, subtree: true });
 
-    window.addEventListener("resize", scheduleFloatingButtonUpdate);
-    document.addEventListener("visibilitychange", scheduleFloatingButtonUpdate);
-    document.addEventListener("focusin", handleFloatingButtonFocusIn);
+    addOwnedEventListener(window, "resize", scheduleFloatingButtonUpdate);
+    addOwnedEventListener(document, "visibilitychange", scheduleFloatingButtonUpdate);
+    addOwnedEventListener(document, "focusin", handleFloatingButtonFocusIn);
     startClaudePathnameMonitoring();
     scheduleFloatingButtonUpdate("monitor-start");
   }
@@ -8287,8 +8431,8 @@
     // Navigation API covers Chromium SPA transitions immediately. The small
     // pathname poll is the cross-browser fallback because pushState emits no
     // standard event and extension isolated worlds cannot reliably wrap it.
-    window.navigation?.addEventListener?.("navigate", handleClaudeNavigation);
-    window.addEventListener("popstate", handleClaudeNavigation);
+    addOwnedEventListener(window.navigation, "navigate", handleClaudeNavigation);
+    addOwnedEventListener(window, "popstate", handleClaudeNavigation);
     claudePathnamePollTimer = setInterval(checkClaudePlacementPathname, CLAUDE_PATHNAME_POLL_MS);
   }
 
@@ -8306,8 +8450,8 @@
   }
 
   function stopClaudePathnameMonitoring() {
-    window.navigation?.removeEventListener?.("navigate", handleClaudeNavigation);
-    window.removeEventListener("popstate", handleClaudeNavigation);
+    removeOwnedEventListener(window.navigation, "navigate", handleClaudeNavigation);
+    removeOwnedEventListener(window, "popstate", handleClaudeNavigation);
     if (claudePathnamePollTimer) clearInterval(claudePathnamePollTimer);
     claudePathnamePollTimer = null;
   }
@@ -8325,15 +8469,16 @@
     stopGrokPlacementResizeMonitoring();
     stopDeepSeekPlacementResizeMonitoring();
     stopGeminiPlacementResizeMonitoring();
+    stopProviderControlMutationMonitoring();
     clearClaudePlacementMonitoring();
     clearClaudePlacementGraceTimer();
     clearTransientComposerPlacement();
     stopClaudePathnameMonitoring();
     clearChatGptPlacementResizeMonitoring();
 
-    window.removeEventListener("resize", scheduleFloatingButtonUpdate);
-    document.removeEventListener("visibilitychange", scheduleFloatingButtonUpdate);
-    document.removeEventListener("focusin", handleFloatingButtonFocusIn);
+    removeOwnedEventListener(window, "resize", scheduleFloatingButtonUpdate);
+    removeOwnedEventListener(document, "visibilitychange", scheduleFloatingButtonUpdate);
+    removeOwnedEventListener(document, "focusin", handleFloatingButtonFocusIn);
   }
 
   function handleFloatingButtonFocusIn(event) {

@@ -232,6 +232,7 @@ function loadPlatformContent(elements = [], hostname = "chatgpt.com", {
   const resizeObservers = [];
   const mutationObservers = [];
   const animationFrameCallbacks = [];
+  const runtimeMessageListeners = [];
   class TestResizeObserver {
     constructor(callback) {
       this.callback = callback;
@@ -319,7 +320,9 @@ function loadPlatformContent(elements = [], hostname = "chatgpt.com", {
     },
     cancelAnimationFrame: () => {},
     setTimeout,
-    clearTimeout
+    clearTimeout,
+    setInterval,
+    clearInterval
   };
   window.sessionStorage = {
     getItem: (key) => sessionValues.get(key) ?? null,
@@ -328,7 +331,13 @@ function loadPlatformContent(elements = [], hostname = "chatgpt.com", {
   };
   const chrome = {
     runtime: {
-      onMessage: { addListener: () => {} },
+      onMessage: {
+        addListener: (listener) => runtimeMessageListeners.push(listener),
+        removeListener: (listener) => {
+          const index = runtimeMessageListeners.indexOf(listener);
+          if (index >= 0) runtimeMessageListeners.splice(index, 1);
+        }
+      },
       sendMessage: async () => ({ ok: true }),
       getURL: (assetPath) => `chrome-extension://test/${assetPath}`
     }
@@ -354,18 +363,30 @@ function loadPlatformContent(elements = [], hostname = "chatgpt.com", {
     requestAnimationFrame: window.requestAnimationFrame,
     cancelAnimationFrame: window.cancelAnimationFrame,
     setTimeout,
-    clearTimeout
+    clearTimeout,
+    setInterval,
+    clearInterval
   };
 
   vm.createContext(sandbox);
   COMPILED_PLATFORM_CONTENT_SCRIPT.runInContext(sandbox);
-  if (expectSupported) {
+  const decorateHooks = () => {
     assert.ok(hooks, "platform-content test hooks were registered");
     hooks.mutationObservers = mutationObservers;
     hooks.resizeObservers = resizeObservers;
     hooks.window = window;
     hooks.document = document;
     hooks.animationFrameCallbacks = animationFrameCallbacks;
+    hooks.runtimeMessageListeners = runtimeMessageListeners;
+    hooks.reinject = () => {
+      window.__contextGeneratorPlatformLoaded = "previous-content-script-version";
+      COMPILED_PLATFORM_CONTENT_SCRIPT.runInContext(sandbox);
+      decorateHooks();
+      return hooks;
+    };
+  };
+  if (expectSupported) {
+    decorateHooks();
   }
   return hooks;
 }
@@ -545,7 +566,7 @@ test("picker selection morphs into handoff and both surfaces keep animated exits
   assert.match(transitionSource, /hideDestinationSheet\(\{ preserveBackdrop: true, restoreFocus: false \}\)/);
   assert.match(overlaySource, /overlay\.style\.transform = getHandoffStartTransform\(overlay\)/);
   assert.match(overlaySource, /bubble\.style\.opacity = "0"/);
-  assert.match(overlaySource, /handoffOverlayHideTimer = window\.setTimeout/);
+  assert.match(overlaySource, /handoffOverlayHideTimer = setTimeout/);
   assert.match(overlaySource, /HANDOFF_OVERLAY_EXIT_MS/);
   assert.ok(
     overlaySource.indexOf('overlay.style.opacity = "0"') < overlaySource.indexOf('overlay.style.display = "none"'),
@@ -558,8 +579,8 @@ test("destination picker preserves outside page focus on every supported platfor
   const sheetStart = source.indexOf("function ensureDestinationSheet()");
   const sheetEnd = source.indexOf("function ensureDestinationSheetBackdrop()", sheetStart);
   const sheetSource = source.slice(sheetStart, sheetEnd);
-  const outsideClickStart = sheetSource.indexOf('document.addEventListener("click"');
-  const outsideClickEnd = sheetSource.indexOf('document.addEventListener("keydown"', outsideClickStart);
+  const outsideClickStart = sheetSource.indexOf('addOwnedEventListener(document, "click"');
+  const outsideClickEnd = sheetSource.indexOf('addOwnedEventListener(document, "keydown"', outsideClickStart);
   const outsideClickSource = sheetSource.slice(outsideClickStart, outsideClickEnd);
   const toggleStart = source.indexOf("function toggleDestinationSheet()");
   const hideEnd = source.indexOf("function releaseDestinationSheetBackdrop()", toggleStart);
@@ -571,7 +592,7 @@ test("destination picker preserves outside page focus on every supported platfor
   assert.match(sheetSource, /focusableTiles\[nextIndex\]\.focus/);
   assert.match(
     outsideClickSource,
-    /document\.addEventListener\("click", \(\) => \{\s+if \(!isDestinationSheetOpen\(\)\) return;[\s\S]*?hideDestinationSheet\(\{ restoreFocus: false \}\);\s+\}\)/
+    /addOwnedEventListener\(document, "click", \(\) => \{\s+if \(!isDestinationSheetOpen\(\)\) return;[\s\S]*?hideDestinationSheet\(\{ restoreFocus: false \}\);\s+\}\)/
   );
   assert.doesNotMatch(outsideClickSource, /currentPlatform|claude|chatgpt|gemini|grok|deepseek/);
   assert.match(sheetSource, /detail\.textContent = "Opening…"/);
@@ -589,6 +610,46 @@ test("composer lifecycle cleanup never restores focus to the orb", () => {
   const ensureSource = source.slice(ensureStart, ensureEnd);
 
   assert.match(ensureSource, /if \(!input\)[\s\S]*hideDestinationSheet\(\{ restoreFocus: false \}\)/);
+});
+
+test("reinjection tears down every resource owned by the previous content-script instance", () => {
+  const input = new FakeElement({
+    attrs: { contenteditable: "true", role: "textbox" },
+    rect: { left: 160, right: 840, top: 150, bottom: 230, width: 680, height: 80 }
+  });
+  const composer = new FakeElement({
+    rect: { left: 100, right: 1000, top: 100, bottom: 260, width: 900, height: 160 }
+  });
+  input.parentElement = composer;
+  composer.children = [input];
+  const previousHooks = loadPlatformContent([input, composer], "claude.ai");
+
+  previousHooks.startFloatingButtonMonitoring();
+  previousHooks.syncClaudePlacementResizeMonitoring(input, composer);
+  previousHooks.delay(10000);
+
+  const activeCounts = previousHooks.getOwnedLifecycleResourceCounts();
+  assert.ok(activeCounts.timeouts > 0);
+  assert.ok(activeCounts.intervals > 0);
+  assert.ok(activeCounts.animationFrames > 0);
+  assert.ok(activeCounts.observers > 0);
+  assert.ok(activeCounts.eventListeners > 0);
+  assert.equal(previousHooks.runtimeMessageListeners.length, 1);
+
+  const currentHooks = previousHooks.reinject();
+
+  assert.notEqual(currentHooks, previousHooks);
+  assert.deepEqual(JSON.parse(JSON.stringify(previousHooks.getOwnedLifecycleResourceCounts())), {
+    timeouts: 0,
+    intervals: 0,
+    animationFrames: 0,
+    observers: 0,
+    eventListeners: 0
+  });
+  assert.ok(previousHooks.mutationObservers.every((observer) => observer.observed.length === 0));
+  assert.ok(previousHooks.resizeObservers.every((observer) => observer.observed.length === 0));
+  assert.equal(previousHooks.runtimeMessageListeners.length, 1);
+  assert.equal(currentHooks.window.__contextGeneratorPlatformTeardown, currentHooks.teardownContextGeneratorInstance);
 });
 
 test("Gemini, Grok, and DeepSeek retain the last viewport placement during a composer remount", () => {
