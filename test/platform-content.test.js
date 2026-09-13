@@ -542,6 +542,15 @@ test("destination picker preserves outside page focus on every supported platfor
   assert.match(toggleAndHideSource, /bubble\.focus\?\.\(\{ preventScroll: true \}\)/);
 });
 
+test("composer lifecycle cleanup never restores focus to the orb", () => {
+  const source = fs.readFileSync(SOURCE_PATH, "utf8");
+  const ensureStart = source.indexOf("function ensureFloatingButton(");
+  const ensureEnd = source.indexOf("function createFloatingButton()", ensureStart);
+  const ensureSource = source.slice(ensureStart, ensureEnd);
+
+  assert.match(ensureSource, /if \(!input\)[\s\S]*hideDestinationSheet\(\{ restoreFocus: false \}\)/);
+});
+
 test("picker and handoff microcopy keeps the direct transfer guidance", () => {
   const source = fs.readFileSync(SOURCE_PATH, "utf8");
 

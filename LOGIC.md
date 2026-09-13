@@ -81,7 +81,7 @@ The toolbar action skips the picker. It defaults to Claude when the source is Ch
 
 Important sequencing:
 
-- The orb, destination picker, and handoff card form one visual transition. The orb exposes dialog state; keyboard/backdrop dismissal restores trigger focus, while clicking a page control preserves focus on that control. A chosen tile holds long enough to register, and the handoff card expands from the picker's measured screen position. Reduced-motion users receive the same state changes without movement.
+- The orb, destination picker, and handoff card form one visual transition. The orb exposes dialog state; keyboard/backdrop dismissal restores trigger focus, while clicking a page control preserves focus on that control. Placement-only lifecycle work, including fullscreen resize reflow and transient composer loss, closes stale picker UI without moving focus. A chosen tile holds long enough to register, and the handoff card expands from the picker's measured screen position. Reduced-motion users receive the same state changes without movement.
 - `isRunning` is page-local with a six-minute safety reset. The reset clears UI/state but does not abort ongoing capture, fetch, or paste work.
 - Picker-path telemetry starts before empty-chat validation so early exits are recorded safely.
 - Destination warmup and network preconnects never contain conversation text.
@@ -249,7 +249,7 @@ Native menus and popovers may temporarily mark the background application `aria-
 - Model/profile routing: provider constants/budgets, prompts, Latest Run labels, evaluation expectations, this file, `memory.md`, `extension/README.md`.
 - Telemetry fields/stages/failures: source/background sanitizers, Vercel validator, Supabase validator, SQL constraints/functions, privacy wording, tests. Free-form telemetry fields are forbidden.
 - Latest Run receipt: producer, background expiry, bridge, analysis renderer, privacy wording, analysis tests.
-- Any content-script change: update `CONTENT_SCRIPT_LOAD_ID` so open tabs replace stale code, and retain stale-node/reservation cleanup. Current value: `platform-content-2026-09-13-grok-mode-placement-v24`.
+- Any content-script change: update `CONTENT_SCRIPT_LOAD_ID` so open tabs replace stale code, and retain stale-node/reservation cleanup. Current value: `platform-content-2026-09-13-fullscreen-focus-v25`.
 - Extension release: bump `extension/manifest.json`, rebuild the ZIP with `manifest.json` at its root, hash-compare every file against `extension/`, then test the unpacked folder in a new Brave window.
 
 ## Common Wrong Assumptions

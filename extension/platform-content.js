@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-09-13-grok-mode-placement-v24";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-09-13-fullscreen-focus-v25";
   const BUBBLE_ID = "context-generator-bubble";
   const OVERLAY_ID = "context-generator-overlay";
   const HANDOFF_SCRIM_ID = "context-generator-handoff-scrim";
@@ -3334,7 +3334,9 @@
       if (existingBubble) existingBubble.style.display = "none";
       hideOnboardingNudge();
       hideClaudeLimitNudge();
-      hideDestinationSheet();
+      // Placement-only lifecycle changes (including fullscreen resize reflow)
+      // must never move focus to the Cap Context trigger.
+      hideDestinationSheet({ restoreFocus: false });
       releaseBubbleSlot();
       releaseComposerSurface();
       clearClaudePlacementMonitoring();
