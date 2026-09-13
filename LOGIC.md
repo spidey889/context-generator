@@ -16,7 +16,7 @@ Use evidence in this order: the owner's current request and project instructions
 - Preserve unrelated working-tree changes and stage only files owned by the task.
 - The extension has no build step. Load Brave's unpacked extension from `extension/`, not from the ZIP.
 - Use Node 22 for tests and scripts. The project intentionally has no tracked lockfile or runtime npm dependency list; tests and smoke tooling use Node built-ins and Node's global WebSocket.
-- `extension/manifest.json` currently reports version `1.4.2` and contains both Chromium and Firefox background declarations. The current branch includes post-1.4.2 Claude placement work, so the manifest number does not prove the Web Store or ZIP contains the checkout's behavior.
+- `extension/manifest.json` currently reports version `1.4.4` and contains both Chromium and Firefox background declarations. The manifest number alone does not prove the Web Store or ZIP contains the checkout's behavior.
 - Production web/API URL: `https://context-generator-five.vercel.app`. The analysis bridge and canonical site links currently use `https://spidey889.github.io/context-generator`.
 - Release warning verified 2026-09-08: `cap-context-extension.zip` is stale relative to `extension/`. It is missing both EBGaramond fonts and contains older `manifest.json` and `platform-content.js` files. Do not publish it until rebuilt and compared again.
 - `SKILL.md`, `index.legacy-2026-07-15.html`, and its dated demo video are retained reference artifacts by owner request, not production entry points. The legacy page reuses the canonical logos under `extension/logos/`.

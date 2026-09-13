@@ -73,10 +73,11 @@ Do not add entries for:
 
 Write entries in past tense and describe the resulting behavior, not every implementation step. When a later change replaces an older approach, make the final state explicit and remove wording that falsely implies the replaced behavior is still current. Never infer that a change was published from its presence on `master`; verify the manifest, release archive, Web Store version, and deployment separately.
 
-## Unreleased on `master` after extension 1.4.2
+## Extension 1.4.4 candidate on `master`
 
 ### 2026-09-13
 
+- Advanced the extension manifest version to 1.4.4. This source version does not by itself confirm that the release archive or Web Store listing has been updated.
 - Tried and removed an isolated idle-orb shimmer after the visual treatment did not read naturally. Production retains the existing orb appearance and animations.
 
 ### 2026-09-12
@@ -108,7 +109,7 @@ Write entries in past tense and describe the resulting behavior, not every imple
 - Restored the minimal three-section static homepage, added a responsive HTML privacy page, and improved keyboard, touch, narrow-screen, and reduced-motion behavior.
 - Strengthened summary fidelity for explicitly retained alternatives, numbers, integrity statements, and implementation state. Updated CI action runtimes, narrowed workflow permissions, preserved clean-checkout license coverage, and normalized typographic ranges in live evaluation.
 
-The manifest still reports 1.4.2. These post-release source changes must not be described as published until the extension is deliberately versioned, packaged, and verified; see `LOGIC.md` for the current release warning.
+The manifest reports 1.4.4. These source changes must not be described as published until the extension is packaged and verified against the release archive and Web Store; see `LOGIC.md` for the current release warning.
 
 ## Extension 1.4.2 — 2026-07-24
 
