@@ -2561,6 +2561,29 @@ test("Gemini bubble anchors to the left of the Pro selector", () => {
   assert.equal(placement.bottom, 15);
 });
 
+test("Grok bubble keeps the Fast placement across every visible mode", () => {
+  const composerRect = getClaudeComposerRect();
+
+  for (const mode of ["Fast", "Build Beta", "Auto", "Expert", "Heavy"]) {
+    const selector = new FakeElement({
+      tag: "button",
+      text: mode,
+      attrs: { "aria-label": "Mode selector" },
+      rect: { left: 700, right: 790, top: 166, bottom: 202, width: 90, height: 36 }
+    });
+    const mic = new FakeElement({
+      tag: "button",
+      attrs: { "aria-label": "Microphone" },
+      rect: { left: 804, right: 840, top: 166, bottom: 202, width: 36, height: 36 }
+    });
+    const hooks = loadPlatformContent([selector, mic], "grok.com");
+    const placement = hooks.getGrokBubblePlacement(composerRect);
+
+    assert.equal(placement.left, 550, `${mode} should anchor before its visible selector`);
+    assert.equal(placement.top, 63);
+  }
+});
+
 test("Gemini retains its outer composer while a large paste reflows in stages", () => {
   const input = new FakeElement({
     attrs: { contenteditable: "true", role: "textbox" },

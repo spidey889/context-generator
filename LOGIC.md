@@ -233,7 +233,7 @@ The protected `users` table creates a row on an install's first successful trans
 - Claude debugging references live in `docs/debugging/`: `claude-last-known-dom.md` records the latest verified hierarchy, geometry, stable/transient nodes, observers, and negative-route check; `claude-placement-logs.md` records the incident evidence, discarded approaches, and future instrumentation guidance. Treat both as dated history; this file and production code remain authoritative.
 - ChatGPT: fixed left of the paid reasoning selector when present; otherwise fixed left of the complete visible right-side control row so free-plan mic/voice controls stay unobstructed. Retains its last usable surface and requires focused paste.
 - Gemini: left of the Pro/Flash selector; retains the outer composer during large-paste expansion.
-- Grok: beside the mode/speed selector; retains the outer composer and requires focused paste.
+- Grok: beside whichever visible Fast, Build, Auto, Expert, Heavy, or thinking-mode selector is active; retains the outer composer and requires focused paste.
 - DeepSeek: near attachment/input controls; retains the outer composer during expansion.
 
 Composer discovery scores platform candidates, rejects page-sized/misaligned surfaces, caps dimensions, and restores prior inline styles when reservations change. Resize observers cover expanding composers; Claude and ChatGPT also watch class/style changes when controls swap visibility without a remount.
@@ -249,7 +249,7 @@ Native menus and popovers may temporarily mark the background application `aria-
 - Model/profile routing: provider constants/budgets, prompts, Latest Run labels, evaluation expectations, this file, `memory.md`, `extension/README.md`.
 - Telemetry fields/stages/failures: source/background sanitizers, Vercel validator, Supabase validator, SQL constraints/functions, privacy wording, tests. Free-form telemetry fields are forbidden.
 - Latest Run receipt: producer, background expiry, bridge, analysis renderer, privacy wording, analysis tests.
-- Any content-script change: update `CONTENT_SCRIPT_LOAD_ID` so open tabs replace stale code, and retain stale-node/reservation cleanup. Current value: `platform-content-2026-09-13-native-menu-visibility-v23`.
+- Any content-script change: update `CONTENT_SCRIPT_LOAD_ID` so open tabs replace stale code, and retain stale-node/reservation cleanup. Current value: `platform-content-2026-09-13-grok-mode-placement-v24`.
 - Extension release: bump `extension/manifest.json`, rebuild the ZIP with `manifest.json` at its root, hash-compare every file against `extension/`, then test the unpacked folder in a new Brave window.
 
 ## Common Wrong Assumptions

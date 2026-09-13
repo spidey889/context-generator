@@ -1,5 +1,7 @@
 # Changelog
 
+- 2026-09-13: Fixed Grok Build and Heavy mode placement by recognizing the complete visible mode set and reusing the existing correct Fast-mode anchor path instead of falling back onto the active control.
+
 - 2026-09-13: Kept Cap Context visible when native menus or popovers temporarily mark the still-visible composer subtree `aria-hidden`. The shared placement path now retains only its last verified connected input, while removed or visually hidden composers continue to hide the orb.
 
 - 2026-09-13: Fixed ChatGPT free-plan placement so Cap Context anchors before the complete visible right-side control row instead of occupying the mic slot when the paid reasoning control is absent. Paid placement remains anchored to the reasoning control.

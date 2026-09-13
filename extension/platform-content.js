@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-09-13-native-menu-visibility-v23";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-09-13-grok-mode-placement-v24";
   const BUBBLE_ID = "context-generator-bubble";
   const OVERLAY_ID = "context-generator-overlay";
   const HANDOFF_SCRIM_ID = "context-generator-handoff-scrim";
@@ -7058,7 +7058,7 @@
         const text = (button.innerText || button.textContent || "").toLowerCase();
         let score = 0;
 
-        if (/\b(fast|auto|expert|think|thinking)\b/.test(text)) score += 180;
+        if (/\b(fast|build|auto|expert|heavy|think|thinking)\b/.test(text)) score += 180;
         if (/\b(mode|speed|model|reasoning|thinking)\b/.test(label)) score += 36;
         if (rect.left >= composerRect.left + composerRect.width * 0.55) score += 22;
         if (rect.width >= 42 && rect.width <= 150) score += 12;
