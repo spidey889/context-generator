@@ -1,5 +1,7 @@
 # Changelog
 
+- 2026-09-18: Reserved time for each remaining Gemini Flash model within the existing 60-second family deadline so slow 3.8/3.7 attempts cannot consume the entire allowance before 3.6/3.5. Retained daily health skips and the overall provider timeout.
+
 - 2026-09-18: Replaced the terminal Google Gemma 4 31B attempt with stable Gemini 3.5 Flash-Lite after the owner verified Gemma had only 16k input tokens/minute, while Flash-Lite showed 250k on the same project. Retained the existing Google key, minimal thinking, timeout allowance, relaxed output handling, and Orca pause switch. Gemma is no longer in the active chain.
 
 - 2026-09-18: Paused OrcaRouter by default while retaining its key and route behind `ORCAROUTER_ENABLED=true`. Added Google Gemma 4 31B via the existing Google key as the final remote attempt after Groq and before full-transcript local carry, with minimal thinking and a 60-second allowance shared with Orca when unpaused. Documented restoration in `docs/provider-fallbacks.md`.

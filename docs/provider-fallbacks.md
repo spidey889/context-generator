@@ -9,3 +9,5 @@ The active generated chain is Gemini Flash family -> Ministral 14B -> optional G
 The active remote allowance is 60s Flash + 55s Mistral + 15s Groq + 60s Flash-Lite = 190s. If Orca is unpaused, Flash-Lite subtracts Orca's elapsed attempt time from its 60s budget (minimum 1s), retaining roughly 19s of headroom under the extension's 210s timeout. This may leave Flash-Lite only a short attempt when Orca exhausts its allowance.
 
 Focused verification: `node --test test/flash-lite-fallback.test.js test/summarize.test.js test/gemini-model-health.test.js`. Google's model/API contract: https://ai.google.dev/gemini-api/docs/models/gemini-3.5-flash-lite . Free service availability and per-key quotas still apply.
+
+Flash models divide the remaining 60-second family allowance among the remaining model slots (about 15 seconds each when all time out). Fast failures release time to later models; daily health skips still apply.

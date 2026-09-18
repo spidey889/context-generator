@@ -508,7 +508,9 @@ async function createSummaryWithFallback({
           profile,
           model,
           initialMessages: geminiMessages,
-          requestBudgetMs: Math.min(getProviderRequestBudgetMs(model), remainingGeminiBudgetMs)
+          // Reserve a share for every remaining Flash model; fast failures leave more time for later ones.
+          requestBudgetMs: Math.min(getProviderRequestBudgetMs(model),
+            Math.floor(remainingGeminiBudgetMs / (GEMINI_MODEL_CHAIN.length - index)))
         });
         const healthAfterSuccess = await geminiModelHealth.recordSuccess(model);
         logGeminiHealth(model, healthAfterSuccess, "success");
