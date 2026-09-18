@@ -43,7 +43,7 @@ for (const [label, groqKey, flashLiteWorks] of [
         geminiApiKey: "test-google", mistralApiKey: "test-mistral",
         groqApiKey: groqKey, geminiModelHealth: health
       });
-      assert.deepEqual(requests, ["gemini-3.8-flash", "ministral-14b-2512", ...(groqKey ? ["groq/compound-mini", "groq/compound-mini"] : []),
+      assert.deepEqual(requests, ["gemini-3.6-flash", "ministral-14b-2512", ...(groqKey ? ["groq/compound-mini", "groq/compound-mini"] : []),
         "gemini-3.5-flash-lite"]);
       assert.equal(result.model, flashLiteWorks ? "gemini-3.5-flash-lite" : "local-direct");
       assert.equal(healthModels.includes("gemini-3.5-flash-lite"), false);

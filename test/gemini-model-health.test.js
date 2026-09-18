@@ -39,7 +39,7 @@ test("legacy Upstash variable names remain supported", async () => {
     fetchImpl: createFakeUpstash().fetch
   });
 
-  assert.equal((await health.beginAttempt("gemini-3.8-flash")).tracking, "shared");
+  assert.equal((await health.beginAttempt("gemini-3.6-flash")).tracking, "shared");
 });
 
 test("a Gemini model becomes exhausted after 20 successes and resets on the next Pacific day", async () => {
@@ -52,17 +52,17 @@ test("a Gemini model becomes exhausted after 20 successes and resets on the next
   });
 
   for (let count = 1; count <= GEMINI_SUCCESS_LIMIT; count += 1) {
-    assert.equal((await health.beginAttempt("gemini-3.8-flash")).available, true);
-    const state = await health.recordSuccess("gemini-3.8-flash");
+    assert.equal((await health.beginAttempt("gemini-3.6-flash")).available, true);
+    const state = await health.recordSuccess("gemini-3.6-flash");
     assert.equal(state.successes, count);
     assert.equal(state.attempts, count);
     assert.equal(state.status, count === GEMINI_SUCCESS_LIMIT ? "exhausted" : "available");
   }
 
-  assert.equal((await health.getStatus("gemini-3.8-flash")).available, false);
+  assert.equal((await health.getStatus("gemini-3.6-flash")).available, false);
   currentTime = new Date("2026-09-13T12:00:00Z");
   assert.deepEqual(
-    pickHealth(await health.getStatus("gemini-3.8-flash")),
+    pickHealth(await health.getStatus("gemini-3.6-flash")),
     { status: "available", successes: 0, failures: 0, consecutiveFailures: 0, attempts: 0 }
   );
 });
@@ -75,20 +75,20 @@ test("three failures without success set bad mood for the rest of the Pacific da
     now: () => new Date("2026-09-12T12:00:00Z")
   });
 
-  await health.beginAttempt("gemini-3.8-flash");
-  await health.recordFailure("gemini-3.8-flash");
-  await health.beginAttempt("gemini-3.8-flash");
-  await health.recordFailure("gemini-3.8-flash");
-  await health.beginAttempt("gemini-3.8-flash");
-  assert.equal((await health.recordSuccess("gemini-3.8-flash")).consecutiveFailures, 0);
+  await health.beginAttempt("gemini-3.6-flash");
+  await health.recordFailure("gemini-3.6-flash");
+  await health.beginAttempt("gemini-3.6-flash");
+  await health.recordFailure("gemini-3.6-flash");
+  await health.beginAttempt("gemini-3.6-flash");
+  assert.equal((await health.recordSuccess("gemini-3.6-flash")).consecutiveFailures, 0);
 
   for (let count = 1; count <= GEMINI_FAILURE_LIMIT; count += 1) {
-    await health.beginAttempt("gemini-3.8-flash");
-    const state = await health.recordFailure("gemini-3.8-flash");
+    await health.beginAttempt("gemini-3.6-flash");
+    const state = await health.recordFailure("gemini-3.6-flash");
     assert.equal(state.status, count === GEMINI_FAILURE_LIMIT ? "bad_mood" : "available");
   }
 
-  const lateSuccess = await health.recordSuccess("gemini-3.8-flash");
+  const lateSuccess = await health.recordSuccess("gemini-3.6-flash");
   assert.equal(lateSuccess.status, "bad_mood");
   assert.equal(lateSuccess.available, false);
   assert.equal(lateSuccess.consecutiveFailures, GEMINI_FAILURE_LIMIT);
@@ -102,8 +102,8 @@ test("a daily quota response marks a Gemini model exhausted immediately", async 
     now: () => new Date("2026-09-12T12:00:00Z")
   });
 
-  await health.beginAttempt("gemini-3.8-flash");
-  const state = await health.recordFailure("gemini-3.8-flash", { dailyQuotaExhausted: true });
+  await health.beginAttempt("gemini-3.6-flash");
+  const state = await health.recordFailure("gemini-3.6-flash", { dailyQuotaExhausted: true });
   assert.equal(state.status, "exhausted");
   assert.equal(state.failures, 1);
 });
@@ -141,10 +141,10 @@ test("health storage failures fail open so summaries can keep using Gemini", asy
   });
 
   try {
-    const state = await health.getStatus("gemini-3.8-flash");
+    const state = await health.getStatus("gemini-3.6-flash");
     assert.equal(state.available, true);
     assert.equal(state.tracking, "unavailable");
-    const invalidState = await invalidHealth.beginAttempt("gemini-3.8-flash");
+    const invalidState = await invalidHealth.beginAttempt("gemini-3.6-flash");
     assert.equal(invalidState.available, true);
     assert.equal(invalidState.tracking, "unavailable");
   } finally {
@@ -155,7 +155,7 @@ test("health storage failures fail open so summaries can keep using Gemini", asy
 test("summary routing skips bad-mood Gemini models without calling them", async () => {
   const originalFetch = global.fetch;
   const providerUrls = [];
-  const health = createRoutingHealth({ "gemini-3.8-flash": "bad_mood" });
+  const health = createRoutingHealth({ "gemini-3.6-flash": "bad_mood" });
   global.fetch = async (url) => {
     providerUrls.push(url);
     return successfulGeminiResponse("healthy-fallback");
@@ -177,7 +177,7 @@ test("summary routing skips bad-mood Gemini models without calling them", async 
     assert.match(providerUrls[0], /gemini-3\.7-flash:generateContent$/);
     assert.equal(result.model, "gemini-3.7-flash");
     assert.deepEqual(result.geminiModelsSkipped, [
-      { model: "gemini-3.8-flash", status: "bad_mood" }
+      { model: "gemini-3.6-flash", status: "bad_mood" }
     ]);
   } finally {
     global.fetch = originalFetch;
@@ -191,7 +191,7 @@ test("a Gemini 429 moves to the next model without hammering the failed model", 
   const health = createRoutingHealth({}, recordedFailures);
   global.fetch = async (url) => {
     providerUrls.push(url);
-    if (url.includes("gemini-3.8-flash")) {
+    if (url.includes("gemini-3.6-flash")) {
       return {
         ok: false,
         status: 429,
@@ -213,10 +213,10 @@ test("a Gemini 429 moves to the next model without hammering the failed model", 
       geminiModelHealth: health
     });
 
-    assert.equal(providerUrls.filter((url) => url.includes("gemini-3.8-flash")).length, 1);
+    assert.equal(providerUrls.filter((url) => url.includes("gemini-3.6-flash")).length, 1);
     assert.match(providerUrls[1], /gemini-3\.7-flash:generateContent$/);
     assert.deepEqual(recordedFailures, [
-      { model: "gemini-3.8-flash", dailyQuotaExhausted: false }
+      { model: "gemini-3.6-flash", dailyQuotaExhausted: false }
     ]);
     assert.equal(result.model, "gemini-3.7-flash");
   } finally {

@@ -156,14 +156,14 @@ Tiny output is different by design: canonical header, quoted `CONVERSATION SO FA
 Generated provider order:
 
 ```text
-Gemini 3.8 Flash
+Gemini 3.6 Flash
 -> Ministral 3 14B (25.12)
 
 -> Google Gemini 3.5 Flash-Lite
 -> emergency local-direct exact transcript
 ```
 
-- Gemini is skipped without `GEMINI_API_KEY`. Only 3.8 Flash is active, with a 90-second family and model budget. Flash 3.7, 3.6, and regular 3.5 remain paused; set `GEMINI_FLASH_FALLBACKS_ENABLED=true` to restore them within that same family allowance. Re-enabled Flash routes divide the remaining family time across remaining model slots. Daily health skips still apply.
+- Gemini is skipped without `GEMINI_API_KEY`. Only 3.6 Flash is active, with a 90-second family and model budget. Flash 3.7, 3.8, and regular 3.5 remain paused; set `GEMINI_FLASH_FALLBACKS_ENABLED=true` to restore them within that same family allowance. Re-enabled Flash routes divide the remaining family time across remaining model slots. Daily health skips still apply.
 - When Vercel has `KV_REST_API_URL` and `KV_REST_API_TOKEN` (or the older `UPSTASH_REDIS_REST_*` aliases), each Gemini model uses a shared Pacific-day health record. Twenty successful summaries mark it `exhausted`; three consecutive failed summary attempts mark it `bad_mood`; either status skips that model until the next Pacific day. An explicit daily-quota response also marks it exhausted immediately. Gemini 429 responses move directly to the next model instead of retrying the same model. Redis stores only model counters/status/timestamps, and storage trouble fails open to the normal provider order. See `GEMINI_MODEL_HEALTH.md` for production setup and diagnosis.
 - OrcaRouter is paused by default. Set `ORCAROUTER_ENABLED=true` and redeploy to restore its retained free route between Flash and Mistral. Orca keeps its 60-second budget; its elapsed time is deducted from the final Flash-Lite allowance. See `docs/provider-fallbacks.md`.
 - Successful OrcaRouter responses use `X-Orca-Resolved-Model` as the receipt model, so Latest Run names the concrete DeepSeek, GLM, or other free model instead of showing the `orcarouter/free` request alias.

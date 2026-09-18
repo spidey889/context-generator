@@ -1,5 +1,7 @@
 # Changelog
 
+- 2026-09-18: Switched the primary Google model from Flash 3.8 to Flash 3.6 at the owner's request. Retained Flash 3.8 in the paused fallback list; the active Mistral/Flash-Lite order, daily health handling, and 90-second budgets are unchanged.
+
 - 2026-09-18: Confirmed Fluid Compute is enabled on Hobby and raised server/client limits to 300/320 seconds. Replaced the short four-Flash attempts with three active 90-second routes: Flash 3.8, Ministral 14B, and Flash-Lite. Paused other Flash models and Groq behind reversible switches; Orca remains paused. Re-enabling Orca/Groq consumes the terminal allowance rather than increasing total remote time beyond 270 seconds.
 
 - 2026-09-18: Reserved time for each remaining Gemini Flash model within the existing 60-second family deadline so slow 3.8/3.7 attempts cannot consume the entire allowance before 3.6/3.5. Retained daily health skips and the overall provider timeout.

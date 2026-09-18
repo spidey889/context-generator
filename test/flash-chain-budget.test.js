@@ -40,7 +40,7 @@ test("three active providers receive 90 seconds each and paused Flash routes are
       modelSelection: getGeneratedModelSelection(conversation, true),
       geminiApiKey: "test-google", mistralApiKey: "test-mistral", geminiModelHealth: health
     });
-    assert.deepEqual(requests, ["gemini-3.8-flash", "ministral-14b-2512", "gemini-3.5-flash-lite"]);
+    assert.deepEqual(requests, ["gemini-3.6-flash", "ministral-14b-2512", "gemini-3.5-flash-lite"]);
     assert.deepEqual(budgets, [90000, 90000, 90000]);
     assert.equal(result.model, "gemini-3.5-flash-lite");
   } finally {

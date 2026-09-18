@@ -12,8 +12,8 @@ const PROVIDER_RETRY_INTERVAL_MS = 450;
 const PROVIDER_ATTEMPT_TIMEOUT_MS = 90000;
 const SUMMARY_HEARTBEAT_INTERVAL_MS = 15000;
 const SUMMARY_HEARTBEAT_CHUNK = `\n${" ".repeat(2048)}\n`;
-const GEMINI_PRIMARY_MODEL = "gemini-3.8-flash";
-const GEMINI_FALLBACK_MODELS = ["gemini-3.7-flash", "gemini-3.6-flash", "gemini-3.5-flash"];
+const GEMINI_PRIMARY_MODEL = "gemini-3.6-flash";
+const GEMINI_FALLBACK_MODELS = ["gemini-3.7-flash", "gemini-3.8-flash", "gemini-3.5-flash"];
 // Retain the old Flash routes behind a reversible pause switch.
 function getGeminiModelChain() {
   return [GEMINI_PRIMARY_MODEL, ...(process.env.GEMINI_FLASH_FALLBACKS_ENABLED === "true" ? GEMINI_FALLBACK_MODELS : [])];
