@@ -800,19 +800,11 @@ async function createSummaryWithProvider({ provider, apiKey, profile, model, ini
   }
 
   const validation = validateContextCarrySummary(rawSummary, profile);
-  if (!validation.ok) {
-    const finishDetail = finishReason ? `; finish reason ${finishReason}` : "";
-    throw createProviderError(
-      provider,
-      `${provider.label} returned an invalid summary: ${validation.reason}${finishDetail}`,
-      502
-    );
-  }
-
-  const summary = normalizeContextCarrySummary(rawSummary);
-  if (!summary) {
-    throw createProviderError(provider, `${provider.label} returned an invalid summary: normalization failed`, 502);
-  }
+  // Temporary availability policy: preserve imperfect provider text rather than
+  // exhausting fallbacks over formatting. Restore via docs/summary-validation.md.
+  const summary = validation.ok
+    ? normalizeContextCarrySummary(rawSummary)
+    : `${rawSummary.trim()}\n\n🔁 NEXT STEP\n${DESTINATION_CONFIRMATION_INSTRUCTION}`;
 
   const expansion = {
     attempted: false,

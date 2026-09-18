@@ -731,7 +731,7 @@ test("backend falls back to Groq when Mistral returns an empty summary", async (
   }
 });
 
-test("backend falls to Groq when Ministral 14B validation rejects output", async () => {
+test("backend accepts incomplete Ministral 14B output without calling Groq", async () => {
   const originalFetch = global.fetch;
   const restoreApiKey = setTemporaryEnv("MISTRAL_API_KEY", "test-mistral-key");
   const restoreGroqKey = setTemporaryEnv("GROQ_API_KEY", "test-groq-key");
@@ -748,7 +748,7 @@ test("backend falls to Groq when Ministral 14B validation rejects output", async
         choices: [{
           message: {
             content: body.model === "ministral-14b-2512"
-              ? "I'm sorry, but I cannot create that summary."
+              ? "CONTEXT CARRY — READY TO PASTE\nKEY CONTEXT\nWe finished the Windows build. Linux validation is still blocked."
               : makeContextCarrySummary("validated-fallback", 180)
           }
         }]
@@ -762,14 +762,13 @@ test("backend falls to Groq when Ministral 14B validation rejects output", async
     await summarize({ method: "POST", body: { conversation } }, res);
 
     assert.equal(res.statusCode, 200);
-    assert.equal(requests.length, 2);
+    assert.equal(requests.length, 1);
     assert.deepEqual(requests.map((request) => request.model), [
-      "ministral-14b-2512",
-      "groq/compound-mini"
+      "ministral-14b-2512"
     ]);
-    assert.equal(res.payload.timing.model, "groq/compound-mini");
-    assert.match(res.payload.timing.modelReason, /ministral-14b-2512 failed; fell back to groq\/compound-mini/);
-    assert.match(res.payload.summary, /validated-fallback/);
+    assert.equal(res.payload.timing.model, "ministral-14b-2512");
+    assert.equal(res.payload.summary,
+      'CONTEXT CARRY — READY TO PASTE\nKEY CONTEXT\nWe finished the Windows build. Linux validation is still blocked.\n\n🔁 NEXT STEP\nReply only: "Context loaded. Let\'s pick up right where you left off." Then wait for the user.');
   } finally {
     restoreGroqKey();
     restoreApiKey();
@@ -1178,7 +1177,7 @@ test("backend falls from a rate-limited Gemini 3.8 Flash to Gemini 3.7 Flash", a
   }
 });
 
-test("backend falls from invalid Gemini output to the preserved Mistral chain", async () => {
+test("backend falls from empty Gemini output to the preserved Mistral chain", async () => {
   const originalFetch = global.fetch;
   const restoreGeminiKey = setTemporaryEnv("GEMINI_API_KEY", "test-gemini-key");
   const restoreMistralKey = setTemporaryEnv("MISTRAL_API_KEY", "test-mistral-key");
@@ -1193,7 +1192,7 @@ test("backend falls from invalid Gemini output to the preserved Mistral chain", 
         ok: true,
         status: 200,
         json: async () => ({
-          candidates: [{ finishReason: "STOP", content: { parts: [{ text: "not a valid Context Carry" }] } }]
+          candidates: [{ finishReason: "STOP", content: { parts: [{ text: "  " }] } }]
         })
       };
     }
@@ -1236,7 +1235,7 @@ test("backend falls from invalid Gemini output to the preserved Mistral chain", 
     assert.equal(res.payload.timing.fallback.attempted, true);
     assert.equal(res.payload.timing.fallback.used, true);
     assert.equal(res.payload.timing.fallback.servedBy, "mistral");
-    assert.match(res.payload.timing.fallback.reason, /Gemini returned an invalid summary/);
+    assert.match(res.payload.timing.fallback.reason, /Gemini returned an empty summary/);
     assert.match(
       res.payload.timing.modelReason,
       /gemini-3\.8-flash -> gemini-3\.7-flash -> gemini-3\.6-flash -> gemini-3\.5-flash failed; fell back to ministral-14b-2512/

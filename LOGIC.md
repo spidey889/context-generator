@@ -180,16 +180,16 @@ Gemini 3.8 Flash -> 3.7 Flash -> 3.6 Flash -> 3.5 Flash
 
 Providers receive a system prompt and a user JSON envelope with schema `cap-context-conversation-v1` and data type `untrusted-conversation-transcript`. `getSummarySystemPrompt()` and `getContextCarryTemplate()` are the complete backend prompt contract; the retained standalone `SKILL.md` is a reference artifact and is not read by the backend.
 
-Generated output requires the exact title and all seven sections once and in order: WHO I AM, WHAT WE WERE DOING, WHERE WE LEFT OFF, DECISIONS MADE, OPEN QUESTIONS, KEY CONTEXT, NEXT STEP. The three core continuation sections must be meaningful, and NEXT STEP must match the exact destination instruction.
+The prompt still requests the exact title and all seven sections once and in order: WHO I AM, WHAT WE WERE DOING, WHERE WE LEFT OFF, DECISIONS MADE, OPEN QUESTIONS, KEY CONTEXT, NEXT STEP. Since 2026-09-18, strict output validation is temporarily advisory: any non-empty provider text is accepted even when its header, sections, length, or content checks fail. Empty responses and provider/network errors still advance through the fallback chain. See `docs/summary-validation.md` for restoration instructions.
 
-Normalization can remove fences/legacy footers, canonicalize recognized headings, add the Unicode box, and replace NEXT STEP. It cannot invent missing sections or make free-form output valid.
+Strictly valid output retains existing normalization: remove fences/legacy footers, canonicalize recognized headings, add the Unicode box, and replace NEXT STEP. Other non-empty output is preserved verbatim apart from outer whitespace, with the trusted destination-confirmation NEXT STEP appended; missing sections are not invented.
 
 Do not overstate current quality enforcement:
 
-- Large-profile `minWords` is prompt guidance and a `qualityFloorMet` diagnostic. The true validation floor is 20% of target, clamped to 80-200 substantive words.
+- Large-profile `minWords` is prompt guidance and a `qualityFloorMet` diagnostic. The retained advisory validator uses 20% of target, clamped to 80-200 substantive words; this floor no longer rejects provider text.
 - `finishReason` is recorded but token-limit output is not rejected solely for that reason.
 - Validation does not receive the source transcript, so it cannot detect a fluent, well-shaped hallucination.
-- There is no expansion or semantic quality loop. The first structurally valid provider result wins.
+- There is no expansion or semantic quality loop. The first non-empty provider result wins under the temporary availability policy.
 
 ## Backend Boundary
 
