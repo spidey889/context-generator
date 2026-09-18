@@ -296,7 +296,7 @@ async function handleSummary(conversation, responseChannel) {
       modelSelection,
       geminiApiKey,
       orcaRouterApiKey,
-      mistralApiKey: process.env.MISTRAL_API_KEY,
+      mistralApiKey: process.env.MISTRAL_ENABLED === "false" ? undefined : process.env.MISTRAL_API_KEY,
       groqApiKey: process.env.GROQ_ENABLED === "true" ? process.env.GROQ_API_KEY : undefined
     });
 
@@ -1092,7 +1092,7 @@ function getGeneratedModelSelection(conversation, geminiConfigured, orcaRouterCo
 
   return {
     model: GEMINI_PRIMARY_MODEL,
-    reason: `generated summaries try ${getGeminiModelChain().join(", then ")}, then ${orcaRouterConfigured ? "OrcaRouter Free, " : ""}Mistral, ${process.env.GROQ_ENABLED === "true" ? "Groq, " : ""}and finally ${FLASH_LITE_FALLBACK_MODEL}`,
+    reason: `generated summaries try ${getGeminiModelChain().join(", then ")}, then ${orcaRouterConfigured ? "OrcaRouter Free, " : ""}${process.env.MISTRAL_ENABLED === "false" ? "" : "Mistral, "}${process.env.GROQ_ENABLED === "true" ? "Groq, " : ""}and finally ${FLASH_LITE_FALLBACK_MODEL}`,
     inputChars,
     thresholdChars: null,
     override: false

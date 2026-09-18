@@ -114,3 +114,35 @@ test("Groq remains paused with a retained key after Mistral fails", async () => 
     names.forEach((name, index) => { if (saved[index] === undefined) delete process.env[name]; else process.env[name] = saved[index]; });
   }
 });
+
+
+test("paused Mistral is bypassed and Flash-Lite serves after primary failure", async () => {
+  const originalFetch = global.fetch;
+  const names = ["MISTRAL_ENABLED", "MISTRAL_API_KEY", "GEMINI_API_KEY", "GEMINI_FLASH_FALLBACKS_ENABLED", "GROQ_ENABLED", "ORCAROUTER_ENABLED", "GEMINI_MODEL_HEALTH_ENABLED"];
+  const saved = names.map((name) => process.env[name]);
+  process.env.MISTRAL_ENABLED = "false";
+  process.env.MISTRAL_API_KEY = "retained-mistral-key";
+  process.env.GEMINI_API_KEY = "test-google";
+  process.env.GEMINI_MODEL_HEALTH_ENABLED = "false";
+  for (const name of ["GEMINI_FLASH_FALLBACKS_ENABLED", "GROQ_ENABLED", "ORCAROUTER_ENABLED"]) delete process.env[name];
+  const requests = [];
+  global.fetch = async (url) => {
+    const model = url.split("/models/")[1].split(":")[0];
+    requests.push(model);
+    if (model === "gemini-3.6-flash") return { ok: false, status: 429, json: async () => ({ error: { code: "rate_limit_exceeded" } }) };
+    return { ok: true, json: async () => ({ candidates: [{ content: { parts: [{ text: "Build passed." }] }, finishReason: "STOP" }] }) };
+  };
+  let payload;
+  const res = { setHeader() {}, status() { return this; }, json(data) { payload = data; } };
+  try {
+    await handler({ method: "POST", body: { conversation: "Build context. ".repeat(150) }, headers: {
+      origin: "chrome-extension://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "content-type": "application/json",
+      "x-cap-context-client": "cap-context-extension/1", "x-forwarded-for": "192.0.2.202"
+    } }, res);
+    assert.deepEqual(requests, ["gemini-3.6-flash", "gemini-3.5-flash-lite"]);
+    assert.equal(payload.timing.model, "gemini-3.5-flash-lite");
+  } finally {
+    global.fetch = originalFetch;
+    names.forEach((name, index) => { if (saved[index] === undefined) delete process.env[name]; else process.env[name] = saved[index]; });
+  }
+});
