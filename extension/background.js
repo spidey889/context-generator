@@ -118,7 +118,7 @@ chrome.storage.onChanged.addListener((changes, areaName) => {
 
 chrome.alarms.onAlarm.addListener((alarm) => {
   if (alarm?.name === RAW_TRANSCRIPT_EXPIRY_ALARM) expireStoredRawTranscript();
-  if (alarm?.name === TELEMETRY_RETRY_ALARM) initializeTelemetryDelivery();
+  if (alarm?.name === TELEMETRY_RETRY_ALARM) { initializeTelemetryDelivery(); flushInstallNoticeEvents(); }
 });
 
 injectIntoOpenSupportedTabs();
@@ -415,6 +415,15 @@ chrome.action.onClicked.addListener(async (tab) => {
 });
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  if (["CLAIM_INSTALL_NOTICE", "RECORD_INSTALL_NOTICE"].includes(message?.type)) {
+    if (!sender?.tab?.url || !getPlatformFromUrl(sender.tab.url)) {
+      sendResponse({ ok: false }); return false;
+    }
+    const work = message.type === "CLAIM_INSTALL_NOTICE" ? claimInstallNotice() : queueInstallNoticeEvent(message.action);
+    work.then((notice) => sendResponse({ ok: true, notice: notice || null })).catch(() => sendResponse({ ok: false }));
+    return true;
+  }
+
   if (message?.type === "RECORD_TRANSFER_TELEMETRY") {
     recordTransferTelemetry(message.event, sender?.tab?.id)
       .then(() => sendResponse({ ok: true }))
@@ -1103,3 +1112,57 @@ function nowMs() {
 function delay(timeoutMs) {
   return new Promise((resolve) => setTimeout(resolve, timeoutMs));
 }
+
+
+const INSTALL_NOTICE_ID = "transfer-apology-20260918";
+const INSTALL_NOTICE_CHECKED_KEY = "cap-notice-checked-" + INSTALL_NOTICE_ID;
+const INSTALL_NOTICE_OUTBOX_KEY = "cap-notice-events-v1";
+let installNoticeWork = Promise.resolve();
+
+async function noticeRequest(action) {
+  const response = await fetch("https://context-generator-five.vercel.app/api/notice", {
+    method: "POST", headers: { "Content-Type": "application/json", "x-cap-context-client": SUMMARY_CLIENT_HEADER },
+    body: JSON.stringify({ action, notice_id: INSTALL_NOTICE_ID, install_id: await getOrCreateTelemetryInstallId() }),
+    signal: AbortSignal.timeout(8000)
+  });
+  if (!response.ok) throw new Error("notice_unavailable");
+  return response.json();
+}
+
+async function claimInstallNotice() {
+  const stored = await chrome.storage.local.get(INSTALL_NOTICE_CHECKED_KEY);
+  if (stored[INSTALL_NOTICE_CHECKED_KEY]) return null;
+  const result = await noticeRequest("claim");
+  // Persistent across AI sites, tab reloads, and worker restarts. Server claim also covers races.
+  await chrome.storage.local.set({ [INSTALL_NOTICE_CHECKED_KEY]: true });
+  return result.notice;
+}
+
+function queueInstallNoticeEvent(action) {
+  if (!["displayed", "ok", "timeout"].includes(action)) return Promise.reject(new Error("invalid_notice_event"));
+  installNoticeWork = installNoticeWork.catch(() => {}).then(async () => {
+    const stored = await chrome.storage.local.get(INSTALL_NOTICE_OUTBOX_KEY);
+    const events = stored[INSTALL_NOTICE_OUTBOX_KEY] || [];
+    if (!events.includes(action)) events.push(action);
+    await chrome.storage.local.set({ [INSTALL_NOTICE_OUTBOX_KEY]: events });
+    await deliverInstallNoticeEvents();
+  });
+  return installNoticeWork;
+}
+
+function flushInstallNoticeEvents() {
+  installNoticeWork = installNoticeWork.catch(() => {}).then(deliverInstallNoticeEvents);
+  return installNoticeWork;
+}
+
+async function deliverInstallNoticeEvents() {
+  const stored = await chrome.storage.local.get(INSTALL_NOTICE_OUTBOX_KEY);
+  const events = stored[INSTALL_NOTICE_OUTBOX_KEY] || [];
+  while (events.length) {
+    try { await noticeRequest(events[0]); }
+    catch { chrome.alarms.create(TELEMETRY_RETRY_ALARM, { delayInMinutes: TELEMETRY_RETRY_DELAY_MINUTES }); return; }
+    events.shift();
+    await chrome.storage.local.set({ [INSTALL_NOTICE_OUTBOX_KEY]: events });
+  }
+}
+flushInstallNoticeEvents();

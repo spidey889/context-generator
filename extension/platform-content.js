@@ -1,6 +1,9 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-09-13-instance-cleanup-v30";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-09-18-install-notice-v31";
   const INSTANCE_TEARDOWN_KEY = "__contextGeneratorPlatformTeardown";
+  const INSTALL_NOTICE_NODE_ID = "context-generator-install-notice";
+  let installNoticeChecked = false;
+  let pendingInstallNotice = null;
   const BUBBLE_ID = "context-generator-bubble";
   const OVERLAY_ID = "context-generator-overlay";
   const HANDOFF_SCRIM_ID = "context-generator-handoff-scrim";
@@ -632,6 +635,7 @@
     cleanupContextGeneratorReservations();
 
     [
+      INSTALL_NOTICE_NODE_ID,
       BUBBLE_ID,
       OVERLAY_ID,
       HANDOFF_SCRIM_ID,
@@ -3553,6 +3557,71 @@
     ensureFloatingOverlay();
     updateFloatingButtonPosition(recalculationReason);
     return bubble;
+  }
+
+
+  async function maybeShowInstallNotice() {
+    const bubble = document.getElementById(BUBBLE_ID);
+    if (!instanceActive || document.visibilityState !== "visible" || !bubble || !isVisible(bubble)) return;
+    if (pendingInstallNotice) {
+      const notice = pendingInstallNotice;
+      pendingInstallNotice = null;
+      showInstallNotice(notice, bubble);
+      return;
+    }
+    if (installNoticeChecked) return;
+    installNoticeChecked = true;
+    try {
+      const result = await extensionRuntime.sendMessage({ type: "CLAIM_INSTALL_NOTICE" });
+      if (!instanceActive || !result?.ok || !result.notice) return;
+      pendingInstallNotice = result.notice;
+      maybeShowInstallNotice();
+    } catch { /* A notice outage must never interrupt capture or transfer. */ }
+  }
+
+  function showInstallNotice(notice, bubble) {
+    const host = document.createElement("div");
+    host.id = INSTALL_NOTICE_NODE_ID;
+    host.dataset.contextGeneratorOwned = "true";
+    host.style.cssText = "position:fixed;z-index:2147483647;width:min(340px,calc(100vw - 24px));margin:0;pointer-events:auto;";
+    const shadow = host.attachShadow({ mode: "closed" });
+    const style = document.createElement("style");
+    style.textContent = ":host{all:initial}.card{box-sizing:border-box;padding:19px 20px 16px;border:1px solid #e4e1dd;border-radius:14px;background:#faf9f7;color:#252525;box-shadow:0 8px 28px #0003;font:13px/1.6 system-ui,-apple-system,Segoe UI,sans-serif;text-align:left}.brand{display:flex;align-items:center;gap:7px;color:#777;font-size:11px;font-weight:600;margin-bottom:9px}.dot{width:6px;height:6px;border-radius:50%;background:#8469a4}h2{font-size:17px;line-height:1.3;font-weight:600;letter-spacing:-.3px;margin:0 0 8px}p{color:#555;margin:0 0 15px}.footer{display:flex;align-items:center;justify-content:space-between;gap:12px}.count{font-size:11px;color:#888}button{border:0;border-radius:7px;background:#29272c;color:white;padding:8px 12px;font:600 12px system-ui;cursor:pointer}button:focus-visible{outline:2px solid #a68dca;outline-offset:3px}";
+    const card = document.createElement("aside");
+    card.className = "card";
+    card.setAttribute("role", "status");
+    card.setAttribute("aria-live", "polite");
+    // Only fixed markup is HTML. Server message strings are always text, never executable markup.
+    card.innerHTML = '<div class="brand"><span class="dot"></span>Cap Context</div><h2></h2><p></p><div class="footer"><span class="count" aria-hidden="true">Closes in <span>30</span>s</span><button type="button">OK, got it</button></div>';
+    card.querySelector("h2").textContent = notice.title;
+    card.querySelector("p").textContent = notice.message;
+    shadow.append(style, card);
+    document.body.appendChild(host);
+    function record(action) { extensionRuntime.sendMessage({ type: "RECORD_INSTALL_NOTICE", action }).catch(() => {}); }
+    function position() {
+      if (!bubble.isConnected) return;
+      const rect = bubble.getBoundingClientRect();
+      host.style.left = Math.max(12, Math.min(window.innerWidth - host.offsetWidth - 12, rect.right - host.offsetWidth)) + "px";
+      host.style.top = Math.max(12, rect.top - host.offsetHeight - 12) + "px";
+    }
+    position();
+    let dismissed = false;
+    const deadline = Date.now() + 30000;
+    const positionTimer = setInterval(() => {
+      position();
+      card.querySelector(".count span").textContent = Math.max(0, Math.ceil((deadline - Date.now()) / 1000));
+    }, 250);
+    function dismiss(action) {
+      if (dismissed) return;
+      dismissed = true;
+      clearTimeout(dismissTimer);
+      clearInterval(positionTimer);
+      host.remove();
+      record(action);
+    }
+    const dismissTimer = setTimeout(() => dismiss("timeout"), 30000);
+    addOwnedEventListener(card.querySelector("button"), "click", () => dismiss("ok"));
+    record("displayed");
   }
 
   function createFloatingButton() {
@@ -8262,6 +8331,7 @@
       try {
         ensureFloatingButton(recalculationReason);
         updateClaudeLimitNudge();
+        maybeShowInstallNotice();
       } catch (error) {
         if (isExtensionContextInvalidated(error)) {
           disableFloatingButtonMonitoring();

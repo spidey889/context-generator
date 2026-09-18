@@ -33,3 +33,5 @@ Sign in to both the source and destination AI sites before using the handoff.
 ## License
 
 Cap Context is proprietary software. All rights are reserved; see the repository `LICENSE` file.
+
+Extension 1.4.5 supports a one-time, privately targeted support notice beside the orb. It closes with OK or after 30 seconds and records display/dismissal without conversation text. Existing installs require the extension update.

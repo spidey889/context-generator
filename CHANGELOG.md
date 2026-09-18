@@ -1,5 +1,9 @@
 # Changelog
 
+- 2026-09-18: Added the approved one-time apology notice for one privately configured install, with atomic server claiming, local duplicate protection, near-orb placement, OK/30-second dismissal, and durable acknowledgement retry. Added a small Redis receipt tracker distinguishing claim, display, OK, and timeout. Bumped extension to 1.4.5; existing users need that update before delivery. Automated tests were intentionally deferred at the owner's request.
+
+- 2026-09-18: Added a standalone apology-notice preview near a mock AI composer orb, with human wording, OK dismissal, and a 30-second timeout. This is for design approval only; no targeted message or production delivery feature has been activated.
+
 - 2026-09-18: Added `MISTRAL_ENABLED=false` as a reversible production pause for testing Flash-Lite after Flash 3.6. Mistral's key, route, and 90-second budget remain; remove the variable or set it to `true` and redeploy to resume.
 
 - 2026-09-18: Switched the primary Google model from Flash 3.8 to Flash 3.6 at the owner's request. Retained Flash 3.8 in the paused fallback list; the active Mistral/Flash-Lite order, daily health handling, and 90-second budgets are unchanged.
