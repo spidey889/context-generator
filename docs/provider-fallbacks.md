@@ -1,8 +1,8 @@
 # Provider pauses and time limits
 
-Mistral is temporarily paused in production with `MISTRAL_ENABLED=false` to check Flash-Lite. Restore it by setting the variable to `true` or removing it, then redeploy. Its key and 90-second budget are retained.
+Mistral is resumed in production with `MISTRAL_ENABLED=true`. Set it to `false` and redeploy to pause; set it to `true` or remove it and redeploy to resume. Its key and 90-second budget are retained.
 
-The active production chain is Gemini 3.6 Flash -> Google Gemini 3.5 Flash-Lite -> full local transcript carry. Each active model has a 90-second request budget including retries. Fluid Compute is enabled on Vercel Hobby; the server maximum is 300 seconds, active remote allowance is 180 seconds (270 seconds after Mistral resumes), and the extension waits 320 seconds. Fast errors advance immediately; the first success stops the chain.
+The active production chain is Gemini 3.6 Flash -> Ministral 3 14B -> Google Gemini 3.5 Flash-Lite -> full local transcript carry. Each active model has a 90-second request budget including retries. Fluid Compute is enabled on Vercel Hobby; the server maximum is 300 seconds, active remote allowance is 270 seconds, and the extension waits 320 seconds. Fast errors advance immediately; the first success stops the chain.
 
 Paused routes retain their keys and implementation. Set the following production environment switches to exactly `true` and redeploy to restore them:
 

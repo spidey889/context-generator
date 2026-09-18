@@ -1,5 +1,7 @@
 # Changelog
 
+- 2026-09-18: Resumed Ministral 3 14B after the owner confirmed Flash-Lite handled a large conversation. Production `MISTRAL_ENABLED=true` restores Flash 3.6 -> Mistral -> Flash-Lite without changing 90-second budgets or the other provider pauses.
+
 - 2026-09-18: Added the approved one-time apology notice for one privately configured install, with atomic server claiming, local duplicate protection, near-orb placement, OK/30-second dismissal, and durable acknowledgement retry. Added a small Redis receipt tracker distinguishing claim, display, OK, and timeout. Bumped extension to 1.4.5; existing users need that update before delivery. Automated tests were intentionally deferred at the owner's request.
 
 - 2026-09-18: Added a standalone apology-notice preview near a mock AI composer orb, with human wording, OK dismissal, and a 30-second timeout. This is for design approval only; no targeted message or production delivery feature has been activated.
