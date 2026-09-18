@@ -43,8 +43,7 @@ for (const [label, groqKey, flashLiteWorks] of [
         geminiApiKey: "test-google", mistralApiKey: "test-mistral",
         groqApiKey: groqKey, geminiModelHealth: health
       });
-      assert.deepEqual(requests, ["gemini-3.8-flash", "gemini-3.7-flash", "gemini-3.6-flash",
-        "gemini-3.5-flash", "ministral-14b-2512", ...(groqKey ? ["groq/compound-mini", "groq/compound-mini"] : []),
+      assert.deepEqual(requests, ["gemini-3.8-flash", "ministral-14b-2512", ...(groqKey ? ["groq/compound-mini", "groq/compound-mini"] : []),
         "gemini-3.5-flash-lite"]);
       assert.equal(result.model, flashLiteWorks ? "gemini-3.5-flash-lite" : "local-direct");
       assert.equal(healthModels.includes("gemini-3.5-flash-lite"), false);
@@ -80,6 +79,36 @@ test("Orca is paused by default even with its API key configured", async () => {
     } }, res);
     assert.deepEqual(requests, ["https://api.mistral.ai/v1/chat/completions"]);
     assert.equal(payload.timing.model, "ministral-14b-2512");
+  } finally {
+    global.fetch = originalFetch;
+    names.forEach((name, index) => { if (saved[index] === undefined) delete process.env[name]; else process.env[name] = saved[index]; });
+  }
+});
+
+
+test("Groq remains paused with a retained key after Mistral fails", async () => {
+  const originalFetch = global.fetch;
+  const names = ["GROQ_ENABLED", "GROQ_API_KEY", "GEMINI_API_KEY", "MISTRAL_API_KEY", "ORCAROUTER_ENABLED"];
+  const saved = names.map((name) => process.env[name]);
+  delete process.env.GROQ_ENABLED;
+  delete process.env.GEMINI_API_KEY;
+  delete process.env.ORCAROUTER_ENABLED;
+  process.env.GROQ_API_KEY = "retained-groq-key";
+  process.env.MISTRAL_API_KEY = "test-mistral";
+  const requests = [];
+  global.fetch = async (url) => {
+    requests.push(url);
+    return { ok: false, status: 429, json: async () => ({ error: { code: "rate_limit_exceeded" } }) };
+  };
+  let payload;
+  const res = { setHeader() {}, status() { return this; }, json(data) { payload = data; } };
+  try {
+    await handler({ method: "POST", body: { conversation: "Build context. ".repeat(150) }, headers: {
+      origin: "chrome-extension://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "content-type": "application/json",
+      "x-cap-context-client": "cap-context-extension/1", "x-forwarded-for": "192.0.2.201"
+    } }, res);
+    assert.deepEqual(requests, ["https://api.mistral.ai/v1/chat/completions"]);
+    assert.equal(payload.timing.model, "local-direct");
   } finally {
     global.fetch = originalFetch;
     names.forEach((name, index) => { if (saved[index] === undefined) delete process.env[name]; else process.env[name] = saved[index]; });

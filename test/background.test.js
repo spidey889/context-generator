@@ -211,7 +211,7 @@ test("destination messaging enforces its deadline while a response is still pend
 });
 
 test("extension sends each summary job to the backend only once", () => {
-  assert.match(source, /const SUMMARY_BACKEND_TIMEOUT_MS = 210000/);
+  assert.match(source, /const SUMMARY_BACKEND_TIMEOUT_MS = 320000/);
   assert.doesNotMatch(source, /SUMMARY_BACKEND_ATTEMPTS|SUMMARY_BACKEND_RETRY_BUDGET_MS/);
   assert.equal((source.match(/fetch\(SUMMARY_BACKEND_URL/g) || []).length, 1);
 });

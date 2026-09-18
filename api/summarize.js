@@ -9,15 +9,18 @@ const {
 } = require("./request-security");
 const { createGeminiModelHealth } = require("./gemini-model-health");
 const PROVIDER_RETRY_INTERVAL_MS = 450;
-const PROVIDER_ATTEMPT_TIMEOUT_MS = 80000;
+const PROVIDER_ATTEMPT_TIMEOUT_MS = 90000;
 const SUMMARY_HEARTBEAT_INTERVAL_MS = 15000;
 const SUMMARY_HEARTBEAT_CHUNK = `\n${" ".repeat(2048)}\n`;
 const GEMINI_PRIMARY_MODEL = "gemini-3.8-flash";
 const GEMINI_FALLBACK_MODELS = ["gemini-3.7-flash", "gemini-3.6-flash", "gemini-3.5-flash"];
-const GEMINI_MODEL_CHAIN = [GEMINI_PRIMARY_MODEL, ...GEMINI_FALLBACK_MODELS];
-// Reserve enough of the extension's 210-second deadline for every non-Gemini
-// fallback plus response parsing/transport overhead.
-const GEMINI_CHAIN_BUDGET_MS = 60000;
+// Retain the old Flash routes behind a reversible pause switch.
+function getGeminiModelChain() {
+  return [GEMINI_PRIMARY_MODEL, ...(process.env.GEMINI_FLASH_FALLBACKS_ENABLED === "true" ? GEMINI_FALLBACK_MODELS : [])];
+}
+// Three active routes receive 90 seconds each, leaving 30 seconds under the
+// 300-second server limit for storage, parsing, and returning local carry.
+const GEMINI_CHAIN_BUDGET_MS = 90000;
 const GEMINI_GENERATE_CONTENT_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/models";
 const ORCAROUTER_CHAT_COMPLETIONS_URL = "https://api.orcarouter.ai/v1/chat/completions";
 const MISTRAL_CHAT_COMPLETIONS_URL = "https://api.mistral.ai/v1/chat/completions";
@@ -30,12 +33,12 @@ const MISTRAL_MODEL_CHAIN = [MISTRAL_PRIMARY_MODEL, ...MISTRAL_FALLBACK_MODELS];
 const GROQ_FALLBACK_MODEL = "groq/compound-mini";
 const FLASH_LITE_FALLBACK_MODEL = "gemini-3.5-flash-lite";
 const PROVIDER_REQUEST_BUDGETS_MS = {
-  [GEMINI_PRIMARY_MODEL]: 45000,
-  ...Object.fromEntries(GEMINI_FALLBACK_MODELS.map((model) => [model, 45000])),
+  [GEMINI_PRIMARY_MODEL]: 90000,
+  ...Object.fromEntries(GEMINI_FALLBACK_MODELS.map((model) => [model, 90000])),
   [ORCAROUTER_FREE_MODEL]: 60000,
-  [MISTRAL_PRIMARY_MODEL]: 55000,
+  [MISTRAL_PRIMARY_MODEL]: 90000,
   [GROQ_FALLBACK_MODEL]: 15000,
-  [FLASH_LITE_FALLBACK_MODEL]: 60000
+  [FLASH_LITE_FALLBACK_MODEL]: 90000
 };
 const MISTRAL_PROMPT_CACHE_VERSION = "capcontext-summary-v7";
 const SUMMARY_PROVIDERS = {
@@ -294,7 +297,7 @@ async function handleSummary(conversation, responseChannel) {
       geminiApiKey,
       orcaRouterApiKey,
       mistralApiKey: process.env.MISTRAL_API_KEY,
-      groqApiKey: process.env.GROQ_API_KEY
+      groqApiKey: process.env.GROQ_ENABLED === "true" ? process.env.GROQ_API_KEY : undefined
     });
 
     return responseChannel.send(200, {
@@ -445,7 +448,8 @@ async function createSummaryWithFallback({
   let lastProviderFailure = null;
 
   async function tryFlashLiteBeforeLocal(groqMs = 0) {
-    if (geminiApiKey) {
+    const terminalBudgetMs = getProviderRequestBudgetMs(FLASH_LITE_FALLBACK_MODEL) - orcaMs - groqMs;
+    if (geminiApiKey && terminalBudgetMs > 0) {
       const flashLiteStartedAt = Date.now();
       modelsTried.push(FLASH_LITE_FALLBACK_MODEL);
       try {
@@ -455,9 +459,9 @@ async function createSummaryWithFallback({
           profile,
           model: FLASH_LITE_FALLBACK_MODEL,
           initialMessages: geminiMessages,
-          // Orca and Flash-Lite share 60 seconds if Orca is unpaused, keeping the
-          // full remote allowance near 190 seconds under the 210s client cap.
-          requestBudgetMs: Math.max(1000, getProviderRequestBudgetMs(FLASH_LITE_FALLBACK_MODEL) - orcaMs)
+          // Restored Orca/Groq consume part of the terminal 90-second allowance.
+          // The complete remote chain stays within 270 seconds.
+          requestBudgetMs: terminalBudgetMs
         });
         return {
           ...result,
@@ -482,6 +486,7 @@ async function createSummaryWithFallback({
   }
 
   if (geminiApiKey) {
+    const GEMINI_MODEL_CHAIN = getGeminiModelChain();
     const geminiDeadline = Date.now() + GEMINI_CHAIN_BUDGET_MS;
     for (const [index, model] of GEMINI_MODEL_CHAIN.entries()) {
       const healthBeforeRequest = await geminiModelHealth.beginAttempt(model);
@@ -1087,7 +1092,7 @@ function getGeneratedModelSelection(conversation, geminiConfigured, orcaRouterCo
 
   return {
     model: GEMINI_PRIMARY_MODEL,
-    reason: `generated summaries try ${GEMINI_MODEL_CHAIN.join(", then ")}, then ${orcaRouterConfigured ? "OrcaRouter Free, " : ""}Mistral, Groq, and finally ${FLASH_LITE_FALLBACK_MODEL}`,
+    reason: `generated summaries try ${getGeminiModelChain().join(", then ")}, then ${orcaRouterConfigured ? "OrcaRouter Free, " : ""}Mistral, ${process.env.GROQ_ENABLED === "true" ? "Groq, " : ""}and finally ${FLASH_LITE_FALLBACK_MODEL}`,
     inputChars,
     thresholdChars: null,
     override: false

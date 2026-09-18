@@ -1,13 +1,15 @@
-# Orca pause and final Flash-Lite fallback
+# Provider pauses and time limits
 
-Since 2026-09-18, OrcaRouter is paused by default in `api/summarize.js` (`handleSummary`). Its route, `ORCAROUTER_API_KEY`, and existing tests remain. To unpause, set `ORCAROUTER_ENABLED=true` in Vercel's production environment and redeploy. Removing that variable or setting it to any other value pauses Orca again. No key replacement or code deletion is necessary.
+The active chain is Gemini 3.8 Flash -> Ministral 3 14B -> Google Gemini 3.5 Flash-Lite -> full local transcript carry. Each active model has a 90-second request budget including retries. Fluid Compute is enabled on Vercel Hobby; the server maximum is 300 seconds, active remote allowance is 270 seconds, and the extension waits 320 seconds. Fast errors advance immediately; the first success stops the chain.
 
-The active generated chain is Gemini Flash family -> Ministral 14B -> optional Groq -> Google `gemini-3.5-flash-lite` -> local transcript carry. Flash-Lite uses the existing `GEMINI_API_KEY` and Google's `generateContent` endpoint, not OpenRouter. It is attempted only after earlier remote routes fail; missing Groq configuration still proceeds to Flash-Lite. Without the Google key, Flash-Lite is skipped. Failed or empty Flash-Lite output proceeds to the unchanged full-transcript local carry.
+Paused routes retain their keys and implementation. Set the following production environment switches to exactly `true` and redeploy to restore them:
 
-`tryFlashLiteBeforeLocal()` inside `createSummaryWithFallback()` owns the last attempt. Flash-Lite uses `MINIMAL` thinking, the existing Google token allowance and hidden-thought filtering, and the temporary relaxed summary validation policy. It does not consume or consult Gemini Flash's daily-health records. Receipts record the actual Flash-Lite model while identifying the provider as the existing Google/Gemini API; `geminiMs` includes both Flash and Flash-Lite time.
+- `GEMINI_FLASH_FALLBACKS_ENABLED`: Flash 3.7, 3.6, and regular 3.5. Restored Flash routes share the 90-second family allowance by dividing remaining time across remaining model slots.
+- `ORCAROUTER_ENABLED`: OrcaRouter Free, before Mistral, with its retained 60-second budget.
+- `GROQ_ENABLED`: Groq Compound Mini, after Mistral, with its retained 15-second budget.
 
-The active remote allowance is 60s Flash + 55s Mistral + 15s Groq + 60s Flash-Lite = 190s. If Orca is unpaused, Flash-Lite subtracts Orca's elapsed attempt time from its 60s budget (minimum 1s), retaining roughly 19s of headroom under the extension's 210s timeout. This may leave Flash-Lite only a short attempt when Orca exhausts its allowance.
+Unset or non-true switches pause those routes. Restoring Orca/Groq deducts their elapsed attempt times from Flash-Lite's 90 seconds; exhausted allowance proceeds straight to local carry. Review timing before restoring routes: extra attempts trade away final-model time.
 
-Focused verification: `node --test test/flash-lite-fallback.test.js test/summarize.test.js test/gemini-model-health.test.js`. Google's model/API contract: https://ai.google.dev/gemini-api/docs/models/gemini-3.5-flash-lite . Free service availability and per-key quotas still apply.
+Flash-Lite uses the existing Google key, MINIMAL thinking, existing token allowance and hidden-thought filtering, and advisory summary validation. It does not consult Flash's daily-health records. Failed or empty output preserves the full captured transcript locally. Receipts identify the actual model and include both Google routes in geminiMs.
 
-Flash models divide the remaining 60-second family allowance among the remaining model slots (about 15 seconds each when all time out). Fast failures release time to later models; daily health skips still apply.
+Focused checks: node --test test/flash-chain-budget.test.js test/flash-lite-fallback.test.js test/summarize.test.js test/gemini-model-health.test.js test/background.test.js.

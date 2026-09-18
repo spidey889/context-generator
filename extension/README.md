@@ -7,7 +7,7 @@ Cap-Context carries the useful parts of one AI chat into another so you can cont
 1. Open a supported AI chat on Claude, ChatGPT, Gemini, Grok, or DeepSeek.
 2. Click the Cap-Context bubble in the message composer.
 3. Pick where you want to continue from the destination picker.
-4. Cap-Context captures role-verified turns and sends one summary job to the Vercel backend. Tiny chats are carried locally; generated summaries try Gemini 3.8, 3.7, 3.6, and 3.5 Flash, then Ministral 3 14B, optional Groq Compound Mini, Google Gemini 3.5 Flash-Lite, and finally the complete local carry. OrcaRouter is temporarily paused; its route and key are retained.
+4. Cap-Context captures role-verified turns and sends one summary job to the Vercel backend. Tiny chats are carried locally; generated summaries try Gemini 3.8 Flash, then Ministral 3 14B, Google Gemini 3.5 Flash-Lite, and finally the complete local carry. Other Flash models, Groq, and OrcaRouter are paused behind reversible switches; their routes and keys are retained. Each active model gets up to 90 seconds.
 5. It opens or prepares the destination tab, pastes the context into the message box, and focuses that tab.
 6. Continue in the destination chat with the prepared context.
 

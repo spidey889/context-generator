@@ -1,5 +1,7 @@
 # Changelog
 
+- 2026-09-18: Confirmed Fluid Compute is enabled on Hobby and raised server/client limits to 300/320 seconds. Replaced the short four-Flash attempts with three active 90-second routes: Flash 3.8, Ministral 14B, and Flash-Lite. Paused other Flash models and Groq behind reversible switches; Orca remains paused. Re-enabling Orca/Groq consumes the terminal allowance rather than increasing total remote time beyond 270 seconds.
+
 - 2026-09-18: Reserved time for each remaining Gemini Flash model within the existing 60-second family deadline so slow 3.8/3.7 attempts cannot consume the entire allowance before 3.6/3.5. Retained daily health skips and the overall provider timeout.
 
 - 2026-09-18: Replaced the terminal Google Gemma 4 31B attempt with stable Gemini 3.5 Flash-Lite after the owner verified Gemma had only 16k input tokens/minute, while Flash-Lite showed 250k on the same project. Retained the existing Google key, minimal thinking, timeout allowance, relaxed output handling, and Orca pause switch. Gemma is no longer in the active chain.

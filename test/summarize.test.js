@@ -1,3 +1,6 @@
+// Exercise retained routes explicitly; production defaults keep them paused.
+process.env.GEMINI_FLASH_FALLBACKS_ENABLED = "true";
+process.env.GROQ_ENABLED = "true";
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
@@ -490,10 +493,10 @@ test("provider fallback budgets keep the complete chain below the extension dead
     getProviderRequestBudgetMs("groq/compound-mini")
   ];
 
-  assert.deepEqual(budgets, [45000, 45000, 45000, 45000, 60000, 55000, 15000]);
-  const completeChainBudget = GEMINI_CHAIN_BUDGET_MS + Math.max(budgets[4], getProviderRequestBudgetMs("gemini-3.5-flash-lite")) + budgets[5] + budgets[6];
-  assert.equal(completeChainBudget, 190000);
-  assert.ok(completeChainBudget <= 210000 - 15000);
+  assert.deepEqual(budgets, [90000, 90000, 90000, 90000, 60000, 90000, 15000]);
+  const completeChainBudget = GEMINI_CHAIN_BUDGET_MS + Math.max(budgets[4], getProviderRequestBudgetMs("gemini-3.5-flash-lite")) + budgets[5];
+  assert.equal(completeChainBudget, 270000);
+  assert.ok(completeChainBudget <= 300000 - 30000);
 });
 
 test("backend uses only OrcaRouter Free before Mistral", async () => {

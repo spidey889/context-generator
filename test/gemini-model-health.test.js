@@ -1,3 +1,6 @@
+// Exercise retained routes explicitly; production defaults keep them paused.
+process.env.GEMINI_FLASH_FALLBACKS_ENABLED = "true";
+process.env.GROQ_ENABLED = "true";
 const assert = require("node:assert/strict");
 const test = require("node:test");
 

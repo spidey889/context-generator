@@ -156,24 +156,24 @@ Tiny output is different by design: canonical header, quoted `CONVERSATION SO FA
 Generated provider order:
 
 ```text
-Gemini 3.8 Flash -> 3.7 Flash -> 3.6 Flash -> 3.5 Flash
+Gemini 3.8 Flash
 -> Ministral 3 14B (25.12)
--> optional Groq Compound Mini
+
 -> Google Gemini 3.5 Flash-Lite
 -> emergency local-direct exact transcript
 ```
 
-- Gemini is skipped without `GEMINI_API_KEY`. Its four models share one 60-second family deadline; each attempt receives the remaining time divided by the number of remaining model slots, capped at 45 seconds. When all four time out, each gets roughly 15 seconds; fast failures leave extra time for later models. Daily health skips still apply. This reserves 15 seconds of overhead beneath the extension's 210-second deadline even if every later fallback exhausts its budget.
+- Gemini is skipped without `GEMINI_API_KEY`. Only 3.8 Flash is active, with a 90-second family and model budget. Flash 3.7, 3.6, and regular 3.5 remain paused; set `GEMINI_FLASH_FALLBACKS_ENABLED=true` to restore them within that same family allowance. Re-enabled Flash routes divide the remaining family time across remaining model slots. Daily health skips still apply.
 - When Vercel has `KV_REST_API_URL` and `KV_REST_API_TOKEN` (or the older `UPSTASH_REDIS_REST_*` aliases), each Gemini model uses a shared Pacific-day health record. Twenty successful summaries mark it `exhausted`; three consecutive failed summary attempts mark it `bad_mood`; either status skips that model until the next Pacific day. An explicit daily-quota response also marks it exhausted immediately. Gemini 429 responses move directly to the next model instead of retrying the same model. Redis stores only model counters/status/timestamps, and storage trouble fails open to the normal provider order. See `GEMINI_MODEL_HEALTH.md` for production setup and diagnosis.
-- OrcaRouter is paused by default, even with `ORCAROUTER_API_KEY` present. Set `ORCAROUTER_ENABLED=true` in the backend environment and redeploy to restore its retained `orcarouter/free` route between Gemini and Mistral. Its key and implementation remain intact; it never calls the paid automatic router. HTTP 429 advances immediately to Mistral. Orca and the terminal Flash-Lite fallback share a 60-second allowance, so unpausing does not add another full minute to the chain. See `docs/provider-fallbacks.md`.
+- OrcaRouter is paused by default. Set `ORCAROUTER_ENABLED=true` and redeploy to restore its retained free route between Flash and Mistral. Orca keeps its 60-second budget; its elapsed time is deducted from the final Flash-Lite allowance. See `docs/provider-fallbacks.md`.
 - Successful OrcaRouter responses use `X-Orca-Resolved-Model` as the receipt model, so Latest Run names the concrete DeepSeek, GLM, or other free model instead of showing the `orcarouter/free` request alias.
-- Mistral is skipped without `MISTRAL_API_KEY`. The only active Mistral model is Ministral 3 14B with a 55-second budget. Mistral Large 3 is excluded because the production Free-tier key consistently receives HTTP 403 code 1910 for it. A 14B HTTP 429 advances immediately to Groq instead of retrying the same model.
-- Groq is optional via `GROQ_API_KEY`, uses `groq/compound-mini`, and has 15 seconds.
-- Flash-Lite uses `gemini-3.5-flash-lite` through Google's existing Gemini API and `GEMINI_API_KEY`, after Groq fails or is absent. It has 60 seconds while Orca is paused, uses `MINIMAL` thinking, and reuses Google's response parsing, hidden-thought filtering, and token allowance. It is independent of the Gemini Flash family deadline and daily Flash health skips. Google provider timings include Flash-Lite in `geminiMs`; the serving model remains `gemini-3.5-flash-lite`. With Orca enabled, Flash-Lite receives the unused portion of Orca's 60 seconds (minimum one second); worst-case remote allowance is about 191 seconds inside the 210-second client cap.
+- Mistral is skipped without `MISTRAL_API_KEY`. Only Ministral 3 14B is active, with a 90-second budget. Mistral Large 3 remains excluded because the Free-tier key receives HTTP 403 code 1910. HTTP 429 advances immediately to the next route.
+- Groq is paused even when its key exists. Set `GROQ_ENABLED=true` to restore `groq/compound-mini` with its retained 15-second budget; elapsed Groq time is deducted from Flash-Lite so restoring routes does not extend the total allowance.
+- Flash-Lite uses Google `gemini-3.5-flash-lite` and the existing `GEMINI_API_KEY` after Mistral (and any explicitly restored routes). It has 90 seconds with `MINIMAL` thinking and remains independent of Flash daily-health skips. Parsing, hidden-thought filtering, relaxed validation, and Google timings remain unchanged. Orca/Groq elapsed time is deducted from this allowance; no remaining allowance proceeds directly to local carry.
 - If every configured remote provider fails or no provider key is available, the backend returns the complete captured transcript through the provider-free `local-direct` format. It never truncates the transcript; the transfer remains usable during a provider-wide outage, though it is not compressed.
-- Retryable provider calls get at most two attempts within the model budget and an 80-second per-attempt ceiling. Ordinary retries wait 450 ms. Gemini, OrcaRouter Free, and Mistral move immediately to their next fallback on HTTP 429; Groq honors `Retry-After` or waits at least one second.
+- Retryable provider calls get at most two attempts within the model budget and an 90-second per-attempt ceiling. Ordinary retries wait 450 ms. Gemini, OrcaRouter Free, and Mistral move immediately to their next fallback on HTTP 429; Groq honors `Retry-After` or waits at least one second.
 - Gemini uses `thinkingLevel: MEDIUM`. Mistral prompt-cache keys use `capcontext-summary-v7-<profile>-<model>`; v7 adds an explicit full-transcript checklist and final omission check for user-protected exact facts, especially integrity and implementation-state details.
-- Vercel allows 240 seconds; the extension aborts the backend call at 210 seconds and calls an extension API every 25 seconds to keep the MV3 worker alive.
+- Fluid Compute is enabled on Vercel Hobby. The server allows 300 seconds; active provider budgets total 270 seconds, reserving about 30 seconds for overhead. The extension aborts at 320 seconds, allowing transport time after server completion, and keeps its MV3 worker alive every 25 seconds.
 - The backend emits JSON-safe whitespace heartbeats every 15 seconds after the first 15 seconds.
 - Identical concurrent conversations share one background promise. Up to eight exact completed results remain in worker memory for two minutes; cache hits preserve original provider metadata.
 
