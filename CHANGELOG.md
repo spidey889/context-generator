@@ -1,5 +1,7 @@
 # Changelog
 
+- 2026-09-18: Paused OrcaRouter by default while retaining its key and route behind `ORCAROUTER_ENABLED=true`. Added Google Gemma 4 31B via the existing Google key as the final remote attempt after Groq and before full-transcript local carry, with minimal thinking and a 60-second allowance shared with Orca when unpaused. Documented restoration in `docs/provider-fallbacks.md`.
+
 - 2026-09-18: Temporarily made generated-summary validation advisory so non-empty provider output is delivered even when the requested header, seven-section structure, or quality checks fail. Valid output keeps canonical normalization; imperfect text is preserved with the destination-confirmation instruction appended. Empty output and service failures still fall back. Retained the strict validator and documented restoration in `docs/summary-validation.md`.
 
 - 2026-09-13: Added explicit content-script instance teardown for reinjection. A new version now retires the previous instance before startup by removing its runtime and DOM listeners, disconnecting owned observers, cancelling timers, intervals, and animation frames, restoring reservations, and removing owned UI.

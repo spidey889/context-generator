@@ -491,7 +491,7 @@ test("provider fallback budgets keep the complete chain below the extension dead
   ];
 
   assert.deepEqual(budgets, [45000, 45000, 45000, 45000, 60000, 55000, 15000]);
-  const completeChainBudget = GEMINI_CHAIN_BUDGET_MS + budgets.slice(4).reduce((total, budget) => total + budget, 0);
+  const completeChainBudget = GEMINI_CHAIN_BUDGET_MS + Math.max(budgets[4], getProviderRequestBudgetMs("gemma-4-31b-it")) + budgets[5] + budgets[6];
   assert.equal(completeChainBudget, 190000);
   assert.ok(completeChainBudget <= 210000 - 15000);
 });
@@ -499,6 +499,7 @@ test("provider fallback budgets keep the complete chain below the extension dead
 test("backend uses only OrcaRouter Free before Mistral", async () => {
   const originalFetch = global.fetch;
   const restoreGeminiKey = setTemporaryEnv("GEMINI_API_KEY", undefined);
+  const restoreOrcaEnabled = setTemporaryEnv("ORCAROUTER_ENABLED", "true");
   const restoreOrcaKey = setTemporaryEnv("ORCAROUTER_API_KEY", "test-orca-key");
   const restoreMistralKey = setTemporaryEnv("MISTRAL_API_KEY", "test-mistral-key");
   const conversation = "OrcaRouter free route context ".repeat(180);
@@ -535,6 +536,7 @@ test("backend uses only OrcaRouter Free before Mistral", async () => {
   } finally {
     restoreMistralKey();
     restoreOrcaKey();
+    restoreOrcaEnabled();
     restoreGeminiKey();
     global.fetch = originalFetch;
   }
@@ -543,6 +545,7 @@ test("backend uses only OrcaRouter Free before Mistral", async () => {
 test("OrcaRouter free-tier 429 falls through immediately without retrying", async () => {
   const originalFetch = global.fetch;
   const restoreGeminiKey = setTemporaryEnv("GEMINI_API_KEY", undefined);
+  const restoreOrcaEnabled = setTemporaryEnv("ORCAROUTER_ENABLED", "true");
   const restoreOrcaKey = setTemporaryEnv("ORCAROUTER_API_KEY", "test-orca-key");
   const restoreMistralKey = setTemporaryEnv("MISTRAL_API_KEY", "test-mistral-key");
   const conversation = "OrcaRouter prompt-cap fallback ".repeat(180);
@@ -581,6 +584,7 @@ test("OrcaRouter free-tier 429 falls through immediately without retrying", asyn
   } finally {
     restoreMistralKey();
     restoreOrcaKey();
+    restoreOrcaEnabled();
     restoreGeminiKey();
     global.fetch = originalFetch;
   }
@@ -1033,7 +1037,7 @@ test("generated summaries select Gemini 3.8 Flash when its server key is configu
   const conversation = "x".repeat(20001);
 
   assert.equal(getGeneratedModelSelection(conversation, true).model, "gemini-3.8-flash");
-  assert.match(getGeneratedModelSelection(conversation, true).reason, /then OrcaRouter Free, Mistral, and Groq/);
+  assert.match(getGeneratedModelSelection(conversation, true).reason, /then Mistral, Groq, and finally gemma-4-31b-it/);
   assert.equal(getGeneratedModelSelection(conversation, false, true).model, "orcarouter/free");
   assert.equal(getGeneratedModelSelection(conversation, false).model, "ministral-14b-2512");
 });

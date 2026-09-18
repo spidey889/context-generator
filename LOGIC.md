@@ -157,18 +157,19 @@ Generated provider order:
 
 ```text
 Gemini 3.8 Flash -> 3.7 Flash -> 3.6 Flash -> 3.5 Flash
--> OrcaRouter Free
 -> Ministral 3 14B (25.12)
 -> optional Groq Compound Mini
+-> Google Gemma 4 31B
 -> emergency local-direct exact transcript
 ```
 
 - Gemini is skipped without `GEMINI_API_KEY`. Its four models share one 60-second family deadline; each model is capped at 45 seconds. This reserves 15 seconds of overhead beneath the extension's 210-second deadline even if every later fallback exhausts its budget.
 - When Vercel has `KV_REST_API_URL` and `KV_REST_API_TOKEN` (or the older `UPSTASH_REDIS_REST_*` aliases), each Gemini model uses a shared Pacific-day health record. Twenty successful summaries mark it `exhausted`; three consecutive failed summary attempts mark it `bad_mood`; either status skips that model until the next Pacific day. An explicit daily-quota response also marks it exhausted immediately. Gemini 429 responses move directly to the next model instead of retrying the same model. Redis stores only model counters/status/timestamps, and storage trouble fails open to the normal provider order. See `GEMINI_MODEL_HEALTH.md` for production setup and diagnosis.
-- OrcaRouter is skipped without `ORCAROUTER_API_KEY`. It calls only `orcarouter/free` through the OpenAI-compatible chat-completions endpoint, never the paid automatic router. Its 60-second budget keeps the complete configured provider allowance at 190 seconds. Any HTTP 429 advances immediately to Mistral so an unpublished free prompt cap, minute limit, or UTC-day limit cannot stall or repeatedly hit the service. OrcaRouter receives the same untrusted transcript envelope and exact output contract as the other chat-completions providers.
+- OrcaRouter is paused by default, even with `ORCAROUTER_API_KEY` present. Set `ORCAROUTER_ENABLED=true` in the backend environment and redeploy to restore its retained `orcarouter/free` route between Gemini and Mistral. Its key and implementation remain intact; it never calls the paid automatic router. HTTP 429 advances immediately to Mistral. Orca and the terminal Gemma fallback share a 60-second allowance, so unpausing does not add another full minute to the chain. See `docs/provider-fallbacks.md`.
 - Successful OrcaRouter responses use `X-Orca-Resolved-Model` as the receipt model, so Latest Run names the concrete DeepSeek, GLM, or other free model instead of showing the `orcarouter/free` request alias.
 - Mistral is skipped without `MISTRAL_API_KEY`. The only active Mistral model is Ministral 3 14B with a 55-second budget. Mistral Large 3 is excluded because the production Free-tier key consistently receives HTTP 403 code 1910 for it. A 14B HTTP 429 advances immediately to Groq instead of retrying the same model.
 - Groq is optional via `GROQ_API_KEY`, uses `groq/compound-mini`, and has 15 seconds.
+- Gemma uses `gemma-4-31b-it` through Google's existing Gemini API and `GEMINI_API_KEY`, after Groq fails or is absent. It has 60 seconds while Orca is paused, uses `MINIMAL` thinking, and reuses Google's response parsing, hidden-thought filtering, and token allowance. It is independent of the Gemini Flash family deadline and daily Flash health skips. Google provider timings include Gemma in `geminiMs`; the serving model remains `gemma-4-31b-it`. With Orca enabled, Gemma receives the unused portion of Orca's 60 seconds (minimum one second); worst-case remote allowance is about 191 seconds inside the 210-second client cap.
 - If every configured remote provider fails or no provider key is available, the backend returns the complete captured transcript through the provider-free `local-direct` format. It never truncates the transcript; the transfer remains usable during a provider-wide outage, though it is not compressed.
 - Retryable provider calls get at most two attempts within the model budget and an 80-second per-attempt ceiling. Ordinary retries wait 450 ms. Gemini, OrcaRouter Free, and Mistral move immediately to their next fallback on HTTP 429; Groq honors `Retry-After` or waits at least one second.
 - Gemini uses `thinkingLevel: MEDIUM`. Mistral prompt-cache keys use `capcontext-summary-v7-<profile>-<model>`; v7 adds an explicit full-transcript checklist and final omission check for user-protected exact facts, especially integrity and implementation-state details.
