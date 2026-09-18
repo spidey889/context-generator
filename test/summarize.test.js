@@ -491,7 +491,7 @@ test("provider fallback budgets keep the complete chain below the extension dead
   ];
 
   assert.deepEqual(budgets, [45000, 45000, 45000, 45000, 60000, 55000, 15000]);
-  const completeChainBudget = GEMINI_CHAIN_BUDGET_MS + Math.max(budgets[4], getProviderRequestBudgetMs("gemma-4-31b-it")) + budgets[5] + budgets[6];
+  const completeChainBudget = GEMINI_CHAIN_BUDGET_MS + Math.max(budgets[4], getProviderRequestBudgetMs("gemini-3.5-flash-lite")) + budgets[5] + budgets[6];
   assert.equal(completeChainBudget, 190000);
   assert.ok(completeChainBudget <= 210000 - 15000);
 });
@@ -1037,7 +1037,7 @@ test("generated summaries select Gemini 3.8 Flash when its server key is configu
   const conversation = "x".repeat(20001);
 
   assert.equal(getGeneratedModelSelection(conversation, true).model, "gemini-3.8-flash");
-  assert.match(getGeneratedModelSelection(conversation, true).reason, /then Mistral, Groq, and finally gemma-4-31b-it/);
+  assert.match(getGeneratedModelSelection(conversation, true).reason, /then Mistral, Groq, and finally gemini-3.5-flash-lite/);
   assert.equal(getGeneratedModelSelection(conversation, false, true).model, "orcarouter/free");
   assert.equal(getGeneratedModelSelection(conversation, false).model, "ministral-14b-2512");
 });

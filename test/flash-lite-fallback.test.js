@@ -3,12 +3,12 @@ const test = require("node:test");
 const handler = require("../api/summarize.js");
 const { createSummaryWithFallback, getSummaryProfile, getGeneratedModelSelection } = handler.__test;
 
-for (const [label, groqKey, gemmaWorks] of [
+for (const [label, groqKey, flashLiteWorks] of [
   ["after Groq failure", "test-groq", true],
   ["when Groq is absent", undefined, true],
-  ["before local carry when Gemma also fails", "test-groq", false]
+  ["before local carry when Flash-Lite also fails", "test-groq", false]
 ]) {
-  test(`Gemma is the final remote fallback ${label}`, async () => {
+  test(`Flash-Lite is the final remote fallback ${label}`, async () => {
     const originalFetch = global.fetch;
     const requests = [];
     const healthModels = [];
@@ -22,7 +22,7 @@ for (const [label, groqKey, gemmaWorks] of [
       const body = JSON.parse(options.body);
       const model = body.model || url.split("/models/")[1].split(":")[0];
       requests.push(model);
-      if (model === "gemma-4-31b-it" && gemmaWorks) {
+      if (model === "gemini-3.5-flash-lite" && flashLiteWorks) {
         assert.equal(options.headers["x-goog-api-key"], "test-google");
         assert.equal(body.generationConfig.thinkingConfig.thinkingLevel, "MINIMAL");
         assert.equal(JSON.parse(body.contents[0].parts[0].text).conversation, conversation);
@@ -45,10 +45,10 @@ for (const [label, groqKey, gemmaWorks] of [
       });
       assert.deepEqual(requests, ["gemini-3.8-flash", "gemini-3.7-flash", "gemini-3.6-flash",
         "gemini-3.5-flash", "ministral-14b-2512", ...(groqKey ? ["groq/compound-mini", "groq/compound-mini"] : []),
-        "gemma-4-31b-it"]);
-      assert.equal(result.model, gemmaWorks ? "gemma-4-31b-it" : "local-direct");
-      assert.equal(healthModels.includes("gemma-4-31b-it"), false);
-      if (gemmaWorks) {
+        "gemini-3.5-flash-lite"]);
+      assert.equal(result.model, flashLiteWorks ? "gemini-3.5-flash-lite" : "local-direct");
+      assert.equal(healthModels.includes("gemini-3.5-flash-lite"), false);
+      if (flashLiteWorks) {
         assert.match(result.summary, /Windows build passed; Linux checks remain pending/);
         assert.doesNotMatch(result.summary, /private reasoning/);
       } else {

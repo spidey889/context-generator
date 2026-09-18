@@ -28,14 +28,14 @@ const MISTRAL_PRIMARY_MODEL = "ministral-14b-2512";
 const MISTRAL_FALLBACK_MODELS = [];
 const MISTRAL_MODEL_CHAIN = [MISTRAL_PRIMARY_MODEL, ...MISTRAL_FALLBACK_MODELS];
 const GROQ_FALLBACK_MODEL = "groq/compound-mini";
-const GEMMA_FALLBACK_MODEL = "gemma-4-31b-it";
+const FLASH_LITE_FALLBACK_MODEL = "gemini-3.5-flash-lite";
 const PROVIDER_REQUEST_BUDGETS_MS = {
   [GEMINI_PRIMARY_MODEL]: 45000,
   ...Object.fromEntries(GEMINI_FALLBACK_MODELS.map((model) => [model, 45000])),
   [ORCAROUTER_FREE_MODEL]: 60000,
   [MISTRAL_PRIMARY_MODEL]: 55000,
   [GROQ_FALLBACK_MODEL]: 15000,
-  [GEMMA_FALLBACK_MODEL]: 60000
+  [FLASH_LITE_FALLBACK_MODEL]: 60000
 };
 const MISTRAL_PROMPT_CACHE_VERSION = "capcontext-summary-v7";
 const SUMMARY_PROVIDERS = {
@@ -444,35 +444,35 @@ async function createSummaryWithFallback({
   let mistralFailure = null;
   let lastProviderFailure = null;
 
-  async function tryGemmaBeforeLocal(groqMs = 0) {
+  async function tryFlashLiteBeforeLocal(groqMs = 0) {
     if (geminiApiKey) {
-      const gemmaStartedAt = Date.now();
-      modelsTried.push(GEMMA_FALLBACK_MODEL);
+      const flashLiteStartedAt = Date.now();
+      modelsTried.push(FLASH_LITE_FALLBACK_MODEL);
       try {
         const result = await createSummaryWithProvider({
           provider: SUMMARY_PROVIDERS.gemini,
           apiKey: geminiApiKey,
           profile,
-          model: GEMMA_FALLBACK_MODEL,
+          model: FLASH_LITE_FALLBACK_MODEL,
           initialMessages: geminiMessages,
-          // Orca and Gemma share 60 seconds if Orca is unpaused, keeping the
+          // Orca and Flash-Lite share 60 seconds if Orca is unpaused, keeping the
           // full remote allowance near 190 seconds under the 210s client cap.
-          requestBudgetMs: Math.max(1000, getProviderRequestBudgetMs(GEMMA_FALLBACK_MODEL) - orcaMs)
+          requestBudgetMs: Math.max(1000, getProviderRequestBudgetMs(FLASH_LITE_FALLBACK_MODEL) - orcaMs)
         });
         return {
           ...result,
-          modelReason: `${modelsTried.slice(0, -1).join(" -> ")} failed; fell back to ${GEMMA_FALLBACK_MODEL}`,
+          modelReason: `${modelsTried.slice(0, -1).join(" -> ")} failed; fell back to ${FLASH_LITE_FALLBACK_MODEL}`,
           modelsTried, geminiModelsSkipped, mistralModelsTried,
           geminiMs: geminiMs + result.providerMs, orcaMs, mistralMs, groqMs,
           fallback: createFallbackMetadata({
             attempted: true, used: true, servedBy: SUMMARY_PROVIDERS.gemini.id,
-            model: GEMMA_FALLBACK_MODEL, reason: getProviderFailureReason(lastProviderFailure)
+            model: FLASH_LITE_FALLBACK_MODEL, reason: getProviderFailureReason(lastProviderFailure)
           })
         };
       } catch (error) {
-        geminiMs += Date.now() - gemmaStartedAt;
+        geminiMs += Date.now() - flashLiteStartedAt;
         lastProviderFailure = error;
-        console.error("Gemma final fallback failed:", getProviderFailureLog(error));
+        console.error("Flash-Lite final fallback failed:", getProviderFailureLog(error));
       }
     }
     return createEmergencyDirectCarryResult({
@@ -693,7 +693,7 @@ async function createSummaryWithFallback({
   }
 
   if (!groqApiKey) {
-    return tryGemmaBeforeLocal();
+    return tryFlashLiteBeforeLocal();
   }
 
   const fallback = createFallbackMetadata({
@@ -732,7 +732,7 @@ async function createSummaryWithFallback({
   } catch (error) {
     console.error("Groq fallback failed:", getProviderFailureLog(error));
     lastProviderFailure = error;
-    return tryGemmaBeforeLocal(Date.now() - groqStartedAt);
+    return tryFlashLiteBeforeLocal(Date.now() - groqStartedAt);
   }
 }
 
@@ -881,7 +881,7 @@ function requestProviderSummary(provider, apiKey, messages, profile, model, opti
   }, options.requestBudgetMs ?? getProviderRequestBudgetMs(model), {
     // Gemini, OrcaRouter Free, and Mistral all have another provider/model ready.
     // Advance immediately on 429 so a free-tier prompt cap or long reset window
-    // never stalls the transfer. Groq may honor Retry-After once before Gemma.
+    // never stalls the transfer. Groq may honor Retry-After once before Flash-Lite.
     retryRateLimits: provider.id === SUMMARY_PROVIDERS.groq.id
   });
 }
@@ -907,7 +907,7 @@ function getProviderRequestBody(provider, messages, profile, model) {
         // Gemini-only totals leave Mistral and Groq on the shared profile caps.
         maxOutputTokens: generationBudget.maxOutputTokens,
         thinkingConfig: {
-          thinkingLevel: model === GEMMA_FALLBACK_MODEL ? "MINIMAL" : "MEDIUM"
+          thinkingLevel: model === FLASH_LITE_FALLBACK_MODEL ? "MINIMAL" : "MEDIUM"
         }
       },
       store: false
@@ -1085,7 +1085,7 @@ function getGeneratedModelSelection(conversation, geminiConfigured, orcaRouterCo
 
   return {
     model: GEMINI_PRIMARY_MODEL,
-    reason: `generated summaries try ${GEMINI_MODEL_CHAIN.join(", then ")}, then ${orcaRouterConfigured ? "OrcaRouter Free, " : ""}Mistral, Groq, and finally ${GEMMA_FALLBACK_MODEL}`,
+    reason: `generated summaries try ${GEMINI_MODEL_CHAIN.join(", then ")}, then ${orcaRouterConfigured ? "OrcaRouter Free, " : ""}Mistral, Groq, and finally ${FLASH_LITE_FALLBACK_MODEL}`,
     inputChars,
     thresholdChars: null,
     override: false
