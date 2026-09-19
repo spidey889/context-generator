@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-09-20-grok-fast-capture-v32";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-09-20-grok-adaptive-capture-v33";
   const INSTANCE_TEARDOWN_KEY = "__contextGeneratorPlatformTeardown";
   const INSTALL_NOTICE_NODE_ID = "context-generator-install-notice";
   let installNoticeChecked = false;
@@ -102,7 +102,7 @@
   // Grok's rendered message window updates promptly after an instant scroll. Keep its
   // capture path responsive without weakening the conservative waits used elsewhere.
   const GROK_SOURCE_SCROLL_STABLE_TIMEOUT_MS = 700;
-  const GROK_SOURCE_SCROLL_STABLE_INTERVAL_MS = 50;
+  const GROK_SOURCE_SCROLL_STABLE_INTERVAL_MS = 40;
   const GROK_SOURCE_SCROLL_STABLE_SAMPLE_COUNT = 2;
   const VIRTUAL_SWEEP_MAX_SCROLLS = 480;
   const VIRTUAL_SWEEP_STALE_SCROLLS = 3;
@@ -115,11 +115,13 @@
   const VIRTUAL_SWEEP_CHANGE_POLL_MS = 16;
   const VIRTUAL_SWEEP_SLOW_CHANGE_TIMEOUT_MS = 360;
   const CLAUDE_VIRTUAL_SWEEP_SLOW_CHANGE_TIMEOUT_MS = 1400;
-  const GROK_VIRTUAL_SWEEP_STEP_RATIO = 0.9;
-  const GROK_VIRTUAL_SWEEP_SETTLE_MS = 160;
+  const GROK_VIRTUAL_SWEEP_STEP_RATIO = 0.7;
+  const GROK_VIRTUAL_SWEEP_OVERLAP_STEP_RATIO = 0.9;
+  const GROK_VIRTUAL_SWEEP_SETTLE_MS = 100;
   const GROK_VIRTUAL_SWEEP_STABLE_SAMPLE_COUNT = 2;
-  const GROK_VIRTUAL_SWEEP_CHANGE_POLL_MS = 12;
+  const GROK_VIRTUAL_SWEEP_CHANGE_POLL_MS = 10;
   const GROK_VIRTUAL_SWEEP_SLOW_CHANGE_TIMEOUT_MS = 160;
+  const GROK_VIRTUAL_SWEEP_DELAYED_RENDER_TIMEOUT_MS = 220;
   const COLLAPSED_CONVERSATION_EXPAND_RE = /\b(?:show|see|read|view)\s+(?:more|full|all)\b|\bcontinue\s+(?:reading|message|response)\b|\bexpand\b/i;
   const COLLAPSED_CONVERSATION_EXPAND_EXCLUDE_RE = /\b(?:continue generating|regenerate|send|submit|stop generating|new chat|settings|menu|voice|microphone)\b/i;
   const PASTED_CONTENT_TITLE_RE = /^\s*pasted\s+(?:content|text)\s*$/i;
@@ -2623,6 +2625,20 @@
         // scroll, but the real page still needs time to mount and finish rendering the new virtualized window.
         afterRenderedSnapshot = await waitForConversationWindowToSettle();
         afterWindowSignature = afterRenderedSnapshot.signature;
+        // A busy Grok tab can render after the fast settle window. Wait only when the
+        // window has not changed, so the normal path stays quick without skipping a
+        // delayed virtualized batch on the next large scroll.
+        if (currentPlatform.id === "grok" && afterWindowSignature === beforeWindowSignature) {
+          afterRenderedSnapshot = await waitForRenderedConversationWindowChange(
+            beforeWindowSignature,
+            GROK_VIRTUAL_SWEEP_DELAYED_RENDER_TIMEOUT_MS
+          );
+          afterWindowSignature = afterRenderedSnapshot.signature;
+          if (afterWindowSignature !== beforeWindowSignature) {
+            afterRenderedSnapshot = await waitForConversationWindowToSettle();
+            afterWindowSignature = afterRenderedSnapshot.signature;
+          }
+        }
       }
 
       scrolls += 1;
@@ -2889,7 +2905,11 @@
   }
 
   function getVirtualSweepStepRatio(useLargerOverlapStep = false) {
-    if (currentPlatform.id === "grok") return GROK_VIRTUAL_SWEEP_STEP_RATIO;
+    if (currentPlatform.id === "grok") {
+      return useLargerOverlapStep
+        ? GROK_VIRTUAL_SWEEP_OVERLAP_STEP_RATIO
+        : GROK_VIRTUAL_SWEEP_STEP_RATIO;
+    }
     return useLargerOverlapStep ? VIRTUAL_SWEEP_OVERLAP_STEP_RATIO : VIRTUAL_SWEEP_STEP_RATIO;
   }
 

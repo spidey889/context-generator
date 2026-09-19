@@ -1,6 +1,6 @@
 # Changelog
 
-- 2026-09-20: Added a Grok-only fast capture profile: shorter preparation and rendered-window stability polling, 90% viewport advances, and a shorter terminal quiet check. Claude, ChatGPT, Gemini, and DeepSeek retain their existing capture timing. Focused regression coverage proves the fast Grok sweep still collects a complete 40-turn virtualized fixture.
+- 2026-09-20: Added a Grok-only adaptive capture profile: shorter normal stability polling, overlap-proven 70%/90% viewport advances, and a delayed-render guard that waits only when a physical scroll has not produced a new virtualized window. Claude, ChatGPT, Gemini, and DeepSeek retain their existing capture timing. Focused regression coverage proves complete 40-turn fast capture and complete 24-turn capture when Grok renders each window 140 ms late.
 
 - 2026-09-18: Resumed Ministral 3 14B after the owner confirmed Flash-Lite handled a large conversation. Production `MISTRAL_ENABLED=true` restores Flash 3.6 -> Mistral -> Flash-Lite without changing 90-second budgets or the other provider pauses.
 

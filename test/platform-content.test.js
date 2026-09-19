@@ -1096,7 +1096,8 @@ function createVirtualizedChatElements({
   windowSize = 12,
   scrollStride = windowSize,
   scrollHeight = 4800,
-  stalledScrollsBeforeRender = 0
+  stalledScrollsBeforeRender = 0,
+  renderDelayMs = 0
 }) {
   const elements = [];
   let delayedScrolls = 0;
@@ -1133,8 +1134,15 @@ function createVirtualizedChatElements({
       return;
     }
     delayedScrolls = 0;
-    renderedStartIndex = startIndex;
-    renderWindow(startIndex);
+    const applyWindow = () => {
+      renderedStartIndex = startIndex;
+      renderWindow(startIndex);
+    };
+    if (renderDelayMs > 0) {
+      setTimeout(applyWindow, renderDelayMs);
+    } else {
+      applyWindow();
+    }
   };
   renderWindow(0);
 
@@ -1232,12 +1240,13 @@ test("Grok uses its fast capture profile without losing a virtualized 40-turn ch
   const hooks = loadPlatformContent(elements, "grok.com");
 
   assert.equal(hooks.getSourceScrollStableTimeout(), 700);
-  assert.equal(hooks.getSourceScrollStableInterval(), 50);
+  assert.equal(hooks.getSourceScrollStableInterval(), 40);
   assert.equal(hooks.getSourceScrollStableSampleCount(), 2);
-  assert.equal(hooks.getVirtualSweepSettleTimeout(), 160);
+  assert.equal(hooks.getVirtualSweepSettleTimeout(), 100);
   assert.equal(hooks.getVirtualSweepStableSampleCount(), 2);
-  assert.equal(hooks.getVirtualSweepChangePollMs(), 12);
-  assert.equal(hooks.getVirtualSweepStepRatio(false), 0.9);
+  assert.equal(hooks.getVirtualSweepChangePollMs(), 10);
+  assert.equal(hooks.getVirtualSweepStepRatio(false), 0.7);
+  assert.equal(hooks.getVirtualSweepStepRatio(true), 0.9);
   assert.equal(hooks.getVirtualSweepTerminalQuietTimeout(), 160);
 
   await hooks.prepareSourceForCapture();
@@ -1248,9 +1257,32 @@ test("Grok uses its fast capture profile without losing a virtualized 40-turn ch
   assert.match(transcript, /User: Fast virtualized Grok turn 1/);
   assert.match(transcript, /Grok: Fast virtualized Grok turn 40/);
   assert.ok(
-    scrollableRoot.scrollCalls.length <= 7,
-    `Grok's 90% advances should finish this fixture in 7 scrolls or fewer; saw ${scrollableRoot.scrollCalls.length}`
+    scrollableRoot.scrollCalls.length <= 8,
+    `Grok's adaptive advances should finish this fixture in 8 scrolls or fewer; saw ${scrollableRoot.scrollCalls.length}`
   );
+});
+
+test("Grok fast capture waits for a delayed virtualized window instead of skipping turns", async () => {
+  const { elements } = createVirtualizedChatElements({
+    label: "Grok delayed render",
+    totalTurns: 24,
+    windowSize: 8,
+    scrollStride: 4,
+    scrollHeight: 2400,
+    renderDelayMs: 140,
+    makeTurn: (index) => new FakeElement({
+      text: `Delayed Grok turn ${index}`,
+      attrs: { "data-message-author-role": index % 2 ? "user" : "assistant" }
+    })
+  });
+  const hooks = loadPlatformContent(elements, "grok.com");
+
+  await hooks.prepareSourceForCapture();
+  const transcript = await hooks.scrapeConversationTextWhenReady();
+
+  assert.equal((transcript.match(/(?:User|Grok): Delayed Grok turn/g) || []).length, 24);
+  assert.match(transcript, /User: Delayed Grok turn 1/);
+  assert.match(transcript, /Grok: Delayed Grok turn 24/);
 });
 
 test("Grok fast capture settings do not change ChatGPT capture pacing", () => {

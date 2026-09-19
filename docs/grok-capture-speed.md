@@ -4,13 +4,14 @@ Grok uses a dedicated fast capture profile. The optimization is intentionally li
 
 ## What changed
 
-- Initial top-of-chat stability: two 50 ms stable samples, bounded by 700 ms.
-- Per-scroll stability: two stable samples inside a 160 ms window.
-- Scroll advance: 90% of the detected conversation viewport on every step.
-- Render-change polling: every 12 ms.
+- Initial top-of-chat stability: two 40 ms stable samples, bounded by 700 ms.
+- Per-scroll stability: two stable samples inside a 100 ms fast window.
+- Scroll advance: 70% of the viewport until ordered overlap is proven, then 90%.
+- Render-change polling: every 10 ms.
 - Final quiet check: 160 ms before concluding no additional rendered window exists.
+- Delayed-render guard: after real scroll movement with no immediate window change, wait up to 220 ms and confirm the late window is stable before advancing again.
 
-Previously, Grok inherited three 140 ms preparation samples, 360 ms sweep windows, conservative 60% starting advances, 16 ms polling, and a 360 ms final quiet check.
+Previously, Grok inherited three 140 ms preparation samples, 360 ms sweep windows, conservative 60% starting advances, 16 ms polling, and a 360 ms final quiet check. The first fast profile used fixed 90% advances and a 160 ms settle window; the adaptive profile replaces that with a quicker normal path plus a targeted slow-render guard.
 
 ## Safety retained
 
@@ -18,7 +19,7 @@ The change does not bypass the shared capture engine. Grok still:
 
 - verifies user and assistant roles;
 - captures and sequence-aligns every rendered window;
-- keeps 10% viewport overlap between advances;
+- requires a safer 30% overlap until ordered window overlap is observed, then keeps 10% overlap;
 - deduplicates exact role-and-text copies;
 - performs bounded terminal and no-movement checks;
 - rejects captures above the existing 350,000-character limit;
@@ -26,6 +27,6 @@ The change does not bypass the shared capture engine. Grok still:
 
 ## Verification
 
-`test/platform-content.test.js` includes a 40-turn virtualized Grok fixture. It verifies that all 40 turns survive the faster sweep, the first and last turns remain present, the fixture completes within seven scroll advances, and ChatGPT's pacing remains unchanged.
+`test/platform-content.test.js` includes a 40-turn virtualized Grok fixture and a 24-turn fixture whose windows render 140 ms late. They verify that all turns survive both the normal and delayed paths, the first and last turns remain present, the normal fixture completes within eight scroll advances, and ChatGPT's pacing remains unchanged.
 
 This is automated fixture evidence, not live Grok timing. Real speed still depends on Grok's DOM size, virtualization behavior, machine load, and network-delivered rendering.
