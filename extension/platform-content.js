@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-09-18-install-notice-v31";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-09-20-grok-fast-capture-v32";
   const INSTANCE_TEARDOWN_KEY = "__contextGeneratorPlatformTeardown";
   const INSTALL_NOTICE_NODE_ID = "context-generator-install-notice";
   let installNoticeChecked = false;
@@ -99,6 +99,11 @@
   const SOURCE_SCROLL_LONG_STABLE_TIMEOUT_MS = 4500;
   const SOURCE_SCROLL_STABLE_INTERVAL_MS = 140;
   const SOURCE_SCROLL_STABLE_SAMPLE_COUNT = 3;
+  // Grok's rendered message window updates promptly after an instant scroll. Keep its
+  // capture path responsive without weakening the conservative waits used elsewhere.
+  const GROK_SOURCE_SCROLL_STABLE_TIMEOUT_MS = 700;
+  const GROK_SOURCE_SCROLL_STABLE_INTERVAL_MS = 50;
+  const GROK_SOURCE_SCROLL_STABLE_SAMPLE_COUNT = 2;
   const VIRTUAL_SWEEP_MAX_SCROLLS = 480;
   const VIRTUAL_SWEEP_STALE_SCROLLS = 3;
   const CLAUDE_VIRTUAL_SWEEP_STALE_SCROLLS = 10;
@@ -110,6 +115,11 @@
   const VIRTUAL_SWEEP_CHANGE_POLL_MS = 16;
   const VIRTUAL_SWEEP_SLOW_CHANGE_TIMEOUT_MS = 360;
   const CLAUDE_VIRTUAL_SWEEP_SLOW_CHANGE_TIMEOUT_MS = 1400;
+  const GROK_VIRTUAL_SWEEP_STEP_RATIO = 0.9;
+  const GROK_VIRTUAL_SWEEP_SETTLE_MS = 160;
+  const GROK_VIRTUAL_SWEEP_STABLE_SAMPLE_COUNT = 2;
+  const GROK_VIRTUAL_SWEEP_CHANGE_POLL_MS = 12;
+  const GROK_VIRTUAL_SWEEP_SLOW_CHANGE_TIMEOUT_MS = 160;
   const COLLAPSED_CONVERSATION_EXPAND_RE = /\b(?:show|see|read|view)\s+(?:more|full|all)\b|\bcontinue\s+(?:reading|message|response)\b|\bexpand\b/i;
   const COLLAPSED_CONVERSATION_EXPAND_EXCLUDE_RE = /\b(?:continue generating|regenerate|send|submit|stop generating|new chat|settings|menu|voice|microphone)\b/i;
   const PASTED_CONTENT_TITLE_RE = /^\s*pasted\s+(?:content|text)\s*$/i;
@@ -748,11 +758,19 @@
       retainTransientComposerPlacement,
       checkClaudePlacementPathname,
       prepareSourceForCapture,
+      getSourceScrollStableTimeout,
+      getSourceScrollStableInterval,
+      getSourceScrollStableSampleCount,
       expandCollapsedConversationContent,
       getConversationTurns,
       getDetectedConversationMessageCount,
       collectRenderedConversationTurns,
       scrapeConversationTextWhenReady,
+      getVirtualSweepSettleTimeout,
+      getVirtualSweepStableSampleCount,
+      getVirtualSweepChangePollMs,
+      getVirtualSweepStepRatio,
+      getVirtualSweepTerminalQuietTimeout,
       createTransferTrace,
       markCaptureDone,
       buildLatestTransferStats,
@@ -986,14 +1004,14 @@
 
     while (Date.now() - startedAt < timeoutMs) {
       const remainingMs = timeoutMs - (Date.now() - startedAt);
-      await delay(Math.min(SOURCE_SCROLL_STABLE_INTERVAL_MS, Math.max(0, remainingMs)));
+      await delay(Math.min(getSourceScrollStableInterval(), Math.max(0, remainingMs)));
       scrollSourceConversationToTop();
 
       const expandedCount = await expandCollapsedConversationContent();
       const nextSnapshot = getConversationReadinessSnapshot();
       if (expandedCount === 0 && isConversationReadinessStable(lastSnapshot, nextSnapshot)) {
         stableSamples += 1;
-        if (stableSamples >= SOURCE_SCROLL_STABLE_SAMPLE_COUNT) return;
+        if (stableSamples >= getSourceScrollStableSampleCount()) return;
       } else {
         lastSnapshot = nextSnapshot;
         stableSamples = 0;
@@ -1002,9 +1020,22 @@
   }
 
   function getSourceScrollStableTimeout() {
+    if (currentPlatform.id === "grok") return GROK_SOURCE_SCROLL_STABLE_TIMEOUT_MS;
     return currentPlatform.id === "claude" || currentPlatform.id === "chatgpt"
       ? SOURCE_SCROLL_LONG_STABLE_TIMEOUT_MS
       : SOURCE_SCROLL_STABLE_TIMEOUT_MS;
+  }
+
+  function getSourceScrollStableInterval() {
+    return currentPlatform.id === "grok"
+      ? GROK_SOURCE_SCROLL_STABLE_INTERVAL_MS
+      : SOURCE_SCROLL_STABLE_INTERVAL_MS;
+  }
+
+  function getSourceScrollStableSampleCount() {
+    return currentPlatform.id === "grok"
+      ? GROK_SOURCE_SCROLL_STABLE_SAMPLE_COUNT
+      : SOURCE_SCROLL_STABLE_SAMPLE_COUNT;
   }
 
   function getConversationReadinessSnapshot() {
@@ -1165,8 +1196,8 @@
   }
 
   async function waitForConversationWindowToSettle(
-    timeoutMs = VIRTUAL_SWEEP_SETTLE_MS,
-    stableSampleCount = VIRTUAL_SWEEP_STABLE_SAMPLE_COUNT
+    timeoutMs = getVirtualSweepSettleTimeout(),
+    stableSampleCount = getVirtualSweepStableSampleCount()
   ) {
     const startedAt = Date.now();
     let lastSnapshot = getConversationReadinessSnapshot();
@@ -1175,7 +1206,7 @@
 
     while (Date.now() - startedAt < timeoutMs) {
       const remainingMs = timeoutMs - (Date.now() - startedAt);
-      await delay(Math.min(SOURCE_SCROLL_STABLE_INTERVAL_MS, Math.max(0, remainingMs)));
+      await delay(Math.min(getSourceScrollStableInterval(), Math.max(0, remainingMs)));
 
       const nextSnapshot = getConversationReadinessSnapshot();
       latestSnapshot = nextSnapshot;
@@ -2568,7 +2599,7 @@
     while (true) {
       const expandedCount = await expandCollapsedConversationContent();
       if (expandedCount > 0) {
-        await waitForConversationWindowToSettle(Math.min(600, VIRTUAL_SWEEP_SETTLE_MS));
+        await waitForConversationWindowToSettle(Math.min(600, getVirtualSweepSettleTimeout()));
       }
 
       const renderedSnapshot = getRenderedConversationSnapshot();
@@ -2858,7 +2889,24 @@
   }
 
   function getVirtualSweepStepRatio(useLargerOverlapStep = false) {
+    if (currentPlatform.id === "grok") return GROK_VIRTUAL_SWEEP_STEP_RATIO;
     return useLargerOverlapStep ? VIRTUAL_SWEEP_OVERLAP_STEP_RATIO : VIRTUAL_SWEEP_STEP_RATIO;
+  }
+
+  function getVirtualSweepSettleTimeout() {
+    return currentPlatform.id === "grok" ? GROK_VIRTUAL_SWEEP_SETTLE_MS : VIRTUAL_SWEEP_SETTLE_MS;
+  }
+
+  function getVirtualSweepStableSampleCount() {
+    return currentPlatform.id === "grok"
+      ? GROK_VIRTUAL_SWEEP_STABLE_SAMPLE_COUNT
+      : VIRTUAL_SWEEP_STABLE_SAMPLE_COUNT;
+  }
+
+  function getVirtualSweepChangePollMs() {
+    return currentPlatform.id === "grok"
+      ? GROK_VIRTUAL_SWEEP_CHANGE_POLL_MS
+      : VIRTUAL_SWEEP_CHANGE_POLL_MS;
   }
 
   function hasSafeOrderedConversationWindowOverlap(beforeTurns, afterTurns) {
@@ -2878,6 +2926,7 @@
   }
 
   function getVirtualSweepTerminalQuietTimeout() {
+    if (currentPlatform.id === "grok") return GROK_VIRTUAL_SWEEP_SLOW_CHANGE_TIMEOUT_MS;
     return currentPlatform.id === "claude"
       ? CLAUDE_VIRTUAL_SWEEP_SLOW_CHANGE_TIMEOUT_MS
       : VIRTUAL_SWEEP_SLOW_CHANGE_TIMEOUT_MS;
@@ -2900,7 +2949,7 @@
 
     while (Date.now() - startedAt < timeoutMs) {
       const remainingMs = timeoutMs - (Date.now() - startedAt);
-      await delay(Math.min(VIRTUAL_SWEEP_CHANGE_POLL_MS, Math.max(0, remainingMs)));
+      await delay(Math.min(getVirtualSweepChangePollMs(), Math.max(0, remainingMs)));
       nextSnapshot = getRenderedConversationSnapshot();
       if (nextSnapshot.signature !== previousSignature) return nextSnapshot;
     }

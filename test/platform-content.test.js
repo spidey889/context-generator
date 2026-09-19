@@ -1217,6 +1217,59 @@ virtualSweepTest("physical scroll movement prevents a premature stale exit on no
   assert.match(transcript, /ChatGPT: Delayed tall-message turn 16/);
 });
 
+test("Grok uses its fast capture profile without losing a virtualized 40-turn chat", async () => {
+  const { elements, scrollableRoot } = createVirtualizedChatElements({
+    label: "Grok",
+    totalTurns: 40,
+    windowSize: 8,
+    scrollStride: 4,
+    scrollHeight: 3600,
+    makeTurn: (index) => new FakeElement({
+      text: `Fast virtualized Grok turn ${index}`,
+      attrs: { "data-message-author-role": index % 2 ? "user" : "assistant" }
+    })
+  });
+  const hooks = loadPlatformContent(elements, "grok.com");
+
+  assert.equal(hooks.getSourceScrollStableTimeout(), 700);
+  assert.equal(hooks.getSourceScrollStableInterval(), 50);
+  assert.equal(hooks.getSourceScrollStableSampleCount(), 2);
+  assert.equal(hooks.getVirtualSweepSettleTimeout(), 160);
+  assert.equal(hooks.getVirtualSweepStableSampleCount(), 2);
+  assert.equal(hooks.getVirtualSweepChangePollMs(), 12);
+  assert.equal(hooks.getVirtualSweepStepRatio(false), 0.9);
+  assert.equal(hooks.getVirtualSweepTerminalQuietTimeout(), 160);
+
+  await hooks.prepareSourceForCapture();
+  scrollableRoot.scrollCalls = [];
+  const transcript = await hooks.scrapeConversationTextWhenReady();
+
+  assert.equal((transcript.match(/(?:User|Grok): Fast virtualized Grok turn/g) || []).length, 40);
+  assert.match(transcript, /User: Fast virtualized Grok turn 1/);
+  assert.match(transcript, /Grok: Fast virtualized Grok turn 40/);
+  assert.ok(
+    scrollableRoot.scrollCalls.length <= 7,
+    `Grok's 90% advances should finish this fixture in 7 scrolls or fewer; saw ${scrollableRoot.scrollCalls.length}`
+  );
+});
+
+test("Grok fast capture settings do not change ChatGPT capture pacing", () => {
+  const turn = new FakeElement({
+    text: "Keep ChatGPT's conservative capture profile.",
+    attrs: { "data-message-author-role": "user" }
+  });
+  const hooks = loadPlatformContent([turn], "chatgpt.com");
+
+  assert.equal(hooks.getSourceScrollStableTimeout(), 4500);
+  assert.equal(hooks.getSourceScrollStableInterval(), 140);
+  assert.equal(hooks.getSourceScrollStableSampleCount(), 3);
+  assert.equal(hooks.getVirtualSweepSettleTimeout(), 360);
+  assert.equal(hooks.getVirtualSweepStableSampleCount(), 2);
+  assert.equal(hooks.getVirtualSweepChangePollMs(), 16);
+  assert.equal(hooks.getVirtualSweepStepRatio(false), 0.6);
+  assert.equal(hooks.getVirtualSweepTerminalQuietTimeout(), 360);
+});
+
 test("slow/release: Claude sweep captures a real-scale 78-turn long chat with paced advances", async () => {
   const longText = "Long Claude message detail ".repeat(28).trim();
   const { elements, scrollableRoot } = createVirtualizedChatElements({

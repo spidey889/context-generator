@@ -1,5 +1,7 @@
 # Changelog
 
+- 2026-09-20: Added a Grok-only fast capture profile: shorter preparation and rendered-window stability polling, 90% viewport advances, and a shorter terminal quiet check. Claude, ChatGPT, Gemini, and DeepSeek retain their existing capture timing. Focused regression coverage proves the fast Grok sweep still collects a complete 40-turn virtualized fixture.
+
 - 2026-09-18: Resumed Ministral 3 14B after the owner confirmed Flash-Lite handled a large conversation. Production `MISTRAL_ENABLED=true` restores Flash 3.6 -> Mistral -> Flash-Lite without changing 90-second budgets or the other provider pauses.
 
 - 2026-09-18: Added the approved one-time apology notice for one privately configured install, with atomic server claiming, local duplicate protection, near-orb placement, OK/30-second dismissal, and durable acknowledgement retry. Added a small Redis receipt tracker distinguishing claim, display, OK, and timeout. Bumped extension to 1.4.5; existing users need that update before delivery. Automated tests were intentionally deferred at the owner's request.

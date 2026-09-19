@@ -126,6 +126,8 @@ Every transfer uses the same bounded rendered-window sweep:
 6. Sequence-align rendered windows into the initial baseline. Longer matching text may replace a shorter rendering; partial text never downgrades a collected turn.
 7. Serialize as `<Platform> conversation:` followed by `User:` and platform-role turns separated by blank lines.
 
+Grok uses a platform-specific fast sweep because its rendered message window updates promptly after instant scrolling: two 50 ms preparation samples, two samples inside a 160 ms per-step settle window, fixed 90% viewport advances, 12 ms change polling, and a 160 ms terminal quiet check. Other platforms retain the shared conservative timing and adaptive 60%/90% advance policy. The Grok path still sequence-aligns every rendered window and applies the same role verification, exact deduplication, limits, and terminal checks.
+
 ### Turn identity and filtering
 
 - Candidates must be visible and outside nav/header/footer/aside/menu, the active composer, prompt suggestions, and Cap Context DOM.
@@ -253,7 +255,7 @@ Native menus and popovers may temporarily mark the background application `aria-
 - Model/profile routing: provider constants/budgets, prompts, Latest Run labels, evaluation expectations, this file, `memory.md`, `extension/README.md`.
 - Telemetry fields/stages/failures: source/background sanitizers, Vercel validator, Supabase validator, SQL constraints/functions, privacy wording, tests. Free-form telemetry fields are forbidden.
 - Latest Run receipt: producer, background expiry, bridge, analysis renderer, privacy wording, analysis tests.
-- Any content-script change: update `CONTENT_SCRIPT_LOAD_ID` so open tabs replace stale code, and retain stale-node/reservation cleanup. Current value: `platform-content-2026-09-13-instance-cleanup-v30`.
+- Any content-script change: update `CONTENT_SCRIPT_LOAD_ID` so open tabs replace stale code, and retain stale-node/reservation cleanup. Current value: `platform-content-2026-09-20-grok-fast-capture-v32`.
 - Extension release: bump `extension/manifest.json`, rebuild the ZIP with `manifest.json` at its root, hash-compare every file against `extension/`, then test the unpacked folder in a new Brave window.
 
 ## Common Wrong Assumptions
