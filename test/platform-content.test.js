@@ -169,6 +169,10 @@ class FakeElement {
     return matches;
   }
 
+  querySelector(selector) {
+    return this.querySelectorAll(selector)[0] || null;
+  }
+
   getBoundingClientRect() {
     return this.rect;
   }
@@ -2508,6 +2512,11 @@ test("composer discovery rejects an unvalidated inner editor wrapper", () => {
     innerWrapper.children = [input];
 
     const hooks = loadPlatformContent([innerWrapper, input], hostname);
+
+    // This fixture has no composer selector matches. Filter like the browser so
+    // the editable input cannot be returned for an unrelated "form" query.
+    hooks.document.querySelectorAll = (selector) => [innerWrapper, input]
+      .filter((element) => element.matches(selector));
 
     assert.equal(
       hooks.findComposerSurfaceElement(input),

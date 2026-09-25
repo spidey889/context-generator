@@ -1,5 +1,7 @@
 # Changelog
 
+- 2026-09-25: Fixed two failing placement tests by giving the fake DOM element `querySelector` and making the inner-wrapper fixture return only nodes matching its composer selectors. The production extension is unchanged. The full test suite and isolated Brave extension smoke passed; live Gemini, Grok, and DeepSeek placement was not checked.
+
 - 2026-09-25: Pruned four low-signal tests that only matched handoff animation/microcopy or Latest Run receipt wording in source text. Kept behavioral coverage and source checks that guard transfer safety, privacy, and paste recovery.
 
 - 2026-09-25: Prepared extension source version 1.4.6 and a versioned, file-compared ZIP for the summary paste fix. The direct-download link now points to that archive; this does not establish a Chrome Web Store update or a live browser verification.
