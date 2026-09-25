@@ -1,5 +1,7 @@
 # Changelog
 
+- 2026-09-25: Prepared extension source version 1.4.6 and a versioned, file-compared ZIP for the summary paste fix. The direct-download link now points to that archive; this does not establish a Chrome Web Store update or a live browser verification.
+
 - 2026-09-25: Hardened summary pasting after production telemetry recorded failures at the paste stage. Paste discovery now skips disabled/read-only editors when another writable composer is available, retains a verified composer through temporary disabled native-overlay states, and retries after an editor remount. Verification now requires summary content from the beginning, middle, and end while tolerating punctuation and line-break changes, preventing partial inserts from being reported as complete. Advanced the content-script load identity so the updated paste logic replaces an older instance on open tabs when reinjected.
 
 - 2026-09-20: Added a Grok-only adaptive capture profile: shorter normal stability polling, overlap-proven 70%/90% viewport advances, and a delayed-render guard that waits only when a physical scroll has not produced a new virtualized window. Claude, ChatGPT, Gemini, and DeepSeek retain their existing capture timing. Focused regression coverage proves complete 40-turn fast capture and complete 24-turn capture when Grok renders each window 140 ms late.
