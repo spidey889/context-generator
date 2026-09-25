@@ -1225,6 +1225,48 @@ virtualSweepTest("physical scroll movement prevents a premature stale exit on no
   assert.match(transcript, /ChatGPT: Delayed tall-message turn 16/);
 });
 
+test("paste selects a ready composer when a higher-scoring one is disabled", () => {
+  for (const [hostname, unavailableProperty] of [
+    ["chatgpt.com", "disabled"],
+    ["gemini.google.com", "readOnly"]
+  ]) {
+    const form = new FakeElement({ tag: "form" });
+    const unavailable = new FakeElement({
+      tag: "textarea",
+      attrs: { placeholder: "Message" },
+      rect: { left: 240, right: 920, top: 620, bottom: 672, width: 680, height: 52 }
+    });
+    unavailable[unavailableProperty] = true;
+    form.appendChild(unavailable);
+    const ready = new FakeElement({
+      tag: "textarea",
+      rect: { left: 240, right: 920, top: 610, bottom: 660, width: 680, height: 50 }
+    });
+    const hooks = loadPlatformContent([form, unavailable, ready], hostname);
+
+    assert.equal(hooks.findPlatformInput(), unavailable);
+    assert.equal(hooks.findReadyPlatformInput(), ready, `${hostname} should use the writable composer`);
+  }
+});
+
+test("paste retains a verified composer through a temporary disabled state", () => {
+  const form = new FakeElement({ tag: "form" });
+  const input = new FakeElement({
+    tag: "textarea",
+    attrs: { placeholder: "Message" },
+    rect: { left: 240, right: 920, top: 620, bottom: 672, width: 680, height: 52 }
+  });
+  form.appendChild(input);
+  const hooks = loadPlatformContent([form, input], "chatgpt.com");
+
+  assert.equal(hooks.findPlatformInput(), input);
+  form.setAttribute("aria-hidden", "true");
+  input.disabled = true;
+  assert.equal(hooks.findReadyPlatformInput(), null);
+  input.disabled = false;
+  assert.equal(hooks.findReadyPlatformInput(), input);
+});
+
 test("Grok uses its fast capture profile without losing a virtualized 40-turn chat", async () => {
   const { elements, scrollableRoot } = createVirtualizedChatElements({
     label: "Grok",
@@ -2077,10 +2119,30 @@ test("paste verification accepts stable context anchors when box characters diff
     "Testing paste verification."
   ].join("\n");
   const editor = new FakeElement({
-    text: "CONTEXT CARRY READY TO PASTE\n\nWHO I AM\nBuilding Context Generator."
+    text: "CONTEXT CARRY READY TO PASTE\n\nWHO I AM\nBuilding Context Generator.\n\nWHAT WE WERE DOING\nTesting paste verification."
   });
 
   assert.equal(hooks.editorContainsText(editor, expected), true);
+});
+
+test("paste verification rejects a carry whose middle or end did not land", () => {
+  const hooks = loadPlatformContent([]);
+  const beginning = "CONTEXT CARRY READY TO PASTE. WHO I AM Building Context Generator.";
+  const middle = "WHAT WE WERE DOING Testing the destination editor and preserving each detail.";
+  const ending = "NEXT STEP Reply only Context loaded then wait for the user.";
+  const expected = [beginning, middle, ending].join("\n\n");
+
+  assert.equal(hooks.editorContainsText(new FakeElement({ text: beginning }), expected), false);
+  assert.equal(hooks.editorContainsText(new FakeElement({ text: `${beginning}\n\n${ending}` }), expected), false);
+  assert.equal(hooks.editorContainsText(new FakeElement({ text: expected }), expected), true);
+});
+
+test("paste verification stops using a detached editor after a remount", async () => {
+  const hooks = loadPlatformContent([]);
+  const detached = new FakeElement({ text: "CONTEXT CARRY READY TO PASTE" });
+  detached.isConnected = false;
+
+  assert.equal(await hooks.waitForEditorText(detached, detached.textContent, 1000), false);
 });
 
 test("paste verification rejects unrelated editor text", () => {

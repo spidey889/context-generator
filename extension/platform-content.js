@@ -741,6 +741,8 @@
       scrapeConversationText,
       getConversationRole,
       editorContainsText,
+      findReadyPlatformInput,
+      waitForEditorText,
       formatFirefoxContentEditableHtml,
       getClaudeBubblePlacement,
       getClaudeFixedBubblePlacement,
@@ -2210,7 +2212,7 @@
           if (await waitForEditorText(input, text, verifyTimeoutMs)) {
             if (stabilityMs > 0) {
               await delay(stabilityMs);
-              if (!editorContainsText(input, text)) {
+              if (!input.isConnected || !editorContainsText(input, text)) {
                 lastError = new Error(`${destination.name} editor cleared the pasted context after first insert.`);
                 continue;
               }
@@ -2235,7 +2237,7 @@
     throw lastError || new Error(`Paste operation failed to populate the ${destination.name} editor.`);
   }
 
-  function findPlatformInput(platform = currentPlatform) {
+  function findPlatformInput(platform = currentPlatform, { readyOnly = false } = {}) {
     const selectors = [...platform.inputSelectors, ...platform.fallbackSelectors];
     const candidates = selectors
       .flatMap((selector) => Array.from(document.querySelectorAll(selector)))
@@ -2252,7 +2254,7 @@
     // primitives as chat composers. Never let a newly mounted overlay replace
     // the page composer; an already verified input remains eligible below.
     const selectedInput = candidates
-      .filter((element) => !isModalEditorCandidate(element))
+      .filter((element) => !isModalEditorCandidate(element) && (!readyOnly || isEditorReady(element)))
       .map((element) => ({ element, score: scoreInputCandidate(element) }))
       .sort((a, b) => b.score - a.score)[0]?.element || null;
 
@@ -2264,12 +2266,10 @@
     // Native modal/popover systems may aria-hide the background application
     // while leaving its composer visibly mounted. Keep only the already-verified
     // input; removed or geometrically hidden composers still fail closed.
-    if (
-      platform.id === currentPlatform.id &&
-      retainedPlatformInput?.isConnected &&
-      isVisible(retainedPlatformInput)
-    ) {
-      return retainedPlatformInput;
+    if (platform.id === currentPlatform.id && retainedPlatformInput?.isConnected && isVisible(retainedPlatformInput)) {
+      // Keep the verified reference through a temporary disabled state. A
+      // native overlay may hide it from normal queries before it becomes ready.
+      return !readyOnly || isEditorReady(retainedPlatformInput) ? retainedPlatformInput : null;
     }
 
     if (platform.id === currentPlatform.id) retainedPlatformInput = null;
@@ -2281,8 +2281,10 @@
   }
 
   function findReadyPlatformInput(platform = currentPlatform) {
-    const input = findPlatformInput(platform);
-    return isEditorReady(input) ? input : null;
+    // A disabled or read-only composer can remain visible while a replacement
+    // is mounting. Select among ready candidates instead of retrying the
+    // highest-scoring unusable element until the paste deadline expires.
+    return findPlatformInput(platform, { readyOnly: true });
   }
 
   function isEditorReady(element) {
@@ -2473,6 +2475,10 @@
 
     return new Promise((resolve) => {
       const tick = () => {
+        if (!element.isConnected) {
+          resolve(false);
+          return;
+        }
         if (editorContainsText(element, text)) {
           resolve(true);
           return;
@@ -2493,25 +2499,22 @@
   function editorContainsText(element, text) {
     const samples = getVerificationSamples(text);
     const actual = normalizeVerificationText(getElementText(element));
-    return samples.some((sample) => actual.includes(sample));
+    return samples.length > 0 && samples.every((sample) => actual.includes(sample));
   }
 
   function getVerificationSamples(text) {
-    const expected = normalizeVerificationText(text);
-    const samples = [
-      expected.slice(0, Math.min(24, expected.length)),
-      expected.replace(/^[^a-z0-9]+/i, "").slice(0, 24)
-    ];
-
-    ["CONTEXT CARRY", "WHO I AM", "WHAT WE WERE DOING"].forEach((anchor) => {
-      if (expected.includes(anchor)) samples.push(anchor);
-    });
-
-    return [...new Set(samples.filter((sample) => sample && sample.length >= 8))];
+    const words = normalizeVerificationText(text).split(" ").filter(Boolean);
+    if (!words.length) return [];
+    const width = Math.min(10, words.length);
+    const lastStart = words.length - width;
+    // Distributed word samples survive editor punctuation/line-break changes,
+    // but require the beginning, middle, and end of a long carry to be present.
+    return [...new Set([0, Math.floor(lastStart / 2), lastStart]
+      .map((start) => words.slice(start, start + width).join(" ")))];
   }
 
   function normalizeVerificationText(text) {
-    return String(text || "").replace(/\s+/g, " ").trim();
+    return String(text || "").normalize("NFKC").replace(/[^\p{L}\p{N}]+/gu, " ").trim().toLowerCase();
   }
 
   function getCleanVisibleText(element) {
