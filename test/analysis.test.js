@@ -84,21 +84,6 @@ test("analysis keeps exact raw scraped text behind a collapsed gear control", ()
   assert.doesNotMatch(ANALYSIS_SOURCE, /escapeHtml\(stats\.rawScrapedText\)/);
 });
 
-test("analysis keeps cached metrics tied to the original generation", () => {
-  assert.doesNotMatch(ANALYSIS_SOURCE, /sideItem\("Summary source"/);
-  assert.match(ANALYSIS_SOURCE, /out from original generation/);
-  assert.match(ANALYSIS_SOURCE, /Cache hit; original/);
-});
-
-test("analysis receipt keeps only useful non-duplicate details", () => {
-  assert.match(ANALYSIS_SOURCE, /sideItem\("Input check", integrity\)/);
-  assert.match(ANALYSIS_SOURCE, /sideItem\("Message turns", formatTurnSummary\(capture\), "turns"\)/);
-  assert.match(ANALYSIS_SOURCE, /Complete - all sent text received/);
-  assert.doesNotMatch(ANALYSIS_SOURCE, /sideItem\("Route"/);
-  assert.doesNotMatch(ANALYSIS_SOURCE, /sideItem\("Capture path"/);
-  assert.doesNotMatch(ANALYSIS_SOURCE, /sideItem\("Expansion"/);
-});
-
 function loadModelHelpers() {
   const start = ANALYSIS_SOURCE.indexOf("function getModelFallbackLabel(summary)");
   const end = ANALYSIS_SOURCE.indexOf("function formatBackendLabel(summary)", start);

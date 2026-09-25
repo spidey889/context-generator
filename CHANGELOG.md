@@ -1,5 +1,7 @@
 # Changelog
 
+- 2026-09-25: Pruned four low-signal tests that only matched handoff animation/microcopy or Latest Run receipt wording in source text. Kept behavioral coverage and source checks that guard transfer safety, privacy, and paste recovery.
+
 - 2026-09-25: Prepared extension source version 1.4.6 and a versioned, file-compared ZIP for the summary paste fix. The direct-download link now points to that archive; this does not establish a Chrome Web Store update or a live browser verification.
 
 - 2026-09-25: Hardened summary pasting after production telemetry recorded failures at the paste stage. Paste discovery now skips disabled/read-only editors when another writable composer is available, retains a verified composer through temporary disabled native-overlay states, and retries after an editor remount. Verification now requires summary content from the beginning, middle, and end while tolerating punctuation and line-break changes, preventing partial inserts from being reported as complete. Advanced the content-script load identity so the updated paste logic replaces an older instance on open tabs when reinjected.

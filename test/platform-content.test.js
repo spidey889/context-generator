@@ -552,28 +552,6 @@ test("native modal editors cannot replace the verified chat composer", () => {
   }
 });
 
-test("picker selection morphs into handoff and both surfaces keep animated exits", () => {
-  const source = fs.readFileSync(SOURCE_PATH, "utf8");
-  const transitionStart = source.indexOf("async function transitionDestinationSheetToHandoff()");
-  const transitionEnd = source.indexOf("function warmDestinationConnections()", transitionStart);
-  const transitionSource = source.slice(transitionStart, transitionEnd);
-  const overlayStart = source.indexOf("function showOverlay(destinationId = null)");
-  const overlayEnd = source.indexOf("function isHandoffOverlayVisible()", overlayStart);
-  const overlaySource = source.slice(overlayStart, overlayEnd);
-
-  assert.ok(transitionStart >= 0 && transitionEnd > transitionStart);
-  assert.match(transitionSource, /pendingHandoffOrigin = sheetRect/);
-  assert.match(transitionSource, /hideDestinationSheet\(\{ preserveBackdrop: true, restoreFocus: false \}\)/);
-  assert.match(overlaySource, /overlay\.style\.transform = getHandoffStartTransform\(overlay\)/);
-  assert.match(overlaySource, /bubble\.style\.opacity = "0"/);
-  assert.match(overlaySource, /handoffOverlayHideTimer = setTimeout/);
-  assert.match(overlaySource, /HANDOFF_OVERLAY_EXIT_MS/);
-  assert.ok(
-    overlaySource.indexOf('overlay.style.opacity = "0"') < overlaySource.indexOf('overlay.style.display = "none"'),
-    "handoff should begin its visual exit before display is removed"
-  );
-});
-
 test("destination picker preserves outside page focus on every supported platform", () => {
   const source = fs.readFileSync(SOURCE_PATH, "utf8");
   const sheetStart = source.indexOf("function ensureDestinationSheet()");
@@ -668,19 +646,6 @@ test("Gemini, Grok, and DeepSeek retain the last viewport placement during a com
     assert.equal(bubble.style.top, "619px");
     assert.equal(bubble.style.display, "flex");
   }
-});
-
-test("picker and handoff microcopy keeps the direct transfer guidance", () => {
-  const source = fs.readFileSync(SOURCE_PATH, "utf8");
-
-  assert.match(source, /Context goes straight into the input box/);
-  assert.match(source, /Almost done, don't cancel now/);
-  assert.match(source, /countdown\.textContent = `~\$\{Math\.max/);
-  assert.doesNotMatch(source, /detail\.textContent = "Opening\.\.\."/);
-  assert.match(source, /overlay\.setAttribute\("role", "group"\)/);
-  assert.doesNotMatch(source, /overlay\.setAttribute\("role", "status"\)/);
-  assert.match(source, /from\{opacity:0\.36;transform:translate3d\(0,5px,0\)\}/);
-  assert.doesNotMatch(source, /contextGeneratorHandoffContentIn 380ms[^;]+115ms/);
 });
 
 test("Grok empty-state prompt is not counted or captured as a real message", () => {
