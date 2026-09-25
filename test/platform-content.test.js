@@ -1249,6 +1249,27 @@ test("paste selects a ready composer when a higher-scoring one is disabled", () 
   }
 });
 
+test("paste selects a writable contenteditable when another editor is aria-disabled", () => {
+  for (const hostname of ["chatgpt.com", "gemini.google.com"]) {
+    const form = new FakeElement({ tag: "form" });
+    const unavailable = new FakeElement({
+      attrs: { contenteditable: "true", role: "textbox", "aria-disabled": "true" },
+      rect: { left: 240, right: 920, top: 620, bottom: 672, width: 680, height: 52 }
+    });
+    unavailable.isContentEditable = true;
+    form.appendChild(unavailable);
+    const ready = new FakeElement({
+      attrs: { contenteditable: "true", role: "textbox" },
+      rect: { left: 240, right: 920, top: 610, bottom: 660, width: 680, height: 50 }
+    });
+    ready.isContentEditable = true;
+    const hooks = loadPlatformContent([form, unavailable, ready], hostname);
+
+    assert.equal(hooks.findPlatformInput(), unavailable);
+    assert.equal(hooks.findReadyPlatformInput(), ready, `${hostname} should use the active editor`);
+  }
+});
+
 test("paste retains a verified composer through a temporary disabled state", () => {
   const form = new FakeElement({ tag: "form" });
   const input = new FakeElement({
