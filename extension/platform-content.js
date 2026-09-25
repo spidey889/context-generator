@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-09-20-grok-adaptive-capture-v33";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-09-25-summary-paste-v34";
   const INSTANCE_TEARDOWN_KEY = "__contextGeneratorPlatformTeardown";
   const INSTALL_NOTICE_NODE_ID = "context-generator-install-notice";
   let installNoticeChecked = false;
