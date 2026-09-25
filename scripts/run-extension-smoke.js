@@ -538,13 +538,59 @@ async function run() {
     const clickResult = await sourceSession.evaluate(`(() => {
       const bubble = document.getElementById("context-generator-bubble");
       bubble.click();
+      const sheet = document.getElementById("context-generator-destination-sheet");
+      const backdrop = document.getElementById("context-generator-destination-backdrop");
       const tiles = [...document.querySelectorAll(".context-generator-destination-tile")];
       const claudeTile = tiles.find((tile) => tile.textContent.includes("Claude"));
       if (!claudeTile) return { ok: false, destinations: tiles.map((tile) => tile.textContent.trim()) };
+      // Reproduce Dark Reader's injected important rules without installing it in
+      // the isolated smoke profile. The extension's visible palette must win.
+      const cases = [
+        [sheet, "background-image", "bgimage", "linear-gradient(red,red)"],
+        [sheet, "border-color", "border", "red"],
+        [sheet, "color", "color", "red"],
+        [sheet, "box-shadow", "boxshadow", "0 0 20px red"],
+        [claudeTile, "background-image", "bgimage", "linear-gradient(red,red)"],
+        [claudeTile, "border-color", "border", "red"],
+        [claudeTile, "color", "color", "red"],
+        [claudeTile, "box-shadow", "boxshadow", "0 0 20px red"],
+        [claudeTile.querySelector(".context-generator-tile-detail"), "color", "color", "red"],
+        [sheet.querySelector(".context-generator-destination-helper"), "color", "color", "red"],
+        [backdrop, "background-color", "bgcolor", "red"]
+      ];
+      const before = cases.map(([element, property]) => getComputedStyle(element).getPropertyValue(property));
+      for (const [element, , key, value] of cases) {
+        element.setAttribute("data-darkreader-inline-" + key, "");
+        element.style.setProperty("--darkreader-inline-" + key, value);
+      }
+      const darkReaderRules = document.createElement("style");
+      darkReaderRules.textContent = cases.map(([, property, key]) =>
+        "[data-darkreader-inline-" + key + "]{" + property + ":var(--darkreader-inline-" + key + ") !important}"
+      ).join("\n");
+      document.head.appendChild(darkReaderRules);
+      const palettePreserved = cases.every(([element, property], index) =>
+        getComputedStyle(element).getPropertyValue(property) === before[index]
+      );
+      const idleBackground = getComputedStyle(claudeTile).backgroundImage;
+      claudeTile.dispatchEvent(new Event("mouseenter"));
+      const hoverBackground = getComputedStyle(claudeTile).backgroundImage;
+      claudeTile.dispatchEvent(new Event("mouseleave"));
       claudeTile.click();
-      return { ok: true };
+      const selectedBackground = getComputedStyle(claudeTile).backgroundImage;
+      darkReaderRules.remove();
+      return {
+        ok: true,
+        palettePreserved,
+        hoverPreserved: hoverBackground !== idleBackground && !hoverBackground.includes("red"),
+        selectedPreserved: selectedBackground !== idleBackground && !selectedBackground.includes("red"),
+        pickerStyleIgnored: sheet.ownerDocument.getElementById("context-generator-destination-sheet-styles")?.classList.contains("darkreader")
+      };
     })()`);
     assert.equal(clickResult?.ok, true, `Claude destination tile was unavailable: ${JSON.stringify(clickResult)}`);
+    assert.equal(clickResult.palettePreserved, true, "Dark Reader must not recolor the picker's idle palette.");
+    assert.equal(clickResult.hoverPreserved, true, "Dark Reader must not recolor the picker's hover palette.");
+    assert.equal(clickResult.selectedPreserved, true, "Dark Reader must not recolor the selected destination tile.");
+    assert.equal(clickResult.pickerStyleIgnored, true, "Dark Reader must leave the picker stylesheet alone.");
 
     await waitFor(() => state.summaryRequests.length === 1, "one summary backend request");
     const capturedConversation = state.summaryRequests[0]?.conversation || "";

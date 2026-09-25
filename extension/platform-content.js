@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-09-25-summary-paste-v34";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-09-25-picker-palette-v35";
   const INSTANCE_TEARDOWN_KEY = "__contextGeneratorPlatformTeardown";
   const INSTALL_NOTICE_NODE_ID = "context-generator-install-notice";
   let installNoticeChecked = false;
@@ -4591,6 +4591,9 @@
 
     const style = document.createElement("style");
     style.id = DESTINATION_SHEET_STYLE_ID;
+    // Dark Reader leaves its own stylesheet class alone. Keep picker pseudo-elements
+    // and selection states in the extension's palette on sites where it is active.
+    style.className = "darkreader";
     style.textContent = `
       @font-face {
         font-family: "Cap Context EB Garamond";
@@ -4598,6 +4601,40 @@
         font-style: normal;
         font-weight: 400;
         font-display: swap;
+      }
+
+      /* Dark Reader can strip importance from colors as it rewrites new inline
+         nodes. These ID-scoped fallbacks retain the same palette in that case. */
+      #${DESTINATION_SHEET_ID} {
+        border-color: rgba(236,229,246,0.17) !important;
+        background: radial-gradient(ellipse 68% 48% at 88% -8%,rgba(145,112,199,0.18),transparent 72%),radial-gradient(ellipse 55% 48% at -8% 110%,rgba(82,57,128,0.15),transparent 74%),linear-gradient(180deg,#111012 0%,#0c0b0e 58%,#09080b 100%) !important;
+        box-shadow: 0 34px 88px rgba(0,0,0,0.58),0 14px 34px rgba(0,0,0,0.34),0 0 54px rgba(104,76,154,0.1),0 0 0 1px rgba(0,0,0,0.6),inset 0 1px 0 rgba(255,255,255,0.09) !important;
+        color: #f5f5f5 !important;
+      }
+      #${DESTINATION_SHEET_BACKDROP_ID} { background: rgba(7,6,10,0.34) !important; }
+      #${DESTINATION_SHEET_ID} .context-generator-destination-brand { color: rgba(247,244,250,0.76) !important; }
+      #${DESTINATION_SHEET_ID} .context-generator-destination-brand-icon {
+        border-color: rgba(185,158,228,0.2) !important;
+        background: linear-gradient(145deg,rgba(189,158,238,0.18),rgba(102,72,155,0.1)) !important;
+        box-shadow: inset 0 1px 0 rgba(255,255,255,0.08),0 7px 18px rgba(74,48,121,0.2) !important;
+      }
+      #${DESTINATION_SHEET_ID} .context-generator-destination-title { color: #ffffff !important; }
+      #${DESTINATION_SHEET_ID} .context-generator-destination-tile {
+        border-color: rgba(255,255,255,0.1) !important;
+        background: linear-gradient(180deg,rgba(255,255,255,0.05),rgba(255,255,255,0.022)) !important;
+        box-shadow: inset 0 1px 0 rgba(255,255,255,0.055),inset 0 -1px 0 rgba(0,0,0,0.3),0 8px 20px rgba(0,0,0,0.08) !important;
+        color: #ffffff !important;
+      }
+      #${DESTINATION_SHEET_ID} .context-generator-destination-logo-wrap {
+        border-color: rgba(255,255,255,0.075) !important;
+        background: rgba(4,4,5,0.28) !important;
+        box-shadow: inset 0 1px 0 rgba(255,255,255,0.045) !important;
+      }
+      #${DESTINATION_SHEET_ID} .context-generator-destination-tile-name { color: #f8f6fa !important; }
+      #${DESTINATION_SHEET_ID} .context-generator-tile-detail { color: rgba(238,234,242,0.56) !important; }
+      #${DESTINATION_SHEET_ID} .context-generator-destination-helper {
+        border-top-color: rgba(255,255,255,0.065) !important;
+        color: rgba(240,236,244,0.58) !important;
       }
 
       @font-face {
@@ -4721,6 +4758,11 @@
         }
       }
     `;
+    style.textContent += Object.values(PLATFORMS).map((platform) => `
+      #${DESTINATION_SHEET_ID} .context-generator-destination-tile[data-context-generator-accent="${platform.accent}"] .context-generator-tile-aura {
+        background: radial-gradient(ellipse at 30% 50%, ${platform.accent}34 0, ${platform.accent}16 40%, transparent 72%) !important;
+      }
+    `).join("");
     (document.head || document.documentElement).appendChild(style);
   }
 
@@ -4747,11 +4789,11 @@
       "box-sizing:border-box",
       "padding:12px",
       "border-radius:19px",
-      "border:1px solid rgba(236,229,246,0.17)",
-      "background:radial-gradient(ellipse 68% 48% at 88% -8%,rgba(145,112,199,0.18),transparent 72%),radial-gradient(ellipse 55% 48% at -8% 110%,rgba(82,57,128,0.15),transparent 74%),linear-gradient(180deg,#111012 0%,#0c0b0e 58%,#09080b 100%)",
-      "box-shadow:0 34px 88px rgba(0,0,0,0.58),0 14px 34px rgba(0,0,0,0.34),0 0 54px rgba(104,76,154,0.1),0 0 0 1px rgba(0,0,0,0.6),inset 0 1px 0 rgba(255,255,255,0.09)",
+      "border:1px solid rgba(236,229,246,0.17) !important",
+      "background:radial-gradient(ellipse 68% 48% at 88% -8%,rgba(145,112,199,0.18),transparent 72%),radial-gradient(ellipse 55% 48% at -8% 110%,rgba(82,57,128,0.15),transparent 74%),linear-gradient(180deg,#111012 0%,#0c0b0e 58%,#09080b 100%) !important",
+      "box-shadow:0 34px 88px rgba(0,0,0,0.58),0 14px 34px rgba(0,0,0,0.34),0 0 54px rgba(104,76,154,0.1),0 0 0 1px rgba(0,0,0,0.6),inset 0 1px 0 rgba(255,255,255,0.09) !important",
       "backdrop-filter:blur(24px) saturate(1.06)",
-      "color:#f5f5f5",
+      "color:#f5f5f5 !important",
       "font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif",
       "max-height:calc(100vh - 20px)",
       "overflow-x:hidden",
@@ -4770,13 +4812,15 @@
     const topLine = document.createElement("div");
     topLine.style.cssText = "width:100%;display:flex;align-items:center;justify-content:flex-start;gap:10px;margin-bottom:11px";
     const brandLockup = document.createElement("div");
-    brandLockup.style.cssText = "display:flex;align-items:center;gap:8px;color:rgba(247,244,250,0.76);font-size:11.5px;font-weight:650;line-height:1";
+    brandLockup.className = "context-generator-destination-brand";
+    brandLockup.style.cssText = "display:flex;align-items:center;gap:8px;color:rgba(247,244,250,0.76) !important;font-size:11.5px;font-weight:650;line-height:1";
     const brandIcon = document.createElement("img");
+    brandIcon.className = "context-generator-destination-brand-icon";
     brandIcon.src = BUBBLE_ICON_URL;
     brandIcon.alt = "";
     brandIcon.width = 26;
     brandIcon.height = 26;
-    brandIcon.style.cssText = "display:block;width:26px;height:26px;box-sizing:border-box;padding:3px;border:1px solid rgba(185,158,228,0.2);border-radius:9px;background:linear-gradient(145deg,rgba(189,158,238,0.18),rgba(102,72,155,0.1));box-shadow:inset 0 1px 0 rgba(255,255,255,0.08),0 7px 18px rgba(74,48,121,0.2);object-fit:contain";
+    brandIcon.style.cssText = "display:block;width:26px;height:26px;box-sizing:border-box;padding:3px;border:1px solid rgba(185,158,228,0.2) !important;border-radius:9px;background:linear-gradient(145deg,rgba(189,158,238,0.18),rgba(102,72,155,0.1)) !important;box-shadow:inset 0 1px 0 rgba(255,255,255,0.08),0 7px 18px rgba(74,48,121,0.2) !important;object-fit:contain";
     const brandName = document.createElement("span");
     brandName.textContent = "Cap Context";
     brandLockup.appendChild(brandIcon);
@@ -4785,7 +4829,7 @@
     title.id = "context-generator-destination-title";
     title.className = "context-generator-destination-title";
     title.textContent = DESTINATION_TITLE_TEXT;
-    title.style.cssText = "font-family:'Cap Context EB Garamond',Georgia,'Times New Roman',serif;font-size:18px;font-style:normal;font-weight:400;letter-spacing:-0.015em;color:#ffffff;line-height:1.05;text-rendering:geometricPrecision";
+    title.style.cssText = "font-family:'Cap Context EB Garamond',Georgia,'Times New Roman',serif;font-size:18px;font-style:normal;font-weight:400;letter-spacing:-0.015em;color:#ffffff !important;line-height:1.05;text-rendering:geometricPrecision";
     topLine.appendChild(brandLockup);
     header.appendChild(topLine);
     header.appendChild(title);
@@ -4809,10 +4853,10 @@
       button.style.cssText = [
         "width:100%",
         "height:60px",
-        "border:1px solid rgba(255,255,255,0.1)",
+        "border:1px solid rgba(255,255,255,0.1) !important",
         "border-radius:14px",
-        "background:linear-gradient(180deg,rgba(255,255,255,0.05),rgba(255,255,255,0.022))",
-        "color:#ffffff",
+        "background:linear-gradient(180deg,rgba(255,255,255,0.05),rgba(255,255,255,0.022)) !important",
+        "color:#ffffff !important",
         "display:flex",
         "align-items:center",
         "gap:8px",
@@ -4824,7 +4868,7 @@
         "position:relative",
         "overflow:hidden",
         "isolation:isolate",
-        "box-shadow:inset 0 1px 0 rgba(255,255,255,0.055),inset 0 -1px 0 rgba(0,0,0,0.3),0 8px 20px rgba(0,0,0,0.08)",
+        "box-shadow:inset 0 1px 0 rgba(255,255,255,0.055),inset 0 -1px 0 rgba(0,0,0,0.3),0 8px 20px rgba(0,0,0,0.08) !important",
         "transition:opacity 0.18s ease,filter 0.18s ease,transform 0.24s cubic-bezier(0.22,1,0.36,1),border-color 0.18s ease,background 0.18s ease,box-shadow 0.18s ease"
       ].join(";");
 
@@ -4839,7 +4883,7 @@
         "z-index:0",
         "pointer-events:none",
         "border-radius:999px",
-        `background:radial-gradient(ellipse at 30% 50%, ${option.accent}34 0, ${option.accent}16 40%, transparent 72%)`,
+        `background:radial-gradient(ellipse at 30% 50%, ${option.accent}34 0, ${option.accent}16 40%, transparent 72%) !important`,
         "opacity:0.24",
         "filter:blur(10px)",
         "transform:translate3d(0,0,0) scaleX(1)",
@@ -4847,7 +4891,8 @@
       ].join(";");
 
       const logoWrap = document.createElement("div");
-      logoWrap.style.cssText = "width:34px;height:34px;display:flex;align-items:center;justify-content:center;box-sizing:border-box;flex:0 0 auto;opacity:0.98;position:relative;z-index:2;border:1px solid rgba(255,255,255,0.075);border-radius:10px;background:rgba(4,4,5,0.28);box-shadow:inset 0 1px 0 rgba(255,255,255,0.045)";
+      logoWrap.className = "context-generator-destination-logo-wrap";
+      logoWrap.style.cssText = "width:34px;height:34px;display:flex;align-items:center;justify-content:center;box-sizing:border-box;flex:0 0 auto;opacity:0.98;position:relative;z-index:2;border:1px solid rgba(255,255,255,0.075) !important;border-radius:10px;background:rgba(4,4,5,0.28) !important;box-shadow:inset 0 1px 0 rgba(255,255,255,0.045) !important";
       const logo = document.createElement("img");
       logo.src = getExtensionAssetUrl(option.logo);
       logo.alt = "";
@@ -4858,12 +4903,13 @@
       const copy = document.createElement("div");
       copy.style.cssText = "display:flex;flex-direction:column;gap:4px;min-width:0;flex:1;position:relative;z-index:2";
       const name = document.createElement("div");
+      name.className = "context-generator-destination-tile-name";
       name.textContent = option.name;
-      name.style.cssText = "font-size:12px;font-weight:720;line-height:1.15;color:#f8f6fa;white-space:nowrap;overflow:hidden;text-overflow:ellipsis";
+      name.style.cssText = "font-size:12px;font-weight:720;line-height:1.15;color:#f8f6fa !important;white-space:nowrap;overflow:hidden;text-overflow:ellipsis";
       const detail = document.createElement("div");
       detail.className = "context-generator-tile-detail";
       detail.textContent = option.detail;
-      detail.style.cssText = "font-size:10px;font-weight:520;line-height:1.25;color:rgba(238,234,242,0.56);white-space:nowrap;overflow:hidden;text-overflow:ellipsis";
+      detail.style.cssText = "font-size:10px;font-weight:520;line-height:1.25;color:rgba(238,234,242,0.56) !important;white-space:nowrap;overflow:hidden;text-overflow:ellipsis";
       copy.appendChild(name);
       copy.appendChild(detail);
 
@@ -4872,21 +4918,23 @@
       spinner.setAttribute("aria-hidden", "true");
 
       const setButtonActive = () => {
-        button.style.background = `linear-gradient(135deg,${option.accent}1f,rgba(255,255,255,0.045) 64%,rgba(255,255,255,0.02))`;
-        button.style.borderColor = `${option.accent}66`;
-        button.style.boxShadow = `inset 0 1px 0 rgba(255,255,255,0.09),0 12px 30px rgba(0,0,0,0.16),0 0 24px ${option.accent}14`;
+        if (button.dataset.contextGeneratorSelected === "true") return;
+        button.style.setProperty("background", `linear-gradient(135deg,${option.accent}1f,rgba(255,255,255,0.045) 64%,rgba(255,255,255,0.02))`, "important");
+        button.style.setProperty("border-color", `${option.accent}66`, "important");
+        button.style.setProperty("box-shadow", `inset 0 1px 0 rgba(255,255,255,0.09),0 12px 30px rgba(0,0,0,0.16),0 0 24px ${option.accent}14`, "important");
         aura.style.opacity = "0.48";
         button.style.transform = "translateY(-2px)";
       };
       const setButtonIdle = () => {
-        button.style.background = "linear-gradient(180deg,rgba(255,255,255,0.05),rgba(255,255,255,0.022))";
-        button.style.borderColor = "rgba(255,255,255,0.1)";
-        button.style.boxShadow = "inset 0 1px 0 rgba(255,255,255,0.055),inset 0 -1px 0 rgba(0,0,0,0.3),0 8px 20px rgba(0,0,0,0.08)";
+        if (button.dataset.contextGeneratorSelected === "true") return;
+        button.style.setProperty("background", "linear-gradient(180deg,rgba(255,255,255,0.05),rgba(255,255,255,0.022))", "important");
+        button.style.setProperty("border-color", "rgba(255,255,255,0.1)", "important");
+        button.style.setProperty("box-shadow", "inset 0 1px 0 rgba(255,255,255,0.055),inset 0 -1px 0 rgba(0,0,0,0.3),0 8px 20px rgba(0,0,0,0.08)", "important");
         aura.style.left = "-24px";
         aura.style.right = "auto";
         aura.style.width = "130px";
         aura.style.borderRadius = "999px";
-        aura.style.background = `radial-gradient(ellipse at 30% 50%, ${option.accent}34 0, ${option.accent}16 40%, transparent 72%)`;
+        aura.style.setProperty("background", `radial-gradient(ellipse at 30% 50%, ${option.accent}34 0, ${option.accent}16 40%, transparent 72%)`, "important");
         aura.style.opacity = "0.24";
         button.style.transform = "translateY(0)";
       };
@@ -4910,6 +4958,11 @@
           if (tile === button) tile.dataset.contextGeneratorSelected = "true";
           else tile.dataset.contextGeneratorDismissed = "true";
         });
+        // Inline importance beats Dark Reader's injected attribute rules. Keep the
+        // selected treatment inline too, so it still wins over idle/hover colors.
+        button.style.setProperty("border-color", "rgba(210,190,241,0.62)", "important");
+        button.style.setProperty("background", "linear-gradient(135deg,rgba(155,123,215,0.2),rgba(255,255,255,0.055))", "important");
+        button.style.setProperty("box-shadow", "inset 0 1px 0 rgba(255,255,255,0.11),0 12px 30px rgba(0,0,0,0.22),0 0 28px rgba(141,108,207,0.16)", "important");
         spinner.style.display = "block";
         sheet.setAttribute("aria-busy", "true");
         sheet.querySelectorAll(".context-generator-destination-tile").forEach((tile) => {
@@ -4935,8 +4988,8 @@
       "gap:0",
       "margin:12px 2px 1px",
       "padding-top:9px",
-      "border-top:1px solid rgba(255,255,255,0.065)",
-      "color:rgba(240,236,244,0.58)",
+      "border-top:1px solid rgba(255,255,255,0.065) !important",
+      "color:rgba(240,236,244,0.58) !important",
       "font-family:Georgia,'Times New Roman',serif",
       "font-size:11.5px",
       "font-weight:540",
@@ -4994,7 +5047,7 @@
       "z-index:2147483646",
       "inset:0",
       "pointer-events:none",
-      "background:rgba(7,6,10,0.34)",
+      "background:rgba(7,6,10,0.34) !important",
       "backdrop-filter:blur(7px) saturate(0.86)",
       "-webkit-backdrop-filter:blur(7px) saturate(0.86)",
       "opacity:0",

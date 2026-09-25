@@ -82,6 +82,7 @@ The toolbar action skips the picker. It defaults to Claude when the source is Ch
 Important sequencing:
 
 - The orb, destination picker, and handoff card form one visual transition. The orb exposes dialog state; keyboard/backdrop dismissal restores trigger focus, while clicking a page control preserves focus on that control. Placement-only lifecycle work, including fullscreen resize reflow and transient composer loss, closes stale picker UI without moving focus. A chosen tile holds long enough to register, and the handoff card expands from the picker's measured screen position. Reduced-motion users receive the same state changes without movement.
+- The destination picker's color styles are protected against Dark Reader rewriting inline styles. Its stylesheet uses Dark Reader's ignored `darkreader` class and ID-scoped fallback colors; inline colors keep priority for hover and selection. This preserves the same picker palette on ChatGPT with Dark Reader active and on sites without it.
 - `isRunning` is page-local with a six-minute safety reset. The reset clears UI/state but does not abort ongoing capture, fetch, or paste work.
 - Picker-path telemetry starts before empty-chat validation so early exits are recorded safely.
 - Destination warmup and network preconnects never contain conversation text.

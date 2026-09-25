@@ -1,5 +1,7 @@
 # Changelog
 
+- 2026-09-25: Fixed Dark Reader washing out the destination picker on ChatGPT. Protected the existing palette with an ignored picker stylesheet, scoped fallback colors, and priority-preserving hover/selection styles. A new Brave window showed matching computed picker colors on ChatGPT with Dark Reader active and Grok without it; the isolated extension smoke runner was blocked by a GPU process crash.
+
 - 2026-09-25: Fixed two failing placement tests by giving the fake DOM element `querySelector` and making the inner-wrapper fixture return only nodes matching its composer selectors. The production extension is unchanged. The full test suite and isolated Brave extension smoke passed; live Gemini, Grok, and DeepSeek placement was not checked.
 
 - 2026-09-25: Pruned four low-signal tests that only matched handoff animation/microcopy or Latest Run receipt wording in source text. Kept behavioral coverage and source checks that guard transfer safety, privacy, and paste recovery.
