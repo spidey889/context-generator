@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-09-26-grok-stable-placement-v37";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-09-26-deepseek-stable-placement-v38";
   const INSTANCE_TEARDOWN_KEY = "__contextGeneratorPlatformTeardown";
   const INSTALL_NOTICE_NODE_ID = "context-generator-install-notice";
   let installNoticeChecked = false;
@@ -62,7 +62,7 @@
   const TRANSIENT_COMPOSER_PLACEMENT_GRACE_MS = 700;
   const TRANSIENT_COMPOSER_PLACEMENT_PLATFORMS = new Set(["gemini", "grok", "deepseek"]);
   const PROVIDER_PLACEMENT_CONFIRMATION_FRAMES = 3;
-  const STABILIZED_PROVIDER_PLACEMENT_PLATFORMS = new Set(["gemini", "grok"]);
+  const STABILIZED_PROVIDER_PLACEMENT_PLATFORMS = new Set(["gemini", "grok", "deepseek"]);
   const CLAUDE_PATHNAME_POLL_MS = 80;
   const CLAUDE_MAX_COMPOSER_HORIZONTAL_PADDING = 160;
   const CLAUDE_MODEL_LEFT_NUDGE = 48;
@@ -505,6 +505,7 @@
   let transientComposerPlacementGraceTimer = null;
   const geminiPlacementStability = createProviderPlacementStabilityState();
   const grokPlacementStability = createProviderPlacementStabilityState();
+  const deepSeekPlacementStability = createProviderPlacementStabilityState();
   let lastClaudePlacementPathname = window.location.pathname;
   let claudePathnamePollTimer = null;
   let pendingFloatingButtonReasons = new Set();
@@ -758,6 +759,8 @@
       stabilizeGrokPlacementCandidate,
       getConfirmedGrokPlacementCandidate: () => grokPlacementStability.confirmed,
       getDeepSeekBubblePlacement,
+      stabilizeDeepSeekPlacementCandidate,
+      getConfirmedDeepSeekPlacementCandidate: () => deepSeekPlacementStability.confirmed,
       getChatGptFixedBubblePlacement,
       findPlatformInput,
       findComposerSurfaceElement,
@@ -6854,21 +6857,40 @@
     }
 
     if (currentPlatform.id === "deepseek") {
-      const deepSeekPlacement = getDeepSeekBubblePlacement(composerRect);
-      if (deepSeekPlacement) {
-        releaseBubbleSlot();
-        bubble.style.left = `${deepSeekPlacement.left}px`;
-        bubble.style.right = "auto";
-        bubble.style.top = `${deepSeekPlacement.top}px`;
-        bubble.style.display = "flex";
-        recordTransientComposerPlacement(
-          bubble,
-          composerRect.left + deepSeekPlacement.left,
-          composerRect.top + deepSeekPlacement.top
-        );
-        maybeShowOnboardingNudge(bubble);
+      const deepSeekPlacementCandidate = getDeepSeekBubblePlacementCandidate(composerRect);
+      const deepSeekCandidate = {
+        input,
+        surface: composerSurface,
+        anchorControl: deepSeekPlacementCandidate.anchorControl,
+        anchorMode: deepSeekPlacementCandidate.anchorControl ? "control" : "fallback",
+        placement: deepSeekPlacementCandidate.placement,
+        viewportLeft: Math.round(composerRect.left + deepSeekPlacementCandidate.placement.left),
+        viewportTop: Math.round(composerRect.top + deepSeekPlacementCandidate.placement.top)
+      };
+      const confirmedCandidate = stabilizeDeepSeekPlacementCandidate(deepSeekCandidate);
+      if (!confirmedCandidate) {
+        holdConfirmedProviderPlacement(bubble, deepSeekPlacementStability);
+        scheduleFloatingButtonUpdate("deepseek-placement-confirmation");
         return;
       }
+
+      reserveComposerSurface(confirmedCandidate.surface);
+      if (bubble.parentElement !== confirmedCandidate.surface) {
+        confirmedCandidate.surface.appendChild(bubble);
+      }
+      setBubbleAbsoluteMode(bubble);
+      releaseBubbleSlot();
+      bubble.style.left = `${confirmedCandidate.placement.left}px`;
+      bubble.style.right = "auto";
+      bubble.style.top = `${confirmedCandidate.placement.top}px`;
+      bubble.style.display = "flex";
+      recordTransientComposerPlacement(
+        bubble,
+        confirmedCandidate.viewportLeft,
+        confirmedCandidate.viewportTop
+      );
+      maybeShowOnboardingNudge(bubble);
+      return;
     }
 
     if (currentPlatform.id === "gemini") {
@@ -7483,14 +7505,31 @@
   }
 
   function getDeepSeekBubblePlacement(composerRect) {
+    return getDeepSeekBubblePlacementCandidate(composerRect).placement;
+  }
+
+  function getDeepSeekBubblePlacementCandidate(composerRect) {
     const rowButtons = getDeepSeekComposerButtonCandidates(composerRect);
-    if (rowButtons.length < 2) return getDeepSeekFallbackBubblePlacement(composerRect);
+    if (rowButtons.length < 2) {
+      return {
+        anchorControl: null,
+        placement: getDeepSeekFallbackBubblePlacement(composerRect)
+      };
+    }
 
     const controlRowStart = rowButtons[0];
     const left = controlRowStart.rect.left - composerRect.left - BUBBLE_SIZE - BUBBLE_GAP;
-    if (left < BUBBLE_GAP) return getDeepSeekFallbackBubblePlacement(composerRect);
+    if (left < BUBBLE_GAP) {
+      return {
+        anchorControl: null,
+        placement: getDeepSeekFallbackBubblePlacement(composerRect)
+      };
+    }
 
-    return getBubblePlacementBesideRect(controlRowStart.rect, composerRect, left);
+    return {
+      anchorControl: controlRowStart.button,
+      placement: getBubblePlacementBesideRect(controlRowStart.rect, composerRect, left)
+    };
   }
 
   function getDeepSeekFallbackBubblePlacement(composerRect) {
@@ -8617,6 +8656,10 @@
 
   function stabilizeGrokPlacementCandidate(candidate) {
     return stabilizeProviderPlacementCandidate(grokPlacementStability, candidate);
+  }
+
+  function stabilizeDeepSeekPlacementCandidate(candidate) {
+    return stabilizeProviderPlacementCandidate(deepSeekPlacementStability, candidate);
   }
 
   function retainClaudeStablePlacement(bubble) {

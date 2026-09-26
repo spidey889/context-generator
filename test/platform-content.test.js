@@ -3000,6 +3000,37 @@ test("DeepSeek anchors before the complete visible right-side control row", () =
   assert.equal(hooks.getDeepSeekBubblePlacement(composerRect).left, 500);
 });
 
+test("DeepSeek keeps its confirmed row while replacement controls are provisional", () => {
+  const hooks = loadPlatformContent([], "chat.deepseek.com");
+  const input = new FakeElement({ attrs: { contenteditable: "true", role: "textbox" } });
+  const composer = new FakeElement();
+  const attach = new FakeElement({ tag: "button", text: "Attach" });
+  const anchored = {
+    input,
+    surface: composer,
+    anchorControl: attach,
+    anchorMode: "control",
+    viewportLeft: 500,
+    viewportTop: 163
+  };
+
+  assert.equal(hooks.stabilizeDeepSeekPlacementCandidate(anchored), null);
+  assert.equal(hooks.stabilizeDeepSeekPlacementCandidate(anchored), null);
+  assert.equal(hooks.stabilizeDeepSeekPlacementCandidate(anchored), anchored);
+
+  const incompleteRowFallback = {
+    ...anchored,
+    anchorControl: null,
+    anchorMode: "fallback",
+    viewportLeft: 746
+  };
+  assert.equal(hooks.stabilizeDeepSeekPlacementCandidate(incompleteRowFallback), null);
+  assert.equal(hooks.getConfirmedDeepSeekPlacementCandidate(), anchored);
+  assert.equal(hooks.stabilizeDeepSeekPlacementCandidate(incompleteRowFallback), null);
+  assert.equal(hooks.getConfirmedDeepSeekPlacementCandidate(), anchored);
+  assert.equal(hooks.stabilizeDeepSeekPlacementCandidate(incompleteRowFallback), incompleteRowFallback);
+});
+
 test("Gemini, Grok, and DeepSeek observe control-only composer changes", () => {
   const providers = [
     ["gemini.google.com", "syncGeminiPlacementResizeMonitoring"],

@@ -1,5 +1,7 @@
 # Changelog
 
+- 2026-09-26: Stabilized DeepSeek orb placement independently from Gemini and Grok. DeepSeek now keeps its confirmed control-row placement while a replacement row is incomplete, and accepts a new composer, real anchor, fallback, or viewport position only after three identical animation frames.
+
 - 2026-09-26: Stabilized Grok orb placement independently from Gemini. Grok now holds its last confirmed viewport position while a replacement composer or mode-control row is provisional, and commits a changed real-control/fallback placement only after three identical animation frames.
 
 - 2026-09-26: Stabilized Gemini orb placement across composer and control-row remounts. Gemini now requires the same input, composer, anchor/fallback mode, and viewport coordinates for three animation frames before reparenting or moving the orb, retaining the last confirmed viewport position while a replacement is provisional.
