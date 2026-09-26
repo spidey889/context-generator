@@ -2862,6 +2862,37 @@ test("Gemini bubble anchors to the left of the Pro selector", () => {
   assert.equal(placement.bottom, 15);
 });
 
+test("Gemini keeps its confirmed anchor until a replacement is stable for three frames", () => {
+  const hooks = loadPlatformContent([], "gemini.google.com");
+  const input = new FakeElement({ attrs: { contenteditable: "true", role: "textbox" } });
+  const composer = new FakeElement();
+  const pro = new FakeElement({ tag: "button", text: "Pro" });
+  const anchored = {
+    input,
+    surface: composer,
+    anchorControl: pro,
+    anchorMode: "control",
+    viewportLeft: 712,
+    viewportTop: 619
+  };
+
+  assert.equal(hooks.stabilizeGeminiPlacementCandidate(anchored), null);
+  assert.equal(hooks.stabilizeGeminiPlacementCandidate(anchored), null);
+  assert.equal(hooks.stabilizeGeminiPlacementCandidate(anchored), anchored);
+
+  const fallback = {
+    ...anchored,
+    anchorControl: null,
+    anchorMode: "fallback",
+    viewportLeft: 780
+  };
+  assert.equal(hooks.stabilizeGeminiPlacementCandidate(fallback), null);
+  assert.equal(hooks.getConfirmedGeminiPlacementCandidate(), anchored);
+  assert.equal(hooks.stabilizeGeminiPlacementCandidate(fallback), null);
+  assert.equal(hooks.getConfirmedGeminiPlacementCandidate(), anchored);
+  assert.equal(hooks.stabilizeGeminiPlacementCandidate(fallback), fallback);
+});
+
 test("Gemini placement does not require an English model label", () => {
   const model = new FakeElement({
     tag: "button",
