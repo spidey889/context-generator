@@ -1,7 +1,5 @@
 # Changelog
 
-- 2026-09-26: Stabilized Grok orb placement independently from Gemini. Grok now holds its last confirmed viewport position while a replacement composer or mode-control row is provisional, and commits a changed real-control/fallback placement only after three identical animation frames.
-
 - 2026-09-26: Stabilized Gemini orb placement across composer and control-row remounts. Gemini now requires the same input, composer, anchor/fallback mode, and viewport coordinates for three animation frames before reparenting or moving the orb, retaining the last confirmed viewport position while a replacement is provisional.
 
 - 2026-09-26: Removed the Cap Context orb from normal page Tab order so keyboard navigation reaches the native composer without stopping on the extension button. The destination picker's intentional tile cycling and programmatic focus restoration remain unchanged.
