@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-09-26-gemini-stable-placement-v36";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-09-25-picker-palette-v35";
   const INSTANCE_TEARDOWN_KEY = "__contextGeneratorPlatformTeardown";
   const INSTALL_NOTICE_NODE_ID = "context-generator-install-notice";
   let installNoticeChecked = false;
@@ -61,8 +61,6 @@
   const CLAUDE_TRANSIENT_PLACEMENT_GRACE_MS = 700;
   const TRANSIENT_COMPOSER_PLACEMENT_GRACE_MS = 700;
   const TRANSIENT_COMPOSER_PLACEMENT_PLATFORMS = new Set(["gemini", "grok", "deepseek"]);
-  const PROVIDER_PLACEMENT_CONFIRMATION_FRAMES = 3;
-  const STABILIZED_PROVIDER_PLACEMENT_PLATFORMS = new Set(["gemini"]);
   const CLAUDE_PATHNAME_POLL_MS = 80;
   const CLAUDE_MAX_COMPOSER_HORIZONTAL_PADDING = 160;
   const CLAUDE_MODEL_LEFT_NUDGE = 48;
@@ -503,7 +501,6 @@
   let claudePlacementGraceTimer = null;
   let transientComposerPlacement = null;
   let transientComposerPlacementGraceTimer = null;
-  const geminiPlacementStability = createProviderPlacementStabilityState();
   let lastClaudePlacementPathname = window.location.pathname;
   let claudePathnamePollTimer = null;
   let pendingFloatingButtonReasons = new Set();
@@ -751,8 +748,6 @@
       getClaudeFixedBubblePlacement,
       getGeminiBubblePlacement,
       findGeminiModelSelectorButton,
-      stabilizeGeminiPlacementCandidate,
-      getConfirmedGeminiPlacementCandidate: () => geminiPlacementStability.confirmed,
       getGrokBubblePlacement,
       getDeepSeekBubblePlacement,
       getChatGptFixedBubblePlacement,
@@ -3624,11 +3619,10 @@
       return bubble;
     }
 
-    const delaysComposerCommit = STABILIZED_PROVIDER_PLACEMENT_PLATFORMS.has(currentPlatform.id);
-    if (!delaysComposerCommit) reserveComposerSurface(composerSurface);
+    reserveComposerSurface(composerSurface);
 
     const bubbleRoot = currentPlatform.id === "claude" ? getFloatingButtonRoot() : composerSurface;
-    if (!delaysComposerCommit && currentPlatform.id !== "chatgpt" && bubble.parentElement !== bubbleRoot) {
+    if (currentPlatform.id !== "chatgpt" && bubble.parentElement !== bubbleRoot) {
       bubbleRoot.appendChild(bubble);
     }
 
@@ -6778,15 +6772,14 @@
       return;
     }
 
-    const delaysComposerCommit = STABILIZED_PROVIDER_PLACEMENT_PLATFORMS.has(currentPlatform.id);
-    if (!delaysComposerCommit) reserveComposerSurface(composerSurface);
+    reserveComposerSurface(composerSurface);
     syncGrokPlacementResizeMonitoring(input, composerSurface);
     syncDeepSeekPlacementResizeMonitoring(input, composerSurface);
     syncGeminiPlacementResizeMonitoring(input, composerSurface);
     syncClaudePlacementResizeMonitoring(input, composerSurface);
 
     const bubbleRoot = currentPlatform.id === "claude" ? getFloatingButtonRoot() : composerSurface;
-    if (!delaysComposerCommit && currentPlatform.id !== "chatgpt" && bubble.parentElement !== bubbleRoot) {
+    if (currentPlatform.id !== "chatgpt" && bubble.parentElement !== bubbleRoot) {
       bubbleRoot.appendChild(bubble);
     }
 
@@ -6811,7 +6804,7 @@
       return;
     }
 
-    if (!delaysComposerCommit) setBubbleAbsoluteMode(bubble);
+    setBubbleAbsoluteMode(bubble);
 
     if (currentPlatform.id === "grok") {
       const grokPlacement = getGrokBubblePlacement(composerRect);
@@ -6855,37 +6848,16 @@
         composerRect,
         geminiAnchor
       );
-      const geminiCandidate = {
-        input,
-        surface: composerSurface,
-        anchorControl: geminiAnchor,
-        anchorMode: geminiAnchor ? "control" : "fallback",
-        placement: geminiPlacement,
-        viewportLeft: Math.round(composerRect.right - geminiPlacement.right - BUBBLE_SIZE),
-        viewportTop: Math.round(composerRect.bottom - geminiPlacement.bottom - BUBBLE_SIZE)
-      };
-      const confirmedCandidate = stabilizeGeminiPlacementCandidate(geminiCandidate);
-      if (!confirmedCandidate) {
-        holdConfirmedProviderPlacement(bubble, geminiPlacementStability);
-        scheduleFloatingButtonUpdate("gemini-placement-confirmation");
-        return;
-      }
-
-      reserveComposerSurface(confirmedCandidate.surface);
-      if (bubble.parentElement !== confirmedCandidate.surface) {
-        confirmedCandidate.surface.appendChild(bubble);
-      }
-      setBubbleAbsoluteMode(bubble);
       releaseBubbleSlot();
       bubble.style.left = "auto";
-      bubble.style.right = `${confirmedCandidate.placement.right}px`;
+      bubble.style.right = `${geminiPlacement.right}px`;
       bubble.style.top = "auto";
-      bubble.style.bottom = `${confirmedCandidate.placement.bottom}px`;
+      bubble.style.bottom = `${geminiPlacement.bottom}px`;
       bubble.style.display = "flex";
       recordTransientComposerPlacement(
         bubble,
-        confirmedCandidate.viewportLeft,
-        confirmedCandidate.viewportTop
+        composerRect.right - geminiPlacement.right - BUBBLE_SIZE,
+        composerRect.bottom - geminiPlacement.bottom - BUBBLE_SIZE
       );
       maybeShowOnboardingNudge(bubble);
       return;
@@ -8509,76 +8481,6 @@
       placement.inlineShift
     );
     return true;
-  }
-
-  function createProviderPlacementStabilityState() {
-    return {
-      pending: null,
-      pendingFrames: 0,
-      confirmed: null
-    };
-  }
-
-  function stabilizeProviderPlacementCandidate(state, candidate) {
-    if (isSameProviderPlacementCandidate(state.confirmed, candidate)) {
-      state.confirmed = candidate;
-      state.pending = null;
-      state.pendingFrames = 0;
-      return candidate;
-    }
-
-    if (isSameProviderPlacementCandidate(state.pending, candidate)) {
-      state.pending = candidate;
-      state.pendingFrames += 1;
-    } else {
-      state.pending = candidate;
-      state.pendingFrames = 1;
-    }
-
-    if (state.pendingFrames < PROVIDER_PLACEMENT_CONFIRMATION_FRAMES) return null;
-
-    state.confirmed = candidate;
-    state.pending = null;
-    state.pendingFrames = 0;
-    return candidate;
-  }
-
-  function isSameProviderPlacementCandidate(left, right) {
-    return Boolean(
-      left &&
-      right &&
-      left.input === right.input &&
-      left.surface === right.surface &&
-      left.anchorControl === right.anchorControl &&
-      left.anchorMode === right.anchorMode &&
-      left.viewportLeft === right.viewportLeft &&
-      left.viewportTop === right.viewportTop
-    );
-  }
-
-  function holdConfirmedProviderPlacement(bubble, state) {
-    const confirmed = state.confirmed;
-    if (!bubble || !confirmed) {
-      if (bubble) bubble.style.display = "none";
-      return false;
-    }
-
-    releaseComposerSurface();
-    const floatingRoot = getFloatingButtonRoot();
-    if (bubble.parentElement !== floatingRoot) floatingRoot.appendChild(bubble);
-    setBubbleFixedMode(bubble);
-    setBubbleStylesIfChanged(bubble, {
-      left: `${confirmed.viewportLeft}px`,
-      right: "auto",
-      top: `${confirmed.viewportTop}px`,
-      bottom: "auto",
-      display: "flex"
-    });
-    return true;
-  }
-
-  function stabilizeGeminiPlacementCandidate(candidate) {
-    return stabilizeProviderPlacementCandidate(geminiPlacementStability, candidate);
   }
 
   function retainClaudeStablePlacement(bubble) {

@@ -1,7 +1,5 @@
 # Changelog
 
-- 2026-09-26: Stabilized Gemini orb placement across composer and control-row remounts. Gemini now requires the same input, composer, anchor/fallback mode, and viewport coordinates for three animation frames before reparenting or moving the orb, retaining the last confirmed viewport position while a replacement is provisional.
-
 - 2026-09-26: Removed the Cap Context orb from normal page Tab order so keyboard navigation reaches the native composer without stopping on the extension button. The destination picker's intentional tile cycling and programmatic focus restoration remain unchanged.
 
 - 2026-09-25: Fixed Dark Reader washing out the destination picker on ChatGPT. Protected the existing palette with an ignored picker stylesheet, scoped fallback colors, and priority-preserving hover/selection styles. A new Brave window showed matching computed picker colors on ChatGPT with Dark Reader active and Grok without it; the isolated extension smoke runner was blocked by a GPU process crash.
