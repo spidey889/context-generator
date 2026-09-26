@@ -3700,6 +3700,7 @@
     const bubble = document.createElement("button");
     bubble.id = BUBBLE_ID;
     bubble.type = "button";
+    bubble.tabIndex = -1;
     bubble.title = DESTINATION_TITLE_TEXT;
     bubble.setAttribute("aria-label", DESTINATION_TITLE_TEXT);
     bubble.setAttribute("aria-expanded", "false");

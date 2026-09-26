@@ -585,6 +585,15 @@ test("destination picker preserves outside page focus on every supported platfor
   assert.match(toggleAndHideSource, /bubble\.focus\?\.\(\{ preventScroll: true \}\)/);
 });
 
+test("normal page Tab navigation skips the Cap Context orb", () => {
+  const source = fs.readFileSync(SOURCE_PATH, "utf8");
+  const buttonStart = source.indexOf("function createFloatingButton()");
+  const buttonEnd = source.indexOf("function ensureOnboardingStyles()", buttonStart);
+  const buttonSource = source.slice(buttonStart, buttonEnd);
+
+  assert.match(buttonSource, /bubble\.tabIndex = -1/);
+});
+
 test("composer lifecycle cleanup never restores focus to the orb", () => {
   const source = fs.readFileSync(SOURCE_PATH, "utf8");
   const ensureStart = source.indexOf("function ensureFloatingButton(");
