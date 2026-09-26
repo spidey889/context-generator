@@ -1,0 +1,30 @@
+# Audit Candidates
+
+Each item below is a candidate for its own dedicated audit; this is an inventory, not an audit or fix plan.
+
+- **Live DOM adapters and orb placement (`extension/platform-content.js`)** — Provider DOMs remount and change without notice, so composer discovery, anchoring, reservation, and visibility can flicker, overlap controls, or lose the orb.
+- **Virtualized conversation capture (`extension/platform-content.js`)** — Scroll settling and window alignment can stop early or miss turns while still producing a plausible transcript.
+- **Claude and ChatGPT pasted-content capture (`extension/platform-content.js`)** — Card expansion, virtualization, and remount reconciliation can duplicate, inflate, misorder, or detach pasted text from its owning turn.
+- **Turn identity and deduplication (`extension/platform-content.js`)** — Non-ChatGPT role-plus-text identity can erase legitimate repeated turns or fail to collapse duplicated DOM copies.
+- **Composer paste and verification (`extension/platform-content.js`)** — Rich editors, disabled states, remounts, browser-specific events, and partial inserts can cause silent or falsely reported paste success.
+- **Picker, focus, and handoff UI lifecycle (`extension/platform-content.js`)** — Shared focus restoration, teardown, animation, reduced-motion, and outside-click paths have historically regressed across platforms.
+- **Content-script reinjection and teardown (`extension/platform-content.js`, `extension/background.js`)** — Manual load identities plus global observers, timers, and listeners can leave stale instances or duplicate page behavior after updates.
+- **Transfer locking and cancellation (`extension/platform-content.js`, `extension/background.js`)** — The six-minute lock does not abort active work, and MV3 worker restarts can lose in-memory cancellation and ownership state.
+- **Prepared destination ownership and recovery (`extension/background.js`)** — Tab warming, navigation, receiver retries, and fresh-tab fallback can race, paste into the wrong state, or leave unused tabs open.
+- **Service-worker lifetime and message delivery (`extension/background.js`)** — Long summaries depend on keepalives, retry loops, and hard deadlines that may behave differently when the MV3 worker is suspended or restarted.
+- **Summary provider routing and deadline budgets (`api/summarize.js`, `extension/background.js`, `vercel.json`)** — Model retries, family budgets, client aborts, and server limits can drift and create late work, false failures, or skipped fallbacks.
+- **Summary grounding and acceptance (`api/summarize.js`, `evaluation/`)** — The temporary non-empty-output policy and structural checks can accept incomplete, truncated, or hallucinated context that looks valid.
+- **Provider response parsing and normalization (`api/summarize.js`)** — Each provider has different error, token, finish-reason, hidden-thought, and output shapes that can be misclassified as success or the wrong fallback reason.
+- **Emergency `local-direct` carry (`api/summarize.js`)** — Provider-wide failure sends the complete transcript, so very large payload usability, destination limits, privacy expectations, and receipt reporting deserve dedicated coverage.
+- **Gemini daily health state (`api/gemini-model-health.js`)** — Redis concurrency, Pacific-day rollover, quota classification, fail-open behavior, and dual environment-variable aliases can incorrectly skip or overuse models.
+- **Backend request security and throttling (`api/request-security.js`, `api/request-validation.js`)** — Extension-origin compatibility, marker checks, body limits, proxy assumptions, and instance-local rate/concurrency state form a sensitive abuse boundary.
+- **Telemetry outbox and delivery (`extension/background.js`, `api/telemetry.js`)** — The queue is unbounded and multi-hop retries, timeouts, worker restarts, and stage ordering can lose, duplicate, or indefinitely retain events.
+- **Telemetry schema and database integrity (`api/telemetry-validation.js`, `supabase/`)** — Duplicated validators, Edge Function logic, migrations, RPC upserts, grants, and RLS can drift or corrupt progress and user counters under concurrency.
+- **Latest Run storage and analysis bridge (`extension/analysis-bridge.js`, `analysis/index.html`)** — Raw-transcript expiry and the page-to-extension `postMessage` bridge can leak stale data, fail silently, or render misleading receipt state.
+- **One-time install notice (`api/notice.js`, `extension/background.js`)** — Atomic claim-before-display and separate event retry paths can consume a notice without showing it or report an incomplete lifecycle.
+- **Browser and manifest compatibility (`extension/manifest.json`, `extension/platform-content.js`)** — One hybrid Chromium/Firefox package contains browser-specific background and paste behavior, but automated browser coverage is Brave-only.
+- **Installed-extension smoke coverage (`scripts/run-extension-smoke.js`)** — The smoke is environment-sensitive, excluded from the main gate, and exercises only a narrow controlled route rather than all five platforms.
+- **Regression evaluation (`scripts/run-regression-eval.js`, `evaluation/cases.json`)** — A small live-provider case set and network-dependent scoring may miss real summary failures or produce unstable release signals.
+- **Release packaging and publication (`extension/`, checked-in ZIPs, `manifest.json`)** — Source, manifest version, archives, store contents, and live deployment can drift while each still appears individually valid.
+- **Static site, privacy, and accessibility (`index.html`, `privacy.html`, `PRIVACY.md`)** — Layout, responsive behavior, focus, contrast, reduced motion, canonical URLs, and privacy copy rely mostly on manual review with no visual regression gate.
+- **Core content-script maintainability (`extension/platform-content.js`)** — Capture, five adapters, placement, UI, paste, telemetry, and lifecycle state share one large mutable script, increasing coupling and regression blast radius.
