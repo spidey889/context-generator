@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-09-26-gemini-stable-placement-v36";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-09-26-grok-stable-placement-v37";
   const INSTANCE_TEARDOWN_KEY = "__contextGeneratorPlatformTeardown";
   const INSTALL_NOTICE_NODE_ID = "context-generator-install-notice";
   let installNoticeChecked = false;
@@ -62,7 +62,7 @@
   const TRANSIENT_COMPOSER_PLACEMENT_GRACE_MS = 700;
   const TRANSIENT_COMPOSER_PLACEMENT_PLATFORMS = new Set(["gemini", "grok", "deepseek"]);
   const PROVIDER_PLACEMENT_CONFIRMATION_FRAMES = 3;
-  const STABILIZED_PROVIDER_PLACEMENT_PLATFORMS = new Set(["gemini"]);
+  const STABILIZED_PROVIDER_PLACEMENT_PLATFORMS = new Set(["gemini", "grok"]);
   const CLAUDE_PATHNAME_POLL_MS = 80;
   const CLAUDE_MAX_COMPOSER_HORIZONTAL_PADDING = 160;
   const CLAUDE_MODEL_LEFT_NUDGE = 48;
@@ -504,6 +504,7 @@
   let transientComposerPlacement = null;
   let transientComposerPlacementGraceTimer = null;
   const geminiPlacementStability = createProviderPlacementStabilityState();
+  const grokPlacementStability = createProviderPlacementStabilityState();
   let lastClaudePlacementPathname = window.location.pathname;
   let claudePathnamePollTimer = null;
   let pendingFloatingButtonReasons = new Set();
@@ -754,6 +755,8 @@
       stabilizeGeminiPlacementCandidate,
       getConfirmedGeminiPlacementCandidate: () => geminiPlacementStability.confirmed,
       getGrokBubblePlacement,
+      stabilizeGrokPlacementCandidate,
+      getConfirmedGrokPlacementCandidate: () => grokPlacementStability.confirmed,
       getDeepSeekBubblePlacement,
       getChatGptFixedBubblePlacement,
       findPlatformInput,
@@ -6814,16 +6817,37 @@
     if (!delaysComposerCommit) setBubbleAbsoluteMode(bubble);
 
     if (currentPlatform.id === "grok") {
-      const grokPlacement = getGrokBubblePlacement(composerRect);
+      const grokPlacementCandidate = getGrokBubblePlacementCandidate(composerRect);
+      const grokCandidate = {
+        input,
+        surface: composerSurface,
+        anchorControl: grokPlacementCandidate.anchorControl,
+        anchorMode: grokPlacementCandidate.anchorControl ? "control" : "fallback",
+        placement: grokPlacementCandidate.placement,
+        viewportLeft: Math.round(composerRect.left + grokPlacementCandidate.placement.left),
+        viewportTop: Math.round(composerRect.top + grokPlacementCandidate.placement.top)
+      };
+      const confirmedCandidate = stabilizeGrokPlacementCandidate(grokCandidate);
+      if (!confirmedCandidate) {
+        holdConfirmedProviderPlacement(bubble, grokPlacementStability);
+        scheduleFloatingButtonUpdate("grok-placement-confirmation");
+        return;
+      }
+
+      reserveComposerSurface(confirmedCandidate.surface);
+      if (bubble.parentElement !== confirmedCandidate.surface) {
+        confirmedCandidate.surface.appendChild(bubble);
+      }
+      setBubbleAbsoluteMode(bubble);
       releaseBubbleSlot();
-      bubble.style.left = `${grokPlacement.left}px`;
+      bubble.style.left = `${confirmedCandidate.placement.left}px`;
       bubble.style.right = "auto";
-      bubble.style.top = `${grokPlacement.top}px`;
+      bubble.style.top = `${confirmedCandidate.placement.top}px`;
       bubble.style.display = "flex";
       recordTransientComposerPlacement(
         bubble,
-        composerRect.left + grokPlacement.left,
-        composerRect.top + grokPlacement.top
+        confirmedCandidate.viewportLeft,
+        confirmedCandidate.viewportTop
       );
       maybeShowOnboardingNudge(bubble);
       return;
@@ -7437,15 +7461,25 @@
   }
 
   function getGrokBubblePlacement(composerRect) {
+    return getGrokBubblePlacementCandidate(composerRect).placement;
+  }
+
+  function getGrokBubblePlacementCandidate(composerRect) {
     const controlRowStart = getGrokComposerButtonCandidates(composerRect)[0];
     if (controlRowStart) {
       const left = controlRowStart.rect.left - composerRect.left - BUBBLE_SIZE - BUBBLE_GAP;
       if (left >= BUBBLE_GAP) {
-        return getBubblePlacementBesideRect(controlRowStart.rect, composerRect, left);
+        return {
+          anchorControl: controlRowStart.button,
+          placement: getBubblePlacementBesideRect(controlRowStart.rect, composerRect, left)
+        };
       }
     }
 
-    return getBottomRightRowBubblePlacement(composerRect, 186);
+    return {
+      anchorControl: null,
+      placement: getBottomRightRowBubblePlacement(composerRect, 186)
+    };
   }
 
   function getDeepSeekBubblePlacement(composerRect) {
@@ -8579,6 +8613,10 @@
 
   function stabilizeGeminiPlacementCandidate(candidate) {
     return stabilizeProviderPlacementCandidate(geminiPlacementStability, candidate);
+  }
+
+  function stabilizeGrokPlacementCandidate(candidate) {
+    return stabilizeProviderPlacementCandidate(grokPlacementStability, candidate);
   }
 
   function retainClaudeStablePlacement(bubble) {

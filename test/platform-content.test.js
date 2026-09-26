@@ -2947,6 +2947,37 @@ test("Grok placement does not require an English mode label", () => {
   assert.equal(hooks.getGrokBubblePlacement(composerRect).left, 550);
 });
 
+test("Grok keeps its confirmed control while a remounted row is provisional", () => {
+  const hooks = loadPlatformContent([], "grok.com");
+  const input = new FakeElement({ attrs: { contenteditable: "true", role: "textbox" } });
+  const composer = new FakeElement();
+  const fast = new FakeElement({ tag: "button", text: "Fast" });
+  const anchored = {
+    input,
+    surface: composer,
+    anchorControl: fast,
+    anchorMode: "control",
+    viewportLeft: 550,
+    viewportTop: 163
+  };
+
+  assert.equal(hooks.stabilizeGrokPlacementCandidate(anchored), null);
+  assert.equal(hooks.stabilizeGrokPlacementCandidate(anchored), null);
+  assert.equal(hooks.stabilizeGrokPlacementCandidate(anchored), anchored);
+
+  const provisionalFallback = {
+    ...anchored,
+    anchorControl: null,
+    anchorMode: "fallback",
+    viewportLeft: 664
+  };
+  assert.equal(hooks.stabilizeGrokPlacementCandidate(provisionalFallback), null);
+  assert.equal(hooks.getConfirmedGrokPlacementCandidate(), anchored);
+  assert.equal(hooks.stabilizeGrokPlacementCandidate(provisionalFallback), null);
+  assert.equal(hooks.getConfirmedGrokPlacementCandidate(), anchored);
+  assert.equal(hooks.stabilizeGrokPlacementCandidate(provisionalFallback), provisionalFallback);
+});
+
 test("DeepSeek anchors before the complete visible right-side control row", () => {
   const composerRect = getClaudeComposerRect();
   const firstControl = new FakeElement({
