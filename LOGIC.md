@@ -112,7 +112,7 @@ These names form an internal API. Update sender, receiver, tests, and this secti
 | `REQUEST_LAST_TRANSFER_STATS` | analysis page -> bridge | Request the local receipt through `window.postMessage` |
 | `BRIDGE_READY`, `LAST_TRANSFER_STATS` | bridge -> analysis page | Announce the bridge and return receipt data |
 
-Background retries missing receivers every 120 ms and may inject the content script. Timeouts: 12 seconds for source startup, normally 30 seconds for destination messaging, 45 seconds for ChatGPT, 9 seconds for normal warmup, and 12 seconds for ChatGPT warmup.
+Background retries missing receivers every 120 ms and may inject the shared `platform-content.js` script. Pre- and post-injection attempts use the same deadline and error policy; non-retryable errors stop immediately. Timeouts: 12 seconds for source startup, normally 30 seconds for destination messaging, 45 seconds for ChatGPT, 9 seconds for normal warmup, and 12 seconds for ChatGPT warmup.
 
 ## Capture Engine
 

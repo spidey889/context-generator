@@ -1,4 +1,3 @@
-const CHATGPT_URL = "https://chatgpt.com/";
 const SUMMARY_BACKEND_URL = "https://context-generator-five.vercel.app/api/summarize";
 const SUMMARY_CLIENT_HEADER = "cap-context-extension/1";
 const PLATFORM_CONTENT_SCRIPT = "platform-content.js";
@@ -57,12 +56,10 @@ const DESTINATIONS = {
   claude: {
     name: "Claude",
     url: "https://claude.ai/",
-    contentScript: PLATFORM_CONTENT_SCRIPT
   },
   chatgpt: {
     name: "ChatGPT",
-    url: CHATGPT_URL,
-    contentScript: PLATFORM_CONTENT_SCRIPT,
+    url: "https://chatgpt.com/",
     focusBeforePaste: true,
     activationSettleMs: 350,
     messageTimeoutMs: 45000,
@@ -70,19 +67,16 @@ const DESTINATIONS = {
   },
   gemini: {
     name: "Gemini",
-    url: "https://gemini.google.com/",
-    contentScript: PLATFORM_CONTENT_SCRIPT
+    url: "https://gemini.google.com/"
   },
   grok: {
     name: "Grok",
     url: "https://grok.com/",
-    contentScript: PLATFORM_CONTENT_SCRIPT,
     focusBeforePaste: true
   },
   deepseek: {
     name: "DeepSeek",
-    url: "https://chat.deepseek.com/",
-    contentScript: PLATFORM_CONTENT_SCRIPT
+    url: "https://chat.deepseek.com/"
   }
 };
 // Keep these rules aligned with manifest host access. Ordinary OpenAI pages are
@@ -95,17 +89,8 @@ const DESTINATION_HOST_RULES = {
   deepseek: { exact: ["chat.deepseek.com"] }
 };
 
-chrome.runtime.onInstalled.addListener(() => {
-  injectIntoOpenSupportedTabs();
-  scheduleStoredRawTranscriptExpiry();
-  initializeTelemetryDelivery();
-});
-
-chrome.runtime.onStartup.addListener(() => {
-  injectIntoOpenSupportedTabs();
-  scheduleStoredRawTranscriptExpiry();
-  initializeTelemetryDelivery();
-});
+chrome.runtime.onInstalled.addListener(initializeBackground);
+chrome.runtime.onStartup.addListener(initializeBackground);
 
 chrome.tabs.onRemoved?.addListener((tabId) => {
   recordUserCancelledTransfersForTab(tabId);
@@ -118,12 +103,16 @@ chrome.storage.onChanged.addListener((changes, areaName) => {
 
 chrome.alarms.onAlarm.addListener((alarm) => {
   if (alarm?.name === RAW_TRANSCRIPT_EXPIRY_ALARM) expireStoredRawTranscript();
-  if (alarm?.name === TELEMETRY_RETRY_ALARM) { initializeTelemetryDelivery(); }
+  if (alarm?.name === TELEMETRY_RETRY_ALARM) initializeTelemetryDelivery();
 });
 
-injectIntoOpenSupportedTabs();
-scheduleStoredRawTranscriptExpiry();
-initializeTelemetryDelivery();
+initializeBackground();
+
+function initializeBackground() {
+  injectIntoOpenSupportedTabs();
+  scheduleStoredRawTranscriptExpiry();
+  initializeTelemetryDelivery();
+}
 
 async function scheduleStoredRawTranscriptExpiry() {
   try {
@@ -301,7 +290,7 @@ async function getOrCreateTelemetryInstallId() {
     const existing = stored?.[TELEMETRY_INSTALL_ID_STORAGE_KEY];
     if (isUuid(existing)) return existing;
 
-    const installId = createTelemetryUuid();
+    const installId = crypto.randomUUID();
     await chrome.storage.local.set({ [TELEMETRY_INSTALL_ID_STORAGE_KEY]: installId });
     return installId;
   })();
@@ -314,21 +303,23 @@ async function getOrCreateTelemetryInstallId() {
   }
 }
 
-async function appendTelemetryOutbox(payload) {
+// Always reread durable storage; the post-delivery read must preserve newly queued entries.
+async function readTelemetryOutbox() {
   const stored = await chrome.storage.local.get(TELEMETRY_OUTBOX_STORAGE_KEY);
-  const outbox = Array.isArray(stored?.[TELEMETRY_OUTBOX_STORAGE_KEY])
+  return Array.isArray(stored?.[TELEMETRY_OUTBOX_STORAGE_KEY])
     ? stored[TELEMETRY_OUTBOX_STORAGE_KEY]
     : [];
-  outbox.push({ deliveryId: createTelemetryUuid(), payload });
+}
+
+async function appendTelemetryOutbox(payload) {
+  const outbox = await readTelemetryOutbox();
+  outbox.push({ deliveryId: crypto.randomUUID(), payload });
   await chrome.storage.local.set({ [TELEMETRY_OUTBOX_STORAGE_KEY]: outbox });
 }
 
 async function flushTelemetryOutbox() {
   while (true) {
-    const stored = await chrome.storage.local.get(TELEMETRY_OUTBOX_STORAGE_KEY);
-    const outbox = Array.isArray(stored?.[TELEMETRY_OUTBOX_STORAGE_KEY])
-      ? stored[TELEMETRY_OUTBOX_STORAGE_KEY]
-      : [];
+    const outbox = await readTelemetryOutbox();
     const next = outbox[0];
 
     if (!next?.deliveryId || !next?.payload) {
@@ -345,10 +336,7 @@ async function flushTelemetryOutbox() {
       return;
     }
 
-    const refreshed = await chrome.storage.local.get(TELEMETRY_OUTBOX_STORAGE_KEY);
-    const currentOutbox = Array.isArray(refreshed?.[TELEMETRY_OUTBOX_STORAGE_KEY])
-      ? refreshed[TELEMETRY_OUTBOX_STORAGE_KEY]
-      : [];
+    const currentOutbox = await readTelemetryOutbox();
     await chrome.storage.local.set({
       [TELEMETRY_OUTBOX_STORAGE_KEY]: currentOutbox.filter((entry) => entry?.deliveryId !== next.deliveryId)
     });
@@ -382,10 +370,6 @@ function isUuid(value) {
     && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
 }
 
-function createTelemetryUuid() {
-  return crypto.randomUUID();
-}
-
 chrome.action.onClicked.addListener(async (tab) => {
   try {
     clearBadge();
@@ -398,7 +382,6 @@ chrome.action.onClicked.addListener(async (tab) => {
     const startResult = await sendMessageWhenReady(
       tab.id,
       { type: "START_CONTEXT_TRANSFER" },
-      PLATFORM_CONTENT_SCRIPT,
       SOURCE_MESSAGE_TIMEOUT_MS,
       "source AI tab"
     );
@@ -465,7 +448,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
 
   if (message?.type === "PREPARE_DESTINATION") {
-    prepareDestination(message.destination, message.transferId)
+    prepareDestination(message.destination)
       .then((result) => sendResponse({ ok: true, tabId: result.tabId, timing: result.timing }))
       .catch((error) => {
         console.error("[Context Generator Relay]", error);
@@ -692,7 +675,7 @@ async function transferToDestination(
     throw error;
   }
 
-  const trace = createBackgroundTrace(transferId);
+  const trace = createBackgroundTrace();
   const destination = DESTINATIONS[destinationId];
   if (!destination) {
     const error = new Error("Unknown AI destination.");
@@ -828,7 +811,7 @@ async function pasteIntoDestinationWithActivation(
   return pasteResult;
 }
 
-async function prepareDestination(destinationId, transferId = null) {
+async function prepareDestination(destinationId) {
   const startedAt = nowMs();
   const destination = DESTINATIONS[destinationId];
   if (!destination) {
@@ -837,7 +820,7 @@ async function prepareDestination(destinationId, transferId = null) {
 
   const destinationTabId = await createDestinationTab(destination, { active: false });
   const openMs = Math.round(nowMs() - startedAt);
-  warmDestinationTab(destinationTabId, destination, transferId);
+  warmDestinationTab(destinationTabId, destination);
   return {
     tabId: destinationTabId,
     timing: { openMs, tabId: destinationTabId }
@@ -895,10 +878,8 @@ async function pasteIntoDestinationTab(
         text,
         transferId
       },
-      destination.contentScript,
       destination.messageTimeoutMs || DESTINATION_MESSAGE_TIMEOUT_MS,
       destination.name,
-      transferId,
       trace
     );
   } catch (error) {
@@ -907,7 +888,7 @@ async function pasteIntoDestinationTab(
   }
 }
 
-async function warmDestinationTab(tabId, destination, transferId = null) {
+async function warmDestinationTab(tabId, destination) {
   try {
     const startedAt = Date.now();
     const timeoutMs = destination.warmupTimeoutMs || DESTINATION_WARMUP_TIMEOUT_MS;
@@ -915,7 +896,7 @@ async function warmDestinationTab(tabId, destination, transferId = null) {
       if (await pingTab(tabId)) {
         return;
       }
-      if (await ensureContentScript(tabId, destination.contentScript) && await pingTab(tabId)) {
+      if (await ensureContentScript(tabId) && await pingTab(tabId)) {
         return;
       }
       await delay(MESSAGE_RETRY_INTERVAL_MS);
@@ -934,9 +915,9 @@ async function pingTab(tabId) {
   }
 }
 
-async function ensureContentScript(tabId, file) {
+async function ensureContentScript(tabId) {
   try {
-    await chrome.scripting.executeScript({ target: { tabId }, files: [file] });
+    await chrome.scripting.executeScript({ target: { tabId }, files: [PLATFORM_CONTENT_SCRIPT] });
     return true;
   } catch (error) {
     const message = String(error?.message || error);
@@ -953,7 +934,7 @@ async function injectIntoOpenSupportedTabs() {
     await Promise.all(
       tabs
         .filter((tab) => tab.id && getPlatformFromUrl(tab.url))
-        .map((tab) => ensureContentScript(tab.id, PLATFORM_CONTENT_SCRIPT))
+        .map((tab) => ensureContentScript(tab.id))
     );
   } catch (error) {
     console.debug("[Context Generator Relay] Startup content script injection skipped:", error?.message || error);
@@ -964,19 +945,19 @@ function sendMessage(tabId, message) {
   return chrome.tabs.sendMessage(tabId, message);
 }
 
-async function sendMessageWhenReady(tabId, message, contentScript, timeoutMs, name, transferId = null, trace = null) {
+async function sendMessageWhenReady(tabId, message, timeoutMs, name, trace = null) {
   const startedAt = Date.now();
   const deadline = startedAt + timeoutMs;
   let lastError = null;
   let attempts = 0;
 
-  while (Date.now() <= deadline) {
-    attempts += 1;
+  // Both attempts use the same deadline and error policy; injection stays between them.
+  async function tryMessage(label) {
     try {
       const response = await sendMessageBeforeDeadline(tabId, message, deadline, name);
       if (response !== undefined) {
         const readyMs = Date.now() - startedAt;
-        markBackgroundTrace(trace, "tab ready/message response", { tabId, readyMs, attempts });
+        markBackgroundTrace(trace, label, { tabId, readyMs, attempts });
         return response;
       }
       lastError = new Error(`No response from ${name}.`);
@@ -986,25 +967,20 @@ async function sendMessageWhenReady(tabId, message, contentScript, timeoutMs, na
         throw error;
       }
     }
+    return undefined;
+  }
+
+  while (Date.now() <= deadline) {
+    attempts += 1;
+    let response = await tryMessage("tab ready/message response");
+    if (response !== undefined) return response;
 
     if (Date.now() > deadline) break;
     markBackgroundTrace(trace, "content script inject attempt", { tabId, attempts });
-    await ensureContentScript(tabId, contentScript);
+    await ensureContentScript(tabId);
 
-    try {
-      const response = await sendMessageBeforeDeadline(tabId, message, deadline, name);
-      if (response !== undefined) {
-        const readyMs = Date.now() - startedAt;
-        markBackgroundTrace(trace, "tab ready/message response after inject", { tabId, readyMs, attempts });
-        return response;
-      }
-      lastError = new Error(`No response from ${name}.`);
-    } catch (error) {
-      lastError = error;
-      if (!isRetryableMessageError(error)) {
-        throw error;
-      }
-    }
+    response = await tryMessage("tab ready/message response after inject");
+    if (response !== undefined) return response;
 
     await delay(MESSAGE_RETRY_INTERVAL_MS);
   }
@@ -1073,9 +1049,8 @@ function clearBadge() {
   chrome.action.setBadgeText({ text: "" });
 }
 
-function createBackgroundTrace(transferId) {
+function createBackgroundTrace() {
   return {
-    id: transferId,
     startedAt: nowMs(),
     lastAt: null,
     marks: []

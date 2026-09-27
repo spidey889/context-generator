@@ -84,7 +84,8 @@ function loadBackgroundForTransferTest({
     created: [],
     gotten: [],
     sent: [],
-    updated: []
+    updated: [],
+    injected: []
   };
   const event = { addListener: () => {} };
   const fastSetTimeout = (callback, _delay, ...args) => setTimeout(callback, 0, ...args);
@@ -116,7 +117,7 @@ function loadBackgroundForTransferTest({
           }
         }
       },
-      scripting: { executeScript: async () => {} },
+      scripting: { executeScript: async (options) => { operations.injected.push(options); } },
       storage: {
         local: {
           get: async () => ({}),
@@ -200,7 +201,6 @@ test("destination messaging enforces its deadline while a response is still pend
     harness.sendMessageWhenReady(
       41,
       { type: "PASTE_CONTEXT", destination: "claude", text: "context" },
-      "platform-content.js",
       40,
       "Claude"
     ),
@@ -389,4 +389,31 @@ test("summary cache preserves original result metadata and labels cache hits", a
   assert.equal(cached.timing.originalSource, "backend");
   assert.equal(cached.timing.originalSummaryMs, fresh.timing.summaryMs);
   assert.deepEqual(JSON.parse(JSON.stringify(cached.timing.backend)), backendTiming);
+});
+
+for (const firstReply of ["missing receiver", "no response"]) {
+  test(`destination messaging retries after injection: ${firstReply}`, async () => {
+    let calls = 0;
+    const harness = loadBackgroundForTransferTest({ sendMessageImpl: async () => {
+      if (++calls === 1) {
+        if (firstReply === "missing receiver") throw new Error("Receiving end does not exist");
+        return undefined;
+      }
+      return { ok: true };
+    } });
+    const trace = { startedAt: Date.now(), lastAt: null, marks: [] };
+    const result = await harness.sendMessageWhenReady(41, { type: "PASTE_CONTEXT" }, 1000, "Claude", trace);
+    assert.equal(result.ok, true);
+    assert.equal(calls, 2);
+    assert.deepEqual(JSON.parse(JSON.stringify(harness.operations.injected)), [{ target: { tabId: 41 }, files: ["platform-content.js"] }]);
+    assert.deepEqual(Array.from(trace.marks, mark => mark.label), ["content script inject attempt", "tab ready/message response after inject"]);
+    assert.equal(trace.marks.at(-1).detail.attempts, 1);
+  });
+}
+
+test("destination messaging stops immediately on a non-retryable failure", async () => {
+  const harness = loadBackgroundForTransferTest({ sendMessageImpl: async () => { throw new Error("Tab access denied"); } });
+  await assert.rejects(harness.sendMessageWhenReady(41, { type: "PASTE_CONTEXT" }, 1000, "Claude"), /Tab access denied/);
+  assert.equal(harness.operations.sent.length, 1);
+  assert.equal(harness.operations.injected.length, 0);
 });
