@@ -71,15 +71,40 @@ test("Claude JSON capture fails closed without a discovered endpoint or after na
   assert.equal(harness.stats().requests, 1);
 });
 
-test("Claude JSON capture rejects missing parents, cycles and unsupported files or tools", async () => {
+test("Claude JSON capture drops image blocks while preserving surrounding text", async () => {
+  const data = fixture();
+  data.chat_messages[2].content = [
+    { type: "text", text: "Before image" },
+    { type: "image", source: { data: "IMAGE_PAYLOAD_SENTINEL" } },
+    { type: "text", text: "After image" }
+  ];
+  const harness = setup(data);
+  await harness.window.fetch(endpoint);
+  const capture = await harness.window.__capCaptureClaudeJson();
+  assert.equal(capture.messageTurnCount, 2);
+  assert.match(capture.text, /Assistant: Before image\n\nAfter image/);
+  assert.doesNotMatch(capture.text, /IMAGE_PAYLOAD_SENTINEL|Duplicate fallback/);
+
+  // Dropping an image does not relax the existing empty-message check.
+  data.chat_messages[2].content = [{ type: "image" }];
+  const imageOnly = setup(data);
+  await imageOnly.window.fetch(endpoint);
+  await assert.rejects(imageOnly.window.__capCaptureClaudeJson(), /incomplete or unsupported/);
+});
+
+test("Claude JSON capture still rejects incomplete or unsupported content alongside images", async () => {
   for (const mutate of [
     data => { data.chat_messages[2].parent_message_uuid = "missing"; },
     data => { data.chat_messages[0].parent_message_uuid = "answer"; },
     data => { data.chat_messages[2].files = [{ file_name: "document.pdf" }]; },
+    data => { data.chat_messages[2].sync_sources = [{ id: "synced-document" }]; },
+    data => { data.chat_messages[2].content.push({ type: "tool_use", name: "tool" }); },
     data => { data.chat_messages[2].content.push({ type: "tool_result", content: "result" }); },
+    data => { data.chat_messages[2].content.push({ type: "artifact", text: "code" }); },
     data => { data.chat_messages[2].truncated = true; }
   ]) {
     const data = fixture();
+    data.chat_messages[2].content.push({ type: "image" });
     mutate(data);
     const harness = setup(data);
     await harness.window.fetch(endpoint);

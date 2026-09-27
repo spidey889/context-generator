@@ -20,8 +20,9 @@
     const turns = branch.reverse().map(message => {
       if (!["human", "assistant"].includes(message.sender) || message.truncated || message.files?.length || message.sync_sources?.length) throw unsupported();
       const blocks = message.content || [];
-      if (!Array.isArray(blocks) || blocks.some(block => !["text", "thinking"].includes(block.type) || (block.type === "text" && typeof block.text !== "string"))) throw unsupported();
-      // Reasoning is deliberately excluded; text/content are alternatives, not duplicates.
+      if (!Array.isArray(blocks) || blocks.some(block => !["text", "thinking", "image"].includes(block.type) || (block.type === "text" && typeof block.text !== "string"))) throw unsupported();
+      // Images and reasoning are excluded; all other unsupported types still fail closed.
+      // text/content are alternatives, not duplicates.
       let text = blocks.length ? blocks.filter(block => block.type === "text").map(block => block.text).join("\n\n") : message.text;
       if (typeof text !== "string") throw unsupported();
       for (const attachment of message.attachments || []) {
