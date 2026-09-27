@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-09-27-chatgpt-json-v37";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-09-27-speed-toggle-v38";
   let claudeJsonCaptureEnabled = false;
   let chatGptJsonCaptureEnabled = false;
   const INSTANCE_TEARDOWN_KEY = "__contextGeneratorPlatformTeardown";
@@ -4986,15 +4986,19 @@
       toggle.type = "button";
       toggle.id = `context-generator-${currentPlatform.id}-json-toggle`;
       toggle.setAttribute("aria-pressed", "false");
-      toggle.textContent = "JSON capture: Off (experimental)";
-      toggle.style.cssText = "margin:10px 2px 0;padding:6px 9px;border:1px solid rgba(255,255,255,.25);border-radius:7px;background:#211d29 !important;color:#fff !important;font-size:11px;cursor:pointer";
+      toggle.setAttribute("aria-label", "Fast capture");
+      toggle.title = "Fast capture: Off";
+      toggle.textContent = "⚡";
+      toggle.style.cssText = "margin:10px 2px 0;width:36px;height:32px;padding:0;border:1px solid rgba(255,255,255,.25) !important;border-radius:7px;background:#211d29 !important;color:#fff !important;font-size:18px;cursor:pointer";
       addOwnedEventListener(toggle, "click", () => {
         if (isRunning) return;
         let enabled;
         if (currentPlatform.id === "claude") enabled = claudeJsonCaptureEnabled = !claudeJsonCaptureEnabled;
         else enabled = chatGptJsonCaptureEnabled = !chatGptJsonCaptureEnabled;
         toggle.setAttribute("aria-pressed", String(enabled));
-        toggle.textContent = `JSON capture: ${enabled ? "On" : "Off"} (experimental)`;
+        toggle.title = `Fast capture: ${enabled ? "On" : "Off"}`;
+        toggle.style.setProperty("background", enabled ? "#513779" : "#211d29", "important");
+        toggle.style.setProperty("border-color", enabled ? "#bc97ef" : "rgba(255,255,255,.25)", "important");
       });
       sheet.appendChild(toggle);
     }

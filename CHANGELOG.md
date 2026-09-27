@@ -1,5 +1,7 @@
 # Changelog
 
+- 2026-09-27: Replaced Claude and ChatGPT's experimental JSON toggle wording with an icon-only ⚡ fast-capture button, retaining default-off behavior and adding a highlighted enabled state, tooltip, and accessible label.
+
 - 2026-09-27: Added ChatGPT source JSON capture on `codex/chatgpt-json-capture`, branched from the Claude experiment. The default-off picker toggle uses an early MAIN-world fetch hook, in-page auth reuse, a fresh full-tree conversation request, and `current_node` branch traversal. Explicit missing/previous-page/incomplete indicators and broken active branches fail before backend submission. Only own user/assistant text/thinking strings are retained; tools/files/images/artifacts are skipped. Added focused regressions and a nonce-CSP Brave smoke mode for the authenticated full-tree-to-backend-to-paste path.
 
 - 2026-09-27: Replaced Claude JSON's per-type rejection and bash-pair exception with own-turn text extraction: only direct user/assistant `text` and `thinking` blocks are included. Tools of every kind, nested tool text/search snippets, files, attachments, images, artifacts, and sync sources are ignored. Empty turns are skipped; content filtering fails only for a wholly empty transcript. Branch/identity and transport checks remain. Replaced obsolete rejection tests with extraction-boundary and whole-conversation-empty regressions.

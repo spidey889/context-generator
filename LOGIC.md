@@ -117,6 +117,8 @@ Background retries missing receivers every 120 ms and may inject the content scr
 
 ### JSON capture experiments (feature branches only)
 
+Claude and ChatGPT show an icon-only ⚡ button for fast capture in the destination picker. Its pressed state and highlighted background indicate activation; its tooltip and accessible label explain the control. Capture selection remains off by default, and clicking the button alone does not capture or transmit text.
+
 On `codex/claude-json-capture`, Claude's destination picker has a page-local `JSON capture` toggle, off by default. The toolbar and all other platforms continue using DOM capture. With the toggle off, the existing picker DOM preparation/sweep is unchanged.
 
 A Claude-only MAIN-world script at `document_start` wraps `fetch` to remember the conversation endpoint URL, without reading or retaining response bodies. After a destination selection with the toggle on, an isolated-world bridge requests fresh JSON through a same-origin fetch using the browser's existing cookies. The response is cloned, correlated to the request and current chat, and serialized locally into the existing `SUMMARIZE_WITH_BACKEND` transcript contract. Raw JSON and cookies are never sent to the backend. Opening or toggling the picker does not capture or transmit messages.
