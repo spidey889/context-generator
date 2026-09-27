@@ -838,11 +838,7 @@
       const skippedLabel = skipped.length ? `Skipped today\n${skipped.join("\n")}\n\n` : "";
       const routeLabel = route ? `Tried this run\n${route}` : "";
 
-      if (summary.fallback?.used && servedModel) {
-        return `${skippedLabel}${routeLabel || `${formatModelDisplayName(servedModel)} — served`}`;
-      }
-
-      if (tried.length > 1 && servedModel) {
+      if ((summary.fallback?.used || tried.length > 1) && servedModel) {
         return `${skippedLabel}${routeLabel}`;
       }
 
@@ -947,21 +943,17 @@
 
     function getDemoStats() {
       return {
-        version: 1,
         transferId: "demo-7n2",
         status: "completed",
         source: { id: "claude", name: "Claude" },
         destination: { id: "chatgpt", name: "ChatGPT" },
-        startedAt: new Date(Date.now() - 14200).toISOString(),
         completedAt: new Date().toISOString(),
         totalMs: 14200,
         rawScrapedText: "Claude conversation:\n\nUser: Keep this exact captured text.\n\nClaude: It is shown without additional processing.",
         capture: {
-          method: "structured",
           messageTurnCount: 32,
           usefulTurnCount: 32,
           rawCandidateChars: 48210,
-          transcriptChars: 47980,
           cleanedChars: 48142,
           sentChars: 48142,
           capped: false,
@@ -970,39 +962,24 @@
         summary: {
           source: "backend",
           summaryMs: 7630,
-          fetchMs: 7410,
-          parseMs: 18,
           outputChars: 6902,
           requestChars: 48142,
           backendInputChars: 48142,
-          backendTotalMs: 7202,
-          geminiMs: 7074,
           mistralMs: 0,
-          groqMs: 0,
           providerMs: 7074,
-          providerPasses: 1,
           servedBy: "gemini",
           provider: "gemini",
-          primaryModel: "gemini-3.6-flash",
           model: "gemini-3.6-flash",
           modelReason: "gemini-3.6-flash served as the primary model",
           modelsTried: ["gemini-3.6-flash"],
           mistralModelsTried: [],
-          modelInputChars: 48142,
-          modelThresholdChars: null,
-          modelOverride: false,
           profile: "medium",
-          maxTokens: 1900,
-          targetWords: 700,
           summaryWordCount: 462,
-          mistralPasses: 1,
-          expansion: { attempted: false, used: false },
           fallback: { attempted: false, used: false },
           usage: {
             promptTokens: 13240,
             completionTokens: 1180,
             totalTokens: 14420,
-            cachedTokens: 0
           }
         },
         destinationTiming: { totalMs: 2540, pasteMs: 620, tabId: 144 },
