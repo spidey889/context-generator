@@ -237,6 +237,17 @@
       color: #000000;
     }
 
+    .hero .re-explaining {
+      white-space: nowrap;
+      color: #c4a5f5;
+      background: linear-gradient(100deg, #c4a5f5 35%, #e6d8fc 50%, #c4a5f5 65%);
+      background-size: 250% 100%;
+      -webkit-background-clip: text;
+      background-clip: text;
+      -webkit-text-fill-color: transparent;
+      animation: shimmer 10s ease-in-out infinite;
+    }
+
     .hero p {
       max-width: 60rem;
       margin: 0 auto;
@@ -1062,7 +1073,7 @@
   <main id="top">
     <section class="hero section container reveal">
 
-      <h1 style="color: #000000 !important;">Switch AIs without <span style="white-space: nowrap; color: #8B5CF6;">re-explaining</span> everything.</h1>
+      <h1 style="color: #000000 !important;">Switch AIs without <span class="re-explaining">re-explaining</span> everything.</h1>
       <p>Install once in Claude. Type /context-generator. Continue anywhere.</p>
       <div class="hero-actions">
         <a class="button button-dark" id="hero-install-btn" href="SKILL.md" download="SKILL.md">Install in Claude →</a>
