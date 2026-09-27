@@ -19,7 +19,7 @@ Use evidence in this order: the owner's current request and project instructions
 - `extension/manifest.json` currently reports version `1.4.6` and contains both Chromium and Firefox background declarations. The manifest number alone does not prove the Web Store contains the checkout's behavior.
 - Production web/API URL: `https://context-generator-five.vercel.app`. The analysis bridge and canonical site links currently use `https://spidey889.github.io/context-generator`.
 - Release warning verified 2026-09-08: the old `cap-context-extension.zip` is stale relative to `extension/`. It is missing both EBGaramond fonts and contains older `manifest.json` and `platform-content.js` files. The versioned `cap-context-extension-1.4.6.zip` is built from tracked `extension/` files and hash-compared before distribution; the old archive must not be published.
-- `SKILL.md`, `index.legacy-2026-07-15.html`, and its dated demo video are retained reference artifacts by owner request, not production entry points. The legacy page reuses the canonical logos under `extension/logos/`.
+- `index.html` serves the restored older landing page, including its `SKILL.md` download, dated demo video, and canonical logos under `extension/logos/`. `index.legacy-2026-07-15.html` now preserves the replaced newer landing page; its filename is retained for continuity.
 
 ## Non-Negotiable Invariants
 
@@ -45,7 +45,7 @@ Use evidence in this order: the owner's current request and project instructions
 | Telemetry relay/schema | `api/telemetry.js`, `api/telemetry-validation.js` | telemetry handler, `validateTelemetryRequest` | `test/telemetry.test.js` |
 | Protected telemetry persistence and user counters | `supabase/functions/transfer-telemetry/`, `supabase/migrations/` | `validateTelemetryPayload`, `record_transfer_event`, `record_user_summary` | `test/telemetry.test.js` plus migration review |
 | Local Latest Run UI | `extension/analysis-bridge.js`, `analysis/index.html` | `readLastTransferStats`, page `renderStats` | `test/analysis.test.js` |
-| Static public site/privacy | `index.html`, `privacy.html`, `PRIVACY.md` | Static HTML/CSS; no JavaScript/build step | `test/license.test.js` plus manual visual review |
+| Static public site/privacy | `index.html`, `privacy.html`, `PRIVACY.md` | Static HTML/CSS with inline landing-page JavaScript; no build step | `test/license.test.js` plus manual visual review |
 | Browser smoke/live quality | `scripts/`, `evaluation/` | `run-extension-smoke.js`, `run-regression-eval.js` | npm scripts below |
 
 `extension/platform-content.js` is a large shared page-lifecycle script. It owns platform selectors, observers, timers, reservations, capture state, and transfer UI. Add characterization tests before extracting or broadly refactoring it.
