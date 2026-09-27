@@ -239,13 +239,15 @@
 
     .hero .re-explaining {
       white-space: nowrap;
-      color: #c4a5f5;
-      background: linear-gradient(100deg, #c4a5f5 35%, #e6d8fc 50%, #c4a5f5 65%);
-      background-size: 250% 100%;
-      -webkit-background-clip: text;
-      background-clip: text;
-      -webkit-text-fill-color: transparent;
-      animation: shimmer 10s ease-in-out infinite;
+      /* Keep a real text fill: dark-mode extensions can replace clipped gradients. */
+      color: #c4a5f5 !important;
+      -webkit-text-fill-color: #c4a5f5 !important;
+      animation: lavender-shimmer 10s ease-in-out infinite;
+    }
+
+    @keyframes lavender-shimmer {
+      0%, 100% { filter: brightness(1); text-shadow: 0 0 0 transparent; }
+      50% { filter: brightness(1.12); text-shadow: 0 0 14px rgba(196, 165, 245, 0.25); }
     }
 
     .hero p {
