@@ -22,46 +22,24 @@
       // Claude's root parent can be the all-zero UUID rather than null.
       if (id === "00000000-0000-0000-0000-000000000000" || id === "00000000-0000-4000-8000-000000000000") break;
     }
-    const turns = branch.reverse().map((message, index) => {
-      const label = `Message ${index + 1} (${message.sender === "human" ? "User" : message.sender === "assistant" ? "Assistant" : "unknown role"})`;
-      if (!["human", "assistant"].includes(message.sender)) throw unsupported(`${label} has an unsupported sender role.`);
-      if (message.truncated) throw unsupported(`${label} is marked truncated.`);
-      if (message.files?.length && message.files.some(file => file?.file_kind !== "image")) throw unsupported(`${label} has non-image file entries in message.files; only image files can be skipped.`);
-      if (message.sync_sources?.length) throw unsupported(`${label} has synced-source entries in message.sync_sources.`);
-      const blocks = message.content || [];
-      if (!Array.isArray(blocks)) throw unsupported(`${label}'s content is not an array.`);
-      // Only skip an unambiguous bash pair. Unmatched calls/results and other tools
-      // still reach the unsupported-block check with their original block positions.
-      const skippedBashBlocks = new Set();
-      blocks.forEach(block => {
-        if (block.type !== "tool_use" || block.name !== "bash_tool" || typeof block.id !== "string" || !block.id) return;
-        const calls = blocks.filter(candidate => candidate.type === "tool_use" && candidate.id === block.id);
-        const results = blocks.filter(candidate => candidate.type === "tool_result" && candidate.tool_use_id === block.id);
-        if (calls.length === 1 && results.length === 1 && results[0].name === "bash_tool") {
-          skippedBashBlocks.add(block);
-          skippedBashBlocks.add(results[0]);
-        }
+    const turns = branch.reverse().flatMap(message => {
+      if (!["human", "assistant"].includes(message.sender)) return [];
+      const blocks = Array.isArray(message.content) ? message.content : [];
+      // Only direct turn blocks are eligible. Never recurse into tools, artifacts,
+      // attachments, files, or sync sources, even when they contain text blocks.
+      const parts = blocks.flatMap(block => {
+        const value = block?.type === "text" ? block.text
+          : block?.type === "thinking" ? (block.thinking ?? block.text) : null;
+        return typeof value === "string" && value.trim() ? [value.trim()] : [];
       });
-      blocks.forEach((block, blockIndex) => {
-        if (skippedBashBlocks.has(block)) return;
-        if (!["text", "thinking", "image"].includes(block.type)) {
-          const type = typeof block.type === "string" && /^[a-z][a-z0-9_]{0,39}$/i.test(block.type) ? block.type : "unknown";
-          throw unsupported(`${label}, block ${blockIndex + 1}: unsupported content type "${type}".`);
-        }
-        if (block.type === "text" && typeof block.text !== "string") throw unsupported(`${label}, block ${blockIndex + 1}: text is missing or is not a string.`);
-      });
-      // Images, reasoning, and matched bash pairs are excluded; other types fail closed.
-      // text/content are alternatives, not duplicates.
-      let text = blocks.length ? blocks.filter(block => block.type === "text").map(block => block.text).join("\n\n") : message.text;
-      if (typeof text !== "string") throw unsupported(`${label} has no valid text field.`);
-      for (const [attachmentIndex, attachment] of (message.attachments || []).entries()) {
-        if (typeof attachment.extracted_content !== "string" || !attachment.extracted_content.trim()) throw unsupported(`${label}, attachment ${attachmentIndex + 1}: extracted_content is missing or empty.`);
-        text += `\n\n[Attachment: ${attachment.file_name || "pasted content"}]\n${attachment.extracted_content}`;
+      // Legacy turn text is an alternative only when structured content is absent.
+      if (message.content == null || blocks.length === 0) {
+        if (typeof message.text === "string" && message.text.trim()) parts.push(message.text.trim());
       }
-      if (!text.trim()) throw unsupported(`${label} has no usable text after image, thinking, and matched bash_tool blocks are skipped.`);
-      return `${message.sender === "human" ? "User" : "Assistant"}: ${text.trim()}`;
+      if (!parts.length) return [];
+      return [(message.sender === "human" ? "User" : "Assistant") + ": " + parts.join("\n\n")];
     });
-    if (!turns.length) throw unsupported("The active branch contains no messages.");
+    if (!turns.length) throw new Error("Claude JSON capture found no usable user or assistant text after skipping tools, files, images, and artifacts. Turn JSON capture off to use DOM capture.");
     const text = `Claude conversation:\n\n${turns.join("\n\n")}`;
     if (text.length > 350000 || new TextEncoder().encode(text).length > 1400000) {
       throw new Error("Conversation exceeds the supported 350,000 character / 1.4 MB limit.");

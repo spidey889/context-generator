@@ -56,9 +56,9 @@ test("Claude fetch wrapper forwards responses and does not read bodies until req
   assert.equal(harness.stats().requestOptions.credentials, "same-origin");
   assert.equal(harness.stats().listeners, 1);
   assert.equal(capture.messageTurnCount, 2);
-  assert.match(capture.text, /Pasted notes/);
+  assert.doesNotMatch(capture.text, /Pasted notes/);
   assert.match(capture.text, /Selected answer/);
-  assert.doesNotMatch(capture.text, /Wrong branch|Private reasoning|Duplicate fallback/);
+  assert.doesNotMatch(capture.text, /Wrong branch|Duplicate fallback/);
 });
 
 test("Claude JSON capture fails closed without a discovered endpoint or after navigation", async () => {
@@ -71,111 +71,6 @@ test("Claude JSON capture fails closed without a discovered endpoint or after na
   assert.equal(harness.stats().requests, 1);
 });
 
-test("Claude JSON capture drops image blocks while preserving surrounding text", async () => {
-  const data = fixture();
-  data.chat_messages[2].content = [
-    { type: "text", text: "Before image" },
-    { type: "image", source: { data: "IMAGE_PAYLOAD_SENTINEL" } },
-    { type: "text", text: "After image" }
-  ];
-  const harness = setup(data);
-  await harness.window.fetch(endpoint);
-  const capture = await harness.window.__capCaptureClaudeJson();
-  assert.equal(capture.messageTurnCount, 2);
-  assert.match(capture.text, /Assistant: Before image\n\nAfter image/);
-  assert.doesNotMatch(capture.text, /IMAGE_PAYLOAD_SENTINEL|Duplicate fallback/);
-
-  // Dropping an image does not relax the existing empty-message check.
-  data.chat_messages[2].content = [{ type: "image" }];
-  const imageOnly = setup(data);
-  await imageOnly.window.fetch(endpoint);
-  await assert.rejects(imageOnly.window.__capCaptureClaudeJson(), /incomplete or unsupported/);
-});
-
-test("Claude JSON capture skips image file entries but still rejects other file kinds", async () => {
-  const data = fixture();
-  data.chat_messages[0].files = [{ file_kind: "image", file_name: "IMAGE_FILE_SENTINEL.png" }];
-  const harness = setup(data);
-  await harness.window.fetch(endpoint);
-  const capture = await harness.window.__capCaptureClaudeJson();
-  assert.equal(capture.messageTurnCount, 2);
-  assert.match(capture.text, /User: Question/);
-  assert.match(capture.text, /Pasted notes/);
-  assert.match(capture.text, /Assistant: Selected answer/);
-  assert.doesNotMatch(capture.text, /IMAGE_FILE_SENTINEL/);
-
-  for (const file_kind of ["document", "audio", "video", "Image", undefined]) {
-    data.chat_messages[0].files = [
-      { file_kind: "image" },
-      { file_kind, file_name: "OTHER_FILE_SENTINEL" }
-    ];
-    const mixed = setup(data);
-    await mixed.window.fetch(endpoint);
-    await assert.rejects(mixed.window.__capCaptureClaudeJson(), /Message 1 \(User\).*non-image file entries in message\.files/);
-  }
-});
-
-test("Claude JSON capture still rejects incomplete or unsupported content alongside images", async () => {
-  for (const mutate of [
-    data => { data.chat_messages[2].parent_message_uuid = "missing"; },
-    data => { data.chat_messages[0].parent_message_uuid = "answer"; },
-    data => { data.chat_messages[2].files = [{ file_name: "document.pdf" }]; },
-    data => { data.chat_messages[2].sync_sources = [{ id: "synced-document" }]; },
-    data => { data.chat_messages[2].content.push({ type: "tool_use", name: "tool" }); },
-    data => { data.chat_messages[2].content.push({ type: "tool_result", content: "result" }); },
-    data => { data.chat_messages[2].content.push({ type: "artifact", text: "code" }); },
-    data => { data.chat_messages[2].truncated = true; }
-  ]) {
-    const data = fixture();
-    data.chat_messages[2].content.push({ type: "image" });
-    mutate(data);
-    const harness = setup(data);
-    await harness.window.fetch(endpoint);
-    await assert.rejects(harness.window.__capCaptureClaudeJson(), /incomplete or unsupported/);
-  }
-});
-
-test("Claude JSON capture drops only matched bash_tool pairs and preserves text", async () => {
-  const data = fixture();
-  data.chat_messages[2].content = [
-    { type: "text", text: "Before tool" },
-    { type: "tool_use", name: "bash_tool", id: "bash-call", input: { command: "PRIVATE_COMMAND" } },
-    { type: "tool_result", name: "bash_tool", tool_use_id: "bash-call", content: [{ type: "text", text: "PRIVATE_OUTPUT" }] },
-    { type: "text", text: "After tool" }
-  ];
-  const harness = setup(data);
-  await harness.window.fetch(endpoint);
-  const capture = await harness.window.__capCaptureClaudeJson();
-  assert.equal(capture.messageTurnCount, 2);
-  assert.match(capture.text, /Assistant: Before tool\n\nAfter tool/);
-  assert.doesNotMatch(capture.text, /PRIVATE_COMMAND|PRIVATE_OUTPUT|bash_tool/);
-
-  for (const tool of ["web_search", "memory_read", "memory_append", "memory_str_replace"]) {
-    const other = fixture();
-    other.chat_messages[2].content.push(
-      { type: "tool_use", name: tool, id: "other-call" },
-      { type: "tool_result", name: tool, tool_use_id: "other-call" }
-    );
-    const rejected = setup(other);
-    await rejected.window.fetch(endpoint);
-    await assert.rejects(rejected.window.__capCaptureClaudeJson(), /unsupported content type "tool_use"/);
-  }
-  for (const mutate of [
-    blocks => { blocks.splice(2, 1); },
-    blocks => { blocks.splice(1, 1); },
-    blocks => { blocks[2].tool_use_id = "different-call"; },
-    blocks => { blocks[2].name = "web_search"; },
-    blocks => { blocks.push({ ...blocks[1] }); },
-    blocks => { blocks.push({ ...blocks[2] }); }
-  ]) {
-    const invalid = JSON.parse(JSON.stringify(data));
-    mutate(invalid.chat_messages[2].content);
-    const rejected = setup(invalid);
-    await rejected.window.fetch(endpoint);
-    await assert.rejects(rejected.window.__capCaptureClaudeJson(), /unsupported content type "tool_(use|result)"/);
-  }
-});
-
 test("Claude JSON capture accepts Claude's actual root-parent marker", async () => {
   const data = fixture();
   data.chat_messages[0].parent_message_uuid = "00000000-0000-4000-8000-000000000000";
@@ -184,33 +79,75 @@ test("Claude JSON capture accepts Claude's actual root-parent marker", async () 
   const capture = await harness.window.__capCaptureClaudeJson();
   assert.equal(capture.messageTurnCount, 2);
   assert.match(capture.text, /User: Question/);
-  assert.match(capture.text, /Assistant: Selected answer/);
+  assert.match(capture.text, /Assistant: Private reasoning\n\nSelected answer/);
 });
 
-test("Claude JSON capture reports the blocking field or block without exposing content", async () => {
-  const cases = [
-    [data => { data.chat_messages[2].files = [{ file_name: "PRIVATE_SENTINEL" }]; }, /Message 2 \(Assistant\).*message\.files/],
-    [data => { data.chat_messages[2].sync_sources = [{ text: "PRIVATE_SENTINEL" }]; }, /Message 2 \(Assistant\).*message\.sync_sources/],
-    [data => { data.chat_messages[2].content.push({ type: "tool_use", input: "PRIVATE_SENTINEL" }); }, /Message 2 \(Assistant\), block 3.*"tool_use"/],
-    [data => { data.chat_messages[2].content.push({ type: "tool_result", content: "PRIVATE_SENTINEL" }); }, /block 3.*"tool_result"/],
-    [data => { data.chat_messages[2].content.push({ type: "artifact", text: "PRIVATE_SENTINEL" }); }, /block 3.*"artifact"/],
-    [data => { data.chat_messages[2].content.push({ type: "PRIVATE_SENTINEL<script>" }); }, /unsupported content type "unknown"/],
-    [data => { data.chat_messages[2].truncated = true; }, /Message 2 \(Assistant\) is marked truncated/],
-    [data => { data.chat_messages[0].attachments[0].extracted_content = ""; }, /Message 1 \(User\), attachment 1.*extracted_content/],
-    [data => { data.chat_messages[2].content = [{ type: "image", source: "PRIVATE_SENTINEL" }]; }, /Message 2 \(Assistant\) has no usable text/],
-    [data => { data.chat_messages[0].parent_message_uuid = "missing"; }, /parent message is missing/],
-    [data => { data.chat_messages[0].parent_message_uuid = "answer"; }, /parent links form a cycle/]
+test("Claude JSON capture extracts only direct user/assistant text and thinking", async () => {
+  const data = fixture();
+  data.chat_messages[0].files = [{ file_kind: "document", text: "FILE_SENTINEL" }];
+  data.chat_messages[0].attachments = [{ extracted_content: "ATTACHMENT_SENTINEL" }];
+  data.chat_messages[0].sync_sources = [{ text: "SYNC_SENTINEL" }];
+  data.chat_messages[2].content = [
+    { type: "text", text: "Own answer" },
+    { type: "thinking", thinking: "Own reasoning" },
+    { type: "image", text: "IMAGE_SENTINEL" },
+    { type: "artifact", content: [{ type: "text", text: "ARTIFACT_SENTINEL" }] },
+    { type: "tool_use", name: "web_search", input: { text: "TOOL_INPUT_SENTINEL" } },
+    { type: "tool_result", name: "web_search", text: "TOOL_TEXT_SENTINEL", content: [
+      { type: "text", text: "SEARCH_SNIPPET_SENTINEL" },
+      { type: "thinking", thinking: "TOOL_THINKING_SENTINEL" }
+    ] }
   ];
-  for (const [mutate, reason] of cases) {
+  const harness = setup(data);
+  await harness.window.fetch(endpoint);
+  const capture = await harness.window.__capCaptureClaudeJson();
+  assert.equal(capture.text, "Claude conversation:\n\nUser: Question\n\nAssistant: Own answer\n\nOwn reasoning");
+  assert.equal(capture.messageTurnCount, 2);
+  assert.doesNotMatch(capture.text, /SENTINEL|Duplicate fallback/);
+});
+
+test("Claude JSON capture skips all tools including unmatched calls and empty turns", async () => {
+  for (const tool of ["bash_tool", "web_search", "memory_read", "memory_append", "memory_str_replace"]) {
     const data = fixture();
-    mutate(data);
+    data.chat_messages[0].content = [{ type: "image" }];
+    data.chat_messages[2].content = [
+      { type: "tool_use", name: tool, input: { text: "NESTED_SENTINEL" } },
+      { type: "tool_result", name: tool, content: [{ type: "text", text: "NESTED_SENTINEL" }] },
+      { type: "text", text: "Usable answer" }
+    ];
     const harness = setup(data);
     await harness.window.fetch(endpoint);
-    await assert.rejects(harness.window.__capCaptureClaudeJson(), error => {
-      assert.match(error.message, reason);
-      assert.doesNotMatch(error.message, /PRIVATE_SENTINEL|Selected answer|Question|notes\.txt/);
-      return true;
-    });
+    const capture = await harness.window.__capCaptureClaudeJson();
+    assert.equal(capture.text, "Claude conversation:\n\nAssistant: Usable answer");
+    assert.equal(capture.messageTurnCount, 1);
+  }
+});
+
+test("Claude JSON capture rejects zero usable text even when tools contain nested text", async () => {
+  const data = fixture();
+  data.chat_messages[0].content = [{ type: "image" }];
+  data.chat_messages[2].content = [{ type: "tool_result", content: [{ type: "text", text: "NESTED_SENTINEL" }] }];
+  const harness = setup(data);
+  await harness.window.fetch(endpoint);
+  await assert.rejects(harness.window.__capCaptureClaudeJson(), /no usable user or assistant text/);
+});
+
+test("Claude JSON capture keeps own thinking but ignores other roles and fallback duplicates", async () => {
+  const data = fixture();
+  data.chat_messages[0].sender = "tool";
+  data.chat_messages[2].content = [{ type: "thinking", text: "Own thought" }];
+  const harness = setup(data);
+  await harness.window.fetch(endpoint);
+  assert.equal((await harness.window.__capCaptureClaudeJson()).text, "Claude conversation:\n\nAssistant: Own thought");
+});
+
+test("Claude JSON capture still rejects missing parents and cyclic branches", async () => {
+  for (const parent of ["missing", "answer"]) {
+    const data = fixture();
+    data.chat_messages[0].parent_message_uuid = parent;
+    const harness = setup(data);
+    await harness.window.fetch(endpoint);
+    await assert.rejects(harness.window.__capCaptureClaudeJson(), /parent message is missing|parent links form a cycle/);
   }
 });
 

@@ -1,5 +1,7 @@
 # Changelog
 
+- 2026-09-27: Replaced Claude JSON's per-type rejection and bash-pair exception with own-turn text extraction: only direct user/assistant `text` and `thinking` blocks are included. Tools of every kind, nested tool text/search snippets, files, attachments, images, artifacts, and sync sources are ignored. Empty turns are skipped; content filtering fails only for a wholly empty transcript. Branch/identity and transport checks remain. Replaced obsolete rejection tests with extraction-boundary and whole-conversation-empty regressions.
+
 - 2026-09-27: Added a narrow Claude JSON exception for uniquely matched `bash_tool` call/result pairs within a message, preserving surrounding text and dropping command/output payloads. Other tools and unmatched/ambiguous bash pairs still fail. Added regressions for bash pairing and continued web-search/memory rejection; updated architecture notes to reflect the previously added image-file exception.
 
 - 2026-09-27: Made Claude JSON validation failures identify the first blocking field or content type and its active-branch message/block position, without including message text, filenames, or tool payloads. Capture acceptance rules remain unchanged. Documented the previously added support for Claude's actual root-parent marker.
