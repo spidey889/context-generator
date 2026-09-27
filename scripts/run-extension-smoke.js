@@ -3,6 +3,7 @@ const fs = require("node:fs");
 const http = require("node:http");
 const os = require("node:os");
 const path = require("node:path");
+const vm = require("node:vm");
 const { spawn } = require("node:child_process");
 
 const REPO_ROOT = path.resolve(__dirname, "..");
@@ -38,13 +39,17 @@ class CdpSession {
         return;
       }
       if (!this.pending.has(message.id)) return;
-      const { resolve, reject } = this.pending.get(message.id);
+      const { resolve, reject, timeout } = this.pending.get(message.id);
+      clearTimeout(timeout);
       this.pending.delete(message.id);
       if (message.error) reject(new Error(message.error.message || JSON.stringify(message.error)));
       else resolve(message.result || {});
     });
     socket.addEventListener("close", () => {
-      for (const { reject } of this.pending.values()) reject(new Error("DevTools connection closed."));
+      for (const { reject, timeout } of this.pending.values()) {
+        clearTimeout(timeout);
+        reject(new Error("DevTools connection closed."));
+      }
       this.pending.clear();
     });
   }
@@ -58,15 +63,28 @@ class CdpSession {
     return new CdpSession(socket);
   }
 
-  call(method, params = {}) {
+  call(method, params = {}, timeoutMs = SMOKE_TIMEOUT_MS) {
     const id = ++this.sequence;
     return new Promise((resolve, reject) => {
-      this.pending.set(id, { resolve, reject });
-      this.socket.send(JSON.stringify({ id, method, params }));
+      // Polling deadlines cannot help when a DevTools command itself never responds.
+      const timeout = setTimeout(() => {
+        this.pending.delete(id);
+        reject(new Error(`DevTools command timed out: ${method}`));
+      }, timeoutMs);
+      this.pending.set(id, { resolve, reject, timeout });
+      try {
+        this.socket.send(JSON.stringify({ id, method, params }));
+      } catch (error) {
+        clearTimeout(timeout);
+        this.pending.delete(id);
+        reject(error);
+      }
     });
   }
 
   async evaluate(expression, contextId = null) {
+    // Compile without executing: fail locally on malformed generated JavaScript.
+    new vm.Script(expression);
     const params = {
       expression,
       awaitPromise: true,
@@ -535,7 +553,7 @@ async function run() {
     assert.match(claudePlacement.sendTranslate, /^-52px(?: 0px)?$/);
     process.stdout.write("✓ Claude's bubble stays centered and its Voice-to-Send swap remains clear of Send.\n");
 
-    const clickResult = await sourceSession.evaluate(`(() => {
+    const clickResult = await sourceSession.evaluate(String.raw`(() => {
       const bubble = document.getElementById("context-generator-bubble");
       bubble.click();
       const sheet = document.getElementById("context-generator-destination-sheet");
@@ -660,7 +678,11 @@ async function run() {
   }
 }
 
-run().catch((error) => {
-  console.error(error.stack || error);
-  process.exitCode = 1;
-});
+if (require.main === module) {
+  run().catch((error) => {
+    console.error(error.stack || error);
+    process.exitCode = 1;
+  });
+}
+
+module.exports = { CdpSession };

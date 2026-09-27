@@ -304,7 +304,7 @@ Latest Claude verification on 2026-09-09: 26 Claude-focused tests passed, includ
 
 - `npm test`: deterministic suite excluding the named slow release capture.
 - `npm run test:slow`: paced 78-turn Claude capture regression.
-- `npm run test:extension-smoke`: isolated Brave profile, unpacked extension, controlled ChatGPT-source/Claude-destination fixtures, stub backend, and Claude placement bounds. The injected bubble and full transfer prove content-script/background startup without requiring an ephemeral service-worker DevTools target. Use a new window/profile, never the owner's main browser.
+- `npm run test:extension-smoke`: isolated Brave profile, unpacked extension, controlled ChatGPT-source/Claude-destination fixtures, stub backend, and Claude placement bounds. The injected bubble and full transfer prove content-script/background startup without requiring an ephemeral service-worker DevTools target. The runner compiles injected expressions locally and bounds individual DevTools commands by the configured smoke timeout. `test/extension-smoke.test.js` verifies escaping and command cleanup without opening Brave. Use a new window/profile, never the owner's main browser.
 - `npm run eval`: live production-endpoint quality/latency evaluation with one retry for a failed quality case or transient request/provider error; two failures still block the gate.
 - `npm run gate`: fast tests, slow capture, live evaluation; it does not include Brave smoke.
 
