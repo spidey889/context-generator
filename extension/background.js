@@ -415,6 +415,14 @@ chrome.action.onClicked.addListener(async (tab) => {
 });
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  if (message?.type === "ENSURE_CLAUDE_JSON_HOOK") {
+    if (!sender?.tab?.id || getPlatformFromUrl(sender.tab.url) !== "claude" || sender.frameId !== 0) {
+      sendResponse({ ok: false }); return false;
+    }
+    ensureClaudeJsonHook(sender.tab.id).then(ok => sendResponse({ ok }));
+    return true;
+  }
+
   if (["CLAIM_INSTALL_NOTICE", "RECORD_INSTALL_NOTICE"].includes(message?.type)) {
     if (!sender?.tab?.url || !getPlatformFromUrl(sender.tab.url)) {
       sendResponse({ ok: false }); return false;
@@ -956,13 +964,26 @@ async function ensureContentScript(tabId, file) {
   }
 }
 
+async function ensureClaudeJsonHook(tabId) {
+  try {
+    await chrome.scripting.executeScript({ target: { tabId }, world: "MAIN", files: ["claude-fetch-main.js"] });
+    return true;
+  } catch { return false; }
+}
+
 async function injectIntoOpenSupportedTabs() {
   try {
     const tabs = await chrome.tabs.query({});
     await Promise.all(
       tabs
         .filter((tab) => tab.id && getPlatformFromUrl(tab.url))
-        .map((tab) => ensureContentScript(tab.id, PLATFORM_CONTENT_SCRIPT))
+        .map(async (tab) => {
+          if (getPlatformFromUrl(tab.url) === "claude") {
+            await ensureClaudeJsonHook(tab.id);
+            await ensureContentScript(tab.id, "claude-json-capture.js");
+          }
+          return ensureContentScript(tab.id, PLATFORM_CONTENT_SCRIPT);
+        })
     );
   } catch (error) {
     console.debug("[Context Generator Relay] Startup content script injection skipped:", error?.message || error);

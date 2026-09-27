@@ -1,5 +1,5 @@
 (() => {
-  const channel = "cap-context-claude-json-v1";
+  const channel = "cap-context-claude-json-v2";
   function serialize(data, chat) {
     // Report structural metadata only, never message text, file names, or tool payloads.
     const unsupported = reason => new Error(`This conversation has incomplete or unsupported JSON content: ${reason} Turn JSON capture off to use DOM capture.`);
@@ -94,23 +94,37 @@
     return { text, messageTurnCount: turns.length };
   }
 
-  window.__capCaptureClaudeJson = () => new Promise((resolve, reject) => {
-    const chat = location.pathname.match(/^\/chat\/([^/]+)$/)?.[1];
-    if (!chat) return reject(new Error("Open a saved Claude conversation to use JSON capture."));
-    const id = crypto.randomUUID();
-    const cleanup = () => { clearTimeout(timer); window.removeEventListener("message", receive); };
-    const receive = event => {
-      const reply = event.data;
-      if (event.source !== window || event.origin !== location.origin || reply?.channel !== channel || reply.type !== "response" || reply.id !== id) return;
-      cleanup();
+  window.__capCaptureClaudeJson = async () => {
+    // Reinstall MAIN before requesting: a worker/extension reload or another page
+    // wrapper must not leave a live isolated bridge talking to a missing hook.
+    if (typeof chrome !== "undefined" && chrome.runtime?.sendMessage) {
+      let readinessTimer;
       try {
-        if (location.pathname !== `/chat/${chat}` || reply.chat !== chat) throw new Error("The Claude conversation changed during capture.");
-        if (reply.error) throw new Error("Claude JSON capture failed. Refresh this conversation or turn JSON capture off.");
-        resolve(serialize(reply.data, chat));
-      } catch (error) { reject(error); }
-    };
-    const timer = setTimeout(() => { cleanup(); reject(new Error("Claude JSON capture timed out. Refresh or turn JSON capture off.")); }, 17000);
-    window.addEventListener("message", receive);
-    window.postMessage({ channel, type: "request", id, chat }, location.origin);
-  });
+        const ready = await Promise.race([
+          chrome.runtime.sendMessage({ type: "ENSURE_CLAUDE_JSON_HOOK" }),
+          new Promise((_, reject) => { readinessTimer = setTimeout(() => reject(new Error("Claude JSON hook installation timed out. Refresh or turn JSON capture off.")), 3000); })
+        ]);
+        if (!ready?.ok) throw new Error("Claude JSON hook could not be installed. Refresh or turn JSON capture off.");
+      } finally { clearTimeout(readinessTimer); }
+    }
+    return new Promise((resolve, reject) => {
+      const chat = location.pathname.match(/^\/chat\/([^/]+)$/)?.[1];
+      if (!chat) return reject(new Error("Open a saved Claude conversation to use JSON capture."));
+      const id = crypto.randomUUID();
+      const cleanup = () => { clearTimeout(timer); window.removeEventListener("message", receive); };
+      const receive = event => {
+        const reply = event.data;
+        if (event.source !== window || event.origin !== location.origin || reply?.channel !== channel || reply.type !== "response" || reply.id !== id) return;
+        cleanup();
+        try {
+          if (location.pathname !== `/chat/${chat}` || reply.chat !== chat) throw new Error("The Claude conversation changed during capture.");
+          if (reply.error) throw new Error("Claude JSON capture failed. Refresh this conversation or turn JSON capture off.");
+          resolve(serialize(reply.data, chat));
+        } catch (error) { reject(error); }
+      };
+      const timer = setTimeout(() => { cleanup(); reject(new Error("Claude JSON capture timed out. Refresh or turn JSON capture off.")); }, 17000);
+      window.addEventListener("message", receive);
+      window.postMessage({ channel, type: "request", id, chat }, location.origin);
+    });
+  };
 })();

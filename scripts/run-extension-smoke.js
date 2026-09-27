@@ -27,6 +27,7 @@ const CLAUDE_PLACEMENT_SCREENSHOT_PATH = process.env.CAP_CONTEXT_CLAUDE_PLACEMEN
 const PICKER_SCREENSHOT_PATH = process.env.CAP_CONTEXT_PICKER_SCREENSHOT || "";
 const JSON_SOURCE = process.env.CAP_CONTEXT_JSON_SMOKE === "chatgpt" ? "chatgpt" : process.env.CAP_CONTEXT_JSON_SMOKE === "1" ? "claude" : null;
 const JSON_CAPTURE_SMOKE = Boolean(JSON_SOURCE);
+const CLAUDE_RELOAD_SMOKE = JSON_SOURCE === "claude" && process.env.CAP_CONTEXT_CLAUDE_RELOAD_SMOKE === "1";
 const CLAUDE_PARTIAL_SMOKE = JSON_SOURCE === "claude" && process.env.CAP_CONTEXT_CLAUDE_PARTIAL_SMOKE === "1";
 
 class CdpSession {
@@ -198,6 +199,13 @@ async function createSmokeExtension(tempRoot, origin) {
       `${platformId} background destination URL`
     );
   }
+  backgroundSource = replaceOnce(backgroundSource,
+    "    const hostname = new URL(url).hostname;",
+    `    const fixtureUrl = new URL(url);
+    const fixturePlatform = fixtureUrl.searchParams.get(${JSON.stringify(SMOKE_PLATFORM_QUERY)});
+    if (fixtureUrl.origin === ${JSON.stringify(origin)} && Object.hasOwn(DESTINATIONS, fixturePlatform)) return fixturePlatform;
+    const hostname = fixtureUrl.hostname;`,
+    "the background fixture platform resolver");
   await fs.promises.writeFile(backgroundPath, backgroundSource);
   return extensionRoot;
 }
@@ -458,10 +466,10 @@ async function run() {
     const sourceUrl = `${origin}${sourcePath}?${SMOKE_PLATFORM_QUERY}=${JSON_SOURCE || "chatgpt"}`;
     braveProcess = spawn(braveExecutable, [
       `--user-data-dir=${profileRoot}`,
-      `--disable-extensions-except=${extensionRoot}`,
-      `--load-extension=${extensionRoot}`,
+      ...(CLAUDE_RELOAD_SMOKE ? [] : [`--disable-extensions-except=${extensionRoot}`, `--load-extension=${extensionRoot}`]),
       "--remote-debugging-port=0",
       "--remote-allow-origins=*",
+      ...(CLAUDE_RELOAD_SMOKE ? ["--enable-unsafe-extension-debugging"] : []),
       "--no-first-run",
       "--no-default-browser-check",
       "--disable-default-apps",
@@ -475,6 +483,7 @@ async function run() {
 
     const devToolsPort = await readDevToolsPort(profileRoot);
     browserSession = await CdpSession.connect(await getBrowserWebSocketUrl(devToolsPort));
+    if (CLAUDE_RELOAD_SMOKE) await browserSession.call("Extensions.loadUnpacked", { path: extensionRoot });
     // MV3 workers may suspend before DevTools enumerates them. The injected
     // bubble and full transfer below prove both content and worker startup.
     const sourceTarget = await waitFor(async () => {
@@ -592,6 +601,22 @@ async function run() {
     assert.match(claudePlacement.sendTranslate, /^-52px(?: 0px)?$/);
     process.stdout.write("✓ Claude's bubble stays centered and its Voice-to-Send swap remains clear of Send.\n");
 
+    if (CLAUDE_RELOAD_SMOKE) {
+      const before = state.jsonRequests;
+      await sourceSession.evaluate(`window.__capSmokeOldBubble = document.getElementById("context-generator-bubble"); true`);
+      const worker = await waitFor(async () => (await getTargets(devToolsPort)).find(target => target.type === "service_worker" && target.url.startsWith("chrome-extension://")), "the extension worker");
+      const extensionId = new URL(worker.url).hostname;
+      // Unload/reload through CDP in the disposable profile. runtime.reload()
+      // alone disables command-line-loaded unpacked extensions in Brave.
+      await browserSession.call("Extensions.uninstall", { id: extensionId });
+      await waitFor(async () => !(await getTargets(devToolsPort)).some(target => target.id === worker.id), "the old extension worker stopping");
+      await browserSession.call("Extensions.loadUnpacked", { path: extensionRoot });
+      await waitFor(async () => (await getTargets(devToolsPort)).some(target => target.type === "service_worker" && target.id !== worker.id && target.url.startsWith(`chrome-extension://${extensionId}/`)), "the reloaded extension worker");
+      await waitFor(() => sourceSession.evaluate(`Boolean(document.getElementById("context-generator-bubble") && document.getElementById("context-generator-bubble") !== window.__capSmokeOldBubble)`), "a fresh bubble after extension reload");
+      assert.equal(state.jsonRequests, before, "Extension reload must not capture conversation bodies.");
+      // No page refresh or native API read: recover routing from resource history.
+      process.stdout.write("Reloaded the extension on an open Claude fixture without refreshing or fetching messages.\n");
+    }
     if (JSON_CAPTURE_SMOKE) {
       const before = state.jsonRequests;
       await sourceSession.evaluate(`document.getElementById("context-generator-bubble").click()`);

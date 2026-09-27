@@ -7,7 +7,7 @@ const vm = require("node:vm");
 const source = fs.readFileSync(path.join(__dirname, "..", "extension", "background.js"), "utf8");
 const manifest = JSON.parse(fs.readFileSync(path.join(__dirname, "..", "extension", "manifest.json"), "utf8"));
 
-function loadBackgroundForSummaryTest(fetchImpl) {
+function loadBackgroundForSummaryTest(fetchImpl, { tabs = [], injections = [], injectionError = false, onMessage = () => {} } = {}) {
   let messageListener = null;
   const event = { addListener: () => {} };
   const sandbox = {
@@ -35,10 +35,11 @@ function loadBackgroundForSummaryTest(fetchImpl) {
         onMessage: {
           addListener(listener) {
             messageListener = listener;
+            onMessage(listener);
           }
         }
       },
-      scripting: { executeScript: async () => {} },
+      scripting: { executeScript: async args => { injections.push(args); if (injectionError) throw new Error("not available"); } },
       storage: {
         local: {
           get: async () => ({}),
@@ -48,7 +49,7 @@ function loadBackgroundForSummaryTest(fetchImpl) {
       },
       tabs: {
         create: async () => ({}),
-        query: async () => [],
+        query: async () => tabs,
         sendMessage: async () => ({}),
         update: async () => ({})
       },
@@ -389,4 +390,40 @@ test("summary cache preserves original result metadata and labels cache hits", a
   assert.equal(cached.timing.originalSource, "backend");
   assert.equal(cached.timing.originalSummaryMs, fresh.timing.summaryMs);
   assert.deepEqual(JSON.parse(JSON.stringify(cached.timing.backend)), backendTiming);
+});
+
+
+test("Claude JSON scripts reinstall in MAIN then isolated on open Claude tabs only", async () => {
+  const injections = [];
+  loadBackgroundForSummaryTest(async () => {}, { injections, tabs: [
+    { id: 1, url: "https://claude.ai/chat/a" },
+    { id: 2, url: "https://chatgpt.com/c/b" }
+  ] });
+  await new Promise(resolve => setTimeout(resolve, 0));
+  const claude = injections.filter(item => item.target.tabId === 1);
+  assert.deepEqual(claude.map(item => [...item.files]), [["claude-fetch-main.js"], ["claude-json-capture.js"], ["platform-content.js"]]);
+  assert.equal(claude[0].world, "MAIN");
+  assert.deepEqual(injections.filter(item => item.target.tabId === 2).map(item => [...item.files]), [["platform-content.js"]]);
+});
+
+test("Claude on-demand MAIN installation accepts only a Claude top-frame sender", async () => {
+  let listener;
+  const injections = [];
+  loadBackgroundForSummaryTest(async () => {}, { injections, onMessage: value => { listener = value; } });
+  const request = sender => new Promise(resolve => listener({ type: "ENSURE_CLAUDE_JSON_HOOK" }, sender, resolve));
+  for (const sender of [{}, { tab: { id: 1, url: "https://chatgpt.com/c/a" }, frameId: 0 }, { tab: { id: 1, url: "https://claude.ai/chat/a" }, frameId: 2 }]) {
+    assert.equal((await request(sender)).ok, false);
+  }
+  assert.equal(injections.length, 0);
+  assert.equal((await request({ tab: { id: 1, url: "https://claude.ai/chat/a" }, frameId: 0 })).ok, true);
+  assert.equal(injections.length, 1);
+  assert.equal(injections[0].world, "MAIN");
+  assert.deepEqual([...injections[0].files], ["claude-fetch-main.js"]);
+});
+
+test("Claude MAIN installation failures are returned without affecting default startup injection", async () => {
+  let listener;
+  loadBackgroundForSummaryTest(async () => {}, { injectionError: true, onMessage: value => { listener = value; } });
+  const reply = await new Promise(resolve => listener({ type: "ENSURE_CLAUDE_JSON_HOOK" }, { tab: { id: 1, url: "https://claude.ai/chat/a" }, frameId: 0 }, resolve));
+  assert.equal(reply.ok, false);
 });

@@ -17,34 +17,42 @@ function fixture() {
     ]
   };
 }
-function setup(data = fixture(), { status = 200, headers = {}, body } = {}) {
+function setup(data = fixture(), { status = 200, headers = {}, body, resources = [], fetchImpl, runtime } = {}) {
   const listeners = new Set();
+  const navigationListeners = new Set();
+  const popListeners = new Set();
   let requests = 0;
   let clones = 0;
   let requestOptions;
   let requestUrl;
   const location = { origin: "https://claude.ai", href: `https://claude.ai/chat/${chat}`, pathname: `/chat/${chat}` };
   const window = {
+    performance: { getEntriesByType: () => resources.map(name => ({ name })) },
+    navigation: { addEventListener: (_type, fn) => navigationListeners.add(fn), removeEventListener: (_type, fn) => navigationListeners.delete(fn) },
     fetch: async (url, options) => {
       requests++;
       requestUrl = url instanceof Request ? url.url : url;
       requestOptions = options;
+      if (fetchImpl) return fetchImpl(url, options);
       const response = new Response(body ?? JSON.stringify(data), { status, headers: { "content-type": "application/json", ...headers } });
       const clone = response.clone.bind(response);
       response.clone = () => { clones++; return clone(); };
       return response;
     },
-    addEventListener: (_type, listener) => listeners.add(listener),
-    removeEventListener: (_type, listener) => listeners.delete(listener),
+    addEventListener: (type, listener) => (type === "message" ? listeners : popListeners).add(listener),
+    removeEventListener: (type, listener) => (type === "message" ? listeners : popListeners).delete(listener),
     postMessage: payload => queueMicrotask(() => {
       for (const listener of [...listeners]) listener({ source: window, origin: location.origin, data: payload });
     })
   };
-  const context = vm.createContext({ window, location, URL, Request, TextEncoder, AbortController, crypto: webcrypto, setTimeout, clearTimeout });
+  const context = vm.createContext({ window, location, chrome: runtime ? { runtime } : undefined, URL, Request, TextEncoder, AbortController, crypto: webcrypto, setTimeout, clearTimeout });
   for (const file of ["claude-fetch-main.js", "claude-json-capture.js"]) {
     vm.runInContext(fs.readFileSync(path.join(__dirname, "..", "extension", file), "utf8"), context);
   }
-  return { window, location, stats: () => ({ requests, clones, requestUrl, requestOptions, listeners: listeners.size }) };
+  return { window, location,
+    reinstall: (file = "claude-fetch-main.js") => vm.runInContext(fs.readFileSync(path.join(__dirname, "..", "extension", file), "utf8"), context),
+    navigate: pathname => { for (const fn of navigationListeners) fn({ destination: { url: location.origin + pathname } }); location.pathname = pathname; },
+    stats: () => ({ requests, clones, requestUrl, requestOptions, listeners: listeners.size }) };
 }
 
 // Shape observed on a live Claude "Pasted text, pasted, 441 lines" card.
@@ -377,5 +385,94 @@ test("Claude JSON capture requires a real root and rejects malformed completenes
     const harness = setup(data);
     await harness.window.fetch(endpoint);
     await assert.rejects(harness.window.__capCaptureClaudeJson(), /incomplete or unsupported JSON/);
+  }
+});
+
+
+test("Claude late installation recovers an exact-chat endpoint without fetching bodies early", async () => {
+  const harness = setup(fixture(), { resources: [endpoint, endpoint.replace(chat, "prefetched-chat")] });
+  assert.equal(harness.stats().requests, 0);
+  assert.equal(harness.stats().clones, 0);
+  await harness.window.__capCaptureClaudeJson();
+  assert.equal(new URL(harness.stats().requestUrl).pathname.split("/").pop(), chat);
+  assert.equal(harness.stats().requests, 1);
+});
+
+test("Claude sidebar navigation and other-chat prefetches cannot overwrite current routing", async () => {
+  const harness = setup();
+  await harness.window.fetch(endpoint.replace(chat, "other-chat"));
+  harness.location.pathname = "/chat/other-chat";
+  await harness.window.fetch(endpoint);
+  harness.location.pathname = `/chat/${chat}`;
+  await harness.window.fetch(endpoint.replace(chat, "other-chat"));
+  await harness.window.__capCaptureClaudeJson();
+  assert.equal(new URL(harness.stats().requestUrl).pathname.split("/").pop(), chat);
+});
+
+test("Claude waits for a late initial request but never invents a different-chat endpoint", async () => {
+  const harness = setup();
+  const capture = harness.window.__capCaptureClaudeJson();
+  await new Promise(resolve => setTimeout(resolve, 60));
+  await harness.window.fetch(endpoint);
+  assert.match((await capture).text, /Selected answer/);
+});
+
+test("Claude repeated hook and bridge injections do not stack listeners or wrappers", async () => {
+  const harness = setup(fixture(), { resources: [endpoint] });
+  const wrapped = harness.window.fetch;
+  for (let n = 0; n < 3; n++) { harness.reinstall(); harness.reinstall("claude-json-capture.js"); }
+  assert.equal(harness.window.fetch, wrapped);
+  assert.equal(harness.stats().listeners, 1);
+  await harness.window.__capCaptureClaudeJson();
+  assert.equal(harness.stats().requests, 1);
+});
+
+test("Claude repairs a replaced wrapper while preserving the page's newer fetch layer", async () => {
+  const harness = setup(fixture(), { resources: [endpoint] });
+  const previous = harness.window.fetch;
+  let pageCalls = 0;
+  harness.window.fetch = (...args) => { pageCalls++; return previous(...args); };
+  harness.reinstall();
+  await harness.window.__capCaptureClaudeJson();
+  assert.equal(pageCalls, 1);
+  assert.equal(harness.stats().listeners, 1);
+});
+
+test("Claude aborts navigation away and back, and rejects concurrent captures promptly", async () => {
+  let finish;
+  const harness = setup(fixture(), { resources: [endpoint], fetchImpl: () => new Promise(resolve => { finish = resolve; }) });
+  const first = harness.window.__capCaptureClaudeJson();
+  const rejected = assert.rejects(first, /failed/);
+  await new Promise(resolve => setTimeout(resolve, 0));
+  await assert.rejects(harness.window.__capCaptureClaudeJson(), /failed/);
+  harness.navigate("/chat/other-chat");
+  harness.navigate(`/chat/${chat}`);
+  finish(new Response(JSON.stringify(fixture()), { headers: { "content-type": "application/json" } }));
+  await rejected;
+  assert.equal(harness.stats().listeners, 1);
+});
+
+test("Claude isolated bridge awaits MAIN reinstallation before requesting capture", async () => {
+  let harness;
+  let ensures = 0;
+  harness = setup(fixture(), { resources: [endpoint], runtime: { sendMessage: async message => {
+    assert.equal(message.type, "ENSURE_CLAUDE_JSON_HOOK");
+    ensures++; harness.window.__capClaudeFetchState.dispose();
+    delete harness.window.__capClaudeFetchState;
+    harness.reinstall();
+    return { ok: true };
+  } } });
+  await harness.window.__capCaptureClaudeJson();
+  assert.equal(ensures, 1);
+  assert.equal(harness.stats().requests, 1);
+});
+
+
+test("Claude refuses capture when MAIN readiness fails or never replies", async () => {
+  for (const sendMessage of [async () => ({ ok: false }), () => new Promise(() => {})]) {
+    const harness = setup(fixture(), { resources: [endpoint], runtime: { sendMessage } });
+    await assert.rejects(harness.window.__capCaptureClaudeJson(), /hook.*(installed|timed out)/);
+    assert.equal(harness.stats().requests, 0);
+    assert.equal(harness.stats().listeners, 1);
   }
 });

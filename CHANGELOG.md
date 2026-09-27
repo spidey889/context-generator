@@ -1,5 +1,7 @@
 # Changelog
 
+- 2026-09-27: Hardened Claude JSON hook lifecycle: reinstall MAIN/bridge scripts on existing Claude tabs, ensure MAIN readiness before explicit capture, recover exact-chat routing from resource timing, and keep bounded per-chat endpoints instead of a single prefetch-sensitive URL. Added idempotent hook replacement, a bounded initial-load routing wait, prompt concurrent-request rejection, navigation cancellation, and fixed private-error masking. Default DOM capture, picker behavior, ChatGPT and summarization remain unchanged. Added lifecycle and background installation regressions.
+
 - 2026-09-27: Hardened Claude-only JSON completeness: always request the native full tree, reject partial/ranged HTTP JSON, explicit incomplete/pagination/count signals, invalid active-branch root markers, truncated or unfinished captured text, and missing/size-mismatched pasted text. Live inspection distinguished normal empty hidden-thinking `truncated: true` metadata from truncated captured text. Added regressions without changing DOM capture, ChatGPT, the picker, or summarization; documented the absence of an authoritative server completeness guarantee.
 
 - 2026-09-27: Polished the fast-capture button with an outlined vector lightning icon, compact placement in the picker header, subtle neutral/lilac states, and keyboard-focus feedback. Capture behavior is unchanged.
