@@ -15,7 +15,7 @@
       branch.push(message);
       id = message.parent_message_uuid;
       // Claude's root parent can be the all-zero UUID rather than null.
-      if (id === "00000000-0000-0000-0000-000000000000") break;
+      if (id === "00000000-0000-0000-0000-000000000000" || id === "00000000-0000-4000-8000-000000000000") break;
     }
     const turns = branch.reverse().map(message => {
       if (!["human", "assistant"].includes(message.sender) || message.truncated || message.files?.length || message.sync_sources?.length) throw unsupported();

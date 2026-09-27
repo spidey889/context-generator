@@ -112,6 +112,17 @@ test("Claude JSON capture still rejects incomplete or unsupported content alongs
   }
 });
 
+test("Claude JSON capture accepts Claude's actual root-parent marker", async () => {
+  const data = fixture();
+  data.chat_messages[0].parent_message_uuid = "00000000-0000-4000-8000-000000000000";
+  const harness = setup(data);
+  await harness.window.fetch(endpoint);
+  const capture = await harness.window.__capCaptureClaudeJson();
+  assert.equal(capture.messageTurnCount, 2);
+  assert.match(capture.text, /User: Question/);
+  assert.match(capture.text, /Assistant: Selected answer/);
+});
+
 test("Claude JSON capture accepts the root sentinel and rejects oversized transcripts", async () => {
   const data = fixture();
   data.chat_messages[0].parent_message_uuid = "00000000-0000-0000-0000-000000000000";
