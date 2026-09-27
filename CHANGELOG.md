@@ -1,5 +1,7 @@
 # Changelog
 
+- 2026-09-27: Added the opt-in Claude JSON capture experiment on `codex/claude-json-capture`. A MAIN-world fetch wrapper remembers only the endpoint; a destination-picker toggle triggers a fresh cookie-authenticated read and active-branch transcript conversion through the existing summary/paste pipeline. DOM capture remains the default. The initial text/pasted-text scope rejects tools, uploaded files, incomplete branches, and truncation rather than silently omitting them. Added bridge/serializer regressions and an isolated Brave JSON smoke mode; repaired the smoke fixture's content-script selection after adding manifest entries and its generated-script newline escaping.
+
 - 2026-09-27: Moved the archived homepage, social preview image, and standalone skill into legacy/, updated the archived page asset links, and removed both checked-in extension ZIPs. Local installation now uses the unpacked xtension/ folder.
 
 - 2026-09-27: Prevented Dark Reader from recoloring the website by adding its official static page lock to the public HTML pages. The homepage also declares its intended light color scheme, so GitHub Pages matches the local design without requiring visitors to change extension settings.

@@ -115,6 +115,18 @@ Background retries missing receivers every 120 ms and may inject the content scr
 
 ## Capture Engine
 
+### Claude JSON experiment (feature branch only)
+
+On `codex/claude-json-capture`, Claude's destination picker has a page-local `JSON capture` toggle, off by default. The toolbar and all other platforms continue using DOM capture. With the toggle off, the existing picker DOM preparation/sweep is unchanged.
+
+A Claude-only MAIN-world script at `document_start` wraps `fetch` to remember the conversation endpoint URL, without reading or retaining response bodies. After a destination selection with the toggle on, an isolated-world bridge requests fresh JSON through a same-origin fetch using the browser's existing cookies. The response is cloned, correlated to the request and current chat, and serialized locally into the existing `SUMMARIZE_WITH_BACKEND` transcript contract. Raw JSON and cookies are never sent to the backend. Opening or toggling the picker does not capture or transmit messages.
+
+The experiment follows `current_leaf_message_uuid` through parent links, includes text blocks and extracted attachment text, and excludes thinking blocks. It rejects missing/cyclic branches, truncated turns, tool blocks, uploaded-file entries, sync sources, and missing attachment extraction. Errors require an explicit retry or switching the toggle off; there is no silent DOM fallback. Existing transcript limits and destination paste/no-auto-send behavior apply. Latest Run labels successful experiment capture `claude-json`.
+
+Reload the unpacked extension and refresh a saved Claude conversation before testing, so the early MAIN-world hook sees the endpoint. Browser-specific MAIN-world support and live Claude schema compatibility remain experiment limitations; the default production capture design is still the DOM sweep below.
+
+Minimal local checks: `node --test test/claude-json-capture.test.js`; ordinary `npm run test:extension-smoke` for the DOM path; in PowerShell, `$env:CAP_CONTEXT_JSON_SMOKE='1'; npm run test:extension-smoke` for a controlled JSON-to-stub-backend-to-paste flow in isolated Brave. Clear that environment variable before running the ordinary smoke in the same shell. The controlled smoke establishes extension integration, not a real Claude/provider transfer.
+
 ### Preparation and sweep
 
 Every transfer uses the same bounded rendered-window sweep:

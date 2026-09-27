@@ -23,6 +23,7 @@ const SUMMARY_TEXT = [
 const SMOKE_PLATFORM_QUERY = "__cap_context_smoke_platform";
 const SMOKE_TIMEOUT_MS = Number(process.env.CAP_CONTEXT_SMOKE_TIMEOUT_MS || 45000);
 const CLAUDE_PLACEMENT_SCREENSHOT_PATH = process.env.CAP_CONTEXT_CLAUDE_PLACEMENT_SCREENSHOT || "";
+const JSON_CAPTURE_SMOKE = process.env.CAP_CONTEXT_JSON_SMOKE === "1";
 
 class CdpSession {
   constructor(socket) {
@@ -126,7 +127,9 @@ async function createSmokeExtension(tempRoot, origin) {
   const manifest = JSON.parse(await fs.promises.readFile(manifestPath, "utf8"));
   const localMatch = "http://127.0.0.1/*";
   addUnique(manifest.host_permissions, localMatch);
-  addUnique(manifest.content_scripts[0].matches, localMatch);
+  for (const entry of manifest.content_scripts.filter(entry => !entry.js.includes("analysis-bridge.js"))) {
+    addUnique(entry.matches, localMatch);
+  }
   addUnique(manifest.web_accessible_resources[0].matches, localMatch);
   await fs.promises.writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
 
@@ -176,12 +179,21 @@ async function createSmokeExtension(tempRoot, origin) {
     `const SUMMARY_BACKEND_URL = ${JSON.stringify(`${origin}/api/summarize`)};`,
     "the summary backend URL"
   );
-  backgroundSource = replaceOnce(
-    backgroundSource,
-    '    url: "https://claude.ai/",',
-    `    url: ${JSON.stringify(`${origin}/destination?${SMOKE_PLATFORM_QUERY}=claude`)},`,
-    "the Claude destination URL"
-  );
+  for (const [platformId, productionUrl] of Object.entries(platformUrls)) {
+    if (platformId === "chatgpt") {
+      backgroundSource = replaceOnce(backgroundSource,
+        `const CHATGPT_URL = ${JSON.stringify(productionUrl)};`,
+        `const CHATGPT_URL = ${JSON.stringify(`${origin}/destination?${SMOKE_PLATFORM_QUERY}=chatgpt`)};`,
+        "the ChatGPT background destination URL");
+      continue;
+    }
+    backgroundSource = replaceOnce(
+      backgroundSource,
+      `    url: ${JSON.stringify(productionUrl)},`,
+      `    url: ${JSON.stringify(`${origin}/destination?${SMOKE_PLATFORM_QUERY}=${platformId}`)},`,
+      `${platformId} background destination URL`
+    );
+  }
   await fs.promises.writeFile(backgroundPath, backgroundSource);
   return extensionRoot;
 }
@@ -276,7 +288,7 @@ function destinationFixture() {
 }
 
 async function startFixtureServer() {
-  const state = { summaryRequests: [] };
+  const state = { summaryRequests: [], jsonRequests: 0 };
   const server = http.createServer(async (request, response) => {
     const url = new URL(request.url, "http://127.0.0.1");
     response.setHeader("Cache-Control", "no-store");
@@ -303,9 +315,27 @@ async function startFixtureServer() {
       }));
       return;
     }
-    if (url.pathname === "/source") {
+    if (url.pathname === "/api/organizations/smoke/chat_conversations/smoke") {
+      state.jsonRequests++;
+      response.writeHead(200, { "Content-Type": "application/json" });
+      response.end(JSON.stringify({
+        uuid: "smoke", current_leaf_message_uuid: "assistant",
+        chat_messages: [
+          { uuid: "user", sender: "human", parent_message_uuid: null, content: [{ type: "text", text: `${SOURCE_SENTINEL}\nJSON_ONLY_SENTINEL: loaded from the API, absent from the DOM.` }] },
+          { uuid: "assistant", sender: "assistant", parent_message_uuid: "user", content: [{ type: "text", text: ASSISTANT_SENTINEL }] }
+        ]
+      }));
+      return;
+    }
+    if (url.pathname === "/source" || url.pathname === "/chat/smoke") {
+      if (url.pathname === "/chat/smoke") response.setHeader("Content-Security-Policy", "script-src 'nonce-smoke'; object-src 'none'; base-uri 'none'; connect-src 'self'");
       response.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
-      response.end(sourceFixture());
+      const page = url.pathname === "/chat/smoke"
+        ? claudePlacementFixture().replace('<div id="claude-page">', `<main aria-label="Conversation"><article data-message-author-role="user">${SOURCE_SENTINEL}</article><article data-message-author-role="assistant"><div class="markdown">${ASSISTANT_SENTINEL}</div></article></main><div id="claude-page">`)
+        : sourceFixture();
+      response.end(url.pathname === "/chat/smoke"
+        ? page.replace("</body>", '<script nonce="smoke">fetch("/api/organizations/smoke/chat_conversations/smoke?tree=True");</script></body>')
+        : page);
       return;
     }
     if (url.pathname === "/new") {
@@ -398,7 +428,8 @@ async function run() {
 
   try {
     const extensionRoot = await createSmokeExtension(tempRoot, origin);
-    const sourceUrl = `${origin}/source?${SMOKE_PLATFORM_QUERY}=chatgpt`;
+    const sourcePath = JSON_CAPTURE_SMOKE ? "/chat/smoke" : "/source";
+    const sourceUrl = `${origin}${sourcePath}?${SMOKE_PLATFORM_QUERY}=${JSON_CAPTURE_SMOKE ? "claude" : "chatgpt"}`;
     braveProcess = spawn(braveExecutable, [
       `--user-data-dir=${profileRoot}`,
       `--disable-extensions-except=${extensionRoot}`,
@@ -422,7 +453,7 @@ async function run() {
     // bubble and full transfer below prove both content and worker startup.
     const sourceTarget = await waitFor(async () => {
       const targets = await getTargets(devToolsPort);
-      return targets.find((target) => target.type === "page" && target.url.startsWith(`${origin}/source`));
+      return targets.find((target) => target.type === "page" && target.url.startsWith(`${origin}${sourcePath}`));
     }, "the controlled source page");
     sourceSession = await CdpSession.connect(sourceTarget.webSocketDebuggerUrl);
     await sourceSession.call("Runtime.enable");
@@ -535,13 +566,25 @@ async function run() {
     assert.match(claudePlacement.sendTranslate, /^-52px(?: 0px)?$/);
     process.stdout.write("✓ Claude's bubble stays centered and its Voice-to-Send swap remains clear of Send.\n");
 
+    if (JSON_CAPTURE_SMOKE) {
+      const before = state.jsonRequests;
+      await sourceSession.evaluate(`document.getElementById("context-generator-bubble").click()`);
+      assert.equal(await sourceSession.evaluate(`document.getElementById("context-generator-claude-json-toggle").getAttribute("aria-pressed")`), "false");
+      await sourceSession.evaluate(`document.getElementById("context-generator-claude-json-toggle").click()`);
+      assert.equal(await sourceSession.evaluate(`document.getElementById("context-generator-claude-json-toggle").getAttribute("aria-pressed")`), "true");
+      assert.equal(state.jsonRequests, before, "Toggling JSON capture must not fetch a conversation.");
+      assert.equal(state.summaryRequests.length, 0, "Toggling JSON capture must not submit a transcript.");
+      await sourceSession.evaluate(`document.querySelector("#context-generator-destination-backdrop").click()`);
+    }
+
+    const jsonRequestsBeforeTransfer = state.jsonRequests;
     const clickResult = await sourceSession.evaluate(`(() => {
       const bubble = document.getElementById("context-generator-bubble");
       bubble.click();
       const sheet = document.getElementById("context-generator-destination-sheet");
       const backdrop = document.getElementById("context-generator-destination-backdrop");
       const tiles = [...document.querySelectorAll(".context-generator-destination-tile")];
-      const claudeTile = tiles.find((tile) => tile.textContent.includes("Claude"));
+      const claudeTile = tiles.find((tile) => tile.textContent.includes(${JSON.stringify(JSON_CAPTURE_SMOKE ? "ChatGPT" : "Claude")}));
       if (!claudeTile) return { ok: false, destinations: tiles.map((tile) => tile.textContent.trim()) };
       // Reproduce Dark Reader's injected important rules without installing it in
       // the isolated smoke profile. The extension's visible palette must win.
@@ -566,7 +609,7 @@ async function run() {
       const darkReaderRules = document.createElement("style");
       darkReaderRules.textContent = cases.map(([, property, key]) =>
         "[data-darkreader-inline-" + key + "]{" + property + ":var(--darkreader-inline-" + key + ") !important}"
-      ).join("\n");
+      ).join("\\n");
       document.head.appendChild(darkReaderRules);
       const palettePreserved = cases.every(([element, property], index) =>
         getComputedStyle(element).getPropertyValue(property) === before[index]
@@ -596,6 +639,11 @@ async function run() {
     const capturedConversation = state.summaryRequests[0]?.conversation || "";
     assert.match(capturedConversation, new RegExp(SOURCE_SENTINEL.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
     assert.match(capturedConversation, new RegExp(ASSISTANT_SENTINEL.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+    if (JSON_CAPTURE_SMOKE) {
+      assert.match(capturedConversation, /^Claude conversation:/);
+      assert.match(capturedConversation, /JSON_ONLY_SENTINEL/);
+      assert.equal(state.jsonRequests, jsonRequestsBeforeTransfer + 1, "JSON capture must fetch fresh conversation data exactly once after destination selection.");
+    }
     process.stdout.write("✓ Capture reached the stub backend exactly once with both conversation turns.\n");
 
     const destinationResult = await waitFor(async () => {

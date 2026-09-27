@@ -35,6 +35,17 @@
   },
   "content_scripts": [
     {
+      "matches": ["https://claude.ai/*"],
+      "js": ["claude-fetch-main.js"],
+      "world": "MAIN",
+      "run_at": "document_start"
+    },
+    {
+      "matches": ["https://claude.ai/*"],
+      "js": ["claude-json-capture.js"],
+      "run_at": "document_start"
+    },
+    {
       "matches": [
         "https://claude.ai/*",
         "https://chatgpt.com/*",

@@ -1,5 +1,6 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-09-25-picker-palette-v35";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-09-27-claude-json-v36";
+  let claudeJsonCaptureEnabled = false;
   const INSTANCE_TEARDOWN_KEY = "__contextGeneratorPlatformTeardown";
   const INSTALL_NOTICE_NODE_ID = "context-generator-install-notice";
   let installNoticeChecked = false;
@@ -4979,6 +4980,22 @@
 
     sheet.appendChild(grid);
 
+    if (currentPlatform.id === "claude") {
+      const toggle = document.createElement("button");
+      toggle.type = "button";
+      toggle.id = "context-generator-claude-json-toggle";
+      toggle.setAttribute("aria-pressed", "false");
+      toggle.textContent = "JSON capture: Off (experimental)";
+      toggle.style.cssText = "margin:10px 2px 0;padding:6px 9px;border:1px solid rgba(255,255,255,.25);border-radius:7px;background:#211d29 !important;color:#fff !important;font-size:11px;cursor:pointer";
+      addOwnedEventListener(toggle, "click", () => {
+        if (isRunning) return;
+        claudeJsonCaptureEnabled = !claudeJsonCaptureEnabled;
+        toggle.setAttribute("aria-pressed", String(claudeJsonCaptureEnabled));
+        toggle.textContent = `JSON capture: ${claudeJsonCaptureEnabled ? "On" : "Off"} (experimental)`;
+      });
+      sheet.appendChild(toggle);
+    }
+
     const footer = document.createElement("div");
     footer.className = "context-generator-destination-helper";
     footer.textContent = DESTINATION_HELPER_TEXT;
@@ -5020,7 +5037,7 @@
       }
       if (event.key !== "Tab") return;
 
-      const focusableTiles = [...sheet.querySelectorAll(".context-generator-destination-tile")]
+      const focusableTiles = [...sheet.querySelectorAll(".context-generator-destination-tile, #context-generator-claude-json-toggle")]
         .filter((tile) => !tile.disabled && tile.getAttribute("aria-disabled") !== "true");
       if (focusableTiles.length === 0) return;
       const focusedIndex = focusableTiles.indexOf(document.activeElement);
@@ -5323,6 +5340,7 @@
   }
 
   async function startDestinationTransfer(destinationId) {
+    const useClaudeJson = currentPlatform.id === "claude" && claudeJsonCaptureEnabled;
     const trace = createTransferTrace(destinationId, "destination tile");
     trace.destinationId = destinationId;
     startTransferTelemetry(trace);
@@ -5354,14 +5372,24 @@
         preparedDestinationPromise = prepareDestinationTab(destinationId, trace);
       }
       advanceTransferTelemetryStage(trace, "capture_started");
-      await prepareSourceForCapture();
+      if (!useClaudeJson) await prepareSourceForCapture();
       if (!preparedDestinationPromise && getDetectedConversationMessageCount() > 0) {
         preparedDestinationPromise = prepareDestinationTab(destinationId, trace);
       }
 
       markTransferTrace(trace, "capture start");
       setHandoffProgress("capture", "active");
-      const conversationText = await scrapeConversationTextWhenReady();
+      let conversationText;
+      if (useClaudeJson) {
+        if (typeof window.__capCaptureClaudeJson !== "function") throw new Error("Refresh Claude to enable JSON capture.");
+        const capture = await window.__capCaptureClaudeJson();
+        conversationText = createConversationCapture(capture.text, {
+          method: "claude-json", messageTurnCount: capture.messageTurnCount,
+          usefulTurnCount: capture.messageTurnCount, candidateTurnCount: capture.messageTurnCount
+        });
+      } else {
+        conversationText = await scrapeConversationTextWhenReady();
+      }
       markCaptureDone(trace, conversationText);
 
       preparedDestinationPromise = preparedDestinationPromise || prepareDestinationTab(destinationId, trace);
