@@ -1,5 +1,7 @@
 # Changelog
 
+- 2026-09-27: Tightened the transition from the homepage actions to the product diagram, reducing the empty band below the hero while preserving the requested internal hero spacing and leaving the diagram unchanged.
+
 - 2026-09-27: Changed the hero support line to `Install once and continue anywhere.`, restored its lighter original styling, and increased its spacing below the headline.
 
 - 2026-09-27: Simplified the extension homepage hero after visual review. Removed the added eyebrow pill, long explanatory paragraph, and five-platform row; replaced them with `One click. Full context. Keep going.` Restored the install CTA to black, made Privacy details a solid high-contrast secondary action, and aligned the header privacy link with the install button. The diagram and video section remain unchanged.
