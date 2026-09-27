@@ -5,9 +5,9 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta name="description"
-    content="Context Generator helps you switch between Claude, ChatGPT, Gemini, and Grok without losing your context.">
+    content="Cap Context is a browser extension that carries your conversations between Claude, ChatGPT, Gemini, Grok, and DeepSeek.">
   <meta name="theme-color" content="#f8f6f1">
-  <title>Context Generator</title>
+  <title>Cap Context — Switch AIs without re-explaining</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap"
@@ -225,12 +225,12 @@
 
     .hero {
       text-align: center;
-      padding-top: clamp(4.25rem, 10vw, 7.5rem);
+      padding-top: clamp(3.5rem, 7vw, 6rem);
     }
 
     .hero h1 {
       max-width: 24ch;
-      margin: 1.5rem auto 2.5rem;
+      margin: 1.5rem auto 1.8rem;
       font-size: 64px;
       line-height: 0.94;
       letter-spacing: -0.075em;
@@ -266,7 +266,7 @@
     }
 
     .hero p {
-      max-width: 60rem;
+      max-width: 36rem;
       margin: 0 auto;
       color: var(--muted);
       font-size: clamp(1rem, 1.8vw, 1.25rem);
@@ -279,8 +279,54 @@
       align-items: center;
       justify-content: center;
       gap: 1rem;
-      margin-top: 3.5rem;
+      margin-top: 2rem;
       flex-wrap: wrap;
+    }
+
+    .hero .eyebrow {
+      font-size: 0.75rem;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: #7950b6;
+      border-color: rgba(149, 96, 223, 0.2);
+      background: rgba(149, 96, 223, 0.06);
+      box-shadow: none;
+    }
+
+    .hero-actions .button-dark {
+      border-color: #7751b1;
+      background: #7751b1;
+      box-shadow: 0 8px 24px rgba(119, 81, 177, 0.2);
+    }
+
+    .hero-actions .button-dark:hover { background: #68439f; }
+
+    .hero-actions .button-outline {
+      background: transparent;
+      box-shadow: none;
+    }
+
+    .hero-platforms {
+      display: flex;
+      justify-content: center;
+      flex-wrap: wrap;
+      gap: 0.6rem 1.25rem;
+      margin: 1.8rem 0 0;
+      padding: 0;
+      list-style: none;
+      color: var(--muted);
+      font-size: 0.8rem;
+      font-weight: 500;
+    }
+
+    .hero-platforms li { display: inline-flex; align-items: center; gap: 0.4rem; }
+    .hero-platforms li::before { content: ""; width: 4px; height: 4px; border-radius: 50%; background: #9560df; }
+
+    @media (max-width: 680px) {
+      .container.site-header { justify-content: space-between; flex-wrap: nowrap; }
+      .site-header .nav-actions { width: auto; }
+      .site-header .nav-link { display: none; }
+      .site-header .button { min-height: 2.8rem; padding: 0.7rem 0.85rem; font-size: 0.8rem; }
     }
 
     .hero-note {
@@ -1081,21 +1127,23 @@
       <span>cap-context</span>
     </a>
     <nav class="nav-actions" aria-label="Primary navigation">
-      <a id="nav-install-link" class="nav-link" href="#install">How to install?</a>
-      <button class="button button-dark" type="button" data-copy-skill
-        data-copied-label="Copied ✓" data-scroll-target="install">Install Free →</button>
+      <a class="nav-link" href="privacy.html">Privacy</a>
+      <a class="button button-dark" href="https://chromewebstore.google.com/detail/cap-context/lpkaciijlhckkdhbgidbjfkldigghnjf" target="_blank" rel="noopener noreferrer">Install extension ↗</a>
     </nav>
   </header>
 
   <main id="top">
     <section class="hero section container reveal">
-
+      <span class="eyebrow">The browser extension for your next conversation</span>
       <h1 style="color: #000000 !important;">Switch AIs without <span class="re-explaining">re-explaining<span class="re-explaining-shine" aria-hidden="true">re-explaining</span></span> everything.</h1>
-      <p>Install once in Claude. Type /context-generator. Continue anywhere.</p>
+      <p>Take your conversation to the next AI, with the context already there. Add Cap Context to Chrome or Brave and keep going.</p>
       <div class="hero-actions">
-        <a class="button button-dark" id="hero-install-btn" href="SKILL.md" download="SKILL.md">Install in Claude →</a>
-        <a class="button button-outline" href="PRIVACY.md">Privacy details</a>
+        <a class="button button-dark" href="https://chromewebstore.google.com/detail/cap-context/lpkaciijlhckkdhbgidbjfkldigghnjf" target="_blank" rel="noopener noreferrer">Install extension ↗</a>
+        <a class="button button-outline" href="privacy.html">Privacy details</a>
       </div>
+      <ul class="hero-platforms" aria-label="Supported AI platforms">
+        <li>Claude</li><li>ChatGPT</li><li>Gemini</li><li>Grok</li><li>DeepSeek</li>
+      </ul>
     </section>
 
     <section class="connector-section section container reveal">
@@ -1420,20 +1468,6 @@
       videoObserver.observe(videoElement);
     }
 
-    ['hero-install-btn', 'nav-install-link'].forEach(id => {
-      document.getElementById(id)?.addEventListener('click', (e) => {
-        document.getElementById('install-video')?.play();
-        if (id === 'nav-install-link') {
-          e.preventDefault();
-          document.getElementById('install')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-        } else {
-          // For hero button which is a download link, we still want to scroll
-          setTimeout(() => {
-            document.getElementById('install')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-          }, 300);
-        }
-      });
-    });
   </script>
 </body>
 
