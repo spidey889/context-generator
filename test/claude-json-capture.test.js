@@ -135,6 +135,47 @@ test("Claude JSON capture still rejects incomplete or unsupported content alongs
   }
 });
 
+test("Claude JSON capture drops only matched bash_tool pairs and preserves text", async () => {
+  const data = fixture();
+  data.chat_messages[2].content = [
+    { type: "text", text: "Before tool" },
+    { type: "tool_use", name: "bash_tool", id: "bash-call", input: { command: "PRIVATE_COMMAND" } },
+    { type: "tool_result", name: "bash_tool", tool_use_id: "bash-call", content: [{ type: "text", text: "PRIVATE_OUTPUT" }] },
+    { type: "text", text: "After tool" }
+  ];
+  const harness = setup(data);
+  await harness.window.fetch(endpoint);
+  const capture = await harness.window.__capCaptureClaudeJson();
+  assert.equal(capture.messageTurnCount, 2);
+  assert.match(capture.text, /Assistant: Before tool\n\nAfter tool/);
+  assert.doesNotMatch(capture.text, /PRIVATE_COMMAND|PRIVATE_OUTPUT|bash_tool/);
+
+  for (const tool of ["web_search", "memory_read", "memory_append", "memory_str_replace"]) {
+    const other = fixture();
+    other.chat_messages[2].content.push(
+      { type: "tool_use", name: tool, id: "other-call" },
+      { type: "tool_result", name: tool, tool_use_id: "other-call" }
+    );
+    const rejected = setup(other);
+    await rejected.window.fetch(endpoint);
+    await assert.rejects(rejected.window.__capCaptureClaudeJson(), /unsupported content type "tool_use"/);
+  }
+  for (const mutate of [
+    blocks => { blocks.splice(2, 1); },
+    blocks => { blocks.splice(1, 1); },
+    blocks => { blocks[2].tool_use_id = "different-call"; },
+    blocks => { blocks[2].name = "web_search"; },
+    blocks => { blocks.push({ ...blocks[1] }); },
+    blocks => { blocks.push({ ...blocks[2] }); }
+  ]) {
+    const invalid = JSON.parse(JSON.stringify(data));
+    mutate(invalid.chat_messages[2].content);
+    const rejected = setup(invalid);
+    await rejected.window.fetch(endpoint);
+    await assert.rejects(rejected.window.__capCaptureClaudeJson(), /unsupported content type "tool_(use|result)"/);
+  }
+});
+
 test("Claude JSON capture accepts Claude's actual root-parent marker", async () => {
   const data = fixture();
   data.chat_messages[0].parent_message_uuid = "00000000-0000-4000-8000-000000000000";

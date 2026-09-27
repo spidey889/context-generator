@@ -30,14 +30,27 @@
       if (message.sync_sources?.length) throw unsupported(`${label} has synced-source entries in message.sync_sources.`);
       const blocks = message.content || [];
       if (!Array.isArray(blocks)) throw unsupported(`${label}'s content is not an array.`);
+      // Only skip an unambiguous bash pair. Unmatched calls/results and other tools
+      // still reach the unsupported-block check with their original block positions.
+      const skippedBashBlocks = new Set();
+      blocks.forEach(block => {
+        if (block.type !== "tool_use" || block.name !== "bash_tool" || typeof block.id !== "string" || !block.id) return;
+        const calls = blocks.filter(candidate => candidate.type === "tool_use" && candidate.id === block.id);
+        const results = blocks.filter(candidate => candidate.type === "tool_result" && candidate.tool_use_id === block.id);
+        if (calls.length === 1 && results.length === 1 && results[0].name === "bash_tool") {
+          skippedBashBlocks.add(block);
+          skippedBashBlocks.add(results[0]);
+        }
+      });
       blocks.forEach((block, blockIndex) => {
+        if (skippedBashBlocks.has(block)) return;
         if (!["text", "thinking", "image"].includes(block.type)) {
           const type = typeof block.type === "string" && /^[a-z][a-z0-9_]{0,39}$/i.test(block.type) ? block.type : "unknown";
           throw unsupported(`${label}, block ${blockIndex + 1}: unsupported content type "${type}".`);
         }
         if (block.type === "text" && typeof block.text !== "string") throw unsupported(`${label}, block ${blockIndex + 1}: text is missing or is not a string.`);
       });
-      // Images and reasoning are excluded; all other unsupported types still fail closed.
+      // Images, reasoning, and matched bash pairs are excluded; other types fail closed.
       // text/content are alternatives, not duplicates.
       let text = blocks.length ? blocks.filter(block => block.type === "text").map(block => block.text).join("\n\n") : message.text;
       if (typeof text !== "string") throw unsupported(`${label} has no valid text field.`);
@@ -45,7 +58,7 @@
         if (typeof attachment.extracted_content !== "string" || !attachment.extracted_content.trim()) throw unsupported(`${label}, attachment ${attachmentIndex + 1}: extracted_content is missing or empty.`);
         text += `\n\n[Attachment: ${attachment.file_name || "pasted content"}]\n${attachment.extracted_content}`;
       }
-      if (!text.trim()) throw unsupported(`${label} has no usable text after image and thinking blocks are skipped.`);
+      if (!text.trim()) throw unsupported(`${label} has no usable text after image, thinking, and matched bash_tool blocks are skipped.`);
       return `${message.sender === "human" ? "User" : "Assistant"}: ${text.trim()}`;
     });
     if (!turns.length) throw unsupported("The active branch contains no messages.");
