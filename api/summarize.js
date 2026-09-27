@@ -28,8 +28,6 @@ const GROQ_CHAT_COMPLETIONS_URL = "https://api.groq.com/openai/v1/chat/completio
 const LOCAL_DIRECT_MODEL = "local-direct";
 const ORCAROUTER_FREE_MODEL = "orcarouter/free";
 const MISTRAL_PRIMARY_MODEL = "ministral-14b-2512";
-const MISTRAL_FALLBACK_MODELS = [];
-const MISTRAL_MODEL_CHAIN = [MISTRAL_PRIMARY_MODEL, ...MISTRAL_FALLBACK_MODELS];
 const GROQ_FALLBACK_MODEL = "groq/compound-mini";
 const FLASH_LITE_FALLBACK_MODEL = "gemini-3.5-flash-lite";
 const PROVIDER_REQUEST_BUDGETS_MS = {
@@ -293,7 +291,6 @@ async function handleSummary(conversation, responseChannel) {
     const providerResult = await createSummaryWithFallback({
       conversation,
       profile: summaryProfile,
-      modelSelection,
       geminiApiKey,
       orcaRouterApiKey,
       mistralApiKey: process.env.MISTRAL_ENABLED === "false" ? undefined : process.env.MISTRAL_API_KEY,
@@ -429,7 +426,6 @@ module.exports.__test = {
 async function createSummaryWithFallback({
   conversation,
   profile,
-  modelSelection,
   geminiApiKey,
   orcaRouterApiKey,
   mistralApiKey,
@@ -444,8 +440,30 @@ async function createSummaryWithFallback({
   let geminiMs = 0;
   let orcaMs = 0;
   let mistralMs = 0;
-  let mistralFailure = null;
   let lastProviderFailure = null;
+
+  // Only the primary remote routes share this receipt contract. Terminal
+  // Flash-Lite and Groq preserve their existing always-fallback reporting.
+  function createRemoteSuccessResult(result, modelReason, timings) {
+    const hadFallback = modelsTried.length > 1 || geminiModelsSkipped.length > 0;
+    return {
+      ...result,
+      modelReason,
+      modelsTried,
+      geminiModelsSkipped,
+      mistralModelsTried,
+      ...timings,
+      fallback: hadFallback
+        ? createFallbackMetadata({
+            attempted: true,
+            used: true,
+            servedBy: result.provider,
+            model: result.model,
+            reason: getProviderFailureReason(lastProviderFailure)
+          })
+        : createFallbackMetadata()
+    };
+  }
 
   async function tryFlashLiteBeforeLocal(groqMs = 0) {
     const terminalBudgetMs = getProviderRequestBudgetMs(FLASH_LITE_FALLBACK_MODEL) - orcaMs - groqMs;
@@ -533,26 +551,9 @@ async function createSummaryWithFallback({
           reason: modelReason
         });
 
-        return {
-          ...result,
-          modelReason,
-          modelsTried,
-          geminiModelsSkipped,
-          mistralModelsTried,
-          geminiMs: geminiMs + result.providerMs,
-          orcaMs: 0,
-          mistralMs: 0,
-          groqMs: 0,
-          fallback: failedModels.length || geminiModelsSkipped.length
-            ? createFallbackMetadata({
-                attempted: true,
-                used: true,
-                servedBy: SUMMARY_PROVIDERS.gemini.id,
-                model,
-                reason: getProviderFailureReason(lastProviderFailure)
-              })
-            : createFallbackMetadata()
-        };
+        return createRemoteSuccessResult(result, modelReason, {
+          geminiMs: geminiMs + result.providerMs, orcaMs: 0, mistralMs: 0, groqMs: 0
+        });
       } catch (error) {
         geminiMs += Date.now() - geminiStartedAt;
         lastProviderFailure = error;
@@ -599,26 +600,9 @@ async function createSummaryWithFallback({
         reason: modelReason
       });
 
-      return {
-        ...result,
-        modelReason,
-        modelsTried,
-        geminiModelsSkipped,
-        mistralModelsTried,
-        geminiMs,
-        orcaMs: result.providerMs,
-        mistralMs: 0,
-        groqMs: 0,
-        fallback: failedModels.length || geminiModelsSkipped.length
-          ? createFallbackMetadata({
-              attempted: true,
-              used: true,
-              servedBy: SUMMARY_PROVIDERS.orcarouter.id,
-              model: result.model,
-              reason: getProviderFailureReason(lastProviderFailure)
-            })
-          : createFallbackMetadata()
-      };
+      return createRemoteSuccessResult(result, modelReason, {
+        geminiMs, orcaMs: result.providerMs, mistralMs: 0, groqMs: 0
+      });
     } catch (error) {
       orcaMs = Date.now() - orcaStartedAt;
       lastProviderFailure = error;
@@ -630,68 +614,47 @@ async function createSummaryWithFallback({
   }
 
   if (mistralApiKey) {
-    for (const [index, model] of MISTRAL_MODEL_CHAIN.entries()) {
-      const mistralStartedAt = Date.now();
-      modelsTried.push(model);
-      mistralModelsTried.push(model);
+    // Mistral has one configured model; retries remain inside its request budget.
+    const model = MISTRAL_PRIMARY_MODEL;
+    const mistralStartedAt = Date.now();
+    modelsTried.push(model);
+    mistralModelsTried.push(model);
 
-      try {
-        const result = await createSummaryWithProvider({
-          provider: SUMMARY_PROVIDERS.mistral,
-          apiKey: mistralApiKey,
-          profile,
-          model,
-          initialMessages: fallbackMessages
-        });
-        const failedModels = modelsTried.slice(0, -1);
-        const skippedReason = formatSkippedGeminiModels(geminiModelsSkipped);
-        const modelReason = skippedReason
-          ? `${skippedReason}; ${failedModels.length ? `${failedModels.join(" -> ")} failed; ` : ""}fell back to ${model}`
-          : failedModels.length
-          ? `${failedModels.join(" -> ")} failed; fell back to ${model}`
-          : `${model} served as the first model in the fixed Mistral chain`;
+    try {
+      const result = await createSummaryWithProvider({
+        provider: SUMMARY_PROVIDERS.mistral,
+        apiKey: mistralApiKey,
+        profile,
+        model,
+        initialMessages: fallbackMessages
+      });
+      const failedModels = modelsTried.slice(0, -1);
+      const skippedReason = formatSkippedGeminiModels(geminiModelsSkipped);
+      const modelReason = skippedReason
+        ? `${skippedReason}; ${failedModels.length ? `${failedModels.join(" -> ")} failed; ` : ""}fell back to ${model}`
+        : failedModels.length
+        ? `${failedModels.join(" -> ")} failed; fell back to ${model}`
+        : `${model} served as the first model in the fixed Mistral chain`;
 
-        console.info("[Context Generator] Summary served:", {
-          provider: SUMMARY_PROVIDERS.mistral.id,
-          model,
-          reason: modelReason
-        });
+      console.info("[Context Generator] Summary served:", {
+        provider: SUMMARY_PROVIDERS.mistral.id,
+        model,
+        reason: modelReason
+      });
 
-        return {
-          ...result,
-          modelReason,
-          modelsTried,
-          geminiModelsSkipped,
-          mistralModelsTried,
-          geminiMs,
-          orcaMs,
-          mistralMs: mistralMs + result.providerMs,
-          groqMs: 0,
-          fallback: failedModels.length || geminiModelsSkipped.length
-            ? createFallbackMetadata({
-                attempted: true,
-                used: true,
-                servedBy: SUMMARY_PROVIDERS.mistral.id,
-                model,
-                reason: getProviderFailureReason(lastProviderFailure)
-              })
-            : createFallbackMetadata()
-        };
-      } catch (error) {
-        mistralMs += Date.now() - mistralStartedAt;
-        mistralFailure = error;
-        lastProviderFailure = error;
-        const nextModel = MISTRAL_MODEL_CHAIN[index + 1];
-        console.error(
-          nextModel
-            ? `[Context Generator] ${model} failed; falling back to ${nextModel}:`
-            : `[Context Generator] ${model} failed; Mistral chain exhausted, trying Groq fallback:`,
-          getProviderFailureLog(error)
-        );
-      }
+      return createRemoteSuccessResult(result, modelReason, {
+        geminiMs, orcaMs, mistralMs: mistralMs + result.providerMs, groqMs: 0
+      });
+    } catch (error) {
+      mistralMs += Date.now() - mistralStartedAt;
+      lastProviderFailure = error;
+      console.error(
+        `[Context Generator] ${model} failed; Mistral chain exhausted, trying Groq fallback:`,
+        getProviderFailureLog(error)
+      );
     }
   } else {
-    mistralFailure = createProviderError(
+    const mistralFailure = createProviderError(
       SUMMARY_PROVIDERS.mistral,
       "MISTRAL_API_KEY is not configured",
       500
