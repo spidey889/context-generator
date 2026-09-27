@@ -2940,9 +2940,9 @@ test("DeepSeek anchors before the complete visible right-side control row", () =
 
 test("Gemini, Grok, and DeepSeek observe control-only composer changes", () => {
   const providers = [
-    ["gemini.google.com", "syncGeminiPlacementResizeMonitoring"],
-    ["grok.com", "syncGrokPlacementResizeMonitoring"],
-    ["chat.deepseek.com", "syncDeepSeekPlacementResizeMonitoring"]
+    ["gemini.google.com", "syncPlatformPlacementResizeMonitoring"],
+    ["grok.com", "syncPlatformPlacementResizeMonitoring"],
+    ["chat.deepseek.com", "syncPlatformPlacementResizeMonitoring"]
   ];
 
   for (const [hostname, syncHook] of providers) {
@@ -3000,7 +3000,7 @@ test("Gemini retains its outer composer while a large paste reflows in stages", 
   const hooks = loadPlatformContent([input, editorWrap, composer, pro, mic], "gemini.google.com");
   assert.equal(hooks.findComposerSurfaceElement(input), composer);
   hooks.reserveComposerSurface(composer);
-  hooks.syncGeminiPlacementResizeMonitoring(input, composer);
+  hooks.syncPlatformPlacementResizeMonitoring(input, composer);
 
   input.rect = { left: 160, right: 840, top: 150, bottom: 550, width: 680, height: 400 };
   editorWrap.rect = { left: 140, right: 860, top: 130, bottom: 570, width: 720, height: 440 };
@@ -3035,7 +3035,7 @@ test("Grok retains its outer composer while a large paste reflows in stages", ()
   const hooks = loadPlatformContent([input, editorWrap, composer, fastSelector], "grok.com");
   assert.equal(hooks.findComposerSurfaceElement(input), composer);
   hooks.reserveComposerSurface(composer);
-  hooks.syncGrokPlacementResizeMonitoring(input, composer);
+  hooks.syncPlatformPlacementResizeMonitoring(input, composer);
 
   // Grok grows the editor first. The outer composer is momentarily too short
   // for the shared containment check, while the inner wrapper already fits.
@@ -3070,7 +3070,7 @@ test("DeepSeek retains its outer composer while a large paste reflows in stages"
   const hooks = loadPlatformContent([input, editorWrap, composer, attach, send], "chat.deepseek.com");
   assert.equal(hooks.findComposerSurfaceElement(input), composer);
   hooks.reserveComposerSurface(composer);
-  hooks.syncDeepSeekPlacementResizeMonitoring(input, composer);
+  hooks.syncPlatformPlacementResizeMonitoring(input, composer);
 
   input.rect = { left: 160, right: 840, top: 150, bottom: 550, width: 680, height: 400 };
   editorWrap.rect = { left: 140, right: 860, top: 130, bottom: 570, width: 720, height: 440 };
@@ -3123,3 +3123,25 @@ function rectsIntersect(first, second) {
     first.bottom > second.top
   );
 }
+
+test("shared composer resize monitoring reuses targets and releases remounted nodes", () => {
+  for (const hostname of ["gemini.google.com", "grok.com", "chat.deepseek.com"]) {
+    const hooks = loadPlatformContent([], hostname);
+    const input = new FakeElement();
+    const composer = new FakeElement();
+    hooks.syncPlatformPlacementResizeMonitoring(input, composer);
+    const first = hooks.resizeObservers.at(-1);
+    const count = hooks.resizeObservers.length;
+    hooks.syncPlatformPlacementResizeMonitoring(input, composer);
+    assert.equal(hooks.resizeObservers.length, count, hostname);
+
+    const replacement = new FakeElement();
+    hooks.syncPlatformPlacementResizeMonitoring(input, replacement);
+    const second = hooks.resizeObservers.at(-1);
+    assert.notEqual(second, first, hostname);
+    assert.equal(first.observed.length, 0, hostname);
+    assert.deepEqual(second.observed, [input, replacement], hostname);
+    hooks.stopPlatformPlacementResizeMonitoring();
+    assert.equal(second.observed.length, 0, hostname);
+  }
+});

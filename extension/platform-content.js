@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-09-27-notice-cleanup-v36";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-09-27-content-cleanup-v37";
   const INSTANCE_TEARDOWN_KEY = "__contextGeneratorPlatformTeardown";
   const BUBBLE_ID = "context-generator-bubble";
   const OVERLAY_ID = "context-generator-overlay";
@@ -231,7 +231,6 @@
       accent: "#d97757",
       logoSize: 24,
       logo: "logos/claude2download__1_-removebg-preview.png",
-      retryPaste: true,
       maxComposerHeight: 720,
       inputSelectors: [
         "textarea",
@@ -264,7 +263,6 @@
       accent: "#19c37d",
       logoSize: 21,
       logo: "logos/gptwhitedownload__1_-removebg-preview.png",
-      retryPaste: true,
       pasteRetryTimeoutMs: CHATGPT_PASTE_RETRY_TIMEOUT_MS,
       pasteVerifyTimeoutMs: CHATGPT_PASTE_VERIFY_TIMEOUT_MS,
       pasteStabilityMs: CHATGPT_PASTE_STABILITY_MS,
@@ -308,7 +306,6 @@
       accent: "#8ab4f8",
       logoSize: 22,
       logo: "logos/gemini-download__1_-removebg-preview.png",
-      retryPaste: true,
       maxComposerWidth: 1080,
       maxComposerHeight: 720,
       composerSelectors: [
@@ -353,7 +350,6 @@
       accent: "#f5f5f5",
       logoSize: 24,
       logo: "logos/grokwhitedownload__1_-removebg-preview.png",
-      retryPaste: true,
       // Grok expands the whole composer after large pastes; the shared 260px cap
       // would reject that real surface and anchor the bubble to an inner editor.
       maxComposerHeight: 720,
@@ -404,7 +400,6 @@
       accent: "#4c8dff",
       logoSize: 22,
       logo: "logos/deepseek-download__1_-removebg-preview.png",
-      retryPaste: true,
       maxComposerWidth: 1140,
       // DeepSeek also expands the whole composer after large pastes.
       maxComposerHeight: 720,
@@ -472,12 +467,8 @@
   let handoffScrimHideTimer = null;
   let floatingButtonFrame = null;
   let floatingButtonObserver = null;
-  let grokPlacementResizeObserver = null;
-  let grokPlacementResizeTargets = [];
-  let deepSeekPlacementResizeObserver = null;
-  let deepSeekPlacementResizeTargets = [];
-  let geminiPlacementResizeObserver = null;
-  let geminiPlacementResizeTargets = [];
+  let platformPlacementResizeObserver = null;
+  let platformPlacementResizeTargets = [];
   let providerControlMutationObserver = null;
   let providerControlMutationRoot = null;
   let claudePlacementResizeObserver = null;
@@ -750,9 +741,8 @@
       findPlatformInput,
       findComposerSurfaceElement,
       reserveComposerSurface,
-      syncGrokPlacementResizeMonitoring,
-      syncDeepSeekPlacementResizeMonitoring,
-      syncGeminiPlacementResizeMonitoring,
+      syncPlatformPlacementResizeMonitoring,
+      stopPlatformPlacementResizeMonitoring,
       syncClaudePlacementResizeMonitoring,
       recordTransientComposerPlacement,
       retainTransientComposerPlacement,
@@ -898,10 +888,6 @@
   }
 
   async function summarizeWithBackend(conversationText, trace = null) {
-    return (await requestBackendSummary(conversationText, trace)).summary;
-  }
-
-  async function requestBackendSummary(conversationText, trace = null) {
     if (conversationText.length > MAX_BACKEND_CONVERSATION_CHARS) {
       const error = new Error(OVERSIZED_CONVERSATION_ERROR_MESSAGE);
       error.code = "conversation_too_large";
@@ -933,7 +919,7 @@
       background: timing
     });
     advanceTransferTelemetryStage(trace, "summary_completed");
-    return { summary, timing };
+    return summary;
   }
 
   function prepareDestinationTab(destinationId, trace = null) {
@@ -2171,23 +2157,8 @@
 
     const trimmedText = text.trim();
 
-    if (destination.retryPaste) {
-      await pasteWithRetry(trimmedText, destination, transferId);
-      return;
-    }
-
-    const input = await waitForElement(() => findPlatformInput(destination), 15000, `${destination.name} message input`);
-    if (!input) {
-      throw new Error(`${destination.name} message input element could not be found.`);
-    }
-
-    setEditorText(input, trimmedText, destination);
-
-    if (!editorContainsText(input, trimmedText)) {
-      throw new Error(`Paste operation failed to populate the ${destination.name} editor.`);
-    }
-
-    input.focus?.();
+    // Every supported destination uses verified retries, including editor remount recovery.
+    await pasteWithRetry(trimmedText, destination, transferId);
   }
 
   async function pasteWithRetry(text, destination, transferId = null) {
@@ -6621,9 +6592,7 @@
         return;
       }
       if (retainTransientComposerPlacement(bubble)) return;
-      stopGrokPlacementResizeMonitoring();
-      stopDeepSeekPlacementResizeMonitoring();
-      stopGeminiPlacementResizeMonitoring();
+      stopPlatformPlacementResizeMonitoring();
       stopProviderControlMutationMonitoring();
       clearClaudePlacementMonitoring();
       clearChatGptPlacementResizeMonitoring();
@@ -6668,9 +6637,7 @@
     }
 
     reserveComposerSurface(composerSurface);
-    syncGrokPlacementResizeMonitoring(input, composerSurface);
-    syncDeepSeekPlacementResizeMonitoring(input, composerSurface);
-    syncGeminiPlacementResizeMonitoring(input, composerSurface);
+    syncPlatformPlacementResizeMonitoring(input, composerSurface);
     syncClaudePlacementResizeMonitoring(input, composerSurface);
 
     const bubbleRoot = currentPlatform.id === "claude" ? getFloatingButtonRoot() : composerSurface;
@@ -7481,17 +7448,9 @@
     const inputRect = input?.getBoundingClientRect();
     if (!inputRect) return null;
 
-    // Grok updates the editable region before its outer composer finishes
-    // reflowing after a large paste. Keep the already-verified surface during
-    // that short geometry mismatch instead of jumping into an inner wrapper.
-    const retainedGrokSurface = getRetainedGrokComposerSurface(input);
-    if (retainedGrokSurface) return retainedGrokSurface;
-
-    const retainedDeepSeekSurface = getRetainedDeepSeekComposerSurface(input);
-    if (retainedDeepSeekSurface) return retainedDeepSeekSurface;
-
-    const retainedGeminiSurface = getRetainedGeminiComposerSurface(input);
-    if (retainedGeminiSurface) return retainedGeminiSurface;
+    // These platforms can reflow the editor before the verified outer composer.
+    const retainedSurface = getRetainedPlatformComposerSurface(input);
+    if (retainedSurface) return retainedSurface;
 
     const retainedClaudeSurface = getRetainedClaudeComposerSurface(input);
     if (retainedClaudeSurface) return retainedClaudeSurface;
@@ -7539,55 +7498,9 @@
     return fallback;
   }
 
-  function getRetainedGrokComposerSurface(input) {
+  function getRetainedPlatformComposerSurface(input) {
     if (
-      currentPlatform.id !== "grok" ||
-      !reservedComposerSurface ||
-      !reservedComposerSurface.contains?.(input) ||
-      isContextGeneratorNode(reservedComposerSurface)
-    ) {
-      return null;
-    }
-
-    const rect = reservedComposerSurface.getBoundingClientRect();
-    const maxWidth = getMaxComposerSurfaceWidth();
-    const maxHeight = currentPlatform.maxComposerHeight || 260;
-    return (
-      rect.width >= 280 &&
-      rect.width <= maxWidth &&
-      rect.height >= 40 &&
-      rect.height <= maxHeight &&
-      rect.bottom >= 0 &&
-      rect.top <= window.innerHeight
-    ) ? reservedComposerSurface : null;
-  }
-
-  function getRetainedDeepSeekComposerSurface(input) {
-    if (
-      currentPlatform.id !== "deepseek" ||
-      !reservedComposerSurface ||
-      !reservedComposerSurface.contains?.(input) ||
-      isContextGeneratorNode(reservedComposerSurface)
-    ) {
-      return null;
-    }
-
-    const rect = reservedComposerSurface.getBoundingClientRect();
-    const maxWidth = getMaxComposerSurfaceWidth();
-    const maxHeight = currentPlatform.maxComposerHeight || 260;
-    return (
-      rect.width >= 280 &&
-      rect.width <= maxWidth &&
-      rect.height >= 40 &&
-      rect.height <= maxHeight &&
-      rect.bottom >= 0 &&
-      rect.top <= window.innerHeight
-    ) ? reservedComposerSurface : null;
-  }
-
-  function getRetainedGeminiComposerSurface(input) {
-    if (
-      currentPlatform.id !== "gemini" ||
+      !TRANSIENT_COMPOSER_PLACEMENT_PLATFORMS.has(currentPlatform.id) ||
       !reservedComposerSurface ||
       !reservedComposerSurface.contains?.(input) ||
       isContextGeneratorNode(reservedComposerSurface)
@@ -7769,15 +7682,17 @@
     reservedComposerSurface = null;
   }
 
-  function syncGrokPlacementResizeMonitoring(input, composerSurface) {
-    if (currentPlatform.id !== "grok") {
-      stopGrokPlacementResizeMonitoring();
+  // One content-script instance has one fixed platform; these three adapters share
+  // the same observer lifecycle. Claude and ChatGPT keep their distinct monitoring.
+  function syncPlatformPlacementResizeMonitoring(input, composerSurface) {
+    if (!TRANSIENT_COMPOSER_PLACEMENT_PLATFORMS.has(currentPlatform.id)) {
+      stopPlatformPlacementResizeMonitoring();
       return;
     }
 
     syncProviderControlMutationMonitoring(input, composerSurface);
     if (typeof ResizeObserver === "undefined") {
-      stopGrokPlacementResizeMonitoring();
+      stopPlatformPlacementResizeMonitoring();
       return;
     }
 
@@ -7785,84 +7700,20 @@
       return element && all.indexOf(element) === index;
     });
     const targetsUnchanged =
-      nextTargets.length === grokPlacementResizeTargets.length &&
-      nextTargets.every((element, index) => element === grokPlacementResizeTargets[index]);
+      nextTargets.length === platformPlacementResizeTargets.length &&
+      nextTargets.every((element, index) => element === platformPlacementResizeTargets[index]);
     if (targetsUnchanged) return;
 
-    stopGrokPlacementResizeMonitoring();
-    grokPlacementResizeObserver = createOwnedObserver(ResizeObserver, () => scheduleFloatingButtonUpdate());
-    nextTargets.forEach((element) => grokPlacementResizeObserver.observe(element));
-    grokPlacementResizeTargets = nextTargets;
+    stopPlatformPlacementResizeMonitoring();
+    platformPlacementResizeObserver = createOwnedObserver(ResizeObserver, () => scheduleFloatingButtonUpdate());
+    nextTargets.forEach((element) => platformPlacementResizeObserver.observe(element));
+    platformPlacementResizeTargets = nextTargets;
   }
 
-  function stopGrokPlacementResizeMonitoring() {
-    grokPlacementResizeObserver?.disconnect();
-    grokPlacementResizeObserver = null;
-    grokPlacementResizeTargets = [];
-  }
-
-  function syncDeepSeekPlacementResizeMonitoring(input, composerSurface) {
-    if (currentPlatform.id !== "deepseek") {
-      stopDeepSeekPlacementResizeMonitoring();
-      return;
-    }
-
-    syncProviderControlMutationMonitoring(input, composerSurface);
-    if (typeof ResizeObserver === "undefined") {
-      stopDeepSeekPlacementResizeMonitoring();
-      return;
-    }
-
-    const nextTargets = [input, composerSurface].filter((element, index, all) => {
-      return element && all.indexOf(element) === index;
-    });
-    const targetsUnchanged =
-      nextTargets.length === deepSeekPlacementResizeTargets.length &&
-      nextTargets.every((element, index) => element === deepSeekPlacementResizeTargets[index]);
-    if (targetsUnchanged) return;
-
-    stopDeepSeekPlacementResizeMonitoring();
-    deepSeekPlacementResizeObserver = createOwnedObserver(ResizeObserver, () => scheduleFloatingButtonUpdate());
-    nextTargets.forEach((element) => deepSeekPlacementResizeObserver.observe(element));
-    deepSeekPlacementResizeTargets = nextTargets;
-  }
-
-  function stopDeepSeekPlacementResizeMonitoring() {
-    deepSeekPlacementResizeObserver?.disconnect();
-    deepSeekPlacementResizeObserver = null;
-    deepSeekPlacementResizeTargets = [];
-  }
-
-  function syncGeminiPlacementResizeMonitoring(input, composerSurface) {
-    if (currentPlatform.id !== "gemini") {
-      stopGeminiPlacementResizeMonitoring();
-      return;
-    }
-
-    syncProviderControlMutationMonitoring(input, composerSurface);
-    if (typeof ResizeObserver === "undefined") {
-      stopGeminiPlacementResizeMonitoring();
-      return;
-    }
-
-    const nextTargets = [input, composerSurface].filter((element, index, all) => {
-      return element && all.indexOf(element) === index;
-    });
-    const targetsUnchanged =
-      nextTargets.length === geminiPlacementResizeTargets.length &&
-      nextTargets.every((element, index) => element === geminiPlacementResizeTargets[index]);
-    if (targetsUnchanged) return;
-
-    stopGeminiPlacementResizeMonitoring();
-    geminiPlacementResizeObserver = createOwnedObserver(ResizeObserver, () => scheduleFloatingButtonUpdate());
-    nextTargets.forEach((element) => geminiPlacementResizeObserver.observe(element));
-    geminiPlacementResizeTargets = nextTargets;
-  }
-
-  function stopGeminiPlacementResizeMonitoring() {
-    geminiPlacementResizeObserver?.disconnect();
-    geminiPlacementResizeObserver = null;
-    geminiPlacementResizeTargets = [];
+  function stopPlatformPlacementResizeMonitoring() {
+    platformPlacementResizeObserver?.disconnect();
+    platformPlacementResizeObserver = null;
+    platformPlacementResizeTargets = [];
   }
 
   function syncProviderControlMutationMonitoring(input, composerSurface) {
@@ -8545,9 +8396,7 @@
       floatingButtonObserver.disconnect();
       floatingButtonObserver = null;
     }
-    stopGrokPlacementResizeMonitoring();
-    stopDeepSeekPlacementResizeMonitoring();
-    stopGeminiPlacementResizeMonitoring();
+    stopPlatformPlacementResizeMonitoring();
     stopProviderControlMutationMonitoring();
     clearClaudePlacementMonitoring();
     clearClaudePlacementGraceTimer();
@@ -8578,29 +8427,6 @@
       clearTimeout(runningResetTimer);
       runningResetTimer = null;
     }
-  }
-
-  function waitForElement(getElement, timeoutMs, name) {
-    const startedAt = Date.now();
-
-    return new Promise((resolve, reject) => {
-      const tick = () => {
-        const element = getElement();
-        if (element) {
-          resolve(element);
-          return;
-        }
-
-        if (Date.now() - startedAt > timeoutMs) {
-          reject(new Error(`Timed out waiting for ${name}.`));
-          return;
-        }
-
-        setTimeout(tick, 250);
-      };
-
-      tick();
-    });
   }
 
   function delay(timeoutMs) {
