@@ -11,7 +11,7 @@ function fixture() {
   return {
     uuid: chat, current_leaf_message_uuid: "answer",
     chat_messages: [
-      { uuid: "question", sender: "human", parent_message_uuid: null, content: [{ type: "text", text: "Question" }], attachments: [{ file_name: "notes.txt", extracted_content: "Pasted notes" }] },
+      { uuid: "question", sender: "human", parent_message_uuid: null, content: [{ type: "text", text: "Question" }], attachments: [{ file_name: "notes.txt", file_type: "txt", extracted_content: "Pasted notes" }] },
       { uuid: "alternate", sender: "assistant", parent_message_uuid: "question", text: "Wrong branch" },
       { uuid: "answer", sender: "assistant", parent_message_uuid: "question", text: "Duplicate fallback", content: [{ type: "thinking", text: "Private reasoning" }, { type: "text", text: "Selected answer" }] }
     ]
@@ -44,6 +44,84 @@ function setup(data = fixture()) {
   }
   return { window, location, stats: () => ({ requests, clones, requestOptions, listeners: listeners.size }) };
 }
+
+// Shape observed on a live Claude "Pasted text, pasted, 441 lines" card.
+function pastedAttachment(text) {
+  return { id: "paste", file_name: "", file_type: "txt", file_size: Buffer.byteLength(text), extracted_content: text };
+}
+
+test("Claude JSON capture preserves a large pasted attachment in its owning user turn", async () => {
+  const data = fixture();
+  const pastedText = `PASTE_START\n${"  preserve indentation and full lines\r\n".repeat(1200)}PASTE_END`;
+  data.chat_messages[0].attachments = [pastedAttachment(pastedText)];
+  const harness = setup(data);
+  await harness.window.fetch(endpoint);
+  const capture = await harness.window.__capCaptureClaudeJson();
+  assert.equal(capture.text, `Claude conversation:\n\nUser: Question\n\n${pastedText}\n\nAssistant: Private reasoning\n\nSelected answer`);
+  assert.equal(capture.messageTurnCount, 2);
+});
+
+test("Claude JSON capture keeps pasted-only user turns and multiple pasted cards in order", async () => {
+  const data = fixture();
+  data.chat_messages[0].content = [];
+  data.chat_messages[0].text = "";
+  data.chat_messages[0].attachments = [pastedAttachment("First paste"), pastedAttachment("Second paste")];
+  const harness = setup(data);
+  await harness.window.fetch(endpoint);
+  const capture = await harness.window.__capCaptureClaudeJson();
+  assert.equal(capture.text, "Claude conversation:\n\nUser: First paste\n\nSecond paste\n\nAssistant: Private reasoning\n\nSelected answer");
+  assert.equal(capture.messageTurnCount, 2);
+});
+
+test("Claude JSON capture ignores other attachments and never extracts nested pasted text", async () => {
+  const data = fixture();
+  const ignoredPaste = pastedAttachment("IGNORED_SENTINEL");
+  data.chat_messages[0].attachments = [
+    null, {},
+    { ...ignoredPaste, file_name: "uploaded.txt" },
+    { ...ignoredPaste, file_type: "pdf" },
+    { ...ignoredPaste, file_type: "image/png" },
+    { file_type: "txt", extracted_content: "IGNORED_SENTINEL" },
+    { file_name: "", extracted_content: "IGNORED_SENTINEL" },
+    pastedAttachment("   "), pastedAttachment(""),
+    { ...ignoredPaste, extracted_content: { text: "IGNORED_SENTINEL" } },
+    { ...ignoredPaste, extracted_content: null },
+    { ...ignoredPaste, extracted_content: 42 }
+  ];
+  data.chat_messages[0].files = [{ file_kind: "image", attachments: [ignoredPaste], extracted_content: "IGNORED_SENTINEL" }];
+  data.chat_messages[0].content.push({ type: "tool_result", attachments: [ignoredPaste] });
+  data.chat_messages[2].attachments = [ignoredPaste];
+  data.chat_messages[1].sender = "human";
+  data.chat_messages[1].attachments = [ignoredPaste];
+  const harness = setup(data);
+  await harness.window.fetch(endpoint);
+  const capture = await harness.window.__capCaptureClaudeJson();
+  assert.equal(capture.text, "Claude conversation:\n\nUser: Question\n\nAssistant: Private reasoning\n\nSelected answer");
+  assert.doesNotMatch(capture.text, /IGNORED_SENTINEL/);
+  data.chat_messages[0].attachments = "malformed";
+  assert.equal((await harness.window.__capCaptureClaudeJson()).text, capture.text);
+});
+
+test("Claude JSON capture avoids repeated paste text within a turn but preserves distinct turns", async () => {
+  const data = fixture();
+  data.chat_messages[0].content = [{ type: "text", text: "Prompt\n\nSame paste" }];
+  data.chat_messages[0].attachments = [pastedAttachment("Same paste"), pastedAttachment("Same paste"), pastedAttachment("Extra paste"), pastedAttachment("Extra paste")];
+  data.chat_messages.push({ uuid: "next-user", sender: "human", parent_message_uuid: "question", content: [], attachments: [pastedAttachment("Same paste")] });
+  data.chat_messages[2].parent_message_uuid = "next-user";
+  const harness = setup(data);
+  await harness.window.fetch(endpoint);
+  const capture = await harness.window.__capCaptureClaudeJson();
+  assert.equal(capture.text, "Claude conversation:\n\nUser: Prompt\n\nSame paste\n\nExtra paste\n\nUser: Same paste\n\nAssistant: Private reasoning\n\nSelected answer");
+  assert.equal(capture.messageTurnCount, 3);
+});
+
+test("Claude JSON capture counts pasted text toward the existing size limit", async () => {
+  const data = fixture();
+  data.chat_messages[0].attachments = [pastedAttachment("x".repeat(350000))];
+  const harness = setup(data);
+  await harness.window.fetch(endpoint);
+  await assert.rejects(harness.window.__capCaptureClaudeJson(), /350,000/);
+});
 
 test("Claude fetch wrapper forwards responses and does not read bodies until requested", async () => {
   const harness = setup();

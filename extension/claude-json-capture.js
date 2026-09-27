@@ -26,7 +26,7 @@
       if (!["human", "assistant"].includes(message.sender)) return [];
       const blocks = Array.isArray(message.content) ? message.content : [];
       // Only direct turn blocks are eligible. Never recurse into tools, artifacts,
-      // attachments, files, or sync sources, even when they contain text blocks.
+      // files, or sync sources, even when they contain text blocks.
       const parts = blocks.flatMap(block => {
         const value = block?.type === "text" ? block.text
           : block?.type === "thinking" ? (block.thinking ?? block.text) : null;
@@ -35,6 +35,14 @@
       // Legacy turn text is an alternative only when structured content is absent.
       if (message.content == null || blocks.length === 0) {
         if (typeof message.text === "string" && message.text.trim()) parts.push(message.text.trim());
+      }
+      // Claude's pasted cards are unnamed txt attachments, unlike named uploads.
+      // Their complete text belongs to the owning user turn, not a separate turn.
+      const attachments = message.sender === "human" && Array.isArray(message.attachments) ? message.attachments : [];
+      for (const attachment of attachments) {
+        if (attachment?.file_type !== "txt" || attachment.file_name !== "" || typeof attachment.extracted_content !== "string") continue;
+        const pastedText = attachment.extracted_content.trim();
+        if (pastedText && !parts.some(part => part.includes(pastedText))) parts.push(pastedText);
       }
       if (!parts.length) return [];
       return [(message.sender === "human" ? "User" : "Assistant") + ": " + parts.join("\n\n")];

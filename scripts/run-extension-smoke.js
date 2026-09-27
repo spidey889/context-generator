@@ -8,6 +8,7 @@ const { spawn } = require("node:child_process");
 const REPO_ROOT = path.resolve(__dirname, "..");
 const SOURCE_SENTINEL = "SMOKE_USER_SENTINEL: preserve the deployment checklist.";
 const ASSISTANT_SENTINEL = "SMOKE_ASSISTANT_SENTINEL: verify staging before release.";
+const CLAUDE_PASTED_TEXT = `CLAUDE_PASTE_START\n${"Full pasted-card line, absent from the DOM.\n".repeat(1000)}CLAUDE_PASTE_END`;
 const SUMMARY_TEXT = [
   "CONTEXT CARRY — READY TO PASTE",
   "",
@@ -336,7 +337,11 @@ async function startFixtureServer() {
       response.end(JSON.stringify({
         uuid: "smoke", current_leaf_message_uuid: "assistant",
         chat_messages: [
-          { uuid: "user", sender: "human", parent_message_uuid: null, content: [{ type: "text", text: `${SOURCE_SENTINEL}\nJSON_ONLY_SENTINEL: loaded from the API, absent from the DOM.` }] },
+          { uuid: "user", sender: "human", parent_message_uuid: null, content: [{ type: "text", text: `${SOURCE_SENTINEL}\nJSON_ONLY_SENTINEL: loaded from the API, absent from the DOM.` }], attachments: [
+            { file_name: "", file_type: "txt", extracted_content: CLAUDE_PASTED_TEXT },
+            { file_name: "upload.txt", file_type: "txt", extracted_content: "CLAUDE_ATTACHMENT_IGNORED_SENTINEL" },
+            { file_name: "", file_type: "image/png", extracted_content: "CLAUDE_ATTACHMENT_IGNORED_SENTINEL" }
+          ] },
           { uuid: "assistant", sender: "assistant", parent_message_uuid: "user", content: [{ type: "text", text: ASSISTANT_SENTINEL }] }
         ]
       }));
@@ -659,6 +664,12 @@ async function run() {
     if (JSON_CAPTURE_SMOKE) {
       assert.match(capturedConversation, new RegExp(`^${JSON_SOURCE === "claude" ? "Claude" : "ChatGPT"} conversation:`));
       assert.match(capturedConversation, /JSON_ONLY_SENTINEL/);
+      if (JSON_SOURCE === "claude") {
+        assert.ok(capturedConversation.includes(CLAUDE_PASTED_TEXT), "The complete pasted attachment must reach the backend.");
+        assert.equal(capturedConversation.split("CLAUDE_PASTE_START").length - 1, 1, "The pasted text must be included once.");
+        assert.ok(capturedConversation.indexOf("CLAUDE_PASTE_END") < capturedConversation.indexOf("Assistant:"), "The paste must remain in its owning user turn.");
+        assert.doesNotMatch(capturedConversation, /CLAUDE_ATTACHMENT_IGNORED_SENTINEL/);
+      }
       assert.equal(state.jsonRequests, jsonRequestsBeforeTransfer + 1, "JSON capture must fetch fresh conversation data exactly once after destination selection.");
     }
     process.stdout.write("✓ Capture reached the stub backend exactly once with both conversation turns.\n");

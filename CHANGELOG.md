@@ -1,5 +1,7 @@
 # Changelog
 
+- 2026-09-27: Claude JSON capture now includes complete `extracted_content` from human-turn pasted cards, identified in live JSON as unnamed `txt` attachments. Named uploads and other attachment/file/tool types remain ignored. Pasted text stays in its owning user turn, avoids duplicate inclusion within that turn, and counts toward the existing size limit. Added focused regressions and a Claude-only large-paste backend assertion to the isolated Brave JSON smoke.
+
 - 2026-09-27: Replaced Claude and ChatGPT's experimental JSON toggle wording with an icon-only ⚡ fast-capture button, retaining default-off behavior and adding a highlighted enabled state, tooltip, and accessible label.
 
 - 2026-09-27: Added ChatGPT source JSON capture on `codex/chatgpt-json-capture`, branched from the Claude experiment. The default-off picker toggle uses an early MAIN-world fetch hook, in-page auth reuse, a fresh full-tree conversation request, and `current_node` branch traversal. Explicit missing/previous-page/incomplete indicators and broken active branches fail before backend submission. Only own user/assistant text/thinking strings are retained; tools/files/images/artifacts are skipped. Added focused regressions and a nonce-CSP Brave smoke mode for the authenticated full-tree-to-backend-to-paste path.
