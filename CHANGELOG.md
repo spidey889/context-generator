@@ -1,5 +1,7 @@
 # Changelog
 
+- 2026-09-27: Retired the one-time apology notice, including its popup, message handlers, server endpoint, receipt retry queue, preview, and setup guide. Removed two uncalled content-script helpers (old tile-entry animation and Claude reserved-translation lookup) and unused tile-entry styling. Advanced the content-script identity so reinjection retires old instances. Historical notice receipts remain untouched; current source no longer reads or sends them. All 198 tests passed. The isolated Brave smoke passed extension loading and Claude placement, then stopped on a pre-existing injected-script syntax error in the smoke runner.
+
 - 2026-09-27: Moved the archived homepage, social preview image, and standalone skill into legacy/, updated the archived page asset links, and removed both checked-in extension ZIPs. Local installation now uses the unpacked xtension/ folder.
 
 - 2026-09-27: Prevented Dark Reader from recoloring the website by adding its official static page lock to the public HTML pages. The homepage also declares its intended light color scheme, so GitHub Pages matches the local design without requiring visitors to change extension settings.

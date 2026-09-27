@@ -318,9 +318,3 @@ GitHub Actions runs the gate on `master`, daily at 06:17 UTC, and manually using
 5. Update every duplicated contract surface, `LOGIC.md`, and a meaningful `CHANGELOG.md` entry. Do not treat `todo.md` as release documentation.
 6. For extension releases, bump the manifest deliberately and rebuild/compare the ZIP. For ordinary source changes, do not silently publish or overwrite release artifacts.
 7. Review `git diff --check` and `git status`, stage only task-owned files, commit, and push the current branch.
-
-### One-time install notice
-
-Since extension 1.4.5, Cap Context asks `/api/notice` once per installation/campaign when an orb is visible on a foreground AI tab. The recipient is `CAP_NOTICE_TARGET_INSTALL_ID` in production; no public recipient list is shipped. Redis atomically claims `cap-context:notice:transfer-apology-20260918:<install-id>` without expiry, and local storage also remembers the check. The approved apology uses plain text in a Shadow DOM popup near the orb. OK or a 30-second deadline closes it. Owned timers and node cleanup follow content-script teardown. Receipt fields are `claimed_at`, `displayed_at`, `dismissal` (`ok` or `timeout`), and `dismissed_at`. Events are queued in local storage and retried with the existing telemetry alarm. No transcript content is collected.
-
-Delivery is at most once: a browser crash between the atomic claim and rendering can consume the notice without showing it. A claim is not proof of display, and display is not proof of reading. Closed tabs may leave a shown receipt with no dismissal. Old extension versions cannot receive this feature until updated. Publishing source or packaging a ZIP does not prove Web Store distribution. See `docs/install-notice.md`.
