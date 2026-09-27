@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-09-27-yellow-speed-toggle-v40";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-09-27-icon-speed-toggle-v41";
   let claudeJsonCaptureEnabled = false;
   let chatGptJsonCaptureEnabled = false;
   const INSTANCE_TEARDOWN_KEY = "__contextGeneratorPlatformTeardown";
@@ -4634,11 +4634,11 @@
         height: 32px;
         margin: 0;
         padding: 0;
-        border: 1px solid rgba(255,255,255,0.09) !important;
+        border: 1px solid transparent !important;
         border-radius: 10px;
-        background: rgba(255,255,255,0.035) !important;
+        background: transparent !important;
         color: #a9a3b2 !important;
-        box-shadow: inset 0 1px 0 rgba(255,255,255,0.035) !important;
+        box-shadow: none !important;
         cursor: pointer;
         transition: background 140ms ease, border-color 140ms ease, color 140ms ease;
       }
@@ -4648,8 +4648,6 @@
         color: #f1edf7 !important;
       }
       #${DESTINATION_SHEET_ID} .context-generator-speed-toggle[aria-pressed="true"] {
-        background: rgba(250,204,21,0.12) !important;
-        border-color: rgba(250,204,21,0.35) !important;
         color: #facc15 !important;
       }
       #${DESTINATION_SHEET_ID} .context-generator-speed-toggle:focus-visible {

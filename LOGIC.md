@@ -117,7 +117,7 @@ Background retries missing receivers every 120 ms and may inject the content scr
 
 ### JSON capture experiments (feature branches only)
 
-Claude and ChatGPT show an icon-only lightning button for fast capture at the right of the destination picker's brand header. It uses a small outlined vector icon, neutral idle styling, and a yellow pressed state, with hover and keyboard-focus feedback. Its tooltip and accessible label explain the control. Capture selection remains off by default, and clicking the button alone does not capture or transmit text.
+Claude and ChatGPT show an icon-only lightning button for fast capture at the right of the destination picker's brand header. It uses a small outlined vector icon, neutral idle styling, and a yellow icon when pressed. The button background and border are transparent until hover; keyboard focus retains an outline. Its tooltip and accessible label explain the control. Capture selection remains off by default, and clicking the button alone does not capture or transmit text.
 
 On `codex/claude-json-capture`, Claude's destination picker has a page-local `JSON capture` toggle, off by default. The toolbar and all other platforms continue using DOM capture. With the toggle off, the existing picker DOM preparation/sweep is unchanged.
 

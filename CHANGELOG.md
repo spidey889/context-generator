@@ -1,5 +1,7 @@
 # Changelog
 
+- 2026-09-27: Made fast capture icon-only at rest: only the lightning turns yellow when enabled; the subtle box appears on hover. Keyboard focus remains visible.
+
 - 2026-09-27: Changed the enabled fast-capture lightning button to yellow, with subtle matching background and border accents. Toggle behavior is unchanged.
 
 - 2026-09-27: Hardened Claude JSON hook lifecycle: reinstall MAIN/bridge scripts on existing Claude tabs, ensure MAIN readiness before explicit capture, recover exact-chat routing from resource timing, and keep bounded per-chat endpoints instead of a single prefetch-sensitive URL. Added idempotent hook replacement, a bounded initial-load routing wait, prompt concurrent-request rejection, navigation cancellation, and fixed private-error masking. Default DOM capture, picker behavior, ChatGPT and summarization remain unchanged. Added lifecycle and background installation regressions.
