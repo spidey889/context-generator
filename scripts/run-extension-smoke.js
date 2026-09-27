@@ -24,6 +24,7 @@ const SUMMARY_TEXT = [
 const SMOKE_PLATFORM_QUERY = "__cap_context_smoke_platform";
 const SMOKE_TIMEOUT_MS = Number(process.env.CAP_CONTEXT_SMOKE_TIMEOUT_MS || 45000);
 const CLAUDE_PLACEMENT_SCREENSHOT_PATH = process.env.CAP_CONTEXT_CLAUDE_PLACEMENT_SCREENSHOT || "";
+const PICKER_SCREENSHOT_PATH = process.env.CAP_CONTEXT_PICKER_SCREENSHOT || "";
 const JSON_SOURCE = process.env.CAP_CONTEXT_JSON_SMOKE === "chatgpt" ? "chatgpt" : process.env.CAP_CONTEXT_JSON_SMOKE === "1" ? "claude" : null;
 const JSON_CAPTURE_SMOKE = Boolean(JSON_SOURCE);
 
@@ -592,8 +593,25 @@ async function run() {
       const before = state.jsonRequests;
       await sourceSession.evaluate(`document.getElementById("context-generator-bubble").click()`);
       assert.equal(await sourceSession.evaluate(`document.getElementById("context-generator-${JSON_SOURCE}-json-toggle").getAttribute("aria-pressed")`), "false");
+      const idleToggle = await sourceSession.evaluate(`(() => {
+        const toggle = document.getElementById("context-generator-${JSON_SOURCE}-json-toggle");
+        const rect = toggle.getBoundingClientRect();
+        const header = toggle.parentElement.getBoundingClientRect();
+        return { icon: Boolean(toggle.querySelector("svg[aria-hidden='true']")), header: toggle.parentElement.contains(document.querySelector(".context-generator-destination-brand")), inHeader: rect.top >= header.top && rect.bottom <= header.bottom && rect.left >= header.left && rect.right <= header.right, color: getComputedStyle(toggle).color };
+      })()`);
+      assert.equal(idleToggle.icon, true, "Fast capture must use a decorative vector icon.");
+      assert.equal(idleToggle.header, true, "The fast-capture control must sit in the brand header.");
+      assert.equal(idleToggle.inHeader, true, "Host button styles must not move the fast-capture control outside the header.");
       await sourceSession.evaluate(`document.getElementById("context-generator-${JSON_SOURCE}-json-toggle").click()`);
       assert.equal(await sourceSession.evaluate(`document.getElementById("context-generator-${JSON_SOURCE}-json-toggle").getAttribute("aria-pressed")`), "true");
+      await waitFor(async () => await sourceSession.evaluate(`getComputedStyle(document.getElementById("context-generator-${JSON_SOURCE}-json-toggle")).color`) === "rgb(218, 199, 247)", "the fast-capture enabled color");
+      assert.notEqual(idleToggle.color, "rgb(218, 199, 247)", "The enabled state must be visibly distinct.");
+      if (PICKER_SCREENSHOT_PATH) {
+        await waitFor(async () => await sourceSession.evaluate(`getComputedStyle(document.getElementById("context-generator-destination-sheet")).opacity`) === "1", "the visible picker");
+        const clip = await sourceSession.evaluate(`(() => { const r = document.getElementById("context-generator-destination-sheet").getBoundingClientRect(); return { x: r.x - 12, y: r.y - 12, width: r.width + 24, height: r.height + 24, scale: 1 }; })()`);
+        const screenshot = await sourceSession.call("Page.captureScreenshot", { format: "png", clip });
+        await fs.promises.writeFile(PICKER_SCREENSHOT_PATH, Buffer.from(screenshot.data, "base64"));
+      }
       assert.equal(state.jsonRequests, before, "Toggling JSON capture must not fetch a conversation.");
       assert.equal(state.summaryRequests.length, 0, "Toggling JSON capture must not submit a transcript.");
       await sourceSession.evaluate(`document.querySelector("#context-generator-destination-backdrop").click()`);

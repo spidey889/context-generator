@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-09-27-speed-toggle-v38";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-09-27-speed-toggle-v39";
   let claudeJsonCaptureEnabled = false;
   let chatGptJsonCaptureEnabled = false;
   const INSTANCE_TEARDOWN_KEY = "__contextGeneratorPlatformTeardown";
@@ -4622,6 +4622,47 @@
         box-shadow: inset 0 1px 0 rgba(255,255,255,0.08),0 7px 18px rgba(74,48,121,0.2) !important;
       }
       #${DESTINATION_SHEET_ID} .context-generator-destination-title { color: #ffffff !important; }
+      #${DESTINATION_SHEET_ID} .context-generator-speed-toggle {
+        appearance: none;
+        position: relative !important;
+        inset: auto !important;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        flex: 0 0 auto;
+        width: 32px;
+        height: 32px;
+        margin: 0;
+        padding: 0;
+        border: 1px solid rgba(255,255,255,0.09) !important;
+        border-radius: 10px;
+        background: rgba(255,255,255,0.035) !important;
+        color: #a9a3b2 !important;
+        box-shadow: inset 0 1px 0 rgba(255,255,255,0.035) !important;
+        cursor: pointer;
+        transition: background 140ms ease, border-color 140ms ease, color 140ms ease;
+      }
+      #${DESTINATION_SHEET_ID} .context-generator-speed-toggle:hover {
+        background: rgba(255,255,255,0.07) !important;
+        border-color: rgba(255,255,255,0.18) !important;
+        color: #f1edf7 !important;
+      }
+      #${DESTINATION_SHEET_ID} .context-generator-speed-toggle[aria-pressed="true"] {
+        background: rgba(167,132,225,0.14) !important;
+        border-color: rgba(190,163,234,0.35) !important;
+        color: #dac7f7 !important;
+      }
+      #${DESTINATION_SHEET_ID} .context-generator-speed-toggle:focus-visible {
+        outline: 2px solid rgba(190,162,233,0.78) !important;
+        outline-offset: 3px;
+      }
+      #${DESTINATION_SHEET_ID} .context-generator-speed-toggle svg {
+        display: block;
+        width: 16px;
+        height: 16px;
+        fill: none !important;
+        stroke: currentColor !important;
+      }
       #${DESTINATION_SHEET_ID} .context-generator-destination-tile {
         border-color: rgba(255,255,255,0.1) !important;
         background: linear-gradient(180deg,rgba(255,255,255,0.05),rgba(255,255,255,0.022)) !important;
@@ -4756,7 +4797,8 @@
           animation: none;
         }
 
-        #${DESTINATION_SHEET_ID} .context-generator-destination-tile {
+        #${DESTINATION_SHEET_ID} .context-generator-destination-tile,
+        #${DESTINATION_SHEET_ID} .context-generator-speed-toggle {
           transition: none !important;
         }
       }
@@ -4813,7 +4855,7 @@
     const header = document.createElement("div");
     header.style.cssText = "padding:0 1px 11px;display:flex;flex-direction:column;align-items:flex-start;gap:0";
     const topLine = document.createElement("div");
-    topLine.style.cssText = "width:100%;display:flex;align-items:center;justify-content:flex-start;gap:10px;margin-bottom:11px";
+    topLine.style.cssText = "width:100%;display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:11px";
     const brandLockup = document.createElement("div");
     brandLockup.className = "context-generator-destination-brand";
     brandLockup.style.cssText = "display:flex;align-items:center;gap:8px;color:rgba(247,244,250,0.76) !important;font-size:11.5px;font-weight:650;line-height:1";
@@ -4985,11 +5027,11 @@
       const toggle = document.createElement("button");
       toggle.type = "button";
       toggle.id = `context-generator-${currentPlatform.id}-json-toggle`;
+      toggle.className = "context-generator-speed-toggle";
       toggle.setAttribute("aria-pressed", "false");
       toggle.setAttribute("aria-label", "Fast capture");
       toggle.title = "Fast capture: Off";
-      toggle.textContent = "⚡";
-      toggle.style.cssText = "margin:10px 2px 0;width:36px;height:32px;padding:0;border:1px solid rgba(255,255,255,.25) !important;border-radius:7px;background:#211d29 !important;color:#fff !important;font-size:18px;cursor:pointer";
+      toggle.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="m13 2-9 12h7l-1 8 10-12h-7l1-8Z"/></svg>';
       addOwnedEventListener(toggle, "click", () => {
         if (isRunning) return;
         let enabled;
@@ -4997,10 +5039,8 @@
         else enabled = chatGptJsonCaptureEnabled = !chatGptJsonCaptureEnabled;
         toggle.setAttribute("aria-pressed", String(enabled));
         toggle.title = `Fast capture: ${enabled ? "On" : "Off"}`;
-        toggle.style.setProperty("background", enabled ? "#513779" : "#211d29", "important");
-        toggle.style.setProperty("border-color", enabled ? "#bc97ef" : "rgba(255,255,255,.25)", "important");
       });
-      sheet.appendChild(toggle);
+      topLine.appendChild(toggle);
     }
 
     const footer = document.createElement("div");
