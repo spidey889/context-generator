@@ -238,16 +238,31 @@
     }
 
     .hero .re-explaining {
+      position: relative;
+      display: inline-block;
       white-space: nowrap;
-      /* Keep a real text fill: dark-mode extensions can replace clipped gradients. */
-      color: #c4a5f5 !important;
-      -webkit-text-fill-color: #c4a5f5 !important;
-      animation: lavender-shimmer 10s ease-in-out infinite;
+      color: #9560df !important;
+      -webkit-text-fill-color: #9560df !important;
     }
 
-    @keyframes lavender-shimmer {
-      0%, 100% { filter: brightness(1); text-shadow: 0 0 0 transparent; }
-      50% { filter: brightness(1.12); text-shadow: 0 0 14px rgba(196, 165, 245, 0.25); }
+    .hero .re-explaining-shine {
+      /* Sweep solid duplicate glyphs, avoiding gradients rewritten by dark-mode extensions. */
+      position: absolute;
+      inset: 0;
+      pointer-events: none;
+      color: #d9baff !important;
+      -webkit-text-fill-color: #d9baff !important;
+      clip-path: polygon(-35% 0, -15% 0, -35% 100%, -55% 100%);
+      animation: lavender-sweep 8s linear infinite;
+    }
+
+    @keyframes lavender-sweep {
+      0%, 15% { clip-path: polygon(-35% 0, -15% 0, -35% 100%, -55% 100%); }
+      80%, 100% { clip-path: polygon(135% 0, 155% 0, 135% 100%, 115% 100%); }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      .hero .re-explaining-shine { display: none; }
     }
 
     .hero p {
@@ -1075,7 +1090,7 @@
   <main id="top">
     <section class="hero section container reveal">
 
-      <h1 style="color: #000000 !important;">Switch AIs without <span class="re-explaining">re-explaining</span> everything.</h1>
+      <h1 style="color: #000000 !important;">Switch AIs without <span class="re-explaining">re-explaining<span class="re-explaining-shine" aria-hidden="true">re-explaining</span></span> everything.</h1>
       <p>Install once in Claude. Type /context-generator. Continue anywhere.</p>
       <div class="hero-actions">
         <a class="button button-dark" id="hero-install-btn" href="SKILL.md" download="SKILL.md">Install in Claude →</a>
