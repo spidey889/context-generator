@@ -1,5 +1,7 @@
 # Changelog
 
+- 2026-09-27: Made Claude JSON validation failures identify the first blocking field or content type and its active-branch message/block position, without including message text, filenames, or tool payloads. Capture acceptance rules remain unchanged. Documented the previously added support for Claude's actual root-parent marker.
+
 - 2026-09-27: Allowed Claude JSON capture to skip `image` content blocks while retaining surrounding text. All other unsupported-content and empty-message checks remain unchanged; regressions cover mixed image/text and images alongside tools, artifacts, files, and sync sources.
 
 - 2026-09-27: Added the opt-in Claude JSON capture experiment on `codex/claude-json-capture`. A MAIN-world fetch wrapper remembers only the endpoint; a destination-picker toggle triggers a fresh cookie-authenticated read and active-branch transcript conversion through the existing summary/paste pipeline. DOM capture remains the default. The initial text/pasted-text scope rejects tools, uploaded files, incomplete branches, and truncation rather than silently omitting them. Added bridge/serializer regressions and an isolated Brave JSON smoke mode; repaired the smoke fixture's content-script selection after adding manifest entries and its generated-script newline escaping.

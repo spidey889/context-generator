@@ -125,6 +125,8 @@ The experiment follows `current_leaf_message_uuid` through parent links, include
 
 Reload the unpacked extension and refresh a saved Claude conversation before testing, so the early MAIN-world hook sees the endpoint. Browser-specific MAIN-world support and live Claude schema compatibility remain experiment limitations; the default production capture design is still the DOM sweep below.
 
+JSON validation failures identify the first blocker using the active-branch message number/role, block type or field, and attachment position where applicable. They never include conversation text, filenames, or tool payloads. File entries remain a separate blocker even when `image` content blocks are skipped. Both the all-zero root sentinel and Claude's `00000000-0000-4000-8000-000000000000` root marker are accepted.
+
 Minimal local checks: `node --test test/claude-json-capture.test.js`; ordinary `npm run test:extension-smoke` for the DOM path; in PowerShell, `$env:CAP_CONTEXT_JSON_SMOKE='1'; npm run test:extension-smoke` for a controlled JSON-to-stub-backend-to-paste flow in isolated Brave. Clear that environment variable before running the ordinary smoke in the same shell. The controlled smoke establishes extension integration, not a real Claude/provider transfer.
 
 ### Preparation and sweep

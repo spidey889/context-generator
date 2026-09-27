@@ -123,6 +123,33 @@ test("Claude JSON capture accepts Claude's actual root-parent marker", async () 
   assert.match(capture.text, /Assistant: Selected answer/);
 });
 
+test("Claude JSON capture reports the blocking field or block without exposing content", async () => {
+  const cases = [
+    [data => { data.chat_messages[2].files = [{ file_name: "PRIVATE_SENTINEL" }]; }, /Message 2 \(Assistant\).*message\.files/],
+    [data => { data.chat_messages[2].sync_sources = [{ text: "PRIVATE_SENTINEL" }]; }, /Message 2 \(Assistant\).*message\.sync_sources/],
+    [data => { data.chat_messages[2].content.push({ type: "tool_use", input: "PRIVATE_SENTINEL" }); }, /Message 2 \(Assistant\), block 3.*"tool_use"/],
+    [data => { data.chat_messages[2].content.push({ type: "tool_result", content: "PRIVATE_SENTINEL" }); }, /block 3.*"tool_result"/],
+    [data => { data.chat_messages[2].content.push({ type: "artifact", text: "PRIVATE_SENTINEL" }); }, /block 3.*"artifact"/],
+    [data => { data.chat_messages[2].content.push({ type: "PRIVATE_SENTINEL<script>" }); }, /unsupported content type "unknown"/],
+    [data => { data.chat_messages[2].truncated = true; }, /Message 2 \(Assistant\) is marked truncated/],
+    [data => { data.chat_messages[0].attachments[0].extracted_content = ""; }, /Message 1 \(User\), attachment 1.*extracted_content/],
+    [data => { data.chat_messages[2].content = [{ type: "image", source: "PRIVATE_SENTINEL" }]; }, /Message 2 \(Assistant\) has no usable text/],
+    [data => { data.chat_messages[0].parent_message_uuid = "missing"; }, /parent message is missing/],
+    [data => { data.chat_messages[0].parent_message_uuid = "answer"; }, /parent links form a cycle/]
+  ];
+  for (const [mutate, reason] of cases) {
+    const data = fixture();
+    mutate(data);
+    const harness = setup(data);
+    await harness.window.fetch(endpoint);
+    await assert.rejects(harness.window.__capCaptureClaudeJson(), error => {
+      assert.match(error.message, reason);
+      assert.doesNotMatch(error.message, /PRIVATE_SENTINEL|Selected answer|Question|notes\.txt/);
+      return true;
+    });
+  }
+});
+
 test("Claude JSON capture accepts the root sentinel and rejects oversized transcripts", async () => {
   const data = fixture();
   data.chat_messages[0].parent_message_uuid = "00000000-0000-0000-0000-000000000000";
