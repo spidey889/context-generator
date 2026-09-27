@@ -18,8 +18,8 @@ Use evidence in this order: the owner's current request and project instructions
 - Use Node 22 for tests and scripts. The project intentionally has no tracked lockfile or runtime npm dependency list; tests and smoke tooling use Node built-ins and Node's global WebSocket.
 - `extension/manifest.json` currently reports version `1.4.6` and contains both Chromium and Firefox background declarations. The manifest number alone does not prove the Web Store contains the checkout's behavior.
 - Production web/API URL: `https://context-generator-five.vercel.app`. The analysis bridge and canonical site links currently use `https://spidey889.github.io/context-generator`.
-- Release warning verified 2026-09-08: the old `cap-context-extension.zip` is stale relative to `extension/`. It is missing both EBGaramond fonts and contains older `manifest.json` and `platform-content.js` files. The versioned `cap-context-extension-1.4.6.zip` is built from tracked `extension/` files and hash-compared before distribution; the old archive must not be published.
-- `index.html` serves the restored landing-page design with a deliberately minimal extension-focused hero. Both top install links open the Chrome Web Store; privacy links open `privacy.html`. The hero keeps only the headline, the light supporting line `Install once and continue anywhere.`, and two high-contrast actions. Its purple highlight sweep is disabled for reduced motion. The diagram sits close enough to the actions to enter the first desktop viewport without changing the diagram itself. The diagram and lower skill-install/video sections remain historical content retained at the owner's request and still use the dated demo video and `SKILL.md`; they have not yet been migrated to extension instructions. `index.legacy-2026-07-15.html` preserves the replaced newer landing page; its filename is retained for continuity.
+- The checked-in extension ZIPs were removed. Load the local `extension/` folder or install from the Chrome Web Store; build and verify a fresh archive when preparing a ZIP release.
+- `index.html` serves the restored landing-page design with a deliberately minimal extension-focused hero. Both top install links open the Chrome Web Store; privacy links open `privacy.html`. The hero keeps only the headline, the light supporting line `Install once and continue anywhere.`, and two high-contrast actions. Its purple highlight sweep is disabled for reduced motion. The diagram sits close enough to the actions to enter the first desktop viewport without changing the diagram itself. The diagram and lower skill-install/video sections remain historical content retained at the owner's request and still use the dated demo video and the embedded skill text; they have not yet been migrated to extension instructions. `legacy/index.legacy-2026-07-15.html` preserves the replaced newer landing page alongside `legacy/og-cap-context.png` and `legacy/SKILL.md`.
 
 ## Non-Negotiable Invariants
 
@@ -182,7 +182,7 @@ Gemini 3.6 Flash
 
 ### Prompt and validation
 
-Providers receive a system prompt and a user JSON envelope with schema `cap-context-conversation-v1` and data type `untrusted-conversation-transcript`. `getSummarySystemPrompt()` and `getContextCarryTemplate()` are the complete backend prompt contract; the retained standalone `SKILL.md` is a reference artifact and is not read by the backend.
+Providers receive a system prompt and a user JSON envelope with schema `cap-context-conversation-v1` and data type `untrusted-conversation-transcript`. `getSummarySystemPrompt()` and `getContextCarryTemplate()` are the complete backend prompt contract; the retained standalone `legacy/SKILL.md` is a reference artifact and is not read by the backend.
 
 The prompt still requests the exact title and all seven sections once and in order: WHO I AM, WHAT WE WERE DOING, WHERE WE LEFT OFF, DECISIONS MADE, OPEN QUESTIONS, KEY CONTEXT, NEXT STEP. Since 2026-09-18, strict output validation is temporarily advisory: any non-empty provider text is accepted even when its header, sections, length, or content checks fail. Empty responses and provider/network errors still advance through the fallback chain. See `docs/summary-validation.md` for restoration instructions.
 
@@ -261,7 +261,7 @@ Native menus and popovers may temporarily mark the background application `aria-
 
 ## Common Wrong Assumptions
 
-- The retained standalone `SKILL.md` is not the backend prompt. The provider sees only the strings assembled in `api/summarize.js`.
+- The retained standalone `legacy/SKILL.md` is not the backend prompt. The provider sees only the strings assembled in `api/summarize.js`.
 - The profile's `minWords` is not the acceptance floor; use `getMinimumValidSummaryWords()` to understand validation.
 - A structurally valid Context Carry is not proven factually grounded because the validator never sees the source transcript.
 - A passing fake-DOM capture test does not prove a current live site DOM works; capture regressions require a real DOM trace and then a fixture.

@@ -4,7 +4,7 @@ Switch AIs without explaining everything all over again.
 
 You already had the conversation. Cap Context helps you carry the useful parts to Claude, ChatGPT, Gemini, Grok, or DeepSeek and continue from there.
 
-[Install from the Chrome Web Store](https://chromewebstore.google.com/detail/cap-context/lpkaciijlhckkdhbgidbjfkldigghnjf) · [Download the ZIP](cap-context-extension-1.4.6.zip) · [Visit the website](https://context-generator-five.vercel.app/).
+[Install from the Chrome Web Store](https://chromewebstore.google.com/detail/cap-context/lpkaciijlhckkdhbgidbjfkldigghnjf) · [Visit the website](https://context-generator-five.vercel.app/).
 
 ## What does it do?
 
@@ -16,15 +16,15 @@ Cap Context prepares your conversation for another AI and places it in the new m
 
 Open the [Chrome Web Store page](https://chromewebstore.google.com/detail/cap-context/lpkaciijlhckkdhbgidbjfkldigghnjf), select **Add to Chrome**, and you are good to go. It works in Brave too.
 
-The 1.4.6 ZIP below contains the latest summary paste fix. The Web Store listing has not been verified at this version.
+The checked-in extension source is version 1.4.6. The Web Store listing has not been verified at this version.
 
-### Prefer the ZIP?
+### Load the local extension
 
-1. [Download the ZIP](cap-context-extension-1.4.6.zip) and extract it.
+1. Use the local `extension/` folder from this checkout.
 2. Open `chrome://extensions` in Chrome or `brave://extensions` in Brave.
 3. Turn on **Developer mode**.
 4. Select **Load unpacked**.
-5. Choose the extracted folder that contains `manifest.json`.
+5. Choose `extension/`, which contains `manifest.json`.
 
 That is the most technical this README gets.
 

@@ -1,5 +1,7 @@
 # Changelog
 
+- 2026-09-27: Moved the archived homepage, social preview image, and standalone skill into legacy/, updated the archived page asset links, and removed both checked-in extension ZIPs. Local installation now uses the unpacked xtension/ folder.
+
 - 2026-09-27: Tightened the transition from the homepage actions to the product diagram, reducing the empty band below the hero while preserving the requested internal hero spacing and leaving the diagram unchanged.
 
 - 2026-09-27: Changed the hero support line to `Install once and continue anywhere.`, restored its lighter original styling, and increased its spacing below the headline.
