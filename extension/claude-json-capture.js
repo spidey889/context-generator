@@ -26,7 +26,7 @@
       const label = `Message ${index + 1} (${message.sender === "human" ? "User" : message.sender === "assistant" ? "Assistant" : "unknown role"})`;
       if (!["human", "assistant"].includes(message.sender)) throw unsupported(`${label} has an unsupported sender role.`);
       if (message.truncated) throw unsupported(`${label} is marked truncated.`);
-      if (message.files?.length) throw unsupported(`${label} has file entries in message.files; file content is not supported by JSON capture, even when image blocks are skipped.`);
+      if (message.files?.length && message.files.some(file => file?.file_kind !== "image")) throw unsupported(`${label} has non-image file entries in message.files; only image files can be skipped.`);
       if (message.sync_sources?.length) throw unsupported(`${label} has synced-source entries in message.sync_sources.`);
       const blocks = message.content || [];
       if (!Array.isArray(blocks)) throw unsupported(`${label}'s content is not an array.`);

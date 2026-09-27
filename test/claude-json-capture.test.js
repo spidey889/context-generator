@@ -92,6 +92,29 @@ test("Claude JSON capture drops image blocks while preserving surrounding text",
   await assert.rejects(imageOnly.window.__capCaptureClaudeJson(), /incomplete or unsupported/);
 });
 
+test("Claude JSON capture skips image file entries but still rejects other file kinds", async () => {
+  const data = fixture();
+  data.chat_messages[0].files = [{ file_kind: "image", file_name: "IMAGE_FILE_SENTINEL.png" }];
+  const harness = setup(data);
+  await harness.window.fetch(endpoint);
+  const capture = await harness.window.__capCaptureClaudeJson();
+  assert.equal(capture.messageTurnCount, 2);
+  assert.match(capture.text, /User: Question/);
+  assert.match(capture.text, /Pasted notes/);
+  assert.match(capture.text, /Assistant: Selected answer/);
+  assert.doesNotMatch(capture.text, /IMAGE_FILE_SENTINEL/);
+
+  for (const file_kind of ["document", "audio", "video", "Image", undefined]) {
+    data.chat_messages[0].files = [
+      { file_kind: "image" },
+      { file_kind, file_name: "OTHER_FILE_SENTINEL" }
+    ];
+    const mixed = setup(data);
+    await mixed.window.fetch(endpoint);
+    await assert.rejects(mixed.window.__capCaptureClaudeJson(), /Message 1 \(User\).*non-image file entries in message\.files/);
+  }
+});
+
 test("Claude JSON capture still rejects incomplete or unsupported content alongside images", async () => {
   for (const mutate of [
     data => { data.chat_messages[2].parent_message_uuid = "missing"; },
