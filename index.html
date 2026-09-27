@@ -228,13 +228,14 @@
     }
 
     .hero {
+      --hero-stack-gap: clamp(3rem, 3.5vw, 4rem);
       text-align: center;
       padding-top: clamp(4rem, 8vw, 6.75rem);
     }
 
     .hero h1 {
       max-width: 24ch;
-      margin: 0 auto 2.75rem;
+      margin: 0 auto var(--hero-stack-gap);
       font-size: 64px;
       line-height: 0.94;
       letter-spacing: -0.075em;
@@ -284,7 +285,7 @@
       align-items: center;
       justify-content: center;
       gap: 1rem;
-      margin-top: 2rem;
+      margin-top: var(--hero-stack-gap);
       flex-wrap: wrap;
     }
 
@@ -1032,7 +1033,7 @@
         font-size: clamp(1.8rem, 8vw, 2.6rem);
         max-width: none;
         letter-spacing: -0.04em;
-        margin: 1rem auto 2.25rem;
+        margin: 1rem auto var(--hero-stack-gap);
       }
 
       .connector-section {
