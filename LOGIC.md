@@ -115,7 +115,7 @@ Background retries missing receivers every 120 ms and may inject the content scr
 
 ## Capture Engine
 
-### Claude JSON experiment (feature branch only)
+### JSON capture experiments (feature branches only)
 
 On `codex/claude-json-capture`, Claude's destination picker has a page-local `JSON capture` toggle, off by default. The toolbar and all other platforms continue using DOM capture. With the toggle off, the existing picker DOM preparation/sweep is unchanged.
 
@@ -128,6 +128,12 @@ Reload the unpacked extension and refresh a saved Claude conversation before tes
 JSON structural validation failures identify missing fields or invalid parent links without including conversation text, filenames, or tool payloads. Both the all-zero root sentinel and Claude's `00000000-0000-4000-8000-000000000000` root marker are accepted.
 
 Minimal local checks: `node --test test/claude-json-capture.test.js`; ordinary `npm run test:extension-smoke` for the DOM path; in PowerShell, `$env:CAP_CONTEXT_JSON_SMOKE='1'; npm run test:extension-smoke` for a controlled JSON-to-stub-backend-to-paste flow in isolated Brave. Clear that environment variable before running the ordinary smoke in the same shell. The controlled smoke establishes extension integration, not a real Claude/provider transfer.
+
+`codex/chatgpt-json-capture` branches from the Claude experiment and adds an independent ChatGPT-as-source picker toggle, off by default on each page load. The toolbar and toggle-off transfers retain DOM capture. A ChatGPT-only MAIN-world hook at `document_start` observes authenticated fetch headers without reading message bodies. Headers remain solely in page memory; they are never sent through the bridge, stored, logged, or sent to the summary backend. After destination selection, it performs a fresh same-origin `GET /backend-api/conversation/{id}` using observed auth/account headers and browser cookies. A native paginated request may supply auth, but its recent-message response is never used as capture data. Refresh a saved `/c/` chat after reloading the extension so the hook can observe auth.
+
+The isolated ChatGPT bridge requires a `mapping` tree and follows `current_node` to a root with a null parent. Missing parents/messages, cycles, missing parent fields, or explicit previous/next/missing/partial/truncated history indicators fail visibly before summary submission. It does not substitute a batch tree or recent-message page. Only own user/assistant text/thinking string parts are extracted; non-string multimodal parts, system/tool roles, tool-directed assistant messages, hidden messages, files, metadata and artifacts are skipped. Empty turns are skipped, with a content error only for a wholly empty transcript. Identity and transport limits remain. Latest Run labels successful capture `chatgpt-json`.
+
+Checks: `node --test test/chatgpt-json-capture.test.js`; `$env:CAP_CONTEXT_JSON_SMOKE='chatgpt'; npm run test:extension-smoke` verifies the off-by-default toggle, no capture on toggle, auth reuse, full-tree-only read under nonce CSP, API-only text reaching the stub backend once, and paste without Send in isolated Brave. These checks do not establish live ChatGPT-to-production capture.
 
 ### Preparation and sweep
 

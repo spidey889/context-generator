@@ -1,6 +1,7 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-09-27-claude-json-v36";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-09-27-chatgpt-json-v37";
   let claudeJsonCaptureEnabled = false;
+  let chatGptJsonCaptureEnabled = false;
   const INSTANCE_TEARDOWN_KEY = "__contextGeneratorPlatformTeardown";
   const INSTALL_NOTICE_NODE_ID = "context-generator-install-notice";
   let installNoticeChecked = false;
@@ -4980,18 +4981,20 @@
 
     sheet.appendChild(grid);
 
-    if (currentPlatform.id === "claude") {
+    if (["claude", "chatgpt"].includes(currentPlatform.id)) {
       const toggle = document.createElement("button");
       toggle.type = "button";
-      toggle.id = "context-generator-claude-json-toggle";
+      toggle.id = `context-generator-${currentPlatform.id}-json-toggle`;
       toggle.setAttribute("aria-pressed", "false");
       toggle.textContent = "JSON capture: Off (experimental)";
       toggle.style.cssText = "margin:10px 2px 0;padding:6px 9px;border:1px solid rgba(255,255,255,.25);border-radius:7px;background:#211d29 !important;color:#fff !important;font-size:11px;cursor:pointer";
       addOwnedEventListener(toggle, "click", () => {
         if (isRunning) return;
-        claudeJsonCaptureEnabled = !claudeJsonCaptureEnabled;
-        toggle.setAttribute("aria-pressed", String(claudeJsonCaptureEnabled));
-        toggle.textContent = `JSON capture: ${claudeJsonCaptureEnabled ? "On" : "Off"} (experimental)`;
+        let enabled;
+        if (currentPlatform.id === "claude") enabled = claudeJsonCaptureEnabled = !claudeJsonCaptureEnabled;
+        else enabled = chatGptJsonCaptureEnabled = !chatGptJsonCaptureEnabled;
+        toggle.setAttribute("aria-pressed", String(enabled));
+        toggle.textContent = `JSON capture: ${enabled ? "On" : "Off"} (experimental)`;
       });
       sheet.appendChild(toggle);
     }
@@ -5037,7 +5040,7 @@
       }
       if (event.key !== "Tab") return;
 
-      const focusableTiles = [...sheet.querySelectorAll(".context-generator-destination-tile, #context-generator-claude-json-toggle")]
+      const focusableTiles = [...sheet.querySelectorAll(".context-generator-destination-tile, #context-generator-claude-json-toggle, #context-generator-chatgpt-json-toggle")]
         .filter((tile) => !tile.disabled && tile.getAttribute("aria-disabled") !== "true");
       if (focusableTiles.length === 0) return;
       const focusedIndex = focusableTiles.indexOf(document.activeElement);
@@ -5341,6 +5344,7 @@
 
   async function startDestinationTransfer(destinationId) {
     const useClaudeJson = currentPlatform.id === "claude" && claudeJsonCaptureEnabled;
+    const useChatGptJson = currentPlatform.id === "chatgpt" && chatGptJsonCaptureEnabled;
     const trace = createTransferTrace(destinationId, "destination tile");
     trace.destinationId = destinationId;
     startTransferTelemetry(trace);
@@ -5372,7 +5376,7 @@
         preparedDestinationPromise = prepareDestinationTab(destinationId, trace);
       }
       advanceTransferTelemetryStage(trace, "capture_started");
-      if (!useClaudeJson) await prepareSourceForCapture();
+      if (!useClaudeJson && !useChatGptJson) await prepareSourceForCapture();
       if (!preparedDestinationPromise && getDetectedConversationMessageCount() > 0) {
         preparedDestinationPromise = prepareDestinationTab(destinationId, trace);
       }
@@ -5380,11 +5384,12 @@
       markTransferTrace(trace, "capture start");
       setHandoffProgress("capture", "active");
       let conversationText;
-      if (useClaudeJson) {
-        if (typeof window.__capCaptureClaudeJson !== "function") throw new Error("Refresh Claude to enable JSON capture.");
-        const capture = await window.__capCaptureClaudeJson();
+      if (useClaudeJson || useChatGptJson) {
+        const captureJson = useClaudeJson ? window.__capCaptureClaudeJson : window.__capCaptureChatGptJson;
+        if (typeof captureJson !== "function") throw new Error(`Refresh ${currentPlatform.name} to enable JSON capture.`);
+        const capture = await captureJson();
         conversationText = createConversationCapture(capture.text, {
-          method: "claude-json", messageTurnCount: capture.messageTurnCount,
+          method: useClaudeJson ? "claude-json" : "chatgpt-json", messageTurnCount: capture.messageTurnCount,
           usefulTurnCount: capture.messageTurnCount, candidateTurnCount: capture.messageTurnCount
         });
       } else {
