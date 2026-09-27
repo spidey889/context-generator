@@ -31,9 +31,18 @@
       if (!chat || request.chat !== chat || !endpoint || new URL(endpoint).pathname.split("/").pop() !== chat) {
         throw new Error("Refresh this Claude conversation before using JSON capture.");
       }
+      // Observed URLs may carry window/cursor parameters. Always request the
+      // native full-tree representation, rather than replaying a recent window.
+      const captureUrl = new URL(endpoint);
+      captureUrl.search = "";
+      captureUrl.searchParams.set("tree", "True");
+      captureUrl.searchParams.set("rendering_mode", "messages");
+      captureUrl.searchParams.set("render_all_tools", "true");
+      captureUrl.searchParams.set("include_inline_comparison", "true");
+      captureUrl.searchParams.set("consistency", "strong");
       // On-demand reads reuse browser cookies; no credentials are extracted or stored.
-      const response = await window.fetch(endpoint, { credentials: "same-origin", cache: "no-store", signal: controller.signal });
-      if (!response.ok || !response.headers.get("content-type")?.includes("application/json")) {
+      const response = await window.fetch(captureUrl.href, { credentials: "same-origin", cache: "no-store", signal: controller.signal });
+      if (response.status !== 200 || response.headers.has("content-range") || !response.headers.get("content-type")?.includes("application/json")) {
         throw new Error("Claude JSON capture could not load this conversation. Use DOM capture or refresh.");
       }
       const data = await response.clone().json();

@@ -3,9 +3,33 @@
   function serialize(data, chat) {
     // Report structural metadata only, never message text, file names, or tool payloads.
     const unsupported = reason => new Error(`This conversation has incomplete or unsupported JSON content: ${reason} Turn JSON capture off to use DOM capture.`);
+    const assertComplete = (value, label) => {
+      if (value == null) return;
+      if (typeof value !== "object" || Array.isArray(value)) throw unsupported(`${label} completeness metadata is invalid.`);
+      // Inspect structural metadata only; never search tool payloads or text.
+      for (const field of ["truncated", "is_truncated", "partial", "is_partial", "incomplete", "is_incomplete", "has_more", "has_more_messages", "has_previous_page", "has_next_page", "has_missing_messages", "missing_message_count", "cut_off"]) {
+        if (value[field] != null && value[field] !== false && value[field] !== 0) throw unsupported(`${label}.${field} indicates incomplete content.`);
+      }
+      for (const field of ["complete", "is_complete"]) {
+        if (value[field] != null && value[field] !== true) throw unsupported(`${label}.${field} does not confirm complete content.`);
+      }
+      for (const field of ["next_cursor", "previous_cursor", "next_page", "previous_page"]) {
+        if (value[field] != null && value[field] !== "" && value[field] !== false) throw unsupported(`${label}.${field} indicates another history page.`);
+      }
+      for (const field of ["missing_messages", "missing_message_ids", "missing_message_uuids"]) {
+        if (value[field] != null && value[field] !== false && value[field] !== 0 && !(Array.isArray(value[field]) && value[field].length === 0)) throw unsupported(`${label}.${field} indicates missing history.`);
+      }
+    };
     if (data?.uuid !== chat) throw unsupported("The response belongs to a different conversation.");
     if (!Array.isArray(data.chat_messages)) throw unsupported("The chat_messages array is missing or invalid.");
-    if (!data.current_leaf_message_uuid) throw unsupported("The active branch's last-message ID is missing.");
+    for (const [value, label] of [[data, "conversation"], [data.page_info, "page_info"], [data.pagination, "pagination"]]) {
+      assertComplete(value, label);
+      for (const field of ["total_messages", "total_message_count"]) {
+        if (value?.[field] != null && (!Number.isSafeInteger(value[field]) || value[field] < 0 || value[field] > data.chat_messages.length)) throw unsupported(`${label}.${field} indicates missing history or an invalid message count.`);
+      }
+    }
+    if (typeof data.current_leaf_message_uuid !== "string" || !data.current_leaf_message_uuid) throw unsupported("The active branch's last-message ID is missing or invalid.");
+    if (data.chat_messages.some(message => typeof message?.uuid !== "string" || !message.uuid)) throw unsupported("A message ID is missing or invalid.");
     const messages = new Map(data.chat_messages.map(message => [message.uuid, message]));
     if (messages.size !== data.chat_messages.length) throw unsupported("The response contains duplicate message IDs.");
     const branch = [];
@@ -18,18 +42,30 @@
       if (!Object.hasOwn(message, "parent_message_uuid")) throw unsupported("A message in the active branch has no parent_message_uuid field.");
       seen.add(id);
       branch.push(message);
-      id = message.parent_message_uuid;
+      const parent = message.parent_message_uuid;
       // Claude's root parent can be the all-zero UUID rather than null.
-      if (id === "00000000-0000-0000-0000-000000000000" || id === "00000000-0000-4000-8000-000000000000") break;
+      if (parent === null || parent === "00000000-0000-0000-0000-000000000000" || parent === "00000000-0000-4000-8000-000000000000") break;
+      if (typeof parent !== "string" || !parent) throw unsupported("The active branch has an invalid parent/root marker.");
+      id = parent;
     }
     const turns = branch.reverse().flatMap(message => {
       if (!["human", "assistant"].includes(message.sender)) return [];
+      assertComplete(message, "Active-branch message");
+      if (message.sender === "assistant" && Object.hasOwn(message, "stop_reason") && message.stop_reason == null) throw unsupported("An assistant turn is still in progress.");
+      if (message.content != null && !Array.isArray(message.content)) throw unsupported("An active-branch message has invalid structured content.");
       const blocks = Array.isArray(message.content) ? message.content : [];
       // Only direct turn blocks are eligible. Never recurse into tools, artifacts,
       // files, or sync sources, even when they contain text blocks.
       const parts = blocks.flatMap(block => {
         const value = block?.type === "text" ? block.text
           : block?.type === "thinking" ? (block.thinking ?? block.text) : null;
+        // Live Claude hides empty thinking with truncated:true. It contributes
+        // no captured text; unlike truncation of an actual text/thinking string.
+        if (block?.type === "text" || (block?.type === "thinking" && typeof value === "string" && value.trim())) {
+          assertComplete(block, `${block.type} block`);
+          if (Object.hasOwn(block, "stop_timestamp") && block.stop_timestamp === null) throw unsupported("A captured text/thinking block is still in progress.");
+          if (typeof value !== "string") throw unsupported("A text block has no complete text string.");
+        }
         return typeof value === "string" && value.trim() ? [value.trim()] : [];
       });
       // Legacy turn text is an alternative only when structured content is absent.
@@ -40,7 +76,10 @@
       // Their complete text belongs to the owning user turn, not a separate turn.
       const attachments = message.sender === "human" && Array.isArray(message.attachments) ? message.attachments : [];
       for (const attachment of attachments) {
-        if (attachment?.file_type !== "txt" || attachment.file_name !== "" || typeof attachment.extracted_content !== "string") continue;
+        if (attachment?.file_type !== "txt" || attachment.file_name !== "") continue;
+        assertComplete(attachment, "Pasted-text attachment");
+        if (typeof attachment.extracted_content !== "string" || (attachment.file_size > 0 && attachment.extracted_content.length === 0)) throw unsupported("A pasted-text attachment is missing its complete extracted_content string.");
+        if (attachment.file_size != null && (!Number.isSafeInteger(attachment.file_size) || attachment.file_size < 0 || new TextEncoder().encode(attachment.extracted_content).length !== attachment.file_size)) throw unsupported("A pasted-text attachment's extracted_content does not match its file_size; completeness cannot be verified.");
         const pastedText = attachment.extracted_content.trim();
         if (pastedText && !parts.some(part => part.includes(pastedText))) parts.push(pastedText);
       }

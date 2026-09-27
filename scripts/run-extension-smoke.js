@@ -27,6 +27,7 @@ const CLAUDE_PLACEMENT_SCREENSHOT_PATH = process.env.CAP_CONTEXT_CLAUDE_PLACEMEN
 const PICKER_SCREENSHOT_PATH = process.env.CAP_CONTEXT_PICKER_SCREENSHOT || "";
 const JSON_SOURCE = process.env.CAP_CONTEXT_JSON_SMOKE === "chatgpt" ? "chatgpt" : process.env.CAP_CONTEXT_JSON_SMOKE === "1" ? "claude" : null;
 const JSON_CAPTURE_SMOKE = Boolean(JSON_SOURCE);
+const CLAUDE_PARTIAL_SMOKE = JSON_SOURCE === "claude" && process.env.CAP_CONTEXT_CLAUDE_PARTIAL_SMOKE === "1";
 
 class CdpSession {
   constructor(socket) {
@@ -291,7 +292,7 @@ function destinationFixture() {
 }
 
 async function startFixtureServer() {
-  const state = { summaryRequests: [], jsonRequests: 0 };
+  const state = { summaryRequests: [], jsonRequests: 0, claudeRequestUrls: [] };
   const server = http.createServer(async (request, response) => {
     const url = new URL(request.url, "http://127.0.0.1");
     response.setHeader("Cache-Control", "no-store");
@@ -334,9 +335,11 @@ async function startFixtureServer() {
     }
     if (url.pathname === "/api/organizations/smoke/chat_conversations/smoke") {
       state.jsonRequests++;
+      state.claudeRequestUrls.push(url.href);
       response.writeHead(200, { "Content-Type": "application/json" });
       response.end(JSON.stringify({
         uuid: "smoke", current_leaf_message_uuid: "assistant",
+        ...(CLAUDE_PARTIAL_SMOKE ? { truncated: true } : {}),
         chat_messages: [
           { uuid: "user", sender: "human", parent_message_uuid: null, content: [{ type: "text", text: `${SOURCE_SENTINEL}\nJSON_ONLY_SENTINEL: loaded from the API, absent from the DOM.` }], attachments: [
             { file_name: "", file_type: "txt", extracted_content: CLAUDE_PASTED_TEXT },
@@ -675,6 +678,15 @@ async function run() {
     assert.equal(clickResult.selectedPreserved, true, "Dark Reader must not recolor the selected destination tile.");
     assert.equal(clickResult.pickerStyleIgnored, true, "Dark Reader must leave the picker stylesheet alone.");
 
+    if (CLAUDE_PARTIAL_SMOKE) {
+      await waitFor(async () => sourceSession.evaluate(`document.getElementById("context-generator-error-overlay")?.textContent.includes("conversation.truncated")`), "a visible Claude incomplete-capture error");
+      assert.equal(state.summaryRequests.length, 0, "Incomplete Claude history must never reach the summary backend.");
+      assert.equal(state.jsonRequests, jsonRequestsBeforeTransfer + 1);
+      assert.deepEqual(Object.fromEntries(new URL(state.claudeRequestUrls.at(-1)).searchParams), { tree: "True", rendering_mode: "messages", render_all_tools: "true", include_inline_comparison: "true", consistency: "strong" });
+      process.stdout.write("✓ Incomplete Claude history failed visibly before any summary backend request.\n");
+      return;
+    }
+
     await waitFor(() => state.summaryRequests.length === 1, "one summary backend request");
     const capturedConversation = state.summaryRequests[0]?.conversation || "";
     assert.match(capturedConversation, new RegExp(SOURCE_SENTINEL.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
@@ -683,6 +695,7 @@ async function run() {
       assert.match(capturedConversation, new RegExp(`^${JSON_SOURCE === "claude" ? "Claude" : "ChatGPT"} conversation:`));
       assert.match(capturedConversation, /JSON_ONLY_SENTINEL/);
       if (JSON_SOURCE === "claude") {
+        assert.deepEqual(Object.fromEntries(new URL(state.claudeRequestUrls.at(-1)).searchParams), { tree: "True", rendering_mode: "messages", render_all_tools: "true", include_inline_comparison: "true", consistency: "strong" });
         assert.ok(capturedConversation.includes(CLAUDE_PASTED_TEXT), "The complete pasted attachment must reach the backend.");
         assert.equal(capturedConversation.split("CLAUDE_PASTE_START").length - 1, 1, "The pasted text must be included once.");
         assert.ok(capturedConversation.indexOf("CLAUDE_PASTE_END") < capturedConversation.indexOf("Assistant:"), "The paste must remain in its owning user turn.");

@@ -17,17 +17,19 @@ function fixture() {
     ]
   };
 }
-function setup(data = fixture()) {
+function setup(data = fixture(), { status = 200, headers = {}, body } = {}) {
   const listeners = new Set();
   let requests = 0;
   let clones = 0;
   let requestOptions;
+  let requestUrl;
   const location = { origin: "https://claude.ai", href: `https://claude.ai/chat/${chat}`, pathname: `/chat/${chat}` };
   const window = {
-    fetch: async (_url, options) => {
+    fetch: async (url, options) => {
       requests++;
+      requestUrl = url instanceof Request ? url.url : url;
       requestOptions = options;
-      const response = new Response(JSON.stringify(data), { headers: { "content-type": "application/json" } });
+      const response = new Response(body ?? JSON.stringify(data), { status, headers: { "content-type": "application/json", ...headers } });
       const clone = response.clone.bind(response);
       response.clone = () => { clones++; return clone(); };
       return response;
@@ -42,7 +44,7 @@ function setup(data = fixture()) {
   for (const file of ["claude-fetch-main.js", "claude-json-capture.js"]) {
     vm.runInContext(fs.readFileSync(path.join(__dirname, "..", "extension", file), "utf8"), context);
   }
-  return { window, location, stats: () => ({ requests, clones, requestOptions, listeners: listeners.size }) };
+  return { window, location, stats: () => ({ requests, clones, requestUrl, requestOptions, listeners: listeners.size }) };
 }
 
 // Shape observed on a live Claude "Pasted text, pasted, 441 lines" card.
@@ -83,10 +85,7 @@ test("Claude JSON capture ignores other attachments and never extracts nested pa
     { ...ignoredPaste, file_type: "image/png" },
     { file_type: "txt", extracted_content: "IGNORED_SENTINEL" },
     { file_name: "", extracted_content: "IGNORED_SENTINEL" },
-    pastedAttachment("   "), pastedAttachment(""),
-    { ...ignoredPaste, extracted_content: { text: "IGNORED_SENTINEL" } },
-    { ...ignoredPaste, extracted_content: null },
-    { ...ignoredPaste, extracted_content: 42 }
+    pastedAttachment("   "), pastedAttachment("")
   ];
   data.chat_messages[0].files = [{ file_kind: "image", attachments: [ignoredPaste], extracted_content: "IGNORED_SENTINEL" }];
   data.chat_messages[0].content.push({ type: "tool_result", attachments: [ignoredPaste] });
@@ -239,4 +238,144 @@ test("Claude JSON capture accepts the root sentinel and rejects oversized transc
   const oversized = setup(data);
   await oversized.window.fetch(endpoint);
   await assert.rejects(oversized.window.__capCaptureClaudeJson(), /350,000/);
+});
+
+test("Claude capture requests the full tree without replaying pagination or window parameters", async () => {
+  const harness = setup();
+  await harness.window.fetch(endpoint.replace("tree=True", "tree=False&limit=2&cursor=older&rendering_mode=preview"));
+  await harness.window.__capCaptureClaudeJson();
+  const url = new URL(harness.stats().requestUrl);
+  assert.equal(url.pathname, new URL(endpoint).pathname);
+  assert.deepEqual(Object.fromEntries(url.searchParams), {
+    tree: "True", rendering_mode: "messages", render_all_tools: "true", include_inline_comparison: "true", consistency: "strong"
+  });
+  assert.equal(harness.stats().requestOptions.credentials, "same-origin");
+});
+
+test("Claude JSON capture rejects partial HTTP responses and broken JSON", async () => {
+  for (const options of [{ status: 206 }, { headers: { "content-range": "bytes 0-99/500" } }, { body: '{"uuid":"test-chat",' }]) {
+    const harness = setup(fixture(), options);
+    await harness.window.fetch(endpoint);
+    await assert.rejects(harness.window.__capCaptureClaudeJson(), /JSON capture failed/);
+    assert.equal(harness.stats().listeners, 1, "The pending capture listener must be cleaned up after rejection.");
+  }
+});
+
+test("Claude JSON capture rejects explicit partial-history metadata without leaking payloads", async () => {
+  const signals = {
+    truncated: true, is_truncated: true, partial: true, is_partial: true, incomplete: true, is_incomplete: true,
+    has_more: true, has_more_messages: true, has_previous_page: true, has_next_page: true, has_missing_messages: true,
+    missing_message_count: 2, complete: false, is_complete: false,
+    next_cursor: "PRIVATE_SENTINEL", previous_cursor: "PRIVATE_SENTINEL", next_page: 2, previous_page: 1,
+    missing_messages: ["PRIVATE_SENTINEL"], missing_message_ids: ["PRIVATE_SENTINEL"], missing_message_uuids: ["PRIVATE_SENTINEL"]
+  };
+  for (const container of [null, "page_info", "pagination"]) {
+    for (const [field, value] of Object.entries(signals)) {
+      const data = fixture();
+      if (container) data[container] = { [field]: value };
+      else data[field] = value;
+      const harness = setup(data);
+      await harness.window.fetch(endpoint);
+      await assert.rejects(harness.window.__capCaptureClaudeJson(), error => {
+        assert.match(error.message, /incomplete or unsupported JSON/);
+        assert.ok(error.message.includes(field));
+        assert.doesNotMatch(error.message, /PRIVATE_SENTINEL|Question|Selected answer/);
+        return true;
+      });
+    }
+  }
+});
+
+test("Claude JSON capture accepts complete metadata and normal empty hidden-thinking truncation", async () => {
+  const data = fixture();
+  data.page_info = { has_previous_page: false, has_next_page: false, next_cursor: null, previous_cursor: "", missing_messages: [] };
+  data.pagination = { complete: true, is_complete: true, truncated: false, partial: false, has_more: false, missing_message_count: 0 };
+  for (const message of data.chat_messages) message.truncated = false;
+  data.chat_messages[2].stop_reason = "end_turn";
+  data.chat_messages[2].content.push({ type: "thinking", thinking: "", truncated: true, cut_off: false, thinking_hidden: true, summaries: [{ summary: "IGNORED_SENTINEL" }] });
+  data.chat_messages[2].content.push({ type: "tool_result", truncated: true, content: [{ type: "text", text: "IGNORED_SENTINEL" }] });
+  data.chat_messages[1].truncated = true;
+  const harness = setup(data);
+  await harness.window.fetch(endpoint);
+  const capture = await harness.window.__capCaptureClaudeJson();
+  assert.equal(capture.text, "Claude conversation:\n\nUser: Question\n\nAssistant: Private reasoning\n\nSelected answer");
+});
+
+test("Claude JSON capture rejects truncated active turns and captured text/thinking blocks", async () => {
+  for (const mutate of [
+    data => { data.chat_messages[0].truncated = true; },
+    data => { data.chat_messages[2].truncated = true; },
+    data => { data.chat_messages[2].content[0].truncated = true; },
+    data => { data.chat_messages[2].content[1].truncated = true; },
+    data => { data.chat_messages[2].content[1].cut_off = true; },
+    data => { data.chat_messages[2].content[1].stop_timestamp = null; },
+    data => { data.chat_messages[2].stop_reason = null; }
+  ]) {
+    const data = fixture();
+    mutate(data);
+    const harness = setup(data);
+    await harness.window.fetch(endpoint);
+    await assert.rejects(harness.window.__capCaptureClaudeJson(), /incomplete content|still in progress/);
+  }
+});
+
+test("Claude JSON capture rejects missing/truncated pasted content rather than silently dropping it", async () => {
+  for (const attachment of [
+    { ...pastedAttachment("Paste"), truncated: true },
+    { ...pastedAttachment("Paste"), extracted_content: undefined },
+    { ...pastedAttachment("Paste"), extracted_content: null },
+    { ...pastedAttachment("Paste"), extracted_content: { text: "PRIVATE_SENTINEL" } },
+    { ...pastedAttachment("Paste"), extracted_content: 42 },
+    { ...pastedAttachment("Paste"), extracted_content: "" },
+    { ...pastedAttachment("Full paste"), extracted_content: "Full" },
+    { ...pastedAttachment("Paste"), file_size: "5" }
+  ]) {
+    const data = fixture();
+    data.chat_messages[0].attachments = [attachment];
+    const harness = setup(data);
+    await harness.window.fetch(endpoint);
+    await assert.rejects(harness.window.__capCaptureClaudeJson(), /Pasted-text attachment.truncated|missing its complete extracted_content|does not match its file_size/);
+  }
+});
+
+test("Claude JSON capture validates advertised total counts without confusing inactive branches", async () => {
+  for (const container of [null, "page_info", "pagination"]) {
+    for (const field of ["total_messages", "total_message_count"]) {
+      const data = fixture();
+      const metadata = container ? (data[container] = {}) : data;
+      metadata[field] = data.chat_messages.length;
+      const harness = setup(data);
+      await harness.window.fetch(endpoint);
+      assert.equal((await harness.window.__capCaptureClaudeJson()).messageTurnCount, 2);
+      metadata[field]++;
+      await assert.rejects(harness.window.__capCaptureClaudeJson(), /missing history/);
+    }
+  }
+});
+
+test("Claude pasted-text size validation uses UTF-8 bytes before trimming", async () => {
+  const data = fixture();
+  data.chat_messages[0].attachments = [pastedAttachment("  café\r\n🙂  ")];
+  const harness = setup(data);
+  await harness.window.fetch(endpoint);
+  assert.match((await harness.window.__capCaptureClaudeJson()).text, /User: Question\n\ncafé\r\n🙂/);
+});
+
+test("Claude JSON capture requires a real root and rejects malformed completeness structures", async () => {
+  for (const mutate of [
+    ...[undefined, "", false, 0, {}].map(parent => data => { data.chat_messages[0].parent_message_uuid = parent; }),
+    data => { delete data.chat_messages[0].parent_message_uuid; },
+    data => { data.chat_messages[0].uuid = ""; },
+    data => { data.current_leaf_message_uuid = 42; },
+    data => { data.page_info = "invalid"; },
+    data => { data.pagination = []; },
+    data => { data.chat_messages[2].content = {}; },
+    data => { data.chat_messages[2].content[1].text = null; }
+  ]) {
+    const data = fixture();
+    mutate(data);
+    const harness = setup(data);
+    await harness.window.fetch(endpoint);
+    await assert.rejects(harness.window.__capCaptureClaudeJson(), /incomplete or unsupported JSON/);
+  }
 });
