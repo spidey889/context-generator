@@ -127,11 +127,15 @@
     .nav-actions {
       display: flex;
       align-items: center;
-      gap: 0.9rem;
+      gap: 0.75rem;
     }
 
     .nav-link {
-      color: var(--muted);
+      display: inline-flex;
+      align-items: center;
+      min-height: 3.4rem;
+      padding: 0 0.45rem;
+      color: #555761 !important;
       font-weight: 600;
       transition: color 180ms ease;
     }
@@ -225,12 +229,12 @@
 
     .hero {
       text-align: center;
-      padding-top: clamp(3.5rem, 7vw, 6rem);
+      padding-top: clamp(4rem, 8vw, 6.75rem);
     }
 
     .hero h1 {
       max-width: 24ch;
-      margin: 1.5rem auto 1.8rem;
+      margin: 0 auto 1.8rem;
       font-size: 64px;
       line-height: 0.94;
       letter-spacing: -0.075em;
@@ -266,12 +270,13 @@
     }
 
     .hero p {
-      max-width: 36rem;
+      max-width: none;
       margin: 0 auto;
-      color: var(--muted);
-      font-size: clamp(1rem, 1.8vw, 1.25rem);
-      line-height: 1.6;
-      letter-spacing: -0.03em;
+      color: #656873 !important;
+      font-size: clamp(0.95rem, 1.5vw, 1.15rem);
+      line-height: 1.4;
+      letter-spacing: -0.02em;
+      white-space: nowrap;
     }
 
     .hero-actions {
@@ -283,44 +288,23 @@
       flex-wrap: wrap;
     }
 
-    .hero .eyebrow {
-      font-size: 0.75rem;
-      letter-spacing: 0.08em;
-      text-transform: uppercase;
-      color: #7950b6;
-      border-color: rgba(149, 96, 223, 0.2);
-      background: rgba(149, 96, 223, 0.06);
-      box-shadow: none;
-    }
-
     .hero-actions .button-dark {
-      border-color: #7751b1;
-      background: #7751b1;
-      box-shadow: 0 8px 24px rgba(119, 81, 177, 0.2);
+      border-color: #111114 !important;
+      background: #111114 !important;
+      color: #ffffff !important;
+      box-shadow: 0 14px 36px rgba(17, 17, 20, 0.16);
     }
 
-    .hero-actions .button-dark:hover { background: #68439f; }
+    .hero-actions .button-dark:hover { background: #1c1d24 !important; }
 
     .hero-actions .button-outline {
-      background: transparent;
-      box-shadow: none;
+      border-color: #55575e !important;
+      background: #55575e !important;
+      color: #ffffff !important;
+      box-shadow: 0 12px 30px rgba(17, 17, 20, 0.12);
     }
 
-    .hero-platforms {
-      display: flex;
-      justify-content: center;
-      flex-wrap: wrap;
-      gap: 0.6rem 1.25rem;
-      margin: 1.8rem 0 0;
-      padding: 0;
-      list-style: none;
-      color: var(--muted);
-      font-size: 0.8rem;
-      font-weight: 500;
-    }
-
-    .hero-platforms li { display: inline-flex; align-items: center; gap: 0.4rem; }
-    .hero-platforms li::before { content: ""; width: 4px; height: 4px; border-radius: 50%; background: #9560df; }
+    .hero-actions .button-outline:hover { background: #484a50 !important; }
 
     @media (max-width: 680px) {
       .container.site-header { justify-content: space-between; flex-wrap: nowrap; }
@@ -1134,16 +1118,12 @@
 
   <main id="top">
     <section class="hero section container reveal">
-      <span class="eyebrow">The browser extension for your next conversation</span>
       <h1 style="color: #000000 !important;">Switch AIs without <span class="re-explaining">re-explaining<span class="re-explaining-shine" aria-hidden="true">re-explaining</span></span> everything.</h1>
-      <p>Take your conversation to the next AI, with the context already there. Add Cap Context to Chrome or Brave and keep going.</p>
+      <p>One click. Full context. Keep going.</p>
       <div class="hero-actions">
         <a class="button button-dark" href="https://chromewebstore.google.com/detail/cap-context/lpkaciijlhckkdhbgidbjfkldigghnjf" target="_blank" rel="noopener noreferrer">Install extension ↗</a>
         <a class="button button-outline" href="privacy.html">Privacy details</a>
       </div>
-      <ul class="hero-platforms" aria-label="Supported AI platforms">
-        <li>Claude</li><li>ChatGPT</li><li>Gemini</li><li>Grok</li><li>DeepSeek</li>
-      </ul>
     </section>
 
     <section class="connector-section section container reveal">

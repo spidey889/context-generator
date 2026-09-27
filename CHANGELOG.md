@@ -1,5 +1,7 @@
 # Changelog
 
+- 2026-09-27: Simplified the extension homepage hero after visual review. Removed the added eyebrow pill, long explanatory paragraph, and five-platform row; replaced them with `One click. Full context. Keep going.` Restored the install CTA to black, made Privacy details a solid high-contrast secondary action, and aligned the header privacy link with the install button. The diagram and video section remain unchanged.
+
 - 2026-09-27: Updated the restored homepage header and hero for the browser extension: Chrome Web Store install links replace skill-copy/download actions, privacy links use the rendered policy, and the hero now describes conversation transfers across all five supported AI platforms. Tightened spacing and introduced a purple primary button while retaining the headline and slow shimmer. The diagram and lower skill/video sections remain unchanged by owner request. Desktop and mobile checks passed in isolated Brave.
 
 - 2026-09-27: Restored the older landing page as the main website by swapping index.html with index.legacy-2026-07-15.html. The legacy filename now preserves the replaced newer design; the main page retains its original skill download and demo video.
