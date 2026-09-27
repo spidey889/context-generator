@@ -632,8 +632,8 @@ async function run() {
       assert.equal(idleToggle.inHeader, true, "Host button styles must not move the fast-capture control outside the header.");
       await sourceSession.evaluate(`document.getElementById("context-generator-${JSON_SOURCE}-json-toggle").click()`);
       assert.equal(await sourceSession.evaluate(`document.getElementById("context-generator-${JSON_SOURCE}-json-toggle").getAttribute("aria-pressed")`), "true");
-      await waitFor(async () => await sourceSession.evaluate(`getComputedStyle(document.getElementById("context-generator-${JSON_SOURCE}-json-toggle")).color`) === "rgb(218, 199, 247)", "the fast-capture enabled color");
-      assert.notEqual(idleToggle.color, "rgb(218, 199, 247)", "The enabled state must be visibly distinct.");
+      await waitFor(async () => await sourceSession.evaluate(`getComputedStyle(document.getElementById("context-generator-${JSON_SOURCE}-json-toggle")).color`) === "rgb(250, 204, 21)", "the fast-capture enabled color");
+      assert.notEqual(idleToggle.color, "rgb(250, 204, 21)", "The enabled state must be visibly distinct.");
       if (PICKER_SCREENSHOT_PATH) {
         await waitFor(async () => await sourceSession.evaluate(`getComputedStyle(document.getElementById("context-generator-destination-sheet")).opacity`) === "1", "the visible picker");
         const clip = await sourceSession.evaluate(`(() => { const r = document.getElementById("context-generator-destination-sheet").getBoundingClientRect(); return { x: r.x - 12, y: r.y - 12, width: r.width + 24, height: r.height + 24, scale: 1 }; })()`);

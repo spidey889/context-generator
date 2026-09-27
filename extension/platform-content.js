@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-09-27-speed-toggle-v39";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-09-27-yellow-speed-toggle-v40";
   let claudeJsonCaptureEnabled = false;
   let chatGptJsonCaptureEnabled = false;
   const INSTANCE_TEARDOWN_KEY = "__contextGeneratorPlatformTeardown";
@@ -4648,9 +4648,9 @@
         color: #f1edf7 !important;
       }
       #${DESTINATION_SHEET_ID} .context-generator-speed-toggle[aria-pressed="true"] {
-        background: rgba(167,132,225,0.14) !important;
-        border-color: rgba(190,163,234,0.35) !important;
-        color: #dac7f7 !important;
+        background: rgba(250,204,21,0.12) !important;
+        border-color: rgba(250,204,21,0.35) !important;
+        color: #facc15 !important;
       }
       #${DESTINATION_SHEET_ID} .context-generator-speed-toggle:focus-visible {
         outline: 2px solid rgba(190,162,233,0.78) !important;
