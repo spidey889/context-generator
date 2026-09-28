@@ -1,7 +1,10 @@
 {
   "source": "extension/platform-content.js",
-  "sourceCommit": "86d7b150d59c29a00a7fbdab7a10f14faed2b9df",
+  "sourceCommit": "0c28aae228e203197076504335234312705c0547",
   "fixture": "local runtime stub; ChatGPT source; production UI functions and styles",
+  "editorialOmissions": [
+    "Estimated countdown hidden in compressed handoff sequence"
+  ],
   "pickerText": "Cap ContextWhere to continue?ClaudeAnthropicGeminiGoogleGrokxAIDeepSeekDeepSeekContext goes straight into the input box",
   "dimensions": {
     "picker": {

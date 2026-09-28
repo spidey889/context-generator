@@ -10,6 +10,7 @@ try {playwright=require('playwright');} catch {playwright=createRequire(path.joi
 const {chromium}=playwright;
 const root = path.resolve(__dirname, '..');
 const v2Capture=process.argv.includes('--v2');
+const cleanCapture=v2Capture&&process.argv.includes('--clean');
 const out = path.join(__dirname, v2Capture?'v2/assets':'assets');
 fs.mkdirSync(out, {recursive:true});
 const server = http.createServer((req,res)=>{
@@ -61,12 +62,18 @@ const server = http.createServer((req,res)=>{
       document.getElementById('context-generator-bubble').style.display='none';
       document.getElementById('context-generator-overlay').style.opacity='1';
     });
+    if(cleanCapture){
+      // Editorial omission for the compressed launch-film sequence. Keep every
+      // production control/style; a static estimated countdown implies timing
+      // that this edited demonstration cannot substantiate.
+      await page.evaluate(()=>document.getElementById('context-generator-handoff-countdown').style.display='none');
+    }
     for(const [file,stage,phase] of [['capture','capture','active'],['summary','summary','active'],['paste','paste','active'],['done','paste','done']]) {
       await page.evaluate(({stage,phase})=>ui.setHandoffProgress(stage,phase,'Claude'),{stage,phase});
       await page.locator('#context-generator-overlay').screenshot({path:path.join(out,file+'.png'),omitBackground:true});
     }
     const labels=await page.locator('#context-generator-destination-sheet').innerText();
-    fs.writeFileSync(path.join(out,'provenance.json'),JSON.stringify({source:'extension/platform-content.js',sourceCommit:require('node:child_process').execSync('git rev-parse HEAD',{cwd:root}).toString().trim(),fixture:'local runtime stub; ChatGPT source; production UI functions and styles',pickerText:labels,dimensions:{picker:pickerDimensions}},null,2));
+    fs.writeFileSync(path.join(out,'provenance.json'),JSON.stringify({source:'extension/platform-content.js',sourceCommit:require('node:child_process').execSync('git rev-parse HEAD',{cwd:root}).toString().trim(),fixture:'local runtime stub; ChatGPT source; production UI functions and styles',editorialOmissions:cleanCapture?['Estimated countdown hidden in compressed handoff sequence']:[],pickerText:labels,dimensions:{picker:pickerDimensions}},null,2));
     console.log('Captured production picker, orb, and four handoff states in isolated Brave.');
   } finally {await browser.close();server.close();}
 })().catch(e=>{console.error(e);server.close();process.exitCode=1;});

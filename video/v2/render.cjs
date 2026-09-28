@@ -17,7 +17,9 @@ const server=http.createServer((req,res)=>{const f=path.resolve(root,'.'+decodeU
    console.log('V2 storyboard ready.');
   }else{
    const target=path.join(output,'cap-context-launch-v2.mp4');
-   const ff=spawn(process.env.FFMPEG_PATH||'ffmpeg',['-y','-hide_banner','-loglevel','warning','-f','image2pipe','-vcodec','mjpeg','-framerate',String(fps),'-i','pipe:0','-i',path.join(output,'score.wav'),'-c:v','libx264','-preset','medium','-crf','17','-pix_fmt','yuv420p','-color_primaries','bt709','-color_trc','bt709','-colorspace','bt709','-c:a','aac','-b:a','192k','-ar','48000','-t',String(duration),'-movflags','+faststart',target],{stdio:['pipe','ignore','pipe']});
+   // JPEG transport is full-range BT.601. Convert the samples, not just tags,
+   // to limited-range BT.709 so Chromium and native players agree on colors.
+   const ff=spawn(process.env.FFMPEG_PATH||'ffmpeg',['-y','-hide_banner','-loglevel','warning','-f','image2pipe','-vcodec','mjpeg','-framerate',String(fps),'-i','pipe:0','-i',path.join(output,'score.wav'),'-vf','scale=in_range=pc:out_range=tv:in_color_matrix=bt601:out_color_matrix=bt709,format=yuv420p','-c:v','libx264','-preset','medium','-crf','17','-pix_fmt','yuv420p','-color_range','tv','-color_primaries','bt709','-color_trc','bt709','-colorspace','bt709','-c:a','aac','-b:a','192k','-ar','48000','-t',String(duration),'-movflags','+faststart',target],{stdio:['pipe','ignore','pipe']});
    let log='';ff.stderr.on('data',d=>log+=d);ff.stdin.on('error',()=>{});
    const completion=new Promise((resolve,reject)=>{ff.on('error',reject);ff.on('close',c=>c===0?resolve():reject(Error('Encoder exit '+c+': '+log.slice(-1500))))});
    const started=Date.now();

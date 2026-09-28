@@ -1,17 +1,60 @@
 {
+  "edition": "polished V2",
+  "deliveryFile": "video/cap-context-launch-v2-polished.mp4",
   "durationSeconds": 29.5,
   "width": 1920,
   "height": 1080,
   "fps": 60,
   "frames": 1770,
   "video": "h264",
+  "pixelFormat": "yuv420p",
+  "colorRange": "tv",
+  "colorSpace": "bt709",
+  "browserColorSamples": [
+    {
+      "seconds": 12,
+      "expectedRgb": [
+        246,
+        245,
+        243
+      ],
+      "browserDecodedRgb": [
+        242,
+        242,
+        241
+      ],
+      "toleranceRgbLevels": 6
+    },
+    {
+      "seconds": 27.5,
+      "expectedRgb": [
+        234,
+        228,
+        216
+      ],
+      "browserDecodedRgb": [
+        232,
+        226,
+        214
+      ],
+      "toleranceRgbLevels": 6
+    }
+  ],
   "audio": "aac",
   "audioChannels": 2,
   "audioPeakDb": -3.8,
-  "sizeBytes": 7346027,
-  "sha256": "eb093aa3e492034ae5fd04ea2b7e0f51400afe21d6fbf38a0c0eeb95677b2bed",
+  "sizeBytes": 8654776,
+  "sha256": "388e010780baa0fecf4b46eb9888de3d4747026081d6ed3f829e3f247c6166f6",
+  "compositionSha256": "2987424df770bce1459d8ffc2f583176be45c7dd840489b439e66a7b106c2eb0",
   "fullDecode": "passed",
   "isolatedBravePlaybackAndSeeking": "passed",
+  "fullBravePlaybackToEnd": {
+    "ended": true,
+    "currentTime": 29.5,
+    "totalVideoFrames": 3314,
+    "droppedVideoFrames": 1,
+    "error": null
+  },
   "sampleFrames": [
     1.8,
     4.5,

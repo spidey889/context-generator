@@ -1,6 +1,6 @@
 # Cap Context — Keep going
 
-The current version is [V2](v2/README.md), delivered as `cap-context-launch-v2.mp4`: 29.5 seconds, 1080p/60 fps, with the explicit limit/transfer/continuation story and motion inspired by the owner's Cowork reference. This document describes the retained V1.
+The current version is [polished V2](v2/README.md), delivered as `cap-context-launch-v2-polished.mp4`: 29.5 seconds, 1080p/60 fps. It retains V2's limit/transfer/continuation sequence with fuller chat UI, refined cursor/camera motion and a simpler ending. The previous `cap-context-launch-v2.mp4` remains for comparison. This document describes the retained V1.
 
 27-second launch film, 1920 × 1080, 30 fps, H.264/AAC MP4. The final deliverable is `cap-context-launch.mp4`. Editable animation, UI captures and original synthesized stereo music are included here. No stock footage, remote fonts, recordings or third-party music are used.
 
