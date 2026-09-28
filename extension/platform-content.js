@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-09-28-default-json-v54";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-09-28-json-fallback-v55";
   const ownedUiStyleSheets = new Map();
   // Start fast capture on for each page instance; a manual opt-out lasts until reload.
   let claudeJsonCaptureEnabled = true;
@@ -5417,6 +5417,7 @@
   }
 
   async function startDestinationTransfer(destinationId) {
+    const sourceUrl = window.location.href;
     const useClaudeJson = currentPlatform.id === "claude" && claudeJsonCaptureEnabled;
     const claudeJsonPath = useClaudeJson ? window.location.pathname : null;
     const useChatGptJson = currentPlatform.id === "chatgpt" && chatGptJsonCaptureEnabled;
@@ -5467,16 +5468,30 @@
       setHandoffProgress("capture", "active");
       let conversationText;
       if (useClaudeJson || useChatGptJson || useNetworkJson) {
-        const captureJson = useClaudeJson ? window.__capCaptureClaudeJson : useChatGptJson ? window.__capCaptureChatGptJson : window.__capCaptureNetworkJson;
-        if (typeof captureJson !== "function") throw new Error(`Refresh ${currentPlatform.name} to enable JSON capture.`);
-        const capture = useClaudeJson ? await captureJson(claudeJsonPath)
-          : useChatGptJson ? await captureJson(chatGptJsonPath)
-          : geminiJsonPath ? await captureJson(geminiJsonPath)
-          : deepseekJsonPath ? await captureJson(deepseekJsonPath) : grokJsonUrl ? await captureJson(grokJsonUrl) : await captureJson();
-        conversationText = createConversationCapture(capture.text, {
-          method: `${currentPlatform.id}-json`, messageTurnCount: capture.messageTurnCount,
-          usefulTurnCount: capture.messageTurnCount, candidateTurnCount: capture.messageTurnCount
-        });
+        try {
+          const captureJson = useClaudeJson ? window.__capCaptureClaudeJson : useChatGptJson ? window.__capCaptureChatGptJson : window.__capCaptureNetworkJson;
+          if (typeof captureJson !== "function") throw new Error(`Refresh ${currentPlatform.name} to enable JSON capture.`);
+          const capture = useClaudeJson ? await captureJson(claudeJsonPath)
+            : useChatGptJson ? await captureJson(chatGptJsonPath)
+            : geminiJsonPath ? await captureJson(geminiJsonPath)
+            : deepseekJsonPath ? await captureJson(deepseekJsonPath) : grokJsonUrl ? await captureJson(grokJsonUrl) : await captureJson();
+          conversationText = createConversationCapture(capture.text, {
+            method: `${currentPlatform.id}-json`, messageTurnCount: capture.messageTurnCount,
+            usefulTurnCount: capture.messageTurnCount, candidateTurnCount: capture.messageTurnCount
+          });
+        } catch (error) {
+          // Recover within this attempt: reuse its destination and call the
+          // summary/paste pipeline only once, after a complete DOM capture.
+          // Retain the bridges' navigation/session cancellation, including an
+          // away-and-back change that a final URL comparison cannot detect.
+          if (/conversation changed during capture\./i.test(error?.message || "")) throw error;
+          if (window.location.href !== sourceUrl) throw new Error("The conversation changed during capture. Return to the source chat and try again.");
+          showFastCaptureFallbackMessage();
+          markTransferTrace(trace, "fast capture failed; using normal capture");
+          await prepareSourceForCapture();
+          conversationText = await scrapeConversationTextWhenReady();
+          if (window.location.href !== sourceUrl) throw new Error("The conversation changed during capture. Return to the source chat and try again.");
+        }
       } else {
         conversationText = await scrapeConversationTextWhenReady();
       }
@@ -5490,6 +5505,17 @@
       resetRunningFlag();
       showErrorOverlay(error.message);
     }
+  }
+
+  function showFastCaptureFallbackMessage() {
+    const group = document.getElementById("context-generator-status-group");
+    if (!group) return;
+    const notice = document.createElement("div");
+    notice.id = "context-generator-capture-notice";
+    notice.setAttribute("role", "status");
+    notice.style.cssText = "font-size:12px;line-height:1.4;color:inherit";
+    notice.textContent = "Fast capture failed. Using normal capture instead.";
+    group.appendChild(notice);
   }
 
   function protectOverlayPalette(root) {
@@ -6050,6 +6076,7 @@
 
   function showOverlay(destinationId = null) {
     ensureFloatingOverlay();
+    document.getElementById("context-generator-capture-notice")?.remove();
     const overlay = document.getElementById(OVERLAY_ID);
     const scrim = document.getElementById(HANDOFF_SCRIM_ID);
     const bubble = document.getElementById(BUBBLE_ID);

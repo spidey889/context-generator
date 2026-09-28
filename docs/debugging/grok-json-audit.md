@@ -1,5 +1,7 @@
 # Grok JSON audit - 2026-09-28
 
+Pre-merge update: the refusal results below describe the audit-time behavior. JSON validation still rejects those responses, but the picker now announces fast-capture failure and falls back to DOM capture once in the same transfer. Use the failure smoke modes to verify DOM fallback, one summary/paste, and no Send click.
+
 Scope: Grok network JSON only, from destination-click identity through MAIN transport,
 active-branch selection, serialization, bridge delivery and capture metrics.
 

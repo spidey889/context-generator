@@ -41,6 +41,7 @@ const JSON_RELOAD_SMOKE = CLAUDE_RELOAD_SMOKE || CHATGPT_RELOAD_SMOKE;
 const CHATGPT_FAILURE_SMOKE = JSON_SOURCE === "chatgpt" ? process.env.CAP_CONTEXT_CHATGPT_FAILURE_SMOKE || "" : "";
 const CHATGPT_PASTE_AUTH_SMOKE = JSON_SOURCE === "chatgpt" && process.env.CAP_CONTEXT_CHATGPT_AUTH_SMOKE === "paste401";
 const CLAUDE_PARTIAL_SMOKE = JSON_SOURCE === "claude" && process.env.CAP_CONTEXT_CLAUDE_PARTIAL_SMOKE === "1";
+const JSON_FALLBACK_SMOKE = Boolean(CHATGPT_FAILURE_SMOKE || CLAUDE_PARTIAL_SMOKE || NETWORK_FAILURE);
 
 class CdpSession {
   constructor(socket) {
@@ -466,11 +467,20 @@ async function startFixtureServer() {
     if (["/source", "/chat/smoke", "/c/smoke", "/app/smoke", "/a/chat/s/smoke"].includes(url.pathname)) {
       if (url.pathname !== "/source") response.setHeader("Content-Security-Policy", "script-src 'nonce-smoke'; object-src 'none'; base-uri 'none'; connect-src 'self'");
       response.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
-      const page = url.pathname === "/chat/smoke"
+      let page = url.pathname === "/chat/smoke"
         // Claude JSON must work before native history mounts. The API still
         // returns the full ordered conversation, including the pasted card.
         ? claudePlacementFixture()
         : sourceFixture();
+      // Failure scenarios need mounted DOM history to verify the fallback.
+      // Successful JSON scenarios still prove capture before native turns mount.
+      if (JSON_FALLBACK_SMOKE && JSON_SOURCE === "claude") {
+        page = page.replace("</body>", `${sourceFixture().match(/<main[\s\S]*?<\/main>/)[0]}</body>`);
+      }
+      if (JSON_FALLBACK_SMOKE && NETWORK_SOURCE) {
+        page = page.replace('data-message-author-role="user"', 'class="query-text message" data-message-author-role="user"')
+          .replace('data-message-author-role="assistant"', 'class="response-content message" data-message-author-role="assistant"');
+      }
       if (NETWORK_SOURCE) {
         const boot = JSON_SOURCE === "gemini" ? `window.WIZ_global_data={SNlM0e:"CSRF_SENTINEL"};const xhr=new XMLHttpRequest();xhr.open("POST","/_/BardChatUi/data/batchexecute?rpcids=hNvQHb");xhr.send(new URLSearchParams({at:"CSRF_SENTINEL","f.req":JSON.stringify([[["hNvQHb",JSON.stringify(["c_smoke",10,null,1,[1],[4],null,1]),null,"generic"]]])}));`
           : JSON_SOURCE === "deepseek" ? 'const xhr=new XMLHttpRequest();xhr.open("GET","/api/v0/session");xhr.setRequestHeader("Authorization","Bearer AUTH_SENTINEL");xhr.setRequestHeader("x-device-id","CACHE_DEVICE");xhr.send();' : "";
@@ -745,15 +755,19 @@ async function run() {
       await waitFor(async () => await sourceSession.evaluate(`getComputedStyle(document.getElementById("context-generator-${JSON_SOURCE}-json-toggle")).color`) === "rgb(250, 204, 21)", "the default fast-capture enabled color");
       await sourceSession.evaluate(`document.getElementById("context-generator-${JSON_SOURCE}-json-toggle").click()`);
       assert.equal(await sourceSession.evaluate(`document.getElementById("context-generator-${JSON_SOURCE}-json-toggle").getAttribute("aria-pressed")`), "false");
+      await waitFor(() => sourceSession.evaluate(`getComputedStyle(document.getElementById("context-generator-destination-sheet")).opacity === "1"`), "the settled picker before measuring the toggle");
       const idleToggle = await sourceSession.evaluate(`(() => {
         const toggle = document.getElementById("context-generator-${JSON_SOURCE}-json-toggle");
         const rect = toggle.getBoundingClientRect();
         const header = toggle.parentElement.getBoundingClientRect();
-        return { icon: Boolean(toggle.querySelector("svg[aria-hidden='true']")), header: toggle.parentElement.contains(document.querySelector(".context-generator-destination-brand")), inHeader: rect.top >= header.top && rect.bottom <= header.bottom && rect.left >= header.left && rect.right <= header.right, color: getComputedStyle(toggle).color };
+        // Transformed rect edges differed by 0.00003px at browser zoom. Allow
+        // rounding noise while still rejecting any visible header overflow.
+        const epsilon = 0.01;
+        return { icon: Boolean(toggle.querySelector("svg[aria-hidden='true']")), header: toggle.parentElement.contains(document.querySelector(".context-generator-destination-brand")), inHeader: rect.top >= header.top - epsilon && rect.bottom <= header.bottom + epsilon && rect.left >= header.left - epsilon && rect.right <= header.right + epsilon, color: getComputedStyle(toggle).color, bounds: rect.toJSON(), headerBounds: header.toJSON() };
       })()`);
       assert.equal(idleToggle.icon, true, "Fast capture must use a decorative vector icon.");
       assert.equal(idleToggle.header, true, "The fast-capture control must sit in the brand header.");
-      assert.equal(idleToggle.inHeader, true, "Host button styles must not move the fast-capture control outside the header.");
+      assert.equal(idleToggle.inHeader, true, `Host button styles must not move the fast-capture control outside the header: ${JSON.stringify(idleToggle)}`);
       await sourceSession.evaluate(`document.getElementById("context-generator-${JSON_SOURCE}-json-toggle").click()`);
       assert.equal(await sourceSession.evaluate(`document.getElementById("context-generator-${JSON_SOURCE}-json-toggle").getAttribute("aria-pressed")`), "true");
       await waitFor(async () => await sourceSession.evaluate(`getComputedStyle(document.getElementById("context-generator-${JSON_SOURCE}-json-toggle")).color`) === "rgb(250, 204, 21)", "the fast-capture enabled color");
@@ -774,9 +788,9 @@ async function run() {
     if (JSON_SOURCE === "chatgpt") {
       // API capture must work before virtualized turns mount, on project routes,
       // without scroll sweeps or opening any pasted-content panels.
-      await sourceSession.evaluate(`document.querySelectorAll("main article").forEach(node => node.remove()); history.pushState({}, "", "/g/project/c/smoke?${SMOKE_PLATFORM_QUERY}=chatgpt"); true`);
+      await sourceSession.evaluate(`if (!${JSON_FALLBACK_SMOKE}) document.querySelectorAll("main article").forEach(node => node.remove()); history.pushState({}, "", "/g/project/c/smoke?${SMOKE_PLATFORM_QUERY}=chatgpt"); true`);
     }
-    if (NETWORK_SOURCE) await sourceSession.evaluate('document.querySelectorAll("main article").forEach(node => node.remove()); true');
+    if (NETWORK_SOURCE && !JSON_FALLBACK_SMOKE) await sourceSession.evaluate('document.querySelectorAll("main article").forEach(node => node.remove()); true');
     const jsonRequestsBeforeTransfer = state.jsonRequests;
     const clickResult = await sourceSession.evaluate(`(() => {
       const bubble = document.getElementById("context-generator-bubble");
@@ -838,35 +852,18 @@ async function run() {
     assert.equal(clickResult.selectedPreserved, true, "Dark Reader must not recolor the selected destination tile.");
     assert.equal(clickResult.pickerStyleIgnored, true, "Dark Reader must leave the picker stylesheet alone.");
 
-    if (CHATGPT_FAILURE_SMOKE) {
-      const reason = CHATGPT_FAILURE_SMOKE === "partial" ? "conversation.has_previous_page" : CHATGPT_FAILURE_SMOKE === "streaming" ? "still in progress" : "HTTP 206";
-      await waitFor(() => sourceSession.evaluate(`document.getElementById("context-generator-error-overlay")?.textContent.includes(${JSON.stringify(reason)})`), "a visible ChatGPT incomplete capture error");
-      assert.equal(state.summaryRequests.length, 0, "Partial ChatGPT text must never reach the backend.");
-      assert.equal(state.jsonRequests, jsonRequestsBeforeTransfer + 1);
-      process.stdout.write("ChatGPT incomplete capture failed visibly with zero backend requests.\n");
-      return;
-    }
-    if (CLAUDE_PARTIAL_SMOKE) {
-      await waitFor(async () => sourceSession.evaluate(`document.getElementById("context-generator-error-overlay")?.textContent.includes("conversation.truncated")`), "a visible Claude incomplete-capture error");
-      assert.equal(state.summaryRequests.length, 0, "Incomplete Claude history must never reach the summary backend.");
-      assert.equal(state.jsonRequests, jsonRequestsBeforeTransfer + 1);
-      assert.deepEqual(Object.fromEntries(new URL(state.claudeRequestUrls.at(-1)).searchParams), { tree: "True", rendering_mode: "messages", render_all_tools: "true", include_inline_comparison: "true", consistency: "strong" });
-      process.stdout.write("✓ Incomplete Claude history failed visibly before any summary backend request.\n");
-      return;
-    }
-
-    if (NETWORK_FAILURE) {
-      const expectedError = GROK_FILE_ONLY_SMOKE ? "file-only user turn" : { gemini: "oldest history turn is missing", grok: "message body is missing", deepseek: "cache update instead of the full history" }[JSON_SOURCE];
-      await waitFor(() => sourceSession.evaluate(`document.getElementById("context-generator-error-overlay")?.textContent.includes(${JSON.stringify(expectedError)})`), "a visible incomplete-history error");
-      assert.equal(state.summaryRequests.length, 0);
-      assert.equal(state.jsonRequests - jsonRequestsBeforeTransfer, JSON_SOURCE === "grok" ? 2 : 1);
-      process.stdout.write(`✓ ${JSON_SOURCE} ${GROK_FILE_ONLY_SMOKE ? "file-only turn" : "incomplete history"} failed visibly with zero backend requests.\n`); return;
+    if (JSON_FALLBACK_SMOKE) {
+      await waitFor(() => sourceSession.evaluate(`document.getElementById("context-generator-capture-notice")?.textContent === "Fast capture failed. Using normal capture instead."`), "the safe fast-capture fallback notice");
     }
     await waitFor(() => state.summaryRequests.length === 1, "one summary backend request");
     const capturedConversation = state.summaryRequests[0]?.conversation || "";
     assert.match(capturedConversation, new RegExp(SOURCE_SENTINEL.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
     assert.match(capturedConversation, new RegExp(ASSISTANT_SENTINEL.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
-    if (JSON_CAPTURE_SMOKE) {
+    if (JSON_FALLBACK_SMOKE) {
+      assert.doesNotMatch(capturedConversation, /JSON_ONLY_SENTINEL|AUTH_SENTINEL|CSRF_SENTINEL|SIGNED_SENTINEL/);
+      assert.equal(state.jsonRequests - jsonRequestsBeforeTransfer, JSON_SOURCE === "grok" ? 2 : 1, "Fast capture must not be retried after failure.");
+      process.stdout.write(`✓ ${JSON_SOURCE} failed fast capture fell back to DOM within the same transfer.\n`);
+    } else if (JSON_CAPTURE_SMOKE) {
       assert.match(capturedConversation, new RegExp(`^${({claude:"Claude",chatgpt:"ChatGPT",gemini:"Gemini",grok:"Grok",deepseek:"DeepSeek"})[JSON_SOURCE]} conversation:`));
       assert.match(capturedConversation, /JSON_ONLY_SENTINEL/);
       if (JSON_SOURCE === "claude") {

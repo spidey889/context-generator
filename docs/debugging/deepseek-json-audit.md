@@ -1,5 +1,7 @@
 # DeepSeek JSON hypothesis verification — 2026-09-28
 
+Pre-merge update: the refusal results below describe the audit-time behavior. JSON validation still rejects those responses, but the picker now announces fast-capture failure and falls back to DOM capture once in the same transfer. Use the failure smoke modes to verify DOM fallback, one summary/paste, and no Send click.
+
 Scope: DeepSeek JSON observation/auth, history read, active branch, typed fragments, signed original text downloads, bridge and picker/metrics boundaries. Other source behavior, DOM capture, summarization, destinations and toggles retain their behavior.
 
 | Reported hypothesis | Evidence and decision |

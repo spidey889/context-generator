@@ -1,5 +1,7 @@
 # Claude network JSON audit — 2026-09-28
 
+Pre-merge update: the refusal results below describe the audit-time behavior. JSON validation still rejects those responses, but the picker now announces fast-capture failure and falls back to DOM capture once in the same transfer. Use the failure smoke modes to verify DOM fallback, one summary/paste, and no Send click.
+
 Scope: `claude-fetch-main.js`, `claude-json-capture.js`, their manifest/background installation, and the Claude JSON branch of the picker transfer. DOM capture, other sources, summarization, destination behavior, and toggle behavior are outside the audit.
 
 ## Confirmed fixes
