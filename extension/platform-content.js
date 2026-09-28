@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-09-28-json-followup-v51";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-09-28-claude-handoff-v52";
   let handoffFallbackStyleSheet = null;
   let claudeJsonCaptureEnabled = false;
   let chatGptJsonCaptureEnabled = false;
@@ -5962,9 +5962,10 @@
           }
         `;
         document.head.appendChild(styleSheet);
-        // Strict page CSP can block this style tag while leaving the card's inline
-        // styles intact. Adopt the same CSS so progress circles/lines still render.
-        if (!styleSheet.sheet) {
+        // Claude's card can retain inline styles while the stage stylesheet is
+        // ineffective. Always adopt its existing CSS there; sheet presence alone
+        // does not guarantee that progress circles, spacing and lines render.
+        if (currentPlatform.id === "claude" || !styleSheet.sheet) {
           handoffFallbackStyleSheet = new CSSStyleSheet();
           handoffFallbackStyleSheet.replaceSync(styleSheet.textContent);
           document.adoptedStyleSheets = [...document.adoptedStyleSheets, handoffFallbackStyleSheet];
