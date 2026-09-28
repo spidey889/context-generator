@@ -3,7 +3,7 @@
   if (!platform || !globalThis.__capNetworkJsonData) return;
   // Advance readiness version with adapter/contract changes: old MAIN closures
   // can survive extension reloads and must be replaced before a new capture.
-  const version = platform === "gemini" ? 2 : 1, channel = "cap-context-network-json-v1";
+  const version = platform === "grok" ? 1 : 2, channel = "cap-context-network-json-v1";
   const previous = window.__capNetworkFetchState;
   if (previous?.version === version && window.fetch === previous.fetch
     && (platform !== "gemini" || previous?.ownsObservation?.())) return;

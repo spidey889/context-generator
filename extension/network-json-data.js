@@ -122,7 +122,10 @@
     if (history?.chat_session?.id !== chat || history.cache_control !== "REPLACE") fail("DeepSeek returned a cache update instead of the full history.");
     return chain(history.chat_messages, history.chat_session.current_message_id, "message_id", "parent_id");
   };
-  const textFile = file => file?.is_image === false && /\.(txt|md|markdown|csv|json)$/i.test(file.file_name || "");
+  // DeepSeek accepts ordinary source/config/data uploads as well as .txt.
+  // Keep binary/Office/PDF formats excluded; original UTF-8 and exact byte
+  // counts are still verified by MAIN before any file text reaches the bridge.
+  const textFile = file => file?.is_image === false && /\.(txt|md|markdown|csv|json|py|js|ts|tsx|jsx|java|kt|swift|c|h|cpp|hpp|cs|go|rs|rb|php|sh|bash|zsh|lua|r|scala|dart|html|htm|css|scss|vue|svelte|xml|yaml|yml|toml|tsv|sql|ipynb|log)$/i.test(file.file_name || "");
   const deepseek = (data, chat, files = {}) => {
     const turns = deepseekBranch(data, chat).flatMap(message => {
       if (!["USER", "ASSISTANT"].includes(message.role)) return [];

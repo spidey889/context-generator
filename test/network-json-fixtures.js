@@ -20,6 +20,7 @@ function fixtures(platform, chat = "smoke", count = 24) {
     turns[1][0] += "\n  Original pasted line  \r\n";
     turns[1][1] += '  \n  print("a\u00a0b")  \n';
   }
+  if (platform === "deepseek") turns[0][0] += '\n  print("a\u00a0b")  \r\nSOURCE_CODE_END';
   const name = { gemini: "Gemini", grok: "Grok", deepseek: "DeepSeek" }[platform];
   const expected = `${name} conversation:\n\n${turns.flatMap(([user, assistant]) => [`User: ${user}`, `Assistant: ${assistant}`]).join("\n\n")}`;
   if (platform === "gemini") {
@@ -35,11 +36,12 @@ function fixtures(platform, chat = "smoke", count = 24) {
     ]);
     return { nodes: { responseNodes: responses.map(({ responseId, parentResponseId, sender }) => ({ responseId, parentResponseId, sender })), inflightResponses: [] }, responses, expected };
   }
-  const file = { id: "file-test-paste", file_name: "Pasted text.txt", file_size: Buffer.byteLength(prompt), is_image: false, status: "SUCCESS", signed_path: "/file?file_id=test-paste&sig=SIGNED_SENTINEL" };
+  const upload = turns[0][0];
+  const file = { id: "file-test-paste", file_name: "Original source.py", file_size: Buffer.byteLength(upload), is_image: false, status: "SUCCESS", signed_path: "/file?file_id=test-paste&sig=SIGNED_SENTINEL" };
   const messages = turns.flatMap(([user, assistant], i) => [
     { message_id: i * 2 + 1, parent_id: i ? i * 2 : null, role: "USER", status: "FINISHED", incomplete_message: null, has_pending_fragment: false, auto_continue: false, fragments: i ? [{ type: "REQUEST", content: user }] : [{ type: "FILE", files: [file] }, { type: "FILE", files: [{ is_image: true, file_name: "ignored.png", signed_path: "/DO_NOT_FETCH_IMAGE" }] }] },
     { message_id: i * 2 + 2, parent_id: i * 2 + 1, role: "ASSISTANT", status: "FINISHED", incomplete_message: null, has_pending_fragment: false, auto_continue: false, fragments: [{ type: "RESPONSE", content: assistant }, { type: "TOOL", content: "TOOL_SENTINEL" }] }
   ]);
-  return { data: { code: 0, data: { biz_code: 0, biz_data: { chat_session: { id: chat, current_message_id: count * 2 }, chat_messages: messages, cache_control: "REPLACE" } } }, files: { [file.id]: prompt }, file, expected };
+  return { data: { code: 0, data: { biz_code: 0, biz_data: { chat_session: { id: chat, current_message_id: count * 2 }, chat_messages: messages, cache_control: "REPLACE" } } }, files: { [file.id]: upload }, file, expected };
 }
 module.exports = { fixtures, rpcFrame, geminiTurn, paste, document, prompt, answer };

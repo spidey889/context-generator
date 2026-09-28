@@ -247,6 +247,88 @@ test("DeepSeek preserves a UTF-8 BOM in an original text file", async () => {
   const capture = await h.window.__capCaptureNetworkJson();
   assert.ok(capture.text.includes("User: \uFEFF" + prompt));
 });
+test("DeepSeek pins the clicked chat and rejects navigation gaps without reading a different chat", async () => {
+  const phases = ["before", "pong", "response"];
+  const checks = await Promise.allSettled(phases.map(async phase => {
+    let h;
+    h = setup("deepseek", fixtures("deepseek", phase === "before" ? "other" : "smoke"), { beforeMessage: message => {
+      if (message.type === phase) { h.navigate("/a/chat/s/other"); h.navigate("/a/chat/s/smoke"); }
+    } });
+    await h.observe();
+    if (phase === "before") h.navigate("/a/chat/s/other");
+    await assert.rejects(h.window.__capCaptureNetworkJson("/a/chat/s/smoke"), /conversation changed/);
+    assert.equal(h.requests.length, phase === "response" ? 2 : 0);
+    assert.equal(h.navigationListeners(), 0);
+    assert.equal(h.listeners.size, 1);
+  }));
+  assert.deepEqual(checks.map((result, index) => result.status === "fulfilled" ? "passed" : `${phases[index]}: ${result.reason.message}`), ["passed", "passed", "passed"]);
+});
+test("DeepSeek captures supported original code/data uploads instead of dropping the user turn", async () => {
+  for (const name of ["notes.txt", "source.py", "source.JS", "settings.yaml", "query.sql"]) {
+    const f = fixtures("deepseek", "smoke", 1);
+    f.file.file_name = name;
+    const code = '\uFEFF  print("a\u00a0b")  \r\n# original source\r\n';
+    f.files[f.file.id] = code; f.file.file_size = Buffer.byteLength(code);
+    const h = setup("deepseek", f); await h.observe();
+    const capture = await h.window.__capCaptureNetworkJson();
+    assert.equal(capture.text, `DeepSeek conversation:\n\nUser: ${code}\n\nAssistant: ${f.data.data.biz_data.chat_messages[1].fragments[0].content}`);
+    assert.equal(capture.messageTurnCount, 2);
+    assert.equal(h.requests.filter(request => request.url.hostname === "files.deepseeksvc.com").length, 1);
+    assert.doesNotMatch(JSON.stringify(h.replies), /AUTH_SENTINEL|SIGNED_SENTINEL/);
+  }
+});
+test("DeepSeek upgrades the old MAIN contract while retaining auth for code uploads", async () => {
+  let h, installs = 0;
+  h = setup("deepseek", fixtures("deepseek"), { runtime: { sendMessage: async () => {
+    installs++; h.reinstall(files[1]); return { ok: true };
+  } } });
+  const source = fs.readFileSync(path.join(__dirname, "..", "extension", files[1]), "utf8");
+  vm.runInContext(source.replace('const version = platform === "grok" ? 1 : 2', "const version = 1"), h.context);
+  await h.observe();
+  assert.equal((await h.window.__capCaptureNetworkJson()).text, h.fixture.expected);
+  assert.equal(installs, 1);
+  assert.equal(h.window.__capNetworkFetchState.version, 2);
+  assert.equal(h.listeners.size, 1);
+});
+test("DeepSeek picker pins chat before handoff and preserves original uploaded code through metrics", async () => {
+  const source = fs.readFileSync(path.join(__dirname, "..", "extension", "platform-content.js"), "utf8");
+  const captureStart = source.indexOf("  function createConversationCapture(text, metrics = {})");
+  const captureEnd = source.indexOf("  function getConversationCaptureMetrics", captureStart);
+  const cleanStart = source.indexOf("  function cleanText(text)");
+  const cleanEnd = source.indexOf("  function isVisible", cleanStart);
+  const metrics = vm.createContext({ lastConversationCaptureMetrics: null });
+  vm.runInContext(source.slice(cleanStart, cleanEnd) + source.slice(captureStart, captureEnd), metrics);
+  const text = 'DeepSeek conversation:\n\nUser: \uFEFF  print("a\u00a0b")  \r\n\nAssistant: Answer';
+  assert.equal(metrics.createConversationCapture(text, { method: "deepseek-json" }), text);
+  const start = source.indexOf("  async function startDestinationTransfer(destinationId)");
+  const end = source.indexOf("  function protectOverlayPalette", start);
+  for (const navigate of [false, true]) {
+    let capturedPath, transfers = 0;
+    const errors = [], noop = () => {};
+    const window = { location: { pathname: "/a/chat/s/smoke" }, __capCaptureNetworkJson: async expected => {
+      capturedPath = expected;
+      if (expected !== window.location.pathname) throw new Error("The conversation changed during capture.");
+      return { text, messageTurnCount: 2 };
+    } };
+    const sandbox = vm.createContext({ window, currentPlatform: { id: "deepseek", name: "DeepSeek" },
+      claudeJsonCaptureEnabled: false, chatGptJsonCaptureEnabled: false, networkJsonCaptureEnabled: true,
+      isRunning: false, runningResetTimer: null, RUNNING_AUTO_RESET_MS: 360000, DESTINATION_SHEET_EXIT_MS: 0,
+      NO_CONVERSATION_ERROR_MESSAGE: "No conversation", createTransferTrace: () => ({}),
+      startTransferTelemetry: noop, markTransferTrace: noop, finishTransferTrace: noop,
+      getDetectedConversationMessageCount: () => 0, hideDestinationSheet: noop, delay: async () => {},
+      showErrorOverlay: error => errors.push(error), clearRunningResetTimer: noop, resetRunningFlag: noop,
+      setTimeout: () => 1, transitionDestinationSheetToHandoff: async () => { if (navigate) window.location.pathname = "/a/chat/s/other"; },
+      showOverlay: noop, releaseDestinationSheetBackdrop: noop, prepareDestinationTab: async () => ({}),
+      advanceTransferTelemetryStage: noop, prepareSourceForCapture: () => { throw new Error("DOM capture must not run"); },
+      setHandoffProgress: noop, createConversationCapture: value => value, markCaptureDone: noop,
+      runContextFlow: () => { transfers++; }, getSafeTelemetryFailureReason: () => "capture_failed" });
+    vm.runInContext(source.slice(start, end), sandbox);
+    await sandbox.startDestinationTransfer("claude");
+    assert.equal(capturedPath, "/a/chat/s/smoke");
+    assert.equal(transfers, navigate ? 0 : 1);
+    assert.deepEqual(errors, navigate ? ["The conversation changed during capture."] : []);
+  }
+});
 test("Grok rejects camelCase pagination and advertised missing counts", () => {
   for (const flag of [{ hasMore: true }, { nextCursor: "next" }, { isComplete: false }, { totalCount: 1000 }]) {
     const h = setup("grok"); Object.assign(h.fixture.nodes, flag);
