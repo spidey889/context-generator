@@ -1,5 +1,5 @@
 (() => {
-  const version = 2;
+  const version = 3;
   const previous = window.__capClaudeFetchState;
   if (previous?.version === version && window.fetch === previous.fetch) return;
   previous?.dispose();
@@ -17,6 +17,9 @@
       if (endpoints.size > 64) endpoints.delete(endpoints.keys().next().value);
     } catch { /* Invalid fetch arguments must retain native behavior. */ }
   };
+  // Resource timing is bounded and can be cleared by the page. Keep routes
+  // already observed by the replaced hook, without retaining response bodies.
+  for (const url of previous?.endpoints?.values() || []) remember(url);
   // Late installation (including extension reload) recovers routing URLs only.
   // No response bodies, credentials, or cross-chat endpoint guessing.
   const recover = () => {
@@ -32,8 +35,13 @@
 
   const receive = async event => {
     const request = event.data;
-    if (event.source !== window || event.origin !== location.origin || request?.channel !== channel || request.type !== "request") return;
+    if (event.source !== window || event.origin !== location.origin || request?.channel !== channel) return;
     if (typeof request.id !== "string" || request.id.length > 80) return;
+    if (request.type === "ping") {
+      if (window.fetch === wrappedFetch) window.postMessage({ channel, type: "pong", id: request.id, version }, location.origin);
+      return;
+    }
+    if (request.type !== "request") return;
     const chat = location.pathname.match(/^\/chat\/([^/]+)$/)?.[1];
     const reply = { channel, type: "response", id: request.id, chat };
     if (active) {
@@ -85,7 +93,7 @@
   };
   window.addEventListener("message", receive);
   window.__capClaudeFetchState = {
-    version, fetch: wrappedFetch,
+    version, fetch: wrappedFetch, endpoints,
     dispose() {
       active?.abort();
       window.removeEventListener("message", receive);

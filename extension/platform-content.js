@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-09-28-handoff-styles-v45";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-09-28-claude-json-audit-v46";
   let handoffFallbackStyleSheet = null;
   let claudeJsonCaptureEnabled = false;
   let chatGptJsonCaptureEnabled = false;
@@ -5396,6 +5396,7 @@
 
   async function startDestinationTransfer(destinationId) {
     const useClaudeJson = currentPlatform.id === "claude" && claudeJsonCaptureEnabled;
+    const claudeJsonPath = useClaudeJson ? window.location.pathname : null;
     const useChatGptJson = currentPlatform.id === "chatgpt" && chatGptJsonCaptureEnabled;
     const useNetworkJson = ["gemini", "grok", "deepseek"].includes(currentPlatform.id) && networkJsonCaptureEnabled;
     const trace = createTransferTrace(destinationId, "destination tile");
@@ -5406,9 +5407,9 @@
       finishTransferTrace(trace, "unknown_failure");
       return;
     }
-    // The full ChatGPT tree can be ready before its virtualized DOM mounts.
+    // The full JSON tree can be ready before its virtualized DOM mounts.
     // JSON validation, rather than rendered turn count, decides whether it is empty.
-    if (!useChatGptJson && !useNetworkJson && getDetectedConversationMessageCount() === 0) {
+    if (!useClaudeJson && !useChatGptJson && !useNetworkJson && getDetectedConversationMessageCount() === 0) {
       markTransferTrace(trace, `failed: ${NO_CONVERSATION_ERROR_MESSAGE}`);
       finishTransferTrace(trace, "no_conversation");
       hideDestinationSheet();
@@ -5427,12 +5428,12 @@
       showOverlay(destinationId);
       releaseDestinationSheetBackdrop();
       let preparedDestinationPromise = null;
-      if (useChatGptJson || useNetworkJson || getDetectedConversationMessageCount() > 0) {
+      if (useClaudeJson || useChatGptJson || useNetworkJson || getDetectedConversationMessageCount() > 0) {
         preparedDestinationPromise = prepareDestinationTab(destinationId, trace);
       }
       advanceTransferTelemetryStage(trace, "capture_started");
       if (!useClaudeJson && !useChatGptJson && !useNetworkJson) await prepareSourceForCapture();
-      if (!preparedDestinationPromise && (useChatGptJson || useNetworkJson || getDetectedConversationMessageCount() > 0)) {
+      if (!preparedDestinationPromise && (useClaudeJson || useChatGptJson || useNetworkJson || getDetectedConversationMessageCount() > 0)) {
         preparedDestinationPromise = prepareDestinationTab(destinationId, trace);
       }
 
@@ -5442,7 +5443,7 @@
       if (useClaudeJson || useChatGptJson || useNetworkJson) {
         const captureJson = useClaudeJson ? window.__capCaptureClaudeJson : useChatGptJson ? window.__capCaptureChatGptJson : window.__capCaptureNetworkJson;
         if (typeof captureJson !== "function") throw new Error(`Refresh ${currentPlatform.name} to enable JSON capture.`);
-        const capture = await captureJson();
+        const capture = useClaudeJson ? await captureJson(claudeJsonPath) : await captureJson();
         conversationText = createConversationCapture(capture.text, {
           method: `${currentPlatform.id}-json`, messageTurnCount: capture.messageTurnCount,
           usefulTurnCount: capture.messageTurnCount, candidateTurnCount: capture.messageTurnCount

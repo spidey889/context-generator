@@ -454,7 +454,9 @@ async function startFixtureServer() {
       if (url.pathname !== "/source") response.setHeader("Content-Security-Policy", "script-src 'nonce-smoke'; object-src 'none'; base-uri 'none'; connect-src 'self'");
       response.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
       const page = url.pathname === "/chat/smoke"
-        ? claudePlacementFixture().replace('<div id="claude-page">', `<main aria-label="Conversation"><article data-message-author-role="user">${SOURCE_SENTINEL}</article><article data-message-author-role="assistant"><div class="markdown">${ASSISTANT_SENTINEL}</div></article></main><div id="claude-page">`)
+        // Claude JSON must work before native history mounts. The API still
+        // returns the full ordered conversation, including the pasted card.
+        ? claudePlacementFixture()
         : sourceFixture();
       if (NETWORK_SOURCE) {
         const boot = JSON_SOURCE === "gemini" ? `window.WIZ_global_data={SNlM0e:"CSRF_SENTINEL"};const xhr=new XMLHttpRequest();xhr.open("POST","/_/BardChatUi/data/batchexecute?rpcids=hNvQHb");xhr.send(new URLSearchParams({at:"CSRF_SENTINEL","f.req":JSON.stringify([[["hNvQHb",JSON.stringify(["c_smoke",10,null,1,[1],[4],null,1]),null,"generic"]]])}));`

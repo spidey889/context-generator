@@ -3,7 +3,7 @@ const fs = require("node:fs");
 const path = require("node:path");
 const vm = require("node:vm");
 const test = require("node:test");
-const { webcrypto } = require("node:crypto");
+const { webcrypto, createHash } = require("node:crypto");
 
 const chat = "test-chat";
 const endpoint = `https://claude.ai/api/organizations/test-org/chat_conversations/${chat}?tree=True`;
@@ -17,7 +17,7 @@ function fixture() {
     ]
   };
 }
-function setup(data = fixture(), { status = 200, headers = {}, body, resources = [], fetchImpl, runtime } = {}) {
+function setup(data = fixture(), { status = 200, headers = {}, body, resources = [], fetchImpl, runtime, beforeMessage } = {}) {
   const listeners = new Set();
   const navigationListeners = new Set();
   const popListeners = new Set();
@@ -42,6 +42,7 @@ function setup(data = fixture(), { status = 200, headers = {}, body, resources =
     addEventListener: (type, listener) => (type === "message" ? listeners : popListeners).add(listener),
     removeEventListener: (type, listener) => (type === "message" ? listeners : popListeners).delete(listener),
     postMessage: payload => queueMicrotask(() => {
+      beforeMessage?.(payload);
       for (const listener of [...listeners]) listener({ source: window, origin: location.origin, data: payload });
     })
   };
@@ -52,12 +53,13 @@ function setup(data = fixture(), { status = 200, headers = {}, body, resources =
   return { window, location,
     reinstall: (file = "claude-fetch-main.js") => vm.runInContext(fs.readFileSync(path.join(__dirname, "..", "extension", file), "utf8"), context),
     navigate: pathname => { for (const fn of navigationListeners) fn({ destination: { url: location.origin + pathname } }); location.pathname = pathname; },
-    stats: () => ({ requests, clones, requestUrl, requestOptions, listeners: listeners.size }) };
+    stats: () => ({ requests, clones, requestUrl, requestOptions, listeners: listeners.size,
+      navigationListeners: navigationListeners.size, popListeners: popListeners.size }) };
 }
 
 // Shape observed on a live Claude "Pasted text, pasted, 441 lines" card.
 function pastedAttachment(text) {
-  return { id: "paste", file_name: "", file_type: "txt", file_size: Buffer.byteLength(text), extracted_content: text };
+  return { id: createHash("sha256").update(text).digest("hex"), file_name: "", file_type: "txt", file_size: Buffer.byteLength(text), extracted_content: text };
 }
 
 test("Claude JSON capture preserves a large pasted attachment in its owning user turn", async () => {
@@ -366,7 +368,7 @@ test("Claude pasted-text size validation uses UTF-8 bytes before trimming", asyn
   data.chat_messages[0].attachments = [pastedAttachment("  café\r\n🙂  ")];
   const harness = setup(data);
   await harness.window.fetch(endpoint);
-  assert.match((await harness.window.__capCaptureClaudeJson()).text, /User: Question\n\ncafé\r\n🙂/);
+  assert.match((await harness.window.__capCaptureClaudeJson()).text, /User: Question\n\n  café\r\n🙂  /);
 });
 
 test("Claude JSON capture requires a real root and rejects malformed completeness structures", async () => {
@@ -442,7 +444,7 @@ test("Claude aborts navigation away and back, and rejects concurrent captures pr
   let finish;
   const harness = setup(fixture(), { resources: [endpoint], fetchImpl: () => new Promise(resolve => { finish = resolve; }) });
   const first = harness.window.__capCaptureClaudeJson();
-  const rejected = assert.rejects(first, /failed/);
+  const rejected = assert.rejects(first, /changed/);
   await new Promise(resolve => setTimeout(resolve, 0));
   await assert.rejects(harness.window.__capCaptureClaudeJson(), /failed/);
   harness.navigate("/chat/other-chat");
@@ -462,17 +464,202 @@ test("Claude isolated bridge awaits MAIN reinstallation before requesting captur
     harness.reinstall();
     return { ok: true };
   } } });
+  harness.window.__capClaudeFetchState.dispose();
   await harness.window.__capCaptureClaudeJson();
   assert.equal(ensures, 1);
   assert.equal(harness.stats().requests, 1);
 });
 
 
-test("Claude refuses capture when MAIN readiness fails or never replies", async () => {
+test("Claude refuses capture when a missing MAIN hook cannot be installed", async () => {
   for (const sendMessage of [async () => ({ ok: false }), () => new Promise(() => {})]) {
     const harness = setup(fixture(), { resources: [endpoint], runtime: { sendMessage } });
-    await assert.rejects(harness.window.__capCaptureClaudeJson(), /hook.*(installed|timed out)/);
+    harness.window.__capClaudeFetchState.dispose();
+    await assert.rejects(harness.window.__capCaptureClaudeJson(), /ready|hook.*(installed|timed out)/);
     assert.equal(harness.stats().requests, 0);
-    assert.equal(harness.stats().listeners, 1);
+    assert.equal(harness.stats().listeners, 0);
+    assert.equal(harness.stats().navigationListeners, 0);
+    assert.equal(harness.stats().popListeners, 0);
   }
+});
+
+test("Claude installed hook captures even when the worker never replies", async () => {
+  let ensures = 0;
+  const harness = setup(fixture(), { resources: [endpoint], runtime: { sendMessage: () => { ensures++; return new Promise(() => {}); } } });
+  assert.equal((await harness.window.__capCaptureClaudeJson()).messageTurnCount, 2);
+  assert.equal(ensures, 0);
+  assert.equal(harness.stats().listeners, 1);
+});
+
+test("Claude rejects navigation during hook setup without fetching the newly selected chat", async () => {
+  let harness;
+  harness = setup(fixture(), { resources: [endpoint], runtime: { sendMessage: async () => {
+    harness.navigate("/chat/other-chat");
+    harness.reinstall();
+    return { ok: true };
+  } } });
+  harness.window.__capClaudeFetchState.dispose();
+  await assert.rejects(harness.window.__capCaptureClaudeJson(), /changed/);
+  assert.equal(harness.stats().requests, 0);
+});
+
+test("Claude hook replacement preserves routes evicted from resource timing history", async () => {
+  const harness = setup();
+  await harness.window.fetch(endpoint);
+  const previous = harness.window.fetch;
+  harness.window.fetch = (...args) => previous(...args);
+  harness.reinstall();
+  assert.equal((await harness.window.__capCaptureClaudeJson()).messageTurnCount, 2);
+  assert.equal(harness.stats().requests, 2);
+});
+
+test("Claude preserves distinct pasted cards with identical or overlapping text", async () => {
+  const data = fixture();
+  data.chat_messages[0].attachments = [
+    { ...pastedAttachment("Long pasted document"), id: "first" },
+    { ...pastedAttachment("pasted"), id: "second" },
+    { ...pastedAttachment("Long pasted document"), id: "third" }
+  ];
+  const harness = setup(data);
+  await harness.window.fetch(endpoint);
+  assert.equal((await harness.window.__capCaptureClaudeJson()).text,
+    "Claude conversation:\n\nUser: Question\n\nLong pasted document\n\npasted\n\nLong pasted document\n\nAssistant: Private reasoning\n\nSelected answer");
+});
+
+test("Claude preserves pasted whitespace and does not confuse prompt substrings with inline paste copies", async () => {
+  const data = fixture();
+  data.chat_messages[0].content = [{ type: "text", text: "Compare pasted with earlier versions" }];
+  data.chat_messages[0].attachments = [pastedAttachment("  pasted\r\n  ")];
+  const harness = setup(data);
+  await harness.window.fetch(endpoint);
+  assert.ok((await harness.window.__capCaptureClaudeJson()).text.includes("User: Compare pasted with earlier versions\n\n  pasted\r\n  \n\nAssistant:"));
+});
+
+test("Claude inline paste deduplication preserves original whitespace and distinct identical cards", async () => {
+  const data = fixture();
+  const pastedText = "  repeated text\r\n  ";
+  data.chat_messages[0].content = [{ type: "text", text: "Prompt\n\nrepeated text" }];
+  data.chat_messages[0].attachments = [
+    { ...pastedAttachment(pastedText), id: "first" },
+    { ...pastedAttachment(pastedText), id: "first" },
+    { ...pastedAttachment(pastedText), id: "second" }
+  ];
+  const harness = setup(data);
+  await harness.window.fetch(endpoint);
+  assert.ok((await harness.window.__capCaptureClaudeJson()).text.includes(`User: Prompt\n\n${pastedText}\n\n${pastedText}\n\nAssistant:`));
+});
+
+test("Claude accounts for each inline paste range without duplicating cards or shifting replacements", async () => {
+  const data = fixture();
+  data.chat_messages[0].content = [{ type: "text", text: "Prompt\n\nFirst paste\n\nSecond paste\n\nFirst paste" }];
+  data.chat_messages[0].attachments = [
+    { ...pastedAttachment("  First paste\r\n"), id: "first" },
+    { ...pastedAttachment(" Second paste "), id: "second" },
+    { ...pastedAttachment("First paste"), id: "third" }
+  ];
+  const harness = setup(data);
+  await harness.window.fetch(endpoint);
+  assert.equal((await harness.window.__capCaptureClaudeJson()).text,
+    "Claude conversation:\n\nUser: Prompt\n\n  First paste\r\n\n\n Second paste \n\nFirst paste\n\nAssistant: Private reasoning\n\nSelected answer");
+});
+
+test("Claude rejects navigation away and back during setup and after MAIN finishes", async () => {
+  for (const phase of ["setup", "response"]) {
+    let harness;
+    harness = setup(fixture(), { resources: [endpoint], beforeMessage: payload => {
+      if (payload.type !== (phase === "setup" ? "pong" : "response")) return;
+      harness.navigate("/chat/another");
+      harness.navigate(`/chat/${chat}`);
+    } });
+    await assert.rejects(harness.window.__capCaptureClaudeJson(), /changed/);
+    assert.equal(harness.stats().requests, phase === "setup" ? 0 : 1);
+    assert.equal(harness.stats().listeners, 1);
+    assert.equal(harness.stats().navigationListeners, 0);
+    assert.equal(harness.stats().popListeners, 0);
+  }
+});
+
+test("Claude pins the destination-click chat before asynchronous handoff preparation", async () => {
+  const harness = setup(fixture(), { resources: [endpoint] });
+  harness.navigate("/chat/another");
+  await assert.rejects(harness.window.__capCaptureClaudeJson(`/chat/${chat}`), /changed/);
+  assert.equal(harness.stats().requests, 0);
+});
+
+test("Claude accepts a late hook installation before a delayed worker callback", async () => {
+  let harness;
+  harness = setup(fixture(), { resources: [endpoint], runtime: { sendMessage: () => {
+    setTimeout(() => harness.reinstall(), 350);
+    return new Promise(() => {});
+  } } });
+  harness.window.__capClaudeFetchState.dispose();
+  assert.equal((await harness.window.__capCaptureClaudeJson()).messageTurnCount, 2);
+  assert.equal(harness.stats().listeners, 1);
+});
+
+test("Claude old hook versions are replaced before capture", async () => {
+  let harness;
+  let ensures = 0;
+  harness = setup(fixture(), { resources: [endpoint], runtime: { sendMessage: async () => {
+    ensures++;
+    harness.reinstall();
+    return { ok: true };
+  } } });
+  harness.window.__capClaudeFetchState.dispose();
+  harness.window.__capClaudeFetchState.version = 2;
+  harness.window.addEventListener("message", event => {
+    if (event.data.type === "ping") harness.window.postMessage({ ...event.data, type: "pong", version: 2 });
+  });
+  assert.equal((await harness.window.__capCaptureClaudeJson()).messageTurnCount, 2);
+  assert.equal(ensures, 1);
+});
+
+// Execute the real picker function with only UI/relay boundaries stubbed. This
+// proves JSON capture can proceed before native conversation DOM has mounted.
+function pickerHarness({ jsonEnabled = true, navigateDuringHandoff = false } = {}) {
+  const source = fs.readFileSync(path.join(__dirname, "..", "extension", "platform-content.js"), "utf8");
+  const start = source.indexOf("  async function startDestinationTransfer(destinationId)");
+  const end = source.indexOf("  function protectOverlayPalette", start);
+  const calls = { capture: 0, flow: 0, prepared: 0, dom: 0, errors: [] };
+  const window = { location: { pathname: `/chat/${chat}` }, __capCaptureClaudeJson: async expectedPath => {
+    calls.capture++;
+    if (expectedPath !== window.location.pathname) throw new Error("The Claude conversation changed during capture.");
+    return { text: "Claude conversation:\n\nUser: API-only history", messageTurnCount: 1 };
+  } };
+  const noop = () => {};
+  const sandbox = {
+    window, currentPlatform: { id: "claude", name: "Claude" }, claudeJsonCaptureEnabled: jsonEnabled,
+    chatGptJsonCaptureEnabled: false, networkJsonCaptureEnabled: false, isRunning: false, runningResetTimer: null,
+    RUNNING_AUTO_RESET_MS: 360000, DESTINATION_SHEET_EXIT_MS: 0, NO_CONVERSATION_ERROR_MESSAGE: "No conversation",
+    createTransferTrace: () => ({}), startTransferTelemetry: noop, markTransferTrace: noop, finishTransferTrace: noop,
+    getDetectedConversationMessageCount: () => 0, hideDestinationSheet: noop, delay: async () => {},
+    showErrorOverlay: error => calls.errors.push(error), clearRunningResetTimer: noop, resetRunningFlag: noop,
+    setTimeout: () => 1, transitionDestinationSheetToHandoff: async () => {
+      if (navigateDuringHandoff) window.location.pathname = "/chat/other";
+    }, showOverlay: noop, releaseDestinationSheetBackdrop: noop,
+    prepareDestinationTab: async () => { calls.prepared++; return {}; }, advanceTransferTelemetryStage: noop,
+    prepareSourceForCapture: async () => { calls.dom++; }, setHandoffProgress: noop,
+    createConversationCapture: text => text, scrapeConversationTextWhenReady: async () => { calls.dom++; return "DOM"; },
+    markCaptureDone: noop, runContextFlow: () => { calls.flow++; }, getSafeTelemetryFailureReason: () => "capture_failed"
+  };
+  vm.createContext(sandbox);
+  vm.runInContext(source.slice(start, end), sandbox);
+  return { calls, run: () => sandbox.startDestinationTransfer("chatgpt") };
+}
+
+test("Claude JSON picker captures API-only history with zero rendered turns", async () => {
+  const harness = pickerHarness();
+  await harness.run();
+  assert.deepEqual(harness.calls, { capture: 1, flow: 1, prepared: 1, dom: 0, errors: [] });
+  const dom = pickerHarness({ jsonEnabled: false });
+  await dom.run();
+  assert.deepEqual(dom.calls, { capture: 0, flow: 0, prepared: 0, dom: 0, errors: ["No conversation"] });
+});
+
+test("Claude JSON picker prevents wrong-chat transfer after handoff navigation", async () => {
+  const harness = pickerHarness({ navigateDuringHandoff: true });
+  await harness.run();
+  assert.equal(harness.calls.flow, 0);
+  assert.equal(harness.calls.dom, 0);
+  assert.deepEqual(harness.calls.errors, ["The Claude conversation changed during capture."]);
 });

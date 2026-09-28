@@ -75,13 +75,46 @@
       // Claude's pasted cards are unnamed txt attachments, unlike named uploads.
       // Their complete text belongs to the owning user turn, not a separate turn.
       const attachments = message.sender === "human" && Array.isArray(message.attachments) ? message.attachments : [];
+      const inlineParts = [...parts];
+      const inlineCopies = new Map();
+      const pastedIds = new Set();
       for (const attachment of attachments) {
         if (attachment?.file_type !== "txt" || attachment.file_name !== "") continue;
         assertComplete(attachment, "Pasted-text attachment");
         if (typeof attachment.extracted_content !== "string" || (attachment.file_size > 0 && attachment.extracted_content.length === 0)) throw unsupported("A pasted-text attachment is missing its complete extracted_content string.");
         if (attachment.file_size != null && (!Number.isSafeInteger(attachment.file_size) || attachment.file_size < 0 || new TextEncoder().encode(attachment.extracted_content).length !== attachment.file_size)) throw unsupported("A pasted-text attachment's extracted_content does not match its file_size; completeness cannot be verified.");
-        const pastedText = attachment.extracted_content.trim();
-        if (pastedText && !parts.some(part => part.includes(pastedText))) parts.push(pastedText);
+        const pastedText = attachment.extracted_content;
+        // Text overlap is not attachment identity: two cards may intentionally
+        // contain the same text, or one may be a substring of another.
+        const duplicate = typeof attachment.id === "string" && pastedIds.has(attachment.id);
+        if (typeof attachment.id === "string" && attachment.id) pastedIds.add(attachment.id);
+        if (!pastedText.trim() || duplicate) continue;
+        const normalizedPaste = pastedText.trim();
+        let inlineCopy = null;
+        for (const [index, part] of inlineParts.entries()) {
+          for (let start = part.indexOf(normalizedPaste); start >= 0; start = part.indexOf(normalizedPaste, start + 1)) {
+            const end = start + normalizedPaste.length;
+            if ((start === 0 || part.slice(0, start).endsWith("\n\n"))
+              && (end === part.length || part.slice(end).startsWith("\n\n"))
+              && !(inlineCopies.get(index) || []).some(copy => start < copy.end && end > copy.start)) {
+              inlineCopy = { index, start, end, text: pastedText };
+              break;
+            }
+          }
+          if (inlineCopy) break;
+        }
+        if (!inlineCopy) parts.push(pastedText);
+        else {
+          if (!inlineCopies.has(inlineCopy.index)) inlineCopies.set(inlineCopy.index, []);
+          inlineCopies.get(inlineCopy.index).push(inlineCopy);
+        }
+      }
+      // Restore original card whitespace without shifting offsets of another
+      // inline card. Each original range can represent only one attachment.
+      for (const [index, copies] of inlineCopies) {
+        for (const copy of copies.sort((a, b) => b.start - a.start)) {
+          parts[index] = parts[index].slice(0, copy.start) + copy.text + parts[index].slice(copy.end);
+        }
       }
       if (!parts.length) return [];
       return [(message.sender === "human" ? "User" : "Assistant") + ": " + parts.join("\n\n")];
@@ -94,37 +127,80 @@
     return { text, messageTurnCount: turns.length };
   }
 
-  window.__capCaptureClaudeJson = async () => {
-    // Reinstall MAIN before requesting: a worker/extension reload or another page
-    // wrapper must not leave a live isolated bridge talking to a missing hook.
-    if (typeof chrome !== "undefined" && chrome.runtime?.sendMessage) {
-      let readinessTimer;
-      try {
-        const ready = await Promise.race([
-          chrome.runtime.sendMessage({ type: "ENSURE_CLAUDE_JSON_HOOK" }),
-          new Promise((_, reject) => { readinessTimer = setTimeout(() => reject(new Error("Claude JSON hook installation timed out. Refresh or turn JSON capture off.")), 3000); })
-        ]);
-        if (!ready?.ok) throw new Error("Claude JSON hook could not be installed. Refresh or turn JSON capture off.");
-      } finally { clearTimeout(readinessTimer); }
-    }
-    return new Promise((resolve, reject) => {
-      const chat = location.pathname.match(/^\/chat\/([^/]+)$/)?.[1];
-      if (!chat) return reject(new Error("Open a saved Claude conversation to use JSON capture."));
+  function waitForHook(timeoutMs, install = false) {
+    return new Promise(resolve => {
       const id = crypto.randomUUID();
-      const cleanup = () => { clearTimeout(timer); window.removeEventListener("message", receive); };
+      let pollTimer;
+      let settled = false;
+      const finish = ready => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        clearTimeout(pollTimer);
+        window.removeEventListener("message", receive);
+        resolve(ready);
+      };
       const receive = event => {
         const reply = event.data;
-        if (event.source !== window || event.origin !== location.origin || reply?.channel !== channel || reply.type !== "response" || reply.id !== id) return;
-        cleanup();
-        try {
-          if (location.pathname !== `/chat/${chat}` || reply.chat !== chat) throw new Error("The Claude conversation changed during capture.");
-          if (reply.error) throw new Error("Claude JSON capture failed. Refresh this conversation or turn JSON capture off.");
-          resolve(serialize(reply.data, chat));
-        } catch (error) { reject(error); }
+        if (event.source === window && event.origin === location.origin && reply?.channel === channel
+          && reply.type === "pong" && reply.id === id && reply.version === 3) finish(true);
       };
-      const timer = setTimeout(() => { cleanup(); reject(new Error("Claude JSON capture timed out. Refresh or turn JSON capture off.")); }, 17000);
+      const ping = () => {
+        if (settled) return;
+        window.postMessage({ channel, type: "ping", id }, location.origin);
+        pollTimer = setTimeout(ping, 100);
+      };
+      const timer = setTimeout(() => finish(false), timeoutMs);
       window.addEventListener("message", receive);
-      window.postMessage({ channel, type: "request", id, chat }, location.origin);
+      ping();
+      if (install) {
+        // A cold worker can lag behind a working hook. A correlated versioned
+        // pong proves readiness independently of the installation callback.
+        Promise.resolve().then(() => chrome.runtime.sendMessage({ type: "ENSURE_CLAUDE_JSON_HOOK" }))
+          .then(reply => { if (!reply?.ok) finish(false); }, () => finish(false));
+      }
     });
+  }
+
+  window.__capCaptureClaudeJson = async (expectedPath = location.pathname) => {
+    const chat = expectedPath.match(/^\/chat\/([^/]+)$/)?.[1];
+    if (!chat) throw new Error("Open a saved Claude conversation to use JSON capture.");
+    let changed = location.pathname !== expectedPath;
+    const navigated = event => {
+      const destination = event?.destination ? new URL(event.destination.url) : location;
+      if (destination.origin !== location.origin || destination.pathname !== expectedPath) changed = true;
+    };
+    // Cover setup and response delivery too, including navigation away and back.
+    window.navigation?.addEventListener("navigate", navigated);
+    window.addEventListener("popstate", navigated);
+    try {
+      if (changed) throw new Error("The Claude conversation changed during capture.");
+      if (!await waitForHook(250)) {
+        if (typeof chrome === "undefined" || !chrome.runtime?.sendMessage || !await waitForHook(8000, true)) {
+          throw new Error("Claude JSON hook is not ready. Refresh this chat and try again, or turn JSON capture off.");
+        }
+      }
+      if (changed || location.pathname !== expectedPath) throw new Error("The Claude conversation changed during capture.");
+      return await new Promise((resolve, reject) => {
+        const id = crypto.randomUUID();
+        const cleanup = () => { clearTimeout(timer); window.removeEventListener("message", receive); };
+        const receive = event => {
+          const reply = event.data;
+          if (event.source !== window || event.origin !== location.origin || reply?.channel !== channel || reply.type !== "response" || reply.id !== id) return;
+          cleanup();
+          try {
+            if (changed || location.pathname !== expectedPath || reply.chat !== chat) throw new Error("The Claude conversation changed during capture.");
+            if (reply.error) throw new Error("Claude JSON capture failed. Refresh this conversation or turn JSON capture off.");
+            resolve(serialize(reply.data, chat));
+          } catch (error) { reject(error); }
+        };
+        const timer = setTimeout(() => { cleanup(); reject(new Error("Claude JSON capture timed out. Refresh or turn JSON capture off.")); }, 17000);
+        window.addEventListener("message", receive);
+        window.postMessage({ channel, type: "request", id, chat }, location.origin);
+      });
+    } finally {
+      window.navigation?.removeEventListener("navigate", navigated);
+      window.removeEventListener("popstate", navigated);
+    }
   };
 })();
