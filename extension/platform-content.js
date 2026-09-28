@@ -1,5 +1,6 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-09-28-network-capture-v44";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-09-28-handoff-styles-v45";
+  let handoffFallbackStyleSheet = null;
   let claudeJsonCaptureEnabled = false;
   let chatGptJsonCaptureEnabled = false;
   let networkJsonCaptureEnabled = false;
@@ -649,6 +650,11 @@
 
   function cleanupContextGeneratorNodes() {
     cleanupContextGeneratorReservations();
+
+    if (handoffFallbackStyleSheet) {
+      document.adoptedStyleSheets = document.adoptedStyleSheets.filter((sheet) => sheet !== handoffFallbackStyleSheet);
+      handoffFallbackStyleSheet = null;
+    }
 
     [
       INSTALL_NOTICE_NODE_ID,
@@ -5946,6 +5952,13 @@
           }
         `;
         document.head.appendChild(styleSheet);
+        // Strict page CSP can block this style tag while leaving the card's inline
+        // styles intact. Adopt the same CSS so progress circles/lines still render.
+        if (!styleSheet.sheet) {
+          handoffFallbackStyleSheet = new CSSStyleSheet();
+          handoffFallbackStyleSheet.replaceSync(styleSheet.textContent);
+          document.adoptedStyleSheets = [...document.adoptedStyleSheets, handoffFallbackStyleSheet];
+        }
       }
 
       const countdown = document.createElement("div");
