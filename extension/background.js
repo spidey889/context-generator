@@ -415,6 +415,14 @@ chrome.action.onClicked.addListener(async (tab) => {
 });
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  if (message?.type === "ENSURE_NETWORK_JSON_HOOK") {
+    if (!sender?.tab?.id || !["gemini", "grok", "deepseek"].includes(getPlatformFromUrl(sender.tab.url)) || sender.frameId !== 0) {
+      sendResponse({ ok: false }); return false;
+    }
+    ensureNetworkJsonHook(sender.tab.id).then(ok => sendResponse({ ok }));
+    return true;
+  }
+
   if (message?.type === "ENSURE_CHATGPT_JSON_HOOK") {
     if (!sender?.tab?.id || getPlatformFromUrl(sender.tab.url) !== "chatgpt" || sender.frameId !== 0) {
       sendResponse({ ok: false }); return false;
@@ -986,6 +994,13 @@ async function ensureChatGptJsonHook(tabId) {
   } catch { return false; }
 }
 
+async function ensureNetworkJsonHook(tabId) {
+  try {
+    await chrome.scripting.executeScript({ target: { tabId }, world: "MAIN", files: ["network-json-data.js", "network-fetch-main.js"] });
+    return true;
+  } catch { return false; }
+}
+
 async function injectIntoOpenSupportedTabs() {
   try {
     const tabs = await chrome.tabs.query({});
@@ -999,6 +1014,9 @@ async function injectIntoOpenSupportedTabs() {
           } else if (getPlatformFromUrl(tab.url) === "chatgpt") {
             await ensureChatGptJsonHook(tab.id);
             await ensureContentScript(tab.id, "chatgpt-json-capture.js");
+          } else if (["gemini", "grok", "deepseek"].includes(getPlatformFromUrl(tab.url))) {
+            await ensureNetworkJsonHook(tab.id);
+            await ensureContentScript(tab.id, "network-json-capture.js");
           }
           return ensureContentScript(tab.id, PLATFORM_CONTENT_SCRIPT);
         })

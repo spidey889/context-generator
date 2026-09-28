@@ -1,7 +1,8 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-09-28-overlay-palette-v43";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-09-28-network-capture-v44";
   let claudeJsonCaptureEnabled = false;
   let chatGptJsonCaptureEnabled = false;
+  let networkJsonCaptureEnabled = false;
   const INSTANCE_TEARDOWN_KEY = "__contextGeneratorPlatformTeardown";
   const INSTALL_NOTICE_NODE_ID = "context-generator-install-notice";
   let installNoticeChecked = false;
@@ -5023,7 +5024,7 @@
 
     sheet.appendChild(grid);
 
-    if (["claude", "chatgpt"].includes(currentPlatform.id)) {
+    if (["claude", "chatgpt", "gemini", "grok", "deepseek"].includes(currentPlatform.id)) {
       const toggle = document.createElement("button");
       toggle.type = "button";
       toggle.id = `context-generator-${currentPlatform.id}-json-toggle`;
@@ -5036,7 +5037,8 @@
         if (isRunning) return;
         let enabled;
         if (currentPlatform.id === "claude") enabled = claudeJsonCaptureEnabled = !claudeJsonCaptureEnabled;
-        else enabled = chatGptJsonCaptureEnabled = !chatGptJsonCaptureEnabled;
+        else if (currentPlatform.id === "chatgpt") enabled = chatGptJsonCaptureEnabled = !chatGptJsonCaptureEnabled;
+        else enabled = networkJsonCaptureEnabled = !networkJsonCaptureEnabled;
         toggle.setAttribute("aria-pressed", String(enabled));
         toggle.title = `Fast capture: ${enabled ? "On" : "Off"}`;
       });
@@ -5084,7 +5086,7 @@
       }
       if (event.key !== "Tab") return;
 
-      const focusableTiles = [...sheet.querySelectorAll(".context-generator-destination-tile, #context-generator-claude-json-toggle, #context-generator-chatgpt-json-toggle")]
+      const focusableTiles = [...sheet.querySelectorAll(".context-generator-destination-tile, .context-generator-speed-toggle")]
         .filter((tile) => !tile.disabled && tile.getAttribute("aria-disabled") !== "true");
       if (focusableTiles.length === 0) return;
       const focusedIndex = focusableTiles.indexOf(document.activeElement);
@@ -5389,6 +5391,7 @@
   async function startDestinationTransfer(destinationId) {
     const useClaudeJson = currentPlatform.id === "claude" && claudeJsonCaptureEnabled;
     const useChatGptJson = currentPlatform.id === "chatgpt" && chatGptJsonCaptureEnabled;
+    const useNetworkJson = ["gemini", "grok", "deepseek"].includes(currentPlatform.id) && networkJsonCaptureEnabled;
     const trace = createTransferTrace(destinationId, "destination tile");
     trace.destinationId = destinationId;
     startTransferTelemetry(trace);
@@ -5399,7 +5402,7 @@
     }
     // The full ChatGPT tree can be ready before its virtualized DOM mounts.
     // JSON validation, rather than rendered turn count, decides whether it is empty.
-    if (!useChatGptJson && getDetectedConversationMessageCount() === 0) {
+    if (!useChatGptJson && !useNetworkJson && getDetectedConversationMessageCount() === 0) {
       markTransferTrace(trace, `failed: ${NO_CONVERSATION_ERROR_MESSAGE}`);
       finishTransferTrace(trace, "no_conversation");
       hideDestinationSheet();
@@ -5418,24 +5421,24 @@
       showOverlay(destinationId);
       releaseDestinationSheetBackdrop();
       let preparedDestinationPromise = null;
-      if (useChatGptJson || getDetectedConversationMessageCount() > 0) {
+      if (useChatGptJson || useNetworkJson || getDetectedConversationMessageCount() > 0) {
         preparedDestinationPromise = prepareDestinationTab(destinationId, trace);
       }
       advanceTransferTelemetryStage(trace, "capture_started");
-      if (!useClaudeJson && !useChatGptJson) await prepareSourceForCapture();
-      if (!preparedDestinationPromise && (useChatGptJson || getDetectedConversationMessageCount() > 0)) {
+      if (!useClaudeJson && !useChatGptJson && !useNetworkJson) await prepareSourceForCapture();
+      if (!preparedDestinationPromise && (useChatGptJson || useNetworkJson || getDetectedConversationMessageCount() > 0)) {
         preparedDestinationPromise = prepareDestinationTab(destinationId, trace);
       }
 
       markTransferTrace(trace, "capture start");
       setHandoffProgress("capture", "active");
       let conversationText;
-      if (useClaudeJson || useChatGptJson) {
-        const captureJson = useClaudeJson ? window.__capCaptureClaudeJson : window.__capCaptureChatGptJson;
+      if (useClaudeJson || useChatGptJson || useNetworkJson) {
+        const captureJson = useClaudeJson ? window.__capCaptureClaudeJson : useChatGptJson ? window.__capCaptureChatGptJson : window.__capCaptureNetworkJson;
         if (typeof captureJson !== "function") throw new Error(`Refresh ${currentPlatform.name} to enable JSON capture.`);
         const capture = await captureJson();
         conversationText = createConversationCapture(capture.text, {
-          method: useClaudeJson ? "claude-json" : "chatgpt-json", messageTurnCount: capture.messageTurnCount,
+          method: `${currentPlatform.id}-json`, messageTurnCount: capture.messageTurnCount,
           usefulTurnCount: capture.messageTurnCount, candidateTurnCount: capture.messageTurnCount
         });
       } else {

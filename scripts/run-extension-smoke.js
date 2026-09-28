@@ -4,6 +4,7 @@ const http = require("node:http");
 const os = require("node:os");
 const path = require("node:path");
 const { spawn } = require("node:child_process");
+const { fixtures: networkFixtures, rpcFrame } = require("../test/network-json-fixtures");
 
 const REPO_ROOT = path.resolve(__dirname, "..");
 const SOURCE_SENTINEL = "SMOKE_USER_SENTINEL: preserve the deployment checklist.";
@@ -28,7 +29,9 @@ const SMOKE_PLATFORM_QUERY = "__cap_context_smoke_platform";
 const SMOKE_TIMEOUT_MS = Number(process.env.CAP_CONTEXT_SMOKE_TIMEOUT_MS || 45000);
 const CLAUDE_PLACEMENT_SCREENSHOT_PATH = process.env.CAP_CONTEXT_CLAUDE_PLACEMENT_SCREENSHOT || "";
 const PICKER_SCREENSHOT_PATH = process.env.CAP_CONTEXT_PICKER_SCREENSHOT || "";
-const JSON_SOURCE = process.env.CAP_CONTEXT_JSON_SMOKE === "chatgpt" ? "chatgpt" : process.env.CAP_CONTEXT_JSON_SMOKE === "1" ? "claude" : null;
+const JSON_SOURCE = ["chatgpt", "gemini", "grok", "deepseek"].includes(process.env.CAP_CONTEXT_JSON_SMOKE) ? process.env.CAP_CONTEXT_JSON_SMOKE : process.env.CAP_CONTEXT_JSON_SMOKE === "1" ? "claude" : null;
+const NETWORK_SOURCE = ["gemini", "grok", "deepseek"].includes(JSON_SOURCE);
+const NETWORK_FAILURE = NETWORK_SOURCE && process.env.CAP_CONTEXT_NETWORK_FAILURE_SMOKE === "partial";
 const JSON_CAPTURE_SMOKE = Boolean(JSON_SOURCE);
 const CLAUDE_RELOAD_SMOKE = JSON_SOURCE === "claude" && process.env.CAP_CONTEXT_CLAUDE_RELOAD_SMOKE === "1";
 const CHATGPT_RELOAD_SMOKE = JSON_SOURCE === "chatgpt" && process.env.CAP_CONTEXT_CHATGPT_RELOAD_SMOKE === "1";
@@ -213,6 +216,13 @@ async function createSmokeExtension(tempRoot, origin) {
     const hostname = fixtureUrl.hostname;`,
     "the background fixture platform resolver");
   await fs.promises.writeFile(backgroundPath, backgroundSource);
+  for (const file of ["network-fetch-main.js", "network-json-capture.js"]) {
+    const filePath = path.join(extensionRoot, file);
+    let source = await fs.promises.readFile(filePath, "utf8");
+    source = replaceOnce(source, "})[location.hostname];", `})[location.hostname] || ({gemini:"gemini",grok:"grok",deepseek:"deepseek"})[new URL(location.href).searchParams.get(${JSON.stringify(SMOKE_PLATFORM_QUERY)})];`, "the network fixture source resolver");
+    if (file === "network-fetch-main.js") source = source.replaceAll("https://files.deepseeksvc.com", origin);
+    await fs.promises.writeFile(filePath, source);
+  }
   return extensionRoot;
 }
 
@@ -332,9 +342,40 @@ function chatGptTreeFixture() {
 
 async function startFixtureServer() {
   const state = { summaryRequests: [], jsonRequests: 0, sessionRequests: 0, pasteDescriptorRequests: 0, pasteContentRequests: 0, chatgptRequestUrls: [], claudeRequestUrls: [] };
+  const network = NETWORK_SOURCE ? networkFixtures(JSON_SOURCE) : null;
   const server = http.createServer(async (request, response) => {
     const url = new URL(request.url, "http://127.0.0.1");
     response.setHeader("Cache-Control", "no-store");
+    if (NETWORK_SOURCE && url.pathname === "/api/v0/session") {
+      response.writeHead(200, { "Content-Type": "application/json" }); response.end("{}"); return;
+    }
+    if (NETWORK_SOURCE && url.pathname === "/api/file") {
+      state.pasteContentRequests++;
+      assert.equal(request.headers.authorization, undefined);
+      response.writeHead(200, { "Content-Type": "application/octet-stream" }); response.end(network.files[network.file.id]); return;
+    }
+    if (NETWORK_SOURCE && ["/_/BardChatUi/data/batchexecute", "/rest/app-chat/conversations/smoke/response-node", "/rest/app-chat/conversations/smoke/load-responses", "/api/v0/chat/history_messages"].includes(url.pathname)) {
+      state.jsonRequests++;
+      response.writeHead(200, { "Content-Type": "application/json" });
+      if (JSON_SOURCE === "gemini") {
+        let raw = ""; for await (const chunk of request) raw += chunk;
+        const form = new URLSearchParams(raw), args = JSON.parse(JSON.parse(form.get("f.req"))[0][0][1]);
+        assert.equal(form.get("at"), "CSRF_SENTINEL"); assert.equal(args[0], "c_smoke");
+        const index = args[2] ? Number(args[2].split("_")[1]) : 0;
+        const page = structuredClone(network.pages[index]);
+        if (NETWORK_FAILURE) page.cursor = null; // Missing root must still fail.
+        response.end(rpcFrame(page));
+      } else if (JSON_SOURCE === "grok") {
+        if (url.pathname.endsWith("response-node")) response.end(JSON.stringify(network.nodes));
+        else response.end(JSON.stringify({ responses: NETWORK_FAILURE ? network.responses.slice(1) : network.responses }));
+      } else {
+        assert.equal(request.headers.authorization, "Bearer AUTH_SENTINEL"); assert.equal(request.headers["x-device-id"], undefined);
+        const data = structuredClone(network.data);
+        if (NETWORK_FAILURE) { data.data.biz_data.cache_control = "MERGE"; data.data.biz_data.chat_messages = []; }
+        response.end(JSON.stringify(data));
+      }
+      return;
+    }
     if (request.method === "OPTIONS") {
       response.writeHead(204, {
         "Access-Control-Allow-Origin": "*",
@@ -409,12 +450,17 @@ async function startFixtureServer() {
       }));
       return;
     }
-    if (["/source", "/chat/smoke", "/c/smoke"].includes(url.pathname)) {
+    if (["/source", "/chat/smoke", "/c/smoke", "/app/smoke", "/a/chat/s/smoke"].includes(url.pathname)) {
       if (url.pathname !== "/source") response.setHeader("Content-Security-Policy", "script-src 'nonce-smoke'; object-src 'none'; base-uri 'none'; connect-src 'self'");
       response.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
       const page = url.pathname === "/chat/smoke"
         ? claudePlacementFixture().replace('<div id="claude-page">', `<main aria-label="Conversation"><article data-message-author-role="user">${SOURCE_SENTINEL}</article><article data-message-author-role="assistant"><div class="markdown">${ASSISTANT_SENTINEL}</div></article></main><div id="claude-page">`)
         : sourceFixture();
+      if (NETWORK_SOURCE) {
+        const boot = JSON_SOURCE === "gemini" ? `window.WIZ_global_data={SNlM0e:"CSRF_SENTINEL"};const xhr=new XMLHttpRequest();xhr.open("POST","/_/BardChatUi/data/batchexecute?rpcids=hNvQHb");xhr.send(new URLSearchParams({at:"CSRF_SENTINEL","f.req":JSON.stringify([[["hNvQHb",JSON.stringify(["c_smoke",10,null,1,[1],[4],null,1]),null,"generic"]]])}));`
+          : JSON_SOURCE === "deepseek" ? 'const xhr=new XMLHttpRequest();xhr.open("GET","/api/v0/session");xhr.setRequestHeader("Authorization","Bearer AUTH_SENTINEL");xhr.setRequestHeader("x-device-id","CACHE_DEVICE");xhr.send();' : "";
+        response.end(page.replace("</body>", `<script nonce="smoke">${boot}</script></body>`)); return;
+      }
       response.end(url.pathname === "/c/smoke"
         ? page.replace("</body>", '<script nonce="smoke">fetch("/backend-api/conversations/smoke?num_turns=10", {headers:{Authorization:"Bearer smoke-only","ChatGPT-Account-Id":"smoke-account"}});</script></body>')
         : url.pathname === "/chat/smoke"
@@ -512,7 +558,7 @@ async function run() {
 
   try {
     const extensionRoot = await createSmokeExtension(tempRoot, origin);
-    const sourcePath = JSON_SOURCE === "chatgpt" ? "/c/smoke" : JSON_SOURCE === "claude" ? "/chat/smoke" : "/source";
+    const sourcePath = JSON_SOURCE === "gemini" ? "/app/smoke" : JSON_SOURCE === "deepseek" ? "/a/chat/s/smoke" : JSON_SOURCE === "grok" || JSON_SOURCE === "chatgpt" ? "/c/smoke" : JSON_SOURCE === "claude" ? "/chat/smoke" : "/source";
     const sourceUrl = `${origin}${sourcePath}?${SMOKE_PLATFORM_QUERY}=${JSON_SOURCE || "chatgpt"}`;
     braveProcess = spawn(braveExecutable, [
       `--user-data-dir=${profileRoot}`,
@@ -708,6 +754,7 @@ async function run() {
       // without scroll sweeps or opening any pasted-content panels.
       await sourceSession.evaluate(`document.querySelectorAll("main article").forEach(node => node.remove()); history.pushState({}, "", "/g/project/c/smoke?${SMOKE_PLATFORM_QUERY}=chatgpt"); true`);
     }
+    if (NETWORK_SOURCE) await sourceSession.evaluate('document.querySelectorAll("main article").forEach(node => node.remove()); true');
     const jsonRequestsBeforeTransfer = state.jsonRequests;
     const clickResult = await sourceSession.evaluate(`(() => {
       const bubble = document.getElementById("context-generator-bubble");
@@ -783,12 +830,19 @@ async function run() {
       return;
     }
 
+    if (NETWORK_FAILURE) {
+      const expectedError = { gemini: "oldest history turn is missing", grok: "message body is missing", deepseek: "cache update instead of the full history" }[JSON_SOURCE];
+      await waitFor(() => sourceSession.evaluate(`document.getElementById("context-generator-error-overlay")?.textContent.includes(${JSON.stringify(expectedError)})`), "a visible incomplete-history error");
+      assert.equal(state.summaryRequests.length, 0);
+      assert.equal(state.jsonRequests - jsonRequestsBeforeTransfer, JSON_SOURCE === "grok" ? 2 : 1);
+      process.stdout.write(`✓ ${JSON_SOURCE} incomplete history failed visibly with zero backend requests.\n`); return;
+    }
     await waitFor(() => state.summaryRequests.length === 1, "one summary backend request");
     const capturedConversation = state.summaryRequests[0]?.conversation || "";
     assert.match(capturedConversation, new RegExp(SOURCE_SENTINEL.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
     assert.match(capturedConversation, new RegExp(ASSISTANT_SENTINEL.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
     if (JSON_CAPTURE_SMOKE) {
-      assert.match(capturedConversation, new RegExp(`^${JSON_SOURCE === "claude" ? "Claude" : "ChatGPT"} conversation:`));
+      assert.match(capturedConversation, new RegExp(`^${({claude:"Claude",chatgpt:"ChatGPT",gemini:"Gemini",grok:"Grok",deepseek:"DeepSeek"})[JSON_SOURCE]} conversation:`));
       assert.match(capturedConversation, /JSON_ONLY_SENTINEL/);
       if (JSON_SOURCE === "claude") {
         assert.deepEqual(Object.fromEntries(new URL(state.claudeRequestUrls.at(-1)).searchParams), { tree: "True", rendering_mode: "messages", render_all_tools: "true", include_inline_comparison: "true", consistency: "strong" });
@@ -816,7 +870,12 @@ async function run() {
         assert.equal(state.chatgptRequestUrls.at(-1), "/backend-api/conversation/smoke");
         assert.equal(state.sessionRequests, CHATGPT_RELOAD_SMOKE ? 1 : 0);
       }
-      assert.equal(state.jsonRequests, jsonRequestsBeforeTransfer + 1, "JSON capture must fetch fresh conversation data exactly once after destination selection.");
+      if (NETWORK_SOURCE) {
+        assert.equal(capturedConversation, networkFixtures(JSON_SOURCE).expected, "Every original own turn/paste/document must reach the backend once and in order.");
+        assert.doesNotMatch(capturedConversation, /TOOL_SENTINEL|SIGNED_SENTINEL|AUTH_SENTINEL|CSRF_SENTINEL/);
+        assert.equal(state.pasteContentRequests, JSON_SOURCE === "deepseek" ? 1 : 0);
+      }
+      assert.equal(state.jsonRequests, jsonRequestsBeforeTransfer + (JSON_SOURCE === "gemini" ? 3 : JSON_SOURCE === "grok" ? 2 : 1), "JSON capture must load the full history only after destination selection.");
     }
     process.stdout.write("✓ Capture reached the stub backend exactly once with both conversation turns.\n");
 

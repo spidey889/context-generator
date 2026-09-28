@@ -35,6 +35,17 @@
   },
   "content_scripts": [
     {
+      "matches": ["https://gemini.google.com/*", "https://grok.com/*", "https://chat.deepseek.com/*"],
+      "js": ["network-json-data.js", "network-fetch-main.js"],
+      "world": "MAIN",
+      "run_at": "document_start"
+    },
+    {
+      "matches": ["https://gemini.google.com/*", "https://grok.com/*", "https://chat.deepseek.com/*"],
+      "js": ["network-json-capture.js"],
+      "run_at": "document_start"
+    },
+    {
       "matches": ["https://chatgpt.com/*"],
       "js": ["chatgpt-fetch-main.js"],
       "world": "MAIN",

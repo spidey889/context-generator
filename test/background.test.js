@@ -397,7 +397,10 @@ test("JSON scripts reinstall in MAIN then isolated on the matching platform tabs
   const injections = [];
   loadBackgroundForSummaryTest(async () => {}, { injections, tabs: [
     { id: 1, url: "https://claude.ai/chat/a" },
-    { id: 2, url: "https://chatgpt.com/c/b" }
+    { id: 2, url: "https://chatgpt.com/c/b" },
+    { id: 3, url: "https://gemini.google.com/app/c" },
+    { id: 4, url: "https://grok.com/c/d" },
+    { id: 5, url: "https://chat.deepseek.com/a/chat/s/e" }
   ] });
   await new Promise(resolve => setTimeout(resolve, 0));
   const claude = injections.filter(item => item.target.tabId === 1);
@@ -406,6 +409,11 @@ test("JSON scripts reinstall in MAIN then isolated on the matching platform tabs
   const chatgpt = injections.filter(item => item.target.tabId === 2);
   assert.deepEqual(chatgpt.map(item => [...item.files]), [["chatgpt-fetch-main.js"], ["chatgpt-json-capture.js"], ["platform-content.js"]]);
   assert.equal(chatgpt[0].world, "MAIN");
+  for (const id of [3, 4, 5]) {
+    const platform = injections.filter(item => item.target.tabId === id);
+    assert.deepEqual(platform.map(item => [...item.files]), [["network-json-data.js", "network-fetch-main.js"], ["network-json-capture.js"], ["platform-content.js"]]);
+    assert.equal(platform[0].world, "MAIN");
+  }
 });
 
 test("Claude on-demand MAIN installation accepts only a Claude top-frame sender", async () => {
@@ -442,4 +450,15 @@ test("ChatGPT on-demand MAIN readiness is restricted to its top-frame source", a
   assert.equal(injections.length, 1);
   assert.equal(injections[0].world, "MAIN");
   assert.deepEqual([...injections[0].files], ["chatgpt-fetch-main.js"]);
+});
+
+test("New network MAIN readiness accepts only Gemini/Grok/DeepSeek top frames", async () => {
+  let listener; const injections = [];
+  loadBackgroundForSummaryTest(async () => {}, { injections, onMessage: value => { listener = value; } });
+  const request = sender => new Promise(resolve => listener({ type: "ENSURE_NETWORK_JSON_HOOK" }, sender, resolve));
+  for (const sender of [{}, { tab: { id: 1, url: "https://chatgpt.com/c/a" }, frameId: 0 }, { tab: { id: 1, url: "https://grok.com/c/a" }, frameId: 2 }]) assert.equal((await request(sender)).ok, false);
+  assert.equal(injections.length, 0);
+  for (const url of ["https://gemini.google.com/app/a", "https://grok.com/c/a", "https://chat.deepseek.com/a/chat/s/a"]) assert.equal((await request({ tab: { id: 1, url }, frameId: 0 })).ok, true);
+  assert.equal(injections.length, 3);
+  assert.ok(injections.every(item => item.world === "MAIN"));
 });
