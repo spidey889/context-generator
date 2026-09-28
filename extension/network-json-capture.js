@@ -2,10 +2,10 @@
   const platform = ({ "gemini.google.com": "gemini", "grok.com": "grok", "chat.deepseek.com": "deepseek" })[location.hostname];
   if (!platform) return;
   const channel = "cap-context-network-json-v1";
-  const pinChat = platform === "gemini" || platform === "deepseek";
-  const current = (pathname = location.pathname) => {
+  const pinChat = ["gemini", "grok", "deepseek"].includes(platform);
+  const current = (pathname = location.pathname, selected = platform === "grok" ? new URL(location.href).searchParams.get("rid") : null) => {
     const pattern = platform === "gemini" ? /\/app\/([^/]+)\/?$/ : platform === "grok" ? /\/c\/([^/]+)\/?$/ : /\/a\/chat\/s\/([^/]+)\/?$/;
-    return { chat: pathname.match(pattern)?.[1], selected: platform === "grok" ? new URL(location.href).searchParams.get("rid") : null };
+    return { chat: pathname.match(pattern)?.[1], selected };
   };
   const waitForHook = (timeout, install = false) => new Promise(resolve => {
     const id = crypto.randomUUID();
@@ -13,20 +13,22 @@
     const finish = ready => { if (settled) return; settled = true; clearTimeout(timer); clearTimeout(poll); window.removeEventListener("message", receive); resolve(ready); };
     const receive = event => {
       const reply = event.data;
-      if (event.source === window && event.origin === location.origin && reply?.channel === channel && reply.platform === platform && reply.type === "pong" && reply.id === id && reply.version === (platform === "grok" ? 1 : 2)) finish(true);
+      if (event.source === window && event.origin === location.origin && reply?.channel === channel && reply.platform === platform && reply.type === "pong" && reply.id === id && reply.version === 2) finish(true);
     };
     const ping = () => { if (settled) return; window.postMessage({ channel, platform, type: "ping", id }, location.origin); poll = setTimeout(ping, 100); };
     const timer = setTimeout(() => finish(false), timeout);
     window.addEventListener("message", receive); ping();
     if (install) Promise.resolve().then(() => chrome.runtime.sendMessage({ type: "ENSURE_NETWORK_JSON_HOOK" })).then(reply => { if (!reply?.ok) finish(false); }, () => finish(false));
   });
-  window.__capCaptureNetworkJson = async (expectedPath = location.pathname) => {
-    const before = current(pinChat ? expectedPath : location.pathname);
+  window.__capCaptureNetworkJson = async (expectedPath = platform === "grok" ? location.href : location.pathname) => {
+    // Grok branch selection lives in the query string; pin it with the clicked chat.
+    const expectedUrl = platform === "grok" ? new URL(expectedPath, location.origin) : null;
+    const before = expectedUrl ? current(expectedUrl.pathname, expectedUrl.searchParams.get("rid")) : current(expectedPath);
     if (!before.chat) throw new Error("Open a saved conversation to use fast capture.");
     let changed = false;
     const navigated = event => {
       const target = event?.destination ? new URL(event.destination.url) : location;
-      if (target.origin !== location.origin || current(target.pathname).chat !== before.chat) changed = true;
+      if (target.origin !== location.origin || JSON.stringify(current(target.pathname, platform === "grok" ? new URL(target.href).searchParams.get("rid") : null)) !== JSON.stringify(before)) changed = true;
     };
     // Pinned JSON sources latch readiness and queued response delivery, including
     // away-and-back changes after MAIN has removed its network listeners.
@@ -35,7 +37,7 @@
       window.addEventListener("popstate", navigated);
     }
     try {
-      if (pinChat && current().chat !== before.chat) throw new Error("The conversation changed during capture.");
+      if (pinChat && (expectedUrl && expectedUrl.origin !== location.origin || JSON.stringify(current()) !== JSON.stringify(before))) throw new Error("The conversation changed during capture.");
       if (!await waitForHook(250)) {
         if (typeof chrome === "undefined" || !chrome.runtime?.sendMessage || !await waitForHook(8000, true)) throw new Error("Fast capture isn't ready yet. Refresh this chat and try again, or turn off the lightning button.");
       }

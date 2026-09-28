@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-09-28-deepseek-json-audit-v49";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-09-28-grok-json-audit-v50";
   let handoffFallbackStyleSheet = null;
   let claudeJsonCaptureEnabled = false;
   let chatGptJsonCaptureEnabled = false;
@@ -3049,9 +3049,9 @@
   }
 
   function createConversationCapture(text, metrics = {}) {
-    // Verified ChatGPT/Gemini/DeepSeek JSON strings are source data, including code, pasted
+    // Verified ChatGPT/Gemini/Grok/DeepSeek JSON strings are source data, including code, pasted
     // bytes and canvas text. DOM cleanup would rewrite NBSP/line whitespace.
-    const cleaned = ["chatgpt-json", "gemini-json", "deepseek-json"].includes(metrics.method) ? text : cleanText(text);
+    const cleaned = ["chatgpt-json", "gemini-json", "grok-json", "deepseek-json"].includes(metrics.method) ? text : cleanText(text);
     lastConversationCaptureMetrics = {
       ...metrics,
       cleanedChars: cleaned.length,
@@ -5403,6 +5403,7 @@
     const chatGptJsonPath = useChatGptJson ? window.location.pathname : null;
     const useNetworkJson = ["gemini", "grok", "deepseek"].includes(currentPlatform.id) && networkJsonCaptureEnabled;
     const geminiJsonPath = useNetworkJson && currentPlatform.id === "gemini" ? window.location.pathname : null;
+    const grokJsonUrl = useNetworkJson && currentPlatform.id === "grok" ? window.location.href : null;
     const deepseekJsonPath = useNetworkJson && currentPlatform.id === "deepseek" ? window.location.pathname : null;
     const trace = createTransferTrace(destinationId, "destination tile");
     trace.destinationId = destinationId;
@@ -5451,7 +5452,7 @@
         const capture = useClaudeJson ? await captureJson(claudeJsonPath)
           : useChatGptJson ? await captureJson(chatGptJsonPath)
           : geminiJsonPath ? await captureJson(geminiJsonPath)
-          : deepseekJsonPath ? await captureJson(deepseekJsonPath) : await captureJson();
+          : deepseekJsonPath ? await captureJson(deepseekJsonPath) : grokJsonUrl ? await captureJson(grokJsonUrl) : await captureJson();
         conversationText = createConversationCapture(capture.text, {
           method: `${currentPlatform.id}-json`, messageTurnCount: capture.messageTurnCount,
           usefulTurnCount: capture.messageTurnCount, candidateTurnCount: capture.messageTurnCount

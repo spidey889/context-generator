@@ -108,6 +108,9 @@
       if (message.partial === true || message.streamErrors?.length) fail("A Grok response is incomplete.");
       if (!["human", "assistant"].includes(message.sender) || message.isControl) return [];
       if (typeof message.message !== "string") fail("A Grok own-turn text field is missing.");
+      // File bodies are unsupported here. Do not accept an answer-only transcript
+      // when its authored user turn consists solely of an attachment.
+      if (message.sender === "human" && !message.message.trim() && [message.fileAttachments, message.fileAttachmentsMetadata].some(files => Array.isArray(files) && files.length)) fail("Grok has a file-only user turn that fast capture cannot read.");
       return turn(message.sender === "human" ? "User" : "Assistant", [message.message]);
     });
     return transcript("Grok", turns);

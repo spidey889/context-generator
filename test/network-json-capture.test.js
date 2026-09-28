@@ -55,7 +55,7 @@ function setup(platform, fixture = fixtures(platform), { fetchImpl, runtime, sch
   };
   return { window, api, requests, replies, context, fixture, observe, reinstall, listeners, location,
     navigationListeners: () => navigation.size,
-    navigate(pathname = "/new") { for (const fn of navigation) fn({ destination: { url: location.origin + pathname } }); location.pathname = pathname; location.href = location.origin + pathname; }
+    navigate(pathname = "/new") { const target = new URL(pathname, location.origin); for (const fn of navigation) fn({ destination: { url: target.href } }); location.pathname = target.pathname; location.search = target.search; location.href = target.href; }
   };
 }
 for (const platform of ["gemini", "grok", "deepseek"]) {
@@ -283,7 +283,7 @@ test("DeepSeek upgrades the old MAIN contract while retaining auth for code uplo
     installs++; h.reinstall(files[1]); return { ok: true };
   } } });
   const source = fs.readFileSync(path.join(__dirname, "..", "extension", files[1]), "utf8");
-  vm.runInContext(source.replace('const version = platform === "grok" ? 1 : 2', "const version = 1"), h.context);
+  vm.runInContext(source.replace('const version = 2', "const version = 1"), h.context);
   await h.observe();
   assert.equal((await h.window.__capCaptureNetworkJson()).text, h.fixture.expected);
   assert.equal(installs, 1);
@@ -363,4 +363,94 @@ test("Native fetch errors cannot expose private strings as adapter error message
   const h = setup("grok", fixtures("grok"), { fetchImpl: async () => { throw new Error("The PRIVATE_SESSION_AND_FILE_URL_SENTINEL failed."); } });
   await assert.rejects(h.window.__capCaptureNetworkJson(), /could not be read completely/);
   assert.doesNotMatch(JSON.stringify(h.replies), /PRIVATE_SESSION_AND_FILE_URL_SENTINEL/);
+});
+
+test("Grok picker pins chat and branch before handoff and preserves source text through metrics", async () => {
+  const source = fs.readFileSync(path.join(__dirname, "..", "extension", "platform-content.js"), "utf8");
+  const captureStart = source.indexOf("  function createConversationCapture(text, metrics = {})");
+  const captureEnd = source.indexOf("  function getConversationCaptureMetrics", captureStart);
+  const cleanStart = source.indexOf("  function cleanText(text)");
+  const cleanEnd = source.indexOf("  function isVisible", cleanStart);
+  const metrics = vm.createContext({ lastConversationCaptureMetrics: null });
+  vm.runInContext(source.slice(cleanStart, cleanEnd) + source.slice(captureStart, captureEnd), metrics);
+  const text = 'Grok conversation:\n\nUser: \uFEFF  print("a\u00a0b")  \r\n\nAssistant: Answer';
+  assert.equal(metrics.createConversationCapture(text, { method: "grok-json" }), text);
+  const start = source.indexOf("  async function startDestinationTransfer(destinationId)");
+  const end = source.indexOf("  function protectOverlayPalette", start);
+  for (const navigate of [false, "chat", "branch"]) {
+    let capturedPath, transfers = 0;
+    const errors = [], noop = () => {};
+    const window = { location: { pathname: "/c/smoke", href: "https://grok.com/c/smoke?rid=answer_23" }, __capCaptureNetworkJson: async expected => {
+      capturedPath = expected;
+      if (expected !== window.location.href) throw new Error("The conversation changed during capture.");
+      return { text, messageTurnCount: 2 };
+    } };
+    const sandbox = vm.createContext({ window, currentPlatform: { id: "grok", name: "Grok" },
+      claudeJsonCaptureEnabled: false, chatGptJsonCaptureEnabled: false, networkJsonCaptureEnabled: true,
+      isRunning: false, runningResetTimer: null, RUNNING_AUTO_RESET_MS: 360000, DESTINATION_SHEET_EXIT_MS: 0,
+      NO_CONVERSATION_ERROR_MESSAGE: "No conversation", createTransferTrace: () => ({}),
+      startTransferTelemetry: noop, markTransferTrace: noop, finishTransferTrace: noop,
+      getDetectedConversationMessageCount: () => 0, hideDestinationSheet: noop, delay: async () => {},
+      showErrorOverlay: error => errors.push(error), clearRunningResetTimer: noop, resetRunningFlag: noop,
+      setTimeout: () => 1, transitionDestinationSheetToHandoff: async () => { if (navigate) window.location.href = navigate === "chat" ? "https://grok.com/c/other?rid=answer_23" : "https://grok.com/c/smoke?rid=answer_0"; },
+      showOverlay: noop, releaseDestinationSheetBackdrop: noop, prepareDestinationTab: async () => ({}),
+      advanceTransferTelemetryStage: noop, prepareSourceForCapture: () => { throw new Error("DOM capture must not run"); },
+      setHandoffProgress: noop, createConversationCapture: value => value, markCaptureDone: noop,
+      runContextFlow: () => { transfers++; }, getSafeTelemetryFailureReason: () => "capture_failed" });
+    vm.runInContext(source.slice(start, end), sandbox);
+    await sandbox.startDestinationTransfer("claude");
+    assert.equal(capturedPath, "https://grok.com/c/smoke?rid=answer_23");
+    assert.equal(transfers, navigate ? 0 : 1);
+    assert.deepEqual(errors, navigate ? ["The conversation changed during capture."] : []);
+  }
+});
+
+test("Grok pins chat/branch and latches away-and-back navigation through readiness and delivery", async () => {
+  const phases = ["before-chat", "before-branch", "pong-chat", "pong-branch", "response-chat", "response-branch"];
+  const checks = await Promise.allSettled(phases.map(async phase => {
+    let h;
+    const original = "/c/smoke?rid=answer_23";
+    const target = phase.endsWith("chat") ? "/c/other?rid=answer_23" : "/c/smoke?rid=answer_0";
+    h = setup("grok", fixtures("grok"), { beforeMessage: message => {
+      if (phase.startsWith(message.type + "-")) { h.navigate(target); h.navigate(original); }
+    } });
+    h.navigate(original);
+    if (phase.startsWith("before-")) h.navigate(target);
+    await assert.rejects(h.window.__capCaptureNetworkJson("https://grok.com" + original), /conversation changed/);
+    assert.equal(h.requests.length, phase.startsWith("response-") ? 2 : 0);
+    assert.equal(h.navigationListeners(), 0);
+    assert.equal(h.listeners.size, 1);
+  }));
+  assert.deepEqual(checks.map((result, index) => result.status === "fulfilled" ? "passed" : `${phases[index]}: ${result.reason.message}`), phases.map(() => "passed"));
+});
+
+test("Grok refuses file-only user turns rather than silently transferring an orphan answer", async () => {
+  for (const metadata of [{ fileAttachments: ["file-id"] }, { fileAttachmentsMetadata: [{ fileName: "source.py", fileMimeType: "text/x-python", fileUri: "PRIVATE_FILE_SENTINEL" }] }]) {
+    const f = fixtures("grok", "smoke", 1);
+    Object.assign(f.responses[0], { message: "", ...metadata });
+    const h = setup("grok", f);
+    await assert.rejects(h.window.__capCaptureNetworkJson(), /file-only/);
+    assert.equal(h.requests.length, 2);
+    assert.doesNotMatch(JSON.stringify(h.replies), /PRIVATE_FILE_SENTINEL/);
+  }
+  // Empty text has nothing to lose; control messages are not authored turns.
+  const h = setup("grok", fixtures("grok", "smoke", 1));
+  h.fixture.responses[0].message = "";
+  assert.equal(h.api.grok(h.fixture.nodes, h.fixture.responses).messageTurnCount, 1);
+  Object.assign(h.fixture.responses[0], { message: "CONTROL_SENTINEL", isControl: true, fileAttachments: ["file-id"] });
+  assert.doesNotMatch(h.api.grok(h.fixture.nodes, h.fixture.responses).text, /CONTROL_SENTINEL/);
+});
+
+test("Grok upgrades the old MAIN contract before enforcing file-only turn protection", async () => {
+  let h, installs = 0;
+  h = setup("grok", fixtures("grok", "smoke", 1), { runtime: { sendMessage: async () => {
+    installs++; h.reinstall(files[1]); return { ok: true };
+  } } });
+  const source = fs.readFileSync(path.join(__dirname, "..", "extension", files[1]), "utf8");
+  vm.runInContext(source.replace("const version = 2", "const version = 1"), h.context);
+  Object.assign(h.fixture.responses[0], { message: "", fileAttachments: ["file-id"] });
+  await assert.rejects(h.window.__capCaptureNetworkJson(), /file-only/);
+  assert.equal(installs, 1);
+  assert.equal(h.window.__capNetworkFetchState.version, 2);
+  assert.equal(h.listeners.size, 1);
 });

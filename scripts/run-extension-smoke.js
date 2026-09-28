@@ -32,7 +32,8 @@ const CLAUDE_PLACEMENT_SCREENSHOT_PATH = process.env.CAP_CONTEXT_CLAUDE_PLACEMEN
 const PICKER_SCREENSHOT_PATH = process.env.CAP_CONTEXT_PICKER_SCREENSHOT || "";
 const JSON_SOURCE = ["chatgpt", "gemini", "grok", "deepseek"].includes(process.env.CAP_CONTEXT_JSON_SMOKE) ? process.env.CAP_CONTEXT_JSON_SMOKE : process.env.CAP_CONTEXT_JSON_SMOKE === "1" ? "claude" : null;
 const NETWORK_SOURCE = ["gemini", "grok", "deepseek"].includes(JSON_SOURCE);
-const NETWORK_FAILURE = NETWORK_SOURCE && process.env.CAP_CONTEXT_NETWORK_FAILURE_SMOKE === "partial";
+const GROK_FILE_ONLY_SMOKE = JSON_SOURCE === "grok" && process.env.CAP_CONTEXT_NETWORK_FAILURE_SMOKE === "file-only";
+const NETWORK_FAILURE = (NETWORK_SOURCE && process.env.CAP_CONTEXT_NETWORK_FAILURE_SMOKE === "partial") || GROK_FILE_ONLY_SMOKE;
 const JSON_CAPTURE_SMOKE = Boolean(JSON_SOURCE);
 const CLAUDE_RELOAD_SMOKE = JSON_SOURCE === "claude" && process.env.CAP_CONTEXT_CLAUDE_RELOAD_SMOKE === "1";
 const CHATGPT_RELOAD_SMOKE = JSON_SOURCE === "chatgpt" && process.env.CAP_CONTEXT_CHATGPT_RELOAD_SMOKE === "1";
@@ -372,7 +373,11 @@ async function startFixtureServer() {
         response.end(rpcFrame(page));
       } else if (JSON_SOURCE === "grok") {
         if (url.pathname.endsWith("response-node")) response.end(JSON.stringify(network.nodes));
-        else response.end(JSON.stringify({ responses: NETWORK_FAILURE ? network.responses.slice(1) : network.responses }));
+        else {
+          const responses = structuredClone(network.responses);
+          if (GROK_FILE_ONLY_SMOKE) Object.assign(responses[0], { message: "", fileAttachments: ["smoke-file-id"] });
+          response.end(JSON.stringify({ responses: NETWORK_FAILURE && !GROK_FILE_ONLY_SMOKE ? responses.slice(1) : responses }));
+        }
       } else {
         assert.equal(request.headers.authorization, "Bearer AUTH_SENTINEL"); assert.equal(request.headers["x-device-id"], undefined);
         const data = structuredClone(network.data);
@@ -644,6 +649,8 @@ async function run() {
     }
     process.stdout.write("✓ Brave loaded the unpacked extension on the controlled source page.\n");
 
+    // Grok JSON mode verifies capture independently of unrelated Claude geometry.
+    if (JSON_SOURCE !== "grok") {
     const claudePlacementUrl = `${origin}/new?${SMOKE_PLATFORM_QUERY}=claude`;
     await browserSession.call("Target.createTarget", { url: claudePlacementUrl });
     const claudePlacementTarget = await waitFor(async () => {
@@ -706,6 +713,8 @@ async function run() {
     assert.equal(claudePlacement.intersects, false, "The Cap Context bubble must not cover Claude's Send button.");
     assert.match(claudePlacement.sendTranslate, /^-52px(?: 0px)?$/);
     process.stdout.write("✓ Claude's bubble stays centered and its Voice-to-Send swap remains clear of Send.\n");
+
+    }
 
     if (JSON_RELOAD_SMOKE) {
       const before = state.jsonRequests;
@@ -841,11 +850,11 @@ async function run() {
     }
 
     if (NETWORK_FAILURE) {
-      const expectedError = { gemini: "oldest history turn is missing", grok: "message body is missing", deepseek: "cache update instead of the full history" }[JSON_SOURCE];
+      const expectedError = GROK_FILE_ONLY_SMOKE ? "file-only user turn" : { gemini: "oldest history turn is missing", grok: "message body is missing", deepseek: "cache update instead of the full history" }[JSON_SOURCE];
       await waitFor(() => sourceSession.evaluate(`document.getElementById("context-generator-error-overlay")?.textContent.includes(${JSON.stringify(expectedError)})`), "a visible incomplete-history error");
       assert.equal(state.summaryRequests.length, 0);
       assert.equal(state.jsonRequests - jsonRequestsBeforeTransfer, JSON_SOURCE === "grok" ? 2 : 1);
-      process.stdout.write(`✓ ${JSON_SOURCE} incomplete history failed visibly with zero backend requests.\n`); return;
+      process.stdout.write(`✓ ${JSON_SOURCE} ${GROK_FILE_ONLY_SMOKE ? "file-only turn" : "incomplete history"} failed visibly with zero backend requests.\n`); return;
     }
     await waitFor(() => state.summaryRequests.length === 1, "one summary backend request");
     const capturedConversation = state.summaryRequests[0]?.conversation || "";
@@ -884,6 +893,7 @@ async function run() {
         assert.equal(capturedConversation, networkFixtures(JSON_SOURCE).expected, "Every original own turn/paste/document must reach the backend once and in order.");
         assert.doesNotMatch(capturedConversation, /TOOL_SENTINEL|SIGNED_SENTINEL|AUTH_SENTINEL|CSRF_SENTINEL/);
         assert.equal(state.pasteContentRequests, JSON_SOURCE === "deepseek" ? 1 : 0);
+        if (JSON_SOURCE === "grok") process.stdout.write("\u2713 Grok JSON: exact 48-turn transcript, original code/whitespace and zero attachment/tool leakage.\n");
       }
       assert.equal(state.jsonRequests, jsonRequestsBeforeTransfer + (JSON_SOURCE === "gemini" ? 3 : JSON_SOURCE === "grok" ? 2 : 1), "JSON capture must load the full history only after destination selection.");
     }
