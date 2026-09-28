@@ -1020,7 +1020,7 @@ test("generated summaries select Gemini 3.6 Flash when its server key is configu
   const conversation = "x".repeat(20001);
 
   assert.equal(getGeneratedModelSelection(conversation, true).model, "gemini-3.6-flash");
-  assert.match(getGeneratedModelSelection(conversation, true).reason, /then Mistral, Groq, and finally gemini-3.5-flash-lite/);
+  assert.match(getGeneratedModelSelection(conversation, true).reason, /then gemini-3.5-flash-lite, then Mistral, Groq, and finally local-direct/);
   assert.equal(getGeneratedModelSelection(conversation, false, true).model, "orcarouter/free");
   assert.equal(getGeneratedModelSelection(conversation, false).model, "ministral-14b-2512");
 });
@@ -1164,7 +1164,7 @@ test("backend falls from a rate-limited Gemini 3.6 Flash to Gemini 3.7 Flash", a
   }
 });
 
-test("backend falls from empty Gemini output to the preserved Mistral chain", async () => {
+test("backend falls from empty Gemini output through Flash-Lite to the preserved Mistral chain", async () => {
   const originalFetch = global.fetch;
   const restoreGeminiKey = setTemporaryEnv("GEMINI_API_KEY", "test-gemini-key");
   const restoreMistralKey = setTemporaryEnv("MISTRAL_API_KEY", "test-mistral-key");
@@ -1197,18 +1197,19 @@ test("backend falls from empty Gemini output to the preserved Mistral chain", as
     await summarize({ method: "POST", body: { conversation } }, res);
 
     assert.equal(res.statusCode, 200);
-    assert.equal(requests.length, 5);
+    assert.equal(requests.length, 6);
     assert.match(requests[0].url, /gemini-3\.6-flash:generateContent$/);
     assert.match(requests[1].url, /gemini-3\.7-flash:generateContent$/);
     assert.match(requests[2].url, /gemini-3\.8-flash:generateContent$/);
     assert.match(requests[3].url, /gemini-3\.5-flash:generateContent$/);
-    assert.equal(requests[4].body.model, "ministral-14b-2512");
+    assert.match(requests[4].url, /gemini-3\.5-flash-lite:generateContent$/);
+    assert.equal(requests[5].body.model, "ministral-14b-2512");
     assert.match(requests[0].body.systemInstruction.parts[0].text, /plain-text title/);
     assert.match(requests[1].body.systemInstruction.parts[0].text, /plain-text title/);
-    assert.match(requests[4].body.messages[0].content, /boxed header exactly as shown/);
+    assert.match(requests[5].body.messages[0].content, /boxed header exactly as shown/);
     assert.equal(requests[0].body.generationConfig.maxOutputTokens, 6500);
     assert.equal(requests[1].body.generationConfig.maxOutputTokens, 6500);
-    assert.equal(requests[4].body.max_tokens, 1000);
+    assert.equal(requests[5].body.max_tokens, 1000);
     assert.equal(res.payload.timing.servedBy, "mistral");
     assert.equal(res.payload.timing.primaryModel, "gemini-3.6-flash");
     assert.deepEqual(res.payload.timing.modelsTried, [
@@ -1216,6 +1217,7 @@ test("backend falls from empty Gemini output to the preserved Mistral chain", as
       "gemini-3.7-flash",
       "gemini-3.8-flash",
       "gemini-3.5-flash",
+      "gemini-3.5-flash-lite",
       "ministral-14b-2512"
     ]);
     assert.deepEqual(res.payload.timing.mistralModelsTried, ["ministral-14b-2512"]);
@@ -1225,7 +1227,7 @@ test("backend falls from empty Gemini output to the preserved Mistral chain", as
     assert.match(res.payload.timing.fallback.reason, /Gemini returned an empty summary/);
     assert.match(
       res.payload.timing.modelReason,
-      /gemini-3\.6-flash -> gemini-3\.7-flash -> gemini-3\.8-flash -> gemini-3\.5-flash failed; fell back to ministral-14b-2512/
+      /gemini-3\.6-flash -> gemini-3\.7-flash -> gemini-3\.8-flash -> gemini-3\.5-flash -> gemini-3\.5-flash-lite failed; fell back to ministral-14b-2512/
     );
   } finally {
     restoreMistralKey();

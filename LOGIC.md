@@ -219,19 +219,18 @@ Generated provider order:
 
 ```text
 Gemini 3.6 Flash
--> Ministral 3 14B (25.12)
-
 -> Google Gemini 3.5 Flash-Lite
+-> Ministral 3 14B (25.12)
 -> emergency local-direct exact transcript
 ```
 
 - Gemini is skipped without `GEMINI_API_KEY`. Only 3.6 Flash is active, with a 90-second family and model budget. Flash 3.7, 3.8, and regular 3.5 remain paused; set `GEMINI_FLASH_FALLBACKS_ENABLED=true` to restore them within that same family allowance. Re-enabled Flash routes divide the remaining family time across remaining model slots. Daily health skips still apply.
 - When Vercel has `KV_REST_API_URL` and `KV_REST_API_TOKEN` (or the older `UPSTASH_REDIS_REST_*` aliases), each Gemini model uses a shared Pacific-day health record. Twenty successful summaries mark it `exhausted`; three consecutive failed summary attempts mark it `bad_mood`; either status skips that model until the next Pacific day. An explicit daily-quota response also marks it exhausted immediately. Gemini 429 responses move directly to the next model instead of retrying the same model. Redis stores only model counters/status/timestamps, and storage trouble fails open to the normal provider order. See `GEMINI_MODEL_HEALTH.md` for production setup and diagnosis.
-- OrcaRouter is paused by default. Set `ORCAROUTER_ENABLED=true` and redeploy to restore its retained free route between Flash and Mistral. Orca keeps its 60-second budget; its elapsed time is deducted from the final Flash-Lite allowance. See `docs/provider-fallbacks.md`.
+- OrcaRouter is paused by default. Set `ORCAROUTER_ENABLED=true` and redeploy to restore its retained free route between Flash-Lite and Mistral. Orca keeps its 60-second budget; when both Google routes are configured, its elapsed time is deducted from the final Mistral allowance. See `docs/provider-fallbacks.md`.
 - Successful OrcaRouter responses use `X-Orca-Resolved-Model` as the receipt model, so Latest Run names the concrete DeepSeek, GLM, or other free model instead of showing the `orcarouter/free` request alias.
 - Mistral is active in production with `MISTRAL_ENABLED=true`. Set it to `false` and redeploy to pause reversibly. It is also skipped without `MISTRAL_API_KEY`. Only Ministral 3 14B is active, with a 90-second budget. Mistral Large 3 remains excluded because the Free-tier key receives HTTP 403 code 1910. HTTP 429 advances immediately to the next route.
-- Groq is paused even when its key exists. Set `GROQ_ENABLED=true` to restore `groq/compound-mini` with its retained 15-second budget; elapsed Groq time is deducted from Flash-Lite so restoring routes does not extend the total allowance.
-- Flash-Lite uses Google `gemini-3.5-flash-lite` and the existing `GEMINI_API_KEY` after Mistral (and any explicitly restored routes). It has 90 seconds with `MINIMAL` thinking and remains independent of Flash daily-health skips. Parsing, hidden-thought filtering, relaxed validation, and Google timings remain unchanged. Orca/Groq elapsed time is deducted from this allowance; no remaining allowance proceeds directly to local carry.
+- Groq is paused even when its key exists. Set `GROQ_ENABLED=true` to restore `groq/compound-mini` with its retained 15-second budget; when both Google routes are configured, its 15-second slot is reserved from Mistral so restoring routes does not extend the total allowance.
+- Flash-Lite uses Google `gemini-3.5-flash-lite` and the existing `GEMINI_API_KEY` immediately after the Flash family and before Mistral (and any explicitly restored routes). It has 90 seconds with `MINIMAL` thinking and remains independent of Flash daily-health skips. Parsing, hidden-thought filtering, relaxed validation, and Google timings remain unchanged. Flash-Lite has its own 90-second slot; restored Orca elapsed time and the optional Groq reserve share Mistral's final slot so the whole chain stays within 270 seconds.
 - If every configured remote provider fails or no provider key is available, the backend returns the complete captured transcript through the provider-free `local-direct` format. It never truncates the transcript; the transfer remains usable during a provider-wide outage, though it is not compressed.
 - Retryable provider calls get at most two attempts within the model budget and an 90-second per-attempt ceiling. Ordinary retries wait 450 ms. Gemini, OrcaRouter Free, and Mistral move immediately to their next fallback on HTTP 429; Groq honors `Retry-After` or waits at least one second.
 - Gemini uses `thinkingLevel: MEDIUM`. Mistral prompt-cache keys use `capcontext-summary-v7-<profile>-<model>`; v7 adds an explicit full-transcript checklist and final omission check for user-protected exact facts, especially integrity and implementation-state details.

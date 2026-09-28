@@ -4,11 +4,11 @@ const handler = require("../api/summarize.js");
 const { createSummaryWithFallback, getSummaryProfile, getGeneratedModelSelection } = handler.__test;
 
 for (const [label, groqKey, flashLiteWorks] of [
-  ["after Groq failure", "test-groq", true],
+  ["with Groq configured", "test-groq", true],
   ["when Groq is absent", undefined, true],
-  ["before local carry when Flash-Lite also fails", "test-groq", false]
+  ["then later fallbacks and local carry when it fails", "test-groq", false]
 ]) {
-  test(`Flash-Lite is the final remote fallback ${label}`, async () => {
+  test(`Flash-Lite is tried before Mistral ${label}`, async () => {
     const originalFetch = global.fetch;
     const requests = [];
     const healthModels = [];
@@ -43,8 +43,10 @@ for (const [label, groqKey, flashLiteWorks] of [
         geminiApiKey: "test-google", mistralApiKey: "test-mistral",
         groqApiKey: groqKey, geminiModelHealth: health
       });
-      assert.deepEqual(requests, ["gemini-3.6-flash", "ministral-14b-2512", ...(groqKey ? ["groq/compound-mini", "groq/compound-mini"] : []),
-        "gemini-3.5-flash-lite"]);
+      assert.deepEqual(requests, ["gemini-3.6-flash", "gemini-3.5-flash-lite",
+        ...(!flashLiteWorks ? ["ministral-14b-2512", ...(groqKey ? ["groq/compound-mini", "groq/compound-mini"] : [])] : [])]);
+      assert.deepEqual(result.modelsTried, [...new Set(requests)]);
+      assert.deepEqual(result.mistralModelsTried, flashLiteWorks ? [] : ["ministral-14b-2512"]);
       assert.equal(result.model, flashLiteWorks ? "gemini-3.5-flash-lite" : "local-direct");
       assert.equal(healthModels.includes("gemini-3.5-flash-lite"), false);
       if (flashLiteWorks) {
