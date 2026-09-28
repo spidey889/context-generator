@@ -741,6 +741,9 @@ async function run() {
     if (JSON_CAPTURE_SMOKE) {
       const before = state.jsonRequests;
       await sourceSession.evaluate(`document.getElementById("context-generator-bubble").click()`);
+      assert.equal(await sourceSession.evaluate(`document.getElementById("context-generator-${JSON_SOURCE}-json-toggle").getAttribute("aria-pressed")`), "true", "Fast capture must start enabled.");
+      await waitFor(async () => await sourceSession.evaluate(`getComputedStyle(document.getElementById("context-generator-${JSON_SOURCE}-json-toggle")).color`) === "rgb(250, 204, 21)", "the default fast-capture enabled color");
+      await sourceSession.evaluate(`document.getElementById("context-generator-${JSON_SOURCE}-json-toggle").click()`);
       assert.equal(await sourceSession.evaluate(`document.getElementById("context-generator-${JSON_SOURCE}-json-toggle").getAttribute("aria-pressed")`), "false");
       const idleToggle = await sourceSession.evaluate(`(() => {
         const toggle = document.getElementById("context-generator-${JSON_SOURCE}-json-toggle");
@@ -778,6 +781,9 @@ async function run() {
     const clickResult = await sourceSession.evaluate(`(() => {
       const bubble = document.getElementById("context-generator-bubble");
       bubble.click();
+      // The ordinary smoke exercises the user's explicit DOM opt-out.
+      const speedToggle = document.querySelector(".context-generator-speed-toggle");
+      if (!${JSON_CAPTURE_SMOKE} && speedToggle?.getAttribute("aria-pressed") === "true") speedToggle.click();
       const sheet = document.getElementById("context-generator-destination-sheet");
       const backdrop = document.getElementById("context-generator-destination-backdrop");
       const tiles = [...document.querySelectorAll(".context-generator-destination-tile")];

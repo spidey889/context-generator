@@ -1,9 +1,10 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-09-28-ui-styles-v53";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-09-28-default-json-v54";
   const ownedUiStyleSheets = new Map();
-  let claudeJsonCaptureEnabled = false;
-  let chatGptJsonCaptureEnabled = false;
-  let networkJsonCaptureEnabled = false;
+  // Start fast capture on for each page instance; a manual opt-out lasts until reload.
+  let claudeJsonCaptureEnabled = true;
+  let chatGptJsonCaptureEnabled = true;
+  let networkJsonCaptureEnabled = true;
   const INSTANCE_TEARDOWN_KEY = "__contextGeneratorPlatformTeardown";
   const INSTALL_NOTICE_NODE_ID = "context-generator-install-notice";
   let installNoticeChecked = false;
@@ -5054,9 +5055,11 @@
       toggle.type = "button";
       toggle.id = `context-generator-${currentPlatform.id}-json-toggle`;
       toggle.className = "context-generator-speed-toggle";
-      toggle.setAttribute("aria-pressed", "false");
+      const enabled = currentPlatform.id === "claude" ? claudeJsonCaptureEnabled
+        : currentPlatform.id === "chatgpt" ? chatGptJsonCaptureEnabled : networkJsonCaptureEnabled;
+      toggle.setAttribute("aria-pressed", String(enabled));
       toggle.setAttribute("aria-label", "Fast capture");
-      toggle.title = "Fast capture: Off";
+      toggle.title = `Fast capture: ${enabled ? "On" : "Off"}`;
       toggle.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="m13 2-9 12h7l-1 8 10-12h-7l1-8Z"/></svg>';
       addOwnedEventListener(toggle, "click", () => {
         if (isRunning) return;
