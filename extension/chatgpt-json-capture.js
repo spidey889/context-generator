@@ -91,20 +91,53 @@
     return { text, messageTurnCount: turns.length };
   }
 
+  function waitForHook(timeoutMs, install = false) {
+    return new Promise(resolve => {
+      const id = crypto.randomUUID();
+      let pollTimer;
+      let settled = false;
+      const finish = ready => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        clearTimeout(pollTimer);
+        window.removeEventListener("message", receive);
+        resolve(ready);
+      };
+      const receive = event => {
+        const reply = event.data;
+        if (event.source === window && event.origin === location.origin && reply?.channel === channel
+          && reply.type === "pong" && reply.id === id && reply.version === 3) finish(true);
+      };
+      const ping = () => {
+        if (settled) return;
+        window.postMessage({ channel, type: "ping", id }, location.origin);
+        pollTimer = setTimeout(ping, 100);
+      };
+      const timer = setTimeout(() => finish(false), timeoutMs);
+      window.addEventListener("message", receive);
+      ping();
+      if (install) {
+        // A busy/cold worker's reply can lag behind a working MAIN hook. Trust
+        // the correlated pong, not the installation callback, as readiness proof.
+        Promise.resolve().then(() => chrome.runtime.sendMessage({ type: "ENSURE_CHATGPT_JSON_HOOK" }))
+          .then(reply => { if (!reply?.ok) finish(false); }, () => finish(false));
+      }
+    });
+  }
+
   window.__capCaptureChatGptJson = async () => {
-    if (typeof chrome !== "undefined" && chrome.runtime?.sendMessage) {
-      let readinessTimer;
-      try {
-        const ready = await Promise.race([
-          chrome.runtime.sendMessage({ type: "ENSURE_CHATGPT_JSON_HOOK" }),
-          new Promise((_, reject) => { readinessTimer = setTimeout(() => reject(new Error("ChatGPT JSON hook installation timed out. Refresh or turn JSON capture off.")), 3000); })
-        ]);
-        if (!ready?.ok) throw new Error("ChatGPT JSON hook could not be installed. Refresh or turn JSON capture off.");
-      } finally { clearTimeout(readinessTimer); }
+    const chat = currentChat();
+    if (!chat) throw new Error("Open a saved ChatGPT conversation to use JSON capture.");
+    // Usually document_start already installed MAIN; don't wake/reinstall it on
+    // every capture. Missing/older hooks get one bounded on-demand recovery.
+    if (!await waitForHook(250)) {
+      if (typeof chrome === "undefined" || !chrome.runtime?.sendMessage || !await waitForHook(8000, true)) {
+        throw new Error("Fast capture isn't ready yet. Refresh this chat and try again, or turn off the lightning button.");
+      }
     }
+    if (currentChat() !== chat) throw new Error("The ChatGPT conversation changed during capture.");
     return new Promise((resolve, reject) => {
-      const chat = currentChat();
-      if (!chat) return reject(new Error("Open a saved ChatGPT conversation to use JSON capture."));
       const id = crypto.randomUUID();
       const cleanup = () => { clearTimeout(timer); window.removeEventListener("message", receive); };
       const receive = event => {

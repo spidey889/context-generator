@@ -1,5 +1,5 @@
 (() => {
-  const version = 2;
+  const version = 3;
   const channel = "cap-context-chatgpt-json-v2";
   const currentChat = pathname => (pathname ?? location.pathname).match(/\/c\/([^/]+)\/?$/)?.[1];
   const previous = window.__capChatGptFetchState;
@@ -34,8 +34,13 @@
 
   const receive = async event => {
     const request = event.data;
-    if (event.source !== window || event.origin !== location.origin || request?.channel !== channel || request.type !== "request") return;
+    if (event.source !== window || event.origin !== location.origin || request?.channel !== channel || !["request", "ping"].includes(request.type)) return;
     if (typeof request.id !== "string" || request.id.length > 80) return;
+    // Readiness probes never fetch session data or conversation messages.
+    if (request.type === "ping") {
+      window.postMessage({ channel, type: "pong", id: request.id, version }, location.origin);
+      return;
+    }
     const chat = currentChat();
     const reply = { channel, type: "response", id: request.id, chat };
     if (active) { window.postMessage({ ...reply, error: "busy" }, location.origin); return; }
