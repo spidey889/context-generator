@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-09-28-chatgpt-json-v42";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-09-28-overlay-palette-v43";
   let claudeJsonCaptureEnabled = false;
   let chatGptJsonCaptureEnabled = false;
   const INSTANCE_TEARDOWN_KEY = "__contextGeneratorPlatformTeardown";
@@ -9,6 +9,7 @@
   const BUBBLE_ID = "context-generator-bubble";
   const OVERLAY_ID = "context-generator-overlay";
   const HANDOFF_SCRIM_ID = "context-generator-handoff-scrim";
+  const OVERLAY_PALETTE_STYLE_ID = "context-generator-overlay-palette-styles";
   const ONBOARDING_ID = "context-generator-onboarding";
   const ONBOARDING_STYLE_ID = "context-generator-onboarding-styles";
   const CLAUDE_LIMIT_NUDGE_ID = "context-generator-claude-limit-nudge";
@@ -653,6 +654,7 @@
       BUBBLE_ID,
       OVERLAY_ID,
       HANDOFF_SCRIM_ID,
+      OVERLAY_PALETTE_STYLE_ID,
       ONBOARDING_ID,
       ONBOARDING_STYLE_ID,
       CLAUDE_LIMIT_NUDGE_ID,
@@ -5451,6 +5453,36 @@
     }
   }
 
+  function protectOverlayPalette(root) {
+    let style = document.getElementById(OVERLAY_PALETTE_STYLE_ID);
+    if (!style) {
+      style = document.createElement("style");
+      style.id = OVERLAY_PALETTE_STYLE_ID;
+      style.className = "darkreader";
+      style.dataset.contextGeneratorOwned = "true";
+      document.head.appendChild(style);
+    }
+
+    // Snapshot only static colors before insertion, using the picker's ignored
+    // stylesheet + scoped priority rules. Progress-state colors live in their CSS.
+    const rules = [root, ...root.querySelectorAll("[style]")].map((element, index) => {
+      const declarations = ["color", "background", "border-color", "box-shadow"]
+        .map((property) => {
+          const value = element.style.getPropertyValue(property);
+          if (!value) return "";
+          element.style.setProperty(property, value, "important");
+          return `${property}:${value} !important;`;
+        }).join("");
+      if (!declarations) return "";
+      if (index) element.setAttribute("data-context-generator-palette", String(index));
+      const selector = index
+        ? `#${root.id} [data-context-generator-palette="${index}"]`
+        : `#${root.id}`;
+      return `${selector}{${declarations}}`;
+    });
+    style.textContent += rules.join("\n");
+  }
+
   function ensureFloatingOverlay() {
     if (!document.getElementById(HANDOFF_SCRIM_ID)) {
       const scrim = document.createElement("div");
@@ -5468,6 +5500,7 @@
         "opacity:0",
         "transition:opacity 240ms ease"
       ].join(";");
+      protectOverlayPalette(scrim);
       document.body.appendChild(scrim);
     }
 
@@ -5677,6 +5710,7 @@
       if (!document.getElementById("context-generator-styles")) {
         const styleSheet = document.createElement("style");
         styleSheet.id = "context-generator-styles";
+        styleSheet.className = "darkreader";
         styleSheet.dataset.contextGeneratorOwned = "true";
         styleSheet.textContent = `
           @keyframes contextGeneratorHeadlineIn{
@@ -5713,7 +5747,7 @@
             height:118px;
             right:-54px;
             top:-58px;
-            background:radial-gradient(ellipse,rgba(190,158,237,0.30),rgba(101,78,158,0.08) 54%,transparent 73%);
+            background:radial-gradient(ellipse,rgba(190,158,237,0.30),rgba(101,78,158,0.08) 54%,transparent 73%) !important;
             transform:rotate(-9deg);
             animation:contextGeneratorAuroraDrift 7200ms cubic-bezier(0.45,0,0.55,1) infinite;
           }
@@ -5722,12 +5756,12 @@
             height:110px;
             left:-72px;
             bottom:-64px;
-            background:radial-gradient(ellipse,rgba(104,73,164,0.25),transparent 72%);
+            background:radial-gradient(ellipse,rgba(104,73,164,0.25),transparent 72%) !important;
           }
           #context-generator-status-group::before{
             content:"CONTEXT TRANSFER";
             display:block;
-            color:rgba(216,202,237,0.48);
+            color:rgba(216,202,237,0.48) !important;
             font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
             font-size:9.5px;
             font-weight:720;
@@ -5742,7 +5776,7 @@
             margin-left:1px;
             align-items:baseline;
             gap:0;
-            color:#f2f0f6;
+            color:#f2f0f6 !important;
             font:inherit;
             line-height:inherit;
             letter-spacing:0;
@@ -5762,7 +5796,7 @@
           }
           #context-generator-text .context-generator-summary-activity-dot{
             display:inline-block;
-            color:inherit;
+            color:inherit !important;
             opacity:0.54;
             transform:translate3d(0,0,0);
             animation:contextGeneratorSummaryDotHop 1800ms cubic-bezier(0.45,0,0.55,1) infinite;
@@ -5778,7 +5812,7 @@
             align-items:center;
             gap:7px;
             padding:0 5px;
-            color:rgba(239,237,244,0.54);
+            color:rgba(239,237,244,0.54) !important;
             text-align:center;
           }
           #context-generator-handoff-progress .context-generator-handoff-stage-connector{
@@ -5790,8 +5824,8 @@
             height:2px;
             overflow:visible;
             border-radius:999px;
-            background:rgba(255,255,255,0.095);
-            box-shadow:inset 0 1px 0 rgba(255,255,255,0.035);
+            background:rgba(255,255,255,0.095) !important;
+            box-shadow:inset 0 1px 0 rgba(255,255,255,0.035) !important;
           }
           /* The line follows live display progress; its motion never gates the transfer pipeline. */
           #context-generator-handoff-progress .context-generator-handoff-stage-connector-fill{
@@ -5799,8 +5833,8 @@
             inset:0;
             width:100%;
             border-radius:inherit;
-            background:linear-gradient(90deg,#755BA8,#AE8BE4);
-            box-shadow:2px 0 9px rgba(159,125,216,0.36);
+            background:linear-gradient(90deg,#755BA8,#AE8BE4) !important;
+            box-shadow:2px 0 9px rgba(159,125,216,0.36) !important;
             transform:scaleX(var(--context-generator-stage-progress-ratio,0));
             transform-origin:left center;
             transition:transform var(--context-generator-stage-progress-duration,1.35s) var(--context-generator-stage-progress-easing,linear);
@@ -5825,8 +5859,8 @@
             width:5px;
             height:5px;
             border-radius:999px;
-            background:#C1A6ED;
-            box-shadow:0 0 0 2px rgba(141,108,207,0.15),0 0 10px rgba(187,154,234,0.78);
+            background:#C1A6ED !important;
+            box-shadow:0 0 0 2px rgba(141,108,207,0.15),0 0 10px rgba(187,154,234,0.78) !important;
             transform:translate(-50%,-50%);
           }
           #context-generator-handoff-progress .context-generator-handoff-stage[data-state="active"] .context-generator-handoff-stage-progress-head{
@@ -5844,10 +5878,10 @@
             align-items:center;
             justify-content:center;
             box-sizing:border-box;
-            border:1px solid rgba(255,255,255,0.16);
+            border:1px solid rgba(255,255,255,0.16) !important;
             border-radius:999px;
-            background:rgba(255,255,255,0.035);
-            color:rgba(245,243,249,0.44);
+            background:rgba(255,255,255,0.035) !important;
+            color:rgba(245,243,249,0.44) !important;
             font-size:10px;
             font-weight:700;
             transition:background 180ms ease,border-color 180ms ease,color 180ms ease,box-shadow 180ms ease;
@@ -5857,7 +5891,7 @@
             position:absolute;
             inset:-5px;
             z-index:-1;
-            border:1px solid rgba(169,139,226,0.46);
+            border:1px solid rgba(169,139,226,0.46) !important;
             border-radius:999px;
             opacity:0;
             transform:scale(0.9);
@@ -5871,29 +5905,29 @@
             transition:color 180ms ease,font-weight 180ms ease,opacity 180ms ease;
           }
           #context-generator-handoff-progress .context-generator-handoff-stage[data-state="active"]{
-            color:#f4f2f7;
+            color:#f4f2f7 !important;
           }
           #context-generator-handoff-progress .context-generator-handoff-stage[data-state="active"] .context-generator-handoff-stage-marker{
-            border-color:rgba(210,190,241,0.78);
-            background:linear-gradient(145deg,#9B7BD7,#7456AD);
-            color:#fff;
-            box-shadow:0 0 0 3px rgba(141,108,207,0.15),0 6px 16px rgba(63,43,98,0.34),inset 0 1px 0 rgba(255,255,255,0.22);
+            border-color:rgba(210,190,241,0.78) !important;
+            background:linear-gradient(145deg,#9B7BD7,#7456AD) !important;
+            color:#fff !important;
+            box-shadow:0 0 0 3px rgba(141,108,207,0.15),0 6px 16px rgba(63,43,98,0.34),inset 0 1px 0 rgba(255,255,255,0.22) !important;
           }
           #context-generator-handoff-progress .context-generator-handoff-stage[data-state="active"] .context-generator-handoff-stage-marker::after{
             animation:contextGeneratorStageHalo 2400ms cubic-bezier(0.45,0,0.55,1) infinite;
           }
           #context-generator-handoff-progress .context-generator-handoff-stage[data-state="active"] .context-generator-handoff-stage-label{
-            color:#fff;
+            color:#fff !important;
             font-weight:680;
           }
           #context-generator-handoff-progress .context-generator-handoff-stage[data-state="complete"]{
-            color:rgba(200,183,229,0.72);
+            color:rgba(200,183,229,0.72) !important;
           }
           #context-generator-handoff-progress .context-generator-handoff-stage[data-state="complete"] .context-generator-handoff-stage-marker{
-            border-color:rgba(164,137,216,0.34);
-            background:rgba(141,108,207,0.14);
-            color:#C8B6E9;
-            box-shadow:inset 0 1px 0 rgba(255,255,255,0.055);
+            border-color:rgba(164,137,216,0.34) !important;
+            background:rgba(141,108,207,0.14) !important;
+            color:#C8B6E9 !important;
+            box-shadow:inset 0 1px 0 rgba(255,255,255,0.055) !important;
           }
           @media (prefers-reduced-motion: reduce){
             #context-generator-text{animation:none!important}
@@ -5968,6 +6002,7 @@
       overlay.appendChild(brand);
       overlay.appendChild(statusGroup);
       overlay.appendChild(progress);
+      protectOverlayPalette(overlay);
       document.body.appendChild(overlay);
     }
   }
@@ -6488,6 +6523,7 @@
       errorDiv.appendChild(header);
       errorDiv.appendChild(textSpan);
       errorDiv.appendChild(closeBtn);
+      protectOverlayPalette(errorDiv);
       document.body.appendChild(errorDiv);
     }
 

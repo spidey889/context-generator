@@ -87,7 +87,7 @@
     });
     if (!turns.length) throw blocked("No usable user or assistant text remains after skipping tools, files, images, and artifacts.");
     const text = `ChatGPT conversation:\n\n${turns.join("\n\n")}`;
-    if (text.length > 350000 || new TextEncoder().encode(text).length > 1400000) throw blocked("Conversation exceeds the supported 350,000 character / 1.4 MB limit.");
+    if (text.length > 350000 || new TextEncoder().encode(text).length > 1400000) throw new Error("This chat is too long to transfer (limit: 350,000 characters). Try a shorter chat.");
     return { text, messageTurnCount: turns.length };
   }
 

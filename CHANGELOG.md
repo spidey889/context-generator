@@ -1,5 +1,7 @@
 # Changelog
 
+- 2026-09-28: Extended the destination picker's Dark Reader palette protection to the handoff, its progress states, and status/error notifications. Preserved the existing colors with an ignored, scoped stylesheet generated from static inline styles, and protected the handoff's state-driven stylesheet. No capture or transfer behavior changed. Tests and browser checks were skipped at the owner's request; static syntax and diff checks only.
+
 - 2026-09-28: Completed the default-off ChatGPT JSON experiment with session/account auth reuse, on-demand late-install/session recovery, one expired-token retry, startup/on-demand MAIN readiness, idempotent replacement, account/navigation cancellation, and prompt concurrent-request failures. Full-tree validation now rejects partial/ranged transport, incomplete metadata, malformed active branches and unfinished turns. Own recap/thought/code fields and full pasted strings are preserved; tools/files/images/canvas remain excluded. JSON capture no longer depends on virtualized DOM mounting. Added long-tree nonce-CSP Brave transfer, reload/session-recovery, and visible partial/streaming/ranged failure scenarios; kept DOM capture, Claude, other platforms, summarization and destination behavior intact.
 
 - 2026-09-27: Made fast capture icon-only at rest: only the lightning turns yellow when enabled; the subtle box appears on hover. Keyboard focus remains visible.
