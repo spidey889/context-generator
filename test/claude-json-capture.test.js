@@ -663,3 +663,17 @@ test("Claude JSON picker prevents wrong-chat transfer after handoff navigation",
   assert.equal(harness.calls.dom, 0);
   assert.deepEqual(harness.calls.errors, ["The Claude conversation changed during capture."]);
 });
+
+test("Claude JSON metrics preserve original NBSP and code whitespace", () => {
+  const source = fs.readFileSync(path.join(__dirname, "..", "extension", "platform-content.js"), "utf8");
+  const captureStart = source.indexOf("  function createConversationCapture(text, metrics = {})");
+  const captureEnd = source.indexOf("  function getConversationCaptureMetrics", captureStart);
+  const cleanStart = source.indexOf("  function cleanText(text)");
+  const cleanEnd = source.indexOf("  function isVisible", cleanStart);
+  const sandbox = vm.createContext({ lastConversationCaptureMetrics: null });
+  vm.runInContext(source.slice(cleanStart, cleanEnd) + source.slice(captureStart, captureEnd), sandbox);
+  const text = 'Claude conversation:\n\nUser:   original paste  \n\nAssistant:   print("a\u00a0b")  \n\tcode tail\t\n';
+  assert.equal(sandbox.createConversationCapture(text, { method: "claude-json" }), text);
+  assert.equal(sandbox.lastConversationCaptureMetrics.sentChars, text.length);
+  assert.equal(sandbox.createConversationCapture(text, { method: "dom" }), sandbox.cleanText(text));
+});

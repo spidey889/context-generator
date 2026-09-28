@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-09-28-grok-json-audit-v50";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-09-28-json-followup-v51";
   let handoffFallbackStyleSheet = null;
   let claudeJsonCaptureEnabled = false;
   let chatGptJsonCaptureEnabled = false;
@@ -3049,9 +3049,9 @@
   }
 
   function createConversationCapture(text, metrics = {}) {
-    // Verified ChatGPT/Gemini/Grok/DeepSeek JSON strings are source data, including code, pasted
+    // Verified Claude/ChatGPT/Gemini/Grok/DeepSeek JSON strings are source data, including code, pasted
     // bytes and canvas text. DOM cleanup would rewrite NBSP/line whitespace.
-    const cleaned = ["chatgpt-json", "gemini-json", "grok-json", "deepseek-json"].includes(metrics.method) ? text : cleanText(text);
+    const cleaned = ["claude-json", "chatgpt-json", "gemini-json", "grok-json", "deepseek-json"].includes(metrics.method) ? text : cleanText(text);
     lastConversationCaptureMetrics = {
       ...metrics,
       cleanedChars: cleaned.length,

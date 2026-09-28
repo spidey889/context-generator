@@ -3,10 +3,10 @@
   if (!platform || !globalThis.__capNetworkJsonData) return;
   // Advance readiness version with adapter/contract changes: old MAIN closures
   // can survive extension reloads and must be replaced before a new capture.
-  const version = 2, channel = "cap-context-network-json-v1";
+  const version = platform === "deepseek" ? 3 : 2, channel = "cap-context-network-json-v1";
   const previous = window.__capNetworkFetchState;
   if (previous?.version === version && window.fetch === previous.fetch
-    && (platform !== "gemini" || previous?.ownsObservation?.())) return;
+    && (platform === "grok" || previous?.ownsObservation?.())) return;
   let auth = previous?.auth?.() || null;
   let geminiTemplate = previous?.template?.() || null;
   previous?.dispose();
@@ -53,7 +53,7 @@
   };
   const wrappedSend = function (...args) { const meta = xhrRequests.get(this); observe(meta?.url, { headers: meta?.headers, body: args[0] }); return Reflect.apply(nativeSend, this, args); };
   if (xhr) { xhr.open = wrappedOpen; xhr.send = wrappedSend; if (nativeSetHeader) xhr.setRequestHeader = wrappedSetHeader; }
-  // Gemini uses XHR as well as fetch. A page replacement of either surface
+  // Gemini and DeepSeek use XHR as well as fetch. A replacement of either surface
   // makes the cached observer stale and must trigger bounded hook recovery.
   const ownsObservation = () => window.fetch === wrappedFetch && (!xhr
     || (window.XMLHttpRequest?.prototype === xhr && xhr.open === wrappedOpen
@@ -63,7 +63,7 @@
     const request = event.data;
     if (event.source !== window || event.origin !== location.origin || request?.channel !== channel || request.platform !== platform || typeof request.id !== "string" || request.id.length > 80) return;
     if (request.type === "ping") {
-      if (platform !== "gemini" || ownsObservation()) window.postMessage({ channel, type: "pong", platform, version, id: request.id }, location.origin);
+      if (platform === "grok" || ownsObservation()) window.postMessage({ channel, type: "pong", platform, version, id: request.id }, location.origin);
       return;
     }
     if (request.type !== "request") return;

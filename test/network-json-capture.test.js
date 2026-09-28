@@ -283,11 +283,11 @@ test("DeepSeek upgrades the old MAIN contract while retaining auth for code uplo
     installs++; h.reinstall(files[1]); return { ok: true };
   } } });
   const source = fs.readFileSync(path.join(__dirname, "..", "extension", files[1]), "utf8");
-  vm.runInContext(source.replace('const version = 2', "const version = 1"), h.context);
+  vm.runInContext(source.replace(/const version = .*?, channel =/, "const version = 2, channel ="), h.context);
   await h.observe();
   assert.equal((await h.window.__capCaptureNetworkJson()).text, h.fixture.expected);
   assert.equal(installs, 1);
-  assert.equal(h.window.__capNetworkFetchState.version, 2);
+  assert.equal(h.window.__capNetworkFetchState.version, 3);
   assert.equal(h.listeners.size, 1);
 });
 test("DeepSeek picker pins chat before handoff and preserves original uploaded code through metrics", async () => {
@@ -447,10 +447,34 @@ test("Grok upgrades the old MAIN contract before enforcing file-only turn protec
     installs++; h.reinstall(files[1]); return { ok: true };
   } } });
   const source = fs.readFileSync(path.join(__dirname, "..", "extension", files[1]), "utf8");
-  vm.runInContext(source.replace("const version = 2", "const version = 1"), h.context);
+  vm.runInContext(source.replace(/const version = .*?, channel =/, "const version = 1, channel ="), h.context);
   Object.assign(h.fixture.responses[0], { message: "", fileAttachments: ["file-id"] });
   await assert.rejects(h.window.__capCaptureNetworkJson(), /file-only/);
   assert.equal(installs, 1);
   assert.equal(h.window.__capNetworkFetchState.version, 2);
   assert.equal(h.listeners.size, 1);
+});
+
+test("DeepSeek repairs broken XHR observation before readiness and retains cached auth", async () => {
+  for (const surface of ["open", "send", "setRequestHeader", "prototype"]) {
+    let h, installs = 0;
+    h = setup("deepseek", fixtures("deepseek"), { runtime: { sendMessage: async () => {
+      installs++; h.reinstall(files[1]); return { ok: true };
+    } } });
+    await h.observe();
+    const proto = h.window.XMLHttpRequest.prototype;
+    if (surface === "prototype") {
+      class ReplacementXhr { open() {} send() {} setRequestHeader() {} }
+      h.window.XMLHttpRequest = ReplacementXhr;
+    } else {
+      const old = proto[surface];
+      proto[surface] = function (...args) { return old.apply(this, args); };
+    }
+    assert.equal(h.window.__capNetworkFetchState.ownsObservation(), false);
+    assert.equal((await h.window.__capCaptureNetworkJson()).text, h.fixture.expected);
+    assert.equal(installs, 1, surface);
+    assert.equal(h.window.__capNetworkFetchState.ownsObservation(), true);
+    assert.equal(h.window.__capNetworkFetchState.auth(), "Bearer AUTH_SENTINEL");
+    assert.equal(h.listeners.size, 1);
+  }
 });
