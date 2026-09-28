@@ -46,9 +46,51 @@
     }
     if (branch[0]?.status != null && !["finished_successfully", "finished_partial"].includes(branch[0].status)) throw blocked("The active turn is still in progress or failed.");
     if (branch[0]?.author?.role === "assistant" && branch[0].end_turn === false) throw blocked("The active assistant turn is still in progress.");
-    const turns = branch.reverse().flatMap(message => {
+    // Legacy canvas bodies are assistant-authored, but delivered through a
+    // canmore operation. Only a successful, adjacent canvas acknowledgement
+    // identifies these document fields; never import the tool reply or params.
+    const canvasParts = (message, result) => {
+      const command = message.recipient === "canmore.create_textdoc" ? "create_textdoc"
+        : message.recipient === "canmore.update_textdoc" ? "update_textdoc" : null;
+      const canvas = result?.metadata?.canvas;
+      if (!command || result?.author?.role !== "tool" || result.author.name !== message.recipient
+        || result.status !== "finished_successfully" || result.metadata?.command !== command
+        || typeof canvas?.textdoc_id !== "string" || !canvas.textdoc_id
+        || typeof canvas.textdoc_type !== "string"
+        || !(canvas.textdoc_type === "document" || canvas.textdoc_type.startsWith("code/"))) return [];
+      assertComplete(message, "Canvas message");
+      assertComplete(message.metadata, "Canvas metadata");
+      assertComplete(message.content, "Canvas content");
+      if (message.status != null && message.status !== "finished_successfully") throw blocked("A canvas document is still in progress or failed.");
+      const content = message.content;
+      const raw = content?.content_type === "code" ? content.text
+        : content?.content_type === "text" && Array.isArray(content.parts) && content.parts.every(part => typeof part === "string") ? content.parts.join("") : null;
+      let payload;
+      try { payload = JSON.parse(raw); } catch { throw blocked("A canvas document has invalid JSON."); }
+      if (!payload || typeof payload !== "object" || Array.isArray(payload)) throw blocked("A canvas document is missing its text fields.");
+      assertComplete(payload, "Canvas document");
+      if (command === "create_textdoc") {
+        if (payload.type !== canvas.textdoc_type || typeof payload.content !== "string" || typeof payload.name !== "string") throw blocked("A canvas document is missing its complete content string.");
+        return payload.content.trim() ? [`Canvas: ${payload.name}\n\n${payload.content}`] : [];
+      }
+      if (!Array.isArray(payload.updates) || !payload.updates.length) throw blocked("A canvas edit is missing its replacement text.");
+      const parts = [];
+      for (const update of payload.updates) {
+        if (typeof update?.replacement !== "string") throw blocked("A canvas edit is missing its replacement text.");
+        assertComplete(update, "Canvas edit");
+        // Preserve authored edit text in this turn, not regex patterns or a
+        // guessed reconstruction of the latest document (edits can be partial).
+        if (update.replacement.trim()) parts.push(`Canvas edit:\n\n${update.replacement}`);
+      }
+      return parts;
+    };
+    const turns = branch.reverse().flatMap((message, index) => {
       const role = message.author?.role;
-      if (!["user", "assistant"].includes(role) || (message.recipient && message.recipient !== "all") || message.metadata?.is_visually_hidden_from_conversation) return [];
+      if (!["user", "assistant"].includes(role) || message.metadata?.is_visually_hidden_from_conversation) return [];
+      if (message.recipient && message.recipient !== "all") {
+        const parts = role === "assistant" ? canvasParts(message, branch[index + 1]) : [];
+        return parts.length ? [`Assistant: ${parts.join("\n\n")}`] : [];
+      }
       const content = message.content;
       if (!["text", "multimodal_text", "code", "thinking", "thoughts", "reasoning_recap"].includes(content?.content_type)) return [];
       assertComplete(message, "Own-turn message");
@@ -60,7 +102,7 @@
       if (content.parts != null && !Array.isArray(content.parts)) throw blocked("An own turn has invalid text parts.");
       if (content.content_type === "text" && !Array.isArray(content.parts)) throw blocked("An own text turn is missing its text parts.");
       // Direct own strings only. Never recurse into tools, multimodal objects,
-      // uploaded files, canvas/artifact payloads, citations, or message metadata.
+      // uploaded files, arbitrary artifact objects, citations, or metadata.
       const parts = Array.isArray(content.parts) ? content.parts.filter(part => typeof part === "string" && part.trim()).map(part => part.trim()) : [];
       if (!parts.length && ["thinking", "code", "reasoning_recap"].includes(content.content_type)) {
         const value = content.content_type === "thinking" ? (content.thinking ?? content.text)

@@ -52,6 +52,114 @@ async function discover(harness) {
   await harness.window.fetch(new Request(`https://chatgpt.com/backend-api/conversations/${chat}?num_turns=10`, { headers: { Authorization: "Bearer TEST_ONLY", "ChatGPT-Account-Id": "test-account" } }));
 }
 
+// Native canvas format observed in both older code.text and newer text.parts
+// messages. The tool acknowledgement contains identity, never the document body.
+function addCanvas(data, { command = "create_textdoc", payload, type = "document", format = "text", id = "canvas" } = {}) {
+  const call = { author: { role: "assistant" }, recipient: `canmore.${command}`, status: "finished_successfully", end_turn: false,
+    metadata: { is_complete: true }, content: format === "code" ? { content_type: "code", text: JSON.stringify(payload) } : { content_type: "text", parts: [JSON.stringify(payload)] } };
+  const result = { author: { role: "tool", name: `canmore.${command}` }, recipient: "all", status: "finished_successfully",
+    content: { content_type: "text", parts: ["TOOL_ACK_SENTINEL"] }, metadata: { command, canvas: { textdoc_id: "test-document", textdoc_type: type, version: 1 } } };
+  data.mapping[id] = { parent: data.mapping.answer.parent, message: call };
+  data.mapping[`${id}-result`] = { parent: id, message: result };
+  data.mapping.answer.parent = `${id}-result`;
+  return { call, result };
+}
+
+test("ChatGPT preserves complete long canvas documents in their owning assistant turn", async () => {
+  const body = `CANVAS_START\n${"  exact document text\n".repeat(1000)}CANVAS_MIDDLE\n${"  remaining lines\n".repeat(1000)}CANVAS_END\n`;
+  for (const [format, type] of [["text", "document"], ["code", "code/html"]]) {
+    const data = fixture();
+    addCanvas(data, { format, type, payload: { name: "Document title", type, content: body, extra: "PARAM_SENTINEL" } });
+    const harness = setup(data); await discover(harness);
+    const capture = await harness.window.__capCaptureChatGptJson();
+    assert.equal(capture.text, `ChatGPT conversation:\n\nUser: Question\n\nAssistant: Canvas: Document title\n\n${body}\n\nAssistant: Selected answer`);
+    assert.equal(capture.messageTurnCount, 3);
+    assert.doesNotMatch(capture.text, /TOOL_ACK_SENTINEL|PARAM_SENTINEL|canmore|textdoc_id/);
+  }
+});
+
+test("ChatGPT captures canvas rewrites and partial edit text without importing edit patterns", async () => {
+  const data = fixture();
+  addCanvas(data, { payload: { name: "Draft", type: "document", content: "Initial document" } });
+  const rewrite = `REWRITE_START\n${"  edited document line\n".repeat(1000)}REWRITE_END\n`;
+  addCanvas(data, { id: "rewrite", command: "update_textdoc", payload: { updates: [{ pattern: ".*", multiple: false, replacement: rewrite }] } });
+  addCanvas(data, { id: "patch", command: "update_textdoc", payload: { updates: [
+    { pattern: "PATTERN_SENTINEL", multiple: true, replacement: "New paragraph" },
+    { pattern: "(a+)+$", replacement: "  New code\n" }, { pattern: "deleted text", replacement: "" }
+  ] } });
+  const harness = setup(data); await discover(harness);
+  const capture = await harness.window.__capCaptureChatGptJson();
+  assert.equal(capture.text, `ChatGPT conversation:\n\nUser: Question\n\nAssistant: Canvas: Draft\n\nInitial document\n\nAssistant: Canvas edit:\n\n${rewrite}\n\nAssistant: Canvas edit:\n\nNew paragraph\n\nCanvas edit:\n\n  New code\n\n\nAssistant: Selected answer`);
+  assert.equal(capture.messageTurnCount, 5);
+  assert.doesNotMatch(capture.text, /PATTERN_SENTINEL|TOOL_ACK_SENTINEL|replacement|multiple/);
+});
+
+test("ChatGPT keeps modern long writing blocks as direct own text and skips their uploaded source", async () => {
+  const data = fixture();
+  const text = `Here is the document:\n:::writing{variant="document" id="123" title="Draft"}\nSTART_MARKER\n${"Long paragraph\n".repeat(500)}MIDDLE_MARKER\n${"Last paragraph\n".repeat(500)}END_MARKER\n:::`;
+  data.mapping.answer.message.content.parts = [text];
+  data.mapping.question.message.metadata = { attachments: [{ is_big_paste: true, mime_type: "text/plain", content: "UPLOAD_SENTINEL" }] };
+  const harness = setup(data); await discover(harness);
+  assert.equal((await harness.window.__capCaptureChatGptJson()).text, `ChatGPT conversation:\n\nUser: Question\n\nAssistant: ${text}`);
+});
+
+test("ChatGPT canvas exception excludes other tools, inactive documents and unconfirmed operations", async () => {
+  for (const mutate of [
+    (d, c) => { c.call.recipient = "web_search"; },
+    (d, c) => { c.call.recipient = "memory_tool"; },
+    (d, c) => { c.call.recipient = "canmore.comment_textdoc"; },
+    (d, c) => { c.call.author.role = "user"; },
+    (d, c) => { c.call.metadata.is_visually_hidden_from_conversation = true; },
+    (d, c) => { c.result.status = "failed"; },
+    (d, c) => { c.result.author.name = "web_search"; },
+    (d, c) => { c.result.metadata.command = "other"; },
+    (d, c) => { c.result.metadata.canvas.textdoc_type = "image"; },
+    (d, c) => { c.result.metadata.canvas.textdoc_type = 2; },
+    (d, c) => { delete c.result.metadata.canvas; },
+    d => { d.mapping.answer.parent = "question"; },
+    d => { d.mapping.answer.parent = "canvas"; }
+  ]) {
+    const data = fixture();
+    const canvas = addCanvas(data, { payload: { name: "Draft", type: "document", content: "CANVAS_SENTINEL" } });
+    mutate(data, canvas);
+    const harness = setup(data); await discover(harness);
+    assert.equal((await harness.window.__capCaptureChatGptJson()).text, "ChatGPT conversation:\n\nUser: Question\n\nAssistant: Selected answer");
+  }
+});
+
+test("ChatGPT rejects malformed or truncated acknowledged canvas text instead of silently omitting it", async () => {
+  for (const mutate of [
+    c => { c.call.content.parts = ["{BROKEN_JSON"]; },
+    c => { c.call.content.parts = [{ content: "NESTED_SENTINEL" }]; },
+    c => { c.call.content.parts = [JSON.stringify({ name: "Draft", type: "document", content: {} })]; },
+    c => { c.call.content.parts = [JSON.stringify({ name: "Draft", type: "code/python", content: "text" })]; },
+    c => { c.call.metadata.is_complete = false; },
+    c => { c.call.content.truncated = true; },
+    c => { c.call.status = "in_progress"; }
+  ]) {
+    const data = fixture(); const canvas = addCanvas(data, { payload: { name: "Draft", type: "document", content: "text" } }); mutate(canvas);
+    const harness = setup(data); await discover(harness);
+    await assert.rejects(harness.window.__capCaptureChatGptJson(), /ChatGPT JSON capture blocked/);
+  }
+  for (const payload of [{}, { updates: [] }, { updates: [{ replacement: {} }] }, { updates: [{ replacement: "text", truncated: true }] }]) {
+    const data = fixture(); addCanvas(data, { command: "update_textdoc", payload });
+    const harness = setup(data); await discover(harness);
+    await assert.rejects(harness.window.__capCaptureChatGptJson(), /ChatGPT JSON capture blocked/);
+  }
+});
+
+test("ChatGPT canvas-only text succeeds, empty documents are skipped and canvas respects size limits", async () => {
+  const data = fixture(); data.mapping.question.message.content.parts = []; data.mapping.answer.message.content.parts = [];
+  const canvas = addCanvas(data, { payload: { name: "Draft", type: "document", content: "Only document text" } });
+  const harness = setup(data); await discover(harness);
+  assert.equal((await harness.window.__capCaptureChatGptJson()).messageTurnCount, 1);
+  for (const [body, reason] of [[" \n", /No usable user or assistant text/], ["x".repeat(350000), /350,000/]]) {
+    canvas.call.content.parts = [JSON.stringify({ name: "Draft", type: "document", content: body })];
+    const variant = setup(data); await discover(variant);
+    await assert.rejects(variant.window.__capCaptureChatGptJson(), reason);
+  }
+});
+
 test("ChatGPT JSON hook reads only on demand and always requests the authenticated full tree", async () => {
   const harness = setup();
   await discover(harness);
