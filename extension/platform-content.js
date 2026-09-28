@@ -1,6 +1,6 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-09-28-claude-handoff-v52";
-  let handoffFallbackStyleSheet = null;
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-09-28-ui-styles-v53";
+  const ownedUiStyleSheets = new Map();
   let claudeJsonCaptureEnabled = false;
   let chatGptJsonCaptureEnabled = false;
   let networkJsonCaptureEnabled = false;
@@ -651,9 +651,10 @@
   function cleanupContextGeneratorNodes() {
     cleanupContextGeneratorReservations();
 
-    if (handoffFallbackStyleSheet) {
-      document.adoptedStyleSheets = document.adoptedStyleSheets.filter((sheet) => sheet !== handoffFallbackStyleSheet);
-      handoffFallbackStyleSheet = null;
+    if (ownedUiStyleSheets.size) {
+      const ownedSheets = new Set(ownedUiStyleSheets.values());
+      document.adoptedStyleSheets = document.adoptedStyleSheets.filter((sheet) => !ownedSheets.has(sheet));
+      ownedUiStyleSheets.clear();
     }
 
     [
@@ -4600,6 +4601,21 @@
     );
   }
 
+  function applyOwnedUiStyleSheet(style) {
+    // Page CSP can leave a style node present but ineffective. Adopt our scoped
+    // UI rules directly, and resync when palette rules are appended later.
+    if (typeof CSSStyleSheet === "undefined" || !("adoptedStyleSheets" in document)) return;
+    let sheet = ownedUiStyleSheets.get(style.id);
+    if (!sheet) {
+      sheet = new CSSStyleSheet();
+      ownedUiStyleSheets.set(style.id, sheet);
+    }
+    sheet.replaceSync(style.textContent);
+    if (!document.adoptedStyleSheets.includes(sheet)) {
+      document.adoptedStyleSheets = [...document.adoptedStyleSheets, sheet];
+    }
+  }
+
   function ensureDestinationSheetStyles() {
     if (document.getElementById(DESTINATION_SHEET_STYLE_ID)) return;
 
@@ -4818,6 +4834,7 @@
       }
     `).join("");
     (document.head || document.documentElement).appendChild(style);
+    applyOwnedUiStyleSheet(style);
   }
 
   function ensureDestinationSheet() {
@@ -5500,6 +5517,7 @@
       return `${selector}{${declarations}}`;
     });
     style.textContent += rules.join("\n");
+    applyOwnedUiStyleSheet(style);
   }
 
   function ensureFloatingOverlay() {
@@ -5962,14 +5980,7 @@
           }
         `;
         document.head.appendChild(styleSheet);
-        // Claude's card can retain inline styles while the stage stylesheet is
-        // ineffective. Always adopt its existing CSS there; sheet presence alone
-        // does not guarantee that progress circles, spacing and lines render.
-        if (currentPlatform.id === "claude" || !styleSheet.sheet) {
-          handoffFallbackStyleSheet = new CSSStyleSheet();
-          handoffFallbackStyleSheet.replaceSync(styleSheet.textContent);
-          document.adoptedStyleSheets = [...document.adoptedStyleSheets, handoffFallbackStyleSheet];
-        }
+        applyOwnedUiStyleSheet(styleSheet);
       }
 
       const countdown = document.createElement("div");
