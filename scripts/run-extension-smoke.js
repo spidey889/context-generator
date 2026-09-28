@@ -8,6 +8,7 @@ const { spawn } = require("node:child_process");
 const REPO_ROOT = path.resolve(__dirname, "..");
 const SOURCE_SENTINEL = "SMOKE_USER_SENTINEL: preserve the deployment checklist.";
 const ASSISTANT_SENTINEL = "SMOKE_ASSISTANT_SENTINEL: verify staging before release.";
+const CHATGPT_PASTED_TEXT = `CHATGPT_PASTE_START\n${"  Original pasted line, absent from the DOM.\n".repeat(1000)}CHATGPT_PASTE_END`;
 const CLAUDE_PASTED_TEXT = `CLAUDE_PASTE_START\n${"Full pasted-card line, absent from the DOM.\n".repeat(1000)}CLAUDE_PASTE_END`;
 const SUMMARY_TEXT = [
   "CONTEXT CARRY — READY TO PASTE",
@@ -28,6 +29,9 @@ const PICKER_SCREENSHOT_PATH = process.env.CAP_CONTEXT_PICKER_SCREENSHOT || "";
 const JSON_SOURCE = process.env.CAP_CONTEXT_JSON_SMOKE === "chatgpt" ? "chatgpt" : process.env.CAP_CONTEXT_JSON_SMOKE === "1" ? "claude" : null;
 const JSON_CAPTURE_SMOKE = Boolean(JSON_SOURCE);
 const CLAUDE_RELOAD_SMOKE = JSON_SOURCE === "claude" && process.env.CAP_CONTEXT_CLAUDE_RELOAD_SMOKE === "1";
+const CHATGPT_RELOAD_SMOKE = JSON_SOURCE === "chatgpt" && process.env.CAP_CONTEXT_CHATGPT_RELOAD_SMOKE === "1";
+const JSON_RELOAD_SMOKE = CLAUDE_RELOAD_SMOKE || CHATGPT_RELOAD_SMOKE;
+const CHATGPT_FAILURE_SMOKE = JSON_SOURCE === "chatgpt" ? process.env.CAP_CONTEXT_CHATGPT_FAILURE_SMOKE || "" : "";
 const CLAUDE_PARTIAL_SMOKE = JSON_SOURCE === "claude" && process.env.CAP_CONTEXT_CLAUDE_PARTIAL_SMOKE === "1";
 
 class CdpSession {
@@ -299,8 +303,29 @@ function destinationFixture() {
 </html>`;
 }
 
+function chatGptTreeFixture() {
+  const mapping = { root: { id: "root", parent: null, message: null } };
+  let parent = "root";
+  // A long tree with older API-only turns; the rendered fixture has two turns.
+  for (let i = 0; i < 60; i++) {
+    const user = `user-${i}`, assistant = `assistant-${i}`;
+    mapping[user] = { id: user, parent, message: { author: { role: "user" }, status: "finished_successfully", content: { content_type: "multimodal_text", parts: [i === 0 ? `${SOURCE_SENTINEL}\nJSON_ONLY_SENTINEL: earliest API-only turn.\n${CHATGPT_PASTED_TEXT}` : `User history ${i}`, { content_type: "image_asset_pointer", text: "UNSUPPORTED_SENTINEL" }] } } };
+    mapping[assistant] = { id: assistant, parent: user, message: { author: { role: "assistant" }, status: "finished_successfully", metadata: { is_complete: true }, content: { content_type: "text", parts: [i === 59 ? ASSISTANT_SENTINEL : `Assistant history ${i}`] } } };
+    parent = assistant;
+  }
+  mapping.tool = { parent, message: { author: { role: "tool" }, content: { content_type: "text", parts: ["UNSUPPORTED_SENTINEL"] } } };
+  mapping.recap = { parent: "tool", message: { author: { role: "assistant" }, content: { content_type: "reasoning_recap", content: "OWN_RECAP_SENTINEL" } } };
+  mapping.thought = { parent: "recap", message: { author: { role: "assistant" }, content: { content_type: "thoughts", thoughts: [{ content: "OWN_THOUGHT_SENTINEL", summary: "UNSUPPORTED_SENTINEL", finished: true }] } } };
+  mapping.code = { parent: "thought", message: { author: { role: "assistant" }, content: { content_type: "code", text: "OWN_CODE_SENTINEL", language: "python" } } };
+  mapping.alternate = { parent: "root", message: { author: { role: "assistant" }, content: { content_type: "text", parts: ["INACTIVE_BRANCH_SENTINEL"] } } };
+  const data = { conversation_id: "smoke", current_node: "code", mapping, context_truncation_continuation: null };
+  if (CHATGPT_FAILURE_SMOKE === "partial") data.has_previous_page = true;
+  if (CHATGPT_FAILURE_SMOKE === "streaming") mapping.code.message.status = "in_progress";
+  return data;
+}
+
 async function startFixtureServer() {
-  const state = { summaryRequests: [], jsonRequests: 0, claudeRequestUrls: [] };
+  const state = { summaryRequests: [], jsonRequests: 0, sessionRequests: 0, chatgptRequestUrls: [], claudeRequestUrls: [] };
   const server = http.createServer(async (request, response) => {
     const url = new URL(request.url, "http://127.0.0.1");
     response.setHeader("Cache-Control", "no-store");
@@ -327,18 +352,23 @@ async function startFixtureServer() {
       }));
       return;
     }
+    if (url.pathname === "/api/auth/session") {
+      state.sessionRequests++;
+      response.writeHead(200, { "Content-Type": "application/json" });
+      response.end(JSON.stringify({ accessToken: "smoke-only", account: { id: "smoke-account" }, sessionToken: "SESSION_TOKEN_MUST_NOT_LEAVE_MAIN" }));
+      return;
+    }
     if (["/backend-api/conversation/smoke", "/backend-api/conversations/smoke"].includes(url.pathname)) {
       state.jsonRequests++;
-      assert.equal(request.headers.authorization, "Bearer smoke-only", "The full-tree read must reuse observed page auth.");
-      response.writeHead(200, { "Content-Type": "application/json" });
-      response.end(JSON.stringify(url.pathname.includes("/conversations/") ? { messages: [], page_info: { has_previous_page: true } } : {
-        conversation_id: "smoke", current_node: "assistant", page_info: { has_previous_page: false, has_next_page: false },
-        mapping: {
-          root: { parent: null },
-          user: { parent: "root", message: { author: { role: "user" }, content: { content_type: "text", parts: [`${SOURCE_SENTINEL}\nJSON_ONLY_SENTINEL: loaded from the API, absent from the DOM.`] } } },
-          assistant: { parent: "user", message: { author: { role: "assistant" }, content: { content_type: "text", parts: [ASSISTANT_SENTINEL] } } }
-        }
-      }));
+      state.chatgptRequestUrls.push(url.pathname + url.search);
+      assert.equal(request.headers.authorization, "Bearer smoke-only", "The full-tree read must reuse page/session auth.");
+      const full = url.pathname === "/backend-api/conversation/smoke";
+      if (full) {
+        assert.equal(request.headers["chatgpt-account-id"], "smoke-account");
+        assert.equal(url.search, "", "The full-tree URL must not carry recent-page parameters.");
+      }
+      response.writeHead(full && CHATGPT_FAILURE_SMOKE === "ranged" ? 206 : 200, { "Content-Type": "application/json" });
+      response.end(JSON.stringify(full ? chatGptTreeFixture() : { messages: [], page_info: { has_previous_page: true } }));
       return;
     }
     if (url.pathname === "/api/organizations/smoke/chat_conversations/smoke") {
@@ -366,7 +396,7 @@ async function startFixtureServer() {
         ? claudePlacementFixture().replace('<div id="claude-page">', `<main aria-label="Conversation"><article data-message-author-role="user">${SOURCE_SENTINEL}</article><article data-message-author-role="assistant"><div class="markdown">${ASSISTANT_SENTINEL}</div></article></main><div id="claude-page">`)
         : sourceFixture();
       response.end(url.pathname === "/c/smoke"
-        ? page.replace("</body>", '<script nonce="smoke">fetch("/backend-api/conversations/smoke?num_turns=10", {headers:{Authorization:"Bearer smoke-only"}});</script></body>')
+        ? page.replace("</body>", '<script nonce="smoke">fetch("/backend-api/conversations/smoke?num_turns=10", {headers:{Authorization:"Bearer smoke-only","ChatGPT-Account-Id":"smoke-account"}});</script></body>')
         : url.pathname === "/chat/smoke"
         ? page.replace("</body>", '<script nonce="smoke">fetch("/api/organizations/smoke/chat_conversations/smoke?tree=True");</script></body>')
         : page);
@@ -466,10 +496,10 @@ async function run() {
     const sourceUrl = `${origin}${sourcePath}?${SMOKE_PLATFORM_QUERY}=${JSON_SOURCE || "chatgpt"}`;
     braveProcess = spawn(braveExecutable, [
       `--user-data-dir=${profileRoot}`,
-      ...(CLAUDE_RELOAD_SMOKE ? [] : [`--disable-extensions-except=${extensionRoot}`, `--load-extension=${extensionRoot}`]),
+      ...(JSON_RELOAD_SMOKE ? [] : [`--disable-extensions-except=${extensionRoot}`, `--load-extension=${extensionRoot}`]),
       "--remote-debugging-port=0",
       "--remote-allow-origins=*",
-      ...(CLAUDE_RELOAD_SMOKE ? ["--enable-unsafe-extension-debugging"] : []),
+      ...(JSON_RELOAD_SMOKE ? ["--enable-unsafe-extension-debugging"] : []),
       "--no-first-run",
       "--no-default-browser-check",
       "--disable-default-apps",
@@ -483,7 +513,7 @@ async function run() {
 
     const devToolsPort = await readDevToolsPort(profileRoot);
     browserSession = await CdpSession.connect(await getBrowserWebSocketUrl(devToolsPort));
-    if (CLAUDE_RELOAD_SMOKE) await browserSession.call("Extensions.loadUnpacked", { path: extensionRoot });
+    if (JSON_RELOAD_SMOKE) await browserSession.call("Extensions.loadUnpacked", { path: extensionRoot });
     // MV3 workers may suspend before DevTools enumerates them. The injected
     // bubble and full transfer below prove both content and worker startup.
     const sourceTarget = await waitFor(async () => {
@@ -601,8 +631,9 @@ async function run() {
     assert.match(claudePlacement.sendTranslate, /^-52px(?: 0px)?$/);
     process.stdout.write("✓ Claude's bubble stays centered and its Voice-to-Send swap remains clear of Send.\n");
 
-    if (CLAUDE_RELOAD_SMOKE) {
+    if (JSON_RELOAD_SMOKE) {
       const before = state.jsonRequests;
+      const sessionBefore = state.sessionRequests;
       await sourceSession.evaluate(`window.__capSmokeOldBubble = document.getElementById("context-generator-bubble"); true`);
       const worker = await waitFor(async () => (await getTargets(devToolsPort)).find(target => target.type === "service_worker" && target.url.startsWith("chrome-extension://")), "the extension worker");
       const extensionId = new URL(worker.url).hostname;
@@ -614,8 +645,13 @@ async function run() {
       await waitFor(async () => (await getTargets(devToolsPort)).some(target => target.type === "service_worker" && target.id !== worker.id && target.url.startsWith(`chrome-extension://${extensionId}/`)), "the reloaded extension worker");
       await waitFor(() => sourceSession.evaluate(`Boolean(document.getElementById("context-generator-bubble") && document.getElementById("context-generator-bubble") !== window.__capSmokeOldBubble)`), "a fresh bubble after extension reload");
       assert.equal(state.jsonRequests, before, "Extension reload must not capture conversation bodies.");
+      assert.equal(state.sessionRequests, sessionBefore, "Reload must not read a session proactively.");
+      if (CHATGPT_RELOAD_SMOKE) {
+        // Reproduce a late MAIN install with no previously observed headers.
+        await sourceSession.evaluate(`window.__capChatGptFetchState.dispose(); delete window.__capChatGptFetchState; true`);
+      }
       // No page refresh or native API read: recover routing from resource history.
-      process.stdout.write("Reloaded the extension on an open Claude fixture without refreshing or fetching messages.\n");
+      process.stdout.write("Reloaded the extension on the open source fixture without refreshing or fetching messages.\n");
     }
     if (JSON_CAPTURE_SMOKE) {
       const before = state.jsonRequests;
@@ -642,9 +678,15 @@ async function run() {
       }
       assert.equal(state.jsonRequests, before, "Toggling JSON capture must not fetch a conversation.");
       assert.equal(state.summaryRequests.length, 0, "Toggling JSON capture must not submit a transcript.");
+      assert.equal(state.sessionRequests, 0, "Opening/toggling the picker must not read a session.");
       await sourceSession.evaluate(`document.querySelector("#context-generator-destination-backdrop").click()`);
     }
 
+    if (JSON_SOURCE === "chatgpt") {
+      // API capture must work before virtualized turns mount, on project routes,
+      // without scroll sweeps or opening any pasted-content panels.
+      await sourceSession.evaluate(`document.querySelectorAll("main article").forEach(node => node.remove()); history.pushState({}, "", "/g/project/c/smoke?${SMOKE_PLATFORM_QUERY}=chatgpt"); true`);
+    }
     const jsonRequestsBeforeTransfer = state.jsonRequests;
     const clickResult = await sourceSession.evaluate(`(() => {
       const bubble = document.getElementById("context-generator-bubble");
@@ -703,6 +745,14 @@ async function run() {
     assert.equal(clickResult.selectedPreserved, true, "Dark Reader must not recolor the selected destination tile.");
     assert.equal(clickResult.pickerStyleIgnored, true, "Dark Reader must leave the picker stylesheet alone.");
 
+    if (CHATGPT_FAILURE_SMOKE) {
+      const reason = CHATGPT_FAILURE_SMOKE === "partial" ? "conversation.has_previous_page" : CHATGPT_FAILURE_SMOKE === "streaming" ? "still in progress" : "HTTP 206";
+      await waitFor(() => sourceSession.evaluate(`document.getElementById("context-generator-error-overlay")?.textContent.includes(${JSON.stringify(reason)})`), "a visible ChatGPT incomplete capture error");
+      assert.equal(state.summaryRequests.length, 0, "Partial ChatGPT text must never reach the backend.");
+      assert.equal(state.jsonRequests, jsonRequestsBeforeTransfer + 1);
+      process.stdout.write("ChatGPT incomplete capture failed visibly with zero backend requests.\n");
+      return;
+    }
     if (CLAUDE_PARTIAL_SMOKE) {
       await waitFor(async () => sourceSession.evaluate(`document.getElementById("context-generator-error-overlay")?.textContent.includes("conversation.truncated")`), "a visible Claude incomplete-capture error");
       assert.equal(state.summaryRequests.length, 0, "Incomplete Claude history must never reach the summary backend.");
@@ -725,6 +775,23 @@ async function run() {
         assert.equal(capturedConversation.split("CLAUDE_PASTE_START").length - 1, 1, "The pasted text must be included once.");
         assert.ok(capturedConversation.indexOf("CLAUDE_PASTE_END") < capturedConversation.indexOf("Assistant:"), "The paste must remain in its owning user turn.");
         assert.doesNotMatch(capturedConversation, /CLAUDE_ATTACHMENT_IGNORED_SENTINEL/);
+      }
+      if (JSON_SOURCE === "chatgpt") {
+        const expectedTurns = Array.from({ length: 60 }, (_, i) => [
+          `User: ${i === 0 ? `${SOURCE_SENTINEL}\nJSON_ONLY_SENTINEL: earliest API-only turn.\n${CHATGPT_PASTED_TEXT}` : `User history ${i}`}`,
+          `Assistant: ${i === 59 ? ASSISTANT_SENTINEL : `Assistant history ${i}`}`
+        ]).flat();
+        expectedTurns.push("Assistant: OWN_RECAP_SENTINEL", "Assistant: OWN_THOUGHT_SENTINEL", "Assistant: OWN_CODE_SENTINEL");
+        assert.equal(capturedConversation, `ChatGPT conversation:\n\n${expectedTurns.join("\n\n")}`, "Every own turn must reach the backend exactly once, including all middle history.");
+        assert.ok(capturedConversation.includes(CHATGPT_PASTED_TEXT), "Full pasted text must remain in its owning user turn.");
+        assert.match(capturedConversation, /Assistant history 0/);
+        assert.match(capturedConversation, /User history 59/);
+        assert.match(capturedConversation, /OWN_RECAP_SENTINEL/);
+        assert.match(capturedConversation, /OWN_THOUGHT_SENTINEL/);
+        assert.match(capturedConversation, /OWN_CODE_SENTINEL/);
+        assert.doesNotMatch(capturedConversation, /UNSUPPORTED_SENTINEL|INACTIVE_BRANCH_SENTINEL|smoke-only|SESSION_TOKEN_MUST_NOT_LEAVE_MAIN/);
+        assert.equal(state.chatgptRequestUrls.at(-1), "/backend-api/conversation/smoke");
+        assert.equal(state.sessionRequests, CHATGPT_RELOAD_SMOKE ? 1 : 0);
       }
       assert.equal(state.jsonRequests, jsonRequestsBeforeTransfer + 1, "JSON capture must fetch fresh conversation data exactly once after destination selection.");
     }

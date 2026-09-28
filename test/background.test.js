@@ -393,7 +393,7 @@ test("summary cache preserves original result metadata and labels cache hits", a
 });
 
 
-test("Claude JSON scripts reinstall in MAIN then isolated on open Claude tabs only", async () => {
+test("JSON scripts reinstall in MAIN then isolated on the matching platform tabs", async () => {
   const injections = [];
   loadBackgroundForSummaryTest(async () => {}, { injections, tabs: [
     { id: 1, url: "https://claude.ai/chat/a" },
@@ -403,7 +403,9 @@ test("Claude JSON scripts reinstall in MAIN then isolated on open Claude tabs on
   const claude = injections.filter(item => item.target.tabId === 1);
   assert.deepEqual(claude.map(item => [...item.files]), [["claude-fetch-main.js"], ["claude-json-capture.js"], ["platform-content.js"]]);
   assert.equal(claude[0].world, "MAIN");
-  assert.deepEqual(injections.filter(item => item.target.tabId === 2).map(item => [...item.files]), [["platform-content.js"]]);
+  const chatgpt = injections.filter(item => item.target.tabId === 2);
+  assert.deepEqual(chatgpt.map(item => [...item.files]), [["chatgpt-fetch-main.js"], ["chatgpt-json-capture.js"], ["platform-content.js"]]);
+  assert.equal(chatgpt[0].world, "MAIN");
 });
 
 test("Claude on-demand MAIN installation accepts only a Claude top-frame sender", async () => {
@@ -426,4 +428,18 @@ test("Claude MAIN installation failures are returned without affecting default s
   loadBackgroundForSummaryTest(async () => {}, { injectionError: true, onMessage: value => { listener = value; } });
   const reply = await new Promise(resolve => listener({ type: "ENSURE_CLAUDE_JSON_HOOK" }, { tab: { id: 1, url: "https://claude.ai/chat/a" }, frameId: 0 }, resolve));
   assert.equal(reply.ok, false);
+});
+
+
+test("ChatGPT on-demand MAIN readiness is restricted to its top-frame source", async () => {
+  let listener;
+  const injections = [];
+  loadBackgroundForSummaryTest(async () => {}, { injections, onMessage: value => { listener = value; } });
+  const request = sender => new Promise(resolve => listener({ type: "ENSURE_CHATGPT_JSON_HOOK" }, sender, resolve));
+  for (const sender of [{}, { tab: { id: 1, url: "https://claude.ai/chat/a" }, frameId: 0 }, { tab: { id: 1, url: "https://chatgpt.com/c/a" }, frameId: 2 }]) assert.equal((await request(sender)).ok, false);
+  assert.equal(injections.length, 0);
+  assert.equal((await request({ tab: { id: 1, url: "https://chatgpt.com/g/project/c/a" }, frameId: 0 })).ok, true);
+  assert.equal(injections.length, 1);
+  assert.equal(injections[0].world, "MAIN");
+  assert.deepEqual([...injections[0].files], ["chatgpt-fetch-main.js"]);
 });

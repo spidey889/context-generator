@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-09-27-icon-speed-toggle-v41";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-09-28-chatgpt-json-v42";
   let claudeJsonCaptureEnabled = false;
   let chatGptJsonCaptureEnabled = false;
   const INSTANCE_TEARDOWN_KEY = "__contextGeneratorPlatformTeardown";
@@ -5395,7 +5395,9 @@
       finishTransferTrace(trace, "unknown_failure");
       return;
     }
-    if (getDetectedConversationMessageCount() === 0) {
+    // The full ChatGPT tree can be ready before its virtualized DOM mounts.
+    // JSON validation, rather than rendered turn count, decides whether it is empty.
+    if (!useChatGptJson && getDetectedConversationMessageCount() === 0) {
       markTransferTrace(trace, `failed: ${NO_CONVERSATION_ERROR_MESSAGE}`);
       finishTransferTrace(trace, "no_conversation");
       hideDestinationSheet();
@@ -5414,12 +5416,12 @@
       showOverlay(destinationId);
       releaseDestinationSheetBackdrop();
       let preparedDestinationPromise = null;
-      if (getDetectedConversationMessageCount() > 0) {
+      if (useChatGptJson || getDetectedConversationMessageCount() > 0) {
         preparedDestinationPromise = prepareDestinationTab(destinationId, trace);
       }
       advanceTransferTelemetryStage(trace, "capture_started");
       if (!useClaudeJson && !useChatGptJson) await prepareSourceForCapture();
-      if (!preparedDestinationPromise && getDetectedConversationMessageCount() > 0) {
+      if (!preparedDestinationPromise && (useChatGptJson || getDetectedConversationMessageCount() > 0)) {
         preparedDestinationPromise = prepareDestinationTab(destinationId, trace);
       }
 

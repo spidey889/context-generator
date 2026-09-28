@@ -415,6 +415,14 @@ chrome.action.onClicked.addListener(async (tab) => {
 });
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  if (message?.type === "ENSURE_CHATGPT_JSON_HOOK") {
+    if (!sender?.tab?.id || getPlatformFromUrl(sender.tab.url) !== "chatgpt" || sender.frameId !== 0) {
+      sendResponse({ ok: false }); return false;
+    }
+    ensureChatGptJsonHook(sender.tab.id).then(ok => sendResponse({ ok }));
+    return true;
+  }
+
   if (message?.type === "ENSURE_CLAUDE_JSON_HOOK") {
     if (!sender?.tab?.id || getPlatformFromUrl(sender.tab.url) !== "claude" || sender.frameId !== 0) {
       sendResponse({ ok: false }); return false;
@@ -971,6 +979,13 @@ async function ensureClaudeJsonHook(tabId) {
   } catch { return false; }
 }
 
+async function ensureChatGptJsonHook(tabId) {
+  try {
+    await chrome.scripting.executeScript({ target: { tabId }, world: "MAIN", files: ["chatgpt-fetch-main.js"] });
+    return true;
+  } catch { return false; }
+}
+
 async function injectIntoOpenSupportedTabs() {
   try {
     const tabs = await chrome.tabs.query({});
@@ -981,6 +996,9 @@ async function injectIntoOpenSupportedTabs() {
           if (getPlatformFromUrl(tab.url) === "claude") {
             await ensureClaudeJsonHook(tab.id);
             await ensureContentScript(tab.id, "claude-json-capture.js");
+          } else if (getPlatformFromUrl(tab.url) === "chatgpt") {
+            await ensureChatGptJsonHook(tab.id);
+            await ensureContentScript(tab.id, "chatgpt-json-capture.js");
           }
           return ensureContentScript(tab.id, PLATFORM_CONTENT_SCRIPT);
         })

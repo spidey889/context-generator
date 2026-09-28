@@ -1,5 +1,7 @@
 # Changelog
 
+- 2026-09-28: Completed the default-off ChatGPT JSON experiment with session/account auth reuse, on-demand late-install/session recovery, one expired-token retry, startup/on-demand MAIN readiness, idempotent replacement, account/navigation cancellation, and prompt concurrent-request failures. Full-tree validation now rejects partial/ranged transport, incomplete metadata, malformed active branches and unfinished turns. Own recap/thought/code fields and full pasted strings are preserved; tools/files/images/canvas remain excluded. JSON capture no longer depends on virtualized DOM mounting. Added long-tree nonce-CSP Brave transfer, reload/session-recovery, and visible partial/streaming/ranged failure scenarios; kept DOM capture, Claude, other platforms, summarization and destination behavior intact.
+
 - 2026-09-27: Made fast capture icon-only at rest: only the lightning turns yellow when enabled; the subtle box appears on hover. Keyboard focus remains visible.
 
 - 2026-09-27: Changed the enabled fast-capture lightning button to yellow, with subtle matching background and border accents. Toggle behavior is unchanged.
