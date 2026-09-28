@@ -1,0 +1,15 @@
+{
+  "name": "cap-context-launch-film",
+  "private": true,
+  "version": "1.0.0",
+  "scripts": {
+    "capture": "node capture-ui.cjs",
+    "preview": "node render.cjs --preview",
+    "score": "python score.py",
+    "render": "node render.cjs",
+    "verify": "node verify.cjs"
+  },
+  "devDependencies": {
+    "playwright": "1.62.1"
+  }
+}

@@ -1,0 +1,23 @@
+{
+  "durationSeconds": 27,
+  "width": 1920,
+  "height": 1080,
+  "fps": 30,
+  "frames": 810,
+  "video": "h264",
+  "audio": "aac",
+  "audioChannels": 2,
+  "audioPeakDb": -3.7,
+  "sizeBytes": 3088669,
+  "sha256": "84f2b3f4f852b0b00f933a7d07ccd41a5fb8165e6cf2300e90559f92272c7229",
+  "fullDecode": "passed",
+  "isolatedBravePlaybackAndSeek": "passed",
+  "visualReviewFrames": [
+    1.5,
+    8.9,
+    12.6,
+    18.15,
+    21.7,
+    24.1
+  ]
+}
