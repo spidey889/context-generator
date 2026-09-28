@@ -398,6 +398,30 @@ chrome.action.onClicked.addListener(async (tab) => {
 });
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  if (message?.type === "ENSURE_NETWORK_JSON_HOOK") {
+    if (!sender?.tab?.id || !["gemini", "grok", "deepseek"].includes(getPlatformFromUrl(sender.tab.url)) || sender.frameId !== 0) {
+      sendResponse({ ok: false }); return false;
+    }
+    ensureNetworkJsonHook(sender.tab.id).then(ok => sendResponse({ ok }));
+    return true;
+  }
+
+  if (message?.type === "ENSURE_CHATGPT_JSON_HOOK") {
+    if (!sender?.tab?.id || getPlatformFromUrl(sender.tab.url) !== "chatgpt" || sender.frameId !== 0) {
+      sendResponse({ ok: false }); return false;
+    }
+    ensureChatGptJsonHook(sender.tab.id).then(ok => sendResponse({ ok }));
+    return true;
+  }
+
+  if (message?.type === "ENSURE_CLAUDE_JSON_HOOK") {
+    if (!sender?.tab?.id || getPlatformFromUrl(sender.tab.url) !== "claude" || sender.frameId !== 0) {
+      sendResponse({ ok: false }); return false;
+    }
+    ensureClaudeJsonHook(sender.tab.id).then(ok => sendResponse({ ok }));
+    return true;
+  }
+
   if (message?.type === "RECORD_TRANSFER_TELEMETRY") {
     recordTransferTelemetry(message.event, sender?.tab?.id)
       .then(() => sendResponse({ ok: true }))
@@ -915,9 +939,9 @@ async function pingTab(tabId) {
   }
 }
 
-async function ensureContentScript(tabId) {
+async function ensureContentScript(tabId, file = PLATFORM_CONTENT_SCRIPT) {
   try {
-    await chrome.scripting.executeScript({ target: { tabId }, files: [PLATFORM_CONTENT_SCRIPT] });
+    await chrome.scripting.executeScript({ target: { tabId }, files: [file] });
     return true;
   } catch (error) {
     const message = String(error?.message || error);
@@ -928,13 +952,46 @@ async function ensureContentScript(tabId) {
   }
 }
 
+async function ensureClaudeJsonHook(tabId) {
+  try {
+    await chrome.scripting.executeScript({ target: { tabId }, world: "MAIN", files: ["claude-fetch-main.js"] });
+    return true;
+  } catch { return false; }
+}
+
+async function ensureChatGptJsonHook(tabId) {
+  try {
+    await chrome.scripting.executeScript({ target: { tabId }, world: "MAIN", files: ["chatgpt-fetch-main.js"] });
+    return true;
+  } catch { return false; }
+}
+
+async function ensureNetworkJsonHook(tabId) {
+  try {
+    await chrome.scripting.executeScript({ target: { tabId }, world: "MAIN", files: ["network-json-data.js", "network-fetch-main.js"] });
+    return true;
+  } catch { return false; }
+}
+
 async function injectIntoOpenSupportedTabs() {
   try {
     const tabs = await chrome.tabs.query({});
     await Promise.all(
       tabs
         .filter((tab) => tab.id && getPlatformFromUrl(tab.url))
-        .map((tab) => ensureContentScript(tab.id))
+        .map(async (tab) => {
+          if (getPlatformFromUrl(tab.url) === "claude") {
+            await ensureClaudeJsonHook(tab.id);
+            await ensureContentScript(tab.id, "claude-json-capture.js");
+          } else if (getPlatformFromUrl(tab.url) === "chatgpt") {
+            await ensureChatGptJsonHook(tab.id);
+            await ensureContentScript(tab.id, "chatgpt-json-capture.js");
+          } else if (["gemini", "grok", "deepseek"].includes(getPlatformFromUrl(tab.url))) {
+            await ensureNetworkJsonHook(tab.id);
+            await ensureContentScript(tab.id, "network-json-capture.js");
+          }
+          return ensureContentScript(tab.id, PLATFORM_CONTENT_SCRIPT);
+        })
     );
   } catch (error) {
     console.debug("[Context Generator Relay] Startup content script injection skipped:", error?.message || error);

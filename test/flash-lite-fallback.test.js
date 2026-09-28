@@ -4,11 +4,11 @@ const handler = require("../api/summarize.js");
 const { createSummaryWithFallback, getSummaryProfile, getGeneratedModelSelection } = handler.__test;
 
 for (const [label, groqKey, flashLiteWorks] of [
-  ["after Groq failure", "test-groq", true],
+  ["with Groq configured", "test-groq", true],
   ["when Groq is absent", undefined, true],
-  ["before local carry when Flash-Lite also fails", "test-groq", false]
+  ["then later fallbacks and local carry when it fails", "test-groq", false]
 ]) {
-  test(`Flash-Lite is the final remote fallback ${label}`, async () => {
+  test(`Flash-Lite is tried before Mistral ${label}`, async () => {
     const originalFetch = global.fetch;
     const requests = [];
     const healthModels = [];
@@ -43,8 +43,10 @@ for (const [label, groqKey, flashLiteWorks] of [
         geminiApiKey: "test-google", mistralApiKey: "test-mistral",
         groqApiKey: groqKey, geminiModelHealth: health
       });
-      assert.deepEqual(requests, ["gemini-3.6-flash", "ministral-14b-2512", ...(groqKey ? ["groq/compound-mini", "groq/compound-mini"] : []),
-        "gemini-3.5-flash-lite"]);
+      assert.deepEqual(requests, ["gemini-3.6-flash", "gemini-3.5-flash-lite",
+        ...(!flashLiteWorks ? ["ministral-14b-2512", ...(groqKey ? ["groq/compound-mini", "groq/compound-mini"] : [])] : [])]);
+      assert.deepEqual(result.modelsTried, [...new Set(requests)]);
+      assert.deepEqual(result.mistralModelsTried, flashLiteWorks ? [] : ["ministral-14b-2512"]);
       assert.equal(result.model, flashLiteWorks ? "gemini-3.5-flash-lite" : "local-direct");
       assert.equal(healthModels.includes("gemini-3.5-flash-lite"), false);
       if (flashLiteWorks) {
@@ -144,5 +146,47 @@ test("paused Mistral is bypassed and Flash-Lite serves after primary failure", a
   } finally {
     global.fetch = originalFetch;
     names.forEach((name, index) => { if (saved[index] === undefined) delete process.env[name]; else process.env[name] = saved[index]; });
+  }
+});
+
+test("daily-health skipped Flash still tries Flash-Lite before Mistral", async () => {
+  const originalFetch = global.fetch;
+  const savedFlashSwitch = process.env.GEMINI_FLASH_FALLBACKS_ENABLED;
+  delete process.env.GEMINI_FLASH_FALLBACKS_ENABLED;
+  const conversation = "User: Preserve the Windows build decision and pending Linux checks.\n".repeat(100);
+  try {
+    for (const flashLiteWorks of [true, false]) {
+      const requests = [], healthModels = [];
+      global.fetch = async (url, options) => {
+        const body = JSON.parse(options.body);
+        const model = body.model || url.split("/models/")[1].split(":")[0];
+        requests.push(model);
+        if (model === "gemini-3.5-flash-lite") {
+          if (!flashLiteWorks) return { ok: false, status: 503, json: async () => ({ error: { code: "unavailable" } }) };
+          return { ok: true, json: async () => ({ candidates: [{ finishReason: "STOP", content: { parts: [{ text: "Build passed; Linux checks remain pending." }] } }] }) };
+        }
+        assert.equal(model, "ministral-14b-2512");
+        return { ok: true, json: async () => ({ choices: [{ message: { content: "Build passed; Linux checks remain pending." } }] }) };
+      };
+      const result = await createSummaryWithFallback({
+        conversation, profile: getSummaryProfile(conversation), modelSelection: getGeneratedModelSelection(conversation, true),
+        geminiApiKey: "test-google", mistralApiKey: "test-mistral",
+        geminiModelHealth: {
+          beginAttempt: async model => { healthModels.push(model); return { available: false, status: "bad_mood" }; },
+          recordFailure: async () => { throw new Error("Skipped Flash must not make a request"); },
+          recordSuccess: async () => { throw new Error("Flash-Lite must bypass Flash health"); }
+        }
+      });
+      assert.deepEqual(healthModels, ["gemini-3.6-flash"]);
+      assert.deepEqual(result.geminiModelsSkipped, [{ model: "gemini-3.6-flash", status: "bad_mood" }]);
+      assert.deepEqual(requests, flashLiteWorks ? ["gemini-3.5-flash-lite"] : ["gemini-3.5-flash-lite", "gemini-3.5-flash-lite", "ministral-14b-2512"]);
+      assert.deepEqual(result.modelsTried, [...new Set(requests)]);
+      if (!flashLiteWorks) assert.match(result.fallback.reason, /Gemini API error 503/);
+      assert.equal(result.model, flashLiteWorks ? "gemini-3.5-flash-lite" : "ministral-14b-2512");
+    }
+  } finally {
+    global.fetch = originalFetch;
+    if (savedFlashSwitch === undefined) delete process.env.GEMINI_FLASH_FALLBACKS_ENABLED;
+    else process.env.GEMINI_FLASH_FALLBACKS_ENABLED = savedFlashSwitch;
   }
 });

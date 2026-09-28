@@ -442,7 +442,7 @@ async function createSummaryWithFallback({
   let mistralMs = 0;
   let lastProviderFailure = null;
 
-  // Only the primary remote routes share this receipt contract. Terminal
+  // Only the primary remote routes share this receipt contract.
   // Flash-Lite and Groq preserve their existing always-fallback reporting.
   function createRemoteSuccessResult(result, modelReason, timings) {
     const hadFallback = modelsTried.length > 1 || geminiModelsSkipped.length > 0;
@@ -465,9 +465,9 @@ async function createSummaryWithFallback({
     };
   }
 
-  async function tryFlashLiteBeforeLocal(groqMs = 0) {
-    const terminalBudgetMs = getProviderRequestBudgetMs(FLASH_LITE_FALLBACK_MODEL) - orcaMs - groqMs;
-    if (geminiApiKey && terminalBudgetMs > 0) {
+  async function tryFlashLiteBeforeMistral() {
+    const flashLiteBudgetMs = getProviderRequestBudgetMs(FLASH_LITE_FALLBACK_MODEL);
+    if (geminiApiKey) {
       const flashLiteStartedAt = Date.now();
       modelsTried.push(FLASH_LITE_FALLBACK_MODEL);
       try {
@@ -477,15 +477,13 @@ async function createSummaryWithFallback({
           profile,
           model: FLASH_LITE_FALLBACK_MODEL,
           initialMessages: geminiMessages,
-          // Restored Orca/Groq consume part of the terminal 90-second allowance.
-          // The complete remote chain stays within 270 seconds.
-          requestBudgetMs: terminalBudgetMs
+          requestBudgetMs: flashLiteBudgetMs
         });
         return {
           ...result,
           modelReason: `${modelsTried.slice(0, -1).join(" -> ")} failed; fell back to ${FLASH_LITE_FALLBACK_MODEL}`,
           modelsTried, geminiModelsSkipped, mistralModelsTried,
-          geminiMs: geminiMs + result.providerMs, orcaMs, mistralMs, groqMs,
+          geminiMs: geminiMs + result.providerMs, orcaMs, mistralMs, groqMs: 0,
           fallback: createFallbackMetadata({
             attempted: true, used: true, servedBy: SUMMARY_PROVIDERS.gemini.id,
             model: FLASH_LITE_FALLBACK_MODEL, reason: getProviderFailureReason(lastProviderFailure)
@@ -494,13 +492,10 @@ async function createSummaryWithFallback({
       } catch (error) {
         geminiMs += Date.now() - flashLiteStartedAt;
         lastProviderFailure = error;
-        console.error("Flash-Lite final fallback failed:", getProviderFailureLog(error));
+        console.error("Flash-Lite fallback failed:", getProviderFailureLog(error));
       }
     }
-    return createEmergencyDirectCarryResult({
-      conversation, modelsTried, geminiModelsSkipped, mistralModelsTried,
-      geminiMs, orcaMs, mistralMs, groqMs, lastProviderFailure
-    });
+    return null;
   }
 
   if (geminiApiKey) {
@@ -562,7 +557,7 @@ async function createSummaryWithFallback({
         });
         logGeminiHealth(model, healthAfterFailure, "failure");
         const nextModel = GEMINI_MODEL_CHAIN[index + 1]
-          || (orcaRouterApiKey ? ORCAROUTER_FREE_MODEL : MISTRAL_PRIMARY_MODEL);
+          || FLASH_LITE_FALLBACK_MODEL;
         console.error(
           `[Context Generator] ${model} failed; falling back to ${nextModel}:`,
           getProviderFailureLog(error)
@@ -570,6 +565,9 @@ async function createSummaryWithFallback({
       }
     }
   }
+
+  const flashLiteResult = await tryFlashLiteBeforeMistral();
+  if (flashLiteResult) return flashLiteResult;
 
   if (orcaRouterApiKey) {
     const orcaStartedAt = Date.now();
@@ -626,7 +624,12 @@ async function createSummaryWithFallback({
         apiKey: mistralApiKey,
         profile,
         model,
-        initialMessages: fallbackMessages
+        initialMessages: fallbackMessages,
+        // With both Google routes ahead of Mistral, restored Orca/Groq share
+        // its final 90-second slot rather than extending the 270-second chain.
+        requestBudgetMs: getProviderRequestBudgetMs(model) - (geminiApiKey
+          ? orcaMs + (groqApiKey ? getProviderRequestBudgetMs(GROQ_FALLBACK_MODEL) : 0)
+          : 0)
       });
       const failedModels = modelsTried.slice(0, -1);
       const skippedReason = formatSkippedGeminiModels(geminiModelsSkipped);
@@ -663,7 +666,10 @@ async function createSummaryWithFallback({
   }
 
   if (!groqApiKey) {
-    return tryFlashLiteBeforeLocal();
+    return createEmergencyDirectCarryResult({
+      conversation, modelsTried, geminiModelsSkipped, mistralModelsTried,
+      geminiMs, orcaMs, mistralMs, groqMs: 0, lastProviderFailure
+    });
   }
 
   const fallback = createFallbackMetadata({
@@ -702,7 +708,10 @@ async function createSummaryWithFallback({
   } catch (error) {
     console.error("Groq fallback failed:", getProviderFailureLog(error));
     lastProviderFailure = error;
-    return tryFlashLiteBeforeLocal(Date.now() - groqStartedAt);
+    return createEmergencyDirectCarryResult({
+      conversation, modelsTried, geminiModelsSkipped, mistralModelsTried,
+      geminiMs, orcaMs, mistralMs, groqMs: Date.now() - groqStartedAt, lastProviderFailure
+    });
   }
 }
 
@@ -851,7 +860,7 @@ function requestProviderSummary(provider, apiKey, messages, profile, model, opti
   }, options.requestBudgetMs ?? getProviderRequestBudgetMs(model), {
     // Gemini, OrcaRouter Free, and Mistral all have another provider/model ready.
     // Advance immediately on 429 so a free-tier prompt cap or long reset window
-    // never stalls the transfer. Groq may honor Retry-After once before Flash-Lite.
+    // never stalls the transfer. Groq may honor Retry-After once before local carry.
     retryRateLimits: provider.id === SUMMARY_PROVIDERS.groq.id
   });
 }
@@ -1055,7 +1064,7 @@ function getGeneratedModelSelection(conversation, geminiConfigured, orcaRouterCo
 
   return {
     model: GEMINI_PRIMARY_MODEL,
-    reason: `generated summaries try ${getGeminiModelChain().join(", then ")}, then ${orcaRouterConfigured ? "OrcaRouter Free, " : ""}${process.env.MISTRAL_ENABLED === "false" ? "" : "Mistral, "}${process.env.GROQ_ENABLED === "true" ? "Groq, " : ""}and finally ${FLASH_LITE_FALLBACK_MODEL}`,
+    reason: `generated summaries try ${getGeminiModelChain().join(", then ")}, then ${FLASH_LITE_FALLBACK_MODEL}, then ${orcaRouterConfigured ? "OrcaRouter Free, " : ""}${process.env.MISTRAL_ENABLED === "false" ? "" : "Mistral, "}${process.env.GROQ_ENABLED === "true" ? "Groq, " : ""}and finally ${LOCAL_DIRECT_MODEL}`,
     inputChars,
     thresholdChars: null,
     override: false

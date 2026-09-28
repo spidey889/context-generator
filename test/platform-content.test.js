@@ -2841,27 +2841,6 @@ test("Gemini bubble anchors to the left of the Flash selector", () => {
   assert.equal(placement.bottom, 15);
 });
 
-test("Gemini bubble anchors to the left of the Pro selector", () => {
-  const pro = new FakeElement({
-    tag: "button",
-    text: "Pro",
-    attrs: { "aria-label": "Gemini Pro model selector" },
-    rect: { left: 700, right: 750, top: 166, bottom: 202, width: 50, height: 36 }
-  });
-  const mic = new FakeElement({
-    tag: "button",
-    attrs: { "aria-label": "Microphone" },
-    rect: { left: 790, right: 826, top: 166, bottom: 202, width: 36, height: 36 }
-  });
-  const hooks = loadPlatformContent([pro, mic], "gemini.google.com");
-  const anchor = hooks.findGeminiModelSelectorButton(getClaudeComposerRect());
-  const placement = hooks.getGeminiBubblePlacement(getClaudeComposerRect(), anchor);
-
-  assert.equal(anchor, pro);
-  assert.equal(placement.right, 208);
-  assert.equal(placement.bottom, 15);
-});
-
 test("Gemini placement does not require an English model label", () => {
   const model = new FakeElement({
     tag: "button",

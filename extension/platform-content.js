@@ -1,9 +1,15 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-09-27-content-cleanup-v37";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-09-28-fast-capture-merge-v56";
+  const ownedUiStyleSheets = new Map();
+  // Start fast capture on for each page instance; a manual opt-out lasts until reload.
+  let claudeJsonCaptureEnabled = true;
+  let chatGptJsonCaptureEnabled = true;
+  let networkJsonCaptureEnabled = true;
   const INSTANCE_TEARDOWN_KEY = "__contextGeneratorPlatformTeardown";
   const BUBBLE_ID = "context-generator-bubble";
   const OVERLAY_ID = "context-generator-overlay";
   const HANDOFF_SCRIM_ID = "context-generator-handoff-scrim";
+  const OVERLAY_PALETTE_STYLE_ID = "context-generator-overlay-palette-styles";
   const ONBOARDING_ID = "context-generator-onboarding";
   const ONBOARDING_STYLE_ID = "context-generator-onboarding-styles";
   const CLAUDE_LIMIT_NUDGE_ID = "context-generator-claude-limit-nudge";
@@ -634,10 +640,17 @@
   function cleanupContextGeneratorNodes() {
     cleanupContextGeneratorReservations();
 
+    if (ownedUiStyleSheets.size) {
+      const ownedSheets = new Set(ownedUiStyleSheets.values());
+      document.adoptedStyleSheets = document.adoptedStyleSheets.filter((sheet) => !ownedSheets.has(sheet));
+      ownedUiStyleSheets.clear();
+    }
+
     [
       BUBBLE_ID,
       OVERLAY_ID,
       HANDOFF_SCRIM_ID,
+      OVERLAY_PALETTE_STYLE_ID,
       ONBOARDING_ID,
       ONBOARDING_STYLE_ID,
       CLAUDE_LIMIT_NUDGE_ID,
@@ -3005,7 +3018,9 @@
   }
 
   function createConversationCapture(text, metrics = {}) {
-    const cleaned = cleanText(text);
+    // Verified Claude/ChatGPT/Gemini/Grok/DeepSeek JSON strings are source data, including code, pasted
+    // bytes and canvas text. DOM cleanup would rewrite NBSP/line whitespace.
+    const cleaned = ["claude-json", "chatgpt-json", "gemini-json", "grok-json", "deepseek-json"].includes(metrics.method) ? text : cleanText(text);
     lastConversationCaptureMetrics = {
       ...metrics,
       cleanedChars: cleaned.length,
@@ -4490,6 +4505,21 @@
     );
   }
 
+  function applyOwnedUiStyleSheet(style) {
+    // Page CSP can leave a style node present but ineffective. Adopt our scoped
+    // UI rules directly, and resync when palette rules are appended later.
+    if (typeof CSSStyleSheet === "undefined" || !("adoptedStyleSheets" in document)) return;
+    let sheet = ownedUiStyleSheets.get(style.id);
+    if (!sheet) {
+      sheet = new CSSStyleSheet();
+      ownedUiStyleSheets.set(style.id, sheet);
+    }
+    sheet.replaceSync(style.textContent);
+    if (!document.adoptedStyleSheets.includes(sheet)) {
+      document.adoptedStyleSheets = [...document.adoptedStyleSheets, sheet];
+    }
+  }
+
   function ensureDestinationSheetStyles() {
     if (document.getElementById(DESTINATION_SHEET_STYLE_ID)) return;
 
@@ -4523,6 +4553,45 @@
         box-shadow: inset 0 1px 0 rgba(255,255,255,0.08),0 7px 18px rgba(74,48,121,0.2) !important;
       }
       #${DESTINATION_SHEET_ID} .context-generator-destination-title { color: #ffffff !important; }
+      #${DESTINATION_SHEET_ID} .context-generator-speed-toggle {
+        appearance: none;
+        position: relative !important;
+        inset: auto !important;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        flex: 0 0 auto;
+        width: 32px;
+        height: 32px;
+        margin: 0;
+        padding: 0;
+        border: 1px solid transparent !important;
+        border-radius: 10px;
+        background: transparent !important;
+        color: #a9a3b2 !important;
+        box-shadow: none !important;
+        cursor: pointer;
+        transition: background 140ms ease, border-color 140ms ease, color 140ms ease;
+      }
+      #${DESTINATION_SHEET_ID} .context-generator-speed-toggle:hover {
+        background: rgba(255,255,255,0.07) !important;
+        border-color: rgba(255,255,255,0.18) !important;
+        color: #f1edf7 !important;
+      }
+      #${DESTINATION_SHEET_ID} .context-generator-speed-toggle[aria-pressed="true"] {
+        color: #facc15 !important;
+      }
+      #${DESTINATION_SHEET_ID} .context-generator-speed-toggle:focus-visible {
+        outline: 2px solid rgba(190,162,233,0.78) !important;
+        outline-offset: 3px;
+      }
+      #${DESTINATION_SHEET_ID} .context-generator-speed-toggle svg {
+        display: block;
+        width: 16px;
+        height: 16px;
+        fill: none !important;
+        stroke: currentColor !important;
+      }
       #${DESTINATION_SHEET_ID} .context-generator-destination-tile {
         border-color: rgba(255,255,255,0.1) !important;
         background: linear-gradient(180deg,rgba(255,255,255,0.05),rgba(255,255,255,0.022)) !important;
@@ -4639,7 +4708,8 @@
           animation: none;
         }
 
-        #${DESTINATION_SHEET_ID} .context-generator-destination-tile {
+        #${DESTINATION_SHEET_ID} .context-generator-destination-tile,
+        #${DESTINATION_SHEET_ID} .context-generator-speed-toggle {
           transition: none !important;
         }
       }
@@ -4650,6 +4720,7 @@
       }
     `).join("");
     (document.head || document.documentElement).appendChild(style);
+    applyOwnedUiStyleSheet(style);
   }
 
   function ensureDestinationSheet() {
@@ -4696,7 +4767,7 @@
     const header = document.createElement("div");
     header.style.cssText = "padding:0 1px 11px;display:flex;flex-direction:column;align-items:flex-start;gap:0";
     const topLine = document.createElement("div");
-    topLine.style.cssText = "width:100%;display:flex;align-items:center;justify-content:flex-start;gap:10px;margin-bottom:11px";
+    topLine.style.cssText = "width:100%;display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:11px";
     const brandLockup = document.createElement("div");
     brandLockup.className = "context-generator-destination-brand";
     brandLockup.style.cssText = "display:flex;align-items:center;gap:8px;color:rgba(247,244,250,0.76) !important;font-size:11.5px;font-weight:650;line-height:1";
@@ -4864,6 +4935,29 @@
 
     sheet.appendChild(grid);
 
+    if (["claude", "chatgpt", "gemini", "grok", "deepseek"].includes(currentPlatform.id)) {
+      const toggle = document.createElement("button");
+      toggle.type = "button";
+      toggle.id = `context-generator-${currentPlatform.id}-json-toggle`;
+      toggle.className = "context-generator-speed-toggle";
+      const enabled = currentPlatform.id === "claude" ? claudeJsonCaptureEnabled
+        : currentPlatform.id === "chatgpt" ? chatGptJsonCaptureEnabled : networkJsonCaptureEnabled;
+      toggle.setAttribute("aria-pressed", String(enabled));
+      toggle.setAttribute("aria-label", "Fast capture");
+      toggle.title = `Fast capture: ${enabled ? "On" : "Off"}`;
+      toggle.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="m13 2-9 12h7l-1 8 10-12h-7l1-8Z"/></svg>';
+      addOwnedEventListener(toggle, "click", () => {
+        if (isRunning) return;
+        let enabled;
+        if (currentPlatform.id === "claude") enabled = claudeJsonCaptureEnabled = !claudeJsonCaptureEnabled;
+        else if (currentPlatform.id === "chatgpt") enabled = chatGptJsonCaptureEnabled = !chatGptJsonCaptureEnabled;
+        else enabled = networkJsonCaptureEnabled = !networkJsonCaptureEnabled;
+        toggle.setAttribute("aria-pressed", String(enabled));
+        toggle.title = `Fast capture: ${enabled ? "On" : "Off"}`;
+      });
+      topLine.appendChild(toggle);
+    }
+
     const footer = document.createElement("div");
     footer.className = "context-generator-destination-helper";
     footer.textContent = DESTINATION_HELPER_TEXT;
@@ -4905,7 +4999,7 @@
       }
       if (event.key !== "Tab") return;
 
-      const focusableTiles = [...sheet.querySelectorAll(".context-generator-destination-tile")]
+      const focusableTiles = [...sheet.querySelectorAll(".context-generator-destination-tile, .context-generator-speed-toggle")]
         .filter((tile) => !tile.disabled && tile.getAttribute("aria-disabled") !== "true");
       if (focusableTiles.length === 0) return;
       const focusedIndex = focusableTiles.indexOf(document.activeElement);
@@ -5189,6 +5283,15 @@
   }
 
   async function startDestinationTransfer(destinationId) {
+    const sourceUrl = window.location.href;
+    const useClaudeJson = currentPlatform.id === "claude" && claudeJsonCaptureEnabled;
+    const claudeJsonPath = useClaudeJson ? window.location.pathname : null;
+    const useChatGptJson = currentPlatform.id === "chatgpt" && chatGptJsonCaptureEnabled;
+    const chatGptJsonPath = useChatGptJson ? window.location.pathname : null;
+    const useNetworkJson = ["gemini", "grok", "deepseek"].includes(currentPlatform.id) && networkJsonCaptureEnabled;
+    const geminiJsonPath = useNetworkJson && currentPlatform.id === "gemini" ? window.location.pathname : null;
+    const grokJsonUrl = useNetworkJson && currentPlatform.id === "grok" ? window.location.href : null;
+    const deepseekJsonPath = useNetworkJson && currentPlatform.id === "deepseek" ? window.location.pathname : null;
     const trace = createTransferTrace(destinationId, "destination tile");
     trace.destinationId = destinationId;
     startTransferTelemetry(trace);
@@ -5197,7 +5300,9 @@
       finishTransferTrace(trace, "unknown_failure");
       return;
     }
-    if (getDetectedConversationMessageCount() === 0) {
+    // The full JSON tree can be ready before its virtualized DOM mounts.
+    // JSON validation, rather than rendered turn count, decides whether it is empty.
+    if (!useClaudeJson && !useChatGptJson && !useNetworkJson && getDetectedConversationMessageCount() === 0) {
       markTransferTrace(trace, `failed: ${NO_CONVERSATION_ERROR_MESSAGE}`);
       finishTransferTrace(trace, "no_conversation");
       hideDestinationSheet();
@@ -5216,18 +5321,46 @@
       showOverlay(destinationId);
       releaseDestinationSheetBackdrop();
       let preparedDestinationPromise = null;
-      if (getDetectedConversationMessageCount() > 0) {
+      if (useClaudeJson || useChatGptJson || useNetworkJson || getDetectedConversationMessageCount() > 0) {
         preparedDestinationPromise = prepareDestinationTab(destinationId, trace);
       }
       advanceTransferTelemetryStage(trace, "capture_started");
-      await prepareSourceForCapture();
-      if (!preparedDestinationPromise && getDetectedConversationMessageCount() > 0) {
+      if (!useClaudeJson && !useChatGptJson && !useNetworkJson) await prepareSourceForCapture();
+      if (!preparedDestinationPromise && (useClaudeJson || useChatGptJson || useNetworkJson || getDetectedConversationMessageCount() > 0)) {
         preparedDestinationPromise = prepareDestinationTab(destinationId, trace);
       }
 
       markTransferTrace(trace, "capture start");
       setHandoffProgress("capture", "active");
-      const conversationText = await scrapeConversationTextWhenReady();
+      let conversationText;
+      if (useClaudeJson || useChatGptJson || useNetworkJson) {
+        try {
+          const captureJson = useClaudeJson ? window.__capCaptureClaudeJson : useChatGptJson ? window.__capCaptureChatGptJson : window.__capCaptureNetworkJson;
+          if (typeof captureJson !== "function") throw new Error(`Refresh ${currentPlatform.name} to enable JSON capture.`);
+          const capture = useClaudeJson ? await captureJson(claudeJsonPath)
+            : useChatGptJson ? await captureJson(chatGptJsonPath)
+            : geminiJsonPath ? await captureJson(geminiJsonPath)
+            : deepseekJsonPath ? await captureJson(deepseekJsonPath) : grokJsonUrl ? await captureJson(grokJsonUrl) : await captureJson();
+          conversationText = createConversationCapture(capture.text, {
+            method: `${currentPlatform.id}-json`, messageTurnCount: capture.messageTurnCount,
+            usefulTurnCount: capture.messageTurnCount, candidateTurnCount: capture.messageTurnCount
+          });
+        } catch (error) {
+          // Recover within this attempt: reuse its destination and call the
+          // summary/paste pipeline only once, after a complete DOM capture.
+          // Retain the bridges' navigation/session cancellation, including an
+          // away-and-back change that a final URL comparison cannot detect.
+          if (/conversation changed during capture\./i.test(error?.message || "")) throw error;
+          if (window.location.href !== sourceUrl) throw new Error("The conversation changed during capture. Return to the source chat and try again.");
+          showFastCaptureFallbackMessage();
+          markTransferTrace(trace, "fast capture failed; using normal capture");
+          await prepareSourceForCapture();
+          conversationText = await scrapeConversationTextWhenReady();
+          if (window.location.href !== sourceUrl) throw new Error("The conversation changed during capture. Return to the source chat and try again.");
+        }
+      } else {
+        conversationText = await scrapeConversationTextWhenReady();
+      }
       markCaptureDone(trace, conversationText);
 
       preparedDestinationPromise = preparedDestinationPromise || prepareDestinationTab(destinationId, trace);
@@ -5238,6 +5371,48 @@
       resetRunningFlag();
       showErrorOverlay(error.message);
     }
+  }
+
+  function showFastCaptureFallbackMessage() {
+    const group = document.getElementById("context-generator-status-group");
+    if (!group) return;
+    const notice = document.createElement("div");
+    notice.id = "context-generator-capture-notice";
+    notice.setAttribute("role", "status");
+    notice.style.cssText = "font-size:12px;line-height:1.4;color:inherit";
+    notice.textContent = "Fast capture failed. Using normal capture instead.";
+    group.appendChild(notice);
+  }
+
+  function protectOverlayPalette(root) {
+    let style = document.getElementById(OVERLAY_PALETTE_STYLE_ID);
+    if (!style) {
+      style = document.createElement("style");
+      style.id = OVERLAY_PALETTE_STYLE_ID;
+      style.className = "darkreader";
+      style.dataset.contextGeneratorOwned = "true";
+      document.head.appendChild(style);
+    }
+
+    // Snapshot only static colors before insertion, using the picker's ignored
+    // stylesheet + scoped priority rules. Progress-state colors live in their CSS.
+    const rules = [root, ...root.querySelectorAll("[style]")].map((element, index) => {
+      const declarations = ["color", "background", "border-color", "box-shadow"]
+        .map((property) => {
+          const value = element.style.getPropertyValue(property);
+          if (!value) return "";
+          element.style.setProperty(property, value, "important");
+          return `${property}:${value} !important;`;
+        }).join("");
+      if (!declarations) return "";
+      if (index) element.setAttribute("data-context-generator-palette", String(index));
+      const selector = index
+        ? `#${root.id} [data-context-generator-palette="${index}"]`
+        : `#${root.id}`;
+      return `${selector}{${declarations}}`;
+    });
+    style.textContent += rules.join("\n");
+    applyOwnedUiStyleSheet(style);
   }
 
   function ensureFloatingOverlay() {
@@ -5257,6 +5432,7 @@
         "opacity:0",
         "transition:opacity 240ms ease"
       ].join(";");
+      protectOverlayPalette(scrim);
       document.body.appendChild(scrim);
     }
 
@@ -5466,6 +5642,7 @@
       if (!document.getElementById("context-generator-styles")) {
         const styleSheet = document.createElement("style");
         styleSheet.id = "context-generator-styles";
+        styleSheet.className = "darkreader";
         styleSheet.dataset.contextGeneratorOwned = "true";
         styleSheet.textContent = `
           @keyframes contextGeneratorHeadlineIn{
@@ -5502,7 +5679,7 @@
             height:118px;
             right:-54px;
             top:-58px;
-            background:radial-gradient(ellipse,rgba(190,158,237,0.30),rgba(101,78,158,0.08) 54%,transparent 73%);
+            background:radial-gradient(ellipse,rgba(190,158,237,0.30),rgba(101,78,158,0.08) 54%,transparent 73%) !important;
             transform:rotate(-9deg);
             animation:contextGeneratorAuroraDrift 7200ms cubic-bezier(0.45,0,0.55,1) infinite;
           }
@@ -5511,12 +5688,12 @@
             height:110px;
             left:-72px;
             bottom:-64px;
-            background:radial-gradient(ellipse,rgba(104,73,164,0.25),transparent 72%);
+            background:radial-gradient(ellipse,rgba(104,73,164,0.25),transparent 72%) !important;
           }
           #context-generator-status-group::before{
             content:"CONTEXT TRANSFER";
             display:block;
-            color:rgba(216,202,237,0.48);
+            color:rgba(216,202,237,0.48) !important;
             font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
             font-size:9.5px;
             font-weight:720;
@@ -5531,7 +5708,7 @@
             margin-left:1px;
             align-items:baseline;
             gap:0;
-            color:#f2f0f6;
+            color:#f2f0f6 !important;
             font:inherit;
             line-height:inherit;
             letter-spacing:0;
@@ -5551,7 +5728,7 @@
           }
           #context-generator-text .context-generator-summary-activity-dot{
             display:inline-block;
-            color:inherit;
+            color:inherit !important;
             opacity:0.54;
             transform:translate3d(0,0,0);
             animation:contextGeneratorSummaryDotHop 1800ms cubic-bezier(0.45,0,0.55,1) infinite;
@@ -5567,7 +5744,7 @@
             align-items:center;
             gap:7px;
             padding:0 5px;
-            color:rgba(239,237,244,0.54);
+            color:rgba(239,237,244,0.54) !important;
             text-align:center;
           }
           #context-generator-handoff-progress .context-generator-handoff-stage-connector{
@@ -5579,8 +5756,8 @@
             height:2px;
             overflow:visible;
             border-radius:999px;
-            background:rgba(255,255,255,0.095);
-            box-shadow:inset 0 1px 0 rgba(255,255,255,0.035);
+            background:rgba(255,255,255,0.095) !important;
+            box-shadow:inset 0 1px 0 rgba(255,255,255,0.035) !important;
           }
           /* The line follows live display progress; its motion never gates the transfer pipeline. */
           #context-generator-handoff-progress .context-generator-handoff-stage-connector-fill{
@@ -5588,8 +5765,8 @@
             inset:0;
             width:100%;
             border-radius:inherit;
-            background:linear-gradient(90deg,#755BA8,#AE8BE4);
-            box-shadow:2px 0 9px rgba(159,125,216,0.36);
+            background:linear-gradient(90deg,#755BA8,#AE8BE4) !important;
+            box-shadow:2px 0 9px rgba(159,125,216,0.36) !important;
             transform:scaleX(var(--context-generator-stage-progress-ratio,0));
             transform-origin:left center;
             transition:transform var(--context-generator-stage-progress-duration,1.35s) var(--context-generator-stage-progress-easing,linear);
@@ -5614,8 +5791,8 @@
             width:5px;
             height:5px;
             border-radius:999px;
-            background:#C1A6ED;
-            box-shadow:0 0 0 2px rgba(141,108,207,0.15),0 0 10px rgba(187,154,234,0.78);
+            background:#C1A6ED !important;
+            box-shadow:0 0 0 2px rgba(141,108,207,0.15),0 0 10px rgba(187,154,234,0.78) !important;
             transform:translate(-50%,-50%);
           }
           #context-generator-handoff-progress .context-generator-handoff-stage[data-state="active"] .context-generator-handoff-stage-progress-head{
@@ -5633,10 +5810,10 @@
             align-items:center;
             justify-content:center;
             box-sizing:border-box;
-            border:1px solid rgba(255,255,255,0.16);
+            border:1px solid rgba(255,255,255,0.16) !important;
             border-radius:999px;
-            background:rgba(255,255,255,0.035);
-            color:rgba(245,243,249,0.44);
+            background:rgba(255,255,255,0.035) !important;
+            color:rgba(245,243,249,0.44) !important;
             font-size:10px;
             font-weight:700;
             transition:background 180ms ease,border-color 180ms ease,color 180ms ease,box-shadow 180ms ease;
@@ -5646,7 +5823,7 @@
             position:absolute;
             inset:-5px;
             z-index:-1;
-            border:1px solid rgba(169,139,226,0.46);
+            border:1px solid rgba(169,139,226,0.46) !important;
             border-radius:999px;
             opacity:0;
             transform:scale(0.9);
@@ -5660,29 +5837,29 @@
             transition:color 180ms ease,font-weight 180ms ease,opacity 180ms ease;
           }
           #context-generator-handoff-progress .context-generator-handoff-stage[data-state="active"]{
-            color:#f4f2f7;
+            color:#f4f2f7 !important;
           }
           #context-generator-handoff-progress .context-generator-handoff-stage[data-state="active"] .context-generator-handoff-stage-marker{
-            border-color:rgba(210,190,241,0.78);
-            background:linear-gradient(145deg,#9B7BD7,#7456AD);
-            color:#fff;
-            box-shadow:0 0 0 3px rgba(141,108,207,0.15),0 6px 16px rgba(63,43,98,0.34),inset 0 1px 0 rgba(255,255,255,0.22);
+            border-color:rgba(210,190,241,0.78) !important;
+            background:linear-gradient(145deg,#9B7BD7,#7456AD) !important;
+            color:#fff !important;
+            box-shadow:0 0 0 3px rgba(141,108,207,0.15),0 6px 16px rgba(63,43,98,0.34),inset 0 1px 0 rgba(255,255,255,0.22) !important;
           }
           #context-generator-handoff-progress .context-generator-handoff-stage[data-state="active"] .context-generator-handoff-stage-marker::after{
             animation:contextGeneratorStageHalo 2400ms cubic-bezier(0.45,0,0.55,1) infinite;
           }
           #context-generator-handoff-progress .context-generator-handoff-stage[data-state="active"] .context-generator-handoff-stage-label{
-            color:#fff;
+            color:#fff !important;
             font-weight:680;
           }
           #context-generator-handoff-progress .context-generator-handoff-stage[data-state="complete"]{
-            color:rgba(200,183,229,0.72);
+            color:rgba(200,183,229,0.72) !important;
           }
           #context-generator-handoff-progress .context-generator-handoff-stage[data-state="complete"] .context-generator-handoff-stage-marker{
-            border-color:rgba(164,137,216,0.34);
-            background:rgba(141,108,207,0.14);
-            color:#C8B6E9;
-            box-shadow:inset 0 1px 0 rgba(255,255,255,0.055);
+            border-color:rgba(164,137,216,0.34) !important;
+            background:rgba(141,108,207,0.14) !important;
+            color:#C8B6E9 !important;
+            box-shadow:inset 0 1px 0 rgba(255,255,255,0.055) !important;
           }
           @media (prefers-reduced-motion: reduce){
             #context-generator-text{animation:none!important}
@@ -5698,6 +5875,7 @@
           }
         `;
         document.head.appendChild(styleSheet);
+        applyOwnedUiStyleSheet(styleSheet);
       }
 
       const countdown = document.createElement("div");
@@ -5757,12 +5935,14 @@
       overlay.appendChild(brand);
       overlay.appendChild(statusGroup);
       overlay.appendChild(progress);
+      protectOverlayPalette(overlay);
       document.body.appendChild(overlay);
     }
   }
 
   function showOverlay(destinationId = null) {
     ensureFloatingOverlay();
+    document.getElementById("context-generator-capture-notice")?.remove();
     const overlay = document.getElementById(OVERLAY_ID);
     const scrim = document.getElementById(HANDOFF_SCRIM_ID);
     const bubble = document.getElementById(BUBBLE_ID);
@@ -6277,6 +6457,7 @@
       errorDiv.appendChild(header);
       errorDiv.appendChild(textSpan);
       errorDiv.appendChild(closeBtn);
+      protectOverlayPalette(errorDiv);
       document.body.appendChild(errorDiv);
     }
 

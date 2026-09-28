@@ -7,7 +7,7 @@ const vm = require("node:vm");
 const source = fs.readFileSync(path.join(__dirname, "..", "extension", "background.js"), "utf8");
 const manifest = JSON.parse(fs.readFileSync(path.join(__dirname, "..", "extension", "manifest.json"), "utf8"));
 
-function loadBackgroundForSummaryTest(fetchImpl) {
+function loadBackgroundForSummaryTest(fetchImpl, { tabs = [], injections = [], injectionError = false, onMessage = () => {} } = {}) {
   let messageListener = null;
   const event = { addListener: () => {} };
   const sandbox = {
@@ -35,10 +35,11 @@ function loadBackgroundForSummaryTest(fetchImpl) {
         onMessage: {
           addListener(listener) {
             messageListener = listener;
+            onMessage(listener);
           }
         }
       },
-      scripting: { executeScript: async () => {} },
+      scripting: { executeScript: async args => { injections.push(args); if (injectionError) throw new Error("not available"); } },
       storage: {
         local: {
           get: async () => ({}),
@@ -48,7 +49,7 @@ function loadBackgroundForSummaryTest(fetchImpl) {
       },
       tabs: {
         create: async () => ({}),
-        query: async () => [],
+        query: async () => tabs,
         sendMessage: async () => ({}),
         update: async () => ({})
       },
@@ -416,4 +417,74 @@ test("destination messaging stops immediately on a non-retryable failure", async
   await assert.rejects(harness.sendMessageWhenReady(41, { type: "PASTE_CONTEXT" }, 1000, "Claude"), /Tab access denied/);
   assert.equal(harness.operations.sent.length, 1);
   assert.equal(harness.operations.injected.length, 0);
+});
+
+test("JSON scripts reinstall in MAIN then isolated on the matching platform tabs", async () => {
+  const injections = [];
+  loadBackgroundForSummaryTest(async () => {}, { injections, tabs: [
+    { id: 1, url: "https://claude.ai/chat/a" },
+    { id: 2, url: "https://chatgpt.com/c/b" },
+    { id: 3, url: "https://gemini.google.com/app/c" },
+    { id: 4, url: "https://grok.com/c/d" },
+    { id: 5, url: "https://chat.deepseek.com/a/chat/s/e" }
+  ] });
+  await new Promise(resolve => setTimeout(resolve, 0));
+  const claude = injections.filter(item => item.target.tabId === 1);
+  assert.deepEqual(claude.map(item => [...item.files]), [["claude-fetch-main.js"], ["claude-json-capture.js"], ["platform-content.js"]]);
+  assert.equal(claude[0].world, "MAIN");
+  const chatgpt = injections.filter(item => item.target.tabId === 2);
+  assert.deepEqual(chatgpt.map(item => [...item.files]), [["chatgpt-fetch-main.js"], ["chatgpt-json-capture.js"], ["platform-content.js"]]);
+  assert.equal(chatgpt[0].world, "MAIN");
+  for (const id of [3, 4, 5]) {
+    const platform = injections.filter(item => item.target.tabId === id);
+    assert.deepEqual(platform.map(item => [...item.files]), [["network-json-data.js", "network-fetch-main.js"], ["network-json-capture.js"], ["platform-content.js"]]);
+    assert.equal(platform[0].world, "MAIN");
+  }
+});
+
+test("Claude on-demand MAIN installation accepts only a Claude top-frame sender", async () => {
+  let listener;
+  const injections = [];
+  loadBackgroundForSummaryTest(async () => {}, { injections, onMessage: value => { listener = value; } });
+  const request = sender => new Promise(resolve => listener({ type: "ENSURE_CLAUDE_JSON_HOOK" }, sender, resolve));
+  for (const sender of [{}, { tab: { id: 1, url: "https://chatgpt.com/c/a" }, frameId: 0 }, { tab: { id: 1, url: "https://claude.ai/chat/a" }, frameId: 2 }]) {
+    assert.equal((await request(sender)).ok, false);
+  }
+  assert.equal(injections.length, 0);
+  assert.equal((await request({ tab: { id: 1, url: "https://claude.ai/chat/a" }, frameId: 0 })).ok, true);
+  assert.equal(injections.length, 1);
+  assert.equal(injections[0].world, "MAIN");
+  assert.deepEqual([...injections[0].files], ["claude-fetch-main.js"]);
+});
+
+test("Claude MAIN installation failures are returned without affecting default startup injection", async () => {
+  let listener;
+  loadBackgroundForSummaryTest(async () => {}, { injectionError: true, onMessage: value => { listener = value; } });
+  const reply = await new Promise(resolve => listener({ type: "ENSURE_CLAUDE_JSON_HOOK" }, { tab: { id: 1, url: "https://claude.ai/chat/a" }, frameId: 0 }, resolve));
+  assert.equal(reply.ok, false);
+});
+
+
+test("ChatGPT on-demand MAIN readiness is restricted to its top-frame source", async () => {
+  let listener;
+  const injections = [];
+  loadBackgroundForSummaryTest(async () => {}, { injections, onMessage: value => { listener = value; } });
+  const request = sender => new Promise(resolve => listener({ type: "ENSURE_CHATGPT_JSON_HOOK" }, sender, resolve));
+  for (const sender of [{}, { tab: { id: 1, url: "https://claude.ai/chat/a" }, frameId: 0 }, { tab: { id: 1, url: "https://chatgpt.com/c/a" }, frameId: 2 }]) assert.equal((await request(sender)).ok, false);
+  assert.equal(injections.length, 0);
+  assert.equal((await request({ tab: { id: 1, url: "https://chatgpt.com/g/project/c/a" }, frameId: 0 })).ok, true);
+  assert.equal(injections.length, 1);
+  assert.equal(injections[0].world, "MAIN");
+  assert.deepEqual([...injections[0].files], ["chatgpt-fetch-main.js"]);
+});
+
+test("New network MAIN readiness accepts only Gemini/Grok/DeepSeek top frames", async () => {
+  let listener; const injections = [];
+  loadBackgroundForSummaryTest(async () => {}, { injections, onMessage: value => { listener = value; } });
+  const request = sender => new Promise(resolve => listener({ type: "ENSURE_NETWORK_JSON_HOOK" }, sender, resolve));
+  for (const sender of [{}, { tab: { id: 1, url: "https://chatgpt.com/c/a" }, frameId: 0 }, { tab: { id: 1, url: "https://grok.com/c/a" }, frameId: 2 }]) assert.equal((await request(sender)).ok, false);
+  assert.equal(injections.length, 0);
+  for (const url of ["https://gemini.google.com/app/a", "https://grok.com/c/a", "https://chat.deepseek.com/a/chat/s/a"]) assert.equal((await request({ tab: { id: 1, url }, frameId: 0 })).ok, true);
+  assert.equal(injections.length, 3);
+  assert.ok(injections.every(item => item.world === "MAIN"));
 });
