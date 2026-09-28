@@ -1,0 +1,12 @@
+{
+  "source": "extension/platform-content.js",
+  "sourceCommit": "86d7b150d59c29a00a7fbdab7a10f14faed2b9df",
+  "fixture": "local runtime stub; ChatGPT source; production UI functions and styles",
+  "pickerText": "Cap ContextWhere to continue?ClaudeAnthropicGeminiGoogleGrokxAIDeepSeekDeepSeekContext goes straight into the input box",
+  "dimensions": {
+    "picker": {
+      "width": 352,
+      "height": 265
+    }
+  }
+}

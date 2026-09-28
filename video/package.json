@@ -7,7 +7,12 @@
     "preview": "node render.cjs --preview",
     "score": "python score.py",
     "render": "node render.cjs",
-    "verify": "node verify.cjs"
+    "verify": "node verify.cjs",
+    "capture:v2": "node capture-ui.cjs --v2",
+    "preview:v2": "node v2/render.cjs --preview",
+    "score:v2": "python v2/score.py",
+    "render:v2": "node v2/render.cjs",
+    "verify:v2": "node v2/verify.cjs"
   },
   "devDependencies": {
     "playwright": "1.62.1"

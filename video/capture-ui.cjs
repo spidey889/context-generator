@@ -9,7 +9,8 @@ let playwright;
 try {playwright=require('playwright');} catch {playwright=createRequire(path.join(deps, '_video.cjs'))('playwright');}
 const {chromium}=playwright;
 const root = path.resolve(__dirname, '..');
-const out = path.join(__dirname, 'assets');
+const v2Capture=process.argv.includes('--v2');
+const out = path.join(__dirname, v2Capture?'v2/assets':'assets');
 fs.mkdirSync(out, {recursive:true});
 const server = http.createServer((req,res)=>{
   const file = path.join(root, decodeURIComponent(req.url.split('?')[0]));
@@ -35,10 +36,18 @@ const server = http.createServer((req,res)=>{
     await page.evaluate(()=>{
       const sheet=ui.ensureDestinationSheet();
       Object.assign(sheet.style,{display:'block',opacity:'1',transform:'none',left:'400px',top:'220px'});
+      sheet.setAttribute('aria-hidden','false');
     });
     // The production picker builds the fast-capture control in ensureDestinationSheet.
     await page.evaluate(()=>document.fonts.ready);
     await page.locator('#context-generator-destination-sheet').screenshot({path:path.join(out,'picker.png'),omitBackground:true});
+    if(v2Capture){
+      // Capture the actual production hover treatment, including platform accent,
+      // rather than approximating it with an editorial selection outline.
+      await page.getByRole('button',{name:'Continue in Claude',exact:true}).hover();
+      await page.waitForTimeout(280);
+      await page.locator('#context-generator-destination-sheet').screenshot({path:path.join(out,'picker-hover.png'),omitBackground:true});
+    }
     const pickerDimensions=await page.locator('#context-generator-destination-sheet').evaluate(e=>({width:e.offsetWidth,height:e.offsetHeight}));
     await page.evaluate(()=>{
       document.getElementById('context-generator-destination-sheet').style.display='none';
