@@ -39,7 +39,7 @@ function setup(data = fixture(), status = 200, { headers = {}, body, fetchImpl, 
     removeEventListener: (type, listener) => (type === "message" ? listeners : popListeners).delete(listener),
     postMessage: data => { if (data.type === "response") replies.push(data); if (data.type === "ping") pings.push(data); queueMicrotask(() => [...listeners].forEach(listener => listener({ source: window, origin: location.origin, data }))); }
   };
-  const context = vm.createContext({ window, location, chrome: runtime ? { runtime } : undefined, URL, Headers, Request, TextEncoder, AbortController, crypto: webcrypto, setTimeout: schedule, clearTimeout });
+  const context = vm.createContext({ window, location, chrome: runtime ? { runtime } : undefined, URL, Headers, Request, TextEncoder, TextDecoder, AbortController, crypto: webcrypto, setTimeout: schedule, clearTimeout });
   const reinstall = (file = "chatgpt-fetch-main.js") => vm.runInContext(fs.readFileSync(path.join(__dirname, "..", "extension", file), "utf8"), context);
   for (const file of ["chatgpt-fetch-main.js", "chatgpt-json-capture.js"]) reinstall(file);
   return { window, location, requests, replies, pings, reads: () => reads, reinstall,
@@ -51,6 +51,142 @@ function setup(data = fixture(), status = 200, { headers = {}, body, fetchImpl, 
 async function discover(harness) {
   await harness.window.fetch(new Request(`https://chatgpt.com/backend-api/conversations/${chat}?num_turns=10`, { headers: { Authorization: "Bearer TEST_ONLY", "ChatGPT-Account-Id": "test-account" } }));
 }
+
+function pasteFixture(texts = ["Original pasted document"]) {
+  const data = fixture();
+  data.mapping.question.message.content.parts = [""];
+  const files = texts.map((text, i) => ({ id: `file_test_${i}`, is_big_paste: true, mime_type: "text/plain", size: Buffer.byteLength(text), text }));
+  data.mapping.question.message.metadata = { attachments: files.map(({ text, ...file }) => file) };
+  const fetchImpl = async request => {
+    const url = new URL(request.url, "https://chatgpt.com");
+    const file = files.find(file => url.pathname === `/backend-api/files/download/${file.id}` || url.searchParams.get("id") === file.id);
+    if (url.pathname.startsWith("/backend-api/files/download/")) {
+      assert.equal(request.options.headers.get("authorization"), "Bearer TEST_ONLY");
+      return jsonResponse({ status: "success", file_size_bytes: file.size, download_url: `https://chatgpt.com/backend-api/estuary/content?id=${file.id}&sig=SIGNED_URL_SENTINEL` });
+    }
+    if (url.pathname === "/backend-api/estuary/content") {
+      assert.equal(request.options.headers, undefined, "Bearer headers must stay off the signed content fetch.");
+      assert.equal(request.options.redirect, "error");
+      return new Response(file.text, { headers: { "content-type": "text/plain; charset=utf-8" } });
+    }
+    return jsonResponse(data);
+  };
+  return { data, files, fetchImpl };
+}
+
+test("ChatGPT preserves the original attachment-only user paste before the assistant's writing block", async () => {
+  const original = `Create a document without shortening it.\r\n\r\nPASTE_START\r\n${"  Original line — 世界\r\n".repeat(1000)}PASTE_MIDDLE\r\n${"More original text\r\n".repeat(1000)}PASTE_END`;
+  const { data, fetchImpl } = pasteFixture([original]);
+  data.mapping.context = { parent: "question", message: { author: { role: "tool", name: "api_tool" }, content: { content_type: "text", parts: ["TOOL_EXTRACT_SENTINEL"] } } };
+  data.mapping.answer.parent = "context";
+  data.mapping.answer.message.content.parts = [':::writing{variant="document"}\nAssistant rewrite\n:::'];
+  const harness = setup(data, 200, { fetchImpl }); await discover(harness);
+  assert.equal(harness.requests.length, 1, "No paste is read before explicit capture.");
+  const capture = await harness.window.__capCaptureChatGptJson();
+  assert.equal(capture.text, `ChatGPT conversation:\n\nUser: ${original}\n\nAssistant: :::writing{variant="document"}\nAssistant rewrite\n:::`);
+  assert.equal(capture.messageTurnCount, 2);
+  assert.equal(harness.requests.length, 4);
+  assert.doesNotMatch(JSON.stringify(harness.replies), /TEST_ONLY|SIGNED_URL_SENTINEL/);
+});
+
+test("ChatGPT keeps multiple pastes in attachment order and preserves repeated content in later turns", async () => {
+  const { data, files, fetchImpl } = pasteFixture(["First paste", "  Second paste\r\n"]);
+  data.mapping.question.message.content.parts = ["Own introduction", "First paste"];
+  data.mapping.next = { parent: "answer", message: { author: { role: "user" }, content: { content_type: "text", parts: [] }, metadata: { attachments: [data.mapping.question.message.metadata.attachments[0]] } } };
+  data.current_node = "next";
+  const harness = setup(data, 200, { fetchImpl }); await discover(harness);
+  const capture = await harness.window.__capCaptureChatGptJson();
+  assert.equal(capture.text, "ChatGPT conversation:\n\nUser: Own introduction\n\nFirst paste\n\n  Second paste\r\n\n\nAssistant: Selected answer\n\nUser: First paste");
+  assert.equal(harness.requests.filter(r => r.url.includes(`/files/download/${files[0].id}`)).length, 1);
+});
+
+test("ChatGPT fetches only active visible user big pastes, excluding uploads, tools and other branches", async () => {
+  const { data, fetchImpl } = pasteFixture();
+  const paste = data.mapping.question.message.metadata.attachments[0];
+  data.mapping.alternate.message.metadata = { attachments: [{ ...paste, id: "file_inactive" }] };
+  data.mapping.answer.message.metadata = { attachments: [{ ...paste, id: "file_assistant" }] };
+  data.mapping.question.message.metadata.attachments.push({ ...paste, is_big_paste: false, id: "file_upload" }, { ...paste, mime_type: "image/png", id: "file_image" });
+  data.mapping.tool = { parent: "question", message: { author: { role: "tool" }, metadata: { attachments: [{ ...paste, id: "file_tool" }] }, content: { content_type: "text", parts: ["TOOL_SENTINEL"] } } };
+  data.mapping.hidden = { parent: "tool", message: { author: { role: "user" }, metadata: { is_visually_hidden_from_conversation: true, attachments: [{ ...paste, id: "file_hidden" }] } } };
+  data.mapping.answer.parent = "hidden";
+  const harness = setup(data, 200, { fetchImpl }); await discover(harness);
+  assert.equal((await harness.window.__capCaptureChatGptJson()).text, "ChatGPT conversation:\n\nUser: Original pasted document\n\nAssistant: Selected answer");
+  assert.equal(harness.requests.length, 4);
+});
+
+test("ChatGPT fails visibly on missing, partial, wrong-file or invalid pasted text", async () => {
+  for (const badResponse of [
+    request => request.url.includes("/files/download/") ? new Response("Denied", { status: 403 }) : null,
+    request => request.url.includes("/files/download/") ? jsonResponse({ status: "success", file_size_bytes: 5, download_url: "https://chatgpt.com/backend-api/estuary/content?id=file_test_0" }) : null,
+    request => request.url.includes("/files/download/") ? jsonResponse({ status: "success", file_size_bytes: 24, download_url: "https://other.example/private?id=file_test_0" }) : null,
+    request => request.url.includes("/files/download/") ? jsonResponse({ status: "success", file_size_bytes: 24, download_url: "https://chatgpt.com/backend-api/estuary/content?id=file_wrong" }) : null,
+    request => request.url.includes("/estuary/content") ? new Response("Original pasted document", { status: 206, headers: { "content-type": "text/plain" } }) : null,
+    request => request.url.includes("/estuary/content") ? new Response("Original pasted document", { headers: { "content-type": "text/plain", "content-range": "bytes 0-23/100" } }) : null,
+    request => request.url.includes("/estuary/content") ? new Response("Truncated", { headers: { "content-type": "text/plain" } }) : null,
+    request => request.url.includes("/estuary/content") ? new Response("Original pasted document", { headers: { "content-type": "text/html" } }) : null,
+    request => request.url.includes("/estuary/content") ? new Response(new Uint8Array(24).fill(255), { headers: { "content-type": "text/plain" } }) : null
+  ]) {
+    const { data, fetchImpl } = pasteFixture();
+    const harness = setup(data, 200, { fetchImpl: request => badResponse(request) || fetchImpl(request) }); await discover(harness);
+    await assert.rejects(harness.window.__capCaptureChatGptJson(), /pasted text attachment could not be read completely/);
+    assert.equal(harness.replies.at(-1).data, undefined, "An incomplete paste must not produce a successful tree response.");
+    assert.doesNotMatch(JSON.stringify(harness.replies), /TEST_ONLY|SIGNED_URL_SENTINEL|Denied|Truncated/);
+  }
+});
+
+test("ChatGPT validates paste byte counts, truncation flags and transcript size without dropping the user", async () => {
+  for (const mutate of [
+    (data, files) => { data.mapping.question.message.metadata.attachments[0].size--; },
+    data => { data.mapping.question.message.metadata.attachments[0].truncated = true; },
+    data => { data.mapping.question.message.metadata.attachments[0].id = "../outside"; },
+    data => { data.mapping.question.message.metadata.attachments[0].size = 1400001; }
+  ]) {
+    const { data, files, fetchImpl } = pasteFixture(); mutate(data, files);
+    const harness = setup(data, 200, { fetchImpl }); await discover(harness);
+    await assert.rejects(harness.window.__capCaptureChatGptJson(), /JSON capture|350,000/);
+  }
+  const { data, fetchImpl } = pasteFixture(["x".repeat(350000)]);
+  const harness = setup(data, 200, { fetchImpl }); await discover(harness);
+  await assert.rejects(harness.window.__capCaptureChatGptJson(), /350,000/);
+});
+
+test("ChatGPT cancels navigation during a pasted-file read and does not emit partial text", async () => {
+  const { data, fetchImpl } = pasteFixture();
+  let started;
+  const waiting = new Promise(resolve => { started = resolve; });
+  const harness = setup(data, 200, { fetchImpl: request => {
+    if (!request.url.includes("/estuary/content")) return fetchImpl(request);
+    started();
+    return new Promise((resolve, reject) => request.options.signal.addEventListener("abort", () => reject(new Error("Aborted")), { once: true }));
+  } });
+  await discover(harness);
+  const capture = harness.window.__capCaptureChatGptJson();
+  await waiting; harness.navigate("/c/another-chat");
+  await assert.rejects(capture, /changed during capture/);
+  assert.equal(harness.replies.at(-1).data, undefined);
+});
+
+test("ChatGPT upgrades a live v3 hook before reading user pastes and retains its auth", async () => {
+  const { data, fetchImpl } = pasteFixture();
+  let installs = 0;
+  const harness = setup(data, 200, { fetchImpl,
+    schedule: (fn, ms) => setTimeout(fn, ms === 250 || ms === 100 ? 5 : ms),
+    runtime: { sendMessage: async () => { installs++; harness.reinstall(); return { ok: true }; } }
+  });
+  await discover(harness);
+  const previous = harness.window.__capChatGptFetchState;
+  previous.dispose();
+  const oldPing = event => {
+    if (event.data.type === "ping") harness.window.postMessage({ ...event.data, type: "pong", version: 3 });
+  };
+  harness.window.addEventListener("message", oldPing);
+  harness.window.__capChatGptFetchState = { version: 3, fetch: harness.window.fetch, headers: previous.headers, dispose: () => harness.window.removeEventListener("message", oldPing) };
+  const capture = await harness.window.__capCaptureChatGptJson();
+  assert.match(capture.text, /^ChatGPT conversation:\n\nUser: Original pasted document/);
+  assert.equal(installs, 1);
+  assert.equal(harness.window.__capChatGptFetchState.version, 4);
+  assert.equal(harness.requests.length, 4);
+});
 
 // Native canvas format observed in both older code.text and newer text.parts
 // messages. The tool acknowledgement contains identity, never the document body.
@@ -98,7 +234,7 @@ test("ChatGPT keeps modern long writing blocks as direct own text and skips thei
   const data = fixture();
   const text = `Here is the document:\n:::writing{variant="document" id="123" title="Draft"}\nSTART_MARKER\n${"Long paragraph\n".repeat(500)}MIDDLE_MARKER\n${"Last paragraph\n".repeat(500)}END_MARKER\n:::`;
   data.mapping.answer.message.content.parts = [text];
-  data.mapping.question.message.metadata = { attachments: [{ is_big_paste: true, mime_type: "text/plain", content: "UPLOAD_SENTINEL" }] };
+  data.mapping.question.message.metadata = { attachments: [{ is_big_paste: false, mime_type: "text/plain", content: "UPLOAD_SENTINEL" }] };
   const harness = setup(data); await discover(harness);
   assert.equal((await harness.window.__capCaptureChatGptJson()).text, `ChatGPT conversation:\n\nUser: Question\n\nAssistant: ${text}`);
 });
@@ -421,12 +557,12 @@ test("ChatGPT requires a live correlated pong even if installation reports succe
   const capture = harness.window.__capCaptureChatGptJson();
   const rejected = assert.rejects(capture, /Fast capture isn't ready/);
   const id = harness.pings[0].id;
-  const pong = { channel: "cap-context-chatgpt-json-v2", type: "pong", id, version: 3 };
+  const pong = { channel: "cap-context-chatgpt-json-v2", type: "pong", id, version: 4 };
   for (const event of [
     { source: {}, origin: harness.location.origin, data: pong },
     { source: harness.window, origin: "https://other.example", data: pong },
     { source: harness.window, origin: harness.location.origin, data: { ...pong, id: "unrelated" } },
-    { source: harness.window, origin: harness.location.origin, data: { ...pong, version: 2 } },
+    { source: harness.window, origin: harness.location.origin, data: { ...pong, version: 3 } },
     { source: harness.window, origin: harness.location.origin, data: { ...pong, type: "response" } }
   ]) harness.emitMessage(event);
   await rejected;

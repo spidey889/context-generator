@@ -1,7 +1,7 @@
 (() => {
   const channel = "cap-context-chatgpt-json-v2";
   const currentChat = () => location.pathname.match(/\/c\/([^/]+)\/?$/)?.[1];
-  function serialize(data, chat) {
+  function serialize(data, chat, pastedTexts = {}) {
     const blocked = reason => new Error(`ChatGPT JSON capture blocked: ${reason} Turn JSON capture off to use DOM capture.`);
     if ((data?.conversation_id ?? data?.id) !== chat) throw blocked("The response belongs to a different conversation.");
     const assertComplete = (scope, label) => {
@@ -125,6 +125,17 @@
           }
         }
       }
+      if (role === "user") {
+        for (const file of Array.isArray(message.metadata?.attachments) ? message.metadata.attachments : []) {
+          if (file?.is_big_paste !== true || file.mime_type !== "text/plain") continue;
+          assertComplete(file, "Pasted text attachment");
+          const pasted = Object.hasOwn(pastedTexts, file.id) ? pastedTexts[file.id] : null;
+          if (typeof pasted !== "string" || !Number.isSafeInteger(file.size) || new TextEncoder().encode(pasted).length !== file.size) throw blocked("A pasted text attachment is missing or incomplete.");
+          // Keep the original paste (including CRLF/indentation) in its owning
+          // user turn. Deduplicate only within that turn, never across roles.
+          if (pasted.trim() && !parts.some(part => part.includes(pasted) || part.trim() === pasted.trim())) parts.push(pasted);
+        }
+      }
       return parts.length ? [`${role === "user" ? "User" : "Assistant"}: ${parts.join("\n\n")}`] : [];
     });
     if (!turns.length) throw blocked("No usable user or assistant text remains after skipping tools, files, images, and artifacts.");
@@ -149,7 +160,7 @@
       const receive = event => {
         const reply = event.data;
         if (event.source === window && event.origin === location.origin && reply?.channel === channel
-          && reply.type === "pong" && reply.id === id && reply.version === 3) finish(true);
+          && reply.type === "pong" && reply.id === id && reply.version === 4) finish(true);
       };
       const ping = () => {
         if (settled) return;
@@ -189,11 +200,13 @@
         try {
           if (currentChat() !== chat || reply.chat !== chat) throw new Error("The ChatGPT conversation changed during capture.");
           if (reply.error) {
+            if (reply.error === "size") throw new Error("This chat is too long to transfer (limit: 350,000 characters). Try a shorter chat.");
             const reasons = { auth: "ChatGPT authentication is unavailable. Refresh this signed-in chat.", partial: "ChatGPT returned a partial/ranged response.", busy: "Another ChatGPT JSON capture is running. Try again after it finishes.", format: "ChatGPT returned a non-JSON response.", changed: "The ChatGPT conversation changed during capture.", timeout: "The full-tree request timed out.", network: "The full-tree request failed or returned invalid JSON." };
+            reasons.paste = "A pasted text attachment could not be read completely. Refresh this chat and try again.";
             const reason = reply.error === "http" && Number.isInteger(reply.status) && reply.status >= 100 && reply.status <= 599 ? `The full-tree request returned HTTP ${reply.status}.` : reasons[reply.error] || "The full-tree request failed.";
             throw new Error(`ChatGPT JSON capture failed: ${reason} Turn JSON capture off to use DOM capture.`);
           }
-          resolve(serialize(reply.data, chat));
+          resolve(serialize(reply.data, chat, reply.pastedTexts));
         } catch (error) { reject(error); }
       };
       const timer = setTimeout(() => { cleanup(); reject(new Error("ChatGPT JSON capture timed out. Refresh or turn JSON capture off.")); }, 17000);
