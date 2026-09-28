@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-09-28-chatgpt-json-audit-v47";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-09-28-gemini-json-audit-v48";
   let handoffFallbackStyleSheet = null;
   let claudeJsonCaptureEnabled = false;
   let chatGptJsonCaptureEnabled = false;
@@ -3049,9 +3049,9 @@
   }
 
   function createConversationCapture(text, metrics = {}) {
-    // Verified ChatGPT JSON strings are source data, including code, pasted
+    // Verified ChatGPT/Gemini JSON strings are source data, including code, pasted
     // bytes and canvas text. DOM cleanup would rewrite NBSP/line whitespace.
-    const cleaned = metrics.method === "chatgpt-json" ? text : cleanText(text);
+    const cleaned = ["chatgpt-json", "gemini-json"].includes(metrics.method) ? text : cleanText(text);
     lastConversationCaptureMetrics = {
       ...metrics,
       cleanedChars: cleaned.length,
@@ -5402,6 +5402,7 @@
     const useChatGptJson = currentPlatform.id === "chatgpt" && chatGptJsonCaptureEnabled;
     const chatGptJsonPath = useChatGptJson ? window.location.pathname : null;
     const useNetworkJson = ["gemini", "grok", "deepseek"].includes(currentPlatform.id) && networkJsonCaptureEnabled;
+    const geminiJsonPath = useNetworkJson && currentPlatform.id === "gemini" ? window.location.pathname : null;
     const trace = createTransferTrace(destinationId, "destination tile");
     trace.destinationId = destinationId;
     startTransferTelemetry(trace);
@@ -5447,7 +5448,8 @@
         const captureJson = useClaudeJson ? window.__capCaptureClaudeJson : useChatGptJson ? window.__capCaptureChatGptJson : window.__capCaptureNetworkJson;
         if (typeof captureJson !== "function") throw new Error(`Refresh ${currentPlatform.name} to enable JSON capture.`);
         const capture = useClaudeJson ? await captureJson(claudeJsonPath)
-          : useChatGptJson ? await captureJson(chatGptJsonPath) : await captureJson();
+          : useChatGptJson ? await captureJson(chatGptJsonPath)
+          : geminiJsonPath ? await captureJson(geminiJsonPath) : await captureJson();
         conversationText = createConversationCapture(capture.text, {
           method: `${currentPlatform.id}-json`, messageTurnCount: capture.messageTurnCount,
           usefulTurnCount: capture.messageTurnCount, candidateTurnCount: capture.messageTurnCount

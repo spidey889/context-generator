@@ -6,7 +6,7 @@ const test = require("node:test");
 const { webcrypto } = require("node:crypto");
 const { fixtures, rpcFrame, geminiTurn, prompt } = require("./network-json-fixtures");
 const files = ["network-json-data.js", "network-fetch-main.js", "network-json-capture.js"];
-function setup(platform, fixture = fixtures(platform), { fetchImpl, runtime, schedule = setTimeout } = {}) {
+function setup(platform, fixture = fixtures(platform), { fetchImpl, runtime, schedule = setTimeout, beforeMessage } = {}) {
   const requests = [], replies = [], listeners = new Set(), navigation = new Set();
   const host = { gemini: "gemini.google.com", grok: "grok.com", deepseek: "chat.deepseek.com" }[platform];
   const pathname = { gemini: "/app/smoke", grok: "/c/smoke", deepseek: "/a/chat/s/smoke" }[platform];
@@ -38,7 +38,7 @@ function setup(platform, fixture = fixtures(platform), { fetchImpl, runtime, sch
     addEventListener: (type, listener) => (type === "message" ? listeners : navigation).add(listener),
     removeEventListener: (type, listener) => (type === "message" ? listeners : navigation).delete(listener),
     navigation: { addEventListener: (_type, fn) => navigation.add(fn), removeEventListener: (_type, fn) => navigation.delete(fn) },
-    postMessage(data) { if (data.type === "response") replies.push(data); queueMicrotask(() => [...listeners].forEach(fn => fn({ data, source: window, origin: location.origin }))); }
+    postMessage(data) { if (data.type === "response") replies.push(data); queueMicrotask(() => { beforeMessage?.(data); [...listeners].forEach(fn => fn({ data, source: window, origin: location.origin })); }); }
   };
   const context = vm.createContext({ window, location, chrome: runtime ? { runtime } : undefined, performance: { getEntriesByType: () => [] }, URL, URLSearchParams, Headers, Request, TextEncoder, TextDecoder, AbortController, crypto: webcrypto, setTimeout: schedule, clearTimeout });
   const reinstall = file => vm.runInContext(fs.readFileSync(path.join(__dirname, "..", "extension", file), "utf8"), context);
@@ -54,7 +54,8 @@ function setup(platform, fixture = fixtures(platform), { fetchImpl, runtime, sch
     }
   };
   return { window, api, requests, replies, context, fixture, observe, reinstall, listeners, location,
-    navigate() { for (const fn of navigation) fn({ destination: { url: location.origin + "/new" } }); location.pathname = "/new"; location.href = location.origin + "/new"; }
+    navigationListeners: () => navigation.size,
+    navigate(pathname = "/new") { for (const fn of navigation) fn({ destination: { url: location.origin + pathname } }); location.pathname = pathname; location.href = location.origin + pathname; }
   };
 }
 for (const platform of ["gemini", "grok", "deepseek"]) {
@@ -163,6 +164,82 @@ test("Gemini: late installation uses resource timing and native bootstrap, witho
   const h = setup("gemini");
   h.context.performance.getEntriesByType = () => [{ name: "https://gemini.google.com/_/BardChatUi/data/batchexecute?rpcids=other" }];
   assert.equal((await h.window.__capCaptureNetworkJson()).text, h.fixture.expected);
+});
+test("Gemini pins the selected chat and latches navigation throughout readiness and response delivery", async () => {
+  for (const phase of ["before", "pong", "response"]) {
+    let h;
+    h = setup("gemini", fixtures("gemini", phase === "before" ? "other" : "smoke"), { beforeMessage: message => {
+      if (message.type === phase) { h.navigate("/app/other"); h.navigate("/app/smoke"); }
+    } });
+    await h.observe();
+    if (phase === "before") h.navigate("/app/other");
+    await assert.rejects(h.window.__capCaptureNetworkJson("/app/smoke"), /conversation changed/);
+    assert.equal(h.requests.length, phase === "response" ? 3 : 0);
+    assert.equal(h.navigationListeners(), 0);
+    assert.equal(h.listeners.size, 1);
+  }
+});
+test("Gemini repairs replaced fetch or XHR observation before accepting readiness", async () => {
+  for (const surface of ["fetch", "xhr"]) {
+    let h, installs = 0;
+    h = setup("gemini", fixtures("gemini"), { runtime: { sendMessage: async () => {
+      installs++; h.reinstall(files[1]); return { ok: true };
+    } } });
+    await h.observe();
+    if (surface === "fetch") {
+      const old = h.window.fetch;
+      h.window.fetch = (...args) => old(...args);
+    } else {
+      const proto = h.window.XMLHttpRequest.prototype;
+      const old = proto.send;
+      proto.send = function (...args) { return old.apply(this, args); };
+    }
+    assert.equal((await h.window.__capCaptureNetworkJson()).text, h.fixture.expected);
+    assert.equal(installs, 1);
+    assert.equal(h.listeners.size, 1);
+    const currentFetch = h.window.fetch;
+    h.reinstall(files[1]);
+    assert.equal(h.window.fetch, currentFetch);
+  }
+});
+test("Gemini JSON picker pins identity before handoff and preserves source whitespace through metrics", async () => {
+  const source = fs.readFileSync(path.join(__dirname, "..", "extension", "platform-content.js"), "utf8");
+  const captureStart = source.indexOf("  function createConversationCapture(text, metrics = {})");
+  const captureEnd = source.indexOf("  function getConversationCaptureMetrics", captureStart);
+  const cleanStart = source.indexOf("  function cleanText(text)");
+  const cleanEnd = source.indexOf("  function isVisible", cleanStart);
+  const metrics = vm.createContext({ lastConversationCaptureMetrics: null });
+  vm.runInContext(source.slice(cleanStart, cleanEnd) + source.slice(captureStart, captureEnd), metrics);
+  const text = 'Gemini conversation:\n\nUser:   pasted code  \n\nAssistant:   print("a\u00a0b")  \n';
+  assert.equal(metrics.createConversationCapture(text, { method: "gemini-json" }), text);
+  const start = source.indexOf("  async function startDestinationTransfer(destinationId)");
+  const end = source.indexOf("  function protectOverlayPalette", start);
+  for (const navigate of [false, true]) {
+    let capturedPath, transfers = 0;
+    const errors = [], noop = () => {};
+    const window = { location: { pathname: "/app/smoke" }, __capCaptureNetworkJson: async expected => {
+      capturedPath = expected;
+      if (expected !== window.location.pathname) throw new Error("The conversation changed during capture.");
+      return { text, messageTurnCount: 2 };
+    } };
+    const sandbox = vm.createContext({ window, currentPlatform: { id: "gemini", name: "Gemini" },
+      claudeJsonCaptureEnabled: false, chatGptJsonCaptureEnabled: false, networkJsonCaptureEnabled: true,
+      isRunning: false, runningResetTimer: null, RUNNING_AUTO_RESET_MS: 360000, DESTINATION_SHEET_EXIT_MS: 0,
+      NO_CONVERSATION_ERROR_MESSAGE: "No conversation", createTransferTrace: () => ({}),
+      startTransferTelemetry: noop, markTransferTrace: noop, finishTransferTrace: noop,
+      getDetectedConversationMessageCount: () => 0, hideDestinationSheet: noop, delay: async () => {},
+      showErrorOverlay: error => errors.push(error), clearRunningResetTimer: noop, resetRunningFlag: noop,
+      setTimeout: () => 1, transitionDestinationSheetToHandoff: async () => { if (navigate) window.location.pathname = "/app/other"; },
+      showOverlay: noop, releaseDestinationSheetBackdrop: noop, prepareDestinationTab: async () => ({}),
+      advanceTransferTelemetryStage: noop, prepareSourceForCapture: () => { throw new Error("DOM capture must not run"); },
+      setHandoffProgress: noop, createConversationCapture: value => value, markCaptureDone: noop,
+      runContextFlow: () => { transfers++; }, getSafeTelemetryFailureReason: () => "capture_failed" });
+    vm.runInContext(source.slice(start, end), sandbox);
+    await sandbox.startDestinationTransfer("claude");
+    assert.equal(capturedPath, "/app/smoke");
+    assert.equal(transfers, navigate ? 0 : 1);
+    assert.deepEqual(errors, navigate ? ["The conversation changed during capture."] : []);
+  }
 });
 test("DeepSeek preserves a UTF-8 BOM in an original text file", async () => {
   const f = fixtures("deepseek"); f.files[f.file.id] = "\uFEFF" + f.files[f.file.id]; f.file.file_size += 3;

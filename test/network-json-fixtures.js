@@ -15,6 +15,11 @@ const rpcFrame = page => {
 };
 function fixtures(platform, chat = "smoke", count = 24) {
   const turns = Array.from({ length: count }, (_, i) => [i ? `User ${i}` : prompt, i === count - 1 ? answer : `Assistant ${i}`]);
+  if (platform === "gemini" && count > 1) {
+    // Exact source whitespace must survive the installed transfer boundary.
+    turns[1][0] += "\n  Original pasted line  \r\n";
+    turns[1][1] += '  \n  print("a\u00a0b")  \n';
+  }
   const name = { gemini: "Gemini", grok: "Grok", deepseek: "DeepSeek" }[platform];
   const expected = `${name} conversation:\n\n${turns.flatMap(([user, assistant]) => [`User: ${user}`, `Assistant: ${assistant}`]).join("\n\n")}`;
   if (platform === "gemini") {
