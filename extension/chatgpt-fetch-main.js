@@ -1,5 +1,5 @@
 (() => {
-  const version = 4;
+  const version = 5;
   const channel = "cap-context-chatgpt-json-v2";
   const currentChat = pathname => (pathname ?? location.pathname).match(/\/c\/([^/]+)\/?$/)?.[1];
   const previous = window.__capChatGptFetchState;
@@ -38,7 +38,7 @@
     if (typeof request.id !== "string" || request.id.length > 80) return;
     // Readiness probes never fetch session data or conversation messages.
     if (request.type === "ping") {
-      window.postMessage({ channel, type: "pong", id: request.id, version }, location.origin);
+      if (window.fetch === wrappedFetch) window.postMessage({ channel, type: "pong", id: request.id, version }, location.origin);
       return;
     }
     const chat = currentChat();
@@ -80,18 +80,30 @@
       auth = headers;
       return new Headers(headers);
     };
-    try {
-      if (!chat || request.chat !== chat) throw new Error("changed");
+    let authRetried = false;
+    const fetchAuthenticatedJson = async (url, options = {}) => {
+      if (controller.signal.aborted || currentChat() !== chat) throw new Error("changed");
+      const revision = authRevision;
       let headers = auth ? new Headers(auth) : await refreshAuth();
       if (controller.signal.aborted || currentChat() !== chat) throw new Error("changed");
+      let response = await fetchJson(url, { ...options, headers });
+      // Every authenticated read uses the latest observed same-account headers.
+      // One expired-token retry is shared by the tree and all paste descriptors.
+      if (response.status === 401 && !authRetried) {
+        authRetried = true;
+        if (controller.signal.aborted || currentChat() !== chat) throw new Error("changed");
+        headers = revision !== authRevision && auth ? new Headers(auth) : await refreshAuth();
+        if (controller.signal.aborted || currentChat() !== chat) throw new Error("changed");
+        response = await fetchJson(url, { ...options, headers });
+      }
+      return response;
+    };
+    try {
+      if (!chat || request.chat !== chat) throw new Error("changed");
       const url = `/backend-api/conversation/${encodeURIComponent(chat)}`;
-      let response = await fetchJson(url, { headers });
       // Retry an expired bearer token once. Never retry a partial tree or guess
       // another workspace on 403; both must fail visibly.
-      if (response.status === 401) {
-        headers = await refreshAuth();
-        response = await fetchJson(url, { headers });
-      }
+      const response = await fetchAuthenticatedJson(url);
       checkTransport(response);
       const data = await response.json();
       if (controller.signal.aborted || currentChat() !== chat || (data.conversation_id ?? data.id) !== chat) throw new Error("changed");
@@ -124,7 +136,7 @@
           pastedBytes += file.size;
           if (pastedBytes > 1400000) throw new Error("size");
           try {
-            const descriptorResponse = await fetchJson(`/backend-api/files/download/${encodeURIComponent(file.id)}`, { headers, redirect: "error" });
+            const descriptorResponse = await fetchAuthenticatedJson(`/backend-api/files/download/${encodeURIComponent(file.id)}`, { redirect: "error" });
             if (descriptorResponse.status !== 200 || descriptorResponse.headers.has("content-range")
               || !descriptorResponse.headers.get("content-type")?.includes("application/json")) throw new Error("paste");
             const descriptor = await descriptorResponse.json();

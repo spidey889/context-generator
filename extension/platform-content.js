@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-09-28-claude-json-audit-v46";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-09-28-chatgpt-json-audit-v47";
   let handoffFallbackStyleSheet = null;
   let claudeJsonCaptureEnabled = false;
   let chatGptJsonCaptureEnabled = false;
@@ -3049,7 +3049,9 @@
   }
 
   function createConversationCapture(text, metrics = {}) {
-    const cleaned = cleanText(text);
+    // Verified ChatGPT JSON strings are source data, including code, pasted
+    // bytes and canvas text. DOM cleanup would rewrite NBSP/line whitespace.
+    const cleaned = metrics.method === "chatgpt-json" ? text : cleanText(text);
     lastConversationCaptureMetrics = {
       ...metrics,
       cleanedChars: cleaned.length,
@@ -5398,6 +5400,7 @@
     const useClaudeJson = currentPlatform.id === "claude" && claudeJsonCaptureEnabled;
     const claudeJsonPath = useClaudeJson ? window.location.pathname : null;
     const useChatGptJson = currentPlatform.id === "chatgpt" && chatGptJsonCaptureEnabled;
+    const chatGptJsonPath = useChatGptJson ? window.location.pathname : null;
     const useNetworkJson = ["gemini", "grok", "deepseek"].includes(currentPlatform.id) && networkJsonCaptureEnabled;
     const trace = createTransferTrace(destinationId, "destination tile");
     trace.destinationId = destinationId;
@@ -5443,7 +5446,8 @@
       if (useClaudeJson || useChatGptJson || useNetworkJson) {
         const captureJson = useClaudeJson ? window.__capCaptureClaudeJson : useChatGptJson ? window.__capCaptureChatGptJson : window.__capCaptureNetworkJson;
         if (typeof captureJson !== "function") throw new Error(`Refresh ${currentPlatform.name} to enable JSON capture.`);
-        const capture = useClaudeJson ? await captureJson(claudeJsonPath) : await captureJson();
+        const capture = useClaudeJson ? await captureJson(claudeJsonPath)
+          : useChatGptJson ? await captureJson(chatGptJsonPath) : await captureJson();
         conversationText = createConversationCapture(capture.text, {
           method: `${currentPlatform.id}-json`, messageTurnCount: capture.messageTurnCount,
           usefulTurnCount: capture.messageTurnCount, candidateTurnCount: capture.messageTurnCount

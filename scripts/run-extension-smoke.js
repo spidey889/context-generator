@@ -12,6 +12,7 @@ const ASSISTANT_SENTINEL = "SMOKE_ASSISTANT_SENTINEL: verify staging before rele
 const CHATGPT_PASTED_TEXT = `CHATGPT_PASTE_START\n${"  Original pasted line, absent from the DOM.\n".repeat(1000)}CHATGPT_PASTE_END`;
 const CHATGPT_USER_PASTE = `${SOURCE_SENTINEL}\nJSON_ONLY_SENTINEL: earliest API-only turn.\n${CHATGPT_PASTED_TEXT}`;
 const CHATGPT_CANVAS_TEXT = `CHATGPT_CANVAS_START\n${"  Complete canvas line, absent from the DOM.\n".repeat(500)}CHATGPT_CANVAS_MIDDLE\n${"  Final canvas line.\n".repeat(500)}CHATGPT_CANVAS_END\n`;
+const CHATGPT_EXACT_CODE = '  OWN_CODE_SENTINEL\n  print("a\u00a0b")  \nCODE_END_SENTINEL';
 const CLAUDE_PASTED_TEXT = `CLAUDE_PASTE_START\n${"Full pasted-card line, absent from the DOM.\n".repeat(1000)}CLAUDE_PASTE_END`;
 const SUMMARY_TEXT = [
   "CONTEXT CARRY — READY TO PASTE",
@@ -37,6 +38,7 @@ const CLAUDE_RELOAD_SMOKE = JSON_SOURCE === "claude" && process.env.CAP_CONTEXT_
 const CHATGPT_RELOAD_SMOKE = JSON_SOURCE === "chatgpt" && process.env.CAP_CONTEXT_CHATGPT_RELOAD_SMOKE === "1";
 const JSON_RELOAD_SMOKE = CLAUDE_RELOAD_SMOKE || CHATGPT_RELOAD_SMOKE;
 const CHATGPT_FAILURE_SMOKE = JSON_SOURCE === "chatgpt" ? process.env.CAP_CONTEXT_CHATGPT_FAILURE_SMOKE || "" : "";
+const CHATGPT_PASTE_AUTH_SMOKE = JSON_SOURCE === "chatgpt" && process.env.CAP_CONTEXT_CHATGPT_AUTH_SMOKE === "paste401";
 const CLAUDE_PARTIAL_SMOKE = JSON_SOURCE === "claude" && process.env.CAP_CONTEXT_CLAUDE_PARTIAL_SMOKE === "1";
 
 class CdpSession {
@@ -332,7 +334,10 @@ function chatGptTreeFixture() {
   mapping.canvasResult = { parent: "canvas", message: { author: { role: "tool", name: "canmore.create_textdoc" }, status: "finished_successfully", content: { content_type: "text", parts: ["UNSUPPORTED_SENTINEL"] }, metadata: { command: "create_textdoc", canvas: { textdoc_id: "smoke-document", textdoc_type: "document", version: 1 } } } };
   mapping.canvasEdit = { parent: "canvasResult", message: { author: { role: "assistant" }, recipient: "canmore.update_textdoc", status: "finished_successfully", end_turn: false, content: { content_type: "text", parts: [JSON.stringify({ updates: [{ pattern: "UNSUPPORTED_SENTINEL", replacement: "OWN_CANVAS_EDIT_SENTINEL" }] })] } } };
   mapping.canvasEditResult = { parent: "canvasEdit", message: { author: { role: "tool", name: "canmore.update_textdoc" }, status: "finished_successfully", content: { content_type: "text", parts: ["UNSUPPORTED_SENTINEL"] }, metadata: { command: "update_textdoc", canvas: { textdoc_id: "smoke-document", textdoc_type: "document", version: 2, from_version: 1 } } } };
-  mapping.code = { parent: "canvasEditResult", message: { author: { role: "assistant" }, content: { content_type: "code", text: "OWN_CODE_SENTINEL", language: "python" } } };
+  // Explicit voice transcript objects are own text; pointer metadata is not.
+  mapping.voiceUser = { parent: "canvasEditResult", message: { author: { role: "user" }, content: { content_type: "multimodal_text", parts: [{ content_type: "audio_transcription", text: "OWN_VOICE_USER_SENTINEL", direction: "in" }, { content_type: "audio_asset_pointer", text: "UNSUPPORTED_SENTINEL" }] } } };
+  mapping.voiceAssistant = { parent: "voiceUser", message: { author: { role: "assistant" }, content: { content_type: "multimodal_text", parts: [{ content_type: "audio_transcription", text: "OWN_VOICE_ASSISTANT_SENTINEL", direction: "out" }] } } };
+  mapping.code = { parent: "voiceAssistant", message: { author: { role: "assistant" }, status: "finished_partial", end_turn: false, content: { content_type: "code", text: CHATGPT_EXACT_CODE, language: "python" } } };
   mapping.alternate = { parent: "root", message: { author: { role: "assistant" }, content: { content_type: "text", parts: ["INACTIVE_BRANCH_SENTINEL"] } } };
   const data = { conversation_id: "smoke", current_node: "code", mapping, context_truncation_continuation: null };
   if (CHATGPT_FAILURE_SMOKE === "partial") data.has_previous_page = true;
@@ -402,12 +407,15 @@ async function startFixtureServer() {
     if (url.pathname === "/api/auth/session") {
       state.sessionRequests++;
       response.writeHead(200, { "Content-Type": "application/json" });
-      response.end(JSON.stringify({ accessToken: "smoke-only", account: { id: "smoke-account" }, sessionToken: "SESSION_TOKEN_MUST_NOT_LEAVE_MAIN" }));
+      response.end(JSON.stringify({ accessToken: CHATGPT_PASTE_AUTH_SMOKE && state.pasteDescriptorRequests ? "smoke-refreshed" : "smoke-only", account: { id: "smoke-account" }, sessionToken: "SESSION_TOKEN_MUST_NOT_LEAVE_MAIN" }));
       return;
     }
     if (url.pathname === "/backend-api/files/download/file_smoke_paste") {
       state.pasteDescriptorRequests++;
-      assert.equal(request.headers.authorization, "Bearer smoke-only");
+      if (CHATGPT_PASTE_AUTH_SMOKE && state.pasteDescriptorRequests === 1) {
+        response.writeHead(401, { "Content-Type": "application/json" }); response.end("{}"); return;
+      }
+      assert.equal(request.headers.authorization, CHATGPT_PASTE_AUTH_SMOKE ? "Bearer smoke-refreshed" : "Bearer smoke-only");
       response.writeHead(200, { "Content-Type": "application/json" });
       response.end(JSON.stringify({ status: "success", file_size_bytes: Buffer.byteLength(CHATGPT_USER_PASTE), download_url: `http://${request.headers.host}/backend-api/estuary/content?id=file_smoke_paste&sig=SIGNED_PASTE_SENTINEL` }));
       return;
@@ -858,7 +866,7 @@ async function run() {
           `User: ${i === 0 ? CHATGPT_USER_PASTE : `User history ${i}`}`,
           `Assistant: ${i === 59 ? ASSISTANT_SENTINEL : `Assistant history ${i}`}`
         ]).flat();
-        expectedTurns.push("Assistant: OWN_RECAP_SENTINEL", "Assistant: OWN_THOUGHT_SENTINEL", `Assistant: Canvas: Smoke document\n\n${CHATGPT_CANVAS_TEXT}`, "Assistant: Canvas edit:\n\nOWN_CANVAS_EDIT_SENTINEL", "Assistant: OWN_CODE_SENTINEL");
+        expectedTurns.push("Assistant: OWN_RECAP_SENTINEL", "Assistant: OWN_THOUGHT_SENTINEL", `Assistant: Canvas: Smoke document\n\n${CHATGPT_CANVAS_TEXT}`, "Assistant: Canvas edit:\n\nOWN_CANVAS_EDIT_SENTINEL", "User: OWN_VOICE_USER_SENTINEL", "Assistant: OWN_VOICE_ASSISTANT_SENTINEL", `Assistant: ${CHATGPT_EXACT_CODE}`);
         assert.equal(capturedConversation, `ChatGPT conversation:\n\n${expectedTurns.join("\n\n")}`, "Every own turn must reach the backend exactly once, including all middle history.");
         assert.ok(capturedConversation.includes(CHATGPT_PASTED_TEXT), "Full pasted text must remain in its owning user turn.");
         assert.match(capturedConversation, /Assistant history 0/);
@@ -866,11 +874,11 @@ async function run() {
         assert.match(capturedConversation, /OWN_RECAP_SENTINEL/);
         assert.match(capturedConversation, /OWN_THOUGHT_SENTINEL/);
         assert.match(capturedConversation, /OWN_CODE_SENTINEL/);
-        assert.doesNotMatch(capturedConversation, /UNSUPPORTED_SENTINEL|INACTIVE_BRANCH_SENTINEL|smoke-only|SESSION_TOKEN_MUST_NOT_LEAVE_MAIN|SIGNED_PASTE_SENTINEL/);
-        assert.equal(state.pasteDescriptorRequests, 1);
+        assert.doesNotMatch(capturedConversation, /UNSUPPORTED_SENTINEL|INACTIVE_BRANCH_SENTINEL|smoke-only|smoke-refreshed|SESSION_TOKEN_MUST_NOT_LEAVE_MAIN|SIGNED_PASTE_SENTINEL/);
+        assert.equal(state.pasteDescriptorRequests, CHATGPT_PASTE_AUTH_SMOKE ? 2 : 1);
         assert.equal(state.pasteContentRequests, 1);
         assert.equal(state.chatgptRequestUrls.at(-1), "/backend-api/conversation/smoke");
-        assert.equal(state.sessionRequests, CHATGPT_RELOAD_SMOKE ? 1 : 0);
+        assert.equal(state.sessionRequests, (CHATGPT_RELOAD_SMOKE ? 1 : 0) + (CHATGPT_PASTE_AUTH_SMOKE ? 1 : 0));
       }
       if (NETWORK_SOURCE) {
         assert.equal(capturedConversation, networkFixtures(JSON_SOURCE).expected, "Every original own turn/paste/document must reach the backend once and in order.");

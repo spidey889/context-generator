@@ -1,6 +1,6 @@
 (() => {
   const channel = "cap-context-chatgpt-json-v2";
-  const currentChat = () => location.pathname.match(/\/c\/([^/]+)\/?$/)?.[1];
+  const currentChat = (pathname = location.pathname) => pathname.match(/\/c\/([^/]+)\/?$/)?.[1];
   function serialize(data, chat, pastedTexts = {}) {
     const blocked = reason => new Error(`ChatGPT JSON capture blocked: ${reason} Turn JSON capture off to use DOM capture.`);
     if ((data?.conversation_id ?? data?.id) !== chat) throw blocked("The response belongs to a different conversation.");
@@ -45,7 +45,10 @@
       id = node.parent;
     }
     if (branch[0]?.status != null && !["finished_successfully", "finished_partial"].includes(branch[0].status)) throw blocked("The active turn is still in progress or failed.");
-    if (branch[0]?.author?.role === "assistant" && branch[0].end_turn === false) throw blocked("The active assistant turn is still in progress.");
+    // finished_partial is terminal after a user stop, even if the streaming
+    // end_turn flag was never advanced. Own completeness checks still apply.
+    if (branch[0]?.author?.role === "assistant" && branch[0].end_turn === false
+      && branch[0].status !== "finished_partial") throw blocked("The active assistant turn is still in progress.");
     // Legacy canvas bodies are assistant-authored, but delivered through a
     // canmore operation. Only a successful, adjacent canvas acknowledgement
     // identifies these document fields; never import the tool reply or params.
@@ -101,14 +104,21 @@
       if (message.status != null && !["finished_successfully", "finished_partial"].includes(message.status)) throw blocked("An own turn is still in progress or failed.");
       if (content.parts != null && !Array.isArray(content.parts)) throw blocked("An own turn has invalid text parts.");
       if (content.content_type === "text" && !Array.isArray(content.parts)) throw blocked("An own text turn is missing its text parts.");
-      // Direct own strings only. Never recurse into tools, multimodal objects,
-      // uploaded files, arbitrary artifact objects, citations, or metadata.
-      const parts = Array.isArray(content.parts) ? content.parts.filter(part => typeof part === "string" && part.trim()).map(part => part.trim()) : [];
+      // Own strings plus explicitly typed voice transcripts only. Never recurse
+      // into tools, audio/image pointers, artifacts, files or their metadata.
+      const parts = Array.isArray(content.parts) ? content.parts.flatMap(part => {
+        if (typeof part === "string") return part.trim() ? [part] : [];
+        if (content.content_type !== "multimodal_text" || part?.content_type !== "audio_transcription") return [];
+        assertComplete(part, "Voice transcription");
+        assertComplete(part.metadata, "Voice transcription metadata");
+        if (typeof part.text !== "string") throw blocked("A voice transcription is missing its complete text string.");
+        return part.text.trim() ? [part.text] : [];
+      }) : [];
       if (!parts.length && ["thinking", "code", "reasoning_recap"].includes(content.content_type)) {
         const value = content.content_type === "thinking" ? (content.thinking ?? content.text)
           : content.content_type === "reasoning_recap" ? content.content : content.text;
         if (value != null && typeof value !== "string") throw blocked("An own text/thinking string is invalid.");
-        if (typeof value === "string" && value.trim()) parts.push(value.trim());
+        if (typeof value === "string" && value.trim()) parts.push(value);
       }
       // Live ChatGPT's own thoughts are explicit entries, not generic nested
       // tool text. content is the full body; summary/chunks can repeat it.
@@ -117,7 +127,7 @@
         for (const thought of content.thoughts) {
           if (typeof thought?.content !== "string") throw blocked("An own thought is missing its complete content string.");
           // Some live thoughts expose only their visible summary (empty body).
-          const value = thought.content.trim() || (typeof thought.summary === "string" ? thought.summary.trim() : "");
+          const value = thought.content.trim() ? thought.content : (typeof thought.summary === "string" && thought.summary.trim() ? thought.summary : "");
           if (value) {
             assertComplete(thought, "Own thought");
             if (thought.finished === false) throw blocked("An own thought is still in progress.");
@@ -126,14 +136,45 @@
         }
       }
       if (role === "user") {
+        const inlineParts = [...parts];
+        const inlineCopies = new Map();
+        const pastedIds = new Set();
         for (const file of Array.isArray(message.metadata?.attachments) ? message.metadata.attachments : []) {
           if (file?.is_big_paste !== true || file.mime_type !== "text/plain") continue;
           assertComplete(file, "Pasted text attachment");
           const pasted = Object.hasOwn(pastedTexts, file.id) ? pastedTexts[file.id] : null;
           if (typeof pasted !== "string" || !Number.isSafeInteger(file.size) || new TextEncoder().encode(pasted).length !== file.size) throw blocked("A pasted text attachment is missing or incomplete.");
-          // Keep the original paste (including CRLF/indentation) in its owning
-          // user turn. Deduplicate only within that turn, never across roles.
-          if (pasted.trim() && !parts.some(part => part.includes(pasted) || part.trim() === pasted.trim())) parts.push(pasted);
+          if (!pasted.trim() || pastedIds.has(file.id)) continue;
+          pastedIds.add(file.id);
+          // Attachment identity, not substring overlap, decides duplication.
+          // One full inline paragraph occurrence may represent one card.
+          let inlineCopy = null;
+          for (const [index, part] of inlineParts.entries()) {
+            for (const candidate of [pasted, pasted.trim()]) {
+              for (let start = part.indexOf(candidate); start >= 0; start = part.indexOf(candidate, start + 1)) {
+                const end = start + candidate.length;
+                if ((start === 0 || /(?:\r?\n){2}$/.test(part.slice(0, start)))
+                  && (end === part.length || /^(?:\r?\n){2}/.test(part.slice(end)))
+                  && !(inlineCopies.get(index) || []).some(copy => start < copy.end && end > copy.start)) {
+                  inlineCopy = { index, start, end, text: pasted };
+                  break;
+                }
+              }
+              if (inlineCopy) break;
+            }
+            if (inlineCopy) break;
+          }
+          if (!inlineCopy) parts.push(pasted);
+          else {
+            if (!inlineCopies.has(inlineCopy.index)) inlineCopies.set(inlineCopy.index, []);
+            inlineCopies.get(inlineCopy.index).push(inlineCopy);
+          }
+        }
+        // Work backwards so whitespace restoration does not shift another card.
+        for (const [index, copies] of inlineCopies) {
+          for (const copy of copies.sort((a, b) => b.start - a.start)) {
+            parts[index] = parts[index].slice(0, copy.start) + copy.text + parts[index].slice(copy.end);
+          }
         }
       }
       return parts.length ? [`${role === "user" ? "User" : "Assistant"}: ${parts.join("\n\n")}`] : [];
@@ -160,7 +201,7 @@
       const receive = event => {
         const reply = event.data;
         if (event.source === window && event.origin === location.origin && reply?.channel === channel
-          && reply.type === "pong" && reply.id === id && reply.version === 4) finish(true);
+          && reply.type === "pong" && reply.id === id && reply.version === 5) finish(true);
       };
       const ping = () => {
         if (settled) return;
@@ -179,39 +220,54 @@
     });
   }
 
-  window.__capCaptureChatGptJson = async () => {
-    const chat = currentChat();
+  window.__capCaptureChatGptJson = async (expectedPath = location.pathname) => {
+    const chat = currentChat(expectedPath);
     if (!chat) throw new Error("Open a saved ChatGPT conversation to use JSON capture.");
-    // Usually document_start already installed MAIN; don't wake/reinstall it on
-    // every capture. Missing/older hooks get one bounded on-demand recovery.
-    if (!await waitForHook(250)) {
-      if (typeof chrome === "undefined" || !chrome.runtime?.sendMessage || !await waitForHook(8000, true)) {
-        throw new Error("Fast capture isn't ready yet. Refresh this chat and try again, or turn off the lightning button.");
+    let changed = currentChat() !== chat;
+    const navigated = event => {
+      const destination = event?.destination ? new URL(event.destination.url) : location;
+      if (destination.origin !== location.origin || currentChat(destination.pathname) !== chat) changed = true;
+    };
+    // Keep the navigation latch through setup and response delivery as well as
+    // the network read; a final pathname alone misses away-and-back changes.
+    window.navigation?.addEventListener("navigate", navigated);
+    window.addEventListener("popstate", navigated);
+    try {
+      if (changed) throw new Error("The ChatGPT conversation changed during capture.");
+      // Usually document_start already installed MAIN; don't wake/reinstall it
+      // on every capture. Missing/older/replaced hooks get bounded recovery.
+      if (!await waitForHook(250)) {
+        if (typeof chrome === "undefined" || !chrome.runtime?.sendMessage || !await waitForHook(8000, true)) {
+          throw new Error("Fast capture isn't ready yet. Refresh this chat and try again, or turn off the lightning button.");
+        }
       }
+      if (changed || currentChat() !== chat) throw new Error("The ChatGPT conversation changed during capture.");
+      return await new Promise((resolve, reject) => {
+        const id = crypto.randomUUID();
+        const cleanup = () => { clearTimeout(timer); window.removeEventListener("message", receive); };
+        const receive = event => {
+          const reply = event.data;
+          if (event.source !== window || event.origin !== location.origin || reply?.channel !== channel || reply.type !== "response" || reply.id !== id) return;
+          cleanup();
+          try {
+            if (changed || currentChat() !== chat || reply.chat !== chat) throw new Error("The ChatGPT conversation changed during capture.");
+            if (reply.error) {
+              if (reply.error === "size") throw new Error("This chat is too long to transfer (limit: 350,000 characters). Try a shorter chat.");
+              const reasons = { auth: "ChatGPT authentication is unavailable. Refresh this signed-in chat.", partial: "ChatGPT returned a partial/ranged response.", busy: "Another ChatGPT JSON capture is running. Try again after it finishes.", format: "ChatGPT returned a non-JSON response.", changed: "The ChatGPT conversation changed during capture.", timeout: "The full-tree request timed out.", network: "The full-tree request failed or returned invalid JSON." };
+              reasons.paste = "A pasted text attachment could not be read completely. Refresh this chat and try again.";
+              const reason = reply.error === "http" && Number.isInteger(reply.status) && reply.status >= 100 && reply.status <= 599 ? `The full-tree request returned HTTP ${reply.status}.` : reasons[reply.error] || "The full-tree request failed.";
+              throw new Error(`ChatGPT JSON capture failed: ${reason} Turn JSON capture off to use DOM capture.`);
+            }
+            resolve(serialize(reply.data, chat, reply.pastedTexts));
+          } catch (error) { reject(error); }
+        };
+        const timer = setTimeout(() => { cleanup(); reject(new Error("ChatGPT JSON capture timed out. Refresh or turn JSON capture off.")); }, 17000);
+        window.addEventListener("message", receive);
+        window.postMessage({ channel, type: "request", id, chat }, location.origin);
+      });
+    } finally {
+      window.navigation?.removeEventListener("navigate", navigated);
+      window.removeEventListener("popstate", navigated);
     }
-    if (currentChat() !== chat) throw new Error("The ChatGPT conversation changed during capture.");
-    return new Promise((resolve, reject) => {
-      const id = crypto.randomUUID();
-      const cleanup = () => { clearTimeout(timer); window.removeEventListener("message", receive); };
-      const receive = event => {
-        const reply = event.data;
-        if (event.source !== window || event.origin !== location.origin || reply?.channel !== channel || reply.type !== "response" || reply.id !== id) return;
-        cleanup();
-        try {
-          if (currentChat() !== chat || reply.chat !== chat) throw new Error("The ChatGPT conversation changed during capture.");
-          if (reply.error) {
-            if (reply.error === "size") throw new Error("This chat is too long to transfer (limit: 350,000 characters). Try a shorter chat.");
-            const reasons = { auth: "ChatGPT authentication is unavailable. Refresh this signed-in chat.", partial: "ChatGPT returned a partial/ranged response.", busy: "Another ChatGPT JSON capture is running. Try again after it finishes.", format: "ChatGPT returned a non-JSON response.", changed: "The ChatGPT conversation changed during capture.", timeout: "The full-tree request timed out.", network: "The full-tree request failed or returned invalid JSON." };
-            reasons.paste = "A pasted text attachment could not be read completely. Refresh this chat and try again.";
-            const reason = reply.error === "http" && Number.isInteger(reply.status) && reply.status >= 100 && reply.status <= 599 ? `The full-tree request returned HTTP ${reply.status}.` : reasons[reply.error] || "The full-tree request failed.";
-            throw new Error(`ChatGPT JSON capture failed: ${reason} Turn JSON capture off to use DOM capture.`);
-          }
-          resolve(serialize(reply.data, chat, reply.pastedTexts));
-        } catch (error) { reject(error); }
-      };
-      const timer = setTimeout(() => { cleanup(); reject(new Error("ChatGPT JSON capture timed out. Refresh or turn JSON capture off.")); }, 17000);
-      window.addEventListener("message", receive);
-      window.postMessage({ channel, type: "request", id, chat }, location.origin);
-    });
   };
 })();
