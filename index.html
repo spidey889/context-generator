@@ -779,11 +779,20 @@
       letter-spacing: -0.02em;
     }
 
-    .output-grid {
+    /* Keep the context preview and FAQ on the same desktop column tracks. */
+    .output-grid,
+    .faq {
       display: grid;
-      grid-template-columns: minmax(0, 24rem) minmax(0, 1fr);
-      gap: 2rem;
-      align-items: center;
+      grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr);
+      gap: clamp(2rem, 5vw, 4rem);
+      align-items: start;
+    }
+
+    .output-grid .section-heading,
+    .faq .section-heading {
+      font-size: clamp(2rem, 3vw, 2.75rem);
+      line-height: 1.1;
+      text-wrap: balance;
     }
 
     .terminal-card {
@@ -958,7 +967,8 @@
         margin-bottom: 0.4rem;
       }
 
-      .output-grid {
+      .output-grid,
+      .faq {
         grid-template-columns: 1fr;
       }
     }
@@ -1085,8 +1095,10 @@
     .step-index { background: #d8ceff; color: #31264c; }
     .step strong { display: block; margin-bottom: .5rem; }
     .step p { color: #c5c6cf; font-size: .95rem; }
-    .faq { max-width: 820px; padding-top: 0; }
-    .faq .section-heading { margin-bottom: 1.5rem; }
+    .faq { padding-top: 0; row-gap: 1.5rem; }
+    .faq .section-heading { margin-bottom: 0; }
+    .faq-items { min-width: 0; }
+    .faq details:first-child { padding-top: 0; }
     .faq details { border-bottom: 1px solid var(--border); padding: 1.3rem 0; }
     .faq summary { cursor: pointer; font-weight: 600; line-height: 1.6; }
     .faq p { color: var(--muted); line-height: 1.7; margin-bottom: 0; }
@@ -1326,9 +1338,11 @@
     </section>
     <section class="faq section container" aria-labelledby="faq-title">
       <h2 id="faq-title" class="section-heading">Before you switch.</h2>
+      <div class="faq-items">
       <details><summary>Which AIs can I move between?</summary><p>Claude, ChatGPT, Gemini, Grok, and DeepSeek. Open Cap Context in your current chat and choose one of the other supported AIs from the picker.</p></details>
       <details><summary>Does it send the message for me?</summary><p>No. Cap Context pastes your handoff into the destination composer. Review it, make any changes, and press Send when you're ready.</p></details>
       <details><summary>What happens to my conversation?</summary><p>Capture starts after you choose a destination. When AI summarization is needed, the captured conversation is processed by our backend and an AI provider. Usage telemetry contains metadata, not conversation text. <a href="privacy.html">Read the full privacy policy.</a></p></details>
+      </div>
     </section>
     <section class="closing-cta section container" aria-labelledby="closing-title">
       <h2 class="section-heading" id="closing-title">Keep the progress.<br>Change the AI.</h2>
