@@ -722,17 +722,14 @@
       letter-spacing: -0.02em;
     }
 
-    /* Keep the context preview and FAQ on the same desktop column tracks. */
-    .output-grid,
-    .faq {
+    .output-grid {
       display: grid;
       grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr);
       gap: clamp(2rem, 5vw, 4rem);
       align-items: start;
     }
 
-    .output-grid .section-heading,
-    .faq .section-heading {
+    .output-grid .section-heading {
       font-size: clamp(2rem, 3vw, 2.75rem);
       line-height: 1.1;
       text-wrap: balance;
@@ -910,8 +907,7 @@
         margin-bottom: 0.4rem;
       }
 
-      .output-grid,
-      .faq {
+      .output-grid {
         grid-template-columns: 1fr;
       }
     }
@@ -1021,17 +1017,9 @@
     .demo-frame video { display: block; width: 100%; height: auto; aspect-ratio: 16 / 9; border-radius: 1.1rem; background: #f8f6f1; }
     .platform-list { display: flex; flex-wrap: wrap; justify-content: center; gap: .6rem 1.3rem; list-style: none; padding: 0; margin: 1.6rem 0 0; color: #525465; font-size: .85rem; font-weight: 600; }
     .platform-list li { padding: .4rem .75rem; border: 1px solid var(--border); border-radius: 999px; background: rgba(255,255,255,.65); }
-    .faq { padding-top: 0; row-gap: 1.5rem; }
-    .faq .section-heading { margin-bottom: 0; }
-    .faq-items { min-width: 0; }
-    .faq details:first-child { padding-top: 0; }
-    .faq details { border-bottom: 1px solid var(--border); padding: 1.3rem 0; }
-    .faq summary { cursor: pointer; font-weight: 600; line-height: 1.6; }
-    .faq p { color: var(--muted); line-height: 1.7; margin-bottom: 0; }
-    .faq a { text-decoration: underline; text-underline-offset: 3px; }
     .closing-cta { text-align: center; padding: clamp(2.5rem, 5vw, 4rem) 1.5rem; margin-bottom: 3rem; border: 1px solid rgba(149,96,223,.16); border-radius: var(--radius); background: radial-gradient(ellipse at top, #ece4fc, transparent 75%), rgba(255,255,255,.6); }
     .closing-cta .button { margin-top: 1.5rem; }
-    a:focus-visible, summary:focus-visible, video:focus-visible { outline: 3px solid var(--accent); outline-offset: 5px; }
+    a:focus-visible, video:focus-visible { outline: 3px solid var(--accent); outline-offset: 5px; }
     .terminal-output { overflow-x: auto; }
     @media (max-width: 680px) {
       .demo-heading { align-items: flex-start; }
@@ -1220,14 +1208,6 @@
 📦 KEY CONTEXT
 🔁 NEXT STEP</pre>
         </div>
-      </div>
-    </section>
-    <section class="faq section container" aria-labelledby="faq-title">
-      <h2 id="faq-title" class="section-heading">Before you switch.</h2>
-      <div class="faq-items">
-      <details><summary>Which AIs can I move between?</summary><p>Claude, ChatGPT, Gemini, Grok, and DeepSeek. Open Cap Context in your current chat and choose one of the other supported AIs from the picker.</p></details>
-      <details><summary>Does it send the message for me?</summary><p>No. Cap Context pastes your handoff into the destination composer. Review it, make any changes, and press Send when you're ready.</p></details>
-      <details><summary>What happens to my conversation?</summary><p>Capture starts after you choose a destination. When AI summarization is needed, the captured conversation is processed by our backend and an AI provider. Usage telemetry contains metadata, not conversation text. <a href="privacy.html">Read the full privacy policy.</a></p></details>
       </div>
     </section>
     <section class="closing-cta section container" aria-labelledby="closing-title">

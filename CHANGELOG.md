@@ -1,5 +1,7 @@
 # Changelog
 
+- 2026-09-30: Removed the homepage "Before you switch" FAQ section and its three answers. Cleared its unused layout styles; the context preview now leads directly into the closing install action. The footer privacy policy link remains available.
+
 - 2026-09-30: Removed the Kyoto demo note, three product-fact counters, and the full install/pick/review card from the homepage. Cleaned up their unused styles and the video's removed description reference; the video, connector diagram, context outline, FAQ and remaining install links stay in place.
 
 - 2026-09-29: Added muted, scroll-triggered homepage demo playback with offscreen/hidden-tab pausing, preservation of visitor pauses, reduced-motion opt-out and native-control fallback. Tightened hero spacing, styled platform and duration labels, and added a soft lavender closing install panel while preserving the shared context/FAQ grid.
