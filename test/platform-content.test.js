@@ -1180,7 +1180,7 @@ virtualSweepTest("transfer capture keeps fuller swept text when the turn count m
   assert.match(transcript, /details that were cut off during the quick first look/);
 });
 
-virtualSweepTest("physical scroll movement prevents a premature stale exit on non-Claude chats", async () => {
+test("slow/release: physical scroll movement prevents a premature stale exit on non-Claude chats", async () => {
   const { elements } = createVirtualizedChatElements({
     label: "ChatGPT",
     totalTurns: 16,
@@ -1496,7 +1496,7 @@ virtualSweepTest("Claude sweep advances by rendered message boundary when the ne
   assert.ok(boundaryAdvances > 0, "Claude sweep should use rendered boundary advances");
 });
 
-virtualSweepTest("Claude sweep waits through slow virtualized batches before declaring stale", async () => {
+test("slow/release: Claude sweep waits through slow virtualized batches before declaring stale", async () => {
   const { elements } = createVirtualizedChatElements({
     label: "Claude",
     totalTurns: 16,
