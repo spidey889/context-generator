@@ -330,149 +330,39 @@
       font-weight: 500;
     }
 
-    .cg-wrap {
-      background: #0d0e14;
-      border-radius: 16px;
-      padding: 48px 32px;
-      min-height: 420px;
-      position: relative;
-      overflow: hidden;
-      font-family: var(--font-sans);
-      max-width: 860px;
-      margin: 0 auto;
-    }
-
-    .cg-grid {
-      display: grid;
-      grid-template-columns: 1fr 180px 1fr;
-      gap: 0;
-      align-items: center;
-      min-height: 340px;
-    }
-
-    .cg-col {
-      display: flex;
-      flex-direction: column;
-      gap: 14px;
-    }
-
-    .cg-col-left {
-      align-items: flex-start;
-      padding-right: 20px;
-    }
-
-    .cg-col-right {
-      align-items: flex-end;
-      padding-left: 20px;
-    }
-
-    .cg-tool {
-      display: flex;
-      align-items: center;
-      gap: 12px;
-      width: fit-content;
-      box-sizing: border-box;
-      cursor: pointer;
-      background: #16181f;
-      border: 1px solid #2a2d3a;
-      border-radius: 12px;
-      padding: 12px 16px;
-      transition: border-color 0.2s, background 0.2s;
-    }
-
-    .cg-tool:hover {
-      border-color: #4a4f6a;
-      background: #1c1f2a;
-    }
-
-    .cg-col-right .cg-tool {
-      justify-content: flex-start;
-    }
-
-    .cg-tool-icon {
-      width: 36px;
-      height: 36px;
-      border-radius: 8px;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      flex-shrink: 0;
-    }
-
-    .cg-tool-info {
-      display: flex;
-      flex-direction: column;
-    }
-
-    .cg-tool-name {
-      font-size: 14px;
-      font-weight: 500;
-      color: #e8eaf0;
-      line-height: 1.2;
-    }
-
-    .cg-tool-sub {
-      font-size: 11px;
-      color: #6b7080;
-      line-height: 1.2;
-      margin-top: 2px;
-    }
-
-    .cg-col-right .cg-tool-info {
-      align-items: flex-start;
-    }
-
-    .cg-hub {
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      justify-content: center;
-      gap: 10px;
-    }
-
-    .cg-hub-box {
-      width: 100px;
-      height: 100px;
-      background: #1a1d28;
-      border: 2px solid #3a3f5a;
-      border-radius: 14px;
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      justify-content: center;
-      gap: 6px;
-      position: relative;
-      z-index: 10;
-    }
-
-    .cg-hub-label {
-      font-size: 12px;
-      color: #8890a8;
+    .network-card {
+      padding: clamp(1.5rem, 4vw, 3rem);
+      border: 1px solid #272334;
+      border-radius: var(--radius);
+      background: radial-gradient(ellipse at 50% 50%, #211531 0, #111018 45%, #0d0e14 75%);
+      color: #f5f3fa;
       text-align: center;
-      line-height: 1.3;
     }
-
-    .cg-hub-brain {
-      font-size: 36px;
-      line-height: 1;
-    }
-
-    .cg-tagline {
-      font-size: 16px;
-      color: #9098b0;
-      text-align: center;
-      margin-top: 24px;
-      letter-spacing: 0.01em;
-    }
-
-    svg.cg-lines {
-      position: absolute;
-      top: 0;
-      left: 0;
-      width: 100%;
-      height: 100%;
-      pointer-events: none;
-      z-index: 1;
+    .network-card h2 { margin: 0; font-size: clamp(1.6rem, 3vw, 2.4rem); letter-spacing: -.045em; }
+    .network-card p { color: #b7b2c6; line-height: 1.6; margin: .75rem auto 0; max-width: 38rem; }
+    .network-map { position: relative; max-width: 800px; height: 450px; margin: 2rem auto 0; }
+    .network-lines { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+    .network-hub, .network-node { position: absolute; transform: translate(-50%, -50%); z-index: 1; }
+    .network-hub { left: 50%; top: 50%; width: 116px; display: grid; justify-items: center; gap: .35rem; font-size: .85rem; font-weight: 600; }
+    .network-hub img { width: 104px; height: 104px; object-fit: contain; filter: drop-shadow(0 0 22px #9b5fe640); }
+    .network-nodes { margin: 0; padding: 0; list-style: none; }
+    .network-node { width: 116px; padding: 12px; display: grid; justify-items: center; gap: 9px; border: 1px solid #37313f; border-radius: 16px; background: #19171f; font-size: .85rem; font-weight: 500; }
+    .network-node img { width: 32px; height: 32px; object-fit: contain; }
+    .network-node:nth-child(1) { left: 50%; top: 10%; }
+    .network-node:nth-child(2) { left: 86%; top: 39%; }
+    .network-node:nth-child(3) { left: 73%; top: 86%; }
+    .network-node:nth-child(4) { left: 27%; top: 86%; }
+    .network-node:nth-child(5) { left: 14%; top: 39%; }
+    @media (max-width: 680px) {
+      .network-card { padding: 1.5rem .75rem; }
+      .network-card p { font-size: .9rem; padding-inline: .5rem; }
+      .network-map { height: 350px; margin-top: 1.5rem; }
+      .network-node { width: 76px; padding: 9px 4px; font-size: .72rem; border-radius: 12px; }
+      .network-node img { width: 26px; height: 26px; }
+      .network-node:nth-child(2) { left: 85%; }
+      .network-node:nth-child(5) { left: 15%; }
+      .network-hub { width: 88px; font-size: .72rem; }
+      .network-hub img { width: 76px; height: 76px; }
     }
 
     .connector-section {
@@ -920,34 +810,6 @@
     }
 
     @media (max-width: 1100px) {
-      .cg-grid {
-        grid-template-columns: 1fr;
-        min-height: auto;
-      }
-
-      svg.cg-lines {
-        display: none;
-      }
-
-      .cg-col-left,
-      .cg-col-right {
-        align-items: stretch;
-        padding: 0;
-      }
-
-      .cg-col-right .cg-tool {
-        flex-direction: row;
-      }
-
-      .cg-col-right .cg-tool-info {
-        align-items: flex-start;
-      }
-
-      .cg-hub {
-        order: -1;
-        margin-bottom: 1rem;
-      }
-
       .connector-grid {
         grid-template-columns: 1fr;
         min-height: auto;
@@ -974,10 +836,6 @@
     }
 
     @media (max-width: 820px) {
-      .cg-wrap {
-        padding: 32px 20px;
-      }
-
       .steps {
         grid-template-columns: 1fr;
       }
@@ -1054,9 +912,6 @@
         margin: 1rem auto var(--hero-stack-gap);
       }
 
-      .connector-section {
-        display: none;
-      }
     }
 
     @media (prefers-reduced-motion: reduce) {
@@ -1206,76 +1061,24 @@
       </dl>
     </section>
 
-    <section class="connector-section section container reveal">
-      <div class="cg-wrap" id="cgWrap">
-        <svg class="cg-lines" id="cgSvg" aria-hidden="true"></svg>
-
-        <div class="cg-grid" style="position: relative; z-index: 5;">
-          <div class="cg-col cg-col-left" id="colLeft">
-            <div class="cg-tool" data-side="left" data-idx="0">
-              <div class="cg-tool-icon" style="background: #1a1a1a; border: 1px solid #333;">
-                <img src="extension/logos/claude2download__1_-removebg-preview.png" alt="Claude"
-                  style="width: 32px; height: 32px; object-fit: contain; background: transparent;">
-              </div>
-              <div class="cg-tool-info">
-                <span class="cg-tool-name">Claude</span>
-                <span class="cg-tool-sub">Anthropic</span>
-              </div>
-            </div>
-          </div>
-
-          <div class="cg-hub">
-            <div class="cg-hub-box" id="hubBox">
-              <span class="cg-hub-brain">&#129504;</span>
-              <span class="cg-hub-label">cap<br>context</span>
-            </div>
-          </div>
-
-          <div class="cg-col cg-col-right" id="colRight">
-            <div class="cg-tool" data-side="right" data-idx="0">
-              <div class="cg-tool-icon" style="background: #1a1a1a; border: 1px solid #333;">
-                <img src="extension/logos/gptwhitedownload__1_-removebg-preview.png" alt="ChatGPT"
-                  style="width: 32px; height: 32px; object-fit: contain; background: transparent;">
-              </div>
-              <div class="cg-tool-info">
-                <span class="cg-tool-name">ChatGPT</span>
-                <span class="cg-tool-sub">OpenAI</span>
-              </div>
-            </div>
-            <div class="cg-tool" data-side="right" data-idx="1">
-              <div class="cg-tool-icon" style="background: #1a1a1a; border: 1px solid #333;">
-                <img src="extension/logos/gemini-download__1_-removebg-preview.png" alt="Gemini"
-                  style="width: 32px; height: 32px; object-fit: contain; background: transparent;">
-              </div>
-              <div class="cg-tool-info">
-                <span class="cg-tool-name">Gemini</span>
-                <span class="cg-tool-sub">Google</span>
-              </div>
-            </div>
-            <div class="cg-tool" data-side="right" data-idx="2">
-              <div class="cg-tool-icon" style="background: #1a1a1a; border: 1px solid #333;">
-                <img src="extension/logos/grokwhitedownload__1_-removebg-preview.png" alt="Grok"
-                  style="width: 32px; height: 32px; object-fit: contain; background: transparent;">
-              </div>
-              <div class="cg-tool-info">
-                <span class="cg-tool-name">Grok</span>
-                <span class="cg-tool-sub">xAI</span>
-              </div>
-            </div>
-            <div class="cg-tool" data-side="right" data-idx="3">
-              <div class="cg-tool-icon" style="background: #1a1a1a; border: 1px solid #333;">
-                <img src="extension/logos/deepseek-download__1_-removebg-preview.png" alt="DeepSeek"
-                  style="width: 32px; height: 32px; object-fit: contain; background: transparent;">
-              </div>
-              <div class="cg-tool-info">
-                <span class="cg-tool-name">DeepSeek</span>
-                <span class="cg-tool-sub">DeepSeek AI</span>
-              </div>
-            </div>
-          </div>
+    <section class="connector-section section container" aria-labelledby="network-title">
+      <div class="network-card">
+        <h2 id="network-title">Any AI. Either direction.</h2>
+        <p>Start with any of the five. Take your conversation to any of the others.</p>
+        <div class="network-map" id="network-map">
+          <svg class="network-lines" aria-hidden="true">
+            <defs><marker id="network-arrow" viewBox="0 0 10 10" refX="5" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M2 2 L6 5 L2 8" fill="none" stroke="#a48ac6" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></marker></defs>
+            <g id="network-connections" fill="none" stroke="#8c70ad" stroke-width="1.25" marker-start="url(#network-arrow)" marker-end="url(#network-arrow)"></g>
+          </svg>
+          <div class="network-hub"><img src="extension/bubble-icon.png" alt="" width="104" height="104"><span>Cap Context</span></div>
+          <ul class="network-nodes" aria-label="Each AI can be a source or destination">
+            <li class="network-node"><img src="extension/logos/claude2download__1_-removebg-preview.png" alt="" width="32" height="32"><span>Claude</span></li>
+            <li class="network-node"><img src="extension/logos/gptwhitedownload__1_-removebg-preview.png" alt="" width="32" height="32"><span>ChatGPT</span></li>
+            <li class="network-node"><img src="extension/logos/gemini-download__1_-removebg-preview.png" alt="" width="32" height="32"><span>Gemini</span></li>
+            <li class="network-node"><img src="extension/logos/grokwhitedownload__1_-removebg-preview.png" alt="" width="32" height="32"><span>Grok</span></li>
+            <li class="network-node"><img src="extension/logos/deepseek-download__1_-removebg-preview.png" alt="" width="32" height="32"><span>DeepSeek</span></li>
+          </ul>
         </div>
-
-        <p class="cg-tagline">Five AIs. Keep the conversation going.</p>
       </div>
     </section>
 
@@ -1415,94 +1218,30 @@
       });
     })();
 
-    (function drawConnectorHubLines() {
-      function drawLines() {
-        const wrap = document.getElementById("cgWrap");
-        const svg = document.getElementById("cgSvg");
-        const hub = document.getElementById("hubBox");
-
-        if (!wrap || !svg || !hub) {
-          return;
-        }
-
-        const wrapRect = wrap.getBoundingClientRect();
-        const hubRect = hub.getBoundingClientRect();
-        const centerY = hubRect.top - wrapRect.top + (hubRect.height / 2);
-        const leftTools = wrap.querySelectorAll('[data-side="left"]');
-        const rightTools = wrap.querySelectorAll('[data-side="right"]');
-
-        svg.innerHTML = "";
-
-        function addLine(x1, y1, x2, y2, color, delay) {
-          const length = Math.hypot(x2 - x1, y2 - y1);
-          const dash = length * 0.3;
-
-          const baseLine = document.createElementNS("http://www.w3.org/2000/svg", "line");
-          baseLine.setAttribute("x1", x1);
-          baseLine.setAttribute("y1", y1);
-          baseLine.setAttribute("x2", x2);
-          baseLine.setAttribute("y2", y2);
-          baseLine.setAttribute("stroke", "#2a2d3a");
-          baseLine.setAttribute("stroke-width", "0.8");
-
+    (function drawNetworkConnections() {
+      const map = document.getElementById("network-map");
+      const connections = document.getElementById("network-connections");
+      const hub = map.querySelector(".network-hub");
+      function draw() {
+        const bounds = map.getBoundingClientRect();
+        const center = hub.getBoundingClientRect();
+        const x = center.left + center.width / 2;
+        const y = center.top + center.height / 2;
+        connections.replaceChildren();
+        map.querySelectorAll(".network-node").forEach(node => {
+          const box = node.getBoundingClientRect();
+          const dx = box.left + box.width / 2 - x;
+          const dy = box.top + box.height / 2 - y;
+          // Clip both ends to the actual cards so arrowheads stay visible at every viewport.
+          const from = Math.min((center.width / 2 + 10) / Math.abs(dx), (center.height / 2 + 10) / Math.abs(dy));
+          const to = Math.min((box.width / 2 + 10) / Math.abs(dx), (box.height / 2 + 10) / Math.abs(dy));
           const line = document.createElementNS("http://www.w3.org/2000/svg", "line");
-          line.setAttribute("x1", x1);
-          line.setAttribute("y1", y1);
-          line.setAttribute("x2", x2);
-          line.setAttribute("y2", y2);
-          line.setAttribute("stroke", color);
-          line.setAttribute("stroke-width", "1");
-          line.setAttribute("stroke-dasharray", `${dash} ${length - dash}`);
-          line.setAttribute("stroke-dashoffset", length);
-          line.setAttribute("opacity", "0.55");
-
-          const animation = document.createElementNS("http://www.w3.org/2000/svg", "animate");
-          animation.setAttribute("attributeName", "stroke-dashoffset");
-          animation.setAttribute("values", `${length};-${length}`);
-          animation.setAttribute("dur", "2.2s");
-          animation.setAttribute("begin", `${delay}s`);
-          animation.setAttribute("repeatCount", "indefinite");
-          animation.setAttribute("calcMode", "linear");
-          if (!window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
-            line.appendChild(animation);
-          }
-
-          svg.appendChild(baseLine);
-          svg.appendChild(line);
-        }
-
-        leftTools.forEach((tool, index) => {
-          const rect = tool.getBoundingClientRect();
-          addLine(
-            rect.right - wrapRect.left,
-            rect.top - wrapRect.top + (rect.height / 2),
-            hubRect.left - wrapRect.left,
-            centerY,
-            "#d97757",
-            index * 0.3
-          );
-        });
-
-        ["#10a37f", "#4285f4", "#888", "#0e5cf0"].forEach((color, index) => {
-          const tool = rightTools[index];
-          if (!tool) {
-            return;
-          }
-
-          const rect = tool.getBoundingClientRect();
-          addLine(
-            hubRect.right - wrapRect.left,
-            centerY,
-            rect.left - wrapRect.left,
-            rect.top - wrapRect.top + (rect.height / 2),
-            color,
-            (index * 0.25) + 0.1
-          );
+          for (const [key, value] of Object.entries({x1: x - bounds.left + dx * from, y1: y - bounds.top + dy * from, x2: x - bounds.left + dx * (1 - to), y2: y - bounds.top + dy * (1 - to)})) line.setAttribute(key, value);
+          connections.appendChild(line);
         });
       }
-
-      window.setTimeout(drawLines, 120);
-      window.addEventListener("resize", drawLines);
+      new ResizeObserver(draw).observe(map);
+      document.fonts.ready.then(draw);
     })();
 
   </script>

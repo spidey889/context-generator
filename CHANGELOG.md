@@ -1,5 +1,7 @@
 # Changelog
 
+- 2026-09-29: Replaced the misleading Claude-only source diagram with five equally styled AI nodes around the real Cap Context logo. Bidirectional arrows now show every platform can be a source or destination; the responsive diagram remains visible on mobile and uses static lines with no motion dependency.
+
 - 2026-09-29: Added muted, scroll-triggered homepage demo playback with offscreen/hidden-tab pausing, preservation of visitor pauses, reduced-motion opt-out and native-control fallback. Tightened hero spacing, styled platform and duration labels, and added a soft lavender closing install panel while preserving the shared context/FAQ grid.
 
 - 2026-09-29: Refreshed the homepage around the owner-selected 62-second Kyoto film from `brag-output-2026-09-29-153657`, with an on-demand native player and matching poster. Replaced obsolete skill-copy setup with extension installation, destination selection and review-before-send steps; added supported-platform names, factual product numbers, a privacy/control FAQ, closing install action and social preview metadata. Kept the existing light/purple design and connector diagram, removed obsolete copy/autoplay JavaScript, and made content available without JavaScript and connector motion respect reduced-motion preferences.
