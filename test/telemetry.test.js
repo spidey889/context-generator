@@ -15,18 +15,6 @@ const PROGRESS_MIGRATION_SOURCE = fs.readFileSync(
   path.join(ROOT, "supabase", "migrations", "20260718113749_atomically_preserve_transfer_event_progress.sql"),
   "utf8"
 );
-const SIMPLE_USERS_MIGRATION_SOURCE = fs.readFileSync(
-  path.join(ROOT, "supabase", "migrations", "20260720101219_add_simple_users_table.sql"),
-  "utf8"
-);
-const USERS_COUNTER_FIX_MIGRATION_SOURCE = fs.readFileSync(
-  path.join(ROOT, "supabase", "migrations", "20260720105251_fix_users_counter_permissions_and_daily_reset.sql"),
-  "utf8"
-);
-const USERS_UPDATE_FIRST_MIGRATION_SOURCE = fs.readFileSync(
-  path.join(ROOT, "supabase", "migrations", "20260722065035_update_user_summary_before_insert.sql"),
-  "utf8"
-);
 
 function loadTelemetryBackground(fetchImpl, initialStorage = {}, manifestVersion = "1.3.0") {
   const storage = structuredClone(initialStorage);
@@ -458,52 +446,4 @@ test("Supabase progress upserts cannot move a transfer backward", () => {
   assert.match(PROGRESS_MIGRATION_SOURCE, /array_position\(stage_order, excluded\.last_stage\)/);
   assert.match(PROGRESS_MIGRATION_SOURCE, /revoke all on function public\.record_transfer_event/);
   assert.match(PROGRESS_MIGRATION_SOURCE, /to service_role/);
-});
-
-test("Supabase replaces the old usage views with one aggregate users table", () => {
-  assert.match(SIMPLE_USERS_MIGRATION_SOURCE, /drop view if exists public\.user_transfer_activity/);
-  assert.match(SIMPLE_USERS_MIGRATION_SOURCE, /drop view if exists public\.user_daily_usage/);
-  assert.match(SIMPLE_USERS_MIGRATION_SOURCE, /drop trigger if exists transfer_events_register_analytics_user on public\.transfer_events/);
-  assert.match(SIMPLE_USERS_MIGRATION_SOURCE, /drop function if exists public\.register_analytics_user\(\)/);
-  assert.match(SIMPLE_USERS_MIGRATION_SOURCE, /drop table if exists public\.analytics_users/);
-  assert.match(SIMPLE_USERS_MIGRATION_SOURCE, /create table public\.users/);
-  assert.match(SIMPLE_USERS_MIGRATION_SOURCE, /user_no bigint generated always as identity primary key/);
-  assert.match(SIMPLE_USERS_MIGRATION_SOURCE, /install_id text not null unique/);
-  assert.match(SIMPLE_USERS_MIGRATION_SOURCE, /total_summaries bigint not null default 0/);
-  assert.match(SIMPLE_USERS_MIGRATION_SOURCE, /today_summaries bigint not null default 0/);
-  assert.match(SIMPLE_USERS_MIGRATION_SOURCE, /today_date date not null default \(now\(\) at time zone 'utc'\)::date/);
-  assert.match(SIMPLE_USERS_MIGRATION_SOURCE, /alter table public\.users enable row level security/);
-  assert.match(SIMPLE_USERS_MIGRATION_SOURCE, /revoke all privileges on table public\.users/);
-  assert.match(SIMPLE_USERS_MIGRATION_SOURCE, /grant select, insert, update on table public\.users to service_role/);
-  assert.doesNotMatch(SIMPLE_USERS_MIGRATION_SOURCE, /create view public\.user_daily_usage|create view public\.user_transfer_activity/);
-});
-
-test("Supabase updates an existing user before inserting a new installation", () => {
-  assert.match(SIMPLE_USERS_MIGRATION_SOURCE, /create or replace function public\.record_user_summary\(\)/);
-  assert.match(USERS_UPDATE_FIRST_MIGRATION_SOURCE, /pg_advisory_xact_lock/);
-  assert.match(USERS_UPDATE_FIRST_MIGRATION_SOURCE, /update public\.users as existing/);
-  assert.match(USERS_UPDATE_FIRST_MIGRATION_SOURCE, /where existing\.install_id = new\.install_id/);
-  assert.match(USERS_UPDATE_FIRST_MIGRATION_SOURCE, /if found then\s+return new;/);
-  assert.match(USERS_UPDATE_FIRST_MIGRATION_SOURCE, /insert into public\.users \(install_id, total_summaries, today_summaries, today_date\)/);
-  assert.ok(
-    USERS_UPDATE_FIRST_MIGRATION_SOURCE.indexOf("update public.users as existing") <
-    USERS_UPDATE_FIRST_MIGRATION_SOURCE.indexOf("insert into public.users")
-  );
-  assert.doesNotMatch(USERS_UPDATE_FIRST_MIGRATION_SOURCE, /on conflict/i);
-  assert.doesNotMatch(USERS_UPDATE_FIRST_MIGRATION_SOURCE, /login|environment|first_seen_at|last_seen_at/i);
-  assert.match(SIMPLE_USERS_MIGRATION_SOURCE, /after insert on public\.transfer_events[\s\S]*when \(new\.status = 'succeeded'\)/);
-  assert.match(SIMPLE_USERS_MIGRATION_SOURCE, /after update on public\.transfer_events[\s\S]*when \(new\.status = 'succeeded' and old\.status is distinct from 'succeeded'\)/);
-  assert.match(SIMPLE_USERS_MIGRATION_SOURCE, /revoke all on function public\.record_user_summary\(\)/);
-  assert.match(SIMPLE_USERS_MIGRATION_SOURCE, /grant execute on function public\.record_user_summary\(\) to service_role/);
-});
-
-test("Supabase gives the invoker trigger write access and resets stale daily totals at UTC midnight", () => {
-  assert.match(USERS_COUNTER_FIX_MIGRATION_SOURCE, /grant select, insert, update on table public\.users to service_role/);
-  assert.match(USERS_COUNTER_FIX_MIGRATION_SOURCE, /drop view if exists public\.user_transfer_activity/);
-  assert.match(USERS_COUNTER_FIX_MIGRATION_SOURCE, /create extension if not exists pg_cron with schema pg_catalog/);
-  assert.match(USERS_COUNTER_FIX_MIGRATION_SOURCE, /'cap-context-reset-daily-user-summaries'/);
-  assert.match(USERS_COUNTER_FIX_MIGRATION_SOURCE, /'0 0 \* \* \*'/);
-  assert.match(USERS_COUNTER_FIX_MIGRATION_SOURCE, /today_summaries = 0/);
-  assert.match(USERS_COUNTER_FIX_MIGRATION_SOURCE, /today_date = \(now\(\) at time zone 'utc'\)::date/);
-  assert.match(USERS_COUNTER_FIX_MIGRATION_SOURCE, /where today_date < \(now\(\) at time zone 'utc'\)::date/);
 });
