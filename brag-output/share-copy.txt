@@ -1,0 +1,4 @@
+Claude hit the limit. Your work doesn't have to stop.
+Cap Context carries the conversation to ChatGPT so you can pick up where you left off. Switch AIs without re-explaining everything.
+
+https://chromewebstore.google.com/detail/cap-context/lpkaciijlhckkdhbgidbjfkldigghnjf
