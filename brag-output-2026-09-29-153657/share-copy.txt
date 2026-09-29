@@ -1,0 +1,3 @@
+Switch AIs without re-explaining everything.
+
+When Claude reaches its limit, Cap Context carries the conversation into ChatGPT—so you can keep going from the same place.

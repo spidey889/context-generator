@@ -1,0 +1,205 @@
+{
+  "duration": 62,
+  "fps": 60,
+  "posterTime": 57.3,
+  "clicks": [
+    {
+      "time": 10.85,
+      "target": "Claude Send",
+      "scene": "claude",
+      "x": 1292,
+      "y": 731
+    },
+    {
+      "time": 17.1,
+      "target": "Cap Context orb",
+      "scene": "claude",
+      "x": 1244,
+      "y": 731
+    },
+    {
+      "time": 21.8,
+      "target": "Continue in ChatGPT",
+      "scene": "claude",
+      "x": 1003.5,
+      "y": 545.89
+    },
+    {
+      "time": 35.9,
+      "target": "Send carried context",
+      "scene": "chatgpt",
+      "x": 1294,
+      "y": 596
+    },
+    {
+      "time": 44.25,
+      "target": "Send follow-up",
+      "scene": "chatgpt",
+      "x": 1294,
+      "y": 734
+    }
+  ],
+  "typing": [
+    {
+      "start": 7.55,
+      "end": 9.8,
+      "text": "Continue with day three.",
+      "target": "Claude composer",
+      "keyTimes": [
+        7.644982,
+        7.743234,
+        7.833791,
+        7.9365,
+        8.029724,
+        8.100072,
+        8.20444,
+        8.29422,
+        8.440234,
+        8.519874,
+        8.591836,
+        8.666529,
+        8.742524,
+        8.888537,
+        8.96905,
+        9.039231,
+        9.125,
+        9.271013,
+        9.35414,
+        9.43188,
+        9.532536,
+        9.621793,
+        9.718341,
+        9.8
+      ]
+    },
+    {
+      "start": 40.7,
+      "end": 43,
+      "text": "Continue with day three.",
+      "target": "ChatGPT composer",
+      "keyTimes": [
+        40.793023,
+        40.879393,
+        40.960257,
+        41.057749,
+        41.128482,
+        41.210427,
+        41.284926,
+        41.379646,
+        41.52753,
+        41.618611,
+        41.700083,
+        41.790354,
+        41.897338,
+        42.045222,
+        42.151103,
+        42.251969,
+        42.353821,
+        42.501705,
+        42.572667,
+        42.643538,
+        42.726073,
+        42.797201,
+        42.897541,
+        43
+      ]
+    }
+  ],
+  "motion": [
+    {
+      "start": 0.7,
+      "end": 1.8,
+      "name": "enter conversation"
+    },
+    {
+      "start": 7.0,
+      "end": 7.7,
+      "name": "Claude composer push"
+    },
+    {
+      "start": 9.9,
+      "end": 10.6,
+      "name": "follow cursor to Claude Send"
+    },
+    {
+      "start": 11.3,
+      "end": 12.15,
+      "name": "pull out to limit"
+    },
+    {
+      "start": 15.4,
+      "end": 16.35,
+      "name": "Cap Context push"
+    },
+    {
+      "start": 17.3,
+      "end": 18.3,
+      "name": "picker reveal"
+    },
+    {
+      "start": 22.7,
+      "end": 23.35,
+      "name": "handoff entrance"
+    },
+    {
+      "start": 25.7,
+      "end": 26.5,
+      "name": "progress macro"
+    },
+    {
+      "start": 28.75,
+      "end": 29.5,
+      "name": "progress pullout"
+    },
+    {
+      "start": 31.65,
+      "end": 32.4,
+      "name": "ChatGPT entrance"
+    },
+    {
+      "start": 32.85,
+      "end": 33.6,
+      "name": "carried context push"
+    },
+    {
+      "start": 36.2,
+      "end": 36.9,
+      "name": "acknowledgement"
+    },
+    {
+      "start": 40,
+      "end": 40.7,
+      "name": "ChatGPT composer push"
+    },
+    {
+      "start": 43.1,
+      "end": 43.8,
+      "name": "follow cursor to ChatGPT Send"
+    },
+    {
+      "start": 44.65,
+      "end": 45.5,
+      "name": "answer reveal"
+    },
+    {
+      "start": 52.25,
+      "end": 53.2,
+      "name": "result pullout"
+    },
+    {
+      "start": 54.05,
+      "end": 54.7,
+      "name": "work exits"
+    },
+    {
+      "start": 54.95,
+      "end": 55.75,
+      "name": "separate message"
+    },
+    {
+      "start": 58.8,
+      "end": 59.45,
+      "name": "brand close"
+    }
+  ]
+}

@@ -1,0 +1,1821 @@
+{
+  "edition": "Reference-led rebuild, fresh Kyoto conversation",
+  "width": 1920,
+  "height": 1080,
+  "durationSeconds": 62,
+  "fps": 60,
+  "frames": 3720,
+  "video": "h264",
+  "pixelFormat": "yuv420p",
+  "colorRange": "tv",
+  "colorSpace": "bt709",
+  "audio": "aac",
+  "audioChannels": 2,
+  "audioPeakDb": -8,
+  "audioMeanDb": -29.1,
+  "posterFrame0MeanRgbError": 2.0007916988168724,
+  "fullDecode": "passed",
+  "browserColors": [
+    {
+      "seconds": 23.4,
+      "expected": [
+        250,
+        249,
+        245
+      ],
+      "decoded": [
+        248,
+        249,
+        245
+      ]
+    },
+    {
+      "seconds": 57.3,
+      "expected": [
+        229,
+        222,
+        208
+      ],
+      "decoded": [
+        226,
+        219,
+        207
+      ]
+    }
+  ],
+  "seeking": "passed",
+  "fullBravePlayback": {
+    "ended": true,
+    "currentTime": 62,
+    "totalVideoFrames": 6210,
+    "droppedVideoFrames": 0,
+    "error": null
+  },
+  "clickSynchronization": [
+    {
+      "target": "Claude Send",
+      "seconds": 10.85,
+      "frame": 651,
+      "soundSample": 520800,
+      "syncErrorSeconds": 0
+    },
+    {
+      "target": "Cap Context orb",
+      "seconds": 17.1,
+      "frame": 1026,
+      "soundSample": 820800,
+      "syncErrorSeconds": 0
+    },
+    {
+      "target": "Continue in ChatGPT",
+      "seconds": 21.8,
+      "frame": 1308,
+      "soundSample": 1046400,
+      "syncErrorSeconds": 0
+    },
+    {
+      "target": "Send carried context",
+      "seconds": 35.9,
+      "frame": 2154,
+      "soundSample": 1723200,
+      "syncErrorSeconds": 0
+    },
+    {
+      "target": "Send follow-up",
+      "seconds": 44.25,
+      "frame": 2655,
+      "soundSample": 2124000,
+      "syncErrorSeconds": 0
+    }
+  ],
+  "story": {
+    "ack": "Context loaded. Let's pick up right where you left off.",
+    "followup": "Continue with day three.",
+    "answer": "Day 3 — Arashiyama, at your pace\nMorning: An early riverside walk from your Sanjo base.\nLunch: Vegetarian, with no need to rush.\nAfternoon: Leave it open.",
+    "context": "CONTEXT CARRY\n\n🧠 WHO I AM\nI’m planning a three-day Kyoto trip and staying near Sanjo. I prefer quiet mornings and vegetarian food.\n\n🎯 WHAT WE WERE DOING\nBuilding a relaxed itinerary, one area per day, with room to wander.\n\n📍 WHERE WE LEFT OFF\nDay one covers downtown and the river. Day two covers the northern temples. Day three is next.\n\n✅ DECISIONS MADE\n• Sanjo is the base.\n• Start early to avoid crowds.\n• Choose vegetarian meals.\n• Keep the afternoons open.\n\n⚠️ OPEN QUESTIONS\nWhat should day three look like?\n\n📦 KEY CONTEXT\nAvoid a packed schedule. The user’s next request was “Continue with day three.” Claude reached its usage limit before answering.\n\n🔁 NEXT STEP\nReply only: \"Context loaded. Let's pick up right where you left off.\" Then wait for the user."
+  },
+  "marketingSeparation": true,
+  "productionUi": {
+    "source": "extension/platform-content.js",
+    "sha256": "5f50f629ad1dc92b5274ac413c212743c25f37e50c880208603a078fb3e3f587",
+    "commit": "9065f9628be131c1cfc7c79078d72f64c07b5253",
+    "capturedAt": "2026-09-29T10:23:36.396Z",
+    "browser": "New isolated Brave process",
+    "method": "Actual constructors, hover and selection handlers; DOM and CSS exported for deterministic animation",
+    "fixtureBoundaries": [
+      "const currentPlatform = getCurrentPlatform();",
+      "scrapeConversationText,",
+      "startDestinationTransfer(option.id);"
+    ],
+    "editorialOmissions": [
+      "Estimated countdown omitted because the film condenses network transfer time"
+    ],
+    "selectionHandlerVerified": true
+  },
+  "compositionAudit": {
+    "samples": [
+      {
+        "state": {
+          "time": 0.4,
+          "scene": "claude",
+          "camera": {
+            "x": 720,
+            "y": 405,
+            "s": 1.32
+          },
+          "cursor": {
+            "world": {
+              "x": 1135,
+              "y": 753
+            },
+            "screen": {
+              "x": 1507.8000000000002,
+              "y": 999.36
+            },
+            "alpha": 0,
+            "scale": 1.0824,
+            "angle": 0
+          },
+          "picker": "picker",
+          "handoff": "capture",
+          "marketingVisible": false,
+          "workVisible": true
+        },
+        "missingImages": [],
+        "pageWidth": 1920,
+        "pageHeight": 1080
+      },
+      {
+        "state": {
+          "time": 1.8,
+          "scene": "claude",
+          "camera": {
+            "x": 824,
+            "y": 331,
+            "s": 1.64
+          },
+          "cursor": {
+            "world": {
+              "x": 1135,
+              "y": 753
+            },
+            "screen": {
+              "x": 1470.04,
+              "y": 1232.08
+            },
+            "alpha": 0,
+            "scale": 1.3447999999999998,
+            "angle": 0
+          },
+          "picker": "picker",
+          "handoff": "capture",
+          "marketingVisible": false,
+          "workVisible": true
+        },
+        "missingImages": [],
+        "pageWidth": 1920,
+        "pageHeight": 1080
+      },
+      {
+        "state": {
+          "time": 3,
+          "scene": "claude",
+          "camera": {
+            "x": 824,
+            "y": 331,
+            "s": 1.64
+          },
+          "cursor": {
+            "world": {
+              "x": 1135,
+              "y": 753
+            },
+            "screen": {
+              "x": 1470.04,
+              "y": 1232.08
+            },
+            "alpha": 0,
+            "scale": 1.3447999999999998,
+            "angle": 0
+          },
+          "picker": "picker",
+          "handoff": "capture",
+          "marketingVisible": false,
+          "workVisible": true
+        },
+        "missingImages": [],
+        "pageWidth": 1920,
+        "pageHeight": 1080
+      },
+      {
+        "state": {
+          "time": 5.8,
+          "scene": "claude",
+          "camera": {
+            "x": 824,
+            "y": 331,
+            "s": 1.64
+          },
+          "cursor": {
+            "world": {
+              "x": 1135,
+              "y": 753
+            },
+            "screen": {
+              "x": 1470.04,
+              "y": 1232.08
+            },
+            "alpha": 0,
+            "scale": 1.3447999999999998,
+            "angle": 0
+          },
+          "picker": "picker",
+          "handoff": "capture",
+          "marketingVisible": false,
+          "workVisible": true
+        },
+        "missingImages": [],
+        "pageWidth": 1920,
+        "pageHeight": 1080
+      },
+      {
+        "state": {
+          "time": 7.6,
+          "scene": "claude",
+          "camera": {
+            "x": 834.7440947224371,
+            "y": 688.4853334919976,
+            "s": 1.8744166121258998
+          },
+          "cursor": {
+            "world": {
+              "x": 1135,
+              "y": 753
+            },
+            "screen": {
+              "x": 1522.8046567411645,
+              "y": 660.9273626283621
+            },
+            "alpha": 0,
+            "scale": 1.5370216219432378,
+            "angle": 0
+          },
+          "picker": "picker",
+          "handoff": "capture",
+          "marketingVisible": false,
+          "workVisible": true
+        },
+        "missingImages": [],
+        "pageWidth": 1920,
+        "pageHeight": 1080
+      },
+      {
+        "state": {
+          "time": 9.8,
+          "scene": "claude",
+          "camera": {
+            "x": 835,
+            "y": 697,
+            "s": 1.88
+          },
+          "cursor": {
+            "world": {
+              "x": 1179.6586102051353,
+              "y": 739.0131895720519
+            },
+            "screen": {
+              "x": 1607.9581871856544,
+              "y": 618.9847963954577
+            },
+            "alpha": 1,
+            "scale": 1.5415999999999999,
+            "angle": 57.58118141213754
+          },
+          "picker": "picker",
+          "handoff": "capture",
+          "marketingVisible": false,
+          "workVisible": true
+        },
+        "missingImages": [],
+        "pageWidth": 1920,
+        "pageHeight": 1080
+      },
+      {
+        "state": {
+          "time": 10.1,
+          "scene": "claude",
+          "camera": {
+            "x": 874.7929434164333,
+            "y": 699.7493306360445,
+            "s": 1.9624799190813347
+          },
+          "cursor": {
+            "world": {
+              "x": 1257.3897662685988,
+              "y": 731.6388189209187
+            },
+            "screen": {
+              "x": 1710.8385819516934,
+              "y": 602.5824803888449
+            },
+            "alpha": 1,
+            "scale": 1.6092335336466943,
+            "angle": 31.372532017977772
+          },
+          "picker": "picker",
+          "handoff": "capture",
+          "marketingVisible": false,
+          "workVisible": true
+        },
+        "missingImages": [],
+        "pageWidth": 1920,
+        "pageHeight": 1080
+      },
+      {
+        "state": {
+          "time": 10.85,
+          "scene": "claude",
+          "camera": {
+            "x": 1110,
+            "y": 716,
+            "s": 2.45
+          },
+          "cursor": {
+            "world": {
+              "x": 1292,
+              "y": 731
+            },
+            "screen": {
+              "x": 1405.9,
+              "y": 576.75
+            },
+            "alpha": 1,
+            "scale": 2.009,
+            "angle": 0
+          },
+          "picker": "picker",
+          "handoff": "capture",
+          "marketingVisible": false,
+          "workVisible": true
+        },
+        "missingImages": [],
+        "pageWidth": 1920,
+        "pageHeight": 1080
+      },
+      {
+        "state": {
+          "time": 11.2,
+          "scene": "claude",
+          "camera": {
+            "x": 1110,
+            "y": 716,
+            "s": 2.45
+          },
+          "cursor": {
+            "world": {
+              "x": 1291.9631904040068,
+              "y": 731.0409426376917
+            },
+            "screen": {
+              "x": 1405.8098164898167,
+              "y": 576.8503094623447
+            },
+            "alpha": 1,
+            "scale": 2.009,
+            "angle": 0.10452566157087374
+          },
+          "picker": "picker",
+          "handoff": "capture",
+          "marketingVisible": false,
+          "workVisible": true
+        },
+        "missingImages": [],
+        "pageWidth": 1920,
+        "pageHeight": 1080
+      },
+      {
+        "state": {
+          "time": 11.7,
+          "scene": "claude",
+          "camera": {
+            "x": 991.1903339561667,
+            "y": 692.8610388229239,
+            "s": 2.1296143837020227
+          },
+          "cursor": {
+            "world": {
+              "x": 1170,
+              "y": 787
+            },
+            "screen": {
+              "x": 1340.7956367519025,
+              "y": 740.4796857894676
+            },
+            "alpha": 1,
+            "scale": 1.7462837946356584,
+            "angle": 0
+          },
+          "picker": "picker",
+          "handoff": "capture",
+          "marketingVisible": false,
+          "workVisible": true
+        },
+        "missingImages": [],
+        "pageWidth": 1920,
+        "pageHeight": 1080
+      },
+      {
+        "state": {
+          "time": 12.2,
+          "scene": "claude",
+          "camera": {
+            "x": 843,
+            "y": 664,
+            "s": 1.73
+          },
+          "cursor": {
+            "world": {
+              "x": 1170,
+              "y": 787
+            },
+            "screen": {
+              "x": 1525.71,
+              "y": 752.79
+            },
+            "alpha": 0,
+            "scale": 1.4185999999999999,
+            "angle": 0
+          },
+          "picker": "picker",
+          "handoff": "capture",
+          "marketingVisible": false,
+          "workVisible": true
+        },
+        "missingImages": [],
+        "pageWidth": 1920,
+        "pageHeight": 1080
+      },
+      {
+        "state": {
+          "time": 14.4,
+          "scene": "claude",
+          "camera": {
+            "x": 843,
+            "y": 664,
+            "s": 1.73
+          },
+          "cursor": {
+            "world": {
+              "x": 1170,
+              "y": 787
+            },
+            "screen": {
+              "x": 1525.71,
+              "y": 752.79
+            },
+            "alpha": 0,
+            "scale": 1.4185999999999999,
+            "angle": 0
+          },
+          "picker": "picker",
+          "handoff": "capture",
+          "marketingVisible": false,
+          "workVisible": true
+        },
+        "missingImages": [],
+        "pageWidth": 1920,
+        "pageHeight": 1080
+      },
+      {
+        "state": {
+          "time": 15.8,
+          "scene": "claude",
+          "camera": {
+            "x": 968.8175218357585,
+            "y": 684.9105177135486,
+            "s": 2.215549309619688
+          },
+          "cursor": {
+            "world": {
+              "x": 1192.0411536021443,
+              "y": 751.0636500218641
+            },
+            "screen": {
+              "x": 1454.5629632508153,
+              "y": 686.5655266148681
+            },
+            "alpha": 1,
+            "scale": 1.816750433888144,
+            "angle": 61.780851160137296
+          },
+          "picker": "picker",
+          "handoff": "capture",
+          "marketingVisible": false,
+          "workVisible": true
+        },
+        "missingImages": [],
+        "pageWidth": 1920,
+        "pageHeight": 1080
+      },
+      {
+        "state": {
+          "time": 16.8,
+          "scene": "claude",
+          "camera": {
+            "x": 1198,
+            "y": 723,
+            "s": 3.1
+          },
+          "cursor": {
+            "world": {
+              "x": 1244,
+              "y": 731
+            },
+            "screen": {
+              "x": 1102.6,
+              "y": 564.8
+            },
+            "alpha": 1,
+            "scale": 2.542,
+            "angle": 0
+          },
+          "picker": "picker",
+          "handoff": "capture",
+          "marketingVisible": false,
+          "workVisible": true
+        },
+        "missingImages": [],
+        "pageWidth": 1920,
+        "pageHeight": 1080
+      },
+      {
+        "state": {
+          "time": 17.2,
+          "scene": "claude",
+          "camera": {
+            "x": 1198,
+            "y": 723,
+            "s": 3.1
+          },
+          "cursor": {
+            "world": {
+              "x": 1244,
+              "y": 731
+            },
+            "screen": {
+              "x": 1102.6,
+              "y": 564.8
+            },
+            "alpha": 1,
+            "scale": 2.2124640331835077,
+            "angle": 0
+          },
+          "picker": "picker",
+          "handoff": "capture",
+          "marketingVisible": false,
+          "workVisible": true
+        },
+        "missingImages": [],
+        "pageWidth": 1920,
+        "pageHeight": 1080
+      },
+      {
+        "state": {
+          "time": 17.6,
+          "scene": "claude",
+          "camera": {
+            "x": 1179.8981199999998,
+            "y": 697.1844359999999,
+            "s": 3.075538
+          },
+          "cursor": {
+            "world": {
+              "x": 1244.1704508874502,
+              "y": 730.8835849663815
+            },
+            "screen": {
+              "x": 1157.6719959929274,
+              "y": 643.6430132137673
+            },
+            "alpha": 1,
+            "scale": 2.52194116,
+            "angle": 0.4320637633295522
+          },
+          "picker": "picker",
+          "handoff": "capture",
+          "marketingVisible": false,
+          "workVisible": true
+        },
+        "missingImages": [],
+        "pageWidth": 1920,
+        "pageHeight": 1080
+      },
+      {
+        "state": {
+          "time": 18.3,
+          "scene": "claude",
+          "camera": {
+            "x": 1087,
+            "y": 564.7,
+            "s": 2.95
+          },
+          "cursor": {
+            "world": {
+              "x": 1280.010737142333,
+              "y": 663.1852664849362
+            },
+            "screen": {
+              "x": 1529.3816745698823,
+              "y": 830.5315361305616
+            },
+            "alpha": 1,
+            "scale": 2.419,
+            "angle": 0.4320637633294301
+          },
+          "picker": "picker",
+          "handoff": "capture",
+          "marketingVisible": false,
+          "workVisible": true
+        },
+        "missingImages": [],
+        "pageWidth": 1920,
+        "pageHeight": 1080
+      },
+      {
+        "state": {
+          "time": 19.8,
+          "scene": "claude",
+          "camera": {
+            "x": 1087,
+            "y": 564.7,
+            "s": 2.95
+          },
+          "cursor": {
+            "world": {
+              "x": 1214.1127412383546,
+              "y": 635.6999076310468
+            },
+            "screen": {
+              "x": 1334.982586653146,
+              "y": 749.449727511588
+            },
+            "alpha": 1,
+            "scale": 2.419,
+            "angle": -12.27362902733625
+          },
+          "picker": "picker",
+          "handoff": "capture",
+          "marketingVisible": false,
+          "workVisible": true
+        },
+        "missingImages": [],
+        "pageWidth": 1920,
+        "pageHeight": 1080
+      },
+      {
+        "state": {
+          "time": 20.6,
+          "scene": "claude",
+          "camera": {
+            "x": 1087,
+            "y": 564.7,
+            "s": 2.95
+          },
+          "cursor": {
+            "world": {
+              "x": 1003.5,
+              "y": 545.89
+            },
+            "screen": {
+              "x": 713.675,
+              "y": 484.5104999999998
+            },
+            "alpha": 1,
+            "scale": 2.419,
+            "angle": 0
+          },
+          "picker": "pickerHover",
+          "handoff": "capture",
+          "marketingVisible": false,
+          "workVisible": true
+        },
+        "missingImages": [],
+        "pageWidth": 1920,
+        "pageHeight": 1080
+      },
+      {
+        "state": {
+          "time": 21.8,
+          "scene": "claude",
+          "camera": {
+            "x": 1087,
+            "y": 564.7,
+            "s": 2.95
+          },
+          "cursor": {
+            "world": {
+              "x": 1003.5,
+              "y": 545.89
+            },
+            "screen": {
+              "x": 713.675,
+              "y": 484.5104999999998
+            },
+            "alpha": 1,
+            "scale": 2.419,
+            "angle": 0
+          },
+          "picker": "pickerSelected",
+          "handoff": "capture",
+          "marketingVisible": false,
+          "workVisible": true
+        },
+        "missingImages": [],
+        "pageWidth": 1920,
+        "pageHeight": 1080
+      },
+      {
+        "state": {
+          "time": 22.55,
+          "scene": "claude",
+          "camera": {
+            "x": 1087,
+            "y": 564.7,
+            "s": 2.95
+          },
+          "cursor": {
+            "world": {
+              "x": 1003.5,
+              "y": 545.89
+            },
+            "screen": {
+              "x": 713.675,
+              "y": 484.5104999999998
+            },
+            "alpha": 0.05792000000000186,
+            "scale": 2.419,
+            "angle": 0
+          },
+          "picker": "pickerSelected",
+          "handoff": "capture",
+          "marketingVisible": false,
+          "workVisible": true
+        },
+        "missingImages": [],
+        "pageWidth": 1920,
+        "pageHeight": 1080
+      },
+      {
+        "state": {
+          "time": 22.7,
+          "scene": "handoff",
+          "camera": {
+            "x": 290,
+            "y": 143,
+            "s": 1.8211427530195752
+          },
+          "cursor": null,
+          "picker": "pickerSelected",
+          "handoff": "capture",
+          "marketingVisible": false,
+          "workVisible": true
+        },
+        "missingImages": [],
+        "pageWidth": 1920,
+        "pageHeight": 1080
+      },
+      {
+        "state": {
+          "time": 23.4,
+          "scene": "handoff",
+          "camera": {
+            "x": 290,
+            "y": 143,
+            "s": 2.17
+          },
+          "cursor": null,
+          "picker": "pickerSelected",
+          "handoff": "capture",
+          "marketingVisible": false,
+          "workVisible": true
+        },
+        "missingImages": [],
+        "pageWidth": 1920,
+        "pageHeight": 1080
+      },
+      {
+        "state": {
+          "time": 25.3,
+          "scene": "handoff",
+          "camera": {
+            "x": 290,
+            "y": 143,
+            "s": 2.17
+          },
+          "cursor": null,
+          "picker": "pickerSelected",
+          "handoff": "capture",
+          "marketingVisible": false,
+          "workVisible": true
+        },
+        "missingImages": [],
+        "pageWidth": 1920,
+        "pageHeight": 1080
+      },
+      {
+        "state": {
+          "time": 25.8,
+          "scene": "handoff",
+          "camera": {
+            "x": 290,
+            "y": 143.97918701171878,
+            "s": 2.186854858398438
+          },
+          "cursor": null,
+          "picker": "pickerSelected",
+          "handoff": "summary",
+          "marketingVisible": false,
+          "workVisible": true
+        },
+        "missingImages": [],
+        "pageWidth": 1920,
+        "pageHeight": 1080
+      },
+      {
+        "state": {
+          "time": 26.5,
+          "scene": "handoff",
+          "camera": {
+            "x": 290,
+            "y": 204,
+            "s": 3.22
+          },
+          "cursor": null,
+          "picker": "pickerSelected",
+          "handoff": "summary",
+          "marketingVisible": false,
+          "workVisible": true
+        },
+        "missingImages": [],
+        "pageWidth": 1920,
+        "pageHeight": 1080
+      },
+      {
+        "state": {
+          "time": 28.7,
+          "scene": "handoff",
+          "camera": {
+            "x": 290,
+            "y": 204,
+            "s": 3.22
+          },
+          "cursor": null,
+          "picker": "pickerSelected",
+          "handoff": "paste",
+          "marketingVisible": false,
+          "workVisible": true
+        },
+        "missingImages": [],
+        "pageWidth": 1920,
+        "pageHeight": 1080
+      },
+      {
+        "state": {
+          "time": 29.6,
+          "scene": "handoff",
+          "camera": {
+            "x": 290,
+            "y": 143,
+            "s": 2.17
+          },
+          "cursor": null,
+          "picker": "pickerSelected",
+          "handoff": "paste",
+          "marketingVisible": false,
+          "workVisible": true
+        },
+        "missingImages": [],
+        "pageWidth": 1920,
+        "pageHeight": 1080
+      },
+      {
+        "state": {
+          "time": 30.8,
+          "scene": "handoff",
+          "camera": {
+            "x": 290,
+            "y": 143,
+            "s": 2.17
+          },
+          "cursor": null,
+          "picker": "pickerSelected",
+          "handoff": "done",
+          "marketingVisible": false,
+          "workVisible": true
+        },
+        "missingImages": [],
+        "pageWidth": 1920,
+        "pageHeight": 1080
+      },
+      {
+        "state": {
+          "time": 31.4,
+          "scene": "handoff",
+          "camera": {
+            "x": 290,
+            "y": 143,
+            "s": 2.17
+          },
+          "cursor": null,
+          "picker": "pickerSelected",
+          "handoff": "done",
+          "marketingVisible": false,
+          "workVisible": true
+        },
+        "missingImages": [],
+        "pageWidth": 1920,
+        "pageHeight": 1080
+      },
+      {
+        "state": {
+          "time": 31.8,
+          "scene": "chatgpt",
+          "camera": {
+            "x": 720,
+            "y": 405,
+            "s": 1.32
+          },
+          "cursor": {
+            "world": {
+              "x": 1390,
+              "y": 765
+            },
+            "screen": {
+              "x": 1844.4,
+              "y": 1015.2
+            },
+            "alpha": 0,
+            "scale": 1.0824,
+            "angle": 0
+          },
+          "picker": "pickerSelected",
+          "handoff": "done",
+          "marketingVisible": false,
+          "workVisible": true
+        },
+        "missingImages": [],
+        "pageWidth": 1920,
+        "pageHeight": 1080
+      },
+      {
+        "state": {
+          "time": 32.45,
+          "scene": "chatgpt",
+          "camera": {
+            "x": 720,
+            "y": 405,
+            "s": 1.32
+          },
+          "cursor": {
+            "world": {
+              "x": 1390,
+              "y": 765
+            },
+            "screen": {
+              "x": 1844.4,
+              "y": 1015.2
+            },
+            "alpha": 0,
+            "scale": 1.0824,
+            "angle": 0
+          },
+          "picker": "pickerSelected",
+          "handoff": "done",
+          "marketingVisible": false,
+          "workVisible": true
+        },
+        "missingImages": [],
+        "pageWidth": 1920,
+        "pageHeight": 1080
+      },
+      {
+        "state": {
+          "time": 33.5,
+          "scene": "chatgpt",
+          "camera": {
+            "x": 825.9246933333332,
+            "y": 475.61646222222214,
+            "s": 1.722121520987654
+          },
+          "cursor": {
+            "world": {
+              "x": 1390,
+              "y": 765
+            },
+            "screen": {
+              "x": 1931.4062250683776,
+              "y": 1038.353618226655
+            },
+            "alpha": 0,
+            "scale": 1.4121396472098762,
+            "angle": 0
+          },
+          "picker": "pickerSelected",
+          "handoff": "done",
+          "marketingVisible": false,
+          "workVisible": true
+        },
+        "missingImages": [],
+        "pageWidth": 1920,
+        "pageHeight": 1080
+      },
+      {
+        "state": {
+          "time": 34.5,
+          "scene": "chatgpt",
+          "camera": {
+            "x": 828,
+            "y": 477,
+            "s": 1.73
+          },
+          "cursor": {
+            "world": {
+              "x": 1390,
+              "y": 765
+            },
+            "screen": {
+              "x": 1932.26,
+              "y": 1038.24
+            },
+            "alpha": 0,
+            "scale": 1.4185999999999999,
+            "angle": 0
+          },
+          "picker": "pickerSelected",
+          "handoff": "done",
+          "marketingVisible": false,
+          "workVisible": true
+        },
+        "missingImages": [],
+        "pageWidth": 1920,
+        "pageHeight": 1080
+      },
+      {
+        "state": {
+          "time": 35.9,
+          "scene": "chatgpt",
+          "camera": {
+            "x": 828,
+            "y": 477,
+            "s": 1.73
+          },
+          "cursor": {
+            "world": {
+              "x": 1294,
+              "y": 596
+            },
+            "screen": {
+              "x": 1766.1799999999998,
+              "y": 745.87
+            },
+            "alpha": 1,
+            "scale": 1.4185999999999999,
+            "angle": 0
+          },
+          "picker": "pickerSelected",
+          "handoff": "done",
+          "marketingVisible": false,
+          "workVisible": true
+        },
+        "missingImages": [],
+        "pageWidth": 1920,
+        "pageHeight": 1080
+      },
+      {
+        "state": {
+          "time": 36.1,
+          "scene": "chatgpt",
+          "camera": {
+            "x": 828,
+            "y": 477,
+            "s": 1.73
+          },
+          "cursor": {
+            "world": {
+              "x": 1294,
+              "y": 596
+            },
+            "screen": {
+              "x": 1766.1799999999998,
+              "y": 745.87
+            },
+            "alpha": 0.760246278322379,
+            "scale": 1.3911139233563299,
+            "angle": 0
+          },
+          "picker": "pickerSelected",
+          "handoff": "done",
+          "marketingVisible": false,
+          "workVisible": true
+        },
+        "missingImages": [],
+        "pageWidth": 1920,
+        "pageHeight": 1080
+      },
+      {
+        "state": {
+          "time": 36.6,
+          "scene": "chatgpt",
+          "camera": {
+            "x": 807.1401201880168,
+            "y": 377.7575415005648,
+            "s": 1.748963527101803
+          },
+          "cursor": {
+            "world": {
+              "x": 1324.3464293673137,
+              "y": 718.8708303595816
+            },
+            "screen": {
+              "x": 1864.5749707415287,
+              "y": 1136.5947008241624
+            },
+            "alpha": 0,
+            "scale": 1.4341500922234782,
+            "angle": 52.07946005156186
+          },
+          "picker": "pickerSelected",
+          "handoff": "done",
+          "marketingVisible": false,
+          "workVisible": true
+        },
+        "missingImages": [],
+        "pageWidth": 1920,
+        "pageHeight": 1080
+      },
+      {
+        "state": {
+          "time": 38.5,
+          "scene": "chatgpt",
+          "camera": {
+            "x": 795,
+            "y": 320,
+            "s": 1.76
+          },
+          "cursor": {
+            "world": {
+              "x": 1320,
+              "y": 769
+            },
+            "screen": {
+              "x": 1884,
+              "y": 1330.24
+            },
+            "alpha": 0,
+            "scale": 1.4431999999999998,
+            "angle": 0
+          },
+          "picker": "pickerSelected",
+          "handoff": "done",
+          "marketingVisible": false,
+          "workVisible": true
+        },
+        "missingImages": [],
+        "pageWidth": 1920,
+        "pageHeight": 1080
+      },
+      {
+        "state": {
+          "time": 40.1,
+          "scene": "chatgpt",
+          "camera": {
+            "x": 795.9538287618254,
+            "y": 329.00321294698665,
+            "s": 1.7625590527756292
+          },
+          "cursor": {
+            "world": {
+              "x": 1320,
+              "y": 769
+            },
+            "screen": {
+              "x": 1883.6623231882522,
+              "y": 1315.5203202124794
+            },
+            "alpha": 0,
+            "scale": 1.4452984232760158,
+            "angle": 0
+          },
+          "picker": "pickerSelected",
+          "handoff": "done",
+          "marketingVisible": false,
+          "workVisible": true
+        },
+        "missingImages": [],
+        "pageWidth": 1920,
+        "pageHeight": 1080
+      },
+      {
+        "state": {
+          "time": 40.8,
+          "scene": "chatgpt",
+          "camera": {
+            "x": 836,
+            "y": 707,
+            "s": 1.87
+          },
+          "cursor": {
+            "world": {
+              "x": 1320,
+              "y": 769
+            },
+            "screen": {
+              "x": 1865.08,
+              "y": 655.94
+            },
+            "alpha": 0,
+            "scale": 1.5334,
+            "angle": 0
+          },
+          "picker": "pickerSelected",
+          "handoff": "done",
+          "marketingVisible": false,
+          "workVisible": true
+        },
+        "missingImages": [],
+        "pageWidth": 1920,
+        "pageHeight": 1080
+      },
+      {
+        "state": {
+          "time": 42.7,
+          "scene": "chatgpt",
+          "camera": {
+            "x": 836,
+            "y": 707,
+            "s": 1.87
+          },
+          "cursor": {
+            "world": {
+              "x": 1320,
+              "y": 769
+            },
+            "screen": {
+              "x": 1865.08,
+              "y": 655.94
+            },
+            "alpha": 0,
+            "scale": 1.5334,
+            "angle": 0
+          },
+          "picker": "pickerSelected",
+          "handoff": "done",
+          "marketingVisible": false,
+          "workVisible": true
+        },
+        "missingImages": [],
+        "pageWidth": 1920,
+        "pageHeight": 1080
+      },
+      {
+        "state": {
+          "time": 43.5,
+          "scene": "chatgpt",
+          "camera": {
+            "x": 1009.2002141964665,
+            "y": 718.3781162610817,
+            "s": 2.236628190634856
+          },
+          "cursor": {
+            "world": {
+              "x": 1288.402893723619,
+              "y": 738.3217480555311
+            },
+            "screen": {
+              "x": 1584.4725839312187,
+              "y": 584.6064890951071
+            },
+            "alpha": 1,
+            "scale": 1.8340351163205817,
+            "angle": 6.058538097962636
+          },
+          "picker": "pickerSelected",
+          "handoff": "done",
+          "marketingVisible": false,
+          "workVisible": true
+        },
+        "missingImages": [],
+        "pageWidth": 1920,
+        "pageHeight": 1080
+      },
+      {
+        "state": {
+          "time": 44.25,
+          "scene": "chatgpt",
+          "camera": {
+            "x": 1110,
+            "y": 725,
+            "s": 2.45
+          },
+          "cursor": {
+            "world": {
+              "x": 1294,
+              "y": 734
+            },
+            "screen": {
+              "x": 1410.8,
+              "y": 562.05
+            },
+            "alpha": 1,
+            "scale": 2.009,
+            "angle": 0
+          },
+          "picker": "pickerSelected",
+          "handoff": "done",
+          "marketingVisible": false,
+          "workVisible": true
+        },
+        "missingImages": [],
+        "pageWidth": 1920,
+        "pageHeight": 1080
+      },
+      {
+        "state": {
+          "time": 44.6,
+          "scene": "chatgpt",
+          "camera": {
+            "x": 1110,
+            "y": 725,
+            "s": 2.45
+          },
+          "cursor": {
+            "world": {
+              "x": 1294,
+              "y": 734
+            },
+            "screen": {
+              "x": 1410.8,
+              "y": 562.05
+            },
+            "alpha": 1,
+            "scale": 2.009,
+            "angle": 0
+          },
+          "picker": "pickerSelected",
+          "handoff": "done",
+          "marketingVisible": false,
+          "workVisible": true
+        },
+        "missingImages": [],
+        "pageWidth": 1920,
+        "pageHeight": 1080
+      },
+      {
+        "state": {
+          "time": 45.25,
+          "scene": "chatgpt",
+          "camera": {
+            "x": 843.9463903759321,
+            "y": 366.03878066594007,
+            "s": 1.867215902728232
+          },
+          "cursor": {
+            "world": {
+              "x": 1350,
+              "y": 802
+            },
+            "screen": {
+              "x": 1904.9113475230843,
+              "y": 1354.0337217133474
+            },
+            "alpha": 0,
+            "scale": 1.5311170402371501,
+            "angle": 0
+          },
+          "picker": "pickerSelected",
+          "handoff": "done",
+          "marketingVisible": false,
+          "workVisible": true
+        },
+        "missingImages": [],
+        "pageWidth": 1920,
+        "pageHeight": 1080
+      },
+      {
+        "state": {
+          "time": 45.7,
+          "scene": "chatgpt",
+          "camera": {
+            "x": 795,
+            "y": 300,
+            "s": 1.76
+          },
+          "cursor": {
+            "world": {
+              "x": 1350,
+              "y": 802
+            },
+            "screen": {
+              "x": 1936.8,
+              "y": 1423.52
+            },
+            "alpha": 0,
+            "scale": 1.4431999999999998,
+            "angle": 0
+          },
+          "picker": "pickerSelected",
+          "handoff": "done",
+          "marketingVisible": false,
+          "workVisible": true
+        },
+        "missingImages": [],
+        "pageWidth": 1920,
+        "pageHeight": 1080
+      },
+      {
+        "state": {
+          "time": 47.8,
+          "scene": "chatgpt",
+          "camera": {
+            "x": 795,
+            "y": 300,
+            "s": 1.76
+          },
+          "cursor": {
+            "world": {
+              "x": 1350,
+              "y": 802
+            },
+            "screen": {
+              "x": 1936.8,
+              "y": 1423.52
+            },
+            "alpha": 0,
+            "scale": 1.4431999999999998,
+            "angle": 0
+          },
+          "picker": "pickerSelected",
+          "handoff": "done",
+          "marketingVisible": false,
+          "workVisible": true
+        },
+        "missingImages": [],
+        "pageWidth": 1920,
+        "pageHeight": 1080
+      },
+      {
+        "state": {
+          "time": 49.6,
+          "scene": "chatgpt",
+          "camera": {
+            "x": 795,
+            "y": 300,
+            "s": 1.76
+          },
+          "cursor": {
+            "world": {
+              "x": 1350,
+              "y": 802
+            },
+            "screen": {
+              "x": 1936.8,
+              "y": 1423.52
+            },
+            "alpha": 0,
+            "scale": 1.4431999999999998,
+            "angle": 0
+          },
+          "picker": "pickerSelected",
+          "handoff": "done",
+          "marketingVisible": false,
+          "workVisible": true
+        },
+        "missingImages": [],
+        "pageWidth": 1920,
+        "pageHeight": 1080
+      },
+      {
+        "state": {
+          "time": 52.4,
+          "scene": "chatgpt",
+          "camera": {
+            "x": 792.7027473457241,
+            "y": 303.2161537159862,
+            "s": 1.7465227844282483
+          },
+          "cursor": {
+            "world": {
+              "x": 1350,
+              "y": 802
+            },
+            "screen": {
+              "x": 1933.332349459959,
+              "y": 1411.1373520397872
+            },
+            "alpha": 0,
+            "scale": 1.4321486832311634,
+            "angle": 0
+          },
+          "picker": "pickerSelected",
+          "handoff": "done",
+          "marketingVisible": false,
+          "workVisible": true
+        },
+        "missingImages": [],
+        "pageWidth": 1920,
+        "pageHeight": 1080
+      },
+      {
+        "state": {
+          "time": 53.5,
+          "scene": "chatgpt",
+          "camera": {
+            "x": 720,
+            "y": 405,
+            "s": 1.32
+          },
+          "cursor": {
+            "world": {
+              "x": 1350,
+              "y": 802
+            },
+            "screen": {
+              "x": 1791.6,
+              "y": 1064.04
+            },
+            "alpha": 0,
+            "scale": 1.0824,
+            "angle": 0
+          },
+          "picker": "pickerSelected",
+          "handoff": "done",
+          "marketingVisible": false,
+          "workVisible": true
+        },
+        "missingImages": [],
+        "pageWidth": 1920,
+        "pageHeight": 1080
+      },
+      {
+        "state": {
+          "time": 54.35,
+          "scene": "chatgpt",
+          "camera": {
+            "x": 720,
+            "y": 405,
+            "s": 1.32
+          },
+          "cursor": {
+            "world": {
+              "x": 1350,
+              "y": 802
+            },
+            "screen": {
+              "x": 1791.6,
+              "y": 1064.04
+            },
+            "alpha": 0,
+            "scale": 1.0824,
+            "angle": 0
+          },
+          "picker": "pickerSelected",
+          "handoff": "done",
+          "marketingVisible": false,
+          "workVisible": true
+        },
+        "missingImages": [],
+        "pageWidth": 1920,
+        "pageHeight": 1080
+      },
+      {
+        "state": {
+          "time": 54.73,
+          "scene": "title",
+          "camera": null,
+          "cursor": null,
+          "picker": "pickerSelected",
+          "handoff": "done",
+          "marketingVisible": false,
+          "workVisible": false
+        },
+        "missingImages": [],
+        "pageWidth": 1920,
+        "pageHeight": 1080
+      },
+      {
+        "state": {
+          "time": 55.2,
+          "scene": "title",
+          "camera": null,
+          "cursor": null,
+          "picker": "pickerSelected",
+          "handoff": "done",
+          "marketingVisible": true,
+          "workVisible": false
+        },
+        "missingImages": [],
+        "pageWidth": 1920,
+        "pageHeight": 1080
+      },
+      {
+        "state": {
+          "time": 55.85,
+          "scene": "title",
+          "camera": null,
+          "cursor": null,
+          "picker": "pickerSelected",
+          "handoff": "done",
+          "marketingVisible": true,
+          "workVisible": false
+        },
+        "missingImages": [],
+        "pageWidth": 1920,
+        "pageHeight": 1080
+      },
+      {
+        "state": {
+          "time": 57.3,
+          "scene": "title",
+          "camera": null,
+          "cursor": null,
+          "picker": "pickerSelected",
+          "handoff": "done",
+          "marketingVisible": true,
+          "workVisible": false
+        },
+        "missingImages": [],
+        "pageWidth": 1920,
+        "pageHeight": 1080
+      },
+      {
+        "state": {
+          "time": 58.75,
+          "scene": "title",
+          "camera": null,
+          "cursor": null,
+          "picker": "pickerSelected",
+          "handoff": "done",
+          "marketingVisible": true,
+          "workVisible": false
+        },
+        "missingImages": [],
+        "pageWidth": 1920,
+        "pageHeight": 1080
+      },
+      {
+        "state": {
+          "time": 59.2,
+          "scene": "title",
+          "camera": null,
+          "cursor": null,
+          "picker": "pickerSelected",
+          "handoff": "done",
+          "marketingVisible": true,
+          "workVisible": false
+        },
+        "missingImages": [],
+        "pageWidth": 1920,
+        "pageHeight": 1080
+      },
+      {
+        "state": {
+          "time": 60.4,
+          "scene": "title",
+          "camera": null,
+          "cursor": null,
+          "picker": "pickerSelected",
+          "handoff": "done",
+          "marketingVisible": true,
+          "workVisible": false
+        },
+        "missingImages": [],
+        "pageWidth": 1920,
+        "pageHeight": 1080
+      }
+    ],
+    "clicks": [
+      {
+        "time": 10.85,
+        "target": "Claude Send",
+        "scene": "claude",
+        "x": 1292,
+        "y": 731,
+        "tip": {
+          "x": 1405.9,
+          "y": 576.75
+        },
+        "targetBounds": {
+          "x": 1371.60009765625,
+          "y": 535.10009765625,
+          "width": 83.300048828125,
+          "height": 83.2999267578125
+        },
+        "inside": true,
+        "centerError": 7.350122070565825
+      },
+      {
+        "time": 17.1,
+        "target": "Cap Context orb",
+        "scene": "claude",
+        "x": 1244,
+        "y": 731,
+        "tip": {
+          "x": 1102.6,
+          "y": 564.8
+        },
+        "targetBounds": {
+          "x": 1040.599853515625,
+          "y": 502.7998046875,
+          "width": 130.199951171875,
+          "height": 130.2001953125
+        },
+        "inside": true,
+        "centerError": 4.383872146821958
+      },
+      {
+        "time": 21.8,
+        "target": "Continue in ChatGPT",
+        "scene": "claude",
+        "x": 1003.5,
+        "y": 545.89,
+        "tip": {
+          "x": 713.675,
+          "y": 484.5104999999998
+        },
+        "targetBounds": {
+          "x": 482.10009765625,
+          "y": 398.96240234375,
+          "width": 469.050048828125,
+          "height": 177
+        },
+        "inside": true,
+        "centerError": 4.173361675769673
+      },
+      {
+        "time": 35.9,
+        "target": "Send carried context",
+        "scene": "chatgpt",
+        "x": 1294,
+        "y": 596,
+        "tip": {
+          "x": 1766.1799999999998,
+          "y": 745.87
+        },
+        "targetBounds": {
+          "x": 1735.0400390625,
+          "y": 713,
+          "width": 62.280029296875,
+          "height": 62.280029296875
+        },
+        "inside": true,
+        "centerError": 1.7299853523962876
+      },
+      {
+        "time": 44.25,
+        "target": "Send follow-up",
+        "scene": "chatgpt",
+        "x": 1294,
+        "y": 734,
+        "tip": {
+          "x": 1410.8,
+          "y": 562.05
+        },
+        "targetBounds": {
+          "x": 1366.699951171875,
+          "y": 517.9500732421875,
+          "width": 88.2001953125,
+          "height": 88.199951171875
+        },
+        "inside": true,
+        "centerError": 0.00006905339666455978
+      }
+    ],
+    "determinism": [
+      {
+        "time": 18.3,
+        "equal": true
+      },
+      {
+        "time": 26.5,
+        "equal": true
+      },
+      {
+        "time": 35.9,
+        "equal": true
+      },
+      {
+        "time": 49.6,
+        "equal": true
+      },
+      {
+        "time": 57.3,
+        "equal": true
+      }
+    ]
+  },
+  "sizeBytes": 9456209,
+  "sha256": "6cf13ae9b1227354497a4c950b89d48fb8cc601651bf1dfa676f54400c9e8ed4",
+  "posterSha256": "15c79dd837c118edbf6dbb733fdab15592e64e26de0c84d93b4292f92bc2fb5a",
+  "compositionSha256": "9a6722c515eae0586a691099a094f596987e71f5744c89d94731972dd1e216e4",
+  "timelineSha256": "519dd948b61d509c13c11e020162df75c91f0a3ee30b805001d4dc5d6e514dc7"
+}

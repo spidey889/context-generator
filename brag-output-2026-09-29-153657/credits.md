@@ -1,0 +1,7 @@
+The film's design, conversation, animation, original score and sound effects were created for Cap Context. No visual or audio footage from the Claude Cowork reference is included.
+
+The quiet upright-piano instrument uses three `pp` recordings from Versilian Studios / Sam Gossner's [VSCO 2 Community Edition](https://github.com/sgossner/VSCO-2-CE), released under [CC0-1.0](https://github.com/sgossner/VSCO-2-CE/blob/master/LICENSE). The publisher also confirms the library's CC0 status on its [official page](https://versilian-studios.com/vsco-community/). Source URLs and downloaded file hashes are recorded in `work/audio-manifest.json`; `work/score.py` can recreate the soundtrack. Clicks, typing and movement textures are original synthesized Foley, synchronized to the composition's timeline.
+
+Cap Context's UI, fonts and icon come directly from this project. Claude and ChatGPT marks identify the illustrated source and destination services. The native-looking host shells and sample conversation are staged, not a recording of someone's private account. The transfer timing is condensed and is not a claim about live network speed.
+
+The limit notice follows Claude's [documented usage-limit wording](https://support.claude.com/en/articles/12466728-troubleshoot-claude-error-messages). Its displayed reset time is illustrative. Public anonymous host pages were blocked by access checks, so the film does not claim that its host shells were captured from a live account.

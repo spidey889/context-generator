@@ -1,0 +1,534 @@
+{
+  "sampleRate": 48000,
+  "duration": 62,
+  "seed": 29092026,
+  "peakDb": -7.9576808902976595,
+  "rmsDb": -29.049516888865277,
+  "clickCount": 5,
+  "music": "Original sparse D-major upright-piano score",
+  "samples": [
+    {
+      "name": "UR1_C3_pp_RR1.wav",
+      "url": "https://raw.githubusercontent.com/sgossner/VSCO-2-CE/master/Keys/Upright%20Nr1/UR1_C3_pp_RR1.wav",
+      "sha256": "2fbe80d44b96c24980762eb805594cff6b84a5b4ed06ddfed70a8f8c692b856f",
+      "license": "CC0-1.0"
+    },
+    {
+      "name": "UR1_C4_pp_RR1.wav",
+      "url": "https://raw.githubusercontent.com/sgossner/VSCO-2-CE/master/Keys/Upright%20Nr1/UR1_C4_pp_RR1.wav",
+      "sha256": "0354bf405b644eb16b0d1223e304de93b4abef4e2191c552665563784d40f1ea",
+      "license": "CC0-1.0"
+    },
+    {
+      "name": "UR1_C5_pp_RR1.wav",
+      "url": "https://raw.githubusercontent.com/sgossner/VSCO-2-CE/master/Keys/Upright%20Nr1/UR1_C5_pp_RR1.wav",
+      "sha256": "e0d5353f67afe55e4d6d49253651f2a8aa0c456603f538175e103769e1e1e73c",
+      "license": "CC0-1.0"
+    }
+  ],
+  "cues": [
+    {
+      "type": "click",
+      "target": "Claude Send",
+      "seconds": 10.85,
+      "sample": 520800,
+      "frame": 651.0
+    },
+    {
+      "type": "click",
+      "target": "Cap Context orb",
+      "seconds": 17.1,
+      "sample": 820800,
+      "frame": 1026.0
+    },
+    {
+      "type": "click",
+      "target": "Continue in ChatGPT",
+      "seconds": 21.8,
+      "sample": 1046400,
+      "frame": 1308.0
+    },
+    {
+      "type": "click",
+      "target": "Send carried context",
+      "seconds": 35.9,
+      "sample": 1723200,
+      "frame": 2154.0
+    },
+    {
+      "type": "click",
+      "target": "Send follow-up",
+      "seconds": 44.25,
+      "sample": 2124000,
+      "frame": 2655.0
+    },
+    {
+      "type": "key",
+      "seconds": 7.644982,
+      "sample": 366959,
+      "target": "Claude composer",
+      "character": "C"
+    },
+    {
+      "type": "key",
+      "seconds": 7.743234,
+      "sample": 371675,
+      "target": "Claude composer",
+      "character": "o"
+    },
+    {
+      "type": "key",
+      "seconds": 7.833791,
+      "sample": 376022,
+      "target": "Claude composer",
+      "character": "n"
+    },
+    {
+      "type": "key",
+      "seconds": 7.9365,
+      "sample": 380952,
+      "target": "Claude composer",
+      "character": "t"
+    },
+    {
+      "type": "key",
+      "seconds": 8.029724,
+      "sample": 385427,
+      "target": "Claude composer",
+      "character": "i"
+    },
+    {
+      "type": "key",
+      "seconds": 8.100072,
+      "sample": 388803,
+      "target": "Claude composer",
+      "character": "n"
+    },
+    {
+      "type": "key",
+      "seconds": 8.20444,
+      "sample": 393813,
+      "target": "Claude composer",
+      "character": "u"
+    },
+    {
+      "type": "key",
+      "seconds": 8.29422,
+      "sample": 398123,
+      "target": "Claude composer",
+      "character": "e"
+    },
+    {
+      "type": "key",
+      "seconds": 8.440234,
+      "sample": 405131,
+      "target": "Claude composer",
+      "character": " "
+    },
+    {
+      "type": "key",
+      "seconds": 8.519874,
+      "sample": 408954,
+      "target": "Claude composer",
+      "character": "w"
+    },
+    {
+      "type": "key",
+      "seconds": 8.591836,
+      "sample": 412408,
+      "target": "Claude composer",
+      "character": "i"
+    },
+    {
+      "type": "key",
+      "seconds": 8.666529,
+      "sample": 415993,
+      "target": "Claude composer",
+      "character": "t"
+    },
+    {
+      "type": "key",
+      "seconds": 8.742524,
+      "sample": 419641,
+      "target": "Claude composer",
+      "character": "h"
+    },
+    {
+      "type": "key",
+      "seconds": 8.888537,
+      "sample": 426650,
+      "target": "Claude composer",
+      "character": " "
+    },
+    {
+      "type": "key",
+      "seconds": 8.96905,
+      "sample": 430514,
+      "target": "Claude composer",
+      "character": "d"
+    },
+    {
+      "type": "key",
+      "seconds": 9.039231,
+      "sample": 433883,
+      "target": "Claude composer",
+      "character": "a"
+    },
+    {
+      "type": "key",
+      "seconds": 9.125,
+      "sample": 438000,
+      "target": "Claude composer",
+      "character": "y"
+    },
+    {
+      "type": "key",
+      "seconds": 9.271013,
+      "sample": 445009,
+      "target": "Claude composer",
+      "character": " "
+    },
+    {
+      "type": "key",
+      "seconds": 9.35414,
+      "sample": 448999,
+      "target": "Claude composer",
+      "character": "t"
+    },
+    {
+      "type": "key",
+      "seconds": 9.43188,
+      "sample": 452730,
+      "target": "Claude composer",
+      "character": "h"
+    },
+    {
+      "type": "key",
+      "seconds": 9.532536,
+      "sample": 457562,
+      "target": "Claude composer",
+      "character": "r"
+    },
+    {
+      "type": "key",
+      "seconds": 9.621793,
+      "sample": 461846,
+      "target": "Claude composer",
+      "character": "e"
+    },
+    {
+      "type": "key",
+      "seconds": 9.718341,
+      "sample": 466480,
+      "target": "Claude composer",
+      "character": "e"
+    },
+    {
+      "type": "key",
+      "seconds": 9.8,
+      "sample": 470400,
+      "target": "Claude composer",
+      "character": "."
+    },
+    {
+      "type": "key",
+      "seconds": 40.793023,
+      "sample": 1958065,
+      "target": "ChatGPT composer",
+      "character": "C"
+    },
+    {
+      "type": "key",
+      "seconds": 40.879393,
+      "sample": 1962211,
+      "target": "ChatGPT composer",
+      "character": "o"
+    },
+    {
+      "type": "key",
+      "seconds": 40.960257,
+      "sample": 1966092,
+      "target": "ChatGPT composer",
+      "character": "n"
+    },
+    {
+      "type": "key",
+      "seconds": 41.057749,
+      "sample": 1970772,
+      "target": "ChatGPT composer",
+      "character": "t"
+    },
+    {
+      "type": "key",
+      "seconds": 41.128482,
+      "sample": 1974167,
+      "target": "ChatGPT composer",
+      "character": "i"
+    },
+    {
+      "type": "key",
+      "seconds": 41.210427,
+      "sample": 1978100,
+      "target": "ChatGPT composer",
+      "character": "n"
+    },
+    {
+      "type": "key",
+      "seconds": 41.284926,
+      "sample": 1981676,
+      "target": "ChatGPT composer",
+      "character": "u"
+    },
+    {
+      "type": "key",
+      "seconds": 41.379646,
+      "sample": 1986223,
+      "target": "ChatGPT composer",
+      "character": "e"
+    },
+    {
+      "type": "key",
+      "seconds": 41.52753,
+      "sample": 1993321,
+      "target": "ChatGPT composer",
+      "character": " "
+    },
+    {
+      "type": "key",
+      "seconds": 41.618611,
+      "sample": 1997693,
+      "target": "ChatGPT composer",
+      "character": "w"
+    },
+    {
+      "type": "key",
+      "seconds": 41.700083,
+      "sample": 2001604,
+      "target": "ChatGPT composer",
+      "character": "i"
+    },
+    {
+      "type": "key",
+      "seconds": 41.790354,
+      "sample": 2005937,
+      "target": "ChatGPT composer",
+      "character": "t"
+    },
+    {
+      "type": "key",
+      "seconds": 41.897338,
+      "sample": 2011072,
+      "target": "ChatGPT composer",
+      "character": "h"
+    },
+    {
+      "type": "key",
+      "seconds": 42.045222,
+      "sample": 2018171,
+      "target": "ChatGPT composer",
+      "character": " "
+    },
+    {
+      "type": "key",
+      "seconds": 42.151103,
+      "sample": 2023253,
+      "target": "ChatGPT composer",
+      "character": "d"
+    },
+    {
+      "type": "key",
+      "seconds": 42.251969,
+      "sample": 2028095,
+      "target": "ChatGPT composer",
+      "character": "a"
+    },
+    {
+      "type": "key",
+      "seconds": 42.353821,
+      "sample": 2032983,
+      "target": "ChatGPT composer",
+      "character": "y"
+    },
+    {
+      "type": "key",
+      "seconds": 42.501705,
+      "sample": 2040082,
+      "target": "ChatGPT composer",
+      "character": " "
+    },
+    {
+      "type": "key",
+      "seconds": 42.572667,
+      "sample": 2043488,
+      "target": "ChatGPT composer",
+      "character": "t"
+    },
+    {
+      "type": "key",
+      "seconds": 42.643538,
+      "sample": 2046890,
+      "target": "ChatGPT composer",
+      "character": "h"
+    },
+    {
+      "type": "key",
+      "seconds": 42.726073,
+      "sample": 2050852,
+      "target": "ChatGPT composer",
+      "character": "r"
+    },
+    {
+      "type": "key",
+      "seconds": 42.797201,
+      "sample": 2054266,
+      "target": "ChatGPT composer",
+      "character": "e"
+    },
+    {
+      "type": "key",
+      "seconds": 42.897541,
+      "sample": 2059082,
+      "target": "ChatGPT composer",
+      "character": "e"
+    },
+    {
+      "type": "key",
+      "seconds": 43,
+      "sample": 2064000,
+      "target": "ChatGPT composer",
+      "character": "."
+    },
+    {
+      "type": "motion",
+      "seconds": 0.7,
+      "end": 1.8,
+      "name": "enter conversation"
+    },
+    {
+      "type": "motion",
+      "seconds": 7.0,
+      "end": 7.7,
+      "name": "Claude composer push"
+    },
+    {
+      "type": "motion",
+      "seconds": 9.9,
+      "end": 10.6,
+      "name": "follow cursor to Claude Send"
+    },
+    {
+      "type": "motion",
+      "seconds": 11.3,
+      "end": 12.15,
+      "name": "pull out to limit"
+    },
+    {
+      "type": "motion",
+      "seconds": 15.4,
+      "end": 16.35,
+      "name": "Cap Context push"
+    },
+    {
+      "type": "motion",
+      "seconds": 17.3,
+      "end": 18.3,
+      "name": "picker reveal"
+    },
+    {
+      "type": "motion",
+      "seconds": 22.7,
+      "end": 23.35,
+      "name": "handoff entrance"
+    },
+    {
+      "type": "motion",
+      "seconds": 25.7,
+      "end": 26.5,
+      "name": "progress macro"
+    },
+    {
+      "type": "motion",
+      "seconds": 28.75,
+      "end": 29.5,
+      "name": "progress pullout"
+    },
+    {
+      "type": "motion",
+      "seconds": 31.65,
+      "end": 32.4,
+      "name": "ChatGPT entrance"
+    },
+    {
+      "type": "motion",
+      "seconds": 32.85,
+      "end": 33.6,
+      "name": "carried context push"
+    },
+    {
+      "type": "motion",
+      "seconds": 36.2,
+      "end": 36.9,
+      "name": "acknowledgement"
+    },
+    {
+      "type": "motion",
+      "seconds": 40,
+      "end": 40.7,
+      "name": "ChatGPT composer push"
+    },
+    {
+      "type": "motion",
+      "seconds": 43.1,
+      "end": 43.8,
+      "name": "follow cursor to ChatGPT Send"
+    },
+    {
+      "type": "motion",
+      "seconds": 44.65,
+      "end": 45.5,
+      "name": "answer reveal"
+    },
+    {
+      "type": "motion",
+      "seconds": 52.25,
+      "end": 53.2,
+      "name": "result pullout"
+    },
+    {
+      "type": "motion",
+      "seconds": 54.05,
+      "end": 54.7,
+      "name": "work exits"
+    },
+    {
+      "type": "status",
+      "seconds": 25.4,
+      "midi": 62
+    },
+    {
+      "type": "status",
+      "seconds": 28.7,
+      "midi": 64
+    },
+    {
+      "type": "status",
+      "seconds": 30.55,
+      "midi": 66
+    },
+    {
+      "type": "status",
+      "seconds": 32.85,
+      "midi": 69
+    },
+    {
+      "type": "status",
+      "seconds": 36.6,
+      "midi": 62
+    },
+    {
+      "type": "status",
+      "seconds": 44.9,
+      "midi": 64
+    }
+  ]
+}
