@@ -1,0 +1,10 @@
+{
+  "mode": "separate visible Brave window",
+  "playback": {
+    "ended": true,
+    "currentTime": 52,
+    "totalVideoFrames": 3120,
+    "droppedVideoFrames": 4,
+    "error": null
+  }
+}

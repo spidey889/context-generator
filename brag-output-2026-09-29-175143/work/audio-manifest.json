@@ -1,0 +1,1089 @@
+{
+  "sampleRate": 48000,
+  "duration": 52,
+  "seed": 30092026,
+  "tempoBpm": 100,
+  "music": "Original D-major felt-upright motif and tonal pulse",
+  "peakDb": -7.3720660622767245,
+  "rmsDb": -25.806895526065464,
+  "musicRawRmsDb": -42.4647752595535,
+  "effectsRawRmsDb": -60.43607599799703,
+  "clickCount": 5,
+  "samples": [
+    {
+      "name": "UR1_C3_pp_RR1.wav",
+      "url": "https://raw.githubusercontent.com/sgossner/VSCO-2-CE/master/Keys/Upright%20Nr1/UR1_C3_pp_RR1.wav",
+      "sha256": "2fbe80d44b96c24980762eb805594cff6b84a5b4ed06ddfed70a8f8c692b856f",
+      "license": "CC0-1.0",
+      "publisher": "VSCO 2 Community Edition"
+    },
+    {
+      "name": "UR1_C4_pp_RR1.wav",
+      "url": "https://raw.githubusercontent.com/sgossner/VSCO-2-CE/master/Keys/Upright%20Nr1/UR1_C4_pp_RR1.wav",
+      "sha256": "0354bf405b644eb16b0d1223e304de93b4abef4e2191c552665563784d40f1ea",
+      "license": "CC0-1.0",
+      "publisher": "VSCO 2 Community Edition"
+    },
+    {
+      "name": "UR1_C5_pp_RR1.wav",
+      "url": "https://raw.githubusercontent.com/sgossner/VSCO-2-CE/master/Keys/Upright%20Nr1/UR1_C5_pp_RR1.wav",
+      "sha256": "e0d5353f67afe55e4d6d49253651f2a8aa0c456603f538175e103769e1e1e73c",
+      "license": "CC0-1.0",
+      "publisher": "VSCO 2 Community Edition"
+    }
+  ],
+  "scoreEvents": [
+    {
+      "type": "bar",
+      "seconds": 0.18,
+      "chord": "Dadd9",
+      "intensity": 0.84
+    },
+    {
+      "type": "motif",
+      "seconds": 0.48,
+      "midi": 76
+    },
+    {
+      "type": "motif",
+      "seconds": 1.08,
+      "midi": 78
+    },
+    {
+      "type": "motif",
+      "seconds": 1.53,
+      "midi": 76
+    },
+    {
+      "type": "motif",
+      "seconds": 2.13,
+      "midi": 69
+    },
+    {
+      "type": "bar",
+      "seconds": 2.58,
+      "chord": "Bm7",
+      "intensity": 0.84
+    },
+    {
+      "type": "motif",
+      "seconds": 2.88,
+      "midi": 69
+    },
+    {
+      "type": "motif",
+      "seconds": 3.48,
+      "midi": 74
+    },
+    {
+      "type": "motif",
+      "seconds": 3.93,
+      "midi": 69
+    },
+    {
+      "type": "motif",
+      "seconds": 4.53,
+      "midi": 66
+    },
+    {
+      "type": "bar",
+      "seconds": 4.98,
+      "chord": "Gmaj7",
+      "intensity": 0.84
+    },
+    {
+      "type": "motif",
+      "seconds": 5.28,
+      "midi": 71
+    },
+    {
+      "type": "motif",
+      "seconds": 5.88,
+      "midi": 78
+    },
+    {
+      "type": "motif",
+      "seconds": 6.33,
+      "midi": 71
+    },
+    {
+      "type": "motif",
+      "seconds": 6.93,
+      "midi": 66
+    },
+    {
+      "type": "bar",
+      "seconds": 7.38,
+      "chord": "Aadd9",
+      "intensity": 0.84
+    },
+    {
+      "type": "motif",
+      "seconds": 7.68,
+      "midi": 71
+    },
+    {
+      "type": "motif",
+      "seconds": 8.28,
+      "midi": 76
+    },
+    {
+      "type": "motif",
+      "seconds": 8.73,
+      "midi": 71
+    },
+    {
+      "type": "motif",
+      "seconds": 9.33,
+      "midi": 64
+    },
+    {
+      "type": "bar",
+      "seconds": 9.78,
+      "chord": "Dadd9",
+      "intensity": 0.84
+    },
+    {
+      "type": "bar",
+      "seconds": 12.18,
+      "chord": "Bm7",
+      "intensity": 0.17
+    },
+    {
+      "type": "bar",
+      "seconds": 14.58,
+      "chord": "Gmaj7",
+      "intensity": 1.06
+    },
+    {
+      "type": "motif",
+      "seconds": 14.88,
+      "midi": 71
+    },
+    {
+      "type": "motif",
+      "seconds": 15.48,
+      "midi": 78
+    },
+    {
+      "type": "motif",
+      "seconds": 15.93,
+      "midi": 71
+    },
+    {
+      "type": "motif",
+      "seconds": 16.53,
+      "midi": 66
+    },
+    {
+      "type": "bar",
+      "seconds": 16.98,
+      "chord": "Aadd9",
+      "intensity": 1.06
+    },
+    {
+      "type": "motif",
+      "seconds": 17.28,
+      "midi": 71
+    },
+    {
+      "type": "motif",
+      "seconds": 17.88,
+      "midi": 76
+    },
+    {
+      "type": "motif",
+      "seconds": 18.33,
+      "midi": 71
+    },
+    {
+      "type": "motif",
+      "seconds": 18.93,
+      "midi": 64
+    },
+    {
+      "type": "bar",
+      "seconds": 19.38,
+      "chord": "Dadd9",
+      "intensity": 1.22
+    },
+    {
+      "type": "motif",
+      "seconds": 19.68,
+      "midi": 76
+    },
+    {
+      "type": "motif",
+      "seconds": 20.28,
+      "midi": 78
+    },
+    {
+      "type": "motif",
+      "seconds": 20.73,
+      "midi": 76
+    },
+    {
+      "type": "motif",
+      "seconds": 21.33,
+      "midi": 69
+    },
+    {
+      "type": "bar",
+      "seconds": 21.78,
+      "chord": "Bm7",
+      "intensity": 1.22
+    },
+    {
+      "type": "motif",
+      "seconds": 22.08,
+      "midi": 69
+    },
+    {
+      "type": "motif",
+      "seconds": 22.68,
+      "midi": 74
+    },
+    {
+      "type": "motif",
+      "seconds": 23.13,
+      "midi": 69
+    },
+    {
+      "type": "motif",
+      "seconds": 23.73,
+      "midi": 66
+    },
+    {
+      "type": "bar",
+      "seconds": 24.18,
+      "chord": "Gmaj7",
+      "intensity": 1.22
+    },
+    {
+      "type": "motif",
+      "seconds": 24.48,
+      "midi": 71
+    },
+    {
+      "type": "motif",
+      "seconds": 25.08,
+      "midi": 78
+    },
+    {
+      "type": "motif",
+      "seconds": 25.53,
+      "midi": 71
+    },
+    {
+      "type": "motif",
+      "seconds": 26.13,
+      "midi": 66
+    },
+    {
+      "type": "bar",
+      "seconds": 26.58,
+      "chord": "Aadd9",
+      "intensity": 0.96
+    },
+    {
+      "type": "motif",
+      "seconds": 26.88,
+      "midi": 71
+    },
+    {
+      "type": "motif",
+      "seconds": 27.48,
+      "midi": 76
+    },
+    {
+      "type": "motif",
+      "seconds": 27.93,
+      "midi": 71
+    },
+    {
+      "type": "motif",
+      "seconds": 28.53,
+      "midi": 64
+    },
+    {
+      "type": "bar",
+      "seconds": 28.98,
+      "chord": "Dadd9",
+      "intensity": 0.96
+    },
+    {
+      "type": "motif",
+      "seconds": 29.28,
+      "midi": 76
+    },
+    {
+      "type": "motif",
+      "seconds": 29.88,
+      "midi": 78
+    },
+    {
+      "type": "motif",
+      "seconds": 30.33,
+      "midi": 76
+    },
+    {
+      "type": "motif",
+      "seconds": 30.93,
+      "midi": 69
+    },
+    {
+      "type": "bar",
+      "seconds": 31.38,
+      "chord": "Bm7",
+      "intensity": 1.03
+    },
+    {
+      "type": "motif",
+      "seconds": 31.68,
+      "midi": 69
+    },
+    {
+      "type": "motif",
+      "seconds": 32.28,
+      "midi": 74
+    },
+    {
+      "type": "motif",
+      "seconds": 32.73,
+      "midi": 69
+    },
+    {
+      "type": "motif",
+      "seconds": 33.33,
+      "midi": 66
+    },
+    {
+      "type": "bar",
+      "seconds": 33.78,
+      "chord": "Gmaj7",
+      "intensity": 1.03
+    },
+    {
+      "type": "motif",
+      "seconds": 34.08,
+      "midi": 71
+    },
+    {
+      "type": "motif",
+      "seconds": 34.68,
+      "midi": 78
+    },
+    {
+      "type": "motif",
+      "seconds": 35.13,
+      "midi": 71
+    },
+    {
+      "type": "motif",
+      "seconds": 35.73,
+      "midi": 66
+    },
+    {
+      "type": "bar",
+      "seconds": 36.18,
+      "chord": "Aadd9",
+      "intensity": 1.03
+    },
+    {
+      "type": "motif",
+      "seconds": 36.48,
+      "midi": 71
+    },
+    {
+      "type": "motif",
+      "seconds": 37.08,
+      "midi": 76
+    },
+    {
+      "type": "motif",
+      "seconds": 37.53,
+      "midi": 71
+    },
+    {
+      "type": "motif",
+      "seconds": 38.13,
+      "midi": 64
+    },
+    {
+      "type": "bar",
+      "seconds": 38.58,
+      "chord": "Dadd9",
+      "intensity": 1.13
+    },
+    {
+      "type": "motif",
+      "seconds": 38.88,
+      "midi": 76
+    },
+    {
+      "type": "motif",
+      "seconds": 39.48,
+      "midi": 78
+    },
+    {
+      "type": "motif",
+      "seconds": 39.93,
+      "midi": 76
+    },
+    {
+      "type": "motif",
+      "seconds": 40.53,
+      "midi": 69
+    },
+    {
+      "type": "bar",
+      "seconds": 40.98,
+      "chord": "Bm7",
+      "intensity": 1.13
+    },
+    {
+      "type": "motif",
+      "seconds": 41.28,
+      "midi": 69
+    },
+    {
+      "type": "motif",
+      "seconds": 41.88,
+      "midi": 74
+    },
+    {
+      "type": "motif",
+      "seconds": 42.33,
+      "midi": 69
+    },
+    {
+      "type": "motif",
+      "seconds": 42.93,
+      "midi": 66
+    },
+    {
+      "type": "bar",
+      "seconds": 43.38,
+      "chord": "Gmaj7",
+      "intensity": 1.13
+    },
+    {
+      "type": "motif",
+      "seconds": 43.68,
+      "midi": 71
+    },
+    {
+      "type": "motif",
+      "seconds": 44.28,
+      "midi": 78
+    },
+    {
+      "type": "motif",
+      "seconds": 44.73,
+      "midi": 71
+    },
+    {
+      "type": "motif",
+      "seconds": 45.33,
+      "midi": 66
+    },
+    {
+      "type": "bar",
+      "seconds": 45.78,
+      "chord": "Aadd9",
+      "intensity": 1.13
+    },
+    {
+      "type": "motif",
+      "seconds": 46.08,
+      "midi": 71
+    },
+    {
+      "type": "motif",
+      "seconds": 46.68,
+      "midi": 76
+    },
+    {
+      "type": "motif",
+      "seconds": 47.13,
+      "midi": 71
+    },
+    {
+      "type": "motif",
+      "seconds": 47.73,
+      "midi": 64
+    },
+    {
+      "type": "bar",
+      "seconds": 48.18,
+      "chord": "Dadd9",
+      "intensity": 0.78
+    },
+    {
+      "type": "motif",
+      "seconds": 48.48,
+      "midi": 76
+    },
+    {
+      "type": "motif",
+      "seconds": 49.08,
+      "midi": 78
+    },
+    {
+      "type": "motif",
+      "seconds": 49.53,
+      "midi": 76
+    },
+    {
+      "type": "motif",
+      "seconds": 50.13,
+      "midi": 69
+    },
+    {
+      "type": "bar",
+      "seconds": 50.58,
+      "chord": "Bm7",
+      "intensity": 0.78
+    },
+    {
+      "type": "motif",
+      "seconds": 50.88,
+      "midi": 69
+    },
+    {
+      "type": "motif",
+      "seconds": 51.48,
+      "midi": 74
+    },
+    {
+      "type": "motif",
+      "seconds": 51.93,
+      "midi": 69
+    },
+    {
+      "type": "accent",
+      "seconds": 9.9,
+      "midi": 62
+    },
+    {
+      "type": "accent",
+      "seconds": 13.4,
+      "midi": 74
+    },
+    {
+      "type": "accent",
+      "seconds": 18.45,
+      "midi": 76
+    },
+    {
+      "type": "accent",
+      "seconds": 20.8,
+      "midi": 78
+    },
+    {
+      "type": "accent",
+      "seconds": 23.2,
+      "midi": 79
+    },
+    {
+      "type": "accent",
+      "seconds": 25.4,
+      "midi": 74
+    },
+    {
+      "type": "accent",
+      "seconds": 30,
+      "midi": 74
+    },
+    {
+      "type": "accent",
+      "seconds": 36.5,
+      "midi": 78
+    },
+    {
+      "type": "accent",
+      "seconds": 46.2,
+      "midi": 76
+    },
+    {
+      "type": "accent",
+      "seconds": 49.55,
+      "midi": 74
+    }
+  ],
+  "cues": [
+    {
+      "type": "click",
+      "target": "Claude Send",
+      "seconds": 9.6,
+      "sample": 460800,
+      "frame": 576
+    },
+    {
+      "type": "click",
+      "target": "Cap Context orb",
+      "seconds": 13.7,
+      "sample": 657600,
+      "frame": 822
+    },
+    {
+      "type": "click",
+      "target": "Continue in ChatGPT",
+      "seconds": 17.7,
+      "sample": 849600,
+      "frame": 1062
+    },
+    {
+      "type": "click",
+      "target": "Send carried context",
+      "seconds": 29.35,
+      "sample": 1408800,
+      "frame": 1761
+    },
+    {
+      "type": "click",
+      "target": "Send follow-up",
+      "seconds": 35.9,
+      "sample": 1723200,
+      "frame": 2154
+    },
+    {
+      "type": "key",
+      "target": "Claude composer",
+      "character": "C",
+      "seconds": 6.436606,
+      "sample": 308957
+    },
+    {
+      "type": "key",
+      "target": "Claude composer",
+      "character": "o",
+      "seconds": 6.533582,
+      "sample": 313612
+    },
+    {
+      "type": "key",
+      "target": "Claude composer",
+      "character": "n",
+      "seconds": 6.622963,
+      "sample": 317902
+    },
+    {
+      "type": "key",
+      "target": "Claude composer",
+      "character": "t",
+      "seconds": 6.724338,
+      "sample": 322768
+    },
+    {
+      "type": "key",
+      "target": "Claude composer",
+      "character": "i",
+      "seconds": 6.816351,
+      "sample": 327185
+    },
+    {
+      "type": "key",
+      "target": "Claude composer",
+      "character": "n",
+      "seconds": 6.885785,
+      "sample": 330518
+    },
+    {
+      "type": "key",
+      "target": "Claude composer",
+      "character": "u",
+      "seconds": 6.988798,
+      "sample": 335462
+    },
+    {
+      "type": "key",
+      "target": "Claude composer",
+      "character": "e",
+      "seconds": 7.077412,
+      "sample": 339716
+    },
+    {
+      "type": "key",
+      "target": "Claude composer",
+      "character": " ",
+      "seconds": 7.22153,
+      "sample": 346633
+    },
+    {
+      "type": "key",
+      "target": "Claude composer",
+      "character": "w",
+      "seconds": 7.300135,
+      "sample": 350406
+    },
+    {
+      "type": "key",
+      "target": "Claude composer",
+      "character": "i",
+      "seconds": 7.371163,
+      "sample": 353816
+    },
+    {
+      "type": "key",
+      "target": "Claude composer",
+      "character": "t",
+      "seconds": 7.444886,
+      "sample": 357355
+    },
+    {
+      "type": "key",
+      "target": "Claude composer",
+      "character": "h",
+      "seconds": 7.519894,
+      "sample": 360955
+    },
+    {
+      "type": "key",
+      "target": "Claude composer",
+      "character": " ",
+      "seconds": 7.664011,
+      "sample": 367873
+    },
+    {
+      "type": "key",
+      "target": "Claude composer",
+      "character": "d",
+      "seconds": 7.743478,
+      "sample": 371687
+    },
+    {
+      "type": "key",
+      "target": "Claude composer",
+      "character": "a",
+      "seconds": 7.812747,
+      "sample": 375012
+    },
+    {
+      "type": "key",
+      "target": "Claude composer",
+      "character": "y",
+      "seconds": 7.897403,
+      "sample": 379075
+    },
+    {
+      "type": "key",
+      "target": "Claude composer",
+      "character": " ",
+      "seconds": 8.041519,
+      "sample": 385993
+    },
+    {
+      "type": "key",
+      "target": "Claude composer",
+      "character": "t",
+      "seconds": 8.123567,
+      "sample": 389931
+    },
+    {
+      "type": "key",
+      "target": "Claude composer",
+      "character": "h",
+      "seconds": 8.200297,
+      "sample": 393614
+    },
+    {
+      "type": "key",
+      "target": "Claude composer",
+      "character": "r",
+      "seconds": 8.299646,
+      "sample": 398383
+    },
+    {
+      "type": "key",
+      "target": "Claude composer",
+      "character": "e",
+      "seconds": 8.387744,
+      "sample": 402612
+    },
+    {
+      "type": "key",
+      "target": "Claude composer",
+      "character": "e",
+      "seconds": 8.483038,
+      "sample": 407186
+    },
+    {
+      "type": "key",
+      "target": "Claude composer",
+      "character": ".",
+      "seconds": 8.563636,
+      "sample": 411055
+    },
+    {
+      "type": "key",
+      "target": "ChatGPT composer",
+      "character": "C",
+      "seconds": 32.782912,
+      "sample": 1573580
+    },
+    {
+      "type": "key",
+      "target": "ChatGPT composer",
+      "character": "o",
+      "seconds": 32.859894,
+      "sample": 1577275
+    },
+    {
+      "type": "key",
+      "target": "ChatGPT composer",
+      "character": "n",
+      "seconds": 32.931968,
+      "sample": 1580734
+    },
+    {
+      "type": "key",
+      "target": "ChatGPT composer",
+      "character": "t",
+      "seconds": 33.018863,
+      "sample": 1584905
+    },
+    {
+      "type": "key",
+      "target": "ChatGPT composer",
+      "character": "i",
+      "seconds": 33.081908,
+      "sample": 1587932
+    },
+    {
+      "type": "key",
+      "target": "ChatGPT composer",
+      "character": "n",
+      "seconds": 33.154946,
+      "sample": 1591437
+    },
+    {
+      "type": "key",
+      "target": "ChatGPT composer",
+      "character": "u",
+      "seconds": 33.221347,
+      "sample": 1594625
+    },
+    {
+      "type": "key",
+      "target": "ChatGPT composer",
+      "character": "e",
+      "seconds": 33.305771,
+      "sample": 1598677
+    },
+    {
+      "type": "key",
+      "target": "ChatGPT composer",
+      "character": " ",
+      "seconds": 33.437581,
+      "sample": 1605004
+    },
+    {
+      "type": "key",
+      "target": "ChatGPT composer",
+      "character": "w",
+      "seconds": 33.518762,
+      "sample": 1608901
+    },
+    {
+      "type": "key",
+      "target": "ChatGPT composer",
+      "character": "i",
+      "seconds": 33.591378,
+      "sample": 1612386
+    },
+    {
+      "type": "key",
+      "target": "ChatGPT composer",
+      "character": "t",
+      "seconds": 33.671837,
+      "sample": 1616248
+    },
+    {
+      "type": "key",
+      "target": "ChatGPT composer",
+      "character": "h",
+      "seconds": 33.767193,
+      "sample": 1620825
+    },
+    {
+      "type": "key",
+      "target": "ChatGPT composer",
+      "character": " ",
+      "seconds": 33.899002,
+      "sample": 1627152
+    },
+    {
+      "type": "key",
+      "target": "ChatGPT composer",
+      "character": "d",
+      "seconds": 33.993374,
+      "sample": 1631682
+    },
+    {
+      "type": "key",
+      "target": "ChatGPT composer",
+      "character": "a",
+      "seconds": 34.083277,
+      "sample": 1635997
+    },
+    {
+      "type": "key",
+      "target": "ChatGPT composer",
+      "character": "y",
+      "seconds": 34.174058,
+      "sample": 1640355
+    },
+    {
+      "type": "key",
+      "target": "ChatGPT composer",
+      "character": " ",
+      "seconds": 34.305867,
+      "sample": 1646682
+    },
+    {
+      "type": "key",
+      "target": "ChatGPT composer",
+      "character": "t",
+      "seconds": 34.369116,
+      "sample": 1649718
+    },
+    {
+      "type": "key",
+      "target": "ChatGPT composer",
+      "character": "h",
+      "seconds": 34.432284,
+      "sample": 1652750
+    },
+    {
+      "type": "key",
+      "target": "ChatGPT composer",
+      "character": "r",
+      "seconds": 34.505848,
+      "sample": 1656281
+    },
+    {
+      "type": "key",
+      "target": "ChatGPT composer",
+      "character": "e",
+      "seconds": 34.569244,
+      "sample": 1659324
+    },
+    {
+      "type": "key",
+      "target": "ChatGPT composer",
+      "character": "e",
+      "seconds": 34.658678,
+      "sample": 1663617
+    },
+    {
+      "type": "key",
+      "target": "ChatGPT composer",
+      "character": ".",
+      "seconds": 34.75,
+      "sample": 1668000
+    },
+    {
+      "type": "motion",
+      "name": "enter conversation",
+      "seconds": 0.58,
+      "end": 1.491429
+    },
+    {
+      "type": "motion",
+      "name": "Claude composer push",
+      "seconds": 5.8,
+      "end": 6.490909
+    },
+    {
+      "type": "motion",
+      "name": "follow cursor to Claude Send",
+      "seconds": 8.662338,
+      "end": 9.353247
+    },
+    {
+      "type": "motion",
+      "name": "pull out to limit",
+      "seconds": 10.000935,
+      "end": 10.47757
+    },
+    {
+      "type": "motion",
+      "name": "Cap Context push",
+      "seconds": 12.3,
+      "end": 13.082353
+    },
+    {
+      "type": "motion",
+      "name": "picker reveal",
+      "seconds": 13.870213,
+      "end": 14.721277
+    },
+    {
+      "type": "motion",
+      "name": "handoff entrance",
+      "seconds": 18.492727,
+      "end": 19.048182
+    },
+    {
+      "type": "motion",
+      "name": "progress macro",
+      "seconds": 21.018182,
+      "end": 21.6
+    },
+    {
+      "type": "motion",
+      "name": "progress pullout",
+      "seconds": 23.237838,
+      "end": 23.805405
+    },
+    {
+      "type": "motion",
+      "name": "ChatGPT entrance",
+      "seconds": 25.4,
+      "end": 26.025
+    },
+    {
+      "type": "motion",
+      "name": "carried context push",
+      "seconds": 26.4,
+      "end": 27.12541
+    },
+    {
+      "type": "motion",
+      "name": "acknowledgement",
+      "seconds": 29.628571,
+      "end": 30.2375
+    },
+    {
+      "type": "motion",
+      "name": "ChatGPT composer push",
+      "seconds": 32.15,
+      "end": 32.7
+    },
+    {
+      "type": "motion",
+      "name": "follow cursor to ChatGPT Send",
+      "seconds": 34.842,
+      "end": 35.486
+    },
+    {
+      "type": "motion",
+      "name": "answer reveal",
+      "seconds": 36.269231,
+      "end": 37.047445
+    },
+    {
+      "type": "motion",
+      "name": "result pullout",
+      "seconds": 44.0,
+      "end": 44.7
+    },
+    {
+      "type": "motion",
+      "name": "work exits",
+      "seconds": 45.4,
+      "end": 45.95
+    }
+  ]
+}

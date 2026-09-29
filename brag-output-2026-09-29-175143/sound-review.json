@@ -1,0 +1,51 @@
+{
+  "overallPeakDb": -7.37,
+  "overallRmsDb": -25.81,
+  "sectionRmsDb": {
+    "opening": -27.66,
+    "limit": -30.36,
+    "picker": -25.74,
+    "in-chat handoff": -24.29,
+    "ChatGPT context": -26.82,
+    "follow-up": -25.73,
+    "answer": -25.47,
+    "outro": -27.96
+  },
+  "clicks": [
+    {
+      "target": "Claude Send",
+      "seconds": 9.6,
+      "preRmsDb": -39.59,
+      "onsetRmsDb": -27.35,
+      "onsetGainDb": 12.24
+    },
+    {
+      "target": "Cap Context orb",
+      "seconds": 13.7,
+      "preRmsDb": -48.26,
+      "onsetRmsDb": -29.72,
+      "onsetGainDb": 18.54
+    },
+    {
+      "target": "Continue in ChatGPT",
+      "seconds": 17.7,
+      "preRmsDb": -26.47,
+      "onsetRmsDb": -24.18,
+      "onsetGainDb": 2.29
+    },
+    {
+      "target": "Send carried context",
+      "seconds": 29.35,
+      "preRmsDb": -23.24,
+      "onsetRmsDb": -20.76,
+      "onsetGainDb": 2.48
+    },
+    {
+      "target": "Send follow-up",
+      "seconds": 35.9,
+      "preRmsDb": -32.4,
+      "onsetRmsDb": -26.81,
+      "onsetGainDb": 5.59
+    }
+  ]
+}

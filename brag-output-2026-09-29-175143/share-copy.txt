@@ -1,0 +1,3 @@
+Claude hit its limit. Cap Context carried the conversation into ChatGPT, so the next question could be just: “Continue with day three.”
+
+Switch AIs without re-explaining everything.

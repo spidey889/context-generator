@@ -1,0 +1,261 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>Cap Context — keep going</title>
+<style>
+@font-face{font-family:CapSerif;src:url('../../extension/fonts/EBGaramond-Regular.woff2');font-weight:400}
+*{box-sizing:border-box}html,body{margin:0;width:1920px;height:1080px;overflow:hidden}
+body{background:#faf9f5;color:#292821;font-family:Arial,sans-serif;-webkit-font-smoothing:antialiased}
+.paper{position:absolute;inset:0;background-color:#faf9f5;background-image:linear-gradient(#e8e5dc65 1px,transparent 1px),linear-gradient(90deg,#e8e5dc65 1px,transparent 1px);background-size:48px 48px}
+.beige{position:absolute;inset:0;background:#e5ded0;opacity:0}
+.scene{position:absolute;inset:0;overflow:hidden;display:none}.world{position:absolute;left:0;top:0;transform-origin:0 0;will-change:transform}
+.app{position:relative;width:1440px;height:810px;border:1px solid #dfdbd2;border-radius:12px;overflow:hidden;background:#faf9f5;box-shadow:0 24px 70px #3b322218,0 3px 9px #302a2010}
+.sidebar{position:absolute;inset:0 auto 0 0;width:222px;background:#f1efea;border-right:1px solid #e8e4dc;padding:23px 14px;color:#5a5850;font-size:14px}
+.claude-wordmark{display:flex;align-items:center;justify-content:space-between;margin:0 10px 26px;font-family:Georgia,serif;color:#272720;font-size:32px;letter-spacing:-1.6px}
+.icon{width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round;flex:none}
+.sidebar .icon{width:18px;height:18px}.navitem{display:flex;align-items:center;gap:10px;padding:10px 12px;border-radius:7px;margin-bottom:4px}.navitem.active{background:#e7e3da;color:#36342e}
+.side-label{margin:29px 12px 10px;font-size:12px;color:#938f85}.recent{padding:10px 12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:13px;border-radius:7px}.recent.current{background:#e5e1d8;color:#36342e}
+.profile{position:absolute;left:24px;right:22px;bottom:22px;display:flex;align-items:center;gap:10px;font-size:13px}.avatar{display:grid;place-items:center;width:29px;height:29px;background:#e0dbd0;border-radius:50%;font-size:11px}.profile span:last-child{margin-left:auto;letter-spacing:2px;color:#7f7c73}
+.appbar{position:absolute;left:222px;right:0;top:0;height:68px;display:flex;align-items:center;justify-content:space-between;padding:0 31px;color:#5d594e;font-size:15px}
+.appbar .right{display:flex;align-items:center;gap:19px;font-size:13px}.share{display:flex;align-items:center;gap:6px}.share .icon{width:16px;height:16px}.chevron{width:14px;height:14px;vertical-align:middle;margin-left:5px}
+.thread{position:absolute;left:335px;top:91px;width:995px;height:481px;overflow:hidden;mask-image:linear-gradient(transparent,#000 3%,#000 97%,transparent)}
+.messages{position:relative;transform-origin:0 0;will-change:transform;padding-top:12px}
+.turn{margin-bottom:27px;font-size:21px;line-height:1.5}.turn.user{font-family:Arial,sans-serif;font-size:18px;line-height:1.5;width:fit-content;max-width:780px;margin-left:auto;background:#eeeae2;padding:14px 20px;border-radius:16px;color:#4c483f}
+.turn.assistant{font-family:Georgia,serif;padding:0 5px;max-width:825px;color:#36342e}.turn p{margin:10px 0}.turn ul{margin:10px 0;padding-left:23px}.turn li{margin:7px 0}.spark{display:block;width:25px;height:25px;margin-bottom:11px;object-fit:contain}
+.actions{display:flex;align-items:center;gap:15px;margin-top:18px;color:#9f9689}.actions .icon{width:16px;height:16px}
+.composer{position:absolute;left:335px;top:640px;width:995px;height:124px;border:1px solid #dcd6ca;border-radius:18px;background:#fffefb;box-shadow:0 5px 15px #3c33220d;padding:18px 20px;font-size:19px;line-height:1.45;color:#39362f}
+.placeholder{color:#8d877d}.draft{white-space:pre-wrap}.caret{display:inline-block;width:1px;height:1.1em;background:currentColor;vertical-align:-.15em;margin-left:1px}
+.composer-bottom{position:absolute;left:20px;right:18px;bottom:15px;height:36px;display:flex;align-items:center;justify-content:space-between;color:#72695e}.composer-right{display:flex;align-items:center;gap:15px}.model{font-size:13px;white-space:nowrap;margin-right:57px}.plus{width:20px;height:20px}
+.send{display:grid;place-items:center;width:34px;height:34px;border:0;border-radius:8px;background:#bc7555;color:#fff;transform-origin:center}.send .icon{width:21px;height:21px;stroke-width:2}.send.disabled{background:#e3ded5;color:#b6aea1}
+.native-orb{position:absolute;left:1223px;top:710px;width:42px;height:42px;z-index:4}.native-picker{position:absolute;left:911px;top:432px;width:352px;height:265.40625px;transform-origin:bottom right;z-index:6}
+.limit{position:absolute;left:335px;top:575px;width:995px;height:51px;border:1px solid #e0d2bb;border-radius:10px;background:#f4edde;display:flex;align-items:center;gap:12px;padding:0 17px;transform-origin:bottom center;color:#77633c;font-size:16px;z-index:3}.limit .icon{width:20px;height:20px;stroke:#90784e}.limit a{margin-left:auto;color:#766447;font-size:13px;text-decoration:underline;text-underline-offset:3px}
+.native-shade{position:absolute;inset:0;background:#07060a57;z-index:5;pointer-events:none}
+.footer-note{position:absolute;left:222px;right:0;bottom:11px;text-align:center;font-size:10px;color:#a49d90}
+.native-panel{width:580px;height:286px;position:relative;transform-origin:center}
+.handoff-veil{position:absolute;inset:0;background:#f4f0e638;opacity:0}
+/* The captured card is opaque. Its live backdrop blur and shadow create a
+   rectangular compositor tile against filmed chat text, so those effects are
+   removed in the video; native structure, colors and progress stay intact. */
+#handoff-mount #context-generator-overlay{backdrop-filter:none!important;box-shadow:none!important}
+/* Fixture normalization only: keep all native colors, typography, structure,
+   padding, states and pseudo-elements; the camera owns geometry and timing. */
+.native-orb>button,.native-picker>div,.native-panel>div{position:absolute!important;left:0!important;top:0!important;margin:0!important;transform:none!important;opacity:1!important;display:flex!important}
+.native-picker>div{display:block!important;width:352px!important;max-height:none!important}
+.native-orb>button{pointer-events:none!important}.native-panel>div{width:580px!important}
+.native-orb *,.native-picker *,.native-panel *{transition:none!important}
+.native-panel #context-generator-handoff-countdown{display:none!important}
+.gpt-app{background:#fff;border-color:#e8e8e8;color:#202123;font-family:'Segoe UI',Arial,sans-serif}
+.gpt-app .sidebar{background:#f9f9f9;border-right-color:#ededed;color:#343434}.gpt-logo{display:flex;justify-content:space-between;align-items:center;margin:0 11px 24px}.gpt-logo img{width:28px;height:28px;object-fit:contain;filter:invert(1)}
+.gpt-app .recent.current{background:#ececec}.gpt-app .appbar{color:#202123;font-weight:600;font-size:20px}.gpt-app .appbar .right{font-weight:400}.gpt-app .profile .avatar{background:#dcdcdc}
+.gpt-app .thread{top:86px;height:541px;mask-image:linear-gradient(transparent,#000 2%,#000 97%,transparent)}
+.gpt-app .turn{font-family:'Segoe UI',Arial,sans-serif;font-size:21px;line-height:1.6;color:#252525}.gpt-app .turn.user{font-size:17px;background:#f1f1f1;max-width:820px;padding:15px 20px;border-radius:24px;white-space:pre-wrap;margin-bottom:30px}
+.gpt-app .turn.assistant{padding-left:0}.gpt-app .actions{color:#727272;margin-top:16px}.gpt-app .actions .icon{width:17px;height:17px}
+.gpt-app h2{font-size:23px;font-weight:650;line-height:1.3;margin:12px 0 19px}.gpt-app .turn li{margin:8px 0}.gpt-app .turn li strong{font-weight:600}
+.gpt-app .composer{background:#fff;color:#262626;border:1px solid #dfdfdf;border-radius:26px;box-shadow:0 3px 10px #00000008;top:330px;height:295px;padding:17px 20px;transition:none}
+.gpt-app .composer-bottom{color:#333;left:20px;bottom:12px;right:18px}.gpt-app .send{width:36px;height:36px;border-radius:50%;background:#171717;color:#fff}.gpt-app .send.disabled{background:#e6e6e6;color:#b0b0b0}.gpt-app .send .icon{width:21px;height:21px}
+.gpt-input{font-family:'Segoe UI',Arial,sans-serif;font-size:17px;line-height:1.45;white-space:pre-wrap;height:223px;overflow:hidden;position:relative}.carry-content{white-space:pre-wrap;will-change:transform}.gpt-input .scrollrail{position:absolute;right:-11px;top:0;width:3px;height:60px;border-radius:3px;background:#c6c6c6}
+.gpt-app .footer-note{color:#888}.gpt-welcome{position:absolute;left:222px;right:0;top:254px;text-align:center;font-size:31px;font-weight:500;letter-spacing:-.7px}
+.carry-history{font-size:16px!important;line-height:1.5!important}.ack{margin-top:2px;min-height:63px}.gpt-response{min-height:254px}
+.gpt-orb{position:absolute;left:1223px;top:713px;width:42px;height:42px;object-fit:contain}.gpt-voice{width:25px;height:25px;margin-right:56px;color:#343434}
+.title-card,.brand-card{position:absolute;inset:0;display:none;text-align:center;color:#25261f}
+.title-copy{position:absolute;top:367px;left:90px;right:90px;font-family:CapSerif,Georgia,serif;font-weight:400;font-size:118px;line-height:1.03;letter-spacing:-2.2px}.title-copy .line{display:block}.title-copy .line+ .line{font-size:108px;margin-top:9px}.title-copy .word{display:inline-block;white-space:pre}
+.title-brand{position:absolute;left:0;right:0;top:720px;display:flex;align-items:center;justify-content:center;gap:10px;font-size:23px;letter-spacing:-.4px}.title-brand img{width:39px;height:39px;object-fit:contain}
+.brand-lockup{position:absolute;top:394px;left:0;right:0;display:flex;justify-content:center;align-items:center;gap:23px}.brand-lockup img{width:126px;height:126px;object-fit:contain}.brand-lockup span{font-family:CapSerif,Georgia,serif;font-size:111px;letter-spacing:-3px}
+.brand-cta{position:absolute;left:0;right:0;top:586px;font-size:24px;letter-spacing:-.4px;color:#615e54}
+.cursor-layer{position:fixed;inset:0;width:1920px;height:1080px;overflow:hidden;pointer-events:none;z-index:2147483647}.cursor{position:absolute;left:0;top:0;width:39px;height:55px;transform-origin:3px 3px;pointer-events:none;will-change:transform;filter:drop-shadow(1px 3px 2px #17171745)}.cursor svg{display:block;width:100%;height:100%;overflow:visible}.cursor path{fill:#111;stroke:#fff;stroke-width:3.4;stroke-linejoin:round;paint-order:stroke fill}
+.click-shadow{position:absolute;left:0;top:0;width:32px;height:32px;border-radius:50%;border:1px solid #14141422;pointer-events:none;z-index:100;opacity:0}
+</style>
+<style id="production-styles"></style>
+<style>/* Avoid cached low-resolution compositor textures during macro zooms. */body *{will-change:auto!important}</style>
+</head>
+<body>
+<svg style="display:none" aria-hidden="true"><defs>
+<symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 4v16M4 12h16"/></symbol>
+<symbol id="i-arrow" viewBox="0 0 24 24"><path d="M12 19V5m-6 6 6-6 6 6"/></symbol>
+<symbol id="i-search" viewBox="0 0 24 24"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 4 4"/></symbol>
+<symbol id="i-chat" viewBox="0 0 24 24"><path d="M20 11a8 8 0 0 1-8 8H4l1.5-4A8 8 0 1 1 20 11Z"/></symbol>
+<symbol id="i-edit" viewBox="0 0 24 24"><path d="M13 5H5v14h14v-8M10 14l2-5 7-7 3 3-7 7Z"/></symbol>
+<symbol id="i-folder" viewBox="0 0 24 24"><path d="M3 7h7l2-3h9v16H3Z"/></symbol>
+<symbol id="i-panel" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9 4v16"/></symbol>
+<symbol id="i-chevron" viewBox="0 0 24 24"><path d="m7 10 5 5 5-5"/></symbol>
+<symbol id="i-copy" viewBox="0 0 24 24"><rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V4H4v12h4"/></symbol>
+<symbol id="i-like" viewBox="0 0 24 24"><path d="M7 10h4l2-7c3 0 3 3 2 7h5v4l-2 7H7ZM3 10h4v11H3Z"/></symbol>
+<symbol id="i-dislike" viewBox="0 0 24 24"><path d="M7 14h4l2 7c3 0 3-3 2-7h5v-4l-2-7H7ZM3 3h4v11H3Z"/></symbol>
+<symbol id="i-retry" viewBox="0 0 24 24"><path d="M4 10a8 8 0 1 1 0 5M4 4v6h6"/></symbol>
+<symbol id="i-share" viewBox="0 0 24 24"><path d="M12 15V3m-4 4 4-4 4 4M5 12v8h14v-8"/></symbol>
+<symbol id="i-voice" viewBox="0 0 24 24"><path d="M3 10v4m4-7v10m5-14v18m5-15v12m4-8v4"/></symbol>
+<symbol id="i-limit" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v6m0 4h.01"/></symbol>
+</defs></svg>
+<div class="paper" id="paper"></div><div class="beige" id="beige"></div>
+<div class="scene" id="claude-scene"><div class="world" id="claude-world"><div class="app" id="claude-app">
+ <aside class="sidebar"><div class="claude-wordmark">Claude<svg class="icon"><use href="#i-panel"/></svg></div>
+  <div class="navitem"><svg class="icon"><use href="#i-edit"/></svg>New chat</div><div class="navitem"><svg class="icon"><use href="#i-search"/></svg>Search chats</div><div class="navitem"><svg class="icon"><use href="#i-folder"/></svg>Projects</div>
+  <div class="side-label">Recents</div><div class="recent current">Three days in Kyoto</div><div class="recent">Sunday reading list</div><div class="recent">A slower morning routine</div><div class="recent">Ideas for the weekend</div>
+  <div class="profile"><div class="avatar">AL</div>Alex<span>···</span></div>
+ </aside>
+ <div class="appbar"><span>Three days in Kyoto<svg class="icon chevron"><use href="#i-chevron"/></svg></span><div class="right"><span class="share"><svg class="icon"><use href="#i-share"/></svg>Share</span><span>···</span></div></div>
+ <div class="thread"><div class="messages" id="claude-history">
+  <div class="turn user">I have three days in Kyoto. I’m staying near Sanjo.</div>
+  <div class="turn assistant"><img class="spark" src="../../extension/logos/claude2download__1_-removebg-preview.png"><p>Let’s plan one area each day, with room to wander.</p><p><b>Day 1:</b> downtown and the river.<br><b>Day 2:</b> the northern temples.</p></div>
+  <div class="turn user">Vegetarian food, early walks, and nothing too packed.</div>
+  <div class="turn assistant" id="claude-last"><img class="spark" src="../../extension/logos/claude2download__1_-removebg-preview.png"><p id="claude-reply"></p><div class="actions"><svg class="icon"><use href="#i-copy"/></svg><svg class="icon"><use href="#i-like"/></svg><svg class="icon"><use href="#i-dislike"/></svg><svg class="icon"><use href="#i-retry"/></svg></div></div>
+ </div></div>
+ <div class="limit" id="limit"><svg class="icon"><use href="#i-limit"/></svg><span>5-hour limit reached · resets 4:00 PM</span><a>Upgrade plan</a></div>
+ <div class="composer" id="claude-composer"><div id="claude-draft" class="draft"></div><div class="composer-bottom"><svg class="icon plus"><use href="#i-plus"/></svg><div class="composer-right"><span class="model">Sonnet<svg class="icon chevron"><use href="#i-chevron"/></svg></span><button class="send" id="claude-send" aria-label="Send message"><svg class="icon"><use href="#i-arrow"/></svg></button></div></div></div>
+ <div class="native-orb" id="orb-mount"></div><div class="native-shade" id="picker-shade"></div><div class="native-picker" id="picker-mount"></div>
+ <div class="footer-note">Claude can make mistakes. Please double-check responses.</div>
+</div></div></div>
+<div class="scene" id="transfer-scene"><div class="handoff-veil" id="handoff-veil"></div><div class="world" id="transfer-world"><div class="native-panel" id="handoff-mount"></div></div></div>
+<div class="scene" id="gpt-scene"><div class="world" id="gpt-world"><div class="app gpt-app" id="gpt-app">
+ <aside class="sidebar"><div class="gpt-logo"><img src="../../extension/logos/gptwhitedownload__1_-removebg-preview.png"><svg class="icon"><use href="#i-panel"/></svg></div><div class="navitem"><svg class="icon"><use href="#i-edit"/></svg>New chat</div><div class="navitem"><svg class="icon"><use href="#i-search"/></svg>Search chats</div><div class="navitem"><svg class="icon"><use href="#i-folder"/></svg>Projects</div><div class="side-label">Your chats</div><div class="recent current">Kyoto itinerary</div><div class="recent">Packing for October</div><div class="recent">A few book recommendations</div><div class="profile"><div class="avatar">AL</div>Alex<span>···</span></div></aside>
+ <div class="appbar"><span>ChatGPT<svg class="icon chevron"><use href="#i-chevron"/></svg></span><div class="right"><span class="share"><svg class="icon"><use href="#i-share"/></svg>Share</span><span>···</span></div></div>
+ <div class="gpt-welcome" id="gpt-welcome">What can I help with?</div>
+ <div class="thread" id="gpt-thread"><div class="messages" id="gpt-history"><div class="turn user carry-history" id="carry-history"></div><div class="turn assistant ack"><p id="gpt-ack"></p><div class="actions" id="ack-actions"><svg class="icon"><use href="#i-copy"/></svg><svg class="icon"><use href="#i-like"/></svg><svg class="icon"><use href="#i-dislike"/></svg><svg class="icon"><use href="#i-voice"/></svg><svg class="icon"><use href="#i-retry"/></svg></div></div><div class="turn user" id="gpt-followup">Continue with day three.</div><div class="turn assistant gpt-response" id="gpt-answer"><h2 id="gpt-answer-title"></h2><ul id="gpt-answer-list"></ul><div class="actions" id="answer-actions"><svg class="icon"><use href="#i-copy"/></svg><svg class="icon"><use href="#i-like"/></svg><svg class="icon"><use href="#i-dislike"/></svg><svg class="icon"><use href="#i-voice"/></svg><svg class="icon"><use href="#i-retry"/></svg></div></div></div></div>
+ <div class="composer" id="gpt-composer"><div class="gpt-input" id="gpt-input"><div class="carry-content" id="gpt-carry"></div><div class="scrollrail" id="gpt-scrollrail"></div></div><div class="composer-bottom"><svg class="icon plus"><use href="#i-plus"/></svg><div class="composer-right"><svg class="icon gpt-voice" id="gpt-voice"><use href="#i-voice"/></svg><button class="send" id="gpt-send" aria-label="Send message"><svg class="icon"><use href="#i-arrow"/></svg></button></div></div></div>
+ <img class="gpt-orb" id="gpt-orb" src="../../extension/bubble-icon.png"><div class="footer-note">ChatGPT can make mistakes. Check important info.</div>
+</div></div></div>
+<div class="title-card" id="title-card"><div class="title-copy"><span class="line" id="title-one"></span><span class="line" id="title-two"></span></div><div class="title-brand" id="title-brand"><img src="../../extension/bubble-icon.png"><span>Cap Context</span></div></div>
+<div class="brand-card" id="brand-card"><div class="brand-lockup" id="brand-lockup"><img src="../../extension/bubble-icon.png"><span>Cap Context</span></div><div class="brand-cta" id="brand-cta">Available in the Chrome Web Store.</div></div>
+<div class="cursor-layer"><div class="click-shadow" id="click-shadow"></div><div class="cursor" id="cursor"><svg viewBox="0 0 39 55"><path d="M3 3 3 40 12 31 22 50 29 46 20 28 35 28Z"/></svg></div></div>
+<script>
+const $=id=>document.getElementById(id),clamp=(v,a=0,b=1)=>Math.max(a,Math.min(b,v)),mix=(a,b,u)=>a+(b-a)*u;
+const smooth=u=>{u=clamp(u);return u*u*u*(u*(u*6-15)+10)},out=u=>1-Math.pow(1-clamp(u),4),ramp=(t,a,b,fn=smooth)=>fn((t-a)/(b-a));
+const show=(id,yes)=>$(id).style.display=yes?'block':'none';
+const fade=(id,alpha)=>$(id).style.opacity=clamp(alpha);
+function sourceTime(actual,keys){let i=0;while(i<keys.length-1&&actual>keys[i+1][1])i++;const a=keys[i],b=keys[Math.min(i+1,keys.length-1)];return a[0]+(actual-a[1])*(b[0]-a[0])/(b[1]-a[1]||1)}
+function track(keys,t){let i=0;while(i<keys.length-1&&t>=keys[i+1][0])i++;const a=keys[i],b=keys[Math.min(i+1,keys.length-1)],u=b[0]===a[0]?0:smooth((t-a[0])/(b[0]-a[0]));return {x:mix(a[1],b[1],u),y:mix(a[2],b[2],u),s:mix(a[3],b[3],u)}}
+function camera(id,c,offsetX=0,offsetY=0){$(id).style.transform=`translate(${960-c.x*c.s+offsetX}px,${540-c.y*c.s+offsetY}px) scale(${c.s})`}
+function screen(p,c){return{x:960+(p.x-c.x)*c.s,y:540+(p.y-c.y)*c.s}}
+function press(t,at){const u=(t-at)/.21;return u>=0&&u<=1?1-.13*Math.sin(Math.PI*u):1}
+// The tip remains attached to its world coordinate even while the pointer tilts.
+function pathMove(t,at,end,a,b,bulge=0){const u=smooth((t-at)/(end-at)),dx=b.x-a.x,dy=b.y-a.y;if(Math.hypot(dx,dy)<.001)return{x:a.x,y:a.y,angle:0};return{x:mix(a.x,b.x,u)+Math.sin(Math.PI*u)*bulge,y:mix(a.y,b.y,u)+Math.sin(Math.PI*u)*bulge*.38,angle:clamp(Math.atan2(dy,dx)*180/Math.PI+135,-42,62)*Math.sin(Math.PI*u)}}
+function moveTrack(keys,t){let i=0;while(i<keys.length-1&&t>=keys[i+1][0])i++;const a=keys[i],b=keys[Math.min(i+1,keys.length-1)];if(a[0]===b[0])return{x:a[1],y:a[2],angle:0};return pathMove(t,a[0],b[0],{x:a[1],y:a[2]},{x:b[1],y:b[2]},b[3]||0)}
+function letters(text,t,a,b){const entry=timeline.typing.find(e=>e.start===a&&e.text===text);return text.slice(0,entry?.keyTimes?entry.keyTimes.filter(s=>s<=t).length:Math.floor(text.length*clamp((t-a)/(b-a))))}
+function streamed(text,t,a,b){const words=text.split(' '),n=Math.floor(words.length*clamp((t-a)/(b-a)));return words.slice(0,n).join(' ')}
+function typing(id,text,t,a,b,placeholder){const value=letters(text,t,a,b),typing=t>=a&&t<b+.65;$(id).classList.toggle('placeholder',!value);$(id).textContent=value||placeholder;if(typing&&(t<b||Math.floor((t-b)/.5)%2===0)){const caret=document.createElement('span');caret.className='caret';$(id).appendChild(caret)}}
+const claudeCameras=[
+ [0,720,405,1.32],[.7,720,405,1.32],[1.8,824,331,1.64],[7,824,331,1.64],[7.7,835,697,1.88],
+ [9.9,835,697,1.88],[10.6,1110,716,2.45],[11.3,1110,716,2.45],[12.15,843,664,1.73],
+ [15.4,843,664,1.73],[16.35,1198,723,3.1],[17.3,1198,723,3.1],[18.3,1087,564.7,2.95],
+ [19.15,1087,564.7,2.95],[19.6,1003.5,545.89,4.05],[22.65,1003.5,545.89,4.05]
+];
+// The real progress DOM floats *over the Claude conversation*. The macro
+// temporarily crops to its stage list; the chat remains the spatial backdrop.
+const transferCameras=[[22.65,290,143,1.40],[23.23,290,143,1.55],[25.45,290,143,1.55],
+ [26.05,290,188,2.55],[28.35,290,188,2.55],[28.95,290,143,1.55],[31.65,290,143,1.55]];
+const gptCameras=[
+ [31.65,720,405,1.32],[32.85,720,405,1.32],[33.6,828,477,1.73],[36.2,828,477,1.73],
+ [36.9,795,320,1.76],[40,795,320,1.76],[40.7,836,707,1.87],[43.1,836,707,1.87],
+ [43.8,1110,725,2.45],[44.65,1110,725,2.45],[45.5,795,300,1.76],[52.25,795,300,1.76],[53.2,720,405,1.32],[62,720,405,1.32]
+];
+const claudePointer=[[0,1135,753],[9.3,1135,753],[10.45,1292,731,-16],[11.18,1292,731],[11.7,1170,787,17],[14.9,1170,787],[16.65,1244,731,-17],[17.55,1244,731],[18.35,1280,663,13],[19.45,1280,663],[20.55,1003.5,545.89,-25],[22.65,1003.5,545.89]];
+const gptPointer=[[31.65,1390,765],[34.9,1390,765],[35.55,1294,596,18],[36.3,1294,596],[36.8,1320,769,15],[42.8,1320,769],[43.9,1294,734,-17],[44.7,1294,734],[45.2,1350,802,15],[62,1350,802]];
+const carry=`CONTEXT CARRY
+
+🧠 WHO I AM
+I’m planning a three-day Kyoto trip and staying near Sanjo. I prefer quiet mornings and vegetarian food.
+
+🎯 WHAT WE WERE DOING
+Building a relaxed itinerary, one area per day, with room to wander.
+
+📍 WHERE WE LEFT OFF
+Day one covers downtown and the river. Day two covers the northern temples. Day three is next.
+
+✅ DECISIONS MADE
+• Sanjo is the base.
+• Start early to avoid crowds.
+• Choose vegetarian meals.
+• Keep the afternoons open.
+
+⚠️ OPEN QUESTIONS
+What should day three look like?
+
+📦 KEY CONTEXT
+Avoid a packed schedule. The user’s next request was “Continue with day three.” Claude reached its usage limit before answering.
+
+🔁 NEXT STEP
+Reply only: "Context loaded. Let's pick up right where you left off." Then wait for the user.`;
+const ack="Context loaded. Let's pick up right where you left off.";
+const answer=[['Morning','An early riverside walk from your Sanjo base.'],['Lunch','Vegetarian, with no need to rush.'],['Afternoon','Leave it open.']];
+let native,timeline,editTimeline,pickerState='',handoffState='';
+function nativeMarkup(mount,state){$(mount).innerHTML=native.components[state];const root=$(mount).firstElementChild;root.style.setProperty('transition','none','important');root.classList.remove('context-generator-handoff-entering');if(mount==='handoff-mount')root.style.setProperty('box-shadow','none','important');return root}
+function nativeAnimations(t){for(const a of document.getAnimations()){a.pause();a.currentTime=t*1000}}
+function mountPicker(state){if(pickerState!==state){nativeMarkup('picker-mount',state);pickerState=state}}
+function mountHandoff(state){if(handoffState!==state){nativeMarkup('handoff-mount',state);handoffState=state}}
+function staticClaudeBackdrop(offsetX=0){
+ // Restore all visible state on each random-access frame; prior seeks must
+ // never determine what remains behind the handoff or app switch.
+ camera('claude-world',{x:720,y:405,s:1.32},offsetX);fade('claude-scene',1);
+ $('claude-history').style.transform='translateY(-128px)';
+ $('claude-reply').textContent='Got it. Sanjo as your base, quiet mornings, vegetarian stops. I’ll leave the afternoons open.';
+ fade('claude-last',1);$('claude-last').querySelector('.actions').style.opacity=1;
+ $('claude-draft').textContent='Continue with day three.';$('claude-draft').classList.remove('placeholder');
+ fade('limit',1);$('limit').style.transform='none';
+ $('claude-send').classList.add('disabled');$('claude-composer').style.color='#9c9486';
+ fade('picker-mount',0);fade('picker-shade',0);fade('orb-mount',1);
+}
+function titleWords(id,text){$(id).innerHTML=text.split(' ').map((w,i)=>`<span class="word" data-word="${i}">${w}${i<text.split(' ').length-1?' ':''}</span>`).join('')}
+function cursor(t,c,scene,alpha){let p=moveTrack(scene==='claude'?claudePointer:gptPointer,t),q=screen(p,c),scale=c.s*.82;const events=timeline.clicks.filter(e=>e.scene===scene);for(const e of events)scale*=press(t,e.time);$('cursor').style.transform=`translate(${q.x-3}px,${q.y-3}px) rotate(${p.angle}deg) scale(${scale})`;fade('cursor',alpha);
+ let ring=events.find(e=>t>=e.time&&t<e.time+.3);if(ring){const u=(t-ring.time)/.3;$('click-shadow').style.transform=`translate(${q.x-16}px,${q.y-16}px) scale(${mix(.4,1.5,u)})`;fade('click-shadow',.22*(1-u));}else fade('click-shadow',0);
+ return{world:{x:p.x,y:p.y},screen:q,alpha,scale,angle:p.angle};
+}
+window.setTime=editTime=>{
+ editTime=clamp(editTime,0,editTimeline.duration);
+ let t=sourceTime(editTime,editTimeline.timeMap),cs=null,cam=null,scene='title';
+ show('claude-scene',t<32.4);show('transfer-scene',t>=22.65&&t<31.65);show('gpt-scene',t>=31.65&&t<54.7);show('title-card',t>=54.7&&t<59);show('brand-card',t>=58.8);
+ fade('beige',ramp(t,53.85,54.65));fade('paper',t>=54.65?0:1);fade('cursor',0);fade('click-shadow',0);
+ if(t<22.65){
+  scene='claude';cam=track(claudeCameras,t);camera('claude-world',cam);fade('claude-scene',1-ramp(t,22.43,22.63));
+  const scroll=mix(0,128,ramp(t,1.1,3.1));$('claude-history').style.transform=`translateY(${-scroll}px)`;
+  $('claude-reply').textContent=streamed('Got it. Sanjo as your base, quiet mornings, vegetarian stops. I’ll leave the afternoons open.',t,1.9,5.4);fade('claude-last',ramp(t,1.75,2.05));$('claude-last').querySelector('.actions').style.opacity=ramp(t,5.4,5.7);
+  typing('claude-draft','Continue with day three.',t,7.55,9.8,'Reply to Claude…');
+  const limit=ramp(t,11.12,11.5,out);fade('limit',limit);$('limit').style.transform=`translateY(${(1-limit)*12}px) scaleY(${mix(.9,1,limit)})`;
+  $('claude-send').classList.toggle('disabled',t<7.55||t>=11.12);$('claude-send').style.transform=`scale(${press(t,10.85)})`;
+  $('claude-composer').style.color=t>=11.12?'#9c9486':'#39362f';
+  const opened=ramp(t,17.13,17.58,out);mountPicker(t>=21.8?'pickerSelected':t>=20.43?'pickerHover':'picker');fade('picker-mount',opened);$('picker-mount').style.transform=`translateY(${(1-opened)*12}px) scale(${mix(.92,1,opened)})`;fade('picker-shade',opened);
+  fade('orb-mount',1);$('orb-mount').style.transform=`scale(${press(t,17.1)})`;
+  const active=t<9.3?0:t<11.8?1:t<14.9?0:t<22.35?1:1-ramp(t,22.35,22.6);cs=cursor(t,cam,scene,active);
+ }else if(t<31.65){
+  scene='handoff';
+  staticClaudeBackdrop();
+  cam=track(transferCameras,t);camera('transfer-world',cam,160,-20);
+  const state=t<25.4?'capture':t<28.7?'summary':t<30.55?'paste':'done';mountHandoff(state);
+  // Clear the card quickly after its completed hold; a long fade ghosts over the busy chat.
+  const enter=ramp(t,22.67,23.13,out),exit=ramp(t,31.08,31.22);
+  fade('handoff-veil',enter*(1-exit));fade('handoff-mount',enter*(1-exit));
+  $('handoff-mount').style.transform=`translateY(${(1-enter)*16-exit*10}px) scale(${mix(.86,1,enter)*(1-exit*.04)})`;
+  const stage=state==='capture'?'capture':state==='summary'?'summary':null;
+  if(stage){const start=stage==='capture'?22.9:25.4,end=stage==='capture'?25.35:28.6,ratio=mix(.08,1,ramp(t,start,end));const el=$('handoff-mount').querySelector(`[data-context-generator-stage="${stage}"]`);el.style.setProperty('--context-generator-stage-progress-ratio',ratio.toFixed(4));el.style.setProperty('--context-generator-stage-progress-position',(ratio*100)+'%');}
+ }else if(t<54.7){
+  if(t<32.4)staticClaudeBackdrop(-1920*ramp(t,31.65,32.4));
+  scene='chatgpt';cam=track(gptCameras,t);camera('gpt-world',cam,1920*(1-ramp(t,31.65,32.4))-2070*ramp(t,54.05,54.7));
+  const loaded=t>=32.85,sent=t>=36.08,follow=t>=44.42;
+  show('gpt-welcome',!sent);fade('gpt-welcome',1-ramp(t,32.8,33.05));show('gpt-thread',sent);show('gpt-followup',follow);show('gpt-answer',follow);show('carry-history',sent);
+  const expansion=ramp(t,32.85,33.15,out),sentMove=ramp(t,36.08,36.58,out),composerY=sent?mix(330,650,sentMove):mix(355,330,expansion),composerH=sent?mix(295,114,sentMove):mix(104,295,expansion);$('gpt-composer').style.top=composerY+'px';$('gpt-composer').style.height=composerH+'px';$('gpt-input').style.height=(sent?mix(223,51,sentMove):mix(42,223,expansion))+'px';
+  $('gpt-carry').style.transform=sent?'none':`translateY(${-mix(0,186,ramp(t,34.15,35.05))}px)`;
+  if(!sent){$('gpt-carry').textContent=loaded?carry:'Ask anything';$('gpt-carry').classList.toggle('placeholder',!loaded);}else if(t<44.42){typing('gpt-carry','Continue with day three.',t,40.7,43,'Ask anything');}else{$('gpt-carry').textContent='Ask anything';$('gpt-carry').classList.add('placeholder');}
+  show('gpt-scrollrail',!sent&&loaded);$('gpt-scrollrail').style.transform=`translateY(${mix(0,143,ramp(t,34.15,35.05))}px)`;
+  $('gpt-send').classList.toggle('disabled',sent&&((t<40.7)||(t>=44.42)));$('gpt-send').querySelector('use').setAttribute('href',!sent&&!loaded?'#i-voice':'#i-arrow');$('gpt-send').style.transform=`scale(${press(t,35.9)*press(t,44.25)})`;show('gpt-voice',sent);show('gpt-orb',t>=33.05);$('gpt-orb').style.top=(composerY+composerH-51)+'px';
+  $('gpt-ack').textContent=streamed(ack,t,36.6,37.8);fade('ack-actions',ramp(t,37.9,38.2));
+  $('gpt-answer-title').textContent=streamed('Day 3 — Arashiyama, at your pace',t,44.9,45.65);
+  $('gpt-answer-list').innerHTML=answer.map(([label,text],i)=>{const value=streamed(text,t,45.65+i*.66,46.32+i*.66);return value?`<li><strong>${label}:</strong> ${value}</li>`:''}).join('');fade('answer-actions',ramp(t,47.7,48.1));
+  const ackY=$('gpt-ack').parentElement.offsetTop,followY=$('gpt-followup').offsetTop;
+  const scrolled=follow?mix(ackY-154,followY-50,ramp(t,44.42,45.1)):ackY-154;$('gpt-history').style.transform=`translateY(${-scrolled}px)`;
+  const active=t<34.9?0:t<35.98?1:t<36.32?1-ramp(t,35.98,36.32):t<42.8?0:t<44.8?1:1-ramp(t,44.8,45.1);cs=cursor(t,cam,scene,active);
+ }
+ if(t>=54.7&&t<59){
+  const exit=1-ramp(t,58.55,58.85);fade('title-card',exit);
+  for(const [id,start,step] of [['title-one',54.95,.14],['title-two',55.28,.13]])[...$(id).children].forEach((el,i)=>{const u=ramp(t,start+i*step,start+i*step+.42,out);el.style.opacity=u;el.style.transform=`translateY(${(1-u)*24}px) rotate(${(1-u)*2.5}deg)`});
+  const u=ramp(t,55.7,56.15);fade('title-brand',u);$('title-brand').style.transform=`translateY(${(1-u)*9}px)`;
+ }
+ if(t>=58.8){const u=ramp(t,58.9,59.45,out);fade('brand-lockup',u);$('brand-lockup').style.transform=`translateY(${(1-u)*19}px) scale(${mix(.975,1,u)})`;const c=ramp(t,59.4,59.85);fade('brand-cta',c);$('brand-cta').style.transform=`translateY(${(1-c)*8}px)`;}
+ nativeAnimations(t);
+ window.frameState={time:editTime,sourceTime:t,scene,camera:cam,cursor:cs,picker:pickerState,handoff:handoffState,marketingVisible:t>=54.95&&t<62,workVisible:t<54.7};
+};
+window.ready=(async()=>{
+ [native,timeline,editTimeline]=await Promise.all([fetch('native/ui.json').then(r=>r.json()),fetch('source-timeline.json').then(r=>r.json()),fetch('timeline.json').then(r=>r.json())]);
+ $('production-styles').textContent=native.styles;nativeMarkup('orb-mount','orb');mountPicker('picker');mountHandoff('capture');
+ $('carry-history').textContent=carry;titleWords('title-one','Switch AIs');titleWords('title-two','without re-explaining everything.');
+ await document.fonts.ready;await Promise.all([...document.images].map(i=>i.decode()));setTime(0);return true;
+})();
+</script>
+</body></html>

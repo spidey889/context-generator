@@ -1,0 +1,387 @@
+{
+  "duration": 52,
+  "fps": 60,
+  "posterTime": 48.4,
+  "clicks": [
+    {
+      "time": 9.6,
+      "target": "Claude Send",
+      "scene": "claude",
+      "x": 1292,
+      "y": 731,
+      "sourceTime": 10.85
+    },
+    {
+      "time": 13.7,
+      "target": "Cap Context orb",
+      "scene": "claude",
+      "x": 1244,
+      "y": 731,
+      "sourceTime": 17.1
+    },
+    {
+      "time": 17.7,
+      "target": "Continue in ChatGPT",
+      "scene": "claude",
+      "x": 1003.5,
+      "y": 545.89,
+      "sourceTime": 21.8
+    },
+    {
+      "time": 29.35,
+      "target": "Send carried context",
+      "scene": "chatgpt",
+      "x": 1294,
+      "y": 596,
+      "sourceTime": 35.9
+    },
+    {
+      "time": 35.9,
+      "target": "Send follow-up",
+      "scene": "chatgpt",
+      "x": 1294,
+      "y": 734,
+      "sourceTime": 44.25
+    }
+  ],
+  "typing": [
+    {
+      "start": 6.342857,
+      "end": 8.563636,
+      "text": "Continue with day three.",
+      "target": "Claude composer",
+      "keyTimes": [
+        6.436606,
+        6.533582,
+        6.622963,
+        6.724338,
+        6.816351,
+        6.885785,
+        6.988798,
+        7.077412,
+        7.22153,
+        7.300135,
+        7.371163,
+        7.444886,
+        7.519894,
+        7.664011,
+        7.743478,
+        7.812747,
+        7.897403,
+        8.041519,
+        8.123567,
+        8.200297,
+        8.299646,
+        8.387744,
+        8.483038,
+        8.563636
+      ],
+      "sourceStart": 7.55,
+      "sourceEnd": 9.8
+    },
+    {
+      "start": 32.7,
+      "end": 34.75,
+      "text": "Continue with day three.",
+      "target": "ChatGPT composer",
+      "keyTimes": [
+        32.782912,
+        32.859894,
+        32.931968,
+        33.018863,
+        33.081908,
+        33.154946,
+        33.221347,
+        33.305771,
+        33.437581,
+        33.518762,
+        33.591378,
+        33.671837,
+        33.767193,
+        33.899002,
+        33.993374,
+        34.083277,
+        34.174058,
+        34.305867,
+        34.369116,
+        34.432284,
+        34.505848,
+        34.569244,
+        34.658678,
+        34.75
+      ],
+      "sourceStart": 40.7,
+      "sourceEnd": 43
+    }
+  ],
+  "motion": [
+    {
+      "start": 0.58,
+      "end": 1.491429,
+      "name": "enter conversation",
+      "sourceStart": 0.7,
+      "sourceEnd": 1.8
+    },
+    {
+      "start": 5.8,
+      "end": 6.490909,
+      "name": "Claude composer push",
+      "sourceStart": 7.0,
+      "sourceEnd": 7.7
+    },
+    {
+      "start": 8.662338,
+      "end": 9.353247,
+      "name": "follow cursor to Claude Send",
+      "sourceStart": 9.9,
+      "sourceEnd": 10.6
+    },
+    {
+      "start": 10.000935,
+      "end": 10.47757,
+      "name": "pull out to limit",
+      "sourceStart": 11.3,
+      "sourceEnd": 12.15
+    },
+    {
+      "start": 12.3,
+      "end": 13.082353,
+      "name": "Cap Context push",
+      "sourceStart": 15.4,
+      "sourceEnd": 16.35
+    },
+    {
+      "start": 13.870213,
+      "end": 14.721277,
+      "name": "picker reveal",
+      "sourceStart": 17.3,
+      "sourceEnd": 18.3
+    },
+    {
+      "start": 18.492727,
+      "end": 19.048182,
+      "name": "handoff entrance",
+      "sourceStart": 22.7,
+      "sourceEnd": 23.35
+    },
+    {
+      "start": 21.018182,
+      "end": 21.6,
+      "name": "progress macro",
+      "sourceStart": 25.7,
+      "sourceEnd": 26.5
+    },
+    {
+      "start": 23.237838,
+      "end": 23.805405,
+      "name": "progress pullout",
+      "sourceStart": 28.75,
+      "sourceEnd": 29.5
+    },
+    {
+      "start": 25.4,
+      "end": 26.025,
+      "name": "ChatGPT entrance",
+      "sourceStart": 31.65,
+      "sourceEnd": 32.4
+    },
+    {
+      "start": 26.4,
+      "end": 27.12541,
+      "name": "carried context push",
+      "sourceStart": 32.85,
+      "sourceEnd": 33.6
+    },
+    {
+      "start": 29.628571,
+      "end": 30.2375,
+      "name": "acknowledgement",
+      "sourceStart": 36.2,
+      "sourceEnd": 36.9
+    },
+    {
+      "start": 32.15,
+      "end": 32.7,
+      "name": "ChatGPT composer push",
+      "sourceStart": 40,
+      "sourceEnd": 40.7
+    },
+    {
+      "start": 34.842,
+      "end": 35.486,
+      "name": "follow cursor to ChatGPT Send",
+      "sourceStart": 43.1,
+      "sourceEnd": 43.8
+    },
+    {
+      "start": 36.269231,
+      "end": 37.047445,
+      "name": "answer reveal",
+      "sourceStart": 44.65,
+      "sourceEnd": 45.5
+    },
+    {
+      "start": 44.0,
+      "end": 44.7,
+      "name": "result pullout",
+      "sourceStart": 52.25,
+      "sourceEnd": 53.2
+    },
+    {
+      "start": 45.4,
+      "end": 45.95,
+      "name": "work exits",
+      "sourceStart": 54.05,
+      "sourceEnd": 54.7
+    },
+    {
+      "start": 46.2,
+      "end": 47.0,
+      "name": "separate message",
+      "sourceStart": 54.95,
+      "sourceEnd": 55.75
+    },
+    {
+      "start": 49.464286,
+      "end": 50.0,
+      "name": "brand close",
+      "sourceStart": 58.8,
+      "sourceEnd": 59.45
+    }
+  ],
+  "timeMap": [
+    [
+      0,
+      0
+    ],
+    [
+      7,
+      5.8
+    ],
+    [
+      10.85,
+      9.6
+    ],
+    [
+      11.12,
+      9.9
+    ],
+    [
+      15.4,
+      12.3
+    ],
+    [
+      17.1,
+      13.7
+    ],
+    [
+      21.8,
+      17.7
+    ],
+    [
+      22.65,
+      18.45
+    ],
+    [
+      25.4,
+      20.8
+    ],
+    [
+      28.7,
+      23.2
+    ],
+    [
+      30.55,
+      24.6
+    ],
+    [
+      31.65,
+      25.4
+    ],
+    [
+      32.85,
+      26.4
+    ],
+    [
+      35.9,
+      29.35
+    ],
+    [
+      36.6,
+      30
+    ],
+    [
+      37.8,
+      30.95
+    ],
+    [
+      40,
+      32.15
+    ],
+    [
+      40.7,
+      32.7
+    ],
+    [
+      43,
+      34.75
+    ],
+    [
+      44.25,
+      35.9
+    ],
+    [
+      44.9,
+      36.5
+    ],
+    [
+      47.64,
+      39
+    ],
+    [
+      52.25,
+      44
+    ],
+    [
+      53.2,
+      44.7
+    ],
+    [
+      54.05,
+      45.4
+    ],
+    [
+      54.7,
+      45.95
+    ],
+    [
+      54.95,
+      46.2
+    ],
+    [
+      55.75,
+      47
+    ],
+    [
+      58.55,
+      49.25
+    ],
+    [
+      58.9,
+      49.55
+    ],
+    [
+      59.45,
+      50
+    ],
+    [
+      59.85,
+      50.4
+    ],
+    [
+      62,
+      52
+    ]
+  ],
+  "sourceDuration": 62
+}
