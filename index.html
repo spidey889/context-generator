@@ -236,7 +236,7 @@
     }
 
     .hero {
-      --hero-stack-gap: clamp(3rem, 3.5vw, 4rem);
+      --hero-stack-gap: clamp(1.75rem, 2.5vw, 2.5rem);
       text-align: center;
       padding-top: clamp(4rem, 8vw, 6.75rem);
       padding-bottom: clamp(3rem, 3vw, 3.5rem);
@@ -1079,12 +1079,14 @@
     /* Native controls keep the film usable with keyboard input and without JavaScript. */
     .demo-section { padding-top: 1rem; scroll-margin-top: 2rem; }
     .demo-heading { display: flex; align-items: baseline; justify-content: space-between; gap: 1rem; margin-bottom: 1rem; }
-    .demo-heading h2 { margin: 0; font-size: 1.1rem; letter-spacing: -.025em; }
+    .demo-heading h2 { margin: 0; font-size: clamp(1.2rem, 2.2vw, 1.6rem); letter-spacing: -.04em; }
     .demo-heading span, .demo-note { color: var(--muted); font-size: .85rem; line-height: 1.6; }
+    .demo-heading span { padding: .35rem .75rem; border: 1px solid var(--border); border-radius: 999px; background: rgba(255,255,255,.75); }
     .demo-frame { margin: 0; padding: .55rem; border: 1px solid var(--border); border-radius: 1.6rem; background: #fff; box-shadow: var(--shadow); }
     .demo-frame video { display: block; width: 100%; height: auto; aspect-ratio: 16 / 9; border-radius: 1.1rem; background: #f8f6f1; }
     .demo-note { text-align: center; margin: 1rem 0 0; }
     .platform-list { display: flex; flex-wrap: wrap; justify-content: center; gap: .6rem 1.3rem; list-style: none; padding: 0; margin: 1.6rem 0 0; color: #525465; font-size: .85rem; font-weight: 600; }
+    .platform-list li { padding: .4rem .75rem; border: 1px solid var(--border); border-radius: 999px; background: rgba(255,255,255,.65); }
     .product-facts { display: grid; grid-template-columns: repeat(3, 1fr); margin: 2.5rem 0 0; padding: 1.8rem 0; border-block: 1px solid var(--border); text-align: center; }
     .product-facts div + div { border-left: 1px solid var(--border); }
     .product-facts div { display: flex; flex-direction: column; }
@@ -1103,7 +1105,7 @@
     .faq summary { cursor: pointer; font-weight: 600; line-height: 1.6; }
     .faq p { color: var(--muted); line-height: 1.7; margin-bottom: 0; }
     .faq a { text-decoration: underline; text-underline-offset: 3px; }
-    .closing-cta { text-align: center; padding-top: 1rem; }
+    .closing-cta { text-align: center; padding: clamp(2.5rem, 5vw, 4rem) 1.5rem; margin-bottom: 3rem; border: 1px solid rgba(149,96,223,.16); border-radius: var(--radius); background: radial-gradient(ellipse at top, #ece4fc, transparent 75%), rgba(255,255,255,.6); }
     .closing-cta .button { margin-top: 1.5rem; }
     a:focus-visible, summary:focus-visible, video:focus-visible { outline: 3px solid var(--accent); outline-offset: 5px; }
     .terminal-output { overflow-x: auto; }
@@ -1189,13 +1191,13 @@
     <section id="demo" class="demo-section section container" aria-labelledby="demo-title">
       <div class="demo-heading"><h2 id="demo-title">Same conversation. Next AI.</h2><span>Watch in 62 seconds</span></div>
       <figure class="demo-frame">
-        <video id="install-video" controls playsinline preload="none" width="1920" height="1080"
+        <video id="install-video" controls muted playsinline preload="none" width="1920" height="1080"
           poster="brag-output-2026-09-29-153657/brag.jpg" aria-label="Cap Context demo: continue a Kyoto trip plan from Claude in ChatGPT" aria-describedby="demo-description">
           <source src="brag-output-2026-09-29-153657/brag.mp4" type="video/mp4">
           <a href="brag-output-2026-09-29-153657/brag.mp4">Watch the Cap Context demo</a>
         </video>
       </figure>
-      <p class="demo-note" id="demo-description">A Kyoto plan moves from Claude to ChatGPT, keeping the details along the way. Illustrative demo; timing condensed. Music only.</p>
+      <p class="demo-note" id="demo-description">A Kyoto plan moves from Claude to ChatGPT, keeping the details along the way. Starts muted; unmute for music. Illustrative demo; timing condensed.</p>
       <!-- Product facts, not traffic counters or measured performance claims. -->
       <dl class="product-facts" aria-label="Cap Context at a glance">
         <div><dt>supported AIs</dt><dd>5</dd></div>
@@ -1367,6 +1369,52 @@
   </footer>
 
   <script>
+    (function playDemoInView() {
+      const video = document.getElementById("install-video");
+      if (!video || !("IntersectionObserver" in window)) return;
+
+      const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
+      let inView = false;
+      let userPaused = false;
+      let visibilityPause = false;
+
+      function pauseOffscreen() {
+        if (video.paused) return;
+        visibilityPause = true;
+        video.pause();
+      }
+
+      function syncPlayback() {
+        if (!inView || document.hidden) {
+          pauseOffscreen();
+        } else if (!reducedMotion.matches && !userPaused && !video.ended && video.paused) {
+          // Muted playback is permitted by most browsers. Native controls remain the fallback.
+          video.play().catch(() => {});
+        }
+      }
+
+      video.addEventListener("pause", () => {
+        // A deliberate pause must survive scrolling away and back into the demo.
+        if (!visibilityPause && !video.ended) userPaused = true;
+        visibilityPause = false;
+      });
+      video.addEventListener("play", () => {
+        userPaused = false;
+        // A pending play request may finish after the user has already scrolled away.
+        if (!inView || document.hidden) pauseOffscreen();
+      });
+
+      new IntersectionObserver(([entry]) => {
+        inView = entry.isIntersecting && entry.intersectionRatio >= 0.35;
+        syncPlayback();
+      }, { threshold: [0, 0.35] }).observe(video);
+      document.addEventListener("visibilitychange", syncPlayback);
+      reducedMotion.addEventListener("change", () => {
+        if (reducedMotion.matches) pauseOffscreen();
+        else syncPlayback();
+      });
+    })();
+
     (function drawConnectorHubLines() {
       function drawLines() {
         const wrap = document.getElementById("cgWrap");
