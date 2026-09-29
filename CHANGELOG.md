@@ -1,5 +1,7 @@
 # Changelog
 
+- 2026-09-29: Added a nonblocking post-activation paste check for Claude, Gemini, DeepSeek, and Grok. A cleared editor gets one retry and a second stability check; persistent loss opens the existing copy modal in the destination tab, while any newer user draft is preserved. ChatGPT keeps its existing in-paste check. Added simulated draft-clearing and copy-fallback regressions and advanced the content-script identity for open-tab replacement. All 364 main-suite and 3 slow-suite tests passed; isolated Brave smoke verified exact paste and no Send click.
+
 - 2026-09-29: Moved the delayed Claude virtualized-batch and ChatGPT physical-scroll capture regressions into the existing slow/release run. The main suite retains the other virtualized capture cases; the gate still runs all three slow tests. Verified 362 main-suite and 3 slow tests, with no application behavior change.
 
 - 2026-09-29: Added advisory summary quality flags and retained the validator reason in backend response timing. The backend logs only flags, the bounded reason, and a word count; summary text, fallback order, and delivery remain unchanged. Added focused flag coverage. No extension or Supabase telemetry changes.

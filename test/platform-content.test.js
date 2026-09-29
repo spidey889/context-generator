@@ -54,7 +54,7 @@ class FakeElement {
     this.localName = tag;
     this.textContent = text;
     this.innerText = text;
-    this.value = "";
+    this._value = "";
     this.id = attrs.id || "";
     this.className = attrs.class || "";
     this.dataset = {};
@@ -79,6 +79,17 @@ class FakeElement {
 
   getAttribute(name) {
     return this.attrs[name] ?? null;
+  }
+
+  get value() { return this._value; }
+
+  set value(text) {
+    this._value = text;
+    if (this.localName === "textarea" || this.localName === "input") {
+      this.innerText = text;
+      this.textContent = text;
+    }
+    this.onValueSet?.(text);
   }
 
   hasAttribute(name) {
@@ -199,6 +210,10 @@ class FakeElement {
     this.onClick?.();
   }
 
+  focus() {}
+
+  dispatchEvent() { return true; }
+
   remove() {}
 
   appendChild(child) {
@@ -228,6 +243,7 @@ function loadPlatformContent(elements = [], hostname = "chatgpt.com", {
   expectSupported = true,
   pathname = "/",
   search = "",
+  visibilityState = "visible",
   innerWidth = 1280,
   innerHeight = 720
 } = {}) {
@@ -237,6 +253,8 @@ function loadPlatformContent(elements = [], hostname = "chatgpt.com", {
   const mutationObservers = [];
   const animationFrameCallbacks = [];
   const runtimeMessageListeners = [];
+  const documentListeners = new Map();
+  const elementsById = new Map();
   class TestResizeObserver {
     constructor(callback) {
       this.callback = callback;
@@ -271,13 +289,17 @@ function loadPlatformContent(elements = [], hostname = "chatgpt.com", {
     body: new FakeElement({ tag: "body" }),
     documentElement: new FakeElement({ tag: "html" }),
     activeElement: null,
-    getElementById: () => null,
+    visibilityState,
+    getElementById: (id) => elementsById.get(id) || null,
     querySelectorAll: (selector = "*") => {
       const isEditorSelector = /contenteditable|textarea|prompt-textarea|grokinput|grok-input|chat-input/i.test(selector);
       return isEditorSelector ? elements.filter((element) => element.matches(selector)) : elements;
     },
-    addEventListener: () => {},
-    removeEventListener: () => {}
+    addEventListener: (type, listener) => {
+      if (!documentListeners.has(type)) documentListeners.set(type, new Set());
+      documentListeners.get(type).add(listener);
+    },
+    removeEventListener: (type, listener) => documentListeners.get(type)?.delete(listener)
   };
   const window = {
     location: { hostname, pathname, search },
@@ -358,6 +380,12 @@ function loadPlatformContent(elements = [], hostname = "chatgpt.com", {
     chrome,
     crypto: webcrypto,
     Element: FakeElement,
+    Event: class FakeEvent {
+      constructor(type) { this.type = type; }
+    },
+    InputEvent: class FakeInputEvent {
+      constructor(type) { this.type = type; }
+    },
     HTMLTextAreaElement: FakeHTMLTextAreaElement,
     HTMLInputElement: FakeHTMLInputElement,
     Node: { DOCUMENT_POSITION_PRECEDING: 2 },
@@ -382,6 +410,11 @@ function loadPlatformContent(elements = [], hostname = "chatgpt.com", {
     hooks.document = document;
     hooks.animationFrameCallbacks = animationFrameCallbacks;
     hooks.runtimeMessageListeners = runtimeMessageListeners;
+    hooks.setVisibility = (state) => {
+      document.visibilityState = state;
+      documentListeners.get("visibilitychange")?.forEach((listener) => listener());
+    };
+    hooks.registerElementId = (id, element) => elementsById.set(id, element);
     hooks.reinject = () => {
       window.__contextGeneratorPlatformLoaded = "previous-content-script-version";
       COMPILED_PLATFORM_CONTENT_SCRIPT.runInContext(sandbox);
@@ -2149,6 +2182,54 @@ test("paste verification rejects unrelated editor text", () => {
   const editor = new FakeElement({ text: "A blank new chat input" });
 
   assert.equal(hooks.editorContainsText(editor, "CONTEXT CARRY\n\nWHO I AM\nProject details"), false);
+});
+
+test("Claude, Gemini, DeepSeek, and Grok restore a draft cleared after the first paste", async () => {
+  const summary = "CONTEXT CARRY — READY TO PASTE\n\nImportant project context and next steps.";
+  for (const [hostname, destination, hidden] of [
+    ["claude.ai", "claude", true],
+    ["gemini.google.com", "gemini", true],
+    ["chat.deepseek.com", "deepseek", true],
+    ["grok.com", "grok", false]
+  ]) {
+    const editor = new FakeElement({ tag: "textarea", attrs: { placeholder: "Message" } });
+    const hooks = loadPlatformContent([editor], hostname, { visibilityState: hidden ? "hidden" : "visible" });
+    await hooks.pasteIntoPlatform(summary, destination);
+    assert.equal(editor.value, summary, `${hostname} received the initial paste`);
+    editor.value = "";
+    editor.innerText = "";
+    editor.textContent = "";
+    if (hidden) {
+      assert.equal(editor.clicks, 1, `${hostname} did not delay activation to re-paste`);
+      hooks.setVisibility("visible");
+    }
+    await new Promise((resolve) => setTimeout(resolve, 650));
+    assert.equal(editor.value, summary, `${hostname} restored the cleared draft`);
+    assert.equal(editor.clicks, 2, `${hostname} retried only once`);
+  }
+});
+
+test("delayed paste recovery offers manual copy if the app clears the retry", async () => {
+  const summary = "CONTEXT CARRY — READY TO PASTE\n\nImportant project context and next steps.";
+  const editor = new FakeElement({ tag: "textarea", attrs: { placeholder: "Message" } });
+  const hooks = loadPlatformContent([editor], "claude.ai", { visibilityState: "hidden" });
+  const modal = new FakeElement();
+  const copyText = new FakeElement({ tag: "textarea" });
+  hooks.registerElementId("context-generator-fallback-modal", modal);
+  hooks.registerElementId("context-generator-fallback-text", copyText);
+  await hooks.pasteIntoPlatform(summary, "claude");
+  editor.value = "";
+  editor.innerText = "";
+  editor.textContent = "";
+  editor.onValueSet = () => {
+    editor.onValueSet = null;
+    setTimeout(() => { editor.value = ""; }, 20);
+  };
+  hooks.setVisibility("visible");
+  await new Promise((resolve) => setTimeout(resolve, 1250));
+  assert.equal(editor.clicks, 2, "only one recovery paste was attempted");
+  assert.equal(modal.style.display, "flex");
+  assert.equal(copyText.value, summary, "the full summary stays available to copy");
 });
 
 test("Firefox contenteditable paste preserves line breaks without treating text as HTML", () => {

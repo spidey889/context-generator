@@ -97,6 +97,7 @@ Important sequencing:
 - Claude, Gemini, and DeepSeek paste while inactive. The source completion cue finishes before the already-pasted tab is revalidated and focused.
 - A missing, navigated, or failed prepared tab receives at most one fresh destination tab.
 - All five destinations use verified paste retries and editor-remount recovery; no separate one-shot paste path exists.
+- ChatGPT keeps its in-paste 550 ms stability check. Claude, Gemini, DeepSeek, and Grok recheck 550 ms after the destination becomes visible, without delaying activation. If the editor is empty, they paste once more and check both immediately and after another 550 ms. A still-missing draft, unavailable editor, or nonempty changed draft opens the existing manual-copy modal in the destination tab; changed user text is not overwritten.
 - Exhausted paste recovery shows one manual-copy fallback when a summary exists. Clipboard success is claimed only after a real copy succeeds.
 - Provider errors are converted to bounded user-safe messages; raw upstream bodies never reach the extension UI.
 
@@ -311,7 +312,7 @@ Composer discovery scores platform candidates, rejects page-sized/misaligned sur
 
 Each platform-content instance publishes a teardown callback before it begins monitoring. A later content-script version invokes that callback before taking ownership, removing its runtime message listener and DOM listeners, disconnecting all owned observers, cancelling timers/intervals/animation frames, restoring reservations, and removing owned UI. Same-version duplicate injection remains a no-op.
 
-Paste uses native setters/events plus stability checks. Paste discovery ranks only writable, enabled candidates, so a disabled or read-only high-scoring editor cannot mask an available composer; a previously verified composer remains retained through a temporary disabled/`aria-hidden` state. Firefox alone converts contenteditable line breaks to escaped HTML `<br>` elements. ChatGPT gets longer insert/verify/stability windows. Verification requires normalized word samples from the beginning, middle, and end of the summary, and a detached editor cannot complete verification after a remount. Punctuation and line-break differences in the editor are tolerated, but a partial paste is not reported as complete.
+Paste uses native setters/events plus stability checks. Paste discovery ranks only writable, enabled candidates, so a disabled or read-only high-scoring editor cannot mask an available composer; a previously verified composer remains retained through a temporary disabled/`aria-hidden` state. Firefox alone converts contenteditable line breaks to escaped HTML `<br>` elements. ChatGPT gets longer insert/verify/stability windows. Verification requires normalized word samples from the beginning, middle, and end of the summary, and a detached editor cannot complete verification after a remount. Punctuation and line-break differences are tolerated; this sample check does not prove byte-for-byte completeness.
 
 Native menus and popovers may temporarily mark the background application `aria-hidden` without visually removing its composer. Placement retains only the last verified, connected, geometrically visible input through that state; removed or visually hidden composers still make Cap Context hide normally. Newly mounted textareas/contenteditables inside native dialogs are excluded from composer selection, so settings editors cannot replace the verified chat input.
 
@@ -322,7 +323,7 @@ Native menus and popovers may temporarily mark the background application `aria-
 - Model/profile routing: provider constants/budgets, prompts, Latest Run labels, evaluation expectations, this file, `memory.md`, `extension/README.md`.
 - Telemetry fields/stages/failures: source/background sanitizers, Vercel validator, Supabase validator, SQL constraints/functions, privacy wording, tests. Free-form telemetry fields are forbidden.
 - Latest Run receipt: producer, background expiry, bridge, analysis renderer, privacy wording, analysis tests.
-- Any content-script change: update `CONTENT_SCRIPT_LOAD_ID` so open tabs replace stale code, and retain stale-node/reservation cleanup. Current value: `platform-content-2026-09-28-fast-capture-merge-v56`.
+- Any content-script change: update `CONTENT_SCRIPT_LOAD_ID` so open tabs replace stale code, and retain stale-node/reservation cleanup. Current value: `platform-content-2026-09-29-delayed-paste-recheck-v57`.
 - Extension release: bump `extension/manifest.json`, rebuild the ZIP with `manifest.json` at its root, hash-compare every file against `extension/`, then test the unpacked folder in a new Brave window.
 
 ## Common Wrong Assumptions

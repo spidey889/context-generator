@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-09-28-fast-capture-merge-v56";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-09-29-delayed-paste-recheck-v57";
   const ownedUiStyleSheets = new Map();
   // Start fast capture on for each page instance; a manual opt-out lasts until reload.
   let claudeJsonCaptureEnabled = true;
@@ -168,7 +168,7 @@
   const PASTE_RETRY_INTERVAL_MS = 180;
   const PASTE_VERIFY_TIMEOUT_MS = 1000;
   const CHATGPT_PASTE_VERIFY_TIMEOUT_MS = 1500;
-  const CHATGPT_PASTE_STABILITY_MS = 550;
+  const PASTE_STABILITY_MS = 550;
   const HANDOFF_COUNTDOWN_ID = "context-generator-handoff-countdown";
   const HANDOFF_COUNTDOWN_FIXED_MS = 40000;
   const HANDOFF_REASSURANCE_ID = "context-generator-handoff-reassurance";
@@ -271,7 +271,7 @@
       logo: "logos/gptwhitedownload__1_-removebg-preview.png",
       pasteRetryTimeoutMs: CHATGPT_PASTE_RETRY_TIMEOUT_MS,
       pasteVerifyTimeoutMs: CHATGPT_PASTE_VERIFY_TIMEOUT_MS,
-      pasteStabilityMs: CHATGPT_PASTE_STABILITY_MS,
+      pasteStabilityMs: PASTE_STABILITY_MS,
       maxComposerWidth: 1120,
       maxComposerHeight: 720,
       composerSelectors: [
@@ -491,6 +491,7 @@
   let chatGptPlacementMutationObserver = null;
   let chatGptPlacementMutationRoot = null;
   let retainedPlatformInput = null;
+  let pendingPasteRecheck = null;
   let lastClaudeStablePlacementAt = 0;
   let claudePlacementGraceTimer = null;
   let transientComposerPlacement = null;
@@ -615,6 +616,7 @@
   function teardownContextGeneratorInstance() {
     if (!instanceActive) return;
     instanceActive = false;
+    cancelPendingPasteRecheck();
     extensionRuntime.onMessage.removeListener?.(handleRuntimeMessage);
     disableFloatingButtonMonitoring();
     clearOwnedLifecycleResources();
@@ -740,6 +742,7 @@
     window.__CONTEXT_GENERATOR_TEST_HOOKS__.register({
       scrapeConversationText,
       getConversationRole,
+      pasteIntoPlatform,
       editorContainsText,
       findReadyPlatformInput,
       waitForEditorText,
@@ -2159,6 +2162,7 @@
   }
 
   async function pasteIntoPlatform(text, destinationId, transferId = null) {
+    cancelPendingPasteRecheck();
     const destination = getPlatform(destinationId) || currentPlatform;
     if (!destination) {
       throw new Error("This AI destination is not supported.");
@@ -2172,6 +2176,9 @@
 
     // Every supported destination uses verified retries, including editor remount recovery.
     await pasteWithRetry(trimmedText, destination, transferId);
+    if (destination.id !== "chatgpt") {
+      schedulePostActivationPasteRecheck(trimmedText, destination);
+    }
   }
 
   async function pasteWithRetry(text, destination, transferId = null) {
@@ -2265,6 +2272,62 @@
     // is mounting. Select among ready candidates instead of retrying the
     // highest-scoring unusable element until the paste deadline expires.
     return findPlatformInput(platform, { readyOnly: true });
+  }
+
+  function cancelPendingPasteRecheck() {
+    if (!pendingPasteRecheck) return;
+    clearTimeout(pendingPasteRecheck.timer);
+    removeOwnedEventListener(document, "visibilitychange", pendingPasteRecheck.onVisible);
+    pendingPasteRecheck = null;
+  }
+
+  function schedulePostActivationPasteRecheck(text, destination) {
+    const pending = { timer: null, onVisible: null };
+    pendingPasteRecheck = pending;
+    pending.onVisible = () => {
+      if (document.visibilityState === "hidden") return;
+      removeOwnedEventListener(document, "visibilitychange", pending.onVisible);
+      // A prepared tab may paste while hidden. Start the check after its reveal.
+      pending.timer = setTimeout(() => {
+        if (pendingPasteRecheck === pending) {
+          void recheckPastedContext(text, destination, pending);
+        }
+      }, PASTE_STABILITY_MS);
+    };
+    if (document.visibilityState === "hidden") {
+      addOwnedEventListener(document, "visibilitychange", pending.onVisible);
+    } else {
+      pending.onVisible();
+    }
+  }
+
+  async function recheckPastedContext(text, destination, pending) {
+    let needsCopy = true;
+    try {
+      const input = findReadyPlatformInput(destination);
+      if (input && editorContainsText(input, text)) {
+        needsCopy = false;
+        return;
+      }
+      // Do not overwrite a draft the user may have started after tab activation.
+      if (pendingPasteRecheck === pending && input && !getElementText(input).trim()) {
+        setEditorText(input, text, destination);
+        if (await waitForEditorText(input, text, destination.pasteVerifyTimeoutMs || PASTE_VERIFY_TIMEOUT_MS)) {
+          await delay(PASTE_STABILITY_MS);
+          if (input.isConnected && editorContainsText(input, text)) {
+            needsCopy = false;
+            return;
+          }
+        }
+      }
+    } catch (error) {
+      console.debug("[Context Generator] Delayed paste check failed:", error?.message || error);
+    } finally {
+      if (pendingPasteRecheck === pending) {
+        pendingPasteRecheck = null;
+        if (needsCopy) showFallbackModal(text, destination.name);
+      }
+    }
   }
 
   function isEditorReady(element) {
