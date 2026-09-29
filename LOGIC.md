@@ -252,6 +252,8 @@ The prompt still requests the exact title and all seven sections once and in ord
 
 Strictly valid output retains existing normalization: remove fences/legacy footers, canonicalize recognized headings, add the Unicode box, and replace NEXT STEP. Other non-empty output is preserved verbatim apart from outer whitespace, with the trusted destination-confirmation NEXT STEP appended; missing sections are not invented.
 
+Generated-summary response timing also includes `validationReason` (a bounded validator reason, or null) and `qualityFlags` (`bad_structure`, `missing_section`, `duplicate_section`, `token_limit`, `too_short`, `refusal_like`). The new quality log contains only those diagnostics and the summary word count. Flags are advisory: they do not change the summary text, provider selection, or delivery. Tiny and emergency local-direct carries report an empty flag list and null reason. These fields are not part of Supabase telemetry.
+
 Do not overstate current quality enforcement:
 
 - Large-profile `minWords` is prompt guidance and a `qualityFloorMet` diagnostic. The retained advisory validator uses 20% of target, clamped to 80-200 substantive words; this floor no longer rejects provider text.

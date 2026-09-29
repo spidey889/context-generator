@@ -27,6 +27,7 @@ const {
   createLongSummaryResponse,
   normalizeContextCarrySummary,
   validateContextCarrySummary,
+  getSummaryQualityFlags,
   getMinimumValidSummaryWords,
   getProviderRequestBudgetMs,
   GEMINI_CHAIN_BUDGET_MS,
@@ -756,6 +757,8 @@ test("backend accepts incomplete Ministral 14B output without calling Groq", asy
     assert.equal(res.payload.timing.model, "ministral-14b-2512");
     assert.equal(res.payload.summary,
       'CONTEXT CARRY — READY TO PASTE\nKEY CONTEXT\nWe finished the Windows build. Linux validation is still blocked.\n\n🔁 NEXT STEP\nReply only: "Context loaded. Let\'s pick up right where you left off." Then wait for the user.');
+    assert.match(res.payload.timing.validationReason, /required sections/);
+    assert.deepEqual(res.payload.timing.qualityFlags, ["bad_structure", "missing_section", "too_short"]);
   } finally {
     restoreGroqKey();
     restoreApiKey();
@@ -978,6 +981,24 @@ test("deterministic validation rejects malformed, empty, short, and refusal outp
   assert.equal(getMinimumValidSummaryWords(smallProfile), 80);
   assert.equal(getMinimumValidSummaryWords(getSummaryProfile("x".repeat(20000))), 140);
   assert.equal(getMinimumValidSummaryWords(getSummaryProfile("x".repeat(90000))), 200);
+});
+
+test("summary quality flags describe imperfect output without including its text", () => {
+  const profile = getSummaryProfile("x".repeat(4000));
+  const valid = makeContextCarrySummary("quality", 90);
+  const missing = valid.replace(/WHERE WE LEFT OFF[\s\S]*?DECISIONS MADE/, "DECISIONS MADE");
+  const duplicate = `${valid}\nNEXT STEP\nRepeated.`;
+  const refusal = valid.replace(/WHO I AM[\s\S]*?WHAT WE WERE DOING/,
+    "WHO I AM\nI'm sorry, but I cannot provide that summary.\n\nWHAT WE WERE DOING");
+
+  assert.deepEqual(getSummaryQualityFlags(valid, profile, "STOP"), []);
+  assert.deepEqual(getSummaryQualityFlags(valid, profile, "MAX_TOKENS"), ["token_limit"]);
+  assert.deepEqual(getSummaryQualityFlags(valid, profile, "length"), ["token_limit"]);
+  assert.deepEqual(getSummaryQualityFlags(missing, profile, null), ["bad_structure", "missing_section"]);
+  assert.deepEqual(getSummaryQualityFlags(duplicate, profile, null), ["bad_structure", "duplicate_section"]);
+  assert.deepEqual(getSummaryQualityFlags(makeContextCarrySummary("tiny", 3), profile, null), ["too_short"]);
+  assert.deepEqual(getSummaryQualityFlags(refusal, profile, null), ["too_short", "refusal_like"]);
+  assert.doesNotMatch(JSON.stringify(getSummaryQualityFlags(missing, profile, null)), /Detailed work/);
 });
 
 test("validator canonicalizes numbered provider headings without weakening section requirements", () => {

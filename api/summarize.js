@@ -264,6 +264,8 @@ async function handleSummary(conversation, responseChannel) {
         targetWords: summaryProfile.targetWords,
         minWords: summaryProfile.minWords,
         summaryWordCount: countWords(summary),
+        qualityFlags: [],
+        validationReason: null,
         mistralPasses: 0,
         expansion,
         fallback: createFallbackMetadata(),
@@ -297,6 +299,13 @@ async function handleSummary(conversation, responseChannel) {
       groqApiKey: process.env.GROQ_ENABLED === "true" ? process.env.GROQ_API_KEY : undefined
     });
 
+    // These diagnostics contain only fixed flag names, validator wording, and counts.
+    console.info("[Context Generator] Summary quality:", {
+      qualityFlags: providerResult.qualityFlags,
+      validationReason: providerResult.validationReason,
+      summaryWordCount: providerResult.summaryWordCount
+    });
+
     return responseChannel.send(200, {
       summary: providerResult.summary,
       timing: {
@@ -327,6 +336,8 @@ async function handleSummary(conversation, responseChannel) {
         expansion: providerResult.expansion,
         finishReason: providerResult.finishReason,
         qualityFloorMet: providerResult.qualityFloorMet,
+        qualityFlags: providerResult.qualityFlags,
+        validationReason: providerResult.validationReason,
         fallback: providerResult.fallback,
         inputChars,
         outputChars: providerResult.summary.length,
@@ -407,6 +418,7 @@ module.exports.__test = {
   createLongSummaryResponse,
   normalizeContextCarrySummary,
   validateContextCarrySummary,
+  getSummaryQualityFlags,
   getMinimumValidSummaryWords,
   getProviderRequestBudgetMs,
   GEMINI_CHAIN_BUDGET_MS,
@@ -746,6 +758,8 @@ function createEmergencyDirectCarryResult({
     finishReason: null,
     summaryWordCount: countWords(summary),
     qualityFloorMet: true,
+    qualityFlags: [],
+    validationReason: null,
     usage: createZeroUsage(),
     modelReason: `${attemptedChain} failed; preserved the complete transcript with ${LOCAL_DIRECT_MODEL}`,
     modelsTried,
@@ -802,6 +816,7 @@ async function createSummaryWithProvider({ provider, apiKey, profile, model, ini
   }
 
   const validation = validateContextCarrySummary(rawSummary, profile);
+  const qualityFlags = getSummaryQualityFlags(rawSummary, profile, finishReason);
   // Temporary availability policy: preserve imperfect provider text rather than
   // exhausting fallbacks over formatting. Restore via docs/summary-validation.md.
   const summary = validation.ok
@@ -830,6 +845,8 @@ async function createSummaryWithProvider({ provider, apiKey, profile, model, ini
     finishReason,
     summaryWordCount,
     qualityFloorMet: profile.minWords <= 0 || summaryWordCount >= profile.minWords,
+    qualityFlags,
+    validationReason: validation.ok ? null : validation.reason,
     usage: initialUsage
   };
 }
@@ -1527,6 +1544,33 @@ function validateContextCarrySummary(text, profile) {
   }
 
   return { ok: true, reason: null, actualWordCount, minimumWords };
+}
+
+function getSummaryQualityFlags(text, profile, finishReason) {
+  const cleanText = stripContextCarryFooter(stripWrappingCodeFence(text));
+  const parsed = parseContextCarrySections(stripExistingContextCarryHeader(cleanText));
+  const sections = CONTEXT_CARRY_SECTIONS.map((section) => section.title);
+  const bodies = sections
+    .filter((title) => title !== "NEXT STEP")
+    .map((title) => parsed.sections.get(title)?.trim() || "")
+    .filter((content) => content && !/^none\.?$/i.test(content));
+  const flags = [];
+
+  if (!hasContextCarryHeader(cleanText) || !hasEveryRequiredSectionOnceInOrder(parsed)
+      || parsed.introLines.some((line) => line.trim())
+      || [...IMPORTANT_CONTEXT_CARRY_SECTIONS].some((title) => !isMeaningfulSummaryContent(parsed.sections.get(title)))) {
+    flags.push("bad_structure");
+  }
+  if (sections.some((title) => !parsed.sections.has(title))) flags.push("missing_section");
+  if (parsed.duplicates.size) flags.push("duplicate_section");
+  if (/^(?:MAX_TOKENS|MAX_OUTPUT_TOKENS|length)$/i.test(String(finishReason || ""))) flags.push("token_limit");
+  if (countWords(bodies.join(" ")) < getMinimumValidSummaryWords(profile)) flags.push("too_short");
+  if (bodies.some((content) => countWords(content) <= 40
+      && SUSPICIOUS_SUMMARY_REFUSAL_PATTERN.test(stripListPrefix(content)))
+      || (parsed.order.length === 0 && SUSPICIOUS_SUMMARY_REFUSAL_PATTERN.test(stripListPrefix(cleanText)))) {
+    flags.push("refusal_like");
+  }
+  return flags;
 }
 
 function hasContextCarryHeader(text) {
