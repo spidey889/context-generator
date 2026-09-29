@@ -1,4 +1,6 @@
 .vercel
+supabase/.temp/
+supabase/.branches/
 .gstack/
 .env*
 node_modules/

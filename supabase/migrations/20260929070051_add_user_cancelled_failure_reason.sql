@@ -1,3 +1,4 @@
+BEGIN;
 alter table public.transfer_events
   drop constraint if exists transfer_events_failure_reason_check;
 
@@ -19,3 +20,4 @@ alter table public.transfer_events
       'unknown_failure'::text
     ])
   );
+COMMIT;

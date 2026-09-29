@@ -294,6 +294,8 @@ The only payload fields are install/attempt IDs, time, source/destination, captu
 
 Delivery path: `content script -> background outbox -> Vercel /api/telemetry -> Supabase Edge Function -> record_transfer_event`. Every layer rejects unknown fields. Supabase credentials remain server-side; RLS/grants block public tables. Upserts preserve the furthest stage and terminal result.
 
+On 2026-09-29, the live `cap-context-telemetry` project (`iqkzynzxbmemhtiupwwu`) was verified with `transfer-telemetry` version 6 and a database constraint accepting all 13 failure reasons, including `user_cancelled`. The database was widened before function deployment to restore compatibility with existing ordered retry queues. `anon` and `authenticated` have no table privileges on `transfer_events` or `users`; `service_role` retains its table grants and EXECUTE on `record_transfer_event`. RLS and policies were unchanged. The ten active migration files match the live recorded history; the never-applied activity-view migration is retained outside the active folder. See `supabase/README.md` for target checks, dry runs and rollback SQL.
+
 The protected `users` table creates a row on an install's first successful transfer and maintains lifetime and UTC-day summary counts. An advisory transaction lock prevents duplicate first-user races; pg_cron resets stale daily values at 00:00 UTC.
 
 ## Placement and Paste

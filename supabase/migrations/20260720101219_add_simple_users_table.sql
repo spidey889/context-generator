@@ -1,7 +1,7 @@
+-- Replace the old analytics_users table + user_daily_usage view with one simple table.
 drop view if exists public.user_daily_usage;
 drop trigger if exists transfer_events_register_analytics_user on public.transfer_events;
 drop function if exists public.register_analytics_user();
-drop view if exists public.user_transfer_activity;
 drop table if exists public.analytics_users;
 
 create table public.users (
@@ -18,7 +18,7 @@ comment on table public.users is
 alter table public.users enable row level security;
 
 revoke all privileges on table public.users from public, anon, authenticated, service_role;
-grant select, insert, update on table public.users to service_role;
+grant select on table public.users to service_role;
 
 revoke all privileges on sequence public.users_user_no_seq from public, anon, authenticated, service_role;
 grant usage on sequence public.users_user_no_seq to service_role;
@@ -50,6 +50,8 @@ $$;
 revoke all on function public.record_user_summary() from public, anon, authenticated;
 grant execute on function public.record_user_summary() to service_role;
 
+-- Covers both cases: a row that arrives already "succeeded", and one that
+-- starts as "started" and later flips to "succeeded".
 create trigger transfer_events_insert_record_user_summary
 after insert on public.transfer_events
 for each row
