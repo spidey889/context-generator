@@ -245,7 +245,8 @@ function loadPlatformContent(elements = [], hostname = "chatgpt.com", {
   search = "",
   visibilityState = "visible",
   innerWidth = 1280,
-  innerHeight = 720
+  innerHeight = 720,
+  runtimeSendMessage = async () => ({ ok: true })
 } = {}) {
   let hooks = null;
   const sessionValues = new Map();
@@ -364,7 +365,7 @@ function loadPlatformContent(elements = [], hostname = "chatgpt.com", {
           if (index >= 0) runtimeMessageListeners.splice(index, 1);
         }
       },
-      sendMessage: async () => ({ ok: true }),
+      sendMessage: runtimeSendMessage,
       getURL: (assetPath) => `chrome-extension://test/${assetPath}`
     }
   };
@@ -2182,6 +2183,44 @@ test("paste verification rejects unrelated editor text", () => {
   const editor = new FakeElement({ text: "A blank new chat input" });
 
   assert.equal(hooks.editorContainsText(editor, "CONTEXT CARRY\n\nWHO I AM\nProject details"), false);
+});
+
+test("captured context survives backend errors, empty replies, and a missing worker locally", async () => {
+  const conversation = "User: const path = 'C:\\work';\r\nAssistant: Keep this exact decision.\r\n".repeat(25);
+  const cases = [
+    async () => ({ ok: false, code: "rate_limited", error: "private service body" }),
+    async () => ({ ok: false, code: "service_busy" }),
+    async () => ({ ok: false, code: "client_not_allowed" }),
+    async () => ({ ok: false, code: "summary_failed" }),
+    async () => ({ ok: true, summary: " \n " }),
+    async () => null,
+    async () => { throw new Error("Extension context invalidated"); }
+  ];
+  for (const reply of cases) {
+    const hooks = loadPlatformContent([], "chatgpt.com", {
+      runtimeSendMessage: message => message.type === "SUMMARIZE_WITH_BACKEND" ? reply() : { ok: true }
+    });
+    const trace = hooks.createTransferTrace("claude", "test");
+    const summary = await hooks.summarizeWithBackend(conversation, trace);
+    assert.ok(summary.includes(conversation.replace(/\r\n?/g, "\n").trim()
+      .split("\n").map(line => `> ${line}`).join("\n")));
+    assert.match(summary, /Reply only: "Context loaded/);
+    const timing = trace.marks.find(mark => mark.label === "summary done").detail.background;
+    assert.equal(timing.source, "local");
+    assert.equal(timing.backend.servedBy, "local-direct");
+    assert.equal(timing.backend.fallback.used, true);
+    assert.doesNotMatch(JSON.stringify(trace), /private service body|Extension context invalidated/);
+  }
+});
+
+test("local summary recovery retains the capture size boundary before contacting the backend", async () => {
+  let requests = 0;
+  const hooks = loadPlatformContent([], "chatgpt.com", { runtimeSendMessage: async () => {
+    requests++;
+    return { ok: true };
+  } });
+  await assert.rejects(hooks.summarizeWithBackend("x".repeat(350001)), /350,000 character limit/);
+  assert.equal(requests, 0);
 });
 
 test("Claude, Gemini, DeepSeek, and Grok restore a draft cleared after the first paste", async () => {

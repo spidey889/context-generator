@@ -419,6 +419,7 @@ module.exports.__test = {
   normalizeContextCarrySummary,
   validateContextCarrySummary,
   getSummaryQualityFlags,
+  getSummaryContentRejectionReason,
   getMinimumValidSummaryWords,
   getProviderRequestBudgetMs,
   GEMINI_CHAIN_BUDGET_MS,
@@ -811,14 +812,16 @@ async function createSummaryWithProvider({ provider, apiKey, profile, model, ini
   const initialUsage = normalizeProviderUsage(provider, data);
   const rawSummary = getProviderSummaryText(provider, data);
 
-  if (!rawSummary.trim()) {
-    throw createProviderError(provider, `${provider.label} returned an empty summary`, 502);
+  const contentRejection = getSummaryContentRejectionReason(rawSummary, profile);
+  if (contentRejection) {
+    const reason = rawSummary.trim() ? contentRejection : "an empty summary";
+    throw createProviderError(provider, `${provider.label} returned ${reason}`, 502);
   }
 
   const validation = validateContextCarrySummary(rawSummary, profile);
   const qualityFlags = getSummaryQualityFlags(rawSummary, profile, finishReason);
-  // Temporary availability policy: preserve imperfect provider text rather than
-  // exhausting fallbacks over formatting. Restore via docs/summary-validation.md.
+  // Structure, length, and token limits remain advisory. Useful partial text is
+  // preferable to another provider call; only empty/refusal-only content fails.
   const summary = validation.ok
     ? normalizeContextCarrySummary(rawSummary)
     : `${rawSummary.trim()}\n\n🔁 NEXT STEP\n${DESTINATION_CONFIRMATION_INSTRUCTION}`;
@@ -1571,6 +1574,40 @@ function getSummaryQualityFlags(text, profile, finishReason) {
     flags.push("refusal_like");
   }
   return flags;
+}
+
+function getSummaryContentRejectionReason(text, profile) {
+  // Scan every line rather than parsed section maps: duplicate or unfamiliar
+  // headings must not hide useful content or turn formatting into rejection.
+  const placeholders = new Set(Object.values(profile?.templateHints || {})
+    .map(hint => `[${hint}]`.toLowerCase()));
+  placeholders.add("[one clear sentence: exactly what the user needs to do or ask next]");
+  const content = stripWrappingCodeFence(String(text || "")).split(/\r?\n/).map(line => {
+    if (isContextCarryBoxLine(line)) return "";
+    // Remove only the title/instruction itself, never useful text on that line.
+    const withoutTitle = line.replace(CONTEXT_CARRY_HEADER_PATTERN, "")
+      .replace(/^\s*CONTEXT\s+CARRY\s+READY\s+TO\s+PASTE\s*:?\s*/i, "");
+    const heading = getContextCarrySectionMatch(withoutTitle);
+    const body = stripListPrefix(heading ? heading.inlineContent : withoutTitle).trim();
+    if (body === DESTINATION_CONFIRMATION_INSTRUCTION || placeholders.has(body.toLowerCase())
+        || /^(?:PASTE THIS AT THE TOP OF YOUR NEW CHAT|(?:Then write:\s*)?Continue from where we left off\.?)[.!]?$/i.test(body)
+        || /^(?:none\.?|n\/a|\[(?:not provided|no context|insert (?:context|summary) here)\])$/i.test(body)) return "";
+    return body;
+  }).join("\n");
+  const units = content.split(/\n\s*\n|(?<=[.!?])\s+/u)
+    .map(unit => stripListPrefix(unit).trim())
+    .filter(unit => /[\p{L}\p{N}]/u.test(unit));
+  if (!units.length) return "substantively empty output";
+
+  // A quoted refusal or a user's inability to connect/build is real context.
+  // Require refusal wording about the assistant's task, and keep mixed output
+  // when it contains any actual context alongside an apology/refusal.
+  const isRefusal = unit => SUSPICIOUS_SUMMARY_REFUSAL_PATTERN.test(unit.replace(/’/g, "'"))
+    && (/\b(?:summari[sz]\w*|help|assist\w*|comply|provide|fulfill)\b/i.test(unit)
+      || /^(?:i(?:['’]m|\s+am)\s+sorry|sorry)[,.!\s]*$/i.test(unit));
+  const isRefusalFollowup = unit => /^(?:please try again|please provide (?:the|your) (?:conversation|transcript)|thank you for understanding)[.!]?$/i.test(unit);
+  return units.some(isRefusal) && units.every(unit => isRefusal(unit) || isRefusalFollowup(unit))
+    ? "refusal-like output" : null;
 }
 
 function hasContextCarryHeader(text) {

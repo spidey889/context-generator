@@ -217,7 +217,7 @@ Claude and ChatGPT additionally open recognized pasted-content cards, read norma
 
 Input length selects output guidance and budgets, not the starting generated model.
 
-| Profile | Input chars | Target | Orca/Mistral/Groq cap | Gemini summary + reasoning | Real validator floor |
+| Profile | Input chars | Target | Orca/Mistral/Groq cap | Gemini summary + reasoning | Advisory word floor |
 | --- | ---: | ---: | ---: | ---: | ---: |
 | Tiny | 0-1,200 | exact local carry | 0 | provider-free | n/a |
 | Small | 1,201-8,000 | ~350 words | 1,000 | 1,500 + 5,000 = 6,500 | 80 substantive words |
@@ -244,6 +244,7 @@ Gemini 3.6 Flash
 - Groq is paused even when its key exists. Set `GROQ_ENABLED=true` to restore `groq/compound-mini` with its retained 15-second budget; when both Google routes are configured, its 15-second slot is reserved from Mistral so restoring routes does not extend the total allowance.
 - Flash-Lite uses Google `gemini-3.5-flash-lite` and the existing `GEMINI_API_KEY` immediately after the Flash family and before Mistral (and any explicitly restored routes). It has 90 seconds with `MINIMAL` thinking and remains independent of Flash daily-health skips. Parsing, hidden-thought filtering, relaxed validation, and Google timings remain unchanged. Flash-Lite has its own 90-second slot; restored Orca elapsed time and the optional Groq reserve share Mistral's final slot so the whole chain stays within 270 seconds.
 - If every configured remote provider fails or no provider key is available, the backend returns the complete captured transcript through the provider-free `local-direct` format. It never truncates the transcript; the transfer remains usable during a provider-wide outage, though it is not compressed.
+- Once a supported transcript has been verified and captured, backend HTTP/network/parse failures, empty replies, and unavailable extension-worker messaging also recover in the source page with a quoted full-transcript carry. This source-local result is reported as `local-direct` with the fixed fallback reason `summary_service_unavailable`; no raw error is copied into its receipt. Destination failure still offers manual copy. Capture verification and the 350,000-character boundary remain enforced; missing or unverified captures are never guessed.
 - Retryable provider calls get at most two attempts within the model budget and an 90-second per-attempt ceiling. Ordinary retries wait 450 ms. Gemini, OrcaRouter Free, and Mistral move immediately to their next fallback on HTTP 429; Groq honors `Retry-After` or waits at least one second.
 - Gemini uses `thinkingLevel: MEDIUM`. Mistral prompt-cache keys use `capcontext-summary-v7-<profile>-<model>`; v7 adds an explicit full-transcript checklist and final omission check for user-protected exact facts, especially integrity and implementation-state details.
 - The extension calls the production alias `context-generator-five.vercel.app`. Git pushes to `codex/*` branches create preview deployments; they do not replace that alias. To release backend routing changes, redeploy the tested deployment with Vercel target `production` so it uses production environment variables, then verify the alias, source commit and a real summary receipt. A successful push or ready preview alone is not a production release.
@@ -255,18 +256,18 @@ Gemini 3.6 Flash
 
 Providers receive a system prompt and a user JSON envelope with schema `cap-context-conversation-v1` and data type `untrusted-conversation-transcript`. `getSummarySystemPrompt()` and `getContextCarryTemplate()` are the complete backend prompt contract; the retained standalone `legacy/SKILL.md` is a reference artifact and is not read by the backend.
 
-The prompt still requests the exact title and all seven sections once and in order: WHO I AM, WHAT WE WERE DOING, WHERE WE LEFT OFF, DECISIONS MADE, OPEN QUESTIONS, KEY CONTEXT, NEXT STEP. Since 2026-09-18, strict output validation is temporarily advisory: any non-empty provider text is accepted even when its header, sections, length, or content checks fail. Empty responses and provider/network errors still advance through the fallback chain. See `docs/summary-validation.md` for restoration instructions.
+The prompt still requests the exact title and all seven sections once and in order: WHO I AM, WHAT WE WERE DOING, WHERE WE LEFT OFF, DECISIONS MADE, OPEN QUESTIONS, KEY CONTEXT, NEXT STEP. Structure and formatting never cause provider rejection. A separate content check rejects only refusal-only output and substantively empty output (no actual content after recognized scaffolding, empty placeholders and trusted instructions are removed). Short useful text, malformed/duplicate/missing headings, and useful token-limited output remain deliverable. Quoted refusals, contextual inability to connect/build, and useful content alongside a refusal remain deliverable. Rejected output advances through the existing chain to the full-transcript `local-direct` carry. See `docs/summary-validation.md` for the precise policy and its heuristic limits.
 
 Strictly valid output retains existing normalization: remove fences/legacy footers, canonicalize recognized headings, add the Unicode box, and replace NEXT STEP. Other non-empty output is preserved verbatim apart from outer whitespace, with the trusted destination-confirmation NEXT STEP appended; missing sections are not invented.
 
-Generated-summary response timing also includes `validationReason` (a bounded validator reason, or null) and `qualityFlags` (`bad_structure`, `missing_section`, `duplicate_section`, `token_limit`, `too_short`, `refusal_like`). The new quality log contains only those diagnostics and the summary word count. Flags are advisory: they do not change the summary text, provider selection, or delivery. Tiny and emergency local-direct carries report an empty flag list and null reason. These fields are not part of Supabase telemetry.
+Generated-summary response timing also includes `validationReason` (a bounded validator reason, or null) and `qualityFlags` (`bad_structure`, `missing_section`, `duplicate_section`, `token_limit`, `too_short`, `refusal_like`). The quality log contains only those diagnostics and the summary word count. Flags remain advisory; the independent content check decides whether output is refusal-only or empty. Tiny and emergency backend local-direct carries report an empty flag list and null reason. These fields are not part of Supabase telemetry.
 
 Do not overstate current quality enforcement:
 
 - Large-profile `minWords` is prompt guidance and a `qualityFloorMet` diagnostic. The retained advisory validator uses 20% of target, clamped to 80-200 substantive words; this floor no longer rejects provider text.
 - `finishReason` is recorded but token-limit output is not rejected solely for that reason.
 - Validation does not receive the source transcript, so it cannot detect a fluent, well-shaped hallucination.
-- There is no expansion or semantic quality loop. The first non-empty provider result wins under the temporary availability policy.
+- There is no expansion or semantic quality loop. The first provider result containing actual context wins; short or cut-off useful output is retained.
 
 ## Backend Boundary
 
@@ -331,7 +332,7 @@ Native menus and popovers may temporarily mark the background application `aria-
 - Model/profile routing: provider constants/budgets, prompts, Latest Run labels, evaluation expectations, this file, `memory.md`, `extension/README.md`.
 - Telemetry fields/stages/failures: source/background sanitizers, Vercel validator, Supabase validator, SQL constraints/functions, privacy wording, tests. Free-form telemetry fields are forbidden.
 - Latest Run receipt: producer, background expiry, bridge, analysis renderer, privacy wording, analysis tests.
-- Any content-script change: update `CONTENT_SCRIPT_LOAD_ID` so open tabs replace stale code, and retain stale-node/reservation cleanup. Current value: `platform-content-2026-09-29-delayed-paste-recheck-v57`.
+- Any content-script change: update `CONTENT_SCRIPT_LOAD_ID` so open tabs replace stale code, and retain stale-node/reservation cleanup. Current value: `platform-content-2026-09-30-local-summary-recovery-v58`.
 - Extension release: bump `extension/manifest.json`, rebuild the ZIP with `manifest.json` at its root, hash-compare every file against `extension/`, then test the unpacked folder in a new Brave window.
 
 ## Common Wrong Assumptions
@@ -352,7 +353,7 @@ Do not claim these are fixed without a reproduction and regression test:
 
 - Live long ChatGPT chats have under-captured despite deterministic virtual-window fixtures passing.
 - The six-minute source lock can reset without cancelling active work.
-- Summary validation is structural, not grounded; large output may pass at 200 substantive words and finish reason is informational.
+- Summary diagnostics are structural, not grounded; the content gate is conservative and heuristic. Useful short/token-limited output is retained, but factual grounding and omission detection are not enforced.
 - The telemetry outbox is unbounded, active cancellation state is worker-memory-only, and Vercel's Supabase fetch has no explicit timeout.
 - A destination prepared before capture/summary failure may remain open unused.
 - `npm run gate` omits the installed-extension smoke; that smoke covers controlled ChatGPT -> Claude, not all five sites.

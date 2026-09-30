@@ -1,37 +1,28 @@
-# Temporary summary validation relaxation
+# Summary acceptance and local recovery
 
-On 2026-09-18, production Mistral returned text that CAP rejected because it recognized only one of seven required sections. The owner chose availability over strict output shape temporarily.
+Output acceptance favors retaining useful context over enforcing an output shape. On 2026-09-18 strict formatting checks became advisory; on 2026-09-30 a separate content-only gate replaced unconditional acceptance of nonempty provider text.
 
-## Current behavior
+## Provider acceptance
 
-In `api/summarize.js`, `summarizeWithProvider()` still rejects empty provider text and provider/network errors. It calls `validateContextCarrySummary()` as an advisory check. Passing output uses `normalizeContextCarrySummary()` as before. Failing output retains the complete provider text (only outer whitespace is trimmed) and appends `DESTINATION_CONFIRMATION_INSTRUCTION` under NEXT STEP.
+`createSummaryWithProvider()` uses `getSummaryContentRejectionReason()` before structural diagnostics. Only refusal-only and substantively empty output advance to another provider:
 
-The prompt, provider chain, time budgets, request security, and transcript limits are unchanged. The relaxation applies to every generated-summary provider. It also accepts short, refusal-like, or error-like text when the provider returns it as non-empty successful output; the retained validator does not block delivery. This does not guarantee summary completeness or factual accuracy.
+- Empty output includes whitespace/decorations or recognized headings, fixed destination instructions, exact profile-template placeholders, and empty markers (`None`, `N/A`, `[Not provided]`, `[No context]`, `[Insert context here]`, `[Insert summary here]`) with no actual content.
+- Refusal-only output consists entirely of task-refusal/apology sentences and narrowly recognized retry/provide-transcript courtesies. Known refusal prefixes must concern summarizing, helping, assisting, complying, providing, or fulfilling. This conservative English heuristic cannot identify every refusal or prove semantic usefulness.
+- The check scans every line, preserving inline bodies and content from repeated sections; section parsing must not erase useful text before acceptance.
+- Quoted refusals, a user's inability to connect/build, and useful content alongside refusal wording are retained. There is no minimum accepted word count.
 
-## Where strictness existed
+Bad structure or formatting NEVER causes rejection. Token-limit finish reasons (`length`, `MAX_TOKENS`, `MAX_OUTPUT_TOKENS`) NEVER cause rejection of useful content. Short, incomplete, missing-heading and duplicate-heading results remain usable.
 
-- `summarizeWithProvider()` rejected `!validation.ok` with a provider error, triggering fallback. Its normalization-failure guard rejected output that could not be canonicalized.
-- `validateContextCarrySummary()` checks the Context Carry header, seven sections exactly once and in order, content outside sections, meaningful core sections, refusal/error patterns, and a minimum substantive word count. This function remains unchanged.
-- `normalizeContextCarrySummary()` calls `normalizeContextCarrySections()`, which returns an empty string when sections are missing, duplicated, or out of order. Both remain unchanged; imperfect responses now bypass normalization to preserve their text.
+`validateContextCarrySummary()` and quality flags remain diagnostics. Strictly valid output receives existing normalization (fences/footer removal, canonical headings/box, trusted NEXT STEP). Other useful output retains its full provider text with the trusted confirmation instruction appended. No sections or missing facts are invented.
 
-## Restore strict enforcement
+## Fallback and source-local recovery
 
-In `summarizeWithProvider()`, replace the temporary-policy comment and conditional `summary` assignment following `const validation = ...` with:
+Provider HTTP/network/timeout/JSON failures retain the existing bounded retry and fallback behavior. Mistral failure advances to enabled/configured Groq; absent or failed Groq returns the complete captured transcript through backend `local-direct`. Other configured routes precede Mistral.
 
-```js
-if (!validation.ok) {
-  const finishDetail = finishReason ? `; finish reason ${finishReason}` : "";
-  throw createProviderError(
-    provider,
-    `${provider.label} returned an invalid summary: ${validation.reason}${finishDetail}`,
-    502
-  );
-}
+If backend HTTP/network/parse errors, empty replies, or unavailable worker messaging prevent a summary from reaching the source, `extension/platform-content.js` builds a quoted full-transcript carry from the verified capture already held in page memory. Latest Run identifies `local-direct` with a fixed `summary_service_unavailable` reason; raw errors are not copied into the receipt. The normal paste flow continues, and destination failures offer the existing manual-copy modal.
 
-const summary = normalizeContextCarrySummary(rawSummary);
-if (!summary) {
-  throw createProviderError(provider, `${provider.label} returned an invalid summary: normalization failed`, 502);
-}
-```
+Recovery applies after successful supported capture. Capture errors, unverified content and the 350,000-character boundary remain enforced; the extension cannot manufacture a complete transcript when capture itself fails.
 
-Update `test/summarize.test.js` so incomplete Ministral output expects fallback instead of delivery. The existing strict validator tests remain active and cover the original rules. Keep the empty-response fallback coverage. Update `LOGIC.md`, record restoration in `CHANGELOG.md`, and run `npm test` and `git diff --check` before committing and pushing. Verify the Vercel production deployment separately; a source push alone does not prove the new policy is live.
+## Verification
+
+`test/summarize.test.js` covers refusal/empty Mistral-to-Groq-to-local fallback, exact retained transcript, short/code/mixed/contextual content, template-only output, and useful token-limited delivery without fallback. `test/platform-content.test.js` covers source-local recovery for backend rejection/empty replies/missing worker and the retained size boundary. Run the focused tests, deterministic suite and isolated Brave extension smoke after related changes. Production deployment and live-provider behavior require separate verification.

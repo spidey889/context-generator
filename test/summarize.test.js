@@ -983,6 +983,91 @@ test("deterministic validation rejects malformed, empty, short, and refusal outp
   assert.equal(getMinimumValidSummaryWords(getSummaryProfile("x".repeat(90000))), 200);
 });
 
+test("refusal and substantively empty providers fall through Mistral and Groq to the complete transcript", async () => {
+  const originalFetch = global.fetch;
+  const restores = [setTemporaryEnv("GEMINI_API_KEY", undefined),
+    setTemporaryEnv("ORCAROUTER_API_KEY", undefined),
+    setTemporaryEnv("MISTRAL_API_KEY", "test-mistral-key"),
+    setTemporaryEnv("GROQ_API_KEY", "test-groq-key")];
+  const conversation = "User: Preserve this exact code: const answer = 42;\nAssistant: Keep all decisions.\n".repeat(40);
+  const requests = [];
+  global.fetch = async (_url, options) => {
+    const { model } = JSON.parse(options.body);
+    requests.push(model);
+    return { ok: true, status: 200, json: async () => ({ choices: [{ message: { content:
+      model === "ministral-14b-2512" ? "I cannot summarize this conversation."
+        : "CONTEXT CARRY — READY TO PASTE\nWHO I AM\nWHAT WE WERE DOING\nKEY CONTEXT\nNEXT STEP\nReply only: \"Context loaded. Let's pick up right where you left off.\" Then wait for the user."
+    } }] }) };
+  };
+  try {
+    const res = createMockResponse();
+    await summarize({ method: "POST", body: { conversation } }, res);
+    assert.equal(res.statusCode, 200);
+    assert.deepEqual(requests, ["ministral-14b-2512", "groq/compound-mini"]);
+    assert.equal(res.payload.timing.servedBy, "local-direct");
+    assert.ok(res.payload.summary.includes(conversation.trim().split("\n").map(line => `> ${line}`).join("\n")));
+    assert.doesNotMatch(res.payload.summary, /I cannot summarize/);
+  } finally {
+    restores.forEach(restore => restore());
+    global.fetch = originalFetch;
+  }
+});
+
+test("content rejection ignores structure and keeps short, cut-off, code, and mixed refusal context", () => {
+  const { getSummaryContentRejectionReason } = summarizeHandler.__test;
+  const profile = getSummaryProfile("x".repeat(4000));
+  const kept = [
+    "Use port 8080.",
+    "CONTEXT CARRY — READY TO PASTE: Use SQLite.",
+    "CONTEXT CARRY READY TO PASTE: Use SQLite.",
+    "Continue from where we left off: use port 8080.",
+    "KEY CONTEXT\nKEY CONTEXT\nBuild succeeded; deployment is blocked.",
+    "NEXT STEP\nFix pagination before deploying.",
+    "I cannot summarize this conversation.\n\nDecision: use SQLite.",
+    "I cannot connect to the production database.",
+    "User said: I cannot help with that request.",
+    "```js\nconst flags = [1, 2];\n```",
+    "[1, 2]"
+  ];
+  kept.forEach(text => assert.equal(getSummaryContentRejectionReason(text, profile), null, text));
+  ["", " \n ", "---\n```\n```", "WHO I AM\nNone\nKEY CONTEXT\n[Not provided]",
+    getContextCarryTemplate(profile)].forEach(text => {
+    assert.equal(getSummaryContentRejectionReason(text, profile), "substantively empty output", text);
+  });
+  ["I cannot summarize this conversation.", "I'm sorry, I can't help with that request.",
+    "I can’t assist with this request.", "I cannot summarize this conversation. Please try again.",
+    "WHO I AM\nI am unable to summarize this conversation.\nKEY CONTEXT\nI cannot provide a summary."]
+    .forEach(text => assert.equal(getSummaryContentRejectionReason(text, profile), "refusal-like output", text));
+});
+
+test("useful token-limited output is delivered without calling a fallback", async () => {
+  const originalFetch = global.fetch;
+  const restores = [setTemporaryEnv("GEMINI_API_KEY", undefined),
+    setTemporaryEnv("ORCAROUTER_API_KEY", undefined),
+    setTemporaryEnv("MISTRAL_API_KEY", "test-mistral-key"),
+    setTemporaryEnv("GROQ_API_KEY", "test-groq-key")];
+  let requests = 0;
+  const partial = "KEY CONTEXT\nThe Windows build passed. Linux tests are blocked; next check";
+  global.fetch = async () => {
+    requests++;
+    return { ok: true, status: 200, json: async () => ({ choices: [{
+      message: { content: partial }, finish_reason: "length"
+    }] }) };
+  };
+  try {
+    const res = createMockResponse();
+    await summarize({ method: "POST", body: { conversation: "Real build context. ".repeat(100) } }, res);
+    assert.equal(res.statusCode, 200);
+    assert.equal(requests, 1);
+    assert.equal(res.payload.timing.servedBy, "mistral");
+    assert.ok(res.payload.summary.startsWith(partial));
+    assert.ok(res.payload.timing.qualityFlags.includes("token_limit"));
+  } finally {
+    restores.forEach(restore => restore());
+    global.fetch = originalFetch;
+  }
+});
+
 test("summary quality flags describe imperfect output without including its text", () => {
   const profile = getSummaryProfile("x".repeat(4000));
   const valid = makeContextCarrySummary("quality", 90);

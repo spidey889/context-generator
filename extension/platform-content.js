@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-09-29-delayed-paste-recheck-v57";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-09-30-local-summary-recovery-v58";
   const ownedUiStyleSheets = new Map();
   // Start fast capture on for each page instance; a manual opt-out lasts until reload.
   let claudeJsonCaptureEnabled = true;
@@ -741,6 +741,7 @@
   if (window.__CONTEXT_GENERATOR_TEST_HOOKS__?.register) {
     window.__CONTEXT_GENERATOR_TEST_HOOKS__.register({
       scrapeConversationText,
+      summarizeWithBackend,
       getConversationRole,
       pasteIntoPlatform,
       editorContainsText,
@@ -918,18 +919,40 @@
       await completeHandoffStageLine("capture", HANDOFF_TINY_STAGE_LINE_DURATION_MS);
     }
     setHandoffProgress("summary", "active");
-    const response = await notifyBackground({
-      type: "SUMMARIZE_WITH_BACKEND",
-      conversation: conversationText,
-      transferId: trace?.id || null
-    });
-
-    if (!response?.summary?.trim()) {
-      throw new Error("Backup summarizer returned no summary.");
+    let summary;
+    let timing;
+    try {
+      const response = await notifyBackground({
+        type: "SUMMARIZE_WITH_BACKEND",
+        conversation: conversationText,
+        transferId: trace?.id || null
+      });
+      if (!response?.summary?.trim()) {
+        throw new Error("Backup summarizer returned no summary.");
+      }
+      summary = response.summary.trim();
+      timing = response.timing || null;
+    } catch {
+      // The verified transcript stays in the source page even when the backend
+      // or MV3 worker is unavailable. Paste failure still offers manual copy.
+      const quotedTranscript = conversationText.replace(/\r\n?/g, "\n").trim()
+        .split("\n").map(line => `> ${line}`).join("\n");
+      summary = ["CONTEXT CARRY — READY TO PASTE", "", "💬 CONVERSATION SO FAR",
+        quotedTranscript, "", "🔁 NEXT STEP",
+        'Reply only: "Context loaded. Let\'s pick up right where you left off." Then wait for the user.'
+      ].join("\n");
+      timing = {
+        source: "local",
+        requestChars: conversationText.length,
+        chars: summary.length,
+        backend: {
+          servedBy: "local-direct", provider: "local-direct", model: "local-direct",
+          inputChars: conversationText.length, outputChars: summary.length,
+          fallback: { attempted: true, used: true, servedBy: "local-direct",
+            model: "local-direct", reason: "summary_service_unavailable" }
+        }
+      };
     }
-
-    const summary = response.summary.trim();
-    const timing = response.timing || null;
     markTransferTrace(trace, "summary done", {
       chars: summary.length,
       background: timing
