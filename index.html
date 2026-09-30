@@ -243,6 +243,48 @@
       box-shadow: none;
     }
 
+    /* Placement variants keep the hero action prominent without repeating its weight. */
+    .button.button-install.button-install-nav {
+      min-height: 2.75rem;
+      padding: 0.6rem 1rem;
+      gap: 0.5rem;
+      border-radius: 999px;
+      border-color: rgba(17, 17, 20, 0.2) !important;
+      background: rgba(255, 255, 255, 0.5) !important;
+      color: #151515 !important;
+      font-size: 0.875rem;
+      box-shadow: none;
+    }
+
+    .button.button-install.button-install-nav:hover {
+      border-color: rgba(17, 17, 20, 0.4) !important;
+      background: #ffffff !important;
+      transform: none;
+    }
+
+    .button-install-nav:hover .install-icon svg { transform: translate(1px, -1px); }
+
+    .button.button-install.button-install-closing {
+      min-height: 3.5rem;
+      padding: 0.85rem 1rem;
+      gap: 0.65rem;
+      border-radius: 0.75rem;
+      border-color: #d4cedd !important;
+      background: #ffffff !important;
+      color: #19171f !important;
+      box-shadow: 0 2px 5px rgba(31, 22, 49, 0.06);
+    }
+
+    .button.button-install.button-install-closing:hover {
+      border-color: #b4a2cd !important;
+      background: #fbf9ff !important;
+      box-shadow: 0 5px 12px rgba(31, 22, 49, 0.09);
+    }
+
+    .button.button-install.button-install-closing:active { box-shadow: none; }
+
+    .install-mark { width: 1.5rem; height: 1.5rem; flex: 0 0 auto; object-fit: contain; }
+
     .button.is-copied {
       background: linear-gradient(180deg, #1b7f5c, #126447);
       border-color: rgba(18, 100, 71, 0.95);
@@ -933,14 +975,14 @@
     </a>
     <nav class="nav-actions" aria-label="Primary navigation">
       <a class="nav-link" href="#demo">Watch demo</a>
-      <a class="button button-dark button-install" href="https://chromewebstore.google.com/detail/cap-context/lpkaciijlhckkdhbgidbjfkldigghnjf" target="_blank" rel="noopener noreferrer"><span>Install extension</span><span class="install-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" focusable="false"><path d="M5 12h14M13 6l6 6-6 6"></path></svg></span></a>
+      <a class="button button-install button-install-nav" href="https://chromewebstore.google.com/detail/cap-context/lpkaciijlhckkdhbgidbjfkldigghnjf" target="_blank" rel="noopener noreferrer" aria-label="Install Cap Context from the Chrome Web Store"><span>Install</span></a>
     </nav>
   </header>
 
   <main id="top">
     <section class="hero section container reveal">
       <h1 style="color: #000000 !important;">Switch AIs without <span class="re-explaining">re-explaining<span class="re-explaining-shine" aria-hidden="true">re-explaining</span></span> everything.</h1>
-      <p>A browser extension to continue your chat in another AI.</p>
+      <p>A browser extension to continue your chat from one AI to another.</p>
       <div class="hero-actions">
         <a class="button button-dark button-install" href="https://chromewebstore.google.com/detail/cap-context/lpkaciijlhckkdhbgidbjfkldigghnjf" target="_blank" rel="noopener noreferrer"><span>Install extension</span><span class="install-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" focusable="false"><path d="M5 12h14M13 6l6 6-6 6"></path></svg></span></a>
         <a class="button button-outline" href="#demo">Watch the demo <span aria-hidden="true">▷</span></a>
@@ -1004,7 +1046,7 @@
     </section>
     <section class="closing-cta section container" aria-labelledby="closing-title">
       <h2 class="section-heading" id="closing-title">Install Cap Context</h2>
-      <a class="button button-dark button-large button-install" href="https://chromewebstore.google.com/detail/cap-context/lpkaciijlhckkdhbgidbjfkldigghnjf" target="_blank" rel="noopener noreferrer"><span>Install extension</span><span class="install-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" focusable="false"><path d="M5 12h14M13 6l6 6-6 6"></path></svg></span></a>
+      <a class="button button-large button-install button-install-closing" href="https://chromewebstore.google.com/detail/cap-context/lpkaciijlhckkdhbgidbjfkldigghnjf" target="_blank" rel="noopener noreferrer" aria-label="Add Cap Context to your browser from the Chrome Web Store"><img class="install-mark" src="extension/icon128.png" alt="" width="24" height="24"><span>Add to your browser</span><span class="install-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" focusable="false"><path d="M5 12h14M13 6l6 6-6 6"></path></svg></span></a>
     </section>
   </main>
 
