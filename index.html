@@ -20,6 +20,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap"
     rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=EB+Garamond:wght@400&display=swap" rel="stylesheet">
   <style>
     :root {
       --paper: #f8f6f1;
@@ -910,8 +911,16 @@
     .platform-list li[title="ChatGPT"] img,
     .platform-list li[title="DeepSeek"] img { width: 34px; height: 34px; }
     .platform-list li[title="Grok"] img { width: 44px; height: 44px; }
-    .closing-cta { text-align: center; padding: clamp(2.5rem, 5vw, 4rem) 1.5rem; margin-bottom: 3rem; border: 1px solid #000000; border-radius: var(--radius); background: radial-gradient(ellipse at top, #ece4fc, transparent 75%), rgba(255,255,255,.6); }
+    .closing-cta { text-align: center; padding: clamp(2.5rem, 5vw, 4rem) 1.5rem; margin-bottom: 3rem; border: 1px solid #b8a5d1; border-radius: var(--radius); background: radial-gradient(ellipse at top, #ece4fc, transparent 75%), rgba(255,255,255,.6); }
     .closing-cta .button { margin-top: 1.5rem; }
+    #closing-title { --closing-swap: 500ms; --closing-interval: 4600ms; display: grid; grid-template-columns: minmax(0, 1fr); overflow: hidden; padding-block: 0.12em; font-family: "EB Garamond", Georgia, serif; font-weight: 400; line-height: 1.15; letter-spacing: -0.03em; }
+    /* Overlapping grid items reserve the tallest phrase at every viewport width. */
+    .closing-phrase { grid-area: 1 / 1; align-self: center; min-width: 0; opacity: 0; transform: translateY(0.45em); transition: opacity 180ms ease, transform 280ms cubic-bezier(0.4, 0, 0.6, 1); }
+    .closing-phrase.is-current { opacity: 1; transform: translateY(0); transition-duration: 220ms, calc(var(--closing-swap) - 80ms); transition-timing-function: ease, cubic-bezier(0.16, 1, 0.3, 1); transition-delay: 80ms; }
+    .closing-phrase.is-leaving { opacity: 0; transform: translateY(-0.35em); }
+    @media (prefers-reduced-motion: reduce) {
+      .closing-phrase { transition: none !important; }
+    }
     a:focus-visible, video:focus-visible { outline: 3px solid var(--accent); outline-offset: 5px; }
     @media (max-width: 680px) {
       .demo-heading { align-items: flex-start; }
@@ -1045,7 +1054,14 @@
       </div>
     </section>
     <section class="closing-cta section container" aria-labelledby="closing-title">
-      <h2 class="section-heading" id="closing-title">Install Cap Context</h2>
+      <h2 class="section-heading" id="closing-title" aria-label="Why explain it again?">
+        <span class="closing-phrase is-current" aria-hidden="true">Why explain it again?</span>
+        <span class="closing-phrase" aria-hidden="true">Why repeat yourself?</span>
+        <span class="closing-phrase" aria-hidden="true">Why start over?</span>
+        <span class="closing-phrase" aria-hidden="true">Why leave your chat behind?</span>
+        <span class="closing-phrase" aria-hidden="true">Why lose your progress?</span>
+        <span class="closing-phrase" aria-hidden="true">Why leave your ideas behind?</span>
+      </h2>
       <a class="button button-large button-install button-install-closing" href="https://chromewebstore.google.com/detail/cap-context/lpkaciijlhckkdhbgidbjfkldigghnjf" target="_blank" rel="noopener noreferrer" aria-label="Add Cap Context to your browser from the Chrome Web Store"><img class="install-mark" src="extension/icon128.png" alt="" width="24" height="24"><span>Add to your browser</span><span class="install-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" focusable="false"><path d="M5 12h14M13 6l6 6-6 6"></path></svg></span></a>
     </section>
   </main>
@@ -1067,6 +1083,52 @@
   </footer>
 
   <script>
+    (function rotateClosingHeading() {
+      const title = document.getElementById("closing-title");
+      if (!title || !("IntersectionObserver" in window)) return;
+      const phrases = [...title.querySelectorAll(".closing-phrase")];
+      if (phrases.length < 2) return;
+      const motion = window.matchMedia("(prefers-reduced-motion: reduce)");
+      // Keep the reset and reading cadence aligned with the heading's CSS motion.
+      const timing = window.getComputedStyle(title);
+      const swapMs = parseFloat(timing.getPropertyValue("--closing-swap"));
+      const intervalMs = parseFloat(timing.getPropertyValue("--closing-interval"));
+      let current = 0;
+      let inView = false;
+      let timer = 0;
+      let resetTimer = 0;
+
+      function rotate() {
+        if (!inView || document.hidden || motion.matches) return sync();
+        const outgoing = phrases[current];
+        current = (current + 1) % phrases.length;
+        outgoing.classList.remove("is-current");
+        outgoing.classList.add("is-leaving");
+        phrases[current].classList.add("is-current");
+        // Reset the invisible outgoing phrase after its CSS transition finishes.
+        resetTimer = window.setTimeout(() => outgoing.classList.remove("is-leaving"), swapMs);
+        timer = window.setTimeout(rotate, intervalMs);
+      }
+
+      function sync() {
+        window.clearTimeout(timer);
+        window.clearTimeout(resetTimer);
+        if (motion.matches) current = 0;
+        phrases.forEach((phrase, index) => {
+          phrase.classList.remove("is-leaving");
+          phrase.classList.toggle("is-current", index === current);
+        });
+        if (inView && !document.hidden && !motion.matches) timer = window.setTimeout(rotate, intervalMs);
+      }
+
+      new IntersectionObserver(([entry]) => {
+        inView = entry.isIntersecting && entry.intersectionRatio >= 0.5;
+        sync();
+      }, { threshold: [0, 0.5] }).observe(title);
+      document.addEventListener("visibilitychange", sync);
+      motion.addEventListener("change", sync);
+    })();
+
     (function playDemoInView() {
       const video = document.getElementById("install-video");
       if (!video || !("IntersectionObserver" in window)) return;
