@@ -317,14 +317,17 @@
 
     .hero {
       --hero-stack-gap: clamp(1.75rem, 2.5vw, 2.5rem);
+      --hero-detail-gap: clamp(.25rem, .5vw, .5rem);
+      --hero-extra-gap: clamp(.375rem, .75vw, .75rem);
       text-align: center;
-      padding-top: clamp(4rem, 8vw, 6.75rem);
-      padding-bottom: clamp(3rem, 3vw, 3.5rem);
+      padding-top: clamp(5rem, 10vw, 9.25rem);
+      /* Borrow space below the logos so the demo stays at the same position. */
+      padding-bottom: calc(clamp(3rem, 3vw, 3.5rem) - var(--hero-detail-gap) - var(--hero-extra-gap) - var(--hero-extra-gap));
     }
 
     .hero h1 {
       max-width: 24ch;
-      margin: 0 auto var(--hero-stack-gap);
+      margin: 0 auto calc(var(--hero-stack-gap) + var(--hero-detail-gap));
       font-size: 64px;
       line-height: 0.94;
       letter-spacing: -0.075em;
@@ -374,7 +377,7 @@
       align-items: center;
       justify-content: center;
       gap: 1rem;
-      margin-top: var(--hero-stack-gap);
+      margin-top: calc(var(--hero-stack-gap) + var(--hero-extra-gap));
       flex-wrap: wrap;
     }
 
@@ -866,7 +869,7 @@
         font-size: clamp(1.8rem, 8vw, 2.6rem);
         max-width: none;
         letter-spacing: -0.04em;
-        margin: 1rem auto var(--hero-stack-gap);
+        margin: 1rem auto calc(var(--hero-stack-gap) + var(--hero-detail-gap));
       }
 
       .connector-section {
@@ -902,8 +905,13 @@
     .demo-heading span { padding: .35rem 0; }
     .demo-frame { margin: 0; padding: .55rem; border: 1px solid var(--border); border-radius: 1.6rem; background: #fff; box-shadow: var(--shadow); }
     .demo-frame video { display: block; width: 100%; height: auto; aspect-ratio: 16 / 9; border-radius: 1.1rem; background: #f8f6f1; }
-    .platform-list { display: flex; flex-wrap: wrap; justify-content: center; gap: .6rem 1.3rem; list-style: none; padding: 0; margin: 2.8rem 0 0; color: #525465; font-size: .85rem; font-weight: 600; }
-    .platform-list li { display: grid; place-items: center; width: 48px; height: 48px; border: 1px solid var(--border); border-radius: 999px; background: rgba(255,255,255,.65); }
+    .platform-list { display: flex; flex-wrap: wrap; justify-content: center; gap: .6rem 1.3rem; list-style: none; padding: 0; margin: calc(2.8rem + var(--hero-extra-gap)) 0 0; color: #525465; font-size: .85rem; font-weight: 600; }
+    .platform-list li { display: grid; place-items: center; width: 48px; height: 48px; }
+    /* Keep the hover target still while its badge lifts and springs into place. */
+    .platform-badge { display: grid; place-items: center; width: 48px; height: 48px; border: 1px solid var(--border); border-radius: 999px; background: rgba(255,255,255,.65); pointer-events: none; transition: transform 220ms ease-out, box-shadow 220ms ease, border-color 220ms ease, background-color 220ms ease; }
+    @media (hover: hover) and (pointer: fine) {
+      .platform-list li:hover .platform-badge { transform: translateY(-8px) scale(1.18); border-color: #ccbde1; background: #fff; box-shadow: 0 8px 20px rgba(104,55,164,.14); transition: transform 420ms cubic-bezier(.34,1.56,.64,1), box-shadow 220ms ease, border-color 220ms ease, background-color 220ms ease; }
+    }
     .platform-list img { display: block; width: 28px; height: 28px; object-fit: contain; }
     /* These two shared assets are white; darken only here for the light hero. */
     .platform-list .platform-logo-dark { filter: brightness(0); }
@@ -922,6 +930,7 @@
     .closing-phrase.is-current { opacity: 1; transform: translateY(0); transition-duration: 220ms, calc(var(--closing-swap) - 80ms); transition-timing-function: ease, cubic-bezier(0.16, 1, 0.3, 1); transition-delay: 80ms; }
     .closing-phrase.is-leaving { opacity: 0; transform: translateY(-0.35em); }
     @media (prefers-reduced-motion: reduce) {
+      .platform-badge { transform: none !important; }
       .closing-phrase { transition: none !important; }
       .closing-flow { display: none; }
     }
@@ -1001,11 +1010,11 @@
         <a class="button button-outline" href="#demo">Watch the demo <span aria-hidden="true">▷</span></a>
       </div>
       <ul class="platform-list" aria-label="Supported AIs">
-        <li title="Claude"><img src="extension/logos/claude2download__1_-removebg-preview.png" alt="Claude" width="28" height="28"></li>
-        <li title="ChatGPT"><img class="platform-logo-dark" src="extension/logos/gptwhitedownload__1_-removebg-preview.png" alt="ChatGPT" width="28" height="28"></li>
-        <li title="Gemini"><img src="extension/logos/gemini-download__1_-removebg-preview.png" alt="Gemini" width="28" height="28"></li>
-        <li title="Grok"><img class="platform-logo-dark" src="extension/logos/grokwhitedownload__1_-removebg-preview.png" alt="Grok" width="28" height="28"></li>
-        <li title="DeepSeek"><img src="extension/logos/deepseek-download__1_-removebg-preview.png" alt="DeepSeek" width="28" height="28"></li>
+        <li title="Claude"><span class="platform-badge"><img src="extension/logos/claude2download__1_-removebg-preview.png" alt="Claude" width="28" height="28"></span></li>
+        <li title="ChatGPT"><span class="platform-badge"><img class="platform-logo-dark" src="extension/logos/gptwhitedownload__1_-removebg-preview.png" alt="ChatGPT" width="28" height="28"></span></li>
+        <li title="Gemini"><span class="platform-badge"><img src="extension/logos/gemini-download__1_-removebg-preview.png" alt="Gemini" width="28" height="28"></span></li>
+        <li title="Grok"><span class="platform-badge"><img class="platform-logo-dark" src="extension/logos/grokwhitedownload__1_-removebg-preview.png" alt="Grok" width="28" height="28"></span></li>
+        <li title="DeepSeek"><span class="platform-badge"><img src="extension/logos/deepseek-download__1_-removebg-preview.png" alt="DeepSeek" width="28" height="28"></span></li>
       </ul>
     </section>
 
