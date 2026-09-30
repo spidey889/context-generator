@@ -1,5 +1,7 @@
 # Changelog
 
+- 2026-10-01: Homepage refinement: replaced the connector hub brain emoji with the Cap Context orb and brighter brand label, removed the header logo's black tile, kept Privacy only in the footer, balanced the provider logos' visible sizes, and simplified the demo time label. Retained the owner's preferred dark gray demo button. Kept the original seven-line context outline on a dark card with brighter text after the pale-card trial was rejected for readability; shortened the adjacent headline. The later detailed-row and supporting-line trial was also rejected and reverted. Owner approved publishing the retained version. Isolated Brave checks passed at 1440, 768, 390 and 320 px; asset/license checks and scoped diff validation passed.
+
 - 2026-10-01: Replaced the homepage hero's five AI name badges with circular logo badges using the existing provider assets. Retained accessible names and hover titles; darkened the white ChatGPT/Grok assets only in the light hero.
 
 - 2026-09-30: Made summary estimate overruns say `Taking a little longer—still working.` and clear the countdown/reassurance immediately when the summary arrives, before pasting. Replaced the analysis copy button text with the familiar overlapping-squares icon, retaining readable detail-only copying, success/failure feedback, tooltips and accessible labels. Advanced the content-script load ID to v70. Syntax, scoped diff and 13 focused checks passed; isolated Brave verified the transfer and analysis copy icon, feedback and reset.
