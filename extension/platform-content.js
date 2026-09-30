@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-09-30-bounded-handoff-finish-v69";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-09-30-handoff-timer-ux-v70";
   const ownedUiStyleSheets = new Map();
   // Start fast capture on for each page instance; a manual opt-out lasts until reload.
   let claudeJsonCaptureEnabled = true;
@@ -171,7 +171,7 @@
   const PASTE_STABILITY_MS = 550;
   const HANDOFF_COUNTDOWN_ID = "context-generator-handoff-countdown";
   const HANDOFF_REASSURANCE_ID = "context-generator-handoff-reassurance";
-  const HANDOFF_REASSURANCE_TEXT = "Almost done, don't cancel now";
+  const HANDOFF_REASSURANCE_TEXT = "Taking a little longer—still working.";
   // Stage completion still comes only from real pipeline marks. In-stage line motion is display-only:
   // capture reads the sweep's existing scroll diagnostics, while summary creeps below completion.
   const HANDOFF_STAGES = [
@@ -834,6 +834,7 @@
       }
       transferStage = "summary";
       summary = await summarizeWithBackend(conversationText, transferTrace);
+      stopHandoffCountdown();
       markTransferTrace(transferTrace, "summary available", { chars: summary.length });
       setHandoffProgress("summary", "done");
       transferStage = "destination";
