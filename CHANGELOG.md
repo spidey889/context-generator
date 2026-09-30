@@ -1,5 +1,7 @@
 # Changelog
 
+- 2026-10-01: Replaced the homepage hero's five AI name badges with circular logo badges using the existing provider assets. Retained accessible names and hover titles; darkened the white ChatGPT/Grok assets only in the light hero.
+
 - 2026-09-30: Made summary estimate overruns say `Taking a little longer—still working.` and clear the countdown/reassurance immediately when the summary arrives, before pasting. Replaced the analysis copy button text with the familiar overlapping-squares icon, retaining readable detail-only copying, success/failure feedback, tooltips and accessible labels. Advanced the content-script load ID to v70. Syntax, scoped diff and 13 focused checks passed; isolated Brave verified the transfer and analysis copy icon, feedback and reset.
 
 - 2026-09-30: Fixed the unbounded finishing-paint wait that could leave a transfer pending after paste when source-tab rendering paused. Hidden sources skip completion animation waits; visible sources retain their two-frame cue with a 120 ms fallback and immediate release on hiding. Recorded handoff finish, final activation and transfer completion in the receipt timeline. Bumped the content-script load ID to v69. Four regressions cover initially hidden sources, frames that never fire, hiding between frames and normal visible completion with resource cleanup. All 378 deterministic tests, syntax/scoped diff checks and the isolated Brave transfer smoke passed; no live provider request was needed.

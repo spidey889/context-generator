@@ -1016,7 +1016,10 @@
     .demo-frame { margin: 0; padding: .55rem; border: 1px solid var(--border); border-radius: 1.6rem; background: #fff; box-shadow: var(--shadow); }
     .demo-frame video { display: block; width: 100%; height: auto; aspect-ratio: 16 / 9; border-radius: 1.1rem; background: #f8f6f1; }
     .platform-list { display: flex; flex-wrap: wrap; justify-content: center; gap: .6rem 1.3rem; list-style: none; padding: 0; margin: 1.6rem 0 0; color: #525465; font-size: .85rem; font-weight: 600; }
-    .platform-list li { padding: .4rem .75rem; border: 1px solid var(--border); border-radius: 999px; background: rgba(255,255,255,.65); }
+    .platform-list li { display: grid; place-items: center; width: 48px; height: 48px; border: 1px solid var(--border); border-radius: 999px; background: rgba(255,255,255,.65); }
+    .platform-list img { display: block; width: 28px; height: 28px; object-fit: contain; }
+    /* These two shared assets are white; darken only here for the light hero. */
+    .platform-list .platform-logo-dark { filter: brightness(0); }
     .closing-cta { text-align: center; padding: clamp(2.5rem, 5vw, 4rem) 1.5rem; margin-bottom: 3rem; border: 1px solid rgba(149,96,223,.16); border-radius: var(--radius); background: radial-gradient(ellipse at top, #ece4fc, transparent 75%), rgba(255,255,255,.6); }
     .closing-cta .button { margin-top: 1.5rem; }
     a:focus-visible, video:focus-visible { outline: 3px solid var(--accent); outline-offset: 5px; }
@@ -1096,7 +1099,13 @@
         <a class="button button-dark" href="https://chromewebstore.google.com/detail/cap-context/lpkaciijlhckkdhbgidbjfkldigghnjf" target="_blank" rel="noopener noreferrer">Install extension ↗</a>
         <a class="button button-outline" href="#demo">Watch the demo <span aria-hidden="true">▷</span></a>
       </div>
-      <ul class="platform-list" aria-label="Supported AIs"><li>Claude</li><li>ChatGPT</li><li>Gemini</li><li>Grok</li><li>DeepSeek</li></ul>
+      <ul class="platform-list" aria-label="Supported AIs">
+        <li title="Claude"><img src="extension/logos/claude2download__1_-removebg-preview.png" alt="Claude" width="28" height="28"></li>
+        <li title="ChatGPT"><img class="platform-logo-dark" src="extension/logos/gptwhitedownload__1_-removebg-preview.png" alt="ChatGPT" width="28" height="28"></li>
+        <li title="Gemini"><img src="extension/logos/gemini-download__1_-removebg-preview.png" alt="Gemini" width="28" height="28"></li>
+        <li title="Grok"><img class="platform-logo-dark" src="extension/logos/grokwhitedownload__1_-removebg-preview.png" alt="Grok" width="28" height="28"></li>
+        <li title="DeepSeek"><img src="extension/logos/deepseek-download__1_-removebg-preview.png" alt="DeepSeek" width="28" height="28"></li>
+      </ul>
     </section>
 
     <section id="demo" class="demo-section section container" aria-labelledby="demo-title">
