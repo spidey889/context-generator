@@ -346,7 +346,8 @@
     .cg-col-right { align-items: flex-end; }
     .cg-tool { display: flex; align-items: center; gap: 16px; position: relative; z-index: 2; }
     .cg-col-right .cg-tool { flex-direction: row-reverse; }
-    .cg-tool-icon { display: grid; place-items: center; width: 60px; height: 60px; border: 1px solid #e1e1e8; border-radius: 15px; background: #fff; flex-shrink: 0; }
+    .cg-tool-icon { position: relative; display: grid; place-items: center; width: 60px; height: 60px; border: 1px solid #e1e1e8; border-radius: 15px; background: #fff; flex-shrink: 0; }
+    .cg-receipt { position: absolute; inset: -1px; border: 1px solid #555; border-radius: inherit; opacity: 0; pointer-events: none; }
     .cg-tool-icon img { display: block; width: 36px; height: 36px; object-fit: contain; }
     .cg-tool-icon .cg-logo-dark { filter: brightness(0); }
     /* Optical sizing accounts for transparent padding in the shared assets. */
@@ -357,12 +358,12 @@
     .cg-col-left .cg-tool-name { padding-right: 8px; }
     .cg-col-right .cg-tool-name { padding-left: 8px; }
     .cg-hub { display: grid; place-items: center; position: relative; z-index: 3; }
-    .cg-hub-box { width: 112px; height: 112px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; border: 1px solid #23202b; border-radius: 18px; background: #fff; }
+    .cg-hub-box { width: 112px; height: 112px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; border: 1px solid #23202b; border-radius: 18px; background: transparent; }
     .cg-hub-logo { display: block; width: 72px; height: 72px; object-fit: contain; }
     .cg-hub-label { color: #17151f; font-size: 12px; font-weight: 600; }
     .cg-caption { max-width: 1080px; margin: 18px auto 0; color: #626270; font-size: .95rem; line-height: 1.6; }
     svg.cg-lines { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; z-index: 1; }
-    .cg-pulse { filter: drop-shadow(0 0 3px rgba(149,96,223,.3)); }
+    .cg-pulse { pointer-events: none; }
     @media (min-width: 769px) and (max-width: 900px) {
       .cg-wrap { padding: 28px; }
       .cg-grid { grid-template-columns: 1fr 112px 1fr; gap: 12px; }
@@ -1120,51 +1121,155 @@
       const motion = window.matchMedia("(prefers-reduced-motion: reduce)");
       const ns = "http://www.w3.org/2000/svg";
       let frame = 0;
+      let receipts = [];
       function drawLines() {
         frame = 0;
+        receipts.forEach(animation => animation.cancel());
+        receipts = [];
+        wrap.querySelectorAll(".cg-receipt").forEach(receipt => receipt.remove());
         svg.replaceChildren();
         if (!wrap.getClientRects().length) return;
         const panel = wrap.getBoundingClientRect();
         const center = hub.getBoundingClientRect();
-        const cx = center.left - panel.left + center.width / 2;
         const cy = center.top - panel.top + center.height / 2;
         // Use the SVG's inner coordinate system, excluding the panel border.
         const borderX = wrap.clientLeft;
         const borderY = wrap.clientTop;
-        wrap.querySelectorAll(".cg-tool").forEach((tool, index) => {
+        if (!motion.matches) {
+          const defs = document.createElementNS(ns, "defs");
+          const gradient = document.createElementNS(ns, "linearGradient");
+          gradient.id = "cgTrail";
+          [["0%", "0"], ["45%", ".18"], ["100%", ".9"]].forEach(([offset, opacity]) => {
+            const stop = document.createElementNS(ns, "stop");
+            stop.setAttribute("offset", offset);
+            stop.setAttribute("stop-color", "#111");
+            stop.setAttribute("stop-opacity", opacity);
+            gradient.appendChild(stop);
+          });
+          defs.appendChild(gradient);
+          svg.appendChild(defs);
+        }
+        const routes = Array.from(wrap.querySelectorAll(".cg-tool"), tool => {
           const icon = tool.querySelector(".cg-tool-icon").getBoundingClientRect();
+          const label = tool.querySelector(".cg-tool-name").getBoundingClientRect();
           const left = tool.dataset.side === "left";
-          const x = (left ? icon.right : icon.left) - panel.left - borderX;
+          // Start beyond the label so the visible track has no masked gaps.
+          const x = (left ? label.right + 10 : label.left - 10) - panel.left - borderX;
           const y = icon.top - panel.top + icon.height / 2 - borderY;
-          const endX = cx - borderX;
+          const endX = (left ? center.left : center.right) - panel.left - borderX;
           const endY = cy - borderY;
           const bend = (endX - x) * .4;
           const d = `M ${x} ${y} C ${x + bend} ${y}, ${endX - bend} ${endY}, ${endX} ${endY}`;
           const track = document.createElementNS(ns, "path");
           track.setAttribute("d", d);
           track.setAttribute("fill", "none");
-          track.setAttribute("stroke", "#e7e7ee");
+          track.setAttribute("stroke", "#111");
+          track.setAttribute("stroke-opacity", ".12");
           track.setAttribute("stroke-width", "1.5");
           svg.appendChild(track);
-          if (motion.matches) return;
-          const pulse = track.cloneNode();
-          pulse.classList.add("cg-pulse");
-          pulse.setAttribute("pathLength", "100");
-          pulse.setAttribute("stroke", "#9560df");
-          pulse.setAttribute("stroke-width", "2.5");
-          pulse.setAttribute("stroke-linecap", "round");
-          pulse.setAttribute("stroke-dasharray", "8 92");
-          pulse.setAttribute("stroke-dashoffset", "100");
-          const animation = document.createElementNS(ns, "animate");
-          animation.setAttribute("attributeName", "stroke-dashoffset");
-          // Each pulse travels toward the hub and back, with staggered starts.
-          animation.setAttribute("values", "100;0;100");
-          animation.setAttribute("dur", "1.8s");
-          animation.setAttribute("begin", `${-(index * .27)}s`);
-          animation.setAttribute("repeatCount", "indefinite");
-          pulse.appendChild(animation);
-          svg.appendChild(pulse);
+          return { d, x, y, endX, endY, bend, left, track, icon: tool.querySelector(".cg-tool-icon"), name: tool.querySelector(".cg-tool-name").textContent.trim() };
         });
+        if (motion.matches) return;
+        // Each trail passes behind the hub and emerges toward a different AI.
+        // A single continuous path avoids a pause or direction reversal at the hub.
+        const leftRoutes = routes.filter(route => route.left);
+        const rightRoutes = routes.filter(route => !route.left);
+        if (!leftRoutes.length || !rightRoutes.length) return;
+        // Pair each connection with its reverse so every AI sends and receives,
+        // including when the two columns have different numbers of platforms.
+        const pairs = Array.from({ length: Math.max(leftRoutes.length, rightRoutes.length) }, (_, index) => {
+          const source = leftRoutes[index % leftRoutes.length];
+          const target = rightRoutes[index % rightRoutes.length];
+          return [source, target];
+        });
+        const journeys = [...pairs, ...pairs.map(([source, target]) => [target, source])];
+        const travelSeconds = 1.8;
+        const spacing = 1.2;
+        const cycle = journeys.length * spacing;
+        const active = travelSeconds / cycle;
+        const logo = hub.querySelector(".cg-hub-logo").getBoundingClientRect();
+        journeys.forEach(([source, target], index) => {
+          const route = `${source.d} L ${target.endX} ${target.endY} C ${target.endX - target.bend} ${target.endY}, ${target.x + target.bend} ${target.y}, ${target.x} ${target.y}`;
+          const pulse = document.createElementNS(ns, "g");
+          pulse.classList.add("cg-pulse");
+          pulse.dataset.from = source.name;
+          pulse.dataset.to = target.name;
+          pulse.setAttribute("opacity", "0");
+          const tail = document.createElementNS(ns, "rect");
+          tail.setAttribute("x", "-36");
+          tail.setAttribute("y", "-1.25");
+          tail.setAttribute("width", "36");
+          tail.setAttribute("height", "2.5");
+          tail.setAttribute("rx", "1.25");
+          tail.setAttribute("fill", "url(#cgTrail)");
+          pulse.appendChild(tail);
+          const head = document.createElementNS(ns, "circle");
+          head.setAttribute("r", "1.4");
+          head.setAttribute("fill", "#111");
+          pulse.appendChild(head);
+          const phase = index * spacing;
+          const begin = `${-phase}s`;
+          const travel = document.createElementNS(ns, "animateMotion");
+          travel.setAttribute("path", route);
+          travel.setAttribute("rotate", "auto");
+          travel.setAttribute("calcMode", "linear");
+          travel.setAttribute("keyPoints", "0;1;1");
+          travel.setAttribute("keyTimes", `0;${active};1`);
+          const fade = document.createElementNS(ns, "animate");
+          fade.setAttribute("attributeName", "opacity");
+          fade.setAttribute("values", "0;1;1;0;0");
+          fade.setAttribute("keyTimes", `0;${active * .08};${active * .88};${active};1`);
+          [travel, fade].forEach(animation => {
+            animation.setAttribute("dur", `${cycle}s`);
+            animation.setAttribute("begin", begin);
+            animation.setAttribute("repeatCount", "indefinite");
+            pulse.appendChild(animation);
+          });
+          svg.appendChild(pulse);
+
+          // The trail is visible inside the transparent hub. The ring and
+          // receiver response share its clock, making the handoff legible.
+          const relay = document.createElementNS(ns, "circle");
+          relay.classList.add("cg-relay");
+          relay.setAttribute("cx", logo.left - panel.left + logo.width / 2 - borderX);
+          relay.setAttribute("cy", logo.top - panel.top + logo.height / 2 - borderY);
+          relay.setAttribute("r", "28");
+          relay.setAttribute("fill", "none");
+          relay.setAttribute("stroke", "#111");
+          relay.setAttribute("stroke-width", "1");
+          relay.setAttribute("opacity", "0");
+          const throughHub = travelSeconds * (source.track.getTotalLength() + center.width / 2) /
+            (source.track.getTotalLength() + center.width + target.track.getTotalLength());
+          [["r", "28;39;39", `0;${.4 / cycle};1`],
+            ["opacity", "0;.25;0;0", `0;${.08 / cycle};${.4 / cycle};1`]].forEach(([name, values, times]) => {
+            const animation = document.createElementNS(ns, "animate");
+            animation.setAttribute("attributeName", name);
+            animation.setAttribute("values", values);
+            animation.setAttribute("keyTimes", times);
+            animation.setAttribute("dur", `${cycle}s`);
+            animation.setAttribute("begin", `${throughHub - phase - .08}s`);
+            animation.setAttribute("repeatCount", "indefinite");
+            relay.appendChild(animation);
+          });
+          svg.appendChild(relay);
+          const receiptRing = document.createElement("span");
+          receiptRing.className = "cg-receipt";
+          receiptRing.dataset.phase = phase;
+          receiptRing.setAttribute("aria-hidden", "true");
+          // Independent rings prevent an idle journey from overriding another
+          // receipt when several platforms share the same receiving AI.
+          target.icon.appendChild(receiptRing);
+          const receipt = receiptRing.animate([
+            { opacity: 0, boxShadow: "0 0 0 0 rgba(17,17,17,0)", offset: 0 },
+            { opacity: 0, boxShadow: "0 0 0 0 rgba(17,17,17,0)", offset: (travelSeconds - .12) / cycle },
+            { opacity: 1, boxShadow: "0 0 0 3px rgba(17,17,17,.07)", offset: active },
+            { opacity: 0, boxShadow: "0 0 0 0 rgba(17,17,17,0)", offset: (travelSeconds + .4) / cycle },
+            { opacity: 0, boxShadow: "0 0 0 0 rgba(17,17,17,0)", offset: 1 }
+          ], { duration: cycle * 1000, iterations: Infinity });
+          receipt.currentTime = phase * 1000;
+          receipts.push(receipt);
+        });
+        svg.setCurrentTime(0);
       }
       function scheduleDraw() {
         if (!frame) frame = window.requestAnimationFrame(drawLines);
