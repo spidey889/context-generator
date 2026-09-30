@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-09-30-post-capture-timer-v64";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-09-30-source-copy-backup-v65";
   const ownedUiStyleSheets = new Map();
   // Start fast capture on for each page instance; a manual opt-out lasts until reload.
   let claudeJsonCaptureEnabled = true;
@@ -857,6 +857,8 @@
         deferFinalActivation: !requiresFocusedPaste
       });
       markTransferTrace(transferTrace, "paste done", pasteResponse?.timing || null);
+      // Keep recovery available on the source even if final activation fails.
+      showFallbackModal(summary, getPlatform(destinationId)?.name || "the destination", true);
       if (!requiresFocusedPaste) {
         await completeHandoffForDestinationReveal();
         await notifyBackground({
@@ -6640,7 +6642,7 @@
     }, 280);
   }
 
-  function showFallbackModal(text, destinationName) {
+  function showFallbackModal(text, destinationName, isBackup = false) {
     let modal = document.getElementById("context-generator-fallback-modal");
     if (!modal) {
       modal = document.createElement("div");
@@ -6885,9 +6887,14 @@
 
     modal.contextGeneratorPreviousFocus = document.activeElement;
 
+    const title = document.getElementById("context-generator-fallback-title");
+    if (title) title.textContent = isBackup ? "In case the paste didn't work" : "Context is ready to copy";
+
     const desc = document.getElementById("context-generator-fallback-desc");
     if (desc) {
-      desc.textContent = `Auto-paste did not land in ${destinationName}. The context is safe here - copy it, paste it into the message box, then send when ready.`;
+      desc.textContent = isBackup
+        ? `If the context is missing or incomplete in ${destinationName}, copy it here and paste it into the message box, then send when ready.`
+        : `Auto-paste did not land in ${destinationName}. The context is safe here - copy it, paste it into the message box, then send when ready.`;
     }
 
     const textarea = document.getElementById("context-generator-fallback-text");
