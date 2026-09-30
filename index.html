@@ -330,163 +330,47 @@
     }
 
     .cg-wrap {
-      background: #121119;
-      border: 1px solid #302b3c;
-      border-radius: 24px;
-      padding: 32px 40px;
       position: relative;
-      overflow: hidden;
-      font-family: var(--font-sans);
-      max-width: 980px;
+      max-width: 1080px;
       margin: 0 auto;
+      padding: 44px;
+      border: 1px solid #e1e1e8;
+      border-radius: 22px;
+      background: #fff;
+      box-shadow: 0 3px 12px rgba(17,17,20,.03);
+      overflow: hidden;
     }
-
-    .cg-heading { position: relative; z-index: 5; margin: 0 0 28px; text-align: center; }
-    .cg-heading h2 { margin: 0; color: #f5f3fa; font-size: clamp(1.5rem, 2.4vw, 2rem); letter-spacing: -.04em; line-height: 1.2; }
-    .cg-heading p { margin: .6rem 0 0; color: #b8b1c8; font-size: .95rem; line-height: 1.5; }
-
-    .cg-grid {
-      display: grid;
-      grid-template-columns: 1fr 200px 1fr;
-      gap: 0;
-      align-items: center;
-      min-height: 304px;
+    .cg-grid { position: relative; display: grid; grid-template-columns: 1fr 128px 1fr; align-items: center; gap: 28px; min-height: 280px; }
+    .cg-col { display: flex; flex-direction: column; justify-content: space-between; height: 280px; }
+    .cg-col-left { align-items: flex-start; }
+    .cg-col-right { align-items: flex-end; }
+    .cg-tool { display: flex; align-items: center; gap: 16px; position: relative; z-index: 2; }
+    .cg-col-right .cg-tool { flex-direction: row-reverse; }
+    .cg-tool-icon { display: grid; place-items: center; width: 60px; height: 60px; border: 1px solid #e1e1e8; border-radius: 15px; background: #fff; flex-shrink: 0; }
+    .cg-tool-icon img { display: block; width: 36px; height: 36px; object-fit: contain; }
+    .cg-tool-icon .cg-logo-dark { filter: brightness(0); }
+    /* Optical sizing accounts for transparent padding in the shared assets. */
+    .cg-tool-icon .cg-logo-chatgpt { width: 42px; height: 42px; }
+    .cg-tool-icon .cg-logo-grok { width: 54px; height: 54px; }
+    .cg-tool-icon .cg-logo-deepseek { width: 44px; height: 44px; }
+    .cg-tool-name { padding: 5px 0; background: #fff; color: #111114; font-size: 18px; font-weight: 500; line-height: 1.3; letter-spacing: -.03em; }
+    .cg-col-left .cg-tool-name { padding-right: 8px; }
+    .cg-col-right .cg-tool-name { padding-left: 8px; }
+    .cg-hub { display: grid; place-items: center; position: relative; z-index: 3; }
+    .cg-hub-box { width: 112px; height: 112px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; border: 1px solid #23202b; border-radius: 18px; background: #fff; }
+    .cg-hub-logo { display: block; width: 72px; height: 72px; object-fit: contain; }
+    .cg-hub-label { color: #17151f; font-size: 12px; font-weight: 600; }
+    .cg-caption { max-width: 1080px; margin: 18px auto 0; color: #626270; font-size: .95rem; line-height: 1.6; }
+    svg.cg-lines { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; z-index: 1; }
+    .cg-pulse { filter: drop-shadow(0 0 3px rgba(149,96,223,.3)); }
+    @media (min-width: 769px) and (max-width: 900px) {
+      .cg-wrap { padding: 28px; }
+      .cg-grid { grid-template-columns: 1fr 112px 1fr; gap: 12px; }
+      .cg-tool { gap: 10px; }
+      .cg-tool-name { font-size: 16px; }
+      .cg-tool-icon { width: 52px; height: 52px; }
+      .cg-hub-box { width: 100px; height: 108px; }
     }
-
-    .cg-col {
-      display: flex;
-      flex-direction: column;
-      gap: 12px;
-    }
-
-    .cg-col-left {
-      align-items: flex-start;
-      padding-right: 20px;
-    }
-
-    .cg-col-right {
-      align-items: flex-end;
-      padding-left: 20px;
-    }
-
-    .cg-tool {
-      display: flex;
-      align-items: center;
-      gap: 12px;
-      width: 190px;
-      min-height: 68px;
-      box-sizing: border-box;
-      background: #1c1a25;
-      border: 1px solid #373240;
-      border-radius: 14px;
-      padding: 12px 14px;
-      transition: border-color 0.2s, background 0.2s;
-    }
-
-    .cg-tool:hover {
-      border-color: #6d588c;
-      background: #24202e;
-    }
-
-    .cg-col-right .cg-tool {
-      justify-content: flex-start;
-    }
-
-    .cg-tool-icon {
-      width: 36px;
-      height: 36px;
-      border-radius: 8px;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      flex-shrink: 0;
-    }
-
-    .cg-tool-info {
-      display: flex;
-      flex-direction: column;
-    }
-
-    /* Match visible logo sizes despite transparent padding in the source PNGs. */
-    .cg-tool[data-idx="0"][data-side="right"] img { width: 36px !important; height: 36px !important; }
-    .cg-tool[data-idx="2"][data-side="right"] img { width: 46px !important; height: 46px !important; }
-    .cg-tool[data-idx="3"][data-side="right"] img { width: 38px !important; height: 38px !important; }
-
-    .cg-tool-name {
-      font-size: 15px;
-      font-weight: 600;
-      color: #f5f3fa;
-      line-height: 1.2;
-    }
-
-    .cg-tool-sub {
-      font-size: 12px;
-      color: #b8b1c8;
-      line-height: 1.3;
-      margin-top: 4px;
-    }
-
-    .cg-col-right .cg-tool-info {
-      align-items: flex-start;
-    }
-
-    .cg-hub {
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      justify-content: center;
-      gap: 10px;
-    }
-
-    .cg-hub-box {
-      width: 136px;
-      height: 136px;
-      background: #292035;
-      border: 1px solid #8b69b7;
-      border-radius: 24px;
-      box-shadow: 0 0 0 7px rgba(149, 96, 223, .06);
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      justify-content: center;
-      gap: 8px;
-      position: relative;
-      z-index: 10;
-    }
-
-    .cg-hub-label {
-      font-size: 14px;
-      color: #e8def6;
-      font-weight: 600;
-      text-align: center;
-      line-height: 1.3;
-    }
-
-    .cg-hub-logo {
-      display: block;
-      width: 64px;
-      height: 64px;
-      object-fit: contain;
-    }
-
-    .cg-tagline {
-      font-size: 13px;
-      color: #b8b1c8;
-      text-align: center;
-      margin: 24px 0 0;
-      letter-spacing: 0.01em;
-    }
-
-    svg.cg-lines {
-      position: absolute;
-      top: 0;
-      left: 0;
-      width: 100%;
-      height: 100%;
-      pointer-events: none;
-      z-index: 1;
-    }
-
     .connector-section {
       padding-top: clamp(2rem, 2.2vw, 2.5rem);
     }
@@ -1002,15 +886,6 @@
     .platform-list li[title="ChatGPT"] img,
     .platform-list li[title="DeepSeek"] img { width: 34px; height: 34px; }
     .platform-list li[title="Grok"] img { width: 44px; height: 44px; }
-    @media (min-width: 769px) and (max-width: 900px) {
-      .cg-wrap { padding: 28px 24px; }
-      .cg-grid { grid-template-columns: 1fr 160px 1fr; }
-      .cg-tool { width: 164px; gap: 8px; padding-inline: 10px; }
-      .cg-tool-name { font-size: 14px; }
-      .cg-col-left { padding-right: 8px; }
-      .cg-col-right { padding-left: 8px; }
-      .cg-hub-box { width: 116px; height: 132px; }
-    }
     .closing-cta { text-align: center; padding: clamp(2.5rem, 5vw, 4rem) 1.5rem; margin-bottom: 3rem; border: 1px solid rgba(149,96,223,.16); border-radius: var(--radius); background: radial-gradient(ellipse at top, #ece4fc, transparent 75%), rgba(255,255,255,.6); }
     .closing-cta .button { margin-top: 1.5rem; }
     a:focus-visible, video:focus-visible { outline: 3px solid var(--accent); outline-offset: 5px; }
@@ -1109,83 +984,44 @@
       </figure>
     </section>
 
-    <section class="connector-section section container reveal" aria-labelledby="connector-title">
+    <section class="connector-section section container reveal" aria-label="Carry context between five AI platforms">
       <div class="cg-wrap" id="cgWrap">
         <svg class="cg-lines" id="cgSvg" aria-hidden="true"></svg>
-        <div class="cg-heading">
-          <h2 id="connector-title">Keep the conversation going.</h2>
-          <p>Your decisions, details, and next steps go with you.</p>
-        </div>
-
-        <div class="cg-grid" style="position: relative; z-index: 5;">
-          <div class="cg-col cg-col-left" id="colLeft">
-            <div class="cg-tool" data-side="left" data-idx="0">
-              <div class="cg-tool-icon">
-                <img src="extension/logos/claude2download__1_-removebg-preview.png" alt="Claude"
-                  style="width: 32px; height: 32px; object-fit: contain; background: transparent;">
-              </div>
-              <div class="cg-tool-info">
-                <span class="cg-tool-name">Claude</span>
-                <span class="cg-tool-sub">Anthropic</span>
-              </div>
+        <div class="cg-grid">
+          <div class="cg-col cg-col-left">
+            <div class="cg-tool" data-side="left">
+              <div class="cg-tool-icon"><img src="extension/logos/claude2download__1_-removebg-preview.png" alt="" width="36" height="36"></div>
+              <span class="cg-tool-name">Claude</span>
+            </div>
+            <div class="cg-tool" data-side="left">
+              <div class="cg-tool-icon"><img class="cg-logo-dark cg-logo-chatgpt" src="extension/logos/gptwhitedownload__1_-removebg-preview.png" alt="" width="42" height="42"></div>
+              <span class="cg-tool-name">ChatGPT</span>
+            </div>
+            <div class="cg-tool" data-side="left">
+              <div class="cg-tool-icon"><img src="extension/logos/gemini-download__1_-removebg-preview.png" alt="" width="36" height="36"></div>
+              <span class="cg-tool-name">Gemini</span>
             </div>
           </div>
-
           <div class="cg-hub">
             <div class="cg-hub-box" id="hubBox">
-              <img class="cg-hub-logo" src="extension/icon128.png" alt="" width="44" height="44">
+              <img class="cg-hub-logo" src="extension/icon128.png" alt="" width="72" height="72">
               <span class="cg-hub-label">Cap Context</span>
             </div>
           </div>
-
-          <div class="cg-col cg-col-right" id="colRight">
-            <div class="cg-tool" data-side="right" data-idx="0">
-              <div class="cg-tool-icon">
-                <img src="extension/logos/gptwhitedownload__1_-removebg-preview.png" alt="ChatGPT"
-                  style="width: 32px; height: 32px; object-fit: contain; background: transparent;">
-              </div>
-              <div class="cg-tool-info">
-                <span class="cg-tool-name">ChatGPT</span>
-                <span class="cg-tool-sub">OpenAI</span>
-              </div>
+          <div class="cg-col cg-col-right">
+            <div class="cg-tool" data-side="right">
+              <div class="cg-tool-icon"><img class="cg-logo-dark cg-logo-grok" src="extension/logos/grokwhitedownload__1_-removebg-preview.png" alt="" width="54" height="54"></div>
+              <span class="cg-tool-name">Grok</span>
             </div>
-            <div class="cg-tool" data-side="right" data-idx="1">
-              <div class="cg-tool-icon">
-                <img src="extension/logos/gemini-download__1_-removebg-preview.png" alt="Gemini"
-                  style="width: 32px; height: 32px; object-fit: contain; background: transparent;">
-              </div>
-              <div class="cg-tool-info">
-                <span class="cg-tool-name">Gemini</span>
-                <span class="cg-tool-sub">Google</span>
-              </div>
-            </div>
-            <div class="cg-tool" data-side="right" data-idx="2">
-              <div class="cg-tool-icon">
-                <img src="extension/logos/grokwhitedownload__1_-removebg-preview.png" alt="Grok"
-                  style="width: 32px; height: 32px; object-fit: contain; background: transparent;">
-              </div>
-              <div class="cg-tool-info">
-                <span class="cg-tool-name">Grok</span>
-                <span class="cg-tool-sub">xAI</span>
-              </div>
-            </div>
-            <div class="cg-tool" data-side="right" data-idx="3">
-              <div class="cg-tool-icon">
-                <img src="extension/logos/deepseek-download__1_-removebg-preview.png" alt="DeepSeek"
-                  style="width: 32px; height: 32px; object-fit: contain; background: transparent;">
-              </div>
-              <div class="cg-tool-info">
-                <span class="cg-tool-name">DeepSeek</span>
-                <span class="cg-tool-sub">DeepSeek AI</span>
-              </div>
+            <div class="cg-tool" data-side="right">
+              <div class="cg-tool-icon"><img class="cg-logo-deepseek" src="extension/logos/deepseek-download__1_-removebg-preview.png" alt="" width="44" height="44"></div>
+              <span class="cg-tool-name">DeepSeek</span>
             </div>
           </div>
         </div>
-
-        <p class="cg-tagline">Start with any AI. Continue with any other.</p>
       </div>
+      <p class="cg-caption">Switch between any of the five AIs. Keep your context.</p>
     </section>
-
     <section class="section container reveal">
       <div class="output-grid">
         <div>
@@ -1277,95 +1113,68 @@
     })();
 
     (function drawConnectorHubLines() {
+      const wrap = document.getElementById("cgWrap");
+      const svg = document.getElementById("cgSvg");
+      const hub = document.getElementById("hubBox");
+      if (!wrap || !svg || !hub) return;
+      const motion = window.matchMedia("(prefers-reduced-motion: reduce)");
+      const ns = "http://www.w3.org/2000/svg";
+      let frame = 0;
       function drawLines() {
-        const wrap = document.getElementById("cgWrap");
-        const svg = document.getElementById("cgSvg");
-        const hub = document.getElementById("hubBox");
-
-        if (!wrap || !svg || !hub) {
-          return;
-        }
-
-        const wrapRect = wrap.getBoundingClientRect();
-        const hubRect = hub.getBoundingClientRect();
-        const centerY = hubRect.top - wrapRect.top + (hubRect.height / 2);
-        const leftTools = wrap.querySelectorAll('[data-side="left"]');
-        const rightTools = wrap.querySelectorAll('[data-side="right"]');
-
-        svg.innerHTML = "";
-
-        function addLine(x1, y1, x2, y2, color, delay) {
-          const length = Math.hypot(x2 - x1, y2 - y1);
-          const dash = length * 0.3;
-
-          const baseLine = document.createElementNS("http://www.w3.org/2000/svg", "line");
-          baseLine.setAttribute("x1", x1);
-          baseLine.setAttribute("y1", y1);
-          baseLine.setAttribute("x2", x2);
-          baseLine.setAttribute("y2", y2);
-          baseLine.setAttribute("stroke", "#2a2d3a");
-          baseLine.setAttribute("stroke-width", "0.8");
-
-          const line = document.createElementNS("http://www.w3.org/2000/svg", "line");
-          line.setAttribute("x1", x1);
-          line.setAttribute("y1", y1);
-          line.setAttribute("x2", x2);
-          line.setAttribute("y2", y2);
-          line.setAttribute("stroke", color);
-          line.setAttribute("stroke-width", "1");
-          line.setAttribute("stroke-dasharray", `${dash} ${length - dash}`);
-          line.setAttribute("stroke-dashoffset", length);
-          line.setAttribute("opacity", "0.55");
-
-          const animation = document.createElementNS("http://www.w3.org/2000/svg", "animate");
+        frame = 0;
+        svg.replaceChildren();
+        if (!wrap.getClientRects().length) return;
+        const panel = wrap.getBoundingClientRect();
+        const center = hub.getBoundingClientRect();
+        const cx = center.left - panel.left + center.width / 2;
+        const cy = center.top - panel.top + center.height / 2;
+        // Use the SVG's inner coordinate system, excluding the panel border.
+        const borderX = wrap.clientLeft;
+        const borderY = wrap.clientTop;
+        wrap.querySelectorAll(".cg-tool").forEach((tool, index) => {
+          const icon = tool.querySelector(".cg-tool-icon").getBoundingClientRect();
+          const left = tool.dataset.side === "left";
+          const x = (left ? icon.right : icon.left) - panel.left - borderX;
+          const y = icon.top - panel.top + icon.height / 2 - borderY;
+          const endX = cx - borderX;
+          const endY = cy - borderY;
+          const bend = (endX - x) * .4;
+          const d = `M ${x} ${y} C ${x + bend} ${y}, ${endX - bend} ${endY}, ${endX} ${endY}`;
+          const track = document.createElementNS(ns, "path");
+          track.setAttribute("d", d);
+          track.setAttribute("fill", "none");
+          track.setAttribute("stroke", "#e7e7ee");
+          track.setAttribute("stroke-width", "1.5");
+          svg.appendChild(track);
+          if (motion.matches) return;
+          const pulse = track.cloneNode();
+          pulse.classList.add("cg-pulse");
+          pulse.setAttribute("pathLength", "100");
+          pulse.setAttribute("stroke", "#9560df");
+          pulse.setAttribute("stroke-width", "2.5");
+          pulse.setAttribute("stroke-linecap", "round");
+          pulse.setAttribute("stroke-dasharray", "8 92");
+          pulse.setAttribute("stroke-dashoffset", "100");
+          const animation = document.createElementNS(ns, "animate");
           animation.setAttribute("attributeName", "stroke-dashoffset");
-          animation.setAttribute("values", `${length};-${length}`);
-          animation.setAttribute("dur", "2.2s");
-          animation.setAttribute("begin", `${delay}s`);
+          // Each pulse travels toward the hub and back, with staggered starts.
+          animation.setAttribute("values", "100;0;100");
+          animation.setAttribute("dur", "1.8s");
+          animation.setAttribute("begin", `${-(index * .27)}s`);
           animation.setAttribute("repeatCount", "indefinite");
-          animation.setAttribute("calcMode", "linear");
-          if (!window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
-            line.appendChild(animation);
-          }
-
-          svg.appendChild(baseLine);
-          svg.appendChild(line);
-        }
-
-        leftTools.forEach((tool, index) => {
-          const rect = tool.getBoundingClientRect();
-          addLine(
-            rect.right - wrapRect.left,
-            rect.top - wrapRect.top + (rect.height / 2),
-            hubRect.left - wrapRect.left,
-            centerY,
-            "#d97757",
-            index * 0.3
-          );
-        });
-
-        ["#10a37f", "#4285f4", "#888", "#0e5cf0"].forEach((color, index) => {
-          const tool = rightTools[index];
-          if (!tool) {
-            return;
-          }
-
-          const rect = tool.getBoundingClientRect();
-          addLine(
-            hubRect.right - wrapRect.left,
-            centerY,
-            rect.left - wrapRect.left,
-            rect.top - wrapRect.top + (rect.height / 2),
-            color,
-            (index * 0.25) + 0.1
-          );
+          pulse.appendChild(animation);
+          svg.appendChild(pulse);
         });
       }
-
-      window.setTimeout(drawLines, 120);
-      window.addEventListener("resize", drawLines);
+      function scheduleDraw() {
+        if (!frame) frame = window.requestAnimationFrame(drawLines);
+      }
+      new ResizeObserver(scheduleDraw).observe(wrap);
+      window.addEventListener("resize", scheduleDraw);
+      motion.addEventListener("change", scheduleDraw);
+      document.fonts.ready.then(scheduleDraw);
+      scheduleDraw();
     })();
-
   </script>
 </body>
 
