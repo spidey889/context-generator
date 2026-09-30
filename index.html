@@ -205,6 +205,44 @@
       padding-inline: 1.5rem;
     }
 
+    .button.button-install {
+      gap: 0.8rem;
+      white-space: nowrap;
+      border-radius: 0.65rem;
+      border-color: #151515 !important;
+      background: #151515 !important;
+      color: #ffffff !important;
+      font-weight: 600;
+      box-shadow: 0 3px 8px rgba(17, 17, 20, 0.08);
+    }
+
+    .install-icon {
+      display: grid;
+      place-items: center;
+      flex: 0 0 auto;
+      width: 1.1rem;
+      height: 1.1rem;
+    }
+
+    .install-icon svg {
+      width: 100%;
+      height: 100%;
+      transition: transform 180ms ease;
+    }
+
+    .button.button-install:hover {
+      transform: translateY(-1px);
+      background: #292929 !important;
+      box-shadow: 0 5px 12px rgba(17, 17, 20, 0.12);
+    }
+
+    .button-install:hover .install-icon svg { transform: translateX(3px); }
+
+    .button.button-install:active {
+      transform: translateY(0);
+      box-shadow: none;
+    }
+
     .button.is-copied {
       background: linear-gradient(180deg, #1b7f5c, #126447);
       border-color: rgba(18, 100, 71, 0.95);
@@ -297,15 +335,6 @@
       flex-wrap: wrap;
     }
 
-    .hero-actions .button-dark {
-      border-color: #111114 !important;
-      background: #111114 !important;
-      color: #ffffff !important;
-      box-shadow: 0 14px 36px rgba(17, 17, 20, 0.16);
-    }
-
-    .hero-actions .button-dark:hover { background: #1c1d24 !important; }
-
     .hero-actions .button-outline {
       border-color: #55575e !important;
       background: #55575e !important;
@@ -320,6 +349,11 @@
       .site-header .nav-actions { width: auto; }
       .site-header .nav-link { display: none; }
       .site-header .button { min-height: 2.8rem; padding: 0.7rem 0.85rem; font-size: 0.8rem; }
+    }
+
+    @media (max-width: 360px) {
+      .container.site-header { gap: 0.5rem; }
+      .site-header .button-install { gap: 0.45rem; padding-inline: 0.65rem; }
     }
 
     .hero-note {
@@ -361,7 +395,6 @@
     .cg-hub-box { width: 112px; height: 112px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; border: 1px solid #23202b; border-radius: 18px; background: transparent; }
     .cg-hub-logo { display: block; width: 72px; height: 72px; object-fit: contain; }
     .cg-hub-label { color: #17151f; font-size: 12px; font-weight: 600; }
-    .cg-caption { max-width: 1080px; margin: 18px auto 0; color: #626270; font-size: .95rem; line-height: 1.6; }
     svg.cg-lines { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; z-index: 1; }
     .cg-pulse { pointer-events: none; }
     @media (min-width: 769px) and (max-width: 900px) {
@@ -593,15 +626,6 @@
       max-width: 42rem;
     }
 
-    .terminal-card {
-      border-radius: var(--radius);
-      overflow: hidden;
-      border: 1px solid rgba(149, 96, 223, 0.24);
-      background: #17151f;
-      color: #f5f3fa;
-      box-shadow: 0 18px 50px rgba(31, 22, 49, 0.14);
-    }
-
     .skill-block {
       margin: 1.8rem 0 0;
       padding: 1.45rem;
@@ -613,55 +637,13 @@
       overflow: auto;
     }
 
-    .skill-block code,
-    .terminal-output {
+    .skill-block code {
       display: block;
       white-space: pre;
       font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
       font-size: 0.95rem;
       line-height: 1.7;
       letter-spacing: -0.02em;
-    }
-
-    .output-grid {
-      display: grid;
-      grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr);
-      gap: clamp(2rem, 5vw, 4rem);
-      align-items: center;
-    }
-
-    .output-grid .section-heading {
-      font-size: clamp(2rem, 3vw, 2.75rem);
-      line-height: 1.1;
-      text-wrap: balance;
-    }
-
-    .terminal-card {
-      position: relative;
-    }
-
-    .terminal-top {
-      display: flex;
-      align-items: center;
-      gap: 0.9rem;
-      padding: 1rem 1.4rem;
-      border-bottom: 1px solid rgba(255, 255, 255, 0.1);
-      background: rgba(149, 96, 223, 0.08);
-    }
-
-    .terminal-label {
-      color: #d9cfea;
-      font-size: 0.95rem;
-      font-weight: 600;
-      letter-spacing: -0.02em;
-    }
-
-    .terminal-output {
-      margin: 0;
-      padding: 1.5rem 1.4rem 1.7rem;
-      color: #f5f3fa;
-      line-height: 2.1;
-      font-size: 1rem;
     }
 
     .site-footer {
@@ -770,9 +752,6 @@
         margin-bottom: 0.4rem;
       }
 
-      .output-grid {
-        grid-template-columns: 1fr;
-      }
     }
 
     @media (max-width: 820px) {
@@ -834,8 +813,7 @@
         text-align: left;
       }
 
-      .skill-block code,
-      .terminal-output {
+      .skill-block code {
         font-size: 0.88rem;
       }
     }
@@ -869,6 +847,9 @@
         opacity: 1;
         transform: none;
       }
+
+      .button.button-install,
+      .button-install .install-icon svg { transform: none !important; }
     }
     /* Native controls keep the film usable with keyboard input and without JavaScript. */
     .demo-section { padding-top: 1rem; scroll-margin-top: 2rem; }
@@ -890,7 +871,6 @@
     .closing-cta { text-align: center; padding: clamp(2.5rem, 5vw, 4rem) 1.5rem; margin-bottom: 3rem; border: 1px solid rgba(149,96,223,.16); border-radius: var(--radius); background: radial-gradient(ellipse at top, #ece4fc, transparent 75%), rgba(255,255,255,.6); }
     .closing-cta .button { margin-top: 1.5rem; }
     a:focus-visible, video:focus-visible { outline: 3px solid var(--accent); outline-offset: 5px; }
-    .terminal-output { overflow-x: auto; }
     @media (max-width: 680px) {
       .demo-heading { align-items: flex-start; }
       .demo-heading span { white-space: nowrap; }
@@ -953,16 +933,16 @@
     </a>
     <nav class="nav-actions" aria-label="Primary navigation">
       <a class="nav-link" href="#demo">Watch demo</a>
-      <a class="button button-dark" href="https://chromewebstore.google.com/detail/cap-context/lpkaciijlhckkdhbgidbjfkldigghnjf" target="_blank" rel="noopener noreferrer">Install extension ↗</a>
+      <a class="button button-dark button-install" href="https://chromewebstore.google.com/detail/cap-context/lpkaciijlhckkdhbgidbjfkldigghnjf" target="_blank" rel="noopener noreferrer"><span>Install extension</span><span class="install-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" focusable="false"><path d="M5 12h14M13 6l6 6-6 6"></path></svg></span></a>
     </nav>
   </header>
 
   <main id="top">
     <section class="hero section container reveal">
       <h1 style="color: #000000 !important;">Switch AIs without <span class="re-explaining">re-explaining<span class="re-explaining-shine" aria-hidden="true">re-explaining</span></span> everything.</h1>
-      <p>Your decisions, details, and next steps. Ready for the next AI.</p>
+      <p>A browser extension to continue your chat in another AI.</p>
       <div class="hero-actions">
-        <a class="button button-dark" href="https://chromewebstore.google.com/detail/cap-context/lpkaciijlhckkdhbgidbjfkldigghnjf" target="_blank" rel="noopener noreferrer">Install extension ↗</a>
+        <a class="button button-dark button-install" href="https://chromewebstore.google.com/detail/cap-context/lpkaciijlhckkdhbgidbjfkldigghnjf" target="_blank" rel="noopener noreferrer"><span>Install extension</span><span class="install-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" focusable="false"><path d="M5 12h14M13 6l6 6-6 6"></path></svg></span></a>
         <a class="button button-outline" href="#demo">Watch the demo <span aria-hidden="true">▷</span></a>
       </div>
       <ul class="platform-list" aria-label="Supported AIs">
@@ -975,7 +955,7 @@
     </section>
 
     <section id="demo" class="demo-section section container" aria-labelledby="demo-title">
-      <div class="demo-heading"><h2 id="demo-title">Same conversation. Next AI.</h2><span>62-second demo</span></div>
+      <div class="demo-heading"><h2 id="demo-title">How it works</h2><span>62-second demo</span></div>
       <figure class="demo-frame">
         <video id="install-video" controls muted playsinline preload="none" width="1920" height="1080"
           poster="brag-output-2026-09-29-153657/brag.jpg" aria-label="Cap Context demo: continue a Kyoto trip plan from Claude in ChatGPT">
@@ -1021,32 +1001,10 @@
           </div>
         </div>
       </div>
-      <p class="cg-caption">Switch between any of the five AIs. Keep your context.</p>
-    </section>
-    <section class="section container reveal">
-      <div class="output-grid">
-        <div>
-          <h2 class="section-heading" style="color: #000000 !important;">Your progress, ready for the next AI.</h2>
-          <p class="section-copy" style="color: #333333 !important;">A structured handoff brings your goal, decisions, open questions, and next steps together. Review the details, then pick up where you left off.</p>
-        </div>
-
-        <div class="terminal-card">
-          <div class="terminal-top">
-            <span class="terminal-label">Your context, at a glance</span>
-          </div>
-          <pre class="terminal-output">🧠 WHO I AM
-🎯 WHAT WE WERE DOING
-📍 WHERE WE LEFT OFF
-✅ DECISIONS MADE
-⚠️ OPEN QUESTIONS
-📦 KEY CONTEXT
-🔁 NEXT STEP</pre>
-        </div>
-      </div>
     </section>
     <section class="closing-cta section container" aria-labelledby="closing-title">
-      <h2 class="section-heading" id="closing-title">Keep the progress.<br>Change the AI.</h2>
-      <a class="button button-dark button-large" href="https://chromewebstore.google.com/detail/cap-context/lpkaciijlhckkdhbgidbjfkldigghnjf" target="_blank" rel="noopener noreferrer">Get Cap Context ↗</a>
+      <h2 class="section-heading" id="closing-title">Install Cap Context</h2>
+      <a class="button button-dark button-large button-install" href="https://chromewebstore.google.com/detail/cap-context/lpkaciijlhckkdhbgidbjfkldigghnjf" target="_blank" rel="noopener noreferrer"><span>Install extension</span><span class="install-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" focusable="false"><path d="M5 12h14M13 6l6 6-6 6"></path></svg></span></a>
     </section>
   </main>
 
