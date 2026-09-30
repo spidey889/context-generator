@@ -2140,7 +2140,7 @@ test("latest-run receipt preserves the exact raw scraped text", () => {
   );
 });
 
-test("paste verification accepts stable context anchors when box characters differ", () => {
+test("paste verification accepts formatting changes when box characters differ", () => {
   const hooks = loadPlatformContent([]);
   const expected = [
     "CONTEXT CARRY - READY TO PASTE",
@@ -2156,6 +2156,69 @@ test("paste verification accepts stable context anchors when box characters diff
   });
 
   assert.equal(hooks.editorContainsText(editor, expected), true);
+});
+
+test("paste verification rejects missing chunks between the old word samples", () => {
+  const hooks = loadPlatformContent([]);
+  const words = Array.from({ length: 100 }, (_, index) => `detail${index}`);
+  const actual = [...words.slice(0, 15), ...words.slice(35)].join(" ");
+  // All three old samples survive despite losing twenty consecutive words.
+  for (const start of [0, 45, 90]) {
+    assert.ok(actual.includes(words.slice(start, start + 10).join(" ")));
+  }
+  assert.equal(hooks.editorContainsText(new FakeElement({ text: actual }), words.join(" ")), false);
+});
+
+test("paste verification accepts whitespace and newline changes on every platform", () => {
+  const expected = "CONTEXT CARRY\n\nKeep the migration decisions and deployment checklist.\nNext step: verify staging before release.";
+  for (const hostname of ["claude.ai", "chatgpt.com", "gemini.google.com", "grok.com", "chat.deepseek.com"]) {
+    const hooks = loadPlatformContent([], hostname);
+    const editor = new FakeElement({ text: expected.replace(/\s+/g, "\t \r\n\u00a0 ") });
+    assert.equal(hooks.editorContainsText(editor, expected), true, hostname);
+  }
+});
+
+test("paste verification requires 95 percent of words in order, including repeated words", () => {
+  const hooks = loadPlatformContent([]);
+  const words = Array.from({ length: 100 }, (_, index) => `detail${index}`);
+  const expected = words.join(" ");
+  assert.equal(hooks.editorContainsText(new FakeElement({ text: words.slice(5).join(" ") }), expected), true);
+  assert.equal(hooks.editorContainsText(new FakeElement({ text: words.slice(6).join(" ") }), expected), false);
+  const reordered = [...words.slice(0, 20), ...words.slice(40, 60), ...words.slice(20, 40), ...words.slice(60)];
+  assert.equal(hooks.editorContainsText(new FakeElement({ text: reordered.join(" ") }), expected), false);
+  const repeated = ["context", ...words.slice(1, 99), "context"];
+  assert.equal(hooks.editorContainsText(new FakeElement({ text: repeated.slice(1).join(" ") }), repeated.join(" ")), true);
+});
+
+test("all destinations accept editor Markdown reformatting without replacing it", async () => {
+  const expected = "# Context carry\n\n1. **Keep** the deployment plan and its rollback steps.\n2. Read [the release notes](https://example.test/release/v2) before continuing.\n\n```text\nDeploy only after staging passes and preserve the saved configuration.\n```\n\nReply only: Context loaded. Then wait for the user.";
+  const rendered = "Context carry\n\nKeep the deployment plan and its rollback steps.\nRead the release notes before continuing.\n\nDeploy only after staging passes and preserve the saved configuration.\n\nReply only: Context loaded. Then wait for the user.";
+  for (const [hostname, destination] of [["claude.ai", "claude"], ["chatgpt.com", "chatgpt"], ["gemini.google.com", "gemini"], ["grok.com", "grok"], ["chat.deepseek.com", "deepseek"]]) {
+    const editor = new FakeElement({ tag: "textarea", attrs: { placeholder: "Message" } });
+    editor.onValueSet = () => { editor.onValueSet = null; editor.value = rendered; };
+    const hooks = loadPlatformContent([editor], hostname);
+    await hooks.pasteIntoPlatform(expected, destination);
+    await hooks.pasteIntoPlatform(expected, destination);
+    assert.equal(editor.value, rendered, hostname);
+    assert.equal(editor.clicks, 1, `${hostname} preserved the already reformatted paste`);
+  }
+});
+
+test("initial paste never overwrites a nonempty draft on any destination", async () => {
+  const draft = "My unfinished question belongs to me.";
+  for (const [hostname, destination] of [["claude.ai", "claude"], ["chatgpt.com", "chatgpt"], ["gemini.google.com", "gemini"], ["grok.com", "grok"], ["chat.deepseek.com", "deepseek"]]) {
+    const editor = new FakeElement({ tag: "textarea", attrs: { placeholder: "Message" } });
+    editor.value = draft;
+    const hooks = loadPlatformContent([editor], hostname);
+    await assert.rejects(hooks.pasteIntoPlatform("CONTEXT CARRY Keep the deployment plan.", destination), /already contains text/);
+    assert.equal(editor.value, draft, hostname);
+    assert.equal(editor.clicks, 0, hostname);
+    editor.value = "";
+    editor.onClick = () => { editor.value = draft; };
+    await assert.rejects(hooks.pasteIntoPlatform("CONTEXT CARRY Keep the deployment plan.", destination), /already contains text/);
+    assert.equal(editor.value, draft, `${hostname} kept the draft restored on focus`);
+    assert.equal(editor.clicks, 1, hostname);
+  }
 });
 
 test("paste verification rejects a carry whose middle or end did not land", () => {

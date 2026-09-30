@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-09-30-local-summary-recovery-v58";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-09-30-tolerant-paste-verification-v59";
   const ownedUiStyleSheets = new Map();
   // Start fast capture on for each page instance; a manual opt-out lasts until reload.
   let claudeJsonCaptureEnabled = true;
@@ -2216,8 +2216,14 @@
       const input = findReadyPlatformInput(destination);
       if (input) {
         sawInput = true;
+        const alreadyPasted = editorContainsText(input, text);
+        // A partial paste and a user draft can look alike. Let destination
+        // recovery/manual copy handle either without replacing nonempty text.
+        if (!alreadyPasted && getElementText(input).trim()) {
+          throw new Error(`${destination.name} editor already contains text. Use an empty chat or copy the context manually.`);
+        }
         try {
-          setEditorText(input, text, destination);
+          if (!alreadyPasted) setEditorText(input, text, destination);
 
           if (await waitForEditorText(input, text, verifyTimeoutMs)) {
             if (stabilityMs > 0) {
@@ -2384,6 +2390,11 @@
   function setEditorText(element, text, destination = currentPlatform) {
     element.click();
     element.focus();
+    // Focusing a native composer can restore its saved draft synchronously.
+    if (getElementText(element).trim()) {
+      if (editorContainsText(element, text)) return;
+      throw new Error(`${destination.name} editor already contains text. Use an empty chat or copy the context manually.`);
+    }
 
     if (element instanceof HTMLTextAreaElement || element instanceof HTMLInputElement) {
       const valueSetter = Object.getOwnPropertyDescriptor(element.constructor.prototype, "value")?.set;
@@ -2563,24 +2574,49 @@
   }
 
   function editorContainsText(element, text) {
-    const samples = getVerificationSamples(text);
-    const actual = normalizeVerificationText(getElementText(element));
-    return samples.length > 0 && samples.every((sample) => actual.includes(sample));
-  }
+    const expected = normalizeVerificationText(text).split(" ").filter(Boolean);
+    const actual = normalizeVerificationText(getElementText(element)).split(" ").filter(Boolean);
+    if (!expected.length) return false;
+    const required = Math.ceil(expected.length * 95 / 100);
+    if (actual.length < required) return false;
 
-  function getVerificationSamples(text) {
-    const words = normalizeVerificationText(text).split(" ").filter(Boolean);
-    if (!words.length) return [];
-    const width = Math.min(10, words.length);
-    const lastStart = words.length - width;
-    // Distributed word samples survive editor punctuation/line-break changes,
-    // but require the beginning, middle, and end of a long carry to be present.
-    return [...new Set([0, Math.floor(lastStart / 2), lastStart]
-      .map((start) => words.slice(start, start + width).join(" ")))];
+    // Ordinary pastes, including added list markers, pass in one linear scan.
+    let matched = 0;
+    for (const word of actual) {
+      if (word === expected[matched]) matched++;
+      if (matched >= required) return true;
+    }
+
+    // Bounded Myers insertion/deletion distance finds the longest ordered word
+    // match, even when a missing word occurs again later. A greedy skip would
+    // reject good pastes with repeated words. Distance = N + M - 2 * matches.
+    const limit = expected.length + actual.length - 2 * required;
+    const offset = limit + 1;
+    const frontier = new Int32Array(2 * limit + 3).fill(-1);
+    frontier[offset + 1] = 0;
+    for (let distance = 0; distance <= limit; distance++) {
+      for (let diagonal = -distance; diagonal <= distance; diagonal += 2) {
+        const index = offset + diagonal;
+        let x = diagonal === -distance || (diagonal !== distance && frontier[index - 1] < frontier[index + 1])
+          ? frontier[index + 1] : frontier[index - 1] + 1;
+        let y = x - diagonal;
+        while (x < expected.length && y < actual.length && expected[x] === actual[y]) { x++; y++; }
+        frontier[index] = x;
+        if (x >= expected.length && y >= actual.length) return true;
+      }
+    }
+    return false;
   }
 
   function normalizeVerificationText(text) {
-    return String(text || "").normalize("NFKC").replace(/[^\p{L}\p{N}]+/gu, " ").trim().toLowerCase();
+    // Count visible words, excluding Markdown link targets, fence labels and
+    // list markers that rich editors remove when rendering the same text.
+    return String(text || "").normalize("NFKC")
+      .replace(/^[ \t]*(?:`{3,}|~{3,})[^\r\n]*$/gm, "")
+      .replace(/\[([^\]]+)\]\((?:[^()]|\([^()]*\))*\)/g, "$1")
+      .replace(/^[ \t]*\d+[.)][ \t]+/gm, "")
+      .replace(/^[ \t]*(?:[-+*][ \t]+)?\[[ xX]\][ \t]+/gm, "")
+      .replace(/[^\p{L}\p{N}]+/gu, " ").trim().toLowerCase();
   }
 
   function getCleanVisibleText(element) {
