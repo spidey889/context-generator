@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-09-30-tolerant-paste-verification-v59";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-09-30-summary-line-estimate-v61";
   const ownedUiStyleSheets = new Map();
   // Start fast capture on for each page instance; a manual opt-out lasts until reload.
   let claudeJsonCaptureEnabled = true;
@@ -184,7 +184,6 @@
   const HANDOFF_CAPTURE_LINE_MAX = 0.94;
   const HANDOFF_ACTIVITY_LINE_START = 0.05;
   const HANDOFF_ACTIVITY_LINE_MAX = 0.9;
-  const HANDOFF_SUMMARY_LINE_DURATION_MS = 20000;
   const HANDOFF_TINY_STAGE_LINE_DURATION_MS = 320;
   const HANDOFF_FINAL_LINE_DURATION_MS = 1000;
   const GENERIC_CONVERSATION_SELECTORS = [
@@ -918,7 +917,7 @@
       // first connector before allowing the summary connector to begin.
       await completeHandoffStageLine("capture", HANDOFF_TINY_STAGE_LINE_DURATION_MS);
     }
-    setHandoffProgress("summary", "active");
+    setHandoffProgress("summary", "active", null, conversationText.length);
     let summary;
     let timing;
     try {
@@ -5920,6 +5919,13 @@
           #context-generator-handoff-progress .context-generator-handoff-stage[data-state="active"] .context-generator-handoff-stage-progress-head{
             opacity:1;
           }
+          #context-generator-handoff-progress .context-generator-handoff-stage[data-context-generator-stage="summary"][data-state="active"] .context-generator-handoff-stage-progress-head::after{
+            animation:contextGeneratorSummaryLinePulse 1600ms ease-in-out infinite alternate;
+          }
+          @keyframes contextGeneratorSummaryLinePulse{
+            from{opacity:0.45;transform:translate(-50%,-50%) scale(0.85)}
+            to{opacity:1;transform:translate(-50%,-50%) scale(1.25)}
+          }
           #context-generator-handoff-progress .context-generator-handoff-stage[data-state="complete"] .context-generator-handoff-stage-progress-head{
             opacity:0;
           }
@@ -5989,6 +5995,7 @@
             #${OVERLAY_ID}.context-generator-handoff-entering #context-generator-status-group,
             #${OVERLAY_ID}.context-generator-handoff-entering #context-generator-handoff-progress{animation:none!important}
             #context-generator-text .context-generator-summary-activity-dot{animation:none!important;opacity:0.72}
+            #context-generator-handoff-progress .context-generator-handoff-stage-progress-head::after{animation:none!important}
             #${HANDOFF_REASSURANCE_ID}{transition:none!important}
             #context-generator-handoff-progress .context-generator-handoff-stage-marker::after{animation:none!important}
             #${OVERLAY_ID} .context-generator-handoff-atmosphere::before{animation:none!important}
@@ -6266,7 +6273,14 @@
     }
   }
 
-  function startHandoffActivityProgress(stageId) {
+  function getHandoffSummaryLineDuration(inputChars) {
+    // Sep 30 real runs: ~19k-70k chars took 13-20s; ~109k took 63s.
+    // This is a display estimate, never a request deadline or measured percentage.
+    const sizeRatio = Math.max(0, Math.min(1, (Number(inputChars || 0) - 60000) / 50000));
+    return Math.round(20000 + sizeRatio * 45000);
+  }
+
+  function startHandoffActivityProgress(stageId, inputChars = 0) {
     stopHandoffActivityProgress();
     if (stageId !== "summary" || window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) return;
     if (!window.requestAnimationFrame) return;
@@ -6281,7 +6295,7 @@
         if (!stageElement || stageElement.dataset.state !== "active" || !isHandoffOverlayVisible()) return;
         stageElement.style.setProperty(
           "--context-generator-stage-progress-duration",
-          `${HANDOFF_SUMMARY_LINE_DURATION_MS}ms`
+          `${getHandoffSummaryLineDuration(inputChars)}ms`
         );
         stageElement.style.setProperty("--context-generator-stage-progress-easing", "linear");
         setHandoffStageLineProgress(stageId, HANDOFF_ACTIVITY_LINE_MAX);
@@ -6303,7 +6317,7 @@
     }
   }
 
-  function setHandoffProgress(stageId, phase = "active", destinationName = null) {
+  function setHandoffProgress(stageId, phase = "active", destinationName = null, inputChars = 0) {
     const overlay = document.getElementById(OVERLAY_ID);
     const progress = document.getElementById("context-generator-handoff-progress");
     const statusText = document.getElementById("context-generator-text");
@@ -6356,7 +6370,7 @@
       statusText.style.animation = "contextGeneratorHeadlineIn 340ms cubic-bezier(0.16,1,0.3,1) both";
     }
     progress.setAttribute("aria-label", `Transfer progress: ${currentStatus}`);
-    if (phase === "active") startHandoffActivityProgress(stageId);
+    if (phase === "active") startHandoffActivityProgress(stageId, inputChars);
   }
 
   async function completeHandoffStageLine(stageId, durationMs) {

@@ -99,6 +99,7 @@ Important sequencing:
 - Picker-path telemetry starts before empty-chat validation so early exits are recorded safely.
 - Destination warmup and network preconnects never contain conversation text.
 - Progress completes only from real capture, summary, and paste events; in-stage line motion is decorative.
+- The summary connector uses captured character count for a display-only estimate: 20 seconds through 60,000 characters, rising smoothly to 65 seconds at 110,000 and capped there. This initial curve comes from the owner's September 30 Flash-Lite runs, not measured model progress. It stops at 90% until a real completion event; the tip pulses throughout the wait, including overruns, and reduced motion disables the animation. This estimate never changes provider budgets or the separate countdown.
 - ChatGPT and Grok require focus before paste. The source completion cue finishes first; ChatGPT then gets a 350 ms activation settle.
 - Claude, Gemini, and DeepSeek paste while inactive. The source completion cue finishes before the already-pasted tab is revalidated and focused.
 - A missing, navigated, or failed prepared tab receives at most one fresh destination tab.
