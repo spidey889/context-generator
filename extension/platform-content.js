@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-09-30-backup-copy-wording-v68";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-09-30-bounded-handoff-finish-v69";
   const ownedUiStyleSheets = new Map();
   // Start fast capture on for each page instance; a manual opt-out lasts until reload.
   let claudeJsonCaptureEnabled = true;
@@ -185,6 +185,7 @@
   const HANDOFF_ACTIVITY_LINE_MAX = 0.9;
   const HANDOFF_TINY_STAGE_LINE_DURATION_MS = 320;
   const HANDOFF_FINAL_LINE_DURATION_MS = 1000;
+  const HANDOFF_FINAL_PAINT_WAIT_MS = 120;
   const GENERIC_CONVERSATION_SELECTORS = [
     "[data-message-author-role]",
     "[data-testid*='conversation' i]",
@@ -790,7 +791,8 @@
       getOwnedLifecycleResourceCounts,
       delay,
       getHandoffProgressState,
-      getHandoffProgressStatusText
+      getHandoffProgressStatusText,
+      completeHandoffForDestinationReveal
     });
   } else {
     startFloatingButtonMonitoring();
@@ -846,7 +848,7 @@
       advanceTransferTelemetryStage(transferTrace, "paste_started");
       const requiresFocusedPaste = FOCUSED_PASTE_DESTINATIONS.has(destinationId);
       if (requiresFocusedPaste) {
-        await completeHandoffForDestinationReveal();
+        await completeHandoffForDestinationReveal(transferTrace);
       }
       const pasteResponse = await notifyBackground({
         type: "TRANSFER_TO_DESTINATION",
@@ -860,13 +862,16 @@
       // Keep recovery available on the source even if final activation fails.
       showFallbackModal(summary, getPlatform(destinationId)?.name || "the destination", true);
       if (!requiresFocusedPaste) {
-        await completeHandoffForDestinationReveal();
+        await completeHandoffForDestinationReveal(transferTrace);
+        markTransferTrace(transferTrace, "final tab activate start");
         await notifyBackground({
           type: "ACTIVATE_DESTINATION_TAB",
           destination: destinationId,
           tabId: pasteResponse?.timing?.tabId || null
         });
+        markTransferTrace(transferTrace, "final tab activate done");
       }
+      markTransferTrace(transferTrace, "transfer complete");
       finishTransferTrace(transferTrace);
       resetRunningFlag();
     } catch (error) {
@@ -6376,7 +6381,8 @@
   }
 
   async function completeHandoffStageLine(stageId, durationMs) {
-    const reducedMotion = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
+    const skipMotion = document.visibilityState === "hidden"
+      || window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
     const stageElement = document.querySelector(
       `#context-generator-handoff-progress [data-context-generator-stage='${stageId}']`
     );
@@ -6397,26 +6403,44 @@
     void stageElement.offsetWidth;
     stageElement.style.setProperty(
       "--context-generator-stage-progress-duration",
-      reducedMotion ? "0ms" : `${durationMs}ms`
+      skipMotion ? "0ms" : `${durationMs}ms`
     );
     stageElement.style.setProperty("--context-generator-stage-progress-easing", "linear");
     setHandoffStageLineProgress(stageId, 1);
 
-    if (!reducedMotion) await delay(durationMs);
+    if (!skipMotion) await delay(durationMs);
   }
 
-  async function completeHandoffForDestinationReveal() {
+  async function completeHandoffForDestinationReveal(trace = null) {
+    markTransferTrace(trace, "handoff finish start");
     stopHandoffActivityProgress();
     await completeHandoffStageLine("summary", HANDOFF_FINAL_LINE_DURATION_MS);
 
     setHandoffProgress("paste", "done");
-    // Let the completed tick reach the screen before the background activates
-    // the destination. Two frames guarantee at least one painted completion state.
-    if (window.requestAnimationFrame) {
+    // Background tabs can suspend animation frames indefinitely. A painted tick
+    // is cosmetic: never let it hold destination activation or receipt saving.
+    const reducedMotion = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
+    if (window.requestAnimationFrame && document.visibilityState !== "hidden" && !reducedMotion) {
       await new Promise((resolve) => {
-        requestAnimationFrame(() => requestAnimationFrame(resolve));
+        let frame = null;
+        let timer = null;
+        const finish = () => {
+          clearTimeout(timer);
+          cancelAnimationFrame(frame);
+          removeOwnedEventListener(document, "visibilitychange", onVisibilityChange);
+          resolve();
+        };
+        const onVisibilityChange = () => {
+          if (document.visibilityState === "hidden") finish();
+        };
+        timer = setTimeout(finish, HANDOFF_FINAL_PAINT_WAIT_MS);
+        addOwnedEventListener(document, "visibilitychange", onVisibilityChange);
+        frame = requestAnimationFrame(() => {
+          frame = requestAnimationFrame(finish);
+        });
       });
     }
+    markTransferTrace(trace, "handoff finish done");
   }
 
   function startHandoffCountdown(durationMs) {

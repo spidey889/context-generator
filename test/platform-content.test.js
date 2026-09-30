@@ -755,6 +755,58 @@ test("role detection uses structural evidence instead of you or me labels", () =
   assert.equal(deepSeekHooks.getConversationRole(deepSeekMarkdown), "User");
 });
 
+test("handoff finish skips suspended frames in an already hidden source tab", { timeout: 1000 }, async () => {
+  const hooks = loadPlatformContent([], "chatgpt.com", { visibilityState: "hidden" });
+  hooks.document.querySelector = () => null;
+  const before = hooks.getOwnedLifecycleResourceCounts();
+  const trace = { startedAt: Date.now(), marks: [] };
+
+  await hooks.completeHandoffForDestinationReveal(trace);
+
+  assert.equal(hooks.animationFrameCallbacks.length, 0);
+  assert.deepEqual(hooks.getOwnedLifecycleResourceCounts(), before);
+  assert.deepEqual(Array.from(trace.marks, (mark) => mark.label), ["handoff finish start", "handoff finish done"]);
+});
+
+test("handoff finish has a deadline when visible-source animation frames never fire", { timeout: 1000 }, async () => {
+  const hooks = loadPlatformContent([]);
+  hooks.document.querySelector = () => null;
+  const before = hooks.getOwnedLifecycleResourceCounts();
+
+  // Deliberately leave every queued frame unfired: the old wait never resolved.
+  await hooks.completeHandoffForDestinationReveal();
+
+  assert.equal(hooks.animationFrameCallbacks.length, 1);
+  assert.deepEqual(hooks.getOwnedLifecycleResourceCounts(), before);
+});
+
+test("handoff finish resolves when the source becomes hidden between frames", { timeout: 1000 }, async () => {
+  const hooks = loadPlatformContent([]);
+  hooks.document.querySelector = () => null;
+  const before = hooks.getOwnedLifecycleResourceCounts();
+  const completion = hooks.completeHandoffForDestinationReveal();
+  await new Promise(setImmediate);
+  hooks.animationFrameCallbacks.shift()();
+
+  hooks.setVisibility("hidden");
+  await completion;
+
+  assert.deepEqual(hooks.getOwnedLifecycleResourceCounts(), before);
+});
+
+test("handoff finish keeps the two-frame cue for a visible source and cleans up", { timeout: 1000 }, async () => {
+  const hooks = loadPlatformContent([]);
+  hooks.document.querySelector = () => null;
+  const before = hooks.getOwnedLifecycleResourceCounts();
+  const completion = hooks.completeHandoffForDestinationReveal();
+  await new Promise(setImmediate);
+  hooks.animationFrameCallbacks.shift()();
+  hooks.animationFrameCallbacks.shift()();
+  await completion;
+
+  assert.deepEqual(hooks.getOwnedLifecycleResourceCounts(), before);
+});
+
 test("ChatGPT capture preserves identical text from distinct conversation turns", () => {
   const elements = [
     new FakeElement({
