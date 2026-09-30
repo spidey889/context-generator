@@ -911,7 +911,10 @@
     .platform-list li[title="ChatGPT"] img,
     .platform-list li[title="DeepSeek"] img { width: 34px; height: 34px; }
     .platform-list li[title="Grok"] img { width: 44px; height: 44px; }
-    .closing-cta { text-align: center; padding: clamp(2.5rem, 5vw, 4rem) 1.5rem; margin-bottom: 3rem; border: 1px solid #b8a5d1; border-radius: var(--radius); background: radial-gradient(ellipse at top, #ece4fc, transparent 75%), rgba(255,255,255,.6); }
+    .closing-cta { isolation: isolate; overflow: hidden; text-align: center; padding: clamp(2.5rem, 5vw, 4rem) 1.5rem; margin-bottom: 3rem; border: 1px solid #b8a5d1; border-radius: var(--radius); background: radial-gradient(ellipse at top, #ece4fc, transparent 75%), rgba(255,255,255,.6); }
+    /* Curves change shape independently; the original wash remains underneath. */
+    .closing-flow { position: absolute; inset: 0; width: 100%; height: 100%; z-index: -1; pointer-events: none; opacity: 0; transition: opacity 700ms ease; }
+    .closing-cta.is-flowing .closing-flow { opacity: 1; }
     .closing-cta .button { margin-top: 1.5rem; }
     #closing-title { --closing-swap: 500ms; --closing-interval: 4600ms; display: grid; grid-template-columns: minmax(0, 1fr); overflow: hidden; padding-block: 0.12em; font-family: "EB Garamond", Georgia, serif; font-weight: 400; line-height: 1.15; letter-spacing: -0.03em; }
     /* Overlapping grid items reserve the tallest phrase at every viewport width. */
@@ -920,6 +923,7 @@
     .closing-phrase.is-leaving { opacity: 0; transform: translateY(-0.35em); }
     @media (prefers-reduced-motion: reduce) {
       .closing-phrase { transition: none !important; }
+      .closing-flow { display: none; }
     }
     a:focus-visible, video:focus-visible { outline: 3px solid var(--accent); outline-offset: 5px; }
     @media (max-width: 680px) {
@@ -1054,6 +1058,43 @@
       </div>
     </section>
     <section class="closing-cta section container" aria-labelledby="closing-title">
+      <svg class="closing-flow" viewBox="0 0 1200 320" preserveAspectRatio="none" aria-hidden="true" focusable="false">
+        <defs>
+          <linearGradient id="closing-fold-purple" x1="0" y1="0" x2="1200" y2="0" gradientUnits="userSpaceOnUse">
+            <stop offset="0" stop-color="#cbb1ec" stop-opacity="0"/>
+            <stop offset=".2" stop-color="#cbb1ec" stop-opacity=".65"/>
+            <stop offset=".48" stop-color="#b18ad8" stop-opacity=".65"/>
+            <stop offset=".76" stop-color="#d5bced" stop-opacity=".7"/>
+            <stop offset="1" stop-color="#d5bced" stop-opacity="0"/>
+          </linearGradient>
+          <linearGradient id="closing-fold-light">
+            <stop offset="0" stop-color="#fff" stop-opacity="0"/>
+            <stop offset=".45" stop-color="#fff" stop-opacity=".9"/>
+            <stop offset="1" stop-color="#fff" stop-opacity="0"/>
+          </linearGradient>
+          <linearGradient id="closing-fold-edge" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0" stop-color="#fff" stop-opacity=".15"/>
+            <stop offset=".2" stop-color="#fff"/>
+            <stop offset=".75" stop-color="#fff"/>
+            <stop offset="1" stop-color="#fff" stop-opacity="0"/>
+          </linearGradient>
+          <mask id="closing-fold-mask"><rect width="1200" height="320" fill="url(#closing-fold-edge)"/></mask>
+          <filter id="closing-fold-soft" x="-100" y="-100" width="1400" height="520" filterUnits="userSpaceOnUse" color-interpolation-filters="sRGB"><feGaussianBlur stdDeviation="16"/></filter>
+        </defs>
+        <g mask="url(#closing-fold-mask)">
+          <g filter="url(#closing-fold-soft)">
+            <path fill="url(#closing-fold-purple)" opacity=".85" d="M -140 225 C 65 335 185 74 414 115 C 604 152 658 -37 933 49 C 1094 106 1168 269 1360 154 L 1360 237 C 1142 350 1069 153 904 139 C 722 103 646 256 451 192 C 234 121 131 351 -140 298 Z">
+              <animate attributeName="d" dur="14s" repeatCount="indefinite" calcMode="spline" keyTimes="0;.33;.66;1" keySplines=".4 0 .6 1;.4 0 .6 1;.4 0 .6 1" values="M -140 225 C 65 335 185 74 414 115 C 604 152 658 -37 933 49 C 1094 106 1168 269 1360 154 L 1360 237 C 1142 350 1069 153 904 139 C 722 103 646 256 451 192 C 234 121 131 351 -140 298 Z; M -140 103 C 65 -55 185 244 414 193 C 604 155 658 322 933 206 C 1094 120 1168 35 1360 132 L 1360 202 C 1142 149 1069 200 904 294 C 722 364 646 214 451 271 C 234 321 131 71 -140 180 Z; M -140 222 C 65 121 185 283 414 201 C 604 136 658 146 933 209 C 1094 304 1168 135 1360 167 L 1360 240 C 1142 209 1069 381 904 289 C 722 219 646 215 451 279 C 234 364 131 192 -140 300 Z; M -140 225 C 65 335 185 74 414 115 C 604 152 658 -37 933 49 C 1094 106 1168 269 1360 154 L 1360 237 C 1142 350 1069 153 904 139 C 722 103 646 256 451 192 C 234 121 131 351 -140 298 Z"/>
+            </path>
+            <path fill="url(#closing-fold-purple)" opacity=".55" d="M -100 80 C 180 185 245 -15 500 50 C 760 140 965 20 1300 130 L 1300 175 C 1000 70 770 215 490 115 C 250 40 150 250 -100 140 Z">
+              <animate attributeName="d" dur="11s" repeatCount="indefinite" calcMode="spline" keyTimes="0;.5;1" keySplines=".4 0 .6 1;.4 0 .6 1" values="M -100 80 C 180 185 245 -15 500 50 C 760 140 965 20 1300 130 L 1300 175 C 1000 70 770 215 490 115 C 250 40 150 250 -100 140 Z; M -100 195 C 180 50 245 200 500 155 C 760 70 965 245 1300 55 L 1300 115 C 1000 305 770 130 490 215 C 250 260 150 110 -100 250 Z; M -100 80 C 180 185 245 -15 500 50 C 760 140 965 20 1300 130 L 1300 175 C 1000 70 770 215 490 115 C 250 40 150 250 -100 140 Z"/>
+            </path>
+            <path fill="url(#closing-fold-light)" d="M -100 165 C 180 15 315 255 610 165 C 850 60 1040 200 1300 80 L 1300 120 C 1030 245 875 110 625 205 C 330 295 175 65 -100 205 Z">
+              <animate attributeName="d" dur="17s" repeatCount="indefinite" calcMode="spline" keyTimes="0;.5;1" keySplines=".4 0 .6 1;.4 0 .6 1" values="M -100 165 C 180 15 315 255 610 165 C 850 60 1040 200 1300 80 L 1300 120 C 1030 245 875 110 625 205 C 330 295 175 65 -100 205 Z; M -100 100 C 180 250 315 35 610 100 C 850 210 1040 60 1300 195 L 1300 235 C 1030 100 875 260 625 140 C 330 75 175 300 -100 145 Z; M -100 165 C 180 15 315 255 610 165 C 850 60 1040 200 1300 80 L 1300 120 C 1030 245 875 110 625 205 C 330 295 175 65 -100 205 Z"/>
+            </path>
+          </g>
+        </g>
+      </svg>
       <h2 class="section-heading" id="closing-title" aria-label="Why explain it again?">
         <span class="closing-phrase is-current" aria-hidden="true">Why explain it again?</span>
         <span class="closing-phrase" aria-hidden="true">Why repeat yourself?</span>
@@ -1088,6 +1129,10 @@
       if (!title || !("IntersectionObserver" in window)) return;
       const phrases = [...title.querySelectorAll(".closing-phrase")];
       if (phrases.length < 2) return;
+      const box = title.closest(".closing-cta");
+      const flow = box && box.querySelector(".closing-flow");
+      // SVG morphs need their own clock paused alongside the heading's lifecycle.
+      if (flow) flow.pauseAnimations();
       const motion = window.matchMedia("(prefers-reduced-motion: reduce)");
       // Keep the reset and reading cadence aligned with the heading's CSS motion.
       const timing = window.getComputedStyle(title);
@@ -1113,6 +1158,9 @@
       function sync() {
         window.clearTimeout(timer);
         window.clearTimeout(resetTimer);
+        const flowing = inView && !document.hidden && !motion.matches;
+        if (box) box.classList.toggle("is-flowing", flowing);
+        if (flow) flowing ? flow.unpauseAnimations() : flow.pauseAnimations();
         if (motion.matches) current = 0;
         phrases.forEach((phrase, index) => {
           phrase.classList.remove("is-leaving");
