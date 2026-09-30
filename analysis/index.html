@@ -618,9 +618,25 @@
 
     copyDetailsButton.addEventListener("click", async () => {
       if (!latestStats) return;
-      // Copy the full receipt, including collapsed raw text and diagnostic fields
-      // that do not fit in the cards, so sharing never depends on screenshots.
-      const report = `Cap Context — Latest Run\n\n${JSON.stringify(latestStats, null, 2)}`;
+      // Read only the displayed cards and timeline; never include the chat panel.
+      const details = [...app.querySelectorAll(".mini, .side-item, .metric")].map((card) => {
+        const [label, value, detail] = [...card.children].map((item) => item.textContent.trim());
+        return `${label}: ${value}${detail ? ` (${detail})` : ""}`;
+      });
+      const timeline = [...app.querySelectorAll(".step")].map((step) => {
+        const label = step.querySelector(".step-label > strong").textContent.trim();
+        const delta = step.querySelector(".step-time").textContent.trim();
+        const total = step.querySelector(".step-total").textContent.trim();
+        const chips = [...step.querySelectorAll(".chip")].map((chip) => chip.textContent.trim());
+        return `${label}: ${delta} (total: ${total})${chips.length ? `\n  ${chips.join("\n  ")}` : ""}`;
+      });
+      const report = [
+        "Cap Context — Latest Run",
+        `Total time: ${app.querySelector("h1").textContent.trim()}`,
+        `Route: ${app.querySelector(".route").textContent.replace(/\s+/g, " ").trim()}`,
+        `Receipt: ${app.querySelector(".side-title > span").textContent.trim()}`,
+        "", ...details, "", `Timeline: ${timeline.length} marks`, ...timeline
+      ].join("\n");
       clearTimeout(copyFeedbackTimer);
       try {
         try {
