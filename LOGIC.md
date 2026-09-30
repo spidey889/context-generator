@@ -293,6 +293,8 @@ Do not overstate current quality enforcement:
 
 The receipt records transfer/capture timings, counts, sizes, profile, the model that actually served, attempted and health-skipped models, fallback, finish reason, token usage, status, and exact captured text. Latest Run labels the serving model directly and excludes it from the failed portion of the fallback log. It deliberately does not store the generated summary. Background expiry and the analysis bridge both remove expired raw text.
 
+The analysis page's **Copy all details** button copies the complete current receipt as formatted JSON, including any unexpired captured transcript even when its panel is collapsed. It is disabled without a receipt and confirms clipboard success or failure; a selection-based fallback supports clipboard-restricted browsers/local files. This adds no storage or backend requests.
+
 Closed telemetry stages are: `intent_started`, `capture_started`, `capture_completed`, `summary_request_started`, `summary_response_started`, `summary_completed`, `paste_started`, `completed`.
 
 Allowed failures are: `no_conversation`, `conversation_too_large`, `capture_failed`, `summary_rate_limited`, `summary_service_busy`, `summary_access_denied`, `summary_failed`, `destination_open_failed`, `paste_failed`, `extension_reloaded`, `client_interrupted`, `user_cancelled`, `unknown_failure`.

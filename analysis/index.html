@@ -592,6 +592,7 @@
       <div class="actions">
         <div class="status" id="bridgeStatus"><span class="dot off"></span><span>Waiting</span></div>
         <button class="gear" id="rawScrapeButton" type="button" aria-label="Show raw scraped text" aria-expanded="false" title="Raw scraped text" disabled>&#9881;</button>
+        <button class="refresh" id="copyDetailsButton" type="button" aria-live="polite" disabled>Copy all details</button>
         <button class="refresh" id="refreshButton" type="button">Refresh</button>
       </div>
     </header>
@@ -605,12 +606,49 @@
     const app = document.getElementById("app");
     const bridgeStatus = document.getElementById("bridgeStatus");
     const rawScrapeButton = document.getElementById("rawScrapeButton");
+    const copyDetailsButton = document.getElementById("copyDetailsButton");
     const refreshButton = document.getElementById("refreshButton");
     const demoMode = new URLSearchParams(location.search).has("demo");
     const postTargetOrigin = location.protocol === "file:" || location.origin === "null" ? "*" : location.origin;
 
     let bridgeReady = false;
     let rawScrapeOpen = false;
+    let latestStats = null;
+    let copyFeedbackTimer = null;
+
+    copyDetailsButton.addEventListener("click", async () => {
+      if (!latestStats) return;
+      // Copy the full receipt, including collapsed raw text and diagnostic fields
+      // that do not fit in the cards, so sharing never depends on screenshots.
+      const report = `Cap Context — Latest Run\n\n${JSON.stringify(latestStats, null, 2)}`;
+      clearTimeout(copyFeedbackTimer);
+      try {
+        try {
+          await navigator.clipboard.writeText(report);
+        } catch {
+          // Local files and browsers with clipboard restrictions need the
+          // user-initiated selection path instead of the Clipboard API.
+          const field = document.createElement("textarea");
+          field.value = report;
+          field.setAttribute("readonly", "");
+          field.style.cssText = "position:fixed;left:-9999px;top:0";
+          document.body.appendChild(field);
+          try {
+            field.select();
+            if (!document.execCommand("copy")) throw new Error("Copy unavailable");
+          } finally {
+            field.remove();
+            copyDetailsButton.focus({ preventScroll: true });
+          }
+        }
+        copyDetailsButton.textContent = "Copied!";
+      } catch {
+        copyDetailsButton.textContent = "Copy failed — try again";
+      }
+      copyFeedbackTimer = setTimeout(() => {
+        copyDetailsButton.textContent = "Copy all details";
+      }, 2000);
+    });
 
     rawScrapeButton.addEventListener("click", () => {
       if (rawScrapeButton.disabled) return;
@@ -662,6 +700,8 @@
 
     function render(stats) {
       if (!stats) {
+        latestStats = null;
+        copyDetailsButton.disabled = true;
         rawScrapeOpen = false;
         rawScrapeButton.disabled = true;
         rawScrapeButton.setAttribute("aria-expanded", "false");
@@ -680,6 +720,8 @@
     }
 
     function renderStats(stats) {
+      latestStats = stats;
+      copyDetailsButton.disabled = false;
       const usage = stats.summary?.usage || {};
       const capture = stats.capture || {};
       const summary = stats.summary || {};
