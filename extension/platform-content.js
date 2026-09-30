@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-09-30-solid-progress-dot-v63";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-09-30-post-capture-timer-v64";
   const ownedUiStyleSheets = new Map();
   // Start fast capture on for each page instance; a manual opt-out lasts until reload.
   let claudeJsonCaptureEnabled = true;
@@ -170,7 +170,6 @@
   const CHATGPT_PASTE_VERIFY_TIMEOUT_MS = 1500;
   const PASTE_STABILITY_MS = 550;
   const HANDOFF_COUNTDOWN_ID = "context-generator-handoff-countdown";
-  const HANDOFF_COUNTDOWN_FIXED_MS = 40000;
   const HANDOFF_REASSURANCE_ID = "context-generator-handoff-reassurance";
   const HANDOFF_REASSURANCE_TEXT = "Almost done, don't cancel now";
   // Stage completion still comes only from real pipeline marks. In-stage line motion is display-only:
@@ -6087,7 +6086,7 @@
       overlay.setAttribute("aria-hidden", "false");
       overlay.setAttribute("aria-busy", "true");
       setHandoffProgress("capture", "active", destinationName);
-      startHandoffCountdown();
+      stopHandoffCountdown();
       overlay.classList.remove("context-generator-handoff-entering");
       overlay.style.opacity = "0";
       overlay.style.display = "flex";
@@ -6418,7 +6417,7 @@
     }
   }
 
-  function startHandoffCountdown(durationMs = HANDOFF_COUNTDOWN_FIXED_MS) {
+  function startHandoffCountdown(durationMs) {
     stopHandoffCountdown();
     const countdown = document.getElementById(HANDOFF_COUNTDOWN_ID);
     if (!countdown) return;
