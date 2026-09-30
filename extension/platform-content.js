@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-09-30-friendly-copy-backup-v66";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-09-30-short-copy-backup-v67";
   const ownedUiStyleSheets = new Map();
   // Start fast capture on for each page instance; a manual opt-out lasts until reload.
   let claudeJsonCaptureEnabled = true;
@@ -6893,7 +6893,7 @@
     const desc = document.getElementById("context-generator-fallback-desc");
     if (desc) {
       desc.textContent = isBackup
-        ? `If anything got lost on the way to ${destinationName}, no worries—your context is right here. Copy it, paste it into the chat, and pick up where you left off.`
+        ? "No worries—your context is right here. Copy it from here."
         : `Auto-paste did not land in ${destinationName}. The context is safe here - copy it, paste it into the message box, then send when ready.`;
     }
 
