@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-09-30-summary-line-estimate-v61";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-09-30-solid-progress-dot-v63";
   const ownedUiStyleSheets = new Map();
   // Start fast capture on for each page instance; a manual opt-out lasts until reload.
   let claudeJsonCaptureEnabled = true;
@@ -918,6 +918,7 @@
       await completeHandoffStageLine("capture", HANDOFF_TINY_STAGE_LINE_DURATION_MS);
     }
     setHandoffProgress("summary", "active", null, conversationText.length);
+    startHandoffCountdown(getHandoffSummaryLineDuration(conversationText.length));
     let summary;
     let timing;
     try {
@@ -5923,7 +5924,7 @@
             animation:contextGeneratorSummaryLinePulse 1600ms ease-in-out infinite alternate;
           }
           @keyframes contextGeneratorSummaryLinePulse{
-            from{opacity:0.45;transform:translate(-50%,-50%) scale(0.85)}
+            from{opacity:1;transform:translate(-50%,-50%) scale(0.85)}
             to{opacity:1;transform:translate(-50%,-50%) scale(1.25)}
           }
           #context-generator-handoff-progress .context-generator-handoff-stage[data-state="complete"] .context-generator-handoff-stage-progress-head{
@@ -6417,12 +6418,12 @@
     }
   }
 
-  function startHandoffCountdown() {
+  function startHandoffCountdown(durationMs = HANDOFF_COUNTDOWN_FIXED_MS) {
     stopHandoffCountdown();
     const countdown = document.getElementById(HANDOFF_COUNTDOWN_ID);
     if (!countdown) return;
 
-    const startMs = HANDOFF_COUNTDOWN_FIXED_MS;
+    const startMs = durationMs;
     const startedAt = getNow();
     countdown.setAttribute("aria-label", "Estimated time remaining");
     countdown.style.display = "inline-flex";
