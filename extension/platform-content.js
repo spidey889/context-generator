@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-01-chatgpt-popup-anchor-v72";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-01-smooth-transfer-errors-v73";
   const ownedUiStyleSheets = new Map();
   // Start fast capture on for each page instance; a manual opt-out lasts until reload.
   let claudeJsonCaptureEnabled = true;
@@ -770,6 +770,7 @@
       expandCollapsedConversationContent,
       getConversationTurns,
       getDetectedConversationMessageCount,
+      hasSavedSourceConversation,
       collectRenderedConversationTurns,
       scrapeConversationTextWhenReady,
       getVirtualSweepSettleTimeout,
@@ -5173,6 +5174,7 @@
   }
 
   function toggleDestinationSheet() {
+    hideErrorOverlay(undefined, { immediate: true });
     hideOnboardingNudge();
     hideClaudeLimitNudge();
     const existingSheet = document.getElementById(DESTINATION_SHEET_ID);
@@ -5411,13 +5413,27 @@
     });
   }
 
+  function hasSavedSourceConversation() {
+    // Match the JSON bridges, including ChatGPT project/custom-GPT routes.
+    // A saved chat may have a complete API tree before any DOM turns mount.
+    const patterns = {
+      claude: /^\/chat\/([^/]+)$/,
+      chatgpt: /\/c\/([^/]+)\/?$/,
+      gemini: /\/app\/([^/]+)\/?$/,
+      grok: /\/c\/([^/]+)\/?$/,
+      deepseek: /\/a\/chat\/s\/([^/]+)\/?$/
+    };
+    return Boolean(patterns[currentPlatform.id]?.test(window.location.pathname));
+  }
+
   async function startDestinationTransfer(destinationId) {
     const sourceUrl = window.location.href;
-    const useClaudeJson = currentPlatform.id === "claude" && claudeJsonCaptureEnabled;
+    const hasSavedConversation = hasSavedSourceConversation();
+    const useClaudeJson = hasSavedConversation && currentPlatform.id === "claude" && claudeJsonCaptureEnabled;
     const claudeJsonPath = useClaudeJson ? window.location.pathname : null;
-    const useChatGptJson = currentPlatform.id === "chatgpt" && chatGptJsonCaptureEnabled;
+    const useChatGptJson = hasSavedConversation && currentPlatform.id === "chatgpt" && chatGptJsonCaptureEnabled;
     const chatGptJsonPath = useChatGptJson ? window.location.pathname : null;
-    const useNetworkJson = ["gemini", "grok", "deepseek"].includes(currentPlatform.id) && networkJsonCaptureEnabled;
+    const useNetworkJson = hasSavedConversation && ["gemini", "grok", "deepseek"].includes(currentPlatform.id) && networkJsonCaptureEnabled;
     const geminiJsonPath = useNetworkJson && currentPlatform.id === "gemini" ? window.location.pathname : null;
     const grokJsonUrl = useNetworkJson && currentPlatform.id === "grok" ? window.location.href : null;
     const deepseekJsonPath = useNetworkJson && currentPlatform.id === "deepseek" ? window.location.pathname : null;
@@ -5434,8 +5450,6 @@
     if (!useClaudeJson && !useChatGptJson && !useNetworkJson && getDetectedConversationMessageCount() === 0) {
       markTransferTrace(trace, `failed: ${NO_CONVERSATION_ERROR_MESSAGE}`);
       finishTransferTrace(trace, "no_conversation");
-      hideDestinationSheet();
-      await delay(DESTINATION_SHEET_EXIT_MS);
       showErrorOverlay(NO_CONVERSATION_ERROR_MESSAGE);
       return;
     }
@@ -6078,6 +6092,7 @@
   }
 
   function showOverlay(destinationId = null) {
+    hideErrorOverlay(undefined, { immediate: true });
     ensureFloatingOverlay();
     document.getElementById("context-generator-capture-notice")?.remove();
     const overlay = document.getElementById(OVERLAY_ID);
@@ -6112,6 +6127,7 @@
         void overlay.offsetWidth;
         overlay.classList.add("context-generator-handoff-entering");
         requestAnimationFrame(() => {
+          if (overlay.getAttribute("aria-hidden") === "true") return;
           overlay.style.opacity = "1";
           overlay.style.transform = "translate3d(-50%,-50%,0) translateY(0) scale(1)";
           if (scrim) scrim.style.opacity = "1";
@@ -6525,6 +6541,16 @@
   }
 
   function showErrorOverlay(message) {
+    const reducedMotion = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
+    const sheet = document.getElementById(DESTINATION_SHEET_ID);
+    const handoff = document.getElementById(OVERLAY_ID);
+    const sourceSurface = isDestinationSheetOpen() ? sheet : isHandoffOverlayVisible() ? handoff : null;
+    const sourceRect = sourceSurface?.getBoundingClientRect();
+    const exitMs = sourceSurface === sheet ? DESTINATION_SHEET_EXIT_MS : HANDOFF_OVERLAY_EXIT_MS;
+    // Finish the current surface's exit before revealing its replacement.
+    // Reopening the picker cancels this reveal, so an old error cannot flash back.
+    if (sourceSurface && sourceSurface === sheet) hideDestinationSheet({ restoreFocus: false });
+    if (sourceSurface && sourceSurface === handoff) hideOverlay();
     const isNoConversationError = message === NO_CONVERSATION_ERROR_MESSAGE;
     const isSummaryRetryError = message === SUMMARY_RETRY_ERROR_MESSAGE;
     let errorDiv = document.getElementById("context-generator-error-overlay");
@@ -6532,9 +6558,11 @@
       errorDiv = document.createElement("div");
       errorDiv.id = "context-generator-error-overlay";
       errorDiv.dataset.contextGeneratorOwned = "true";
+      errorDiv.setAttribute("role", "alert");
+      errorDiv.setAttribute("aria-atomic", "true");
       errorDiv.style.cssText = [
         "position:fixed",
-        "z-index:9999999",
+        "z-index:2147483647",
         "right:20px",
         "bottom:80px",
         "width:min(340px,calc(100vw - 32px))",
@@ -6548,8 +6576,8 @@
         "font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif",
         "display:none",
         "opacity:0",
-        "transform:translate3d(24px,0,0)",
-        "transition:opacity 260ms ease,transform 260ms ease",
+        "transform:translate3d(0,8px,0) scale(0.98)",
+        "transition:opacity 200ms ease,transform 200ms ease",
         "flex-direction:column",
         "gap:12px",
         "overflow:hidden"
@@ -6643,28 +6671,52 @@
       textSpan.textContent = message;
     }
 
-    clearTimeout(errorDiv.contextGeneratorHideTimer);
-    clearTimeout(errorDiv.contextGeneratorDisplayTimer);
-    errorDiv.style.display = "flex";
-    errorDiv.style.opacity = "0";
-    errorDiv.style.transform = "translate3d(24px,0,0)";
-    requestAnimationFrame(() => {
-      errorDiv.style.opacity = "1";
-      errorDiv.style.transform = "translate3d(0,0,0)";
-    });
-    errorDiv.contextGeneratorHideTimer = setTimeout(() => {
-      hideErrorOverlay(errorDiv);
-    }, 8000);
+    hideErrorOverlay(errorDiv, { immediate: true });
+    errorDiv.style.transition = reducedMotion ? "none" : "opacity 200ms ease,transform 200ms ease";
+    const reveal = () => {
+      errorDiv.contextGeneratorEnterTimer = null;
+      errorDiv.style.display = "flex";
+      errorDiv.setAttribute("aria-hidden", "false");
+      errorDiv.style.right = "20px";
+      errorDiv.style.bottom = "80px";
+      errorDiv.style.left = "auto";
+      errorDiv.style.top = "auto";
+      if (sourceRect) {
+        const rect = errorDiv.getBoundingClientRect();
+        errorDiv.style.right = "auto";
+        errorDiv.style.bottom = "auto";
+        errorDiv.style.left = `${Math.max(16, Math.min(sourceRect.left + (sourceRect.width - rect.width) / 2, window.innerWidth - rect.width - 16))}px`;
+        errorDiv.style.top = `${Math.max(16, Math.min(sourceRect.top + (sourceRect.height - rect.height) / 2, window.innerHeight - rect.height - 16))}px`;
+      }
+      const settle = () => {
+        errorDiv.contextGeneratorAnimationFrame = null;
+        errorDiv.style.opacity = "1";
+        errorDiv.style.transform = "translate3d(0,0,0) scale(1)";
+      };
+      if (reducedMotion) settle();
+      else {
+        void errorDiv.offsetWidth;
+        errorDiv.contextGeneratorAnimationFrame = requestAnimationFrame(settle);
+      }
+      errorDiv.contextGeneratorHideTimer = setTimeout(() => hideErrorOverlay(errorDiv), 8000);
+    };
+    if (sourceSurface && !reducedMotion) errorDiv.contextGeneratorEnterTimer = setTimeout(reveal, exitMs);
+    else reveal();
   }
 
-  function hideErrorOverlay(errorDiv = document.getElementById("context-generator-error-overlay")) {
+  function hideErrorOverlay(errorDiv = document.getElementById("context-generator-error-overlay"), { immediate = false } = {}) {
     if (!errorDiv) return;
+    clearTimeout(errorDiv.contextGeneratorEnterTimer);
+    clearTimeout(errorDiv.contextGeneratorHideTimer);
     clearTimeout(errorDiv.contextGeneratorDisplayTimer);
+    cancelAnimationFrame(errorDiv.contextGeneratorAnimationFrame);
+    errorDiv.setAttribute("aria-hidden", "true");
     errorDiv.style.opacity = "0";
-    errorDiv.style.transform = "translate3d(24px,0,0)";
-    errorDiv.contextGeneratorDisplayTimer = setTimeout(() => {
+    errorDiv.style.transform = "translate3d(0,8px,0) scale(0.98)";
+    if (immediate || window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) errorDiv.style.display = "none";
+    else errorDiv.contextGeneratorDisplayTimer = setTimeout(() => {
       errorDiv.style.display = "none";
-    }, 280);
+    }, 200);
   }
 
   function showFallbackModal(text, destinationName, isBackup = false) {

@@ -5,16 +5,17 @@ const test = require("node:test");
 const vm = require("node:vm");
 
 const source = fs.readFileSync(path.join(__dirname, "../extension/platform-content.js"), "utf8");
-const start = source.indexOf("  async function startDestinationTransfer(");
+const start = source.indexOf("  function hasSavedSourceConversation()");
 const end = source.indexOf("  function showFastCaptureFallbackMessage(", start);
 const picker = source.slice(start, end);
 
 // Exercise the actual picker orchestrator; substitute only its UI, capture and
 // transfer boundaries to count side effects without native timers or a browser.
 function harness(platform, { mode = "failure", enabled = true, domFails = false } = {}) {
-  const calls = { json: 0, prepare: 0, dom: 0, notice: 0, destination: 0, flows: [], errors: [], traces: [] };
+  const calls = { json: 0, prepare: 0, dom: 0, notice: 0, handoff: 0, destination: 0, flows: [], errors: [], traces: [] };
   const prepared = Promise.resolve({ tabId: 42 });
-  const location = { href: `https://example.test/chat/source`, pathname: "/chat/source" };
+  const pathname = { claude: "/chat/source", chatgpt: "/c/source", gemini: "/app/source", grok: "/c/source", deepseek: "/a/chat/s/source" }[platform];
+  const location = { href: `https://example.test${pathname}`, pathname };
   const context = vm.createContext({
     window: { location }, currentPlatform: { id: platform, name: platform },
     claudeJsonCaptureEnabled: enabled, chatGptJsonCaptureEnabled: enabled, networkJsonCaptureEnabled: enabled,
@@ -24,7 +25,7 @@ function harness(platform, { mode = "failure", enabled = true, domFails = false 
     markTransferTrace: (_trace, message) => calls.traces.push(message), finishTransferTrace() {},
     clearRunningResetTimer() {}, resetRunningFlag: () => { context.isRunning = false; },
     getDetectedConversationMessageCount: () => 2,
-    transitionDestinationSheetToHandoff: async () => {}, showOverlay() {}, releaseDestinationSheetBackdrop() {},
+    transitionDestinationSheetToHandoff: async () => {}, showOverlay: () => { calls.handoff++; }, releaseDestinationSheetBackdrop() {},
     advanceTransferTelemetryStage() {}, setHandoffProgress() {}, markCaptureDone() {},
     prepareDestinationTab: () => { calls.destination++; return prepared; },
     prepareSourceForCapture: async () => { calls.prepare++; },
@@ -56,6 +57,17 @@ function harness(platform, { mode = "failure", enabled = true, domFails = false 
 }
 
 for (const platform of ["claude", "chatgpt", "gemini", "grok", "deepseek"]) {
+  test(`${platform}: empty new chat rejects before handoff, capture or destination work with fast capture enabled`, async () => {
+    const { context, calls } = harness(platform);
+    context.window.location.pathname = "/";
+    context.window.location.href = "https://example.test/";
+    context.getDetectedConversationMessageCount = () => 0;
+    await context.start("claude");
+    assert.deepEqual(calls.errors, ["No conversation"]);
+    assert.equal(calls.handoff + calls.json + calls.prepare + calls.dom + calls.destination + calls.flows.length, 0);
+    assert.equal(context.isRunning, false);
+  });
+
   for (const mode of ["failure", "missing"]) {
     test(`${platform}: ${mode} fast capture falls back once within the same transfer`, async () => {
       const { context, calls, prepared } = harness(platform, { mode });

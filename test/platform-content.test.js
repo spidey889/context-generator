@@ -768,6 +768,23 @@ test("handoff finish skips suspended frames in an already hidden source tab", { 
   assert.deepEqual(Array.from(trace.marks, (mark) => mark.label), ["handoff finish start", "handoff finish done"]);
 });
 
+test("new-chat routes never bypass empty detection, while saved JSON chats may be unrendered", () => {
+  const routes = [
+    ["claude.ai", ["/", "/new"], ["/chat/saved"]],
+    ["chatgpt.com", ["/", "/g/custom", "/g/project"], ["/c/saved", "/g/project/c/saved", "/g/custom/c/saved/"]],
+    ["gemini.google.com", ["/", "/app"], ["/app/saved", "/u/1/app/saved/"]],
+    ["grok.com", ["/", "/new"], ["/c/saved/"]],
+    ["chat.deepseek.com", ["/", "/a/chat"], ["/a/chat/s/saved/"]]
+  ];
+  for (const [hostname, newPaths, savedPaths] of routes) {
+    for (const pathname of [...newPaths, ...savedPaths]) {
+      const hooks = loadPlatformContent([], hostname, { pathname });
+      assert.equal(hooks.getDetectedConversationMessageCount(), 0);
+      assert.equal(hooks.hasSavedSourceConversation(), savedPaths.includes(pathname), `${hostname}${pathname}`);
+    }
+  }
+});
+
 test("handoff finish has a deadline when visible-source animation frames never fire", { timeout: 1000 }, async () => {
   const hooks = loadPlatformContent([]);
   hooks.document.querySelector = () => null;

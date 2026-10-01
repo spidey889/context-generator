@@ -295,7 +295,7 @@ test("ChatGPT project route aliases for the same chat remain valid during readin
 
 test("ChatGPT picker pins its chat before the handoff and remains independent of rendered history", async () => {
   const source = fs.readFileSync(path.join(__dirname, "..", "extension", "platform-content.js"), "utf8");
-  const start = source.indexOf("  async function startDestinationTransfer(destinationId)");
+  const start = source.indexOf("  function hasSavedSourceConversation()");
   const end = source.indexOf("  function protectOverlayPalette", start);
   for (const navigateDuringHandoff of [false, true]) {
     let capturedPath;

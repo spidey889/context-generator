@@ -212,7 +212,7 @@ test("Gemini JSON picker pins identity before handoff and preserves source white
   vm.runInContext(source.slice(cleanStart, cleanEnd) + source.slice(captureStart, captureEnd), metrics);
   const text = 'Gemini conversation:\n\nUser:   pasted code  \n\nAssistant:   print("a\u00a0b")  \n';
   assert.equal(metrics.createConversationCapture(text, { method: "gemini-json" }), text);
-  const start = source.indexOf("  async function startDestinationTransfer(destinationId)");
+  const start = source.indexOf("  function hasSavedSourceConversation()");
   const end = source.indexOf("  function protectOverlayPalette", start);
   for (const navigate of [false, true]) {
     let capturedPath, transfers = 0;
@@ -300,7 +300,7 @@ test("DeepSeek picker pins chat before handoff and preserves original uploaded c
   vm.runInContext(source.slice(cleanStart, cleanEnd) + source.slice(captureStart, captureEnd), metrics);
   const text = 'DeepSeek conversation:\n\nUser: \uFEFF  print("a\u00a0b")  \r\n\nAssistant: Answer';
   assert.equal(metrics.createConversationCapture(text, { method: "deepseek-json" }), text);
-  const start = source.indexOf("  async function startDestinationTransfer(destinationId)");
+  const start = source.indexOf("  function hasSavedSourceConversation()");
   const end = source.indexOf("  function protectOverlayPalette", start);
   for (const navigate of [false, true]) {
     let capturedPath, transfers = 0;
@@ -375,7 +375,7 @@ test("Grok picker pins chat and branch before handoff and preserves source text 
   vm.runInContext(source.slice(cleanStart, cleanEnd) + source.slice(captureStart, captureEnd), metrics);
   const text = 'Grok conversation:\n\nUser: \uFEFF  print("a\u00a0b")  \r\n\nAssistant: Answer';
   assert.equal(metrics.createConversationCapture(text, { method: "grok-json" }), text);
-  const start = source.indexOf("  async function startDestinationTransfer(destinationId)");
+  const start = source.indexOf("  function hasSavedSourceConversation()");
   const end = source.indexOf("  function protectOverlayPalette", start);
   for (const navigate of [false, "chat", "branch"]) {
     let capturedPath, transfers = 0;

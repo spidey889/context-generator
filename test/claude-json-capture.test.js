@@ -618,7 +618,7 @@ test("Claude old hook versions are replaced before capture", async () => {
 // proves JSON capture can proceed before native conversation DOM has mounted.
 function pickerHarness({ jsonEnabled = true, navigateDuringHandoff = false } = {}) {
   const source = fs.readFileSync(path.join(__dirname, "..", "extension", "platform-content.js"), "utf8");
-  const start = source.indexOf("  async function startDestinationTransfer(destinationId)");
+  const start = source.indexOf("  function hasSavedSourceConversation()");
   const end = source.indexOf("  function protectOverlayPalette", start);
   const calls = { capture: 0, flow: 0, prepared: 0, dom: 0, errors: [] };
   const window = { location: { pathname: `/chat/${chat}` }, __capCaptureClaudeJson: async expectedPath => {

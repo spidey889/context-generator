@@ -31,6 +31,7 @@ const SMOKE_PLATFORM_QUERY = "__cap_context_smoke_platform";
 const SMOKE_TIMEOUT_MS = Number(process.env.CAP_CONTEXT_SMOKE_TIMEOUT_MS || 45000);
 const CLAUDE_PLACEMENT_SCREENSHOT_PATH = process.env.CAP_CONTEXT_CLAUDE_PLACEMENT_SCREENSHOT || "";
 const PICKER_SCREENSHOT_PATH = process.env.CAP_CONTEXT_PICKER_SCREENSHOT || "";
+const ERROR_SCREENSHOT_PATH = process.env.CAP_CONTEXT_ERROR_SCREENSHOT || "";
 const JSON_SOURCE = ["chatgpt", "gemini", "grok", "deepseek"].includes(process.env.CAP_CONTEXT_JSON_SMOKE) ? process.env.CAP_CONTEXT_JSON_SMOKE : process.env.CAP_CONTEXT_JSON_SMOKE === "1" ? "claude" : null;
 const NETWORK_SOURCE = ["gemini", "grok", "deepseek"].includes(JSON_SOURCE);
 const GROK_FILE_ONLY_SMOKE = JSON_SOURCE === "grok" && process.env.CAP_CONTEXT_NETWORK_FAILURE_SMOKE === "file-only";
@@ -579,6 +580,72 @@ function appendProcessOutput(current, chunk) {
   return `${current}${chunk}`.slice(-8000);
 }
 
+async function verifyEmptyChatError(session, browserSession, state, { removeTurns = false, screenshot = false } = {}) {
+  const before = { summaries: state.summaryRequests.length, json: state.jsonRequests, tabs: (await browserSession.call("Target.getTargets")).targetInfos.filter(t => t.type === "page").length };
+  await session.evaluate(`(() => {
+    window.__emptySmokeOriginal = { url: location.href, html: document.querySelector("main")?.innerHTML };
+    if (${removeTurns}) {
+      document.querySelector("main").innerHTML = "";
+      history.replaceState({}, "", "/?${SMOKE_PLATFORM_QUERY}=chatgpt");
+    }
+    window.__emptySmokeHandoffShown = false;
+    window.__emptySmokeObserver = new MutationObserver(() => {
+      if (document.getElementById("context-generator-overlay")?.style.display === "flex") window.__emptySmokeHandoffShown = true;
+    });
+    window.__emptySmokeObserver.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ["style"] });
+    document.getElementById("context-generator-bubble").click();
+  })()`);
+  await waitFor(() => session.evaluate(`getComputedStyle(document.getElementById("context-generator-destination-sheet")).opacity === "1"`), "empty-chat picker");
+  await session.evaluate(`(() => {
+    window.__emptySmokePickerRect = document.getElementById("context-generator-destination-sheet").getBoundingClientRect().toJSON();
+    document.querySelector(".context-generator-destination-tile").click();
+  })()`);
+  await waitFor(() => session.evaluate(`(() => { const e = document.getElementById("context-generator-error-overlay"); return e?.style.display === "flex" && getComputedStyle(e).opacity === "1"; })()`), "direct empty-chat error");
+  const result = await session.evaluate(`(() => {
+    const error = document.getElementById("context-generator-error-overlay");
+    const rect = error.getBoundingClientRect(), picker = window.__emptySmokePickerRect;
+    return { title: document.getElementById("context-generator-error-title").textContent,
+      message: document.getElementById("context-generator-error-text").textContent,
+      handoffShown: window.__emptySmokeHandoffShown,
+      sheetHidden: document.getElementById("context-generator-destination-sheet").style.display === "none",
+      insideViewport: rect.left >= 0 && rect.right <= innerWidth && rect.top >= 0 && rect.bottom <= innerHeight,
+      nearPicker: Math.abs(rect.left + rect.width / 2 - picker.left - picker.width / 2) < 20,
+      role: error.getAttribute("role") };
+  })()`);
+  assert.equal(result.title, "Chat is empty");
+  assert.equal(result.message, "Send a message first, then try again.");
+  assert.equal(result.handoffShown, false, "Empty chat must never flash the handoff.");
+  assert.equal(result.sheetHidden && result.insideViewport && result.nearPicker, true, JSON.stringify(result));
+  assert.equal(result.role, "alert");
+  assert.equal(state.summaryRequests.length, before.summaries);
+  assert.equal(state.jsonRequests, before.json);
+  assert.equal((await browserSession.call("Target.getTargets")).targetInfos.filter(t => t.type === "page").length, before.tabs, "Empty chat must not open a destination.");
+  if (screenshot && ERROR_SCREENSHOT_PATH) {
+    const clip = await session.evaluate(`(() => { const r = document.getElementById("context-generator-error-overlay").getBoundingClientRect(); return { x: Math.max(0, r.x - 12), y: Math.max(0, r.y - 12), width: r.width + 24, height: r.height + 24, scale: 1 }; })()`);
+    const capture = await session.call("Page.captureScreenshot", { format: "png", clip });
+    await fs.promises.mkdir(path.dirname(ERROR_SCREENSHOT_PATH), { recursive: true });
+    await fs.promises.writeFile(ERROR_SCREENSHOT_PATH, Buffer.from(capture.data, "base64"));
+  }
+  // Starting again cancels old error dismissal/reveal work. Reduced motion
+  // must also reveal and dismiss immediately, without intermediate movement.
+  await session.call("Emulation.setEmulatedMedia", { features: [{ name: "prefers-reduced-motion", value: "reduce" }] });
+  assert.equal(await session.evaluate(`(() => {
+    document.getElementById("context-generator-bubble").click();
+    const error = document.getElementById("context-generator-error-overlay");
+    const previousHidden = error.style.display === "none";
+    document.querySelector(".context-generator-destination-tile").click();
+    const immediateError = error.style.opacity === "1" && error.style.transition === "none";
+    error.querySelector("button").click();
+    return previousHidden && immediateError && error.style.display === "none";
+  })()`), true, "Reduced motion and repeated attempts must not flash stale errors.");
+  await session.call("Emulation.setEmulatedMedia", { features: [] });
+  await session.evaluate(`(() => {
+    window.__emptySmokeObserver.disconnect();
+    if (${removeTurns}) document.querySelector("main").innerHTML = window.__emptySmokeOriginal.html;
+    history.replaceState({}, "", window.__emptySmokeOriginal.url);
+  })()`);
+}
+
 async function run() {
   assert.equal(typeof WebSocket, "function", "This smoke test requires Node.js with the built-in WebSocket client.");
   const braveExecutable = findBraveExecutable();
@@ -669,6 +736,10 @@ async function run() {
       throw error;
     }
     process.stdout.write("✓ Brave loaded the unpacked extension on the controlled source page.\n");
+    if (!JSON_CAPTURE_SMOKE) {
+      await verifyEmptyChatError(sourceSession, browserSession, state, { removeTurns: true, screenshot: true });
+      process.stdout.write("✓ Empty ChatGPT shows its error directly, opens no destination, and supports repeated attempts/reduced motion.\n");
+    }
 
     // Grok JSON mode verifies capture independently of unrelated Claude geometry.
     if (JSON_SOURCE !== "grok") {
@@ -700,6 +771,10 @@ async function run() {
     assert.equal(claudeEmptyBounds.dictateInside, true);
     assert.equal(claudeEmptyBounds.voiceInside, true);
     assert.ok(claudeEmptyBounds.alignment <= 1, `Claude's fresh-page bubble was ${claudeEmptyBounds.alignment}px from the control row.`);
+    if (!JSON_CAPTURE_SMOKE) {
+      await verifyEmptyChatError(claudePlacementSession, browserSession, state);
+      process.stdout.write("✓ Empty Claude shows its error directly without handoff or destination work.\n");
+    }
     if (CLAUDE_PLACEMENT_SCREENSHOT_PATH) {
       const screenshot = await claudePlacementSession.call("Page.captureScreenshot", { format: "png" });
       await fs.promises.mkdir(path.dirname(CLAUDE_PLACEMENT_SCREENSHOT_PATH), { recursive: true });
