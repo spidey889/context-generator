@@ -2693,6 +2693,38 @@ test("Claude inline discovery validates the compact model chin against the same 
   assert.equal(hooks.findClaudeInlineToolbar(fixture.input), null);
 });
 
+for (const platform of ["claude", "chatgpt"]) {
+  test(`${platform} prefers inline, uses its legacy backup and clears backup state on recovery`, () => {
+    const inline = platform === "claude" ? inlineClaudeFixture() : inlineChatGptFixture();
+    const form = new FakeElement({ tag: "form", rect: { left: 60, right: 760, top: 400, bottom: 560, width: 700, height: 160 } });
+    const input = new FakeElement({ attrs: { contenteditable: "true", role: "textbox" }, rect: { left: 80, right: 740, top: 410, bottom: 470, width: 660, height: 60 } });
+    const model = new FakeElement({ tag: "button", text: "Sonnet High", attrs: { "aria-label": "Model Sonnet", "aria-haspopup": "menu" }, rect: { left: 500, right: 590, top: 510, bottom: 542, width: 90, height: 32 } });
+    const voice = new FakeElement({ tag: "button", attrs: { "aria-label": "Use voice mode" }, rect: { left: 640, right: 672, top: 510, bottom: 542, width: 32, height: 32 } });
+    form.appendChild(input); form.appendChild(model); form.appendChild(voice);
+    const hooks = loadPlatformContent([...Object.values(inline), form, input, model, voice], platform === "claude" ? "claude.ai" : "chatgpt.com");
+    hooks.document.createElement = () => new FakeElement();
+    const bubble = new FakeElement({ tag: "button", attrs: { id: "context-generator-bubble" } });
+    assert.equal(hooks.mountInlineOrLegacyBackup(bubble, inline.input), true);
+    assert.equal(bubble.style.position, "static", "inline remains primary");
+    assert.equal(hooks.resizeObservers.some(observer => observer.observed.length), false);
+    assert.equal(hooks.mountInlineOrLegacyBackup(bubble, input), true);
+    assert.equal(bubble.style.position, "fixed", "unknown inline markup uses the real legacy path");
+    assert.equal(bubble.parentElement, hooks.document.body);
+    assert.equal(bubble.style.width, "42px");
+    assert.ok(Number.isFinite(parseFloat(bubble.style.left)));
+    assert.equal(hooks.resizeObservers.some(observer => observer.observed.length), true);
+    if (platform === "claude") assert.ok(model.hasAttribute("data-context-generator-original-translate"));
+    assert.equal(hooks.mountInlineOrLegacyBackup(bubble, inline.input), true);
+    assert.equal(bubble.style.position, "static");
+    assert.equal(bubble.style.width, "32px");
+    assert.equal(hooks.resizeObservers.some(observer => observer.observed.length), false);
+    assert.equal(hooks.mutationObservers.some(observer => observer.observed.length), false);
+    assert.equal(model.hasAttribute("data-context-generator-original-translate"), false);
+    assert.equal(voice.hasAttribute("data-context-generator-original-translate"), false);
+    assert.equal(form.hasAttribute("data-context-generator-original-position"), false);
+  });
+}
+
 test("Inline platforms detect SPA route changes and schedule fresh mounting", () => {
   for (const [host, initial, next] of [
     ["claude.ai", "/new", "/chat/example"], ["chatgpt.com", "/", "/c/example"],
