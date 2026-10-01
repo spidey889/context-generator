@@ -253,13 +253,20 @@ function sourceFixture() {
     body{margin:0;min-height:100vh;background:#151515;color:#f7f7f7;font:16px system-ui}
     main{max-width:760px;margin:40px auto 160px;padding:20px}
     article{margin:18px 0;padding:18px;border:1px solid #444;border-radius:14px}
-    form{position:fixed;left:50%;bottom:28px;width:min(720px,calc(100vw - 48px));transform:translateX(-50%);padding:16px;background:#242424;border-radius:18px}
+    form{position:fixed;left:50%;bottom:28px;box-sizing:border-box;width:min(720px,calc(100vw - 48px));transform:translateX(-50%);padding:16px;background:#242424;border-radius:18px}
     #prompt-textarea{min-height:36px;max-height:200px;overflow:auto;outline:none;white-space:pre-wrap}
     [data-composer-footer-responsive]{display:grid;grid-template-columns:36px minmax(0,1fr) auto;gap:8px;align-items:center}
-    .gpt-right{display:flex;align-items:center;gap:8px;min-width:0}
+    .gpt-right{min-width:0}
+    .gpt-contents{display:contents}
+    .gpt-controls{display:flex;min-width:0;align-items:center;justify-content:flex-end;flex-shrink:0}
+    .gpt-model{display:flex;flex:1;min-width:0;justify-content:flex-end}
+    .gpt-model-inner{display:flex;align-items:center}
+    .gpt-voice-controls{display:flex;flex-shrink:0;align-items:center;gap:8px}
     .gpt-right button{height:36px;flex-shrink:0}
+    .gpt-voice-controls button{width:36px}
+    #gpt-voice,#gpt-send{width:44px}
     .gpt-left button{width:36px;height:36px}
-    #gpt-reasoning{min-width:0;flex-shrink:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+    #gpt-reasoning{width:82px;min-width:0;flex-shrink:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
     #gpt-send{display:none}
     form.has-text #gpt-send{display:block}
     form.has-text #gpt-voice{display:none}
@@ -275,9 +282,9 @@ function sourceFixture() {
     <div data-composer-footer-responsive data-composer-layout="single-line">
       <div class="gpt-left"><button type="button" data-composer-navigation-target="add-context" aria-label="Add files and more">+</button></div>
       <div data-composer-input><div id="prompt-textarea" data-testid="prompt-textarea" data-composer-markdown contenteditable="true" role="textbox" aria-label="Ask ChatGPT"></div></div>
-      <div class="gpt-right"><button type="button" id="gpt-reasoning" data-composer-navigation-target="reasoning" aria-haspopup="menu">High</button><button type="button" aria-label="Dictate">Mic</button><button type="button" id="gpt-voice" aria-label="Start Voice">Voice</button><button type="button" id="gpt-send" data-testid="send-button" aria-label="Send">Send</button></div>
+      <div class="gpt-right"><div class="gpt-contents"><div class="gpt-controls"><div class="gpt-model"><div class="gpt-model-inner"><button type="button" id="gpt-reasoning" data-composer-navigation-target="reasoning" aria-haspopup="menu">High</button></div></div><div class="gpt-voice-controls"><button type="button" aria-label="Dictate">Mic</button><button type="button" id="gpt-voice" aria-label="Start Voice">Voice</button><button type="button" id="gpt-send" data-testid="send-button" aria-label="Send">Send</button></div></div></div></div>
     </div></div></form>
-    <script>document.querySelector('form').addEventListener('input',e=>e.target.closest('form').classList.toggle('has-text',!!e.target.textContent.trim()));</script>
+    <script nonce="smoke">document.querySelector('form').addEventListener('input',e=>e.target.closest('form').classList.toggle('has-text',!!e.target.textContent.trim()));</script>
 </body>
 </html>`;
 }
@@ -783,27 +790,33 @@ async function run() {
 
     if (!JSON_SOURCE || JSON_SOURCE === "chatgpt") {
       const originalDraft = await sourceSession.evaluate(`document.getElementById('prompt-textarea').textContent`);
-      await sourceSession.evaluate(`(() => {
-        const input = document.getElementById('prompt-textarea');
-        input.textContent = Array.from({length:12},(_,i)=>'Inline draft line '+i).join('\\n');
-        input.dispatchEvent(new Event('input',{bubbles:true}));
-      })()`);
-      for (const width of [760, 390, 320]) {
-        await sourceSession.call("Emulation.setDeviceMetricsOverride", { width, height: 740, deviceScaleFactor: 1, mobile: false });
-        const inline = await waitFor(() => sourceSession.evaluate(`(() => {
-          const b=document.getElementById('context-generator-bubble'),r=b.getBoundingClientRect();
-          const native=[...document.querySelector('.gpt-right').querySelectorAll('button')]
-            .filter(n=>getComputedStyle(n).display!=='none').map(n=>n.getBoundingClientRect());
-          const style=getComputedStyle(b);
-          return b.parentElement.getAttribute('data-context-generator-chatgpt-inline')==='left'
-            ? {width:parseFloat(style.width),position:style.position,
-               overlap:native.some(n=>r.left<n.right&&r.right>n.left&&r.top<n.bottom&&r.bottom>n.top),
-               inside:r.left>=0&&r.right<=innerWidth} : null;
-        })()`), "ChatGPT inline mounting");
-        assert.equal(inline.width, 32);
-        assert.equal(inline.position, "static");
-        assert.equal(inline.overlap, false, `ChatGPT overlaps native controls at ${width}px.`);
-        assert.equal(inline.inside, true);
+      for (const draft of ["", Array.from({length:12},(_,i)=>'Inline draft line '+i).join('\n')]) {
+        await sourceSession.evaluate(`(() => {
+          const input = document.getElementById('prompt-textarea');
+          input.textContent = ${JSON.stringify(draft)};
+          input.dispatchEvent(new Event('input',{bubbles:true}));
+        })()`);
+        for (const width of [760, 390, 320]) {
+          await sourceSession.call("Emulation.setDeviceMetricsOverride", { width, height: 740, deviceScaleFactor: 1, mobile: false });
+          const inline = await waitFor(() => sourceSession.evaluate(`(() => {
+            const b=document.getElementById('context-generator-bubble'),r=b.getBoundingClientRect();
+            const native=[...document.querySelector('.gpt-right').querySelectorAll('button')]
+              .filter(n=>getComputedStyle(n).display!=='none').map(n=>n.getBoundingClientRect());
+            const style=getComputedStyle(b);
+            return b.parentElement.getAttribute('data-context-generator-chatgpt-inline')==='left'
+              ? {width:parseFloat(style.width),position:style.position,
+                 overlap:native.some(n=>r.left<n.right&&r.right>n.left&&r.top<n.bottom&&r.bottom>n.top),
+                 send:getComputedStyle(document.getElementById('gpt-send')).display!=='none',
+                 voice:getComputedStyle(document.getElementById('gpt-voice')).display!=='none',
+                 inside:r.left>=0&&r.right<=innerWidth} : null;
+          })()`), "ChatGPT inline mounting");
+          assert.equal(inline.width, 32);
+          assert.equal(inline.position, "static");
+          assert.equal(inline.overlap, false, `ChatGPT overlaps native controls at ${width}px.`);
+          assert.equal(inline.send, Boolean(draft));
+          assert.equal(inline.voice, !draft);
+          assert.equal(inline.inside, true);
+        }
       }
       if (CHATGPT_PLACEMENT_SCREENSHOT_PATH) {
         const capture=await sourceSession.call("Page.captureScreenshot",{format:"png"});
@@ -827,7 +840,7 @@ async function run() {
         const input=document.getElementById('prompt-textarea');input.textContent=${JSON.stringify(originalDraft)};
         input.dispatchEvent(new Event('input',{bubbles:true}));
       })()`);
-      process.stdout.write("✓ ChatGPT's 32px inline slot survives long drafts, 760/390/320px widths and editor remount without native-control overlap.\n");
+      process.stdout.write("✓ ChatGPT's 32px inline slot survives empty/long drafts, 760/390/320px widths and editor remount without native-control overlap.\n");
     }
 
     // Grok JSON mode verifies capture independently of unrelated Claude geometry.

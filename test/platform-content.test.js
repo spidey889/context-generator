@@ -2467,6 +2467,8 @@ test("ChatGPT inline discovery follows the editor-owned footer across multiline 
   f.footer.children = [f.editor, f.left, f.right];
   assert.equal(hooks.findChatGptInlineToolbar(f.input).right, f.right);
   assert.equal(hooks.findChatGptInlineToolbar(new FakeElement()), null);
+  f.body.appendChild(f.editor);
+  assert.equal(hooks.findChatGptInlineToolbar(f.input), null, "a sibling footer does not own this editor");
 });
 
 test("ChatGPT inline discovery supports free controls and excludes popup or unrelated rows", () => {
@@ -2484,6 +2486,10 @@ test("ChatGPT inline discovery supports free controls and excludes popup or unre
 test("ChatGPT inline mounting retains a non-shrinking 32px button through remount and cleans markers", () => {
   const f = inlineChatGptFixture();
   const next = inlineChatGptFixture();
+  const nativeGroup = new FakeElement();
+  next.right.appendChild(nativeGroup);
+  nativeGroup.appendChild(next.model);
+  nativeGroup.appendChild(next.voice);
   const hooks = loadPlatformContent(Object.values(f));
   hooks.document.createElement = () => new FakeElement();
   const originalGetById = hooks.document.getElementById;
@@ -2497,9 +2503,12 @@ test("ChatGPT inline mounting retains a non-shrinking 32px button through remoun
   assert.equal(bubble.style.position, "static");
   assert.equal(hooks.mountChatGptInlineButton(bubble, next.input), true);
   assert.equal(bubble.parentElement, next.left);
+  assert.equal(nativeGroup.getAttribute("data-context-generator-chatgpt-inline"), "controls");
   assert.equal(f.footer.hasAttribute("data-context-generator-chatgpt-inline"), false);
+  assert.equal(f.right.hasAttribute("data-context-generator-chatgpt-inline"), false);
   hooks.releaseChatGptInlineMount();
   assert.equal(next.left.hasAttribute("data-context-generator-chatgpt-inline"), false);
+  assert.equal(nativeGroup.hasAttribute("data-context-generator-chatgpt-inline"), false);
 });
 
 function inlineClaudeFixture() {
@@ -2585,14 +2594,14 @@ test("Claude inline discovery validates the compact model chin against the same 
   assert.equal(hooks.findClaudeInlineToolbar(fixture.input), null);
 });
 
-test("Claude detects the /new to /chat route change and schedules fresh alignment", () => {
-  const hooks = loadPlatformContent([], "claude.ai", { pathname: "/new" });
-
-  assert.equal(hooks.checkClaudePlacementPathname(), false);
-  hooks.window.location.pathname = "/chat/example";
-
-  assert.equal(hooks.checkClaudePlacementPathname(), true);
-  assert.equal(hooks.animationFrameCallbacks.length, 1);
+test("Inline platforms detect SPA route changes and schedule fresh mounting", () => {
+  for (const [host, initial, next] of [["claude.ai", "/new", "/chat/example"], ["chatgpt.com", "/", "/c/example"]]) {
+    const hooks = loadPlatformContent([], host, { pathname: initial });
+    assert.equal(hooks.checkInlinePlacementPathname(), false);
+    hooks.window.location.pathname = next;
+    assert.equal(hooks.checkInlinePlacementPathname(), true);
+    assert.equal(hooks.animationFrameCallbacks.length, 1);
+  }
 });
 
 test("composer discovery rejects an unvalidated inner editor wrapper", () => {
@@ -2620,116 +2629,6 @@ test("composer discovery rejects an unvalidated inner editor wrapper", () => {
       `${hostname} should reject the inner editor wrapper`
     );
   }
-});
-
-function getChatGptComposerPlacement(controls) {
-  const composerRect = { left: 642, right: 1602, top: 920, bottom: 986, width: 960, height: 66 };
-  const composer = new FakeElement({ tag: "form", rect: composerRect });
-  const input = new FakeElement({
-    attrs: { contenteditable: "true", role: "textbox" },
-    rect: { left: 708, right: 1368, top: 932, bottom: 974, width: 660, height: 42 }
-  });
-  composer.children = [input, ...controls];
-  composer.children.forEach((element) => { element.parentElement = composer; });
-
-  const hooks = loadPlatformContent(
-    [composer, input, ...controls],
-    "chatgpt.com",
-    { innerWidth: 1920, innerHeight: 1080 }
-  );
-  return hooks.getChatGptFixedBubblePlacement(input);
-}
-
-test("ChatGPT paid placement remains left of the reasoning control", () => {
-  const high = new FakeElement({
-    tag: "button",
-    text: "High",
-    attrs: { "aria-label": "Reasoning effort" },
-    rect: { left: 1400, right: 1466, top: 936, bottom: 972, width: 66, height: 36 }
-  });
-  const mic = new FakeElement({
-    tag: "button",
-    attrs: { "aria-label": "Microphone" },
-    rect: { left: 1478, right: 1514, top: 936, bottom: 972, width: 36, height: 36 }
-  });
-  const voice = new FakeElement({
-    tag: "button",
-    attrs: { "aria-label": "Voice mode" },
-    rect: { left: 1548, right: 1592, top: 932, bottom: 976, width: 44, height: 44 }
-  });
-
-  const placement = getChatGptComposerPlacement([high, mic, voice]);
-
-  assert.equal(placement.left, 1350);
-  assert.equal(placement.top, 933);
-});
-
-test("ChatGPT keeps its orb beside wider modes inside a page-sized form", () => {
-  const form = new FakeElement({
-    tag: "form",
-    rect: { left: 642, right: 1698, top: 420, bottom: 1620, width: 1056, height: 1200 }
-  });
-  const input = new FakeElement({
-    attrs: { id: "prompt-textarea", contenteditable: "true", role: "textbox" },
-    rect: { left: 708, right: 1410, top: 505, bottom: 541, width: 702, height: 36 }
-  });
-  const selector = new FakeElement({ tag: "button", attrs: { "aria-label": "Reasoning effort" } });
-  form.children = [input, selector];
-  form.children.forEach((element) => { element.parentElement = form; });
-  const hooks = loadPlatformContent([form, input, selector], "chatgpt.com", {
-    innerWidth: 1920, innerHeight: 1080
-  });
-
-  for (const [mode, width] of [["High", 70], ["Medium", 120], ["Instant", 95], ["High", 70]]) {
-    selector.textContent = selector.innerText = mode;
-    selector.rect = { left: 1420, right: 1420 + width, top: 505, bottom: 541, width, height: 36 };
-    const placement = hooks.getChatGptFixedBubblePlacement(input);
-    assert.equal(placement.left, 1370, mode);
-    assert.equal(placement.top, 502, mode);
-  }
-});
-
-test("ChatGPT placement fallback rejects a page-sized form", () => {
-  const form = new FakeElement({
-    tag: "form",
-    rect: { left: 642, right: 1698, top: 420, bottom: 1620, width: 1056, height: 1200 }
-  });
-  const input = new FakeElement({
-    attrs: { contenteditable: "true", role: "textbox" },
-    rect: { left: 708, right: 1410, top: 505, bottom: 541, width: 702, height: 36 }
-  });
-  form.children = [input];
-  input.parentElement = form;
-  const hooks = loadPlatformContent([form, input], "chatgpt.com", {
-    innerWidth: 1920, innerHeight: 1080
-  });
-  const placement = hooks.getChatGptFixedBubblePlacement(input);
-  assert.ok(placement.top >= input.rect.top - 42);
-  assert.ok(placement.top <= input.rect.bottom + 112);
-});
-
-test("ChatGPT free placement stays left of the complete visible control row", () => {
-  const think = new FakeElement({
-    tag: "button",
-    text: "Think",
-    attrs: { "aria-label": "Thinking" },
-    rect: { left: 1390, right: 1482, top: 936, bottom: 972, width: 92, height: 36 }
-  });
-  const mic = new FakeElement({
-    tag: "button",
-    attrs: { "aria-label": "Microphone" },
-    rect: { left: 1498, right: 1534, top: 936, bottom: 972, width: 36, height: 36 }
-  });
-  const voice = new FakeElement({
-    tag: "button",
-    attrs: { "aria-label": "Voice mode" },
-    rect: { left: 1548, right: 1592, top: 932, bottom: 976, width: 44, height: 44 }
-  });
-  const placement = getChatGptComposerPlacement([think, mic, voice]);
-
-  assert.equal(placement.left, 1340);
-  assert.equal(placement.top, 933);
-  assert.ok(placement.left + 42 <= think.rect.left);
 });
 
 test("Gemini bubble anchors to the left of the Flash selector", () => {
