@@ -1,6 +1,7 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-02-inline-size-gpt-hover-v91";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-02-gemini-row-claude-transition-v92";
   const INLINE_PILL_SIZE = 36;
+  const CLAUDE_INLINE_REMOUNT_GRACE_MS = 500;
   const ownedUiStyleSheets = new Map();
   const CLAUDE_INLINE_STYLE_ID = "context-generator-claude-inline-styles";
   const CLAUDE_INLINE_MARKER = "data-context-generator-claude-inline";
@@ -3763,8 +3764,38 @@
     applyOwnedUiStyleSheet(style);
   }
 
+  function clearClaudeInlineMountGrace() {
+    if (!claudeInlineMount) return;
+    clearTimeout(claudeInlineMount.graceTimer);
+    claudeInlineMount.graceTimer = null;
+    claudeInlineMount.graceExpired = false;
+  }
+
+  function retainClaudeInlineMount(bubble, input) {
+    const mount = claudeInlineMount;
+    if (!mount || mount.bubble !== bubble || mount.graceExpired) return false;
+    // Sending can briefly hide controls or replace the composer while it docks.
+    // Keep the last inline slot during that gap instead of flashing the fixed
+    // backup. Repeated mutations must not extend this one bounded grace period.
+    if (mount.graceTimer == null) {
+      mount.graceTimer = setTimeout(() => {
+        if (claudeInlineMount !== mount) return;
+        mount.graceTimer = null;
+        mount.graceExpired = true;
+        scheduleFloatingButtonUpdate("claude-inline-grace-expired");
+      }, CLAUDE_INLINE_REMOUNT_GRACE_MS);
+    }
+    const ownsSlot = (!input || input === mount.input) && mount.input.isConnected &&
+      mount.host.isConnected && mount.host.contains(mount.input) && mount.host.contains(mount.actions) &&
+      mount.actions.contains(mount.right) && bubble.parentElement === mount.right;
+    // A detached/replaced owner waits invisibly for a validated remount.
+    setBubbleStylesIfChanged(bubble, { visibility: ownsSlot ? "visible" : "hidden" });
+    return true;
+  }
+
   function releaseClaudeInlineMount() {
     if (!claudeInlineMount) return;
+    clearClaudeInlineMountGrace();
     const { editorBranch, actions, left, right } = claudeInlineMount;
     [editorBranch, actions, left, right].forEach((node) => node.removeAttribute(CLAUDE_INLINE_MARKER));
     claudeInlineMount = null;
@@ -3774,6 +3805,7 @@
   function mountClaudeInlineButton(bubble, input) {
     const toolbar = findClaudeInlineToolbar(input);
     if (!toolbar) {
+      if (retainClaudeInlineMount(bubble, input)) return true;
       releaseClaudeInlineMount();
       return false;
     }
@@ -3785,6 +3817,7 @@
       releaseClaudeInlineMount();
       claudeInlineMount = { ...toolbar, bubble, pathname: window.location.pathname };
     }
+    clearClaudeInlineMountGrace();
     claudeInlineMount.pathname = window.location.pathname;
     // The control observer serves both modes; stable inline updates can reuse it.
     clearLegacyInlineBackup({ keepControlObserver: true });
@@ -4020,6 +4053,8 @@
       style.dataset.contextGeneratorOwned = "true";
       style.textContent = `
         [${PROVIDER_INLINE_MARKER}="slot"]:not([hidden]):not(.hidden) { display:inline-flex; align-items:center!important; min-width:0!important; max-width:100%!important; }
+        /* Gemini's model wrapper can be a column; keep the pill left of Flash. */
+        .text-input-field [${PROVIDER_INLINE_MARKER}="slot"]:not([hidden]):not(.hidden) { flex-direction:row!important; flex-wrap:nowrap!important; }
         [${PROVIDER_INLINE_MARKER}="controls"]:not([hidden]):not(.hidden) { display:flex; align-items:center!important; flex-wrap:wrap!important; min-width:0!important; max-width:100%!important; height:auto!important; }
         [${PROVIDER_INLINE_MARKER}="row"] { flex-wrap:wrap!important; align-items:center!important; justify-content:space-between!important; gap:6px!important; height:auto!important; }
         [${PROVIDER_INLINE_MARKER}="grok-dock"] { position:static!important; inset:auto!important; }
@@ -4827,6 +4862,7 @@
     const input = findPlatformInput();
     const existingBubble = document.getElementById(BUBBLE_ID) || inlineBubble || transientComposerPlacement?.bubble || null;
     if (!input) {
+      if (currentPlatform.id === "claude" && retainClaudeInlineMount(existingBubble, null)) return existingBubble;
       const retainedBubble = retainTransientComposerPlacement(existingBubble);
       if (retainedBubble) return retainedBubble;
       if (existingBubble) existingBubble.style.display = "none";
@@ -9052,6 +9088,7 @@
     stopProviderControlMutationMonitoring();
     clearChatGptPlacementResizeMonitoring();
     clearTransientComposerPlacement();
+    clearClaudeInlineMountGrace();
     stopInlinePathnameMonitoring();
 
 

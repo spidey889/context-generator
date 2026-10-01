@@ -2894,6 +2894,33 @@ test("Claude inline mounting reuses its 36px mic-adjacent slot after remount and
   }
 });
 
+test("Claude keeps its inline slot through temporary control and editor discovery gaps", () => {
+  const f = inlineClaudeFixture();
+  const hooks = loadPlatformContent(Object.values(f), "claude.ai");
+  hooks.document.createElement = () => new FakeElement();
+  const bubble = new FakeElement({ tag: "button" });
+  const timers = [];
+  const cancelled = [];
+  hooks.window.setTimeout = (callback, delay) => { timers.push({ callback, delay }); return timers.length; };
+  hooks.window.clearTimeout = (timer) => cancelled.push(timer);
+  assert.equal(hooks.mountInlineOrLegacyBackup(bubble, f.input), true);
+  f.model.setAttribute("data-visibility", "hidden");
+  assert.equal(hooks.mountInlineOrLegacyBackup(bubble, f.input), true);
+  assert.equal(hooks.mountClaudeInlineButton(bubble, null), true);
+  assert.equal(bubble.parentElement, f.right);
+  assert.equal(bubble.style.position, "static");
+  assert.equal(bubble.style.width, "36px");
+  assert.equal(timers.length, 1, "repeated updates must not extend the grace period");
+  assert.equal(timers[0].delay, 500);
+  f.model.removeAttribute("data-visibility");
+  assert.equal(hooks.mountInlineOrLegacyBackup(bubble, f.input), true);
+  assert.deepEqual(cancelled, [1], "inline recovery must cancel its pending backup retry");
+  f.model.setAttribute("data-visibility", "hidden");
+  assert.equal(hooks.mountClaudeInlineButton(bubble, f.input), true);
+  hooks.releaseClaudeInlineMount();
+  assert.deepEqual(cancelled, [1, 2], "release must cancel the transition retry too");
+});
+
 test("Claude inline discovery validates the compact model chin against the same composer", () => {
   const fixture = inlineClaudeFixture();
   const composer = new FakeElement({ attrs: { "data-cds": "ChatComposer" } });
@@ -2924,6 +2951,19 @@ for (const platform of ["claude", "chatgpt"]) {
     assert.equal(hooks.mountInlineOrLegacyBackup(bubble, inline.input), true);
     assert.equal(bubble.style.position, "static", "inline remains primary");
     assert.equal(hooks.resizeObservers.some(observer => observer.observed.length), false);
+    if (platform === "claude") {
+      let expireGrace;
+      hooks.window.setTimeout = (callback, delay) => {
+        assert.equal(delay, 500);
+        expireGrace = callback;
+        return 1;
+      };
+      hooks.window.clearTimeout = () => {};
+      assert.equal(hooks.mountInlineOrLegacyBackup(bubble, input), true);
+      assert.equal(bubble.style.position, "static", "a replacement first waits for inline recovery");
+      assert.equal(bubble.style.visibility, "hidden", "the old composer must not own a visible pill for the new editor");
+      expireGrace();
+    }
     assert.equal(hooks.mountInlineOrLegacyBackup(bubble, input), true);
     assert.equal(bubble.style.position, "fixed", "unknown inline markup uses the real legacy path");
     assert.equal(bubble.parentElement, hooks.document.body);
