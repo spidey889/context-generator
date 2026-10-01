@@ -38,12 +38,15 @@ const TELEMETRY_KEYS = new Set([
   "status",
   "last_stage",
   "failure_reason",
-  "extension_version"
+  "extension_version",
+  "summary_proof"
 ]);
 
 export function validateTelemetryPayload(input) {
   if (!input || typeof input !== "object" || Array.isArray(input)) return null;
   if (Object.keys(input).some((key) => !TELEMETRY_KEYS.has(key))) return null;
+  if (input.summary_proof !== undefined &&
+      (typeof input.summary_proof !== "string" || !/^[0-9a-f]{64}$/.test(input.summary_proof))) return null;
   if (!isUuid(input.attempt_id) || !isUuid(input.install_id)) return null;
   if (!TELEMETRY_PLATFORMS.has(input.source_platform)) return null;
   if (!TELEMETRY_PLATFORMS.has(input.destination_platform)) return null;
@@ -78,7 +81,8 @@ export function validateTelemetryPayload(input) {
     status: input.status,
     last_stage: input.last_stage,
     failure_reason: failureReason,
-    extension_version: input.extension_version
+    extension_version: input.extension_version,
+    ...(input.summary_proof !== undefined ? { summary_proof: input.summary_proof } : {})
   };
 }
 

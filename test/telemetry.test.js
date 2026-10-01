@@ -447,3 +447,87 @@ test("Supabase progress upserts cannot move a transfer backward", () => {
   assert.match(PROGRESS_MIGRATION_SOURCE, /revoke all on function public\.record_transfer_event/);
   assert.match(PROGRESS_MIGRATION_SOURCE, /to service_role/);
 });
+
+test("background persists server confirmation and never rebinds cached proof to a new attempt", async () => {
+  const { createSummaryProof, verifySummaryProof } = await import("../supabase/functions/_shared/summary-proof.mjs");
+  const key = "test-only-signing-key-0123456789abcdef";
+  const requests = [];
+  let summaryRequests = 0;
+  let online = true;
+  const background = loadTelemetryBackground(async (url, options) => {
+    const body = JSON.parse(options.body);
+    if (url.endsWith("/api/summarize")) {
+      summaryRequests++;
+      assert.equal(body.telemetry.attempt_id, "11111111-1111-4111-8111-111111111111");
+      return { ok: true, json: async () => ({
+        summary: "The build passed.", summaryProof: await createSummaryProof(body.telemetry, key), timing: {}
+      }) };
+    }
+    requests.push(body);
+    return { ok: online };
+  }, {}, "1.4.6");
+  await background.drain();
+  await background.sendTelemetry(makeEvent({ lastStage: "summary_request_started" }));
+  async function summary(attemptId) {
+    return new Promise(resolve => background.listeners.message({
+      type: "SUMMARIZE_WITH_BACKEND", conversation: "The build passed.", transferId: attemptId
+    }, { tab: { id: 7 } }, resolve));
+  }
+  const first = await summary("11111111-1111-4111-8111-111111111111");
+  assert.equal(first.ok, true);
+  await background.drain();
+  const confirmation = requests.find(request => request.summary_proof);
+  assert.ok(confirmation);
+  assert.equal(confirmation.last_stage, "summary_completed");
+  assert.equal(await verifySummaryProof(confirmation, key), true);
+  online = false;
+  await background.sendTelemetry(makeEvent({ status: "succeeded", lastStage: "completed", characterCount: 17 }));
+  const retained = background.storage["context-generator-telemetry-outbox-v1"];
+  assert.equal(await verifySummaryProof(retained[0].payload, key), true);
+  online = true;
+  const secondId = "33333333-3333-4333-8333-333333333333";
+  await background.sendTelemetry(makeEvent({ attemptId: secondId, lastStage: "summary_request_started" }));
+  const second = await summary(secondId);
+  assert.equal(second.ok, true);
+  assert.equal(second.timing.cacheHit, true);
+  await background.sendTelemetry(makeEvent({ attemptId: secondId, status: "succeeded", lastStage: "completed" }));
+  await background.drain();
+  assert.equal(summaryRequests, 1);
+  assert.ok(requests.filter(request => request.attempt_id === secondId).every(request => !request.summary_proof));
+});
+
+test("completed server summary retains confirmation after source-tab cancellation", async () => {
+  const { createSummaryProof, verifySummaryProof } = await import("../supabase/functions/_shared/summary-proof.mjs");
+  const key = "test-only-signing-key-0123456789abcdef";
+  const requests = [];
+  let releaseSummary;
+  let requestStarted;
+  const started = new Promise(resolve => { requestStarted = resolve; });
+  const background = loadTelemetryBackground(async (url, options) => {
+    const body = JSON.parse(options.body);
+    if (url.endsWith("/api/summarize")) {
+      requestStarted();
+      await new Promise(resolve => { releaseSummary = resolve; });
+      return { ok: true, json: async () => ({ summary: "Build passed.", summaryProof: await createSummaryProof(body.telemetry, key) }) };
+    }
+    requests.push(body);
+    return { ok: true };
+  }, {}, "1.4.6");
+  await background.drain();
+  await background.sendTelemetry(makeEvent({ lastStage: "summary_request_started" }), 42);
+  const pending = new Promise(resolve => background.listeners.message({
+    type: "SUMMARIZE_WITH_BACKEND", conversation: "Build passed.", transferId: makeEvent().attemptId
+  }, { tab: { id: 42 } }, resolve));
+  await started;
+  background.listeners.tabRemoved(42);
+  await background.drain();
+  assert.equal(requests.at(-1).failure_reason, "user_cancelled");
+  releaseSummary();
+  assert.equal((await pending).ok, true);
+  await background.drain();
+  const confirmation = requests.find(request => request.summary_proof);
+  assert.ok(confirmation);
+  assert.equal(confirmation.status, "started");
+  assert.equal(confirmation.last_stage, "summary_completed");
+  assert.equal(await verifySummaryProof(confirmation, key), true);
+});

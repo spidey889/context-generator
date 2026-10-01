@@ -43,3 +43,30 @@ COMMIT;
 ```
 
 For a function rollback, redeploy the previous function source while keeping the widened failure-reason constraint. Queued cancellation reports and stored rows remain compatible with that constraint.
+
+## Pending security migration: verified summary counters
+
+`20261002000000_count_only_verified_summaries.sql` is new and has **not** been applied to the production project above. The ten recorded migrations remain unchanged. This migration preserves historical counter values and starts requiring server confirmation for future increments; it cannot establish the provenance of old values.
+
+The public `status` and `last_stage` fields describe a **client-reported paste outcome**. They must not be used as verified summary totals. `summary_verified` describes completed server summarization and is computed only in the edge handler from a signed receipt. The `users` counters increment on its first false-to-true transition, even if a paste failed. Installation IDs remain anonymous, caller-generated IDs, not authenticated people. Someone can still automate real summary requests or submit false diagnostic outcomes; this fix prevents unsigned claims alone from incrementing verified summary/user counters.
+
+### Rollout order
+
+1. Review and apply only the new migration to **cap-context-telemetry** (`iqkzynzxbmemhtiupwwu`) after comparing migration history and the dry-run output. Never replay old migrations, the archive, or use `--include-all` to hide mismatches. The migration switches counting off for unsigned events immediately; the previous edge function remains compatible via the RPC's default `p_summary_verified=false`.
+2. Configure the same high-entropy, private `TELEMETRY_SIGNING_KEY` in **Vercel's server environment** and **Supabase Edge Function secrets**. Use at least 32 random bytes (64 hex characters is suitable). Generate and enter it securely; never put it in the extension, repository, logs, or chat. A publishable Supabase key is not a signing secret. Missing/short keys fail closed for counting and do not prevent summaries or legacy diagnostic delivery.
+3. Deploy `transfer-telemetry` with `handler.mjs`, `validation.mjs`, and `../_shared/summary-proof.mjs`, then deploy the Vercel summary code. The shared proof file must also be included in the Vercel function bundle; the literal dynamic import in `api/summarize.js` is the dependency.
+4. Package/release the updated extension background code with a new store version. Older extensions still transfer and drain diagnostic retries, but do not supply the summary context needed for confirmations. Cached/shared requests count the backend summary once; repeated cached pastes and entirely offline carries remain unverified client outcomes.
+5. Validate one real summary and its signed stage event, confirm `summary_verified=true` and one counter increment, replay that event and confirm no additional increment, then submit an unsigned success and confirm no verified increment. No live validation or deployment was performed during development.
+
+Receipts bind the attempt, installation, original timestamp, route and extension version. They omit conversation/summary content and do not expire, so durable offline retries remain usable while the signing key is unchanged. The attempt UUID deduplicates confirmations. Rotating the signing key invalidates outstanding old receipts; coordinate rotation with the retry backlog. These receipts prove server summary completion, not a human identity or a verified browser paste.
+
+### Local migration check
+
+The normal Node suites test the API, signature handling, actual edge request handler, and extension receipt/cache behavior. An additional isolated PostgreSQL check is available without touching production:
+
+```sh
+npm install --prefix /tmp/cap-context-db-check --cache /tmp/cap-context-npm-cache --no-audit --no-fund --package-lock=false @electric-sql/pglite@0.3.14
+PGLITE_MODULE_PATH=/tmp/cap-context-db-check/node_modules/@electric-sql/pglite node scripts/check-verified-telemetry-db.js
+```
+
+It replays all eleven migrations and checks forged successes, valid confirmations, duplicates, late confirmation after failure, identity mismatch, legacy defaults, and anon/authenticated denial. It supplies Supabase's default service-role table grants and a local `pg_cron` catalog shim; hosted gateway behavior and scheduled execution are not covered.

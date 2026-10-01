@@ -50,6 +50,7 @@ const summaryCache = new Map();
 const summaryInflight = new Map();
 const activeTransferTelemetry = new Map();
 const activeTransferSourceTabs = new Map();
+const summaryProofs = new Map();
 let telemetryInstallIdPromise = null;
 let telemetryWorkChain = Promise.resolve();
 const DESTINATIONS = {
@@ -202,7 +203,9 @@ async function recordTransferTelemetry(event, sourceTabId = null) {
       status: sanitizedEvent.status,
       last_stage: sanitizedEvent.lastStage,
       failure_reason: sanitizedEvent.failureReason,
-      extension_version: chrome.runtime.getManifest?.().version || null
+      extension_version: chrome.runtime.getManifest?.().version || null,
+      ...(summaryProofs.has(sanitizedEvent.attemptId)
+        ? { summary_proof: summaryProofs.get(sanitizedEvent.attemptId) } : {})
     };
 
     await appendTelemetryOutbox(payload);
@@ -214,6 +217,7 @@ async function recordTransferTelemetry(event, sourceTabId = null) {
       if (activeTransferTelemetry.get(sanitizedEvent.attemptId)?.status !== "started") {
         activeTransferTelemetry.delete(sanitizedEvent.attemptId);
         activeTransferSourceTabs.delete(sanitizedEvent.attemptId);
+        summaryProofs.delete(sanitizedEvent.attemptId);
       }
     }).catch(() => {});
   }
@@ -534,6 +538,19 @@ async function fetchSummaryFromBackend(conversationText, transferId = null) {
   const stopServiceWorkerKeepAlive = startSummaryServiceWorkerKeepAlive();
 
   try {
+    const activeTelemetry = activeTransferTelemetry.get(transferId);
+    const telemetry = activeTelemetry ? {
+      attempt_id: activeTelemetry.attemptId,
+      install_id: await getOrCreateTelemetryInstallId(),
+      attempted_at: activeTelemetry.attemptedAt,
+      source_platform: activeTelemetry.sourcePlatform,
+      destination_platform: activeTelemetry.destinationPlatform,
+      character_count: activeTelemetry.characterCount,
+      status: "started",
+      last_stage: activeTelemetry.lastStage,
+      failure_reason: null,
+      extension_version: chrome.runtime.getManifest?.().version || null
+    } : null;
     const fetchStartedAt = nowMs();
     const response = await fetch(SUMMARY_BACKEND_URL, {
       method: "POST",
@@ -541,7 +558,7 @@ async function fetchSummaryFromBackend(conversationText, transferId = null) {
         "Content-Type": "application/json",
         "X-Cap-Context-Client": SUMMARY_CLIENT_HEADER
       },
-      body: JSON.stringify({ conversation: conversationText }),
+      body: JSON.stringify({ conversation: conversationText, ...(telemetry ? { telemetry } : {}) }),
       signal: controller.signal
     });
     recordKnownTransferTelemetryStage(transferId, "summary_response_started");
@@ -558,6 +575,19 @@ async function fetchSummaryFromBackend(conversationText, transferId = null) {
       throw createSummaryBackendPayloadError(data, data?.status || response.status);
     }
     if (!data.summary?.trim()) throw new Error("Backup summarizer returned no summary.");
+    if (telemetry && typeof data.summaryProof === "string" && /^[0-9a-f]{64}$/.test(data.summaryProof)) {
+      if (activeTransferTelemetry.has(transferId)) summaryProofs.set(transferId, data.summaryProof);
+      // Persist the confirmation even if the source tab has closed and its
+      // terminal client outcome was already delivered. No paste is asserted.
+      enqueueTelemetryWork(async () => {
+        await appendTelemetryOutbox({
+          ...telemetry,
+          last_stage: "summary_completed",
+          summary_proof: data.summaryProof
+        });
+        await flushTelemetryOutbox();
+      }).catch(() => {});
+    }
 
     const summary = data.summary.trim();
     const timing = {

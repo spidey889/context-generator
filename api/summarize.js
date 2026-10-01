@@ -222,6 +222,17 @@ async function handler(req, res) {
   }
 
   const responseChannel = createLongSummaryResponse(res);
+  if (validation.telemetry) {
+    const send = responseChannel.send;
+    responseChannel.send = async (status, payload) => {
+      if (status === 200 && payload.summary) {
+        const { createSummaryProof } = await import("../supabase/functions/_shared/summary-proof.mjs");
+        const proof = await createSummaryProof(validation.telemetry, process.env.TELEMETRY_SIGNING_KEY);
+        if (proof) payload = { ...payload, summaryProof: proof };
+      }
+      return send(status, payload);
+    };
+  }
   try {
     return await handleSummary(validation.conversation, responseChannel);
   } finally {

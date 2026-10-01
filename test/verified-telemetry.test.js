@@ -1,0 +1,160 @@
+const assert = require("node:assert/strict");
+const test = require("node:test");
+const summarize = require("../api/summarize.js");
+const telemetry = require("../api/telemetry.js");
+const { validateTelemetryPayload } = require("../api/telemetry-validation.js");
+const KEY = "test-only-signing-key-0123456789abcdef";
+const payload = (changes = {}) => ({
+  attempt_id: "11111111-1111-4111-8111-111111111111",
+  install_id: "22222222-2222-4222-8222-222222222222",
+  attempted_at: "2026-10-02T00:00:00.000Z",
+  source_platform: "claude", destination_platform: "chatgpt",
+  character_count: 50, status: "succeeded", last_stage: "completed",
+  failure_reason: null, extension_version: "1.4.6", ...changes
+});
+const response = () => ({
+  setHeader() {}, status(code) { this.code = code; return this; },
+  json(body) { this.body = body; return this; }, end() { return this; }
+});
+async function proofHelpers() { return import("../supabase/functions/_shared/summary-proof.mjs"); }
+async function edgeHarness(secret = KEY) {
+  const { createTelemetryHandler } = await import("../supabase/functions/transfer-telemetry/handler.mjs");
+  const calls = [];
+  const handler = createTelemetryHandler({
+    getEnv: name => ({ SUPABASE_PUBLISHABLE_KEYS: '{"default":"public-key"}', TELEMETRY_SIGNING_KEY: secret })[name],
+    createClient: () => ({ rpc: async (name, args) => { calls.push({ name, args }); return { error: null }; } })
+  });
+  return {
+    calls,
+    async send(body) {
+      return handler(new Request("https://example.invalid/telemetry", {
+        method: "POST", headers: { apikey: "public-key", "Content-Type": "application/json" }, body: JSON.stringify(body)
+      }));
+    }
+  };
+}
+
+test("summary confirmation binds attempt, installation, timestamp, route and extension version", async () => {
+  const { createSummaryProof, verifySummaryProof } = await proofHelpers();
+  const signed = { ...payload(), summary_proof: await createSummaryProof(payload(), KEY) };
+  assert.equal(await verifySummaryProof(signed, KEY), true);
+  for (const change of [
+    { attempt_id: "33333333-3333-4333-8333-333333333333" },
+    { install_id: "44444444-4444-4444-8444-444444444444" },
+    { attempted_at: "2026-10-02T00:00:01.000Z" },
+    { source_platform: "grok" }, { destination_platform: "gemini" }, { extension_version: "1.4.7" },
+    { summary_proof: "0".repeat(64) }
+  ]) assert.equal(await verifySummaryProof({ ...signed, ...change }, KEY), false);
+  assert.equal(await verifySummaryProof(signed, undefined), false);
+  assert.equal(await verifySummaryProof(signed, "short"), false);
+  assert.equal(await verifySummaryProof(payload(), KEY), false);
+});
+
+test("direct edge calls cannot promote fake successes or externally supplied verification booleans", async () => {
+  const edge = await edgeHarness();
+  for (let i = 1; i <= 50; i++) {
+    const res = await edge.send(payload({ attempt_id: `11111111-1111-4111-8111-${String(i).padStart(12, "0")}` }));
+    assert.equal(res.status, 204); // Legacy diagnostics still drain from the outbox.
+  }
+  assert.equal(edge.calls.length, 50);
+  assert.ok(edge.calls.every(call => call.args.p_summary_verified === false));
+  assert.equal((await edge.send(payload({ summary_verified: true }))).status, 400);
+  assert.equal((await edge.send(payload({ p_summary_verified: true }))).status, 400);
+  assert.equal((await edge.send(payload({ summary_proof: "0".repeat(64) }))).status, 204);
+  assert.equal(edge.calls.at(-1).args.p_summary_verified, false);
+});
+
+test("originless forged successes remain unverified through Vercel and the actual edge handler", async t => {
+  const edge = await edgeHarness();
+  const originalFetch = global.fetch;
+  const originalUrl = process.env.SUPABASE_TELEMETRY_FUNCTION_URL;
+  const originalKey = process.env.SUPABASE_TELEMETRY_PUBLISHABLE_KEY;
+  t.after(() => {
+    global.fetch = originalFetch;
+    for (const [name, old] of [["SUPABASE_TELEMETRY_FUNCTION_URL", originalUrl], ["SUPABASE_TELEMETRY_PUBLISHABLE_KEY", originalKey]]) {
+      if (old === undefined) delete process.env[name]; else process.env[name] = old;
+    }
+  });
+  process.env.SUPABASE_TELEMETRY_FUNCTION_URL = "https://example.invalid/telemetry";
+  process.env.SUPABASE_TELEMETRY_PUBLISHABLE_KEY = "public-key";
+  global.fetch = async (_url, options) => edge.send(JSON.parse(options.body));
+  const res = response();
+  await telemetry({ method: "POST", headers: { "content-type": "application/json", "x-cap-context-client": "cap-context-extension/1" }, body: payload() }, res);
+  assert.equal(res.code, 204);
+  assert.equal(edge.calls[0].args.p_summary_verified, false);
+});
+
+test("completed server summary yields a usable receipt, including local server direct carry", async t => {
+  const { verifySummaryProof } = await proofHelpers();
+  const originalKey = process.env.TELEMETRY_SIGNING_KEY;
+  t.after(() => {
+    if (originalKey === undefined) delete process.env.TELEMETRY_SIGNING_KEY;
+    else process.env.TELEMETRY_SIGNING_KEY = originalKey;
+  });
+  process.env.TELEMETRY_SIGNING_KEY = KEY;
+  const context = payload({ status: "started", last_stage: "summary_request_started", failure_reason: null });
+  const res = response();
+  await summarize({ method: "POST", headers: { "content-type": "application/json", "x-cap-context-client": "cap-context-extension/1" }, body: { conversation: "User: Keep the build result.\nClaude: The build passed.", telemetry: context } }, res);
+  assert.equal(res.code, 200);
+  assert.ok(res.body.summary);
+  const signed = { ...payload(), summary_proof: res.body.summaryProof };
+  assert.equal(await verifySummaryProof(signed, KEY), true);
+  const edge = await edgeHarness();
+  assert.equal((await edge.send(signed)).status, 204);
+  assert.equal(edge.calls[0].args.p_summary_verified, true);
+  // Paste outcomes are distinct from completed server summary work.
+  await edge.send({ ...signed, status: "failed", last_stage: "paste_started", failure_reason: "paste_failed" });
+  assert.equal(edge.calls[1].args.p_summary_verified, true);
+  const unconfigured = await edgeHarness("");
+  await unconfigured.send(signed);
+  assert.equal(unconfigured.calls[0].args.p_summary_verified, false);
+});
+
+test("summary validation rejects forged proofs, verification flags and malformed contexts", async () => {
+  for (const changes of [{ summary_proof: "0".repeat(64) }, { summary_verified: true }, { install_id: "invalid" }]) {
+    const res = response();
+    await summarize({ method: "POST", headers: { "content-type": "application/json", "x-cap-context-client": "cap-context-extension/1" }, body: {
+      conversation: "User: hello", telemetry: payload({ status: "started", last_stage: "summary_request_started", ...changes })
+    } }, res);
+    assert.equal(res.code, 400);
+  }
+  assert.equal(validateTelemetryPayload(payload({ summary_proof: "x".repeat(10000) })), null);
+});
+
+test("server receipts cover remote success and emergency carry, and missing keys keep summaries usable", async t => {
+  const { verifySummaryProof } = await proofHelpers();
+  const originalFetch = global.fetch;
+  const names = ["TELEMETRY_SIGNING_KEY", "GEMINI_API_KEY", "MISTRAL_API_KEY", "GROQ_ENABLED", "ORCAROUTER_ENABLED"];
+  const previous = Object.fromEntries(names.map(name => [name, process.env[name]]));
+  t.after(() => {
+    global.fetch = originalFetch;
+    for (const name of names) {
+      if (previous[name] === undefined) delete process.env[name]; else process.env[name] = previous[name];
+    }
+  });
+  process.env.TELEMETRY_SIGNING_KEY = KEY;
+  delete process.env.GEMINI_API_KEY;
+  process.env.MISTRAL_API_KEY = "test-provider-key";
+  process.env.GROQ_ENABLED = "false";
+  process.env.ORCAROUTER_ENABLED = "false";
+  const context = payload({ status: "started", last_stage: "summary_request_started", failure_reason: null });
+  const req = { method: "POST", headers: { "content-type": "application/json", "x-cap-context-client": "cap-context-extension/1" }, body: {
+    conversation: "User: Windows build passed.\nClaude: Linux checks remain pending.\n".repeat(80), telemetry: context
+  } };
+  for (const remoteWorks of [true, false]) {
+    global.fetch = async () => remoteWorks
+      ? new Response(JSON.stringify({ choices: [{ message: { content: "Windows build passed; Linux checks remain pending." } }] }))
+      : new Response(JSON.stringify({ error: { code: "unavailable" } }), { status: 400 });
+    const res = response();
+    await summarize(req, res);
+    assert.equal(res.code, 200);
+    assert.equal(res.body.timing.provider, remoteWorks ? "mistral" : "local-direct");
+    assert.equal(await verifySummaryProof({ ...context, summary_proof: res.body.summaryProof }, KEY), true);
+  }
+  delete process.env.TELEMETRY_SIGNING_KEY;
+  const res = response();
+  await summarize(req, res);
+  assert.equal(res.code, 200);
+  assert.ok(res.body.summary);
+  assert.equal(res.body.summaryProof, undefined);
+});
