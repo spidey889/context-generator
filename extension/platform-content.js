@@ -6706,7 +6706,7 @@
     cancelAnimationFrame(errorDiv.contextGeneratorAnimationFrame);
     errorDiv.setAttribute("aria-hidden", "true");
     errorDiv.style.opacity = "0";
-    errorDiv.style.transform = "translate3d(-24px,0,0)";
+    errorDiv.style.transform = "translate3d(24px,0,0)";
     if (immediate || window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) errorDiv.style.display = "none";
     else errorDiv.contextGeneratorDisplayTimer = setTimeout(() => {
       errorDiv.style.display = "none";

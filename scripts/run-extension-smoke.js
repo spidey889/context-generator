@@ -633,8 +633,8 @@ async function verifyEmptyChatError(session, browserSession, state, { removeTurn
   assert.equal(await session.evaluate(`(() => {
     const error = document.getElementById("context-generator-error-overlay");
     error.querySelector("button").click();
-    return new DOMMatrix(error.style.transform).m41 === -24 && error.style.opacity === "0";
-  })()`), true, "Dismissal must fade towards the left.");
+    return new DOMMatrix(error.style.transform).m41 === 24 && error.style.opacity === "0";
+  })()`), true, "Dismissal must fade towards the right.");
   await waitFor(() => session.evaluate(`document.getElementById("context-generator-error-overlay").style.display === "none"`), "completed toast dismissal");
   // Starting again cancels old error dismissal/reveal work. Reduced motion
   // must also reveal and dismiss immediately, without intermediate movement.
