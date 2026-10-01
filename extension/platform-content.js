@@ -1,6 +1,9 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-01-claude-popup-anchor-v76";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-01-claude-inline-experiment-v77";
   const ownedUiStyleSheets = new Map();
+  const CLAUDE_INLINE_STYLE_ID = "context-generator-claude-inline-styles";
+  const CLAUDE_INLINE_MARKER = "data-context-generator-claude-inline";
+  let claudeInlineMount = null;
   // Start fast capture on for each page instance; a manual opt-out lasts until reload.
   let claudeJsonCaptureEnabled = true;
   let chatGptJsonCaptureEnabled = true;
@@ -639,6 +642,7 @@
   }
 
   function cleanupContextGeneratorNodes() {
+    releaseClaudeInlineMount();
     cleanupContextGeneratorReservations();
 
     if (ownedUiStyleSheets.size) {
@@ -649,6 +653,7 @@
 
     [
       BUBBLE_ID,
+      CLAUDE_INLINE_STYLE_ID,
       OVERLAY_ID,
       HANDOFF_SCRIM_ID,
       OVERLAY_PALETTE_STYLE_ID,
@@ -748,6 +753,9 @@
       waitForEditorText,
       formatFirefoxContentEditableHtml,
       getClaudeBubblePlacement,
+      findClaudeInlineToolbar,
+      mountClaudeInlineButton,
+      releaseClaudeInlineMount,
       getClaudeFixedBubblePlacement,
       getGeminiBubblePlacement,
       findGeminiModelSelectorButton,
@@ -3677,9 +3685,91 @@
     ].join(",")));
   }
 
+  function findClaudeInlineToolbar(input) {
+    if (!input?.isConnected || !isVisible(input)) return null;
+    // Claude's named actions container must be a sibling of this editor's
+    // branch. Never select a page-wide flex row, another composer, or a popup.
+    let host = input.parentElement;
+    for (let depth = 0; host && host !== document.body && depth < 10; depth++, host = host.parentElement) {
+      const actions = Array.from(host.children).find((node) => node.getAttribute("data-cds") === "ChatComposerActions");
+      if (!actions || actions.contains(input) || isComposerPopupControl(actions, input)) continue;
+      const editorBranch = Array.from(host.children).find((node) => node.contains(input));
+      const attach = actions.querySelector("[data-testid='chat-input-attach']");
+      const model = actions.querySelector("[data-testid='model-selector-dropdown']");
+      if (!editorBranch || !attach || !model || !isVisible(attach) || !isVisible(model)) continue;
+      if (isComposerPopupControl(attach, input) || isComposerPopupControl(model, input)) continue;
+      const rows = Array.from(actions.children);
+      const left = rows.find((row) => row.contains(attach) && getComputedStyle(row).display === "flex");
+      const right = rows.find((row) => row.contains(model) && getComputedStyle(row).display === "flex");
+      const rect = host.getBoundingClientRect();
+      if (!left || !right || left === right || rect.width < 180 || rect.width > Math.min(1320, window.innerWidth)) continue;
+      return { input, host, editorBranch, actions, left, right };
+    }
+    return null;
+  }
+
+  function ensureClaudeInlineStyles() {
+    if (document.getElementById(CLAUDE_INLINE_STYLE_ID)) return;
+    const style = document.createElement("style");
+    style.id = CLAUDE_INLINE_STYLE_ID;
+    style.className = "darkreader";
+    style.dataset.contextGeneratorOwned = "true";
+    // Native absolute groups can collide even if our slot is inline. Put the
+    // two groups in normal flow and let CSS wrap them; no viewport coordinates,
+    // control translations, or width-dependent JavaScript are needed.
+    style.textContent = `
+      [${CLAUDE_INLINE_MARKER}="editor"] {
+        padding-left:0!important; padding-right:0!important; padding-bottom:0!important;
+      }
+      [${CLAUDE_INLINE_MARKER}="actions"] {
+        display:flex!important; position:static!important; width:100%!important;
+        flex-wrap:wrap!important; align-items:center!important;
+        justify-content:space-between!important; gap:6px!important; margin-top:2px!important;
+      }
+      [${CLAUDE_INLINE_MARKER}="left"], [${CLAUDE_INLINE_MARKER}="right"] {
+        position:static!important; inset:auto!important; max-width:100%!important;
+        min-width:0!important; flex-wrap:wrap!important; height:auto!important;
+      }
+      [${CLAUDE_INLINE_MARKER}="right"] { margin-left:auto!important; }
+    `;
+    (document.head || document.documentElement).appendChild(style);
+    applyOwnedUiStyleSheet(style);
+  }
+
+  function releaseClaudeInlineMount() {
+    if (!claudeInlineMount) return;
+    const { editorBranch, actions, left, right } = claudeInlineMount;
+    [editorBranch, actions, left, right].forEach((node) => node.removeAttribute(CLAUDE_INLINE_MARKER));
+    claudeInlineMount = null;
+  }
+
+  function mountClaudeInlineButton(bubble, input) {
+    const toolbar = findClaudeInlineToolbar(input);
+    if (!toolbar) {
+      releaseClaudeInlineMount();
+      return false;
+    }
+    if (claudeInlineMount?.input !== input || claudeInlineMount?.left !== toolbar.left) {
+      releaseClaudeInlineMount();
+      claudeInlineMount = { ...toolbar, bubble, pathname: window.location.pathname };
+    }
+    ensureClaudeInlineStyles();
+    [[toolbar.editorBranch, "editor"], [toolbar.actions, "actions"], [toolbar.left, "left"], [toolbar.right, "right"]]
+      .forEach(([node, value]) => {
+        if (node.getAttribute(CLAUDE_INLINE_MARKER) !== value) node.setAttribute(CLAUDE_INLINE_MARKER, value);
+      });
+    if (bubble.parentElement !== toolbar.left) toolbar.left.appendChild(bubble);
+    setBubbleSize(bubble, 32);
+    setBubbleStylesIfChanged(bubble, {
+      position: "static", left: "auto", right: "auto", top: "auto", bottom: "auto",
+      margin: "0", flex: "0 0 32px", alignSelf: "center", display: "flex", visibility: "visible"
+    });
+    return true;
+  }
+
   function ensureFloatingButton(recalculationReason = "direct") {
     const input = findPlatformInput();
-    const existingBubble = document.getElementById(BUBBLE_ID) || transientComposerPlacement?.bubble || null;
+    const existingBubble = document.getElementById(BUBBLE_ID) || claudeInlineMount?.bubble || transientComposerPlacement?.bubble || null;
 
     if (!input) {
       if (retainClaudeStablePlacement(existingBubble)) {
@@ -3700,6 +3790,14 @@
     }
 
     const bubble = existingBubble || createFloatingButton();
+    if (currentPlatform.id === "claude" && mountClaudeInlineButton(bubble, input)) {
+      releaseBubbleSlot();
+      releaseComposerSurface();
+      clearClaudePlacementMonitoring();
+      ensureFloatingOverlay();
+      maybeShowOnboardingNudge(bubble);
+      return bubble;
+    }
     if (currentPlatform.id === "chatgpt") {
       releaseBubbleSlot();
       releaseComposerSurface();

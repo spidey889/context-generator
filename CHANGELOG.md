@@ -1,5 +1,7 @@
 # Changelog
 
+- 2026-10-01 (`inline-pill-experiment`, not production): Added the first Claude-only 32px inline mounting adapter, validated through the active editor's named actions container and semantic attachment/model controls. Native groups wrap in normal flow; old fixed placement remains temporarily available. Added discovery, popup rejection, remount, slot sizing, and native-marker cleanup tests. Preserved owner changes in stash `2869dac0` before creating the branch; master remains at `dc1ac963`.
+
 - 2026-10-01: Closed Claude's popup-control placement gap by excluding nested menu/dialog/popover controls from orb anchors and mounted control reservations. Reused ChatGPT's popup boundary without changing its behavior or Claude's native Voice/Send placement. Advanced the content-script identity to v76. Tests and browser checks were skipped at the owner's request.
 
 - 2026-10-01: Prevented ChatGPT intelligence/effort popup controls from moving the orb by excluding menu/slider buttons from composer anchors and recognizing the real thinking/intelligence trigger. Advanced the content-script identity to v75. Tests and browser checks were skipped at the owner's request.

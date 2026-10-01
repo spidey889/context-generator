@@ -2440,6 +2440,73 @@ test("startup clears stale Claude placement transform reservations", () => {
   assert.equal(translatedClaudeControl.hasAttribute("data-context-generator-original-translate"), false);
 });
 
+function inlineClaudeFixture() {
+  const host = new FakeElement();
+  const editorBranch = new FakeElement();
+  const input = new FakeElement({ attrs: { contenteditable: "true", role: "textbox" } });
+  const actions = new FakeElement({ attrs: { "data-cds": "ChatComposerActions" } });
+  const left = new FakeElement({ attrs: { "data-display": "flex" } });
+  const right = new FakeElement({ attrs: { "data-display": "flex" } });
+  const attach = new FakeElement({ tag: "button", attrs: { "data-testid": "chat-input-attach" } });
+  const model = new FakeElement({ tag: "button", attrs: { "data-testid": "model-selector-dropdown" } });
+  host.appendChild(editorBranch);
+  editorBranch.appendChild(input);
+  host.appendChild(actions);
+  actions.appendChild(left);
+  actions.appendChild(right);
+  left.appendChild(attach);
+  right.appendChild(model);
+  return { host, editorBranch, input, actions, left, right, attach, model };
+}
+
+test("Claude inline slot discovers only the named actions beside its active editor", () => {
+  const fixture = inlineClaudeFixture();
+  const decoy = new FakeElement({ attrs: { "data-display": "flex" } });
+  fixture.editorBranch.appendChild(decoy);
+  const hooks = loadPlatformContent(Object.values(fixture), "claude.ai");
+  assert.equal(hooks.findClaudeInlineToolbar(fixture.input).left, fixture.left);
+  fixture.actions.removeAttribute("data-cds");
+  assert.equal(hooks.findClaudeInlineToolbar(fixture.input), null);
+});
+
+test("Claude inline discovery excludes popup controls and a different editor's toolbar", () => {
+  const fixture = inlineClaudeFixture();
+  const hooks = loadPlatformContent(Object.values(fixture), "claude.ai");
+  const otherInput = new FakeElement({ attrs: { contenteditable: "true" } });
+  assert.equal(hooks.findClaudeInlineToolbar(otherInput), null);
+  fixture.left.setAttribute("role", "menu");
+  assert.equal(hooks.findClaudeInlineToolbar(fixture.input), null);
+  fixture.left.removeAttribute("role");
+  fixture.model.setAttribute("data-visibility", "hidden");
+  assert.equal(hooks.findClaudeInlineToolbar(fixture.input), null);
+});
+
+test("Claude inline mounting reuses its 32px slot after an editor remount and restores native markers", () => {
+  const first = inlineClaudeFixture();
+  const next = inlineClaudeFixture();
+  const hooks = loadPlatformContent(Object.values(first), "claude.ai");
+  hooks.document.createElement = () => new FakeElement();
+  const originalGetById = hooks.document.getElementById;
+  hooks.document.getElementById = (id) => originalGetById(id)
+    || hooks.document.documentElement.children.find((node) => node.id === id);
+  const bubble = new FakeElement({ tag: "button" });
+  first.left.style.position = "absolute";
+  assert.equal(hooks.mountClaudeInlineButton(bubble, first.input), true);
+  assert.equal(bubble.parentElement, first.left);
+  assert.equal(bubble.style.position, "static");
+  assert.equal(bubble.style.width, "32px");
+  assert.equal(bubble.style.flex, "0 0 32px");
+  assert.equal(hooks.mountClaudeInlineButton(bubble, next.input), true);
+  assert.equal(bubble.parentElement, next.left);
+  assert.equal(first.left.hasAttribute("data-context-generator-claude-inline"), false);
+  assert.equal(first.left.style.position, "absolute");
+  assert.equal(next.left.children.filter((node) => node === bubble).length, 1);
+  hooks.releaseClaudeInlineMount();
+  for (const node of [next.editorBranch, next.actions, next.left, next.right]) {
+    assert.equal(node.hasAttribute("data-context-generator-claude-inline"), false);
+  }
+});
+
 test("Claude bubble fills the inline slot to the right of voice mode", () => {
   const voiceMode = new FakeElement({
     tag: "button",
