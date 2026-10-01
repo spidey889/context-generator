@@ -3031,6 +3031,50 @@ test("ChatGPT paid placement remains left of the reasoning control", () => {
   assert.equal(placement.top, 933);
 });
 
+test("ChatGPT keeps its orb beside wider modes inside a page-sized form", () => {
+  const form = new FakeElement({
+    tag: "form",
+    rect: { left: 642, right: 1698, top: 420, bottom: 1620, width: 1056, height: 1200 }
+  });
+  const input = new FakeElement({
+    attrs: { id: "prompt-textarea", contenteditable: "true", role: "textbox" },
+    rect: { left: 708, right: 1410, top: 505, bottom: 541, width: 702, height: 36 }
+  });
+  const selector = new FakeElement({ tag: "button", attrs: { "aria-label": "Reasoning effort" } });
+  form.children = [input, selector];
+  form.children.forEach((element) => { element.parentElement = form; });
+  const hooks = loadPlatformContent([form, input, selector], "chatgpt.com", {
+    innerWidth: 1920, innerHeight: 1080
+  });
+
+  for (const [mode, width] of [["High", 70], ["Medium", 120], ["Instant", 95], ["High", 70]]) {
+    selector.textContent = selector.innerText = mode;
+    selector.rect = { left: 1420, right: 1420 + width, top: 505, bottom: 541, width, height: 36 };
+    const placement = hooks.getChatGptFixedBubblePlacement(input);
+    assert.equal(placement.left, 1370, mode);
+    assert.equal(placement.top, 502, mode);
+  }
+});
+
+test("ChatGPT placement fallback rejects a page-sized form", () => {
+  const form = new FakeElement({
+    tag: "form",
+    rect: { left: 642, right: 1698, top: 420, bottom: 1620, width: 1056, height: 1200 }
+  });
+  const input = new FakeElement({
+    attrs: { contenteditable: "true", role: "textbox" },
+    rect: { left: 708, right: 1410, top: 505, bottom: 541, width: 702, height: 36 }
+  });
+  form.children = [input];
+  input.parentElement = form;
+  const hooks = loadPlatformContent([form, input], "chatgpt.com", {
+    innerWidth: 1920, innerHeight: 1080
+  });
+  const placement = hooks.getChatGptFixedBubblePlacement(input);
+  assert.ok(placement.top >= input.rect.top - 42);
+  assert.ok(placement.top <= input.rect.bottom + 112);
+});
+
 test("ChatGPT free placement stays left of the complete visible control row", () => {
   const think = new FakeElement({
     tag: "button",

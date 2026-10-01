@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-09-30-handoff-timer-ux-v70";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-01-chatgpt-mode-placement-v71";
   const ownedUiStyleSheets = new Map();
   // Start fast capture on for each page instance; a manual opt-out lasts until reload.
   let claudeJsonCaptureEnabled = true;
@@ -7376,7 +7376,9 @@
     const scopeRight = composerRect
       ? composerRect.right + 12
       : hasInputScope
-        ? Math.min(window.innerWidth - BUBBLE_GAP, inputRect.right + 96)
+        // The editor ends before the controls; wider mode labels still belong
+        // to the same composer, even when its outer form spans the page.
+        ? Math.min(window.innerWidth - BUBBLE_GAP, inputRect.left + getMaxComposerSurfaceWidth())
         : window.innerWidth - BUBBLE_GAP;
 
     return Array.from(root.querySelectorAll("button"))
@@ -7568,7 +7570,9 @@
     return Boolean(
       rect &&
       rect.width >= 280 &&
+      rect.width <= getMaxComposerSurfaceWidth() &&
       rect.height >= 40 &&
+      rect.height <= (currentPlatform.maxComposerHeight || 260) &&
       rect.bottom >= BUBBLE_GAP &&
       rect.top <= window.innerHeight - BUBBLE_GAP &&
       rect.right >= BUBBLE_GAP &&
