@@ -1,5 +1,11 @@
 # Changelog
 
+- 2026-10-01 (local only, not pushed): Refined the top-left brand from the small bold `cap-context` label to `Cap Context`, with larger semibold typography, tighter orb spacing and a single-line mobile treatment. Kept the orb artwork/animation and home destination; the explicitly named home link now treats its redundant logo image as decorative.
+
+- 2026-10-01 (local only, not pushed): Replaced the rejected purple closing install pill with a white button, a light border, compact rounded corners and a small decorative Cap Context orb. Kept the closing section, wording and destination; preserved the hero and arrow-free header actions.
+
+- 2026-10-01 (local only, not pushed): Added install-button hierarchy after inspecting Linear, Notion and Raycast in isolated Brave. Kept the owner-approved black hero action and gray demo button; made the header a compact light outlined "Install" pill and the closing action a purple "Add to your browser" pill. Preserved Web Store destinations and added descriptive accessible labels to the shorter/different variants.
+
 - 2026-10-01: Owner approved publishing the homepage simplification and install buttons. Replaced the owner-rejected gradient/circular-arrow install-button trial with flat black buttons, tighter corners, minimal shadows and a simple right arrow that nudges forward on hover. Preserved the labels, Web Store destinations, focus/press feedback, reduced-motion support and demo styling.
 
 - 2026-10-01 (rejected local trial, never published): Refined all three install buttons with a charcoal finish, lighter shadows and a consistent circular SVG arrow. Added gentle hover/press feedback and disabled movement for reduced motion; kept the Web Store links, accessible labels and gray demo button. Isolated Brave verified four widths down to 320 px, keyboard focus, hover/press, reduced motion and intact links without overflow or page errors; asset/license and scoped diff checks passed.
