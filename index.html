@@ -329,9 +329,10 @@
       max-width: 24ch;
       margin: 0 auto calc(var(--hero-stack-gap) + var(--hero-detail-gap));
       font-size: 64px;
+      font-weight: 500;
       line-height: 0.94;
-      letter-spacing: -0.075em;
-      color: #000000;
+      letter-spacing: -0.055em;
+      color: #17151f;
     }
 
     .hero .re-explaining {
@@ -361,6 +362,28 @@
       transform: rotate(-1deg);
       opacity: 0.65;
       pointer-events: none;
+    }
+
+    .hero .re-explaining-shimmer {
+      /* Extra paint room keeps the italic overhang and descenders in the highlight. */
+      position: absolute;
+      inset: -0.22em -0.14em -0.25em;
+      padding: 0.22em 0.14em 0.25em;
+      pointer-events: none;
+      color: transparent !important;
+      -webkit-text-fill-color: transparent !important;
+      background-image: linear-gradient(110deg, transparent 42%, rgba(202,156,244,0.3) 45%, rgba(223,186,255,0.85) 48%, #f5e8ff 50%, rgba(223,186,255,0.85) 52%, rgba(202,156,244,0.3) 55%, transparent 58%);
+      background-size: 250% 100%;
+      background-position: 100% 0;
+      background-repeat: no-repeat;
+      background-clip: text;
+      -webkit-background-clip: text;
+      animation: hero-word-shimmer 3s linear -0.3s infinite;
+    }
+
+    @keyframes hero-word-shimmer {
+      from { background-position: 100% 0; }
+      to { background-position: 0% 0; }
     }
 
     .hero p {
@@ -823,7 +846,7 @@
       }
 
       .hero h1 {
-        max-width: 12ch;
+        max-width: 20ch;
       }
     }
 
@@ -904,6 +927,8 @@
 
       .button.button-install,
       .button-install .install-icon svg { transform: none !important; }
+
+      .hero .re-explaining-shimmer { display: none; }
     }
     /* Native controls keep the film usable with keyboard input and without JavaScript. */
     .demo-section { padding-top: 1rem; scroll-margin-top: 2rem; }
@@ -1014,7 +1039,7 @@
 
   <main id="top">
     <section class="hero section container reveal">
-      <h1 style="color: #000000 !important;">Switch AIs without <span class="re-explaining">re-explaining</span> everything.</h1>
+      <h1 style="color: #17151f !important;">Switch AIs without <span class="re-explaining">re-explaining<span class="re-explaining-shimmer" aria-hidden="true">re-explaining</span></span> everything.</h1>
       <p>A browser extension to continue your chat from one AI to another.</p>
       <div class="hero-actions">
         <a class="button button-dark button-install" href="https://chromewebstore.google.com/detail/cap-context/lpkaciijlhckkdhbgidbjfkldigghnjf" target="_blank" rel="noopener noreferrer"><span>Install extension</span><span class="install-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" focusable="false"><path d="M5 12h14M13 6l6 6-6 6"></path></svg></span></a>
