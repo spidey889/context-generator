@@ -918,7 +918,13 @@ async function run() {
       await waitFor(()=>sourceSession.evaluate(`getComputedStyle(window.__gptSmokeButton).position==='static'
         && window.__gptSmokeButton.nextElementSibling===document.getElementById('gpt-reasoning')`),"ChatGPT hidden control-group recovery without resize");
       await sourceSession.call("Emulation.clearDeviceMetricsOverride");
-      await sourceSession.evaluate(`(() => {const input=document.getElementById('prompt-textarea');input.textContent=window.__gptAuditDraft;input.dispatchEvent(new Event('input',{bubbles:true}));})()`);
+      // Restoring the viewport/draft queues native resize and placement work.
+      // Finish that reflow before opening a picker that resize intentionally closes.
+      await sourceSession.evaluate(`(() => {
+        const input=document.getElementById('prompt-textarea');input.textContent=window.__gptAuditDraft;
+        input.dispatchEvent(new Event('input',{bubbles:true}));
+        return new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)));
+      })()`);
       await sourceSession.evaluate(`window.__gptSmokeButton.click()`);
       await waitFor(()=>sourceSession.evaluate(`getComputedStyle(document.getElementById('context-generator-destination-sheet')).opacity==='1'`),"ChatGPT picker before body-only remount");
       await sourceSession.evaluate(`(() => {
