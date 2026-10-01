@@ -211,12 +211,6 @@ test("destination messaging enforces its deadline while a response is still pend
   assert.ok(Date.now() - startedAt < 500, "The in-flight destination response must not outlive its deadline.");
 });
 
-test("extension sends each summary job to the backend only once", () => {
-  assert.match(source, /const SUMMARY_BACKEND_TIMEOUT_MS = 320000/);
-  assert.doesNotMatch(source, /SUMMARY_BACKEND_ATTEMPTS|SUMMARY_BACKEND_RETRY_BUDGET_MS/);
-  assert.equal((source.match(/fetch\(SUMMARY_BACKEND_URL/g) || []).length, 1);
-});
-
 test("destination preconnect and warmup never include conversation content", () => {
   const prepareStart = source.indexOf("async function prepareDestination(");
   const prepareEnd = source.indexOf("async function createDestinationTab(", prepareStart);

@@ -9,6 +9,7 @@ for (const status of [200, 429, 503]) {
     const originalSetTimeout = global.setTimeout;
     const requests = [];
     let stalledSignal;
+    let receivedStalledHeaders = false;
     const server = http.createServer((_req, res) => {
       res.writeHead(status, { "Content-Type": "application/json" });
       res.write("{"); // Headers arrive immediately, but the JSON never completes.
@@ -17,12 +18,15 @@ for (const status of [200, 429, 503]) {
     const conversation = "Build passed; Linux checks remain pending. ".repeat(100);
 
     // Exercise the real 90-second timer without making the test wait 90 seconds.
-    global.setTimeout = (callback, ms, ...args) => originalSetTimeout(callback, ms === 90000 ? 500 : ms, ...args);
+    // Deadline bookkeeping can subtract a few milliseconds before scheduling.
+    global.setTimeout = (callback, ms, ...args) => originalSetTimeout(callback, ms >= 89000 && ms <= 90000 ? 500 : ms, ...args);
     global.fetch = async (url, options) => {
       requests.push(url);
       if (requests.length === 1) {
         stalledSignal = options.signal;
-        return originalFetch(`http://127.0.0.1:${server.address().port}`, options);
+        const response = await originalFetch(`http://127.0.0.1:${server.address().port}`, options);
+        receivedStalledHeaders = true;
+        return response;
       }
       return new Response(JSON.stringify({ candidates: [{
         content: { parts: [{ text: "Build passed; Linux checks remain pending." }] },
@@ -40,6 +44,7 @@ for (const status of [200, 429, 503]) {
           recordSuccess: async () => ({})
         }
       });
+      assert.equal(receivedStalledHeaders, true, "timeout must exercise a stalled body after headers arrive");
       assert.equal(stalledSignal.aborted, true);
       assert.equal(requests.length, 2);
       assert.match(requests[1], /gemini-3\.5-flash-lite/);

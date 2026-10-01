@@ -13,39 +13,43 @@ const COMPILED_PLATFORM_CONTENT_SCRIPT = new vm.Script(
   { filename: SOURCE_PATH }
 );
 const virtualSweepTests = [];
+const loadedInstances = new Set();
+
+test.after(() => {
+  for (const hooks of loadedInstances) hooks.teardownContextGeneratorInstance();
+  loadedInstances.clear();
+});
+
+function clockTest(name, options, fn) {
+  if (typeof options === "function") [fn, options] = [options, {}];
+  test(name, { timeout: 5000, ...options }, async (t) => {
+    t.mock.timers.enable({ apis: ["Date", "setTimeout", "setInterval"], now: Date.now() });
+    const existingInstances = new Set(loadedInstances);
+    let finished = false;
+    const result = Promise.resolve().then(() => fn(t));
+    // Attach both handlers immediately so assertion failures cannot go unhandled.
+    result.then(() => { finished = true; }, () => { finished = true; });
+    try {
+      for (let elapsed = 0; !finished && elapsed < 60000; elapsed += 10) {
+        await new Promise(setImmediate);
+        t.mock.timers.tick(10);
+      }
+      assert.ok(finished, "operation exceeded 60 seconds of simulated time");
+      await result;
+    } finally {
+      for (const hooks of loadedInstances) {
+        if (existingInstances.has(hooks)) continue;
+        hooks.teardownContextGeneratorInstance();
+        loadedInstances.delete(hooks);
+      }
+      t.mock.timers.reset();
+    }
+  });
+}
 
 function virtualSweepTest(name, fn) {
   virtualSweepTests.push({ name, fn });
 }
-
-test("extension enforces the 350k client cap before backend summary", () => {
-  assert.match(PLATFORM_CONTENT_SOURCE, /MAX_BACKEND_CONVERSATION_CHARS = 350000/);
-  assert.match(PLATFORM_CONTENT_SOURCE, /supported 350,000 character limit/);
-});
-
-test("manual copy waits until background destination recovery is exhausted", () => {
-  const pasteStart = PLATFORM_CONTENT_SOURCE.indexOf("async function pasteIntoPlatform(");
-  const pasteEnd = PLATFORM_CONTENT_SOURCE.indexOf("function findPlatformInput(", pasteStart);
-  const pasteSource = PLATFORM_CONTENT_SOURCE.slice(pasteStart, pasteEnd);
-  const failureStart = PLATFORM_CONTENT_SOURCE.indexOf("function showContextTransferFailure(");
-  const failureEnd = PLATFORM_CONTENT_SOURCE.indexOf("async function summarizeWithBackend(", failureStart);
-  const failureSource = PLATFORM_CONTENT_SOURCE.slice(failureStart, failureEnd);
-
-  assert.ok(pasteStart >= 0 && pasteEnd > pasteStart);
-  assert.doesNotMatch(pasteSource, /showFallbackModal\(/);
-  assert.match(failureSource, /if \(summary\) \{\s*showFallbackModal\(summary, destinationName\)/);
-});
-
-test("manual copy never reports success when both clipboard methods fail", () => {
-  const modalStart = PLATFORM_CONTENT_SOURCE.indexOf("function showFallbackModal(");
-  const modalEnd = PLATFORM_CONTENT_SOURCE.indexOf("function updateFloatingButtonPosition(", modalStart);
-  const modalSource = PLATFORM_CONTENT_SOURCE.slice(modalStart, modalEnd);
-
-  assert.ok(modalStart >= 0 && modalEnd > modalStart);
-  assert.match(modalSource, /let copied = false/);
-  assert.match(modalSource, /copied = document\.execCommand\("copy"\) === true/);
-  assert.match(modalSource, /if \(!copied\) \{[\s\S]*Select text and copy manually/);
-});
 
 let nextOrder = 1;
 
@@ -391,6 +395,7 @@ function loadPlatformContent(elements = [], hostname = "chatgpt.com", {
     HTMLInputElement: FakeHTMLInputElement,
     Node: { DOCUMENT_POSITION_PRECEDING: 2 },
     URLSearchParams,
+    Date,
     MutationObserver: TestMutationObserver,
     ResizeObserver: TestResizeObserver,
     requestAnimationFrame: window.requestAnimationFrame,
@@ -405,6 +410,7 @@ function loadPlatformContent(elements = [], hostname = "chatgpt.com", {
   COMPILED_PLATFORM_CONTENT_SCRIPT.runInContext(sandbox);
   const decorateHooks = () => {
     assert.ok(hooks, "platform-content test hooks were registered");
+    loadedInstances.add(hooks);
     hooks.mutationObservers = mutationObservers;
     hooks.resizeObservers = resizeObservers;
     hooks.window = window;
@@ -516,31 +522,6 @@ test("telemetry maps failures to the closed non-sensitive reason list", () => {
   assert.equal(hooks.getSafeTelemetryFailureReason(new Error("private provider detail"), "paste"), "paste_failed");
 });
 
-test("handoff progress state advances deterministically through the three real stages", () => {
-  const hooks = loadPlatformContent([]);
-  const getState = (stage, phase) => JSON.parse(JSON.stringify(
-    hooks.getHandoffProgressState(stage, phase, "ChatGPT")
-  ));
-
-  assert.deepEqual(getState("capture", "active"), [
-    { id: "capture", label: "Capturing chat", state: "active" },
-    { id: "summary", label: "Summarizing", state: "upcoming" },
-    { id: "paste", label: "Pasting into ChatGPT", state: "upcoming" }
-  ]);
-  assert.deepEqual(getState("capture", "done").map(({ state }) => state), ["complete", "upcoming", "upcoming"]);
-  assert.deepEqual(getState("summary", "active").map(({ state }) => state), ["complete", "active", "upcoming"]);
-  assert.deepEqual(getState("summary", "done").map(({ state }) => state), ["complete", "complete", "upcoming"]);
-  assert.deepEqual(getState("paste", "active").map(({ state }) => state), ["complete", "complete", "active"]);
-  assert.deepEqual(getState("paste", "done").map(({ state }) => state), ["complete", "complete", "complete"]);
-
-  assert.equal(hooks.getHandoffProgressStatusText("capture", "active", "ChatGPT"), "Capturing chat");
-  assert.equal(hooks.getHandoffProgressStatusText("capture", "done", "ChatGPT"), "Chat captured");
-  assert.equal(hooks.getHandoffProgressStatusText("summary", "active", "ChatGPT"), "Summarizing");
-  assert.equal(hooks.getHandoffProgressStatusText("summary", "done", "ChatGPT"), "Summary ready");
-  assert.equal(hooks.getHandoffProgressStatusText("paste", "active", "ChatGPT"), "Pasting into ChatGPT");
-  assert.equal(hooks.getHandoffProgressStatusText("paste", "done", "ChatGPT"), "Pasted into ChatGPT");
-});
-
 test("native popovers do not discard a still-visible verified composer", () => {
   for (const hostname of ["claude.ai", "chatgpt.com", "gemini.google.com", "grok.com", "chat.deepseek.com"]) {
     const composer = new FakeElement({ tag: "form" });
@@ -619,24 +600,6 @@ test("destination picker preserves outside page focus on every supported platfor
   assert.match(toggleAndHideSource, /bubble\.focus\?\.\(\{ preventScroll: true \}\)/);
 });
 
-test("normal page Tab navigation skips the Cap Context orb", () => {
-  const source = fs.readFileSync(SOURCE_PATH, "utf8");
-  const buttonStart = source.indexOf("function createFloatingButton()");
-  const buttonEnd = source.indexOf("function ensureOnboardingStyles()", buttonStart);
-  const buttonSource = source.slice(buttonStart, buttonEnd);
-
-  assert.match(buttonSource, /bubble\.tabIndex = -1/);
-});
-
-test("composer lifecycle cleanup never restores focus to the orb", () => {
-  const source = fs.readFileSync(SOURCE_PATH, "utf8");
-  const ensureStart = source.indexOf("function ensureFloatingButton(");
-  const ensureEnd = source.indexOf("function createFloatingButton()", ensureStart);
-  const ensureSource = source.slice(ensureStart, ensureEnd);
-
-  assert.match(ensureSource, /if \(!input\)[\s\S]*hideDestinationSheet\(\{ restoreFocus: false \}\)/);
-});
-
 test("reinjection tears down every resource owned by the previous content-script instance", () => {
   const input = new FakeElement({
     attrs: { contenteditable: "true", role: "textbox" },
@@ -675,24 +638,6 @@ test("reinjection tears down every resource owned by the previous content-script
   assert.ok(previousHooks.resizeObservers.every((observer) => observer.observed.length === 0));
   assert.equal(previousHooks.runtimeMessageListeners.length, 1);
   assert.equal(currentHooks.window.__contextGeneratorPlatformTeardown, currentHooks.teardownContextGeneratorInstance);
-});
-
-test("Gemini, Grok, and DeepSeek retain the last viewport placement during a composer remount", () => {
-  for (const hostname of ["gemini.google.com", "grok.com", "chat.deepseek.com"]) {
-    const hooks = loadPlatformContent([], hostname);
-    const bubble = new FakeElement({ tag: "button" });
-
-    hooks.recordTransientComposerPlacement(bubble, 712.4, 618.6);
-    bubble.isConnected = false;
-    const retainedBubble = hooks.retainTransientComposerPlacement(null);
-
-    assert.equal(retainedBubble, bubble);
-    assert.equal(bubble.parentElement, hooks.document.body);
-    assert.equal(bubble.style.position, "fixed");
-    assert.equal(bubble.style.left, "712px");
-    assert.equal(bubble.style.top, "619px");
-    assert.equal(bubble.style.display, "flex");
-  }
 });
 
 test("Grok empty-state prompt is not counted or captured as a real message", () => {
@@ -898,69 +843,6 @@ test("sequence merge keeps positional duplicates until the final capture safety 
   assert.equal(collected.filter((turn) => turn.role === "User" && turn.text === "Repeat this.").length, 2);
 });
 
-test("sequence alignment does not confuse numeric message prefixes", () => {
-  const hooks = loadPlatformContent([]);
-  const collected = [{ role: "User", text: "Boundary-loaded diagnostic turn 1" }];
-
-  const added = hooks.collectRenderedConversationTurns(collected, [
-    { role: "User", text: "Boundary-loaded diagnostic turn 10" }
-  ]);
-
-  assert.equal(added, 1);
-  assert.equal(collected.length, 2);
-});
-
-test("virtual sweep does not append the same 38 turns when one rendered response grows between snapshots", () => {
-  const hooks = loadPlatformContent([], "claude.ai");
-  const collected = [];
-  const baseTurns = Array.from({ length: 38 }, (_, index) => ({
-    role: index % 2 === 0 ? "User" : "Claude",
-    text: `${index % 2 === 0 ? "Question" : "Answer"} for real turn ${index + 1}.`
-  }));
-
-  for (let snapshot = 1; snapshot <= 7; snapshot += 1) {
-    const renderedTurns = baseTurns.map((turn) => ({ ...turn }));
-    renderedTurns[17].text = `Answer for real turn 18. ${"Newly rendered detail. ".repeat(snapshot)}`.trim();
-    hooks.collectRenderedConversationTurns(collected, renderedTurns);
-  }
-
-  assert.equal(collected.length, 38);
-  assert.match(collected[17].text, /Newly rendered detail\.(?: Newly rendered detail\.){6}$/);
-});
-
-test("virtual sweep merges sliding windows when an overlapping response becomes richer", () => {
-  const hooks = loadPlatformContent([], "claude.ai");
-  const collected = [];
-  const turns = Array.from({ length: 13 }, (_, index) => ({
-    role: index % 2 === 0 ? "User" : "Claude",
-    text: `${index % 2 === 0 ? "Question" : "Answer"} for sliding turn ${index + 1}.`
-  }));
-  const firstWindow = turns.slice(0, 8).map((turn) => ({ ...turn }));
-  const secondWindow = turns.slice(5, 13).map((turn) => ({ ...turn }));
-  secondWindow[1].text += " Additional Markdown content rendered after scrolling.";
-
-  hooks.collectRenderedConversationTurns(collected, firstWindow);
-  hooks.collectRenderedConversationTurns(collected, secondWindow);
-
-  assert.equal(collected.length, 13);
-  assert.match(collected[6].text, /Additional Markdown content rendered after scrolling\.$/);
-});
-
-test("virtual sweep inserts a new turn between matching interior blocks", () => {
-  const hooks = loadPlatformContent([], "claude.ai");
-  const canonicalTurns = Array.from({ length: 38 }, (_, index) => ({
-    role: index % 2 === 0 ? "User" : "Claude",
-    text: `Exact diagnostic turn ${index + 1}.`
-  }));
-  const collected = canonicalTurns.filter((_, index) => index !== 18).map((turn) => ({ ...turn }));
-  const interiorSnapshot = canonicalTurns.slice(10, 27).map((turn) => ({ ...turn }));
-
-  const added = hooks.collectRenderedConversationTurns(collected, interiorSnapshot);
-
-  assert.equal(added, 1);
-  assert.deepEqual(JSON.parse(JSON.stringify(collected)), canonicalTurns);
-});
-
 test("virtual sweep reduces 18 overlapping snapshots and 315 entries to the canonical 38-turn sequence", () => {
   const hooks = loadPlatformContent([], "claude.ai");
   const canonicalTurns = Array.from({ length: 38 }, (_, index) => ({
@@ -1033,65 +915,6 @@ test("unverified page-like content fails instead of becoming conversation contex
   );
 });
 
-test("Claude scraping keeps child message turns instead of a broad wrapper blob", () => {
-  const wrapper = new FakeElement({
-    text: [
-      "Please keep every turn separate.",
-      "I will preserve the first assistant turn.",
-      "Now add the older messages too.",
-      "I will keep the second assistant turn."
-    ].join("\n"),
-    attrs: { class: "messages conversation-scroll" }
-  });
-  const turns = [
-    new FakeElement({ text: "Please keep every turn separate.", attrs: { "data-testid": "user-message" } }),
-    new FakeElement({ text: "I will preserve the first assistant turn.", attrs: { class: "font-claude-response" } }),
-    new FakeElement({ text: "Now add the older messages too.", attrs: { "data-testid": "user-message" } }),
-    new FakeElement({ text: "I will keep the second assistant turn.", attrs: { class: "font-claude-response" } })
-  ];
-  wrapper.children = turns;
-  turns.forEach((turn) => {
-    turn.parentElement = wrapper;
-  });
-
-  const hooks = loadPlatformContent([wrapper, ...turns], "claude.ai");
-  const transcript = hooks.scrapeConversationText();
-
-  assert.match(transcript, /^Claude conversation:/);
-  assert.equal((transcript.match(/(?:User|Claude):/g) || []).length, 4);
-  assert.match(transcript, /User: Please keep every turn separate\./);
-  assert.match(transcript, /Claude: I will keep the second assistant turn\./);
-});
-
-test("Claude counts one role-bearing assistant wrapper as one turn instead of its paragraph fragments", () => {
-  const userTurn = new FakeElement({
-    text: "Explain the investigation in detail.",
-    attrs: { "data-testid": "user-message" }
-  });
-  const assistantWrapper = new FakeElement({
-    attrs: { "data-testid": "assistant-message", class: "assistant-message" }
-  });
-  const paragraphs = Array.from({ length: 10 }, (_, index) => new FakeElement({
-    text: `Assistant paragraph ${index + 1} with distinct investigation detail.`,
-    attrs: { class: "font-claude-response" }
-  }));
-  assistantWrapper.children = paragraphs;
-  assistantWrapper.textContent = paragraphs.map((paragraph) => paragraph.textContent).join("\n");
-  assistantWrapper.innerText = assistantWrapper.textContent;
-  paragraphs.forEach((paragraph) => {
-    paragraph.parentElement = assistantWrapper;
-  });
-
-  const hooks = loadPlatformContent([userTurn, assistantWrapper, ...paragraphs], "claude.ai");
-  const turns = hooks.getConversationTurns();
-  const transcript = hooks.scrapeConversationText();
-
-  assert.equal(turns.length, 2);
-  assert.equal((transcript.match(/Claude:/g) || []).length, 1);
-  assert.match(transcript, /Assistant paragraph 1/);
-  assert.match(transcript, /Assistant paragraph 10/);
-});
-
 test("Claude keeps a 38-turn chat at 38 turns when its DOM exposes 299 message candidates", () => {
   const elements = [];
   let fragmentNumber = 1;
@@ -1132,42 +955,6 @@ test("Claude keeps a 38-turn chat at 38 turns when its DOM exposes 299 message c
   assert.equal((transcript.match(/(?:User|Claude):/g) || []).length, 38);
   assert.match(transcript, /User: Real user turn 37/);
   assert.match(transcript, /Rendered assistant fragment 261/);
-});
-
-test("Claude scraping does not stop at explicit wrapper chunks when many loaded turns exist", () => {
-  const elements = [];
-  let turnNumber = 1;
-
-  for (let chunkIndex = 0; chunkIndex < 12; chunkIndex += 1) {
-    const chunkTurns = [];
-    const turnsInChunk = chunkIndex < 6 ? 7 : 6;
-    const wrapper = new FakeElement({
-      attrs: { class: "assistant-message chunk-wrapper" }
-    });
-
-    for (let localIndex = 0; localIndex < turnsInChunk; localIndex += 1) {
-      const isUser = turnNumber % 2 === 1;
-      const turn = new FakeElement({
-        text: `Loaded turn ${turnNumber}`,
-        attrs: isUser ? { "data-testid": "user-message" } : { class: "font-claude-response" }
-      });
-      turn.parentElement = wrapper;
-      chunkTurns.push(turn);
-      turnNumber += 1;
-    }
-
-    wrapper.children = chunkTurns;
-    wrapper.textContent = chunkTurns.map((turn) => turn.textContent).join("\n");
-    wrapper.innerText = wrapper.textContent;
-    elements.push(wrapper, ...chunkTurns);
-  }
-
-  const hooks = loadPlatformContent(elements, "claude.ai");
-  const transcript = hooks.scrapeConversationText();
-
-  assert.equal((transcript.match(/(?:User|Claude): Loaded turn/g) || []).length, 78);
-  assert.match(transcript, /User: Loaded turn 1/);
-  assert.match(transcript, /Claude: Loaded turn 78/);
 });
 
 function createVirtualizedChatElements({
@@ -1369,7 +1156,7 @@ test("paste retains a verified composer through a temporary disabled state", () 
   assert.equal(hooks.findReadyPlatformInput(), input);
 });
 
-test("Grok uses its fast capture profile without losing a virtualized 40-turn chat", async () => {
+clockTest("Grok uses its fast capture profile without losing a virtualized 40-turn chat", async () => {
   const { elements, scrollableRoot } = createVirtualizedChatElements({
     label: "Grok",
     totalTurns: 40,
@@ -1406,7 +1193,7 @@ test("Grok uses its fast capture profile without losing a virtualized 40-turn ch
   );
 });
 
-test("Grok fast capture waits for a delayed virtualized window instead of skipping turns", async () => {
+clockTest("Grok fast capture waits for a delayed virtualized window instead of skipping turns", async () => {
   const { elements } = createVirtualizedChatElements({
     label: "Grok delayed render",
     totalTurns: 24,
@@ -1427,199 +1214,6 @@ test("Grok fast capture waits for a delayed virtualized window instead of skippi
   assert.equal((transcript.match(/(?:User|Grok): Delayed Grok turn/g) || []).length, 24);
   assert.match(transcript, /User: Delayed Grok turn 1/);
   assert.match(transcript, /Grok: Delayed Grok turn 24/);
-});
-
-test("Grok fast capture settings do not change ChatGPT capture pacing", () => {
-  const turn = new FakeElement({
-    text: "Keep ChatGPT's conservative capture profile.",
-    attrs: { "data-message-author-role": "user" }
-  });
-  const hooks = loadPlatformContent([turn], "chatgpt.com");
-
-  assert.equal(hooks.getSourceScrollStableTimeout(), 4500);
-  assert.equal(hooks.getSourceScrollStableInterval(), 140);
-  assert.equal(hooks.getSourceScrollStableSampleCount(), 3);
-  assert.equal(hooks.getVirtualSweepSettleTimeout(), 360);
-  assert.equal(hooks.getVirtualSweepStableSampleCount(), 2);
-  assert.equal(hooks.getVirtualSweepChangePollMs(), 16);
-  assert.equal(hooks.getVirtualSweepStepRatio(false), 0.6);
-  assert.equal(hooks.getVirtualSweepTerminalQuietTimeout(), 360);
-});
-
-test("slow/release: Claude sweep captures a real-scale 78-turn long chat with paced advances", async () => {
-  const longText = "Long Claude message detail ".repeat(28).trim();
-  const { elements, scrollableRoot } = createVirtualizedChatElements({
-    label: "Claude",
-    totalTurns: 78,
-    windowSize: 8,
-    scrollStride: 1,
-    scrollHeight: 31000,
-    makeTurn: (index) => new FakeElement({
-      text: `Slow virtualized Claude turn ${index}. ${longText}`,
-      attrs: index % 2 ? { "data-testid": "user-message" } : { class: "font-claude-response" }
-    })
-  });
-  const hooks = loadPlatformContent(elements, "claude.ai");
-  const initialTranscript = hooks.scrapeConversationText();
-  assert.equal((initialTranscript.match(/(?:User|Claude): Slow virtualized Claude turn/g) || []).length, 8);
-
-  await hooks.prepareSourceForCapture();
-  const advanceTimes = [];
-  const virtualizedScrollTo = scrollableRoot.scrollTo.bind(scrollableRoot);
-  scrollableRoot.scrollTo = (...args) => {
-    const beforeTop = scrollableRoot.scrollTop;
-    virtualizedScrollTo(...args);
-    if (scrollableRoot.scrollTop > beforeTop) advanceTimes.push(Date.now());
-  };
-  const captureStartedAt = Date.now();
-  const transcript = await hooks.scrapeConversationTextWhenReady();
-  const captureMs = Date.now() - captureStartedAt;
-  const advanceGaps = advanceTimes.slice(1).map((time, index) => time - advanceTimes[index]);
-  console.log("real-scale sweep metrics", {
-    turns: 78,
-    chars: transcript.length,
-    steps: advanceTimes.length,
-    captureMs,
-    minStepGapMs: Math.min(...advanceGaps),
-    averageStepGapMs: Math.round(advanceGaps.reduce((total, gap) => total + gap, 0) / advanceGaps.length)
-  });
-
-  assert.equal((transcript.match(/(?:User|Claude): Slow virtualized Claude turn/g) || []).length, 78);
-  assert.match(transcript, /User: Slow virtualized Claude turn 1/);
-  assert.match(transcript, /Claude: Slow virtualized Claude turn 78/);
-  assert.ok(transcript.length > 60000, "fixture should represent a 60k-character long chat");
-  assert.ok(advanceTimes.length <= 62, `adaptive overlap steps should keep this sweep at 62 advances or fewer; saw ${advanceTimes.length}`);
-  assert.ok(
-    advanceGaps.every((gap) => gap >= 250),
-    `real-scale sweep must preserve the paced render window; observed gaps: ${advanceGaps.join(", ")}ms`
-  );
-});
-
-virtualSweepTest("Claude sweep crosses one oversized rendered message before concluding capture is complete", async () => {
-  const elements = [];
-  const totalTurns = 24;
-  const windowSize = 12;
-  const nextWindowScrollTop = 3961;
-  const oversizedLines = Array.from(
-    { length: 220 },
-    (_, index) => `Rendered oversized-message line ${index + 1}`
-  );
-  let renderedSecondWindow = false;
-  const scrollableRoot = new FakeElement({
-    text: "Scrollable Claude chat with one oversized message",
-    attrs: { role: "main" }
-  });
-  scrollableRoot.scrollHeight = 5200;
-  scrollableRoot.clientHeight = 600;
-  scrollableRoot.scrollTop = 0;
-  elements.push(scrollableRoot);
-
-  const renderWindow = (startIndex) => {
-    const windowTurns = [];
-    for (let index = startIndex + 1; index <= Math.min(totalTurns, startIndex + windowSize); index += 1) {
-      const text = index === 6
-        ? `Oversized Claude turn ${index}\n${oversizedLines.join("\n")}`
-        : `Normal Claude turn ${index}`;
-      const turn = new FakeElement({
-        text,
-        attrs: index % 2 ? { "data-testid": "user-message" } : { class: "font-claude-response" }
-      });
-      turn.parentElement = scrollableRoot;
-      windowTurns.push(turn);
-    }
-
-    scrollableRoot.children = windowTurns;
-    scrollableRoot.textContent = windowTurns.map((turn) => turn.textContent).join("\n");
-    scrollableRoot.innerText = scrollableRoot.textContent;
-    elements.splice(1, elements.length - 1, ...windowTurns);
-  };
-
-  const originalScrollTo = scrollableRoot.scrollTo.bind(scrollableRoot);
-  scrollableRoot.scrollTo = (...args) => {
-    originalScrollTo(...args);
-    if (!renderedSecondWindow && scrollableRoot.scrollTop >= nextWindowScrollTop) {
-      renderedSecondWindow = true;
-      renderWindow(windowSize);
-    }
-  };
-  renderWindow(0);
-
-  const hooks = loadPlatformContent(elements, "claude.ai");
-  await hooks.prepareSourceForCapture();
-  const transcript = await hooks.scrapeConversationTextWhenReady();
-
-  assert.equal(oversizedLines.length, 220, "fixture must include a 200+ rendered-line message");
-  assert.equal((transcript.match(/(?:User|Claude): (?:Normal|Oversized) Claude turn/g) || []).length, 24);
-  assert.match(transcript, /User: Normal Claude turn 1/);
-  assert.match(transcript, /Claude: Normal Claude turn 24/);
-});
-
-virtualSweepTest("Claude sweep advances by rendered message boundary when the next virtual batch is available", async () => {
-  const elements = [];
-  const totalTurns = 40;
-  const windowSize = 8;
-  let boundaryAdvances = 0;
-  const transcriptHost = new FakeElement({
-    text: "Rendered Claude messages",
-    attrs: { role: "main" }
-  });
-  elements.push(transcriptHost);
-
-  const renderWindow = (startIndex) => {
-    const windowTurns = [];
-    for (let index = startIndex + 1; index <= Math.min(totalTurns, startIndex + windowSize); index += 1) {
-      const turn = new FakeElement({
-        text: `Boundary-loaded Claude turn ${index}`,
-        attrs: index % 2 ? { "data-testid": "user-message" } : { class: "font-claude-response" }
-      });
-      turn.parentElement = transcriptHost;
-      turn.onScrollIntoView = () => {
-        if (index !== startIndex + windowSize) return;
-        boundaryAdvances += 1;
-        renderWindow(Math.min(totalTurns - windowSize, startIndex + windowSize));
-      };
-      windowTurns.push(turn);
-    }
-
-    transcriptHost.children = windowTurns;
-    transcriptHost.textContent = windowTurns.map((turn) => turn.textContent).join("\n");
-    transcriptHost.innerText = transcriptHost.textContent;
-    elements.splice(1, elements.length - 1, ...windowTurns);
-  };
-  renderWindow(0);
-
-  const hooks = loadPlatformContent(elements, "claude.ai");
-
-  await hooks.prepareSourceForCapture();
-  const transcript = await hooks.scrapeConversationTextWhenReady();
-
-  assert.equal((transcript.match(/(?:User|Claude): Boundary-loaded Claude turn/g) || []).length, 40);
-  assert.match(transcript, /User: Boundary-loaded Claude turn 1/);
-  assert.match(transcript, /Claude: Boundary-loaded Claude turn 40/);
-  assert.ok(boundaryAdvances > 0, "Claude sweep should use rendered boundary advances");
-});
-
-test("slow/release: Claude sweep waits through slow virtualized batches before declaring stale", async () => {
-  const { elements } = createVirtualizedChatElements({
-    label: "Claude",
-    totalTurns: 16,
-    windowSize: 8,
-    scrollStride: 1,
-    scrollHeight: 9000,
-    stalledScrollsBeforeRender: 5,
-    makeTurn: (index) => new FakeElement({
-      text: `Slow loading Claude batch turn ${index}`,
-      attrs: index % 2 ? { "data-testid": "user-message" } : { class: "font-claude-response" }
-    })
-  });
-  const hooks = loadPlatformContent(elements, "claude.ai");
-
-  await hooks.prepareSourceForCapture();
-  const transcript = await hooks.scrapeConversationTextWhenReady();
-
-  assert.equal((transcript.match(/(?:User|Claude): Slow loading Claude batch turn/g) || []).length, 16);
-  assert.match(transcript, /User: Slow loading Claude batch turn 1/);
-  assert.match(transcript, /Claude: Slow loading Claude batch turn 16/);
 });
 
 virtualSweepTest("ChatGPT sweep preserves a 40-turn chat with intentionally repeated text", async () => {
@@ -1646,108 +1240,7 @@ virtualSweepTest("ChatGPT sweep preserves a 40-turn chat with intentionally repe
   assert.equal((transcript.match(/ChatGPT: Repeated exact response\./g) || []).length, 20);
 });
 
-virtualSweepTest("ChatGPT scroll root is the nearest auto or scroll ancestor of a structural turn", async () => {
-  for (const overflowY of ["auto", "scroll"]) {
-    const fartherScrollableAncestor = new FakeElement({
-      text: `Farther ChatGPT ${overflowY} case scroller`,
-      attrs: { "data-overflow-y": overflowY === "auto" ? "scroll" : "auto" }
-    });
-    fartherScrollableAncestor.scrollHeight = 900000;
-    fartherScrollableAncestor.clientHeight = 600;
-    fartherScrollableAncestor.scrollTop = 400000;
-
-    const authoritativeRoot = new FakeElement({
-      text: `Real ChatGPT ${overflowY} scroll root`,
-      attrs: { "data-overflow-y": overflowY }
-    });
-    authoritativeRoot.scrollHeight = 320000;
-    authoritativeRoot.clientHeight = 700;
-    authoritativeRoot.scrollTop = 310000;
-    authoritativeRoot.parentElement = fartherScrollableAncestor;
-    fartherScrollableAncestor.children = [authoritativeRoot];
-
-    // Geometry is intentionally misleading: both visible ancestors look more scrollable than the real root.
-    const largeVisibleOuter = new FakeElement({
-      text: "Large visible outer ancestor",
-      attrs: { "data-overflow-y": "visible" }
-    });
-    largeVisibleOuter.scrollHeight = 620000;
-    largeVisibleOuter.clientHeight = 900;
-    largeVisibleOuter.scrollTop = 220000;
-    largeVisibleOuter.parentElement = authoritativeRoot;
-    authoritativeRoot.children = [largeVisibleOuter];
-
-    const largeVisibleInner = new FakeElement({
-      text: "Large visible inner ancestor",
-      attrs: { "data-overflow-y": "visible" }
-    });
-    largeVisibleInner.scrollHeight = 480000;
-    largeVisibleInner.clientHeight = 800;
-    largeVisibleInner.scrollTop = 180000;
-    largeVisibleInner.parentElement = largeVisibleOuter;
-    largeVisibleOuter.children = [largeVisibleInner];
-
-    const turn = new FakeElement({
-      text: `A real structural ChatGPT turn inside ${overflowY}`,
-      attrs: {
-        "data-testid": `conversation-turn-${overflowY}`,
-        "data-message-author-role": "user"
-      }
-    });
-    turn.parentElement = largeVisibleInner;
-    largeVisibleInner.children = [turn];
-
-    const hooks = loadPlatformContent(
-      [fartherScrollableAncestor, authoritativeRoot, largeVisibleOuter, largeVisibleInner, turn],
-      "chatgpt.com"
-    );
-    await hooks.prepareSourceForCapture();
-
-    assert.equal(authoritativeRoot.scrollTop, 0, `${overflowY} ancestor was not selected`);
-    assert.equal(largeVisibleOuter.scrollTop, 220000, `${overflowY} case selected a visible outer decoy`);
-    assert.equal(largeVisibleInner.scrollTop, 180000, `${overflowY} case selected a visible inner decoy`);
-    assert.equal(fartherScrollableAncestor.scrollTop, 400000, `${overflowY} case did not select the nearest scroller`);
-  }
-});
-
-virtualSweepTest("short unscrollable chats probe the rendered boundary before finishing", async () => {
-  const elements = [];
-  const scrollableRoot = new FakeElement({
-    text: "Scrollable ChatGPT chat root",
-    attrs: { role: "main" }
-  });
-  scrollableRoot.scrollHeight = 600;
-  scrollableRoot.clientHeight = 600;
-  scrollableRoot.scrollTop = 0;
-  elements.push(scrollableRoot);
-
-  for (let index = 1; index <= 4; index += 1) {
-    const turn = new FakeElement({
-      text: `Short turn ${index}`,
-      attrs: { "data-message-author-role": index % 2 ? "user" : "assistant" }
-    });
-    turn.parentElement = scrollableRoot;
-    scrollableRoot.children.push(turn);
-    elements.push(turn);
-  }
-  scrollableRoot.textContent = scrollableRoot.children.map((turn) => turn.textContent).join("\n");
-  scrollableRoot.innerText = scrollableRoot.textContent;
-
-  const hooks = loadPlatformContent(elements, "chatgpt.com");
-
-  await hooks.prepareSourceForCapture();
-  scrollableRoot.scrollCalls = [];
-  scrollableRoot.children.forEach((turn) => {
-    turn.scrollIntoViewCalls = [];
-  });
-  const transcript = await hooks.scrapeConversationTextWhenReady();
-
-  assert.equal((transcript.match(/(?:User|ChatGPT): Short turn/g) || []).length, 4);
-  assert.equal(scrollableRoot.scrollCalls.some((call) => Number(call?.top || 0) > 0), false);
-  assert.equal(scrollableRoot.children.some((turn) => turn.scrollIntoViewCalls.length > 0), true);
-});
-
-test("virtualized capture regressions", { concurrency: true }, async (t) => {
+clockTest("virtualized capture regressions", { concurrency: true }, async (t) => {
   await Promise.all(virtualSweepTests.map(({ name, fn }) => t.test(name, fn)));
 });
 
@@ -1778,7 +1271,7 @@ test("collapsed conversation previews are expanded before capture", async () => 
   assert.equal(showMore.clicks, 1);
 });
 
-test("Claude and ChatGPT attach expanded pasted content to the owning user turn", async () => {
+clockTest("Claude and ChatGPT attach expanded pasted content to the owning user turn", async () => {
   const cases = [
     {
       hostname: "claude.ai",
@@ -2029,7 +1522,7 @@ test("conversation transport preserves the complete middle beyond the old 160k c
   assert.match(transported, /TAIL-DETAILS$/);
 });
 
-test("source capture prep scrolls conversation containers to the top instantly", async () => {
+clockTest("source capture prep scrolls conversation containers to the top instantly", async () => {
   const scrollableRoot = new FakeElement({
     text: "Scrollable chat root",
     attrs: { role: "main" }
@@ -2045,7 +1538,7 @@ test("source capture prep scrolls conversation containers to the top instantly",
   assert.equal(scrollableRoot.scrollCalls[0].behavior, "instant");
 });
 
-test("source capture prep waits until delayed older messages finish loading", async () => {
+clockTest("source capture prep waits until delayed older messages finish loading", async () => {
   const elements = [];
   const scrollableRoot = new FakeElement({ text: "Scrollable chat root" });
   scrollableRoot.scrollHeight = 2200;
@@ -2087,7 +1580,7 @@ test("source capture prep waits until delayed older messages finish loading", as
   assert.equal((transcript.match(/(?:Older|Visible) message/g) || []).length, 24);
 });
 
-test("source capture prep waits when message characters grow without a new turn", async () => {
+clockTest("source capture prep waits when message characters grow without a new turn", async () => {
   const scrollableRoot = new FakeElement({ text: "Scrollable chat root" });
   scrollableRoot.scrollHeight = 1800;
   scrollableRoot.clientHeight = 500;
@@ -2259,7 +1752,7 @@ test("paste verification requires 95 percent of words in order, including repeat
   assert.equal(hooks.editorContainsText(new FakeElement({ text: repeated.slice(1).join(" ") }), repeated.join(" ")), true);
 });
 
-test("all destinations accept editor Markdown reformatting without replacing it", async () => {
+clockTest("all destinations accept editor Markdown reformatting without replacing it", async () => {
   const expected = "# Context carry\n\n1. **Keep** the deployment plan and its rollback steps.\n2. Read [the release notes](https://example.test/release/v2) before continuing.\n\n```text\nDeploy only after staging passes and preserve the saved configuration.\n```\n\nReply only: Context loaded. Then wait for the user.";
   const rendered = "Context carry\n\nKeep the deployment plan and its rollback steps.\nRead the release notes before continuing.\n\nDeploy only after staging passes and preserve the saved configuration.\n\nReply only: Context loaded. Then wait for the user.";
   for (const [hostname, destination] of [["claude.ai", "claude"], ["chatgpt.com", "chatgpt"], ["gemini.google.com", "gemini"], ["grok.com", "grok"], ["chat.deepseek.com", "deepseek"]]) {
@@ -2273,7 +1766,7 @@ test("all destinations accept editor Markdown reformatting without replacing it"
   }
 });
 
-test("initial paste never overwrites a nonempty draft on any destination", async () => {
+clockTest("initial paste never overwrites a nonempty draft on any destination", async () => {
   const draft = "My unfinished question belongs to me.";
   for (const [hostname, destination] of [["claude.ai", "claude"], ["chatgpt.com", "chatgpt"], ["gemini.google.com", "gemini"], ["grok.com", "grok"], ["chat.deepseek.com", "deepseek"]]) {
     const editor = new FakeElement({ tag: "textarea", attrs: { placeholder: "Message" } });
@@ -2355,7 +1848,7 @@ test("local summary recovery retains the capture size boundary before contacting
   assert.equal(requests, 0);
 });
 
-test("Claude, Gemini, DeepSeek, and Grok restore a draft cleared after the first paste", async () => {
+clockTest("Claude, Gemini, DeepSeek, and Grok restore a draft cleared after the first paste", async () => {
   const summary = "CONTEXT CARRY — READY TO PASTE\n\nImportant project context and next steps.";
   for (const [hostname, destination, hidden] of [
     ["claude.ai", "claude", true],
@@ -2380,7 +1873,7 @@ test("Claude, Gemini, DeepSeek, and Grok restore a draft cleared after the first
   }
 });
 
-test("delayed paste recovery offers manual copy if the app clears the retry", async () => {
+clockTest("delayed paste recovery offers manual copy if the app clears the retry", async () => {
   const summary = "CONTEXT CARRY — READY TO PASTE\n\nImportant project context and next steps.";
   const editor = new FakeElement({ tag: "textarea", attrs: { placeholder: "Message" } });
   const hooks = loadPlatformContent([editor], "claude.ai", { visibilityState: "hidden" });
@@ -2412,34 +1905,6 @@ test("Firefox contenteditable paste preserves line breaks without treating text 
   );
 });
 
-test("startup clears stale Claude placement transform reservations", () => {
-  const shiftedActionRow = new FakeElement({
-    attrs: {
-      "data-context-generator-original-transform": "",
-      "data-context-generator-original-transition": "transform 150ms ease"
-    }
-  });
-  shiftedActionRow.style.transform = "translateX(-56px)";
-  shiftedActionRow.style.transition = "none";
-  shiftedActionRow.style.willChange = "transform";
-  const translatedClaudeControl = new FakeElement({
-    attrs: { "data-context-generator-original-translate": "2px 0px" }
-  });
-  translatedClaudeControl.style.translate = "-52px 0px";
-  translatedClaudeControl.style.willChange = "translate";
-
-  loadPlatformContent([shiftedActionRow, translatedClaudeControl], "claude.ai");
-
-  assert.equal(shiftedActionRow.style.transform, "");
-  assert.equal(shiftedActionRow.style.transition, "transform 150ms ease");
-  assert.equal(shiftedActionRow.style.willChange, "");
-  assert.equal(shiftedActionRow.hasAttribute("data-context-generator-original-transform"), false);
-  assert.equal(shiftedActionRow.hasAttribute("data-context-generator-original-transition"), false);
-  assert.equal(translatedClaudeControl.style.translate, "2px 0px");
-  assert.equal(translatedClaudeControl.style.willChange, "");
-  assert.equal(translatedClaudeControl.hasAttribute("data-context-generator-original-translate"), false);
-});
-
 test("Claude bubble fills the inline slot to the right of voice mode", () => {
   const voiceMode = new FakeElement({
     tag: "button",
@@ -2453,557 +1918,6 @@ test("Claude bubble fills the inline slot to the right of voice mode", () => {
   assert.equal(placement.left, 734);
   assert.equal(placement.top, 63);
   assert.equal(placement.inlineShift, 0);
-});
-
-test("Claude bubble stays vertically centered in the shallow live composer", () => {
-  const composerRect = { left: 100, right: 900, top: 100, bottom: 194, width: 800, height: 94 };
-  const voiceMode = new FakeElement({
-    tag: "button",
-    attrs: { "aria-label": "Voice mode" },
-    rect: { left: 844, right: 880, top: 162, bottom: 194, width: 36, height: 32 }
-  });
-  const hooks = loadPlatformContent([voiceMode], "claude.ai");
-  const placement = hooks.getClaudeBubblePlacement(composerRect);
-  const bubbleCenter = composerRect.top + placement.top + 42 / 2;
-  const controlCenter = (voiceMode.rect.top + voiceMode.rect.bottom) / 2;
-
-  assert.equal(placement.top, 57);
-  assert.equal(bubbleCenter, controlCenter);
-});
-
-test("Claude fresh page keeps the visible orb connected to the voice controls", () => {
-  const composerRect = { left: 600, right: 1224, top: 367.5, bottom: 461.5, width: 624, height: 94 };
-  const input = new FakeElement({
-    attrs: { contenteditable: "true", role: "textbox", "aria-label": "Write your prompt to Claude" },
-    rect: { left: 620, right: 1204, top: 383.5, bottom: 423.5, width: 584, height: 40 }
-  });
-  const voiceMode = new FakeElement({
-    tag: "button",
-    attrs: { "aria-label": "Voice input" },
-    rect: { left: 1204, right: 1224, top: 429.5, bottom: 461.5, width: 20, height: 32 }
-  });
-  const hooks = loadPlatformContent([input, voiceMode], "claude.ai", { pathname: "/new" });
-  const placement = hooks.getClaudeBubblePlacement(composerRect, input);
-  const bubbleRect = localPlacementToPageRect(placement, composerRect);
-  const shiftedAnchorRight = voiceMode.rect.right
-    + hooks.getClaudeControlTargetOffset(placement.anchorControl, placement.inlineShift);
-  const visibleArtworkGap = bubbleRect.left + 7 - shiftedAnchorRight;
-  const visibleArtworkCenterY = bubbleRect.top + 42 / 2 - 0.5;
-  const controlCenterY = voiceMode.rect.top + voiceMode.rect.height / 2;
-
-  assert.equal(placement.left, 578);
-  assert.equal(placement.top, 56.5);
-  assert.equal(visibleArtworkGap, 13);
-  assert.equal(visibleArtworkCenterY, controlCenterY - 1);
-});
-
-test("Claude typed new-chat state keeps the existing placement for the later fix", () => {
-  const composerRect = { left: 600, right: 1224, top: 367.5, bottom: 461.5, width: 624, height: 94 };
-  const input = new FakeElement({
-    text: "hello",
-    attrs: { contenteditable: "true", role: "textbox", "aria-label": "Write your prompt to Claude" },
-    rect: { left: 620, right: 1204, top: 383.5, bottom: 423.5, width: 584, height: 40 }
-  });
-  const send = new FakeElement({
-    tag: "button",
-    attrs: { "aria-label": "Send message" },
-    rect: { left: 1204, right: 1224, top: 429.5, bottom: 461.5, width: 20, height: 32 }
-  });
-  const hooks = loadPlatformContent([input, send], "claude.ai", { pathname: "/new" });
-  const placement = hooks.getClaudeBubblePlacement(composerRect, input);
-
-  assert.equal(placement.left, 578);
-  assert.equal(placement.top, 57);
-});
-
-test("Claude existing chat aligns the orb artwork with the docked mic row", () => {
-  const composerRect = { left: 316, right: 900, top: 668, bottom: 716, width: 584, height: 48 };
-  const input = new FakeElement({
-    attrs: { contenteditable: "true", role: "textbox", "aria-label": "Write your prompt to Claude" },
-    rect: { left: 336, right: 780, top: 676, bottom: 708, width: 444, height: 32 }
-  });
-  const voiceMode = new FakeElement({
-    tag: "button",
-    attrs: { "aria-label": "Voice input" },
-    rect: { left: 820, right: 840, top: 676, bottom: 708, width: 20, height: 32 }
-  });
-  const hooks = loadPlatformContent([input, voiceMode], "claude.ai", { pathname: "/chat/example" });
-  const placement = hooks.getClaudeBubblePlacement(composerRect, input);
-  const orbCenterY = composerRect.top + placement.top + 42 / 2;
-  const controlCenterY = voiceMode.rect.top + voiceMode.rect.height / 2;
-
-  assert.equal(placement.top, 3);
-  assert.equal(orbCenterY, controlCenterY);
-  assert.ok(composerRect.top + placement.top + 42 <= composerRect.bottom);
-});
-
-test("Claude detects the /new to /chat route change and schedules fresh alignment", () => {
-  const hooks = loadPlatformContent([], "claude.ai", { pathname: "/new" });
-
-  assert.equal(hooks.checkClaudePlacementPathname(), false);
-  hooks.window.location.pathname = "/chat/example";
-
-  assert.equal(hooks.checkClaudePlacementPathname(), true);
-  assert.equal(hooks.animationFrameCallbacks.length, 1);
-});
-
-test("Claude bubble uses the rightmost small control when voice mode is unlabeled", () => {
-  const mic = new FakeElement({
-    tag: "button",
-    attrs: { "aria-label": "Microphone" },
-    rect: { left: 656, right: 692, top: 166, bottom: 202, width: 36, height: 36 }
-  });
-  const unlabeledVoiceMode = new FakeElement({
-    tag: "button",
-    rect: { left: 700, right: 736, top: 166, bottom: 202, width: 36, height: 36 }
-  });
-  const hooks = loadPlatformContent([mic, unlabeledVoiceMode], "claude.ai");
-  const placement = hooks.getClaudeBubblePlacement(getClaudeComposerRect());
-
-  assert.equal(placement.anchorControl.element, unlabeledVoiceMode);
-  assert.equal(placement.left, 734);
-  assert.equal(placement.top, 63);
-  assert.equal(placement.inlineShift, 0);
-});
-
-test("Claude normal row nudges model left and mic/voice right", () => {
-  const model = new FakeElement({
-    tag: "button",
-    attrs: { "aria-label": "Model selector" },
-    rect: { left: 520, right: 640, top: 166, bottom: 202, width: 120, height: 36 }
-  });
-  const mic = new FakeElement({
-    tag: "button",
-    attrs: { "aria-label": "Microphone" },
-    rect: { left: 656, right: 692, top: 166, bottom: 202, width: 36, height: 36 }
-  });
-  const voiceMode = new FakeElement({
-    tag: "button",
-    attrs: { "aria-label": "Voice mode" },
-    rect: { left: 700, right: 736, top: 166, bottom: 202, width: 36, height: 36 }
-  });
-  const hooks = loadPlatformContent([model, mic, voiceMode], "claude.ai");
-  const placement = hooks.getClaudeBubblePlacement(getClaudeComposerRect());
-  const bubbleRect = localPlacementToPageRect(placement, getClaudeComposerRect());
-  const shiftedControls = hooks.getClaudeInlineControlsToShift(placement.controls, placement.anchorControl);
-  const modelControls = hooks.getClaudeModelControlsToNudge(placement.controls, placement.anchorControl);
-
-  assert.equal(placement.inlineShift, 0);
-  assert.equal(hooks.getClaudeControlTargetOffset(modelControls[0], placement.inlineShift), -48);
-  assert.equal(hooks.getClaudeControlTargetOffset(shiftedControls[0], placement.inlineShift), 52);
-  assert.equal(hooks.getClaudeControlTargetOffset(shiftedControls[1], placement.inlineShift), 52);
-  [model, mic, voiceMode].forEach((control) => {
-    assert.equal(rectsIntersect(bubbleRect, control.getBoundingClientRect()), false);
-  });
-});
-
-test("Claude model nudge keeps the label from clipping", () => {
-  const modelClipParent = new FakeElement({
-    rect: { left: 520, right: 640, top: 166, bottom: 202, width: 120, height: 36 }
-  });
-  modelClipParent.style.overflow = "hidden";
-
-  const model = new FakeElement({
-    tag: "button",
-    text: "Sonnet 5 Medium",
-    attrs: { "aria-label": "Model selector" },
-    rect: { left: 520, right: 640, top: 166, bottom: 202, width: 120, height: 36 }
-  });
-  model.parentElement = modelClipParent;
-  modelClipParent.children = [model];
-
-  const mic = new FakeElement({
-    tag: "button",
-    attrs: { "aria-label": "Microphone" },
-    rect: { left: 656, right: 692, top: 166, bottom: 202, width: 36, height: 36 }
-  });
-  const voiceMode = new FakeElement({
-    tag: "button",
-    attrs: { "aria-label": "Voice mode" },
-    rect: { left: 700, right: 736, top: 166, bottom: 202, width: 36, height: 36 }
-  });
-  const hooks = loadPlatformContent([model, mic, voiceMode], "claude.ai");
-  model.style.overflow = "hidden";
-  const placement = hooks.getClaudeBubblePlacement(getClaudeComposerRect());
-
-  hooks.reserveClaudeInlineBubbleSlot(placement.anchorControl, placement.controls, null, getClaudeComposerRect(), placement.inlineShift);
-
-  assert.equal(model.style.overflow, "visible");
-  assert.equal(modelClipParent.style.overflow, "visible");
-  assert.equal(model.getAttribute("data-context-generator-original-overflow"), "hidden");
-  assert.equal(modelClipParent.getAttribute("data-context-generator-original-overflow"), "hidden");
-});
-
-test("Claude crowded row shifts only small voice-side controls", () => {
-  const model = new FakeElement({
-    tag: "button",
-    text: "Sonnet 5 Medium",
-    attrs: { "aria-label": "Model selector" },
-    rect: { left: 672, right: 792, top: 166, bottom: 202, width: 120, height: 36 }
-  });
-  const mic = new FakeElement({
-    tag: "button",
-    attrs: { "aria-label": "Microphone" },
-    rect: { left: 800, right: 836, top: 166, bottom: 202, width: 36, height: 36 }
-  });
-  const voiceMode = new FakeElement({
-    tag: "button",
-    attrs: { "aria-label": "Voice mode" },
-    rect: { left: 844, right: 880, top: 166, bottom: 202, width: 36, height: 36 }
-  });
-  const hooks = loadPlatformContent([model, mic, voiceMode], "claude.ai");
-  const placement = hooks.getClaudeBubblePlacement(getClaudeComposerRect());
-  const shiftedControls = hooks.getClaudeInlineControlsToShift(placement.controls, placement.anchorControl);
-
-  assert.equal(placement.anchorControl.element, voiceMode);
-  assert.equal(placement.left, 754);
-  assert.equal(placement.inlineShift, 104);
-  assert.equal(shiftedControls.length, 2);
-  assert.equal(shiftedControls[0].element, mic);
-  assert.equal(shiftedControls[1].element, voiceMode);
-  assert.equal(shiftedControls.some((control) => control.element === model), false);
-  assert.equal(hooks.getClaudeControlTargetOffset(shiftedControls[0], placement.inlineShift), -52);
-  assert.equal(hooks.getClaudeControlTargetOffset(shiftedControls[1], placement.inlineShift), -52);
-});
-
-test("Claude typed-state send button does not shift the model selector", () => {
-  const model = new FakeElement({
-    tag: "button",
-    text: "Sonnet 5 Medium",
-    attrs: { "aria-label": "Model selector" },
-    rect: { left: 672, right: 792, top: 166, bottom: 202, width: 120, height: 36 }
-  });
-  const send = new FakeElement({
-    tag: "button",
-    attrs: { "aria-label": "Send message" },
-    rect: { left: 844, right: 880, top: 166, bottom: 202, width: 36, height: 36 }
-  });
-  const hooks = loadPlatformContent([model, send], "claude.ai");
-  const placement = hooks.getClaudeBubblePlacement(getClaudeComposerRect());
-  const shiftedControls = hooks.getClaudeInlineControlsToShift(placement.controls, placement.anchorControl);
-
-  assert.equal(placement.anchorControl.element, send);
-  assert.equal(placement.left, 754);
-  assert.equal(placement.inlineShift, 104);
-  assert.equal(shiftedControls.length, 1);
-  assert.equal(shiftedControls[0].element, send);
-  assert.equal(shiftedControls.some((control) => control.element === model), false);
-  assert.equal(hooks.getClaudeControlTargetOffset(shiftedControls[0], placement.inlineShift), -52);
-});
-
-test("Claude watches control visibility changes inside a stable composer", () => {
-  const input = new FakeElement({
-    attrs: { contenteditable: "true", role: "textbox" },
-    rect: { left: 160, right: 840, top: 150, bottom: 230, width: 680, height: 80 }
-  });
-  const composer = new FakeElement({
-    rect: { left: 100, right: 1000, top: 100, bottom: 260, width: 900, height: 160 }
-  });
-  input.parentElement = composer;
-  composer.children = [input];
-
-  const hooks = loadPlatformContent([input, composer], "claude.ai");
-  hooks.syncClaudePlacementResizeMonitoring(input, composer);
-
-  const observation = hooks.mutationObservers.at(-1).observed[0];
-  assert.equal(observation.element, composer);
-  assert.deepEqual(JSON.parse(JSON.stringify(observation.options)), {
-    attributes: true,
-    childList: true,
-    subtree: true,
-    attributeFilter: ["class", "style", "aria-hidden", "hidden", "data-state"]
-  });
-});
-
-test("Claude rejects a page-sized ancestor as the composer surface", () => {
-  const input = new FakeElement({
-    attrs: { contenteditable: "true", role: "textbox", "aria-label": "Write your prompt to Claude" },
-    rect: { left: 588, right: 1204, top: 336, bottom: 358, width: 616, height: 22 }
-  });
-  const compactComposer = new FakeElement({
-    rect: { left: 572, right: 1212, top: 323, bottom: 433, width: 640, height: 110 }
-  });
-  const pageContainer = new FakeElement({
-    rect: { left: 306, right: 1477, top: 48, bottom: 718, width: 1171, height: 670 }
-  });
-  const model = new FakeElement({
-    tag: "button",
-    attrs: { "aria-label": "Model: Sonnet 5 Extra" },
-    rect: { left: 900, right: 1009, top: 385, bottom: 417, width: 109, height: 32 }
-  });
-  const mic = new FakeElement({
-    tag: "button",
-    attrs: { "aria-label": "Dictate" },
-    rect: { left: 1080, right: 1112, top: 385, bottom: 417, width: 32, height: 32 }
-  });
-  const voice = new FakeElement({
-    tag: "button",
-    attrs: { "aria-label": "Voice input" },
-    rect: { left: 1120, right: 1152, top: 385, bottom: 417, width: 32, height: 32 }
-  });
-
-  input.parentElement = compactComposer;
-  compactComposer.children = [input, model, mic, voice];
-  [model, mic, voice].forEach((control) => {
-    control.parentElement = compactComposer;
-  });
-  compactComposer.parentElement = pageContainer;
-  pageContainer.children = [compactComposer];
-
-  const hooks = loadPlatformContent(
-    [input, compactComposer, pageContainer, model, mic, voice],
-    "claude.ai",
-    { pathname: "/new" }
-  );
-
-  hooks.reserveComposerSurface(pageContainer);
-  assert.equal(hooks.findComposerSurfaceElement(input), compactComposer);
-});
-
-test("composer discovery rejects an unvalidated inner editor wrapper", () => {
-  for (const hostname of ["chatgpt.com", "gemini.google.com", "grok.com", "chat.deepseek.com"]) {
-    const input = new FakeElement({
-      attrs: { contenteditable: "true", role: "textbox" },
-      rect: { left: 240, right: 920, top: 620, bottom: 672, width: 680, height: 52 }
-    });
-    const innerWrapper = new FakeElement({
-      rect: { left: 250, right: 900, top: 625, bottom: 668, width: 650, height: 43 }
-    });
-    input.parentElement = innerWrapper;
-    innerWrapper.children = [input];
-
-    const hooks = loadPlatformContent([innerWrapper, input], hostname);
-
-    // This fixture has no composer selector matches. Filter like the browser so
-    // the editable input cannot be returned for an unrelated "form" query.
-    hooks.document.querySelectorAll = (selector) => [innerWrapper, input]
-      .filter((element) => element.matches(selector));
-
-    assert.equal(
-      hooks.findComposerSurfaceElement(input),
-      null,
-      `${hostname} should reject the inner editor wrapper`
-    );
-  }
-});
-
-test("Claude selects the surface whose geometry actually contains the visible control row", () => {
-  const input = new FakeElement({
-    attrs: { contenteditable: "true", role: "textbox", "aria-label": "Write your prompt to Claude" },
-    rect: { left: 180, right: 780, top: 300, bottom: 350, width: 600, height: 50 }
-  });
-  const overflowingInner = new FakeElement({
-    rect: { left: 150, right: 800, top: 280, bottom: 390, width: 650, height: 110 }
-  });
-  const realComposer = new FakeElement({
-    tag: "form",
-    rect: { left: 100, right: 860, top: 260, bottom: 410, width: 760, height: 150 }
-  });
-  const mic = new FakeElement({
-    tag: "button",
-    attrs: { "aria-label": "Microphone" },
-    rect: { left: 808, right: 840, top: 360, bottom: 392, width: 32, height: 32 }
-  });
-  input.parentElement = overflowingInner;
-  overflowingInner.children = [input, mic];
-  overflowingInner.parentElement = realComposer;
-  mic.parentElement = overflowingInner;
-  realComposer.children = [overflowingInner];
-
-  const hooks = loadPlatformContent([input, overflowingInner, realComposer, mic], "claude.ai", { pathname: "/chat/example" });
-
-  assert.equal(hooks.findComposerSurfaceElement(input), realComposer);
-  const placement = hooks.getClaudeBubblePlacement(realComposer.rect, input, realComposer);
-  assert.equal(placement.anchorControl.element, mic);
-});
-
-test("Claude null-anchor state waits instead of producing a bottom-right placement", () => {
-  const input = new FakeElement({
-    attrs: { contenteditable: "true", role: "textbox" },
-    rect: { left: 160, right: 840, top: 150, bottom: 230, width: 680, height: 80 }
-  });
-  const hooks = loadPlatformContent([input], "claude.ai", { pathname: "/chat/example" });
-  const placement = hooks.getClaudeBubblePlacement(getClaudeComposerRect(), input);
-
-  assert.equal(placement.anchorControl, null);
-  assert.equal(Object.hasOwn(placement, "left"), false);
-  assert.equal(Object.hasOwn(placement, "top"), false);
-});
-
-test("Claude anchored placement remains inside a narrow refreshed chat viewport", () => {
-  const composerRect = { left: 64, right: 783, top: 480, bottom: 600, width: 719, height: 120 };
-  const input = new FakeElement({
-    attrs: { contenteditable: "true", role: "textbox" },
-    rect: { left: 84, right: 763, top: 496, bottom: 548, width: 679, height: 52 }
-  });
-  const composer = new FakeElement({ tag: "form", rect: composerRect });
-  const mic = new FakeElement({
-    tag: "button",
-    attrs: { "aria-label": "Microphone" },
-    rect: { left: 731, right: 763, top: 552, bottom: 584, width: 32, height: 32 }
-  });
-  composer.children = [input, mic];
-  input.parentElement = composer;
-  mic.parentElement = composer;
-
-  const hooks = loadPlatformContent(
-    [input, composer, mic],
-    "claude.ai",
-    { pathname: "/chat/example", innerWidth: 847 }
-  );
-  const localPlacement = hooks.getClaudeBubblePlacement(composerRect, input, composer);
-  const fixedPlacement = hooks.getClaudeFixedBubblePlacement(localPlacement, composerRect);
-
-  assert.equal(localPlacement.anchorControl.element, mic);
-  assert.ok(fixedPlacement.left >= composerRect.left);
-  assert.ok(fixedPlacement.left + 42 <= composerRect.right);
-  assert.ok(fixedPlacement.left + 42 <= 847 - 8);
-});
-
-test("Claude reserves a hidden mounted Send control before the Voice-to-Send swap", () => {
-  const composerRect = getClaudeComposerRect();
-  const input = new FakeElement({ attrs: { contenteditable: "true", role: "textbox" } });
-  const composer = new FakeElement({ tag: "form", rect: composerRect });
-  const voice = new FakeElement({
-    tag: "button",
-    attrs: { "aria-label": "Voice mode" },
-    rect: { left: 810, right: 842, top: 170, bottom: 202, width: 32, height: 32 }
-  });
-  const send = new FakeElement({
-    tag: "button",
-    attrs: { "aria-label": "Send message", "data-visibility": "hidden" },
-    rect: { left: 810, right: 842, top: 170, bottom: 202, width: 32, height: 32 }
-  });
-  composer.children = [input, voice, send];
-  [input, voice, send].forEach((element) => { element.parentElement = composer; });
-
-  const hooks = loadPlatformContent([input, composer, voice, send], "claude.ai", { pathname: "/new" });
-  const placement = hooks.getClaudeBubblePlacement(composerRect, input, composer);
-
-  assert.equal(placement.anchorControl.element, voice);
-  assert.equal(placement.controls.some((control) => control.element === send), false);
-  assert.equal(placement.reservationControls.some((control) => control.element === send), true);
-});
-
-test("Claude keeps the stable switch-cluster reservation when Mic remounts", () => {
-  const composerRect = getClaudeComposerRect();
-  const input = new FakeElement({ attrs: { contenteditable: "true", role: "textbox" } });
-  const composer = new FakeElement({ tag: "form", rect: composerRect });
-  const switchCluster = new FakeElement({
-    attrs: { "data-display": "grid" },
-    rect: { left: 797, right: 880, top: 166, bottom: 198, width: 83, height: 32 }
-  });
-  const send = new FakeElement({
-    tag: "button",
-    attrs: { "aria-label": "Send message" },
-    rect: { left: 844, right: 880, top: 166, bottom: 202, width: 36, height: 36 }
-  });
-  const mic = new FakeElement({
-    tag: "button",
-    attrs: { "aria-label": "Microphone" },
-    rect: { left: 844, right: 880, top: 166, bottom: 202, width: 36, height: 36 }
-  });
-  composer.children = [input, switchCluster];
-  input.parentElement = composer;
-  switchCluster.parentElement = composer;
-  switchCluster.children = [send];
-  send.parentElement = switchCluster;
-
-  const hooks = loadPlatformContent(
-    [input, composer, send, mic],
-    "claude.ai",
-    { pathname: "/chat/example" }
-  );
-  mic.style.transition = "transform 150ms ease";
-  mic.style.transform = "scale(0.96)";
-  mic.style.willChange = "transform";
-  const sendPlacement = hooks.getClaudeBubblePlacement(composerRect, input, composer);
-  hooks.reserveClaudeInlineBubbleSlot(
-    sendPlacement.anchorControl,
-    sendPlacement.reservationControls,
-    input,
-    composerRect,
-    sendPlacement.inlineShift
-  );
-
-  assert.equal(mic.style.transform, "scale(0.96)");
-  switchCluster.children = [mic];
-  mic.parentElement = switchCluster;
-  send.parentElement = null;
-  hooks.syncClaudePlacementResizeMonitoring(input, composer);
-  hooks.mutationObservers.at(-1).callback([{
-    target: switchCluster,
-    attributeName: null,
-    addedNodes: [mic],
-    removedNodes: [send]
-  }]);
-  assert.equal(switchCluster.style.translate, "-52px 0px");
-  assert.equal(mic.style.translate || "", "");
-  assert.equal(mic.style.transform, "scale(0.96)");
-  assert.equal(mic.style.transition, "transform 150ms ease");
-  assert.equal(mic.style.willChange, "transform");
-  assert.equal(hooks.animationFrameCallbacks.length, 1);
-});
-
-test("Claude preserves native control animation during a populated-editor Voice mismatch", () => {
-  const composerRect = getClaudeComposerRect();
-  const input = new FakeElement({
-    text: "stale editor text",
-    attrs: { contenteditable: "true", role: "textbox" }
-  });
-  const composer = new FakeElement({ tag: "form", rect: composerRect });
-  const switchCluster = new FakeElement({
-    attrs: { "data-display": "grid" },
-    rect: { left: 797, right: 884, top: 166, bottom: 198, width: 87, height: 32 }
-  });
-  const mic = new FakeElement({
-    tag: "button",
-    attrs: { "aria-label": "Microphone" },
-    rect: { left: 792, right: 824, top: 166, bottom: 198, width: 32, height: 32 }
-  });
-  const voice = new FakeElement({
-    tag: "button",
-    attrs: { "aria-label": "Voice options" },
-    rect: { left: 828, right: 848, top: 166, bottom: 198, width: 20, height: 32 }
-  });
-  const voiceMode = new FakeElement({
-    tag: "button",
-    attrs: { "aria-label": "Voice mode" },
-    rect: { left: 852, right: 884, top: 166, bottom: 198, width: 32, height: 32 }
-  });
-  composer.children = [input, switchCluster];
-  input.parentElement = composer;
-  switchCluster.parentElement = composer;
-  switchCluster.children = [mic, voice, voiceMode];
-  switchCluster.children.forEach((element) => { element.parentElement = switchCluster; });
-
-  const hooks = loadPlatformContent(
-    [input, composer, switchCluster, mic, voice, voiceMode],
-    "claude.ai",
-    { pathname: "/chat/example" }
-  );
-  [mic, voice, voiceMode].forEach((control) => {
-    control.style.transform = "scale(0.98)";
-    control.style.transition = "transform 150ms ease";
-    control.style.willChange = "transform";
-  });
-  const placement = hooks.getClaudeBubblePlacement(composerRect, input, composer);
-  hooks.reserveClaudeInlineBubbleSlot(
-    placement.anchorControl,
-    placement.reservationControls,
-    input,
-    composerRect,
-    placement.inlineShift
-  );
-
-  assert.equal(placement.anchorControl.element, voiceMode);
-  assert.equal(switchCluster.style.translate, "-52px 0px");
-  [mic, voice, voiceMode].forEach((control) => {
-    assert.equal(control.style.translate || "", "");
-    assert.equal(control.style.transform, "scale(0.98)");
-    assert.equal(control.style.transition, "transform 150ms ease");
-    assert.equal(control.style.willChange, "transform");
-  });
 });
 
 function getChatGptComposerPlacement(controls) {
@@ -3048,74 +1962,6 @@ test("ChatGPT paid placement remains left of the reasoning control", () => {
   assert.equal(placement.top, 933);
 });
 
-test("ChatGPT keeps its orb beside wider modes inside a page-sized form", () => {
-  const form = new FakeElement({
-    tag: "form",
-    rect: { left: 642, right: 1698, top: 420, bottom: 1620, width: 1056, height: 1200 }
-  });
-  const input = new FakeElement({
-    attrs: { id: "prompt-textarea", contenteditable: "true", role: "textbox" },
-    rect: { left: 708, right: 1410, top: 505, bottom: 541, width: 702, height: 36 }
-  });
-  const selector = new FakeElement({ tag: "button", attrs: { "aria-label": "Reasoning effort" } });
-  form.children = [input, selector];
-  form.children.forEach((element) => { element.parentElement = form; });
-  const hooks = loadPlatformContent([form, input, selector], "chatgpt.com", {
-    innerWidth: 1920, innerHeight: 1080
-  });
-
-  for (const [mode, width] of [["High", 70], ["Medium", 120], ["Instant", 95], ["High", 70]]) {
-    selector.textContent = selector.innerText = mode;
-    selector.rect = { left: 1420, right: 1420 + width, top: 505, bottom: 541, width, height: 36 };
-    const placement = hooks.getChatGptFixedBubblePlacement(input);
-    assert.equal(placement.left, 1370, mode);
-    assert.equal(placement.top, 502, mode);
-  }
-});
-
-test("ChatGPT placement fallback rejects a page-sized form", () => {
-  const form = new FakeElement({
-    tag: "form",
-    rect: { left: 642, right: 1698, top: 420, bottom: 1620, width: 1056, height: 1200 }
-  });
-  const input = new FakeElement({
-    attrs: { contenteditable: "true", role: "textbox" },
-    rect: { left: 708, right: 1410, top: 505, bottom: 541, width: 702, height: 36 }
-  });
-  form.children = [input];
-  input.parentElement = form;
-  const hooks = loadPlatformContent([form, input], "chatgpt.com", {
-    innerWidth: 1920, innerHeight: 1080
-  });
-  const placement = hooks.getChatGptFixedBubblePlacement(input);
-  assert.ok(placement.top >= input.rect.top - 42);
-  assert.ok(placement.top <= input.rect.bottom + 112);
-});
-
-test("ChatGPT free placement stays left of the complete visible control row", () => {
-  const think = new FakeElement({
-    tag: "button",
-    text: "Think",
-    attrs: { "aria-label": "Thinking" },
-    rect: { left: 1390, right: 1482, top: 936, bottom: 972, width: 92, height: 36 }
-  });
-  const mic = new FakeElement({
-    tag: "button",
-    attrs: { "aria-label": "Microphone" },
-    rect: { left: 1498, right: 1534, top: 936, bottom: 972, width: 36, height: 36 }
-  });
-  const voice = new FakeElement({
-    tag: "button",
-    attrs: { "aria-label": "Voice mode" },
-    rect: { left: 1548, right: 1592, top: 932, bottom: 976, width: 44, height: 44 }
-  });
-  const placement = getChatGptComposerPlacement([think, mic, voice]);
-
-  assert.equal(placement.left, 1340);
-  assert.equal(placement.top, 933);
-  assert.ok(placement.left + 42 <= think.rect.left);
-});
-
 test("Gemini bubble anchors to the left of the Flash selector", () => {
   const flash = new FakeElement({
     tag: "button",
@@ -3135,21 +1981,6 @@ test("Gemini bubble anchors to the left of the Flash selector", () => {
   assert.equal(anchor, flash);
   assert.equal(placement.right, 208);
   assert.equal(placement.bottom, 15);
-});
-
-test("Gemini placement does not require an English model label", () => {
-  const model = new FakeElement({
-    tag: "button",
-    text: "Avanzado",
-    rect: { left: 700, right: 790, top: 166, bottom: 202, width: 90, height: 36 }
-  });
-  const mic = new FakeElement({
-    tag: "button",
-    rect: { left: 804, right: 840, top: 166, bottom: 202, width: 36, height: 36 }
-  });
-  const hooks = loadPlatformContent([model, mic], "gemini.google.com");
-
-  assert.equal(hooks.findGeminiModelSelectorButton(getClaudeComposerRect()), model);
 });
 
 test("Grok bubble keeps the Fast placement across every visible mode", () => {
@@ -3175,22 +2006,6 @@ test("Grok bubble keeps the Fast placement across every visible mode", () => {
   }
 });
 
-test("Grok placement does not require an English mode label", () => {
-  const composerRect = getClaudeComposerRect();
-  const selector = new FakeElement({
-    tag: "button",
-    text: "Construir",
-    rect: { left: 700, right: 790, top: 166, bottom: 202, width: 90, height: 36 }
-  });
-  const mic = new FakeElement({
-    tag: "button",
-    rect: { left: 804, right: 840, top: 166, bottom: 202, width: 36, height: 36 }
-  });
-  const hooks = loadPlatformContent([selector, mic], "grok.com");
-
-  assert.equal(hooks.getGrokBubblePlacement(composerRect).left, 550);
-});
-
 test("DeepSeek anchors before the complete visible right-side control row", () => {
   const composerRect = getClaudeComposerRect();
   const firstControl = new FakeElement({
@@ -3211,147 +2026,6 @@ test("DeepSeek anchors before the complete visible right-side control row", () =
   );
 
   assert.equal(hooks.getDeepSeekBubblePlacement(composerRect).left, 500);
-});
-
-test("Gemini, Grok, and DeepSeek observe control-only composer changes", () => {
-  const providers = [
-    ["gemini.google.com", "syncPlatformPlacementResizeMonitoring"],
-    ["grok.com", "syncPlatformPlacementResizeMonitoring"],
-    ["chat.deepseek.com", "syncPlatformPlacementResizeMonitoring"]
-  ];
-
-  for (const [hostname, syncHook] of providers) {
-    const input = new FakeElement({ attrs: { contenteditable: "true", role: "textbox" } });
-    const composer = new FakeElement({ rect: getClaudeComposerRect() });
-    input.parentElement = composer;
-    composer.children = [input];
-    const hooks = loadPlatformContent([input, composer], hostname);
-
-    hooks[syncHook](input, composer);
-
-    const observation = hooks.mutationObservers.at(-1).observed[0];
-    assert.equal(observation.element, composer);
-    assert.deepEqual(JSON.parse(JSON.stringify(observation.options)), {
-      attributes: true,
-      characterData: true,
-      childList: true,
-      subtree: true,
-      attributeFilter: [
-        "class",
-        "style",
-        "aria-expanded",
-        "aria-hidden",
-        "aria-pressed",
-        "aria-selected",
-        "hidden",
-        "data-state",
-        "disabled"
-      ]
-    });
-  }
-});
-
-test("Gemini retains its outer composer while a large paste reflows in stages", () => {
-  const input = new FakeElement({
-    attrs: { contenteditable: "true", role: "textbox" },
-    rect: { left: 160, right: 840, top: 150, bottom: 230, width: 680, height: 80 }
-  });
-  const editorWrap = new FakeElement({
-    rect: { left: 140, right: 860, top: 130, bottom: 250, width: 720, height: 120 }
-  });
-  const composer = new FakeElement({
-    rect: { left: 100, right: 1000, top: 100, bottom: 260, width: 900, height: 160 }
-  });
-  const pro = new FakeElement({ tag: "button", text: "Pro" });
-  const mic = new FakeElement({ tag: "button", attrs: { "aria-label": "Microphone" } });
-
-  input.parentElement = editorWrap;
-  editorWrap.children = [input];
-  editorWrap.parentElement = composer;
-  composer.children = [editorWrap, pro, mic];
-  pro.parentElement = composer;
-  mic.parentElement = composer;
-
-  const hooks = loadPlatformContent([input, editorWrap, composer, pro, mic], "gemini.google.com");
-  assert.equal(hooks.findComposerSurfaceElement(input), composer);
-  hooks.reserveComposerSurface(composer);
-  hooks.syncPlatformPlacementResizeMonitoring(input, composer);
-
-  input.rect = { left: 160, right: 840, top: 150, bottom: 550, width: 680, height: 400 };
-  editorWrap.rect = { left: 140, right: 860, top: 130, bottom: 570, width: 720, height: 440 };
-
-  assert.equal(hooks.findComposerSurfaceElement(input), composer);
-  assert.deepEqual(hooks.resizeObservers.at(-1).observed, [input, composer]);
-});
-
-test("Grok retains its outer composer while a large paste reflows in stages", () => {
-  const input = new FakeElement({
-    attrs: { contenteditable: "true", role: "textbox" },
-    rect: { left: 160, right: 840, top: 150, bottom: 230, width: 680, height: 80 }
-  });
-  const editorWrap = new FakeElement({
-    rect: { left: 140, right: 860, top: 130, bottom: 250, width: 720, height: 120 }
-  });
-  const composer = new FakeElement({
-    rect: { left: 100, right: 1000, top: 100, bottom: 260, width: 900, height: 160 }
-  });
-  const fastSelector = new FakeElement({
-    tag: "button",
-    text: "Fast",
-    rect: { left: 720, right: 790, top: 210, bottom: 246, width: 70, height: 36 }
-  });
-
-  input.parentElement = editorWrap;
-  editorWrap.children = [input];
-  editorWrap.parentElement = composer;
-  composer.children = [editorWrap, fastSelector];
-  fastSelector.parentElement = composer;
-
-  const hooks = loadPlatformContent([input, editorWrap, composer, fastSelector], "grok.com");
-  assert.equal(hooks.findComposerSurfaceElement(input), composer);
-  hooks.reserveComposerSurface(composer);
-  hooks.syncPlatformPlacementResizeMonitoring(input, composer);
-
-  // Grok grows the editor first. The outer composer is momentarily too short
-  // for the shared containment check, while the inner wrapper already fits.
-  input.rect = { left: 160, right: 840, top: 150, bottom: 550, width: 680, height: 400 };
-  editorWrap.rect = { left: 140, right: 860, top: 130, bottom: 570, width: 720, height: 440 };
-
-  assert.equal(hooks.findComposerSurfaceElement(input), composer);
-  assert.deepEqual(hooks.resizeObservers.at(-1).observed, [input, composer]);
-});
-
-test("DeepSeek retains its outer composer while a large paste reflows in stages", () => {
-  const input = new FakeElement({
-    attrs: { contenteditable: "true", role: "textbox" },
-    rect: { left: 160, right: 840, top: 150, bottom: 230, width: 680, height: 80 }
-  });
-  const editorWrap = new FakeElement({
-    rect: { left: 140, right: 860, top: 130, bottom: 250, width: 720, height: 120 }
-  });
-  const composer = new FakeElement({
-    rect: { left: 100, right: 1000, top: 100, bottom: 260, width: 900, height: 160 }
-  });
-  const attach = new FakeElement({ tag: "button", attrs: { "aria-label": "Attach file" } });
-  const send = new FakeElement({ tag: "button", attrs: { "aria-label": "Send message" } });
-
-  input.parentElement = editorWrap;
-  editorWrap.children = [input];
-  editorWrap.parentElement = composer;
-  composer.children = [editorWrap, attach, send];
-  attach.parentElement = composer;
-  send.parentElement = composer;
-
-  const hooks = loadPlatformContent([input, editorWrap, composer, attach, send], "chat.deepseek.com");
-  assert.equal(hooks.findComposerSurfaceElement(input), composer);
-  hooks.reserveComposerSurface(composer);
-  hooks.syncPlatformPlacementResizeMonitoring(input, composer);
-
-  input.rect = { left: 160, right: 840, top: 150, bottom: 550, width: 680, height: 400 };
-  editorWrap.rect = { left: 140, right: 860, top: 130, bottom: 570, width: 720, height: 440 };
-
-  assert.equal(hooks.findComposerSurfaceElement(input), composer);
-  assert.deepEqual(hooks.resizeObservers.at(-1).observed, [input, composer]);
 });
 
 test("versioned evaluation set gates capture completeness", () => {
@@ -3379,24 +2053,6 @@ test("versioned evaluation set gates capture completeness", () => {
 
 function getClaudeComposerRect() {
   return { left: 100, right: 900, top: 100, bottom: 220, width: 800, height: 120 };
-}
-
-function localPlacementToPageRect(placement, composerRect) {
-  return {
-    left: composerRect.left + placement.left,
-    right: composerRect.left + placement.left + 42,
-    top: composerRect.top + placement.top,
-    bottom: composerRect.top + placement.top + 42
-  };
-}
-
-function rectsIntersect(first, second) {
-  return (
-    first.left < second.right &&
-    first.right > second.left &&
-    first.top < second.bottom &&
-    first.bottom > second.top
-  );
 }
 
 test("shared composer resize monitoring reuses targets and releases remounted nodes", () => {

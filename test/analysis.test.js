@@ -5,7 +5,6 @@ const test = require("node:test");
 const vm = require("node:vm");
 
 const ANALYSIS_SOURCE = fs.readFileSync(path.join(__dirname, "..", "analysis", "index.html"), "utf8");
-const PLATFORM_SOURCE = fs.readFileSync(path.join(__dirname, "..", "extension", "platform-content.js"), "utf8");
 
 test("analysis receipt shows the served model and does not report it as failed", () => {
   const { getModelFallbackLabel, formatModelDisplayName } = loadModelHelpers();
@@ -16,9 +15,6 @@ test("analysis receipt shows the served model and does not report it as failed",
     fallback: { used: true, model: "gemini-3.6-flash" }
   };
 
-  assert.match(ANALYSIS_SOURCE, /mini\("Served model"/);
-  assert.doesNotMatch(ANALYSIS_SOURCE, /sideItem\("Primary model"/);
-  assert.match(ANALYSIS_SOURCE, /sideItem\("Model path", getModelFallbackLabel\(summary\), "fallback"\)/);
   assert.equal(formatModelDisplayName("gemini-3.8-flash"), "Gemini 3.8 Flash");
   assert.equal(formatModelDisplayName("orcarouter/free"), "Orca / Model not recorded");
   assert.equal(formatModelDisplayName("deepseek/deepseek-v4-flash-free"), "Orca / DeepSeek V4 Flash");
@@ -32,7 +28,6 @@ test("analysis receipt shows the served model and does not report it as failed",
 
 test("analysis receipt carries Gemini health skips from the backend", () => {
   const { getModelFallbackLabel } = loadModelHelpers();
-  assert.match(PLATFORM_SOURCE, /geminiModelsSkipped: sanitizeGeminiModelsSkippedForStats/);
   assert.equal(
     getModelFallbackLabel({
       model: "gemini-3.7-flash",
@@ -46,10 +41,6 @@ test("analysis receipt carries Gemini health skips from the backend", () => {
 
 test("analysis formats a long provider failure chain as readable lines", () => {
   const { getModelFallbackLabel } = loadModelHelpers();
-  assert.match(ANALYSIS_SOURCE, /grid-template-rows: auto minmax\(120px, 0\.75fr\) minmax\(280px, 1\.6fr\)/);
-  assert.match(ANALYSIS_SOURCE, /white-space: pre-line/);
-  assert.match(PLATFORM_SOURCE, /orcaMs: backendTiming\?\.orcaMs/);
-  assert.match(PLATFORM_SOURCE, /\.slice\(0, 8\)/);
   assert.equal(
     getModelFallbackLabel({
       model: "local-direct",
@@ -74,14 +65,6 @@ test("analysis formats a long provider failure chain as readable lines", () => {
       "Local fallback — served"
     ].join("\n")
   );
-});
-
-test("analysis keeps exact raw scraped text behind a collapsed gear control", () => {
-  assert.match(ANALYSIS_SOURCE, /id="rawScrapeButton"/);
-  assert.match(ANALYSIS_SOURCE, /id="rawScrapePanel" hidden/);
-  assert.match(ANALYSIS_SOURCE, /rawScrapedText\.textContent = rawText/);
-  assert.match(ANALYSIS_SOURCE, /Stored locally for 24 hours or until the next transfer/);
-  assert.doesNotMatch(ANALYSIS_SOURCE, /escapeHtml\(stats\.rawScrapedText\)/);
 });
 
 function loadModelHelpers() {

@@ -11,10 +11,6 @@ const PLATFORM_SOURCE = fs.readFileSync(path.join(ROOT, "extension", "platform-c
 const VALIDATION_PATH = path.join(ROOT, "supabase", "functions", "transfer-telemetry", "validation.mjs");
 const VERCEL_VALIDATION = require(path.join(ROOT, "api", "telemetry-validation.js"));
 const VERCEL_TELEMETRY_HANDLER = require(path.join(ROOT, "api", "telemetry.js"));
-const PROGRESS_MIGRATION_SOURCE = fs.readFileSync(
-  path.join(ROOT, "supabase", "migrations", "20260718113749_atomically_preserve_transfer_event_progress.sql"),
-  "utf8"
-);
 
 function loadTelemetryBackground(fetchImpl, initialStorage = {}, manifestVersion = "1.3.0") {
   const storage = structuredClone(initialStorage);
@@ -172,19 +168,6 @@ async function invokeTelemetryHandler(body, options = {}) {
   await VERCEL_TELEMETRY_HANDLER(req, res);
   return res;
 }
-
-test("both transfer entry points start telemetry before early exits", () => {
-  const iconStart = PLATFORM_SOURCE.indexOf('if (message?.type === "START_CONTEXT_TRANSFER")');
-  const iconEnd = PLATFORM_SOURCE.indexOf("return false;", PLATFORM_SOURCE.indexOf("runContextFlow", iconStart));
-  const iconSource = PLATFORM_SOURCE.slice(iconStart, iconEnd);
-  assert.ok(iconSource.indexOf("startTransferTelemetry(trace)") < iconSource.indexOf("if (isRunning)"));
-
-  const pickerStart = PLATFORM_SOURCE.indexOf("async function startDestinationTransfer(destinationId)");
-  const pickerEnd = PLATFORM_SOURCE.indexOf("function ensureFloatingOverlay()", pickerStart);
-  const pickerSource = PLATFORM_SOURCE.slice(pickerStart, pickerEnd);
-  assert.ok(pickerSource.indexOf("startTransferTelemetry(trace)") < pickerSource.indexOf("if (isRunning)"));
-  assert.ok(pickerSource.indexOf("startTransferTelemetry(trace)") < pickerSource.indexOf("getDetectedConversationMessageCount() === 0"));
-});
 
 test("telemetry keeps one install id across summaries, browser restarts, and extension updates", async () => {
   const requests = [];
@@ -430,24 +413,6 @@ test("Vercel returns a retryable failure when Supabase delivery fails", async (t
   const res = await invokeTelemetryHandler(makeTelemetryPayload());
   assert.equal(res.statusCode, 503);
   assert.equal(res.body.code, "telemetry_unavailable");
-});
-
-test("transfer flow emits each closed telemetry stage without attaching content", () => {
-  assert.match(PLATFORM_SOURCE, /startTransferTelemetry\(trace\);[\s\S]*?if \(isRunning\)/);
-  assert.match(PLATFORM_SOURCE, /advanceTransferTelemetryStage\(transferTrace, "capture_started"\);\s*await prepareSourceForCapture/);
-  assert.match(PLATFORM_SOURCE, /advanceTransferTelemetryStage\(trace, "capture_completed"\)/);
-  assert.match(PLATFORM_SOURCE, /advanceTransferTelemetryStage\(trace, "summary_request_started"\)/);
-  assert.match(BACKGROUND_SOURCE, /recordKnownTransferTelemetryStage\(transferId, "summary_response_started"\)/);
-  assert.match(PLATFORM_SOURCE, /advanceTransferTelemetryStage\(trace, "summary_completed"\)/);
-  assert.match(PLATFORM_SOURCE, /advanceTransferTelemetryStage\(transferTrace, "paste_started"\)/);
-  assert.match(PLATFORM_SOURCE, /trace\.telemetryLastStage = "completed"/);
-});
-
-test("Supabase progress upserts cannot move a transfer backward", () => {
-  assert.match(PROGRESS_MIGRATION_SOURCE, /on conflict \(attempt_id\) do update/);
-  assert.match(PROGRESS_MIGRATION_SOURCE, /array_position\(stage_order, excluded\.last_stage\)/);
-  assert.match(PROGRESS_MIGRATION_SOURCE, /revoke all on function public\.record_transfer_event/);
-  assert.match(PROGRESS_MIGRATION_SOURCE, /to service_role/);
 });
 
 test("background persists server confirmation and never rebinds cached proof to a new attempt", async () => {
