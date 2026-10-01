@@ -2579,7 +2579,7 @@ test("ChatGPT inline body-only remount invalidates the picker once and refreshes
   assert.equal(hooks.invalidateInlinePicker("document-childlist"), false);
   assert.equal(observer.observed.length, 0);
   assert.ok(hooks.mutationObservers.some(item => item.observed.some(target => target.element === nextBody)));
-  assert.equal(bubble.nextElementSibling, f.model);
+  assert.equal(bubble.nextElementSibling, f.modelWrapper);
 });
 
 test("ChatGPT mounts before the model, follows remounts and supports free controls", () => {
@@ -2596,14 +2596,15 @@ test("ChatGPT mounts before the model, follows remounts and supports free contro
     || hooks.document.documentElement.children.find(node => node.id === id);
   const bubble = new FakeElement({ tag: "button" });
   assert.equal(hooks.mountChatGptInlineButton(bubble, f.input), true);
-  assert.equal(bubble.parentElement, f.modelWrapper);
-  assert.equal(bubble.nextElementSibling, f.model);
-  assert.equal(bubble.style.width, "32px");
-  assert.equal(bubble.style.flex, "0 0 32px");
+  assert.equal(bubble.parentElement, f.right);
+  assert.equal(bubble.nextElementSibling, f.modelWrapper);
+  assert.equal(f.modelWrapper.contains(bubble), false, "the pill must stay outside the native model tooltip branch");
+  assert.equal(bubble.style.width, "36px");
+  assert.equal(bubble.style.flex, "0 0 36px");
   assert.equal(bubble.style.position, "static");
   assert.equal(hooks.mountChatGptInlineButton(bubble, next.input), true);
-  assert.equal(bubble.parentElement, next.modelWrapper);
-  assert.equal(bubble.nextElementSibling, next.model);
+  assert.equal(bubble.parentElement, nativeGroup);
+  assert.equal(bubble.nextElementSibling, next.modelWrapper);
   assert.equal(nativeGroup.getAttribute("data-context-generator-chatgpt-inline"), "controls");
   assert.equal(f.footer.hasAttribute("data-context-generator-chatgpt-inline"), false);
   assert.equal(f.right.hasAttribute("data-context-generator-chatgpt-inline"), false);
@@ -2612,7 +2613,7 @@ test("ChatGPT mounts before the model, follows remounts and supports free contro
   assert.equal(hooks.mountChatGptInlineButton(bubble, next.input), true);
   assert.equal(bubble.parentElement, nativeGroup);
   assert.equal(bubble.nextElementSibling, next.voice);
-  assert.equal(bubble.style.flex, "0 0 32px");
+  assert.equal(bubble.style.flex, "0 0 36px");
   assert.equal(next.modelWrapper.hasAttribute("data-context-generator-chatgpt-inline"), false);
   hooks.releaseChatGptInlineMount();
   assert.equal(next.left.hasAttribute("data-context-generator-chatgpt-inline"), false);
@@ -2661,9 +2662,9 @@ for (const [platform, host] of [["gemini", "gemini.google.com"], ["grok", "grok.
     assert.equal(hooks.findProviderInlineToolbar(new FakeElement()), null);
     assert.equal(hooks.mountProviderInlineButton(bubble, f.input), true);
     assert.equal(bubble.nextElementSibling, f.anchor);
-    assert.equal(bubble.style.width, "32px");
+    assert.equal(bubble.style.width, "36px");
     assert.equal(bubble.style.position, "static");
-    assert.equal(bubble.style.flex, "0 0 32px");
+    assert.equal(bubble.style.flex, "0 0 36px");
     assert.equal(hooks.mountProviderInlineButton(bubble, next.input), true);
     assert.equal(bubble.parentElement, next.slot);
     assert.equal(bubble.nextElementSibling, next.anchor);
@@ -2936,7 +2937,7 @@ for (const platform of ["claude", "chatgpt"]) {
     }
     assert.equal(hooks.mountInlineOrLegacyBackup(bubble, inline.input), true);
     assert.equal(bubble.style.position, "static");
-    assert.equal(bubble.style.width, platform === "claude" ? "36px" : "32px");
+    assert.equal(bubble.style.width, "36px");
     assert.equal(hooks.resizeObservers.some(observer => observer.observed.length), false);
     assert.equal(hooks.mutationObservers.some(observer => observer.observed.some(target => target.element === form)), false);
     assert.equal(model.hasAttribute("data-context-generator-original-translate"), false);

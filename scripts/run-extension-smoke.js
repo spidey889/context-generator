@@ -853,7 +853,7 @@ async function run() {
                  voice:getComputedStyle(document.getElementById('gpt-voice')).display!=='none',
                  inside:r.left>=0&&r.right<=innerWidth} : null;
           })()`), "ChatGPT inline mounting");
-          assert.equal(inline.width, 32);
+          assert.equal(inline.width, 36);
           assert.equal(inline.position, "static");
           assert.equal(inline.besideModel, true);
           assert.equal(inline.overlap, false, `ChatGPT overlaps native controls at ${width}px.`);
@@ -879,7 +879,7 @@ async function run() {
         return new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)));
       })()`);
       assert.equal(await sourceSession.evaluate(`getComputedStyle(window.__gptSmokeButton).position==='static'
-        && window.__gptSmokeButton.nextElementSibling===document.getElementById('gpt-reasoning')`),true,"ChatGPT duplicate controls must not force fallback.");
+        && window.__gptSmokeButton.nextElementSibling===document.querySelector('.gpt-model')`),true,"ChatGPT duplicate controls must not force fallback.");
       await sourceSession.evaluate(`['gpt-duplicate-footer','gpt-hidden-attach','gpt-decoy-menu'].forEach(id=>document.getElementById(id).remove())`);
       await sourceSession.evaluate(`document.querySelector('[data-composer-navigation-target="add-context"]').style.display='none'`);
       await waitFor(()=>sourceSession.evaluate(`getComputedStyle(window.__gptSmokeButton).position==='fixed'`),"ChatGPT attribute-only fallback");
@@ -889,7 +889,7 @@ async function run() {
       await sourceSession.evaluate(`document.getElementById('gpt-reasoning').style.display='none'`);
       await waitFor(()=>sourceSession.evaluate(`window.__gptSmokeButton.nextElementSibling===document.querySelector('.gpt-voice-controls [aria-label="Dictate"]')`),"ChatGPT attribute-only model removal");
       await sourceSession.evaluate(`document.getElementById('gpt-reasoning').style.display=''`);
-      await waitFor(()=>sourceSession.evaluate(`window.__gptSmokeButton.nextElementSibling===document.getElementById('gpt-reasoning')`),"ChatGPT attribute-only model return");
+      await waitFor(()=>sourceSession.evaluate(`window.__gptSmokeButton.nextElementSibling===document.querySelector('.gpt-model')`),"ChatGPT attribute-only model return");
       for (const mode of ["style", "hidden", "class"]) {
         await sourceSession.evaluate(`(() => {
           const wrapper=document.getElementById('gpt-reasoning').parentElement;
@@ -903,7 +903,7 @@ async function run() {
           const wrapper=document.getElementById('gpt-reasoning').parentElement;
           wrapper.style.display='';wrapper.hidden=false;wrapper.classList.remove('hidden');
         })()`);
-        await waitFor(()=>sourceSession.evaluate(`window.__gptSmokeButton.nextElementSibling===document.getElementById('gpt-reasoning')`),"ChatGPT native model-wrapper recovery");
+        await waitFor(()=>sourceSession.evaluate(`window.__gptSmokeButton.nextElementSibling===document.querySelector('.gpt-model')`),"ChatGPT native model-wrapper recovery");
       }
       await sourceSession.call("Emulation.setDeviceMetricsOverride", { width:390,height:740,deviceScaleFactor:1,mobile:false });
       await sourceSession.evaluate(`(() => {
@@ -917,7 +917,7 @@ async function run() {
       assert.deepEqual(await sourceSession.evaluate(`[document.getElementById('prompt-textarea'),document.querySelector('form')].map(n=>{const r=n.getBoundingClientRect();return[r.width,r.height];})`),gptObservedRects,"This hidden-group transition must exercise recovery without ResizeObserver changes.");
       await sourceSession.evaluate(`window.__gptHiddenControls.hidden=false`);
       await waitFor(()=>sourceSession.evaluate(`getComputedStyle(window.__gptSmokeButton).position==='static'
-        && window.__gptSmokeButton.nextElementSibling===document.getElementById('gpt-reasoning')`),"ChatGPT hidden control-group recovery without resize");
+        && window.__gptSmokeButton.nextElementSibling===document.querySelector('.gpt-model')`),"ChatGPT hidden control-group recovery without resize");
       await sourceSession.call("Emulation.clearDeviceMetricsOverride");
       // Restoring the viewport/draft queues native resize and placement work.
       // Finish that reflow before opening a picker that resize intentionally closes.
@@ -933,7 +933,7 @@ async function run() {
         body.replaceWith(next);while(body.firstChild)next.appendChild(body.firstChild);
       })()`);
       await waitFor(()=>sourceSession.evaluate(`document.getElementById('context-generator-destination-sheet').style.display==='none'
-        && window.__gptSmokeButton.nextElementSibling===document.getElementById('gpt-reasoning')`),"ChatGPT body-only picker invalidation");
+        && window.__gptSmokeButton.nextElementSibling===document.querySelector('.gpt-model')`),"ChatGPT body-only picker invalidation");
       assert.equal(await sourceSession.evaluate(`window.__gptSmokeButton.style.filter==='none'
         && window.__gptSmokeButton.style.transform.includes('scale(1)')`),true,"Picker invalidation must clear active pill visuals without a pointer leave.");
       await sourceSession.evaluate(`window.__gptSmokeButton.click()`);
@@ -955,14 +955,14 @@ async function run() {
       })()`);
       await waitFor(() => sourceSession.evaluate(`(() => {
         const b=document.getElementById('context-generator-bubble');
-        return b===window.__gptSmokeButton && b?.nextElementSibling===document.getElementById('gpt-reasoning')
+        return b===window.__gptSmokeButton && b?.nextElementSibling===document.querySelector('.gpt-model')
           && !window.__gptSmokeOldFooter.hasAttribute('data-context-generator-chatgpt-inline');
       })()`), "ChatGPT button recovery after editor replacement");
       await sourceSession.evaluate(`(() => {
         const input=document.getElementById('prompt-textarea');input.textContent=${JSON.stringify(originalDraft)};
         input.dispatchEvent(new Event('input',{bubbles:true}));
       })()`);
-      process.stdout.write("✓ ChatGPT's 32px inline slot survives empty/long drafts, 760/390/320px widths and editor remount without native-control overlap.\n");
+      process.stdout.write("✓ ChatGPT's 36px inline slot survives empty/long drafts, 760/390/320px widths and editor remount without native-control overlap.\n");
     }
 
     for (const platform of ["gemini", "grok", "deepseek"]) {
@@ -989,7 +989,7 @@ async function run() {
                 adjacent:b.nextElementSibling===anchor||${JSON.stringify(platform)}==='gemini'&&innerWidth<=640,
                 overlap:peers.some(p=>r.left<p.right&&r.right>p.left&&r.top<p.bottom&&r.bottom>p.top)}:null;
             })()`), `${platform} inline layout`);
-            assert.equal(layout.width, 32);
+            assert.equal(layout.width, 36);
             assert.equal(layout.inside, true);
             assert.equal(layout.adjacent, true);
             assert.equal(layout.overlap, false, `${platform} control overlap at ${width}px`);
@@ -1033,7 +1033,7 @@ async function run() {
         assert.equal(await session.evaluate(`getComputedStyle(window.__providerHiddenGroup).display==='none'`),true,`${platform} flow CSS must preserve native hiding.`);
         await session.evaluate(`window.__providerHiddenGroup.style.display=''`);
         await waitFor(()=>session.evaluate(`getComputedStyle(window.__providerPill).position==='static'
-          && window.__providerPill.getBoundingClientRect().width===32`),`${platform} native hidden-group recovery`);
+          && window.__providerPill.getBoundingClientRect().width===36`),`${platform} native hidden-group recovery`);
         // Keep controls visible while changing only the inline identification.
         await session.evaluate(`(() => {
           if('${platform}'==='gemini')document.querySelector('.trailing-actions-wrapper').classList.remove('trailing-actions-wrapper');
@@ -1048,7 +1048,7 @@ async function run() {
         })()`);
         await waitFor(()=>session.evaluate(`getComputedStyle(window.__providerPill).position==='static'
           && window.__providerPill.style.left==='auto' && window.__providerPill.style.top==='auto'
-          && window.__providerPill.style.width==='32px'`),`${platform} legacy-to-inline style cleanup`);
+          && window.__providerPill.style.width==='36px'`),`${platform} legacy-to-inline style cleanup`);
         assert.deepEqual(await session.evaluate(`['transform','filter','zIndex'].map(key=>window.__providerPill.style[key])`),
           await session.evaluate(`window.__providerInteraction`),`${platform} placement switching must preserve shared interaction styles.`);
         if(platform==='deepseek'){

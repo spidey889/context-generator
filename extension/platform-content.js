@@ -1,5 +1,6 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-02-claude-mic-pill-v90";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-02-inline-size-gpt-hover-v91";
+  const INLINE_PILL_SIZE = 36;
   const ownedUiStyleSheets = new Map();
   const CLAUDE_INLINE_STYLE_ID = "context-generator-claude-inline-styles";
   const CLAUDE_INLINE_MARKER = "data-context-generator-claude-inline";
@@ -3795,10 +3796,10 @@
     if (bubble.parentElement !== toolbar.right || bubble.nextElementSibling !== toolbar.anchor) {
       toolbar.right.insertBefore(bubble, toolbar.anchor);
     }
-    setBubbleSize(bubble, 36);
+    setBubbleSize(bubble, INLINE_PILL_SIZE);
     setBubbleStylesIfChanged(bubble, {
       position: "static", left: "auto", right: "auto", top: "auto", bottom: "auto",
-      margin: "0 4px 0 0", flex: "0 0 36px", alignSelf: "center", display: "flex", visibility: "visible"
+      margin: "0 4px 0 0", flex: `0 0 ${INLINE_PILL_SIZE}px`, alignSelf: "center", display: "flex", visibility: "visible"
     });
     // Attribute-only mode/visibility changes emit no document child-list event.
     syncProviderControlMutationMonitoring(input, input.closest("[data-cds='ChatComposer']") || toolbar.host);
@@ -3838,12 +3839,14 @@
       controls = controls.parentElement;
     }
     const model = nativeButtons.find((button) => button.getAttribute("data-composer-navigation-target") === "reasoning");
-    // Keep the pill and model trigger together inside its native wrapper.
-    // Free layouts without a model trigger use the start of the right controls.
-    const slot = model?.parentElement || controls;
+    // The model's native wrappers also own its Thinking effort tooltip. Keep
+    // our pill outside the entire model branch so its hover/focus stays separate.
+    if (model && nativeButtons.length === 1) controls = right;
+    const slot = controls;
     let anchor = model || nativeButtons[0];
     while (anchor.parentElement !== slot) anchor = anchor.parentElement;
-    return { input, body, footer, left, right, controls, slot, anchor };
+    const modelBranch = model ? anchor : null;
+    return { input, body, footer, left, right, controls, slot, anchor, modelBranch };
   }
 
   function ensureChatGptInlineStyles() {
@@ -3852,9 +3855,8 @@
     style.id = CHATGPT_INLINE_STYLE_ID;
     style.className = "darkreader";
     style.dataset.contextGeneratorOwned = "true";
-    // Size the grid to its native controls and keep the pill/model pair intact
-    // when the right-side branches wrap. Model triggers use display:contents
-    // wrappers, which need a real flex box once they also own our pill.
+    // Size the grid to its native controls. The model branch gets a real flex
+    // box for wrapping, while our pill remains its sibling outside the tooltip.
     // Native hidden states and inline display:none must still win over our flow.
     style.textContent = `
       [${CHATGPT_INLINE_MARKER}="footer"] {
@@ -3862,6 +3864,7 @@
       }
       [${CHATGPT_INLINE_MARKER}="model"]:not([hidden]):not(.hidden) {
         display:inline-flex; align-items:center!important;
+        width:auto!important;
         min-width:0!important; max-width:100%!important;
       }
       [${CHATGPT_INLINE_MARKER}="controls"]:not([hidden]):not(.hidden) {
@@ -3879,6 +3882,7 @@
     chatGptInlineMount.footer.removeAttribute(CHATGPT_INLINE_MARKER);
     chatGptInlineMount.slot.removeAttribute(CHATGPT_INLINE_MARKER);
     chatGptInlineMount.controls.removeAttribute(CHATGPT_INLINE_MARKER);
+    chatGptInlineMount.modelBranch?.removeAttribute(CHATGPT_INLINE_MARKER);
     chatGptInlineMount = null;
     stopProviderControlMutationMonitoring();
   }
@@ -3893,7 +3897,7 @@
         chatGptInlineMount?.footer !== toolbar.footer ||
         chatGptInlineMount?.left !== toolbar.left || chatGptInlineMount?.right !== toolbar.right ||
         chatGptInlineMount?.controls !== toolbar.controls || chatGptInlineMount?.slot !== toolbar.slot ||
-        chatGptInlineMount?.anchor !== toolbar.anchor) {
+        chatGptInlineMount?.anchor !== toolbar.anchor || chatGptInlineMount?.modelBranch !== toolbar.modelBranch) {
       releaseChatGptInlineMount();
       chatGptInlineMount = { ...toolbar, bubble };
     }
@@ -3901,17 +3905,17 @@
     clearLegacyInlineBackup({ keepControlObserver: true });
     ensureChatGptInlineStyles();
     const markers = [[toolbar.footer, "footer"], [toolbar.controls, "controls"]];
-    if (toolbar.slot !== toolbar.controls) markers.push([toolbar.slot, "model"]);
+    if (toolbar.modelBranch) markers.push([toolbar.modelBranch, "model"]);
     markers.forEach(([node, value]) => {
       if (node.getAttribute(CHATGPT_INLINE_MARKER) !== value) node.setAttribute(CHATGPT_INLINE_MARKER, value);
     });
     if (bubble.parentElement !== toolbar.slot || bubble.nextElementSibling !== toolbar.anchor) {
       toolbar.slot.insertBefore(bubble, toolbar.anchor);
     }
-    setBubbleSize(bubble, 32);
+    setBubbleSize(bubble, INLINE_PILL_SIZE);
     setBubbleStylesIfChanged(bubble, {
       position: "static", left: "auto", right: "auto", top: "auto", bottom: "auto",
-      margin: "0 6px 0 0", flex: "0 0 32px", alignSelf: "center", display: "flex", visibility: "visible"
+      margin: "0 6px 0 0", flex: `0 0 ${INLINE_PILL_SIZE}px`, alignSelf: "center", display: "flex", visibility: "visible"
     });
     syncProviderControlMutationMonitoring(input, toolbar.body);
     return true;
@@ -4030,10 +4034,10 @@
     if (bubble.parentElement !== toolbar.slot || bubble.nextElementSibling !== toolbar.anchor) {
       toolbar.slot.insertBefore(bubble, toolbar.anchor);
     }
-    setBubbleSize(bubble, 32);
+    setBubbleSize(bubble, INLINE_PILL_SIZE);
     setBubbleStylesIfChanged(bubble, {
       position: "static", left: "auto", right: "auto", top: "auto", bottom: "auto",
-      margin: "0 6px 0 0", flex: "0 0 32px", alignSelf: "center", display: "flex", visibility: "visible"
+      margin: "0 6px 0 0", flex: `0 0 ${INLINE_PILL_SIZE}px`, alignSelf: "center", display: "flex", visibility: "visible"
     });
     return true;
   }
@@ -8887,7 +8891,7 @@
       mount.input !== input || mount.left !== toolbar.left ||
       mount.body !== toolbar.body ||
       mount.right !== toolbar.right || mount.footer !== toolbar.footer || mount.controls !== toolbar.controls ||
-      mount.slot !== toolbar.slot || mount.anchor !== toolbar.anchor ||
+      mount.slot !== toolbar.slot || mount.anchor !== toolbar.anchor || mount.modelBranch !== toolbar.modelBranch ||
       mount.surface !== toolbar.surface || mount.row !== toolbar.row || mount.dock !== toolbar.dock || mount.editorContainer !== toolbar.editorContainer ||
       (isClaude && (mount.host !== toolbar.host || mount.editorBranch !== toolbar.editorBranch || mount.actions !== toolbar.actions)) ||
       mount.pathname !== window.location.pathname ||
