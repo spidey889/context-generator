@@ -1070,8 +1070,8 @@ virtualSweepTest("transfer capture keeps fuller swept text when the turn count m
   assert.match(transcript, /details that were cut off during the quick first look/);
 });
 
-test("slow/release: physical scroll movement prevents a premature stale exit on non-Claude chats", async () => {
-  const { elements } = createVirtualizedChatElements({
+clockTest("slow/release: physical scroll movement prevents a premature stale exit on non-Claude chats", async () => {
+  const { elements, scrollableRoot } = createVirtualizedChatElements({
     label: "ChatGPT",
     totalTurns: 16,
     windowSize: 8,
@@ -1083,14 +1083,28 @@ test("slow/release: physical scroll movement prevents a premature stale exit on 
       attrs: { "data-message-author-role": index % 2 ? "user" : "assistant" }
     })
   });
+  let unchangedMoves = 0;
+  let longestUnchangedRun = 0;
+  const scrollTo = scrollableRoot.scrollTo.bind(scrollableRoot);
+  scrollableRoot.scrollTo = (...args) => {
+    const previousTop = scrollableRoot.scrollTop;
+    const previousText = scrollableRoot.textContent;
+    scrollTo(...args);
+    unchangedMoves = scrollableRoot.scrollTop > previousTop && scrollableRoot.textContent === previousText
+      ? unchangedMoves + 1 : 0;
+    longestUnchangedRun = Math.max(longestUnchangedRun, unchangedMoves);
+  };
   const hooks = loadPlatformContent(elements, "chatgpt.com");
 
   await hooks.prepareSourceForCapture();
   const transcript = await hooks.scrapeConversationTextWhenReady();
 
-  assert.equal((transcript.match(/(?:User|ChatGPT): Delayed tall-message turn/g) || []).length, 16);
-  assert.match(transcript, /User: Delayed tall-message turn 1/);
-  assert.match(transcript, /ChatGPT: Delayed tall-message turn 16/);
+  assert.ok(longestUnchangedRun >= 5, "fixture must move through five unchanged windows before rendering");
+  assert.deepEqual(
+    transcript.match(/(?:User|ChatGPT): Delayed tall-message turn \d+/g),
+    Array.from({ length: 16 }, (_, index) => `${index % 2 ? "ChatGPT" : "User"}: Delayed tall-message turn ${index + 1}`),
+    "every turn must survive in order, without omissions or duplicates"
+  );
 });
 
 test("paste selects a ready composer when a higher-scoring one is disabled", () => {
