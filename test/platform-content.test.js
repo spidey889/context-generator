@@ -2439,6 +2439,69 @@ test("startup clears stale Claude placement transform reservations", () => {
   assert.equal(translatedClaudeControl.hasAttribute("data-context-generator-original-translate"), false);
 });
 
+function inlineChatGptFixture() {
+  const body = new FakeElement({ attrs: { "data-composer-body": "" } });
+  const footer = new FakeElement({ attrs: { "data-composer-footer-responsive": "" } });
+  const editor = new FakeElement({ attrs: { "data-composer-input": "" } });
+  const input = new FakeElement({ attrs: { contenteditable: "true", role: "textbox" } });
+  const left = new FakeElement();
+  const right = new FakeElement();
+  const attach = new FakeElement({ tag: "button", attrs: { "data-composer-navigation-target": "add-context" } });
+  const model = new FakeElement({ tag: "button", attrs: { "data-composer-navigation-target": "reasoning", "aria-haspopup": "menu" } });
+  const voice = new FakeElement({ tag: "button", attrs: { "aria-label": "Start Voice" } });
+  body.appendChild(footer);
+  footer.appendChild(left);
+  footer.appendChild(editor);
+  footer.appendChild(right);
+  editor.appendChild(input);
+  left.appendChild(attach);
+  right.appendChild(model);
+  right.appendChild(voice);
+  return { body, footer, editor, input, left, right, attach, model, voice };
+}
+
+test("ChatGPT inline discovery follows the editor-owned footer across multiline reordering", () => {
+  const f = inlineChatGptFixture();
+  const hooks = loadPlatformContent(Object.values(f));
+  assert.equal(hooks.findChatGptInlineToolbar(f.input).left, f.left);
+  f.footer.children = [f.editor, f.left, f.right];
+  assert.equal(hooks.findChatGptInlineToolbar(f.input).right, f.right);
+  assert.equal(hooks.findChatGptInlineToolbar(new FakeElement()), null);
+});
+
+test("ChatGPT inline discovery supports free controls and excludes popup or unrelated rows", () => {
+  const f = inlineChatGptFixture();
+  const hooks = loadPlatformContent(Object.values(f));
+  f.right.children = [f.voice];
+  assert.equal(hooks.findChatGptInlineToolbar(f.input).right, f.right);
+  f.right.setAttribute("role", "menu");
+  assert.equal(hooks.findChatGptInlineToolbar(f.input), null);
+  f.right.removeAttribute("role");
+  f.attach.removeAttribute("data-composer-navigation-target");
+  assert.equal(hooks.findChatGptInlineToolbar(f.input), null);
+});
+
+test("ChatGPT inline mounting retains a non-shrinking 32px button through remount and cleans markers", () => {
+  const f = inlineChatGptFixture();
+  const next = inlineChatGptFixture();
+  const hooks = loadPlatformContent(Object.values(f));
+  hooks.document.createElement = () => new FakeElement();
+  const originalGetById = hooks.document.getElementById;
+  hooks.document.getElementById = id => originalGetById(id)
+    || hooks.document.documentElement.children.find(node => node.id === id);
+  const bubble = new FakeElement({ tag: "button" });
+  assert.equal(hooks.mountChatGptInlineButton(bubble, f.input), true);
+  assert.equal(bubble.parentElement, f.left);
+  assert.equal(bubble.style.width, "32px");
+  assert.equal(bubble.style.flex, "0 0 32px");
+  assert.equal(bubble.style.position, "static");
+  assert.equal(hooks.mountChatGptInlineButton(bubble, next.input), true);
+  assert.equal(bubble.parentElement, next.left);
+  assert.equal(f.footer.hasAttribute("data-context-generator-chatgpt-inline"), false);
+  hooks.releaseChatGptInlineMount();
+  assert.equal(next.left.hasAttribute("data-context-generator-chatgpt-inline"), false);
+});
+
 function inlineClaudeFixture() {
   const host = new FakeElement();
   const editorBranch = new FakeElement();

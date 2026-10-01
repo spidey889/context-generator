@@ -30,6 +30,7 @@ const SUMMARY_TEXT = [
 const SMOKE_PLATFORM_QUERY = "__cap_context_smoke_platform";
 const SMOKE_TIMEOUT_MS = Number(process.env.CAP_CONTEXT_SMOKE_TIMEOUT_MS || 45000);
 const CLAUDE_PLACEMENT_SCREENSHOT_PATH = process.env.CAP_CONTEXT_CLAUDE_PLACEMENT_SCREENSHOT || "";
+const CHATGPT_PLACEMENT_SCREENSHOT_PATH = process.env.CAP_CONTEXT_CHATGPT_PLACEMENT_SCREENSHOT || "";
 const PICKER_SCREENSHOT_PATH = process.env.CAP_CONTEXT_PICKER_SCREENSHOT || "";
 const ERROR_SCREENSHOT_PATH = process.env.CAP_CONTEXT_ERROR_SCREENSHOT || "";
 const JSON_SOURCE = ["chatgpt", "gemini", "grok", "deepseek"].includes(process.env.CAP_CONTEXT_JSON_SMOKE) ? process.env.CAP_CONTEXT_JSON_SMOKE : process.env.CAP_CONTEXT_JSON_SMOKE === "1" ? "claude" : null;
@@ -253,7 +254,16 @@ function sourceFixture() {
     main{max-width:760px;margin:40px auto 160px;padding:20px}
     article{margin:18px 0;padding:18px;border:1px solid #444;border-radius:14px}
     form{position:fixed;left:50%;bottom:28px;width:min(720px,calc(100vw - 48px));transform:translateX(-50%);padding:16px;background:#242424;border-radius:18px}
-    #prompt-textarea{min-height:48px;outline:none}
+    #prompt-textarea{min-height:36px;max-height:200px;overflow:auto;outline:none;white-space:pre-wrap}
+    [data-composer-footer-responsive]{display:grid;grid-template-columns:36px minmax(0,1fr) auto;gap:8px;align-items:center}
+    .gpt-right{display:flex;align-items:center;gap:8px;min-width:0}
+    .gpt-right button{height:36px;flex-shrink:0}
+    .gpt-left button{width:36px;height:36px}
+    #gpt-reasoning{min-width:0;flex-shrink:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+    #gpt-send{display:none}
+    form.has-text #gpt-send{display:block}
+    form.has-text #gpt-voice{display:none}
+    @media(max-width:640px){[data-composer-input]{grid-column:1/-1;grid-row:1}.gpt-left{grid-column:1;grid-row:2}.gpt-right{grid-column:3;grid-row:2}}
   </style>
 </head>
 <body>
@@ -261,7 +271,13 @@ function sourceFixture() {
     <article data-message-author-role="user">${SOURCE_SENTINEL}</article>
     <article data-message-author-role="assistant"><div class="markdown">${ASSISTANT_SENTINEL}</div></article>
   </main>
-  <form data-testid="composer"><div id="prompt-textarea" data-testid="prompt-textarea" contenteditable="true" role="textbox"></div></form>
+  <form data-testid="composer"><div data-composer-body>
+    <div data-composer-footer-responsive data-composer-layout="single-line">
+      <div class="gpt-left"><button type="button" data-composer-navigation-target="add-context" aria-label="Add files and more">+</button></div>
+      <div data-composer-input><div id="prompt-textarea" data-testid="prompt-textarea" data-composer-markdown contenteditable="true" role="textbox" aria-label="Ask ChatGPT"></div></div>
+      <div class="gpt-right"><button type="button" id="gpt-reasoning" data-composer-navigation-target="reasoning" aria-haspopup="menu">High</button><button type="button" aria-label="Dictate">Mic</button><button type="button" id="gpt-voice" aria-label="Start Voice">Voice</button><button type="button" id="gpt-send" data-testid="send-button" aria-label="Send">Send</button></div>
+    </div></div></form>
+    <script>document.querySelector('form').addEventListener('input',e=>e.target.closest('form').classList.toggle('has-text',!!e.target.textContent.trim()));</script>
 </body>
 </html>`;
 }
@@ -604,8 +620,15 @@ async function verifyEmptyChatError(session, browserSession, state, { removeTurn
         && new DOMMatrix(getComputedStyle(error).transform).m41 > 0) window.__emptySmokeEnteredFromRight = true;
     });
     window.__emptySmokeObserver.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ["style"] });
-    document.getElementById("context-generator-bubble").click();
   })()`);
+  // The empty-chat fixture changes routes without replacing the editor. Let
+  // navigation mounting settle before opening a picker owned by the new route.
+  await session.evaluate(`new Promise(resolve => {
+    dispatchEvent(new PopStateEvent('popstate'));
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+      document.getElementById('context-generator-bubble').click(); resolve();
+    }));
+  })`);
   await waitFor(() => session.evaluate(`getComputedStyle(document.getElementById("context-generator-destination-sheet")).opacity === "1"`), "empty-chat picker");
   await session.evaluate(`(() => {
     document.querySelector(".context-generator-destination-tile").click();
@@ -756,6 +779,55 @@ async function run() {
     if (!JSON_CAPTURE_SMOKE) {
       await verifyEmptyChatError(sourceSession, browserSession, state, { removeTurns: true, screenshot: true });
       process.stdout.write("✓ Empty ChatGPT shows its error directly, opens no destination, and supports repeated attempts/reduced motion.\n");
+    }
+
+    if (!JSON_SOURCE || JSON_SOURCE === "chatgpt") {
+      const originalDraft = await sourceSession.evaluate(`document.getElementById('prompt-textarea').textContent`);
+      await sourceSession.evaluate(`(() => {
+        const input = document.getElementById('prompt-textarea');
+        input.textContent = Array.from({length:12},(_,i)=>'Inline draft line '+i).join('\\n');
+        input.dispatchEvent(new Event('input',{bubbles:true}));
+      })()`);
+      for (const width of [760, 390, 320]) {
+        await sourceSession.call("Emulation.setDeviceMetricsOverride", { width, height: 740, deviceScaleFactor: 1, mobile: false });
+        const inline = await waitFor(() => sourceSession.evaluate(`(() => {
+          const b=document.getElementById('context-generator-bubble'),r=b.getBoundingClientRect();
+          const native=[...document.querySelector('.gpt-right').querySelectorAll('button')]
+            .filter(n=>getComputedStyle(n).display!=='none').map(n=>n.getBoundingClientRect());
+          const style=getComputedStyle(b);
+          return b.parentElement.getAttribute('data-context-generator-chatgpt-inline')==='left'
+            ? {width:parseFloat(style.width),position:style.position,
+               overlap:native.some(n=>r.left<n.right&&r.right>n.left&&r.top<n.bottom&&r.bottom>n.top),
+               inside:r.left>=0&&r.right<=innerWidth} : null;
+        })()`), "ChatGPT inline mounting");
+        assert.equal(inline.width, 32);
+        assert.equal(inline.position, "static");
+        assert.equal(inline.overlap, false, `ChatGPT overlaps native controls at ${width}px.`);
+        assert.equal(inline.inside, true);
+      }
+      if (CHATGPT_PLACEMENT_SCREENSHOT_PATH) {
+        const capture=await sourceSession.call("Page.captureScreenshot",{format:"png"});
+        await fs.promises.mkdir(path.dirname(CHATGPT_PLACEMENT_SCREENSHOT_PATH),{recursive:true});
+        await fs.promises.writeFile(CHATGPT_PLACEMENT_SCREENSHOT_PATH,Buffer.from(capture.data,"base64"));
+      }
+      await sourceSession.call("Emulation.clearDeviceMetricsOverride");
+      await sourceSession.evaluate(`(() => {
+        window.__gptSmokeButton=document.getElementById('context-generator-bubble');
+        window.__gptSmokeOldFooter=document.querySelector('[data-composer-footer-responsive]');
+        const body=document.querySelector('[data-composer-body]'),next=body.cloneNode(true);
+        next.querySelector('#context-generator-bubble').remove();
+        body.replaceWith(next);
+      })()`);
+      await waitFor(() => sourceSession.evaluate(`(() => {
+        const b=document.getElementById('context-generator-bubble');
+        return b===window.__gptSmokeButton && b?.parentElement.getAttribute('data-context-generator-chatgpt-inline')==='left'
+          && !window.__gptSmokeOldFooter.hasAttribute('data-context-generator-chatgpt-inline');
+      })()`), "ChatGPT button recovery after editor replacement");
+      await sourceSession.evaluate(`(() => {
+        const input=document.getElementById('prompt-textarea');input.textContent=${JSON.stringify(originalDraft)};
+        input.dispatchEvent(new Event('input',{bubbles:true}));
+      })()`);
+      process.stdout.write("✓ ChatGPT's 32px inline slot survives long drafts, 760/390/320px widths and editor remount without native-control overlap.\n");
     }
 
     // Grok JSON mode verifies capture independently of unrelated Claude geometry.

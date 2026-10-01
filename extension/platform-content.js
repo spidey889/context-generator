@@ -1,10 +1,13 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-01-claude-inline-experiment-v79";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-01-gpt-inline-experiment-v80";
   const ownedUiStyleSheets = new Map();
   const CLAUDE_INLINE_STYLE_ID = "context-generator-claude-inline-styles";
   const CLAUDE_INLINE_MARKER = "data-context-generator-claude-inline";
+  const CHATGPT_INLINE_STYLE_ID = "context-generator-chatgpt-inline-styles";
+  const CHATGPT_INLINE_MARKER = "data-context-generator-chatgpt-inline";
+  let chatGptInlineMount = null;
   let claudeInlineMount = null;
-  let claudeInlineBubble = null;
+  let inlineBubble = null;
   // Start fast capture on for each page instance; a manual opt-out lasts until reload.
   let claudeJsonCaptureEnabled = true;
   let chatGptJsonCaptureEnabled = true;
@@ -625,8 +628,9 @@
 
   function cleanupContextGeneratorNodes() {
     releaseClaudeInlineMount();
-    claudeInlineBubble?.remove();
-    claudeInlineBubble = null;
+    releaseChatGptInlineMount();
+    inlineBubble?.remove();
+    inlineBubble = null;
     cleanupContextGeneratorReservations();
 
     if (ownedUiStyleSheets.size) {
@@ -638,6 +642,7 @@
     [
       BUBBLE_ID,
       CLAUDE_INLINE_STYLE_ID,
+      CHATGPT_INLINE_STYLE_ID,
       OVERLAY_ID,
       HANDOFF_SCRIM_ID,
       OVERLAY_PALETTE_STYLE_ID,
@@ -739,6 +744,9 @@
       findClaudeInlineToolbar,
       mountClaudeInlineButton,
       releaseClaudeInlineMount,
+      findChatGptInlineToolbar,
+      mountChatGptInlineButton,
+      releaseChatGptInlineMount,
       getGeminiBubblePlacement,
       findGeminiModelSelectorButton,
       getGrokBubblePlacement,
@@ -3753,14 +3761,91 @@
     return true;
   }
 
+  function findChatGptInlineToolbar(input) {
+    if (!input?.isConnected || !isVisible(input)) return null;
+    const body = input.closest("[data-composer-body]");
+    const editor = input.closest("[data-composer-input]");
+    if (!body || !editor || !body.contains(editor) || isComposerPopupControl(body, input)) return null;
+    // ChatGPT reorders these children when it switches to multiline. Identify
+    // them through the attachment navigation target and editor ownership,
+    // never through a generic flex selector or a child index.
+    const footer = body.querySelector("[data-composer-footer-responsive]");
+    if (!footer || footer.closest("[data-composer-body]") !== body) return null;
+    const attach = footer.querySelector("[data-composer-navigation-target='add-context']");
+    if (!attach?.matches("button") || !isVisible(attach) || isComposerPopupControl(attach, input)) return null;
+    const rows = Array.from(footer.children);
+    const left = rows.find((row) => row.contains(attach) && !row.contains(input));
+    const rightRows = rows.filter((row) => row !== left && !row.contains(input) &&
+      Array.from(row.querySelectorAll("button")).some((button) =>
+        !isContextGeneratorNode(button) && isVisible(button) && !isComposerPopupControl(button, input)));
+    const rect = body.getBoundingClientRect();
+    if (!left || rightRows.length !== 1 || !isVisible(left) || !isVisible(rightRows[0]) ||
+        rect.width < 180 || rect.width > Math.min(1320, window.innerWidth)) return null;
+    return { input, body, footer, left, right: rightRows[0] };
+  }
+
+  function ensureChatGptInlineStyles() {
+    if (document.getElementById(CHATGPT_INLINE_STYLE_ID)) return;
+    const style = document.createElement("style");
+    style.id = CHATGPT_INLINE_STYLE_ID;
+    style.className = "darkreader";
+    style.dataset.contextGeneratorOwned = "true";
+    // The native leading track is 36px. Let it size to the attachment + pill;
+    // keep ChatGPT's own row switching, editor spanning and label truncation.
+    style.textContent = `
+      [${CHATGPT_INLINE_MARKER}="footer"] {
+        grid-template-columns:max-content minmax(0,1fr) minmax(0,max-content)!important;
+      }
+      [${CHATGPT_INLINE_MARKER}="left"] {
+        display:flex!important; align-items:center!important; gap:6px!important;
+        width:max-content!important; max-width:100%!important;
+      }
+    `;
+    (document.head || document.documentElement).appendChild(style);
+    applyOwnedUiStyleSheet(style);
+  }
+
+  function releaseChatGptInlineMount() {
+    if (!chatGptInlineMount) return;
+    chatGptInlineMount.footer.removeAttribute(CHATGPT_INLINE_MARKER);
+    chatGptInlineMount.left.removeAttribute(CHATGPT_INLINE_MARKER);
+    chatGptInlineMount = null;
+  }
+
+  function mountChatGptInlineButton(bubble, input) {
+    const toolbar = findChatGptInlineToolbar(input);
+    if (!toolbar) {
+      releaseChatGptInlineMount();
+      return false;
+    }
+    if (chatGptInlineMount?.input !== input || chatGptInlineMount?.footer !== toolbar.footer ||
+        chatGptInlineMount?.left !== toolbar.left || chatGptInlineMount?.right !== toolbar.right) {
+      releaseChatGptInlineMount();
+      chatGptInlineMount = { ...toolbar, bubble };
+    }
+    chatGptInlineMount.pathname = window.location.pathname;
+    ensureChatGptInlineStyles();
+    [[toolbar.footer, "footer"], [toolbar.left, "left"]].forEach(([node, value]) => {
+      if (node.getAttribute(CHATGPT_INLINE_MARKER) !== value) node.setAttribute(CHATGPT_INLINE_MARKER, value);
+    });
+    if (bubble.parentElement !== toolbar.left) toolbar.left.appendChild(bubble);
+    setBubbleSize(bubble, 32);
+    setBubbleStylesIfChanged(bubble, {
+      position: "static", left: "auto", right: "auto", top: "auto", bottom: "auto",
+      margin: "0", flex: "0 0 32px", alignSelf: "center", display: "flex", visibility: "visible"
+    });
+    return true;
+  }
+
   function ensureFloatingButton(recalculationReason = "direct") {
     const input = findPlatformInput();
-    const existingBubble = document.getElementById(BUBBLE_ID) || claudeInlineBubble || transientComposerPlacement?.bubble || null;
+    const existingBubble = document.getElementById(BUBBLE_ID) || inlineBubble || transientComposerPlacement?.bubble || null;
     if (!input) {
       const retainedBubble = retainTransientComposerPlacement(existingBubble);
       if (retainedBubble) return retainedBubble;
       if (existingBubble) existingBubble.style.display = "none";
       releaseClaudeInlineMount();
+      releaseChatGptInlineMount();
       hideOnboardingNudge();
       hideClaudeLimitNudge();
       // Composer loss must never move focus to the Cap Context trigger.
@@ -3773,7 +3858,7 @@
     if (currentPlatform.id === "claude") {
       // Retain the button while React replaces its parent. Failed ownership
       // hides it; there is no synthetic fixed-position fallback.
-      claudeInlineBubble = bubble;
+      inlineBubble = bubble;
       if (!mountClaudeInlineButton(bubble, input)) {
         bubble.style.display = "none";
         hideOnboardingNudge();
@@ -3786,6 +3871,13 @@
       return bubble;
     }
     if (currentPlatform.id === "chatgpt") {
+      inlineBubble = bubble;
+      if (mountChatGptInlineButton(bubble, input)) {
+        clearChatGptPlacementResizeMonitoring();
+        ensureFloatingOverlay();
+        maybeShowOnboardingNudge(bubble);
+        return bubble;
+      }
       releaseBubbleSlot();
       releaseComposerSurface();
       const floatingRoot = getFloatingButtonRoot();
@@ -8072,7 +8164,7 @@
 
   function scheduleFloatingButtonUpdate(reason = "unspecified") {
     if (floatingButtonMonitoringDisabled) return;
-    if (isDestinationSheetOpen() && !invalidateClaudeInlinePicker(reason)) return;
+    if (isDestinationSheetOpen() && !invalidateInlinePicker(reason)) return;
     pendingFloatingButtonReasons.add(normalizeFloatingButtonUpdateReason(reason));
     if (floatingButtonFrame) return;
     floatingButtonFrame = requestAnimationFrame(() => {
@@ -8080,7 +8172,7 @@
       const recalculationReason = [...pendingFloatingButtonReasons].sort().join("+") || "unspecified";
       pendingFloatingButtonReasons.clear();
       if (floatingButtonMonitoringDisabled) return;
-      if (isDestinationSheetOpen() && !invalidateClaudeInlinePicker(recalculationReason)) return;
+      if (isDestinationSheetOpen() && !invalidateInlinePicker(recalculationReason)) return;
       try {
         ensureFloatingButton(recalculationReason);
         updateClaudeLimitNudge();
@@ -8094,16 +8186,18 @@
     });
   }
 
-  function invalidateClaudeInlinePicker(reason) {
-    if (currentPlatform.id !== "claude") return false;
+  function invalidateInlinePicker(reason) {
+    if (!["claude", "chatgpt"].includes(currentPlatform.id)) return false;
     const input = findPlatformInput();
-    const toolbar = findClaudeInlineToolbar(input);
+    const isClaude = currentPlatform.id === "claude";
+    const toolbar = isClaude ? findClaudeInlineToolbar(input) : findChatGptInlineToolbar(input);
+    const mount = isClaude ? claudeInlineMount : chatGptInlineMount;
     // A picker belongs to the editor that opened it. On replacement, route
     // change or resize close it without stealing focus; its opening position
     // is intentionally locked during the picker-to-handoff animation.
-    const changed = !toolbar || !claudeInlineMount ||
-      claudeInlineMount.input !== input || claudeInlineMount.left !== toolbar.left ||
-      claudeInlineMount.right !== toolbar.right || claudeInlineMount.pathname !== window.location.pathname ||
+    const changed = !toolbar || !mount ||
+      mount.input !== input || mount.left !== toolbar.left ||
+      mount.right !== toolbar.right || mount.pathname !== window.location.pathname ||
       normalizeFloatingButtonUpdateReason(reason).includes("resize");
     if (changed) {
       hideDestinationSheet({ restoreFocus: false });
@@ -8217,7 +8311,7 @@
   }
 
   function startClaudePathnameMonitoring() {
-    if (currentPlatform.id !== "claude" || claudePathnamePollTimer) return;
+    if (!["claude", "chatgpt"].includes(currentPlatform.id) || claudePathnamePollTimer) return;
     lastClaudePlacementPathname = window.location.pathname;
     // Navigation API covers Chromium SPA transitions immediately. The small
     // pathname poll is the cross-browser fallback because pushState emits no
@@ -8232,7 +8326,7 @@
   }
 
   function checkClaudePlacementPathname() {
-    if (currentPlatform.id !== "claude") return false;
+    if (!["claude", "chatgpt"].includes(currentPlatform.id)) return false;
     const pathname = window.location.pathname;
     if (pathname === lastClaudePlacementPathname) return false;
     lastClaudePlacementPathname = pathname;
