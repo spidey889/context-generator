@@ -1,7 +1,6 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-02-gemini-row-claude-transition-v92";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-02-claude-inline-only-v93";
   const INLINE_PILL_SIZE = 36;
-  const CLAUDE_INLINE_REMOUNT_GRACE_MS = 500;
   const ownedUiStyleSheets = new Map();
   const CLAUDE_INLINE_STYLE_ID = "context-generator-claude-inline-styles";
   const CLAUDE_INLINE_MARKER = "data-context-generator-claude-inline";
@@ -3764,38 +3763,20 @@
     applyOwnedUiStyleSheet(style);
   }
 
-  function clearClaudeInlineMountGrace() {
-    if (!claudeInlineMount) return;
-    clearTimeout(claudeInlineMount.graceTimer);
-    claudeInlineMount.graceTimer = null;
-    claudeInlineMount.graceExpired = false;
-  }
-
   function retainClaudeInlineMount(bubble, input) {
     const mount = claudeInlineMount;
-    if (!mount || mount.bubble !== bubble || mount.graceExpired) return false;
-    // Sending can briefly hide controls or replace the composer while it docks.
-    // Keep the last inline slot during that gap instead of flashing the fixed
-    // backup. Repeated mutations must not extend this one bounded grace period.
-    if (mount.graceTimer == null) {
-      mount.graceTimer = setTimeout(() => {
-        if (claudeInlineMount !== mount) return;
-        mount.graceTimer = null;
-        mount.graceExpired = true;
-        scheduleFloatingButtonUpdate("claude-inline-grace-expired");
-      }, CLAUDE_INLINE_REMOUNT_GRACE_MS);
-    }
+    if (!mount || mount.bubble !== bubble) return false;
+    // Native controls may disappear while sending/docking. Keep the validated
+    // inline slot as long as this editor still owns it; never use fixed placement.
     const ownsSlot = (!input || input === mount.input) && mount.input.isConnected &&
       mount.host.isConnected && mount.host.contains(mount.input) && mount.host.contains(mount.actions) &&
       mount.actions.contains(mount.right) && bubble.parentElement === mount.right;
-    // A detached/replaced owner waits invisibly for a validated remount.
     setBubbleStylesIfChanged(bubble, { visibility: ownsSlot ? "visible" : "hidden" });
-    return true;
+    return ownsSlot;
   }
 
   function releaseClaudeInlineMount() {
     if (!claudeInlineMount) return;
-    clearClaudeInlineMountGrace();
     const { editorBranch, actions, left, right } = claudeInlineMount;
     [editorBranch, actions, left, right].forEach((node) => node.removeAttribute(CLAUDE_INLINE_MARKER));
     claudeInlineMount = null;
@@ -3807,6 +3788,10 @@
     if (!toolbar) {
       if (retainClaudeInlineMount(bubble, input)) return true;
       releaseClaudeInlineMount();
+      if (input?.isConnected) {
+        // Keep watching a remounted composer's attribute-only toolbar reveal.
+        syncProviderControlMutationMonitoring(input, input.closest("[data-cds='ChatComposer']"));
+      }
       return false;
     }
     if (claudeInlineMount?.input !== input || claudeInlineMount?.host !== toolbar.host ||
@@ -3817,9 +3802,8 @@
       releaseClaudeInlineMount();
       claudeInlineMount = { ...toolbar, bubble, pathname: window.location.pathname };
     }
-    clearClaudeInlineMountGrace();
     claudeInlineMount.pathname = window.location.pathname;
-    // The control observer serves both modes; stable inline updates can reuse it.
+    // Stable inline updates reuse the scoped native-control observer.
     clearLegacyInlineBackup({ keepControlObserver: true });
     ensureClaudeInlineStyles();
     [[toolbar.editorBranch, "editor"], [toolbar.actions, "actions"], [toolbar.left, "left"], [toolbar.right, "right"]]
@@ -4077,7 +4061,8 @@
     return true;
   }
 
-  // Trial-only legacy placement helpers, restored from dc1ac96. Inline remains first.
+  // Retained Claude legacy helpers from dc1ac96 are inactive; cleanup still
+  // restores reservations left by an older injected instance.
   function getClaudeBubblePlacement(composerRect, input = null, composerSurface = null) {
     const controls = getClaudeComposerControlCandidates(composerRect, composerSurface);
     const anchorControl = findClaudeVoiceModeControl(controls) || findClaudeInlineFallbackControl(controls);
@@ -4823,26 +4808,13 @@
   }
 
   function mountLegacyInlineBackup(bubble, input) {
+    if (currentPlatform.id !== "chatgpt") return false;
     // Inline validation has already failed. Clear its native markers before
     // restoring the old geometry, and reuse the same button across both modes.
-    releaseClaudeInlineMount();
     releaseChatGptInlineMount();
-    let placement;
-    if (currentPlatform.id === "claude") {
-      const surface = findComposerSurfaceElement(input);
-      if (!surface) { clearLegacyInlineBackup(); return false; }
-      const rect = surface.getBoundingClientRect();
-      const local = getClaudeBubblePlacement(rect, input, surface);
-      if (!local.anchorControl) { clearLegacyInlineBackup(); return false; }
-      reserveComposerSurface(surface);
-      syncPlatformPlacementResizeMonitoring(input, surface);
-      reserveClaudeInlineBubbleSlot(local.anchorControl, local.reservationControls, input, rect, local.inlineShift);
-      placement = getClaudeFixedBubblePlacement(local, rect);
-    } else if (currentPlatform.id === "chatgpt") {
-      releaseBubbleSlot();
-      releaseComposerSurface();
-      placement = getChatGptFixedBubblePlacement(input);
-    } else return false;
+    releaseBubbleSlot();
+    releaseComposerSurface();
+    const placement = getChatGptFixedBubblePlacement(input);
     const root = getFloatingButtonRoot();
     if (bubble.parentElement !== root) root.appendChild(bubble);
     setBubbleFixedMode(bubble);
@@ -4853,9 +4825,8 @@
   }
 
   function mountInlineOrLegacyBackup(bubble, input) {
-    const mounted = currentPlatform.id === "claude"
-      ? mountClaudeInlineButton(bubble, input) : mountChatGptInlineButton(bubble, input);
-    return mounted || mountLegacyInlineBackup(bubble, input);
+    if (currentPlatform.id === "claude") return mountClaudeInlineButton(bubble, input);
+    return mountChatGptInlineButton(bubble, input) || mountLegacyInlineBackup(bubble, input);
   }
 
   function ensureFloatingButton(recalculationReason = "direct") {
@@ -4880,7 +4851,7 @@
     }
     const bubble = existingBubble || createFloatingButton();
     if (currentPlatform.id === "claude") {
-      // Inline is primary; old placement is a backup during the daily-use trial.
+      // Claude stays inline through send/docking; unmatched owners hide until remount.
       inlineBubble = bubble;
       if (!mountInlineOrLegacyBackup(bubble, input)) {
         bubble.style.display = "none";
@@ -9088,7 +9059,6 @@
     stopProviderControlMutationMonitoring();
     clearChatGptPlacementResizeMonitoring();
     clearTransientComposerPlacement();
-    clearClaudeInlineMountGrace();
     stopInlinePathnameMonitoring();
 
 

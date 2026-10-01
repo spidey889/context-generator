@@ -1188,7 +1188,8 @@ async function run() {
       return new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
     })()`);
     await claudePlacementSession.evaluate(`document.getElementById("model").style.display = "none"`);
-    await waitFor(() => claudePlacementSession.evaluate(`getComputedStyle(document.getElementById("context-generator-bubble")).position === "fixed"`), "Claude attribute-only fallback");
+    await waitFor(() => claudePlacementSession.evaluate(`getComputedStyle(document.getElementById("context-generator-bubble")).position === "static"
+      && document.getElementById("context-generator-bubble").parentElement.getAttribute("data-context-generator-claude-inline") === "right"`), "Claude inline retention during attribute-only hiding");
     await claudePlacementSession.evaluate(`document.getElementById("model").style.display = ""`);
     await waitFor(() => claudePlacementSession.evaluate(`getComputedStyle(document.getElementById("context-generator-bubble")).position === "static"
       && document.querySelectorAll("[data-context-generator-original-translate]").length === 0`), "Claude attribute-only inline recovery");
@@ -1220,7 +1221,7 @@ async function run() {
     })()`);
     await waitFor(() => claudePlacementSession.evaluate(`getComputedStyle(document.getElementById("context-generator-bubble")).position === "static"
       && getComputedStyle(document.getElementById("send")).visibility === "hidden"`), "Claude compact empty Voice mode");
-    process.stdout.write("✓ Claude inline handles hidden/popup duplicates, attribute-only fallback/recovery, picker wrapper remounts and compact Voice mode.\n");
+    process.stdout.write("✓ Claude inline handles hidden/popup duplicates, attribute-only inline retention/recovery, picker wrapper remounts and compact Voice mode.\n");
 
     }
 

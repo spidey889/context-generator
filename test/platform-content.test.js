@@ -2899,10 +2899,7 @@ test("Claude keeps its inline slot through temporary control and editor discover
   const hooks = loadPlatformContent(Object.values(f), "claude.ai");
   hooks.document.createElement = () => new FakeElement();
   const bubble = new FakeElement({ tag: "button" });
-  const timers = [];
-  const cancelled = [];
-  hooks.window.setTimeout = (callback, delay) => { timers.push({ callback, delay }); return timers.length; };
-  hooks.window.clearTimeout = (timer) => cancelled.push(timer);
+  hooks.window.setTimeout = () => { throw new Error("Claude inline must not start a fallback timer"); };
   assert.equal(hooks.mountInlineOrLegacyBackup(bubble, f.input), true);
   f.model.setAttribute("data-visibility", "hidden");
   assert.equal(hooks.mountInlineOrLegacyBackup(bubble, f.input), true);
@@ -2910,15 +2907,12 @@ test("Claude keeps its inline slot through temporary control and editor discover
   assert.equal(bubble.parentElement, f.right);
   assert.equal(bubble.style.position, "static");
   assert.equal(bubble.style.width, "36px");
-  assert.equal(timers.length, 1, "repeated updates must not extend the grace period");
-  assert.equal(timers[0].delay, 500);
   f.model.removeAttribute("data-visibility");
   assert.equal(hooks.mountInlineOrLegacyBackup(bubble, f.input), true);
-  assert.deepEqual(cancelled, [1], "inline recovery must cancel its pending backup retry");
-  f.model.setAttribute("data-visibility", "hidden");
-  assert.equal(hooks.mountClaudeInlineButton(bubble, f.input), true);
+  f.input.isConnected = false;
+  assert.equal(hooks.mountInlineOrLegacyBackup(bubble, f.input), false);
+  assert.equal(bubble.style.visibility, "hidden", "a detached editor must lose ownership");
   hooks.releaseClaudeInlineMount();
-  assert.deepEqual(cancelled, [1, 2], "release must cancel the transition retry too");
 });
 
 test("Claude inline discovery validates the compact model chin against the same composer", () => {
@@ -2938,7 +2932,7 @@ test("Claude inline discovery validates the compact model chin against the same 
 });
 
 for (const platform of ["claude", "chatgpt"]) {
-  test(`${platform} prefers inline, uses its legacy backup and clears backup state on recovery`, () => {
+  test(`${platform} ${platform === "claude" ? "stays inline only" : "uses its legacy backup"} and recovers after editor replacement`, () => {
     const inline = platform === "claude" ? inlineClaudeFixture() : inlineChatGptFixture();
     const form = new FakeElement({ tag: "form", rect: { left: 60, right: 760, top: 400, bottom: 560, width: 700, height: 160 } });
     const input = new FakeElement({ attrs: { contenteditable: "true", role: "textbox" }, rect: { left: 80, right: 740, top: 410, bottom: 470, width: 660, height: 60 } });
@@ -2952,26 +2946,18 @@ for (const platform of ["claude", "chatgpt"]) {
     assert.equal(bubble.style.position, "static", "inline remains primary");
     assert.equal(hooks.resizeObservers.some(observer => observer.observed.length), false);
     if (platform === "claude") {
-      let expireGrace;
-      hooks.window.setTimeout = (callback, delay) => {
-        assert.equal(delay, 500);
-        expireGrace = callback;
-        return 1;
-      };
-      hooks.window.clearTimeout = () => {};
-      assert.equal(hooks.mountInlineOrLegacyBackup(bubble, input), true);
-      assert.equal(bubble.style.position, "static", "a replacement first waits for inline recovery");
+      assert.equal(hooks.mountInlineOrLegacyBackup(bubble, input), false);
+      assert.equal(bubble.style.position, "static", "unmatched Claude markup must never switch to fixed placement");
       assert.equal(bubble.style.visibility, "hidden", "the old composer must not own a visible pill for the new editor");
-      expireGrace();
-    }
-    assert.equal(hooks.mountInlineOrLegacyBackup(bubble, input), true);
-    assert.equal(bubble.style.position, "fixed", "unknown inline markup uses the real legacy path");
-    assert.equal(bubble.parentElement, hooks.document.body);
-    assert.equal(bubble.style.width, "42px");
-    assert.ok(Number.isFinite(parseFloat(bubble.style.left)));
-    assert.equal(hooks.resizeObservers.some(observer => observer.observed.length), true);
-    if (platform === "claude") assert.ok(model.hasAttribute("data-context-generator-original-translate"));
-    else {
+      assert.equal(hooks.resizeObservers.some(observer => observer.observed.length), false);
+      assert.equal(model.hasAttribute("data-context-generator-original-translate"), false);
+    } else {
+      assert.equal(hooks.mountInlineOrLegacyBackup(bubble, input), true);
+      assert.equal(bubble.style.position, "fixed", "unknown GPT markup uses the real legacy path");
+      assert.equal(bubble.parentElement, hooks.document.body);
+      assert.equal(bubble.style.width, "42px");
+      assert.ok(Number.isFinite(parseFloat(bubble.style.left)));
+      assert.equal(hooks.resizeObservers.some(observer => observer.observed.length), true);
       const backupObserver = hooks.mutationObservers.find(observer => observer.observed.some(target => target.element === form));
       assert.ok(backupObserver.observed[0].options.attributeFilter.includes("hidden"), "the backup must recover from native hidden changes without a resize");
     }
