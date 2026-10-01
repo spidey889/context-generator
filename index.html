@@ -118,6 +118,8 @@
     }
 
     .brand-mark {
+      position: relative;
+      isolation: isolate;
       display: grid;
       place-items: center;
       width: 2.8rem;
@@ -126,10 +128,57 @@
     }
 
     .brand-mark img {
+      position: relative;
+      z-index: 1;
       width: 2.8rem;
       height: 2.8rem;
       object-fit: contain;
       filter: drop-shadow(0 4px 8px rgba(104, 55, 164, 0.2));
+    }
+
+    .orb-particles {
+      /* Sampled grains skim the rim while the original logo remains fully opaque. */
+      position: absolute;
+      inset: 0;
+      z-index: 2;
+      pointer-events: none;
+    }
+
+    .orb-particle {
+      position: absolute;
+      left: var(--source-x);
+      top: var(--source-y);
+      width: 3px;
+      height: 2px;
+      border-radius: 25% 60% 35% 55%;
+      /* Sample the same patch of the logo instead of making detached points of light. */
+      background-color: #b795de;
+      background-image: url("extension/icon128.png");
+      background-size: 2.8rem 2.8rem;
+      background-position: calc(-1 * var(--source-x)) calc(-1 * var(--source-y));
+      opacity: 0;
+      animation: orb-particle-drift var(--flight) linear var(--phase) infinite;
+    }
+
+    /* Shared direction and near-equal speeds make one continuous current, with staggered births. */
+    .orb-particle:nth-child(1) { --source-x: 2.2rem; --source-y: 0.95rem; --drift-x: 40px; --drift-y: -18px; --flight: 5s; --phase: -0.3s; --turn: -12deg; }
+    .orb-particle:nth-child(2) { --source-x: 2.12rem; --source-y: 0.76rem; width: 2px; height: 1.5px; --drift-x: 44px; --drift-y: -20px; --flight: 5.4s; --phase: -0.75s; --turn: 18deg; }
+    .orb-particle:nth-child(3) { --source-x: 2.35rem; --source-y: 1.28rem; --drift-x: 42px; --drift-y: -19px; --flight: 5.2s; --phase: -1.15s; --turn: 30deg; }
+    .orb-particle:nth-child(4) { --source-x: 2.02rem; --source-y: 0.67rem; width: 1.5px; height: 1.5px; --drift-x: 39px; --drift-y: -18px; --flight: 4.8s; --phase: -1.65s; --turn: -20deg; }
+    .orb-particle:nth-child(5) { --source-x: 2.3rem; --source-y: 1.12rem; width: 2.5px; height: 2px; --drift-x: 46px; --drift-y: -21px; --flight: 5.8s; --phase: -2.1s; --turn: 8deg; }
+    .orb-particle:nth-child(6) { --source-x: 2.18rem; --source-y: 0.88rem; width: 2px; height: 1.5px; --drift-x: 43px; --drift-y: -20px; --flight: 5.4s; --phase: -2.55s; --turn: -25deg; }
+    .orb-particle:nth-child(7) { --source-x: 2.4rem; --source-y: 1.4rem; width: 2px; height: 2px; --drift-x: 40px; --drift-y: -18px; --flight: 5.1s; --phase: -3s; --turn: 22deg; }
+    .orb-particle:nth-child(8) { --source-x: 2.1rem; --source-y: 0.75rem; width: 2.5px; height: 1.5px; --drift-x: 45px; --drift-y: -20px; --flight: 5.6s; --phase: -3.4s; --turn: -5deg; }
+    .orb-particle:nth-child(9) { --source-x: 2.26rem; --source-y: 1.02rem; width: 1.5px; height: 1.5px; --drift-x: 41px; --drift-y: -19px; --flight: 5.2s; --phase: -3.85s; --turn: 35deg; }
+    .orb-particle:nth-child(10) { --source-x: 2.34rem; --source-y: 1.24rem; width: 2.5px; height: 2px; --drift-x: 44px; --drift-y: -20px; --flight: 5.5s; --phase: -4.2s; --turn: -18deg; }
+    .orb-particle:nth-child(11) { --source-x: 2.05rem; --source-y: 0.7rem; width: 2px; height: 1.5px; --drift-x: 42px; --drift-y: -19px; --flight: 5.3s; --phase: -4.6s; --turn: 12deg; }
+    .orb-particle:nth-child(12) { --source-x: 2.23rem; --source-y: 0.96rem; width: 2px; height: 2px; --drift-x: 46px; --drift-y: -21px; --flight: 5.8s; --phase: -4.95s; --turn: -30deg; }
+
+    @keyframes orb-particle-drift {
+      0% { opacity: 0; filter: blur(0); transform: translate3d(0, 0, 0) rotate(var(--turn)) scale(0.95); }
+      14% { opacity: 0.85; }
+      50% { opacity: 0.7; }
+      100% { opacity: 0; filter: blur(0.7px); transform: translate3d(var(--drift-x), var(--drift-y), 0) rotate(calc(var(--turn) + 18deg)) scale(0.55); }
     }
 
     .nav-actions {
@@ -929,6 +978,8 @@
       .button-install .install-icon svg { transform: none !important; }
 
       .hero .re-explaining-shimmer { display: none; }
+
+      .orb-particles { display: none; }
     }
     /* Native controls keep the film usable with keyboard input and without JavaScript. */
     .demo-section { padding-top: 1rem; scroll-margin-top: 2rem; }
@@ -1027,6 +1078,7 @@
   <header class="site-header container">
     <a class="brand" href="#top" aria-label="cap-context home">
       <span class="brand-mark">
+        <span class="orb-particles" aria-hidden="true"><span class="orb-particle"></span><span class="orb-particle"></span><span class="orb-particle"></span><span class="orb-particle"></span><span class="orb-particle"></span><span class="orb-particle"></span><span class="orb-particle"></span><span class="orb-particle"></span><span class="orb-particle"></span><span class="orb-particle"></span><span class="orb-particle"></span><span class="orb-particle"></span></span>
         <img src="extension/icon128.png" alt="cap-context logo" width="128" height="128">
       </span>
       <span>cap-context</span>
