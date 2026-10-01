@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-02-claude-inline-validation-v86";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-02-chatgpt-inline-validation-v87";
   const ownedUiStyleSheets = new Map();
   const CLAUDE_INLINE_STYLE_ID = "context-generator-claude-inline-styles";
   const CLAUDE_INLINE_MARKER = "data-context-generator-claude-inline";
@@ -3805,10 +3805,12 @@
     // ChatGPT reorders these children when it switches to multiline. Identify
     // them through the attachment navigation target and editor ownership,
     // never through a generic flex selector or a child index.
-    const footer = body.querySelector("[data-composer-footer-responsive]");
+    const footer = editor.closest("[data-composer-footer-responsive]");
     if (!footer || !footer.contains(editor) || footer.closest("[data-composer-body]") !== body) return null;
-    const attach = footer.querySelector("[data-composer-navigation-target='add-context']");
-    if (!attach?.matches("button") || !isVisible(attach) || isComposerPopupControl(attach, input)) return null;
+    const attach = Array.from(footer.querySelectorAll("[data-composer-navigation-target='add-context']"))
+      .find((node) => node.matches("button") && isVisible(node) && !isComposerPopupControl(node, input) &&
+        node.closest("[data-composer-footer-responsive]") === footer);
+    if (!attach) return null;
     const rows = Array.from(footer.children);
     const left = rows.find((row) => row.contains(attach) && !row.contains(input));
     const rightRows = rows.filter((row) => row !== left && !row.contains(input) &&
@@ -3820,6 +3822,7 @@
     const right = rightRows[0];
     const nativeButtons = Array.from(right.querySelectorAll("button")).filter((button) =>
       !isContextGeneratorNode(button) && isVisible(button) && !isComposerPopupControl(button, input));
+    // rightRows already required at least one button using this same predicate.
     // Locate the common native group, including through display:contents
     // wrappers. Its model and Voice branches otherwise overflow a narrow track.
     let controls = nativeButtons[0].parentElement;
@@ -3868,6 +3871,7 @@
     chatGptInlineMount.slot.removeAttribute(CHATGPT_INLINE_MARKER);
     chatGptInlineMount.controls.removeAttribute(CHATGPT_INLINE_MARKER);
     chatGptInlineMount = null;
+    stopProviderControlMutationMonitoring();
   }
 
   function mountChatGptInlineButton(bubble, input) {
@@ -3876,7 +3880,8 @@
       releaseChatGptInlineMount();
       return false;
     }
-    if (chatGptInlineMount?.input !== input || chatGptInlineMount?.footer !== toolbar.footer ||
+    if (chatGptInlineMount?.input !== input || chatGptInlineMount?.body !== toolbar.body ||
+        chatGptInlineMount?.footer !== toolbar.footer ||
         chatGptInlineMount?.left !== toolbar.left || chatGptInlineMount?.right !== toolbar.right ||
         chatGptInlineMount?.controls !== toolbar.controls || chatGptInlineMount?.slot !== toolbar.slot ||
         chatGptInlineMount?.anchor !== toolbar.anchor) {
@@ -3884,7 +3889,7 @@
       chatGptInlineMount = { ...toolbar, bubble };
     }
     chatGptInlineMount.pathname = window.location.pathname;
-    clearLegacyInlineBackup();
+    clearLegacyInlineBackup({ keepControlObserver: true });
     ensureChatGptInlineStyles();
     const markers = [[toolbar.footer, "footer"], [toolbar.controls, "controls"]];
     if (toolbar.slot !== toolbar.controls) markers.push([toolbar.slot, "model"]);
@@ -3899,6 +3904,7 @@
       position: "static", left: "auto", right: "auto", top: "auto", bottom: "auto",
       margin: "0 6px 0 0", flex: "0 0 32px", alignSelf: "center", display: "flex", visibility: "visible"
     });
+    syncProviderControlMutationMonitoring(input, toolbar.body);
     return true;
   }
 
@@ -8859,6 +8865,7 @@
     // is intentionally locked during the picker-to-handoff animation.
     const changed = !toolbar || !mount ||
       mount.input !== input || mount.left !== toolbar.left ||
+      mount.body !== toolbar.body ||
       mount.right !== toolbar.right || mount.footer !== toolbar.footer || mount.controls !== toolbar.controls ||
       mount.slot !== toolbar.slot || mount.anchor !== toolbar.anchor ||
       mount.surface !== toolbar.surface || mount.row !== toolbar.row || mount.dock !== toolbar.dock ||

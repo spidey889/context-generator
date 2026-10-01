@@ -2503,8 +2503,61 @@ test("ChatGPT inline discovery supports free controls and excludes popup or unre
   f.right.setAttribute("role", "menu");
   assert.equal(hooks.findChatGptInlineToolbar(f.input), null);
   f.right.removeAttribute("role");
+  f.voice.setAttribute("data-visibility", "hidden");
+  assert.equal(hooks.findChatGptInlineToolbar(f.input), null, "an empty visible control set must return before indexing its first button");
+  f.voice.removeAttribute("data-visibility");
   f.attach.removeAttribute("data-composer-navigation-target");
   assert.equal(hooks.findChatGptInlineToolbar(f.input), null);
+});
+
+test("ChatGPT inline discovery skips a duplicate footer and hidden or popup attachment copies", () => {
+  const f = inlineChatGptFixture();
+  const duplicateFooter = new FakeElement({ attrs: { "data-composer-footer-responsive": "", "data-display": "none" } });
+  f.body.insertBefore(duplicateFooter, f.footer);
+  const hiddenAttach = new FakeElement({ tag: "button", attrs: { "data-composer-navigation-target": "add-context", "data-visibility": "hidden" } });
+  const menu = new FakeElement({ attrs: { role: "menu" } });
+  const popupAttach = new FakeElement({ tag: "button", attrs: { "data-composer-navigation-target": "add-context" } });
+  f.left.insertBefore(hiddenAttach, f.attach); f.left.insertBefore(menu, f.attach); menu.appendChild(popupAttach);
+  const hooks = loadPlatformContent([...Object.values(f), duplicateFooter, hiddenAttach, menu, popupAttach]);
+  assert.equal(hooks.findChatGptInlineToolbar(f.input)?.footer, f.footer);
+  duplicateFooter.remove();
+  assert.equal(hooks.findChatGptInlineToolbar(f.input)?.left, f.left, "a hidden attachment must not mask the visible native control");
+});
+
+test("ChatGPT inline mounting reuses its native-control observer and ignores editor text", () => {
+  const f = inlineChatGptFixture();
+  const hooks = loadPlatformContent(Object.values(f));
+  hooks.document.createElement = () => new FakeElement();
+  const bubble = new FakeElement({ tag: "button" });
+  assert.equal(hooks.mountChatGptInlineButton(bubble, f.input), true);
+  const observer = hooks.mutationObservers.find(item => item.observed.some(target => target.element === f.body));
+  assert.ok(observer, "inline must watch native attribute-only changes in its composer body");
+  const observerCount = hooks.mutationObservers.length;
+  assert.equal(hooks.mountChatGptInlineButton(bubble, f.input), true);
+  assert.equal(hooks.mutationObservers.length, observerCount);
+  observer.callback([{ type: "characterData", target: { parentElement: f.input }, addedNodes: [], removedNodes: [] }]);
+  assert.equal(hooks.animationFrameCallbacks.length, 0);
+  observer.callback([{ type: "attributes", attributeName: "style", target: f.modelWrapper, addedNodes: [], removedNodes: [] }]);
+  assert.equal(hooks.animationFrameCallbacks.length, 1);
+  hooks.releaseChatGptInlineMount();
+  assert.equal(observer.observed.length, 0);
+});
+
+test("ChatGPT inline body-only remount invalidates the picker once and refreshes observer ownership", () => {
+  const f = inlineChatGptFixture();
+  const hooks = loadPlatformContent(Object.values(f));
+  hooks.document.createElement = () => new FakeElement();
+  const bubble = new FakeElement({ tag: "button" });
+  assert.equal(hooks.mountChatGptInlineButton(bubble, f.input), true);
+  const observer = hooks.mutationObservers.find(item => item.observed.some(target => target.element === f.body));
+  const nextBody = new FakeElement({ attrs: { "data-composer-body": "" } });
+  nextBody.appendChild(f.footer);
+  assert.equal(hooks.invalidateInlinePicker("document-childlist"), true, "the old body must not continue owning the picker");
+  assert.equal(hooks.mountChatGptInlineButton(bubble, f.input), true);
+  assert.equal(hooks.invalidateInlinePicker("document-childlist"), false);
+  assert.equal(observer.observed.length, 0);
+  assert.ok(hooks.mutationObservers.some(item => item.observed.some(target => target.element === nextBody)));
+  assert.equal(bubble.nextElementSibling, f.model);
 });
 
 test("ChatGPT mounts before the model, follows remounts and supports free controls", () => {

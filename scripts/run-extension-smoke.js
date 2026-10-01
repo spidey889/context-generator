@@ -868,6 +868,46 @@ async function run() {
       await sourceSession.call("Emulation.clearDeviceMetricsOverride");
       await sourceSession.evaluate(`(() => {
         window.__gptSmokeButton=document.getElementById('context-generator-bubble');
+        const footer=document.querySelector('[data-composer-footer-responsive]'),duplicate=footer.cloneNode(false);
+        duplicate.id='gpt-duplicate-footer';duplicate.style.display='none';footer.before(duplicate);
+        const attach=footer.querySelector('[data-composer-navigation-target="add-context"]'),hidden=attach.cloneNode(true);
+        hidden.id='gpt-hidden-attach';hidden.style.display='none';attach.before(hidden);
+        const menu=document.createElement('div');menu.id='gpt-decoy-menu';menu.setAttribute('role','menu');
+        menu.appendChild(attach.cloneNode(true));attach.before(menu);
+        return new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)));
+      })()`);
+      assert.equal(await sourceSession.evaluate(`getComputedStyle(window.__gptSmokeButton).position==='static'
+        && window.__gptSmokeButton.nextElementSibling===document.getElementById('gpt-reasoning')`),true,"ChatGPT duplicate controls must not force fallback.");
+      await sourceSession.evaluate(`['gpt-duplicate-footer','gpt-hidden-attach','gpt-decoy-menu'].forEach(id=>document.getElementById(id).remove())`);
+      await sourceSession.evaluate(`document.querySelector('[data-composer-navigation-target="add-context"]').style.display='none'`);
+      await waitFor(()=>sourceSession.evaluate(`getComputedStyle(window.__gptSmokeButton).position==='fixed'`),"ChatGPT attribute-only fallback");
+      await sourceSession.evaluate(`document.querySelector('[data-composer-navigation-target="add-context"]').style.display=''`);
+      await waitFor(()=>sourceSession.evaluate(`getComputedStyle(window.__gptSmokeButton).position==='static'
+        && window.__gptSmokeButton.style.left==='auto' && window.__gptSmokeButton.style.top==='auto'`),"ChatGPT attribute-only inline recovery");
+      await sourceSession.evaluate(`document.getElementById('gpt-reasoning').style.display='none'`);
+      await waitFor(()=>sourceSession.evaluate(`window.__gptSmokeButton.nextElementSibling===document.querySelector('.gpt-voice-controls [aria-label="Dictate"]')`),"ChatGPT attribute-only model removal");
+      await sourceSession.evaluate(`document.getElementById('gpt-reasoning').style.display=''`);
+      await waitFor(()=>sourceSession.evaluate(`window.__gptSmokeButton.nextElementSibling===document.getElementById('gpt-reasoning')`),"ChatGPT attribute-only model return");
+      await sourceSession.evaluate(`window.__gptSmokeButton.click()`);
+      await waitFor(()=>sourceSession.evaluate(`getComputedStyle(document.getElementById('context-generator-destination-sheet')).opacity==='1'`),"ChatGPT picker before body-only remount");
+      await sourceSession.evaluate(`(() => {
+        const body=document.querySelector('[data-composer-body]'),next=body.cloneNode(false);
+        body.replaceWith(next);while(body.firstChild)next.appendChild(body.firstChild);
+      })()`);
+      await waitFor(()=>sourceSession.evaluate(`document.getElementById('context-generator-destination-sheet').style.display==='none'
+        && window.__gptSmokeButton.nextElementSibling===document.getElementById('gpt-reasoning')`),"ChatGPT body-only picker invalidation");
+      await sourceSession.evaluate(`window.__gptSmokeButton.click()`);
+      await waitFor(()=>sourceSession.evaluate(`getComputedStyle(document.getElementById('context-generator-destination-sheet')).opacity==='1'`),"ChatGPT picker after body-only remount");
+      assert.equal(await sourceSession.evaluate(`(() => {
+        document.getElementById('gpt-reasoning').setAttribute('data-state','closed');
+        return new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(()=>
+          resolve(document.getElementById('context-generator-destination-sheet').style.display!=='none'))));
+      })()`),true,"ChatGPT body remount must refresh picker ownership.");
+      await sourceSession.evaluate(`window.__gptSmokeButton.click()`);
+      await waitFor(()=>sourceSession.evaluate(`document.getElementById('context-generator-destination-sheet').style.display==='none'`),"ChatGPT picker closure");
+      process.stdout.write("✓ ChatGPT skips duplicate controls, tracks attribute-only fallback/model changes and refreshes picker ownership after body-only remount.\n");
+      await sourceSession.evaluate(`(() => {
+        window.__gptSmokeButton=document.getElementById('context-generator-bubble');
         window.__gptSmokeOldFooter=document.querySelector('[data-composer-footer-responsive]');
         const body=document.querySelector('[data-composer-body]'),next=body.cloneNode(true);
         next.querySelector('#context-generator-bubble').remove();
