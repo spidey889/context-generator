@@ -119,6 +119,7 @@ class FakeElement {
   matchesSingle(selector) {
     if (selector === "*") return true;
     if (/^[a-z][a-z0-9-]*$/i.test(selector)) return this.localName === selector.toLowerCase();
+    if (selector.startsWith("#")) return this.id === selector.slice(1);
     if (selector.startsWith(".")) {
       return String(this.className || "").split(/\s+/).includes(selector.slice(1));
     }
@@ -241,6 +242,10 @@ class FakeElement {
 
   get nextElementSibling() {
     return this.parentElement?.children[this.parentElement.children.indexOf(this) + 1] || null;
+  }
+
+  get previousElementSibling() {
+    return this.parentElement?.children[this.parentElement.children.indexOf(this) - 1] || null;
   }
 }
 
@@ -2539,6 +2544,72 @@ test("ChatGPT mounts before the model, follows remounts and supports free contro
   assert.equal(nativeGroup.hasAttribute("data-context-generator-chatgpt-inline"), false);
 });
 
+function inlineProviderFixture(platform) {
+  const surface = new FakeElement({ attrs: { class: platform === "gemini" ? "text-input-field" : platform === "grok" ? "query-bar" : "" } });
+  const input = new FakeElement({ tag: platform === "deepseek" ? "textarea" : "div", attrs: { contenteditable: "true", role: "textbox" } });
+  const editor = new FakeElement({ tag: platform === "gemini" ? "rich-textarea" : "div", attrs: { "data-testid": "chat-input" } });
+  const row = new FakeElement({ attrs: { class: platform === "gemini" ? "trailing-actions-wrapper" : "" } });
+  const controls = platform === "gemini" ? row : new FakeElement();
+  const slot = platform === "deepseek" ? controls : new FakeElement({ attrs: { "data-query-bar-mode-select": "true" } });
+  const anchor = new FakeElement({ tag: platform === "deepseek" ? "div" : "button", attrs: platform === "deepseek"
+    ? { role: "button", class: "ds-button ds-button--iconLabelPrimary" }
+    : { id: "model-select-trigger", "data-test-id": "bard-mode-menu-button" } });
+  const action = new FakeElement({ tag: platform === "deepseek" ? "div" : "button", attrs: { role: "button", class: "ds-button--circle" } });
+  const attach = new FakeElement({ tag: "button", attrs: { "data-testid": "attach-button" } });
+  const file = new FakeElement({ tag: "input", attrs: { type: "file" } });
+  const editorContainer = platform === "grok" ? new FakeElement() : surface;
+  const dock = platform === "grok" ? new FakeElement() : row;
+  if (editorContainer !== surface) surface.appendChild(editorContainer);
+  editorContainer.appendChild(editor);
+  editor.appendChild(input);
+  editorContainer.appendChild(dock);
+  if (dock !== row) dock.appendChild(row);
+  if (platform === "grok") row.appendChild(attach);
+  if (controls !== row) row.appendChild(controls);
+  if (slot !== controls) controls.appendChild(slot);
+  slot.appendChild(anchor);
+  if (platform === "deepseek") controls.appendChild(file);
+  controls.appendChild(action);
+  return { surface, input, editor, row, controls, slot, anchor, action, attach, file, editorContainer, dock };
+}
+
+for (const [platform, host] of [["gemini", "gemini.google.com"], ["grok", "grok.com"], ["deepseek", "chat.deepseek.com"]]) {
+  test(`${platform} mounts beside its native controls and reuses the pill after remount`, () => {
+    const f = inlineProviderFixture(platform), next = inlineProviderFixture(platform);
+    const hooks = loadPlatformContent(Object.values(f), host);
+    hooks.document.createElement = () => new FakeElement();
+    const originalGetById = hooks.document.getElementById;
+    hooks.document.getElementById = id => originalGetById(id)
+      || hooks.document.documentElement.children.find(node => node.id === id);
+    const bubble = new FakeElement({ tag: "button", attrs: { id: "context-generator-bubble" } });
+    assert.equal(hooks.findProviderInlineToolbar(f.input).anchor, f.anchor);
+    assert.equal(hooks.findProviderInlineToolbar(new FakeElement()), null);
+    assert.equal(hooks.mountProviderInlineButton(bubble, f.input), true);
+    assert.equal(bubble.nextElementSibling, f.anchor);
+    assert.equal(bubble.style.width, "32px");
+    assert.equal(bubble.style.position, "static");
+    assert.equal(bubble.style.flex, "0 0 32px");
+    assert.equal(hooks.mountProviderInlineButton(bubble, next.input), true);
+    assert.equal(bubble.parentElement, next.slot);
+    assert.equal(bubble.nextElementSibling, next.anchor);
+    assert.equal(f.controls.hasAttribute("data-context-generator-provider-inline"), false);
+    hooks.releaseProviderInlineMount();
+    assert.equal(next.controls.hasAttribute("data-context-generator-provider-inline"), false);
+    assert.equal(next.slot.hasAttribute("data-context-generator-provider-inline"), false);
+    next.controls.setAttribute("role", "menu");
+    assert.equal(hooks.findProviderInlineToolbar(next.input), null);
+  });
+}
+
+test("Gemini mobile inline mounting uses native trailing controls when the mode picker is hidden", () => {
+  const f = inlineProviderFixture("gemini");
+  f.anchor.rect = { width: 0, height: 0 };
+  const hooks = loadPlatformContent(Object.values(f), "gemini.google.com");
+  const toolbar = hooks.findProviderInlineToolbar(f.input);
+  assert.equal(toolbar.slot, f.controls);
+  assert.equal(toolbar.anchor, f.action);
+});
+
 function inlineClaudeFixture() {
   const host = new FakeElement();
   const editorBranch = new FakeElement();
@@ -2623,7 +2694,11 @@ test("Claude inline discovery validates the compact model chin against the same 
 });
 
 test("Inline platforms detect SPA route changes and schedule fresh mounting", () => {
-  for (const [host, initial, next] of [["claude.ai", "/new", "/chat/example"], ["chatgpt.com", "/", "/c/example"]]) {
+  for (const [host, initial, next] of [
+    ["claude.ai", "/new", "/chat/example"], ["chatgpt.com", "/", "/c/example"],
+    ["gemini.google.com", "/app", "/app/example"], ["grok.com", "/", "/c/example"],
+    ["chat.deepseek.com", "/", "/a/chat/s/example"]
+  ]) {
     const hooks = loadPlatformContent([], host, { pathname: initial });
     assert.equal(hooks.checkInlinePlacementPathname(), false);
     hooks.window.location.pathname = next;

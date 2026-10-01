@@ -31,6 +31,7 @@ const SMOKE_PLATFORM_QUERY = "__cap_context_smoke_platform";
 const SMOKE_TIMEOUT_MS = Number(process.env.CAP_CONTEXT_SMOKE_TIMEOUT_MS || 45000);
 const CLAUDE_PLACEMENT_SCREENSHOT_PATH = process.env.CAP_CONTEXT_CLAUDE_PLACEMENT_SCREENSHOT || "";
 const CHATGPT_PLACEMENT_SCREENSHOT_PATH = process.env.CAP_CONTEXT_CHATGPT_PLACEMENT_SCREENSHOT || "";
+const PROVIDER_PLACEMENT_SCREENSHOT_DIR = process.env.CAP_CONTEXT_PROVIDER_PLACEMENT_SCREENSHOT_DIR || "";
 const PICKER_SCREENSHOT_PATH = process.env.CAP_CONTEXT_PICKER_SCREENSHOT || "";
 const ERROR_SCREENSHOT_PATH = process.env.CAP_CONTEXT_ERROR_SCREENSHOT || "";
 const JSON_SOURCE = ["chatgpt", "gemini", "grok", "deepseek"].includes(process.env.CAP_CONTEXT_JSON_SMOKE) ? process.env.CAP_CONTEXT_JSON_SMOKE : process.env.CAP_CONTEXT_JSON_SMOKE === "1" ? "claude" : null;
@@ -335,6 +336,37 @@ function claudePlacementFixture() {
 </html>`;
 }
 
+function providerPlacementFixture(platform) {
+  const editor = platform === "deepseek"
+    ? '<div class="editor"><textarea id="provider-editor" placeholder="Message DeepSeek"></textarea></div>'
+    : `<${platform === "gemini" ? 'rich-textarea' : 'div data-testid="chat-input"'} class="editor"><div id="provider-editor" class="ql-editor ProseMirror query-bar-editor" contenteditable="true" role="textbox" aria-label="Provider prompt"></div></${platform === "gemini" ? 'rich-textarea' : 'div'}>`;
+  const capsule = '<span class="other-pill" aria-label="Other extension">C</span>';
+  const modes = '<span class="modes">DeepThink · Search</span>';
+  const model = platform === "gemini"
+    ? '<div class="model-wrapper"><button data-test-id="bard-mode-menu-button" id="provider-anchor">Flash</button></div>'
+    : '<div data-query-bar-mode-select class="model-wrapper"><button id="model-select-trigger" data-anchor>Fast</button></div>';
+  const actions = `<button class="voice">Mic</button>${capsule}<button class="send">Send</button>`;
+  const content = platform === "gemini"
+    ? `<div class="text-input-field">${editor}<div class="leading"><button>+</button></div><div class="trailing-actions-wrapper">${model}<div class="actions">${actions}</div></div></div>`
+    : platform === "grok"
+      ? `<div class="query-bar"><div class="native-grok-space">${editor}<div class="native-grok-dock"><div class="provider-row"><div><button data-testid="attach-button">+</button></div><div class="right-controls">${model}${actions}</div></div></div></div></div>`
+      : `<div class="deepseek-composer">${editor}<div class="provider-row">${modes}<div class="right-controls">${capsule}<div role="button" id="provider-anchor" class="ds-button">+</div><input type="file" hidden><div role="button" class="ds-button--circle">Send</div></div></div></div>`;
+  return `<!doctype html><html><head><meta charset="utf-8"><title>${platform} inline smoke</title><style>
+    *{box-sizing:border-box}body{margin:0;background:#151515;color:#eee;font:16px system-ui}
+    form{position:fixed;bottom:40px;left:50%;transform:translateX(-50%);width:min(720px,calc(100vw - 32px));padding:12px;background:#242424;border-radius:20px}
+    button,.ds-button,.ds-button--circle,.other-pill{height:36px;min-width:36px;display:inline-flex;align-items:center;justify-content:center;flex-shrink:0}
+    .other-pill{background:#555;border-radius:50%;width:32px;min-width:32px;height:32px}
+    .model-wrapper{flex-shrink:0}.model-wrapper button{width:96px}
+    .editor{display:block;min-width:0}#provider-editor{display:block;outline:none;min-height:40px;max-height:180px;overflow:auto;white-space:pre-wrap;width:100%;resize:none;background:transparent;color:inherit;border:0;font:inherit}
+    .provider-row,.right-controls,.trailing-actions-wrapper,.actions{display:flex;align-items:center;gap:4px}
+    .provider-row{justify-content:space-between}.right-controls{margin-left:auto;flex-shrink:0}.modes{white-space:nowrap}
+    .text-input-field{display:grid;grid-template-columns:40px minmax(0,1fr) auto;align-items:center;gap:8px}.text-input-field>.editor{grid-column:2;grid-row:1}.leading{grid-column:1;grid-row:1}.trailing-actions-wrapper{grid-column:3;grid-row:1}
+    .native-grok-space{position:relative;padding-bottom:56px}.native-grok-dock{position:absolute;bottom:0;width:100%;padding:10px 0}.native-grok-dock>.provider-row{width:100%}
+    .deepseek-composer{display:flex;flex-direction:column;gap:10px}
+    @media(max-width:640px){.text-input-field>.editor{grid-column:1/-1;grid-row:1}.leading,.trailing-actions-wrapper{grid-row:2}.trailing-actions-wrapper>.model-wrapper{display:none}}
+  </style></head><body><form data-testid="composer">${content}</form></body></html>`;
+}
+
 function destinationFixture() {
   return `<!doctype html>
 <html lang="en">
@@ -395,6 +427,13 @@ async function startFixtureServer() {
   const server = http.createServer(async (request, response) => {
     const url = new URL(request.url, "http://127.0.0.1");
     response.setHeader("Cache-Control", "no-store");
+    if (url.pathname === "/provider-placement") {
+      const platform = url.searchParams.get(SMOKE_PLATFORM_QUERY);
+      assert.ok(["gemini", "grok", "deepseek"].includes(platform));
+      response.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
+      response.end(providerPlacementFixture(platform));
+      return;
+    }
     if (NETWORK_SOURCE && url.pathname === "/api/v0/session") {
       response.writeHead(200, { "Content-Type": "application/json" }); response.end("{}"); return;
     }
@@ -844,6 +883,50 @@ async function run() {
         input.dispatchEvent(new Event('input',{bubbles:true}));
       })()`);
       process.stdout.write("✓ ChatGPT's 32px inline slot survives empty/long drafts, 760/390/320px widths and editor remount without native-control overlap.\n");
+    }
+
+    for (const platform of ["gemini", "grok", "deepseek"]) {
+      const url = `${origin}/provider-placement?${SMOKE_PLATFORM_QUERY}=${platform}`;
+      await browserSession.call("Target.createTarget", { url });
+      const target = await waitFor(async () => (await getTargets(devToolsPort))
+        .find((item) => item.type === "page" && item.url === url), `${platform} placement page`);
+      const session = await CdpSession.connect(target.webSocketDebuggerUrl);
+      try {
+        await session.call("Page.bringToFront");
+        await waitFor(() => session.evaluate(`Boolean(document.querySelector('#context-generator-bubble'))`), `${platform} startup`);
+        for (const draft of ["", ["Normal draft", "Second line", "Third line"].join(String.fromCharCode(10))]) {
+          await session.evaluate(`(() => {const e=document.getElementById('provider-editor');
+            if(e.tagName==='TEXTAREA')e.value=${JSON.stringify(draft)};else e.textContent=${JSON.stringify(draft)};
+            e.dispatchEvent(new Event('input',{bubbles:true}));})()`);
+          for (const width of [760, 390, 320]) {
+            await session.call("Emulation.setDeviceMetricsOverride", { width, height: 740, deviceScaleFactor: 1, mobile: false });
+            const layout = await waitFor(() => session.evaluate(`(() => {
+              const b=document.getElementById('context-generator-bubble'),r=b.getBoundingClientRect(),c=getComputedStyle(b);
+              const anchor=document.querySelector('[data-test-id="bard-mode-menu-button"],#model-select-trigger,#provider-anchor');
+              const peers=[...document.querySelector('form').querySelectorAll('button,[role="button"],.other-pill')]
+                .filter(n=>n!==b&&n.getBoundingClientRect().width>0).map(n=>n.getBoundingClientRect());
+              return c.position==='static'?{width:r.width,inside:r.left>=0&&r.right<=innerWidth,
+                adjacent:b.nextElementSibling===anchor||${JSON.stringify(platform)}==='gemini'&&innerWidth<=640,
+                overlap:peers.some(p=>r.left<p.right&&r.right>p.left&&r.top<p.bottom&&r.bottom>p.top)}:null;
+            })()`), `${platform} inline layout`);
+            assert.equal(layout.width, 32);
+            assert.equal(layout.inside, true);
+            assert.equal(layout.adjacent, true);
+            assert.equal(layout.overlap, false, `${platform} control overlap at ${width}px`);
+          }
+        }
+        if (PROVIDER_PLACEMENT_SCREENSHOT_DIR) {
+          const capture = await session.call("Page.captureScreenshot", { format: "png" });
+          await fs.promises.mkdir(PROVIDER_PLACEMENT_SCREENSHOT_DIR, { recursive: true });
+          await fs.promises.writeFile(path.join(PROVIDER_PLACEMENT_SCREENSHOT_DIR, `${platform}-inline.png`), Buffer.from(capture.data, "base64"));
+        }
+        await session.call("Emulation.clearDeviceMetricsOverride");
+        await session.evaluate(`(() => {window.__providerPill=document.getElementById('context-generator-bubble');
+          const form=document.querySelector('form'),next=form.cloneNode(true);next.querySelector('#context-generator-bubble').remove();form.replaceWith(next);})()`);
+        await waitFor(() => session.evaluate(`document.getElementById('context-generator-bubble')===window.__providerPill
+          && getComputedStyle(window.__providerPill).position==='static'`), `${platform} remount`);
+        process.stdout.write(`✓ ${platform} inline placement stays beside native controls through drafts, 760/390/320px widths and remount.\n`);
+      } finally { session.close(); await browserSession.call("Target.closeTarget", { targetId: target.id }); }
     }
 
     // Grok JSON mode verifies capture independently of unrelated Claude geometry.

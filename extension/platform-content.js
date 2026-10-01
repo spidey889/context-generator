@@ -1,10 +1,14 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-01-gpt-inline-high-v82";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-01-provider-inline-v83";
   const ownedUiStyleSheets = new Map();
   const CLAUDE_INLINE_STYLE_ID = "context-generator-claude-inline-styles";
   const CLAUDE_INLINE_MARKER = "data-context-generator-claude-inline";
   const CHATGPT_INLINE_STYLE_ID = "context-generator-chatgpt-inline-styles";
   const CHATGPT_INLINE_MARKER = "data-context-generator-chatgpt-inline";
+  const PROVIDER_INLINE_STYLE_ID = "context-generator-provider-inline-styles";
+  const PROVIDER_INLINE_MARKER = "data-context-generator-provider-inline";
+  const INLINE_MOUNT_PLATFORMS = new Set(["claude", "chatgpt", "gemini", "grok", "deepseek"]);
+  let providerInlineMount = null;
   let chatGptInlineMount = null;
   let claudeInlineMount = null;
   let inlineBubble = null;
@@ -624,6 +628,7 @@
   function cleanupContextGeneratorNodes() {
     releaseClaudeInlineMount();
     releaseChatGptInlineMount();
+    releaseProviderInlineMount();
     inlineBubble?.remove();
     inlineBubble = null;
     cleanupContextGeneratorReservations();
@@ -638,6 +643,7 @@
       BUBBLE_ID,
       CLAUDE_INLINE_STYLE_ID,
       CHATGPT_INLINE_STYLE_ID,
+      PROVIDER_INLINE_STYLE_ID,
       OVERLAY_ID,
       HANDOFF_SCRIM_ID,
       OVERLAY_PALETTE_STYLE_ID,
@@ -742,6 +748,9 @@
       findChatGptInlineToolbar,
       mountChatGptInlineButton,
       releaseChatGptInlineMount,
+      findProviderInlineToolbar,
+      mountProviderInlineButton,
+      releaseProviderInlineMount,
       getGeminiBubblePlacement,
       findGeminiModelSelectorButton,
       getGrokBubblePlacement,
@@ -3859,6 +3868,119 @@
     return true;
   }
 
+  function findProviderInlineToolbar(input) {
+    if (!input?.isConnected || !isVisible(input) || isComposerPopupControl(input, input)) return null;
+    const nativeControls = (root) => Array.from(root.querySelectorAll("button, [role='button']"))
+      .filter((node) => !isContextGeneratorNode(node) && isVisible(node) && !isComposerPopupControl(node, input));
+    let surface, row, controls, slot, anchor, dock, editorContainer;
+    if (currentPlatform.id === "gemini") {
+      surface = input.closest(".text-input-field");
+      controls = surface?.querySelector(".trailing-actions-wrapper");
+      if (!controls || !input.closest("rich-textarea") || controls.contains(input)) return null;
+      const buttons = nativeControls(controls);
+      const model = buttons.find((button) => button.getAttribute("data-test-id") === "bard-mode-menu-button");
+      // Gemini hides the model trigger on mobile. Its named trailing group is
+      // still editor-owned; mount before the native mic/send branch there.
+      slot = model?.parentElement || controls;
+      anchor = model || buttons[0];
+      row = controls;
+    } else if (currentPlatform.id === "grok") {
+      surface = input.closest(".query-bar");
+      const editor = input.closest("[data-testid='chat-input']");
+      const attach = surface?.querySelector("[data-testid='attach-button']");
+      const model = surface?.querySelector("#model-select-trigger");
+      const buttons = surface ? nativeControls(surface) : [];
+      if (!editor || !surface?.contains(editor) || !buttons.includes(attach) || !buttons.includes(model)) return null;
+      slot = model.closest("[data-query-bar-mode-select]");
+      if (!slot || slot.parentElement?.contains(input)) return null;
+      controls = slot.parentElement;
+      row = attach.parentElement;
+      while (row && row !== surface && !row.contains(controls)) row = row.parentElement;
+      if (!row || row === surface || row.contains(input)) return null;
+      dock = row.parentElement;
+      editorContainer = dock.parentElement;
+      if (!surface.contains(editorContainer) || !editorContainer.contains(input)) return null;
+      anchor = model;
+    } else if (currentPlatform.id === "deepseek") {
+      // DeepSeek hashes composer classes. Use the file input's associated
+      // upload control and circle action, in a sibling row of this textarea.
+      if (!input.matches("textarea")) return null;
+      for (let node = input.parentElement; node && node !== document.body; node = node.parentElement) {
+        const file = node.querySelector("[type='file']");
+        const upload = file?.previousElementSibling;
+        const group = file?.parentElement;
+        const send = group?.querySelector(".ds-button--circle");
+        if (!upload?.matches("[role='button']") || !upload.matches(".ds-button") ||
+            !isVisible(upload) || !send?.matches("[role='button']") || !isVisible(send) ||
+            isComposerPopupControl(upload, input) || isComposerPopupControl(send, input)) continue;
+        const branches = Array.from(node.children);
+        const editor = branches.find((branch) => branch.contains(input));
+        const toolbar = branches.find((branch) => branch !== editor && branch.contains(group));
+        if (!toolbar) continue;
+        surface = node; row = toolbar; controls = group; slot = group; anchor = upload;
+        break;
+      }
+    } else return null;
+    if (!surface || !row || !controls || !slot || !anchor) return null;
+    while (anchor.parentElement !== slot) anchor = anchor.parentElement;
+    const rect = surface.getBoundingClientRect();
+    if (!isVisible(row) || !isVisible(slot) || isComposerPopupControl(slot, input) ||
+        rect.width < 180 || rect.width > Math.min(1320, window.innerWidth)) return null;
+    return { input, surface, row, controls, slot, anchor, dock, editorContainer };
+  }
+
+  function releaseProviderInlineMount() {
+    providerInlineMount?.markers.forEach(([node]) => node.removeAttribute(PROVIDER_INLINE_MARKER));
+    providerInlineMount = null;
+  }
+
+  function mountProviderInlineButton(bubble, input) {
+    const toolbar = findProviderInlineToolbar(input);
+    if (!toolbar) { releaseProviderInlineMount(); return false; }
+    const keys = ["input", "surface", "row", "controls", "slot", "anchor", "dock", "editorContainer"];
+    if (!providerInlineMount || keys.some((key) => providerInlineMount[key] !== toolbar[key])) {
+      releaseProviderInlineMount();
+      const markers = [[toolbar.controls, "controls"]];
+      if (toolbar.slot !== toolbar.controls) markers.push([toolbar.slot, "slot"]);
+      if (toolbar.row !== toolbar.controls) markers.push([toolbar.row, "row"]);
+      if (toolbar.dock) markers.push([toolbar.dock, "grok-dock"], [toolbar.editorContainer, "grok-space"]);
+      providerInlineMount = { ...toolbar, markers };
+    }
+    providerInlineMount.pathname = window.location.pathname;
+    releaseBubbleSlot();
+    releaseComposerSurface();
+    clearTransientComposerPlacement();
+    stopPlatformPlacementResizeMonitoring();
+    syncProviderControlMutationMonitoring(input, toolbar.surface);
+    if (!document.getElementById(PROVIDER_INLINE_STYLE_ID)) {
+      const style = document.createElement("style");
+      style.id = PROVIDER_INLINE_STYLE_ID;
+      style.className = "darkreader";
+      style.dataset.contextGeneratorOwned = "true";
+      style.textContent = `
+        [${PROVIDER_INLINE_MARKER}="slot"] { display:inline-flex!important; align-items:center!important; min-width:0!important; max-width:100%!important; }
+        [${PROVIDER_INLINE_MARKER}="controls"] { display:flex!important; align-items:center!important; flex-wrap:wrap!important; min-width:0!important; max-width:100%!important; height:auto!important; }
+        [${PROVIDER_INLINE_MARKER}="row"] { flex-wrap:wrap!important; align-items:center!important; justify-content:space-between!important; gap:6px!important; height:auto!important; }
+        [${PROVIDER_INLINE_MARKER}="grok-dock"] { position:static!important; inset:auto!important; }
+        [${PROVIDER_INLINE_MARKER}="grok-space"] { padding-bottom:0!important; }
+      `;
+      (document.head || document.documentElement).appendChild(style);
+      applyOwnedUiStyleSheet(style);
+    }
+    providerInlineMount.markers.forEach(([node, value]) => {
+      if (node.getAttribute(PROVIDER_INLINE_MARKER) !== value) node.setAttribute(PROVIDER_INLINE_MARKER, value);
+    });
+    if (bubble.parentElement !== toolbar.slot || bubble.nextElementSibling !== toolbar.anchor) {
+      toolbar.slot.insertBefore(bubble, toolbar.anchor);
+    }
+    setBubbleSize(bubble, 32);
+    setBubbleStylesIfChanged(bubble, {
+      position: "static", left: "auto", right: "auto", top: "auto", bottom: "auto",
+      margin: "0 6px 0 0", flex: "0 0 32px", alignSelf: "center", display: "flex", visibility: "visible"
+    });
+    return true;
+  }
+
   function ensureFloatingButton(recalculationReason = "direct") {
     const input = findPlatformInput();
     const existingBubble = document.getElementById(BUBBLE_ID) || inlineBubble || transientComposerPlacement?.bubble || null;
@@ -3868,6 +3990,7 @@
       if (existingBubble) existingBubble.style.display = "none";
       releaseClaudeInlineMount();
       releaseChatGptInlineMount();
+      releaseProviderInlineMount();
       hideOnboardingNudge();
       hideClaudeLimitNudge();
       // Composer loss must never move focus to the Cap Context trigger.
@@ -3905,6 +4028,13 @@
       maybeShowOnboardingNudge(bubble);
       return bubble;
     }
+    inlineBubble = bubble;
+    if (mountProviderInlineButton(bubble, input)) {
+      ensureFloatingOverlay();
+      maybeShowOnboardingNudge(bubble);
+      return bubble;
+    }
+    // Unmatched provider variants retain the existing validated fallback.
     const composerSurface = findComposerSurfaceElement(input);
     if (!composerSurface) {
       const retainedBubble = retainTransientComposerPlacement(bubble);
@@ -7170,6 +7300,12 @@
       return;
     }
 
+    if (mountProviderInlineButton(bubble, input)) {
+      inlineBubble = bubble;
+      ensureFloatingOverlay();
+      maybeShowOnboardingNudge(bubble);
+      return;
+    }
     const composerSurface = findComposerSurfaceElement(input);
     if (!composerSurface) {
       if (retainTransientComposerPlacement(bubble)) return;
@@ -7892,11 +8028,15 @@
   }
 
   function invalidateInlinePicker(reason) {
-    if (!["claude", "chatgpt"].includes(currentPlatform.id)) return false;
+    if (!INLINE_MOUNT_PLATFORMS.has(currentPlatform.id)) return false;
     const input = findPlatformInput();
     const isClaude = currentPlatform.id === "claude";
-    const toolbar = isClaude ? findClaudeInlineToolbar(input) : findChatGptInlineToolbar(input);
-    const mount = isClaude ? claudeInlineMount : chatGptInlineMount;
+    const toolbar = isClaude ? findClaudeInlineToolbar(input) : currentPlatform.id === "chatgpt"
+      ? findChatGptInlineToolbar(input) : findProviderInlineToolbar(input);
+    const mount = isClaude ? claudeInlineMount : currentPlatform.id === "chatgpt" ? chatGptInlineMount : providerInlineMount;
+    // These three providers retain their old placement for unmatched variants.
+    // A fallback picker has no inline owner to invalidate on ordinary updates.
+    if (!isClaude && currentPlatform.id !== "chatgpt" && !toolbar && !mount) return false;
     // A picker belongs to the editor that opened it. On replacement, route
     // change or resize close it without stealing focus; its opening position
     // is intentionally locked during the picker-to-handoff animation.
@@ -7904,6 +8044,7 @@
       mount.input !== input || mount.left !== toolbar.left ||
       mount.right !== toolbar.right || mount.footer !== toolbar.footer || mount.controls !== toolbar.controls ||
       mount.slot !== toolbar.slot || mount.anchor !== toolbar.anchor ||
+      mount.surface !== toolbar.surface || mount.row !== toolbar.row || mount.dock !== toolbar.dock ||
       mount.pathname !== window.location.pathname ||
       normalizeFloatingButtonUpdateReason(reason).includes("resize");
     if (changed) {
@@ -8018,7 +8159,7 @@
   }
 
   function startInlinePathnameMonitoring() {
-    if (!["claude", "chatgpt"].includes(currentPlatform.id) || inlinePathnamePollTimer) return;
+    if (!INLINE_MOUNT_PLATFORMS.has(currentPlatform.id) || inlinePathnamePollTimer) return;
     lastInlinePlacementPathname = window.location.pathname;
     // Navigation API covers Chromium SPA transitions immediately. The small
     // pathname poll is the cross-browser fallback because pushState emits no
@@ -8033,7 +8174,7 @@
   }
 
   function checkInlinePlacementPathname() {
-    if (!["claude", "chatgpt"].includes(currentPlatform.id)) return false;
+    if (!INLINE_MOUNT_PLATFORMS.has(currentPlatform.id)) return false;
     const pathname = window.location.pathname;
     if (pathname === lastInlinePlacementPathname) return false;
     lastInlinePlacementPathname = pathname;
