@@ -1,5 +1,7 @@
 # Changelog
 
+- 2026-10-01: Closed Claude's popup-control placement gap by excluding nested menu/dialog/popover controls from orb anchors and mounted control reservations. Reused ChatGPT's popup boundary without changing its behavior or Claude's native Voice/Send placement. Advanced the content-script identity to v76. Tests and browser checks were skipped at the owner's request.
+
 - 2026-10-01: Prevented ChatGPT intelligence/effort popup controls from moving the orb by excluding menu/slider buttons from composer anchors and recognizing the real thinking/intelligence trigger. Advanced the content-script identity to v75. Tests and browser checks were skipped at the owner's request.
 
 - 2026-10-01: Separated GitHub code checks from the live production-summary monitor after recurring runs passed deterministic/slow tests but failed provider fact-retention checks. Added checks for `codex/**` pushes and pull requests, named test steps and cancellation of superseded code runs. Kept the daily/manual production check and its existing quality thresholds, with serialized runs and enough time for bounded retries. Fixed evaluation latency to include the full heartbeat-streamed response and added a 320-second body deadline; malformed JSON now follows service-error retry handling. All 392 deterministic tests, three slow capture tests and official actionlint validation passed. Local `npm run gate` retains release coverage. Pages/Vercel deployment behavior is unchanged; scheduled workflow changes require `master`.

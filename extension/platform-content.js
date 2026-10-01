@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-01-chatgpt-popup-anchor-v75";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-01-claude-popup-anchor-v76";
   const ownedUiStyleSheets = new Map();
   // Start fast capture on for each page instance; a manual opt-out lasts until reload.
   let claudeJsonCaptureEnabled = true;
@@ -7267,7 +7267,7 @@
     if (!composerSurface) return visibleControls;
 
     const mountedControls = Array.from(composerSurface.querySelectorAll("button, [role='button'], [tabindex='0']"))
-      .filter((element) => element.id !== BUBBLE_ID && !isContextGeneratorNode(element) && element.isConnected)
+      .filter((element) => element.id !== BUBBLE_ID && !isContextGeneratorNode(element) && element.isConnected && !isComposerPopupControl(element, composerSurface))
       .map((element) => ({
         element,
         label: getElementLabel(element, true),
@@ -7303,6 +7303,7 @@
         element.id !== BUBBLE_ID &&
         !isContextGeneratorNode(element) &&
         (!composerSurface || composerSurface.contains?.(element)) &&
+        !isComposerPopupControl(element, composerSurface) &&
         isVisible(element)
       ))
       .map((element) => ({
@@ -7473,10 +7474,14 @@
 
   function isChatGptComposerButton(button, input) {
     if (button.id === BUBBLE_ID || isContextGeneratorNode(button) || !isVisible(button)) return false;
-    // ChatGPT mounts effort options and sliders inside the form. They must not
-    // replace the real composer controls as the orb's placement anchor.
-    const popup = button.closest("dialog, [role='dialog'], [role='alertdialog'], [role='menu'], [role='listbox'], [role='menuitem'], [role='menuitemradio'], [role='menuitemcheckbox'], [role='option'], [aria-modal='true'], [popover], [data-radix-popper-content-wrapper]");
-    return !popup || popup.contains(input);
+    return !isComposerPopupControl(button, input);
+  }
+
+  function isComposerPopupControl(element, composerRoot) {
+    // Nested popup controls are not anchors or reservation targets. Allow a
+    // dialog that contains the actual composer, rather than excluding its UI.
+    const popup = element.closest("dialog, [role='dialog'], [role='alertdialog'], [role='menu'], [role='listbox'], [role='menuitem'], [role='menuitemradio'], [role='menuitemcheckbox'], [role='option'], [aria-modal='true'], [popover], [data-radix-popper-content-wrapper]");
+    return Boolean(popup && (!composerRoot || !popup.contains(composerRoot)));
   }
 
   function setBubbleAbsoluteMode(bubble) {
