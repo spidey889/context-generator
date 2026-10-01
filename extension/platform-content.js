@@ -7428,7 +7428,7 @@
         : window.innerWidth - BUBBLE_GAP;
 
     return Array.from(root.querySelectorAll("button"))
-      .filter((button) => isChatGptComposerButton(button, input))
+      .filter((button) => button.id !== BUBBLE_ID && !isContextGeneratorNode(button) && isVisible(button))
       .map((button) => {
         const rect = button.getBoundingClientRect();
         const label = getElementLabel(button, true);
@@ -7436,8 +7436,7 @@
         let score = 0;
 
         if (/\b(instant|medium|high)\b/.test(text)) score += 180;
-        if (/\b(model|intelligence|reasoning|thinking)\b/.test(label)) score += 180;
-        if (/^(true|menu|listbox|dialog)$/.test(button.getAttribute("aria-haspopup") || "")) score += 140;
+        if (/\b(model|intelligence|reasoning|thinking)\b/.test(label)) score += 42;
         if (composerRect && rect.left >= composerRect.left + composerRect.width * 0.45) score += 22;
         if (!composerRect && rect.left >= window.innerWidth * 0.45) score += 12;
         if (rect.top >= rowTop && rect.bottom <= rowBottom) score += 28;
@@ -7450,7 +7449,6 @@
         return (
           score >= 120 &&
           rect.width > 0 &&
-          rect.width <= 280 &&
           rect.height > 0 &&
           rect.height <= 56 &&
           rect.left >= scopeLeft &&
@@ -7469,28 +7467,6 @@
     const inputForm = input.closest("form");
     if (inputForm?.contains(input)) return inputForm;
     return composerSurface?.contains?.(input) ? composerSurface : null;
-  }
-
-  function isChatGptComposerButton(button, input) {
-    if (button.id === BUBBLE_ID || isContextGeneratorNode(button) || !isVisible(button)) return false;
-
-    // Native popups can be mounted inside the editor's form. Their mode options
-    // and slider controls are not composer anchors, even while visibly nearby.
-    const popup = button.closest([
-      "dialog",
-      "[role='dialog']",
-      "[role='alertdialog']",
-      "[role='menu']",
-      "[role='listbox']",
-      "[role='menuitem']",
-      "[role='menuitemradio']",
-      "[role='menuitemcheckbox']",
-      "[role='option']",
-      "[aria-modal='true']",
-      "[popover]",
-      "[data-radix-popper-content-wrapper]"
-    ].join(","));
-    return !popup || popup.contains(input);
   }
 
   function setBubbleAbsoluteMode(bubble) {
@@ -7676,7 +7652,7 @@
     const rowTop = composerRect.bottom - Math.max(60, composerRect.height * 0.55);
 
     return Array.from(root.querySelectorAll("button"))
-      .filter((button) => isChatGptComposerButton(button, input))
+      .filter((button) => button.id !== BUBBLE_ID && !isContextGeneratorNode(button) && isVisible(button))
       .map((button) => ({ button, rect: button.getBoundingClientRect() }))
       .filter(({ rect }) => {
         return (
@@ -8321,7 +8297,7 @@
       attributes: true,
       characterData: true,
       subtree: true,
-      attributeFilter: ["class", "style", "aria-expanded", "aria-haspopup", "aria-label", "aria-hidden", "hidden", "role", "data-state"]
+      attributeFilter: ["class", "style", "aria-expanded", "data-state"]
     });
   }
 
