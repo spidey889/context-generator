@@ -2848,12 +2848,19 @@ test("Claude inline host-only remount refreshes identity and invalidates the pic
   assert.equal(hooks.invalidateInlinePicker("document-childlist"), false, "a remounted host must become the new picker owner");
   assert.equal(oldObserver.observed.length, 0);
   assert.ok(hooks.mutationObservers.some(item => item.observed.some(target => target.element === nextHost)));
-  assert.equal(bubble.parentElement, f.left);
+  assert.equal(bubble.parentElement, f.right);
 });
 
-test("Claude inline mounting reuses its 32px slot after an editor remount and restores native markers", () => {
+test("Claude inline mounting reuses its 36px mic-adjacent slot after remount and restores native markers", () => {
   const first = inlineClaudeFixture();
   const next = inlineClaudeFixture();
+  for (const fixture of [first, next]) {
+    const branch = new FakeElement();
+    branch.appendChild(new FakeElement({ tag: "button", attrs: { "aria-label": "Dictate" } }));
+    branch.appendChild(new FakeElement({ tag: "button", attrs: { "data-testid": "chat-input-send", "data-visibility": "hidden" } }));
+    fixture.right.appendChild(branch);
+    fixture.voiceBranch = branch;
+  }
   const hooks = loadPlatformContent(Object.values(first), "claude.ai");
   hooks.document.createElement = () => new FakeElement();
   const originalGetById = hooks.document.getElementById;
@@ -2862,15 +2869,24 @@ test("Claude inline mounting reuses its 32px slot after an editor remount and re
   const bubble = new FakeElement({ tag: "button" });
   first.left.style.position = "absolute";
   assert.equal(hooks.mountClaudeInlineButton(bubble, first.input), true);
-  assert.equal(bubble.parentElement, first.left);
+  assert.equal(bubble.parentElement, first.right);
+  assert.equal(bubble.nextElementSibling, first.voiceBranch);
   assert.equal(bubble.style.position, "static");
-  assert.equal(bubble.style.width, "32px");
-  assert.equal(bubble.style.flex, "0 0 32px");
+  assert.equal(bubble.style.width, "36px");
+  assert.equal(bubble.style.flex, "0 0 36px");
+  const replacementBranch = new FakeElement();
+  while (first.voiceBranch.children.length) replacementBranch.appendChild(first.voiceBranch.children[0]);
+  first.right.appendChild(replacementBranch);
+  assert.equal(hooks.invalidateInlinePicker("document-childlist"), true, "a replaced mic/Send branch must refresh picker ownership");
+  assert.equal(hooks.mountClaudeInlineButton(bubble, first.input), true);
+  assert.equal(bubble.nextElementSibling, replacementBranch);
+  assert.equal(hooks.invalidateInlinePicker("document-childlist"), false);
   assert.equal(hooks.mountClaudeInlineButton(bubble, next.input), true);
-  assert.equal(bubble.parentElement, next.left);
+  assert.equal(bubble.parentElement, next.right);
+  assert.equal(bubble.nextElementSibling, next.voiceBranch);
   assert.equal(first.left.hasAttribute("data-context-generator-claude-inline"), false);
   assert.equal(first.left.style.position, "absolute");
-  assert.equal(next.left.children.filter((node) => node === bubble).length, 1);
+  assert.equal(next.right.children.filter((node) => node === bubble).length, 1);
   hooks.releaseClaudeInlineMount();
   for (const node of [next.editorBranch, next.actions, next.left, next.right]) {
     assert.equal(node.hasAttribute("data-context-generator-claude-inline"), false);
@@ -2920,7 +2936,7 @@ for (const platform of ["claude", "chatgpt"]) {
     }
     assert.equal(hooks.mountInlineOrLegacyBackup(bubble, inline.input), true);
     assert.equal(bubble.style.position, "static");
-    assert.equal(bubble.style.width, "32px");
+    assert.equal(bubble.style.width, platform === "claude" ? "36px" : "32px");
     assert.equal(hooks.resizeObservers.some(observer => observer.observed.length), false);
     assert.equal(hooks.mutationObservers.some(observer => observer.observed.some(target => target.element === form)), false);
     assert.equal(model.hasAttribute("data-context-generator-original-translate"), false);

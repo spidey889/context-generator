@@ -1103,11 +1103,13 @@ async function run() {
         && rect.top >= composer.top && rect.bottom <= composer.bottom;
       const bubbleHorizontallyInside = bubble.left >= composer.left && bubble.right <= composer.right;
       const alignment = Math.abs((bubble.top + bubble.height / 2) - (voice.top + voice.height / 2));
-      return { bubbleHorizontallyInside, dictateInside: inside(dictate), voiceInside: inside(voice), alignment };
+      return { bubbleHorizontallyInside, dictateInside: inside(dictate), voiceInside: inside(voice), alignment,
+        besideMic: bubble.right <= dictate.left && dictate.left - bubble.right <= 12 };
     })()`);
     assert.equal(claudeEmptyBounds.bubbleHorizontallyInside, true);
     assert.equal(claudeEmptyBounds.dictateInside, true);
     assert.equal(claudeEmptyBounds.voiceInside, true);
+    assert.equal(claudeEmptyBounds.besideMic, true, "Claude's pill must sit immediately before the mic branch.");
     assert.ok(claudeEmptyBounds.alignment <= 1, `Claude's fresh-page bubble was ${claudeEmptyBounds.alignment}px from the control row.`);
     if (!JSON_CAPTURE_SMOKE) {
       await verifyEmptyChatError(claudePlacementSession, browserSession, state);
@@ -1152,18 +1154,20 @@ async function run() {
         const b = document.getElementById("context-generator-bubble"), r = b.getBoundingClientRect();
         const m = document.getElementById("model").getBoundingClientRect();
         return { width: parseFloat(getComputedStyle(b).width), position: getComputedStyle(b).position,
+          besideControls: b.nextElementSibling === document.getElementById("voice-switch"),
           overlaps: r.left < m.right && r.right > m.left && r.top < m.bottom && r.bottom > m.top,
           inside: r.left >= 0 && r.right <= innerWidth,
           nativeTranslations: document.querySelectorAll("[data-context-generator-original-translate]").length };
       })()`);
-      assert.equal(inline.width, 32);
+      assert.equal(inline.width, 36);
+      assert.equal(inline.besideControls, true);
       assert.equal(inline.position, "static");
       assert.equal(inline.overlaps, false, `Claude inline pill overlaps model at ${width}px.`);
       assert.equal(inline.inside, true);
       assert.equal(inline.nativeTranslations, 0);
     }
     await claudePlacementSession.call("Emulation.clearDeviceMetricsOverride");
-    process.stdout.write("✓ Claude's 32px inline slot survives Voice/Send and 760/390/320px layouts without model overlap or native translation.\n");
+    process.stdout.write("✓ Claude's 36px inline pill stays beside the mic/Send branch at 760/390/320px without model overlap or native translation.\n");
 
     await claudePlacementSession.evaluate(`(() => {
       window.__claudeAuditBubble = document.getElementById("context-generator-bubble");
@@ -1176,7 +1180,8 @@ async function run() {
     await waitFor(() => claudePlacementSession.evaluate(`(() => {
       const b = document.getElementById("context-generator-bubble");
       return b === window.__claudeAuditBubble && getComputedStyle(b).position === "static"
-        && b.parentElement.getAttribute("data-context-generator-claude-inline") === "left";
+        && b.parentElement.getAttribute("data-context-generator-claude-inline") === "right"
+        && b.nextElementSibling === document.getElementById("voice-switch");
     })()`), "Claude inline ownership with hidden/popup control copies");
     await claudePlacementSession.evaluate(`(() => {
       document.getElementById("hidden-model").remove(); document.getElementById("decoy-menu").remove();

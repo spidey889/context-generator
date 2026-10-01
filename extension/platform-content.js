@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-02-provider-inline-audit-v89";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-02-claude-mic-pill-v90";
   const ownedUiStyleSheets = new Map();
   const CLAUDE_INLINE_STYLE_ID = "context-generator-claude-inline-styles";
   const CLAUDE_INLINE_MARKER = "data-context-generator-claude-inline";
@@ -3722,7 +3722,11 @@
       const right = rows.find((row) => (row.contains(model) || (send && row.contains(send))) && getComputedStyle(row).display === "flex");
       const rect = host.getBoundingClientRect();
       if (!left || !right || left === right || rect.width < 180 || rect.width > Math.min(1320, window.innerWidth)) continue;
-      return { input, host, editorBranch, actions, left, right };
+      // Mount before the persistent Send/Voice branch, beside the mic even
+      // while Send is hidden. Keep the pill outside its animated layers.
+      let anchor = send && right.contains(send) ? send : model;
+      while (anchor.parentElement !== right) anchor = anchor.parentElement;
+      return { input, host, editorBranch, actions, left, right, anchor };
     }
     return null;
   }
@@ -3775,7 +3779,8 @@
     if (claudeInlineMount?.input !== input || claudeInlineMount?.host !== toolbar.host ||
         claudeInlineMount?.editorBranch !== toolbar.editorBranch ||
         claudeInlineMount?.actions !== toolbar.actions ||
-        claudeInlineMount?.left !== toolbar.left || claudeInlineMount?.right !== toolbar.right) {
+        claudeInlineMount?.left !== toolbar.left || claudeInlineMount?.right !== toolbar.right ||
+        claudeInlineMount?.anchor !== toolbar.anchor) {
       releaseClaudeInlineMount();
       claudeInlineMount = { ...toolbar, bubble, pathname: window.location.pathname };
     }
@@ -3787,11 +3792,13 @@
       .forEach(([node, value]) => {
         if (node.getAttribute(CLAUDE_INLINE_MARKER) !== value) node.setAttribute(CLAUDE_INLINE_MARKER, value);
       });
-    if (bubble.parentElement !== toolbar.left) toolbar.left.appendChild(bubble);
-    setBubbleSize(bubble, 32);
+    if (bubble.parentElement !== toolbar.right || bubble.nextElementSibling !== toolbar.anchor) {
+      toolbar.right.insertBefore(bubble, toolbar.anchor);
+    }
+    setBubbleSize(bubble, 36);
     setBubbleStylesIfChanged(bubble, {
       position: "static", left: "auto", right: "auto", top: "auto", bottom: "auto",
-      margin: "0", flex: "0 0 32px", alignSelf: "center", display: "flex", visibility: "visible"
+      margin: "0 4px 0 0", flex: "0 0 36px", alignSelf: "center", display: "flex", visibility: "visible"
     });
     // Attribute-only mode/visibility changes emit no document child-list event.
     syncProviderControlMutationMonitoring(input, input.closest("[data-cds='ChatComposer']") || toolbar.host);
