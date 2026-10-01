@@ -12,7 +12,7 @@
   <meta property="og:title" content="Cap Context — Switch AIs without re-explaining">
   <meta property="og:description" content="Keep your decisions, details, and next steps moving between 5 AIs. Watch Cap Context in action.">
   <meta property="og:type" content="website">
-  <meta property="og:image" content="https://spidey889.github.io/context-generator/brag-output-2026-09-29-153657/brag.jpg">
+  <meta property="og:image" content="https://spidey889.github.io/context-generator/brag/brag.jpg">
   <meta name="twitter:card" content="summary_large_image">
   <link rel="icon" href="extension/icon128.png" type="image/png">
   <title>Cap Context — Switch AIs without re-explaining</title>
@@ -24,18 +24,12 @@
   <style>
     :root {
       --paper: #f8f6f1;
-      --surface: rgba(255, 255, 255, 0.84);
-      --surface-strong: #ffffff;
       --ink: #111114;
       --muted: #636776;
       --border: rgba(17, 17, 20, 0.09);
       --grid: rgba(17, 17, 20, 0.045);
       --shadow: 0 30px 90px rgba(17, 17, 20, 0.08);
-      --shadow-soft: 0 18px 44px rgba(17, 17, 20, 0.07);
-      --dark: #111114;
-      --dark-soft: #1c1d24;
       --accent: #5f67ff;
-      --accent-soft: rgba(95, 103, 255, 0.12);
       --radius: 32px;
       --container: 1200px;
     }
@@ -78,10 +72,6 @@
     a {
       color: inherit;
       text-decoration: none;
-    }
-
-    button {
-      font: inherit;
     }
 
     img,
@@ -270,17 +260,6 @@
       outline-offset: 3px;
     }
 
-    .button-dark {
-      border-color: rgba(17, 17, 20, 0.92);
-      background: linear-gradient(180deg, #17171d, #0f1014);
-      color: #ffffff;
-      box-shadow: 0 16px 42px rgba(17, 17, 20, 0.18);
-    }
-
-    .button-dark:hover {
-      background: linear-gradient(180deg, #1d1d24, #14151a);
-    }
-
     .button-outline {
       background: rgba(255, 255, 255, 0.68);
     }
@@ -347,8 +326,6 @@
       transform: none;
     }
 
-    .button-install-nav:hover .install-icon svg { transform: translate(1px, -1px); }
-
     .button.button-install.button-install-closing {
       min-height: 3.5rem;
       padding: 0.85rem 1rem;
@@ -369,35 +346,6 @@
     .button.button-install.button-install-closing:active { box-shadow: none; }
 
     .install-mark { width: 1.5rem; height: 1.5rem; flex: 0 0 auto; object-fit: contain; }
-
-    .button.is-copied {
-      background: linear-gradient(180deg, #1b7f5c, #126447);
-      border-color: rgba(18, 100, 71, 0.95);
-      color: #ffffff;
-    }
-
-    .eyebrow {
-      display: inline-flex;
-      align-items: center;
-      gap: 0.55rem;
-      padding: 0.5rem 0.85rem;
-      border-radius: 999px;
-      border: 1px solid rgba(17, 17, 20, 0.08);
-      background: rgba(255, 255, 255, 0.64);
-      color: var(--muted);
-      font-size: 0.9rem;
-      font-weight: 700;
-      letter-spacing: 0.01em;
-      box-shadow: 0 10px 30px rgba(17, 17, 20, 0.04);
-    }
-
-    .eyebrow-dot {
-      width: 0.5rem;
-      height: 0.5rem;
-      border-radius: 999px;
-      background: var(--accent);
-      box-shadow: 0 0 0 0.35rem rgba(95, 103, 255, 0.12);
-    }
 
     .hero {
       --hero-stack-gap: clamp(1.75rem, 2.5vw, 2.5rem);
@@ -548,13 +496,6 @@
       .site-header .button-install { gap: 0.45rem; padding-inline: 0.65rem; }
     }
 
-    .hero-note {
-      margin-top: 1rem;
-      color: var(--muted);
-      font-size: 0.95rem;
-      font-weight: 500;
-    }
-
     .cg-wrap {
       position: relative;
       max-width: 1080px;
@@ -601,241 +542,11 @@
       padding-top: clamp(2rem, 2.2vw, 2.5rem);
     }
 
-    .connector-card {
-      position: relative;
-      overflow: hidden;
-      border: 1px solid rgba(17, 17, 20, 0.07);
-      border-radius: var(--radius);
-      background: linear-gradient(180deg, rgba(255, 255, 255, 0.86), rgba(255, 255, 255, 0.72));
-      box-shadow: var(--shadow);
-      backdrop-filter: blur(18px);
-      padding: clamp(1.5rem, 3vw, 2.8rem);
-      isolation: isolate;
-    }
-
-    .connector-card::before {
-      content: "";
-      position: absolute;
-      inset: 0;
-      background:
-        radial-gradient(circle at 50% 50%, rgba(95, 103, 255, 0.12), transparent 28%),
-        radial-gradient(circle at 15% 15%, rgba(230, 126, 81, 0.08), transparent 18%);
-      opacity: 0.9;
-      z-index: 0;
-    }
-
-    .connector-grid {
-      position: relative;
-      z-index: 2;
-      display: grid;
-      grid-template-columns: minmax(0, 1fr) 15rem minmax(0, 1fr);
-      gap: clamp(1rem, 3vw, 2.8rem);
-      align-items: center;
-      min-height: 32rem;
-    }
-
-    .connector-lines {
-      position: absolute;
-      inset: 0;
-      z-index: 1;
-      width: 100%;
-      height: 100%;
-      pointer-events: none;
-    }
-
-    .connector-path-base {
-      fill: none;
-      stroke: rgba(17, 17, 20, 0.08);
-      stroke-width: 2;
-      stroke-linecap: round;
-    }
-
-    .connector-path-glow {
-      fill: none;
-      stroke: rgba(95, 103, 255, 0.28);
-      stroke-width: 2.2;
-      stroke-linecap: round;
-      stroke-dasharray: 10 16;
-      animation: dash 18s linear infinite;
-    }
-
-    .connector-path-glow.alt {
-      animation-duration: 22s;
-      animation-direction: reverse;
-      stroke: rgba(17, 17, 20, 0.15);
-    }
-
-    .ai-column {
-      display: flex;
-      flex-direction: column;
-      gap: 1rem;
-    }
-
-    .ai-item {
-      display: flex;
-      align-items: center;
-      gap: 1rem;
-      min-height: 5.4rem;
-      padding: 0.95rem 1rem;
-      border: 1px solid rgba(17, 17, 20, 0.08);
-      border-radius: 1.6rem;
-      background: rgba(255, 255, 255, 0.9);
-      box-shadow: var(--shadow-soft);
-      animation: bob 8s ease-in-out infinite;
-    }
-
-    .ai-item:nth-child(2) {
-      animation-delay: -1.8s;
-    }
-
-    .ai-item:nth-child(3) {
-      animation-delay: -3.4s;
-    }
-
-    .ai-item:nth-child(4) {
-      animation-delay: -5.1s;
-    }
-
-    .ai-column.right .ai-item {
-      flex-direction: row-reverse;
-      text-align: right;
-    }
-
-    .logo-chip {
-      flex: 0 0 auto;
-      width: 4rem;
-      height: 4rem;
-      border-radius: 1.35rem;
-      border: 1px solid rgba(17, 17, 20, 0.08);
-      background: #ffffff;
-      display: grid;
-      place-items: center;
-      box-shadow: 0 12px 28px rgba(17, 17, 20, 0.06);
-    }
-
-    .logo-chip svg {
-      width: 2rem;
-      height: 2rem;
-    }
-
-    .ai-name {
-      margin: 0;
-      font-size: 1.18rem;
-      font-weight: 700;
-      line-height: 1.1;
-      letter-spacing: -0.04em;
-    }
-
-    .ai-subtitle {
-      margin: 0.3rem 0 0;
-      color: var(--muted);
-      font-size: 0.92rem;
-      font-weight: 500;
-      line-height: 1.2;
-    }
-
-    .ai-item[data-brand="claude"] .ai-name {
-      color: #d06f48;
-    }
-
-    .ai-item[data-brand="chatgpt"] .ai-name {
-      color: #0e8f6f;
-    }
-
-    .ai-item[data-brand="gemini"] .ai-name {
-      color: #4f63ff;
-    }
-
-    .ai-item[data-brand="grok"] .ai-name {
-      color: #101114;
-    }
-
-    .core-wrap {
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      gap: 1rem;
-      position: relative;
-    }
-
-    .core-node {
-      position: relative;
-      width: min(100%, 10.8rem);
-      aspect-ratio: 1;
-      border-radius: 2rem;
-      background: linear-gradient(180deg, #1c1d24, #101114);
-      color: #ffffff;
-      display: grid;
-      place-items: center;
-      font-size: clamp(3.25rem, 5vw, 4.5rem);
-      border: 1px solid rgba(255, 255, 255, 0.08);
-      box-shadow: 0 22px 52px rgba(17, 17, 20, 0.2);
-    }
-
-    .core-node::after {
-      content: "";
-      position: absolute;
-      inset: -0.55rem;
-      border-radius: 2.45rem;
-      border: 1px solid rgba(95, 103, 255, 0.26);
-    }
-
-    .core-label {
-      display: inline-flex;
-      align-items: center;
-      gap: 0.45rem;
-      padding: 0.8rem 1rem;
-      border-radius: 999px;
-      background: rgba(17, 17, 20, 0.94);
-      color: #f6f7fb;
-      font-size: 0.95rem;
-      font-weight: 700;
-      letter-spacing: -0.03em;
-      box-shadow: 0 18px 36px rgba(17, 17, 20, 0.16);
-    }
-
-    .tagline {
-      margin: 1.8rem 0 0;
-      text-align: center;
-      font-size: clamp(1.3rem, 2.5vw, 1.8rem);
-      font-weight: 600;
-      letter-spacing: -0.05em;
-      color: #414555;
-    }
-
     .section-heading {
       margin: 0;
       font-size: clamp(2rem, 4vw, 3.2rem);
       line-height: 1;
       letter-spacing: -0.06em;
-    }
-
-    .section-copy {
-      margin: 0.85rem 0 0;
-      color: var(--muted);
-      font-size: 1.05rem;
-      line-height: 1.7;
-      max-width: 42rem;
-    }
-
-    .skill-block {
-      margin: 1.8rem 0 0;
-      padding: 1.45rem;
-      border-radius: 1.6rem;
-      border: 1px solid rgba(255, 255, 255, 0.08);
-      background: rgba(255, 255, 255, 0.035);
-      color: #e4e7f1;
-      box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.03);
-      overflow: auto;
-    }
-
-    .skill-block code {
-      display: block;
-      white-space: pre;
-      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
-      font-size: 0.95rem;
-      line-height: 1.7;
-      letter-spacing: -0.02em;
     }
 
     .site-footer {
@@ -855,11 +566,6 @@
       align-items: center;
       gap: 0.3rem;
       flex-wrap: wrap;
-    }
-
-    .footer-link {
-      font-weight: 600;
-      color: var(--ink);
     }
 
     .privacy-badge,
@@ -888,70 +594,6 @@
     }
     .footer-icon { width: 16px; height: 16px; flex-shrink: 0; }
     .license-type { padding: 0.15rem 0.4rem; border: 1px solid #e4dfea; border-radius: 5px; background: rgba(237,232,245,.5); color: #6c6178; font-size: 0.7rem; line-height: 1.4; font-weight: 500; }
-
-    .reveal {
-      opacity: 1;
-      transition: opacity 700ms ease, transform 700ms ease;
-    }
-
-    .reveal.is-visible {
-      opacity: 1;
-      transform: translateY(0);
-    }
-
-    @keyframes dash {
-      to {
-        stroke-dashoffset: -320;
-      }
-    }
-
-    @keyframes bob {
-
-      0%,
-      100% {
-        transform: translateY(0);
-      }
-
-      50% {
-        transform: translateY(-4px);
-      }
-    }
-
-    @keyframes shimmer {
-      0% { background-position: 0% 50%; }
-      50% { background-position: 100% 50%; }
-      100% { background-position: 0% 50%; }
-    }
-
-    .shimmer-text {
-      background: linear-gradient(90deg, #64748b, #94a3b8, #475569, #64748b);
-      background-size: 300% auto;
-      -webkit-background-clip: text;
-      -webkit-text-fill-color: transparent;
-      animation: shimmer 6s ease-in-out infinite;
-    }
-
-    @media (max-width: 1100px) {
-      .connector-grid {
-        grid-template-columns: 1fr;
-        min-height: auto;
-      }
-
-      .connector-lines {
-        display: none;
-      }
-
-      .ai-column {
-        display: grid;
-        grid-template-columns: repeat(2, minmax(0, 1fr));
-      }
-
-      .core-wrap {
-        order: -1;
-        margin-bottom: 0.4rem;
-      }
-
-    }
 
     @media (max-width: 820px) {
       .cg-wrap {
@@ -1001,20 +643,6 @@
       .hero-actions .button {
         width: 100%;
       }
-
-      .ai-column {
-        grid-template-columns: 1fr;
-      }
-
-      .ai-item,
-      .ai-column.right .ai-item {
-        flex-direction: row;
-        text-align: left;
-      }
-
-      .skill-block code {
-        font-size: 0.88rem;
-      }
     }
 
     @media (max-width: 768px) {
@@ -1040,11 +668,6 @@
       *::after {
         animation: none !important;
         transition-duration: 0ms !important;
-      }
-
-      .reveal {
-        opacity: 1;
-        transform: none;
       }
 
       .button.button-install,
@@ -1106,48 +729,6 @@
 </head>
 
 <body>
-  <svg aria-hidden="true" width="0" height="0" style="position:absolute">
-    <defs>
-      <linearGradient id="geminiGradient" x1="0%" y1="0%" x2="100%" y2="100%">
-        <stop offset="0%" stop-color="#22b8ff"></stop>
-        <stop offset="100%" stop-color="#6a5cff"></stop>
-      </linearGradient>
-    </defs>
-    <symbol id="icon-claude" viewBox="0 0 48 48">
-      <g fill="none" stroke="#e67e51" stroke-linecap="round" stroke-width="3.2">
-        <path d="M24 5.5V16"></path>
-        <path d="M24 32V42.5"></path>
-        <path d="M5.5 24H16"></path>
-        <path d="M32 24H42.5"></path>
-        <path d="M10.5 10.5l7.7 7.7"></path>
-        <path d="M29.8 29.8l7.7 7.7"></path>
-        <path d="M10.5 37.5l7.7-7.7"></path>
-        <path d="M29.8 18.2l7.7-7.7"></path>
-      </g>
-      <circle cx="24" cy="24" r="5.5" fill="#e67e51" opacity="0.18"></circle>
-    </symbol>
-    <symbol id="icon-chatgpt" viewBox="0 0 48 48">
-      <g fill="none" stroke="#10a37f" stroke-linecap="round" stroke-linejoin="round" stroke-width="3.6">
-        <rect x="17" y="6" width="14" height="26" rx="7"></rect>
-        <rect x="17" y="6" width="14" height="26" rx="7" transform="rotate(60 24 24)"></rect>
-        <rect x="17" y="6" width="14" height="26" rx="7" transform="rotate(120 24 24)"></rect>
-      </g>
-      <circle cx="24" cy="24" r="4" fill="#10a37f" opacity="0.14"></circle>
-    </symbol>
-    <symbol id="icon-gemini" viewBox="0 0 48 48">
-      <path d="M24 4L28 18L42 24L28 30L24 44L20 30L6 24L20 18Z" fill="url(#geminiGradient)"></path>
-      <path d="M24 11L27 20L36 24L27 28L24 37L21 28L12 24L21 20Z" fill="#ffffff" opacity="0.22"></path>
-    </symbol>
-    <symbol id="icon-grok" viewBox="0 0 48 48">
-      <g fill="none" stroke="#111114" stroke-linecap="round" stroke-linejoin="round" stroke-width="4.2">
-        <path d="M12 10L24 24L12 38"></path>
-        <path d="M36 10L24 24L36 38"></path>
-        <path d="M18 6H30"></path>
-        <path d="M18 42H30"></path>
-      </g>
-    </symbol>
-  </svg>
-
   <header class="site-header container">
     <a class="brand" href="#top" aria-label="Cap Context home">
       <span class="brand-mark">
@@ -1163,7 +744,7 @@
   </header>
 
   <main id="top">
-    <section class="hero section container reveal">
+    <section class="hero section container">
       <h1 style="color: #17151f !important;">Switch AIs without <span class="re-explaining">re-explaining<span class="re-explaining-shimmer" aria-hidden="true">re-explaining</span></span> everything.</h1>
       <p>A browser extension to continue your chat from one AI to another.</p>
       <div class="hero-actions">
@@ -1183,14 +764,14 @@
       <div class="demo-heading"><h2 id="demo-title">How it works</h2><span>62-second demo</span></div>
       <figure class="demo-frame">
         <video id="install-video" controls muted playsinline preload="none" width="1920" height="1080"
-          poster="brag-output-2026-09-29-153657/brag.jpg" aria-label="Cap Context demo: continue a Kyoto trip plan from Claude in ChatGPT">
-          <source src="brag-output-2026-09-29-153657/brag.mp4" type="video/mp4">
-          <a href="brag-output-2026-09-29-153657/brag.mp4">Watch the Cap Context demo</a>
+          poster="brag/brag.jpg" aria-label="Cap Context demo: continue a Kyoto trip plan from Claude in ChatGPT">
+          <source src="brag/brag.mp4" type="video/mp4">
+          <a href="brag/brag.mp4">Watch the Cap Context demo</a>
         </video>
       </figure>
     </section>
 
-    <section class="connector-section section container reveal" aria-label="Carry context between five AI platforms">
+    <section class="connector-section section container" aria-label="Carry context between five AI platforms">
       <div class="cg-wrap" id="cgWrap">
         <svg class="cg-lines" id="cgSvg" aria-hidden="true"></svg>
         <div class="cg-grid">
