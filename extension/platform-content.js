@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-01-gpt-inline-experiment-v81";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-01-gpt-inline-high-v82";
   const ownedUiStyleSheets = new Map();
   const CLAUDE_INLINE_STYLE_ID = "context-generator-claude-inline-styles";
   const CLAUDE_INLINE_MARKER = "data-context-generator-claude-inline";
@@ -3784,7 +3784,13 @@
     while (controls !== right && !nativeButtons.every((button) => controls.contains(button))) {
       controls = controls.parentElement;
     }
-    return { input, body, footer, left, right, controls };
+    const model = nativeButtons.find((button) => button.getAttribute("data-composer-navigation-target") === "reasoning");
+    // Keep the pill and model trigger together inside its native wrapper.
+    // Free layouts without a model trigger use the start of the right controls.
+    const slot = model?.parentElement || controls;
+    let anchor = model || nativeButtons[0];
+    while (anchor.parentElement !== slot) anchor = anchor.parentElement;
+    return { input, body, footer, left, right, controls, slot, anchor };
   }
 
   function ensureChatGptInlineStyles() {
@@ -3793,21 +3799,22 @@
     style.id = CHATGPT_INLINE_STYLE_ID;
     style.className = "darkreader";
     style.dataset.contextGeneratorOwned = "true";
-    // The native leading track is 36px. Let it size to the attachment + pill;
-    // keep ChatGPT's own row switching, editor spanning and label truncation.
+    // Size the grid to its native controls and keep the pill/model pair intact
+    // when the right-side branches wrap. Model triggers use display:contents
+    // wrappers, which need a real flex box once they also own our pill.
     style.textContent = `
       [${CHATGPT_INLINE_MARKER}="footer"] {
         grid-template-columns:max-content minmax(0,1fr) minmax(0,max-content)!important;
       }
-      [${CHATGPT_INLINE_MARKER}="left"] {
-        display:flex!important; align-items:center!important; gap:6px!important;
-        width:max-content!important; max-width:100%!important;
+      [${CHATGPT_INLINE_MARKER}="model"] {
+        display:inline-flex!important; align-items:center!important;
+        min-width:0!important; max-width:100%!important;
       }
       [${CHATGPT_INLINE_MARKER}="controls"] {
         display:flex!important; width:100%!important; min-width:0!important;
         max-width:100%!important; flex-wrap:wrap!important; justify-content:flex-end!important;
       }
-      [${CHATGPT_INLINE_MARKER}="controls"] > * { flex:0 1 auto!important; }
+      [${CHATGPT_INLINE_MARKER}="controls"] > :not(#${BUBBLE_ID}) { flex:0 1 auto!important; }
     `;
     (document.head || document.documentElement).appendChild(style);
     applyOwnedUiStyleSheet(style);
@@ -3816,7 +3823,7 @@
   function releaseChatGptInlineMount() {
     if (!chatGptInlineMount) return;
     chatGptInlineMount.footer.removeAttribute(CHATGPT_INLINE_MARKER);
-    chatGptInlineMount.left.removeAttribute(CHATGPT_INLINE_MARKER);
+    chatGptInlineMount.slot.removeAttribute(CHATGPT_INLINE_MARKER);
     chatGptInlineMount.controls.removeAttribute(CHATGPT_INLINE_MARKER);
     chatGptInlineMount = null;
   }
@@ -3829,20 +3836,25 @@
     }
     if (chatGptInlineMount?.input !== input || chatGptInlineMount?.footer !== toolbar.footer ||
         chatGptInlineMount?.left !== toolbar.left || chatGptInlineMount?.right !== toolbar.right ||
-        chatGptInlineMount?.controls !== toolbar.controls) {
+        chatGptInlineMount?.controls !== toolbar.controls || chatGptInlineMount?.slot !== toolbar.slot ||
+        chatGptInlineMount?.anchor !== toolbar.anchor) {
       releaseChatGptInlineMount();
       chatGptInlineMount = { ...toolbar, bubble };
     }
     chatGptInlineMount.pathname = window.location.pathname;
     ensureChatGptInlineStyles();
-    [[toolbar.footer, "footer"], [toolbar.left, "left"], [toolbar.controls, "controls"]].forEach(([node, value]) => {
+    const markers = [[toolbar.footer, "footer"], [toolbar.controls, "controls"]];
+    if (toolbar.slot !== toolbar.controls) markers.push([toolbar.slot, "model"]);
+    markers.forEach(([node, value]) => {
       if (node.getAttribute(CHATGPT_INLINE_MARKER) !== value) node.setAttribute(CHATGPT_INLINE_MARKER, value);
     });
-    if (bubble.parentElement !== toolbar.left) toolbar.left.appendChild(bubble);
+    if (bubble.parentElement !== toolbar.slot || bubble.nextElementSibling !== toolbar.anchor) {
+      toolbar.slot.insertBefore(bubble, toolbar.anchor);
+    }
     setBubbleSize(bubble, 32);
     setBubbleStylesIfChanged(bubble, {
       position: "static", left: "auto", right: "auto", top: "auto", bottom: "auto",
-      margin: "0", flex: "0 0 32px", alignSelf: "center", display: "flex", visibility: "visible"
+      margin: "0 6px 0 0", flex: "0 0 32px", alignSelf: "center", display: "flex", visibility: "visible"
     });
     return true;
   }
@@ -7891,6 +7903,7 @@
     const changed = !toolbar || !mount ||
       mount.input !== input || mount.left !== toolbar.left ||
       mount.right !== toolbar.right || mount.footer !== toolbar.footer || mount.controls !== toolbar.controls ||
+      mount.slot !== toolbar.slot || mount.anchor !== toolbar.anchor ||
       mount.pathname !== window.location.pathname ||
       normalizeFloatingButtonUpdateReason(reason).includes("resize");
     if (changed) {

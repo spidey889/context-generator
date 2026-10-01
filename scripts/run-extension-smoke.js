@@ -801,10 +801,12 @@ async function run() {
           const inline = await waitFor(() => sourceSession.evaluate(`(() => {
             const b=document.getElementById('context-generator-bubble'),r=b.getBoundingClientRect();
             const native=[...document.querySelector('.gpt-right').querySelectorAll('button')]
-              .filter(n=>getComputedStyle(n).display!=='none').map(n=>n.getBoundingClientRect());
+              .filter(n=>n!==b&&getComputedStyle(n).display!=='none').map(n=>n.getBoundingClientRect());
+            const model=document.getElementById('gpt-reasoning'),m=model.getBoundingClientRect();
             const style=getComputedStyle(b);
-            return b.parentElement.getAttribute('data-context-generator-chatgpt-inline')==='left'
+            return b.nextElementSibling===model
               ? {width:parseFloat(style.width),position:style.position,
+                 besideModel:r.right<=m.left&&Math.abs((r.top+r.bottom-m.top-m.bottom)/2)<1,
                  overlap:native.some(n=>r.left<n.right&&r.right>n.left&&r.top<n.bottom&&r.bottom>n.top),
                  send:getComputedStyle(document.getElementById('gpt-send')).display!=='none',
                  voice:getComputedStyle(document.getElementById('gpt-voice')).display!=='none',
@@ -812,6 +814,7 @@ async function run() {
           })()`), "ChatGPT inline mounting");
           assert.equal(inline.width, 32);
           assert.equal(inline.position, "static");
+          assert.equal(inline.besideModel, true);
           assert.equal(inline.overlap, false, `ChatGPT overlaps native controls at ${width}px.`);
           assert.equal(inline.send, Boolean(draft));
           assert.equal(inline.voice, !draft);
@@ -833,7 +836,7 @@ async function run() {
       })()`);
       await waitFor(() => sourceSession.evaluate(`(() => {
         const b=document.getElementById('context-generator-bubble');
-        return b===window.__gptSmokeButton && b?.parentElement.getAttribute('data-context-generator-chatgpt-inline')==='left'
+        return b===window.__gptSmokeButton && b?.nextElementSibling===document.getElementById('gpt-reasoning')
           && !window.__gptSmokeOldFooter.hasAttribute('data-context-generator-chatgpt-inline');
       })()`), "ChatGPT button recovery after editor replacement");
       await sourceSession.evaluate(`(() => {

@@ -225,6 +225,23 @@ class FakeElement {
     child.isConnected = this.isConnected;
     return child;
   }
+
+  insertBefore(child, anchor) {
+    if (!anchor) return this.appendChild(child);
+    if (child === anchor) return child;
+    if (anchor.parentElement !== this) throw new Error("The anchor is not a child of this node");
+    if (child.parentElement) {
+      child.parentElement.children = child.parentElement.children.filter((element) => element !== child);
+    }
+    this.children.splice(this.children.indexOf(anchor), 0, child);
+    child.parentElement = this;
+    child.isConnected = this.isConnected;
+    return child;
+  }
+
+  get nextElementSibling() {
+    return this.parentElement?.children[this.parentElement.children.indexOf(this) + 1] || null;
+  }
 }
 
 class FakeHTMLTextAreaElement {
@@ -2448,6 +2465,7 @@ function inlineChatGptFixture() {
   const right = new FakeElement();
   const attach = new FakeElement({ tag: "button", attrs: { "data-composer-navigation-target": "add-context" } });
   const model = new FakeElement({ tag: "button", attrs: { "data-composer-navigation-target": "reasoning", "aria-haspopup": "menu" } });
+  const modelWrapper = new FakeElement({ attrs: { class: "contents" } });
   const voice = new FakeElement({ tag: "button", attrs: { "aria-label": "Start Voice" } });
   body.appendChild(footer);
   footer.appendChild(left);
@@ -2455,9 +2473,10 @@ function inlineChatGptFixture() {
   footer.appendChild(right);
   editor.appendChild(input);
   left.appendChild(attach);
-  right.appendChild(model);
+  right.appendChild(modelWrapper);
+  modelWrapper.appendChild(model);
   right.appendChild(voice);
-  return { body, footer, editor, input, left, right, attach, model, voice };
+  return { body, footer, editor, input, left, right, attach, model, modelWrapper, voice };
 }
 
 test("ChatGPT inline discovery follows the editor-owned footer across multiline reordering", () => {
@@ -2483,12 +2502,12 @@ test("ChatGPT inline discovery supports free controls and excludes popup or unre
   assert.equal(hooks.findChatGptInlineToolbar(f.input), null);
 });
 
-test("ChatGPT inline mounting retains a non-shrinking 32px button through remount and cleans markers", () => {
+test("ChatGPT mounts before the model, follows remounts and supports free controls", () => {
   const f = inlineChatGptFixture();
   const next = inlineChatGptFixture();
   const nativeGroup = new FakeElement();
   next.right.appendChild(nativeGroup);
-  nativeGroup.appendChild(next.model);
+  nativeGroup.appendChild(next.modelWrapper);
   nativeGroup.appendChild(next.voice);
   const hooks = loadPlatformContent(Object.values(f));
   hooks.document.createElement = () => new FakeElement();
@@ -2497,15 +2516,24 @@ test("ChatGPT inline mounting retains a non-shrinking 32px button through remoun
     || hooks.document.documentElement.children.find(node => node.id === id);
   const bubble = new FakeElement({ tag: "button" });
   assert.equal(hooks.mountChatGptInlineButton(bubble, f.input), true);
-  assert.equal(bubble.parentElement, f.left);
+  assert.equal(bubble.parentElement, f.modelWrapper);
+  assert.equal(bubble.nextElementSibling, f.model);
   assert.equal(bubble.style.width, "32px");
   assert.equal(bubble.style.flex, "0 0 32px");
   assert.equal(bubble.style.position, "static");
   assert.equal(hooks.mountChatGptInlineButton(bubble, next.input), true);
-  assert.equal(bubble.parentElement, next.left);
+  assert.equal(bubble.parentElement, next.modelWrapper);
+  assert.equal(bubble.nextElementSibling, next.model);
   assert.equal(nativeGroup.getAttribute("data-context-generator-chatgpt-inline"), "controls");
   assert.equal(f.footer.hasAttribute("data-context-generator-chatgpt-inline"), false);
   assert.equal(f.right.hasAttribute("data-context-generator-chatgpt-inline"), false);
+  assert.equal(f.modelWrapper.hasAttribute("data-context-generator-chatgpt-inline"), false);
+  nativeGroup.children = nativeGroup.children.filter((node) => node !== next.modelWrapper);
+  assert.equal(hooks.mountChatGptInlineButton(bubble, next.input), true);
+  assert.equal(bubble.parentElement, nativeGroup);
+  assert.equal(bubble.nextElementSibling, next.voice);
+  assert.equal(bubble.style.flex, "0 0 32px");
+  assert.equal(next.modelWrapper.hasAttribute("data-context-generator-chatgpt-inline"), false);
   hooks.releaseChatGptInlineMount();
   assert.equal(next.left.hasAttribute("data-context-generator-chatgpt-inline"), false);
   assert.equal(nativeGroup.hasAttribute("data-context-generator-chatgpt-inline"), false);
