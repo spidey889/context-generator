@@ -4,6 +4,8 @@ const path = require("node:path");
 const fixturePath = path.join(__dirname, "..", "evaluation", "cases.json");
 const fixture = JSON.parse(fs.readFileSync(fixturePath, "utf8"));
 const endpoint = process.env.EVAL_ENDPOINT || "https://context-generator-five.vercel.app/api/summarize";
+// Match the extension's allowance, including the backend's streaming heartbeats.
+const requestTimeoutMs = 320_000;
 
 function transcriptFor(testCase) {
   const platform = testCase.platform.includes("claude") ? "Claude" : "ChatGPT";
@@ -43,19 +45,22 @@ function factLabel(fact) {
   return Array.isArray(fact) ? fact.join(" OR ") : fact;
 }
 
-async function evaluateCase(testCase) {
+async function evaluateCase(testCase, { fetchImpl = fetch, now = Date.now, timeoutMs = requestTimeoutMs } = {}) {
   const conversation = transcriptFor(testCase);
-  const startedAt = Date.now();
-  const response = await fetch(endpoint, {
+  const startedAt = now();
+  const response = await fetchImpl(endpoint, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
       "X-Cap-Context-Client": "cap-context-extension/1"
     },
-    body: JSON.stringify({ conversation })
+    body: JSON.stringify({ conversation }),
+    signal: AbortSignal.timeout(timeoutMs)
   });
-  const latencyMs = Date.now() - startedAt;
-  const payload = await response.json().catch(() => ({}));
+  // Headers can arrive with the first heartbeat, long before the summary. The
+  // deadline and latency measurement must cover the complete response body.
+  const payload = await response.json();
+  const latencyMs = now() - startedAt;
 
   if (!response.ok) {
     throw new Error(`${testCase.id}: endpoint returned ${response.status} ${payload.error || ""}`.trim());
@@ -163,4 +168,4 @@ if (require.main === module) {
   });
 }
 
-module.exports = { containsFact, evaluateCaseWithRetry, normalize };
+module.exports = { containsFact, evaluateCase, evaluateCaseWithRetry, normalize };

@@ -1,8 +1,17 @@
-name: Production regression gate
+name: Code and production checks
 
 on:
   workflow_dispatch:
+    inputs:
+      evaluate_production:
+        description: Also check the deployed API (uses live provider quota)
+        type: boolean
+        default: false
   push:
+    branches:
+      - master
+      - "codex/**"
+  pull_request:
     branches:
       - master
   schedule:
@@ -13,11 +22,38 @@ permissions:
 
 jobs:
   regression-gate:
+    name: Code regression checks
+    if: github.event_name != 'schedule'
     runs-on: ubuntu-latest
     timeout-minutes: 8
+    concurrency:
+      group: code-regression-${{ github.ref }}
+      cancel-in-progress: true
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-node@v6
         with:
           node-version: 22
-      - run: npm run gate
+      - name: Deterministic tests
+        run: npm test
+      - name: Long capture regressions
+        run: npm run test:slow
+
+  production-evaluation:
+    name: Live production summary check
+    # This probes the deployed API, not the checked-out branch. Keep variable
+    # provider quality visible without calling it a failure of every code push.
+    if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.evaluate_production)
+    runs-on: ubuntu-latest
+    # Two cases, at most two 320-second requests each, plus setup overhead.
+    timeout-minutes: 25
+    concurrency:
+      group: live-production-summary
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+      - name: Production accuracy and latency
+        run: npm run eval

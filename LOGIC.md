@@ -345,7 +345,7 @@ Native menus and popovers may temporarily mark the background application `aria-
 - `npm test`: deterministic suite excluding the three `slow/release:` capture tests.
 - `npm run test:slow`: paced 78-turn Claude capture plus delayed virtualized-batch and physical-scroll regressions.
 - `npm run test:extension-smoke`: disposable Brave profile, unpacked extension, ChatGPT-source/Claude-destination fixtures and stub backend. It verifies content/background startup, exact transfer and Claude placement without depending on an ephemeral worker DevTools target. `test/extension-smoke.test.js` guards injected-script escaping and bounded command cleanup. Use a separate browser window/profile.
-- `npm run eval`: live production-endpoint quality/latency evaluation with one retry for a failed quality case or transient request/provider error; two failures still block the gate.
+- `npm run eval`: live production-endpoint quality/latency evaluation with one retry for a failed quality case or transient request/provider error; two failures still block the gate. Each request has a 320-second deadline covering the complete response body; latency includes generation after streaming heartbeat headers. Malformed JSON is a retryable service failure.
 - `npm run gate`: fast tests, slow capture, live evaluation; it does not include Brave smoke.
 
 JSON capture checks:
@@ -358,4 +358,6 @@ JSON capture checks:
 
 Run smoke modes with `npm run test:extension-smoke`. Optional scenarios: `CAP_CONTEXT_CLAUDE_RELOAD_SMOKE=1`, `CAP_CONTEXT_CLAUDE_PARTIAL_SMOKE=1`, `CAP_CONTEXT_CHATGPT_RELOAD_SMOKE=1`, `CAP_CONTEXT_CHATGPT_FAILURE_SMOKE=partial|streaming|ranged`, and `CAP_CONTEXT_NETWORK_FAILURE_SMOKE=partial` or Grok's `file-only`. Clear scenario variables before a default/success run. Fixtures cover history absent from the DOM, source identity/auth recovery, complete pasted/document text, announced DOM fallback, exact backend transcript/paste and no Send. They establish extension integration, not fresh native-account capture or provider quality.
 
-GitHub Actions runs the gate on `master`, daily at 06:17 UTC, and manually using Node 22, read-only repository permissions, and an eight-minute job timeout.
+GitHub Actions uses Node 22 and read-only repository permissions. Pushes to `master` and `codex/**`, plus pull requests into `master`, run the deterministic suite and slow capture regressions as separately named steps in `Code regression checks`, with an eight-minute job timeout and cancellation of superseded runs on the same ref. These checks validate the checked-out code without calling production providers.
+
+At 06:17 UTC daily, `Live production summary check` probes the deployed API with the existing accuracy, structure, incorrect-fact and latency thresholds. Manual runs execute the code checks and can also enable `evaluate_production` (off by default, uses live provider quota). Production checks are serialized and have a 25-minute job allowance for the existing two cases with at most two bounded attempts each. A failed production check remains a real failure; it is separate from code validation and does not gate GitHub Pages or Vercel deployments. The local `npm run gate` still includes all three commands for release verification. Branch workflow changes become the scheduled/default workflow only after they reach `master`.
