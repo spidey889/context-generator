@@ -589,43 +589,53 @@ async function verifyEmptyChatError(session, browserSession, state, { removeTurn
       history.replaceState({}, "", "/?${SMOKE_PLATFORM_QUERY}=chatgpt");
     }
     window.__emptySmokeHandoffShown = false;
+    window.__emptySmokeEnteredFromRight = false;
     window.__emptySmokeObserver = new MutationObserver(() => {
       if (document.getElementById("context-generator-overlay")?.style.display === "flex") window.__emptySmokeHandoffShown = true;
+      const error = document.getElementById("context-generator-error-overlay");
+      if (error?.style.display === "flex" && error.getAttribute("aria-hidden") === "false"
+        && new DOMMatrix(getComputedStyle(error).transform).m41 > 0) window.__emptySmokeEnteredFromRight = true;
     });
     window.__emptySmokeObserver.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ["style"] });
     document.getElementById("context-generator-bubble").click();
   })()`);
   await waitFor(() => session.evaluate(`getComputedStyle(document.getElementById("context-generator-destination-sheet")).opacity === "1"`), "empty-chat picker");
   await session.evaluate(`(() => {
-    window.__emptySmokePickerRect = document.getElementById("context-generator-destination-sheet").getBoundingClientRect().toJSON();
     document.querySelector(".context-generator-destination-tile").click();
   })()`);
   await waitFor(() => session.evaluate(`(() => { const e = document.getElementById("context-generator-error-overlay"); return e?.style.display === "flex" && getComputedStyle(e).opacity === "1"; })()`), "direct empty-chat error");
   const result = await session.evaluate(`(() => {
     const error = document.getElementById("context-generator-error-overlay");
-    const rect = error.getBoundingClientRect(), picker = window.__emptySmokePickerRect;
+    const rect = error.getBoundingClientRect();
     return { title: document.getElementById("context-generator-error-title").textContent,
       message: document.getElementById("context-generator-error-text").textContent,
       handoffShown: window.__emptySmokeHandoffShown,
       sheetHidden: document.getElementById("context-generator-destination-sheet").style.display === "none",
       insideViewport: rect.left >= 0 && rect.right <= innerWidth && rect.top >= 0 && rect.bottom <= innerHeight,
-      nearPicker: Math.abs(rect.left + rect.width / 2 - picker.left - picker.width / 2) < 20,
+      bottomRight: Math.abs(document.documentElement.clientWidth - rect.right - 20) < 1 && Math.abs(innerHeight - rect.bottom - 80) < 1,
+      bounds: { right: rect.right, bottom: rect.bottom, width: document.documentElement.clientWidth, height: innerHeight },
+      enteredFromRight: window.__emptySmokeEnteredFromRight,
       role: error.getAttribute("role") };
   })()`);
   assert.equal(result.title, "Chat is empty");
   assert.equal(result.message, "Send a message first, then try again.");
   assert.equal(result.handoffShown, false, "Empty chat must never flash the handoff.");
-  assert.equal(result.sheetHidden && result.insideViewport && result.nearPicker, true, JSON.stringify(result));
+  assert.equal(result.sheetHidden && result.insideViewport && result.bottomRight && result.enteredFromRight, true, JSON.stringify(result));
   assert.equal(result.role, "alert");
   assert.equal(state.summaryRequests.length, before.summaries);
   assert.equal(state.jsonRequests, before.json);
   assert.equal((await browserSession.call("Target.getTargets")).targetInfos.filter(t => t.type === "page").length, before.tabs, "Empty chat must not open a destination.");
   if (screenshot && ERROR_SCREENSHOT_PATH) {
-    const clip = await session.evaluate(`(() => { const r = document.getElementById("context-generator-error-overlay").getBoundingClientRect(); return { x: Math.max(0, r.x - 12), y: Math.max(0, r.y - 12), width: r.width + 24, height: r.height + 24, scale: 1 }; })()`);
-    const capture = await session.call("Page.captureScreenshot", { format: "png", clip });
+    const capture = await session.call("Page.captureScreenshot", { format: "png" });
     await fs.promises.mkdir(path.dirname(ERROR_SCREENSHOT_PATH), { recursive: true });
     await fs.promises.writeFile(ERROR_SCREENSHOT_PATH, Buffer.from(capture.data, "base64"));
   }
+  assert.equal(await session.evaluate(`(() => {
+    const error = document.getElementById("context-generator-error-overlay");
+    error.querySelector("button").click();
+    return new DOMMatrix(error.style.transform).m41 === -24 && error.style.opacity === "0";
+  })()`), true, "Dismissal must fade towards the left.");
+  await waitFor(() => session.evaluate(`document.getElementById("context-generator-error-overlay").style.display === "none"`), "completed toast dismissal");
   // Starting again cancels old error dismissal/reveal work. Reduced motion
   // must also reveal and dismiss immediately, without intermediate movement.
   await session.call("Emulation.setEmulatedMedia", { features: [{ name: "prefers-reduced-motion", value: "reduce" }] });

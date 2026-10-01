@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-01-smooth-transfer-errors-v73";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-01-restore-error-toast-v74";
   const ownedUiStyleSheets = new Map();
   // Start fast capture on for each page instance; a manual opt-out lasts until reload.
   let claudeJsonCaptureEnabled = true;
@@ -6545,7 +6545,6 @@
     const sheet = document.getElementById(DESTINATION_SHEET_ID);
     const handoff = document.getElementById(OVERLAY_ID);
     const sourceSurface = isDestinationSheetOpen() ? sheet : isHandoffOverlayVisible() ? handoff : null;
-    const sourceRect = sourceSurface?.getBoundingClientRect();
     const exitMs = sourceSurface === sheet ? DESTINATION_SHEET_EXIT_MS : HANDOFF_OVERLAY_EXIT_MS;
     // Finish the current surface's exit before revealing its replacement.
     // Reopening the picker cancels this reveal, so an old error cannot flash back.
@@ -6562,7 +6561,7 @@
       errorDiv.setAttribute("aria-atomic", "true");
       errorDiv.style.cssText = [
         "position:fixed",
-        "z-index:2147483647",
+        "z-index:9999999",
         "right:20px",
         "bottom:80px",
         "width:min(340px,calc(100vw - 32px))",
@@ -6576,8 +6575,8 @@
         "font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif",
         "display:none",
         "opacity:0",
-        "transform:translate3d(0,8px,0) scale(0.98)",
-        "transition:opacity 200ms ease,transform 200ms ease",
+        "transform:translate3d(24px,0,0)",
+        "transition:opacity 260ms ease,transform 260ms ease",
         "flex-direction:column",
         "gap:12px",
         "overflow:hidden"
@@ -6672,26 +6671,21 @@
     }
 
     hideErrorOverlay(errorDiv, { immediate: true });
-    errorDiv.style.transition = reducedMotion ? "none" : "opacity 200ms ease,transform 200ms ease";
+    errorDiv.style.transition = reducedMotion ? "none" : "opacity 260ms ease,transform 260ms ease";
+    errorDiv.style.transform = "translate3d(24px,0,0)";
     const reveal = () => {
       errorDiv.contextGeneratorEnterTimer = null;
       errorDiv.style.display = "flex";
       errorDiv.setAttribute("aria-hidden", "false");
+      // Keep notifications anchored to the bottom-right, independent of transfer UI.
       errorDiv.style.right = "20px";
       errorDiv.style.bottom = "80px";
       errorDiv.style.left = "auto";
       errorDiv.style.top = "auto";
-      if (sourceRect) {
-        const rect = errorDiv.getBoundingClientRect();
-        errorDiv.style.right = "auto";
-        errorDiv.style.bottom = "auto";
-        errorDiv.style.left = `${Math.max(16, Math.min(sourceRect.left + (sourceRect.width - rect.width) / 2, window.innerWidth - rect.width - 16))}px`;
-        errorDiv.style.top = `${Math.max(16, Math.min(sourceRect.top + (sourceRect.height - rect.height) / 2, window.innerHeight - rect.height - 16))}px`;
-      }
       const settle = () => {
         errorDiv.contextGeneratorAnimationFrame = null;
         errorDiv.style.opacity = "1";
-        errorDiv.style.transform = "translate3d(0,0,0) scale(1)";
+        errorDiv.style.transform = "translate3d(0,0,0)";
       };
       if (reducedMotion) settle();
       else {
@@ -6712,11 +6706,11 @@
     cancelAnimationFrame(errorDiv.contextGeneratorAnimationFrame);
     errorDiv.setAttribute("aria-hidden", "true");
     errorDiv.style.opacity = "0";
-    errorDiv.style.transform = "translate3d(0,8px,0) scale(0.98)";
+    errorDiv.style.transform = "translate3d(-24px,0,0)";
     if (immediate || window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) errorDiv.style.display = "none";
     else errorDiv.contextGeneratorDisplayTimer = setTimeout(() => {
       errorDiv.style.display = "none";
-    }, 200);
+    }, 280);
   }
 
   function showFallbackModal(text, destinationName, isBackup = false) {
