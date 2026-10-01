@@ -20,7 +20,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap"
     rel="stylesheet">
-  <link href="https://fonts.googleapis.com/css2?family=EB+Garamond:wght@400&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=EB+Garamond:ital,wght@0,400;1,400&display=swap" rel="stylesheet">
   <style>
     :root {
       --paper: #f8f6f1;
@@ -338,28 +338,29 @@
       position: relative;
       display: inline-block;
       white-space: nowrap;
-      color: #9560df !important;
-      -webkit-text-fill-color: #9560df !important;
+      /* Match the serif's visible height to the bold text without stretching the line box. */
+      font-family: "EB Garamond", Georgia, serif;
+      font-size: 1.12em;
+      font-style: italic;
+      font-weight: 400;
+      line-height: 0.8;
+      letter-spacing: -0.055em;
+      color: #8451ca !important;
+      -webkit-text-fill-color: #8451ca !important;
     }
 
-    .hero .re-explaining-shine {
-      /* Sweep solid duplicate glyphs, avoiding gradients rewritten by dark-mode extensions. */
+    .hero .re-explaining::after {
+      content: "";
       position: absolute;
-      inset: 0;
+      left: 0.03em;
+      right: 0.01em;
+      bottom: -0.17em;
+      height: 0.14em;
+      border-top: 2px solid #ad8bdd;
+      border-radius: 50%;
+      transform: rotate(-1deg);
+      opacity: 0.65;
       pointer-events: none;
-      color: #d9baff !important;
-      -webkit-text-fill-color: #d9baff !important;
-      clip-path: polygon(-35% 0, -15% 0, -35% 100%, -55% 100%);
-      animation: lavender-sweep 8s linear infinite;
-    }
-
-    @keyframes lavender-sweep {
-      0%, 15% { clip-path: polygon(-35% 0, -15% 0, -35% 100%, -55% 100%); }
-      80%, 100% { clip-path: polygon(135% 0, 155% 0, 135% 100%, 115% 100%); }
-    }
-
-    @media (prefers-reduced-motion: reduce) {
-      .hero .re-explaining-shine { display: none; }
     }
 
     .hero p {
@@ -1013,7 +1014,7 @@
 
   <main id="top">
     <section class="hero section container reveal">
-      <h1 style="color: #000000 !important;">Switch AIs without <span class="re-explaining">re-explaining<span class="re-explaining-shine" aria-hidden="true">re-explaining</span></span> everything.</h1>
+      <h1 style="color: #000000 !important;">Switch AIs without <span class="re-explaining">re-explaining</span> everything.</h1>
       <p>A browser extension to continue your chat from one AI to another.</p>
       <div class="hero-actions">
         <a class="button button-dark button-install" href="https://chromewebstore.google.com/detail/cap-context/lpkaciijlhckkdhbgidbjfkldigghnjf" target="_blank" rel="noopener noreferrer"><span>Install extension</span><span class="install-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" focusable="false"><path d="M5 12h14M13 6l6 6-6 6"></path></svg></span></a>
