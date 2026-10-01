@@ -1,5 +1,7 @@
 # Changelog
 
+- 2026-10-01: Reduced unnecessary work during homepage scrolling by pausing offscreen orb particles, headline shimmer and AI connector animations, including hidden-tab work. Kept the connector's SVG/receiving-ring clocks synchronized and reapplied visibility after redraw. Page HTML/CSS, visible animation timing and native scrolling are unchanged. Isolated Brave verified pause/resume, clock alignment, resize, reduced motion and scrolling at four widths; hidden-document handling used controlled visibility events because automated tabs remained visible. Public asset/license checks passed.
+
 - 2026-10-01 (local only, not pushed): Refined the top-left brand from the small bold `cap-context` label to `Cap Context`, with larger semibold typography, tighter orb spacing and a single-line mobile treatment. Kept the orb artwork/animation and home destination; the explicitly named home link now treats its redundant logo image as decorative.
 
 - 2026-10-01 (local only, not pushed): Replaced the rejected purple closing install pill with a white button, a light border, compact rounded corners and a small decorative Cap Context orb. Kept the closing section, wording and destination; preserved the hero and arrow-free header actions.

@@ -1224,6 +1224,27 @@
   </footer>
 
   <script>
+    (function pauseHiddenDecorations() {
+      if (!("IntersectionObserver" in window) || !("getAnimations" in Element.prototype)) return;
+      const decorations = [...document.querySelectorAll(".brand-mark, .re-explaining")];
+      const visible = new Set();
+      function sync() {
+        decorations.forEach(element => {
+          // Keep native scrolling free of frame work; visibility changes pause only decoration.
+          const playing = visible.has(element) && !document.hidden;
+          element.getAnimations({ subtree: true }).forEach(animation => playing ? animation.play() : animation.pause());
+        });
+      }
+      const observer = new IntersectionObserver(entries => {
+        entries.forEach(entry => entry.isIntersecting ? visible.add(entry.target) : visible.delete(entry.target));
+        sync();
+      });
+      decorations.forEach(element => observer.observe(element));
+      document.addEventListener("visibilitychange", sync);
+      window.matchMedia("(prefers-reduced-motion: reduce)").addEventListener("change", sync);
+      sync();
+    })();
+
     (function rotateClosingHeading() {
       const title = document.getElementById("closing-title");
       if (!title || !("IntersectionObserver" in window)) return;
@@ -1332,6 +1353,13 @@
       const ns = "http://www.w3.org/2000/svg";
       let frame = 0;
       let receipts = [];
+      let inView = !("IntersectionObserver" in window);
+      function syncMotion() {
+        const playing = inView && !document.hidden && !motion.matches;
+        // Pause both clocks together so the trails and receiving rings stay aligned.
+        playing ? svg.unpauseAnimations() : svg.pauseAnimations();
+        receipts.forEach(animation => playing ? animation.play() : animation.pause());
+      }
       function drawLines() {
         frame = 0;
         receipts.forEach(animation => animation.cancel());
@@ -1480,11 +1508,19 @@
           receipts.push(receipt);
         });
         svg.setCurrentTime(0);
+        syncMotion();
       }
       function scheduleDraw() {
         if (!frame) frame = window.requestAnimationFrame(drawLines);
       }
       new ResizeObserver(scheduleDraw).observe(wrap);
+      if ("IntersectionObserver" in window) {
+        new IntersectionObserver(([entry]) => {
+          inView = entry.isIntersecting;
+          syncMotion();
+        }).observe(wrap);
+      }
+      document.addEventListener("visibilitychange", syncMotion);
       window.addEventListener("resize", scheduleDraw);
       motion.addEventListener("change", scheduleDraw);
       document.fonts.ready.then(scheduleDraw);
