@@ -1321,14 +1321,32 @@ async function fetchWithRetry(url, options, requestBudgetMs, retryOptions = {}) 
     const timeout = setTimeout(() => controller.abort(), Math.min(PROVIDER_ATTEMPT_TIMEOUT_MS, remainingMs));
     try {
       const response = await fetch(url, { ...options, signal: controller.signal });
-      lastResponse = response;
+      // fetch resolves at the headers. Keep the deadline active until the JSON
+      // body finishes too, including error bodies read before provider fallback.
+      let payload;
+      let bodyError;
+      try {
+        payload = await response.json();
+      } catch (error) {
+        if (controller.signal.aborted || error?.name === "AbortError") throw error;
+        bodyError = error;
+      }
+      lastResponse = {
+        ok: response.ok,
+        status: response.status,
+        headers: response.headers,
+        async json() {
+          if (bodyError) throw bodyError;
+          return payload;
+        }
+      };
       retryAfterMs = response.status === 429
         ? getRetryAfterMs(response.headers?.get?.("retry-after")) || 1000
         : 0;
       const retryableStatus = isRetryableProviderStatus(response.status)
         && (response.status !== 429 || retryOptions.retryRateLimits !== false);
       if (response.ok || !retryableStatus || attempt === PROVIDER_MAX_ATTEMPTS) {
-        return response;
+        return lastResponse;
       }
     } catch (error) {
       lastError = error;
