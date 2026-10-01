@@ -1,5 +1,7 @@
 # Changelog
 
+- 2026-10-01: Made the six-minute transfer deadline invalidate late capture results, bound summary requests and prevent expired destination paste/recovery. Bounded the telemetry outbox to 500 entries retained for seven days, persisted active cancellation metadata across worker restarts, and added an eight-second Supabase relay timeout. Advanced the content-script identity to v77; source changes do not establish a Web Store release.
+
 - 2026-10-01: Closed Claude's popup-control placement gap by excluding nested menu/dialog/popover controls from orb anchors and mounted control reservations. Reused ChatGPT's popup boundary without changing its behavior or Claude's native Voice/Send placement. Advanced the content-script identity to v76. Tests and browser checks were skipped at the owner's request.
 
 - 2026-10-01: Prevented ChatGPT intelligence/effort popup controls from moving the orb by excluding menu/slider buttons from composer anchors and recognizing the real thinking/intelligence trigger. Advanced the content-script identity to v75. Tests and browser checks were skipped at the owner's request.

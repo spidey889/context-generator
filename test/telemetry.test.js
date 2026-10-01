@@ -291,7 +291,7 @@ test("failed delivery keeps ordered operations and startup retries them", async 
   assert.deepEqual(background.storage["context-generator-telemetry-outbox-v1"], []);
 });
 
-test("closing the source tab records an in-flight transfer as user cancelled", async () => {
+test("closing the source tab after a worker restart records the last durable stage as cancelled", async () => {
   const requests = [];
   const background = loadTelemetryBackground(async (_url, options) => {
     requests.push(JSON.parse(options.body));
@@ -300,8 +300,14 @@ test("closing the source tab records an in-flight transfer as user cancelled", a
   await background.drain();
 
   await background.sendTelemetry(makeEvent({ lastStage: "summary_request_started" }), 42);
-  background.listeners.tabRemoved(42, { isWindowClosing: false });
-  await background.drain();
+  const restarted = loadTelemetryBackground(async (_url, options) => {
+    requests.push(JSON.parse(options.body));
+    return { ok: true };
+  }, background.storage);
+  await restarted.drain();
+  await restarted.listeners.tabRemoved(42, { isWindowClosing: false });
+  await restarted.drain();
+  assert.deepEqual(restarted.storage["context-generator-active-transfers-v1"], {});
 
   assert.equal(requests.at(-1).status, "failed");
   assert.equal(requests.at(-1).failure_reason, "user_cancelled");
@@ -486,7 +492,7 @@ test("completed server summary retains confirmation after source-tab cancellatio
     type: "SUMMARIZE_WITH_BACKEND", conversation: "Build passed.", transferId: makeEvent().attemptId
   }, { tab: { id: 42 } }, resolve));
   await started;
-  background.listeners.tabRemoved(42);
+  await background.listeners.tabRemoved(42);
   await background.drain();
   assert.equal(requests.at(-1).failure_reason, "user_cancelled");
   releaseSummary();

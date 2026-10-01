@@ -40,6 +40,7 @@ async function handler(req, res) {
 
   try {
     const response = await fetch(upstreamUrl, {
+      signal: AbortSignal.timeout(8000),
       method: "POST",
       headers: {
         "Content-Type": "application/json",

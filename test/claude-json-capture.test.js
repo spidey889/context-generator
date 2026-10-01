@@ -299,7 +299,7 @@ function pickerHarness({ jsonEnabled = true, navigateDuringHandoff = false } = {
   const noop = () => {};
   const sandbox = {
     window, currentPlatform: { id: "claude", name: "Claude" }, claudeJsonCaptureEnabled: jsonEnabled,
-    chatGptJsonCaptureEnabled: false, networkJsonCaptureEnabled: false, isRunning: false, runningResetTimer: null,
+    chatGptJsonCaptureEnabled: false, networkJsonCaptureEnabled: false, activeTransferTrace: null, isRunning: false, runningResetTimer: null,
     RUNNING_AUTO_RESET_MS: 360000, DESTINATION_SHEET_EXIT_MS: 0, NO_CONVERSATION_ERROR_MESSAGE: "No conversation",
     createTransferTrace: () => ({}), startTransferTelemetry: noop, markTransferTrace: noop, finishTransferTrace: noop,
     getDetectedConversationMessageCount: () => 0, hideDestinationSheet: noop, delay: async () => {},
@@ -313,7 +313,8 @@ function pickerHarness({ jsonEnabled = true, navigateDuringHandoff = false } = {
     markCaptureDone: noop, runContextFlow: () => { calls.flow++; }, getSafeTelemetryFailureReason: () => "capture_failed"
   };
   vm.createContext(sandbox);
-  vm.runInContext(source.slice(start, end), sandbox);
+  const deadlines = source.slice(source.indexOf("  function checkTransferDeadline("), source.indexOf("  function createTransferTrace("));
+  vm.runInContext(deadlines + source.slice(start, end), sandbox);
   return { calls, run: () => sandbox.startDestinationTransfer("chatgpt") };
 }
 

@@ -87,7 +87,7 @@ Important sequencing:
 - The orb, destination picker, and handoff card form one visual transition. Normal page Tab navigation skips the orb, while pointer activation still opens the picker and explicit keyboard/backdrop dismissal can restore trigger focus programmatically. Clicking a page control preserves focus on that control. Placement-only lifecycle work, including fullscreen resize reflow and transient composer loss, closes stale picker UI without moving focus. A chosen tile holds long enough to register, and the handoff card expands from the picker's measured screen position. Reduced-motion users receive the same state changes without movement.
 - The destination picker, handoff card and status/error notifications protect their existing palettes against Dark Reader rewriting inline styles. Their stylesheets use Dark Reader's ignored `darkreader` class and ID-scoped priority colors. Picker hover/selection colors keep inline priority; handoff progress colors remain state-driven. The handoff and notifications snapshot only their static inline palette before insertion, so the fallback rules preserve the authored colors without duplicating them. These styles are extension-owned and removed on teardown; the host page's theme is unaffected.
 - If page CSP blocks the handoff's style tag, the same CSS is installed as a constructed stylesheet so stage circles, connectors and labels retain the shared layout. That fallback is removed on teardown.
-- `isRunning` is page-local with a six-minute safety reset. The reset clears UI/state but does not abort ongoing capture, fetch, or paste work.
+- `isRunning` is page-local with a six-minute transfer deadline. Expiry marks the attempt cancelled, records `client_interrupted`, shows a timeout, and releases the lock. Capture continuation, summary requests, destination activation, paste retries and delayed paste recovery check the same deadline; late results cannot continue the expired transfer.
 - Picker-path telemetry starts before empty-chat validation so early exits are recorded safely.
 - Destination warmup and network preconnects never contain conversation text.
 - Progress completes only from real capture, summary, and paste events; in-stage line motion is decorative.
@@ -273,7 +273,7 @@ Do not overstate current quality enforcement:
 | `expire-latest-run-raw-transcript` | Alarm that removes only raw transcript fields |
 | `retry-transfer-telemetry` | Alarm that retries delivery after five minutes |
 
-`chrome.storage.local` persists receipts and outbox data; the summary cache, in-flight deduplication, active transfers and source `isRunning` lock are memory-only. The analysis renderer reads receipts through the GitHub Pages-matched bridge and its `window.postMessage` contract, rather than accessing extension storage directly.
+`chrome.storage.local` persists receipts and outbox data. The outbox retains at most 500 entries for seven days, dropping expired and oldest entries during prolonged outages. Active telemetry events and source tab IDs are persisted in `chrome.storage.session` (local storage fallback) with six-minute expiry so tab-close cancellation survives worker restarts. Summary cache, in-flight deduplication and the source `isRunning` lock remain memory-only. The analysis renderer reads receipts through the GitHub Pages-matched bridge and its `window.postMessage` contract, rather than accessing extension storage directly.
 
 The receipt records transfer/capture timings, counts, sizes, profile, the model that actually served, attempted and health-skipped models, fallback, finish reason, token usage, status, and exact captured text. Latest Run labels the serving model directly and excludes it from the failed portion of the fallback log. It deliberately does not store the generated summary. Background expiry and the analysis bridge both remove expired raw text.
 
@@ -316,18 +316,16 @@ Native menus and popovers may temporarily mark the background application `aria-
 
 - Platform support: manifest matches/permissions, `PLATFORMS`, background `DESTINATIONS`, `DESTINATION_HOST_RULES`, telemetry platform lists, tests, smoke fixtures.
 - Conversation limits: content-script cap, request-security character/byte/body limits, analysis display, tests.
-- Model/profile routing: provider constants/budgets, prompts, Latest Run labels, evaluation expectations, this file, `memory.md`, `extension/README.md`.
+- Model/profile routing: provider constants/budgets, prompts, Latest Run labels, evaluation expectations, this file, `memory.md`, `docs/provider-fallbacks.md`.
 - Telemetry fields/stages/failures: source/background sanitizers, Vercel validator, Supabase validator, SQL constraints/functions, tests. Free-form telemetry fields are forbidden.
 - Latest Run receipt: producer, background expiry, bridge, analysis renderer, analysis tests.
-- Content-script changes must advance `CONTENT_SCRIPT_LOAD_ID` for open-tab replacement and retain stale-node/reservation cleanup. Current value: `platform-content-2026-10-01-claude-popup-anchor-v76`.
+- Content-script changes must advance `CONTENT_SCRIPT_LOAD_ID` for open-tab replacement and retain stale-node/reservation cleanup. Current value: `platform-content-2026-10-01-transfer-deadline-v77`.
 - Extension release: bump `extension/manifest.json`, rebuild the ZIP with `manifest.json` at its root, hash-compare every file against `extension/`, then test the unpacked folder in a new Brave window.
 
 ## Known Current Risks
 
 - Long ChatGPT DOM capture has historically under-captured; deterministic virtual-window fixtures alone do not establish native-chat completeness.
-- The six-minute source lock can reset without cancelling active work.
 - Summary diagnostics are structural, not grounded; the content gate is conservative and heuristic. Useful short/token-limited output is retained, but factual grounding and omission detection are not enforced.
-- The telemetry outbox is unbounded, active cancellation state is worker-memory-only, and Vercel's Supabase fetch has no explicit timeout.
 - A destination prepared before capture/summary failure may remain open unused.
 - `npm run gate` omits installed-extension smoke. Default smoke covers ChatGPT → Claude; optional JSON modes cover all five source platforms against fixtures and a stub backend.
 - Browser packaging uses one hybrid Chromium/Firefox manifest while automation is Brave-only.
