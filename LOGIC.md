@@ -1,6 +1,6 @@
 # Cap Context Production Logic
 
-This is the agent-facing source of truth for the current checkout and its intended production behavior. `master` contains the merged production source; live deployment must still be verified separately. Use `CHANGELOG.md` for history. `backafter15day.md` is a dated audit whose findings must be reverified, and `todo.md` is the owner's personal tracker—not an instruction queue.
+This is the agent-facing source of truth for the extension and backend in the current checkout and their intended production behavior. `master` contains the merged production source; live deployment must still be verified separately. Use `CHANGELOG.md` for history. `backafter15day.md` is a dated audit whose findings must be reverified, and `todo.md` is the owner's personal tracker—not an instruction queue.
 
 When code and this file disagree, verify the behavior in code and tests, then update this file in the same change.
 
@@ -17,30 +17,8 @@ Use evidence in this order: the owner's current request and project instructions
 - The extension has no build step. Load Brave's unpacked extension from `extension/`, not from the ZIP.
 - Use Node 22 for tests and scripts. The project intentionally has no tracked lockfile or runtime npm dependency list; tests and smoke tooling use Node built-ins and Node's global WebSocket.
 - `extension/manifest.json` currently reports version `1.4.6` and contains both Chromium and Firefox background declarations. The manifest number alone does not prove the Web Store contains the checkout's behavior.
-- Production web/API URL: `https://context-generator-five.vercel.app`. The analysis bridge and canonical site links currently use `https://spidey889.github.io/context-generator`.
+- Production API URL: `https://context-generator-five.vercel.app`.
 - The checked-in extension ZIPs were removed. Load the local `extension/` folder or install from the Chrome Web Store; build and verify a fresh archive when preparing a ZIP release.
-- `index.html` serves the extension-focused landing page with the light/purple hero, supported-platform logo badges with accessible names and hover titles, native video player, an Executor-inspired white connector panel with three AI logo tiles on the left, two on the right and the Cap Context orb in its central hub, and a final Web Store action. The demo uses the owner-selected `brag-output-2026-09-29-153657/brag.mp4` and matching poster (62-second first Kyoto cut), with native controls and `preload="none"`. It starts muted when at least 35% visible, pauses offscreen or in a hidden tab, and resumes on return unless the visitor paused it or playback ended. The connector places Claude, ChatGPT and Gemini on the left and Grok/DeepSeek on the right. Thin curved black tracks carry six fading trails from one AI through the transparent hub to another; all five AIs send and receive. Each journey travels for 1.8 seconds, staggered 1.2 seconds apart within a 7.2-second loop. A subtle orb ring responds at transit and the receiving tile highlights on arrival. ResizeObserver, font readiness and motion-preference changes refresh SVG geometry; reduced motion retains only static tracks. The connector stays connected on tablet widths and is hidden at 768 px and below. Reduced-motion preference keeps playback manual; rejected autoplay falls back to native controls. The newer film remains a separate artifact. No usage or latency statistics are claimed. All install actions open the Chrome Web Store; the footer privacy action opens `privacy.html`; the header has no privacy link. Content and controls remain usable without JavaScript; reduced motion disables the headline sweep and animated SVG connector strokes. Public pages retain the Dark Reader lock. The old skill, dated demo and former page remain historical artifacts, but the homepage no longer embeds or copies the skill.
-
-Homepage layout: the "Your progress, ready for the next AI" context-outline section has been removed. The hero supporting line plainly describes a browser extension to continue a chat in another AI; the demo is titled "How it works", the redundant connector caption is removed, and the final action is "Install Cap Context". The approved hero install link uses a flat black treatment with compact rounded corners and a right-pointing SVG arrow. In the current local preview, the header uses a smaller light outlined "Install" pill without an arrow, and the closing action uses a white "Add to your browser" button with a small decorative Cap Context orb, a light border and compact rounded corners. All install actions retain keyboard focus, press feedback and reduced-motion support. The demo button retains its gray styling. The current checkout flows hero → demo → animated AI handoff → final install action. The header/closing button variants are not pushed; the last published source retains three black install buttons.
-
-The header displays `Cap Context` as a single-line Inter wordmark beside the existing orb, with 600 weight, 1.45rem desktop/1.25rem mobile text and a tighter 0.6rem gap. Its home link has an explicit accessible name, so the orb image is decorative.
-
-Scrolling remains browser-native, with no wheel/touch interception or custom scroll loop. IntersectionObserver pauses offscreen orb particles and the headline shimmer, and freezes the connector's SVG and receiving-ring clocks together. They also pause in hidden tabs and resume when visible; connector redraws apply the same visibility state. Visible styling, animation cadence, video controls and reduced-motion behavior are unchanged. The demo and closing animation retain their existing visibility lifecycles.
-
-### Homepage connector animation
-
-The connector keeps the approved small orb and black hub border. Faint black tracks carry heads with transparent gradient tails. The hub background is transparent so trails visibly enter the box, pass behind the orb and emerge toward a different AI. A synchronized monochrome ring responds at the center, and the receiving AI tile briefly highlights on arrival. Six journeys each travel for 1.8 seconds, staggered 1.2 seconds apart in a 7.2-second loop, making individual handoffs legible. Every connection has a reverse journey, ensuring all five AIs send and receive despite the uneven three/two columns. Resize/font redraws cancel and replace receipt animations; independent receipt rings avoid overrides when an AI has multiple incoming routes. Reduced motion renders only static tracks and removes all relay/receipt animations.
-
-## Product launch film
-
-`brag-output-2026-09-29-175143/brag.mp4` is the latest `/brag-slim` launch-film cut: 52 seconds at 1080p/60 fps. A realistic staged Claude Kyoto chat reaches its limit; the production Cap Context picker selects ChatGPT; the production transfer card remains visibly inside Claude's conversation through capture, summary and paste; then ChatGPT receives the seven-heading Context Carry and answers the same short day-three follow-up using Sanjo, vegetarian food and an open afternoon. Five cursor-led clicks, decisive macro pushes, short settled reading holds and a new original 100 BPM piano/pulse/Foley score tighten the previous edit. Both ChatGPT Send actions are user-controlled. The app leaves the frame before the standalone message and brand close; the message is `Switch AIs without re-explaining everything.` The output directory holds the editable time-based composition, production DOM/CSS capture with source hash, soundtrack generator/manifest, plan, reference study, poster, share copy, creative review and verification. Only in the film, the handoff card's backdrop blur/shadow and countdown are suppressed to avoid a compositor artifact and invented latency. Claude/ChatGPT shells and reset time are authored illustrations; transfer/generation timing is condensed, not measured live behavior. The latest cut does not change production extension behavior or the website video embed.
-
-`brag-output-2026-09-29-153657/brag.mp4` is the retained 62-second first Kyoto cut. Its output directory preserves its editable composition, distinct earlier soundtrack, poster and verification. The homepage now embeds this owner-selected cut. The locally installed skill is at `.agents/skills/brag-slim/SKILL.md`, with its source recorded in `skills-lock.json`.
-
-`brag-output/brag.mp4` is the retained 24-second first draft, rejected for repeating the earlier creative direction. It is historical material. The latest draft does not replace the website embed or the retained V1/V2 exports.
-
-`video/cap-context-launch-v2-polished.mp4` is a retained earlier standalone launch film: 29.5 seconds, 1080p at 60 fps. `video/v2/` holds the editable composition, production UI captures, original score generator, render/verification scripts and reproduction notes. The original V2 structure remains: a long chat, an explicit illustrated message-limit state, cursor-led Cap Context selection, capture/summary/paste, a new Claude chat with context and user-initiated continuation. Fuller host chats, a normal sent-context preview, streamed continuation, shorter cursor paths with target dwell/hand states, controlled camera moves and reduced copy improve realism and clarity. The finish contains the brand and the three requested switch/install/Web Store messages. The owner's local Cowork reference informs spacing, framing and motion; reference footage/audio are not reused. Production-owned orb, picker (including actual hover) and progress controls are captured from `extension/platform-content.js` in an isolated local Brave fixture. The estimated countdown is omitted only in this edited fixture. AI surroundings and conversation content remain authored illustrations; condensed timing is documented in `video/v2/README.md`, not presented as a latency benchmark. The previous V2 export remains at `video/cap-context-launch-v2.mp4`, with its source recoverable from `0c28aae`; V1 remains at `video/cap-context-launch.mp4`. These artifacts do not change the extension or replace the retained website video embed.
-
 ## Non-Negotiable Invariants
 
 1. Opening, browsing, closing, or cancelling the destination picker never captures or transmits chat text. Preconnects contain no conversation data.
@@ -58,14 +36,13 @@ The connector keeps the approved small orb and black hub border. Faint black tra
 
 | Area | Source of truth | Important entry points | Primary tests |
 | --- | --- | --- | --- |
-| Site adapters, capture, picker/handoff UI, paste, placement, receipt creation | `extension/platform-content.js` | `startDestinationTransfer`, `runContextFlow`, `scrapeVirtualConversation`, `getConversationTurns`, `pasteIntoPlatform`, `updateFloatingButtonPosition` | `test/platform-content.test.js` |
+| Platform adapters, capture, picker/handoff UI, paste, placement, receipt creation | `extension/platform-content.js` | `startDestinationTransfer`, `runContextFlow`, `scrapeVirtualConversation`, `getConversationTurns`, `pasteIntoPlatform`, `updateFloatingButtonPosition` | `test/platform-content.test.js` |
 | Cross-tab flow, backend call, destination recovery, cache, telemetry outbox, receipt expiry | `extension/background.js` | `summarizeWithBackend`, `transferToDestination`, `sendMessageWhenReady`, `recordTransferTelemetry` | `test/background.test.js`, `test/telemetry.test.js` |
 | Profiles, provider routing, prompt, validation, normalization | `api/summarize.js` | `handleSummary`, `createSummaryWithFallback`, `createSummaryWithProvider`, `validateContextCarrySummary` | `test/summarize.test.js` |
 | Summary request boundary | `api/request-security.js` | `isTrustedExtensionRequest`, `validateSummarizeRequest`, `consumeRateLimit` | `test/request-security.test.js` |
 | Telemetry relay/schema | `api/telemetry.js`, `api/telemetry-validation.js` | telemetry handler, `validateTelemetryRequest` | `test/telemetry.test.js` |
 | Protected telemetry persistence and user counters | `supabase/functions/transfer-telemetry/`, `supabase/migrations/` | `validateTelemetryPayload`, `record_transfer_event`, `record_user_summary` | `test/telemetry.test.js` plus migration review |
 | Local Latest Run UI | `extension/analysis-bridge.js`, `analysis/index.html` | `readLastTransferStats`, page `renderStats` | `test/analysis.test.js` |
-| Static public site/privacy | `index.html`, `privacy.html`, `PRIVACY.md` | Static HTML/CSS with inline landing-page JavaScript; no build step | `test/license.test.js` plus manual visual review |
 | Browser smoke/live quality | `scripts/`, `evaluation/` | `run-extension-smoke.js`, `run-regression-eval.js` | npm scripts below |
 
 `extension/platform-content.js` is a large shared page-lifecycle script. It owns platform selectors, observers, timers, reservations, capture state, and transfer UI. Add characterization tests before extracting or broadly refactoring it.
@@ -341,11 +318,11 @@ Native menus and popovers may temporarily mark the background application `aria-
 
 ## Contracts That Must Change Together
 
-- Platform support: manifest matches/permissions, `PLATFORMS`, background `DESTINATIONS`, `DESTINATION_HOST_RULES`, telemetry platform lists, public/privacy copy, tests, smoke fixtures.
-- Conversation limits: content-script cap, request-security character/byte/body limits, public/privacy copy, analysis display, tests.
+- Platform support: manifest matches/permissions, `PLATFORMS`, background `DESTINATIONS`, `DESTINATION_HOST_RULES`, telemetry platform lists, tests, smoke fixtures.
+- Conversation limits: content-script cap, request-security character/byte/body limits, analysis display, tests.
 - Model/profile routing: provider constants/budgets, prompts, Latest Run labels, evaluation expectations, this file, `memory.md`, `extension/README.md`.
-- Telemetry fields/stages/failures: source/background sanitizers, Vercel validator, Supabase validator, SQL constraints/functions, privacy wording, tests. Free-form telemetry fields are forbidden.
-- Latest Run receipt: producer, background expiry, bridge, analysis renderer, privacy wording, analysis tests.
+- Telemetry fields/stages/failures: source/background sanitizers, Vercel validator, Supabase validator, SQL constraints/functions, tests. Free-form telemetry fields are forbidden.
+- Latest Run receipt: producer, background expiry, bridge, analysis renderer, analysis tests.
 - Any content-script change: update `CONTENT_SCRIPT_LOAD_ID` so open tabs replace stale code, and retain stale-node/reservation cleanup. Current value: `platform-content-2026-09-30-local-summary-recovery-v58`.
 - Extension release: bump `extension/manifest.json`, rebuild the ZIP with `manifest.json` at its root, hash-compare every file against `extension/`, then test the unpacked folder in a new Brave window.
 
@@ -372,7 +349,6 @@ Do not claim these are fixed without a reproduction and regression test:
 - A destination prepared before capture/summary failure may remain open unused.
 - `npm run gate` omits the installed-extension smoke; that smoke covers controlled ChatGPT -> Claude, not all five sites.
 - Browser packaging uses one hybrid Chromium/Firefox manifest while automation is Brave-only.
-- Website tests have no visual regression coverage.
 - The checked-in ZIP is stale, as noted above.
 
 `backafter15day.md` has deeper evidence, but recheck it against current code. For example, its stale content-script-ID finding is now superseded by `platform-content-2026-09-08-claude-chat-orb-lift-v3`, and the smoke no longer requires catching an ephemeral service-worker DevTools target.
@@ -388,7 +364,6 @@ Latest Claude verification on 2026-09-09: 26 Claude-focused tests passed, includ
 | Summary prompt/routing/validation | `node --test test/summarize.test.js test/request-security.test.js`; model health: `node --test test/gemini-model-health.test.js` | `npm run eval` for quality/provider changes |
 | Telemetry/Supabase | `node --test test/telemetry.test.js` | `npm test` plus schema/grant review |
 | Latest Run analysis | `node --test test/analysis.test.js` | Open GitHub Pages analysis with extension loaded |
-| Website/privacy | `node --test test/license.test.js` | Manual desktop/mobile, keyboard, reduced-motion, link review |
 | Release/package | `npm test` and `npm run test:extension-smoke` | `npm run gate`, then ZIP hash comparison |
 
 - `npm test`: deterministic suite excluding the three `slow/release:` capture tests.
