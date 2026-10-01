@@ -192,15 +192,48 @@
     .nav-link {
       display: inline-flex;
       align-items: center;
-      min-height: 3.4rem;
-      padding: 0 0.45rem;
-      color: #555761 !important;
+      justify-content: center;
+      gap: 0.5rem;
+      min-height: 2.75rem;
+      padding: 0 0.25rem;
+      color: #242129;
+      font-size: 0.875rem;
       font-weight: 600;
-      transition: color 180ms ease;
+      white-space: nowrap;
+      transition: color 160ms ease;
     }
 
     .nav-link:hover {
-      color: var(--ink);
+      color: #242129;
+    }
+
+    .nav-link span {
+      position: relative;
+      padding-block: 0.25rem;
+    }
+
+    .nav-link span::after {
+      content: "";
+      position: absolute;
+      left: 0;
+      right: 0;
+      bottom: 0.05rem;
+      height: 1px;
+      background: currentColor;
+      transform: scaleX(0);
+      transform-origin: left;
+      transition: transform 180ms ease;
+    }
+
+    .nav-link:hover span::after,
+    .nav-link:focus-visible span::after {
+      transform: scaleX(1);
+    }
+
+    .nav-play-icon {
+      width: 20px;
+      height: 20px;
+      flex-shrink: 0;
     }
 
     .button {
@@ -464,6 +497,44 @@
     }
 
     .hero-actions .button-outline:hover { background: #484a50 !important; }
+
+    .hero-actions .button.button-install {
+      gap: 0;
+      min-height: 3.4rem;
+      padding: 0 0.25rem 0 0;
+      border-radius: 0.5rem;
+      border-color: #baadc9 !important;
+      background: rgba(255, 255, 255, 0.55) !important;
+      color: #332b3c !important;
+      font-family: "EB Garamond", Georgia, serif;
+      font-size: 1.5rem;
+      font-style: normal;
+      font-weight: 400;
+      line-height: 1.1;
+      letter-spacing: -0.03em;
+      box-shadow: none;
+    }
+
+    .hero-actions .button.button-install:hover {
+      border-color: #8c7ba0 !important;
+      background: #ffffff !important;
+      transform: none;
+      box-shadow: none;
+    }
+
+    .hero-actions .button.button-install:active {
+      background: #f1ecf5 !important;
+      box-shadow: none;
+    }
+
+    .hero-actions .install-label { padding: 0.65rem 1rem; }
+    .hero-actions .button-install .install-icon {
+      width: 2.7rem;
+      height: 1.9rem;
+      border-left: 1px solid #cfc4d9;
+      opacity: 1;
+    }
+    .hero-actions .button-install .install-icon svg { width: 1.1rem; height: 1.1rem; }
 
     @media (max-width: 680px) {
       .container.site-header { justify-content: space-between; flex-wrap: nowrap; }
@@ -1086,7 +1157,7 @@
       <span>Cap Context</span>
     </a>
     <nav class="nav-actions" aria-label="Primary navigation">
-      <a class="nav-link" href="#demo">Watch demo</a>
+      <a class="nav-link" href="#demo"><svg class="nav-play-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true" focusable="false"><circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="1.5"></circle><path d="m10 8 6 4-6 4V8Z" fill="currentColor" stroke="currentColor" stroke-width="0.8" stroke-linejoin="round"></path></svg><span>Watch demo</span></a>
       <a class="button button-install button-install-nav" href="https://chromewebstore.google.com/detail/cap-context/lpkaciijlhckkdhbgidbjfkldigghnjf" target="_blank" rel="noopener noreferrer" aria-label="Install Cap Context from the Chrome Web Store"><span>Install</span></a>
     </nav>
   </header>
@@ -1096,7 +1167,7 @@
       <h1 style="color: #17151f !important;">Switch AIs without <span class="re-explaining">re-explaining<span class="re-explaining-shimmer" aria-hidden="true">re-explaining</span></span> everything.</h1>
       <p>A browser extension to continue your chat from one AI to another.</p>
       <div class="hero-actions">
-        <a class="button button-dark button-install" href="https://chromewebstore.google.com/detail/cap-context/lpkaciijlhckkdhbgidbjfkldigghnjf" target="_blank" rel="noopener noreferrer"><span>Install extension</span><span class="install-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" focusable="false"><path d="M5 12h14M13 6l6 6-6 6"></path></svg></span></a>
+        <a class="button button-install" href="https://chromewebstore.google.com/detail/cap-context/lpkaciijlhckkdhbgidbjfkldigghnjf" target="_blank" rel="noopener noreferrer" aria-label="Install Cap Context from the Chrome Web Store"><span class="install-label">Install Cap Context</span><span class="install-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" focusable="false"><path d="M5 12h14M13 6l6 6-6 6"></path></svg></span></a>
         <a class="button button-outline" href="#demo">Watch the demo <span aria-hidden="true">▷</span></a>
       </div>
       <ul class="platform-list" aria-label="Supported AIs">
