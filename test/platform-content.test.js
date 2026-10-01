@@ -2685,6 +2685,58 @@ test("Gemini mobile inline mounting uses native trailing controls when the mode 
   assert.equal(toolbar.anchor, f.action);
 });
 
+test("Gemini inline skips a hidden duplicate trailing wrapper", () => {
+  const f = inlineProviderFixture("gemini");
+  const duplicate = new FakeElement({ attrs: { class: "trailing-actions-wrapper", "data-display": "none" } });
+  const hiddenModel = f.anchor.cloneNode(); hiddenModel.setAttribute("data-display", "none");
+  duplicate.appendChild(hiddenModel); f.surface.insertBefore(duplicate, f.row);
+  const hooks = loadPlatformContent([...Object.values(f), duplicate, hiddenModel], "gemini.google.com");
+  assert.ok(hooks.findProviderInlineToolbar(f.input)?.controls === f.controls);
+});
+
+test("Grok inline skips hidden attachment and model copies", () => {
+  const f = inlineProviderFixture("grok");
+  const attach = f.attach.cloneNode(), model = f.anchor.cloneNode();
+  attach.setAttribute("data-display", "none"); model.setAttribute("data-display", "none");
+  f.row.insertBefore(attach, f.attach); f.slot.insertBefore(model, f.anchor);
+  const hooks = loadPlatformContent([...Object.values(f), attach, model], "grok.com");
+  assert.ok(hooks.findProviderInlineToolbar(f.input)?.anchor === f.anchor);
+});
+
+test("DeepSeek inline skips duplicate file/send copies and tolerates a spacer before its file", () => {
+  const f = inlineProviderFixture("deepseek"), file = f.file.cloneNode(), send = f.action.cloneNode();
+  send.setAttribute("data-display", "none");
+  f.controls.insertBefore(file, f.anchor); f.controls.insertBefore(send, f.action);
+  const hooks = loadPlatformContent([...Object.values(f), file, send], "chat.deepseek.com");
+  assert.ok(hooks.findProviderInlineToolbar(f.input)?.anchor === f.anchor);
+  file.remove(); send.remove();
+  f.controls.insertBefore(new FakeElement(), f.file);
+  assert.ok(hooks.findProviderInlineToolbar(f.input)?.anchor === f.anchor, "a non-control spacer must not break the file/upload association");
+});
+
+test("DeepSeek inline supports a hidden upload with visible Send inside the verified file group", () => {
+  const f = inlineProviderFixture("deepseek"); f.anchor.setAttribute("data-display", "none");
+  const hooks = loadPlatformContent(Object.values(f), "chat.deepseek.com");
+  assert.ok(hooks.findProviderInlineToolbar(f.input)?.anchor === f.action);
+  const wrapper = new FakeElement(); f.controls.appendChild(wrapper); wrapper.appendChild(f.action);
+  assert.ok(hooks.findProviderInlineToolbar(f.input)?.anchor === wrapper, "the synchronous parent walk must resolve a wrapped Send to its direct slot child");
+  f.action.setAttribute("data-display", "none");
+  assert.equal(hooks.findProviderInlineToolbar(f.input), null);
+});
+
+test("Grok inline picker invalidates an editor-container-only remount", () => {
+  const f = inlineProviderFixture("grok"), hooks = loadPlatformContent(Object.values(f), "grok.com");
+  hooks.document.createElement = () => new FakeElement();
+  const bubble = new FakeElement({ tag: "button" });
+  assert.equal(hooks.mountProviderInlineButton(bubble, f.input), true);
+  const next = new FakeElement(); f.surface.appendChild(next); next.appendChild(f.editor); next.appendChild(f.dock);
+  assert.equal(hooks.invalidateInlinePicker("document-childlist"), true);
+  assert.equal(hooks.mountProviderInlineButton(bubble, f.input), true);
+  assert.equal(hooks.invalidateInlinePicker("document-childlist"), false);
+  assert.equal(f.editorContainer.hasAttribute("data-context-generator-provider-inline"), false);
+  assert.equal(next.getAttribute("data-context-generator-provider-inline"), "grok-space");
+});
+
 function inlineClaudeFixture() {
   const host = new FakeElement();
   const editorBranch = new FakeElement();

@@ -351,7 +351,7 @@ function providerPlacementFixture(platform) {
     ? `<div class="text-input-field">${editor}<div class="leading"><button>+</button></div><div class="trailing-actions-wrapper">${model}<div class="actions">${actions}</div></div></div>`
     : platform === "grok"
       ? `<div class="query-bar"><div class="native-grok-space">${editor}<div class="native-grok-dock"><div class="provider-row"><div><button data-testid="attach-button">+</button></div><div class="right-controls">${model}${actions}</div></div></div></div></div>`
-      : `<div class="deepseek-composer">${editor}<div class="provider-row">${modes}<div class="right-controls">${capsule}<div role="button" id="provider-anchor" class="ds-button">+</div><input type="file" hidden><div role="button" class="ds-button--circle">Send</div></div></div></div>`;
+      : `<div class="deepseek-composer">${editor}<div class="provider-row">${modes}<div class="right-controls">${capsule}<div role="button" id="provider-anchor" class="ds-button">+</div><input type="file" hidden><div class="send-wrapper"><div role="button" class="ds-button--circle">Send</div></div></div></div></div>`;
   return `<!doctype html><html><head><meta charset="utf-8"><title>${platform} inline smoke</title><style>
     *{box-sizing:border-box}body{margin:0;background:#151515;color:#eee;font:16px system-ui}
     form{position:fixed;bottom:40px;left:50%;transform:translateX(-50%);width:min(720px,calc(100vw - 32px));padding:12px;background:#242424;border-radius:20px}
@@ -361,6 +361,7 @@ function providerPlacementFixture(platform) {
     .editor{display:block;min-width:0}#provider-editor{display:block;outline:none;min-height:40px;max-height:180px;overflow:auto;white-space:pre-wrap;width:100%;resize:none;background:transparent;color:inherit;border:0;font:inherit}
     .provider-row,.right-controls,.trailing-actions-wrapper,.actions{display:flex;align-items:center;gap:4px}
     .provider-row{justify-content:space-between}.right-controls{margin-left:auto;flex-shrink:0}.modes{white-space:nowrap}
+    [hidden]{display:none!important}.hidden{display:none}
     .text-input-field{display:grid;grid-template-columns:40px minmax(0,1fr) auto;align-items:center;gap:8px}.text-input-field>.editor{grid-column:2;grid-row:1}.leading{grid-column:1;grid-row:1}.trailing-actions-wrapper{grid-column:3;grid-row:1}
     .native-grok-space{position:relative;padding-bottom:56px}.native-grok-dock{position:absolute;bottom:0;width:100%;padding:10px 0}.native-grok-dock>.provider-row{width:100%}
     .deepseek-composer{display:flex;flex-direction:column;gap:10px}
@@ -1000,6 +1001,74 @@ async function run() {
           await fs.promises.writeFile(path.join(PROVIDER_PLACEMENT_SCREENSHOT_DIR, `${platform}-inline.png`), Buffer.from(capture.data, "base64"));
         }
         await session.call("Emulation.clearDeviceMetricsOverride");
+        await session.evaluate(`(() => {
+          window.__providerPill=document.getElementById('context-generator-bubble');
+          window.__providerInteraction=['transform','filter','zIndex'].map(key=>window.__providerPill.style[key]);
+          window.__providerAnchor=document.querySelector('[data-test-id="bard-mode-menu-button"],#model-select-trigger,#provider-anchor');
+          const extras=[];
+          if('${platform}'==='gemini'){
+            const live=document.querySelector('.trailing-actions-wrapper'),copy=live.cloneNode(true);
+            copy.querySelector('#context-generator-bubble')?.remove();
+            [copy,...copy.querySelectorAll('[data-context-generator-provider-inline]')].forEach(n=>n.removeAttribute('data-context-generator-provider-inline'));
+            copy.style.display='none';live.before(copy);extras.push(copy);
+          }else if('${platform}'==='grok'){
+            for(const live of [document.querySelector('[data-testid="attach-button"]'),window.__providerAnchor]){
+              const copy=live.cloneNode(true);copy.style.display='none';live.before(copy);extras.push(copy);
+            }
+          }else{
+            const file=document.querySelector('input[type="file"]'),copy=file.cloneNode(true),send=document.querySelector('.ds-button--circle'),hidden=send.cloneNode(true),spacer=document.createElement('span');
+            hidden.style.display='none';send.before(hidden);window.__providerAnchor.before(copy);file.before(spacer);extras.push(copy,hidden,spacer);
+          }
+          window.__providerExtras=extras;
+          return new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)));
+        })()`);
+        assert.equal(await session.evaluate(`getComputedStyle(window.__providerPill).position==='static'
+          && window.__providerPill.nextElementSibling===window.__providerAnchor`),true,`${platform} duplicate controls must not force fallback.`);
+        await session.evaluate(`window.__providerExtras.forEach(n=>n.remove())`);
+        await session.evaluate(`(() => {
+          window.__providerHiddenGroup=document.querySelector('[data-context-generator-provider-inline="controls"]');
+          window.__providerHiddenGroup.style.display='none';
+          return new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)));
+        })()`);
+        assert.equal(await session.evaluate(`getComputedStyle(window.__providerHiddenGroup).display==='none'`),true,`${platform} flow CSS must preserve native hiding.`);
+        await session.evaluate(`window.__providerHiddenGroup.style.display=''`);
+        await waitFor(()=>session.evaluate(`getComputedStyle(window.__providerPill).position==='static'
+          && window.__providerPill.getBoundingClientRect().width===32`),`${platform} native hidden-group recovery`);
+        // Keep controls visible while changing only the inline identification.
+        await session.evaluate(`(() => {
+          if('${platform}'==='gemini')document.querySelector('.trailing-actions-wrapper').classList.remove('trailing-actions-wrapper');
+          else if('${platform}'==='grok')document.querySelector('.query-bar').classList.remove('query-bar');
+          else {window.__providerFile=document.querySelector('input[type="file"]');window.__providerFile.remove();}
+        })()`);
+        await waitFor(()=>session.evaluate(`getComputedStyle(window.__providerPill).position==='absolute'`),`${platform} legacy backup`);
+        await session.evaluate(`(() => {
+          if('${platform}'==='gemini')window.__providerHiddenGroup.classList.add('trailing-actions-wrapper');
+          else if('${platform}'==='grok')document.querySelector('.native-grok-space').parentElement.classList.add('query-bar');
+          else window.__providerAnchor.after(window.__providerFile);
+        })()`);
+        await waitFor(()=>session.evaluate(`getComputedStyle(window.__providerPill).position==='static'
+          && window.__providerPill.style.left==='auto' && window.__providerPill.style.top==='auto'
+          && window.__providerPill.style.width==='32px'`),`${platform} legacy-to-inline style cleanup`);
+        assert.deepEqual(await session.evaluate(`['transform','filter','zIndex'].map(key=>window.__providerPill.style[key])`),
+          await session.evaluate(`window.__providerInteraction`),`${platform} placement switching must preserve shared interaction styles.`);
+        if(platform==='deepseek'){
+          await session.evaluate(`window.__providerAnchor.style.display='none'`);
+          await waitFor(()=>session.evaluate(`window.__providerPill.nextElementSibling===document.querySelector('.send-wrapper')
+            && getComputedStyle(window.__providerPill).position==='static'`),"DeepSeek validated Send-only inline state");
+          await session.evaluate(`window.__providerAnchor.style.display=''`);
+          await waitFor(()=>session.evaluate(`window.__providerPill.nextElementSibling===window.__providerAnchor`),"DeepSeek upload recovery");
+        }
+        if(platform==='grok'){
+          await session.evaluate(`window.__providerPill.click()`);
+          await waitFor(()=>session.evaluate(`getComputedStyle(document.getElementById('context-generator-destination-sheet')).opacity==='1'`),"Grok picker before editor-container remount");
+          await session.evaluate(`(() => {
+            const old=document.querySelector('.native-grok-space'),next=old.cloneNode(false);
+            next.removeAttribute('data-context-generator-provider-inline');old.replaceWith(next);
+            while(old.firstChild)next.appendChild(old.firstChild);
+          })()`);
+          await waitFor(()=>session.evaluate(`document.getElementById('context-generator-destination-sheet').style.display==='none'
+            && document.querySelector('.native-grok-space').getAttribute('data-context-generator-provider-inline')==='grok-space'`),"Grok picker invalidation and marker recovery");
+        }
         await session.evaluate(`(() => {window.__providerPill=document.getElementById('context-generator-bubble');
           const form=document.querySelector('form'),next=form.cloneNode(true);next.querySelector('#context-generator-bubble').remove();form.replaceWith(next);})()`);
         await waitFor(() => session.evaluate(`document.getElementById('context-generator-bubble')===window.__providerPill

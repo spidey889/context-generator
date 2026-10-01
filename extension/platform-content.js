@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-02-chatgpt-inline-audit-v88";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-02-provider-inline-audit-v89";
   const ownedUiStyleSheets = new Map();
   const CLAUDE_INLINE_STYLE_ID = "context-generator-claude-inline-styles";
   const CLAUDE_INLINE_MARKER = "data-context-generator-claude-inline";
@@ -3917,7 +3917,8 @@
     let surface, row, controls, slot, anchor, dock, editorContainer;
     if (currentPlatform.id === "gemini") {
       surface = input.closest(".text-input-field");
-      controls = surface?.querySelector(".trailing-actions-wrapper");
+      controls = surface && Array.from(surface.querySelectorAll(".trailing-actions-wrapper"))
+        .find((wrapper) => wrapper.closest(".text-input-field") === surface && !wrapper.contains(input) && nativeControls(wrapper).length);
       if (!controls || !input.closest("rich-textarea") || controls.contains(input)) return null;
       const buttons = nativeControls(controls);
       const model = buttons.find((button) => button.getAttribute("data-test-id") === "bard-mode-menu-button");
@@ -3929,9 +3930,9 @@
     } else if (currentPlatform.id === "grok") {
       surface = input.closest(".query-bar");
       const editor = input.closest("[data-testid='chat-input']");
-      const attach = surface?.querySelector("[data-testid='attach-button']");
-      const model = surface?.querySelector("#model-select-trigger");
-      const buttons = surface ? nativeControls(surface) : [];
+      const buttons = surface ? nativeControls(surface).filter((button) => button.closest(".query-bar") === surface) : [];
+      const attach = buttons.find((button) => button.getAttribute("data-testid") === "attach-button");
+      const model = buttons.find((button) => button.id === "model-select-trigger");
       if (!editor || !surface?.contains(editor) || !buttons.includes(attach) || !buttons.includes(model)) return null;
       slot = model.closest("[data-query-bar-mode-select]");
       if (!slot || slot.parentElement?.contains(input)) return null;
@@ -3948,22 +3949,29 @@
       // upload control and circle action, in a sibling row of this textarea.
       if (!input.matches("textarea")) return null;
       for (let node = input.parentElement; node && node !== document.body; node = node.parentElement) {
-        const file = node.querySelector("[type='file']");
-        const upload = file?.previousElementSibling;
-        const group = file?.parentElement;
-        const send = group?.querySelector(".ds-button--circle");
-        if (!upload?.matches("[role='button']") || !upload.matches(".ds-button") ||
-            !isVisible(upload) || !send?.matches("[role='button']") || !isVisible(send) ||
-            isComposerPopupControl(upload, input) || isComposerPopupControl(send, input)) continue;
         const branches = Array.from(node.children);
         const editor = branches.find((branch) => branch.contains(input));
-        const toolbar = branches.find((branch) => branch !== editor && branch.contains(group));
-        if (!toolbar) continue;
-        surface = node; row = toolbar; controls = group; slot = group; anchor = upload;
-        break;
+        for (const file of node.querySelectorAll("[type='file']")) {
+          const group = file.parentElement;
+          // Keep the native file/upload association, allowing intervening
+          // non-control siblings and skipping retained file/Send copies.
+          let upload = file.previousElementSibling;
+          while (upload && (!upload.matches("[role='button']") || !upload.matches(".ds-button") || upload.matches(".ds-button--circle"))) {
+            upload = upload.previousElementSibling;
+          }
+          const send = nativeControls(group).find((button) => button.matches(".ds-button--circle"));
+          if (!upload || !send || isComposerPopupControl(upload, input)) continue;
+          const toolbar = branches.find((branch) => branch !== editor && branch.contains(group));
+          if (!toolbar) continue;
+          surface = node; row = toolbar; controls = group; slot = group;
+          anchor = isVisible(upload) ? upload : send;
+          break;
+        }
+        if (surface) break;
       }
     } else return null;
     if (!surface || !row || !controls || !slot || !anchor) return null;
+    // Each adapter supplies an ancestor slot; this native DOM walk is synchronous.
     while (anchor.parentElement !== slot) anchor = anchor.parentElement;
     const rect = surface.getBoundingClientRect();
     if (!isVisible(row) || !isVisible(slot) || isComposerPopupControl(slot, input) ||
@@ -4000,8 +4008,8 @@
       style.className = "darkreader";
       style.dataset.contextGeneratorOwned = "true";
       style.textContent = `
-        [${PROVIDER_INLINE_MARKER}="slot"] { display:inline-flex!important; align-items:center!important; min-width:0!important; max-width:100%!important; }
-        [${PROVIDER_INLINE_MARKER}="controls"] { display:flex!important; align-items:center!important; flex-wrap:wrap!important; min-width:0!important; max-width:100%!important; height:auto!important; }
+        [${PROVIDER_INLINE_MARKER}="slot"]:not([hidden]):not(.hidden) { display:inline-flex; align-items:center!important; min-width:0!important; max-width:100%!important; }
+        [${PROVIDER_INLINE_MARKER}="controls"]:not([hidden]):not(.hidden) { display:flex; align-items:center!important; flex-wrap:wrap!important; min-width:0!important; max-width:100%!important; height:auto!important; }
         [${PROVIDER_INLINE_MARKER}="row"] { flex-wrap:wrap!important; align-items:center!important; justify-content:space-between!important; gap:6px!important; height:auto!important; }
         [${PROVIDER_INLINE_MARKER}="grok-dock"] { position:static!important; inset:auto!important; }
         [${PROVIDER_INLINE_MARKER}="grok-space"] { padding-bottom:0!important; }
@@ -8873,7 +8881,7 @@
       mount.body !== toolbar.body ||
       mount.right !== toolbar.right || mount.footer !== toolbar.footer || mount.controls !== toolbar.controls ||
       mount.slot !== toolbar.slot || mount.anchor !== toolbar.anchor ||
-      mount.surface !== toolbar.surface || mount.row !== toolbar.row || mount.dock !== toolbar.dock ||
+      mount.surface !== toolbar.surface || mount.row !== toolbar.row || mount.dock !== toolbar.dock || mount.editorContainer !== toolbar.editorContainer ||
       (isClaude && (mount.host !== toolbar.host || mount.editorBranch !== toolbar.editorBranch || mount.actions !== toolbar.actions)) ||
       mount.pathname !== window.location.pathname ||
       normalizeFloatingButtonUpdateReason(reason).includes("resize");
