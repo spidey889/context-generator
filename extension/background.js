@@ -53,6 +53,7 @@ const activeTransferSourceTabs = new Map();
 const summaryProofs = new Map();
 let telemetryInstallIdPromise = null;
 let telemetryWorkChain = Promise.resolve();
+let telemetryDeliveryChain = Promise.resolve();
 const DESTINATIONS = {
   claude: {
     name: "Claude",
@@ -174,7 +175,12 @@ function getRawTranscriptExpiryEpoch(stats) {
 
 function initializeTelemetryDelivery() {
   getOrCreateTelemetryInstallId().catch(() => {});
-  enqueueTelemetryWork(() => flushTelemetryOutbox()).catch(() => {});
+  // Network waits must never hold the queue used to persist new events.
+  telemetryDeliveryChain = telemetryDeliveryChain.catch(() => {})
+    .then(() => flushTelemetryOutbox())
+    .catch(() => {
+      chrome.alarms.create(TELEMETRY_RETRY_ALARM, { delayInMinutes: TELEMETRY_RETRY_DELAY_MINUTES });
+    });
 }
 
 function enqueueTelemetryWork(work) {
@@ -209,7 +215,7 @@ async function recordTransferTelemetry(event, sourceTabId = null) {
     };
 
     await appendTelemetryOutbox(payload);
-    await flushTelemetryOutbox();
+    initializeTelemetryDelivery();
   });
 
   if (sanitizedEvent.status === "succeeded" || sanitizedEvent.status === "failed") {
@@ -323,12 +329,15 @@ async function appendTelemetryOutbox(payload) {
 
 async function flushTelemetryOutbox() {
   while (true) {
-    const outbox = await readTelemetryOutbox();
+    const outbox = await enqueueTelemetryWork(() => readTelemetryOutbox());
     const next = outbox[0];
 
     if (!next?.deliveryId || !next?.payload) {
       if (outbox.length) {
-        await chrome.storage.local.set({ [TELEMETRY_OUTBOX_STORAGE_KEY]: outbox.slice(1) });
+        await enqueueTelemetryWork(async () => {
+          const currentOutbox = await readTelemetryOutbox();
+          await chrome.storage.local.set({ [TELEMETRY_OUTBOX_STORAGE_KEY]: currentOutbox.slice(1) });
+        });
         continue;
       }
       await chrome.alarms.clear(TELEMETRY_RETRY_ALARM);
@@ -340,9 +349,11 @@ async function flushTelemetryOutbox() {
       return;
     }
 
-    const currentOutbox = await readTelemetryOutbox();
-    await chrome.storage.local.set({
-      [TELEMETRY_OUTBOX_STORAGE_KEY]: currentOutbox.filter((entry) => entry?.deliveryId !== next.deliveryId)
+    await enqueueTelemetryWork(async () => {
+      const currentOutbox = await readTelemetryOutbox();
+      await chrome.storage.local.set({
+        [TELEMETRY_OUTBOX_STORAGE_KEY]: currentOutbox.filter((entry) => entry?.deliveryId !== next.deliveryId)
+      });
     });
   }
 }
@@ -585,7 +596,7 @@ async function fetchSummaryFromBackend(conversationText, transferId = null) {
           last_stage: "summary_completed",
           summary_proof: data.summaryProof
         });
-        await flushTelemetryOutbox();
+        initializeTelemetryDelivery();
       }).catch(() => {});
     }
 

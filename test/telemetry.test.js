@@ -84,7 +84,7 @@ function loadTelemetryBackground(fetchImpl, initialStorage = {}, manifestVersion
     storage,
     listeners,
     async sendTelemetry(event, sourceTabId = 7) {
-      return new Promise((resolve, reject) => {
+      const result = await new Promise((resolve, reject) => {
         const keepsChannelOpen = listeners.message(
           { type: "RECORD_TRANSFER_TELEMETRY", event },
           { tab: { id: sourceTabId } },
@@ -92,9 +92,11 @@ function loadTelemetryBackground(fetchImpl, initialStorage = {}, manifestVersion
         );
         if (keepsChannelOpen !== true) reject(new Error("telemetry listener did not keep the channel open"));
       });
+      await this.drain();
+      return result;
     },
     drain() {
-      return new vm.Script("telemetryWorkChain").runInContext(sandbox);
+      return new vm.Script("(async () => { await telemetryWorkChain; await telemetryDeliveryChain; })()").runInContext(sandbox);
     }
   };
 }
