@@ -1,5 +1,7 @@
 # Changelog
 
+- 2026-10-01: Prevented ChatGPT intelligence/effort popup controls from moving the orb by excluding menu/slider buttons from composer anchors and recognizing the real thinking/intelligence trigger. Advanced the content-script identity to v75. Tests and browser checks were skipped at the owner's request.
+
 - 2026-10-01: Separated GitHub code checks from the live production-summary monitor after recurring runs passed deterministic/slow tests but failed provider fact-retention checks. Added checks for `codex/**` pushes and pull requests, named test steps and cancellation of superseded code runs. Kept the daily/manual production check and its existing quality thresholds, with serialized runs and enough time for bounded retries. Fixed evaluation latency to include the full heartbeat-streamed response and added a 320-second body deadline; malformed JSON now follows service-error retry handling. All 392 deterministic tests, three slow capture tests and official actionlint validation passed. Local `npm run gate` retains release coverage. Pages/Vercel deployment behavior is unchanged; scheduled workflow changes require `master`.
 
 - 2026-10-01 (local preview, not pushed): Owner rejected moving errors to the picker/handoff position. Restored the fixed bottom-right notification, horizontal entrance from the right and leftward fading dismissal with the existing 260 ms timing. Kept the empty-chat preflight, cancellation of stale timers and reduced-motion support. Updated Brave smoke to require the bottom-right position and horizontal motion.

@@ -297,7 +297,7 @@ The protected `users` table creates a row on an install's first successful trans
 - Claude composer surfaces must remain horizontally close to the editor. `CLAUDE_MAX_COMPOSER_HORIZONTAL_PADDING` is 160 px across the combined left and right padding. Reject page-sized ancestors beyond this bound so phantom width cannot push mic/voice controls and the orb outside the composer or make placement oscillate during hydration. Apply this check to both retained and newly scored surfaces while still allowing tall real composers.
 
 - Claude placement evidence and discarded approaches are in `docs/debugging/claude-last-known-dom.md` and `docs/debugging/claude-placement-logs.md`.
-- ChatGPT: fixed left of the paid reasoning selector when present; otherwise fixed left of the complete visible right-side control row so free-plan mic/voice controls stay unobstructed. Retains its last usable surface and requires focused paste.
+- ChatGPT: fixed left of the paid reasoning selector when present; otherwise fixed left of the complete visible right-side control row so free-plan mic/voice controls stay unobstructed. Intelligence/effort menu options and slider controls are excluded from placement anchors, including popups mounted inside the composer form; the actual thinking/intelligence trigger remains eligible. Retains its last usable surface and requires focused paste.
 - Gemini: left of the Pro/Flash selector; retains the outer composer during large-paste expansion.
 - Grok: beside whichever visible Fast, Build, Auto, Expert, Heavy, or thinking-mode selector is active; retains the outer composer and requires focused paste.
 - DeepSeek: near attachment/input controls; retains the outer composer during expansion.
@@ -318,7 +318,7 @@ Native menus and popovers may temporarily mark the background application `aria-
 - Model/profile routing: provider constants/budgets, prompts, Latest Run labels, evaluation expectations, this file, `memory.md`, `extension/README.md`.
 - Telemetry fields/stages/failures: source/background sanitizers, Vercel validator, Supabase validator, SQL constraints/functions, tests. Free-form telemetry fields are forbidden.
 - Latest Run receipt: producer, background expiry, bridge, analysis renderer, analysis tests.
-- Content-script changes must advance `CONTENT_SCRIPT_LOAD_ID` for open-tab replacement and retain stale-node/reservation cleanup. Local error-flow preview value: `platform-content-2026-10-01-restore-error-toast-v74`.
+- Content-script changes must advance `CONTENT_SCRIPT_LOAD_ID` for open-tab replacement and retain stale-node/reservation cleanup. Current value: `platform-content-2026-10-01-chatgpt-popup-anchor-v75`.
 - Extension release: bump `extension/manifest.json`, rebuild the ZIP with `manifest.json` at its root, hash-compare every file against `extension/`, then test the unpacked folder in a new Brave window.
 
 ## Known Current Risks
