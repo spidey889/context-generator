@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-01-inline-backups-v84";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-01-claude-inline-audit-v85";
   const ownedUiStyleSheets = new Map();
   const CLAUDE_INLINE_STYLE_ID = "context-generator-claude-inline-styles";
   const CLAUDE_INLINE_MARKER = "data-context-generator-claude-inline";
@@ -766,6 +766,7 @@
       mountChatGptInlineButton,
       releaseChatGptInlineMount,
       mountInlineOrLegacyBackup,
+      invalidateInlinePicker,
       findProviderInlineToolbar,
       mountProviderInlineButton,
       releaseProviderInlineMount,
@@ -3692,25 +3693,31 @@
 
   function findClaudeInlineToolbar(input) {
     if (!input?.isConnected || !isVisible(input)) return null;
+    const composer = input.closest("[data-cds='ChatComposer']");
+    const ownsControl = (node) => !isComposerPopupControl(node, input) &&
+      (!composer || node.closest("[data-cds='ChatComposer']") === composer);
+    // Native transitions can retain hidden copies; select a visible owned
+    // control before deciding that inline mounting is unavailable.
+    const findControl = (root, selector) => root && Array.from(root.querySelectorAll(selector))
+      .find((node) => node.isConnected && isVisible(node) && ownsControl(node));
     // Claude's named actions container must be a sibling of this editor's
     // branch. Never select a page-wide flex row, another composer, or a popup.
     let host = input.parentElement;
     for (let depth = 0; host && host !== document.body && depth < 10; depth++, host = host.parentElement) {
+      if (composer && !composer.contains(host)) break;
       const actions = Array.from(host.children).find((node) => node.getAttribute("data-cds") === "ChatComposerActions");
       if (!actions || actions.contains(input) || isComposerPopupControl(actions, input)) continue;
       const editorBranch = Array.from(host.children).find((node) => node.contains(input));
-      const attach = actions.querySelector("[data-testid='chat-input-attach']");
+      const attach = findControl(actions, "[data-testid='chat-input-attach']");
       // Compact existing chats move the model into the composer's separate
       // chin. Accept that variant only within this editor's named composer.
-      const composer = input.closest("[data-cds='ChatComposer']");
-      const model = actions.querySelector("[data-testid='model-selector-dropdown']") ||
-        composer?.querySelector("[data-testid='model-selector-dropdown']");
-      if (!editorBranch || !attach || !model || !isVisible(attach) || !isVisible(model)) continue;
-      if (!actions.contains(model) && model.closest("[data-cds='ChatComposer']") !== composer) continue;
-      if (isComposerPopupControl(attach, input) || isComposerPopupControl(model, input)) continue;
+      const model = findControl(actions, "[data-testid='model-selector-dropdown']") ||
+        findControl(composer, "[data-testid='model-selector-dropdown']");
+      if (!editorBranch || !attach || !model) continue;
       const rows = Array.from(actions.children);
       const left = rows.find((row) => row.contains(attach) && getComputedStyle(row).display === "flex");
-      const send = actions.querySelector("[data-testid='chat-input-send']");
+      // The hidden Send branch still identifies the compact row in Voice mode.
+      const send = Array.from(actions.querySelectorAll("[data-testid='chat-input-send']")).find(ownsControl);
       const right = rows.find((row) => (row.contains(model) || (send && row.contains(send))) && getComputedStyle(row).display === "flex");
       const rect = host.getBoundingClientRect();
       if (!left || !right || left === right || rect.width < 180 || rect.width > Math.min(1320, window.innerWidth)) continue;
@@ -3753,6 +3760,7 @@
     const { editorBranch, actions, left, right } = claudeInlineMount;
     [editorBranch, actions, left, right].forEach((node) => node.removeAttribute(CLAUDE_INLINE_MARKER));
     claudeInlineMount = null;
+    stopProviderControlMutationMonitoring();
   }
 
   function mountClaudeInlineButton(bubble, input) {
@@ -3780,6 +3788,8 @@
       position: "static", left: "auto", right: "auto", top: "auto", bottom: "auto",
       margin: "0", flex: "0 0 32px", alignSelf: "center", display: "flex", visibility: "visible"
     });
+    // Attribute-only mode/visibility changes emit no document child-list event.
+    syncProviderControlMutationMonitoring(input, input.closest("[data-cds='ChatComposer']") || toolbar.host);
     return true;
   }
 
@@ -8848,6 +8858,7 @@
       mount.right !== toolbar.right || mount.footer !== toolbar.footer || mount.controls !== toolbar.controls ||
       mount.slot !== toolbar.slot || mount.anchor !== toolbar.anchor ||
       mount.surface !== toolbar.surface || mount.row !== toolbar.row || mount.dock !== toolbar.dock ||
+      (isClaude && (mount.host !== toolbar.host || mount.editorBranch !== toolbar.editorBranch || mount.actions !== toolbar.actions)) ||
       mount.pathname !== window.location.pathname ||
       normalizeFloatingButtonUpdateReason(reason).includes("resize");
     if (changed) {

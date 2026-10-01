@@ -2651,6 +2651,57 @@ test("Claude inline discovery excludes popup controls and a different editor's t
   assert.equal(hooks.findClaudeInlineToolbar(fixture.input), null);
 });
 
+test("Claude inline discovery skips hidden and popup copies of native controls", () => {
+  const f = inlineClaudeFixture();
+  const hiddenModel = new FakeElement({ tag: "button", attrs: { "data-testid": "model-selector-dropdown", "data-visibility": "hidden" } });
+  const menu = new FakeElement({ attrs: { role: "menu" } });
+  const popupAttach = new FakeElement({ tag: "button", attrs: { "data-testid": "chat-input-attach" } });
+  f.right.insertBefore(hiddenModel, f.model);
+  f.left.insertBefore(menu, f.attach); menu.appendChild(popupAttach);
+  const hooks = loadPlatformContent([...Object.values(f), hiddenModel, menu, popupAttach], "claude.ai");
+  assert.ok(hooks.findClaudeInlineToolbar(f.input)?.left === f.left);
+});
+
+test("Claude inline discovery stays within the active named composer", () => {
+  const f = inlineClaudeFixture();
+  const composer = new FakeElement({ attrs: { "data-cds": "ChatComposer" } });
+  f.host.appendChild(composer); composer.appendChild(f.editorBranch);
+  const hooks = loadPlatformContent([...Object.values(f), composer], "claude.ai");
+  assert.ok(hooks.findClaudeInlineToolbar(f.input) === null, "ancestor actions outside this named composer must not be claimed");
+});
+
+test("Claude inline picker invalidates editor and actions wrapper replacements", () => {
+  const f = inlineClaudeFixture();
+  const hooks = loadPlatformContent(Object.values(f), "claude.ai");
+  hooks.document.createElement = () => new FakeElement();
+  const bubble = new FakeElement({ tag: "button" });
+  assert.equal(hooks.mountClaudeInlineButton(bubble, f.input), true);
+  assert.equal(hooks.invalidateInlinePicker("document-childlist"), false);
+  const editor = new FakeElement();
+  f.host.appendChild(editor); editor.appendChild(f.input);
+  assert.equal(hooks.invalidateInlinePicker("document-childlist"), true, "same input in a replaced editor branch must close the picker");
+  assert.equal(hooks.mountClaudeInlineButton(bubble, f.input), true);
+  const actions = new FakeElement({ attrs: { "data-cds": "ChatComposerActions" } });
+  f.actions.removeAttribute("data-cds"); f.host.appendChild(actions);
+  actions.appendChild(f.left); actions.appendChild(f.right);
+  assert.equal(hooks.invalidateInlinePicker("document-childlist"), true, "same rows in a replaced actions container must close the picker");
+});
+
+test("Claude inline mounting monitors native attribute changes without reacting to editor text", () => {
+  const f = inlineClaudeFixture();
+  const hooks = loadPlatformContent(Object.values(f), "claude.ai");
+  hooks.document.createElement = () => new FakeElement();
+  assert.equal(hooks.mountClaudeInlineButton(new FakeElement({ tag: "button" }), f.input), true);
+  const observer = hooks.mutationObservers.find(item => item.observed.some(target => target.element === f.host));
+  assert.ok(observer, "inline mounting must watch attribute-only native toolbar changes");
+  observer.callback([{ type: "characterData", target: { parentElement: f.input }, addedNodes: [], removedNodes: [] }]);
+  assert.equal(hooks.animationFrameCallbacks.length, 0);
+  observer.callback([{ type: "attributes", attributeName: "style", target: f.model, addedNodes: [], removedNodes: [] }]);
+  assert.equal(hooks.animationFrameCallbacks.length, 1);
+  hooks.releaseClaudeInlineMount();
+  assert.equal(observer.observed.length, 0);
+});
+
 test("Claude inline mounting reuses its 32px slot after an editor remount and restores native markers", () => {
   const first = inlineClaudeFixture();
   const next = inlineClaudeFixture();
@@ -2718,7 +2769,7 @@ for (const platform of ["claude", "chatgpt"]) {
     assert.equal(bubble.style.position, "static");
     assert.equal(bubble.style.width, "32px");
     assert.equal(hooks.resizeObservers.some(observer => observer.observed.length), false);
-    assert.equal(hooks.mutationObservers.some(observer => observer.observed.length), false);
+    assert.equal(hooks.mutationObservers.some(observer => observer.observed.some(target => target.element === form)), false);
     assert.equal(model.hasAttribute("data-context-generator-original-translate"), false);
     assert.equal(voice.hasAttribute("data-context-generator-original-translate"), false);
     assert.equal(form.hasAttribute("data-context-generator-original-position"), false);

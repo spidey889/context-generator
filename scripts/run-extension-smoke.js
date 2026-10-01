@@ -316,7 +316,7 @@ function claudePlacementFixture() {
 </head>
 <body>
   <div id="claude-page">
-    <form id="claude-composer">
+    <form id="claude-composer" data-cds="ChatComposer">
       <div id="claude-host">
         <div class="editor-branch"><div aria-label="Write your prompt to Claude" contenteditable="true" role="textbox"></div></div>
         <div data-cds="ChatComposerActions" style="display:contents">
@@ -325,7 +325,7 @@ function claudePlacementFixture() {
             <button id="model" type="button" data-testid="model-selector-dropdown" aria-label="Model selector">Sonnet</button>
             <div id="voice-switch">
               <div class="voice-state"><button id="dictate" type="button" aria-label="Dictate"></button><button id="voice" type="button" aria-label="Voice input"></button></div>
-              <div class="send-state"><button id="send" type="button" aria-label="Send message"></button></div>
+              <div class="send-state"><button id="send" type="button" data-testid="chat-input-send" aria-label="Send message"></button></div>
             </div>
           </div>
         </div>
@@ -1014,6 +1014,50 @@ async function run() {
     }
     await claudePlacementSession.call("Emulation.clearDeviceMetricsOverride");
     process.stdout.write("✓ Claude's 32px inline slot survives Voice/Send and 760/390/320px layouts without model overlap or native translation.\n");
+
+    await claudePlacementSession.evaluate(`(() => {
+      window.__claudeAuditBubble = document.getElementById("context-generator-bubble");
+      const model = document.getElementById("model"), hidden = model.cloneNode(true);
+      hidden.id = "hidden-model"; hidden.style.display = "none"; model.before(hidden);
+      const menu = document.createElement("div"); menu.id = "decoy-menu"; menu.setAttribute("role", "menu");
+      const attach = document.querySelector("[data-testid='chat-input-attach']");
+      menu.appendChild(attach.cloneNode(true)); attach.before(menu);
+    })()`);
+    await waitFor(() => claudePlacementSession.evaluate(`(() => {
+      const b = document.getElementById("context-generator-bubble");
+      return b === window.__claudeAuditBubble && getComputedStyle(b).position === "static"
+        && b.parentElement.getAttribute("data-context-generator-claude-inline") === "left";
+    })()`), "Claude inline ownership with hidden/popup control copies");
+    await claudePlacementSession.evaluate(`(() => {
+      document.getElementById("hidden-model").remove(); document.getElementById("decoy-menu").remove();
+      return new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    })()`);
+    await claudePlacementSession.evaluate(`document.getElementById("model").style.display = "none"`);
+    await waitFor(() => claudePlacementSession.evaluate(`getComputedStyle(document.getElementById("context-generator-bubble")).position === "fixed"`), "Claude attribute-only fallback");
+    await claudePlacementSession.evaluate(`document.getElementById("model").style.display = ""`);
+    await waitFor(() => claudePlacementSession.evaluate(`getComputedStyle(document.getElementById("context-generator-bubble")).position === "static"
+      && document.querySelectorAll("[data-context-generator-original-translate]").length === 0`), "Claude attribute-only inline recovery");
+    for (const wrapper of ["editor", "actions"]) {
+      await claudePlacementSession.evaluate(`document.getElementById("context-generator-bubble").click()`);
+      await waitFor(() => claudePlacementSession.evaluate(`getComputedStyle(document.getElementById("context-generator-destination-sheet")).opacity === "1"`), "Claude picker before wrapper replacement");
+      await claudePlacementSession.evaluate(`(() => {
+        const old = document.querySelector('[data-context-generator-claude-inline="${wrapper}"]');
+        const next = old.cloneNode(false); next.removeAttribute("data-context-generator-claude-inline");
+        old.replaceWith(next); while (old.firstChild) next.appendChild(old.firstChild);
+      })()`);
+      await waitFor(() => claudePlacementSession.evaluate(`document.getElementById("context-generator-destination-sheet").style.display === "none"
+        && document.getElementById("context-generator-bubble") === window.__claudeAuditBubble
+        && getComputedStyle(window.__claudeAuditBubble).position === "static"`), "Claude picker invalidation and remount");
+    }
+    await claudePlacementSession.evaluate(`(() => {
+      const chin = document.createElement("div"); chin.setAttribute("data-cds", "ChatComposerChin");
+      document.getElementById("claude-composer").appendChild(chin); chin.appendChild(document.getElementById("model"));
+      document.querySelector("[contenteditable]").textContent = "";
+      document.getElementById("claude-composer").classList.remove("has-text");
+    })()`);
+    await waitFor(() => claudePlacementSession.evaluate(`getComputedStyle(document.getElementById("context-generator-bubble")).position === "static"
+      && getComputedStyle(document.getElementById("send")).visibility === "hidden"`), "Claude compact empty Voice mode");
+    process.stdout.write("✓ Claude inline handles hidden/popup duplicates, attribute-only fallback/recovery, picker wrapper remounts and compact Voice mode.\n");
 
     }
 
