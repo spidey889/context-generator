@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-01-claude-inline-experiment-v77";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-01-claude-inline-experiment-v78";
   const ownedUiStyleSheets = new Map();
   const CLAUDE_INLINE_STYLE_ID = "context-generator-claude-inline-styles";
   const CLAUDE_INLINE_MARKER = "data-context-generator-claude-inline";
@@ -3695,12 +3695,17 @@
       if (!actions || actions.contains(input) || isComposerPopupControl(actions, input)) continue;
       const editorBranch = Array.from(host.children).find((node) => node.contains(input));
       const attach = actions.querySelector("[data-testid='chat-input-attach']");
-      const model = actions.querySelector("[data-testid='model-selector-dropdown']");
+      // Compact existing chats move the model into the composer's separate
+      // chin. Accept that variant only within this editor's named composer.
+      const composer = input.closest("[data-cds='ChatComposer']");
+      const model = actions.querySelector("[data-testid='model-selector-dropdown']") ||
+        composer?.querySelector("[data-testid='model-selector-dropdown']");
       if (!editorBranch || !attach || !model || !isVisible(attach) || !isVisible(model)) continue;
       if (isComposerPopupControl(attach, input) || isComposerPopupControl(model, input)) continue;
       const rows = Array.from(actions.children);
       const left = rows.find((row) => row.contains(attach) && getComputedStyle(row).display === "flex");
-      const right = rows.find((row) => row.contains(model) && getComputedStyle(row).display === "flex");
+      const send = actions.querySelector("[data-testid='chat-input-send']");
+      const right = rows.find((row) => (row.contains(model) || (send && row.contains(send))) && getComputedStyle(row).display === "flex");
       const rect = host.getBoundingClientRect();
       if (!left || !right || left === right || rect.width < 180 || rect.width > Math.min(1320, window.innerWidth)) continue;
       return { input, host, editorBranch, actions, left, right };
@@ -3720,6 +3725,7 @@
     style.textContent = `
       [${CLAUDE_INLINE_MARKER}="editor"] {
         padding-left:0!important; padding-right:0!important; padding-bottom:0!important;
+        --cmp-lead-w:0px!important; --cmp-trail-w:0px!important; --cmp-wrap-h:0px!important;
       }
       [${CLAUDE_INLINE_MARKER}="actions"] {
         display:flex!important; position:static!important; width:100%!important;
@@ -3749,10 +3755,12 @@
       releaseClaudeInlineMount();
       return false;
     }
-    if (claudeInlineMount?.input !== input || claudeInlineMount?.left !== toolbar.left) {
+    if (claudeInlineMount?.input !== input || claudeInlineMount?.actions !== toolbar.actions ||
+        claudeInlineMount?.left !== toolbar.left || claudeInlineMount?.right !== toolbar.right) {
       releaseClaudeInlineMount();
       claudeInlineMount = { ...toolbar, bubble, pathname: window.location.pathname };
     }
+    claudeInlineMount.pathname = window.location.pathname;
     ensureClaudeInlineStyles();
     [[toolbar.editorBranch, "editor"], [toolbar.actions, "actions"], [toolbar.left, "left"], [toolbar.right, "right"]]
       .forEach(([node, value]) => {
@@ -8692,7 +8700,7 @@
 
   function scheduleFloatingButtonUpdate(reason = "unspecified") {
     if (floatingButtonMonitoringDisabled) return;
-    if (isDestinationSheetOpen()) return;
+    if (isDestinationSheetOpen() && !invalidateClaudeInlinePicker(reason)) return;
     pendingFloatingButtonReasons.add(normalizeFloatingButtonUpdateReason(reason));
     if (floatingButtonFrame) return;
     floatingButtonFrame = requestAnimationFrame(() => {
@@ -8700,7 +8708,7 @@
       const recalculationReason = [...pendingFloatingButtonReasons].sort().join("+") || "unspecified";
       pendingFloatingButtonReasons.clear();
       if (floatingButtonMonitoringDisabled) return;
-      if (isDestinationSheetOpen()) return;
+      if (isDestinationSheetOpen() && !invalidateClaudeInlinePicker(recalculationReason)) return;
       try {
         ensureFloatingButton(recalculationReason);
         updateClaudeLimitNudge();
@@ -8712,6 +8720,23 @@
         throw error;
       }
     });
+  }
+
+  function invalidateClaudeInlinePicker(reason) {
+    if (currentPlatform.id !== "claude") return false;
+    const input = findPlatformInput();
+    const toolbar = findClaudeInlineToolbar(input);
+    // A picker belongs to the editor that opened it. On replacement or route
+    // change close it without stealing focus, then let normal mounting resume.
+    const changed = !toolbar || !claudeInlineMount ||
+      claudeInlineMount.input !== input || claudeInlineMount.left !== toolbar.left ||
+      claudeInlineMount.right !== toolbar.right || claudeInlineMount.pathname !== window.location.pathname ||
+      normalizeFloatingButtonUpdateReason(reason).includes("resize");
+    if (changed) {
+      hideDestinationSheet({ restoreFocus: false });
+      return true;
+    }
+    return false;
   }
 
   function syncClaudeInlineReservationBeforePaint(input, composerSurface) {

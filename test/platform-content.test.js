@@ -2507,6 +2507,21 @@ test("Claude inline mounting reuses its 32px slot after an editor remount and re
   }
 });
 
+test("Claude inline discovery validates the compact model chin against the same composer", () => {
+  const fixture = inlineClaudeFixture();
+  const composer = new FakeElement({ attrs: { "data-cds": "ChatComposer" } });
+  const chin = new FakeElement({ attrs: { "data-cds": "ChatComposerChin" } });
+  const send = new FakeElement({ tag: "button", attrs: { "data-testid": "chat-input-send" } });
+  composer.appendChild(fixture.host);
+  composer.appendChild(chin);
+  chin.appendChild(fixture.model);
+  fixture.right.appendChild(send);
+  const hooks = loadPlatformContent([...Object.values(fixture), composer, chin, send], "claude.ai");
+  assert.equal(hooks.findClaudeInlineToolbar(fixture.input).right, fixture.right);
+  chin.remove();
+  assert.equal(hooks.findClaudeInlineToolbar(fixture.input), null);
+});
+
 test("Claude bubble fills the inline slot to the right of voice mode", () => {
   const voiceMode = new FakeElement({
     tag: "button",

@@ -275,15 +275,16 @@ function claudePlacementFixture() {
   <style>
     body{margin:0;min-height:100vh;background:#151515;color:#f7f7f7;font:16px system-ui}
     #claude-page{position:fixed;inset:48px 12px 0}
-    form{position:fixed;left:50%;bottom:80px;width:800px;height:94px;transform:translateX(-50%);background:#242424;border-radius:18px}
-    [contenteditable]{position:absolute;left:20px;right:20px;top:16px;min-height:40px;outline:none}
-    button{position:absolute;bottom:0;width:36px;height:32px}
-    #model{right:55px;width:109px}
-    #dictate{right:15px;width:32px}
-    #voice{right:0;width:20px}
-    #send{right:0}
-    form.existing-chat{height:48px}
-    form.existing-chat button{bottom:8px}
+    form{position:fixed;left:50%;bottom:80px;box-sizing:border-box;width:min(800px,calc(100vw - 32px));padding:12px;transform:translateX(-50%);background:#242424;border-radius:18px}
+    #claude-host{position:relative}
+    .editor-branch{padding-bottom:34px}
+    [contenteditable]{min-height:40px;max-height:220px;overflow-y:auto;outline:none;white-space:pre-wrap}
+    .left-row,.right-row{position:absolute;bottom:0;display:flex;align-items:center;gap:8px}
+    .left-row{left:0}.right-row{right:0}
+    button{box-sizing:border-box;flex-shrink:0;height:32px;width:32px}
+    #model{width:109px}#voice{width:32px}
+    #voice-switch{display:grid}.voice-state,.send-state{grid-area:1/1;display:flex}
+    .mode-toggle{width:88px;height:32px;background:#343434;border-radius:6px;display:inline-flex;align-items:center;justify-content:center}
     .send-state{visibility:hidden;pointer-events:none}
     form.has-text .voice-state{visibility:hidden;pointer-events:none}
     form.has-text .send-state{visibility:visible;pointer-events:auto}
@@ -292,13 +293,19 @@ function claudePlacementFixture() {
 <body>
   <div id="claude-page">
     <form id="claude-composer">
-      <div aria-label="Write your prompt to Claude" contenteditable="true" role="textbox"></div>
-      <button id="model" type="button" aria-label="Model selector">Sonnet</button>
-      <div class="voice-state">
-        <button id="dictate" type="button" aria-label="Dictate"></button>
-        <button id="voice" type="button" aria-label="Voice input"></button>
+      <div id="claude-host">
+        <div class="editor-branch"><div aria-label="Write your prompt to Claude" contenteditable="true" role="textbox"></div></div>
+        <div data-cds="ChatComposerActions" style="display:contents">
+          <div class="left-row"><button type="button" data-testid="chat-input-attach" aria-label="Add files">+</button><span class="mode-toggle">Chat / Cowork</span></div>
+          <div class="right-row">
+            <button id="model" type="button" data-testid="model-selector-dropdown" aria-label="Model selector">Sonnet</button>
+            <div id="voice-switch">
+              <div class="voice-state"><button id="dictate" type="button" aria-label="Dictate"></button><button id="voice" type="button" aria-label="Voice input"></button></div>
+              <div class="send-state"><button id="send" type="button" aria-label="Send message"></button></div>
+            </div>
+          </div>
+        </div>
       </div>
-      <div class="send-state"><button id="send" type="button" aria-label="Send message"></button></div>
     </form>
   </div>
 </body>
@@ -774,7 +781,7 @@ async function run() {
       const inside = (rect) => rect.left >= composer.left && rect.right <= composer.right
         && rect.top >= composer.top && rect.bottom <= composer.bottom;
       const bubbleHorizontallyInside = bubble.left >= composer.left && bubble.right <= composer.right;
-      const alignment = Math.abs((bubble.top + bubble.height / 2 - 0.5) - (voice.top + voice.height / 2 - 1));
+      const alignment = Math.abs((bubble.top + bubble.height / 2) - (voice.top + voice.height / 2));
       return { bubbleHorizontallyInside, dictateInside: inside(dictate), voiceInside: inside(voice), alignment };
     })()`);
     assert.equal(claudeEmptyBounds.bubbleHorizontallyInside, true);
@@ -798,7 +805,7 @@ async function run() {
     const claudeEmptyAlignment = await waitFor(() => claudePlacementSession.evaluate(`(() => {
       const bubble = document.getElementById("context-generator-bubble").getBoundingClientRect();
       const voice = document.getElementById("voice").getBoundingClientRect();
-      const alignment = Math.abs((bubble.top + bubble.height / 2 - 0.5) - (voice.top + voice.height / 2));
+      const alignment = Math.abs((bubble.top + bubble.height / 2) - (voice.top + voice.height / 2));
       return alignment <= 1 ? { alignment } : null;
     })()`), "Claude's existing-chat placement alignment");
     assert.ok(claudeEmptyAlignment.alignment <= 1, `Claude's empty-state bubble was ${claudeEmptyAlignment.alignment}px above its control row.`);
@@ -812,13 +819,30 @@ async function run() {
       if (!bubble || !send || getComputedStyle(document.getElementById("send")).visibility !== "visible") return null;
       const intersects = bubble.left < send.right && bubble.right > send.left && bubble.top < send.bottom && bubble.bottom > send.top;
       const sendTranslate = document.getElementById("send").style.translate;
-      return !intersects && /^-52px(?: 0px)?$/.test(sendTranslate)
+      return !intersects && !sendTranslate
         ? { intersects, sendTranslate }
         : null;
     })()`), "Claude's typed-state placement refresh");
     assert.equal(claudePlacement.intersects, false, "The Cap Context bubble must not cover Claude's Send button.");
-    assert.match(claudePlacement.sendTranslate, /^-52px(?: 0px)?$/);
-    process.stdout.write("✓ Claude's bubble stays centered and its Voice-to-Send swap remains clear of Send.\n");
+    assert.equal(claudePlacement.sendTranslate, "");
+    for (const width of [760, 390, 320]) {
+      await claudePlacementSession.call("Emulation.setDeviceMetricsOverride", { width, height: 740, deviceScaleFactor: 1, mobile: false });
+      const inline = await claudePlacementSession.evaluate(`(() => {
+        const b = document.getElementById("context-generator-bubble"), r = b.getBoundingClientRect();
+        const m = document.getElementById("model").getBoundingClientRect();
+        return { width: parseFloat(getComputedStyle(b).width), position: getComputedStyle(b).position,
+          overlaps: r.left < m.right && r.right > m.left && r.top < m.bottom && r.bottom > m.top,
+          inside: r.left >= 0 && r.right <= innerWidth,
+          nativeTranslations: document.querySelectorAll("[data-context-generator-original-translate]").length };
+      })()`);
+      assert.equal(inline.width, 32);
+      assert.equal(inline.position, "static");
+      assert.equal(inline.overlaps, false, `Claude inline pill overlaps model at ${width}px.`);
+      assert.equal(inline.inside, true);
+      assert.equal(inline.nativeTranslations, 0);
+    }
+    await claudePlacementSession.call("Emulation.clearDeviceMetricsOverride");
+    process.stdout.write("✓ Claude's 32px inline slot survives Voice/Send and 760/390/320px layouts without model overlap or native translation.\n");
 
     }
 
