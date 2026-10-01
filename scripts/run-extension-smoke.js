@@ -911,6 +911,9 @@ async function run() {
       await sourceSession.evaluate(`if (!${JSON_FALLBACK_SMOKE}) document.querySelectorAll("main article").forEach(node => node.remove()); history.pushState({}, "", "/g/project/c/smoke?${SMOKE_PLATFORM_QUERY}=chatgpt"); true`);
     }
     if (NETWORK_SOURCE && !JSON_FALLBACK_SMOKE) await sourceSession.evaluate('document.querySelectorAll("main article").forEach(node => node.remove()); true');
+    // Responsive placement runs in a second tab. Restore the source tab before
+    // capture so hidden-tab throttling cannot turn this into a timing test.
+    await sourceSession.call("Page.bringToFront");
     const jsonRequestsBeforeTransfer = state.jsonRequests;
     const clickResult = await sourceSession.evaluate(String.raw`(() => {
       const bubble = document.getElementById("context-generator-bubble");
@@ -1051,6 +1054,16 @@ async function run() {
     process.stdout.write("✓ The exact summary was pasted and Send remained untouched.\n");
     process.stdout.write("Cap Context Brave extension smoke passed.\n");
   } catch (error) {
+    if (sourceSession) {
+      try {
+        error.message += `\nSource diagnostics: ${JSON.stringify(await sourceSession.evaluate(`({
+          visibility: document.visibilityState,
+          errors: [...document.querySelectorAll('[role="alert"]')].map(n => n.textContent),
+          overlay: document.getElementById('context-generator-overlay')?.textContent
+        })`))}\nConsole: ${JSON.stringify(sourceSession.getRecentEvents().filter(e =>
+          e.method === 'Runtime.exceptionThrown' || e.method === 'Runtime.consoleAPICalled'))}`;
+      } catch { /* Preserve the original error if the failed page disconnected. */ }
+    }
     if (browserOutput.trim()) error.message += `\nBrave output:\n${browserOutput.trim()}`;
     throw error;
   } finally {
