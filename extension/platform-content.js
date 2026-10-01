@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-02-chatgpt-inline-validation-v87";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-02-chatgpt-inline-audit-v88";
   const ownedUiStyleSheets = new Map();
   const CLAUDE_INLINE_STYLE_ID = "context-generator-claude-inline-styles";
   const CLAUDE_INLINE_MARKER = "data-context-generator-claude-inline";
@@ -767,6 +767,7 @@
       releaseChatGptInlineMount,
       mountInlineOrLegacyBackup,
       invalidateInlinePicker,
+      hideDestinationSheet,
       findProviderInlineToolbar,
       mountProviderInlineButton,
       releaseProviderInlineMount,
@@ -3847,16 +3848,17 @@
     // Size the grid to its native controls and keep the pill/model pair intact
     // when the right-side branches wrap. Model triggers use display:contents
     // wrappers, which need a real flex box once they also own our pill.
+    // Native hidden states and inline display:none must still win over our flow.
     style.textContent = `
       [${CHATGPT_INLINE_MARKER}="footer"] {
         grid-template-columns:max-content minmax(0,1fr) minmax(0,max-content)!important;
       }
-      [${CHATGPT_INLINE_MARKER}="model"] {
-        display:inline-flex!important; align-items:center!important;
+      [${CHATGPT_INLINE_MARKER}="model"]:not([hidden]):not(.hidden) {
+        display:inline-flex; align-items:center!important;
         min-width:0!important; max-width:100%!important;
       }
-      [${CHATGPT_INLINE_MARKER}="controls"] {
-        display:flex!important; width:100%!important; min-width:0!important;
+      [${CHATGPT_INLINE_MARKER}="controls"]:not([hidden]):not(.hidden) {
+        display:flex; width:100%!important; min-width:0!important;
         max-width:100%!important; flex-wrap:wrap!important; justify-content:flex-end!important;
       }
       [${CHATGPT_INLINE_MARKER}="controls"] > :not(#${BUBBLE_ID}) { flex:0 1 auto!important; }
@@ -4554,7 +4556,8 @@
       attributes: true,
       characterData: true,
       subtree: true,
-      attributeFilter: ["class", "style", "aria-expanded", "data-state"]
+      // Responsive rows can hide/return without resizing either observed box.
+      attributeFilter: ["class", "style", "aria-expanded", "data-state", "hidden"]
     });
   }
 
@@ -6389,12 +6392,14 @@
     const bubble = document.getElementById(BUBBLE_ID);
     if (bubble) {
       bubble.setAttribute("aria-expanded", "false");
-      if (restoreFocus) {
+      // Dismissal visuals are independent of focus. Keep the active effect only
+      // during the preserved-backdrop bridge into the handoff animation.
+      if (!preserveBackdrop) {
         bubble.style.filter = "none";
         bubble.style.transform = "translate3d(0,0,0) scale(1)";
-        if (!isRunning) {
-          setTimeout(() => bubble.focus?.({ preventScroll: true }), shouldAnimate ? DESTINATION_SHEET_EXIT_MS : 0);
-        }
+      }
+      if (restoreFocus && !isRunning) {
+        setTimeout(() => bubble.focus?.({ preventScroll: true }), shouldAnimate ? DESTINATION_SHEET_EXIT_MS : 0);
       }
     }
   }

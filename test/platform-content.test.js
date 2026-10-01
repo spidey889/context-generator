@@ -650,6 +650,28 @@ test("normal page Tab navigation skips the Cap Context orb", () => {
   assert.match(buttonSource, /bubble\.tabIndex = -1/);
 });
 
+test("destination picker dismissal clears active visuals without focus and preserves handoff glow", () => {
+  for (const hostname of ["chatgpt.com", "claude.ai", "gemini.google.com", "grok.com", "chat.deepseek.com"]) {
+    const hooks = loadPlatformContent([], hostname);
+    const bubble = new FakeElement({ tag: "button", attrs: { id: "context-generator-bubble" } });
+    const input = new FakeElement({ attrs: { contenteditable: "true" } });
+    let focusCalls = 0;
+    bubble.focus = () => { focusCalls++; };
+    hooks.registerElementId(bubble.id, bubble);
+    hooks.document.activeElement = input;
+    for (const preserveBackdrop of [true, false]) {
+      bubble.style.filter = "brightness(1.14)";
+      bubble.style.transform = "translate3d(0,0,0) scale(0.94)";
+      hooks.hideDestinationSheet({ immediate: true, restoreFocus: false, preserveBackdrop });
+      assert.equal(bubble.style.filter, preserveBackdrop ? "brightness(1.14)" : "none");
+      assert.equal(bubble.style.transform, preserveBackdrop ? "translate3d(0,0,0) scale(0.94)" : "translate3d(0,0,0) scale(1)");
+      assert.equal(bubble.getAttribute("aria-expanded"), "false");
+      assert.equal(hooks.document.activeElement, input);
+      assert.equal(focusCalls, 0);
+    }
+  }
+});
+
 test("composer lifecycle cleanup never restores focus to the orb", () => {
   const source = fs.readFileSync(SOURCE_PATH, "utf8");
   const ensureStart = source.indexOf("function ensureFloatingButton(");
@@ -2840,6 +2862,10 @@ for (const platform of ["claude", "chatgpt"]) {
     assert.ok(Number.isFinite(parseFloat(bubble.style.left)));
     assert.equal(hooks.resizeObservers.some(observer => observer.observed.length), true);
     if (platform === "claude") assert.ok(model.hasAttribute("data-context-generator-original-translate"));
+    else {
+      const backupObserver = hooks.mutationObservers.find(observer => observer.observed.some(target => target.element === form));
+      assert.ok(backupObserver.observed[0].options.attributeFilter.includes("hidden"), "the backup must recover from native hidden changes without a resize");
+    }
     assert.equal(hooks.mountInlineOrLegacyBackup(bubble, inline.input), true);
     assert.equal(bubble.style.position, "static");
     assert.equal(bubble.style.width, "32px");

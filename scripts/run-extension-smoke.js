@@ -269,6 +269,7 @@ function sourceFixture() {
     .gpt-left button{width:36px;height:36px}
     #gpt-reasoning{width:82px;min-width:0;flex-shrink:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
     #gpt-send{display:none}
+    [hidden]{display:none!important}.hidden{display:none}
     form.has-text #gpt-send{display:block}
     form.has-text #gpt-voice{display:none}
     @media(max-width:640px){[data-composer-input]{grid-column:1/-1;grid-row:1}.gpt-left{grid-column:1;grid-row:2}.gpt-right{grid-column:3;grid-row:2}}
@@ -888,6 +889,36 @@ async function run() {
       await waitFor(()=>sourceSession.evaluate(`window.__gptSmokeButton.nextElementSibling===document.querySelector('.gpt-voice-controls [aria-label="Dictate"]')`),"ChatGPT attribute-only model removal");
       await sourceSession.evaluate(`document.getElementById('gpt-reasoning').style.display=''`);
       await waitFor(()=>sourceSession.evaluate(`window.__gptSmokeButton.nextElementSibling===document.getElementById('gpt-reasoning')`),"ChatGPT attribute-only model return");
+      for (const mode of ["style", "hidden", "class"]) {
+        await sourceSession.evaluate(`(() => {
+          const wrapper=document.getElementById('gpt-reasoning').parentElement;
+          if('${mode}'==='style')wrapper.style.display='none';
+          else if('${mode}'==='hidden')wrapper.hidden=true;
+          else wrapper.classList.add('hidden');
+        })()`);
+        await waitFor(()=>sourceSession.evaluate(`window.__gptSmokeButton.nextElementSibling===document.querySelector('.gpt-voice-controls [aria-label="Dictate"]')
+          && document.getElementById('gpt-reasoning').getBoundingClientRect().width===0`),`ChatGPT native model-wrapper ${mode} hiding`);
+        await sourceSession.evaluate(`(() => {
+          const wrapper=document.getElementById('gpt-reasoning').parentElement;
+          wrapper.style.display='';wrapper.hidden=false;wrapper.classList.remove('hidden');
+        })()`);
+        await waitFor(()=>sourceSession.evaluate(`window.__gptSmokeButton.nextElementSibling===document.getElementById('gpt-reasoning')`),"ChatGPT native model-wrapper recovery");
+      }
+      await sourceSession.call("Emulation.setDeviceMetricsOverride", { width:390,height:740,deviceScaleFactor:1,mobile:false });
+      await sourceSession.evaluate(`(() => {
+        const input=document.getElementById('prompt-textarea');window.__gptAuditDraft=input.textContent;
+        input.textContent='';input.dispatchEvent(new Event('input',{bubbles:true}));
+        return new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)));
+      })()`);
+      const gptObservedRects = await sourceSession.evaluate(`[document.getElementById('prompt-textarea'),document.querySelector('form')].map(n=>{const r=n.getBoundingClientRect();return[r.width,r.height];})`);
+      await sourceSession.evaluate(`window.__gptHiddenControls=document.querySelector('[data-context-generator-chatgpt-inline="controls"]');window.__gptHiddenControls.hidden=true`);
+      await waitFor(()=>sourceSession.evaluate(`getComputedStyle(window.__gptSmokeButton).position==='fixed'`),"ChatGPT hidden control-group fallback");
+      assert.deepEqual(await sourceSession.evaluate(`[document.getElementById('prompt-textarea'),document.querySelector('form')].map(n=>{const r=n.getBoundingClientRect();return[r.width,r.height];})`),gptObservedRects,"This hidden-group transition must exercise recovery without ResizeObserver changes.");
+      await sourceSession.evaluate(`window.__gptHiddenControls.hidden=false`);
+      await waitFor(()=>sourceSession.evaluate(`getComputedStyle(window.__gptSmokeButton).position==='static'
+        && window.__gptSmokeButton.nextElementSibling===document.getElementById('gpt-reasoning')`),"ChatGPT hidden control-group recovery without resize");
+      await sourceSession.call("Emulation.clearDeviceMetricsOverride");
+      await sourceSession.evaluate(`(() => {const input=document.getElementById('prompt-textarea');input.textContent=window.__gptAuditDraft;input.dispatchEvent(new Event('input',{bubbles:true}));})()`);
       await sourceSession.evaluate(`window.__gptSmokeButton.click()`);
       await waitFor(()=>sourceSession.evaluate(`getComputedStyle(document.getElementById('context-generator-destination-sheet')).opacity==='1'`),"ChatGPT picker before body-only remount");
       await sourceSession.evaluate(`(() => {
@@ -896,6 +927,8 @@ async function run() {
       })()`);
       await waitFor(()=>sourceSession.evaluate(`document.getElementById('context-generator-destination-sheet').style.display==='none'
         && window.__gptSmokeButton.nextElementSibling===document.getElementById('gpt-reasoning')`),"ChatGPT body-only picker invalidation");
+      assert.equal(await sourceSession.evaluate(`window.__gptSmokeButton.style.filter==='none'
+        && window.__gptSmokeButton.style.transform.includes('scale(1)')`),true,"Picker invalidation must clear active pill visuals without a pointer leave.");
       await sourceSession.evaluate(`window.__gptSmokeButton.click()`);
       await waitFor(()=>sourceSession.evaluate(`getComputedStyle(document.getElementById('context-generator-destination-sheet')).opacity==='1'`),"ChatGPT picker after body-only remount");
       assert.equal(await sourceSession.evaluate(`(() => {
