@@ -2691,15 +2691,37 @@ test("Claude inline mounting monitors native attribute changes without reacting 
   const f = inlineClaudeFixture();
   const hooks = loadPlatformContent(Object.values(f), "claude.ai");
   hooks.document.createElement = () => new FakeElement();
-  assert.equal(hooks.mountClaudeInlineButton(new FakeElement({ tag: "button" }), f.input), true);
+  const bubble = new FakeElement({ tag: "button" });
+  assert.equal(hooks.mountClaudeInlineButton(bubble, f.input), true);
   const observer = hooks.mutationObservers.find(item => item.observed.some(target => target.element === f.host));
   assert.ok(observer, "inline mounting must watch attribute-only native toolbar changes");
+  const observerCount = hooks.mutationObservers.length;
+  assert.equal(hooks.mountClaudeInlineButton(bubble, f.input), true);
+  assert.equal(hooks.mutationObservers.length, observerCount, "stable mounting must reuse its control observer");
+  assert.equal(observer.observed.length, 1, "stable mounting must keep observing the composer");
   observer.callback([{ type: "characterData", target: { parentElement: f.input }, addedNodes: [], removedNodes: [] }]);
   assert.equal(hooks.animationFrameCallbacks.length, 0);
   observer.callback([{ type: "attributes", attributeName: "style", target: f.model, addedNodes: [], removedNodes: [] }]);
   assert.equal(hooks.animationFrameCallbacks.length, 1);
   hooks.releaseClaudeInlineMount();
   assert.equal(observer.observed.length, 0);
+});
+
+test("Claude inline host-only remount refreshes identity and invalidates the picker only once", () => {
+  const f = inlineClaudeFixture();
+  const hooks = loadPlatformContent(Object.values(f), "claude.ai");
+  hooks.document.createElement = () => new FakeElement();
+  const bubble = new FakeElement({ tag: "button" });
+  assert.equal(hooks.mountClaudeInlineButton(bubble, f.input), true);
+  const oldObserver = hooks.mutationObservers.find(item => item.observed.some(target => target.element === f.host));
+  const nextHost = new FakeElement();
+  nextHost.appendChild(f.editorBranch); nextHost.appendChild(f.actions);
+  assert.equal(hooks.invalidateInlinePicker("document-childlist"), true);
+  assert.equal(hooks.mountClaudeInlineButton(bubble, f.input), true);
+  assert.equal(hooks.invalidateInlinePicker("document-childlist"), false, "a remounted host must become the new picker owner");
+  assert.equal(oldObserver.observed.length, 0);
+  assert.ok(hooks.mutationObservers.some(item => item.observed.some(target => target.element === nextHost)));
+  assert.equal(bubble.parentElement, f.left);
 });
 
 test("Claude inline mounting reuses its 32px slot after an editor remount and restores native markers", () => {

@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-01-claude-inline-audit-v85";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-02-claude-inline-validation-v86";
   const ownedUiStyleSheets = new Map();
   const CLAUDE_INLINE_STYLE_ID = "context-generator-claude-inline-styles";
   const CLAUDE_INLINE_MARKER = "data-context-generator-claude-inline";
@@ -3735,9 +3735,11 @@
     // Native absolute groups can collide even if our slot is inline. Put the
     // two groups in normal flow and let CSS wrap them; no viewport coordinates,
     // control translations, or width-dependent JavaScript are needed.
+    // Zero the old leading/trailing float reservations, preserving native side
+    // padding. Only the expanded editor's bottom toolbar reservation needs reset.
     style.textContent = `
       [${CLAUDE_INLINE_MARKER}="editor"] {
-        padding-left:0!important; padding-right:0!important; padding-bottom:0!important;
+        padding-bottom:0!important;
         --cmp-lead-w:0px!important; --cmp-trail-w:0px!important; --cmp-wrap-h:0px!important;
       }
       [${CLAUDE_INLINE_MARKER}="actions"] {
@@ -3769,14 +3771,16 @@
       releaseClaudeInlineMount();
       return false;
     }
-    if (claudeInlineMount?.input !== input || claudeInlineMount?.editorBranch !== toolbar.editorBranch ||
+    if (claudeInlineMount?.input !== input || claudeInlineMount?.host !== toolbar.host ||
+        claudeInlineMount?.editorBranch !== toolbar.editorBranch ||
         claudeInlineMount?.actions !== toolbar.actions ||
         claudeInlineMount?.left !== toolbar.left || claudeInlineMount?.right !== toolbar.right) {
       releaseClaudeInlineMount();
       claudeInlineMount = { ...toolbar, bubble, pathname: window.location.pathname };
     }
     claudeInlineMount.pathname = window.location.pathname;
-    clearLegacyInlineBackup();
+    // The control observer serves both modes; stable inline updates can reuse it.
+    clearLegacyInlineBackup({ keepControlObserver: true });
     ensureClaudeInlineStyles();
     [[toolbar.editorBranch, "editor"], [toolbar.actions, "actions"], [toolbar.left, "left"], [toolbar.right, "right"]]
       .forEach(([node, value]) => {
@@ -4747,11 +4751,11 @@
     element.removeAttribute("data-context-generator-original-overflow");
   }
 
-  function clearLegacyInlineBackup() {
+  function clearLegacyInlineBackup({ keepControlObserver = false } = {}) {
     releaseBubbleSlot();
     releaseComposerSurface();
     stopPlatformPlacementResizeMonitoring();
-    stopProviderControlMutationMonitoring();
+    if (!keepControlObserver) stopProviderControlMutationMonitoring();
     clearChatGptPlacementResizeMonitoring();
   }
 

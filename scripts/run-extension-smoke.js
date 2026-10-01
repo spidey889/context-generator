@@ -939,6 +939,8 @@ async function run() {
     }, "the Claude placement fixture");
     claudePlacementSession = await CdpSession.connect(claudePlacementTarget.webSocketDebuggerUrl);
     await claudePlacementSession.call("Runtime.enable");
+    // Picker animations and remounts require unthrottled foreground frames.
+    await claudePlacementSession.call("Page.bringToFront");
     await claudePlacementSession.call("Page.reload", { ignoreCache: true });
     await waitFor(() => claudePlacementSession.evaluate(`Boolean(
       document.getElementById("context-generator-bubble") &&
@@ -1037,11 +1039,11 @@ async function run() {
     await claudePlacementSession.evaluate(`document.getElementById("model").style.display = ""`);
     await waitFor(() => claudePlacementSession.evaluate(`getComputedStyle(document.getElementById("context-generator-bubble")).position === "static"
       && document.querySelectorAll("[data-context-generator-original-translate]").length === 0`), "Claude attribute-only inline recovery");
-    for (const wrapper of ["editor", "actions"]) {
+    for (const wrapper of ["editor", "actions", "host"]) {
       await claudePlacementSession.evaluate(`document.getElementById("context-generator-bubble").click()`);
-      await waitFor(() => claudePlacementSession.evaluate(`getComputedStyle(document.getElementById("context-generator-destination-sheet")).opacity === "1"`), "Claude picker before wrapper replacement");
+      await waitFor(() => claudePlacementSession.evaluate(`getComputedStyle(document.getElementById("context-generator-destination-sheet")).opacity === "1"`), `Claude picker before ${wrapper} replacement`);
       await claudePlacementSession.evaluate(`(() => {
-        const old = document.querySelector('[data-context-generator-claude-inline="${wrapper}"]');
+        const old = ${wrapper === "host" ? 'document.getElementById("claude-host")' : `document.querySelector('[data-context-generator-claude-inline="${wrapper}"]')`};
         const next = old.cloneNode(false); next.removeAttribute("data-context-generator-claude-inline");
         old.replaceWith(next); while (old.firstChild) next.appendChild(old.firstChild);
       })()`);
@@ -1049,6 +1051,14 @@ async function run() {
         && document.getElementById("context-generator-bubble") === window.__claudeAuditBubble
         && getComputedStyle(window.__claudeAuditBubble).position === "static"`), "Claude picker invalidation and remount");
     }
+    await claudePlacementSession.evaluate(`document.getElementById("context-generator-bubble").click()`);
+    await waitFor(() => claudePlacementSession.evaluate(`getComputedStyle(document.getElementById("context-generator-destination-sheet")).opacity === "1"`), "Claude picker after host remount");
+    assert.equal(await claudePlacementSession.evaluate(`(() => {
+      document.getElementById("model").setAttribute("data-state", "closed");
+      return new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(() =>
+        resolve(document.getElementById("context-generator-destination-sheet").style.display !== "none"))));
+    })()`), true, "A native control update after host remount must not close the picker again.");
+    await claudePlacementSession.evaluate(`document.getElementById("context-generator-bubble").click()`);
     await claudePlacementSession.evaluate(`(() => {
       const chin = document.createElement("div"); chin.setAttribute("data-cds", "ChatComposerChin");
       document.getElementById("claude-composer").appendChild(chin); chin.appendChild(document.getElementById("model"));
