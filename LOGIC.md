@@ -253,7 +253,7 @@ Do not overstate current quality enforcement:
 
 ## Backend Boundary
 
-`POST /api/summarize` requires `Content-Type: application/json`, public marker `X-Cap-Context-Client: cap-context-extension/1`, and exactly `{ "conversation": <non-empty string> }`.
+`POST /api/summarize` requires `Content-Type: application/json`, public marker `X-Cap-Context-Client: cap-context-extension/1`, and `{ "conversation": <non-empty string>, "telemetry"?: <validated started-attempt metadata> }`.
 
 - Accepted origins are Chromium and Firefox extension origins. Firefox may omit Origin; then the marker is mandatory. An already-running extension worker with a valid extension Origin may omit the marker for compatibility.
 - The marker is public and is not an authentication secret.
@@ -269,11 +269,13 @@ Do not overstate current quality enforcement:
 | `context-generator-onboarding-dismissed-v2` | Local onboarding dismissal |
 | `context-generator-last-transfer-stats-v1` | One Latest Run receipt; raw text expires after 24 hours |
 | `context-generator-install-id-v1` | Random install UUID, not an account or real identity |
-| `context-generator-telemetry-outbox-v1` | Ordered retryable metadata queue |
+| `context-generator-telemetry-outbox-v1` | Durable per-attempt metadata queue, at most 500 entries / seven days |
+| `context-generator-telemetry-diagnostics-v1` | Bounded delivery/drop counters and 100 recent metadata-only diagnostics |
+| `context-generator-active-transfers-v1` | Six-minute active attempt snapshots in session storage, local fallback |
 | `expire-latest-run-raw-transcript` | Alarm that removes only raw transcript fields |
-| `retry-transfer-telemetry` | Alarm that retries delivery after five minutes |
+| `retry-transfer-telemetry` | Alarm for persisted backoff, Retry-After and startup recovery |
 
-`chrome.storage.local` persists receipts and outbox data; the summary cache, in-flight deduplication, active transfers and source `isRunning` lock are memory-only. The analysis renderer reads receipts through the GitHub Pages-matched bridge and its `window.postMessage` contract, rather than accessing extension storage directly.
+`chrome.storage.local` persists receipts and outbox data. Active transfer snapshots prefer `chrome.storage.session` so worker restarts retain tab ownership without carrying it across a browser restart; local fallback supports older runtimes. Expired snapshots produce an unknown-outcome diagnostic, never a fabricated failure. The summary cache, in-flight deduplication and source `isRunning` lock remain memory-only. The analysis renderer reads receipts through the GitHub Pages-matched bridge and its `window.postMessage` contract, rather than accessing extension storage directly.
 
 The receipt records transfer/capture timings, counts, sizes, profile, the model that actually served, attempted and health-skipped models, fallback, finish reason, token usage, status, and exact captured text. Latest Run labels the serving model directly and excludes it from the failed portion of the fallback log. It deliberately does not store the generated summary. Background expiry and the analysis bridge both remove expired raw text.
 
@@ -283,13 +285,15 @@ Closed telemetry stages are: `intent_started`, `capture_started`, `capture_compl
 
 Allowed failures are: `no_conversation`, `conversation_too_large`, `capture_failed`, `summary_rate_limited`, `summary_service_busy`, `summary_access_denied`, `summary_failed`, `destination_open_failed`, `paste_failed`, `extension_reloaded`, `client_interrupted`, `user_cancelled`, `unknown_failure`.
 
-The only payload fields are install/attempt IDs, time, source/destination, captured character count, status, last stage, closed failure reason, and extension version.
+The closed payload fields are install/attempt IDs, `attempted_at`, source/destination, captured character count, status, last stage, closed failure reason, and extension version, plus optional `completed_at`, `summary_proof` and `summary_confirmed_at`. Client completion clocks are diagnostic; server completion time is authenticated by a v2 HMAC receipt. Proofs bind attempt/install/time/route/version. The server returns legacy `summaryProof` as well as `summaryProofV2` / `summaryConfirmedAt`; unsigned legacy reports remain valid diagnostics. No chat, summary, URL, account, IP or free-form error is stored in Supabase telemetry.
 
-Delivery path: `content script -> background outbox -> Vercel /api/telemetry -> Supabase Edge Function -> record_transfer_event`. Every layer rejects unknown fields. Supabase credentials remain server-side; RLS/grants block public tables. Upserts preserve the furthest stage and terminal result.
+Delivery path: `content script -> background outbox -> Vercel /api/telemetry -> Supabase Edge Function -> record_transfer_event`. Durable queue writes run independently of network delivery. Per-attempt compaction retains monotonic progress, the first terminal outcome and signed receipts paired with their authenticated version. In-flight acknowledgements remove only the sent revision. Permanent malformed/proof/identity failures are removed with bounded metadata diagnostics so later reports drain; network/429/5xx retry with persisted jittered backoff (30 seconds to one hour), configuration failures start at five minutes, and Retry-After is capped at one hour. Capacity pruning preserves terminal reports and receipts before ordinary progress, and records every drop. Diagnostics contain no proof bytes or recoverable rejected payload.
 
-On 2026-09-29, the live `cap-context-telemetry` project (`iqkzynzxbmemhtiupwwu`) was verified with `transfer-telemetry` version 6 and a database constraint accepting all 13 failure reasons, including `user_cancelled`. The database was widened before function deployment to restore compatibility with existing ordered retry queues. `anon` and `authenticated` have no table privileges on `transfer_events` or `users`; `service_role` retains its table grants and EXECUTE on `record_transfer_event`. RLS and policies were unchanged. The ten active migration files match the live recorded history; the never-applied activity-view migration is retained outside the active folder. See `supabase/README.md` for target checks, dry runs and rollback SQL.
+Every layer rejects unknown fields. Edge ingestion requires a private `TELEMETRY_RELAY_SECRET`; the publishable key is not writer authentication. Matching `TELEMETRY_SIGNING_KEY` values on Vercel and Edge authenticate completed server work before SQL. The relay has a five-second upstream deadline; Edge reads at most 4 KiB with a one-second body deadline and a four-second RPC deadline. Fixed error codes distinguish permanent rejection, transient availability and configuration problems. Upstash atomically enforces per-install 180/minute and 2,000/hour, per-IP 3,000/minute and 30,000/hour, and global 20,000/minute, 60,000/hour and 200,000/day budgets. Redis identifiers are keyed hashes with short TTLs; a 450 ms storage failure falls back to bounded local limits and an enum-only warning. These availability limits are separate from the process-local summary limiter.
 
-The protected `users` table creates a row on an install's first successful transfer and maintains lifetime and UTC-day summary counts. An advisory transaction lock prevents duplicate first-user races; pg_cron resets stale daily values at 00:00 UTC.
+The production project is `cap-context-telemetry` (`iqkzynzxbmemhtiupwwu`). Thirteen active migrations preserve historical rows, UUIDs and lifetime totals. Database checks and a table guard enforce core identity and the first terminal outcome/stage/time even for direct service writes. RPC callers may legitimately change extension version after an upgrade; the original first-observed version remains stored. `anon` / `authenticated` have no table, view or RPC access. RLS stays enabled without public policies; service-role writes use SELECT/INSERT/UPDATE, not DELETE/TRUNCATE. New application objects owned by `postgres` start private; managed `supabase_admin` defaults cannot be changed by the hosted application role. See `supabase/README.md` for operational checks and recovery.
+
+`users` now creates a row on the first verified server-summary confirmation, independently of a failed paste, and increments exactly once under an advisory transaction lock. Existing totals remain in `total_summaries`, with their unverified historical baseline labelled `legacy_total_summaries`. Signed UTC occurrence time drives new daily counts; delayed yesterday receipts and v1 receipts never inflate today. Legacy 10/11-argument RPCs remain supported by optional defaults. The midnight pg_cron reset remains solely for the existing stored `today_summaries` contract. Service-only `verified_summary_daily_usage` and `user_summary_usage` derive truthful daily/unknown-day metrics from events; `transfer_event_outcomes` labels unresolved started rows older than 24 hours `outcome_unknown`, leaving stored status unchanged. Installs are not unique people. Historical metadata is retained; no automatic deletion or retroactive failure/verification backfill runs.
 
 ## Placement and Paste
 
@@ -329,7 +333,7 @@ Native menus and popovers may temporarily mark the background application `aria-
 - Long ChatGPT DOM capture has historically under-captured; deterministic virtual-window fixtures alone do not establish native-chat completeness.
 - The six-minute source lock can reset without cancelling active work.
 - Summary diagnostics are structural, not grounded; the content gate is conservative and heuristic. Useful short/token-limited output is retained, but factual grounding and omission detection are not enforced.
-- The telemetry outbox is unbounded, active cancellation state is worker-memory-only, and Vercel's Supabase fetch has no explicit timeout.
+- Telemetry is bounded best-effort delivery: seven-day/capacity drops are diagnosed, while stale historical attempts remain unknown and unsigned legacy summaries cannot be retrospectively verified. Redis outage fallback limits are process-local.
 - A destination prepared before capture/summary failure may remain open unused.
 - `npm run gate` omits installed-extension smoke. Default smoke covers ChatGPT → Claude; optional JSON modes cover all five source platforms against fixtures and a stub backend.
 - Browser packaging uses one hybrid Chromium/Firefox manifest while automation is Brave-only.
@@ -341,7 +345,7 @@ Native menus and popovers may temporarily mark the background application `aria-
 | Capture, pasted cards, placement, picker/handoff | `node --test --test-skip-pattern="^slow/release:" test/platform-content.test.js` | `npm run test:slow`; Brave smoke for real extension/UI work |
 | Background messages, destination recovery, cache | `node --test test/background.test.js` | `npm test` |
 | Summary prompt/routing/validation | `node --test test/summarize.test.js test/request-security.test.js`; model health: `node --test test/gemini-model-health.test.js` | `npm run eval` for quality/provider changes |
-| Telemetry/Supabase | `node --test test/telemetry.test.js` | `npm test` plus schema/grant review |
+| Telemetry/Supabase | Telemetry delivery, ingestion and verified-receipt tests; `node scripts/check-verified-telemetry-db.js` with pinned PGlite | `npm test`, real backup restore, hosted proof/counter/grant checks and Brave database smoke |
 | Latest Run analysis | `node --test test/analysis.test.js` | Open GitHub Pages analysis with extension loaded |
 | Release/package | `npm test` and `npm run test:extension-smoke` | `npm run gate`, then ZIP hash comparison |
 

@@ -14,6 +14,7 @@ const RATE_LIMIT_ENTRY_TTL_MS = 2 * RATE_LIMIT_HOUR_MS;
 const RATE_LIMIT_MAX_ENTRIES = 5000;
 const RATE_LIMIT_STATE_KEY = Symbol.for("cap-context.request-security.v1");
 const { getHeader, invalid, parseBoundedJsonBody } = require("./request-validation");
+const { validateTelemetryPayload } = require("./telemetry-validation");
 
 function getRateLimitState() {
   if (!globalThis[RATE_LIMIT_STATE_KEY]) {
@@ -78,7 +79,8 @@ function isTrustedExtensionRequest(req) {
 
   // Firefox can suppress Origin for privileged extension requests. In that
   // case the public marker is still required to reject ordinary originless
-  // HTTP clients before rate limiting and provider work.
+  // unmarked HTTP requests before rate limiting and provider work. The marker
+  // is public; server-signed receipts separately protect telemetry integrity.
   return originMayBeSuppressedByExtensionRuntime && clientMarker === CLIENT_HEADER_VALUE;
 }
 
@@ -102,8 +104,16 @@ function validateSummarizeRequest(req) {
   }
 
   const keys = Object.keys(body);
-  if (keys.length !== 1 || keys[0] !== "conversation") {
-    return invalid(400, "invalid_schema", "JSON body must contain only the conversation field");
+  if (!keys.includes("conversation") || keys.some(key => !["conversation", "telemetry"].includes(key))) {
+    return invalid(400, "invalid_schema", "JSON body must contain conversation and optionally telemetry");
+  }
+
+  let telemetry = null;
+  if (Object.hasOwn(body, "telemetry")) {
+    telemetry = validateTelemetryPayload(body.telemetry);
+    if (!telemetry || telemetry.status !== "started" || telemetry.summary_proof !== undefined || telemetry.summary_confirmed_at !== undefined) {
+      return invalid(400, "invalid_schema", "Invalid summary telemetry context");
+    }
   }
 
   const conversation = body.conversation;
@@ -124,7 +134,7 @@ function validateSummarizeRequest(req) {
     return invalid(413, "conversation_too_large", "Conversation exceeds the supported encoded size");
   }
 
-  return { ok: true, conversation, requestBytes };
+  return { ok: true, conversation, requestBytes, ...(telemetry ? { telemetry } : {}) };
 }
 
 function consumeRateLimit(req, now = Date.now()) {

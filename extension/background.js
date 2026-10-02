@@ -15,9 +15,17 @@ const RAW_TRANSCRIPT_EXPIRY_ALARM = "expire-latest-run-raw-transcript";
 const TELEMETRY_ENDPOINT_URL = "https://context-generator-five.vercel.app/api/telemetry";
 const TELEMETRY_INSTALL_ID_STORAGE_KEY = "context-generator-install-id-v1";
 const TELEMETRY_OUTBOX_STORAGE_KEY = "context-generator-telemetry-outbox-v1";
+const TELEMETRY_ACTIVE_STORAGE_KEY = "context-generator-active-transfers-v1";
+const TELEMETRY_DIAGNOSTICS_STORAGE_KEY = "context-generator-telemetry-diagnostics-v1";
+const TELEMETRY_OUTBOX_MAX_ENTRIES = 500;
+const TELEMETRY_OUTBOX_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
+const TELEMETRY_ACTIVE_MAX_AGE_MS = 6 * 60 * 1000;
+const TELEMETRY_DIAGNOSTICS_MAX_ENTRIES = 100;
 const TELEMETRY_RETRY_ALARM = "retry-transfer-telemetry";
 const TELEMETRY_REQUEST_TIMEOUT_MS = 8000;
-const TELEMETRY_RETRY_DELAY_MINUTES = 5;
+const TELEMETRY_RETRY_BASE_MS = 30000;
+const TELEMETRY_RETRY_MAX_MS = 60 * 60 * 1000;
+const TELEMETRY_CONFIG_RETRY_BASE_MS = 5 * 60 * 1000;
 const TELEMETRY_MAX_CHARACTER_COUNT = 2147483647;
 const TELEMETRY_PLATFORMS = new Set(["claude", "chatgpt", "gemini", "grok", "deepseek"]);
 const TELEMETRY_STATUSES = new Set(["started", "succeeded", "failed"]);
@@ -50,8 +58,12 @@ const summaryCache = new Map();
 const summaryInflight = new Map();
 const activeTransferTelemetry = new Map();
 const activeTransferSourceTabs = new Map();
+const summaryProofs = new Map();
 let telemetryInstallIdPromise = null;
 let telemetryWorkChain = Promise.resolve();
+let telemetryDeliveryChain = Promise.resolve();
+let telemetryDeliveryRunning = false;
+let telemetryDeliveryRequested = false;
 const DESTINATIONS = {
   claude: {
     name: "Claude",
@@ -93,7 +105,7 @@ chrome.runtime.onInstalled.addListener(initializeBackground);
 chrome.runtime.onStartup.addListener(initializeBackground);
 
 chrome.tabs.onRemoved?.addListener((tabId) => {
-  recordUserCancelledTransfersForTab(tabId);
+  return recordUserCancelledTransfersForTab(tabId).catch(() => {});
 });
 
 chrome.storage.onChanged.addListener((changes, areaName) => {
@@ -172,8 +184,26 @@ function getRawTranscriptExpiryEpoch(stats) {
 }
 
 function initializeTelemetryDelivery() {
-  getOrCreateTelemetryInstallId().catch(() => {});
-  enqueueTelemetryWork(() => flushTelemetryOutbox()).catch(() => {});
+  telemetryDeliveryRequested = true;
+  if (telemetryDeliveryRunning) return;
+  // The storage chain never waits for a network request. One delivery loop is
+  // enough, even while many progress updates arrive during a slow request.
+  telemetryDeliveryRunning = true;
+  telemetryDeliveryChain = (async () => {
+    do {
+      telemetryDeliveryRequested = false;
+      await enqueueTelemetryWork(async () => {
+        await getOrCreateTelemetryInstallId();
+        await restoreActiveTransferTelemetry();
+      });
+      await flushTelemetryOutbox();
+    } while (telemetryDeliveryRequested);
+  })().catch(() => {
+    chrome.alarms.create(TELEMETRY_RETRY_ALARM, { delayInMinutes: 5 });
+  }).finally(() => {
+    telemetryDeliveryRunning = false;
+    if (telemetryDeliveryRequested) initializeTelemetryDelivery();
+  });
 }
 
 function enqueueTelemetryWork(work) {
@@ -185,42 +215,133 @@ function enqueueTelemetryWork(work) {
 async function recordTransferTelemetry(event, sourceTabId = null) {
   const sanitizedEvent = sanitizeTransferTelemetryEvent(event);
   if (!sanitizedEvent) return;
-  activeTransferTelemetry.set(sanitizedEvent.attemptId, sanitizedEvent);
-  if (Number.isInteger(sourceTabId)) {
-    activeTransferSourceTabs.set(sanitizedEvent.attemptId, sourceTabId);
-  }
-
-  const work = enqueueTelemetryWork(async () => {
+  return enqueueTelemetryWork(async () => {
+    await restoreActiveTransferTelemetry();
+    const known = activeTransferTelemetry.get(sanitizedEvent.attemptId);
+    if (known && !sameTransferIdentity(known, sanitizedEvent)) {
+      await recordTelemetryDiagnostic("identity_conflict", makeTelemetryPayload(sanitizedEvent, null));
+      return;
+    }
+    const queuedIdentity = (await readTelemetryOutbox()).find(entry => entry.payload.attempt_id === sanitizedEvent.attemptId)?.payload;
+    const mergedEvent = mergeTransferTelemetryEvents(known, {
+      ...sanitizedEvent, extensionVersion: queuedIdentity?.extension_version || known?.extensionVersion || chrome.runtime.getManifest?.().version || null
+    });
+    if (known?.status !== "started" && known?.status && known.status !== sanitizedEvent.status && sanitizedEvent.status !== "started") {
+      await recordTelemetryDiagnostic("terminal_conflict", makeTelemetryPayload(sanitizedEvent, null));
+    }
+    activeTransferTelemetry.set(mergedEvent.attemptId, mergedEvent);
+    if (Number.isInteger(sourceTabId)) activeTransferSourceTabs.set(mergedEvent.attemptId, sourceTabId);
     const installId = await getOrCreateTelemetryInstallId();
-    const payload = {
-      attempt_id: sanitizedEvent.attemptId,
-      install_id: installId,
-      attempted_at: sanitizedEvent.attemptedAt,
-      source_platform: sanitizedEvent.sourcePlatform,
-      destination_platform: sanitizedEvent.destinationPlatform,
-      character_count: sanitizedEvent.characterCount,
-      status: sanitizedEvent.status,
-      last_stage: sanitizedEvent.lastStage,
-      failure_reason: sanitizedEvent.failureReason,
-      extension_version: chrome.runtime.getManifest?.().version || null
-    };
-
+    const payload = makeTelemetryPayload(mergedEvent, installId);
     await appendTelemetryOutbox(payload);
-    await flushTelemetryOutbox();
+    await persistActiveTransferTelemetry(mergedEvent.attemptId);
+    initializeTelemetryDelivery();
   });
-
-  if (sanitizedEvent.status === "succeeded" || sanitizedEvent.status === "failed") {
-    work.finally(() => {
-      if (activeTransferTelemetry.get(sanitizedEvent.attemptId)?.status !== "started") {
-        activeTransferTelemetry.delete(sanitizedEvent.attemptId);
-        activeTransferSourceTabs.delete(sanitizedEvent.attemptId);
-      }
-    }).catch(() => {});
-  }
-  return work;
 }
 
-function recordUserCancelledTransfersForTab(tabId) {
+function sameTransferIdentity(first, second) {
+  return first.attemptId === second.attemptId && first.attemptedAt === second.attemptedAt
+    && first.sourcePlatform === second.sourcePlatform && first.destinationPlatform === second.destinationPlatform;
+}
+
+function mergeTransferTelemetryEvents(previous, next) {
+  if (!previous) return next;
+  // First terminal outcome wins as a unit: never produce failed + completed.
+  if (previous.status !== "started") return previous;
+  const stages = [...TELEMETRY_STAGES];
+  return {
+    ...next,
+    lastStage: next.status === "succeeded" ? "completed"
+      : stages.indexOf(previous.lastStage) > stages.indexOf(next.lastStage) ? previous.lastStage : next.lastStage,
+    characterCount: next.characterCount ?? previous.characterCount
+  };
+}
+
+function makeTelemetryPayload(event, installId) {
+  const confirmation = summaryProofs.get(event.attemptId);
+  return {
+    attempt_id: event.attemptId,
+    install_id: installId,
+    attempted_at: event.attemptedAt,
+    source_platform: event.sourcePlatform,
+    destination_platform: event.destinationPlatform,
+    character_count: event.characterCount,
+    status: event.status,
+    last_stage: event.lastStage,
+    failure_reason: event.failureReason,
+    extension_version: event.extensionVersion || chrome.runtime.getManifest?.().version || null,
+    ...(event.completedAt ? { completed_at: event.completedAt } : {}),
+    ...(confirmation ? confirmation : {})
+  };
+}
+
+async function restoreActiveTransferTelemetry() {
+  const activeStorage = chrome.storage.session || chrome.storage.local;
+  const stored = await activeStorage.get(TELEMETRY_ACTIVE_STORAGE_KEY);
+  const entries = stored?.[TELEMETRY_ACTIVE_STORAGE_KEY] || {};
+  const retained = {};
+  activeTransferTelemetry.clear();
+  activeTransferSourceTabs.clear();
+  summaryProofs.clear();
+  for (const [attemptId, entry] of Object.entries(entries)) {
+    const event = sanitizeTransferTelemetryEvent(entry?.event, false);
+    if (!event || event.attemptId !== attemptId) continue;
+    if (!Number.isFinite(entry.expiresAt) || entry.expiresAt <= Date.now()) {
+      if (event.status === "started") await recordTelemetryDiagnostic("outcome_unknown", makeTelemetryPayload(event, null));
+      continue;
+    }
+    retained[attemptId] = { event, tabId: Number.isInteger(entry.tabId) ? entry.tabId : null, expiresAt: entry.expiresAt };
+    activeTransferTelemetry.set(attemptId, event);
+    if (Number.isInteger(entry.tabId)) activeTransferSourceTabs.set(attemptId, entry.tabId);
+    const confirmation = sanitizeSummaryConfirmation(entry);
+    if (confirmation) {
+      summaryProofs.set(attemptId, confirmation);
+      Object.assign(retained[attemptId], confirmation);
+    }
+  }
+  await activeStorage.set({ [TELEMETRY_ACTIVE_STORAGE_KEY]: retained });
+}
+
+async function persistActiveTransferTelemetry(attemptId) {
+  const activeStorage = chrome.storage.session || chrome.storage.local;
+  const stored = await activeStorage.get(TELEMETRY_ACTIVE_STORAGE_KEY);
+  const entries = stored?.[TELEMETRY_ACTIVE_STORAGE_KEY] || {};
+  const currentEvent = activeTransferTelemetry.get(attemptId);
+  const currentSourceTabId = activeTransferSourceTabs.get(attemptId);
+  const currentConfirmation = summaryProofs.get(attemptId);
+  for (const [id, entry] of Object.entries(entries)) {
+    if (entry?.expiresAt > Date.now()) continue;
+    const event = sanitizeTransferTelemetryEvent(entry?.event, false);
+    if (event?.status === "started") await recordTelemetryDiagnostic("outcome_unknown", makeTelemetryPayload(event, null));
+    delete entries[id];
+    activeTransferTelemetry.delete(id);
+    activeTransferSourceTabs.delete(id);
+    summaryProofs.delete(id);
+  }
+  if (currentEvent) entries[attemptId] = {
+    event: currentEvent,
+    tabId: currentSourceTabId ?? null,
+    expiresAt: Date.now() + TELEMETRY_ACTIVE_MAX_AGE_MS,
+    ...(currentConfirmation || {})
+  };
+  if (currentEvent) activeTransferTelemetry.set(attemptId, currentEvent);
+  if (Number.isInteger(currentSourceTabId)) activeTransferSourceTabs.set(attemptId, currentSourceTabId);
+  if (currentConfirmation) summaryProofs.set(attemptId, currentConfirmation);
+  while (Object.keys(entries).length > TELEMETRY_OUTBOX_MAX_ENTRIES) {
+    const oldestId = Object.keys(entries).find(id => entries[id].event?.status !== "started") || Object.keys(entries)[0];
+    const removed = entries[oldestId];
+    if (removed.event?.status === "started") await recordTelemetryDiagnostic("outcome_unknown", makeTelemetryPayload(removed.event, null));
+    delete entries[oldestId];
+    activeTransferTelemetry.delete(oldestId);
+    activeTransferSourceTabs.delete(oldestId);
+    summaryProofs.delete(oldestId);
+  }
+  await activeStorage.set({ [TELEMETRY_ACTIVE_STORAGE_KEY]: entries });
+}
+
+async function recordUserCancelledTransfersForTab(tabId) {
+  await enqueueTelemetryWork(() => restoreActiveTransferTelemetry());
+  const work = [];
   for (const [attemptId, sourceTabId] of activeTransferSourceTabs.entries()) {
     if (sourceTabId !== tabId) continue;
     const active = activeTransferTelemetry.get(attemptId);
@@ -228,12 +349,13 @@ function recordUserCancelledTransfersForTab(tabId) {
 
     // Closing the source tab is the one unambiguous user-side cancellation
     // signal available after a transfer has started.
-    recordTransferTelemetry({
+    work.push(recordTransferTelemetry({
       ...active,
       status: "failed",
       failureReason: "user_cancelled"
-    }).catch(() => {});
+    }));
   }
+  await Promise.all(work);
 }
 
 function recordKnownTransferTelemetryStage(attemptId, lastStage) {
@@ -247,7 +369,7 @@ function recordKnownTransferTelemetryStage(attemptId, lastStage) {
   }).catch(() => {});
 }
 
-function sanitizeTransferTelemetryEvent(event) {
+function sanitizeTransferTelemetryEvent(event, captureCompletionTime = true) {
   if (!event || typeof event !== "object") return null;
   if (!isUuid(event.attemptId)) return null;
   if (!TELEMETRY_PLATFORMS.has(event.sourcePlatform)) return null;
@@ -278,7 +400,12 @@ function sanitizeTransferTelemetryEvent(event) {
     characterCount,
     status: event.status,
     lastStage: event.lastStage,
-    failureReason
+    failureReason,
+    ...(!captureCompletionTime && typeof event.extensionVersion === "string" && /^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/.test(event.extensionVersion)
+      ? { extensionVersion: event.extensionVersion } : {}),
+    ...(event.status !== "started" && (event.completedAt || captureCompletionTime)
+      ? { completedAt: Number.isFinite(Date.parse(event.completedAt || ""))
+        ? new Date(event.completedAt).toISOString() : new Date().toISOString() } : {})
   };
 }
 
@@ -303,44 +430,213 @@ async function getOrCreateTelemetryInstallId() {
   }
 }
 
-// Always reread durable storage; the post-delivery read must preserve newly queued entries.
+// This function is called only on the storage chain. Legacy entries without
+// queuedAt get their retention clock on upgrade, preserving existing reports.
 async function readTelemetryOutbox() {
   const stored = await chrome.storage.local.get(TELEMETRY_OUTBOX_STORAGE_KEY);
-  return Array.isArray(stored?.[TELEMETRY_OUTBOX_STORAGE_KEY])
+  const entries = Array.isArray(stored?.[TELEMETRY_OUTBOX_STORAGE_KEY])
     ? stored[TELEMETRY_OUTBOX_STORAGE_KEY]
     : [];
+  const retained = [];
+  for (const entry of entries) {
+    const payload = sanitizeStoredTelemetryPayload(entry?.payload);
+    if (!entry?.deliveryId || typeof entry.deliveryId !== "string" || !payload) {
+      await recordTelemetryDiagnostic("quarantined_local", entry?.payload);
+      continue;
+    }
+    const queuedAt = Number.isFinite(entry.queuedAt) ? entry.queuedAt : Date.now();
+    if (queuedAt <= Date.now() - TELEMETRY_OUTBOX_MAX_AGE_MS) {
+      await recordTelemetryDiagnostic(payload.status === "started" ? "expired_progress" : "expired_terminal", payload);
+      continue;
+    }
+    const previousIndex = retained.findIndex(item => item.payload.attempt_id === payload.attempt_id);
+    if (previousIndex !== -1 && samePayloadIdentity(retained[previousIndex].payload, payload)) {
+      const previous = retained[previousIndex];
+      retained[previousIndex] = {
+        ...entry, payload: mergeTelemetryPayloads(previous.payload, payload), queuedAt: Math.min(previous.queuedAt, queuedAt)
+      };
+    } else retained.push({ deliveryId: entry.deliveryId, payload, queuedAt });
+  }
+  while (retained.length > TELEMETRY_OUTBOX_MAX_ENTRIES) {
+    const progressIndex = retained.findIndex(entry => telemetryDeliveryPriority(entry.payload) === 0);
+    const confirmationIndex = retained.findIndex(entry => telemetryDeliveryPriority(entry.payload) === 1);
+    const removed = retained.splice(progressIndex !== -1 ? progressIndex : confirmationIndex !== -1 ? confirmationIndex : 0, 1)[0];
+    await recordTelemetryDiagnostic(removed.payload.status !== "started" ? "overflow_terminal"
+      : removed.payload.summary_proof ? "overflow_confirmation" : "overflow_progress", removed.payload);
+  }
+  if (JSON.stringify(entries) !== JSON.stringify(retained)) {
+    await chrome.storage.local.set({ [TELEMETRY_OUTBOX_STORAGE_KEY]: retained });
+  }
+  return retained;
 }
 
 async function appendTelemetryOutbox(payload) {
   const outbox = await readTelemetryOutbox();
-  outbox.push({ deliveryId: crypto.randomUUID(), payload });
+  const previousIndex = outbox.findIndex(entry => entry.payload.attempt_id === payload.attempt_id);
+  if (previousIndex !== -1 && !samePayloadIdentity(outbox[previousIndex].payload, payload)) {
+    await recordTelemetryDiagnostic("identity_conflict", payload);
+    return;
+  }
+  const previous = previousIndex === -1 ? null : outbox[previousIndex];
+  const mergedPayload = previous ? mergeTelemetryPayloads(previous.payload, payload) : payload;
+  if (previous && JSON.stringify(previous.payload) === JSON.stringify(mergedPayload)) return;
+  const entry = {
+    // A revision gets a new delivery ID so an in-flight acknowledgement cannot
+    // remove a newer terminal report or proof appended during its request.
+    deliveryId: crypto.randomUUID(),
+    payload: mergedPayload,
+    queuedAt: previous?.queuedAt ?? Date.now()
+  };
+  if (previousIndex === -1) outbox.push(entry);
+  else outbox[previousIndex] = entry;
   await chrome.storage.local.set({ [TELEMETRY_OUTBOX_STORAGE_KEY]: outbox });
+  await readTelemetryOutbox();
 }
 
 async function flushTelemetryOutbox() {
   while (true) {
-    const outbox = await readTelemetryOutbox();
-    const next = outbox[0];
-
-    if (!next?.deliveryId || !next?.payload) {
-      if (outbox.length) {
-        await chrome.storage.local.set({ [TELEMETRY_OUTBOX_STORAGE_KEY]: outbox.slice(1) });
-        continue;
+    const next = await enqueueTelemetryWork(async () => {
+      const outbox = await readTelemetryOutbox();
+      const diagnostics = await readTelemetryDiagnostics();
+      if (!outbox.length) return null;
+      if (diagnostics.retry?.nextAttemptAt > Date.now()) {
+        chrome.alarms.create(TELEMETRY_RETRY_ALARM, { when: diagnostics.retry.nextAttemptAt });
+        return false;
       }
+      return outbox.reduce((selected, entry) => !selected || telemetryDeliveryPriority(entry.payload) > telemetryDeliveryPriority(selected.payload)
+        ? entry : selected, null);
+    });
+    if (next === false) return;
+    if (!next) {
       await chrome.alarms.clear(TELEMETRY_RETRY_ALARM);
       return;
     }
 
-    if (!await deliverTelemetryPayload(next.payload)) {
-      chrome.alarms.create(TELEMETRY_RETRY_ALARM, { delayInMinutes: TELEMETRY_RETRY_DELAY_MINUTES });
+    const result = await deliverTelemetryPayload(next.payload);
+    if (result.kind === "retry" || result.kind === "configuration") {
+      await enqueueTelemetryWork(() => scheduleTelemetryRetry(result));
       return;
     }
 
-    const currentOutbox = await readTelemetryOutbox();
-    await chrome.storage.local.set({
-      [TELEMETRY_OUTBOX_STORAGE_KEY]: currentOutbox.filter((entry) => entry?.deliveryId !== next.deliveryId)
+    await enqueueTelemetryWork(async () => {
+      const currentOutbox = await readTelemetryOutbox();
+      await chrome.storage.local.set({
+        [TELEMETRY_OUTBOX_STORAGE_KEY]: currentOutbox.filter(entry => entry.deliveryId !== next.deliveryId)
+      });
+      await recordTelemetryDiagnostic(result.kind === "delivered" ? "delivered" : "quarantined_remote", next.payload, result);
+      const diagnostics = await readTelemetryDiagnostics();
+      delete diagnostics.retry;
+      await chrome.storage.local.set({ [TELEMETRY_DIAGNOSTICS_STORAGE_KEY]: diagnostics });
     });
   }
+}
+
+function telemetryDeliveryPriority(payload) {
+  return payload.status !== "started" ? 2 : payload.summary_proof ? 1 : 0;
+}
+
+function samePayloadIdentity(first, second) {
+  return first.attempt_id === second.attempt_id && first.install_id === second.install_id
+    && first.attempted_at === second.attempted_at && first.source_platform === second.source_platform
+    && first.destination_platform === second.destination_platform;
+}
+
+function mergeTelemetryPayloads(previous, next) {
+  const terminal = previous.status !== "started";
+  const stages = [...TELEMETRY_STAGES];
+  const previousProof = sanitizeSummaryConfirmation(previous);
+  const nextProof = sanitizeSummaryConfirmation(next);
+  const useNextProof = nextProof && (!previousProof || nextProof.summary_confirmed_at || !previousProof.summary_confirmed_at);
+  const proof = useNextProof ? nextProof : previousProof;
+  const merged = {
+    ...next,
+    status: terminal ? previous.status : next.status,
+    last_stage: terminal ? previous.last_stage : next.status === "succeeded" ? "completed"
+      : stages.indexOf(previous.last_stage) > stages.indexOf(next.last_stage) ? previous.last_stage : next.last_stage,
+    failure_reason: terminal ? previous.failure_reason : next.failure_reason,
+    // Late incomplete progress cannot erase the known captured count or the
+    // extension version authenticated by an already generated receipt.
+    character_count: previous.summary_proof ? previous.character_count : next.character_count ?? previous.character_count,
+    // Keep a proof paired with the version it authenticated, including an
+    // in-flight backend response created across an extension update.
+    extension_version: useNextProof ? next.extension_version : previous.extension_version,
+    ...(terminal && previous.completed_at ? { completed_at: previous.completed_at } : {}),
+    ...(proof || {})
+  };
+  if (proof && !proof.summary_confirmed_at) delete merged.summary_confirmed_at;
+  if (terminal && !previous.completed_at) delete merged.completed_at;
+  return merged;
+}
+
+function sanitizeSummaryConfirmation(input) {
+  if (typeof input?.summary_proof !== "string" || !/^[0-9a-f]{64}$/.test(input.summary_proof)) return null;
+  if (input.summary_confirmed_at !== undefined && !Number.isFinite(Date.parse(input.summary_confirmed_at))) return null;
+  return {
+    summary_proof: input.summary_proof,
+    ...(input.summary_confirmed_at ? { summary_confirmed_at: new Date(input.summary_confirmed_at).toISOString() } : {})
+  };
+}
+
+function sanitizeStoredTelemetryPayload(payload) {
+  const keys = new Set(["attempt_id", "install_id", "attempted_at", "source_platform", "destination_platform",
+    "character_count", "status", "last_stage", "failure_reason", "extension_version", "summary_proof", "completed_at", "summary_confirmed_at"]);
+  if (!payload || typeof payload !== "object" || Array.isArray(payload) || Object.keys(payload).some(key => !keys.has(key))) return null;
+  if (!isUuid(payload.install_id) || typeof payload.extension_version !== "string"
+    || !/^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/.test(payload.extension_version)) return null;
+  const event = sanitizeTransferTelemetryEvent({
+    attemptId: payload.attempt_id, attemptedAt: payload.attempted_at, sourcePlatform: payload.source_platform,
+    destinationPlatform: payload.destination_platform, characterCount: payload.character_count,
+    status: payload.status, lastStage: payload.last_stage, failureReason: payload.failure_reason, completedAt: payload.completed_at
+  }, false);
+  if (!event || (payload.completed_at !== undefined && (payload.status === "started" || !Number.isFinite(Date.parse(payload.completed_at))))) return null;
+  const confirmation = sanitizeSummaryConfirmation(payload);
+  if ((payload.summary_proof !== undefined || payload.summary_confirmed_at !== undefined) && !confirmation) return null;
+  return {
+    attempt_id: event.attemptId, install_id: payload.install_id, attempted_at: event.attemptedAt,
+    source_platform: event.sourcePlatform, destination_platform: event.destinationPlatform,
+    character_count: event.characterCount, status: event.status, last_stage: event.lastStage,
+    failure_reason: event.failureReason, extension_version: payload.extension_version,
+    ...(event.completedAt ? { completed_at: event.completedAt } : {}), ...(confirmation || {})
+  };
+}
+
+async function readTelemetryDiagnostics() {
+  const stored = await chrome.storage.local.get(TELEMETRY_DIAGNOSTICS_STORAGE_KEY);
+  const diagnostics = stored?.[TELEMETRY_DIAGNOSTICS_STORAGE_KEY];
+  return diagnostics && typeof diagnostics === "object" ? diagnostics : { counts: {}, recent: [] };
+}
+
+async function recordTelemetryDiagnostic(reason, payload, result = {}) {
+  const diagnostics = await readTelemetryDiagnostics();
+  diagnostics.counts = diagnostics.counts || {};
+  diagnostics.counts[reason] = Math.min(Number.MAX_SAFE_INTEGER, (diagnostics.counts[reason] || 0) + 1);
+  // Only fixed enums and bounded metadata enter diagnostics. Rejected arbitrary
+  // payloads, server bodies, proofs and errors never get copied into this log.
+  const event = {
+    at: new Date().toISOString(), reason,
+    ...(isUuid(payload?.attempt_id) ? { attemptId: payload.attempt_id } : {}),
+    ...(TELEMETRY_STATUSES.has(payload?.status) ? { status: payload.status } : {}),
+    ...(TELEMETRY_STAGES.has(payload?.last_stage) ? { lastStage: payload.last_stage } : {}),
+    ...(TELEMETRY_FAILURE_REASONS.has(payload?.failure_reason) ? { failureReason: payload.failure_reason } : {}),
+    ...(typeof payload?.summary_proof === "string" && /^[0-9a-f]{64}$/.test(payload.summary_proof) ? { summaryConfirmed: true } : {}),
+    ...(Number.isInteger(result.status) && result.status >= 100 && result.status <= 599 ? { httpStatus: result.status } : {})
+  };
+  if (reason !== "delivered") diagnostics.recent = [...(diagnostics.recent || []), event].slice(-TELEMETRY_DIAGNOSTICS_MAX_ENTRIES);
+  diagnostics.lastDelivery = reason === "delivered" ? event : diagnostics.lastDelivery;
+  await chrome.storage.local.set({ [TELEMETRY_DIAGNOSTICS_STORAGE_KEY]: diagnostics });
+}
+
+async function scheduleTelemetryRetry(result) {
+  const diagnostics = await readTelemetryDiagnostics();
+  const failures = Math.min(12, (diagnostics.retry?.failures || 0) + 1);
+  const base = result.kind === "configuration" ? TELEMETRY_CONFIG_RETRY_BASE_MS : TELEMETRY_RETRY_BASE_MS;
+  const exponential = Math.min(TELEMETRY_RETRY_MAX_MS, base * 2 ** (failures - 1));
+  const delayMs = Math.min(TELEMETRY_RETRY_MAX_MS, Math.max(result.retryAfterMs || 0, exponential * (0.75 + Math.random() * 0.5)));
+  const nextAttemptAt = Date.now() + Math.max(TELEMETRY_RETRY_BASE_MS, Math.round(delayMs));
+  diagnostics.retry = { failures, nextAttemptAt, kind: result.kind, ...(result.status ? { httpStatus: result.status } : {}) };
+  await chrome.storage.local.set({ [TELEMETRY_DIAGNOSTICS_STORAGE_KEY]: diagnostics });
+  await recordTelemetryDiagnostic(result.kind === "configuration" ? "configuration_retry" : "transient_retry", null, result);
+  chrome.alarms.create(TELEMETRY_RETRY_ALARM, { when: nextAttemptAt });
 }
 
 async function deliverTelemetryPayload(payload) {
@@ -357,9 +653,26 @@ async function deliverTelemetryPayload(payload) {
       body: JSON.stringify(payload),
       signal: controller.signal
     });
-    return response.ok;
+    if (response.ok) return { kind: "delivered", status: response.status };
+    const status = response.status;
+    let code = null;
+    try {
+      const body = await response.json();
+      if (typeof body?.code === "string") code = body.code;
+    } catch {}
+    if ([400, 413, 415, 422].includes(status) || (status === 409 && code === "attempt_identity_mismatch")) {
+      return { kind: "quarantined", status };
+    }
+    const retryAfter = response.headers?.get?.("retry-after");
+    const seconds = Number(retryAfter);
+    const retryAfterMs = retryAfter && Number.isFinite(seconds) ? Math.max(0, seconds * 1000)
+      : retryAfter && Number.isFinite(Date.parse(retryAfter)) ? Math.max(0, Date.parse(retryAfter) - Date.now()) : 0;
+    return {
+      kind: [401, 403, 404, 405].includes(status) || (status === 503 && code === "telemetry_unavailable") ? "configuration" : "retry",
+      status, retryAfterMs: Math.min(TELEMETRY_RETRY_MAX_MS, retryAfterMs)
+    };
   } catch {
-    return false;
+    return { kind: "retry" };
   } finally {
     clearTimeout(timeout);
   }
@@ -534,6 +847,17 @@ async function fetchSummaryFromBackend(conversationText, transferId = null) {
   const stopServiceWorkerKeepAlive = startSummaryServiceWorkerKeepAlive();
 
   try {
+    const telemetry = await enqueueTelemetryWork(async () => {
+      await restoreActiveTransferTelemetry();
+      const active = activeTransferTelemetry.get(transferId);
+      if (!active || active.status !== "started") return null;
+      // Older workers persisted active events without a version. An existing
+      // outbox envelope is the best available identity across an update.
+      const queuedIdentity = (await readTelemetryOutbox()).find(entry => entry.payload.attempt_id === transferId)?.payload;
+      active.extensionVersion = queuedIdentity?.extension_version || active.extensionVersion || chrome.runtime.getManifest?.().version || null;
+      await persistActiveTransferTelemetry(transferId);
+      return makeTelemetryPayload(active, await getOrCreateTelemetryInstallId());
+    });
     const fetchStartedAt = nowMs();
     const response = await fetch(SUMMARY_BACKEND_URL, {
       method: "POST",
@@ -541,7 +865,7 @@ async function fetchSummaryFromBackend(conversationText, transferId = null) {
         "Content-Type": "application/json",
         "X-Cap-Context-Client": SUMMARY_CLIENT_HEADER
       },
-      body: JSON.stringify({ conversation: conversationText }),
+      body: JSON.stringify({ conversation: conversationText, ...(telemetry ? { telemetry } : {}) }),
       signal: controller.signal
     });
     recordKnownTransferTelemetryStage(transferId, "summary_response_started");
@@ -558,6 +882,21 @@ async function fetchSummaryFromBackend(conversationText, transferId = null) {
       throw createSummaryBackendPayloadError(data, data?.status || response.status);
     }
     if (!data.summary?.trim()) throw new Error("Backup summarizer returned no summary.");
+    const confirmation = sanitizeSummaryConfirmation({
+      summary_proof: data.summaryProofV2 || data.summaryProof,
+      ...(data.summaryProofV2 ? { summary_confirmed_at: data.summaryConfirmedAt } : {})
+    });
+    if (telemetry && confirmation) {
+      // A summary may finish after its source tab closes. Its receipt confirms
+      // generation, never a paste, and survives even if the worker stops next.
+      await enqueueTelemetryWork(async () => {
+        const active = activeTransferTelemetry.get(transferId);
+        if (active) summaryProofs.set(transferId, confirmation);
+        await appendTelemetryOutbox({ ...telemetry, last_stage: "summary_completed", ...confirmation });
+        if (active) await persistActiveTransferTelemetry(transferId);
+        initializeTelemetryDelivery();
+      });
+    }
 
     const summary = data.summary.trim();
     const timing = {

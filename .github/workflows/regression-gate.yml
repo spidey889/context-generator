@@ -39,6 +39,23 @@ jobs:
       - name: Long capture regressions
         run: npm run test:slow
 
+  database-regression:
+    name: Database migrations and telemetry invariants
+    if: github.event_name != 'schedule'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+      - name: Install pinned local database test engine
+        run: npm install --prefix "$RUNNER_TEMP/cap-context-db-check" --no-audit --no-fund @electric-sql/pglite@0.5.8
+      - name: Replay real SQL and verify telemetry contracts
+        env:
+          PGLITE_MODULE_PATH: ${{ runner.temp }}/cap-context-db-check/node_modules/@electric-sql/pglite
+        run: node scripts/check-verified-telemetry-db.js
+
   production-evaluation:
     name: Live production summary check
     # This probes the deployed API, not the checked-out branch. Keep variable

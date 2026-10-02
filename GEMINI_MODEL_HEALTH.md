@@ -8,7 +8,7 @@ Cap Context keeps a small shared daily status for each Gemini model so Vercel do
 - `exhausted`: the model reached 20 successful summaries, or Gemini explicitly reported a daily quota. Skip it for the rest of the Pacific day.
 - `bad_mood`: the model had three consecutive failed summary attempts. Skip it for the rest of the Pacific day.
 - A success before `bad_mood` resets the consecutive-failure count. Once a model is `bad_mood` or `exhausted`, it stays skipped until the new Pacific day.
-- The model order remains 3.8, 3.7, 3.6, 3.5, then the existing Mistral, Groq, and local-direct safety chain.
+- Provider order and enabled overrides are defined in `LOGIC.md` and `api/summarize.js`; this health store only affects Gemini routes when they are enabled.
 - Gemini `429` responses are not retried against the same model; Cap Context moves to the next model immediately.
 
 The reset is based on `America/Los_Angeles`, not a fixed UTC or India time. A new date-key automatically makes every model available at midnight Pacific, including daylight-saving changes. Old counter keys expire after eight days for short-term diagnosis.
@@ -22,6 +22,8 @@ cap-context:gemini-health:v1:<Pacific YYYY-MM-DD>:<model>
 ```
 
 Each value contains only `status`, `attempts`, `successes`, `failures`, `consecutiveFailures`, `lastOutcome`, and `updatedAt`. An attempt is recorded immediately before calling the model, while its success or failure is recorded afterward. Updates are atomic so separate Vercel Function instances do not overwrite one another.
+
+Twenty successes is a soft routing threshold, not a strict concurrent quota reservation: already-started jobs can finish after the threshold is crossed. Redis calls have a 1.2-second deadline and fail open. Telemetry ingestion uses separate short-lived `cap-context:telemetry-limit:v1:` budget keys and never changes these model-health records.
 
 ## Vercel production setup
 

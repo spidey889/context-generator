@@ -84,7 +84,7 @@ function loadTelemetryBackground(fetchImpl, initialStorage = {}, manifestVersion
     storage,
     listeners,
     async sendTelemetry(event, sourceTabId = 7) {
-      return new Promise((resolve, reject) => {
+      const response = await new Promise((resolve, reject) => {
         const keepsChannelOpen = listeners.message(
           { type: "RECORD_TRANSFER_TELEMETRY", event },
           { tab: { id: sourceTabId } },
@@ -92,9 +92,18 @@ function loadTelemetryBackground(fetchImpl, initialStorage = {}, manifestVersion
         );
         if (keepsChannelOpen !== true) reject(new Error("telemetry listener did not keep the channel open"));
       });
+      await this.drain();
+      return response;
     },
-    drain() {
-      return new vm.Script("telemetryWorkChain").runInContext(sandbox);
+    async drain() {
+      // Delivery is separate from persistence; wait for both chains and any
+      // follow-up storage tasks enqueued while a request was completing.
+      for (let round = 0; round < 10; round += 1) {
+        const chains = new vm.Script("[telemetryWorkChain, telemetryDeliveryChain]").runInContext(sandbox);
+        await Promise.all(chains);
+        const next = new vm.Script("[telemetryWorkChain, telemetryDeliveryChain]").runInContext(sandbox);
+        if (chains[0] === next[0] && chains[1] === next[1]) return;
+      }
     }
   };
 }
@@ -267,7 +276,7 @@ test("extension sends telemetry only to the Vercel backend without Supabase cred
   assert.equal(requests[0].options.headers.apikey, undefined);
 });
 
-test("failed delivery keeps ordered operations and startup retries them", async () => {
+test("failed delivery compacts progress into its terminal outcome and retries after backoff", async () => {
   let online = false;
   const requests = [];
   const background = loadTelemetryBackground(async (_url, options) => {
@@ -287,22 +296,20 @@ test("failed delivery keeps ordered operations and startup retries them", async 
     lastStage: "summary_response_started",
     failureReason: "summary_service_busy"
   }));
-  assert.equal(background.storage["context-generator-telemetry-outbox-v1"].length, 4);
+  assert.equal(background.storage["context-generator-telemetry-outbox-v1"].length, 1);
 
   online = true;
+  background.storage["context-generator-telemetry-diagnostics-v1"].retry.nextAttemptAt = Date.now() - 1;
   background.listeners.startup();
   await background.drain();
 
   const delivered = requests.filter((request) => request.online).map((request) => request.payload);
   assert.deepEqual(delivered.map(({ last_stage: lastStage }) => lastStage), [
-    "intent_started",
-    "capture_started",
-    "capture_completed",
     "summary_response_started"
   ]);
   assert.ok(delivered.every(({ attempt_id: attemptId }) => attemptId === delivered[0].attempt_id));
-  assert.equal(delivered[3].status, "failed");
-  assert.equal(delivered[3].failure_reason, "summary_service_busy");
+  assert.equal(delivered[0].status, "failed");
+  assert.equal(delivered[0].failure_reason, "summary_service_busy");
   assert.deepEqual(background.storage["context-generator-telemetry-outbox-v1"], []);
 });
 
@@ -369,16 +376,20 @@ test("Vercel forwards valid telemetry with server-only Supabase credentials", as
   const originalFetch = global.fetch;
   const originalUrl = process.env.SUPABASE_TELEMETRY_FUNCTION_URL;
   const originalKey = process.env.SUPABASE_TELEMETRY_PUBLISHABLE_KEY;
+  const originalRelaySecret = process.env.TELEMETRY_RELAY_SECRET;
   t.after(() => {
     global.fetch = originalFetch;
     if (originalUrl === undefined) delete process.env.SUPABASE_TELEMETRY_FUNCTION_URL;
     else process.env.SUPABASE_TELEMETRY_FUNCTION_URL = originalUrl;
     if (originalKey === undefined) delete process.env.SUPABASE_TELEMETRY_PUBLISHABLE_KEY;
     else process.env.SUPABASE_TELEMETRY_PUBLISHABLE_KEY = originalKey;
+    if (originalRelaySecret === undefined) delete process.env.TELEMETRY_RELAY_SECRET;
+    else process.env.TELEMETRY_RELAY_SECRET = originalRelaySecret;
   });
 
   process.env.SUPABASE_TELEMETRY_FUNCTION_URL = "https://example.supabase.co/functions/v1/transfer-telemetry";
   process.env.SUPABASE_TELEMETRY_PUBLISHABLE_KEY = "server-only-key";
+  process.env.TELEMETRY_RELAY_SECRET = "server-only-relay-secret-0123456789abcdef";
   const upstreamRequests = [];
   global.fetch = async (url, options) => {
     upstreamRequests.push({ url, options });
@@ -392,6 +403,7 @@ test("Vercel forwards valid telemetry with server-only Supabase credentials", as
   assert.equal(upstreamRequests.length, 1);
   assert.equal(upstreamRequests[0].url, process.env.SUPABASE_TELEMETRY_FUNCTION_URL);
   assert.equal(upstreamRequests[0].options.headers.apikey, "server-only-key");
+  assert.equal(upstreamRequests[0].options.headers["X-Cap-Context-Relay"], process.env.TELEMETRY_RELAY_SECRET);
   assert.deepEqual(JSON.parse(upstreamRequests[0].options.body), payload);
 });
 
@@ -414,20 +426,24 @@ test("Vercel returns a retryable failure when Supabase delivery fails", async (t
   const originalFetch = global.fetch;
   const originalUrl = process.env.SUPABASE_TELEMETRY_FUNCTION_URL;
   const originalKey = process.env.SUPABASE_TELEMETRY_PUBLISHABLE_KEY;
+  const originalRelaySecret = process.env.TELEMETRY_RELAY_SECRET;
   t.after(() => {
     global.fetch = originalFetch;
     if (originalUrl === undefined) delete process.env.SUPABASE_TELEMETRY_FUNCTION_URL;
     else process.env.SUPABASE_TELEMETRY_FUNCTION_URL = originalUrl;
     if (originalKey === undefined) delete process.env.SUPABASE_TELEMETRY_PUBLISHABLE_KEY;
     else process.env.SUPABASE_TELEMETRY_PUBLISHABLE_KEY = originalKey;
+    if (originalRelaySecret === undefined) delete process.env.TELEMETRY_RELAY_SECRET;
+    else process.env.TELEMETRY_RELAY_SECRET = originalRelaySecret;
   });
   process.env.SUPABASE_TELEMETRY_FUNCTION_URL = "https://example.supabase.co/functions/v1/transfer-telemetry";
   process.env.SUPABASE_TELEMETRY_PUBLISHABLE_KEY = "server-only-key";
+  process.env.TELEMETRY_RELAY_SECRET = "server-only-relay-secret-0123456789abcdef";
   global.fetch = async () => ({ ok: false, status: 500 });
 
   const res = await invokeTelemetryHandler(makeTelemetryPayload());
   assert.equal(res.statusCode, 503);
-  assert.equal(res.body.code, "telemetry_unavailable");
+  assert.equal(res.body.code, "telemetry_upstream_unavailable");
 });
 
 test("transfer flow emits each closed telemetry stage without attaching content", () => {

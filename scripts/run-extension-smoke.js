@@ -6,6 +6,7 @@ const path = require("node:path");
 const vm = require("node:vm");
 const { spawn } = require("node:child_process");
 const { fixtures: networkFixtures, rpcFrame } = require("../test/network-json-fixtures");
+const { createTelemetrySmokeFixture } = require("./telemetry-smoke-fixture");
 
 const REPO_ROOT = path.resolve(__dirname, "..");
 const SOURCE_SENTINEL = "SMOKE_USER_SENTINEL: preserve the deployment checklist.";
@@ -46,6 +47,7 @@ const CHATGPT_FAILURE_SMOKE = JSON_SOURCE === "chatgpt" ? process.env.CAP_CONTEX
 const CHATGPT_PASTE_AUTH_SMOKE = JSON_SOURCE === "chatgpt" && process.env.CAP_CONTEXT_CHATGPT_AUTH_SMOKE === "paste401";
 const CLAUDE_PARTIAL_SMOKE = JSON_SOURCE === "claude" && process.env.CAP_CONTEXT_CLAUDE_PARTIAL_SMOKE === "1";
 const JSON_FALLBACK_SMOKE = Boolean(CHATGPT_FAILURE_SMOKE || CLAUDE_PARTIAL_SMOKE || NETWORK_FAILURE);
+const TELEMETRY_DATABASE_SMOKE = process.env.CAP_CONTEXT_TELEMETRY_SMOKE === "1";
 
 class CdpSession {
   constructor(socket) {
@@ -53,9 +55,16 @@ class CdpSession {
     this.sequence = 0;
     this.pending = new Map();
     this.events = [];
+    this.executionContexts = new Map();
     socket.addEventListener("message", (event) => {
       const message = JSON.parse(String(event.data));
       if (!message.id) {
+        if (message.method === "Runtime.executionContextCreated") {
+          const context = message.params?.context;
+          if (context) this.executionContexts.set(context.id, context);
+        }
+        if (message.method === "Runtime.executionContextDestroyed") this.executionContexts.delete(message.params?.executionContextId);
+        if (message.method === "Runtime.executionContextsCleared") this.executionContexts.clear();
         this.events.push(message);
         if (this.events.length > 100) this.events.shift();
         return;
@@ -126,6 +135,10 @@ class CdpSession {
 
   getRecentEvents() {
     return this.events.slice(-30);
+  }
+
+  getExtensionContextId() {
+    return [...this.executionContexts.values()].filter(context => context.origin?.startsWith("chrome-extension://")).at(-1)?.id;
   }
 }
 
@@ -217,6 +230,12 @@ async function createSmokeExtension(tempRoot, origin) {
     'const SUMMARY_BACKEND_URL = "https://context-generator-five.vercel.app/api/summarize";',
     `const SUMMARY_BACKEND_URL = ${JSON.stringify(`${origin}/api/summarize`)};`,
     "the summary backend URL"
+  );
+  backgroundSource = replaceOnce(
+    backgroundSource,
+    'const TELEMETRY_ENDPOINT_URL = "https://context-generator-five.vercel.app/api/telemetry";',
+    `const TELEMETRY_ENDPOINT_URL = ${JSON.stringify(`${origin}/api/telemetry`)};`,
+    "the telemetry backend URL"
   );
   for (const [platformId, productionUrl] of Object.entries(platformUrls)) {
     backgroundSource = replaceOnce(
@@ -425,6 +444,8 @@ function chatGptTreeFixture() {
 
 async function startFixtureServer() {
   const state = { summaryRequests: [], jsonRequests: 0, sessionRequests: 0, pasteDescriptorRequests: 0, pasteContentRequests: 0, chatgptRequestUrls: [], claudeRequestUrls: [] };
+  const telemetryFixture = await createTelemetrySmokeFixture(REPO_ROOT, TELEMETRY_DATABASE_SMOKE);
+  state.telemetryRequests = telemetryFixture.received;
   const network = NETWORK_SOURCE ? networkFixtures(JSON_SOURCE) : null;
   const server = http.createServer(async (request, response) => {
     const url = new URL(request.url, "http://127.0.0.1");
@@ -483,14 +504,23 @@ async function startFixtureServer() {
       let rawBody = "";
       for await (const chunk of request) rawBody += chunk;
       state.summaryRequests.push(JSON.parse(rawBody));
+      const receipt = await telemetryFixture.signSummary(state.summaryRequests.at(-1)?.telemetry);
       response.writeHead(200, {
         "Access-Control-Allow-Origin": "*",
         "Content-Type": "application/json"
       });
       response.end(JSON.stringify({
         summary: SUMMARY_TEXT,
+        ...receipt,
         timing: { inputChars: state.summaryRequests.at(-1)?.conversation?.length || 0, servedBy: "smoke-stub" }
       }));
+      return;
+    }
+    if (request.method === "POST" && ["/api/telemetry", "/smoke/transfer-telemetry"].includes(url.pathname)) {
+      let rawBody = "";
+      for await (const chunk of request) rawBody += chunk;
+      if (url.pathname === "/api/telemetry") await telemetryFixture.handleTelemetry(request, response, rawBody);
+      else await telemetryFixture.handleEdge(request, response, rawBody);
       return;
     }
     if (url.pathname === "/api/auth/session") {
@@ -594,10 +624,13 @@ async function startFixtureServer() {
     server.listen(0, "127.0.0.1", resolve);
   });
   const address = server.address();
+  const origin = `http://127.0.0.1:${address.port}`;
+  telemetryFixture.configure(origin);
   return {
     server,
     state,
-    origin: `http://127.0.0.1:${address.port}`
+    origin,
+    telemetryFixture
   };
 }
 
@@ -737,7 +770,7 @@ async function verifyEmptyChatError(session, browserSession, state, { removeTurn
 async function run() {
   assert.equal(typeof WebSocket, "function", "This smoke test requires Node.js with the built-in WebSocket client.");
   const braveExecutable = findBraveExecutable();
-  const { server, state, origin } = await startFixtureServer();
+  const { server, state, origin, telemetryFixture } = await startFixtureServer();
   const tempRoot = await fs.promises.mkdtemp(path.join(os.tmpdir(), "cap-context-brave-smoke-"));
   const profileRoot = path.join(tempRoot, "profile");
   let braveProcess = null;
@@ -845,7 +878,8 @@ async function run() {
               .filter(n=>n!==b&&getComputedStyle(n).display!=='none').map(n=>n.getBoundingClientRect());
             const model=document.getElementById('gpt-reasoning'),m=model.getBoundingClientRect();
             const style=getComputedStyle(b);
-            return b.nextElementSibling===model
+            // The shipped branch isolates the native model hover wrapper.
+            return b.nextElementSibling===model.closest('.gpt-model')
               ? {width:parseFloat(style.width),position:style.position,
                  besideModel:r.right<=m.left&&Math.abs((r.top+r.bottom-m.top-m.bottom)/2)<1,
                  overlap:native.some(n=>r.left<n.right&&r.right>n.left&&r.top<n.bottom&&r.bottom>n.top),
@@ -1037,13 +1071,16 @@ async function run() {
         // Keep controls visible while changing only the inline identification.
         await session.evaluate(`(() => {
           if('${platform}'==='gemini')document.querySelector('.trailing-actions-wrapper').classList.remove('trailing-actions-wrapper');
-          else if('${platform}'==='grok')document.querySelector('.query-bar').classList.remove('query-bar');
+          else if('${platform}'==='grok'){
+            window.__providerInlineOwner=document.querySelector('.query-bar');
+            window.__providerInlineOwner.classList.remove('query-bar');
+          }
           else {window.__providerFile=document.querySelector('input[type="file"]');window.__providerFile.remove();}
         })()`);
         await waitFor(()=>session.evaluate(`getComputedStyle(window.__providerPill).position==='absolute'`),`${platform} legacy backup`);
         await session.evaluate(`(() => {
           if('${platform}'==='gemini')window.__providerHiddenGroup.classList.add('trailing-actions-wrapper');
-          else if('${platform}'==='grok')document.querySelector('.native-grok-space').parentElement.classList.add('query-bar');
+          else if('${platform}'==='grok')window.__providerInlineOwner.classList.add('query-bar');
           else window.__providerAnchor.after(window.__providerFile);
         })()`);
         await waitFor(()=>session.evaluate(`getComputedStyle(window.__providerPill).position==='static'
@@ -1431,6 +1468,21 @@ async function run() {
     assert.equal(sendClicks, 0, "The extension must never press the destination Send button.");
     assert.equal(state.summaryRequests.length, 1, "The extension must send exactly one summary request per transfer.");
     process.stdout.write("✓ The exact summary was pasted and Send remained untouched.\n");
+    const summaryContext = state.summaryRequests[0].telemetry;
+    await waitFor(() => state.telemetryRequests.some(payload => payload.attempt_id === summaryContext.attempt_id
+      && payload.status === "succeeded" && payload.last_stage === "completed" && payload.summary_proof
+      && payload.summary_confirmed_at && payload.completed_at), "the installed worker's signed terminal telemetry");
+    const extensionContextId = sourceSession.getExtensionContextId();
+    assert.ok(extensionContextId, "The smoke source must expose its installed extension context.");
+    await waitFor(async () => {
+      const stored = await sourceSession.evaluate(`chrome.storage.local.get("context-generator-telemetry-outbox-v1")`, extensionContextId);
+      return Array.isArray(stored?.["context-generator-telemetry-outbox-v1"]) && stored["context-generator-telemetry-outbox-v1"].length === 0;
+    }, "the installed worker's drained durable telemetry outbox");
+    assert.ok(telemetryFixture.responses.every(status => status === 204), "Every local telemetry report must be accepted.");
+    await telemetryFixture.verifyDatabaseOutcome(summaryContext);
+    process.stdout.write(TELEMETRY_DATABASE_SMOKE
+      ? "✓ Installed worker → Vercel relay → Edge handler → migrated database: verified completion, one count, drained outbox.\n"
+      : "✓ Signed terminal telemetry stayed in the local fixture and the installed worker's outbox drained.\n");
     process.stdout.write("Cap Context Brave extension smoke passed.\n");
   } catch (error) {
     if (sourceSession) {
@@ -1466,6 +1518,7 @@ async function run() {
       await waitForProcessExit(braveProcess, 2000);
     }
     await new Promise((resolve) => server.close(resolve));
+    await telemetryFixture.close();
     const safeTempRoot = path.resolve(tempRoot);
     const safeOsTemp = path.resolve(os.tmpdir());
     if (process.env.CAP_CONTEXT_SMOKE_KEEP_TEMP === "1") {
