@@ -33,8 +33,8 @@ async function createTelemetrySmokeFixture(repoRoot, databaseEnabled) {
         alter default privileges in schema public grant execute on functions to anon, authenticated, service_role;
         create schema cron;
         create table cron.job (jobid bigint generated always as identity, jobname text, schedule text, command text, active boolean default true);
-        create function cron.alter_job(job_id bigint, command text) returns void language sql as $$
-          update cron.job as j set command=$2 where j.jobid=$1; $$;
+        create function cron.alter_job(job_id bigint, schedule text default null, command text default null) returns void language sql as $$
+          update cron.job as j set schedule=coalesce($2,j.schedule),command=coalesce($3,j.command) where j.jobid=$1; $$;
         create function cron.unschedule(bigint) returns boolean language plpgsql as $$
           begin delete from cron.job where jobid=$1; return found; end; $$;
         create function cron.schedule(text, text, text) returns bigint language plpgsql as $$

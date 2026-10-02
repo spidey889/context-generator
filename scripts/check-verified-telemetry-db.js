@@ -56,8 +56,8 @@ async function main() {
       -- the reset command itself is tested; actual scheduling remains hosted.
       create schema cron;
       create table cron.job (jobid bigint generated always as identity, jobname text, schedule text, command text, active boolean default true);
-      create function cron.alter_job(job_id bigint, command text) returns void language sql as $$
-        update cron.job as j set command=$2 where j.jobid=$1; $$;
+      create function cron.alter_job(job_id bigint, schedule text default null, command text default null) returns void language sql as $$
+        update cron.job as j set schedule=coalesce($2,j.schedule),command=coalesce($3,j.command) where j.jobid=$1; $$;
       create function cron.unschedule(bigint) returns boolean language plpgsql as $$
         begin delete from cron.job where jobid = $1; return found; end; $$;
       create function cron.schedule(text, text, text) returns bigint language plpgsql as $$
@@ -274,6 +274,8 @@ async function main() {
       if (name.endsWith("_minimal_users_and_reset.sql")) checks += await checkMinimalUsers(db, sql, appliedMigrations);
       else if (name.endsWith("_format_users_and_famous_names.sql")) {
         checks += await require("./check-users-format-db.js").checkUsersFormat(db, sql);
+      } else if (name.endsWith("_users_daily_ist.sql")) {
+        checks += await require("./check-users-ist-db.js").checkUsersIst(db, sql);
       } else await db.exec(sql);
     }
     console.log(`PASS: ${names.length} real migrations replayed; ${checks} database correctness, data preservation, attribution and privilege checks.`);
