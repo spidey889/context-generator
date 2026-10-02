@@ -39,7 +39,9 @@ const TELEMETRY_KEYS = new Set([
   "last_stage",
   "failure_reason",
   "extension_version",
-  "summary_proof"
+  "summary_proof",
+  "completed_at",
+  "summary_confirmed_at"
 ]);
 
 export function validateTelemetryPayload(input) {
@@ -55,26 +57,30 @@ export function validateTelemetryPayload(input) {
   if (input.status === "succeeded" && input.last_stage !== "completed") return null;
   if (input.status !== "succeeded" && input.last_stage === "completed") return null;
 
-  const attemptedAt = Date.parse(input.attempted_at || "");
-  if (!Number.isFinite(attemptedAt)) return null;
+  const attemptedAt = normalizeTimestamp(input.attempted_at);
+  if (!attemptedAt) return null;
+  const completedAt = input.completed_at === undefined ? undefined : normalizeTimestamp(input.completed_at);
+  const summaryConfirmedAt = input.summary_confirmed_at === undefined ? undefined : normalizeTimestamp(input.summary_confirmed_at);
+  if (input.completed_at !== undefined && (!completedAt || input.status === "started")) return null;
+  if (input.summary_confirmed_at !== undefined && (!summaryConfirmedAt || input.summary_proof === undefined)) return null;
 
   const characterCount = input.character_count === null || input.character_count === undefined
     ? null
-    : Number(input.character_count);
+    : input.character_count;
   if (characterCount !== null && (!Number.isInteger(characterCount) || characterCount < 0 || characterCount > TELEMETRY_MAX_CHARACTER_COUNT)) {
     return null;
   }
 
   const failureReason = input.status === "failed" ? input.failure_reason : null;
   if (input.status === "failed" && !TELEMETRY_FAILURE_REASONS.has(failureReason)) return null;
-  if (typeof input.extension_version !== "string" || !/^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/.test(input.extension_version)) {
+  if (typeof input.extension_version !== "string" || input.extension_version.length > 64 || !/^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/.test(input.extension_version)) {
     return null;
   }
 
   return {
     attempt_id: input.attempt_id,
     install_id: input.install_id,
-    attempted_at: new Date(attemptedAt).toISOString(),
+    attempted_at: attemptedAt,
     source_platform: input.source_platform,
     destination_platform: input.destination_platform,
     character_count: characterCount,
@@ -82,15 +88,22 @@ export function validateTelemetryPayload(input) {
     last_stage: input.last_stage,
     failure_reason: failureReason,
     extension_version: input.extension_version,
-    ...(input.summary_proof !== undefined ? { summary_proof: input.summary_proof } : {})
+    ...(input.summary_proof !== undefined ? { summary_proof: input.summary_proof } : {}),
+    ...(completedAt !== undefined ? { completed_at: completedAt } : {}),
+    ...(summaryConfirmedAt !== undefined ? { summary_confirmed_at: summaryConfirmedAt } : {})
   };
 }
 
-export function selectLatestTelemetryStage(existingStage, incomingStage) {
-  if (!TELEMETRY_STAGES.has(incomingStage)) return null;
-  const existingIndex = TELEMETRY_STAGE_ORDER.indexOf(existingStage);
-  const incomingIndex = TELEMETRY_STAGE_ORDER.indexOf(incomingStage);
-  return existingIndex > incomingIndex ? existingStage : incomingStage;
+function normalizeTimestamp(value) {
+  if (typeof value !== "string") return null;
+  const parts = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.\d{1,3})?(?:Z|[+-](\d{2}):(\d{2}))$/.exec(value);
+  if (!parts) return null;
+  const [year, month, day, hour, minute, second, offsetHour = 0, offsetMinute = 0] = parts.slice(1).map(Number);
+  const leapYear = year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0);
+  const days = [31, leapYear ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+  if (month < 1 || month > 12 || day < 1 || day > days[month - 1] || hour > 23 || minute > 59 || second > 59 || offsetHour > 23 || offsetMinute > 59) return null;
+  const timestamp = Date.parse(value);
+  return Number.isFinite(timestamp) ? new Date(timestamp).toISOString() : null;
 }
 
 function isUuid(value) {

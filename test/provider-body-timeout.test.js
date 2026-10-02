@@ -5,7 +5,15 @@ const { createSummaryWithFallback, getSummaryProfile } = require("../api/summari
 
 for (const openrouterEnabled of [false, true]) {
 for (const status of [200, 429, 503]) {
-  test(`${openrouterEnabled ? "OpenRouter" : "Gemini"} fallback aborts a stalled ${status} response body within its budget`, { timeout: 5000 }, async () => {
+  test(`${openrouterEnabled ? "OpenRouter" : "Gemini"} fallback aborts a stalled ${status} response body within its budget`, { timeout: 5000 }, async t => {
+    // Exercise this route regardless of a developer's deployed env switches.
+    const flags = ["OPENROUTER_ENABLED", "OPENROUTER_APODEX_ENABLED", "OPENROUTER_QWEN_ENABLED",
+      "OPENROUTER_DOTS_ENABLED", "OPENROUTER_GEMMA_ENABLED", "OPENROUTER_LING_ENABLED"];
+    const previous = flags.map(name => process.env[name]);
+    flags.forEach((name, i) => { process.env[name] = openrouterEnabled && i < 2 ? "true" : "false"; });
+    t.after(() => flags.forEach((name, i) => {
+      if (previous[i] === undefined) delete process.env[name]; else process.env[name] = previous[i];
+    }));
     const originalFetch = global.fetch;
     const originalSetTimeout = global.setTimeout;
     const requests = [];

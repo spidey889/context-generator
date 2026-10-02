@@ -23,7 +23,7 @@ The best path forward is not globally reducing waits. Reliability should first b
 - Deterministic coverage: `test/platform-content.test.js` and `evaluation/cases.json`.
 - Browser harness: `scripts/run-extension-smoke.js`.
 - Historical context: `CHANGELOG.md` and Git history for the capture code.
-- Current verification: `npm test` passed 198/198; `npm run test:slow` passed 1/1.
+- Original audit verification: `npm test` passed 198/198; `npm run test:slow` passed 1/1. Current combined-branch coverage is recorded in `supabase/AUDIT.md` and `CHANGELOG.md`.
 - Current measured slow fixture: 78 turns, 62,177 characters, 61 advances, 20,398 ms inside capture, 306 ms average gap.
 - Current measured Grok fixtures: 40-turn normal capture about 982 ms; delayed-render capture about 1,434 ms.
 

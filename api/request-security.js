@@ -79,7 +79,8 @@ function isTrustedExtensionRequest(req) {
 
   // Firefox can suppress Origin for privileged extension requests. In that
   // case the public marker is still required to reject ordinary originless
-  // HTTP clients before rate limiting and provider work.
+  // unmarked HTTP requests before rate limiting and provider work. The marker
+  // is public; server-signed receipts separately protect telemetry integrity.
   return originMayBeSuppressedByExtensionRuntime && clientMarker === CLIENT_HEADER_VALUE;
 }
 
@@ -110,7 +111,7 @@ function validateSummarizeRequest(req) {
   let telemetry = null;
   if (Object.hasOwn(body, "telemetry")) {
     telemetry = validateTelemetryPayload(body.telemetry);
-    if (!telemetry || telemetry.status !== "started" || telemetry.summary_proof !== undefined) {
+    if (!telemetry || telemetry.status !== "started" || telemetry.summary_proof !== undefined || telemetry.summary_confirmed_at !== undefined) {
       return invalid(400, "invalid_schema", "Invalid summary telemetry context");
     }
   }

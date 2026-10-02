@@ -3,14 +3,16 @@
 const encoder = new TextEncoder();
 
 function confirmationMessage(payload) {
+  const version = payload.summary_confirmed_at === undefined ? 1 : 2;
   return JSON.stringify([
-    "cap-context-summary-confirmation-v1",
+    `cap-context-summary-confirmation-v${version}`,
     payload.attempt_id,
     payload.install_id,
     payload.attempted_at,
     payload.source_platform,
     payload.destination_platform,
-    payload.extension_version
+    payload.extension_version,
+    ...(version === 2 ? [payload.summary_confirmed_at] : [])
   ]);
 }
 

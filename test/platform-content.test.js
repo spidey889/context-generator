@@ -123,6 +123,7 @@ class FakeElement {
   matchesSingle(selector) {
     if (selector === "*") return true;
     if (/^[a-z][a-z0-9-]*$/i.test(selector)) return this.localName === selector.toLowerCase();
+    if (selector.startsWith("#")) return this.id === selector.slice(1);
     if (selector.startsWith(".")) {
       return String(this.className || "").split(/\s+/).includes(selector.slice(1));
     }
@@ -228,6 +229,27 @@ class FakeElement {
     child.parentElement = this;
     child.isConnected = this.isConnected;
     return child;
+  }
+
+  insertBefore(child, anchor) {
+    if (!anchor) return this.appendChild(child);
+    if (child === anchor) return child;
+    if (anchor.parentElement !== this) throw new Error("The anchor is not a child of this node");
+    if (child.parentElement) {
+      child.parentElement.children = child.parentElement.children.filter((element) => element !== child);
+    }
+    this.children.splice(this.children.indexOf(anchor), 0, child);
+    child.parentElement = this;
+    child.isConnected = this.isConnected;
+    return child;
+  }
+
+  get nextElementSibling() {
+    return this.parentElement?.children[this.parentElement.children.indexOf(this) + 1] || null;
+  }
+
+  get previousElementSibling() {
+    return this.parentElement?.children[this.parentElement.children.indexOf(this) - 1] || null;
   }
 }
 
@@ -600,6 +622,46 @@ test("destination picker preserves outside page focus on every supported platfor
   assert.match(toggleAndHideSource, /bubble\.focus\?\.\(\{ preventScroll: true \}\)/);
 });
 
+test("normal page Tab navigation skips the Cap Context orb", () => {
+  const source = fs.readFileSync(SOURCE_PATH, "utf8");
+  const buttonStart = source.indexOf("function createFloatingButton()");
+  const buttonEnd = source.indexOf("function ensureOnboardingStyles()", buttonStart);
+  const buttonSource = source.slice(buttonStart, buttonEnd);
+
+  assert.match(buttonSource, /bubble\.tabIndex = -1/);
+});
+
+test("destination picker dismissal clears active visuals without focus and preserves handoff glow", () => {
+  for (const hostname of ["chatgpt.com", "claude.ai", "gemini.google.com", "grok.com", "chat.deepseek.com"]) {
+    const hooks = loadPlatformContent([], hostname);
+    const bubble = new FakeElement({ tag: "button", attrs: { id: "context-generator-bubble" } });
+    const input = new FakeElement({ attrs: { contenteditable: "true" } });
+    let focusCalls = 0;
+    bubble.focus = () => { focusCalls++; };
+    hooks.registerElementId(bubble.id, bubble);
+    hooks.document.activeElement = input;
+    for (const preserveBackdrop of [true, false]) {
+      bubble.style.filter = "brightness(1.14)";
+      bubble.style.transform = "translate3d(0,0,0) scale(0.94)";
+      hooks.hideDestinationSheet({ immediate: true, restoreFocus: false, preserveBackdrop });
+      assert.equal(bubble.style.filter, preserveBackdrop ? "brightness(1.14)" : "none");
+      assert.equal(bubble.style.transform, preserveBackdrop ? "translate3d(0,0,0) scale(0.94)" : "translate3d(0,0,0) scale(1)");
+      assert.equal(bubble.getAttribute("aria-expanded"), "false");
+      assert.equal(hooks.document.activeElement, input);
+      assert.equal(focusCalls, 0);
+    }
+  }
+});
+
+test("composer lifecycle cleanup never restores focus to the orb", () => {
+  const source = fs.readFileSync(SOURCE_PATH, "utf8");
+  const ensureStart = source.indexOf("function ensureFloatingButton(");
+  const ensureEnd = source.indexOf("function createFloatingButton()", ensureStart);
+  const ensureSource = source.slice(ensureStart, ensureEnd);
+
+  assert.match(ensureSource, /if \(!input\)[\s\S]*hideDestinationSheet\(\{ restoreFocus: false \}\)/);
+});
+
 test("reinjection tears down every resource owned by the previous content-script instance", () => {
   const input = new FakeElement({
     attrs: { contenteditable: "true", role: "textbox" },
@@ -613,7 +675,6 @@ test("reinjection tears down every resource owned by the previous content-script
   const previousHooks = loadPlatformContent([input, composer], "claude.ai");
 
   previousHooks.startFloatingButtonMonitoring();
-  previousHooks.syncClaudePlacementResizeMonitoring(input, composer);
   previousHooks.delay(10000);
 
   const activeCounts = previousHooks.getOwnedLifecycleResourceCounts();
@@ -1626,6 +1687,17 @@ clockTest("source capture prep waits when message characters grow without a new 
   assert.match(transcript, /older loaded details that arrive after the first scroll/);
 });
 
+test("expired destination paste leaves the existing draft untouched", async () => {
+  const editor = new FakeElement({ tag: "textarea", attrs: { id: "prompt-textarea" } });
+  editor.value = "My unsent draft";
+  const hooks = loadPlatformContent([editor], "chatgpt.com");
+  await assert.rejects(
+    hooks.pasteIntoPlatform("late summary", "chatgpt", "expired-transfer", Date.now() - 1),
+    error => error.code === "transfer_timeout"
+  );
+  assert.equal(editor.value, "My unsent draft");
+});
+
 test("opening the destination picker does not scrape or summarize", () => {
   const source = fs.readFileSync(SOURCE_PATH, "utf8");
   const pickerStart = source.indexOf("function toggleDestinationSheet()");
@@ -1923,61 +1995,574 @@ test("Firefox contenteditable paste preserves line breaks without treating text 
   );
 });
 
-test("Claude bubble fills the inline slot to the right of voice mode", () => {
-  const voiceMode = new FakeElement({
-    tag: "button",
-    attrs: { "aria-label": "Voice mode" },
-    rect: { left: 700, right: 736, top: 166, bottom: 202, width: 36, height: 36 }
+test("startup clears stale Claude placement transform reservations", () => {
+  const shiftedActionRow = new FakeElement({
+    attrs: {
+      "data-context-generator-original-transform": "",
+      "data-context-generator-original-transition": "transform 150ms ease"
+    }
   });
-  const hooks = loadPlatformContent([voiceMode], "claude.ai");
-  const placement = hooks.getClaudeBubblePlacement(getClaudeComposerRect());
+  shiftedActionRow.style.transform = "translateX(-56px)";
+  shiftedActionRow.style.transition = "none";
+  shiftedActionRow.style.willChange = "transform";
+  const translatedClaudeControl = new FakeElement({
+    attrs: { "data-context-generator-original-translate": "2px 0px" }
+  });
+  translatedClaudeControl.style.translate = "-52px 0px";
+  translatedClaudeControl.style.willChange = "translate";
 
-  assert.equal(placement.anchorControl.element, voiceMode);
-  assert.equal(placement.left, 734);
-  assert.equal(placement.top, 63);
-  assert.equal(placement.inlineShift, 0);
+  loadPlatformContent([shiftedActionRow, translatedClaudeControl], "claude.ai");
+
+  assert.equal(shiftedActionRow.style.transform, "");
+  assert.equal(shiftedActionRow.style.transition, "transform 150ms ease");
+  assert.equal(shiftedActionRow.style.willChange, "");
+  assert.equal(shiftedActionRow.hasAttribute("data-context-generator-original-transform"), false);
+  assert.equal(shiftedActionRow.hasAttribute("data-context-generator-original-transition"), false);
+  assert.equal(translatedClaudeControl.style.translate, "2px 0px");
+  assert.equal(translatedClaudeControl.style.willChange, "");
+  assert.equal(translatedClaudeControl.hasAttribute("data-context-generator-original-translate"), false);
 });
 
-function getChatGptComposerPlacement(controls) {
-  const composerRect = { left: 642, right: 1602, top: 920, bottom: 986, width: 960, height: 66 };
-  const composer = new FakeElement({ tag: "form", rect: composerRect });
-  const input = new FakeElement({
-    attrs: { contenteditable: "true", role: "textbox" },
-    rect: { left: 708, right: 1368, top: 932, bottom: 974, width: 660, height: 42 }
-  });
-  composer.children = [input, ...controls];
-  composer.children.forEach((element) => { element.parentElement = composer; });
-
-  const hooks = loadPlatformContent(
-    [composer, input, ...controls],
-    "chatgpt.com",
-    { innerWidth: 1920, innerHeight: 1080 }
-  );
-  return hooks.getChatGptFixedBubblePlacement(input);
+function inlineChatGptFixture() {
+  const body = new FakeElement({ attrs: { "data-composer-body": "" } });
+  const footer = new FakeElement({ attrs: { "data-composer-footer-responsive": "" } });
+  const editor = new FakeElement({ attrs: { "data-composer-input": "" } });
+  const input = new FakeElement({ attrs: { contenteditable: "true", role: "textbox" } });
+  const left = new FakeElement();
+  const right = new FakeElement();
+  const attach = new FakeElement({ tag: "button", attrs: { "data-composer-navigation-target": "add-context" } });
+  const model = new FakeElement({ tag: "button", attrs: { "data-composer-navigation-target": "reasoning", "aria-haspopup": "menu" } });
+  const modelWrapper = new FakeElement({ attrs: { class: "contents" } });
+  const voice = new FakeElement({ tag: "button", attrs: { "aria-label": "Start Voice" } });
+  body.appendChild(footer);
+  footer.appendChild(left);
+  footer.appendChild(editor);
+  footer.appendChild(right);
+  editor.appendChild(input);
+  left.appendChild(attach);
+  right.appendChild(modelWrapper);
+  modelWrapper.appendChild(model);
+  right.appendChild(voice);
+  return { body, footer, editor, input, left, right, attach, model, modelWrapper, voice };
 }
 
-test("ChatGPT paid placement remains left of the reasoning control", () => {
-  const high = new FakeElement({
-    tag: "button",
-    text: "High",
-    attrs: { "aria-label": "Reasoning effort" },
-    rect: { left: 1400, right: 1466, top: 936, bottom: 972, width: 66, height: 36 }
-  });
-  const mic = new FakeElement({
-    tag: "button",
-    attrs: { "aria-label": "Microphone" },
-    rect: { left: 1478, right: 1514, top: 936, bottom: 972, width: 36, height: 36 }
-  });
-  const voice = new FakeElement({
-    tag: "button",
-    attrs: { "aria-label": "Voice mode" },
-    rect: { left: 1548, right: 1592, top: 932, bottom: 976, width: 44, height: 44 }
-  });
+test("ChatGPT inline discovery follows the editor-owned footer across multiline reordering", () => {
+  const f = inlineChatGptFixture();
+  const hooks = loadPlatformContent(Object.values(f));
+  assert.equal(hooks.findChatGptInlineToolbar(f.input).left, f.left);
+  f.footer.children = [f.editor, f.left, f.right];
+  assert.equal(hooks.findChatGptInlineToolbar(f.input).right, f.right);
+  assert.equal(hooks.findChatGptInlineToolbar(new FakeElement()), null);
+  f.body.appendChild(f.editor);
+  assert.equal(hooks.findChatGptInlineToolbar(f.input), null, "a sibling footer does not own this editor");
+});
 
-  const placement = getChatGptComposerPlacement([high, mic, voice]);
+test("ChatGPT inline discovery supports free controls and excludes popup or unrelated rows", () => {
+  const f = inlineChatGptFixture();
+  const hooks = loadPlatformContent(Object.values(f));
+  f.right.children = [f.voice];
+  assert.equal(hooks.findChatGptInlineToolbar(f.input).right, f.right);
+  f.right.setAttribute("role", "menu");
+  assert.equal(hooks.findChatGptInlineToolbar(f.input), null);
+  f.right.removeAttribute("role");
+  f.voice.setAttribute("data-visibility", "hidden");
+  assert.equal(hooks.findChatGptInlineToolbar(f.input), null, "an empty visible control set must return before indexing its first button");
+  f.voice.removeAttribute("data-visibility");
+  f.attach.removeAttribute("data-composer-navigation-target");
+  assert.equal(hooks.findChatGptInlineToolbar(f.input), null);
+});
 
-  assert.equal(placement.left, 1350);
-  assert.equal(placement.top, 933);
+test("ChatGPT inline discovery skips a duplicate footer and hidden or popup attachment copies", () => {
+  const f = inlineChatGptFixture();
+  const duplicateFooter = new FakeElement({ attrs: { "data-composer-footer-responsive": "", "data-display": "none" } });
+  f.body.insertBefore(duplicateFooter, f.footer);
+  const hiddenAttach = new FakeElement({ tag: "button", attrs: { "data-composer-navigation-target": "add-context", "data-visibility": "hidden" } });
+  const menu = new FakeElement({ attrs: { role: "menu" } });
+  const popupAttach = new FakeElement({ tag: "button", attrs: { "data-composer-navigation-target": "add-context" } });
+  f.left.insertBefore(hiddenAttach, f.attach); f.left.insertBefore(menu, f.attach); menu.appendChild(popupAttach);
+  const hooks = loadPlatformContent([...Object.values(f), duplicateFooter, hiddenAttach, menu, popupAttach]);
+  assert.equal(hooks.findChatGptInlineToolbar(f.input)?.footer, f.footer);
+  duplicateFooter.remove();
+  assert.equal(hooks.findChatGptInlineToolbar(f.input)?.left, f.left, "a hidden attachment must not mask the visible native control");
+});
+
+test("ChatGPT inline mounting reuses its native-control observer and ignores editor text", () => {
+  const f = inlineChatGptFixture();
+  const hooks = loadPlatformContent(Object.values(f));
+  hooks.document.createElement = () => new FakeElement();
+  const bubble = new FakeElement({ tag: "button" });
+  assert.equal(hooks.mountChatGptInlineButton(bubble, f.input), true);
+  const observer = hooks.mutationObservers.find(item => item.observed.some(target => target.element === f.body));
+  assert.ok(observer, "inline must watch native attribute-only changes in its composer body");
+  const observerCount = hooks.mutationObservers.length;
+  assert.equal(hooks.mountChatGptInlineButton(bubble, f.input), true);
+  assert.equal(hooks.mutationObservers.length, observerCount);
+  observer.callback([{ type: "characterData", target: { parentElement: f.input }, addedNodes: [], removedNodes: [] }]);
+  assert.equal(hooks.animationFrameCallbacks.length, 0);
+  observer.callback([{ type: "attributes", attributeName: "style", target: f.modelWrapper, addedNodes: [], removedNodes: [] }]);
+  assert.equal(hooks.animationFrameCallbacks.length, 1);
+  hooks.releaseChatGptInlineMount();
+  assert.equal(observer.observed.length, 0);
+});
+
+test("ChatGPT inline body-only remount invalidates the picker once and refreshes observer ownership", () => {
+  const f = inlineChatGptFixture();
+  const hooks = loadPlatformContent(Object.values(f));
+  hooks.document.createElement = () => new FakeElement();
+  const bubble = new FakeElement({ tag: "button" });
+  assert.equal(hooks.mountChatGptInlineButton(bubble, f.input), true);
+  const observer = hooks.mutationObservers.find(item => item.observed.some(target => target.element === f.body));
+  const nextBody = new FakeElement({ attrs: { "data-composer-body": "" } });
+  nextBody.appendChild(f.footer);
+  assert.equal(hooks.invalidateInlinePicker("document-childlist"), true, "the old body must not continue owning the picker");
+  assert.equal(hooks.mountChatGptInlineButton(bubble, f.input), true);
+  assert.equal(hooks.invalidateInlinePicker("document-childlist"), false);
+  assert.equal(observer.observed.length, 0);
+  assert.ok(hooks.mutationObservers.some(item => item.observed.some(target => target.element === nextBody)));
+  assert.equal(bubble.nextElementSibling, f.modelWrapper);
+});
+
+test("ChatGPT mounts before the model, follows remounts and supports free controls", () => {
+  const f = inlineChatGptFixture();
+  const next = inlineChatGptFixture();
+  const nativeGroup = new FakeElement();
+  next.right.appendChild(nativeGroup);
+  nativeGroup.appendChild(next.modelWrapper);
+  nativeGroup.appendChild(next.voice);
+  const hooks = loadPlatformContent(Object.values(f));
+  hooks.document.createElement = () => new FakeElement();
+  const originalGetById = hooks.document.getElementById;
+  hooks.document.getElementById = id => originalGetById(id)
+    || hooks.document.documentElement.children.find(node => node.id === id);
+  const bubble = new FakeElement({ tag: "button" });
+  assert.equal(hooks.mountChatGptInlineButton(bubble, f.input), true);
+  assert.equal(bubble.parentElement, f.right);
+  assert.equal(bubble.nextElementSibling, f.modelWrapper);
+  assert.equal(f.modelWrapper.contains(bubble), false, "the pill must stay outside the native model tooltip branch");
+  assert.equal(bubble.style.width, "36px");
+  assert.equal(bubble.style.flex, "0 0 36px");
+  assert.equal(bubble.style.position, "static");
+  assert.equal(hooks.mountChatGptInlineButton(bubble, next.input), true);
+  assert.equal(bubble.parentElement, nativeGroup);
+  assert.equal(bubble.nextElementSibling, next.modelWrapper);
+  assert.equal(nativeGroup.getAttribute("data-context-generator-chatgpt-inline"), "controls");
+  assert.equal(f.footer.hasAttribute("data-context-generator-chatgpt-inline"), false);
+  assert.equal(f.right.hasAttribute("data-context-generator-chatgpt-inline"), false);
+  assert.equal(f.modelWrapper.hasAttribute("data-context-generator-chatgpt-inline"), false);
+  nativeGroup.children = nativeGroup.children.filter((node) => node !== next.modelWrapper);
+  assert.equal(hooks.mountChatGptInlineButton(bubble, next.input), true);
+  assert.equal(bubble.parentElement, nativeGroup);
+  assert.equal(bubble.nextElementSibling, next.voice);
+  assert.equal(bubble.style.flex, "0 0 36px");
+  assert.equal(next.modelWrapper.hasAttribute("data-context-generator-chatgpt-inline"), false);
+  hooks.releaseChatGptInlineMount();
+  assert.equal(next.left.hasAttribute("data-context-generator-chatgpt-inline"), false);
+  assert.equal(nativeGroup.hasAttribute("data-context-generator-chatgpt-inline"), false);
+});
+
+function inlineProviderFixture(platform) {
+  const surface = new FakeElement({ attrs: { class: platform === "gemini" ? "text-input-field" : platform === "grok" ? "query-bar" : "" } });
+  const input = new FakeElement({ tag: platform === "deepseek" ? "textarea" : "div", attrs: { contenteditable: "true", role: "textbox" } });
+  const editor = new FakeElement({ tag: platform === "gemini" ? "rich-textarea" : "div", attrs: { "data-testid": "chat-input" } });
+  const row = new FakeElement({ attrs: { class: platform === "gemini" ? "trailing-actions-wrapper" : "" } });
+  const controls = platform === "gemini" ? row : new FakeElement();
+  const slot = platform === "deepseek" ? controls : new FakeElement({ attrs: { "data-query-bar-mode-select": "true" } });
+  const anchor = new FakeElement({ tag: platform === "deepseek" ? "div" : "button", attrs: platform === "deepseek"
+    ? { role: "button", class: "ds-button ds-button--iconLabelPrimary" }
+    : { id: "model-select-trigger", "data-test-id": "bard-mode-menu-button" } });
+  const action = new FakeElement({ tag: platform === "deepseek" ? "div" : "button", attrs: { role: "button", class: "ds-button--circle" } });
+  const attach = new FakeElement({ tag: "button", attrs: { "data-testid": "attach-button" } });
+  const file = new FakeElement({ tag: "input", attrs: { type: "file" } });
+  const editorContainer = platform === "grok" ? new FakeElement() : surface;
+  const dock = platform === "grok" ? new FakeElement() : row;
+  if (editorContainer !== surface) surface.appendChild(editorContainer);
+  editorContainer.appendChild(editor);
+  editor.appendChild(input);
+  editorContainer.appendChild(dock);
+  if (dock !== row) dock.appendChild(row);
+  if (platform === "grok") row.appendChild(attach);
+  if (controls !== row) row.appendChild(controls);
+  if (slot !== controls) controls.appendChild(slot);
+  slot.appendChild(anchor);
+  if (platform === "deepseek") controls.appendChild(file);
+  controls.appendChild(action);
+  return { surface, input, editor, row, controls, slot, anchor, action, attach, file, editorContainer, dock };
+}
+
+for (const [platform, host] of [["gemini", "gemini.google.com"], ["grok", "grok.com"], ["deepseek", "chat.deepseek.com"]]) {
+  test(`${platform} mounts beside its native controls and reuses the pill after remount`, () => {
+    const f = inlineProviderFixture(platform), next = inlineProviderFixture(platform);
+    const hooks = loadPlatformContent(Object.values(f), host);
+    hooks.document.createElement = () => new FakeElement();
+    const originalGetById = hooks.document.getElementById;
+    hooks.document.getElementById = id => originalGetById(id)
+      || hooks.document.documentElement.children.find(node => node.id === id);
+    const bubble = new FakeElement({ tag: "button", attrs: { id: "context-generator-bubble" } });
+    assert.equal(hooks.findProviderInlineToolbar(f.input).anchor, f.anchor);
+    assert.equal(hooks.findProviderInlineToolbar(new FakeElement()), null);
+    assert.equal(hooks.mountProviderInlineButton(bubble, f.input), true);
+    assert.equal(bubble.nextElementSibling, f.anchor);
+    assert.equal(bubble.style.width, "36px");
+    assert.equal(bubble.style.position, "static");
+    assert.equal(bubble.style.flex, "0 0 36px");
+    if (platform === "grok") {
+      const observer = hooks.mutationObservers.find(item => item.observed.some(target => target.element === f.surface));
+      f.surface.setAttribute("class", "");
+      assert.equal(hooks.mountProviderInlineButton(bubble, f.input), false);
+      hooks.syncPlatformPlacementResizeMonitoring(f.input, f.editorContainer);
+      assert.ok(observer.observed.some(target => target.element === f.surface),
+        "fallback must still observe the outer native class that restores inline mounting");
+      f.surface.setAttribute("class", "query-bar");
+      observer.callback([{ type: "attributes", attributeName: "class", target: f.surface, addedNodes: [], removedNodes: [] }]);
+      assert.equal(hooks.animationFrameCallbacks.length, 1);
+      assert.equal(hooks.mountProviderInlineButton(bubble, f.input), true);
+    }
+    assert.equal(hooks.mountProviderInlineButton(bubble, next.input), true);
+    assert.equal(bubble.parentElement, next.slot);
+    assert.equal(bubble.nextElementSibling, next.anchor);
+    assert.equal(f.controls.hasAttribute("data-context-generator-provider-inline"), false);
+    hooks.releaseProviderInlineMount();
+    assert.equal(next.controls.hasAttribute("data-context-generator-provider-inline"), false);
+    assert.equal(next.slot.hasAttribute("data-context-generator-provider-inline"), false);
+    next.controls.setAttribute("role", "menu");
+    assert.equal(hooks.findProviderInlineToolbar(next.input), null);
+  });
+}
+
+test("Gemini mobile inline mounting uses native trailing controls when the mode picker is hidden", () => {
+  const f = inlineProviderFixture("gemini");
+  f.anchor.rect = { width: 0, height: 0 };
+  const hooks = loadPlatformContent(Object.values(f), "gemini.google.com");
+  const toolbar = hooks.findProviderInlineToolbar(f.input);
+  assert.equal(toolbar.slot, f.controls);
+  assert.equal(toolbar.anchor, f.action);
+});
+
+test("Gemini inline skips a hidden duplicate trailing wrapper", () => {
+  const f = inlineProviderFixture("gemini");
+  const duplicate = new FakeElement({ attrs: { class: "trailing-actions-wrapper", "data-display": "none" } });
+  const hiddenModel = f.anchor.cloneNode(); hiddenModel.setAttribute("data-display", "none");
+  duplicate.appendChild(hiddenModel); f.surface.insertBefore(duplicate, f.row);
+  const hooks = loadPlatformContent([...Object.values(f), duplicate, hiddenModel], "gemini.google.com");
+  assert.ok(hooks.findProviderInlineToolbar(f.input)?.controls === f.controls);
+});
+
+test("Grok inline skips hidden attachment and model copies", () => {
+  const f = inlineProviderFixture("grok");
+  const attach = f.attach.cloneNode(), model = f.anchor.cloneNode();
+  attach.setAttribute("data-display", "none"); model.setAttribute("data-display", "none");
+  f.row.insertBefore(attach, f.attach); f.slot.insertBefore(model, f.anchor);
+  const hooks = loadPlatformContent([...Object.values(f), attach, model], "grok.com");
+  assert.ok(hooks.findProviderInlineToolbar(f.input)?.anchor === f.anchor);
+});
+
+test("DeepSeek inline skips duplicate file/send copies and tolerates a spacer before its file", () => {
+  const f = inlineProviderFixture("deepseek"), file = f.file.cloneNode(), send = f.action.cloneNode();
+  send.setAttribute("data-display", "none");
+  f.controls.insertBefore(file, f.anchor); f.controls.insertBefore(send, f.action);
+  const hooks = loadPlatformContent([...Object.values(f), file, send], "chat.deepseek.com");
+  assert.ok(hooks.findProviderInlineToolbar(f.input)?.anchor === f.anchor);
+  file.remove(); send.remove();
+  f.controls.insertBefore(new FakeElement(), f.file);
+  assert.ok(hooks.findProviderInlineToolbar(f.input)?.anchor === f.anchor, "a non-control spacer must not break the file/upload association");
+});
+
+test("DeepSeek inline supports a hidden upload with visible Send inside the verified file group", () => {
+  const f = inlineProviderFixture("deepseek"); f.anchor.setAttribute("data-display", "none");
+  const hooks = loadPlatformContent(Object.values(f), "chat.deepseek.com");
+  assert.ok(hooks.findProviderInlineToolbar(f.input)?.anchor === f.action);
+  const wrapper = new FakeElement(); f.controls.appendChild(wrapper); wrapper.appendChild(f.action);
+  assert.ok(hooks.findProviderInlineToolbar(f.input)?.anchor === wrapper, "the synchronous parent walk must resolve a wrapped Send to its direct slot child");
+  f.action.setAttribute("data-display", "none");
+  assert.equal(hooks.findProviderInlineToolbar(f.input), null);
+});
+
+test("Grok inline picker invalidates an editor-container-only remount", () => {
+  const f = inlineProviderFixture("grok"), hooks = loadPlatformContent(Object.values(f), "grok.com");
+  hooks.document.createElement = () => new FakeElement();
+  const bubble = new FakeElement({ tag: "button" });
+  assert.equal(hooks.mountProviderInlineButton(bubble, f.input), true);
+  const next = new FakeElement(); f.surface.appendChild(next); next.appendChild(f.editor); next.appendChild(f.dock);
+  assert.equal(hooks.invalidateInlinePicker("document-childlist"), true);
+  assert.equal(hooks.mountProviderInlineButton(bubble, f.input), true);
+  assert.equal(hooks.invalidateInlinePicker("document-childlist"), false);
+  assert.equal(f.editorContainer.hasAttribute("data-context-generator-provider-inline"), false);
+  assert.equal(next.getAttribute("data-context-generator-provider-inline"), "grok-space");
+});
+
+function inlineClaudeFixture() {
+  const host = new FakeElement();
+  const editorBranch = new FakeElement();
+  const input = new FakeElement({ attrs: { contenteditable: "true", role: "textbox" } });
+  const actions = new FakeElement({ attrs: { "data-cds": "ChatComposerActions" } });
+  const left = new FakeElement({ attrs: { "data-display": "flex" } });
+  const right = new FakeElement({ attrs: { "data-display": "flex" } });
+  const attach = new FakeElement({ tag: "button", attrs: { "data-testid": "chat-input-attach" } });
+  const model = new FakeElement({ tag: "button", attrs: { "data-testid": "model-selector-dropdown" } });
+  host.appendChild(editorBranch);
+  editorBranch.appendChild(input);
+  host.appendChild(actions);
+  actions.appendChild(left);
+  actions.appendChild(right);
+  left.appendChild(attach);
+  right.appendChild(model);
+  return { host, editorBranch, input, actions, left, right, attach, model };
+}
+
+test("Claude inline slot discovers only the named actions beside its active editor", () => {
+  const fixture = inlineClaudeFixture();
+  const decoy = new FakeElement({ attrs: { "data-display": "flex" } });
+  fixture.editorBranch.appendChild(decoy);
+  const hooks = loadPlatformContent(Object.values(fixture), "claude.ai");
+  assert.equal(hooks.findClaudeInlineToolbar(fixture.input).left, fixture.left);
+  fixture.actions.removeAttribute("data-cds");
+  assert.equal(hooks.findClaudeInlineToolbar(fixture.input), null);
+});
+
+test("Claude inline discovery excludes popup controls and a different editor's toolbar", () => {
+  const fixture = inlineClaudeFixture();
+  const hooks = loadPlatformContent(Object.values(fixture), "claude.ai");
+  const otherInput = new FakeElement({ attrs: { contenteditable: "true" } });
+  assert.equal(hooks.findClaudeInlineToolbar(otherInput), null);
+  fixture.left.setAttribute("role", "menu");
+  assert.equal(hooks.findClaudeInlineToolbar(fixture.input), null);
+  fixture.left.removeAttribute("role");
+  fixture.model.setAttribute("data-visibility", "hidden");
+  assert.equal(hooks.findClaudeInlineToolbar(fixture.input), null);
+});
+
+test("Claude inline discovery skips hidden and popup copies of native controls", () => {
+  const f = inlineClaudeFixture();
+  const hiddenModel = new FakeElement({ tag: "button", attrs: { "data-testid": "model-selector-dropdown", "data-visibility": "hidden" } });
+  const menu = new FakeElement({ attrs: { role: "menu" } });
+  const popupAttach = new FakeElement({ tag: "button", attrs: { "data-testid": "chat-input-attach" } });
+  f.right.insertBefore(hiddenModel, f.model);
+  f.left.insertBefore(menu, f.attach); menu.appendChild(popupAttach);
+  const hooks = loadPlatformContent([...Object.values(f), hiddenModel, menu, popupAttach], "claude.ai");
+  assert.ok(hooks.findClaudeInlineToolbar(f.input)?.left === f.left);
+});
+
+test("Claude inline discovery stays within the active named composer", () => {
+  const f = inlineClaudeFixture();
+  const composer = new FakeElement({ attrs: { "data-cds": "ChatComposer" } });
+  f.host.appendChild(composer); composer.appendChild(f.editorBranch);
+  const hooks = loadPlatformContent([...Object.values(f), composer], "claude.ai");
+  assert.ok(hooks.findClaudeInlineToolbar(f.input) === null, "ancestor actions outside this named composer must not be claimed");
+});
+
+test("Claude inline picker invalidates editor and actions wrapper replacements", () => {
+  const f = inlineClaudeFixture();
+  const hooks = loadPlatformContent(Object.values(f), "claude.ai");
+  hooks.document.createElement = () => new FakeElement();
+  const bubble = new FakeElement({ tag: "button" });
+  assert.equal(hooks.mountClaudeInlineButton(bubble, f.input), true);
+  assert.equal(hooks.invalidateInlinePicker("document-childlist"), false);
+  const editor = new FakeElement();
+  f.host.appendChild(editor); editor.appendChild(f.input);
+  assert.equal(hooks.invalidateInlinePicker("document-childlist"), true, "same input in a replaced editor branch must close the picker");
+  assert.equal(hooks.mountClaudeInlineButton(bubble, f.input), true);
+  const actions = new FakeElement({ attrs: { "data-cds": "ChatComposerActions" } });
+  f.actions.removeAttribute("data-cds"); f.host.appendChild(actions);
+  actions.appendChild(f.left); actions.appendChild(f.right);
+  assert.equal(hooks.invalidateInlinePicker("document-childlist"), true, "same rows in a replaced actions container must close the picker");
+});
+
+test("Claude inline mounting monitors native attribute changes without reacting to editor text", () => {
+  const f = inlineClaudeFixture();
+  const hooks = loadPlatformContent(Object.values(f), "claude.ai");
+  hooks.document.createElement = () => new FakeElement();
+  const bubble = new FakeElement({ tag: "button" });
+  assert.equal(hooks.mountClaudeInlineButton(bubble, f.input), true);
+  const observer = hooks.mutationObservers.find(item => item.observed.some(target => target.element === f.host));
+  assert.ok(observer, "inline mounting must watch attribute-only native toolbar changes");
+  const observerCount = hooks.mutationObservers.length;
+  assert.equal(hooks.mountClaudeInlineButton(bubble, f.input), true);
+  assert.equal(hooks.mutationObservers.length, observerCount, "stable mounting must reuse its control observer");
+  assert.equal(observer.observed.length, 1, "stable mounting must keep observing the composer");
+  observer.callback([{ type: "characterData", target: { parentElement: f.input }, addedNodes: [], removedNodes: [] }]);
+  assert.equal(hooks.animationFrameCallbacks.length, 0);
+  observer.callback([{ type: "attributes", attributeName: "style", target: f.model, addedNodes: [], removedNodes: [] }]);
+  assert.equal(hooks.animationFrameCallbacks.length, 1);
+  hooks.releaseClaudeInlineMount();
+  assert.equal(observer.observed.length, 0);
+});
+
+test("Claude inline host-only remount refreshes identity and invalidates the picker only once", () => {
+  const f = inlineClaudeFixture();
+  const hooks = loadPlatformContent(Object.values(f), "claude.ai");
+  hooks.document.createElement = () => new FakeElement();
+  const bubble = new FakeElement({ tag: "button" });
+  assert.equal(hooks.mountClaudeInlineButton(bubble, f.input), true);
+  const oldObserver = hooks.mutationObservers.find(item => item.observed.some(target => target.element === f.host));
+  const nextHost = new FakeElement();
+  nextHost.appendChild(f.editorBranch); nextHost.appendChild(f.actions);
+  assert.equal(hooks.invalidateInlinePicker("document-childlist"), true);
+  assert.equal(hooks.mountClaudeInlineButton(bubble, f.input), true);
+  assert.equal(hooks.invalidateInlinePicker("document-childlist"), false, "a remounted host must become the new picker owner");
+  assert.equal(oldObserver.observed.length, 0);
+  assert.ok(hooks.mutationObservers.some(item => item.observed.some(target => target.element === nextHost)));
+  assert.equal(bubble.parentElement, f.right);
+});
+
+test("Claude inline mounting reuses its 36px mic-adjacent slot after remount and restores native markers", () => {
+  const first = inlineClaudeFixture();
+  const next = inlineClaudeFixture();
+  for (const fixture of [first, next]) {
+    const branch = new FakeElement();
+    branch.appendChild(new FakeElement({ tag: "button", attrs: { "aria-label": "Dictate" } }));
+    branch.appendChild(new FakeElement({ tag: "button", attrs: { "data-testid": "chat-input-send", "data-visibility": "hidden" } }));
+    fixture.right.appendChild(branch);
+    fixture.voiceBranch = branch;
+  }
+  const hooks = loadPlatformContent(Object.values(first), "claude.ai");
+  hooks.document.createElement = () => new FakeElement();
+  const originalGetById = hooks.document.getElementById;
+  hooks.document.getElementById = (id) => originalGetById(id)
+    || hooks.document.documentElement.children.find((node) => node.id === id);
+  const bubble = new FakeElement({ tag: "button" });
+  first.left.style.position = "absolute";
+  assert.equal(hooks.mountClaudeInlineButton(bubble, first.input), true);
+  assert.equal(bubble.parentElement, first.right);
+  assert.equal(bubble.nextElementSibling, first.voiceBranch);
+  assert.equal(bubble.style.position, "static");
+  assert.equal(bubble.style.width, "36px");
+  assert.equal(bubble.style.flex, "0 0 36px");
+  const replacementBranch = new FakeElement();
+  while (first.voiceBranch.children.length) replacementBranch.appendChild(first.voiceBranch.children[0]);
+  first.right.appendChild(replacementBranch);
+  assert.equal(hooks.invalidateInlinePicker("document-childlist"), true, "a replaced mic/Send branch must refresh picker ownership");
+  assert.equal(hooks.mountClaudeInlineButton(bubble, first.input), true);
+  assert.equal(bubble.nextElementSibling, replacementBranch);
+  assert.equal(hooks.invalidateInlinePicker("document-childlist"), false);
+  assert.equal(hooks.mountClaudeInlineButton(bubble, next.input), true);
+  assert.equal(bubble.parentElement, next.right);
+  assert.equal(bubble.nextElementSibling, next.voiceBranch);
+  assert.equal(first.left.hasAttribute("data-context-generator-claude-inline"), false);
+  assert.equal(first.left.style.position, "absolute");
+  assert.equal(next.right.children.filter((node) => node === bubble).length, 1);
+  hooks.releaseClaudeInlineMount();
+  for (const node of [next.editorBranch, next.actions, next.left, next.right]) {
+    assert.equal(node.hasAttribute("data-context-generator-claude-inline"), false);
+  }
+});
+
+test("Claude keeps its inline slot through temporary control and editor discovery gaps", () => {
+  const f = inlineClaudeFixture();
+  const hooks = loadPlatformContent(Object.values(f), "claude.ai");
+  hooks.document.createElement = () => new FakeElement();
+  const bubble = new FakeElement({ tag: "button" });
+  hooks.window.setTimeout = () => { throw new Error("Claude inline must not start a fallback timer"); };
+  assert.equal(hooks.mountInlineOrLegacyBackup(bubble, f.input), true);
+  f.model.setAttribute("data-visibility", "hidden");
+  assert.equal(hooks.mountInlineOrLegacyBackup(bubble, f.input), true);
+  assert.equal(hooks.mountClaudeInlineButton(bubble, null), true);
+  assert.equal(bubble.parentElement, f.right);
+  assert.equal(bubble.style.position, "static");
+  assert.equal(bubble.style.width, "36px");
+  f.model.removeAttribute("data-visibility");
+  assert.equal(hooks.mountInlineOrLegacyBackup(bubble, f.input), true);
+  f.input.isConnected = false;
+  assert.equal(hooks.mountInlineOrLegacyBackup(bubble, f.input), false);
+  assert.equal(bubble.style.visibility, "hidden", "a detached editor must lose ownership");
+  hooks.releaseClaudeInlineMount();
+});
+
+test("Claude inline discovery validates the compact model chin against the same composer", () => {
+  const fixture = inlineClaudeFixture();
+  const composer = new FakeElement({ attrs: { "data-cds": "ChatComposer" } });
+  const chin = new FakeElement({ attrs: { "data-cds": "ChatComposerChin" } });
+  const send = new FakeElement({ tag: "button", attrs: { "data-testid": "chat-input-send" } });
+  composer.appendChild(fixture.host);
+  composer.appendChild(chin);
+  fixture.right.children = fixture.right.children.filter((node) => node !== fixture.model);
+  chin.appendChild(fixture.model);
+  fixture.right.appendChild(send);
+  const hooks = loadPlatformContent([...Object.values(fixture), composer, chin, send], "claude.ai");
+  assert.equal(hooks.findClaudeInlineToolbar(fixture.input).right, fixture.right);
+  composer.children = composer.children.filter((node) => node !== chin);
+  assert.equal(hooks.findClaudeInlineToolbar(fixture.input), null);
+});
+
+for (const platform of ["claude", "chatgpt"]) {
+  test(`${platform} ${platform === "claude" ? "stays inline only" : "uses its legacy backup"} and recovers after editor replacement`, () => {
+    const inline = platform === "claude" ? inlineClaudeFixture() : inlineChatGptFixture();
+    const form = new FakeElement({ tag: "form", rect: { left: 60, right: 760, top: 400, bottom: 560, width: 700, height: 160 } });
+    const input = new FakeElement({ attrs: { contenteditable: "true", role: "textbox" }, rect: { left: 80, right: 740, top: 410, bottom: 470, width: 660, height: 60 } });
+    const model = new FakeElement({ tag: "button", text: "Sonnet High", attrs: { "aria-label": "Model Sonnet", "aria-haspopup": "menu" }, rect: { left: 500, right: 590, top: 510, bottom: 542, width: 90, height: 32 } });
+    const voice = new FakeElement({ tag: "button", attrs: { "aria-label": "Use voice mode" }, rect: { left: 640, right: 672, top: 510, bottom: 542, width: 32, height: 32 } });
+    form.appendChild(input); form.appendChild(model); form.appendChild(voice);
+    const hooks = loadPlatformContent([...Object.values(inline), form, input, model, voice], platform === "claude" ? "claude.ai" : "chatgpt.com");
+    hooks.document.createElement = () => new FakeElement();
+    const bubble = new FakeElement({ tag: "button", attrs: { id: "context-generator-bubble" } });
+    assert.equal(hooks.mountInlineOrLegacyBackup(bubble, inline.input), true);
+    assert.equal(bubble.style.position, "static", "inline remains primary");
+    assert.equal(hooks.resizeObservers.some(observer => observer.observed.length), false);
+    if (platform === "claude") {
+      assert.equal(hooks.mountInlineOrLegacyBackup(bubble, input), false);
+      assert.equal(bubble.style.position, "static", "unmatched Claude markup must never switch to fixed placement");
+      assert.equal(bubble.style.visibility, "hidden", "the old composer must not own a visible pill for the new editor");
+      assert.equal(hooks.resizeObservers.some(observer => observer.observed.length), false);
+      assert.equal(model.hasAttribute("data-context-generator-original-translate"), false);
+    } else {
+      assert.equal(hooks.mountInlineOrLegacyBackup(bubble, input), true);
+      assert.equal(bubble.style.position, "fixed", "unknown GPT markup uses the real legacy path");
+      assert.equal(bubble.parentElement, hooks.document.body);
+      assert.equal(bubble.style.width, "42px");
+      assert.ok(Number.isFinite(parseFloat(bubble.style.left)));
+      assert.equal(hooks.resizeObservers.some(observer => observer.observed.length), true);
+      const backupObserver = hooks.mutationObservers.find(observer => observer.observed.some(target => target.element === form));
+      assert.ok(backupObserver.observed[0].options.attributeFilter.includes("hidden"), "the backup must recover from native hidden changes without a resize");
+    }
+    assert.equal(hooks.mountInlineOrLegacyBackup(bubble, inline.input), true);
+    assert.equal(bubble.style.position, "static");
+    assert.equal(bubble.style.width, "36px");
+    assert.equal(hooks.resizeObservers.some(observer => observer.observed.length), false);
+    assert.equal(hooks.mutationObservers.some(observer => observer.observed.some(target => target.element === form)), false);
+    assert.equal(model.hasAttribute("data-context-generator-original-translate"), false);
+    assert.equal(voice.hasAttribute("data-context-generator-original-translate"), false);
+    assert.equal(form.hasAttribute("data-context-generator-original-position"), false);
+  });
+}
+
+test("Inline platforms detect SPA route changes and schedule fresh mounting", () => {
+  for (const [host, initial, next] of [
+    ["claude.ai", "/new", "/chat/example"], ["chatgpt.com", "/", "/c/example"],
+    ["gemini.google.com", "/app", "/app/example"], ["grok.com", "/", "/c/example"],
+    ["chat.deepseek.com", "/", "/a/chat/s/example"]
+  ]) {
+    const hooks = loadPlatformContent([], host, { pathname: initial });
+    assert.equal(hooks.checkInlinePlacementPathname(), false);
+    hooks.window.location.pathname = next;
+    assert.equal(hooks.checkInlinePlacementPathname(), true);
+    assert.equal(hooks.animationFrameCallbacks.length, 1);
+  }
+});
+
+test("composer discovery rejects an unvalidated inner editor wrapper", () => {
+  for (const hostname of ["chatgpt.com", "gemini.google.com", "grok.com", "chat.deepseek.com"]) {
+    const input = new FakeElement({
+      attrs: { contenteditable: "true", role: "textbox" },
+      rect: { left: 240, right: 920, top: 620, bottom: 672, width: 680, height: 52 }
+    });
+    const innerWrapper = new FakeElement({
+      rect: { left: 250, right: 900, top: 625, bottom: 668, width: 650, height: 43 }
+    });
+    input.parentElement = innerWrapper;
+    innerWrapper.children = [input];
+
+    const hooks = loadPlatformContent([innerWrapper, input], hostname);
+
+    // This fixture has no composer selector matches. Filter like the browser so
+    // the editable input cannot be returned for an unrelated "form" query.
+    hooks.document.querySelectorAll = (selector) => [innerWrapper, input]
+      .filter((element) => element.matches(selector));
+
+    assert.equal(
+      hooks.findComposerSurfaceElement(input),
+      null,
+      `${hostname} should reject the inner editor wrapper`
+    );
+  }
 });
 
 test("Gemini bubble anchors to the left of the Flash selector", () => {

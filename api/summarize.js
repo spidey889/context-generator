@@ -213,8 +213,15 @@ async function handler(req, res) {
     responseChannel.send = async (status, payload) => {
       if (status === 200 && payload.summary) {
         const { createSummaryProof } = await import("../supabase/functions/_shared/summary-proof.mjs");
-        const proof = await createSummaryProof(validation.telemetry, process.env.TELEMETRY_SIGNING_KEY);
-        if (proof) payload = { ...payload, summaryProof: proof };
+        const secret = process.env.TELEMETRY_SIGNING_KEY;
+        const proof = await createSummaryProof(validation.telemetry, secret);
+        if (proof) {
+          const confirmedAt = new Date().toISOString();
+          const proofV2 = await createSummaryProof({ ...validation.telemetry, summary_confirmed_at: confirmedAt }, secret);
+          // Keep the original receipt for already-running workers. New workers
+          // carry the signed server timestamp so delayed delivery retains its day.
+          payload = { ...payload, summaryProof: proof, summaryProofV2: proofV2, summaryConfirmedAt: confirmedAt };
+        }
       }
       return send(status, payload);
     };

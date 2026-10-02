@@ -1,6 +1,27 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-03-openrouter-v82";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-03-routing-product-merge-v95";
+  const INLINE_PILL_SIZE = 36;
   const ownedUiStyleSheets = new Map();
+  const CLAUDE_INLINE_STYLE_ID = "context-generator-claude-inline-styles";
+  const CLAUDE_INLINE_MARKER = "data-context-generator-claude-inline";
+  const CHATGPT_INLINE_STYLE_ID = "context-generator-chatgpt-inline-styles";
+  const CHATGPT_INLINE_MARKER = "data-context-generator-chatgpt-inline";
+  const PROVIDER_INLINE_STYLE_ID = "context-generator-provider-inline-styles";
+  const PROVIDER_INLINE_MARKER = "data-context-generator-provider-inline";
+  const INLINE_MOUNT_PLATFORMS = new Set(["claude", "chatgpt", "gemini", "grok", "deepseek"]);
+  let providerInlineMount = null;
+  let chatGptInlineMount = null;
+  let claudeInlineMount = null;
+  let inlineBubble = null;
+  let reservedClaudeInlineControls = [];
+  let reservedClaudeInlineShift = 0;
+  let reservedClaudeControlOffsets = new Map();
+  let reservedClaudeOverflowElements = [];
+  let chatGptPlacementSurface = null;
+  let chatGptPlacementResizeObserver = null;
+  let chatGptPlacementResizeTargets = [];
+  let chatGptPlacementMutationObserver = null;
+  let chatGptPlacementMutationRoot = null;
   // Start fast capture on for each page instance; a manual opt-out lasts until reload.
   let claudeJsonCaptureEnabled = true;
   let chatGptJsonCaptureEnabled = true;
@@ -61,13 +82,12 @@
   const CLAUDE_INLINE_RIGHT_MARGIN = 4;
   const CLAUDE_EMPTY_COMPOSER_Y_NUDGE = -0.5;
   const CLAUDE_EXISTING_CHAT_COMPOSER_Y_NUDGE = -5;
-  const CLAUDE_TRANSIENT_PLACEMENT_GRACE_MS = 700;
-  const TRANSIENT_COMPOSER_PLACEMENT_GRACE_MS = 700;
-  const TRANSIENT_COMPOSER_PLACEMENT_PLATFORMS = new Set(["gemini", "grok", "deepseek"]);
-  const CLAUDE_PATHNAME_POLL_MS = 80;
   const CLAUDE_MAX_COMPOSER_HORIZONTAL_PADDING = 160;
   const CLAUDE_MODEL_LEFT_NUDGE = 48;
   const CLAUDE_SIDE_CONTROL_RIGHT_NUDGE = 52;
+  const TRANSIENT_COMPOSER_PLACEMENT_GRACE_MS = 700;
+  const TRANSIENT_COMPOSER_PLACEMENT_PLATFORMS = new Set(["gemini", "grok", "deepseek"]);
+  const INLINE_PATHNAME_POLL_MS = 80;
   const DESTINATION_SHEET_WIDTH = 352;
   const DESTINATION_SHEET_CLOSED_TRANSFORM = "translate3d(0,12px,0) scale(0.96)";
   const DESTINATION_SHEET_EXIT_MS = 200;
@@ -460,10 +480,6 @@
   let activeTransferTrace = null;
   let runningResetTimer = null;
   let reservedActionCluster = null;
-  let reservedClaudeInlineControls = [];
-  let reservedClaudeInlineShift = 0;
-  let reservedClaudeControlOffsets = new Map();
-  let reservedClaudeOverflowElements = [];
   let reservedComposerSurface = null;
   let destinationSheetAnimationFrame = null;
   let destinationSheetHideTimer = null;
@@ -477,27 +493,16 @@
   let platformPlacementResizeTargets = [];
   let providerControlMutationObserver = null;
   let providerControlMutationRoot = null;
-  let claudePlacementResizeObserver = null;
-  let claudePlacementResizeTargets = [];
-  let claudePlacementMutationObserver = null;
-  let claudePlacementMutationRoot = null;
   let pastedContentCardAttempts = new WeakMap();
   // Detail panels are portaled outside the message DOM. Keep their payload tied
   // to the inner user node, then rejoin it to whichever containing turn wins.
   const capturedPastedContent = [];
-  let chatGptPlacementSurface = null;
-  let chatGptPlacementResizeObserver = null;
-  let chatGptPlacementResizeTargets = [];
-  let chatGptPlacementMutationObserver = null;
-  let chatGptPlacementMutationRoot = null;
   let retainedPlatformInput = null;
   let pendingPasteRecheck = null;
-  let lastClaudeStablePlacementAt = 0;
-  let claudePlacementGraceTimer = null;
   let transientComposerPlacement = null;
   let transientComposerPlacementGraceTimer = null;
-  let lastClaudePlacementPathname = window.location.pathname;
-  let claudePathnamePollTimer = null;
+  let lastInlinePlacementPathname = window.location.pathname;
+  let inlinePathnamePollTimer = null;
   let pendingFloatingButtonReasons = new Set();
   let floatingButtonMonitoringDisabled = false;
   let handoffCountdownTimer = null;
@@ -641,6 +646,11 @@
   }
 
   function cleanupContextGeneratorNodes() {
+    releaseClaudeInlineMount();
+    releaseChatGptInlineMount();
+    releaseProviderInlineMount();
+    inlineBubble?.remove();
+    inlineBubble = null;
     cleanupContextGeneratorReservations();
 
     if (ownedUiStyleSheets.size) {
@@ -651,6 +661,9 @@
 
     [
       BUBBLE_ID,
+      CLAUDE_INLINE_STYLE_ID,
+      CHATGPT_INLINE_STYLE_ID,
+      PROVIDER_INLINE_STYLE_ID,
       OVERLAY_ID,
       HANDOFF_SCRIM_ID,
       OVERLAY_PALETTE_STYLE_ID,
@@ -749,22 +762,30 @@
       findReadyPlatformInput,
       waitForEditorText,
       formatFirefoxContentEditableHtml,
-      getClaudeBubblePlacement,
-      getClaudeFixedBubblePlacement,
+      findClaudeInlineToolbar,
+      mountClaudeInlineButton,
+      releaseClaudeInlineMount,
+      findChatGptInlineToolbar,
+      mountChatGptInlineButton,
+      releaseChatGptInlineMount,
+      mountInlineOrLegacyBackup,
+      invalidateInlinePicker,
+      hideDestinationSheet,
+      findProviderInlineToolbar,
+      mountProviderInlineButton,
+      releaseProviderInlineMount,
       getGeminiBubblePlacement,
       findGeminiModelSelectorButton,
       getGrokBubblePlacement,
       getDeepSeekBubblePlacement,
-      getChatGptFixedBubblePlacement,
       findPlatformInput,
       findComposerSurfaceElement,
       reserveComposerSurface,
       syncPlatformPlacementResizeMonitoring,
       stopPlatformPlacementResizeMonitoring,
-      syncClaudePlacementResizeMonitoring,
       recordTransientComposerPlacement,
       retainTransientComposerPlacement,
-      checkClaudePlacementPathname,
+      checkInlinePlacementPathname,
       prepareSourceForCapture,
       getSourceScrollStableTimeout,
       getSourceScrollStableInterval,
@@ -784,11 +805,6 @@
       markCaptureDone,
       buildLatestTransferStats,
       getSafeTelemetryFailureReason,
-      getClaudeInlineControlsToShift,
-      getClaudeModelControlsToNudge,
-      getClaudeControlTargetOffset,
-      findClaudeControlSwitchCluster,
-      reserveClaudeInlineBubbleSlot,
       startFloatingButtonMonitoring,
       teardownContextGeneratorInstance,
       getOwnedLifecycleResourceCounts,
@@ -2134,7 +2150,8 @@
     return models
       .filter((model) => typeof model === "string" && model.trim())
       // Preserve the complete bounded backend chain in Latest Run. The current
-      // maximum is Flash + Flash-Lite + Mistral + local fallback.
+      // maximum is five OpenRouter routes + Flash + Flash-Lite + Mistral.
+      // Local carry is the outcome, not an additional attempted remote model.
       .slice(0, 8)
       .map((model) => model.trim());
   }
@@ -3736,72 +3753,1210 @@
     ].join(",")));
   }
 
+  function findClaudeInlineToolbar(input) {
+    if (!input?.isConnected || !isVisible(input)) return null;
+    const composer = input.closest("[data-cds='ChatComposer']");
+    const ownsControl = (node) => !isComposerPopupControl(node, input) &&
+      (!composer || node.closest("[data-cds='ChatComposer']") === composer);
+    // Native transitions can retain hidden copies; select a visible owned
+    // control before deciding that inline mounting is unavailable.
+    const findControl = (root, selector) => root && Array.from(root.querySelectorAll(selector))
+      .find((node) => node.isConnected && isVisible(node) && ownsControl(node));
+    // Claude's named actions container must be a sibling of this editor's
+    // branch. Never select a page-wide flex row, another composer, or a popup.
+    let host = input.parentElement;
+    for (let depth = 0; host && host !== document.body && depth < 10; depth++, host = host.parentElement) {
+      if (composer && !composer.contains(host)) break;
+      const actions = Array.from(host.children).find((node) => node.getAttribute("data-cds") === "ChatComposerActions");
+      if (!actions || actions.contains(input) || isComposerPopupControl(actions, input)) continue;
+      const editorBranch = Array.from(host.children).find((node) => node.contains(input));
+      const attach = findControl(actions, "[data-testid='chat-input-attach']");
+      // Compact existing chats move the model into the composer's separate
+      // chin. Accept that variant only within this editor's named composer.
+      const model = findControl(actions, "[data-testid='model-selector-dropdown']") ||
+        findControl(composer, "[data-testid='model-selector-dropdown']");
+      if (!editorBranch || !attach || !model) continue;
+      const rows = Array.from(actions.children);
+      const left = rows.find((row) => row.contains(attach) && getComputedStyle(row).display === "flex");
+      // The hidden Send branch still identifies the compact row in Voice mode.
+      const send = Array.from(actions.querySelectorAll("[data-testid='chat-input-send']")).find(ownsControl);
+      const right = rows.find((row) => (row.contains(model) || (send && row.contains(send))) && getComputedStyle(row).display === "flex");
+      const rect = host.getBoundingClientRect();
+      if (!left || !right || left === right || rect.width < 180 || rect.width > Math.min(1320, window.innerWidth)) continue;
+      // Mount before the persistent Send/Voice branch, beside the mic even
+      // while Send is hidden. Keep the pill outside its animated layers.
+      let anchor = send && right.contains(send) ? send : model;
+      while (anchor.parentElement !== right) anchor = anchor.parentElement;
+      return { input, host, editorBranch, actions, left, right, anchor };
+    }
+    return null;
+  }
+
+  function ensureClaudeInlineStyles() {
+    if (document.getElementById(CLAUDE_INLINE_STYLE_ID)) return;
+    const style = document.createElement("style");
+    style.id = CLAUDE_INLINE_STYLE_ID;
+    style.className = "darkreader";
+    style.dataset.contextGeneratorOwned = "true";
+    // Native absolute groups can collide even if our slot is inline. Put the
+    // two groups in normal flow and let CSS wrap them; no viewport coordinates,
+    // control translations, or width-dependent JavaScript are needed.
+    // Zero the old leading/trailing float reservations, preserving native side
+    // padding. Only the expanded editor's bottom toolbar reservation needs reset.
+    style.textContent = `
+      [${CLAUDE_INLINE_MARKER}="editor"] {
+        padding-bottom:0!important;
+        --cmp-lead-w:0px!important; --cmp-trail-w:0px!important; --cmp-wrap-h:0px!important;
+      }
+      [${CLAUDE_INLINE_MARKER}="actions"] {
+        display:flex!important; position:static!important; width:100%!important;
+        flex-wrap:wrap!important; align-items:center!important;
+        justify-content:space-between!important; gap:6px!important; margin-top:2px!important;
+      }
+      [${CLAUDE_INLINE_MARKER}="left"], [${CLAUDE_INLINE_MARKER}="right"] {
+        position:static!important; inset:auto!important; max-width:100%!important;
+        min-width:0!important; flex-wrap:wrap!important; height:auto!important;
+      }
+      [${CLAUDE_INLINE_MARKER}="right"] { margin-left:auto!important; }
+    `;
+    (document.head || document.documentElement).appendChild(style);
+    applyOwnedUiStyleSheet(style);
+  }
+
+  function retainClaudeInlineMount(bubble, input) {
+    const mount = claudeInlineMount;
+    if (!mount || mount.bubble !== bubble) return false;
+    // Native controls may disappear while sending/docking. Keep the validated
+    // inline slot as long as this editor still owns it; never use fixed placement.
+    const ownsSlot = (!input || input === mount.input) && mount.input.isConnected &&
+      mount.host.isConnected && mount.host.contains(mount.input) && mount.host.contains(mount.actions) &&
+      mount.actions.contains(mount.right) && bubble.parentElement === mount.right;
+    setBubbleStylesIfChanged(bubble, { visibility: ownsSlot ? "visible" : "hidden" });
+    return ownsSlot;
+  }
+
+  function releaseClaudeInlineMount() {
+    if (!claudeInlineMount) return;
+    const { editorBranch, actions, left, right } = claudeInlineMount;
+    [editorBranch, actions, left, right].forEach((node) => node.removeAttribute(CLAUDE_INLINE_MARKER));
+    claudeInlineMount = null;
+    stopProviderControlMutationMonitoring();
+  }
+
+  function mountClaudeInlineButton(bubble, input) {
+    const toolbar = findClaudeInlineToolbar(input);
+    if (!toolbar) {
+      if (retainClaudeInlineMount(bubble, input)) return true;
+      releaseClaudeInlineMount();
+      if (input?.isConnected) {
+        // Keep watching a remounted composer's attribute-only toolbar reveal.
+        syncProviderControlMutationMonitoring(input, input.closest("[data-cds='ChatComposer']"));
+      }
+      return false;
+    }
+    if (claudeInlineMount?.input !== input || claudeInlineMount?.host !== toolbar.host ||
+        claudeInlineMount?.editorBranch !== toolbar.editorBranch ||
+        claudeInlineMount?.actions !== toolbar.actions ||
+        claudeInlineMount?.left !== toolbar.left || claudeInlineMount?.right !== toolbar.right ||
+        claudeInlineMount?.anchor !== toolbar.anchor) {
+      releaseClaudeInlineMount();
+      claudeInlineMount = { ...toolbar, bubble, pathname: window.location.pathname };
+    }
+    claudeInlineMount.pathname = window.location.pathname;
+    // Stable inline updates reuse the scoped native-control observer.
+    clearLegacyInlineBackup({ keepControlObserver: true });
+    ensureClaudeInlineStyles();
+    [[toolbar.editorBranch, "editor"], [toolbar.actions, "actions"], [toolbar.left, "left"], [toolbar.right, "right"]]
+      .forEach(([node, value]) => {
+        if (node.getAttribute(CLAUDE_INLINE_MARKER) !== value) node.setAttribute(CLAUDE_INLINE_MARKER, value);
+      });
+    if (bubble.parentElement !== toolbar.right || bubble.nextElementSibling !== toolbar.anchor) {
+      toolbar.right.insertBefore(bubble, toolbar.anchor);
+    }
+    setBubbleSize(bubble, INLINE_PILL_SIZE);
+    setBubbleStylesIfChanged(bubble, {
+      position: "static", left: "auto", right: "auto", top: "auto", bottom: "auto",
+      margin: "0 4px 0 0", flex: `0 0 ${INLINE_PILL_SIZE}px`, alignSelf: "center", display: "flex", visibility: "visible"
+    });
+    // Attribute-only mode/visibility changes emit no document child-list event.
+    syncProviderControlMutationMonitoring(input, input.closest("[data-cds='ChatComposer']") || toolbar.host);
+    return true;
+  }
+
+  function findChatGptInlineToolbar(input) {
+    if (!input?.isConnected || !isVisible(input)) return null;
+    const body = input.closest("[data-composer-body]");
+    const editor = input.closest("[data-composer-input]");
+    if (!body || !editor || !body.contains(editor) || isComposerPopupControl(body, input)) return null;
+    // ChatGPT reorders these children when it switches to multiline. Identify
+    // them through the attachment navigation target and editor ownership,
+    // never through a generic flex selector or a child index.
+    const footer = editor.closest("[data-composer-footer-responsive]");
+    if (!footer || !footer.contains(editor) || footer.closest("[data-composer-body]") !== body) return null;
+    const attach = Array.from(footer.querySelectorAll("[data-composer-navigation-target='add-context']"))
+      .find((node) => node.matches("button") && isVisible(node) && !isComposerPopupControl(node, input) &&
+        node.closest("[data-composer-footer-responsive]") === footer);
+    if (!attach) return null;
+    const rows = Array.from(footer.children);
+    const left = rows.find((row) => row.contains(attach) && !row.contains(input));
+    const rightRows = rows.filter((row) => row !== left && !row.contains(input) &&
+      Array.from(row.querySelectorAll("button")).some((button) =>
+        !isContextGeneratorNode(button) && isVisible(button) && !isComposerPopupControl(button, input)));
+    const rect = body.getBoundingClientRect();
+    if (!left || rightRows.length !== 1 || !isVisible(left) || !isVisible(rightRows[0]) ||
+        rect.width < 180 || rect.width > Math.min(1320, window.innerWidth)) return null;
+    const right = rightRows[0];
+    const nativeButtons = Array.from(right.querySelectorAll("button")).filter((button) =>
+      !isContextGeneratorNode(button) && isVisible(button) && !isComposerPopupControl(button, input));
+    // rightRows already required at least one button using this same predicate.
+    // Locate the common native group, including through display:contents
+    // wrappers. Its model and Voice branches otherwise overflow a narrow track.
+    let controls = nativeButtons[0].parentElement;
+    while (controls !== right && !nativeButtons.every((button) => controls.contains(button))) {
+      controls = controls.parentElement;
+    }
+    const model = nativeButtons.find((button) => button.getAttribute("data-composer-navigation-target") === "reasoning");
+    // The model's native wrappers also own its Thinking effort tooltip. Keep
+    // our pill outside the entire model branch so its hover/focus stays separate.
+    if (model && nativeButtons.length === 1) controls = right;
+    const slot = controls;
+    let anchor = model || nativeButtons[0];
+    while (anchor.parentElement !== slot) anchor = anchor.parentElement;
+    const modelBranch = model ? anchor : null;
+    return { input, body, footer, left, right, controls, slot, anchor, modelBranch };
+  }
+
+  function ensureChatGptInlineStyles() {
+    if (document.getElementById(CHATGPT_INLINE_STYLE_ID)) return;
+    const style = document.createElement("style");
+    style.id = CHATGPT_INLINE_STYLE_ID;
+    style.className = "darkreader";
+    style.dataset.contextGeneratorOwned = "true";
+    // Size the grid to its native controls. The model branch gets a real flex
+    // box for wrapping, while our pill remains its sibling outside the tooltip.
+    // Native hidden states and inline display:none must still win over our flow.
+    style.textContent = `
+      [${CHATGPT_INLINE_MARKER}="footer"] {
+        grid-template-columns:max-content minmax(0,1fr) minmax(0,max-content)!important;
+      }
+      [${CHATGPT_INLINE_MARKER}="model"]:not([hidden]):not(.hidden) {
+        display:inline-flex; align-items:center!important;
+        width:auto!important;
+        min-width:0!important; max-width:100%!important;
+      }
+      [${CHATGPT_INLINE_MARKER}="controls"]:not([hidden]):not(.hidden) {
+        display:flex; width:100%!important; min-width:0!important;
+        max-width:100%!important; flex-wrap:wrap!important; justify-content:flex-end!important;
+      }
+      [${CHATGPT_INLINE_MARKER}="controls"] > :not(#${BUBBLE_ID}) { flex:0 1 auto!important; }
+    `;
+    (document.head || document.documentElement).appendChild(style);
+    applyOwnedUiStyleSheet(style);
+  }
+
+  function releaseChatGptInlineMount() {
+    if (!chatGptInlineMount) return;
+    chatGptInlineMount.footer.removeAttribute(CHATGPT_INLINE_MARKER);
+    chatGptInlineMount.slot.removeAttribute(CHATGPT_INLINE_MARKER);
+    chatGptInlineMount.controls.removeAttribute(CHATGPT_INLINE_MARKER);
+    chatGptInlineMount.modelBranch?.removeAttribute(CHATGPT_INLINE_MARKER);
+    chatGptInlineMount = null;
+    stopProviderControlMutationMonitoring();
+  }
+
+  function mountChatGptInlineButton(bubble, input) {
+    const toolbar = findChatGptInlineToolbar(input);
+    if (!toolbar) {
+      releaseChatGptInlineMount();
+      return false;
+    }
+    if (chatGptInlineMount?.input !== input || chatGptInlineMount?.body !== toolbar.body ||
+        chatGptInlineMount?.footer !== toolbar.footer ||
+        chatGptInlineMount?.left !== toolbar.left || chatGptInlineMount?.right !== toolbar.right ||
+        chatGptInlineMount?.controls !== toolbar.controls || chatGptInlineMount?.slot !== toolbar.slot ||
+        chatGptInlineMount?.anchor !== toolbar.anchor || chatGptInlineMount?.modelBranch !== toolbar.modelBranch) {
+      releaseChatGptInlineMount();
+      chatGptInlineMount = { ...toolbar, bubble };
+    }
+    chatGptInlineMount.pathname = window.location.pathname;
+    clearLegacyInlineBackup({ keepControlObserver: true });
+    ensureChatGptInlineStyles();
+    const markers = [[toolbar.footer, "footer"], [toolbar.controls, "controls"]];
+    if (toolbar.modelBranch) markers.push([toolbar.modelBranch, "model"]);
+    markers.forEach(([node, value]) => {
+      if (node.getAttribute(CHATGPT_INLINE_MARKER) !== value) node.setAttribute(CHATGPT_INLINE_MARKER, value);
+    });
+    if (bubble.parentElement !== toolbar.slot || bubble.nextElementSibling !== toolbar.anchor) {
+      toolbar.slot.insertBefore(bubble, toolbar.anchor);
+    }
+    setBubbleSize(bubble, INLINE_PILL_SIZE);
+    setBubbleStylesIfChanged(bubble, {
+      position: "static", left: "auto", right: "auto", top: "auto", bottom: "auto",
+      margin: "0 6px 0 0", flex: `0 0 ${INLINE_PILL_SIZE}px`, alignSelf: "center", display: "flex", visibility: "visible"
+    });
+    syncProviderControlMutationMonitoring(input, toolbar.body);
+    return true;
+  }
+
+  function findProviderInlineToolbar(input) {
+    if (!input?.isConnected || !isVisible(input) || isComposerPopupControl(input, input)) return null;
+    const nativeControls = (root) => Array.from(root.querySelectorAll("button, [role='button']"))
+      .filter((node) => !isContextGeneratorNode(node) && isVisible(node) && !isComposerPopupControl(node, input));
+    let surface, row, controls, slot, anchor, dock, editorContainer;
+    if (currentPlatform.id === "gemini") {
+      surface = input.closest(".text-input-field");
+      controls = surface && Array.from(surface.querySelectorAll(".trailing-actions-wrapper"))
+        .find((wrapper) => wrapper.closest(".text-input-field") === surface && !wrapper.contains(input) && nativeControls(wrapper).length);
+      if (!controls || !input.closest("rich-textarea") || controls.contains(input)) return null;
+      const buttons = nativeControls(controls);
+      const model = buttons.find((button) => button.getAttribute("data-test-id") === "bard-mode-menu-button");
+      // Gemini hides the model trigger on mobile. Its named trailing group is
+      // still editor-owned; mount before the native mic/send branch there.
+      slot = model?.parentElement || controls;
+      anchor = model || buttons[0];
+      row = controls;
+    } else if (currentPlatform.id === "grok") {
+      surface = input.closest(".query-bar");
+      const editor = input.closest("[data-testid='chat-input']");
+      const buttons = surface ? nativeControls(surface).filter((button) => button.closest(".query-bar") === surface) : [];
+      const attach = buttons.find((button) => button.getAttribute("data-testid") === "attach-button");
+      const model = buttons.find((button) => button.id === "model-select-trigger");
+      if (!editor || !surface?.contains(editor) || !buttons.includes(attach) || !buttons.includes(model)) return null;
+      slot = model.closest("[data-query-bar-mode-select]");
+      if (!slot || slot.parentElement?.contains(input)) return null;
+      controls = slot.parentElement;
+      row = attach.parentElement;
+      while (row && row !== surface && !row.contains(controls)) row = row.parentElement;
+      if (!row || row === surface || row.contains(input)) return null;
+      dock = row.parentElement;
+      editorContainer = dock.parentElement;
+      if (!surface.contains(editorContainer) || !editorContainer.contains(input)) return null;
+      anchor = model;
+    } else if (currentPlatform.id === "deepseek") {
+      // DeepSeek hashes composer classes. Use the file input's associated
+      // upload control and circle action, in a sibling row of this textarea.
+      if (!input.matches("textarea")) return null;
+      for (let node = input.parentElement; node && node !== document.body; node = node.parentElement) {
+        const branches = Array.from(node.children);
+        const editor = branches.find((branch) => branch.contains(input));
+        for (const file of node.querySelectorAll("[type='file']")) {
+          const group = file.parentElement;
+          // Keep the native file/upload association, allowing intervening
+          // non-control siblings and skipping retained file/Send copies.
+          let upload = file.previousElementSibling;
+          while (upload && (!upload.matches("[role='button']") || !upload.matches(".ds-button") || upload.matches(".ds-button--circle"))) {
+            upload = upload.previousElementSibling;
+          }
+          const send = nativeControls(group).find((button) => button.matches(".ds-button--circle"));
+          if (!upload || !send || isComposerPopupControl(upload, input)) continue;
+          const toolbar = branches.find((branch) => branch !== editor && branch.contains(group));
+          if (!toolbar) continue;
+          surface = node; row = toolbar; controls = group; slot = group;
+          anchor = isVisible(upload) ? upload : send;
+          break;
+        }
+        if (surface) break;
+      }
+    } else return null;
+    if (!surface || !row || !controls || !slot || !anchor) return null;
+    // Each adapter supplies an ancestor slot; this native DOM walk is synchronous.
+    while (anchor.parentElement !== slot) anchor = anchor.parentElement;
+    const rect = surface.getBoundingClientRect();
+    if (!isVisible(row) || !isVisible(slot) || isComposerPopupControl(slot, input) ||
+        rect.width < 180 || rect.width > Math.min(1320, window.innerWidth)) return null;
+    return { input, surface, row, controls, slot, anchor, dock, editorContainer };
+  }
+
+  function releaseProviderInlineMount() {
+    providerInlineMount?.markers.forEach(([node]) => node.removeAttribute(PROVIDER_INLINE_MARKER));
+    providerInlineMount = null;
+  }
+
+  function mountProviderInlineButton(bubble, input) {
+    const toolbar = findProviderInlineToolbar(input);
+    if (!toolbar) { releaseProviderInlineMount(); return false; }
+    const keys = ["input", "surface", "row", "controls", "slot", "anchor", "dock", "editorContainer"];
+    if (!providerInlineMount || keys.some((key) => providerInlineMount[key] !== toolbar[key])) {
+      releaseProviderInlineMount();
+      const markers = [[toolbar.controls, "controls"]];
+      if (toolbar.slot !== toolbar.controls) markers.push([toolbar.slot, "slot"]);
+      if (toolbar.row !== toolbar.controls) markers.push([toolbar.row, "row"]);
+      if (toolbar.dock) markers.push([toolbar.dock, "grok-dock"], [toolbar.editorContainer, "grok-space"]);
+      providerInlineMount = { ...toolbar, markers };
+    }
+    providerInlineMount.pathname = window.location.pathname;
+    releaseBubbleSlot();
+    releaseComposerSurface();
+    clearTransientComposerPlacement();
+    stopPlatformPlacementResizeMonitoring();
+    syncProviderControlMutationMonitoring(input, toolbar.surface);
+    if (!document.getElementById(PROVIDER_INLINE_STYLE_ID)) {
+      const style = document.createElement("style");
+      style.id = PROVIDER_INLINE_STYLE_ID;
+      style.className = "darkreader";
+      style.dataset.contextGeneratorOwned = "true";
+      style.textContent = `
+        [${PROVIDER_INLINE_MARKER}="slot"]:not([hidden]):not(.hidden) { display:inline-flex; align-items:center!important; min-width:0!important; max-width:100%!important; }
+        /* Gemini's model wrapper can be a column; keep the pill left of Flash. */
+        .text-input-field [${PROVIDER_INLINE_MARKER}="slot"]:not([hidden]):not(.hidden) { flex-direction:row!important; flex-wrap:nowrap!important; }
+        [${PROVIDER_INLINE_MARKER}="controls"]:not([hidden]):not(.hidden) { display:flex; align-items:center!important; flex-wrap:wrap!important; min-width:0!important; max-width:100%!important; height:auto!important; }
+        [${PROVIDER_INLINE_MARKER}="row"] { flex-wrap:wrap!important; align-items:center!important; justify-content:space-between!important; gap:6px!important; height:auto!important; }
+        [${PROVIDER_INLINE_MARKER}="grok-dock"] { position:static!important; inset:auto!important; }
+        [${PROVIDER_INLINE_MARKER}="grok-space"] { padding-bottom:0!important; }
+      `;
+      (document.head || document.documentElement).appendChild(style);
+      applyOwnedUiStyleSheet(style);
+    }
+    providerInlineMount.markers.forEach(([node, value]) => {
+      if (node.getAttribute(PROVIDER_INLINE_MARKER) !== value) node.setAttribute(PROVIDER_INLINE_MARKER, value);
+    });
+    if (bubble.parentElement !== toolbar.slot || bubble.nextElementSibling !== toolbar.anchor) {
+      toolbar.slot.insertBefore(bubble, toolbar.anchor);
+    }
+    setBubbleSize(bubble, INLINE_PILL_SIZE);
+    setBubbleStylesIfChanged(bubble, {
+      position: "static", left: "auto", right: "auto", top: "auto", bottom: "auto",
+      margin: "0 6px 0 0", flex: `0 0 ${INLINE_PILL_SIZE}px`, alignSelf: "center", display: "flex", visibility: "visible"
+    });
+    return true;
+  }
+
+  // Retained Claude legacy helpers from dc1ac96 are inactive; cleanup still
+  // restores reservations left by an older injected instance.
+  function getClaudeBubblePlacement(composerRect, input = null, composerSurface = null) {
+    const controls = getClaudeComposerControlCandidates(composerRect, composerSurface);
+    const anchorControl = findClaudeVoiceModeControl(controls) || findClaudeInlineFallbackControl(controls);
+    const reservationControls = getClaudeMountedReservationControls(composerSurface, controls);
+    const isFreshEmptyComposer = isClaudeFreshEmptyComposer(input);
+    const isExistingChatComposer = window.location.pathname.startsWith("/chat/");
+    const emptyComposerNudge = isExistingChatComposer
+      ? CLAUDE_EXISTING_CHAT_COMPOSER_Y_NUDGE
+      : isFreshEmptyComposer ? CLAUDE_EMPTY_COMPOSER_Y_NUDGE : 0;
+
+    if (anchorControl) {
+      const currentOffset = getClaudeCurrentControlOffset(anchorControl);
+      const baseAnchorRight = anchorControl.rect.right - currentOffset;
+      const anchorNudge = getClaudeControlTargetOffset(anchorControl, 0);
+      const maxLeft = Math.max(
+        BUBBLE_GAP,
+        composerRect.width - BUBBLE_SIZE - CLAUDE_INLINE_RIGHT_MARGIN
+      );
+      const preferredLeft = baseAnchorRight + anchorNudge - composerRect.left + CLAUDE_INLINE_BUBBLE_GAP;
+      const inlineShift = Math.min(
+        CLAUDE_INLINE_SLOT_WIDTH,
+        Math.max(0, preferredLeft - maxLeft)
+      );
+      const left = clampNumber(
+        baseAnchorRight + getClaudeControlTargetOffset(anchorControl, inlineShift) - composerRect.left + CLAUDE_INLINE_BUBBLE_GAP,
+        BUBBLE_GAP,
+        maxLeft
+      );
+      const top = getClaudeBubbleTop(
+        anchorControl.rect,
+        composerRect,
+        emptyComposerNudge
+      );
+
+      return {
+        left: Math.round(left),
+        top,
+        inlineShift: Math.round(inlineShift),
+        anchorControl,
+        controls,
+        reservationControls
+      };
+    }
+
+    return {
+      inlineShift: 0,
+      anchorControl: null,
+      controls,
+      reservationControls
+    };
+  }
+
+  function getClaudeComposerControlCandidates(composerRect, composerSurface = null) {
+    const rowTop = getClaudeComposerControlRowTop(composerRect);
+
+    return Array.from(document.querySelectorAll("button, [role='button'], [tabindex='0']"))
+      .filter((element) => (
+        element.id !== BUBBLE_ID &&
+        !isContextGeneratorNode(element) &&
+        (!composerSurface || composerSurface.contains?.(element)) &&
+        !isComposerPopupControl(element, composerSurface) &&
+        isVisible(element)
+      ))
+      .map((element) => ({
+        element,
+        label: getElementLabel(element, true),
+        rect: element.getBoundingClientRect()
+      }))
+      .filter(({ rect }) => {
+        return (
+          rect.width > 0 &&
+          rect.width <= 280 &&
+          rect.height > 0 &&
+          rect.height <= 84 &&
+          rect.left >= composerRect.left - 12 &&
+          rect.right <= composerRect.right + 16 &&
+          rect.top >= rowTop &&
+          rect.bottom <= composerRect.bottom + 16
+        );
+      })
+      .sort((a, b) => a.rect.left - b.rect.left);
+  }
+
+  function getClaudeComposerControlRowTop(composerRect) {
+    return composerRect.bottom - Math.max(72, composerRect.height * 0.62);
+  }
+
+  function findClaudeVoiceModeControl(controls) {
+    return controls
+      .map((control) => {
+        let score = 0;
+        if (/\bvoice\s*mode\b/.test(control.label)) score += 260;
+        if (/\b(voice|speak|speech|talk|dictation|audio)\b/.test(control.label)) score += 160;
+        if (control.rect.width <= 64 && control.rect.right >= getRightmostControlEdge(controls) - 4) score += 90;
+        if (/\b(send|submit|attach|upload|file|project|sidebar|side bar|menu|navigation|toggle|model)\b/.test(control.label)) {
+          score -= 260;
+        }
+        if (/\b(mic|microphone)\b/.test(control.label) && !/\bvoice\b/.test(control.label)) {
+          score -= 80;
+        }
+
+        return { ...control, score };
+      })
+      .filter(({ score }) => score >= 160)
+      .sort((a, b) => {
+        if (b.score !== a.score) return b.score - a.score;
+        return b.rect.right - a.rect.right;
+      })[0] || null;
+  }
+
+  function findClaudeInlineFallbackControl(controls) {
+    return controls
+      .filter((control) => {
+        return (
+          control.rect.width <= 72 &&
+          !/\b(attach|upload|file|project|sidebar|side bar|menu|navigation|toggle|model)\b/.test(control.label)
+        );
+      })
+      .sort((a, b) => b.rect.right - a.rect.right)[0] || null;
+  }
+
+  function getClaudeMountedReservationControls(composerSurface, visibleControls) {
+    if (!composerSurface) return visibleControls;
+
+    const mountedControls = Array.from(composerSurface.querySelectorAll("button, [role='button'], [tabindex='0']"))
+      .filter((element) => element.id !== BUBBLE_ID && !isContextGeneratorNode(element) && element.isConnected && !isComposerPopupControl(element, composerSurface))
+      .map((element) => ({
+        element,
+        label: getElementLabel(element, true),
+        rect: element.getBoundingClientRect()
+      }))
+      .filter((control) => {
+        return (
+          control.rect.width > 0 &&
+          control.rect.width <= 280 &&
+          control.rect.height > 0 &&
+          control.rect.height <= 84 &&
+          /\b(model|sonnet|opus|haiku|send|submit|mic|microphone|voice|speak|speech|talk|dictation|audio)\b/.test(control.label)
+        );
+      });
+
+    return [...visibleControls, ...mountedControls].filter((control, index, all) => {
+      return all.findIndex((candidate) => candidate.element === control.element) === index;
+    });
+  }
+
+  function isClaudeFreshEmptyComposer(input) {
+    return window.location.pathname === "/new" && isClaudeComposerEmpty(input);
+  }
+
+  function isClaudeComposerEmpty(input) {
+    if (!input) return false;
+    const value = /^(input|textarea)$/.test(input.localName || "")
+      ? input.value
+      : input.innerText || input.textContent;
+    return String(value || "").trim() === "";
+  }
+
+  function getClaudeCurrentControlOffset(anchorControl) {
+    if (!anchorControl) return 0;
+    return reservedClaudeControlOffsets.get(anchorControl.element) || 0;
+  }
+
+  function getClaudeControlTargetOffset(control, inlineShift = 0) {
+    if (isClaudeModelControl(control)) {
+      return -CLAUDE_MODEL_LEFT_NUDGE;
+    }
+    if (isClaudeSideControl(control)) {
+      return CLAUDE_SIDE_CONTROL_RIGHT_NUDGE - Math.max(0, Math.round(inlineShift));
+    }
+    return 0;
+  }
+
+  function isClaudeModelControl(control) {
+    return /\b(model|sonnet|opus|haiku)\b/.test(control?.label || "");
+  }
+
+  function isClaudeSideControl(control) {
+    return (
+      control?.rect?.width <= 84 ||
+      /\b(send|submit|mic|microphone|voice|speak|speech|talk|dictation|audio)\b/.test(control?.label || "")
+    );
+  }
+
+  function getClaudeBubbleTop(targetRect, composerRect, opticalNudge = 0) {
+    const centeredTop = targetRect.top + (targetRect.height - BUBBLE_SIZE) / 2 - composerRect.top;
+    // Claude's control row can sit flush with the bottom of a shallower inner
+    // surface. Allow only the natural half-height overflow needed to keep the
+    // larger Cap Context bubble centered on the native control.
+    const bottomOverflow = Math.max(0, (BUBBLE_SIZE - targetRect.height) / 2);
+    const maxTop = Math.max(
+      BUBBLE_GAP,
+      composerRect.height - BUBBLE_SIZE + bottomOverflow
+    );
+    // Optical alignment may intentionally cross the local surface edge. Apply
+    // it after the legacy local bound; fixed-root placement is viewport-clamped.
+    return Math.round((clampNumber(centeredTop, BUBBLE_GAP, maxTop) + opticalNudge) * 2) / 2;
+  }
+
+  function getClaudeFixedBubblePlacement(localPlacement, composerRect) {
+    return clampFixedBubblePlacement(
+      composerRect.left + localPlacement.left,
+      composerRect.top + localPlacement.top
+    );
+  }
+
+  function clampFixedBubblePlacement(left, top) {
+    const minLeft = BUBBLE_GAP;
+    const minTop = BUBBLE_GAP;
+    const maxLeft = Math.max(minLeft, window.innerWidth - BUBBLE_SIZE - BUBBLE_GAP);
+    const maxTop = Math.max(minTop, window.innerHeight - BUBBLE_SIZE - BUBBLE_GAP);
+
+    return {
+      left: Math.round(Math.min(Math.max(left, minLeft), maxLeft)),
+      top: Math.round(Math.min(Math.max(top, minTop), maxTop))
+    };
+  }
+
+  function reserveClaudeInlineBubbleSlot(anchorControl, controls, input, composerRect, inlineShift = 0) {
+    reserveClaudeInlineControls(
+      getClaudeInlineControlsToShift(controls, anchorControl),
+      getClaudeModelControlsToNudge(controls, anchorControl),
+      inlineShift,
+      input
+    );
+  }
+
+  function reserveClaudeInlineControls(
+    sideControls,
+    modelControls = [],
+    inlineShift = CLAUDE_INLINE_SLOT_WIDTH,
+    input = null
+  ) {
+    const shift = Math.max(0, Math.round(inlineShift));
+    const reservationOffsets = new Map();
+    const controlOffsets = new Map();
+
+    modelControls.forEach((control) => {
+      if (!control.element) return;
+      const offset = getClaudeControlTargetOffset(control, shift);
+      reservationOffsets.set(control.element, offset);
+      controlOffsets.set(control.element, offset);
+    });
+
+    const switchCluster = findClaudeControlSwitchCluster(sideControls, input);
+    sideControls.forEach((control) => {
+      if (!control.element) return;
+      const offset = getClaudeControlTargetOffset(control, shift);
+      controlOffsets.set(control.element, offset);
+      if (!switchCluster) reservationOffsets.set(control.element, offset);
+    });
+    if (switchCluster && sideControls.length > 0) {
+      reservationOffsets.set(switchCluster, getClaudeControlTargetOffset(sideControls[0], shift));
+    }
+
+    const elements = [...reservationOffsets.keys()].filter((element) => reservationOffsets.get(element) !== 0);
+    const overflowElements = getClaudeModelOverflowElements(modelControls);
+
+    if (elements.length === 0) {
+      releaseClaudeInlineControlSlots();
+      return;
+    }
+
+    if (reservedActionCluster) {
+      releaseActionClusterSlot();
+    }
+
+    reservedClaudeInlineControls
+      .filter((element) => !elements.includes(element))
+      .forEach(restoreReservedTranslate);
+
+    reservedClaudeOverflowElements
+      .filter((element) => !overflowElements.includes(element))
+      .forEach(restoreReservedOverflow);
+
+    overflowElements.forEach(reserveClaudeModelOverflow);
+
+    elements.forEach((element) => {
+      if (!element.hasAttribute("data-context-generator-original-translate")) {
+        element.setAttribute("data-context-generator-original-translate", element.style.translate || "");
+      }
+
+      const offset = reservationOffsets.get(element) || 0;
+      const targetTranslate = `${offset}px 0px`;
+      // Keep Cap Context's offset independent from Claude's animated transform.
+      // Overriding transform or transition can strand Claude's outgoing visual
+      // layer when the editor and control DOM update in separate React commits.
+      if (element.style.translate !== targetTranslate) {
+        element.style.translate = targetTranslate;
+      }
+    });
+
+    reservedClaudeInlineControls = elements;
+    reservedClaudeInlineShift = shift;
+    reservedClaudeControlOffsets = controlOffsets;
+    reservedClaudeOverflowElements = overflowElements;
+  }
+
+  function findClaudeControlSwitchCluster(sideControls, input = null) {
+    const elements = sideControls
+      .map((control) => control.element)
+      .filter((element, index, all) => element && element.isConnected && all.indexOf(element) === index);
+    if (elements.length === 0) return null;
+
+    let node = elements[0].parentElement;
+    let depth = 0;
+    while (node && node !== document.body && depth < 10) {
+      if (input && node.contains?.(input)) break;
+      if (elements.every((element) => node.contains?.(element))) {
+        const rect = node.getBoundingClientRect();
+        const style = window.getComputedStyle(node);
+        if (
+          style.display === "grid" &&
+          rect.width > 0 && rect.width <= 280 &&
+          rect.height > 0 && rect.height <= 84
+        ) {
+          return node;
+        }
+      }
+      node = node.parentElement;
+      depth += 1;
+    }
+    return null;
+  }
+
+  function getClaudeModelOverflowElements(modelControls) {
+    const elements = [];
+
+    modelControls.forEach((control) => {
+      let node = control.element;
+      let depth = 0;
+
+      while (node && node !== document.body && depth < 4) {
+        if (!elements.includes(node)) elements.push(node);
+        node = node.parentElement;
+        depth += 1;
+      }
+    });
+
+    return elements;
+  }
+
+  function releaseClaudeInlineControlSlots() {
+    if (!reservedClaudeInlineControls.length) return;
+
+    reservedClaudeInlineControls.forEach(restoreReservedTranslate);
+    reservedClaudeOverflowElements.forEach(restoreReservedOverflow);
+    reservedClaudeInlineControls = [];
+    reservedClaudeInlineShift = 0;
+    reservedClaudeControlOffsets = new Map();
+    reservedClaudeOverflowElements = [];
+  }
+
+  function getClaudeInlineControlsToShift(controls, anchorControl) {
+    const anchorCenterY = anchorControl.rect.top + anchorControl.rect.height / 2;
+    const minLeft = anchorControl.rect.left - 160;
+
+    return controls.filter((control) => {
+      const centerY = control.rect.top + control.rect.height / 2;
+      if (Math.abs(centerY - anchorCenterY) > 28) return false;
+      if (control.rect.right < minLeft) return false;
+      if (/\b(attach|upload|file|project|sidebar|side bar|menu|navigation|toggle|model|sonnet|opus|haiku)\b/.test(control.label)) {
+        return false;
+      }
+      return control === anchorControl || isClaudeSideControl(control);
+    });
+  }
+
+  function getClaudeModelControlsToNudge(controls, anchorControl) {
+    const anchorCenterY = anchorControl.rect.top + anchorControl.rect.height / 2;
+
+    return controls.filter((control) => {
+      const centerY = control.rect.top + control.rect.height / 2;
+      return Math.abs(centerY - anchorCenterY) <= 28 && isClaudeModelControl(control);
+    });
+  }
+
+  function getChatGptFixedBubblePlacement(input) {
+    const composerRect = getChatGptPlacementRect(input);
+    const inputRect = input.getBoundingClientRect();
+    const composerSurface = getRetainedChatGptPlacementSurface(input);
+    // Search only actual buttons that share the editor's form or verified
+    // composer surface. Streaming response text must never become an anchor.
+    const modelButton =
+      findChatGptModelSelectorButton(input, composerSurface, null, inputRect) ||
+      findChatGptModelSelectorButton(input, composerSurface, composerRect, inputRect);
+
+    if (modelButton) {
+      return getFixedBubblePlacementBesideRect(modelButton.getBoundingClientRect());
+    }
+
+    if (composerRect) {
+      const rowButtons = getChatGptComposerButtonCandidates(input, composerSurface, composerRect);
+      // Free plans have no reasoning selector. Anchor before the whole visible
+      // control row (including wider pills such as Think), not beside Voice.
+      const leftmostControl = rowButtons[0];
+
+      if (leftmostControl) {
+        return getFixedBubblePlacementBesideRect(leftmostControl.rect);
+      }
+
+      const fallback = getBottomRightRowBubblePlacement(composerRect, 64);
+      return clampFixedBubblePlacement(composerRect.left + fallback.left, composerRect.top + fallback.top);
+    }
+
+    return clampFixedBubblePlacement(
+      inputRect.right - BUBBLE_SIZE - 112,
+      inputRect.top + (inputRect.height - BUBBLE_SIZE) / 2
+    );
+  }
+
+  function getChatGptPlacementRect(input) {
+    const retainedSurface = getRetainedChatGptPlacementSurface(input);
+    const detectedSurface = retainedSurface ? null : findComposerSurfaceElement(input);
+    const composerSurface = retainedSurface || detectedSurface;
+    const composerRect = composerSurface?.getBoundingClientRect();
+    if (isUsableChatGptPlacementRect(composerRect)) {
+      chatGptPlacementSurface = composerSurface;
+      syncChatGptPlacementResizeMonitoring(input, composerSurface);
+      return composerRect;
+    }
+
+    const form = input.closest("form");
+    const formRect = form?.getBoundingClientRect();
+    if (isUsableChatGptPlacementRect(formRect)) {
+      chatGptPlacementSurface = form;
+      syncChatGptPlacementResizeMonitoring(input, form);
+      return formRect;
+    }
+
+    chatGptPlacementSurface = null;
+    syncChatGptPlacementResizeMonitoring(input, null);
+
+    const inputRect = input.getBoundingClientRect();
+    if (!inputRect || inputRect.width <= 0 || inputRect.height <= 0) return null;
+
+    let left = Math.max(BUBBLE_GAP, inputRect.left - 64);
+    const right = Math.min(window.innerWidth - BUBBLE_GAP, Math.max(inputRect.right + 180, left + 320));
+    if (right - left < 280) {
+      left = Math.max(BUBBLE_GAP, right - 320);
+    }
+    const top = Math.max(BUBBLE_GAP, inputRect.top - 18);
+    const bottom = Math.min(window.innerHeight - BUBBLE_GAP, Math.max(inputRect.bottom + 70, top + 96));
+
+    return {
+      left,
+      right,
+      top,
+      bottom,
+      width: right - left,
+      height: bottom - top
+    };
+  }
+
+  function getRetainedChatGptPlacementSurface(input) {
+    if (
+      currentPlatform.id !== "chatgpt" ||
+      !chatGptPlacementSurface ||
+      !chatGptPlacementSurface.contains?.(input) ||
+      isContextGeneratorNode(chatGptPlacementSurface)
+    ) {
+      return null;
+    }
+
+    const rect = chatGptPlacementSurface.getBoundingClientRect();
+    const maxWidth = getMaxComposerSurfaceWidth();
+    const maxHeight = currentPlatform.maxComposerHeight || 260;
+    return (
+      rect.width >= 280 &&
+      rect.width <= maxWidth &&
+      rect.height >= 40 &&
+      rect.height <= maxHeight &&
+      rect.bottom >= 0 &&
+      rect.top <= window.innerHeight
+    ) ? chatGptPlacementSurface : null;
+  }
+
+  function isUsableChatGptPlacementRect(rect) {
+    return Boolean(
+      rect &&
+      rect.width >= 280 &&
+      rect.width <= getMaxComposerSurfaceWidth() &&
+      rect.height >= 40 &&
+      rect.height <= (currentPlatform.maxComposerHeight || 260) &&
+      rect.bottom >= BUBBLE_GAP &&
+      rect.top <= window.innerHeight - BUBBLE_GAP &&
+      rect.right >= BUBBLE_GAP &&
+      rect.left <= window.innerWidth - BUBBLE_GAP
+    );
+  }
+
+  function syncChatGptPlacementResizeMonitoring(input, composerSurface) {
+    syncChatGptPlacementMutationMonitoring(input, composerSurface);
+
+    if (currentPlatform.id !== "chatgpt" || typeof ResizeObserver === "undefined") {
+      stopChatGptPlacementResizeMonitoring();
+      return;
+    }
+
+    const nextTargets = [input, composerSurface].filter((element, index, all) => {
+      return element && all.indexOf(element) === index;
+    });
+    const targetsUnchanged =
+      nextTargets.length === chatGptPlacementResizeTargets.length &&
+      nextTargets.every((element, index) => element === chatGptPlacementResizeTargets[index]);
+    if (targetsUnchanged) return;
+
+    stopChatGptPlacementResizeMonitoring();
+    chatGptPlacementResizeObserver = createOwnedObserver(ResizeObserver, () => scheduleFloatingButtonUpdate());
+    nextTargets.forEach((element) => chatGptPlacementResizeObserver.observe(element));
+    chatGptPlacementResizeTargets = nextTargets;
+  }
+
+  function syncChatGptPlacementMutationMonitoring(input, composerSurface) {
+    if (
+      currentPlatform.id !== "chatgpt" ||
+      typeof MutationObserver === "undefined"
+    ) {
+      stopChatGptPlacementMutationMonitoring();
+      return;
+    }
+
+    const root = getChatGptComposerControlRoot(input, composerSurface) || input;
+    if (root === chatGptPlacementMutationRoot) return;
+
+    stopChatGptPlacementMutationMonitoring();
+    chatGptPlacementMutationRoot = root;
+    chatGptPlacementMutationObserver = createOwnedObserver(MutationObserver, () => scheduleFloatingButtonUpdate());
+    chatGptPlacementMutationObserver.observe(root, {
+      attributes: true,
+      characterData: true,
+      subtree: true,
+      // Responsive rows can hide/return without resizing either observed box.
+      attributeFilter: ["class", "style", "aria-expanded", "data-state", "hidden"]
+    });
+  }
+
+  function stopChatGptPlacementMutationMonitoring() {
+    chatGptPlacementMutationObserver?.disconnect();
+    chatGptPlacementMutationObserver = null;
+    chatGptPlacementMutationRoot = null;
+  }
+
+  function getChatGptComposerControlRoot(input, composerSurface) {
+    const inputForm = input.closest("form");
+    if (inputForm?.contains(input)) return inputForm;
+    return composerSurface?.contains?.(input) ? composerSurface : null;
+  }
+
+  function stopChatGptPlacementResizeMonitoring() {
+    chatGptPlacementResizeObserver?.disconnect();
+    chatGptPlacementResizeObserver = null;
+    chatGptPlacementResizeTargets = [];
+  }
+
+  function findChatGptModelSelectorButton(input, composerSurface, composerRect, inputRect = null) {
+    const root = getChatGptComposerControlRoot(input, composerSurface);
+    if (!root) return null;
+
+    const hasInputScope = !composerRect && inputRect?.width > 0 && inputRect?.height > 0;
+    const rowTop = composerRect
+      ? composerRect.bottom - Math.max(64, composerRect.height * 0.65)
+      : hasInputScope
+        ? Math.max(BUBBLE_GAP, inputRect.bottom - 112)
+        : window.innerHeight * 0.45;
+    const rowBottom = composerRect
+      ? composerRect.bottom + 16
+      : hasInputScope
+        ? Math.min(window.innerHeight - BUBBLE_GAP, inputRect.bottom + 112)
+        : window.innerHeight - BUBBLE_GAP;
+    const scopeLeft = composerRect
+      ? composerRect.left - 12
+      : hasInputScope
+        ? Math.max(BUBBLE_GAP, inputRect.left - 96)
+        : window.innerWidth * 0.22;
+    const scopeRight = composerRect
+      ? composerRect.right + 12
+      : hasInputScope
+        // The editor ends before the controls; wider mode labels still belong
+        // to the same composer, even when its outer form spans the page.
+        ? Math.min(window.innerWidth - BUBBLE_GAP, inputRect.left + getMaxComposerSurfaceWidth())
+        : window.innerWidth - BUBBLE_GAP;
+
+    return Array.from(root.querySelectorAll("button"))
+      .filter((button) => isChatGptComposerButton(button, input))
+      .map((button) => {
+        const rect = button.getBoundingClientRect();
+        const label = getElementLabel(button, true);
+        const text = (button.innerText || button.textContent || "").toLowerCase();
+        let score = 0;
+
+        if (/\b(instant|medium|high)\b/.test(text)) score += 180;
+        if (/\b(model|intelligence|reasoning|thinking)\b/.test(label)) score += 180;
+        if (/^(true|menu|listbox|dialog)$/.test(button.getAttribute("aria-haspopup") || "")) score += 140;
+        if (composerRect && rect.left >= composerRect.left + composerRect.width * 0.45) score += 22;
+        if (!composerRect && rect.left >= window.innerWidth * 0.45) score += 12;
+        if (rect.top >= rowTop && rect.bottom <= rowBottom) score += 28;
+        if (rect.width >= 48 && rect.width <= 140) score += 12;
+        if (/\b(send|voice|mic|microphone|attach|upload|tools|image|canvas)\b/.test(label)) score -= 120;
+
+        return { button, rect, score };
+      })
+      .filter(({ rect, score }) => {
+        return (
+          score >= 120 &&
+          rect.width > 0 &&
+          rect.width <= 280 &&
+          rect.height > 0 &&
+          rect.height <= 56 &&
+          rect.left >= scopeLeft &&
+          rect.right <= scopeRight &&
+          rect.top >= rowTop &&
+          rect.bottom <= rowBottom
+        );
+      })
+      .sort((a, b) => {
+        if (b.score !== a.score) return b.score - a.score;
+        return b.rect.left - a.rect.left;
+      })[0]?.button || null;
+  }
+
+  function isChatGptComposerButton(button, input) {
+    if (button.id === BUBBLE_ID || isContextGeneratorNode(button) || !isVisible(button)) return false;
+    return !isComposerPopupControl(button, input);
+  }
+
+  function getFixedBubblePlacementBesideRect(targetRect) {
+    return clampFixedBubblePlacement(
+      targetRect.left - BUBBLE_SIZE - BUBBLE_GAP,
+      targetRect.top + (targetRect.height - BUBBLE_SIZE) / 2
+    );
+  }
+
+  function getChatGptComposerButtonCandidates(input, composerSurface, composerRect) {
+    const root = getChatGptComposerControlRoot(input, composerSurface);
+    if (!root) return [];
+
+    const rowTop = composerRect.bottom - Math.max(60, composerRect.height * 0.55);
+
+    return Array.from(root.querySelectorAll("button"))
+      .filter((button) => isChatGptComposerButton(button, input))
+      .map((button) => ({ button, rect: button.getBoundingClientRect() }))
+      .filter(({ rect }) => {
+        return (
+          rect.width > 0 &&
+          rect.width <= 180 &&
+          rect.height > 0 &&
+          rect.height <= 72 &&
+          rect.left >= composerRect.left + composerRect.width * 0.45 &&
+          rect.right <= composerRect.right + 12 &&
+          rect.top >= rowTop &&
+          rect.bottom <= composerRect.bottom + 12
+        );
+      })
+      .sort((a, b) => a.rect.left - b.rect.left);
+  }
+
+  function clearChatGptPlacementResizeMonitoring() {
+    stopChatGptPlacementResizeMonitoring();
+    stopChatGptPlacementMutationMonitoring();
+    chatGptPlacementSurface = null;
+  }
+
+  function getRetainedClaudeComposerSurface(input) {
+    if (
+      currentPlatform.id !== "claude" ||
+      !reservedComposerSurface ||
+      !reservedComposerSurface.contains?.(input) ||
+      isContextGeneratorNode(reservedComposerSurface)
+    ) {
+      return null;
+    }
+
+    const rect = reservedComposerSurface.getBoundingClientRect();
+    const inputRect = input.getBoundingClientRect();
+    const maxWidth = getMaxComposerSurfaceWidth();
+    const maxHeight = currentPlatform.maxComposerHeight || 260;
+    return (
+      rect.width >= 280 &&
+      rect.width <= maxWidth &&
+      rect.height >= 40 &&
+      rect.height <= maxHeight &&
+      rect.bottom >= 0 &&
+      rect.top <= window.innerHeight &&
+      isClaudeComposerSurfaceHorizontallyAligned(rect, inputRect) &&
+      isClaudeAnchorSurfaceCandidate(reservedComposerSurface, rect)
+    ) ? reservedComposerSurface : null;
+  }
+
+  function isClaudeComposerSurfaceHorizontallyAligned(rect, inputRect) {
+    if (currentPlatform.id !== "claude") return true;
+
+    // Claude's real composer stays close to the editor horizontally, even when
+    // a large paste makes it tall. Reject page-sized ancestors so their phantom
+    // width cannot push the native voice controls and our orb beyond the border.
+    const horizontalPadding =
+      Math.max(0, inputRect.left - rect.left) +
+      Math.max(0, rect.right - inputRect.right);
+    return horizontalPadding <= CLAUDE_MAX_COMPOSER_HORIZONTAL_PADDING;
+  }
+
+  function isClaudeAnchorSurfaceCandidate(surface, surfaceRect) {
+    if (!surface || !surfaceRect) return false;
+    const controls = getClaudeComposerControlCandidates(surfaceRect, surface);
+    const hasClaudeSideControl = controls.some((control) => {
+      return /\b(send|submit|mic|microphone|voice|speak|speech|talk|dictation|audio)\b/.test(control.label);
+    });
+    return hasClaudeSideControl && Boolean(
+      findClaudeVoiceModeControl(controls) || findClaudeInlineFallbackControl(controls)
+    );
+  }
+
+  function reserveClaudeModelOverflow(element) {
+    if (!element.hasAttribute("data-context-generator-original-overflow")) {
+      element.setAttribute("data-context-generator-original-overflow", element.style.overflow || "");
+    }
+    if (element.style.overflow !== "visible") {
+      element.style.overflow = "visible";
+    }
+  }
+
+  function restoreReservedTranslate(element) {
+    if (!element) return;
+
+    element.style.translate = element.getAttribute("data-context-generator-original-translate") || "";
+    element.removeAttribute("data-context-generator-original-translate");
+  }
+
+  function restoreReservedOverflow(element) {
+    if (!element) return;
+
+    const originalOverflow = element.getAttribute("data-context-generator-original-overflow") || "";
+    element.style.overflow = originalOverflow;
+    element.removeAttribute("data-context-generator-original-overflow");
+  }
+
+  function clearLegacyInlineBackup({ keepControlObserver = false } = {}) {
+    releaseBubbleSlot();
+    releaseComposerSurface();
+    stopPlatformPlacementResizeMonitoring();
+    if (!keepControlObserver) stopProviderControlMutationMonitoring();
+    clearChatGptPlacementResizeMonitoring();
+  }
+
+  function mountLegacyInlineBackup(bubble, input) {
+    if (currentPlatform.id !== "chatgpt") return false;
+    // Inline validation has already failed. Clear its native markers before
+    // restoring the old geometry, and reuse the same button across both modes.
+    releaseChatGptInlineMount();
+    releaseBubbleSlot();
+    releaseComposerSurface();
+    const placement = getChatGptFixedBubblePlacement(input);
+    const root = getFloatingButtonRoot();
+    if (bubble.parentElement !== root) root.appendChild(bubble);
+    setBubbleFixedMode(bubble);
+    setBubbleStylesIfChanged(bubble, {
+      left: `${placement.left}px`, right: "auto", top: `${placement.top}px`, bottom: "auto", display: "flex"
+    });
+    return true;
+  }
+
+  function mountInlineOrLegacyBackup(bubble, input) {
+    if (currentPlatform.id === "claude") return mountClaudeInlineButton(bubble, input);
+    return mountChatGptInlineButton(bubble, input) || mountLegacyInlineBackup(bubble, input);
+  }
+
   function ensureFloatingButton(recalculationReason = "direct") {
     const input = findPlatformInput();
-    const existingBubble = document.getElementById(BUBBLE_ID) || transientComposerPlacement?.bubble || null;
-
+    const existingBubble = document.getElementById(BUBBLE_ID) || inlineBubble || transientComposerPlacement?.bubble || null;
     if (!input) {
-      if (retainClaudeStablePlacement(existingBubble)) {
-        return existingBubble;
-      }
+      if (currentPlatform.id === "claude" && retainClaudeInlineMount(existingBubble, null)) return existingBubble;
       const retainedBubble = retainTransientComposerPlacement(existingBubble);
       if (retainedBubble) return retainedBubble;
       if (existingBubble) existingBubble.style.display = "none";
+      releaseClaudeInlineMount();
+      releaseChatGptInlineMount();
+      releaseProviderInlineMount();
+      clearLegacyInlineBackup();
       hideOnboardingNudge();
       hideClaudeLimitNudge();
-      // Placement-only lifecycle changes (including fullscreen resize reflow)
-      // must never move focus to the Cap Context trigger.
+      // Composer loss must never move focus to the Cap Context trigger.
       hideDestinationSheet({ restoreFocus: false });
       releaseBubbleSlot();
       releaseComposerSurface();
-      clearClaudePlacementMonitoring();
       return existingBubble;
     }
-
     const bubble = existingBubble || createFloatingButton();
-    if (currentPlatform.id === "chatgpt") {
-      releaseBubbleSlot();
-      releaseComposerSurface();
-      const floatingRoot = getFloatingButtonRoot();
-      if (bubble.parentElement !== floatingRoot) {
-        floatingRoot.appendChild(bubble);
-      }
-      ensureFloatingOverlay();
-      updateFloatingButtonPosition(recalculationReason);
-      return bubble;
-    }
-
-    const composerSurface = findComposerSurfaceElement(input);
-    if (!composerSurface) {
-      if (currentPlatform.id === "claude") {
-        syncClaudePlacementResizeMonitoring(input, findClaudePendingMonitoringSurface(input));
-      }
-      if (retainClaudeStablePlacement(bubble)) {
+    if (currentPlatform.id === "claude") {
+      // Claude stays inline through send/docking; unmatched owners hide until remount.
+      inlineBubble = bubble;
+      if (!mountInlineOrLegacyBackup(bubble, input)) {
+        bubble.style.display = "none";
+        hideOnboardingNudge();
+        hideClaudeLimitNudge();
+        hideDestinationSheet({ restoreFocus: false });
         return bubble;
       }
+      ensureFloatingOverlay();
+      maybeShowOnboardingNudge(bubble);
+      return bubble;
+    }
+    if (currentPlatform.id === "chatgpt") {
+      inlineBubble = bubble;
+      if (!mountInlineOrLegacyBackup(bubble, input)) {
+        bubble.style.display = "none";
+        hideOnboardingNudge();
+        hideDestinationSheet({ restoreFocus: false });
+        return bubble;
+      }
+      ensureFloatingOverlay();
+      maybeShowOnboardingNudge(bubble);
+      return bubble;
+    }
+    inlineBubble = bubble;
+    if (mountProviderInlineButton(bubble, input)) {
+      ensureFloatingOverlay();
+      maybeShowOnboardingNudge(bubble);
+      return bubble;
+    }
+    // Unmatched provider variants retain the existing validated fallback.
+    const composerSurface = findComposerSurfaceElement(input);
+    if (!composerSurface) {
       const retainedBubble = retainTransientComposerPlacement(bubble);
       if (retainedBubble) return retainedBubble;
       bubble.style.display = "none";
       hideOnboardingNudge();
-      if (currentPlatform.id === "claude") {
-        releaseBubbleSlot();
-        releaseComposerSurface();
-      }
       return bubble;
     }
-
     reserveComposerSurface(composerSurface);
-
-    const bubbleRoot = currentPlatform.id === "claude" ? getFloatingButtonRoot() : composerSurface;
-    if (currentPlatform.id !== "chatgpt" && bubble.parentElement !== bubbleRoot) {
-      bubbleRoot.appendChild(bubble);
-    }
-
+    if (bubble.parentElement !== composerSurface) composerSurface.appendChild(bubble);
     ensureFloatingOverlay();
     updateFloatingButtonPosition(recalculationReason);
     return bubble;
   }
-
 
   function createFloatingButton() {
     const bubble = document.createElement("button");
@@ -4736,6 +5891,25 @@
       }
       #${DESTINATION_SHEET_BACKDROP_ID} { background: rgba(7,6,10,0.34) !important; }
       #${DESTINATION_SHEET_ID} .context-generator-destination-brand { color: rgba(247,244,250,0.76) !important; }
+      #${DESTINATION_SHEET_ID} .context-generator-destination-home-link {
+        display: block;
+        position: relative !important;
+        inset: auto !important;
+        flex: 0 0 auto;
+        margin: 0;
+        padding: 0;
+        border: 0 !important;
+        border-radius: 9px;
+        background: transparent !important;
+        box-shadow: none !important;
+        line-height: 0;
+        text-decoration: none !important;
+        cursor: pointer;
+      }
+      #${DESTINATION_SHEET_ID} .context-generator-destination-home-link:focus-visible {
+        outline: 2px solid rgba(190,162,233,0.78) !important;
+        outline-offset: 3px;
+      }
       #${DESTINATION_SHEET_ID} .context-generator-destination-brand-icon {
         border-color: rgba(185,158,228,0.2) !important;
         background: linear-gradient(145deg,rgba(189,158,238,0.18),rgba(102,72,155,0.1)) !important;
@@ -4752,7 +5926,7 @@
         flex: 0 0 auto;
         width: 32px;
         height: 32px;
-        margin: 0;
+        margin: 0 0 0 34px;
         padding: 0;
         border: 1px solid transparent !important;
         border-radius: 10px;
@@ -4776,10 +5950,60 @@
       }
       #${DESTINATION_SHEET_ID} .context-generator-speed-toggle svg {
         display: block;
+        position: relative;
+        z-index: 1;
         width: 16px;
         height: 16px;
         fill: none !important;
         stroke: currentColor !important;
+      }
+      /* Reserve room behind the bolt so trails stay inside the picker header.
+         aria-pressed owns the effect; disabling speed removes its animations. */
+      #${DESTINATION_SHEET_ID} .context-generator-speed-lines {
+        display: none;
+        position: absolute;
+        right: 14px;
+        top: 8px;
+        width: 42px;
+        height: 16px;
+        overflow: visible;
+        pointer-events: none;
+        mask-image: linear-gradient(90deg,transparent,#000 28%);
+      }
+      #${DESTINATION_SHEET_ID} .context-generator-speed-toggle[aria-pressed="true"] .context-generator-speed-lines {
+        display: block;
+      }
+      #${DESTINATION_SHEET_ID} .context-generator-speed-lines i {
+        position: absolute;
+        right: 1px;
+        top: 2px;
+        width: 18px;
+        height: 1.5px;
+        border-radius: 999px;
+        background: linear-gradient(90deg,transparent,rgba(250,204,21,0.6) 45%,#fde68a) !important;
+        box-shadow: 0 0 4px rgba(250,204,21,0.18) !important;
+        transform-origin: right center;
+        opacity: 0;
+        animation: contextGeneratorSpeedStreak 420ms linear infinite;
+      }
+      #${DESTINATION_SHEET_ID} .context-generator-speed-lines i:nth-child(2) {
+        /* Each origin follows the bolt's sloped left edge, rather than one plane. */
+        right: 5px;
+        top: 7px;
+        width: 27px;
+        animation-delay: -140ms;
+      }
+      #${DESTINATION_SHEET_ID} .context-generator-speed-lines i:nth-child(3) {
+        right: 2px;
+        top: 12px;
+        width: 15px;
+        animation-delay: -280ms;
+      }
+      @keyframes contextGeneratorSpeedStreak {
+        0% { opacity: 0; transform: translateX(0) scaleX(0.45); }
+        8% { opacity: 0.85; }
+        48% { opacity: 0.7; }
+        100% { opacity: 0; transform: translateX(-34px) scaleX(1.15); }
       }
       #${DESTINATION_SHEET_ID} .context-generator-destination-tile {
         border-color: rgba(255,255,255,0.1) !important;
@@ -4889,6 +6113,10 @@
       }
 
       @media (prefers-reduced-motion: reduce) {
+        #${DESTINATION_SHEET_ID} .context-generator-speed-lines i {
+          animation: none;
+          opacity: 0.65;
+        }
         .context-generator-tile-aura {
           animation: none;
         }
@@ -4960,6 +6188,13 @@
     const brandLockup = document.createElement("div");
     brandLockup.className = "context-generator-destination-brand";
     brandLockup.style.cssText = "display:flex;align-items:center;gap:8px;color:rgba(247,244,250,0.76) !important;font-size:11.5px;font-weight:650;line-height:1";
+    const brandLink = document.createElement("a");
+    brandLink.className = "context-generator-destination-home-link";
+    brandLink.href = "https://context-generator-five.vercel.app/";
+    brandLink.target = "_blank";
+    brandLink.rel = "noopener noreferrer";
+    brandLink.setAttribute("aria-label", "Open Cap Context website (opens in a new tab)");
+    brandLink.title = "Visit Cap Context";
     const brandIcon = document.createElement("img");
     brandIcon.className = "context-generator-destination-brand-icon";
     brandIcon.src = BUBBLE_ICON_URL;
@@ -4969,7 +6204,8 @@
     brandIcon.style.cssText = "display:block;width:26px;height:26px;box-sizing:border-box;padding:3px;border:1px solid rgba(185,158,228,0.2) !important;border-radius:9px;background:linear-gradient(145deg,rgba(189,158,238,0.18),rgba(102,72,155,0.1)) !important;box-shadow:inset 0 1px 0 rgba(255,255,255,0.08),0 7px 18px rgba(74,48,121,0.2) !important;object-fit:contain";
     const brandName = document.createElement("span");
     brandName.textContent = "Cap Context";
-    brandLockup.appendChild(brandIcon);
+    brandLink.appendChild(brandIcon);
+    brandLockup.appendChild(brandLink);
     brandLockup.appendChild(brandName);
     const title = document.createElement("div");
     title.id = "context-generator-destination-title";
@@ -5134,7 +6370,7 @@
       toggle.setAttribute("aria-pressed", String(enabled));
       toggle.setAttribute("aria-label", "Fast capture");
       toggle.title = `Fast capture: ${enabled ? "On" : "Off"}`;
-      toggle.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="m13 2-9 12h7l-1 8 10-12h-7l1-8Z"/></svg>';
+      toggle.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="m13 2-9 12h7l-1 8 10-12h-7l1-8Z"/></svg><span class="context-generator-speed-lines" aria-hidden="true"><i></i><i></i><i></i></span>';
       addOwnedEventListener(toggle, "click", () => {
         if (isRunning) return;
         let enabled;
@@ -5188,7 +6424,7 @@
       }
       if (event.key !== "Tab") return;
 
-      const focusableTiles = [...sheet.querySelectorAll(".context-generator-destination-tile, .context-generator-speed-toggle")]
+      const focusableTiles = [...sheet.querySelectorAll(".context-generator-destination-tile, .context-generator-speed-toggle, .context-generator-destination-home-link")]
         .filter((tile) => !tile.disabled && tile.getAttribute("aria-disabled") !== "true");
       if (focusableTiles.length === 0) return;
       const focusedIndex = focusableTiles.indexOf(document.activeElement);
@@ -5323,12 +6559,14 @@
     const bubble = document.getElementById(BUBBLE_ID);
     if (bubble) {
       bubble.setAttribute("aria-expanded", "false");
-      if (restoreFocus) {
+      // Dismissal visuals are independent of focus. Keep the active effect only
+      // during the preserved-backdrop bridge into the handoff animation.
+      if (!preserveBackdrop) {
         bubble.style.filter = "none";
         bubble.style.transform = "translate3d(0,0,0) scale(1)";
-        if (!isRunning) {
-          setTimeout(() => bubble.focus?.({ preventScroll: true }), shouldAnimate ? DESTINATION_SHEET_EXIT_MS : 0);
-        }
+      }
+      if (restoreFocus && !isRunning) {
+        setTimeout(() => bubble.focus?.({ preventScroll: true }), shouldAnimate ? DESTINATION_SHEET_EXIT_MS : 0);
       }
     }
   }
@@ -7047,63 +8285,40 @@
   }
 
   function updateFloatingButtonPosition(recalculationReason = "direct") {
+    if (["claude", "chatgpt"].includes(currentPlatform.id)) {
+      ensureFloatingButton(recalculationReason);
+      return;
+    }
     const bubble = document.getElementById(BUBBLE_ID) || transientComposerPlacement?.bubble || null;
     const input = findPlatformInput();
     if (!bubble || !input) {
-      if (retainClaudeStablePlacement(bubble)) {
-        return;
-      }
       if (retainTransientComposerPlacement(bubble)) return;
       stopPlatformPlacementResizeMonitoring();
       stopProviderControlMutationMonitoring();
-      clearClaudePlacementMonitoring();
-      clearChatGptPlacementResizeMonitoring();
+
       return;
     }
 
-    if (currentPlatform.id === "chatgpt") {
-      releaseBubbleSlot();
-      releaseComposerSurface();
-      const floatingRoot = getFloatingButtonRoot();
-      if (bubble.parentElement !== floatingRoot) {
-        floatingRoot.appendChild(bubble);
-      }
-
-      setBubbleFixedMode(bubble);
-      const placement = getChatGptFixedBubblePlacement(input);
-      bubble.style.left = `${placement.left}px`;
-      bubble.style.right = "auto";
-      bubble.style.top = `${placement.top}px`;
-      bubble.style.display = "flex";
+    if (mountProviderInlineButton(bubble, input)) {
+      inlineBubble = bubble;
+      ensureFloatingOverlay();
       maybeShowOnboardingNudge(bubble);
       return;
     }
-
     const composerSurface = findComposerSurfaceElement(input);
     if (!composerSurface) {
-      if (currentPlatform.id === "claude") {
-        syncClaudePlacementResizeMonitoring(input, findClaudePendingMonitoringSurface(input));
-      }
-      if (retainClaudeStablePlacement(bubble)) {
-        return;
-      }
       if (retainTransientComposerPlacement(bubble)) return;
       stopProviderControlMutationMonitoring();
       bubble.style.display = "none";
       hideOnboardingNudge();
-      if (currentPlatform.id === "claude") {
-        releaseBubbleSlot();
-        releaseComposerSurface();
-      }
       return;
     }
 
     reserveComposerSurface(composerSurface);
     syncPlatformPlacementResizeMonitoring(input, composerSurface);
-    syncClaudePlacementResizeMonitoring(input, composerSurface);
 
-    const bubbleRoot = currentPlatform.id === "claude" ? getFloatingButtonRoot() : composerSurface;
-    if (currentPlatform.id !== "chatgpt" && bubble.parentElement !== bubbleRoot) {
+    const bubbleRoot = composerSurface;
+    if (bubble.parentElement !== bubbleRoot) {
       bubbleRoot.appendChild(bubble);
     }
 
@@ -7114,17 +8329,9 @@
       composerRect.bottom < 0 ||
       composerRect.top > window.innerHeight
     ) {
-      if (retainClaudeStablePlacement(bubble)) {
-        return;
-      }
       if (retainTransientComposerPlacement(bubble)) return;
       bubble.style.display = "none";
       hideOnboardingNudge();
-      if (currentPlatform.id === "claude") {
-        releaseBubbleSlot();
-        releaseComposerSurface();
-        clearClaudePlacementMonitoring();
-      }
       return;
     }
 
@@ -7183,37 +8390,6 @@
         composerRect.right - geminiPlacement.right - BUBBLE_SIZE,
         composerRect.bottom - geminiPlacement.bottom - BUBBLE_SIZE
       );
-      maybeShowOnboardingNudge(bubble);
-      return;
-    }
-
-    if (currentPlatform.id === "claude") {
-      const claudePlacement = getClaudeBubblePlacement(composerRect, input, composerSurface);
-      if (!claudePlacement.anchorControl) {
-        if (!retainClaudeStablePlacement(bubble)) {
-          bubble.style.display = "none";
-          releaseBubbleSlot();
-        }
-        return;
-      }
-      reserveClaudeInlineBubbleSlot(
-        claudePlacement.anchorControl,
-        claudePlacement.reservationControls,
-        input,
-        composerRect,
-        claudePlacement.inlineShift
-      );
-      clearClaudePlacementGraceTimer();
-      setBubbleFixedMode(bubble);
-      const fixedPlacement = getClaudeFixedBubblePlacement(claudePlacement, composerRect);
-      setBubbleStylesIfChanged(bubble, {
-        left: `${fixedPlacement.left}px`,
-        right: "auto",
-        top: `${fixedPlacement.top}px`,
-        bottom: "auto",
-        display: "flex"
-      });
-      lastClaudeStablePlacementAt = Date.now();
       maybeShowOnboardingNudge(bubble);
       return;
     }
@@ -7278,270 +8454,8 @@
     });
   }
 
-  function getClaudeBubblePlacement(composerRect, input = null, composerSurface = null) {
-    const controls = getClaudeComposerControlCandidates(composerRect, composerSurface);
-    const anchorControl = findClaudeVoiceModeControl(controls) || findClaudeInlineFallbackControl(controls);
-    const reservationControls = getClaudeMountedReservationControls(composerSurface, controls);
-    const isFreshEmptyComposer = isClaudeFreshEmptyComposer(input);
-    const isExistingChatComposer = window.location.pathname.startsWith("/chat/");
-    const emptyComposerNudge = isExistingChatComposer
-      ? CLAUDE_EXISTING_CHAT_COMPOSER_Y_NUDGE
-      : isFreshEmptyComposer ? CLAUDE_EMPTY_COMPOSER_Y_NUDGE : 0;
-
-    if (anchorControl) {
-      const currentOffset = getClaudeCurrentControlOffset(anchorControl);
-      const baseAnchorRight = anchorControl.rect.right - currentOffset;
-      const anchorNudge = getClaudeControlTargetOffset(anchorControl, 0);
-      const maxLeft = Math.max(
-        BUBBLE_GAP,
-        composerRect.width - BUBBLE_SIZE - CLAUDE_INLINE_RIGHT_MARGIN
-      );
-      const preferredLeft = baseAnchorRight + anchorNudge - composerRect.left + CLAUDE_INLINE_BUBBLE_GAP;
-      const inlineShift = Math.min(
-        CLAUDE_INLINE_SLOT_WIDTH,
-        Math.max(0, preferredLeft - maxLeft)
-      );
-      const left = clampNumber(
-        baseAnchorRight + getClaudeControlTargetOffset(anchorControl, inlineShift) - composerRect.left + CLAUDE_INLINE_BUBBLE_GAP,
-        BUBBLE_GAP,
-        maxLeft
-      );
-      const top = getClaudeBubbleTop(
-        anchorControl.rect,
-        composerRect,
-        emptyComposerNudge
-      );
-
-      return {
-        left: Math.round(left),
-        top,
-        inlineShift: Math.round(inlineShift),
-        anchorControl,
-        controls,
-        reservationControls
-      };
-    }
-
-    return {
-      inlineShift: 0,
-      anchorControl: null,
-      controls,
-      reservationControls
-    };
-  }
-
-  function getClaudeMountedReservationControls(composerSurface, visibleControls) {
-    if (!composerSurface) return visibleControls;
-
-    const mountedControls = Array.from(composerSurface.querySelectorAll("button, [role='button'], [tabindex='0']"))
-      .filter((element) => element.id !== BUBBLE_ID && !isContextGeneratorNode(element) && element.isConnected && !isComposerPopupControl(element, composerSurface))
-      .map((element) => ({
-        element,
-        label: getElementLabel(element, true),
-        rect: element.getBoundingClientRect()
-      }))
-      .filter((control) => {
-        return (
-          control.rect.width > 0 &&
-          control.rect.width <= 280 &&
-          control.rect.height > 0 &&
-          control.rect.height <= 84 &&
-          /\b(model|sonnet|opus|haiku|send|submit|mic|microphone|voice|speak|speech|talk|dictation|audio)\b/.test(control.label)
-        );
-      });
-
-    return [...visibleControls, ...mountedControls].filter((control, index, all) => {
-      return all.findIndex((candidate) => candidate.element === control.element) === index;
-    });
-  }
-
-  function getClaudeFixedBubblePlacement(localPlacement, composerRect) {
-    return clampFixedBubblePlacement(
-      composerRect.left + localPlacement.left,
-      composerRect.top + localPlacement.top
-    );
-  }
-
-  function getClaudeComposerControlCandidates(composerRect, composerSurface = null) {
-    const rowTop = getClaudeComposerControlRowTop(composerRect);
-
-    return Array.from(document.querySelectorAll("button, [role='button'], [tabindex='0']"))
-      .filter((element) => (
-        element.id !== BUBBLE_ID &&
-        !isContextGeneratorNode(element) &&
-        (!composerSurface || composerSurface.contains?.(element)) &&
-        !isComposerPopupControl(element, composerSurface) &&
-        isVisible(element)
-      ))
-      .map((element) => ({
-        element,
-        label: getElementLabel(element, true),
-        rect: element.getBoundingClientRect()
-      }))
-      .filter(({ rect }) => {
-        return (
-          rect.width > 0 &&
-          rect.width <= 280 &&
-          rect.height > 0 &&
-          rect.height <= 84 &&
-          rect.left >= composerRect.left - 12 &&
-          rect.right <= composerRect.right + 16 &&
-          rect.top >= rowTop &&
-          rect.bottom <= composerRect.bottom + 16
-        );
-      })
-      .sort((a, b) => a.rect.left - b.rect.left);
-  }
-
-  function findClaudeVoiceModeControl(controls) {
-    return controls
-      .map((control) => {
-        let score = 0;
-        if (/\bvoice\s*mode\b/.test(control.label)) score += 260;
-        if (/\b(voice|speak|speech|talk|dictation|audio)\b/.test(control.label)) score += 160;
-        if (control.rect.width <= 64 && control.rect.right >= getRightmostControlEdge(controls) - 4) score += 90;
-        if (/\b(send|submit|attach|upload|file|project|sidebar|side bar|menu|navigation|toggle|model)\b/.test(control.label)) {
-          score -= 260;
-        }
-        if (/\b(mic|microphone)\b/.test(control.label) && !/\bvoice\b/.test(control.label)) {
-          score -= 80;
-        }
-
-        return { ...control, score };
-      })
-      .filter(({ score }) => score >= 160)
-      .sort((a, b) => {
-        if (b.score !== a.score) return b.score - a.score;
-        return b.rect.right - a.rect.right;
-      })[0] || null;
-  }
-
-  function findClaudeInlineFallbackControl(controls) {
-    return controls
-      .filter((control) => {
-        return (
-          control.rect.width <= 72 &&
-          !/\b(attach|upload|file|project|sidebar|side bar|menu|navigation|toggle|model)\b/.test(control.label)
-        );
-      })
-      .sort((a, b) => b.rect.right - a.rect.right)[0] || null;
-  }
-
   function getRightmostControlEdge(controls) {
     return controls.reduce((right, control) => Math.max(right, control.rect.right), 0);
-  }
-
-  function getClaudeCurrentControlOffset(anchorControl) {
-    if (!anchorControl) return 0;
-    return reservedClaudeControlOffsets.get(anchorControl.element) || 0;
-  }
-
-  function getClaudeComposerControlRowTop(composerRect) {
-    return composerRect.bottom - Math.max(72, composerRect.height * 0.62);
-  }
-
-  function isClaudeFreshEmptyComposer(input) {
-    return window.location.pathname === "/new" && isClaudeComposerEmpty(input);
-  }
-
-  function isClaudeComposerEmpty(input) {
-    if (!input) return false;
-    const value = /^(input|textarea)$/.test(input.localName || "")
-      ? input.value
-      : input.innerText || input.textContent;
-    return String(value || "").trim() === "";
-  }
-
-  function getClaudeBubbleTop(targetRect, composerRect, opticalNudge = 0) {
-    const centeredTop = targetRect.top + (targetRect.height - BUBBLE_SIZE) / 2 - composerRect.top;
-    // Claude's control row can sit flush with the bottom of a shallower inner
-    // surface. Allow only the natural half-height overflow needed to keep the
-    // larger Cap Context bubble centered on the native control.
-    const bottomOverflow = Math.max(0, (BUBBLE_SIZE - targetRect.height) / 2);
-    const maxTop = Math.max(
-      BUBBLE_GAP,
-      composerRect.height - BUBBLE_SIZE + bottomOverflow
-    );
-    // Optical alignment may intentionally cross the local surface edge. Apply
-    // it after the legacy local bound; fixed-root placement is viewport-clamped.
-    return Math.round((clampNumber(centeredTop, BUBBLE_GAP, maxTop) + opticalNudge) * 2) / 2;
-  }
-
-  function findChatGptModelSelectorButton(input, composerSurface, composerRect, inputRect = null) {
-    const root = getChatGptComposerControlRoot(input, composerSurface);
-    if (!root) return null;
-
-    const hasInputScope = !composerRect && inputRect?.width > 0 && inputRect?.height > 0;
-    const rowTop = composerRect
-      ? composerRect.bottom - Math.max(64, composerRect.height * 0.65)
-      : hasInputScope
-        ? Math.max(BUBBLE_GAP, inputRect.bottom - 112)
-        : window.innerHeight * 0.45;
-    const rowBottom = composerRect
-      ? composerRect.bottom + 16
-      : hasInputScope
-        ? Math.min(window.innerHeight - BUBBLE_GAP, inputRect.bottom + 112)
-        : window.innerHeight - BUBBLE_GAP;
-    const scopeLeft = composerRect
-      ? composerRect.left - 12
-      : hasInputScope
-        ? Math.max(BUBBLE_GAP, inputRect.left - 96)
-        : window.innerWidth * 0.22;
-    const scopeRight = composerRect
-      ? composerRect.right + 12
-      : hasInputScope
-        // The editor ends before the controls; wider mode labels still belong
-        // to the same composer, even when its outer form spans the page.
-        ? Math.min(window.innerWidth - BUBBLE_GAP, inputRect.left + getMaxComposerSurfaceWidth())
-        : window.innerWidth - BUBBLE_GAP;
-
-    return Array.from(root.querySelectorAll("button"))
-      .filter((button) => isChatGptComposerButton(button, input))
-      .map((button) => {
-        const rect = button.getBoundingClientRect();
-        const label = getElementLabel(button, true);
-        const text = (button.innerText || button.textContent || "").toLowerCase();
-        let score = 0;
-
-        if (/\b(instant|medium|high)\b/.test(text)) score += 180;
-        if (/\b(model|intelligence|reasoning|thinking)\b/.test(label)) score += 180;
-        if (/^(true|menu|listbox|dialog)$/.test(button.getAttribute("aria-haspopup") || "")) score += 140;
-        if (composerRect && rect.left >= composerRect.left + composerRect.width * 0.45) score += 22;
-        if (!composerRect && rect.left >= window.innerWidth * 0.45) score += 12;
-        if (rect.top >= rowTop && rect.bottom <= rowBottom) score += 28;
-        if (rect.width >= 48 && rect.width <= 140) score += 12;
-        if (/\b(send|voice|mic|microphone|attach|upload|tools|image|canvas)\b/.test(label)) score -= 120;
-
-        return { button, rect, score };
-      })
-      .filter(({ rect, score }) => {
-        return (
-          score >= 120 &&
-          rect.width > 0 &&
-          rect.width <= 280 &&
-          rect.height > 0 &&
-          rect.height <= 56 &&
-          rect.left >= scopeLeft &&
-          rect.right <= scopeRight &&
-          rect.top >= rowTop &&
-          rect.bottom <= rowBottom
-        );
-      })
-      .sort((a, b) => {
-        if (b.score !== a.score) return b.score - a.score;
-        return b.rect.left - a.rect.left;
-      })[0]?.button || null;
-  }
-
-  function getChatGptComposerControlRoot(input, composerSurface) {
-    const inputForm = input.closest("form");
-    if (inputForm?.contains(input)) return inputForm;
-    return composerSurface?.contains?.(input) ? composerSurface : null;
-  }
-
-  function isChatGptComposerButton(button, input) {
-    if (button.id === BUBBLE_ID || isContextGeneratorNode(button) || !isVisible(button)) return false;
-    return !isComposerPopupControl(button, input);
   }
 
   function isComposerPopupControl(element, composerRoot) {
@@ -7592,163 +8506,6 @@
       icon.style.width = `${iconSize}px`;
       icon.style.height = `${iconSize}px`;
     }
-  }
-
-  function getChatGptFixedBubblePlacement(input) {
-    const composerRect = getChatGptPlacementRect(input);
-    const inputRect = input.getBoundingClientRect();
-    const composerSurface = getRetainedChatGptPlacementSurface(input);
-    // Search only actual buttons that share the editor's form or verified
-    // composer surface. Streaming response text must never become an anchor.
-    const modelButton =
-      findChatGptModelSelectorButton(input, composerSurface, null, inputRect) ||
-      findChatGptModelSelectorButton(input, composerSurface, composerRect, inputRect);
-
-    if (modelButton) {
-      return getFixedBubblePlacementBesideRect(modelButton.getBoundingClientRect());
-    }
-
-    if (composerRect) {
-      const rowButtons = getChatGptComposerButtonCandidates(input, composerSurface, composerRect);
-      // Free plans have no reasoning selector. Anchor before the whole visible
-      // control row (including wider pills such as Think), not beside Voice.
-      const leftmostControl = rowButtons[0];
-
-      if (leftmostControl) {
-        return getFixedBubblePlacementBesideRect(leftmostControl.rect);
-      }
-
-      const fallback = getBottomRightRowBubblePlacement(composerRect, 64);
-      return clampFixedBubblePlacement(composerRect.left + fallback.left, composerRect.top + fallback.top);
-    }
-
-    return clampFixedBubblePlacement(
-      inputRect.right - BUBBLE_SIZE - 112,
-      inputRect.top + (inputRect.height - BUBBLE_SIZE) / 2
-    );
-  }
-
-  function getChatGptPlacementRect(input) {
-    const retainedSurface = getRetainedChatGptPlacementSurface(input);
-    const detectedSurface = retainedSurface ? null : findComposerSurfaceElement(input);
-    const composerSurface = retainedSurface || detectedSurface;
-    const composerRect = composerSurface?.getBoundingClientRect();
-    if (isUsableChatGptPlacementRect(composerRect)) {
-      chatGptPlacementSurface = composerSurface;
-      syncChatGptPlacementResizeMonitoring(input, composerSurface);
-      return composerRect;
-    }
-
-    const form = input.closest("form");
-    const formRect = form?.getBoundingClientRect();
-    if (isUsableChatGptPlacementRect(formRect)) {
-      chatGptPlacementSurface = form;
-      syncChatGptPlacementResizeMonitoring(input, form);
-      return formRect;
-    }
-
-    chatGptPlacementSurface = null;
-    syncChatGptPlacementResizeMonitoring(input, null);
-
-    const inputRect = input.getBoundingClientRect();
-    if (!inputRect || inputRect.width <= 0 || inputRect.height <= 0) return null;
-
-    let left = Math.max(BUBBLE_GAP, inputRect.left - 64);
-    const right = Math.min(window.innerWidth - BUBBLE_GAP, Math.max(inputRect.right + 180, left + 320));
-    if (right - left < 280) {
-      left = Math.max(BUBBLE_GAP, right - 320);
-    }
-    const top = Math.max(BUBBLE_GAP, inputRect.top - 18);
-    const bottom = Math.min(window.innerHeight - BUBBLE_GAP, Math.max(inputRect.bottom + 70, top + 96));
-
-    return {
-      left,
-      right,
-      top,
-      bottom,
-      width: right - left,
-      height: bottom - top
-    };
-  }
-
-  function getRetainedChatGptPlacementSurface(input) {
-    if (
-      currentPlatform.id !== "chatgpt" ||
-      !chatGptPlacementSurface ||
-      !chatGptPlacementSurface.contains?.(input) ||
-      isContextGeneratorNode(chatGptPlacementSurface)
-    ) {
-      return null;
-    }
-
-    const rect = chatGptPlacementSurface.getBoundingClientRect();
-    const maxWidth = getMaxComposerSurfaceWidth();
-    const maxHeight = currentPlatform.maxComposerHeight || 260;
-    return (
-      rect.width >= 280 &&
-      rect.width <= maxWidth &&
-      rect.height >= 40 &&
-      rect.height <= maxHeight &&
-      rect.bottom >= 0 &&
-      rect.top <= window.innerHeight
-    ) ? chatGptPlacementSurface : null;
-  }
-
-  function isUsableChatGptPlacementRect(rect) {
-    return Boolean(
-      rect &&
-      rect.width >= 280 &&
-      rect.width <= getMaxComposerSurfaceWidth() &&
-      rect.height >= 40 &&
-      rect.height <= (currentPlatform.maxComposerHeight || 260) &&
-      rect.bottom >= BUBBLE_GAP &&
-      rect.top <= window.innerHeight - BUBBLE_GAP &&
-      rect.right >= BUBBLE_GAP &&
-      rect.left <= window.innerWidth - BUBBLE_GAP
-    );
-  }
-
-  function getFixedBubblePlacementBesideRect(targetRect) {
-    return clampFixedBubblePlacement(
-      targetRect.left - BUBBLE_SIZE - BUBBLE_GAP,
-      targetRect.top + (targetRect.height - BUBBLE_SIZE) / 2
-    );
-  }
-
-  function clampFixedBubblePlacement(left, top) {
-    const minLeft = BUBBLE_GAP;
-    const minTop = BUBBLE_GAP;
-    const maxLeft = Math.max(minLeft, window.innerWidth - BUBBLE_SIZE - BUBBLE_GAP);
-    const maxTop = Math.max(minTop, window.innerHeight - BUBBLE_SIZE - BUBBLE_GAP);
-
-    return {
-      left: Math.round(Math.min(Math.max(left, minLeft), maxLeft)),
-      top: Math.round(Math.min(Math.max(top, minTop), maxTop))
-    };
-  }
-
-  function getChatGptComposerButtonCandidates(input, composerSurface, composerRect) {
-    const root = getChatGptComposerControlRoot(input, composerSurface);
-    if (!root) return [];
-
-    const rowTop = composerRect.bottom - Math.max(60, composerRect.height * 0.55);
-
-    return Array.from(root.querySelectorAll("button"))
-      .filter((button) => isChatGptComposerButton(button, input))
-      .map((button) => ({ button, rect: button.getBoundingClientRect() }))
-      .filter(({ rect }) => {
-        return (
-          rect.width > 0 &&
-          rect.width <= 180 &&
-          rect.height > 0 &&
-          rect.height <= 72 &&
-          rect.left >= composerRect.left + composerRect.width * 0.45 &&
-          rect.right <= composerRect.right + 12 &&
-          rect.top >= rowTop &&
-          rect.bottom <= composerRect.bottom + 12
-        );
-      })
-      .sort((a, b) => a.rect.left - b.rect.left);
   }
 
   function getGrokBubblePlacement(composerRect) {
@@ -7965,20 +8722,6 @@
     return null;
   }
 
-  function findClaudePendingMonitoringSurface(input) {
-    let node = input?.parentElement || null;
-    const fallback = node || input;
-    let depth = 0;
-
-    while (node && node !== document.body && depth < 8) {
-      if (node.querySelectorAll?.("button, [role='button'], [tabindex='0']").length) return node;
-      node = node.parentElement;
-      depth += 1;
-    }
-
-    return fallback;
-  }
-
   function getRetainedPlatformComposerSurface(input) {
     if (
       !TRANSIENT_COMPOSER_PLACEMENT_PLATFORMS.has(currentPlatform.id) ||
@@ -7999,32 +8742,6 @@
       rect.height <= maxHeight &&
       rect.bottom >= 0 &&
       rect.top <= window.innerHeight
-    ) ? reservedComposerSurface : null;
-  }
-
-  function getRetainedClaudeComposerSurface(input) {
-    if (
-      currentPlatform.id !== "claude" ||
-      !reservedComposerSurface ||
-      !reservedComposerSurface.contains?.(input) ||
-      isContextGeneratorNode(reservedComposerSurface)
-    ) {
-      return null;
-    }
-
-    const rect = reservedComposerSurface.getBoundingClientRect();
-    const inputRect = input.getBoundingClientRect();
-    const maxWidth = getMaxComposerSurfaceWidth();
-    const maxHeight = currentPlatform.maxComposerHeight || 260;
-    return (
-      rect.width >= 280 &&
-      rect.width <= maxWidth &&
-      rect.height >= 40 &&
-      rect.height <= maxHeight &&
-      rect.bottom >= 0 &&
-      rect.top <= window.innerHeight &&
-      isClaudeComposerSurfaceHorizontallyAligned(rect, inputRect) &&
-      isClaudeAnchorSurfaceCandidate(reservedComposerSurface, rect)
     ) ? reservedComposerSurface : null;
   }
 
@@ -8073,18 +8790,6 @@
     );
   }
 
-  function isClaudeComposerSurfaceHorizontallyAligned(rect, inputRect) {
-    if (currentPlatform.id !== "claude") return true;
-
-    // Claude's real composer stays close to the editor horizontally, even when
-    // a large paste makes it tall. Reject page-sized ancestors so their phantom
-    // width cannot push the native voice controls and our orb beyond the border.
-    const horizontalPadding =
-      Math.max(0, inputRect.left - rect.left) +
-      Math.max(0, rect.right - inputRect.right);
-    return horizontalPadding <= CLAUDE_MAX_COMPOSER_HORIZONTAL_PADDING;
-  }
-
   function getMaxComposerSurfaceWidth() {
     return Math.min(currentPlatform.maxComposerWidth || DEFAULT_MAX_COMPOSER_WIDTH, window.innerWidth - 24);
   }
@@ -8101,17 +8806,6 @@
         score: scoreComposerSurfaceCandidate(candidate, input)
       }))
       .sort((a, b) => b.score - a.score)[0].node;
-  }
-
-  function isClaudeAnchorSurfaceCandidate(surface, surfaceRect) {
-    if (!surface || !surfaceRect) return false;
-    const controls = getClaudeComposerControlCandidates(surfaceRect, surface);
-    const hasClaudeSideControl = controls.some((control) => {
-      return /\b(send|submit|mic|microphone|voice|speak|speech|talk|dictation|audio)\b/.test(control.label);
-    });
-    return hasClaudeSideControl && Boolean(
-      findClaudeVoiceModeControl(controls) || findClaudeInlineFallbackControl(controls)
-    );
   }
 
   function scoreComposerSurfaceCandidate(candidate, input) {
@@ -8163,10 +8857,9 @@
     reservedComposerSurface = null;
   }
 
-  // One content-script instance has one fixed platform; these three adapters share
-  // the same observer lifecycle. Claude and ChatGPT keep their distinct monitoring.
+  // Geometry backups share resize ownership; inline Claude/GPT clear it on mount.
   function syncPlatformPlacementResizeMonitoring(input, composerSurface) {
-    if (!TRANSIENT_COMPOSER_PLACEMENT_PLATFORMS.has(currentPlatform.id)) {
+    if (!INLINE_MOUNT_PLATFORMS.has(currentPlatform.id)) {
       stopPlatformPlacementResizeMonitoring();
       return;
     }
@@ -8199,7 +8892,7 @@
 
   function syncProviderControlMutationMonitoring(input, composerSurface) {
     if (
-      !["grok", "deepseek", "gemini"].includes(currentPlatform.id) ||
+      !INLINE_MOUNT_PLATFORMS.has(currentPlatform.id) ||
       typeof MutationObserver === "undefined"
     ) {
       stopProviderControlMutationMonitoring();
@@ -8208,6 +8901,11 @@
 
     const root = composerSurface?.contains?.(input) ? composerSurface : input;
     if (!root || root === providerControlMutationRoot) return;
+    // A geometry fallback can select an inner surface after the native inline
+    // class disappears. Keep watching its validated ancestor: restoring that
+    // class may neither resize the inner surface nor change its children.
+    if (providerControlMutationRoot?.isConnected && providerControlMutationRoot.contains(input) &&
+        providerControlMutationRoot.contains(root)) return;
 
     stopProviderControlMutationMonitoring();
     providerControlMutationRoot = root;
@@ -8249,146 +8947,6 @@
     providerControlMutationRoot = null;
   }
 
-  function syncClaudePlacementResizeMonitoring(input, composerSurface) {
-    syncClaudePlacementMutationMonitoring(input, composerSurface);
-
-    if (currentPlatform.id !== "claude" || typeof ResizeObserver === "undefined") {
-      stopClaudePlacementResizeMonitoring();
-      return;
-    }
-
-    const nextTargets = [input, composerSurface].filter((element, index, all) => {
-      return element && all.indexOf(element) === index;
-    });
-    const targetsUnchanged =
-      nextTargets.length === claudePlacementResizeTargets.length &&
-      nextTargets.every((element, index) => element === claudePlacementResizeTargets[index]);
-    if (targetsUnchanged) return;
-
-    stopClaudePlacementResizeMonitoring();
-    claudePlacementResizeObserver = createOwnedObserver(ResizeObserver, (entries) => {
-      const resized = entries.map((entry) => {
-        if (entry.target === input) return "editor";
-        if (entry.target === composerSurface) return "surface";
-        return "unknown";
-      });
-      scheduleFloatingButtonUpdate(`claude-resize:${[...new Set(resized)].sort().join("+")}`);
-    });
-    nextTargets.forEach((element) => claudePlacementResizeObserver.observe(element));
-    claudePlacementResizeTargets = nextTargets;
-  }
-
-  function stopClaudePlacementResizeMonitoring() {
-    claudePlacementResizeObserver?.disconnect();
-    claudePlacementResizeObserver = null;
-    claudePlacementResizeTargets = [];
-  }
-
-  function syncClaudePlacementMutationMonitoring(input, composerSurface) {
-    if (
-      currentPlatform.id !== "claude" ||
-      typeof MutationObserver === "undefined"
-    ) {
-      stopClaudePlacementMutationMonitoring();
-      return;
-    }
-
-    const root = composerSurface?.contains?.(input) ? composerSurface : input;
-    if (!root || root === claudePlacementMutationRoot) return;
-
-    stopClaudePlacementMutationMonitoring();
-    claudePlacementMutationRoot = root;
-    // Claude may either toggle visibility or remount Send/Mic. Apply the native
-    // control reservation in this microtask so the newly visible control cannot
-    // paint once underneath the orb while the full update waits.
-    claudePlacementMutationObserver = createOwnedObserver(MutationObserver, (mutations) => {
-      if (mutations.every(isOwnDomMutation)) return;
-      syncClaudeInlineReservationBeforePaint(input, composerSurface);
-      const attributes = mutations.map((mutation) => mutation.attributeName).filter(Boolean);
-      scheduleFloatingButtonUpdate(`claude-attribute:${[...new Set(attributes)].sort().join("+") || "unknown"}`);
-    });
-    claudePlacementMutationObserver.observe(root, {
-      attributes: true,
-      childList: true,
-      subtree: true,
-      attributeFilter: ["class", "style", "aria-hidden", "hidden", "data-state"]
-    });
-  }
-
-  function stopClaudePlacementMutationMonitoring() {
-    claudePlacementMutationObserver?.disconnect();
-    claudePlacementMutationObserver = null;
-    claudePlacementMutationRoot = null;
-  }
-
-  function clearClaudePlacementMonitoring() {
-    stopClaudePlacementResizeMonitoring();
-    stopClaudePlacementMutationMonitoring();
-  }
-
-  function syncChatGptPlacementResizeMonitoring(input, composerSurface) {
-    syncChatGptPlacementMutationMonitoring(input, composerSurface);
-
-    if (currentPlatform.id !== "chatgpt" || typeof ResizeObserver === "undefined") {
-      stopChatGptPlacementResizeMonitoring();
-      return;
-    }
-
-    const nextTargets = [input, composerSurface].filter((element, index, all) => {
-      return element && all.indexOf(element) === index;
-    });
-    const targetsUnchanged =
-      nextTargets.length === chatGptPlacementResizeTargets.length &&
-      nextTargets.every((element, index) => element === chatGptPlacementResizeTargets[index]);
-    if (targetsUnchanged) return;
-
-    stopChatGptPlacementResizeMonitoring();
-    chatGptPlacementResizeObserver = createOwnedObserver(ResizeObserver, () => scheduleFloatingButtonUpdate());
-    nextTargets.forEach((element) => chatGptPlacementResizeObserver.observe(element));
-    chatGptPlacementResizeTargets = nextTargets;
-  }
-
-  function stopChatGptPlacementResizeMonitoring() {
-    chatGptPlacementResizeObserver?.disconnect();
-    chatGptPlacementResizeObserver = null;
-    chatGptPlacementResizeTargets = [];
-  }
-
-  function clearChatGptPlacementResizeMonitoring() {
-    stopChatGptPlacementResizeMonitoring();
-    stopChatGptPlacementMutationMonitoring();
-    chatGptPlacementSurface = null;
-  }
-
-  function syncChatGptPlacementMutationMonitoring(input, composerSurface) {
-    if (
-      currentPlatform.id !== "chatgpt" ||
-      typeof MutationObserver === "undefined"
-    ) {
-      stopChatGptPlacementMutationMonitoring();
-      return;
-    }
-
-    const root = getChatGptComposerControlRoot(input, composerSurface) || input;
-    if (root === chatGptPlacementMutationRoot) return;
-
-    stopChatGptPlacementMutationMonitoring();
-    chatGptPlacementMutationRoot = root;
-    chatGptPlacementMutationObserver = createOwnedObserver(MutationObserver, () => scheduleFloatingButtonUpdate());
-    chatGptPlacementMutationObserver.observe(root, {
-      attributes: true,
-      characterData: true,
-      subtree: true,
-      attributeFilter: ["class", "style", "aria-expanded", "data-state"]
-    });
-  }
-
-  function stopChatGptPlacementMutationMonitoring() {
-    chatGptPlacementMutationObserver?.disconnect();
-    chatGptPlacementMutationObserver = null;
-    chatGptPlacementMutationRoot = null;
-  }
-
   function reserveBubbleSlot(actionBtn, input) {
     const cluster = findActionCluster(actionBtn, input);
     reserveBubbleSlotForCluster(cluster);
@@ -8397,7 +8955,6 @@
   function reserveBubbleSlotForCluster(cluster, slotWidth = BUBBLE_SLOT_WIDTH) {
     if (!cluster) return;
 
-    releaseClaudeInlineControlSlots();
     if (reservedActionCluster && reservedActionCluster !== cluster) {
       releaseActionClusterSlot();
     }
@@ -8415,184 +8972,6 @@
       cluster.style.willChange = "transform";
     }
     reservedActionCluster = cluster;
-  }
-
-  function reserveClaudeInlineBubbleSlot(anchorControl, controls, input, composerRect, inlineShift = 0) {
-    reserveClaudeInlineControls(
-      getClaudeInlineControlsToShift(controls, anchorControl),
-      getClaudeModelControlsToNudge(controls, anchorControl),
-      inlineShift,
-      input
-    );
-  }
-
-  function reserveClaudeInlineControls(
-    sideControls,
-    modelControls = [],
-    inlineShift = CLAUDE_INLINE_SLOT_WIDTH,
-    input = null
-  ) {
-    const shift = Math.max(0, Math.round(inlineShift));
-    const reservationOffsets = new Map();
-    const controlOffsets = new Map();
-
-    modelControls.forEach((control) => {
-      if (!control.element) return;
-      const offset = getClaudeControlTargetOffset(control, shift);
-      reservationOffsets.set(control.element, offset);
-      controlOffsets.set(control.element, offset);
-    });
-
-    const switchCluster = findClaudeControlSwitchCluster(sideControls, input);
-    sideControls.forEach((control) => {
-      if (!control.element) return;
-      const offset = getClaudeControlTargetOffset(control, shift);
-      controlOffsets.set(control.element, offset);
-      if (!switchCluster) reservationOffsets.set(control.element, offset);
-    });
-    if (switchCluster && sideControls.length > 0) {
-      reservationOffsets.set(switchCluster, getClaudeControlTargetOffset(sideControls[0], shift));
-    }
-
-    const elements = [...reservationOffsets.keys()].filter((element) => reservationOffsets.get(element) !== 0);
-    const overflowElements = getClaudeModelOverflowElements(modelControls);
-
-    if (elements.length === 0) {
-      releaseClaudeInlineControlSlots();
-      return;
-    }
-
-    if (reservedActionCluster) {
-      releaseActionClusterSlot();
-    }
-
-    reservedClaudeInlineControls
-      .filter((element) => !elements.includes(element))
-      .forEach(restoreReservedTranslate);
-
-    reservedClaudeOverflowElements
-      .filter((element) => !overflowElements.includes(element))
-      .forEach(restoreReservedOverflow);
-
-    overflowElements.forEach(reserveClaudeModelOverflow);
-
-    elements.forEach((element) => {
-      if (!element.hasAttribute("data-context-generator-original-translate")) {
-        element.setAttribute("data-context-generator-original-translate", element.style.translate || "");
-      }
-
-      const offset = reservationOffsets.get(element) || 0;
-      const targetTranslate = `${offset}px 0px`;
-      // Keep Cap Context's offset independent from Claude's animated transform.
-      // Overriding transform or transition can strand Claude's outgoing visual
-      // layer when the editor and control DOM update in separate React commits.
-      if (element.style.translate !== targetTranslate) {
-        element.style.translate = targetTranslate;
-      }
-    });
-
-    reservedClaudeInlineControls = elements;
-    reservedClaudeInlineShift = shift;
-    reservedClaudeControlOffsets = controlOffsets;
-    reservedClaudeOverflowElements = overflowElements;
-  }
-
-  function findClaudeControlSwitchCluster(sideControls, input = null) {
-    const elements = sideControls
-      .map((control) => control.element)
-      .filter((element, index, all) => element && element.isConnected && all.indexOf(element) === index);
-    if (elements.length === 0) return null;
-
-    let node = elements[0].parentElement;
-    let depth = 0;
-    while (node && node !== document.body && depth < 10) {
-      if (input && node.contains?.(input)) break;
-      if (elements.every((element) => node.contains?.(element))) {
-        const rect = node.getBoundingClientRect();
-        const style = window.getComputedStyle(node);
-        if (
-          style.display === "grid" &&
-          rect.width > 0 && rect.width <= 280 &&
-          rect.height > 0 && rect.height <= 84
-        ) {
-          return node;
-        }
-      }
-      node = node.parentElement;
-      depth += 1;
-    }
-    return null;
-  }
-
-  function getClaudeModelOverflowElements(modelControls) {
-    const elements = [];
-
-    modelControls.forEach((control) => {
-      let node = control.element;
-      let depth = 0;
-
-      while (node && node !== document.body && depth < 4) {
-        if (!elements.includes(node)) elements.push(node);
-        node = node.parentElement;
-        depth += 1;
-      }
-    });
-
-    return elements;
-  }
-
-  function reserveClaudeModelOverflow(element) {
-    if (!element.hasAttribute("data-context-generator-original-overflow")) {
-      element.setAttribute("data-context-generator-original-overflow", element.style.overflow || "");
-    }
-    if (element.style.overflow !== "visible") {
-      element.style.overflow = "visible";
-    }
-  }
-
-  function getClaudeControlTargetOffset(control, inlineShift = 0) {
-    if (isClaudeModelControl(control)) {
-      return -CLAUDE_MODEL_LEFT_NUDGE;
-    }
-    if (isClaudeSideControl(control)) {
-      return CLAUDE_SIDE_CONTROL_RIGHT_NUDGE - Math.max(0, Math.round(inlineShift));
-    }
-    return 0;
-  }
-
-  function getClaudeModelControlsToNudge(controls, anchorControl) {
-    const anchorCenterY = anchorControl.rect.top + anchorControl.rect.height / 2;
-
-    return controls.filter((control) => {
-      const centerY = control.rect.top + control.rect.height / 2;
-      return Math.abs(centerY - anchorCenterY) <= 28 && isClaudeModelControl(control);
-    });
-  }
-
-  function isClaudeModelControl(control) {
-    return /\b(model|sonnet|opus|haiku)\b/.test(control?.label || "");
-  }
-
-  function isClaudeSideControl(control) {
-    return (
-      control?.rect?.width <= 84 ||
-      /\b(send|submit|mic|microphone|voice|speak|speech|talk|dictation|audio)\b/.test(control?.label || "")
-    );
-  }
-
-  function getClaudeInlineControlsToShift(controls, anchorControl) {
-    const anchorCenterY = anchorControl.rect.top + anchorControl.rect.height / 2;
-    const minLeft = anchorControl.rect.left - 160;
-
-    return controls.filter((control) => {
-      const centerY = control.rect.top + control.rect.height / 2;
-      if (Math.abs(centerY - anchorCenterY) > 28) return false;
-      if (control.rect.right < minLeft) return false;
-      if (/\b(attach|upload|file|project|sidebar|side bar|menu|navigation|toggle|model|sonnet|opus|haiku)\b/.test(control.label)) {
-        return false;
-      }
-      return control === anchorControl || isClaudeSideControl(control);
-    });
   }
 
   function findActionCluster(actionBtn, input) {
@@ -8620,17 +8999,6 @@
     reservedActionCluster = null;
   }
 
-  function releaseClaudeInlineControlSlots() {
-    if (!reservedClaudeInlineControls.length) return;
-
-    reservedClaudeInlineControls.forEach(restoreReservedTranslate);
-    reservedClaudeOverflowElements.forEach(restoreReservedOverflow);
-    reservedClaudeInlineControls = [];
-    reservedClaudeInlineShift = 0;
-    reservedClaudeControlOffsets = new Map();
-    reservedClaudeOverflowElements = [];
-  }
-
   function restoreReservedTransform(element) {
     if (!element) return;
 
@@ -8644,24 +9012,9 @@
     }
   }
 
-  function restoreReservedTranslate(element) {
-    if (!element) return;
-
-    element.style.translate = element.getAttribute("data-context-generator-original-translate") || "";
-    element.removeAttribute("data-context-generator-original-translate");
-  }
-
-  function restoreReservedOverflow(element) {
-    if (!element) return;
-
-    const originalOverflow = element.getAttribute("data-context-generator-original-overflow") || "";
-    element.style.overflow = originalOverflow;
-    element.removeAttribute("data-context-generator-original-overflow");
-  }
-
   function scheduleFloatingButtonUpdate(reason = "unspecified") {
     if (floatingButtonMonitoringDisabled) return;
-    if (isDestinationSheetOpen()) return;
+    if (isDestinationSheetOpen() && !invalidateInlinePicker(reason)) return;
     pendingFloatingButtonReasons.add(normalizeFloatingButtonUpdateReason(reason));
     if (floatingButtonFrame) return;
     floatingButtonFrame = requestAnimationFrame(() => {
@@ -8669,7 +9022,7 @@
       const recalculationReason = [...pendingFloatingButtonReasons].sort().join("+") || "unspecified";
       pendingFloatingButtonReasons.clear();
       if (floatingButtonMonitoringDisabled) return;
-      if (isDestinationSheetOpen()) return;
+      if (isDestinationSheetOpen() && !invalidateInlinePicker(recalculationReason)) return;
       try {
         ensureFloatingButton(recalculationReason);
         updateClaudeLimitNudge();
@@ -8683,47 +9036,32 @@
     });
   }
 
-  function syncClaudeInlineReservationBeforePaint(input, composerSurface) {
-    if (currentPlatform.id !== "claude" || !input || !composerSurface) return false;
-    const composerRect = composerSurface.getBoundingClientRect();
-    const placement = getClaudeBubblePlacement(composerRect, input, composerSurface);
-    if (!placement.anchorControl) return false;
-    reserveClaudeInlineBubbleSlot(
-      placement.anchorControl,
-      placement.reservationControls,
-      input,
-      composerRect,
-      placement.inlineShift
-    );
-    return true;
-  }
-
-  function retainClaudeStablePlacement(bubble) {
-    if (
-      currentPlatform.id !== "claude" ||
-      !bubble ||
-      !lastClaudeStablePlacementAt ||
-      Date.now() - lastClaudeStablePlacementAt > CLAUDE_TRANSIENT_PLACEMENT_GRACE_MS
-    ) {
-      clearClaudePlacementGraceTimer();
-      return false;
+  function invalidateInlinePicker(reason) {
+    if (!INLINE_MOUNT_PLATFORMS.has(currentPlatform.id)) return false;
+    const input = findPlatformInput();
+    const isClaude = currentPlatform.id === "claude";
+    const toolbar = isClaude ? findClaudeInlineToolbar(input) : currentPlatform.id === "chatgpt"
+      ? findChatGptInlineToolbar(input) : findProviderInlineToolbar(input);
+    const mount = isClaude ? claudeInlineMount : currentPlatform.id === "chatgpt" ? chatGptInlineMount : providerInlineMount;
+    // A fallback picker has no inline owner to invalidate on ordinary updates.
+    if (!toolbar && !mount) return false;
+    // A picker belongs to the editor that opened it. On replacement, route
+    // change or resize close it without stealing focus; its opening position
+    // is intentionally locked during the picker-to-handoff animation.
+    const changed = !toolbar || !mount ||
+      mount.input !== input || mount.left !== toolbar.left ||
+      mount.body !== toolbar.body ||
+      mount.right !== toolbar.right || mount.footer !== toolbar.footer || mount.controls !== toolbar.controls ||
+      mount.slot !== toolbar.slot || mount.anchor !== toolbar.anchor || mount.modelBranch !== toolbar.modelBranch ||
+      mount.surface !== toolbar.surface || mount.row !== toolbar.row || mount.dock !== toolbar.dock || mount.editorContainer !== toolbar.editorContainer ||
+      (isClaude && (mount.host !== toolbar.host || mount.editorBranch !== toolbar.editorBranch || mount.actions !== toolbar.actions)) ||
+      mount.pathname !== window.location.pathname ||
+      normalizeFloatingButtonUpdateReason(reason).includes("resize");
+    if (changed) {
+      hideDestinationSheet({ restoreFocus: false });
+      return true;
     }
-
-    const floatingRoot = getFloatingButtonRoot();
-    if (bubble.parentElement !== floatingRoot) floatingRoot.appendChild(bubble);
-    setBubbleFixedMode(bubble);
-    bubble.style.display = "flex";
-    if (!claudePlacementGraceTimer) {
-      const remainingGrace = Math.max(
-        0,
-        CLAUDE_TRANSIENT_PLACEMENT_GRACE_MS - (Date.now() - lastClaudeStablePlacementAt)
-      );
-      claudePlacementGraceTimer = setTimeout(() => {
-        claudePlacementGraceTimer = null;
-        scheduleFloatingButtonUpdate("claude-grace-expired");
-      }, remainingGrace);
-    }
-    return true;
+    return false;
   }
 
   function recordTransientComposerPlacement(bubble, left, top) {
@@ -8788,12 +9126,6 @@
     transientComposerPlacement = null;
   }
 
-  function clearClaudePlacementGraceTimer() {
-    if (!claudePlacementGraceTimer) return;
-    clearTimeout(claudePlacementGraceTimer);
-    claudePlacementGraceTimer = null;
-  }
-
   function normalizeFloatingButtonUpdateReason(reason) {
     if (typeof reason === "string" && reason) return reason;
     if (reason?.type) return reason.type;
@@ -8832,39 +9164,39 @@
     addOwnedEventListener(window, "resize", scheduleFloatingButtonUpdate);
     addOwnedEventListener(document, "visibilitychange", scheduleFloatingButtonUpdate);
     addOwnedEventListener(document, "focusin", handleFloatingButtonFocusIn);
-    startClaudePathnameMonitoring();
+    startInlinePathnameMonitoring();
     scheduleFloatingButtonUpdate("monitor-start");
   }
 
-  function startClaudePathnameMonitoring() {
-    if (currentPlatform.id !== "claude" || claudePathnamePollTimer) return;
-    lastClaudePlacementPathname = window.location.pathname;
+  function startInlinePathnameMonitoring() {
+    if (!INLINE_MOUNT_PLATFORMS.has(currentPlatform.id) || inlinePathnamePollTimer) return;
+    lastInlinePlacementPathname = window.location.pathname;
     // Navigation API covers Chromium SPA transitions immediately. The small
     // pathname poll is the cross-browser fallback because pushState emits no
     // standard event and extension isolated worlds cannot reliably wrap it.
-    addOwnedEventListener(window.navigation, "navigate", handleClaudeNavigation);
-    addOwnedEventListener(window, "popstate", handleClaudeNavigation);
-    claudePathnamePollTimer = setInterval(checkClaudePlacementPathname, CLAUDE_PATHNAME_POLL_MS);
+    addOwnedEventListener(window.navigation, "navigate", handleInlineNavigation);
+    addOwnedEventListener(window, "popstate", handleInlineNavigation);
+    inlinePathnamePollTimer = setInterval(checkInlinePlacementPathname, INLINE_PATHNAME_POLL_MS);
   }
 
-  function handleClaudeNavigation() {
-    scheduleFloatingButtonUpdate("claude-route");
+  function handleInlineNavigation() {
+    scheduleFloatingButtonUpdate("inline-route");
   }
 
-  function checkClaudePlacementPathname() {
-    if (currentPlatform.id !== "claude") return false;
+  function checkInlinePlacementPathname() {
+    if (!INLINE_MOUNT_PLATFORMS.has(currentPlatform.id)) return false;
     const pathname = window.location.pathname;
-    if (pathname === lastClaudePlacementPathname) return false;
-    lastClaudePlacementPathname = pathname;
-    scheduleFloatingButtonUpdate("claude-pathname");
+    if (pathname === lastInlinePlacementPathname) return false;
+    lastInlinePlacementPathname = pathname;
+    scheduleFloatingButtonUpdate("inline-pathname");
     return true;
   }
 
-  function stopClaudePathnameMonitoring() {
-    removeOwnedEventListener(window.navigation, "navigate", handleClaudeNavigation);
-    removeOwnedEventListener(window, "popstate", handleClaudeNavigation);
-    if (claudePathnamePollTimer) clearInterval(claudePathnamePollTimer);
-    claudePathnamePollTimer = null;
+  function stopInlinePathnameMonitoring() {
+    removeOwnedEventListener(window.navigation, "navigate", handleInlineNavigation);
+    removeOwnedEventListener(window, "popstate", handleInlineNavigation);
+    if (inlinePathnamePollTimer) clearInterval(inlinePathnamePollTimer);
+    inlinePathnamePollTimer = null;
   }
 
   function disableFloatingButtonMonitoring() {
@@ -8879,11 +9211,10 @@
     }
     stopPlatformPlacementResizeMonitoring();
     stopProviderControlMutationMonitoring();
-    clearClaudePlacementMonitoring();
-    clearClaudePlacementGraceTimer();
-    clearTransientComposerPlacement();
-    stopClaudePathnameMonitoring();
     clearChatGptPlacementResizeMonitoring();
+    clearTransientComposerPlacement();
+    stopInlinePathnameMonitoring();
+
 
     removeOwnedEventListener(window, "resize", scheduleFloatingButtonUpdate);
     removeOwnedEventListener(document, "visibilitychange", scheduleFloatingButtonUpdate);
