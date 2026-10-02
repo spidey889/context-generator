@@ -55,7 +55,9 @@ async function main() {
       -- pg_cron is not bundled in PGlite. Preserve its job catalog and SQL so
       -- the reset command itself is tested; actual scheduling remains hosted.
       create schema cron;
-      create table cron.job (jobid bigint generated always as identity, jobname text, schedule text, command text);
+      create table cron.job (jobid bigint generated always as identity, jobname text, schedule text, command text, active boolean default true);
+      create function cron.alter_job(job_id bigint, command text) returns void language sql as $$
+        update cron.job as j set command=$2 where j.jobid=$1; $$;
       create function cron.unschedule(bigint) returns boolean language plpgsql as $$
         begin delete from cron.job where jobid = $1; return found; end; $$;
       create function cron.schedule(text, text, text) returns bigint language plpgsql as $$
@@ -70,7 +72,9 @@ async function main() {
     let legacySnapshot;
     const appliedMigrations = [];
     const preCutoverVerifiedInstall = "55555555-5555-4555-8555-555555555555";
-    for (const name of names) {
+    // Verify the original preservation rollout at its historical boundary;
+    // the subsequent explicit users reset is tested separately below.
+    for (const name of names.filter(name => name.slice(0, 14) <= "20261002073711")) {
       if (name === "20261002000000_count_only_verified_summaries.sql") {
         // Preserve and verify data/counters across the actual old→new cutover.
         await event(900, { installId: historicInstall, legacy: true });
@@ -243,7 +247,8 @@ async function main() {
     const indexedPlan = await db.query("explain (format json) select attempt_id from public.transfer_events where install_id=$1 order by attempted_at desc limit 50", [install]);
     assert.match(JSON.stringify(indexedPlan.rows), /transfer_events_install_id_attempted_at_idx/); checks++;
     const { checkSnapshot } = require("./check-telemetry-backup.js");
-    const restoredBackup = await checkSnapshot(legacySnapshot);
+    const upgradeOptions = { applyPending: true, throughVersion: "20261002073711" };
+    const restoredBackup = await checkSnapshot(legacySnapshot, upgradeOptions);
     equal(restoredBackup.originalValuesPreserved, true);
     equal(restoredBackup.capturedMigrations, 10);
     equal(restoredBackup.pendingMigrations, 3);
@@ -259,9 +264,15 @@ async function main() {
       assert.ok(statements.length > 1, "Fixture must contain distinct unterminated SQL statements");
       return { ...migration, statements };
     }) };
-    const restoredSplitBackup = await checkSnapshot(splitStatementSnapshot);
+    const restoredSplitBackup = await checkSnapshot(splitStatementSnapshot, upgradeOptions);
     equal(restoredSplitBackup.originalValuesPreserved, true);
     equal(restoredSplitBackup.originalColumnHashes, restoredBackup.originalColumnHashes);
+    const { checkMinimalUsers } = require("./check-minimal-users-db.js");
+    for (const name of names.filter(name => name.slice(0, 14) > "20261002073711")) {
+      const sql = fs.readFileSync(path.join(directory, name), "utf8");
+      appliedMigrations.push({ version: name.slice(0, 14), name: name.slice(15, -4), statements: [sql] });
+      checks += await checkMinimalUsers(db, sql, appliedMigrations);
+    }
     console.log(`PASS: ${names.length} real migrations replayed; ${checks} database correctness, data preservation, attribution and privilege checks.`);
     console.log(`Per-install default plan: ${JSON.stringify(plan.rows[0]["QUERY PLAN"][0].Plan["Node Type"])}; retained composite index verified.`);
     console.log("Local pg_cron catalog shim: scheduled SQL tested; hosted scheduling and concurrent sessions require deployment verification.");

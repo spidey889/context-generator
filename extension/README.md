@@ -17,7 +17,7 @@ Opening or cancelling the picker does not capture or upload conversation text. T
 
 Each transfer attempt also sends metadata-only operational telemetry: random install/attempt IDs, time, route, character count when known, outcome, last predefined pipeline stage, a predefined safe failure category, and extension version. It never sends chat text, generated summaries, URLs, stack traces, arbitrary JavaScript errors, or provider response bodies. Each stage update is queued locally and retried without blocking the transfer.
 
-After an install's first successful summary, a protected internal `users` row tracks only its sequential user number, lifetime successful-summary count, current UTC-day successful-summary count, and the UTC date for that daily count. It contains no conversation content or per-transfer activity.
+After an install's first post-reset verified summary or reported failed attempt, a protected `users` row tracks its sequential number, random unique Naruto character name, lifetime successful summaries, and today's successful summaries/failed attempts. The installation key and UTC reset date remain internal. Daily counts reset at midnight UTC; an unsigned claimed paste success does not count as a verified summary. It contains no conversation content or per-transfer activity, and requires no extension update for this users-table cleanup.
 
 Closing the source AI tab during an active transfer records the safe failure category `user_cancelled`, so it is distinguishable from provider or extension failures without adding content.
 

@@ -32,7 +32,9 @@ async function createTelemetrySmokeFixture(repoRoot, databaseEnabled) {
         alter default privileges in schema public grant all on sequences to anon, authenticated, service_role;
         alter default privileges in schema public grant execute on functions to anon, authenticated, service_role;
         create schema cron;
-        create table cron.job (jobid bigint generated always as identity, jobname text, schedule text, command text);
+        create table cron.job (jobid bigint generated always as identity, jobname text, schedule text, command text, active boolean default true);
+        create function cron.alter_job(job_id bigint, command text) returns void language sql as $$
+          update cron.job as j set command=$2 where j.jobid=$1; $$;
         create function cron.unschedule(bigint) returns boolean language plpgsql as $$
           begin delete from cron.job where jobid=$1; return found; end; $$;
         create function cron.schedule(text, text, text) returns bigint language plpgsql as $$
@@ -140,9 +142,9 @@ async function createTelemetrySmokeFixture(repoRoot, databaseEnabled) {
       const terminal = received.findLast(payload => payload.attempt_id === context.attempt_id && payload.status === "succeeded");
       assert.equal(Date.parse(row.completed_at), Date.parse(terminal.completed_at));
       assert.equal(Date.parse(row.summary_confirmed_at), Date.parse(terminal.summary_confirmed_at));
-      const counts = (await database.query(`select total_summaries::int as total, today_summaries::int as today,
-        legacy_total_summaries::int as legacy from public.users where install_id=$1`, [context.install_id])).rows[0];
-      assert.deepEqual(counts, { total: 1, today: 1, legacy: 0 });
+      const counts = (await database.query(`select lifetime_successful_summaries::int as total, today_successful_summaries::int as today,
+        today_failed_attempts::int as failed from public.users where install_id=$1`, [context.install_id])).rows[0];
+      assert.deepEqual(counts, { total: 1, today: 1, failed: 0 });
       assert.equal((await database.query("select count(*)::int as count from public.transfer_events where summary_verified")).rows[0].count, 1);
     },
     async close() {

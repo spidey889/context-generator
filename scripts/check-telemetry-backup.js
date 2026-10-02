@@ -27,7 +27,9 @@ function digest(rows, columns) {
   return crypto.createHash("sha256").update(JSON.stringify(canonicalRows)).digest("hex");
 }
 
-async function checkSnapshot(snapshot) {
+// Restore captured state by default. Applying future migrations is opt-in:
+// the owner-authorized users reset intentionally discards old user counters.
+async function checkSnapshot(snapshot, { applyPending = false, throughVersion } = {}) {
   const db = new PGlite();
   let phase = "snapshot validation";
   try {
@@ -39,7 +41,9 @@ async function checkSnapshot(snapshot) {
       alter default privileges in schema public grant all on sequences to anon, authenticated, service_role;
       alter default privileges in schema public grant execute on functions to anon, authenticated, service_role;
       create schema cron;
-      create table cron.job (jobid bigint generated always as identity, jobname text, schedule text, command text);
+      create table cron.job (jobid bigint generated always as identity, jobname text, schedule text, command text, active boolean default true);
+      create function cron.alter_job(job_id bigint, command text) returns void language sql as $$
+        update cron.job as j set command=$2 where j.jobid=$1; $$;
       create function cron.unschedule(bigint) returns boolean language plpgsql as $$
         begin delete from cron.job where jobid = $1; return found; end; $$;
       create function cron.schedule(text, text, text) returns bigint language plpgsql as $$
@@ -60,6 +64,32 @@ async function checkSnapshot(snapshot) {
       // MCP-applied migrations can instead contain the entire SQL file. Adding
       // a separator supports both formats, including already-terminated SQL.
       await db.exec(localSql(migration.statements.join(";\n")));
+    }
+
+    // The users-reset migration freezes its real deployment time in these
+    // definitions. Replaying its DO block alone would invent a new boundary
+    // and hide restored post-reset history from reports. Restore captured SQL.
+    phase = "captured function and view definitions";
+    if (snapshot.functions) {
+      assert.ok(Array.isArray(snapshot.functions) && snapshot.functions.every(sql => typeof sql === "string"));
+      for (const sql of snapshot.functions) await db.exec(sql);
+      phase = "captured function definition comparison";
+      const definitions = (await db.query("select pg_get_functiondef(oid) as definition from pg_proc where pronamespace='public'::regnamespace")).rows.map(row => row.definition);
+      assert.deepEqual(definitions.sort(), [...snapshot.functions].sort());
+    }
+    if (snapshot.views) {
+      phase = "captured view definitions";
+      assert.ok(Array.isArray(snapshot.views));
+      for (const view of snapshot.views) {
+        assert.match(view.name, /^[a-z_][a-z0-9_]*$/);
+        assert.equal(typeof view.definition, "string");
+        await db.exec(`create or replace view public.${view.name} with (security_invoker=true) as ${view.definition}`);
+        // pg_get_viewdef formatting differs across PostgreSQL builds. Execute
+        // the exact captured SQL, then verify it resolves and remains invoker.
+        await db.query(`select * from public.${view.name} limit 0`);
+        const restored = (await db.query("select reloptions from pg_class where oid=$1::regclass", [`public.${view.name}`])).rows[0];
+        assert.ok(restored.reloptions.includes("security_invoker=true"));
+      }
     }
 
     phase = "private row restore";
@@ -110,8 +140,9 @@ async function checkSnapshot(snapshot) {
 
     phase = "pending migration replay";
     const directory = path.join(__dirname, "..", "supabase", "migrations");
-    const pending = fs.readdirSync(directory).filter(name => /^\d{14}_.+\.sql$/.test(name))
-      .sort().filter(name => !capturedVersions.has(name.slice(0, 14)));
+    const pending = applyPending ? fs.readdirSync(directory).filter(name => /^\d{14}_.+\.sql$/.test(name))
+      .sort().filter(name => !capturedVersions.has(name.slice(0, 14))
+        && (!throughVersion || name.slice(0, 14) <= throughVersion)) : [];
     for (const name of pending) await db.exec(localSql(fs.readFileSync(path.join(directory, name), "utf8")));
     phase = "upgraded row hash comparison";
     await compareOriginalColumns();
@@ -128,7 +159,8 @@ async function checkSnapshot(snapshot) {
       "Restored next identity must be above the existing maximum");
     return { transferEvents: snapshot.transfer_events.length, users: snapshot.users.length,
       capturedMigrations: captured.length, pendingMigrations: pending.length,
-      originalColumnHashes: hashes, originalValuesPreserved: true };
+      originalColumnHashes: hashes, originalValuesPreserved: true,
+      capturedDefinitionsPreserved: Boolean(snapshot.functions && snapshot.views) };
   } catch (error) {
     // Driver errors can include private SQL parameters and row contents. Keep
     // diagnostics to a fixed phase label and optional standard SQLSTATE.
@@ -144,7 +176,7 @@ if (require.main === module) {
     process.exitCode = 1;
   } else {
     Promise.resolve().then(() => checkSnapshot(JSON.parse(fs.readFileSync(input, "utf8").replace(/^\uFEFF/, ""))))
-      .then(result => console.log(`PASS: application snapshot restored and pending migrations replayed. ${JSON.stringify(result)}`))
+      .then(result => console.log(`PASS: captured application snapshot restored (future migrations are opt-in). ${JSON.stringify(result)}`))
       .catch(error => { console.error(error.message.startsWith("Application backup") ? error.message : "Application backup input could not be read or parsed."); process.exitCode = 1; });
   }
 }

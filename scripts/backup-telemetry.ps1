@@ -42,6 +42,7 @@ select jsonb_build_object(
   'users_sequence',(select jsonb_build_object('last_value',last_value::text,'is_called',is_called) from public.users_user_no_seq),
   'migrations',(select jsonb_agg(to_jsonb(m) order by version) from supabase_migrations.schema_migrations m),
   'functions',(select jsonb_agg(pg_get_functiondef(p.oid)) from pg_proc p join pg_namespace n on n.oid=p.pronamespace where n.nspname='public'),
+  'views',(select coalesce(jsonb_agg(jsonb_build_object('name',viewname,'definition',definition)),'[]') from pg_views where schemaname='public'),
   'cron_jobs',(select coalesce(jsonb_agg(to_jsonb(j)),'[]') from cron.job j)
 ) as backup;
 '@
