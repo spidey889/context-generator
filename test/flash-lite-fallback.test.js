@@ -3,10 +3,9 @@ const test = require("node:test");
 const handler = require("../api/summarize.js");
 const { createSummaryWithFallback, getSummaryProfile, getGeneratedModelSelection } = handler.__test;
 
-for (const [label, groqKey, flashLiteWorks] of [
-  ["with Groq configured", "test-groq", true],
-  ["when Groq is absent", undefined, true],
-  ["then later fallbacks and local carry when it fails", "test-groq", false]
+for (const [label, flashLiteWorks] of [
+  ["when it succeeds", true],
+  ["then local carry when all remote routes fail", false]
 ]) {
   test(`Flash-Lite is tried before Mistral ${label}`, async () => {
     const originalFetch = global.fetch;
@@ -41,10 +40,10 @@ for (const [label, groqKey, flashLiteWorks] of [
         conversation, profile: getSummaryProfile(conversation),
         modelSelection: getGeneratedModelSelection(conversation, true),
         geminiApiKey: "test-google", mistralApiKey: "test-mistral",
-        groqApiKey: groqKey, geminiModelHealth: health
+        geminiModelHealth: health
       });
       assert.deepEqual(requests, ["gemini-3.6-flash", "gemini-3.5-flash-lite",
-        ...(!flashLiteWorks ? ["ministral-14b-2512", ...(groqKey ? ["groq/compound-mini", "groq/compound-mini"] : [])] : [])]);
+        ...(!flashLiteWorks ? ["ministral-14b-2512"] : [])]);
       assert.deepEqual(result.modelsTried, [...new Set(requests)]);
       assert.deepEqual(result.mistralModelsTried, flashLiteWorks ? [] : ["ministral-14b-2512"]);
       assert.equal(result.model, flashLiteWorks ? "gemini-3.5-flash-lite" : "local-direct");
@@ -88,45 +87,15 @@ test("Orca is paused by default even with its API key configured", async () => {
 });
 
 
-test("Groq remains paused with a retained key after Mistral fails", async () => {
-  const originalFetch = global.fetch;
-  const names = ["GROQ_ENABLED", "GROQ_API_KEY", "GEMINI_API_KEY", "MISTRAL_API_KEY", "ORCAROUTER_ENABLED"];
-  const saved = names.map((name) => process.env[name]);
-  delete process.env.GROQ_ENABLED;
-  delete process.env.GEMINI_API_KEY;
-  delete process.env.ORCAROUTER_ENABLED;
-  process.env.GROQ_API_KEY = "retained-groq-key";
-  process.env.MISTRAL_API_KEY = "test-mistral";
-  const requests = [];
-  global.fetch = async (url) => {
-    requests.push(url);
-    return { ok: false, status: 429, json: async () => ({ error: { code: "rate_limit_exceeded" } }) };
-  };
-  let payload;
-  const res = { setHeader() {}, status() { return this; }, json(data) { payload = data; } };
-  try {
-    await handler({ method: "POST", body: { conversation: "Build context. ".repeat(150) }, headers: {
-      origin: "chrome-extension://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "content-type": "application/json",
-      "x-cap-context-client": "cap-context-extension/1", "x-forwarded-for": "192.0.2.201"
-    } }, res);
-    assert.deepEqual(requests, ["https://api.mistral.ai/v1/chat/completions"]);
-    assert.equal(payload.timing.model, "local-direct");
-  } finally {
-    global.fetch = originalFetch;
-    names.forEach((name, index) => { if (saved[index] === undefined) delete process.env[name]; else process.env[name] = saved[index]; });
-  }
-});
-
-
 test("paused Mistral is bypassed and Flash-Lite serves after primary failure", async () => {
   const originalFetch = global.fetch;
-  const names = ["MISTRAL_ENABLED", "MISTRAL_API_KEY", "GEMINI_API_KEY", "GEMINI_FLASH_FALLBACKS_ENABLED", "GROQ_ENABLED", "ORCAROUTER_ENABLED", "GEMINI_MODEL_HEALTH_ENABLED"];
+  const names = ["MISTRAL_ENABLED", "MISTRAL_API_KEY", "GEMINI_API_KEY", "GEMINI_FLASH_FALLBACKS_ENABLED", "ORCAROUTER_ENABLED", "GEMINI_MODEL_HEALTH_ENABLED"];
   const saved = names.map((name) => process.env[name]);
   process.env.MISTRAL_ENABLED = "false";
   process.env.MISTRAL_API_KEY = "retained-mistral-key";
   process.env.GEMINI_API_KEY = "test-google";
   process.env.GEMINI_MODEL_HEALTH_ENABLED = "false";
-  for (const name of ["GEMINI_FLASH_FALLBACKS_ENABLED", "GROQ_ENABLED", "ORCAROUTER_ENABLED"]) delete process.env[name];
+  for (const name of ["GEMINI_FLASH_FALLBACKS_ENABLED", "ORCAROUTER_ENABLED"]) delete process.env[name];
   const requests = [];
   global.fetch = async (url) => {
     const model = url.split("/models/")[1].split(":")[0];

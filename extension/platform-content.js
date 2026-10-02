@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-01-transfer-deadline-v77";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-02-provider-cleanup-v78";
   const ownedUiStyleSheets = new Map();
   // Start fast capture on for each page instance; a manual opt-out lasts until reload.
   let claudeJsonCaptureEnabled = true;
@@ -2060,7 +2060,6 @@
         geminiMs: backendTiming?.geminiMs ?? null,
         orcaMs: backendTiming?.orcaMs ?? null,
         mistralMs: backendTiming?.mistralMs ?? null,
-        groqMs: backendTiming?.groqMs ?? null,
         providerMs: backendTiming?.providerMs ?? null,
         providerPasses: backendTiming?.providerPasses ?? null,
         servedBy: backendTiming?.servedBy || backendTiming?.provider || null,
@@ -2135,7 +2134,7 @@
     return models
       .filter((model) => typeof model === "string" && model.trim())
       // Preserve the complete bounded backend chain in Latest Run. The current
-      // maximum is Gemini (4) + OrcaRouter + Mistral + Groq + local fallback.
+      // maximum is Flash (4) + Flash-Lite + OrcaRouter + Mistral + local fallback.
       .slice(0, 8)
       .map((model) => model.trim());
   }

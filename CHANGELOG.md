@@ -2,6 +2,8 @@
 
 Historical changes; `LOGIC.md` describes current source behavior. Repository changes do not establish deployment or Web Store release state.
 
+- 2026-10-03: Removed the retired Groq integration, enable switch, 15-second budget reserve, dedicated rate-limit retry, timing fields, receipt labels and obsolete tests. Mistral exhaustion now advances directly to exact local transcript carry; the default Gemini Flash -> Flash-Lite -> Ministral chain and 270-second allowance remain. Updated routing/recovery coverage, privacy and architecture docs, and the content-script identity to v78. API keys and Vercel environment variables were left untouched; this branch change does not establish production deployment.
+
 - 2026-10-01: Trimmed repeated/source-text tests to 255 normal checks and one scroll regression. Simulated time preserves capture/paste delays without wall-clock waits; the scroll check verifies all 16 turns in order after five unchanged windows. Normal/slow runners have 30/60-second hang limits.
 
 - 2026-10-01: Added HMAC-signed server summary confirmations and a pending migration so usage counters increment once per verified summary, independently of client paste claims. Preserved diagnostic delivery without a receipt and historical counter values. Decoupled telemetry persistence from network delivery. Coordinated signing keys, edge/migration rollout and an extension release remain required; source work did not deploy them.
@@ -68,7 +70,7 @@ Historical changes; `LOGIC.md` describes current source behavior. Repository cha
 
 - 2026-09-28: Fixed the live summary fallback mismatch: the production alias still served master `732cfd0`, while the reordered chain from `b0c0a6f` existed only in preview. Redeployed that tested source with Vercel target `production`; verified READY deployment `dpl_QK54UTQ2LygVGJGBr1ATUx2gm26H`, the production alias and source commit. A real synthetic summary request confirmed Gemini 3.6 Flash was skipped by daily health, Gemini 3.5 Flash-Lite was attempted and retried, then Ministral served after Google's HTTP 503 UNAVAILABLE response. Added focused coverage for both successful and failed Flash-Lite after a health skip, and documented production release verification in LOGIC.md. All 72 focused checks and 339 full-suite tests passed. No provider health reset or application-code change was needed; Mistral remains the fallback when Google fails.
 
-- 2026-09-28: Reordered the active summary chain to Gemini 3.6 Flash -> Gemini 3.5 Flash-Lite -> Ministral 3 14B -> exact local transcript carry. Flash-Lite succeeds before any Mistral request, and its failure advances to Mistral instead of going straight to local carry. Kept the active three 90-second slots and 270-second total; if paused Orca/Groq are restored, Orca runs between Flash-Lite and Mistral and its elapsed time plus the Groq reserve share the final Mistral slot when the Google key is configured. No provider switches, prompts, token allowances, health policy or extension behavior changed. Updated model-selection receipts/logs, routing tests and production architecture notes. All 71 focused routing/health/background checks and 338 full-suite tests passed. This entry records the source change; live Vercel deployment was not verified.
+- 2026-09-28: Reordered the active summary chain to Gemini 3.6 Flash -> Gemini 3.5 Flash-Lite -> Ministral 3 14B -> exact local transcript carry. Flash-Lite succeeds before any Mistral request, and its failure advances to Mistral instead of going straight to local carry. Kept the active three 90-second slots and 270-second total; if paused Orca is restored, it runs between Flash-Lite and Mistral and its elapsed time shares the final Mistral slot when the Google key is configured. No provider switches, prompts, token allowances, health policy or extension behavior changed. Updated model-selection receipts/logs, routing tests and production architecture notes. All 71 focused routing/health/background checks and 338 full-suite tests passed. This entry records the source change; live Vercel deployment was not verified.
 
 - 2026-09-28: Quick UI-only follow-up found two more style-tag dependency paths beside the reported handoff failure: destination-picker rules and handoff/error palette protection. Consolidated their existing CSS and handoff progress CSS into owned adopted stylesheets, resynced palette additions, and removed only owned sheets on teardown. This closes the same page-style restriction exposure across supported source sites without changing the design or transfer behavior. No additional visible failure was claimed reproduced; no tests or browser runs were made, following the request for a fast fix. Advanced the content-script load ID.
 
@@ -156,13 +158,13 @@ Historical changes; `LOGIC.md` describes current source behavior. Repository cha
 
 - 2026-09-18: Switched the primary Google model from Flash 3.8 to Flash 3.6 at the owner's request. Retained Flash 3.8 in the paused fallback list; the active Mistral/Flash-Lite order, daily health handling, and 90-second budgets are unchanged.
 
-- 2026-09-18: Confirmed Fluid Compute is enabled on Hobby and raised server/client limits to 300/320 seconds. Replaced the short four-Flash attempts with three active 90-second routes: Flash 3.8, Ministral 14B, and Flash-Lite. Paused other Flash models and Groq behind reversible switches; Orca remains paused. Re-enabling Orca/Groq consumes the terminal allowance rather than increasing total remote time beyond 270 seconds.
+- 2026-09-18: Confirmed Fluid Compute is enabled on Hobby and raised server/client limits to 300/320 seconds. Replaced the short four-Flash attempts with three active 90-second routes: Flash 3.8, Ministral 14B, and Flash-Lite. Paused other Flash models behind a reversible switch; Orca remains paused. Re-enabling Orca consumes the terminal allowance rather than increasing total remote time beyond 270 seconds.
 
 - 2026-09-18: Reserved time for each remaining Gemini Flash model within the existing 60-second family deadline so slow 3.8/3.7 attempts cannot consume the entire allowance before 3.6/3.5. Retained daily health skips and the overall provider timeout.
 
 - 2026-09-18: Replaced the terminal Google Gemma 4 31B attempt with stable Gemini 3.5 Flash-Lite after the owner verified Gemma had only 16k input tokens/minute, while Flash-Lite showed 250k on the same project. Retained the existing Google key, minimal thinking, timeout allowance, relaxed output handling, and Orca pause switch. Gemma is no longer in the active chain.
 
-- 2026-09-18: Paused OrcaRouter by default while retaining its key and route behind `ORCAROUTER_ENABLED=true`. Added Google Gemma 4 31B via the existing Google key as the final remote attempt after Groq and before full-transcript local carry, with minimal thinking and a 60-second allowance shared with Orca when unpaused. Documented restoration in `docs/provider-fallbacks.md`.
+- 2026-09-18: Paused OrcaRouter by default while retaining its key and route behind `ORCAROUTER_ENABLED=true`. Added Google Gemma 4 31B via the existing Google key as the final remote attempt after Mistral and before full-transcript local carry, with minimal thinking and a 60-second allowance shared with Orca when unpaused. Documented restoration in `docs/provider-fallbacks.md`.
 
 - 2026-09-18: Temporarily made generated-summary validation advisory so non-empty provider output is delivered even when the requested header, seven-section structure, or quality checks fail. Valid output keeps canonical normalization; imperfect text is preserved with the destination-confirmation instruction appended. Empty output and service failures still fall back. Retained the strict validator and documented restoration in `docs/summary-validation.md`.
 
@@ -196,9 +198,7 @@ Historical changes; `LOGIC.md` describes current source behavior. Repository cha
 
 - 2026-09-12: Fixed provider rate-limit retries to honor `Retry-After`, with a one-second minimum for HTTP 429 responses, instead of retrying Mistral inside its one-request-per-second window.
 
-- 2026-09-12: Stopped rejecting otherwise valid Groq summaries solely because the model paraphrased NEXT STEP; normalization still replaces that section with the trusted exact destination instruction.
-
-- 2026-09-12: Replaced the retired Groq Llama 3.1 fallback with Groq Compound Mini for its larger free-tier token allowance and active production availability.
+- 2026-09-12: Stopped rejecting otherwise valid provider summaries solely because the model paraphrased NEXT STEP; normalization still replaces that section with the trusted exact destination instruction.
 
 - 2026-09-12: Replaced the unreadable one-line fallback log with a vertical model path that separates daily skips from models tried in the current run and formats provider model names for people instead of internal IDs.
 
@@ -273,7 +273,7 @@ The entries in this section describe the September 1.4.4 source candidate, not t
 ## Multi-platform transfer foundation — 2026-06-10 to 2026-07-10
 
 - Evolved the original Claude-to-ChatGPT relay into destination selection across Claude, ChatGPT, Gemini, Grok, and DeepSeek, with platform-specific composer discovery, placement, paste activation, and retry behavior.
-- Added the Vercel summarization backend, exact Context Carry normalization and destination-confirmation instruction, size-based model routing, Groq fallback, and the Mistral fallback chain used before Gemini became primary.
+- Added the Vercel summarization backend, exact Context Carry normalization and destination-confirmation instruction, size-based model routing, and the Mistral fallback chain used before Gemini became primary.
 - Replaced the earlier automatic-submission experiment with the current user-reviewed composer handoff.
 - Added prepared-destination recovery, instant empty-chat rejection, user-facing failure overlays, and a manual-copy fallback.
 - Added the local Latest Run analysis page with provider chain, timing, turn count, and captured-transcript diagnostics.

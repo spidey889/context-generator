@@ -1,6 +1,5 @@
 // Exercise retained routes explicitly; production defaults keep them paused.
 process.env.GEMINI_FLASH_FALLBACKS_ENABLED = "true";
-process.env.GROQ_ENABLED = "true";
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
@@ -376,136 +375,42 @@ test("OrcaRouter free-tier 429 falls through immediately without retrying", asyn
   }
 });
 
-test("backend falls back to Groq after Mistral rate limits and keeps the same prompt", async () => {
-  const originalFetch = global.fetch;
-  const restoreApiKey = setTemporaryEnv("MISTRAL_API_KEY", "test-mistral-key");
-  const restoreGroqKey = setTemporaryEnv("GROQ_API_KEY", "test-groq-key");
-  const restoreMistralModel = setTemporaryEnv("MISTRAL_MODEL", "custom-mistral-test");
-  const conversation = "fallback context ".repeat(260);
-  const mistralRequests = [];
-  const groqRequests = [];
-
-  global.fetch = async (url, options) => {
-    const body = JSON.parse(options.body);
-
-    if (url === "https://api.mistral.ai/v1/chat/completions") {
-      mistralRequests.push(body);
-      return {
-        ok: false,
-        status: 429,
-        text: async () => "rate limited"
-      };
-    }
-
-    if (url === "https://api.groq.com/openai/v1/chat/completions") {
-      groqRequests.push(body);
-      return {
-        ok: true,
-        status: 200,
-        json: async () => ({
-          usage: {
-            prompt_tokens: 700,
-            completion_tokens: 220,
-            total_tokens: 920
-          },
-          choices: [{
-            message: {
-              content: makeContextCarrySummary("groq", 260)
-            }
-          }]
-        })
-      };
-    }
-
-    throw new Error(`Unexpected URL ${url}`);
-  };
-
-  const res = createMockResponse();
-
-  try {
-    await summarize({ method: "POST", body: { conversation } }, res);
-
-    assert.equal(res.statusCode, 200);
-    assert.equal(mistralRequests.length, 1);
-    assert.equal(groqRequests.length, 1);
-    assert.deepEqual(mistralRequests.map((request) => request.model), ["ministral-14b-2512"]);
-    assert.ok(mistralRequests.every((request) => request.prompt_cache_key));
-    assert.equal(groqRequests[0].model, "groq/compound-mini");
-    assert.equal(groqRequests[0].prompt_cache_key, undefined);
-    assert.equal(groqRequests[0].prediction, undefined);
-    assert.equal(groqRequests[0].max_tokens, mistralRequests[0].max_tokens);
-    assert.deepEqual(groqRequests[0].messages, mistralRequests[0].messages);
-    assert.equal(res.payload.timing.servedBy, "groq");
-    assert.equal(res.payload.timing.provider, "groq");
-    assert.equal(res.payload.timing.model, "groq/compound-mini");
-    assert.equal(res.payload.timing.primaryModel, "ministral-14b-2512");
-    assert.equal(res.payload.timing.modelOverride, false);
-    assert.equal(res.payload.timing.fallback.attempted, true);
-    assert.equal(res.payload.timing.fallback.used, true);
-    assert.equal(res.payload.timing.fallback.servedBy, "groq");
-    assert.equal(res.payload.timing.fallback.model, "groq/compound-mini");
-    assert.match(res.payload.timing.fallback.reason, /Mistral API error 429/);
-    assert.deepEqual(res.payload.timing.usage, {
-      promptTokens: 700,
-      completionTokens: 220,
-      totalTokens: 920,
-      cachedTokens: null
-    });
-  } finally {
-    restoreMistralModel();
-    restoreGroqKey();
-    restoreApiKey();
-    global.fetch = originalFetch;
-  }
-});
-
-test("backend advances to Groq after a timed-out Ministral 14B attempt", async () => {
-  const originalFetch = global.fetch;
-  const restoreApiKey = setTemporaryEnv("MISTRAL_API_KEY", "test-mistral-key");
-  const restoreGroqKey = setTemporaryEnv("GROQ_API_KEY", "test-groq-key");
-  const conversation = "timeout fallback context ".repeat(180);
-  const requests = [];
-
-  global.fetch = async (_url, options) => {
-    const body = JSON.parse(options.body);
-    requests.push(body);
-
-    if (body.model === "ministral-14b-2512") {
-      const error = new Error("request timed out");
-      error.name = "AbortError";
-      throw error;
-    }
-
-    return {
-      ok: true,
-      status: 200,
-      json: async () => ({
-        choices: [{
-          message: {
-            content: makeContextCarrySummary("timeout-fallback", 260)
-          }
-        }]
-      })
+for (const [label, failure] of [
+  ["rate-limited", async () => ({ ok: false, status: 429, json: async () => ({}) })],
+  ["timed-out", async () => { const error = new Error("request timed out"); error.name = "AbortError"; throw error; }]
+]) {
+  test("backend preserves the exact transcript after a " + label + " Mistral attempt", async () => {
+    const originalFetch = global.fetch;
+    const restores = [setTemporaryEnv("GEMINI_API_KEY", undefined),
+      setTemporaryEnv("ORCAROUTER_API_KEY", undefined),
+      setTemporaryEnv("MISTRAL_API_KEY", "test-mistral-key")];
+    const conversation = "User: Preserve this decision exactly.\nAssistant: Continue the build checks.\n".repeat(80);
+    const requests = [];
+    global.fetch = async (url, options) => {
+      assert.equal(url, "https://api.mistral.ai/v1/chat/completions");
+      requests.push(JSON.parse(options.body));
+      return failure();
     };
-  };
-
-  const res = createMockResponse();
-
-  try {
-    await summarize({ method: "POST", body: { conversation } }, res);
-
-    assert.equal(res.statusCode, 200);
-    assert.deepEqual(requests.map((request) => request.model), [
-      "ministral-14b-2512",
-      "groq/compound-mini"
-    ]);
-    assert.equal(res.payload.timing.model, "groq/compound-mini");
-  } finally {
-    restoreGroqKey();
-    restoreApiKey();
-    global.fetch = originalFetch;
-  }
-});
+    try {
+      const res = createMockResponse();
+      await summarize({ method: "POST", body: { conversation } }, res);
+      assert.equal(res.statusCode, 200);
+      assert.deepEqual(requests.map(request => request.model), ["ministral-14b-2512"]);
+      assert.ok(requests[0].prompt_cache_key);
+      assert.equal(res.payload.timing.model, "local-direct");
+      assert.equal(res.payload.timing.provider, "local-direct");
+      assert.equal(res.payload.timing.primaryModel, "ministral-14b-2512");
+      assert.deepEqual(res.payload.timing.modelsTried, ["ministral-14b-2512"]);
+      assert.equal(res.payload.timing.fallback.used, true);
+      assert.equal(res.payload.timing.fallback.servedBy, "local-direct");
+      assert.ok(res.payload.summary.includes(conversation.trim().split("\n").map(line => "> " + line).join("\n")));
+      assert.equal(res.payload.timing.usage.totalTokens, 0);
+    } finally {
+      restores.forEach(restore => restore());
+      global.fetch = originalFetch;
+    }
+  });
+}
 
 test("normalizer refuses to disguise free-form output as a valid Context Carry", () => {
   const normalized = normalizeContextCarrySummary("User is debugging paste reliability.");
@@ -559,7 +464,6 @@ test("captured prompt injections stay inside the untrusted transcript data envel
 test("provider exhaustion preserves the exact transcript locally without reading error bodies", async () => {
   const originalFetch = global.fetch;
   const restoreMistralKey = setTemporaryEnv("MISTRAL_API_KEY", "test-mistral-key");
-  const restoreGroqKey = setTemporaryEnv("GROQ_API_KEY", undefined);
   const privateProviderBody = "provider echoed private conversation text";
   let responseTextReads = 0;
 
@@ -591,7 +495,6 @@ test("provider exhaustion preserves the exact transcript locally without reading
     assert.doesNotMatch(JSON.stringify(res.payload), new RegExp(privateProviderBody));
   } finally {
     restoreMistralKey();
-    restoreGroqKey();
     global.fetch = originalFetch;
   }
 });
@@ -620,30 +523,32 @@ test("deterministic validation rejects malformed, empty, short, and refusal outp
   assert.equal(getMinimumValidSummaryWords(getSummaryProfile("x".repeat(90000))), 200);
 });
 
-test("refusal and substantively empty providers fall through Mistral and Groq to the complete transcript", async () => {
+test("refusal and substantively empty Mistral output fall through to the complete transcript", async () => {
   const originalFetch = global.fetch;
   const restores = [setTemporaryEnv("GEMINI_API_KEY", undefined),
     setTemporaryEnv("ORCAROUTER_API_KEY", undefined),
-    setTemporaryEnv("MISTRAL_API_KEY", "test-mistral-key"),
-    setTemporaryEnv("GROQ_API_KEY", "test-groq-key")];
+    setTemporaryEnv("MISTRAL_API_KEY", "test-mistral-key")];
   const conversation = "User: Preserve this exact code: const answer = 42;\nAssistant: Keep all decisions.\n".repeat(40);
   const requests = [];
+  let rejectedSummary;
   global.fetch = async (_url, options) => {
-    const { model } = JSON.parse(options.body);
-    requests.push(model);
-    return { ok: true, status: 200, json: async () => ({ choices: [{ message: { content:
-      model === "ministral-14b-2512" ? "I cannot summarize this conversation."
-        : "CONTEXT CARRY — READY TO PASTE\nWHO I AM\nWHAT WE WERE DOING\nKEY CONTEXT\nNEXT STEP\nReply only: \"Context loaded. Let's pick up right where you left off.\" Then wait for the user."
-    } }] }) };
+    requests.push(JSON.parse(options.body).model);
+    return { ok: true, status: 200, json: async () => ({
+      choices: [{ message: { content: rejectedSummary } }]
+    }) };
   };
   try {
-    const res = createMockResponse();
-    await summarize({ method: "POST", body: { conversation } }, res);
-    assert.equal(res.statusCode, 200);
-    assert.deepEqual(requests, ["ministral-14b-2512", "groq/compound-mini"]);
-    assert.equal(res.payload.timing.servedBy, "local-direct");
-    assert.ok(res.payload.summary.includes(conversation.trim().split("\n").map(line => `> ${line}`).join("\n")));
-    assert.doesNotMatch(res.payload.summary, /I cannot summarize/);
+    for (const output of ["I cannot summarize this conversation.", getContextCarryTemplate(getSummaryProfile(conversation))]) {
+      rejectedSummary = output;
+      requests.length = 0;
+      const res = createMockResponse();
+      await summarize({ method: "POST", body: { conversation } }, res);
+      assert.equal(res.statusCode, 200);
+      assert.deepEqual(requests, ["ministral-14b-2512"]);
+      assert.equal(res.payload.timing.servedBy, "local-direct");
+      assert.ok(res.payload.summary.includes(conversation.trim().split("\n").map(line => "> " + line).join("\n")));
+      assert.doesNotMatch(res.payload.summary, /I cannot summarize/);
+    }
   } finally {
     restores.forEach(restore => restore());
     global.fetch = originalFetch;
@@ -681,8 +586,7 @@ test("useful token-limited output is delivered without calling a fallback", asyn
   const originalFetch = global.fetch;
   const restores = [setTemporaryEnv("GEMINI_API_KEY", undefined),
     setTemporaryEnv("ORCAROUTER_API_KEY", undefined),
-    setTemporaryEnv("MISTRAL_API_KEY", "test-mistral-key"),
-    setTemporaryEnv("GROQ_API_KEY", "test-groq-key")];
+    setTemporaryEnv("MISTRAL_API_KEY", "test-mistral-key")];
   let requests = 0;
   const partial = "KEY CONTEXT\nThe Windows build passed. Linux tests are blocked; next check";
   global.fetch = async () => {

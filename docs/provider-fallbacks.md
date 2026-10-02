@@ -8,9 +8,8 @@ Paused routes retain their keys and implementation. Set the following production
 
 - `GEMINI_FLASH_FALLBACKS_ENABLED`: Flash 3.7, 3.8, and regular 3.5. Restored Flash routes share the 90-second family allowance by dividing remaining time across remaining model slots.
 - `ORCAROUTER_ENABLED`: OrcaRouter Free, after Flash-Lite and before Mistral, with its retained 60-second budget.
-- `GROQ_ENABLED`: Groq Compound Mini, after Mistral, with its retained 15-second budget.
 
-Unset or non-true switches pause those routes. When the Google key is configured, restoring Orca deducts its elapsed attempt time from Mistral's final 90-second slot, and restored Groq reserves 15 seconds from that slot. The first two Google routes keep their 90-second budgets. The total remains within 270 seconds; restored routes trade away final-model time.
+Unset or non-true switches pause those routes. When the Google key is configured, restoring Orca deducts its elapsed attempt time from Mistral's final 90-second slot. The first two Google routes keep their 90-second budgets. The total remains within 270 seconds; restored routes trade away final-model time.
 
 Flash-Lite uses the existing Google key, MINIMAL thinking, existing token allowance and hidden-thought filtering, and advisory summary validation. It does not consult Flash's daily-health records. Failed or empty Flash-Lite output advances to Mistral; exhaustion of all configured remote routes preserves the full captured transcript locally. Receipts identify the actual model and include both Google routes in geminiMs.
 

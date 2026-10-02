@@ -41,12 +41,11 @@ test("active fallback order keeps 90-second slots and restored optional routes s
         conversation, profile: getSummaryProfile(conversation),
         modelSelection: getGeneratedModelSelection(conversation, true),
         geminiApiKey: "test-google", mistralApiKey: "test-mistral", geminiModelHealth: health,
-        orcaRouterApiKey: optionalRoutes ? "test-orca" : undefined,
-        groqApiKey: optionalRoutes ? "test-groq" : undefined
+        orcaRouterApiKey: optionalRoutes ? "test-orca" : undefined
       });
       assert.deepEqual(requests, ["gemini-3.6-flash", "gemini-3.5-flash-lite", ...(optionalRoutes ? ["orcarouter/free"] : []), "ministral-14b-2512"]);
-      assert.deepEqual(budgets, optionalRoutes ? [90000, 90000, 60000, 15000] : [90000, 90000, 90000]);
-      assert.ok(budgets.reduce((sum, budget) => sum + budget, 0) + (optionalRoutes ? 15000 : 0) <= 270000);
+      assert.deepEqual(budgets, optionalRoutes ? [90000, 90000, 60000, 30000] : [90000, 90000, 90000]);
+      assert.ok(budgets.reduce((sum, budget) => sum + budget, 0) <= 270000);
       assert.equal(result.model, "ministral-14b-2512");
     }
   } finally {

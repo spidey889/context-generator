@@ -24,18 +24,15 @@ const GEMINI_CHAIN_BUDGET_MS = 90000;
 const GEMINI_GENERATE_CONTENT_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/models";
 const ORCAROUTER_CHAT_COMPLETIONS_URL = "https://api.orcarouter.ai/v1/chat/completions";
 const MISTRAL_CHAT_COMPLETIONS_URL = "https://api.mistral.ai/v1/chat/completions";
-const GROQ_CHAT_COMPLETIONS_URL = "https://api.groq.com/openai/v1/chat/completions";
 const LOCAL_DIRECT_MODEL = "local-direct";
 const ORCAROUTER_FREE_MODEL = "orcarouter/free";
 const MISTRAL_PRIMARY_MODEL = "ministral-14b-2512";
-const GROQ_FALLBACK_MODEL = "groq/compound-mini";
 const FLASH_LITE_FALLBACK_MODEL = "gemini-3.5-flash-lite";
 const PROVIDER_REQUEST_BUDGETS_MS = {
   [GEMINI_PRIMARY_MODEL]: 90000,
   ...Object.fromEntries(GEMINI_FALLBACK_MODELS.map((model) => [model, 90000])),
   [ORCAROUTER_FREE_MODEL]: 60000,
   [MISTRAL_PRIMARY_MODEL]: 90000,
-  [GROQ_FALLBACK_MODEL]: 15000,
   [FLASH_LITE_FALLBACK_MODEL]: 90000
 };
 const MISTRAL_PROMPT_CACHE_VERSION = "capcontext-summary-v7";
@@ -54,11 +51,6 @@ const SUMMARY_PROVIDERS = {
     id: "mistral",
     label: "Mistral",
     url: MISTRAL_CHAT_COMPLETIONS_URL
-  },
-  groq: {
-    id: "groq",
-    label: "Groq",
-    url: GROQ_CHAT_COMPLETIONS_URL
   }
 };
 const SUMMARY_PROFILES = [
@@ -263,7 +255,6 @@ async function handleSummary(conversation, responseChannel) {
         geminiMs: 0,
         orcaMs: 0,
         mistralMs: 0,
-        groqMs: 0,
         providerMs: 0,
         providerPasses: 0,
         servedBy: LOCAL_DIRECT_MODEL,
@@ -306,8 +297,7 @@ async function handleSummary(conversation, responseChannel) {
       profile: summaryProfile,
       geminiApiKey,
       orcaRouterApiKey,
-      mistralApiKey: process.env.MISTRAL_ENABLED === "false" ? undefined : process.env.MISTRAL_API_KEY,
-      groqApiKey: process.env.GROQ_ENABLED === "true" ? process.env.GROQ_API_KEY : undefined
+      mistralApiKey: process.env.MISTRAL_ENABLED === "false" ? undefined : process.env.MISTRAL_API_KEY
     });
 
     // These diagnostics contain only fixed flag names, validator wording, and counts.
@@ -324,7 +314,6 @@ async function handleSummary(conversation, responseChannel) {
         geminiMs: providerResult.geminiMs,
         orcaMs: providerResult.orcaMs,
         mistralMs: providerResult.mistralMs,
-        groqMs: providerResult.groqMs,
         providerMs: providerResult.providerMs,
         initialMs: providerResult.initialMs,
         providerPasses: providerResult.providerPasses,
@@ -453,7 +442,6 @@ async function createSummaryWithFallback({
   geminiApiKey,
   orcaRouterApiKey,
   mistralApiKey,
-  groqApiKey,
   geminiModelHealth = createGeminiModelHealth()
 }) {
   const fallbackMessages = getInitialSummaryMessages(conversation, profile);
@@ -467,7 +455,7 @@ async function createSummaryWithFallback({
   let lastProviderFailure = null;
 
   // Only the primary remote routes share this receipt contract.
-  // Flash-Lite and Groq preserve their existing always-fallback reporting.
+  // Flash-Lite preserves its existing always-fallback reporting.
   function createRemoteSuccessResult(result, modelReason, timings) {
     const hadFallback = modelsTried.length > 1 || geminiModelsSkipped.length > 0;
     return {
@@ -507,7 +495,7 @@ async function createSummaryWithFallback({
           ...result,
           modelReason: `${modelsTried.slice(0, -1).join(" -> ")} failed; fell back to ${FLASH_LITE_FALLBACK_MODEL}`,
           modelsTried, geminiModelsSkipped, mistralModelsTried,
-          geminiMs: geminiMs + result.providerMs, orcaMs, mistralMs, groqMs: 0,
+          geminiMs: geminiMs + result.providerMs, orcaMs, mistralMs,
           fallback: createFallbackMetadata({
             attempted: true, used: true, servedBy: SUMMARY_PROVIDERS.gemini.id,
             model: FLASH_LITE_FALLBACK_MODEL, reason: getProviderFailureReason(lastProviderFailure)
@@ -571,7 +559,7 @@ async function createSummaryWithFallback({
         });
 
         return createRemoteSuccessResult(result, modelReason, {
-          geminiMs: geminiMs + result.providerMs, orcaMs: 0, mistralMs: 0, groqMs: 0
+          geminiMs: geminiMs + result.providerMs, orcaMs: 0, mistralMs: 0
         });
       } catch (error) {
         geminiMs += Date.now() - geminiStartedAt;
@@ -623,7 +611,7 @@ async function createSummaryWithFallback({
       });
 
       return createRemoteSuccessResult(result, modelReason, {
-        geminiMs, orcaMs: result.providerMs, mistralMs: 0, groqMs: 0
+        geminiMs, orcaMs: result.providerMs, mistralMs: 0
       });
     } catch (error) {
       orcaMs = Date.now() - orcaStartedAt;
@@ -649,11 +637,9 @@ async function createSummaryWithFallback({
         profile,
         model,
         initialMessages: fallbackMessages,
-        // With both Google routes ahead of Mistral, restored Orca/Groq share
+        // With both Google routes ahead of Mistral, restored Orca consumes
         // its final 90-second slot rather than extending the 270-second chain.
-        requestBudgetMs: getProviderRequestBudgetMs(model) - (geminiApiKey
-          ? orcaMs + (groqApiKey ? getProviderRequestBudgetMs(GROQ_FALLBACK_MODEL) : 0)
-          : 0)
+        requestBudgetMs: getProviderRequestBudgetMs(model) - (geminiApiKey ? orcaMs : 0)
       });
       const failedModels = modelsTried.slice(0, -1);
       const skippedReason = formatSkippedGeminiModels(geminiModelsSkipped);
@@ -670,13 +656,13 @@ async function createSummaryWithFallback({
       });
 
       return createRemoteSuccessResult(result, modelReason, {
-        geminiMs, orcaMs, mistralMs: mistralMs + result.providerMs, groqMs: 0
+        geminiMs, orcaMs, mistralMs: mistralMs + result.providerMs
       });
     } catch (error) {
       mistralMs += Date.now() - mistralStartedAt;
       lastProviderFailure = error;
       console.error(
-        `[Context Generator] ${model} failed; Mistral chain exhausted, trying Groq fallback:`,
+        `[Context Generator] ${model} failed; Mistral chain exhausted, preserving the full transcript locally:`,
         getProviderFailureLog(error)
       );
     }
@@ -689,54 +675,10 @@ async function createSummaryWithFallback({
     lastProviderFailure = lastProviderFailure || mistralFailure;
   }
 
-  if (!groqApiKey) {
-    return createEmergencyDirectCarryResult({
-      conversation, modelsTried, geminiModelsSkipped, mistralModelsTried,
-      geminiMs, orcaMs, mistralMs, groqMs: 0, lastProviderFailure
-    });
-  }
-
-  const fallback = createFallbackMetadata({
-    attempted: true,
-    reason: getProviderFailureReason(lastProviderFailure),
-    model: GROQ_FALLBACK_MODEL
+  return createEmergencyDirectCarryResult({
+    conversation, modelsTried, geminiModelsSkipped, mistralModelsTried,
+    geminiMs, orcaMs, mistralMs, lastProviderFailure
   });
-
-  modelsTried.push(GROQ_FALLBACK_MODEL);
-  const groqStartedAt = Date.now();
-  try {
-    const result = await createSummaryWithProvider({
-      provider: SUMMARY_PROVIDERS.groq,
-      apiKey: groqApiKey,
-      profile,
-      model: GROQ_FALLBACK_MODEL,
-      initialMessages: fallbackMessages
-    });
-
-    return {
-      ...result,
-      modelReason: `${modelsTried.slice(0, -1).join(" -> ")} failed; fell back to ${GROQ_FALLBACK_MODEL}`,
-      modelsTried,
-      geminiModelsSkipped,
-      mistralModelsTried,
-      geminiMs,
-      orcaMs,
-      mistralMs,
-      groqMs: result.providerMs,
-      fallback: {
-        ...fallback,
-        used: true,
-        servedBy: SUMMARY_PROVIDERS.groq.id
-      }
-    };
-  } catch (error) {
-    console.error("Groq fallback failed:", getProviderFailureLog(error));
-    lastProviderFailure = error;
-    return createEmergencyDirectCarryResult({
-      conversation, modelsTried, geminiModelsSkipped, mistralModelsTried,
-      geminiMs, orcaMs, mistralMs, groqMs: Date.now() - groqStartedAt, lastProviderFailure
-    });
-  }
 }
 
 function createEmergencyDirectCarryResult({
@@ -747,7 +689,6 @@ function createEmergencyDirectCarryResult({
   geminiMs,
   orcaMs,
   mistralMs,
-  groqMs = 0,
   lastProviderFailure
 }) {
   const summary = buildDirectContextCarrySummary(conversation);
@@ -780,7 +721,6 @@ function createEmergencyDirectCarryResult({
     geminiMs,
     orcaMs,
     mistralMs,
-    groqMs,
     fallback: createFallbackMetadata({
       attempted: true,
       used: true,
@@ -888,12 +828,7 @@ function requestProviderSummary(provider, apiKey, messages, profile, model, opti
     method: "POST",
     headers,
     body: JSON.stringify(body)
-  }, options.requestBudgetMs ?? getProviderRequestBudgetMs(model), {
-    // Gemini, OrcaRouter Free, and Mistral all have another provider/model ready.
-    // Advance immediately on 429 so a free-tier prompt cap or long reset window
-    // never stalls the transfer. Groq may honor Retry-After once before local carry.
-    retryRateLimits: provider.id === SUMMARY_PROVIDERS.groq.id
-  });
+  }, options.requestBudgetMs ?? getProviderRequestBudgetMs(model));
 }
 
 function getProviderRequestBody(provider, messages, profile, model) {
@@ -914,7 +849,7 @@ function getProviderRequestBody(provider, messages, profile, model) {
       }],
       generationConfig: {
         // Gemini counts hidden reasoning against the generation allowance. These
-        // Gemini-only totals leave Mistral and Groq on the shared profile caps.
+        // Gemini-only totals leave OrcaRouter and Mistral on the shared profile caps.
         maxOutputTokens: generationBudget.maxOutputTokens,
         thinkingConfig: {
           thinkingLevel: model === FLASH_LITE_FALLBACK_MODEL ? "MINIMAL" : "MEDIUM"
@@ -1078,7 +1013,7 @@ function getOrcaRouterModelSelection(conversation) {
 
   return {
     model: ORCAROUTER_FREE_MODEL,
-    reason: `${ORCAROUTER_FREE_MODEL} is the first configured remote model before Mistral and Groq`,
+    reason: `${ORCAROUTER_FREE_MODEL} is the first configured remote model before Mistral`,
     inputChars,
     thresholdChars: null,
     override: false
@@ -1095,7 +1030,7 @@ function getGeneratedModelSelection(conversation, geminiConfigured, orcaRouterCo
 
   return {
     model: GEMINI_PRIMARY_MODEL,
-    reason: `generated summaries try ${getGeminiModelChain().join(", then ")}, then ${FLASH_LITE_FALLBACK_MODEL}, then ${orcaRouterConfigured ? "OrcaRouter Free, " : ""}${process.env.MISTRAL_ENABLED === "false" ? "" : "Mistral, "}${process.env.GROQ_ENABLED === "true" ? "Groq, " : ""}and finally ${LOCAL_DIRECT_MODEL}`,
+    reason: `generated summaries try ${getGeminiModelChain().join(", then ")}, then ${FLASH_LITE_FALLBACK_MODEL}, then ${orcaRouterConfigured ? "OrcaRouter Free, " : ""}${process.env.MISTRAL_ENABLED === "false" ? "" : "Mistral, "}and finally ${LOCAL_DIRECT_MODEL}`,
     inputChars,
     thresholdChars: null,
     override: false
@@ -1318,10 +1253,9 @@ function getContextCarryTemplate(profile, options = {}) {
 [One clear sentence: exactly what the user needs to do or ask next]`;
 }
 
-async function fetchWithRetry(url, options, requestBudgetMs, retryOptions = {}) {
+async function fetchWithRetry(url, options, requestBudgetMs) {
   let lastError = null;
   let lastResponse = null;
-  let retryAfterMs = 0;
   const deadline = Date.now() + requestBudgetMs;
 
   for (let attempt = 1; attempt <= PROVIDER_MAX_ATTEMPTS; attempt += 1) {
@@ -1351,11 +1285,9 @@ async function fetchWithRetry(url, options, requestBudgetMs, retryOptions = {}) 
           return payload;
         }
       };
-      retryAfterMs = response.status === 429
-        ? getRetryAfterMs(response.headers?.get?.("retry-after")) || 1000
-        : 0;
-      const retryableStatus = isRetryableProviderStatus(response.status)
-        && (response.status !== 429 || retryOptions.retryRateLimits !== false);
+      // Rate limits advance immediately to the next model or full local carry.
+      // Waiting cannot fix a free-tier prompt cap and wastes the transfer budget.
+      const retryableStatus = isRetryableProviderStatus(response.status);
       if (response.ok || !retryableStatus || attempt === PROVIDER_MAX_ATTEMPTS) {
         return lastResponse;
       }
@@ -1368,7 +1300,7 @@ async function fetchWithRetry(url, options, requestBudgetMs, retryOptions = {}) 
     }
 
     const retryDelayMs = Math.min(
-      Math.max(PROVIDER_RETRY_INTERVAL_MS * attempt, retryAfterMs),
+      PROVIDER_RETRY_INTERVAL_MS * attempt,
       Math.max(0, deadline - Date.now())
     );
     if (retryDelayMs <= 0) break;
@@ -1377,14 +1309,6 @@ async function fetchWithRetry(url, options, requestBudgetMs, retryOptions = {}) 
 
   if (lastResponse) return lastResponse;
   throw lastError || createTimeoutError();
-}
-
-function getRetryAfterMs(value) {
-  const seconds = Number(value);
-  if (Number.isFinite(seconds) && seconds >= 0) return Math.ceil(seconds * 1000);
-
-  const retryAt = Date.parse(String(value || ""));
-  return Number.isFinite(retryAt) ? Math.max(0, retryAt - Date.now()) : 0;
 }
 
 function createTimeoutError() {
@@ -1398,7 +1322,7 @@ function getProviderRequestBudgetMs(model) {
 }
 
 function isRetryableProviderStatus(status) {
-  return status === 429 || status === 500 || status === 502 || status === 503 || status === 504;
+  return status === 500 || status === 502 || status === 503 || status === 504;
 }
 
 function delay(timeoutMs) {

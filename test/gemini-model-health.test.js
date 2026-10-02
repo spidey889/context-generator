@@ -1,6 +1,5 @@
 // Exercise retained routes explicitly; production defaults keep them paused.
 process.env.GEMINI_FLASH_FALLBACKS_ENABLED = "true";
-process.env.GROQ_ENABLED = "true";
 const assert = require("node:assert/strict");
 const test = require("node:test");
 
@@ -169,7 +168,6 @@ test("summary routing skips bad-mood Gemini models without calling them", async 
       modelSelection: getGeneratedModelSelection(conversation, true),
       geminiApiKey: "test-key",
       mistralApiKey: undefined,
-      groqApiKey: undefined,
       geminiModelHealth: health
     });
 
@@ -209,7 +207,6 @@ test("a Gemini 429 moves to the next model without hammering the failed model", 
       modelSelection: getGeneratedModelSelection(conversation, true),
       geminiApiKey: "test-key",
       mistralApiKey: undefined,
-      groqApiKey: undefined,
       geminiModelHealth: health
     });
 

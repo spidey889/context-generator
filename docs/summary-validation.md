@@ -17,7 +17,7 @@ Bad structure or formatting NEVER causes rejection. Token-limit finish reasons (
 
 ## Fallback and source-local recovery
 
-Provider HTTP/network/timeout/JSON failures retain the existing bounded retry and fallback behavior. Mistral failure advances to enabled/configured Groq; absent or failed Groq returns the complete captured transcript through backend `local-direct`. Other configured routes precede Mistral.
+Provider HTTP/network/timeout/JSON failures retain the existing bounded retry and fallback behavior. Mistral failure returns the complete captured transcript through backend `local-direct`. Other configured routes precede Mistral.
 
 If backend HTTP/network/parse errors, empty replies, or unavailable worker messaging prevent a summary from reaching the source, `extension/platform-content.js` builds a quoted full-transcript carry from the verified capture already held in page memory. Latest Run identifies `local-direct` with a fixed `summary_service_unavailable` reason; raw errors are not copied into the receipt. The normal paste flow continues, and destination failures offer the existing manual-copy modal.
 
@@ -25,4 +25,4 @@ Recovery applies after successful supported capture. Capture errors, unverified 
 
 ## Verification
 
-`test/summarize.test.js` covers refusal/empty Mistral-to-Groq-to-local fallback, exact retained transcript, short/code/mixed/contextual content, template-only output, and useful token-limited delivery without fallback. `test/platform-content.test.js` covers source-local recovery for backend rejection/empty replies/missing worker and the retained size boundary. Run the focused tests, deterministic suite and isolated Brave extension smoke after related changes. Production deployment and live-provider behavior require separate verification.
+`test/summarize.test.js` covers refusal/empty Mistral-to-local fallback, exact retained transcript, short/code/mixed/contextual content, template-only output, and useful token-limited delivery without fallback. `test/platform-content.test.js` covers source-local recovery for backend rejection/empty replies/missing worker and the retained size boundary. Run the focused tests, deterministic suite and isolated Brave extension smoke after related changes. Production deployment and live-provider behavior require separate verification.

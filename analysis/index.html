@@ -959,8 +959,6 @@
       if (model === "mistral-large-2512" || model === "mistral-large-3-25-12") return "Mistral Large 3";
       if (model === "ministral-14b-2512") return "Ministral 3 14B";
       if (model === "ministral-3b-2512" || model === "ministral-3-3b-25-12") return "Ministral 3 3B";
-      if (model === "groq/compound-mini") return "Groq Compound Mini";
-      if (model === "llama-3.1-8b-instant") return "Llama 3.1 8B Instant";
       if (model === "local-direct") return "Local fallback";
       return model;
     }
@@ -974,7 +972,6 @@
       if (provider === "gemini") return "Google Gemini";
       if (provider === "orcarouter") return "OrcaRouter";
       if (provider === "mistral") return "Mistral";
-      if (provider === "groq") return "Groq";
       if (provider === "local-direct") return "Local";
       return provider || "n/a";
     }

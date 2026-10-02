@@ -8,7 +8,7 @@ Cap Context keeps a small shared daily status for each Gemini model so Vercel do
 - `exhausted`: the model reached 20 successful summaries, or Gemini explicitly reported a daily quota. Skip it for the rest of the Pacific day.
 - `bad_mood`: the model had three consecutive failed summary attempts. Skip it for the rest of the Pacific day.
 - A success before `bad_mood` resets the consecutive-failure count. Once a model is `bad_mood` or `exhausted`, it stays skipped until the new Pacific day.
-- The model order remains 3.8, 3.7, 3.6, 3.5, then the existing Mistral, Groq, and local-direct safety chain.
+- The active order is Gemini 3.6 Flash, Gemini 3.5 Flash-Lite, Ministral 3 14B, then exact local-direct carry. Restored Flash models share the Flash family budget; Flash-Lite remains independent of these daily-health skips. OrcaRouter remains paused by default.
 - Gemini `429` responses are not retried against the same model; Cap Context moves to the next model immediately.
 
 The reset is based on `America/Los_Angeles`, not a fixed UTC or India time. A new date-key automatically makes every model available at midnight Pacific, including daylight-saving changes. Old counter keys expire after eight days for short-term diagnosis.
