@@ -52,12 +52,11 @@ for (const [label, flashLiteWorks] of [
 
 test("paused Mistral is bypassed and Flash-Lite serves after primary failure", async () => {
   const originalFetch = global.fetch;
-  const names = ["MISTRAL_ENABLED", "MISTRAL_API_KEY", "GEMINI_API_KEY", "GEMINI_FLASH_FALLBACKS_ENABLED"];
+  const names = ["MISTRAL_ENABLED", "MISTRAL_API_KEY", "GEMINI_API_KEY"];
   const saved = names.map((name) => process.env[name]);
   process.env.MISTRAL_ENABLED = "false";
   process.env.MISTRAL_API_KEY = "retained-mistral-key";
   process.env.GEMINI_API_KEY = "test-google";
-  delete process.env.GEMINI_FLASH_FALLBACKS_ENABLED;
   const requests = [];
   global.fetch = async (url) => {
     const model = url.split("/models/")[1].split(":")[0];

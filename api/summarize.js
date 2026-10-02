@@ -12,22 +12,15 @@ const PROVIDER_ATTEMPT_TIMEOUT_MS = 90000;
 const SUMMARY_HEARTBEAT_INTERVAL_MS = 15000;
 const SUMMARY_HEARTBEAT_CHUNK = `\n${" ".repeat(2048)}\n`;
 const GEMINI_PRIMARY_MODEL = "gemini-3.6-flash";
-const GEMINI_FALLBACK_MODELS = ["gemini-3.7-flash", "gemini-3.8-flash", "gemini-3.5-flash"];
-// Retain the old Flash routes behind a reversible pause switch.
-function getGeminiModelChain() {
-  return [GEMINI_PRIMARY_MODEL, ...(process.env.GEMINI_FLASH_FALLBACKS_ENABLED === "true" ? GEMINI_FALLBACK_MODELS : [])];
-}
-// Three active routes receive 90 seconds each, leaving 30 seconds under the
-// 300-second server limit for storage, parsing, and returning local carry.
-const GEMINI_CHAIN_BUDGET_MS = 90000;
 const GEMINI_GENERATE_CONTENT_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/models";
 const MISTRAL_CHAT_COMPLETIONS_URL = "https://api.mistral.ai/v1/chat/completions";
 const LOCAL_DIRECT_MODEL = "local-direct";
 const MISTRAL_PRIMARY_MODEL = "ministral-14b-2512";
 const FLASH_LITE_FALLBACK_MODEL = "gemini-3.5-flash-lite";
+// Three active routes receive 90 seconds each, leaving 30 seconds under the
+// 300-second server limit for storage, parsing, and returning local carry.
 const PROVIDER_REQUEST_BUDGETS_MS = {
   [GEMINI_PRIMARY_MODEL]: 90000,
-  ...Object.fromEntries(GEMINI_FALLBACK_MODELS.map((model) => [model, 90000])),
   [MISTRAL_PRIMARY_MODEL]: 90000,
   [FLASH_LITE_FALLBACK_MODEL]: 90000
 };
@@ -404,7 +397,6 @@ module.exports.__test = {
   getSummaryContentRejectionReason,
   getMinimumValidSummaryWords,
   getProviderRequestBudgetMs,
-  GEMINI_CHAIN_BUDGET_MS,
   getGeminiGenerationBudget,
   stripContextCarryFooter,
   countWords,
@@ -487,51 +479,36 @@ async function createSummaryWithFallback({
   }
 
   if (geminiApiKey) {
-    const GEMINI_MODEL_CHAIN = getGeminiModelChain();
-    const geminiDeadline = Date.now() + GEMINI_CHAIN_BUDGET_MS;
-    // Start the configured Flash order fresh for each summary; actual failures
-    // advance the chain within this request's shared deadline.
-    for (const [index, model] of GEMINI_MODEL_CHAIN.entries()) {
-      const remainingGeminiBudgetMs = geminiDeadline - Date.now();
-      if (remainingGeminiBudgetMs <= 0) break;
-      const geminiStartedAt = Date.now();
-      modelsTried.push(model);
+    const model = GEMINI_PRIMARY_MODEL;
+    const geminiStartedAt = Date.now();
+    modelsTried.push(model);
 
-      try {
-        const result = await createSummaryWithProvider({
-          provider: SUMMARY_PROVIDERS.gemini,
-          apiKey: geminiApiKey,
-          profile,
-          model,
-          initialMessages: geminiMessages,
-          // Reserve a share for every remaining Flash model; fast failures leave more time for later ones.
-          requestBudgetMs: Math.min(getProviderRequestBudgetMs(model),
-            Math.floor(remainingGeminiBudgetMs / (GEMINI_MODEL_CHAIN.length - index)))
-        });
-        const failedModels = modelsTried.slice(0, -1);
-        const modelReason = failedModels.length
-          ? `${failedModels.join(" -> ")} failed; fell back to ${model}`
-          : `${model} served as the primary model`;
+    try {
+      const result = await createSummaryWithProvider({
+        provider: SUMMARY_PROVIDERS.gemini,
+        apiKey: geminiApiKey,
+        profile,
+        model,
+        initialMessages: geminiMessages
+      });
+      const modelReason = `${model} served as the primary model`;
 
-        console.info("[Context Generator] Summary served:", {
-          provider: SUMMARY_PROVIDERS.gemini.id,
-          model,
-          reason: modelReason
-        });
+      console.info("[Context Generator] Summary served:", {
+        provider: SUMMARY_PROVIDERS.gemini.id,
+        model,
+        reason: modelReason
+      });
 
-        return createRemoteSuccessResult(result, modelReason, {
-          geminiMs: geminiMs + result.providerMs, mistralMs: 0
-        });
-      } catch (error) {
-        geminiMs += Date.now() - geminiStartedAt;
-        lastProviderFailure = error;
-        const nextModel = GEMINI_MODEL_CHAIN[index + 1]
-          || FLASH_LITE_FALLBACK_MODEL;
-        console.error(
-          `[Context Generator] ${model} failed; falling back to ${nextModel}:`,
-          getProviderFailureLog(error)
-        );
-      }
+      return createRemoteSuccessResult(result, modelReason, {
+        geminiMs: result.providerMs, mistralMs: 0
+      });
+    } catch (error) {
+      geminiMs += Date.now() - geminiStartedAt;
+      lastProviderFailure = error;
+      console.error(
+        `[Context Generator] ${model} failed; falling back to ${FLASH_LITE_FALLBACK_MODEL}:`,
+        getProviderFailureLog(error)
+      );
     }
   }
 
@@ -909,7 +886,7 @@ function getGeneratedModelSelection(conversation, geminiConfigured) {
 
   return {
     model: GEMINI_PRIMARY_MODEL,
-    reason: `generated summaries try ${getGeminiModelChain().join(", then ")}, then ${FLASH_LITE_FALLBACK_MODEL}, then ${process.env.MISTRAL_ENABLED === "false" ? "" : "Mistral, "}and finally ${LOCAL_DIRECT_MODEL}`,
+    reason: `generated summaries try ${GEMINI_PRIMARY_MODEL}, then ${FLASH_LITE_FALLBACK_MODEL}, then ${process.env.MISTRAL_ENABLED === "false" ? "" : "Mistral, "}and finally ${LOCAL_DIRECT_MODEL}`,
     inputChars,
     thresholdChars: null,
     override: false

@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-03-routing-cleanup-v80";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-03-routing-cleanup-v81";
   const ownedUiStyleSheets = new Map();
   // Start fast capture on for each page instance; a manual opt-out lasts until reload.
   let claudeJsonCaptureEnabled = true;
@@ -2132,7 +2132,7 @@
     return models
       .filter((model) => typeof model === "string" && model.trim())
       // Preserve the complete bounded backend chain in Latest Run. The current
-      // maximum is Flash (4) + Flash-Lite + Mistral + local fallback.
+      // maximum is Flash + Flash-Lite + Mistral + local fallback.
       .slice(0, 8)
       .map((model) => model.trim());
   }

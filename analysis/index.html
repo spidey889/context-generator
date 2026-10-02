@@ -933,8 +933,8 @@
 
     function formatModelDisplayName(model) {
       if (!model) return "n/a";
-      const geminiFlash = String(model).match(/^gemini-(\d+(?:\.\d+)?)-flash$/i);
-      if (geminiFlash) return `Gemini ${geminiFlash[1]} Flash`;
+      const geminiFlash = String(model).match(/^gemini-(\d+(?:\.\d+)?)-flash(-lite)?$/i);
+      if (geminiFlash) return `Gemini ${geminiFlash[1]} Flash${geminiFlash[2] ? "-Lite" : ""}`;
       if (model === "mistral-medium-2604" || model === "mistral-medium-3-5") return "Mistral Medium 3.5";
       if (model === "mistral-large-2512" || model === "mistral-large-3-25-12") return "Mistral Large 3";
       if (model === "ministral-14b-2512") return "Ministral 3 14B";

@@ -9,18 +9,18 @@ const ANALYSIS_SOURCE = fs.readFileSync(path.join(__dirname, "..", "analysis", "
 test("analysis receipt shows the served model and does not report it as failed", () => {
   const { getModelFallbackLabel, formatModelDisplayName } = loadModelHelpers();
   const summary = {
-    primaryModel: "gemini-3.8-flash",
-    model: "gemini-3.6-flash",
-    modelsTried: ["gemini-3.8-flash", "gemini-3.7-flash", "gemini-3.6-flash"],
-    fallback: { used: true, model: "gemini-3.6-flash" }
+    primaryModel: "gemini-3.6-flash",
+    model: "ministral-14b-2512",
+    modelsTried: ["gemini-3.6-flash", "gemini-3.5-flash-lite", "ministral-14b-2512"],
+    fallback: { used: true, model: "ministral-14b-2512" }
   };
 
-  assert.equal(formatModelDisplayName("gemini-3.8-flash"), "Gemini 3.8 Flash");
+  assert.equal(formatModelDisplayName("gemini-3.5-flash-lite"), "Gemini 3.5 Flash-Lite");
   assert.equal(
     getModelFallbackLabel(summary),
-    "Tried this run\nGemini 3.8 Flash — failed\nGemini 3.7 Flash — failed\nGemini 3.6 Flash — served"
+    "Tried this run\nGemini 3.6 Flash — failed\nGemini 3.5 Flash-Lite — failed\nMinistral 3 14B — served"
   );
-  assert.doesNotMatch(getModelFallbackLabel(summary), /Gemini 3\.6 Flash failed/);
+  assert.doesNotMatch(getModelFallbackLabel(summary), /Ministral 3 14B — failed/);
 });
 
 test("analysis formats a long provider failure chain as readable lines", () => {
@@ -28,14 +28,14 @@ test("analysis formats a long provider failure chain as readable lines", () => {
   assert.equal(
     getModelFallbackLabel({
       model: "local-direct",
-      modelsTried: ["gemini-3.6-flash", "gemini-3.5-flash", "mistral-medium-2604", "local-direct"],
+      modelsTried: ["gemini-3.6-flash", "gemini-3.5-flash-lite", "ministral-14b-2512", "local-direct"],
       fallback: { used: true, model: "local-direct" }
     }),
     [
       "Tried this run",
       "Gemini 3.6 Flash — failed",
-      "Gemini 3.5 Flash — failed",
-      "Mistral Medium 3.5 — failed",
+      "Gemini 3.5 Flash-Lite — failed",
+      "Ministral 3 14B — failed",
       "Local fallback — served"
     ].join("\n")
   );

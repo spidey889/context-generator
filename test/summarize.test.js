@@ -1,5 +1,3 @@
-// Exercise retained routes explicitly; production defaults keep them paused.
-process.env.GEMINI_FLASH_FALLBACKS_ENABLED = "true";
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
@@ -699,7 +697,7 @@ test("backend sends generated summaries to native Gemini first and records Gemin
   }
 });
 
-test("backend falls from a rate-limited Gemini 3.6 Flash to Gemini 3.7 Flash", async () => {
+test("backend falls from a rate-limited Gemini 3.6 Flash to Gemini 3.5 Flash-Lite", async () => {
   const originalFetch = global.fetch;
   const restoreGeminiKey = setTemporaryEnv("GEMINI_API_KEY", "test-gemini-key");
   const restoreMistralKey = setTemporaryEnv("MISTRAL_API_KEY", "test-mistral-key");
@@ -734,15 +732,15 @@ test("backend falls from a rate-limited Gemini 3.6 Flash to Gemini 3.7 Flash", a
     assert.equal(res.statusCode, 200);
     assert.equal(requests.length, 2);
     assert.match(requests[0].url, /gemini-3\.6-flash:generateContent$/);
-    assert.match(requests[1].url, /gemini-3\.7-flash:generateContent$/);
+    assert.match(requests[1].url, /gemini-3\.5-flash-lite:generateContent$/);
     assert.equal(res.payload.timing.servedBy, "gemini");
     assert.equal(res.payload.timing.primaryModel, "gemini-3.6-flash");
-    assert.equal(res.payload.timing.model, "gemini-3.7-flash");
-    assert.deepEqual(res.payload.timing.modelsTried, ["gemini-3.6-flash", "gemini-3.7-flash"]);
+    assert.equal(res.payload.timing.model, "gemini-3.5-flash-lite");
+    assert.deepEqual(res.payload.timing.modelsTried, ["gemini-3.6-flash", "gemini-3.5-flash-lite"]);
     assert.equal(res.payload.timing.fallback.attempted, true);
     assert.equal(res.payload.timing.fallback.used, true);
     assert.equal(res.payload.timing.fallback.servedBy, "gemini");
-    assert.equal(res.payload.timing.fallback.model, "gemini-3.7-flash");
+    assert.equal(res.payload.timing.fallback.model, "gemini-3.5-flash-lite");
     assert.match(res.payload.timing.fallback.reason, /Gemini API error 429/);
   } finally {
     restoreMistralKey();
@@ -784,26 +782,20 @@ test("backend falls from empty Gemini output through Flash-Lite to the preserved
     await summarize({ method: "POST", body: { conversation } }, res);
 
     assert.equal(res.statusCode, 200);
-    assert.equal(requests.length, 6);
+    assert.equal(requests.length, 3);
     assert.match(requests[0].url, /gemini-3\.6-flash:generateContent$/);
-    assert.match(requests[1].url, /gemini-3\.7-flash:generateContent$/);
-    assert.match(requests[2].url, /gemini-3\.8-flash:generateContent$/);
-    assert.match(requests[3].url, /gemini-3\.5-flash:generateContent$/);
-    assert.match(requests[4].url, /gemini-3\.5-flash-lite:generateContent$/);
-    assert.equal(requests[5].body.model, "ministral-14b-2512");
+    assert.match(requests[1].url, /gemini-3\.5-flash-lite:generateContent$/);
+    assert.equal(requests[2].body.model, "ministral-14b-2512");
     assert.match(requests[0].body.systemInstruction.parts[0].text, /plain-text title/);
     assert.match(requests[1].body.systemInstruction.parts[0].text, /plain-text title/);
-    assert.match(requests[5].body.messages[0].content, /boxed header exactly as shown/);
+    assert.match(requests[2].body.messages[0].content, /boxed header exactly as shown/);
     assert.equal(requests[0].body.generationConfig.maxOutputTokens, 6500);
     assert.equal(requests[1].body.generationConfig.maxOutputTokens, 6500);
-    assert.equal(requests[5].body.max_tokens, 1000);
+    assert.equal(requests[2].body.max_tokens, 1000);
     assert.equal(res.payload.timing.servedBy, "mistral");
     assert.equal(res.payload.timing.primaryModel, "gemini-3.6-flash");
     assert.deepEqual(res.payload.timing.modelsTried, [
       "gemini-3.6-flash",
-      "gemini-3.7-flash",
-      "gemini-3.8-flash",
-      "gemini-3.5-flash",
       "gemini-3.5-flash-lite",
       "ministral-14b-2512"
     ]);
@@ -814,7 +806,7 @@ test("backend falls from empty Gemini output through Flash-Lite to the preserved
     assert.match(res.payload.timing.fallback.reason, /Gemini returned an empty summary/);
     assert.match(
       res.payload.timing.modelReason,
-      /gemini-3\.6-flash -> gemini-3\.7-flash -> gemini-3\.8-flash -> gemini-3\.5-flash -> gemini-3\.5-flash-lite failed; fell back to ministral-14b-2512/
+      /gemini-3\.6-flash -> gemini-3\.5-flash-lite failed; fell back to ministral-14b-2512/
     );
   } finally {
     restoreMistralKey();
