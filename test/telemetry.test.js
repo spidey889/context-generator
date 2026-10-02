@@ -332,7 +332,7 @@ test("closing the source tab records an in-flight transfer as user cancelled", a
 });
 
 test("Supabase payload validation rejects content, unknown stages, and arbitrary failures", async () => {
-  const { selectLatestTelemetryStage, validateTelemetryPayload } = await import(pathToFileURL(VALIDATION_PATH).href);
+  const { validateTelemetryPayload } = await import(pathToFileURL(VALIDATION_PATH).href);
   const valid = makeTelemetryPayload({ extension_version: "1.3.0" });
 
   assert.deepEqual(validateTelemetryPayload(valid), valid);
@@ -352,8 +352,6 @@ test("Supabase payload validation rejects content, unknown stages, and arbitrary
     character_count: 210001,
     failure_reason: "conversation_too_large"
   }).character_count, 210001);
-  assert.equal(selectLatestTelemetryStage("summary_response_started", "capture_completed"), "summary_response_started");
-  assert.equal(selectLatestTelemetryStage("capture_completed", "summary_completed"), "summary_completed");
 });
 
 test("Vercel and Supabase enforce the same metadata-only telemetry schema", async () => {

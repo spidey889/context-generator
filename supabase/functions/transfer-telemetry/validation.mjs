@@ -106,13 +106,6 @@ function normalizeTimestamp(value) {
   return Number.isFinite(timestamp) ? new Date(timestamp).toISOString() : null;
 }
 
-export function selectLatestTelemetryStage(existingStage, incomingStage) {
-  if (!TELEMETRY_STAGES.has(incomingStage)) return null;
-  const existingIndex = TELEMETRY_STAGE_ORDER.indexOf(existingStage);
-  const incomingIndex = TELEMETRY_STAGE_ORDER.indexOf(incomingStage);
-  return existingIndex > incomingIndex ? existingStage : incomingStage;
-}
-
 function isUuid(value) {
   return typeof value === "string"
     && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);

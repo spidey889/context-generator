@@ -56,7 +56,8 @@ async function checkTransfers(db, sql, migrations) {
     users_sequence: await one("select last_value::text,is_called from public.users_user_no_seq"),
     migrations: history,
     functions: (await db.query("select pg_get_functiondef(oid) as definition from pg_proc where pronamespace='public'::regnamespace")).rows.map(row => row.definition),
-    views: (await db.query("select viewname as name,definition from pg_views where schemaname='public'")).rows
+    views: (await db.query("select viewname as name,definition from pg_views where schemaname='public'")).rows,
+    cron_jobs: (await db.query("select to_jsonb(j) as row from cron.job j")).rows.map(value => value.row)
   });
   const oldSnapshot = await snapshot("transfer_events", migrations.slice(0, -1));
 
@@ -88,11 +89,12 @@ async function checkTransfers(db, sql, migrations) {
   equal((await one(`select count(*)::int as n from pg_index i where i.indrelid='public.transfers'::regclass and i.indisunique
     and i.indkey::text=(select attnum::text from pg_attribute where attrelid=i.indrelid and attname='attempt_id')`)).n, 1);
   equal((await one("select count(*)::int as n from pg_trigger where tgrelid='public.transfers'::regclass and not tgisinternal")).n, 3);
-  const { checkSnapshot } = require("./check-telemetry-backup.js");
+  const { checkSnapshot, selectPendingMigrations } = require("./check-telemetry-backup.js");
   const oldRestore = await checkSnapshot(oldSnapshot);
   equal(oldRestore.originalValuesPreserved, true);
   equal(oldRestore.pendingMigrations, 0);
   equal(oldRestore.removedColumns, []);
+  equal(oldRestore.capturedCronJobsRestored, true);
   const upgraded = await checkSnapshot(oldSnapshot, { applyPending: true, throughVersion: "20261002163357" });
   equal(upgraded.retainedValuesPreserved, true);
   equal(upgraded.originalValuesPreserved, false);
@@ -101,6 +103,33 @@ async function checkTransfers(db, sql, migrations) {
   equal(newRestore.originalValuesPreserved, true);
   equal(newRestore.removedColumns, []);
   equal(newRestore.transferEvents, beforeRows.length);
+
+  // Backup recovery must restore the captured job, including non-default
+  // targets/owners, disabled state and extra jobs, without scheduling anything.
+  const currentSnapshot = await snapshot("transfers", migrations);
+  const customJobSnapshot = { ...currentSnapshot, cron_jobs: [
+    { jobid: "37", jobname: "cap-context-reset-daily-user-summaries", schedule: "17 3 * * 2",
+      command: "select 42;", active: false, nodename: "snapshot.invalid", nodeport: 6432,
+      database: "snapshot_database", username: "snapshot_owner" },
+    { jobid: "52", jobname: "snapshot-extra-job", schedule: "19 4 * * 3", command: "select 44;",
+      active: true, nodename: "second.invalid", nodeport: 7432, database: "second_database", username: "second_owner" }
+  ] };
+  const customJobRestore = await checkSnapshot(customJobSnapshot);
+  equal(customJobRestore.capturedCronJobsRestored, true);
+  equal(customJobRestore.capturedCronJobs, 2);
+  assert.match(customJobRestore.capturedCronJobHash, /^[0-9a-f]{64}$/); checks++;
+  equal(customJobRestore.originalColumnHashes, newRestore.originalColumnHashes);
+  const { cron_jobs: ignoredJobs, ...legacyWithoutJobs } = currentSnapshot;
+  equal((await checkSnapshot(legacyWithoutJobs)).capturedCronJobsRestored, false);
+
+  // Exercise drift refusal without creating files in the active migration
+  // folder. Only an explicit boundary above recorded history permits an upgrade.
+  const versions = new Set(migrations.map(migration => String(migration.version)));
+  assert.throws(() => selectPendingMigrations(["20261001000000_accidentally_unarchived.sql"], versions,
+    "20261002163400"), /Unexpected older migration/); checks++;
+  assert.throws(() => selectPendingMigrations([], versions), /explicit migration boundary/); checks++;
+  equal(selectPendingMigrations(["20261002163500_outside_boundary.sql", "20261002163400_requested.sql",
+    "20261002163357_simplify_transfers.sql"], versions, "20261002163400"), ["20261002163400_requested.sql"]);
 
   const outcome = n => one("select to_jsonb(t) as row from public.transfers t where attempt_id=$1", [id(n)]);
   const counts = install => one("select lifetime_summaries::int as lifetime,today_summaries::int as today,today_failed_attempts::int as failed from public.users where install_id=$1", [install]);

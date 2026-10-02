@@ -314,6 +314,52 @@ async function main() {
         });
       } else if (name.endsWith("_simplify_transfers.sql")) {
         checks += await require("./check-transfers-db.js").checkTransfers(db, sql, appliedMigrations);
+      } else if (name.endsWith("_finalize_database_cleanup.sql")) {
+        const preserved = async () => (await db.query(`select
+          (select jsonb_agg(to_jsonb(t) order by attempt_id) from public.transfers t) as transfers,
+          (select jsonb_agg(to_jsonb(u) order by user_no) from public.users u) as users,
+          (select jsonb_agg(to_jsonb(j) order by jobid) from cron.job j) as jobs,
+          (select jsonb_build_object('last',last_value::text,'called',is_called) from public.users_user_no_seq) as sequence,
+          (select jsonb_agg(jsonb_build_object('oid',oid,'acl',relacl,'rls',relrowsecurity) order by oid)
+            from pg_class where oid in ('public.users'::regclass,'public.transfers'::regclass)) as security`)).rows;
+        const before = await preserved();
+        const definition = async () => (await one("select pg_get_functiondef('public.record_user_summary()'::regprocedure) as sql")).sql;
+        const cutoff = (await definition()).match(/new.received_at < '([^']+)'::timestamptz/)[1];
+        await db.exec(sql);
+        equal(await preserved(), before);
+        const counter = await definition();
+        equal(counter.match(/new.received_at < '([^']+)'::timestamptz/)[1], cutoff);
+        // The local engine has one connection: inspect this critical ordering;
+        // actual lock waits across midnight require a multi-session check later.
+        assert.ok(counter.indexOf("'cap-context-users-allocation'") < counter.indexOf("today := (clock_timestamp()")); checks++;
+        equal((await one("select count(*)::int as n from pg_constraint where conrelid='public.transfers'::regclass and conname='transfers_status_check'")).n, 0);
+        const triggers = (await db.query("select pg_get_triggerdef(oid) as definition from pg_trigger where tgrelid='public.transfers'::regclass and tgname like '%record_user_summary' order by tgname")).rows;
+        equal(triggers.length, 2);
+        for (const trigger of triggers) { assert.ok(trigger.definition.includes("no_conversation")); checks++; }
+        await rejectsCode(() => asRole("service_role", () => db.query(`select public.record_transfer_event(
+          'ffffffff-ffff-4fff-8fff-000000000001'::uuid,'final-invalid',now(),'claude','chatgpt',0,
+          'invalid','capture_started',null,'1.4.7')`)), "23514");
+
+        // Exercise countable transitions through the unchanged real RPC;
+        // empty diagnostics must still be kept without allocating any user.
+        const finalInstall = "final-cleanup-install";
+        const finalCounts = async () => one("select lifetime_summaries::int as lifetime,today_summaries::int as today,today_failed_attempts::int as failed,today_date=(clock_timestamp() at time zone 'Asia/Kolkata')::date as current_day from public.users where install_id=$1", [finalInstall]);
+        const finalReport = (number, status, stage, failure, verified = false) => asRole("service_role", () => db.query(`select public.record_transfer_event(
+          $1::uuid,$2::text,'2026-10-02T00:00:00Z'::timestamptz,'claude','chatgpt',1,
+          $3::text,$4::text,$5::text,'1.4.7',$6::boolean,null,
+          case when $6::boolean then clock_timestamp() else null end)`,
+          [`ffffffff-ffff-4fff-8fff-${String(number).padStart(12, "0")}`, finalInstall, status, stage, failure, verified]));
+        await finalReport(2, "failed", "capture_started", "no_conversation");
+        equal(await finalCounts(), undefined);
+        await finalReport(3, "failed", "capture_started", "capture_failed");
+        equal(await finalCounts(), { lifetime: 0, today: 0, failed: 1, current_day: true });
+        await finalReport(3, "failed", "capture_started", "capture_failed");
+        equal(await finalCounts(), { lifetime: 0, today: 0, failed: 1, current_day: true });
+        await finalReport(3, "failed", "capture_started", "capture_failed", true);
+        equal(await finalCounts(), { lifetime: 1, today: 1, failed: 1, current_day: true });
+        await db.query("update public.users set today_date=(clock_timestamp() at time zone 'Asia/Kolkata')::date-1 where install_id=$1", [finalInstall]);
+        await finalReport(4, "failed", "capture_started", "capture_failed");
+        equal(await finalCounts(), { lifetime: 1, today: 0, failed: 1, current_day: true });
       } else await db.exec(sql);
     }
     console.log(`PASS: ${names.length} real migrations replayed; ${checks} database correctness, data preservation, attribution and privilege checks.`);

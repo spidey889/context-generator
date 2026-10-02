@@ -27,6 +27,18 @@ function digest(rows, columns) {
   return crypto.createHash("sha256").update(JSON.stringify(canonicalRows)).digest("hex");
 }
 
+function selectPendingMigrations(names, capturedVersions, throughVersion) {
+  assert.match(throughVersion || "", /^\d{14}$/, "Pending upgrades require an explicit migration boundary");
+  const maximumCaptured = [...capturedVersions].sort().at(-1);
+  assert.match(maximumCaptured || "", /^\d{14}$/, "Captured migration history is required");
+  const available = names.filter(name => /^\d{14}_.+\.sql$/.test(name)).sort();
+  // An archived/backdated file must never be silently inserted into recorded
+  // history. Default recovery does not consult the working tree at all.
+  assert.ok(!available.some(name => name.slice(0, 14) <= maximumCaptured
+    && !capturedVersions.has(name.slice(0, 14))), "Unexpected older migration absent from captured history");
+  return available.filter(name => name.slice(0, 14) > maximumCaptured && name.slice(0, 14) <= throughVersion);
+}
+
 // Restore captured state by default. Applying future migrations is opt-in:
 // the owner-authorized users reset intentionally discards old user counters.
 async function checkSnapshot(snapshot, { applyPending = false, throughVersion } = {}) {
@@ -41,13 +53,19 @@ async function checkSnapshot(snapshot, { applyPending = false, throughVersion } 
     const tables = [transferTable, "users"];
     assert.ok(Array.isArray(snapshot[transferTable]) && Array.isArray(snapshot.users));
     assert.ok(Array.isArray(snapshot.migrations) && snapshot.migrations.length > 0);
+    if (applyPending) assert.match(throughVersion || "", /^\d{14}$/, "Pending upgrades require an explicit migration boundary");
     await db.exec(`
       create role anon; create role authenticated; create role service_role bypassrls;
       alter default privileges in schema public grant all on tables to anon, authenticated, service_role;
       alter default privileges in schema public grant all on sequences to anon, authenticated, service_role;
       alter default privileges in schema public grant execute on functions to anon, authenticated, service_role;
       create schema cron;
-      create table cron.job (jobid bigint generated always as identity, jobname text, schedule text, command text, active boolean default true);
+      create table cron.job (
+        jobid bigint generated always as identity primary key, jobname text,
+        schedule text not null, command text not null, active boolean not null default true,
+        nodename text not null default 'localhost', nodeport integer not null default 5432,
+        database text not null default 'postgres', username text not null default 'postgres'
+      );
       create function cron.alter_job(job_id bigint, schedule text default null, command text default null) returns void language sql as $$
         update cron.job as j set schedule=coalesce($2,j.schedule),command=coalesce($3,j.command) where j.jobid=$1; $$;
       create function cron.unschedule(bigint) returns boolean language plpgsql as $$
@@ -96,6 +114,44 @@ async function checkSnapshot(snapshot, { applyPending = false, throughVersion } 
         const restored = (await db.query("select reloptions from pg_class where oid=$1::regclass", [`public.${view.name}`])).rows[0];
         assert.ok(restored.reloptions.includes("security_invoker=true"));
       }
+    }
+
+    let capturedCronJobHash = null;
+    let capturedCronJobs = null;
+    if (Object.hasOwn(snapshot, "cron_jobs")) {
+      phase = "captured cron job restore";
+      assert.ok(Array.isArray(snapshot.cron_jobs));
+      const catalogColumns = (await db.query(`select column_name, data_type from information_schema.columns
+        where table_schema='cron' and table_name='job' order by column_name`)).rows;
+      const knownColumns = new Set(catalogColumns.map(column => column.column_name));
+      const requiredColumns = ["jobid", "jobname", "schedule", "command", "active"];
+      const cronColumns = catalogColumns.filter(column => snapshot.cron_jobs.some(job => Object.hasOwn(job, column.column_name)));
+      for (const job of snapshot.cron_jobs) {
+        assert.ok(job && typeof job === "object" && !Array.isArray(job));
+        assert.ok(requiredColumns.every(column => Object.hasOwn(job, column)));
+        assert.ok(Object.keys(job).every(column => knownColumns.has(column)), "Unknown captured cron catalog column");
+        assert.deepEqual(Object.keys(job).sort(), cronColumns.map(column => column.column_name), "Captured cron rows must share their catalog schema");
+        assert.match(String(job.jobid), /^\d+$/);
+        assert.ok(BigInt(job.jobid) > 0n);
+        assert.equal(typeof job.active, "boolean");
+      }
+      capturedCronJobHash = digest(snapshot.cron_jobs, cronColumns);
+      // Captured target/owner fields are data in this local shim, never remote
+      // connections. Restore disabled/custom jobs instead of migration defaults.
+      await db.exec("begin; truncate table cron.job restart identity;");
+      try {
+        if (snapshot.cron_jobs.length) {
+          const names = cronColumns.map(column => column.column_name).join(",");
+          await db.query(`insert into cron.job (${names}) overriding system value
+            select ${names} from jsonb_populate_recordset(null::cron.job,$1::jsonb)`, [JSON.stringify(snapshot.cron_jobs)]);
+        }
+        await db.exec("select setval('cron.job_jobid_seq',coalesce((select max(jobid) from cron.job),1),exists(select 1 from cron.job)); commit;");
+      } catch (error) { await db.exec("rollback;"); throw error; }
+      phase = "captured cron job comparison";
+      const restoredJobs = (await db.query("select to_jsonb(j) as row from cron.job j")).rows.map(value => value.row);
+      assert.equal(restoredJobs.length, snapshot.cron_jobs.length, "Captured cron job count changed during restore");
+      assert.equal(digest(restoredJobs, cronColumns), capturedCronJobHash, "Captured cron job settings changed during restore");
+      capturedCronJobs = restoredJobs.length;
     }
 
     phase = "private row restore";
@@ -163,9 +219,7 @@ async function checkSnapshot(snapshot, { applyPending = false, throughVersion } 
 
     phase = "pending migration replay";
     const directory = path.join(__dirname, "..", "supabase", "migrations");
-    const pending = applyPending ? fs.readdirSync(directory).filter(name => /^\d{14}_.+\.sql$/.test(name))
-      .sort().filter(name => !capturedVersions.has(name.slice(0, 14))
-        && (!throughVersion || name.slice(0, 14) <= throughVersion)) : [];
+    const pending = applyPending ? selectPendingMigrations(fs.readdirSync(directory), capturedVersions, throughVersion) : [];
     for (const name of pending) await db.exec(localSql(fs.readFileSync(path.join(directory, name), "utf8")));
     phase = "upgraded row hash comparison";
     const cleanupApplied = pending.some(name => name.slice(0, 14) === "20261002163357");
@@ -185,6 +239,7 @@ async function checkSnapshot(snapshot, { applyPending = false, throughVersion } 
       capturedMigrations: captured.length, pendingMigrations: pending.length,
       originalColumnHashes: hashes, originalValuesPreserved: removedColumns.length === 0,
       removedColumns, retainedValuesPreserved: true,
+      capturedCronJobsRestored: capturedCronJobs !== null, capturedCronJobs, capturedCronJobHash,
       capturedDefinitionsPreserved: Boolean(snapshot.functions && snapshot.views) };
   } catch (error) {
     // Driver errors can include private SQL parameters and row contents. Keep
@@ -205,4 +260,4 @@ if (require.main === module) {
       .catch(error => { console.error(error.message.startsWith("Application backup") ? error.message : "Application backup input could not be read or parsed."); process.exitCode = 1; });
   }
 }
-module.exports = { checkSnapshot };
+module.exports = { checkSnapshot, selectPendingMigrations };
