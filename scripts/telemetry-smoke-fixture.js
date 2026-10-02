@@ -130,7 +130,7 @@ async function createTelemetrySmokeFixture(repoRoot, databaseEnabled) {
       await rpcChain;
       const row = (await database.query(`select status, last_stage, failure_reason, summary_verified,
         completed_at::text, terminal_received_at::text, summary_confirmed_at::text
-        from public.transfer_events where attempt_id=$1`, [context.attempt_id])).rows[0];
+        from public.transfers where attempt_id=$1`, [context.attempt_id])).rows[0];
       assert.ok(row, "The installed worker event must reach the database.");
       assert.equal(row.status, "succeeded");
       assert.equal(row.last_stage, "completed");
@@ -145,7 +145,7 @@ async function createTelemetrySmokeFixture(repoRoot, databaseEnabled) {
       const counts = (await database.query(`select lifetime_summaries::int as total, today_summaries::int as today,
         today_failed_attempts::int as failed from public.users where install_id=$1`, [context.install_id])).rows[0];
       assert.deepEqual(counts, { total: 1, today: 1, failed: 0 });
-      assert.equal((await database.query("select count(*)::int as count from public.transfer_events where summary_verified")).rows[0].count, 1);
+      assert.equal((await database.query("select count(*)::int as count from public.transfers where summary_verified")).rows[0].count, 1);
     },
     async close() {
       for (const [name, value] of previousEnvironment) {

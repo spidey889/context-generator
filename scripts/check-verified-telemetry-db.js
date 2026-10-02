@@ -312,6 +312,8 @@ async function main() {
           if (removedView !== "transfer_event_outcomes") await db.query("select * from public.transfer_event_outcomes limit 0");
           checks++;
         });
+      } else if (name.endsWith("_simplify_transfers.sql")) {
+        checks += await require("./check-transfers-db.js").checkTransfers(db, sql, appliedMigrations);
       } else await db.exec(sql);
     }
     console.log(`PASS: ${names.length} real migrations replayed; ${checks} database correctness, data preservation, attribution and privilege checks.`);

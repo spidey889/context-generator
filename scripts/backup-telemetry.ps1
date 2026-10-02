@@ -37,7 +37,7 @@ if (-not $OutputPath) {
 $query = @'
 select jsonb_build_object(
   'snapshot_at',now(), 'project_ref','iqkzynzxbmemhtiupwwu', 'server_version',version(),
-  'transfer_events',(select coalesce(jsonb_agg(to_jsonb(t) order by attempt_id),'[]') from public.transfer_events t),
+  'transfers',(select coalesce(jsonb_agg(to_jsonb(t) order by attempt_id),'[]') from public.transfers t),
   'users',(select coalesce(jsonb_agg(to_jsonb(u) order by user_no),'[]') from public.users u),
   'users_sequence',(select jsonb_build_object('last_value',last_value::text,'is_called',is_called) from public.users_user_no_seq),
   'migrations',(select jsonb_agg(to_jsonb(m) order by version) from supabase_migrations.schema_migrations m),
@@ -57,7 +57,7 @@ $envelope = [ordered]@{
     format = 'cap-context-telemetry-dpapi-v1'
     project_ref = $snapshot.project_ref
     snapshot_at = $snapshot.snapshot_at
-    event_count = @($snapshot.transfer_events).Count
+    event_count = @($snapshot.transfers).Count
     user_count = @($snapshot.users).Count
     protected = [Convert]::ToBase64String($protected)
 }

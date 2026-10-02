@@ -33,7 +33,13 @@ async function checkSnapshot(snapshot, { applyPending = false, throughVersion } 
   const db = new PGlite();
   let phase = "snapshot validation";
   try {
-    assert.ok(Array.isArray(snapshot.transfer_events) && Array.isArray(snapshot.users));
+    // Restore each snapshot's recorded schema, including backups made before
+    // the table rename. Accept one known key rather than guessing identifiers.
+    const transferKeys = ["transfers", "transfer_events"].filter(key => Object.hasOwn(snapshot, key));
+    assert.equal(transferKeys.length, 1, "Snapshot must contain exactly one transfer table");
+    const transferTable = transferKeys[0];
+    const tables = [transferTable, "users"];
+    assert.ok(Array.isArray(snapshot[transferTable]) && Array.isArray(snapshot.users));
     assert.ok(Array.isArray(snapshot.migrations) && snapshot.migrations.length > 0);
     await db.exec(`
       create role anon; create role authenticated; create role service_role bypassrls;
@@ -95,7 +101,7 @@ async function checkSnapshot(snapshot, { applyPending = false, throughVersion } 
     phase = "private row restore";
     const columns = {};
     const hashes = {};
-    for (const table of ["transfer_events", "users"]) {
+    for (const table of tables) {
       columns[table] = (await db.query(`select column_name, data_type from information_schema.columns
         where table_schema='public' and table_name=$1 order by column_name`, [table])).rows;
       assert.ok(columns[table].length > 0);
@@ -109,7 +115,7 @@ async function checkSnapshot(snapshot, { applyPending = false, throughVersion } 
     }
     await db.exec("begin;");
     try {
-      for (const table of ["transfer_events", "users"]) {
+      for (const table of tables) {
         await db.query(`insert into public.${table} overriding system value
           select * from jsonb_populate_recordset(null::public.${table}, $1::jsonb)`, [JSON.stringify(snapshot[table])]);
       }
@@ -126,14 +132,31 @@ async function checkSnapshot(snapshot, { applyPending = false, throughVersion } 
       await db.exec("rollback;");
       throw error;
     }
-    for (const table of ["transfer_events", "users"]) await db.exec(`alter table public.${table} enable trigger user;`);
+    for (const table of tables) await db.exec(`alter table public.${table} enable trigger user;`);
 
-    const compareOriginalColumns = async () => {
-      for (const table of ["transfer_events", "users"]) {
-        const restored = (await db.query(`select to_jsonb(row_value) as row from public.${table} as row_value`)).rows.map(value => value.row);
+    const compareOriginalColumns = async (cleanupApplied = false) => {
+      const removedColumns = [];
+      for (const table of tables) {
+        const renamed = cleanupApplied && table === "transfer_events";
+        const restoredTable = renamed ? "transfers" : table;
+        const currentColumns = (await db.query(`select column_name, data_type from information_schema.columns
+          where table_schema='public' and table_name=$1 order by column_name`, [restoredTable])).rows;
+        assert.ok(currentColumns.length > 0, "Captured table must still exist after restore/upgrade");
+        const currentByName = new Map(currentColumns.map(column => [column.column_name, column]));
+        const removed = columns[table].filter(column => !currentByName.has(column.column_name));
+        // Only the explicitly authorized cleanup may remove the redundant ID.
+        // Users and every retained transfer field still require exact values.
+        assert.deepEqual(removed.map(column => column.column_name), renamed ? ["id"] : [],
+          "Unexpected original column removal during restore/upgrade");
+        removedColumns.push(...removed.map(column => `${table}.${column.column_name}`));
+        const retained = columns[table].filter(column => currentByName.has(column.column_name));
+        for (const column of retained) assert.equal(currentByName.get(column.column_name).data_type, column.data_type,
+          "Original column type changed during restore/upgrade");
+        const restored = (await db.query(`select to_jsonb(row_value) as row from public.${restoredTable} as row_value`)).rows.map(value => value.row);
         assert.equal(restored.length, snapshot[table].length, "Row count changed during restore/upgrade");
-        assert.equal(digest(restored, columns[table]), hashes[table], "Original row values changed during restore/upgrade");
+        assert.equal(digest(restored, retained), digest(snapshot[table], retained), "Original retained row values changed during restore/upgrade");
       }
+      return removedColumns;
     };
     phase = "restored row hash comparison";
     await compareOriginalColumns();
@@ -145,7 +168,8 @@ async function checkSnapshot(snapshot, { applyPending = false, throughVersion } 
         && (!throughVersion || name.slice(0, 14) <= throughVersion)) : [];
     for (const name of pending) await db.exec(localSql(fs.readFileSync(path.join(directory, name), "utf8")));
     phase = "upgraded row hash comparison";
-    await compareOriginalColumns();
+    const cleanupApplied = pending.some(name => name.slice(0, 14) === "20261002163357");
+    const removedColumns = await compareOriginalColumns(cleanupApplied);
 
     // Verify identity allocation will continue above the restored largest ID.
     phase = "restored identity sequence verification";
@@ -157,9 +181,10 @@ async function checkSnapshot(snapshot, { applyPending = false, throughVersion } 
     assert.ok(BigInt(sequence.last_value) >= BigInt(maximum), "Restored sequence must not reuse an existing user number");
     assert.ok(snapshot.users.length === 0 || sequence.is_called || BigInt(sequence.last_value) > BigInt(maximum),
       "Restored next identity must be above the existing maximum");
-    return { transferEvents: snapshot.transfer_events.length, users: snapshot.users.length,
+    return { transferEvents: snapshot[transferTable].length, users: snapshot.users.length,
       capturedMigrations: captured.length, pendingMigrations: pending.length,
-      originalColumnHashes: hashes, originalValuesPreserved: true,
+      originalColumnHashes: hashes, originalValuesPreserved: removedColumns.length === 0,
+      removedColumns, retainedValuesPreserved: true,
       capturedDefinitionsPreserved: Boolean(snapshot.functions && snapshot.views) };
   } catch (error) {
     // Driver errors can include private SQL parameters and row contents. Keep
