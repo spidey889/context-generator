@@ -124,7 +124,7 @@ test("summary validation rejects forged proofs, verification flags and malformed
 test("server receipts cover remote success and emergency carry, and missing keys keep summaries usable", async t => {
   const { verifySummaryProof } = await proofHelpers();
   const originalFetch = global.fetch;
-  const names = ["TELEMETRY_SIGNING_KEY", "GEMINI_API_KEY", "MISTRAL_API_KEY", "ORCAROUTER_ENABLED"];
+  const names = ["TELEMETRY_SIGNING_KEY", "GEMINI_API_KEY", "MISTRAL_API_KEY"];
   const previous = Object.fromEntries(names.map(name => [name, process.env[name]]));
   t.after(() => {
     global.fetch = originalFetch;
@@ -135,7 +135,6 @@ test("server receipts cover remote success and emergency carry, and missing keys
   process.env.TELEMETRY_SIGNING_KEY = KEY;
   delete process.env.GEMINI_API_KEY;
   process.env.MISTRAL_API_KEY = "test-provider-key";
-  process.env.ORCAROUTER_ENABLED = "false";
   const context = payload({ status: "started", last_stage: "summary_request_started", failure_reason: null });
   const req = { method: "POST", headers: { "content-type": "application/json", "x-cap-context-client": "cap-context-extension/1" }, body: {
     conversation: "User: Windows build passed.\nClaude: Linux checks remain pending.\n".repeat(80), telemetry: context

@@ -58,44 +58,15 @@ for (const [label, flashLiteWorks] of [
   });
 }
 
-test("Orca is paused by default even with its API key configured", async () => {
-  const originalFetch = global.fetch;
-  const names = ["ORCAROUTER_ENABLED", "ORCAROUTER_API_KEY", "GEMINI_API_KEY", "MISTRAL_API_KEY"];
-  const saved = names.map((name) => process.env[name]);
-  delete process.env.ORCAROUTER_ENABLED;
-  delete process.env.GEMINI_API_KEY;
-  process.env.ORCAROUTER_API_KEY = "retained-orca-key";
-  process.env.MISTRAL_API_KEY = "test-mistral";
-  const requests = [];
-  global.fetch = async (url) => {
-    requests.push(url);
-    return { ok: true, json: async () => ({ choices: [{ message: { content: "The build passed." } }] }) };
-  };
-  let payload;
-  const res = { setHeader() {}, status() { return this; }, json(data) { payload = data; } };
-  try {
-    await handler({ method: "POST", body: { conversation: "Build context. ".repeat(150) }, headers: {
-      origin: "chrome-extension://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "content-type": "application/json",
-      "x-cap-context-client": "cap-context-extension/1", "x-forwarded-for": "192.0.2.200"
-    } }, res);
-    assert.deepEqual(requests, ["https://api.mistral.ai/v1/chat/completions"]);
-    assert.equal(payload.timing.model, "ministral-14b-2512");
-  } finally {
-    global.fetch = originalFetch;
-    names.forEach((name, index) => { if (saved[index] === undefined) delete process.env[name]; else process.env[name] = saved[index]; });
-  }
-});
-
-
 test("paused Mistral is bypassed and Flash-Lite serves after primary failure", async () => {
   const originalFetch = global.fetch;
-  const names = ["MISTRAL_ENABLED", "MISTRAL_API_KEY", "GEMINI_API_KEY", "GEMINI_FLASH_FALLBACKS_ENABLED", "ORCAROUTER_ENABLED", "GEMINI_MODEL_HEALTH_ENABLED"];
+  const names = ["MISTRAL_ENABLED", "MISTRAL_API_KEY", "GEMINI_API_KEY", "GEMINI_FLASH_FALLBACKS_ENABLED", "GEMINI_MODEL_HEALTH_ENABLED"];
   const saved = names.map((name) => process.env[name]);
   process.env.MISTRAL_ENABLED = "false";
   process.env.MISTRAL_API_KEY = "retained-mistral-key";
   process.env.GEMINI_API_KEY = "test-google";
   process.env.GEMINI_MODEL_HEALTH_ENABLED = "false";
-  for (const name of ["GEMINI_FLASH_FALLBACKS_ENABLED", "ORCAROUTER_ENABLED"]) delete process.env[name];
+  delete process.env.GEMINI_FLASH_FALLBACKS_ENABLED;
   const requests = [];
   global.fetch = async (url) => {
     const model = url.split("/models/")[1].split(":")[0];

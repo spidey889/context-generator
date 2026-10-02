@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-02-provider-cleanup-v78";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-03-provider-cleanup-v79";
   const ownedUiStyleSheets = new Map();
   // Start fast capture on for each page instance; a manual opt-out lasts until reload.
   let claudeJsonCaptureEnabled = true;
@@ -2058,7 +2058,6 @@
         backendInputChars: summaryTiming?.backendInputChars ?? backendTiming?.inputChars ?? null,
         backendTotalMs: backendTiming?.totalMs ?? null,
         geminiMs: backendTiming?.geminiMs ?? null,
-        orcaMs: backendTiming?.orcaMs ?? null,
         mistralMs: backendTiming?.mistralMs ?? null,
         providerMs: backendTiming?.providerMs ?? null,
         providerPasses: backendTiming?.providerPasses ?? null,
@@ -2134,7 +2133,7 @@
     return models
       .filter((model) => typeof model === "string" && model.trim())
       // Preserve the complete bounded backend chain in Latest Run. The current
-      // maximum is Flash (4) + Flash-Lite + OrcaRouter + Mistral + local fallback.
+      // maximum is Flash (4) + Flash-Lite + Mistral + local fallback.
       .slice(0, 8)
       .map((model) => model.trim());
   }

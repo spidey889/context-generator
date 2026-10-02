@@ -16,9 +16,6 @@ test("analysis receipt shows the served model and does not report it as failed",
   };
 
   assert.equal(formatModelDisplayName("gemini-3.8-flash"), "Gemini 3.8 Flash");
-  assert.equal(formatModelDisplayName("orcarouter/free"), "Orca / Model not recorded");
-  assert.equal(formatModelDisplayName("deepseek/deepseek-v4-flash-free"), "Orca / DeepSeek V4 Flash");
-  assert.equal(formatModelDisplayName("z-ai/glm-5-3-flash-free"), "Orca / GLM 5.3 Flash");
   assert.equal(
     getModelFallbackLabel(summary),
     "Tried this run\nGemini 3.8 Flash — failed\nGemini 3.7 Flash — failed\nGemini 3.6 Flash — served"
@@ -44,7 +41,7 @@ test("analysis formats a long provider failure chain as readable lines", () => {
   assert.equal(
     getModelFallbackLabel({
       model: "local-direct",
-      modelsTried: ["gemini-3.6-flash", "gemini-3.5-flash", "orcarouter/free", "mistral-medium-2604", "local-direct"],
+      modelsTried: ["gemini-3.6-flash", "gemini-3.5-flash", "mistral-medium-2604", "local-direct"],
       geminiModelsSkipped: [
         { model: "gemini-3.8-flash", status: "exhausted" },
         { model: "gemini-3.7-flash", status: "bad_mood" }
@@ -59,7 +56,6 @@ test("analysis formats a long provider failure chain as readable lines", () => {
       "Tried this run",
       "Gemini 3.6 Flash — failed",
       "Gemini 3.5 Flash — failed",
-    "Orca / Model not recorded — failed",
       "Mistral Medium 3.5 — failed",
       "Local fallback — served"
     ].join("\n")

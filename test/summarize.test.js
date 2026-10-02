@@ -327,54 +327,6 @@ test("validator rejects box borders without the Context Carry title", () => {
   );
 });
 
-test("OrcaRouter free-tier 429 falls through immediately without retrying", async () => {
-  const originalFetch = global.fetch;
-  const restoreGeminiKey = setTemporaryEnv("GEMINI_API_KEY", undefined);
-  const restoreOrcaEnabled = setTemporaryEnv("ORCAROUTER_ENABLED", "true");
-  const restoreOrcaKey = setTemporaryEnv("ORCAROUTER_API_KEY", "test-orca-key");
-  const restoreMistralKey = setTemporaryEnv("MISTRAL_API_KEY", "test-mistral-key");
-  const conversation = "OrcaRouter prompt-cap fallback ".repeat(180);
-  const requests = [];
-
-  global.fetch = async (url, options) => {
-    const body = JSON.parse(options.body);
-    requests.push({ url, body });
-    if (url === "https://api.orcarouter.ai/v1/chat/completions") {
-      return {
-        ok: false,
-        status: 429,
-        headers: { get: () => null },
-        json: async () => ({ error: { code: "free_rate_limited" } })
-      };
-    }
-    return {
-      ok: true,
-      status: 200,
-      json: async () => ({
-        choices: [{ message: { content: makeContextCarrySummary("mistral-after-orca", 260) } }]
-      })
-    };
-  };
-
-  const res = createMockResponse();
-  try {
-    await summarize({ method: "POST", body: { conversation } }, res);
-
-    assert.equal(requests.length, 2);
-    assert.equal(requests[0].body.model, "orcarouter/free");
-    assert.equal(requests[1].body.model, "ministral-14b-2512");
-    assert.equal(res.payload.timing.servedBy, "mistral");
-    assert.deepEqual(res.payload.timing.modelsTried, ["orcarouter/free", "ministral-14b-2512"]);
-    assert.match(res.payload.timing.fallback.reason, /OrcaRouter API error 429/);
-  } finally {
-    restoreMistralKey();
-    restoreOrcaKey();
-    restoreOrcaEnabled();
-    restoreGeminiKey();
-    global.fetch = originalFetch;
-  }
-});
-
 for (const [label, failure] of [
   ["rate-limited", async () => ({ ok: false, status: 429, json: async () => ({}) })],
   ["timed-out", async () => { const error = new Error("request timed out"); error.name = "AbortError"; throw error; }]
@@ -382,7 +334,6 @@ for (const [label, failure] of [
   test("backend preserves the exact transcript after a " + label + " Mistral attempt", async () => {
     const originalFetch = global.fetch;
     const restores = [setTemporaryEnv("GEMINI_API_KEY", undefined),
-      setTemporaryEnv("ORCAROUTER_API_KEY", undefined),
       setTemporaryEnv("MISTRAL_API_KEY", "test-mistral-key")];
     const conversation = "User: Preserve this decision exactly.\nAssistant: Continue the build checks.\n".repeat(80);
     const requests = [];
@@ -526,7 +477,6 @@ test("deterministic validation rejects malformed, empty, short, and refusal outp
 test("refusal and substantively empty Mistral output fall through to the complete transcript", async () => {
   const originalFetch = global.fetch;
   const restores = [setTemporaryEnv("GEMINI_API_KEY", undefined),
-    setTemporaryEnv("ORCAROUTER_API_KEY", undefined),
     setTemporaryEnv("MISTRAL_API_KEY", "test-mistral-key")];
   const conversation = "User: Preserve this exact code: const answer = 42;\nAssistant: Keep all decisions.\n".repeat(40);
   const requests = [];
@@ -585,7 +535,6 @@ test("content rejection ignores structure and keeps short, cut-off, code, and mi
 test("useful token-limited output is delivered without calling a fallback", async () => {
   const originalFetch = global.fetch;
   const restores = [setTemporaryEnv("GEMINI_API_KEY", undefined),
-    setTemporaryEnv("ORCAROUTER_API_KEY", undefined),
     setTemporaryEnv("MISTRAL_API_KEY", "test-mistral-key")];
   let requests = 0;
   const partial = "KEY CONTEXT\nThe Windows build passed. Linux tests are blocked; next check";

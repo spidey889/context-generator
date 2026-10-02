@@ -22,16 +22,13 @@ function getGeminiModelChain() {
 // 300-second server limit for storage, parsing, and returning local carry.
 const GEMINI_CHAIN_BUDGET_MS = 90000;
 const GEMINI_GENERATE_CONTENT_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/models";
-const ORCAROUTER_CHAT_COMPLETIONS_URL = "https://api.orcarouter.ai/v1/chat/completions";
 const MISTRAL_CHAT_COMPLETIONS_URL = "https://api.mistral.ai/v1/chat/completions";
 const LOCAL_DIRECT_MODEL = "local-direct";
-const ORCAROUTER_FREE_MODEL = "orcarouter/free";
 const MISTRAL_PRIMARY_MODEL = "ministral-14b-2512";
 const FLASH_LITE_FALLBACK_MODEL = "gemini-3.5-flash-lite";
 const PROVIDER_REQUEST_BUDGETS_MS = {
   [GEMINI_PRIMARY_MODEL]: 90000,
   ...Object.fromEntries(GEMINI_FALLBACK_MODELS.map((model) => [model, 90000])),
-  [ORCAROUTER_FREE_MODEL]: 60000,
   [MISTRAL_PRIMARY_MODEL]: 90000,
   [FLASH_LITE_FALLBACK_MODEL]: 90000
 };
@@ -41,11 +38,6 @@ const SUMMARY_PROVIDERS = {
     id: "gemini",
     label: "Gemini",
     url: GEMINI_GENERATE_CONTENT_BASE_URL
-  },
-  orcarouter: {
-    id: "orcarouter",
-    label: "OrcaRouter",
-    url: ORCAROUTER_CHAT_COMPLETIONS_URL
   },
   mistral: {
     id: "mistral",
@@ -253,7 +245,6 @@ async function handleSummary(conversation, responseChannel) {
       timing: {
         totalMs: Date.now() - startedAt,
         geminiMs: 0,
-        orcaMs: 0,
         mistralMs: 0,
         providerMs: 0,
         providerPasses: 0,
@@ -283,20 +274,15 @@ async function handleSummary(conversation, responseChannel) {
 
   try {
     const geminiApiKey = process.env.GEMINI_API_KEY;
-    // Paused by default; retain the key and route for one-switch restoration.
-    const orcaRouterApiKey = process.env.ORCAROUTER_ENABLED === "true"
-      ? process.env.ORCAROUTER_API_KEY : undefined;
     const modelSelection = getGeneratedModelSelection(
       conversation,
-      Boolean(geminiApiKey),
-      Boolean(orcaRouterApiKey)
+      Boolean(geminiApiKey)
     );
     logModelSelection(modelSelection);
     const providerResult = await createSummaryWithFallback({
       conversation,
       profile: summaryProfile,
       geminiApiKey,
-      orcaRouterApiKey,
       mistralApiKey: process.env.MISTRAL_ENABLED === "false" ? undefined : process.env.MISTRAL_API_KEY
     });
 
@@ -312,7 +298,6 @@ async function handleSummary(conversation, responseChannel) {
       timing: {
         totalMs: Date.now() - startedAt,
         geminiMs: providerResult.geminiMs,
-        orcaMs: providerResult.orcaMs,
         mistralMs: providerResult.mistralMs,
         providerMs: providerResult.providerMs,
         initialMs: providerResult.initialMs,
@@ -430,7 +415,6 @@ module.exports.__test = {
   createSummaryWithFallback,
   readProviderErrorMetadata,
   getGeneratedModelSelection,
-  getOrcaRouterModelSelection,
   getMistralModelSelection,
   getContextCarryTemplate,
   getSummarySystemPrompt
@@ -440,7 +424,6 @@ async function createSummaryWithFallback({
   conversation,
   profile,
   geminiApiKey,
-  orcaRouterApiKey,
   mistralApiKey,
   geminiModelHealth = createGeminiModelHealth()
 }) {
@@ -450,7 +433,6 @@ async function createSummaryWithFallback({
   const geminiModelsSkipped = [];
   const mistralModelsTried = [];
   let geminiMs = 0;
-  let orcaMs = 0;
   let mistralMs = 0;
   let lastProviderFailure = null;
 
@@ -495,7 +477,7 @@ async function createSummaryWithFallback({
           ...result,
           modelReason: `${modelsTried.slice(0, -1).join(" -> ")} failed; fell back to ${FLASH_LITE_FALLBACK_MODEL}`,
           modelsTried, geminiModelsSkipped, mistralModelsTried,
-          geminiMs: geminiMs + result.providerMs, orcaMs, mistralMs,
+          geminiMs: geminiMs + result.providerMs, mistralMs,
           fallback: createFallbackMetadata({
             attempted: true, used: true, servedBy: SUMMARY_PROVIDERS.gemini.id,
             model: FLASH_LITE_FALLBACK_MODEL, reason: getProviderFailureReason(lastProviderFailure)
@@ -559,7 +541,7 @@ async function createSummaryWithFallback({
         });
 
         return createRemoteSuccessResult(result, modelReason, {
-          geminiMs: geminiMs + result.providerMs, orcaMs: 0, mistralMs: 0
+          geminiMs: geminiMs + result.providerMs, mistralMs: 0
         });
       } catch (error) {
         geminiMs += Date.now() - geminiStartedAt;
@@ -581,48 +563,6 @@ async function createSummaryWithFallback({
   const flashLiteResult = await tryFlashLiteBeforeMistral();
   if (flashLiteResult) return flashLiteResult;
 
-  if (orcaRouterApiKey) {
-    const orcaStartedAt = Date.now();
-    modelsTried.push(ORCAROUTER_FREE_MODEL);
-
-    try {
-      const result = await createSummaryWithProvider({
-        provider: SUMMARY_PROVIDERS.orcarouter,
-        apiKey: orcaRouterApiKey,
-        profile,
-        model: ORCAROUTER_FREE_MODEL,
-        initialMessages: fallbackMessages
-      });
-      // The router alias is only the request target. Keep the concrete model
-      // OrcaRouter reports so Latest Run shows what actually produced the text.
-      modelsTried[modelsTried.length - 1] = result.model;
-      const failedModels = modelsTried.slice(0, -1);
-      const skippedReason = formatSkippedGeminiModels(geminiModelsSkipped);
-      const modelReason = skippedReason
-        ? `${skippedReason}; ${failedModels.length ? `${failedModels.join(" -> ")} failed; ` : ""}fell back to ${result.model}`
-        : failedModels.length
-        ? `${failedModels.join(" -> ")} failed; fell back to ${result.model}`
-        : `${result.model} served through OrcaRouter as the first configured remote model`;
-
-      console.info("[Context Generator] Summary served:", {
-        provider: SUMMARY_PROVIDERS.orcarouter.id,
-        model: result.model,
-        reason: modelReason
-      });
-
-      return createRemoteSuccessResult(result, modelReason, {
-        geminiMs, orcaMs: result.providerMs, mistralMs: 0
-      });
-    } catch (error) {
-      orcaMs = Date.now() - orcaStartedAt;
-      lastProviderFailure = error;
-      console.error(
-        `[Context Generator] ${ORCAROUTER_FREE_MODEL} failed; falling back to ${MISTRAL_PRIMARY_MODEL}:`,
-        getProviderFailureLog(error)
-      );
-    }
-  }
-
   if (mistralApiKey) {
     // Mistral has one configured model; retries remain inside its request budget.
     const model = MISTRAL_PRIMARY_MODEL;
@@ -636,10 +576,7 @@ async function createSummaryWithFallback({
         apiKey: mistralApiKey,
         profile,
         model,
-        initialMessages: fallbackMessages,
-        // With both Google routes ahead of Mistral, restored Orca consumes
-        // its final 90-second slot rather than extending the 270-second chain.
-        requestBudgetMs: getProviderRequestBudgetMs(model) - (geminiApiKey ? orcaMs : 0)
+        initialMessages: fallbackMessages
       });
       const failedModels = modelsTried.slice(0, -1);
       const skippedReason = formatSkippedGeminiModels(geminiModelsSkipped);
@@ -656,7 +593,7 @@ async function createSummaryWithFallback({
       });
 
       return createRemoteSuccessResult(result, modelReason, {
-        geminiMs, orcaMs, mistralMs: mistralMs + result.providerMs
+        geminiMs, mistralMs: mistralMs + result.providerMs
       });
     } catch (error) {
       mistralMs += Date.now() - mistralStartedAt;
@@ -677,7 +614,7 @@ async function createSummaryWithFallback({
 
   return createEmergencyDirectCarryResult({
     conversation, modelsTried, geminiModelsSkipped, mistralModelsTried,
-    geminiMs, orcaMs, mistralMs, lastProviderFailure
+    geminiMs, mistralMs, lastProviderFailure
   });
 }
 
@@ -687,7 +624,6 @@ function createEmergencyDirectCarryResult({
   geminiModelsSkipped,
   mistralModelsTried,
   geminiMs,
-  orcaMs,
   mistralMs,
   lastProviderFailure
 }) {
@@ -719,7 +655,6 @@ function createEmergencyDirectCarryResult({
     geminiModelsSkipped,
     mistralModelsTried,
     geminiMs,
-    orcaMs,
     mistralMs,
     fallback: createFallbackMetadata({
       attempted: true,
@@ -758,7 +693,6 @@ async function createSummaryWithProvider({ provider, apiKey, profile, model, ini
   }
 
   const data = await readResponseJson(initialResponse, provider);
-  const resolvedModel = getResolvedProviderModel(provider, initialResponse, model);
   const finishReason = getProviderFinishReason(provider, data);
   const initialUsage = normalizeProviderUsage(provider, data);
   const rawSummary = getProviderSummaryText(provider, data);
@@ -791,7 +725,7 @@ async function createSummaryWithProvider({ provider, apiKey, profile, model, ini
   return {
     summary,
     provider: provider.id,
-    model: resolvedModel,
+    model,
     providerMs: Date.now() - providerStartedAt,
     initialMs,
     providerPasses: 1,
@@ -849,7 +783,7 @@ function getProviderRequestBody(provider, messages, profile, model) {
       }],
       generationConfig: {
         // Gemini counts hidden reasoning against the generation allowance. These
-        // Gemini-only totals leave OrcaRouter and Mistral on the shared profile caps.
+        // Gemini-only totals leave Mistral on the shared profile caps.
         maxOutputTokens: generationBudget.maxOutputTokens,
         thinkingConfig: {
           thinkingLevel: model === FLASH_LITE_FALLBACK_MODEL ? "MINIMAL" : "MEDIUM"
@@ -999,38 +933,15 @@ function getMistralModelSelection(conversation) {
   };
 }
 
-function getResolvedProviderModel(provider, response, requestedModel) {
-  if (provider.id !== SUMMARY_PROVIDERS.orcarouter.id) return requestedModel;
-
-  const resolvedModel = response.headers?.get?.("x-orca-resolved-model");
-  return typeof resolvedModel === "string" && /^[a-z0-9._/-]{1,160}$/i.test(resolvedModel)
-    ? resolvedModel
-    : requestedModel;
-}
-
-function getOrcaRouterModelSelection(conversation) {
-  const inputChars = String(conversation || "").length;
-
-  return {
-    model: ORCAROUTER_FREE_MODEL,
-    reason: `${ORCAROUTER_FREE_MODEL} is the first configured remote model before Mistral`,
-    inputChars,
-    thresholdChars: null,
-    override: false
-  };
-}
-
-function getGeneratedModelSelection(conversation, geminiConfigured, orcaRouterConfigured = false) {
+function getGeneratedModelSelection(conversation, geminiConfigured) {
   const inputChars = String(conversation || "").length;
   if (!geminiConfigured) {
-    return orcaRouterConfigured
-      ? getOrcaRouterModelSelection(conversation)
-      : getMistralModelSelection(conversation);
+    return getMistralModelSelection(conversation);
   }
 
   return {
     model: GEMINI_PRIMARY_MODEL,
-    reason: `generated summaries try ${getGeminiModelChain().join(", then ")}, then ${FLASH_LITE_FALLBACK_MODEL}, then ${orcaRouterConfigured ? "OrcaRouter Free, " : ""}${process.env.MISTRAL_ENABLED === "false" ? "" : "Mistral, "}and finally ${LOCAL_DIRECT_MODEL}`,
+    reason: `generated summaries try ${getGeminiModelChain().join(", then ")}, then ${FLASH_LITE_FALLBACK_MODEL}, then ${process.env.MISTRAL_ENABLED === "false" ? "" : "Mistral, "}and finally ${LOCAL_DIRECT_MODEL}`,
     inputChars,
     thresholdChars: null,
     override: false
