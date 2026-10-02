@@ -2,6 +2,8 @@
 
 Historical changes; `LOGIC.md` describes current source behavior. Repository changes do not establish deployment or Web Store release state.
 
+- 2026-10-03: Made the destination picker's header orb open the Cap Context website in a new tab. Kept the icon layout and included the link in the picker's keyboard focus cycle, with an accessible name and focus outline. Advanced content-script identity to v81. Tests skipped at the owner's request.
+
 - 2026-10-02 (approved local baseline): Aligned the three trail origins with the bolt's sloped left edge and removed their shared clipping edge so they emerge from the icon. Owner approved this version as the baseline for further visual trials. Kept the backward motion; identity v80. No tests or push.
 
 - 2026-10-02 (local preview revision, not pushed): Owner rejected the forward-moving streaks. Moved the effect behind the bolt to its left, with faster 420 ms streaming, thinner tapered trails and a soft glow. Advanced script identity to v79. No tests run for this visual iteration at the owner's request.

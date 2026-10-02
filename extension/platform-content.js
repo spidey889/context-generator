@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-02-speed-trails-preview-v80";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-03-picker-website-link-v81";
   const ownedUiStyleSheets = new Map();
   // Start fast capture on for each page instance; a manual opt-out lasts until reload.
   let claudeJsonCaptureEnabled = true;
@@ -4746,6 +4746,25 @@
       }
       #${DESTINATION_SHEET_BACKDROP_ID} { background: rgba(7,6,10,0.34) !important; }
       #${DESTINATION_SHEET_ID} .context-generator-destination-brand { color: rgba(247,244,250,0.76) !important; }
+      #${DESTINATION_SHEET_ID} .context-generator-destination-home-link {
+        display: block;
+        position: relative !important;
+        inset: auto !important;
+        flex: 0 0 auto;
+        margin: 0;
+        padding: 0;
+        border: 0 !important;
+        border-radius: 9px;
+        background: transparent !important;
+        box-shadow: none !important;
+        line-height: 0;
+        text-decoration: none !important;
+        cursor: pointer;
+      }
+      #${DESTINATION_SHEET_ID} .context-generator-destination-home-link:focus-visible {
+        outline: 2px solid rgba(190,162,233,0.78) !important;
+        outline-offset: 3px;
+      }
       #${DESTINATION_SHEET_ID} .context-generator-destination-brand-icon {
         border-color: rgba(185,158,228,0.2) !important;
         background: linear-gradient(145deg,rgba(189,158,238,0.18),rgba(102,72,155,0.1)) !important;
@@ -5024,6 +5043,13 @@
     const brandLockup = document.createElement("div");
     brandLockup.className = "context-generator-destination-brand";
     brandLockup.style.cssText = "display:flex;align-items:center;gap:8px;color:rgba(247,244,250,0.76) !important;font-size:11.5px;font-weight:650;line-height:1";
+    const brandLink = document.createElement("a");
+    brandLink.className = "context-generator-destination-home-link";
+    brandLink.href = "https://context-generator-five.vercel.app/";
+    brandLink.target = "_blank";
+    brandLink.rel = "noopener noreferrer";
+    brandLink.setAttribute("aria-label", "Open Cap Context website (opens in a new tab)");
+    brandLink.title = "Visit Cap Context";
     const brandIcon = document.createElement("img");
     brandIcon.className = "context-generator-destination-brand-icon";
     brandIcon.src = BUBBLE_ICON_URL;
@@ -5033,7 +5059,8 @@
     brandIcon.style.cssText = "display:block;width:26px;height:26px;box-sizing:border-box;padding:3px;border:1px solid rgba(185,158,228,0.2) !important;border-radius:9px;background:linear-gradient(145deg,rgba(189,158,238,0.18),rgba(102,72,155,0.1)) !important;box-shadow:inset 0 1px 0 rgba(255,255,255,0.08),0 7px 18px rgba(74,48,121,0.2) !important;object-fit:contain";
     const brandName = document.createElement("span");
     brandName.textContent = "Cap Context";
-    brandLockup.appendChild(brandIcon);
+    brandLink.appendChild(brandIcon);
+    brandLockup.appendChild(brandLink);
     brandLockup.appendChild(brandName);
     const title = document.createElement("div");
     title.id = "context-generator-destination-title";
@@ -5252,7 +5279,7 @@
       }
       if (event.key !== "Tab") return;
 
-      const focusableTiles = [...sheet.querySelectorAll(".context-generator-destination-tile, .context-generator-speed-toggle")]
+      const focusableTiles = [...sheet.querySelectorAll(".context-generator-destination-tile, .context-generator-speed-toggle, .context-generator-destination-home-link")]
         .filter((tile) => !tile.disabled && tile.getAttribute("aria-disabled") !== "true");
       if (focusableTiles.length === 0) return;
       const focusedIndex = focusableTiles.indexOf(document.activeElement);

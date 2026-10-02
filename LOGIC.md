@@ -72,7 +72,7 @@ Important sequencing:
 
 - Empty unsaved chats fail before handoff, capture or destination preparation. Unsaved chats with rendered turns use DOM capture; saved JSON chats may capture before DOM turns mount. Errors stay bottom-right and pending reveals/dismissals are cancelled when picker/handoff state changes.
 - Picker/handoff styles use extension-owned constructed stylesheets so page CSP cannot strip their layout. Dark Reader protection uses ignored, scoped styles and priority colors; progress colors remain state-driven. Teardown removes only extension-owned sheets and reservations.
-- The picker transitions into handoff from its measured position. Ordinary Tab navigation skips the orb. Outside-click/lifecycle dismissal preserves native focus; explicit keyboard/backdrop dismissal can restore trigger focus. Reduced motion keeps state changes without movement.
+- The picker transitions into handoff from its measured position. Ordinary Tab navigation skips the composer orb. Inside the picker, the header orb is a keyboard-accessible link to `https://context-generator-five.vercel.app/`, opening a new tab with `noopener noreferrer`; clicking it does not start a transfer. Outside-click/lifecycle dismissal preserves native focus; explicit keyboard/backdrop dismissal can restore trigger focus. Reduced motion keeps state changes without movement.
 - `isRunning` is page-local with a six-minute transfer deadline. Expiry marks the attempt cancelled, records `client_interrupted`, shows a timeout, and releases the lock. Capture continuation, summary requests, destination activation, paste retries and delayed paste recovery check the same deadline; late results cannot continue the expired transfer.
 - Picker-path telemetry starts before empty-chat validation so early exits are recorded safely.
 - Destination warmup and network preconnects never contain conversation text.
@@ -309,7 +309,7 @@ Native menus and popovers may temporarily mark the background application `aria-
 - Model/profile routing: provider constants/budgets, prompts, Latest Run labels, evaluation expectations, this file, `docs/provider-fallbacks.md`.
 - Telemetry fields/stages/failures: source/background sanitizers, Vercel validator, Supabase validator, SQL constraints/functions, tests. Free-form telemetry fields are forbidden.
 - Latest Run receipt: producer, background expiry, bridge, analysis renderer, analysis tests.
-- Content-script changes must advance `CONTENT_SCRIPT_LOAD_ID` for open-tab replacement and retain stale-node/reservation cleanup. Local preview value: `platform-content-2026-10-02-speed-trails-preview-v80`.
+- Content-script changes must advance `CONTENT_SCRIPT_LOAD_ID` for open-tab replacement and retain stale-node/reservation cleanup. Current value: `platform-content-2026-10-03-picker-website-link-v81`.
 - Extension release: bump `extension/manifest.json`, rebuild the ZIP with `manifest.json` at its root, hash-compare every file against `extension/`, then test the unpacked folder in a new Brave window.
 
 ## Known Current Risks
