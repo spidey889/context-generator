@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-01-transfer-deadline-v77";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-02-speed-trails-preview-v80";
   const ownedUiStyleSheets = new Map();
   // Start fast capture on for each page instance; a manual opt-out lasts until reload.
   let claudeJsonCaptureEnabled = true;
@@ -4762,7 +4762,7 @@
         flex: 0 0 auto;
         width: 32px;
         height: 32px;
-        margin: 0;
+        margin: 0 0 0 34px;
         padding: 0;
         border: 1px solid transparent !important;
         border-radius: 10px;
@@ -4786,10 +4786,60 @@
       }
       #${DESTINATION_SHEET_ID} .context-generator-speed-toggle svg {
         display: block;
+        position: relative;
+        z-index: 1;
         width: 16px;
         height: 16px;
         fill: none !important;
         stroke: currentColor !important;
+      }
+      /* Reserve room behind the bolt so trails stay inside the picker header.
+         aria-pressed owns the effect; disabling speed removes its animations. */
+      #${DESTINATION_SHEET_ID} .context-generator-speed-lines {
+        display: none;
+        position: absolute;
+        right: 14px;
+        top: 8px;
+        width: 42px;
+        height: 16px;
+        overflow: visible;
+        pointer-events: none;
+        mask-image: linear-gradient(90deg,transparent,#000 28%);
+      }
+      #${DESTINATION_SHEET_ID} .context-generator-speed-toggle[aria-pressed="true"] .context-generator-speed-lines {
+        display: block;
+      }
+      #${DESTINATION_SHEET_ID} .context-generator-speed-lines i {
+        position: absolute;
+        right: 1px;
+        top: 2px;
+        width: 18px;
+        height: 1.5px;
+        border-radius: 999px;
+        background: linear-gradient(90deg,transparent,rgba(250,204,21,0.6) 45%,#fde68a) !important;
+        box-shadow: 0 0 4px rgba(250,204,21,0.18) !important;
+        transform-origin: right center;
+        opacity: 0;
+        animation: contextGeneratorSpeedStreak 420ms linear infinite;
+      }
+      #${DESTINATION_SHEET_ID} .context-generator-speed-lines i:nth-child(2) {
+        /* Each origin follows the bolt's sloped left edge, rather than one plane. */
+        right: 5px;
+        top: 7px;
+        width: 27px;
+        animation-delay: -140ms;
+      }
+      #${DESTINATION_SHEET_ID} .context-generator-speed-lines i:nth-child(3) {
+        right: 2px;
+        top: 12px;
+        width: 15px;
+        animation-delay: -280ms;
+      }
+      @keyframes contextGeneratorSpeedStreak {
+        0% { opacity: 0; transform: translateX(0) scaleX(0.45); }
+        8% { opacity: 0.85; }
+        48% { opacity: 0.7; }
+        100% { opacity: 0; transform: translateX(-34px) scaleX(1.15); }
       }
       #${DESTINATION_SHEET_ID} .context-generator-destination-tile {
         border-color: rgba(255,255,255,0.1) !important;
@@ -4899,6 +4949,10 @@
       }
 
       @media (prefers-reduced-motion: reduce) {
+        #${DESTINATION_SHEET_ID} .context-generator-speed-lines i {
+          animation: none;
+          opacity: 0.65;
+        }
         .context-generator-tile-aura {
           animation: none;
         }
@@ -5144,7 +5198,7 @@
       toggle.setAttribute("aria-pressed", String(enabled));
       toggle.setAttribute("aria-label", "Fast capture");
       toggle.title = `Fast capture: ${enabled ? "On" : "Off"}`;
-      toggle.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="m13 2-9 12h7l-1 8 10-12h-7l1-8Z"/></svg>';
+      toggle.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="m13 2-9 12h7l-1 8 10-12h-7l1-8Z"/></svg><span class="context-generator-speed-lines" aria-hidden="true"><i></i><i></i><i></i></span>';
       addOwnedEventListener(toggle, "click", () => {
         if (isRunning) return;
         let enabled;

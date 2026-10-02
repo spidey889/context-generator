@@ -2,6 +2,12 @@
 
 Historical changes; `LOGIC.md` describes current source behavior. Repository changes do not establish deployment or Web Store release state.
 
+- 2026-10-02 (approved local baseline): Aligned the three trail origins with the bolt's sloped left edge and removed their shared clipping edge so they emerge from the icon. Owner approved this version as the baseline for further visual trials. Kept the backward motion; identity v80. No tests or push.
+
+- 2026-10-02 (local preview revision, not pushed): Owner rejected the forward-moving streaks. Moved the effect behind the bolt to its left, with faster 420 ms streaming, thinner tapered trails and a soft glow. Advanced script identity to v79. No tests run for this visual iteration at the owner's request.
+
+- 2026-10-02 (local master worktree preview, not pushed): Added three quick gold motion streaks after the picker's Speed lightning control to convey its enabled state. The CSS-only effect follows the existing toggle, hides when disabled and becomes static for reduced motion. Reserved header space prevents clipping. Advanced the content-script identity to v78 for preview reinjection. All 67 focused checks and isolated Brave Grok smoke passed, including actual movement, toggle-off cleanup, reduced motion, 390/320px fit and exact transfer with Send untouched. The ChatGPT smoke stopped at its separate Claude placement-alignment check before visual verification.
+
 - 2026-10-01: Trimmed repeated/source-text tests to 255 normal checks and one scroll regression. Simulated time preserves capture/paste delays without wall-clock waits; the scroll check verifies all 16 turns in order after five unchanged windows. Normal/slow runners have 30/60-second hang limits.
 
 - 2026-10-01: Added HMAC-signed server summary confirmations and a pending migration so usage counters increment once per verified summary, independently of client paste claims. Preserved diagnostic delivery without a receipt and historical counter values. Decoupled telemetry persistence from network delivery. Coordinated signing keys, edge/migration rollout and an extension release remain required; source work did not deploy them.
