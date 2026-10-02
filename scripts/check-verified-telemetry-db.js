@@ -279,9 +279,11 @@ async function main() {
       } else if (name.endsWith("_exclude_empty_chat_user_failures.sql")) {
         checks += await require("./check-empty-chat-users-db.js").checkEmptyChatUsers(db, sql);
       } else if (name.endsWith("_remove_unused_user_summary_usage.sql")
-        || name.endsWith("_remove_unused_verified_summary_daily_usage.sql")) {
+        || name.endsWith("_remove_unused_verified_summary_daily_usage.sql")
+        || name.endsWith("_remove_unused_transfer_event_outcomes.sql")) {
         const removedView = name.endsWith("_remove_unused_user_summary_usage.sql")
-          ? "user_summary_usage" : "verified_summary_daily_usage";
+          ? "user_summary_usage" : name.endsWith("_remove_unused_verified_summary_daily_usage.sql")
+            ? "verified_summary_daily_usage" : "transfer_event_outcomes";
         // Earlier checks intentionally exercise the view at historical migration
         // boundaries; the current schema removes it without changing persistence.
         const beforeRemoval = (await db.query(`select
@@ -307,7 +309,8 @@ async function main() {
           await db.query("select * from public.users limit 0");
           await db.query("select * from public.transfer_events limit 0");
           if (removedView === "user_summary_usage") await db.query("select * from public.verified_summary_daily_usage limit 0");
-          await db.query("select * from public.transfer_event_outcomes limit 0"); checks++;
+          if (removedView !== "transfer_event_outcomes") await db.query("select * from public.transfer_event_outcomes limit 0");
+          checks++;
         });
       } else await db.exec(sql);
     }
