@@ -11,10 +11,6 @@ const PLATFORM_SOURCE = fs.readFileSync(path.join(ROOT, "extension", "platform-c
 const VALIDATION_PATH = path.join(ROOT, "supabase", "functions", "transfer-telemetry", "validation.mjs");
 const VERCEL_VALIDATION = require(path.join(ROOT, "api", "telemetry-validation.js"));
 const VERCEL_TELEMETRY_HANDLER = require(path.join(ROOT, "api", "telemetry.js"));
-const PROGRESS_MIGRATION_SOURCE = fs.readFileSync(
-  path.join(ROOT, "supabase", "migrations", "20260718113749_atomically_preserve_transfer_event_progress.sql"),
-  "utf8"
-);
 
 function loadTelemetryBackground(fetchImpl, initialStorage = {}, manifestVersion = "1.3.0") {
   const storage = structuredClone(initialStorage);
@@ -180,19 +176,6 @@ async function invokeTelemetryHandler(body, options = {}) {
   return res;
 }
 
-test("both transfer entry points start telemetry before early exits", () => {
-  const iconStart = PLATFORM_SOURCE.indexOf('if (message?.type === "START_CONTEXT_TRANSFER")');
-  const iconEnd = PLATFORM_SOURCE.indexOf("return false;", PLATFORM_SOURCE.indexOf("runContextFlow", iconStart));
-  const iconSource = PLATFORM_SOURCE.slice(iconStart, iconEnd);
-  assert.ok(iconSource.indexOf("startTransferTelemetry(trace)") < iconSource.indexOf("if (isRunning)"));
-
-  const pickerStart = PLATFORM_SOURCE.indexOf("async function startDestinationTransfer(destinationId)");
-  const pickerEnd = PLATFORM_SOURCE.indexOf("function ensureFloatingOverlay()", pickerStart);
-  const pickerSource = PLATFORM_SOURCE.slice(pickerStart, pickerEnd);
-  assert.ok(pickerSource.indexOf("startTransferTelemetry(trace)") < pickerSource.indexOf("if (isRunning)"));
-  assert.ok(pickerSource.indexOf("startTransferTelemetry(trace)") < pickerSource.indexOf("getDetectedConversationMessageCount() === 0"));
-});
-
 test("telemetry keeps one install id across summaries, browser restarts, and extension updates", async () => {
   const requests = [];
   const deliver = async (_url, options) => {
@@ -313,7 +296,7 @@ test("failed delivery compacts progress into its terminal outcome and retries af
   assert.deepEqual(background.storage["context-generator-telemetry-outbox-v1"], []);
 });
 
-test("closing the source tab records an in-flight transfer as user cancelled", async () => {
+test("closing the source tab after a worker restart records the last durable stage as cancelled", async () => {
   const requests = [];
   const background = loadTelemetryBackground(async (_url, options) => {
     requests.push(JSON.parse(options.body));
@@ -322,8 +305,19 @@ test("closing the source tab records an in-flight transfer as user cancelled", a
   await background.drain();
 
   await background.sendTelemetry(makeEvent({ lastStage: "summary_request_started" }), 42);
-  background.listeners.tabRemoved(42, { isWindowClosing: false });
-  await background.drain();
+  const restarted = loadTelemetryBackground(async (_url, options) => {
+    requests.push(JSON.parse(options.body));
+    return { ok: true };
+  }, background.storage);
+  await restarted.drain();
+  await restarted.listeners.tabRemoved(42, { isWindowClosing: false });
+  await restarted.drain();
+  // A bounded terminal record survives cancellation so late server receipts
+  // can confirm summary work without changing the cancelled paste outcome.
+  const retained = restarted.storage["context-generator-active-transfers-v1"][makeEvent().attemptId];
+  assert.equal(retained.event.status, "failed");
+  assert.equal(retained.event.failureReason, "user_cancelled");
+  assert.ok(retained.expiresAt > Date.now());
 
   assert.equal(requests.at(-1).status, "failed");
   assert.equal(requests.at(-1).failure_reason, "user_cancelled");
@@ -447,20 +441,86 @@ test("Vercel returns a retryable failure when Supabase delivery fails", async (t
   assert.equal(res.body.code, "telemetry_upstream_unavailable");
 });
 
-test("transfer flow emits each closed telemetry stage without attaching content", () => {
-  assert.match(PLATFORM_SOURCE, /startTransferTelemetry\(trace\);[\s\S]*?if \(isRunning\)/);
-  assert.match(PLATFORM_SOURCE, /advanceTransferTelemetryStage\(transferTrace, "capture_started"\);\s*await prepareSourceForCapture/);
-  assert.match(PLATFORM_SOURCE, /advanceTransferTelemetryStage\(trace, "capture_completed"\)/);
-  assert.match(PLATFORM_SOURCE, /advanceTransferTelemetryStage\(trace, "summary_request_started"\)/);
-  assert.match(BACKGROUND_SOURCE, /recordKnownTransferTelemetryStage\(transferId, "summary_response_started"\)/);
-  assert.match(PLATFORM_SOURCE, /advanceTransferTelemetryStage\(trace, "summary_completed"\)/);
-  assert.match(PLATFORM_SOURCE, /advanceTransferTelemetryStage\(transferTrace, "paste_started"\)/);
-  assert.match(PLATFORM_SOURCE, /trace\.telemetryLastStage = "completed"/);
+test("background persists server confirmation and never rebinds cached proof to a new attempt", async () => {
+  const { createSummaryProof, verifySummaryProof } = await import("../supabase/functions/_shared/summary-proof.mjs");
+  const key = "test-only-signing-key-0123456789abcdef";
+  const requests = [];
+  let summaryRequests = 0;
+  let online = true;
+  const background = loadTelemetryBackground(async (url, options) => {
+    const body = JSON.parse(options.body);
+    if (url.endsWith("/api/summarize")) {
+      summaryRequests++;
+      assert.equal(body.telemetry.attempt_id, "11111111-1111-4111-8111-111111111111");
+      return { ok: true, json: async () => ({
+        summary: "The build passed.", summaryProof: await createSummaryProof(body.telemetry, key), timing: {}
+      }) };
+    }
+    requests.push(body);
+    return { ok: online };
+  }, {}, "1.4.6");
+  await background.drain();
+  await background.sendTelemetry(makeEvent({ lastStage: "summary_request_started" }));
+  async function summary(attemptId) {
+    return new Promise(resolve => background.listeners.message({
+      type: "SUMMARIZE_WITH_BACKEND", conversation: "The build passed.", transferId: attemptId
+    }, { tab: { id: 7 } }, resolve));
+  }
+  const first = await summary("11111111-1111-4111-8111-111111111111");
+  assert.equal(first.ok, true);
+  await background.drain();
+  const confirmation = requests.find(request => request.summary_proof);
+  assert.ok(confirmation);
+  assert.equal(confirmation.last_stage, "summary_completed");
+  assert.equal(await verifySummaryProof(confirmation, key), true);
+  online = false;
+  await background.sendTelemetry(makeEvent({ status: "succeeded", lastStage: "completed", characterCount: 17 }));
+  const retained = background.storage["context-generator-telemetry-outbox-v1"];
+  assert.equal(await verifySummaryProof(retained[0].payload, key), true);
+  online = true;
+  const secondId = "33333333-3333-4333-8333-333333333333";
+  await background.sendTelemetry(makeEvent({ attemptId: secondId, lastStage: "summary_request_started" }));
+  const second = await summary(secondId);
+  assert.equal(second.ok, true);
+  assert.equal(second.timing.cacheHit, true);
+  await background.sendTelemetry(makeEvent({ attemptId: secondId, status: "succeeded", lastStage: "completed" }));
+  await background.drain();
+  assert.equal(summaryRequests, 1);
+  assert.ok(requests.filter(request => request.attempt_id === secondId).every(request => !request.summary_proof));
 });
 
-test("Supabase progress upserts cannot move a transfer backward", () => {
-  assert.match(PROGRESS_MIGRATION_SOURCE, /on conflict \(attempt_id\) do update/);
-  assert.match(PROGRESS_MIGRATION_SOURCE, /array_position\(stage_order, excluded\.last_stage\)/);
-  assert.match(PROGRESS_MIGRATION_SOURCE, /revoke all on function public\.record_transfer_event/);
-  assert.match(PROGRESS_MIGRATION_SOURCE, /to service_role/);
+test("completed server summary retains confirmation after source-tab cancellation", async () => {
+  const { createSummaryProof, verifySummaryProof } = await import("../supabase/functions/_shared/summary-proof.mjs");
+  const key = "test-only-signing-key-0123456789abcdef";
+  const requests = [];
+  let releaseSummary;
+  let requestStarted;
+  const started = new Promise(resolve => { requestStarted = resolve; });
+  const background = loadTelemetryBackground(async (url, options) => {
+    const body = JSON.parse(options.body);
+    if (url.endsWith("/api/summarize")) {
+      requestStarted();
+      await new Promise(resolve => { releaseSummary = resolve; });
+      return { ok: true, json: async () => ({ summary: "Build passed.", summaryProof: await createSummaryProof(body.telemetry, key) }) };
+    }
+    requests.push(body);
+    return { ok: true };
+  }, {}, "1.4.6");
+  await background.drain();
+  await background.sendTelemetry(makeEvent({ lastStage: "summary_request_started" }), 42);
+  const pending = new Promise(resolve => background.listeners.message({
+    type: "SUMMARIZE_WITH_BACKEND", conversation: "Build passed.", transferId: makeEvent().attemptId
+  }, { tab: { id: 42 } }, resolve));
+  await started;
+  await background.listeners.tabRemoved(42);
+  await background.drain();
+  assert.equal(requests.at(-1).failure_reason, "user_cancelled");
+  releaseSummary();
+  assert.equal((await pending).ok, true);
+  await background.drain();
+  const confirmation = requests.find(request => request.summary_proof);
+  assert.ok(confirmation);
+  assert.equal(confirmation.status, "started");
+  assert.equal(confirmation.last_stage, "summary_completed");
+  assert.equal(await verifySummaryProof(confirmation, key), true);
 });

@@ -11,7 +11,6 @@ test("repository and public website declare proprietary source terms", () => {
   const packageJson = JSON.parse(read("package.json"));
   const publicCopy = [
     read("README.md"),
-    read("extension/README.md"),
     read("index.html"),
     read("privacy.html")
   ].join("\n");

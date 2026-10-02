@@ -19,7 +19,7 @@ function harness(platform, { mode = "failure", enabled = true, domFails = false 
   const context = vm.createContext({
     window: { location }, currentPlatform: { id: platform, name: platform },
     claudeJsonCaptureEnabled: enabled, chatGptJsonCaptureEnabled: enabled, networkJsonCaptureEnabled: enabled,
-    isRunning: false, runningResetTimer: null, RUNNING_AUTO_RESET_MS: 360000, DESTINATION_SHEET_EXIT_MS: 0,
+    activeTransferTrace: null, isRunning: false, runningResetTimer: null, RUNNING_AUTO_RESET_MS: 360000, DESTINATION_SHEET_EXIT_MS: 0,
     NO_CONVERSATION_ERROR_MESSAGE: "No conversation", setTimeout: () => 1,
     createTransferTrace: () => ({ id: "same-attempt" }), startTransferTelemetry() {},
     markTransferTrace: (_trace, message) => calls.traces.push(message), finishTransferTrace() {},
@@ -52,7 +52,8 @@ function harness(platform, { mode = "failure", enabled = true, domFails = false 
     context.window.__capCaptureChatGptJson = capture;
     context.window.__capCaptureNetworkJson = capture;
   }
-  vm.runInContext(`${picker}; globalThis.start = startDestinationTransfer;`, context);
+  const deadlines = source.slice(source.indexOf("  function checkTransferDeadline("), source.indexOf("  function createTransferTrace("));
+  vm.runInContext(`${deadlines}${picker}; globalThis.start = startDestinationTransfer;`, context);
   return { context, calls, prepared };
 }
 

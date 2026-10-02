@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-02-claude-inline-only-v93";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-03-combined-deadline-picker-v94";
   const INLINE_PILL_SIZE = 36;
   const ownedUiStyleSheets = new Map();
   const CLAUDE_INLINE_STYLE_ID = "context-generator-claude-inline-styles";
@@ -477,6 +477,7 @@
   }
 
   let isRunning = false;
+  let activeTransferTrace = null;
   let runningResetTimer = null;
   let reservedActionCluster = null;
   let reservedComposerSurface = null;
@@ -620,6 +621,7 @@
   function teardownContextGeneratorInstance() {
     if (!instanceActive) return;
     instanceActive = false;
+    if (activeTransferTrace) activeTransferTrace.expired = true;
     cancelPendingPasteRecheck();
     extensionRuntime.onMessage.removeListener?.(handleRuntimeMessage);
     disableFloatingButtonMonitoring();
@@ -714,7 +716,7 @@
 
     if (message?.type === "PASTE_CONTEXT") {
       const pasteStartedAt = getNow();
-      pasteIntoPlatform(message.text, message.destination, message.transferId)
+      pasteIntoPlatform(message.text, message.destination, message.transferId, message.deadlineAt)
         .then(() => {
           const pasteMs = Math.round(getNow() - pasteStartedAt);
           sendResponse({ ok: true, timing: { pasteMs } });
@@ -737,7 +739,7 @@
 
       isRunning = true;
       clearRunningResetTimer();
-      runningResetTimer = setTimeout(resetRunningFlag, RUNNING_AUTO_RESET_MS);
+      startTransferDeadline(trace);
       sendResponse({ ok: true });
       markTransferTrace(trace, "click", { source: "extension icon" });
       runContextFlow(destination, null, null, trace);
@@ -822,6 +824,7 @@
     let transferStage = "capture";
     let summary = "";
     try {
+      checkTransferDeadline(transferTrace);
       let conversationText = scrapedConversationText;
       let destinationPrepPromise = preparedDestinationPromise;
       if (!conversationText) {
@@ -836,6 +839,7 @@
         }
         advanceTransferTelemetryStage(transferTrace, "capture_started");
         await prepareSourceForCapture();
+        checkTransferDeadline(transferTrace);
         if (!destinationPrepPromise && getDetectedConversationMessageCount() > 0) {
           destinationPrepPromise = prepareDestinationTab(destinationId, transferTrace);
         }
@@ -843,6 +847,7 @@
         markTransferTrace(transferTrace, "capture start");
         setHandoffProgress("capture", "active");
         conversationText = await scrapeConversationTextWhenReady();
+        checkTransferDeadline(transferTrace);
         markCaptureDone(transferTrace, conversationText);
       }
       destinationPrepPromise = destinationPrepPromise || prepareDestinationTab(destinationId, transferTrace);
@@ -851,11 +856,13 @@
       }
       transferStage = "summary";
       summary = await summarizeWithBackend(conversationText, transferTrace);
+      checkTransferDeadline(transferTrace);
       stopHandoffCountdown();
       markTransferTrace(transferTrace, "summary available", { chars: summary.length });
       setHandoffProgress("summary", "done");
       transferStage = "destination";
       const preparedDestination = destinationPrepPromise ? await destinationPrepPromise : null;
+      checkTransferDeadline(transferTrace);
       markTransferTrace(transferTrace, "tab open done", {
         tabId: preparedDestination?.tabId || null,
         background: preparedDestination?.timing || null
@@ -867,6 +874,7 @@
       const requiresFocusedPaste = FOCUSED_PASTE_DESTINATIONS.has(destinationId);
       if (requiresFocusedPaste) {
         await completeHandoffForDestinationReveal(transferTrace);
+        checkTransferDeadline(transferTrace);
       }
       const pasteResponse = await notifyBackground({
         type: "TRANSFER_TO_DESTINATION",
@@ -874,25 +882,31 @@
         text: summary,
         preparedTabId: preparedDestination?.tabId || null,
         transferId: transferTrace.id,
+        deadlineAt: transferTrace.deadlineAt,
         deferFinalActivation: !requiresFocusedPaste
       });
+      checkTransferDeadline(transferTrace);
       markTransferTrace(transferTrace, "paste done", pasteResponse?.timing || null);
       // Keep recovery available on the source even if final activation fails.
       showFallbackModal(summary, getPlatform(destinationId)?.name || "the destination", true);
       if (!requiresFocusedPaste) {
         await completeHandoffForDestinationReveal(transferTrace);
+        checkTransferDeadline(transferTrace);
         markTransferTrace(transferTrace, "final tab activate start");
         await notifyBackground({
           type: "ACTIVATE_DESTINATION_TAB",
           destination: destinationId,
+          deadlineAt: transferTrace.deadlineAt,
           tabId: pasteResponse?.timing?.tabId || null
         });
+        checkTransferDeadline(transferTrace);
         markTransferTrace(transferTrace, "final tab activate done");
       }
       markTransferTrace(transferTrace, "transfer complete");
       finishTransferTrace(transferTrace);
       resetRunningFlag();
     } catch (error) {
+      if (transferTrace.expired) return;
       markTransferTrace(transferTrace, `failed: ${error.message}`);
       finishTransferTrace(transferTrace, getSafeTelemetryFailureReason(error, transferStage));
       resetRunningFlag();
@@ -928,6 +942,7 @@
   }
 
   async function summarizeWithBackend(conversationText, trace = null) {
+    checkTransferDeadline(trace);
     if (conversationText.length > MAX_BACKEND_CONVERSATION_CHARS) {
       const error = new Error(OVERSIZED_CONVERSATION_ERROR_MESSAGE);
       error.code = "conversation_too_large";
@@ -940,6 +955,7 @@
       // local-direct can return in the same visual beat as capture. Finish the
       // first connector before allowing the summary connector to begin.
       await completeHandoffStageLine("capture", HANDOFF_TINY_STAGE_LINE_DURATION_MS);
+      checkTransferDeadline(trace);
     }
     setHandoffProgress("summary", "active", null, conversationText.length);
     startHandoffCountdown(getHandoffSummaryLineDuration(conversationText.length));
@@ -949,7 +965,8 @@
       const response = await notifyBackground({
         type: "SUMMARIZE_WITH_BACKEND",
         conversation: conversationText,
-        transferId: trace?.id || null
+        transferId: trace?.id || null,
+        deadlineAt: trace?.deadlineAt
       });
       if (!response?.summary?.trim()) {
         throw new Error("Backup summarizer returned no summary.");
@@ -957,6 +974,7 @@
       summary = response.summary.trim();
       timing = response.timing || null;
     } catch {
+      checkTransferDeadline(trace);
       // The verified transcript stays in the source page even when the backend
       // or MV3 worker is unavailable. Paste failure still offers manual copy.
       const quotedTranscript = conversationText.replace(/\r\n?/g, "\n").trim()
@@ -977,6 +995,7 @@
         }
       };
     }
+    checkTransferDeadline(trace);
     markTransferTrace(trace, "summary done", {
       chars: summary.length,
       background: timing
@@ -990,7 +1009,8 @@
     return notifyBackground({
       type: "PREPARE_DESTINATION",
       destination: destinationId,
-      transferId: trace?.id || null
+      transferId: trace?.id || null,
+      deadlineAt: trace?.deadlineAt
     }).then((response) => {
       markTransferTrace(trace, "tab open response", {
         tabId: response?.tabId || null,
@@ -1000,6 +1020,26 @@
     }).catch(() => {
       return null;
     });
+  }
+
+  function checkTransferDeadline(trace) {
+    if (trace?.expired || (trace?.deadlineAt && Date.now() >= trace.deadlineAt)) {
+      const error = new Error("Transfer timed out. Please try again.");
+      error.code = "transfer_timeout";
+      throw error;
+    }
+  }
+
+  function startTransferDeadline(trace) {
+    activeTransferTrace = trace;
+    trace.deadlineAt = Date.now() + RUNNING_AUTO_RESET_MS;
+    runningResetTimer = setTimeout(() => {
+      trace.expired = true;
+      markTransferTrace(trace, "failed: Transfer timed out.");
+      finishTransferTrace(trace, "client_interrupted");
+      resetRunningFlag();
+      showErrorOverlay("Transfer timed out. Please try again.");
+    }, RUNNING_AUTO_RESET_MS);
   }
 
   function createTransferTrace(destinationId, source) {
@@ -1032,6 +1072,8 @@
   }
 
   async function prepareSourceForCapture() {
+    const transferTrace = activeTransferTrace;
+    checkTransferDeadline(transferTrace);
     sourceScrollTargetsCache = null;
     chatGptConversationScrollRootCache = null;
     // Captured panel text belongs only to one transfer. Reset both collections so
@@ -1040,6 +1082,7 @@
     pastedContentCardAttempts = new WeakMap();
     scrollSourceConversationToTop();
     await waitForConversationCaptureToSettle();
+    checkTransferDeadline(transferTrace);
     const expandedCount = await expandCollapsedConversationContent();
     if (expandedCount > 0) {
       await waitForConversationCaptureToSettle(Math.min(1200, getSourceScrollStableTimeout()));
@@ -1047,6 +1090,7 @@
   }
 
   async function waitForConversationCaptureToSettle(timeoutMs = getSourceScrollStableTimeout()) {
+    const transferTrace = activeTransferTrace;
     const startedAt = Date.now();
     let lastSnapshot = getConversationReadinessSnapshot();
     let stableSamples = 0;
@@ -1054,6 +1098,7 @@
     while (Date.now() - startedAt < timeoutMs) {
       const remainingMs = timeoutMs - (Date.now() - startedAt);
       await delay(Math.min(getSourceScrollStableInterval(), Math.max(0, remainingMs)));
+      checkTransferDeadline(transferTrace);
       scrollSourceConversationToTop();
 
       const expandedCount = await expandCollapsedConversationContent();
@@ -1281,9 +1326,12 @@
   }
 
   async function expandCollapsedConversationContent(maxRounds = 3) {
+    const transferTrace = activeTransferTrace;
+    checkTransferDeadline(transferTrace);
     let expandedCount = await capturePastedConversationCards();
 
     for (let round = 0; round < maxRounds; round += 1) {
+      checkTransferDeadline(transferTrace);
       const expanders = getCollapsedConversationExpanders();
       if (!expanders.length) break;
 
@@ -1303,10 +1351,13 @@
   }
 
   async function capturePastedConversationCards() {
+    const transferTrace = activeTransferTrace;
+    checkTransferDeadline(transferTrace);
     if (currentPlatform.id !== "claude" && currentPlatform.id !== "chatgpt") return 0;
 
     let capturedCount = 0;
     for (const { turn, card } of getPastedConversationCards()) {
+      checkTransferDeadline(transferTrace);
       const attempts = pastedContentCardAttempts.get(card) || 0;
       if (attempts >= 2 || capturedPastedContent.some((entry) => entry.card === card)) continue;
       pastedContentCardAttempts.set(card, attempts + 1);
@@ -2208,7 +2259,8 @@
     return platform ? { ...platform, id: platformId } : null;
   }
 
-  async function pasteIntoPlatform(text, destinationId, transferId = null) {
+  async function pasteIntoPlatform(text, destinationId, transferId = null, deadlineAt = null) {
+    checkTransferDeadline({ deadlineAt });
     cancelPendingPasteRecheck();
     const destination = getPlatform(destinationId) || currentPlatform;
     if (!destination) {
@@ -2222,13 +2274,14 @@
     const trimmedText = text.trim();
 
     // Every supported destination uses verified retries, including editor remount recovery.
-    await pasteWithRetry(trimmedText, destination, transferId);
+    await pasteWithRetry(trimmedText, destination, transferId, deadlineAt);
+    checkTransferDeadline({ deadlineAt });
     if (destination.id !== "chatgpt") {
-      schedulePostActivationPasteRecheck(trimmedText, destination);
+      schedulePostActivationPasteRecheck(trimmedText, destination, deadlineAt);
     }
   }
 
-  async function pasteWithRetry(text, destination, transferId = null) {
+  async function pasteWithRetry(text, destination, transferId = null, deadlineAt = null) {
     const startedAt = Date.now();
     const retryTimeoutMs = destination.pasteRetryTimeoutMs || PASTE_RETRY_TIMEOUT_MS;
     const verifyTimeoutMs = destination.pasteVerifyTimeoutMs || PASTE_VERIFY_TIMEOUT_MS;
@@ -2237,6 +2290,7 @@
     let lastError = null;
 
     while (Date.now() - startedAt <= retryTimeoutMs) {
+      checkTransferDeadline({ deadlineAt });
       const input = findReadyPlatformInput(destination);
       if (input) {
         sawInput = true;
@@ -2334,10 +2388,14 @@
     pendingPasteRecheck = null;
   }
 
-  function schedulePostActivationPasteRecheck(text, destination) {
-    const pending = { timer: null, onVisible: null };
+  function schedulePostActivationPasteRecheck(text, destination, deadlineAt = null) {
+    const pending = { timer: null, onVisible: null, deadlineAt };
     pendingPasteRecheck = pending;
     pending.onVisible = () => {
+      if (deadlineAt && Date.now() >= deadlineAt) {
+        if (pendingPasteRecheck === pending) cancelPendingPasteRecheck();
+        return;
+      }
       if (document.visibilityState === "hidden") return;
       removeOwnedEventListener(document, "visibilitychange", pending.onVisible);
       // A prepared tab may paste while hidden. Start the check after its reveal.
@@ -2357,6 +2415,7 @@
   async function recheckPastedContext(text, destination, pending) {
     let needsCopy = true;
     try {
+      checkTransferDeadline(pending);
       const input = findReadyPlatformInput(destination);
       if (input && editorContainsText(input, text)) {
         needsCopy = false;
@@ -2374,6 +2433,7 @@
         }
       }
     } catch (error) {
+      if (error?.code === "transfer_timeout") needsCopy = false;
       console.debug("[Context Generator] Delayed paste check failed:", error?.message || error);
     } finally {
       if (pendingPasteRecheck === pending) {
@@ -2717,6 +2777,8 @@
   }
 
   async function scrapeVirtualConversation(initialCapture, initialMessageTurns) {
+    const transferTrace = activeTransferTrace;
+    checkTransferDeadline(transferTrace);
     const initialMetrics = lastConversationCaptureMetrics || {};
     const collectedTurns = [];
     const sweepStartedAt = Date.now();
@@ -2728,7 +2790,9 @@
     let useLargerOverlapStep = false;
 
     while (true) {
+      checkTransferDeadline(transferTrace);
       const expandedCount = await expandCollapsedConversationContent();
+      checkTransferDeadline(transferTrace);
       if (expandedCount > 0) {
         await waitForConversationWindowToSettle(Math.min(600, getVirtualSweepSettleTimeout()));
       }
@@ -2748,6 +2812,7 @@
       const stepRatio = getVirtualSweepStepRatio(useLargerOverlapStep);
       const step = Math.round(getSourceViewportHeight() * stepRatio);
 
+      checkTransferDeadline(transferTrace);
       pixelMoved = scrollSourceConversationByInstantly(step);
       if (pixelMoved) {
         // This minimum stability window is intentional. Signature changes can happen synchronously after a
@@ -2773,6 +2838,7 @@
       scrolls += 1;
 
       if (!pixelMoved && afterWindowSignature === beforeWindowSignature) {
+        checkTransferDeadline(transferTrace);
         triedBoundaryAdvance = scrollRenderedConversationBoundaryIntoView(renderedSnapshot.anchor);
         if (triedBoundaryAdvance) {
           afterRenderedSnapshot = await waitForConversationWindowToSettle();
@@ -3196,10 +3262,13 @@
   }
 
   async function scrapeConversationTextWhenReady(timeoutMs = CONVERSATION_SCRAPE_RETRY_TIMEOUT_MS) {
+    const transferTrace = activeTransferTrace;
+    checkTransferDeadline(transferTrace);
     const startedAt = Date.now();
     let lastEmptyError = null;
 
     while (Date.now() - startedAt <= timeoutMs) {
+      checkTransferDeadline(transferTrace);
       try {
         return await scrapeConversationTextForTransfer();
       } catch (error) {
@@ -5831,6 +5900,25 @@
       }
       #${DESTINATION_SHEET_BACKDROP_ID} { background: rgba(7,6,10,0.34) !important; }
       #${DESTINATION_SHEET_ID} .context-generator-destination-brand { color: rgba(247,244,250,0.76) !important; }
+      #${DESTINATION_SHEET_ID} .context-generator-destination-home-link {
+        display: block;
+        position: relative !important;
+        inset: auto !important;
+        flex: 0 0 auto;
+        margin: 0;
+        padding: 0;
+        border: 0 !important;
+        border-radius: 9px;
+        background: transparent !important;
+        box-shadow: none !important;
+        line-height: 0;
+        text-decoration: none !important;
+        cursor: pointer;
+      }
+      #${DESTINATION_SHEET_ID} .context-generator-destination-home-link:focus-visible {
+        outline: 2px solid rgba(190,162,233,0.78) !important;
+        outline-offset: 3px;
+      }
       #${DESTINATION_SHEET_ID} .context-generator-destination-brand-icon {
         border-color: rgba(185,158,228,0.2) !important;
         background: linear-gradient(145deg,rgba(189,158,238,0.18),rgba(102,72,155,0.1)) !important;
@@ -5847,7 +5935,7 @@
         flex: 0 0 auto;
         width: 32px;
         height: 32px;
-        margin: 0;
+        margin: 0 0 0 34px;
         padding: 0;
         border: 1px solid transparent !important;
         border-radius: 10px;
@@ -5871,10 +5959,60 @@
       }
       #${DESTINATION_SHEET_ID} .context-generator-speed-toggle svg {
         display: block;
+        position: relative;
+        z-index: 1;
         width: 16px;
         height: 16px;
         fill: none !important;
         stroke: currentColor !important;
+      }
+      /* Reserve room behind the bolt so trails stay inside the picker header.
+         aria-pressed owns the effect; disabling speed removes its animations. */
+      #${DESTINATION_SHEET_ID} .context-generator-speed-lines {
+        display: none;
+        position: absolute;
+        right: 14px;
+        top: 8px;
+        width: 42px;
+        height: 16px;
+        overflow: visible;
+        pointer-events: none;
+        mask-image: linear-gradient(90deg,transparent,#000 28%);
+      }
+      #${DESTINATION_SHEET_ID} .context-generator-speed-toggle[aria-pressed="true"] .context-generator-speed-lines {
+        display: block;
+      }
+      #${DESTINATION_SHEET_ID} .context-generator-speed-lines i {
+        position: absolute;
+        right: 1px;
+        top: 2px;
+        width: 18px;
+        height: 1.5px;
+        border-radius: 999px;
+        background: linear-gradient(90deg,transparent,rgba(250,204,21,0.6) 45%,#fde68a) !important;
+        box-shadow: 0 0 4px rgba(250,204,21,0.18) !important;
+        transform-origin: right center;
+        opacity: 0;
+        animation: contextGeneratorSpeedStreak 420ms linear infinite;
+      }
+      #${DESTINATION_SHEET_ID} .context-generator-speed-lines i:nth-child(2) {
+        /* Each origin follows the bolt's sloped left edge, rather than one plane. */
+        right: 5px;
+        top: 7px;
+        width: 27px;
+        animation-delay: -140ms;
+      }
+      #${DESTINATION_SHEET_ID} .context-generator-speed-lines i:nth-child(3) {
+        right: 2px;
+        top: 12px;
+        width: 15px;
+        animation-delay: -280ms;
+      }
+      @keyframes contextGeneratorSpeedStreak {
+        0% { opacity: 0; transform: translateX(0) scaleX(0.45); }
+        8% { opacity: 0.85; }
+        48% { opacity: 0.7; }
+        100% { opacity: 0; transform: translateX(-34px) scaleX(1.15); }
       }
       #${DESTINATION_SHEET_ID} .context-generator-destination-tile {
         border-color: rgba(255,255,255,0.1) !important;
@@ -5984,6 +6122,10 @@
       }
 
       @media (prefers-reduced-motion: reduce) {
+        #${DESTINATION_SHEET_ID} .context-generator-speed-lines i {
+          animation: none;
+          opacity: 0.65;
+        }
         .context-generator-tile-aura {
           animation: none;
         }
@@ -6055,6 +6197,13 @@
     const brandLockup = document.createElement("div");
     brandLockup.className = "context-generator-destination-brand";
     brandLockup.style.cssText = "display:flex;align-items:center;gap:8px;color:rgba(247,244,250,0.76) !important;font-size:11.5px;font-weight:650;line-height:1";
+    const brandLink = document.createElement("a");
+    brandLink.className = "context-generator-destination-home-link";
+    brandLink.href = "https://context-generator-five.vercel.app/";
+    brandLink.target = "_blank";
+    brandLink.rel = "noopener noreferrer";
+    brandLink.setAttribute("aria-label", "Open Cap Context website (opens in a new tab)");
+    brandLink.title = "Visit Cap Context";
     const brandIcon = document.createElement("img");
     brandIcon.className = "context-generator-destination-brand-icon";
     brandIcon.src = BUBBLE_ICON_URL;
@@ -6064,7 +6213,8 @@
     brandIcon.style.cssText = "display:block;width:26px;height:26px;box-sizing:border-box;padding:3px;border:1px solid rgba(185,158,228,0.2) !important;border-radius:9px;background:linear-gradient(145deg,rgba(189,158,238,0.18),rgba(102,72,155,0.1)) !important;box-shadow:inset 0 1px 0 rgba(255,255,255,0.08),0 7px 18px rgba(74,48,121,0.2) !important;object-fit:contain";
     const brandName = document.createElement("span");
     brandName.textContent = "Cap Context";
-    brandLockup.appendChild(brandIcon);
+    brandLink.appendChild(brandIcon);
+    brandLockup.appendChild(brandLink);
     brandLockup.appendChild(brandName);
     const title = document.createElement("div");
     title.id = "context-generator-destination-title";
@@ -6229,7 +6379,7 @@
       toggle.setAttribute("aria-pressed", String(enabled));
       toggle.setAttribute("aria-label", "Fast capture");
       toggle.title = `Fast capture: ${enabled ? "On" : "Off"}`;
-      toggle.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="m13 2-9 12h7l-1 8 10-12h-7l1-8Z"/></svg>';
+      toggle.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="m13 2-9 12h7l-1 8 10-12h-7l1-8Z"/></svg><span class="context-generator-speed-lines" aria-hidden="true"><i></i><i></i><i></i></span>';
       addOwnedEventListener(toggle, "click", () => {
         if (isRunning) return;
         let enabled;
@@ -6283,7 +6433,7 @@
       }
       if (event.key !== "Tab") return;
 
-      const focusableTiles = [...sheet.querySelectorAll(".context-generator-destination-tile, .context-generator-speed-toggle")]
+      const focusableTiles = [...sheet.querySelectorAll(".context-generator-destination-tile, .context-generator-speed-toggle, .context-generator-destination-home-link")]
         .filter((tile) => !tile.disabled && tile.getAttribute("aria-disabled") !== "true");
       if (focusableTiles.length === 0) return;
       const focusedIndex = focusableTiles.indexOf(document.activeElement);
@@ -6614,9 +6764,10 @@
 
     isRunning = true;
     clearRunningResetTimer();
-    runningResetTimer = setTimeout(resetRunningFlag, RUNNING_AUTO_RESET_MS);
+    startTransferDeadline(trace);
     try {
       await transitionDestinationSheetToHandoff();
+      checkTransferDeadline(trace);
       showOverlay(destinationId);
       releaseDestinationSheetBackdrop();
       let preparedDestinationPromise = null;
@@ -6625,6 +6776,7 @@
       }
       advanceTransferTelemetryStage(trace, "capture_started");
       if (!useClaudeJson && !useChatGptJson && !useNetworkJson) await prepareSourceForCapture();
+      checkTransferDeadline(trace);
       if (!preparedDestinationPromise && (useClaudeJson || useChatGptJson || useNetworkJson || getDetectedConversationMessageCount() > 0)) {
         preparedDestinationPromise = prepareDestinationTab(destinationId, trace);
       }
@@ -6640,11 +6792,13 @@
             : useChatGptJson ? await captureJson(chatGptJsonPath)
             : geminiJsonPath ? await captureJson(geminiJsonPath)
             : deepseekJsonPath ? await captureJson(deepseekJsonPath) : grokJsonUrl ? await captureJson(grokJsonUrl) : await captureJson();
+          checkTransferDeadline(trace);
           conversationText = createConversationCapture(capture.text, {
             method: `${currentPlatform.id}-json`, messageTurnCount: capture.messageTurnCount,
             usefulTurnCount: capture.messageTurnCount, candidateTurnCount: capture.messageTurnCount
           });
         } catch (error) {
+          checkTransferDeadline(trace);
           // Recover within this attempt: reuse its destination and call the
           // summary/paste pipeline only once, after a complete DOM capture.
           // Retain the bridges' navigation/session cancellation, including an
@@ -6654,17 +6808,21 @@
           showFastCaptureFallbackMessage();
           markTransferTrace(trace, "fast capture failed; using normal capture");
           await prepareSourceForCapture();
+          checkTransferDeadline(trace);
           conversationText = await scrapeConversationTextWhenReady();
+          checkTransferDeadline(trace);
           if (window.location.href !== sourceUrl) throw new Error("The conversation changed during capture. Return to the source chat and try again.");
         }
       } else {
         conversationText = await scrapeConversationTextWhenReady();
       }
+      checkTransferDeadline(trace);
       markCaptureDone(trace, conversationText);
 
       preparedDestinationPromise = preparedDestinationPromise || prepareDestinationTab(destinationId, trace);
       runContextFlow(destinationId, preparedDestinationPromise, conversationText, trace);
     } catch (error) {
+      if (trace.expired) return;
       markTransferTrace(trace, `failed: ${error.message}`);
       finishTransferTrace(trace, getSafeTelemetryFailureReason(error, "capture"));
       resetRunningFlag();
@@ -9076,6 +9234,7 @@
 
   function resetRunningFlag() {
     isRunning = false;
+    activeTransferTrace = null;
     clearRunningResetTimer();
     hideOverlay();
   }

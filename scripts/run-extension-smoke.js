@@ -684,6 +684,65 @@ function appendProcessOutput(current, chunk) {
   return `${current}${chunk}`.slice(-8000);
 }
 
+async function verifyPickerProductChanges(session, state) {
+  const requestsBefore = [state.summaryRequests.length, state.jsonRequests];
+  await session.evaluate('document.getElementById("context-generator-bubble").click()');
+  await waitFor(() => session.evaluate('getComputedStyle(document.getElementById("context-generator-destination-sheet")).opacity === "1"'), "the product picker");
+  const product = await session.evaluate(`(() => {
+    const sheet = document.getElementById("context-generator-destination-sheet");
+    const home = sheet.querySelector(".context-generator-destination-home-link");
+    const controls = [...sheet.querySelectorAll(".context-generator-destination-tile, .context-generator-speed-toggle, .context-generator-destination-home-link")]
+      .filter(node => !node.disabled && node.getAttribute("aria-disabled") !== "true");
+    home.focus();
+    home.dispatchEvent(new KeyboardEvent("keydown", { key: "Tab", shiftKey: true, bubbles: true, cancelable: true }));
+    const reverseWrap = document.activeElement === controls.at(-1);
+    document.activeElement.dispatchEvent(new KeyboardEvent("keydown", { key: "Tab", bubbles: true, cancelable: true }));
+    const forwardWrap = document.activeElement === home;
+    const toggle = sheet.querySelector(".context-generator-speed-toggle");
+    window.__smokeSpeedWasEnabled = toggle.getAttribute("aria-pressed") === "true";
+    if (!window.__smokeSpeedWasEnabled) toggle.click();
+    return { href: home.href, target: home.target, rel: home.rel, label: home.getAttribute("aria-label"), reverseWrap, forwardWrap,
+      trailCount: sheet.querySelectorAll(".context-generator-speed-lines i").length };
+  })()`);
+  assert.equal(product.href, "https://context-generator-five.vercel.app/");
+  assert.equal(product.target, "_blank");
+  assert.match(product.rel, /noopener/);
+  assert.match(product.label, /Cap Context/);
+  assert.equal(product.reverseWrap, true);
+  assert.equal(product.forwardWrap, true);
+  assert.equal(product.trailCount, 3);
+  await waitFor(() => session.evaluate(`(() => {
+    const line = document.querySelector(".context-generator-speed-lines i");
+    return line.getAnimations().some(animation => animation.playState === "running" && animation.currentTime > 0);
+  })()`), "the moving lightning trails");
+  await session.evaluate('document.querySelector(".context-generator-speed-toggle").click()');
+  assert.equal(await session.evaluate('getComputedStyle(document.querySelector(".context-generator-speed-lines")).display'), "none");
+  await session.evaluate('document.querySelector(".context-generator-speed-toggle").click()');
+  await session.call("Emulation.setEmulatedMedia", { features: [{ name: "prefers-reduced-motion", value: "reduce" }] });
+  assert.equal(await session.evaluate('getComputedStyle(document.querySelector(".context-generator-speed-lines i")).animationName'), "none");
+  await session.call("Emulation.setEmulatedMedia", { features: [] });
+  for (const width of [390, 320]) {
+    // Resize intentionally closes inline-owned pickers; reopen on the remounted pill.
+    await session.call("Emulation.setDeviceMetricsOverride", { width, height: 740, deviceScaleFactor: 1, mobile: false });
+    await waitFor(() => session.evaluate('getComputedStyle(document.getElementById("context-generator-destination-sheet")).display === "none"'), "picker closure on resize");
+    await session.evaluate('document.getElementById("context-generator-bubble").click()');
+    await waitFor(() => session.evaluate('getComputedStyle(document.getElementById("context-generator-destination-sheet")).opacity === "1"'), "the narrow picker");
+    assert.equal(await session.evaluate(`(() => {
+      const r = document.getElementById("context-generator-destination-sheet").getBoundingClientRect();
+      return r.left >= 0 && r.right <= innerWidth;
+    })()`), true, `Picker must fit at ${width}px.`);
+  }
+  await session.evaluate(`(() => {
+    const toggle = document.querySelector(".context-generator-speed-toggle");
+    if ((toggle.getAttribute("aria-pressed") === "true") !== window.__smokeSpeedWasEnabled) toggle.click();
+    delete window.__smokeSpeedWasEnabled;
+    document.getElementById("context-generator-destination-backdrop").click();
+  })()`);
+  await session.call("Emulation.clearDeviceMetricsOverride");
+  assert.deepEqual([state.summaryRequests.length, state.jsonRequests], requestsBefore, "Picker interaction must not read or send chat content.");
+  process.stdout.write("✓ Picker website link/focus cycle, lightning motion, toggle/reduced motion and 390/320px fit.\n");
+}
+
 async function verifyEmptyChatError(session, browserSession, state, { removeTurns = false, screenshot = false } = {}) {
   const before = { summaries: state.summaryRequests.length, json: state.jsonRequests, tabs: (await browserSession.call("Target.getTargets")).targetInfos.filter(t => t.type === "page").length };
   await session.evaluate(`(() => {
@@ -1330,6 +1389,7 @@ async function run() {
     // Responsive placement runs in a second tab. Restore the source tab before
     // capture so hidden-tab throttling cannot turn this into a timing test.
     await sourceSession.call("Page.bringToFront");
+    await verifyPickerProductChanges(sourceSession, state);
     const jsonRequestsBeforeTransfer = state.jsonRequests;
     const clickResult = await sourceSession.evaluate(String.raw`(() => {
       const bubble = document.getElementById("context-generator-bubble");

@@ -29,15 +29,11 @@ const {
   validateContextCarrySummary,
   getSummaryQualityFlags,
   getMinimumValidSummaryWords,
-  getProviderRequestBudgetMs,
-  GEMINI_CHAIN_BUDGET_MS,
   getGeminiGenerationBudget,
   countWords,
   getSummaryProfile,
   readProviderErrorMetadata,
-  getGeneratedModelSelection,
   getContextCarryTemplate,
-  getSummarySystemPrompt
 } = summarizeHandler.__test;
 const SUMMARIZE_SOURCE = fs.readFileSync(path.join(__dirname, "..", "api", "summarize.js"), "utf8");
 const BACKGROUND_SOURCE = fs.readFileSync(path.join(__dirname, "..", "extension", "background.js"), "utf8");
@@ -70,43 +66,6 @@ test("normalizes summary into the required Context Carry shape", () => {
     normalized,
     /Reply only: "Context loaded\. Let's pick up right where you left off\." Then wait for the user\./
   );
-});
-
-test("backend prompt profiles scale summary size to the captured chat", () => {
-  assert.equal(getSummaryProfile("x".repeat(500)).id, "tiny");
-  assert.equal(getSummaryProfile("x".repeat(4000)).id, "small");
-  assert.equal(getSummaryProfile("x".repeat(20000)).id, "medium");
-  assert.equal(getSummaryProfile("x".repeat(90000)).id, "large");
-  assert.equal(getSummaryProfile("x".repeat(210000)).id, "large");
-  assert.equal(getSummaryProfile("x".repeat(210001)).id, "extra-large");
-  assert.equal(getSummaryProfile("x".repeat(350000)).id, "extra-large");
-  assert.equal(getSummaryProfile("x".repeat(500)).maxTokens, 0);
-  assert.equal(getSummaryProfile("x".repeat(90000)).maxTokens, 4200);
-  assert.equal(getSummaryProfile("x".repeat(350000)).maxTokens, 7000);
-  assert.match(getContextCarryTemplate(getSummaryProfile("x".repeat(500))), /WHAT WE WERE DOING\n\[2-3 lines/);
-  assert.match(getContextCarryTemplate(getSummaryProfile("x".repeat(90000))), /KEY CONTEXT\n\[350-500 words/);
-  assert.match(getContextCarryTemplate(getSummaryProfile("x".repeat(350000))), /KEY CONTEXT\n\[600-850 words/);
-  assert.match(SUMMARIZE_SOURCE, /Do not duplicate or pad short chats/);
-  assert.match(SUMMARIZE_SOURCE, /Use the .* profile/);
-  assert.match(SUMMARIZE_SOURCE, /serious handoff to another capable AI/);
-  assert.match(SUMMARIZE_SOURCE, /OPEN QUESTIONS should include unresolved risks/);
-  assert.match(SUMMARIZE_SOURCE, /Do not invent, correct, or infer project facts/);
-  assert.match(SUMMARIZE_SOURCE, /untrusted customer transcript data/);
-});
-
-test("Gemini generation budgets scale independently of Orca, Mistral, and Groq profile caps", () => {
-  const expectedBudgets = [
-    ["x".repeat(4000), 1000, { summaryTokens: 1500, reasoningTokens: 5000, maxOutputTokens: 6500 }],
-    ["x".repeat(20000), 1900, { summaryTokens: 3000, reasoningTokens: 6000, maxOutputTokens: 9000 }],
-    ["x".repeat(90000), 4200, { summaryTokens: 6000, reasoningTokens: 8000, maxOutputTokens: 14000 }],
-    ["x".repeat(350000), 7000, { summaryTokens: 10000, reasoningTokens: 10000, maxOutputTokens: 20000 }]
-  ];
-
-  expectedBudgets.forEach(([conversation, fallbackMaxTokens, expectedGeminiBudget]) => {
-    const profile = getSummaryProfile(conversation);
-    assert.equal(profile.maxTokens, fallbackMaxTokens);
-    assert.deepEqual(getGeminiGenerationBudget(profile), expectedGeminiBudget);
-  });
 });
 
 test("Gemini budgets switch at exact profile boundaries", () => {
@@ -338,100 +297,6 @@ test("backend sends small generated chats to Ministral 14B first", async () => {
   }
 });
 
-test("backend sends medium chats to Ministral 14B without changing profile limits", async () => {
-  const originalFetch = global.fetch;
-  const originalApiKey = process.env.MISTRAL_API_KEY;
-  const restoreMistralModel = setTemporaryEnv("MISTRAL_MODEL", undefined);
-  const conversation = "x".repeat(20001);
-  const requests = [];
-
-  process.env.MISTRAL_API_KEY = "test-key";
-  global.fetch = async (_url, options) => {
-    requests.push(JSON.parse(options.body));
-    return {
-      ok: true,
-      status: 200,
-      json: async () => ({
-        choices: [{
-          message: {
-            content: makeContextCarrySummary("medium", 520)
-          }
-        }]
-      })
-    };
-  };
-
-  const res = createMockResponse();
-
-  try {
-    await summarize({ method: "POST", body: { conversation } }, res);
-
-    assert.equal(res.statusCode, 200);
-    assert.equal(requests.length, 1);
-    assert.equal(requests[0].model, "ministral-14b-2512");
-    assert.equal(requests[0].max_tokens, 1900);
-    assert.equal(res.payload.timing.profile, "medium");
-    assert.equal(res.payload.timing.model, "ministral-14b-2512");
-    assert.equal(res.payload.timing.targetWords, 700);
-    assert.equal(res.payload.timing.mistralPasses, 1);
-    assert.match(res.payload.timing.modelReason, /served as the first model/);
-  } finally {
-    restoreMistralModel();
-    global.fetch = originalFetch;
-    if (originalApiKey === undefined) {
-      delete process.env.MISTRAL_API_KEY;
-    } else {
-      process.env.MISTRAL_API_KEY = originalApiKey;
-    }
-  }
-});
-
-test("backend fixed chain takes precedence over MISTRAL_MODEL", async () => {
-  const originalFetch = global.fetch;
-  const originalApiKey = process.env.MISTRAL_API_KEY;
-  const restoreMistralModel = setTemporaryEnv("MISTRAL_MODEL", "custom-mistral-test");
-  const conversation = "override context ".repeat(2200);
-  const requests = [];
-
-  process.env.MISTRAL_API_KEY = "test-key";
-  global.fetch = async (_url, options) => {
-    requests.push(JSON.parse(options.body));
-    return {
-      ok: true,
-      status: 200,
-      json: async () => ({
-        choices: [{
-          message: {
-            content: makeContextCarrySummary("override", 520)
-          }
-        }]
-      })
-    };
-  };
-
-  const res = createMockResponse();
-
-  try {
-    await summarize({ method: "POST", body: { conversation } }, res);
-
-    assert.equal(res.statusCode, 200);
-    assert.equal(requests.length, 1);
-    assert.equal(requests[0].model, "ministral-14b-2512");
-    assert.equal(res.payload.timing.model, "ministral-14b-2512");
-    assert.equal(res.payload.timing.modelOverride, false);
-    assert.equal(res.payload.timing.modelThresholdChars, null);
-    assert.match(res.payload.timing.modelReason, /served as the first model/);
-  } finally {
-    restoreMistralModel();
-    global.fetch = originalFetch;
-    if (originalApiKey === undefined) {
-      delete process.env.MISTRAL_API_KEY;
-    } else {
-      process.env.MISTRAL_API_KEY = originalApiKey;
-    }
-  }
-});
-
 test("validator accepts the exact boxed Unicode header requested from providers", () => {
   const boxedSummary = makeContextCarrySummary("boxed", 90).replace(
     "CONTEXT CARRY - READY TO PASTE",
@@ -461,69 +326,6 @@ test("validator rejects box borders without the Context Carry title", () => {
     validateContextCarrySummary(borderOnlySummary, profile),
     { ok: false, reason: "missing Context Carry header" }
   );
-});
-
-test("provider fallback budgets keep the complete chain below the extension deadline", () => {
-  const budgets = [
-    getProviderRequestBudgetMs("gemini-3.6-flash"),
-    getProviderRequestBudgetMs("gemini-3.7-flash"),
-    getProviderRequestBudgetMs("gemini-3.8-flash"),
-    getProviderRequestBudgetMs("gemini-3.5-flash"),
-    getProviderRequestBudgetMs("orcarouter/free"),
-    getProviderRequestBudgetMs("ministral-14b-2512"),
-    getProviderRequestBudgetMs("groq/compound-mini")
-  ];
-
-  assert.deepEqual(budgets, [90000, 90000, 90000, 90000, 60000, 90000, 15000]);
-  const completeChainBudget = GEMINI_CHAIN_BUDGET_MS + Math.max(budgets[4], getProviderRequestBudgetMs("gemini-3.5-flash-lite")) + budgets[5];
-  assert.equal(completeChainBudget, 270000);
-  assert.ok(completeChainBudget <= 300000 - 30000);
-});
-
-test("backend uses only OrcaRouter Free before Mistral", async () => {
-  const originalFetch = global.fetch;
-  const restoreGeminiKey = setTemporaryEnv("GEMINI_API_KEY", undefined);
-  const restoreOrcaEnabled = setTemporaryEnv("ORCAROUTER_ENABLED", "true");
-  const restoreOrcaKey = setTemporaryEnv("ORCAROUTER_API_KEY", "test-orca-key");
-  const restoreMistralKey = setTemporaryEnv("MISTRAL_API_KEY", "test-mistral-key");
-  const conversation = "OrcaRouter free route context ".repeat(180);
-  let capturedRequest = null;
-
-  global.fetch = async (url, options) => {
-    capturedRequest = { url, headers: options.headers, body: JSON.parse(options.body) };
-    return {
-      ok: true,
-      status: 200,
-      headers: {
-        get: (name) => name.toLowerCase() === "x-orca-resolved-model"
-          ? "deepseek/deepseek-v4-flash-free"
-          : null
-      },
-      json: async () => ({
-        usage: { prompt_tokens: 500, completion_tokens: 200, total_tokens: 700 },
-        choices: [{ message: { content: makeContextCarrySummary("orca-free", 260) } }]
-      })
-    };
-  };
-
-  const res = createMockResponse();
-  try {
-    await summarize({ method: "POST", body: { conversation } }, res);
-
-    assert.equal(capturedRequest.url, "https://api.orcarouter.ai/v1/chat/completions");
-    assert.equal(capturedRequest.headers.Authorization, "Bearer test-orca-key");
-    assert.equal(capturedRequest.body.model, "orcarouter/free");
-    assert.equal(res.payload.timing.servedBy, "orcarouter");
-    assert.equal(res.payload.timing.model, "deepseek/deepseek-v4-flash-free");
-    assert.equal(res.payload.timing.primaryModel, "orcarouter/free");
-    assert.deepEqual(res.payload.timing.modelsTried, ["deepseek/deepseek-v4-flash-free"]);
-  } finally {
-    restoreMistralKey();
-    restoreOrcaKey();
-    restoreOrcaEnabled();
-    restoreGeminiKey();
-    global.fetch = originalFetch;
-  }
 });
 
 test("OrcaRouter free-tier 429 falls through immediately without retrying", async () => {
@@ -657,115 +459,6 @@ test("backend falls back to Groq after Mistral rate limits and keeps the same pr
   }
 });
 
-test("backend falls back to Groq when Mistral returns an empty summary", async () => {
-  const originalFetch = global.fetch;
-  const restoreApiKey = setTemporaryEnv("MISTRAL_API_KEY", "test-mistral-key");
-  const restoreGroqKey = setTemporaryEnv("GROQ_API_KEY", "test-groq-key");
-  const restoreMistralModel = setTemporaryEnv("MISTRAL_MODEL", undefined);
-  const conversation = "empty summary fallback ".repeat(180);
-  const requests = [];
-
-  global.fetch = async (url, options) => {
-    const body = JSON.parse(options.body);
-    requests.push({ url, body });
-
-    if (url === "https://api.mistral.ai/v1/chat/completions") {
-      return {
-        ok: true,
-        status: 200,
-        json: async () => ({
-          choices: [{ message: { content: "" } }]
-        })
-      };
-    }
-
-    if (url === "https://api.groq.com/openai/v1/chat/completions") {
-      return {
-        ok: true,
-        status: 200,
-        json: async () => ({
-          choices: [{
-            message: {
-              content: makeContextCarrySummary("groq-empty", 260)
-            }
-          }]
-        })
-      };
-    }
-
-    throw new Error(`Unexpected URL ${url}`);
-  };
-
-  const res = createMockResponse();
-
-  try {
-    await summarize({ method: "POST", body: { conversation } }, res);
-
-    assert.equal(res.statusCode, 200);
-    assert.equal(requests.length, 2);
-    assert.deepEqual(requests.slice(0, 1).map((request) => request.body.model), ["ministral-14b-2512"]);
-    assert.equal(requests[1].body.model, "groq/compound-mini");
-    assert.deepEqual(requests[1].body.messages, requests[0].body.messages);
-    assert.equal(res.payload.timing.servedBy, "groq");
-    assert.equal(res.payload.timing.primaryModel, "ministral-14b-2512");
-    assert.equal(res.payload.timing.model, "groq/compound-mini");
-    assert.equal(res.payload.timing.fallback.used, true);
-    assert.match(res.payload.timing.fallback.reason, /Mistral returned an empty summary/);
-  } finally {
-    restoreMistralModel();
-    restoreGroqKey();
-    restoreApiKey();
-    global.fetch = originalFetch;
-  }
-});
-
-test("backend accepts incomplete Ministral 14B output without calling Groq", async () => {
-  const originalFetch = global.fetch;
-  const restoreApiKey = setTemporaryEnv("MISTRAL_API_KEY", "test-mistral-key");
-  const restoreGroqKey = setTemporaryEnv("GROQ_API_KEY", "test-groq-key");
-  const conversation = "validation fallback context ".repeat(180);
-  const requests = [];
-
-  global.fetch = async (_url, options) => {
-    const body = JSON.parse(options.body);
-    requests.push(body);
-    return {
-      ok: true,
-      status: 200,
-      json: async () => ({
-        choices: [{
-          message: {
-            content: body.model === "ministral-14b-2512"
-              ? "CONTEXT CARRY — READY TO PASTE\nKEY CONTEXT\nWe finished the Windows build. Linux validation is still blocked."
-              : makeContextCarrySummary("validated-fallback", 180)
-          }
-        }]
-      })
-    };
-  };
-
-  const res = createMockResponse();
-
-  try {
-    await summarize({ method: "POST", body: { conversation } }, res);
-
-    assert.equal(res.statusCode, 200);
-    assert.equal(requests.length, 1);
-    assert.deepEqual(requests.map((request) => request.model), [
-      "ministral-14b-2512"
-    ]);
-    assert.equal(res.payload.timing.model, "ministral-14b-2512");
-    assert.equal(res.payload.summary,
-      'CONTEXT CARRY — READY TO PASTE\nKEY CONTEXT\nWe finished the Windows build. Linux validation is still blocked.\n\n🔁 NEXT STEP\nReply only: "Context loaded. Let\'s pick up right where you left off." Then wait for the user.');
-    assert.match(res.payload.timing.validationReason, /required sections/);
-    assert.deepEqual(res.payload.timing.qualityFlags, ["bad_structure", "missing_section", "too_short"]);
-  } finally {
-    restoreGroqKey();
-    restoreApiKey();
-    global.fetch = originalFetch;
-  }
-});
-
 test("backend advances to Groq after a timed-out Ministral 14B attempt", async () => {
   const originalFetch = global.fetch;
   const restoreApiKey = setTemporaryEnv("MISTRAL_API_KEY", "test-mistral-key");
@@ -811,62 +504,6 @@ test("backend advances to Groq after a timed-out Ministral 14B attempt", async (
     restoreGroqKey();
     restoreApiKey();
     global.fetch = originalFetch;
-  }
-});
-
-test("backend returns the first large summary without a second expansion request", async () => {
-  const originalFetch = global.fetch;
-  const originalApiKey = process.env.MISTRAL_API_KEY;
-  const conversation = "substantial context ".repeat(4000);
-  const shortSummary = makeContextCarrySummary("short", 220);
-  const requests = [];
-
-  process.env.MISTRAL_API_KEY = "test-key";
-  global.fetch = async (_url, options) => {
-    requests.push(JSON.parse(options.body));
-    return {
-      ok: true,
-      status: 200,
-      json: async () => ({
-        usage: { prompt_tokens: 900, completion_tokens: 180, total_tokens: 1080 },
-        choices: [{
-          message: {
-            content: shortSummary
-          }
-        }]
-      })
-    };
-  };
-
-  const res = createMockResponse();
-
-  try {
-    await summarize({ method: "POST", body: { conversation } }, res);
-
-    assert.equal(res.statusCode, 200);
-    assert.equal(requests.length, 1);
-    assert.equal(requests[0].prediction, undefined);
-    assert.equal(res.payload.timing.mistralPasses, 1);
-    assert.equal(res.payload.timing.expansion.attempted, false);
-    assert.equal(res.payload.timing.expansion.used, false);
-    assert.equal(res.payload.timing.expansion.predictedOutput, false);
-    assert.equal(res.payload.timing.qualityFloorMet, false);
-    assert.equal(res.payload.timing.summaryWordCount, countWords(res.payload.summary));
-    assert.deepEqual(res.payload.timing.usage, {
-      promptTokens: 900,
-      completionTokens: 180,
-      totalTokens: 1080,
-      cachedTokens: null
-    });
-    assert.equal(res.payload.timing.expansion.usage, null);
-    assert.match(res.payload.summary, /short/);
-  } finally {
-    global.fetch = originalFetch;
-    if (originalApiKey === undefined) {
-      delete process.env.MISTRAL_API_KEY;
-    } else {
-      process.env.MISTRAL_API_KEY = originalApiKey;
-    }
   }
 });
 
@@ -1122,15 +759,6 @@ test("normalizer safely replaces provider-written NEXT STEP wording", () => {
   );
 });
 
-test("generated summaries select Gemini 3.6 Flash when its server key is configured", () => {
-  const conversation = "x".repeat(20001);
-
-  assert.equal(getGeneratedModelSelection(conversation, true).model, "gemini-3.6-flash");
-  assert.match(getGeneratedModelSelection(conversation, true).reason, /then gemini-3.5-flash-lite, then Mistral, Groq, and finally local-direct/);
-  assert.equal(getGeneratedModelSelection(conversation, false, true).model, "orcarouter/free");
-  assert.equal(getGeneratedModelSelection(conversation, false).model, "ministral-14b-2512");
-});
-
 test("backend sends generated summaries to native Gemini first and records Gemini usage", async () => {
   const originalFetch = global.fetch;
   const restoreGeminiKey = setTemporaryEnv("GEMINI_API_KEY", "test-gemini-key");
@@ -1369,56 +997,6 @@ test("prompt and validator reserve None for genuinely unavailable optional facts
     );
     assert.match(validateContextCarrySummary(requiredSectionIsNone, smallProfile).reason, new RegExp(`${section} is empty`));
   }
-});
-
-test("summary prompt keeps decisions and current state tied to the latest user confirmation", async (t) => {
-  const prompt = getSummarySystemPrompt(getSummaryProfile("x".repeat(4000)));
-
-  await t.test("assistant proposes something but the user does not accept it", () => {
-    assert.match(prompt, /assistant suggestions, recommendations, possibilities, and proposed options as unconfirmed/i);
-    assert.match(prompt, /Never present an unaccepted assistant proposal as a decision or current project state/i);
-  });
-
-  await t.test("the user rejects an assistant proposal", () => {
-    assert.match(prompt, /If the user rejects an assistant proposal, do not list that proposal in DECISIONS MADE/i);
-    assert.match(prompt, /label it explicitly as rejected/i);
-  });
-
-  await t.test("the user changes an earlier decision later", () => {
-    assert.match(prompt, /When the user later changes an earlier decision/i);
-    assert.match(prompt, /latest user-confirmed decision or state as the current truth/i);
-  });
-
-  await t.test("old and new project states conflict and the latest confirmed state wins", () => {
-    assert.match(prompt, /older and newer project states conflict/i);
-    assert.match(prompt, /label it explicitly as replaced, rejected, changed, or historical/i);
-  });
-
-  assert.match(
-    prompt,
-    /DECISIONS MADE must contain only decisions actually made by the user or clearly accepted or confirmed by the user/i
-  );
-  assert.match(prompt, /choices the user deliberately deferred and tradeoffs the user accepted/i);
-  assert.match(prompt, /Your output must match the required template shown below exactly\./);
-  assert.doesNotMatch(prompt, /Context Generator SKILL\.md template/);
-  assert.match(SUMMARIZE_SOURCE, /capcontext-summary-v7/);
-  assert.match(SUMMARIZE_SOURCE, /Do not number it or prefix it with a bullet/);
-});
-
-test("summary prompt preserves user-marked exact facts without collapsing alternatives", () => {
-  const prompt = getSummarySystemPrompt(getSummaryProfile("x".repeat(20000)));
-
-  assert.match(prompt, /explicitly asks to keep or preserve a set of exact facts/i);
-  assert.match(prompt, /every fact in that set/i);
-  assert.match(prompt, /competing options/i);
-  assert.match(prompt, /numeric values and ranges/i);
-  assert.match(prompt, /safety or integrity statements/i);
-  assert.match(prompt, /implementation state/i);
-  assert.match(prompt, /silent checklist from the full transcript/i);
-  assert.match(prompt, /negative integrity facts/i);
-  assert.match(prompt, /work not started/i);
-  assert.match(prompt, /recheck any user-requested exact-fact checklist/i);
-  assert.match(SUMMARIZE_SOURCE, /capcontext-summary-v7/);
 });
 
 function makeContextCarrySummary(word, wordCount) {

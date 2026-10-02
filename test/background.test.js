@@ -61,10 +61,10 @@ function loadBackgroundForSummaryTest(fetchImpl, { tabs = [], injections = [], i
   new vm.Script(source, { filename: "extension/background.js" }).runInContext(sandbox);
   assert.ok(messageListener, "background summary listener was registered");
 
-  return async function sendSummary(conversation) {
+  return async function sendSummary(conversation, deadlineAt = null) {
     return new Promise((resolve, reject) => {
       const keepsChannelOpen = messageListener(
-        { type: "SUMMARIZE_WITH_BACKEND", conversation, transferId: "cache-test" },
+        { type: "SUMMARIZE_WITH_BACKEND", conversation, transferId: "cache-test", deadlineAt },
         {},
         resolve
       );
@@ -161,7 +161,7 @@ function loadBackgroundForTransferTest({
     operations,
     getPlatformFromUrl: sandbox.__backgroundTestHooks.getPlatformFromUrl,
     sendMessageWhenReady: sandbox.__backgroundTestHooks.sendMessageWhenReady,
-    sendTransfer(destination, preparedTabId = null, deferFinalActivation = false) {
+    sendTransfer(destination, preparedTabId = null, deferFinalActivation = false, deadlineAt = null) {
       return new Promise((resolve, reject) => {
         const keepsChannelOpen = messageListener(
           {
@@ -170,7 +170,8 @@ function loadBackgroundForTransferTest({
             text: "CONTEXT CARRY — READY TO PASTE\nUseful transfer context",
             preparedTabId,
             transferId: "transfer-test",
-            deferFinalActivation
+            deferFinalActivation,
+            deadlineAt
           },
           {},
           resolve
@@ -178,10 +179,10 @@ function loadBackgroundForTransferTest({
         if (keepsChannelOpen !== true) reject(new Error("transfer listener did not keep the response channel open"));
       });
     },
-    activateDestination(destination, tabId) {
+    activateDestination(destination, tabId, deadlineAt = null) {
       return new Promise((resolve, reject) => {
         const keepsChannelOpen = messageListener(
-          { type: "ACTIVATE_DESTINATION_TAB", destination, tabId },
+          { type: "ACTIVATE_DESTINATION_TAB", destination, tabId, deadlineAt },
           {},
           resolve
         );
@@ -211,10 +212,37 @@ test("destination messaging enforces its deadline while a response is still pend
   assert.ok(Date.now() - startedAt < 500, "The in-flight destination response must not outlive its deadline.");
 });
 
-test("extension sends each summary job to the backend only once", () => {
-  assert.match(source, /const SUMMARY_BACKEND_TIMEOUT_MS = 320000/);
-  assert.doesNotMatch(source, /SUMMARY_BACKEND_ATTEMPTS|SUMMARY_BACKEND_RETRY_BUDGET_MS/);
-  assert.equal((source.match(/fetch\(SUMMARY_BACKEND_URL/g) || []).length, 1);
+test("expired transfer messages cannot fetch summaries, open tabs, paste or activate destinations", async () => {
+  let fetches = 0;
+  const sendSummary = loadBackgroundForSummaryTest(async () => { fetches++; });
+  const expiredAt = Date.now() - 1;
+  const summary = await sendSummary("captured conversation", expiredAt);
+  assert.equal(summary.ok, false);
+  assert.equal(summary.code, "transfer_timeout");
+  assert.equal(fetches, 0);
+
+  const harness = loadBackgroundForTransferTest();
+  const transfer = await harness.sendTransfer("claude", null, false, expiredAt);
+  const activation = await harness.activateDestination("claude", 41, expiredAt);
+  for (const response of [transfer, activation]) {
+    assert.equal(response.ok, false);
+    assert.equal(response.code, "transfer_timeout");
+  }
+  assert.deepEqual(harness.operations, { created: [], gotten: [], sent: [], updated: [], injected: [] });
+});
+
+test("a transfer deadline aborts an outstanding summary request", { timeout: 2000 }, async () => {
+  let signal;
+  const sendSummary = loadBackgroundForSummaryTest(async (_url, options) => {
+    signal = options.signal;
+    return new Promise((resolve, reject) => {
+      signal.addEventListener("abort", () => reject(Object.assign(new Error("aborted"), { name: "AbortError" })), { once: true });
+    });
+  });
+  const response = await sendSummary("captured conversation", Date.now() + 100);
+  assert.equal(signal.aborted, true);
+  assert.equal(response.ok, false);
+  assert.equal(response.code, "transfer_timeout");
 });
 
 test("destination preconnect and warmup never include conversation content", () => {

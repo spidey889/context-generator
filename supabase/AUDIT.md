@@ -106,7 +106,7 @@ trust boundary remain explicit product limits, not hidden schema defects.
 - No hosted table changes, production probes, live-provider evaluation or
   multi-session midnight reproduction were performed for this merge check.
   The Edge validator source fix has not been separately deployed.
-- Merge approval is withheld: fetched `origin/master` at `04001f8` has nine
+- At that point merge approval was withheld: fetched `origin/master` at `04001f8` had nine
   unique commits and produces 17 file conflicts against this branch. Resolution
   must retain master's transfer deadlines, approved picker trails/website link
   and simulated-clock regressions alongside this branch's inline placement and
@@ -146,3 +146,29 @@ catch-up reset. Retained transfer hashes, full users hash, sequence, table
 identity/RLS/grants and cron settings remain identical. No unrelated table was
 modified. Controlled local clocks cover both sides of IST midnight and a wait
 across it; an actual multi-session midnight wait was not reproduced.
+
+## Combined branch verification — October 3
+
+Merged master `04001f8` into `supabase-flash` and resolved all seventeen conflicts.
+The combined code keeps the latest picker visuals/link, enforced transfer deadlines,
+simulated-clock tests and documentation cleanup, along with the database branch's
+five-platform inline placement and signed, durable, private telemetry. All 23
+migration files and database/API ingestion implementations are unchanged from the
+verified database branch. No hosted data/schema, reset cutoff or cron was changed.
+The owner's earlier explicit data reset is separate from this integration.
+
+Verification passed: 318 deterministic tests, the ordered sixteen-turn simulated
+scroll regression, 348 SQL migration/invariant checks, and isolated installed-Brave
+transfer through the actual local relay/Edge handlers into SQL with one verified
+count and a drained outbox. New checks cover expired summary/transfer/activation,
+request abortion, untouched destination drafts, website-link keyboard wrapping,
+lightning motion/toggle/reduced motion and 390/320px picker fit. Retained cancelled
+attempt metadata permits late server receipts without rewriting paste outcomes.
+The lower test count follows master's intentional consolidation; SQL coverage is
+preserved. Deadline errors now retain their code across activation/warmup and a
+storage wait cannot begin an already-expired summary request.
+
+This verifies the combined source and controlled runtime, not a new production
+deployment, live-provider evaluation or fresh native-account capture. The Edge
+validator correction still needs its normal deployment. Existing forty-name and
+anonymous-failure trust limits remain unchanged.
