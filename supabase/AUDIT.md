@@ -2,8 +2,9 @@
 
 Scope: hosted `cap-context-telemetry` (`iqkzynzxbmemhtiupwwu`), current source,
 recorded migrations, ingestion and recovery. The application schema is small and
-clean after migration twenty-two. Runtime signoff remains limited by the owner's
-instruction not to run tests. `LOGIC.md` is the current production contract; this
+clean after migration twenty-two. Tests were initially deferred under the owner's
+instruction; the requested final merge check subsequently verified them below.
+`LOGIC.md` is the current production contract; this
 document records the audit evidence and remaining policy limits.
 
 ## Findings and changes, in priority order
@@ -80,8 +81,34 @@ for service-only tables. JavaScript syntax and Git diff checks passed; independe
 static review found no blocker. Encrypted pre/post exports outside Git passed
 DPAPI byte-roundtrip checks.
 
-Regression coverage was updated, but no test suites, restore tests, browser/HTTP
-probes, synthetic events, CI dispatches or multi-session midnight reproduction
-ran. Recovery scheduling uses a local catalog shim; captured-job restoration is
-not proof of a managed-project restore. The forty-name capacity and anonymous
-failure trust boundary remain explicit product limits, not hidden schema defects.
+The initial audit updated regression coverage without running tests, restores or
+browser/HTTP probes. The subsequent final merge check ran the checks below.
+Recovery scheduling uses a local catalog shim; captured-job restoration is not
+proof of a managed-project restore. The forty-name capacity and anonymous failure
+trust boundary remain explicit product limits, not hidden schema defects.
+
+## Final merge check — October 3
+
+- Fixed two runtime review findings: optional telemetry storage errors could
+  block/discard summaries, and Edge calendar validation accepted September 31
+  while Vercel rejected it. Four storage fault regressions reproduced against
+  the previous commit and pass after the fix; date parity coverage now rejects
+  invalid attempted, completed and signed-completion timestamps.
+- Final source passed 433 deterministic tests and a fresh installed Brave smoke
+  run through the actual local relay/Edge handlers and all 22 SQL migrations,
+  with one verified count and a drained outbox. Three long capture tests and
+  296 SQL checks also passed, including preservation, counters, permissions,
+  IST reset behavior and backup cron recovery.
+- Actual encrypted pre-cleanup and current exports restored locally with exact
+  data and captured cron preservation: 591 transfers/one user at migration 20,
+  and 592 transfers/one user at migration 22. Decrypted bytes stayed in memory.
+- No hosted table changes, production probes, live-provider evaluation or
+  multi-session midnight reproduction were performed for this merge check.
+  The Edge validator source fix has not been separately deployed.
+- Merge approval is withheld: fetched `origin/master` at `04001f8` has nine
+  unique commits and produces 17 file conflicts against this branch. Resolution
+  must retain master's transfer deadlines, approved picker trails/website link
+  and simulated-clock regressions alongside this branch's inline placement and
+  database/telemetry work. The combined result needs its own verification.
+  No merge was performed. Branch pushes do not match the regression workflow's
+  `master`/`codex/**` filters; a PR targeting `master` runs that code gate.

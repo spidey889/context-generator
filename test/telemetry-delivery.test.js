@@ -395,3 +395,63 @@ test("backend summary receipts are durable while cached follow-up transfers neve
   assert.ok(requests.some(input => input.attempt_id === id(1) && input.summary_proof === "c".repeat(64)));
   assert.ok(requests.filter(input => input.attempt_id === id(2)).every(input => input.summary_proof === undefined && input.summary_confirmed_at === undefined));
 });
+
+for (const area of ["local", "session"]) {
+  test(`telemetry storage ${area} read failure cannot block summary generation`, async () => {
+    const summaryRequests = [];
+    const background = worker(async (url, options) => {
+      if (url.endsWith("/api/telemetry")) throw new Error("offline");
+      summaryRequests.push(JSON.parse(options.body));
+      return { ok: true, status: 200, json: async () => ({ summary: "available summary" }) };
+    });
+    await background.settled();
+    await background.ack(event());
+    await background.settled();
+    background.evaluate(`chrome.storage.${area}.get = async () => { throw new Error("storage unavailable"); }`);
+    const response = await new Promise(resolve => background.listeners.message({
+      type: "SUMMARIZE_WITH_BACKEND", conversation: "transcript", transferId: id(1)
+    }, {}, resolve));
+    await background.settled();
+    assert.equal(response.ok, true);
+    assert.equal(response.summary, "available summary");
+    assert.equal(summaryRequests.length, 1);
+    assert.equal(summaryRequests[0].telemetry, undefined);
+  });
+
+  test(`telemetry storage ${area} write failure cannot discard a successful summary or its recoverable receipt`, async () => {
+    const proof = "d".repeat(64);
+    const confirmedAt = "2026-10-02T10:00:03.000Z";
+    const background = worker(async url => {
+      if (url.endsWith("/api/telemetry")) throw new Error("offline");
+      return { ok: true, status: 200, json: async () => {
+        // Fail only after the provider has returned a valid summary. The other
+        // storage area must still preserve proof for the later terminal report.
+        background.evaluate(`globalThis.originalStorageSet = chrome.storage.${area}.set;
+          chrome.storage.${area}.set = async () => { throw new Error("storage unavailable"); }`);
+        return { summary: "generated summary", summaryProofV2: proof, summaryConfirmedAt: confirmedAt };
+      } };
+    });
+    await background.settled();
+    await background.ack(event());
+    await background.settled();
+    const response = await new Promise(resolve => background.listeners.message({
+      type: "SUMMARIZE_WITH_BACKEND", conversation: "transcript", transferId: id(1)
+    }, {}, resolve));
+    await background.settled();
+    assert.equal(response.ok, true);
+    assert.equal(response.summary, "generated summary");
+    const retainedReceipt = area === "local"
+      ? background.shared.session[ACTIVE][id(1)]
+      : background.shared.local[OUTBOX][0].payload;
+    assert.equal(retainedReceipt.summary_proof, proof);
+    assert.equal(retainedReceipt.summary_confirmed_at, confirmedAt);
+    background.evaluate(`chrome.storage.${area}.set = globalThis.originalStorageSet`);
+    await background.ack(event(1, { status: "succeeded", lastStage: "completed" }));
+    await background.settled();
+    const queued = background.shared.local[OUTBOX];
+    assert.equal(queued.length, 1);
+    assert.equal(queued[0].payload.status, "succeeded");
+    assert.equal(queued[0].payload.summary_proof, proof);
+    assert.equal(queued[0].payload.summary_confirmed_at, confirmedAt);
+  });
+}

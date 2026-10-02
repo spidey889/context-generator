@@ -362,7 +362,10 @@ test("Vercel and Supabase enforce the same metadata-only telemetry schema", asyn
     makeTelemetryPayload({ conversation: "raw chat" }),
     makeTelemetryPayload({ summary: "generated summary" }),
     makeTelemetryPayload({ last_stage: "unknown_stage" }),
-    makeTelemetryPayload({ failure_reason: "arbitrary detail" })
+    makeTelemetryPayload({ failure_reason: "arbitrary detail" }),
+    makeTelemetryPayload({ attempted_at: "2026-09-31T00:00:00Z" }),
+    makeTelemetryPayload({ completed_at: "2026-09-31T00:00:00Z" }),
+    makeTelemetryPayload({ summary_confirmed_at: "2026-09-31T00:00:00Z" })
   ];
 
   for (const candidate of candidates) {

@@ -847,6 +847,8 @@ async function fetchSummaryFromBackend(conversationText, transferId = null) {
   const stopServiceWorkerKeepAlive = startSummaryServiceWorkerKeepAlive();
 
   try {
+    // Telemetry storage is optional: a failed read/write must not prevent the
+    // summary request, which remains usable without an attribution context.
     const telemetry = await enqueueTelemetryWork(async () => {
       await restoreActiveTransferTelemetry();
       const active = activeTransferTelemetry.get(transferId);
@@ -857,7 +859,7 @@ async function fetchSummaryFromBackend(conversationText, transferId = null) {
       active.extensionVersion = queuedIdentity?.extension_version || active.extensionVersion || chrome.runtime.getManifest?.().version || null;
       await persistActiveTransferTelemetry(transferId);
       return makeTelemetryPayload(active, await getOrCreateTelemetryInstallId());
-    });
+    }).catch(() => null);
     const fetchStartedAt = nowMs();
     const response = await fetch(SUMMARY_BACKEND_URL, {
       method: "POST",
@@ -888,14 +890,19 @@ async function fetchSummaryFromBackend(conversationText, transferId = null) {
     });
     if (telemetry && confirmation) {
       // A summary may finish after its source tab closes. Its receipt confirms
-      // generation, never a paste, and survives even if the worker stops next.
+      // generation, never a paste; persist it before returning when storage works.
       await enqueueTelemetryWork(async () => {
         const active = activeTransferTelemetry.get(transferId);
         if (active) summaryProofs.set(transferId, confirmation);
-        await appendTelemetryOutbox({ ...telemetry, last_stage: "summary_completed", ...confirmation });
-        if (active) await persistActiveTransferTelemetry(transferId);
-        initializeTelemetryDelivery();
-      });
+        try {
+          await appendTelemetryOutbox({ ...telemetry, last_stage: "summary_completed", ...confirmation });
+        } finally {
+          // Retain the receipt in session storage even if the local outbox
+          // failed. Neither telemetry store may discard a successful summary.
+          if (active) await persistActiveTransferTelemetry(transferId);
+        }
+      }).catch(() => {});
+      initializeTelemetryDelivery();
     }
 
     const summary = data.summary.trim();
