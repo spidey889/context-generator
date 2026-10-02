@@ -58,7 +58,7 @@ async function checkUsersIst(db, sql) {
   async function event(id, confirmedAt) {
     await db.exec("set role service_role;");
     try {
-      await db.query(`select public.record_transfer_event($1::uuid,$2,now(),'claude','chatgpt',1,
+      await db.query(`select public.record_transfer_event($1::uuid,$2,'2026-10-02 00:00:00+00'::timestamptz,'claude','chatgpt',1,
         'failed','capture_started','capture_failed','1.4.7',true,null,$3::timestamptz)`, [id, install, confirmedAt]);
     } finally { await db.exec("reset role;"); }
   }

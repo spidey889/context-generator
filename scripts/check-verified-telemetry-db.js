@@ -276,6 +276,8 @@ async function main() {
         checks += await require("./check-users-format-db.js").checkUsersFormat(db, sql);
       } else if (name.endsWith("_users_daily_ist.sql")) {
         checks += await require("./check-users-ist-db.js").checkUsersIst(db, sql);
+      } else if (name.endsWith("_exclude_empty_chat_user_failures.sql")) {
+        checks += await require("./check-empty-chat-users-db.js").checkEmptyChatUsers(db, sql);
       } else await db.exec(sql);
     }
     console.log(`PASS: ${names.length} real migrations replayed; ${checks} database correctness, data preservation, attribution and privilege checks.`);
