@@ -4,6 +4,14 @@ const path = require("node:path");
 const test = require("node:test");
 
 const summarizeHandler = require("../api/summarize.js");
+// These cases exercise Google/Mistral compatibility even on machines with a
+// real OpenRouter key. New primary-route coverage lives in openrouter.test.js.
+const originalOpenRouterEnabled = process.env.OPENROUTER_ENABLED;
+test.before(() => { process.env.OPENROUTER_ENABLED = "false"; });
+test.after(() => {
+  if (originalOpenRouterEnabled === undefined) delete process.env.OPENROUTER_ENABLED;
+  else process.env.OPENROUTER_ENABLED = originalOpenRouterEnabled;
+});
 let requestSequence = 1;
 
 function summarize(req, res) {

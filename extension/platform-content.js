@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-03-routing-cleanup-v81";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-03-openrouter-v82";
   const ownedUiStyleSheets = new Map();
   // Start fast capture on for each page instance; a manual opt-out lasts until reload.
   let claudeJsonCaptureEnabled = true;
@@ -2057,6 +2057,7 @@
         requestChars: summaryTiming?.requestChars ?? null,
         backendInputChars: summaryTiming?.backendInputChars ?? backendTiming?.inputChars ?? null,
         backendTotalMs: backendTiming?.totalMs ?? null,
+        openrouterMs: backendTiming?.openrouterMs ?? null,
         geminiMs: backendTiming?.geminiMs ?? null,
         mistralMs: backendTiming?.mistralMs ?? null,
         providerMs: backendTiming?.providerMs ?? null,
@@ -2068,6 +2069,7 @@
         modelReason: backendTiming?.modelReason || null,
         modelsTried: sanitizeModelChainForStats(backendTiming?.modelsTried),
         mistralModelsTried: sanitizeModelChainForStats(backendTiming?.mistralModelsTried),
+        openrouterModelsTried: sanitizeModelChainForStats(backendTiming?.openrouterModelsTried),
         modelInputChars: backendTiming?.modelInputChars ?? null,
         modelThresholdChars: backendTiming?.modelThresholdChars ?? null,
         modelOverride: backendTiming?.modelOverride === true,

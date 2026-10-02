@@ -17,15 +17,25 @@ const MISTRAL_CHAT_COMPLETIONS_URL = "https://api.mistral.ai/v1/chat/completions
 const LOCAL_DIRECT_MODEL = "local-direct";
 const MISTRAL_PRIMARY_MODEL = "ministral-14b-2512";
 const FLASH_LITE_FALLBACK_MODEL = "gemini-3.5-flash-lite";
-// Three active routes receive 90 seconds each, leaving 30 seconds under the
-// 300-second server limit for storage, parsing, and returning local carry.
-const PROVIDER_REQUEST_BUDGETS_MS = {
-  [GEMINI_PRIMARY_MODEL]: 90000,
-  [MISTRAL_PRIMARY_MODEL]: 90000,
-  [FLASH_LITE_FALLBACK_MODEL]: 90000
-};
+const REMOTE_CHAIN_BUDGET_MS = 270000;
+const OPENROUTER_CHAT_COMPLETIONS_URL = "https://openrouter.ai/api/v1/chat/completions";
+// A single key serves these pinned routes. Only Apodex starts enabled; enabling
+// another model must be deliberate and must not extend the server deadline.
+const OPENROUTER_MODELS = [
+  { model: "apodex/apodex-1.1-mini:free", enabledEnv: "OPENROUTER_APODEX_ENABLED", defaultEnabled: true },
+  { model: "qwen/qwen3.8-27b:free", enabledEnv: "OPENROUTER_QWEN_ENABLED", defaultEnabled: false },
+  { model: "dots-studio/dots-3-note-preview:free", enabledEnv: "OPENROUTER_DOTS_ENABLED", defaultEnabled: false },
+  { model: "google/gemma-4-26b-a4b-it:free", enabledEnv: "OPENROUTER_GEMMA_ENABLED", defaultEnabled: false },
+  // Ling has no :free suffix. A zero-price provider filter prevents paid routing.
+  { model: "inclusionai/ling-3.1-flash", enabledEnv: "OPENROUTER_LING_ENABLED", defaultEnabled: false }
+];
 const MISTRAL_PROMPT_CACHE_VERSION = "capcontext-summary-v7";
 const SUMMARY_PROVIDERS = {
+  openrouter: {
+    id: "openrouter",
+    label: "OpenRouter",
+    url: OPENROUTER_CHAT_COMPLETIONS_URL
+  },
   gemini: {
     id: "gemini",
     label: "Gemini",
@@ -236,6 +246,7 @@ async function handleSummary(conversation, responseChannel) {
       summary,
       timing: {
         totalMs: Date.now() - startedAt,
+        openrouterMs: 0,
         geminiMs: 0,
         mistralMs: 0,
         providerMs: 0,
@@ -256,6 +267,7 @@ async function handleSummary(conversation, responseChannel) {
         fallback: createFallbackMetadata(),
         modelsTried: [],
         mistralModelsTried: [],
+        openrouterModelsTried: [],
         inputChars,
         outputChars: summary.length,
         usage: createZeroUsage()
@@ -265,16 +277,18 @@ async function handleSummary(conversation, responseChannel) {
 
   try {
     const geminiApiKey = process.env.GEMINI_API_KEY;
+    const openrouterApiKey = process.env.OPENROUTER_API_KEY;
+    const mistralApiKey = process.env.MISTRAL_ENABLED === "false" ? undefined : process.env.MISTRAL_API_KEY;
     const modelSelection = getGeneratedModelSelection(
-      conversation,
-      Boolean(geminiApiKey)
+      conversation, Boolean(geminiApiKey), Boolean(openrouterApiKey), Boolean(mistralApiKey)
     );
     logModelSelection(modelSelection);
     const providerResult = await createSummaryWithFallback({
       conversation,
       profile: summaryProfile,
       geminiApiKey,
-      mistralApiKey: process.env.MISTRAL_ENABLED === "false" ? undefined : process.env.MISTRAL_API_KEY
+      mistralApiKey,
+      openrouterApiKey
     });
 
     // These diagnostics contain only fixed flag names, validator wording, and counts.
@@ -288,6 +302,7 @@ async function handleSummary(conversation, responseChannel) {
       summary: providerResult.summary,
       timing: {
         totalMs: Date.now() - startedAt,
+        openrouterMs: providerResult.openrouterMs,
         geminiMs: providerResult.geminiMs,
         mistralMs: providerResult.mistralMs,
         providerMs: providerResult.providerMs,
@@ -301,6 +316,7 @@ async function handleSummary(conversation, responseChannel) {
         modelReason: providerResult.modelReason,
         modelsTried: providerResult.modelsTried,
         mistralModelsTried: providerResult.mistralModelsTried,
+        openrouterModelsTried: providerResult.openrouterModelsTried,
         profile: summaryProfile.id,
         maxTokens: summaryProfile.maxTokens,
         targetWords: summaryProfile.targetWords,
@@ -397,6 +413,7 @@ module.exports.__test = {
   getSummaryContentRejectionReason,
   getMinimumValidSummaryWords,
   getProviderRequestBudgetMs,
+  getEnabledOpenRouterModels,
   getGeminiGenerationBudget,
   stripContextCarryFooter,
   countWords,
@@ -409,161 +426,81 @@ module.exports.__test = {
   getSummarySystemPrompt
 };
 
-async function createSummaryWithFallback({
-  conversation,
-  profile,
-  geminiApiKey,
-  mistralApiKey
-}) {
+function getEnabledOpenRouterModels() {
+  if (process.env.OPENROUTER_ENABLED === "false") return [];
+  return OPENROUTER_MODELS.filter(({ enabledEnv, defaultEnabled }) => defaultEnabled
+    ? process.env[enabledEnv] !== "false"
+    : process.env[enabledEnv] === "true").map(({ model }) => model);
+}
+
+async function createSummaryWithFallback({ conversation, profile, geminiApiKey, mistralApiKey, openrouterApiKey }) {
   const fallbackMessages = getInitialSummaryMessages(conversation, profile);
   const geminiMessages = getInitialSummaryMessages(conversation, profile, { plainHeader: true });
+  const routes = [];
+  if (openrouterApiKey) {
+    for (const model of getEnabledOpenRouterModels()) {
+      routes.push({ provider: SUMMARY_PROVIDERS.openrouter, model, apiKey: openrouterApiKey });
+    }
+  }
+  if (geminiApiKey) {
+    for (const model of [GEMINI_PRIMARY_MODEL, FLASH_LITE_FALLBACK_MODEL]) {
+      routes.push({ provider: SUMMARY_PROVIDERS.gemini, model, apiKey: geminiApiKey });
+    }
+  }
+  if (mistralApiKey && process.env.MISTRAL_ENABLED !== "false") {
+    routes.push({ provider: SUMMARY_PROVIDERS.mistral, model: MISTRAL_PRIMARY_MODEL, apiKey: mistralApiKey });
+  }
+
   const modelsTried = [];
   const mistralModelsTried = [];
-  let geminiMs = 0;
-  let mistralMs = 0;
+  const openrouterModelsTried = [];
+  const timings = { openrouterMs: 0, geminiMs: 0, mistralMs: 0 };
+  const deadline = Date.now() + REMOTE_CHAIN_BUDGET_MS;
+  // Give the first route 90s and divide the remainder fairly among fallbacks.
+  // Default: Apodex 90s + Google 60s + Flash-Lite 60s + Mistral 60s.
+  // Without OpenRouter, the original three 90s slots remain unchanged.
+  const fallbackBudgetMs = routes.length > 1
+    ? Math.min(PROVIDER_ATTEMPT_TIMEOUT_MS, Math.floor((REMOTE_CHAIN_BUDGET_MS - PROVIDER_ATTEMPT_TIMEOUT_MS) / (routes.length - 1)))
+    : PROVIDER_ATTEMPT_TIMEOUT_MS;
   let lastProviderFailure = null;
 
-  // Only the primary remote routes share this receipt contract.
-  // Flash-Lite preserves its existing always-fallback reporting.
-  function createRemoteSuccessResult(result, modelReason, timings) {
-    const hadFallback = modelsTried.length > 1;
-    return {
-      ...result,
-      modelReason,
-      modelsTried,
-      mistralModelsTried,
-      ...timings,
-      fallback: hadFallback
-        ? createFallbackMetadata({
-            attempted: true,
-            used: true,
-            servedBy: result.provider,
-            model: result.model,
-            reason: getProviderFailureReason(lastProviderFailure)
-          })
-        : createFallbackMetadata()
-    };
-  }
-
-  async function tryFlashLiteBeforeMistral() {
-    const flashLiteBudgetMs = getProviderRequestBudgetMs(FLASH_LITE_FALLBACK_MODEL);
-    if (geminiApiKey) {
-      const flashLiteStartedAt = Date.now();
-      modelsTried.push(FLASH_LITE_FALLBACK_MODEL);
-      try {
-        const result = await createSummaryWithProvider({
-          provider: SUMMARY_PROVIDERS.gemini,
-          apiKey: geminiApiKey,
-          profile,
-          model: FLASH_LITE_FALLBACK_MODEL,
-          initialMessages: geminiMessages,
-          requestBudgetMs: flashLiteBudgetMs
-        });
-        return {
-          ...result,
-          modelReason: `${modelsTried.slice(0, -1).join(" -> ")} failed; fell back to ${FLASH_LITE_FALLBACK_MODEL}`,
-          modelsTried, mistralModelsTried,
-          geminiMs: geminiMs + result.providerMs, mistralMs,
-          fallback: createFallbackMetadata({
-            attempted: true, used: true, servedBy: SUMMARY_PROVIDERS.gemini.id,
-            model: FLASH_LITE_FALLBACK_MODEL, reason: getProviderFailureReason(lastProviderFailure)
-          })
-        };
-      } catch (error) {
-        geminiMs += Date.now() - flashLiteStartedAt;
-        lastProviderFailure = error;
-        console.error("Flash-Lite fallback failed:", getProviderFailureLog(error));
-      }
-    }
-    return null;
-  }
-
-  if (geminiApiKey) {
-    const model = GEMINI_PRIMARY_MODEL;
-    const geminiStartedAt = Date.now();
+  for (const [index, route] of routes.entries()) {
+    const requestBudgetMs = Math.min(index === 0 ? PROVIDER_ATTEMPT_TIMEOUT_MS : fallbackBudgetMs, deadline - Date.now());
+    if (requestBudgetMs <= 0) break;
+    const { provider, model, apiKey } = route;
+    const startedAt = Date.now();
     modelsTried.push(model);
-
+    if (provider.id === "openrouter") openrouterModelsTried.push(model);
+    if (provider.id === "mistral") mistralModelsTried.push(model);
     try {
       const result = await createSummaryWithProvider({
-        provider: SUMMARY_PROVIDERS.gemini,
-        apiKey: geminiApiKey,
-        profile,
-        model,
-        initialMessages: geminiMessages
+        provider, apiKey, profile, model, requestBudgetMs,
+        initialMessages: provider.id === "gemini" ? geminiMessages : fallbackMessages
       });
-      const modelReason = `${model} served as the primary model`;
-
-      console.info("[Context Generator] Summary served:", {
-        provider: SUMMARY_PROVIDERS.gemini.id,
-        model,
-        reason: modelReason
-      });
-
-      return createRemoteSuccessResult(result, modelReason, {
-        geminiMs: result.providerMs, mistralMs: 0
-      });
-    } catch (error) {
-      geminiMs += Date.now() - geminiStartedAt;
-      lastProviderFailure = error;
-      console.error(
-        `[Context Generator] ${model} failed; falling back to ${FLASH_LITE_FALLBACK_MODEL}:`,
-        getProviderFailureLog(error)
-      );
-    }
-  }
-
-  const flashLiteResult = await tryFlashLiteBeforeMistral();
-  if (flashLiteResult) return flashLiteResult;
-
-  if (mistralApiKey) {
-    // Mistral has one configured model; retries remain inside its request budget.
-    const model = MISTRAL_PRIMARY_MODEL;
-    const mistralStartedAt = Date.now();
-    modelsTried.push(model);
-    mistralModelsTried.push(model);
-
-    try {
-      const result = await createSummaryWithProvider({
-        provider: SUMMARY_PROVIDERS.mistral,
-        apiKey: mistralApiKey,
-        profile,
-        model,
-        initialMessages: fallbackMessages
-      });
+      timings[`${provider.id}Ms`] += result.providerMs;
       const failedModels = modelsTried.slice(0, -1);
       const modelReason = failedModels.length
         ? `${failedModels.join(" -> ")} failed; fell back to ${model}`
-        : `${model} served as the first model in the fixed Mistral chain`;
-
-      console.info("[Context Generator] Summary served:", {
-        provider: SUMMARY_PROVIDERS.mistral.id,
-        model,
-        reason: modelReason
-      });
-
-      return createRemoteSuccessResult(result, modelReason, {
-        geminiMs, mistralMs: mistralMs + result.providerMs
-      });
+        : `${model} served as the first model in the configured chain`;
+      console.info("[Context Generator] Summary served:", { provider: provider.id, model, reason: modelReason });
+      return {
+        ...result, ...timings, modelReason, modelsTried, mistralModelsTried, openrouterModelsTried,
+        fallback: failedModels.length ? createFallbackMetadata({
+          attempted: true, used: true, servedBy: provider.id, model,
+          reason: getProviderFailureReason(lastProviderFailure)
+        }) : createFallbackMetadata()
+      };
     } catch (error) {
-      mistralMs += Date.now() - mistralStartedAt;
-      lastProviderFailure = error;
-      console.error(
-        `[Context Generator] ${model} failed; Mistral chain exhausted, preserving the full transcript locally:`,
-        getProviderFailureLog(error)
-      );
+      timings[`${provider.id}Ms`] += Date.now() - startedAt;
+      // Only fixed diagnostics are allowed in receipts/logs, never upstream bodies.
+      lastProviderFailure = error?.publicMessage ? error : createProviderError(provider,
+        error?.name === "AbortError" ? `${provider.label} request timed out` : `${provider.label} request failed`);
+      console.error(`[Context Generator] ${model} failed:`, getProviderFailureLog(lastProviderFailure));
     }
-  } else {
-    const mistralFailure = createProviderError(
-      SUMMARY_PROVIDERS.mistral,
-      "MISTRAL_API_KEY is not configured",
-      500
-    );
-    lastProviderFailure = lastProviderFailure || mistralFailure;
   }
-
   return createEmergencyDirectCarryResult({
-    conversation, modelsTried, mistralModelsTried,
-    geminiMs, mistralMs, lastProviderFailure
+    conversation, modelsTried, mistralModelsTried, openrouterModelsTried,
+    ...timings, lastProviderFailure
   });
 }
 
@@ -571,6 +508,8 @@ function createEmergencyDirectCarryResult({
   conversation,
   modelsTried,
   mistralModelsTried,
+  openrouterModelsTried,
+  openrouterMs,
   geminiMs,
   mistralMs,
   lastProviderFailure
@@ -600,6 +539,8 @@ function createEmergencyDirectCarryResult({
     modelReason: `${attemptedChain} failed; preserved the complete transcript with ${LOCAL_DIRECT_MODEL}`,
     modelsTried,
     mistralModelsTried,
+    openrouterModelsTried,
+    openrouterMs,
     geminiMs,
     mistralMs,
     fallback: createFallbackMetadata({
@@ -638,6 +579,12 @@ async function createSummaryWithProvider({ provider, apiKey, profile, model, ini
   }
 
   const data = await readResponseJson(initialResponse, provider);
+  // OpenRouter can report upstream failure after sending HTTP 200 headers.
+  // Never accept partial/error text as a successful summary in that case.
+  if (provider.id === "openrouter" && (data?.error || data?.choices?.[0]?.error
+      || ["error", "content_filter"].includes(data?.choices?.[0]?.finish_reason))) {
+    throw createProviderError(provider, "OpenRouter generation failed", 502);
+  }
   const finishReason = getProviderFinishReason(provider, data);
   const initialUsage = normalizeProviderUsage(provider, data);
   const rawSummary = getProviderSummaryText(provider, data);
@@ -738,12 +685,15 @@ function getProviderRequestBody(provider, messages, profile, model) {
     };
   }
 
-  return {
-    model,
-    temperature: 0.1,
-    max_tokens: profile.maxTokens,
-    messages
-  };
+  const body = { model, temperature: 0.1, max_tokens: profile.maxTokens, messages };
+  if (provider.id === "openrouter") {
+    // Do not let a reasoning model spend the summary allowance on hidden text,
+    // route to a paid endpoint, or silently relax the data policy on fallback.
+    body.stream = false;
+    body.reasoning = { enabled: false, exclude: true };
+    body.provider = { data_collection: "deny", max_price: { prompt: 0, completion: 0, request: 0 } };
+  }
+  return body;
 }
 
 function getGeminiGenerationBudget(profile) {
@@ -775,7 +725,15 @@ function getProviderSummaryText(provider, data) {
       .map((part) => typeof part?.text === "string" ? part.text : "")
       .join("");
   }
-  return String(data.choices?.[0]?.message?.content || "");
+  const content = data?.choices?.[0]?.message?.content;
+  if (typeof content !== "string") return "";
+  // Some compatible providers put thinking tags in content despite exclusion.
+  // Fail closed on an unfinished thinking block; separate reasoning fields are ignored.
+  if (provider.id === "openrouter") {
+    const answer = content.replace(/<think>[\s\S]*?<\/think>/gi, "");
+    return /<think>/i.test(answer) ? "" : answer.trim();
+  }
+  return content;
 }
 
 function getInitialSummaryMessages(conversation, profile, options = {}) {
@@ -859,7 +817,7 @@ function getLocalDirectModelSelection(conversation) {
   const inputChars = String(conversation || "").length;
   return {
     model: LOCAL_DIRECT_MODEL,
-    reason: `inputChars ${inputChars} uses the unchanged tiny local-direct profile before the fixed Mistral chain`,
+    reason: `inputChars ${inputChars} uses the tiny local-direct profile before any remote route`,
     inputChars,
     thresholdChars: null,
     override: false
@@ -878,16 +836,16 @@ function getMistralModelSelection(conversation) {
   };
 }
 
-function getGeneratedModelSelection(conversation, geminiConfigured) {
-  const inputChars = String(conversation || "").length;
-  if (!geminiConfigured) {
-    return getMistralModelSelection(conversation);
-  }
-
+function getGeneratedModelSelection(conversation, geminiConfigured, openrouterConfigured = false, mistralConfigured = true) {
+  const models = [
+    ...(openrouterConfigured ? getEnabledOpenRouterModels() : []),
+    ...(geminiConfigured ? [GEMINI_PRIMARY_MODEL, FLASH_LITE_FALLBACK_MODEL] : []),
+    ...(mistralConfigured && process.env.MISTRAL_ENABLED !== "false" ? [MISTRAL_PRIMARY_MODEL] : [])
+  ];
   return {
-    model: GEMINI_PRIMARY_MODEL,
-    reason: `generated summaries try ${GEMINI_PRIMARY_MODEL}, then ${FLASH_LITE_FALLBACK_MODEL}, then ${process.env.MISTRAL_ENABLED === "false" ? "" : "Mistral, "}and finally ${LOCAL_DIRECT_MODEL}`,
-    inputChars,
+    model: models[0] || LOCAL_DIRECT_MODEL,
+    reason: `generated summaries try ${[...models, LOCAL_DIRECT_MODEL].join(" -> ")}`,
+    inputChars: String(conversation || "").length,
     thresholdChars: null,
     override: false
   };
@@ -1147,7 +1105,8 @@ function createTimeoutError() {
 }
 
 function getProviderRequestBudgetMs(model) {
-  return PROVIDER_REQUEST_BUDGETS_MS[model] || 15000;
+  return [GEMINI_PRIMARY_MODEL, FLASH_LITE_FALLBACK_MODEL, MISTRAL_PRIMARY_MODEL,
+    ...OPENROUTER_MODELS.map((route) => route.model)].includes(model) ? PROVIDER_ATTEMPT_TIMEOUT_MS : 15000;
 }
 
 function isRetryableProviderStatus(status) {

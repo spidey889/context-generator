@@ -1660,17 +1660,19 @@ test("latest-run cache receipt preserves original provider metadata", () => {
         chars: 1200,
         backend: {
           inputChars: 24000,
+          openrouterMs: 1200,
+          openrouterModelsTried: ["apodex/apodex-1.1-mini:free"],
           servedBy: "mistral",
           provider: "mistral",
-          primaryModel: "gemini-3.6-flash",
-          model: "mistral-medium-2604",
-          modelsTried: ["gemini-3.6-flash", "mistral-medium-2604"],
-          mistralModelsTried: ["mistral-medium-2604"],
+          primaryModel: "apodex/apodex-1.1-mini:free",
+          model: "ministral-14b-2512",
+          modelsTried: ["apodex/apodex-1.1-mini:free", "gemini-3.6-flash", "gemini-3.5-flash-lite", "ministral-14b-2512"],
+          mistralModelsTried: ["ministral-14b-2512"],
           fallback: {
             attempted: true,
             used: true,
             servedBy: "mistral",
-            model: "mistral-medium-2604",
+            model: "ministral-14b-2512",
             reason: "Gemini failed validation"
           },
           usage: { promptTokens: 6000, completionTokens: 800, totalTokens: 6800, cachedTokens: 0 }
@@ -1686,10 +1688,12 @@ test("latest-run cache receipt preserves original provider metadata", () => {
   assert.equal(stats.summary.summaryMs, 0);
   assert.equal(stats.summary.originalSummaryMs, 8200);
   assert.equal(stats.summary.servedBy, "mistral");
-  assert.equal(stats.summary.model, "mistral-medium-2604");
+  assert.equal(stats.summary.model, "ministral-14b-2512");
+  assert.equal(stats.summary.openrouterMs, 1200);
+  assert.deepEqual(JSON.parse(JSON.stringify(stats.summary.openrouterModelsTried)), ["apodex/apodex-1.1-mini:free"]);
   assert.deepEqual(
     JSON.parse(JSON.stringify(stats.summary.modelsTried)),
-    ["gemini-3.6-flash", "mistral-medium-2604"]
+    ["apodex/apodex-1.1-mini:free", "gemini-3.6-flash", "gemini-3.5-flash-lite", "ministral-14b-2512"]
   );
   assert.equal(stats.summary.fallback.used, true);
   assert.equal(stats.summary.fallback.servedBy, "mistral");

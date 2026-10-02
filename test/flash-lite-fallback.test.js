@@ -1,6 +1,12 @@
 const assert = require("node:assert/strict");
 const test = require("node:test");
 const handler = require("../api/summarize.js");
+const originalOpenRouterEnabled = process.env.OPENROUTER_ENABLED;
+test.before(() => { process.env.OPENROUTER_ENABLED = "false"; });
+test.after(() => {
+  if (originalOpenRouterEnabled === undefined) delete process.env.OPENROUTER_ENABLED;
+  else process.env.OPENROUTER_ENABLED = originalOpenRouterEnabled;
+});
 const { createSummaryWithFallback, getSummaryProfile, getGeneratedModelSelection } = handler.__test;
 
 for (const [label, flashLiteWorks] of [

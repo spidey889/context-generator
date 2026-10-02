@@ -3,8 +3,9 @@ const http = require("node:http");
 const test = require("node:test");
 const { createSummaryWithFallback, getSummaryProfile } = require("../api/summarize.js").__test;
 
+for (const openrouterEnabled of [false, true]) {
 for (const status of [200, 429, 503]) {
-  test(`provider fallback aborts a stalled ${status} response body within its budget`, { timeout: 5000 }, async () => {
+  test(`${openrouterEnabled ? "OpenRouter" : "Gemini"} fallback aborts a stalled ${status} response body within its budget`, { timeout: 5000 }, async () => {
     const originalFetch = global.fetch;
     const originalSetTimeout = global.setTimeout;
     const requests = [];
@@ -37,13 +38,14 @@ for (const status of [200, 429, 503]) {
       const result = await createSummaryWithFallback({
         conversation,
         profile: getSummaryProfile(conversation),
-        geminiApiKey: "test-google"
+        geminiApiKey: "test-google",
+        openrouterApiKey: openrouterEnabled ? "test-openrouter" : undefined
       });
       assert.equal(receivedStalledHeaders, true, "timeout must exercise a stalled body after headers arrive");
       assert.equal(stalledSignal.aborted, true);
       assert.equal(requests.length, 2);
-      assert.match(requests[1], /gemini-3\.5-flash-lite/);
-      assert.equal(result.model, "gemini-3.5-flash-lite");
+      assert.match(requests[1], openrouterEnabled ? /gemini-3\.6-flash/ : /gemini-3\.5-flash-lite/);
+      assert.equal(result.model, openrouterEnabled ? "gemini-3.6-flash" : "gemini-3.5-flash-lite");
       assert.match(result.summary, /Linux checks remain pending/);
     } finally {
       global.fetch = originalFetch;
@@ -52,4 +54,5 @@ for (const status of [200, 429, 503]) {
       await new Promise(resolve => server.close(resolve));
     }
   });
+}
 }

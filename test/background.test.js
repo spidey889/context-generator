@@ -344,19 +344,21 @@ test("latest-run raw transcript expires without deleting diagnostic metadata", (
 test("summary cache preserves original result metadata and labels cache hits", async () => {
   let fetchCalls = 0;
   const backendTiming = {
-    servedBy: "mistral",
-    provider: "mistral",
-    primaryModel: "gemini-3.6-flash",
-    model: "mistral-medium-2604",
-    modelsTried: ["gemini-3.6-flash", "mistral-medium-2604"],
-    mistralModelsTried: ["mistral-medium-2604"],
+    servedBy: "openrouter",
+    provider: "openrouter",
+    primaryModel: "apodex/apodex-1.1-mini:free",
+    model: "apodex/apodex-1.1-mini:free",
+    modelsTried: ["apodex/apodex-1.1-mini:free"],
+    mistralModelsTried: [],
+    openrouterModelsTried: ["apodex/apodex-1.1-mini:free"],
+    openrouterMs: 812,
     providerMs: 812,
     fallback: {
-      attempted: true,
-      used: true,
-      servedBy: "mistral",
-      model: "mistral-medium-2604",
-      reason: "Gemini failed validation"
+      attempted: false,
+      used: false,
+      servedBy: null,
+      model: null,
+      reason: null
     },
     usage: { promptTokens: 1200, completionTokens: 240, totalTokens: 1440, cachedTokens: 0 }
   };
