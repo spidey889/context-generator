@@ -7,7 +7,6 @@ const {
   consumeRateLimit,
   acquireRequestSlot
 } = require("./request-security");
-const { createGeminiModelHealth } = require("./gemini-model-health");
 const PROVIDER_RETRY_INTERVAL_MS = 450;
 const PROVIDER_ATTEMPT_TIMEOUT_MS = 90000;
 const SUMMARY_HEARTBEAT_INTERVAL_MS = 15000;
@@ -263,7 +262,6 @@ async function handleSummary(conversation, responseChannel) {
         expansion,
         fallback: createFallbackMetadata(),
         modelsTried: [],
-        geminiModelsSkipped: [],
         mistralModelsTried: [],
         inputChars,
         outputChars: summary.length,
@@ -309,7 +307,6 @@ async function handleSummary(conversation, responseChannel) {
         model: providerResult.model,
         modelReason: providerResult.modelReason,
         modelsTried: providerResult.modelsTried,
-        geminiModelsSkipped: providerResult.geminiModelsSkipped,
         mistralModelsTried: providerResult.mistralModelsTried,
         profile: summaryProfile.id,
         maxTokens: summaryProfile.maxTokens,
@@ -424,13 +421,11 @@ async function createSummaryWithFallback({
   conversation,
   profile,
   geminiApiKey,
-  mistralApiKey,
-  geminiModelHealth = createGeminiModelHealth()
+  mistralApiKey
 }) {
   const fallbackMessages = getInitialSummaryMessages(conversation, profile);
   const geminiMessages = getInitialSummaryMessages(conversation, profile, { plainHeader: true });
   const modelsTried = [];
-  const geminiModelsSkipped = [];
   const mistralModelsTried = [];
   let geminiMs = 0;
   let mistralMs = 0;
@@ -439,12 +434,11 @@ async function createSummaryWithFallback({
   // Only the primary remote routes share this receipt contract.
   // Flash-Lite preserves its existing always-fallback reporting.
   function createRemoteSuccessResult(result, modelReason, timings) {
-    const hadFallback = modelsTried.length > 1 || geminiModelsSkipped.length > 0;
+    const hadFallback = modelsTried.length > 1;
     return {
       ...result,
       modelReason,
       modelsTried,
-      geminiModelsSkipped,
       mistralModelsTried,
       ...timings,
       fallback: hadFallback
@@ -476,7 +470,7 @@ async function createSummaryWithFallback({
         return {
           ...result,
           modelReason: `${modelsTried.slice(0, -1).join(" -> ")} failed; fell back to ${FLASH_LITE_FALLBACK_MODEL}`,
-          modelsTried, geminiModelsSkipped, mistralModelsTried,
+          modelsTried, mistralModelsTried,
           geminiMs: geminiMs + result.providerMs, mistralMs,
           fallback: createFallbackMetadata({
             attempted: true, used: true, servedBy: SUMMARY_PROVIDERS.gemini.id,
@@ -495,19 +489,9 @@ async function createSummaryWithFallback({
   if (geminiApiKey) {
     const GEMINI_MODEL_CHAIN = getGeminiModelChain();
     const geminiDeadline = Date.now() + GEMINI_CHAIN_BUDGET_MS;
+    // Start the configured Flash order fresh for each summary; actual failures
+    // advance the chain within this request's shared deadline.
     for (const [index, model] of GEMINI_MODEL_CHAIN.entries()) {
-      const healthBeforeRequest = await geminiModelHealth.beginAttempt(model);
-      if (!healthBeforeRequest.available) {
-        geminiModelsSkipped.push({ model, status: healthBeforeRequest.status });
-        lastProviderFailure = lastProviderFailure || createProviderError(
-          SUMMARY_PROVIDERS.gemini,
-          `${model} skipped for the current Pacific day because its health is ${healthBeforeRequest.status}`,
-          502
-        );
-        logGeminiHealth(model, healthBeforeRequest, "skipped");
-        continue;
-      }
-
       const remainingGeminiBudgetMs = geminiDeadline - Date.now();
       if (remainingGeminiBudgetMs <= 0) break;
       const geminiStartedAt = Date.now();
@@ -524,13 +508,8 @@ async function createSummaryWithFallback({
           requestBudgetMs: Math.min(getProviderRequestBudgetMs(model),
             Math.floor(remainingGeminiBudgetMs / (GEMINI_MODEL_CHAIN.length - index)))
         });
-        const healthAfterSuccess = await geminiModelHealth.recordSuccess(model);
-        logGeminiHealth(model, healthAfterSuccess, "success");
         const failedModels = modelsTried.slice(0, -1);
-        const skippedReason = formatSkippedGeminiModels(geminiModelsSkipped);
-        const modelReason = skippedReason
-          ? `${skippedReason}; ${model} served the summary`
-          : failedModels.length
+        const modelReason = failedModels.length
           ? `${failedModels.join(" -> ")} failed; fell back to ${model}`
           : `${model} served as the primary model`;
 
@@ -546,10 +525,6 @@ async function createSummaryWithFallback({
       } catch (error) {
         geminiMs += Date.now() - geminiStartedAt;
         lastProviderFailure = error;
-        const healthAfterFailure = await geminiModelHealth.recordFailure(model, {
-          dailyQuotaExhausted: error?.providerDailyQuota === true
-        });
-        logGeminiHealth(model, healthAfterFailure, "failure");
         const nextModel = GEMINI_MODEL_CHAIN[index + 1]
           || FLASH_LITE_FALLBACK_MODEL;
         console.error(
@@ -579,10 +554,7 @@ async function createSummaryWithFallback({
         initialMessages: fallbackMessages
       });
       const failedModels = modelsTried.slice(0, -1);
-      const skippedReason = formatSkippedGeminiModels(geminiModelsSkipped);
-      const modelReason = skippedReason
-        ? `${skippedReason}; ${failedModels.length ? `${failedModels.join(" -> ")} failed; ` : ""}fell back to ${model}`
-        : failedModels.length
+      const modelReason = failedModels.length
         ? `${failedModels.join(" -> ")} failed; fell back to ${model}`
         : `${model} served as the first model in the fixed Mistral chain`;
 
@@ -613,7 +585,7 @@ async function createSummaryWithFallback({
   }
 
   return createEmergencyDirectCarryResult({
-    conversation, modelsTried, geminiModelsSkipped, mistralModelsTried,
+    conversation, modelsTried, mistralModelsTried,
     geminiMs, mistralMs, lastProviderFailure
   });
 }
@@ -621,15 +593,13 @@ async function createSummaryWithFallback({
 function createEmergencyDirectCarryResult({
   conversation,
   modelsTried,
-  geminiModelsSkipped,
   mistralModelsTried,
   geminiMs,
   mistralMs,
   lastProviderFailure
 }) {
   const summary = buildDirectContextCarrySummary(conversation);
-  const skippedReason = formatSkippedGeminiModels(geminiModelsSkipped);
-  const attemptedChain = modelsTried.length ? modelsTried.join(" -> ") : skippedReason || "No remote provider";
+  const attemptedChain = modelsTried.length ? modelsTried.join(" -> ") : "No remote provider";
 
   console.warn("[Context Generator] Remote providers exhausted; preserving the exact transcript locally.");
   return {
@@ -652,7 +622,6 @@ function createEmergencyDirectCarryResult({
     usage: createZeroUsage(),
     modelReason: `${attemptedChain} failed; preserved the complete transcript with ${LOCAL_DIRECT_MODEL}`,
     modelsTried,
-    geminiModelsSkipped,
     mistralModelsTried,
     geminiMs,
     mistralMs,
@@ -688,7 +657,6 @@ async function createSummaryWithProvider({ provider, apiKey, profile, model, ini
       initialResponse.status
     );
     error.providerCode = providerErrorMetadata.code;
-    error.providerDailyQuota = providerErrorMetadata.dailyQuota;
     throw error;
   }
 
@@ -998,30 +966,8 @@ function getProviderFailureLog(error) {
     message: getProviderFailureReason(error),
     statusCode: error?.statusCode || null,
     providerStatus: error?.providerStatus || null,
-    providerCode: error?.providerCode || null,
-    providerDailyQuota: error?.providerDailyQuota === true
+    providerCode: error?.providerCode || null
   };
-}
-
-function formatSkippedGeminiModels(skippedModels) {
-  return skippedModels
-    .map(({ model, status }) => `${model} skipped (${status})`)
-    .join("; ");
-}
-
-function logGeminiHealth(model, health, outcome) {
-  if (!health || health.tracking === "disabled" || health.tracking === "unavailable") return;
-  console.info("[Context Generator] Gemini health updated:", {
-    model,
-    outcome,
-    status: health.status,
-    successes: health.successes,
-    failures: health.failures,
-    consecutiveFailures: health.consecutiveFailures,
-    attempts: health.attempts,
-    pacificDate: health.pacificDate,
-    tracking: health.tracking
-  });
 }
 
 async function readProviderErrorMetadata(response) {
@@ -1039,14 +985,9 @@ async function readProviderErrorMetadata(response) {
       : typeof providerError.status === "string"
       ? providerError.status.toLowerCase()
       : null;
-    // Inspect quota identifiers only to distinguish a daily reset from a short
-    // rate limit. The provider body is never logged, returned, or persisted.
-    const quotaHints = JSON.stringify(providerError.details || []).slice(0, 8192);
-    const dailyQuota = code === "quota_exceeded"
-      || /(?:\brpd\b|requests?.{0,16}per.{0,16}day|per[_ .-]?day)/i.test(quotaHints);
-    return { code, dailyQuota };
+    return { code };
   } catch {
-    return { code: null, dailyQuota: false };
+    return { code: null };
   }
 }
 

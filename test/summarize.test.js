@@ -42,7 +42,7 @@ test("reads safe error codes from Mistral root-level error responses", async () 
     json: async () => ({ code: "model_access_denied", message: "not logged" })
   });
 
-  assert.deepEqual(metadata, { code: "model_access_denied", dailyQuota: false });
+  assert.deepEqual(metadata, { code: "model_access_denied" });
 });
 
 test("normalizes summary into the required Context Carry shape", () => {

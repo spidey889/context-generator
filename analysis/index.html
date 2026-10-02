@@ -912,22 +912,16 @@
         : summary.mistralModelsTried;
       const tried = Array.isArray(recordedChain) ? recordedChain.filter(Boolean) : [];
       const servedModel = summary.model || summary.fallback?.model || null;
-      const skipped = Array.isArray(summary.geminiModelsSkipped)
-        ? summary.geminiModelsSkipped
-          .filter((entry) => entry?.model && entry?.status)
-          .map((entry) => `${formatModelDisplayName(entry.model)} — ${String(entry.status).replaceAll("_", " ")}`)
-        : [];
       const servedIndex = servedModel ? tried.lastIndexOf(servedModel) : -1;
       const failedModels = servedIndex >= 0 ? tried.slice(0, servedIndex) : tried;
       const route = [
         ...failedModels.map((model) => `${formatModelDisplayName(model)} — failed`),
         ...(servedModel ? [`${formatModelDisplayName(servedModel)} — served`] : [])
       ].join("\n");
-      const skippedLabel = skipped.length ? `Skipped today\n${skipped.join("\n")}\n\n` : "";
       const routeLabel = route ? `Tried this run\n${route}` : "";
 
       if ((summary.fallback?.used || tried.length > 1) && servedModel) {
-        return `${skippedLabel}${routeLabel}`;
+        return routeLabel;
       }
 
       if (tried.length === 1) return `${formatModelDisplayName(tried[0])} served first\nNo fallback needed`;

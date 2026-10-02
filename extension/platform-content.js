@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-03-provider-cleanup-v79";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-03-routing-cleanup-v80";
   const ownedUiStyleSheets = new Map();
   // Start fast capture on for each page instance; a manual opt-out lasts until reload.
   let claudeJsonCaptureEnabled = true;
@@ -2067,7 +2067,6 @@
         model: backendTiming?.model || null,
         modelReason: backendTiming?.modelReason || null,
         modelsTried: sanitizeModelChainForStats(backendTiming?.modelsTried),
-        geminiModelsSkipped: sanitizeGeminiModelsSkippedForStats(backendTiming?.geminiModelsSkipped),
         mistralModelsTried: sanitizeModelChainForStats(backendTiming?.mistralModelsTried),
         modelInputChars: backendTiming?.modelInputChars ?? null,
         modelThresholdChars: backendTiming?.modelThresholdChars ?? null,
@@ -2136,15 +2135,6 @@
       // maximum is Flash (4) + Flash-Lite + Mistral + local fallback.
       .slice(0, 8)
       .map((model) => model.trim());
-  }
-
-  function sanitizeGeminiModelsSkippedForStats(entries) {
-    if (!Array.isArray(entries)) return [];
-    return entries
-      .filter((entry) => entry && typeof entry.model === "string" && ["bad_mood", "exhausted"].includes(entry.status))
-      .slice(0, 4)
-      .map((entry) => ({ model: entry.model.trim(), status: entry.status }))
-      .filter((entry) => entry.model);
   }
 
   function normalizeUsageForStats(usage) {

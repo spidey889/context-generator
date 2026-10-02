@@ -37,12 +37,7 @@ for (const status of [200, 429, 503]) {
       const result = await createSummaryWithFallback({
         conversation,
         profile: getSummaryProfile(conversation),
-        geminiApiKey: "test-google",
-        geminiModelHealth: {
-          beginAttempt: async () => ({ available: true }),
-          recordFailure: async () => ({}),
-          recordSuccess: async () => ({})
-        }
+        geminiApiKey: "test-google"
       });
       assert.equal(receivedStalledHeaders, true, "timeout must exercise a stalled body after headers arrive");
       assert.equal(stalledSignal.aborted, true);

@@ -23,36 +23,15 @@ test("analysis receipt shows the served model and does not report it as failed",
   assert.doesNotMatch(getModelFallbackLabel(summary), /Gemini 3\.6 Flash failed/);
 });
 
-test("analysis receipt carries Gemini health skips from the backend", () => {
-  const { getModelFallbackLabel } = loadModelHelpers();
-  assert.equal(
-    getModelFallbackLabel({
-      model: "gemini-3.7-flash",
-      modelsTried: ["gemini-3.7-flash"],
-      geminiModelsSkipped: [{ model: "gemini-3.8-flash", status: "bad_mood" }],
-      fallback: { used: true, model: "gemini-3.7-flash" }
-    }),
-    "Skipped today\nGemini 3.8 Flash — bad mood\n\nTried this run\nGemini 3.7 Flash — served"
-  );
-});
-
 test("analysis formats a long provider failure chain as readable lines", () => {
   const { getModelFallbackLabel } = loadModelHelpers();
   assert.equal(
     getModelFallbackLabel({
       model: "local-direct",
       modelsTried: ["gemini-3.6-flash", "gemini-3.5-flash", "mistral-medium-2604", "local-direct"],
-      geminiModelsSkipped: [
-        { model: "gemini-3.8-flash", status: "exhausted" },
-        { model: "gemini-3.7-flash", status: "bad_mood" }
-      ],
       fallback: { used: true, model: "local-direct" }
     }),
     [
-      "Skipped today",
-      "Gemini 3.8 Flash — exhausted",
-      "Gemini 3.7 Flash — bad mood",
-      "",
       "Tried this run",
       "Gemini 3.6 Flash — failed",
       "Gemini 3.5 Flash — failed",

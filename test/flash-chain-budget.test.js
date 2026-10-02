@@ -30,15 +30,11 @@ test("active fallback order keeps three 90-second slots within the 270-second al
     } }] }) };
   };
   const conversation = "Build context. ".repeat(200);
-  const health = {
-    beginAttempt: async () => ({ available: true }),
-    recordFailure: async () => ({}), recordSuccess: async () => ({})
-  };
   try {
     const result = await createSummaryWithFallback({
       conversation, profile: getSummaryProfile(conversation),
       modelSelection: getGeneratedModelSelection(conversation, true),
-      geminiApiKey: "test-google", mistralApiKey: "test-mistral", geminiModelHealth: health
+      geminiApiKey: "test-google", mistralApiKey: "test-mistral"
     });
     assert.deepEqual(requests, ["gemini-3.6-flash", "gemini-3.5-flash-lite", "ministral-14b-2512"]);
     assert.deepEqual(budgets, [90000, 90000, 90000]);

@@ -10,6 +10,6 @@ Additional Flash models retain their implementation. Set the following productio
 
 An unset or non-true switch pauses those Flash models. Restored Flash routes share the first 90-second family slot; Flash-Lite and Mistral each keep their own 90-second slot. Total remote time remains within 270 seconds.
 
-Flash-Lite uses the existing Google key, MINIMAL thinking, existing token allowance and hidden-thought filtering, and advisory summary validation. It does not consult Flash's daily-health records. Failed or empty Flash-Lite output advances to Mistral; exhaustion of all configured remote routes preserves the full captured transcript locally. Receipts identify the actual model and include both Google routes in geminiMs.
+Flash-Lite uses the existing Google key, MINIMAL thinking, existing token allowance and hidden-thought filtering, and advisory summary validation. Failed or empty Flash-Lite output advances to Mistral; exhaustion of all configured remote routes preserves the full captured transcript locally. Receipts identify the actual model and include both Google routes in geminiMs.
 
-Focused checks: node --test test/flash-chain-budget.test.js test/flash-lite-fallback.test.js test/summarize.test.js test/gemini-model-health.test.js test/background.test.js.
+Focused checks: node --test test/flash-chain-budget.test.js test/flash-lite-fallback.test.js test/summarize.test.js test/background.test.js.

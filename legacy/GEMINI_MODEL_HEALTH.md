@@ -1,4 +1,6 @@
-# Gemini Model Health
+# Gemini Model Health (Archived)
+
+Archived on 2026-10-03 after health tracking was removed from `routing-flash`. The rules and setup below describe the former implementation; current routing is documented in `LOGIC.md`. A branch push does not establish production deployment.
 
 Cap Context keeps a small shared daily status for each Gemini model so Vercel does not repeatedly call a model that is already exhausted or repeatedly failing. No conversation, prompt, URL, summary, API key, or raw provider error is stored.
 
