@@ -142,7 +142,7 @@ async function createTelemetrySmokeFixture(repoRoot, databaseEnabled) {
       const terminal = received.findLast(payload => payload.attempt_id === context.attempt_id && payload.status === "succeeded");
       assert.equal(Date.parse(row.completed_at), Date.parse(terminal.completed_at));
       assert.equal(Date.parse(row.summary_confirmed_at), Date.parse(terminal.summary_confirmed_at));
-      const counts = (await database.query(`select lifetime_successful_summaries::int as total, today_successful_summaries::int as today,
+      const counts = (await database.query(`select lifetime_summaries::int as total, today_summaries::int as today,
         today_failed_attempts::int as failed from public.users where install_id=$1`, [context.install_id])).rows[0];
       assert.deepEqual(counts, { total: 1, today: 1, failed: 0 });
       assert.equal((await database.query("select count(*)::int as count from public.transfer_events where summary_verified")).rows[0].count, 1);

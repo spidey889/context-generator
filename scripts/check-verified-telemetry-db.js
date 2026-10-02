@@ -271,7 +271,10 @@ async function main() {
     for (const name of names.filter(name => name.slice(0, 14) > "20261002073711")) {
       const sql = fs.readFileSync(path.join(directory, name), "utf8");
       appliedMigrations.push({ version: name.slice(0, 14), name: name.slice(15, -4), statements: [sql] });
-      checks += await checkMinimalUsers(db, sql, appliedMigrations);
+      if (name.endsWith("_minimal_users_and_reset.sql")) checks += await checkMinimalUsers(db, sql, appliedMigrations);
+      else if (name.endsWith("_format_users_and_famous_names.sql")) {
+        checks += await require("./check-users-format-db.js").checkUsersFormat(db, sql);
+      } else await db.exec(sql);
     }
     console.log(`PASS: ${names.length} real migrations replayed; ${checks} database correctness, data preservation, attribution and privilege checks.`);
     console.log(`Per-install default plan: ${JSON.stringify(plan.rows[0]["QUERY PLAN"][0].Plan["Node Type"])}; retained composite index verified.`);
