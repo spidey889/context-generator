@@ -261,7 +261,7 @@ Quality limits:
 
 `chrome.storage.local` persists receipts and outbox data. The outbox retains at most 500 entries for seven days, dropping expired and oldest entries during prolonged outages. Active telemetry events and source tab IDs are persisted in `chrome.storage.session` (local storage fallback) with six-minute expiry so tab-close cancellation survives worker restarts. Summary cache, in-flight deduplication and the source `isRunning` lock remain memory-only. The analysis renderer reads receipts through the GitHub Pages-matched bridge and its `window.postMessage` contract, rather than accessing extension storage directly.
 
-The receipt records transfer/capture timings, counts, sizes, profile, the model that actually served, attempted and health-skipped models, fallback, finish reason, token usage, status, and exact captured text. Latest Run labels the serving model directly and excludes it from the failed portion of the fallback log. It does not store the generated summary. Background expiry and the analysis bridge both remove expired raw text.
+The receipt records transfer/capture timings, counts, sizes, profile, the model that actually served, attempted models, fallback, finish reason, token usage, status, and exact captured text. Latest Run labels only the current 3.6 Flash, 3.5 Flash-Lite, Ministral 14B and local-direct routes and excludes the serving model from the failed portion of the fallback log. Unsupported model paths request a fresh transfer instead of displaying retired routes. It does not store the generated summary. Background expiry and the analysis bridge both remove expired raw text.
 
 The analysis page's overlapping-squares **Copy all details** icon copies the displayed Latest Run cards and timeline as readable label/value lines, excluding raw chat text. It is disabled without a receipt and briefly shows a check or cross for clipboard success or failure, with tooltips and accessible status text; a selection-based fallback supports clipboard-restricted browsers/local files.
 
@@ -304,7 +304,7 @@ Native menus and popovers may temporarily mark the background application `aria-
 - Model/profile routing: provider constants/budgets, prompts, Latest Run labels, evaluation expectations, this file, `docs/provider-fallbacks.md`.
 - Telemetry fields/stages/failures: source/background sanitizers, Vercel validator, Supabase validator, SQL constraints/functions, tests. Free-form telemetry fields are forbidden.
 - Latest Run receipt: producer, background expiry, bridge, analysis renderer, analysis tests.
-- Content-script changes must advance `CONTENT_SCRIPT_LOAD_ID` for open-tab replacement and retain stale-node/reservation cleanup. Current value: `platform-content-2026-10-01-transfer-deadline-v77`.
+- Content-script changes must advance `CONTENT_SCRIPT_LOAD_ID` for open-tab replacement and retain stale-node/reservation cleanup. Current value: `platform-content-2026-10-03-routing-cleanup-v81`.
 - Extension release: bump `extension/manifest.json`, rebuild the ZIP with `manifest.json` at its root, hash-compare every file against `extension/`, then test the unpacked folder in a new Brave window.
 
 ## Known Current Risks

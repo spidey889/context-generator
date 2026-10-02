@@ -7,7 +7,7 @@ const vm = require("node:vm");
 const ANALYSIS_SOURCE = fs.readFileSync(path.join(__dirname, "..", "analysis", "index.html"), "utf8");
 
 test("analysis receipt shows the served model and does not report it as failed", () => {
-  const { getModelFallbackLabel, formatModelDisplayName } = loadModelHelpers();
+  const { getModelFallbackLabel, formatModelDisplayName, formatBackendLabel } = loadModelHelpers();
   const summary = {
     primaryModel: "gemini-3.6-flash",
     model: "ministral-14b-2512",
@@ -15,7 +15,17 @@ test("analysis receipt shows the served model and does not report it as failed",
     fallback: { used: true, model: "ministral-14b-2512" }
   };
 
-  assert.equal(formatModelDisplayName("gemini-3.5-flash-lite"), "Gemini 3.5 Flash-Lite");
+  for (const [model, label] of [
+    ["gemini-3.6-flash", "Gemini 3.6 Flash"],
+    ["gemini-3.5-flash-lite", "Gemini 3.5 Flash-Lite"],
+    ["ministral-14b-2512", "Ministral 3 14B"],
+    ["local-direct", "Local fallback"]
+  ]) assert.equal(formatModelDisplayName(model), label);
+  assert.equal(formatModelDisplayName("unsupported-model"), "n/a");
+  assert.equal(formatBackendLabel({ servedBy: "gemini" }), "Google Gemini");
+  assert.equal(formatBackendLabel({ servedBy: "mistral" }), "Mistral");
+  assert.equal(formatBackendLabel({ servedBy: "local-direct" }), "Local");
+  assert.equal(formatBackendLabel({ servedBy: "unsupported-provider" }), "n/a");
   assert.equal(
     getModelFallbackLabel(summary),
     "Tried this run\nGemini 3.6 Flash — failed\nGemini 3.5 Flash-Lite — failed\nMinistral 3 14B — served"
@@ -25,6 +35,9 @@ test("analysis receipt shows the served model and does not report it as failed",
 
 test("analysis formats a long provider failure chain as readable lines", () => {
   const { getModelFallbackLabel } = loadModelHelpers();
+  assert.equal(getModelFallbackLabel({ model: "unsupported-model", modelsTried: ["unsupported-model"] }), "Not recorded - run a new transfer");
+  assert.equal(getModelFallbackLabel({ model: "local-direct", servedBy: "local-direct", modelsTried: [] }), "Local fallback served\nNo provider model needed");
+  assert.equal(getModelFallbackLabel({ model: "gemini-3.6-flash", modelsTried: ["gemini-3.6-flash"] }), "Gemini 3.6 Flash served first\nNo fallback needed");
   assert.equal(
     getModelFallbackLabel({
       model: "local-direct",
@@ -43,11 +56,11 @@ test("analysis formats a long provider failure chain as readable lines", () => {
 
 function loadModelHelpers() {
   const start = ANALYSIS_SOURCE.indexOf("function getModelFallbackLabel(summary)");
-  const end = ANALYSIS_SOURCE.indexOf("function formatBackendLabel(summary)", start);
+  const end = ANALYSIS_SOURCE.indexOf("function formatTurnSummary(capture)", start);
   assert.ok(start >= 0 && end > start, "model helper block should remain available");
   const context = {};
   vm.runInNewContext(
-    `${ANALYSIS_SOURCE.slice(start, end)}; helpers = { getModelFallbackLabel, formatModelDisplayName };`,
+    `${ANALYSIS_SOURCE.slice(start, end)}; helpers = { getModelFallbackLabel, formatModelDisplayName, formatBackendLabel };`,
     context
   );
   return context.helpers;

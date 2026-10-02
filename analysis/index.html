@@ -779,7 +779,7 @@
         : `${formatNumber(usage.promptTokens)} in / ${formatNumber(usage.completionTokens)} out`;
       const summaryTimingDetail = cacheHit
         ? `Cache hit; original ${formatBackendLabel(summary)}: ${formatDuration(summary.originalSummaryMs)}`
-        : `${formatBackendLabel(summary)}: ${formatDuration(summary.providerMs ?? summary.mistralMs)}`;
+        : `${formatBackendLabel(summary)}: ${formatDuration(summary.providerMs)}`;
 
       app.innerHTML = `
         <section class="hero">
@@ -907,11 +907,12 @@
 
     function getModelFallbackLabel(summary) {
       if (!summary) return "n/a";
-      const recordedChain = Array.isArray(summary.modelsTried) && summary.modelsTried.length
-        ? summary.modelsTried
-        : summary.mistralModelsTried;
-      const tried = Array.isArray(recordedChain) ? recordedChain.filter(Boolean) : [];
-      const servedModel = summary.model || summary.fallback?.model || null;
+      const tried = Array.isArray(summary.modelsTried) ? summary.modelsTried.filter(Boolean) : [];
+      const servedModel = summary.model || null;
+      if ((servedModel && formatModelDisplayName(servedModel) === "n/a")
+        || tried.some((model) => formatModelDisplayName(model) === "n/a")) {
+        return "Not recorded - run a new transfer";
+      }
       const servedIndex = servedModel ? tried.lastIndexOf(servedModel) : -1;
       const failedModels = servedIndex >= 0 ? tried.slice(0, servedIndex) : tried;
       const route = [
@@ -926,21 +927,15 @@
 
       if (tried.length === 1) return `${formatModelDisplayName(tried[0])} served first\nNo fallback needed`;
       if (summary.servedBy === "local-direct") return "Local fallback served\nNo provider model needed";
-      return summary.modelReason && !/threshold\s+20000/i.test(summary.modelReason)
-        ? summary.modelReason
-        : "Not recorded - run a new transfer";
+      return "Not recorded - run a new transfer";
     }
 
     function formatModelDisplayName(model) {
-      if (!model) return "n/a";
-      const geminiFlash = String(model).match(/^gemini-(\d+(?:\.\d+)?)-flash(-lite)?$/i);
-      if (geminiFlash) return `Gemini ${geminiFlash[1]} Flash${geminiFlash[2] ? "-Lite" : ""}`;
-      if (model === "mistral-medium-2604" || model === "mistral-medium-3-5") return "Mistral Medium 3.5";
-      if (model === "mistral-large-2512" || model === "mistral-large-3-25-12") return "Mistral Large 3";
+      if (model === "gemini-3.6-flash") return "Gemini 3.6 Flash";
+      if (model === "gemini-3.5-flash-lite") return "Gemini 3.5 Flash-Lite";
       if (model === "ministral-14b-2512") return "Ministral 3 14B";
-      if (model === "ministral-3b-2512" || model === "ministral-3-3b-25-12") return "Ministral 3 3B";
       if (model === "local-direct") return "Local fallback";
-      return model;
+      return "n/a";
     }
 
     function formatBackendLabel(summary) {
@@ -948,7 +943,7 @@
       if (provider === "gemini") return "Google Gemini";
       if (provider === "mistral") return "Mistral";
       if (provider === "local-direct") return "Local";
-      return provider || "n/a";
+      return "n/a";
     }
 
     function formatTurnSummary(capture) {
