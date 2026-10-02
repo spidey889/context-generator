@@ -129,18 +129,23 @@ async function createTelemetrySmokeFixture(repoRoot, databaseEnabled) {
       if (!databaseEnabled) return;
       await rpcChain;
       const row = (await database.query(`select status, last_stage, failure_reason, summary_verified,
-        completed_at::text, terminal_received_at::text, summary_confirmed_at::text
+        received_at::text, summary_confirmed_at::text
         from public.transfers where attempt_id=$1`, [context.attempt_id])).rows[0];
       assert.ok(row, "The installed worker event must reach the database.");
       assert.equal(row.status, "succeeded");
       assert.equal(row.last_stage, "completed");
       assert.equal(row.failure_reason, null);
       assert.equal(row.summary_verified, true);
-      assert.ok(Number.isFinite(Date.parse(row.completed_at)));
-      assert.ok(Number.isFinite(Date.parse(row.terminal_received_at)));
+      assert.ok(Number.isFinite(Date.parse(row.received_at)));
       assert.ok(Number.isFinite(Date.parse(row.summary_confirmed_at)));
       const terminal = received.findLast(payload => payload.attempt_id === context.attempt_id && payload.status === "succeeded");
-      assert.equal(Date.parse(row.completed_at), Date.parse(terminal.completed_at));
+      assert.ok(terminal.completed_at, "Older worker completion metadata must remain accepted without storing it.");
+      const columns = (await database.query(`select column_name from information_schema.columns
+        where table_schema='public' and table_name='transfers'`)).rows.map(column => column.column_name);
+      assert.equal(columns.length, 13);
+      for (const removed of ["updated_at", "completed_at", "summary_received_at", "terminal_received_at"]) {
+        assert.equal(columns.includes(removed), false);
+      }
       assert.equal(Date.parse(row.summary_confirmed_at), Date.parse(terminal.summary_confirmed_at));
       const counts = (await database.query(`select lifetime_summaries::int as total, today_summaries::int as today,
         today_failed_attempts::int as failed from public.users where install_id=$1`, [context.install_id])).rows[0];

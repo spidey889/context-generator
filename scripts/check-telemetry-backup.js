@@ -190,7 +190,7 @@ async function checkSnapshot(snapshot, { applyPending = false, throughVersion } 
     }
     for (const table of tables) await db.exec(`alter table public.${table} enable trigger user;`);
 
-    const compareOriginalColumns = async (cleanupApplied = false) => {
+    const compareOriginalColumns = async (cleanupApplied = false, timestampsRemoved = false) => {
       const removedColumns = [];
       for (const table of tables) {
         const renamed = cleanupApplied && table === "transfer_events";
@@ -200,9 +200,14 @@ async function checkSnapshot(snapshot, { applyPending = false, throughVersion } 
         assert.ok(currentColumns.length > 0, "Captured table must still exist after restore/upgrade");
         const currentByName = new Map(currentColumns.map(column => [column.column_name, column]));
         const removed = columns[table].filter(column => !currentByName.has(column.column_name));
-        // Only the explicitly authorized cleanup may remove the redundant ID.
-        // Users and every retained transfer field still require exact values.
-        assert.deepEqual(removed.map(column => column.column_name), renamed ? ["id"] : [],
+        // Only bounded, explicitly requested cleanups may remove captured
+        // columns. Default recovery still restores every original value.
+        const allowedRemoved = table === "users" ? [] : [
+          ...(renamed ? ["id"] : []),
+          ...(timestampsRemoved ? ["updated_at", "completed_at", "summary_received_at", "terminal_received_at"] : [])
+        ];
+        assert.deepEqual(removed.map(column => column.column_name).sort(),
+          columns[table].filter(column => allowedRemoved.includes(column.column_name)).map(column => column.column_name).sort(),
           "Unexpected original column removal during restore/upgrade");
         removedColumns.push(...removed.map(column => `${table}.${column.column_name}`));
         const retained = columns[table].filter(column => currentByName.has(column.column_name));
@@ -223,7 +228,8 @@ async function checkSnapshot(snapshot, { applyPending = false, throughVersion } 
     for (const name of pending) await db.exec(localSql(fs.readFileSync(path.join(directory, name), "utf8")));
     phase = "upgraded row hash comparison";
     const cleanupApplied = pending.some(name => name.slice(0, 14) === "20261002163357");
-    const removedColumns = await compareOriginalColumns(cleanupApplied);
+    const timestampsRemoved = pending.some(name => name.slice(0, 14) === "20261002221512");
+    const removedColumns = await compareOriginalColumns(cleanupApplied, timestampsRemoved);
 
     // Verify identity allocation will continue above the restored largest ID.
     phase = "restored identity sequence verification";

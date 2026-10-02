@@ -2,7 +2,7 @@
 
 Scope: hosted `cap-context-telemetry` (`iqkzynzxbmemhtiupwwu`), current source,
 recorded migrations, ingestion and recovery. The application schema is small and
-clean after migration twenty-two. Tests were initially deferred under the owner's
+clean after migration twenty-three. Tests were initially deferred under the owner's
 instruction; the requested final merge check subsequently verified them below.
 `LOGIC.md` is the current production contract; this
 document records the audit evidence and remaining policy limits.
@@ -11,6 +11,7 @@ document records the audit evidence and remaining policy limits.
 
 | Finding | Result |
 | --- | --- |
+| Four transfer timestamps exceeded the current debugging/reporting needs | Migration twenty-three removes updated_at, completed_at, summary_received_at and terminal_received_at. First-failure IST attribution uses the identical transaction timestamp directly, without storing it. |
 | First-install name allocation could wait across midnight after sampling the counter date | Fixed: reserve allocation before sampling the IST day; existing users still lock their row first. |
 | Backup checks ignored the captured cron configuration | Fixed in recovery tooling: restore and compare captured IDs, schedule, command, active state, connection target and owner in a local catalog. Older snapshots without cron metadata remain supported. |
 | Optional recovery upgrades could insert an older missing migration out of order | Fixed: require an explicit upper boundary and refuse backdated gaps before applying future migrations. Default restoration uses captured history only. |
@@ -24,7 +25,7 @@ document records the audit evidence and remaining policy limits.
 
 | Object | Purpose |
 | --- | --- |
-| `transfers` — 17 columns | One mutable metadata row per attempt; attempt primary key, route, outcome/stage/reason, size/version, distinct client/database/signed timing. No conversation content. |
+| `transfers` — 13 columns | One mutable metadata row per attempt; attempt primary key, route, outcome/stage/reason, size/version, attempted_at, trusted received_at reset boundary and authenticated summary state/time. No conversation content. |
 | `users` — 7 columns | Installation key, visible number/name, lifetime summaries, daily summaries/failures and internal IST date. |
 | `record_transfer_event(...)` | The stable retry/upsert RPC; immutable attempt ownership, monotonic progress, first terminal outcome and first proof remain sticky. |
 | `preserve_transfer_event_invariants()` | Guard direct writes as well as RPC updates; capture first terminal/proof receipt times. |
@@ -36,7 +37,7 @@ document records the audit evidence and remaining policy limits.
 | Three users indexes | Number PK, unique installation and unique name; each serves a distinct invariant/access path. |
 | `users_user_no_seq` | Retained identity-column machinery and historical backup state; it does not control visible max+1 numbering. |
 | One active cron job | Job 1 at `30 18 * * *` on the GMT scheduler, clearing daily counters at 00:00 IST; historical runs are retained. |
-| Twenty-two additive migrations | Hosted and local histories align; recorded migrations are unchanged. The never-applied activity view remains outside the active folder. |
+| Twenty-three migrations | Hosted and local histories align; earlier recorded migrations are unchanged. The never-applied activity view remains outside the active folder. |
 
 There are no public views, obsolete analytics tables, duplicate RPC overloads,
 staging users tables, incoming foreign keys or application Realtime publication
@@ -68,7 +69,7 @@ attempts can legitimately exist without a counted user row.
 
 ## Verification evidence and limits
 
-Read-only before/after inspection confirms identical complete row hashes for all
+The migration-twenty-two before/after inspection confirmed identical complete row hashes for all
 592 transfers and the one users row. User numbering/sequence, the original
 cutoff, other function bodies, table/function security and cron configuration
 are unchanged. Counters reconcile exactly with retained post-reset transfers.
@@ -112,3 +113,36 @@ trust boundary remain explicit product limits, not hidden schema defects.
   database/telemetry work. The combined result needs its own verification.
   No merge was performed. Branch pushes do not match the regression workflow's
   `master`/`codex/**` filters; a PR targeting `master` runs that code gate.
+
+## Timestamp simplification — October 3 follow-up
+
+Migration twenty-three removes exactly `updated_at`, `completed_at`,
+`summary_received_at` and `terminal_received_at`, plus their three obsolete table
+checks. Retained values and all 592 rows are preserved. `received_at` and the
+original reset cutoff still exclude old test attempts; `summary_verified` and
+the first signed `summary_confirmed_at` remain sticky and count work once.
+
+The failure counter now uses `transaction_timestamp()` on the first failure
+transition. This equals the removed terminal receipt's `now()` value. The
+current IST day is still sampled with `clock_timestamp()` after the existing
+user/allocation locks, preventing a wait across midnight from attributing an old
+failure to today. Daily reset/catch-up behavior and empty-chat exclusion remain.
+
+The RPC keeps all thirteen arguments/defaults, accepting and ignoring the legacy
+`p_completed_at`; Edge/Vercel/worker payloads remain compatible. No client update
+or Edge deployment is required. Existing attempts update only for meaningful
+progress, first outcome or first verification. Historical failure/progress/end
+timing is deliberately unavailable in the smaller table, with removed values
+preserved in the encrypted pre-change export.
+
+Verification passed: 433 deterministic tests, 348 SQL checks across all 23
+migrations (52 new cutover checks), installed Brave through actual local
+relay/Edge handlers into SQL, and exact encrypted pre/post backup restoration.
+The actual pre-change export also upgraded through only migration twenty-three,
+preserving every retained value and user. Hosted rolled-back checks passed legacy
+completion metadata, duplicate outcomes/proofs, failed-paste verification,
+v1/delayed summary days, empty chats, frozen reset cutoff, ownership rejection and
+catch-up reset. Retained transfer hashes, full users hash, sequence, table
+identity/RLS/grants and cron settings remain identical. No unrelated table was
+modified. Controlled local clocks cover both sides of IST midnight and a wait
+across it; an actual multi-session midnight wait was not reproduced.

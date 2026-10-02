@@ -360,6 +360,8 @@ async function main() {
         await db.query("update public.users set today_date=(clock_timestamp() at time zone 'Asia/Kolkata')::date-1 where install_id=$1", [finalInstall]);
         await finalReport(4, "failed", "capture_started", "capture_failed");
         equal(await finalCounts(), { lifetime: 1, today: 0, failed: 1, current_day: true });
+      } else if (name.endsWith("_remove_transfer_reporting_timestamps.sql")) {
+        checks += await require("./check-minimal-transfers-db.js").checkMinimalTransfers(db, sql, appliedMigrations);
       } else await db.exec(sql);
     }
     console.log(`PASS: ${names.length} real migrations replayed; ${checks} database correctness, data preservation, attribution and privilege checks.`);
