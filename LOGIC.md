@@ -264,6 +264,8 @@ Do not overstate current quality enforcement:
 
 ## Telemetry, Storage, and Analysis
 
+The hosted telemetry engine runs PostgreSQL 17.11 after the October 2 managed security update; schema migrations and private access rules were verified again after the upgrade.
+
 | Key/alarm | Purpose |
 | --- | --- |
 | `context-generator-onboarding-dismissed-v2` | Local onboarding dismissal |
