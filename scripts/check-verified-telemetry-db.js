@@ -278,7 +278,10 @@ async function main() {
         checks += await require("./check-users-ist-db.js").checkUsersIst(db, sql);
       } else if (name.endsWith("_exclude_empty_chat_user_failures.sql")) {
         checks += await require("./check-empty-chat-users-db.js").checkEmptyChatUsers(db, sql);
-      } else if (name.endsWith("_remove_unused_user_summary_usage.sql")) {
+      } else if (name.endsWith("_remove_unused_user_summary_usage.sql")
+        || name.endsWith("_remove_unused_verified_summary_daily_usage.sql")) {
+        const removedView = name.endsWith("_remove_unused_user_summary_usage.sql")
+          ? "user_summary_usage" : "verified_summary_daily_usage";
         // Earlier checks intentionally exercise the view at historical migration
         // boundaries; the current schema removes it without changing persistence.
         const beforeRemoval = (await db.query(`select
@@ -289,11 +292,11 @@ async function main() {
           pg_get_functiondef('public.record_user_summary()'::regprocedure) as counter`)).rows;
         // Prove the exact migration refuses dependencies rather than dropping
         // them. This fixture and all checks run locally only when requested.
-        await db.exec("create view public.removal_dependency_fixture as select * from public.user_summary_usage;");
+        await db.exec(`create view public.removal_dependency_fixture as select * from public.${removedView};`);
         await rejectsCode(() => db.exec(sql), "2BP01");
         await db.exec("rollback; drop view public.removal_dependency_fixture;");
         await db.exec(sql);
-        equal((await one("select to_regclass('public.user_summary_usage') as view")).view, null);
+        equal((await one("select to_regclass($1) as removed", [`public.${removedView}`])).removed, null);
         equal((await db.query(`select
           (select jsonb_agg(to_jsonb(u) order by user_no) from public.users u) as users,
           (select jsonb_agg(to_jsonb(e) order by id) from public.transfer_events e) as events,
@@ -302,7 +305,8 @@ async function main() {
           pg_get_functiondef('public.record_user_summary()'::regprocedure) as counter`)).rows, beforeRemoval);
         await asRole("service_role", async () => {
           await db.query("select * from public.users limit 0");
-          await db.query("select * from public.verified_summary_daily_usage limit 0");
+          await db.query("select * from public.transfer_events limit 0");
+          if (removedView === "user_summary_usage") await db.query("select * from public.verified_summary_daily_usage limit 0");
           await db.query("select * from public.transfer_event_outcomes limit 0"); checks++;
         });
       } else await db.exec(sql);
