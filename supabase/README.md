@@ -50,4 +50,3 @@ CAP_CONTEXT_TELEMETRY_SMOKE=1 npm run test:extension-smoke adds installed Brave 
 Post-deployment checks: migration history parity; original row/ID/counter preservation; unsigned success uncounted; verified duplicates counted once across simultaneous requests; failed paste independent from summary completion; v1 unknown-day/v2 UTC day; identity rejection; direct Edge denial; grants/RLS/advisors; cron schedule and recent successful runs. Check both HTTP and stored state: a 204 alone cannot establish correct counters.
 
 The managed PostgreSQL 17.6 installation needs the platform's 17.11 security patch rollout. Review [upgrade eligibility and downtime](https://supabase.com/docs/guides/platform/upgrading) in the project settings; an application SQL migration cannot install that managed engine patch. No blind pause/restore is part of this deployment. See [Supabase backups](https://supabase.com/docs/guides/platform/backups) for managed recovery options.
-

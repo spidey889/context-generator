@@ -249,6 +249,19 @@ async function main() {
     equal(restoredBackup.pendingMigrations, 3);
     equal(restoredBackup.transferEvents, legacySnapshot.transfer_events.length);
     equal(restoredBackup.users, legacySnapshot.users.length);
+    // Supabase CLI migration history stores parsed statements without trailing
+    // semicolons, whereas MCP can store one whole SQL file. Replay both formats.
+    const splitStatementSnapshot = { ...legacySnapshot, migrations: legacySnapshot.migrations.map((migration, index) => {
+      if (index !== 0) return migration;
+      const statements = migration.statements[0]
+        .split(/;\s*(?=(?:create index|alter table|create policy)\b)/i)
+        .map(sql => sql.trim().replace(/;$/, ""));
+      assert.ok(statements.length > 1, "Fixture must contain distinct unterminated SQL statements");
+      return { ...migration, statements };
+    }) };
+    const restoredSplitBackup = await checkSnapshot(splitStatementSnapshot);
+    equal(restoredSplitBackup.originalValuesPreserved, true);
+    equal(restoredSplitBackup.originalColumnHashes, restoredBackup.originalColumnHashes);
     console.log(`PASS: ${names.length} real migrations replayed; ${checks} database correctness, data preservation, attribution and privilege checks.`);
     console.log(`Per-install default plan: ${JSON.stringify(plan.rows[0]["QUERY PLAN"][0].Plan["Node Type"])}; retained composite index verified.`);
     console.log("Local pg_cron catalog shim: scheduled SQL tested; hosted scheduling and concurrent sessions require deployment verification.");

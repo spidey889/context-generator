@@ -56,7 +56,10 @@ async function checkSnapshot(snapshot) {
       assert.ok(Array.isArray(migration.statements) && migration.statements.every(sql => typeof sql === "string"));
       assert.ok(!capturedVersions.has(String(migration.version)), "Migration versions must be unique");
       capturedVersions.add(String(migration.version));
-      await db.exec(localSql(migration.statements.join("\n")));
+      // The CLI records individually parsed statements without terminators;
+      // MCP-applied migrations can instead contain the entire SQL file. Adding
+      // a separator supports both formats, including already-terminated SQL.
+      await db.exec(localSql(migration.statements.join(";\n")));
     }
 
     phase = "private row restore";
