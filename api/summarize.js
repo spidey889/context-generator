@@ -19,17 +19,17 @@ const MISTRAL_PRIMARY_MODEL = "ministral-14b-2512";
 const FLASH_LITE_FALLBACK_MODEL = "gemini-3.5-flash-lite";
 const REMOTE_CHAIN_BUDGET_MS = 270000;
 const OPENROUTER_CHAT_COMPLETIONS_URL = "https://openrouter.ai/api/v1/chat/completions";
-// A single key serves these pinned routes. Only Apodex starts enabled; enabling
-// another model must be deliberate and must not extend the server deadline.
+// A single key serves these pinned routes. Ling leads; Apodex remains its backup.
+// Enabling another model must be deliberate and cannot extend the deadline.
 const OPENROUTER_MODELS = [
+  // Ling has no :free suffix. A zero-price provider filter prevents paid routing.
+  { model: "inclusionai/ling-3.1-flash", enabledEnv: "OPENROUTER_LING_ENABLED", defaultEnabled: true },
   { model: "apodex/apodex-1.1-mini:free", enabledEnv: "OPENROUTER_APODEX_ENABLED", defaultEnabled: true },
   { model: "qwen/qwen3.8-27b:free", enabledEnv: "OPENROUTER_QWEN_ENABLED", defaultEnabled: false },
   { model: "dots-studio/dots-3-note-preview:free", enabledEnv: "OPENROUTER_DOTS_ENABLED", defaultEnabled: false },
-  { model: "google/gemma-4-26b-a4b-it:free", enabledEnv: "OPENROUTER_GEMMA_ENABLED", defaultEnabled: false },
-  // Ling has no :free suffix. A zero-price provider filter prevents paid routing.
-  { model: "inclusionai/ling-3.1-flash", enabledEnv: "OPENROUTER_LING_ENABLED", defaultEnabled: false }
+  { model: "google/gemma-4-26b-a4b-it:free", enabledEnv: "OPENROUTER_GEMMA_ENABLED", defaultEnabled: false }
 ];
-const MISTRAL_PROMPT_CACHE_VERSION = "capcontext-summary-v8";
+const MISTRAL_PROMPT_CACHE_VERSION = "capcontext-summary-v9";
 const SUMMARY_PROVIDERS = {
   openrouter: {
     id: "openrouter",
@@ -61,7 +61,7 @@ const SUMMARY_PROFILES = [
       doing: "2-3 lines: the immediate task and why it matters",
       left: "1-2 lines: exact stopping point",
       decisions: "0-3 bullets: only real decisions",
-      questions: "0-2 bullets, or None",
+      questions: "Only unresolved items explicitly stated; missing details do not create questions. None if none stated",
       context: "2-4 dense bullets: exact details worth carrying"
     }
   },
@@ -77,7 +77,7 @@ const SUMMARY_PROFILES = [
       doing: "60-90 words: actual task and concrete direction",
       left: "40-70 words: latest state and next validation point",
       decisions: "3-6 compact bullets if available",
-      questions: "1-4 compact bullets, or None",
+      questions: "Only unresolved items explicitly stated; missing details do not create questions. None if none stated",
       context: "80-140 words in compact bullets: files, constraints, exact copy, commands, risks"
     }
   },
@@ -93,7 +93,7 @@ const SUMMARY_PROFILES = [
       doing: "110-160 words: task, product/repo/platform, attempts, direction",
       left: "80-120 words: latest state, blocker, next validation",
       decisions: "5-9 compact bullets preserving tradeoffs",
-      questions: "2-6 compact bullets, or None",
+      questions: "Only unresolved items explicitly stated; missing details do not create questions. None if none stated",
       context: "180-280 words in dense bullets: files, functions, commands, errors, tests, deployment state, constraints"
     }
   },
@@ -105,11 +105,11 @@ const SUMMARY_PROFILES = [
     maxTokens: 4200,
     sectionBudget: "WHO I AM 80-140 words; WHAT WE WERE DOING 170-240; WHERE WE LEFT OFF 120-180; DECISIONS MADE 180-280; OPEN QUESTIONS 100-180; KEY CONTEXT 350-500; NEXT STEP exactly as instructed.",
     templateHints: {
-      who: "80-140 words: user's name if mentioned, what they are building or trying to do, role/background/preferences that matter, and any durable context the next AI must know",
+      who: "Explicit user/project context only, or None; never assume a named project owner is the user",
       doing: "170-240 words: the actual task, product/repo/platform, why it mattered, what was tried or discussed, and the concrete direction the user wanted",
       left: "120-180 words: exact stopping point, latest state, latest user instruction, current blocker or next validation point",
       decisions: "180-280 words in compact bullets: every important user-made or user-accepted decision, user-deferred choice, accepted tradeoff, accepted risk, and reason when available",
-      questions: "100-180 words in compact bullets: unresolved risks, validation gaps, review concerns, things deferred by the user, or None only when truly nothing remains",
+      questions: "Only unresolved items explicitly stated; missing details do not create questions. None if none stated",
       context: "350-500 words in dense bullets: exact files, functions, constants, commands, errors, tests, deployment state, APIs, model IDs, payload sizes, user constraints, tone/copy requirements, and anything that prevents repeating work"
     }
   },
@@ -121,11 +121,11 @@ const SUMMARY_PROFILES = [
     maxTokens: 7000,
     sectionBudget: "WHO I AM 100-180 words; WHAT WE WERE DOING 260-360; WHERE WE LEFT OFF 180-260; DECISIONS MADE 260-400; OPEN QUESTIONS 160-260; KEY CONTEXT 600-850; NEXT STEP exactly as instructed.",
     templateHints: {
-      who: "100-180 words: user's name if mentioned, what they are building or trying to do, role/background/preferences that matter, and any durable context the next AI must know",
+      who: "Explicit user/project context only, or None; never assume a named project owner is the user",
       doing: "260-360 words: the actual task, product/repo/platform, why it mattered, what was tried or discussed, and the concrete direction the user wanted",
       left: "180-260 words: exact stopping point, latest state, latest user instruction, current blocker or next validation point",
       decisions: "260-400 words in compact bullets: every important user-made or user-accepted decision, user-deferred choice, accepted tradeoff, accepted risk, and reason when available",
-      questions: "160-260 words in compact bullets: unresolved risks, validation gaps, review concerns, things deferred by the user, or None only when truly nothing remains",
+      questions: "Only unresolved items explicitly stated; missing details do not create questions. None if none stated",
       context: "600-850 words in dense bullets: exact files, functions, constants, commands, errors, tests, deployment state, APIs, model IDs, payload sizes, user constraints, tone/copy requirements, and anything that prevents repeating work"
     }
   }
@@ -463,7 +463,7 @@ async function createSummaryWithFallback({ conversation, profile, geminiApiKey, 
   const unavailableProviders = new Set();
   const deadline = Date.now() + REMOTE_CHAIN_BUDGET_MS;
   // Give the first route 90s and divide the remainder fairly among fallbacks.
-  // Default: Apodex 90s + Google 60s + Flash-Lite 60s + Mistral 60s.
+  // Default: Ling 90s + Apodex/Google/Flash-Lite/Mistral 45s each.
   // Without OpenRouter, the original three 90s slots remain unchanged.
   const fallbackBudgetMs = routes.length > 1
     ? Math.min(PROVIDER_ATTEMPT_TIMEOUT_MS, Math.floor((REMOTE_CHAIN_BUDGET_MS - PROVIDER_ATTEMPT_TIMEOUT_MS) / (routes.length - 1)))
@@ -813,7 +813,8 @@ ${headerRule}
 - When the user later changes an earlier decision, or older and newer project states conflict, use the latest user-confirmed decision or state as the current truth.
 - Mention an older state only when it still matters for continuation, and label it explicitly as replaced, rejected, changed, or historical.
 - DECISIONS MADE must contain only decisions actually made by the user or clearly accepted or confirmed by the user, including choices the user deliberately deferred and tradeoffs the user accepted.
-- OPEN QUESTIONS should include unresolved risks, review concerns, validation gaps, or decisions deferred by the user. Write "None" only when the transcript truly leaves no unresolved issue.
+- WHO I AM describes the user only when their identity, role or preferences are explicit. A named project/incident owner is not necessarily the user. Preserve the owner separately; never identify the user as that person without an explicit link. Do not describe yourself or invent a user biography.
+- OPEN QUESTIONS contains only questions, risks, validation gaps or choices explicitly left unresolved in the transcript. Missing information alone is not an open question or a task. Do not turn confirmed states (for example, implementation not started or rollback not approved) into uncertainty. Write "None" when no unresolved item is stated, even if other details are absent.
 - Do not invent, correct, or infer project facts. If the transcript is unclear, say what is uncertain instead of guessing.
 - Avoid broad labels like "security discussion", "early development", or platform names unless the transcript actually supports them.
 - Do not pad or write generic filler; every line should carry useful context.
@@ -997,6 +998,7 @@ function formatDirectConversationExcerpt(conversation) {
 }
 
 function getContextCarryTemplate(profile, options = {}) {
+  // The content gate also uses these exact hints to reject empty template echoes.
   const hints = profile.templateHints;
   const header = options.plainHeader ? CONTEXT_CARRY_TITLE : CONTEXT_CARRY_BOX_HEADER;
   return `${header}

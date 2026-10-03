@@ -150,7 +150,8 @@ test("server receipts cover remote success and emergency carry, and missing keys
   const { verifySummaryProof } = await proofHelpers();
   const originalFetch = global.fetch;
   const names = ["TELEMETRY_SIGNING_KEY", "GEMINI_API_KEY", "MISTRAL_API_KEY", "MISTRAL_ENABLED",
-    "OPENROUTER_API_KEY", "OPENROUTER_ENABLED", "OPENROUTER_APODEX_ENABLED"];
+    "OPENROUTER_API_KEY", "OPENROUTER_ENABLED", "OPENROUTER_APODEX_ENABLED", "OPENROUTER_LING_ENABLED",
+    "OPENROUTER_QWEN_ENABLED", "OPENROUTER_DOTS_ENABLED", "OPENROUTER_GEMMA_ENABLED"];
   const previous = Object.fromEntries(names.map(name => [name, process.env[name]]));
   t.after(() => {
     global.fetch = originalFetch;
@@ -164,6 +165,8 @@ test("server receipts cover remote success and emergency carry, and missing keys
   process.env.MISTRAL_ENABLED = "true";
   process.env.OPENROUTER_API_KEY = "test-openrouter-key";
   process.env.OPENROUTER_APODEX_ENABLED = "true";
+  process.env.OPENROUTER_LING_ENABLED = "true";
+  for (const name of ["OPENROUTER_QWEN_ENABLED", "OPENROUTER_DOTS_ENABLED", "OPENROUTER_GEMMA_ENABLED"]) process.env[name] = "false";
   const context = payload({ status: "started", last_stage: "summary_request_started", failure_reason: null });
   const req = { method: "POST", headers: { "content-type": "application/json", "x-cap-context-client": "cap-context-extension/1" }, body: {
     conversation: "User: Windows build passed.\nClaude: Linux checks remain pending.\n".repeat(80), telemetry: context
@@ -184,6 +187,7 @@ test("server receipts cover remote success and emergency carry, and missing keys
     await summarize(req, res);
     assert.equal(res.code, 200);
     assert.equal(res.body.timing.provider, provider);
+    if (provider === "openrouter") assert.equal(res.body.timing.primaryModel, "inclusionai/ling-3.1-flash");
     assert.equal(await verifySummaryProof({ ...context, summary_proof: res.body.summaryProof }, KEY), true);
     const signedV2 = { ...context, last_stage: "summary_completed",
       summary_proof: res.body.summaryProofV2, summary_confirmed_at: res.body.summaryConfirmedAt };
