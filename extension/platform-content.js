@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-03-routing-product-merge-v95";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-03-routing-master-hover-v97";
   const INLINE_PILL_SIZE = 36;
   const ownedUiStyleSheets = new Map();
   const CLAUDE_INLINE_STYLE_ID = "context-generator-claude-inline-styles";
@@ -2150,7 +2150,7 @@
     return models
       .filter((model) => typeof model === "string" && model.trim())
       // Preserve the complete bounded backend chain in Latest Run. The current
-      // maximum is five OpenRouter routes + Flash + Flash-Lite + Mistral.
+      // maximum is four OpenRouter routes + Flash + Flash-Lite + Mistral.
       // Local carry is the outcome, not an additional attempted remote model.
       .slice(0, 8)
       .map((model) => model.trim());
@@ -5008,10 +5008,23 @@
     icon.draggable = false;
     bubble.appendChild(icon);
 
+    const reducedMotion = window.matchMedia?.("(prefers-reduced-motion: reduce)");
+    const updateMotion = () => {
+      bubble.style.transition = reducedMotion?.matches
+        ? "opacity 0.2s ease,filter 0.18s ease"
+        : "opacity 0.2s ease,filter 0.18s ease,transform 0.24s cubic-bezier(0.22,1,0.36,1)";
+    };
+    updateMotion();
+    addOwnedEventListener(reducedMotion, "change", updateMotion);
+    // Picker/handoff owns the pressed scale; hovering must not overwrite it.
+    const canHover = () => !bubble.disabled && !isRunning && bubble.getAttribute("aria-expanded") !== "true";
     addOwnedEventListener(bubble, "mouseenter", () => {
+      if (!canHover()) return;
       bubble.style.filter = "brightness(1.12) drop-shadow(0 2px 6px rgba(0,0,0,0.25))";
+      bubble.style.transform = "translate3d(0,0,0) scale(1.14)";
     });
     addOwnedEventListener(bubble, "mouseleave", () => {
+      if (!canHover()) return;
       bubble.style.filter = "none";
       bubble.style.transform = "translate3d(0,0,0) scale(1)";
     });
@@ -5019,7 +5032,8 @@
       if (!bubble.disabled) bubble.style.transform = "translate3d(0,0,0) scale(0.91)";
     });
     addOwnedEventListener(bubble, "pointerup", () => {
-      bubble.style.transform = "translate3d(0,0,0) scale(1)";
+      if (!canHover()) return;
+      bubble.style.transform = `translate3d(0,0,0) scale(${bubble.matches(":hover") ? 1.14 : 1})`;
     });
     addOwnedEventListener(bubble, "pointercancel", () => {
       bubble.style.transform = "translate3d(0,0,0) scale(1)";
