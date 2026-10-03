@@ -659,6 +659,63 @@ test("destination picker dismissal clears active visuals without focus and prese
   }
 });
 
+function makePickerFocusFixture(hostname = "chatgpt.com") {
+  const composer = new FakeElement({ tag: "form" });
+  const input = new FakeElement({ attrs: { contenteditable: "true", role: "textbox" } });
+  composer.appendChild(input);
+  const hooks = loadPlatformContent([composer, input], hostname);
+  assert.equal(hooks.findPlatformInput(), input);
+  const bubble = new FakeElement({ tag: "button", attrs: { id: "context-generator-bubble" } });
+  const sheet = new FakeElement({ attrs: { id: "context-generator-destination-sheet" } });
+  const tile = new FakeElement({ tag: "button" });
+  sheet.appendChild(tile);
+  sheet.style.display = "block";
+  hooks.registerElementId(bubble.id, bubble);
+  hooks.registerElementId(sheet.id, sheet);
+  hooks.document.activeElement = tile;
+  const focusCalls = [];
+  for (const node of [input, bubble]) {
+    node.focus = () => { focusCalls.push(node); hooks.document.activeElement = node; };
+  }
+  return { hooks, input, bubble, sheet, tile, focusCalls };
+}
+
+clockTest("picker dismissal restores composer through a restarted hide timer without focusing the orb", (t) => {
+  for (const hostname of ["chatgpt.com", "claude.ai", "gemini.google.com", "grok.com", "chat.deepseek.com"]) {
+    const { hooks, input, sheet, focusCalls } = makePickerFocusFixture(hostname);
+    hooks.hideDestinationSheet();
+    t.mock.timers.tick(100);
+    // A resize restarts the hide animation without requesting focus restoration.
+    hooks.hideDestinationSheet({ restoreFocus: false });
+    t.mock.timers.tick(99);
+    assert.deepEqual(focusCalls, [], `${hostname}: focus waits for the dismissal boundary`);
+    t.mock.timers.tick(1);
+    assert.equal(sheet.style.display, "block", "the restarted hide animation is still running");
+    assert.equal(hooks.document.activeElement, input);
+    assert.deepEqual(focusCalls, [input], `${hostname}: only the native composer receives focus`);
+    t.mock.timers.tick(100);
+    assert.equal(sheet.style.display, "none");
+    assert.deepEqual(focusCalls, [input], "the second hide must not restore focus again");
+  }
+});
+
+clockTest("pending picker dismissal preserves reopened picker and newer page focus", (t) => {
+  for (const race of ["reopened picker", "page control"]) {
+    const { hooks, bubble, sheet, tile, focusCalls } = makePickerFocusFixture();
+    hooks.hideDestinationSheet({ immediate: true });
+    const expectedFocus = race === "reopened picker" ? tile : new FakeElement({ tag: "button" });
+    if (race === "reopened picker") {
+      bubble.setAttribute("aria-expanded", "true");
+      sheet.setAttribute("aria-hidden", "false");
+      sheet.style.display = "block";
+    }
+    hooks.document.activeElement = expectedFocus;
+    t.mock.timers.tick(0);
+    assert.equal(hooks.document.activeElement, expectedFocus, race);
+    assert.deepEqual(focusCalls, [], `${race}: neither composer nor orb should steal focus`);
+  }
+});
+
 test("composer lifecycle cleanup never restores focus to the orb", () => {
   const source = fs.readFileSync(SOURCE_PATH, "utf8");
   const ensureStart = source.indexOf("function ensureFloatingButton(");
