@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-03-routing-master-hover-v97";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-03-approved-orb-hover-v98";
   const INLINE_PILL_SIZE = 36;
   const ownedUiStyleSheets = new Map();
   const CLAUDE_INLINE_STYLE_ID = "context-generator-claude-inline-styles";
@@ -4993,7 +4993,7 @@
       "contain:layout style paint",
       "transform:translate3d(0,0,0) scale(1)",
       "transform-origin:center",
-      "transition:opacity 0.2s ease,filter 0.18s ease,transform 0.24s cubic-bezier(0.22,1,0.36,1)",
+      "transition:opacity 0.2s ease,filter 0.24s ease,transform 0.26s cubic-bezier(0.16,1,0.3,1)",
       "pointer-events:auto"
     ].join(";");
 
@@ -5011,8 +5011,8 @@
     const reducedMotion = window.matchMedia?.("(prefers-reduced-motion: reduce)");
     const updateMotion = () => {
       bubble.style.transition = reducedMotion?.matches
-        ? "opacity 0.2s ease,filter 0.18s ease"
-        : "opacity 0.2s ease,filter 0.18s ease,transform 0.24s cubic-bezier(0.22,1,0.36,1)";
+        ? "opacity 0.2s ease,filter 0.24s ease"
+        : "opacity 0.2s ease,filter 0.24s ease,transform 0.26s cubic-bezier(0.16,1,0.3,1)";
     };
     updateMotion();
     addOwnedEventListener(reducedMotion, "change", updateMotion);
@@ -5020,8 +5020,8 @@
     const canHover = () => !bubble.disabled && !isRunning && bubble.getAttribute("aria-expanded") !== "true";
     addOwnedEventListener(bubble, "mouseenter", () => {
       if (!canHover()) return;
-      bubble.style.filter = "brightness(1.12) drop-shadow(0 2px 6px rgba(0,0,0,0.25))";
-      bubble.style.transform = "translate3d(0,0,0) scale(1.14)";
+      bubble.style.filter = "brightness(1.1) saturate(1.08) drop-shadow(0 0 6px rgba(139,92,246,0.38)) drop-shadow(0 3px 5px rgba(0,0,0,0.18))";
+      bubble.style.transform = "translate3d(0,-1px,0) scale(1.14)";
     });
     addOwnedEventListener(bubble, "mouseleave", () => {
       if (!canHover()) return;
@@ -5029,11 +5029,13 @@
       bubble.style.transform = "translate3d(0,0,0) scale(1)";
     });
     addOwnedEventListener(bubble, "pointerdown", () => {
-      if (!bubble.disabled) bubble.style.transform = "translate3d(0,0,0) scale(0.91)";
+      if (!bubble.disabled) bubble.style.transform = "translate3d(0,0,0) scale(0.95)";
     });
     addOwnedEventListener(bubble, "pointerup", () => {
       if (!canHover()) return;
-      bubble.style.transform = `translate3d(0,0,0) scale(${bubble.matches(":hover") ? 1.14 : 1})`;
+      bubble.style.transform = bubble.matches(":hover")
+        ? "translate3d(0,-1px,0) scale(1.14)"
+        : "translate3d(0,0,0) scale(1)";
     });
     addOwnedEventListener(bubble, "pointercancel", () => {
       bubble.style.transform = "translate3d(0,0,0) scale(1)";
