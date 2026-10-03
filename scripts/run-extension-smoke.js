@@ -704,6 +704,20 @@ async function verifyPickerProductChanges(session, state) {
   }
   await session.evaluate('document.getElementById("context-generator-bubble").click()');
   await waitFor(() => session.evaluate('getComputedStyle(document.getElementById("context-generator-destination-sheet")).opacity === "1"'), "the product picker");
+  const orbPoint = await session.evaluate(`(() => {
+    const rect = document.getElementById("context-generator-bubble").getBoundingClientRect();
+    return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
+  })()`);
+  for (const type of ["mousePressed", "mouseReleased"]) {
+    await session.call("Input.dispatchMouseEvent", { type, ...orbPoint, button: "left", clickCount: 1 });
+  }
+  await waitFor(() => session.evaluate('document.getElementById("context-generator-destination-sheet").style.display === "none"'),
+    "picker dismissal through a real orb click");
+  assert.equal(await session.evaluate('document.getElementById("context-generator-destination-backdrop").style.clipPath'), "",
+    "Dismissal must release the backdrop cutout.");
+  await session.evaluate('document.getElementById("context-generator-bubble").click()');
+  await waitFor(() => session.evaluate('getComputedStyle(document.getElementById("context-generator-destination-sheet")).opacity === "1"'),
+    "the reopened product picker");
   const product = await session.evaluate(`(() => {
     const sheet = document.getElementById("context-generator-destination-sheet");
     const home = sheet.querySelector(".context-generator-destination-home-link");
@@ -718,6 +732,14 @@ async function verifyPickerProductChanges(session, state) {
       controlCount: controls.length,
       trailCount: sheet.querySelectorAll(".context-generator-speed-lines i").length };
   })()`);
+  const orbVisibleThroughBackdrop = `(() => {
+    const orb = document.getElementById("context-generator-bubble");
+    const rect = orb.getBoundingClientRect();
+    return document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2) === orb
+      && getComputedStyle(document.getElementById("context-generator-destination-backdrop")).clipPath !== "none";
+  })()`;
+  assert.equal(await session.evaluate(orbVisibleThroughBackdrop), true,
+    "The open picker must leave the real orb above the backdrop's hit-test/blur region.");
   assert.equal(product.href, "https://context-generator-five.vercel.app/");
   assert.equal(product.target, "_blank");
   assert.match(product.rel, /noopener/);
@@ -745,6 +767,19 @@ async function verifyPickerProductChanges(session, state) {
     assert.equal(reached.size, product.controlCount, "Every enabled picker control must remain reachable.");
   }
   assert.equal(product.trailCount, 3);
+  if (PICKER_SCREENSHOT_PATH) {
+    const clip = await session.evaluate(`(() => {
+      const sheet = document.getElementById("context-generator-destination-sheet").getBoundingClientRect();
+      const orb = document.getElementById("context-generator-bubble").getBoundingClientRect();
+      const x = Math.max(0, Math.min(sheet.left, orb.left) - 18);
+      const y = Math.max(0, Math.min(sheet.top, orb.top) - 18);
+      return { x, y, width: Math.min(innerWidth - x, Math.max(sheet.right, orb.right) + 18 - x),
+        height: Math.min(innerHeight - y, Math.max(sheet.bottom, orb.bottom) + 18 - y), scale: 1 };
+    })()`);
+    const screenshot = await session.call("Page.captureScreenshot", { format: "png", clip });
+    await fs.promises.mkdir(path.dirname(PICKER_SCREENSHOT_PATH), { recursive: true });
+    await fs.promises.writeFile(PICKER_SCREENSHOT_PATH, Buffer.from(screenshot.data, "base64"));
+  }
   await waitFor(() => session.evaluate(`(() => {
     const line = document.querySelector(".context-generator-speed-lines i");
     return line.getAnimations().some(animation => animation.playState === "running" && animation.currentTime > 0);
@@ -765,6 +800,7 @@ async function verifyPickerProductChanges(session, state) {
       const r = document.getElementById("context-generator-destination-sheet").getBoundingClientRect();
       return r.left >= 0 && r.right <= innerWidth;
     })()`), true, `Picker must fit at ${width}px.`);
+    assert.equal(await session.evaluate(orbVisibleThroughBackdrop), true, `Orb must stay clear/clickable at ${width}px.`);
   }
   await session.evaluate(`(() => {
     const toggle = document.querySelector(".context-generator-speed-toggle");
@@ -776,7 +812,7 @@ async function verifyPickerProductChanges(session, state) {
   await waitFor(() => session.evaluate(`document.activeElement?.matches('[contenteditable="true"], textarea')`),
     "native composer focus after picker dismissal");
   assert.deepEqual([state.summaryRequests.length, state.jsonRequests], requestsBefore, "Picker interaction must not read or send chat content.");
-  process.stdout.write("✓ Native Tab/Shift+Tab skip both orbs, picker controls cycle, dismissal returns to composer; motion and narrow fit pass.\n");
+  process.stdout.write("✓ Orb stays clear/clickable through picker reopen/narrow layouts; native Tab skips both orbs, focus/motion pass.\n");
 }
 
 async function verifyEmptyChatError(session, browserSession, state, { removeTurns = false, screenshot = false } = {}) {

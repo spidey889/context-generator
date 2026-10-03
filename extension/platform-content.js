@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-03-orbs-skip-tab-v99";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-03-tight-orb-cutout-v101";
   const INLINE_PILL_SIZE = 36;
   const ownedUiStyleSheets = new Map();
   const CLAUDE_INLINE_STYLE_ID = "context-generator-claude-inline-styles";
@@ -6426,6 +6426,8 @@
     sheet.appendChild(footer);
 
     addOwnedEventListener(sheet, "click", (event) => event.stopPropagation());
+    addOwnedEventListener(window, "scroll", updateDestinationBackdropCutout, { capture: true, passive: true });
+    addOwnedEventListener(window, "resize", updateDestinationBackdropCutout);
     document.body.appendChild(sheet);
     addOwnedEventListener(document, "click", () => {
       if (!isDestinationSheetOpen()) return;
@@ -6517,9 +6519,10 @@
     const bubble = document.getElementById(BUBBLE_ID);
     if (bubble) {
       bubble.setAttribute("aria-expanded", "true");
-      bubble.style.filter = "brightness(1.14) drop-shadow(0 3px 9px rgba(92,57,145,0.38))";
-      bubble.style.transform = "translate3d(0,0,0) scale(0.94)";
+      bubble.style.filter = "brightness(1.14) saturate(1.12) drop-shadow(0 0 7px rgba(153,110,235,0.58)) drop-shadow(0 3px 8px rgba(78,42,128,0.32))";
+      bubble.style.transform = "translate3d(0,-1px,0) scale(1.08)";
     }
+    updateDestinationBackdropCutout();
     if (window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) {
       backdrop.style.opacity = "1";
       sheet.style.opacity = "1";
@@ -6596,6 +6599,22 @@
     }
   }
 
+  function updateDestinationBackdropCutout() {
+    const bubble = document.getElementById(BUBBLE_ID);
+    const backdrop = document.getElementById(DESTINATION_SHEET_BACKDROP_ID);
+    if (!bubble || !backdrop || bubble.getAttribute("aria-expanded") !== "true") return;
+    const rect = bubble.getBoundingClientRect();
+    const x = Math.round(rect.left + rect.width / 2);
+    const y = Math.round(rect.top + rect.height / 2);
+    // Match the solid artwork, keeping the native button/background under blur.
+    const radius = Math.max(1, Math.round(Math.min(rect.width, rect.height) * 0.4));
+    // Inline ancestors trap z-index. Clip the scrim around the real orb instead
+    // of moving/cloning it or lifting the native composer's controls above blur.
+    // Unlike a CSS mask, this hole also lets pointer clicks reach the orb.
+    const clip = `path(evenodd, "M0 0 H${window.innerWidth} V${window.innerHeight} H0 Z M${x - radius} ${y} a${radius} ${radius} 0 1 0 ${radius * 2} 0 a${radius} ${radius} 0 1 0 ${-radius * 2} 0 Z")`;
+    if (backdrop.style.clipPath !== clip) backdrop.style.clipPath = clip;
+  }
+
   function releaseDestinationSheetBackdrop({ immediate = false } = {}) {
     const backdrop = document.getElementById(DESTINATION_SHEET_BACKDROP_ID);
     if (!backdrop) return;
@@ -6608,10 +6627,12 @@
     if (!immediate && !reducedMotion && backdrop.style.display === "block") {
       destinationBackdropHideTimer = setTimeout(() => {
         backdrop.style.display = "none";
+        backdrop.style.clipPath = "";
         destinationBackdropHideTimer = null;
       }, DESTINATION_SHEET_EXIT_MS);
     } else {
       backdrop.style.display = "none";
+      backdrop.style.clipPath = "";
     }
   }
 
