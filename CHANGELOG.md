@@ -2,6 +2,8 @@
 
 Historical changes; `LOGIC.md` describes current source behavior. Repository changes do not establish deployment or Web Store release state.
 
+- 2026-10-04 (`master`, agent documentation): Reorganized `LOGIC.md` for agent use around ownership, transfer sequencing, capture, summaries, telemetry, composer/paste contracts and targeted verification. Removed repetition and dated runtime/deployment snapshots while retaining supported text exceptions, privacy/draft guards, deadlines, compatibility and practical evidence limits. Clarified signed summary work versus paste success, source versus release state, fixture versus live evidence, chronological queries and which checks `gate` actually includes. Checked current source references, local links and document consistency; documentation only, no runtime tests needed.
+
 - 2026-10-04 (`master`, audit cleanup): Removed the dated `SCRAPING_AUDIT.md` at the owner's request.
 
 - 2026-10-04 (`master`, handoff skill reference): Added `HANDOFF_SKILL.md` with David Ondrej's complete handoff workflow and template, a pinned upstream source, and its MIT license. The reusable skill reference is separate from generated session handoffs.

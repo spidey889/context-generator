@@ -1,370 +1,553 @@
 # Cap Context Production Logic
 
-This file documents the current extension and backend contracts. `master` is the production source branch; deployment and Web Store release states are separate. Historical decisions live in `CHANGELOG.md`; `todo.md` is personal tracking.
+This is the working reference for the extension and backend contracts in this checkout. `master` is the production source branch, but a local change, Git push, ready Vercel deployment and Web Store release are separate states. Verify the relevant deployed artifact before making a production claim. Historical decisions and validation results belong in [CHANGELOG.md](CHANGELOG.md).
 
-## Runtime
+Read the invariants and ownership map first, then the section for the component being changed. This document explains the contracts and the reasons for fragile behavior; source constants and tests resolve exact implementation details. Update it when behavior changes, without copying past test counts or deployment snapshots into the current contract.
 
-- Node 22; the extension has no build step or runtime npm dependencies. Load the unpacked `extension/` folder for browser checks.
-- Manifest version: `1.4.8`, with Chromium service-worker and Firefox background-script declarations.
-- Backend URL used by the extension: `https://context-generator-five.vercel.app`.
-- No release ZIP is tracked. Packaging and Web Store publication are separate from repository pushes.
-- Launch-film sources, reproduction instructions and credits are in `brag/README.md`.
+## Navigation and runtime
 
-## Non-Negotiable Invariants
+- [Ownership map](#ownership-map): files and entry points for a change.
+- [Transfer lifecycle](#transfer-lifecycle): sequencing, deadlines and cross-tab messages.
+- [Capture](#capture): JSON adapters, DOM sweep and completeness boundaries.
+- [Summaries and backend](#summaries-and-backend): routing, validation and exact local recovery.
+- [Telemetry and local receipts](#telemetry-and-local-receipts): proof, persistence, counters and privacy.
+- [Composer UI and paste](#composer-ui-and-paste): placement ownership, lifecycle and draft protection.
+- [Changes that must stay aligned](#changes-that-must-stay-aligned): coupled contracts.
+- [Verification and diagnosis](#verification-and-diagnosis): checks to run and what their results establish.
 
-1. Opening, browsing, closing, or cancelling the destination picker never captures or transmits chat text. Preconnects contain no conversation data.
-2. Capture begins only after the user selects a destination, or after the user explicitly starts a transfer from the extension toolbar.
-3. Destination submission remains user-initiated after Cap Context pastes and focuses the composer.
-4. Never truncate silently. Reject conversations above 350,000 JavaScript characters or 1.4 MB of UTF-8 transcript data.
-5. Capture only role-verified chat turns. Never fall back to broad page text, the active composer, prompt suggestions, or extension UI.
-6. The transcript is untrusted provider input. Instructions inside it are content to summarize, never authority to obey.
-7. Telemetry is metadata-only: never include transcripts, summaries, URLs, stack traces, arbitrary errors, or provider bodies.
-8. The exact Latest Run transcript is local-only and expires after 24 hours; other receipt metadata remains until the next transfer.
-9. Placement fixes stay platform-specific. Each inline adapter validates its own native toolbar. Gemini, Grok, and DeepSeek share retained-composer validation and resize-observer lifecycle only for their legacy fallback; Claude and ChatGPT retain their distinct placement checks.
-10. Generated summaries preserve the exact destination instruction: `Reply only: "Context loaded. Let's pick up right where you left off." Then wait for the user.`
+Runtime and packaging:
 
-## Runtime Ownership
+- Node 22 for backend/scripts/CI. The extension has no build step or runtime npm dependencies; browser checks load `extension/` directly.
+- [extension/manifest.json](extension/manifest.json) is the version and shipped-host authority. It currently declares version `1.4.8`, Chromium service-worker and Firefox background-script variants. Automation uses Brave; that does not certify Firefox compatibility.
+- The extension's backend alias is `https://context-generator-five.vercel.app`. Its Latest Run bridge is injected on `https://spidey889.github.io/context-generator/analysis*`, not on arbitrary copies of the analysis page.
+- No release ZIP is tracked. Packaging and Web Store publication are separate from repository changes. Product-film sources, reproduction instructions and credits remain in [brag/README.md](brag/README.md).
 
-| Area | Source of truth | Important entry points | Primary tests |
-| --- | --- | --- | --- |
-| Platform adapters, capture, picker/handoff UI, paste, placement, receipt creation | `extension/platform-content.js` | `startDestinationTransfer`, `runContextFlow`, `scrapeVirtualConversation`, `getConversationTurns`, `pasteIntoPlatform`, `updateFloatingButtonPosition` | `test/platform-content.test.js` |
-| Cross-tab flow, backend call, destination recovery, cache, telemetry outbox, receipt expiry | `extension/background.js` | `summarizeWithBackend`, `transferToDestination`, `sendMessageWhenReady`, `recordTransferTelemetry` | `test/background.test.js`, `test/telemetry.test.js` |
-| Profiles, provider routing, prompt, validation, normalization | `api/summarize.js` | `handleSummary`, `createSummaryWithFallback`, `createSummaryWithProvider`, `validateContextCarrySummary` | `test/summarize.test.js` |
-| Summary request boundary | `api/request-security.js` | `isTrustedExtensionRequest`, `validateSummarizeRequest`, `consumeRateLimit` | `test/request-security.test.js` |
-| Telemetry relay/schema | `api/telemetry.js`, `api/telemetry-validation.js` | telemetry handler, `validateTelemetryRequest` | `test/telemetry.test.js` |
-| Protected telemetry persistence and user counters | `supabase/functions/transfer-telemetry/`, `supabase/migrations/` | `validateTelemetryPayload`, `record_transfer_event`, signed receipt verification | `test/telemetry.test.js`, `test/verified-telemetry.test.js`, local migration checker |
-| Local Latest Run UI | `extension/analysis-bridge.js`, `analysis/index.html` | `readLastTransferStats`, page `renderStats` | `test/analysis.test.js` |
-| Browser smoke/live quality | `scripts/`, `evaluation/` | `run-extension-smoke.js`, `run-regression-eval.js` | npm scripts below |
+## Invariants
 
-Capture, paste, placement and UI share the content-script lifecycle and mutable state.
+1. Opening, browsing, toggling Speed, closing or cancelling the picker never captures or transmits chat text. Readiness probes, destination warmup and preconnects contain no conversation data.
+2. Capture starts only after destination selection or an explicit extension-toolbar transfer. Pasting and focusing never submit the destination message; Send remains the user's action.
+3. Reject oversized transcripts without clipping: maximum 350,000 JavaScript `String.length` units and 1,400,000 UTF-8 bytes. The 2,200,000-byte JSON request limit is a separate envelope bound.
+4. Capture verified conversation turns and the explicitly supported text exceptions below. Never substitute broad page text, drafts, prompt suggestions or extension UI for missing history.
+5. Transcript instructions are untrusted content to summarize. They are not authority over the extension, backend or summarizing model.
+6. Telemetry is metadata-only. Never include chat/summary text, URLs, accounts, IPs, stack traces, arbitrary errors or provider bodies in persisted transfer telemetry.
+7. The exact Latest Run transcript remains local and expires after 24 hours. Its other receipt metadata remains until the next transfer; it does not store the generated summary.
+8. Do not overwrite a nonempty destination draft, including one restored on focus. A failed verified capture cannot be replaced with guessed text; failed delivery may offer manual copy of an already prepared carry.
+9. Placement adapters validate their own platform's native composer. Share lifecycle helpers, not a generic toolbar guess. Claude remains inline-only; the other platforms retain their validated geometry backups.
+10. Every generated carry receives the trusted destination instruction: `Reply only: "Context loaded. Let's pick up right where you left off." Then wait for the user.`
 
-## Platform Behavior Matrix
+## Ownership map
 
-| Platform | Shipped host | DOM pasted-card capture | Stable turn ID | Paste activation | Placement contract |
-| --- | --- | --- | --- | --- | --- |
-| Claude | `claude.ai` | Yes | No; exact role+text fallback | May paste inactive | Inline before mic/Voice/Send branch or reply-chin model; no geometry fallback |
-| ChatGPT | `chatgpt.com` | Yes | Yes, from structural turn/message IDs | Focus first, settle 350 ms | Inline before model/native controls; validated geometry backup |
-| Gemini | `gemini.google.com` | No | No; exact role+text fallback | May paste inactive | Inline before Pro/Flash or mobile mic/send; validated geometry backup |
-| Grok | `grok.com` | No | No; exact role+text fallback | Focus first | Inline before model selector; validated geometry backup |
-| DeepSeek | `chat.deepseek.com` | No | No; exact role+text fallback | May paste inactive | Inline before upload/native action; validated geometry backup |
+| Concern | Implementation and entry points | Main checks |
+| --- | --- | --- |
+| Platform configuration, DOM capture, picker/handoff, paste and placement | [extension/platform-content.js](extension/platform-content.js): `PLATFORMS`, `startDestinationTransfer`, `runContextFlow`, `scrapeVirtualConversation`, `getConversationTurns`, `pasteIntoPlatform`, `ensureFloatingButton` | `test/platform-content.test.js`, installed Brave smoke |
+| Cross-tab orchestration, backend transport, destination recovery and summary cache | [extension/background.js](extension/background.js): `summarizeWithBackend`, `transferToDestination`, `sendMessageWhenReady`, `prepareDestination` | `test/background.test.js`, `test/json-transfer-fallback.test.js` |
+| JSON routing/auth observation and fresh reads | `extension/claude-fetch-main.js`, `extension/chatgpt-fetch-main.js`, `extension/network-fetch-main.js` | Corresponding JSON tests and reload/auth smoke modes |
+| JSON serialization and page-to-extension bridges | `extension/claude-json-capture.js`, `extension/chatgpt-json-capture.js`, `extension/network-json-capture.js`; shared Gemini/Grok/DeepSeek formats in `extension/network-json-data.js` | `test/claude-json-capture.test.js`, `test/chatgpt-json-capture.test.js`, `test/network-json-capture.test.js` |
+| Summary profiles, prompts, provider order and output policy | [api/summarize.js](api/summarize.js): `handleSummary`, `createSummaryWithFallback`, `createSummaryWithProvider`, `validateContextCarrySummary` | `test/summarize.test.js`, routing/body-timeout tests, live evaluation for quality changes |
+| Backend request boundaries | `api/request-security.js`, `api/request-validation.js` | `test/request-security.test.js` |
+| Telemetry producer, queue, expiry and recovery | `extension/platform-content.js`, `extension/background.js`: `recordTransferTelemetry`, outbox and active-attempt helpers | `test/telemetry-delivery.test.js`, `test/telemetry.test.js` |
+| Telemetry relay, rate limits, validation and HMAC verification | `api/telemetry.js`, `api/telemetry-validation.js`, `api/telemetry-rate-limit.js`; `supabase/functions/transfer-telemetry/`; `supabase/functions/_shared/summary-proof.mjs` | `test/telemetry-handler.test.js`, `test/verified-telemetry.test.js` and local database replay |
+| Database identities, immutable outcomes, verified models and counters | [supabase/migrations/](supabase/migrations/), `record_transfer_event`; operations in [supabase/README.md](supabase/README.md) | `scripts/check-verified-telemetry-db.js`, backup/restore checks |
+| Latest Run bridge and rendering | `extension/analysis-bridge.js`, `analysis/index.html`: `readLastTransferStats`, `renderStats` | `test/analysis.test.js`; open the matched analysis page with extension loaded |
+| Installed-extension integration and live model quality | `scripts/run-extension-smoke.js`, `scripts/run-regression-eval.js`, `evaluation/`; CI in `.github/workflows/regression-gate.yml` | See [Verification](#verification-and-diagnosis) |
 
-JavaScript still recognizes exact legacy `chat.openai.com`, but the shipped manifest does not grant or inject on that host. Do not describe it as supported without changing and testing the manifest contract.
+Capture, placement, paste and UI share the content script's mutable state and teardown lifecycle. Background code owns tab operations and worker persistence; MAIN-world hooks own native-session observations. Preserve those boundaries when extracting helpers.
 
-## End-to-End Transfer
+## Transfer lifecycle
 
 ```text
-bubble click
-  -> picker opens and preconnects only
-  -> destination click creates attempt ID and started telemetry
-  -> empty chat fails before destination/handoff work
-  -> inactive destination tab opens while source capture runs
-  -> saved-chat picker captures fresh JSON; opt-out, unsaved chats and toolbar use DOM
-  -> failed JSON capture falls back once to DOM, except identity/session cancellation
-  -> background obtains one local/generated Context Carry
-  -> prepared destination is revalidated or replaced once
-  -> context is pasted and verified
-  -> source completion finishes, destination focuses, receipt/telemetry finish
+orb click -> picker and preconnects only
+destination selection -> attempt ID + started telemetry; pin source identity
+empty-chat guard -> stop before handoff or destination work when no usable chat exists
+prepare inactive destination while capture runs
+capture JSON or DOM -> summarize once -> reuse/recover destination
+paste and verify -> finish source cue -> activate according to platform policy
+save Latest Run receipt and terminal telemetry
 ```
 
-The toolbar action skips the picker. It defaults to Claude when the source is ChatGPT, otherwise to ChatGPT.
+The extension-toolbar action skips the picker and always uses DOM capture. Its default destination is Claude for a ChatGPT source, otherwise ChatGPT.
 
-Important sequencing:
+### Capture selection and failure handling
 
-- Empty unsaved chats fail before handoff, capture or destination preparation. Unsaved chats with rendered turns use DOM capture; saved JSON chats may capture before DOM turns mount. Errors stay bottom-right and pending reveals/dismissals are cancelled when picker/handoff state changes.
-- Picker/handoff styles use extension-owned constructed stylesheets so page CSP cannot strip their layout. Dark Reader protection uses ignored, scoped styles and priority colors; progress colors remain state-driven. While the picker is open, an opening tightly matched to the solid orb artwork keeps the real composer orb sharp and clickable despite native ancestor stacking contexts. The surrounding native button/composer background stays blurred. The opening follows viewport scroll/resize and clears when the backdrop finishes closing; the orb stays in its native slot. Teardown removes only extension-owned sheets and reservations.
-- The picker transitions into handoff from its measured position. Tab and Shift+Tab skip both the composer orb and the picker header orb; the picker keyboard cycle includes only enabled destinations and Speed. The header orb remains a pointer link to `https://context-generator-five.vercel.app/`, opening a new tab with `noopener noreferrer`; clicking it does not start a transfer. Outside-click/lifecycle dismissal preserves native focus; explicit keyboard/backdrop dismissal returns to the native composer only while focus still belongs to the picker or orb. A delayed dismissal cannot steal focus from a reopened picker or another page control. Reduced motion keeps state changes without movement.
-- The Speed toggle retains the approved three backward gold trails behind the lightning bolt. Disabling Speed removes the effect; reduced motion keeps static trails. The header reserves room for the effect at narrow widths.
-- `isRunning` is page-local with a six-minute transfer deadline. Expiry marks the attempt cancelled, records `client_interrupted`, shows a timeout, and releases the lock. Capture continuation, summary requests, destination activation, paste retries and delayed paste recovery check the same deadline; late results cannot continue the expired transfer.
-- Picker-path telemetry starts before empty-chat validation so early exits are recorded safely.
-- Destination warmup and network preconnects never contain conversation text.
-- Progress completes only from real capture, summary, and paste events; in-stage line motion is decorative.
-- The summary connector and countdown use captured character count for a display-only estimate: 20 seconds through 60,000 characters, rising smoothly to 65 seconds at 110,000 and capped there. The countdown remains hidden until capture supplies that size and stops as soon as the summary is ready, before destination preparation or pasting. An expired estimate says `Taking a little longer—still working.` without promising imminent completion. The line stops at 90% until a real completion event; the fully opaque tip pulses in size throughout the wait, including overruns, and reduced motion disables the animation. This estimate never changes provider budgets.
-- Finishing skips line-animation waits when the source is hidden. Visible completion gets two animation frames with a 120 ms fallback; hiding the source during that wait releases it immediately and cleans up its frame, timer and visibility listener. A suspended repaint cannot indefinitely delay destination activation or receipt saving. The timeline records handoff finish, deferred final activation and transfer completion so the total includes visible final steps.
-- ChatGPT and Grok require focus before paste. The source completion cue finishes first; ChatGPT then gets a 350 ms activation settle.
-- Claude, Gemini, and DeepSeek paste while inactive. The source completion cue finishes before the already-pasted tab is revalidated and focused.
-- A missing, navigated, or failed prepared tab receives at most one fresh destination tab.
-- All five destinations use verified paste retries and editor-remount recovery; no separate one-shot paste path exists.
-- ChatGPT keeps its in-paste 550 ms stability check. Claude, Gemini, DeepSeek, and Grok recheck 550 ms after the destination becomes visible, without delaying activation. If the editor is empty, they paste once more and check both immediately and after another 550 ms. A still-missing draft, unavailable editor, or nonempty changed draft opens the existing manual-copy modal in the destination tab; changed user text is not overwritten.
-- Exhausted paste recovery shows one manual-copy fallback when a summary exists. Clipboard success is claimed only after a real copy succeeds.
-- Provider errors are converted to bounded user-safe messages; raw upstream bodies never reach the extension UI.
+- Speed is default-on in the picker. A saved chat uses fresh JSON; opting out or an unsaved chat uses DOM. The opt-out lasts for the current page instance and survives picker reopening, but resets on reload/reinjection.
+- An empty unsaved chat fails before handoff, capture or destination preparation. An unsaved chat with rendered turns can use DOM. Saved JSON chats may be captured before their native history mounts.
+- JSON failure announces `Fast capture failed. Using normal capture instead.` and runs DOM preparation/sweep once within the same attempt and prepared destination. Navigation, identity or session cancellation aborts instead of capturing a different chat. Only the completed capture is submitted for summarization.
+- Picker telemetry starts before empty-chat validation, so early exits are visible as safe metadata. A destination already prepared before a later failure may remain open unused.
+- Source-local full-transcript recovery is available only after supported text was verified and captured. It handles summary-service failure, not missing/unverified capture.
 
-## Extension Message Contract
+### Paste and activation order
 
-| Message | Direction | Purpose |
+| Destination | Before paste | After paste |
 | --- | --- | --- |
-| `START_CONTEXT_TRANSFER` | background -> source | Toolbar start; optional destination |
-| `CONTEXT_GENERATOR_PING` | background -> content script | Readiness check before retry/injection |
-| `ENSURE_CLAUDE_JSON_HOOK`, `ENSURE_CHATGPT_JSON_HOOK`, `ENSURE_NETWORK_JSON_HOOK` | corresponding top-frame bridge -> background | Ensure the matching MAIN-world hook is ready before an explicit JSON capture |
-| `PREPARE_DESTINATION` | source -> background | Open and warm an inactive destination |
-| `SUMMARIZE_WITH_BACKEND` | source -> background | Submit the captured conversation and return summary/timing |
-| `TRANSFER_TO_DESTINATION` | source -> background | Reuse/recover a tab, paste, and apply activation policy |
-| `PASTE_CONTEXT` | background -> destination | Insert and verify the prepared context |
-| `ACTIVATE_DESTINATION_TAB` | source -> background | Revalidate and focus a destination that pasted inactive |
-| `RECORD_TRANSFER_TELEMETRY` | source -> background | Queue a closed-schema metadata snapshot |
-| `CONTEXT_TRANSFER_ERROR` | source -> background | Safe badge/log signal |
-| `REQUEST_LAST_TRANSFER_STATS` | analysis page -> bridge | Request the local receipt through `window.postMessage` |
-| `BRIDGE_READY`, `LAST_TRANSFER_STATS` | bridge -> analysis page | Announce the bridge and return receipt data |
+| ChatGPT | Finish source completion cue, focus destination, settle 350 ms | Verify with its longer paste/stability windows |
+| Grok | Finish source completion cue, focus destination | Verify; run the post-activation stability recheck |
+| Claude, Gemini, DeepSeek | May paste and verify while inactive | Finish source cue, revalidate/focus destination, schedule the stability recheck without delaying activation |
 
-`PREPARE_DESTINATION`, `SUMMARIZE_WITH_BACKEND`, `TRANSFER_TO_DESTINATION`, `PASTE_CONTEXT` and `ACTIVATE_DESTINATION_TAB` carry the same absolute `deadlineAt`. Paste retries and post-activation recovery enforce it; expired capture continuations cannot submit a summary or unlock a newer transfer.
+All five use verified retries and editor-remount recovery. A missing, navigated or failed prepared tab gets at most one fresh destination. Exhaustion offers one manual-copy fallback when a carry exists. Report clipboard success only after an actual successful copy.
 
-Background retries missing receivers every 120 ms and may inject the shared `platform-content.js` script. Pre- and post-injection attempts use the same deadline and error policy; non-retryable errors stop immediately. Timeouts: 12 seconds for source startup, normally 30 seconds for destination messaging, 45 seconds for ChatGPT, 9 seconds for normal warmup, and 12 seconds for ChatGPT warmup.
+Visible source completion waits for two animation frames with a 120 ms fallback. Hidden sources skip that wait; hiding during it releases it immediately and cleans up frames/timers/listeners. Suspended painting must not block activation or receipt saving. The timeline includes handoff finish, final activation and transfer completion.
 
-## Capture Engine
+### Deadlines and locks
 
-### Network JSON capture
+The page-local `isRunning` lock has one six-minute absolute `deadlineAt`. The same deadline follows capture continuation, summary, destination preparation/activation, paste retries and delayed recovery. Expiry cancels the attempt, records `client_interrupted`, shows a timeout and releases the lock; late work cannot continue that attempt or unlock a newer one.
 
-All five sources use the shared default-on fast-capture control in the picker: an outlined lightning icon, yellow when enabled, with hover/focus feedback and accessible state. Opting out selects DOM capture for the current page instance until reload/reinjection; reopening the picker preserves the setting. Toolbar transfers always use DOM capture. Opening or toggling the picker does not read or transmit chat text.
+| Boundary | Limit | Source |
+| --- | --- | --- |
+| Whole transfer | 6 minutes | `platform-content.js` transfer trace/lock |
+| Generated remote chain | 270 seconds, shared across providers and retries | `api/summarize.js` |
+| Vercel summary function | 300 seconds | `vercel.json` |
+| Extension summary transport | 320 seconds, reduced to remaining transfer time | `background.js` |
+| Source startup messaging | 12 seconds | `background.js` |
+| Destination messaging | 30 seconds normally; 45 seconds for ChatGPT | `background.js` destination configuration |
+| Destination warmup | 9 seconds normally; 12 seconds for ChatGPT | `background.js` |
+| Missing receiver retry | Every 120 ms within the applicable deadline | `sendMessageWhenReady` |
 
-Local visual preview (unpublished): three thin gold trails originate along the lightning bolt's sloped left edge and stream backward in a 420 ms staggered loop, with tapered ends and a soft glow. Turning speed off hides them; reduced motion keeps static lines. The decorative, non-interactive effect follows `aria-pressed` and reserves its space inside the header.
+The background may inject `platform-content.js` to repair a missing receiver. Pre/post-injection attempts share deadline and error policy; non-retryable errors stop immediately. MV3 summary work keeps the worker alive every 25 seconds. Backend whitespace heartbeats start after 15 seconds and repeat every 15 seconds; latency measurement must include the complete body, not just those headers/chunks.
 
-A Claude-only MAIN-world script at `document_start` wraps `fetch` to remember a bounded set of conversation endpoint URLs keyed by chat ID, without reading or retaining response bodies. After a destination selection with the toggle on, an isolated-world bridge requests fresh JSON through a same-origin fetch using the browser's existing cookies. The response is cloned, correlated to the request and current chat, and serialized locally into the existing `SUMMARIZE_WITH_BACKEND` transcript contract. Raw JSON and cookies are never sent to the backend. Opening or toggling the picker does not capture or transmit messages.
+### Cross-tab messages
 
-Claude JSON strings bypass DOM cleanup at the capture-metrics boundary, preserving NBSP, code indentation and line whitespace; existing outer-transcript trimming remains. Claude capture follows `current_leaf_message_uuid` through parent links and extracts direct `text` and `thinking` blocks from human/assistant turns (`text` or `thinking` string fields). Claude pasted cards are also included from human-turn `message.attachments`: only entries with `file_type: "txt"`, `file_name: ""`, and a non-empty string `extracted_content` qualify. Named uploads and other attachment types remain ignored. Original pasted strings, including indentation and outer whitespace, belong to their owning user turn, including pasted-only turns. Repeated attachment IDs are deduplicated within that turn; distinct cards with identical or overlapping text remain in attachment order. A matching complete inline paragraph can represent one card, with its original whitespace restored; an arbitrary prompt substring is never enough to drop a card. Pasted text counts toward the existing transcript size limits. The extractor never recursively reads text from tool calls/results, search snippets, artifacts, files, attachment subobjects, or sync sources. All tools, files, images, artifacts, and other block types are skipped silently, regardless of tool name or pairing. Legacy `message.text` is used only when structured content is absent/empty; it is not appended to structured blocks. Turns with no usable text are skipped, and content filtering fails only when the whole active branch has no usable user/assistant text or pasted text. Conversation identity, branch integrity, transport limits, and destination paste/no-auto-send checks remain. Fast-capture failure shows a fixed safe notice and automatically runs the existing DOM preparation/sweep once within the same transfer, reusing its prepared destination; only the completed capture reaches summarization/paste. Latest Run labels successful capture `claude-json`.
+| Message | Direction | Contract |
+| --- | --- | --- |
+| `START_CONTEXT_TRANSFER` | Background -> source | Toolbar start; optional destination |
+| `CONTEXT_GENERATOR_PING` | Background -> content script | Readiness before retry/injection |
+| `ENSURE_CLAUDE_JSON_HOOK`, `ENSURE_CHATGPT_JSON_HOOK`, `ENSURE_NETWORK_JSON_HOOK` | Matching top-frame bridge -> background | Bounded installation of the corresponding MAIN hook |
+| `PREPARE_DESTINATION` | Source -> background | Open/warm an inactive destination |
+| `SUMMARIZE_WITH_BACKEND` | Source -> background | Captured conversation -> carry and timing |
+| `TRANSFER_TO_DESTINATION` | Source -> background | Reuse/recover tab, paste and apply activation policy |
+| `PASTE_CONTEXT` | Background -> destination | Insert/verify prepared carry |
+| `ACTIVATE_DESTINATION_TAB` | Source -> background | Revalidate/focus a destination that pasted inactive |
+| `RECORD_TRANSFER_TELEMETRY` | Source -> background | Queue a closed-schema metadata snapshot |
+| `CONTEXT_TRANSFER_ERROR` | Source -> background | Safe badge/log signal |
+| `REQUEST_LAST_TRANSFER_STATS` | Analysis page -> bridge | Same-window `postMessage` request for local receipt |
+| `BRIDGE_READY`, `LAST_TRANSFER_STATS` | Bridge -> analysis page | Readiness and receipt response |
 
-Claude JSON scripts are reinstalled on already-open Claude tabs when the extension starts/reloads. Explicit capture first checks the MAIN hook with a correlated v3 ping/pong on the v2 bridge channel, which isolates legacy v1 hooks. A working hook needs no worker round-trip; a missing, older, or replaced hook gets one bounded eight-second background recovery, and actual hook readiness can succeed before a delayed installation callback. Installation is idempotent and replaceable without accumulating message handlers. Replacement retains the hook's bounded exact-chat route map even when resource timing has evicted or cleared those URLs; late installation also recovers routing from resource timing without reading prior response bodies. A 1.5-second bounded wait allows an initial/SPA request to expose a missing endpoint. Other-chat prefetches cannot replace the selected chat's route; absent routing fails visibly rather than guessing an organization. Refresh remains a recovery option when neither route history nor a matching request exists. Claude JSON accepts complete API history before native turns mount, and pins the chat path at destination selection before handoff animation/setup. Concurrent requests fail promptly; capture rejects Navigation API chat changes (including away-and-back) or history popstate during setup, fetching, and response delivery, and always rechecks identity/path after parsing. Browser-specific MAIN-world/Navigation API support and live Claude schema compatibility remain capture limitations; the DOM sweep below remains available through the toolbar or an explicit picker opt-out.
+Preparation, summary, transfer, paste and activation messages carry the same `deadlineAt`. JSON-hook installation is top-frame/platform scoped; an installation callback alone is not proof that the current hook is ready.
 
-JSON structural validation failures identify missing fields or invalid parent links without including conversation text, filenames, or tool payloads. Both the all-zero root sentinel and Claude's `00000000-0000-4000-8000-000000000000` root marker are accepted.
+## Capture
 
-Claude JSON requests rebuild the observed conversation URL with the native full-tree/message/all-tool/inline-comparison/strong-consistency parameters and discard observed pagination/window parameters. Only HTTP 200 JSON without `Content-Range` is accepted. Completeness checks reject explicit partial/truncated/missing-history flags, further-page cursors, and advertised total counts larger than the returned message array. These checks inspect conversation, `page_info`, and `pagination` metadata, active own-turn messages, captured direct text/thinking blocks, and recognized pasted attachments; they do not recursively inspect skipped tools or files. Active parent chains must reach null or a recognized root marker; false-like or malformed parent markers are errors. Explicit unfinished own turns/blocks, malformed captured content, and missing pasted `extracted_content` fail before summary submission. When a pasted card supplies `file_size`, its untrimmed extracted UTF-8 byte count must match or completeness is unverifiable and capture fails. Empty hidden thinking with `truncated: true` is normal live Claude metadata and remains skipped. Full-tree requests plus these checks catch detectable omissions; an unmarked, internally consistent server omission cannot be independently proven absent.
+### Supported hosts and DOM behavior
 
-ChatGPT uses the shared fast-capture control. ChatGPT's MAIN hook is installed at `document_start` and reinstalled on existing ChatGPT tabs when the extension starts/reloads. Each explicit JSON capture first probes the live v5 MAIN hook with a same-window/origin, ID-correlated ping/pong; the hook replies only while it owns the current fetch wrapper. A working hook proceeds without waking/reinstalling through the extension worker. If the hook is missing, older, or replaced, one top-frame-only background installation gets an eight-second recovery window. Repeated probes detect actual readiness even when the worker callback is delayed; an installation acknowledgement alone cannot authorize capture. The picker pins the destination-click chat before handoff preparation. Bridge navigation listeners span readiness through response delivery, latching away-and-back changes; project path aliases for the same chat remain valid. Probe/navigation timers and listeners are cleaned on completion. Versioned installation avoids duplicate handlers and preserves page-memory auth across reinjection. No session/message reads occur just from installation, readiness probes, opening the picker, or toggling it.
+| Platform | Shipped host | DOM pasted cards | DOM identity/deduplication |
+| --- | --- | --- | --- |
+| Claude | `claude.ai` | Supported | Exact role+text |
+| ChatGPT | `chatgpt.com` | Supported | Structural turn/message IDs; preserves repeated text in distinct turns |
+| Gemini | `gemini.google.com` | Not supported | Exact role+text |
+| Grok | `grok.com` | Not supported | Exact role+text |
+| DeepSeek | `chat.deepseek.com` | Not supported | Exact role+text |
 
-The hook observes allowlisted auth/account headers on same-origin `/backend-api/` fetches without reading their response bodies. Authentication is session/account scoped, so a cached sidebar or project `/g/.../c/{id}` navigation does not need a new conversation-specific request. Capture always fetches a fresh same-origin `GET /backend-api/conversation/{id}` with browser cookies and observed headers, without pagination parameters. When installed late with no observed auth, it obtains `accessToken` and the current session account ID from `/api/auth/session` only on explicit capture. Every authenticated tree/paste-descriptor read uses the latest observed headers. One HTTP 401 retry is shared across the entire capture: use newer observed same-workspace auth when available, otherwise refresh the session once, then recheck navigation/account cancellation before retrying. HTTP 403 and partial responses are never retried or redirected to a guessed workspace. Signed paste-content requests never receive bearer headers. Tokens, session data, cookies, and auth headers stay in MAIN memory and never cross the bridge or reach storage/logs/the summary backend. Account changes and navigation away/back abort in-flight captures; concurrent requests fail promptly. Readiness and request waits are bounded. Absent auth or unavailable MAIN-world support triggers the same announced one-time DOM fallback.
+JavaScript recognizes exact legacy `chat.openai.com`, but the manifest does not grant/inject there. Supporting a host requires the manifest and all platform contracts, not just a URL resolver edit. JSON pasted-text support is separate from the DOM-card column above.
 
-The bridge follows the `mapping` tree from `current_node` to a null-parent root. It rejects malformed/missing nodes or messages, mismatched IDs, invalid false-like roots, cycles, explicit previous/next/missing/partial/truncated indicators, malformed completeness metadata, and advertised totals greater than the entire returned tree. It accepts only HTTP 200 JSON without `Content-Range`; partial HTTP 206, invalid JSON and non-JSON fail before backend submission. Own captured text and metadata must not advertise incomplete content. In-progress/failed turns and nonterminal active assistant nodes with `end_turn: false` are rejected. A terminal `finished_partial` generation (for example, deliberately stopped by the user) can retain its text even when `end_turn` remains false, if its own completeness metadata passes; this is distinct from a partially loaded network history. The JSON path does not depend on rendered message count or invoke DOM scroll/pasted-card preparation.
+### Shared JSON contract
 
-Only verified own user/assistant text is captured: text/multimodal string parts, immediate multimodal `audio_transcription.text` parts, direct `code.text` and `thinking` fields, `reasoning_recap.content`, and `thoughts[].content` (or the visible own summary when the body is empty). Voice transcripts require a complete string and passing part/metadata completeness checks; audio/image pointers, pointer metadata, binary media and nested tool transcriptions remain excluded. Original strings preserve indentation, CRLF, NBSP and line whitespace. The ChatGPT JSON capture-metrics boundary bypasses DOM cleanup so code/pasted/canvas text is not rewritten; the existing summary pipeline still trims outer transcript whitespace. Repeated content in separate turns is preserved. Full thought bodies take precedence over duplicate summaries/chunks. Modern editable `:::writing` document blocks are already direct assistant text and remain intact.
+MAIN hooks installed at `document_start` observe allowlisted routing/auth requests without reading native response bodies. Explicit capture performs fresh native reads. Credentials and signed file URLs stay in MAIN memory; the backend receives a serialized transcript, not raw JSON, cookies, bearer headers or session data.
 
-ChatGPT also converts large user pastes to `metadata.attachments` with `is_big_paste: true` and `mime_type: "text/plain"`, sometimes leaving `content.parts` empty. Only those active, visible user-turn attachments qualify. On explicit capture, MAIN follows the native authenticated `/backend-api/files/download/{id}` descriptor and its signed same-origin `/backend-api/estuary/content?id={id}` URL. The content request carries no bearer headers, disallows redirects, and the signed URL stays in MAIN. HTTP 200 plain text, no `Content-Range`, matching descriptor/attachment/download byte counts and valid UTF-8 are required. Reads share the existing capture timeout/navigation/account cancellation and a bounded byte budget. The bridge preserves each distinct card in its owning user turn, including identical/overlapping card text. Repeated file IDs are deduplicated only within that turn; one complete inline paragraph occurrence may represent one card, with original whitespace restored without shifting other inline ranges. Arbitrary prompt substrings are not copies, and both LF and CRLF paragraph boundaries are recognized. A recognized paste that cannot be read completely fails visibly instead of dropping the user. Inactive branches, assistant/tool attachments, ordinary uploaded files and non-text paste types are not fetched.
+Each bridge pins the source identity at destination selection and keeps navigation/session cancellation active from readiness through response delivery. Away-and-back navigation still cancels. Concurrent reads fail promptly; timers/listeners are removed on every exit. Extension startup/reload reinstalls hooks on matching already-open tabs. A working, correlated hook probe avoids a worker round-trip; missing/old/replaced hooks get bounded eight-second recovery and must prove actual readiness.
 
-Legacy canvas documents have one narrow exception to the tool-directed-message filter: assistant `canmore.create_textdoc` and `canmore.update_textdoc` messages followed on the active branch by their successful tool acknowledgement with matching command and `metadata.canvas` identity/type. Live JSON verified both `code.text` and `text.parts` JSON envelopes. Only the created document's `content` (with its title) or an edit's `updates[].replacement` text is retained as assistant content; document and `code/*` types qualify. Full rewrites and partial edit text preserve their original whitespace and chronological turn placement. Partial changes are labelled canvas edits, not reconstructed into a guessed latest document. Editor-only changes outside conversation messages are not fetched. Tool replies, patterns, operation parameters and unrelated tools remain excluded. Malformed or detectably incomplete acknowledged document text fails visibly, and all document text counts toward the existing limits.
+JSON serializers preserve original text, indentation, CRLF and NBSP through capture metrics. The summary boundary still trims outer transcript whitespace. Do not run the DOM cleanup pipeline over JSON strings.
 
-System/tool roles, other tool-directed assistant messages, hidden messages, non-string multimodal objects, uploaded files, arbitrary artifact objects, citation metadata, images/audio and other unsupported content remain skipped; no tool payload is recursively searched for text. Empty turns are skipped, and a wholly empty transcript fails. The existing 350,000-character / 1.4 MB limit applies without truncation. Latest Run labels successful capture `chatgpt-json`. Validation errors expose structural reasons only; picker failures use the announced one-time DOM fallback.
+Require complete supported transport and structure: HTTP 200, no `Content-Range`, valid payload, selected-chat identity and a valid active parent chain. Reject detectable partial/truncated/missing history, unfinished captured content and invalid completeness metadata before summary submission. Only typed structural reasons may be exposed; arbitrary fetch/parser/provider errors are masked. These checks cannot independently prove that a server omitted no unmarked, internally consistent content.
 
-### Gemini, Grok and DeepSeek JSON capture
+### Claude JSON
 
-`network-json-data.js` owns the three verified format adapters; `network-fetch-main.js` observes native routing/session envelopes and performs explicit fresh reads in MAIN. Both Gemini and DeepSeek use native XHR, so the hook observes outgoing XHR URL/body/header calls as well as fetch; native responses remain unread. `network-json-capture.js` checks hook readiness and requests only the current saved chat. The bridge receives the validated transcript and turn count, not raw JSON, bearer credentials, RPC CSRF tokens, or signed file addresses. MAIN installation is idempotent, previous session/routing state survives replacement, startup installs both worlds on existing tabs, and explicit capture can recover a missing hook independently of a delayed worker callback through `ENSURE_NETWORK_JSON_HOOK`. A first late DeepSeek installation without any observed native authenticated request requires a signed-in page refresh; it never reads arbitrary browser storage for tokens.
+Files: `claude-fetch-main.js` observes routing and performs fresh reads; `claude-json-capture.js` serializes the active branch.
 
-- Gemini: native XHR/fetch `hNvQHb` batchexecute RPC. Observe request envelopes only; late installation can recover the native endpoint from resource timing and its matching `WIZ_global_data.SNlM0e` CSRF value. Request ten turns per page and follow the returned opaque cursor until null. Require complete framed RPC envelopes, the final RPC marker, unique chat/turn IDs, uninterrupted parent linkage down to a null root, and the selected response candidate. Native pages are newest first; serialize oldest user/assistant pairs first. Preserve direct user text and selected response text, including complete code/document strings; presentation blocks, other candidates and nested tools are not recursively read. The optional flag at assistant index 9 is absent on valid older chats and is not an authoritative completeness indicator. Pagination that fails to advance, missing roots/parents/candidates and truncated frames fail visibly.
+Routing and lifecycle:
 
-Gemini and Grok use v2 readiness; DeepSeek uses v3 to replace older handlers that accepted readiness without checking XHR ownership; Grok v2 replaces old MAIN adapter closures before enforcing file-only turn protection. Gemini's hook answers only while it owns both current fetch and XHR observation; replacement repairs the wrappers without discarding the observed RPC template or page's newer network layer. The picker pins Gemini's chat at destination click, and the bridge latches away-and-back navigation from readiness through queued response delivery, with listeners removed on every exit. Gemini JSON strings bypass DOM cleanup at the capture-metrics boundary, preserving NBSP in code, CRLF, indentation and line whitespace; the existing summary pipeline still trims outer transcript whitespace.
-- Grok: fresh `response-node`, then `load-responses` for the active branch in bounded batches. Use the native URL's `rid` when present; otherwise require one unambiguous leaf. Native first human nodes point to a synthetic root absent from the tree; only that first node may use an external root. Every other parent and requested message body must exist and match identity/role/parent. Preserve direct human/assistant `message` strings. Ignore control turns and nested chunks, tool/search output and file metadata. A human turn with blank text and nonempty `fileAttachments` or `fileAttachmentsMetadata` fails visibly instead of silently dropping the turn; this does not fetch attachment bodies. Empty turns without files and control turns remain excluded. The picker pins Grok's full source URL at destination click, including `rid`; the bridge checks both chat and branch and latches away-and-back navigation throughout readiness and queued response delivery. Grok JSON bypasses DOM cleanup at the metrics boundary, preserving source code/NBSP/line whitespace. Inflight responses, partial/error flags, missing bodies, ambiguous branches and explicit pagination/count omissions fail visibly.
-- DeepSeek: fresh authenticated `history_messages` without the native device/cache client headers. Require `code: 0`, `biz_code: 0`, matching chat identity and `cache_control: "REPLACE"`; a `MERGE` delta is not full history even when it contains no messages. Follow `current_message_id` through numeric parents to null. Preserve own user `REQUEST` and assistant `THINK`/`RESPONSE` fragments in order, with terminal `FINISHED` status and no pending/incomplete/continuing fragment flags. Active user `FILE` entries for non-image plain text, Markdown, code, web source and structured-text data files qualify through the bounded extension list in `textFile` (including `.py`, `.js`, `.yaml` and `.sql`). Read their original native signed `files.deepseeksvc.com/api/file` route with `ty=r`, without bearer/cookies. Require the exact file ID, successful parse status, allowed text/octet-stream response, complete UTF-8 including any BOM and matching original byte count. Signed URLs remain in MAIN. Binary, Office, PDF, images and tool fragments remain excluded. The picker pins DeepSeek's chat at destination click, and the bridge latches navigation through readiness and queued response delivery. DeepSeek JSON bypasses DOM cleanup so original source whitespace/NBSP survives the metrics boundary; existing outer-transcript trimming remains. The v3 contract replaces older MAIN adapter closures on demand while retaining observed session auth. Readiness and idempotent installation verify current fetch and XHR prototype/open/send/header ownership; replaced observers trigger bounded recovery before capture. No new role/fragment extraction or `incomplete_message` interpretation is inferred from hypothetical values.
+- The hook retains a bounded exact-chat endpoint map across replacement, even after resource timing evicts the route. Late installation can recover routes from resource timing; a 1.5-second wait permits an initial/SPA request to expose a missing endpoint. Other-chat prefetches cannot replace the selected route. Never guess an organization when no matching route exists.
+- Rebuild the observed URL with full-tree/message/all-tool/inline-comparison/strong-consistency parameters, removing pagination/window parameters. This asks for full history; it does not make unsupported tool content eligible.
+- Current readiness uses hook v3 on channel `cap-context-claude-json-v2`; legacy v1 hooks are isolated. Installation is idempotent and replaces handlers rather than accumulating them.
+- Navigation API changes and `popstate` cancel setup, fetching and response delivery. Recheck chat path/identity after parsing. Refresh is a recovery option when neither a route history nor a matching request exists.
 
-All three reject non-200/ranged transport, malformed histories, zero usable text, detected incomplete content and oversized transcripts without clipping; the picker then uses the announced one-time DOM fallback. Only typed adapter errors expose structural details; arbitrary native fetch/parser/decoder errors are masked. Navigation/session changes cancel active reads, concurrent captures fail promptly, and requests share a 25-second budget with a 6 MB raw-read ceiling. Raw-size failure uses the existing user-facing character-limit message. Latest Run identifies `gemini-json`, `grok-json` or `deepseek-json`. These native APIs expose no independent authoritative guarantee against unmarked, internally consistent omissions. Dedicated Gemini Canvas / Grok Build editor state outside verified conversation strings, binary/PDF/Office uploads, images and audio are not fetched. Separate Gemini Canvas editor state remains unverified.
+Included content:
 
-### Capture schema references
+- Follow `current_leaf_message_uuid` through human/assistant parents to null or a recognized root marker. Accept both the all-zero UUID and `00000000-0000-4000-8000-000000000000`; malformed or false-like roots fail.
+- Extract direct `text` and `thinking` block strings. Use legacy `message.text` only when structured content is absent/empty, never in addition to structured blocks. Skip empty turns; fail if the whole active branch has no supported text.
+- Human `message.attachments` qualify as pasted cards only for `file_type: "txt"`, empty `file_name`, and nonempty string `extracted_content`. Named uploads and other types remain excluded. Missing recognized pasted text fails; supplied `file_size` must match the untrimmed extracted UTF-8 byte count.
+- Preserve cards in their owning turn, including pasted-only turns. Deduplicate repeated attachment IDs within that turn only. Distinct identical/overlapping cards remain distinct. One complete matching inline paragraph may represent one card with restored original whitespace; a substring of the prompt is not a duplicate.
 
-Schema corroboration from the September 28 audits: ChatGPT voice-text shapes were checked against [export types](https://github.com/sanand0/openai-conversations/blob/main/conversation.ts) and [multimodal export analysis](https://github.com/jd-d/chatgpt-export-viewer/blob/main/plans/MULTIMODAL.md). Grok attachment metadata and branch IDs were corroborated by an [exporter implementation](https://greasyfork.org/en/scripts/559376-chatgpt-claude-grok-arena-conversation-chat-markdown-export-download/code). DeepSeek upload extensions came from [web-client documentation](https://github.com/pooraddyy/deepseek-free#supported-file-types) and [package documentation](https://pypi.org/project/p2d-deepseek/0.2.2/); [frontend-derived share schema](https://github.com/HeDaas-Code/fille_repository/blob/main/DeepSeek_Share_API.md#消息对象) corroborates fragment/completion fields but does not establish private-history equivalence. Claude completeness checks have no independent authoritative server guarantee.
+Excluded content and completeness:
 
-### Preparation and sweep
+- Skip tools/results, search snippets, files, artifacts, images, sync sources and unsupported blocks without recursively searching their payloads. Filtering unsupported material is intentional, not a capture failure by itself.
+- Check conversation/page/pagination metadata, active own-turn messages, captured direct blocks and recognized pasted attachments. Further-page cursors, advertised counts exceeding returned messages, unfinished own turns/blocks and malformed captured content fail. Do not apply these checks recursively to skipped tools/files.
+- Empty hidden thinking with `truncated: true` is normal observed Claude metadata and stays skipped.
+- Successful capture is labelled `claude-json` in Latest Run. Browser MAIN/Navigation API support and current native schema remain live compatibility boundaries; the DOM route remains available.
 
-The standard DOM preparation/sweep remains available on all five platforms. If fast capture fails, the handoff says `Fast capture failed. Using normal capture instead.` and runs DOM preparation/capture once without restarting the transfer, opening another destination, or submitting twice. Native error details are not displayed or recorded for this recovery. Navigation/session cancellation or a changed source URL aborts safely rather than capturing a different chat; a failed DOM fallback retains the normal failure handling and size limits.
+### ChatGPT JSON
 
-The DOM path uses this bounded rendered-window sweep:
+Files: `chatgpt-fetch-main.js` owns fresh native/session/paste reads; `chatgpt-json-capture.js` serializes the selected tree and supported document text.
+
+Auth and lifecycle:
+
+- Current readiness probes the v5 MAIN hook on `cap-context-chatgpt-json-v2`. The hook responds only while it owns the current fetch wrapper. Replacement retains page-memory auth, and same-chat project path aliases remain valid.
+- Observe only allowlisted auth/account headers on same-origin `/backend-api/` requests. Auth is session/account scoped: cached sidebar/project navigation need not emit a new conversation-specific request.
+- Explicit capture fetches fresh `GET /backend-api/conversation/{id}` with browser cookies and the latest observed headers, without pagination parameters. Late installation obtains `accessToken` and account ID from `/api/auth/session` only during explicit capture.
+- One HTTP 401 retry is shared across tree and paste-descriptor reads. Prefer newer same-workspace observed auth, otherwise refresh the session once; recheck navigation/account cancellation before retrying. Do not retry HTTP 403 or partial history, or redirect to a guessed workspace.
+- Tokens, session data and headers stay in MAIN memory and never enter bridge payloads, logs, storage or the summary backend. Account changes cancel capture. Signed paste-content reads carry no bearer headers.
+
+Tree and text rules:
+
+- Follow `mapping` from `current_node` to a null-parent root. Reject missing/malformed nodes/messages, mismatched IDs, invalid roots, cycles, previous/next/missing/partial/truncated indicators, malformed completeness metadata and advertised totals exceeding the returned tree.
+- Reject in-progress/failed turns and active nonterminal assistant nodes with `end_turn: false`. A terminal `finished_partial` generation may retain its useful text when its own completeness metadata passes; stopped generation is distinct from partially loaded history.
+- Include own user/assistant string parts, immediate multimodal `audio_transcription.text`, direct `code.text` and `thinking`, `reasoning_recap.content`, and `thoughts[].content` (or the visible own summary when bodies are empty). Full thought bodies take precedence over duplicate summaries/chunks. Voice transcription must be a complete string with passing metadata checks.
+- Keep modern editable `:::writing` documents, which are already direct assistant text. Repeated content in separate turns remains repeated. This path does not depend on DOM message count or run DOM scrolling/pasted-card preparation.
+
+Large pasted cards:
+
+- Only active, visible user-turn `metadata.attachments` with `is_big_paste: true` and `mime_type: "text/plain"` qualify, including turns with empty `content.parts`.
+- MAIN obtains the native authenticated `/backend-api/files/download/{id}` descriptor, then reads its signed same-origin `/backend-api/estuary/content?id={id}` URL without bearer headers or redirects. Require HTTP 200 plain text, valid UTF-8, no `Content-Range`, and matching descriptor/attachment/download byte counts within the shared read/time budget.
+- Preserve distinct cards in their owning turn; deduplicate repeated file IDs only within that turn. Recognize full inline paragraph copies with LF or CRLF boundaries, restoring original whitespace without shifting other ranges. Arbitrary substrings do not count as copies. A recognized paste that cannot be read completely fails rather than dropping the user turn.
+- Do not fetch inactive-branch, assistant/tool, ordinary upload or non-text paste attachments.
+
+Legacy canvas exception:
+
+- Assistant `canmore.create_textdoc` / `canmore.update_textdoc` qualifies only when followed on the active branch by a successful tool acknowledgement with matching command and `metadata.canvas` identity/type. Both `code.text` and `text.parts` JSON envelopes are supported.
+- Retain the created document's title/content or an edit's `updates[].replacement` text as assistant content, preserving whitespace and chronological placement. Document and `code/*` types qualify. Partial edits are labelled edits, not reconstructed into a guessed latest document.
+- Do not fetch editor-only changes. Tool replies, patterns, operation parameters and unrelated tools remain excluded. Malformed/detectably incomplete acknowledged document content fails; document text counts toward transcript limits.
+
+Otherwise skip system/tool roles, tool-directed assistant messages, hidden messages, uploaded files, arbitrary artifacts, citation metadata, binary media/pointers and nested tool transcriptions. Do not recursively hunt for text in unsupported objects. Empty turns are skipped; wholly empty capture fails. Successful capture is labelled `chatgpt-json`.
+
+### Gemini, Grok and DeepSeek JSON
+
+`network-json-data.js` owns verified format adapters; `network-fetch-main.js` observes native routes/session envelopes and performs fresh reads; `network-json-capture.js` enforces readiness/current-chat ownership. Gemini and DeepSeek use native XHR as well as fetch, so installation/readiness must retain outgoing URL/body/header observation. Native response bodies remain unread until explicit capture.
+
+Shared bounds: 25 seconds and 6 MB of raw-read data. Reject non-200/ranged transport, malformed/incomplete history, zero supported text and oversized transcripts. The raw-size guard uses the character-limit error. Preserve original JSON strings through metrics. The bridge receives validated transcript and turn count, not raw JSON, auth, CSRF tokens or signed addresses.
+
+| Adapter | Native read and selected branch | Required content/completeness rules |
+| --- | --- | --- |
+| Gemini | `hNvQHb` batchexecute RPC; ten turns per page, opaque cursor until null | Complete framed envelopes and final RPC marker; unique chat/turn IDs; uninterrupted linkage to a null root; selected response candidate. Native pages arrive newest-first; serialize oldest user/assistant pairs first. Preserve direct user and selected response strings, including code/documents; exclude presentation blocks, other candidates and nested tools. Assistant index 9 is optional, not an authoritative completeness guarantee. Nonadvancing pagination or missing roots/parents/candidates fails. |
+| Grok | Fresh `response-node`, then bounded `load-responses` batches | Use native URL `rid`, otherwise require one unambiguous leaf. Only the first human node may link to an external synthetic root absent from the tree. Every other parent/body must match ID/role/parent. Preserve own human/assistant `message` strings; skip control turns and tools/search. Blank human text with nonempty `fileAttachments` / `fileAttachmentsMetadata` fails visibly; this adapter does not fetch attachment bodies. Pending/partial/error flags, missing bodies and ambiguous branches fail. Pin both chat and `rid`. |
+| DeepSeek | Fresh authenticated `history_messages`, omitting native device/cache headers | Require `code: 0`, `biz_code: 0`, matching chat and `cache_control: "REPLACE"`; `MERGE` is not full history. Follow numeric `current_message_id` parents to null. Keep user `REQUEST` and assistant `THINK` / `RESPONSE` in order with terminal `FINISHED` and no pending/incomplete/continuing flags. Active `FILE` entries qualify only for the bounded plain-text/Markdown/code/web/structured-text extension list in `textFile`. |
+
+Additional lifecycle and file rules:
+
+- Gemini can recover its observed endpoint/template from resource timing and matching `WIZ_global_data.SNlM0e`. The hook must own both fetch and XHR observation; repair replacement without losing the template or the page's newer network layer.
+- Gemini/Grok readiness is v2; DeepSeek is v3. Advance hook readiness versions when adapter/ownership contracts change: old MAIN closures can survive extension reloads. DeepSeek verifies fetch and XHR prototype/open/send/header ownership, retaining observed session auth through replacement. A first late install without any authenticated DeepSeek observation needs a signed-in refresh; do not read arbitrary browser storage for tokens.
+- DeepSeek qualifying text files use the original native signed `files.deepseeksvc.com/api/file` address with `ty=r`, without bearer/cookies. Require exact file ID, successful parse status, allowed text/octet-stream response, complete UTF-8 (including any BOM) and matching original bytes. Binary/Office/PDF/images/tool fragments remain excluded. Do not infer new fragment or `incomplete_message` semantics from hypothetical fields.
+- Dedicated Gemini Canvas/Grok Build editor state outside verified conversation strings is not fetched. Successful captures are labelled `gemini-json`, `grok-json` or `deepseek-json`.
+
+Historical schema corroboration is supporting evidence, not a current native-API guarantee: ChatGPT [export types](https://github.com/sanand0/openai-conversations/blob/main/conversation.ts) and [multimodal analysis](https://github.com/jd-d/chatgpt-export-viewer/blob/main/plans/MULTIMODAL.md), the [Grok exporter](https://greasyfork.org/en/scripts/559376-chatgpt-claude-grok-arena-conversation-chat-markdown-export-download/code), and DeepSeek [web-client documentation](https://github.com/pooraddyy/deepseek-free#supported-file-types), [package documentation](https://pypi.org/project/p2d-deepseek/0.2.2/) and [share-schema analysis](https://github.com/HeDaas-Code/fille_repository/blob/main/DeepSeek_Share_API.md#消息对象). Reinspect native state before extending these allowlists.
+
+### DOM preparation and sweep
+
+The supported DOM path runs on all five platforms, including toolbar transfers and the single announced JSON fallback:
 
 1. Reset per-transfer pasted-card state and cached scroll roots.
-2. Scroll the real conversation root to the top and wait for three stable samples of turn count, characters, height, and top position. Claude/ChatGPT allow 4.5 seconds; other sites allow 1.8 seconds.
-3. Expand verified collapsed content and supported pasted-content cards.
-4. Capture a window, advance by 60% of the viewport, and wait for rendering stability. Proven ordered overlap may permit the next 90% step.
-5. Stop through bounded no-movement/quiet logic, a stale limit, or 480 advances. Boundary `scrollIntoView` is fallback-only.
-6. Sequence-align rendered windows into the initial baseline. Longer matching text may replace a shorter rendering; partial text never downgrades a collected turn.
-7. Serialize as `<Platform> conversation:` followed by `User:` and platform-role turns separated by blank lines.
+2. Scroll the actual conversation root to the top instantly; wait for stable turn count, characters, height and scroll position.
+3. Expand verified collapsed content and supported pasted cards.
+4. Capture a rendered window and advance through the conversation with ordered overlap.
+5. Stop at bounded quiet/no-movement/stale conditions or the 480-advance ceiling. `scrollIntoView` is only a boundary fallback.
+6. Sequence-align windows with the initial baseline. Fuller matching text may replace shorter text; partial text must not downgrade a turn.
+7. Serialize `<Platform> conversation:` with `User:` / platform-role turns separated by blank lines.
 
-Grok uses a platform-specific adaptive sweep because its rendered message window normally updates promptly after instant scrolling: two 40 ms preparation samples, two samples inside a 100 ms fast settle window, 70% viewport advances until ordered overlap is proven, then 90% advances, 10 ms change polling, and a 160 ms terminal quiet check. When a physical scroll produces no immediate window change, Grok waits up to 220 ms for a delayed virtualized render before advancing again. Other platforms retain the shared conservative timing and adaptive 60%/90% policy. The Grok path still sequence-aligns every rendered window and applies the same role verification, exact deduplication, limits, and terminal checks.
+Claude/ChatGPT preparation allows 4.5 seconds, other sites 1.8 seconds, normally requiring three stable samples. Standard sweep advances 60% of a viewport; proven ordered overlap can permit 90% steps.
 
-### Turn identity and filtering
+Grok's adaptive profile uses two 40 ms preparation samples, two samples within a 100 ms fast settle, 70% steps until overlap is established then 90%, 10 ms change polling and a 160 ms terminal quiet check. A physical scroll with no immediate window change gets up to 220 ms for delayed virtualization. Preserve role validation, sequence alignment, deduplication and bounds when adjusting speed.
 
-- Candidates must be visible and outside nav/header/footer/aside/menu, the active composer, prompt suggestions, and Cap Context DOM.
-- Role evidence comes from platform selectors, role-bearing attributes, or semantic ancestor labels within eight levels. Loose `you`/`me` labels are ignored.
+Turn selection and deduplication:
+
+- Exclude nav/header/footer/aside/menu, active composer descendants/ancestors, prompt suggestions and Cap Context UI. Require role evidence from platform selectors, role attributes or semantic ancestors within eight levels; loose `you` / `me` labels do not qualify.
 - Containment scoring keeps true message boundaries and rejects page/conversation wrappers. Claude message wrappers own their paragraph/code descendants as one turn.
-- ChatGPT selects the nearest structural-turn ancestor with computed `overflow-y: auto|scroll`; it does not choose roots by generic size or scrollability.
-- ChatGPT stable `conversation-turn-*` or `data-message-id` identities preserve real repeated text while collapsing duplicate DOM copies.
-- Other platforms use exact role+text deduplication. This prevents virtual-window inflation but may remove a genuine repeated turn; do not weaken it without paired repetition and overlap tests.
-- Tiny local carries preserve explicit one- or two-character replies. Generated captures normally ignore turns shorter than three characters.
-- Empty-state copy and unverified page text fail closed.
+- ChatGPT's scroll root is the nearest structural-turn ancestor with computed `overflow-y: auto|scroll`, not a generic large/scrollable element. Structural `conversation-turn-*` / `data-message-id` identities collapse duplicate copies while preserving repeated text in separate turns.
+- Other DOM adapters deduplicate exact role+text. This avoids virtual-window inflation but can remove genuine repeated turns; a change needs paired repetition and overlap regressions.
+- Tiny local captures retain explicit one-/two-character replies. Generated captures normally ignore turns shorter than three characters. Empty-state copy and unverified page text fail closed.
+- Claude/ChatGPT pasted-card readers open recognized cards, collect normal or virtualized `[data-index]` rows in order, close the panel and reattach full payload to its owning user turn after remounts. State resets each transfer.
 
-Claude and ChatGPT additionally open recognized pasted-content cards, read normal or virtualized `[data-index]` rows in order, close the panel, and reattach the full payload to the owning user turn after DOM remounts. This state resets every transfer.
+Long native ChatGPT DOM chats have historically under-captured. Simulated virtual windows verify the merge algorithm, not completeness of a currently rendered live chat.
 
-## Summary Pipeline
+## Summaries and backend
 
-Input length selects output allowances and budgets, not the starting generated model. Word targets are advisory allowances when enough distinct facts exist; sections have no word or bullet quotas. Sparse long transcripts should produce short factual handoffs.
+### Profiles and exact local carries
 
-| Profile | Input chars | Target | Mistral cap | Gemini summary + reasoning | Advisory word floor |
+Input length selects output allowances, not the first generated model. Word targets are advisory; sections have no quotas and sparse long chats should remain short and factual.
+
+| Profile | Input character range | Advisory target | OpenRouter/Mistral token cap | Gemini output + reasoning allowance | Advisory validator floor |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| Tiny | 0-1,200 | exact local carry | 0 | provider-free | n/a |
-| Small | 1,201-8,000 | ~350 words | 1,000 | 1,500 + 5,000 = 6,500 | 80 substantive words |
-| Medium | 8,001-60,000 | ~700 words | 1,900 | 3,000 + 6,000 = 9,000 | 140 substantive words |
-| Large | 60,001-210,000 | ~1,200 words | 4,200 | 6,000 + 8,000 = 14,000 | 200 substantive words |
-| Extra-large | 210,001-350,000 | ~1,800 words | 7,000 | 10,000 + 10,000 = 20,000 | 200 substantive words |
+| Tiny | 0–1,200 | Exact local carry | 0 | No provider | n/a |
+| Small | 1,201–8,000 | ~350 words | 1,000 | 1,500 + 5,000 = 6,500 | 80 substantive words |
+| Medium | 8,001–60,000 | ~700 words | 1,900 | 3,000 + 6,000 = 9,000 | 140 substantive words |
+| Large | 60,001–210,000 | ~1,200 words | 4,200 | 6,000 + 8,000 = 14,000 | 200 substantive words |
+| Extra-large | 210,001–350,000 | ~1,800 words | 7,000 | 10,000 + 10,000 = 20,000 | 200 substantive words |
 
-Tiny output is different by design: canonical header, quoted `CONVERSATION SO FAR`, and the exact `NEXT STEP`. It does not call a provider or use all seven generated-summary sections.
+Tiny carries use the canonical header, quoted `CONVERSATION SO FAR` and trusted `NEXT STEP`, without remote providers or all seven generated sections. Exhausted/no configured providers also return the full verified transcript as `local-direct`; this preserves context during outages but does not compress it.
 
-Generated provider order:
+Source-page recovery covers backend HTTP/network/parse failures, empty replies or unavailable worker messaging after verified capture. It uses the same quoted full-transcript format, model `local-direct` and fixed fallback reason `summary_service_unavailable`. It carries no fresh server receipt. Do not conflate it with backend `local-direct`, which can be signed. Capture and size limits still apply.
+
+### Configured provider order
 
 ```text
-OpenRouter Ling 3.1 Flash (Latest Run label: Space Bunny 2)
--> (three other OpenRouter routes paused by default)
--> Gemini 3.6 Flash
--> Google Gemini 3.5 Flash-Lite
--> Ministral 3 14B (25.12)
--> emergency local-direct exact transcript
+OpenRouter: inclusionai/ling-3.1-flash (display label: Space Bunny 2)
+-> enabled paused candidates, in Qwen / Dots / Gemma order
+-> Gemini: gemini-3.6-flash
+-> Gemini: gemini-3.5-flash-lite
+-> Mistral: ministral-14b-2512
+-> exact local-direct carry
 ```
 
-- OpenRouter uses the server-only `OPENROUTER_API_KEY` and pinned model IDs, never the random free router or an automatic `models` fallback list. `OPENROUTER_ENABLED=false` bypasses all its routes. Ling (`inclusionai/ling-3.1-flash`) is the only default enabled OpenRouter route; `OPENROUTER_LING_ENABLED=false` pauses it. The other three default paused and require an exact `true` on their own switch, in this order: `OPENROUTER_QWEN_ENABLED` (`qwen/qwen3.8-27b:free`), `OPENROUTER_DOTS_ENABLED` (`dots-studio/dots-3-note-preview:free`), `OPENROUTER_GEMMA_ENABLED` (`google/gemma-4-26b-a4b-it:free`). Ling has no `:free` suffix. Dots is a temporary preview whose catalog expiration is December 31, 2026; recheck availability and data policy before enabling a paused route.
-- OpenRouter chat completions use the same untrusted-transcript envelope, system prompt and profile output caps as Mistral. Requests disable context compression and hidden reasoning, require endpoints to support all supplied parameters, and constrain provider prices to zero for prompt, completion and per-request fees. `data_collection: deny` excludes collecting endpoints; an unavailable eligible endpoint falls through without relaxing policy or choosing a paid model. HTTP-200 error envelopes, errored/filtered choices, invalid JSON, empty/refusal-only content and unfinished thinking blocks advance safely. An OpenRouter 401/402 skips its remaining models for that request because they share the rejected key/account; model-specific errors and 429s keep the ordinary order. Separate reasoning fields are never copied into the carry. Token-limited useful text retains the existing advisory quality behavior. Logs use fixed messages and numeric HTTP status, never arbitrary upstream error-code strings.
-- Gemini is skipped without `GEMINI_API_KEY`. Its only routes are 3.6 Flash and 3.5 Flash-Lite; Flash-Lite follows Flash with `MINIMAL` thinking, the existing Google generation allowance and hidden-thought filtering. Mistral is enabled by default; `MISTRAL_ENABLED=false` pauses it, and a missing `MISTRAL_API_KEY` skips it. Its only route is `ministral-14b-2512`.
-- The first configured remote route receives up to 90 seconds. Remaining routes divide the other 180 seconds evenly, capped at 90 seconds each. With Ling, both Google routes and Mistral configured, budgets are 90/60/60/60 seconds. Without OpenRouter, the original three 90-second slots remain. Missing keys and explicit pauses change the configured route count; with only OpenRouter configured, Ling gets 90 seconds before exact local carry. Enabling paused routes redistributes fallback time and never expands the shared absolute 270-second deadline. Retries and response-body reads are included in each slot.
-- Every generated request tries its configured order afresh; there are no health counters or daily skips. Missing keys and paused routes are not recorded as attempted. Receipts retain the served provider/model, actual tried chain, token usage, and `openrouterMs`/`geminiMs`/`mistralMs`; OpenRouter tries also appear in `openrouterModelsTried`. Latest Run labels all five integrated OpenRouter models without changing its layout.
-- If every configured remote provider fails or no provider key is available, the backend returns the complete captured transcript through the provider-free `local-direct` format. It never truncates the transcript; the transfer remains usable during a provider-wide outage, though it is not compressed.
-- Once a supported transcript has been verified and captured, backend HTTP/network/parse failures, empty replies, and unavailable extension-worker messaging also recover in the source page with a quoted full-transcript carry. This source-local result is reported as `local-direct` with the fixed fallback reason `summary_service_unavailable`; no raw error is copied into its receipt. Destination failure still offers manual copy. Capture verification and the 350,000-character boundary remain enforced; missing or unverified captures are never guessed.
-- Retryable provider calls get at most two attempts within the model budget and a 90-second per-attempt ceiling that remains active through JSON body parsing. Ordinary retries wait 450 ms. All providers advance immediately on HTTP 429; OpenRouter account-wide free limits are shared across its models.
-- Gemini uses `thinkingLevel: MEDIUM`. Mistral prompt-cache keys use `capcontext-summary-v10-<profile>-<model>`. The shared prompt separates reported facts, accepted choices, proposals, rejections, deferred alternatives and constraints before drafting. Generated profiles share grounding hints without section quotas; named owners belong in KEY CONTEXT unless explicitly linked to the user. Important prohibitions are requested verbatim, observed integrity remains a fact, and the final silent check covers relevant constraints and requested exact facts. Two generic grounding examples reinforce these distinctions. This is prompt guidance, not semantic verification.
-- The extension calls the production alias `context-generator-five.vercel.app`. Git pushes to `codex/*` branches create preview deployments; they do not replace that alias. To release backend routing changes, redeploy the tested deployment with Vercel target `production` so it uses production environment variables, then verify the alias, source commit and a real summary receipt. A successful push or ready preview alone is not a production release.
-- `vercel.json` sets the summary function limit to 300 seconds; active provider budgets total 270 seconds, reserving about 30 seconds for overhead. The extension aborts at 320 seconds, allowing transport time after server completion, and keeps its MV3 worker alive every 25 seconds.
-- The backend emits JSON-safe whitespace heartbeats every 15 seconds after the first 15 seconds.
-- Identical concurrent conversations share one background promise. Up to eight exact completed results remain in worker memory for two minutes; cache hits preserve original provider metadata.
+| Route | Key / switch | Default |
+| --- | --- | --- |
+| All OpenRouter routes | `OPENROUTER_API_KEY`; `OPENROUTER_ENABLED=false` bypasses all | Enabled when key exists |
+| Ling `inclusionai/ling-3.1-flash` | `OPENROUTER_LING_ENABLED=false` pauses | Enabled; no `:free` suffix |
+| Qwen `qwen/qwen3.8-27b:free` | `OPENROUTER_QWEN_ENABLED=true` | Paused |
+| Dots `dots-studio/dots-3-note-preview:free` | `OPENROUTER_DOTS_ENABLED=true` | Paused |
+| Gemma `google/gemma-4-26b-a4b-it:free` | `OPENROUTER_GEMMA_ENABLED=true` | Paused |
+| Both Google routes | `GEMINI_API_KEY` | Configured when key exists |
+| Ministral | `MISTRAL_API_KEY`; `MISTRAL_ENABLED=false` pauses | Enabled when key exists |
 
-### Prompt and validation
+Paused OpenRouter candidates require exact `true`; inspect current availability/data policy before enabling one. These are pinned model IDs, not the random free router or an automatic provider `models` fallback list. Missing keys and explicit pauses are not attempted routes. Every request tries its configured order afresh; there are no health counters or daily skips.
 
-Providers receive a system prompt and a user JSON envelope with schema `cap-context-conversation-v1` and data type `untrusted-conversation-transcript`. `getSummarySystemPrompt()` and `getContextCarryTemplate()` are the complete backend prompt contract; the retained standalone `legacy/SKILL.md` is a reference artifact and is not read by the backend.
+Budgets and retries:
 
-The prompt requests the exact title and all seven sections once and in order: WHO I AM, WHAT WE WERE DOING, WHERE WE LEFT OFF, DECISIONS MADE, OPEN QUESTIONS, KEY CONTEXT, NEXT STEP. The template's NEXT STEP contains the fixed destination-confirmation instruction rather than asking the model to invent next work. Structure and formatting never cause provider rejection. A separate content check rejects only refusal-only output and substantively empty output (no actual content after recognized scaffolding, empty placeholders and trusted instructions are removed). Short useful text, malformed/duplicate/missing headings, and useful token-limited output remain deliverable. Quoted refusals, contextual inability to connect/build, and useful content alongside a refusal remain deliverable. Rejected output advances through the existing chain to the full-transcript `local-direct` carry. See `docs/summary-validation.md` for the precise policy and its heuristic limits.
+- First configured remote route: at most 90 seconds. Remaining routes divide the other 180 seconds evenly, capped at 90 seconds each, under the shared 270-second deadline. Default Ling + two Google routes + Ministral is 90/60/60/60; without OpenRouter the three slots are 90/90/90. A single route still gets only 90 seconds. Enabling routes redistributes time, not the total deadline.
+- Retryable calls get at most two attempts, with a 450 ms ordinary retry delay and a 90-second per-attempt ceiling reduced by remaining model time. Timeouts remain active through response-body parsing. HTTP 429 advances immediately.
+- OpenRouter 401/402 skips the remaining OpenRouter routes because they share credentials/account. Model-specific failures and 429 keep the ordinary order; free-limit availability may be shared across models.
+- The first provider returning actual context wins. There is no expansion or semantic retry loop merely because its text is short, imperfectly structured or token-limited.
 
-Strictly valid output retains existing normalization: remove fences/legacy footers, canonicalize recognized headings, add the Unicode box, and replace NEXT STEP. Other non-empty output is preserved verbatim apart from outer whitespace, with the trusted destination-confirmation NEXT STEP appended; missing sections are not invented.
+Provider-specific constraints:
 
-Generated-summary response timing also includes `validationReason` (a bounded validator reason, or null) and `qualityFlags` (`bad_structure`, `missing_section`, `duplicate_section`, `token_limit`, `too_short`, `refusal_like`). The quality log contains only those diagnostics and the summary word count. Flags remain advisory; the independent content check decides whether output is refusal-only or empty. Tiny and emergency backend local-direct carries report an empty flag list and null reason. These diagnostics are not part of Supabase telemetry.
+- OpenRouter uses the shared untrusted-transcript envelope, system prompt and OpenRouter/Mistral profile caps. Disable context compression and hidden reasoning; require endpoint support for supplied parameters; enforce zero prompt/completion/request prices and `data_collection: deny`. If no endpoint qualifies, fall through without relaxing policy or using a paid route.
+- OpenRouter HTTP-200 error envelopes, errored/filtered choices, invalid JSON, empty/refusal-only text and unfinished thinking blocks fail safely. Never copy separate reasoning fields into the carry. Logs use fixed messages/numeric status, not arbitrary upstream error strings.
+- Gemini Flash uses `thinkingLevel: MEDIUM`; Flash-Lite uses `MINIMAL`, with existing generation allowances and hidden-thought filtering.
+- Mistral prompt-cache keys use `capcontext-summary-v10-<profile>-<model>`. Prompt changes must consider that namespace.
 
-Quality limits:
+Receipts preserve the actual served provider/model, attempted chain, token usage and `openrouterMs` / `geminiMs` / `mistralMs`; OpenRouter attempts also populate `openrouterModelsTried`. `Space Bunny 2` changes display text only. Identical concurrent conversations share a background promise; up to eight exact completed results remain in worker memory for two minutes, preserving original provider metadata on cache hits.
 
-- Large-profile `minWords` remains a `qualityFloorMet` diagnostic, not a prompt minimum. The retained advisory validator uses 20% of target, clamped to 80-200 substantive words; this floor no longer rejects provider text.
-- `finishReason` is recorded but token-limit output is not rejected solely for that reason.
-- Validation does not receive the source transcript, so it cannot detect a fluent, well-shaped hallucination.
-- There is no expansion or semantic quality loop. The first provider result containing actual context wins; short or cut-off useful output is retained.
+### Prompt and output policy
 
-## Backend Boundary
+`getSummarySystemPrompt()` and `getContextCarryTemplate()` in `api/summarize.js` define the full prompt. The backend does not read `legacy/SKILL.md`. Providers receive a system prompt and a user JSON envelope with schema `cap-context-conversation-v1`, data type `untrusted-conversation-transcript`.
 
-`POST /api/summarize` requires `Content-Type: application/json`, public marker `X-Cap-Context-Client: cap-context-extension/1`, and `{ "conversation": <non-empty string>, "telemetry"?: <validated started-attempt metadata> }`.
+The requested title is `CONTEXT CARRY — READY TO PASTE`, followed once and in order by WHO I AM, WHAT WE WERE DOING, WHERE WE LEFT OFF, DECISIONS MADE, OPEN QUESTIONS, KEY CONTEXT, NEXT STEP. Shared grounding hints distinguish reported facts, user identity, named owners, accepted choices, proposals/rejections/deferred alternatives and prohibitions. Named owners are not assumed to be the user; observed integrity remains a fact, not a newly invented requirement. Important prohibitions are requested verbatim, with generic grounding examples and a silent constraint/exact-fact check. These are instructions to the model, not semantic verification.
 
-- Accepted origins are Chromium and Firefox extension origins. Firefox may omit Origin; then the marker is mandatory. An already-running extension worker with a valid extension Origin may omit the marker for compatibility.
-- The marker is public and is not an authentication secret.
-- Limits: 2.2 MB JSON request, 350,000 JavaScript characters, 1.4 MB transcript UTF-8, 8 requests/minute and 40/hour per forwarded IP, and 8 concurrent jobs per warm server instance.
-- Rate/concurrency state is process-local, not a durable global limiter.
-- Responses are `no-store`; provider error bodies are not exposed.
-- Both Vercel endpoints share bounded JSON parsing and case-insensitive header handling through `api/request-validation.js`. The Vercel and Supabase telemetry payload validators intentionally remain separate because they run in different deployment bundles; parity tests enforce their shared closed schema.
+Separate two decisions:
 
-## Telemetry, Storage, and Analysis
+1. **Deliverability:** an independent content check rejects only refusal-only or substantively empty output after recognized scaffolding/placeholders/trusted instructions are removed. Quoted refusals, contextual inability to connect/build, useful content alongside refusal, short useful text and useful token-limited text remain deliverable. Rejection advances the normal route chain.
+2. **Structure/quality diagnostics:** missing/duplicate/malformed headings, shortness and finish reasons produce advisory flags. They do not reject useful provider text. `validateContextCarrySummary()` does not receive the source transcript and cannot establish factual grounding or detect fluent hallucinations.
 
-The hosted telemetry engine runs PostgreSQL 17.11 after the October 2 managed security update; schema migrations and private access rules were verified again after the upgrade.
+Strictly structured output gets existing normalization: remove fences/legacy footers, canonicalize headings, add the Unicode box and replace NEXT STEP. Other deliverable output remains verbatim apart from outer whitespace, with the trusted NEXT STEP appended; do not invent missing sections.
 
-| Key/alarm | Purpose |
+Response diagnostics are bounded `validationReason` and `qualityFlags`: `bad_structure`, `missing_section`, `duplicate_section`, `token_limit`, `too_short`, `refusal_like`. Logs include only these and word count. Tiny/emergency backend local-direct results use empty flags/null reason. The advisory floor is 20% of target, clamped to 80–200 substantive words; the separate large-profile `minWords` / `qualityFloorMet` diagnostic is not a prompt minimum or rejection threshold. These diagnostics are not Supabase telemetry. See [docs/summary-validation.md](docs/summary-validation.md) for exact policy/heuristic limits and [docs/summary-accuracy-pass.md](docs/summary-accuracy-pass.md) for historical quality evidence.
+
+### HTTP boundary and release evidence
+
+`POST /api/summarize` requires JSON and `{ "conversation": <nonempty string>, "telemetry"?: <validated started-attempt metadata> }`. The public marker is `X-Cap-Context-Client: cap-context-extension/1`; it is not an authentication secret.
+
+- Accept Chromium/Firefox extension origins. Firefox may omit Origin when the marker is present. A valid extension Origin can omit the marker for already-running worker compatibility.
+- Enforce transcript/envelope limits from [Invariants](#invariants), 8 requests/minute and 40/hour per forwarded IP, and 8 concurrent jobs per warm server instance. Summary limiter state is process-local, not durable/global.
+- Responses are `no-store`; return bounded user-safe errors, never raw provider bodies. Both Vercel endpoints share bounded JSON parsing and case-insensitive headers through `api/request-validation.js`.
+- Vercel/Supabase telemetry validators remain separate deployment bundles; parity tests enforce their shared closed schema.
+- Backend release claims require the production alias to resolve to the intended source commit with production environment settings and a real summary receipt. A ready branch preview or successful push alone is insufficient. Extension distribution still requires its own package/store release.
+
+## Telemetry and local receipts
+
+### Storage and Latest Run
+
+| Key/alarm | Scope and purpose |
 | --- | --- |
 | `context-generator-onboarding-dismissed-v2` | Local onboarding dismissal |
-| `context-generator-last-transfer-stats-v1` | One Latest Run receipt; raw text expires after 24 hours |
-| `context-generator-install-id-v1` | Random install UUID, not an account or real identity |
-| `context-generator-telemetry-outbox-v1` | Durable per-attempt metadata queue, at most 500 entries / seven days |
+| `context-generator-last-transfer-stats-v1` | One local Latest Run receipt; raw transcript expires after 24 hours |
+| `context-generator-install-id-v1` | Random install UUID, not an account/person |
+| `context-generator-telemetry-outbox-v1` | Durable metadata queue; 500 entries / seven days |
 | `context-generator-telemetry-diagnostics-v1` | Bounded delivery/drop counters and 100 recent metadata-only diagnostics |
-| `context-generator-active-transfers-v1` | Six-minute active attempt snapshots in session storage, local fallback |
-| `expire-latest-run-raw-transcript` | Alarm that removes only raw transcript fields |
-| `retry-transfer-telemetry` | Alarm for persisted backoff, Retry-After and startup recovery |
+| `context-generator-active-transfers-v1` | Six-minute active-attempt snapshots; session storage preferred, local fallback |
+| `expire-latest-run-raw-transcript` | Remove only raw transcript fields |
+| `retry-transfer-telemetry` | Persisted backoff, Retry-After and startup recovery |
 
-`chrome.storage.local` persists receipts and outbox data. Active transfer snapshots prefer `chrome.storage.session` so worker restarts retain tab ownership without carrying it across a browser restart; local fallback supports older runtimes. Expired snapshots produce an unknown-outcome diagnostic, never a fabricated failure. The summary cache, in-flight deduplication and source `isRunning` lock remain memory-only. The analysis renderer reads receipts through the GitHub Pages-matched bridge and its `window.postMessage` contract, rather than accessing extension storage directly.
+Receipts/outbox persist in `chrome.storage.local`. Active snapshots prefer `chrome.storage.session` to survive worker restarts without crossing a browser restart; older runtimes fall back to local storage. Expired snapshots record unknown outcome, never fabricated failure. Cache/in-flight deduplication and page `isRunning` remain memory-only.
 
-The receipt records transfer/capture timings, counts, sizes, profile, the model that actually served, attempted models, fallback, finish reason, token usage, status, and exact captured text. Latest Run displays Ling as **Space Bunny 2**, the three paused OpenRouter routes, 3.6 Flash, 3.5 Flash-Lite, Ministral 14B and local-direct. The alias changes only display text; backend requests and receipt model IDs remain `inclusionai/ling-3.1-flash`. The serving model is excluded from the failed portion of the fallback log. OpenRouter timings and attempted models survive cache reuse. Unsupported model paths request a fresh transfer instead of displaying retired routes. It does not store the generated summary. Background expiry and the analysis bridge both remove expired raw text.
+Latest Run records transfer/capture timings, counts, sizes, profile, actual serving/attempted models, fallback/finish reason, token usage, status and exact captured text. It does not store generated summary text. The matched analysis bridge, not the page directly, reads extension storage; both background and bridge strip expired raw text. The serving model is excluded from the failed portion of the fallback log, and cache reuse preserves provider timing/attempt metadata. Current labels cover four configured OpenRouter models, both Google routes, Ministral and local-direct; unsupported paths ask for a new transfer instead of showing retired routes.
 
-The analysis page's overlapping-squares **Copy all details** icon copies the displayed Latest Run cards and timeline as readable label/value lines, excluding raw chat text. It is disabled without a receipt and briefly shows a check or cross for clipboard success or failure, with tooltips and accessible status text; a selection-based fallback supports clipboard-restricted browsers/local files.
+**Copy all details** copies displayed receipt cards/timeline as label/value text, excluding raw chat. It is disabled without a receipt and reports actual clipboard success/failure with accessible status. A selection-based fallback supports clipboard restrictions/local files.
 
-Closed telemetry stages are: `intent_started`, `capture_started`, `capture_completed`, `summary_request_started`, `summary_response_started`, `summary_completed`, `paste_started`, `completed`.
+### Payload, proof and serving-model trust
 
-Allowed failures are: `no_conversation`, `conversation_too_large`, `capture_failed`, `summary_rate_limited`, `summary_service_busy`, `summary_access_denied`, `summary_failed`, `destination_open_failed`, `paste_failed`, `extension_reloaded`, `client_interrupted`, `user_cancelled`, `unknown_failure`.
+Delivery: `content script -> background outbox -> Vercel /api/telemetry -> Supabase Edge -> record_transfer_event`.
 
-The closed payload fields are install/attempt IDs, `attempted_at`, source/destination, captured character count, status, last stage, closed failure reason, and extension version, plus optional `completed_at`, `summary_proof`, `summary_confirmed_at` and `model`. Client completed_at remains accepted for compatibility but is not stored. Proofs bind attempt/install/time/route/version; v2 adds server summary completion time, and v3 also binds the canonical model that actually served. The server returns legacy `summaryProof` and `summaryProofV2` alongside `summaryProofV3`, `summaryConfirmedAt` and `summaryModel`. The worker prefers v3, persisting its proof/time/model/version together through retries and restart. Edge accepts all three versions and rejects model tampering before SQL. Unsigned legacy reports remain valid diagnostics. No chat, summary, URL, account, IP or free-form error is stored in Supabase telemetry.
+Every layer rejects unknown fields. Allowed payload fields are `install_id`, `attempt_id`, `attempted_at`, `source_platform`, `destination_platform`, `character_count`, `status`, `last_stage`, `failure_reason`, `extension_version`, and optional `completed_at`, `summary_proof`, `summary_confirmed_at`, `model`. Client completion time is accepted for compatibility but not stored.
 
-`transfers.model` sits immediately after `character_count`. It records the final serving model, including fallback models and backend `local-direct`, only from a verified v3 receipt. The first attribution is immutable. A v3 receipt may fill a v2 row's missing model only for the exact same signed completion time; unknown v1 completion times cannot be inferred. Historical rows, older clients, source-local recovery and cross-attempt cache reuse without a fresh server receipt retain NULL. The optional fourteenth RPC argument preserves historical 10–13-argument calls. Migration twenty-five copies/swaps only `transfers` atomically to achieve the requested column order, with dependency/schema refusal, preserved rows/indexes/constraints/triggers/private access, and no counter replay.
+Statuses are `started`, `succeeded`, `failed`. A succeeded terminal transfer requires stage `completed`; summary verification is independent of paste status.
 
-Delivery path: `content script -> background outbox -> Vercel /api/telemetry -> Supabase Edge Function -> record_transfer_event`. Durable queue writes run independently of network delivery. Telemetry storage errors cannot block summary generation or discard a valid summary response: unavailable preflight storage omits optional attribution, and receipt persistence attempts session storage even if the local outbox fails. If both stores are unavailable, telemetry may be lost while the summary remains usable. Per-attempt compaction retains monotonic progress, the first terminal outcome and signed receipts paired with their authenticated version. In-flight acknowledgements remove only the sent revision. Permanent malformed/proof/identity failures are removed with bounded metadata diagnostics so later reports drain; network/429/5xx retry with persisted jittered backoff (30 seconds to one hour), configuration failures start at five minutes, and Retry-After is capped at one hour. Capacity pruning preserves terminal reports and receipts before ordinary progress, and records every drop. Diagnostics contain no proof bytes or recoverable rejected payload.
+Stages: `intent_started`, `capture_started`, `capture_completed`, `summary_request_started`, `summary_response_started`, `summary_completed`, `paste_started`, `completed`.
 
-Every layer rejects unknown fields. Edge ingestion requires a private `TELEMETRY_RELAY_SECRET`; the publishable key is not writer authentication. Matching `TELEMETRY_SIGNING_KEY` values on Vercel and Edge authenticate completed server work before SQL. The relay has a five-second upstream deadline; Edge reads at most 4 KiB with a one-second body deadline and a four-second RPC deadline. Fixed error codes distinguish permanent rejection, transient availability and configuration problems. Upstash atomically enforces per-install 180/minute and 2,000/hour, per-IP 3,000/minute and 30,000/hour, and global 20,000/minute, 60,000/hour and 200,000/day budgets. Redis identifiers are keyed hashes with short TTLs; a 450 ms storage failure falls back to bounded local limits and an enum-only warning. These availability limits are separate from the process-local summary limiter.
+Failure reasons: `no_conversation`, `conversation_too_large`, `capture_failed`, `summary_rate_limited`, `summary_service_busy`, `summary_access_denied`, `summary_failed`, `destination_open_failed`, `paste_failed`, `extension_reloaded`, `client_interrupted`, `user_cancelled`, `unknown_failure`.
 
-The production project is `cap-context-telemetry` (`iqkzynzxbmemhtiupwwu`). The first thirteen migrations preserve historical rows, UUIDs and lifetime totals; subsequent migrations implement the authorized users reset, formatting and IST daily counters. Database checks and a table guard enforce core identity and the first terminal outcome/stage/reason even for direct service writes. The outcome constraint also enforces the closed status set; no separate duplicate status check is needed. RPC callers may legitimately change extension version after an upgrade; the original first-observed version remains stored. `anon` / `authenticated` have no table, view or RPC access. RLS stays enabled without public policies; service-role writes use SELECT/INSERT/UPDATE, not DELETE/TRUNCATE. New application objects owned by `postgres` start private; managed `supabase_admin` defaults cannot be changed by the hosted application role. See `supabase/README.md` for operational checks and recovery.
+| Receipt | Authenticated meaning |
+| --- | --- |
+| v1 `summaryProof` | Summary work bound to attempt/install IDs, attempt start time, source/destination and extension version; summary completion day unknown |
+| v2 `summaryProofV2` + `summaryConfirmedAt` | Adds server summary completion time |
+| v3 `summaryProofV3` + `summaryConfirmedAt` + `summaryModel` | Also binds the canonical model that actually served |
 
-`users` displays columns in this order: `install_id`, `user_no`, `name`, `lifetime_summaries`, `today_summaries`, `today_failed_attempts`, then the internal `today_date` reset field. The installation key remains stable. The owner-authorized October 2 users-only reset clears the old rows/counters and restarts numbering at 1; transfer history is retained. Attempts already recorded before the reset cannot recreate cleared counts, including late completions. Newly received attempts use the existing signed-day/receipt-day rules, including offline delivery. A row is created on an install's first countable verified summary or reported failure, not on unsigned paste success alone. New-install allocation uses a short advisory lock and transactional max+1, so duplicate reports and rolled-back inserts do not leave gaps in visible numbering. A random unused real Naruto name is assigned from the 40-name SQL pool; names cannot contain numbers or repeat. User No. 1 also permits the owner-requested exact lowercase name `naruto`, outside automatic allocation. While that alias is used, forty canonical names remain available for other installations. Extend the pool before exhaustion; no duplicate or numbered fallback is allowed. Once all forty canonical names are occupied, a new counted installation rolls back its transfer/counter write until more predefined names are available. Failure reports and install IDs are client-supplied diagnostics, not authenticated identities; the relay secret protects Edge ingress and signed receipts authenticate summary work, while rate limits only bound anonymous report abuse.
+The backend returns compatible legacy proofs alongside v3. These camelCase fields belong to the summary response; the worker converts them to the snake_case telemetry fields above. It prefers v3 and persists proof/time/model/authenticated version together through retry/restart. Edge verifies all supported versions and rejects model tampering before SQL. Unsigned reports remain diagnostics, not proof of completed summary work.
 
-Verified summaries increment lifetime once, independently of paste success. Signed occurrence time interpreted in Asia/Kolkata drives daily successes; delayed prior-IST-day receipts and v1 unknown-day proofs never inflate today. A first received failed terminal outcome increments daily failures once on its transaction-start calendar day in IST (the same now() value previously stored as terminal_received_at); empty-chat no_conversation and unknown/started attempts are not user failures. Unverified empty chats remain in transfer diagnostics but are filtered out before the user-counter trigger runs; they never create a user row, acquire counter locks or increment its failure counter. Pre-existing empty-only rows are removed without renumbering real users. The existing pg_cron job resets both daily counters at 00:00 IST (30 18 * * * on the GMT scheduler); ingestion also resets both if the job is late. Ingestion locks an existing user row before sampling the current day, preventing a wait across midnight from restoring yesterday. For a first installation it also acquires the identity-allocation lock before sampling the day, so waiting for a new name cannot create stale counters after midnight. The IST migration reconciles only today from post-reset authoritative events, preserving lifetime totals and the original cutoff. Legacy 10/11-argument RPCs remain supported. The database stores one mutable row per attempt in `transfers` (renamed from `transfer_events`), keyed only by `attempt_id`; the unused generated `id` and its duplicate identity index are removed. The deployed `record_transfer_event` RPC name/signature stays compatible. The unused reporting views `user_summary_usage`, `verified_summary_daily_usage` and `transfer_event_outcomes` have been removed; use `users` for current counters and `transfers` for history, including historical daily totals grouped by signed completion date in Asia/Kolkata. No runtime ingestion, reset or backup code required these views. The fourteen-field table omits updated_at, completed_at, summary_received_at and terminal_received_at. The compatible RPC accepts but ignores p_completed_at. Failed counters derive transaction_timestamp() directly on the first failure transition while clock_timestamp() samples the current IST day after locks, so a midnight lock wait cannot shift yesterday's failure into today. A started event has no received terminal outcome; never infer failure or rewrite its status. Historical failure/progress/completion timing is deliberately unavailable. Extension-local outcome_unknown delivery diagnostics are independent of database views. Installs are not unique people; there is no automatic event deletion or retroactive failure/verification backfill.
+A proof authenticates server summary work and the fields listed for its version. It does not attest capture completeness, reported `character_count`, paste outcome or a person's identity. Those require their own capture/delivery evidence; do not treat a verified receipt as end-to-end correctness.
 
-## Placement and Paste
+`transfers.model` follows `character_count` and is populated only by verified v3 attribution, including actual fallback models and backend `local-direct`. First attribution is immutable. A v3 receipt may fill a v2 row only at the identical signed completion time; unknown v1 completion times cannot be inferred. Historical/older-client rows, source-local recovery and cross-attempt cache reuse without a fresh server receipt retain NULL. Never fill NULL with the first requested model as a guess.
 
-- Claude mounts a 36px non-shrinking pill with 32px orb artwork in the active editor's native toolbar. Expanded layouts validate a sibling `ChatComposerActions`, the attachment test ID and distinct native action rows, then mount before the persistent mic/Voice/Send branch. A model-only chin variant still uses the editor's Send branch. Reply layouts that move both attachment and model into `ChatComposerChin` validate distinct flex groups in their shared chin row within the same named `ChatComposer`, then mount before the model branch. Hidden/popup controls and other composers cannot supply the slot. Mount/picker identity includes the editor, host, toolbar, rows and direct anchor branch. During temporary sending/docking control gaps, the pill retains its validated row only while the same connected editor owns it. Detached/replaced owners release markers and hide until a valid toolbar returns; unmatched connected editors retain scoped attribute monitoring for recovery. Claude uses inline placement only.
-- Scoped adopted CSS moves Claude's expanded absolute toolbar groups into wrapping normal flow and resets that editor's leading/trailing/float reservations and bottom toolbar padding. Reply-chin mounting changes only the chin toolbar's flow; the editor's native Send position and trailing reservation remain intact. Native controls are not reparented or translated. Narrow layouts can wrap toolbar groups beneath the editor.
-- The existing document child-list observer, focus/visibility/resize events and SPA navigation monitoring remount the same owned button after editor replacement. Claude mount identity includes the host, editor branch, actions and both rows, so replacing only the host invalidates the picker once and updates ownership. Old native marker attributes are removed on replacement/teardown. Claude uses no placement ResizeObserver or fixed geometry. ChatGPT uses those only for its restored legacy backup; returning to GPT inline clears its reservations and placement observers. Claude legacy placement helpers are retained but inactive; reservation cleanup remains necessary when replacing an older injected instance. Claude reuses its scoped native-control mutation observer across stable inline updates, covering attribute-only mode/visibility changes in its named composer without reacting to editor character-data mutations. Ownership changes replace it; release/teardown disconnects it. The other three inline adapters keep their scoped native-control mutation observers, with resize geometry reserved for their fallback. Legacy reservation cleanup remains for upgrading an already-running older content script. Fallback pickers preserve their existing lifecycle without requiring an inline owner.
-- Picker/handoff overlays retain their page-root lifecycle. An open inline picker on any of the five platforms closes without restoring focus when the editor/toolbar is replaced (including Claude's editor branch, actions container or host, and ChatGPT's composer body), the route changes or the viewport resizes; normal mounting then resumes. Dismissal resets the retained orb's active visuals and expanded state even when the old composer has already detached it. The picker position remains locked during its transfer animation.
-- ChatGPT mounts a 36px non-shrinking child before the model/Think branch or visible right-side native controls. Responsive layouts validate the editor's closest `[data-composer-input]` footer within its own `[data-composer-body]`, using the owned `add-context` navigation control. The free transition grid instead validates `[data-composer-body][data-composer-grid]`, the owned `composer-plus-btn` and direct `leading`/`trailing` transition slots; it requires no responsive-footer/input markers. Hidden/popup copies and foreign slots are rejected. The `reasoning` target or visible Think/Thinking label identifies the model branch. The pill remains outside its tooltip wrappers; hiding Think on narrow screens moves the anchor to the visible mic/Send controls without revealing Think. Native nodes are not reparented. Mount/picker identity includes the body and model branch. Failed inline validation retains the existing validated geometry backup.
-- ChatGPT inline reuses the shared native-control mutation observer on its composer body, covering attribute-only visibility/model changes without reacting to editor character-data changes. Stable mounts retain that observer; composer/editor/toolbar ownership changes replace it, and release/teardown disconnects it. Mount and picker identity include the composer body even when its inner nodes are reused. The legacy GPT observer also watches `hidden` so a returning native group can restore inline placement even when the responsive input/composer sizes never change.
-- Scoped adopted CSS lets ChatGPT's native control tracks size to their contents and preserves native editor row switching. The model branch becomes an inline flex box with intrinsic width, with the pill 6px before that branch. Flow overrides preserve native inline `display:none`, `hidden` attributes and `.hidden` classes. The common ancestor of visible right-side native buttons is marked for wrapping: its pill/model/voice branches use intrinsic flex bases instead of forcing a model button into a too-small track. At narrow widths this can add a native-control row. Markers are removed on remount/teardown. Old fixed anchors, synthetic composer rectangles, retained placement surfaces and dedicated GPT placement observers are restored solely for the backup; successful inline mounting clears that state. ChatGPT still requires focused paste.
-- Opening the picker gives the composer orb an 8% enlargement, 1px lift and soft artwork-shaped purple glow. Ordinary picker dismissal clears that active effect independently of composer focus restoration. The preserved-backdrop picker-to-handoff bridge retains it until the handoff animation takes ownership.
-- Hovering the composer orb smoothly enlarges it by 14% over 260ms, lifts it 1px and adds a soft purple glow shaped by the artwork. Leaving restores its normal size and appearance; pressing gently scales it to 0.95. The transform preserves the native toolbar's layout. Hover does not overwrite picker/handoff scaling; reduced motion makes size and lift changes immediate.
-- Gemini mounts 36px inline before the visible `bard-mode-menu-button` inside the active editor's named `.text-input-field` trailing actions. Discovery selects an owned wrapper with visible native controls, skipping hidden duplicates. Scoped CSS keeps the model slot horizontal and non-wrapping, so the pill sits left of Flash/Pro even when Gemini gives that wrapper a column direction. On mobile, where Gemini hides the mode picker, it mounts before that group's native mic/send branch. Grok mounts before the visible owned `model-select-trigger` in the active `.query-bar`, validated against its named chat input and visible attachment control. Its existing absolute toolbar becomes normal flow, replacing only the matching native bottom-padding reservation so wrapped controls stay below a growing draft. DeepSeek checks file-input candidates in the textarea's sibling action row, associating each with its preceding native upload control while allowing non-control spacers. The same group must contain a visible native circle action; the pill precedes upload when visible, otherwise that action's direct group child. This supports a hidden-upload layout without relaxing editor ownership or relying on hashed composer classes. The anchor-to-slot walk is synchronous, and each adapter supplies an ancestor slot.
-- All five inline adapters use the shared 36px non-shrinking pill size with 32px artwork. Scoped marker CSS allows native action groups to wrap rather than overlap. Flow display rules respect native inline hiding and `hidden` states. Markers are removed on replacement/teardown. The same owned button survives native editor remounts; Grok picker ownership also includes the editor container that owns its bottom-padding reservation. Returning from legacy placement resets offsets and size while retaining shared hover/picker effects. Grok still requires focused paste; capture and paste contracts are unchanged.
-- Gemini, Grok, and DeepSeek retain the existing validated geometry placement for unmatched native variants. Only that fallback reserves an outer composer and runs placement resize observers. The fallback keeps the last verified viewport placement for up to 700 ms when composer discovery temporarily fails, moving to the page root during that bound; a valid remounted composer reclaims it. A validated inline toolbar clears that geometry/grace state. Persistent discovery loss hides the orb. Fallback pickers preserve their existing lifecycle; inline-owner invalidation applies when a validated inline mount is active.
-- Provider control monitoring retains its validated native ancestor when geometry fallback selects a narrower surface, so restoring an outer inline-identification class triggers recovery even without resize or child changes. Remounted editors still replace the observer scope.
+`record_transfer_event` retains 10–13-argument compatibility; optional fourteenth `p_model` defaults to NULL. Migration `20261003124307_add_served_model_to_transfers.sql` achieved column order with a locked atomic copy/swap that refuses unexpected schema/dependencies and preserves rows, indexes, constraints, triggers and private access without counter replay. Future schema changes must preserve those contracts, not edit applied migration history.
 
-For those three fallback paths, composer discovery scores platform candidates, rejects page-sized/misaligned surfaces, caps dimensions, and restores prior inline styles when reservations change. It never falls back to an unvalidated editor parent: if no surface qualifies, the bounded provider remount grace applies and persistent loss hides the orb. Resize observers cover expanding composers; composer-scoped mutation observers also track native control remounts, text/state changes, and visibility changes that do not resize the composer. Gemini, Grok, and DeepSeek place the orb before the geometry-defined right-side control row instead of recognizing English labels or assuming a fixed button index.
+### Outbox and ingress availability
 
-Each platform-content instance publishes a teardown callback before it begins monitoring. A later content-script version invokes that callback before taking ownership, removing its runtime message listener and DOM listeners, disconnecting all owned observers, cancelling timers/intervals/animation frames, restoring reservations, and removing owned UI. Same-version duplicate injection remains a no-op.
+- Queue writes are independent of network delivery. Optional telemetry-storage failures cannot prevent generation or discard a successful summary; unavailable preflight storage omits attribution, and signed-receipt persistence tries session storage when local outbox writes fail. If both stores fail, telemetry may be lost while the summary remains usable.
+- Per-attempt compaction keeps monotonic progress, first terminal outcome and the first signed receipt paired with its authenticated version. An in-flight acknowledgement removes only the revision actually sent.
+- Permanent malformed/proof/identity failures are removed with bounded diagnostics so later reports drain. Network/429/5xx failures retry with persisted jittered backoff from 30 seconds to one hour; configuration failures start at five minutes. Retry-After is capped at one hour.
+- Capacity pruning retains terminal reports/receipts ahead of ordinary progress and diagnoses every drop. Diagnostics contain neither proof bytes nor recoverable rejected payloads. Delivery is best effort, not an audit-complete ledger.
+- Edge ingress requires private `TELEMETRY_RELAY_SECRET`; a publishable key is not writer authentication. Matching `TELEMETRY_SIGNING_KEY` values authenticate summary receipts on Vercel/Edge. Fixed errors distinguish permanent, transient and configuration problems.
+- Worker delivery deadline: eight seconds; relay upstream deadline: five seconds. Edge body bound: 4 KiB/one second; RPC deadline: four seconds. Upstash budgets are per-install 180/minute and 2,000/hour; per-IP 3,000/minute and 30,000/hour; global 20,000/minute, 60,000/hour and 200,000/day. Redis IDs are keyed hashes with short TTLs. A 450 ms store failure falls back to bounded process-local limits and an enum-only warning. These limits are separate from summary admission limits.
 
-Paste uses native setters/events plus stability checks. Paste discovery ranks only writable, enabled candidates, so a disabled or read-only high-scoring editor cannot mask an available composer; a previously verified composer remains retained through a temporary disabled/`aria-hidden` state. Firefox alone converts contenteditable line breaks to escaped HTML `<br>` elements. ChatGPT gets longer insert/verify/stability windows. Verification requires at least 95% of the expected summary's normalized words to appear in order across the full editor text. Whitespace, newlines, punctuation, bullets and rendered Markdown differences (link targets, code-fence labels, ordered/task-list markers) are ignored. A linear scan handles ordinary pastes; bounded word insertion/deletion matching handles small omissions and repeated words without relying on three samples. This deliberately tolerates up to 5% missing words and does not prove byte-for-byte completeness. A detached editor cannot complete verification after a remount. Initial insertion, retries and delayed rechecks preserve nonempty drafts, including drafts restored on focus; already verified text is accepted without replacing it. Failed verification uses the existing destination recovery/manual-copy path.
+### Database and counters
 
-Native menus and popovers may temporarily mark the background application `aria-hidden` without visually removing its composer. Placement retains only the last verified, connected, geometrically visible input through that state; removed or visually hidden composers still make Cap Context hide normally. Newly mounted textareas/contenteditables inside native dialogs are excluded from composer selection, so settings editors cannot replace the verified chat input.
+Project: `cap-context-telemetry` (`iqkzynzxbmemhtiupwwu`). Migrations define expected schema/access; live engine version and deployed migration/function state require a fresh check, not a dated documentation claim. Operational checks, encrypted backups/restores and rollout details are in [supabase/README.md](supabase/README.md).
 
-## Contracts That Must Change Together
+- `transfers` has one mutable row per `attempt_id`, preserving immutable core identity, first terminal outcome/stage/reason, signed completion and first model attribution. `received_at` is initial receipt time, not a complete progress timeline. Historical failure/progress/completion timestamps deliberately are not retained. Compatible `p_completed_at` is ignored.
+- Use `users` for current counters and `transfers` for history; removed reporting views and generated duplicate `id` are not runtime interfaces. Signed summary days can be grouped in Asia/Kolkata. For chronological results, request an explicit `ORDER BY attempted_at`; physical/table-editor row order is not a database guarantee.
+- A `started` row means no terminal outcome was received. Never infer failure or backfill verification from it. Extension-local `outcome_unknown` diagnostics are separate. There is no automatic event deletion or retroactive failure/verification backfill.
+- Both tables keep RLS enabled without public policies. `anon` / `authenticated` have no table/view/RPC access. Service-role writes have SELECT/INSERT/UPDATE and required sequence/RPC rights, not DELETE/TRUNCATE. Database constraints/guards also protect direct service writes. New application objects owned by `postgres` default private; hosted application migrations cannot change managed `supabase_admin` defaults.
+- The original first-observed extension version remains stored, though a later RPC caller may legitimately use an upgraded version. This differs from the authenticated version paired with a proof during worker retries.
 
-- Platform support: manifest matches/permissions, `PLATFORMS`, background `DESTINATIONS`, `DESTINATION_HOST_RULES`, telemetry platform lists, tests, smoke fixtures.
-- Conversation limits: content-script cap, request-security character/byte/body limits, analysis display, tests.
-- Model/profile routing: provider constants/budgets, prompts, Latest Run labels, evaluation expectations, this file, `docs/provider-fallbacks.md`.
-- Telemetry fields/stages/failures: source/background sanitizers, Vercel validator, Supabase validator, SQL constraints/functions, tests. Free-form telemetry fields are forbidden.
-- Latest Run receipt: producer, background expiry, bridge, analysis renderer, analysis tests.
-- Content-script changes must advance `CONTENT_SCRIPT_LOAD_ID` for open-tab replacement and retain stale-node/reservation cleanup. Current value: `platform-content-2026-10-03-tight-orb-cutout-v101`.
-- Extension release: bump `extension/manifest.json`, rebuild the ZIP with `manifest.json` at its root, hash-compare every file against `extension/`, then test the unpacked folder in a new Brave window.
+User allocation:
 
-## Known Current Risks
+- Column order is `install_id`, `user_no`, `name`, `lifetime_summaries`, `today_summaries`, `today_failed_attempts`, then internal `today_date`. Installs are not unique people.
+- The first countable verified summary or reported failure creates a row; unsigned successful paste alone does not. The authorized users-only reset retained transfer history. Attempts recorded before its cutoff cannot restore cleared counts, including delayed completions.
+- New installs use a short advisory lock and transactional max+1 numbering. Duplicate/rolled-back inserts do not leave visible numbering gaps. Names are random unused values from the 40-name predefined Naruto pool, without digits or duplicates. User No. 1 additionally permits exact lowercase `naruto`, outside automatic allocation.
+- Extend the pool before exhaustion. With all canonical names used, a new counted installation rolls back its transfer/counter write; there is no numbered/duplicate fallback. Failure reports/install IDs are client-supplied diagnostics, not authenticated identities; receipt signing authenticates summary work and rate limits only bound anonymous abuse.
 
-- Long ChatGPT DOM capture has historically under-captured; deterministic virtual-window fixtures alone do not establish native-chat completeness.
-- Summary diagnostics are structural, not grounded; the content gate is conservative and heuristic. Useful short/token-limited output is retained, but factual grounding and omission detection are not enforced. Template hints remain exact-match empty-output placeholders. The focused October 3 accuracy pass used identical short/109k/62k-token inputs: all five final Ling outputs retained critical facts, but one mislabeled an unrelated unapproved mockup as rejected. Those small-sample results do not guarantee future factual preservation by Ling or the remaining generated fallbacks. See `docs/summary-accuracy-pass.md` for the historical comparison; no further provider calls were made for the subsequent route removal.
-- Telemetry is bounded best-effort delivery: seven-day/capacity drops are diagnosed, while stale historical attempts remain unknown and unsigned legacy summaries cannot be retrospectively verified. Redis outage fallback limits are process-local.
-- A destination prepared before capture/summary failure may remain open unused.
-- `npm run gate` omits installed-extension smoke. Default smoke covers ChatGPT → Claude; optional JSON modes cover all five source platforms against fixtures and a stub backend.
-- Browser packaging uses one hybrid Chromium/Firefox manifest while automation is Brave-only.
+Counter rules:
 
-## Verification Matrix
-
-| Change | Focused check | Broader check |
+| Counter | Countable event | Time attribution |
 | --- | --- | --- |
-| Capture, pasted cards, placement, picker/handoff | `node --test --test-skip-pattern="^slow/release:" test/platform-content.test.js` | `npm run test:slow`; Brave smoke for real extension/UI work |
-| Background messages, destination recovery, cache | `node --test test/background.test.js` | `npm test` |
-| Summary prompt/routing/validation | `node --test test/summarize.test.js test/request-security.test.js` | `npm run eval` for quality/provider changes |
-| Telemetry/Supabase | Telemetry delivery, ingestion and verified-receipt tests; `node scripts/check-verified-telemetry-db.js` with pinned PGlite | `npm test`, real backup restore, hosted proof/counter/grant checks and Brave database smoke |
-| Latest Run analysis | `node --test test/analysis.test.js` | Open GitHub Pages analysis with extension loaded |
-| Release/package | `npm test` and `npm run test:extension-smoke` | `npm run gate`, then ZIP hash comparison |
+| Lifetime summaries | First verified summary, even if paste failed | Once per attempt; independent of transfer success |
+| Today's summaries | First verified summary with known signed day | Server signed occurrence time in Asia/Kolkata; delayed earlier-day and unknown-day v1 proofs do not inflate today |
+| Today's failed attempts | First received failed terminal outcome, excluding `no_conversation` | Transaction-start calendar day in IST, ignoring client clocks |
 
-- `npm test`: deterministic suite with a 30-second hang limit, excluding `slow/release:` capture tests. Virtualized sweep regressions use simulated time while preserving capture/paste delays.
-- Capture/background/provider timing regressions use scoped clocks with matching Date/timer injections in VM fixtures. Checks retain 250ms probes, eight-second hook recovery, the 15-second ChatGPT request deadline, 450ms provider retries and the 120ms handoff paint fallback. Gemini/OpenRouter body tests still read stalled native HTTP bodies before clock advancement and verify their actual 90s/60s deadlines.
-- JSON/background fixtures reuse compiled scripts inside fresh VM contexts. Scoped clock cleanup cancels leftover fixture timers after assertions, including the five-second error-badge timers that previously kept the background test worker alive.
-- Telemetry schema parity and strict-input cases share one regression; credential forwarding exercises the actual Edge handler, and signed-receipt checks cover both diagnostic completion and authenticated summary timestamps. Cache-proof reuse is covered in the existing background/telemetry tests. Shared provider-body timeout coverage retains Gemini 200/429/503 plus OpenRouter 200, which also checks its distinct route budgets before the same status-independent body reader aborts.
-- `npm run test:slow`: the physical-scroll regression, using simulated time to verify all sixteen turns in order after five unchanged windows, with a 60-second hang limit.
-- `npm run test:extension-smoke`: disposable Brave profile, unpacked extension, ChatGPT-source/Claude-destination fixtures and stub backend. It verifies content/background startup, exact transfer, picker website-link focus wrapping, lightning/toggle/reduced-motion behavior, narrow picker fit, and inline placement on all five platforms (drafts, narrow widths and remount) without depending on an ephemeral worker DevTools target. `CAP_CONTEXT_TELEMETRY_SMOKE=1` routes installed-worker reports through the local relay/Edge handlers into all real SQL migrations, checking one verified count and a drained outbox. `test/extension-smoke.test.js` guards injected-script escaping and bounded command cleanup. Use a separate browser window/profile.
-- `npm run eval`: live production-endpoint quality/latency evaluation with one retry for a failed quality case or transient request/provider error; two failures still block the gate. Each request has a 320-second deadline covering the complete response body; latency includes generation after streaming heartbeat headers. Malformed JSON is a retryable service failure.
-- `npm run gate`: fast tests, slow capture, live evaluation; it does not include Brave smoke.
+Empty/unknown/started activity never creates a counted user failure. Empty-only telemetry is filtered before counter triggers/locks. Current day is sampled with `clock_timestamp()` after existing-user or new-allocation locks; failure occurrence uses stable `transaction_timestamp()`. This prevents a midnight lock wait from restoring yesterday's counters or moving yesterday's failure into today.
 
-JSON capture checks:
+Both daily counters reset at 00:00 IST via the existing GMT cron `30 18 * * *`; ingestion resets them if the job is late. Reconciliation preserves lifetime totals and the users-reset cutoff. Keep old RPC defaults, sticky outcomes and signed-day behavior when changing counters.
+
+For telemetry rollout, preserve compatibility across queued receipts: backup/restore and migration dry run -> additive schema -> matching secrets -> Edge -> Vercel -> extension. Keep signing keys valid while seven-day queues may hold old receipts; rotation needs verifier overlap or a drained queue. Roll back code while retaining compatible schema/validators, not by dropping new fields or rewriting migration history.
+
+## Composer UI and paste
+
+### Shared lifecycle and visual ownership
+
+- Each content instance publishes teardown before monitoring. A new `CONTENT_SCRIPT_LOAD_ID` invokes the previous teardown, removes owned runtime/DOM listeners, disconnects observers, cancels timers/frames, restores reservations and removes only owned UI. Same-version duplicate injection is a no-op. Read the current constant in `extension/platform-content.js` rather than copying a stale value here.
+- Reuse/move one owned orb across editor remounts. All inline slots use a non-shrinking 36px button with 32px artwork; native control groups may wrap rather than overlap. Preserve native hiding and remove marker attributes on replacement/teardown.
+- Validate visible controls belonging to the active editor, excluding hidden copies, other composers and popup/menu/listbox/dialog controls unless the dialog contains the actual composer. A native popover may `aria-hidden` the background without removing it: retain only an already verified, connected, geometrically visible editor. Newly mounted modal/settings editors cannot replace it.
+- Document child-list, focus/visibility/resize and SPA monitoring remount the orb. Scoped control mutation observers cover attribute-only visibility/mode/label changes while ignoring ordinary editor character-data. Stable ownership reuses observers; remount/release/teardown replaces or disconnects them.
+- Picker ownership includes the editor and native host/rows/anchor wrappers. Replacement, route change or viewport resize closes an inline picker without restoring focus, then remounts. Reset the retained orb's expanded state and active visuals even if its old composer already detached it.
+
+### Platform placement contracts
+
+**Claude — inline only:**
+
+- Expanded layouts locate sibling `ChatComposerActions` within the input's nearest `ChatComposer`, validate owned attachment/model controls and distinct rows, then mount before the persistent mic/Voice/Send branch. The hidden Send node still identifies that branch in Voice mode; keep the orb outside animated layers.
+- A model-only chin variant still mounts in the editor's Send row. A Reply layout with both attachment and model in `ChatComposerChin` instead validates their separate flex groups in the same chin row and mounts before the model branch.
+- Expanded toolbar CSS moves absolute groups into wrapping normal flow and resets that editor's leading/trailing/float/bottom-padding reservations. Reply-chin CSS changes only the chin flow: preserve the native editor Send position and trailing inset. Do not reparent/translate native controls.
+- During sending/docking gaps, retain the validated inline row only while its connected input still owns it. Detached/replaced ownership hides until valid discovery returns; an unmatched connected input keeps attribute monitoring on its named composer. No fixed-placement switch, grace timer or placement ResizeObserver is active. Retained legacy helpers are inactive; reservation cleanup still handles older injected instances.
+
+**ChatGPT — inline first, validated geometry backup:**
+
+- Responsive layouts validate `[data-composer-input]` and its closest `[data-composer-footer-responsive]` inside the input's own `[data-composer-body]`, using the owned `add-context` navigation control.
+- Free transition grids validate `[data-composer-body][data-composer-grid]`, `composer-plus-btn` and direct `leading` / `trailing` slots. They have no required responsive-footer/input markers.
+- Mount before the owned `reasoning` or visible Think/Thinking branch, outside its tooltip wrappers. If Think is hidden on a narrow layout, anchor before visible mic/Send controls without revealing Think. Do not require a paid model selector or assume a child index.
+- Scoped CSS gives native control tracks intrinsic widths and wrapping while preserving editor row switching and `display:none`, `hidden` and `.hidden` states. The orb sits 6px before the model branch. Identity includes the body, native rows/common control group and model branch, even if child nodes are reused.
+- Failure to validate inline uses the existing GPT geometry backup. Returning inline clears backup reservations/placement observers while retaining hover/picker effects. Both inline and backup observe attribute-only native visibility changes, including `hidden`.
+
+**Gemini, Grok, DeepSeek — platform-specific inline adapters with geometry backups:**
+
+| Platform | Validated inline slot | Fragile behavior to preserve |
+| --- | --- | --- |
+| Gemini | Active `.text-input-field` trailing actions, before visible `bard-mode-menu-button`; mobile mic/send when model picker is hidden | Select an owned visible wrapper; keep model slot horizontal/nonwrapping even when native wrapper uses a column |
+| Grok | Active `.query-bar`, named input and attachment, before owned `model-select-trigger` | Convert the matching absolute toolbar to normal flow and replace only its editor bottom-padding reservation; picker ownership includes that editor container |
+| DeepSeek | Textarea sibling action row, file-input candidate paired with its preceding native upload control, plus visible native circle action | Allow non-control spacers and hidden upload; mount before visible upload or direct native-action branch; do not rely on hashed classes |
+
+For these three backups, score/cap composer candidates and reject page-sized/misaligned surfaces; never accept an unvalidated editor parent. Only backup geometry reserves an outer composer and runs placement ResizeObservers. Temporary discovery loss retains last verified viewport placement at page root for at most 700 ms; a valid composer reclaims it, persistent loss hides. Inline validation clears geometry/grace state. Keep the validated native ancestor observer when fallback selects a narrower surface so an outer identification-class restoration can recover without resize/child changes. Restore previous inline styles when reservations change. Fallback pickers retain their existing lifecycle without inventing an inline owner.
+
+### Picker, handoff and motion
+
+- Extension-owned constructed stylesheets protect layout from page CSP. Dark Reader handling uses ignored/scoped styles and priority colors while progress remains state-driven. Teardown removes only extension-owned styles/reservations.
+- The picker backdrop has a small opening matched to solid orb artwork so the real composer orb stays sharp/clickable despite native ancestor stacking. It stays in its slot; adjacent composer background remains blurred. The opening tracks scroll/resize and clears when backdrop closing finishes. Do not clone the orb or raise neighboring controls to solve stacking.
+- Tab/Shift+Tab skip both composer and header orbs. The custom picker cycle includes enabled destinations and Speed only. Header orb is a pointer link to the website with `noopener noreferrer`; it never starts capture.
+- Outside-click/lifecycle dismissal preserves native focus. Explicit keyboard/backdrop dismissal may restore the composer only while focus still belongs to picker/orb. Delayed dismissal cannot steal focus from a reopened picker or another page control.
+- Handoff starts at the measured picker position, which stays locked through the picker-to-handoff animation. Progress completes from actual capture/summary/paste events, not decorative motion.
+- Summary countdown is display-only: 20 seconds through 60,000 captured characters, rising to 65 seconds at 110,000 and capped there. It starts only after capture size is known and stops when summary is ready. Overrun says `Taking a little longer—still working.`; the line stays at 90% until real completion. The tip pulses during waiting; reduced motion disables movement. Estimates never alter provider budgets.
+- Speed's three backward gold trails follow the bolt's sloped left edge in a staggered 420 ms loop; off hides them and reduced motion retains static trails. They are decorative, track `aria-pressed` and reserve header space at narrow widths.
+- Orb hover: 14% enlargement over 260 ms, 1px lift and artwork-shaped purple glow; press scale 0.95. Open-picker effect: 8% enlargement, 1px lift and soft glow. Hover must not override picker/handoff state or change toolbar geometry. Dismissal resets active effects independently of focus; the preserved-backdrop handoff bridge retains them until handoff ownership. Reduced motion changes size/lift immediately.
+- Empty-chat errors remain bottom-right; pending error reveals/dismissals are cancelled when picker/handoff state changes.
+
+### Paste verification and draft recovery
+
+`pasteIntoPlatform` uses native setters/events and stability checks. Rank writable/enabled candidates so a disabled/read-only high-scoring node cannot mask an available editor. Retain an already verified composer through temporary disabled/`aria-hidden` state, but readiness must still pass before insertion.
+
+- Firefox alone converts contenteditable line breaks to escaped HTML `<br>` elements. ChatGPT has longer insert/verify/stability windows.
+- Require at least 95% of expected normalized words in order across the whole editor text, not three samples. Normalize whitespace/newlines/punctuation/bullets and rendered Markdown differences (link targets, code-fence labels, ordered/task markers). A linear scan handles normal matches; bounded insertion/deletion matching handles small omissions/repeated words.
+- This tolerates up to 5% missing words; it is not byte-for-byte completeness proof. Detached editors cannot complete verification after remount.
+- Initial insertion, retries and post-activation recovery preserve nonempty drafts, including focus-restored drafts. Already verified text is accepted without replacement.
+- ChatGPT retains its in-paste 550 ms stability check. The other four recheck 550 ms after activation. If empty, paste once more, verify immediately and after another 550 ms. Still-empty/unavailable or nonempty changed draft opens the destination manual-copy modal; never replace changed user text.
+
+## Changes that must stay aligned
+
+| Change | Coupled contracts |
+| --- | --- |
+| Platform/host support | Manifest matches/permissions, content `PLATFORMS`, background `DESTINATIONS` / `DESTINATION_HOST_RULES`, telemetry platform lists, tests and smoke fixtures |
+| Transcript limits | Capture/source-local recovery, request-security character/byte/envelope bounds, analysis display and tests |
+| Model/profile routing | Provider constants/flags/budgets, prompts/cache namespace, Latest Run labels, served-model validation/signing and evaluation expectations |
+| JSON capture contract | MAIN hook, serializer/bridge, readiness versions, manifest/on-demand installation and identity/transport/content fixtures |
+| Telemetry field/outcome | Client sanitizer/producer, worker compaction/persistence, Vercel validator, Edge validator/proof verification, SQL constraints/functions and parity/replay tests |
+| Local receipt | Producer, background retention, bridge, analysis renderer and tests |
+| Content-script runtime change | Advance `CONTENT_SCRIPT_LOAD_ID`; preserve teardown and stale-node/reservation cleanup. Documentation-only changes do not need a runtime ID bump. |
+| Extension release | Manifest version, ZIP rooted at `manifest.json`, hash comparison against extension source and a fresh unpacked Brave check; Web Store upload/publication is separate |
+
+Do not weaken an adjacent privacy/ownership/compatibility guard to make one new layout or payload pass. Update the matching fixture to represent the observed variant and retain the existing variants.
+
+## Verification and diagnosis
+
+On Windows use `npm.cmd` for npm scripts when PowerShell shim policy blocks `npm`. Select checks by behavior changed; a documentation edit needs source/link/consistency review, not provider calls or a release smoke solely to validate prose.
+
+### Check selection
+
+| Change | Focused check | Additional evidence when relevant |
+| --- | --- | --- |
+| DOM capture, pasted cards, placement, picker/handoff, paste | `node --test --test-skip-pattern="^slow/release:" test/platform-content.test.js` | `npm run test:slow` for capture changes; installed Brave smoke for meaningful extension/UI changes |
+| Background messages/recovery/cache | `node --test test/background.test.js` | `npm test`; installed smoke if cross-tab behavior changes |
+| Prompts/routing/output policy | `node --test test/summarize.test.js test/request-security.test.js`; applicable routing/body-timeout tests | `npm run eval` probes deployed production, so a local prompt change needs a matching test deployment to assess its quality |
+| Telemetry/schema/counters | Telemetry delivery/handler/verified-receipt tests; `node scripts/check-verified-telemetry-db.js` | Backup restore/bounded upgrade, hosted grants/proof/counters when changing deployment, installed database smoke |
+| Latest Run | `node --test test/analysis.test.js` | Matched GitHub Pages analysis with extension loaded |
+| Release/package | `npm test`, `npm run test:slow`, `npm run test:extension-smoke` | Appropriate live evaluation and ZIP hash/resource checks |
+
+Commands and evidence boundaries:
+
+- Provider-specific regressions live in `test/openrouter.test.js`, `test/flash-chain-budget.test.js`, `test/flash-lite-fallback.test.js` and `test/provider-body-timeout.test.js`. Select them when changing those routes or budgets; use `--test-timeout=30000` for focused deterministic runs too.
+- `npm test` runs deterministic cases with a 30-second hang limit, excluding `slow/release:`. `npm run test:slow` runs the simulated-time physical-scroll regression with a 60-second limit. Scoped clocks must advance Date/timers together, preserve native response-body reads and clean up leftover timers; do not remove delays/assertions to claim faster validation.
+- `npm run test:extension-smoke` uses a disposable Brave profile, unpacked extension, controlled five-platform placement/picker fixtures and a stub backend. Default transfer is ChatGPT -> Claude. It covers exact capture/paste without Send, drafts, 760/390/320px layouts, remounts, free ChatGPT transition slots, Claude Reply-chin transitions, focus and reduced motion. It establishes integration against those fixtures, not current native-account capture completeness or provider quality. Use a separate browser window/profile for live checks too.
+- `CAP_CONTEXT_TELEMETRY_SMOKE=1` adds installed-worker -> local relay/Edge -> real migration replay, checking verified count/outbox drain. The SQL checker requires PGlite; CI pins `@electric-sql/pglite@0.5.8` and supplies `PGLITE_MODULE_PATH`. The application still has no runtime npm dependency.
+- `npm run eval` sends requests to the deployed production endpoint, consuming provider quota. Each case allows one retry for quality/transient/malformed-JSON failure; a second failure still fails. Its 320-second deadline/latency covers the full response body after streaming heartbeat headers. Structural scores alone cannot establish factual preservation.
+- `npm run gate` = deterministic tests + slow capture + live production evaluation. It includes neither installed Brave smoke nor database replay; run those separately when the change needs them.
+
+JSON smoke modes (run with `npm run test:extension-smoke`):
 
 | Source | Focused tests | `CAP_CONTEXT_JSON_SMOKE` |
 | --- | --- | --- |
 | Claude | `node --test test/claude-json-capture.test.js` | `1` |
 | ChatGPT | `node --test test/chatgpt-json-capture.test.js test/background.test.js` | `chatgpt` |
-| Gemini/Grok/DeepSeek | `node --test test/network-json-capture.test.js test/background.test.js` | `gemini`, `grok`, `deepseek` |
+| Gemini / Grok / DeepSeek | `node --test test/network-json-capture.test.js test/background.test.js` | `gemini` / `grok` / `deepseek` |
 
-Run smoke modes with `npm run test:extension-smoke`. Optional scenarios: `CAP_CONTEXT_CLAUDE_RELOAD_SMOKE=1`, `CAP_CONTEXT_CLAUDE_PARTIAL_SMOKE=1`, `CAP_CONTEXT_CHATGPT_RELOAD_SMOKE=1`, `CAP_CONTEXT_CHATGPT_AUTH_SMOKE=paste401`, `CAP_CONTEXT_CHATGPT_FAILURE_SMOKE=partial|streaming|ranged`, and `CAP_CONTEXT_NETWORK_FAILURE_SMOKE=partial` or Grok's `file-only`. Clear scenario variables before a default/success run. Fixtures cover history absent from the DOM, source identity/auth recovery, complete pasted/document text, announced DOM fallback, exact backend transcript/paste and no Send. They establish extension integration, not fresh native-account capture or provider quality.
+Optional scenarios: `CAP_CONTEXT_CLAUDE_RELOAD_SMOKE=1`, `CAP_CONTEXT_CLAUDE_PARTIAL_SMOKE=1`, `CAP_CONTEXT_CHATGPT_RELOAD_SMOKE=1`, `CAP_CONTEXT_CHATGPT_AUTH_SMOKE=paste401`, `CAP_CONTEXT_CHATGPT_FAILURE_SMOKE=partial|streaming|ranged`, `CAP_CONTEXT_NETWORK_FAILURE_SMOKE=partial` or Grok's `file-only`. Clear scenario environment variables before a normal success run. Fixtures cover history absent from DOM, auth/identity recovery, pasted/doc text, announced fallback and exact backend/paste behavior.
 
-GitHub Actions uses Node 22 and read-only repository permissions. Pushes to `master` and `codex/**`, plus pull requests into `master`, run the deterministic suite and slow capture regressions as separately named steps in `Code regression checks`, with an eight-minute job timeout and cancellation of superseded runs on the same ref. These checks validate the checked-out code without calling production providers.
+CI in `.github/workflows/regression-gate.yml` separates three kinds of evidence:
 
-At 06:17 UTC daily, `Live production summary check` probes the deployed API with the existing accuracy, structure, incorrect-fact and latency thresholds. Manual runs execute the code checks and can also enable `evaluate_production` (off by default, uses live provider quota). Production checks are serialized and have a 25-minute job allowance for the existing two cases with at most two bounded attempts each. A failed production check remains a real failure; it is separate from code validation and does not gate GitHub Pages or Vercel deployments. The local `npm run gate` still includes all three commands for release verification. Branch workflow changes become the scheduled/default workflow only after they reach `master`.
+- Pushes to `master` / `codex/**`, PRs into `master` and manual dispatch run Node 22 code checks: deterministic + slow capture, and a separate pinned-PGlite real migration replay. Code job: eight minutes with superseded-ref cancellation; database job: five minutes. Repository permissions are read-only.
+- Daily 06:17 UTC (11:47 IST) schedule runs **Live production summary check**, not branch code validation. Manual `evaluate_production` can add it, default off. It is serialized, has a 25-minute allowance for the existing bounded case retries, and uses deployed production's accuracy/structure/incorrect-fact/latency thresholds.
+- A failed live check remains a real failure but does not establish that the checked-out code regressed, or gate automatic Pages/Vercel deployment. A green code/database job does not establish deployed provider quality. Branch workflow edits affect scheduled/default behavior only after landing on `master`.
+
+### Diagnosis starting points
+
+| Symptom | First place to inspect | Do not infer |
+| --- | --- | --- |
+| Orb missing/misplaced after sending, account/layout change or resize | Current visible composer DOM; platform `find*InlineToolbar`, ownership/markers, observer scope and picker invalidation | A free plan necessarily lacks controls, or a generic/fixed anchor is safe for Claude |
+| JSON capture falls back or captures the wrong branch | Hook readiness/ownership, pinned chat/account, route/auth observation, serializer completeness and cancellation | A worker installation acknowledgement proves MAIN readiness |
+| DOM capture loses/duplicates turns | Actual scroll root, virtual overlap, role boundaries and stable IDs | Simulated window tests prove full live-chat history |
+| Pasted carry disappears or user draft changes | Ready editor identity, pre-focus draft, verification and post-activation recovery | A successful insert event proves stable delivery |
+| Useful summary has quality flags | Content gate versus advisory validator, finish reason and actual deployed model | Bad structure should discard useful context, or good structure proves grounded facts |
+| Latest Run model differs from telemetry model/NULL | Display alias, actual response model, v3 receipt, source-local/cache/legacy path | The requested primary model served, or NULL is always an ingestion defect |
+| `transfers` stays started or counts look low | Outbox/revision delivery, terminal report and signed receipt/counter eligibility | Started means failed, or successful paste necessarily proves summary work |
+| Local checks pass, live evaluation fails | Exact subcommand, deployment commit/alias/environment and provider output | All validation modes check the same artifact or failure category |
+
+Current limits worth preserving in assessments: JSON checks cannot prove absence of unmarked server omissions; DOM role+text can lose real repetitions; summary validation cannot establish semantic grounding; paste verification allows 5% missing normalized words; telemetry can drop bounded old/capacity reports; automated browser evidence is Brave/fixture based. Report those practical boundaries when they affect a conclusion, rather than promoting a test pass into a broader product guarantee.
