@@ -187,18 +187,42 @@ test("OpenRouter auth, quota, unavailable endpoints, malformed/error envelopes a
   } finally { global.fetch = originalFetch; restore(); }
 });
 
-test("transient OpenRouter failures retry within the same route; useful length-limited text stays advisory", async () => {
+test("transient OpenRouter failures retry within the same route; useful length-limited text stays advisory", { timeout: 5000 }, async t => {
   const restore = isolateEnv();
   const originalFetch = global.fetch;
+  const originalSetTimeout = global.setTimeout;
+  t.mock.timers.enable({ apis: ["Date", "setTimeout"], now: Date.now() });
+  const scheduleTimeout = global.setTimeout;
+  let signalRetryScheduled;
+  const retryScheduled = new Promise(resolve => { signalRetryScheduled = resolve; });
+  global.setTimeout = (callback, ms, ...args) => {
+    const timer = scheduleTimeout(callback, ms, ...args);
+    if (ms < 90000) signalRetryScheduled(ms);
+    return timer;
+  };
   let attempts = 0;
   global.fetch = async () => ++attempts === 1 ? new Response("{}", { status: 503 })
     : new Response(JSON.stringify({ choices: [{ finish_reason: "length", message: { content: "Windows passed; Linux checks are pending." } }] }));
   try {
-    const result = await run("Build facts. ".repeat(200));
+    const pending = run("Build facts. ".repeat(200));
+    // Wait for the real retry to be scheduled before moving the clock.
+    const retryMs = await Promise.race([retryScheduled, pending.then(() => assert.fail("request completed without scheduling a retry"))]);
+    assert.equal(retryMs, 450);
+    assert.equal(attempts, 1);
+    t.mock.timers.tick(449);
+    await Promise.resolve();
+    assert.equal(attempts, 1, "a retry must not start before its delay expires");
+    t.mock.timers.tick(1);
+    const result = await pending;
     assert.equal(attempts, 2);
     assert.deepEqual(result.modelsTried, [LING]);
     assert.equal(result.finishReason, "length");
     assert.ok(result.qualityFlags.length > 0);
     assert.match(result.summary, /Linux checks are pending/);
-  } finally { global.fetch = originalFetch; restore(); }
+  } finally {
+    global.fetch = originalFetch;
+    global.setTimeout = originalSetTimeout;
+    t.mock.timers.reset();
+    restore();
+  }
 });
