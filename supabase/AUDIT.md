@@ -2,7 +2,7 @@
 
 Scope: hosted `cap-context-telemetry` (`iqkzynzxbmemhtiupwwu`), current source,
 recorded migrations, ingestion and recovery. The application schema is small and
-clean after migration twenty-three. Tests were initially deferred under the owner's
+clean after migration twenty-four. Tests were initially deferred under the owner's
 instruction; the requested final merge check subsequently verified them below.
 `LOGIC.md` is the current production contract; this
 document records the audit evidence and remaining policy limits.
@@ -18,7 +18,7 @@ document records the audit evidence and remaining policy limits.
 | Separate transfer status check repeated the outcome constraint | Removed only the weaker duplicate. NOT NULL status plus the outcome constraint still rejects every other status and invalid stage/reason combination. |
 | Empty-chat failures invoked counter code and took locks despite contributing nothing | Counter-trigger conditions now exclude unverified `no_conversation`; the transfer diagnostic remains stored. Verified work remains countable independently of paste. |
 | Edge exported a stage-selection helper unused by production | Removed the helper and its two obsolete assertions; SQL still owns monotonic progress. No runtime behavior or wire contract changed. |
-| Unique Naruto name pool has forty entries | Kept the requested policy. The forty-first counted install cannot be allocated and its whole RPC rolls back; extend the pool before reaching capacity. |
+| Unique Naruto name pool has forty entries | Automatic allocation fails and the whole RPC rolls back when all forty canonical names are occupied; extend the pool before exhaustion. Migration twenty-four allows only user No. 1 to use the owner's exact `naruto` alias, leaving forty canonical slots while that alias is used. |
 | Unsigned failures and install IDs are client-supplied | Kept current anonymous reporting. They can be fabricated; signed receipts authenticate completed summary work, not users/paste/failures. Rate limits bound volume, not identity. |
 
 ## Final application inventory
@@ -31,13 +31,13 @@ document records the audit evidence and remaining policy limits.
 | `preserve_transfer_event_invariants()` | Guard direct writes as well as RPC updates; capture first terminal/proof receipt times. |
 | `record_user_summary()` | Count only first verification/failure transitions, preserve the reset boundary, attribute IST days and catch up late resets. |
 | `assign_user_identity()` | Serialize new-install numbering/name allocation; transactional max+1 prevents rollback gaps. |
-| `naruto_user_names()` | Single predefined name pool shared by allocation and the membership constraint. |
+| `naruto_user_names()` | Forty predefined names shared by allocation and the membership constraint, with a separate exact `naruto` exception only for user No. 1. |
 | Four triggers | Transfer guard, insert/update counter transitions, and user identity allocation; no unused trigger remains. |
 | Four transfer indexes | Attempt PK, recent date, install/date history and status diagnostics. All have observed usage; no redundant identity/install-only index remains. |
 | Three users indexes | Number PK, unique installation and unique name; each serves a distinct invariant/access path. |
 | `users_user_no_seq` | Retained identity-column machinery and historical backup state; it does not control visible max+1 numbering. |
 | One active cron job | Job 1 at `30 18 * * *` on the GMT scheduler, clearing daily counters at 00:00 IST; historical runs are retained. |
-| Twenty-three migrations | Hosted and local histories align; earlier recorded migrations are unchanged. The never-applied activity view remains outside the active folder. |
+| Twenty-four migrations | Hosted and local histories align; earlier recorded migrations are unchanged. The never-applied activity view remains outside the active folder. |
 
 There are no public views, obsolete analytics tables, duplicate RPC overloads,
 staging users tables, incoming foreign keys or application Realtime publication
