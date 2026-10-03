@@ -2111,6 +2111,64 @@ function inlineChatGptFixture() {
   return { body, footer, editor, input, left, right, attach, model, modelWrapper, voice };
 }
 
+function gridChatGptFixture() {
+  const f = inlineChatGptFixture();
+  f.body.setAttribute("data-composer-grid", "");
+  f.body.appendChild(f.left); f.body.appendChild(f.editor); f.body.appendChild(f.right);
+  f.editor.removeAttribute("data-composer-input");
+  f.attach.removeAttribute("data-composer-navigation-target");
+  f.attach.setAttribute("data-testid", "composer-plus-btn");
+  f.left.setAttribute("data-composer-transition-slot", "leading");
+  f.right.setAttribute("data-composer-transition-slot", "trailing");
+  f.model.removeAttribute("data-composer-navigation-target");
+  f.model.removeAttribute("aria-haspopup");
+  f.model.setAttribute("aria-pressed", "false");
+  f.model.textContent = f.model.innerText = "Think";
+  return f;
+}
+
+test("ChatGPT free transition grid mounts beside Think without responsive-footer markers", () => {
+  const f = gridChatGptFixture();
+  const hooks = loadPlatformContent(Object.values(f));
+  hooks.document.createElement = () => new FakeElement();
+  const bubble = new FakeElement({ tag: "button", attrs: { id: "context-generator-bubble" } });
+  assert.equal(hooks.findChatGptInlineToolbar(f.input)?.footer, f.body);
+  assert.equal(hooks.mountChatGptInlineButton(bubble, f.input), true);
+  assert.equal(bubble.parentElement, f.right);
+  assert.equal(bubble.nextElementSibling, f.modelWrapper);
+  assert.equal(f.modelWrapper.contains(bubble), false, "Think's tooltip must not own the orb");
+  assert.equal(bubble.style.position, "static");
+  assert.equal(bubble.style.width, "36px");
+  f.model.setAttribute("data-visibility", "hidden");
+  assert.equal(hooks.mountChatGptInlineButton(bubble, f.input), true);
+  assert.equal(bubble.nextElementSibling, f.voice, "a hidden Think control must not hide the orb");
+  f.model.removeAttribute("data-visibility");
+  f.model.setAttribute("aria-pressed", "true");
+  assert.equal(hooks.mountChatGptInlineButton(bubble, f.input), true);
+  assert.equal(bubble.nextElementSibling, f.modelWrapper);
+});
+
+test("ChatGPT free grid rejects foreign slots and refreshes remounted picker ownership", () => {
+  const f = gridChatGptFixture();
+  const hooks = loadPlatformContent(Object.values(f));
+  hooks.document.createElement = () => new FakeElement();
+  const bubble = new FakeElement({ tag: "button", attrs: { id: "context-generator-bubble" } });
+  f.right.setAttribute("role", "menu");
+  assert.equal(hooks.findChatGptInlineToolbar(f.input), null);
+  f.right.removeAttribute("role");
+  f.right.removeAttribute("data-composer-transition-slot");
+  assert.equal(hooks.findChatGptInlineToolbar(f.input), null);
+  f.right.setAttribute("data-composer-transition-slot", "trailing");
+  assert.equal(hooks.mountChatGptInlineButton(bubble, f.input), true);
+  const next = gridChatGptFixture();
+  next.editor.appendChild(f.input);
+  assert.equal(hooks.invalidateInlinePicker("document-childlist"), true);
+  assert.equal(hooks.mountChatGptInlineButton(bubble, f.input), true);
+  assert.equal(hooks.invalidateInlinePicker("document-childlist"), false);
+  assert.equal(bubble.nextElementSibling, next.modelWrapper);
+  assert.equal(f.body.hasAttribute("data-context-generator-chatgpt-inline"), false);
+});
+
 test("ChatGPT inline discovery follows the editor-owned footer across multiline reordering", () => {
   const f = inlineChatGptFixture();
   const hooks = loadPlatformContent(Object.values(f));
@@ -2530,6 +2588,67 @@ test("Claude keeps its inline slot through temporary control and editor discover
   assert.equal(hooks.mountInlineOrLegacyBackup(bubble, f.input), false);
   assert.equal(bubble.style.visibility, "hidden", "a detached editor must lose ownership");
   hooks.releaseClaudeInlineMount();
+});
+
+function replyClaudeFixture() {
+  const f = inlineClaudeFixture();
+  const composer = new FakeElement({ attrs: { "data-cds": "ChatComposer", "data-form": "reply" } });
+  const chin = new FakeElement({ attrs: { "data-cds": "ChatComposerChin" } });
+  const row = new FakeElement({ attrs: { "data-display": "flex" } });
+  const sendRow = new FakeElement({ attrs: { "data-display": "flex" } });
+  const send = new FakeElement({ tag: "button", attrs: { "data-testid": "chat-input-send" } });
+  composer.appendChild(f.host); composer.appendChild(chin); chin.appendChild(row);
+  row.appendChild(f.left); row.appendChild(f.right);
+  f.actions.appendChild(sendRow); sendRow.appendChild(send);
+  return { ...f, composer, chin, row, sendRow, send };
+}
+
+test("Claude reply chin mounts without moving or unreserving Send inside the editor", () => {
+  const f = replyClaudeFixture(), hooks = loadPlatformContent(Object.values(f), "claude.ai");
+  hooks.document.createElement = () => new FakeElement();
+  const bubble = new FakeElement({ tag: "button", attrs: { id: "context-generator-bubble" } });
+  assert.equal(hooks.mountClaudeInlineButton(bubble, f.input), true);
+  assert.equal(bubble.parentElement, f.right);
+  assert.equal(bubble.nextElementSibling, f.model);
+  assert.equal(bubble.style.position, "static");
+  assert.equal(f.send.parentElement, f.sendRow);
+  assert.equal(f.editorBranch.hasAttribute("data-context-generator-claude-inline"), false);
+  assert.equal(f.actions.hasAttribute("data-context-generator-claude-inline"), false);
+  assert.equal(f.row.getAttribute("data-context-generator-claude-inline"), "chin");
+  f.model.setAttribute("data-visibility", "hidden");
+  assert.equal(hooks.mountClaudeInlineButton(bubble, f.input), true, "sending gaps retain the validated chin slot");
+  f.input.isConnected = false;
+  assert.equal(hooks.mountClaudeInlineButton(bubble, f.input), false);
+  assert.equal(bubble.style.visibility, "hidden");
+});
+
+test("Claude new chat transitions to a reply chin and back without stale picker ownership", () => {
+  const f = inlineClaudeFixture(), reply = replyClaudeFixture();
+  const hooks = loadPlatformContent([...Object.values(f), ...Object.values(reply)], "claude.ai");
+  hooks.document.createElement = () => new FakeElement();
+  const bubble = new FakeElement({ tag: "button", attrs: { id: "context-generator-bubble" } });
+  assert.equal(hooks.mountClaudeInlineButton(bubble, f.input), true);
+  bubble.setAttribute("aria-expanded", "true");
+  bubble.style.transform = "translate3d(0,-1px,0) scale(1.08)";
+  f.input.isConnected = false;
+  f.input.setAttribute("data-display", "none");
+  assert.equal(hooks.invalidateInlinePicker("document-childlist"), true);
+  assert.equal(bubble.getAttribute("aria-expanded"), "false", "a detached retained orb must lose its old picker state");
+  assert.equal(bubble.style.transform, "translate3d(0,0,0) scale(1)");
+  assert.equal(hooks.mountClaudeInlineButton(bubble, reply.input), true);
+  assert.equal(hooks.invalidateInlinePicker("document-childlist"), false);
+  assert.equal(f.actions.hasAttribute("data-context-generator-claude-inline"), false);
+  reply.row.setAttribute("role", "menu");
+  assert.equal(hooks.findClaudeInlineToolbar(reply.input), null, "popup copies cannot become a chin toolbar");
+  reply.row.removeAttribute("role");
+  const other = new FakeElement({ attrs: { "data-cds": "ChatComposer" } });
+  other.appendChild(reply.chin);
+  assert.equal(hooks.findClaudeInlineToolbar(reply.input), null, "another composer cannot supply the chin");
+  f.input.isConnected = true;
+  f.input.removeAttribute("data-display");
+  assert.equal(hooks.mountClaudeInlineButton(bubble, f.input), true);
+  assert.equal(bubble.parentElement, f.right);
+  assert.equal(reply.row.hasAttribute("data-context-generator-claude-inline"), false);
 });
 
 test("Claude inline discovery validates the compact model chin against the same composer", () => {

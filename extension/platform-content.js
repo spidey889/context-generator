@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-03-tight-orb-cutout-v101";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-04-free-composer-layouts-v103";
   const INLINE_PILL_SIZE = 36;
   const ownedUiStyleSheets = new Map();
   const CLAUDE_INLINE_STYLE_ID = "context-generator-claude-inline-styles";
@@ -3762,6 +3762,28 @@
     // control before deciding that inline mounting is unavailable.
     const findControl = (root, selector) => root && Array.from(root.querySelectorAll(selector))
       .find((node) => node.isConnected && isVisible(node) && ownsControl(node));
+    // Reply mode can leave only Send inside ChatComposerActions and move both
+    // attachment/model groups into the chin. Preserve the editor's Send inset;
+    // the pill belongs in that separate native toolbar, outside animated layers.
+    const chin = composer && Array.from(composer.querySelectorAll("[data-cds='ChatComposerChin']"))
+      .find((node) => isVisible(node) && ownsControl(node));
+    const chinAttach = findControl(chin, "[data-testid='chat-input-attach']");
+    const chinModel = findControl(chin, "[data-testid='model-selector-dropdown']");
+    if (chinAttach && chinModel) {
+      for (let row = chinAttach.parentElement; row && row !== chin; row = row.parentElement) {
+        if (!row.contains(chinModel) || getComputedStyle(row).display !== "flex") continue;
+        const left = Array.from(row.children).find((node) => node.contains(chinAttach));
+        const right = Array.from(row.children).find((node) => node.contains(chinModel));
+        const editorBranch = Array.from(composer.children).find((node) => node.contains(input));
+        const rect = composer.getBoundingClientRect();
+        if (!left || !right || left === right || !editorBranch ||
+            getComputedStyle(left).display !== "flex" || getComputedStyle(right).display !== "flex" ||
+            rect.width < 180 || rect.width > Math.min(1320, window.innerWidth)) continue;
+        let anchor = chinModel;
+        while (anchor.parentElement !== right) anchor = anchor.parentElement;
+        return { input, host: composer, editorBranch, actions: row, left, right, anchor, chin: true };
+      }
+    }
     // Claude's named actions container must be a sibling of this editor's
     // branch. Never select a page-wide flex row, another composer, or a popup.
     let host = input.parentElement;
@@ -3808,11 +3830,12 @@
         padding-bottom:0!important;
         --cmp-lead-w:0px!important; --cmp-trail-w:0px!important; --cmp-wrap-h:0px!important;
       }
-      [${CLAUDE_INLINE_MARKER}="actions"] {
+      [${CLAUDE_INLINE_MARKER}="actions"], [${CLAUDE_INLINE_MARKER}="chin"] {
         display:flex!important; position:static!important; width:100%!important;
         flex-wrap:wrap!important; align-items:center!important;
         justify-content:space-between!important; gap:6px!important; margin-top:2px!important;
       }
+      [${CLAUDE_INLINE_MARKER}="chin"] { box-sizing:border-box!important; }
       [${CLAUDE_INLINE_MARKER}="left"], [${CLAUDE_INLINE_MARKER}="right"] {
         position:static!important; inset:auto!important; max-width:100%!important;
         min-width:0!important; flex-wrap:wrap!important; height:auto!important;
@@ -3866,7 +3889,8 @@
     // Stable inline updates reuse the scoped native-control observer.
     clearLegacyInlineBackup({ keepControlObserver: true });
     ensureClaudeInlineStyles();
-    [[toolbar.editorBranch, "editor"], [toolbar.actions, "actions"], [toolbar.left, "left"], [toolbar.right, "right"]]
+    [...(toolbar.chin ? [] : [[toolbar.editorBranch, "editor"]]),
+      [toolbar.actions, toolbar.chin ? "chin" : "actions"], [toolbar.left, "left"], [toolbar.right, "right"]]
       .forEach(([node, value]) => {
         if (node.getAttribute(CLAUDE_INLINE_MARKER) !== value) node.setAttribute(CLAUDE_INLINE_MARKER, value);
       });
@@ -3887,19 +3911,26 @@
     if (!input?.isConnected || !isVisible(input)) return null;
     const body = input.closest("[data-composer-body]");
     const editor = input.closest("[data-composer-input]");
-    if (!body || !editor || !body.contains(editor) || isComposerPopupControl(body, input)) return null;
+    if (!body || isComposerPopupControl(body, input)) return null;
+    // Free accounts also receive the transition-slot grid. It owns the editor
+    // directly and has no responsive-footer/input markers from the other layout.
+    const transitionGrid = body.hasAttribute("data-composer-grid");
+    if (!transitionGrid && (!editor || !body.contains(editor))) return null;
     // ChatGPT reorders these children when it switches to multiline. Identify
     // them through the attachment navigation target and editor ownership,
     // never through a generic flex selector or a child index.
-    const footer = editor.closest("[data-composer-footer-responsive]");
-    if (!footer || !footer.contains(editor) || footer.closest("[data-composer-body]") !== body) return null;
-    const attach = Array.from(footer.querySelectorAll("[data-composer-navigation-target='add-context']"))
+    const footer = transitionGrid ? body : editor.closest("[data-composer-footer-responsive]");
+    if (!footer || !footer.contains(input) || footer.closest("[data-composer-body]") !== body) return null;
+    const attach = Array.from(footer.querySelectorAll(transitionGrid
+      ? "[data-testid='composer-plus-btn']" : "[data-composer-navigation-target='add-context']"))
       .find((node) => node.matches("button") && isVisible(node) && !isComposerPopupControl(node, input) &&
-        node.closest("[data-composer-footer-responsive]") === footer);
+        node.closest(transitionGrid ? "[data-composer-grid]" : "[data-composer-footer-responsive]") === footer);
     if (!attach) return null;
     const rows = Array.from(footer.children);
-    const left = rows.find((row) => row.contains(attach) && !row.contains(input));
+    const left = rows.find((row) => row.contains(attach) && !row.contains(input) &&
+      (!transitionGrid || row.getAttribute("data-composer-transition-slot") === "leading"));
     const rightRows = rows.filter((row) => row !== left && !row.contains(input) &&
+      (!transitionGrid || row.getAttribute("data-composer-transition-slot") === "trailing") &&
       Array.from(row.querySelectorAll("button")).some((button) =>
         !isContextGeneratorNode(button) && isVisible(button) && !isComposerPopupControl(button, input)));
     const rect = body.getBoundingClientRect();
@@ -3915,7 +3946,8 @@
     while (controls !== right && !nativeButtons.every((button) => controls.contains(button))) {
       controls = controls.parentElement;
     }
-    const model = nativeButtons.find((button) => button.getAttribute("data-composer-navigation-target") === "reasoning");
+    const model = nativeButtons.find((button) => button.getAttribute("data-composer-navigation-target") === "reasoning" ||
+      /\bthink(?:ing)?\b/.test(getElementLabel(button, true)));
     // The model's native wrappers also own its Thinking effort tooltip. Keep
     // our pill outside the entire model branch so its hover/focus stays separate.
     if (model && nativeButtons.length === 1) controls = right;
@@ -4715,7 +4747,7 @@
         let score = 0;
 
         if (/\b(instant|medium|high)\b/.test(text)) score += 180;
-        if (/\b(model|intelligence|reasoning|thinking)\b/.test(label)) score += 180;
+        if (/\b(model|intelligence|reasoning|think|thinking)\b/.test(label)) score += 180;
         if (/^(true|menu|listbox|dialog)$/.test(button.getAttribute("aria-haspopup") || "")) score += 140;
         if (composerRect && rect.left >= composerRect.left + composerRect.width * 0.45) score += 22;
         if (!composerRect && rect.left >= window.innerWidth * 0.45) score += 12;
@@ -6577,7 +6609,10 @@
       releaseDestinationSheetBackdrop({ immediate });
     }
 
-    const bubble = document.getElementById(BUBBLE_ID);
+    // A native composer replacement can detach the orb before the picker closes.
+    // Reset the retained instance too, before inline mounting reuses that node.
+    const bubble = document.getElementById(BUBBLE_ID) || inlineBubble ||
+      (claudeInlineMount || chatGptInlineMount || providerInlineMount)?.bubble;
     if (bubble) {
       bubble.setAttribute("aria-expanded", "false");
       // Dismissal visuals are independent of focus. Keep the active effect only

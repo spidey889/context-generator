@@ -263,7 +263,7 @@ async function createSmokeExtension(tempRoot, origin) {
   return extensionRoot;
 }
 
-function sourceFixture() {
+function sourceFixture(freeGrid = false) {
   return `<!doctype html>
 <html lang="en">
 <head>
@@ -292,6 +292,9 @@ function sourceFixture() {
     form.has-text #gpt-send{display:block}
     form.has-text #gpt-voice{display:none}
     @media(max-width:640px){[data-composer-input]{grid-column:1/-1;grid-row:1}.gpt-left{grid-column:1;grid-row:2}.gpt-right{grid-column:3;grid-row:2}}
+    ${freeGrid ? `[data-composer-grid]{display:grid;grid-template-columns:auto minmax(0,1fr) auto;grid-template-areas:"leading primary trailing";gap:8px;align-items:center}
+      .gpt-left{grid-area:leading}.gpt-editor{grid-area:primary}.gpt-right{grid-area:trailing;display:flex;align-items:center;gap:6px}.gpt-model{flex:initial}
+      @media(max-width:640px){[data-composer-grid]{grid-template-areas:"primary primary primary" "leading . trailing"}.gpt-model-inner{display:none}}` : ""}
   </style>
 </head>
 <body>
@@ -299,11 +302,11 @@ function sourceFixture() {
     <article data-message-author-role="user">${SOURCE_SENTINEL}</article>
     <article data-message-author-role="assistant"><div class="markdown">${ASSISTANT_SENTINEL}</div></article>
   </main>
-  <form data-testid="composer"><div data-composer-body>
-    <div data-composer-footer-responsive data-composer-layout="single-line">
-      <div class="gpt-left"><button type="button" data-composer-navigation-target="add-context" aria-label="Add files and more">+</button></div>
-      <div data-composer-input><div id="prompt-textarea" data-testid="prompt-textarea" data-composer-markdown contenteditable="true" role="textbox" aria-label="Ask ChatGPT"></div></div>
-      <div class="gpt-right"><div class="gpt-contents"><div class="gpt-controls"><div class="gpt-model"><div class="gpt-model-inner"><button type="button" id="gpt-reasoning" data-composer-navigation-target="reasoning" aria-haspopup="menu">High</button></div></div><div class="gpt-voice-controls"><button type="button" aria-label="Dictate">Mic</button><button type="button" id="gpt-voice" aria-label="Start Voice">Voice</button><button type="button" id="gpt-send" data-testid="send-button" aria-label="Send">Send</button></div></div></div></div>
+  <form data-testid="composer"><div ${freeGrid ? "" : "data-composer-body"}>
+    <div ${freeGrid ? "data-composer-body data-composer-grid" : 'data-composer-footer-responsive data-composer-layout="single-line"'}>
+      <div class="gpt-left" ${freeGrid ? 'data-composer-transition-slot="leading"' : ""}><button type="button" ${freeGrid ? 'data-testid="composer-plus-btn"' : 'data-composer-navigation-target="add-context"'} aria-label="Add files and more">+</button></div>
+      <div class="gpt-editor" ${freeGrid ? "" : "data-composer-input"}><div id="prompt-textarea" data-testid="prompt-textarea" data-composer-markdown contenteditable="true" role="textbox" aria-label="Ask ChatGPT"></div></div>
+      <div class="gpt-right" ${freeGrid ? 'data-composer-transition-slot="trailing"' : ""}>${freeGrid ? "" : '<div class="gpt-contents"><div class="gpt-controls">'}<div class="gpt-model"><div class="gpt-model-inner"><button type="button" id="gpt-reasoning" ${freeGrid ? 'aria-pressed="false"' : 'data-composer-navigation-target="reasoning" aria-haspopup="menu"'}>${freeGrid ? "Think" : "High"}</button></div></div><div class="gpt-voice-controls"><button type="button" aria-label="Dictate">Mic</button><button type="button" id="gpt-voice" aria-label="Start Voice">Voice</button><button type="button" id="gpt-send" data-testid="send-button" aria-label="Send">Send</button></div>${freeGrid ? "" : "</div></div>"}</div>
     </div></div></form>
     <script nonce="smoke">document.querySelector('form').addEventListener('input',e=>e.target.closest('form').classList.toggle('has-text',!!e.target.textContent.trim()));</script>
 </body>
@@ -354,6 +357,23 @@ function claudePlacementFixture() {
   </div>
 </body>
 </html>`;
+}
+
+// Observed Reply variant: only Send belongs to the editor actions; attachment,
+// mic and model live in a separate chin. Keep this distinct from the older
+// model-only chin regression, which still leaves both action groups inside.
+function claudeReplyFixture() {
+  return claudePlacementFixture().replace(/<form id="claude-composer"[\s\S]*?<\/form>/, `<form id="claude-composer" data-cds="ChatComposer" data-form="reply">
+    <div id="claude-host" style="position:relative;--cmp-trail-w:44px">
+      <div class="editor-branch" style="padding-bottom:0;padding-right:var(--cmp-trail-w)"><div contenteditable="true" role="textbox" data-testid="chat-input" aria-label="Write your prompt to Claude"></div></div>
+      <div data-cds="ChatComposerActions" style="display:contents"><div class="right-row"><button id="send" data-testid="chat-input-send" aria-label="Send message" disabled></button></div></div>
+    </div>
+    <div data-cds="ChatComposerChin"><div><div><div id="chin-row" style="display:flex;justify-content:space-between;align-items:center;padding:0 4px">
+      <div style="display:flex"><div style="display:flex"><button data-testid="chat-input-attach" aria-label="Add files">+</button><div data-testid="chin-mic" style="display:flex"><button id="dictate" aria-label="Dictate">Mic</button><button id="voice" aria-label="Voice input">V</button></div></div></div>
+      <span aria-hidden="true">Claude can make mistakes</span>
+      <div style="display:flex;min-width:0"><div style="display:flex;min-width:0"><span style="display:inline-flex"><button id="model" data-testid="model-selector-dropdown" aria-label="Model selector">Sonnet</button></span></div><button style="width:64px">Manual</button></div>
+    </div></div></div></div>
+  </form>`).replace("</style>", '@media(max-width:640px){#chin-row>span{display:none}}</style>');
 }
 
 function providerPlacementFixture(platform) {
@@ -450,6 +470,11 @@ async function startFixtureServer() {
   const server = http.createServer(async (request, response) => {
     const url = new URL(request.url, "http://127.0.0.1");
     response.setHeader("Cache-Control", "no-store");
+    if (url.pathname === "/free-placement") {
+      response.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
+      response.end(url.searchParams.get(SMOKE_PLATFORM_QUERY) === "claude" ? claudeReplyFixture() : sourceFixture(true));
+      return;
+    }
     if (url.pathname === "/provider-placement") {
       const platform = url.searchParams.get(SMOKE_PLATFORM_QUERY);
       assert.ok(["gemini", "grok", "deepseek"].includes(platform));
@@ -1404,6 +1429,78 @@ async function run() {
     await waitFor(() => claudePlacementSession.evaluate(`getComputedStyle(document.getElementById("context-generator-bubble")).position === "static"
       && getComputedStyle(document.getElementById("send")).visibility === "hidden"`), "Claude compact empty Voice mode");
     process.stdout.write("✓ Claude inline handles hidden/popup duplicates, attribute-only inline retention/recovery, picker wrapper remounts and compact Voice mode.\n");
+
+    for (const platform of ["chatgpt", "claude"]) {
+      const fixtureUrl = `${origin}/free-placement?${SMOKE_PLATFORM_QUERY}=${platform}`;
+      const { targetId } = await browserSession.call("Target.createTarget", { url: fixtureUrl });
+      const target = await waitFor(async () => (await getTargets(devToolsPort)).find(t => t.id === targetId), `${platform} free-layout target`);
+      const session = await CdpSession.connect(target.webSocketDebuggerUrl);
+      try {
+        await session.call("Runtime.enable"); await session.call("Page.bringToFront");
+        const probe = `(() => {
+          const b = document.getElementById("context-generator-bubble");
+          if (!b || getComputedStyle(b).position !== "static" || getComputedStyle(b).visibility !== "visible") return null;
+          const r = b.getBoundingClientRect(), model = document.getElementById("model") || document.getElementById("gpt-reasoning");
+          const m = model.getBoundingClientRect(), send = document.getElementById("send") || document.getElementById("gpt-send"), s = send.getBoundingClientRect();
+          const overlaps = rect => rect.width > 0 && r.left < rect.right && r.right > rect.left && r.top < rect.bottom && r.bottom > rect.top;
+          const modelVisible = m.width > 0 && m.height > 0;
+          const beforeModel = modelVisible && b.nextElementSibling?.contains(model);
+          return r.width === 36 && r.left >= 0 && r.right <= innerWidth && !overlaps(m) && !overlaps(s)
+            && (!modelVisible || beforeModel) && document.querySelectorAll("#context-generator-bubble").length === 1
+            ? { beforeModel, width: r.width } : null;
+        })()`;
+        for (const width of [1100, 760, 390, 320]) {
+          await session.call("Emulation.setDeviceMetricsOverride", { width, height: 740, deviceScaleFactor: 1, mobile: false });
+          await waitFor(() => session.evaluate(probe), `${platform} free-layout placement at ${width}px`);
+          await session.evaluate(`(() => {
+            const editor = document.querySelector('[contenteditable]'); editor.textContent = "draft";
+            editor.dispatchEvent(new Event("input", { bubbles:true }));
+            const send = document.getElementById("send"); if (send) send.disabled = false;
+          })()`);
+          await waitFor(() => session.evaluate(probe), `${platform} free-layout draft placement at ${width}px`);
+        }
+        await session.call("Emulation.clearDeviceMetricsOverride");
+        // Resize invalidates an open picker. Drain its scheduled placement frames
+        // before testing a click, and require the desktop model anchor to return.
+        await session.evaluate(`new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))`);
+        await waitFor(async () => (await session.evaluate(probe))?.beforeModel, `${platform} free-layout desktop anchor after resize`);
+        await session.evaluate(`document.getElementById("context-generator-bubble").click()`);
+        await waitFor(() => session.evaluate(`getComputedStyle(document.getElementById("context-generator-destination-sheet")).opacity === "1"`), `${platform} free-layout picker`);
+        await session.evaluate(`(() => {
+          const old = document.querySelector(${JSON.stringify(platform === "claude" ? '[data-cds="ChatComposer"]' : '[data-composer-body]')});
+          const next = old.cloneNode(true); next.querySelector("#context-generator-bubble")?.remove();
+          for (const node of [next, ...next.querySelectorAll("*")]) {
+            node.removeAttribute("data-context-generator-claude-inline"); node.removeAttribute("data-context-generator-chatgpt-inline");
+          }
+          old.replaceWith(next);
+        })()`);
+        await waitFor(() => session.evaluate(probe), `${platform} free-layout composer replacement`);
+        await waitFor(() => session.evaluate(`document.getElementById("context-generator-destination-sheet").style.display === "none"`), `${platform} replaced editor's picker dismissal`);
+        if (platform === "claude") {
+          assert.equal(await session.evaluate(`document.getElementById("claude-host").style.getPropertyValue("--cmp-trail-w")`), "44px", "Reply mode must preserve its native Send reservation.");
+          for (const page of [claudePlacementFixture(), claudeReplyFixture()]) {
+            await session.evaluate(`(() => {
+              const next = new DOMParser().parseFromString(${JSON.stringify(page)}, "text/html").querySelector('[data-cds="ChatComposer"]');
+              document.querySelector('[data-cds="ChatComposer"]').replaceWith(next);
+            })()`);
+            await waitFor(() => session.evaluate(`(() => {const b=document.getElementById("context-generator-bubble");return b && getComputedStyle(b).position==="static" && getComputedStyle(b).visibility==="visible" && b.closest('[data-cds="ChatComposer"]');})()`), "Claude expanded/reply transition");
+          }
+          await waitFor(() => session.evaluate(probe), "Claude reply placement after returning from expanded mode");
+        }
+        if (PROVIDER_PLACEMENT_SCREENSHOT_DIR) {
+          const screenshot = await session.call("Page.captureScreenshot", { format:"png" });
+          await fs.promises.mkdir(PROVIDER_PLACEMENT_SCREENSHOT_DIR, { recursive:true });
+          await fs.promises.writeFile(path.join(PROVIDER_PLACEMENT_SCREENSHOT_DIR, `${platform}-free.png`), Buffer.from(screenshot.data, "base64"));
+        }
+        process.stdout.write(`✓ ${platform} free layout: desktop/760/390/320px, drafts, picker dismissal and composer replacement.\n`);
+      } catch (error) {
+        process.stderr.write(`Free ${platform} diagnostics: ${JSON.stringify(await session.evaluate(`(() => {
+          const b=document.getElementById("context-generator-bubble"), s=document.getElementById("context-generator-destination-sheet");
+          return { bubble:b?.outerHTML.slice(0,800), sheet:s?.style.cssText, opacity:s&&getComputedStyle(s).opacity, width:innerWidth };
+        })()`))}\n`);
+        throw error;
+      } finally { session.close(); await browserSession.call("Target.closeTarget", { targetId }); }
+    }
 
     }
 
