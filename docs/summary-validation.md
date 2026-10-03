@@ -2,7 +2,7 @@
 
 Output acceptance favors retaining useful context over enforcing an output shape. On 2026-09-18 strict formatting checks became advisory; on 2026-09-30 a separate content-only gate replaced unconditional acceptance of nonempty provider text.
 
-Word targets and section budgets are prompt guidance as well as diagnostic metadata, not reasons to expand beyond supported facts. The prompt forbids invented test counts, roles, release gates and open questions, and distinguishes observed state from requirements. This does not prove grounding: live Apodex checks still changed an integrity fact into a requirement and invented open questions. Structural validation cannot detect those errors; see `routing-audit.md`.
+Word targets are advisory allowances and diagnostic metadata; generated sections have no word or bullet quotas. The shared prompt separates reported state, explicit constraints, accepted/rejected proposals and unresolved choices; it asks for operational prohibitions verbatim and forbids owner/user identity inference. This does not prove grounding: the latest paired accuracy pass removed invented identities/questions in the final samples, but Apodex still mislabeled an integrity fact as a constraint and omitted an explicit no-deploy prohibition in one long output. Structural validation cannot detect those errors; see `summary-accuracy-pass.md`.
 
 ## Provider acceptance
 
