@@ -11,6 +11,7 @@ const PLATFORM_SOURCE = fs.readFileSync(path.join(ROOT, "extension", "platform-c
 const VALIDATION_PATH = path.join(ROOT, "supabase", "functions", "transfer-telemetry", "validation.mjs");
 const VERCEL_VALIDATION = require(path.join(ROOT, "api", "telemetry-validation.js"));
 const VERCEL_TELEMETRY_HANDLER = require(path.join(ROOT, "api", "telemetry.js"));
+const { resetTelemetryRateLimitForTests } = require(path.join(ROOT, "api", "telemetry-rate-limit.js"));
 
 function loadTelemetryBackground(fetchImpl, initialStorage = {}, manifestVersion = "1.3.0") {
   const storage = structuredClone(initialStorage);
@@ -350,6 +351,9 @@ test("Supabase payload validation rejects content, unknown stages, and arbitrary
 
 test("Vercel and Supabase enforce the same metadata-only telemetry schema", async () => {
   const { validateTelemetryPayload: validateSupabasePayload } = await import(pathToFileURL(VALIDATION_PATH).href);
+  const succeeded = (changes = {}) => makeTelemetryPayload({
+    status: "succeeded", last_stage: "completed", failure_reason: null, ...changes
+  });
   const candidates = [
     makeTelemetryPayload(),
     makeTelemetryPayload({ status: "succeeded", last_stage: "completed", failure_reason: null }),
@@ -359,11 +363,26 @@ test("Vercel and Supabase enforce the same metadata-only telemetry schema", asyn
     makeTelemetryPayload({ failure_reason: "arbitrary detail" }),
     makeTelemetryPayload({ attempted_at: "2026-09-31T00:00:00Z" }),
     makeTelemetryPayload({ completed_at: "2026-09-31T00:00:00Z" }),
-    makeTelemetryPayload({ summary_confirmed_at: "2026-09-31T00:00:00Z" })
+    makeTelemetryPayload({ summary_confirmed_at: "2026-09-31T00:00:00Z" }),
+    ...[{}, { completed_at: "2026-10-02T00:00:10.000Z" },
+      { summary_proof: "0".repeat(64), summary_confirmed_at: "2026-10-02T00:00:05.000Z" },
+      { status: "started", last_stage: "capture_completed", completed_at: "2026-10-02T00:00:10.000Z" },
+      { character_count: true }, { character_count: "50" }, { character_count: -1 }, { attempted_at: 1 }, { attempted_at: "1" },
+      { attempted_at: "2026-02-31T00:00:00.000Z" }, { attempted_at: "2026-10-02T24:00:00.000Z" },
+      { completed_at: null }, { summary_confirmed_at: "2026-10-02T00:00:05.000Z" }, { extension_version: "1.2.3+" + "x".repeat(80) },
+      { error: "private" }, { summary_verified: true },
+      { completed_at: "2026-10-02T05:30:10+05:30" }].map(succeeded)
   ];
 
   for (const candidate of candidates) {
     assert.deepEqual(VERCEL_VALIDATION.validateTelemetryPayload(candidate), validateSupabasePayload(candidate));
+  }
+  // Parity alone could let both validators accept the same invalid scalar/date.
+  assert.ok(VERCEL_VALIDATION.validateTelemetryPayload(succeeded({ completed_at: "2026-10-02T05:30:10+05:30" })));
+  for (const changes of [{ character_count: true }, { character_count: "50" }, { attempted_at: "1" },
+    { attempted_at: "2026-02-31T00:00:00.000Z" }, { attempted_at: "2026-10-02T24:00:00.000Z" },
+    { completed_at: null }, { summary_verified: true }]) {
+    assert.equal(VERCEL_VALIDATION.validateTelemetryPayload(succeeded(changes)), null);
   }
 });
 
@@ -372,6 +391,10 @@ test("Vercel forwards valid telemetry with server-only Supabase credentials", as
   const originalUrl = process.env.SUPABASE_TELEMETRY_FUNCTION_URL;
   const originalKey = process.env.SUPABASE_TELEMETRY_PUBLISHABLE_KEY;
   const originalRelaySecret = process.env.TELEMETRY_RELAY_SECRET;
+  const redisNames = ["KV_REST_API_URL", "KV_REST_API_TOKEN", "UPSTASH_REDIS_REST_URL", "UPSTASH_REDIS_REST_TOKEN"];
+  const originalRedis = redisNames.map(name => process.env[name]);
+  redisNames.forEach(name => { delete process.env[name]; });
+  resetTelemetryRateLimitForTests();
   t.after(() => {
     global.fetch = originalFetch;
     if (originalUrl === undefined) delete process.env.SUPABASE_TELEMETRY_FUNCTION_URL;
@@ -380,26 +403,43 @@ test("Vercel forwards valid telemetry with server-only Supabase credentials", as
     else process.env.SUPABASE_TELEMETRY_PUBLISHABLE_KEY = originalKey;
     if (originalRelaySecret === undefined) delete process.env.TELEMETRY_RELAY_SECRET;
     else process.env.TELEMETRY_RELAY_SECRET = originalRelaySecret;
+    redisNames.forEach((name, index) => {
+      if (originalRedis[index] === undefined) delete process.env[name];
+      else process.env[name] = originalRedis[index];
+    });
+    resetTelemetryRateLimitForTests();
   });
 
   process.env.SUPABASE_TELEMETRY_FUNCTION_URL = "https://example.supabase.co/functions/v1/transfer-telemetry";
   process.env.SUPABASE_TELEMETRY_PUBLISHABLE_KEY = "server-only-key";
   process.env.TELEMETRY_RELAY_SECRET = "server-only-relay-secret-0123456789abcdef";
+  const { createTelemetryHandler } = await import("../supabase/functions/transfer-telemetry/handler.mjs");
+  const edgeCalls = [];
+  const edge = createTelemetryHandler({
+    getEnv: name => ({ TELEMETRY_RELAY_SECRET: process.env.TELEMETRY_RELAY_SECRET,
+      SUPABASE_URL: "https://example.invalid", SUPABASE_SERVICE_ROLE_KEY: "server-only-test-key" })[name],
+    log() {},
+    createClient: () => ({ rpc: async (name, args) => { edgeCalls.push({ name, args }); return { error: null }; } })
+  });
   const upstreamRequests = [];
   global.fetch = async (url, options) => {
     upstreamRequests.push({ url, options });
-    return { ok: true };
+    assert.ok(options.signal);
+    return edge(new Request(url, options));
   };
 
-  const payload = makeTelemetryPayload();
-  const res = await invokeTelemetryHandler(payload);
-
-  assert.equal(res.statusCode, 204);
-  assert.equal(upstreamRequests.length, 1);
-  assert.equal(upstreamRequests[0].url, process.env.SUPABASE_TELEMETRY_FUNCTION_URL);
-  assert.equal(upstreamRequests[0].options.headers.apikey, "server-only-key");
-  assert.equal(upstreamRequests[0].options.headers["X-Cap-Context-Relay"], process.env.TELEMETRY_RELAY_SECRET);
-  assert.deepEqual(JSON.parse(upstreamRequests[0].options.body), payload);
+  for (const [index, payload] of [makeTelemetryPayload(),
+    makeTelemetryPayload({ status: "succeeded", last_stage: "completed", failure_reason: null })].entries()) {
+    const res = await invokeTelemetryHandler(payload);
+    assert.equal(res.statusCode, 204);
+    assert.equal(upstreamRequests.length, index + 1);
+    assert.equal(upstreamRequests[index].url, process.env.SUPABASE_TELEMETRY_FUNCTION_URL);
+    assert.equal(upstreamRequests[index].options.headers.apikey, "server-only-key");
+    assert.equal(upstreamRequests[index].options.headers["X-Cap-Context-Relay"], process.env.TELEMETRY_RELAY_SECRET);
+    assert.deepEqual(JSON.parse(upstreamRequests[index].options.body), payload);
+    assert.equal(edgeCalls.length, index + 1);
+    assert.equal(edgeCalls[index].args.p_summary_verified, false);
+  }
 });
 
 test("Vercel rejects telemetry content fields before contacting Supabase", async (t) => {
@@ -482,11 +522,13 @@ test("background persists server confirmation and never rebinds cached proof to 
   await background.sendTelemetry(makeEvent({ attemptId: secondId, lastStage: "summary_request_started" }));
   const second = await summary(secondId);
   assert.equal(second.ok, true);
+  assert.equal(second.timing.source, "cache");
   assert.equal(second.timing.cacheHit, true);
   await background.sendTelemetry(makeEvent({ attemptId: secondId, status: "succeeded", lastStage: "completed" }));
   await background.drain();
   assert.equal(summaryRequests, 1);
-  assert.ok(requests.filter(request => request.attempt_id === secondId).every(request => !request.summary_proof));
+  assert.ok(requests.filter(request => request.attempt_id === secondId)
+    .every(request => request.summary_proof === undefined && request.summary_confirmed_at === undefined));
 });
 
 test("completed server summary retains confirmation after source-tab cancellation", async () => {

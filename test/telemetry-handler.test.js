@@ -1,7 +1,6 @@
 const assert = require("node:assert/strict");
 const test = require("node:test");
 const relay = require("../api/telemetry.js");
-const { validateTelemetryPayload } = require("../api/telemetry-validation.js");
 const { consumeTelemetryRateLimit, resetTelemetryRateLimitForTests } = require("../api/telemetry-rate-limit.js");
 const RELAY_KEY = "test-only-private-relay-0123456789abcdef";
 const SIGNING_KEY = "test-only-signing-key-0123456789abcdef";
@@ -48,21 +47,6 @@ function relayEnv(t) {
   });
 }
 
-test("Node and Edge validators agree on optional times, strict types and metadata boundaries", async () => {
-  const edge = await import("../supabase/functions/transfer-telemetry/validation.mjs");
-  for (const changes of [{}, { completed_at: "2026-10-02T00:00:10.000Z" },
-    { summary_proof: "0".repeat(64), summary_confirmed_at: "2026-10-02T00:00:05.000Z" },
-    { status: "started", last_stage: "capture_completed", completed_at: "2026-10-02T00:00:10.000Z" },
-    { character_count: true }, { character_count: "50" }, { character_count: -1 }, { attempted_at: 1 }, { attempted_at: "1" },
-    { attempted_at: "2026-02-31T00:00:00.000Z" }, { attempted_at: "2026-10-02T24:00:00.000Z" },
-    { completed_at: null }, { summary_confirmed_at: "2026-10-02T00:00:05.000Z" }, { extension_version: "1.2.3+" + "x".repeat(80) },
-    { error: "private" }, { summary_verified: true }]) {
-    assert.deepEqual(validateTelemetryPayload(payload(changes)), edge.validateTelemetryPayload(payload(changes)), JSON.stringify(changes));
-  }
-  assert.ok(validateTelemetryPayload(payload({ completed_at: "2026-10-02T05:30:10+05:30" })));
-  for (const changes of [{ character_count: true }, { character_count: "50" }, { attempted_at: "1" }, { attempted_at: "2026-02-31T00:00:00.000Z" }, { attempted_at: "2026-10-02T24:00:00.000Z" }, { completed_at: null }, { summary_verified: true }]) assert.equal(validateTelemetryPayload(payload(changes)), null);
-});
-
 test("public Supabase credentials cannot reach the privileged writer", async () => {
   const edge = await edgeHarness();
   const response = await edge.send(payload(), { apikey: "public-key", "x-cap-context-relay": "" });
@@ -87,21 +71,6 @@ test("Edge bounds streamed UTF-8 bytes and body time before SQL", async () => {
   assert.equal(edge.calls.length, 0);
 });
 
-test("Edge preserves diagnostic terminal time while server confirmation time requires a v2 receipt", async () => {
-  const { createSummaryProof } = await import("../supabase/functions/_shared/summary-proof.mjs");
-  const edge = await edgeHarness();
-  const terminal = payload({ completed_at: "2026-10-02T00:00:10.000Z" });
-  await edge.send(terminal);
-  assert.equal(edge.calls[0].args.p_completed_at, terminal.completed_at);
-  assert.equal(edge.calls[0].args.p_summary_verified, false);
-  assert.equal(edge.calls[0].args.p_summary_confirmed_at, null);
-  const confirmed = { ...terminal, summary_confirmed_at: "2026-10-02T00:00:05.000Z" };
-  confirmed.summary_proof = await createSummaryProof(confirmed, SIGNING_KEY);
-  await edge.send(confirmed);
-  assert.equal(edge.calls[1].args.p_summary_verified, true);
-  assert.equal(edge.calls[1].args.p_summary_confirmed_at, confirmed.summary_confirmed_at);
-});
-
 test("Edge SQL failures have safe permanent/configuration/transient classification", async () => {
   for (const [error, status, code] of [[{ code: "22023", message: "PRIVATE_BODY" }, 422, "attempt_identity_mismatch"],
     [{ code: "23514", details: "PRIVATE_BODY" }, 422, "invalid_payload"], [{ code: "42501" }, 503, "telemetry_unavailable"],
@@ -120,20 +89,6 @@ test("Edge SQL failures have safe permanent/configuration/transient classificati
     assert.equal((await res.json()).code, "telemetry_upstream_unavailable");
     assert.doesNotMatch(JSON.stringify(edge.logs), /PRIVATE_ERROR_BODY/);
   }
-});
-
-test("relay carries only normalized metadata and private credentials to actual Edge handler", async t => {
-  relayEnv(t);
-  const edge = await edgeHarness();
-  global.fetch = async (_url, options) => {
-    assert.equal(options.headers["X-Cap-Context-Relay"], RELAY_KEY);
-    assert.ok(options.signal);
-    return edge.handler(new Request("https://example.invalid/telemetry", options));
-  };
-  const res = response();
-  await relay({ method: "POST", headers: { "content-type": "application/json", "x-cap-context-client": "cap-context-extension/1" }, body: payload() }, res);
-  assert.equal(res.code, 204);
-  assert.equal(edge.calls[0].args.p_summary_verified, false);
 });
 
 test("relay preserves permanent payload failures and retries configuration/network failures without leaking bodies", async t => {

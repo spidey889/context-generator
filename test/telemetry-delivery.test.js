@@ -371,31 +371,6 @@ test("queue bounds remove progress before terminals and record expired or overfl
   assert.equal(allTerminal.local[DIAGNOSTICS].recent.at(-1).summaryConfirmed, true);
 });
 
-test("backend summary receipts are durable while cached follow-up transfers never reuse a proof", async () => {
-  const requests = [];
-  let generations = 0;
-  const background = worker(async (url, options) => {
-    const input = JSON.parse(options.body);
-    if (url.endsWith("/api/telemetry")) { requests.push(input); return success(); }
-    generations++;
-    return { ok: true, status: 200, json: async () => ({ summary: "cached summary", summaryProof: "c".repeat(64) }) };
-  });
-  await background.settled();
-  await background.ack(event());
-  await background.evaluate(`summarizeWithBackend("same transcript", "${id(1)}")`);
-  await background.settled();
-  await background.ack(event(1, { status: "succeeded", lastStage: "completed" }));
-  await background.settled();
-  await background.ack(event(2));
-  const result = await background.evaluate(`summarizeWithBackend("same transcript", "${id(2)}")`);
-  await background.ack(event(2, { status: "succeeded", lastStage: "completed" }));
-  await background.settled();
-  assert.equal(generations, 1);
-  assert.equal(result.timing.source, "cache");
-  assert.ok(requests.some(input => input.attempt_id === id(1) && input.summary_proof === "c".repeat(64)));
-  assert.ok(requests.filter(input => input.attempt_id === id(2)).every(input => input.summary_proof === undefined && input.summary_confirmed_at === undefined));
-});
-
 for (const area of ["local", "session"]) {
   test(`telemetry storage ${area} read failure cannot block summary generation`, async () => {
     const summaryRequests = [];

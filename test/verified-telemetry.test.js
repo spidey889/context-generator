@@ -54,7 +54,10 @@ test("summary confirmation binds attempt, installation, timestamp, route and ext
 
 test("v2 receipts authenticate server completion time while v1 never authenticates an added time", async () => {
   const { createSummaryProof, verifySummaryProof } = await proofHelpers();
-  const confirmed = payload({ summary_confirmed_at: "2026-10-02T00:00:08.000Z" });
+  const confirmed = payload({
+    completed_at: "2026-10-02T00:00:10.000Z",
+    summary_confirmed_at: "2026-10-02T00:00:08.000Z"
+  });
   const signed = { ...confirmed, summary_proof: await createSummaryProof(confirmed, KEY) };
   assert.equal(await verifySummaryProof(signed, KEY), true);
   assert.equal(await verifySummaryProof({ ...signed, summary_confirmed_at: "2026-10-01T23:59:59.000Z" }, KEY), false);
@@ -63,8 +66,15 @@ test("v2 receipts authenticate server completion time while v1 never authenticat
   const v1 = { ...confirmed, summary_proof: await createSummaryProof(payload(), KEY) };
   assert.equal(await verifySummaryProof(v1, KEY), false);
   const edge = await edgeHarness();
+  // Client completion time is diagnostic; only a v2 proof authenticates summary time.
+  await edge.send(payload({ completed_at: confirmed.completed_at }));
+  assert.equal(edge.calls[0].args.p_completed_at, confirmed.completed_at);
+  assert.equal(edge.calls[0].args.p_summary_verified, false);
+  assert.equal(edge.calls[0].args.p_summary_confirmed_at, null);
   assert.equal((await edge.send(signed)).status, 204);
-  assert.equal(edge.calls[0].args.p_summary_confirmed_at, confirmed.summary_confirmed_at);
+  assert.equal(edge.calls[1].args.p_completed_at, confirmed.completed_at);
+  assert.equal(edge.calls[1].args.p_summary_verified, true);
+  assert.equal(edge.calls[1].args.p_summary_confirmed_at, confirmed.summary_confirmed_at);
   assert.equal((await edge.send({ ...signed, summary_confirmed_at: "2026-10-01T23:59:59.000Z" })).status, 422);
 });
 

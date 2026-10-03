@@ -4,7 +4,9 @@ const test = require("node:test");
 const { createSummaryWithFallback, getSummaryProfile } = require("../api/summarize.js").__test;
 
 for (const openrouterEnabled of [false, true]) {
-for (const status of [200, 429, 503]) {
+// Both providers use the same body reader before status-specific retry logic.
+// Gemini covers success/error bodies; OpenRouter checks its 90s/60s route budgets.
+for (const status of openrouterEnabled ? [200] : [200, 429, 503]) {
   test(`${openrouterEnabled ? "OpenRouter" : "Gemini"} fallback aborts a stalled ${status} response body within its budget`, { timeout: 5000 }, async t => {
     // Exercise this route regardless of a developer's deployed env switches.
     const flags = ["OPENROUTER_ENABLED", "OPENROUTER_QWEN_ENABLED",
