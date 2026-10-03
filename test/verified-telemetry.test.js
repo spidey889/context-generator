@@ -150,7 +150,7 @@ test("server receipts cover remote success and emergency carry, and missing keys
   const { verifySummaryProof } = await proofHelpers();
   const originalFetch = global.fetch;
   const names = ["TELEMETRY_SIGNING_KEY", "GEMINI_API_KEY", "MISTRAL_API_KEY", "MISTRAL_ENABLED",
-    "OPENROUTER_API_KEY", "OPENROUTER_ENABLED", "OPENROUTER_APODEX_ENABLED", "OPENROUTER_LING_ENABLED",
+    "OPENROUTER_API_KEY", "OPENROUTER_ENABLED", "OPENROUTER_LING_ENABLED",
     "OPENROUTER_QWEN_ENABLED", "OPENROUTER_DOTS_ENABLED", "OPENROUTER_GEMMA_ENABLED"];
   const previous = Object.fromEntries(names.map(name => [name, process.env[name]]));
   t.after(() => {
@@ -164,7 +164,6 @@ test("server receipts cover remote success and emergency carry, and missing keys
   process.env.MISTRAL_API_KEY = "test-provider-key";
   process.env.MISTRAL_ENABLED = "true";
   process.env.OPENROUTER_API_KEY = "test-openrouter-key";
-  process.env.OPENROUTER_APODEX_ENABLED = "true";
   process.env.OPENROUTER_LING_ENABLED = "true";
   for (const name of ["OPENROUTER_QWEN_ENABLED", "OPENROUTER_DOTS_ENABLED", "OPENROUTER_GEMMA_ENABLED"]) process.env[name] = "false";
   const context = payload({ status: "started", last_stage: "summary_request_started", failure_reason: null });

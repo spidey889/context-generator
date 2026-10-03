@@ -380,11 +380,11 @@ test("summary cache preserves original result metadata and labels cache hits", a
   const backendTiming = {
     servedBy: "openrouter",
     provider: "openrouter",
-    primaryModel: "apodex/apodex-1.1-mini:free",
-    model: "apodex/apodex-1.1-mini:free",
-    modelsTried: ["apodex/apodex-1.1-mini:free"],
+    primaryModel: "inclusionai/ling-3.1-flash",
+    model: "inclusionai/ling-3.1-flash",
+    modelsTried: ["inclusionai/ling-3.1-flash"],
     mistralModelsTried: [],
-    openrouterModelsTried: ["apodex/apodex-1.1-mini:free"],
+    openrouterModelsTried: ["inclusionai/ling-3.1-flash"],
     openrouterMs: 812,
     providerMs: 812,
     fallback: {

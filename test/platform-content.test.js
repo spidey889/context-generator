@@ -1733,12 +1733,12 @@ test("latest-run cache receipt preserves original provider metadata", () => {
         backend: {
           inputChars: 24000,
           openrouterMs: 1200,
-          openrouterModelsTried: ["apodex/apodex-1.1-mini:free"],
+          openrouterModelsTried: ["inclusionai/ling-3.1-flash"],
           servedBy: "mistral",
           provider: "mistral",
-          primaryModel: "apodex/apodex-1.1-mini:free",
+          primaryModel: "inclusionai/ling-3.1-flash",
           model: "ministral-14b-2512",
-          modelsTried: ["apodex/apodex-1.1-mini:free", "gemini-3.6-flash", "gemini-3.5-flash-lite", "ministral-14b-2512"],
+          modelsTried: ["inclusionai/ling-3.1-flash", "gemini-3.6-flash", "gemini-3.5-flash-lite", "ministral-14b-2512"],
           mistralModelsTried: ["ministral-14b-2512"],
           fallback: {
             attempted: true,
@@ -1762,10 +1762,10 @@ test("latest-run cache receipt preserves original provider metadata", () => {
   assert.equal(stats.summary.servedBy, "mistral");
   assert.equal(stats.summary.model, "ministral-14b-2512");
   assert.equal(stats.summary.openrouterMs, 1200);
-  assert.deepEqual(JSON.parse(JSON.stringify(stats.summary.openrouterModelsTried)), ["apodex/apodex-1.1-mini:free"]);
+  assert.deepEqual(JSON.parse(JSON.stringify(stats.summary.openrouterModelsTried)), ["inclusionai/ling-3.1-flash"]);
   assert.deepEqual(
     JSON.parse(JSON.stringify(stats.summary.modelsTried)),
-    ["apodex/apodex-1.1-mini:free", "gemini-3.6-flash", "gemini-3.5-flash-lite", "ministral-14b-2512"]
+    ["inclusionai/ling-3.1-flash", "gemini-3.6-flash", "gemini-3.5-flash-lite", "ministral-14b-2512"]
   );
   assert.equal(stats.summary.fallback.used, true);
   assert.equal(stats.summary.fallback.servedBy, "mistral");

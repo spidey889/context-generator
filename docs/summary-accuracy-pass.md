@@ -1,5 +1,7 @@
 # Ling-first factual accuracy pass — October 3, 2026
 
+Historical comparison before Apodex was removed. The subsequent source chain is Ling -> Gemini Flash -> Flash-Lite -> Mistral -> exact local carry; see [current routing](provider-fallbacks.md). The outputs and findings below remain unchanged evaluation evidence.
+
 **Hold the master merge for the combined Ling/Apodex flow.** The focused prompt change substantially improves factual preservation, but Apodex still drops an explicit operational prohibition intermittently. A clean structural receipt does not detect that loss.
 
 ## Changes

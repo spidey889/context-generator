@@ -3,7 +3,6 @@ const test = require("node:test");
 const handler = require("../api/summarize.js");
 const { createSummaryWithFallback, getSummaryProfile, getEnabledOpenRouterModels } = handler.__test;
 const LING = "inclusionai/ling-3.1-flash";
-const APODEX = "apodex/apodex-1.1-mini:free";
 const PAUSED = [
   ["OPENROUTER_QWEN_ENABLED", "qwen/qwen3.8-27b:free"],
   ["OPENROUTER_DOTS_ENABLED", "dots-studio/dots-3-note-preview:free"],
@@ -91,7 +90,7 @@ test("Ling serves first with full input, private free routing, usage and truthfu
   } finally { global.fetch = originalFetch; restore(); }
 });
 
-test("Ling and Apodex rate limits skip three paused models and preserve the complete transcript after all fallbacks fail", async () => {
+test("Ling rate limits skip three paused models and preserve the complete transcript after all fallbacks fail", async () => {
   const restore = isolateEnv();
   const originalFetch = global.fetch;
   const calls = [];
@@ -102,7 +101,7 @@ test("Ling and Apodex rate limits skip three paused models and preserve the comp
   };
   try {
     const result = await run(conversation, { openrouterApiKey: "test-openrouter", geminiApiKey: "test-google", mistralApiKey: "test-mistral" });
-    assert.deepEqual(calls, [LING, APODEX, "gemini-3.6-flash", "gemini-3.5-flash-lite", "ministral-14b-2512"]);
+    assert.deepEqual(calls, [LING, "gemini-3.6-flash", "gemini-3.5-flash-lite", "ministral-14b-2512"]);
     assert.deepEqual(result.modelsTried, calls);
     assert.equal(result.model, "local-direct");
     assert.ok(result.summary.includes(conversation.trim().split("\n").map(line => `> ${line}`).join("\n")));
@@ -125,11 +124,11 @@ test("each paused route can be enabled explicitly with the same key; missing key
     return googleResponse();
   };
   try {
-    assert.deepEqual(getEnabledOpenRouterModels(), [LING, APODEX]);
+    // A stale deployed flag cannot resurrect the removed Apodex route.
+    process.env.OPENROUTER_APODEX_ENABLED = "true";
+    assert.deepEqual(getEnabledOpenRouterModels(), [LING]);
     process.env.OPENROUTER_LING_ENABLED = "false";
-    assert.deepEqual(getEnabledOpenRouterModels(), [APODEX], "pausing Ling retains Apodex");
-    process.env.OPENROUTER_APODEX_ENABLED = "false";
-    assert.deepEqual(getEnabledOpenRouterModels(), []);
+    assert.deepEqual(getEnabledOpenRouterModels(), [], "pausing Ling leaves no default OpenRouter route");
     for (const [flag, model] of PAUSED) {
       process.env[flag] = "TRUE";
       assert.deepEqual(getEnabledOpenRouterModels(), [], "only explicit lowercase true enables a paused route");
@@ -137,7 +136,6 @@ test("each paused route can be enabled explicitly with the same key; missing key
       assert.equal((await run("Build facts. ".repeat(200))).model, model);
       delete process.env[flag];
     }
-    process.env.OPENROUTER_APODEX_ENABLED = "true";
     process.env.OPENROUTER_LING_ENABLED = "true";
     process.env.OPENROUTER_ENABLED = "false";
     assert.equal((await run("Build facts. ".repeat(200), { openrouterApiKey: "test-openrouter", geminiApiKey: "test-google" })).model, "gemini-3.6-flash");
@@ -148,7 +146,7 @@ test("each paused route can be enabled explicitly with the same key; missing key
     for (authFailure of [{ status: 401, code: 401 }, { status: 402, code: 402 }, { status: 200, code: 401 }]) {
       calls.length = 0;
       assert.equal((await run("Build facts. ".repeat(200), { openrouterApiKey: "test-openrouter", geminiApiKey: "test-google" })).model, "gemini-3.6-flash");
-      assert.deepEqual(calls, [LING, "gemini-3.6-flash"], "a shared account failure must not retry all five models");
+      assert.deepEqual(calls, [LING, "gemini-3.6-flash"], "a shared account failure must not retry other OpenRouter models");
     }
   } finally { global.fetch = originalFetch; restore(); }
 });
@@ -180,10 +178,9 @@ test("OpenRouter auth, quota, unavailable endpoints, malformed/error envelopes a
         return JSON.parse(options.body).model === LING ? failure() : response();
       };
       const result = await run("Build facts. ".repeat(200), { openrouterApiKey: "test-openrouter", geminiApiKey: "test-google" });
-      const sharedAccountFailure = [401, 402].includes((await failure()).status);
-      assert.equal(result.model, sharedAccountFailure ? "gemini-3.6-flash" : APODEX);
+      assert.equal(result.model, "gemini-3.6-flash");
       assert.equal(calls.length, 2);
-      assert.deepEqual(calls, [LING, sharedAccountFailure ? "gemini-3.6-flash" : APODEX]);
+      assert.deepEqual(calls, [LING, "gemini-3.6-flash"]);
       assert.equal(result.fallback.used, true);
       assert.doesNotMatch(JSON.stringify(result), /PRIVATE_BODY|Unfinished private chain|Partial text/);
     }

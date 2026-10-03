@@ -16,7 +16,6 @@ test("analysis receipt shows the served model and does not report it as failed",
   };
 
   for (const [model, label] of [
-    ["apodex/apodex-1.1-mini:free", "Apodex 1.1 Mini"],
     ["qwen/qwen3.8-27b:free", "Qwen3.8 27B"],
     ["dots-studio/dots-3-note-preview:free", "Dots3-Note Preview"],
     ["google/gemma-4-26b-a4b-it:free", "Gemma 4 26B A4B"],
@@ -28,9 +27,8 @@ test("analysis receipt shows the served model and does not report it as failed",
   ]) assert.equal(formatModelDisplayName(model), label);
   assert.equal(formatModelDisplayName("unsupported-model"), "n/a");
   assert.equal(formatBackendLabel({ servedBy: "openrouter" }), "OpenRouter");
-  assert.equal(getModelFallbackLabel({ model: "apodex/apodex-1.1-mini:free", modelsTried: ["apodex/apodex-1.1-mini:free"] }), "Apodex 1.1 Mini served first\nNo fallback needed");
   assert.equal(getModelFallbackLabel({ model: "inclusionai/ling-3.1-flash", modelsTried: ["inclusionai/ling-3.1-flash"] }), "Space Bunny 2 served first\nNo fallback needed");
-  assert.equal(getModelFallbackLabel({ model: "apodex/apodex-1.1-mini:free", modelsTried: ["inclusionai/ling-3.1-flash", "apodex/apodex-1.1-mini:free"] }), "Tried this run\nSpace Bunny 2 — failed\nApodex 1.1 Mini — served");
+  assert.equal(getModelFallbackLabel({ model: "gemini-3.6-flash", modelsTried: ["inclusionai/ling-3.1-flash", "gemini-3.6-flash"] }), "Tried this run\nSpace Bunny 2 — failed\nGemini 3.6 Flash — served");
   assert.equal(formatBackendLabel({ servedBy: "gemini" }), "Google Gemini");
   assert.equal(formatBackendLabel({ servedBy: "mistral" }), "Mistral");
   assert.equal(formatBackendLabel({ servedBy: "local-direct" }), "Local");

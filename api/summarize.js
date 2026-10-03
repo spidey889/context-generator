@@ -19,12 +19,11 @@ const MISTRAL_PRIMARY_MODEL = "ministral-14b-2512";
 const FLASH_LITE_FALLBACK_MODEL = "gemini-3.5-flash-lite";
 const REMOTE_CHAIN_BUDGET_MS = 270000;
 const OPENROUTER_CHAT_COMPLETIONS_URL = "https://openrouter.ai/api/v1/chat/completions";
-// A single key serves these pinned routes. Ling leads; Apodex remains its backup.
+// A single key serves these pinned routes. Ling leads; other OpenRouter routes are paused.
 // Enabling another model must be deliberate and cannot extend the deadline.
 const OPENROUTER_MODELS = [
   // Ling has no :free suffix. A zero-price provider filter prevents paid routing.
   { model: "inclusionai/ling-3.1-flash", enabledEnv: "OPENROUTER_LING_ENABLED", defaultEnabled: true },
-  { model: "apodex/apodex-1.1-mini:free", enabledEnv: "OPENROUTER_APODEX_ENABLED", defaultEnabled: true },
   { model: "qwen/qwen3.8-27b:free", enabledEnv: "OPENROUTER_QWEN_ENABLED", defaultEnabled: false },
   { model: "dots-studio/dots-3-note-preview:free", enabledEnv: "OPENROUTER_DOTS_ENABLED", defaultEnabled: false },
   { model: "google/gemma-4-26b-a4b-it:free", enabledEnv: "OPENROUTER_GEMMA_ENABLED", defaultEnabled: false }
@@ -440,7 +439,7 @@ async function createSummaryWithFallback({ conversation, profile, geminiApiKey, 
   const unavailableProviders = new Set();
   const deadline = Date.now() + REMOTE_CHAIN_BUDGET_MS;
   // Give the first route 90s and divide the remainder fairly among fallbacks.
-  // Default: Ling 90s + Apodex/Google/Flash-Lite/Mistral 45s each.
+  // Default: Ling 90s + Google/Flash-Lite/Mistral 60s each.
   // Without OpenRouter, the original three 90s slots remain unchanged.
   const fallbackBudgetMs = routes.length > 1
     ? Math.min(PROVIDER_ATTEMPT_TIMEOUT_MS, Math.floor((REMOTE_CHAIN_BUDGET_MS - PROVIDER_ATTEMPT_TIMEOUT_MS) / (routes.length - 1)))

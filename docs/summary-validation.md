@@ -2,7 +2,7 @@
 
 Output acceptance favors retaining useful context over enforcing an output shape. On 2026-09-18 strict formatting checks became advisory; on 2026-09-30 a separate content-only gate replaced unconditional acceptance of nonempty provider text.
 
-Word targets are advisory allowances and diagnostic metadata; generated sections have no word or bullet quotas. The shared prompt separates reported state, explicit constraints, accepted/rejected proposals and unresolved choices; it asks for operational prohibitions verbatim and forbids owner/user identity inference. This does not prove grounding: the latest paired accuracy pass removed invented identities/questions in the final samples, but Apodex still mislabeled an integrity fact as a constraint and omitted an explicit no-deploy prohibition in one long output. Structural validation cannot detect those errors; see `summary-accuracy-pass.md`.
+Word targets are advisory allowances and diagnostic metadata; generated sections have no word or bullet quotas. The shared prompt separates reported state, explicit constraints, accepted/rejected proposals and unresolved choices; it asks for operational prohibitions verbatim and forbids owner/user identity inference. This does not prove grounding: the paired accuracy pass preserved critical facts in the final Ling samples but still found a minor unsupported rejection. Apodex's failures in that historical comparison led to its subsequent removal from the chain. Structural validation cannot detect invented facts or missing constraints in the remaining generated routes; see `summary-accuracy-pass.md`.
 
 ## Provider acceptance
 
