@@ -3,7 +3,7 @@
 const encoder = new TextEncoder();
 
 function confirmationMessage(payload) {
-  const version = payload.summary_confirmed_at === undefined ? 1 : 2;
+  const version = payload.model !== undefined ? 3 : payload.summary_confirmed_at === undefined ? 1 : 2;
   return JSON.stringify([
     `cap-context-summary-confirmation-v${version}`,
     payload.attempt_id,
@@ -12,7 +12,8 @@ function confirmationMessage(payload) {
     payload.source_platform,
     payload.destination_platform,
     payload.extension_version,
-    ...(version === 2 ? [payload.summary_confirmed_at] : [])
+    ...(version >= 2 ? [payload.summary_confirmed_at] : []),
+    ...(version === 3 ? [payload.model] : [])
   ]);
 }
 

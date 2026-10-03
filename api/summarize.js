@@ -194,9 +194,12 @@ async function handler(req, res) {
         if (proof) {
           const confirmedAt = new Date().toISOString();
           const proofV2 = await createSummaryProof({ ...validation.telemetry, summary_confirmed_at: confirmedAt }, secret);
-          // Keep the original receipt for already-running workers. New workers
-          // carry the signed server timestamp so delayed delivery retains its day.
-          payload = { ...payload, summaryProof: proof, summaryProofV2: proofV2, summaryConfirmedAt: confirmedAt };
+          const model = payload.timing.model;
+          const proofV3 = await createSummaryProof({ ...validation.telemetry, summary_confirmed_at: confirmedAt, model }, secret);
+          // Retain v1/v2 for installed clients; v3 binds the served model too.
+          // Use the final result, never the primary or first attempted route.
+          payload = { ...payload, summaryProof: proof, summaryProofV2: proofV2,
+            summaryProofV3: proofV3, summaryConfirmedAt: confirmedAt, summaryModel: model };
         }
       }
       return send(status, payload);

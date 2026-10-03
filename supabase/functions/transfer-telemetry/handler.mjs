@@ -64,7 +64,9 @@ export function createTelemetryHandler({ createClient, getEnv, log = console.war
         p_summary_verified: summaryVerified,
         p_completed_at: payload.completed_at || null,
         // V1 receipts verify lifetime work, but do not authenticate occurrence time.
-        p_summary_confirmed_at: summaryVerified ? payload.summary_confirmed_at || null : null
+        p_summary_confirmed_at: summaryVerified ? payload.summary_confirmed_at || null : null,
+        // Model is accepted only with its v3 HMAC; legacy receipts stay unknown.
+        p_model: summaryVerified ? payload.model || null : null
       }), rpcTimeoutMs);
       if (error) {
         if (error.code === "22023") return failure(422, "attempt_identity_mismatch");

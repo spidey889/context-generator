@@ -546,7 +546,10 @@ function mergeTelemetryPayloads(previous, next) {
   const stages = [...TELEMETRY_STAGES];
   const previousProof = sanitizeSummaryConfirmation(previous);
   const nextProof = sanitizeSummaryConfirmation(next);
-  const useNextProof = nextProof && (!previousProof || nextProof.summary_confirmed_at || !previousProof.summary_confirmed_at);
+  // Upgrade legacy receipts, but retain the first attribution at the same
+  // version so retries cannot switch the model of an already completed run.
+  const proofVersion = proof => proof?.model ? 3 : proof?.summary_confirmed_at ? 2 : 1;
+  const useNextProof = nextProof && (!previousProof || proofVersion(nextProof) > proofVersion(previousProof));
   const proof = useNextProof ? nextProof : previousProof;
   const merged = {
     ...next,
@@ -564,6 +567,7 @@ function mergeTelemetryPayloads(previous, next) {
     ...(proof || {})
   };
   if (proof && !proof.summary_confirmed_at) delete merged.summary_confirmed_at;
+  if (!proof?.model) delete merged.model;
   if (terminal && !previous.completed_at) delete merged.completed_at;
   return merged;
 }
@@ -571,15 +575,18 @@ function mergeTelemetryPayloads(previous, next) {
 function sanitizeSummaryConfirmation(input) {
   if (typeof input?.summary_proof !== "string" || !/^[0-9a-f]{64}$/.test(input.summary_proof)) return null;
   if (input.summary_confirmed_at !== undefined && !Number.isFinite(Date.parse(input.summary_confirmed_at))) return null;
+  if (input.model !== undefined && (!input.summary_confirmed_at || typeof input.model !== "string"
+      || !/^[a-z0-9][a-z0-9._:/-]{0,159}$/.test(input.model))) return null;
   return {
     summary_proof: input.summary_proof,
-    ...(input.summary_confirmed_at ? { summary_confirmed_at: new Date(input.summary_confirmed_at).toISOString() } : {})
+    ...(input.summary_confirmed_at ? { summary_confirmed_at: new Date(input.summary_confirmed_at).toISOString() } : {}),
+    ...(input.model !== undefined ? { model: input.model } : {})
   };
 }
 
 function sanitizeStoredTelemetryPayload(payload) {
   const keys = new Set(["attempt_id", "install_id", "attempted_at", "source_platform", "destination_platform",
-    "character_count", "status", "last_stage", "failure_reason", "extension_version", "summary_proof", "completed_at", "summary_confirmed_at"]);
+    "character_count", "status", "last_stage", "failure_reason", "extension_version", "summary_proof", "completed_at", "summary_confirmed_at", "model"]);
   if (!payload || typeof payload !== "object" || Array.isArray(payload) || Object.keys(payload).some(key => !keys.has(key))) return null;
   if (!isUuid(payload.install_id) || typeof payload.extension_version !== "string"
     || !/^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/.test(payload.extension_version)) return null;
@@ -590,7 +597,7 @@ function sanitizeStoredTelemetryPayload(payload) {
   }, false);
   if (!event || (payload.completed_at !== undefined && (payload.status === "started" || !Number.isFinite(Date.parse(payload.completed_at))))) return null;
   const confirmation = sanitizeSummaryConfirmation(payload);
-  if ((payload.summary_proof !== undefined || payload.summary_confirmed_at !== undefined) && !confirmation) return null;
+  if ((payload.summary_proof !== undefined || payload.summary_confirmed_at !== undefined || payload.model !== undefined) && !confirmation) return null;
   return {
     attempt_id: event.attemptId, install_id: payload.install_id, attempted_at: event.attemptedAt,
     source_platform: event.sourcePlatform, destination_platform: event.destinationPlatform,
@@ -891,8 +898,9 @@ async function fetchSummaryFromBackend(conversationText, transferId = null, dead
     }
     if (!data.summary?.trim()) throw new Error("Backup summarizer returned no summary.");
     const confirmation = sanitizeSummaryConfirmation({
-      summary_proof: data.summaryProofV2 || data.summaryProof,
-      ...(data.summaryProofV2 ? { summary_confirmed_at: data.summaryConfirmedAt } : {})
+      summary_proof: data.summaryProofV3 || data.summaryProofV2 || data.summaryProof,
+      ...(data.summaryProofV3 || data.summaryProofV2 ? { summary_confirmed_at: data.summaryConfirmedAt } : {}),
+      ...(data.summaryProofV3 ? { model: data.summaryModel } : {})
     });
     if (telemetry && confirmation) {
       // A summary may finish after its source tab closes. Its receipt confirms

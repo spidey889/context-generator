@@ -366,10 +366,14 @@ test("Vercel and Supabase enforce the same metadata-only telemetry schema", asyn
     makeTelemetryPayload({ summary_confirmed_at: "2026-09-31T00:00:00Z" }),
     ...[{}, { completed_at: "2026-10-02T00:00:10.000Z" },
       { summary_proof: "0".repeat(64), summary_confirmed_at: "2026-10-02T00:00:05.000Z" },
+      { summary_proof: "0".repeat(64), summary_confirmed_at: "2026-10-02T00:00:05.000Z", model: "inclusionai/ling-3.1-flash" },
       { status: "started", last_stage: "capture_completed", completed_at: "2026-10-02T00:00:10.000Z" },
       { character_count: true }, { character_count: "50" }, { character_count: -1 }, { attempted_at: 1 }, { attempted_at: "1" },
       { attempted_at: "2026-02-31T00:00:00.000Z" }, { attempted_at: "2026-10-02T24:00:00.000Z" },
       { completed_at: null }, { summary_confirmed_at: "2026-10-02T00:00:05.000Z" }, { extension_version: "1.2.3+" + "x".repeat(80) },
+      { model: "local-direct" }, { model: null },
+      { summary_proof: "0".repeat(64), summary_confirmed_at: "2026-10-02T00:00:05.000Z", model: "private conversation" },
+      { summary_proof: "0".repeat(64), summary_confirmed_at: "2026-10-02T00:00:05.000Z", model: "x".repeat(161) },
       { error: "private" }, { summary_verified: true },
       { completed_at: "2026-10-02T05:30:10+05:30" }].map(succeeded)
   ];

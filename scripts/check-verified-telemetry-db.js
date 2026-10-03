@@ -362,6 +362,8 @@ async function main() {
         equal(await finalCounts(), { lifetime: 1, today: 0, failed: 1, current_day: true });
       } else if (name.endsWith("_remove_transfer_reporting_timestamps.sql")) {
         checks += await require("./check-minimal-transfers-db.js").checkMinimalTransfers(db, sql, appliedMigrations);
+      } else if (name.endsWith("_add_served_model_to_transfers.sql")) {
+        checks += await require("./check-served-model-db.js").checkServedModel(db, sql);
       } else await db.exec(sql);
     }
     console.log(`PASS: ${names.length} real migrations replayed; ${checks} database correctness, data preservation, attribution and privilege checks.`);

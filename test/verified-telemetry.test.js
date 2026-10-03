@@ -137,6 +137,9 @@ test("completed server summary yields a usable receipt, including local server d
   assert.equal(edge.calls[0].args.p_summary_confirmed_at, null);
   await edge.send(signedV2);
   assert.equal(edge.calls[1].args.p_summary_confirmed_at, res.body.summaryConfirmedAt);
+  assert.equal(res.body.summaryModel, "local-direct");
+  const signedV3 = { ...signedV2, model: res.body.summaryModel, summary_proof: res.body.summaryProofV3 };
+  assert.equal(await verifySummaryProof(signedV3, KEY), true);
   // Paste outcomes are distinct from completed server summary work.
   await edge.send({ ...signed, status: "failed", last_stage: "paste_started", failure_reason: "paste_failed" });
   assert.equal(edge.calls[2].args.p_summary_verified, true);
@@ -154,6 +157,28 @@ test("summary validation rejects forged proofs, verification flags and malformed
     assert.equal(res.code, 400);
   }
   assert.equal(validateTelemetryPayload(payload({ summary_proof: "x".repeat(10000) })), null);
+});
+
+test("v3 receipts bind the served model and retain v1/v2 compatibility through Edge", async () => {
+  const { createSummaryProof } = await proofHelpers();
+  const signed = payload({ model: "inclusionai/ling-3.1-flash", summary_confirmed_at: "2026-10-02T00:00:08.000Z" });
+  signed.summary_proof = await createSummaryProof(signed, KEY);
+  assert.equal(validateTelemetryPayload(signed).model, signed.model);
+  const edge = await edgeHarness();
+  assert.equal((await edge.send(signed)).status, 204);
+  assert.equal(edge.calls[0].args.p_model, signed.model);
+  for (const change of [{ model: "local-direct" }, { model: undefined },
+    { summary_confirmed_at: "2026-10-02T00:00:09.000Z" }]) {
+    assert.equal((await edge.send({ ...signed, ...change })).status, 422);
+  }
+  assert.equal(edge.calls.length, 1, "altered attribution must never reach SQL");
+  for (const confirmed of [undefined, signed.summary_confirmed_at]) {
+    const legacy = payload(confirmed ? { summary_confirmed_at: confirmed } : {});
+    legacy.summary_proof = await createSummaryProof(legacy, KEY);
+    assert.equal((await edge.send(legacy)).status, 204);
+    assert.equal(edge.calls.at(-1).args.p_model, null);
+    assert.equal((await edge.send({ ...legacy, model: signed.model })).status, confirmed ? 422 : 400);
+  }
 });
 
 test("server receipts cover remote success and emergency carry, and missing keys keep summaries usable", async t => {
@@ -182,9 +207,18 @@ test("server receipts cover remote success and emergency carry, and missing keys
   } };
   // The merged router must sign every completion path for the current Edge
   // contract, including OpenRouter and the exact emergency local carry.
-  for (const provider of ["openrouter", "mistral", "local-direct"]) {
-    process.env.OPENROUTER_ENABLED = provider === "mistral" ? "false" : "true";
+  for (const provider of ["openrouter", "mistral", "gemini", "local-direct"]) {
+    process.env.OPENROUTER_ENABLED = ["mistral", "gemini"].includes(provider) ? "false" : "true";
+    if (provider === "gemini") process.env.GEMINI_API_KEY = "test-gemini-key";
+    else delete process.env.GEMINI_API_KEY;
     global.fetch = async (url) => {
+      if (provider === "gemini") {
+        if (url.includes("gemini-3.6-flash:")) return new Response("{}", { status: 429 });
+        assert.match(url, /gemini-3\.5-flash-lite:generateContent$/);
+        return new Response(JSON.stringify({ candidates: [{ content: { parts: [{
+          text: "Windows build passed; Linux checks remain pending."
+        }] }, finishReason: "STOP" }] }));
+      }
       if (provider === "local-direct") {
         return new Response(JSON.stringify({ error: { code: "unavailable" } }), { status: 400 });
       }
@@ -205,6 +239,13 @@ test("server receipts cover remote success and emergency carry, and missing keys
     assert.equal((await edge.send(signedV2)).status, 204);
     assert.equal(edge.calls[0].args.p_summary_verified, true);
     assert.equal(edge.calls[0].args.p_summary_confirmed_at, res.body.summaryConfirmedAt);
+    const expectedModel = { openrouter: "inclusionai/ling-3.1-flash", mistral: "ministral-14b-2512",
+      gemini: "gemini-3.5-flash-lite", "local-direct": "local-direct" }[provider];
+    assert.equal(res.body.summaryModel, expectedModel);
+    const signedV3 = { ...signedV2, summary_proof: res.body.summaryProofV3, model: res.body.summaryModel };
+    assert.equal(await verifySummaryProof(signedV3, KEY), true);
+    assert.equal((await edge.send(signedV3)).status, 204);
+    assert.equal(edge.calls[1].args.p_model, expectedModel, "persist final fallback model, not the failed primary");
   }
   delete process.env.TELEMETRY_SIGNING_KEY;
   const res = response();

@@ -41,7 +41,8 @@ const TELEMETRY_KEYS = new Set([
   "extension_version",
   "summary_proof",
   "completed_at",
-  "summary_confirmed_at"
+  "summary_confirmed_at",
+  "model"
 ]);
 
 export function validateTelemetryPayload(input) {
@@ -63,6 +64,8 @@ export function validateTelemetryPayload(input) {
   const summaryConfirmedAt = input.summary_confirmed_at === undefined ? undefined : normalizeTimestamp(input.summary_confirmed_at);
   if (input.completed_at !== undefined && (!completedAt || input.status === "started")) return null;
   if (input.summary_confirmed_at !== undefined && (!summaryConfirmedAt || input.summary_proof === undefined)) return null;
+  if (input.model !== undefined && (!summaryConfirmedAt || input.summary_proof === undefined
+      || typeof input.model !== "string" || !/^[a-z0-9][a-z0-9._:/-]{0,159}$/.test(input.model))) return null;
 
   const characterCount = input.character_count === null || input.character_count === undefined
     ? null
@@ -90,7 +93,8 @@ export function validateTelemetryPayload(input) {
     extension_version: input.extension_version,
     ...(input.summary_proof !== undefined ? { summary_proof: input.summary_proof } : {}),
     ...(completedAt !== undefined ? { completed_at: completedAt } : {}),
-    ...(summaryConfirmedAt !== undefined ? { summary_confirmed_at: summaryConfirmedAt } : {})
+    ...(summaryConfirmedAt !== undefined ? { summary_confirmed_at: summaryConfirmedAt } : {}),
+    ...(input.model !== undefined ? { model: input.model } : {})
   };
 }
 

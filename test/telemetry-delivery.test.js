@@ -218,7 +218,7 @@ test("configuration failures pause delivery longer and retry delay stays bounded
   assert.equal(background.shared.local[OUTBOX].length, 1);
 });
 
-test("active state and signed receipt survive worker restart before tab cancellation", async () => {
+test("active state and v3 served-model receipt survive worker restart before tab cancellation", async () => {
   const shared = profile();
   const proof = "b".repeat(64);
   const confirmedAt = "2026-10-02T10:00:03.000Z";
@@ -226,7 +226,8 @@ test("active state and signed receipt survive worker restart before tab cancella
   const fetchImpl = async (url, options) => {
     if (url.endsWith("/api/telemetry")) throw new Error("offline");
     summaryRequests.push(JSON.parse(options.body));
-    return { ok: true, status: 200, json: async () => ({ summary: "SENSITIVE_SUMMARY", summaryProof: "a".repeat(64), summaryProofV2: proof, summaryConfirmedAt: confirmedAt }) };
+    return { ok: true, status: 200, json: async () => ({ summary: "SENSITIVE_SUMMARY", summaryProof: "a".repeat(64),
+      summaryProofV2: "c".repeat(64), summaryProofV3: proof, summaryModel: "gemini-3.5-flash-lite", summaryConfirmedAt: confirmedAt }) };
   };
   const first = worker(fetchImpl, shared);
   await first.settled();
@@ -236,6 +237,7 @@ test("active state and signed receipt survive worker restart before tab cancella
   assert.equal(summaryRequests[0].telemetry.attempt_id, id(1));
   assert.equal(shared.session[ACTIVE][id(1)].summary_proof, proof);
   assert.equal(shared.session[ACTIVE][id(1)].summary_confirmed_at, confirmedAt);
+  assert.equal(shared.session[ACTIVE][id(1)].model, "gemini-3.5-flash-lite");
   const second = worker(fetchImpl, shared, NOW + 10000, "1.4.7");
   await second.settled();
   await second.listeners.removed(42);
@@ -245,9 +247,30 @@ test("active state and signed receipt survive worker restart before tab cancella
   assert.equal(queued.failure_reason, "user_cancelled");
   assert.equal(queued.summary_proof, proof);
   assert.equal(queued.summary_confirmed_at, confirmedAt);
+  assert.equal(queued.model, "gemini-3.5-flash-lite");
   assert.equal(queued.extension_version, "1.4.6", "a worker update must preserve the signed version");
   assert.equal(queued.completed_at, "2026-10-02T10:00:10.000Z");
   assert.doesNotMatch(JSON.stringify(shared), /SENSITIVE_SUMMARY|SENSITIVE_TRANSCRIPT/);
+});
+
+test("queue merges keep the first v3 proof/model pair through legacy progress and retries", async () => {
+  const { createSummaryProof, verifySummaryProof } = await import("../supabase/functions/_shared/summary-proof.mjs");
+  const key = "queue-model-test-key-0123456789abcdef";
+  const signed = payload(1, { model: "local-direct", summary_confirmed_at: "2026-10-02T10:00:00.000Z" });
+  signed.summary_proof = await createSummaryProof(signed, key);
+  const legacy = { ...signed };
+  delete legacy.model;
+  legacy.summary_proof = await createSummaryProof(legacy, key);
+  const replacement = { ...signed, model: "gemini-3.6-flash" };
+  replacement.summary_proof = await createSummaryProof(replacement, key);
+  const shared = profile({ [OUTBOX]: [signed, legacy, replacement].map((value, index) => ({ deliveryId: id(100 + index), payload: value })) });
+  const received = [];
+  const background = worker(async (_url, options) => { received.push(JSON.parse(options.body)); return success(); }, shared);
+  await background.settled();
+  assert.equal(received.length, 1);
+  assert.equal(received[0].model, "local-direct");
+  assert.equal(received[0].summary_proof, signed.summary_proof);
+  assert.equal(await verifySummaryProof(received[0], key), true);
 });
 
 test("an unsigned legacy queue keeps its original version across update, summary and terminal reports", async () => {
