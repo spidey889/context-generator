@@ -36,4 +36,6 @@ The baseline output invented a Linux-dependent exception to the no-deploy instru
 
 **Recommendation: hold the master merge with Apodex first.** The implementation and fallback mechanics pass verification, but the requested factual reliability is not established and live semantic errors remain. Reconsider the primary model/order before release and retain representative factual evaluations when switching to paid inference. Free account quotas and endpoint availability are shared external constraints; more free model IDs do not remove them. Exact local carry avoids compression errors but can exceed a destination model's own context limit.
 
+Subsequent evidence: [the matched-input primary comparison](openrouter-primary-comparison.md) recommends Ling over Apodex on factual usefulness, but found unsupported details in every generator that produced outputs. It leaves routing unchanged and does not remove this accuracy hold.
+
 Primary references: [OpenRouter parameter/data routing](https://openrouter.ai/docs/guides/routing/provider-selection), [context compression](https://openrouter.ai/docs/guides/features/message-transforms), [Apodex catalog](https://openrouter.ai/apodex/apodex-1.1-mini:free), [account limits](https://openrouter.ai/docs/api/reference/limits).
