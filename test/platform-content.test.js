@@ -619,16 +619,22 @@ test("destination picker preserves outside page focus on every supported platfor
   assert.match(toggleAndHideSource, /bubble\.setAttribute\("aria-expanded", "true"\)/);
   assert.match(toggleAndHideSource, /sheet\.focus\?\.\(\{ preventScroll: true \}\)/);
   assert.match(toggleAndHideSource, /document\.activeElement === bubble/);
-  assert.match(toggleAndHideSource, /bubble\.focus\?\.\(\{ preventScroll: true \}\)/);
+  assert.doesNotMatch(toggleAndHideSource, /bubble\.focus/);
+  assert.match(toggleAndHideSource, /findPlatformInput\(\)\?\.focus\?\.\(\{ preventScroll: true \}\)/);
 });
 
-test("normal page Tab navigation skips the Cap Context orb", () => {
+test("page and picker Tab navigation skip both Cap Context orbs", () => {
   const source = fs.readFileSync(SOURCE_PATH, "utf8");
   const buttonStart = source.indexOf("function createFloatingButton()");
   const buttonEnd = source.indexOf("function ensureOnboardingStyles()", buttonStart);
   const buttonSource = source.slice(buttonStart, buttonEnd);
 
   assert.match(buttonSource, /bubble\.tabIndex = -1/);
+  const sheetStart = source.indexOf("function ensureDestinationSheet()");
+  const sheetEnd = source.indexOf("function ensureDestinationSheetBackdrop()", sheetStart);
+  const sheetSource = source.slice(sheetStart, sheetEnd);
+  assert.match(sheetSource, /brandLink\.tabIndex = -1/);
+  assert.doesNotMatch(sheetSource, /sheet\.querySelectorAll\("[^"\n]*destination-home-link/);
 });
 
 test("destination picker dismissal clears active visuals without focus and preserves handoff glow", () => {

@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-03-approved-orb-hover-v98";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-03-orbs-skip-tab-v99";
   const INLINE_PILL_SIZE = 36;
   const ownedUiStyleSheets = new Map();
   const CLAUDE_INLINE_STYLE_ID = "context-generator-claude-inline-styles";
@@ -6209,6 +6209,8 @@
     brandLink.href = "https://context-generator-five.vercel.app/";
     brandLink.target = "_blank";
     brandLink.rel = "noopener noreferrer";
+    // Both orbs are pointer controls; the picker Tab cycle starts at destinations.
+    brandLink.tabIndex = -1;
     brandLink.setAttribute("aria-label", "Open Cap Context website (opens in a new tab)");
     brandLink.title = "Visit Cap Context";
     const brandIcon = document.createElement("img");
@@ -6427,8 +6429,8 @@
     document.body.appendChild(sheet);
     addOwnedEventListener(document, "click", () => {
       if (!isDestinationSheetOpen()) return;
-      // The page control the user clicked now owns focus. Only keyboard/backdrop
-      // dismissals should return focus to the Cap Context trigger.
+      // The page control the user clicked now owns focus. Keyboard/backdrop
+      // dismissals can return to the native composer instead of the orb.
       hideDestinationSheet({ restoreFocus: false });
     });
     addOwnedEventListener(document, "keydown", (event) => {
@@ -6440,7 +6442,7 @@
       }
       if (event.key !== "Tab") return;
 
-      const focusableTiles = [...sheet.querySelectorAll(".context-generator-destination-tile, .context-generator-speed-toggle, .context-generator-destination-home-link")]
+      const focusableTiles = [...sheet.querySelectorAll(".context-generator-destination-tile, .context-generator-speed-toggle")]
         .filter((tile) => !tile.disabled && tile.getAttribute("aria-disabled") !== "true");
       if (focusableTiles.length === 0) return;
       const focusedIndex = focusableTiles.indexOf(document.activeElement);
@@ -6582,7 +6584,14 @@
         bubble.style.transform = "translate3d(0,0,0) scale(1)";
       }
       if (restoreFocus && !isRunning) {
-        setTimeout(() => bubble.focus?.({ preventScroll: true }), shouldAnimate ? DESTINATION_SHEET_EXIT_MS : 0);
+        setTimeout(() => {
+          // A closing sheet stays displayed during animation; only a reopened
+          // picker or changed page focus should cancel composer restoration.
+          if (isRunning || bubble.getAttribute("aria-expanded") === "true") return;
+          const active = document.activeElement;
+          if (active !== bubble && active !== document.body && !sheet?.contains(active)) return;
+          findPlatformInput()?.focus?.({ preventScroll: true });
+        }, shouldAnimate ? DESTINATION_SHEET_EXIT_MS : 0);
       }
     }
   }

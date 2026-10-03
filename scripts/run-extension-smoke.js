@@ -686,30 +686,64 @@ function appendProcessOutput(current, chunk) {
 
 async function verifyPickerProductChanges(session, state) {
   const requestsBefore = [state.summaryRequests.length, state.jsonRequests];
+  const pressTab = async (shift = false) => {
+    for (const type of ["keyDown", "keyUp"]) {
+      await session.call("Input.dispatchKeyEvent", {
+        type, key: "Tab", code: "Tab", windowsVirtualKeyCode: 9, modifiers: shift ? 8 : 0
+      });
+    }
+  };
+  // Real browser navigation catches focus behavior that tabindex source checks miss.
+  for (const shift of [false, true]) {
+    await session.evaluate(`document.querySelector('[contenteditable="true"], textarea').focus()`);
+    for (let step = 0; step < 8; step++) {
+      await pressTab(shift);
+      assert.equal(await session.evaluate(`document.activeElement?.id === "context-generator-bubble"`), false,
+        "Tab and Shift+Tab must skip the composer orb.");
+    }
+  }
   await session.evaluate('document.getElementById("context-generator-bubble").click()');
   await waitFor(() => session.evaluate('getComputedStyle(document.getElementById("context-generator-destination-sheet")).opacity === "1"'), "the product picker");
   const product = await session.evaluate(`(() => {
     const sheet = document.getElementById("context-generator-destination-sheet");
     const home = sheet.querySelector(".context-generator-destination-home-link");
-    const controls = [...sheet.querySelectorAll(".context-generator-destination-tile, .context-generator-speed-toggle, .context-generator-destination-home-link")]
+    const controls = [...sheet.querySelectorAll(".context-generator-destination-tile, .context-generator-speed-toggle")]
       .filter(node => !node.disabled && node.getAttribute("aria-disabled") !== "true");
-    home.focus();
-    home.dispatchEvent(new KeyboardEvent("keydown", { key: "Tab", shiftKey: true, bubbles: true, cancelable: true }));
-    const reverseWrap = document.activeElement === controls.at(-1);
-    document.activeElement.dispatchEvent(new KeyboardEvent("keydown", { key: "Tab", bubbles: true, cancelable: true }));
-    const forwardWrap = document.activeElement === home;
+    controls[0].focus();
     const toggle = sheet.querySelector(".context-generator-speed-toggle");
     window.__smokeSpeedWasEnabled = toggle.getAttribute("aria-pressed") === "true";
     if (!window.__smokeSpeedWasEnabled) toggle.click();
-    return { href: home.href, target: home.target, rel: home.rel, label: home.getAttribute("aria-label"), reverseWrap, forwardWrap,
+    return { href: home.href, target: home.target, rel: home.rel, label: home.getAttribute("aria-label"),
+      homeTabIndex: home.tabIndex, bubbleTabIndex: document.getElementById("context-generator-bubble").tabIndex,
+      controlCount: controls.length,
       trailCount: sheet.querySelectorAll(".context-generator-speed-lines i").length };
   })()`);
   assert.equal(product.href, "https://context-generator-five.vercel.app/");
   assert.equal(product.target, "_blank");
   assert.match(product.rel, /noopener/);
   assert.match(product.label, /Cap Context/);
-  assert.equal(product.reverseWrap, true);
-  assert.equal(product.forwardWrap, true);
+  assert.equal(product.homeTabIndex, -1);
+  assert.equal(product.bubbleTabIndex, -1);
+  const focusedPickerIndex = `(() => {
+    const sheet = document.getElementById("context-generator-destination-sheet");
+    return [...sheet.querySelectorAll(".context-generator-destination-tile, .context-generator-speed-toggle")]
+      .filter(node => !node.disabled && node.getAttribute("aria-disabled") !== "true")
+      .indexOf(document.activeElement);
+  })()`;
+  await pressTab(true);
+  assert.equal(await session.evaluate(focusedPickerIndex), product.controlCount - 1);
+  await pressTab();
+  assert.equal(await session.evaluate(focusedPickerIndex), 0);
+  for (const shift of [false, true]) {
+    const reached = new Set();
+    for (let step = 0; step < product.controlCount; step++) {
+      await pressTab(shift);
+      const index = await session.evaluate(focusedPickerIndex);
+      assert.ok(index >= 0, "Picker keyboard navigation must stay on destinations and Speed, skipping both orbs.");
+      reached.add(index);
+    }
+    assert.equal(reached.size, product.controlCount, "Every enabled picker control must remain reachable.");
+  }
   assert.equal(product.trailCount, 3);
   await waitFor(() => session.evaluate(`(() => {
     const line = document.querySelector(".context-generator-speed-lines i");
@@ -739,8 +773,10 @@ async function verifyPickerProductChanges(session, state) {
     document.getElementById("context-generator-destination-backdrop").click();
   })()`);
   await session.call("Emulation.clearDeviceMetricsOverride");
+  await waitFor(() => session.evaluate(`document.activeElement?.matches('[contenteditable="true"], textarea')`),
+    "native composer focus after picker dismissal");
   assert.deepEqual([state.summaryRequests.length, state.jsonRequests], requestsBefore, "Picker interaction must not read or send chat content.");
-  process.stdout.write("✓ Picker website link/focus cycle, lightning motion, toggle/reduced motion and 390/320px fit.\n");
+  process.stdout.write("✓ Native Tab/Shift+Tab skip both orbs, picker controls cycle, dismissal returns to composer; motion and narrow fit pass.\n");
 }
 
 async function verifyEmptyChatError(session, browserSession, state, { removeTurns = false, screenshot = false } = {}) {
