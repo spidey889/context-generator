@@ -23,7 +23,7 @@ function harness(platform, { mode = "failure", enabled = true, domFails = false 
     NO_CONVERSATION_ERROR_MESSAGE: "No conversation", setTimeout: () => 1,
     createTransferTrace: () => ({ id: "same-attempt" }), startTransferTelemetry() {},
     markTransferTrace: (_trace, message) => calls.traces.push(message), finishTransferTrace() {},
-    cancelOrbBounce() {}, clearRunningResetTimer() {}, resetRunningFlag: () => { context.isRunning = false; },
+    clearRunningResetTimer() {}, resetRunningFlag: () => { context.isRunning = false; },
     getDetectedConversationMessageCount: () => 2,
     transitionDestinationSheetToHandoff: async () => {}, showOverlay: () => { calls.handoff++; }, releaseDestinationSheetBackdrop() {},
     advanceTransferTelemetryStage() {}, setHandoffProgress() {}, markCaptureDone() {},

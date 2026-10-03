@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-03-routing-orb-proximity-bounce-v96";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-03-routing-product-merge-v95";
   const INLINE_PILL_SIZE = 36;
   const ownedUiStyleSheets = new Map();
   const CLAUDE_INLINE_STYLE_ID = "context-generator-claude-inline-styles";
@@ -13,7 +13,6 @@
   let chatGptInlineMount = null;
   let claudeInlineMount = null;
   let inlineBubble = null;
-  let orbBounceAnimation = null;
   let reservedClaudeInlineControls = [];
   let reservedClaudeInlineShift = 0;
   let reservedClaudeControlOffsets = new Map();
@@ -622,7 +621,6 @@
   function teardownContextGeneratorInstance() {
     if (!instanceActive) return;
     instanceActive = false;
-    cancelOrbBounce();
     if (activeTransferTrace) activeTransferTrace.expired = true;
     cancelPendingPasteRecheck();
     extensionRuntime.onMessage.removeListener?.(handleRuntimeMessage);
@@ -740,7 +738,6 @@
       }
 
       isRunning = true;
-      cancelOrbBounce();
       clearRunningResetTimer();
       startTransferDeadline(trace);
       sendResponse({ ok: true });
@@ -4961,57 +4958,6 @@
     return bubble;
   }
 
-  function cancelOrbBounce() {
-    orbBounceAnimation?.cancel();
-    orbBounceAnimation = null;
-  }
-
-  function addOrbProximityBounce(bubble, icon) {
-    const reducedMotion = window.matchMedia?.("(prefers-reduced-motion: reduce)");
-    let nearby = false;
-    const reset = () => {
-      nearby = false;
-      cancelOrbBounce();
-    };
-
-    addOwnedEventListener(document, "pointermove", (event) => {
-      if (event.pointerType !== "mouse" || event.buttons) return;
-      if (reducedMotion?.matches || isRunning || bubble.disabled
-        || bubble.getAttribute("aria-expanded") === "true" || !bubble.isConnected
-        || bubble.style.display === "none" || document.hidden) {
-        reset();
-        return;
-      }
-      const rect = bubble.getBoundingClientRect();
-      if (!rect.width || !rect.height) return;
-      const dx = Math.max(rect.left - event.clientX, 0, event.clientX - rect.right);
-      const dy = Math.max(rect.top - event.clientY, 0, event.clientY - rect.bottom);
-      const distance = Math.hypot(dx, dy);
-      // A wider exit radius prevents cursor jitter from repeatedly restarting the bounce.
-      if (nearby) {
-        if (distance > 68) nearby = false;
-        return;
-      }
-      if (distance > 42 || !icon.animate) return;
-      nearby = true;
-      cancelOrbBounce();
-      // Move only the artwork: toolbar geometry, hit testing and picker anchoring stay steady.
-      orbBounceAnimation = icon.animate([
-        { transform: "translateY(0) scale(1)", offset: 0 },
-        { transform: "translateY(1px) scale(1.06,0.92)", offset: 0.16 },
-        { transform: "translateY(-3px) scale(0.97,1.03)", offset: 0.38 },
-        { transform: "translateY(1px) scale(1.03,0.97)", offset: 0.62 },
-        { transform: "translateY(-1px) scale(0.99,1.01)", offset: 0.8 },
-        { transform: "translateY(0) scale(1)", offset: 1 }
-      ], { duration: 620, easing: "cubic-bezier(0.22,0.61,0.36,1)" });
-    }, { passive: true });
-    addOwnedEventListener(bubble, "pointerdown", reset);
-    addOwnedEventListener(document, "pointerleave", reset);
-    addOwnedEventListener(document, "visibilitychange", reset);
-    addOwnedEventListener(window, "blur", reset);
-    addOwnedEventListener(reducedMotion, "change", reset);
-  }
-
   function createFloatingButton() {
     const bubble = document.createElement("button");
     bubble.id = BUBBLE_ID;
@@ -5061,7 +5007,6 @@
     icon.style.pointerEvents = "none";
     icon.draggable = false;
     bubble.appendChild(icon);
-    addOrbProximityBounce(bubble, icon);
 
     addOwnedEventListener(bubble, "mouseenter", () => {
       bubble.style.filter = "brightness(1.12) drop-shadow(0 2px 6px rgba(0,0,0,0.25))";
@@ -5083,7 +5028,6 @@
       event.preventDefault();
       event.stopPropagation();
       if (isRunning) return;
-      cancelOrbBounce();
       dismissOnboardingNudge();
       dismissClaudeLimitNudge();
       toggleDestinationSheet();
@@ -6810,7 +6754,6 @@
     markTransferTrace(trace, "destination click", { destination: destinationId });
 
     isRunning = true;
-    cancelOrbBounce();
     clearRunningResetTimer();
     startTransferDeadline(trace);
     try {

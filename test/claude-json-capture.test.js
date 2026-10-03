@@ -303,7 +303,7 @@ function pickerHarness({ jsonEnabled = true, navigateDuringHandoff = false } = {
     RUNNING_AUTO_RESET_MS: 360000, DESTINATION_SHEET_EXIT_MS: 0, NO_CONVERSATION_ERROR_MESSAGE: "No conversation",
     createTransferTrace: () => ({}), startTransferTelemetry: noop, markTransferTrace: noop, finishTransferTrace: noop,
     getDetectedConversationMessageCount: () => 0, hideDestinationSheet: noop, delay: async () => {},
-    showErrorOverlay: error => calls.errors.push(error), cancelOrbBounce: noop, clearRunningResetTimer: noop, resetRunningFlag: noop,
+    showErrorOverlay: error => calls.errors.push(error), clearRunningResetTimer: noop, resetRunningFlag: noop,
     setTimeout: () => 1, transitionDestinationSheetToHandoff: async () => {
       if (navigateDuringHandoff) window.location.pathname = "/chat/other";
     }, showOverlay: noop, releaseDestinationSheetBackdrop: noop,
