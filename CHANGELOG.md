@@ -2,6 +2,8 @@
 
 Historical changes; `LOGIC.md` describes current source behavior. Repository changes do not establish deployment or Web Store release state.
 
+- 2026-10-04 (`master`, audit cleanup): Removed the dated `SCRAPING_AUDIT.md` at the owner's request.
+
 - 2026-10-04 (`master`, handoff skill reference): Added `HANDOFF_SKILL.md` with David Ondrej's complete handoff workflow and template, a pinned upstream source, and its MIT license. The reusable skill reference is separate from generated session handoffs.
 
 - 2026-10-04 (`master`, free composer layouts): Inspected the live free ChatGPT transition grid and Claude's missing-orb Reply layout. ChatGPT now mounts beside Think using its owned leading/trailing slots without requiring responsive-footer markers; hiding Think retains the orb beside visible controls. Claude now supports attachment/model groups in its separate chin while preserving Send's editor inset and position. Composer replacement closes the picker and clears the detached retained orb's active state before reuse, fixing a second bug exposed by the new browser regression. Preserved native controls, existing adapters, scoped observers and popup/other-composer rejection; advanced content-script identity to v103. Added four focused cases and installed-Brave fixtures for the observed layouts, drafts, desktop/760/390/320px widths and expanded/Reply transitions. All 315 regular tests and the full isolated Brave placement/picker/transfer/telemetry smoke passed. Verified live free ChatGPT placement and Brave Claude's existing-chat orb after reload. Helium's exact Reply variant was inspected read-only and reproduced in the isolated fixture; Web Store publication remains separate.
