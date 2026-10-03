@@ -5,7 +5,7 @@ This file documents the current extension and backend contracts. `master` is the
 ## Runtime
 
 - Node 22; the extension has no build step or runtime npm dependencies. Load the unpacked `extension/` folder for browser checks.
-- Manifest version: `1.4.7`, with Chromium service-worker and Firefox background-script declarations.
+- Manifest version: `1.4.8`, with Chromium service-worker and Firefox background-script declarations.
 - Backend URL used by the extension: `https://context-generator-five.vercel.app`.
 - No release ZIP is tracked. Packaging and Web Store publication are separate from repository pushes.
 - Launch-film sources, reproduction instructions and credits are in `brag/README.md`.
