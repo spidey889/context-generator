@@ -4,6 +4,10 @@ const path = require("node:path");
 const vm = require("node:vm");
 const test = require("node:test");
 const { webcrypto } = require("node:crypto");
+const { clockTest } = require("../testing/clock");
+// Reuse compiled code; every setup still executes it in a fresh VM with its own hook state.
+const scripts = new Map(["chatgpt-fetch-main.js", "chatgpt-json-capture.js"].map(file =>
+  [file, new vm.Script(fs.readFileSync(path.join(__dirname, "..", "extension", file), "utf8"), { filename: file })]));
 const chat = "test-chat";
 const fullUrl = `https://chatgpt.com/backend-api/conversation/${chat}`;
 function fixture() {
@@ -42,8 +46,8 @@ function setup(data = fixture(), status = 200, { headers = {}, body, fetchImpl, 
       [...listeners].forEach(listener => listener({ source: window, origin: location.origin, data }));
     }); }
   };
-  const context = vm.createContext({ window, location, chrome: runtime ? { runtime } : undefined, URL, Headers, Request, TextEncoder, TextDecoder, AbortController, crypto: webcrypto, setTimeout: schedule, clearTimeout });
-  const reinstall = (file = "chatgpt-fetch-main.js") => vm.runInContext(fs.readFileSync(path.join(__dirname, "..", "extension", file), "utf8"), context);
+  const context = vm.createContext({ window, location, chrome: runtime ? { runtime } : undefined, URL, Headers, Request, TextEncoder, TextDecoder, AbortController, crypto: webcrypto, Date, setTimeout: schedule, clearTimeout });
+  const reinstall = (file = "chatgpt-fetch-main.js") => scripts.get(file).runInContext(context);
   for (const file of ["chatgpt-fetch-main.js", "chatgpt-json-capture.js"]) reinstall(file);
   return { window, location, requests, replies, pings, reads: () => reads, reinstall,
     emitMessage: event => [...listeners].forEach(listener => listener(event)),
@@ -334,7 +338,7 @@ test("ChatGPT transport rejects 206, content ranges, non-JSON and broken JSON wi
   }
 });
 
-test("ChatGPT bridge waits for MAIN installation and fails visibly if readiness is unavailable", async () => {
+clockTest("ChatGPT bridge waits for MAIN installation and fails visibly if readiness is unavailable", async () => {
   let harness;
   let ensures = 0;
   harness = setup(fixture(), 200, { runtime: { sendMessage: async message => {
@@ -342,12 +346,16 @@ test("ChatGPT bridge waits for MAIN installation and fails visibly if readiness 
   } } });
   await discover(harness);
   harness.window.__capChatGptFetchState.dispose();
+  const started = Date.now();
   await harness.window.__capCaptureChatGptJson();
   assert.equal(ensures, 1);
+  assert.ok(Date.now() - started >= 250 && Date.now() - started < 8250, "live readiness must win within the recovery window");
   const failed = setup(fixture(), 200, { runtime: { sendMessage: async () => ({ ok: false }) } });
   failed.window.__capChatGptFetchState.dispose();
   await assert.rejects(failed.window.__capCaptureChatGptJson(), /Fast capture isn't ready/);
   assert.equal(failed.requests.length, 0);
+  assert.equal(failed.listeners(), 0);
+  assert.equal(failed.navigationListeners(), 0);
 });
 
 
@@ -364,24 +372,34 @@ test("ChatGPT account switching invalidates an in-flight capture and never sends
 });
 
 
-test("ChatGPT bounds stalled network capture and cleans the pending bridge listener", async () => {
+clockTest("ChatGPT bounds stalled network capture and cleans the pending bridge listener", async () => {
+  let requestStarted, abortedAt;
   const harness = setup(fixture(), 200, {
-    schedule: (fn, ms) => setTimeout(fn, ms === 15000 ? 10 : ms),
-    fetchImpl: request => request.url.includes("/conversations/") ? jsonResponse({}) : new Promise((_, reject) => request.options.signal.addEventListener("abort", () => reject(new DOMException("Aborted", "AbortError"))))
+    fetchImpl: request => {
+      if (request.url.includes("/conversations/")) return jsonResponse({});
+      requestStarted = Date.now();
+      return new Promise((_, reject) => request.options.signal.addEventListener("abort", () => {
+        abortedAt = Date.now();
+        reject(new DOMException("Aborted", "AbortError"));
+      }, { once: true }));
+    }
   });
   await discover(harness);
   await assert.rejects(harness.window.__capCaptureChatGptJson(), /full-tree request timed out/);
   assert.equal(harness.listeners(), 1);
   assert.ok(harness.replies.every(reply => !reply.data));
+  assert.equal(abortedAt - requestStarted, 15000, "the full-tree request must retain its real deadline");
 });
 
-test("ChatGPT bounds MAIN readiness even when the worker never responds", async () => {
+clockTest("ChatGPT bounds MAIN readiness even when the worker never responds", async () => {
   const harness = setup(fixture(), 200, {
-    schedule: (fn, ms) => setTimeout(fn, ms === 8000 ? 10 : ms === 250 ? 5 : ms),
     runtime: { sendMessage: () => new Promise(() => {}) }
   });
   harness.window.__capChatGptFetchState.dispose();
+  const started = Date.now();
   await assert.rejects(harness.window.__capCaptureChatGptJson(), /Fast capture isn't ready/);
+  assert.equal(Date.now() - started, 8250, "readiness includes the initial probe and full recovery window");
   assert.equal(harness.requests.length, 0);
   assert.equal(harness.listeners(), 0);
+  assert.equal(harness.navigationListeners(), 0);
 });

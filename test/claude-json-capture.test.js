@@ -4,6 +4,9 @@ const path = require("node:path");
 const vm = require("node:vm");
 const test = require("node:test");
 const { webcrypto, createHash } = require("node:crypto");
+const { clockTest } = require("../testing/clock");
+const scripts = new Map(["claude-fetch-main.js", "claude-json-capture.js"].map(file =>
+  [file, new vm.Script(fs.readFileSync(path.join(__dirname, "..", "extension", file), "utf8"), { filename: file })]));
 
 const chat = "test-chat";
 const endpoint = `https://claude.ai/api/organizations/test-org/chat_conversations/${chat}?tree=True`;
@@ -46,12 +49,12 @@ function setup(data = fixture(), { status = 200, headers = {}, body, resources =
       for (const listener of [...listeners]) listener({ source: window, origin: location.origin, data: payload });
     })
   };
-  const context = vm.createContext({ window, location, chrome: runtime ? { runtime } : undefined, URL, Request, TextEncoder, AbortController, crypto: webcrypto, setTimeout, clearTimeout });
+  const context = vm.createContext({ window, location, chrome: runtime ? { runtime } : undefined, URL, Request, TextEncoder, AbortController, crypto: webcrypto, Date, setTimeout, clearTimeout });
   for (const file of ["claude-fetch-main.js", "claude-json-capture.js"]) {
-    vm.runInContext(fs.readFileSync(path.join(__dirname, "..", "extension", file), "utf8"), context);
+    scripts.get(file).runInContext(context);
   }
   return { window, location,
-    reinstall: (file = "claude-fetch-main.js") => vm.runInContext(fs.readFileSync(path.join(__dirname, "..", "extension", file), "utf8"), context),
+    reinstall: (file = "claude-fetch-main.js") => scripts.get(file).runInContext(context),
     navigate: pathname => { for (const fn of navigationListeners) fn({ destination: { url: location.origin + pathname } }); location.pathname = pathname; },
     stats: () => ({ requests, clones, requestUrl, requestOptions, listeners: listeners.size,
       navigationListeners: navigationListeners.size, popListeners: popListeners.size }) };
@@ -244,7 +247,7 @@ test("Claude aborts navigation away and back, and rejects concurrent captures pr
   assert.equal(harness.stats().listeners, 1);
 });
 
-test("Claude isolated bridge awaits MAIN reinstallation before requesting capture", async () => {
+clockTest("Claude isolated bridge awaits MAIN reinstallation before requesting capture", async () => {
   let harness;
   let ensures = 0;
   harness = setup(fixture(), { resources: [endpoint], runtime: { sendMessage: async message => {
@@ -255,7 +258,9 @@ test("Claude isolated bridge awaits MAIN reinstallation before requesting captur
     return { ok: true };
   } } });
   harness.window.__capClaudeFetchState.dispose();
+  const started = Date.now();
   await harness.window.__capCaptureClaudeJson();
+  assert.ok(Date.now() - started >= 250 && Date.now() - started < 8250, "live readiness must win within the recovery window");
   assert.equal(ensures, 1);
   assert.equal(harness.stats().requests, 1);
 });

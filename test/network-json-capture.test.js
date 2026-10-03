@@ -4,8 +4,11 @@ const path = require("node:path");
 const vm = require("node:vm");
 const test = require("node:test");
 const { webcrypto } = require("node:crypto");
+const { clockTest } = require("../testing/clock");
 const { fixtures, rpcFrame, geminiTurn, prompt } = require("./network-json-fixtures");
 const files = ["network-json-data.js", "network-fetch-main.js", "network-json-capture.js"];
+const scripts = new Map(files.map(file =>
+  [file, new vm.Script(fs.readFileSync(path.join(__dirname, "..", "extension", file), "utf8"), { filename: file })]));
 function setup(platform, fixture = fixtures(platform), { fetchImpl, runtime, schedule = setTimeout, beforeMessage } = {}) {
   const requests = [], replies = [], listeners = new Set(), navigation = new Set();
   const host = { gemini: "gemini.google.com", grok: "grok.com", deepseek: "chat.deepseek.com" }[platform];
@@ -40,8 +43,8 @@ function setup(platform, fixture = fixtures(platform), { fetchImpl, runtime, sch
     navigation: { addEventListener: (_type, fn) => navigation.add(fn), removeEventListener: (_type, fn) => navigation.delete(fn) },
     postMessage(data) { if (data.type === "response") replies.push(data); queueMicrotask(() => { beforeMessage?.(data); [...listeners].forEach(fn => fn({ data, source: window, origin: location.origin })); }); }
   };
-  const context = vm.createContext({ window, location, chrome: runtime ? { runtime } : undefined, performance: { getEntriesByType: () => [] }, URL, URLSearchParams, Headers, Request, TextEncoder, TextDecoder, AbortController, crypto: webcrypto, setTimeout: schedule, clearTimeout });
-  const reinstall = file => vm.runInContext(fs.readFileSync(path.join(__dirname, "..", "extension", file), "utf8"), context);
+  const context = vm.createContext({ window, location, chrome: runtime ? { runtime } : undefined, performance: { getEntriesByType: () => [] }, URL, URLSearchParams, Headers, Request, TextEncoder, TextDecoder, AbortController, crypto: webcrypto, Date, setTimeout: schedule, clearTimeout });
+  const reinstall = file => scripts.get(file).runInContext(context);
   files.forEach(reinstall);
   const api = vm.runInContext("__capNetworkJsonData", context);
   const observe = async () => {
@@ -175,7 +178,7 @@ test("DeepSeek captures supported original code/data uploads instead of dropping
   }
 });
 for (const platform of ["gemini", "grok", "deepseek"]) {
-  test(`${platform}: a missing MAIN hook recovers on demand without requiring a worker callback to prove readiness`, async () => {
+  clockTest(`${platform}: a missing MAIN hook recovers on demand without requiring a worker callback to prove readiness`, async () => {
     let h, installs = 0;
     h = setup(platform, fixtures(platform), { runtime: { sendMessage: async message => {
       assert.equal(message.type, "ENSURE_NETWORK_JSON_HOOK"); installs++;
@@ -183,8 +186,11 @@ for (const platform of ["gemini", "grok", "deepseek"]) {
       return new Promise(() => {}); // Live pong must win over this stalled reply.
     } } });
     await h.observe(); h.window.__capNetworkFetchState.dispose(); delete h.window.__capNetworkFetchState;
+    const started = Date.now();
     assert.equal((await h.window.__capCaptureNetworkJson()).text, h.fixture.expected);
+    assert.ok(Date.now() - started >= 250 && Date.now() - started < 8250, "live readiness must win over the stalled worker callback");
     assert.equal(installs, 1); assert.equal(h.listeners.size, 1);
+    assert.equal(h.navigationListeners(), 0);
   });
 }
 test("DeepSeek aborts an active capture when the native session credential changes", async () => {

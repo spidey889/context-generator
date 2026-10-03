@@ -791,14 +791,16 @@ test("new-chat routes never bypass empty detection, while saved JSON chats may b
   }
 });
 
-test("handoff finish has a deadline when visible-source animation frames never fire", { timeout: 1000 }, async () => {
+clockTest("handoff finish has a deadline when visible-source animation frames never fire", { timeout: 1000 }, async () => {
   const hooks = loadPlatformContent([]);
   hooks.document.querySelector = () => null;
   const before = hooks.getOwnedLifecycleResourceCounts();
+  const started = Date.now();
 
   // Deliberately leave every queued frame unfired: the old wait never resolved.
   await hooks.completeHandoffForDestinationReveal();
 
+  assert.equal(Date.now() - started, 120, "the paint fallback must retain its deadline");
   assert.equal(hooks.animationFrameCallbacks.length, 1);
   assert.deepEqual(hooks.getOwnedLifecycleResourceCounts(), before);
 });

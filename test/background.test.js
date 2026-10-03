@@ -3,15 +3,21 @@ const fs = require("node:fs");
 const path = require("node:path");
 const test = require("node:test");
 const vm = require("node:vm");
+const { clockTest } = require("../testing/clock");
 
 const source = fs.readFileSync(path.join(__dirname, "..", "extension", "background.js"), "utf8");
 const manifest = JSON.parse(fs.readFileSync(path.join(__dirname, "..", "extension", "manifest.json"), "utf8"));
+const compiledBackground = new vm.Script(source, { filename: "extension/background.js" });
+const compiledTransferBackground = new vm.Script(`${source}\n;globalThis.__backgroundTestHooks = { getPlatformFromUrl, sendMessageWhenReady };`, {
+  filename: "extension/background.js"
+});
 
 function loadBackgroundForSummaryTest(fetchImpl, { tabs = [], injections = [], injectionError = false, onMessage = () => {} } = {}) {
   let messageListener = null;
   const event = { addListener: () => {} };
   const sandbox = {
     AbortController,
+    Date,
     URL,
     clearTimeout,
     console: { debug() {}, error() {}, log() {}, warn() {} },
@@ -58,7 +64,7 @@ function loadBackgroundForSummaryTest(fetchImpl, { tabs = [], injections = [], i
   };
 
   vm.createContext(sandbox);
-  new vm.Script(source, { filename: "extension/background.js" }).runInContext(sandbox);
+  compiledBackground.runInContext(sandbox);
   assert.ok(messageListener, "background summary listener was registered");
 
   return async function sendSummary(conversation, deadlineAt = null) {
@@ -92,6 +98,7 @@ function loadBackgroundForTransferTest({
   const fastSetTimeout = (callback, _delay, ...args) => setTimeout(callback, 0, ...args);
   const sandbox = {
     AbortController,
+    Date,
     URL,
     clearTimeout,
     console: { debug() {}, error() {}, log() {}, warn() {} },
@@ -152,9 +159,7 @@ function loadBackgroundForTransferTest({
   };
 
   vm.createContext(sandbox);
-  new vm.Script(`${source}\n;globalThis.__backgroundTestHooks = { getPlatformFromUrl, sendMessageWhenReady };`, {
-    filename: "extension/background.js"
-  }).runInContext(sandbox);
+  compiledTransferBackground.runInContext(sandbox);
   assert.ok(messageListener, "background transfer listener was registered");
 
   return {
@@ -212,7 +217,8 @@ test("destination messaging enforces its deadline while a response is still pend
   assert.ok(Date.now() - startedAt < 500, "The in-flight destination response must not outlive its deadline.");
 });
 
-test("expired transfer messages cannot fetch summaries, open tabs, paste or activate destinations", async () => {
+// Error paths leave a five-second badge timer; scoped clocks also clean it up after these cases.
+clockTest("expired transfer messages cannot fetch summaries, open tabs, paste or activate destinations", async () => {
   let fetches = 0;
   const sendSummary = loadBackgroundForSummaryTest(async () => { fetches++; });
   const expiredAt = Date.now() - 1;
@@ -231,16 +237,21 @@ test("expired transfer messages cannot fetch summaries, open tabs, paste or acti
   assert.deepEqual(harness.operations, { created: [], gotten: [], sent: [], updated: [], injected: [] });
 });
 
-test("a transfer deadline aborts an outstanding summary request", { timeout: 2000 }, async () => {
-  let signal;
+clockTest("a transfer deadline aborts an outstanding summary request", { timeout: 2000 }, async () => {
+  let signal, abortedAt;
   const sendSummary = loadBackgroundForSummaryTest(async (_url, options) => {
     signal = options.signal;
     return new Promise((resolve, reject) => {
-      signal.addEventListener("abort", () => reject(Object.assign(new Error("aborted"), { name: "AbortError" })), { once: true });
+      signal.addEventListener("abort", () => {
+        abortedAt = Date.now();
+        reject(Object.assign(new Error("aborted"), { name: "AbortError" }));
+      }, { once: true });
     });
   });
-  const response = await sendSummary("captured conversation", Date.now() + 100);
+  const deadlineAt = Date.now() + 100;
+  const response = await sendSummary("captured conversation", deadlineAt);
   assert.equal(signal.aborted, true);
+  assert.equal(abortedAt, deadlineAt, "the request must abort exactly at the transfer deadline");
   assert.equal(response.ok, false);
   assert.equal(response.code, "transfer_timeout");
 });

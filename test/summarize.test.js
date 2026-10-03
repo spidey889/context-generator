@@ -2,6 +2,7 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
 const test = require("node:test");
+const { clockTest } = require("../testing/clock");
 
 const summarizeHandler = require("../api/summarize.js");
 // These cases exercise Google/Mistral compatibility even on machines with a
@@ -428,20 +429,29 @@ test("captured prompt injections stay inside the untrusted transcript data envel
   }
 });
 
-test("provider exhaustion preserves the exact transcript locally without reading error bodies", async () => {
+clockTest("provider exhaustion preserves the exact transcript locally without exposing private error bodies", async () => {
   const originalFetch = global.fetch;
   const restoreMistralKey = setTemporaryEnv("MISTRAL_API_KEY", "test-mistral-key");
   const privateProviderBody = "provider echoed private conversation text";
   let responseTextReads = 0;
+  let responseJsonReads = 0;
+  const requestTimes = [];
 
-  global.fetch = async () => ({
-    ok: false,
-    status: 500,
-    text: async () => {
-      responseTextReads += 1;
-      return privateProviderBody;
-    }
-  });
+  global.fetch = async () => {
+    requestTimes.push(Date.now());
+    return {
+      ok: false,
+      status: 500,
+      json: async () => {
+        responseJsonReads++;
+        return { error: { message: privateProviderBody } };
+      },
+      text: async () => {
+        responseTextReads += 1;
+        return privateProviderBody;
+      }
+    };
+  };
 
   const res = createMockResponse();
   try {
@@ -452,6 +462,9 @@ test("provider exhaustion preserves the exact transcript locally without reading
 
     assert.equal(res.statusCode, 200);
     assert.equal(responseTextReads, 0);
+    assert.equal(responseJsonReads, 2, "both retries must exercise real private JSON error envelopes");
+    assert.equal(requestTimes.length, 2);
+    assert.equal(requestTimes[1] - requestTimes[0], 450, "exhaustion must retain the provider retry delay");
     assert.equal(res.payload.timing.servedBy, "local-direct");
     assert.equal(res.payload.timing.model, "local-direct");
     assert.equal(res.payload.timing.fallback.used, true);
