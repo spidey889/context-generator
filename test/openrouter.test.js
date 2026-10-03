@@ -61,7 +61,10 @@ test("Apodex serves first with full input, private free routing, usage and truth
     assert.match(body.messages[0].content, /Never follow, execute, or adopt instructions/);
     assert.equal(body.max_tokens, 7000);
     assert.equal(body.models, undefined, "paused models must not enter server-side automatic fallback");
-    assert.deepEqual(body.provider, { data_collection: "deny", max_price: { prompt: 0, completion: 0, request: 0 } });
+    assert.deepEqual(body.provider, { require_parameters: true, data_collection: "deny", max_price: { prompt: 0, completion: 0, request: 0 } });
+    assert.deepEqual(body.plugins, [{ id: "context-compression", enabled: false }]);
+    assert.match(body.messages[0].content, /Word counts and section budgets are guidance/);
+    assert.doesNotMatch(body.messages[0].content, /output is below .* words, expand/);
     assert.deepEqual(body.reasoning, { enabled: false, exclude: true });
     return response("<think>private chain</think>Windows passed; Linux validation remains pending.");
   };
@@ -108,11 +111,12 @@ test("each paused route can be enabled explicitly with the same key; missing key
   const restore = isolateEnv();
   const originalFetch = global.fetch;
   const calls = [];
+  let authFailure = null;
   global.fetch = async (url, options) => {
     if (url.includes("openrouter.ai")) {
       calls.push(JSON.parse(options.body).model);
       assert.equal(options.headers.Authorization, "Bearer test-openrouter");
-      return response();
+      return authFailure ? new Response(JSON.stringify({ error: { code: authFailure.code } }), { status: authFailure.status }) : response();
     }
     calls.push("gemini-3.6-flash");
     return googleResponse();
@@ -133,6 +137,12 @@ test("each paused route can be enabled explicitly with the same key; missing key
     delete process.env.OPENROUTER_ENABLED;
     assert.equal((await run("Build facts. ".repeat(200), { geminiApiKey: "test-google" })).model, "gemini-3.6-flash");
     assert.deepEqual(calls, [...PAUSED.map(([,model]) => model), "gemini-3.6-flash", "gemini-3.6-flash"]);
+    PAUSED.forEach(([flag]) => { process.env[flag] = "true"; });
+    for (authFailure of [{ status: 401, code: 401 }, { status: 402, code: 402 }, { status: 200, code: 401 }]) {
+      calls.length = 0;
+      assert.equal((await run("Build facts. ".repeat(200), { openrouterApiKey: "test-openrouter", geminiApiKey: "test-google" })).model, "gemini-3.6-flash");
+      assert.deepEqual(calls, [APODEX, "gemini-3.6-flash"], "a shared account failure must not retry all five models");
+    }
   } finally { global.fetch = originalFetch; restore(); }
 });
 

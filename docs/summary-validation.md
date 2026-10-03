@@ -2,6 +2,8 @@
 
 Output acceptance favors retaining useful context over enforcing an output shape. On 2026-09-18 strict formatting checks became advisory; on 2026-09-30 a separate content-only gate replaced unconditional acceptance of nonempty provider text.
 
+Word targets and section budgets are prompt guidance as well as diagnostic metadata, not reasons to expand beyond supported facts. The prompt forbids invented test counts, roles, release gates and open questions, and distinguishes observed state from requirements. This does not prove grounding: live Apodex checks still changed an integrity fact into a requirement and invented open questions. Structural validation cannot detect those errors; see `routing-audit.md`.
+
 ## Provider acceptance
 
 `createSummaryWithProvider()` uses `getSummaryContentRejectionReason()` before structural diagnostics. Only refusal-only and substantively empty output advance to another provider:

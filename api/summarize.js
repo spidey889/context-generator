@@ -29,7 +29,7 @@ const OPENROUTER_MODELS = [
   // Ling has no :free suffix. A zero-price provider filter prevents paid routing.
   { model: "inclusionai/ling-3.1-flash", enabledEnv: "OPENROUTER_LING_ENABLED", defaultEnabled: false }
 ];
-const MISTRAL_PROMPT_CACHE_VERSION = "capcontext-summary-v7";
+const MISTRAL_PROMPT_CACHE_VERSION = "capcontext-summary-v8";
 const SUMMARY_PROVIDERS = {
   openrouter: {
     id: "openrouter",
@@ -426,9 +426,7 @@ module.exports.__test = {
   countWords,
   getSummaryProfile,
   createSummaryWithFallback,
-  readProviderErrorMetadata,
   getGeneratedModelSelection,
-  getMistralModelSelection,
   getContextCarryTemplate,
   getSummarySystemPrompt
 };
@@ -462,6 +460,7 @@ async function createSummaryWithFallback({ conversation, profile, geminiApiKey, 
   const mistralModelsTried = [];
   const openrouterModelsTried = [];
   const timings = { openrouterMs: 0, geminiMs: 0, mistralMs: 0 };
+  const unavailableProviders = new Set();
   const deadline = Date.now() + REMOTE_CHAIN_BUDGET_MS;
   // Give the first route 90s and divide the remainder fairly among fallbacks.
   // Default: Apodex 90s + Google 60s + Flash-Lite 60s + Mistral 60s.
@@ -472,6 +471,7 @@ async function createSummaryWithFallback({ conversation, profile, geminiApiKey, 
   let lastProviderFailure = null;
 
   for (const [index, route] of routes.entries()) {
+    if (unavailableProviders.has(route.provider.id)) continue;
     const requestBudgetMs = Math.min(index === 0 ? PROVIDER_ATTEMPT_TIMEOUT_MS : fallbackBudgetMs, deadline - Date.now());
     if (requestBudgetMs <= 0) break;
     const { provider, model, apiKey } = route;
@@ -502,6 +502,12 @@ async function createSummaryWithFallback({ conversation, profile, geminiApiKey, 
       // Only fixed diagnostics are allowed in receipts/logs, never upstream bodies.
       lastProviderFailure = error?.publicMessage ? error : createProviderError(provider,
         error?.name === "AbortError" ? `${provider.label} request timed out` : `${provider.label} request failed`);
+      // All OpenRouter models share this key/account. Another model cannot fix
+      // rejected credentials or an exhausted credit balance. Model-specific
+      // failures and 429s still retain the ordinary configured fallback order.
+      if (provider.id === "openrouter" && [401, 402].includes(lastProviderFailure.providerStatus)) {
+        unavailableProviders.add(provider.id);
+      }
       console.error(`[Context Generator] ${model} failed:`, getProviderFailureLog(lastProviderFailure));
     }
   }
@@ -574,14 +580,12 @@ async function createSummaryWithProvider({ provider, apiKey, profile, model, ini
   const initialMs = Date.now() - initialStartedAt;
 
   if (!initialResponse.ok) {
-    const providerErrorMetadata = await readProviderErrorMetadata(initialResponse);
     const error = createProviderError(
       provider,
       `${provider.label} API error ${initialResponse.status}`,
       502,
       initialResponse.status
     );
-    error.providerCode = providerErrorMetadata.code;
     throw error;
   }
 
@@ -590,7 +594,9 @@ async function createSummaryWithProvider({ provider, apiKey, profile, model, ini
   // Never accept partial/error text as a successful summary in that case.
   if (provider.id === "openrouter" && (data?.error || data?.choices?.[0]?.error
       || ["error", "content_filter"].includes(data?.choices?.[0]?.finish_reason))) {
-    throw createProviderError(provider, "OpenRouter generation failed", 502);
+    const reportedStatus = data?.error?.code ?? data?.choices?.[0]?.error?.code;
+    throw createProviderError(provider, "OpenRouter generation failed", 502,
+      Number.isInteger(reportedStatus) ? reportedStatus : null);
   }
   const finishReason = getProviderFinishReason(provider, data);
   const initialUsage = normalizeProviderUsage(provider, data);
@@ -697,8 +703,10 @@ function getProviderRequestBody(provider, messages, profile, model) {
     // Do not let a reasoning model spend the summary allowance on hidden text,
     // route to a paid endpoint, or silently relax the data policy on fallback.
     body.stream = false;
+    // Preserve the full transcript even if account defaults later change.
+    body.plugins = [{ id: "context-compression", enabled: false }];
     body.reasoning = { enabled: false, exclude: true };
-    body.provider = { data_collection: "deny", max_price: { prompt: 0, completion: 0, request: 0 } };
+    body.provider = { require_parameters: true, data_collection: "deny", max_price: { prompt: 0, completion: 0, request: 0 } };
   }
   return body;
 }
@@ -787,7 +795,9 @@ ${headerRule}
 - Replace bracket instructions with concrete, continuation-ready content from the conversation.
 - Target about ${profile.targetWords} useful words for this conversation size. Do not duplicate or pad short chats.
 - Use the ${profile.id} profile. Section budget: ${profile.sectionBudget}
-- Do not be concise when useful continuation context exists, but do not manufacture detail when the chat itself is short.
+- Word counts and section budgets are guidance, never reasons to pad, repeat, or invent facts, even in a very long transcript with little useful information.
+- State only facts supported by the transcript. Do not invent test/check counts, message counts, paths, user roles, owners, deadlines, blockers, release gates, or completed actions. Preserve facts as facts and constraints as constraints; do not turn "no data loss" into merely a desired requirement.
+- Do not create an exception to a prohibition: "do not deploy" stays unconditional unless the user explicitly changes it. Missing results or unknown work do not establish a blocker, authorize execution, or prove that an action never happened.
 - Make the result feel like a serious handoff to another capable AI, not a thin executive summary.
 - Preserve exact names, files, APIs, model IDs, commands, error text, copy requirements, constraints, and latest working state when they matter.
 - When the user explicitly asks to keep or preserve a set of exact facts, include every fact in that set. Preserve competing options, exact numeric values and ranges, safety or integrity statements, and implementation state without collapsing, generalizing, or silently dropping them.
@@ -810,7 +820,7 @@ ${headerRule}
 - Do not add the retired skill-template footer: no "PASTE THIS AT THE TOP OF YOUR NEW CHAT" and no "Continue from where we left off."
 - The 🔁 NEXT STEP section must be exactly: ${DESTINATION_CONFIRMATION_INSTRUCTION}
 - Before finalizing, recheck any user-requested exact-fact checklist against the completed output and add every omitted item to the appropriate section without changing its meaning.
-- Before finalizing, silently check the total word count. If this profile has a non-zero minimum and the output is below ${profile.minWords || 0} words, expand KEY CONTEXT, DECISIONS MADE, and OPEN QUESTIONS with concrete details from the transcript.
+- Before finalizing, remove unsupported claims and invented open questions. If there are too few grounded facts for the target length, keep the output shorter. Never infer missing details or add proposed work merely to fill a section.
 
 Required template:
 ${getContextCarryTemplate(profile, options)}`;
@@ -825,18 +835,6 @@ function getLocalDirectModelSelection(conversation) {
   return {
     model: LOCAL_DIRECT_MODEL,
     reason: `inputChars ${inputChars} uses the tiny local-direct profile before any remote route`,
-    inputChars,
-    thresholdChars: null,
-    override: false
-  };
-}
-
-function getMistralModelSelection(conversation) {
-  const inputChars = String(conversation || "").length;
-
-  return {
-    model: MISTRAL_PRIMARY_MODEL,
-    reason: `fixed Mistral priority chain starts with ${MISTRAL_PRIMARY_MODEL} for every generated summary`,
     inputChars,
     thresholdChars: null,
     override: false
@@ -907,30 +905,8 @@ function getProviderFailureLog(error) {
     provider: error?.provider || null,
     message: getProviderFailureReason(error),
     statusCode: error?.statusCode || null,
-    providerStatus: error?.providerStatus || null,
-    providerCode: error?.providerCode || null
+    providerStatus: error?.providerStatus || null
   };
-}
-
-async function readProviderErrorMetadata(response) {
-  try {
-    const payload = await response.json();
-    // Gemini nests error metadata, while Mistral returns the same fields at the
-    // response root. Read both shapes without retaining or logging the body.
-    const providerError = payload?.error && typeof payload.error === "object"
-      ? payload.error
-      : payload && typeof payload === "object"
-      ? payload
-      : {};
-    const code = typeof providerError.code === "string"
-      ? providerError.code.toLowerCase()
-      : typeof providerError.status === "string"
-      ? providerError.status.toLowerCase()
-      : null;
-    return { code };
-  } catch {
-    return { code: null };
-  }
 }
 
 async function readResponseJson(response, provider) {

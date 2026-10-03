@@ -37,18 +37,28 @@ const {
   getGeminiGenerationBudget,
   countWords,
   getSummaryProfile,
-  readProviderErrorMetadata,
+  createSummaryWithFallback,
   getContextCarryTemplate,
 } = summarizeHandler.__test;
 const SUMMARIZE_SOURCE = fs.readFileSync(path.join(__dirname, "..", "api", "summarize.js"), "utf8");
 const BACKGROUND_SOURCE = fs.readFileSync(path.join(__dirname, "..", "extension", "background.js"), "utf8");
 
-test("reads safe error codes from Mistral root-level error responses", async () => {
-  const metadata = await readProviderErrorMetadata({
-    json: async () => ({ code: "model_access_denied", message: "not logged" })
+test("provider failures log fixed metadata without reflecting arbitrary upstream codes or bodies", async t => {
+  const originalFetch = global.fetch, originalError = console.error, originalEnabled = process.env.MISTRAL_ENABLED;
+  t.after(() => {
+    global.fetch = originalFetch; console.error = originalError;
+    if (originalEnabled === undefined) delete process.env.MISTRAL_ENABLED;
+    else process.env.MISTRAL_ENABLED = originalEnabled;
   });
-
-  assert.deepEqual(metadata, { code: "model_access_denied" });
+  process.env.MISTRAL_ENABLED = "true";
+  const logs = [];
+  console.error = (...args) => logs.push(args);
+  global.fetch = async () => new Response(JSON.stringify({ code: "PRIVATE_UPSTREAM_CODE", message: "PRIVATE_UPSTREAM_BODY" }), { status: 403 });
+  const conversation = "User: Preserve this real project state.\n".repeat(100);
+  const result = await createSummaryWithFallback({ conversation, profile: getSummaryProfile(conversation), mistralApiKey: "test-mistral" });
+  assert.equal(result.model, "local-direct");
+  assert.equal(logs[0][1].providerStatus, 403);
+  assert.doesNotMatch(JSON.stringify(logs), /PRIVATE_UPSTREAM/i);
 });
 
 test("normalizes summary into the required Context Carry shape", () => {
@@ -149,7 +159,7 @@ test("backend forwards a 350k conversation to Mistral and reports the same input
     assert.equal(capturedRequest.url, "https://api.mistral.ai/v1/chat/completions");
     assert.equal(capturedRequest.body.model, "ministral-14b-2512");
     assert.equal(capturedRequest.body.max_tokens, 7000);
-    assert.match(capturedRequest.body.prompt_cache_key, /^capcontext-summary-v7-extra-large-ministral-14b-2512$/);
+    assert.match(capturedRequest.body.prompt_cache_key, /^capcontext-summary-v8-extra-large-ministral-14b-2512$/);
     assert.equal(capturedRequest.body.prediction, undefined);
     const transcriptEnvelope = JSON.parse(capturedRequest.body.messages[1].content);
     assert.deepEqual(transcriptEnvelope, {
