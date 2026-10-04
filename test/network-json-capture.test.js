@@ -68,6 +68,7 @@ for (const platform of ["gemini", "grok", "deepseek"]) {
     const capture = await h.window.__capCaptureNetworkJson();
     assert.equal(capture.text, h.fixture.expected);
     assert.equal(capture.messageTurnCount, 48);
+    assert.deepEqual([...capture.excludedContentTypes], { gemini: [], grok: ["tools"], deepseek: ["media", "tools"] }[platform]);
     assert.doesNotMatch(capture.text, /TOOL_SENTINEL|SIGNED_SENTINEL|AUTH_SENTINEL|CSRF_SENTINEL/);
     assert.equal(h.listeners.size, 1);
     assert.equal(h.requests.length - before, platform === "gemini" ? 3 : 2);
@@ -142,6 +143,27 @@ test("DeepSeek: own thoughts and file text remain in original fragment order; to
   assert.ok(text.includes("Assistant: Own thought\n\nSMOKE_ASSISTANT_SENTINEL"));
   assert.doesNotMatch(text, /TOOL_SENTINEL|DO_NOT_FETCH_IMAGE/);
 });
+test("DeepSeek keeps distinct identical files and request text, deduplicating file IDs only within a turn", async () => {
+  const f = fixtures("deepseek", "smoke", 1);
+  const text = f.files[f.file.id];
+  const second = { ...f.file, id: "file-second-paste", signed_path: "/file?file_id=second-paste&sig=SIGNED_SENTINEL" };
+  f.files[second.id] = text;
+  const user = f.data.data.biz_data.chat_messages[0];
+  user.fragments = [
+    { type: "REQUEST", content: text },
+    { type: "FILE", files: [f.file, second] },
+    { type: "FILE", files: [f.file] }
+  ];
+  f.data.data.biz_data.chat_messages.push({ ...user, message_id: 3, parent_id: 2, fragments: [{ type: "FILE", files: [f.file] }] });
+  f.data.data.biz_data.chat_session.current_message_id = 3;
+  const h = setup("deepseek", f);
+  await h.observe();
+  const capture = await h.window.__capCaptureNetworkJson();
+  const assistant = f.data.data.biz_data.chat_messages[1].fragments[0].content;
+  assert.equal(capture.text, `DeepSeek conversation:\n\nUser: ${text}\n\n${text}\n\n${text}\n\nAssistant: ${assistant}\n\nUser: ${text}`);
+  assert.equal(capture.messageTurnCount, 3);
+  assert.equal(h.requests.filter(request => request.url.hostname === "files.deepseeksvc.com").length, 2);
+});
 test("All adapters reject zero own text and oversize text without truncation", () => {
   const g = setup("gemini"), t = geminiTurn(0, "smoke", "", "");
   assert.throws(() => g.api.gemini([{ turns: [t], cursor: null }], "smoke"), /No usable/);
@@ -206,8 +228,25 @@ test("DeepSeek aborts an active capture when the native session credential chang
 });
 test("Native fetch errors cannot expose private strings as adapter error messages", async () => {
   const h = setup("grok", fixtures("grok"), { fetchImpl: async () => { throw new Error("The PRIVATE_SESSION_AND_FILE_URL_SENTINEL failed."); } });
-  await assert.rejects(h.window.__capCaptureNetworkJson(), /could not be read completely/);
+  await assert.rejects(h.window.__capCaptureNetworkJson(), error => {
+    assert.match(error.message, /could not be read completely/);
+    assert.equal(error.captureFailureReason, "request_failed");
+    return true;
+  });
   assert.doesNotMatch(JSON.stringify(h.replies), /PRIVATE_SESSION_AND_FILE_URL_SENTINEL/);
+});
+
+clockTest("Grok native request deadline reports a bounded timeout reason", async () => {
+  const h = setup("grok", fixtures("grok"), { fetchImpl: async request => new Promise((_resolve, reject) => {
+    request.options.signal.addEventListener("abort", () => reject(new Error("PRIVATE_NATIVE_ERROR")), { once: true });
+  }) });
+  await assert.rejects(h.window.__capCaptureNetworkJson(), error => {
+    assert.equal(error.captureFailureReason, "timeout");
+    assert.doesNotMatch(error.message, /PRIVATE_/);
+    return true;
+  });
+  assert.equal(h.navigationListeners(), 0);
+  assert.equal(h.listeners.size, 1);
 });
 
 test("Grok refuses file-only user turns rather than silently transferring an orphan answer", async () => {
@@ -215,7 +254,11 @@ test("Grok refuses file-only user turns rather than silently transferring an orp
     const f = fixtures("grok", "smoke", 1);
     Object.assign(f.responses[0], { message: "", ...metadata });
     const h = setup("grok", f);
-    await assert.rejects(h.window.__capCaptureNetworkJson(), /file-only/);
+    await assert.rejects(h.window.__capCaptureNetworkJson(), error => {
+      assert.match(error.message, /file-only/);
+      assert.equal(error.captureFailureReason, "unsupported");
+      return true;
+    });
     assert.equal(h.requests.length, 2);
     assert.doesNotMatch(JSON.stringify(h.replies), /PRIVATE_FILE_SENTINEL/);
   }

@@ -88,6 +88,39 @@ test("Claude JSON capture keeps pasted-only user turns and multiple pasted cards
   assert.equal(capture.messageTurnCount, 2);
 });
 
+test("Claude JSON capture preserves original own text, thinking and legacy whitespace", async () => {
+  const user = "\u00a0    print('user')  \r\n";
+  const thinking = "  preserve reasoning  \r\n";
+  const answer = "    print('answer')  \n";
+  for (const legacy of [false, "absent", "empty"]) {
+    const data = fixture();
+    data.chat_messages[0].content = [{ type: "text", text: " \r\n\u00a0 " }, { type: "text", text: user }];
+    data.chat_messages[0].attachments = [];
+    data.chat_messages[2].content = [{ type: "thinking", thinking }, { type: "text", text: answer }];
+    if (legacy) {
+      if (legacy === "absent") delete data.chat_messages[0].content;
+      else data.chat_messages[0].content = [];
+      data.chat_messages[0].text = user;
+    }
+    const h = setup(data);
+    await h.window.fetch(endpoint);
+    const capture = await h.window.__capCaptureClaudeJson();
+    assert.equal(capture.text, `Claude conversation:\n\nUser: ${user}\n\nAssistant: ${thinking}\n\n${answer}`);
+    assert.equal(capture.messageTurnCount, 2);
+  }
+});
+
+test("Claude inline pasted-card matching preserves original block and card whitespace", async () => {
+  const data = fixture();
+  const pasted = "    print('paste')  \r\n";
+  data.chat_messages[0].content = [{ type: "text", text: ` \n${pasted}\n ` }];
+  data.chat_messages[0].attachments = [pastedAttachment(pasted)];
+  const h = setup(data);
+  await h.window.fetch(endpoint);
+  assert.equal((await h.window.__capCaptureClaudeJson()).text,
+    `Claude conversation:\n\nUser: ${pasted}\n\nAssistant: Private reasoning\n\nSelected answer`);
+});
+
 test("Claude JSON capture extracts only direct user/assistant text and thinking", async () => {
   const data = fixture();
   data.chat_messages[0].files = [{ file_kind: "document", text: "FILE_SENTINEL" }];
@@ -110,6 +143,7 @@ test("Claude JSON capture extracts only direct user/assistant text and thinking"
   assert.equal(capture.text, "Claude conversation:\n\nUser: Question\n\nAssistant: Own answer\n\nOwn reasoning");
   assert.equal(capture.messageTurnCount, 2);
   assert.doesNotMatch(capture.text, /SENTINEL|Duplicate fallback/);
+  assert.deepEqual([...capture.excludedContentTypes], ["artifacts", "media", "other", "tools", "uploads"]);
 });
 
 test("Claude JSON capture rejects zero usable text even when tools contain nested text", async () => {

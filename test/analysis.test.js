@@ -72,3 +72,21 @@ function loadModelHelpers() {
   );
   return context.helpers;
 }
+
+test("capture notes describe exclusions and fallback without implying completeness or exposing unknown values", () => {
+  const start = ANALYSIS_SOURCE.indexOf("function formatCaptureDiagnostics(capture)");
+  const end = ANALYSIS_SOURCE.indexOf("function formatTurnSummary(capture)", start);
+  const format = vm.runInNewContext(`${ANALYSIS_SOURCE.slice(start, end)}; formatCaptureDiagnostics;`);
+  assert.equal(format({}), "Not recorded - run a new transfer");
+  const notes = format({ diagnostics: { excludedContentTypes: ["uploads", "PRIVATE_FILE_SENTINEL", "tools"], jsonFallbackReason: "incomplete" } });
+  assert.match(notes, /Conversation response incomplete; used normal capture/);
+  assert.match(notes, /Skipped: tool output/);
+  assert.doesNotMatch(notes, /uploaded files/);
+  assert.match(notes, /Separate editor-only changes are not checked/);
+  assert.doesNotMatch(notes, /PRIVATE_|complete capture/);
+  const empty = format({ diagnostics: { excludedContentTypes: [], jsonFallbackReason: "PRIVATE_ERROR_SENTINEL" } });
+  assert.match(empty, /No excluded types recorded/);
+  assert.doesNotMatch(empty, /PRIVATE_/);
+  const uploadsOnly = format({ diagnostics: { excludedContentTypes: ["uploads"] } });
+  assert.equal(uploadsOnly, "Separate editor-only changes are not checked");
+});

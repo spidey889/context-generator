@@ -1,6 +1,11 @@
 (() => {
-  class CaptureError extends Error {}
-  const fail = reason => { throw new CaptureError(reason); };
+  class CaptureError extends Error {
+    constructor(reason, captureFailureReason = "incomplete") {
+      super(reason);
+      this.captureFailureReason = reason === "size" ? "size_limit" : captureFailureReason;
+    }
+  }
+  const fail = (reason, captureFailureReason) => { throw new CaptureError(reason, captureFailureReason); };
   const complete = value => {
     if (!value || typeof value !== "object") return;
     for (const key of ["has_more", "has_next_page", "has_previous_page", "is_partial", "is_incomplete", "is_truncated", "partial", "truncated", "incomplete", "missing_messages", "next_cursor", "previous_cursor", "hasMore", "hasNextPage", "hasPreviousPage", "isPartial", "isIncomplete", "isTruncated", "missingMessages", "nextCursor", "previousCursor"]) {
@@ -9,11 +14,11 @@
     }
     if (value.is_complete === false || value.complete === false || value.isComplete === false) fail("Incomplete history was returned.");
   };
-  const transcript = (name, turns) => {
+  const transcript = (name, turns, excludedContentTypes = new Set()) => {
     if (!turns.length) fail("No usable user or assistant text was found.");
     const text = `${name} conversation:\n\n${turns.join("\n\n")}`;
     if (text.length > 350000 || new TextEncoder().encode(text).length > 1400000) fail("size");
-    return { text, messageTurnCount: turns.length };
+    return { text, messageTurnCount: turns.length, excludedContentTypes: [...excludedContentTypes].sort() };
   };
   const turn = (role, parts) => parts.filter(text => typeof text === "string" && text.trim()).length
     ? [`${role}: ${parts.filter(text => typeof text === "string" && text.trim()).join("\n\n")}`] : [];
@@ -63,6 +68,7 @@
   const gemini = (pages, chat) => {
     if (!Array.isArray(pages) || !pages.length || pages.at(-1).cursor !== null) fail("Gemini still has previous history pages.");
     const turns = [], seen = new Set();
+    const excludedContentTypes = new Set();
     let expected = null;
     for (const page of pages) for (const item of page.turns) {
       if (!Array.isArray(item) || item[0]?.[0] !== `c_${chat}` || typeof item[0][1] !== "string" || seen.has(item[0][1])) fail("Gemini returned a wrong conversation or duplicate turn.");
@@ -76,12 +82,13 @@
       if (!Array.isArray(assistant?.[0]) || typeof assistant[3] !== "string") fail("A Gemini response is missing or unfinished.");
       const candidate = assistant[0].find(candidate => candidate?.[0] === assistant[3]);
       if (!candidate || !Array.isArray(candidate[1])) fail("The selected Gemini response is missing.");
+      if (candidate[1].some(part => part != null && typeof part !== "string")) excludedContentTypes.add("other");
       // Only the selected response's own text; render blocks duplicate that
       // text and can contain search/tool payloads, so never walk them recursively.
       turns.unshift(...turn("User", [user]), ...turn("Assistant", candidate[1].filter(part => typeof part === "string")));
     }
     if (expected !== null || !seen.size) fail("Gemini's oldest history turn is missing.");
-    return transcript("Gemini", turns);
+    return transcript("Gemini", turns, excludedContentTypes);
   };
   const grokBranch = (data, selected) => {
     complete(data);
@@ -97,6 +104,7 @@
     const branch = grokBranch(nodes, selected);
     if (!Array.isArray(responses)) fail("Grok message bodies are missing.");
     const mapping = new Map();
+    const excludedContentTypes = new Set();
     for (const message of responses) {
       if (mapping.has(message?.responseId)) fail("Grok returned duplicate message bodies.");
       mapping.set(message?.responseId, message);
@@ -107,13 +115,15 @@
       complete(message);
       if (message.partial === true || message.streamErrors?.length) fail("A Grok response is incomplete.");
       if (!["human", "assistant"].includes(message.sender) || message.isControl) return [];
+      if ([message.fileAttachments, message.fileAttachmentsMetadata].some(files => Array.isArray(files) && files.length)) excludedContentTypes.add("uploads");
+      if (Array.isArray(message.toolResponses) && message.toolResponses.length) excludedContentTypes.add("tools");
       if (typeof message.message !== "string") fail("A Grok own-turn text field is missing.");
       // File bodies are unsupported here. Do not accept an answer-only transcript
       // when its authored user turn consists solely of an attachment.
-      if (message.sender === "human" && !message.message.trim() && [message.fileAttachments, message.fileAttachmentsMetadata].some(files => Array.isArray(files) && files.length)) fail("Grok has a file-only user turn that fast capture cannot read.");
+      if (message.sender === "human" && !message.message.trim() && [message.fileAttachments, message.fileAttachmentsMetadata].some(files => Array.isArray(files) && files.length)) fail("Grok has a file-only user turn that fast capture cannot read.", "unsupported");
       return turn(message.sender === "human" ? "User" : "Assistant", [message.message]);
     });
-    return transcript("Grok", turns);
+    return transcript("Grok", turns, excludedContentTypes);
   };
   const deepseekBranch = (data, chat) => {
     if (data?.code !== 0 || data.data?.biz_code !== 0) fail("DeepSeek could not load the conversation.");
@@ -130,12 +140,14 @@
   // counts are still verified by MAIN before any file text reaches the bridge.
   const textFile = file => file?.is_image === false && /\.(txt|md|markdown|csv|json|py|js|ts|tsx|jsx|java|kt|swift|c|h|cpp|hpp|cs|go|rs|rb|php|sh|bash|zsh|lua|r|scala|dart|html|htm|css|scss|vue|svelte|xml|yaml|yml|toml|tsv|sql|ipynb|log)$/i.test(file.file_name || "");
   const deepseek = (data, chat, files = {}) => {
+    const excludedContentTypes = new Set();
     const turns = deepseekBranch(data, chat).flatMap(message => {
       if (!["USER", "ASSISTANT"].includes(message.role)) return [];
       complete(message);
       if (message.status !== "FINISHED" || message.incomplete_message != null || message.has_pending_fragment || message.auto_continue) fail("A DeepSeek turn is unfinished or incomplete.");
       if (!Array.isArray(message.fragments)) fail("DeepSeek turn fragments are missing.");
       const parts = [];
+      const fileIds = new Set();
       for (const fragment of message.fragments) {
         if ((message.role === "USER" && fragment.type === "REQUEST") || (message.role === "ASSISTANT" && ["RESPONSE", "THINK"].includes(fragment.type))) {
           complete(fragment);
@@ -143,17 +155,24 @@
           parts.push(fragment.content);
         } else if (message.role === "USER" && fragment.type === "FILE") {
           for (const file of Array.isArray(fragment.files) ? fragment.files : []) {
-            if (!textFile(file)) continue;
+            if (!textFile(file)) { excludedContentTypes.add(file?.is_image === true ? "media" : "uploads"); continue; }
             complete(file);
             const text = Object.hasOwn(files, file.id) ? files[file.id] : null;
             if (file.status !== "SUCCESS" || typeof text !== "string" || new TextEncoder().encode(text).length !== file.file_size) fail("A DeepSeek text attachment is missing or incomplete.");
-            if (text.trim() && !parts.includes(text)) parts.push(text);
+            // Identity, not text equality, identifies a repeated attachment.
+            // The same file may legitimately appear again in another turn.
+            if (!fileIds.has(file.id)) {
+              fileIds.add(file.id);
+              if (text.trim()) parts.push(text);
+            }
           }
+        } else {
+          excludedContentTypes.add(fragment.type === "TOOL" ? "tools" : "other");
         }
       }
       return turn(message.role === "USER" ? "User" : "Assistant", parts);
     });
-    return transcript("DeepSeek", turns);
+    return transcript("DeepSeek", turns, excludedContentTypes);
   };
   globalThis.__capNetworkJsonData = { CaptureError, complete, geminiPage, gemini, grokBranch, grok, deepseekBranch, deepseek, textFile };
 })();

@@ -1,8 +1,10 @@
 (() => {
   const channel = "cap-context-claude-json-v2";
+  const captureError = (message, captureFailureReason) => Object.assign(new Error(message), { captureFailureReason });
   function serialize(data, chat) {
     // Report structural metadata only, never message text, file names, or tool payloads.
-    const unsupported = reason => new Error(`This conversation has incomplete or unsupported JSON content: ${reason} Turn JSON capture off to use DOM capture.`);
+    const unsupported = reason => captureError(`This conversation has incomplete or unsupported JSON content: ${reason} Turn JSON capture off to use DOM capture.`, "incomplete");
+    const excludedContentTypes = new Set();
     const assertComplete = (value, label) => {
       if (value == null) return;
       if (typeof value !== "object" || Array.isArray(value)) throw unsupported(`${label} completeness metadata is invalid.`);
@@ -54,11 +56,17 @@
       if (message.sender === "assistant" && Object.hasOwn(message, "stop_reason") && message.stop_reason == null) throw unsupported("An assistant turn is still in progress.");
       if (message.content != null && !Array.isArray(message.content)) throw unsupported("An active-branch message has invalid structured content.");
       const blocks = Array.isArray(message.content) ? message.content : [];
+      if ((Array.isArray(message.files) && message.files.length) || (Array.isArray(message.attachments) && message.attachments.some(file => file?.file_type !== "txt" || file.file_name !== ""))) excludedContentTypes.add("uploads");
+      if (Array.isArray(message.sync_sources) && message.sync_sources.length) excludedContentTypes.add("other");
       // Only direct turn blocks are eligible. Never recurse into tools, artifacts,
       // files, or sync sources, even when they contain text blocks.
       const parts = blocks.flatMap(block => {
         const value = block?.type === "text" ? block.text
           : block?.type === "thinking" ? (block.thinking ?? block.text) : null;
+        if (block?.type && !["text", "thinking"].includes(block.type)) {
+          excludedContentTypes.add(["tool_use", "tool_result"].includes(block.type) ? "tools"
+            : block.type === "artifact" ? "artifacts" : ["image", "audio", "video"].includes(block.type) ? "media" : "other");
+        }
         // Live Claude hides empty thinking with truncated:true. It contributes
         // no captured text; unlike truncation of an actual text/thinking string.
         if (block?.type === "text" || (block?.type === "thinking" && typeof value === "string" && value.trim())) {
@@ -66,11 +74,12 @@
           if (Object.hasOwn(block, "stop_timestamp") && block.stop_timestamp === null) throw unsupported("A captured text/thinking block is still in progress.");
           if (typeof value !== "string") throw unsupported("A text block has no complete text string.");
         }
-        return typeof value === "string" && value.trim() ? [value.trim()] : [];
+        // Trim only to test emptiness; indentation and line endings are source data.
+        return typeof value === "string" && value.trim() ? [value] : [];
       });
       // Legacy turn text is an alternative only when structured content is absent.
       if (message.content == null || blocks.length === 0) {
-        if (typeof message.text === "string" && message.text.trim()) parts.push(message.text.trim());
+        if (typeof message.text === "string" && message.text.trim()) parts.push(message.text);
       }
       // Claude's pasted cards are unnamed txt attachments, unlike named uploads.
       // Their complete text belongs to the owning user turn, not a separate turn.
@@ -92,12 +101,18 @@
         const normalizedPaste = pastedText.trim();
         let inlineCopy = null;
         for (const [index, part] of inlineParts.entries()) {
-          for (let start = part.indexOf(normalizedPaste); start >= 0; start = part.indexOf(normalizedPaste, start + 1)) {
+          // Match the same complete paragraph as before without trimming the
+          // serialized block. Translate matches back to its original offsets.
+          const matchText = part.trim();
+          const offset = part.indexOf(matchText);
+          for (let start = matchText.indexOf(normalizedPaste); start >= 0; start = matchText.indexOf(normalizedPaste, start + 1)) {
             const end = start + normalizedPaste.length;
-            if ((start === 0 || part.slice(0, start).endsWith("\n\n"))
-              && (end === part.length || part.slice(end).startsWith("\n\n"))
-              && !(inlineCopies.get(index) || []).some(copy => start < copy.end && end > copy.start)) {
-              inlineCopy = { index, start, end, text: pastedText };
+            const originalStart = start === 0 ? 0 : offset + start;
+            const originalEnd = end === matchText.length ? part.length : offset + end;
+            if ((start === 0 || matchText.slice(0, start).endsWith("\n\n"))
+              && (end === matchText.length || matchText.slice(end).startsWith("\n\n"))
+              && !(inlineCopies.get(index) || []).some(copy => originalStart < copy.end && originalEnd > copy.start)) {
+              inlineCopy = { index, start: originalStart, end: originalEnd, text: pastedText };
               break;
             }
           }
@@ -119,12 +134,12 @@
       if (!parts.length) return [];
       return [(message.sender === "human" ? "User" : "Assistant") + ": " + parts.join("\n\n")];
     });
-    if (!turns.length) throw new Error("Claude JSON capture found no usable user or assistant text after skipping tools, files, images, and artifacts. Turn JSON capture off to use DOM capture.");
+    if (!turns.length) throw captureError("Claude JSON capture found no usable user or assistant text after skipping tools, files, images, and artifacts. Turn JSON capture off to use DOM capture.", "incomplete");
     const text = `Claude conversation:\n\n${turns.join("\n\n")}`;
     if (text.length > 350000 || new TextEncoder().encode(text).length > 1400000) {
-      throw new Error("Conversation exceeds the supported 350,000 character / 1.4 MB limit.");
+      throw captureError("Conversation exceeds the supported 350,000 character / 1.4 MB limit.", "size_limit");
     }
-    return { text, messageTurnCount: turns.length };
+    return { text, messageTurnCount: turns.length, excludedContentTypes: [...excludedContentTypes].sort() };
   }
 
   function waitForHook(timeoutMs, install = false) {
@@ -177,7 +192,7 @@
       if (changed) throw new Error("The Claude conversation changed during capture.");
       if (!await waitForHook(250)) {
         if (typeof chrome === "undefined" || !chrome.runtime?.sendMessage || !await waitForHook(8000, true)) {
-          throw new Error("Claude JSON hook is not ready. Refresh this chat and try again, or turn JSON capture off.");
+          throw captureError("Claude JSON hook is not ready. Refresh this chat and try again, or turn JSON capture off.", "unavailable");
         }
       }
       if (changed || location.pathname !== expectedPath) throw new Error("The Claude conversation changed during capture.");
@@ -190,11 +205,11 @@
           cleanup();
           try {
             if (changed || location.pathname !== expectedPath || reply.chat !== chat) throw new Error("The Claude conversation changed during capture.");
-            if (reply.error) throw new Error("Claude JSON capture failed. Refresh this conversation or turn JSON capture off.");
+            if (reply.error) throw captureError("Claude JSON capture failed. Refresh this conversation or turn JSON capture off.", reply.error === "busy" ? "unavailable" : "request_failed");
             resolve(serialize(reply.data, chat));
           } catch (error) { reject(error); }
         };
-        const timer = setTimeout(() => { cleanup(); reject(new Error("Claude JSON capture timed out. Refresh or turn JSON capture off.")); }, 17000);
+        const timer = setTimeout(() => { cleanup(); reject(captureError("Claude JSON capture timed out. Refresh or turn JSON capture off.", "timeout")); }, 17000);
         window.addEventListener("message", receive);
         window.postMessage({ channel, type: "request", id, chat }, location.origin);
       });

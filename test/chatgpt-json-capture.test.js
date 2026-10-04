@@ -119,6 +119,21 @@ test("ChatGPT pins the destination-click conversation before handoff preparation
   assert.equal(harness.requests.length, 1);
 });
 
+test("ChatGPT exclusions report only active-branch categories without file or tool details", async () => {
+  const data = fixture();
+  data.mapping.question.message.content.content_type = "multimodal_text";
+  data.mapping.question.message.content.parts.push({ content_type: "image_asset_pointer", asset_pointer: "PRIVATE_IMAGE_SENTINEL" });
+  data.mapping.question.message.metadata = { attachments: [{ name: "PRIVATE_FILE_SENTINEL", mime_type: "application/pdf" }] };
+  data.mapping.tool = { parent: "question", message: { author: { role: "tool" }, content: { content_type: "text", parts: ["PRIVATE_TOOL_SENTINEL"] } } };
+  data.mapping.answer.parent = "tool";
+  data.mapping.alternate.message.content = { content_type: "PRIVATE_TYPE_SENTINEL" };
+  const h = setup(data); await discover(h);
+  const capture = await h.window.__capCaptureChatGptJson();
+  assert.equal(capture.text, "ChatGPT conversation:\n\nUser: Question\n\nAssistant: Selected answer");
+  assert.deepEqual([...capture.excludedContentTypes], ["media", "tools", "uploads"]);
+  assert.doesNotMatch(JSON.stringify(capture), /PRIVATE_/);
+});
+
 test("ChatGPT preserves original whitespace in own text, code, thoughts and recap", async () => {
   const data = fixture();
   data.mapping.question.message.content.parts = ["  if enabled:\n    run()\n"];

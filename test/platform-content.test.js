@@ -1857,6 +1857,17 @@ test("latest-run receipt preserves the exact raw scraped text", () => {
   );
 });
 
+test("latest-run receipt retains capture exclusions and the JSON fallback reason locally", () => {
+  const hooks = loadPlatformContent([]);
+  const trace = hooks.createTransferTrace("claude", "test");
+  hooks.markCaptureDone(trace, "ChatGPT conversation:\n\nUser: Keep this text.");
+  trace.marks.find(mark => mark.label === "capture done").detail.diagnostics = { excludedContentTypes: ["uploads", "media"] };
+  trace.marks.push({ ...trace.marks[0], label: "fast capture failed; using normal capture", detail: { jsonFallbackReason: "timeout" } });
+  const stats = hooks.buildLatestTransferStats(trace, 25);
+  assert.deepEqual(JSON.parse(JSON.stringify(stats.capture.diagnostics)), { excludedContentTypes: ["media", "uploads"], jsonFallbackReason: "timeout" });
+  assert.equal(stats.rawScrapedText, trace.rawScrapedText);
+});
+
 test("paste verification accepts formatting changes when box characters differ", () => {
   const hooks = loadPlatformContent([]);
   const expected = [

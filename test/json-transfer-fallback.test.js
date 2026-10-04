@@ -11,8 +11,8 @@ const picker = source.slice(start, end);
 
 // Exercise the actual picker orchestrator; substitute only its UI, capture and
 // transfer boundaries to count side effects without native timers or a browser.
-function harness(platform, { mode = "failure", enabled = true, domFails = false } = {}) {
-  const calls = { json: 0, prepare: 0, dom: 0, notice: 0, handoff: 0, destination: 0, flows: [], errors: [], traces: [] };
+function harness(platform, { mode = "failure", enabled = true, domFails = false, failureReason } = {}) {
+  const calls = { json: 0, prepare: 0, dom: 0, notice: 0, handoff: 0, destination: 0, flows: [], errors: [], traces: [], traceDetails: [], captureMetrics: [] };
   const prepared = Promise.resolve({ tabId: 42 });
   const pathname = { claude: "/chat/source", chatgpt: "/c/source", gemini: "/app/source", grok: "/c/source", deepseek: "/a/chat/s/source" }[platform];
   const location = { href: `https://example.test${pathname}`, pathname };
@@ -22,7 +22,7 @@ function harness(platform, { mode = "failure", enabled = true, domFails = false 
     activeTransferTrace: null, isRunning: false, runningResetTimer: null, RUNNING_AUTO_RESET_MS: 360000, DESTINATION_SHEET_EXIT_MS: 0,
     NO_CONVERSATION_ERROR_MESSAGE: "No conversation", setTimeout: () => 1,
     createTransferTrace: () => ({ id: "same-attempt" }), startTransferTelemetry() {},
-    markTransferTrace: (_trace, message) => calls.traces.push(message), finishTransferTrace() {},
+    markTransferTrace: (_trace, message, detail) => { calls.traces.push(message); calls.traceDetails.push(detail); }, finishTransferTrace() {},
     clearRunningResetTimer() {}, resetRunningFlag: () => { context.isRunning = false; },
     getDetectedConversationMessageCount: () => 2,
     transitionDestinationSheetToHandoff: async () => {}, showOverlay: () => { calls.handoff++; }, releaseDestinationSheetBackdrop() {},
@@ -34,7 +34,7 @@ function harness(platform, { mode = "failure", enabled = true, domFails = false 
       if (domFails) throw new Error("DOM capture failed");
       return "DOM transcript";
     },
-    createConversationCapture: text => text,
+    createConversationCapture: (text, metrics) => { calls.captureMetrics.push(metrics); return text; },
     showFastCaptureFallbackMessage: () => { calls.notice++; },
     runContextFlow: (destination, prep, text, trace) => { calls.flows.push({ destination, prep, text, trace }); },
     getSafeTelemetryFailureReason: () => "capture_failed",
@@ -44,8 +44,8 @@ function harness(platform, { mode = "failure", enabled = true, domFails = false 
     calls.json++;
     if (mode === "cancelled") throw new Error("The conversation changed during capture.");
     if (mode === "navigate") location.href = "https://example.test/chat/other";
-    if (mode !== "success") throw new Error("private native error and token MUST_NOT_APPEAR");
-    return { text: "JSON transcript", messageTurnCount: 2 };
+    if (mode !== "success") throw Object.assign(new Error("private native error and token MUST_NOT_APPEAR"), { captureFailureReason: failureReason });
+    return { text: "JSON transcript", messageTurnCount: 2, excludedContentTypes: ["uploads", "MUST_NOT_APPEAR", "tools", "uploads"] };
   };
   if (mode !== "missing") {
     context.window.__capCaptureClaudeJson = capture;
@@ -84,6 +84,7 @@ for (const platform of ["claude", "chatgpt", "gemini", "grok", "deepseek"]) {
       assert.equal(calls.flows[0].trace.id, "same-attempt");
       assert.deepEqual(calls.errors, []);
       assert.doesNotMatch(calls.traces.join(" "), /private native|MUST_NOT_APPEAR/);
+      assert.ok(calls.traceDetails.some(detail => detail?.jsonFallbackReason === "request_failed"));
       // The existing transfer lock also prevents a repeated destination click.
       await context.start("claude");
       assert.equal(calls.flows.length, 1);
@@ -101,9 +102,20 @@ for (const platform of ["claude", "chatgpt", "gemini", "grok", "deepseek"]) {
       assert.equal(calls.destination, 1);
       assert.equal(calls.flows.length, 1);
       assert.equal(calls.flows[0].text, enabled ? "JSON transcript" : "DOM transcript");
+      if (enabled) assert.deepEqual(JSON.parse(JSON.stringify(calls.captureMetrics[0].diagnostics)), { excludedContentTypes: ["tools", "uploads"], jsonFallbackReason: null });
     }
   });
 }
+
+test("capture fallback records only recognized reasons, never arbitrary native errors", async () => {
+  for (const reason of ["unavailable", "timeout", "size_limit", "incomplete", "unsupported", "request_failed", "MUST_NOT_APPEAR"]) {
+    const { context, calls } = harness("chatgpt", { failureReason: reason });
+    await context.start("claude");
+    assert.ok(calls.traceDetails.some(detail => detail?.jsonFallbackReason === (reason === "MUST_NOT_APPEAR" ? "request_failed" : reason)));
+    assert.doesNotMatch(JSON.stringify(calls.traceDetails), /MUST_NOT_APPEAR|private native/);
+    assert.equal(calls.flows.length, 1);
+  }
+});
 
 test("failed DOM fallback releases the lock without retrying or starting a transfer", async () => {
   const { context, calls } = harness("chatgpt", { domFails: true });

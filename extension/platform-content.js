@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-04-free-composer-layouts-v103";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-04-json-capture-preservation-v104";
   const INLINE_PILL_SIZE = 36;
   const ownedUiStyleSheets = new Map();
   const CLAUDE_INLINE_STYLE_ID = "context-generator-claude-inline-styles";
@@ -2058,7 +2058,11 @@
         cleanedChars: captureDetail.cleanedChars ?? null,
         sentChars: captureDetail.sentChars ?? captureDetail.chars ?? null,
         capped: captureDetail.capped === true,
-        capChars: captureDetail.capChars ?? null
+        capChars: captureDetail.capChars ?? null,
+        diagnostics: sanitizeCaptureDiagnostics({
+          ...captureDetail.diagnostics,
+          jsonFallbackReason: getMarkDetail(trace, "fast capture failed; using normal capture")?.jsonFallbackReason
+        })
       },
       summary: {
         source: summaryTiming?.source || null,
@@ -6804,6 +6808,17 @@
     return Boolean(patterns[currentPlatform.id]?.test(window.location.pathname));
   }
 
+  function sanitizeCaptureDiagnostics(diagnostics = {}) {
+    // These local-only labels never contain filenames, IDs, URLs or raw errors.
+    const excluded = diagnostics.excludedContentTypes;
+    return {
+      excludedContentTypes: Array.isArray(excluded) && excluded.length <= 16
+        ? ["artifacts", "media", "other", "tools", "uploads"].filter(type => excluded.includes(type)) : null,
+      jsonFallbackReason: ["unavailable", "timeout", "size_limit", "incomplete", "unsupported", "request_failed"].includes(diagnostics.jsonFallbackReason)
+        ? diagnostics.jsonFallbackReason : null
+    };
+  }
+
   async function startDestinationTransfer(destinationId) {
     const sourceUrl = window.location.href;
     const hasSavedConversation = hasSavedSourceConversation();
@@ -6867,7 +6882,8 @@
           checkTransferDeadline(trace);
           conversationText = createConversationCapture(capture.text, {
             method: `${currentPlatform.id}-json`, messageTurnCount: capture.messageTurnCount,
-            usefulTurnCount: capture.messageTurnCount, candidateTurnCount: capture.messageTurnCount
+            usefulTurnCount: capture.messageTurnCount, candidateTurnCount: capture.messageTurnCount,
+            diagnostics: sanitizeCaptureDiagnostics({ excludedContentTypes: capture.excludedContentTypes })
           });
         } catch (error) {
           checkTransferDeadline(trace);
@@ -6878,7 +6894,8 @@
           if (/conversation changed during capture\./i.test(error?.message || "")) throw error;
           if (window.location.href !== sourceUrl) throw new Error("The conversation changed during capture. Return to the source chat and try again.");
           showFastCaptureFallbackMessage();
-          markTransferTrace(trace, "fast capture failed; using normal capture");
+          const jsonFallbackReason = sanitizeCaptureDiagnostics({ jsonFallbackReason: error?.captureFailureReason }).jsonFallbackReason || "request_failed";
+          markTransferTrace(trace, "fast capture failed; using normal capture", { jsonFallbackReason });
           await prepareSourceForCapture();
           checkTransferDeadline(trace);
           conversationText = await scrapeConversationTextWhenReady();

@@ -4,6 +4,7 @@ A short history of decisions and regressions that matter when changing the code.
 
 ## 2026-10-04
 
+- **JSON capture data preserved.** Fixed Claude trimming code indentation and DeepSeek dropping distinct files with identical text. Retained per-turn file identity and original whitespace through pasted-card matching. Latest Run now records local-only exclusion categories and bounded JSON fallback reasons, so supported-text omissions are visible without storing file details or raw errors.
 - **Free composer layouts fixed.** Live free ChatGPT and Claude Reply layouts exposed assumptions about responsive-footer markers and where model controls live. Updated the platform adapters to use the observed native slots; composer replacement also clears the detached orb's active state. Focused regressions and installed-Brave fixtures covered narrow layouts, drafts and Reply transitions, with live placement checks. Web Store publication remains separate.
 - **Agent references clarified.** Reorganized `LOGIC.md` around component ownership, contracts and targeted checks, and removed the dated scraping audit. Added [HANDOFF_SKILL.md](HANDOFF_SKILL.md) as a reusable handoff workflow with pinned upstream source and MIT license; it is separate from generated session handoffs and the backend prompt.
 
