@@ -599,6 +599,13 @@ test("provider summaries keep only identical NEXT STEP sections while preserving
   const differentStep = `${context}\n\nNEXT STEP\nCheck the Linux build before release.`;
   const shortStructured = makeContextCarrySummary("short", 3);
   const inline = `${context}\n\n### 🔁 NEXT STEP: ${instruction}`;
+  const examples = ["Alice", "Bob"].map(name => `NEXT STEP\nCheck the Linux build before release.\n\nWHO I AM\n${name}`);
+  const quotedExamples = `${context}\n\n${examples.map(example => example.split("\n").map(line => `> ${line}`).join("\n")).join("\n\n")}`;
+  const indentedExamples = `${context}\n\n${examples.map(example => example.split("\n").map(line => `    ${line}`).join("\n")).join("\n\n")}`;
+  const fencedExamples = fence => `${context}\n\n${examples.map(example => `${fence}markdown\n${example}\n${fence}`).join("\n\n")}`;
+  const multilineStep = `${context}\n\nNEXT STEP\nRun Linux tests.\r\nRecord the result.`;
+  const intervening = "WHO I AM\nBuild maintainer.";
+  const following = "OPEN QUESTIONS\nWho owns Linux validation?";
   const cases = [
     { name: "missing sections", raw: carry, expected: carry },
     { name: "short structured output", raw: shortStructured, expected: shortStructured },
@@ -607,8 +614,15 @@ test("provider summaries keep only identical NEXT STEP sections while preserving
     { name: "original CRLF preserved", raw: carry.replace(/\n/g, "\r\n"), expected: carry.replace(/\n/g, "\r\n") },
     { name: "different next steps retained", raw: `${differentStep}\n\n${nextStep}`, expected: `${differentStep}\n\n${nextStep}` },
     { name: "identical custom steps", raw: `${differentStep}\n\nNEXT STEP\nCheck the Linux build before release.`, expected: `${differentStep}\n\n${nextStep}` },
+    { name: "multiline line endings ignored", raw: `${multilineStep}\n\nNEXT STEP\nRun Linux tests.\nRecord the result.`, expected: `${multilineStep}\n\n${nextStep}` },
+    { name: "separated duplicates preserve surrounding sections", raw: `${differentStep}\n\n${intervening}\n\nNEXT STEP\nCheck the Linux build before release.\n\n${following}`, expected: `${differentStep}\n\n${intervening}\n\n${following}\n\n${nextStep}` },
     { name: "other repeated sections retained", raw: `${context}\n\n${carry}`, expected: `${context}\n\n${carry}` },
-    { name: "missing next step appended", raw: context, expected: carry }
+    { name: "missing next step appended", raw: context, expected: carry },
+    { name: "quoted examples preserved", raw: quotedExamples, expected: `${quotedExamples}\n\n${nextStep}` },
+    { name: "indented code preserved", raw: indentedExamples, expected: `${indentedExamples}\n\n${nextStep}` },
+    { name: "backtick code preserved", raw: fencedExamples("```"), expected: `${fencedExamples("```")}\n\n${nextStep}` },
+    { name: "tilde code preserved", raw: fencedExamples("~~~"), expected: `${fencedExamples("~~~")}\n\n${nextStep}` },
+    { name: "real next step after fenced code deduplicated", raw: `${fencedExamples("````")}\n\n${nextStep}`, expected: `${fencedExamples("````")}\n\n${nextStep}` }
   ];
   let currentCase;
   let requests = 0;

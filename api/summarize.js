@@ -1123,7 +1123,20 @@ function delay(timeoutMs, signal) {
 function appendDestinationConfirmation(text) {
   const summary = `${text.trim()}\n\n🔁 NEXT STEP\n${DESTINATION_CONFIRMATION_INSTRUCTION}`;
   const headings = [];
+  let fence = null;
   for (const line of summary.matchAll(/[^\r\n]+/g)) {
+    // Quoted/indented examples and fenced code are content, not carry sections.
+    const fenceMatch = line[0].match(/^ {0,3}(`{3,}|~{3,})(.*)$/);
+    if (fence) {
+      if (fenceMatch && fenceMatch[1][0] === fence[0] && fenceMatch[1].length >= fence.length
+          && !fenceMatch[2].trim()) fence = null;
+      continue;
+    }
+    if (fenceMatch) {
+      fence = fenceMatch[1];
+      continue;
+    }
+    if (/^(?: {4}|\t|\s*>)/.test(line[0])) continue;
     const heading = getContextCarrySectionMatch(line[0]);
     if (heading) headings.push({ ...heading, start: line.index, bodyStart: line.index + line[0].length });
   }

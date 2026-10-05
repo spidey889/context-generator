@@ -15,7 +15,7 @@ Word targets are advisory allowances and diagnostic metadata; generated sections
 
 Bad structure or formatting NEVER causes rejection. Token-limit finish reasons (`length`, `MAX_TOKENS`, `MAX_OUTPUT_TOKENS`) NEVER cause rejection of useful content. Short, incomplete, missing-heading and duplicate-heading results remain usable.
 
-`validateContextCarrySummary()` and quality flags remain diagnostics. Strictly valid output receives existing normalization (fences/footer removal, canonical headings/box, trusted NEXT STEP). Other useful output receives the trusted confirmation instruction, then removes repeated NEXT STEP sections only when their bodies match, ignoring outer whitespace and line-ending differences. The first matching section, different NEXT STEP bodies and all other provider text are preserved. Diagnostics retain flags from the original output; no sections or missing facts are invented.
+`validateContextCarrySummary()` and quality flags remain diagnostics. Strictly valid output receives existing normalization (fences/footer removal, canonical headings/box, trusted NEXT STEP). Other useful output receives the trusted confirmation instruction, then removes repeated NEXT STEP sections only when their bodies match, ignoring outer whitespace and line-ending differences. Quoted/indented examples and fenced code are excluded from heading recognition for deduplication. The first matching section, different NEXT STEP bodies and all other provider text are preserved. Diagnostics retain flags from the original output; no sections or missing facts are invented.
 
 ## Fallback and source-local recovery
 
