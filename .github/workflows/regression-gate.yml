@@ -37,6 +37,10 @@ jobs:
           cache: npm
       - name: Install locked test dependencies
         run: npm ci --no-audit --no-fund
+      - name: Build Astro architecture page
+        run: |
+          npm ci --prefix architecture --no-audit --no-fund
+          npm run build --prefix architecture
       - name: Deterministic tests
         run: npm test
       - name: Long capture regressions

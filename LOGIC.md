@@ -14,6 +14,7 @@ Read the invariants and ownership map first, then the section for the component 
 - [Composer UI and paste](#composer-ui-and-paste): placement ownership, lifecycle and draft protection.
 - [Changes that must stay aligned](#changes-that-must-stay-aligned): coupled contracts.
 - [Verification and diagnosis](#verification-and-diagnosis): checks to run and what their results establish.
+- [Interactive architecture](architecture/README.md): isolated Astro diagram with source links, editable Archify data and regeneration notes.
 
 Runtime and packaging:
 
