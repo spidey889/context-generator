@@ -201,13 +201,18 @@ test("normal capture and JSON DOM fallback cancel source navigation before dispa
   }
 });
 
-test("navigation during the selection transition aborts before destination preparation", async () => {
+test("destination warms during selection motion but navigation still cancels before capture or dispatch", async () => {
   const { context, calls, navigate } = harness("chatgpt", { enabled: false });
-  context.transitionDestinationSheetToHandoff = async () => { navigate("/c/other"); navigate("/c/source"); };
+  context.transitionDestinationSheetToHandoff = async () => {
+    assert.equal(calls.destination, 1, "data-free navigation starts before cosmetic motion finishes");
+    navigate("/c/other"); navigate("/c/source");
+  };
   await context.start("claude");
-  assert.equal(calls.destination, 0);
+  assert.equal(calls.destination, 1);
+  assert.equal(calls.json + calls.prepare + calls.dom, 0);
   assert.equal(calls.flows.length, 0);
   assert.equal(context.isRunning, false);
+  assert.match(calls.errors[0], /conversation changed/);
 });
 
 test("fallback notice uses fixed safe copy in the handoff and announces it", () => {

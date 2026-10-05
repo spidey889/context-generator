@@ -441,6 +441,12 @@ function destinationFixture() {
   </form>
   <script>
     window.__capContextSmokeSendClicks = 0;
+    window.__capContextSmokeStatusHistory = [];
+    new MutationObserver(() => {
+      const text = document.getElementById("context-generator-destination-status")?.textContent;
+      const history = window.__capContextSmokeStatusHistory;
+      if (text && history.at(-1) !== text) history.push(text);
+    }).observe(document.body, { childList: true, subtree: true, characterData: true });
     document.getElementById("send-button").addEventListener("click", () => { window.__capContextSmokeSendClicks += 1; });
   </script>
 </body>
@@ -1587,6 +1593,14 @@ async function run() {
     await sourceSession.call("Page.bringToFront");
     await verifyPickerProductChanges(sourceSession, state);
     const jsonRequestsBeforeTransfer = state.jsonRequests;
+    const extensionContextId = sourceSession.getExtensionContextId();
+    assert.ok(extensionContextId, "The smoke source must expose its installed extension context.");
+    // Both windows belong to this disposable profile. A different current
+    // window must not steal preparation tabs from the source's window.
+    if (!JSON_CAPTURE_SMOKE) {
+      const otherWindow = await browserSession.call("Target.createTarget", { url: "about:blank", newWindow: true });
+      await browserSession.call("Target.activateTarget", { targetId: otherWindow.targetId });
+    }
     const clickResult = await sourceSession.evaluate(String.raw`(() => {
       const bubble = document.getElementById("context-generator-bubble");
       bubble.click();
@@ -1724,12 +1738,48 @@ async function run() {
     assert.equal(sendClicks, 0, "The extension must never press the destination Send button.");
     assert.equal(state.summaryRequests.length, 1, "The extension must send exactly one summary request per transfer.");
     process.stdout.write("✓ The exact summary was pasted and Send remained untouched.\n");
+    const statusHistory = await waitFor(async () => {
+      const history = await destinationSession.evaluate("window.__capContextSmokeStatusHistory");
+      return history.some(text => text.startsWith("Context ready.")) ? history : null;
+    }, "the verified destination-ready cue");
+    assert.ok(statusHistory.includes("Adding your context…"), "Destination explains insertion while it is pending.");
+    assert.ok(statusHistory.some(text => text.startsWith("Context ready.")), "Ready cue follows verified insertion.");
+    const workerTarget = (await getTargets(devToolsPort)).find(target => target.type === "service_worker" && target.url.endsWith("/background.js"));
+    assert.ok(workerTarget, "Transfer worker must be available for tab-placement verification.");
+    const workerSession = await CdpSession.connect(workerTarget.webSocketDebuggerUrl);
+    let tabPlacement;
+    try {
+      tabPlacement = await workerSession.evaluate(`(async () => {
+        const tabs = await chrome.tabs.query({});
+        const source = tabs.find(tab => tab.url?.startsWith(${JSON.stringify(sourceUrl)}));
+        const destination = tabs.find(tab => tab.url?.startsWith(${JSON.stringify(`${origin}/destination`)}));
+        return { source, destination };
+      })()`);
+    } finally { workerSession.close(); }
+    assert.equal(tabPlacement.destination.windowId, tabPlacement.source.windowId);
+    assert.equal(tabPlacement.destination.index, tabPlacement.source.index + 1);
+    assert.equal(tabPlacement.destination.openerTabId, tabPlacement.source.id);
+    process.stdout.write("✓ Destination opens beside its source, stays in that window, and shows pending/ready cues.\n");
     const summaryContext = state.summaryRequests[0].telemetry;
     await waitFor(() => state.telemetryRequests.some(payload => payload.attempt_id === summaryContext.attempt_id
       && payload.status === "succeeded" && payload.last_stage === "completed" && payload.summary_proof
       && payload.summary_confirmed_at && payload.completed_at), "the installed worker's signed terminal telemetry");
-    const extensionContextId = sourceSession.getExtensionContextId();
-    assert.ok(extensionContextId, "The smoke source must expose its installed extension context.");
+    const remoteStats = await waitFor(async () => {
+      const stored = await sourceSession.evaluate('chrome.storage.local.get("context-generator-last-transfer-stats-v1")', extensionContextId);
+      const stats = stored?.["context-generator-last-transfer-stats-v1"];
+      return stats?.status === "completed" ? stats : null;
+    }, "tab performance receipt");
+    assert.equal(typeof remoteStats.destinationTiming.openMs, "number");
+    assert.equal(typeof remoteStats.destinationTiming.pageLoadMs, "number");
+    assert.equal(typeof remoteStats.destinationTiming.composerWaitMs, "number");
+    const finishStart = remoteStats.timeline.find(mark => mark.label === "handoff finish start");
+    const finishEnd = remoteStats.timeline.find(mark => mark.label === "handoff finish done");
+    assert.ok(finishEnd.totalMs - finishStart.totalMs < 800, "Completion must not add the old one-second cosmetic delay.");
+    process.stdout.write(`ℹ Fixture tab opened: ${remoteStats.destinationTiming.openMs} ms; page loaded: ${remoteStats.destinationTiming.pageLoadMs} ms; composer wait: ${remoteStats.destinationTiming.composerWaitMs} ms; completion cue: ${finishEnd.totalMs - finishStart.totalMs} ms.\n`);
+    if (process.env.CAP_CONTEXT_DESTINATION_SCREENSHOT) {
+      const capture = await destinationSession.call("Page.captureScreenshot", { format: "png" });
+      await fs.promises.writeFile(path.resolve(process.env.CAP_CONTEXT_DESTINATION_SCREENSHOT), Buffer.from(capture.data, "base64"));
+    }
     await waitFor(async () => {
       const stored = await sourceSession.evaluate(`chrome.storage.local.get("context-generator-telemetry-outbox-v1")`, extensionContextId);
       return Array.isArray(stored?.["context-generator-telemetry-outbox-v1"]) && stored["context-generator-telemetry-outbox-v1"].length === 0;

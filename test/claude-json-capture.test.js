@@ -401,7 +401,10 @@ test("Claude JSON picker captures API-only history with zero rendered turns", as
   assert.deepEqual(dom.calls, { capture: 0, flow: 0, prepared: 0, dom: 0, errors: ["No conversation"] });
   const navigated = pickerHarness({ navigateDuringHandoff: true });
   await navigated.run();
-  assert.equal(navigated.calls.capture + navigated.calls.prepared + navigated.calls.flow, 0);
+  // Only data-free tab preparation overlaps handoff motion. A route change
+  // still forbids native capture, summary dispatch and insertion.
+  assert.equal(navigated.calls.prepared, 1);
+  assert.equal(navigated.calls.capture + navigated.calls.flow, 0);
   assert.match(navigated.calls.errors[0], /conversation changed during capture/);
 });
 

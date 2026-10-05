@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-05-transfer-ownership-local-tiny-v108";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-05-tab-ux-speed-v109";
   const INLINE_PILL_SIZE = 36;
   const ownedUiStyleSheets = new Map();
   const CLAUDE_INLINE_STYLE_ID = "context-generator-claude-inline-styles";
@@ -30,6 +30,7 @@
   const BUBBLE_ID = "context-generator-bubble";
   const OVERLAY_ID = "context-generator-overlay";
   const HANDOFF_SCRIM_ID = "context-generator-handoff-scrim";
+  const DESTINATION_STATUS_ID = "context-generator-destination-status";
   const OVERLAY_PALETTE_STYLE_ID = "context-generator-overlay-palette-styles";
   const ONBOARDING_ID = "context-generator-onboarding";
   const ONBOARDING_STYLE_ID = "context-generator-onboarding-styles";
@@ -208,7 +209,6 @@
   const HANDOFF_CAPTURE_LINE_MAX = 0.94;
   const HANDOFF_ACTIVITY_LINE_START = 0.05;
   const HANDOFF_ACTIVITY_LINE_MAX = 0.9;
-  const HANDOFF_FINAL_LINE_DURATION_MS = 1000;
   const HANDOFF_FINAL_PAINT_WAIT_MS = 120;
   const GENERIC_CONVERSATION_SELECTORS = [
     "[data-message-author-role]",
@@ -671,6 +671,7 @@
       CHATGPT_INLINE_STYLE_ID,
       PROVIDER_INLINE_STYLE_ID,
       OVERLAY_ID,
+      DESTINATION_STATUS_ID,
       HANDOFF_SCRIM_ID,
       OVERLAY_PALETTE_STYLE_ID,
       ONBOARDING_ID,
@@ -722,12 +723,17 @@
 
     if (message?.type === "PASTE_CONTEXT") {
       const pasteStartedAt = getNow();
+      const finishStatus = showDestinationPasteStatus();
       pasteIntoPlatform(message.text, message.destination, message.transferId, message.deadlineAt)
-        .then(() => {
+        .then((timing) => {
+          finishStatus(true);
           const pasteMs = Math.round(getNow() - pasteStartedAt);
-          sendResponse({ ok: true, timing: { pasteMs } });
+          sendResponse({ ok: true, timing: { pasteMs, ...timing } });
         })
-        .catch((error) => sendResponse({ ok: false, error: error.message }));
+        .catch((error) => {
+          finishStatus(false);
+          sendResponse({ ok: false, error: error.message });
+        });
 
       return true;
     }
@@ -747,6 +753,28 @@
     }
 
     return false;
+  }
+
+  function showDestinationPasteStatus() {
+    if (!document.body) return () => {};
+    document.getElementById(DESTINATION_STATUS_ID)?.remove();
+    const status = document.createElement("div");
+    status.id = DESTINATION_STATUS_ID;
+    status.dataset.contextGeneratorOwned = "true";
+    status.setAttribute("role", "status");
+    status.setAttribute("aria-live", "polite");
+    status.setAttribute("aria-atomic", "true");
+    status.style.cssText = "position:fixed;top:20px;left:50%;transform:translateX(-50%);z-index:2147483647;box-sizing:border-box;max-width:calc(100vw - 32px);padding:12px 18px;border:1px solid #6b5c92;border-radius:14px;background:#211b30;color:#f5f0ff;box-shadow:0 6px 24px #0004;font:500 14px/1.5 system-ui,sans-serif;text-align:center;pointer-events:none;";
+    status.textContent = "Adding your context…";
+    document.body.appendChild(status);
+    return (succeeded) => {
+      // Late completion must not replace a newer transfer's cue or recreated UI.
+      if (document.getElementById(DESTINATION_STATUS_ID) !== status) return;
+      status.textContent = succeeded
+        ? "Context ready. Review it, then send when you’re ready."
+        : "Couldn’t add context. Return to your original tab to copy it.";
+      setTimeout(() => status.remove(), succeeded ? 3000 : 6000);
+    };
   }
 
   extensionRuntime.onMessage.addListener(handleRuntimeMessage);
@@ -894,7 +922,7 @@
       // Keep recovery available on the source even if final activation fails.
       showFallbackModal(summary, getPlatform(destinationId)?.name || "the destination", true);
       if (!requiresFocusedPaste) {
-        await completeHandoffForDestinationReveal(transferTrace);
+        await completeHandoffForDestinationReveal(transferTrace, true);
         checkTransferDeadline(transferTrace);
         markTransferTrace(transferTrace, "final tab activate start");
         await notifyBackground({
@@ -2186,6 +2214,9 @@
       },
       destinationTiming: {
         totalMs: pasteDetail.totalMs ?? null,
+        openMs: getMarkDetail(trace, "tab open response")?.background?.openMs ?? null,
+        composerWaitMs: pasteDetail.paste?.composerWaitMs ?? null,
+        pageLoadMs: pasteDetail.paste?.pageLoadMs ?? null,
         pasteMs: pasteDetail.paste?.pasteMs ?? pasteDetail.pasteMs ?? null,
         tabId: pasteDetail.tabId ?? null
       },
@@ -2359,13 +2390,14 @@
       if (destination.id !== currentPlatform.id || !landingPaths.includes(window.location.pathname.replace(/\/+$/, "") || "/")) {
         throw new Error("The destination is no longer a new chat.");
       }
-      await pasteWithRetry(trimmedText, destination, transferId, deadlineAt, guard);
+      const timing = await pasteWithRetry(trimmedText, destination, transferId, deadlineAt, guard);
       checkTransferDeadline({ deadlineAt });
       guard.check();
       if (destination.id !== "chatgpt") {
         schedulePostActivationPasteRecheck(trimmedText, destination, deadlineAt, guard);
         retainedGuard = true;
       }
+      return timing;
     } finally {
       if (!retainedGuard) guard.dispose();
     }
@@ -2377,6 +2409,7 @@
     const verifyTimeoutMs = destination.pasteVerifyTimeoutMs || PASTE_VERIFY_TIMEOUT_MS;
     const stabilityMs = destination.pasteStabilityMs || 0;
     let sawInput = false;
+    let composerWaitMs = null;
     let lastError = null;
 
     while (Date.now() - startedAt <= retryTimeoutMs) {
@@ -2385,6 +2418,7 @@
       if (getDetectedConversationMessageCount() > 0) throw new Error("The destination is no longer a new chat.");
       const input = findReadyPlatformInput(destination);
       if (input) {
+        composerWaitMs ??= Date.now() - startedAt;
         guard?.pin();
         sawInput = true;
         const alreadyPasted = editorContainsText(input, text);
@@ -2410,7 +2444,14 @@
             if (!input.isConnected || !editorContainsText(input, text)) {
               throw new Error(`${destination.name} editor changed while focusing the pasted context.`);
             }
-            return input;
+            // DOMContentLoaded is page load, not SPA composer hydration; keep
+            // the delivery-time composer wait separate in the local receipt.
+            const navigationTiming = window.performance?.getEntriesByType?.("navigation")?.[0];
+            return {
+              composerWaitMs,
+              pageLoadMs: navigationTiming?.domContentLoadedEventEnd > 0
+                ? Math.round(navigationTiming.domContentLoadedEventEnd) : null
+            };
           } else {
             lastError = new Error(`Paste operation failed to populate the ${destination.name} editor.`);
           }
@@ -6960,14 +7001,16 @@
     markTransferTrace(trace, "destination click", { destination: destinationId });
 
     try {
-      await transitionDestinationSheetToHandoff();
-      checkTransferDeadline(trace);
-      showOverlay(destinationId);
-      releaseDestinationSheetBackdrop();
+      // Start navigation during the picker bridge, after empty-chat admission.
+      // These probes contain no chat text and do not wait on cosmetic motion.
       let preparedDestinationPromise = null;
       if (useClaudeJson || useChatGptJson || useNetworkJson || getDetectedConversationMessageCount() > 0) {
         preparedDestinationPromise = prepareDestinationTab(destinationId, trace);
       }
+      await transitionDestinationSheetToHandoff();
+      checkTransferDeadline(trace);
+      showOverlay(destinationId);
+      releaseDestinationSheetBackdrop();
       advanceTransferTelemetryStage(trace, "capture_started");
       if (!useClaudeJson && !useChatGptJson && !useNetworkJson) await prepareSourceForCapture();
       checkTransferDeadline(trace);
@@ -7938,16 +7981,14 @@
     if (!skipMotion) await delay(durationMs);
   }
 
-  async function completeHandoffForDestinationReveal(trace = null) {
+  async function completeHandoffForDestinationReveal(trace = null, pasteCompleted = false) {
     markTransferTrace(trace, "handoff finish start");
     stopHandoffActivityProgress();
-    const summaryTiming = getSummaryTimingFromTrace(trace);
-    // A synchronous local carry should not spend a second animating a summary
-    // that is already ready. Preserve the bounded paint cue before activation.
-    const localTinyCarry = summaryTiming?.source === "local" && summaryTiming.backend?.profile === "tiny";
-    await completeHandoffStageLine("summary", localTinyCarry ? 0 : HANDOFF_FINAL_LINE_DURATION_MS);
+    // Work is already ready: finish the line immediately instead of adding a
+    // one-second cosmetic delay. The bounded paint cue still precedes switching.
+    await completeHandoffStageLine("summary", 0);
 
-    setHandoffProgress("paste", "done");
+    setHandoffProgress("paste", pasteCompleted ? "done" : "active");
     // Background tabs can suspend animation frames indefinitely. A painted tick
     // is cosmetic: never let it hold destination activation or receipt saving.
     const reducedMotion = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;

@@ -81,6 +81,8 @@ function loadBackgroundForSummaryTest(fetchImpl, { tabs = [], injections = [], i
 
 function loadBackgroundForTransferTest({
   preparedTab,
+  sourceTab,
+  updateError = false,
   sendMessageImpl,
   firstCreatedTabId = 100,
   useRealTimers = false
@@ -135,12 +137,13 @@ function loadBackgroundForTransferTest({
       },
       tabs: {
         create: async (options) => {
-          const tab = { id: nextCreatedTabId++, url: options.url, windowId: 1 };
+          const tab = { id: nextCreatedTabId++, url: options.url, windowId: options.windowId ?? 1 };
           operations.created.push({ options, tab });
           return tab;
         },
         get: async (tabId) => {
           operations.gotten.push(tabId);
+          if (sourceTab?.id === tabId) return sourceTab;
           if (!preparedTab) throw new Error(`No tab with id: ${tabId}`);
           return preparedTab;
         },
@@ -151,6 +154,7 @@ function loadBackgroundForTransferTest({
         },
         update: async (tabId, options) => {
           operations.updated.push({ tabId, options });
+          if (updateError) throw new Error("No tab with id");
           return { id: tabId, windowId: 1 };
         }
       },
@@ -166,7 +170,13 @@ function loadBackgroundForTransferTest({
     operations,
     getPlatformFromUrl: sandbox.__backgroundTestHooks.getPlatformFromUrl,
     sendMessageWhenReady: sandbox.__backgroundTestHooks.sendMessageWhenReady,
-    sendTransfer(destination, preparedTabId = null, deferFinalActivation = false, deadlineAt = null) {
+    prepare(destination, senderTab = null, deadlineAt = null) {
+      return new Promise(resolve => messageListener(
+        { type: "PREPARE_DESTINATION", destination, deadlineAt },
+        { tab: senderTab }, resolve
+      ));
+    },
+    sendTransfer(destination, preparedTabId = null, deferFinalActivation = false, deadlineAt = null, senderTab = null) {
       return new Promise((resolve, reject) => {
         const keepsChannelOpen = messageListener(
           {
@@ -178,7 +188,7 @@ function loadBackgroundForTransferTest({
             deferFinalActivation,
             deadlineAt
           },
-          {},
+          { tab: senderTab },
           resolve
         );
         if (keepsChannelOpen !== true) reject(new Error("transfer listener did not keep the response channel open"));
@@ -196,6 +206,51 @@ function loadBackgroundForTransferTest({
     }
   };
 }
+
+test("preparation and fresh recovery open beside the source in its current window", async () => {
+  const currentSource = { id: 9, windowId: 7, index: 3 };
+  const senderSnapshot = { id: 9, windowId: 1, index: 0 };
+  const harness = loadBackgroundForTransferTest({ sourceTab: currentSource });
+  const prepared = await harness.prepare("claude", senderSnapshot);
+  assert.equal(prepared.ok, true);
+  const recovered = await harness.sendTransfer("claude", 41, false, null, senderSnapshot);
+  assert.equal(recovered.ok, true);
+  assert.equal(harness.operations.created.length, 2);
+  for (const { options } of harness.operations.created) {
+    assert.equal(options.windowId, 7);
+    assert.equal(options.index, 4);
+    assert.equal(options.openerTabId, 9);
+  }
+  assert.equal(harness.operations.created[0].options.active, false);
+});
+
+clockTest("a closed source cannot open a destination in an unrelated current window", async () => {
+  const harness = loadBackgroundForTransferTest();
+  const response = await harness.prepare("claude", { id: 9 });
+  assert.equal(response.ok, false);
+  assert.equal(harness.operations.created.length, 0);
+});
+
+test("focused delivery switches once and never reactivates after verification", async () => {
+  for (const [destination, url] of [["claude", "https://claude.ai/new"], ["chatgpt", "https://chatgpt.com/"], ["grok", "https://grok.com/"]]) {
+    const harness = loadBackgroundForTransferTest({ preparedTab: { id: 41, url, windowId: 1 } });
+    assert.equal((await harness.sendTransfer(destination, 41)).ok, true);
+    assert.equal(harness.operations.updated.length, 1);
+  }
+});
+
+clockTest("activation failure is reported and focused delivery never pastes hidden", async () => {
+  const harness = loadBackgroundForTransferTest({
+    preparedTab: { id: 41, url: "https://claude.ai/new", windowId: 1 }, updateError: true
+  });
+  const response = await harness.sendTransfer("claude", 41);
+  assert.equal(response.ok, false);
+  assert.equal(response.code, "destination_open_failed");
+  assert.equal(harness.operations.sent.length, 0);
+  const activation = await harness.activateDestination("claude", 41);
+  assert.equal(activation.ok, false);
+  assert.equal(activation.code, "destination_open_failed");
+});
 
 test("destination messaging enforces its deadline while a response is still pending", async () => {
   const harness = loadBackgroundForTransferTest({
@@ -351,7 +406,7 @@ test("Claude focuses and settles both prepared and fresh composers before paste"
   const response = await harness.sendTransfer("claude", 41);
   assert.equal(response.ok, true);
   assert.equal(harness.operations.created.length, 1);
-  assert.equal(harness.operations.created[0].options.active, true);
+  assert.equal(harness.operations.created[0].options.active, false);
   for (const tabId of [41, 100]) {
     const focusIndex = response.marks.findIndex(mark => mark.label === "tab activate before paste start" && mark.detail.tabId === tabId);
     const settleIndex = response.marks.findIndex((mark, index) => index > focusIndex && mark.label === "tab activation settle done");
@@ -492,6 +547,17 @@ for (const firstReply of ["missing receiver", "no response"]) {
     assert.equal(trace.marks.at(-1).detail.attempts, 1);
   });
 }
+
+test("a receiver still mounting after successful injection does not repeatedly reinject", async () => {
+  let calls = 0;
+  const harness = loadBackgroundForTransferTest({ sendMessageImpl: async () => {
+    if (++calls < 4) throw new Error("Receiving end does not exist");
+    return { ok: true };
+  } });
+  const response = await harness.sendMessageWhenReady(41, { type: "PASTE_CONTEXT" }, 1000, "Claude");
+  assert.equal(response.ok, true);
+  assert.equal(harness.operations.injected.length, 1);
+});
 
 test("destination messaging stops immediately on a non-retryable failure", async () => {
   const harness = loadBackgroundForTransferTest({ sendMessageImpl: async () => { throw new Error("Tab access denied"); } });

@@ -781,7 +781,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       message.preparedTabId,
       message.transferId,
       message.deferFinalActivation === true,
-      message.deadlineAt
+      message.deadlineAt,
+      sender?.tab
     )
       .then((result) => sendResponse({ ok: true, timing: result?.timing || null, marks: result?.marks || [] }))
       .catch((error) => {
@@ -801,7 +802,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
 
   if (message?.type === "PREPARE_DESTINATION") {
-    prepareDestination(message.destination, message.deadlineAt)
+    prepareDestination(message.destination, message.deadlineAt, sender?.tab)
       .then((result) => sendResponse({ ok: true, tabId: result.tabId, timing: result.timing }))
       .catch((error) => {
         console.error("[Context Generator Relay]", error);
@@ -1071,7 +1072,8 @@ async function transferToDestination(
   preparedTabId = null,
   transferId = null,
   deferFinalActivation = false,
-  deadlineAt = null
+  deadlineAt = null,
+  sourceTab = null
 ) {
   if (!text?.trim()) {
     const error = new Error("Context summary text was not available.");
@@ -1129,16 +1131,18 @@ async function transferToDestination(
       );
     }
     const openLabel = recoveringPreparedTab ? "fresh fallback tab" : "tab";
-    const activateFreshTab = deferFinalActivation
-      ? false
-      : (recoveringPreparedTab ? destination.focusBeforePaste === true : true);
+    // Keep all creation inactive; the platform's explicit activation point
+    // decides when to reveal it, including fresh recovery.
+    const activateFreshTab = false;
     markBackgroundTrace(trace, `${openLabel} open start`, {
       destination: destinationId,
       active: activateFreshTab,
       previousError: preparedAttempted ? pasteResult?.error || "No paste response." : null
     });
     destinationTabId = await createDestinationTab(destination, {
-      active: activateFreshTab
+      active: activateFreshTab,
+      sourceTab,
+      deadlineAt
     });
     markBackgroundTrace(trace, `${openLabel} open done`, { tabId: destinationTabId });
     pasteResult = await pasteIntoDestinationWithActivation(
@@ -1157,12 +1161,16 @@ async function transferToDestination(
     throw error;
   }
 
-  if (!deferFinalActivation) {
+  if (!deferFinalActivation && !destination.focusBeforePaste) {
     markBackgroundTrace(trace, "final tab activate start", { tabId: destinationTabId });
     await activateDestinationTab(destinationTabId, deadlineAt);
     markBackgroundTrace(trace, "final tab activate done", { tabId: destinationTabId });
-  } else {
+  } else if (deferFinalActivation) {
     markBackgroundTrace(trace, "final tab activation deferred", { tabId: destinationTabId });
+  } else {
+    // Focused delivery already revealed this tab. A second activation both
+    // wastes an API round-trip and yanks the user back if they switched away.
+    markBackgroundTrace(trace, "destination already revealed", { tabId: destinationTabId });
   }
   await setBadge("OK", "#1f8f4d", 2500);
   return {
@@ -1222,7 +1230,7 @@ async function pasteIntoDestinationWithActivation(
   return pasteResult;
 }
 
-async function prepareDestination(destinationId, deadlineAt = null) {
+async function prepareDestination(destinationId, deadlineAt = null, sourceTab = null) {
   checkTransferDeadline(deadlineAt);
   const startedAt = nowMs();
   const destination = DESTINATIONS[destinationId];
@@ -1230,7 +1238,7 @@ async function prepareDestination(destinationId, deadlineAt = null) {
     throw new Error("Unknown AI destination.");
   }
 
-  const destinationTabId = await createDestinationTab(destination, { active: false });
+  const destinationTabId = await createDestinationTab(destination, { active: false, sourceTab, deadlineAt });
   const openMs = Math.round(nowMs() - startedAt);
   warmDestinationTab(destinationTabId, destination);
   return {
@@ -1241,9 +1249,18 @@ async function prepareDestination(destinationId, deadlineAt = null) {
 
 async function createDestinationTab(destination, options = {}) {
   try {
+    let placement = {};
+    if (Number.isInteger(options.sourceTab?.id)) {
+      // The user can focus a different window while capture runs. Resolve the
+      // source's current position rather than opening in Chrome's current window.
+      const source = await chrome.tabs.get(options.sourceTab.id);
+      placement = { windowId: source.windowId, index: source.index + 1, openerTabId: source.id };
+    }
+    checkTransferDeadline(options.deadlineAt);
     const destinationTab = await chrome.tabs.create({
       url: destination.url,
-      active: options.active !== false
+      active: options.active !== false,
+      ...placement
     });
     return destinationTab.id;
   } catch (error) {
@@ -1262,7 +1279,11 @@ async function activateDestinationTab(tabId, deadlineAt = null) {
     }
   } catch (error) {
     if (error?.code === "transfer_timeout") throw error;
-    console.debug("[Context Generator Relay] Destination activation skipped:", error?.message || error);
+    // Focus is required for several composers to restore their native drafts.
+    // Never report a successful switch or paste into a hidden tab after failure.
+    const activationError = new Error("Could not switch to the destination tab. Return to your original tab and try again.");
+    activationError.code = "destination_open_failed";
+    throw activationError;
   }
 }
 
@@ -1309,12 +1330,14 @@ async function warmDestinationTab(tabId, destination) {
   try {
     const startedAt = Date.now();
     const timeoutMs = destination.warmupTimeoutMs || DESTINATION_WARMUP_TIMEOUT_MS;
+    let injected = false;
     while (Date.now() - startedAt <= timeoutMs) {
       if (await pingTab(tabId)) {
         return;
       }
-      if (await ensureContentScript(tabId) && await pingTab(tabId)) {
-        return;
+      if (!injected) {
+        injected = await ensureContentScript(tabId);
+        if (injected && await pingTab(tabId)) return;
       }
       await delay(MESSAGE_RETRY_INTERVAL_MS);
     }
@@ -1400,6 +1423,7 @@ async function sendMessageWhenReady(tabId, message, timeoutMs, name, trace = nul
   const deadline = Math.min(startedAt + timeoutMs, message.deadlineAt || Infinity);
   let lastError = null;
   let attempts = 0;
+  let injected = false;
 
   // Both attempts use the same deadline and error policy; injection stays between them.
   async function tryMessage(label) {
@@ -1427,11 +1451,14 @@ async function sendMessageWhenReady(tabId, message, timeoutMs, name, trace = nul
     if (response !== undefined) return response;
 
     if (Date.now() > deadline) break;
-    markBackgroundTrace(trace, "content script inject attempt", { tabId, attempts });
-    await ensureContentScript(tabId);
-
-    response = await tryMessage("tab ready/message response after inject");
-    if (response !== undefined) return response;
+    // A successful injection need not be repeated every 120 ms while the page
+    // hydrates. Native navigation installs the manifest script in its new document.
+    if (!injected) {
+      markBackgroundTrace(trace, "content script inject attempt", { tabId, attempts });
+      injected = await ensureContentScript(tabId);
+      response = await tryMessage("tab ready/message response after inject");
+      if (response !== undefined) return response;
+    }
 
     await delay(MESSAGE_RETRY_INTERVAL_MS);
   }

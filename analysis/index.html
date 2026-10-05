@@ -823,7 +823,7 @@
           ${metric("Summary", formatNumber(summary.outputChars), `${formatNumber(summary.summaryWordCount)} words`, "accent-violet")}
           ${metric("Tokens", formatNumber(usage.totalTokens), usageDetail, "accent-green")}
           ${metric("Summary time", formatDuration(summary.summaryMs), summaryTimingDetail, "accent-amber")}
-          ${metric("Paste time", formatDuration(stats.destinationTiming?.pasteMs), `Total: ${formatDuration(stats.totalMs)}`, "accent-teal")}
+          ${metric("Paste time", formatDuration(stats.destinationTiming?.pasteMs), `Page: ${formatDuration(stats.destinationTiming?.pageLoadMs)} · Composer wait: ${formatDuration(stats.destinationTiming?.composerWaitMs)}`, "accent-teal")}
         </section>
 
         <section class="raw-panel" id="rawScrapePanel" hidden>

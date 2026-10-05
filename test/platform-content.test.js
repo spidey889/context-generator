@@ -2225,7 +2225,7 @@ test("up to 1,200 trimmed characters stay local on every platform without worker
   }
 });
 
-clockTest("tiny local handoff skips the one-second summary animation while remote handoff retains it", async () => {
+clockTest("local and remote handoffs reveal without a cosmetic one-second delay", async () => {
   for (const local of [true, false]) {
     const hooks = loadPlatformContent([]);
     const properties = new Map();
@@ -2239,8 +2239,8 @@ clockTest("tiny local handoff skips the one-second summary animation while remot
     const startedAt = Date.now();
     await hooks.completeHandoffForDestinationReveal(trace);
     const elapsed = Date.now() - startedAt;
-    assert.equal(properties.get("--context-generator-stage-progress-duration"), local ? "0ms" : "1000ms");
-    assert.ok(local ? elapsed < 250 : elapsed >= 1000, `local=${local}: ${elapsed} ms`);
+    assert.equal(properties.get("--context-generator-stage-progress-duration"), "0ms");
+    assert.ok(elapsed < 250, `local=${local}: ${elapsed} ms`);
   }
 });
 
@@ -2257,6 +2257,54 @@ test("tiny local carry works offline and preserves code, Unicode, roles and blan
   assert.match(summary, /Reply only: "Context loaded\. Let's pick up right where you left off\." Then wait for the user\./);
   assert.equal(summaryRequests, 0);
   assert.equal(hooks.buildLatestTransferStats(trace, 1).summary.fallback.used, false);
+});
+
+clockTest("destination status follows verified insertion and cleans up without submitting", async () => {
+  const input = new FakeElement({ tag: "textarea", attrs: { id: "prompt-textarea" } });
+  const hooks = loadPlatformContent([input]);
+  hooks.document.createElement = () => {
+    const node = new FakeElement();
+    node.remove = () => { node.isConnected = false; };
+    return node;
+  };
+  hooks.document.getElementById = id => hooks.document.body.children.find(node => node.id === id && node.isConnected) || null;
+  hooks.window.performance.getEntriesByType = () => [{ domContentLoadedEventEnd: 42.4 }];
+  const listener = hooks.runtimeMessageListeners[0];
+  let respond;
+  const response = new Promise(resolve => { respond = resolve; });
+  assert.equal(listener({ type: "PASTE_CONTEXT", destination: "chatgpt", text: "context ready", deadlineAt: Date.now() + 10000 }, {}, respond), true);
+  const cue = hooks.document.getElementById("context-generator-destination-status");
+  assert.equal(cue.textContent, "Adding your context…");
+  assert.equal(cue.getAttribute("role"), "status");
+  const result = await response;
+  assert.equal(result.ok, true);
+  assert.equal(result.timing.pageLoadMs, 42);
+  assert.equal(typeof result.timing.composerWaitMs, "number");
+  assert.match(cue.textContent, /Context ready/);
+  assert.equal(input.value, "context ready");
+  assert.match(cue.style.cssText, /pointer-events:none/);
+  await hooks.delay(3010);
+  assert.equal(hooks.document.getElementById("context-generator-destination-status"), null);
+});
+
+clockTest("destination status reports failure without overwriting a restored draft", async () => {
+  const input = new FakeElement({ tag: "textarea", attrs: { id: "prompt-textarea" } });
+  input.value = "My draft";
+  const hooks = loadPlatformContent([input]);
+  hooks.document.createElement = () => {
+    const node = new FakeElement();
+    node.remove = () => { node.isConnected = false; };
+    return node;
+  };
+  hooks.document.getElementById = id => hooks.document.body.children.find(node => node.id === id && node.isConnected) || null;
+  const result = await new Promise(resolve => hooks.runtimeMessageListeners[0](
+    { type: "PASTE_CONTEXT", destination: "chatgpt", text: "carry" }, {}, resolve
+  ));
+  assert.equal(result.ok, false);
+  assert.equal(input.value, "My draft");
+  assert.match(hooks.document.getElementById("context-generator-destination-status").textContent, /Couldn’t add context/);
+  hooks.teardownContextGeneratorInstance();
+  assert.equal(hooks.document.getElementById("context-generator-destination-status"), null);
 });
 
 test("captured context survives backend errors, empty replies, and a missing worker locally", async () => {

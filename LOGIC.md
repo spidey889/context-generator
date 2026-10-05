@@ -67,6 +67,8 @@ save Latest Run receipt and terminal telemetry
 
 The extension-toolbar action skips the picker and always uses DOM capture. Its default destination is Claude for a ChatGPT source, otherwise ChatGPT.
 
+After empty-chat admission, destination preparation starts during the picker-to-handoff bridge, overlapping its 190 ms of motion rather than waiting for it. It opens beside the source tab in that tab's current window, with the source as its opener. The worker resolves the browser-supplied sender tab again before creation, including fresh recovery, so focusing another window or moving the source does not redirect the destination. A closed source fails preparation instead of opening in an unrelated window. Tab creation starts navigation; its response is not proof that the page or composer has loaded.
+
 ### Capture selection and failure handling
 
 - Speed is default-on in the picker. A saved chat uses fresh JSON; opting out or an unsaved chat uses DOM. The opt-out lasts for the current page instance and survives picker reopening, but resets on reload/reinjection.
@@ -87,7 +89,9 @@ The extension-toolbar action skips the picker and always uses DOM capture. Its d
 
 All five use verified retries and editor-remount recovery. Prepared-tab reuse and activation require a platform's new-chat landing route, never a saved conversation. Content delivery independently rejects existing conversation turns and pins the route when the composer mounts; navigation cancels insertion/recovery even after an away-and-back change. Initial landing redirects are allowed before that pin. Click/focus may replace a startup composer: reacquire it before writing and recheck identity/text after final focus. Preserve any draft restored in its replacement. A missing, navigated or failed prepared tab gets at most one fresh destination. Exhaustion offers one manual-copy fallback when a carry exists. Report clipboard success only after an actual successful copy.
 
-Visible source completion waits for two animation frames with a 120 ms fallback. Hidden sources skip that wait; hiding during it releases it immediately and cleans up frames/timers/listeners. Suspended painting must not block activation or receipt saving. The timeline includes handoff finish, final activation and transfer completion.
+Focused delivery activates once before paste and does not activate again after verification; the user can switch away without being pulled back. Activation failure is reported, and a focus-required composer cannot receive an insertion after failed activation. A noninteractive, live-announced destination cue says `Adding your context…`, then confirms verified insertion or directs the user back to source recovery. It never blocks composer controls or sends the message, and teardown removes it.
+
+Source summary completion fills its line immediately; there is no one-second cosmetic hold for local or remote carries. The paste stage remains active before focused insertion and becomes complete only after verified inactive insertion. Visible source completion waits for two animation frames with a 120 ms fallback. Hidden sources skip that wait; hiding during it releases it immediately and cleans up frames/timers/listeners. Suspended painting must not block activation or receipt saving. The timeline includes handoff finish, final activation and transfer completion.
 
 ### Deadlines and locks
 
@@ -106,7 +110,7 @@ Picker and toolbar admission share `beginTransferAttempt`. A click while an atte
 | Destination warmup | 9 seconds normally; 12 seconds for ChatGPT | `background.js` |
 | Missing receiver retry | Every 120 ms within the applicable deadline | `sendMessageWhenReady` |
 
-The background may inject `platform-content.js` to repair a missing receiver. Pre/post-injection attempts share deadline and error policy; non-retryable errors stop immediately. MV3 summary work keeps the worker alive every 25 seconds. Backend whitespace heartbeats start after 15 seconds and repeat every 15 seconds; latency measurement must include the complete body, not just those headers/chunks.
+The background may inject `platform-content.js` to repair a missing receiver. Each warmup/delivery loop stops repeating successful injection while the receiver mounts; failed injections can retry, and native navigation installs the manifest script in the next document. Pre/post-injection attempts share deadline and error policy; non-retryable errors stop immediately. MV3 summary work keeps the worker alive every 25 seconds. Backend whitespace heartbeats start after 15 seconds and repeat every 15 seconds; latency measurement must include the complete body, not just those headers/chunks.
 
 ### Cross-tab messages
 
@@ -366,6 +370,8 @@ Receipts/outbox persist in `chrome.storage.local`. Active snapshots prefer `chro
 Latest Run persistence is optional: synchronous storage exceptions and rejected writes cannot block terminal telemetry or transfer-lock release.
 
 Latest Run records transfer/capture timings, counts, sizes, profile, actual serving/attempted models, fallback/finish reason, token usage, status and exact captured text. It does not store generated summary text. The matched analysis bridge, not the page directly, reads extension storage; both background and bridge strip expired raw text. The serving model is excluded from the failed portion of the fallback log, and cache reuse preserves provider timing/attempt metadata. Current labels cover four configured OpenRouter models, both Google routes, Ministral and local-direct; unsupported paths ask for a new transfer instead of showing retired routes.
+
+Local destination timings distinguish `openMs` (preparation tab API), `pageLoadMs` (navigation start to DOMContentLoaded, not complete SPA hydration) and `composerWaitMs` (delivery start to the first usable composer). Null means unavailable. These fields stay in the local receipt, separate from telemetry, and the analysis paste card shows page/composer timing. Parallel warmup can make delivery-time waiting zero even when earlier page loading took time.
 
 Capture notes retain local-only observed exclusion categories (`uploads`, `media`, `tools`, `artifacts`, `other`) and a bounded JSON-to-DOM fallback reason. Uploaded-file labels are hidden in the displayed notes. They contain no filenames, IDs, URLs or raw errors and are not added to backend requests or telemetry. A fallback reason records the attempt; the notes say normal capture was used only after a capture completed. No recorded exclusions means none were identified by that adapter, not proof that every native/editor-only item was captured; DOM paths and older receipts can leave exclusions unrecorded.
 
