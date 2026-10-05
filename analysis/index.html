@@ -634,10 +634,16 @@
     const refreshButton = document.getElementById("refreshButton");
     const demoMode = new URLSearchParams(location.search).has("demo");
     const postTargetOrigin = location.protocol === "file:" || location.origin === "null" ? "*" : location.origin;
+    const numberFormatter = new Intl.NumberFormat("en-US");
+    const dateFormatter = new Intl.DateTimeFormat("en-US", {
+      month: "short",
+      day: "numeric",
+      hour: "numeric",
+      minute: "2-digit"
+    });
 
     let bridgeReady = false;
     let rawScrapeOpen = false;
-    let latestStats = null;
     let copyFeedbackTimer = null;
 
     function setCopyFeedback(label, paths = copyDetailsIconPaths) {
@@ -647,7 +653,7 @@
     }
 
     copyDetailsButton.addEventListener("click", async () => {
-      if (!latestStats) return;
+      if (copyDetailsButton.disabled) return;
       // Read only the displayed cards and timeline; never include the chat panel.
       const details = [...app.querySelectorAll(".mini, .side-item, .metric")].map((card) => {
         const [label, value, detail] = [...card.children].map((item) => item.textContent.trim());
@@ -720,7 +726,7 @@
       }
 
       if (event.data.type === "LAST_TRANSFER_STATS") {
-        render(event.data.payload);
+        renderStats(event.data.payload);
       }
     });
 
@@ -732,7 +738,7 @@
       setTimeout(() => {
         if (!bridgeReady) {
           setBridgeStatus("Offline", "off");
-          render(null);
+          renderStats(null);
         }
       }, 900);
     }
@@ -744,9 +750,8 @@
       }, postTargetOrigin);
     }
 
-    function render(stats) {
+    function renderStats(stats) {
       if (!stats) {
-        latestStats = null;
         copyDetailsButton.disabled = true;
         rawScrapeOpen = false;
         rawScrapeButton.disabled = true;
@@ -762,15 +767,10 @@
         return;
       }
 
-      renderStats(stats);
-    }
-
-    function renderStats(stats) {
-      latestStats = stats;
       copyDetailsButton.disabled = false;
-      const usage = stats.summary?.usage || {};
       const capture = stats.capture || {};
       const summary = stats.summary || {};
+      const usage = summary.usage || {};
       const localCarry = summary.source === "local";
       const integrity = getIntegrityLabel(summary.requestChars, summary.backendInputChars);
       const rawText = typeof stats.rawScrapedText === "string" ? stats.rawScrapedText : "";
@@ -915,16 +915,15 @@
         || tried.some((model) => formatModelDisplayName(model) === "n/a")) {
         return "Not recorded - run a new transfer";
       }
-      const servedIndex = servedModel ? tried.lastIndexOf(servedModel) : -1;
-      const failedModels = servedIndex >= 0 ? tried.slice(0, servedIndex) : tried;
-      const route = [
-        ...failedModels.map((model) => `${formatModelDisplayName(model)} — failed`),
-        ...(servedModel ? [`${formatModelDisplayName(servedModel)} — served`] : [])
-      ].join("\n");
-      const routeLabel = route ? `Tried this run\n${route}` : "";
-
       if ((summary.fallback?.used || tried.length > 1) && servedModel) {
-        return routeLabel;
+        // Only attempts before the served model belong in the failure list.
+        const servedIndex = tried.lastIndexOf(servedModel);
+        const failedModels = servedIndex >= 0 ? tried.slice(0, servedIndex) : tried;
+        return [
+          "Tried this run",
+          ...failedModels.map((model) => `${formatModelDisplayName(model)} — failed`),
+          `${formatModelDisplayName(servedModel)} — served`
+        ].join("\n");
       }
 
       if (tried.length === 1) return `${formatModelDisplayName(tried[0])} served first\nNo fallback needed`;
@@ -981,7 +980,7 @@
       if (value === null || value === undefined || value === "") return "n/a";
       const number = Number(value);
       if (!Number.isFinite(number)) return "n/a";
-      return new Intl.NumberFormat("en-US").format(number);
+      return numberFormatter.format(number);
     }
 
     function formatDuration(value) {
@@ -999,12 +998,7 @@
       if (!value) return "";
       const date = new Date(value);
       if (Number.isNaN(date.getTime())) return "";
-      return new Intl.DateTimeFormat("en-US", {
-        month: "short",
-        day: "numeric",
-        hour: "numeric",
-        minute: "2-digit"
-      }).format(date);
+      return dateFormatter.format(date);
     }
 
     function formatDetailValue(value) {
@@ -1027,8 +1021,8 @@
       return {
         transferId: "demo-7n2",
         status: "completed",
-        source: { id: "claude", name: "Claude" },
-        destination: { id: "chatgpt", name: "ChatGPT" },
+        source: { name: "Claude" },
+        destination: { name: "ChatGPT" },
         completedAt: new Date().toISOString(),
         totalMs: 14200,
         rawScrapedText: "Claude conversation:\n\nUser: Keep this exact captured text.\n\nClaude: It is shown without additional processing.",
@@ -1038,8 +1032,7 @@
           rawCandidateChars: 48210,
           cleanedChars: 48142,
           sentChars: 48142,
-          capped: false,
-          capChars: 350000
+          capped: false
         },
         summary: {
           source: "backend",
@@ -1047,24 +1040,20 @@
           outputChars: 6902,
           requestChars: 48142,
           backendInputChars: 48142,
-          mistralMs: 0,
           providerMs: 7074,
           servedBy: "gemini",
-          provider: "gemini",
           model: "gemini-3.6-flash",
-          modelReason: "gemini-3.6-flash served as the primary model",
           modelsTried: ["gemini-3.6-flash"],
-          mistralModelsTried: [],
           profile: "medium",
           summaryWordCount: 462,
-          fallback: { attempted: false, used: false },
+          fallback: { used: false },
           usage: {
             promptTokens: 13240,
             completionTokens: 1180,
             totalTokens: 14420,
           }
         },
-        destinationTiming: { totalMs: 2540, pasteMs: 620, tabId: 144 },
+        destinationTiming: { pasteMs: 620 },
         timeline: [
           { label: "click", deltaMs: 0, totalMs: 0, detail: { source: "Cap-Context button" } },
           { label: "capture start", deltaMs: 12, totalMs: 12, detail: {} },
