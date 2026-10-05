@@ -3,6 +3,7 @@ const fs = require("node:fs");
 const path = require("node:path");
 const test = require("node:test");
 const { clockTest } = require("../testing/clock");
+const { withFundedBudget } = require("../testing/funded-budget");
 
 const summarizeHandler = require("../api/summarize.js");
 // These cases exercise Google/Mistral compatibility even on machines with a
@@ -17,7 +18,7 @@ let requestSequence = 1;
 
 function summarize(req, res) {
   const requestId = requestSequence++;
-  return summarizeHandler({
+  return withFundedBudget(() => summarizeHandler({
     ...req,
     headers: {
       origin: "chrome-extension://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
@@ -26,7 +27,7 @@ function summarize(req, res) {
       "x-forwarded-for": `203.0.113.${requestId}`,
       ...(req.headers || {})
     }
-  }, res);
+  }, res));
 }
 
 const {

@@ -364,6 +364,8 @@ async function main() {
         checks += await require("./check-minimal-transfers-db.js").checkMinimalTransfers(db, sql, appliedMigrations);
       } else if (name.endsWith("_add_served_model_to_transfers.sql")) {
         checks += await require("./check-served-model-db.js").checkServedModel(db, sql);
+      } else if (name.endsWith("_reuse_exhausted_user_names.sql")) {
+        checks += await require("./check-user-name-reuse-db.js").checkUserNameReuse(db, sql);
       } else await db.exec(sql);
     }
     console.log(`PASS: ${names.length} real migrations replayed; ${checks} database correctness, data preservation, attribution and privilege checks.`);
