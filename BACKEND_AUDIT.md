@@ -89,4 +89,8 @@ An attacker can create false `started`, `succeeded` or `failed` rows, invent pla
 
 Reviewed all six tracked `api/*.js` files, all four telemetry Edge/proof modules, deployment configuration and the relevant migration/counter/grant definitions and tests. No additional source-backed error/log leak was found. Actual Vercel/Supabase platform logging, historical Git secrets, live permissions/deployment parity, billing settings and external WAF/provider spending caps remain unverified. Forwarded-IP trust depends on deployment handling; no unverified header-spoofing claim is included.
 
-Priority: first close or explicitly budget funded public work (B01); then remove name allocation as an ingestion prerequisite (B02); then separate anonymous diagnostics from authoritative statistics (B03). No fixes were made.
+Priority at audit time: first close or explicitly budget funded public work (B01); then remove name allocation as an ingestion prerequisite (B02); then separate anonymous diagnostics from authoritative statistics (B03). No fixes were made during the original audit.
+
+## Follow-up fixes — 2026-10-05
+
+- **B01 mitigated in source:** shared atomic IP/global UTC-day work budgets precede every Gemini/Mistral attempt, including retries. Missing/unavailable accounting or exhaustion returns the existing exact local carry; zero-price OpenRouter remains available. An unfinished response closing cancels pending fetch/body/reservation/retry work and stops fallback. Existing extension request and receipt contracts remain compatible. Public headers still do not authenticate callers; a stranger can consume the bounded shared allowance and deny others paid summaries. Already accepted provider charges cannot be reversed. Defaults/configuration are documented in `LOGIC.md`. This is a local source fix, not a deployment or a verified monetary cap.

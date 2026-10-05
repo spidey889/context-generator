@@ -2,6 +2,10 @@
 
 A short history of decisions and regressions that matter when changing the code. Read the relevant section of [LOGIC.md](LOGIC.md) for current behavior, ownership and checks; use this file when you need to understand why an approach changed. Entries describe source changes unless deployment is explicitly recorded. Extension packaging, Web Store publication and backend deployment are separate.
 
+## 2026-10-05
+
+- **Public funded summaries bounded (B01).** Added shared, fail-closed IP/global daily work reservations before every Gemini/Mistral attempt and cancelled pending provider work when the caller disconnects. Budget denial uses the existing exact transcript fallback, preserving published extension requests and signed receipts. Public headers remain compatibility hints rather than authentication; reservations cannot undo upstream charges. Deployment is separate from this local fix.
+
 ## 2026-10-04
 
 - **JSON capture data preserved.** Fixed Claude trimming code indentation and DeepSeek dropping distinct files with identical text. Retained per-turn file identity and original whitespace through pasted-card matching. Latest Run now records local-only exclusion categories and bounded JSON fallback reasons, so supported-text omissions are visible without storing file details or raw errors.

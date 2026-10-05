@@ -1,4 +1,5 @@
 const PROVIDER_MAX_ATTEMPTS = 2;
+const { reserveFundedSummaryBudget } = require("./funded-summary-budget");
 const {
   applyCorsHeaders,
   isValidPreflightRequest,
@@ -183,10 +184,21 @@ async function handler(req, res) {
     });
   }
 
+  const controller = new AbortController();
+  // IncomingMessage.close also fires on a normally completed request BODY.
+  // Only an unfinished response closing means the caller abandoned the result.
+  const onClose = () => { if (!res.writableEnded) controller.abort(); };
+  res.once?.("close", onClose);
+  if (res.destroyed || req.aborted) controller.abort();
+  const requestContext = {
+    signal: controller.signal,
+    reserveFunded: units => reserveFundedSummaryBudget(req, units, { signal: controller.signal })
+  };
   const responseChannel = createLongSummaryResponse(res);
   if (validation.telemetry) {
     const send = responseChannel.send;
     responseChannel.send = async (status, payload) => {
+      if (controller.signal.aborted) return;
       if (status === 200 && payload.summary) {
         const { createSummaryProof } = await import("../supabase/functions/_shared/summary-proof.mjs");
         const secret = process.env.TELEMETRY_SIGNING_KEY;
@@ -202,18 +214,22 @@ async function handler(req, res) {
             summaryProofV3: proofV3, summaryConfirmedAt: confirmedAt, summaryModel: model };
         }
       }
-      return send(status, payload);
+      if (!controller.signal.aborted) return send(status, payload);
     };
   }
   try {
-    return await handleSummary(validation.conversation, responseChannel);
+    controller.signal.throwIfAborted();
+    return await handleSummary(validation.conversation, responseChannel, requestContext);
+  } catch (error) {
+    if (!controller.signal.aborted) throw error;
   } finally {
+    res.removeListener?.("close", onClose);
     responseChannel.close();
     releaseSlot();
   }
 }
 
-async function handleSummary(conversation, responseChannel) {
+async function handleSummary(conversation, responseChannel, requestContext = {}) {
   const startedAt = Date.now();
   const inputChars = conversation.length;
   const summaryProfile = getSummaryProfile(conversation);
@@ -274,7 +290,8 @@ async function handleSummary(conversation, responseChannel) {
       profile: summaryProfile,
       geminiApiKey,
       mistralApiKey,
-      openrouterApiKey
+      openrouterApiKey,
+      requestContext
     });
 
     // These diagnostics contain only fixed flag names, validator wording, and counts.
@@ -322,6 +339,7 @@ async function handleSummary(conversation, responseChannel) {
       }
     });
   } catch (error) {
+    if (requestContext.signal?.aborted) throw error;
     console.error("[Context Generator] Summary request failed:", {
       provider: error?.provider || null,
       message: error?.publicMessage || "Unexpected summarization error",
@@ -417,7 +435,7 @@ function getEnabledOpenRouterModels() {
     : process.env[enabledEnv] === "true").map(({ model }) => model);
 }
 
-async function createSummaryWithFallback({ conversation, profile, geminiApiKey, mistralApiKey, openrouterApiKey }) {
+async function createSummaryWithFallback({ conversation, profile, geminiApiKey, mistralApiKey, openrouterApiKey, requestContext = {} }) {
   const fallbackMessages = getInitialSummaryMessages(conversation, profile);
   const geminiMessages = getInitialSummaryMessages(conversation, profile, { plainHeader: true });
   const routes = [];
@@ -450,6 +468,7 @@ async function createSummaryWithFallback({ conversation, profile, geminiApiKey, 
   let lastProviderFailure = null;
 
   for (const [index, route] of routes.entries()) {
+    requestContext.signal?.throwIfAborted();
     if (unavailableProviders.has(route.provider.id)) continue;
     const requestBudgetMs = Math.min(index === 0 ? PROVIDER_ATTEMPT_TIMEOUT_MS : fallbackBudgetMs, deadline - Date.now());
     if (requestBudgetMs <= 0) break;
@@ -460,7 +479,7 @@ async function createSummaryWithFallback({ conversation, profile, geminiApiKey, 
     if (provider.id === "mistral") mistralModelsTried.push(model);
     try {
       const result = await createSummaryWithProvider({
-        provider, apiKey, profile, model, requestBudgetMs,
+        provider, apiKey, profile, model, requestBudgetMs, requestContext,
         initialMessages: provider.id === "gemini" ? geminiMessages : fallbackMessages
       });
       timings[`${provider.id}Ms`] += result.providerMs;
@@ -477,6 +496,7 @@ async function createSummaryWithFallback({ conversation, profile, geminiApiKey, 
         }) : createFallbackMetadata()
       };
     } catch (error) {
+      requestContext.signal?.throwIfAborted();
       timings[`${provider.id}Ms`] += Date.now() - startedAt;
       // Only fixed diagnostics are allowed in receipts/logs, never upstream bodies.
       lastProviderFailure = error?.publicMessage ? error : createProviderError(provider,
@@ -488,6 +508,7 @@ async function createSummaryWithFallback({ conversation, profile, geminiApiKey, 
         unavailableProviders.add(provider.id);
       }
       console.error(`[Context Generator] ${model} failed:`, getProviderFailureLog(lastProviderFailure));
+      if (error?.code === "funded_budget_unavailable") break;
     }
   }
   return createEmergencyDirectCarryResult({
@@ -545,7 +566,7 @@ function createEmergencyDirectCarryResult({
   };
 }
 
-async function createSummaryWithProvider({ provider, apiKey, profile, model, initialMessages, requestBudgetMs }) {
+async function createSummaryWithProvider({ provider, apiKey, profile, model, initialMessages, requestBudgetMs, requestContext }) {
   const providerStartedAt = Date.now();
   const initialStartedAt = Date.now();
   const initialResponse = await requestProviderSummary(
@@ -554,7 +575,7 @@ async function createSummaryWithProvider({ provider, apiKey, profile, model, ini
     initialMessages,
     profile,
     model,
-    { promptCacheKey: getProviderPromptCacheKey(provider, model, profile), requestBudgetMs }
+    { promptCacheKey: getProviderPromptCacheKey(provider, model, profile), requestBudgetMs, ...requestContext }
   );
   const initialMs = Date.now() - initialStartedAt;
 
@@ -642,11 +663,18 @@ function requestProviderSummary(provider, apiKey, messages, profile, model, opti
   const providerUrl = provider.id === SUMMARY_PROVIDERS.gemini.id
     ? `${GEMINI_GENERATE_CONTENT_BASE_URL}/${model}:generateContent`
     : provider.url;
+  const serializedBody = JSON.stringify(body);
+  // Weighted work allowance, not a dollar estimate: include the full prompt
+  // envelope and the maximum output (Gemini includes hidden reasoning).
+  const units = Buffer.byteLength(serializedBody, "utf8") + (body.max_tokens ?? body.generationConfig.maxOutputTokens);
   return fetchWithRetry(providerUrl, {
     method: "POST",
     headers,
-    body: JSON.stringify(body)
-  }, options.requestBudgetMs ?? getProviderRequestBudgetMs(model));
+    body: serializedBody
+  }, options.requestBudgetMs ?? getProviderRequestBudgetMs(model), {
+    signal: options.signal,
+    reserveFunded: provider.id === "openrouter" || !options.reserveFunded ? null : () => options.reserveFunded(units)
+  });
 }
 
 function getProviderRequestBody(provider, messages, profile, model) {
@@ -994,19 +1022,28 @@ function getContextCarryTemplate(profile, options = {}) {
 ${DESTINATION_CONFIRMATION_INSTRUCTION}`;
 }
 
-async function fetchWithRetry(url, options, requestBudgetMs) {
+async function fetchWithRetry(url, options, requestBudgetMs, context = {}) {
   let lastError = null;
   let lastResponse = null;
   const deadline = Date.now() + requestBudgetMs;
 
   for (let attempt = 1; attempt <= PROVIDER_MAX_ATTEMPTS; attempt += 1) {
+    context.signal?.throwIfAborted();
+    if (Date.now() >= deadline) break;
+    if (context.reserveFunded && !await context.reserveFunded()) {
+      const error = new Error("Funded summary budget exhausted or unavailable");
+      error.code = "funded_budget_unavailable";
+      throw error;
+    }
+    context.signal?.throwIfAborted();
     const remainingMs = deadline - Date.now();
     if (remainingMs <= 0) break;
 
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), Math.min(PROVIDER_ATTEMPT_TIMEOUT_MS, remainingMs));
     try {
-      const response = await fetch(url, { ...options, signal: controller.signal });
+      const signal = context.signal ? AbortSignal.any([context.signal, controller.signal]) : controller.signal;
+      const response = await fetch(url, { ...options, signal });
       // fetch resolves at the headers. Keep the deadline active until the JSON
       // body finishes too, including error bodies read before provider fallback.
       let payload;
@@ -1014,9 +1051,10 @@ async function fetchWithRetry(url, options, requestBudgetMs) {
       try {
         payload = await response.json();
       } catch (error) {
-        if (controller.signal.aborted || error?.name === "AbortError") throw error;
+        if (signal.aborted || error?.name === "AbortError") throw error;
         bodyError = error;
       }
+      context.signal?.throwIfAborted();
       lastResponse = {
         ok: response.ok,
         status: response.status,
@@ -1033,6 +1071,7 @@ async function fetchWithRetry(url, options, requestBudgetMs) {
         return lastResponse;
       }
     } catch (error) {
+      context.signal?.throwIfAborted();
       lastError = error;
       if (error?.name === "AbortError") throw error;
       if (attempt === PROVIDER_MAX_ATTEMPTS) throw error;
@@ -1045,7 +1084,7 @@ async function fetchWithRetry(url, options, requestBudgetMs) {
       Math.max(0, deadline - Date.now())
     );
     if (retryDelayMs <= 0) break;
-    await delay(retryDelayMs);
+    await delay(retryDelayMs, context.signal);
   }
 
   if (lastResponse) return lastResponse;
@@ -1067,8 +1106,18 @@ function isRetryableProviderStatus(status) {
   return status === 500 || status === 502 || status === 503 || status === 504;
 }
 
-function delay(timeoutMs) {
-  return new Promise((resolve) => setTimeout(resolve, timeoutMs));
+function delay(timeoutMs, signal) {
+  signal?.throwIfAborted();
+  return new Promise((resolve, reject) => {
+    const finish = () => { signal?.removeEventListener("abort", onAbort); resolve(); };
+    const timer = setTimeout(finish, timeoutMs);
+    const onAbort = () => {
+      clearTimeout(timer);
+      signal.removeEventListener("abort", onAbort);
+      reject(signal.reason);
+    };
+    signal?.addEventListener("abort", onAbort, { once: true });
+  });
 }
 
 function normalizeContextCarrySummary(text) {
