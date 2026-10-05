@@ -412,8 +412,8 @@ User allocation:
 
 - Column order is `install_id`, `user_no`, `name`, `lifetime_summaries`, `today_summaries`, `today_failed_attempts`, then internal `today_date`. Installs are not unique people.
 - The first countable verified summary or reported failure creates a row; unsigned successful paste alone does not. The authorized users-only reset retained transfer history. Attempts recorded before its cutoff cannot restore cleared counts, including delayed completions.
-- New installs use a short advisory lock and transactional max+1 numbering. Duplicate/rolled-back inserts do not leave visible numbering gaps. Names are random unused values from the 40-name predefined Naruto pool, without digits or duplicates. User No. 1 additionally permits exact lowercase `naruto`, outside automatic allocation.
-- Extend the pool before exhaustion. With all canonical names used, a new counted installation rolls back its transfer/counter write; there is no numbered/duplicate fallback. Failure reports/install IDs are client-supplied diagnostics, not authenticated identities; receipt signing authenticates summary work and rate limits only bound anonymous abuse.
+- New installs use a short advisory lock and transactional max+1 numbering. Duplicate/rolled-back inserts do not leave visible numbering gaps. Names prefer random unused values from the 40-name predefined Naruto pool; once exhausted, reuse a random pool name. Names are cosmetic and may repeat; `install_id` and `user_no` remain unique identities. User No. 1 additionally permits exact lowercase `naruto`, outside automatic allocation.
+- Exhausting the name pool cannot block a counted transfer/counter write. Failure reports/install IDs remain client-supplied diagnostics, not authenticated identities; receipt signing authenticates summary work and rate limits only bound anonymous abuse.
 
 Counter rules:
 

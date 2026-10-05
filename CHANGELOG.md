@@ -5,6 +5,8 @@ A short history of decisions and regressions that matter when changing the code.
 ## 2026-10-05
 
 - **Public funded summaries bounded (B01).** Added shared, fail-closed IP/global daily work reservations before every Gemini/Mistral attempt and cancelled pending provider work when the caller disconnects. Budget denial uses the existing exact transcript fallback, preserving published extension requests and signed receipts. Public headers remain compatibility hints rather than authentication; reservations cannot undo upstream charges. Deployment is separate from this local fix.
+- **Cosmetic names no longer gate telemetry (B02).** A new migration removes name uniqueness and reuses a pool name after all forty are occupied. Existing names, installation/number identities, counters, RPC compatibility and permissions are preserved; a nonunique name index retains allocation lookups. The migration is local and has not been applied to Supabase. Unsigned telemetry authenticity (B03) is unchanged.
+- **Backend fixes verified.** After correcting the initial test IP and nontransactional sequence-cleanup fixtures, the authorized full local run passed 334 regular tests, the long-capture regression and 400 database checks across 26 migrations. No browser, production probe or hosted migration ran; master integration remains separate.
 
 ## 2026-10-04
 
