@@ -68,6 +68,9 @@ const DESTINATIONS = {
   claude: {
     name: "Claude",
     url: "https://claude.ai/",
+    // Reveal the native composer before it hydrates and restores its draft.
+    focusBeforePaste: true,
+    activationSettleMs: 350
   },
   chatgpt: {
     name: "ChatGPT",

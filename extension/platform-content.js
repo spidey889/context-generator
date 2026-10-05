@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-05-json-capture-audit-v105";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-05-transfer-reliability-v106";
   const INLINE_PILL_SIZE = 36;
   const ownedUiStyleSheets = new Map();
   const CLAUDE_INLINE_STYLE_ID = "context-generator-claude-inline-styles";
@@ -112,9 +112,9 @@
   // Keep this aligned with api/request-security.js so unsupported captures never leave the extension.
   const MAX_BACKEND_CONVERSATION_CHARS = 350000;
   const TINY_DIRECT_PROFILE_MAX_CHARS = 1200;
-  // ChatGPT and Grok do not reliably hydrate or retain composer inserts while inactive.
+  // Claude, ChatGPT and Grok need focus before composer hydration/verification.
   // Their source-side completion cue must finish before the background performs the focused paste.
-  const FOCUSED_PASTE_DESTINATIONS = new Set(["chatgpt", "grok"]);
+  const FOCUSED_PASTE_DESTINATIONS = new Set(["claude", "chatgpt", "grok"]);
   const OVERSIZED_CONVERSATION_ERROR_MESSAGE = "Conversation exceeds the supported 350,000 character limit";
   const CONVERSATION_SCRAPE_RETRY_TIMEOUT_MS = 1800;
   const CONVERSATION_SCRAPE_RETRY_INTERVAL_MS = 140;
@@ -257,6 +257,7 @@
       logoSize: 24,
       logo: "logos/claude2download__1_-removebg-preview.png",
       maxComposerHeight: 720,
+      pasteStabilityMs: PASTE_STABILITY_MS,
       inputSelectors: [
         "textarea",
         "[contenteditable='true'][data-placeholder]",
@@ -728,18 +729,12 @@
 
     if (message?.type === "START_CONTEXT_TRANSFER") {
       const destination = message.destination || getDefaultDestinationId();
-      const trace = createTransferTrace(destination, "extension icon");
-      startTransferTelemetry(trace);
-      if (isRunning) {
-        markTransferTrace(trace, "failed: Context transfer is already running.");
-        finishTransferTrace(trace, "unknown_failure");
+      const trace = beginTransferAttempt(destination, "extension icon");
+      if (!trace) {
         sendResponse({ ok: false, error: "Context transfer is already running." });
         return false;
       }
 
-      isRunning = true;
-      clearRunningResetTimer();
-      startTransferDeadline(trace);
       sendResponse({ ok: true });
       markTransferTrace(trace, "click", { source: "extension icon" });
       runContextFlow(destination, null, null, trace);
@@ -802,6 +797,9 @@
       getVirtualSweepStepRatio,
       getVirtualSweepTerminalQuietTimeout,
       createTransferTrace,
+      beginTransferAttempt,
+      finishTransferTrace,
+      resetRunningFlag,
       markCaptureDone,
       buildLatestTransferStats,
       getSafeTelemetryFailureReason,
@@ -1040,6 +1038,18 @@
       resetRunningFlag();
       showErrorOverlay("Transfer timed out. Please try again.");
     }, RUNNING_AUTO_RESET_MS);
+  }
+
+  function beginTransferAttempt(destinationId, source) {
+    // Repeated picker/toolbar clicks belong to the running attempt. Allocating
+    // another receipt here fabricated failures and replaced Latest Run.
+    if (isRunning) return null;
+    const trace = createTransferTrace(destinationId, source);
+    isRunning = true;
+    clearRunningResetTimer();
+    startTransferDeadline(trace);
+    startTransferTelemetry(trace);
+    return trace;
   }
 
   function createTransferTrace(destinationId, source) {
@@ -2008,15 +2018,16 @@
   }
 
   function persistLatestTransferStats(trace, totalMs) {
-    const storage = chrome?.storage?.local;
-    if (!storage?.set) return;
-
-    const stats = buildLatestTransferStats(trace, totalMs);
-    const setResult = storage.set({ [LAST_TRANSFER_STATS_STORAGE_KEY]: stats });
-    if (setResult?.catch) {
-      setResult.catch((error) => {
-        console.debug("[Context Generator] Could not save latest analysis stats:", error?.message || error);
-      });
+    // Storage can throw synchronously during reload or browser shutdown. The
+    // optional local receipt must not block terminal telemetry or lock release.
+    try {
+      const storage = chrome?.storage?.local;
+      if (!storage?.set) return;
+      const stats = buildLatestTransferStats(trace, totalMs);
+      const setResult = storage.set({ [LAST_TRANSFER_STATS_STORAGE_KEY]: stats });
+      setResult?.catch?.(() => {});
+    } catch {
+      console.debug("[Context Generator] Could not save latest analysis stats.");
     }
   }
 
@@ -2307,6 +2318,9 @@
               }
             }
             input.focus?.();
+            if (!input.isConnected || !editorContainsText(input, text)) {
+              throw new Error(`${destination.name} editor changed while focusing the pasted context.`);
+            }
             return input;
           } else {
             lastError = new Error(`Paste operation failed to populate the ${destination.name} editor.`);
@@ -2468,7 +2482,11 @@
 
   function setEditorText(element, text, destination = currentPlatform) {
     element.click();
+    if (!element.isConnected) return;
     element.focus();
+    // Claude's startup composer can hydrate/remount on click or focus. Never
+    // insert into the detached placeholder; pasteWithRetry finds its successor.
+    if (!element.isConnected) return;
     // Focusing a native composer can restore its saved draft synchronously.
     if (getElementText(element).trim()) {
       if (editorContainsText(element, text)) return;
@@ -6820,6 +6838,8 @@
   }
 
   async function startDestinationTransfer(destinationId) {
+    const trace = beginTransferAttempt(destinationId, "destination tile");
+    if (!trace) return;
     const sourceUrl = window.location.href;
     const hasSavedConversation = hasSavedSourceConversation();
     const useClaudeJson = hasSavedConversation && currentPlatform.id === "claude" && claudeJsonCaptureEnabled;
@@ -6830,28 +6850,18 @@
     const geminiJsonPath = useNetworkJson && currentPlatform.id === "gemini" ? window.location.pathname : null;
     const grokJsonUrl = useNetworkJson && currentPlatform.id === "grok" ? window.location.href : null;
     const deepseekJsonPath = useNetworkJson && currentPlatform.id === "deepseek" ? window.location.pathname : null;
-    const trace = createTransferTrace(destinationId, "destination tile");
-    trace.destinationId = destinationId;
-    startTransferTelemetry(trace);
-    if (isRunning) {
-      markTransferTrace(trace, "failed: Context transfer is already running.");
-      finishTransferTrace(trace, "unknown_failure");
-      return;
-    }
     // The full JSON tree can be ready before its virtualized DOM mounts.
     // JSON validation, rather than rendered turn count, decides whether it is empty.
     if (!useClaudeJson && !useChatGptJson && !useNetworkJson && getDetectedConversationMessageCount() === 0) {
       markTransferTrace(trace, `failed: ${NO_CONVERSATION_ERROR_MESSAGE}`);
       finishTransferTrace(trace, "no_conversation");
+      resetRunningFlag();
       showErrorOverlay(NO_CONVERSATION_ERROR_MESSAGE);
       return;
     }
 
     markTransferTrace(trace, "destination click", { destination: destinationId });
 
-    isRunning = true;
-    clearRunningResetTimer();
-    startTransferDeadline(trace);
     try {
       await transitionDestinationSheetToHandoff();
       checkTransferDeadline(trace);

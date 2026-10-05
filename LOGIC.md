@@ -79,17 +79,20 @@ The extension-toolbar action skips the picker and always uses DOM capture. Its d
 
 | Destination | Before paste | After paste |
 | --- | --- | --- |
+| Claude | Finish source completion cue, focus destination, settle 350 ms | Verify through 550 ms of stability, then schedule the post-activation recheck |
 | ChatGPT | Finish source completion cue, focus destination, settle 350 ms | Verify with its longer paste/stability windows |
 | Grok | Finish source completion cue, focus destination | Verify; run the post-activation stability recheck |
-| Claude, Gemini, DeepSeek | May paste and verify while inactive | Finish source cue, revalidate/focus destination, schedule the stability recheck without delaying activation |
+| Gemini, DeepSeek | May paste and verify while inactive | Finish source cue, revalidate/focus destination, schedule the stability recheck without delaying activation |
 
-All five use verified retries and editor-remount recovery. A missing, navigated or failed prepared tab gets at most one fresh destination. Exhaustion offers one manual-copy fallback when a carry exists. Report clipboard success only after an actual successful copy.
+All five use verified retries and editor-remount recovery. Click/focus may replace a startup composer: reacquire it before writing and recheck identity/text after final focus. Preserve any draft restored in its replacement. A missing, navigated or failed prepared tab gets at most one fresh destination. Exhaustion offers one manual-copy fallback when a carry exists. Report clipboard success only after an actual successful copy.
 
 Visible source completion waits for two animation frames with a 120 ms fallback. Hidden sources skip that wait; hiding during it releases it immediately and cleans up frames/timers/listeners. Suspended painting must not block activation or receipt saving. The timeline includes handoff finish, final activation and transfer completion.
 
 ### Deadlines and locks
 
 The page-local `isRunning` lock has one six-minute absolute `deadlineAt`. The same deadline follows capture continuation, summary, destination preparation/activation, paste retries and delayed recovery. Expiry cancels the attempt, records `client_interrupted`, shows a timeout and releases the lock; late work cannot continue that attempt or unlock a newer one.
+
+Picker and toolbar admission share `beginTransferAttempt`. A click while an attempt is running creates no second attempt, telemetry failure or Latest Run receipt. An admitted empty-chat attempt remains visible as `no_conversation` and immediately releases its lock.
 
 | Boundary | Limit | Source |
 | --- | --- | --- |
@@ -358,6 +361,8 @@ Response diagnostics are bounded `validationReason` and `qualityFlags`: `bad_str
 | `retry-transfer-telemetry` | Persisted backoff, Retry-After and startup recovery |
 
 Receipts/outbox persist in `chrome.storage.local`. Active snapshots prefer `chrome.storage.session` to survive worker restarts without crossing a browser restart; older runtimes fall back to local storage. Expired snapshots record unknown outcome, never fabricated failure. Cache/in-flight deduplication and page `isRunning` remain memory-only.
+
+Latest Run persistence is optional: synchronous storage exceptions and rejected writes cannot block terminal telemetry or transfer-lock release.
 
 Latest Run records transfer/capture timings, counts, sizes, profile, actual serving/attempted models, fallback/finish reason, token usage, status and exact captured text. It does not store generated summary text. The matched analysis bridge, not the page directly, reads extension storage; both background and bridge strip expired raw text. The serving model is excluded from the failed portion of the fallback log, and cache reuse preserves provider timing/attempt metadata. Current labels cover four configured OpenRouter models, both Google routes, Ministral and local-direct; unsupported paths ask for a new transfer instead of showing retired routes.
 

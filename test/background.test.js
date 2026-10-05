@@ -320,13 +320,33 @@ test("fresh ChatGPT recovery uses the same activation settle as the normal path"
   assert.ok(recoveryMarks.includes("tab activation settle done"));
 });
 
-test("successful paste defers destination activation until the completion UI finishes", async () => {
+test("Claude focuses and settles both prepared and fresh composers before paste", async () => {
   const harness = loadBackgroundForTransferTest({
     preparedTab: { id: 41, url: "https://claude.ai/new", windowId: 1 },
+    sendMessageImpl: async tabId => {
+      assert.ok(harness.operations.updated.some(update => update.tabId === tabId), "focus precedes delivery");
+      return { ok: tabId !== 41, error: tabId === 41 ? "Startup editor remounted" : undefined };
+    }
+  });
+  const response = await harness.sendTransfer("claude", 41);
+  assert.equal(response.ok, true);
+  assert.equal(harness.operations.created.length, 1);
+  assert.equal(harness.operations.created[0].options.active, true);
+  for (const tabId of [41, 100]) {
+    const focusIndex = response.marks.findIndex(mark => mark.label === "tab activate before paste start" && mark.detail.tabId === tabId);
+    const settleIndex = response.marks.findIndex((mark, index) => index > focusIndex && mark.label === "tab activation settle done");
+    const pasteIndex = response.marks.findIndex(mark => mark.label === "paste message start" && mark.detail.tabId === tabId);
+    assert.ok(focusIndex >= 0 && settleIndex > focusIndex && pasteIndex > settleIndex);
+  }
+});
+
+test("successful paste defers destination activation until the completion UI finishes", async () => {
+  const harness = loadBackgroundForTransferTest({
+    preparedTab: { id: 41, url: "https://gemini.google.com/app", windowId: 1 },
     sendMessageImpl: async () => ({ ok: true, timing: { pasteMs: 5 } })
   });
 
-  const response = await harness.sendTransfer("claude", 41, true);
+  const response = await harness.sendTransfer("gemini", 41, true);
 
   assert.equal(response.ok, true);
   assert.equal(response.timing.tabId, 41);
@@ -334,7 +354,7 @@ test("successful paste defers destination activation until the completion UI fin
   assert.equal(harness.operations.updated.length, 0);
   assert.equal("showHandoffCompletion" in harness.operations.sent[0].message, false);
 
-  const activation = await harness.activateDestination("claude", 41);
+  const activation = await harness.activateDestination("gemini", 41);
   assert.equal(activation.ok, true);
   assert.deepEqual(
     JSON.parse(JSON.stringify(harness.operations.updated)),

@@ -4,6 +4,8 @@ A short history of decisions and regressions that matter when changing the code.
 
 ## 2026-10-05
 
+- **Transfer failures investigated from live telemetry.** Three recent paste failures reached Claude after verified summary generation; three intent-stage `unknown_failure` rows matched repeat clicks during an existing transfer. Shared admission now ignores busy clicks before creating another attempt or receipt. Claude delivery now focuses/settles the destination and verifies paste stability; editor replacement on click/focus retries against the connected composer without overwriting restored drafts. Optional local receipt-storage exceptions no longer swallow terminal reports. Historical rows retain their recorded outcomes: database metadata cannot identify every past editor error, and `started` does not prove failure. See [transfer sequencing](LOGIC.md#paste-and-activation-order) and the content/background regressions.
+
 - **DeepSeek file boundaries retained.** Recovered text files now carry their name, verified byte count and end marker, including empty files. Different files with identical contents remain separate; original whitespace, fragment order, per-turn ID deduplication and download validation are preserved.
 
 - **JSON attachment labels preserved.** Active user turns retain explicit upload names on Claude, ChatGPT, Gemini, Grok and DeepSeek without downloading unsupported bodies. Quoted names prevent embedded line breaks from becoming transcript role headings. Existing pasted-text validation and Grok file-only fallback remain intact; network hook versions advance so reloads use the updated adapters.
