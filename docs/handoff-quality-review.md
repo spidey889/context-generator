@@ -29,3 +29,7 @@ Missing headers are existing advisory-format behavior, not repaired by this prom
 Across the same eight cases, v14 used 87,986 prompt tokens versus baseline's 86,442 (about 1.8% more); output tokens were 4,245 versus 3,952 (about 7.4% more). Longer handoffs are not necessarily better. This comparison covers one working free model and artificial distraction, not all cheap models or real production conversations.
 
 The concrete improvement is removing a demonstrated source of foreign facts and explicitly carrying pending work and usable evidence. The branch remains an experiment, not evidence for a broad quality claim. Next work should reduce competing prompt instructions and measure unsupported additions on fresh cases before merging or considering fine-tuning.
+
+## V15 follow-up
+
+The next candidate replaces the multi-stage recipe with a shorter source/record/section contract and explicitly excludes new arithmetic, diagnosis, recommendations, drafts and plans. Existing format, source boundary, constraints, current-work coverage and one-call behavior remain. All 380 deterministic tests passed. The attempted Dots review comparison returned 429 before any candidate generation, so neither shortening nor the added instruction is a verified quality improvement. Resume the paired review and long-history comparisons when the free/private route is available; do not interpret compatibility as semantic success.
