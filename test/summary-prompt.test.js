@@ -22,6 +22,8 @@ test("worked examples remain deliverable and normalize identically across provid
     assert.match(example, /Retry delay is undecided: 80 ms or 240 ms\./);
     assert.match(example, /Implementation has not started; nothing has been tested or deployed\./);
     assert.match(example, /Constraint: "Do not deploy this change\."/);
+    assert.match(example, /Pending request: explain the two-worker design before proposing code\./);
+    assert.match(example, /node scripts\/export-repro\.mjs fixtures\/duplicate\.json/);
     assert.doesNotMatch(example, /8 workers|user is Dana|until tests pass/);
     return normalizeContextCarrySummary(example);
   });

@@ -326,7 +326,7 @@ Provider-specific constraints:
 - OpenRouter uses the shared untrusted-transcript envelope, system prompt and OpenRouter/Mistral profile caps. Disable context compression and hidden reasoning; require endpoint support for supplied parameters; enforce zero prompt/completion/request prices and `data_collection: deny`. If no endpoint qualifies, fall through without relaxing policy or using a paid route.
 - OpenRouter HTTP-200 error envelopes, errored/filtered choices, invalid JSON, empty/refusal-only text and unfinished thinking blocks fail safely. Never copy separate reasoning fields into the carry. Logs use fixed messages/numeric status, not arbitrary upstream error strings.
 - Gemini Flash uses `thinkingLevel: MEDIUM`; Flash-Lite uses `MINIMAL`, with existing generation allowances and hidden-thought filtering.
-- Mistral prompt-cache keys use `capcontext-summary-v11-<profile>-<model>`. The namespace lives beside the prompt in `api/summary-prompt.js`; bump it when prompt wording changes.
+- Mistral prompt-cache keys use `capcontext-summary-v12-<profile>-<model>`. The namespace lives beside the prompt in `api/summary-prompt.js`; bump it when prompt wording changes.
 
 Receipts preserve the actual served provider/model, attempted chain, token usage and `openrouterMs` / `geminiMs` / `mistralMs`; OpenRouter attempts also populate `openrouterModelsTried`. `Space Bunny 2` changes display text only. Identical concurrent conversations share a background promise; up to eight exact completed results remain in worker memory for two minutes, preserving original provider metadata on cache hits.
 
@@ -337,6 +337,8 @@ Receipts preserve the actual served provider/model, attempted chain, token usage
 The requested title is `CONTEXT CARRY — READY TO PASTE`, followed once and in order by WHO I AM, WHAT WE WERE DOING, WHERE WE LEFT OFF, DECISIONS MADE, OPEN QUESTIONS, KEY CONTEXT, NEXT STEP. Shared grounding hints distinguish reported facts, user identity, named owners, accepted choices, proposals/rejections/deferred alternatives and prohibitions. Named owners are not assumed to be the user; observed integrity remains a fact, not a newly invented requirement. The prompt separates fact extraction, meaning/section placement, writing and final checking. One labelled transcript-to-handoff example demonstrates replaced decisions, rejected proposals, unselected alternatives, an unconditional prohibition and work not started/tested/deployed. Its facts differ from evaluation fixtures and its header follows the provider's plain/boxed mode. Important prohibitions are requested verbatim, with a silent constraint/exact-fact check. These are instructions to the model, not semantic verification; each provider attempt still uses one generation call.
 
 Separate two decisions:
+
+Continuity takes priority over incidental history: WHERE WE LEFT OFF carries the latest user request and stopping point; KEY CONTEXT preserves the current draft/code/formula or exact reproduction needed to act on it, verbatim where wording matters. The fixed NEXT STEP confirmation is separate from the user's pending task. These preservation instructions do not perform that task or authorize proposals. Live improvement must be established against the baseline rather than inferred from passing structural tests.
 
 1. **Deliverability:** an independent content check rejects only refusal-only or substantively empty output after recognized scaffolding/placeholders/trusted instructions are removed. Quoted refusals, contextual inability to connect/build, useful content alongside refusal, short useful text and useful token-limited text remain deliverable. Rejection advances the normal route chain.
 2. **Structure/quality diagnostics:** missing/duplicate/malformed headings, shortness and finish reasons produce advisory flags. They do not reject useful provider text. `validateContextCarrySummary()` does not receive the source transcript and cannot establish factual grounding or detect fluent hallucinations.
@@ -527,6 +529,8 @@ Do not weaken an adjacent privacy/ownership/compatibility guard to make one new 
 On Windows use `npm.cmd` for npm scripts when PowerShell shim policy blocks `npm`. Select checks by behavior changed; a documentation edit needs source/link/consistency review, not provider calls or a release smoke solely to validate prose.
 
 ### Check selection
+
+For branch prompt experiments, `scripts/compare-summary-prompts.js` compares a pinned baseline Git commit and the working-tree backend on the same synthetic `evaluation/handoff-quality-cases.json` inputs. It alternates order, retains every repeat and full synthetic model output, records prompt/input hashes and token usage, and never grades exact local fallback as model success. Credentials/account/route/rate-limit failures stop the experiment. Lexical coverage is advisory: review full handoffs against the fixture's continuation criteria. The six cases cover corrected decisions, current drafts, unbooked plans, tutoring preferences, exact debugging evidence and hostile/unrelated content. This separate suite does not expand the scheduled production monitor.
 
 | Change | Focused check | Additional evidence when relevant |
 | --- | --- | --- |
