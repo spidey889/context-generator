@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-04-free-composer-layouts-v103";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-05-destination-ownership-v104";
   const INLINE_PILL_SIZE = 36;
   const ownedUiStyleSheets = new Map();
   const CLAUDE_INLINE_STYLE_ID = "context-generator-claude-inline-styles";
@@ -97,6 +97,11 @@
   const HANDOFF_OVERLAY_EXIT_MS = 220;
   // Covers the 210-second summary ceiling plus one prepared and one fresh paste attempt.
   const RUNNING_AUTO_RESET_MS = 360000;
+  // Keep aligned with background.js: delivery is restricted to new-chat routes.
+  const DESTINATION_LANDING_PATHS = {
+    claude: ["/", "/new"], chatgpt: ["/"], gemini: ["/", "/app"],
+    grok: ["/", "/chat"], deepseek: ["/", "/a/chat"]
+  };
   const DEFAULT_MAX_COMPOSER_WIDTH = 1320;
   const DESTINATION_TITLE_TEXT = "Where to continue?";
   const DESTINATION_HELPER_TEXT = "Context goes straight into the input box";
@@ -1028,6 +1033,39 @@
       error.code = "transfer_timeout";
       throw error;
     }
+  }
+
+  function createConversationGuard(message, identify = (location) => location.pathname + (location.search || "")) {
+    let identity = identify(window.location);
+    let changed = false;
+    const onNavigate = (event) => {
+      const location = event?.destination?.url ? new URL(event.destination.url, window.location.href) : window.location;
+      if (identify(location) !== identity) changed = true;
+    };
+    addOwnedEventListener(window.navigation, "navigate", onNavigate);
+    addOwnedEventListener(window, "popstate", onNavigate);
+    // The latch survives an away-and-back navigation; polling covers SPA hosts
+    // without Navigation API events. Checks also cover synchronous route changes.
+    const timer = setInterval(onNavigate, INLINE_PATHNAME_POLL_MS);
+    return {
+      check() {
+        onNavigate();
+        if (!changed) return;
+        const error = new Error(message);
+        error.code = "conversation_changed";
+        throw error;
+      },
+      pin() {
+        this.check();
+        identify = (location) => location.pathname + (location.search || "");
+        identity = identify(window.location);
+      },
+      dispose() {
+        clearInterval(timer);
+        removeOwnedEventListener(window.navigation, "navigate", onNavigate);
+        removeOwnedEventListener(window, "popstate", onNavigate);
+      }
+    };
   }
 
   function startTransferDeadline(trace) {
@@ -2263,16 +2301,30 @@
     }
 
     const trimmedText = text.trim();
-
-    // Every supported destination uses verified retries, including editor remount recovery.
-    await pasteWithRetry(trimmedText, destination, transferId, deadlineAt);
-    checkTransferDeadline({ deadlineAt });
-    if (destination.id !== "chatgpt") {
-      schedulePostActivationPasteRecheck(trimmedText, destination, deadlineAt);
+    const landingPaths = DESTINATION_LANDING_PATHS[destination.id] || [];
+    const guard = createConversationGuard("The destination conversation changed. Use a new chat and try again.", (location) => {
+      const path = location.pathname.replace(/\/+$/, "") || "/";
+      // Allow the platform's initial landing redirect until its composer mounts.
+      return (landingPaths.includes(path) ? "new-chat" : path) + (location.search || "");
+    });
+    let retainedGuard = false;
+    try {
+      if (destination.id !== currentPlatform.id || !landingPaths.includes(window.location.pathname.replace(/\/+$/, "") || "/")) {
+        throw new Error("The destination is no longer a new chat.");
+      }
+      await pasteWithRetry(trimmedText, destination, transferId, deadlineAt, guard);
+      checkTransferDeadline({ deadlineAt });
+      guard.check();
+      if (destination.id !== "chatgpt") {
+        schedulePostActivationPasteRecheck(trimmedText, destination, deadlineAt, guard);
+        retainedGuard = true;
+      }
+    } finally {
+      if (!retainedGuard) guard.dispose();
     }
   }
 
-  async function pasteWithRetry(text, destination, transferId = null, deadlineAt = null) {
+  async function pasteWithRetry(text, destination, transferId = null, deadlineAt = null, guard = null) {
     const startedAt = Date.now();
     const retryTimeoutMs = destination.pasteRetryTimeoutMs || PASTE_RETRY_TIMEOUT_MS;
     const verifyTimeoutMs = destination.pasteVerifyTimeoutMs || PASTE_VERIFY_TIMEOUT_MS;
@@ -2282,8 +2334,11 @@
 
     while (Date.now() - startedAt <= retryTimeoutMs) {
       checkTransferDeadline({ deadlineAt });
+      guard?.check();
+      if (getDetectedConversationMessageCount() > 0) throw new Error("The destination is no longer a new chat.");
       const input = findReadyPlatformInput(destination);
       if (input) {
+        guard?.pin();
         sawInput = true;
         const alreadyPasted = editorContainsText(input, text);
         // A partial paste and a user draft can look alike. Let destination
@@ -2292,11 +2347,13 @@
           throw new Error(`${destination.name} editor already contains text. Use an empty chat or copy the context manually.`);
         }
         try {
-          if (!alreadyPasted) setEditorText(input, text, destination);
+          if (!alreadyPasted) setEditorText(input, text, destination, guard);
 
           if (await waitForEditorText(input, text, verifyTimeoutMs)) {
+            guard?.check();
             if (stabilityMs > 0) {
               await delay(stabilityMs);
+              guard?.check();
               if (!input.isConnected || !editorContainsText(input, text)) {
                 lastError = new Error(`${destination.name} editor cleared the pasted context after first insert.`);
                 continue;
@@ -2308,6 +2365,7 @@
             lastError = new Error(`Paste operation failed to populate the ${destination.name} editor.`);
           }
         } catch (error) {
+          if (error?.code === "conversation_changed") throw error;
           lastError = error;
         }
       }
@@ -2376,11 +2434,12 @@
     if (!pendingPasteRecheck) return;
     clearTimeout(pendingPasteRecheck.timer);
     removeOwnedEventListener(document, "visibilitychange", pendingPasteRecheck.onVisible);
+    pendingPasteRecheck.guard?.dispose();
     pendingPasteRecheck = null;
   }
 
-  function schedulePostActivationPasteRecheck(text, destination, deadlineAt = null) {
-    const pending = { timer: null, onVisible: null, deadlineAt };
+  function schedulePostActivationPasteRecheck(text, destination, deadlineAt = null, guard = null) {
+    const pending = { timer: null, onVisible: null, deadlineAt, guard };
     pendingPasteRecheck = pending;
     pending.onVisible = () => {
       if (deadlineAt && Date.now() >= deadlineAt) {
@@ -2407,6 +2466,7 @@
     let needsCopy = true;
     try {
       checkTransferDeadline(pending);
+      pending.guard?.check();
       const input = findReadyPlatformInput(destination);
       if (input && editorContainsText(input, text)) {
         needsCopy = false;
@@ -2414,9 +2474,10 @@
       }
       // Do not overwrite a draft the user may have started after tab activation.
       if (pendingPasteRecheck === pending && input && !getElementText(input).trim()) {
-        setEditorText(input, text, destination);
+        setEditorText(input, text, destination, pending.guard);
         if (await waitForEditorText(input, text, destination.pasteVerifyTimeoutMs || PASTE_VERIFY_TIMEOUT_MS)) {
           await delay(PASTE_STABILITY_MS);
+          pending.guard?.check();
           if (input.isConnected && editorContainsText(input, text)) {
             needsCopy = false;
             return;
@@ -2424,9 +2485,10 @@
         }
       }
     } catch (error) {
-      if (error?.code === "transfer_timeout") needsCopy = false;
+      if (["transfer_timeout", "conversation_changed"].includes(error?.code)) needsCopy = false;
       console.debug("[Context Generator] Delayed paste check failed:", error?.message || error);
     } finally {
+      pending.guard?.dispose();
       if (pendingPasteRecheck === pending) {
         pendingPasteRecheck = null;
         if (needsCopy) showFallbackModal(text, destination.name);
@@ -2462,9 +2524,10 @@
     return score;
   }
 
-  function setEditorText(element, text, destination = currentPlatform) {
+  function setEditorText(element, text, destination = currentPlatform, guard = null) {
     element.click();
     element.focus();
+    guard?.check();
     // Focusing a native composer can restore its saved draft synchronously.
     if (getElementText(element).trim()) {
       if (editorContainsText(element, text)) return;

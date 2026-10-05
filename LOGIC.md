@@ -83,7 +83,7 @@ The extension-toolbar action skips the picker and always uses DOM capture. Its d
 | Grok | Finish source completion cue, focus destination | Verify; run the post-activation stability recheck |
 | Claude, Gemini, DeepSeek | May paste and verify while inactive | Finish source cue, revalidate/focus destination, schedule the stability recheck without delaying activation |
 
-All five use verified retries and editor-remount recovery. A missing, navigated or failed prepared tab gets at most one fresh destination. Exhaustion offers one manual-copy fallback when a carry exists. Report clipboard success only after an actual successful copy.
+All five use verified retries and editor-remount recovery. Prepared-tab reuse and activation require a platform's new-chat landing route, never a saved conversation. Content delivery independently rejects existing conversation turns and pins the route when the composer mounts; navigation cancels insertion/recovery even after an away-and-back change. Initial landing redirects are allowed before that pin. A missing, navigated or failed prepared tab gets at most one fresh destination. Exhaustion offers one manual-copy fallback when a carry exists. Report clipboard success only after an actual successful copy.
 
 Visible source completion waits for two animation frames with a 120 ms fallback. Hidden sources skip that wait; hiding during it releases it immediately and cleans up frames/timers/listeners. Suspended painting must not block activation or receipt saving. The timeline includes handoff finish, final activation and transfer completion.
 

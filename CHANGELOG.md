@@ -2,6 +2,10 @@
 
 A short history of decisions and regressions that matter when changing the code. Read the relevant section of [LOGIC.md](LOGIC.md) for current behavior, ownership and checks; use this file when you need to understand why an approach changed. Entries describe source changes unless deployment is explicitly recorded. Extension packaging, Web Store publication and backend deployment are separate.
 
+## 2026-10-05
+
+- **Destination chat ownership (T01).** Restricted prepared-tab reuse/activation and content insertion to new-chat surfaces. Added a navigation latch through paste retries, focus and delayed recovery, preserving initial landing redirects and same-route editor remounts. Added automated regressions for saved/pending chats, focus navigation and away-and-back recovery; browser checks were explicitly excluded.
+
 ## 2026-10-04
 
 - **Free composer layouts fixed.** Live free ChatGPT and Claude Reply layouts exposed assumptions about responsive-footer markers and where model controls live. Updated the platform adapters to use the observed native slots; composer replacement also clears the detached orb's active state. Focused regressions and installed-Brave fixtures covered narrow layouts, drafts and Reply transitions, with live placement checks. Web Store publication remains separate.

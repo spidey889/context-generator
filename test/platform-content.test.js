@@ -281,6 +281,8 @@ function loadPlatformContent(elements = [], hostname = "chatgpt.com", {
   const animationFrameCallbacks = [];
   const runtimeMessageListeners = [];
   const documentListeners = new Map();
+  const windowListeners = new Map();
+  const navigationListeners = new Set();
   const elementsById = new Map();
   class TestResizeObserver {
     constructor(callback) {
@@ -330,6 +332,10 @@ function loadPlatformContent(elements = [], hostname = "chatgpt.com", {
   };
   const window = {
     location: { hostname, pathname, search },
+    navigation: {
+      addEventListener: (_type, listener) => navigationListeners.add(listener),
+      removeEventListener: (_type, listener) => navigationListeners.delete(listener)
+    },
     scrollX: 0,
     scrollY: 400,
     __CONTEXT_GENERATOR_TEST_HOOKS__: {
@@ -354,8 +360,11 @@ function loadPlatformContent(elements = [], hostname = "chatgpt.com", {
       };
     },
     performance: { now: () => 0 },
-    addEventListener: () => {},
-    removeEventListener: () => {},
+    addEventListener: (type, listener) => {
+      if (!windowListeners.has(type)) windowListeners.set(type, new Set());
+      windowListeners.get(type).add(listener);
+    },
+    removeEventListener: (type, listener) => windowListeners.get(type)?.delete(listener),
     scrollTo: (optionsOrX, y) => {
       if (typeof optionsOrX === "object") {
         window.scrollX = optionsOrX.left ?? window.scrollX;
@@ -377,6 +386,7 @@ function loadPlatformContent(elements = [], hostname = "chatgpt.com", {
     setInterval,
     clearInterval
   };
+  Object.defineProperty(window.location, "href", { get: () => `https://${hostname}${window.location.pathname}${window.location.search}` });
   window.sessionStorage = {
     getItem: (key) => sessionValues.get(key) ?? null,
     setItem: (key, value) => sessionValues.set(key, String(value)),
@@ -417,6 +427,7 @@ function loadPlatformContent(elements = [], hostname = "chatgpt.com", {
     HTMLInputElement: FakeHTMLInputElement,
     Node: { DOCUMENT_POSITION_PRECEDING: 2 },
     URLSearchParams,
+    URL,
     Date,
     MutationObserver: TestMutationObserver,
     ResizeObserver: TestResizeObserver,
@@ -437,6 +448,14 @@ function loadPlatformContent(elements = [], hostname = "chatgpt.com", {
     hooks.resizeObservers = resizeObservers;
     hooks.window = window;
     hooks.document = document;
+    hooks.navigate = (pathname) => {
+      navigationListeners.forEach(listener => listener({ destination: { url: `https://${hostname}${pathname}` } }));
+      window.location.pathname = pathname;
+    };
+    hooks.popstate = (pathname) => {
+      window.location.pathname = pathname;
+      windowListeners.get("popstate")?.forEach(listener => listener({}));
+    };
     hooks.animationFrameCallbacks = animationFrameCallbacks;
     hooks.runtimeMessageListeners = runtimeMessageListeners;
     hooks.setVisibility = (state) => {
@@ -1761,6 +1780,54 @@ test("expired destination paste leaves the existing draft untouched", async () =
     error => error.code === "transfer_timeout"
   );
   assert.equal(editor.value, "My unsent draft");
+});
+
+clockTest("destination ownership rejects saved chats and navigation during focus", async () => {
+  for (const [hostname, destination, otherPath] of [
+    ["claude.ai", "claude", "/chat/other"], ["chatgpt.com", "chatgpt", "/c/other"],
+    ["gemini.google.com", "gemini", "/app/other"], ["grok.com", "grok", "/c/other"],
+    ["chat.deepseek.com", "deepseek", "/a/chat/s/other"]
+  ]) {
+    const editor = new FakeElement({ tag: "textarea", attrs: { placeholder: "Message" } });
+    const hooks = loadPlatformContent([editor], hostname, { pathname: otherPath });
+    await assert.rejects(hooks.pasteIntoPlatform("private carry", destination), /no longer a new chat/);
+    assert.equal(editor.value, "");
+    hooks.navigate("/");
+    editor.onClick = () => { hooks.navigate(otherPath); hooks.navigate("/"); };
+    await assert.rejects(hooks.pasteIntoPlatform("private carry", destination), /destination conversation changed/);
+    assert.equal(editor.value, "", hostname);
+  }
+});
+
+clockTest("destination recovery cancels after navigation, including away and back", async () => {
+  for (const awayAndBack of [false, true]) {
+    const editor = new FakeElement({ tag: "textarea", attrs: { placeholder: "Message" } });
+    const hooks = loadPlatformContent([editor], "claude.ai", { pathname: "/new", visibilityState: "hidden" });
+    await hooks.pasteIntoPlatform("private carry", "claude");
+    editor.value = "";
+    hooks.navigate("/chat/other");
+    if (awayAndBack) hooks.navigate("/new");
+    hooks.setVisibility("visible");
+    await new Promise(resolve => setTimeout(resolve, 1200));
+    assert.equal(editor.value, "");
+    assert.equal(editor.clicks, 1);
+    assert.equal(hooks.getOwnedLifecycleResourceCounts().intervals, 0);
+  }
+});
+
+clockTest("destination retry permits initial landing redirects but cancels a route change while waiting", async () => {
+  for (const changed of [false, true]) {
+    const elements = [];
+    const hooks = loadPlatformContent(elements, "claude.ai");
+    const operation = hooks.pasteIntoPlatform("private carry", "claude");
+    const observed = operation.then(() => null, error => error);
+    hooks.navigate(changed ? "/chat/other" : "/new");
+    const editor = new FakeElement({ tag: "textarea", attrs: { placeholder: "Message" } });
+    elements.push(editor);
+    const error = await observed;
+    assert.equal(error?.code || null, changed ? "conversation_changed" : null);
+    assert.equal(editor.value, changed ? "" : "private carry");
+  }
 });
 
 test("opening the destination picker does not scrape or summarize", () => {

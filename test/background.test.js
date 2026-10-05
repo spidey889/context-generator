@@ -284,6 +284,26 @@ test("prepared destination is reused only while it remains on the selected platf
   assert.deepEqual(harness.operations.sent.map(({ tabId }) => tabId), [100]);
 });
 
+test("same-platform saved chats, including pending navigation, never receive a prepared carry", async () => {
+  for (const [destination, url] of [
+    ["claude", "https://claude.ai/chat/other"], ["chatgpt", "https://chatgpt.com/c/other"],
+    ["gemini", "https://gemini.google.com/app/other"], ["grok", "https://grok.com/c/other"],
+    ["deepseek", "https://chat.deepseek.com/a/chat/s/other"]
+  ]) {
+    for (const pending of [false, true]) {
+      const harness = loadBackgroundForTransferTest({ preparedTab: {
+        id: 41, url: pending ? new URL(url).origin + "/" : url,
+        ...(pending ? { pendingUrl: url } : {}), windowId: 1
+      } });
+      const response = await harness.sendTransfer(destination, 41, true);
+      assert.equal(response.ok, true);
+      assert.equal(harness.operations.created.length, 1);
+      assert.deepEqual(harness.operations.sent.map(({ tabId }) => tabId), [100]);
+      assert.equal((await harness.activateDestination(destination, 41)).ok, false);
+    }
+  }
+});
+
 test("prepared-tab recovery opens at most one fresh destination", async () => {
   const harness = loadBackgroundForTransferTest({
     preparedTab: { id: 41, url: "https://chatgpt.com/", windowId: 1 },

@@ -100,6 +100,11 @@ const DESTINATION_HOST_RULES = {
   grok: { exact: ["grok.com"] },
   deepseek: { exact: ["chat.deepseek.com"] }
 };
+// Only reuse the new-chat surfaces opened by this extension, never a saved chat.
+const DESTINATION_LANDING_PATHS = {
+  claude: ["/", "/new"], chatgpt: ["/"], gemini: ["/", "/app"],
+  grok: ["/", "/chat"], deepseek: ["/", "/a/chat"]
+};
 
 chrome.runtime.onInstalled.addListener(initializeBackground);
 chrome.runtime.onStartup.addListener(initializeBackground);
@@ -1171,7 +1176,8 @@ async function isPreparedDestinationTabUsable(tabId, destinationId) {
   try {
     const tab = await chrome.tabs.get(tabId);
     const currentOrPendingUrl = tab?.pendingUrl || tab?.url || "";
-    return getPlatformFromUrl(currentOrPendingUrl) === destinationId;
+    return getPlatformFromUrl(currentOrPendingUrl) === destinationId &&
+      DESTINATION_LANDING_PATHS[destinationId]?.includes(new URL(currentOrPendingUrl).pathname.replace(/\/+$/, "") || "/");
   } catch {
     return false;
   }
