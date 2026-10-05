@@ -1976,6 +1976,82 @@ test("paste verification rejects unrelated editor text", () => {
   assert.equal(hooks.editorContainsText(editor, "CONTEXT CARRY\n\nWHO I AM\nProject details"), false);
 });
 
+test("up to 1,200 trimmed characters stay local on every platform without worker calls or waits", async () => {
+  for (const hostname of ["claude.ai", "chatgpt.com", "gemini.google.com", "grok.com", "chat.deepseek.com"]) {
+    let summaryRequests = 0;
+    const hooks = loadPlatformContent([], hostname, {
+      runtimeSendMessage: async message => {
+        if (message.type === "SUMMARIZE_WITH_BACKEND") {
+          summaryRequests++;
+          return { ok: true, summary: "AI must never replace this tiny transcript." };
+        }
+        return { ok: true };
+      }
+    });
+    for (const length of [1, 1199, 1200]) {
+      const transcript = "x".repeat(length);
+      const trace = hooks.createTransferTrace("claude", "test");
+      let settled = false;
+      const pending = hooks.summarizeWithBackend(` \r\n${transcript}\n `, trace).then(summary => {
+        settled = true;
+        return summary;
+      });
+      await Promise.resolve();
+      assert.equal(settled, true, `${hostname}: ${length} characters must finish without a timer or worker wait`);
+      const summary = await pending;
+      assert.ok(summary.includes(`> ${transcript}\n`));
+      const stats = hooks.buildLatestTransferStats(trace, 1);
+      assert.equal(stats.summary.source, "local");
+      assert.equal(stats.summary.model, "local-direct");
+      assert.equal(stats.summary.profile, "tiny");
+      assert.equal(stats.summary.fetchMs, 0);
+      assert.equal(stats.summary.maxTokens, 0);
+      assert.equal(stats.summary.usage.totalTokens, 0);
+      assert.equal(stats.summary.modelsTried.length, 0);
+      assert.equal(stats.summary.fallback.used, false);
+    }
+    assert.equal(summaryRequests, 0, hostname);
+    assert.equal(await hooks.summarizeWithBackend("x".repeat(1201)), "AI must never replace this tiny transcript.");
+    assert.equal(summaryRequests, 1, `${hostname}: 1,201 characters still use the backend`);
+    await assert.rejects(hooks.summarizeWithBackend("tiny", { deadlineAt: Date.now() - 1 }), /Transfer timed out/);
+    assert.equal(summaryRequests, 1, `${hostname}: expired tiny transfers stay cancelled`);
+  }
+});
+
+clockTest("tiny local handoff skips the one-second summary animation while remote handoff retains it", async () => {
+  for (const local of [true, false]) {
+    const hooks = loadPlatformContent([]);
+    const properties = new Map();
+    const stage = new FakeElement();
+    stage.style.setProperty = (key, value) => properties.set(key, value);
+    hooks.document.querySelector = () => stage;
+    const trace = hooks.createTransferTrace("claude", "test");
+    trace.marks.push({ label: "summary done", detail: { background: {
+      source: local ? "local" : "backend", backend: { profile: local ? "tiny" : "small" }
+    } } });
+    const startedAt = Date.now();
+    await hooks.completeHandoffForDestinationReveal(trace);
+    const elapsed = Date.now() - startedAt;
+    assert.equal(properties.get("--context-generator-stage-progress-duration"), local ? "0ms" : "1000ms");
+    assert.ok(local ? elapsed < 250 : elapsed >= 1000, `local=${local}: ${elapsed} ms`);
+  }
+});
+
+test("tiny local carry works offline and preserves code, Unicode, roles and blank lines", async () => {
+  let summaryRequests = 0;
+  const hooks = loadPlatformContent([], "chatgpt.com", { runtimeSendMessage: async message => {
+    if (message.type === "SUMMARIZE_WITH_BACKEND") summaryRequests++;
+    throw new Error("Extension context invalidated");
+  } });
+  const conversation = "User: Keep this exactly.\r\n\r\nAssistant: 代码 🙂\r\n  const path = 'C:\\work';\u00a0 ";
+  const trace = hooks.createTransferTrace("claude", "test");
+  const summary = await hooks.summarizeWithBackend(conversation, trace);
+  assert.ok(summary.includes(conversation.replace(/\r\n?/g, "\n").trim().split("\n").map(line => `> ${line}`).join("\n")));
+  assert.match(summary, /Reply only: "Context loaded\. Let's pick up right where you left off\." Then wait for the user\./);
+  assert.equal(summaryRequests, 0);
+  assert.equal(hooks.buildLatestTransferStats(trace, 1).summary.fallback.used, false);
+});
+
 test("captured context survives backend errors, empty replies, and a missing worker locally", async () => {
   const conversation = "User: const path = 'C:\\work';\r\nAssistant: Keep this exact decision.\r\n".repeat(25);
   const cases = [

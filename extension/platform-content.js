@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-05-json-capture-audit-v105";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-05-local-tiny-carry-v106";
   const INLINE_PILL_SIZE = 36;
   const ownedUiStyleSheets = new Map();
   const CLAUDE_INLINE_STYLE_ID = "context-generator-claude-inline-styles";
@@ -203,7 +203,6 @@
   const HANDOFF_CAPTURE_LINE_MAX = 0.94;
   const HANDOFF_ACTIVITY_LINE_START = 0.05;
   const HANDOFF_ACTIVITY_LINE_MAX = 0.9;
-  const HANDOFF_TINY_STAGE_LINE_DURATION_MS = 320;
   const HANDOFF_FINAL_LINE_DURATION_MS = 1000;
   const HANDOFF_FINAL_PAINT_WAIT_MS = 120;
   const GENERIC_CONVERSATION_SELECTORS = [
@@ -951,49 +950,33 @@
 
     advanceTransferTelemetryStage(trace, "summary_request_started");
     markTransferTrace(trace, "summary start", { chars: conversationText.length, inputChars: conversationText.length });
-    if (conversationText.length <= TINY_DIRECT_PROFILE_MAX_CHARS) {
-      // local-direct can return in the same visual beat as capture. Finish the
-      // first connector before allowing the summary connector to begin.
-      await completeHandoffStageLine("capture", HANDOFF_TINY_STAGE_LINE_DURATION_MS);
-      checkTransferDeadline(trace);
-    }
     setHandoffProgress("summary", "active", null, conversationText.length);
-    startHandoffCountdown(getHandoffSummaryLineDuration(conversationText.length));
     let summary;
     let timing;
-    try {
-      const response = await notifyBackground({
-        type: "SUMMARIZE_WITH_BACKEND",
-        conversation: conversationText,
-        transferId: trace?.id || null,
-        deadlineAt: trace?.deadlineAt
-      });
-      if (!response?.summary?.trim()) {
-        throw new Error("Backup summarizer returned no summary.");
-      }
-      summary = response.summary.trim();
-      timing = response.timing || null;
-    } catch {
-      checkTransferDeadline(trace);
-      // The verified transcript stays in the source page even when the backend
-      // or MV3 worker is unavailable. Paste failure still offers manual copy.
-      const quotedTranscript = conversationText.replace(/\r\n?/g, "\n").trim()
-        .split("\n").map(line => `> ${line}`).join("\n");
-      summary = ["CONTEXT CARRY — READY TO PASTE", "", "💬 CONVERSATION SO FAR",
-        quotedTranscript, "", "🔁 NEXT STEP",
-        'Reply only: "Context loaded. Let\'s pick up right where you left off." Then wait for the user.'
-      ].join("\n");
-      timing = {
-        source: "local",
-        requestChars: conversationText.length,
-        chars: summary.length,
-        backend: {
-          servedBy: "local-direct", provider: "local-direct", model: "local-direct",
-          inputChars: conversationText.length, outputChars: summary.length,
-          fallback: { attempted: true, used: true, servedBy: "local-direct",
-            model: "local-direct", reason: "summary_service_unavailable" }
+    // Match the backend's trimmed String.length boundary, before messaging the
+    // worker. Tiny carries need neither network/storage work nor cosmetic waits.
+    if (conversationText.trim().length <= TINY_DIRECT_PROFILE_MAX_CHARS) {
+      ({ summary, timing } = createLocalContextCarry(conversationText));
+    } else {
+      try {
+        startHandoffCountdown(getHandoffSummaryLineDuration(conversationText.length));
+        const response = await notifyBackground({
+          type: "SUMMARIZE_WITH_BACKEND",
+          conversation: conversationText,
+          transferId: trace?.id || null,
+          deadlineAt: trace?.deadlineAt
+        });
+        if (!response?.summary?.trim()) {
+          throw new Error("Backup summarizer returned no summary.");
         }
-      };
+        summary = response.summary.trim();
+        timing = response.timing || null;
+      } catch {
+        checkTransferDeadline(trace);
+        // The verified transcript stays in the source page even when the backend
+        // or MV3 worker is unavailable. Paste failure still offers manual copy.
+        ({ summary, timing } = createLocalContextCarry(conversationText, "summary_service_unavailable"));
+      }
     }
     checkTransferDeadline(trace);
     markTransferTrace(trace, "summary done", {
@@ -1002,6 +985,43 @@
     });
     advanceTransferTelemetryStage(trace, "summary_completed");
     return summary;
+  }
+
+  function createLocalContextCarry(conversationText, fallbackReason = null) {
+    const startedAt = getNow();
+    const inputChars = conversationText.trim().length;
+    const quotedTranscript = conversationText.replace(/\r\n?/g, "\n").trim()
+      .split("\n").map(line => `> ${line}`).join("\n");
+    // Keep the quoted transcript and trusted footer aligned with the backend's
+    // direct carry. Source-local results have no server-signed summary receipt.
+    const summary = [
+      "╔══════════════════════════════════════════╗",
+      "║         CONTEXT CARRY — READY TO PASTE        ║",
+      "╚══════════════════════════════════════════╝",
+      "", "💬 CONVERSATION SO FAR", quotedTranscript, "", "🔁 NEXT STEP",
+      'Reply only: "Context loaded. Let\'s pick up right where you left off." Then wait for the user.'
+    ].join("\n");
+    return {
+      summary,
+      timing: {
+        source: "local", summaryMs: fallbackReason ? null : Math.round(getNow() - startedAt),
+        fetchMs: fallbackReason ? null : 0, parseMs: fallbackReason ? null : 0,
+        requestChars: inputChars, chars: summary.length,
+        backend: {
+          servedBy: "local-direct", provider: "local-direct", primaryModel: "local-direct", model: "local-direct",
+          inputChars, outputChars: summary.length,
+          profile: fallbackReason ? null : "tiny", maxTokens: 0,
+          modelsTried: [], openrouterModelsTried: [], mistralModelsTried: [],
+          ...(!fallbackReason ? {
+            openrouterMs: 0, geminiMs: 0, mistralMs: 0, providerMs: 0, providerPasses: 0,
+            usage: { promptTokens: 0, completionTokens: 0, totalTokens: 0, cachedTokens: 0 }
+          } : {}),
+          fallback: { attempted: Boolean(fallbackReason), used: Boolean(fallbackReason),
+            servedBy: fallbackReason ? "local-direct" : null,
+            model: fallbackReason ? "local-direct" : null, reason: fallbackReason }
+        }
+      }
+    };
   }
 
   function prepareDestinationTab(destinationId, trace = null) {
@@ -7801,7 +7821,7 @@
   }
 
   async function completeHandoffStageLine(stageId, durationMs) {
-    const skipMotion = document.visibilityState === "hidden"
+    const skipMotion = durationMs === 0 || document.visibilityState === "hidden"
       || window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
     const stageElement = document.querySelector(
       `#context-generator-handoff-progress [data-context-generator-stage='${stageId}']`
@@ -7834,7 +7854,11 @@
   async function completeHandoffForDestinationReveal(trace = null) {
     markTransferTrace(trace, "handoff finish start");
     stopHandoffActivityProgress();
-    await completeHandoffStageLine("summary", HANDOFF_FINAL_LINE_DURATION_MS);
+    const summaryTiming = getSummaryTimingFromTrace(trace);
+    // A synchronous local carry should not spend a second animating a summary
+    // that is already ready. Preserve the bounded paint cue before activation.
+    const localTinyCarry = summaryTiming?.source === "local" && summaryTiming.backend?.profile === "tiny";
+    await completeHandoffStageLine("summary", localTinyCarry ? 0 : HANDOFF_FINAL_LINE_DURATION_MS);
 
     setHandoffProgress("paste", "done");
     // Background tabs can suspend animation frames indefinitely. A painted tick

@@ -4,6 +4,8 @@ A short history of decisions and regressions that matter when changing the code.
 
 ## 2026-10-05
 
+- **Tiny chats moved into the extension.** Chats up to 1,200 trimmed transcript characters now build their exact carry in the source page before worker/backend summary work. Removed their summary countdown, capture-to-summary wait and final one-second summary animation; Latest Run reports Local carry (`local-direct`), zero provider usage and no fallback. The old backend path already avoided AI but still required a server round trip. Source-local completion has no signed receipt and does not count as a verified backend summary. Boundary regressions cover all five platforms; Brave smoke checks the exact 1,200-character capture and paste alongside the larger backend path.
+
 - **DeepSeek file boundaries retained.** Recovered text files now carry their name, verified byte count and end marker, including empty files. Different files with identical contents remain separate; original whitespace, fragment order, per-turn ID deduplication and download validation are preserved.
 
 - **JSON attachment labels preserved.** Active user turns retain explicit upload names on Claude, ChatGPT, Gemini, Grok and DeepSeek without downloading unsupported bodies. Quoted names prevent embedded line breaks from becoming transcript role headings. Existing pasted-text validation and Grok file-only fallback remain intact; network hook versions advance so reloads use the updated adapters.
