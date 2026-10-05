@@ -4,6 +4,8 @@ A short history of decisions and regressions that matter when changing the code.
 
 ## 2026-10-05
 
+- **DeepSeek file boundaries retained.** Recovered text files now carry their name, verified byte count and end marker, including empty files. Different files with identical contents remain separate; original whitespace, fragment order, per-turn ID deduplication and download validation are preserved.
+
 - **JSON attachment labels preserved.** Active user turns retain explicit upload names on Claude, ChatGPT, Gemini, Grok and DeepSeek without downloading unsupported bodies. Quoted names prevent embedded line breaks from becoming transcript role headings. Existing pasted-text validation and Grok file-only fallback remain intact; network hook versions advance so reloads use the updated adapters.
 
 - **JSON capture review corrected receipt reporting.** Kept Claude whitespace preservation and DeepSeek per-turn attachment identity. Reproduced Claude's native timeout, partial-response and missing-route failures being reported as generic request errors, then added bounded MAIN failure categories and replaced older hooks before capture. Latest Run now distinguishes a failed normal-capture attempt from completed capture instead of implying fallback success.

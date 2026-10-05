@@ -184,7 +184,9 @@
             // The same file may legitimately appear again in another turn.
             if (!fileIds.has(file.id)) {
               fileIds.add(file.id);
-              if (text.trim()) parts.push(text);
+              // Exact byte count plus a named end marker separates file data from
+              // the next file/request, even for empty files or delimiter-like text.
+              parts.push(`File contents (${file.file_size} UTF-8 bytes):\n${text}\nEnd attachment: ${JSON.stringify(file.file_name)}`);
             }
           }
         } else {

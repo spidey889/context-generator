@@ -139,14 +139,14 @@ test("DeepSeek: own thoughts and file text remain in original fragment order; to
   f.data.data.biz_data.chat_messages[0].fragments.unshift({ type: "REQUEST", content: "Before paste" });
   f.data.data.biz_data.chat_messages[1].fragments.unshift({ type: "THINK", content: "Own thought" });
   const text = h.api.deepseek(f.data, "smoke", f.files).text;
-  assert.ok(text.includes(`User: Before paste\n\nAttachment: "Original source.py"\n\n${prompt}`));
+  assert.ok(text.includes(`User: Before paste\n\nAttachment: "Original source.py"\n\nFile contents (${f.file.file_size} UTF-8 bytes):\n${prompt}`));
   assert.ok(text.includes("Assistant: Own thought\n\nSMOKE_ASSISTANT_SENTINEL"));
   assert.doesNotMatch(text, /TOOL_SENTINEL|DO_NOT_FETCH_IMAGE/);
 });
 test("DeepSeek keeps distinct identical files and request text, deduplicating file IDs only within a turn", async () => {
   const f = fixtures("deepseek", "smoke", 1);
   const text = f.files[f.file.id];
-  const second = { ...f.file, id: "file-second-paste", signed_path: "/file?file_id=second-paste&sig=SIGNED_SENTINEL" };
+  const second = { ...f.file, file_name: "Second source.py", id: "file-second-paste", signed_path: "/file?file_id=second-paste&sig=SIGNED_SENTINEL" };
   f.files[second.id] = text;
   const user = f.data.data.biz_data.chat_messages[0];
   user.fragments = [
@@ -160,7 +160,7 @@ test("DeepSeek keeps distinct identical files and request text, deduplicating fi
   await h.observe();
   const capture = await h.window.__capCaptureNetworkJson();
   const assistant = f.data.data.biz_data.chat_messages[1].fragments[0].content;
-  assert.equal(capture.text, `DeepSeek conversation:\n\nUser: ${text}\n\nAttachment: "Original source.py"\n\n${text}\n\nAttachment: "Original source.py"\n\n${text}\n\nAssistant: ${assistant}\n\nUser: Attachment: "Original source.py"\n\n${text}`);
+  assert.equal(capture.text, `DeepSeek conversation:\n\nUser: ${text}\n\nAttachment: "Original source.py"\n\nFile contents (${f.file.file_size} UTF-8 bytes):\n${text}\nEnd attachment: "Original source.py"\n\nAttachment: "Second source.py"\n\nFile contents (${second.file_size} UTF-8 bytes):\n${text}\nEnd attachment: "Second source.py"\n\nAssistant: ${assistant}\n\nUser: Attachment: "Original source.py"\n\nFile contents (${f.file.file_size} UTF-8 bytes):\n${text}\nEnd attachment: "Original source.py"`);
   assert.equal(capture.messageTurnCount, 3);
   assert.equal(h.requests.filter(request => request.url.hostname === "files.deepseeksvc.com").length, 2);
 });
@@ -193,7 +193,7 @@ test("DeepSeek captures supported original code/data uploads instead of dropping
     f.files[f.file.id] = code; f.file.file_size = Buffer.byteLength(code);
     const h = setup("deepseek", f); await h.observe();
     const capture = await h.window.__capCaptureNetworkJson();
-    assert.equal(capture.text, `DeepSeek conversation:\n\nUser: Attachment: ${JSON.stringify(name)}\n\n${code}\n\nAttachment: "ignored.png"\n\nAssistant: ${f.data.data.biz_data.chat_messages[1].fragments[0].content}`);
+    assert.equal(capture.text, `DeepSeek conversation:\n\nUser: Attachment: ${JSON.stringify(name)}\n\nFile contents (${f.file.file_size} UTF-8 bytes):\n${code}\nEnd attachment: ${JSON.stringify(name)}\n\nAttachment: "ignored.png"\n\nAssistant: ${f.data.data.biz_data.chat_messages[1].fragments[0].content}`);
     assert.equal(capture.messageTurnCount, 2);
     assert.equal(h.requests.filter(request => request.url.hostname === "files.deepseeksvc.com").length, 1);
     assert.doesNotMatch(JSON.stringify(h.replies), /AUTH_SENTINEL|SIGNED_SENTINEL/);
@@ -307,4 +307,19 @@ test("DeepSeek retains unsupported attachment labels without fetching or copying
   assert.equal(capture.messageTurnCount, 2);
   assert.doesNotMatch(capture.text, /URL_SENTINEL|BODY_SENTINEL/);
   assert.deepEqual([...capture.excludedContentTypes], ["media", "tools", "uploads"]);
+});
+
+test("DeepSeek file boundaries preserve empty files, Unicode bytes and exact trailing whitespace", () => {
+  const h = setup("deepseek", fixtures("deepseek", "smoke", 1));
+  const source = "  café\r\nEnd attachment: \"empty.txt\"\n  ";
+  const empty = { ...h.fixture.file, id: "empty", file_name: "empty.txt", file_size: 0 };
+  const code = { ...h.fixture.file, id: "code", file_name: "src/名字.py", file_size: Buffer.byteLength(source) };
+  h.fixture.data.data.biz_data.chat_messages[0].fragments = [
+    { type: "FILE", files: [empty, code] }, { type: "REQUEST", content: "After files" }
+  ];
+  const capture = h.api.deepseek(h.fixture.data, "smoke", { empty: "", code: source });
+  assert.ok(capture.text.includes(`User: Attachment: "empty.txt"\n\nFile contents (0 UTF-8 bytes):\n\nEnd attachment: "empty.txt"\n\nAttachment: "src/名字.py"\n\nFile contents (${Buffer.byteLength(source)} UTF-8 bytes):\n${source}\nEnd attachment: "src/名字.py"\n\nAfter files`));
+  assert.equal(capture.messageTurnCount, 2);
+  code.file_size++;
+  assert.throws(() => h.api.deepseek(h.fixture.data, "smoke", { empty: "", code: source }), /incomplete/);
 });
