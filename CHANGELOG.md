@@ -4,6 +4,8 @@ A short history of decisions and regressions that matter when changing the code.
 
 ## 2026-10-06
 
+- **Long-history prompt comparisons.** Added optional 90k/280k synthetic variants with intact source turns and corrections buried between unrelated history blocks. Reports identify selected cases and runner bytes. This adds recall coverage without changing production routing or claiming a measured quality improvement.
+
 - **Handoffs target actual continuation.** The branch prompt now asks for the latest user request and exact stopping point, plus the current work product or reproduction needed by the next assistant. It prioritizes those over incidental history and distinguishes the pending task from the fixed confirmation instruction. The complete example carries a pending explanation and exact reproduction command; the cache namespace is v12. Added six synthetic continuation cases across design, writing, travel, tutoring, debugging and hostile/unrelated content, plus a pinned-baseline comparison runner that retains every attempt and excludes local fallback from model scores. A stale inherited OpenRouter key caused 401s; explicitly using the fetched development key reached Ling 429s and the configured Qwen route returned 404. No generated comparison output exists, so model-quality improvement is unverified. The runner now stops on those availability failures rather than repeating unusable requests.
 
 ## 2026-10-05

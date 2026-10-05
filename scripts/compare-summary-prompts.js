@@ -11,6 +11,39 @@ const root = path.join(__dirname, "..");
 const sha256 = text => createHash("sha256").update(text).digest("hex");
 const factLabel = fact => Array.isArray(fact) ? fact.join(" OR ") : fact;
 
+function withLongHistory(testCase, targetChars) {
+  if (!Number.isInteger(targetChars) || targetChars < testCase.conversation.length || targetChars > 340000) {
+    throw new Error("Long-history target must preserve the base conversation and fit the transcript limit");
+  }
+  const turns = testCase.conversation.split("\n\n");
+  const anchor = testCase.historyAnchor
+    ? turns.findIndex(turn => turn.includes(testCase.historyAnchor))
+    : Math.floor(turns.length / 2);
+  if (anchor < 0) throw new Error("Long-history anchor must match a source turn");
+  const archive = [[], []];
+  const topics = [
+    "the retired Meadow bookmark project used a green star icon; that project is unrelated to the active task",
+    "an old neighborhood bulletin used a two-column layout; it supplies no decision about the current work",
+    "a sample cooking exercise described oats and apples; its quantities are not active project requirements",
+    "the archived Kite puzzle discussion preferred arrow keys; no current input behavior was decided there",
+    "a fictional reading club discussed a poetry anthology; its owner and dates are irrelevant here"
+  ];
+  let chars = testCase.conversation.length;
+  for (let index = 0; chars < targetChars; index++) {
+    const paragraph = `Assistant: Archived reference ${index + 1}: ${topics[index % topics.length]}. This reference is historical background only.`;
+    archive[index % 2].push(paragraph);
+    chars += paragraph.length + 2;
+  }
+  // Insert complete unrelated turns without cutting, reordering or rewriting any
+  // source turn. Corrections now sit between two substantial history blocks.
+  const conversation = turns.flatMap((turn, index) => {
+    return index === anchor ? [...archive[0], turn, ...archive[1]] : [turn];
+  }).join("\n\n");
+  return { ...testCase, id: `${testCase.id}-long-${targetChars}`, conversation,
+    purpose: `${testCase.purpose} Distributed among unrelated archived turns.`,
+    baseCaseId: testCase.id, targetChars };
+}
+
 function assessSummary(summary, testCase) {
   const missing = facts => facts.filter(fact => !containsFact(summary, fact)).map(factLabel);
   return {
@@ -75,6 +108,8 @@ async function main() {
     "baseline-ref": { type: "string", default: "master" },
     cases: { type: "string", default: "evaluation/handoff-quality-cases.json" },
     output: { type: "string" },
+    "case-id": { type: "string" },
+    "long-history": { type: "boolean", default: false },
     repeats: { type: "string", default: "1" },
     model: { type: "string", default: "inclusionai/ling-3.1-flash" }
   } });
@@ -94,6 +129,15 @@ async function main() {
   const fixtureSource = fs.readFileSync(casesPath, "utf8");
   const fixture = JSON.parse(fixtureSource);
   if (fixture.syntheticOnly !== true) throw new Error("Comparison requires explicitly synthetic fixtures");
+  let cases = fixture.cases;
+  if (values["long-history"]) {
+    cases = [...cases,
+      withLongHistory(fixture.cases.find(item => item.id === "continue-latest-draft"), 90000),
+      withLongHistory(fixture.cases.find(item => item.id === "corrected-export-design"), 280000)
+    ];
+  }
+  if (values["case-id"]) cases = cases.filter(item => item.id === values["case-id"]);
+  if (!cases.length) throw new Error("No matching synthetic case");
   const baselineRef = execFileSync("git", ["rev-parse", "--verify", `${values["baseline-ref"]}^{commit}`], { cwd: root, encoding: "utf8" }).trim();
   const baseline = loadBaseline(baselineRef);
   const candidate = require("../api/summarize").__test;
@@ -102,12 +146,14 @@ async function main() {
     version: 1, syntheticOnly: true, baselineRef, candidateRef: execFileSync("git", ["rev-parse", "HEAD"], { cwd: root, encoding: "utf8" }).trim(),
     candidatePromptSourceSha256: sha256(fs.readFileSync(path.join(root, "api", "summary-prompt.js"))),
     fixtureSha256: sha256(fixtureSource), model: values.model, repeats,
+    selectedCases: cases.map(item => item.id), longHistory: values["long-history"],
+    comparisonRunnerSha256: sha256(fs.readFileSync(__filename)),
     reviewCriteria: fixture.reviewCriteria,
     limitations: "Lexical checks are diagnostics, not semantic grading. Review every full handoff; local fallback is not a successful model generation. Short fixtures force the same generated profile on both variants; production tiny chats still use exact local carry.",
     results: []
   };
   try {
-    await comparePrompts({ cases: fixture.cases, variants: [{ name: "baseline", backend: baseline.backend }, { name: "candidate", backend: candidate }], repeats,
+    await comparePrompts({ cases, variants: [{ name: "baseline", backend: baseline.backend }, { name: "candidate", backend: candidate }], repeats,
       generate: async (variant, testCase) => {
         let profile = variant.backend.getSummaryProfile(testCase.conversation);
         const forcedGeneratedProfile = Boolean(profile.directCarry);
@@ -137,4 +183,4 @@ async function main() {
 }
 
 if (require.main === module) main().catch(() => { console.error("Prompt comparison failed; inspect configuration and retained safe results."); process.exitCode = 1; });
-module.exports = { assessSummary, comparePrompts };
+module.exports = { assessSummary, comparePrompts, withLongHistory };
