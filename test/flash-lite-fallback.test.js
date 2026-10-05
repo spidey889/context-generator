@@ -1,6 +1,6 @@
 const assert = require("node:assert/strict");
 const test = require("node:test");
-const { withFundedBudget } = require("../testing/funded-budget");
+const { withFundedBudget } = require("./helpers/funded-budget");
 const handler = require("../api/summarize.js");
 const originalOpenRouterEnabled = process.env.OPENROUTER_ENABLED;
 test.before(() => { process.env.OPENROUTER_ENABLED = "false"; });

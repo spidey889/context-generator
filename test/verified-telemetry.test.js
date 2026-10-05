@@ -1,7 +1,7 @@
 const assert = require("node:assert/strict");
 const test = require("node:test");
 const summarize = require("../api/summarize.js");
-const { withFundedBudget } = require("../testing/funded-budget");
+const { withFundedBudget } = require("./helpers/funded-budget");
 const telemetry = require("../api/telemetry.js");
 const { validateTelemetryPayload } = require("../api/telemetry-validation.js");
 const KEY = "test-only-signing-key-0123456789abcdef";

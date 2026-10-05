@@ -4,6 +4,7 @@ A short history of decisions and regressions that matter when changing the code.
 
 ## 2026-10-06
 
+- **Test helpers consolidated.** Moved the shared clock, funded-budget and transfer-flow fixtures into `test/helpers/`, updated imports and the nested source path, and limited deterministic discovery to `test/**/*.test.js` so helper files are only loaded by their callers.
 - **CI coverage completed with focused offline checks.** Added ChatGPT fast-capture/reload and Claude partial-JSON fallback browser cases; the existing DOM smoke now verifies installed-worker telemetry through local relay/Edge code and the migrated database. Failures retain screenshots, bounded diagnostics and command logs for seven days, including placement tabs before teardown, while preserving original assertions. PGlite is a pinned development dependency with a committed lockfile; CI uses cached `npm ci` and fresh-checkout instructions document Brave/display requirements. The checks use isolated synthetic fixtures and no provider calls.
 - **Browser fixtures kept focused and route-aware.** The DOM case retains the full placement suite; JSON cases concentrate on capture/reload/fallback. Wait for viewport quiet before a resize-owned picker click, and use the source's current project-chat URL for worker tab-placement assertions after SPA navigation. Failure capture was verified against real Brave failures as well as a disconnected-page regression.
 

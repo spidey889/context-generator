@@ -6,7 +6,7 @@
     "@electric-sql/pglite": "0.5.8"
   },
   "scripts": {
-    "test": "node --test --test-timeout=30000 --test-skip-pattern=\"^slow/release:\"",
+    "test": "node --test --test-timeout=30000 --test-skip-pattern=\"^slow/release:\" \"test/**/*.test.js\"",
     "test:slow": "node --test --test-timeout=60000 --test-name-pattern=\"^slow/release:\" test/platform-content.test.js",
     "test:extension-smoke": "node scripts/run-extension-smoke.js",
     "test:db": "node scripts/check-verified-telemetry-db.js",

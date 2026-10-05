@@ -4,7 +4,7 @@ const path = require("node:path");
 const vm = require("node:vm");
 const test = require("node:test");
 const { webcrypto } = require("node:crypto");
-const { clockTest } = require("../testing/clock");
+const { clockTest } = require("./helpers/clock");
 // Reuse compiled code; every setup still executes it in a fresh VM with its own hook state.
 const scripts = new Map(["chatgpt-fetch-main.js", "chatgpt-json-capture.js"].map(file =>
   [file, new vm.Script(fs.readFileSync(path.join(__dirname, "..", "extension", file), "utf8"), { filename: file })]));

@@ -2,8 +2,8 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
 const test = require("node:test");
-const { clockTest } = require("../testing/clock");
-const { withFundedBudget } = require("../testing/funded-budget");
+const { clockTest } = require("./helpers/clock");
+const { withFundedBudget } = require("./helpers/funded-budget");
 
 const summarizeHandler = require("../api/summarize.js");
 // These cases exercise Google/Mistral compatibility even on machines with a

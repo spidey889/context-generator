@@ -4,7 +4,7 @@ const path = require("node:path");
 const vm = require("node:vm");
 const test = require("node:test");
 const { webcrypto } = require("node:crypto");
-const { clockTest } = require("../testing/clock");
+const { clockTest } = require("./helpers/clock");
 const { fixtures, rpcFrame, geminiTurn, prompt } = require("./network-json-fixtures");
 const files = ["network-json-data.js", "network-fetch-main.js", "network-json-capture.js"];
 const scripts = new Map(files.map(file =>

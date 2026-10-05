@@ -3,7 +3,7 @@ const fs = require("node:fs");
 const path = require("node:path");
 const test = require("node:test");
 const vm = require("node:vm");
-const { loadTransferFlow } = require("../testing/transfer-flow");
+const { loadTransferFlow } = require("./helpers/transfer-flow");
 
 const source = fs.readFileSync(path.join(__dirname, "../extension/platform-content.js"), "utf8");
 

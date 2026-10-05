@@ -4,7 +4,7 @@ const path = require("node:path");
 const vm = require("node:vm");
 const test = require("node:test");
 const { webcrypto, createHash } = require("node:crypto");
-const { clockTest } = require("../testing/clock");
+const { clockTest } = require("./helpers/clock");
 const scripts = new Map(["claude-fetch-main.js", "claude-json-capture.js"].map(file =>
   [file, new vm.Script(fs.readFileSync(path.join(__dirname, "..", "extension", file), "utf8"), { filename: file })]));
 
@@ -364,7 +364,7 @@ function pickerHarness({ jsonEnabled = true, navigateDuringHandoff = false } = {
     return { text: "Claude conversation:\n\nUser: API-only history", messageTurnCount: 1 };
   } };
   const noop = () => {};
-  const sandbox = require("../testing/transfer-flow").loadTransferFlow({
+  const sandbox = require("./helpers/transfer-flow").loadTransferFlow({
     window, currentPlatform: { id: "claude", name: "Claude" }, claudeJsonCaptureEnabled: jsonEnabled,
     chatGptJsonCaptureEnabled: false, networkJsonCaptureEnabled: false,
     createTransferTrace: () => ({}), startTransferTelemetry: noop, markTransferTrace: noop, finishTransferTrace: noop,

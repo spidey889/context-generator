@@ -3,7 +3,7 @@ const fs = require("node:fs");
 const path = require("node:path");
 const test = require("node:test");
 const vm = require("node:vm");
-const { clockTest } = require("../testing/clock");
+const { clockTest } = require("./helpers/clock");
 
 const source = fs.readFileSync(path.join(__dirname, "..", "extension", "background.js"), "utf8");
 const manifest = JSON.parse(fs.readFileSync(path.join(__dirname, "..", "extension", "manifest.json"), "utf8"));
