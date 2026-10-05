@@ -916,6 +916,7 @@
         return "Not recorded - run a new transfer";
       }
       if ((summary.fallback?.used || tried.length > 1) && servedModel) {
+        // Only attempts before the served model belong in the failure list.
         const servedIndex = tried.lastIndexOf(servedModel);
         const failedModels = servedIndex >= 0 ? tried.slice(0, servedIndex) : tried;
         return [
