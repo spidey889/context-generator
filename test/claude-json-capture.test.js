@@ -88,6 +88,39 @@ test("Claude JSON capture keeps pasted-only user turns and multiple pasted cards
   assert.equal(capture.messageTurnCount, 2);
 });
 
+test("Claude JSON capture preserves original own text, thinking and legacy whitespace", async () => {
+  const user = "\u00a0    print('user')  \r\n";
+  const thinking = "  preserve reasoning  \r\n";
+  const answer = "    print('answer')  \n";
+  for (const legacy of [false, "absent", "empty"]) {
+    const data = fixture();
+    data.chat_messages[0].content = [{ type: "text", text: " \r\n\u00a0 " }, { type: "text", text: user }];
+    data.chat_messages[0].attachments = [];
+    data.chat_messages[2].content = [{ type: "thinking", thinking }, { type: "text", text: answer }];
+    if (legacy) {
+      if (legacy === "absent") delete data.chat_messages[0].content;
+      else data.chat_messages[0].content = [];
+      data.chat_messages[0].text = user;
+    }
+    const h = setup(data);
+    await h.window.fetch(endpoint);
+    const capture = await h.window.__capCaptureClaudeJson();
+    assert.equal(capture.text, `Claude conversation:\n\nUser: ${user}\n\nAssistant: ${thinking}\n\n${answer}`);
+    assert.equal(capture.messageTurnCount, 2);
+  }
+});
+
+test("Claude inline pasted-card matching preserves original block and card whitespace", async () => {
+  const data = fixture();
+  const pasted = "    print('paste')  \r\n";
+  data.chat_messages[0].content = [{ type: "text", text: ` \n${pasted}\n ` }];
+  data.chat_messages[0].attachments = [pastedAttachment(pasted)];
+  const h = setup(data);
+  await h.window.fetch(endpoint);
+  assert.equal((await h.window.__capCaptureClaudeJson()).text,
+    `Claude conversation:\n\nUser: ${pasted}\n\nAssistant: Private reasoning\n\nSelected answer`);
+});
+
 test("Claude JSON capture extracts only direct user/assistant text and thinking", async () => {
   const data = fixture();
   data.chat_messages[0].files = [{ file_kind: "document", text: "FILE_SENTINEL" }];
@@ -110,6 +143,7 @@ test("Claude JSON capture extracts only direct user/assistant text and thinking"
   assert.equal(capture.text, "Claude conversation:\n\nUser: Question\n\nAssistant: Own answer\n\nOwn reasoning");
   assert.equal(capture.messageTurnCount, 2);
   assert.doesNotMatch(capture.text, /SENTINEL|Duplicate fallback/);
+  assert.deepEqual([...capture.excludedContentTypes], ["artifacts", "media", "other", "tools", "uploads"]);
 });
 
 test("Claude JSON capture rejects zero usable text even when tools contain nested text", async () => {
@@ -247,22 +281,53 @@ test("Claude aborts navigation away and back, and rejects concurrent captures pr
   assert.equal(harness.stats().listeners, 1);
 });
 
+clockTest("Claude native failures retain safe fallback reasons instead of labelling every failure a request error", async () => {
+  const cases = [
+    [{ status: 206 }, "incomplete"],
+    [{ headers: { "content-range": "bytes 0-10/100" } }, "incomplete"],
+    [{ body: "PRIVATE_INVALID_JSON" }, "incomplete"],
+    [{ status: 401 }, "unavailable"],
+    [{ status: 500 }, "request_failed"],
+    [{ resources: [] }, "unavailable"],
+    [{ fetchImpl: (_url, options) => new Promise((_resolve, reject) => {
+      options.signal.addEventListener("abort", () => reject(new Error("PRIVATE_TIMEOUT_ERROR")), { once: true });
+    }) }, "timeout"]
+  ];
+  for (const [options, expected] of cases) {
+    const h = setup(fixture(), { resources: [endpoint], ...options });
+    await assert.rejects(h.window.__capCaptureClaudeJson(), error => {
+      assert.equal(error.captureFailureReason, expected);
+      assert.doesNotMatch(error.message, /PRIVATE_/);
+      return true;
+    });
+    assert.equal(h.stats().listeners, 1);
+    assert.equal(h.stats().navigationListeners, 0);
+    assert.equal(h.stats().popListeners, 0);
+  }
+});
+
 clockTest("Claude isolated bridge awaits MAIN reinstallation before requesting capture", async () => {
-  let harness;
-  let ensures = 0;
-  harness = setup(fixture(), { resources: [endpoint], runtime: { sendMessage: async message => {
-    assert.equal(message.type, "ENSURE_CLAUDE_JSON_HOOK");
-    ensures++; harness.window.__capClaudeFetchState.dispose();
-    delete harness.window.__capClaudeFetchState;
-    harness.reinstall();
-    return { ok: true };
-  } } });
-  harness.window.__capClaudeFetchState.dispose();
-  const started = Date.now();
-  await harness.window.__capCaptureClaudeJson();
-  assert.ok(Date.now() - started >= 250 && Date.now() - started < 8250, "live readiness must win within the recovery window");
-  assert.equal(ensures, 1);
-  assert.equal(harness.stats().requests, 1);
+  for (const stale of ["missing", "legacy"]) {
+    let harness;
+    let ensures = 0;
+    let legacy = stale === "legacy";
+    harness = setup(fixture(), { resources: [endpoint], beforeMessage: payload => {
+      // An open tab can still answer probes with the pre-diagnostics protocol.
+      if (legacy && payload.type === "pong") payload.version = 3;
+    }, runtime: { sendMessage: async message => {
+      assert.equal(message.type, "ENSURE_CLAUDE_JSON_HOOK");
+      ensures++; legacy = false; harness.window.__capClaudeFetchState.dispose();
+      delete harness.window.__capClaudeFetchState;
+      harness.reinstall();
+      return { ok: true };
+    } } });
+    if (stale === "missing") harness.window.__capClaudeFetchState.dispose();
+    const started = Date.now();
+    await harness.window.__capCaptureClaudeJson();
+    assert.ok(Date.now() - started >= 250 && Date.now() - started < 8250, "live readiness must win within the recovery window");
+    assert.equal(ensures, 1);
+    assert.equal(harness.stats().requests, 1);
+  }
 });
 
 
@@ -307,6 +372,10 @@ function pickerHarness({ jsonEnabled = true, navigateDuringHandoff = false } = {
     chatGptJsonCaptureEnabled: false, networkJsonCaptureEnabled: false, activeTransferTrace: null, isRunning: false, runningResetTimer: null,
     RUNNING_AUTO_RESET_MS: 360000, DESTINATION_SHEET_EXIT_MS: 0, NO_CONVERSATION_ERROR_MESSAGE: "No conversation",
     createTransferTrace: () => ({}), startTransferTelemetry: noop, markTransferTrace: noop, finishTransferTrace: noop,
+    // The sliced picker retains its real navigation guard; stub only browser
+    // listener/timer plumbing, as with the other UI boundaries below.
+    addOwnedEventListener: noop, removeOwnedEventListener: noop,
+    INLINE_PATHNAME_POLL_MS: 80, setInterval: () => 1, clearInterval: noop,
     getDetectedConversationMessageCount: () => 0, hideDestinationSheet: noop, delay: async () => {},
     showErrorOverlay: error => calls.errors.push(error), clearRunningResetTimer: noop, resetRunningFlag: noop,
     setTimeout: () => 1, transitionDestinationSheetToHandoff: async () => {
@@ -330,4 +399,8 @@ test("Claude JSON picker captures API-only history with zero rendered turns", as
   const dom = pickerHarness({ jsonEnabled: false });
   await dom.run();
   assert.deepEqual(dom.calls, { capture: 0, flow: 0, prepared: 0, dom: 0, errors: ["No conversation"] });
+  const navigated = pickerHarness({ navigateDuringHandoff: true });
+  await navigated.run();
+  assert.equal(navigated.calls.capture + navigated.calls.prepared + navigated.calls.flow, 0);
+  assert.match(navigated.calls.errors[0], /conversation changed during capture/);
 });

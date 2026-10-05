@@ -810,6 +810,7 @@
             ${sideItem("Served by", formatBackendLabel(summary))}
             ${sideItem("Model path", getModelFallbackLabel(summary), "fallback")}
             ${sideItem("Message turns", formatTurnSummary(capture), "turns")}
+            ${sideItem("Capture notes", formatCaptureDiagnostics(capture), "turns")}
           </aside>
         </section>
 
@@ -949,6 +950,23 @@
       if (provider === "mistral") return "Mistral";
       if (provider === "local-direct") return "Local";
       return "n/a";
+    }
+
+    function formatCaptureDiagnostics(capture) {
+      const diagnostics = capture.diagnostics;
+      if (!diagnostics) return "Not recorded - run a new transfer";
+      const labels = { media: "images/audio/video", tools: "tool output", artifacts: "artifacts", other: "other unsupported content" };
+      const reasons = { unavailable: "Fast capture unavailable", timeout: "Fast capture timed out", size_limit: "Fast capture exceeded a size limit", incomplete: "Conversation response incomplete", unsupported: "Unsupported content in fast capture", request_failed: "Native history request failed" };
+      const lines = [];
+      // The fallback mark precedes DOM capture, which can itself fail.
+      if (Object.hasOwn(reasons, diagnostics.jsonFallbackReason)) lines.push(`${reasons[diagnostics.jsonFallbackReason]}; ${capture.method ? "used" : "tried"} normal capture`);
+      const types = Array.isArray(diagnostics.excludedContentTypes)
+        ? Object.keys(labels).filter(type => diagnostics.excludedContentTypes.includes(type)) : null;
+      if (types === null) lines.push("Excluded types not recorded");
+      else if (types.length) lines.push(`Skipped: ${types.map(type => labels[type]).join(", ")}`);
+      else if (!diagnostics.excludedContentTypes.length) lines.push("No excluded types recorded");
+      lines.push("Separate editor-only changes are not checked");
+      return lines.join("\n");
     }
 
     function formatTurnSummary(capture) {

@@ -1,8 +1,10 @@
 (() => {
   const channel = "cap-context-chatgpt-json-v2";
+  const captureError = (message, captureFailureReason) => Object.assign(new Error(message), { captureFailureReason });
   const currentChat = (pathname = location.pathname) => pathname.match(/\/c\/([^/]+)\/?$/)?.[1];
   function serialize(data, chat, pastedTexts = {}) {
-    const blocked = reason => new Error(`ChatGPT JSON capture blocked: ${reason} Turn JSON capture off to use DOM capture.`);
+    const blocked = reason => captureError(`ChatGPT JSON capture blocked: ${reason} Turn JSON capture off to use DOM capture.`, "incomplete");
+    const excludedContentTypes = new Set();
     if ((data?.conversation_id ?? data?.id) !== chat) throw blocked("The response belongs to a different conversation.");
     const assertComplete = (scope, label) => {
       if (scope == null) return;
@@ -89,13 +91,19 @@
     };
     const turns = branch.reverse().flatMap((message, index) => {
       const role = message.author?.role;
+      if (role === "tool") excludedContentTypes.add("tools");
       if (!["user", "assistant"].includes(role) || message.metadata?.is_visually_hidden_from_conversation) return [];
+      if (role === "user" && Array.isArray(message.metadata?.attachments) && message.metadata.attachments.some(file => file?.is_big_paste !== true || file.mime_type !== "text/plain")) excludedContentTypes.add("uploads");
       if (message.recipient && message.recipient !== "all") {
         const parts = role === "assistant" ? canvasParts(message, branch[index + 1]) : [];
+        if (!parts.length) excludedContentTypes.add("tools");
         return parts.length ? [`Assistant: ${parts.join("\n\n")}`] : [];
       }
       const content = message.content;
-      if (!["text", "multimodal_text", "code", "thinking", "thoughts", "reasoning_recap"].includes(content?.content_type)) return [];
+      if (!["text", "multimodal_text", "code", "thinking", "thoughts", "reasoning_recap"].includes(content?.content_type)) {
+        excludedContentTypes.add(/image|audio|video/.test(content?.content_type || "") ? "media" : "other");
+        return [];
+      }
       assertComplete(message, "Own-turn message");
       assertComplete(message.metadata, "Own-turn metadata");
       assertComplete(content, "Own-turn content");
@@ -108,7 +116,10 @@
       // into tools, audio/image pointers, artifacts, files or their metadata.
       const parts = Array.isArray(content.parts) ? content.parts.flatMap(part => {
         if (typeof part === "string") return part.trim() ? [part] : [];
-        if (content.content_type !== "multimodal_text" || part?.content_type !== "audio_transcription") return [];
+        if (content.content_type !== "multimodal_text" || part?.content_type !== "audio_transcription") {
+          excludedContentTypes.add(/image|audio|video/.test(part?.content_type || "") ? "media" : "other");
+          return [];
+        }
         assertComplete(part, "Voice transcription");
         assertComplete(part.metadata, "Voice transcription metadata");
         if (typeof part.text !== "string") throw blocked("A voice transcription is missing its complete text string.");
@@ -181,8 +192,8 @@
     });
     if (!turns.length) throw blocked("No usable user or assistant text remains after skipping tools, files, images, and artifacts.");
     const text = `ChatGPT conversation:\n\n${turns.join("\n\n")}`;
-    if (text.length > 350000 || new TextEncoder().encode(text).length > 1400000) throw new Error("This chat is too long to transfer (limit: 350,000 characters). Try a shorter chat.");
-    return { text, messageTurnCount: turns.length };
+    if (text.length > 350000 || new TextEncoder().encode(text).length > 1400000) throw captureError("This chat is too long to transfer (limit: 350,000 characters). Try a shorter chat.", "size_limit");
+    return { text, messageTurnCount: turns.length, excludedContentTypes: [...excludedContentTypes].sort() };
   }
 
   function waitForHook(timeoutMs, install = false) {
@@ -238,7 +249,7 @@
       // on every capture. Missing/older/replaced hooks get bounded recovery.
       if (!await waitForHook(250)) {
         if (typeof chrome === "undefined" || !chrome.runtime?.sendMessage || !await waitForHook(8000, true)) {
-          throw new Error("Fast capture isn't ready yet. Refresh this chat and try again, or turn off the lightning button.");
+          throw captureError("Fast capture isn't ready yet. Refresh this chat and try again, or turn off the lightning button.", "unavailable");
         }
       }
       if (changed || currentChat() !== chat) throw new Error("The ChatGPT conversation changed during capture.");
@@ -252,16 +263,17 @@
           try {
             if (changed || currentChat() !== chat || reply.chat !== chat) throw new Error("The ChatGPT conversation changed during capture.");
             if (reply.error) {
-              if (reply.error === "size") throw new Error("This chat is too long to transfer (limit: 350,000 characters). Try a shorter chat.");
+              if (reply.error === "size") throw captureError("This chat is too long to transfer (limit: 350,000 characters). Try a shorter chat.", "size_limit");
               const reasons = { auth: "ChatGPT authentication is unavailable. Refresh this signed-in chat.", partial: "ChatGPT returned a partial/ranged response.", busy: "Another ChatGPT JSON capture is running. Try again after it finishes.", format: "ChatGPT returned a non-JSON response.", changed: "The ChatGPT conversation changed during capture.", timeout: "The full-tree request timed out.", network: "The full-tree request failed or returned invalid JSON." };
               reasons.paste = "A pasted text attachment could not be read completely. Refresh this chat and try again.";
               const reason = reply.error === "http" && Number.isInteger(reply.status) && reply.status >= 100 && reply.status <= 599 ? `The full-tree request returned HTTP ${reply.status}.` : reasons[reply.error] || "The full-tree request failed.";
-              throw new Error(`ChatGPT JSON capture failed: ${reason} Turn JSON capture off to use DOM capture.`);
+              const failureReason = { auth: "unavailable", busy: "unavailable", partial: "incomplete", format: "incomplete", paste: "incomplete", timeout: "timeout" }[reply.error] || "request_failed";
+              throw captureError(`ChatGPT JSON capture failed: ${reason} Turn JSON capture off to use DOM capture.`, failureReason);
             }
             resolve(serialize(reply.data, chat, reply.pastedTexts));
           } catch (error) { reject(error); }
         };
-        const timer = setTimeout(() => { cleanup(); reject(new Error("ChatGPT JSON capture timed out. Refresh or turn JSON capture off.")); }, 17000);
+        const timer = setTimeout(() => { cleanup(); reject(captureError("ChatGPT JSON capture timed out. Refresh or turn JSON capture off.", "timeout")); }, 17000);
         window.addEventListener("message", receive);
         window.postMessage({ channel, type: "request", id, chat }, location.origin);
       });

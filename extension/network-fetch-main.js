@@ -3,7 +3,7 @@
   if (!platform || !globalThis.__capNetworkJsonData) return;
   // Advance readiness version with adapter/contract changes: old MAIN closures
   // can survive extension reloads and must be replaced before a new capture.
-  const version = platform === "deepseek" ? 3 : 2, channel = "cap-context-network-json-v1";
+  const version = platform === "deepseek" ? 4 : 3, channel = "cap-context-network-json-v1";
   const previous = window.__capNetworkFetchState;
   if (previous?.version === version && window.fetch === previous.fetch
     && (platform === "grok" || previous?.ownsObservation?.())) return;
@@ -69,13 +69,13 @@
     if (request.type !== "request") return;
     const { chat, selected } = current();
     const reply = { channel, type: "response", platform, chat, selected, id: request.id };
-    if (active) { window.postMessage({ ...reply, error: "Another fast capture is running. Try again after it finishes." }, location.origin); return; }
+    if (active) { window.postMessage({ ...reply, error: "Another fast capture is running. Try again after it finishes.", captureFailureReason: "unavailable" }, location.origin); return; }
     const controller = new AbortController();
     active = controller;
-    const timer = setTimeout(() => controller.abort(), 25000);
+    const timer = setTimeout(() => controller.abort("capture_timeout"), 25000);
     const check = () => {
       const now = current();
-      if (controller.signal.aborted) throw new api.CaptureError("The capture request timed out or was cancelled.");
+      if (controller.signal.aborted) throw new api.CaptureError("The capture request timed out or was cancelled.", controller.signal.reason === "capture_timeout" ? "timeout" : "request_failed");
       if (!chat || request.chat !== chat || request.selected !== selected || now.chat !== chat || now.selected !== selected) throw new api.CaptureError("The conversation changed during capture.");
     };
     const changed = event => {
@@ -92,7 +92,7 @@
       check();
       const response = await Reflect.apply(nativeFetch, window, [url, { credentials: "same-origin", ...options, redirect: "error", signal: controller.signal }]);
       check();
-      if (response.status !== 200 || response.headers.get("content-range")) throw new api.CaptureError("The history request failed or returned a partial response.");
+      if (response.status !== 200 || response.headers.get("content-range")) throw new api.CaptureError("The history request failed or returned a partial response.", response.status === 206 || response.headers.get("content-range") ? "incomplete" : "request_failed");
       const contentType = response.headers.get("content-type") || "";
       if (type === "json" && !/application\/json/i.test(contentType)) throw new api.CaptureError("The history request returned an unsupported response.");
       if (type === "rpc" && !/(application\/json|text\/plain)/i.test(contentType)) throw new api.CaptureError("Gemini returned an unsupported RPC response.");
@@ -119,7 +119,7 @@
           if (endpoint) geminiTemplate = { url: endpoint };
         }
         const at = window.WIZ_global_data?.SNlM0e || geminiTemplate?.at;
-        if (!geminiTemplate?.url || typeof at !== "string" || !at) throw new api.CaptureError("Refresh this signed-in Gemini chat to make fast capture ready.");
+        if (!geminiTemplate?.url || typeof at !== "string" || !at) throw new api.CaptureError("Refresh this signed-in Gemini chat to make fast capture ready.", "unavailable");
         const url = new URL(geminiTemplate.url);
         url.searchParams.set("rpcids", "hNvQHb");
         url.searchParams.set("source-path", location.pathname);
@@ -152,7 +152,7 @@
       } else {
         // Omitting x-device-id/cache client headers makes DeepSeek return a
         // full REPLACE snapshot. A MERGE/delta must never count as full history.
-        if (!auth) throw new api.CaptureError("Refresh this signed-in DeepSeek chat to make fast capture ready.");
+        if (!auth) throw new api.CaptureError("Refresh this signed-in DeepSeek chat to make fast capture ready.", "unavailable");
         const data = await read(`/api/v0/chat/history_messages?chat_session_id=${encodeURIComponent(chat)}`, { headers: { authorization: auth } });
         const branch = api.deepseekBranch(data, chat);
         const files = Object.create(null);
@@ -181,6 +181,8 @@
       const reason = error?.message;
       reply.error = error instanceof api.CaptureError && reason.length < 180
         ? reason : "The conversation could not be read completely. Refresh this chat and try again.";
+      reply.captureFailureReason = error instanceof api.CaptureError ? error.captureFailureReason
+        : controller.signal.reason === "capture_timeout" ? "timeout" : "request_failed";
     } finally {
       clearTimeout(timer);
       window.navigation?.removeEventListener("navigate", changed);
