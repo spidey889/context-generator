@@ -42,6 +42,6 @@ Cap Context handles the handoff so you can stay focused on the work.
 
 If the button does not appear immediately after installation, refresh the AI website.
 
-[Privacy policy](PRIVACY.md) · [License](LICENSE)
+[Privacy policy](PRIVACY.md) · [License](LICENSE) · [Development checks](LOGIC.md#verification-and-diagnosis)
 
 Copyright © 2026 Vinit Rajpurohit. All rights reserved.

@@ -7,6 +7,7 @@ const vm = require("node:vm");
 const { spawn } = require("node:child_process");
 const { fixtures: networkFixtures, rpcFrame } = require("../test/network-json-fixtures");
 const { createTelemetrySmokeFixture } = require("./telemetry-smoke-fixture");
+const { saveSmokeFailure } = require("./smoke-failure-artifacts");
 
 const REPO_ROOT = path.resolve(__dirname, "..");
 const SOURCE_SENTINEL = "SMOKE_USER_SENTINEL: preserve the deployment checklist.";
@@ -49,6 +50,7 @@ const CHATGPT_PASTE_AUTH_SMOKE = JSON_SOURCE === "chatgpt" && process.env.CAP_CO
 const CLAUDE_PARTIAL_SMOKE = JSON_SOURCE === "claude" && process.env.CAP_CONTEXT_CLAUDE_PARTIAL_SMOKE === "1";
 const JSON_FALLBACK_SMOKE = Boolean(CHATGPT_FAILURE_SMOKE || CLAUDE_PARTIAL_SMOKE || NETWORK_FAILURE);
 const TELEMETRY_DATABASE_SMOKE = process.env.CAP_CONTEXT_TELEMETRY_SMOKE === "1";
+const FAILURE_ARTIFACT_DIR = process.env.CAP_CONTEXT_SMOKE_ARTIFACT_DIR || "";
 
 class CdpSession {
   constructor(socket) {
@@ -1053,7 +1055,9 @@ async function run() {
       process.stdout.write("✓ Empty ChatGPT shows its error directly, opens no destination, and supports repeated attempts/reduced motion.\n");
     }
 
-    if (!JSON_SOURCE || JSON_SOURCE === "chatgpt") {
+    // The DOM case owns the full placement suite. JSON cases exercise capture,
+    // reload and fallback without repeating unrelated geometry in every run.
+    if (!JSON_CAPTURE_SMOKE) {
       const originalDraft = await sourceSession.evaluate(`document.getElementById('prompt-textarea').textContent`);
       for (const draft of ["", Array.from({length:12},(_,i)=>'Inline draft line '+i).join('\n')]) {
         await sourceSession.evaluate(`(() => {
@@ -1190,6 +1194,7 @@ async function run() {
       process.stdout.write("✓ ChatGPT's 36px inline slot survives empty/long drafts, 760/390/320px widths and editor remount without native-control overlap.\n");
     }
 
+    if (!JSON_CAPTURE_SMOKE) {
     for (const platform of ["gemini", "grok", "deepseek"]) {
       const url = `${origin}/provider-placement?${SMOKE_PLATFORM_QUERY}=${platform}`;
       await browserSession.call("Target.createTarget", { url });
@@ -1315,12 +1320,14 @@ async function run() {
                 .map(n=>[n.className,n.getAttribute('data-context-generator-provider-inline')])};
           })()`))}`;
         } catch { /* Keep the original assertion if the fixture disconnected. */ }
+        await saveSmokeFailure(FAILURE_ARTIFACT_DIR, error, { [platform]: session }, browserOutput, `${platform}-placement`);
         throw error;
       } finally { session.close(); await browserSession.call("Target.closeTarget", { targetId: target.id }); }
     }
 
-    // Grok JSON mode verifies capture independently of unrelated Claude geometry.
-    if (JSON_SOURCE !== "grok") {
+    }
+
+    if (!JSON_CAPTURE_SMOKE) {
     const claudePlacementUrl = `${origin}/new?${SMOKE_PLATFORM_QUERY}=claude`;
     await browserSession.call("Target.createTarget", { url: claudePlacementUrl });
     const claudePlacementTarget = await waitFor(async () => {
@@ -1495,9 +1502,19 @@ async function run() {
           await waitFor(() => session.evaluate(probe), `${platform} free-layout draft placement at ${width}px`);
         }
         await session.call("Emulation.clearDeviceMetricsOverride");
-        // Resize invalidates an open picker. Drain its scheduled placement frames
-        // before testing a click, and require the desktop model anchor to return.
-        await session.evaluate(`new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))`);
+        // CDP can return before the final native resize event. Wait for a quiet
+        // viewport and placement frames before opening a resize-owned picker.
+        await session.evaluate(`new Promise(resolve => {
+          let timer, frame;
+          const finish = () => { removeEventListener("resize", changed); resolve(); };
+          const changed = () => {
+            clearTimeout(timer); cancelAnimationFrame(frame);
+            timer = setTimeout(() => {
+              frame = requestAnimationFrame(() => { frame = requestAnimationFrame(finish); });
+            }, 100);
+          };
+          addEventListener("resize", changed); changed();
+        })`);
         await waitFor(async () => (await session.evaluate(probe))?.beforeModel, `${platform} free-layout desktop anchor after resize`);
         await session.evaluate(`document.getElementById("context-generator-bubble").click()`);
         await waitFor(() => session.evaluate(`getComputedStyle(document.getElementById("context-generator-destination-sheet")).opacity === "1"`), `${platform} free-layout picker`);
@@ -1529,10 +1546,11 @@ async function run() {
         }
         process.stdout.write(`✓ ${platform} free layout: desktop/760/390/320px, drafts, picker dismissal and composer replacement.\n`);
       } catch (error) {
-        process.stderr.write(`Free ${platform} diagnostics: ${JSON.stringify(await session.evaluate(`(() => {
+        await saveSmokeFailure(FAILURE_ARTIFACT_DIR, error, { [platform]: session }, browserOutput, `${platform}-free`);
+        try { process.stderr.write(`Free ${platform} diagnostics: ${JSON.stringify(await session.evaluate(`(() => {
           const b=document.getElementById("context-generator-bubble"), s=document.getElementById("context-generator-destination-sheet");
           return { bubble:b?.outerHTML.slice(0,800), sheet:s?.style.cssText, opacity:s&&getComputedStyle(s).opacity, width:innerWidth };
-        })()`))}\n`);
+        })()`))}\n`); } catch { /* Preserve the original failure if the page disconnected. */ }
         throw error;
       } finally { session.close(); await browserSession.call("Target.closeTarget", { targetId }); }
     }
@@ -1762,16 +1780,20 @@ async function run() {
     assert.ok(statusHistory.some(text => text.startsWith("Context ready.")), "Ready cue follows verified insertion.");
     const workerTarget = (await getTargets(devToolsPort)).find(target => target.type === "service_worker" && target.url.endsWith("/background.js"));
     assert.ok(workerTarget, "Transfer worker must be available for tab-placement verification.");
+    // ChatGPT JSON coverage moves the fixture onto a project route. Locate its
+    // current SPA URL rather than the URL used to create the original page.
+    const currentSourceUrl = await sourceSession.evaluate("location.href");
     const workerSession = await CdpSession.connect(workerTarget.webSocketDebuggerUrl);
     let tabPlacement;
     try {
       tabPlacement = await workerSession.evaluate(`(async () => {
         const tabs = await chrome.tabs.query({});
-        const source = tabs.find(tab => tab.url?.startsWith(${JSON.stringify(sourceUrl)}));
+        const source = tabs.find(tab => tab.url === ${JSON.stringify(currentSourceUrl)});
         const destination = tabs.find(tab => tab.url?.startsWith(${JSON.stringify(`${origin}/destination`)}));
         return { source, destination };
       })()`);
     } finally { workerSession.close(); }
+    assert.ok(tabPlacement.source && tabPlacement.destination, "Both transfer tabs must be found at their current routes.");
     assert.equal(tabPlacement.destination.windowId, tabPlacement.source.windowId);
     assert.equal(tabPlacement.destination.index, tabPlacement.source.index + 1);
     assert.equal(tabPlacement.destination.openerTabId, tabPlacement.source.id);
@@ -1864,6 +1886,8 @@ async function run() {
       } catch { /* Preserve the original error if the failed page disconnected. */ }
     }
     if (browserOutput.trim()) error.message += `\nBrave output:\n${browserOutput.trim()}`;
+    await saveSmokeFailure(FAILURE_ARTIFACT_DIR, error,
+      { source: sourceSession, claude: claudePlacementSession, destination: destinationSession }, browserOutput);
     throw error;
   } finally {
     destinationSession?.close();

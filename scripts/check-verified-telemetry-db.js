@@ -1,5 +1,5 @@
 // Replay the real migration chain in a local PostgreSQL engine. No hosted reads
-// or writes. CI installs pinned PGlite in a temporary directory; the application
+// or writes. PGlite is a locked development dependency; the application
 // itself retains its existing no-runtime-dependencies contract.
 const assert = require("node:assert/strict");
 const fs = require("node:fs");

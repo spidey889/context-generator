@@ -34,17 +34,16 @@ jobs:
       - uses: actions/setup-node@v6
         with:
           node-version: 22
+          cache: npm
+      - name: Install locked test dependencies
+        run: npm ci --no-audit --no-fund
       - name: Deterministic tests
         run: npm test
       - name: Long capture regressions
         run: npm run test:slow
 
-      - name: Install pinned local database test engine
-        run: npm install --prefix "$RUNNER_TEMP/cap-context-db-check" --no-audit --no-fund @electric-sql/pglite@0.5.8
       - name: Replay real SQL and verify telemetry contracts
         timeout-minutes: 5
-        env:
-          PGLITE_MODULE_PATH: ${{ runner.temp }}/cap-context-db-check/node_modules/@electric-sql/pglite
         run: node scripts/check-verified-telemetry-db.js
       - name: Install Brave for local browser fixtures
         run: |
@@ -52,9 +51,44 @@ jobs:
           sudo curl -fsSLo /etc/apt/sources.list.d/brave-browser-release.sources https://brave-browser-apt-release.s3.brave.com/brave-browser.sources
           sudo apt-get update -qq
           sudo apt-get install -y --no-install-recommends brave-browser xvfb
-      - name: Installed Brave transfer, placement and draft checks (no AI calls)
+      - name: Brave DOM transfer, placement and local telemetry database
         timeout-minutes: 3
-        run: xvfb-run -a npm run test:extension-smoke
+        shell: bash
+        env:
+          CAP_CONTEXT_TELEMETRY_SMOKE: "1"
+          CAP_CONTEXT_SMOKE_ARTIFACT_DIR: .gstack/browser-smoke/dom-telemetry
+        run: |
+          mkdir -p "$CAP_CONTEXT_SMOKE_ARTIFACT_DIR"
+          xvfb-run -a npm run test:extension-smoke 2>&1 | tee "$CAP_CONTEXT_SMOKE_ARTIFACT_DIR/run.log"
+      - name: Brave ChatGPT fast capture after extension reload
+        timeout-minutes: 3
+        shell: bash
+        env:
+          CAP_CONTEXT_JSON_SMOKE: chatgpt
+          CAP_CONTEXT_CHATGPT_RELOAD_SMOKE: "1"
+          CAP_CONTEXT_SMOKE_ARTIFACT_DIR: .gstack/browser-smoke/chatgpt-reload
+        run: |
+          mkdir -p "$CAP_CONTEXT_SMOKE_ARTIFACT_DIR"
+          xvfb-run -a npm run test:extension-smoke 2>&1 | tee "$CAP_CONTEXT_SMOKE_ARTIFACT_DIR/run.log"
+      - name: Brave Claude fast capture fallback
+        timeout-minutes: 3
+        shell: bash
+        env:
+          CAP_CONTEXT_JSON_SMOKE: "1"
+          CAP_CONTEXT_CLAUDE_PARTIAL_SMOKE: "1"
+          CAP_CONTEXT_SMOKE_ARTIFACT_DIR: .gstack/browser-smoke/claude-fallback
+        run: |
+          mkdir -p "$CAP_CONTEXT_SMOKE_ARTIFACT_DIR"
+          xvfb-run -a npm run test:extension-smoke 2>&1 | tee "$CAP_CONTEXT_SMOKE_ARTIFACT_DIR/run.log"
+      - name: Browser failure screenshots and logs
+        if: failure() && !cancelled()
+        uses: actions/upload-artifact@v4
+        with:
+          name: browser-smoke-failure
+          path: .gstack/browser-smoke/
+          include-hidden-files: true
+          if-no-files-found: ignore
+          retention-days: 7
 
   production-evaluation:
     name: Live production summary check
