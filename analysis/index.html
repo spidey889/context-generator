@@ -634,6 +634,7 @@
     const refreshButton = document.getElementById("refreshButton");
     const demoMode = new URLSearchParams(location.search).has("demo");
     const postTargetOrigin = location.protocol === "file:" || location.origin === "null" ? "*" : location.origin;
+    // Reuse formatters across cards instead of constructing one per value.
     const numberFormatter = new Intl.NumberFormat("en-US");
     const dateFormatter = new Intl.DateTimeFormat("en-US", {
       month: "short",
@@ -717,6 +718,8 @@
     });
 
     window.addEventListener("message", (event) => {
+      // The extension bridge owns storage access; this page consumes its messages.
+      // A matching source name alone is insufficient without the window check.
       if (event.source !== window || event.data?.source !== STORAGE_BRIDGE_SOURCE) return;
 
       if (event.data.type === "BRIDGE_READY") {
@@ -847,6 +850,8 @@
       `;
 
       const rawScrapedText = document.getElementById("rawScrapedText");
+      // Keep captured markup literal rather than inserting it as HTML.
+      // Raw transcripts must also stay outside the copied receipt details.
       if (rawScrapedText) rawScrapedText.textContent = rawText;
       rawScrapeButton.disabled = !rawText;
       if (!rawText) rawScrapeOpen = false;
@@ -911,6 +916,8 @@
       if (!summary) return "n/a";
       const tried = Array.isArray(summary.modelsTried) ? summary.modelsTried.filter(Boolean) : [];
       const servedModel = summary.model || null;
+      // Older receipts can contain model IDs this page no longer recognizes.
+      // Preserve the warning rather than inventing a label for an unknown route.
       if ((servedModel && formatModelDisplayName(servedModel) === "n/a")
         || tried.some((model) => formatModelDisplayName(model) === "n/a")) {
         return "Not recorded - run a new transfer";
@@ -958,6 +965,8 @@
     function formatCaptureDiagnostics(capture) {
       const diagnostics = capture.diagnostics;
       if (!diagnostics) return "Not recorded - run a new transfer";
+      // Only known categories become labels; never echo arbitrary receipt values.
+      // Uploads intentionally have no visible label in the capture notes.
       const labels = { media: "images/audio/video", tools: "tool output", artifacts: "artifacts", other: "other unsupported content" };
       const reasons = { unavailable: "Fast capture unavailable", timeout: "Fast capture timed out", size_limit: "Fast capture exceeded a size limit", incomplete: "Conversation response incomplete", unsupported: "Unsupported content in fast capture", request_failed: "Native history request failed" };
       const lines = [];
@@ -1009,6 +1018,7 @@
     }
 
     function escapeHtml(value) {
+      // Escape ampersands first so newly added entities are not escaped again.
       return String(value ?? "")
         .replaceAll("&", "&amp;")
         .replaceAll("<", "&lt;")
