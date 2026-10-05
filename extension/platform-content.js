@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-05-destination-ownership-v104";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-05-source-ownership-v105";
   const INLINE_PILL_SIZE = 36;
   const ownedUiStyleSheets = new Map();
   const CLAUDE_INLINE_STYLE_ID = "context-generator-claude-inline-styles";
@@ -627,6 +627,7 @@
     if (!instanceActive) return;
     instanceActive = false;
     if (activeTransferTrace) activeTransferTrace.expired = true;
+    activeTransferTrace?.sourceGuard?.dispose();
     cancelPendingPasteRecheck();
     extensionRuntime.onMessage.removeListener?.(handleRuntimeMessage);
     disableFloatingButtonMonitoring();
@@ -807,6 +808,7 @@
       getVirtualSweepStepRatio,
       getVirtualSweepTerminalQuietTimeout,
       createTransferTrace,
+      startTransferDeadline,
       markCaptureDone,
       buildLatestTransferStats,
       getSafeTelemetryFailureReason,
@@ -1033,6 +1035,7 @@
       error.code = "transfer_timeout";
       throw error;
     }
+    trace?.sourceGuard?.check();
   }
 
   function createConversationGuard(message, identify = (location) => location.pathname + (location.search || "")) {
@@ -1070,6 +1073,9 @@
 
   function startTransferDeadline(trace) {
     activeTransferTrace = trace;
+    // Capture, including DOM fallback, belongs to the chat selected before any
+    // animation, scroll or attachment await. A later return cannot revive it.
+    trace.sourceGuard = createConversationGuard("The conversation changed during capture. Return to the source chat and try again.");
     trace.deadlineAt = Date.now() + RUNNING_AUTO_RESET_MS;
     runningResetTimer = setTimeout(() => {
       trace.expired = true;
@@ -1125,6 +1131,7 @@
     if (expandedCount > 0) {
       await waitForConversationCaptureToSettle(Math.min(1200, getSourceScrollStableTimeout()));
     }
+    checkTransferDeadline(transferTrace);
   }
 
   async function waitForConversationCaptureToSettle(timeoutMs = getSourceScrollStableTimeout()) {
@@ -1406,9 +1413,11 @@
           card.click?.();
           panel = await waitForPastedContentPanel(turn);
         }
+        checkTransferDeadline(transferTrace);
         if (!panel) continue;
 
         const fullText = await getPastedContentPanelText(panel);
+        checkTransferDeadline(transferTrace);
         if (fullText.length < 2) continue;
 
         const cardAriaLabel = cleanText(card.getAttribute?.("aria-label") || "");
@@ -1422,9 +1431,11 @@
         });
         capturedCount += 1;
       } catch (error) {
+        if (["conversation_changed", "transfer_timeout"].includes(error?.code)) throw error;
         console.debug("[Context Generator] Could not capture pasted content:", error?.message || error);
       } finally {
         if (panel && isVisible(panel)) {
+          checkTransferDeadline(transferTrace);
           try {
             await closePastedContentPanel(panel);
           } catch (error) {
@@ -1958,6 +1969,7 @@
 
   function finishTransferTrace(trace, telemetryFailureReason = null) {
     if (!trace || trace.completed) return;
+    trace.sourceGuard?.dispose();
     trace.completed = true;
     const totalMs = Math.round(getNow() - trace.startedAt);
     persistLatestTransferStats(trace, totalMs);
@@ -3324,7 +3336,9 @@
     while (Date.now() - startedAt <= timeoutMs) {
       checkTransferDeadline(transferTrace);
       try {
-        return await scrapeConversationTextForTransfer();
+        const capture = await scrapeConversationTextForTransfer();
+        checkTransferDeadline(transferTrace);
+        return capture;
       } catch (error) {
         if (!isNoConversationError(error)) throw error;
         lastEmptyError = error;

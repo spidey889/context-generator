@@ -4,6 +4,7 @@ A short history of decisions and regressions that matter when changing the code.
 
 ## 2026-10-05
 
+- **Source chat ownership (T02).** Pinned each picker/toolbar attempt before its first await and checked the navigation latch through capture and summary dispatch. DOM sweeps and attachment reads now abort on chat changes, including navigation away and back during JSON-to-DOM fallback. Added automated capture/orchestration regressions; browser checks were explicitly excluded.
 - **Destination chat ownership (T01).** Restricted prepared-tab reuse/activation and content insertion to new-chat surfaces. Added a navigation latch through paste retries, focus and delayed recovery, preserving initial landing redirects and same-route editor remounts. Added automated regressions for saved/pending chats, focus navigation and away-and-back recovery; browser checks were explicitly excluded.
 
 ## 2026-10-04

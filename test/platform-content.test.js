@@ -1830,6 +1830,54 @@ clockTest("destination retry permits initial landing redirects but cancels a rou
   }
 });
 
+clockTest("source DOM sweep rejects another chat instead of returning a mixed transcript", async () => {
+  for (const awayAndBack of [false, true]) {
+    const root = new FakeElement({ attrs: { role: "main", "data-overflow-y": "auto" } });
+    root.scrollHeight = 1300;
+    root.clientHeight = 600;
+    const a = new FakeElement({ text: "Selected chat A contains a private project question.", attrs: { "data-message-author-role": "user" } });
+    const b = new FakeElement({ text: "Unselected chat B contains different private account details.", attrs: { "data-message-author-role": "assistant" } });
+    a.parentElement = root;
+    root.children = [a];
+    const elements = [root, a];
+    const hooks = loadPlatformContent(elements, "chatgpt.com", { pathname: "/c/source" });
+    hooks.startTransferDeadline(hooks.createTransferTrace("claude", "extension icon"));
+    const scroll = root.scrollTo.bind(root);
+    root.scrollTo = (...args) => {
+      scroll(...args);
+      if (root.scrollTop <= 0) return;
+      hooks.navigate("/c/other");
+      if (awayAndBack) hooks.navigate("/c/source");
+      b.parentElement = root;
+      root.children = [b];
+      elements.splice(1, elements.length - 1, b);
+    };
+    await assert.rejects(hooks.scrapeConversationTextWhenReady(), error => error.code === "conversation_changed");
+    hooks.teardownContextGeneratorInstance();
+    assert.equal(hooks.getOwnedLifecycleResourceCounts().intervals, 0);
+  }
+});
+
+clockTest("source preparation and summary dispatch reject navigation without transmitting text", async () => {
+  for (const stage of ["prepare", "summary"]) {
+    const messages = [];
+    const turn = new FakeElement({ text: "Selected source conversation has a verified user turn.", attrs: { "data-message-author-role": "user" } });
+    const hooks = loadPlatformContent([turn], "chatgpt.com", { pathname: "/c/source", runtimeSendMessage: async message => {
+      messages.push(message);
+      return { ok: true };
+    } });
+    const trace = hooks.createTransferTrace("claude", "destination tile");
+    hooks.startTransferDeadline(trace);
+    const change = () => { hooks.popstate("/c/other"); hooks.popstate("/c/source"); };
+    if (stage === "prepare") setTimeout(change, 100);
+    else change();
+    await assert.rejects(stage === "prepare" ? hooks.prepareSourceForCapture() : hooks.summarizeWithBackend("verified source text", trace),
+      error => error.code === "conversation_changed");
+    assert.equal(messages.length, 0);
+    hooks.teardownContextGeneratorInstance();
+  }
+});
+
 test("opening the destination picker does not scrape or summarize", () => {
   const source = fs.readFileSync(SOURCE_PATH, "utf8");
   const pickerStart = source.indexOf("function toggleDestinationSheet()");

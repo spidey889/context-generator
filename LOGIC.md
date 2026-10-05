@@ -72,6 +72,7 @@ The extension-toolbar action skips the picker and always uses DOM capture. Its d
 - Speed is default-on in the picker. A saved chat uses fresh JSON; opting out or an unsaved chat uses DOM. The opt-out lasts for the current page instance and survives picker reopening, but resets on reload/reinjection.
 - An empty unsaved chat fails before handoff, capture or destination preparation. An unsaved chat with rendered turns can use DOM. Saved JSON chats may be captured before their native history mounts.
 - JSON failure announces `Fast capture failed. Using normal capture instead.` and runs DOM preparation/sweep once within the same attempt and prepared destination. Navigation, identity or session cancellation aborts instead of capturing a different chat. Only the completed capture is submitted for summarization.
+- Picker and toolbar attempts pin the source route before their first await. A navigation latch follows preparation, DOM/attachment reads, JSON fallback and summary dispatch; away-and-back navigation cannot revive an attempt. Every capture result is checked before use, and terminal completion/teardown removes the guard's listeners and timer.
 - Picker telemetry starts before empty-chat validation, so early exits are visible as safe metadata. A destination already prepared before a later failure may remain open unused.
 - Source-local full-transcript recovery is available only after supported text was verified and captured. It handles summary-service failure, not missing/unverified capture.
 
