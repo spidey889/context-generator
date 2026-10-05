@@ -155,7 +155,7 @@ Routing and lifecycle:
 
 - The hook retains a bounded exact-chat endpoint map across replacement, even after resource timing evicts the route. Late installation can recover routes from resource timing; a 1.5-second wait permits an initial/SPA request to expose a missing endpoint. Other-chat prefetches cannot replace the selected route. Never guess an organization when no matching route exists.
 - Rebuild the observed URL with full-tree/message/all-tool/inline-comparison/strong-consistency parameters, removing pagination/window parameters. This asks for full history; it does not make unsupported tool content eligible.
-- Current readiness uses hook v3 on channel `cap-context-claude-json-v2`; legacy v1 hooks are isolated. Installation is idempotent and replaces handlers rather than accumulating them.
+- Current readiness uses hook v4 on channel `cap-context-claude-json-v2`; legacy v1 hooks are isolated. Installation is idempotent and replaces handlers rather than accumulating them. MAIN reports bounded native failure categories, including its own 15-second timeout, without returning upstream/parser error text.
 - Navigation API changes and `popstate` cancel setup, fetching and response delivery. Recheck chat path/identity after parsing. Refresh is a recovery option when neither a route history nor a matching request exists.
 
 Included content:
@@ -357,7 +357,7 @@ Receipts/outbox persist in `chrome.storage.local`. Active snapshots prefer `chro
 
 Latest Run records transfer/capture timings, counts, sizes, profile, actual serving/attempted models, fallback/finish reason, token usage, status and exact captured text. It does not store generated summary text. The matched analysis bridge, not the page directly, reads extension storage; both background and bridge strip expired raw text. The serving model is excluded from the failed portion of the fallback log, and cache reuse preserves provider timing/attempt metadata. Current labels cover four configured OpenRouter models, both Google routes, Ministral and local-direct; unsupported paths ask for a new transfer instead of showing retired routes.
 
-Capture notes retain local-only observed exclusion categories (`uploads`, `media`, `tools`, `artifacts`, `other`) and a bounded JSON-to-DOM fallback reason. Uploaded-file labels are hidden in the displayed notes. They contain no filenames, IDs, URLs or raw errors and are not added to backend requests or telemetry. No recorded exclusions means none were identified by that adapter, not proof that every native/editor-only item was captured; DOM paths and older receipts can leave exclusions unrecorded.
+Capture notes retain local-only observed exclusion categories (`uploads`, `media`, `tools`, `artifacts`, `other`) and a bounded JSON-to-DOM fallback reason. Uploaded-file labels are hidden in the displayed notes. They contain no filenames, IDs, URLs or raw errors and are not added to backend requests or telemetry. A fallback reason records the attempt; the notes say normal capture was used only after a capture completed. No recorded exclusions means none were identified by that adapter, not proof that every native/editor-only item was captured; DOM paths and older receipts can leave exclusions unrecorded.
 
 **Copy all details** copies displayed receipt cards/timeline as label/value text, excluding raw chat. It is disabled without a receipt and reports actual clipboard success/failure with accessible status. A selection-based fallback supports clipboard restrictions/local files.
 

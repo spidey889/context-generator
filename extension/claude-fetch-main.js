@@ -1,5 +1,5 @@
 (() => {
-  const version = 3;
+  const version = 4;
   const previous = window.__capClaudeFetchState;
   if (previous?.version === version && window.fetch === previous.fetch) return;
   previous?.dispose();
@@ -50,7 +50,8 @@
     }
     const controller = new AbortController();
     active = controller;
-    const timer = setTimeout(() => controller.abort(), 15000);
+    const timer = setTimeout(() => controller.abort("capture_timeout"), 15000);
+    let captureFailureReason = "request_failed";
     const changed = event => {
       const destination = event?.destination ? new URL(event.destination.url) : location;
       if (destination.origin !== location.origin || destination.pathname !== `/chat/${chat}`) controller.abort();
@@ -67,7 +68,10 @@
         await new Promise(resolve => setTimeout(resolve, 50));
       }
       if (controller.signal.aborted || location.pathname !== `/chat/${chat}`) throw new Error("changed");
-      if (!endpoints.has(chat)) throw new Error("routing");
+      if (!endpoints.has(chat)) {
+        captureFailureReason = "unavailable";
+        throw new Error("routing");
+      }
       const captureUrl = new URL(endpoints.get(chat));
       captureUrl.search = "";
       captureUrl.searchParams.set("tree", "True");
@@ -76,13 +80,20 @@
       captureUrl.searchParams.set("include_inline_comparison", "true");
       captureUrl.searchParams.set("consistency", "strong");
       const response = await Reflect.apply(nativeFetch, window, [captureUrl.href, { credentials: "same-origin", cache: "no-store", signal: controller.signal }]);
-      if (response.status !== 200 || response.headers.has("content-range") || !response.headers.get("content-type")?.includes("application/json")) throw new Error("transport");
-      const data = await response.clone().json();
+      if (response.status !== 200 || response.headers.has("content-range") || !response.headers.get("content-type")?.includes("application/json")) {
+        captureFailureReason = [401, 403].includes(response.status) ? "unavailable"
+          : response.status === 206 || response.headers.has("content-range") || response.status === 200 ? "incomplete" : "request_failed";
+        throw new Error("transport");
+      }
+      let data;
+      try { data = await response.clone().json(); }
+      catch (error) { captureFailureReason = "incomplete"; throw error; }
       if (controller.signal.aborted || location.pathname !== `/chat/${chat}` || data.uuid !== chat) throw new Error("changed");
       reply.data = data;
     } catch {
       // Upstream/network/JSON-parser errors may contain private response content.
       reply.error = "capture_failed";
+      reply.captureFailureReason = controller.signal.reason === "capture_timeout" ? "timeout" : captureFailureReason;
     } finally {
       clearTimeout(timer);
       window.navigation?.removeEventListener("navigate", changed);

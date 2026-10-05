@@ -158,7 +158,7 @@
       const receive = event => {
         const reply = event.data;
         if (event.source === window && event.origin === location.origin && reply?.channel === channel
-          && reply.type === "pong" && reply.id === id && reply.version === 3) finish(true);
+          && reply.type === "pong" && reply.id === id && reply.version === 4) finish(true);
       };
       const ping = () => {
         if (settled) return;
@@ -205,7 +205,7 @@
           cleanup();
           try {
             if (changed || location.pathname !== expectedPath || reply.chat !== chat) throw new Error("The Claude conversation changed during capture.");
-            if (reply.error) throw captureError("Claude JSON capture failed. Refresh this conversation or turn JSON capture off.", reply.error === "busy" ? "unavailable" : "request_failed");
+            if (reply.error) throw captureError("Claude JSON capture failed. Refresh this conversation or turn JSON capture off.", reply.error === "busy" ? "unavailable" : reply.captureFailureReason || "request_failed");
             resolve(serialize(reply.data, chat));
           } catch (error) { reject(error); }
         };

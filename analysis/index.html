@@ -958,7 +958,8 @@
       const labels = { media: "images/audio/video", tools: "tool output", artifacts: "artifacts", other: "other unsupported content" };
       const reasons = { unavailable: "Fast capture unavailable", timeout: "Fast capture timed out", size_limit: "Fast capture exceeded a size limit", incomplete: "Conversation response incomplete", unsupported: "Unsupported content in fast capture", request_failed: "Native history request failed" };
       const lines = [];
-      if (Object.hasOwn(reasons, diagnostics.jsonFallbackReason)) lines.push(`${reasons[diagnostics.jsonFallbackReason]}; used normal capture`);
+      // The fallback mark precedes DOM capture, which can itself fail.
+      if (Object.hasOwn(reasons, diagnostics.jsonFallbackReason)) lines.push(`${reasons[diagnostics.jsonFallbackReason]}; ${capture.method ? "used" : "tried"} normal capture`);
       const types = Array.isArray(diagnostics.excludedContentTypes)
         ? Object.keys(labels).filter(type => diagnostics.excludedContentTypes.includes(type)) : null;
       if (types === null) lines.push("Excluded types not recorded");

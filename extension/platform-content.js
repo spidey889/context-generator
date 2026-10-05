@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-04-json-capture-preservation-v104";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-05-json-capture-audit-v105";
   const INLINE_PILL_SIZE = 36;
   const ownedUiStyleSheets = new Map();
   const CLAUDE_INLINE_STYLE_ID = "context-generator-claude-inline-styles";

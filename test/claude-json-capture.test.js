@@ -281,22 +281,53 @@ test("Claude aborts navigation away and back, and rejects concurrent captures pr
   assert.equal(harness.stats().listeners, 1);
 });
 
+clockTest("Claude native failures retain safe fallback reasons instead of labelling every failure a request error", async () => {
+  const cases = [
+    [{ status: 206 }, "incomplete"],
+    [{ headers: { "content-range": "bytes 0-10/100" } }, "incomplete"],
+    [{ body: "PRIVATE_INVALID_JSON" }, "incomplete"],
+    [{ status: 401 }, "unavailable"],
+    [{ status: 500 }, "request_failed"],
+    [{ resources: [] }, "unavailable"],
+    [{ fetchImpl: (_url, options) => new Promise((_resolve, reject) => {
+      options.signal.addEventListener("abort", () => reject(new Error("PRIVATE_TIMEOUT_ERROR")), { once: true });
+    }) }, "timeout"]
+  ];
+  for (const [options, expected] of cases) {
+    const h = setup(fixture(), { resources: [endpoint], ...options });
+    await assert.rejects(h.window.__capCaptureClaudeJson(), error => {
+      assert.equal(error.captureFailureReason, expected);
+      assert.doesNotMatch(error.message, /PRIVATE_/);
+      return true;
+    });
+    assert.equal(h.stats().listeners, 1);
+    assert.equal(h.stats().navigationListeners, 0);
+    assert.equal(h.stats().popListeners, 0);
+  }
+});
+
 clockTest("Claude isolated bridge awaits MAIN reinstallation before requesting capture", async () => {
-  let harness;
-  let ensures = 0;
-  harness = setup(fixture(), { resources: [endpoint], runtime: { sendMessage: async message => {
-    assert.equal(message.type, "ENSURE_CLAUDE_JSON_HOOK");
-    ensures++; harness.window.__capClaudeFetchState.dispose();
-    delete harness.window.__capClaudeFetchState;
-    harness.reinstall();
-    return { ok: true };
-  } } });
-  harness.window.__capClaudeFetchState.dispose();
-  const started = Date.now();
-  await harness.window.__capCaptureClaudeJson();
-  assert.ok(Date.now() - started >= 250 && Date.now() - started < 8250, "live readiness must win within the recovery window");
-  assert.equal(ensures, 1);
-  assert.equal(harness.stats().requests, 1);
+  for (const stale of ["missing", "legacy"]) {
+    let harness;
+    let ensures = 0;
+    let legacy = stale === "legacy";
+    harness = setup(fixture(), { resources: [endpoint], beforeMessage: payload => {
+      // An open tab can still answer probes with the pre-diagnostics protocol.
+      if (legacy && payload.type === "pong") payload.version = 3;
+    }, runtime: { sendMessage: async message => {
+      assert.equal(message.type, "ENSURE_CLAUDE_JSON_HOOK");
+      ensures++; legacy = false; harness.window.__capClaudeFetchState.dispose();
+      delete harness.window.__capClaudeFetchState;
+      harness.reinstall();
+      return { ok: true };
+    } } });
+    if (stale === "missing") harness.window.__capClaudeFetchState.dispose();
+    const started = Date.now();
+    await harness.window.__capCaptureClaudeJson();
+    assert.ok(Date.now() - started >= 250 && Date.now() - started < 8250, "live readiness must win within the recovery window");
+    assert.equal(ensures, 1);
+    assert.equal(harness.stats().requests, 1);
+  }
 });
 
 
