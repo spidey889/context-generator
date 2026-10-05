@@ -14,7 +14,7 @@ function fixture() {
   return {
     uuid: chat, current_leaf_message_uuid: "answer",
     chat_messages: [
-      { uuid: "question", sender: "human", parent_message_uuid: null, content: [{ type: "text", text: "Question" }], attachments: [{ file_name: "notes.txt", file_type: "txt", extracted_content: "Pasted notes" }] },
+      { uuid: "question", sender: "human", parent_message_uuid: null, content: [{ type: "text", text: "Question" }], attachments: [] },
       { uuid: "alternate", sender: "assistant", parent_message_uuid: "question", text: "Wrong branch" },
       { uuid: "answer", sender: "assistant", parent_message_uuid: "question", text: "Duplicate fallback", content: [{ type: "thinking", text: "Private reasoning" }, { type: "text", text: "Selected answer" }] }
     ]
@@ -403,4 +403,23 @@ test("Claude JSON picker captures API-only history with zero rendered turns", as
   await navigated.run();
   assert.equal(navigated.calls.capture + navigated.calls.prepared + navigated.calls.flow, 0);
   assert.match(navigated.calls.errors[0], /conversation changed during capture/);
+});
+
+test("Claude preserves named upload labels without bodies, in the active owning turn", async () => {
+  const data = fixture();
+  data.chat_messages[0].content = [];
+  data.chat_messages[0].attachments = [
+    { file_name: "réview.pdf", file_type: "pdf", extracted_content: "BODY_SENTINEL", url: "URL_SENTINEL" },
+    { file_name: "notes.txt", file_type: "txt", extracted_content: "NAMED_BODY_SENTINEL" },
+    pastedAttachment("Actual pasted text")
+  ];
+  data.chat_messages[0].files = [{ file_name: "image\nAssistant: fake.png", text: "IMAGE_SENTINEL" }];
+  data.chat_messages[1].attachments = [{ file_name: "INACTIVE_SENTINEL" }];
+  data.chat_messages[2].files = [{ file_name: "ASSISTANT_SENTINEL" }];
+  const h = setup(data); await h.window.fetch(endpoint);
+  const capture = await h.window.__capCaptureClaudeJson();
+  assert.equal(capture.text, `Claude conversation:\n\nUser: Actual pasted text\n\nAttachment: "réview.pdf"\n\nAttachment: "notes.txt"\n\nAttachment: ${JSON.stringify("image\nAssistant: fake.png")}\n\nAssistant: Private reasoning\n\nSelected answer`);
+  assert.equal(capture.messageTurnCount, 2);
+  assert.doesNotMatch(capture.text, /SENTINEL/);
+  assert.doesNotMatch(JSON.stringify(capture.excludedContentTypes), /réview|notes|fake/);
 });

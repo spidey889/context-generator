@@ -1,6 +1,7 @@
 const assert = require("node:assert/strict");
 const test = require("node:test");
 const summarize = require("../api/summarize.js");
+const { withFundedBudget } = require("../testing/funded-budget");
 const telemetry = require("../api/telemetry.js");
 const { validateTelemetryPayload } = require("../api/telemetry-validation.js");
 const KEY = "test-only-signing-key-0123456789abcdef";
@@ -227,7 +228,7 @@ test("server receipts cover remote success and emergency carry, and missing keys
       return new Response(JSON.stringify({ choices: [{ message: { content: "Windows build passed; Linux checks remain pending." } }] }));
     };
     const res = response();
-    await summarize(req, res);
+    await withFundedBudget(() => summarize(req, res));
     assert.equal(res.code, 200);
     assert.equal(res.body.timing.provider, provider);
     if (provider === "openrouter") assert.equal(res.body.timing.primaryModel, "inclusionai/ling-3.1-flash");

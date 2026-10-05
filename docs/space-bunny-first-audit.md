@@ -1,3 +1,5 @@
+> Historical snapshot; may be outdated. See [LOGIC.md](../LOGIC.md) for the current routing chain.
+
 # Ling-first routing audit — October 3, 2026
 
 Ling 3.1 Flash is now the primary OpenRouter route, with Apodex Mini enabled immediately after it. Latest Run displays Ling as **Space Bunny 2**; provider IDs, logs and receipts continue to use `inclusionai/ling-3.1-flash`. Qwen, Dots and Gemma remain paused. Master `a0c22d5` is still the remote master tip and is already merged into this branch.

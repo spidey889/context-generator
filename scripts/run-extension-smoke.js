@@ -212,6 +212,17 @@ async function createSmokeExtension(tempRoot, origin) {
     grok: "https://grok.com/",
     deepseek: "https://chat.deepseek.com/"
   };
+  // Production guards use native new-chat routes; the isolated server puts all
+  // destination composers at /destination. Translate only the copied extension
+  // so the smoke still exercises route ownership rather than disabling it.
+  const smokeLandingPaths = Object.fromEntries(Object.keys(platformUrls).map(id => [id, ["/destination"]]));
+  const translateLandingPaths = source => {
+    const declaration = source.match(/const DESTINATION_LANDING_PATHS = \{[\s\S]*?\n\s*\};/)?.[0];
+    assert.ok(declaration, "Smoke setup must find the new-chat route guard.");
+    return replaceOnce(source, declaration,
+      `const DESTINATION_LANDING_PATHS = ${JSON.stringify(smokeLandingPaths)};`, "new-chat landing paths");
+  };
+  platformSource = translateLandingPaths(platformSource);
   for (const [platformId, productionUrl] of Object.entries(platformUrls)) {
     const fixtureUrl = `${origin}/destination?${SMOKE_PLATFORM_QUERY}=${platformId}`;
     platformSource = replaceOnce(
@@ -225,6 +236,7 @@ async function createSmokeExtension(tempRoot, origin) {
 
   const backgroundPath = path.join(extensionRoot, "background.js");
   let backgroundSource = (await fs.promises.readFile(backgroundPath, "utf8")).replace(/\r\n/g, "\n");
+  backgroundSource = translateLandingPaths(backgroundSource);
   backgroundSource = replaceOnce(
     backgroundSource,
     'const SUMMARY_BACKEND_URL = "https://context-generator-five.vercel.app/api/summarize";',
@@ -299,7 +311,8 @@ function sourceFixture(freeGrid = false) {
 </head>
 <body>
   <main aria-label="Conversation">
-    <article data-message-author-role="user">${SOURCE_SENTINEL}</article>
+    <!-- Keep the backend/receipt smoke above the tiny local-carry boundary. -->
+    <article data-message-author-role="user">${SOURCE_SENTINEL} ${"Deployment context. ".repeat(80)}</article>
     <article data-message-author-role="assistant"><div class="markdown">${ASSISTANT_SENTINEL}</div></article>
   </main>
   <form data-testid="composer"><div ${freeGrid ? "" : "data-composer-body"}>
@@ -1726,6 +1739,52 @@ async function run() {
     process.stdout.write(TELEMETRY_DATABASE_SMOKE
       ? "✓ Installed worker → Vercel relay → Edge handler → migrated database: verified completion, one count, drained outbox.\n"
       : "✓ Signed terminal telemetry stayed in the local fixture and the installed worker's outbox drained.\n");
+    if (!JSON_CAPTURE_SMOKE) {
+      // Repeat with exactly 1,200 serialized characters: exercise the real local
+      // branch and prove it cannot reuse the previous remote summary or receipt.
+      const prefix = "ChatGPT conversation:\n\nUser: ";
+      const suffix = `\n\nChatGPT: ${ASSISTANT_SENTINEL}`;
+      const userText = `${SOURCE_SENTINEL} ${"L".repeat(1200 - prefix.length - suffix.length - SOURCE_SENTINEL.length - 1)}`;
+      const transcript = prefix + userText + suffix;
+      const requestsBefore = state.summaryRequests.length;
+      await destinationSession.evaluate('document.querySelector("textarea").value = ""');
+      await sourceSession.call("Page.bringToFront");
+      await sourceSession.evaluate(`(() => {
+        document.querySelector('article[data-message-author-role="user"]').textContent = ${JSON.stringify(userText)};
+        document.getElementById("context-generator-bubble").click();
+        [...document.querySelectorAll(".context-generator-destination-tile")].find(tile => tile.textContent.includes("Claude")).click();
+      })()`);
+      const stats = await waitFor(async () => {
+        const stored = await sourceSession.evaluate('chrome.storage.local.get("context-generator-last-transfer-stats-v1")', extensionContextId);
+        const receipt = stored?.["context-generator-last-transfer-stats-v1"];
+        return receipt?.rawScrapedText === transcript ? receipt : null;
+      }, "the exact tiny local transfer receipt");
+      assert.equal(stats.status, "completed");
+      assert.equal(stats.summary.source, "local");
+      assert.equal(stats.summary.model, "local-direct");
+      assert.equal(stats.summary.profile, "tiny");
+      assert.equal(stats.summary.fetchMs, 0);
+      assert.deepEqual(stats.summary.modelsTried, []);
+      assert.equal(stats.summary.usage.totalTokens, 0);
+      assert.equal(stats.summary.fallback.used, false);
+      assert.equal(state.summaryRequests.length, requestsBefore, "Tiny chats must never reach the summary backend.");
+      let verifiedPaste = false;
+      for (const target of (await getTargets(devToolsPort)).filter(target => target.type === "page" && target.url.startsWith(`${origin}/destination`))) {
+        const session = await CdpSession.connect(target.webSocketDebuggerUrl);
+        try {
+          const value = await session.evaluate('document.querySelector("textarea")?.value || ""');
+          if (value.includes(transcript.split("\n").map(line => `> ${line}`).join("\n"))) {
+            assert.match(value, /Reply only: "Context loaded/);
+            assert.equal(await session.evaluate("window.__capContextSmokeSendClicks"), 0);
+            verifiedPaste = true;
+          }
+        } finally { session.close(); }
+      }
+      assert.equal(verifiedPaste, true, "The complete tiny transcript must reach the destination without pressing Send.");
+      const terminal = await waitFor(() => state.telemetryRequests.find(payload => payload.attempt_id === stats.transferId && payload.status === "succeeded"), "unsigned local completion telemetry");
+      assert.equal(terminal.summary_proof, undefined, "Local work cannot inherit the previous server receipt.");
+      process.stdout.write(`✓ Exactly 1,200 characters: local carry (${stats.summary.summaryMs} ms), zero summary requests, complete paste, no Send click.\n`);
+    }
     process.stdout.write("Cap Context Brave extension smoke passed.\n");
   } catch (error) {
     if (sourceSession) {

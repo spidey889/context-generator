@@ -38,6 +38,6 @@ The baseline output invented a Linux-dependent exception to the no-deploy instru
 
 Subsequent evidence: [the matched-input primary comparison](openrouter-primary-comparison.md) recommends Ling over Apodex on factual usefulness, but found unsupported details in every generator that produced outputs. It leaves routing unchanged and does not remove this accuracy hold.
 
-Later source cutover: [the Ling-first configuration audit](ling-first-audit.md) enables Ling with Apodex retained as fallback and verifies the new five-route budgets. Its mechanical checks pass, but live fallback lost a no-deploy prohibition, so strict factual-preservation clearance remains on hold.
+Later source cutover: [the Ling-first configuration audit](space-bunny-first-audit.md) enables Ling with Apodex retained as fallback and verifies the new five-route budgets. Its mechanical checks pass, but live fallback lost a no-deploy prohibition, so strict factual-preservation clearance remains on hold.
 
 Primary references: [OpenRouter parameter/data routing](https://openrouter.ai/docs/guides/routing/provider-selection), [context compression](https://openrouter.ai/docs/guides/features/message-transforms), [Apodex catalog](https://openrouter.ai/apodex/apodex-1.1-mini:free), [account limits](https://openrouter.ai/docs/api/reference/limits).

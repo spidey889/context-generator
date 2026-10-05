@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-05-json-capture-transfer-ownership-v106";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-05-transfer-ownership-local-tiny-v108";
   const INLINE_PILL_SIZE = 36;
   const ownedUiStyleSheets = new Map();
   const CLAUDE_INLINE_STYLE_ID = "context-generator-claude-inline-styles";
@@ -117,9 +117,9 @@
   // Keep this aligned with api/request-security.js so unsupported captures never leave the extension.
   const MAX_BACKEND_CONVERSATION_CHARS = 350000;
   const TINY_DIRECT_PROFILE_MAX_CHARS = 1200;
-  // ChatGPT and Grok do not reliably hydrate or retain composer inserts while inactive.
+  // Claude, ChatGPT and Grok need focus before composer hydration/verification.
   // Their source-side completion cue must finish before the background performs the focused paste.
-  const FOCUSED_PASTE_DESTINATIONS = new Set(["chatgpt", "grok"]);
+  const FOCUSED_PASTE_DESTINATIONS = new Set(["claude", "chatgpt", "grok"]);
   const OVERSIZED_CONVERSATION_ERROR_MESSAGE = "Conversation exceeds the supported 350,000 character limit";
   const CONVERSATION_SCRAPE_RETRY_TIMEOUT_MS = 1800;
   const CONVERSATION_SCRAPE_RETRY_INTERVAL_MS = 140;
@@ -208,7 +208,6 @@
   const HANDOFF_CAPTURE_LINE_MAX = 0.94;
   const HANDOFF_ACTIVITY_LINE_START = 0.05;
   const HANDOFF_ACTIVITY_LINE_MAX = 0.9;
-  const HANDOFF_TINY_STAGE_LINE_DURATION_MS = 320;
   const HANDOFF_FINAL_LINE_DURATION_MS = 1000;
   const HANDOFF_FINAL_PAINT_WAIT_MS = 120;
   const GENERIC_CONVERSATION_SELECTORS = [
@@ -262,6 +261,7 @@
       logoSize: 24,
       logo: "logos/claude2download__1_-removebg-preview.png",
       maxComposerHeight: 720,
+      pasteStabilityMs: PASTE_STABILITY_MS,
       inputSelectors: [
         "textarea",
         "[contenteditable='true'][data-placeholder]",
@@ -734,18 +734,12 @@
 
     if (message?.type === "START_CONTEXT_TRANSFER") {
       const destination = message.destination || getDefaultDestinationId();
-      const trace = createTransferTrace(destination, "extension icon");
-      startTransferTelemetry(trace);
-      if (isRunning) {
-        markTransferTrace(trace, "failed: Context transfer is already running.");
-        finishTransferTrace(trace, "unknown_failure");
+      const trace = beginTransferAttempt(destination, "extension icon");
+      if (!trace) {
         sendResponse({ ok: false, error: "Context transfer is already running." });
         return false;
       }
 
-      isRunning = true;
-      clearRunningResetTimer();
-      startTransferDeadline(trace);
       sendResponse({ ok: true });
       markTransferTrace(trace, "click", { source: "extension icon" });
       runContextFlow(destination, null, null, trace);
@@ -809,6 +803,9 @@
       getVirtualSweepTerminalQuietTimeout,
       createTransferTrace,
       startTransferDeadline,
+      beginTransferAttempt,
+      finishTransferTrace,
+      resetRunningFlag,
       markCaptureDone,
       buildLatestTransferStats,
       getSafeTelemetryFailureReason,
@@ -958,49 +955,33 @@
 
     advanceTransferTelemetryStage(trace, "summary_request_started");
     markTransferTrace(trace, "summary start", { chars: conversationText.length, inputChars: conversationText.length });
-    if (conversationText.length <= TINY_DIRECT_PROFILE_MAX_CHARS) {
-      // local-direct can return in the same visual beat as capture. Finish the
-      // first connector before allowing the summary connector to begin.
-      await completeHandoffStageLine("capture", HANDOFF_TINY_STAGE_LINE_DURATION_MS);
-      checkTransferDeadline(trace);
-    }
     setHandoffProgress("summary", "active", null, conversationText.length);
-    startHandoffCountdown(getHandoffSummaryLineDuration(conversationText.length));
     let summary;
     let timing;
-    try {
-      const response = await notifyBackground({
-        type: "SUMMARIZE_WITH_BACKEND",
-        conversation: conversationText,
-        transferId: trace?.id || null,
-        deadlineAt: trace?.deadlineAt
-      });
-      if (!response?.summary?.trim()) {
-        throw new Error("Backup summarizer returned no summary.");
-      }
-      summary = response.summary.trim();
-      timing = response.timing || null;
-    } catch {
-      checkTransferDeadline(trace);
-      // The verified transcript stays in the source page even when the backend
-      // or MV3 worker is unavailable. Paste failure still offers manual copy.
-      const quotedTranscript = conversationText.replace(/\r\n?/g, "\n").trim()
-        .split("\n").map(line => `> ${line}`).join("\n");
-      summary = ["CONTEXT CARRY — READY TO PASTE", "", "💬 CONVERSATION SO FAR",
-        quotedTranscript, "", "🔁 NEXT STEP",
-        'Reply only: "Context loaded. Let\'s pick up right where you left off." Then wait for the user.'
-      ].join("\n");
-      timing = {
-        source: "local",
-        requestChars: conversationText.length,
-        chars: summary.length,
-        backend: {
-          servedBy: "local-direct", provider: "local-direct", model: "local-direct",
-          inputChars: conversationText.length, outputChars: summary.length,
-          fallback: { attempted: true, used: true, servedBy: "local-direct",
-            model: "local-direct", reason: "summary_service_unavailable" }
+    // Match the backend's trimmed String.length boundary, before messaging the
+    // worker. Tiny carries need neither network/storage work nor cosmetic waits.
+    if (conversationText.trim().length <= TINY_DIRECT_PROFILE_MAX_CHARS) {
+      ({ summary, timing } = createLocalContextCarry(conversationText));
+    } else {
+      try {
+        startHandoffCountdown(getHandoffSummaryLineDuration(conversationText.length));
+        const response = await notifyBackground({
+          type: "SUMMARIZE_WITH_BACKEND",
+          conversation: conversationText,
+          transferId: trace?.id || null,
+          deadlineAt: trace?.deadlineAt
+        });
+        if (!response?.summary?.trim()) {
+          throw new Error("Backup summarizer returned no summary.");
         }
-      };
+        summary = response.summary.trim();
+        timing = response.timing || null;
+      } catch {
+        checkTransferDeadline(trace);
+        // The verified transcript stays in the source page even when the backend
+        // or MV3 worker is unavailable. Paste failure still offers manual copy.
+        ({ summary, timing } = createLocalContextCarry(conversationText, "summary_service_unavailable"));
+      }
     }
     checkTransferDeadline(trace);
     markTransferTrace(trace, "summary done", {
@@ -1009,6 +990,43 @@
     });
     advanceTransferTelemetryStage(trace, "summary_completed");
     return summary;
+  }
+
+  function createLocalContextCarry(conversationText, fallbackReason = null) {
+    const startedAt = getNow();
+    const inputChars = conversationText.trim().length;
+    const quotedTranscript = conversationText.replace(/\r\n?/g, "\n").trim()
+      .split("\n").map(line => `> ${line}`).join("\n");
+    // Keep the quoted transcript and trusted footer aligned with the backend's
+    // direct carry. Source-local results have no server-signed summary receipt.
+    const summary = [
+      "╔══════════════════════════════════════════╗",
+      "║         CONTEXT CARRY — READY TO PASTE        ║",
+      "╚══════════════════════════════════════════╝",
+      "", "💬 CONVERSATION SO FAR", quotedTranscript, "", "🔁 NEXT STEP",
+      'Reply only: "Context loaded. Let\'s pick up right where you left off." Then wait for the user.'
+    ].join("\n");
+    return {
+      summary,
+      timing: {
+        source: "local", summaryMs: fallbackReason ? null : Math.round(getNow() - startedAt),
+        fetchMs: fallbackReason ? null : 0, parseMs: fallbackReason ? null : 0,
+        requestChars: inputChars, chars: summary.length,
+        backend: {
+          servedBy: "local-direct", provider: "local-direct", primaryModel: "local-direct", model: "local-direct",
+          inputChars, outputChars: summary.length,
+          profile: fallbackReason ? null : "tiny", maxTokens: 0,
+          modelsTried: [], openrouterModelsTried: [], mistralModelsTried: [],
+          ...(!fallbackReason ? {
+            openrouterMs: 0, geminiMs: 0, mistralMs: 0, providerMs: 0, providerPasses: 0,
+            usage: { promptTokens: 0, completionTokens: 0, totalTokens: 0, cachedTokens: 0 }
+          } : {}),
+          fallback: { attempted: Boolean(fallbackReason), used: Boolean(fallbackReason),
+            servedBy: fallbackReason ? "local-direct" : null,
+            model: fallbackReason ? "local-direct" : null, reason: fallbackReason }
+        }
+      }
+    };
   }
 
   function prepareDestinationTab(destinationId, trace = null) {
@@ -1084,6 +1102,18 @@
       resetRunningFlag();
       showErrorOverlay("Transfer timed out. Please try again.");
     }, RUNNING_AUTO_RESET_MS);
+  }
+
+  function beginTransferAttempt(destinationId, source) {
+    // Repeated picker/toolbar clicks belong to the running attempt. Allocating
+    // another receipt here fabricated failures and replaced Latest Run.
+    if (isRunning) return null;
+    const trace = createTransferTrace(destinationId, source);
+    isRunning = true;
+    clearRunningResetTimer();
+    startTransferDeadline(trace);
+    startTransferTelemetry(trace);
+    return trace;
   }
 
   function createTransferTrace(destinationId, source) {
@@ -2058,15 +2088,16 @@
   }
 
   function persistLatestTransferStats(trace, totalMs) {
-    const storage = chrome?.storage?.local;
-    if (!storage?.set) return;
-
-    const stats = buildLatestTransferStats(trace, totalMs);
-    const setResult = storage.set({ [LAST_TRANSFER_STATS_STORAGE_KEY]: stats });
-    if (setResult?.catch) {
-      setResult.catch((error) => {
-        console.debug("[Context Generator] Could not save latest analysis stats:", error?.message || error);
-      });
+    // Storage can throw synchronously during reload or browser shutdown. The
+    // optional local receipt must not block terminal telemetry or lock release.
+    try {
+      const storage = chrome?.storage?.local;
+      if (!storage?.set) return;
+      const stats = buildLatestTransferStats(trace, totalMs);
+      const setResult = storage.set({ [LAST_TRANSFER_STATS_STORAGE_KEY]: stats });
+      setResult?.catch?.(() => {});
+    } catch {
+      console.debug("[Context Generator] Could not save latest analysis stats.");
     }
   }
 
@@ -2376,6 +2407,9 @@
               }
             }
             input.focus?.();
+            if (!input.isConnected || !editorContainsText(input, text)) {
+              throw new Error(`${destination.name} editor changed while focusing the pasted context.`);
+            }
             return input;
           } else {
             lastError = new Error(`Paste operation failed to populate the ${destination.name} editor.`);
@@ -2542,8 +2576,12 @@
 
   function setEditorText(element, text, destination = currentPlatform, guard = null) {
     element.click();
+    if (!element.isConnected) return;
     element.focus();
     guard?.check();
+    // Claude's startup composer can hydrate/remount on click or focus. Never
+    // insert into the detached placeholder; pasteWithRetry finds its successor.
+    if (!element.isConnected) return;
     // Focusing a native composer can restore its saved draft synchronously.
     if (getElementText(element).trim()) {
       if (editorContainsText(element, text)) return;
@@ -6897,6 +6935,8 @@
   }
 
   async function startDestinationTransfer(destinationId) {
+    const trace = beginTransferAttempt(destinationId, "destination tile");
+    if (!trace) return;
     const sourceUrl = window.location.href;
     const hasSavedConversation = hasSavedSourceConversation();
     const useClaudeJson = hasSavedConversation && currentPlatform.id === "claude" && claudeJsonCaptureEnabled;
@@ -6907,28 +6947,18 @@
     const geminiJsonPath = useNetworkJson && currentPlatform.id === "gemini" ? window.location.pathname : null;
     const grokJsonUrl = useNetworkJson && currentPlatform.id === "grok" ? window.location.href : null;
     const deepseekJsonPath = useNetworkJson && currentPlatform.id === "deepseek" ? window.location.pathname : null;
-    const trace = createTransferTrace(destinationId, "destination tile");
-    trace.destinationId = destinationId;
-    startTransferTelemetry(trace);
-    if (isRunning) {
-      markTransferTrace(trace, "failed: Context transfer is already running.");
-      finishTransferTrace(trace, "unknown_failure");
-      return;
-    }
     // The full JSON tree can be ready before its virtualized DOM mounts.
     // JSON validation, rather than rendered turn count, decides whether it is empty.
     if (!useClaudeJson && !useChatGptJson && !useNetworkJson && getDetectedConversationMessageCount() === 0) {
       markTransferTrace(trace, `failed: ${NO_CONVERSATION_ERROR_MESSAGE}`);
       finishTransferTrace(trace, "no_conversation");
+      resetRunningFlag();
       showErrorOverlay(NO_CONVERSATION_ERROR_MESSAGE);
       return;
     }
 
     markTransferTrace(trace, "destination click", { destination: destinationId });
 
-    isRunning = true;
-    clearRunningResetTimer();
-    startTransferDeadline(trace);
     try {
       await transitionDestinationSheetToHandoff();
       checkTransferDeadline(trace);
@@ -7878,7 +7908,7 @@
   }
 
   async function completeHandoffStageLine(stageId, durationMs) {
-    const skipMotion = document.visibilityState === "hidden"
+    const skipMotion = durationMs === 0 || document.visibilityState === "hidden"
       || window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
     const stageElement = document.querySelector(
       `#context-generator-handoff-progress [data-context-generator-stage='${stageId}']`
@@ -7911,7 +7941,11 @@
   async function completeHandoffForDestinationReveal(trace = null) {
     markTransferTrace(trace, "handoff finish start");
     stopHandoffActivityProgress();
-    await completeHandoffStageLine("summary", HANDOFF_FINAL_LINE_DURATION_MS);
+    const summaryTiming = getSummaryTimingFromTrace(trace);
+    // A synchronous local carry should not spend a second animating a summary
+    // that is already ready. Preserve the bounded paint cue before activation.
+    const localTinyCarry = summaryTiming?.source === "local" && summaryTiming.backend?.profile === "tiny";
+    await completeHandoffStageLine("summary", localTinyCarry ? 0 : HANDOFF_FINAL_LINE_DURATION_MS);
 
     setHandoffProgress("paste", "done");
     // Background tabs can suspend animation frames indefinitely. A painted tick

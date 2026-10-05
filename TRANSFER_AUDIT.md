@@ -2,6 +2,8 @@
 
 Date: 2026-10-05. Audited source: `c609165a8fd0fa972467c73907c78434ad87f643`, the refreshed remote `master` used to create `codex/transfer-audit` in a separate worktree.
 
+Integration status: the later T01/T02 fixes now restrict destination delivery to guarded new-chat surfaces and cancel source capture on navigation. This report preserves the original audit evidence and line numbers; its old behavior descriptions are historical, not the current production contract. T03–T07 remain follow-up findings requiring revalidation against current code. See [LOGIC.md](LOGIC.md) for the combined behavior, including later local-carry and Claude delivery fixes.
+
 This is a source audit of work after transfer selection: the page lock, cancellation, worker restart, destination preparation, delivery and activation. No application code or existing documentation was changed. No browser was opened, automated or used for execution. Evidence comes from source inspection, existing Node tests and additional in-memory Node/VM fixtures using the repository's actual functions. Chrome API documentation was read to verify window selection. No live accounts, providers, deployment or production telemetry were queried.
 
 Likelihood estimates are qualitative judgments about ordinary use, not measured failure rates. “Confirmed” means the implementation permits the described result and, where stated, a local fixture reproduced it; it does not mean every live platform exhibits it routinely. Pasting never automatically presses Send.

@@ -272,7 +272,8 @@ function loadPlatformContent(elements = [], hostname = "chatgpt.com", {
   visibilityState = "visible",
   innerWidth = 1280,
   innerHeight = 720,
-  runtimeSendMessage = async () => ({ ok: true })
+  runtimeSendMessage = async () => ({ ok: true }),
+  storageSet = null
 } = {}) {
   let hooks = null;
   const sessionValues = new Map();
@@ -405,6 +406,7 @@ function loadPlatformContent(elements = [], hostname = "chatgpt.com", {
       getURL: (assetPath) => `chrome-extension://test/${assetPath}`
     }
   };
+  if (storageSet) chrome.storage = { local: { set: storageSet } };
   const sandbox = {
     console: {
       ...console,
@@ -520,7 +522,7 @@ test("empty chats are rejected before handoff UI or destination preparation", ()
 
   assert.ok(pickerStart >= 0 && pickerEnd > pickerStart);
   assert.ok(pickerEmptyGuard >= 0, "picker transfer must check for zero real messages");
-  assert.ok(pickerSource.indexOf("startTransferTelemetry(trace)") < pickerEmptyGuard);
+  assert.ok(pickerSource.indexOf("beginTransferAttempt(destinationId") < pickerEmptyGuard);
   assert.ok(pickerEmptyGuard < pickerSource.indexOf("showOverlay(destinationId)"));
   assert.ok(pickerEmptyGuard < pickerSource.indexOf("prepareDestinationTab(destinationId, trace)"));
   assert.match(pickerSource.slice(pickerEmptyGuard), /showErrorOverlay\(NO_CONVERSATION_ERROR_MESSAGE\)/);
@@ -2064,6 +2066,96 @@ clockTest("initial paste never overwrites a nonempty draft on any destination", 
   }
 });
 
+test("duplicate transfer clicks preserve the running attempt and its telemetry", () => {
+  const messages = [];
+  const hooks = loadPlatformContent([], "chatgpt.com", { runtimeSendMessage: async message => {
+    messages.push(message);
+    return { ok: true };
+  } });
+  const first = hooks.beginTransferAttempt("claude", "destination tile");
+  assert.ok(first);
+  assert.equal(hooks.beginTransferAttempt("deepseek", "destination tile"), null);
+  let response;
+  hooks.runtimeMessageListeners[0]({ type: "START_CONTEXT_TRANSFER", destination: "claude" }, {}, result => { response = result; });
+  assert.equal(response.ok, false);
+  assert.match(response.error, /already running/);
+  const telemetry = messages.filter(message => message.type === "RECORD_TRANSFER_TELEMETRY");
+  assert.equal(telemetry.length, 1);
+  assert.equal(telemetry[0].event.attemptId, first.id);
+  assert.equal(first.completed, false);
+  hooks.resetRunningFlag();
+  assert.ok(hooks.beginTransferAttempt("claude", "extension icon"), "the next real attempt is admitted");
+});
+
+test("a synchronous local receipt failure cannot swallow terminal telemetry", () => {
+  const messages = [];
+  const hooks = loadPlatformContent([], "chatgpt.com", {
+    storageSet: () => { throw new Error("Storage unavailable"); },
+    runtimeSendMessage: async message => { messages.push(message); return { ok: true }; }
+  });
+  const trace = hooks.beginTransferAttempt("claude", "destination tile");
+  assert.doesNotThrow(() => hooks.finishTransferTrace(trace));
+  hooks.resetRunningFlag();
+  const telemetry = messages.filter(message => message.type === "RECORD_TRANSFER_TELEMETRY");
+  assert.deepEqual(telemetry.map(message => message.event.status), ["started", "succeeded"]);
+  assert.equal(telemetry[1].event.lastStage, "completed");
+  assert.ok(hooks.beginTransferAttempt("claude", "destination tile"));
+});
+
+clockTest("paste reacquires a composer replaced by click or focus before writing", async () => {
+  for (const action of ["click", "focus"]) {
+    const oldEditor = new FakeElement({ tag: "textarea", attrs: { placeholder: "Message" } });
+    const newEditor = new FakeElement({ tag: "textarea", attrs: { placeholder: "Message" } });
+    const elements = [oldEditor];
+    let staleWrites = 0;
+    oldEditor.onValueSet = () => { staleWrites++; };
+    const remount = () => { oldEditor.isConnected = false; elements[0] = newEditor; };
+    if (action === "click") oldEditor.onClick = remount;
+    else oldEditor.focus = remount;
+    const hooks = loadPlatformContent(elements, "claude.ai");
+    await hooks.pasteIntoPlatform("CONTEXT CARRY Preserve the complete deployment plan.", "claude");
+    assert.equal(staleWrites, 0, action);
+    assert.equal(newEditor.value, "CONTEXT CARRY Preserve the complete deployment plan.", action);
+  }
+});
+
+clockTest("paste cannot report success when final focus replaces the verified composer", async () => {
+  const oldEditor = new FakeElement({ tag: "textarea", attrs: { placeholder: "Message" } });
+  const newEditor = new FakeElement({ tag: "textarea", attrs: { placeholder: "Message" } });
+  const elements = [oldEditor];
+  let focuses = 0;
+  oldEditor.focus = () => {
+    if (++focuses === 2) { oldEditor.isConnected = false; elements[0] = newEditor; }
+  };
+  const hooks = loadPlatformContent(elements, "claude.ai");
+  const summary = "CONTEXT CARRY Preserve the complete deployment plan.";
+  await hooks.pasteIntoPlatform(summary, "claude");
+  assert.equal(newEditor.value, summary);
+});
+
+clockTest("Claude verifies a settled paste and preserves a draft restored on remount", async () => {
+  const summary = "CONTEXT CARRY Preserve the complete deployment plan.";
+  const editor = new FakeElement({ tag: "textarea", attrs: { placeholder: "Message" } });
+  let writes = 0;
+  editor.onValueSet = value => {
+    if (value !== summary) return;
+    if (++writes === 1) setTimeout(() => { editor.value = ""; }, 20);
+  };
+  const hooks = loadPlatformContent([editor], "claude.ai");
+  await hooks.pasteIntoPlatform(summary, "claude");
+  assert.equal(editor.value, summary);
+  assert.equal(writes, 2, "an insert cleared by the native app is retried before reporting success");
+
+  const oldEditor = new FakeElement({ tag: "textarea", attrs: { placeholder: "Message" } });
+  const draftEditor = new FakeElement({ tag: "textarea", attrs: { placeholder: "Message" } });
+  draftEditor.value = "My saved draft";
+  const elements = [oldEditor];
+  oldEditor.onClick = () => { oldEditor.isConnected = false; elements[0] = draftEditor; };
+  const remountHooks = loadPlatformContent(elements, "claude.ai");
+  await assert.rejects(remountHooks.pasteIntoPlatform(summary, "claude"), /already contains text/);
+  assert.equal(draftEditor.value, "My saved draft");
+});
+
 test("paste verification rejects a carry whose middle or end did not land", () => {
   const hooks = loadPlatformContent([]);
   const beginning = "CONTEXT CARRY READY TO PASTE. WHO I AM Building Context Generator.";
@@ -2089,6 +2181,82 @@ test("paste verification rejects unrelated editor text", () => {
   const editor = new FakeElement({ text: "A blank new chat input" });
 
   assert.equal(hooks.editorContainsText(editor, "CONTEXT CARRY\n\nWHO I AM\nProject details"), false);
+});
+
+test("up to 1,200 trimmed characters stay local on every platform without worker calls or waits", async () => {
+  for (const hostname of ["claude.ai", "chatgpt.com", "gemini.google.com", "grok.com", "chat.deepseek.com"]) {
+    let summaryRequests = 0;
+    const hooks = loadPlatformContent([], hostname, {
+      runtimeSendMessage: async message => {
+        if (message.type === "SUMMARIZE_WITH_BACKEND") {
+          summaryRequests++;
+          return { ok: true, summary: "AI must never replace this tiny transcript." };
+        }
+        return { ok: true };
+      }
+    });
+    for (const length of [1, 1199, 1200]) {
+      const transcript = "x".repeat(length);
+      const trace = hooks.createTransferTrace("claude", "test");
+      let settled = false;
+      const pending = hooks.summarizeWithBackend(` \r\n${transcript}\n `, trace).then(summary => {
+        settled = true;
+        return summary;
+      });
+      await Promise.resolve();
+      assert.equal(settled, true, `${hostname}: ${length} characters must finish without a timer or worker wait`);
+      const summary = await pending;
+      assert.ok(summary.includes(`> ${transcript}\n`));
+      const stats = hooks.buildLatestTransferStats(trace, 1);
+      assert.equal(stats.summary.source, "local");
+      assert.equal(stats.summary.model, "local-direct");
+      assert.equal(stats.summary.profile, "tiny");
+      assert.equal(stats.summary.fetchMs, 0);
+      assert.equal(stats.summary.maxTokens, 0);
+      assert.equal(stats.summary.usage.totalTokens, 0);
+      assert.equal(stats.summary.modelsTried.length, 0);
+      assert.equal(stats.summary.fallback.used, false);
+    }
+    assert.equal(summaryRequests, 0, hostname);
+    assert.equal(await hooks.summarizeWithBackend("x".repeat(1201)), "AI must never replace this tiny transcript.");
+    assert.equal(summaryRequests, 1, `${hostname}: 1,201 characters still use the backend`);
+    await assert.rejects(hooks.summarizeWithBackend("tiny", { deadlineAt: Date.now() - 1 }), /Transfer timed out/);
+    assert.equal(summaryRequests, 1, `${hostname}: expired tiny transfers stay cancelled`);
+  }
+});
+
+clockTest("tiny local handoff skips the one-second summary animation while remote handoff retains it", async () => {
+  for (const local of [true, false]) {
+    const hooks = loadPlatformContent([]);
+    const properties = new Map();
+    const stage = new FakeElement();
+    stage.style.setProperty = (key, value) => properties.set(key, value);
+    hooks.document.querySelector = () => stage;
+    const trace = hooks.createTransferTrace("claude", "test");
+    trace.marks.push({ label: "summary done", detail: { background: {
+      source: local ? "local" : "backend", backend: { profile: local ? "tiny" : "small" }
+    } } });
+    const startedAt = Date.now();
+    await hooks.completeHandoffForDestinationReveal(trace);
+    const elapsed = Date.now() - startedAt;
+    assert.equal(properties.get("--context-generator-stage-progress-duration"), local ? "0ms" : "1000ms");
+    assert.ok(local ? elapsed < 250 : elapsed >= 1000, `local=${local}: ${elapsed} ms`);
+  }
+});
+
+test("tiny local carry works offline and preserves code, Unicode, roles and blank lines", async () => {
+  let summaryRequests = 0;
+  const hooks = loadPlatformContent([], "chatgpt.com", { runtimeSendMessage: async message => {
+    if (message.type === "SUMMARIZE_WITH_BACKEND") summaryRequests++;
+    throw new Error("Extension context invalidated");
+  } });
+  const conversation = "User: Keep this exactly.\r\n\r\nAssistant: 代码 🙂\r\n  const path = 'C:\\work';\u00a0 ";
+  const trace = hooks.createTransferTrace("claude", "test");
+  const summary = await hooks.summarizeWithBackend(conversation, trace);
+  assert.ok(summary.includes(conversation.replace(/\r\n?/g, "\n").trim().split("\n").map(line => `> ${line}`).join("\n")));
+  assert.match(summary, /Reply only: "Context loaded\. Let's pick up right where you left off\." Then wait for the user\./);
+  assert.equal(summaryRequests, 0);
+  assert.equal(hooks.buildLatestTransferStats(trace, 1).summary.fallback.used, false);
 });
 
 test("captured context survives backend errors, empty replies, and a missing worker locally", async () => {

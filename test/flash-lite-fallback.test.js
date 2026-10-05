@@ -1,5 +1,6 @@
 const assert = require("node:assert/strict");
 const test = require("node:test");
+const { withFundedBudget } = require("../testing/funded-budget");
 const handler = require("../api/summarize.js");
 const originalOpenRouterEnabled = process.env.OPENROUTER_ENABLED;
 test.before(() => { process.env.OPENROUTER_ENABLED = "false"; });
@@ -73,10 +74,10 @@ test("paused Mistral is bypassed and Flash-Lite serves after primary failure", a
   let payload;
   const res = { setHeader() {}, status() { return this; }, json(data) { payload = data; } };
   try {
-    await handler({ method: "POST", body: { conversation: "Build context. ".repeat(150) }, headers: {
+    await withFundedBudget(() => handler({ method: "POST", body: { conversation: "Build context. ".repeat(150) }, headers: {
       origin: "chrome-extension://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "content-type": "application/json",
       "x-cap-context-client": "cap-context-extension/1", "x-forwarded-for": "192.0.2.202"
-    } }, res);
+    } }, res));
     assert.deepEqual(requests, ["gemini-3.6-flash", "gemini-3.5-flash-lite"]);
     assert.equal(payload.timing.model, "gemini-3.5-flash-lite");
   } finally {
