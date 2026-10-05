@@ -51,7 +51,11 @@
         "The user is Jules",
         "rollback is approved",
         "deployment completed",
-        "implementation completed"
+        "implementation completed",
+        "the backup is intact",
+        "disabling duplicate detection",
+        "Harbor",
+        "Dana"
       ],
       "contradictions": [
         {
@@ -92,7 +96,11 @@
       "forbiddenFacts": [
         "Hundreds of neighbors will join us",
         "registration link is",
-        "second paragraph completed"
+        "second paragraph completed",
+        "the backup is intact",
+        "disabling duplicate detection",
+        "Harbor",
+        "Dana"
       ],
       "contradictions": []
     },
@@ -140,7 +148,11 @@
         "Bay House is booked",
         "museum is accessible",
         "ferry is accessible",
-        "budget is 240 credits per person"
+        "budget is 240 credits per person",
+        "the backup is intact",
+        "disabling duplicate detection",
+        "Harbor",
+        "Dana"
       ],
       "contradictions": []
     },
@@ -180,7 +192,11 @@
       "forbiddenFacts": [
         "The roots are 2 and 5",
         "The solutions are 2 and 5",
-        "the current equation is x^2 - 5x + 6"
+        "the current equation is x^2 - 5x + 6",
+        "the backup is intact",
+        "disabling duplicate detection",
+        "Harbor",
+        "Dana"
       ],
       "contradictions": []
     },
@@ -219,7 +235,11 @@
       "forbiddenFacts": [
         "fix has landed",
         "tests passed",
-        "Grove uses tab-separated files"
+        "Grove uses tab-separated files",
+        "the backup is intact",
+        "disabling duplicate detection",
+        "Harbor",
+        "Dana"
       ],
       "contradictions": []
     },
@@ -263,9 +283,65 @@
         "The user is Tess",
         "Juniper's budget is 900",
         "fix is complete and deployed",
-        "side panel was accepted"
+        "side panel was accepted",
+        "the backup is intact",
+        "disabling duplicate detection",
+        "Harbor",
+        "Dana"
       ],
       "contradictions": []
+    },
+    {
+      "id": "review-budget-draft",
+      "purpose": "Fresh review-only case introduced after v14 was fixed; no prompt tuning against its output.",
+      "conversation": "ChatGPT conversation:\n\nUser: We are reviewing a quote for the fictional Birch neighborhood event. Ren is the supplier contact, not my name. The event has a 700-credit total budget. I only want a review of the draft, not approval to buy anything.\n\nChatGPT: The earlier proposal was 150 credits for lights and 200 credits for audio. I could tell Ren to proceed if you approve it. No message has been sent.\n\nUser: Correction: the current lighting quote is 180 credits, not 150. The audio quote remains 200. Neither quote has been accepted. Do not contact Ren or place an order.\n\nUser: Current draft is exactly: \"Lighting: 180 credits. Audio: 200 credits. Delivery fee: not supplied. Offer expires Friday 12 June.\" Keep this wording so we can edit it later.\n\nChatGPT: The delivery fee is unknown. There has been no purchase, payment or supplier contact. The quote does not establish a delivery date.\n\nUser: Next, review whether this draft gives enough information to decide within the 700-credit budget. Explain what is known and what remains unknown. Do not approve a purchase or turn this into a new event plan.\n\nUser: No decision about delivery has been made. The expiry is a quote deadline, not the event date or delivery date. Only review this draft; don't rewrite it yet.",
+      "requiredFacts": [
+        "Birch",
+        "Ren",
+        "700",
+        "180",
+        "200",
+        "Friday 12 June"
+      ],
+      "criticalFacts": [
+        "Lighting: 180 credits. Audio: 200 credits. Delivery fee: not supplied. Offer expires Friday 12 June.",
+        [
+          "review",
+          "reviewing"
+        ],
+        [
+          "not accepted",
+          "Neither quote",
+          "neither quote"
+        ],
+        [
+          "Do not contact Ren",
+          "do not contact",
+          "no supplier contact"
+        ],
+        [
+          "not the event date",
+          "not a delivery date",
+          "not the delivery date",
+          "quote deadline"
+        ]
+      ],
+      "forbiddenFacts": [
+        "The user is Ren",
+        "purchase approved",
+        "order placed",
+        "payment completed",
+        "the backup is intact",
+        "disabling duplicate detection",
+        "Harbor",
+        "Dana"
+      ],
+      "contradictions": [
+        {
+          "label": "Obsolete lighting quote treated as current",
+          "pattern": "(?:current|accepted|approved) lighting (?:quote|cost)[^\\n]{0,25}150"
+        }
+      ]
     }
   ]
 }

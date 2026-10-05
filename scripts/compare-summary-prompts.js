@@ -118,9 +118,11 @@ async function main() {
   if (!process.env.OPENROUTER_API_KEY) throw new Error("OPENROUTER_API_KEY is required");
   const flags = {
     "inclusionai/ling-3.1-flash": "OPENROUTER_LING_ENABLED",
-    "qwen/qwen3.8-27b:free": "OPENROUTER_QWEN_ENABLED"
+    "qwen/qwen3.8-27b:free": "OPENROUTER_QWEN_ENABLED",
+    "dots-studio/dots-3-note-preview:free": "OPENROUTER_DOTS_ENABLED",
+    "google/gemma-4-26b-a4b-it:free": "OPENROUTER_GEMMA_ENABLED"
   };
-  if (!flags[values.model]) throw new Error("Only the configured free Ling and Qwen experiment routes are supported");
+  if (!flags[values.model]) throw new Error("Only configured free experiment routes are supported");
   process.env.OPENROUTER_ENABLED = "true";
   for (const flag of ["OPENROUTER_LING_ENABLED", "OPENROUTER_QWEN_ENABLED", "OPENROUTER_DOTS_ENABLED", "OPENROUTER_GEMMA_ENABLED"]) {
     process.env[flag] = flag === flags[values.model] ? "true" : "false";

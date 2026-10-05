@@ -1,0 +1,169 @@
+{
+  "version": 1,
+  "syntheticOnly": true,
+  "baselineRef": "7652aa84bc239e550d32de31bcd8fdc00219e0c0",
+  "candidateRef": "9f546567a093af233e1375f7e2763009d3392262",
+  "candidatePromptSourceSha256": "22f781359fb6b354274c1d38dccc62581dba57f9b8d4468a42407e839af516c8",
+  "fixtureSha256": "d601db0e1fc30c9c45f3e6ece49749e0c20854fa6386ff186094a561bfc5915b",
+  "model": "dots-studio/dots-3-note-preview:free",
+  "repeats": 2,
+  "selectedCases": [
+    "corrected-export-design-long-280000"
+  ],
+  "longHistory": true,
+  "comparisonRunnerSha256": "96a89cd2d77d162f01de19be3e3276d236185594d2c0767cae3269d32b0a0cd1",
+  "reviewCriteria": [
+    "Can the next assistant answer the latest user request without asking for information already supplied?",
+    "Are accepted choices, proposals, rejections and unresolved alternatives kept distinct?",
+    "Are prohibitions, user corrections and not-started/not-tested/not-booked states preserved?",
+    "Is the current work product or exact reproduction evidence available when needed to continue?",
+    "Does the handoff avoid invented identity, causes, approvals, completed work and extra tasks?"
+  ],
+  "limitations": "Lexical checks are diagnostics, not semantic grading. Review every full handoff; local fallback is not a successful model generation. Short fixtures force the same generated profile on both variants; production tiny chats still use exact local carry.",
+  "results": [
+    {
+      "caseId": "corrected-export-design-long-280000",
+      "repeat": 1,
+      "variant": "baseline",
+      "summary": "╔══════════════════════════════════════════╗\n║         CONTEXT CARRY — READY TO PASTE        ║\n╚══════════════════════════════════════════╝\n\n🧠 WHO I AM\nNone. No user identity, role, or preferences were stated in the transcript. The transcript explicitly notes: \"Do not infer that Jules is me\" and \"No owner identity has been linked to my account.\"\n\n🎯 WHAT WE WERE DOING\nFixing Project Cedar's nightly export worker (owner: Jules; production branch: release; region: ap-south-1). The export times out only for files larger than 30 MB. Database writes are healthy and no customer records were lost. The task is to address the \"upload idle timeout\" failure log in worker/export.mjs.\n\n📍 WHERE WE LEFT OFF\n- The latest user instruction is to \"Pick up with a patch proposal for the two-upload design; preserve my no-deploy instruction and both retry options.\"\n- The patch target is worker/export.mjs.\n- The failure log is exactly: \"upload idle timeout.\"\n- Implementation, testing, and deployment have NOT started.\n- The retry policy remains undecided between fixed 400 ms pause or jitter 200-600 ms.\n- The user has not yet received or approved the requested patch proposal.\n\n✅ DECISIONS MADE\n- Chunk size: 10 MB (accepted).\n- Simultaneous uploads: Changed from six to two (user-accepted replacement of the earlier six-upload choice).\n- Required invoice-format fix: Must be kept.\n- Rollback: Not approved.\n- Global timeout increase: Explicitly rejected by the user.\n\n⚠️ OPEN QUESTIONS\n- Retry policy: Undecided between fixed 400 ms pause or jitter 200-600 ms.\n- Patch proposal: Requested but not yet generated or delivered.\n\n📦 KEY CONTEXT\n- Constraint: \"Do not deploy this change.\" (verbatim, unconditional)\n- Constraint: \"Keep the required invoice-format fix; rollback is not approved.\" (verbatim)\n- Constraint: \"Reject increasing the global timeout.\" (verbatim)\n- Constraint: \"We have not started implementation, testing or deployment.\" (verbatim)\n- Reported fact: Export times out only for files larger than 30 MB.\n- Reported fact: Database writes are healthy and no customer records were lost.\n- Reported fact: The failure log is exactly: \"upload idle timeout.\"\n- Rejected idea: Increasing the global timeout.\n- Rejected idea: Rolling back the change.\n- Historical context (irrelevant to active task): Multiple archived references to unrelated projects (Meadow bookmark, cooking exercise, reading club, neighborhood bulletin, Kite puzzle) were injected as historical background only and carry no active project requirements or decisions.\n\n🔁 NEXT STEP\nReply only: \"Context loaded. Let's pick up right where you left off.\" Then wait for the user.",
+      "generated": true,
+      "model": "dots-studio/dots-3-note-preview:free",
+      "elapsedMs": 11237,
+      "inputChars": 280125,
+      "inputSha256": "e9f64e7a0183cc471b8ce15464fa4aa7b26f7478c3e55e987148b3383e021d7c",
+      "systemPromptSha256": "441198797fb858e53d1681488bd3439a6ab37704c2caf4038c6824a7ed7174bb",
+      "profile": "extra-large",
+      "forcedGeneratedProfile": false,
+      "maxTokens": 7000,
+      "usage": {
+        "promptTokens": 56770,
+        "completionTokens": 626,
+        "totalTokens": 57396,
+        "cachedTokens": 0
+      },
+      "qualityFlags": [],
+      "fallback": {
+        "attempted": false,
+        "used": false,
+        "servedBy": null,
+        "model": null,
+        "reason": null
+      },
+      "assessment": {
+        "missingFacts": [
+          "two simultaneous OR 2 simultaneous OR two concurrent OR 2 concurrent"
+        ],
+        "missingCriticalFacts": [],
+        "incorrectFacts": []
+      }
+    },
+    {
+      "caseId": "corrected-export-design-long-280000",
+      "repeat": 1,
+      "variant": "candidate",
+      "summary": "╔══════════════════════════════════════════╗\n║         CONTEXT CARRY — READY TO PASTE        ║\n╚══════════════════════════════════════════╝\n\n🧠 WHO I AM\nNone (no user identity, role, or preferences were stated in the transcript).\n\n🎯 WHAT WE WERE DOING\nFixing Project Cedar's nightly export worker. The worker times out only for files larger than 30 MB in the ap-south-1 region on the release branch. Database writes are healthy and no customer records were lost. The owner is Jules, but the user explicitly stated: \"Do not infer that Jules is me.\" The task is to implement a patch for worker/export.mjs using two simultaneous uploads and 10 MB chunks, while preserving a required invoice-format fix and rejecting a rollback.\n\n📍 WHERE WE LEFT OFF\nThe user requested a patch proposal for the two-upload design for the file worker/export.mjs. The failure log is exactly: \"upload idle timeout.\" The user has not started implementation, testing, or deployment. The user's latest instruction is to preserve the no-deploy instruction and both retry options (fixed 400 ms pause or jitter between 200-600 ms).\n\n✅ DECISIONS MADE\n- Rejected: Increasing the global timeout (explicitly rejected by the user).\n- Rejected: Rollback is not approved (explicitly rejected by the user).\n- Accepted: Use 10 MB chunks (originally proposed and confirmed).\n- Accepted: Two simultaneous uploads (replacing the earlier six-upload choice).\n- Accepted: Keep the required invoice-format fix (must be preserved in the patch).\n- Accepted: Retry policy options are fixed 400 ms pause OR jitter between 200-600 ms (both must be preserved as options in the proposal).\n\n⚠️ OPEN QUESTIONS\n- The retry policy is undecided: fixed 400 ms pause versus jitter 200-600 ms. Both options must be presented in the patch proposal.\n\n📦 KEY CONTEXT\n- Target file: worker/export.mjs\n- Failure log: \"upload idle timeout\"\n- Constraints: Do not deploy this change. Do not infer that Jules is the user. No owner identity has been linked to the user's account.\n- Historical/Archived references: Multiple archived references (Meadow bookmark project, cooking exercise, reading club, neighborhood bulletin, Kite puzzle) were mentioned but are explicitly labeled as historical background only and unrelated to the active task.\n\n🔁 NEXT STEP\nReply only: \"Context loaded. Let's pick up right where you left off.\" Then wait for the user.",
+      "generated": true,
+      "model": "dots-studio/dots-3-note-preview:free",
+      "elapsedMs": 9697,
+      "inputChars": 280125,
+      "inputSha256": "e9f64e7a0183cc471b8ce15464fa4aa7b26f7478c3e55e987148b3383e021d7c",
+      "systemPromptSha256": "385fbb221765d920dae83aa9c52c03a3f7f32369b0aa809db6d00f9ea67d5cbb",
+      "profile": "extra-large",
+      "forcedGeneratedProfile": false,
+      "maxTokens": 7000,
+      "usage": {
+        "promptTokens": 56874,
+        "completionTokens": 574,
+        "totalTokens": 57448,
+        "cachedTokens": 0
+      },
+      "qualityFlags": [],
+      "fallback": {
+        "attempted": false,
+        "used": false,
+        "servedBy": null,
+        "model": null,
+        "reason": null
+      },
+      "assessment": {
+        "missingFacts": [],
+        "missingCriticalFacts": [],
+        "incorrectFacts": []
+      }
+    },
+    {
+      "caseId": "corrected-export-design-long-280000",
+      "repeat": 2,
+      "variant": "candidate",
+      "summary": "🧠 WHO I AM\nNone\n\n🎯 WHAT WE WERE DOING\nFixing Project Cedar's nightly export worker (owner Jules) on production branch `release` in region `ap-south-1`. The export times out only for files larger than 30 MB; database writes are healthy and no customer records were lost. The user explicitly instructed: do not deploy this change.\n\n📍 WHERE WE LEFT OFF\nThe user's latest request: \"Pick up with a patch proposal for the two-upload design; preserve my no-deploy instruction and both retry options.\" The target file is `worker/export.mjs`, and the failure log is exactly: `upload idle timeout`. No owner identity has been linked to the user's account. Implementation, testing, and deployment have not started.\n\n✅ DECISIONS MADE\n- Reject increasing the global timeout (rejected option).\n- Use 10 MB chunks (accepted).\n- Use two simultaneous uploads (accepted, replacing the earlier six-upload choice).\n- Keep the required invoice-format fix; rollback is not approved.\n- Retry policy remains undecided between: fixed 400 ms pause, or jitter between 200-600 ms.\n\n⚠️ OPEN QUESTIONS\nRetry policy choice: fixed 400 ms pause vs. jitter 200-600 ms.\n\n📦 KEY CONTEXT\n- Project: Cedar nightly export worker\n- Owner: Jules (not linked to user account)\n- Branch: `release`\n- Region: `ap-south-1`\n- Failure symptom: `upload idle timeout` (exact log)\n- File size threshold: >30 MB\n- Database writes: healthy\n- Customer records: none lost\n- Explicit constraint: \"Do not deploy this change.\"\n- Target file: `worker/export.mjs`\n- Rejected idea: increasing the global timeout\n- Rejected idea: rollback\n- Archived references (1-1508): Meadow bookmark (green star), cooking exercise (oats/apples), reading club (poetry anthology), neighborhood bulletin (two-column layout), Kite puzzle (arrow keys) — all historical background, unrelated to active task.\n\n🔁 NEXT STEP\nReply only: \"Context loaded. Let's pick up right where you left off.\" Then wait for the user.",
+      "generated": true,
+      "model": "dots-studio/dots-3-note-preview:free",
+      "elapsedMs": 8003,
+      "inputChars": 280125,
+      "inputSha256": "e9f64e7a0183cc471b8ce15464fa4aa7b26f7478c3e55e987148b3383e021d7c",
+      "systemPromptSha256": "385fbb221765d920dae83aa9c52c03a3f7f32369b0aa809db6d00f9ea67d5cbb",
+      "profile": "extra-large",
+      "forcedGeneratedProfile": false,
+      "maxTokens": 7000,
+      "usage": {
+        "promptTokens": 56874,
+        "completionTokens": 469,
+        "totalTokens": 57343,
+        "cachedTokens": 56832
+      },
+      "qualityFlags": [
+        "bad_structure"
+      ],
+      "fallback": {
+        "attempted": false,
+        "used": false,
+        "servedBy": null,
+        "model": null,
+        "reason": null
+      },
+      "assessment": {
+        "missingFacts": [],
+        "missingCriticalFacts": [],
+        "incorrectFacts": []
+      }
+    },
+    {
+      "caseId": "corrected-export-design-long-280000",
+      "repeat": 2,
+      "variant": "baseline",
+      "summary": "🧠 WHO I AM\nNone\n\n🎯 WHAT WE WERE DOING\nFixing Project Cedar's nightly export worker, which times out only for files larger than 30 MB. The task is to implement a chunked upload design with simultaneous uploads and a retry policy, without deploying the change.\n\n📍 WHERE WE LEFT OFF\nImplementation, testing, and deployment have not started. The design is set for two simultaneous uploads with 10 MB chunks. The retry policy remains undecided between a fixed 400 ms pause and a jitter of 200-600 ms. The patch target is worker/export.mjs, and the failure log is exactly: \"upload idle timeout.\"\n\n✅ DECISIONS MADE\n- Use 10 MB chunks.\n- Use two simultaneous uploads (replacing the earlier six-upload choice).\n- Reject increasing the global timeout.\n- Keep the required invoice-format fix; rollback is not approved.\n- Do not deploy this change.\n\n⚠️ OPEN QUESTIONS\n- Retry policy: fixed 400 ms pause vs. jitter 200-600 ms (undecided).\n\n📦 KEY CONTEXT\n- Project: Cedar nightly export worker.\n- Owner: Jules.\n- Production branch: release.\n- Region: ap-south-1.\n- Symptom: Export times out only for files larger than 30 MB.\n- Reported fact: Database writes are healthy and no customer records were lost.\n- Constraint: \"Do not deploy this change.\"\n- Rejected idea: Increasing the global timeout.\n- Rejected idea: Rollback.\n- Target file: worker/export.mjs.\n- Failure log: \"upload idle timeout.\"\n- Constraint: \"Do not infer that Jules is me.\"\n- Archived references (unrelated, historical background only):\n  - Meadow bookmark project (green star icon).\n  - Sample cooking exercise (oats and apples).\n  - Fictional reading club (poetry anthology).\n  - Old neighborhood bulletin (two-column layout).\n  - Archived Kite puzzle discussion (arrow keys).\n\n🔁 NEXT STEP\nReply only: \"Context loaded. Let's pick up right where you left off.\" Then wait for the user.",
+      "generated": true,
+      "model": "dots-studio/dots-3-note-preview:free",
+      "elapsedMs": 7237,
+      "inputChars": 280125,
+      "inputSha256": "e9f64e7a0183cc471b8ce15464fa4aa7b26f7478c3e55e987148b3383e021d7c",
+      "systemPromptSha256": "441198797fb858e53d1681488bd3439a6ab37704c2caf4038c6824a7ed7174bb",
+      "profile": "extra-large",
+      "forcedGeneratedProfile": false,
+      "maxTokens": 7000,
+      "usage": {
+        "promptTokens": 56770,
+        "completionTokens": 444,
+        "totalTokens": 57214,
+        "cachedTokens": 56320
+      },
+      "qualityFlags": [
+        "bad_structure"
+      ],
+      "fallback": {
+        "attempted": false,
+        "used": false,
+        "servedBy": null,
+        "model": null,
+        "reason": null
+      },
+      "assessment": {
+        "missingFacts": [],
+        "missingCriticalFacts": [
+          "patch proposal OR propose a patch OR propose the patch"
+        ],
+        "incorrectFacts": []
+      }
+    }
+  ]
+}
