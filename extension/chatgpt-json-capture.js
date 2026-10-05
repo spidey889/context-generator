@@ -99,10 +99,18 @@
         if (!parts.length) excludedContentTypes.add("tools");
         return parts.length ? [`Assistant: ${parts.join("\n\n")}`] : [];
       }
+      const attachmentLabels = role === "user" && Array.isArray(message.metadata?.attachments)
+        ? message.metadata.attachments.flatMap(file => file?.is_big_paste !== true && typeof file?.name === "string" && file.name.trim()
+          ? [`Attachment: ${JSON.stringify(file.name)}`] : []) : [];
       const content = message.content;
       if (!["text", "multimodal_text", "code", "thinking", "thoughts", "reasoning_recap"].includes(content?.content_type)) {
         excludedContentTypes.add(/image|audio|video/.test(content?.content_type || "") ? "media" : "other");
-        return [];
+        if (!attachmentLabels.length) return [];
+        assertComplete(message, "Own-turn message");
+        assertComplete(message.metadata, "Own-turn metadata");
+        assertComplete(content, "Own-turn content");
+        if (message.status != null && !["finished_successfully", "finished_partial"].includes(message.status)) throw blocked("An own turn is still in progress or failed.");
+        return [`User: ${attachmentLabels.join("\n\n")}`];
       }
       assertComplete(message, "Own-turn message");
       assertComplete(message.metadata, "Own-turn metadata");
@@ -188,6 +196,8 @@
           }
         }
       }
+      // Only explicit upload names; never serialize signed pointers or nested metadata.
+      parts.push(...attachmentLabels);
       return parts.length ? [`${role === "user" ? "User" : "Assistant"}: ${parts.join("\n\n")}`] : [];
     });
     if (!turns.length) throw blocked("No usable user or assistant text remains after skipping tools, files, images, and artifacts.");

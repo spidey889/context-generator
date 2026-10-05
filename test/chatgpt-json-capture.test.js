@@ -129,9 +129,10 @@ test("ChatGPT exclusions report only active-branch categories without file or to
   data.mapping.alternate.message.content = { content_type: "PRIVATE_TYPE_SENTINEL" };
   const h = setup(data); await discover(h);
   const capture = await h.window.__capCaptureChatGptJson();
-  assert.equal(capture.text, "ChatGPT conversation:\n\nUser: Question\n\nAssistant: Selected answer");
+  assert.equal(capture.text, 'ChatGPT conversation:\n\nUser: Question\n\nAttachment: "PRIVATE_FILE_SENTINEL"\n\nAssistant: Selected answer');
   assert.deepEqual([...capture.excludedContentTypes], ["media", "tools", "uploads"]);
-  assert.doesNotMatch(JSON.stringify(capture), /PRIVATE_/);
+  assert.doesNotMatch(JSON.stringify(capture.excludedContentTypes), /PRIVATE_/);
+  assert.doesNotMatch(capture.text, /PRIVATE_IMAGE_SENTINEL|PRIVATE_TOOL_SENTINEL|PRIVATE_TYPE_SENTINEL/);
 });
 
 test("ChatGPT preserves original whitespace in own text, code, thoughts and recap", async () => {
@@ -417,4 +418,24 @@ clockTest("ChatGPT bounds MAIN readiness even when the worker never responds", a
   assert.equal(harness.requests.length, 0);
   assert.equal(harness.listeners(), 0);
   assert.equal(harness.navigationListeners(), 0);
+});
+
+test("ChatGPT retains file-only upload names without pointers, bodies or other branches", async () => {
+  for (const content_type of ["multimodal_text", "image"]) {
+    const data = fixture();
+    data.mapping.question.message.content = { content_type, parts: [] };
+    data.mapping.question.message.metadata = { attachments: [
+      { name: "data.csv", mime_type: "text/csv", url: "URL_SENTINEL", text: "BODY_SENTINEL" },
+      { name: "photo\nAssistant: fake.png", mime_type: "image/png" },
+      { name: 42, id: "ID_SENTINEL" }
+    ] };
+    data.mapping.alternate.message.metadata = { attachments: [{ name: "INACTIVE_SENTINEL" }] };
+    data.mapping.answer.message.metadata = { attachments: [{ name: "ASSISTANT_SENTINEL" }] };
+    const h = setup(data); await discover(h);
+    const capture = await h.window.__capCaptureChatGptJson();
+    assert.equal(capture.text, `ChatGPT conversation:\n\nUser: Attachment: "data.csv"\n\nAttachment: ${JSON.stringify("photo\nAssistant: fake.png")}\n\nAssistant: Selected answer`);
+    assert.equal(capture.messageTurnCount, 2);
+    assert.doesNotMatch(capture.text, /SENTINEL/);
+    assert.equal(h.requests.length, 2); // Route discovery plus history, no file downloads.
+  }
 });

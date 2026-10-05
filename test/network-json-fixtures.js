@@ -22,7 +22,7 @@ function fixtures(platform, chat = "smoke", count = 24) {
   }
   if (platform === "deepseek") turns[0][0] += '\n  print("a\u00a0b")  \r\nSOURCE_CODE_END';
   const name = { gemini: "Gemini", grok: "Grok", deepseek: "DeepSeek" }[platform];
-  const expected = `${name} conversation:\n\n${turns.flatMap(([user, assistant]) => [`User: ${user}`, `Assistant: ${assistant}`]).join("\n\n")}`;
+  let expected = `${name} conversation:\n\n${turns.flatMap(([user, assistant]) => [`User: ${user}`, `Assistant: ${assistant}`]).join("\n\n")}`;
   if (platform === "gemini") {
     const reverse = turns.map(([user, assistant], i) => geminiTurn(i, chat, user, assistant)).reverse();
     const pages = [];
@@ -38,6 +38,7 @@ function fixtures(platform, chat = "smoke", count = 24) {
   }
   const upload = turns[0][0];
   const file = { id: "file-test-paste", file_name: "Original source.py", file_size: Buffer.byteLength(upload), is_image: false, status: "SUCCESS", signed_path: "/file?file_id=test-paste&sig=SIGNED_SENTINEL" };
+  expected = expected.replace(`User: ${upload}`, `User: Attachment: "Original source.py"\n\n${upload}\n\nAttachment: "ignored.png"`);
   const messages = turns.flatMap(([user, assistant], i) => [
     { message_id: i * 2 + 1, parent_id: i ? i * 2 : null, role: "USER", status: "FINISHED", incomplete_message: null, has_pending_fragment: false, auto_continue: false, fragments: i ? [{ type: "REQUEST", content: user }] : [{ type: "FILE", files: [file] }, { type: "FILE", files: [{ is_image: true, file_name: "ignored.png", signed_path: "/DO_NOT_FETCH_IMAGE" }] }] },
     { message_id: i * 2 + 2, parent_id: i * 2 + 1, role: "ASSISTANT", status: "FINISHED", incomplete_message: null, has_pending_fragment: false, auto_continue: false, fragments: [{ type: "RESPONSE", content: assistant }, { type: "TOOL", content: "TOOL_SENTINEL" }] }

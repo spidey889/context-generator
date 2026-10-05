@@ -131,6 +131,13 @@
           parts[index] = parts[index].slice(0, copy.start) + copy.text + parts[index].slice(copy.end);
         }
       }
+      // File labels belong to the owning user turn, not diagnostics or file bodies.
+      // Quote names so embedded newlines cannot masquerade as transcript roles.
+      if (message.sender === "human") {
+        for (const file of [...attachments, ...(Array.isArray(message.files) ? message.files : [])]) {
+          if (typeof file?.file_name === "string" && file.file_name.trim()) parts.push(`Attachment: ${JSON.stringify(file.file_name)}`);
+        }
+      }
       if (!parts.length) return [];
       return [(message.sender === "human" ? "User" : "Assistant") + ": " + parts.join("\n\n")];
     });

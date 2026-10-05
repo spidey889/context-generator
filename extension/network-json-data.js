@@ -78,6 +78,20 @@
       if (item[1] !== null && (item[1]?.[0] !== `c_${chat}` || typeof item[1]?.[1] !== "string")) fail("Gemini returned an invalid parent turn.");
       expected = item[1]?.[1] ?? null;
       const user = item[2]?.[0]?.[0];
+      const userParts = [user];
+      // hNvQHb user attachment slot: groups contain descriptors at [4], name at [2].
+      // Read this slot only, never recursively collect strings from render/tool data.
+      const groups = item[2]?.[0]?.[4];
+      if (groups != null && !Array.isArray(groups)) fail("Gemini attachment labels have an unsupported shape.", "unsupported");
+      if (Array.isArray(groups)) for (const group of groups) {
+        if (!Array.isArray(group?.[4])) fail("Gemini attachment labels have an unsupported shape.", "unsupported");
+        for (const file of group[4]) {
+          if (Array.isArray(file) && typeof file[1] === "number" && typeof file[2] === "string" && file[2].trim()) {
+            userParts.push(`Attachment: ${JSON.stringify(file[2])}`);
+            excludedContentTypes.add("uploads");
+          } else fail("Gemini attachment labels have an unsupported shape.", "unsupported");
+        }
+      }
       const assistant = item[3];
       if (!Array.isArray(assistant?.[0]) || typeof assistant[3] !== "string") fail("A Gemini response is missing or unfinished.");
       const candidate = assistant[0].find(candidate => candidate?.[0] === assistant[3]);
@@ -85,7 +99,7 @@
       if (candidate[1].some(part => part != null && typeof part !== "string")) excludedContentTypes.add("other");
       // Only the selected response's own text; render blocks duplicate that
       // text and can contain search/tool payloads, so never walk them recursively.
-      turns.unshift(...turn("User", [user]), ...turn("Assistant", candidate[1].filter(part => typeof part === "string")));
+      turns.unshift(...turn("User", userParts), ...turn("Assistant", candidate[1].filter(part => typeof part === "string")));
     }
     if (expected !== null || !seen.size) fail("Gemini's oldest history turn is missing.");
     return transcript("Gemini", turns, excludedContentTypes);
@@ -121,7 +135,13 @@
       // File bodies are unsupported here. Do not accept an answer-only transcript
       // when its authored user turn consists solely of an attachment.
       if (message.sender === "human" && !message.message.trim() && [message.fileAttachments, message.fileAttachmentsMetadata].some(files => Array.isArray(files) && files.length)) fail("Grok has a file-only user turn that fast capture cannot read.", "unsupported");
-      return turn(message.sender === "human" ? "User" : "Assistant", [message.message]);
+      const parts = [message.message];
+      if (message.sender === "human" && Array.isArray(message.fileAttachmentsMetadata)) {
+        for (const file of message.fileAttachmentsMetadata) {
+          if (typeof file?.fileName === "string" && file.fileName.trim()) parts.push(`Attachment: ${JSON.stringify(file.fileName)}`);
+        }
+      }
+      return turn(message.sender === "human" ? "User" : "Assistant", parts);
     });
     return transcript("Grok", turns, excludedContentTypes);
   };
@@ -155,6 +175,7 @@
           parts.push(fragment.content);
         } else if (message.role === "USER" && fragment.type === "FILE") {
           for (const file of Array.isArray(fragment.files) ? fragment.files : []) {
+            if (typeof file?.file_name === "string" && file.file_name.trim() && !fileIds.has(file.id)) parts.push(`Attachment: ${JSON.stringify(file.file_name)}`);
             if (!textFile(file)) { excludedContentTypes.add(file?.is_image === true ? "media" : "uploads"); continue; }
             complete(file);
             const text = Object.hasOwn(files, file.id) ? files[file.id] : null;
