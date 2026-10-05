@@ -15,6 +15,7 @@ const CHATGPT_PASTED_TEXT = `CHATGPT_PASTE_START\n${"  Original pasted line, abs
 const CHATGPT_USER_PASTE = `${SOURCE_SENTINEL}\nJSON_ONLY_SENTINEL: earliest API-only turn.\n${CHATGPT_PASTED_TEXT}`;
 const CHATGPT_CANVAS_TEXT = `CHATGPT_CANVAS_START\n${"  Complete canvas line, absent from the DOM.\n".repeat(500)}CHATGPT_CANVAS_MIDDLE\n${"  Final canvas line.\n".repeat(500)}CHATGPT_CANVAS_END\n`;
 const CHATGPT_EXACT_CODE = '  OWN_CODE_SENTINEL\n  print("a\u00a0b")  \nCODE_END_SENTINEL';
+const CHATGPT_PYTHON_RESULT = "  Test code Item  Value\n0  JV3XLMSP    A   6791\n1  JV3XLMSP    B   3197\n2  JV3XLMSP    C   7083";
 const CLAUDE_PASTED_TEXT = `CLAUDE_PASTE_START\n${"Full pasted-card line, absent from the DOM.\n".repeat(1000)}CLAUDE_PASTE_END`;
 const SUMMARY_TEXT = [
   "CONTEXT CARRY — READY TO PASTE",
@@ -464,7 +465,9 @@ function chatGptTreeFixture() {
     parent = assistant;
   }
   mapping.tool = { parent, message: { author: { role: "tool" }, content: { content_type: "text", parts: ["UNSUPPORTED_SENTINEL"] } } };
-  mapping.recap = { parent: "tool", message: { author: { role: "assistant" }, content: { content_type: "reasoning_recap", content: "OWN_RECAP_SENTINEL" } } };
+  mapping.python = { parent: "tool", message: { author: { role: "assistant" }, recipient: "python", status: "finished_successfully", content: { content_type: "code", text: "UNSUPPORTED_SENTINEL" }, metadata: { is_complete: true } } };
+  mapping.pythonResult = { parent: "python", message: { author: { role: "tool", name: "python" }, recipient: "all", status: "finished_successfully", content: { content_type: "execution_output", text: CHATGPT_PYTHON_RESULT }, metadata: { is_complete: true, aggregate_result: "UNSUPPORTED_SENTINEL" } } };
+  mapping.recap = { parent: "pythonResult", message: { author: { role: "assistant" }, content: { content_type: "reasoning_recap", content: "OWN_RECAP_SENTINEL" } } };
   mapping.thought = { parent: "recap", message: { author: { role: "assistant" }, content: { content_type: "thoughts", thoughts: [{ content: "OWN_THOUGHT_SENTINEL", summary: "UNSUPPORTED_SENTINEL", finished: true }] } } };
   mapping.canvas = { parent: "thought", message: { author: { role: "assistant" }, recipient: "canmore.create_textdoc", status: "finished_successfully", end_turn: false, content: { content_type: "code", text: JSON.stringify({ name: "Smoke document", type: "document", content: CHATGPT_CANVAS_TEXT }) } } };
   mapping.canvasResult = { parent: "canvas", message: { author: { role: "tool", name: "canmore.create_textdoc" }, status: "finished_successfully", content: { content_type: "text", parts: ["UNSUPPORTED_SENTINEL"] }, metadata: { command: "create_textdoc", canvas: { textdoc_id: "smoke-document", textdoc_type: "document", version: 1 } } } };
@@ -1687,7 +1690,7 @@ async function run() {
           `User: ${i === 0 ? CHATGPT_USER_PASTE : `User history ${i}`}`,
           `Assistant: ${i === 59 ? ASSISTANT_SENTINEL : `Assistant history ${i}`}`
         ]).flat();
-        expectedTurns.push("Assistant: OWN_RECAP_SENTINEL", "Assistant: OWN_THOUGHT_SENTINEL", `Assistant: Canvas: Smoke document\n\n${CHATGPT_CANVAS_TEXT}`, "Assistant: Canvas edit:\n\nOWN_CANVAS_EDIT_SENTINEL", "User: OWN_VOICE_USER_SENTINEL", "Assistant: OWN_VOICE_ASSISTANT_SENTINEL", `Assistant: ${CHATGPT_EXACT_CODE}`);
+        expectedTurns.push(`Assistant: Python result:\n\n${CHATGPT_PYTHON_RESULT}`, "Assistant: OWN_RECAP_SENTINEL", "Assistant: OWN_THOUGHT_SENTINEL", `Assistant: Canvas: Smoke document\n\n${CHATGPT_CANVAS_TEXT}`, "Assistant: Canvas edit:\n\nOWN_CANVAS_EDIT_SENTINEL", "User: OWN_VOICE_USER_SENTINEL", "Assistant: OWN_VOICE_ASSISTANT_SENTINEL", `Assistant: ${CHATGPT_EXACT_CODE}`);
         assert.equal(capturedConversation, `ChatGPT conversation:\n\n${expectedTurns.join("\n\n")}`, "Every own turn must reach the backend exactly once, including all middle history.");
         assert.ok(capturedConversation.includes(CHATGPT_PASTED_TEXT), "Full pasted text must remain in its owning user turn.");
         assert.match(capturedConversation, /Assistant history 0/);
