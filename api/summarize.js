@@ -614,7 +614,7 @@ async function createSummaryWithProvider({ provider, apiKey, profile, model, ini
   // preferable to another provider call; only empty/refusal-only content fails.
   const summary = validation.ok
     ? normalizeContextCarrySummary(rawSummary)
-    : `${rawSummary.trim()}\n\n🔁 NEXT STEP\n${DESTINATION_CONFIRMATION_INSTRUCTION}`;
+    : appendDestinationConfirmation(rawSummary);
 
   const expansion = {
     attempted: false,
@@ -1118,6 +1118,33 @@ function delay(timeoutMs, signal) {
     };
     signal?.addEventListener("abort", onAbort, { once: true });
   });
+}
+
+function appendDestinationConfirmation(text) {
+  const summary = `${text.trim()}\n\n🔁 NEXT STEP\n${DESTINATION_CONFIRMATION_INSTRUCTION}`;
+  const headings = [];
+  for (const line of summary.matchAll(/[^\r\n]+/g)) {
+    const heading = getContextCarrySectionMatch(line[0]);
+    if (heading) headings.push({ ...heading, start: line.index, bodyStart: line.index + line[0].length });
+  }
+
+  // Partial/short summaries can already contain our instruction. Deduplicate
+  // only equal NEXT STEP bodies; offsets preserve all other provider text.
+  const seen = new Set();
+  let kept = "";
+  let cursor = 0;
+  headings.forEach((heading, index) => {
+    if (heading.section.title !== "NEXT STEP") return;
+    const end = headings[index + 1]?.start ?? summary.length;
+    const body = `${heading.inlineContent}\n${summary.slice(heading.bodyStart, end)}`.replace(/\r\n/g, "\n").trim();
+    if (seen.has(body)) {
+      kept += summary.slice(cursor, heading.start);
+      cursor = end;
+    } else {
+      seen.add(body);
+    }
+  });
+  return `${kept}${summary.slice(cursor)}`.trim();
 }
 
 function normalizeContextCarrySummary(text) {

@@ -588,6 +588,55 @@ test("useful token-limited output is delivered without calling a fallback", asyn
   }
 });
 
+test("provider summaries keep only identical NEXT STEP sections while preserving other content", async () => {
+  const originalFetch = global.fetch;
+  const restores = [setTemporaryEnv("GEMINI_API_KEY", undefined),
+    setTemporaryEnv("MISTRAL_API_KEY", "test-mistral-key")];
+  const instruction = 'Reply only: "Context loaded. Let\'s pick up right where you left off." Then wait for the user.';
+  const nextStep = `🔁 NEXT STEP\n${instruction}`;
+  const context = "📦 KEY CONTEXT\nThe Windows build passed; Linux testing is still pending.";
+  const carry = `${context}\n\n${nextStep}`;
+  const differentStep = `${context}\n\nNEXT STEP\nCheck the Linux build before release.`;
+  const shortStructured = makeContextCarrySummary("short", 3);
+  const inline = `${context}\n\n### 🔁 NEXT STEP: ${instruction}`;
+  const cases = [
+    { name: "missing sections", raw: carry, expected: carry },
+    { name: "short structured output", raw: shortStructured, expected: shortStructured },
+    { name: "repeated provider sections", raw: `${carry}\n\n${nextStep}`, expected: carry },
+    { name: "inline Markdown heading", raw: inline, expected: inline },
+    { name: "original CRLF preserved", raw: carry.replace(/\n/g, "\r\n"), expected: carry.replace(/\n/g, "\r\n") },
+    { name: "different next steps retained", raw: `${differentStep}\n\n${nextStep}`, expected: `${differentStep}\n\n${nextStep}` },
+    { name: "identical custom steps", raw: `${differentStep}\n\nNEXT STEP\nCheck the Linux build before release.`, expected: `${differentStep}\n\n${nextStep}` },
+    { name: "other repeated sections retained", raw: `${context}\n\n${carry}`, expected: `${context}\n\n${carry}` },
+    { name: "missing next step appended", raw: context, expected: carry }
+  ];
+  let currentCase;
+  let requests = 0;
+  global.fetch = async () => {
+    requests++;
+    return { ok: true, status: 200, json: async () => ({ choices: [{
+      message: { content: currentCase.raw }, finish_reason: "stop"
+    }] }) };
+  };
+  try {
+    for (currentCase of cases) {
+      requests = 0;
+      const res = createMockResponse();
+      await summarize({ method: "POST", body: { conversation: "Real build context. ".repeat(100) } }, res);
+      assert.equal(res.statusCode, 200, currentCase.name);
+      assert.equal(res.payload.summary, currentCase.expected, currentCase.name);
+      assert.equal(res.payload.timing.servedBy, "mistral", currentCase.name);
+      assert.equal(requests, 1, currentCase.name);
+      if (currentCase.name === "repeated provider sections") {
+        assert.ok(res.payload.timing.qualityFlags.includes("duplicate_section"));
+      }
+    }
+  } finally {
+    restores.forEach(restore => restore());
+    global.fetch = originalFetch;
+  }
+});
+
 test("summary quality flags describe imperfect output without including its text", () => {
   const profile = getSummaryProfile("x".repeat(4000));
   const valid = makeContextCarrySummary("quality", 90);
