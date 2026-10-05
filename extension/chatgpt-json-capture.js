@@ -89,9 +89,27 @@
       }
       return parts;
     };
+    // The native Analysis panel renders Python execution_output.text. Keep only
+    // this adjacent completed call/result pair, not code or visualization metadata.
+    const pythonResult = (message, call) => {
+      if (message.author?.name !== "python" || message.recipient !== "all"
+        || message.content?.content_type !== "execution_output"
+        || call?.author?.role !== "assistant" || call.recipient !== "python"
+        || call.content?.content_type !== "code" || typeof call.content.text !== "string"
+        || call.metadata?.is_visually_hidden_from_conversation
+        || call.status !== "finished_successfully" || message.status !== "finished_successfully") return null;
+      for (const [scope, label] of [[call, "Python call"], [call.metadata, "Python call metadata"], [call.content, "Python call content"],
+        [message, "Python result"], [message.metadata, "Python result metadata"], [message.content, "Python result content"]]) assertComplete(scope, label);
+      if (typeof message.content.text !== "string") throw blocked("A Python result is missing its complete text string.");
+      return message.content.text.trim() ? message.content.text : null;
+    };
     const turns = branch.reverse().flatMap((message, index) => {
       const role = message.author?.role;
-      if (role === "tool") excludedContentTypes.add("tools");
+      if (role === "tool") {
+        const output = message.metadata?.is_visually_hidden_from_conversation ? null : pythonResult(message, branch[index - 1]);
+        if (output === null) { excludedContentTypes.add("tools"); return []; }
+        return [`Assistant: Python result:\n\n${output}`];
+      }
       if (!["user", "assistant"].includes(role) || message.metadata?.is_visually_hidden_from_conversation) return [];
       if (role === "user" && Array.isArray(message.metadata?.attachments) && message.metadata.attachments.some(file => file?.is_big_paste !== true || file.mime_type !== "text/plain")) excludedContentTypes.add("uploads");
       if (message.recipient && message.recipient !== "all") {

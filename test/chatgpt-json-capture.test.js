@@ -210,6 +210,70 @@ test("ChatGPT validates paste byte counts, truncation flags and transcript size 
   await assert.rejects(harness.window.__capCaptureChatGptJson(), /350,000/);
 });
 
+// Native format inspected in the owner's synthetic table chat on 2026-10-05:
+// a Python code call followed by execution_output.text, outside the final reply.
+function addPythonResult(data, text = "  Test code Item  Value\n0  JV3XLMSP    A   6791\n1  JV3XLMSP    B   3197\n2  JV3XLMSP    C   7083") {
+  const call = { author: { role: "assistant" }, recipient: "python", channel: "commentary", status: "finished_successfully",
+    content: { content_type: "code", text: "PRIVATE_CODE_SENTINEL", language: "unknown" }, metadata: { is_complete: true } };
+  const result = { author: { role: "tool", name: "python" }, recipient: "all", channel: "commentary", status: "finished_successfully",
+    content: { content_type: "execution_output", text }, metadata: { is_complete: true, aggregate_result: { text: "NESTED_SENTINEL" }, ada_visualizations: [{ url: "PRIVATE_URL_SENTINEL" }] } };
+  data.mapping.python = { parent: data.mapping.answer.parent, message: call };
+  data.mapping.pythonResult = { parent: "python", message: result };
+  data.mapping.answer.parent = "pythonResult";
+  return { call, result };
+}
+
+test("ChatGPT preserves completed Python Analysis results exactly without code or visualization metadata", async () => {
+  const data = fixture();
+  const output = "  Test code Item  Value\r\n0  JV3XLMSP    A   6791\r\n1  JV3XLMSP    B   3197\r\n2  JV3XLMSP    C   7083  \r\n";
+  addPythonResult(data, output);
+  data.mapping.answer.message.content.parts = ["The table is ready."];
+  const h = setup(data); await discover(h);
+  const capture = await h.window.__capCaptureChatGptJson();
+  assert.equal(capture.text, `ChatGPT conversation:\n\nUser: Question\n\nAssistant: Python result:\n\n${output}\n\nAssistant: The table is ready.`);
+  assert.equal(capture.messageTurnCount, 3);
+  assert.doesNotMatch(capture.text, /PRIVATE_|NESTED_/);
+  assert.equal(h.requests.length, 2, "Python results need no additional file or tool fetch.");
+});
+
+test("ChatGPT Python results exclude other tools, hidden or unpaired output and inactive branches", async () => {
+  for (const mutate of [
+    (_d, p) => { p.result.author.name = "web_search"; },
+    (_d, p) => { p.call.recipient = "web_search"; },
+    (_d, p) => { p.call.author.role = "user"; },
+    (_d, p) => { p.call.content.content_type = "text"; },
+    (_d, p) => { p.call.metadata.is_visually_hidden_from_conversation = true; },
+    (_d, p) => { p.result.metadata.is_visually_hidden_from_conversation = true; },
+    (_d, p) => { p.result.recipient = "python"; },
+    (_d, p) => { p.result.status = "failed"; },
+    (_d, p) => { p.call.status = "in_progress"; },
+    (_d, p) => { p.result.content = { content_type: "text", parts: ["PRIVATE_RESULT_SENTINEL"] }; },
+    d => { d.mapping.pythonResult.parent = "question"; },
+    d => { d.mapping.answer.parent = "question"; }
+  ]) {
+    const data = fixture(); const p = addPythonResult(data, "PRIVATE_RESULT_SENTINEL"); mutate(data, p);
+    const h = setup(data); await discover(h);
+    assert.equal((await h.window.__capCaptureChatGptJson()).text, "ChatGPT conversation:\n\nUser: Question\n\nAssistant: Selected answer");
+  }
+});
+
+test("ChatGPT rejects malformed, truncated and oversized recognized Python result text", async () => {
+  for (const mutate of [
+    p => { p.result.content.text = { text: "PRIVATE_RESULT_SENTINEL" }; },
+    p => { delete p.result.content.text; },
+    p => { p.result.content.truncated = true; },
+    p => { p.result.metadata.is_complete = false; },
+    p => { p.call.metadata.is_complete = false; }
+  ]) {
+    const data = fixture(); const p = addPythonResult(data); mutate(p);
+    const h = setup(data); await discover(h);
+    await assert.rejects(h.window.__capCaptureChatGptJson(), /ChatGPT JSON capture blocked/);
+  }
+  const data = fixture(); addPythonResult(data, "x".repeat(350000));
+  const h = setup(data); await discover(h);
+  await assert.rejects(h.window.__capCaptureChatGptJson(), /350,000/);
+});
+
 // Native canvas format observed in both older code.text and newer text.parts
 // messages. The tool acknowledgement contains identity, never the document body.
 function addCanvas(data, { command = "create_textdoc", payload, type = "document", format = "text", id = "canvas" } = {}) {

@@ -203,13 +203,18 @@ Large pasted cards:
 - Preserve distinct cards in their owning turn; deduplicate repeated file IDs only within that turn. Recognize full inline paragraph copies with LF or CRLF boundaries, restoring original whitespace without shifting other ranges. Arbitrary substrings do not count as copies. A recognized paste that cannot be read completely fails rather than dropping the user turn.
 - Do not fetch inactive-branch, assistant/tool, ordinary upload or non-text paste attachments.
 
+Python Analysis results:
+
+- Preserve native `python` tool `execution_output.text` as a labelled `Assistant: Python result` on the active branch, only immediately after an assistant `python` code call. Both messages must be successfully finished and not marked visually hidden. This includes textual table values shown in the Analysis panel, even when the final assistant reply contains none of them.
+- Require complete call/result metadata and a string result; preserve its original whitespace and enforce the existing transcript limits. Do not include the Python call's code, `aggregate_result`, `ada_visualizations`, file pointers or nested metadata. No additional tool/file requests run. Other tools and unpaired/failed output retain their existing exclusions; this does not establish generic interactive-chart capture.
+
 Legacy canvas exception:
 
 - Assistant `canmore.create_textdoc` / `canmore.update_textdoc` qualifies only when followed on the active branch by a successful tool acknowledgement with matching command and `metadata.canvas` identity/type. Both `code.text` and `text.parts` JSON envelopes are supported.
 - Retain the created document's title/content or an edit's `updates[].replacement` text as assistant content, preserving whitespace and chronological placement. Document and `code/*` types qualify. Partial edits are labelled edits, not reconstructed into a guessed latest document.
 - Do not fetch editor-only changes. Tool replies, patterns, operation parameters and unrelated tools remain excluded. Malformed/detectably incomplete acknowledged document content fails; document text counts toward transcript limits.
 
-Otherwise skip system/tool roles, tool-directed assistant messages, hidden messages, uploaded files, arbitrary artifacts, citation metadata, binary media/pointers and nested tool transcriptions. Do not recursively hunt for text in unsupported objects. Empty turns are skipped; wholly empty capture fails. Successful capture is labelled `chatgpt-json`.
+Outside the Python-result and Canvas exceptions, skip system/tool roles, tool-directed assistant messages, hidden messages, uploaded files, arbitrary artifacts, citation metadata, binary media/pointers and nested tool transcriptions. Do not recursively hunt for text in unsupported objects. Empty turns are skipped; wholly empty capture fails. Successful capture is labelled `chatgpt-json`.
 
 Attachment-label contract: active user-turn uploads retain explicit Claude `file_name`, ChatGPT `metadata.attachments.name` (ordinary uploads), Grok `fileAttachmentsMetadata.fileName` and DeepSeek `FILE.files.file_name`. Names are JSON-quoted to keep embedded newlines/control characters inside the label. Preserve original names without clipping; final transcript size bounds still apply. Labels do not authorize reading unsupported bodies and remain absent from local diagnostics/telemetry. Unnamed pasted cards keep their existing complete-text handling. Gemini reads names only from `hNvQHb` user slot `[2][0][4]`, attachment-group descriptors at `[4]`, filename at `[2]`; no recursive metadata search. This shape is corroborated by the [HAR-derived exporter fixture](https://github.com/mauriziofonte/chat-dump-bookmarklet/blob/main/test/remote-gemini.js), not browser validation in this change.
 

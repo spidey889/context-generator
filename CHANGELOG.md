@@ -4,6 +4,8 @@ A short history of decisions and regressions that matter when changing the code.
 
 ## 2026-10-05
 
+- **ChatGPT Python results preserved.** A native synthetic chat showed its random table only in the Analysis panel: the exact values existed in `execution_output.text` but were absent from the carry. Fast capture now retains the labelled text after its adjacent completed Python call, preserving whitespace and existing size/completeness checks. Python code, visualization metadata, unrelated/hidden tools and inactive branches remain excluded. The regression and installed-Brave fixture use the observed table shape; other rendered-card types remain separate investigation work.
+
 - **Source chat ownership (T02).** Pinned each picker/toolbar attempt before its first await and checked the navigation latch through capture and summary dispatch. DOM sweeps and attachment reads now abort on chat changes, including navigation away and back during JSON-to-DOM fallback. Added automated capture/orchestration regressions and integrated with the later tiny local-carry and Claude delivery fixes.
 - **Destination chat ownership (T01).** Restricted prepared-tab reuse/activation and content insertion to new-chat surfaces. Added a navigation latch through paste retries, focus and delayed recovery, preserving initial landing redirects and same-route editor remounts. Added automated regressions for saved/pending chats, focus navigation and away-and-back recovery. The initial fixes used Node fixtures; integration later passed installed-Brave transfer smoke with route guards translated to the isolated server's destination path.
 
