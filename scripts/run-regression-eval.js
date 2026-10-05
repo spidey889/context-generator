@@ -71,6 +71,11 @@ async function evaluateCase(testCase, { fetchImpl = fetch, now = Date.now, timeo
     .filter((fact) => !containsFact(summary, fact))
     .map(factLabel);
   const incorrectFacts = testCase.forbiddenFacts.filter((fact) => containsFact(summary, fact));
+  // Phrase presence alone cannot establish an assertion's meaning. Curated
+  // contradictions cover critical fixture facts without another AI judge call.
+  for (const rule of testCase.contradictions || []) {
+    if (new RegExp(rule.pattern, "iu").test(normalize(summary))) incorrectFacts.push(rule.label);
+  }
   const validShape = /CONTEXT\s+CARRY[\s\S]*WHO I AM[\s\S]*WHAT WE WERE DOING[\s\S]*WHERE WE LEFT OFF[\s\S]*DECISIONS MADE[\s\S]*OPEN QUESTIONS[\s\S]*KEY CONTEXT[\s\S]*NEXT STEP/i.test(summary);
   const factRecall = testCase.requiredFacts.length
     ? (testCase.requiredFacts.length - missingFacts.length) / testCase.requiredFacts.length
@@ -85,7 +90,8 @@ async function evaluateCase(testCase, { fetchImpl = fetch, now = Date.now, timeo
     incorrectFacts,
     validShape,
     profile: payload.timing?.profile || null,
-    model: payload.timing?.model || payload.timing?.primaryModel || null
+    model: payload.timing?.model || payload.timing?.primaryModel || null,
+    usage: payload.timing?.usage || null
   };
 }
 
@@ -96,47 +102,52 @@ function failureCount(result) {
     + Number(result.latencyMs > result.maxLatencyMs);
 }
 
-function preferResult(first, second) {
-  const firstRank = [failureCount(first), -first.factRecall, first.incorrectFacts.length, first.latencyMs];
-  const secondRank = [failureCount(second), -second.factRecall, second.incorrectFacts.length, second.latencyMs];
-  for (let index = 0; index < firstRank.length; index += 1) {
-    if (firstRank[index] !== secondRank[index]) return firstRank[index] < secondRank[index] ? first : second;
-  }
-  return first;
-}
-
-async function evaluateCaseWithRetry(testCase, evaluator = evaluateCase, retryDelayMs = 1000) {
-  let first;
-  try {
-    first = await evaluator(testCase);
-  } catch (firstError) {
-    // The gate already tolerates one variable provider-quality result. Apply the
-    // same bounded policy to transient endpoint/provider failures, but never a third try.
-    if (retryDelayMs > 0) await new Promise((resolve) => setTimeout(resolve, retryDelayMs));
+async function evaluateCaseWithRetry(testCase, evaluator = evaluateCase, retryDelayMs = 1000, now = Date.now) {
+  const startedAt = now();
+  const attemptResults = [];
+  const errors = [];
+  let result;
+  for (let attempt = 1; attempt <= 2; attempt++) {
+    const attemptStartedAt = now();
     try {
-      return { ...(await evaluator(testCase)), attempts: 2 };
-    } catch (secondError) {
-      throw new AggregateError([firstError, secondError], `${testCase.id}: evaluation failed twice`);
+      result = await evaluator(testCase);
+      attemptResults.push({ ...result, attempt, passed: failureCount(result) === 0 });
+      if (failureCount(result) === 0) break;
+    } catch (error) {
+      errors.push(error);
+      attemptResults.push({ attempt, passed: false, error: error.message, latencyMs: now() - attemptStartedAt });
+      if (attempt === 1 && retryDelayMs > 0) await new Promise(resolve => setTimeout(resolve, retryDelayMs));
     }
   }
-  if (failureCount(first) === 0) return { ...first, attempts: 1 };
-
-  // Live providers vary; require a failed case to reproduce once before blocking production.
-  const second = await evaluator(testCase);
-  return { ...preferResult(first, second), attempts: 2 };
+  const diagnostics = {
+    attempts: attemptResults.length, attemptResults, totalLatencyMs: now() - startedAt,
+    totalRequestMs: attemptResults.reduce((sum, attempt) => sum + attempt.latencyMs, 0),
+    recovered: attemptResults.length > 1 && attemptResults.at(-1).passed
+  };
+  if (!result) {
+    throw Object.assign(new AggregateError(errors, `${testCase.id}: evaluation failed twice`), diagnostics);
+  }
+  return { ...result, ...diagnostics };
 }
 
-async function main() {
+async function runEvaluation({ cases = fixture.cases, evaluator = evaluateCaseWithRetry, now = Date.now } = {}) {
+  const startedAt = now();
   const results = [];
-  for (const testCase of fixture.cases) {
-    const result = await evaluateCaseWithRetry(testCase);
-    results.push(result);
-    process.stdout.write(`${result.id}: recall=${(result.factRecall * 100).toFixed(0)}% incorrect=${result.incorrectFacts.length} latency=${result.latencyMs}ms/${result.maxLatencyMs}ms attempts=${result.attempts} model=${result.model || "unknown"}\n`);
+  for (const testCase of cases) {
+    try {
+      results.push({ ...(await evaluator(testCase)), id: testCase.id });
+    } catch (error) {
+      results.push({ id: testCase.id, error: error.message, attempts: error.attempts,
+        attemptResults: error.attemptResults || [], totalLatencyMs: error.totalLatencyMs || 0,
+        totalRequestMs: error.totalRequestMs || 0, recovered: false });
+    }
   }
 
-  const totalMs = results.reduce((sum, result) => sum + result.latencyMs, 0);
+  // Include failed attempts, body reads, retries and retry delays in the total.
+  const totalMs = now() - startedAt;
   const failures = [];
   for (const result of results) {
+    if (result.error) { failures.push(result.error); continue; }
     if (!result.validShape) failures.push(`${result.id}: invalid Context Carry structure`);
     if (result.factRecall < fixture.thresholds.minimumFactRecall) {
       failures.push(`${result.id}: missing facts: ${result.missingFacts.join(", ")}`);
@@ -152,13 +163,23 @@ async function main() {
     failures.push(`total latency ${totalMs}ms exceeded ${fixture.thresholds.maximumTotalMs}ms`);
   }
 
-  process.stdout.write(`Evaluation set v${fixture.version}: ${results.length} cases, total=${totalMs}ms\n`);
-  if (failures.length) {
-    failures.forEach((failure) => process.stderr.write(`FAIL: ${failure}\n`));
-    process.exitCode = 1;
-  } else {
-    process.stdout.write("PASS: accuracy, incorrect-fact, structure, and latency gates met\n");
+  return { version: fixture.version, endpoint, results, totalMs, failures, passed: failures.length === 0 };
+}
+
+async function main() {
+  const report = await runEvaluation();
+  for (const result of report.results) {
+    for (const attempt of result.attemptResults) {
+      process.stdout.write(`${result.id} attempt=${attempt.attempt} ${attempt.passed ? "PASS" : "FAIL"}: ${JSON.stringify(attempt)}\n`);
+    }
+    if (result.recovered) process.stdout.write(`WARN: ${result.id} recovered on retry; its initial failure is retained.\n`);
   }
+  const reportPath = process.env.EVAL_REPORT_PATH;
+  if (reportPath) fs.writeFileSync(reportPath, JSON.stringify(report, null, 2) + "\n");
+  process.stdout.write(`Evaluation set v${report.version}: ${report.results.length} cases, actual total=${report.totalMs}ms\n`);
+  report.failures.forEach(failure => process.stderr.write(`FAIL: ${failure}\n`));
+  if (!report.passed) process.exitCode = 1;
+  else process.stdout.write("PASS: accuracy, incorrect-fact, structure, and latency gates met\n");
 }
 
 if (require.main === module) {
@@ -168,4 +189,4 @@ if (require.main === module) {
   });
 }
 
-module.exports = { containsFact, evaluateCase, evaluateCaseWithRetry, normalize };
+module.exports = { containsFact, evaluateCase, evaluateCaseWithRetry, runEvaluation, normalize };

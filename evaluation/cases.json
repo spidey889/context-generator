@@ -1,5 +1,5 @@
 {
-  "version": 1,
+  "version": 2,
   "thresholds": {
     "minimumFactRecall": 0.9,
     "maximumIncorrectFacts": 0,
@@ -32,6 +32,10 @@
         "incorrect facts",
         "complete capture",
         "transfer latency"
+      ],
+      "contradictions": [
+        { "label": "production branch denies master", "pattern": "\\b(?:production |release )?branch (?:is |was )?not master\\b" },
+        { "label": "server limit denies 210000 characters", "pattern": "\\b(?:server |character )?limit (?:is |was )?not 210,?000\\b" }
       ],
       "forbiddenFacts": [
         "Project Apollo",
@@ -72,6 +76,12 @@
         "500-1500 ms",
         "enterprise-2026-07.csv",
         "implementation has not started"
+      ],
+      "contradictions": [
+        { "label": "incident start time denied", "pattern": "\\b(?:did not|didn't|never) (?:begin|start)\\b[^.!?]{0,60}\\b14:35 utc\\b" },
+        { "label": "customer data integrity denied", "pattern": "\\bcustomer data (?:is|was) not intact\\b" },
+        { "label": "incident region denied", "pattern": "\\b(?:incident )?region (?:is |was )?(?:not|outside) eu-west-1\\b" },
+        { "label": "implementation incorrectly reported started", "pattern": "\\bimplementation (?:has |is )?(?:already )?(?:started|complete|completed|finished)\\b" }
       ],
       "forbiddenFacts": [
         "data was lost",

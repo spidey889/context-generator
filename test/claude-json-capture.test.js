@@ -357,9 +357,6 @@ test("Claude pins the destination-click chat before asynchronous handoff prepara
 // Execute the real picker function with only UI/relay boundaries stubbed. This
 // proves JSON capture can proceed before native conversation DOM has mounted.
 function pickerHarness({ jsonEnabled = true, navigateDuringHandoff = false } = {}) {
-  const source = fs.readFileSync(path.join(__dirname, "..", "extension", "platform-content.js"), "utf8");
-  const start = source.indexOf("  function hasSavedSourceConversation()");
-  const end = source.indexOf("  function protectOverlayPalette", start);
   const calls = { capture: 0, flow: 0, prepared: 0, dom: 0, errors: [] };
   const window = { location: { pathname: `/chat/${chat}` }, __capCaptureClaudeJson: async expectedPath => {
     calls.capture++;
@@ -367,28 +364,20 @@ function pickerHarness({ jsonEnabled = true, navigateDuringHandoff = false } = {
     return { text: "Claude conversation:\n\nUser: API-only history", messageTurnCount: 1 };
   } };
   const noop = () => {};
-  const sandbox = {
+  const sandbox = require("../testing/transfer-flow").loadTransferFlow({
     window, currentPlatform: { id: "claude", name: "Claude" }, claudeJsonCaptureEnabled: jsonEnabled,
-    chatGptJsonCaptureEnabled: false, networkJsonCaptureEnabled: false, activeTransferTrace: null, isRunning: false, runningResetTimer: null,
-    RUNNING_AUTO_RESET_MS: 360000, DESTINATION_SHEET_EXIT_MS: 0, NO_CONVERSATION_ERROR_MESSAGE: "No conversation",
+    chatGptJsonCaptureEnabled: false, networkJsonCaptureEnabled: false,
     createTransferTrace: () => ({}), startTransferTelemetry: noop, markTransferTrace: noop, finishTransferTrace: noop,
-    // The sliced picker retains its real navigation guard; stub only browser
-    // listener/timer plumbing, as with the other UI boundaries below.
-    addOwnedEventListener: noop, removeOwnedEventListener: noop,
-    INLINE_PATHNAME_POLL_MS: 80, setInterval: () => 1, clearInterval: noop,
     getDetectedConversationMessageCount: () => 0, hideDestinationSheet: noop, delay: async () => {},
     showErrorOverlay: error => calls.errors.push(error), clearRunningResetTimer: noop, resetRunningFlag: noop,
-    setTimeout: () => 1, transitionDestinationSheetToHandoff: async () => {
+    transitionDestinationSheetToHandoff: async () => {
       if (navigateDuringHandoff) window.location.pathname = "/chat/other";
     }, showOverlay: noop, releaseDestinationSheetBackdrop: noop,
     prepareDestinationTab: async () => { calls.prepared++; return {}; }, advanceTransferTelemetryStage: noop,
     prepareSourceForCapture: async () => { calls.dom++; }, setHandoffProgress: noop,
     createConversationCapture: text => text, scrapeConversationTextWhenReady: async () => { calls.dom++; return "DOM"; },
     markCaptureDone: noop, runContextFlow: () => { calls.flow++; }, getSafeTelemetryFailureReason: () => "capture_failed"
-  };
-  vm.createContext(sandbox);
-  const deadlines = source.slice(source.indexOf("  function checkTransferDeadline("), source.indexOf("  function createTransferTrace("));
-  vm.runInContext(deadlines + source.slice(start, end), sandbox);
+  });
   return { calls, run: () => sandbox.startDestinationTransfer("chatgpt") };
 }
 

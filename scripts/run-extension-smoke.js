@@ -892,7 +892,20 @@ async function verifyEmptyChatError(session, browserSession, state, { removeTurn
   await session.evaluate(`(() => {
     document.querySelector(".context-generator-destination-tile").click();
   })()`);
-  await waitFor(() => session.evaluate(`(() => { const e = document.getElementById("context-generator-error-overlay"); return e?.style.display === "flex" && getComputedStyle(e).opacity === "1"; })()`), "direct empty-chat error");
+  try {
+    await waitFor(() => session.evaluate(`(() => { const e = document.getElementById("context-generator-error-overlay"); return e?.style.display === "flex" && getComputedStyle(e).opacity === "1"; })()`), "direct empty-chat error");
+  } catch (error) {
+    // This check also runs in a separate Claude tab. Report that tab, rather
+    // than the original ChatGPT source, when its assertion fails.
+    error.message += `\nEmpty-chat diagnostics: ${JSON.stringify(await session.evaluate(`(() => {
+      const error = document.getElementById("context-generator-error-overlay");
+      return { path: location.pathname, visibility: document.visibilityState,
+        error: error && { text: error.textContent, display: error.style.display, opacity: getComputedStyle(error).opacity },
+        picker: document.getElementById("context-generator-destination-sheet")?.style.display,
+        handoff: document.getElementById("context-generator-overlay")?.style.display };
+    })()`))}`;
+    throw error;
+  }
   const result = await session.evaluate(`(() => {
     const error = document.getElementById("context-generator-error-overlay");
     const rect = error.getBoundingClientRect();

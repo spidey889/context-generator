@@ -3,11 +3,9 @@ const fs = require("node:fs");
 const path = require("node:path");
 const test = require("node:test");
 const vm = require("node:vm");
+const { loadTransferFlow } = require("../testing/transfer-flow");
 
 const source = fs.readFileSync(path.join(__dirname, "../extension/platform-content.js"), "utf8");
-const start = source.indexOf("  function hasSavedSourceConversation()");
-const end = source.indexOf("  function showFastCaptureFallbackMessage(", start);
-const picker = source.slice(start, end);
 
 // Exercise the actual picker orchestrator; substitute only its UI, capture and
 // transfer boundaries to count side effects without native timers or a browser.
@@ -17,17 +15,12 @@ function harness(platform, { mode = "failure", enabled = true, domFails = false,
   const pathname = { claude: "/chat/source", chatgpt: "/c/source", gemini: "/app/source", grok: "/c/source", deepseek: "/a/chat/s/source" }[platform];
   const location = { href: `https://example.test${pathname}`, pathname };
   const navigationListeners = new Set();
-  const context = vm.createContext({
+  const context = loadTransferFlow({
     window: { location, navigation: {
       addEventListener: (_type, listener) => navigationListeners.add(listener),
       removeEventListener: (_type, listener) => navigationListeners.delete(listener)
     } }, currentPlatform: { id: platform, name: platform },
     claudeJsonCaptureEnabled: enabled, chatGptJsonCaptureEnabled: enabled, networkJsonCaptureEnabled: enabled,
-    activeTransferTrace: null, isRunning: false, runningResetTimer: null, RUNNING_AUTO_RESET_MS: 360000, DESTINATION_SHEET_EXIT_MS: 0,
-    NO_CONVERSATION_ERROR_MESSAGE: "No conversation", setTimeout: () => 1,
-    INLINE_PATHNAME_POLL_MS: 80, setInterval: () => 1, clearInterval() {}, URL,
-    addOwnedEventListener: (target, type, listener) => target?.addEventListener?.(type, listener),
-    removeOwnedEventListener: (target, type, listener) => target?.removeEventListener?.(type, listener),
     createTransferTrace: () => ({ id: "same-attempt" }), startTransferTelemetry() {},
     markTransferTrace: (_trace, message, detail) => { calls.traces.push(message); calls.traceDetails.push(detail); }, finishTransferTrace() {},
     clearRunningResetTimer() {}, resetRunningFlag: () => { context.isRunning = false; },
@@ -59,8 +52,6 @@ function harness(platform, { mode = "failure", enabled = true, domFails = false,
     context.window.__capCaptureChatGptJson = capture;
     context.window.__capCaptureNetworkJson = capture;
   }
-  const deadlines = source.slice(source.indexOf("  function checkTransferDeadline("), source.indexOf("  function createTransferTrace("));
-  vm.runInContext(`${deadlines}${picker}; globalThis.start = startDestinationTransfer;`, context);
   return { context, calls, prepared, navigate(pathname) {
     navigationListeners.forEach(listener => listener({ destination: { url: `https://example.test${pathname}` } }));
     location.pathname = pathname;
@@ -216,7 +207,7 @@ test("destination warms during selection motion but navigation still cancels bef
 });
 
 test("fallback notice uses fixed safe copy in the handoff and announces it", () => {
-  const noticeStart = end;
+  const noticeStart = source.indexOf("  function showFastCaptureFallbackMessage(");
   const noticeEnd = source.indexOf("  function protectOverlayPalette(", noticeStart);
   const node = { style: {}, setAttribute: (key, value) => { node[key] = value; } };
   const group = { appendChild: child => { group.child = child; } };

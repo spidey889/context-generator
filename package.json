@@ -6,7 +6,8 @@
     "test": "node --test --test-timeout=30000 --test-skip-pattern=\"^slow/release:\"",
     "test:slow": "node --test --test-timeout=60000 --test-name-pattern=\"^slow/release:\" test/platform-content.test.js",
     "test:extension-smoke": "node scripts/run-extension-smoke.js",
+    "test:db": "node scripts/check-verified-telemetry-db.js",
     "eval": "node scripts/run-regression-eval.js",
-    "gate": "npm test && npm run test:slow && npm run eval"
+    "gate": "npm test && npm run test:slow && npm run test:db && npm run test:extension-smoke"
   }
 }
