@@ -47,6 +47,7 @@ const CLAUDE_RELOAD_SMOKE = JSON_SOURCE === "claude" && process.env.CAP_CONTEXT_
 const CHATGPT_RELOAD_SMOKE = JSON_SOURCE === "chatgpt" && process.env.CAP_CONTEXT_CHATGPT_RELOAD_SMOKE === "1";
 const JSON_RELOAD_SMOKE = CLAUDE_RELOAD_SMOKE || CHATGPT_RELOAD_SMOKE;
 const CHATGPT_FAILURE_SMOKE = JSON_SOURCE === "chatgpt" ? process.env.CAP_CONTEXT_CHATGPT_FAILURE_SMOKE || "" : "";
+const CHATGPT_PASTE_OVERSIZE_SMOKE = CHATGPT_FAILURE_SMOKE === "paste-oversize";
 const CHATGPT_PASTE_AUTH_SMOKE = JSON_SOURCE === "chatgpt" && process.env.CAP_CONTEXT_CHATGPT_AUTH_SMOKE === "paste401";
 const CLAUDE_PARTIAL_SMOKE = JSON_SOURCE === "claude" && process.env.CAP_CONTEXT_CLAUDE_PARTIAL_SMOKE === "1";
 const JSON_FALLBACK_SMOKE = Boolean(CHATGPT_FAILURE_SMOKE || CLAUDE_PARTIAL_SMOKE || NETWORK_FAILURE);
@@ -502,9 +503,32 @@ function networkSmokeFixture(platform) {
   return fixture;
 }
 
+function streamOversizedFixtureResponse(response, prefix, metrics) {
+  // No Content-Length: native readers must cancel before the 20 MB tail
+  // finishes. Pace writes and respect backpressure to observe cancellation.
+  const padding = Buffer.alloc(1000000, 32);
+  metrics.bytes = Buffer.byteLength(prefix);
+  response.write(prefix);
+  let remaining = 20, timer;
+  const schedule = () => { if (!response.destroyed) timer = setTimeout(writePadding, 25); };
+  const writePadding = () => {
+    if (response.destroyed) return;
+    if (!remaining--) return response.end();
+    metrics.bytes += padding.length;
+    if (response.write(padding)) schedule();
+    else response.once("drain", schedule);
+  };
+  response.once("close", () => {
+    clearTimeout(timer);
+    metrics.cancelled = !response.writableFinished;
+  });
+  schedule();
+}
+
 async function startFixtureServer() {
   const state = { summaryRequests: [], jsonRequests: 0, sessionRequests: 0, pasteDescriptorRequests: 0, pasteContentRequests: 0, fileReadsActive: 0, fileReadsPeak: 0, chatgptRequestUrls: [], claudeRequestUrls: [] };
   state.oversizeHistory = { bytes: 0, cancelled: false };
+  state.oversizePaste = { bytes: 0, cancelled: false };
   const telemetryFixture = await createTelemetrySmokeFixture(REPO_ROOT, TELEMETRY_DATABASE_SMOKE);
   state.telemetryRequests = telemetryFixture.received;
   const network = NETWORK_SOURCE ? networkSmokeFixture(JSON_SOURCE) : null;
@@ -566,25 +590,7 @@ async function startFixtureServer() {
         assert.equal(request.headers.authorization, "Bearer AUTH_SENTINEL"); assert.equal(request.headers["x-device-id"], undefined);
         const data = structuredClone(network.data);
         if (DEEPSEEK_OVERSIZE_SMOKE) {
-          // No Content-Length: a native reader must cancel before the 20 MB
-          // tail finishes. Pace writes and respect backpressure to observe it.
-          const prefix = JSON.stringify(data), padding = Buffer.alloc(1000000, 32);
-          state.oversizeHistory.bytes = Buffer.byteLength(prefix);
-          response.write(prefix);
-          let remaining = 20, timer;
-          const schedule = () => { if (!response.destroyed) timer = setTimeout(writePadding, 25); };
-          const writePadding = () => {
-            if (response.destroyed) return;
-            if (!remaining--) return response.end();
-            state.oversizeHistory.bytes += padding.length;
-            if (response.write(padding)) schedule();
-            else response.once("drain", schedule);
-          };
-          response.once("close", () => {
-            clearTimeout(timer);
-            state.oversizeHistory.cancelled = !response.writableFinished;
-          });
-          schedule();
+          streamOversizedFixtureResponse(response, JSON.stringify(data), state.oversizeHistory);
           return;
         }
         if (NETWORK_FAILURE) { data.data.biz_data.cache_control = "MERGE"; data.data.biz_data.chat_messages = []; }
@@ -644,7 +650,8 @@ async function startFixtureServer() {
       state.pasteContentRequests++;
       assert.equal(request.headers.authorization, undefined, "Signed paste content must not receive bearer headers.");
       response.writeHead(200, { "Content-Type": "text/plain; charset=utf-8" });
-      response.end(CHATGPT_USER_PASTE);
+      if (CHATGPT_PASTE_OVERSIZE_SMOKE) streamOversizedFixtureResponse(response, CHATGPT_USER_PASTE, state.oversizePaste);
+      else response.end(CHATGPT_USER_PASTE);
       return;
     }
     if (["/backend-api/conversation/smoke", "/backend-api/conversations/smoke"].includes(url.pathname)) {
@@ -1645,6 +1652,7 @@ async function run() {
       await sourceSession.evaluate(`document.getElementById("context-generator-${JSON_SOURCE}-json-toggle").click()`);
       assert.equal(await sourceSession.evaluate(`document.getElementById("context-generator-${JSON_SOURCE}-json-toggle").getAttribute("aria-pressed")`), "false");
       await waitFor(() => sourceSession.evaluate(`getComputedStyle(document.getElementById("context-generator-destination-sheet")).opacity === "1"`), "the settled picker before measuring the toggle");
+      await waitFor(async () => await sourceSession.evaluate(`getComputedStyle(document.getElementById("context-generator-${JSON_SOURCE}-json-toggle")).color`) !== "rgb(250, 204, 21)", "the visibly disabled fast-capture color");
       const idleToggle = await sourceSession.evaluate(`(() => {
         const toggle = document.getElementById("context-generator-${JSON_SOURCE}-json-toggle");
         const rect = toggle.getBoundingClientRect();
@@ -1766,6 +1774,13 @@ async function run() {
     if (JSON_FALLBACK_SMOKE) {
       assert.doesNotMatch(capturedConversation, /JSON_ONLY_SENTINEL|AUTH_SENTINEL|CSRF_SENTINEL|SIGNED_SENTINEL/);
       assert.equal(state.jsonRequests - jsonRequestsBeforeTransfer, JSON_SOURCE === "grok" ? 2 : 1, "Fast capture must not be retried after failure.");
+      if (CHATGPT_PASTE_OVERSIZE_SMOKE) {
+        assert.equal(state.oversizePaste.cancelled, true, "Brave must cancel the oversized paste response.");
+        assert.ok(state.oversizePaste.bytes < 20000000, "The full oversized paste tail must not be downloaded.");
+        assert.equal(state.pasteDescriptorRequests, CHATGPT_PASTE_AUTH_SMOKE ? 2 : 1);
+        assert.equal(state.pasteContentRequests, 1, "A rejected paste must not be downloaded again.");
+        process.stdout.write(`✓ Brave cancelled oversized paste after ${state.oversizePaste.bytes} fixture bytes.\n`);
+      }
       if (DEEPSEEK_OVERSIZE_SMOKE) {
         assert.equal(state.oversizeHistory.cancelled, true, "Brave must cancel the oversized history response.");
         assert.ok(state.oversizeHistory.bytes < 20000000, "The full oversized tail must not be downloaded.");
@@ -1889,7 +1904,7 @@ async function run() {
     assert.equal(typeof remoteStats.destinationTiming.composerWaitMs, "number");
     const finishStart = remoteStats.timeline.find(mark => mark.label === "handoff finish start");
     const finishEnd = remoteStats.timeline.find(mark => mark.label === "handoff finish done");
-    assert.ok(finishEnd.totalMs - finishStart.totalMs < 800, "Completion must not add the old one-second cosmetic delay.");
+    assert.ok(finishEnd.totalMs - finishStart.totalMs < 800, `Completion must not add the old one-second cosmetic delay (observed ${finishEnd.totalMs - finishStart.totalMs} ms).`);
     process.stdout.write(`ℹ Fixture tab opened: ${remoteStats.destinationTiming.openMs} ms; page loaded: ${remoteStats.destinationTiming.pageLoadMs} ms; composer wait: ${remoteStats.destinationTiming.composerWaitMs} ms; completion cue: ${finishEnd.totalMs - finishStart.totalMs} ms.\n`);
     if (process.env.CAP_CONTEXT_DESTINATION_SCREENSHOT) {
       const capture = await destinationSession.call("Page.captureScreenshot", { format: "png" });

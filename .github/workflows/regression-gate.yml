@@ -74,6 +74,16 @@ jobs:
         run: |
           mkdir -p "$CAP_CONTEXT_SMOKE_ARTIFACT_DIR"
           xvfb-run -a npm run test:extension-smoke 2>&1 | tee "$CAP_CONTEXT_SMOKE_ARTIFACT_DIR/run.log"
+      - name: Brave ChatGPT oversized paste cancellation and fallback
+        timeout-minutes: 3
+        shell: bash
+        env:
+          CAP_CONTEXT_JSON_SMOKE: chatgpt
+          CAP_CONTEXT_CHATGPT_FAILURE_SMOKE: paste-oversize
+          CAP_CONTEXT_SMOKE_ARTIFACT_DIR: .gstack/browser-smoke/paste-budget
+        run: |
+          mkdir -p "$CAP_CONTEXT_SMOKE_ARTIFACT_DIR"
+          xvfb-run -a npm run test:extension-smoke 2>&1 | tee "$CAP_CONTEXT_SMOKE_ARTIFACT_DIR/run.log"
       - name: Brave Claude fast capture fallback
         timeout-minutes: 3
         shell: bash

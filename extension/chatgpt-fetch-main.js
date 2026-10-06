@@ -1,5 +1,5 @@
 (() => {
-  const version = 5;
+  const version = 6;
   const channel = "cap-context-chatgpt-json-v2";
   const currentChat = pathname => (pathname ?? location.pathname).match(/\/c\/([^/]+)\/?$/)?.[1];
   const previous = window.__capChatGptFetchState;
@@ -60,6 +60,36 @@
     const fetchJson = (url, options = {}) => Reflect.apply(nativeFetch, window, [url, {
       ...options, credentials: "same-origin", cache: "no-store", signal: controller.signal
     }]);
+    const readPaste = async (response, expectedSize) => {
+      let reader;
+      try {
+        if (controller.signal.aborted || currentChat() !== chat) throw new Error("changed");
+        if (response.status !== 200 || response.headers.has("content-range")
+          || response.headers.get("content-type")?.split(";", 1)[0].trim() !== "text/plain"
+          || Number(response.headers.get("content-length")) > expectedSize) throw new Error("paste");
+        // The manifest bounds this allocation. Never buffer an oversized body
+        // first: reject the first excess chunk, including without Content-Length.
+        const bytes = new Uint8Array(expectedSize);
+        reader = response.body?.getReader();
+        let size = 0;
+        if (reader) while (true) {
+          const { done, value } = await reader.read();
+          if (controller.signal.aborted || currentChat() !== chat) throw new Error("changed");
+          if (done) break;
+          if (size + value.byteLength > expectedSize) throw new Error("paste");
+          bytes.set(value, size); size += value.byteLength;
+        }
+        if (size !== expectedSize) throw new Error("paste");
+        // Preserve complete UTF-8, BOM and whitespace through chunk boundaries.
+        return new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(bytes);
+      } catch (error) {
+        if (reader) await reader.cancel().catch(() => {});
+        else await response.body?.cancel().catch(() => {});
+        throw error;
+      } finally {
+        reader?.releaseLock();
+      }
+    };
     const checkTransport = response => {
       if (response.status !== 200) { reply.status = response.status; throw new Error("http"); }
       if (response.headers.has("content-range")) throw new Error("partial");
@@ -147,13 +177,7 @@
             if (download.origin !== location.origin || download.pathname !== "/backend-api/estuary/content"
               || download.searchParams.get("id") !== file.id) throw new Error("paste");
             const textResponse = await fetchJson(download.href, { redirect: "error" });
-            if (textResponse.status !== 200 || textResponse.headers.has("content-range")
-              || textResponse.headers.get("content-type")?.split(";", 1)[0].trim() !== "text/plain") throw new Error("paste");
-            const bytes = await textResponse.arrayBuffer();
-            if (bytes.byteLength !== file.size) throw new Error("paste");
-            // Fatal decoding plus byte-count equality prevents truncated or
-            // binary content from silently becoming a successful text capture.
-            pastedTexts[file.id] = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(bytes);
+            pastedTexts[file.id] = await readPaste(textResponse, file.size);
           } catch { throw new Error("paste"); }
         }
       }

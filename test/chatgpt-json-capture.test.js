@@ -82,6 +82,136 @@ function pasteFixture(texts = ["Original pasted document"]) {
   return { data, files, fetchImpl };
 }
 
+test("ChatGPT stops an oversized paste without Content-Length, then allows a fresh exact capture", async () => {
+  const { data, fetchImpl } = pasteFixture();
+  let delivered = 0, cancelled = false, healthy = false, body;
+  const harness = setup(data, 200, { fetchImpl: request => {
+    if (healthy || !request.url.includes("/estuary/content")) return fetchImpl(request);
+    let chunks = 0;
+    const padding = new Uint8Array(1000000).fill(32);
+    body = new ReadableStream({
+      pull(controller) {
+        if (chunks++ === 20) return controller.close();
+        delivered += padding.length; controller.enqueue(padding);
+      },
+      cancel() { cancelled = true; }
+    });
+    return new Response(body, { headers: { "content-type": "text/plain" } });
+  } });
+  await discover(harness);
+  await assert.rejects(harness.window.__capCaptureChatGptJson(), /pasted text attachment could not be read completely/);
+  assert.ok(delivered <= 2000000, `Stop at the first oversized chunk plus prefetch; delivered ${delivered} bytes.`);
+  assert.equal(cancelled, true);
+  assert.equal(body.locked, false);
+  assert.equal(harness.navigationListeners(), 0);
+  assert.ok(harness.replies.every(reply => !reply.data && !reply.pastedTexts));
+  healthy = true;
+  assert.equal((await harness.window.__capCaptureChatGptJson()).text,
+    "ChatGPT conversation:\n\nUser: Original pasted document\n\nAssistant: Selected answer");
+});
+
+test("ChatGPT streamed pastes preserve split UTF-8/BOM and reject short, invalid or excess bytes", async () => {
+  const original = "\uFEFF  café🙂\r\nEND  ";
+  for (const outcome of ["exact", "short", "invalid", "excess"]) {
+    const { data, fetchImpl } = pasteFixture([original]);
+    let bytes = Buffer.from(original), body;
+    if (outcome === "short") bytes = bytes.subarray(0, bytes.length - 1);
+    if (outcome === "invalid") bytes[0] = 255;
+    if (outcome === "excess") bytes = Buffer.concat([bytes, Buffer.from("x")]);
+    const harness = setup(data, 200, { fetchImpl: request => {
+      if (!request.url.includes("/estuary/content")) return fetchImpl(request);
+      let offset = 0;
+      body = new ReadableStream({ pull(controller) {
+        if (offset === bytes.length) return controller.close();
+        controller.enqueue(bytes.subarray(offset, ++offset));
+      } });
+      return new Response(body, { headers: { "content-type": "text/plain" } });
+    } });
+    await discover(harness);
+    if (outcome === "exact") assert.equal((await harness.window.__capCaptureChatGptJson()).text,
+      `ChatGPT conversation:\n\nUser: ${original}\n\nAssistant: Selected answer`);
+    else {
+      await assert.rejects(harness.window.__capCaptureChatGptJson(), /pasted text attachment could not be read completely/);
+      assert.ok(harness.replies.every(reply => !reply.data && !reply.pastedTexts));
+    }
+    assert.equal(body.locked, false);
+  }
+});
+
+test("ChatGPT rejects paste transport before reading and preserves safe errors when cancellation fails", async () => {
+  for (const [status, headers] of [
+    [206, { "content-type": "text/plain" }],
+    [200, { "content-type": "text/html" }],
+    [200, { "content-type": "text/plain", "content-range": "bytes 0-23/100" }],
+    [200, { "content-type": "text/plain", "content-length": "100" }]
+  ]) {
+    const { data, fetchImpl } = pasteFixture();
+    let cancelled = false, body;
+    const harness = setup(data, 200, { fetchImpl: request => {
+      if (!request.url.includes("/estuary/content")) return fetchImpl(request);
+      body = new ReadableStream({ cancel() { cancelled = true; throw new Error("PRIVATE_CANCEL_SENTINEL"); } });
+      return new Response(body, { status, headers });
+    } });
+    await discover(harness);
+    await assert.rejects(harness.window.__capCaptureChatGptJson(), error => {
+      assert.match(error.message, /pasted text attachment could not be read completely/);
+      assert.doesNotMatch(error.message, /PRIVATE_/);
+      return true;
+    });
+    assert.equal(cancelled, true);
+    assert.equal(body.locked, false);
+    assert.ok(harness.replies.every(reply => !reply.data && !reply.pastedTexts));
+  }
+});
+
+test("ChatGPT replaces the old buffering hook without losing observed authentication", async () => {
+  const { data, fetchImpl } = pasteFixture();
+  const harness = setup(data, 200, { fetchImpl });
+  await discover(harness);
+  const old = harness.window.__capChatGptFetchState;
+  old.version = 5;
+  harness.reinstall();
+  assert.notEqual(harness.window.__capChatGptFetchState, old);
+  assert.equal(harness.window.__capChatGptFetchState.version, 6);
+  assert.equal(harness.listeners(), 1);
+  assert.equal((await harness.window.__capCaptureChatGptJson()).text,
+    "ChatGPT conversation:\n\nUser: Original pasted document\n\nAssistant: Selected answer");
+});
+
+clockTest("ChatGPT aborts a pending paste body on navigation, account changes and timeout", async () => {
+  for (const reason of ["navigate", "account", "timeout"]) {
+    const { data, fetchImpl } = pasteFixture();
+    let aborted = false, body;
+    const harness = setup(data, 200, { fetchImpl: request => {
+      if (!request.url.includes("/estuary/content")) return fetchImpl(request);
+      body = new ReadableStream({ start(controller) {
+        controller.enqueue(Buffer.from("partial"));
+        request.options.signal.addEventListener("abort", () => {
+          aborted = true; controller.error(new Error("PRIVATE_ABORT_SENTINEL"));
+        }, { once: true });
+      } });
+      return new Response(body, { headers: { "content-type": "text/plain" } });
+    } });
+    await discover(harness);
+    const capture = harness.window.__capCaptureChatGptJson();
+    const rejected = assert.rejects(capture, error => {
+      assert.match(error.message, reason === "timeout" ? /timed out/ : /changed/);
+      assert.doesNotMatch(error.message, /PRIVATE_/);
+      return true;
+    });
+    await new Promise(setImmediate);
+    if (reason === "navigate") { harness.navigate("/c/other"); harness.navigate(`/c/${chat}`); }
+    if (reason === "account") await harness.window.fetch("/backend-api/settings/user", {
+      headers: { authorization: "Bearer other-token", "chatgpt-account-id": "other-account" }
+    });
+    await rejected;
+    assert.equal(aborted, true);
+    assert.equal(body.locked, false);
+    assert.equal(harness.navigationListeners(), 0);
+    assert.ok(harness.replies.every(reply => !reply.data && !reply.pastedTexts));
+  }
+});
+
 test("ChatGPT preserves the original attachment-only user paste before the assistant's writing block", async () => {
   const original = `Create a document without shortening it.\r\n\r\nPASTE_START\r\n${"  Original line — 世界\r\n".repeat(1000)}PASTE_MIDDLE\r\n${"More original text\r\n".repeat(1000)}PASTE_END`;
   const { data, fetchImpl } = pasteFixture([original]);
