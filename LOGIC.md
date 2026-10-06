@@ -106,6 +106,7 @@ Picker and toolbar admission share `beginTransferAttempt`. A click while an atte
 | Generated remote chain | 270 seconds, shared across providers and retries | `api/summarize.js` |
 | Vercel summary function | 300 seconds | `vercel.json` |
 | Extension summary transport | 320 seconds, reduced to remaining transfer time | `background.js` |
+| Optional summary telemetry storage | 1 second per attribution/receipt wait, interrupted by the summary deadline | `background.js` |
 | Source startup messaging | 12 seconds | `background.js` |
 | Destination messaging | 30 seconds normally; 45 seconds for ChatGPT | `background.js` destination configuration |
 | Destination warmup | 9 seconds normally; 12 seconds for ChatGPT | `background.js` |
@@ -418,7 +419,7 @@ A proof authenticates server summary work and the fields listed for its version.
 
 ### Outbox and ingress availability
 
-- Queue writes are independent of network delivery. Optional telemetry-storage failures cannot prevent generation or discard a successful summary; unavailable preflight storage omits attribution, and signed-receipt persistence tries session storage when local outbox writes fail. If both stores fail, telemetry may be lost while the summary remains usable.
+- Queue writes are independent of network delivery. Optional summary attribution/receipt waits stop after one second or summary abort, including when Chrome storage never settles. Unavailable preflight storage omits attribution; queued reads/writes remain serialized and can finish later without resending the summary. Signed-receipt persistence tries session storage when local outbox writes reject. Elapsed transfer/transport time and abort state are checked before a backend request and before accepting its result, so storage cannot extend either deadline or cache late success. If storage stays unavailable or the worker stops before persistence, telemetry may be lost while the summary remains usable.
 - Per-attempt compaction keeps monotonic progress, first terminal outcome and the first signed receipt paired with its authenticated version. An in-flight acknowledgement removes only the revision actually sent.
 - Permanent malformed/proof/identity failures are removed with bounded diagnostics so later reports drain. Network/429/5xx failures retry with persisted jittered backoff from 30 seconds to one hour; configuration failures start at five minutes. Retry-After is capped at one hour.
 - Capacity pruning retains terminal reports/receipts ahead of ordinary progress and diagnoses every drop. Diagnostics contain neither proof bytes nor recoverable rejected payloads. Delivery is best effort, not an audit-complete ledger.

@@ -6,6 +6,7 @@ const DESTINATION_MESSAGE_TIMEOUT_MS = 30000;
 const MESSAGE_RETRY_INTERVAL_MS = 120;
 const DESTINATION_WARMUP_TIMEOUT_MS = 9000;
 const SUMMARY_BACKEND_TIMEOUT_MS = 320000;
+const SUMMARY_TELEMETRY_WAIT_MS = 1000;
 const SUMMARY_SERVICE_WORKER_KEEPALIVE_MS = 25000;
 const SUMMARY_CACHE_TTL_MS = 120000;
 const SUMMARY_CACHE_MAX_ENTRIES = 8;
@@ -877,13 +878,20 @@ async function fetchSummaryFromBackend(conversationText, transferId = null, dead
   checkTransferDeadline(deadlineAt);
   const summaryStartedAt = nowMs();
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), Math.min(SUMMARY_BACKEND_TIMEOUT_MS, deadlineAt ? deadlineAt - Date.now() : SUMMARY_BACKEND_TIMEOUT_MS));
+  const requestDeadlineAt = Math.min(Date.now() + SUMMARY_BACKEND_TIMEOUT_MS, deadlineAt || Infinity);
+  const timeout = setTimeout(() => controller.abort(), Math.max(0, requestDeadlineAt - Date.now()));
   const stopServiceWorkerKeepAlive = startSummaryServiceWorkerKeepAlive();
+  const checkSummaryDeadline = () => {
+    checkTransferDeadline(deadlineAt);
+    // Response/storage microtasks may run before an overdue abort timer.
+    if (Date.now() >= requestDeadlineAt) controller.abort();
+    controller.signal.throwIfAborted();
+  };
 
   try {
-    // Telemetry storage is optional: a failed read/write must not prevent the
-    // summary request, which remains usable without an attribution context.
-    const telemetry = await enqueueTelemetryWork(async () => {
+    // Attribution is optional. Bound stalled storage as well as rejected I/O;
+    // queued work can finish later without holding up the summary request.
+    const telemetry = await waitForSummaryTelemetry(enqueueTelemetryWork(async () => {
       await restoreActiveTransferTelemetry();
       const active = activeTransferTelemetry.get(transferId);
       if (!active || active.status !== "started") return null;
@@ -893,10 +901,8 @@ async function fetchSummaryFromBackend(conversationText, transferId = null, dead
       active.extensionVersion = queuedIdentity?.extension_version || active.extensionVersion || chrome.runtime.getManifest?.().version || null;
       await persistActiveTransferTelemetry(transferId);
       return makeTelemetryPayload(active, await getOrCreateTelemetryInstallId());
-    }).catch(() => null);
-    // Optional storage can finish after the transfer deadline. Do not begin a
-    // request for an already-expired attempt after that wait.
-    checkTransferDeadline(deadlineAt);
+    }), controller.signal);
+    checkSummaryDeadline();
     const fetchStartedAt = nowMs();
     const response = await fetch(SUMMARY_BACKEND_URL, {
       method: "POST",
@@ -928,8 +934,9 @@ async function fetchSummaryFromBackend(conversationText, transferId = null, dead
     });
     if (telemetry && confirmation) {
       // A summary may finish after its source tab closes. Its receipt confirms
-      // generation, never a paste; persist it before returning when storage works.
-      await enqueueTelemetryWork(async () => {
+      // generation, never a paste. Give persistence a bounded head start;
+      // keep the serialized write queued if storage stalls or the wait expires.
+      await waitForSummaryTelemetry(enqueueTelemetryWork(async () => {
         const active = activeTransferTelemetry.get(transferId);
         if (active) summaryProofs.set(transferId, confirmation);
         try {
@@ -939,10 +946,11 @@ async function fetchSummaryFromBackend(conversationText, transferId = null, dead
           // failed. Neither telemetry store may discard a successful summary.
           if (active) await persistActiveTransferTelemetry(transferId);
         }
-      }).catch(() => {});
+      }), controller.signal);
       initializeTelemetryDelivery();
     }
 
+    checkSummaryDeadline();
     const summary = data.summary.trim();
     const timing = {
       source: "backend",
@@ -958,11 +966,29 @@ async function fetchSummaryFromBackend(conversationText, transferId = null, dead
     };
     return { summary, timing };
   } catch (error) {
-    checkTransferDeadline(deadlineAt);
+    checkSummaryDeadline();
     throw error;
   } finally {
     clearTimeout(timeout);
     stopServiceWorkerKeepAlive();
+  }
+}
+
+async function waitForSummaryTelemetry(work, signal) {
+  let timeout, onAbort;
+  try {
+    return await Promise.race([
+      work.catch(() => null),
+      new Promise(resolve => {
+        onAbort = () => resolve(null);
+        if (signal.aborted) return onAbort();
+        signal.addEventListener("abort", onAbort, { once: true });
+        timeout = setTimeout(onAbort, SUMMARY_TELEMETRY_WAIT_MS);
+      })
+    ]);
+  } finally {
+    clearTimeout(timeout);
+    signal.removeEventListener("abort", onAbort);
   }
 }
 

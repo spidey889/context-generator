@@ -3,6 +3,7 @@ const fs = require("node:fs");
 const path = require("node:path");
 const test = require("node:test");
 const vm = require("node:vm");
+const { clockTest } = require("./helpers/clock");
 
 const SOURCE = fs.readFileSync(path.join(__dirname, "..", "extension", "background.js"), "utf8");
 const OUTBOX = "context-generator-telemetry-outbox-v1";
@@ -42,7 +43,9 @@ function profile(local = {}, session = {}) {
 function worker(fetchImpl, shared = profile(), now = NOW, version = "1.4.6") {
   const listeners = {};
   const alarms = [];
-  const clock = { now };
+  // Scoped timer tests supply a live clock; restart/retry fixtures can still
+  // advance their explicit timestamp without scheduling real delays.
+  const clock = typeof now === "function" ? { get now() { return now(); } } : { now };
   let uuidSequence = 5000;
   class ClockDate extends Date {
     constructor(...args) { super(...(args.length ? args : [clock.now])); }
@@ -102,6 +105,30 @@ function worker(fetchImpl, shared = profile(), now = NOW, version = "1.4.6") {
       await this.settled();
     }
   };
+}
+
+function blockStorage(background, area, method) {
+  background.evaluate(`globalThis.originalStorageMethod = chrome.storage.${area}.${method};
+    globalThis.storageBlock = new Promise(resolve => { globalThis.releaseStorage = resolve; });
+    globalThis.storageBlocked = new Promise(resolve => { globalThis.noteStorageBlocked = resolve; });
+    chrome.storage.${area}.${method} = async (...args) => {
+      noteStorageBlocked();
+      await storageBlock;
+      return originalStorageMethod(...args);
+    };`);
+  const release = () => background.evaluate(`chrome.storage.${area}.${method} = originalStorageMethod; releaseStorage();`);
+  release.began = background.evaluate("storageBlocked");
+  return release;
+}
+
+function summaryWithin(background, deadlineAt = null, conversation = "Complete captured transcript") {
+  let timeout;
+  const request = new Promise(resolve => background.listeners.message({
+    type: "SUMMARIZE_WITH_BACKEND", conversation, transferId: id(1), deadlineAt
+  }, {}, resolve));
+  const observed = Promise.race([request, new Promise(resolve => { timeout = setTimeout(() => resolve(null), 1100); })])
+    .finally(() => clearTimeout(timeout));
+  return { request, observed };
 }
 
 test("slow delivery never blocks durable terminal appends, and acknowledgement preserves newer revisions", async () => {
@@ -395,6 +422,150 @@ test("queue bounds remove progress before terminals and record expired or overfl
 });
 
 for (const area of ["local", "session"]) {
+  clockTest(`stalled ${area} telemetry reads allow summaries, cache reuse and later requests`, async t => {
+    t.mock.timers.setTime(NOW);
+    const summaryRequests = [];
+    const background = worker(async (url, options) => {
+      if (url.endsWith("/api/telemetry")) throw new Error("offline");
+      summaryRequests.push(JSON.parse(options.body));
+      return { ok: true, status: 200, json: async () => ({ summary: "available summary" }) };
+    }, profile(), () => Date.now());
+    await background.settled();
+    await background.ack(event());
+    await background.settled();
+    const release = blockStorage(background, area, "get");
+    const first = summaryWithin(background, NOW + 5000);
+    let later;
+    try {
+      const response = await first.observed;
+      assert.equal(response?.ok, true, "A stalled attribution read must not hold the summary indefinitely.");
+      assert.equal(response.summary, "available summary");
+      assert.ok(Date.now() - NOW <= 1000, "Optional storage gets at most one second.");
+      const cached = await summaryWithin(background, NOW + 5000).observed;
+      assert.equal(cached?.timing.source, "cache");
+      later = summaryWithin(background, NOW + 5000, "Another captured transcript");
+      assert.equal((await later.observed)?.ok, true, "The blocked queue must not freeze later summaries.");
+      assert.equal(summaryRequests.length, 2);
+      assert.ok(summaryRequests.every(input => input.telemetry === undefined));
+    } finally {
+      release();
+      await first.request;
+      await later?.request;
+      await background.settled();
+    }
+    assert.equal(summaryRequests.length, 2, "Late attribution reads must not resend summary requests.");
+    const recovered = await summaryWithin(background, Date.now() + 5000, "Transcript after storage recovery").observed;
+    assert.equal(recovered?.ok, true);
+    assert.equal(summaryRequests[2].telemetry.attempt_id, id(1));
+    await background.settled();
+  });
+
+  clockTest(`stalled ${area} receipt writes return the summary and preserve its late terminal proof`, async t => {
+    t.mock.timers.setTime(NOW);
+    const proof = "e".repeat(64), confirmedAt = new Date(NOW).toISOString();
+    let release, requests = 0;
+    const background = worker(async url => {
+      if (url.endsWith("/api/telemetry")) throw new Error("offline");
+      requests++;
+      return { ok: true, status: 200, json: async () => {
+        release = blockStorage(background, area, "set");
+        return { summary: "generated summary", summaryProofV3: proof, summaryModel: "gemini-3.5-flash-lite", summaryConfirmedAt: confirmedAt };
+      } };
+    }, profile(), () => Date.now());
+    await background.settled();
+    await background.ack(event());
+    await background.settled();
+    const first = summaryWithin(background, NOW + 5000);
+    let terminal;
+    try {
+      const response = await first.observed;
+      assert.equal(response?.ok, true, "A completed summary must not wait indefinitely for its receipt write.");
+      assert.equal(response.summary, "generated summary");
+      assert.ok(Date.now() - NOW <= 1000);
+      assert.equal((await summaryWithin(background, NOW + 5000).observed)?.timing.source, "cache");
+      assert.equal(requests, 1);
+      terminal = background.ack(event(1, { status: "succeeded", lastStage: "completed" }));
+    } finally {
+      release?.();
+      await first.request;
+      await terminal;
+      await background.settled();
+    }
+    const retained = background.shared.local[OUTBOX][0].payload;
+    assert.equal(retained.status, "succeeded");
+    assert.equal(retained.summary_proof, proof);
+    assert.equal(retained.summary_confirmed_at, confirmedAt);
+    assert.equal(retained.model, "gemini-3.5-flash-lite");
+    assert.equal(background.shared.session[ACTIVE][id(1)].summary_proof, proof);
+  });
+
+  for (const stage of ["snapshot", "receipt"]) clockTest(`transfer expiry interrupts a stalled ${area} ${stage} without late success`, async t => {
+    t.mock.timers.setTime(NOW);
+    let release, requests = 0;
+    const background = worker(async url => {
+      if (url.endsWith("/api/telemetry")) throw new Error("offline");
+      requests++;
+      return { ok: true, status: 200, json: async () => {
+        if (stage === "receipt") release = blockStorage(background, area, "set");
+        return { summary: "generated summary", summaryProofV2: "f".repeat(64), summaryConfirmedAt: new Date(NOW).toISOString() };
+      } };
+    }, profile(), () => Date.now());
+    await background.settled();
+    await background.ack(event());
+    await background.settled();
+    if (stage === "snapshot") release = blockStorage(background, area, "get");
+    const operation = summaryWithin(background, NOW + 50);
+    try {
+      const response = await operation.observed;
+      assert.equal(response?.ok, false, "Expiry must reply while the storage operation is still stalled.");
+      assert.equal(response.code, "transfer_timeout");
+      assert.equal(Date.now(), NOW + 50);
+      assert.equal(requests, stage === "snapshot" ? 0 : 1);
+      assert.equal(background.evaluate("summaryInflight.size"), 0);
+      assert.equal(background.evaluate("summaryCache.size"), 0);
+    } finally {
+      release?.();
+      await operation.request;
+      await background.settled();
+    }
+  });
+
+  clockTest(`an expired ${area} receipt completion rejects success before a delayed timer fires`, async t => {
+    t.mock.timers.setTime(NOW);
+    let release, signal, receiptStarted;
+    const began = new Promise(resolve => { receiptStarted = resolve; });
+    const background = worker(async (url, options) => {
+      if (url.endsWith("/api/telemetry")) throw new Error("offline");
+      signal = options.signal;
+      return { ok: true, status: 200, json: async () => {
+        release = blockStorage(background, area, "set");
+        receiptStarted();
+        return { summary: "generated summary", summaryProofV2: "f".repeat(64), summaryConfirmedAt: new Date(NOW).toISOString() };
+      } };
+    });
+    await background.settled();
+    await background.ack(event());
+    await background.settled();
+    const operation = summaryWithin(background, NOW + 50);
+    try {
+      await began;
+      await release.began;
+      assert.equal(signal.aborted, false);
+      // Elapsed time can exceed the deadline while queued response/storage
+      // microtasks run ahead of timer tasks on a busy worker.
+      background.clock.now = NOW + 100;
+      release();
+      const response = await operation.observed;
+      assert.equal(response?.ok, false);
+      assert.equal(response.code, "transfer_timeout");
+      assert.equal(background.evaluate("summaryCache.size"), 0);
+    } finally {
+      release?.();
+      await operation.request;
+      await background.settled();
+    }
+  });
+
   test(`telemetry storage ${area} read failure cannot block summary generation`, async () => {
     const summaryRequests = [];
     const background = worker(async (url, options) => {
@@ -453,3 +624,35 @@ for (const area of ["local", "session"]) {
     assert.equal(queued[0].payload.summary_confirmed_at, confirmedAt);
   });
 }
+
+clockTest("the summary transport deadline also interrupts receipt storage without a transfer deadline", async t => {
+  t.mock.timers.setTime(NOW);
+  let release, signal, receiptStarted;
+  const began = new Promise(resolve => { receiptStarted = resolve; });
+  const background = worker(async (url, options) => {
+    if (url.endsWith("/api/telemetry")) throw new Error("offline");
+    signal = options.signal;
+    return { ok: true, status: 200, json: async () => {
+      release = blockStorage(background, "local", "set");
+      receiptStarted();
+      return { summary: "generated summary", summaryProofV2: "f".repeat(64), summaryConfirmedAt: new Date(NOW).toISOString() };
+    } };
+  }, profile(), () => Date.now());
+  await background.settled();
+  await background.ack(event());
+  await background.settled();
+  const operation = summaryWithin(background);
+  try {
+    await began;
+    await release.began;
+    t.mock.timers.tick(320000);
+    const response = await operation.request;
+    assert.equal(signal.aborted, true);
+    assert.equal(response.ok, false);
+    assert.equal(background.evaluate("summaryCache.size"), 0);
+  } finally {
+    release?.();
+    await operation.request;
+    await background.settled();
+  }
+});
