@@ -76,8 +76,8 @@ clockTest("a provider retry retains the model deadline when its body beats a del
   global.fetch = async (url, options) => {
     const index = requests.length;
     requests.push({ url, signal: options.signal, at: Date.now() });
+    if (index === 0) t.mock.timers.setTime(startedAt + 44550);
     return { ok: index !== 0, status: index === 0 ? 503 : 200, json: async () => {
-      if (index === 0) t.mock.timers.setTime(startedAt + 44550);
       if (index === 1) t.mock.timers.setTime(startedAt + 90000);
       return index === 0 ? { error: { message: "TEST_ONLY_UNAVAILABLE" } }
         : { candidates: [{ content: { parts: [{ text: "Build passed; Linux checks remain pending." }] }, finishReason: "STOP" }] };
@@ -143,10 +143,116 @@ test("elapsed provider headers abort the native unread socket before fallback", 
   }
 });
 
+for (const scenario of [
+  { provider: "Gemini", status: 429, failures: 1, model: "gemini-3.5-flash-lite" },
+  { provider: "Gemini", status: 503, failures: 2, model: "gemini-3.5-flash-lite" },
+  { provider: "OpenRouter", status: 401, failures: 1, model: "gemini-3.6-flash" },
+  { provider: "OpenRouter", status: 402, failures: 1, model: "gemini-3.6-flash" },
+  { provider: "OpenRouter", status: 429, failures: 1, model: "qwen/qwen3.8-27b:free" },
+  { provider: "Mistral", status: 429, failures: 1, model: "local-direct" },
+  { provider: "Mistral", status: 503, failures: 2, model: "local-direct" }
+]) test(`${scenario.provider} discards a stalled HTTP ${scenario.status} body before retry or fallback`, { timeout: 5000 }, async t => {
+  const keys = configureProviderRoute(t, scenario.provider);
+  if (scenario.provider === "OpenRouter") process.env.OPENROUTER_QWEN_ENABLED = "true";
+  const originalFetch = global.fetch, originalSetTimeout = global.setTimeout, originalClearTimeout = global.clearTimeout;
+  const requests = [], closed = [];
+  let noteClosed, rejectUnexpectedRead, closeTimer, pending, bodyReads = 0, reservations = 0;
+  const allClosed = new Promise(resolve => { noteClosed = resolve; });
+  const unexpectedRead = new Promise((_, reject) => { rejectUnexpectedRead = reject; });
+  const server = http.createServer((_req, res) => {
+    res.once("close", () => {
+      closed.push(!res.writableEnded);
+      if (closed.length === scenario.failures) noteClosed(closed.every(Boolean));
+    });
+    res.writeHead(scenario.status, { "Content-Type": "application/json" });
+    res.write("{");
+  });
+  await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
+  t.mock.timers.enable({ apis: ["Date", "setTimeout"], now: Date.parse("2026-10-06T10:00:00Z") });
+  const scheduleTimeout = global.setTimeout;
+  global.setTimeout = (callback, ms, ...args) => {
+    const timer = scheduleTimeout(callback, ms, ...args);
+    // Advance only a scheduled retry; native headers/cancellation use real I/O.
+    if (ms === 450) queueMicrotask(() => t.mock.timers.tick(450));
+    return timer;
+  };
+  global.fetch = async (url, options) => {
+    requests.push({ url, model: JSON.parse(options.body).model, at: Date.now() });
+    if (requests.length <= scenario.failures) {
+      const response = await originalFetch(`http://127.0.0.1:${server.address().port}`, options);
+      const readBody = response.json.bind(response);
+      response.json = () => {
+        bodyReads++;
+        rejectUnexpectedRead(new Error("Unused provider error body was read"));
+        return readBody();
+      };
+      return response;
+    }
+    const text = "Build passed; Linux checks remain pending.";
+    return new Response(JSON.stringify(url.includes("generativelanguage.googleapis.com")
+      ? { candidates: [{ content: { parts: [{ text }] }, finishReason: "STOP" }] }
+      : { choices: [{ message: { content: text }, finish_reason: "stop" }] }));
+  };
+  try {
+    const conversation = "Build passed; Linux checks remain pending. ".repeat(100);
+    pending = createSummaryWithFallback({ conversation, profile: getSummaryProfile(conversation), ...keys,
+      requestContext: { reserveFunded: async () => { reservations++; return true; } } });
+    const result = await Promise.race([pending, unexpectedRead]);
+    assert.equal(result.model, scenario.model);
+    assert.equal(bodyReads, 0);
+    assert.equal(requests.length, scenario.failures + (scenario.model === "local-direct" ? 0 : 1));
+    assert.equal(reservations, scenario.provider === "OpenRouter" ? (scenario.status === 429 ? 0 : 1) : requests.length);
+    if (scenario.failures === 2) {
+      assert.equal(requests[1].at - requests[0].at, 450);
+      assert.equal(requests[0].url, requests[1].url);
+    }
+    if (scenario.provider === "OpenRouter") {
+      assert.deepEqual(result.openrouterModelsTried, scenario.status === 429
+        ? ["inclusionai/ling-3.1-flash", "qwen/qwen3.8-27b:free"] : ["inclusionai/ling-3.1-flash"]);
+    }
+    assert.equal(await Promise.race([allClosed, new Promise(resolve => {
+      closeTimer = originalSetTimeout(() => resolve(false), 1000);
+    })]), true, "Every owned error body must close its unfinished native socket.");
+  } finally {
+    originalClearTimeout(closeTimer);
+    server.closeAllConnections();
+    await new Promise(resolve => server.close(resolve));
+    await pending?.catch(() => {});
+    global.fetch = originalFetch;
+    global.setTimeout = originalSetTimeout;
+    t.mock.timers.reset();
+  }
+});
+
+for (const mode of ["throws", "rejects", "stalls", "absent"]) clockTest(`provider error-body cancellation ${mode} cannot delay status fallback`, async t => {
+  const keys = configureProviderRoute(t, "Gemini");
+  const originalFetch = global.fetch;
+  t.after(() => { global.fetch = originalFetch; });
+  let requests = 0, bodyReads = 0, cancelled = false;
+  global.fetch = async () => {
+    if (++requests > 1) return new Response(JSON.stringify({ candidates: [{
+      content: { parts: [{ text: "Build passed; Linux checks remain pending." }] }, finishReason: "STOP"
+    }] }));
+    return { ok: false, status: 429, body: mode === "absent" ? null : { cancel() {
+      cancelled = true;
+      if (mode === "throws") throw new Error("PRIVATE_CANCEL_ERROR");
+      if (mode === "rejects") return Promise.reject(new Error("PRIVATE_CANCEL_ERROR"));
+      return new Promise(() => {});
+    } }, json: async () => { bodyReads++; throw new Error("PRIVATE_UNUSED_PROVIDER_BODY"); } };
+  };
+  const startedAt = Date.now(), conversation = "Build passed; Linux checks remain pending. ".repeat(100);
+  const result = await createSummaryWithFallback({ conversation, profile: getSummaryProfile(conversation), ...keys });
+  assert.equal(result.model, "gemini-3.5-flash-lite");
+  assert.equal(requests, 2);
+  assert.equal(bodyReads, 0);
+  assert.equal(cancelled, mode !== "absent");
+  assert.ok(Date.now() - startedAt < 1000);
+});
+
 for (const openrouterEnabled of [false, true]) {
-// Both providers use the same body reader before status-specific retry logic.
-// Gemini covers success/error bodies; OpenRouter checks its 90s/60s route budgets.
-for (const status of openrouterEnabled ? [200] : [200, 429, 503]) {
+// Successful bodies still share the bounded reader; OpenRouter checks its
+// 90s/60s route budgets. Non-OK bodies use the cancellation regressions above.
+const status = 200;
   test(`${openrouterEnabled ? "OpenRouter" : "Gemini"} fallback aborts a stalled ${status} response body within its budget`, { timeout: 5000 }, async t => {
     // Exercise this route regardless of a developer's deployed env switches.
     const flags = ["OPENROUTER_ENABLED", "OPENROUTER_QWEN_ENABLED",
@@ -236,5 +342,4 @@ for (const status of openrouterEnabled ? [200] : [200, 429, 503]) {
       global.fetch = originalFetch;
     }
   });
-}
 }

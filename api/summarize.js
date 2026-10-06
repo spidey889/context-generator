@@ -1054,15 +1054,24 @@ async function fetchWithRetry(url, options, requestBudgetMs, context = {}) {
       const signal = context.signal ? AbortSignal.any([context.signal, controller.signal]) : controller.signal;
       const response = await fetch(url, { ...options, signal });
       checkAttemptDeadline();
-      // fetch resolves at the headers. Keep the deadline active until the JSON
-      // body finishes too, including error bodies read before provider fallback.
+      // fetch resolves at the headers. Successful JSON still belongs to the
+      // attempt's deadline; HTTP failures route by status alone.
       let payload;
       let bodyError;
-      try {
-        payload = await response.json();
-      } catch (error) {
-        if (signal.aborted || error?.name === "AbortError") throw error;
-        bodyError = error;
+      if (response.ok) {
+        try {
+          payload = await response.json();
+        } catch (error) {
+          if (signal.aborted || error?.name === "AbortError") throw error;
+          bodyError = error;
+        }
+      } else {
+        // Error payloads are unused. Start owned-body cancellation without
+        // waiting for cleanup; a stalled/rejected cancel must not block routing.
+        try {
+          const cancellation = response.body?.cancel?.();
+          cancellation?.catch?.(() => {});
+        } catch { /* Retain the HTTP status even if cleanup fails. */ }
       }
       checkAttemptDeadline();
       lastResponse = {

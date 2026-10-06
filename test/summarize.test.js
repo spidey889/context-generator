@@ -436,6 +436,7 @@ clockTest("provider exhaustion preserves the exact transcript locally without ex
   const privateProviderBody = "provider echoed private conversation text";
   let responseTextReads = 0;
   let responseJsonReads = 0;
+  let responseBodyCancels = 0;
   const requestTimes = [];
 
   global.fetch = async () => {
@@ -443,6 +444,7 @@ clockTest("provider exhaustion preserves the exact transcript locally without ex
     return {
       ok: false,
       status: 500,
+      body: { cancel: async () => { responseBodyCancels++; } },
       json: async () => {
         responseJsonReads++;
         return { error: { message: privateProviderBody } };
@@ -463,7 +465,8 @@ clockTest("provider exhaustion preserves the exact transcript locally without ex
 
     assert.equal(res.statusCode, 200);
     assert.equal(responseTextReads, 0);
-    assert.equal(responseJsonReads, 2, "both retries must exercise real private JSON error envelopes");
+    assert.equal(responseJsonReads, 0, "private error envelopes must remain unread");
+    assert.equal(responseBodyCancels, 2, "both owned retry response bodies must be cancelled");
     assert.equal(requestTimes.length, 2);
     assert.equal(requestTimes[1] - requestTimes[0], 450, "exhaustion must retain the provider retry delay");
     assert.equal(res.payload.timing.servedBy, "local-direct");
