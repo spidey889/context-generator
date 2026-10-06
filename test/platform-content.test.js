@@ -540,19 +540,6 @@ test("empty chats are rejected before handoff UI or destination preparation", ()
   assert.match(flowSource.slice(flowEmptyGuard), /NO_CONVERSATION_ERROR_MESSAGE/);
 });
 
-test("picker capture preparation failures release the transfer lock immediately", () => {
-  const pickerStart = PLATFORM_CONTENT_SOURCE.indexOf("async function startDestinationTransfer(destinationId)");
-  const pickerEnd = PLATFORM_CONTENT_SOURCE.indexOf("function ensureFloatingOverlay()", pickerStart);
-  const pickerSource = PLATFORM_CONTENT_SOURCE.slice(pickerStart, pickerEnd);
-  const captureTry = pickerSource.indexOf("try {");
-  const preparation = pickerSource.indexOf("await prepareSourceForCapture()");
-  const reset = pickerSource.indexOf("resetRunningFlag()", preparation);
-
-  assert.ok(captureTry >= 0 && preparation > captureTry);
-  assert.ok(reset > preparation);
-  assert.match(pickerSource.slice(preparation), /catch \(error\) \{[\s\S]*resetRunningFlag\(\)/);
-});
-
 test("telemetry maps failures to the closed non-sensitive reason list", () => {
   const hooks = loadPlatformContent([]);
 

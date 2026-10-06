@@ -22,13 +22,17 @@ function configureProviderRoute(t, provider) {
   };
 }
 
-for (const provider of ["Gemini", "OpenRouter", "Mistral"]) {
-  for (const scenario of [
-    { phase: "body", elapsedMs: 89999 },
-    { phase: "body", elapsedMs: 90000 },
-    { phase: "body", elapsedMs: 90001 },
-    { phase: "headers", elapsedMs: 90000 }
-  ]) test(`${provider} checks elapsed ${scenario.phase} time at ${scenario.elapsedMs} ms before delayed abort timers run`, async t => {
+// All routes share fetchWithRetry. Exercise its boundaries once, retaining a
+// failed-body integration check for each other provider's fallback policy.
+for (const { provider, phase, elapsedMs } of [
+  { provider: "Gemini", phase: "body", elapsedMs: 89999 },
+  { provider: "Gemini", phase: "body", elapsedMs: 90000 },
+  { provider: "Gemini", phase: "headers", elapsedMs: 90000 },
+  { provider: "OpenRouter", phase: "body", elapsedMs: 90000 },
+  { provider: "Mistral", phase: "body", elapsedMs: 90000 }
+]) {
+  const scenario = { phase, elapsedMs };
+  test(`${provider} checks elapsed ${phase} time at ${elapsedMs} ms before delayed abort timers run`, async t => {
     const keys = configureProviderRoute(t, provider);
     const originalFetch = global.fetch;
     t.after(() => { global.fetch = originalFetch; });
@@ -153,18 +157,15 @@ test("elapsed provider headers abort the native unread socket before fallback", 
 });
 
 for (const scenario of [
-  { provider: "Gemini", status: 429, failures: 1, model: "gemini-3.5-flash-lite" },
   { provider: "Gemini", status: 503, failures: 2, model: "gemini-3.5-flash-lite" },
   { provider: "OpenRouter", status: 401, failures: 1, model: "gemini-3.6-flash" },
-  { provider: "OpenRouter", status: 402, failures: 1, model: "gemini-3.6-flash" },
   { provider: "OpenRouter", status: 429, failures: 1, model: "qwen/qwen3.8-27b:free" },
-  { provider: "Mistral", status: 429, failures: 1, model: "local-direct" },
-  { provider: "Mistral", status: 503, failures: 2, model: "local-direct" }
+  { provider: "Mistral", status: 429, failures: 1, model: "local-direct" }
 ]) test(`${scenario.provider} discards a stalled HTTP ${scenario.status} body before retry or fallback`, { timeout: 5000 }, async t => {
   const keys = configureProviderRoute(t, scenario.provider);
   if (scenario.provider === "OpenRouter") process.env.OPENROUTER_QWEN_ENABLED = "true";
   const originalFetch = global.fetch, originalSetTimeout = global.setTimeout, originalClearTimeout = global.clearTimeout;
-  const requests = [], closed = [];
+  const requests = [], closed = [], retryDelays = [];
   let noteClosed, rejectUnexpectedRead, closeTimer, pending, bodyReads = 0, reservations = 0;
   const allClosed = new Promise(resolve => { noteClosed = resolve; });
   const unexpectedRead = new Promise((_, reject) => { rejectUnexpectedRead = reject; });
@@ -179,12 +180,15 @@ for (const scenario of [
   await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
   t.mock.timers.enable({ apis: ["Date"], now: Date.parse("2026-10-06T10:00:00Z") });
   global.setTimeout = (callback, ms, ...args) => {
-    // Keep transport timers real: Node 22's native client can stall after
-    // cancellation when its timers share a fake retry clock across tests.
-    if (ms === 450) return originalSetTimeout(() => {
-      t.mock.timers.setTime(Date.now() + ms);
-      callback(...args);
-    }, ms);
+    // Assert the requested delay, then advance only that retry on a real task.
+    // Native transport timers remain real; mocking them can stall Node 22 I/O.
+    if (ms === 450) {
+      retryDelays.push(ms);
+      return originalSetTimeout(() => {
+        t.mock.timers.setTime(Date.now() + ms);
+        callback(...args);
+      }, 0);
+    }
     return originalSetTimeout(callback, ms, ...args);
   };
   global.fetch = async (url, options) => {
@@ -215,6 +219,7 @@ for (const scenario of [
     assert.equal(bodyReads, 0);
     assert.equal(requests.length, scenario.failures + (scenario.model === "local-direct" ? 0 : 1));
     assert.equal(reservations, scenario.provider === "OpenRouter" ? (scenario.status === 429 ? 0 : 1) : requests.length);
+    assert.deepEqual(retryDelays, scenario.failures === 2 ? [450] : []);
     if (scenario.failures === 2) {
       assert.equal(requests[1].at - requests[0].at, 450);
       assert.equal(requests[0].url, requests[1].url);

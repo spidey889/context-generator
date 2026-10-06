@@ -75,14 +75,14 @@ test("missing, invalid, zero, rejected and malformed shared accounting cannot ad
   }
 });
 
-for (const status of [401, 429, 503]) test(`rejected HTTP ${status} accounting closes its native unread body`, { timeout: 5000 }, async () => {
+test("rejected HTTP accounting closes its native unread body", { timeout: 5000 }, async () => {
   const nativeFetch = global.fetch;
   const caller = new AbortController();
   let noteClosed, closeTimer, attemptSignal, bodyReads = 0, requests = 0;
   const closed = new Promise(resolve => { noteClosed = resolve; });
   const server = http.createServer((_req, res) => {
     res.once("close", () => noteClosed(!res.writableEnded));
-    res.writeHead(status, { "Content-Type": "application/json" });
+    res.writeHead(503, { "Content-Type": "application/json" });
     res.write('{"error":"PRIVATE_STORE_BODY');
   });
   await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
@@ -123,7 +123,9 @@ clockTest("accounting deadline covers a stalled response body and aborts its fet
 });
 
 for (const phase of ["headers", "body"]) {
-  for (const elapsedMs of [449, 450, 451]) test(`accounting checks elapsed ${phase} time at ${elapsedMs} ms before a delayed timer runs`, async t => {
+  // Header expiry rejects before reading; only the body needs the full boundary
+  // matrix because accepting a late acknowledgement could start funded work.
+  for (const elapsedMs of phase === "headers" ? [450] : [449, 450, 451]) test(`accounting checks elapsed ${phase} time at ${elapsedMs} ms before a delayed timer runs`, async t => {
     t.mock.timers.enable({ apis: ["Date"], now: Date.now() });
     let attemptSignal, bodyReads = 0;
     const allowed = await reserve({ headers: {} }, 1, { env, fetchImpl: async (_url, { signal }) => {

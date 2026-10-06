@@ -143,22 +143,29 @@ for (const platform of ["gemini", "grok", "deepseek"]) {
   });
 
   test(`${platform}: chunked history preserves split UTF-8/BOM and exact transcripts`, async () => {
+    let splitCodepoints = 0;
     const h = setup(platform, fixtures(platform, "smoke", 1), { responseTransform: async response => {
       const original = new Uint8Array(await response.arrayBuffer());
       const bytes = response.headers.get("content-type")?.includes("application/json")
         ? Buffer.concat([Buffer.from([239, 187, 191]), original]) : original;
+      // Split the BOM and one actual multibyte character deliberately. The
+      // remaining large paste can use normal chunks instead of thousands of
+      // seven-byte reads that add no new decoding coverage.
+      const unicodeOffset = bytes.findIndex((byte, index) => index >= 3 && byte >= 0xc2);
       let offset = 0;
       return new Response(new ReadableStream({
         pull(controller) {
           if (offset === bytes.length) return controller.close();
-          // Odd-sized chunks split multibyte text and JSON/RPC framing.
-          const end = Math.min(offset + (offset === 0 ? 2 : 7), bytes.length);
+          const end = offset === 0 ? 2 : offset === 2 && unicodeOffset >= 3 ? unicodeOffset + 1
+            : Math.min(offset + 16385, bytes.length);
+          if (end < bytes.length && (bytes[end] & 0xc0) === 0x80) splitCodepoints++;
           controller.enqueue(bytes.subarray(offset, end)); offset = end;
         }
       }), { headers: response.headers });
     } });
     await h.observe();
     assert.equal((await h.window.__capCaptureNetworkJson()).text, h.fixture.expected);
+    assert.ok(splitCodepoints > 0, "Unicode must actually cross a delivered chunk boundary.");
   });
 
   test(`${platform}: an unfinished UTF-8 character after valid history must not be silently dropped`, async () => {

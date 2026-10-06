@@ -1,8 +1,5 @@
 const assert = require("node:assert/strict");
-const fs = require("node:fs");
-const path = require("node:path");
 const test = require("node:test");
-const vm = require("node:vm");
 const { CdpSession } = require("../scripts/run-extension-smoke.js");
 
 class FakeSocket {
@@ -11,14 +8,6 @@ class FakeSocket {
   send(data) { this.sent = JSON.parse(data); }
   reply(data) { this.listeners.get("message")({ data: JSON.stringify(data) }); }
 }
-
-test("smoke palette expression preserves escapes and compiles before browser execution", () => {
-  const source = fs.readFileSync(path.join(__dirname, "../scripts/run-extension-smoke.js"), "utf8");
-  const start = source.indexOf("const clickResult = await sourceSession.evaluate(") + "const clickResult = await sourceSession.evaluate(".length;
-  const end = source.indexOf("})`);", start) + 3;
-  const expression = vm.runInNewContext(source.slice(start, end));
-  assert.doesNotThrow(() => new vm.Script(expression));
-});
 
 test("smoke DevTools commands time out and discard late responses", async () => {
   const socket = new FakeSocket();

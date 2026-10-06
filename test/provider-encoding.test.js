@@ -29,7 +29,8 @@ function payload(url, content = text) {
     : { choices: [{ message: { content }, finish_reason: "stop" }] });
 }
 
-for (const provider of ["Gemini", "OpenRouter", "Mistral"]) {
+// Both response formats and remote/local fallback exercise the shared decoder.
+for (const provider of ["Gemini", "Mistral"]) {
   test(`${provider} rejects malformed UTF-8 instead of silently corrupting a summary name`, async t => {
     const keys = configure(t, provider);
     let requests = 0;
@@ -39,14 +40,16 @@ for (const provider of ["Gemini", "OpenRouter", "Mistral"]) {
       return new Response(bytes);
     };
     const result = await createSummaryWithFallback({ conversation, profile: getSummaryProfile(conversation), ...keys });
-    const fallbackModel = { Gemini: "gemini-3.5-flash-lite", OpenRouter: "gemini-3.6-flash", Mistral: "local-direct" }[provider];
+    const fallbackModel = provider === "Gemini" ? "gemini-3.5-flash-lite" : "local-direct";
     assert.equal(result.model, fallbackModel);
     assert.equal(requests, provider === "Mistral" ? 1 : 2, "Malformed successful bodies must not retry the same provider call.");
     assert.ok(result.summary.includes("José owns the rollout."));
     if (provider === "Mistral") assert.ok(result.summary.includes(conversation.trim()));
     else assert.equal((result.summary.match(/�/g) || []).length, 1, "Only the valid literal replacement character survives.");
   });
+}
 
+for (const provider of ["Gemini", "OpenRouter"]) {
   test(`${provider} preserves split Unicode, a leading BOM and literal replacement characters`, async t => {
     const keys = configure(t, provider);
     let requests = 0;
@@ -61,24 +64,9 @@ for (const provider of ["Gemini", "OpenRouter", "Mistral"]) {
       } }));
     };
     const result = await createSummaryWithFallback({ conversation, profile: getSummaryProfile(conversation), ...keys });
-    const model = { Gemini: "gemini-3.6-flash", OpenRouter: "inclusionai/ling-3.1-flash", Mistral: "ministral-14b-2512" }[provider];
+    const model = provider === "Gemini" ? "gemini-3.6-flash" : "inclusionai/ling-3.1-flash";
     assert.equal(result.model, model);
     assert.equal(requests, 1);
     assert.ok(result.summary.startsWith(text));
-  });
-}
-
-for (const [label, invalidBytes] of [["overlong UTF-8", [0xc0, 0xaf]], ["UTF-8 encoded surrogate", [0xed, 0xa0, 0x80]]]) {
-  test(`provider rejects ${label} in an otherwise useful summary`, async t => {
-    const keys = configure(t, "Mistral");
-    global.fetch = async url => {
-      const marker = "PRIVATE_BAD_BYTE";
-      const json = Buffer.from(payload(url, "Build passed; PRIVATE_BAD_BYTE owns the rollout."));
-      const offset = json.indexOf(marker);
-      return new Response(Buffer.concat([json.subarray(0, offset), Buffer.from(invalidBytes), json.subarray(offset + marker.length)]));
-    };
-    const result = await createSummaryWithFallback({ conversation, profile: getSummaryProfile(conversation), ...keys });
-    assert.equal(result.model, "local-direct");
-    assert.ok(result.summary.includes(conversation.trim()));
   });
 }

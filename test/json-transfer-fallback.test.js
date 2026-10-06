@@ -9,7 +9,7 @@ const source = fs.readFileSync(path.join(__dirname, "../extension/platform-conte
 
 // Exercise the actual picker orchestrator; substitute only its UI, capture and
 // transfer boundaries to count side effects without native timers or a browser.
-function harness(platform, { mode = "failure", enabled = true, domFails = false, failureReason } = {}) {
+function harness(platform, { mode = "failure", enabled = true, domFails = false, prepareFails = false, failureReason } = {}) {
   const calls = { json: 0, prepare: 0, dom: 0, notice: 0, handoff: 0, destination: 0, flows: [], errors: [], traces: [], traceDetails: [], captureMetrics: [] };
   const prepared = Promise.resolve({ tabId: 42 });
   const pathname = { claude: "/chat/source", chatgpt: "/c/source", gemini: "/app/source", grok: "/c/source", deepseek: "/a/chat/s/source" }[platform];
@@ -28,7 +28,10 @@ function harness(platform, { mode = "failure", enabled = true, domFails = false,
     transitionDestinationSheetToHandoff: async () => {}, showOverlay: () => { calls.handoff++; }, releaseDestinationSheetBackdrop() {},
     advanceTransferTelemetryStage() {}, setHandoffProgress() {}, markCaptureDone() {},
     prepareDestinationTab: () => { calls.destination++; return prepared; },
-    prepareSourceForCapture: async () => { calls.prepare++; },
+    prepareSourceForCapture: async () => {
+      calls.prepare++;
+      if (prepareFails) throw new Error("Source preparation failed");
+    },
     scrapeConversationTextWhenReady: async () => {
       calls.dom++;
       if (domFails) throw new Error("DOM capture failed");
@@ -59,19 +62,22 @@ function harness(platform, { mode = "failure", enabled = true, domFails = false,
   } };
 }
 
-for (const platform of ["claude", "chatgpt", "gemini", "grok", "deepseek"]) {
-  test(`${platform}: empty new chat rejects before handoff, capture or destination work with fast capture enabled`, async () => {
-    const { context, calls } = harness(platform);
-    context.window.location.pathname = "/";
-    context.window.location.href = "https://example.test/";
-    context.getDetectedConversationMessageCount = () => 0;
-    await context.start("claude");
-    assert.deepEqual(calls.errors, ["No conversation"]);
-    assert.equal(calls.handoff + calls.json + calls.prepare + calls.dom + calls.destination + calls.flows.length, 0);
-    assert.equal(context.isRunning, false);
-  });
+// Empty admission precedes the platform-specific capture branches.
+test("empty new chat rejects before handoff, capture or destination work with fast capture enabled", async () => {
+  const { context, calls } = harness("chatgpt");
+  context.window.location.pathname = "/";
+  context.window.location.href = "https://example.test/";
+  context.getDetectedConversationMessageCount = () => 0;
+  await context.start("claude");
+  assert.deepEqual(calls.errors, ["No conversation"]);
+  assert.equal(calls.handoff + calls.json + calls.prepare + calls.dom + calls.destination + calls.flows.length, 0);
+  assert.equal(context.isRunning, false);
+});
 
-  for (const mode of ["failure", "missing"]) {
+for (const platform of ["claude", "chatgpt", "gemini", "grok", "deepseek"]) {
+  // Every bridge retains failure/success wiring checks. A missing bridge uses
+  // the same fallback path; per-adapter readiness recovery is tested separately.
+  for (const mode of platform === "chatgpt" ? ["failure", "missing"] : ["failure"]) {
     test(`${platform}: ${mode} fast capture falls back once within the same transfer`, async () => {
       const { context, calls, prepared } = harness(platform, { mode });
       await context.start("claude");
@@ -147,13 +153,18 @@ test("capture fallback records only recognized reasons, never arbitrary native e
   }
 });
 
-test("failed DOM fallback releases the lock without retrying or starting a transfer", async () => {
-  const { context, calls } = harness("chatgpt", { domFails: true });
-  await context.start("claude");
-  assert.equal(calls.dom, 1);
-  assert.equal(calls.flows.length, 0);
-  assert.equal(context.isRunning, false);
-  assert.deepEqual(calls.errors, ["DOM capture failed"]);
+test("failed source preparation or DOM fallback releases the lock and permits a fresh attempt", async () => {
+  for (const prepareFails of [true, false]) {
+    const { context, calls } = harness("chatgpt", { prepareFails, domFails: !prepareFails });
+    for (let attempt = 1; attempt <= 2; attempt++) {
+      await context.start("claude");
+      assert.equal(calls.prepare, attempt);
+      assert.equal(calls.dom, prepareFails ? 0 : attempt);
+      assert.equal(calls.flows.length, 0);
+      assert.equal(context.isRunning, false);
+      assert.deepEqual(calls.errors, Array(attempt).fill(prepareFails ? "Source preparation failed" : "DOM capture failed"));
+    }
+  }
 });
 
 test("fallback does not capture a different source chat", async () => {

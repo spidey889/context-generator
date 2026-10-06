@@ -198,6 +198,8 @@ test("live evaluation stops after two endpoint failures", async () => {
 test("evaluation CLI saves both failed attempts and still evaluates the other case without AI calls", async () => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), "cap-eval-report-"));
   const reportPath = path.join(directory, "report.json");
+  const clockPath = path.join(directory, "retry-clock.cjs");
+  const delaysPath = path.join(directory, "retry-delays.json");
   let requests = 0;
   const server = http.createServer(async (request, response) => {
     for await (const _chunk of request) { /* Drain the local request. */ }
@@ -213,9 +215,25 @@ test("evaluation CLI saves both failed attempts and still evaluates the other ca
       timing: { usage: { totalTokens: 123 }, model: "local-fixture" } }));
   });
   try {
+    // Advance only the CLI retry clock; native HTTP timers keep real scheduling.
+    // Record its requested delay so skipping the backoff cannot pass this test.
+    await fs.writeFile(clockPath, `
+      const { writeFileSync } = require("node:fs");
+      const schedule = global.setTimeout;
+      const now = Date.now;
+      const delays = [];
+      let elapsed = 0;
+      Date.now = () => now() + elapsed;
+      global.setTimeout = (callback, ms, ...args) => {
+        if (ms !== 1000) return schedule(callback, ms, ...args);
+        delays.push(ms);
+        writeFileSync(${JSON.stringify(delaysPath)}, JSON.stringify(delays));
+        return schedule(() => { elapsed += ms; callback(...args); }, 0);
+      };
+    `);
     await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
     const endpoint = `http://127.0.0.1:${server.address().port}/summarize`;
-    const child = spawn(process.execPath, [path.join(__dirname, "../scripts/run-regression-eval.js")], {
+    const child = spawn(process.execPath, ["--require", clockPath, path.join(__dirname, "../scripts/run-regression-eval.js")], {
       env: { ...process.env, EVAL_ENDPOINT: endpoint, EVAL_REPORT_PATH: reportPath }, stdio: "pipe"
     });
     let output = "";
@@ -227,12 +245,14 @@ test("evaluation CLI saves both failed attempts and still evaluates the other ca
     });
     assert.equal(exitCode, 1, output);
     assert.equal(requests, 3, "An endpoint failure must not skip the remaining case.");
+    assert.deepEqual(JSON.parse(await fs.readFile(delaysPath, "utf8")), [1000]);
     const report = JSON.parse(await fs.readFile(reportPath, "utf8"));
     assert.equal(report.passed, false);
     assert.equal(report.results.length, 2);
     assert.equal(report.results[0].attempts, 2);
     assert.ok(report.results[0].attemptResults.every(attempt => attempt.error.includes("502")));
-    assert.ok(report.results[0].totalLatencyMs >= report.results[0].totalRequestMs);
+    assert.ok(report.results[0].totalLatencyMs - report.results[0].totalRequestMs >= 1000,
+      "The failed case must count the requested backoff separately from HTTP time.");
     assert.equal(report.results[1].usage.totalTokens, 123);
     assert.equal(report.results[1].attemptResults[0].passed, true);
     assert.ok(report.totalMs >= 1000, "The report must count the retry delay.");
