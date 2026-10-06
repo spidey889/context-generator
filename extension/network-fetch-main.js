@@ -3,7 +3,7 @@
   if (!platform || !globalThis.__capNetworkJsonData) return;
   // Advance readiness version with adapter/contract changes: old MAIN closures
   // can survive extension reloads and must be replaced before a new capture.
-  const version = platform === "deepseek" ? 5 : 4, channel = "cap-context-network-json-v1";
+  const version = platform === "deepseek" ? 6 : 4, channel = "cap-context-network-json-v1";
   const previous = window.__capNetworkFetchState;
   if (previous?.version === version && window.fetch === previous.fetch
     && (platform === "grok" || previous?.ownsObservation?.())) return;
@@ -88,7 +88,7 @@
     window.navigation?.addEventListener("navigate", changed);
     window.addEventListener("popstate", changed);
     let bytesRead = 0;
-    const read = async (url, options = {}, type = "json") => {
+    const read = async (url, options = {}, type = "json", expectedSize) => {
       check();
       const response = await Reflect.apply(nativeFetch, window, [url, { credentials: "same-origin", ...options, redirect: "error", signal: controller.signal }]);
       check();
@@ -98,8 +98,36 @@
       if (type === "rpc" && !/(application\/json|text\/plain)/i.test(contentType)) throw new api.CaptureError("Gemini returned an unsupported RPC response.");
       if (type === "file" && !/^(text\/plain|text\/markdown|text\/csv|application\/(json|octet-stream))(;|$)/i.test(contentType)) throw new api.CaptureError("A text attachment returned an unsupported response.");
       if (Number(response.headers.get("content-length")) > 6000000 - bytesRead) throw new api.CaptureError("size");
-      const bytes = new Uint8Array(await response.arrayBuffer());
-      bytesRead += bytes.length;
+      let bytes;
+      if (type === "file") {
+        // Concurrent uploads must remain bounded even without Content-Length.
+        // Stop reading at the manifest's original byte count, before decoding.
+        const reader = response.body?.getReader(), chunks = [];
+        let size = 0;
+        try {
+          if (reader) while (true) {
+            const { done, value } = await reader.read();
+            check();
+            if (done) break;
+            size += value.byteLength;
+            bytesRead += value.byteLength;
+            if (size > expectedSize) throw new api.CaptureError("A text attachment is incomplete.");
+            if (bytesRead > 6000000) throw new api.CaptureError("size");
+            chunks.push(value);
+          }
+          bytes = new Uint8Array(size);
+          let offset = 0;
+          for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.byteLength; }
+        } catch (error) {
+          await reader?.cancel().catch(() => {});
+          throw error;
+        } finally {
+          reader?.releaseLock();
+        }
+      } else {
+        bytes = new Uint8Array(await response.arrayBuffer());
+        bytesRead += bytes.length;
+      }
       if (bytesRead > 6000000) throw new api.CaptureError("size");
       check();
       const text = new TextDecoder("utf-8", { fatal: true, ignoreBOM: type === "file" }).decode(bytes);
@@ -156,21 +184,48 @@
         const data = await read(`/api/v0/chat/history_messages?chat_session_id=${encodeURIComponent(chat)}`, { headers: { authorization: auth } });
         const branch = api.deepseekBranch(data, chat);
         const files = Object.create(null);
+        const uploads = new Map();
+        let uploadBytes = 0;
         for (const message of branch) {
           if (message.role !== "USER") continue;
           for (const fragment of message.fragments || []) for (const file of fragment.type === "FILE" && Array.isArray(fragment.files) ? fragment.files : []) {
-            if (!api.textFile(file) || Object.hasOwn(files, file.id)) continue;
+            if (!api.textFile(file)) continue;
             if (file.status !== "SUCCESS" || !Number.isSafeInteger(file.file_size) || file.file_size < 0 || file.file_size > 1400000 || typeof file.signed_path !== "string") throw new api.CaptureError("A text attachment is unavailable or incomplete.");
             // DeepSeek's native preview uses this signed file service with ty=r
             // for original bytes. No session bearer/cookies go to that host.
             const url = new URL(file.signed_path.startsWith("/") ? `https://files.deepseeksvc.com/api${file.signed_path}` : file.signed_path);
             if (url.origin !== "https://files.deepseeksvc.com" || url.pathname !== "/api/file" || url.username || url.password || url.searchParams.get("file_id") !== file.id?.replace(/^file-/, "")) throw new api.CaptureError("A text attachment has an unsupported download address.");
             url.searchParams.set("ty", "r");
-            const content = await read(url.href, { credentials: "omit" }, "file");
-            if (content.size !== file.file_size) throw new api.CaptureError("A text attachment is incomplete.");
-            files[file.id] = content.text;
+            if (uploads.has(file.id)) {
+              if (uploads.get(file.id).file.file_size !== file.file_size) throw new api.CaptureError("A text attachment is incomplete.");
+              continue;
+            }
+            uploadBytes += file.file_size;
+            if (uploadBytes > 1400000) throw new api.CaptureError("size");
+            uploads.set(file.id, { file, url });
           }
         }
+        // Independent original-file reads overlap; serialization still follows
+        // branch/fragment order. Validate all descriptors before any download.
+        const pending = [...uploads.values()];
+        let next = 0, failure;
+        const download = async () => {
+          try {
+            while (next < pending.length) {
+              check();
+              const { file, url } = pending[next++];
+              const content = await read(url.href, { credentials: "omit" }, "file", file.file_size);
+              if (content.size !== file.file_size) throw new api.CaptureError("A text attachment is incomplete.");
+              files[file.id] = content.text;
+            }
+          } catch (error) {
+            if (!failure) { failure = error; controller.abort("attachment_failed"); }
+          }
+        };
+        // Wait for aborted siblings to settle before releasing active capture,
+        // so fallback/retry cannot overlap stale downloads or accept partial text.
+        await Promise.all(Array.from({ length: Math.min(4, pending.length) }, download));
+        if (failure) throw failure;
         reply.capture = api.deepseek(data, chat, files);
       }
       check();

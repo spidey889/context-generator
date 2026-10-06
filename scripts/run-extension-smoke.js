@@ -486,11 +486,27 @@ function chatGptTreeFixture() {
   return data;
 }
 
+function networkSmokeFixture(platform) {
+  const fixture = networkFixtures(platform);
+  if (platform !== "deepseek") return fixture;
+  const extraBodies = [];
+  for (let i = 1; i <= 3; i++) {
+    const text = `\uFEFF  original upload ${i}: café 🕷️\r\n`;
+    const file = { ...fixture.file, id: `file-concurrent-${i}`, file_name: `original-${i}.py`, file_size: Buffer.byteLength(text), signed_path: `/file?file_id=concurrent-${i}&sig=SIGNED_SENTINEL` };
+    fixture.files[file.id] = text;
+    fixture.data.data.biz_data.chat_messages[0].fragments[0].files.push(file);
+    extraBodies.push(`Attachment: ${JSON.stringify(file.file_name)}\n\nFile contents (${file.file_size} UTF-8 bytes):\n${text}\nEnd attachment: ${JSON.stringify(file.file_name)}`);
+  }
+  fixture.expected = fixture.expected.replace('\n\nAttachment: "ignored.png"', `\n\n${extraBodies.join("\n\n")}\n\nAttachment: "ignored.png"`);
+  return fixture;
+}
+
 async function startFixtureServer() {
-  const state = { summaryRequests: [], jsonRequests: 0, sessionRequests: 0, pasteDescriptorRequests: 0, pasteContentRequests: 0, chatgptRequestUrls: [], claudeRequestUrls: [] };
+  const state = { summaryRequests: [], jsonRequests: 0, sessionRequests: 0, pasteDescriptorRequests: 0, pasteContentRequests: 0, fileReadsActive: 0, fileReadsPeak: 0, chatgptRequestUrls: [], claudeRequestUrls: [] };
   const telemetryFixture = await createTelemetrySmokeFixture(REPO_ROOT, TELEMETRY_DATABASE_SMOKE);
   state.telemetryRequests = telemetryFixture.received;
-  const network = NETWORK_SOURCE ? networkFixtures(JSON_SOURCE) : null;
+  const network = NETWORK_SOURCE ? networkSmokeFixture(JSON_SOURCE) : null;
+  const pendingFileResponses = [];
   const server = http.createServer(async (request, response) => {
     const url = new URL(request.url, "http://127.0.0.1");
     response.setHeader("Cache-Control", "no-store");
@@ -512,7 +528,19 @@ async function startFixtureServer() {
     if (NETWORK_SOURCE && url.pathname === "/api/file") {
       state.pasteContentRequests++;
       assert.equal(request.headers.authorization, undefined);
-      response.writeHead(200, { "Content-Type": "application/octet-stream" }); response.end(network.files[network.file.id]); return;
+      const id = `file-${url.searchParams.get("file_id")}`;
+      assert.ok(Object.hasOwn(network.files, id));
+      state.fileReadsActive++;
+      state.fileReadsPeak = Math.max(state.fileReadsPeak, state.fileReadsActive);
+      response.on("close", () => { state.fileReadsActive--; });
+      // Hold independent bodies until all four arrive, then complete in reverse
+      // order. This proves browser concurrency without timing-based assertions.
+      pendingFileResponses.push({ response, text: network.files[id] });
+      if (pendingFileResponses.length === 4) for (const item of pendingFileResponses.reverse()) {
+        item.response.writeHead(200, { "Content-Type": "application/octet-stream" });
+        item.response.end(item.text);
+      }
+      return;
     }
     if (NETWORK_SOURCE && ["/_/BardChatUi/data/batchexecute", "/rest/app-chat/conversations/smoke/response-node", "/rest/app-chat/conversations/smoke/load-responses", "/api/v0/chat/history_messages"].includes(url.pathname)) {
       state.jsonRequests++;
@@ -634,6 +662,11 @@ async function startFixtureServer() {
         // returns the full ordered conversation, including the pasted card.
         ? claudePlacementFixture()
         : sourceFixture();
+      if (JSON_SOURCE === "deepseek") {
+        // Exercise the selected adapter's native composer. A ChatGPT form made
+        // DeepSeek fall back to geometry over unrelated controls before capture.
+        page = providerPlacementFixture(JSON_SOURCE).replace("<body>", `<body>${sourceFixture().match(/<main[\s\S]*?<\/main>/)[0]}`);
+      }
       // Failure scenarios need mounted DOM history to verify the fallback.
       // Successful JSON scenarios still prove capture before native turns mount.
       if (JSON_FALLBACK_SMOKE && JSON_SOURCE === "claude") {
@@ -1736,9 +1769,13 @@ async function run() {
         assert.equal(state.sessionRequests, (CHATGPT_RELOAD_SMOKE ? 1 : 0) + (CHATGPT_PASTE_AUTH_SMOKE ? 1 : 0));
       }
       if (NETWORK_SOURCE) {
-        assert.equal(capturedConversation, networkFixtures(JSON_SOURCE).expected, "Every original own turn/paste/document must reach the backend once and in order.");
+        assert.equal(capturedConversation, networkSmokeFixture(JSON_SOURCE).expected, "Every original own turn/paste/document must reach the backend once and in order.");
         assert.doesNotMatch(capturedConversation, /TOOL_SENTINEL|SIGNED_SENTINEL|AUTH_SENTINEL|CSRF_SENTINEL/);
-        assert.equal(state.pasteContentRequests, JSON_SOURCE === "deepseek" ? 1 : 0);
+        assert.equal(state.pasteContentRequests, JSON_SOURCE === "deepseek" ? 4 : 0);
+        if (JSON_SOURCE === "deepseek") {
+          assert.equal(state.fileReadsPeak, 4, "The installed extension must overlap independent original-file reads.");
+          process.stdout.write("✓ DeepSeek JSON: four overlapping original-file reads, exact source order/bytes and no credential leakage.\n");
+        }
         if (JSON_SOURCE === "grok") process.stdout.write("\u2713 Grok JSON: exact 48-turn transcript, original code/whitespace and zero attachment/tool leakage.\n");
       }
       assert.equal(state.jsonRequests, jsonRequestsBeforeTransfer + (JSON_SOURCE === "gemini" ? 3 : JSON_SOURCE === "grok" ? 2 : 1), "JSON capture must load the full history only after destination selection.");

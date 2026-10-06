@@ -61,6 +61,187 @@ function setup(platform, fixture = fixtures(platform), { fetchImpl, runtime, sch
     navigate(pathname = "/new") { const target = new URL(pathname, location.origin); for (const fn of navigation) fn({ destination: { url: target.href } }); location.pathname = target.pathname; location.search = target.search; location.href = target.href; }
   };
 }
+
+function deepseekUploads(count = 6) {
+  const f = fixtures("deepseek", "smoke", 1);
+  const uploads = Array.from({ length: count }, (_, i) => {
+    const text = `\uFEFF  original ${i}\r\n`;
+    const file = { ...f.file, id: `file-upload-${i}`, file_name: `source-${i}.py`, file_size: Buffer.byteLength(text), signed_path: `/file?file_id=upload-${i}&sig=SIGNED_SENTINEL` };
+    f.files[file.id] = text;
+    return file;
+  });
+  f.data.data.biz_data.chat_messages[0].fragments = [{ type: "FILE", files: [...uploads, uploads[0]] }];
+  f.uploads = uploads;
+  f.expected = `DeepSeek conversation:\n\nUser: ${uploads.map(file => `Attachment: ${JSON.stringify(file.file_name)}\n\nFile contents (${file.file_size} UTF-8 bytes):\n${f.files[file.id]}\nEnd attachment: ${JSON.stringify(file.file_name)}`).join("\n\n")}\n\nAssistant: ${f.data.data.biz_data.chat_messages[1].fragments[0].content}`;
+  return f;
+}
+
+clockTest("DeepSeek: independent uploads overlap in bounded waves and preserve exact source order", async () => {
+  const f = deepseekUploads();
+  let active = 0, peak = 0;
+  const completed = [];
+  const h = setup("deepseek", f, { fetchImpl: async request => {
+    if (request.url.pathname.includes("history_messages")) return Response.json(f.data);
+    assert.equal(request.options.credentials, "omit");
+    assert.equal(request.options.headers, undefined);
+    assert.equal(request.options.cache, undefined);
+    assert.equal(request.options.redirect, "error");
+    assert.equal(request.url.searchParams.get("ty"), "r");
+    active++; peak = Math.max(peak, active);
+    const id = `file-${request.url.searchParams.get("file_id")}`;
+    const index = f.uploads.findIndex(file => file.id === id);
+    await new Promise(resolve => setTimeout(resolve, index === 0 ? 60 : 20));
+    active--; completed.push(id);
+    return new Response(f.files[id], { headers: { "content-type": "application/octet-stream" } });
+  } });
+  await h.observe();
+  const started = Date.now();
+  const capture = await h.window.__capCaptureNetworkJson();
+  assert.equal(capture.text, f.expected);
+  assert.equal(capture.messageTurnCount, 2);
+  assert.equal(h.requests.length, 7, "duplicate file IDs must download only once");
+  assert.equal(peak, 4, "four independent reads should overlap, without launching every file");
+  assert.notEqual(completed[0], f.uploads[0].id, "completion order must differ from transcript order");
+  assert.ok(Date.now() - started <= 100, `download waves took ${Date.now() - started} ms`);
+  assert.equal(h.navigationListeners(), 0);
+  assert.doesNotMatch(JSON.stringify(h.replies), /AUTH_SENTINEL|SIGNED_SENTINEL/);
+});
+
+test("DeepSeek: invalid or oversized upload manifests fail before any file download", async () => {
+  for (const mutate of [
+    f => { f.uploads[5].signed_path = "https://other.example/api/file?file_id=upload-5"; },
+    f => { f.uploads[5].status = "PENDING"; },
+    f => { f.uploads[0].file_size = 800000; f.uploads[1].file_size = 800000; }
+  ]) {
+    const f = deepseekUploads(); mutate(f);
+    const h = setup("deepseek", f, { fetchImpl: async request => request.url.pathname.includes("history_messages")
+      ? Response.json(f.data) : new Response(f.files[`file-${request.url.searchParams.get("file_id")}`], { headers: { "content-type": "text/plain" } }) });
+    await h.observe();
+    await assert.rejects(h.window.__capCaptureNetworkJson(), /attachment|too long/);
+    assert.equal(h.requests.length, 1, "validate the entire manifest before reading original bodies");
+    assert.equal(h.navigationListeners(), 0);
+  }
+});
+
+test("DeepSeek: one incomplete upload cancels siblings before fallback or a fresh capture", async () => {
+  const f = deepseekUploads();
+  let healthy = false;
+  const aborted = [];
+  const h = setup("deepseek", f, { fetchImpl: async request => {
+    if (request.url.pathname.includes("history_messages")) return Response.json(f.data);
+    const id = `file-${request.url.searchParams.get("file_id")}`;
+    if (healthy || id === f.uploads[0].id) return new Response(healthy ? f.files[id] : "short", { headers: { "content-type": "text/plain" } });
+    return new Promise((_resolve, reject) => request.options.signal.addEventListener("abort", () => {
+      aborted.push(id); reject(new Error("PRIVATE_FILE_SENTINEL"));
+    }, { once: true }));
+  } });
+  await h.observe();
+  await assert.rejects(h.window.__capCaptureNetworkJson(), error => {
+    assert.match(error.message, /attachment is incomplete/);
+    assert.equal(error.captureFailureReason, "incomplete");
+    return true;
+  });
+  assert.equal(h.requests.length, 5, "failure stops queued downloads");
+  assert.equal(aborted.length, 3);
+  assert.equal(h.window.__capNetworkFetchState.version, 6);
+  assert.ok(h.replies.every(reply => !reply.capture));
+  assert.equal(h.navigationListeners(), 0);
+  assert.equal(h.listeners.size, 1);
+  healthy = true;
+  assert.equal((await h.window.__capCaptureNetworkJson()).text, f.expected);
+  assert.equal(h.requests.length, 12);
+  assert.doesNotMatch(JSON.stringify(h.replies), /PRIVATE_FILE_SENTINEL|SIGNED_SENTINEL|AUTH_SENTINEL/);
+});
+
+test("DeepSeek: streamed bodies preserve split UTF-8 and stop oversized reads without Content-Length", async () => {
+  for (const oversized of [false, true]) {
+    const f = deepseekUploads(1);
+    const text = "\uFEFF  café 🕷️\r\n";
+    f.files[f.uploads[0].id] = text;
+    f.uploads[0].file_size = oversized ? 2 : Buffer.byteLength(text);
+    let reads = 0, cancelled = false, body;
+    const bytes = Buffer.from(text);
+    const h = setup("deepseek", f, { fetchImpl: async request => {
+      if (request.url.pathname.includes("history_messages")) return Response.json(f.data);
+      body = new ReadableStream({
+        pull(controller) {
+          if (reads === bytes.length) return controller.close();
+          controller.enqueue(bytes.subarray(reads, ++reads));
+        },
+        cancel() { cancelled = true; }
+      });
+      return new Response(body, { headers: { "content-type": "application/octet-stream" } });
+    } });
+    await h.observe();
+    if (oversized) {
+      await assert.rejects(h.window.__capCaptureNetworkJson(), /attachment is incomplete/);
+      assert.equal(cancelled, true);
+      assert.ok(reads <= 4, "stop after the first extra byte, allowing one prefetched chunk");
+      assert.ok(h.replies.every(reply => !reply.capture));
+    } else {
+      const capture = await h.window.__capCaptureNetworkJson();
+      assert.ok(capture.text.includes(`File contents (${bytes.length} UTF-8 bytes):\n${text}\nEnd attachment:`));
+      assert.equal(reads, bytes.length);
+    }
+    assert.equal(body.locked, false);
+  }
+});
+
+clockTest("DeepSeek: navigation, auth changes and timeouts abort every overlapping upload", async () => {
+  for (const reason of ["navigate", "auth", "timeout"]) {
+    const f = deepseekUploads();
+    const aborted = [];
+    const h = setup("deepseek", f, { fetchImpl: async request => {
+      if (request.url.pathname.includes("history_messages")) return Response.json(f.data);
+      if (request.url.pathname.endsWith("/session")) return Response.json({});
+      return new Promise((_resolve, reject) => request.options.signal.addEventListener("abort", () => {
+        aborted.push(request.url.searchParams.get("file_id")); reject(new Error("PRIVATE_BODY_SENTINEL"));
+      }, { once: true }));
+    } });
+    await h.observe();
+    const pending = h.window.__capCaptureNetworkJson();
+    const rejected = assert.rejects(pending, error => {
+      assert.equal(error.captureFailureReason, reason === "timeout" ? "timeout" : reason === "auth" ? "request_failed" : undefined);
+      return true;
+    });
+    await new Promise(setImmediate);
+    assert.equal(h.requests.length, 5);
+    if (reason === "navigate") { h.navigate("/a/chat/s/other"); h.navigate("/a/chat/s/smoke"); }
+    if (reason === "auth") await h.window.fetch("/api/v0/session", { headers: { authorization: "Bearer NEW_SESSION" } });
+    await rejected;
+    assert.equal(aborted.length, 4);
+    assert.ok(h.replies.every(reply => !reply.capture));
+    assert.equal(h.navigationListeners(), 0);
+    assert.doesNotMatch(JSON.stringify(h.replies), /PRIVATE_BODY_SENTINEL|SIGNED_SENTINEL|NEW_SESSION/);
+  }
+});
+
+test("DeepSeek: a stale sequential hook is replaced while retaining observed auth", async () => {
+  const h = setup("deepseek");
+  await h.observe();
+  const old = h.window.__capNetworkFetchState;
+  old.version = 5;
+  h.reinstall(files[1]);
+  assert.notEqual(h.window.__capNetworkFetchState, old);
+  assert.equal(h.window.__capNetworkFetchState.version, 6);
+  assert.equal(h.listeners.size, 1);
+  assert.equal((await h.window.__capCaptureNetworkJson()).text, h.fixture.expected);
+});
+
+test("DeepSeek: overlapping body reads share the history's raw byte budget", async () => {
+  const f = deepseekUploads(4);
+  f.data.unused_metadata = "x".repeat(5800000);
+  for (const file of f.uploads) { file.file_size = 70000; f.files[file.id] = "x".repeat(file.file_size); }
+  const h = setup("deepseek", f, { fetchImpl: async request => request.url.pathname.includes("history_messages")
+    ? Response.json(f.data) : new Response(f.files[`file-${request.url.searchParams.get("file_id")}`], { headers: { "content-type": "text/plain" } }) });
+  await h.observe();
+  await assert.rejects(h.window.__capCaptureNetworkJson(), error => {
+    assert.equal(error.captureFailureReason, "size_limit");
+    return true;
+  });
+  assert.ok(h.replies.every(reply => !reply.capture));
+  assert.equal(h.navigationListeners(), 0);
+});
 for (const platform of ["gemini", "grok", "deepseek"]) {
   test(`${platform}: exact complete ordered history with large own paste and document; no tool/file leakage`, async () => {
     const h = setup(platform); await h.observe(); const before = h.requests.length;
