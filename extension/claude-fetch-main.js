@@ -1,5 +1,5 @@
 (() => {
-  const version = 4;
+  const version = 5;
   const previous = window.__capClaudeFetchState;
   if (previous?.version === version && window.fetch === previous.fetch) return;
   previous?.dispose();
@@ -86,7 +86,9 @@
         throw new Error("transport");
       }
       let data;
-      try { data = await response.clone().json(); }
+      // This fresh response belongs only to capture. Cloning leaves an unread
+      // stream branch buffering the entire body; page responses stay untouched.
+      try { data = await response.json(); }
       catch (error) { captureFailureReason = "incomplete"; throw error; }
       if (controller.signal.aborted || location.pathname !== `/chat/${chat}` || data.uuid !== chat) throw new Error("changed");
       reply.data = data;

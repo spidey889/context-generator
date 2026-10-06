@@ -1004,6 +1004,7 @@ async function run() {
   let sourceSession = null;
   let claudePlacementSession = null;
   let destinationSession = null;
+  const destinationSessions = new Map();
   let browserOutput = "";
 
   try {
@@ -1789,14 +1790,20 @@ async function run() {
       );
 
       for (const target of destinationTargets) {
-        const candidateSession = await CdpSession.connect(target.webSocketDebuggerUrl);
+        let candidateSession = destinationSessions.get(target.id);
         try {
+          if (!candidateSession) {
+            candidateSession = await CdpSession.connect(target.webSocketDebuggerUrl);
+            destinationSessions.set(target.id, candidateSession);
+            await candidateSession.call("Runtime.enable");
+          }
           const value = await candidateSession.evaluate('document.querySelector("textarea")?.value || ""');
           if (value === SUMMARY_TEXT) return { session: candidateSession, value };
         } catch {
           // A recovery tab can still be navigating; retry it on the next poll.
+          candidateSession?.close();
+          destinationSessions.delete(target.id);
         }
-        candidateSession.close();
       }
 
       return null;
@@ -1924,10 +1931,12 @@ async function run() {
     }
     if (browserOutput.trim()) error.message += `\nBrave output:\n${browserOutput.trim()}`;
     await saveSmokeFailure(FAILURE_ARTIFACT_DIR, error,
-      { source: sourceSession, claude: claudePlacementSession, destination: destinationSession }, browserOutput);
+      { source: sourceSession, claude: claudePlacementSession,
+        // Keep pre-paste tabs too: the exact-paste assertion may never succeed.
+        ...Object.fromEntries([...destinationSessions].map(([id, session]) => [`destination-${id}`, session])) }, browserOutput);
     throw error;
   } finally {
-    destinationSession?.close();
+    for (const session of destinationSessions.values()) session.close();
     claudePlacementSession?.close();
     sourceSession?.close();
     if (browserSession) {
