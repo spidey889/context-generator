@@ -3,7 +3,7 @@
   if (!platform || !globalThis.__capNetworkJsonData) return;
   // Advance readiness version with adapter/contract changes: old MAIN closures
   // can survive extension reloads and must be replaced before a new capture.
-  const version = platform === "deepseek" ? 6 : 4, channel = "cap-context-network-json-v1";
+  const version = platform === "deepseek" ? 7 : 5, channel = "cap-context-network-json-v1";
   const previous = window.__capNetworkFetchState;
   if (previous?.version === version && window.fetch === previous.fetch
     && (platform === "grok" || previous?.ownsObservation?.())) return;
@@ -91,47 +91,46 @@
     const read = async (url, options = {}, type = "json", expectedSize) => {
       check();
       const response = await Reflect.apply(nativeFetch, window, [url, { credentials: "same-origin", ...options, redirect: "error", signal: controller.signal }]);
-      check();
-      if (response.status !== 200 || response.headers.get("content-range")) throw new api.CaptureError("The history request failed or returned a partial response.", response.status === 206 || response.headers.get("content-range") ? "incomplete" : "request_failed");
-      const contentType = response.headers.get("content-type") || "";
-      if (type === "json" && !/application\/json/i.test(contentType)) throw new api.CaptureError("The history request returned an unsupported response.");
-      if (type === "rpc" && !/(application\/json|text\/plain)/i.test(contentType)) throw new api.CaptureError("Gemini returned an unsupported RPC response.");
-      if (type === "file" && !/^(text\/plain|text\/markdown|text\/csv|application\/(json|octet-stream))(;|$)/i.test(contentType)) throw new api.CaptureError("A text attachment returned an unsupported response.");
-      if (Number(response.headers.get("content-length")) > 6000000 - bytesRead) throw new api.CaptureError("size");
-      let bytes;
-      if (type === "file") {
-        // Concurrent uploads must remain bounded even without Content-Length.
-        // Stop reading at the manifest's original byte count, before decoding.
-        const reader = response.body?.getReader(), chunks = [];
+      let reader;
+      try {
+        check();
+        if (response.status !== 200 || response.headers.get("content-range")) throw new api.CaptureError("The history request failed or returned a partial response.", response.status === 206 || response.headers.get("content-range") ? "incomplete" : "request_failed");
+        const contentType = response.headers.get("content-type") || "";
+        if (type === "json" && !/application\/json/i.test(contentType)) throw new api.CaptureError("The history request returned an unsupported response.");
+        if (type === "rpc" && !/(application\/json|text\/plain)/i.test(contentType)) throw new api.CaptureError("Gemini returned an unsupported RPC response.");
+        if (type === "file" && !/^(text\/plain|text\/markdown|text\/csv|application\/(json|octet-stream))(;|$)/i.test(contentType)) throw new api.CaptureError("A text attachment returned an unsupported response.");
+        if (Number(response.headers.get("content-length")) > 6000000 - bytesRead) throw new api.CaptureError("size");
+        // Enforce the shared budget while reading, including history without
+        // Content-Length. Files also stop at their declared original byte count.
+        reader = response.body?.getReader();
+        const chunks = [];
         let size = 0;
-        try {
-          if (reader) while (true) {
-            const { done, value } = await reader.read();
-            check();
-            if (done) break;
-            size += value.byteLength;
-            bytesRead += value.byteLength;
-            if (size > expectedSize) throw new api.CaptureError("A text attachment is incomplete.");
-            if (bytesRead > 6000000) throw new api.CaptureError("size");
-            chunks.push(value);
-          }
-          bytes = new Uint8Array(size);
-          let offset = 0;
-          for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.byteLength; }
-        } catch (error) {
-          await reader?.cancel().catch(() => {});
-          throw error;
-        } finally {
-          reader?.releaseLock();
+        if (reader) while (true) {
+          const { done, value } = await reader.read();
+          check();
+          if (done) break;
+          size += value.byteLength;
+          bytesRead += value.byteLength;
+          if (type === "file" && size > expectedSize) throw new api.CaptureError("A text attachment is incomplete.");
+          if (bytesRead > 6000000) throw new api.CaptureError("size");
+          chunks.push(value);
         }
-      } else {
-        bytes = new Uint8Array(await response.arrayBuffer());
-        bytesRead += bytes.length;
+        const bytes = new Uint8Array(size);
+        let offset = 0;
+        for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.byteLength; }
+        chunks.length = 0;
+        check();
+        const text = new TextDecoder("utf-8", { fatal: true, ignoreBOM: type === "file" }).decode(bytes);
+        return type === "json" ? JSON.parse(text) : { text, size: bytes.length };
+      } catch (error) {
+        // Rejected headers still own an unread body. Cancel that body too,
+        // preserving the structural error even if native cancellation fails.
+        if (reader) await reader.cancel().catch(() => {});
+        else await response.body?.cancel().catch(() => {});
+        throw error;
+      } finally {
+        reader?.releaseLock();
       }
-      if (bytesRead > 6000000) throw new api.CaptureError("size");
-      check();
-      const text = new TextDecoder("utf-8", { fatal: true, ignoreBOM: type === "file" }).decode(bytes);
-      return type === "json" ? JSON.parse(text) : { text, size: bytes.length };
     };
     try {
       check();

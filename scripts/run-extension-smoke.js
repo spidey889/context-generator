@@ -40,7 +40,8 @@ const ERROR_SCREENSHOT_PATH = process.env.CAP_CONTEXT_ERROR_SCREENSHOT || "";
 const JSON_SOURCE = ["chatgpt", "gemini", "grok", "deepseek"].includes(process.env.CAP_CONTEXT_JSON_SMOKE) ? process.env.CAP_CONTEXT_JSON_SMOKE : process.env.CAP_CONTEXT_JSON_SMOKE === "1" ? "claude" : null;
 const NETWORK_SOURCE = ["gemini", "grok", "deepseek"].includes(JSON_SOURCE);
 const GROK_FILE_ONLY_SMOKE = JSON_SOURCE === "grok" && process.env.CAP_CONTEXT_NETWORK_FAILURE_SMOKE === "file-only";
-const NETWORK_FAILURE = (NETWORK_SOURCE && process.env.CAP_CONTEXT_NETWORK_FAILURE_SMOKE === "partial") || GROK_FILE_ONLY_SMOKE;
+const DEEPSEEK_OVERSIZE_SMOKE = JSON_SOURCE === "deepseek" && process.env.CAP_CONTEXT_NETWORK_FAILURE_SMOKE === "oversize";
+const NETWORK_FAILURE = (NETWORK_SOURCE && process.env.CAP_CONTEXT_NETWORK_FAILURE_SMOKE === "partial") || GROK_FILE_ONLY_SMOKE || DEEPSEEK_OVERSIZE_SMOKE;
 const JSON_CAPTURE_SMOKE = Boolean(JSON_SOURCE);
 const CLAUDE_RELOAD_SMOKE = JSON_SOURCE === "claude" && process.env.CAP_CONTEXT_CLAUDE_RELOAD_SMOKE === "1";
 const CHATGPT_RELOAD_SMOKE = JSON_SOURCE === "chatgpt" && process.env.CAP_CONTEXT_CHATGPT_RELOAD_SMOKE === "1";
@@ -503,6 +504,7 @@ function networkSmokeFixture(platform) {
 
 async function startFixtureServer() {
   const state = { summaryRequests: [], jsonRequests: 0, sessionRequests: 0, pasteDescriptorRequests: 0, pasteContentRequests: 0, fileReadsActive: 0, fileReadsPeak: 0, chatgptRequestUrls: [], claudeRequestUrls: [] };
+  state.oversizeHistory = { bytes: 0, cancelled: false };
   const telemetryFixture = await createTelemetrySmokeFixture(REPO_ROOT, TELEMETRY_DATABASE_SMOKE);
   state.telemetryRequests = telemetryFixture.received;
   const network = NETWORK_SOURCE ? networkSmokeFixture(JSON_SOURCE) : null;
@@ -563,6 +565,28 @@ async function startFixtureServer() {
       } else {
         assert.equal(request.headers.authorization, "Bearer AUTH_SENTINEL"); assert.equal(request.headers["x-device-id"], undefined);
         const data = structuredClone(network.data);
+        if (DEEPSEEK_OVERSIZE_SMOKE) {
+          // No Content-Length: a native reader must cancel before the 20 MB
+          // tail finishes. Pace writes and respect backpressure to observe it.
+          const prefix = JSON.stringify(data), padding = Buffer.alloc(1000000, 32);
+          state.oversizeHistory.bytes = Buffer.byteLength(prefix);
+          response.write(prefix);
+          let remaining = 20, timer;
+          const schedule = () => { if (!response.destroyed) timer = setTimeout(writePadding, 25); };
+          const writePadding = () => {
+            if (response.destroyed) return;
+            if (!remaining--) return response.end();
+            state.oversizeHistory.bytes += padding.length;
+            if (response.write(padding)) schedule();
+            else response.once("drain", schedule);
+          };
+          response.once("close", () => {
+            clearTimeout(timer);
+            state.oversizeHistory.cancelled = !response.writableFinished;
+          });
+          schedule();
+          return;
+        }
         if (NETWORK_FAILURE) { data.data.biz_data.cache_control = "MERGE"; data.data.biz_data.chat_messages = []; }
         response.end(JSON.stringify(data));
       }
@@ -1648,6 +1672,9 @@ async function run() {
       assert.equal(state.summaryRequests.length, 0, "Toggling JSON capture must not submit a transcript.");
       assert.equal(state.sessionRequests, 0, "Opening/toggling the picker must not read a session.");
       await sourceSession.evaluate(`document.querySelector("#context-generator-destination-backdrop").click()`);
+      // Dismissal keeps display:block during its exit animation. Reopening
+      // before it becomes none would toggle the still-displayed sheet closed.
+      await waitFor(() => sourceSession.evaluate(`document.getElementById("context-generator-destination-sheet").style.display === "none"`), "capture-toggle picker closure");
     }
 
     if (JSON_SOURCE === "chatgpt") {
@@ -1739,6 +1766,12 @@ async function run() {
     if (JSON_FALLBACK_SMOKE) {
       assert.doesNotMatch(capturedConversation, /JSON_ONLY_SENTINEL|AUTH_SENTINEL|CSRF_SENTINEL|SIGNED_SENTINEL/);
       assert.equal(state.jsonRequests - jsonRequestsBeforeTransfer, JSON_SOURCE === "grok" ? 2 : 1, "Fast capture must not be retried after failure.");
+      if (DEEPSEEK_OVERSIZE_SMOKE) {
+        assert.equal(state.oversizeHistory.cancelled, true, "Brave must cancel the oversized history response.");
+        assert.ok(state.oversizeHistory.bytes < 20000000, "The full oversized tail must not be downloaded.");
+        assert.equal(state.pasteContentRequests, 0, "Rejected history must not begin file downloads.");
+        process.stdout.write(`✓ Brave cancelled oversized history after ${state.oversizeHistory.bytes} fixture bytes.\n`);
+      }
       process.stdout.write(`✓ ${JSON_SOURCE} failed fast capture fell back to DOM within the same transfer.\n`);
     } else if (JSON_CAPTURE_SMOKE) {
       assert.match(capturedConversation, new RegExp(`^${({claude:"Claude",chatgpt:"ChatGPT",gemini:"Gemini",grok:"Grok",deepseek:"DeepSeek"})[JSON_SOURCE]} conversation:`));

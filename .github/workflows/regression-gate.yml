@@ -93,6 +93,16 @@ jobs:
         run: |
           mkdir -p "$CAP_CONTEXT_SMOKE_ARTIFACT_DIR"
           xvfb-run -a npm run test:extension-smoke 2>&1 | tee "$CAP_CONTEXT_SMOKE_ARTIFACT_DIR/run.log"
+      - name: Brave oversized history cancellation and fallback
+        timeout-minutes: 3
+        shell: bash
+        env:
+          CAP_CONTEXT_JSON_SMOKE: deepseek
+          CAP_CONTEXT_NETWORK_FAILURE_SMOKE: oversize
+          CAP_CONTEXT_SMOKE_ARTIFACT_DIR: .gstack/browser-smoke/history-budget
+        run: |
+          mkdir -p "$CAP_CONTEXT_SMOKE_ARTIFACT_DIR"
+          xvfb-run -a npm run test:extension-smoke 2>&1 | tee "$CAP_CONTEXT_SMOKE_ARTIFACT_DIR/run.log"
       - name: Browser failure screenshots and logs
         if: failure() && !cancelled()
         uses: actions/upload-artifact@v4

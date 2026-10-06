@@ -9,7 +9,7 @@ const { fixtures, rpcFrame, geminiTurn, prompt } = require("./network-json-fixtu
 const files = ["network-json-data.js", "network-fetch-main.js", "network-json-capture.js"];
 const scripts = new Map(files.map(file =>
   [file, new vm.Script(fs.readFileSync(path.join(__dirname, "..", "extension", file), "utf8"), { filename: file })]));
-function setup(platform, fixture = fixtures(platform), { fetchImpl, runtime, schedule = setTimeout, beforeMessage } = {}) {
+function setup(platform, fixture = fixtures(platform), { fetchImpl, responseTransform, runtime, schedule = setTimeout, beforeMessage } = {}) {
   const requests = [], replies = [], listeners = new Set(), navigation = new Set();
   const host = { gemini: "gemini.google.com", grok: "grok.com", deepseek: "chat.deepseek.com" }[platform];
   const pathname = { gemini: "/app/smoke", grok: "/c/smoke", deepseek: "/a/chat/s/smoke" }[platform];
@@ -37,7 +37,7 @@ function setup(platform, fixture = fixtures(platform), { fetchImpl, runtime, sch
     return json({});
   };
   class Xhr { open() {} send() {} setRequestHeader() {} }
-  const window = { fetch: nativeFetch, XMLHttpRequest: Xhr, WIZ_global_data: { SNlM0e: "CSRF_SENTINEL" },
+  const window = { fetch: responseTransform ? async (...args) => responseTransform(await nativeFetch(...args)) : nativeFetch, XMLHttpRequest: Xhr, WIZ_global_data: { SNlM0e: "CSRF_SENTINEL" },
     addEventListener: (type, listener) => (type === "message" ? listeners : navigation).add(listener),
     removeEventListener: (type, listener) => (type === "message" ? listeners : navigation).delete(listener),
     navigation: { addEventListener: (_type, fn) => navigation.add(fn), removeEventListener: (_type, fn) => navigation.delete(fn) },
@@ -74,6 +74,81 @@ function deepseekUploads(count = 6) {
   f.uploads = uploads;
   f.expected = `DeepSeek conversation:\n\nUser: ${uploads.map(file => `Attachment: ${JSON.stringify(file.file_name)}\n\nFile contents (${file.file_size} UTF-8 bytes):\n${f.files[file.id]}\nEnd attachment: ${JSON.stringify(file.file_name)}`).join("\n\n")}\n\nAssistant: ${f.data.data.biz_data.chat_messages[1].fragments[0].content}`;
   return f;
+}
+
+for (const platform of ["gemini", "grok", "deepseek"]) {
+  test(`${platform}: history streams stop at the raw budget without Content-Length and allow a fresh capture`, async () => {
+    let delivered = 0, cancelled = false, healthy = false, body;
+    const padding = new Uint8Array(1000000).fill(32);
+    const h = setup(platform, fixtures(platform), { responseTransform: async response => {
+      if (healthy) return response;
+      const original = new Uint8Array(await response.arrayBuffer());
+      let sentOriginal = false, paddingChunks = 0;
+      body = new ReadableStream({
+        pull(controller) {
+          if (!sentOriginal) {
+            sentOriginal = true; delivered += original.length; controller.enqueue(original);
+          } else if (paddingChunks++ < 20) {
+            delivered += padding.length; controller.enqueue(padding);
+          } else controller.close();
+        },
+        cancel() { cancelled = true; }
+      });
+      return new Response(body, { headers: response.headers });
+    } });
+    await h.observe();
+    await assert.rejects(h.window.__capCaptureNetworkJson(), error => {
+      assert.equal(error.captureFailureReason, "size_limit");
+      return true;
+    });
+    assert.ok(delivered <= 8000000, `Stop at the first oversized chunk plus stream prefetch; delivered ${delivered} bytes.`);
+    assert.equal(cancelled, true);
+    assert.equal(body.locked, false);
+    assert.equal(h.navigationListeners(), 0);
+    assert.ok(h.replies.every(reply => !reply.capture));
+    healthy = true;
+    assert.equal((await h.window.__capCaptureNetworkJson()).text, h.fixture.expected);
+  });
+
+  test(`${platform}: chunked history preserves UTF-8 and exact transcripts`, async () => {
+    const h = setup(platform, fixtures(platform, "smoke", 1), { responseTransform: async response => {
+      const bytes = new Uint8Array(await response.arrayBuffer());
+      let offset = 0;
+      return new Response(new ReadableStream({
+        pull(controller) {
+          if (offset === bytes.length) return controller.close();
+          // Odd-sized chunks split multibyte text and JSON/RPC framing.
+          const end = Math.min(offset + 7, bytes.length);
+          controller.enqueue(bytes.subarray(offset, end)); offset = end;
+        }
+      }), { headers: response.headers });
+    } });
+    await h.observe();
+    assert.equal((await h.window.__capCaptureNetworkJson()).text, h.fixture.expected);
+  });
+
+  test(`${platform}: rejected transport cancels its unread response without exposing cancellation errors`, async () => {
+    for (const [status, headers, reason] of [
+      [206, { "content-type": "application/json" }, "incomplete"],
+      [200, { "content-type": "text/html" }, "incomplete"],
+      [200, { "content-type": "application/json", "content-length": "6000001" }, "size_limit"]
+    ]) {
+      let cancelled = false, body;
+      const h = setup(platform, fixtures(platform), { responseTransform: () => {
+        body = new ReadableStream({ cancel() { cancelled = true; throw new Error("PRIVATE_CANCELLATION_SENTINEL"); } });
+        return new Response(body, { status, headers });
+      } });
+      await h.observe();
+      await assert.rejects(h.window.__capCaptureNetworkJson(), error => {
+        assert.equal(error.captureFailureReason, reason);
+        assert.doesNotMatch(error.message, /PRIVATE_/);
+        return true;
+      });
+      assert.equal(cancelled, true);
+      assert.equal(body.locked, false);
+      assert.equal(h.navigationListeners(), 0);
+    }
+  });
 }
 
 clockTest("DeepSeek: independent uploads overlap in bounded waves and preserve exact source order", async () => {
@@ -143,7 +218,7 @@ test("DeepSeek: one incomplete upload cancels siblings before fallback or a fres
   });
   assert.equal(h.requests.length, 5, "failure stops queued downloads");
   assert.equal(aborted.length, 3);
-  assert.equal(h.window.__capNetworkFetchState.version, 6);
+  assert.equal(h.window.__capNetworkFetchState.version, 7);
   assert.ok(h.replies.every(reply => !reply.capture));
   assert.equal(h.navigationListeners(), 0);
   assert.equal(h.listeners.size, 1);
@@ -216,14 +291,14 @@ clockTest("DeepSeek: navigation, auth changes and timeouts abort every overlappi
   }
 });
 
-test("DeepSeek: a stale sequential hook is replaced while retaining observed auth", async () => {
-  const h = setup("deepseek");
+for (const platform of ["gemini", "grok", "deepseek"]) test(`${platform}: a stale history-buffering hook is replaced while retaining observations`, async () => {
+  const h = setup(platform);
   await h.observe();
   const old = h.window.__capNetworkFetchState;
-  old.version = 5;
+  old.version = platform === "deepseek" ? 6 : 4;
   h.reinstall(files[1]);
   assert.notEqual(h.window.__capNetworkFetchState, old);
-  assert.equal(h.window.__capNetworkFetchState.version, 6);
+  assert.equal(h.window.__capNetworkFetchState.version, platform === "deepseek" ? 7 : 5);
   assert.equal(h.listeners.size, 1);
   assert.equal((await h.window.__capCaptureNetworkJson()).text, h.fixture.expected);
 });
@@ -406,6 +481,25 @@ test("DeepSeek aborts an active capture when the native session credential chang
   await h.window.fetch("/api/v0/session", { headers: { authorization: "Bearer NEW_SESSION" } });
   await assert.rejects(pending, /could not be read|cancelled/);
   assert.ok(h.replies.every(reply => !reply.capture));
+});
+
+test("DeepSeek: the shared history/file budget accepts exactly 6 MB and rejects one extra byte", async () => {
+  for (const extra of [0, 1]) {
+    const f = fixtures("deepseek", "smoke", 1);
+    f.data.unused_metadata = "";
+    const historyBytes = Buffer.byteLength(JSON.stringify(f.data));
+    f.data.unused_metadata = " ".repeat(6000000 - historyBytes - f.file.file_size + extra);
+    assert.equal(Buffer.byteLength(JSON.stringify(f.data)) + f.file.file_size, 6000000 + extra);
+    const h = setup("deepseek", f);
+    await h.observe();
+    if (extra) {
+      await assert.rejects(h.window.__capCaptureNetworkJson(), error => {
+        assert.equal(error.captureFailureReason, "size_limit");
+        return true;
+      });
+      assert.ok(h.replies.every(reply => !reply.capture));
+    } else assert.equal((await h.window.__capCaptureNetworkJson()).text, f.expected);
+  }
 });
 test("Native fetch errors cannot expose private strings as adapter error messages", async () => {
   const h = setup("grok", fixtures("grok"), { fetchImpl: async () => { throw new Error("The PRIVATE_SESSION_AND_FILE_URL_SENTINEL failed."); } });
