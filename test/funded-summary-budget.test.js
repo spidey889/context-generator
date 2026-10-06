@@ -84,6 +84,108 @@ clockTest("accounting deadline covers a stalled response body and aborts its fet
   assert.equal(signal.aborted, true);
 });
 
+for (const phase of ["headers", "body"]) {
+  for (const elapsedMs of [449, 450, 451]) test(`accounting checks elapsed ${phase} time at ${elapsedMs} ms before a delayed timer runs`, async t => {
+    t.mock.timers.enable({ apis: ["Date"], now: Date.now() });
+    let attemptSignal, bodyReads = 0;
+    const allowed = await reserve({ headers: {} }, 1, { env, fetchImpl: async (_url, { signal }) => {
+      attemptSignal = signal;
+      const upstream = new Response('{"result":1}');
+      if (phase === "headers") t.mock.timers.setTime(Date.now() + elapsedMs);
+      const readBody = upstream.json.bind(upstream);
+      upstream.json = async () => {
+        bodyReads++;
+        const value = await readBody();
+        if (phase === "body") t.mock.timers.setTime(Date.now() + elapsedMs);
+        return value;
+      };
+      return upstream;
+    } });
+    const expired = elapsedMs >= 450;
+    assert.equal(allowed, !expired);
+    assert.equal(attemptSignal.aborted, expired);
+    assert.equal(bodyReads, expired && phase === "headers" ? 0 : 1);
+  });
+
+  test(`accounting cannot admit a completed ${phase} response after caller cancellation`, async () => {
+    const caller = new AbortController();
+    const reason = new Error("TEST_ONLY_CANCELLED");
+    await assert.rejects(reserve({ headers: {} }, 1, { env, signal: caller.signal,
+      fetchImpl: async () => {
+        const upstream = new Response('{"result":1}');
+        if (phase === "headers") caller.abort(reason);
+        const readBody = upstream.json.bind(upstream);
+        upstream.json = async () => {
+          const value = await readBody();
+          if (phase === "body") caller.abort(reason);
+          return value;
+        };
+        return upstream;
+      } }), error => error === reason);
+  });
+}
+
+test("expired accounting results cannot start a paid provider attempt", async t => {
+  isolate(t, { GEMINI_API_KEY: "TEST_ONLY_GOOGLE", MISTRAL_API_KEY: "TEST_ONLY_MISTRAL" });
+  t.mock.timers.enable({ apis: ["Date"], now: Date.now() });
+  let reservations = 0, providerRequests = 0;
+  global.fetch = async url => {
+    if (url === STORE) {
+      reservations++;
+      const upstream = new Response('{"result":1}');
+      const readBody = upstream.json.bind(upstream);
+      upstream.json = async () => {
+        const value = await readBody();
+        t.mock.timers.setTime(Date.now() + 451);
+        return value;
+      };
+      return upstream;
+    }
+    providerRequests++;
+    return new Response(JSON.stringify({ candidates: [{ content: { parts: [{ text: "Windows passed; Linux remains pending." }] } }] }));
+  };
+  const res = response();
+  await handler(request(), res);
+  assert.equal(reservations, 1);
+  assert.equal(providerRequests, 0);
+  assert.equal(res.code, 200);
+  assert.equal(res.body.timing.model, "local-direct");
+  assert.ok(res.body.summary.includes(conversation.trim().split("\n").map(line => `> ${line}`).join("\n")));
+});
+
+test("expired accounting headers cancel the native unread body", { timeout: 5000 }, async t => {
+  const nativeFetch = global.fetch;
+  t.mock.timers.enable({ apis: ["Date"], now: Date.now() });
+  let noteClosed, closeTimer, attemptSignal, bodyReads = 0;
+  const closed = new Promise(resolve => { noteClosed = resolve; });
+  const server = http.createServer((_req, res) => {
+    res.once("close", () => noteClosed(!res.writableEnded));
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.write("{");
+  });
+  await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
+  try {
+    const allowed = await reserve({ headers: {} }, 1, { env, fetchImpl: async (_url, options) => {
+      attemptSignal = options.signal;
+      const upstream = await nativeFetch(`http://127.0.0.1:${server.address().port}`, options);
+      t.mock.timers.setTime(Date.now() + 450);
+      const readBody = upstream.json.bind(upstream);
+      upstream.json = () => { bodyReads++; return readBody(); };
+      return upstream;
+    } });
+    assert.equal(allowed, false);
+    assert.equal(attemptSignal.aborted, true);
+    assert.equal(bodyReads, 0, "An expired reservation must not start its native body read.");
+    assert.equal(await Promise.race([closed, new Promise(resolve => {
+      closeTimer = setTimeout(() => resolve(false), 1000);
+    })]), true, "The expired reservation must close its unfinished native socket.");
+  } finally {
+    clearTimeout(closeTimer);
+    server.closeAllConnections();
+    await new Promise(resolve => server.close(resolve));
+  }
+});
+
 test("no-Origin published-client request keeps exact local fallback when paid accounting is unavailable", async t => {
   isolate(t, { KV_REST_API_URL: "", GEMINI_API_KEY: "test-google", MISTRAL_API_KEY: "test-mistral" });
   global.fetch = () => { assert.fail("no funded provider may be contacted without shared accounting"); };
