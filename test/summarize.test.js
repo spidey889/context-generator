@@ -133,23 +133,19 @@ test("backend forwards a 350k conversation to Mistral and reports the same input
       url,
       body: JSON.parse(options.body)
     };
-    return {
-      ok: true,
-      status: 200,
-      json: async () => ({
-        usage: {
-          prompt_tokens: 1200,
-          completion_tokens: 320,
-          total_tokens: 1520,
-          prompt_tokens_details: { cached_tokens: 64 }
-        },
-        choices: [{
-          message: {
-            content: makeContextCarrySummary("payload", 1800)
-          }
-        }]
-      })
-    };
+    return new Response(JSON.stringify({
+      usage: {
+        prompt_tokens: 1200,
+        completion_tokens: 320,
+        total_tokens: 1520,
+        prompt_tokens_details: { cached_tokens: 64 }
+      },
+      choices: [{
+        message: {
+          content: makeContextCarrySummary("payload", 1800)
+        }
+      }]
+    }));
   };
 
   const res = createMockResponse();
@@ -208,17 +204,13 @@ test("backend keeps tiny chats local and avoids Mistral", async () => {
   delete process.env.MISTRAL_API_KEY;
   global.fetch = async (_url, options) => {
     requests.push(JSON.parse(options.body));
-    return {
-      ok: true,
-      status: 200,
-      json: async () => ({
-        choices: [{
-          message: {
-            content: makeContextCarrySummary("short", 90)
-          }
-        }]
-      })
-    };
+    return new Response(JSON.stringify({
+      choices: [{
+        message: {
+          content: makeContextCarrySummary("short", 90)
+        }
+      }]
+    }));
   };
 
   const res = createMockResponse();
@@ -276,17 +268,13 @@ test("backend sends small generated chats to Ministral 14B first", async () => {
   process.env.MISTRAL_API_KEY = "test-key";
   global.fetch = async (_url, options) => {
     requests.push(JSON.parse(options.body));
-    return {
-      ok: true,
-      status: 200,
-      json: async () => ({
-        choices: [{
-          message: {
-            content: makeContextCarrySummary("small", 180)
-          }
-        }]
-      })
-    };
+    return new Response(JSON.stringify({
+      choices: [{
+        message: {
+          content: makeContextCarrySummary("small", 180)
+        }
+      }]
+    }));
   };
 
   const res = createMockResponse();
@@ -401,13 +389,9 @@ test("captured prompt injections stay inside the untrusted transcript data envel
 
   global.fetch = async (_url, options) => {
     capturedMessages = JSON.parse(options.body).messages;
-    return {
-      ok: true,
-      status: 200,
-      json: async () => ({
-        choices: [{ message: { content: makeContextCarrySummary("injection-safe", 100) } }]
-      })
-    };
+    return new Response(JSON.stringify({
+      choices: [{ message: { content: makeContextCarrySummary("injection-safe", 100) } }]
+    }));
   };
 
   const res = createMockResponse();
@@ -516,9 +500,9 @@ test("refusal and substantively empty Mistral output fall through to the complet
   let rejectedSummary;
   global.fetch = async (_url, options) => {
     requests.push(JSON.parse(options.body).model);
-    return { ok: true, status: 200, json: async () => ({
+    return new Response(JSON.stringify({
       choices: [{ message: { content: rejectedSummary } }]
-    }) };
+    }));
   };
   try {
     for (const output of ["I cannot summarize this conversation.", getContextCarryTemplate(getSummaryProfile(conversation))]) {
@@ -573,9 +557,9 @@ test("useful token-limited output is delivered without calling a fallback", asyn
   const partial = "KEY CONTEXT\nThe Windows build passed. Linux tests are blocked; next check";
   global.fetch = async () => {
     requests++;
-    return { ok: true, status: 200, json: async () => ({ choices: [{
+    return new Response(JSON.stringify({ choices: [{
       message: { content: partial }, finish_reason: "length"
-    }] }) };
+    }] }));
   };
   try {
     const res = createMockResponse();
@@ -631,9 +615,9 @@ test("provider summaries keep only identical NEXT STEP sections while preserving
   let requests = 0;
   global.fetch = async () => {
     requests++;
-    return { ok: true, status: 200, json: async () => ({ choices: [{
+    return new Response(JSON.stringify({ choices: [{
       message: { content: currentCase.raw }, finish_reason: "stop"
-    }] }) };
+    }] }));
   };
   try {
     for (currentCase of cases) {
@@ -721,25 +705,21 @@ test("backend sends generated summaries to native Gemini first and records Gemin
       headers: options.headers,
       body: JSON.parse(options.body)
     };
-    return {
-      ok: true,
-      status: 200,
-      json: async () => ({
-        usageMetadata: {
-          promptTokenCount: 900,
-          candidatesTokenCount: 240,
-          thoughtsTokenCount: 60,
-          totalTokenCount: 1200,
-          cachedContentTokenCount: 0
-        },
-        candidates: [{
-          finishReason: "STOP",
-          content: {
-            parts: [{ text: makeContextCarrySummary("gemini-primary", 1800) }]
-          }
-        }]
-      })
-    };
+    return new Response(JSON.stringify({
+      usageMetadata: {
+        promptTokenCount: 900,
+        candidatesTokenCount: 240,
+        thoughtsTokenCount: 60,
+        totalTokenCount: 1200,
+        cachedContentTokenCount: 0
+      },
+      candidates: [{
+        finishReason: "STOP",
+        content: {
+          parts: [{ text: makeContextCarrySummary("gemini-primary", 1800) }]
+        }
+      }]
+    }));
   };
 
   const res = createMockResponse();
@@ -811,16 +791,12 @@ test("backend falls from a rate-limited Gemini 3.6 Flash to Gemini 3.5 Flash-Lit
         json: async () => ({ error: { message: "quota exhausted" } })
       };
     }
-    return {
-      ok: true,
-      status: 200,
-      json: async () => ({
-        candidates: [{
-          finishReason: "STOP",
-          content: { parts: [{ text: makeContextCarrySummary("gemini-fallback", 260) }] }
-        }]
-      })
-    };
+    return new Response(JSON.stringify({
+      candidates: [{
+        finishReason: "STOP",
+        content: { parts: [{ text: makeContextCarrySummary("gemini-fallback", 260) }] }
+      }]
+    }));
   };
 
   const res = createMockResponse();
@@ -858,21 +834,13 @@ test("backend falls from empty Gemini output through Flash-Lite to the preserved
     const body = JSON.parse(options.body);
     requests.push({ url, body });
     if (url.includes("generativelanguage.googleapis.com")) {
-      return {
-        ok: true,
-        status: 200,
-        json: async () => ({
-          candidates: [{ finishReason: "STOP", content: { parts: [{ text: "  " }] } }]
-        })
-      };
+      return new Response(JSON.stringify({
+        candidates: [{ finishReason: "STOP", content: { parts: [{ text: "  " }] } }]
+      }));
     }
-    return {
-      ok: true,
-      status: 200,
-      json: async () => ({
-        choices: [{ message: { content: makeContextCarrySummary("mistral-after-gemini", 260) } }]
-      })
-    };
+    return new Response(JSON.stringify({
+      choices: [{ message: { content: makeContextCarrySummary("mistral-after-gemini", 260) } }]
+    }));
   };
 
   const res = createMockResponse();

@@ -30,9 +30,9 @@ test(`active fallback order stays within 270 seconds with OpenRouter ${mode}`, a
       error.name = "AbortError";
       throw error;
     }
-    return { ok: true, json: async () => ({ choices: [{ message: {
+    return new Response(JSON.stringify({ choices: [{ message: {
       content: "Windows build passed; Linux checks remain pending."
-    } }] }) };
+    } }] }));
   };
   const conversation = "Build context. ".repeat(200);
   try {

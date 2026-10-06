@@ -26,12 +26,12 @@ for (const [label, flashLiteWorks] of [
         assert.equal(options.headers["x-goog-api-key"], "test-google");
         assert.equal(body.generationConfig.thinkingConfig.thinkingLevel, "MINIMAL");
         assert.equal(JSON.parse(body.contents[0].parts[0].text).conversation, conversation);
-        return { ok: true, json: async () => ({ candidates: [{
+        return new Response(JSON.stringify({ candidates: [{
           finishReason: "STOP", content: { parts: [
             { thought: true, text: "private reasoning" },
             { text: "Windows build passed; Linux checks remain pending." }
           ] }
-        }] }) };
+        }] }));
       }
       return { ok: false, status: 429, headers: { get: () => null },
         json: async () => ({ error: { code: "rate_limit_exceeded" } }) };
@@ -69,7 +69,7 @@ test("paused Mistral is bypassed and Flash-Lite serves after primary failure", a
     const model = url.split("/models/")[1].split(":")[0];
     requests.push(model);
     if (model === "gemini-3.6-flash") return { ok: false, status: 429, json: async () => ({ error: { code: "rate_limit_exceeded" } }) };
-    return { ok: true, json: async () => ({ candidates: [{ content: { parts: [{ text: "Build passed." }] }, finishReason: "STOP" }] }) };
+    return new Response(JSON.stringify({ candidates: [{ content: { parts: [{ text: "Build passed." }] }, finishReason: "STOP" }] }));
   };
   let payload;
   const res = { setHeader() {}, status() { return this; }, json(data) { payload = data; } };

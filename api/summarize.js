@@ -1060,7 +1060,10 @@ async function fetchWithRetry(url, options, requestBudgetMs, context = {}) {
       let bodyError;
       if (response.ok) {
         try {
-          payload = await response.json();
+          // Response.json silently replaces malformed UTF-8, which can corrupt
+          // names/facts in otherwise valid JSON. Reject those transport bytes.
+          const bytes = await response.arrayBuffer();
+          payload = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes));
         } catch (error) {
           if (signal.aborted || error?.name === "AbortError") throw error;
           bodyError = error;

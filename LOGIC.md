@@ -333,6 +333,7 @@ Budgets and retries:
 
 Provider-specific constraints:
 
+- Successful provider JSON is decoded as strict UTF-8 before parsing. Malformed byte sequences fail through the existing invalid-response fallback instead of silently replacing characters in names or facts. A leading UTF-8 BOM and valid Unicode, including literal replacement characters, remain supported. The owned body read and decoding/parsing retain the same attempt deadline and caller cancellation.
 - OpenRouter uses the shared untrusted-transcript envelope, system prompt and OpenRouter/Mistral profile caps. Disable context compression and hidden reasoning; require endpoint support for supplied parameters; enforce zero prompt/completion/request prices and `data_collection: deny`. If no endpoint qualifies, fall through without relaxing policy or using a paid route.
 - OpenRouter HTTP-200 error envelopes, errored/filtered choices, invalid JSON, empty/refusal-only text and unfinished thinking blocks fail safely. Never copy separate reasoning fields into the carry. Logs use fixed messages/numeric status, not arbitrary upstream error strings.
 - Gemini Flash uses `thinkingLevel: MEDIUM`; Flash-Lite uses `MINIMAL`, with existing generation allowances and hidden-thought filtering.

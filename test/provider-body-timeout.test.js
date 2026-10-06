@@ -43,14 +43,17 @@ for (const provider of ["Gemini", "OpenRouter", "Mistral"]) {
         if (index === 0) t.mock.timers.setTime(Date.now() + scenario.elapsedMs);
       };
       if (scenario.phase === "headers") advanceElapsedTime();
-      return { ok: true, status: 200, json: async () => {
+      const text = "Build passed; Linux checks remain pending.";
+      const response = new Response(JSON.stringify(url.includes("generativelanguage.googleapis.com")
+        ? { candidates: [{ content: { parts: [{ text }] }, finishReason: "STOP" }] }
+        : { choices: [{ message: { content: text }, finish_reason: "stop" }] }));
+      const readBody = response.arrayBuffer.bind(response);
+      response.arrayBuffer = async () => {
         bodyReads.push(index);
         if (scenario.phase === "body") advanceElapsedTime();
-        const text = "Build passed; Linux checks remain pending.";
-        return url.includes("generativelanguage.googleapis.com")
-          ? { candidates: [{ content: { parts: [{ text }] }, finishReason: "STOP" }] }
-          : { choices: [{ message: { content: text }, finish_reason: "stop" }] };
-      } };
+        return readBody();
+      };
+      return response;
     };
     const conversation = "Build passed; Linux checks remain pending. ".repeat(100);
     const result = await createSummaryWithFallback({ conversation, profile: getSummaryProfile(conversation), ...keys });
@@ -77,11 +80,15 @@ clockTest("a provider retry retains the model deadline when its body beats a del
     const index = requests.length;
     requests.push({ url, signal: options.signal, at: Date.now() });
     if (index === 0) t.mock.timers.setTime(startedAt + 44550);
-    return { ok: index !== 0, status: index === 0 ? 503 : 200, json: async () => {
+    const response = new Response(JSON.stringify(index === 0 ? { error: { message: "TEST_ONLY_UNAVAILABLE" } }
+      : { candidates: [{ content: { parts: [{ text: "Build passed; Linux checks remain pending." }] }, finishReason: "STOP" }] }),
+      { status: index === 0 ? 503 : 200 });
+    const readBody = response.arrayBuffer.bind(response);
+    response.arrayBuffer = async () => {
       if (index === 1) t.mock.timers.setTime(startedAt + 90000);
-      return index === 0 ? { error: { message: "TEST_ONLY_UNAVAILABLE" } }
-        : { candidates: [{ content: { parts: [{ text: "Build passed; Linux checks remain pending." }] }, finishReason: "STOP" }] };
-    } };
+      return readBody();
+    };
+    return response;
   };
   const conversation = "Build passed; Linux checks remain pending. ".repeat(100);
   const result = await createSummaryWithFallback({ conversation, profile: getSummaryProfile(conversation), ...keys });
@@ -113,12 +120,14 @@ test("elapsed provider headers abort the native unread socket before fallback", 
       firstSignal = options.signal;
       const response = await originalFetch(`http://127.0.0.1:${server.address().port}`, options);
       t.mock.timers.setTime(Date.now() + 90000);
-      const readBody = response.json.bind(response);
-      response.json = () => {
-        bodyReads++;
-        rejectUnexpectedRead(new Error("Expired headers started reading the native body"));
-        return readBody();
-      };
+      for (const method of ["json", "arrayBuffer"]) {
+        const readBody = response[method].bind(response);
+        response[method] = () => {
+          bodyReads++;
+          rejectUnexpectedRead(new Error("Expired headers started reading the native body"));
+          return readBody();
+        };
+      }
       return response;
     }
     return new Response(JSON.stringify({ candidates: [{
@@ -182,12 +191,14 @@ for (const scenario of [
     requests.push({ url, model: JSON.parse(options.body).model, at: Date.now() });
     if (requests.length <= scenario.failures) {
       const response = await originalFetch(`http://127.0.0.1:${server.address().port}`, options);
-      const readBody = response.json.bind(response);
-      response.json = () => {
-        bodyReads++;
-        rejectUnexpectedRead(new Error("Unused provider error body was read"));
-        return readBody();
-      };
+      for (const method of ["json", "arrayBuffer"]) {
+        const readBody = response[method].bind(response);
+        response[method] = () => {
+          bodyReads++;
+          rejectUnexpectedRead(new Error("Unused provider error body was read"));
+          return readBody();
+        };
+      }
       return response;
     }
     const text = "Build passed; Linux checks remain pending.";
@@ -293,8 +304,8 @@ const status = 200;
         stalledSignals.push(options.signal);
         const response = await originalFetch(`http://127.0.0.1:${server.address().port}`, options);
         receivedStalledHeaders = true;
-        const readBody = response.json.bind(response);
-        response.json = () => {
+        const readBody = response.arrayBuffer.bind(response);
+        response.arrayBuffer = () => {
           const pendingBody = readBody();
           pendingBody.catch(() => {}); // Drain rejections even if the clock driver fails.
           const budget = openrouterEnabled && requests.length === 2 ? 60000 : 90000;

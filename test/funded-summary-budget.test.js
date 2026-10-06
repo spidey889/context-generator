@@ -160,8 +160,8 @@ for (const phase of ["headers", "body"]) {
       req.emit("close"); // Normal request-body completion must not cancel the response.
       assert.equal(signal.aborted, false);
       const upstream = await nativeFetch(`http://127.0.0.1:${server.address().port}`, options);
-      const readBody = upstream.json.bind(upstream);
-      upstream.json = () => {
+      const readBody = upstream.arrayBuffer.bind(upstream);
+      upstream.arrayBuffer = () => {
         const pending = readBody();
         res.destroyed = true; res.emit("close");
         return pending;
