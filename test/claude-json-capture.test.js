@@ -278,6 +278,45 @@ test("Claude inline pasted-card matching preserves original block and card white
     `Claude conversation:\n\nUser: ${pasted}\n\nAssistant: Private reasoning\n\nSelected answer`);
 });
 
+for (const [before, after] of [["\n\n", "\n\n"], ["\r\n\r\n", "\r\n\r\n"], ["\n\r\n", "\r\n\n"]]) {
+  test(`Claude matches a full inline pasted paragraph with ${JSON.stringify([before, after])} separators without changing source text`, async () => {
+    const data = fixture();
+    const pasted = "  café🙂\r\n  original card  ";
+    const original = `  Intro${before}${pasted.trim()}${after}Outro  `;
+    data.chat_messages[0].content = [{ type: "text", text: original }];
+    data.chat_messages[0].attachments = [pastedAttachment(pasted)];
+    const h = setup(data, { resources: [endpoint] });
+    assert.equal((await h.window.__capCaptureClaudeJson()).text,
+      `Claude conversation:\n\nUser: ${original.replace(pasted.trim(), pasted)}\n\nAssistant: Private reasoning\n\nSelected answer`);
+  });
+}
+
+test("Claude restores multiple CRLF inline cards backwards and preserves repeated cards with distinct identities", async () => {
+  const data = fixture();
+  const first = "  First card  ", second = "\tSecond card\r\n";
+  data.chat_messages[0].content = [{ type: "text", text: `Intro\r\n\r\n${first.trim()}\r\n\r\n${second.trim()}\r\n\r\nOutro` }];
+  const firstCard = { ...pastedAttachment(first), id: "first" };
+  data.chat_messages[0].attachments = [firstCard, { ...firstCard }, { ...pastedAttachment(second), id: "second" },
+    { ...pastedAttachment(first), id: "third" }];
+  const h = setup(data, { resources: [endpoint] });
+  const capture = await h.window.__capCaptureClaudeJson();
+  assert.equal(capture.text,
+    `Claude conversation:\n\nUser: Intro\r\n\r\n${first}\r\n\r\n${second}\r\n\r\nOutro\n\n${first}\n\nAssistant: Private reasoning\n\nSelected answer`);
+  assert.equal(capture.messageTurnCount, 2);
+});
+
+test("Claude keeps a pasted card separate when its text is only a substring or is missing a full paragraph boundary", async () => {
+  for (const original of ["Intro\r\nCARD\r\nOutro", "Intro\r\n\r\nCARD_suffix\r\n\r\nOutro",
+    "Intro\r\n\r\nCARD\r\nOutro", "Intro\r\nCARD\r\n\r\nOutro"]) {
+    const data = fixture();
+    data.chat_messages[0].content = [{ type: "text", text: original }];
+    data.chat_messages[0].attachments = [pastedAttachment("CARD")];
+    const h = setup(data, { resources: [endpoint] });
+    assert.equal((await h.window.__capCaptureClaudeJson()).text,
+      `Claude conversation:\n\nUser: ${original}\n\nCARD\n\nAssistant: Private reasoning\n\nSelected answer`);
+  }
+});
+
 test("Claude JSON capture extracts only direct user/assistant text and thinking", async () => {
   const data = fixture();
   data.chat_messages[0].files = [{ file_kind: "document", text: "FILE_SENTINEL" }];

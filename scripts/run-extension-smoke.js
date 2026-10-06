@@ -18,6 +18,7 @@ const CHATGPT_CANVAS_TEXT = `CHATGPT_CANVAS_START\n${"  Complete canvas line, ab
 const CHATGPT_EXACT_CODE = '  OWN_CODE_SENTINEL\n  print("a\u00a0b")  \nCODE_END_SENTINEL';
 const CHATGPT_PYTHON_RESULT = "  Test code Item  Value\n0  JV3XLMSP    A   6791\n1  JV3XLMSP    B   3197\n2  JV3XLMSP    C   7083";
 const CLAUDE_PASTED_TEXT = `CLAUDE_PASTE_START\n${"Full pasted-card line, absent from the DOM.\n".repeat(1000)}CLAUDE_PASTE_END`;
+const CLAUDE_JSON_USER_TEXT = `${SOURCE_SENTINEL}\nJSON_ONLY_SENTINEL: loaded from the API, absent from the DOM.\r\n\r\n${CLAUDE_PASTED_TEXT}\r\n\r\nCLAUDE_INLINE_SUFFIX`;
 const SUMMARY_TEXT = [
   "CONTEXT CARRY — READY TO PASTE",
   "",
@@ -690,7 +691,7 @@ async function startFixtureServer() {
         uuid: "smoke", current_leaf_message_uuid: "assistant",
         ...(CLAUDE_PARTIAL_SMOKE ? { truncated: true } : {}),
         chat_messages: [
-          { uuid: "user", sender: "human", parent_message_uuid: null, content: [{ type: "text", text: `${SOURCE_SENTINEL}\nJSON_ONLY_SENTINEL: loaded from the API, absent from the DOM.` }], attachments: [
+          { uuid: "user", sender: "human", parent_message_uuid: null, content: [{ type: "text", text: CLAUDE_JSON_USER_TEXT }], attachments: [
             { file_name: "", file_type: "txt", extracted_content: CLAUDE_PASTED_TEXT },
             { file_name: "upload.txt", file_type: "txt", extracted_content: "CLAUDE_ATTACHMENT_IGNORED_SENTINEL" },
             { file_name: "", file_type: "image/png", extracted_content: "CLAUDE_ATTACHMENT_IGNORED_SENTINEL" }
@@ -1823,7 +1824,9 @@ async function run() {
       if (JSON_SOURCE === "claude") {
         assert.deepEqual(Object.fromEntries(new URL(state.claudeRequestUrls.at(-1)).searchParams), { tree: "True", rendering_mode: "messages", render_all_tools: "true", include_inline_comparison: "true", consistency: "strong" });
         assert.ok(capturedConversation.includes(CLAUDE_PASTED_TEXT), "The complete pasted attachment must reach the backend.");
-        assert.equal(capturedConversation.split("CLAUDE_PASTE_START").length - 1, 1, "The pasted text must be included once.");
+        assert.equal(capturedConversation,
+          `Claude conversation:\n\nUser: ${CLAUDE_JSON_USER_TEXT}\n\nAttachment: "upload.txt"\n\nAssistant: ${ASSISTANT_SENTINEL}`,
+          "CRLF inline paste matching must preserve the exact user turn without adding its card twice.");
         assert.ok(capturedConversation.indexOf("CLAUDE_PASTE_END") < capturedConversation.indexOf("Assistant:"), "The paste must remain in its owning user turn.");
         assert.doesNotMatch(capturedConversation, /CLAUDE_ATTACHMENT_IGNORED_SENTINEL/);
       }

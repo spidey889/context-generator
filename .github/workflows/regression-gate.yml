@@ -95,7 +95,7 @@ jobs:
         run: |
           mkdir -p "$CAP_CONTEXT_SMOKE_ARTIFACT_DIR"
           xvfb-run -a npm run test:extension-smoke 2>&1 | tee "$CAP_CONTEXT_SMOKE_ARTIFACT_DIR/run.log"
-      - name: Brave Claude fast capture fallback
+      - name: Brave Claude CRLF pasted-card capture and partial fallback
         timeout-minutes: 3
         shell: bash
         env:
@@ -103,6 +103,9 @@ jobs:
           CAP_CONTEXT_CLAUDE_PARTIAL_SMOKE: "1"
           CAP_CONTEXT_SMOKE_ARTIFACT_DIR: .gstack/browser-smoke/claude-fallback
         run: |
+          mkdir -p "$CAP_CONTEXT_SMOKE_ARTIFACT_DIR/complete"
+          CAP_CONTEXT_CLAUDE_PARTIAL_SMOKE="" CAP_CONTEXT_SMOKE_ARTIFACT_DIR="$CAP_CONTEXT_SMOKE_ARTIFACT_DIR/complete" \
+            xvfb-run -a npm run test:extension-smoke 2>&1 | tee "$CAP_CONTEXT_SMOKE_ARTIFACT_DIR/complete/run.log"
           mkdir -p "$CAP_CONTEXT_SMOKE_ARTIFACT_DIR"
           xvfb-run -a npm run test:extension-smoke 2>&1 | tee "$CAP_CONTEXT_SMOKE_ARTIFACT_DIR/run.log"
       - name: Brave Claude oversized history cancellation and fallback
