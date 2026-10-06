@@ -77,6 +77,38 @@ function deepseekUploads(count = 6) {
 }
 
 for (const platform of ["gemini", "grok", "deepseek"]) {
+  test(`${platform}: invalid UTF-8 stops history consumption immediately and permits a fresh capture`, async () => {
+    let delivered = 0, cancelled = false, healthy = false, body;
+    const padding = new Uint8Array(1000000).fill(32);
+    const h = setup(platform, fixtures(platform), { responseTransform: response => {
+      if (healthy) return response;
+      let first = true, remaining = 5;
+      body = new ReadableStream({
+        pull(controller) {
+          if (first) {
+            first = false; delivered++; controller.enqueue(new Uint8Array([255]));
+          } else if (remaining--) {
+            delivered += padding.length; controller.enqueue(padding);
+          } else controller.close();
+        },
+        cancel() { cancelled = true; }
+      });
+      return new Response(body, { headers: response.headers });
+    } });
+    await h.observe();
+    await assert.rejects(h.window.__capCaptureNetworkJson(), error => {
+      assert.doesNotMatch(error.message, /decoder|encoded data|UTF-8/);
+      return true;
+    });
+    assert.ok(delivered <= 1000001, `Stop at the invalid chunk plus stream prefetch, rather than draining ${delivered} bytes.`);
+    assert.equal(cancelled, true);
+    assert.equal(body.locked, false);
+    assert.equal(h.navigationListeners(), 0);
+    assert.ok(h.replies.every(reply => !reply.capture));
+    healthy = true;
+    assert.equal((await h.window.__capCaptureNetworkJson()).text, h.fixture.expected);
+  });
+
   test(`${platform}: history streams stop at the raw budget without Content-Length and allow a fresh capture`, async () => {
     let delivered = 0, cancelled = false, healthy = false, body;
     const padding = new Uint8Array(1000000).fill(32);
@@ -110,20 +142,37 @@ for (const platform of ["gemini", "grok", "deepseek"]) {
     assert.equal((await h.window.__capCaptureNetworkJson()).text, h.fixture.expected);
   });
 
-  test(`${platform}: chunked history preserves UTF-8 and exact transcripts`, async () => {
+  test(`${platform}: chunked history preserves split UTF-8/BOM and exact transcripts`, async () => {
     const h = setup(platform, fixtures(platform, "smoke", 1), { responseTransform: async response => {
-      const bytes = new Uint8Array(await response.arrayBuffer());
+      const original = new Uint8Array(await response.arrayBuffer());
+      const bytes = response.headers.get("content-type")?.includes("application/json")
+        ? Buffer.concat([Buffer.from([239, 187, 191]), original]) : original;
       let offset = 0;
       return new Response(new ReadableStream({
         pull(controller) {
           if (offset === bytes.length) return controller.close();
           // Odd-sized chunks split multibyte text and JSON/RPC framing.
-          const end = Math.min(offset + 7, bytes.length);
+          const end = Math.min(offset + (offset === 0 ? 2 : 7), bytes.length);
           controller.enqueue(bytes.subarray(offset, end)); offset = end;
         }
       }), { headers: response.headers });
     } });
     await h.observe();
+    assert.equal((await h.window.__capCaptureNetworkJson()).text, h.fixture.expected);
+  });
+
+  test(`${platform}: an unfinished UTF-8 character after valid history must not be silently dropped`, async () => {
+    let healthy = false;
+    const h = setup(platform, fixtures(platform, "smoke", 1), { responseTransform: async response => {
+      if (healthy || !response.headers.get("content-type")?.includes("application/json")) return response;
+      const bytes = Buffer.concat([Buffer.from(await response.arrayBuffer()), Buffer.from([226, 130])]);
+      return new Response(bytes, { headers: response.headers });
+    } });
+    await h.observe();
+    await assert.rejects(h.window.__capCaptureNetworkJson());
+    assert.ok(h.replies.every(reply => !reply.capture));
+    assert.equal(h.navigationListeners(), 0);
+    healthy = true;
     assert.equal((await h.window.__capCaptureNetworkJson()).text, h.fixture.expected);
   });
 
@@ -218,7 +267,7 @@ test("DeepSeek: one incomplete upload cancels siblings before fallback or a fres
   });
   assert.equal(h.requests.length, 5, "failure stops queued downloads");
   assert.equal(aborted.length, 3);
-  assert.equal(h.window.__capNetworkFetchState.version, 7);
+  assert.equal(h.window.__capNetworkFetchState.version, 8);
   assert.ok(h.replies.every(reply => !reply.capture));
   assert.equal(h.navigationListeners(), 0);
   assert.equal(h.listeners.size, 1);
@@ -291,14 +340,14 @@ clockTest("DeepSeek: navigation, auth changes and timeouts abort every overlappi
   }
 });
 
-for (const platform of ["gemini", "grok", "deepseek"]) test(`${platform}: a stale history-buffering hook is replaced while retaining observations`, async () => {
+for (const platform of ["gemini", "grok", "deepseek"]) test(`${platform}: the previous hook is replaced while retaining observations`, async () => {
   const h = setup(platform);
   await h.observe();
   const old = h.window.__capNetworkFetchState;
-  old.version = platform === "deepseek" ? 6 : 4;
+  old.version = platform === "deepseek" ? 7 : 5;
   h.reinstall(files[1]);
   assert.notEqual(h.window.__capNetworkFetchState, old);
-  assert.equal(h.window.__capNetworkFetchState.version, platform === "deepseek" ? 7 : 5);
+  assert.equal(h.window.__capNetworkFetchState.version, platform === "deepseek" ? 8 : 6);
   assert.equal(h.listeners.size, 1);
   assert.equal((await h.window.__capCaptureNetworkJson()).text, h.fixture.expected);
 });

@@ -3,7 +3,7 @@
   if (!platform || !globalThis.__capNetworkJsonData) return;
   // Advance readiness version with adapter/contract changes: old MAIN closures
   // can survive extension reloads and must be replaced before a new capture.
-  const version = platform === "deepseek" ? 7 : 5, channel = "cap-context-network-json-v1";
+  const version = platform === "deepseek" ? 8 : 6, channel = "cap-context-network-json-v1";
   const previous = window.__capNetworkFetchState;
   if (previous?.version === version && window.fetch === previous.fetch
     && (platform === "grok" || previous?.ownsObservation?.())) return;
@@ -103,7 +103,11 @@
         // Enforce the shared budget while reading, including history without
         // Content-Length. Files also stop at their declared original byte count.
         reader = response.body?.getReader();
-        const chunks = [];
+        // Decode accepted chunks directly: retaining bytes and copying them into
+        // a second complete buffer adds no validation. One decoder preserves
+        // split UTF-8/BOM state; the final flush rejects an incomplete codepoint.
+        const decoder = new TextDecoder("utf-8", { fatal: true, ignoreBOM: type === "file" });
+        const parts = [];
         let size = 0;
         if (reader) while (true) {
           const { done, value } = await reader.read();
@@ -113,15 +117,13 @@
           bytesRead += value.byteLength;
           if (type === "file" && size > expectedSize) throw new api.CaptureError("A text attachment is incomplete.");
           if (bytesRead > 6000000) throw new api.CaptureError("size");
-          chunks.push(value);
+          const part = decoder.decode(value, { stream: true });
+          if (part) parts.push(part);
         }
-        const bytes = new Uint8Array(size);
-        let offset = 0;
-        for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.byteLength; }
-        chunks.length = 0;
         check();
-        const text = new TextDecoder("utf-8", { fatal: true, ignoreBOM: type === "file" }).decode(bytes);
-        return type === "json" ? JSON.parse(text) : { text, size: bytes.length };
+        parts.push(decoder.decode());
+        const text = parts.join("");
+        return type === "json" ? JSON.parse(text) : { text, size };
       } catch (error) {
         // Rejected headers still own an unread body. Cancel that body too,
         // preserving the structural error even if native cancellation fails.
