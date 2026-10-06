@@ -23,9 +23,9 @@ These prove defects in the shipped path and explain why the repository fixes can
 
 ## Delivery
 
-Source version 1.4.9 carries the existing fixes: focus Claude and settle before paste, reacquire replaced editors, preserve restored drafts, verify stability, and retain one fresh-tab recovery plus manual copy. No new paste algorithm or backend/database change is needed for this release gap.
+Source version 1.4.9 and later carry the existing fixes: focus Claude and settle before paste, reacquire replaced editors, preserve restored drafts, verify stability, and retain one fresh-tab recovery plus manual copy. No new paste algorithm or backend/database change is needed for this release gap.
 
-A Git push or backend deployment does not update Web Store installations. The 1.4.9 package must be uploaded and published through the Chrome Web Store; users must receive that update before this change can affect them. After publication, verify a transfer with the updated installed version. Existing failed telemetry rows remain unchanged.
+A Git push or backend deployment does not update Web Store installations. The current 1.4.10 package must be uploaded and published through the Chrome Web Store; users must receive that update before this change can affect them. After publication, verify a transfer with the updated installed version. Existing failed telemetry rows remain unchanged.
 
 ## Local validation
 

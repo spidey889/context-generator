@@ -4,6 +4,8 @@ A short history of decisions and regressions that matter when changing the code.
 
 ## 2026-10-06
 
+- **Extension version advanced to 1.4.10.** Updated the manifest and current source/release documentation at the owner's request. This version change preserves existing runtime behavior; Web Store packaging and publication remain separate.
+
 - **Pages publishing excludes isolated Astro source.** The final master check reproduced Jekyll rejecting `architecture/src/pages/index.astro` as invalid YAML front matter. Root Pages configuration now excludes that separate source project while retaining ordinary dependency exclusions. Architecture still builds in its own CI step; root/analysis page content and extension/backend behavior are unchanged.
 
 - **Lean deterministic checks.** Removed 28 repeated or source-text checks, reducing the regular suite from 518 to 490 tests. Shared provider deadline/UTF-8 checks retain representative boundaries and distinct fallback policies; shared empty-chat/missing-bridge admission no longer repeats across every platform. Failed preparation now verifies lock release and a fresh attempt through actual transfer behavior. Streaming fixtures deliberately split BOM/Unicode, then use normal chunks. Provider/CLI retry tests assert the requested delay and logical elapsed time without waiting for backoff; native HTTP scheduling stays real. Socket cancellation, privacy, long capture, SQL replay and installed Brave integration remain covered. In-memory regression probes confirmed retained tests reject missed deadlines, lossy UTF-8 and omitted accounting cancellation. Production code and UI are unchanged.
