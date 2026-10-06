@@ -366,8 +366,11 @@ async function main() {
         checks += await require("./check-served-model-db.js").checkServedModel(db, sql);
       } else if (name.endsWith("_reuse_exhausted_user_names.sql")) {
         checks += await require("./check-user-name-reuse-db.js").checkUserNameReuse(db, sql);
+      } else if (name.endsWith("_name_ling_space_bunny_2.sql")) {
+        checks += await require("./check-served-model-db.js").checkServedModelLabel(db, sql);
       } else await db.exec(sql);
     }
+    checks += await require("./check-served-model-db.js").checkStoreModelReceipts(db);
     console.log(`PASS: ${names.length} real migrations replayed; ${checks} database correctness, data preservation, attribution and privilege checks.`);
     console.log(`Per-install default plan: ${JSON.stringify(plan.rows[0]["QUERY PLAN"][0].Plan["Node Type"])}; retained composite index verified.`);
     console.log("Local pg_cron catalog shim: scheduled SQL tested; hosted scheduling and concurrent sessions require deployment verification.");

@@ -19,9 +19,9 @@ Read the invariants and ownership map first, then the section for the component 
 Runtime and packaging:
 
 - Node 22 for backend/scripts/CI. The extension has no build step or runtime npm dependencies; browser checks load `extension/` directly.
-- [extension/manifest.json](extension/manifest.json) is the version and shipped-host authority. It currently declares version `1.4.8`, Chromium service-worker and Firefox background-script variants. Automation uses Brave; that does not certify Firefox compatibility.
+- [extension/manifest.json](extension/manifest.json) is the version and shipped-host authority. It currently declares version `1.4.9`, Chromium service-worker and Firefox background-script variants. Automation uses Brave; that does not certify Firefox compatibility.
 - The extension's backend alias is `https://context-generator-five.vercel.app`. Its Latest Run bridge is injected on `https://spidey889.github.io/context-generator/analysis*`, not on arbitrary copies of the analysis page.
-- No release ZIP is tracked. Packaging and Web Store publication are separate from repository changes. Product-film sources, reproduction instructions and credits remain in [brag/README.md](brag/README.md).
+- No release ZIP is tracked. Packaging and Web Store publication are separate from repository changes. Source version 1.4.9 includes the Claude focus/remount/stability fixes; the published 1.4.8 build inspected on October 6 lacks them. A backend deployment or Git push cannot update those installed content scripts. See [the release-gap diagnosis](docs/claude-paste-release-gap.md). Product-film sources, reproduction instructions and credits remain in [brag/README.md](brag/README.md).
 
 ## Invariants
 
@@ -413,13 +413,15 @@ Failure reasons: `no_conversation`, `conversation_too_large`, `capture_failed`, 
 | v2 `summaryProofV2` + `summaryConfirmedAt` | Adds server summary completion time |
 | v3 `summaryProofV3` + `summaryConfirmedAt` + `summaryModel` | Also binds the canonical model that actually served |
 
-The backend returns compatible legacy proofs alongside v3. These camelCase fields belong to the summary response; the worker converts them to the snake_case telemetry fields above. It prefers v3 and persists proof/time/model/authenticated version together through retry/restart. Edge verifies all supported versions and rejects model tampering before SQL. Unsigned reports remain diagnostics, not proof of completed summary work.
+These camelCase fields belong to the summary response; the worker converts them to the snake_case telemetry fields above. Current workers prefer v3 and persist proof/time/model/authenticated version together through retry/restart. Published Web Store 1.4.8 workers forward only `summaryProofV2` and `summaryConfirmedAt`, omitting model. The backend therefore aliases the v3 proof into `summaryProofV2`. When model is absent, Edge first verifies genuine v1/v2 receipts, then checks the v3 HMAC against the bounded `LEGACY_RECEIPT_MODELS` catalog to recover its authenticated model. Explicit models must verify exactly; no route/date guess or client update is required. Keep that catalog aligned with serving routes and deploy the compatible Edge verifier before the backend. Genuine queued v1/v2 receipts remain accepted without invented model attribution. Unsigned reports remain diagnostics, not proof of completed summary work.
 
 A proof authenticates server summary work and the fields listed for its version. It does not attest capture completeness, reported `character_count`, paste outcome or a person's identity. Those require their own capture/delivery evidence; do not treat a verified receipt as end-to-end correctness.
 
-`transfers.model` follows `character_count` and is populated only by verified v3 attribution, including actual fallback models and backend `local-direct`. First attribution is immutable. A v3 receipt may fill a v2 row only at the identical signed completion time; unknown v1 completion times cannot be inferred. Historical/older-client rows, source-local tiny carries/recovery and cross-attempt cache reuse without a fresh server receipt retain NULL. Source-local tiny transfers report unsigned completion metadata and do not increment verified-summary counters. Never fill NULL with the first requested model as a guess.
+`transfers.model` follows `character_count` and is populated only by verified v3 attribution, including actual fallback models and backend `local-direct`. First attribution is immutable. A v3 receipt may fill a v2 row only at the identical signed completion time; unknown v1 completion times cannot be inferred. Historical rows without a model-bound receipt, source-local tiny carries/recovery and cross-attempt cache reuse without a fresh server receipt retain NULL. Source-local tiny transfers report unsigned completion metadata and do not increment verified-summary counters. Never fill NULL with the first requested model as a guess.
 
 `record_transfer_event` retains 10–13-argument compatibility; optional fourteenth `p_model` defaults to NULL. Migration `20261003124307_add_served_model_to_transfers.sql` achieved column order with a locked atomic copy/swap that refuses unexpected schema/dependencies and preserves rows, indexes, constraints, triggers and private access without counter replay. Future schema changes must preserve those contracts, not edit applied migration history.
+
+Database model naming: the transfer guard converts authenticated `inclusionai/ling-3.1-flash` to the exact stored label `space bunny 2`. Provider requests, HMAC receipts and their recovery catalog continue using the real provider ID. This normalization applies to old/new workers, retries and existing attributed Ling rows; other models and NULL remain unchanged. The naming migration preserves the first-model guard by comparing the two Ling names as the same model, without allowing replacement by another provider.
 
 ### Outbox and ingress availability
 

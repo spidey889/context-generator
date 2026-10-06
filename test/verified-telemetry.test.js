@@ -116,7 +116,7 @@ test("originless forged successes remain unverified through Vercel and the actua
 });
 
 test("completed server summary yields a usable receipt, including local server direct carry", async t => {
-  const { verifySummaryProof } = await proofHelpers();
+  const { verifySummaryProof, verifySummaryReceipt } = await proofHelpers();
   const originalKey = process.env.TELEMETRY_SIGNING_KEY;
   t.after(() => {
     if (originalKey === undefined) delete process.env.TELEMETRY_SIGNING_KEY;
@@ -131,13 +131,15 @@ test("completed server summary yields a usable receipt, including local server d
   const signed = { ...payload(), summary_proof: res.body.summaryProof };
   assert.equal(await verifySummaryProof(signed, KEY), true);
   const signedV2 = { ...payload(), summary_proof: res.body.summaryProofV2, summary_confirmed_at: res.body.summaryConfirmedAt };
-  assert.equal(await verifySummaryProof(signedV2, KEY), true);
+  assert.equal(res.body.summaryProofV2, res.body.summaryProofV3);
+  assert.deepEqual(await verifySummaryReceipt(signedV2, KEY), { model: "local-direct" });
   const edge = await edgeHarness();
   assert.equal((await edge.send(signed)).status, 204);
   assert.equal(edge.calls[0].args.p_summary_verified, true);
   assert.equal(edge.calls[0].args.p_summary_confirmed_at, null);
   await edge.send(signedV2);
   assert.equal(edge.calls[1].args.p_summary_confirmed_at, res.body.summaryConfirmedAt);
+  assert.equal(edge.calls[1].args.p_model, "local-direct");
   assert.equal(res.body.summaryModel, "local-direct");
   const signedV3 = { ...signedV2, model: res.body.summaryModel, summary_proof: res.body.summaryProofV3 };
   assert.equal(await verifySummaryProof(signedV3, KEY), true);
@@ -168,11 +170,13 @@ test("v3 receipts bind the served model and retain v1/v2 compatibility through E
   const edge = await edgeHarness();
   assert.equal((await edge.send(signed)).status, 204);
   assert.equal(edge.calls[0].args.p_model, signed.model);
-  for (const change of [{ model: "local-direct" }, { model: undefined },
+  for (const change of [{ model: "local-direct" },
     { summary_confirmed_at: "2026-10-02T00:00:09.000Z" }]) {
     assert.equal((await edge.send({ ...signed, ...change })).status, 422);
   }
   assert.equal(edge.calls.length, 1, "altered attribution must never reach SQL");
+  assert.equal((await edge.send({ ...signed, model: undefined })).status, 204);
+  assert.equal(edge.calls.at(-1).args.p_model, signed.model, "old store worker can omit model without losing attribution");
   for (const confirmed of [undefined, signed.summary_confirmed_at]) {
     const legacy = payload(confirmed ? { summary_confirmed_at: confirmed } : {});
     legacy.summary_proof = await createSummaryProof(legacy, KEY);
@@ -182,8 +186,39 @@ test("v3 receipts bind the served model and retain v1/v2 compatibility through E
   }
 });
 
+test("Web Store receipt recovery authenticates every served route and rejects tampering", async () => {
+  const { createSummaryProof, verifySummaryReceipt, LEGACY_RECEIPT_MODELS } = await proofHelpers();
+  const edge = await edgeHarness();
+  for (const model of LEGACY_RECEIPT_MODELS) {
+    const signed = payload({ model, summary_confirmed_at: "2026-10-02T00:00:08.000Z" });
+    const proof = await createSummaryProof(signed, KEY);
+    // Published 1.4.8 persists only proof/time. This remains valid through its
+    // ordinary outbox serialization/restart, including failed destination paste.
+    const { model: omitted, ...oldWorker } = signed;
+    const legacy = JSON.parse(JSON.stringify({ ...oldWorker, summary_proof: proof,
+      status: "failed", last_stage: "paste_started", failure_reason: "paste_failed" }));
+    assert.deepEqual(await verifySummaryReceipt(legacy, KEY), { model });
+    assert.equal((await edge.send(legacy)).status, 204);
+    assert.equal(edge.calls.at(-1).args.p_model, model);
+    assert.equal(edge.calls.at(-1).args.p_status, "failed");
+    const before = edge.calls.length;
+    for (const change of [{ summary_confirmed_at: undefined },
+      { summary_confirmed_at: "2026-10-02T00:00:09.000Z" }, { install_id: "44444444-4444-4444-8444-444444444444" },
+      { attempt_id: "33333333-3333-4333-8333-333333333333" }, { destination_platform: "gemini" },
+      { extension_version: "1.4.7" }, { summary_proof: "0".repeat(64) }, { model: "made-up-model" }]) {
+      assert.equal((await edge.send({ ...legacy, ...change })).status, 422);
+    }
+    assert.equal(edge.calls.length, before);
+    assert.equal(await verifySummaryReceipt(legacy, "short"), null);
+  }
+  const unknown = payload({ model: "future/model", summary_confirmed_at: "2026-10-02T00:00:08.000Z" });
+  unknown.summary_proof = await createSummaryProof(unknown, KEY);
+  assert.equal((await edge.send({ ...unknown, model: undefined })).status, 422, "unsupported omitted models never get guessed");
+  assert.equal((await edge.send(unknown)).status, 204, "explicit authenticated v3 models remain supported");
+});
+
 test("server receipts cover remote success and emergency carry, and missing keys keep summaries usable", async t => {
-  const { verifySummaryProof } = await proofHelpers();
+  const { verifySummaryProof, verifySummaryReceipt } = await proofHelpers();
   const originalFetch = global.fetch;
   const names = ["TELEMETRY_SIGNING_KEY", "GEMINI_API_KEY", "MISTRAL_API_KEY", "MISTRAL_ENABLED",
     "OPENROUTER_API_KEY", "OPENROUTER_ENABLED", "OPENROUTER_LING_ENABLED",
@@ -235,19 +270,31 @@ test("server receipts cover remote success and emergency carry, and missing keys
     assert.equal(await verifySummaryProof({ ...context, summary_proof: res.body.summaryProof }, KEY), true);
     const signedV2 = { ...context, last_stage: "summary_completed",
       summary_proof: res.body.summaryProofV2, summary_confirmed_at: res.body.summaryConfirmedAt };
-    assert.equal(await verifySummaryProof(signedV2, KEY), true);
+    const expectedModel = { openrouter: "inclusionai/ling-3.1-flash", mistral: "ministral-14b-2512",
+      gemini: "gemini-3.5-flash-lite", "local-direct": "local-direct" }[provider];
+    assert.deepEqual(await verifySummaryReceipt(signedV2, KEY), { model: expectedModel });
     const edge = await edgeHarness();
     assert.equal((await edge.send(signedV2)).status, 204);
     assert.equal(edge.calls[0].args.p_summary_verified, true);
     assert.equal(edge.calls[0].args.p_summary_confirmed_at, res.body.summaryConfirmedAt);
-    const expectedModel = { openrouter: "inclusionai/ling-3.1-flash", mistral: "ministral-14b-2512",
-      gemini: "gemini-3.5-flash-lite", "local-direct": "local-direct" }[provider];
+    assert.equal(edge.calls[0].args.p_model, expectedModel, "store-shaped receipt retains final serving model");
     assert.equal(res.body.summaryModel, expectedModel);
     const signedV3 = { ...signedV2, summary_proof: res.body.summaryProofV3, model: res.body.summaryModel };
     assert.equal(await verifySummaryProof(signedV3, KEY), true);
     assert.equal((await edge.send(signedV3)).status, 204);
     assert.equal(edge.calls[1].args.p_model, expectedModel, "persist final fallback model, not the failed primary");
   }
+  // Fail the full configured chain so every runtime route appears in the receipt
+  // diagnostics. A newly added route must also be recoverable by old workers.
+  process.env.GEMINI_API_KEY = "test-gemini-key";
+  process.env.OPENROUTER_ENABLED = "true";
+  for (const name of ["OPENROUTER_QWEN_ENABLED", "OPENROUTER_DOTS_ENABLED", "OPENROUTER_GEMMA_ENABLED"]) process.env[name] = "true";
+  global.fetch = async () => new Response("{}", { status: 400 });
+  const allRoutes = response();
+  await withFundedBudget(() => summarize(req, allRoutes));
+  assert.equal(allRoutes.code, 200);
+  const { LEGACY_RECEIPT_MODELS } = await proofHelpers();
+  assert.deepEqual(new Set([...allRoutes.body.timing.modelsTried, "local-direct"]), new Set(LEGACY_RECEIPT_MODELS));
   delete process.env.TELEMETRY_SIGNING_KEY;
   const res = response();
   await summarize(req, res);
