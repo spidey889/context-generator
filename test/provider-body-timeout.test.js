@@ -168,13 +168,15 @@ for (const scenario of [
     res.write("{");
   });
   await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
-  t.mock.timers.enable({ apis: ["Date", "setTimeout"], now: Date.parse("2026-10-06T10:00:00Z") });
-  const scheduleTimeout = global.setTimeout;
+  t.mock.timers.enable({ apis: ["Date"], now: Date.parse("2026-10-06T10:00:00Z") });
   global.setTimeout = (callback, ms, ...args) => {
-    const timer = scheduleTimeout(callback, ms, ...args);
-    // Advance only a scheduled retry; native headers/cancellation use real I/O.
-    if (ms === 450) queueMicrotask(() => t.mock.timers.tick(450));
-    return timer;
+    // Keep transport timers real: Node 22's native client can stall after
+    // cancellation when its timers share a fake retry clock across tests.
+    if (ms === 450) return originalSetTimeout(() => {
+      t.mock.timers.setTime(Date.now() + ms);
+      callback(...args);
+    }, ms);
+    return originalSetTimeout(callback, ms, ...args);
   };
   global.fetch = async (url, options) => {
     requests.push({ url, model: JSON.parse(options.body).model, at: Date.now() });
