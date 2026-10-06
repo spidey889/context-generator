@@ -12,17 +12,17 @@ const compiledTransferBackground = new vm.Script(`${source}\n;globalThis.__backg
   filename: "extension/background.js"
 });
 
-function loadBackgroundForSummaryTest(fetchImpl, { tabs = [], injections = [], injectionError = false, onMessage = () => {} } = {}) {
+function loadBackgroundForSummaryTest(fetchImpl, { tabs = [], injections = [], injectionError = false, onMessage = () => {}, clock = Date } = {}) {
   let messageListener = null;
   const event = { addListener: () => {} };
   const sandbox = {
     AbortController,
-    Date,
+    Date: clock,
     URL,
     clearTimeout,
     console: { debug() {}, error() {}, log() {}, warn() {} },
     fetch: fetchImpl,
-    performance: { now: () => Date.now() },
+    performance: { now: () => clock.now() },
     setTimeout,
     chrome: {
       action: {
@@ -309,6 +309,77 @@ clockTest("a transfer deadline aborts an outstanding summary request", { timeout
   assert.equal(abortedAt, deadlineAt, "the request must abort exactly at the transfer deadline");
   assert.equal(response.ok, false);
   assert.equal(response.code, "transfer_timeout");
+});
+
+clockTest("a shared summary waiter expires at its own deadline without cancelling the original request", async () => {
+  let finish, signal, fetches = 0;
+  const sendSummary = loadBackgroundForSummaryTest(async (_url, options) => {
+    fetches++; signal = options.signal;
+    return new Promise(resolve => {
+      let timer;
+      finish = () => { clearTimeout(timer); resolve({ ok: true, status: 200,
+        json: async () => ({ summary: "Shared complete Context Carry" }) }); };
+      timer = setTimeout(finish, 250);
+    });
+  });
+  const owner = sendSummary("same exact conversation", Date.now() + 1000);
+  await new Promise(setImmediate);
+  const unboundedWaiter = sendSummary("same exact conversation");
+  const deadlineAt = Date.now() + 100;
+  const response = await sendSummary("same exact conversation", deadlineAt);
+  assert.equal(Date.now(), deadlineAt, "Joining an older request must retain the joining transfer's time limit.");
+  assert.equal(response.ok, false);
+  assert.equal(response.code, "transfer_timeout");
+  assert.equal(signal.aborted, false, "A waiting transfer cannot cancel another transfer's request.");
+  const laterWaiter = sendSummary("same exact conversation", Date.now() + 500);
+  finish();
+  for (const result of await Promise.all([owner, unboundedWaiter, laterWaiter])) {
+    assert.equal(result.ok, true);
+    assert.equal(result.summary, "Shared complete Context Carry");
+  }
+  assert.equal(fetches, 1, "Expiry must not evict the still-running shared request.");
+  const cached = await sendSummary("same exact conversation", Date.now() + 500);
+  assert.equal(cached.timing.source, "cache");
+  assert.equal(fetches, 1);
+});
+
+clockTest("shared summary failures retain the backend error and allow a fresh request", async () => {
+  let finish, fetches = 0;
+  const sendSummary = loadBackgroundForSummaryTest(async () => {
+    if (++fetches > 1) return { ok: true, status: 200, json: async () => ({ summary: "Fresh Context Carry" }) };
+    return new Promise(resolve => { finish = () => resolve({ ok: false, status: 503,
+      json: async () => ({ code: "service_busy" }) }); });
+  });
+  const owner = sendSummary("same exact conversation", Date.now() + 1000);
+  await new Promise(setImmediate);
+  const waiter = sendSummary("same exact conversation", Date.now() + 500);
+  finish();
+  for (const response of await Promise.all([owner, waiter])) {
+    assert.equal(response.ok, false);
+    assert.equal(response.code, "service_busy");
+  }
+  assert.equal((await sendSummary("same exact conversation", Date.now() + 500)).summary, "Fresh Context Carry");
+  assert.equal(fetches, 2);
+});
+
+for (const ok of [true, false]) clockTest(`an expired shared waiter rejects a queued ${ok ? "success" : "failure"} before a delayed timer fires`, async () => {
+  let now = Date.now(), finish;
+  class QueuedResultClock extends Date { static now() { return now; } }
+  const sendSummary = loadBackgroundForSummaryTest(async () => new Promise(resolve => {
+    finish = () => resolve({ ok, status: ok ? 200 : 503,
+      json: async () => ok ? { summary: "Complete Context Carry" } : { code: "service_busy" } });
+  }), { clock: QueuedResultClock });
+  const owner = sendSummary("same exact conversation", now + 1000);
+  await new Promise(setImmediate);
+  const waiter = sendSummary("same exact conversation", now + 100);
+  // Advance elapsed time without dispatching timer tasks. Response microtasks
+  // can run first on a busy event loop; the acceptance guard must still apply.
+  now += 150;
+  finish();
+  const response = await waiter;
+  assert.equal(response.ok, false);
+  assert.equal(response.code, "transfer_timeout");
+  assert.equal((await owner).ok, ok);
 });
 
 test("destination preconnect and warmup never include conversation content", () => {

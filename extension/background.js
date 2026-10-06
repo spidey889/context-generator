@@ -839,10 +839,25 @@ async function summarizeWithBackend(conversation, transferId = null, deadlineAt 
 
   const inFlightSummary = summaryInflight.get(conversationText);
   if (inFlightSummary) {
-    return inFlightSummary.then((result) => {
+    let timeout;
+    try {
+      // A joiner's time limit does not own the shared fetch. Expiring here
+      // must neither abort it nor evict it while other transfers still wait.
+      const result = deadlineAt ? await Promise.race([
+        inFlightSummary,
+        new Promise((_, reject) => {
+          timeout = setTimeout(() => reject(createTransferTimeoutError()), Math.max(0, deadlineAt - Date.now()));
+        })
+      ]) : await inFlightSummary;
+      checkTransferDeadline(deadlineAt);
       recordKnownTransferTelemetryStage(transferId, "summary_response_started");
       return result;
-    });
+    } catch (error) {
+      checkTransferDeadline(deadlineAt);
+      throw error;
+    } finally {
+      clearTimeout(timeout);
+    }
   }
 
   const summaryPromise = fetchSummaryFromBackend(conversationText, transferId, deadlineAt)
@@ -1059,11 +1074,13 @@ function cacheSummaryResult(conversationText, result) {
 }
 
 function checkTransferDeadline(deadlineAt) {
-  if (deadlineAt && Date.now() >= deadlineAt) {
-    const error = new Error("Transfer timed out. Please try again.");
-    error.code = "transfer_timeout";
-    throw error;
-  }
+  if (deadlineAt && Date.now() >= deadlineAt) throw createTransferTimeoutError();
+}
+
+function createTransferTimeoutError() {
+  const error = new Error("Transfer timed out. Please try again.");
+  error.code = "transfer_timeout";
+  return error;
 }
 
 async function transferToDestination(

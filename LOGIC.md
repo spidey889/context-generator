@@ -378,6 +378,8 @@ Response diagnostics are bounded `validationReason` and `qualityFlags`: `bad_str
 
 Receipts/outbox persist in `chrome.storage.local`. Active snapshots prefer `chrome.storage.session` to survive worker restarts without crossing a browser restart; older runtimes fall back to local storage. Expired snapshots record unknown outcome, never fabricated failure. Cache/in-flight deduplication and page `isRunning` remain memory-only.
 
+Identical summary requests may share the initiating transfer's network promise. A joining transfer with a deadline has its own bounded wait; expiry returns `transfer_timeout` without aborting/evicting the shared request or accepting its late success/error. Check elapsed time again when a queued result settles, and clear the wait timer on every outcome. Other waiters and completed cache entries remain usable. The shared network operation retains the initiating transfer's transport deadline; joining does not extend that operation.
+
 Latest Run persistence is optional: synchronous storage exceptions and rejected writes cannot block terminal telemetry or transfer-lock release.
 
 Latest Run records transfer/capture timings, counts, sizes, profile, actual serving/attempted models, fallback/finish reason, token usage, status and exact captured text. It does not store generated summary text. The matched analysis bridge, not the page directly, reads extension storage; both background and bridge strip expired raw text. The serving model is excluded from the failed portion of the fallback log, and cache reuse preserves provider timing/attempt metadata. Current labels cover four configured OpenRouter models, both Google routes, Ministral and local-direct; unsupported paths ask for a new transfer instead of showing retired routes.
