@@ -165,7 +165,7 @@
       const receive = event => {
         const reply = event.data;
         if (event.source === window && event.origin === location.origin && reply?.channel === channel
-          && reply.type === "pong" && reply.id === id && reply.version === 5) finish(true);
+          && reply.type === "pong" && reply.id === id && reply.version === 6) finish(true);
       };
       const ping = () => {
         if (settled) return;

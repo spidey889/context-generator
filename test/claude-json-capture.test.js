@@ -65,6 +65,33 @@ function pastedAttachment(text) {
   return { id: createHash("sha256").update(text).digest("hex"), file_name: "", file_type: "txt", file_size: Buffer.byteLength(text), extracted_content: text };
 }
 
+test("Claude cancels discarded transport responses and keeps safe fallback reasons when cancellation fails", async () => {
+  for (const [status, headers, reason] of [
+    [401, {}, "unavailable"], [500, {}, "request_failed"],
+    [200, { "content-range": "bytes 0-10/100" }, "incomplete"],
+    [200, { "content-type": "text/html" }, "incomplete"]
+  ]) {
+    let cancelled = 0, healthy = false, discarded;
+    const harness = setup(fixture(), { resources: [endpoint], fetchImpl: async () => {
+      if (healthy) return new Response(JSON.stringify(fixture()), { headers: { "content-type": "application/json" } });
+      discarded = new Response(new ReadableStream({ cancel() { cancelled++; throw new Error("PRIVATE_CANCEL_SENTINEL"); } }),
+        { status, headers: { "content-type": "application/json", ...headers } });
+      return discarded;
+    } });
+    await assert.rejects(harness.window.__capCaptureClaudeJson(), error => {
+      assert.equal(error.captureFailureReason, reason);
+      assert.doesNotMatch(error.message, /PRIVATE_CANCEL_SENTINEL/);
+      return true;
+    });
+    assert.equal(cancelled, 1, "A rejected response must stop its unused stream.");
+    assert.equal(discarded.body.locked, false);
+    assert.equal(harness.stats().navigationListeners + harness.stats().popListeners, 0);
+    healthy = true;
+    assert.equal((await harness.window.__capCaptureClaudeJson()).text,
+      "Claude conversation:\n\nUser: Question\n\nAssistant: Private reasoning\n\nSelected answer");
+  }
+});
+
 test("Claude JSON capture preserves a large pasted attachment in its owning user turn", async () => {
   const data = fixture();
   const pastedText = `PASTE_START\n${"  preserve indentation and full lines\r\n".repeat(1200)}PASTE_END`;
@@ -326,8 +353,8 @@ clockTest("Claude isolated bridge awaits MAIN reinstallation before requesting c
     let ensures = 0;
     let legacy = stale === "legacy";
     harness = setup(fixture(), { resources: [endpoint], beforeMessage: payload => {
-      // An open tab can still answer probes from the older response-cloning hook.
-      if (legacy && payload.type === "pong") payload.version = 4;
+      // Open tabs can answer probes from the previous hook until it is replaced.
+      if (legacy && payload.type === "pong") payload.version = 5;
     }, runtime: { sendMessage: async message => {
       assert.equal(message.type, "ENSURE_CLAUDE_JSON_HOOK");
       ensures++; legacy = false; harness.window.__capClaudeFetchState.dispose();

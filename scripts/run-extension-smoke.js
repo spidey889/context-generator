@@ -504,8 +504,8 @@ function networkSmokeFixture(platform) {
 }
 
 function streamOversizedFixtureResponse(response, prefix, metrics) {
-  // No Content-Length: native readers must cancel before the 20 MB tail
-  // finishes. Pace writes and respect backpressure to observe cancellation.
+  // No Content-Length: native capture must cancel discarded/excess bodies
+  // before the 20 MB tail finishes. Pace writes and observe cancellation.
   const padding = Buffer.alloc(1000000, 32);
   metrics.bytes = Buffer.byteLength(prefix);
   response.write(prefix);
@@ -529,6 +529,7 @@ async function startFixtureServer() {
   const state = { summaryRequests: [], jsonRequests: 0, sessionRequests: 0, pasteDescriptorRequests: 0, pasteContentRequests: 0, fileReadsActive: 0, fileReadsPeak: 0, chatgptRequestUrls: [], claudeRequestUrls: [] };
   state.oversizeHistory = { bytes: 0, cancelled: false };
   state.oversizePaste = { bytes: 0, cancelled: false };
+  state.discardedAuth = { bytes: 0, cancelled: false };
   const telemetryFixture = await createTelemetrySmokeFixture(REPO_ROOT, TELEMETRY_DATABASE_SMOKE);
   state.telemetryRequests = telemetryFixture.received;
   const network = NETWORK_SOURCE ? networkSmokeFixture(JSON_SOURCE) : null;
@@ -639,7 +640,9 @@ async function startFixtureServer() {
     if (url.pathname === "/backend-api/files/download/file_smoke_paste") {
       state.pasteDescriptorRequests++;
       if (CHATGPT_PASTE_AUTH_SMOKE && state.pasteDescriptorRequests === 1) {
-        response.writeHead(401, { "Content-Type": "application/json" }); response.end("{}"); return;
+        response.writeHead(401, { "Content-Type": "application/json" });
+        streamOversizedFixtureResponse(response, "{}", state.discardedAuth);
+        return;
       }
       assert.equal(request.headers.authorization, CHATGPT_PASTE_AUTH_SMOKE ? "Bearer smoke-refreshed" : "Bearer smoke-only");
       response.writeHead(200, { "Content-Type": "application/json" });
@@ -713,9 +716,9 @@ async function startFixtureServer() {
         response.end(page.replace("</body>", `<script nonce="smoke">${boot}</script></body>`)); return;
       }
       response.end(url.pathname === "/c/smoke"
-        ? page.replace("</body>", '<script nonce="smoke">fetch("/backend-api/conversations/smoke?num_turns=10", {headers:{Authorization:"Bearer smoke-only","ChatGPT-Account-Id":"smoke-account"}});</script></body>')
+        ? page.replace("</body>", '<script nonce="smoke">fetch("/backend-api/conversations/smoke?num_turns=10", {headers:{Authorization:"Bearer smoke-only","ChatGPT-Account-Id":"smoke-account"}}).then(()=>{window.__capSmokeNativeRequestReady=true;});</script></body>')
         : url.pathname === "/chat/smoke"
-        ? page.replace("</body>", '<script nonce="smoke">fetch("/api/organizations/smoke/chat_conversations/smoke?tree=True");</script></body>')
+        ? page.replace("</body>", '<script nonce="smoke">fetch("/api/organizations/smoke/chat_conversations/smoke?tree=True").then(()=>{window.__capSmokeNativeRequestReady=true;});</script></body>')
         : page);
       return;
     }
@@ -1113,6 +1116,11 @@ async function run() {
         : null;
       error.message += `\nTargets: ${JSON.stringify(targets.map(({ type, url }) => ({ type, url })))}\nPage: ${JSON.stringify(pageState)}\nExtension: ${JSON.stringify(extensionState)}\nEvents: ${JSON.stringify(recentEvents)}`;
       throw error;
+    }
+    if (["chatgpt", "claude"].includes(JSON_SOURCE)) {
+      // The bubble can mount before the fixture's ordinary page-load request.
+      // Establish that request before counting reload/picker capture activity.
+      await waitFor(() => sourceSession.evaluate("Boolean(window.__capSmokeNativeRequestReady)"), "the fixture's initial native request");
     }
     process.stdout.write("✓ Brave loaded the unpacked extension on the controlled source page.\n");
     if (!JSON_CAPTURE_SMOKE) {
@@ -1816,6 +1824,11 @@ async function run() {
         assert.equal(state.pasteContentRequests, 1);
         assert.equal(state.chatgptRequestUrls.at(-1), "/backend-api/conversation/smoke");
         assert.equal(state.sessionRequests, (CHATGPT_RELOAD_SMOKE ? 1 : 0) + (CHATGPT_PASTE_AUTH_SMOKE ? 1 : 0));
+        if (CHATGPT_PASTE_AUTH_SMOKE) {
+          assert.equal(state.discardedAuth.cancelled, true, "Brave must cancel the expired-token body before retrying.");
+          assert.ok(state.discardedAuth.bytes < 20000000, "The discarded authentication tail must not finish downloading.");
+          process.stdout.write(`✓ Brave cancelled expired-token response after ${state.discardedAuth.bytes} fixture bytes, then recovered exact capture.\n`);
+        }
       }
       if (NETWORK_SOURCE) {
         assert.equal(capturedConversation, networkSmokeFixture(JSON_SOURCE).expected, "Every original own turn/paste/document must reach the backend once and in order.");

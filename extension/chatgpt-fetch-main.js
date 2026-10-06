@@ -1,5 +1,5 @@
 (() => {
-  const version = 7;
+  const version = 8;
   const channel = "cap-context-chatgpt-json-v2";
   const currentChat = pathname => (pathname ?? location.pathname).match(/\/c\/([^/]+)\/?$/)?.[1];
   const previous = window.__capChatGptFetchState;
@@ -60,6 +60,9 @@
     const fetchJson = (url, options = {}) => Reflect.apply(nativeFetch, window, [url, {
       ...options, credentials: "same-origin", cache: "no-store", signal: controller.signal
     }]);
+    // Discard owned responses before retry/fallback; cleanup must never replace
+    // the bounded capture error with private upstream cancellation details.
+    const discardResponse = response => response.body?.cancel().catch(() => {});
     const readPaste = async (response, expectedSize) => {
       let reader;
       try {
@@ -84,23 +87,25 @@
         return new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(bytes);
       } catch (error) {
         if (reader) await reader.cancel().catch(() => {});
-        else await response.body?.cancel().catch(() => {});
+        else await discardResponse(response);
         throw error;
       } finally {
         reader?.releaseLock();
       }
     };
-    const checkTransport = response => {
-      if (response.status !== 200) { reply.status = response.status; throw new Error("http"); }
-      if (response.headers.has("content-range")) throw new Error("partial");
-      if (!response.headers.get("content-type")?.includes("application/json")) throw new Error("format");
+    const checkTransport = async response => {
+      try {
+        if (response.status !== 200) { reply.status = response.status; throw new Error("http"); }
+        if (response.headers.has("content-range")) throw new Error("partial");
+        if (!response.headers.get("content-type")?.includes("application/json")) throw new Error("format");
+      } catch (error) { await discardResponse(response); throw error; }
     };
     const refreshAuth = async () => {
       // Late hooks cannot recover headers from resource timing. Read the existing
       // same-origin session only on explicit capture, keeping tokens in MAIN.
       const revision = authRevision;
       const response = await fetchJson("/api/auth/session");
-      checkTransport(response);
+      await checkTransport(response);
       const session = await response.json();
       if (typeof session.accessToken !== "string" || !session.accessToken) throw new Error("auth");
       if (revision !== authRevision && auth) return new Headers(auth);
@@ -120,6 +125,7 @@
       // Every authenticated read uses the latest observed same-account headers.
       // One expired-token retry is shared by the tree and all paste descriptors.
       if (response.status === 401 && !authRetried) {
+        await discardResponse(response);
         authRetried = true;
         if (controller.signal.aborted || currentChat() !== chat) throw new Error("changed");
         headers = revision !== authRevision && auth ? new Headers(auth) : await refreshAuth();
@@ -134,7 +140,7 @@
       // Retry an expired bearer token once. Never retry a partial tree or guess
       // another workspace on 403; both must fail visibly.
       const response = await fetchAuthenticatedJson(url);
-      checkTransport(response);
+      await checkTransport(response);
       const data = await response.json();
       if (controller.signal.aborted || currentChat() !== chat || (data.conversation_id ?? data.id) !== chat) throw new Error("changed");
       // Big pastes are user text stored as files, not text.parts. Read only
@@ -178,7 +184,10 @@
         try {
           const descriptorResponse = await fetchAuthenticatedJson(`/backend-api/files/download/${encodeURIComponent(file.id)}`, { redirect: "error" });
           if (descriptorResponse.status !== 200 || descriptorResponse.headers.has("content-range")
-            || !descriptorResponse.headers.get("content-type")?.includes("application/json")) throw new Error("paste");
+            || !descriptorResponse.headers.get("content-type")?.includes("application/json")) {
+            await discardResponse(descriptorResponse);
+            throw new Error("paste");
+          }
           const descriptor = await descriptorResponse.json();
           if (descriptor.status !== "success" || descriptor.file_size_bytes !== file.size || typeof descriptor.download_url !== "string") throw new Error("paste");
           const download = new URL(descriptor.download_url, location.origin);

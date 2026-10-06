@@ -1,5 +1,5 @@
 (() => {
-  const version = 5;
+  const version = 6;
   const previous = window.__capClaudeFetchState;
   if (previous?.version === version && window.fetch === previous.fetch) return;
   previous?.dispose();
@@ -83,6 +83,9 @@
       if (response.status !== 200 || response.headers.has("content-range") || !response.headers.get("content-type")?.includes("application/json")) {
         captureFailureReason = [401, 403].includes(response.status) ? "unavailable"
           : response.status === 206 || response.headers.has("content-range") || response.status === 200 ? "incomplete" : "request_failed";
+        // The rejected fresh response has no reader. Stop its unused body before
+        // fallback, retaining the safe transport reason even if cleanup rejects.
+        await response.body?.cancel().catch(() => {});
         throw new Error("transport");
       }
       let data;

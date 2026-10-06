@@ -64,12 +64,13 @@ jobs:
         run: |
           mkdir -p "$CAP_CONTEXT_SMOKE_ARTIFACT_DIR"
           xvfb-run -a npm run test:extension-smoke 2>&1 | tee "$CAP_CONTEXT_SMOKE_ARTIFACT_DIR/run.log"
-      - name: Brave ChatGPT fast capture after extension reload
+      - name: Brave ChatGPT fast capture after reload and expired-token cancellation
         timeout-minutes: 3
         shell: bash
         env:
           CAP_CONTEXT_JSON_SMOKE: chatgpt
           CAP_CONTEXT_CHATGPT_RELOAD_SMOKE: "1"
+          CAP_CONTEXT_CHATGPT_AUTH_SMOKE: paste401
           CAP_CONTEXT_SMOKE_ARTIFACT_DIR: .gstack/browser-smoke/chatgpt-reload
         run: |
           mkdir -p "$CAP_CONTEXT_SMOKE_ARTIFACT_DIR"
