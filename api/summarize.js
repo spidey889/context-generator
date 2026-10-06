@@ -1040,10 +1040,20 @@ async function fetchWithRetry(url, options, requestBudgetMs, context = {}) {
     if (remainingMs <= 0) break;
 
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), Math.min(PROVIDER_ATTEMPT_TIMEOUT_MS, remainingMs));
+    const attemptDeadline = Math.min(deadline, Date.now() + PROVIDER_ATTEMPT_TIMEOUT_MS);
+    const timeout = setTimeout(() => controller.abort(), Math.max(0, attemptDeadline - Date.now()));
+    const checkAttemptDeadline = () => {
+      context.signal?.throwIfAborted();
+      // Response/parser microtasks can beat an overdue abort timer on a busy
+      // process. Elapsed time and the attempt signal both remain authoritative.
+      if (Date.now() >= attemptDeadline) controller.abort();
+      controller.signal.throwIfAborted();
+    };
     try {
+      checkAttemptDeadline();
       const signal = context.signal ? AbortSignal.any([context.signal, controller.signal]) : controller.signal;
       const response = await fetch(url, { ...options, signal });
+      checkAttemptDeadline();
       // fetch resolves at the headers. Keep the deadline active until the JSON
       // body finishes too, including error bodies read before provider fallback.
       let payload;
@@ -1054,7 +1064,7 @@ async function fetchWithRetry(url, options, requestBudgetMs, context = {}) {
         if (signal.aborted || error?.name === "AbortError") throw error;
         bodyError = error;
       }
-      context.signal?.throwIfAborted();
+      checkAttemptDeadline();
       lastResponse = {
         ok: response.ok,
         status: response.status,
@@ -1071,7 +1081,7 @@ async function fetchWithRetry(url, options, requestBudgetMs, context = {}) {
         return lastResponse;
       }
     } catch (error) {
-      context.signal?.throwIfAborted();
+      checkAttemptDeadline();
       lastError = error;
       if (error?.name === "AbortError") throw error;
       if (attempt === PROVIDER_MAX_ATTEMPTS) throw error;
