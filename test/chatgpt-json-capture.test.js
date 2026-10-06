@@ -82,6 +82,24 @@ function pasteFixture(texts = ["Original pasted document"]) {
   return { data, files, fetchImpl };
 }
 
+for (const [name, mutate, reason] of [
+  ["invalid ID", files => { files[1].id = "file_invalid/path"; }, "paste"],
+  ["invalid size", files => { files[1].size = "6"; }, "paste"],
+  ["oversized total", files => { files[1].size = 1400000; }, "size"],
+  ["conflicting duplicate", files => { files[1].id = files[0].id; files[1].size = files[0].size + 1; }, "paste"]
+]) test(`ChatGPT manifest rejects a later ${name} before any file request`, async () => {
+  const { data, fetchImpl } = pasteFixture(["First paste", "Second paste"]);
+  mutate(data.mapping.question.message.metadata.attachments);
+  const harness = setup(data, 200, { fetchImpl });
+  await discover(harness);
+  await assert.rejects(harness.window.__capCaptureChatGptJson());
+  assert.equal(harness.replies.at(-1).error, reason);
+  assert.equal(harness.requests.filter(request => /\/files\/download\/|\/estuary\/content/.test(request.url)).length, 0,
+    "An invalid later file must reject the complete manifest before any file request.");
+  assert.ok(harness.replies.every(reply => !reply.data && !reply.pastedTexts));
+  assert.equal(harness.navigationListeners(), 0);
+});
+
 test("ChatGPT stops an oversized paste without Content-Length, then allows a fresh exact capture", async () => {
   const { data, fetchImpl } = pasteFixture();
   let delivered = 0, cancelled = false, healthy = false, body;
@@ -169,10 +187,10 @@ test("ChatGPT replaces the old buffering hook without losing observed authentica
   const harness = setup(data, 200, { fetchImpl });
   await discover(harness);
   const old = harness.window.__capChatGptFetchState;
-  old.version = 5;
+  old.version = 6;
   harness.reinstall();
   assert.notEqual(harness.window.__capChatGptFetchState, old);
-  assert.equal(harness.window.__capChatGptFetchState.version, 6);
+  assert.equal(harness.window.__capChatGptFetchState.version, 7);
   assert.equal(harness.listeners(), 1);
   assert.equal((await harness.window.__capCaptureChatGptJson()).text,
     "ChatGPT conversation:\n\nUser: Original pasted document\n\nAssistant: Selected answer");

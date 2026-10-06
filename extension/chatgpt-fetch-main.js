@@ -1,5 +1,5 @@
 (() => {
-  const version = 6;
+  const version = 7;
   const channel = "cap-context-chatgpt-json-v2";
   const currentChat = pathname => (pathname ?? location.pathname).match(/\/c\/([^/]+)\/?$/)?.[1];
   const previous = window.__capChatGptFetchState;
@@ -154,6 +154,7 @@
       // do not fetch attachments until the chain reaches a real root.
       const rooted = data.mapping?.[nodeId]?.parent === null;
       const pastedTexts = Object.create(null);
+      const uploads = new Map();
       let pastedBytes = 0;
       for (const message of rooted ? branch : []) {
         if (message?.author?.role !== "user" || message.metadata?.is_visually_hidden_from_conversation
@@ -162,24 +163,32 @@
           if (file?.is_big_paste !== true || file.mime_type !== "text/plain") continue;
           if (typeof file.id !== "string" || !/^file[-_][a-zA-Z0-9_-]+$/.test(file.id)
             || !Number.isSafeInteger(file.size) || file.size < 0) throw new Error("paste");
-          if (Object.hasOwn(pastedTexts, file.id)) continue;
+          if (uploads.has(file.id)) {
+            if (uploads.get(file.id).size !== file.size) throw new Error("paste");
+            continue;
+          }
           pastedBytes += file.size;
           if (pastedBytes > 1400000) throw new Error("size");
-          try {
-            const descriptorResponse = await fetchAuthenticatedJson(`/backend-api/files/download/${encodeURIComponent(file.id)}`, { redirect: "error" });
-            if (descriptorResponse.status !== 200 || descriptorResponse.headers.has("content-range")
-              || !descriptorResponse.headers.get("content-type")?.includes("application/json")) throw new Error("paste");
-            const descriptor = await descriptorResponse.json();
-            if (descriptor.status !== "success" || descriptor.file_size_bytes !== file.size || typeof descriptor.download_url !== "string") throw new Error("paste");
-            const download = new URL(descriptor.download_url, location.origin);
-            // Native preview uses this signed same-origin content route. Keep the
-            // URL in MAIN and never forward bearer headers or follow other hosts.
-            if (download.origin !== location.origin || download.pathname !== "/backend-api/estuary/content"
-              || download.searchParams.get("id") !== file.id) throw new Error("paste");
-            const textResponse = await fetchJson(download.href, { redirect: "error" });
-            pastedTexts[file.id] = await readPaste(textResponse, file.size);
-          } catch { throw new Error("paste"); }
+          uploads.set(file.id, file);
         }
+      }
+      // Validate the complete qualifying manifest before remote file work.
+      // Repeated IDs share one read, but every declaration must match its bytes.
+      for (const file of uploads.values()) {
+        try {
+          const descriptorResponse = await fetchAuthenticatedJson(`/backend-api/files/download/${encodeURIComponent(file.id)}`, { redirect: "error" });
+          if (descriptorResponse.status !== 200 || descriptorResponse.headers.has("content-range")
+            || !descriptorResponse.headers.get("content-type")?.includes("application/json")) throw new Error("paste");
+          const descriptor = await descriptorResponse.json();
+          if (descriptor.status !== "success" || descriptor.file_size_bytes !== file.size || typeof descriptor.download_url !== "string") throw new Error("paste");
+          const download = new URL(descriptor.download_url, location.origin);
+          // Native preview uses this signed same-origin content route. Keep the
+          // URL in MAIN and never forward bearer headers or follow other hosts.
+          if (download.origin !== location.origin || download.pathname !== "/backend-api/estuary/content"
+            || download.searchParams.get("id") !== file.id) throw new Error("paste");
+          const textResponse = await fetchJson(download.href, { redirect: "error" });
+          pastedTexts[file.id] = await readPaste(textResponse, file.size);
+        } catch { throw new Error("paste"); }
       }
       if (controller.signal.aborted || currentChat() !== chat) throw new Error("changed");
       reply.pastedTexts = pastedTexts;

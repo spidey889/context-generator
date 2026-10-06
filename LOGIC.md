@@ -188,7 +188,7 @@ Files: `chatgpt-fetch-main.js` owns fresh native/session/paste reads; `chatgpt-j
 
 Auth and lifecycle:
 
-- Current readiness probes the v6 MAIN hook on `cap-context-chatgpt-json-v2`. The hook responds only while it owns the current fetch wrapper. Replacement retains page-memory auth, and same-chat project path aliases remain valid.
+- Current readiness probes the v7 MAIN hook on `cap-context-chatgpt-json-v2`. The hook responds only while it owns the current fetch wrapper. Replacement retains page-memory auth, and same-chat project path aliases remain valid.
 - Observe only allowlisted auth/account headers on same-origin `/backend-api/` requests. Auth is session/account scoped: cached sidebar/project navigation need not emit a new conversation-specific request.
 - Explicit capture fetches fresh `GET /backend-api/conversation/{id}` with browser cookies and the latest observed headers, without pagination parameters. Late installation obtains `accessToken` and account ID from `/api/auth/session` only during explicit capture.
 - One HTTP 401 retry is shared across tree and paste-descriptor reads. Prefer newer same-workspace observed auth, otherwise refresh the session once; recheck navigation/account cancellation before retrying. Do not retry HTTP 403 or partial history, or redirect to a guessed workspace.
@@ -204,6 +204,7 @@ Tree and text rules:
 Large pasted cards:
 
 - Only active, visible user-turn `metadata.attachments` with `is_big_paste: true` and `mime_type: "text/plain"` qualify, including turns with empty `content.parts`.
+- Before any descriptor/content request, validate every qualifying file ID and nonnegative safe-integer size and the 1,400,000-byte total across unique IDs. Duplicate IDs must declare the same size; one network read may supply repeated owning turns. A bad later entry rejects the complete manifest without downloading earlier valid files. Download order follows the existing active-branch scan; transcript order and per-turn deduplication remain the serializer's responsibility.
 - MAIN obtains the native authenticated `/backend-api/files/download/{id}` descriptor, then reads its signed same-origin `/backend-api/estuary/content?id={id}` URL without bearer headers or redirects. Require HTTP 200 plain text, valid UTF-8, no `Content-Range`, and matching descriptor/attachment/download byte counts. Qualifying pastes share a 1,400,000-byte declared total and the existing 15-second capture deadline. Each body copies chunks into one buffer capped at its declared size; reject and cancel the first excess chunk, including without `Content-Length`, and cancel unread bodies rejected by status/type/length headers. Short/invalid UTF-8 fails, BOM and whitespace remain exact, and reader locks are released before fallback/retry. Native prefetch can receive excess bytes before cancellation; the file buffer cap is not a whole-browser memory cap.
 - Preserve distinct cards in their owning turn; deduplicate repeated file IDs only within that turn. Recognize full inline paragraph copies with LF or CRLF boundaries, restoring original whitespace without shifting other ranges. Arbitrary substrings do not count as copies. A recognized paste that cannot be read completely fails rather than dropping the user turn.
 - Do not fetch inactive-branch, assistant/tool, ordinary upload or non-text paste attachments.
