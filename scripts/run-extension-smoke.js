@@ -48,6 +48,7 @@ const CHATGPT_RELOAD_SMOKE = JSON_SOURCE === "chatgpt" && process.env.CAP_CONTEX
 const JSON_RELOAD_SMOKE = CLAUDE_RELOAD_SMOKE || CHATGPT_RELOAD_SMOKE;
 const CHATGPT_FAILURE_SMOKE = JSON_SOURCE === "chatgpt" ? process.env.CAP_CONTEXT_CHATGPT_FAILURE_SMOKE || "" : "";
 const CHATGPT_PASTE_OVERSIZE_SMOKE = CHATGPT_FAILURE_SMOKE === "paste-oversize";
+const CHATGPT_HISTORY_OVERSIZE_SMOKE = CHATGPT_FAILURE_SMOKE === "history-oversize";
 const CHATGPT_PASTE_AUTH_SMOKE = JSON_SOURCE === "chatgpt" && process.env.CAP_CONTEXT_CHATGPT_AUTH_SMOKE === "paste401";
 const CLAUDE_PARTIAL_SMOKE = JSON_SOURCE === "claude" && process.env.CAP_CONTEXT_CLAUDE_PARTIAL_SMOKE === "1";
 const CLAUDE_OVERSIZE_SMOKE = JSON_SOURCE === "claude" && process.env.CAP_CONTEXT_CLAUDE_PARTIAL_SMOKE === "oversize";
@@ -676,7 +677,9 @@ async function startFixtureServer() {
         assert.equal(url.search, "", "The full-tree URL must not carry recent-page parameters.");
       }
       response.writeHead(full && CHATGPT_FAILURE_SMOKE === "ranged" ? 206 : 200, { "Content-Type": "application/json" });
-      response.end(JSON.stringify(full ? chatGptTreeFixture() : { messages: [], page_info: { has_previous_page: true } }));
+      const history = JSON.stringify(full ? chatGptTreeFixture() : { messages: [], page_info: { has_previous_page: true } });
+      if (full && CHATGPT_HISTORY_OVERSIZE_SMOKE) streamOversizedFixtureResponse(response, history, state.oversizeHistory);
+      else response.end(history);
       return;
     }
     if (url.pathname === "/api/organizations/smoke/chat_conversations/smoke") {
@@ -1806,10 +1809,11 @@ async function run() {
         assert.equal(state.pasteContentRequests, 1, "A rejected paste must not be downloaded again.");
         process.stdout.write(`✓ Brave cancelled oversized paste after ${state.oversizePaste.bytes} fixture bytes.\n`);
       }
-      if (DEEPSEEK_OVERSIZE_SMOKE || CLAUDE_OVERSIZE_SMOKE) {
+      if (DEEPSEEK_OVERSIZE_SMOKE || CLAUDE_OVERSIZE_SMOKE || CHATGPT_HISTORY_OVERSIZE_SMOKE) {
         assert.equal(state.oversizeHistory.cancelled, true, "Brave must cancel the oversized history response.");
         assert.ok(state.oversizeHistory.bytes < 20000000, "The full oversized tail must not be downloaded.");
         assert.equal(state.pasteContentRequests, 0, "Rejected history must not begin file downloads.");
+        if (CHATGPT_HISTORY_OVERSIZE_SMOKE) assert.equal(state.pasteDescriptorRequests, 0);
         process.stdout.write(`✓ Brave cancelled oversized history after ${state.oversizeHistory.bytes} fixture bytes.\n`);
       }
       process.stdout.write(`✓ ${JSON_SOURCE} failed fast capture fell back to DOM within the same transfer.\n`);

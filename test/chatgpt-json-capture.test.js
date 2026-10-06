@@ -60,6 +60,235 @@ async function discover(harness) {
   await harness.window.fetch(new Request(`https://chatgpt.com/backend-api/conversations/${chat}?num_turns=10`, { headers: { Authorization: "Bearer TEST_ONLY", "ChatGPT-Account-Id": "test-account" } }));
 }
 
+function streamJsonChunks(chunks, headers = {}, cancelError = false) {
+  const stats = { bytes: 0, cancelled: 0 };
+  let index = 0;
+  const response = new Response(new ReadableStream({
+    pull(controller) {
+      if (index === chunks.length) return controller.close();
+      const chunk = chunks[index++]; stats.bytes += chunk.byteLength; controller.enqueue(chunk);
+    },
+    cancel() {
+      stats.cancelled++;
+      if (cancelError) throw new Error("PRIVATE_CANCEL_SENTINEL");
+    }
+  }, { highWaterMark: 0 }), { headers: { "content-type": "application/json", ...headers } });
+  return { response, stats };
+}
+
+function jsonStageFixture(stage, responseFor) {
+  const { data, files, fetchImpl } = pasteFixture();
+  const session = { accessToken: "TEST_ONLY", account: { id: "test-account" } };
+  const descriptor = { status: "success", file_size_bytes: files[0].size,
+    download_url: `https://chatgpt.com/backend-api/estuary/content?id=${files[0].id}&sig=SIGNED_URL_SENTINEL` };
+  let healthy = false;
+  const harness = setup(data, 200, { fetchImpl: request => {
+    const pathname = new URL(request.url, "https://chatgpt.com").pathname;
+    const matches = stage === "session" ? pathname === "/api/auth/session"
+      : stage === "history" ? pathname === `/backend-api/conversation/${chat}` : pathname.startsWith("/backend-api/files/download/");
+    if (matches && !healthy) return responseFor({ session, history: data, descriptor }[stage], request);
+    return pathname === "/api/auth/session" ? jsonResponse(session) : fetchImpl(request);
+  } });
+  return { harness, recover() { healthy = true; } };
+}
+
+for (const stage of ["session", "history", "descriptor"]) {
+  for (const length of [undefined, "1", "6000001"]) test(`ChatGPT bounds ${stage} JSON with Content-Length ${length ?? "absent"} and permits recovery`, async () => {
+    let streamed;
+    const { harness, recover } = jsonStageFixture(stage, data => {
+      const prefix = Buffer.from(JSON.stringify(data).slice(0, -1) + ',"ignored":"');
+      streamed = streamJsonChunks([prefix, ...Array(20).fill(new Uint8Array(1000000).fill(32)), Buffer.from('"}')],
+        length ? { "content-length": length } : {}, true);
+      return streamed.response;
+    });
+    if (stage !== "session") await discover(harness);
+    await assert.rejects(harness.window.__capCaptureChatGptJson(), error => {
+      assert.equal(error.captureFailureReason, "incomplete");
+      return true;
+    });
+    assert.equal(streamed.stats.cancelled, 1);
+    assert.ok(streamed.stats.bytes <= 7000000, `The oversized ${stage} body was drained: ${streamed.stats.bytes} bytes.`);
+    if (length === "6000001") assert.equal(streamed.stats.bytes, 0);
+    assert.equal(streamed.response.body.locked, false);
+    assert.ok(harness.replies.every(reply => !reply.data && !reply.pastedTexts));
+    assert.doesNotMatch(JSON.stringify(harness.replies), /PRIVATE_CANCEL_SENTINEL|TEST_ONLY|SIGNED_URL_SENTINEL/);
+    assert.equal(harness.navigationListeners(), 0);
+    recover();
+    assert.equal((await harness.window.__capCaptureChatGptJson()).text,
+      "ChatGPT conversation:\n\nUser: Original pasted document\n\nAssistant: Selected answer");
+  });
+
+  test(`ChatGPT rejects malformed UTF-8 in ${stage} JSON before reading its irrelevant tail`, async () => {
+    let streamed, firstSize;
+    const { harness, recover } = jsonStageFixture(stage, data => {
+      const bytes = Buffer.from(JSON.stringify(data).slice(0, -1) + ',"ignored":"BROKEN');
+      bytes[bytes.indexOf("BROKEN")] = 0xff;
+      firstSize = bytes.length;
+      streamed = streamJsonChunks([bytes, ...Array(5).fill(new Uint8Array(1000000).fill(32)), Buffer.from('"}')]);
+      return streamed.response;
+    });
+    if (stage !== "session") await discover(harness);
+    await assert.rejects(harness.window.__capCaptureChatGptJson(), error => error.captureFailureReason === "incomplete");
+    assert.equal(streamed.stats.bytes, firstSize);
+    assert.equal(streamed.stats.cancelled, 1);
+    assert.equal(streamed.response.body.locked, false);
+    assert.doesNotMatch(JSON.stringify(harness.replies), /BROKEN|TEST_ONLY|SIGNED_URL_SENTINEL/);
+    recover();
+    assert.equal((await harness.window.__capCaptureChatGptJson()).messageTurnCount, 2);
+  });
+}
+
+test("ChatGPT rejects corrupt history text rather than silently replacing its bytes", async () => {
+  const bytes = Buffer.from(JSON.stringify(fixture()));
+  bytes[bytes.indexOf("Question") + 2] = 0xff;
+  const streamed = streamJsonChunks([bytes]);
+  const harness = setup(fixture(), 200, { fetchImpl: request => request.url.startsWith("/backend-api/conversation/")
+    ? streamed.response : jsonResponse({}) });
+  await discover(harness);
+  await assert.rejects(harness.window.__capCaptureChatGptJson(), error => error.captureFailureReason === "incomplete");
+  assert.ok(harness.replies.every(reply => !reply.data && !reply.pastedTexts));
+});
+
+function paddedJson(data, size) {
+  const prefix = Buffer.from(JSON.stringify(data).slice(0, -1) + ',"ignored":"');
+  return Buffer.concat([prefix, Buffer.alloc(size - prefix.length - 2, 32), Buffer.from('"}')]);
+}
+
+test("ChatGPT accepts exactly six million history bytes with split BOM and Unicode while leaving page responses unread", async () => {
+  const data = fixture();
+  const text = "  café🙂\r\n\uFEFF  original text  ";
+  data.mapping.question.message.content.parts = [text];
+  const bytes = Buffer.concat([Buffer.from("\uFEFF"), paddedJson(data, 5999997)]);
+  const split = bytes.indexOf(Buffer.from("🙂")) + 1;
+  const streamed = streamJsonChunks([bytes.subarray(0, 1), bytes.subarray(1, 2), bytes.subarray(2, split),
+    bytes.subarray(split, split + 1), bytes.subarray(split + 1)], { "content-length": "6000000" });
+  let pageResponse;
+  const harness = setup(data, 200, { fetchImpl: request => {
+    if (request.url.startsWith("/backend-api/conversation/")) return streamed.response;
+    pageResponse = jsonResponse(data);
+    return pageResponse;
+  } });
+  await discover(harness);
+  assert.equal((await harness.window.__capCaptureChatGptJson()).text,
+    `ChatGPT conversation:\n\nUser: ${text}\n\nAssistant: Selected answer`);
+  assert.equal(streamed.stats.bytes, 6000000);
+  assert.equal(streamed.stats.cancelled, 0);
+  assert.equal(streamed.response.body.locked, false);
+  assert.equal(pageResponse.bodyUsed, false);
+  assert.deepEqual(await pageResponse.json(), data);
+});
+
+for (const total of [6000000, 6000001]) test(`ChatGPT shares its raw allowance across session, history, descriptor and original paste (${total} bytes)`, async () => {
+  const { data, files } = pasteFixture(["\uFEFF  café🙂\r\noriginal paste  "]);
+  const session = { accessToken: "TEST_ONLY", account: { id: "test-account" } };
+  const descriptor = { status: "success", file_size_bytes: files[0].size,
+    download_url: `https://chatgpt.com/backend-api/estuary/content?id=${files[0].id}&sig=SIGNED_URL_SENTINEL` };
+  const history = paddedJson(data, total - Buffer.byteLength(JSON.stringify(session)) - Buffer.byteLength(JSON.stringify(descriptor)) - files[0].size);
+  let paste;
+  const harness = setup(data, 200, { fetchImpl: request => {
+    const pathname = new URL(request.url, "https://chatgpt.com").pathname;
+    if (pathname === "/api/auth/session") return jsonResponse(session);
+    if (pathname === `/backend-api/conversation/${chat}`) return new Response(history, { headers: { "content-type": "application/json" } });
+    if (pathname.startsWith("/backend-api/files/download/")) return jsonResponse(descriptor);
+    paste = streamJsonChunks([Buffer.from(files[0].text)], { "content-type": "text/plain" });
+    return paste.response;
+  } });
+  if (total === 6000000) {
+    assert.equal((await harness.window.__capCaptureChatGptJson()).text,
+      `ChatGPT conversation:\n\nUser: ${files[0].text}\n\nAssistant: Selected answer`);
+    assert.equal(paste.stats.bytes, files[0].size);
+  } else {
+    await assert.rejects(harness.window.__capCaptureChatGptJson(), error => error.captureFailureReason === "incomplete");
+    assert.equal(paste, undefined, "A declared paste beyond the remaining allowance must be rejected before its request.");
+    assert.ok(harness.replies.every(reply => !reply.data && !reply.pastedTexts));
+  }
+  if (paste) assert.equal(paste.response.body.locked, false);
+});
+
+test("ChatGPT starts no file requests when history leaves less raw budget than the complete paste manifest", async () => {
+  const { data, fetchImpl } = pasteFixture(["x".repeat(100000)]);
+  const history = paddedJson(data, 5950000);
+  const harness = setup(data, 200, { fetchImpl: request => request.url.startsWith("/backend-api/conversation/")
+    ? new Response(history, { headers: { "content-type": "application/json" } }) : fetchImpl(request) });
+  await discover(harness);
+  await assert.rejects(harness.window.__capCaptureChatGptJson(), error => error.captureFailureReason === "incomplete");
+  assert.equal(harness.requests.filter(request => /\/files\/download\/|\/estuary\/content/.test(request.url)).length, 0);
+  assert.ok(harness.replies.every(reply => !reply.data && !reply.pastedTexts));
+});
+
+test("ChatGPT shares the raw allowance across repeated paste descriptors instead of granting each another budget", async () => {
+  const { data, files } = pasteFixture(["First paste", "Second paste"]);
+  const historyBytes = Buffer.byteLength(JSON.stringify(data));
+  let last;
+  const harness = setup(data, 200, { fetchImpl: request => {
+    const url = new URL(request.url, "https://chatgpt.com");
+    if (url.pathname.startsWith("/backend-api/files/download/")) {
+      const file = files.find(entry => url.pathname.endsWith(entry.id));
+      const descriptor = { status: "success", file_size_bytes: file.size,
+        download_url: `https://chatgpt.com/backend-api/estuary/content?id=${file.id}` };
+      const size = file === files[0] ? 3000000 : 3000001 - historyBytes - files[0].size;
+      const streamed = streamJsonChunks([paddedJson(descriptor, size)]);
+      if (file === files[1]) last = streamed;
+      return streamed.response;
+    }
+    if (url.pathname === "/backend-api/estuary/content") return new Response(files[0].text, { headers: { "content-type": "text/plain" } });
+    return jsonResponse(data);
+  } });
+  await discover(harness);
+  await assert.rejects(harness.window.__capCaptureChatGptJson(), error => error.captureFailureReason === "incomplete");
+  assert.equal(harness.requests.filter(request => request.url.includes("/estuary/content")).length, 1);
+  assert.equal(last.stats.cancelled, 1);
+  assert.equal(last.response.body.locked, false);
+  assert.ok(harness.replies.every(reply => !reply.data && !reply.pastedTexts));
+});
+
+test("ChatGPT rejects an unfinished UTF-8 tail after complete JSON and permits a fresh capture", async () => {
+  const streamed = streamJsonChunks([Buffer.from(JSON.stringify(fixture())), new Uint8Array([0xc3])]);
+  let healthy = false;
+  const harness = setup(fixture(), 200, { fetchImpl: request => !healthy && request.url.startsWith("/backend-api/conversation/")
+    ? streamed.response : jsonResponse(fixture()) });
+  await discover(harness);
+  await assert.rejects(harness.window.__capCaptureChatGptJson(), error => error.captureFailureReason === "incomplete");
+  assert.equal(streamed.response.body.locked, false);
+  healthy = true;
+  assert.equal((await harness.window.__capCaptureChatGptJson()).messageTurnCount, 2);
+});
+
+for (const reason of ["navigation", "account", "timeout"]) clockTest(`ChatGPT aborts pending JSON reads on ${reason} and permits recovery`, async () => {
+  let response, signal, readStarted, healthy = false;
+  const began = new Promise(resolve => { readStarted = resolve; });
+  const harness = setup(fixture(), 200, { fetchImpl: request => {
+    if (healthy || !request.url.startsWith("/backend-api/conversation/")) return jsonResponse(fixture());
+    signal = request.options.signal;
+    response = new Response(new ReadableStream({
+      start(controller) {
+        signal.addEventListener("abort", () => controller.error(new Error("PRIVATE_ABORT_SENTINEL")), { once: true });
+      },
+      pull() { readStarted(); return new Promise(() => {}); }
+    }, { highWaterMark: 0 }), { headers: { "content-type": "application/json" } });
+    return response;
+  } });
+  await discover(harness);
+  const capture = harness.window.__capCaptureChatGptJson();
+  await began;
+  if (reason === "navigation") { harness.navigate("/c/another"); harness.navigate(`/c/${chat}`); }
+  if (reason === "account") await harness.window.fetch("/backend-api/settings/user", {
+    headers: { authorization: "Bearer new-account", "chatgpt-account-id": "other-account" }
+  });
+  await assert.rejects(capture, error => {
+    assert.doesNotMatch(error.message, /PRIVATE_ABORT_SENTINEL/);
+    if (reason === "timeout") assert.equal(error.captureFailureReason, "timeout");
+    else assert.match(error.message, /changed during capture/);
+    return true;
+  });
+  assert.equal(signal.aborted, true);
+  assert.equal(response.body.locked, false);
+  assert.equal(harness.navigationListeners(), 0);
+  assert.ok(harness.replies.every(reply => !reply.data && !reply.pastedTexts));
+  healthy = true;
+  assert.equal((await harness.window.__capCaptureChatGptJson()).messageTurnCount, 2);
+});
+
 for (const [stage, status, headers, reason] of [
   ["session", 403, {}, "http"],
   ["history", 206, {}, "http"],
@@ -246,10 +475,10 @@ test("ChatGPT replaces the previous hook without losing observed authentication"
   const harness = setup(data, 200, { fetchImpl });
   await discover(harness);
   const old = harness.window.__capChatGptFetchState;
-  old.version = 7;
+  old.version = 8;
   harness.reinstall();
   assert.notEqual(harness.window.__capChatGptFetchState, old);
-  assert.equal(harness.window.__capChatGptFetchState.version, 8);
+  assert.equal(harness.window.__capChatGptFetchState.version, 9);
   assert.equal(harness.listeners(), 1);
   assert.equal((await harness.window.__capCaptureChatGptJson()).text,
     "ChatGPT conversation:\n\nUser: Original pasted document\n\nAssistant: Selected answer");

@@ -1,5 +1,6 @@
 (() => {
-  const version = 8;
+  const version = 9;
+  const maxCaptureBytes = 6000000;
   const channel = "cap-context-chatgpt-json-v2";
   const currentChat = pathname => (pathname ?? location.pathname).match(/\/c\/([^/]+)\/?$/)?.[1];
   const previous = window.__capChatGptFetchState;
@@ -63,6 +64,38 @@
     // Discard owned responses before retry/fallback; cleanup must never replace
     // the bounded capture error with private upstream cancellation details.
     const discardResponse = response => response.body?.cancel().catch(() => {});
+    // Bound the entire owned read, not each request: session refreshes and
+    // repeated descriptors share the allowance with history and original files.
+    let bytesRead = 0;
+    const readJson = async response => {
+      let reader;
+      try {
+        if (controller.signal.aborted || currentChat() !== chat) throw new Error("changed");
+        if (Number(response.headers.get("content-length")) > maxCaptureBytes - bytesRead) throw new Error("partial");
+        reader = response.body?.getReader();
+        const decoder = new TextDecoder("utf-8", { fatal: true });
+        const parts = [];
+        if (reader) while (true) {
+          const { done, value } = await reader.read();
+          if (controller.signal.aborted || currentChat() !== chat) throw new Error("changed");
+          if (done) break;
+          bytesRead += value.byteLength;
+          if (bytesRead > maxCaptureBytes) throw new Error("partial");
+          const part = decoder.decode(value, { stream: true });
+          if (part) parts.push(part);
+        }
+        // Flush partial UTF-8 at EOF. Silent replacement would alter source
+        // text; parse only a complete, strictly decoded response.
+        parts.push(decoder.decode());
+        return JSON.parse(parts.join(""));
+      } catch {
+        if (reader) await reader.cancel().catch(() => {});
+        else await discardResponse(response);
+        throw new Error("partial");
+      } finally {
+        reader?.releaseLock();
+      }
+    };
     const readPaste = async (response, expectedSize) => {
       let reader;
       try {
@@ -70,6 +103,7 @@
         if (response.status !== 200 || response.headers.has("content-range")
           || response.headers.get("content-type")?.split(";", 1)[0].trim() !== "text/plain"
           || Number(response.headers.get("content-length")) > expectedSize) throw new Error("paste");
+        if (expectedSize > maxCaptureBytes - bytesRead) throw new Error("paste");
         // The manifest bounds this allocation. Never buffer an oversized body
         // first: reject the first excess chunk, including without Content-Length.
         const bytes = new Uint8Array(expectedSize);
@@ -80,6 +114,8 @@
           if (controller.signal.aborted || currentChat() !== chat) throw new Error("changed");
           if (done) break;
           if (size + value.byteLength > expectedSize) throw new Error("paste");
+          bytesRead += value.byteLength;
+          if (bytesRead > maxCaptureBytes) throw new Error("paste");
           bytes.set(value, size); size += value.byteLength;
         }
         if (size !== expectedSize) throw new Error("paste");
@@ -106,7 +142,7 @@
       const revision = authRevision;
       const response = await fetchJson("/api/auth/session");
       await checkTransport(response);
-      const session = await response.json();
+      const session = await readJson(response);
       if (typeof session.accessToken !== "string" || !session.accessToken) throw new Error("auth");
       if (revision !== authRevision && auth) return new Headers(auth);
       const headers = new Headers(auth || undefined);
@@ -141,7 +177,7 @@
       // another workspace on 403; both must fail visibly.
       const response = await fetchAuthenticatedJson(url);
       await checkTransport(response);
-      const data = await response.json();
+      const data = await readJson(response);
       if (controller.signal.aborted || currentChat() !== chat || (data.conversation_id ?? data.id) !== chat) throw new Error("changed");
       // Big pastes are user text stored as files, not text.parts. Read only
       // active-branch user pastes; never use a tool's extracted/rephrased copy.
@@ -180,6 +216,7 @@
       }
       // Validate the complete qualifying manifest before remote file work.
       // Repeated IDs share one read, but every declaration must match its bytes.
+      if (pastedBytes > maxCaptureBytes - bytesRead) throw new Error("paste");
       for (const file of uploads.values()) {
         try {
           const descriptorResponse = await fetchAuthenticatedJson(`/backend-api/files/download/${encodeURIComponent(file.id)}`, { redirect: "error" });
@@ -188,13 +225,16 @@
             await discardResponse(descriptorResponse);
             throw new Error("paste");
           }
-          const descriptor = await descriptorResponse.json();
+          const descriptor = await readJson(descriptorResponse);
           if (descriptor.status !== "success" || descriptor.file_size_bytes !== file.size || typeof descriptor.download_url !== "string") throw new Error("paste");
           const download = new URL(descriptor.download_url, location.origin);
           // Native preview uses this signed same-origin content route. Keep the
           // URL in MAIN and never forward bearer headers or follow other hosts.
           if (download.origin !== location.origin || download.pathname !== "/backend-api/estuary/content"
             || download.searchParams.get("id") !== file.id) throw new Error("paste");
+          // Descriptor/session reads also consume the budget. Recheck before
+          // starting a signed download whose declared body cannot fit.
+          if (file.size > maxCaptureBytes - bytesRead) throw new Error("paste");
           const textResponse = await fetchJson(download.href, { redirect: "error" });
           pastedTexts[file.id] = await readPaste(textResponse, file.size);
         } catch { throw new Error("paste"); }
