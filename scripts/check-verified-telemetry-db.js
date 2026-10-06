@@ -366,6 +366,8 @@ async function main() {
         checks += await require("./check-served-model-db.js").checkServedModel(db, sql);
       } else if (name.endsWith("_reuse_exhausted_user_names.sql")) {
         checks += await require("./check-user-name-reuse-db.js").checkUserNameReuse(db, sql);
+      } else if (name.endsWith("_name_ling_space_bunny_2.sql")) {
+        checks += await require("./check-served-model-db.js").checkServedModelLabel(db, sql);
       } else await db.exec(sql);
     }
     checks += await require("./check-served-model-db.js").checkStoreModelReceipts(db);

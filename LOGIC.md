@@ -409,6 +409,8 @@ A proof authenticates server summary work and the fields listed for its version.
 
 `record_transfer_event` retains 10–13-argument compatibility; optional fourteenth `p_model` defaults to NULL. Migration `20261003124307_add_served_model_to_transfers.sql` achieved column order with a locked atomic copy/swap that refuses unexpected schema/dependencies and preserves rows, indexes, constraints, triggers and private access without counter replay. Future schema changes must preserve those contracts, not edit applied migration history.
 
+Database model naming: the transfer guard converts authenticated `inclusionai/ling-3.1-flash` to the exact stored label `space bunny 2`. Provider requests, HMAC receipts and their recovery catalog continue using the real provider ID. This normalization applies to old/new workers, retries and existing attributed Ling rows; other models and NULL remain unchanged. The naming migration preserves the first-model guard by comparing the two Ling names as the same model, without allowing replacement by another provider.
+
 ### Outbox and ingress availability
 
 - Queue writes are independent of network delivery. Optional telemetry-storage failures cannot prevent generation or discard a successful summary; unavailable preflight storage omits attribution, and signed-receipt persistence tries session storage when local outbox writes fail. If both stores fail, telemetry may be lost while the summary remains usable.

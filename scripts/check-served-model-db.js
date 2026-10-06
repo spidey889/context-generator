@@ -149,7 +149,8 @@ async function checkStoreModelReceipts(db) {
     const legacyProof = await createSummaryProof(event, secret);
     equal((await send({ ...terminal, summary_proof: legacyProof })).status, 204);
     const row = (await db.query("select model,status,failure_reason,summary_verified from public.transfers where attempt_id=$1", [event.attempt_id])).rows[0];
-    equal(row, { model, status: "failed", failure_reason: "paste_failed", summary_verified: true });
+    equal(row, { model: model === "inclusionai/ling-3.1-flash" ? "space bunny 2" : model,
+      status: "failed", failure_reason: "paste_failed", summary_verified: true });
     equal(await counts(), { total: index + 1, today: index + 1, failed: index + 1 });
     equal((await send({ ...terminal, model: "made-up-model" })).status, 422);
     equal(await counts(), { total: index + 1, today: index + 1, failed: index + 1 });
@@ -157,4 +158,35 @@ async function checkStoreModelReceipts(db) {
   console.log(`PASS: ${checks} Web Store receipt, real Edge/RPC, sticky model/outcome and duplicate-counter checks.`);
   return checks;
 }
-module.exports = { checkServedModel, checkStoreModelReceipts };
+
+async function checkServedModelLabel(db, sql) {
+  let checks = 0;
+  const equal = (actual, expected) => { assert.deepEqual(actual, expected); checks++; };
+  const rows = async query => (await db.query(query)).rows;
+  const snapshot = async () => ({
+    transfers: await rows("select to_jsonb(t) as row from public.transfers t order by attempt_id"),
+    users: await rows("select to_jsonb(u) as row from public.users u order by install_id"),
+    security: await rows("select relacl::text,relrowsecurity from pg_class where oid in ('public.transfers'::regclass,'public.users'::regclass) order by oid"),
+    jobs: await rows("select to_jsonb(j) as row from cron.job j order by jobid")
+  });
+  const expected = await snapshot();
+  for (const { row } of expected.transfers) {
+    if (row.model === "inclusionai/ling-3.1-flash") row.model = "space bunny 2";
+  }
+  await db.exec(sql);
+  equal(await snapshot(), expected);
+  const id = 'c0de5706-0000-4000-8000-000000000020';
+  const report = model => db.query(`select public.record_transfer_event(
+    $1::uuid,'label-regression',clock_timestamp(),'claude','chatgpt',50,
+    'succeeded','completed',null,'1.4.8',true,null,clock_timestamp(),$2::text)`, [id, model]);
+  await report("inclusionai/ling-3.1-flash");
+  const stored = async () => (await db.query("select model from public.transfers where attempt_id=$1", [id])).rows[0].model;
+  equal(await stored(), "space bunny 2");
+  await db.query("update public.transfers set model='inclusionai/ling-3.1-flash' where attempt_id=$1", [id]);
+  equal(await stored(), "space bunny 2");
+  await assert.rejects(() => db.query("update public.transfers set model='local-direct' where attempt_id=$1", [id]), error => error.code === "22023"); checks++;
+  equal((await rows("select count(*)::int as n from public.transfers where model='inclusionai/ling-3.1-flash'"))[0].n, 0);
+  console.log(`PASS: ${checks} Space Bunny label, retained rows/counters/access and model immutability checks.`);
+  return checks;
+}
+module.exports = { checkServedModel, checkStoreModelReceipts, checkServedModelLabel };
