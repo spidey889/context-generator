@@ -50,7 +50,8 @@ const CHATGPT_FAILURE_SMOKE = JSON_SOURCE === "chatgpt" ? process.env.CAP_CONTEX
 const CHATGPT_PASTE_OVERSIZE_SMOKE = CHATGPT_FAILURE_SMOKE === "paste-oversize";
 const CHATGPT_PASTE_AUTH_SMOKE = JSON_SOURCE === "chatgpt" && process.env.CAP_CONTEXT_CHATGPT_AUTH_SMOKE === "paste401";
 const CLAUDE_PARTIAL_SMOKE = JSON_SOURCE === "claude" && process.env.CAP_CONTEXT_CLAUDE_PARTIAL_SMOKE === "1";
-const JSON_FALLBACK_SMOKE = Boolean(CHATGPT_FAILURE_SMOKE || CLAUDE_PARTIAL_SMOKE || NETWORK_FAILURE);
+const CLAUDE_OVERSIZE_SMOKE = JSON_SOURCE === "claude" && process.env.CAP_CONTEXT_CLAUDE_PARTIAL_SMOKE === "oversize";
+const JSON_FALLBACK_SMOKE = Boolean(CHATGPT_FAILURE_SMOKE || CLAUDE_PARTIAL_SMOKE || CLAUDE_OVERSIZE_SMOKE || NETWORK_FAILURE);
 const TELEMETRY_DATABASE_SMOKE = process.env.CAP_CONTEXT_TELEMETRY_SMOKE === "1";
 const FAILURE_ARTIFACT_DIR = process.env.CAP_CONTEXT_SMOKE_ARTIFACT_DIR || "";
 
@@ -682,7 +683,7 @@ async function startFixtureServer() {
       state.jsonRequests++;
       state.claudeRequestUrls.push(url.href);
       response.writeHead(200, { "Content-Type": "application/json" });
-      response.end(JSON.stringify({
+      const history = JSON.stringify({
         uuid: "smoke", current_leaf_message_uuid: "assistant",
         ...(CLAUDE_PARTIAL_SMOKE ? { truncated: true } : {}),
         chat_messages: [
@@ -693,7 +694,12 @@ async function startFixtureServer() {
           ] },
           { uuid: "assistant", sender: "assistant", parent_message_uuid: "user", content: [{ type: "text", text: ASSISTANT_SENTINEL }] }
         ]
-      }));
+      });
+      // The initial page-owned routing request stays small and unread. Only the
+      // extension's fresh strong-consistency read receives the oversized tail.
+      if (CLAUDE_OVERSIZE_SMOKE && url.searchParams.get("consistency") === "strong") {
+        streamOversizedFixtureResponse(response, history, state.oversizeHistory);
+      } else response.end(history);
       return;
     }
     if (["/source", "/chat/smoke", "/c/smoke", "/app/smoke", "/a/chat/s/smoke"].includes(url.pathname)) {
@@ -1800,7 +1806,7 @@ async function run() {
         assert.equal(state.pasteContentRequests, 1, "A rejected paste must not be downloaded again.");
         process.stdout.write(`✓ Brave cancelled oversized paste after ${state.oversizePaste.bytes} fixture bytes.\n`);
       }
-      if (DEEPSEEK_OVERSIZE_SMOKE) {
+      if (DEEPSEEK_OVERSIZE_SMOKE || CLAUDE_OVERSIZE_SMOKE) {
         assert.equal(state.oversizeHistory.cancelled, true, "Brave must cancel the oversized history response.");
         assert.ok(state.oversizeHistory.bytes < 20000000, "The full oversized tail must not be downloaded.");
         assert.equal(state.pasteContentRequests, 0, "Rejected history must not begin file downloads.");

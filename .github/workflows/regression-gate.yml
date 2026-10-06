@@ -95,6 +95,16 @@ jobs:
         run: |
           mkdir -p "$CAP_CONTEXT_SMOKE_ARTIFACT_DIR"
           xvfb-run -a npm run test:extension-smoke 2>&1 | tee "$CAP_CONTEXT_SMOKE_ARTIFACT_DIR/run.log"
+      - name: Brave Claude oversized history cancellation and fallback
+        timeout-minutes: 3
+        shell: bash
+        env:
+          CAP_CONTEXT_JSON_SMOKE: "1"
+          CAP_CONTEXT_CLAUDE_PARTIAL_SMOKE: oversize
+          CAP_CONTEXT_SMOKE_ARTIFACT_DIR: .gstack/browser-smoke/claude-oversize
+        run: |
+          mkdir -p "$CAP_CONTEXT_SMOKE_ARTIFACT_DIR"
+          xvfb-run -a npm run test:extension-smoke 2>&1 | tee "$CAP_CONTEXT_SMOKE_ARTIFACT_DIR/run.log"
       - name: Brave DeepSeek concurrent original-file capture
         timeout-minutes: 3
         shell: bash

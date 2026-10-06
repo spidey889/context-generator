@@ -1,5 +1,6 @@
 (() => {
-  const version = 6;
+  const version = 7;
+  const maxHistoryBytes = 6000000;
   const previous = window.__capClaudeFetchState;
   if (previous?.version === version && window.fetch === previous.fetch) return;
   previous?.dispose();
@@ -88,11 +89,36 @@
         await response.body?.cancel().catch(() => {});
         throw new Error("transport");
       }
-      let data;
-      // This fresh response belongs only to capture. Cloning leaves an unread
-      // stream branch buffering the entire body; page responses stay untouched.
-      try { data = await response.json(); }
-      catch (error) { captureFailureReason = "incomplete"; throw error; }
+      let data, reader;
+      try {
+        if (Number(response.headers.get("content-length")) > maxHistoryBytes) throw new Error("size");
+        // Transcript limits apply after parsing. Bound the owned raw stream too,
+        // including inactive/tool metadata and bodies without Content-Length.
+        reader = response.body?.getReader();
+        const decoder = new TextDecoder("utf-8", { fatal: true });
+        const parts = [];
+        let size = 0;
+        if (reader) while (true) {
+          const { done, value } = await reader.read();
+          if (controller.signal.aborted || location.pathname !== `/chat/${chat}`) throw new Error("changed");
+          if (done) break;
+          size += value.byteLength;
+          if (size > maxHistoryBytes) throw new Error("size");
+          const part = decoder.decode(value, { stream: true });
+          if (part) parts.push(part);
+        }
+        // Preserve split UTF-8/BOM state and reject unfinished final bytes;
+        // replacing corrupt bytes would silently change the captured text.
+        parts.push(decoder.decode());
+        data = JSON.parse(parts.join(""));
+      } catch (error) {
+        captureFailureReason = "incomplete";
+        if (reader) await reader.cancel().catch(() => {});
+        else await response.body?.cancel().catch(() => {});
+        throw error;
+      } finally {
+        reader?.releaseLock();
+      }
       if (controller.signal.aborted || location.pathname !== `/chat/${chat}` || data.uuid !== chat) throw new Error("changed");
       reply.data = data;
     } catch {
