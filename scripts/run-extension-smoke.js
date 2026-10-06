@@ -210,6 +210,14 @@ async function createSmokeExtension(tempRoot, origin) {
     currentPlatformReplacement,
     "the current-platform resolver"
   );
+  // pushState can beat the isolated world's 80 ms route poll. Expose only
+  // fixture-owned mount readiness so a new-route click uses its current owner.
+  platformSource = replaceOnce(platformSource,
+    "  function checkInlinePlacementPathname() {",
+    `  window.__capSmokeChatGptMountReady = () => Boolean(chatGptInlineMount?.input?.isConnected
+      && chatGptInlineMount?.bubble?.isConnected && chatGptInlineMount.pathname === window.location.pathname);
+  function checkInlinePlacementPathname() {`,
+    "the fixture inline-route readiness probe");
   const platformUrls = {
     claude: "https://claude.ai/",
     chatgpt: "https://chatgpt.com/",
@@ -1697,6 +1705,9 @@ async function run() {
       // API capture must work before virtualized turns mount, on project routes,
       // without scroll sweeps or opening any pasted-content panels.
       await sourceSession.evaluate(`if (!${JSON_FALLBACK_SMOKE}) document.querySelectorAll("main article").forEach(node => node.remove()); history.pushState({}, "", "/g/project/c/smoke?${SMOKE_PLATFORM_QUERY}=chatgpt"); true`);
+      const contextId = sourceSession.getExtensionContextId();
+      assert.ok(contextId, "The source must expose its extension context before checking route ownership.");
+      await waitFor(() => sourceSession.evaluate("window.__capSmokeChatGptMountReady()", contextId), "ChatGPT inline mounting on the project route");
     }
     if (NETWORK_SOURCE && !JSON_FALLBACK_SMOKE) await sourceSession.evaluate('document.querySelectorAll("main article").forEach(node => node.remove()); true');
     // Responsive placement runs in a second tab. Restore the source tab before
@@ -1985,7 +1996,12 @@ async function run() {
         error.message += `\nSource diagnostics: ${JSON.stringify(await sourceSession.evaluate(`({
           visibility: document.visibilityState,
           errors: [...document.querySelectorAll('[role="alert"]')].map(n => n.textContent),
-          overlay: document.getElementById('context-generator-overlay')?.textContent
+          picker: (() => { const sheet = document.getElementById('context-generator-destination-sheet');
+            return sheet && { display: sheet.style.display, opacity: getComputedStyle(sheet).opacity, hidden: sheet.getAttribute('aria-hidden') }; })(),
+          bubble: (() => { const bubble = document.getElementById('context-generator-bubble');
+            return bubble && { disabled: bubble.disabled, expanded: bubble.getAttribute('aria-expanded'), position: getComputedStyle(bubble).position }; })(),
+          overlay: (() => { const overlay = document.getElementById('context-generator-overlay');
+            return overlay && getComputedStyle(overlay).display !== 'none' ? overlay.textContent : null; })()
         })`))}\nConsole: ${JSON.stringify(sourceSession.getRecentEvents().filter(e =>
           e.method === 'Runtime.exceptionThrown' || e.method === 'Runtime.consoleAPICalled'))}`;
       } catch { /* Preserve the original error if the failed page disconnected. */ }
