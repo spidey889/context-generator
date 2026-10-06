@@ -205,12 +205,12 @@ async function handler(req, res) {
         const proof = await createSummaryProof(validation.telemetry, secret);
         if (proof) {
           const confirmedAt = new Date().toISOString();
-          const proofV2 = await createSummaryProof({ ...validation.telemetry, summary_confirmed_at: confirmedAt }, secret);
           const model = payload.timing.model;
           const proofV3 = await createSummaryProof({ ...validation.telemetry, summary_confirmed_at: confirmedAt, model }, secret);
-          // Retain v1/v2 for installed clients; v3 binds the served model too.
-          // Use the final result, never the primary or first attempted route.
-          payload = { ...payload, summaryProof: proof, summaryProofV2: proofV2,
+          // Published 1.4.8 workers only forward summaryProofV2 + time. Alias the
+          // model-bound proof into that field; Edge authenticates the omitted model.
+          // Deploy the compatible Edge verifier before releasing this backend.
+          payload = { ...payload, summaryProof: proof, summaryProofV2: proofV3,
             summaryProofV3: proofV3, summaryConfirmedAt: confirmedAt, summaryModel: model };
         }
       }

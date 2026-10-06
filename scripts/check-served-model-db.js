@@ -98,4 +98,63 @@ async function checkServedModel(db, sql) {
   console.log(`PASS: ${checks} served-model cutover, preservation, receipt-order, legacy and private-access checks.`);
   return checks;
 }
-module.exports = { checkServedModel };
+// Exercise the published worker's proof/time-only payload through real Edge/SQL.
+async function checkStoreModelReceipts(db) {
+  const { createSummaryProof } = await import("../supabase/functions/_shared/summary-proof.mjs");
+  const { createTelemetryHandler } = await import("../supabase/functions/transfer-telemetry/handler.mjs");
+  const secret = "store-receipt-check-only-0123456789abcdef";
+  const install = "99999999-9999-4999-8999-999999999906";
+  const attempted = new Date().toISOString();
+  let checks = 0;
+  const equal = (actual, expected) => { assert.deepEqual(actual, expected); checks++; };
+  const fields = ["attempt_id", "install_id", "attempted_at", "source_platform", "destination_platform", "character_count",
+    "status", "last_stage", "failure_reason", "extension_version", "summary_verified", "completed_at", "summary_confirmed_at", "model"];
+  const types = ["uuid", "text", "timestamptz", "text", "text", "integer", "text", "text", "text", "text", "boolean", "timestamptz", "timestamptz", "text"];
+  let rpcFailure;
+  const handler = createTelemetryHandler({
+    getEnv: name => ({ TELEMETRY_SIGNING_KEY: secret, TELEMETRY_RELAY_SECRET: secret,
+      SUPABASE_URL: "https://store-check.invalid", SUPABASE_SERVICE_ROLE_KEY: "local-only" })[name],
+    log() {},
+    createClient: () => ({ rpc: async (name, args) => {
+      equal(name, "record_transfer_event");
+      await db.exec("set role service_role");
+      try {
+        await db.query(`select public.record_transfer_event(${types.map((type, i) => `$${i + 1}::${type}`).join(",")})`, fields.map(field => args[`p_${field}`]));
+        return { error: null };
+      } catch (error) {
+        rpcFailure = error;
+        return { error };
+      } finally { await db.exec("reset role"); }
+    } })
+  });
+  const send = async body => {
+    const response = await handler(new Request("https://store-check.invalid", {
+      method: "POST", headers: { "Content-Type": "application/json", "X-Cap-Context-Relay": secret }, body: JSON.stringify(body)
+    }));
+    if (rpcFailure) throw rpcFailure;
+    return response;
+  };
+  const counts = async () => (await db.query("select lifetime_summaries::int as total,today_summaries::int as today,today_failed_attempts::int as failed from public.users where install_id=$1", [install])).rows[0];
+  for (const [index, model] of ["local-direct", "inclusionai/ling-3.1-flash", "gemini-3.5-flash-lite"].entries()) {
+    const event = { attempt_id: `c0de5706-0000-4000-8000-${String(index + 1).padStart(12, "0")}`,
+      install_id: install, attempted_at: attempted, source_platform: "chatgpt", destination_platform: "claude",
+      character_count: 5000, status: "started", last_stage: "summary_completed", failure_reason: null,
+      extension_version: "1.4.8", summary_confirmed_at: attempted };
+    const summary_proof = await createSummaryProof({ ...event, model }, secret);
+    const oldWorker = { ...event, summary_proof }; // No model field survives the old worker.
+    equal((await send(oldWorker)).status, 204);
+    const terminal = { ...oldWorker, status: "failed", last_stage: "paste_started", failure_reason: "paste_failed" };
+    equal((await send(terminal)).status, 204);
+    equal((await send(terminal)).status, 204);
+    const legacyProof = await createSummaryProof(event, secret);
+    equal((await send({ ...terminal, summary_proof: legacyProof })).status, 204);
+    const row = (await db.query("select model,status,failure_reason,summary_verified from public.transfers where attempt_id=$1", [event.attempt_id])).rows[0];
+    equal(row, { model, status: "failed", failure_reason: "paste_failed", summary_verified: true });
+    equal(await counts(), { total: index + 1, today: index + 1, failed: index + 1 });
+    equal((await send({ ...terminal, model: "made-up-model" })).status, 422);
+    equal(await counts(), { total: index + 1, today: index + 1, failed: index + 1 });
+  }
+  console.log(`PASS: ${checks} Web Store receipt, real Edge/RPC, sticky model/outcome and duplicate-counter checks.`);
+  return checks;
+}
+module.exports = { checkServedModel, checkStoreModelReceipts };
