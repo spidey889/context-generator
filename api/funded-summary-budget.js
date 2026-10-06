@@ -51,7 +51,12 @@ async function reserveFundedSummaryBudget(req, units, options = {}) {
         body: JSON.stringify(["EVAL", RESERVE_SCRIPT, 2, ...keys, units, 86460, ipLimit, globalLimit])
       });
       checkDeadline();
-      if (!response.ok) return false;
+      if (!response.ok) {
+        // The reservation is rejected; its private body is unused. Stop the
+        // owned fetch before clearing its deadline, without aborting the caller.
+        controller.abort();
+        return false;
+      }
       const body = await response.json();
       checkDeadline();
       return body.result === 1;

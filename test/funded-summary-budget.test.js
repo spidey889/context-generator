@@ -75,6 +75,44 @@ test("missing, invalid, zero, rejected and malformed shared accounting cannot ad
   }
 });
 
+for (const status of [401, 429, 503]) test(`rejected HTTP ${status} accounting closes its native unread body`, { timeout: 5000 }, async () => {
+  const nativeFetch = global.fetch;
+  const caller = new AbortController();
+  let noteClosed, closeTimer, attemptSignal, bodyReads = 0, requests = 0;
+  const closed = new Promise(resolve => { noteClosed = resolve; });
+  const server = http.createServer((_req, res) => {
+    res.once("close", () => noteClosed(!res.writableEnded));
+    res.writeHead(status, { "Content-Type": "application/json" });
+    res.write('{"error":"PRIVATE_STORE_BODY');
+  });
+  await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
+  try {
+    const allowed = await reserve({ headers: {} }, 1, { env, signal: caller.signal,
+      fetchImpl: async (_url, options) => {
+        requests++;
+        attemptSignal = options.signal;
+        const upstream = await nativeFetch(`http://127.0.0.1:${server.address().port}`, options);
+        for (const method of ["json", "text", "arrayBuffer"]) {
+          const readBody = upstream[method].bind(upstream);
+          upstream[method] = () => { bodyReads++; return readBody(); };
+        }
+        return upstream;
+      } });
+    assert.equal(allowed, false);
+    assert.equal(requests, 1);
+    assert.equal(bodyReads, 0, "Rejected private store data must stay unread.");
+    assert.equal(caller.signal.aborted, false, "Discarding an owned response must not cancel its caller.");
+    assert.equal(await Promise.race([closed, new Promise(resolve => {
+      closeTimer = setTimeout(() => resolve(false), 1000);
+    })]), true, "Rejecting the reservation must close its unfinished native socket.");
+    assert.equal(attemptSignal.aborted, true);
+  } finally {
+    clearTimeout(closeTimer);
+    server.closeAllConnections();
+    await new Promise(resolve => server.close(resolve));
+  }
+});
+
 clockTest("accounting deadline covers a stalled response body and aborts its fetch", async () => {
   let signal;
   assert.equal(await reserve({ headers: {} }, 1, { env, fetchImpl: async (_url, options) => {
