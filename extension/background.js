@@ -308,7 +308,11 @@ async function restoreActiveTransferTelemetry() {
       Object.assign(retained[attemptId], confirmation);
     }
   }
-  await activeStorage.set({ [TELEMETRY_ACTIVE_STORAGE_KEY]: retained });
+  // Normal progress rereads clean records; only expiry/schema cleanup needs a
+  // write. Avoid putting unchanged snapshots back on the summary's I/O path.
+  if (JSON.stringify(entries) !== JSON.stringify(retained)) {
+    await activeStorage.set({ [TELEMETRY_ACTIVE_STORAGE_KEY]: retained });
+  }
 }
 
 async function persistActiveTransferTelemetry(attemptId) {

@@ -421,6 +421,64 @@ test("queue bounds remove progress before terminals and record expired or overfl
   assert.equal(allTerminal.local[DIAGNOSTICS].recent.at(-1).summaryConfirmed, true);
 });
 
+clockTest("slow storage progress bursts retain summary attribution within the existing optional deadline", async t => {
+  t.mock.timers.setTime(NOW);
+  const requests = [];
+  const background = worker(async (url, options) => {
+    if (url.endsWith("/api/telemetry")) throw new Error("offline");
+    requests.push(JSON.parse(options.body));
+    return { ok: true, status: 200, json: async () => ({ summary: "available summary" }) };
+  }, profile(), () => Date.now());
+  await background.settled();
+  // Thirty milliseconds per storage operation models a responsive but slow
+  // profile. Progress snapshots queue without waiting in the source page.
+  background.evaluate(`for (const area of ["local", "session"]) for (const method of ["get", "set"]) {
+    const original = chrome.storage[area][method];
+    chrome.storage[area][method] = async (...args) => {
+      await new Promise(resolve => setTimeout(resolve, 30));
+      return original(...args);
+    };
+  }`);
+  const stages = ["intent_started", "capture_started", "capture_completed", "summary_request_started"];
+  const snapshots = stages.map(lastStage => background.ack(event(1, { lastStage })));
+  const startedAt = Date.now();
+  const operation = summaryWithin(background, NOW + 5000);
+  try {
+    const result = await operation.observed;
+    assert.equal(result?.summary, "available summary");
+    assert.equal(requests.length, 1);
+    assert.equal(requests[0].telemetry?.attempt_id, id(1), "Responsive storage must retain attribution through the progress burst.");
+    assert.equal(requests[0].telemetry.last_stage, "summary_request_started");
+    assert.ok(Date.now() - startedAt < 1000);
+  } finally {
+    await operation.request;
+    await Promise.all(snapshots);
+    await background.settled();
+  }
+});
+
+test("active restore still removes expired and malformed records and sanitizes a retained signed receipt", async () => {
+  const proof = "c".repeat(64);
+  const shared = profile({}, { [ACTIVE]: {
+    [id(1)]: { event: { ...event(), extensionVersion: "1.4.5", untrusted: "SENSITIVE_ACTIVE_VALUE" }, tabId: 42,
+      expiresAt: NOW + 300000, summary_proof: proof, summary_confirmed_at: new Date(NOW).toISOString(),
+      model: "gemini-3.5-flash-lite", untrusted: "SENSITIVE_ACTIVE_VALUE" },
+    [id(2)]: { event: event(2), tabId: 42, expiresAt: NOW - 1 },
+    [id(3)]: { event: event(4), tabId: 42, expiresAt: NOW + 300000 }
+  } });
+  const background = worker(async () => { throw new Error("offline"); }, shared);
+  await background.settled();
+  assert.deepEqual(Object.keys(shared.session[ACTIVE]), [id(1)]);
+  assert.equal(shared.session[ACTIVE][id(1)].summary_proof, proof);
+  assert.equal(shared.session[ACTIVE][id(1)].event.extensionVersion, "1.4.5");
+  assert.doesNotMatch(JSON.stringify(shared), /SENSITIVE_ACTIVE_VALUE/);
+  assert.equal(shared.local[DIAGNOSTICS].counts.outcome_unknown, 1);
+  await background.listeners.removed(42);
+  await background.settled();
+  assert.equal(shared.local[OUTBOX][0].payload.failure_reason, "user_cancelled");
+  assert.equal(shared.local[OUTBOX][0].payload.summary_proof, proof);
+});
+
 for (const area of ["local", "session"]) {
   clockTest(`stalled ${area} telemetry reads allow summaries, cache reuse and later requests`, async t => {
     t.mock.timers.setTime(NOW);
