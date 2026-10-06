@@ -19,9 +19,9 @@ Read the invariants and ownership map first, then the section for the component 
 Runtime and packaging:
 
 - Node 22 for backend/scripts/CI. The extension has no build step or runtime npm dependencies; browser checks load `extension/` directly.
-- [extension/manifest.json](extension/manifest.json) is the version and shipped-host authority. It currently declares version `1.4.8`, Chromium service-worker and Firefox background-script variants. Automation uses Brave; that does not certify Firefox compatibility.
+- [extension/manifest.json](extension/manifest.json) is the version and shipped-host authority. It currently declares version `1.4.9`, Chromium service-worker and Firefox background-script variants. Automation uses Brave; that does not certify Firefox compatibility.
 - The extension's backend alias is `https://context-generator-five.vercel.app`. Its Latest Run bridge is injected on `https://spidey889.github.io/context-generator/analysis*`, not on arbitrary copies of the analysis page.
-- No release ZIP is tracked. Packaging and Web Store publication are separate from repository changes. Product-film sources, reproduction instructions and credits remain in [brag/README.md](brag/README.md).
+- No release ZIP is tracked. Packaging and Web Store publication are separate from repository changes. Source version 1.4.9 includes the Claude focus/remount/stability fixes; the published 1.4.8 build inspected on October 6 lacks them. A backend deployment or Git push cannot update those installed content scripts. See [the release-gap diagnosis](docs/claude-paste-release-gap.md). Product-film sources, reproduction instructions and credits remain in [brag/README.md](brag/README.md).
 
 ## Invariants
 
