@@ -421,6 +421,57 @@ test("queue bounds remove progress before terminals and record expired or overfl
   assert.equal(allTerminal.local[DIAGNOSTICS].recent.at(-1).summaryConfirmed, true);
 });
 
+for (const scenario of [
+  { name: "terminal over progress", terminals: false, signed: false, terminal: true, dropped: 1, reason: "overflow_progress" },
+  { name: "receipt over progress", terminals: false, signed: true, terminal: false, dropped: 1, reason: "overflow_progress" },
+  { name: "new terminal in a terminal-only queue", terminals: true, signed: false, terminal: true, dropped: 1, reason: "overflow_terminal" },
+  { name: "progress below terminals", terminals: true, signed: false, terminal: false, dropped: 501, reason: "overflow_progress" },
+  { name: "receipt below terminals", terminals: true, signed: true, terminal: false, dropped: 501, reason: "overflow_confirmation" }
+]) test(`outbox appends ${scenario.name} with one bounded durable snapshot when later writes fail`, async () => {
+  const proof = "d".repeat(64);
+  const incoming = event(501, { status: scenario.terminal ? "succeeded" : "started",
+    lastStage: scenario.terminal ? "completed" : scenario.signed ? "summary_completed" : "capture_completed" });
+  const entries = Array.from({ length: 500 }, (_, i) => ({ deliveryId: id(i + 10000), queuedAt: NOW,
+    payload: payload(i + 1, scenario.terminals ? { status: "succeeded", last_stage: "completed" } : {}) }));
+  const shared = profile({ [OUTBOX]: entries,
+    [DIAGNOSTICS]: { counts: {}, recent: [], retry: { failures: 1, nextAttemptAt: NOW + 60000, kind: "retry" } }
+  }, scenario.signed ? { [ACTIVE]: { [id(501)]: {
+    event: event(501), tabId: 42, expiresAt: NOW + 300000, summary_proof: proof,
+    summary_confirmed_at: new Date(NOW).toISOString(), model: "gemini-3.5-flash-lite"
+  } } } : {});
+  const background = worker(async () => { throw new Error("offline"); }, shared);
+  await background.settled();
+  // Simulate storage becoming unavailable after its first outbox commit.
+  // A post-write cleanup cannot repair an already oversized durable snapshot.
+  background.evaluate(`globalThis.outboxWriteSizes = []; const originalSet = chrome.storage.local.set;
+    chrome.storage.local.set = async entries => {
+      const outbox = entries[${JSON.stringify(OUTBOX)}];
+      if (Array.isArray(outbox)) {
+        outboxWriteSizes.push(outbox.length);
+        if (outboxWriteSizes.length > 1) throw new Error("storage unavailable after first outbox commit");
+      }
+      return originalSet(entries);
+    };`);
+  assert.equal((await background.ack(incoming)).ok, true);
+  await background.settled();
+  assert.deepEqual(Array.from(background.evaluate("outboxWriteSizes")), [500]);
+  assert.equal(shared.local[OUTBOX].length, 500);
+  assert.ok(shared.local[OUTBOX].every(entry => entry.payload.attempt_id !== id(scenario.dropped)));
+  assert.equal(shared.local[DIAGNOSTICS].counts[scenario.reason], 1);
+  assert.equal(shared.local[DIAGNOSTICS].recent.at(-1).attemptId, id(scenario.dropped));
+  assert.doesNotMatch(JSON.stringify(shared.local[DIAGNOSTICS]), new RegExp(proof));
+  const retained = shared.local[OUTBOX].find(entry => entry.payload.attempt_id === id(501));
+  if (scenario.dropped === 501) assert.equal(retained, undefined);
+  else {
+    assert.equal(retained.payload.status, incoming.status);
+    assert.equal(retained.payload.last_stage, incoming.lastStage);
+    if (scenario.signed) {
+      assert.equal(retained.payload.summary_proof, proof);
+      assert.equal(retained.payload.model, "gemini-3.5-flash-lite");
+    }
+  }
+});
+
 clockTest("slow storage progress bursts retain summary attribution within the existing optional deadline", async t => {
   t.mock.timers.setTime(NOW);
   const requests = [];

@@ -450,6 +450,14 @@ async function readTelemetryOutbox() {
   const entries = Array.isArray(stored?.[TELEMETRY_OUTBOX_STORAGE_KEY])
     ? stored[TELEMETRY_OUTBOX_STORAGE_KEY]
     : [];
+  const retained = await compactTelemetryOutbox(entries);
+  if (JSON.stringify(entries) !== JSON.stringify(retained)) {
+    await chrome.storage.local.set({ [TELEMETRY_OUTBOX_STORAGE_KEY]: retained });
+  }
+  return retained;
+}
+
+async function compactTelemetryOutbox(entries) {
   const retained = [];
   for (const entry of entries) {
     const payload = sanitizeStoredTelemetryPayload(entry?.payload);
@@ -477,9 +485,6 @@ async function readTelemetryOutbox() {
     await recordTelemetryDiagnostic(removed.payload.status !== "started" ? "overflow_terminal"
       : removed.payload.summary_proof ? "overflow_confirmation" : "overflow_progress", removed.payload);
   }
-  if (JSON.stringify(entries) !== JSON.stringify(retained)) {
-    await chrome.storage.local.set({ [TELEMETRY_OUTBOX_STORAGE_KEY]: retained });
-  }
   return retained;
 }
 
@@ -502,8 +507,10 @@ async function appendTelemetryOutbox(payload) {
   };
   if (previousIndex === -1) outbox.push(entry);
   else outbox[previousIndex] = entry;
-  await chrome.storage.local.set({ [TELEMETRY_OUTBOX_STORAGE_KEY]: outbox });
-  await readTelemetryOutbox();
+  // Validate/prune the new snapshot before its one durable commit. A worker
+  // stopping after this write must never leave an oversized or unsanitized queue.
+  const retained = await compactTelemetryOutbox(outbox);
+  await chrome.storage.local.set({ [TELEMETRY_OUTBOX_STORAGE_KEY]: retained });
 }
 
 async function flushTelemetryOutbox() {
