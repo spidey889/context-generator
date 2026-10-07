@@ -551,6 +551,8 @@ Fresh checkout: use Node 22, install Brave, then run `npm ci` and `npm run gate`
 
 Keep shared deadline/decoding boundary checks once, plus each provider's distinct routing policy and each platform's capture wiring. Prefer observable failures and recovery over source-text assertions. Native socket cancellation, privacy, SQL replay and installed-browser integration establish separate behavior and remain required where applicable.
 
+JSON reader rejection matrices run once per implementation: Claude, ChatGPT and the shared Gemini/Grok/DeepSeek reader. ChatGPT retains session/history/paste-descriptor wiring checks; each network adapter retains exact Unicode capture and rejected-transport cancellation. Combine overlapping success fixtures while keeping platform-specific parsing, attachment, identity, deadline and fallback regressions.
+
 | Change | Focused check | Additional evidence when relevant |
 | --- | --- | --- |
 | DOM capture, pasted cards, placement, picker/handoff, paste | `node --test --test-skip-pattern="^slow/release:" test/platform-content.test.js` | `npm run test:slow` for capture changes; installed Brave smoke for meaningful extension/UI changes |

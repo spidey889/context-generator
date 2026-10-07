@@ -93,7 +93,10 @@ function jsonStageFixture(stage, responseFor) {
 }
 
 for (const stage of ["session", "history", "descriptor"]) {
-  for (const length of [undefined, "1", "6000001"]) test(`ChatGPT bounds ${stage} JSON with Content-Length ${length ?? "absent"} and permits recovery`, async () => {
+  // All three stages use readJson. Keep its header matrix once, with one
+  // oversized streamed response per other stage to protect their wiring.
+  const lengths = stage === "history" ? [undefined, "1", "6000001"] : [undefined];
+  for (const length of lengths) test(`ChatGPT bounds ${stage} JSON with Content-Length ${length ?? "absent"} and permits recovery`, async () => {
     let streamed;
     const { harness, recover } = jsonStageFixture(stage, data => {
       const prefix = Buffer.from(JSON.stringify(data).slice(0, -1) + ',"ignored":"');
@@ -117,36 +120,26 @@ for (const stage of ["session", "history", "descriptor"]) {
     assert.equal((await harness.window.__capCaptureChatGptJson()).text,
       "ChatGPT conversation:\n\nUser: Original pasted document\n\nAssistant: Selected answer");
   });
-
-  test(`ChatGPT rejects malformed UTF-8 in ${stage} JSON before reading its irrelevant tail`, async () => {
-    let streamed, firstSize;
-    const { harness, recover } = jsonStageFixture(stage, data => {
-      const bytes = Buffer.from(JSON.stringify(data).slice(0, -1) + ',"ignored":"BROKEN');
-      bytes[bytes.indexOf("BROKEN")] = 0xff;
-      firstSize = bytes.length;
-      streamed = streamJsonChunks([bytes, ...Array(5).fill(new Uint8Array(1000000).fill(32)), Buffer.from('"}')]);
-      return streamed.response;
-    });
-    if (stage !== "session") await discover(harness);
-    await assert.rejects(harness.window.__capCaptureChatGptJson(), error => error.captureFailureReason === "incomplete");
-    assert.equal(streamed.stats.bytes, firstSize);
-    assert.equal(streamed.stats.cancelled, 1);
-    assert.equal(streamed.response.body.locked, false);
-    assert.doesNotMatch(JSON.stringify(harness.replies), /BROKEN|TEST_ONLY|SIGNED_URL_SENTINEL/);
-    recover();
-    assert.equal((await harness.window.__capCaptureChatGptJson()).messageTurnCount, 2);
-  });
 }
 
-test("ChatGPT rejects corrupt history text rather than silently replacing its bytes", async () => {
-  const bytes = Buffer.from(JSON.stringify(fixture()));
-  bytes[bytes.indexOf("Question") + 2] = 0xff;
-  const streamed = streamJsonChunks([bytes]);
-  const harness = setup(fixture(), 200, { fetchImpl: request => request.url.startsWith("/backend-api/conversation/")
-    ? streamed.response : jsonResponse({}) });
+test("ChatGPT rejects corrupt history text before draining its tail and permits recovery", async () => {
+  let streamed, firstSize;
+  const { harness, recover } = jsonStageFixture("history", data => {
+    const bytes = Buffer.from(JSON.stringify(data).slice(0, -1) + ',"ignored":"');
+    bytes[bytes.indexOf("Selected answer") + 2] = 0xff;
+    firstSize = bytes.length;
+    streamed = streamJsonChunks([bytes, ...Array(5).fill(new Uint8Array(1000000).fill(32)), Buffer.from('"}')]);
+    return streamed.response;
+  });
   await discover(harness);
   await assert.rejects(harness.window.__capCaptureChatGptJson(), error => error.captureFailureReason === "incomplete");
+  assert.equal(streamed.stats.bytes, firstSize);
+  assert.equal(streamed.stats.cancelled, 1);
+  assert.equal(streamed.response.body.locked, false);
   assert.ok(harness.replies.every(reply => !reply.data && !reply.pastedTexts));
+  assert.doesNotMatch(JSON.stringify(harness.replies), /TEST_ONLY|SIGNED_URL_SENTINEL/);
+  recover();
+  assert.equal((await harness.window.__capCaptureChatGptJson()).messageTurnCount, 2);
 });
 
 function paddedJson(data, size) {

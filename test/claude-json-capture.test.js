@@ -208,17 +208,6 @@ test("Claude cancels discarded transport responses and keeps safe fallback reaso
   }
 });
 
-test("Claude JSON capture preserves a large pasted attachment in its owning user turn", async () => {
-  const data = fixture();
-  const pastedText = `PASTE_START\n${"  preserve indentation and full lines\r\n".repeat(1200)}PASTE_END`;
-  data.chat_messages[0].attachments = [pastedAttachment(pastedText)];
-  const harness = setup(data);
-  await harness.window.fetch(endpoint);
-  const capture = await harness.window.__capCaptureClaudeJson();
-  assert.equal(capture.text, `Claude conversation:\n\nUser: Question\n\n${pastedText}\n\nAssistant: Private reasoning\n\nSelected answer`);
-  assert.equal(capture.messageTurnCount, 2);
-});
-
 test("Claude capture reads its dedicated response once and leaves the page response readable", async () => {
   const data = fixture();
   const pastedText = `  café🙂\r\n${"  original pasted line\r\n".repeat(10000)}END  `;
@@ -227,6 +216,7 @@ test("Claude capture reads its dedicated response once and leaves the page respo
   const pageResponse = await harness.window.fetch(endpoint);
   const capture = await harness.window.__capCaptureClaudeJson();
   assert.equal(capture.text, `Claude conversation:\n\nUser: Question\n\n${pastedText}\n\nAssistant: Private reasoning\n\nSelected answer`);
+  assert.equal(capture.messageTurnCount, 2);
   assert.equal(harness.stats().requests, 2);
   assert.equal(harness.stats().clones, 0, "The extension's fresh response has no second reader.");
   assert.equal(pageResponse.bodyUsed, false, "Observing the page's routing must not consume its body.");

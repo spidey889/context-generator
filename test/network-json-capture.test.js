@@ -76,8 +76,10 @@ function deepseekUploads(count = 6) {
   return f;
 }
 
+// These adapters share one chunk reader. Run its decoder/budget rejection
+// matrix on Grok; retain Unicode success and transport validation per adapter.
 for (const platform of ["gemini", "grok", "deepseek"]) {
-  test(`${platform}: invalid UTF-8 stops history consumption immediately and permits a fresh capture`, async () => {
+  if (platform === "grok") test(`${platform}: invalid UTF-8 stops history consumption immediately and permits a fresh capture`, async () => {
     let delivered = 0, cancelled = false, healthy = false, body;
     const padding = new Uint8Array(1000000).fill(32);
     const h = setup(platform, fixtures(platform), { responseTransform: response => {
@@ -109,7 +111,7 @@ for (const platform of ["gemini", "grok", "deepseek"]) {
     assert.equal((await h.window.__capCaptureNetworkJson()).text, h.fixture.expected);
   });
 
-  test(`${platform}: history streams stop at the raw budget without Content-Length and allow a fresh capture`, async () => {
+  if (platform === "grok") test(`${platform}: history streams stop at the raw budget without Content-Length and allow a fresh capture`, async () => {
     let delivered = 0, cancelled = false, healthy = false, body;
     const padding = new Uint8Array(1000000).fill(32);
     const h = setup(platform, fixtures(platform), { responseTransform: async response => {
@@ -168,7 +170,7 @@ for (const platform of ["gemini", "grok", "deepseek"]) {
     assert.ok(splitCodepoints > 0, "Unicode must actually cross a delivered chunk boundary.");
   });
 
-  test(`${platform}: an unfinished UTF-8 character after valid history must not be silently dropped`, async () => {
+  if (platform === "grok") test(`${platform}: an unfinished UTF-8 character after valid history must not be silently dropped`, async () => {
     let healthy = false;
     const h = setup(platform, fixtures(platform, "smoke", 1), { responseTransform: async response => {
       if (healthy || !response.headers.get("content-type")?.includes("application/json")) return response;
@@ -186,6 +188,7 @@ for (const platform of ["gemini", "grok", "deepseek"]) {
   test(`${platform}: rejected transport cancels its unread response without exposing cancellation errors`, async () => {
     for (const [status, headers, reason] of [
       [206, { "content-type": "application/json" }, "incomplete"],
+      [200, { "content-type": "application/json", "content-range": "bytes 0-2/9" }, "incomplete"],
       [200, { "content-type": "text/html" }, "incomplete"],
       [200, { "content-type": "application/json", "content-length": "6000001" }, "size_limit"]
     ]) {
@@ -203,6 +206,7 @@ for (const platform of ["gemini", "grok", "deepseek"]) {
       assert.equal(cancelled, true);
       assert.equal(body.locked, false);
       assert.equal(h.navigationListeners(), 0);
+      assert.ok(h.replies.every(reply => !reply.capture));
     }
   });
 }
@@ -374,8 +378,13 @@ test("DeepSeek: overlapping body reads share the history's raw byte budget", asy
   assert.equal(h.navigationListeners(), 0);
 });
 for (const platform of ["gemini", "grok", "deepseek"]) {
-  test(`${platform}: exact complete ordered history with large own paste and document; no tool/file leakage`, async () => {
+  test(`${platform}: inert reinstall and data-free ping preserve exact ordered capture without tool/file leakage`, async () => {
     const h = setup(platform); await h.observe(); const before = h.requests.length;
+    h.reinstall(files[1]); h.reinstall(files[2]);
+    h.window.postMessage({ channel: "cap-context-network-json-v1", platform, type: "ping", id: "probe" });
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(h.requests.length, before);
+    assert.equal(h.listeners.size, 1);
     assert.equal(h.replies.length, 0);
     const capture = await h.window.__capCaptureNetworkJson();
     assert.equal(capture.text, h.fixture.expected);
@@ -385,27 +394,11 @@ for (const platform of ["gemini", "grok", "deepseek"]) {
     assert.equal(h.listeners.size, 1);
     assert.equal(h.requests.length - before, platform === "gemini" ? 3 : 2);
   });
-  test(`${platform}: repeated installation is inert and ping never reads data`, async () => {
-    const h = setup(platform); await h.observe(); const before = h.requests.length;
-    h.reinstall(files[1]); h.reinstall(files[2]);
-    h.window.postMessage({ channel: "cap-context-network-json-v1", platform, type: "ping", id: "probe" });
-    await new Promise(resolve => setImmediate(resolve));
-    assert.equal(h.requests.length, before); assert.equal(h.listeners.size, 1);
-    assert.equal((await h.window.__capCaptureNetworkJson()).text, h.fixture.expected);
-  });
   test(`${platform}: navigation cancels capture, never returns stale text`, async () => {
     let h; h = setup(platform, fixtures(platform), { fetchImpl: async request => { if (!request.url.pathname.endsWith("/session")) h.navigate(); return new Response("{}"); } });
     await h.observe();
     await assert.rejects(h.window.__capCaptureNetworkJson(), /conversation changed|cancelled/);
     assert.equal(h.listeners.size, 1);
-  });
-  test(`${platform}: ranged/non-JSON responses fail visibly`, async () => {
-    for (const response of [new Response("{}", { status: 206, headers: { "content-type": "application/json" } }), new Response("{}", { headers: { "content-type": "text/html" } }), new Response("{}", { headers: { "content-type": "application/json", "content-range": "bytes 0-2/9" } })]) {
-      const h = setup(platform, fixtures(platform), { fetchImpl: async () => response });
-      if (platform === "deepseek") { h.context.window.__capNetworkFetchState.dispose(); h.context.window.fetch = async () => response; h.reinstall(files[1]); await h.window.fetch("/api/v0/session", { headers: { authorization: "Bearer AUTH_SENTINEL" } }); }
-      else await h.observe();
-      await assert.rejects(h.window.__capCaptureNetworkJson(), /partial|unsupported/);
-    }
   });
 }
 test("Gemini: Unicode frame lengths, selected candidate, page root and broken chains", () => {
