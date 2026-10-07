@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-07-claude-picker-lock-v113";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-07-artwork-cutout-v114";
   const INLINE_PILL_SIZE = 36;
   const ownedUiStyleSheets = new Map();
   const CLAUDE_INLINE_STYLE_ID = "context-generator-claude-inline-styles";
@@ -5184,9 +5184,9 @@
       `max-width:${BUBBLE_SIZE}px`,
       `max-height:${BUBBLE_SIZE}px`,
       "border-radius:9999px",
-      "background:transparent",
-      "border:0",
-      "box-shadow:none",
+      "background:transparent !important",
+      "border:0 !important",
+      "box-shadow:none !important",
       "box-sizing:border-box",
       "cursor:pointer",
       "padding:0",
@@ -5244,6 +5244,9 @@
     });
     addOwnedEventListener(bubble, "pointercancel", () => {
       bubble.style.transform = "translate3d(0,0,0) scale(1)";
+    });
+    addOwnedEventListener(bubble, "transitionend", (event) => {
+      if (event.target === bubble && event.propertyName === "transform") updateDestinationBackdropCutout();
     });
     addOwnedEventListener(bubble, "click", (event) => {
       event.preventDefault();
@@ -6817,11 +6820,12 @@
       backdrop.style.clipPath = "";
       return;
     }
-    const rect = bubble.getBoundingClientRect();
-    const x = Math.round(rect.left + rect.width / 2);
-    const y = Math.round(rect.top + rect.height / 2);
-    // Match the solid artwork, keeping the native button/background under blur.
-    const radius = Math.max(1, Math.round(Math.min(rect.width, rect.height) * 0.4));
+    const rect = (bubble.querySelector("img") || bubble).getBoundingClientRect();
+    const x = rect.left + rect.width / 2;
+    const y = rect.top + rect.height / 2;
+    // bubble-icon.png's solid orb occupies 75% of its transparent canvas.
+    // Use the artwork, not the larger button, or the hole exposes a hard disc.
+    const radius = Math.max(1, Math.min(rect.width, rect.height) * 0.375);
     // Inline ancestors trap z-index. Clip the scrim around the real orb instead
     // of moving/cloning it or lifting the native composer's controls above blur.
     // Unlike a CSS mask, this hole also lets pointer clicks reach the orb.
