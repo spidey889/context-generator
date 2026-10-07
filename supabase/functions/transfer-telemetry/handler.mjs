@@ -67,7 +67,10 @@ export function createTelemetryHandler({ createClient, getEnv, log = console.war
         // V1 receipts verify lifetime work, but do not authenticate occurrence time.
         p_summary_confirmed_at: summaryVerified ? payload.summary_confirmed_at || null : null,
         // Includes model recovered from the v3 proof forwarded by an older worker.
-        p_model: receipt?.model || null
+        p_model: receipt?.model || null,
+        // This never grants summary verification. The database distinguishes
+        // observed model reports from authenticated v3 attribution.
+        p_reported_model: payload.reported_model || null
       }), rpcTimeoutMs);
       if (error) {
         if (error.code === "22023") return failure(422, "attempt_identity_mismatch");

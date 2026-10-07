@@ -37,6 +37,33 @@ async function edgeHarness(secret = KEY) {
   };
 }
 
+test("observed models survive missing receipts without granting server verification", async () => {
+  const { LEGACY_RECEIPT_MODELS, createSummaryProof } = await proofHelpers();
+  const edge = await edgeHarness();
+  for (const reported_model of LEGACY_RECEIPT_MODELS) {
+    const report = payload({ reported_model });
+    assert.equal(validateTelemetryPayload(report).reported_model, reported_model);
+    assert.equal((await edge.send(report)).status, 204);
+    assert.equal(edge.calls.at(-1).args.p_reported_model, reported_model);
+    assert.equal(edge.calls.at(-1).args.p_model, null);
+    assert.equal(edge.calls.at(-1).args.p_summary_verified, false);
+    assert.equal(edge.calls.at(-1).args.p_summary_confirmed_at, null);
+  }
+  for (const change of [{ reported_model: "PRIVATE_TEXT_SENTINEL" },
+    { reported_model: null }, { status: "started", last_stage: "capture_started" }]) {
+    const report = payload({ reported_model: "local-direct", ...change });
+    assert.equal(validateTelemetryPayload(report), null);
+    assert.equal((await edge.send(report)).status, 400);
+  }
+  const signed = payload({ model: "gemini-3.5-flash-lite", reported_model: "local-direct",
+    summary_confirmed_at: "2026-10-02T00:00:08.000Z" });
+  signed.summary_proof = await createSummaryProof(signed, KEY);
+  assert.equal((await edge.send(signed)).status, 204);
+  assert.equal(edge.calls.at(-1).args.p_model, "gemini-3.5-flash-lite");
+  assert.equal(edge.calls.at(-1).args.p_summary_verified, true);
+  assert.equal((await edge.send({ ...signed, model: "gemini-3.6-flash" })).status, 422);
+});
+
 test("summary confirmation binds attempt, installation, timestamp, route and extension version", async () => {
   const { createSummaryProof, verifySummaryProof } = await proofHelpers();
   const signed = { ...payload(), summary_proof: await createSummaryProof(payload(), KEY) };
