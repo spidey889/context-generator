@@ -370,6 +370,8 @@ async function main() {
         checks += await require("./check-served-model-db.js").checkServedModelLabel(db, sql);
       } else if (name.endsWith("_add_reported_model_attribution.sql")) {
         checks += await require("./check-served-model-db.js").checkReportedModelAttribution(db, sql);
+      } else if (name.endsWith("_add_transfer_user_labels.sql")) {
+        checks += await require("./check-transfer-user-labels-db.js").checkTransferUserLabels(db, sql);
       } else await db.exec(sql);
     }
     checks += await require("./check-served-model-db.js").checkStoreModelReceipts(db);
