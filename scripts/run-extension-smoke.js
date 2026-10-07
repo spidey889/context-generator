@@ -1544,26 +1544,63 @@ async function run() {
     await claudePlacementSession.evaluate(`document.getElementById("model").style.display = ""`);
     await waitFor(() => claudePlacementSession.evaluate(`getComputedStyle(document.getElementById("context-generator-bubble")).position === "static"
       && document.querySelectorAll("[data-context-generator-original-translate]").length === 0`), "Claude attribute-only inline recovery");
+    await claudePlacementSession.evaluate(`document.getElementById("context-generator-bubble").click()`);
+    await waitFor(() => claudePlacementSession.evaluate(`getComputedStyle(document.getElementById("context-generator-destination-sheet")).opacity === "1"`), "Claude picker opening before native reflow");
+    await claudePlacementSession.evaluate(`(() => {
+      window.__claudePickerFocus = [...document.querySelectorAll(".context-generator-destination-tile")].find(tile => !tile.disabled);
+      window.__claudePickerFocus.focus();
+      window.__claudePickerSpeed = document.querySelector(".context-generator-speed-toggle").getAttribute("aria-pressed");
+    })()`);
+    const assertClaudePickerRetained = async label => {
+      const state = await claudePlacementSession.evaluate(`new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(() => {
+        const sheet = document.getElementById("context-generator-destination-sheet");
+        resolve({ open: sheet.getAttribute("aria-hidden") === "false" && getComputedStyle(sheet).opacity === "1",
+          focus: document.activeElement === window.__claudePickerFocus,
+          speed: document.querySelector(".context-generator-speed-toggle").getAttribute("aria-pressed") === window.__claudePickerSpeed });
+      })))`);
+      assert.deepEqual(state, { open:true, focus:true, speed:true }, label);
+    };
     for (const wrapper of ["editor", "actions", "host"]) {
-      await claudePlacementSession.evaluate(`document.getElementById("context-generator-bubble").click()`);
       await waitFor(() => claudePlacementSession.evaluate(`getComputedStyle(document.getElementById("context-generator-destination-sheet")).opacity === "1"`), `Claude picker before ${wrapper} replacement`);
       await claudePlacementSession.evaluate(`(() => {
         const old = ${wrapper === "host" ? 'document.getElementById("claude-host")' : `document.querySelector('[data-context-generator-claude-inline="${wrapper}"]')`};
         const next = old.cloneNode(false); next.removeAttribute("data-context-generator-claude-inline");
         old.replaceWith(next); while (old.firstChild) next.appendChild(old.firstChild);
       })()`);
-      await waitFor(() => claudePlacementSession.evaluate(`document.getElementById("context-generator-destination-sheet").style.display === "none"
-        && document.getElementById("context-generator-bubble") === window.__claudeAuditBubble
-        && getComputedStyle(window.__claudeAuditBubble).position === "static"`), "Claude picker invalidation and remount");
+      await assertClaudePickerRetained(`Claude ${wrapper} replacement must preserve its open picker, focus and Speed choice.`);
+      assert.equal(await claudePlacementSession.evaluate(`document.getElementById("context-generator-bubble") === window.__claudeAuditBubble
+        && getComputedStyle(window.__claudeAuditBubble).position === "static"`), true, "Claude must reuse its inline orb after remount.");
     }
-    await claudePlacementSession.evaluate(`document.getElementById("context-generator-bubble").click()`);
-    await waitFor(() => claudePlacementSession.evaluate(`getComputedStyle(document.getElementById("context-generator-destination-sheet")).opacity === "1"`), "Claude picker after host remount");
+    await claudePlacementSession.call("Emulation.setDeviceMetricsOverride", { width:390,height:240,deviceScaleFactor:1,mobile:false });
+    await assertClaudePickerRetained("A narrow/short viewport resize must preserve Claude's picker.");
+    assert.equal(await claudePlacementSession.evaluate(`(() => {const r=document.getElementById("context-generator-destination-sheet").getBoundingClientRect();
+      return r.left>=9 && r.right<=innerWidth-9 && r.top>=9 && r.bottom<=innerHeight-9;})()`), true, "The resized Claude picker must remain inside the viewport.");
+    await claudePlacementSession.call("Emulation.clearDeviceMetricsOverride");
+    await claudePlacementSession.evaluate(`(() => {
+      window.__claudeComposerGap = document.getElementById("claude-composer");
+      window.__claudeComposerGapMarker = document.createComment("temporary composer replacement");
+      window.__claudeComposerGap.replaceWith(window.__claudeComposerGapMarker);
+    })()`);
+    await assertClaudePickerRetained("A temporary composer gap must not close Claude's picker.");
+    assert.equal(await claudePlacementSession.evaluate(`document.getElementById("context-generator-destination-backdrop").style.clipPath`), "", "A missing orb must not leave a stale click-through hole.");
+    await claudePlacementSession.evaluate(`window.__claudeComposerGapMarker.replaceWith(window.__claudeComposerGap)`);
+    await assertClaudePickerRetained("Claude's restored composer must preserve the existing picker.");
     assert.equal(await claudePlacementSession.evaluate(`(() => {
       document.getElementById("model").setAttribute("data-state", "closed");
       return new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(() =>
         resolve(document.getElementById("context-generator-destination-sheet").style.display !== "none"))));
     })()`), true, "A native control update after host remount must not close the picker again.");
-    await claudePlacementSession.evaluate(`document.getElementById("context-generator-bubble").click()`);
+    for (const dismissal of ["orb", "backdrop", "outside", "Escape"]) {
+      if (dismissal !== "orb") {
+        await claudePlacementSession.evaluate(`document.getElementById("context-generator-bubble").click()`);
+        await waitFor(() => claudePlacementSession.evaluate(`getComputedStyle(document.getElementById("context-generator-destination-sheet")).opacity === "1"`), `Claude picker before ${dismissal} dismissal`);
+      }
+      await claudePlacementSession.evaluate(dismissal === "Escape"
+        ? `document.dispatchEvent(new KeyboardEvent("keydown", { key:"Escape",bubbles:true,cancelable:true }))`
+        : dismissal === "outside" ? `document.body.click()`
+        : `document.getElementById(${JSON.stringify(dismissal === "orb" ? "context-generator-bubble" : "context-generator-destination-backdrop")}).click()`);
+      await waitFor(() => claudePlacementSession.evaluate(`document.getElementById("context-generator-destination-sheet").style.display === "none"`), `Claude explicit ${dismissal} dismissal`);
+    }
     await claudePlacementSession.evaluate(`(() => {
       const chin = document.createElement("div"); chin.setAttribute("data-cds", "ChatComposerChin");
       document.getElementById("claude-composer").appendChild(chin); chin.appendChild(document.getElementById("model"));
@@ -1572,7 +1609,7 @@ async function run() {
     })()`);
     await waitFor(() => claudePlacementSession.evaluate(`getComputedStyle(document.getElementById("context-generator-bubble")).position === "static"
       && getComputedStyle(document.getElementById("send")).visibility === "hidden"`), "Claude compact empty Voice mode");
-    process.stdout.write("✓ Claude inline handles hidden/popup duplicates, attribute-only inline retention/recovery, picker wrapper remounts and compact Voice mode.\n");
+    process.stdout.write("✓ Claude picker survives wrapper remounts, viewport resize and composer gaps with focus/Speed intact; explicit dismissals and compact Voice mode pass.\n");
 
     for (const platform of ["chatgpt", "claude"]) {
       const fixtureUrl = `${origin}/free-placement?${SMOKE_PLATFORM_QUERY}=${platform}`;
@@ -1629,7 +1666,7 @@ async function run() {
           old.replaceWith(next);
         })()`);
         await waitFor(() => session.evaluate(probe), `${platform} free-layout composer replacement`);
-        await waitFor(() => session.evaluate(`document.getElementById("context-generator-destination-sheet").style.display === "none"`), `${platform} replaced editor's picker dismissal`);
+        await waitFor(() => session.evaluate(`document.getElementById("context-generator-destination-sheet").${platform === "claude" ? 'getAttribute("aria-hidden") === "false"' : 'style.display === "none"'}`), `${platform} replaced editor's picker ${platform === "claude" ? "retention" : "dismissal"}`);
         if (platform === "claude") {
           assert.equal(await session.evaluate(`document.getElementById("claude-host").style.getPropertyValue("--cmp-trail-w")`), "44px", "Reply mode must preserve its native Send reservation.");
           for (const page of [claudePlacementFixture(), claudeReplyFixture()]) {
@@ -1640,6 +1677,9 @@ async function run() {
             await waitFor(() => session.evaluate(`(() => {const b=document.getElementById("context-generator-bubble");return b && getComputedStyle(b).position==="static" && getComputedStyle(b).visibility==="visible" && b.closest('[data-cds="ChatComposer"]');})()`), "Claude expanded/reply transition");
           }
           await waitFor(() => session.evaluate(probe), "Claude reply placement after returning from expanded mode");
+          assert.equal(await session.evaluate(`document.getElementById("context-generator-destination-sheet").getAttribute("aria-hidden")`), "false", "Expanded/reply composer replacements must retain the picker.");
+          await session.evaluate(`document.getElementById("context-generator-bubble").click()`);
+          await waitFor(() => session.evaluate(`document.getElementById("context-generator-destination-sheet").style.display === "none"`), "Claude explicit dismissal after composer transitions");
         }
         if (PROVIDER_PLACEMENT_SCREENSHOT_DIR) {
           const screenshot = await session.call("Page.captureScreenshot", { format:"png" });

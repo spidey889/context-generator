@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-07-model-reporting-v111";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-07-claude-picker-v112";
   const INLINE_PILL_SIZE = 36;
   const ownedUiStyleSheets = new Map();
   const CLAUDE_INLINE_STYLE_ID = "context-generator-claude-inline-styles";
@@ -487,6 +487,7 @@
   let reservedActionCluster = null;
   let reservedComposerSurface = null;
   let destinationSheetAnimationFrame = null;
+  let destinationSheetPathname = null;
   let destinationSheetHideTimer = null;
   let destinationBackdropHideTimer = null;
   let pendingHandoffOrigin = null;
@@ -798,6 +799,7 @@
       releaseChatGptInlineMount,
       mountInlineOrLegacyBackup,
       invalidateInlinePicker,
+      toggleDestinationSheet,
       hideDestinationSheet,
       findProviderInlineToolbar,
       mountProviderInlineButton,
@@ -838,6 +840,7 @@
       buildLatestTransferStats,
       getSafeTelemetryFailureReason,
       startFloatingButtonMonitoring,
+      scheduleFloatingButtonUpdate,
       teardownContextGeneratorInstance,
       getOwnedLifecycleResourceCounts,
       delay,
@@ -5106,7 +5109,7 @@
       hideOnboardingNudge();
       hideClaudeLimitNudge();
       // Composer loss must never move focus to the Cap Context trigger.
-      hideDestinationSheet({ restoreFocus: false });
+      if (!shouldPreserveClaudePicker()) hideDestinationSheet({ restoreFocus: false });
       releaseBubbleSlot();
       releaseComposerSurface();
       return existingBubble;
@@ -5119,7 +5122,7 @@
         bubble.style.display = "none";
         hideOnboardingNudge();
         hideClaudeLimitNudge();
-        hideDestinationSheet({ restoreFocus: false });
+        if (!shouldPreserveClaudePicker()) hideDestinationSheet({ restoreFocus: false });
         return bubble;
       }
       ensureFloatingOverlay();
@@ -6714,6 +6717,7 @@
     sheet.style.opacity = "0";
     sheet.style.transform = DESTINATION_SHEET_CLOSED_TRANSFORM;
     sheet.style.display = "block";
+    destinationSheetPathname = window.location.pathname;
     delete sheet.dataset.contextGeneratorPositionLocked;
     positionDestinationSheet();
     resetDestinationTiles(sheet);
@@ -6749,6 +6753,7 @@
   }
 
   function hideDestinationSheet({ immediate = false, preserveBackdrop = false, restoreFocus = true } = {}) {
+    destinationSheetPathname = null;
     const sheet = document.getElementById(DESTINATION_SHEET_ID);
     const backdrop = document.getElementById(DESTINATION_SHEET_BACKDROP_ID);
     const reducedMotion = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
@@ -6808,6 +6813,10 @@
     const bubble = document.getElementById(BUBBLE_ID);
     const backdrop = document.getElementById(DESTINATION_SHEET_BACKDROP_ID);
     if (!bubble || !backdrop || bubble.getAttribute("aria-expanded") !== "true") return;
+    if (!bubble.isConnected || !isVisible(bubble) || bubble.style.display === "none" || bubble.style.visibility === "hidden") {
+      backdrop.style.clipPath = "";
+      return;
+    }
     const rect = bubble.getBoundingClientRect();
     const x = Math.round(rect.left + rect.width / 2);
     const y = Math.round(rect.top + rect.height / 2);
@@ -6901,6 +6910,37 @@
     return Boolean(sheet && sheet.style.display === "block");
   }
 
+  function shouldPreserveClaudePicker() {
+    const sheet = document.getElementById(DESTINATION_SHEET_ID);
+    return currentPlatform.id === "claude" && !isRunning &&
+      destinationSheetPathname === window.location.pathname &&
+      sheet?.style.display === "block" && sheet.getAttribute("aria-hidden") !== "true";
+  }
+
+  function refreshClaudePickerPosition() {
+    if (!shouldPreserveClaudePicker()) return;
+    const sheet = document.getElementById(DESTINATION_SHEET_ID);
+    const bubble = document.getElementById(BUBBLE_ID);
+    // Claude can replace its editor/toolbar after the orb click. The picker is
+    // owned by the chat, not those transient nodes; reconnect the orb without
+    // replaying the opening animation or changing focus/Speed/selection state.
+    if (bubble?.isConnected && isVisible(bubble) && bubble.style.display !== "none" && bubble.style.visibility !== "hidden") {
+      delete sheet.dataset.contextGeneratorPositionLocked;
+      positionDestinationSheet();
+      updateDestinationBackdropCutout();
+      return;
+    }
+    // Keep the last picker position usable through a temporary composer gap,
+    // but remove its click-through hole until a visible orb owns that location.
+    const margin = 10;
+    const width = Math.min(DESTINATION_SHEET_WIDTH, window.innerWidth - margin * 2);
+    const height = Math.min(sheet.offsetHeight || 330, window.innerHeight - margin * 2);
+    sheet.style.left = `${Math.max(margin, Math.min(Number.parseFloat(sheet.style.left) || margin, window.innerWidth - width - margin))}px`;
+    sheet.style.top = `${Math.max(margin, Math.min(Number.parseFloat(sheet.style.top) || margin, window.innerHeight - height - margin))}px`;
+    const backdrop = document.getElementById(DESTINATION_SHEET_BACKDROP_ID);
+    if (backdrop) backdrop.style.clipPath = "";
+  }
+
   function positionDestinationSheet() {
     const sheet = document.getElementById(DESTINATION_SHEET_ID);
     const bubble = document.getElementById(BUBBLE_ID);
@@ -6910,7 +6950,7 @@
     const bubbleRect = bubble.getBoundingClientRect();
     const margin = 10;
     const sheetWidth = Math.min(DESTINATION_SHEET_WIDTH, window.innerWidth - margin * 2);
-    const sheetHeight = sheet.offsetHeight || 330;
+    const sheetHeight = Math.min(sheet.offsetHeight || 330, Math.max(0, window.innerHeight - margin * 2));
     const left = Math.max(
       margin,
       Math.min(
@@ -6922,7 +6962,7 @@
     const top = preferredTop >= margin ? preferredTop : bubbleRect.bottom + margin;
 
     sheet.style.left = `${Math.round(left)}px`;
-    sheet.style.top = `${Math.round(Math.min(top, window.innerHeight - sheetHeight - margin))}px`;
+    sheet.style.top = `${Math.round(Math.max(margin, Math.min(top, window.innerHeight - sheetHeight - margin)))}px`;
     sheet.style.transformOrigin = preferredTop >= margin ? "bottom right" : "top right";
     sheet.dataset.contextGeneratorPositionLocked = "true";
   }
@@ -9274,7 +9314,7 @@
 
   function scheduleFloatingButtonUpdate(reason = "unspecified") {
     if (floatingButtonMonitoringDisabled) return;
-    if (isDestinationSheetOpen() && !invalidateInlinePicker(reason)) return;
+    if (isDestinationSheetOpen() && !shouldPreserveClaudePicker() && !invalidateInlinePicker(reason)) return;
     pendingFloatingButtonReasons.add(normalizeFloatingButtonUpdateReason(reason));
     if (floatingButtonFrame) return;
     floatingButtonFrame = requestAnimationFrame(() => {
@@ -9282,9 +9322,10 @@
       const recalculationReason = [...pendingFloatingButtonReasons].sort().join("+") || "unspecified";
       pendingFloatingButtonReasons.clear();
       if (floatingButtonMonitoringDisabled) return;
-      if (isDestinationSheetOpen() && !invalidateInlinePicker(recalculationReason)) return;
+      if (isDestinationSheetOpen() && !shouldPreserveClaudePicker() && !invalidateInlinePicker(recalculationReason)) return;
       try {
         ensureFloatingButton(recalculationReason);
+        refreshClaudePickerPosition();
         updateClaudeLimitNudge();
       } catch (error) {
         if (isExtensionContextInvalidated(error)) {
@@ -9298,6 +9339,15 @@
 
   function invalidateInlinePicker(reason) {
     if (!INLINE_MOUNT_PLATFORMS.has(currentPlatform.id)) return false;
+    // Layout and transient discovery loss must not dismiss Claude's picker.
+    // Once a tile starts transfer, freeze geometry until the handoff owns it.
+    if (currentPlatform.id === "claude" && isDestinationSheetOpen() && (isRunning || shouldPreserveClaudePicker())) return false;
+    if (currentPlatform.id === "claude" && destinationSheetPathname !== null && destinationSheetPathname !== window.location.pathname) {
+      // Route ownership survives a composer gap, when no mount remains to
+      // compare. Never leave an old chat's picker over the next conversation.
+      hideDestinationSheet({ restoreFocus: false });
+      return true;
+    }
     const input = findPlatformInput();
     const isClaude = currentPlatform.id === "claude";
     const toolbar = isClaude ? findClaudeInlineToolbar(input) : currentPlatform.id === "chatgpt"
@@ -9305,9 +9355,8 @@
     const mount = isClaude ? claudeInlineMount : currentPlatform.id === "chatgpt" ? chatGptInlineMount : providerInlineMount;
     // A fallback picker has no inline owner to invalidate on ordinary updates.
     if (!toolbar && !mount) return false;
-    // A picker belongs to the editor that opened it. On replacement, route
-    // change or resize close it without stealing focus; its opening position
-    // is intentionally locked during the picker-to-handoff animation.
+    // Other inline pickers retain editor ownership. Claude's active picker
+    // reaches this path only after its chat changes or explicit dismissal.
     const changed = !toolbar || !mount ||
       mount.input !== input || mount.left !== toolbar.left ||
       mount.body !== toolbar.body ||

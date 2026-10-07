@@ -2817,6 +2817,85 @@ function inlineClaudeFixture() {
   return { host, editorBranch, input, actions, left, right, attach, model };
 }
 
+function openClaudePickerFixture() {
+  const f = inlineClaudeFixture();
+  const hooks = loadPlatformContent(Object.values(f), "claude.ai");
+  hooks.document.createElement = () => new FakeElement();
+  hooks.document.head = new FakeElement({ tag: "head" });
+  const bubble = new FakeElement({ tag: "button", attrs: { id: "context-generator-bubble" } });
+  const sheet = new FakeElement({ attrs: { id: "context-generator-destination-sheet" } });
+  const backdrop = new FakeElement({ attrs: { id: "context-generator-destination-backdrop" } });
+  sheet.style.display = "none";
+  for (const node of [bubble, sheet, backdrop]) hooks.registerElementId(node.id, node);
+  for (const id of ["context-generator-overlay", "context-generator-handoff-scrim"]) {
+    const node = new FakeElement({ attrs: { id } });
+    node.classList = { add() {}, remove() {} };
+    hooks.registerElementId(id, node);
+  }
+  assert.equal(hooks.mountClaudeInlineButton(bubble, f.input), true);
+  const paint = () => hooks.animationFrameCallbacks.splice(0).forEach(callback => callback());
+  hooks.startFloatingButtonMonitoring();
+  hooks.toggleDestinationSheet(); paint();
+  assert.equal(sheet.getAttribute("aria-hidden"), "false");
+  return { ...f, hooks, bubble, sheet, backdrop, paint };
+}
+
+clockTest("Claude picker stays open through queued resize, wrapper remounts and temporary composer loss", () => {
+  const f = openClaudePickerFixture(), { hooks, sheet, bubble, paint } = f;
+  const focus = new FakeElement({ tag: "button" });
+  hooks.document.activeElement = focus;
+  hooks.window.innerWidth = 390;
+  hooks.window.innerHeight = 240;
+  hooks.scheduleFloatingButtonUpdate({ type: "resize" }); paint();
+  const assertOpen = () => {
+    assert.equal(sheet.getAttribute("aria-hidden"), "false");
+    assert.equal(sheet.style.display, "block");
+    assert.equal(bubble.getAttribute("aria-expanded"), "true");
+    assert.equal(hooks.document.activeElement, focus, "layout updates must preserve the user's focus");
+  };
+  assertOpen();
+  assert.ok(Number.parseFloat(sheet.style.top) >= 10, "the resized picker must stay inside the viewport");
+  for (const part of ["editor", "actions", "host"]) {
+    const next = new FakeElement({ attrs: part === "actions" ? { "data-cds": "ChatComposerActions" } : {} });
+    if (part === "editor") { f.host.appendChild(next); next.appendChild(f.input); }
+    if (part === "actions") { f.actions.removeAttribute("data-cds"); f.host.appendChild(next); next.appendChild(f.left); next.appendChild(f.right); }
+    if (part === "host") { next.appendChild(f.input.parentElement); next.appendChild(f.right.parentElement); }
+    hooks.scheduleFloatingButtonUpdate("document-childlist"); paint(); assertOpen();
+    assert.equal(bubble.parentElement, f.right, "the retained orb must reattach to the current toolbar");
+  }
+  f.input.isConnected = false;
+  hooks.scheduleFloatingButtonUpdate("document-childlist"); paint(); assertOpen();
+  assert.equal(f.backdrop.style.clipPath, "", "no stale click-through hole may expose the page while the orb is missing");
+  f.input.isConnected = true;
+  hooks.scheduleFloatingButtonUpdate("document-childlist"); paint(); assertOpen();
+  assert.equal(bubble.style.visibility, "visible");
+  hooks.popstate("/chat/a-different-conversation"); paint();
+  assert.equal(sheet.getAttribute("aria-hidden"), "true", "a real conversation change still dismisses the old picker");
+});
+
+clockTest("Claude picker layout work cannot undo explicit dismissal or move a selected transfer", () => {
+  const { hooks, sheet, paint } = openClaudePickerFixture();
+  const origin = { left: sheet.style.left, top: sheet.style.top };
+  const trace = hooks.beginTransferAttempt("chatgpt", "destination tile");
+  try {
+    hooks.scheduleFloatingButtonUpdate({ type: "resize" }); paint();
+    assert.equal(sheet.getAttribute("aria-hidden"), "false", "selection owns the picker until its handoff animation closes it");
+    assert.deepEqual({ left: sheet.style.left, top: sheet.style.top }, origin);
+  } finally { hooks.finishTransferTrace(trace); hooks.resetRunningFlag(); }
+  hooks.hideDestinationSheet({ restoreFocus: false });
+  hooks.scheduleFloatingButtonUpdate("document-childlist"); paint();
+  assert.equal(sheet.getAttribute("aria-hidden"), "true", "a queued frame must not reopen a dismissed picker");
+});
+
+clockTest("Claude route changes dismiss a picker even while its composer is absent", () => {
+  const { hooks, sheet, input, paint } = openClaudePickerFixture();
+  input.isConnected = false;
+  hooks.scheduleFloatingButtonUpdate("document-childlist"); paint();
+  assert.equal(sheet.getAttribute("aria-hidden"), "false");
+  hooks.popstate("/new"); paint();
+  assert.equal(sheet.getAttribute("aria-hidden"), "true");
+});
+
 test("Claude inline slot discovers only the named actions beside its active editor", () => {
   const fixture = inlineClaudeFixture();
   const decoy = new FakeElement({ attrs: { "data-display": "flex" } });
