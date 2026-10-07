@@ -140,6 +140,10 @@ test("ChatGPT rejects corrupt history text before draining its tail and permits 
   assert.doesNotMatch(JSON.stringify(harness.replies), /TEST_ONLY|SIGNED_URL_SENTINEL/);
   recover();
   assert.equal((await harness.window.__capCaptureChatGptJson()).messageTurnCount, 2);
+  const malformed = setup(fixture(), 200, { body: '{PRIVATE_SENTINEL' });
+  await discover(malformed);
+  await assert.rejects(malformed.window.__capCaptureChatGptJson(), /JSON capture failed/);
+  assert.doesNotMatch(JSON.stringify(malformed.replies), /PRIVATE_SENTINEL|TEST_ONLY/);
 });
 
 function paddedJson(data, size) {
@@ -564,18 +568,6 @@ test("ChatGPT exclusions report only active-branch categories without file or to
   assert.doesNotMatch(capture.text, /PRIVATE_IMAGE_SENTINEL|PRIVATE_TOOL_SENTINEL|PRIVATE_TYPE_SENTINEL/);
 });
 
-test("ChatGPT preserves original whitespace in own text, code, thoughts and recap", async () => {
-  const data = fixture();
-  data.mapping.question.message.content.parts = ["  if enabled:\n    run()\n"];
-  data.mapping.recap = { parent: "question", message: { author: { role: "assistant" }, content: { content_type: "reasoning_recap", content: "  Exact recap\n" } } };
-  data.mapping.thought = { parent: "recap", message: { author: { role: "assistant" }, content: { content_type: "thoughts", thoughts: [{ content: "  Exact thought\n", finished: true }] } } };
-  data.mapping.answer.parent = "thought";
-  data.mapping.answer.message.content = { content_type: "code", text: "  if enabled:\n    run()\n" };
-  const harness = setup(data); await discover(harness);
-  assert.equal((await harness.window.__capCaptureChatGptJson()).text,
-    "ChatGPT conversation:\n\nUser:   if enabled:\n    run()\n\n\nAssistant:   Exact recap\n\n\nAssistant:   Exact thought\n\n\nAssistant:   if enabled:\n    run()\n");
-});
-
 // audio_transcription is an explicit own multimodal part, verified in native
 // export schemas. Pointer metadata and nested tool transcripts are excluded.
 test("ChatGPT keeps multiple pastes in attachment order and preserves repeated content in later turns", async () => {
@@ -829,22 +821,15 @@ test("ChatGPT preserves large pasted strings, own code, reasoning recap and thou
   const data = fixture();
   const pasted = `PASTE_START\n${"  all lines and indentation\n".repeat(1600)}PASTE_END`;
   data.mapping.question.message.content.parts = [pasted];
-  data.mapping.recap = { parent: "question", message: { author: { role: "assistant" }, status: "finished_successfully", content: { content_type: "reasoning_recap", content: "Own recap" } } };
-  data.mapping.thought = { parent: "recap", message: { author: { role: "assistant" }, content: { content_type: "thoughts", thoughts: [{ content: "Own thought", summary: "DUPLICATE_SENTINEL", chunks: [{ text: "NESTED_SENTINEL" }], finished: true }] } } };
+  const recap = "  Own recap\r\n", thought = "  Own thought\n", code = "  if enabled:\n    run()\n";
+  data.mapping.recap = { parent: "question", message: { author: { role: "assistant" }, status: "finished_successfully", content: { content_type: "reasoning_recap", content: recap } } };
+  data.mapping.thought = { parent: "recap", message: { author: { role: "assistant" }, content: { content_type: "thoughts", thoughts: [{ content: thought, summary: "DUPLICATE_SENTINEL", chunks: [{ text: "NESTED_SENTINEL" }], finished: true }] } } };
   data.mapping.answer.parent = "thought";
-  data.mapping.answer.message.content = { content_type: "code", text: "print('own code')", language: "python" };
+  data.mapping.answer.message.content = { content_type: "code", text: code, language: "python" };
   const harness = setup(data); await discover(harness);
   const capture = await harness.window.__capCaptureChatGptJson();
-  assert.equal(capture.text, `ChatGPT conversation:\n\nUser: ${pasted}\n\nAssistant: Own recap\n\nAssistant: Own thought\n\nAssistant: print('own code')`);
+  assert.equal(capture.text, `ChatGPT conversation:\n\nUser: ${pasted}\n\nAssistant: ${recap}\n\nAssistant: ${thought}\n\nAssistant: ${code}`);
   assert.equal(capture.messageTurnCount, 4);
-});
-
-test("ChatGPT transport rejects 206, content ranges, non-JSON and broken JSON without leaking bodies", async () => {
-  for (const options of [{ status: 206 }, { headers: { "content-range": "bytes 0-30/500" } }, { headers: { "content-type": "text/html" } }, { body: '{PRIVATE_SENTINEL' }]) {
-    const harness = setup(fixture(), options.status || 200, options); await discover(harness);
-    await assert.rejects(harness.window.__capCaptureChatGptJson(), /JSON capture failed/);
-    assert.doesNotMatch(JSON.stringify(harness.replies), /PRIVATE_SENTINEL|TEST_ONLY/);
-  }
 });
 
 clockTest("ChatGPT bridge waits for MAIN installation and fails visibly if readiness is unavailable", async () => {

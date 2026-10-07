@@ -7,7 +7,6 @@ const { pathToFileURL } = require("node:url");
 
 const ROOT = path.join(__dirname, "..");
 const BACKGROUND_SOURCE = fs.readFileSync(path.join(ROOT, "extension", "background.js"), "utf8");
-const PLATFORM_SOURCE = fs.readFileSync(path.join(ROOT, "extension", "platform-content.js"), "utf8");
 const VALIDATION_PATH = path.join(ROOT, "supabase", "functions", "transfer-telemetry", "validation.mjs");
 const VERCEL_VALIDATION = require(path.join(ROOT, "api", "telemetry-validation.js"));
 const VERCEL_TELEMETRY_HANDLER = require(path.join(ROOT, "api", "telemetry.js"));
@@ -179,7 +178,10 @@ async function invokeTelemetryHandler(body, options = {}) {
 
 test("telemetry keeps one install id across summaries, browser restarts, and extension updates", async () => {
   const requests = [];
-  const deliver = async (_url, options) => {
+  const deliver = async (url, options) => {
+    assert.equal(url, "https://context-generator-five.vercel.app/api/telemetry");
+    assert.equal(options.headers["X-Cap-Context-Client"], "cap-context-extension/1");
+    assert.equal(options.headers.apikey, undefined);
     requests.push(JSON.parse(options.body));
     return { ok: true };
   };
@@ -243,87 +245,6 @@ test("telemetry keeps one install id across summaries, browser restarts, and ext
     ["succeeded", "completed"]
   ]);
   assert.deepEqual(updatedWorker.storage["context-generator-telemetry-outbox-v1"], []);
-});
-
-test("extension sends telemetry only to the Vercel backend without Supabase credentials", async () => {
-  const requests = [];
-  const background = loadTelemetryBackground(async (url, options) => {
-    requests.push({ url, options });
-    return { ok: true };
-  });
-  await background.drain();
-  await background.sendTelemetry(makeEvent());
-
-  assert.equal(requests.length, 1);
-  assert.equal(requests[0].url, "https://context-generator-five.vercel.app/api/telemetry");
-  assert.equal(requests[0].options.headers["X-Cap-Context-Client"], "cap-context-extension/1");
-  assert.equal(requests[0].options.headers.apikey, undefined);
-});
-
-test("failed delivery compacts progress into its terminal outcome and retries after backoff", async () => {
-  let online = false;
-  const requests = [];
-  const background = loadTelemetryBackground(async (_url, options) => {
-    const payload = JSON.parse(options.body);
-    requests.push({ online, payload });
-    if (!online) throw new Error("offline");
-    return { ok: true };
-  });
-  await background.drain();
-
-  await background.sendTelemetry(makeEvent());
-  await background.sendTelemetry(makeEvent({ lastStage: "capture_started" }));
-  await background.sendTelemetry(makeEvent({ lastStage: "capture_completed", characterCount: 1200 }));
-  await background.sendTelemetry(makeEvent({
-    status: "failed",
-    characterCount: 1200,
-    lastStage: "summary_response_started",
-    failureReason: "summary_service_busy"
-  }));
-  assert.equal(background.storage["context-generator-telemetry-outbox-v1"].length, 1);
-
-  online = true;
-  background.storage["context-generator-telemetry-diagnostics-v1"].retry.nextAttemptAt = Date.now() - 1;
-  background.listeners.startup();
-  await background.drain();
-
-  const delivered = requests.filter((request) => request.online).map((request) => request.payload);
-  assert.deepEqual(delivered.map(({ last_stage: lastStage }) => lastStage), [
-    "summary_response_started"
-  ]);
-  assert.ok(delivered.every(({ attempt_id: attemptId }) => attemptId === delivered[0].attempt_id));
-  assert.equal(delivered[0].status, "failed");
-  assert.equal(delivered[0].failure_reason, "summary_service_busy");
-  assert.deepEqual(background.storage["context-generator-telemetry-outbox-v1"], []);
-});
-
-test("closing the source tab after a worker restart records the last durable stage as cancelled", async () => {
-  const requests = [];
-  const background = loadTelemetryBackground(async (_url, options) => {
-    requests.push(JSON.parse(options.body));
-    return { ok: true };
-  });
-  await background.drain();
-
-  await background.sendTelemetry(makeEvent({ lastStage: "summary_request_started" }), 42);
-  const restarted = loadTelemetryBackground(async (_url, options) => {
-    requests.push(JSON.parse(options.body));
-    return { ok: true };
-  }, background.storage);
-  await restarted.drain();
-  await restarted.listeners.tabRemoved(42, { isWindowClosing: false });
-  await restarted.drain();
-  // A bounded terminal record survives cancellation so late server receipts
-  // can confirm summary work without changing the cancelled paste outcome.
-  const retained = restarted.storage["context-generator-active-transfers-v1"][makeEvent().attemptId];
-  assert.equal(retained.event.status, "failed");
-  assert.equal(retained.event.failureReason, "user_cancelled");
-  assert.ok(retained.expiresAt > Date.now());
-
-  assert.equal(requests.at(-1).status, "failed");
-  assert.equal(requests.at(-1).failure_reason, "user_cancelled");
-  assert.equal(requests.at(-1).last_stage, "summary_request_started");
-  assert.equal(requests.at(-1).character_count, null);
 });
 
 test("Supabase payload validation rejects content, unknown stages, and arbitrary failures", async () => {
@@ -459,30 +380,6 @@ test("Vercel rejects telemetry content fields before contacting Supabase", async
   assert.equal(res.statusCode, 400);
   assert.equal(res.body.code, "invalid_schema");
   assert.equal(upstreamCalls, 0);
-});
-
-test("Vercel returns a retryable failure when Supabase delivery fails", async (t) => {
-  const originalFetch = global.fetch;
-  const originalUrl = process.env.SUPABASE_TELEMETRY_FUNCTION_URL;
-  const originalKey = process.env.SUPABASE_TELEMETRY_PUBLISHABLE_KEY;
-  const originalRelaySecret = process.env.TELEMETRY_RELAY_SECRET;
-  t.after(() => {
-    global.fetch = originalFetch;
-    if (originalUrl === undefined) delete process.env.SUPABASE_TELEMETRY_FUNCTION_URL;
-    else process.env.SUPABASE_TELEMETRY_FUNCTION_URL = originalUrl;
-    if (originalKey === undefined) delete process.env.SUPABASE_TELEMETRY_PUBLISHABLE_KEY;
-    else process.env.SUPABASE_TELEMETRY_PUBLISHABLE_KEY = originalKey;
-    if (originalRelaySecret === undefined) delete process.env.TELEMETRY_RELAY_SECRET;
-    else process.env.TELEMETRY_RELAY_SECRET = originalRelaySecret;
-  });
-  process.env.SUPABASE_TELEMETRY_FUNCTION_URL = "https://example.supabase.co/functions/v1/transfer-telemetry";
-  process.env.SUPABASE_TELEMETRY_PUBLISHABLE_KEY = "server-only-key";
-  process.env.TELEMETRY_RELAY_SECRET = "server-only-relay-secret-0123456789abcdef";
-  global.fetch = async () => ({ ok: false, status: 500 });
-
-  const res = await invokeTelemetryHandler(makeTelemetryPayload());
-  assert.equal(res.statusCode, 503);
-  assert.equal(res.body.code, "telemetry_upstream_unavailable");
 });
 
 test("background persists server confirmation and never rebinds cached proof to a new attempt", async () => {

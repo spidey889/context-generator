@@ -724,15 +724,6 @@ clockTest("pending picker dismissal preserves reopened picker and newer page foc
   }
 });
 
-test("composer lifecycle cleanup never restores focus to the orb", () => {
-  const source = fs.readFileSync(SOURCE_PATH, "utf8");
-  const ensureStart = source.indexOf("function ensureFloatingButton(");
-  const ensureEnd = source.indexOf("function createFloatingButton()", ensureStart);
-  const ensureSource = source.slice(ensureStart, ensureEnd);
-
-  assert.match(ensureSource, /if \(!input\)[\s\S]*hideDestinationSheet\(\{ restoreFocus: false \}\)/);
-});
-
 test("reinjection tears down every resource owned by the previous content-script instance", () => {
   const input = new FakeElement({
     attrs: { contenteditable: "true", role: "textbox" },
@@ -1880,24 +1871,6 @@ test("latest-run receipt retains capture exclusions and the JSON fallback reason
   assert.equal(stats.rawScrapedText, trace.rawScrapedText);
 });
 
-test("paste verification accepts formatting changes when box characters differ", () => {
-  const hooks = loadPlatformContent([]);
-  const expected = [
-    "CONTEXT CARRY - READY TO PASTE",
-    "",
-    "WHO I AM",
-    "Building Context Generator.",
-    "",
-    "WHAT WE WERE DOING",
-    "Testing paste verification."
-  ].join("\n");
-  const editor = new FakeElement({
-    text: "CONTEXT CARRY READY TO PASTE\n\nWHO I AM\nBuilding Context Generator.\n\nWHAT WE WERE DOING\nTesting paste verification."
-  });
-
-  assert.equal(hooks.editorContainsText(editor, expected), true);
-});
-
 test("paste verification rejects missing chunks between the old word samples", () => {
   const hooks = loadPlatformContent([]);
   const words = Array.from({ length: 100 }, (_, index) => `detail${index}`);
@@ -1909,11 +1882,11 @@ test("paste verification rejects missing chunks between the old word samples", (
   assert.equal(hooks.editorContainsText(new FakeElement({ text: actual }), words.join(" ")), false);
 });
 
-test("paste verification accepts whitespace and newline changes on every platform", () => {
-  const expected = "CONTEXT CARRY\n\nKeep the migration decisions and deployment checklist.\nNext step: verify staging before release.";
+test("paste verification accepts whitespace, newline and decorative punctuation changes on every platform", () => {
+  const expected = "CONTEXT CARRY - READY TO PASTE\n\nKeep the migration decisions and deployment checklist.\nNext step: verify staging before release.";
   for (const hostname of ["claude.ai", "chatgpt.com", "gemini.google.com", "grok.com", "chat.deepseek.com"]) {
     const hooks = loadPlatformContent([], hostname);
-    const editor = new FakeElement({ text: expected.replace(/\s+/g, "\t \r\n\u00a0 ") });
+    const editor = new FakeElement({ text: expected.replace(" - ", " ").replace(/\s+/g, "\t \r\n\u00a0 ") });
     assert.equal(hooks.editorContainsText(editor, expected), true, hostname);
   }
 });
@@ -1928,6 +1901,7 @@ test("paste verification requires 95 percent of words in order, including repeat
   assert.equal(hooks.editorContainsText(new FakeElement({ text: reordered.join(" ") }), expected), false);
   const repeated = ["context", ...words.slice(1, 99), "context"];
   assert.equal(hooks.editorContainsText(new FakeElement({ text: repeated.slice(1).join(" ") }), repeated.join(" ")), true);
+  assert.equal(hooks.editorContainsText(new FakeElement({ text: "Unrelated input" }), expected), false);
 });
 
 clockTest("all destinations accept editor Markdown reformatting without replacing it", async () => {
@@ -2051,31 +2025,12 @@ clockTest("Claude verifies a settled paste and preserves a draft restored on rem
   assert.equal(draftEditor.value, "My saved draft");
 });
 
-test("paste verification rejects a carry whose middle or end did not land", () => {
-  const hooks = loadPlatformContent([]);
-  const beginning = "CONTEXT CARRY READY TO PASTE. WHO I AM Building Context Generator.";
-  const middle = "WHAT WE WERE DOING Testing the destination editor and preserving each detail.";
-  const ending = "NEXT STEP Reply only Context loaded then wait for the user.";
-  const expected = [beginning, middle, ending].join("\n\n");
-
-  assert.equal(hooks.editorContainsText(new FakeElement({ text: beginning }), expected), false);
-  assert.equal(hooks.editorContainsText(new FakeElement({ text: `${beginning}\n\n${ending}` }), expected), false);
-  assert.equal(hooks.editorContainsText(new FakeElement({ text: expected }), expected), true);
-});
-
 test("paste verification stops using a detached editor after a remount", async () => {
   const hooks = loadPlatformContent([]);
   const detached = new FakeElement({ text: "CONTEXT CARRY READY TO PASTE" });
   detached.isConnected = false;
 
   assert.equal(await hooks.waitForEditorText(detached, detached.textContent, 1000), false);
-});
-
-test("paste verification rejects unrelated editor text", () => {
-  const hooks = loadPlatformContent([]);
-  const editor = new FakeElement({ text: "A blank new chat input" });
-
-  assert.equal(hooks.editorContainsText(editor, "CONTEXT CARRY\n\nWHO I AM\nProject details"), false);
 });
 
 test("up to 1,200 trimmed characters stay local on every platform without worker calls or waits", async () => {
@@ -3043,29 +2998,6 @@ test("DeepSeek anchors before the complete visible right-side control row", () =
   );
 
   assert.equal(hooks.getDeepSeekBubblePlacement(composerRect).left, 500);
-});
-
-test("versioned evaluation set gates capture completeness", () => {
-  const evaluation = JSON.parse(
-    fs.readFileSync(path.join(__dirname, "..", "evaluation", "cases.json"), "utf8")
-  );
-
-  for (const testCase of evaluation.cases) {
-    const elements = testCase.turns.map((turn) => new FakeElement({
-      text: turn.text,
-      attrs: { "data-message-author-role": turn.role }
-    }));
-    const transcript = loadPlatformContent(elements, testCase.platform).scrapeConversationText();
-
-    for (const turn of testCase.turns) {
-      assert.ok(transcript.includes(turn.text), testCase.id + " lost a captured turn");
-    }
-    assert.equal(
-      (transcript.match(/^(?:User|Claude|ChatGPT): /gm) || []).length,
-      testCase.turns.length,
-      testCase.id + " changed the captured turn count"
-    );
-  }
 });
 
 function getClaudeComposerRect() {

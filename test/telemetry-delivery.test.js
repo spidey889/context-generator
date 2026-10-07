@@ -210,24 +210,33 @@ test("temporary failures back off durably across restart, honor Retry-After, and
   const shared = profile({ [INSTALL]: id(999) });
   let online = false;
   let attempts = 0;
-  const fetchImpl = async () => { attempts++; return online ? success() : rejection(429, "rate_limited", "600"); };
+  const delivered = [];
+  const fetchImpl = async (_url, options) => {
+    attempts++;
+    if (online) delivered.push(JSON.parse(options.body));
+    return online ? success() : rejection(429, "rate_limited", "600");
+  };
   const first = worker(fetchImpl, shared);
   await first.settled();
   await first.ack(event());
   await first.settled();
   const retryAt = shared.local[DIAGNOSTICS].retry.nextAttemptAt;
   assert.equal(retryAt - NOW, 600000);
-  await first.ack(event(1, { status: "succeeded", lastStage: "completed" }));
+  await first.ack(event(1, { lastStage: "summary_request_started" }));
+  await first.ack(event(1, { status: "failed", lastStage: "summary_response_started", failureReason: "summary_service_busy" }));
   await first.settled();
   assert.equal(attempts, 1, "new progress must not hammer an unavailable endpoint");
   const restarted = worker(fetchImpl, shared);
   await restarted.settled();
   assert.equal(attempts, 1);
   assert.equal(shared.local[INSTALL], id(999));
-  assert.equal(shared.local[OUTBOX][0].payload.status, "succeeded");
+  assert.equal(shared.local[OUTBOX].length, 1);
+  assert.equal(shared.local[OUTBOX][0].payload.status, "failed");
   online = true;
   await restarted.retry();
   assert.equal(attempts, 2);
+  assert.equal(delivered[0].last_stage, "summary_response_started");
+  assert.equal(delivered[0].failure_reason, "summary_service_busy");
   assert.deepEqual(shared.local[OUTBOX], []);
   assert.equal(shared.local[DIAGNOSTICS].retry, undefined);
 });
@@ -245,39 +254,51 @@ test("configuration failures pause delivery longer and retry delay stays bounded
   assert.equal(background.shared.local[OUTBOX].length, 1);
 });
 
-test("active state and v3 served-model receipt survive worker restart before tab cancellation", async () => {
-  const shared = profile();
-  const proof = "b".repeat(64);
-  const confirmedAt = "2026-10-02T10:00:03.000Z";
-  const summaryRequests = [];
-  const fetchImpl = async (url, options) => {
-    if (url.endsWith("/api/telemetry")) throw new Error("offline");
-    summaryRequests.push(JSON.parse(options.body));
-    return { ok: true, status: 200, json: async () => ({ summary: "SENSITIVE_SUMMARY", summaryProof: "a".repeat(64),
-      summaryProofV2: "c".repeat(64), summaryProofV3: proof, summaryModel: "gemini-3.5-flash-lite", summaryConfirmedAt: confirmedAt }) };
-  };
-  const first = worker(fetchImpl, shared);
-  await first.settled();
-  await first.ack(event());
-  await first.evaluate(`summarizeWithBackend("SENSITIVE_TRANSCRIPT", "${id(1)}")`);
-  await first.settled();
-  assert.equal(summaryRequests[0].telemetry.attempt_id, id(1));
-  assert.equal(shared.session[ACTIVE][id(1)].summary_proof, proof);
-  assert.equal(shared.session[ACTIVE][id(1)].summary_confirmed_at, confirmedAt);
-  assert.equal(shared.session[ACTIVE][id(1)].model, "gemini-3.5-flash-lite");
-  const second = worker(fetchImpl, shared, NOW + 10000, "1.4.7");
-  await second.settled();
-  await second.listeners.removed(42);
-  await second.settled();
-  const queued = shared.local[OUTBOX][0].payload;
-  assert.equal(queued.status, "failed");
-  assert.equal(queued.failure_reason, "user_cancelled");
-  assert.equal(queued.summary_proof, proof);
-  assert.equal(queued.summary_confirmed_at, confirmedAt);
-  assert.equal(queued.model, "gemini-3.5-flash-lite");
-  assert.equal(queued.extension_version, "1.4.6", "a worker update must preserve the signed version");
-  assert.equal(queued.completed_at, "2026-10-02T10:00:10.000Z");
-  assert.doesNotMatch(JSON.stringify(shared), /SENSITIVE_SUMMARY|SENSITIVE_TRANSCRIPT/);
+test("active state and optional v3 served-model receipt survive worker restart before tab cancellation", async () => {
+  for (const withReceipt of [false, true]) {
+    const shared = profile();
+    const proof = "b".repeat(64);
+    const confirmedAt = "2026-10-02T10:00:03.000Z";
+    const summaryRequests = [];
+    const fetchImpl = async (url, options) => {
+      if (url.endsWith("/api/telemetry")) throw new Error("offline");
+      summaryRequests.push(JSON.parse(options.body));
+      return { ok: true, status: 200, json: async () => ({ summary: "SENSITIVE_SUMMARY", summaryProof: "a".repeat(64),
+        summaryProofV2: "c".repeat(64), summaryProofV3: proof, summaryModel: "gemini-3.5-flash-lite", summaryConfirmedAt: confirmedAt }) };
+    };
+    const first = worker(fetchImpl, shared);
+    await first.settled();
+    await first.ack(event(1, { lastStage: "summary_request_started", characterCount: null }));
+    if (withReceipt) {
+      await first.evaluate(`summarizeWithBackend("SENSITIVE_TRANSCRIPT", "${id(1)}")`);
+      await first.settled();
+      assert.equal(summaryRequests[0].telemetry.attempt_id, id(1));
+      assert.equal(shared.session[ACTIVE][id(1)].summary_proof, proof);
+      assert.equal(shared.session[ACTIVE][id(1)].summary_confirmed_at, confirmedAt);
+      assert.equal(shared.session[ACTIVE][id(1)].model, "gemini-3.5-flash-lite");
+    }
+    const second = worker(fetchImpl, shared, NOW + 10000, "1.4.7");
+    await second.settled();
+    await second.listeners.removed(42);
+    await second.settled();
+    const queued = shared.local[OUTBOX][0].payload;
+    assert.equal(queued.status, "failed");
+    assert.equal(queued.failure_reason, "user_cancelled");
+    assert.equal(queued.summary_proof, withReceipt ? proof : undefined);
+    assert.equal(queued.summary_confirmed_at, withReceipt ? confirmedAt : undefined);
+    assert.equal(queued.model, withReceipt ? "gemini-3.5-flash-lite" : undefined);
+    assert.equal(queued.character_count, null);
+    assert.equal(queued.extension_version, "1.4.6", "a worker update must preserve the signed version");
+    assert.equal(queued.completed_at, "2026-10-02T10:00:10.000Z");
+    const retained = shared.session[ACTIVE][id(1)];
+    assert.equal(retained.event.status, "failed");
+    assert.equal(retained.event.failureReason, "user_cancelled");
+    // A signed receipt advances the durable queue beyond the last source-page event.
+    assert.equal(queued.last_stage, withReceipt ? "summary_completed" : "summary_request_started");
+    assert.equal(retained.event.lastStage, withReceipt ? "summary_response_started" : "summary_request_started");
+    assert.ok(retained.expiresAt > NOW + 10000);
+    assert.doesNotMatch(JSON.stringify(shared), /SENSITIVE_SUMMARY|SENSITIVE_TRANSCRIPT/);
+  }
 });
 
 test("queue merges keep the first v3 proof/model pair through legacy progress and retries", async () => {

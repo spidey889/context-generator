@@ -69,6 +69,9 @@ test("live evaluation retries malformed JSON as a service failure", async () => 
   assert.equal(attempts, 2);
   assert.equal(result.attempts, 2);
   assert.equal(result.factRecall, 1);
+  assert.equal(result.recovered, true);
+  assert.equal(result.attemptResults[0].passed, false);
+  assert.equal(result.attemptResults[1].passed, true);
 });
 
 test("live evaluation treats typographic dashes as equivalent in numeric ranges", () => {
@@ -76,30 +79,6 @@ test("live evaluation treats typographic dashes as equivalent in numeric ranges"
 
   assert.equal(containsFact(summary, "250-750 ms"), true);
   assert.equal(containsFact(summary, "500-1500 ms"), true);
-});
-
-test("live evaluation retries one transient endpoint failure", async () => {
-  let attempts = 0;
-  const passingResult = {
-    validShape: true,
-    factRecall: 1,
-    incorrectFacts: [],
-    latencyMs: 10,
-    maxLatencyMs: 100
-  };
-  const result = await evaluateCaseWithRetry({ id: "transient-case" }, async () => {
-    attempts += 1;
-    if (attempts === 1) throw new Error("temporary 502");
-    return passingResult;
-  }, 0);
-
-  assert.equal(attempts, 2);
-  assert.equal(result.factRecall, passingResult.factRecall);
-  assert.equal(result.latencyMs, passingResult.latencyMs);
-  assert.equal(result.recovered, true);
-  assert.equal(result.attemptResults[0].error, "temporary 502");
-  assert.equal(result.attemptResults[0].passed, false);
-  assert.equal(result.attemptResults[1].passed, true);
 });
 
 test("live evaluation retains initial quality failure, time and tokens after retry recovery", async () => {
@@ -181,18 +160,6 @@ test("live evaluation rejects critical contradictions even when every required p
     assert.ok(failing.incorrectFacts.includes(expected), contradiction);
     assert.equal(failing.usage.totalTokens, 12);
   }
-});
-
-test("live evaluation stops after two endpoint failures", async () => {
-  let attempts = 0;
-  await assert.rejects(
-    evaluateCaseWithRetry({ id: "persistent-case" }, async () => {
-      attempts += 1;
-      throw new Error(`failure ${attempts}`);
-    }, 0),
-    /persistent-case: evaluation failed twice/
-  );
-  assert.equal(attempts, 2);
 });
 
 test("evaluation CLI saves both failed attempts and still evaluates the other case without AI calls", async () => {

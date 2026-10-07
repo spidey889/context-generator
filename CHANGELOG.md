@@ -4,6 +4,8 @@ A short history of decisions and regressions that matter when changing the code.
 
 ## 2026-10-07
 
+- **Overall Node suite trimmed by behavior.** Removed 18 overlapping fixtures across paste/capture, destination recovery, telemetry delivery/relay, summary formatting and evaluation retries. Moved unique assertions into stronger retained fixtures, including cancellation with and without a signed receipt, exact whitespace and malformed-response recovery; warmup privacy now checks actual messages and fetches. The suite fell from 471 to 453 tests (452 regular plus one slow scrolling regression), and all 453 passed locally. Production code, the seven legacy placement checks, database replay and browser checks are unchanged.
+
 - **One overlapping inline placement fixture consolidated.** Folded Claude's basic named-action lookup into its stronger hidden/popup-control fixture, retaining rejection of unnamed toolbar actions. Inline placement tests fell from 31 to 30; production behavior is unchanged.
 
 - **DOM capture checks reduced to the fallback contract.** Removed five overlapping basic-role, repeated-turn, sequence-helper, preparation and Grok profile fixtures, reducing focused DOM cases from 30 to 25. The remaining cases include a 40-turn repeated-text ChatGPT sweep, a delayed 40-turn Grok sweep, instant preparation with delayed history and the separate slow physical-scroll regression. All 113 checks in the affected content-script test file passed, including its slow case. Navigation/privacy, attachment and fallback checks remain; DOM still serves JSON failures, unsaved chats, Speed opt-out and toolbar transfers.
