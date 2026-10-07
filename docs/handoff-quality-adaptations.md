@@ -35,7 +35,7 @@ The exact rejected prompt modules are retained under `evaluation/prompts`; their
 
 ## Final v19 findings
 
-**Recommendation: retain the four principles, but hold this candidate's production merge.** Actual outputs do not establish an overall quality win. Stronger wording does not provide semantic verification.
+**Recommendation: retain the four principles; the overall quality difference remains inconclusive.** Shared model hallucinations alone do not justify rejecting the candidate. The available comparisons establish neither an overall win nor a consistent regression. Stronger wording does not provide semantic verification.
 
 | Case | Full-output result |
 | --- | --- |
@@ -51,10 +51,20 @@ The exact rejected prompt modules are retained under `evaluation/prompts`; their
 
 [Dots adaptation outputs](../evaluation/results/2026-10-07-handoff-v19-adaptations-dots.json), [partial regression outputs](../evaluation/results/2026-10-07-handoff-v19-regressions-dots.json), and [Ling status pair](../evaluation/results/2026-10-07-handoff-v19-status-ling.json) retain the evidence. A [broader Ling run](../evaluation/results/2026-10-07-handoff-v19-adaptations-ling.json) generated only its first baseline before candidate 429; it adds no pair. Availability failures remain ungraded, not passes or prompt failures.
 
-Across v16-v19, all 63 attempts are retained: 59 generated handoffs and four provider failures, with 28 complete pairs and three unpaired generations. Final v19 has eight complete pairs plus three unpaired generations. This is a small synthetic, development-influenced sample. It cannot prove production quality or replace the unreached regressions.
+The initial v16-v19 evaluation retains all 63 attempts: 59 generated handoffs and four provider failures, with 28 complete pairs and three unpaired generations. Final v19 has eight complete pairs plus three unpaired generations. This is a small synthetic, development-influenced sample. It cannot prove production quality or replace the unreached regressions.
 
 The report's `candidateRef` is the checkout parent before the uncommitted experiment, not a claim that v19 was already committed there. Prompt source hashes, each full system-prompt hash and fixture/input hashes identify the evaluated bytes. Rejected snapshots reproduce the earlier source hashes; the final runtime module matches the v19 reports.
 
 Final compatibility checks: 28 focused tests passed for provider/template/cache integration, empty-template rejection and comparison integrity. Ground-truth phrase checks and diff checks passed. Routing, output allowances, validation policy, seven headings and trusted destination confirmation remain unchanged. The development environment file was removed after evaluation. No master merge or deployment was performed.
 
 The next quality decision needs an available route, completed failure-prone/long-history comparisons, and full source/output review. Further wording changes alone should not be declared a fix for unsupported facts.
+
+## Master control and attribution correction
+
+The user challenged whether the cited failures were existing model behavior. Reinspection confirms that the current master control (`a952541`, re-fetched on October 7) makes the same unsupported testing claim as the candidate on the same Dots input. The source says "No testing state for Birch has been reported." Master nevertheless claims "No testing, implementation, inspection, or deployment has occurred for Birch export feature"; the candidate claims "No implementation, testing, or deployment has occurred; no files changed". Earlier master repeats show the same unknown-to-not-done error. Conversely, both Ling outputs preserve the unknown testing state on that input.
+
+This supports a shared model weakness and demonstrates that the failure is not unique to the new prompt. It does not isolate a purely model-only cause: prompt wording can still change failure rates. Nor does it establish a new-prompt regression. The CSV candidate's incorrect implementation approval also lacks a generated master partner, so that single output cannot establish comparative worsening. Travel has different substantive errors on both sides rather than a clean control.
+
+A [fresh master-first Dots retry](../evaluation/results/2026-10-07-handoff-master-status-recheck-dots.json) returned 429 before either generation. It is retained as an unavailable attempt and adds no quality evidence. No runtime wording or routing was changed for this follow-up.
+
+The earlier merge-hold conclusion was too strong when grounded in shared hallucinations. The relevant acceptance question is whether the candidate preserves more essential context without increasing unsupported claims relative to master, using repeated matched generations. It is not whether the candidate eliminates every failure the same model already exhibits on master. The existing four adaptation recommendations stand; production merge has not been performed or newly authorized.
