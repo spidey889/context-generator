@@ -12,6 +12,10 @@ export const TELEMETRY_STAGE_ORDER = [
 ];
 export const TELEMETRY_STAGES = new Set(TELEMETRY_STAGE_ORDER);
 export const TELEMETRY_MAX_CHARACTER_COUNT = 2147483647;
+// Client reports preserve observed outcomes without granting receipt/counter
+// trust or accepting arbitrary text. Keep aligned with Vercel and the worker.
+const REPORTED_MODELS = new Set(["local-direct", "gemini-3.6-flash", "gemini-3.5-flash-lite", "ministral-14b-2512",
+  "inclusionai/ling-3.1-flash", "qwen/qwen3.8-27b:free", "dots-studio/dots-3-note-preview:free", "google/gemma-4-26b-a4b-it:free"]);
 export const TELEMETRY_FAILURE_REASONS = new Set([
   "no_conversation",
   "conversation_too_large",
@@ -42,7 +46,8 @@ const TELEMETRY_KEYS = new Set([
   "summary_proof",
   "completed_at",
   "summary_confirmed_at",
-  "model"
+  "model",
+  "reported_model"
 ]);
 
 export function validateTelemetryPayload(input) {
@@ -66,6 +71,8 @@ export function validateTelemetryPayload(input) {
   if (input.summary_confirmed_at !== undefined && (!summaryConfirmedAt || input.summary_proof === undefined)) return null;
   if (input.model !== undefined && (!summaryConfirmedAt || input.summary_proof === undefined
       || typeof input.model !== "string" || !/^[a-z0-9][a-z0-9._:/-]{0,159}$/.test(input.model))) return null;
+  if (input.reported_model !== undefined && (!REPORTED_MODELS.has(input.reported_model)
+      || !["summary_completed", "paste_started", "completed"].includes(input.last_stage))) return null;
 
   const characterCount = input.character_count === null || input.character_count === undefined
     ? null
@@ -94,7 +101,8 @@ export function validateTelemetryPayload(input) {
     ...(input.summary_proof !== undefined ? { summary_proof: input.summary_proof } : {}),
     ...(completedAt !== undefined ? { completed_at: completedAt } : {}),
     ...(summaryConfirmedAt !== undefined ? { summary_confirmed_at: summaryConfirmedAt } : {}),
-    ...(input.model !== undefined ? { model: input.model } : {})
+    ...(input.model !== undefined ? { model: input.model } : {}),
+    ...(input.reported_model !== undefined ? { reported_model: input.reported_model } : {})
   };
 }
 
