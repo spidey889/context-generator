@@ -94,7 +94,8 @@ function loadBackgroundForTransferTest({
     gotten: [],
     sent: [],
     updated: [],
-    injected: []
+    injected: [],
+    fetched: []
   };
   const event = { addListener: () => {} };
   const fastSetTimeout = (callback, _delay, ...args) => setTimeout(callback, 0, ...args);
@@ -104,7 +105,7 @@ function loadBackgroundForTransferTest({
     URL,
     clearTimeout,
     console: { debug() {}, error() {}, log() {}, warn() {} },
-    fetch: async () => { throw new Error("fetch is not expected in transfer tests"); },
+    fetch: async (...args) => { operations.fetched.push(args); throw new Error("fetch is not expected in transfer tests"); },
     performance: { now: () => Date.now() },
     setTimeout: useRealTimers ? setTimeout : fastSetTimeout,
     chrome: {
@@ -213,6 +214,11 @@ test("preparation and fresh recovery open beside the source in its current windo
   const harness = loadBackgroundForTransferTest({ sourceTab: currentSource });
   const prepared = await harness.prepare("claude", senderSnapshot);
   assert.equal(prepared.ok, true);
+  // Warmup may send only a readiness ping and must make no fetch request.
+  await new Promise(setImmediate);
+  assert.ok(harness.operations.sent.length > 0);
+  assert.ok(harness.operations.sent.every(({ message }) => JSON.stringify(message) === '{"type":"CONTEXT_GENERATOR_PING"}'));
+  assert.equal(harness.operations.fetched.length, 0);
   const recovered = await harness.sendTransfer("claude", 41, false, null, senderSnapshot);
   assert.equal(recovered.ok, true);
   assert.equal(harness.operations.created.length, 2);
@@ -289,7 +295,7 @@ clockTest("expired transfer messages cannot fetch summaries, open tabs, paste or
     assert.equal(response.ok, false);
     assert.equal(response.code, "transfer_timeout");
   }
-  assert.deepEqual(harness.operations, { created: [], gotten: [], sent: [], updated: [], injected: [] });
+  assert.deepEqual(harness.operations, { created: [], gotten: [], sent: [], updated: [], injected: [], fetched: [] });
 });
 
 clockTest("a transfer deadline aborts an outstanding summary request", { timeout: 2000 }, async () => {
@@ -382,19 +388,6 @@ for (const ok of [true, false]) clockTest(`an expired shared waiter rejects a qu
   assert.equal((await owner).ok, ok);
 });
 
-test("destination preconnect and warmup never include conversation content", () => {
-  const prepareStart = source.indexOf("async function prepareDestination(");
-  const prepareEnd = source.indexOf("async function createDestinationTab(", prepareStart);
-  const warmupStart = source.indexOf("async function warmDestinationTab(");
-  const warmupEnd = source.indexOf("async function pingTab(", warmupStart);
-  const warmupSource = `${source.slice(prepareStart, prepareEnd)}\n${source.slice(warmupStart, warmupEnd)}`;
-
-  assert.ok(prepareStart >= 0 && prepareEnd > prepareStart && warmupEnd > warmupStart);
-  assert.match(warmupSource, /pingTab\(tabId\)/);
-  assert.match(source, /sendMessage\(tabId, \{ type: "CONTEXT_GENERATOR_PING" \}\)/);
-  assert.doesNotMatch(warmupSource, /SUMMARIZE_WITH_BACKEND|conversationText|summary|PASTE_CONTEXT/);
-});
-
 test("prepared destination is reused only while it remains on the selected platform", async () => {
   const harness = loadBackgroundForTransferTest({
     preparedTab: { id: 41, url: "https://example.com/user-navigated-away", windowId: 1 },
@@ -446,43 +439,25 @@ test("prepared-tab recovery opens at most one fresh destination", async () => {
   assert.deepEqual(harness.operations.sent.map(({ tabId }) => tabId), [41, 100]);
 });
 
-test("fresh ChatGPT recovery uses the same activation settle as the normal path", async () => {
-  const harness = loadBackgroundForTransferTest({
-    preparedTab: { id: 41, url: "https://chatgpt.com/", windowId: 1 },
-    sendMessageImpl: async (tabId) => {
-      if (tabId === 41) throw new Error("Prepared tab message failed");
-      return { ok: true, timing: { pasteMs: 5 } };
+test("Claude and ChatGPT focus and settle prepared and fresh composers before paste", async () => {
+  for (const [destination, url] of [["claude", "https://claude.ai/new"], ["chatgpt", "https://chatgpt.com/"]]) {
+    const harness = loadBackgroundForTransferTest({
+      preparedTab: { id: 41, url, windowId: 1 },
+      sendMessageImpl: async tabId => {
+        assert.ok(harness.operations.updated.some(update => update.tabId === tabId), "focus precedes delivery");
+        return { ok: tabId !== 41, error: tabId === 41 ? "Startup editor remounted" : undefined };
+      }
+    });
+    const response = await harness.sendTransfer(destination, 41);
+    assert.equal(response.ok, true);
+    assert.equal(harness.operations.created.length, 1);
+    assert.equal(harness.operations.created[0].options.active, false);
+    for (const tabId of [41, 100]) {
+      const focusIndex = response.marks.findIndex(mark => mark.label === "tab activate before paste start" && mark.detail.tabId === tabId);
+      const settleIndex = response.marks.findIndex((mark, index) => index > focusIndex && mark.label === "tab activation settle done");
+      const pasteIndex = response.marks.findIndex(mark => mark.label === "paste message start" && mark.detail.tabId === tabId);
+      assert.ok(focusIndex >= 0 && settleIndex > focusIndex && pasteIndex > settleIndex, `${destination}: tab ${tabId}`);
     }
-  });
-
-  const response = await harness.sendTransfer("chatgpt", 41);
-
-  assert.equal(response.ok, true);
-  assert.equal(harness.operations.created.length, 1);
-  const freshOpenIndex = response.marks.findIndex(({ label }) => label === "fresh fallback tab open done");
-  const recoveryMarks = response.marks.slice(freshOpenIndex + 1).map(({ label }) => label);
-  assert.ok(freshOpenIndex >= 0);
-  assert.ok(recoveryMarks.includes("tab activation settle start"));
-  assert.ok(recoveryMarks.includes("tab activation settle done"));
-});
-
-test("Claude focuses and settles both prepared and fresh composers before paste", async () => {
-  const harness = loadBackgroundForTransferTest({
-    preparedTab: { id: 41, url: "https://claude.ai/new", windowId: 1 },
-    sendMessageImpl: async tabId => {
-      assert.ok(harness.operations.updated.some(update => update.tabId === tabId), "focus precedes delivery");
-      return { ok: tabId !== 41, error: tabId === 41 ? "Startup editor remounted" : undefined };
-    }
-  });
-  const response = await harness.sendTransfer("claude", 41);
-  assert.equal(response.ok, true);
-  assert.equal(harness.operations.created.length, 1);
-  assert.equal(harness.operations.created[0].options.active, false);
-  for (const tabId of [41, 100]) {
-    const focusIndex = response.marks.findIndex(mark => mark.label === "tab activate before paste start" && mark.detail.tabId === tabId);
-    const settleIndex = response.marks.findIndex((mark, index) => index > focusIndex && mark.label === "tab activation settle done");
-    const pasteIndex = response.marks.findIndex(mark => mark.label === "paste message start" && mark.detail.tabId === tabId);
-    assert.ok(focusIndex >= 0 && settleIndex > focusIndex && pasteIndex > settleIndex);
   }
 });
 

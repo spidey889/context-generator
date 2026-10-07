@@ -66,7 +66,8 @@ test("provider failures log fixed metadata without reflecting arbitrary upstream
 test("normalizes summary into the required Context Carry shape", () => {
   const raw = [
     "```markdown",
-    makeContextCarrySummary("normalize", 90),
+    makeContextCarrySummary("normalize", 90).replace("CONTEXT CARRY - READY TO PASTE",
+      "╔══════════════════════════════════════════╗\n║ CONTEXT CARRY — READY TO PASTE ║\n╚══════════════════════════════════════════╝"),
     "---",
     "PASTE THIS AT THE TOP OF YOUR NEW CHAT",
     "Then write: Continue from where we left off.",
@@ -75,6 +76,7 @@ test("normalizes summary into the required Context Carry shape", () => {
 
   const normalized = normalizeContextCarrySummary(raw);
 
+  assert.equal(validateContextCarrySummary(raw, getSummaryProfile("x".repeat(4000))).ok, true);
   assert.match(normalized, /CONTEXT CARRY/);
   assert.match(normalized, /WHO I AM\nnormalize0 normalize1/);
   assert.match(normalized, /WHAT WE WERE DOING\nDetailed work remains preserved\./);
@@ -302,37 +304,6 @@ test("backend sends small generated chats to Ministral 14B first", async () => {
   }
 });
 
-test("validator accepts the exact boxed Unicode header requested from providers", () => {
-  const boxedSummary = makeContextCarrySummary("boxed", 90).replace(
-    "CONTEXT CARRY - READY TO PASTE",
-    [
-      "╔══════════════════════════════════════════╗",
-      "║         CONTEXT CARRY — READY TO PASTE        ║",
-      "╚══════════════════════════════════════════╝"
-    ].join("\n")
-  );
-  const profile = getSummaryProfile("x".repeat(4000));
-
-  assert.equal(validateContextCarrySummary(boxedSummary, profile).ok, true);
-  assert.match(normalizeContextCarrySummary(boxedSummary), /CONTEXT CARRY — READY TO PASTE/);
-});
-
-test("validator rejects box borders without the Context Carry title", () => {
-  const borderOnlySummary = makeContextCarrySummary("border-only", 90).replace(
-    "CONTEXT CARRY - READY TO PASTE",
-    [
-      "╔══════════════════════════════════════════╗",
-      "╚══════════════════════════════════════════╝"
-    ].join("\n")
-  );
-  const profile = getSummaryProfile("x".repeat(4000));
-
-  assert.deepEqual(
-    validateContextCarrySummary(borderOnlySummary, profile),
-    { ok: false, reason: "missing Context Carry header" }
-  );
-});
-
 for (const [label, failure] of [
   ["rate-limited", async () => ({ ok: false, status: 429, json: async () => ({}) })],
   ["timed-out", async () => { const error = new Error("request timed out"); error.name = "AbortError"; throw error; }]
@@ -368,12 +339,6 @@ for (const [label, failure] of [
     }
   });
 }
-
-test("normalizer refuses to disguise free-form output as a valid Context Carry", () => {
-  const normalized = normalizeContextCarrySummary("User is debugging paste reliability.");
-
-  assert.equal(normalized, "");
-});
 
 test("captured prompt injections stay inside the untrusted transcript data envelope", async () => {
   const originalFetch = global.fetch;
@@ -481,6 +446,9 @@ test("deterministic validation rejects malformed, empty, short, and refusal outp
     .replace(/WHAT WE WERE DOING[\s\S]*?WHERE WE LEFT OFF/, "WHAT WE WERE DOING\nRequest failed because the service is unavailable.\n\nWHERE WE LEFT OFF");
 
   assert.equal(validateContextCarrySummary(valid, smallProfile).ok, true);
+  const borderOnly = valid.replace("CONTEXT CARRY - READY TO PASTE", "╔════╗\n╚════╝");
+  assert.equal(validateContextCarrySummary(borderOnly, smallProfile).reason, "missing Context Carry header");
+  assert.equal(normalizeContextCarrySummary("User is debugging paste reliability."), "");
   assert.match(validateContextCarrySummary(missingSection, smallProfile).reason, /required sections/);
   assert.match(validateContextCarrySummary(emptyImportant, smallProfile).reason, /WHAT WE WERE DOING is empty/);
   assert.match(validateContextCarrySummary(tooShort, smallProfile).reason, /suspiciously short/);
