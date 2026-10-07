@@ -936,23 +936,22 @@ async function verifyPickerProductChanges(session, state) {
   assert.equal(await session.evaluate('getComputedStyle(document.querySelector(".context-generator-speed-lines i")).animationName'), "none");
   await session.call("Emulation.setEmulatedMedia", { features: [] });
   for (const width of [390, 320]) {
-    // Claude keeps the existing picker; other inline providers retain their
-    // dismissal/reopen lifecycle. Both must fit and keep the real orb clickable.
-    await session.call("Emulation.setDeviceMetricsOverride", { width, height: 740, deviceScaleFactor: 1, mobile: false });
+    // Claude freezes an open picker. Explicitly reopen at the new viewport
+    // size to check its initial fit; retention is exercised separately below.
     if (JSON_SOURCE === "claude") {
-      await waitFor(() => session.evaluate(`(() => {const sheet=document.getElementById("context-generator-destination-sheet"), r=sheet.getBoundingClientRect();
-        return sheet.getAttribute("aria-hidden")==="false" && r.left>=0 && r.right<=innerWidth;})()`), "Claude picker retention on resize");
-    } else {
-      await waitFor(() => session.evaluate('getComputedStyle(document.getElementById("context-generator-destination-sheet")).display === "none"'), "picker closure on resize");
       await session.evaluate('document.getElementById("context-generator-bubble").click()');
+      await waitFor(() => session.evaluate('getComputedStyle(document.getElementById("context-generator-destination-sheet")).display === "none"'), "explicit Claude picker dismissal before resize");
     }
+    await session.call("Emulation.setDeviceMetricsOverride", { width, height: 740, deviceScaleFactor: 1, mobile: false });
+    await waitFor(() => session.evaluate('getComputedStyle(document.getElementById("context-generator-destination-sheet")).display === "none"'), "picker closure before narrow reopening");
+    await session.evaluate('document.getElementById("context-generator-bubble").click()');
     await waitFor(() => session.evaluate('getComputedStyle(document.getElementById("context-generator-destination-sheet")).opacity === "1"'), "the narrow picker");
     assert.equal(await session.evaluate(`(() => {
       const r = document.getElementById("context-generator-destination-sheet").getBoundingClientRect();
       return r.left >= 0 && r.right <= innerWidth;
     })()`), true, `Picker must fit at ${width}px.`);
-    // Retention has no exit/open delay; let the coalesced placement frame move
-    // the backdrop cutout before testing the orb's actual browser hit target.
+    // Let the coalesced placement frame update the backdrop cutout before
+    // testing the orb's actual browser hit target.
     await waitFor(() => session.evaluate(orbVisibleThroughBackdrop), `the clickable orb at ${width}px`);
   }
   await session.evaluate(`(() => {
@@ -1558,16 +1557,21 @@ async function run() {
       window.__claudePickerFocus = [...document.querySelectorAll(".context-generator-destination-tile")].find(tile => !tile.disabled);
       window.__claudePickerFocus.focus();
       window.__claudePickerSpeed = document.querySelector(".context-generator-speed-toggle").getAttribute("aria-pressed");
+      const sheet = document.getElementById("context-generator-destination-sheet");
+      window.__claudePickerPosition = [sheet.style.left, sheet.style.top, sheet.style.transformOrigin];
     })()`);
     const assertClaudePickerRetained = async label => {
       const state = await claudePlacementSession.evaluate(`new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(() => {
         const sheet = document.getElementById("context-generator-destination-sheet");
         resolve({ open: sheet.getAttribute("aria-hidden") === "false" && getComputedStyle(sheet).opacity === "1",
           focus: document.activeElement === window.__claudePickerFocus,
+          position: JSON.stringify([sheet.style.left, sheet.style.top, sheet.style.transformOrigin]) === JSON.stringify(window.__claudePickerPosition),
           speed: document.querySelector(".context-generator-speed-toggle").getAttribute("aria-pressed") === window.__claudePickerSpeed });
       })))`);
-      assert.deepEqual(state, { open:true, focus:true, speed:true }, label);
+      assert.deepEqual(state, { open:true, focus:true, position:true, speed:true }, label);
     };
+    await claudePlacementSession.evaluate(`document.getElementById("model").style.marginRight = "8px"`);
+    await assertClaudePickerRetained("A native toolbar reflow must not move Claude's open picker.");
     for (const wrapper of ["editor", "actions", "host"]) {
       await waitFor(() => claudePlacementSession.evaluate(`getComputedStyle(document.getElementById("context-generator-destination-sheet")).opacity === "1"`), `Claude picker before ${wrapper} replacement`);
       await claudePlacementSession.evaluate(`(() => {
@@ -1581,8 +1585,6 @@ async function run() {
     }
     await claudePlacementSession.call("Emulation.setDeviceMetricsOverride", { width:390,height:240,deviceScaleFactor:1,mobile:false });
     await assertClaudePickerRetained("A narrow/short viewport resize must preserve Claude's picker.");
-    assert.equal(await claudePlacementSession.evaluate(`(() => {const r=document.getElementById("context-generator-destination-sheet").getBoundingClientRect();
-      return r.left>=9 && r.right<=innerWidth-9 && r.top>=9 && r.bottom<=innerHeight-9;})()`), true, "The resized Claude picker must remain inside the viewport.");
     await claudePlacementSession.call("Emulation.clearDeviceMetricsOverride");
     await claudePlacementSession.evaluate(`(() => {
       window.__claudeComposerGap = document.getElementById("claude-composer");
@@ -1617,7 +1619,7 @@ async function run() {
     })()`);
     await waitFor(() => claudePlacementSession.evaluate(`getComputedStyle(document.getElementById("context-generator-bubble")).position === "static"
       && getComputedStyle(document.getElementById("send")).visibility === "hidden"`), "Claude compact empty Voice mode");
-    process.stdout.write("✓ Claude picker survives wrapper remounts, viewport resize and composer gaps with focus/Speed intact; explicit dismissals and compact Voice mode pass.\n");
+    process.stdout.write("✓ Claude picker stays at its opening position through reflow, remounts, resize and composer gaps with focus/Speed intact; explicit dismissals pass.\n");
 
     for (const platform of ["chatgpt", "claude"]) {
       const fixtureUrl = `${origin}/free-placement?${SMOKE_PLATFORM_QUERY}=${platform}`;

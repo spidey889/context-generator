@@ -2679,8 +2679,13 @@ function openClaudePickerFixture() {
   return { ...f, hooks, bubble, sheet, backdrop, paint };
 }
 
-clockTest("Claude picker stays open through queued resize, wrapper remounts and temporary composer loss", () => {
+clockTest("Claude picker stays open at its original position through reflow, resize, remounts and composer loss", () => {
   const f = openClaudePickerFixture(), { hooks, sheet, bubble, paint } = f;
+  const position = () => ({ left: sheet.style.left, top: sheet.style.top, origin: sheet.style.transformOrigin });
+  const openingPosition = position();
+  bubble.getBoundingClientRect = () => ({ left: 600, right: 636, top: 180, bottom: 216, width: 36, height: 36 });
+  hooks.scheduleFloatingButtonUpdate("document-childlist"); paint();
+  assert.deepEqual(position(), openingPosition, "an orb reflow must not shift the picker horizontally");
   const focus = new FakeElement({ tag: "button" });
   hooks.document.activeElement = focus;
   hooks.window.innerWidth = 390;
@@ -2691,9 +2696,9 @@ clockTest("Claude picker stays open through queued resize, wrapper remounts and 
     assert.equal(sheet.style.display, "block");
     assert.equal(bubble.getAttribute("aria-expanded"), "true");
     assert.equal(hooks.document.activeElement, focus, "layout updates must preserve the user's focus");
+    assert.deepEqual(position(), openingPosition, "layout updates must never reanchor an open picker");
   };
   assertOpen();
-  assert.ok(Number.parseFloat(sheet.style.top) >= 10, "the resized picker must stay inside the viewport");
   for (const part of ["editor", "actions", "host"]) {
     const next = new FakeElement({ attrs: part === "actions" ? { "data-cds": "ChatComposerActions" } : {} });
     if (part === "editor") { f.host.appendChild(next); next.appendChild(f.input); }

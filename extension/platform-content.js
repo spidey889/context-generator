@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-07-claude-picker-v112";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-07-claude-picker-lock-v113";
   const INLINE_PILL_SIZE = 36;
   const ownedUiStyleSheets = new Map();
   const CLAUDE_INLINE_STYLE_ID = "context-generator-claude-inline-styles";
@@ -6917,26 +6917,15 @@
       sheet?.style.display === "block" && sheet.getAttribute("aria-hidden") !== "true";
   }
 
-  function refreshClaudePickerPosition() {
+  function refreshClaudePickerBackdrop() {
     if (!shouldPreserveClaudePicker()) return;
-    const sheet = document.getElementById(DESTINATION_SHEET_ID);
     const bubble = document.getElementById(BUBBLE_ID);
-    // Claude can replace its editor/toolbar after the orb click. The picker is
-    // owned by the chat, not those transient nodes; reconnect the orb without
-    // replaying the opening animation or changing focus/Speed/selection state.
-    if (bubble?.isConnected && isVisible(bubble) && bubble.style.display !== "none" && bubble.style.visibility !== "hidden") {
-      delete sheet.dataset.contextGeneratorPositionLocked;
-      positionDestinationSheet();
+    // Keep the picker locked at its opening coordinates. Only the orb's
+    // click-through hole follows Claude's reflow or composer replacement.
+    if (bubble) {
       updateDestinationBackdropCutout();
       return;
     }
-    // Keep the last picker position usable through a temporary composer gap,
-    // but remove its click-through hole until a visible orb owns that location.
-    const margin = 10;
-    const width = Math.min(DESTINATION_SHEET_WIDTH, window.innerWidth - margin * 2);
-    const height = Math.min(sheet.offsetHeight || 330, window.innerHeight - margin * 2);
-    sheet.style.left = `${Math.max(margin, Math.min(Number.parseFloat(sheet.style.left) || margin, window.innerWidth - width - margin))}px`;
-    sheet.style.top = `${Math.max(margin, Math.min(Number.parseFloat(sheet.style.top) || margin, window.innerHeight - height - margin))}px`;
     const backdrop = document.getElementById(DESTINATION_SHEET_BACKDROP_ID);
     if (backdrop) backdrop.style.clipPath = "";
   }
@@ -9325,7 +9314,7 @@
       if (isDestinationSheetOpen() && !shouldPreserveClaudePicker() && !invalidateInlinePicker(recalculationReason)) return;
       try {
         ensureFloatingButton(recalculationReason);
-        refreshClaudePickerPosition();
+        refreshClaudePickerBackdrop();
         updateClaudeLimitNudge();
       } catch (error) {
         if (isExtensionContextInvalidated(error)) {
