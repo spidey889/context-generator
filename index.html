@@ -684,7 +684,7 @@
     .demo-heading span { color: var(--muted); font-size: .85rem; line-height: 1.6; }
     .demo-heading span { padding: .35rem 0; }
     .demo-frame { margin: 0; padding: .55rem; border: 1px solid var(--border); border-radius: 1.6rem; background: #fff; box-shadow: var(--shadow); }
-    .demo-frame video { display: block; width: 100%; height: auto; aspect-ratio: 16 / 9; border-radius: 1.1rem; background: #f8f6f1; }
+    .demo-frame video, .demo-frame img { display: block; width: 100%; height: auto; aspect-ratio: 16 / 9; border-radius: 1.1rem; background: #f8f6f1; }
     .platform-list { display: flex; flex-wrap: wrap; justify-content: center; gap: .6rem 1.3rem; list-style: none; padding: 0; margin: calc(2.8rem + var(--hero-extra-gap)) 0 0; color: #525465; font-size: .85rem; font-weight: 600; }
     .platform-list li { display: grid; place-items: center; width: 48px; height: 48px; }
     /* Keep the hover target still while its badge lifts and springs into place. */
@@ -719,7 +719,7 @@
       .demo-heading { align-items: flex-start; }
       .demo-heading span { white-space: nowrap; }
       .demo-frame { padding: .25rem; border-radius: .9rem; }
-      .demo-frame video { border-radius: .65rem; }
+      .demo-frame video, .demo-frame img { border-radius: .65rem; }
       .closing-cta .button { width: auto; }
       .footer-meta { width: 100%; gap: 0.25rem; }
       .privacy-badge, .license-badge { gap: 0.35rem; padding-inline: 0.375rem; font-size: 0.82rem; }
@@ -738,7 +738,9 @@
       <span>Cap Context</span>
     </a>
     <nav class="nav-actions" aria-label="Primary navigation">
+      <!-- DEMO PAUSED: uncomment this navigation link when restoring the video.
       <a class="nav-link" href="#demo"><svg class="nav-play-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true" focusable="false"><circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="1.5"></circle><path d="m10 8 6 4-6 4V8Z" fill="currentColor" stroke="currentColor" stroke-width="0.8" stroke-linejoin="round"></path></svg><span>Watch demo</span></a>
+      -->
       <a class="button button-install button-install-nav" href="https://chromewebstore.google.com/detail/cap-context/lpkaciijlhckkdhbgidbjfkldigghnjf" target="_blank" rel="noopener noreferrer" aria-label="Install Cap Context from the Chrome Web Store"><span>Install</span></a>
     </nav>
   </header>
@@ -749,7 +751,9 @@
       <p>A browser extension to continue your chat from one AI to another.</p>
       <div class="hero-actions">
         <a class="button button-install" href="https://chromewebstore.google.com/detail/cap-context/lpkaciijlhckkdhbgidbjfkldigghnjf" target="_blank" rel="noopener noreferrer" aria-label="Install Cap Context from the Chrome Web Store"><span class="install-label">Install Cap Context</span><span class="install-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" focusable="false"><path d="M5 12h14M13 6l6 6-6 6"></path></svg></span></a>
+        <!-- DEMO PAUSED: uncomment this hero link when restoring the video.
         <a class="button button-outline" href="#demo">Watch the demo <span aria-hidden="true">▷</span></a>
+        -->
       </div>
       <ul class="platform-list" aria-label="Supported AIs">
         <li title="Claude"><span class="platform-badge"><img src="extension/logos/claude2download__1_-removebg-preview.png" alt="Claude" width="28" height="28"></span></li>
@@ -760,6 +764,9 @@
       </ul>
     </section>
 
+    <!-- DEMO PAUSED: the owner temporarily replaced the film with the picker screenshot.
+         To unpause, remove the screenshot section and uncomment the original section
+         and both DEMO PAUSED links. Keep the video assets and playDemoInView script.
     <section id="demo" class="demo-section section container" aria-labelledby="demo-title">
       <div class="demo-heading"><h2 id="demo-title">How it works</h2><span>62-second demo</span></div>
       <figure class="demo-frame">
@@ -768,6 +775,13 @@
           <source src="brag/brag.mp4" type="video/mp4">
           <a href="brag/brag.mp4">Watch the Cap Context demo</a>
         </video>
+      </figure>
+    </section>
+    -->
+
+    <section class="demo-section section container" aria-label="Cap Context destination picker">
+      <figure class="demo-frame">
+        <img src="brag/picker-preview.png" alt="Cap Context's destination picker on Claude, with ChatGPT, Gemini, Grok and DeepSeek options" width="1920" height="1080" loading="lazy" decoding="async">
       </figure>
     </section>
 

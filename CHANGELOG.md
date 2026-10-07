@@ -4,6 +4,8 @@ A short history of decisions and regressions that matter when changing the code.
 
 ## 2026-10-07
 
+- **Homepage demo temporarily paused.** Replaced the video with the owner's Claude picker screenshot and commented out both Watch demo links plus the How it works / 62-second demo heading. Original markup, video/poster assets and playback script remain intact. To unpause, remove the screenshot section and uncomment the three `DEMO PAUSED` blocks in `index.html`.
+
 - **Model retries only cover temporary failures.** Retry the same model once for temporary network/server errors or provider overload, including HTTP 529 and temporary error envelopes returned with HTTP 200. Rate limits, account/auth/billing/permission errors and other API errors advance immediately. Routing order, budgets, retry delay, cancellation and local fallback stay unchanged. Tests were skipped at the owner's request.
 
 - **Transfer rows show their user number and username.** Added nullable `user_no` and `username` labels derived from `users` through `install_id`, including existing history and users allocated after a transfer starts. Labels follow renames/deletion/reset without changing accounting or public access. Unmatched installs remain blank; cosmetic names identify anonymous installs rather than people. Applied to hosted Supabase: 11 of 12 transfers linked, zero mismatches, original transfer/user hashes preserved. Database replay passed 471 checks; the final migration passed 13 focused checks. Rolled-back live service-role checks verified labels, rename, spoof prevention and duplicate failure accounting; security advisors reported no warnings/errors. The Brave telemetry fixture checks the new 17-column schema and verifies both labels match the counted user.
