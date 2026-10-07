@@ -1,0 +1,92 @@
+{
+  "version": 1,
+  "syntheticOnly": true,
+  "baselineRef": "a95254190755a55c09341c6626301012b1805726",
+  "candidateRef": "508eb73e3e847618e4a64b0c333d2e316045d539",
+  "candidatePromptSourceSha256": "2f1d3e6fbf4ff421293072f48aedd597d14e6696e1737f905aab43ed7075e70b",
+  "fixtureSha256": "ae9f3e953eb8a541e6cad08148d9dc47a2b3011dd9ebf1f08365e99c1be35a16",
+  "model": "inclusionai/ling-3.1-flash",
+  "repeats": 1,
+  "selectedCases": [
+    "decision-with-stated-reason",
+    "failed-attempts-with-observed-results",
+    "artifact-and-separate-work-status",
+    "missing-reason-and-unverified-status"
+  ],
+  "longHistory": false,
+  "comparisonRunnerSha256": "96a89cd2d77d162f01de19be3e3276d236185594d2c0767cae3269d32b0a0cd1",
+  "reviewCriteria": [
+    "Does an accepted decision retain its explicitly stated reason without inventing one?",
+    "Are relevant failed attempts paired with their actual results rather than a guessed cause or fix?",
+    "Are implementation, testing and deployment states separate and no stronger than the source?",
+    "Can an assistant without file access continue using the preserved work product and useful pointers?",
+    "Are the latest request, exact constraints and unselected alternatives retained without extra analysis?"
+  ],
+  "limitations": "Lexical checks are diagnostics, not semantic grading. Review every full handoff; local fallback is not a successful model generation. Short fixtures force the same generated profile on both variants; production tiny chats still use exact local carry.",
+  "results": [
+    {
+      "caseId": "decision-with-stated-reason",
+      "repeat": 1,
+      "variant": "baseline",
+      "summary": "╔══════════════════════════════════════════╗\n║         CONTEXT CARRY — READY TO PASTE        ║\n╚══════════════════════════════════════════╝\n\n🧠 WHO I AM\nNone\n\n🎯 WHAT WE WERE DOING\nPreparing the Maple archive exporter, which produces one CSV per customer account; source file is jobs/archive-export.js. The user requested a proposal only, with the existing invoice-column order unchanged.\n\n📍 WHERE WE LEFT OFF\nThe user asked to pick up by explaining the tradeoff behind the final two-upload choice. Actual provider testing has not started. The mock run completed with output \"mock upload complete, 12 files\"; this is only a simulation and says nothing about provider behavior. The branch is export-review, with no production changes.\n\n✅ DECISIONS MADE\n- Use two uploads (replacing the initial six-upload choice).\n- Use 8 MB chunks.\n- Keep the existing invoice-column order unchanged.\n\n⚠️ OPEN QUESTIONS\n- Retry delay remains undecided: fixed 500 ms or jitter from 300 to 700 ms.\n\n📦 KEY CONTEXT\n- Constraint (verbatim): \"do not edit files or deploy.\"\n- Constraint: existing invoice-column order must stay unchanged.\n- Stated reason for two uploads: keeping peak memory below the 96 MB worker limit. The user is not claiming the provider rate-limits them or that this fixes the timeout.\n- Rejected idea: raising the global timeout, rejected because it hides a stalled upload longer; do not restore that idea.\n- Reported fact: a timeout is not evidence of the cause; the provider's actual limits have not been examined.\n- Reported fact: neither upload count has been tested against the provider.\n\n🔁 NEXT STEP\nReply only: \"Context loaded. Let's pick up right where you left off.\" Then wait for the user.",
+      "generated": true,
+      "model": "inclusionai/ling-3.1-flash",
+      "elapsedMs": 7761,
+      "inputChars": 1469,
+      "inputSha256": "f405682292b1e1fb0ac0e883d324e38d61bf379878e35ce7086e4ec5b753563e",
+      "systemPromptSha256": "ef4de72be8865c998d80c0e4600a8b863d999c4256798883fb361d82020f829d",
+      "profile": "small",
+      "forcedGeneratedProfile": false,
+      "maxTokens": 1000,
+      "usage": {
+        "promptTokens": 1865,
+        "completionTokens": 428,
+        "totalTokens": 2293,
+        "cachedTokens": 0
+      },
+      "qualityFlags": [],
+      "fallback": {
+        "attempted": false,
+        "used": false,
+        "servedBy": null,
+        "model": null,
+        "reason": null
+      },
+      "assessment": {
+        "missingFacts": [],
+        "missingCriticalFacts": [],
+        "incorrectFacts": []
+      }
+    },
+    {
+      "caseId": "decision-with-stated-reason",
+      "repeat": 1,
+      "variant": "candidate",
+      "summary": null,
+      "generated": false,
+      "model": "local-direct",
+      "elapsedMs": 383,
+      "inputChars": 1469,
+      "inputSha256": "f405682292b1e1fb0ac0e883d324e38d61bf379878e35ce7086e4ec5b753563e",
+      "systemPromptSha256": "37dd8ab714112d13b1cadf1684b6996191f12f8579cfaad27df6a1694f14dbf8",
+      "profile": "small",
+      "forcedGeneratedProfile": false,
+      "maxTokens": 1000,
+      "usage": {
+        "promptTokens": 0,
+        "completionTokens": 0,
+        "totalTokens": 0,
+        "cachedTokens": 0
+      },
+      "qualityFlags": [],
+      "fallback": {
+        "attempted": true,
+        "used": true,
+        "servedBy": "local-direct",
+        "model": "local-direct",
+        "reason": "OpenRouter API error 429"
+      },
+      "assessment": null
+    }
+  ]
+}

@@ -59,10 +59,10 @@ const SUMMARY_PROVIDERS = {
 const GENERATED_SUMMARY_HINTS = {
   who: "Explicit user identity, role or preferences only; None if not stated",
   doing: "The stated task and purpose; no inferred responsibilities or requirements",
-  left: "Latest user request, exact stopping point and reported state; preserve not-started/not-tested status",
-  decisions: "Only accepted or user-made choices; distinguish approval from implementation; None if none stated",
+  left: "Latest user request and stopping state; distinguish implementation, testing and deployment status",
+  decisions: "Only accepted or user-made choices and stated reasons; distinguish approval from implementation; None if none stated",
   questions: "Only explicitly unresolved questions or choices, with every competing option; None if none stated",
-  context: "Current work product/exact reproduction needed to continue, reported facts, explicit constraints (verbatim), and rejected ideas (labeled rejected)"
+  context: "Essential current work product/evidence, useful artifact pointers, reported facts, verbatim constraints, labelled rejections and relevant failed attempts with observed results"
 };
 const SUMMARY_PROFILES = [
   {

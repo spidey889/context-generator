@@ -1,5 +1,5 @@
 // Keep the prompt and its cache namespace together: wording changes need a new version.
-const SUMMARY_PROMPT_CACHE_VERSION = "capcontext-summary-v19";
+const SUMMARY_PROMPT_CACHE_VERSION = "capcontext-summary-v18";
 const CONTEXT_CARRY_TITLE = "CONTEXT CARRY — READY TO PASTE";
 const CONTEXT_CARRY_BOX_HEADER = [
   "╔══════════════════════════════════════════╗",
@@ -44,7 +44,6 @@ Writing and final check:
 - Word counts and section budgets are guidance, never reasons to pad, repeat, or invent facts. Prefer near-verbatim factual statements over elaborate paraphrases that add meaning.
 - Use "None" only when the transcript genuinely contains no useful information for that section. WHAT WE WERE DOING, WHERE WE LEFT OFF, and KEY CONTEXT must always contain strong, grounded content from the transcript when available; never fill gaps with guesses.
 - Before finalizing, check every output claim against the transcript, deleting unsupported implications and invented questions. Then check that all relevant prohibitions, rejected ideas, undecided alternatives, exact requested facts and negative/current states survived. Place any missing constraint in KEY CONTEXT, keeping its original wording. Never quote a paraphrase as verbatim.
-- Preserve missing-result wording exactly: "not reported" must never become "not run", "not started" or "not done". No inspection output, test report or deployment record proves only the absence of that report, not the absence of the activity.
 - Output only the filled context block below. No intro, commentary, markdown fence, internal checklist or retired skill-template footer.
 ${headerRule}
 - Keep all seven headings exactly, once each in order, as standalone lines including emoji/capitalization. Replace bracket hints with supported content or None.

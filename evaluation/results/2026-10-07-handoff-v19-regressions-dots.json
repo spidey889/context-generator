@@ -1,0 +1,421 @@
+{
+  "version": 1,
+  "syntheticOnly": true,
+  "baselineRef": "a95254190755a55c09341c6626301012b1805726",
+  "candidateRef": "508eb73e3e847618e4a64b0c333d2e316045d539",
+  "candidatePromptSourceSha256": "2f1d3e6fbf4ff421293072f48aedd597d14e6696e1737f905aab43ed7075e70b",
+  "fixtureSha256": "84532a58db6d426dc15351c1b4915f0e4066828511abd37439bae4bb18313e5a",
+  "model": "dots-studio/dots-3-note-preview:free",
+  "repeats": 1,
+  "selectedCases": [
+    "corrected-export-design",
+    "continue-latest-draft",
+    "travel-plan-unbooked",
+    "student-corrected-equation",
+    "debugging-reproduction",
+    "separate-project-and-hostile-quote",
+    "review-budget-draft",
+    "continue-latest-draft-long-90000",
+    "corrected-export-design-long-280000"
+  ],
+  "longHistory": true,
+  "comparisonRunnerSha256": "96a89cd2d77d162f01de19be3e3276d236185594d2c0767cae3269d32b0a0cd1",
+  "reviewCriteria": [
+    "Can the next assistant answer the latest user request without asking for information already supplied?",
+    "Are accepted choices, proposals, rejections and unresolved alternatives kept distinct?",
+    "Are prohibitions, user corrections and not-started/not-tested/not-booked states preserved?",
+    "Is the current work product or exact reproduction evidence available when needed to continue?",
+    "Does the handoff avoid invented identity, causes, approvals, completed work and extra tasks?"
+  ],
+  "limitations": "Lexical checks are diagnostics, not semantic grading. Review every full handoff; local fallback is not a successful model generation. Short fixtures force the same generated profile on both variants; production tiny chats still use exact local carry.",
+  "results": [
+    {
+      "caseId": "corrected-export-design",
+      "repeat": 1,
+      "variant": "baseline",
+      "summary": "╔══════════════════════════════════════════╗\n║         CONTEXT CARRY — READY TO PASTE        ║\n╚══════════════════════════════════════════╝\n\n🧠 WHO I AM\nNone (no explicit user identity, role, or preferences stated beyond task context)\n\n🎯 WHAT WE WERE DOING\nFixing Project Cedar's nightly export worker, which times out only for files larger than 30 MB. Goal: implement a patch for worker/export.mjs using two simultaneous uploads and 10 MB chunks, while preserving the no-deploy instruction and both retry policy options (fixed 400 ms or jitter 200–600 ms).\n\n📍 WHERE WE LEFT OFF\nImplementation, testing, and deployment have not started. The failure log for worker/export.mjs is exactly: \"upload idle timeout\". The patch proposal is pending, targeting the two-upload design with 10 MB chunks.\n\n✅ DECISIONS MADE\n- Rejected: Increasing the global timeout (explicitly rejected by user).\n- Accepted: Use 10 MB chunks.\n- Accepted: Use two simultaneous uploads (replacing the earlier six-upload choice).\n- Accepted: Keep the required invoice-format fix; rollback is not approved.\n- Undecided: Retry policy — fixed 400 ms pause vs. jitter between 200–600 ms.\n\n⚠️ OPEN QUESTIONS\n- Which retry policy to implement: fixed 400 ms or jitter 200–600 ms?\n\n📦 KEY CONTEXT\n- Project: Cedar nightly export worker.\n- Owner: Jules (not linked to user account).\n- Production branch: release.\n- Region: ap-south-1.\n- Symptom: Timeout only for files >30 MB.\n- Reported fact: Database writes are healthy; no customer records were lost.\n- Constraint: \"Do not deploy this change.\" (verbatim, unconditional)\n- Rejected idea: Increasing the global timeout.\n- Failure log: \"upload idle timeout\" (exact string).\n- File target: worker/export.mjs.\n- No owner identity has been linked to the user's account.\n\n🔁 NEXT STEP\nReply only: \"Context loaded. Let's pick up right where you left off.\" Then wait for the user.",
+      "generated": true,
+      "model": "dots-studio/dots-3-note-preview:free",
+      "elapsedMs": 12412,
+      "inputChars": 1341,
+      "inputSha256": "ef8cc7f79b04ba31cf77b9ece7c0b065a01b6f4648f11fc66e4163d9fe576f66",
+      "systemPromptSha256": "ef4de72be8865c998d80c0e4600a8b863d999c4256798883fb361d82020f829d",
+      "profile": "small",
+      "forcedGeneratedProfile": false,
+      "maxTokens": 1000,
+      "usage": {
+        "promptTokens": 1776,
+        "completionTokens": 491,
+        "totalTokens": 2267,
+        "cachedTokens": 0
+      },
+      "qualityFlags": [],
+      "fallback": {
+        "attempted": false,
+        "used": false,
+        "servedBy": null,
+        "model": null,
+        "reason": null
+      },
+      "assessment": {
+        "missingFacts": [],
+        "missingCriticalFacts": [],
+        "incorrectFacts": []
+      }
+    },
+    {
+      "caseId": "corrected-export-design",
+      "repeat": 1,
+      "variant": "candidate",
+      "summary": "╔══════════════════════════════════════════╗\n║         CONTEXT CARRY — READY TO PASTE        ║\n╚══════════════════════════════════════════╝\n\n🧠 WHO I AM\nNone\n\n🎯 WHAT WE WERE DOING\nFixing Project Cedar's nightly export worker, which times out only for files larger than 30 MB. Database writes are healthy; no customer records were lost. The goal is a patch proposal for worker/export.mjs using two simultaneous uploads and 10 MB chunks, while preserving the no-deploy instruction and both retry policy options.\n\n📍 WHERE WE LEFT OFF\nThe user requested a patch proposal for the two-upload design. No implementation, testing, or deployment has started. The failure log is exactly: \"upload idle timeout.\" No owner identity has been linked to the user's account.\n\n✅ DECISIONS MADE\n- Rejected: Increasing the global timeout.\n- Accepted: 10 MB chunk size.\n- Accepted: Two simultaneous uploads (replacing the earlier six-upload choice).\n- Accepted: Required invoice-format fix; rollback is not approved.\n- Constraint: Do not deploy this change.\n\n⚠️ OPEN QUESTIONS\nRetry policy is undecided: fixed 400 ms pause vs. jitter between 200–600 ms.\n\n📦 KEY CONTEXT\n- Project: Cedar nightly export worker\n- Owner: Jules (not linked to user account)\n- Production branch: release\n- Region: ap-south-1\n- Symptom: Timeout only for files >30 MB; failure log: \"upload idle timeout\"\n- Database writes: Healthy; no customer records lost\n- Target file: worker/export.mjs\n- Rejected idea: Global timeout increase\n- Unresolved: Retry policy choice (fixed 400 ms or jitter 200–600 ms)\n- Operational prohibition: \"Do not deploy this change.\"\n\n🔁 NEXT STEP\nReply only: \"Context loaded. Let's pick up right where you left off.\" Then wait for the user.",
+      "generated": true,
+      "model": "dots-studio/dots-3-note-preview:free",
+      "elapsedMs": 12350,
+      "inputChars": 1341,
+      "inputSha256": "ef8cc7f79b04ba31cf77b9ece7c0b065a01b6f4648f11fc66e4163d9fe576f66",
+      "systemPromptSha256": "37dd8ab714112d13b1cadf1684b6996191f12f8579cfaad27df6a1694f14dbf8",
+      "profile": "small",
+      "forcedGeneratedProfile": false,
+      "maxTokens": 1000,
+      "usage": {
+        "promptTokens": 1881,
+        "completionTokens": 444,
+        "totalTokens": 2325,
+        "cachedTokens": 0
+      },
+      "qualityFlags": [],
+      "fallback": {
+        "attempted": false,
+        "used": false,
+        "servedBy": null,
+        "model": null,
+        "reason": null
+      },
+      "assessment": {
+        "missingFacts": [],
+        "missingCriticalFacts": [
+          "have not started OR not started OR has not started"
+        ],
+        "incorrectFacts": []
+      }
+    },
+    {
+      "caseId": "continue-latest-draft",
+      "repeat": 1,
+      "variant": "candidate",
+      "summary": "╔══════════════════════════════════════════╗\n║         CONTEXT CARRY — READY TO PASTE        ║\n╚══════════════════════════════════════════╝\n\n🧠 WHO I AM\nNone\n\n🎯 WHAT WE WERE DOING\nWriting the opening of a small community newsletter called The Lantern for neighbors, not sponsors. Tone must be friendly and plain. No invented attendance numbers or quotes.\n\n📍 WHERE WE LEFT OFF\nThe user provided the exact opening paragraph and instructed to keep it exactly as written. The user then requested a second paragraph in the same voice, with specific content: mention that the courtyard is outdoors, and visitors can leave whenever they like. The assistant has not yet written this second paragraph.\n\n✅ DECISIONS MADE\n- Rejected the assistant's initial proposal of a big claim about the whole town coming together and a registration link.\n- Rejected the assistant's draft v1 (\"Our town comes together for a wonderful afternoon of books and tea. Hundreds of neighbors will join us on Saturday.\") due to invented turnout.\n- Accepted and locked the user's replacement opening paragraph: \"A spare book, a familiar face, and a cup of tea: join us at the old library courtyard on Saturday 18 April, 16:00-18:00. Bring a mug and a children's book to exchange. Tea is free; books are for swapping, not selling.\"\n- Instruction: Do not rewrite the opening or revive v1.\n- Instruction: Write only the second paragraph in the same voice.\n\n⚠️ OPEN QUESTIONS\nNone\n\n📦 KEY CONTEXT\n- Newsletter name: The Lantern\n- Audience: Neighbors, not sponsors\n- Tone: Friendly and plain\n- Event: Saturday 18 April, 16:00-18:00 at the old library courtyard\n- Bring: A mug and a children's book to exchange\n- Tea: Free\n- Books: For swapping, not selling (explicit prohibition)\n- Current opening paragraph (locked, verbatim): \"A spare book, a familiar face, and a cup of tea: join us at the old library courtyard on Saturday 18 April, 16:00-18:00. Bring a mug and a children's book to exchange. Tea is free; books are for swapping, not selling.\"\n- Second paragraph requirements: Mention courtyard is outdoors; mention visitors can leave whenever they like; same voice as opening; do not rewrite opening or revive v1.\n- Rejected ideas: Big claim about town coming together, registration link, invented attendance numbers (\"Hundreds of neighbors\"), draft v1.\n\n🔁 NEXT STEP\nReply only: \"Context loaded. Let's pick up right where you left off.\" Then wait for the user.",
+      "generated": true,
+      "model": "dots-studio/dots-3-note-preview:free",
+      "elapsedMs": 17108,
+      "inputChars": 1368,
+      "inputSha256": "66da686d897a65fd29b016ae24b7ce4948600840f2018b21082cb7b57307c255",
+      "systemPromptSha256": "37dd8ab714112d13b1cadf1684b6996191f12f8579cfaad27df6a1694f14dbf8",
+      "profile": "small",
+      "forcedGeneratedProfile": false,
+      "maxTokens": 1000,
+      "usage": {
+        "promptTokens": 1890,
+        "completionTokens": 593,
+        "totalTokens": 2483,
+        "cachedTokens": 1536
+      },
+      "qualityFlags": [],
+      "fallback": {
+        "attempted": false,
+        "used": false,
+        "servedBy": null,
+        "model": null,
+        "reason": null
+      },
+      "assessment": {
+        "missingFacts": [],
+        "missingCriticalFacts": [],
+        "incorrectFacts": [
+          "Hundreds of neighbors will join us"
+        ]
+      }
+    },
+    {
+      "caseId": "continue-latest-draft",
+      "repeat": 1,
+      "variant": "baseline",
+      "summary": "╔══════════════════════════════════════════╗\n║         CONTEXT CARRY — READY TO PASTE        ║\n╚══════════════════════════════════════════╝\n\n🧠 WHO I AM\nNone\n\n🎯 WHAT WE WERE DOING\nWriting the opening of a small community newsletter called The Lantern for neighbors. The user provided the first paragraph and requested a second paragraph in the same voice, covering practical details: the courtyard is outdoors, and visitors can leave whenever they like. Tone must be friendly and plain. No invented attendance numbers or quotes.\n\n📍 WHERE WE LEFT OFF\nThe user's first paragraph is finalized and locked: \"A spare book, a familiar face, and a cup of tea: join us at the old library courtyard on Saturday 18 April, 16:00-18:00. Bring a mug and a children's book to exchange. Tea is free; books are for swapping, not selling.\" The assistant has not yet written the second paragraph. The second paragraph must mention that the courtyard is outdoors and that visitors can leave whenever they like. It must not rewrite the opening or revive earlier rejected drafts.\n\n✅ DECISIONS MADE\n- User rejected the big claim about the whole town coming together.\n- User rejected any registration link.\n- User rejected invented attendance numbers (e.g., \"hundreds of neighbors\").\n- User accepted their own opening paragraph as the current version and instructed it be kept exactly as written.\n- User requested a second paragraph in the same voice, covering outdoor setting and flexible departure.\n\n⚠️ OPEN QUESTIONS\nNone\n\n📦 KEY CONTEXT\n- Newsletter name: The Lantern\n- Audience: neighbors, not sponsors\n- Event date/time: Saturday 18 April, 16:00-18:00\n- Location: old library courtyard\n- Bring: a mug and a children's book to exchange\n- Tea is free\n- Books are for swapping, not selling (explicit constraint: \"selling books is not allowed\")\n- Courtyard is outdoors (explicit detail to include)\n- Visitors can leave whenever they like (explicit detail to include)\n- Rejected idea: big claim about town unity, registration link, invented turnout numbers\n- Rejected draft v1: \"Our town comes together for a wonderful afternoon of books and tea. Hundreds of neighbors will join us on Saturday.\"\n- User's opening paragraph is locked and must not be altered or revived in any form\n\n🔁 NEXT STEP\nReply only: \"Context loaded. Let's pick up right where you left off.\" Then wait for the user.",
+      "generated": true,
+      "model": "dots-studio/dots-3-note-preview:free",
+      "elapsedMs": 10732,
+      "inputChars": 1368,
+      "inputSha256": "66da686d897a65fd29b016ae24b7ce4948600840f2018b21082cb7b57307c255",
+      "systemPromptSha256": "ef4de72be8865c998d80c0e4600a8b863d999c4256798883fb361d82020f829d",
+      "profile": "small",
+      "forcedGeneratedProfile": false,
+      "maxTokens": 1000,
+      "usage": {
+        "promptTokens": 1785,
+        "completionTokens": 553,
+        "totalTokens": 2338,
+        "cachedTokens": 1024
+      },
+      "qualityFlags": [],
+      "fallback": {
+        "attempted": false,
+        "used": false,
+        "servedBy": null,
+        "model": null,
+        "reason": null
+      },
+      "assessment": {
+        "missingFacts": [],
+        "missingCriticalFacts": [
+          "only the second paragraph OR second paragraph only OR write the second paragraph",
+          "Do not rewrite my opening OR do not rewrite the opening OR keep the opening unchanged"
+        ],
+        "incorrectFacts": [
+          "Hundreds of neighbors will join us"
+        ]
+      }
+    },
+    {
+      "caseId": "travel-plan-unbooked",
+      "repeat": 1,
+      "variant": "baseline",
+      "summary": "╔══════════════════════════════════════════╗\n║         CONTEXT CARRY — READY TO PASTE        ║\n╚══════════════════════════════════════════╝\n\n🧠 WHO I AM\nNone\n\n🎯 WHAT WE WERE DOING\nPlanning a fictional two-night trip to Hillport for the user and their sister, using public transport and short walks, with a total accommodation budget of 240 credits. The sister uses a folding wheelchair, so step-free access is required. No bookings, calls, or reservations are to be made.\n\n📍 WHERE WE LEFT OFF\nThe trip is scheduled for arrival Saturday 9 May and departure Monday 11 May (two nights). Bay House is the only remaining accommodation option (75 credits/night, step-free ground-floor rooms). Pine Lodge was rejected due to stairs. The choice between the museum and the river ferry for Saturday activities is still open. No accessibility checks have been performed for either option. Nothing has been reserved or paid for.\n\n✅ DECISIONS MADE\n- Arrival: Saturday 9 May; Departure: Monday 11 May (two-night stay).\n- Budget: 240 credits total for both people.\n- Accommodation: Bay House selected (75 credits/night); Pine Lodge rejected due to stairs.\n- Activity choice (museum vs. ferry): Still open/undecided.\n\n⚠️ OPEN QUESTIONS\nNone explicitly stated as unresolved questions; however, the choice between the museum and the river ferry remains undecided.\n\n📦 KEY CONTEXT\n- Constraint: Step-free access required (sister uses folding wheelchair).\n- Constraint: Total accommodation budget is 240 credits for both people, not per person.\n- Constraint: Public transport and short walks preferred.\n- Constraint: Do not book or contact anyone; no reservations or payments.\n- Rejected idea: Pine Lodge (stairs present).\n- Reported fact: Bay House lists step-free ground-floor rooms at 75 credits per night.\n- Reported fact: Museum and river ferry are proposed Saturday options; accessibility for neither has been verified.\n- Reported fact: Trip dates revised from May 8–10 to May 9–11; stay remains two nights.\n\n🔁 NEXT STEP\nReply only: \"Context loaded. Let's pick up right where you left off.\" Then wait for the user.",
+      "generated": true,
+      "model": "dots-studio/dots-3-note-preview:free",
+      "elapsedMs": 12432,
+      "inputChars": 1288,
+      "inputSha256": "5cd64f48a846561100e3943fce7780fc1208d502366d5d7ec4191782acf89850",
+      "systemPromptSha256": "ef4de72be8865c998d80c0e4600a8b863d999c4256798883fb361d82020f829d",
+      "profile": "small",
+      "forcedGeneratedProfile": false,
+      "maxTokens": 1000,
+      "usage": {
+        "promptTokens": 1743,
+        "completionTokens": 501,
+        "totalTokens": 2244,
+        "cachedTokens": 0
+      },
+      "qualityFlags": [],
+      "fallback": {
+        "attempted": false,
+        "used": false,
+        "servedBy": null,
+        "model": null,
+        "reason": null
+      },
+      "assessment": {
+        "missingFacts": [],
+        "missingCriticalFacts": [
+          "accessibility checks have not OR accessibility not verified OR accessibility unverified",
+          "compare the museum and ferry OR compare museum and ferry"
+        ],
+        "incorrectFacts": []
+      }
+    },
+    {
+      "caseId": "travel-plan-unbooked",
+      "repeat": 1,
+      "variant": "candidate",
+      "summary": "╔══════════════════════════════════════════╗\n║         CONTEXT CARRY — READY TO PASTE        ║\n╚══════════════════════════════════════════╝\n\n🧠 WHO I AM\nUser is planning a fictional three-day trip to Hillport with their sister. Preferences: public transport, short walks, step-free access required due to sister’s folding wheelchair. Budget: 240 credits total for both, not per person. Explicit instruction: do not book or contact anyone.\n\n🎯 WHAT WE WERE DOING\nPlanning a two-night trip to Hillport for the user and their sister, prioritizing accessibility and public transport. Comparing museum vs. ferry as Saturday activity options. No bookings, reservations, or payments have been made. All options remain unverified and fictional for planning purposes.\n\n📍 WHERE WE LEFT OFF\nUser requested a comparison of the museum and ferry using only known facts, and identification of remaining unknown accessibility information. No calls, bookings, or invented hours allowed. Work stopped at the point of initiating this comparison — no analysis has been performed yet.\n\n✅ DECISIONS MADE\n- Removed Pine Lodge due to stairs (explicit rejection).\n- Changed trip dates to Saturday 9 May arrival, Monday 11 May departure (two nights).\n- Confirmed Bay House as remaining accommodation option (75 credits/night, step-free ground-floor rooms) — not booked.\n- Budget fixed at 240 credits total for both travelers.\n- Museum vs. ferry choice left open; no decision made.\n\n⚠️ OPEN QUESTIONS\n- Which Saturday activity to choose: museum or ferry? (Unresolved)\n- What is the accessibility status of the museum? (Unknown)\n- What is the accessibility status of the river ferry? (Unknown)\n- Are there any step-free boarding points or ramps on the ferry? (Unknown)\n- Does the museum have elevators, wide doorways, or accessible restrooms? (Unknown)\n\n📦 KEY CONTEXT\n- Accommodation: Bay House — 75 credits/night, step-free ground-floor rooms. Two nights = 150 credits. Within 240-credit budget.\n- Rejected: Pine Lodge — stairs, 60 credits/night (removed due to accessibility incompatibility).\n- Transport: Public transport preferred; short walks required. No specific routes or schedules provided.\n- Sister uses folding wheelchair — step-free access is mandatory.\n- No reservations, payments, or contacts made. All options are fictional and unverified.\n- User explicitly prohibited: booking, contacting anyone, inventing opening hours, or making assumptions beyond stated facts.\n- Reported facts only: Bay House has step-free ground-floor rooms; Pine Lodge has stairs; museum and ferry are options — accessibility not verified for either.\n\n🔁 NEXT STEP\nReply only: \"Context loaded. Let's pick up right where you left off.\" Then wait for the user.",
+      "generated": true,
+      "model": "dots-studio/dots-3-note-preview:free",
+      "elapsedMs": 12199,
+      "inputChars": 1288,
+      "inputSha256": "5cd64f48a846561100e3943fce7780fc1208d502366d5d7ec4191782acf89850",
+      "systemPromptSha256": "37dd8ab714112d13b1cadf1684b6996191f12f8579cfaad27df6a1694f14dbf8",
+      "profile": "small",
+      "forcedGeneratedProfile": false,
+      "maxTokens": 1000,
+      "usage": {
+        "promptTokens": 1848,
+        "completionTokens": 615,
+        "totalTokens": 2463,
+        "cachedTokens": 0
+      },
+      "qualityFlags": [],
+      "fallback": {
+        "attempted": false,
+        "used": false,
+        "servedBy": null,
+        "model": null,
+        "reason": null
+      },
+      "assessment": {
+        "missingFacts": [],
+        "missingCriticalFacts": [
+          "compare the museum and ferry OR compare museum and ferry"
+        ],
+        "incorrectFacts": []
+      }
+    },
+    {
+      "caseId": "student-corrected-equation",
+      "repeat": 1,
+      "variant": "candidate",
+      "summary": null,
+      "generated": false,
+      "model": "local-direct",
+      "elapsedMs": 15763,
+      "inputChars": 1221,
+      "inputSha256": "a3bef098e3a6f40d88a46a9c2ede53dbe2720d1f3a9dee65c0f3c6955210d79f",
+      "systemPromptSha256": "37dd8ab714112d13b1cadf1684b6996191f12f8579cfaad27df6a1694f14dbf8",
+      "profile": "small",
+      "forcedGeneratedProfile": false,
+      "maxTokens": 1000,
+      "usage": {
+        "promptTokens": 0,
+        "completionTokens": 0,
+        "totalTokens": 0,
+        "cachedTokens": 0
+      },
+      "qualityFlags": [],
+      "fallback": {
+        "attempted": true,
+        "used": true,
+        "servedBy": "local-direct",
+        "model": "local-direct",
+        "reason": "OpenRouter generation failed"
+      },
+      "assessment": null
+    },
+    {
+      "caseId": "student-corrected-equation",
+      "repeat": 1,
+      "variant": "baseline",
+      "summary": "╔══════════════════════════════════════════╗\n║         CONTEXT CARRY — READY TO PASTE        ║\n╚══════════════════════════════════════════╝\n\n🧠 WHO I AM\nNone\n\n🎯 WHAT WE WERE DOING\nPracticing quadratic equations by factoring; user is learning algebra and wants hints instead of full solutions. The active equation is x² − 7x + 10 = 0. User’s current factorization attempt is (x − 2)(x − 5), which has not been verified by expansion. The goal is to guide the user through checking the factorization step-by-step without providing the final roots or completing the expansion on their behalf.\n\n📍 WHERE WE LEFT OFF\nUser has requested a step-by-step expansion check of (x − 2)(x − 5). They want to be asked for the x² term first, then the middle term, then the constant term. If a mistake is made, the assistant should point to the specific step without finishing the expansion. The check has not yet been performed by the user. The earlier equation x² − 5x + 6 = 0 is discarded as historical context only.\n\n✅ DECISIONS MADE\n- User explicitly discarded x² − 5x + 6 = 0 as the active exercise; only x² − 7x + 10 = 0 is current.\n- User chose to verify (x − 2)(x − 5) by expansion rather than receiving roots directly.\n- User requested a guided, step-by-step check (x² term → middle term → constant), with error feedback at each step.\n\n⚠️ OPEN QUESTIONS\nNone\n\n📦 KEY CONTEXT\n- Active equation: x² − 7x + 10 = 0\n- User’s factorization attempt: (x − 2)(x − 5)\n- Verification status: Not yet expanded or checked\n- Discarded equation: x² − 5x + 6 = 0 (historical only)\n- User constraint: \"Do not give me the final solution unless I ask for it.\"\n- User instruction: \"Ask me for the x² term first, then the middle term, then the constant. If I make a mistake, point to that step without finishing the expansion for me.\"\n- Assistant prior response: Confirmed the older equation is now just history; suggested multiplying the brackets next.\n\n🔁 NEXT STEP\nReply only: \"Context loaded. Let's pick up right where you left off.\" Then wait for the user.",
+      "generated": true,
+      "model": "dots-studio/dots-3-note-preview:free",
+      "elapsedMs": 13928,
+      "inputChars": 1221,
+      "inputSha256": "a3bef098e3a6f40d88a46a9c2ede53dbe2720d1f3a9dee65c0f3c6955210d79f",
+      "systemPromptSha256": "ef4de72be8865c998d80c0e4600a8b863d999c4256798883fb361d82020f829d",
+      "profile": "small",
+      "forcedGeneratedProfile": false,
+      "maxTokens": 1000,
+      "usage": {
+        "promptTokens": 1793,
+        "completionTokens": 553,
+        "totalTokens": 2346,
+        "cachedTokens": 0
+      },
+      "qualityFlags": [],
+      "fallback": {
+        "attempted": false,
+        "used": false,
+        "servedBy": null,
+        "model": null,
+        "reason": null
+      },
+      "assessment": {
+        "missingFacts": [
+          "x^2 - 7x + 10 = 0",
+          "(x-2)(x-5)",
+          "one step at a time OR step by step"
+        ],
+        "missingCriticalFacts": [
+          "Do not state the roots OR do not give the roots OR do not provide the roots",
+          "have not checked OR not checked OR unchecked",
+          "hints before full answers OR hints before answers OR hint-first"
+        ],
+        "incorrectFacts": []
+      }
+    },
+    {
+      "caseId": "debugging-reproduction",
+      "repeat": 1,
+      "variant": "baseline",
+      "summary": null,
+      "generated": false,
+      "model": "local-direct",
+      "elapsedMs": 15864,
+      "inputChars": 1203,
+      "inputSha256": "32242bd6bbbbdb6151ccbe1e4186c42afe60e811a7df21e641adb06cb7d8cbd2",
+      "systemPromptSha256": "ef4de72be8865c998d80c0e4600a8b863d999c4256798883fb361d82020f829d",
+      "profile": "small",
+      "forcedGeneratedProfile": false,
+      "maxTokens": 1000,
+      "usage": {
+        "promptTokens": 0,
+        "completionTokens": 0,
+        "totalTokens": 0,
+        "cachedTokens": 0
+      },
+      "qualityFlags": [],
+      "fallback": {
+        "attempted": true,
+        "used": true,
+        "servedBy": "local-direct",
+        "model": "local-direct",
+        "reason": "OpenRouter generation failed"
+      },
+      "assessment": null
+    },
+    {
+      "caseId": "debugging-reproduction",
+      "repeat": 1,
+      "variant": "candidate",
+      "summary": "╔══════════════════════════════════════════╗\n║         CONTEXT CARRY — READY TO PASTE        ║\n╚══════════════════════════════════════════╝\n\n🧠 WHO I AM\nNone\n\n🎯 WHAT WE WERE DOING\nDebug the Grove CSV importer located at C:\\lab\\grove. The target file is src/import.mjs on the branch csv-quoted-fields. The goal is to fix parsing of quoted fields containing commas without changing the delimiter or switching libraries.\n\n📍 WHERE WE LEFT OFF\nThe user provided the exact input:\nname,note\nAda,\"red, blue\"\n\nExpected row: [\"Ada\", \"red, blue\"]\nActual row: [\"Ada\", \"red\", \" blue\"]\nReproduction command: node scripts/repro.mjs fixtures/quoted-comma.csv\n\nThe current parser uses line.split(','), which cannot distinguish quoted commas from field separators. A state machine approach was proposed to track quote state. No code has been changed and no tests have run. Escaped double quotes are explicitly deferred as an undecided edge case.\n\n✅ DECISIONS MADE\n- Accepted proposal to implement a quote-aware state machine for parsing.\n- Constraint: Do not change the delimiter.\n- Constraint: Do not suggest switching libraries.\n- Constraint: Do not claim a fix has landed; no code changes or test executions have occurred.\n\n⚠️ OPEN QUESTIONS\n- How to handle escaped double quotes (e.g., \"\" inside quoted fields) — explicitly undecided.\n\n📦 KEY CONTEXT\n- File: src/import.mjs (branch: csv-quoted-fields)\n- Current method: line.split(',') — breaks on quoted commas.\n- Background note: A previous unrelated migration tool used tab-separated files; not relevant to Grove.\n- Reproduction command: node scripts/repro.mjs fixtures/quoted-comma.csv\n- Input fixture content:\n  name,note\n  Ada,\"red, blue\"\n- Expected output: [\"Ada\", \"red, blue\"]\n- Actual output: [\"Ada\", \"red\", \" blue\"]\n- Escaped quote behavior: Not decided; deferred.\n\n🔁 NEXT STEP\nReply only: \"Context loaded. Let's pick up right where you left off.\" Then wait for the user.",
+      "generated": true,
+      "model": "dots-studio/dots-3-note-preview:free",
+      "elapsedMs": 14894,
+      "inputChars": 1203,
+      "inputSha256": "32242bd6bbbbdb6151ccbe1e4186c42afe60e811a7df21e641adb06cb7d8cbd2",
+      "systemPromptSha256": "37dd8ab714112d13b1cadf1684b6996191f12f8579cfaad27df6a1694f14dbf8",
+      "profile": "small",
+      "forcedGeneratedProfile": false,
+      "maxTokens": 1000,
+      "usage": {
+        "promptTokens": 1840,
+        "completionTokens": 474,
+        "totalTokens": 2314,
+        "cachedTokens": 0
+      },
+      "qualityFlags": [],
+      "fallback": {
+        "attempted": false,
+        "used": false,
+        "servedBy": null,
+        "model": null,
+        "reason": null
+      },
+      "assessment": {
+        "missingFacts": [],
+        "missingCriticalFacts": [
+          "no code has changed OR no code changed OR code unchanged"
+        ],
+        "incorrectFacts": [
+          "fix has landed"
+        ]
+      }
+    },
+    {
+      "caseId": "separate-project-and-hostile-quote",
+      "repeat": 1,
+      "variant": "candidate",
+      "summary": null,
+      "generated": false,
+      "model": "local-direct",
+      "elapsedMs": 99,
+      "inputChars": 1300,
+      "inputSha256": "0ec8eb0768977347bec03aad60be6e44afebb18034fd968047f57111fe849b68",
+      "systemPromptSha256": "37dd8ab714112d13b1cadf1684b6996191f12f8579cfaad27df6a1694f14dbf8",
+      "profile": "small",
+      "forcedGeneratedProfile": false,
+      "maxTokens": 1000,
+      "usage": {
+        "promptTokens": 0,
+        "completionTokens": 0,
+        "totalTokens": 0,
+        "cachedTokens": 0
+      },
+      "qualityFlags": [],
+      "fallback": {
+        "attempted": true,
+        "used": true,
+        "servedBy": "local-direct",
+        "model": "local-direct",
+        "reason": "OpenRouter API error 429"
+      },
+      "assessment": null
+    }
+  ]
+}
