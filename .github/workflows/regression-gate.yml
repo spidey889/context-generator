@@ -35,27 +35,45 @@ jobs:
         with:
           node-version: 22
           cache: npm
+      - name: Select checks from the complete change
+        id: scope
+        run: node scripts/ci-scope.js
+      - name: Lightweight public site and scope checks
+        if: steps.scope.outputs.mode == 'light'
+        env:
+          CI_BASE_SHA: ${{ steps.scope.outputs.base }}
+        run: |
+          git diff --check "$CI_BASE_SHA" "$GITHUB_SHA"
+          node --test test/ci-scope.test.js test/license.test.js
       - name: Install locked test dependencies
+        if: steps.scope.outputs.mode != 'light'
         run: npm ci --no-audit --no-fund
       - name: Build Astro architecture page
+        if: steps.scope.outputs.mode != 'light'
         run: |
           npm ci --prefix architecture --no-audit --no-fund
           npm run build --prefix architecture
       - name: Deterministic tests
+        if: steps.scope.outputs.mode != 'light'
         run: npm test
       - name: Long capture regressions
+        if: steps.scope.outputs.mode != 'light'
         run: npm run test:slow
 
       - name: Replay real SQL and verify telemetry contracts
+        if: steps.scope.outputs.mode != 'light'
         timeout-minutes: 5
         run: node scripts/check-verified-telemetry-db.js
       - name: Install Brave for local browser fixtures
+        if: steps.scope.outputs.mode != 'light'
+        timeout-minutes: 2
         run: |
-          sudo curl -fsSLo /usr/share/keyrings/brave-browser-archive-keyring.gpg https://brave-browser-apt-release.s3.brave.com/brave-browser-archive-keyring.gpg
-          sudo curl -fsSLo /etc/apt/sources.list.d/brave-browser-release.sources https://brave-browser-apt-release.s3.brave.com/brave-browser.sources
+          sudo curl --connect-timeout 10 --max-time 30 --retry 2 --retry-max-time 60 -fsSLo /usr/share/keyrings/brave-browser-archive-keyring.gpg https://brave-browser-apt-release.s3.brave.com/brave-browser-archive-keyring.gpg
+          sudo curl --connect-timeout 10 --max-time 30 --retry 2 --retry-max-time 60 -fsSLo /etc/apt/sources.list.d/brave-browser-release.sources https://brave-browser-apt-release.s3.brave.com/brave-browser.sources
           sudo apt-get update -qq
           sudo apt-get install -y --no-install-recommends brave-browser xvfb
       - name: Brave DOM transfer, placement and local telemetry database
+        if: steps.scope.outputs.mode != 'light'
         timeout-minutes: 3
         shell: bash
         env:
@@ -65,6 +83,7 @@ jobs:
           mkdir -p "$CAP_CONTEXT_SMOKE_ARTIFACT_DIR"
           xvfb-run -a npm run test:extension-smoke 2>&1 | tee "$CAP_CONTEXT_SMOKE_ARTIFACT_DIR/run.log"
       - name: Brave ChatGPT fast capture after reload and expired-token cancellation
+        if: steps.scope.outputs.mode != 'light'
         timeout-minutes: 3
         shell: bash
         env:
@@ -76,6 +95,7 @@ jobs:
           mkdir -p "$CAP_CONTEXT_SMOKE_ARTIFACT_DIR"
           xvfb-run -a npm run test:extension-smoke 2>&1 | tee "$CAP_CONTEXT_SMOKE_ARTIFACT_DIR/run.log"
       - name: Brave ChatGPT oversized paste cancellation and fallback
+        if: steps.scope.outputs.mode != 'light'
         timeout-minutes: 3
         shell: bash
         env:
@@ -86,6 +106,7 @@ jobs:
           mkdir -p "$CAP_CONTEXT_SMOKE_ARTIFACT_DIR"
           xvfb-run -a npm run test:extension-smoke 2>&1 | tee "$CAP_CONTEXT_SMOKE_ARTIFACT_DIR/run.log"
       - name: Brave ChatGPT oversized history cancellation and fallback
+        if: steps.scope.outputs.mode != 'light'
         timeout-minutes: 3
         shell: bash
         env:
@@ -96,6 +117,7 @@ jobs:
           mkdir -p "$CAP_CONTEXT_SMOKE_ARTIFACT_DIR"
           xvfb-run -a npm run test:extension-smoke 2>&1 | tee "$CAP_CONTEXT_SMOKE_ARTIFACT_DIR/run.log"
       - name: Brave Claude CRLF pasted-card capture and partial fallback
+        if: steps.scope.outputs.mode != 'light'
         timeout-minutes: 3
         shell: bash
         env:
@@ -109,6 +131,7 @@ jobs:
           mkdir -p "$CAP_CONTEXT_SMOKE_ARTIFACT_DIR"
           xvfb-run -a npm run test:extension-smoke 2>&1 | tee "$CAP_CONTEXT_SMOKE_ARTIFACT_DIR/run.log"
       - name: Brave Claude oversized history cancellation and fallback
+        if: steps.scope.outputs.mode != 'light'
         timeout-minutes: 3
         shell: bash
         env:
@@ -119,6 +142,7 @@ jobs:
           mkdir -p "$CAP_CONTEXT_SMOKE_ARTIFACT_DIR"
           xvfb-run -a npm run test:extension-smoke 2>&1 | tee "$CAP_CONTEXT_SMOKE_ARTIFACT_DIR/run.log"
       - name: Brave Gemini bootstrap JSON capture and response-menu-free fallback
+        if: steps.scope.outputs.mode != 'light'
         timeout-minutes: 3
         shell: bash
         env:
@@ -132,6 +156,7 @@ jobs:
           mkdir -p "$CAP_CONTEXT_SMOKE_ARTIFACT_DIR"
           xvfb-run -a npm run test:extension-smoke 2>&1 | tee "$CAP_CONTEXT_SMOKE_ARTIFACT_DIR/run.log"
       - name: Brave DeepSeek concurrent original-file capture
+        if: steps.scope.outputs.mode != 'light'
         timeout-minutes: 3
         shell: bash
         env:
@@ -141,6 +166,7 @@ jobs:
           mkdir -p "$CAP_CONTEXT_SMOKE_ARTIFACT_DIR"
           xvfb-run -a npm run test:extension-smoke 2>&1 | tee "$CAP_CONTEXT_SMOKE_ARTIFACT_DIR/run.log"
       - name: Brave oversized history cancellation and fallback
+        if: steps.scope.outputs.mode != 'light'
         timeout-minutes: 3
         shell: bash
         env:
