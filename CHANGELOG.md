@@ -2,6 +2,10 @@
 
 A short history of decisions and regressions that matter when changing the code. Read the relevant section of [LOGIC.md](LOGIC.md) for current behavior, ownership and checks; use this file when you need to understand why an approach changed. Entries describe source changes unless deployment is explicitly recorded. Extension packaging, Web Store publication and backend deployment are separate.
 
+## 2026-10-08
+
+- **Small presentation/docs changes get lightweight CI.** Known public images/videos, docs, CNAME and homepage text/CSS use whitespace plus scope/public-license/image checks. Runtime, scripts, markup/wiring, dependencies, workflow, mixed and unknown changes retain the full suite. Every feature-branch push compares against the default branch so a docs follow-up cannot conceal unmerged code; PRs and default-branch pushes use their complete base ranges. The required `Offline checks` job always runs. Brave setup now has bounded downloads and a two-minute step limit. Local boundary checks and the full GitHub suite passed.
+
 ## 2026-10-07
 
 - **Homepage demo temporarily paused.** Replaced the video with the owner's Claude picker screenshot and commented out both Watch demo links plus the How it works / 62-second demo heading. Original markup, video/poster assets and playback script remain intact. To unpause, remove the screenshot section and uncomment the three `DEMO PAUSED` blocks in `index.html`.
