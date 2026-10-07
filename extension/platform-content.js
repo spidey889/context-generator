@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-07-artwork-cutout-v114";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-07-orb-cutout-motion-v115";
   const INLINE_PILL_SIZE = 36;
   const ownedUiStyleSheets = new Map();
   const CLAUDE_INLINE_STYLE_ID = "context-generator-claude-inline-styles";
@@ -490,6 +490,7 @@
   let destinationSheetPathname = null;
   let destinationSheetHideTimer = null;
   let destinationBackdropHideTimer = null;
+  let destinationBackdropCutoutFrame = null;
   let pendingHandoffOrigin = null;
   let handoffOverlayHideTimer = null;
   let handoffScrimHideTimer = null;
@@ -5248,6 +5249,9 @@
     addOwnedEventListener(bubble, "transitionend", (event) => {
       if (event.target === bubble && event.propertyName === "transform") updateDestinationBackdropCutout();
     });
+    addOwnedEventListener(bubble, "transitionrun", (event) => {
+      if (event.target === bubble && event.propertyName === "transform") trackDestinationBackdropCutout();
+    });
     addOwnedEventListener(bubble, "click", (event) => {
       event.preventDefault();
       event.stopPropagation();
@@ -6812,10 +6816,29 @@
     }
   }
 
+  function trackDestinationBackdropCutout() {
+    if (destinationBackdropCutoutFrame) return;
+    const follow = () => {
+      destinationBackdropCutoutFrame = null;
+      const backdrop = document.getElementById(DESTINATION_SHEET_BACKDROP_ID);
+      if (!backdrop || backdrop.style.display !== "block") return;
+      updateDestinationBackdropCutout();
+      const bubble = document.getElementById(BUBBLE_ID);
+      // Follow only the live transform, including dismissal while the scrim
+      // fades. The owned frame stops when motion or the backdrop finishes.
+      if (bubble?.getAnimations?.().some(animation => animation.transitionProperty === "transform" && animation.playState === "running")) {
+        destinationBackdropCutoutFrame = requestAnimationFrame(follow);
+      }
+    };
+    destinationBackdropCutoutFrame = requestAnimationFrame(follow);
+  }
+
   function updateDestinationBackdropCutout() {
     const bubble = document.getElementById(BUBBLE_ID);
     const backdrop = document.getElementById(DESTINATION_SHEET_BACKDROP_ID);
-    if (!bubble || !backdrop || bubble.getAttribute("aria-expanded") !== "true") return;
+    // aria-expanded flips before the closing animation ends; its visible
+    // backdrop must keep following the orb until the fade actually finishes.
+    if (!bubble || !backdrop || backdrop.style.display !== "block") return;
     if (!bubble.isConnected || !isVisible(bubble) || bubble.style.display === "none" || bubble.style.visibility === "hidden") {
       backdrop.style.clipPath = "";
       return;

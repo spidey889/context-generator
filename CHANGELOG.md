@@ -4,6 +4,8 @@ A short history of decisions and regressions that matter when changing the code.
 
 ## 2026-10-07
 
+- **Backdrop opening follows the settling orb on dismissal.** Closing set `aria-expanded=false` before the orb's lift/scale and backdrop fade finished, freezing the cutout above the moving artwork. Track the image during its transform transition while the backdrop is visible, including the closing fade; stop tracking once motion or the backdrop ends. Picker coordinates remain locked. Tests skipped for this requested quick visual follow-up.
+
 - **Removed the orb's exposed surrounding disc.** The backdrop cutout used the button's bounds even though the image is smaller and its canvas has transparent margins. Measure the actual image and match its solid artwork, refresh the hole after the scale transition, and protect the transparent button against native page styling. Retained the existing glow and locked picker position. Tests intentionally skipped at the owner's request.
 
 - **Claude picker keeps its opening position.** The preceding automatic-dismissal fix unlocked and recalculated placement on native layout updates, causing a visible shift after opening. Removed that recalculation and composer-gap clamping; the open picker now keeps its original coordinates and animation origin while the orb's backdrop cutout can follow native reflow. Remount, focus, Speed and dismissal behavior remain covered, with stationary-position regressions in the content-script and Brave fixtures.
