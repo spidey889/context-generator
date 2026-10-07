@@ -89,6 +89,8 @@ python evaluation/capcontext-bench/render-ranking.py
 
 Rendering requires Pillow and Segoe UI (Windows) or DejaVu Sans. The export checks the recorded ranking and archive cohort, and validates the v1 review through the benchmark harness. Neither script makes model requests. They are manual tools with no CI or push integration. The PNG is 2000 × 1640 pixels and is marked binary in Git.
 
+[The minimal dark plot](model-ranking-dark.png) uses the same archived data: each model has one marker for its qualitative rank and median response time. Rank is ordinal, not a percentage score; independent models are not connected into invented curves. Regenerate with `python evaluation/capcontext-bench/render-ranking-dark.py`. The original detailed image remains available.
+
 ## How to investigate a failure
 
 The scoreboard includes per-case, per-dimension paired counts for both failing, master-only failure, candidate-only failure and both passing. Use those counts and the actual reviewer evidence together:
