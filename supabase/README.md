@@ -4,11 +4,12 @@ Only target **cap-context-telemetry** (`iqkzynzxbmemhtiupwwu`). The first thirte
 
 ## Persistence and reporting
 
-The current table is `public.transfers`, with fourteen fields:
+The current table is `public.transfers`:
 
 | Fields | Purpose |
 | --- | --- |
 | attempt_id, install_id | One transfer identity and installation association |
+| user_no, username | Current anonymous `users` number/name linked through install_id; NULL if no user row exists |
 | source_platform, destination_platform | Transfer route, also bound into signed receipts |
 | status, last_stage, failure_reason | Outcome, failure location and safe reason code |
 | character_count, extension_version | Input size and first-observed client version for debugging |
@@ -18,6 +19,8 @@ The current table is `public.transfers`, with fourteen fields:
 | summary_verified, summary_confirmed_at | Authenticated summary work counted once and signed completion day |
 
 `attempted_at` is the main transfer clock, but cannot replace the trusted reset boundary or signed summary day. `summary_verified=true` with unknown `summary_confirmed_at` supports v1 receipts. `install_id` deliberately has no foreign key to users: empty/unsigned/pre-reset attempts can exist without a countable user row.
+
+User labels are maintained by database triggers, including backfill when a countable event first creates the user, renames and deletion/truncation. Labels do not create users or replay counters; they identify installs, not authenticated people. The Table Editor can display them directly in `transfers`.
 
 - transfers stores one metadata-only row per attempt, updated only for meaningful progress/outcome/verification, never chat or summary text. attempt_id is the primary key and retry identity; the unused generated id was removed. The first terminal status/stage/reason is sticky. Core attempt/install/time/route identity is immutable. extension_version is the first observed client version; legitimate RPC reports from an upgraded worker remain accepted.
 - updated_at, completed_at, summary_received_at and terminal_received_at are removed. Legacy completed_at payloads and p_completed_at RPC arguments remain accepted but are ignored by persistence. summary_confirmed_at retains its complete signed timestamp; no date/type/wire migration is needed. Client/server clock differences must not be hidden by attributing counters to attempted_at.

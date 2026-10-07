@@ -4,6 +4,8 @@ A short history of decisions and regressions that matter when changing the code.
 
 ## 2026-10-07
 
+- **Transfer rows show their user number and username.** Added nullable `user_no` and `username` labels derived from `users` through `install_id`, including existing history and users allocated after a transfer starts. Labels follow renames/deletion/reset without changing accounting or public access. Unmatched installs remain blank; cosmetic names identify anonymous installs rather than people. Applied to hosted Supabase: 11 of 12 transfers linked, zero mismatches, original transfer/user hashes preserved. Database replay passed 471 checks; the final migration passed 13 focused checks. Rolled-back live service-role checks verified labels, rename, spoof prevention and duplicate failure accounting; security advisors reported no warnings/errors.
+
 - **Backdrop opening follows the settling orb on dismissal.** Closing set `aria-expanded=false` before the orb's lift/scale and backdrop fade finished, freezing the cutout above the moving artwork. Track the image during its transform transition while the backdrop is visible, including the closing fade; stop tracking once motion or the backdrop ends. Picker coordinates remain locked. Tests skipped for this requested quick visual follow-up.
 
 - **Removed the orb's exposed surrounding disc.** The backdrop cutout used the button's bounds even though the image is smaller and its canvas has transparent margins. Measure the actual image and match its solid artwork, refresh the hole after the scale transition, and protect the transparent button against native page styling. Retained the existing glow and locked picker position. Tests intentionally skipped at the owner's request.
