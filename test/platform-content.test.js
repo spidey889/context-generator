@@ -2669,16 +2669,6 @@ function inlineClaudeFixture() {
   return { host, editorBranch, input, actions, left, right, attach, model };
 }
 
-test("Claude inline slot discovers only the named actions beside its active editor", () => {
-  const fixture = inlineClaudeFixture();
-  const decoy = new FakeElement({ attrs: { "data-display": "flex" } });
-  fixture.editorBranch.appendChild(decoy);
-  const hooks = loadPlatformContent(Object.values(fixture), "claude.ai");
-  assert.equal(hooks.findClaudeInlineToolbar(fixture.input).left, fixture.left);
-  fixture.actions.removeAttribute("data-cds");
-  assert.equal(hooks.findClaudeInlineToolbar(fixture.input), null);
-});
-
 test("Claude inline discovery excludes popup controls and a different editor's toolbar", () => {
   const fixture = inlineClaudeFixture();
   const hooks = loadPlatformContent(Object.values(fixture), "claude.ai");
@@ -2693,6 +2683,7 @@ test("Claude inline discovery excludes popup controls and a different editor's t
 
 test("Claude inline discovery skips hidden and popup copies of native controls", () => {
   const f = inlineClaudeFixture();
+  f.editorBranch.appendChild(new FakeElement({ attrs: { "data-display": "flex" } }));
   const hiddenModel = new FakeElement({ tag: "button", attrs: { "data-testid": "model-selector-dropdown", "data-visibility": "hidden" } });
   const menu = new FakeElement({ attrs: { role: "menu" } });
   const popupAttach = new FakeElement({ tag: "button", attrs: { "data-testid": "chat-input-attach" } });
@@ -2700,6 +2691,8 @@ test("Claude inline discovery skips hidden and popup copies of native controls",
   f.left.insertBefore(menu, f.attach); menu.appendChild(popupAttach);
   const hooks = loadPlatformContent([...Object.values(f), hiddenModel, menu, popupAttach], "claude.ai");
   assert.ok(hooks.findClaudeInlineToolbar(f.input)?.left === f.left);
+  f.actions.removeAttribute("data-cds");
+  assert.equal(hooks.findClaudeInlineToolbar(f.input), null, "unnamed actions cannot own the inline slot");
 });
 
 test("Claude inline discovery stays within the active named composer", () => {

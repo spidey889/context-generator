@@ -4,6 +4,8 @@ A short history of decisions and regressions that matter when changing the code.
 
 ## 2026-10-07
 
+- **One overlapping inline placement fixture consolidated.** Folded Claude's basic named-action lookup into its stronger hidden/popup-control fixture, retaining rejection of unnamed toolbar actions. Inline placement tests fell from 31 to 30; production behavior is unchanged.
+
 - **DOM capture checks reduced to the fallback contract.** Removed five overlapping basic-role, repeated-turn, sequence-helper, preparation and Grok profile fixtures, reducing focused DOM cases from 30 to 25. The remaining cases include a 40-turn repeated-text ChatGPT sweep, a delayed 40-turn Grok sweep, instant preparation with delayed history and the separate slow physical-scroll regression. All 113 checks in the affected content-script test file passed, including its slow case. Navigation/privacy, attachment and fallback checks remain; DOM still serves JSON failures, unsaved chats, Speed opt-out and toolbar transfers.
 
 - **JSON capture tests trimmed by shared behavior.** Removed repeated shared-reader rejection matrices and overlapping large-paste, successful-capture and transport fixtures. Direct capture tests fell from 157 to 137; all 20 JSON-to-DOM fallback tests remain, and all 157 remaining focused tests passed. Kept per-platform capture wiring, exact Unicode/attachment text, rejected-body cancellation and identity/deadline safeguards. The remaining Claude/ChatGPT/network reader boundaries are tested separately because their implementations differ; no production code changed.
