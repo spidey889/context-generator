@@ -2098,6 +2098,38 @@ test("duplicate transfer clicks preserve the running attempt and its telemetry",
   assert.ok(hooks.beginTransferAttempt("claude", "extension icon"), "the next real attempt is admitted");
 });
 
+test("actual serving models reach progress and terminal telemetry for fallback, cache and local carries", async () => {
+  for (const scenario of ["backend", "cache", "tiny", "recovery"]) {
+    const messages = [];
+    const hooks = loadPlatformContent([], "gemini.google.com", {
+      // Reporting must not depend on the optional local Latest Run write.
+      storageSet: () => { throw new Error("Storage unavailable"); },
+      runtimeSendMessage: async message => {
+        messages.push(message);
+        if (message.type !== "SUMMARIZE_WITH_BACKEND") return { ok: true };
+        if (scenario === "recovery") return { ok: false, code: "summary_failed" };
+        return { ok: true, summary: "The final served summary.", timing: {
+          source: scenario, backend: { model: "gemini-3.5-flash-lite", primaryModel: "inclusionai/ling-3.1-flash",
+            fallback: { used: true, model: "gemini-3.5-flash-lite" } }
+        } };
+      }
+    });
+    const trace = hooks.beginTransferAttempt("claude", "test");
+    try {
+      await hooks.summarizeWithBackend("x".repeat(scenario === "tiny" ? 1200 : 1201), trace);
+      hooks.finishTransferTrace(trace);
+      const telemetry = messages.filter(message => message.type === "RECORD_TRANSFER_TELEMETRY").map(message => message.event);
+      const model = ["tiny", "recovery"].includes(scenario) ? "local-direct" : "gemini-3.5-flash-lite";
+      assert.equal(telemetry.find(event => event.lastStage === "summary_completed").reportedModel, model, scenario);
+      assert.equal(telemetry.at(-1).status, "succeeded");
+      assert.equal(telemetry.at(-1).reportedModel, model, scenario);
+      assert.ok(telemetry.filter(event => !["summary_completed", "completed"].includes(event.lastStage))
+        .every(event => event.reportedModel === undefined), "An attempted provider must not be reported before a result.");
+      for (const event of telemetry) for (const key of ["model", "summary_proof", "summary_confirmed_at"]) assert.equal(event[key], undefined);
+    } finally { hooks.resetRunningFlag(); }
+  }
+});
+
 test("a synchronous local receipt failure cannot swallow terminal telemetry", () => {
   const messages = [];
   const hooks = loadPlatformContent([], "chatgpt.com", {

@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-07-gemini-capture-v110";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-07-model-reporting-v111";
   const INLINE_PILL_SIZE = 36;
   const ownedUiStyleSheets = new Map();
   const CLAUDE_INLINE_STYLE_ID = "context-generator-claude-inline-styles";
@@ -1016,6 +1016,10 @@
       chars: summary.length,
       background: timing
     });
+    // Receipt signing can be skipped by optional storage, and cached/local
+    // carries have no fresh proof. Report the actual result, never the primary
+    // attempted model; the server keeps this separate from verified accounting.
+    if (trace && timing?.backend?.model) trace.telemetryReportedModel = timing.backend.model;
     advanceTransferTelemetryStage(trace, "summary_completed");
     return summary;
   }
@@ -2074,7 +2078,8 @@
       characterCount: trace.telemetryCharacterCount ?? (failureReason === "no_conversation" ? 0 : null),
       status,
       lastStage: trace.telemetryLastStage,
-      failureReason: status === "failed" ? failureReason : null
+      failureReason: status === "failed" ? failureReason : null,
+      ...(trace.telemetryReportedModel ? { reportedModel: trace.telemetryReportedModel } : {})
     });
   }
 

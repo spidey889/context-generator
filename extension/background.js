@@ -30,6 +30,11 @@ const TELEMETRY_CONFIG_RETRY_BASE_MS = 5 * 60 * 1000;
 const TELEMETRY_MAX_CHARACTER_COUNT = 2147483647;
 const TELEMETRY_PLATFORMS = new Set(["claude", "chatgpt", "gemini", "grok", "deepseek"]);
 const TELEMETRY_STATUSES = new Set(["started", "succeeded", "failed"]);
+// Only serving-route identifiers enter reports; transcript text and attempted
+// providers never belong in this field. Keep the catalog aligned with ingress.
+const TELEMETRY_REPORTED_MODELS = new Set(["local-direct", "gemini-3.6-flash", "gemini-3.5-flash-lite", "ministral-14b-2512",
+  "inclusionai/ling-3.1-flash", "qwen/qwen3.8-27b:free", "dots-studio/dots-3-note-preview:free", "google/gemma-4-26b-a4b-it:free"]);
+const TELEMETRY_MODEL_STAGES = new Set(["summary_completed", "paste_started", "completed"]);
 const TELEMETRY_STAGES = new Set([
   "intent_started",
   "capture_started",
@@ -256,13 +261,18 @@ function sameTransferIdentity(first, second) {
 function mergeTransferTelemetryEvents(previous, next) {
   if (!previous) return next;
   // First terminal outcome wins as a unit: never produce failed + completed.
-  if (previous.status !== "started") return previous;
+  if (previous.status !== "started") return {
+    ...previous,
+    ...(TELEMETRY_MODEL_STAGES.has(previous.lastStage) && !previous.reportedModel && next.reportedModel
+      ? { reportedModel: next.reportedModel } : {})
+  };
   const stages = [...TELEMETRY_STAGES];
   return {
     ...next,
     lastStage: next.status === "succeeded" ? "completed"
       : stages.indexOf(previous.lastStage) > stages.indexOf(next.lastStage) ? previous.lastStage : next.lastStage,
-    characterCount: next.characterCount ?? previous.characterCount
+    characterCount: next.characterCount ?? previous.characterCount,
+    ...(previous.reportedModel || next.reportedModel ? { reportedModel: previous.reportedModel || next.reportedModel } : {})
   };
 }
 
@@ -280,6 +290,7 @@ function makeTelemetryPayload(event, installId) {
     failure_reason: event.failureReason,
     extension_version: event.extensionVersion || chrome.runtime.getManifest?.().version || null,
     ...(event.completedAt ? { completed_at: event.completedAt } : {}),
+    ...(event.reportedModel ? { reported_model: event.reportedModel } : {}),
     ...(confirmation ? confirmation : {})
   };
 }
@@ -391,6 +402,8 @@ function sanitizeTransferTelemetryEvent(event, captureCompletionTime = true) {
   if (!TELEMETRY_STAGES.has(event.lastStage)) return null;
   if (event.status === "succeeded" && event.lastStage !== "completed") return null;
   if (event.status !== "succeeded" && event.lastStage === "completed") return null;
+  if (event.reportedModel !== undefined && (!TELEMETRY_REPORTED_MODELS.has(event.reportedModel)
+    || !TELEMETRY_MODEL_STAGES.has(event.lastStage))) return null;
 
   const attemptedAtEpoch = Date.parse(event.attemptedAt || "");
   if (!Number.isFinite(attemptedAtEpoch)) return null;
@@ -414,6 +427,7 @@ function sanitizeTransferTelemetryEvent(event, captureCompletionTime = true) {
     status: event.status,
     lastStage: event.lastStage,
     failureReason,
+    ...(event.reportedModel ? { reportedModel: event.reportedModel } : {}),
     ...(!captureCompletionTime && typeof event.extensionVersion === "string" && /^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/.test(event.extensionVersion)
       ? { extensionVersion: event.extensionVersion } : {}),
     ...(event.status !== "started" && (event.completedAt || captureCompletionTime)
@@ -588,6 +602,11 @@ function mergeTelemetryPayloads(previous, next) {
   };
   if (proof && !proof.summary_confirmed_at) delete merged.summary_confirmed_at;
   if (!proof?.model) delete merged.model;
+  // Later progress and restart compaction must preserve an observed model
+  // independently of the signed proof/model pair.
+  if (TELEMETRY_MODEL_STAGES.has(merged.last_stage) && (previous.reported_model || next.reported_model)) {
+    merged.reported_model = previous.reported_model || next.reported_model;
+  } else delete merged.reported_model;
   if (terminal && !previous.completed_at) delete merged.completed_at;
   return merged;
 }
@@ -606,14 +625,15 @@ function sanitizeSummaryConfirmation(input) {
 
 function sanitizeStoredTelemetryPayload(payload) {
   const keys = new Set(["attempt_id", "install_id", "attempted_at", "source_platform", "destination_platform",
-    "character_count", "status", "last_stage", "failure_reason", "extension_version", "summary_proof", "completed_at", "summary_confirmed_at", "model"]);
+    "character_count", "status", "last_stage", "failure_reason", "extension_version", "summary_proof", "completed_at", "summary_confirmed_at", "model", "reported_model"]);
   if (!payload || typeof payload !== "object" || Array.isArray(payload) || Object.keys(payload).some(key => !keys.has(key))) return null;
   if (!isUuid(payload.install_id) || typeof payload.extension_version !== "string"
     || !/^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/.test(payload.extension_version)) return null;
   const event = sanitizeTransferTelemetryEvent({
     attemptId: payload.attempt_id, attemptedAt: payload.attempted_at, sourcePlatform: payload.source_platform,
     destinationPlatform: payload.destination_platform, characterCount: payload.character_count,
-    status: payload.status, lastStage: payload.last_stage, failureReason: payload.failure_reason, completedAt: payload.completed_at
+    status: payload.status, lastStage: payload.last_stage, failureReason: payload.failure_reason, completedAt: payload.completed_at,
+    reportedModel: payload.reported_model
   }, false);
   if (!event || (payload.completed_at !== undefined && (payload.status === "started" || !Number.isFinite(Date.parse(payload.completed_at))))) return null;
   const confirmation = sanitizeSummaryConfirmation(payload);
@@ -623,7 +643,8 @@ function sanitizeStoredTelemetryPayload(payload) {
     source_platform: event.sourcePlatform, destination_platform: event.destinationPlatform,
     character_count: event.characterCount, status: event.status, last_stage: event.lastStage,
     failure_reason: event.failureReason, extension_version: payload.extension_version,
-    ...(event.completedAt ? { completed_at: event.completedAt } : {}), ...(confirmation || {})
+    ...(event.completedAt ? { completed_at: event.completedAt } : {}),
+    ...(event.reportedModel ? { reported_model: event.reportedModel } : {}), ...(confirmation || {})
   };
 }
 

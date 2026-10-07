@@ -121,10 +121,10 @@ function blockStorage(background, area, method) {
   return release;
 }
 
-function summaryWithin(background, deadlineAt = null, conversation = "Complete captured transcript") {
+function summaryWithin(background, deadlineAt = null, conversation = "Complete captured transcript", transferId = id(1)) {
   let timeout;
   const request = new Promise(resolve => background.listeners.message({
-    type: "SUMMARIZE_WITH_BACKEND", conversation, transferId: id(1), deadlineAt
+    type: "SUMMARIZE_WITH_BACKEND", conversation, transferId, deadlineAt
   }, {}, resolve));
   const observed = Promise.race([request, new Promise(resolve => { timeout = setTimeout(() => resolve(null), 1100); })])
     .finally(() => clearTimeout(timeout));
@@ -280,10 +280,46 @@ test("active state and v3 served-model receipt survive worker restart before tab
   assert.doesNotMatch(JSON.stringify(shared), /SENSITIVE_SUMMARY|SENSITIVE_TRANSCRIPT/);
 });
 
+test("unsigned serving reports survive progress, worker restart and delivery without inventing proof", async () => {
+  const shared = profile();
+  const first = worker(async () => { throw new Error("offline"); }, shared);
+  await first.settled();
+  await first.ack(event(1, { lastStage: "summary_completed", reportedModel: "gemini-3.5-flash-lite" }));
+  await first.ack(event()); // Delayed pre-summary progress cannot erase attribution.
+  await first.ack(event(1, { lastStage: "paste_started" }));
+  await first.settled();
+  assert.equal(shared.session[ACTIVE][id(1)].event.reportedModel, "gemini-3.5-flash-lite");
+  const received = [];
+  const second = worker(async (_url, options) => { received.push(JSON.parse(options.body)); return success(); }, shared);
+  await second.settled();
+  await second.ack(event(1, { status: "succeeded", lastStage: "completed" }));
+  await second.retry();
+  const terminal = received.findLast(input => input.status === "succeeded");
+  assert.equal(terminal.reported_model, "gemini-3.5-flash-lite");
+  for (const field of ["summary_proof", "summary_confirmed_at", "model"]) assert.equal(terminal[field], undefined);
+});
+
+test("late serving reports preserve the first terminal outcome and reject text or pre-summary attribution", async () => {
+  const shared = profile();
+  const background = worker(async () => { throw new Error("offline"); }, shared);
+  await background.settled();
+  for (const input of [event(2, { reportedModel: "local-direct" }),
+    event(3, { lastStage: "summary_completed", reportedModel: "SENSITIVE_TRANSCRIPT" })]) await background.ack(input);
+  await background.ack(event(1, { status: "succeeded", lastStage: "completed" }));
+  await background.ack(event(1, { lastStage: "summary_completed", reportedModel: "local-direct" }));
+  await background.ack(event(1, { status: "failed", lastStage: "paste_started", failureReason: "paste_failed", reportedModel: "gemini-3.6-flash" }));
+  await background.settled();
+  assert.equal(shared.local[OUTBOX].length, 1);
+  assert.equal(shared.local[OUTBOX][0].payload.status, "succeeded");
+  assert.equal(shared.local[OUTBOX][0].payload.reported_model, "local-direct");
+  assert.doesNotMatch(JSON.stringify(shared), /SENSITIVE_TRANSCRIPT/);
+});
+
 test("queue merges keep the first v3 proof/model pair through legacy progress and retries", async () => {
   const { createSummaryProof, verifySummaryProof } = await import("../supabase/functions/_shared/summary-proof.mjs");
   const key = "queue-model-test-key-0123456789abcdef";
-  const signed = payload(1, { model: "local-direct", summary_confirmed_at: "2026-10-02T10:00:00.000Z" });
+  const signed = payload(1, { last_stage: "summary_completed", reported_model: "gemini-3.6-flash",
+    model: "local-direct", summary_confirmed_at: "2026-10-02T10:00:00.000Z" });
   signed.summary_proof = await createSummaryProof(signed, key);
   const legacy = { ...signed };
   delete legacy.model;
@@ -296,6 +332,7 @@ test("queue merges keep the first v3 proof/model pair through legacy progress an
   await background.settled();
   assert.equal(received.length, 1);
   assert.equal(received[0].model, "local-direct");
+  assert.equal(received[0].reported_model, "gemini-3.6-flash", "A report must not replace authenticated attribution.");
   assert.equal(received[0].summary_proof, signed.summary_proof);
   assert.equal(await verifySummaryProof(received[0], key), true);
 });
@@ -537,7 +574,7 @@ for (const area of ["local", "session"]) {
     const background = worker(async (url, options) => {
       if (url.endsWith("/api/telemetry")) throw new Error("offline");
       summaryRequests.push(JSON.parse(options.body));
-      return { ok: true, status: 200, json: async () => ({ summary: "available summary" }) };
+      return { ok: true, status: 200, json: async () => ({ summary: "available summary", timing: { model: "gemini-3.5-flash-lite" } }) };
     }, profile(), () => Date.now());
     await background.settled();
     await background.ack(event());
@@ -549,9 +586,11 @@ for (const area of ["local", "session"]) {
       const response = await first.observed;
       assert.equal(response?.ok, true, "A stalled attribution read must not hold the summary indefinitely.");
       assert.equal(response.summary, "available summary");
+      assert.equal(response.timing.backend.model, "gemini-3.5-flash-lite");
       assert.ok(Date.now() - NOW <= 1000, "Optional storage gets at most one second.");
       const cached = await summaryWithin(background, NOW + 5000).observed;
       assert.equal(cached?.timing.source, "cache");
+      assert.equal(cached?.timing.backend.model, "gemini-3.5-flash-lite");
       later = summaryWithin(background, NOW + 5000, "Another captured transcript");
       assert.equal((await later.observed)?.ok, true, "The blocked queue must not freeze later summaries.");
       assert.equal(summaryRequests.length, 2);
@@ -563,9 +602,17 @@ for (const area of ["local", "session"]) {
       await background.settled();
     }
     assert.equal(summaryRequests.length, 2, "Late attribution reads must not resend summary requests.");
-    const recovered = await summaryWithin(background, Date.now() + 5000, "Transcript after storage recovery").observed;
+    await background.ack(event(1, { lastStage: "summary_completed", reportedModel: "gemini-3.5-flash-lite" }));
+    await background.ack(event(1, { status: "succeeded", lastStage: "completed" }));
+    await background.settled();
+    const terminal = background.shared.local[OUTBOX][0].payload;
+    assert.equal(terminal.reported_model, "gemini-3.5-flash-lite", "A storage timeout must not lose the model when the source reports its actual result.");
+    assert.equal(terminal.summary_proof, undefined);
+    assert.equal(terminal.model, undefined);
+    await background.ack(event(2));
+    const recovered = await summaryWithin(background, Date.now() + 5000, "Transcript after storage recovery", id(2)).observed;
     assert.equal(recovered?.ok, true);
-    assert.equal(summaryRequests[2].telemetry.attempt_id, id(1));
+    assert.equal(summaryRequests[2].telemetry.attempt_id, id(2), "A new transfer must regain signing context after storage recovers.");
     await background.settled();
   });
 

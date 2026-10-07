@@ -60,8 +60,8 @@ async function createTelemetrySmokeFixture(repoRoot, databaseEnabled) {
       const operation = rpcChain.catch(() => {}).then(async () => {
         assert.equal(name, "record_transfer_event");
         const fields = ["attempt_id", "install_id", "attempted_at", "source_platform", "destination_platform", "character_count",
-          "status", "last_stage", "failure_reason", "extension_version", "summary_verified", "completed_at", "summary_confirmed_at", "model"];
-        const types = ["uuid", "text", "timestamptz", "text", "text", "integer", "text", "text", "text", "text", "boolean", "timestamptz", "timestamptz", "text"];
+          "status", "last_stage", "failure_reason", "extension_version", "summary_verified", "completed_at", "summary_confirmed_at", "model", "reported_model"];
+        const types = ["uuid", "text", "timestamptz", "text", "text", "integer", "text", "text", "text", "text", "boolean", "timestamptz", "timestamptz", "text", "text"];
         await database.exec("set role service_role;");
         try {
           await database.query(`select public.record_transfer_event(${types.map((type, index) => `$${index + 1}::${type}`).join(",")})`, fields.map(field => args[`p_${field}`]));
@@ -131,7 +131,7 @@ async function createTelemetrySmokeFixture(repoRoot, databaseEnabled) {
       if (!databaseEnabled) return;
       await rpcChain;
       const row = (await database.query(`select status, last_stage, failure_reason, summary_verified,
-        received_at::text, summary_confirmed_at::text, model
+        received_at::text, summary_confirmed_at::text, model, model_verified
         from public.transfers where attempt_id=$1`, [context.attempt_id])).rows[0];
       assert.ok(row, "The installed worker event must reach the database.");
       assert.equal(row.status, "succeeded");
@@ -144,8 +144,10 @@ async function createTelemetrySmokeFixture(repoRoot, databaseEnabled) {
       assert.ok(terminal.completed_at, "Older worker completion metadata must remain accepted without storing it.");
       const columns = (await database.query(`select column_name from information_schema.columns
         where table_schema='public' and table_name='transfers'`)).rows.map(column => column.column_name);
-      assert.equal(columns.length, 14);
+      assert.equal(columns.length, 15);
       assert.equal(row.model, "gemini-3.6-flash");
+      assert.equal(row.model_verified, true);
+      assert.equal(terminal.reported_model, row.model);
       assert.equal(terminal.model, row.model);
       for (const removed of ["updated_at", "completed_at", "summary_received_at", "terminal_received_at"]) {
         assert.equal(columns.includes(removed), false);

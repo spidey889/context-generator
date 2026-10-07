@@ -639,7 +639,7 @@ async function startFixtureServer() {
       response.end(JSON.stringify({
         summary: SUMMARY_TEXT,
         ...receipt,
-        timing: { inputChars: state.summaryRequests.at(-1)?.conversation?.length || 0, servedBy: "smoke-stub" }
+        timing: { inputChars: state.summaryRequests.at(-1)?.conversation?.length || 0, servedBy: "smoke-stub", model: receipt.summaryModel }
       }));
       return;
     }
