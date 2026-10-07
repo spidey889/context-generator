@@ -351,10 +351,10 @@ for (const platform of ["gemini", "grok", "deepseek"]) test(`${platform}: the pr
   const h = setup(platform);
   await h.observe();
   const old = h.window.__capNetworkFetchState;
-  old.version = platform === "deepseek" ? 7 : platform === "gemini" ? 6 : 5;
+  old.version = platform === "deepseek" ? 7 : platform === "gemini" ? 7 : 5;
   h.reinstall(files[1]);
   assert.notEqual(h.window.__capNetworkFetchState, old);
-  assert.equal(h.window.__capNetworkFetchState.version, platform === "deepseek" ? 8 : platform === "gemini" ? 7 : 6);
+  assert.equal(h.window.__capNetworkFetchState.version, platform === "deepseek" ? 8 : platform === "gemini" ? 8 : 6);
   assert.equal(h.listeners.size, 1);
   assert.equal((await h.window.__capCaptureNetworkJson()).text, h.fixture.expected);
 });
@@ -632,6 +632,48 @@ test("Grok refuses file-only user turns rather than silently transferring an orp
   assert.equal(h.api.grok(h.fixture.nodes, h.fixture.responses).messageTurnCount, 1);
   Object.assign(h.fixture.responses[0], { message: "CONTROL_SENTINEL", isControl: true, fileAttachments: ["file-id"] });
   assert.doesNotMatch(h.api.grok(h.fixture.nodes, h.fixture.responses).text, /CONTROL_SENTINEL/);
+});
+
+test("Gemini: optional user metadata cannot reject a complete paginated text history", async () => {
+  const f = fixtures("gemini");
+  const metadata = [
+    [["CONTEXT_SENTINEL", { text: "NESTED_BODY_SENTINEL" }]],
+    [null, [null, null, null, null, null]],
+    [[null, null, null, null, [null, { file_name: "GUESS_SENTINEL" }, [null, null, "NOT_A_FILE_SENTINEL"]]]],
+    { text: "UNSUPPORTED_OBJECT_SENTINEL" },
+    "UNSUPPORTED_STRING_SENTINEL"
+  ];
+  f.pages.flatMap(page => page.turns).forEach((item, i) => { item[2][0][4] = metadata[i % metadata.length]; });
+  const h = setup("gemini", f);
+  assert.equal(h.requests.length, 0);
+  const capture = await h.window.__capCaptureNetworkJson();
+  assert.equal(capture.text, f.expected);
+  assert.equal(capture.messageTurnCount, 48);
+  assert.deepEqual([...capture.excludedContentTypes], ["other"]);
+  assert.equal(h.requests.length, 3);
+  assert.doesNotMatch(JSON.stringify(h.replies), /CONTEXT_SENTINEL|NESTED_BODY_SENTINEL|GUESS_SENTINEL|NOT_A_FILE_SENTINEL|UNSUPPORTED_.*_SENTINEL/);
+  assert.equal(h.navigationListeners(), 0);
+});
+
+test("Gemini: known upload names survive mixed optional metadata without guessing other names", async () => {
+  const f = fixtures("gemini", "smoke", 1), item = f.pages[0].turns[0];
+  item[2][0][4] = [
+    null,
+    ["CONTEXT_SENTINEL"],
+    [null, null, null, null, [[null, 11, "Guide.pdf"], ["ID_SENTINEL", null, "NOT_A_FILE_SENTINEL"], { text: "BODY_SENTINEL" }]]
+  ];
+  f.expected = f.expected.replace("\n\nAssistant:", '\n\nAttachment: "Guide.pdf"\n\nAssistant:');
+  const h = setup("gemini", f);
+  const capture = await h.window.__capCaptureNetworkJson();
+  assert.equal(capture.text, f.expected);
+  assert.deepEqual([...capture.excludedContentTypes], ["other", "uploads"]);
+  assert.equal(h.requests.length, 1);
+  assert.doesNotMatch(JSON.stringify(h.replies), /CONTEXT_SENTINEL|ID_SENTINEL|NOT_A_FILE_SENTINEL|BODY_SENTINEL/);
+  // With no own prompt, unknown metadata might be the entire user input.
+  // It must still fall back instead of sending a label/answer-only history.
+  item[2][0][0] = " \r\n";
+  await assert.rejects(h.window.__capCaptureNetworkJson(), error => error.captureFailureReason === "unsupported");
+  assert.equal(h.navigationListeners(), 0);
 });
 
 test("Gemini retains only attachment descriptor names in each user turn", () => {

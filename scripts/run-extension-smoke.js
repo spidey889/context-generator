@@ -505,6 +505,9 @@ function networkSmokeFixture(platform) {
     // Parent triples select older regenerated replies across pages; the optional
     // assistant selection field is absent from this native-derived fixture.
     fixture.pages[1].turns[0][3][0].unshift(["rc_abandoned", ["ABANDONED_SENTINEL"]]);
+    // A real local receipt failed as unsupported optional user metadata. Keep
+    // unknown context out of the transcript without forcing valid text to DOM.
+    fixture.pages[2].turns[0][2][0][4] = [["CONTEXT_METADATA_SENTINEL"], null];
   }
   if (platform !== "deepseek") return fixture;
   const extraBodies = [];

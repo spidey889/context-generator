@@ -82,15 +82,28 @@
       // hNvQHb user attachment slot: groups contain descriptors at [4], name at [2].
       // Read this slot only, never recursively collect strings from render/tool data.
       const groups = item[2]?.[0]?.[4];
-      if (groups != null && !Array.isArray(groups)) fail("Gemini attachment labels have an unsupported shape.", "unsupported");
+      let unrecognizedMetadata = groups != null && !Array.isArray(groups);
       if (Array.isArray(groups)) for (const group of groups) {
-        if (!Array.isArray(group?.[4])) fail("Gemini attachment labels have an unsupported shape.", "unsupported");
+        if (group == null) continue;
+        if (!Array.isArray(group?.[4])) {
+          if (!Array.isArray(group) || group.some(value => value != null)) unrecognizedMetadata = true;
+          continue;
+        }
         for (const file of group[4]) {
+          if (file == null) continue;
           if (Array.isArray(file) && typeof file[1] === "number" && typeof file[2] === "string" && file[2].trim()) {
             userParts.push(`Attachment: ${JSON.stringify(file[2])}`);
             excludedContentTypes.add("uploads");
-          } else fail("Gemini attachment labels have an unsupported shape.", "unsupported");
+          } else unrecognizedMetadata = true;
         }
+      }
+      if (unrecognizedMetadata) {
+        // This optional slot also carries context/media metadata. Unsupported
+        // labels must not discard verified own text; keep unknown data excluded.
+        // Without a prompt, that data could be the entire user input, so fallback
+        // is still required rather than accepting a label/answer-only history.
+        if (!user.trim()) fail("Gemini attachment labels have an unsupported shape.", "unsupported");
+        excludedContentTypes.add("other");
       }
       const assistant = item[3];
       if (!Array.isArray(assistant?.[0]) || !assistant[0].length) fail("A Gemini response is missing or unfinished.");
