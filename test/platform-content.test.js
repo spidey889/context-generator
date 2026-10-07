@@ -787,26 +787,6 @@ test("Grok empty-state prompt is not counted or captured as a real message", () 
   );
 });
 
-test("conversation scraping preserves detected user and assistant roles", () => {
-  const userTurn = new FakeElement({
-    text: "Please make the fallback modal better.",
-    attrs: { "data-message-author-role": "user" }
-  });
-  const assistantTurn = new FakeElement({
-    text: "I will update the modal and add focused tests.",
-    attrs: { "data-message-author-role": "assistant" }
-  });
-  const hooks = loadPlatformContent([userTurn, assistantTurn]);
-
-  assert.equal(hooks.getConversationRole(userTurn), "User");
-  assert.equal(hooks.getConversationRole(assistantTurn), "ChatGPT");
-
-  const transcript = hooks.scrapeConversationText();
-  assert.match(transcript, /^ChatGPT conversation:/);
-  assert.match(transcript, /User: Please make the fallback modal better\./);
-  assert.match(transcript, /ChatGPT: I will update the modal and add focused tests\./);
-});
-
 test("role detection uses structural evidence instead of you or me labels", () => {
   const vagueYouLabel = new FakeElement({
     text: "Account navigation",
@@ -903,33 +883,6 @@ test("handoff finish keeps the two-frame cue for a visible source and cleans up"
   assert.deepEqual(hooks.getOwnedLifecycleResourceCounts(), before);
 });
 
-test("ChatGPT capture preserves identical text from distinct conversation turns", () => {
-  const elements = [
-    new FakeElement({
-      text: "Repeat this exact request.",
-      attrs: { "data-testid": "conversation-turn-1", "data-message-author-role": "user" }
-    }),
-    new FakeElement({
-      text: "Repeated exact response.",
-      attrs: { "data-testid": "conversation-turn-2", "data-message-author-role": "assistant" }
-    }),
-    new FakeElement({
-      text: "Repeat this exact request.",
-      attrs: { "data-testid": "conversation-turn-3", "data-message-author-role": "user" }
-    }),
-    new FakeElement({
-      text: "Repeated exact response.",
-      attrs: { "data-testid": "conversation-turn-4", "data-message-author-role": "assistant" }
-    })
-  ];
-  const hooks = loadPlatformContent(elements);
-
-  const transcript = hooks.scrapeConversationText();
-
-  assert.equal((transcript.match(/User: Repeat this exact request\./g) || []).length, 2);
-  assert.equal((transcript.match(/ChatGPT: Repeated exact response\./g) || []).length, 2);
-});
-
 test("ChatGPT capture collapses duplicate DOM copies of the same conversation turn", () => {
   const elements = [
     new FakeElement({
@@ -955,26 +908,6 @@ test("ChatGPT capture collapses duplicate DOM copies of the same conversation tu
 
   assert.equal((transcript.match(/User: One real request\./g) || []).length, 1);
   assert.equal((transcript.match(/ChatGPT: One real response\./g) || []).length, 1);
-});
-
-test("sequence merge keeps positional duplicates until the final capture safety pass", () => {
-  const hooks = loadPlatformContent([]);
-  const collected = [];
-  const firstWindow = [
-    { role: "User", text: "Repeat this." },
-    { role: "ChatGPT", text: "First answer." },
-    { role: "User", text: "Repeat this." }
-  ];
-  const secondWindow = [
-    { role: "ChatGPT", text: "First answer." },
-    { role: "User", text: "Repeat this." },
-    { role: "ChatGPT", text: "Second answer." }
-  ];
-
-  assert.equal(hooks.collectRenderedConversationTurns(collected, firstWindow), 3);
-  assert.equal(hooks.collectRenderedConversationTurns(collected, secondWindow), 1);
-  assert.equal(collected.length, 4);
-  assert.equal(collected.filter((turn) => turn.role === "User" && turn.text === "Repeat this.").length, 2);
 });
 
 test("virtual sweep reduces 18 overlapping snapshots and 315 entries to the canonical 38-turn sequence", () => {
@@ -1304,50 +1237,13 @@ test("paste retains a verified composer through a temporary disabled state", () 
   assert.equal(hooks.findReadyPlatformInput(), input);
 });
 
-clockTest("Grok uses its fast capture profile without losing a virtualized 40-turn chat", async () => {
-  const { elements, scrollableRoot } = createVirtualizedChatElements({
-    label: "Grok",
+clockTest("Grok fast capture waits for a delayed virtualized window instead of skipping turns", async () => {
+  const { elements } = createVirtualizedChatElements({
+    label: "Grok delayed render",
     totalTurns: 40,
     windowSize: 8,
     scrollStride: 4,
     scrollHeight: 3600,
-    makeTurn: (index) => new FakeElement({
-      text: `Fast virtualized Grok turn ${index}`,
-      attrs: { "data-message-author-role": index % 2 ? "user" : "assistant" }
-    })
-  });
-  const hooks = loadPlatformContent(elements, "grok.com");
-
-  assert.equal(hooks.getSourceScrollStableTimeout(), 700);
-  assert.equal(hooks.getSourceScrollStableInterval(), 40);
-  assert.equal(hooks.getSourceScrollStableSampleCount(), 2);
-  assert.equal(hooks.getVirtualSweepSettleTimeout(), 100);
-  assert.equal(hooks.getVirtualSweepStableSampleCount(), 2);
-  assert.equal(hooks.getVirtualSweepChangePollMs(), 10);
-  assert.equal(hooks.getVirtualSweepStepRatio(false), 0.7);
-  assert.equal(hooks.getVirtualSweepStepRatio(true), 0.9);
-  assert.equal(hooks.getVirtualSweepTerminalQuietTimeout(), 160);
-
-  await hooks.prepareSourceForCapture();
-  scrollableRoot.scrollCalls = [];
-  const transcript = await hooks.scrapeConversationTextWhenReady();
-
-  assert.equal((transcript.match(/(?:User|Grok): Fast virtualized Grok turn/g) || []).length, 40);
-  assert.match(transcript, /User: Fast virtualized Grok turn 1/);
-  assert.match(transcript, /Grok: Fast virtualized Grok turn 40/);
-  assert.ok(
-    scrollableRoot.scrollCalls.length <= 8,
-    `Grok's adaptive advances should finish this fixture in 8 scrolls or fewer; saw ${scrollableRoot.scrollCalls.length}`
-  );
-});
-
-clockTest("Grok fast capture waits for a delayed virtualized window instead of skipping turns", async () => {
-  const { elements } = createVirtualizedChatElements({
-    label: "Grok delayed render",
-    totalTurns: 24,
-    windowSize: 8,
-    scrollStride: 4,
-    scrollHeight: 2400,
     renderDelayMs: 140,
     makeTurn: (index) => new FakeElement({
       text: `Delayed Grok turn ${index}`,
@@ -1359,11 +1255,13 @@ clockTest("Grok fast capture waits for a delayed virtualized window instead of s
   await hooks.prepareSourceForCapture();
   const transcript = await hooks.scrapeConversationTextWhenReady();
 
-  assert.equal((transcript.match(/(?:User|Grok): Delayed Grok turn/g) || []).length, 24);
+  assert.equal((transcript.match(/(?:User|Grok): Delayed Grok turn/g) || []).length, 40);
   assert.match(transcript, /User: Delayed Grok turn 1/);
-  assert.match(transcript, /Grok: Delayed Grok turn 24/);
+  assert.match(transcript, /Grok: Delayed Grok turn 40/);
 });
 
+// This full sweep checks role labels, distinct repeated turns and overlapping
+// windows together; separate quick-capture/helper fixtures duplicate that work.
 virtualSweepTest("ChatGPT sweep preserves a 40-turn chat with intentionally repeated text", async () => {
   const { elements } = createVirtualizedChatElements({
     label: "ChatGPT",
@@ -1694,22 +1592,6 @@ test("conversation transport preserves the complete middle beyond the old 160k c
   assert.match(transported, /TAIL-DETAILS$/);
 });
 
-clockTest("source capture prep scrolls conversation containers to the top instantly", async () => {
-  const scrollableRoot = new FakeElement({
-    text: "Scrollable chat root",
-    attrs: { role: "main" }
-  });
-  scrollableRoot.scrollHeight = 1800;
-  scrollableRoot.clientHeight = 500;
-  scrollableRoot.scrollTop = 740;
-  const hooks = loadPlatformContent([scrollableRoot]);
-
-  await hooks.prepareSourceForCapture();
-
-  assert.equal(scrollableRoot.scrollTop, 0);
-  assert.equal(scrollableRoot.scrollCalls[0].behavior, "instant");
-});
-
 clockTest("source capture prep waits until delayed older messages finish loading", async () => {
   const elements = [];
   const scrollableRoot = new FakeElement({ text: "Scrollable chat root" });
@@ -1744,6 +1626,8 @@ clockTest("source capture prep waits until delayed older messages finish loading
   const hooks = loadPlatformContent(elements);
 
   await hooks.prepareSourceForCapture();
+  assert.equal(scrollableRoot.scrollTop, 0);
+  assert.equal(scrollableRoot.scrollCalls[0].behavior, "instant");
   const transcript = hooks.scrapeConversationText();
 
   assert.match(transcript, /Older message 1/);

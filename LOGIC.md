@@ -553,6 +553,8 @@ Keep shared deadline/decoding boundary checks once, plus each provider's distinc
 
 JSON reader rejection matrices run once per implementation: Claude, ChatGPT and the shared Gemini/Grok/DeepSeek reader. ChatGPT retains session/history/paste-descriptor wiring checks; each network adapter retains exact Unicode capture and rejected-transport cancellation. Combine overlapping success fixtures while keeping platform-specific parsing, attachment, identity, deadline and fallback regressions.
 
+DOM remains active for JSON failure, unsaved chats, Speed opt-out and toolbar transfers. Keep a compact suite for verified roles, deduplication, virtual scrolling, delayed history, pasted content, source identity and privacy. Full repeated-turn/delayed-render sweeps can replace overlapping basic/helper fixtures; retain the separate slow physical-scroll regression.
+
 | Change | Focused check | Additional evidence when relevant |
 | --- | --- | --- |
 | DOM capture, pasted cards, placement, picker/handoff, paste | `node --test --test-skip-pattern="^slow/release:" test/platform-content.test.js` | `npm run test:slow` for capture changes; installed Brave smoke for meaningful extension/UI changes |
