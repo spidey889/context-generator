@@ -1626,7 +1626,10 @@ async function run() {
           const overlaps = rect => rect.width > 0 && r.left < rect.right && r.right > rect.left && r.top < rect.bottom && r.bottom > rect.top;
           const modelVisible = m.width > 0 && m.height > 0;
           const beforeModel = modelVisible && b.nextElementSibling?.contains(model);
-          return r.width === 36 && r.left >= 0 && r.right <= innerWidth && !overlaps(m) && !overlaps(s)
+          // Claude now keeps the picker and its 1.08 active glow on remount.
+          // Verify the 36px layout slot separately from its transformed artwork.
+          const expectedWidth = b.getAttribute("aria-expanded") === "true" ? 36 * 1.08 : 36;
+          return b.offsetWidth === 36 && Math.abs(r.width - expectedWidth) < 0.1 && r.left >= 0 && r.right <= innerWidth && !overlaps(m) && !overlaps(s)
             && (!modelVisible || beforeModel) && document.querySelectorAll("#context-generator-bubble").length === 1
             ? { beforeModel, width: r.width } : null;
         })()`;

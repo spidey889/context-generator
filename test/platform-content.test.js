@@ -2937,7 +2937,7 @@ test("Claude inline discovery stays within the active named composer", () => {
   assert.ok(hooks.findClaudeInlineToolbar(f.input) === null, "ancestor actions outside this named composer must not be claimed");
 });
 
-test("Claude inline picker invalidates editor and actions wrapper replacements", () => {
+test("Claude inline ownership detects editor and actions replacements before picker opening", () => {
   const f = inlineClaudeFixture();
   const hooks = loadPlatformContent(Object.values(f), "claude.ai");
   hooks.document.createElement = () => new FakeElement();
@@ -2946,12 +2946,12 @@ test("Claude inline picker invalidates editor and actions wrapper replacements",
   assert.equal(hooks.invalidateInlinePicker("document-childlist"), false);
   const editor = new FakeElement();
   f.host.appendChild(editor); editor.appendChild(f.input);
-  assert.equal(hooks.invalidateInlinePicker("document-childlist"), true, "same input in a replaced editor branch must close the picker");
+  assert.equal(hooks.invalidateInlinePicker("document-childlist"), true, "same input in a replaced editor branch must invalidate the previous mount");
   assert.equal(hooks.mountClaudeInlineButton(bubble, f.input), true);
   const actions = new FakeElement({ attrs: { "data-cds": "ChatComposerActions" } });
   f.actions.removeAttribute("data-cds"); f.host.appendChild(actions);
   actions.appendChild(f.left); actions.appendChild(f.right);
-  assert.equal(hooks.invalidateInlinePicker("document-childlist"), true, "same rows in a replaced actions container must close the picker");
+  assert.equal(hooks.invalidateInlinePicker("document-childlist"), true, "same rows in a replaced actions container must invalidate the previous mount");
 });
 
 test("Claude inline mounting monitors native attribute changes without reacting to editor text", () => {
@@ -2974,7 +2974,7 @@ test("Claude inline mounting monitors native attribute changes without reacting 
   assert.equal(observer.observed.length, 0);
 });
 
-test("Claude inline host-only remount refreshes identity and invalidates the picker only once", () => {
+test("Claude inline host-only remount refreshes retained ownership once", () => {
   const f = inlineClaudeFixture();
   const hooks = loadPlatformContent(Object.values(f), "claude.ai");
   hooks.document.createElement = () => new FakeElement();
