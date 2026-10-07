@@ -204,12 +204,12 @@ async function handler(req, res) {
         const proof = await createSummaryProof(validation.telemetry, secret);
         if (proof) {
           const confirmedAt = new Date().toISOString();
-          const proofV2 = await createSummaryProof({ ...validation.telemetry, summary_confirmed_at: confirmedAt }, secret);
           const model = payload.timing.model;
           const proofV3 = await createSummaryProof({ ...validation.telemetry, summary_confirmed_at: confirmedAt, model }, secret);
-          // Retain v1/v2 for installed clients; v3 binds the served model too.
-          // Use the final result, never the primary or first attempted route.
-          payload = { ...payload, summaryProof: proof, summaryProofV2: proofV2,
+          // Published 1.4.8 workers only forward summaryProofV2 + time. Alias the
+          // model-bound proof into that field; Edge authenticates the omitted model.
+          // Deploy the compatible Edge verifier before releasing this backend.
+          payload = { ...payload, summaryProof: proof, summaryProofV2: proofV3,
             summaryProofV3: proofV3, summaryConfirmedAt: confirmedAt, summaryModel: model };
         }
       }
@@ -967,21 +967,43 @@ async function fetchWithRetry(url, options, requestBudgetMs, context = {}) {
     if (remainingMs <= 0) break;
 
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), Math.min(PROVIDER_ATTEMPT_TIMEOUT_MS, remainingMs));
+    const attemptDeadline = Math.min(deadline, Date.now() + PROVIDER_ATTEMPT_TIMEOUT_MS);
+    const timeout = setTimeout(() => controller.abort(), Math.max(0, attemptDeadline - Date.now()));
+    const checkAttemptDeadline = () => {
+      context.signal?.throwIfAborted();
+      // Response/parser microtasks can beat an overdue abort timer on a busy
+      // process. Elapsed time and the attempt signal both remain authoritative.
+      if (Date.now() >= attemptDeadline) controller.abort();
+      controller.signal.throwIfAborted();
+    };
     try {
+      checkAttemptDeadline();
       const signal = context.signal ? AbortSignal.any([context.signal, controller.signal]) : controller.signal;
       const response = await fetch(url, { ...options, signal });
-      // fetch resolves at the headers. Keep the deadline active until the JSON
-      // body finishes too, including error bodies read before provider fallback.
+      checkAttemptDeadline();
+      // fetch resolves at the headers. Successful JSON still belongs to the
+      // attempt's deadline; HTTP failures route by status alone.
       let payload;
       let bodyError;
-      try {
-        payload = await response.json();
-      } catch (error) {
-        if (signal.aborted || error?.name === "AbortError") throw error;
-        bodyError = error;
+      if (response.ok) {
+        try {
+          // Response.json silently replaces malformed UTF-8, which can corrupt
+          // names/facts in otherwise valid JSON. Reject those transport bytes.
+          const bytes = await response.arrayBuffer();
+          payload = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes));
+        } catch (error) {
+          if (signal.aborted || error?.name === "AbortError") throw error;
+          bodyError = error;
+        }
+      } else {
+        // Error payloads are unused. Start owned-body cancellation without
+        // waiting for cleanup; a stalled/rejected cancel must not block routing.
+        try {
+          const cancellation = response.body?.cancel?.();
+          cancellation?.catch?.(() => {});
+        } catch { /* Retain the HTTP status even if cleanup fails. */ }
       }
-      context.signal?.throwIfAborted();
+      checkAttemptDeadline();
       lastResponse = {
         ok: response.ok,
         status: response.status,
@@ -998,7 +1020,7 @@ async function fetchWithRetry(url, options, requestBudgetMs, context = {}) {
         return lastResponse;
       }
     } catch (error) {
-      context.signal?.throwIfAborted();
+      checkAttemptDeadline();
       lastError = error;
       if (error?.name === "AbortError") throw error;
       if (attempt === PROVIDER_MAX_ATTEMPTS) throw error;

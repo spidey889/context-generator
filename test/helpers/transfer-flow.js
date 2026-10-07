@@ -3,7 +3,7 @@ const fs = require("node:fs");
 const path = require("node:path");
 const vm = require("node:vm");
 
-const source = fs.readFileSync(path.join(__dirname, "../extension/platform-content.js"), "utf8");
+const source = fs.readFileSync(path.join(__dirname, "../../extension/platform-content.js"), "utf8");
 function sliceBetween(startMarker, endMarker) {
   const start = source.indexOf(startMarker);
   const end = source.indexOf(endMarker, start);

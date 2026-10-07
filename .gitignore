@@ -4,7 +4,6 @@ supabase/.branches/
 .gstack/
 .env*
 node_modules/
-package-lock.json
 api/mcp.mjs
 extension/chrome.zip
 extension/chrome-*.zip

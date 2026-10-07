@@ -7,6 +7,7 @@ const vm = require("node:vm");
 const { spawn } = require("node:child_process");
 const { fixtures: networkFixtures, rpcFrame } = require("../test/network-json-fixtures");
 const { createTelemetrySmokeFixture } = require("./telemetry-smoke-fixture");
+const { saveSmokeFailure } = require("./smoke-failure-artifacts");
 
 const REPO_ROOT = path.resolve(__dirname, "..");
 const SOURCE_SENTINEL = "SMOKE_USER_SENTINEL: preserve the deployment checklist.";
@@ -17,6 +18,7 @@ const CHATGPT_CANVAS_TEXT = `CHATGPT_CANVAS_START\n${"  Complete canvas line, ab
 const CHATGPT_EXACT_CODE = '  OWN_CODE_SENTINEL\n  print("a\u00a0b")  \nCODE_END_SENTINEL';
 const CHATGPT_PYTHON_RESULT = "  Test code Item  Value\n0  JV3XLMSP    A   6791\n1  JV3XLMSP    B   3197\n2  JV3XLMSP    C   7083";
 const CLAUDE_PASTED_TEXT = `CLAUDE_PASTE_START\n${"Full pasted-card line, absent from the DOM.\n".repeat(1000)}CLAUDE_PASTE_END`;
+const CLAUDE_JSON_USER_TEXT = `${SOURCE_SENTINEL}\nJSON_ONLY_SENTINEL: loaded from the API, absent from the DOM.\r\n\r\n${CLAUDE_PASTED_TEXT}\r\n\r\nCLAUDE_INLINE_SUFFIX`;
 const SUMMARY_TEXT = [
   "CONTEXT CARRY — READY TO PASTE",
   "",
@@ -39,16 +41,21 @@ const ERROR_SCREENSHOT_PATH = process.env.CAP_CONTEXT_ERROR_SCREENSHOT || "";
 const JSON_SOURCE = ["chatgpt", "gemini", "grok", "deepseek"].includes(process.env.CAP_CONTEXT_JSON_SMOKE) ? process.env.CAP_CONTEXT_JSON_SMOKE : process.env.CAP_CONTEXT_JSON_SMOKE === "1" ? "claude" : null;
 const NETWORK_SOURCE = ["gemini", "grok", "deepseek"].includes(JSON_SOURCE);
 const GROK_FILE_ONLY_SMOKE = JSON_SOURCE === "grok" && process.env.CAP_CONTEXT_NETWORK_FAILURE_SMOKE === "file-only";
-const NETWORK_FAILURE = (NETWORK_SOURCE && process.env.CAP_CONTEXT_NETWORK_FAILURE_SMOKE === "partial") || GROK_FILE_ONLY_SMOKE;
+const DEEPSEEK_OVERSIZE_SMOKE = JSON_SOURCE === "deepseek" && process.env.CAP_CONTEXT_NETWORK_FAILURE_SMOKE === "oversize";
+const NETWORK_FAILURE = (NETWORK_SOURCE && process.env.CAP_CONTEXT_NETWORK_FAILURE_SMOKE === "partial") || GROK_FILE_ONLY_SMOKE || DEEPSEEK_OVERSIZE_SMOKE;
 const JSON_CAPTURE_SMOKE = Boolean(JSON_SOURCE);
 const CLAUDE_RELOAD_SMOKE = JSON_SOURCE === "claude" && process.env.CAP_CONTEXT_CLAUDE_RELOAD_SMOKE === "1";
 const CHATGPT_RELOAD_SMOKE = JSON_SOURCE === "chatgpt" && process.env.CAP_CONTEXT_CHATGPT_RELOAD_SMOKE === "1";
 const JSON_RELOAD_SMOKE = CLAUDE_RELOAD_SMOKE || CHATGPT_RELOAD_SMOKE;
 const CHATGPT_FAILURE_SMOKE = JSON_SOURCE === "chatgpt" ? process.env.CAP_CONTEXT_CHATGPT_FAILURE_SMOKE || "" : "";
+const CHATGPT_PASTE_OVERSIZE_SMOKE = CHATGPT_FAILURE_SMOKE === "paste-oversize";
+const CHATGPT_HISTORY_OVERSIZE_SMOKE = CHATGPT_FAILURE_SMOKE === "history-oversize";
 const CHATGPT_PASTE_AUTH_SMOKE = JSON_SOURCE === "chatgpt" && process.env.CAP_CONTEXT_CHATGPT_AUTH_SMOKE === "paste401";
 const CLAUDE_PARTIAL_SMOKE = JSON_SOURCE === "claude" && process.env.CAP_CONTEXT_CLAUDE_PARTIAL_SMOKE === "1";
-const JSON_FALLBACK_SMOKE = Boolean(CHATGPT_FAILURE_SMOKE || CLAUDE_PARTIAL_SMOKE || NETWORK_FAILURE);
+const CLAUDE_OVERSIZE_SMOKE = JSON_SOURCE === "claude" && process.env.CAP_CONTEXT_CLAUDE_PARTIAL_SMOKE === "oversize";
+const JSON_FALLBACK_SMOKE = Boolean(CHATGPT_FAILURE_SMOKE || CLAUDE_PARTIAL_SMOKE || CLAUDE_OVERSIZE_SMOKE || NETWORK_FAILURE);
 const TELEMETRY_DATABASE_SMOKE = process.env.CAP_CONTEXT_TELEMETRY_SMOKE === "1";
+const FAILURE_ARTIFACT_DIR = process.env.CAP_CONTEXT_SMOKE_ARTIFACT_DIR || "";
 
 class CdpSession {
   constructor(socket) {
@@ -206,6 +213,14 @@ async function createSmokeExtension(tempRoot, origin) {
     currentPlatformReplacement,
     "the current-platform resolver"
   );
+  // pushState can beat the isolated world's 80 ms route poll. Expose only
+  // fixture-owned mount readiness so a new-route click uses its current owner.
+  platformSource = replaceOnce(platformSource,
+    "  function checkInlinePlacementPathname() {",
+    `  window.__capSmokeChatGptMountReady = () => Boolean(chatGptInlineMount?.input?.isConnected
+      && chatGptInlineMount?.bubble?.isConnected && chatGptInlineMount.pathname === window.location.pathname);
+  function checkInlinePlacementPathname() {`,
+    "the fixture inline-route readiness probe");
   const platformUrls = {
     claude: "https://claude.ai/",
     chatgpt: "https://chatgpt.com/",
@@ -484,11 +499,60 @@ function chatGptTreeFixture() {
   return data;
 }
 
+function networkSmokeFixture(platform) {
+  const fixture = networkFixtures(platform);
+  if (platform === "gemini") {
+    // Parent triples select older regenerated replies across pages; the optional
+    // assistant selection field is absent from this native-derived fixture.
+    fixture.pages[1].turns[0][3][0].unshift(["rc_abandoned", ["ABANDONED_SENTINEL"]]);
+    // A real local receipt failed as unsupported optional user metadata. Keep
+    // unknown context out of the transcript without forcing valid text to DOM.
+    fixture.pages[2].turns[0][2][0][4] = [["CONTEXT_METADATA_SENTINEL"], null];
+  }
+  if (platform !== "deepseek") return fixture;
+  const extraBodies = [];
+  for (let i = 1; i <= 3; i++) {
+    const text = `\uFEFF  original upload ${i}: café 🕷️\r\n`;
+    const file = { ...fixture.file, id: `file-concurrent-${i}`, file_name: `original-${i}.py`, file_size: Buffer.byteLength(text), signed_path: `/file?file_id=concurrent-${i}&sig=SIGNED_SENTINEL` };
+    fixture.files[file.id] = text;
+    fixture.data.data.biz_data.chat_messages[0].fragments[0].files.push(file);
+    extraBodies.push(`Attachment: ${JSON.stringify(file.file_name)}\n\nFile contents (${file.file_size} UTF-8 bytes):\n${text}\nEnd attachment: ${JSON.stringify(file.file_name)}`);
+  }
+  fixture.expected = fixture.expected.replace('\n\nAttachment: "ignored.png"', `\n\n${extraBodies.join("\n\n")}\n\nAttachment: "ignored.png"`);
+  return fixture;
+}
+
+function streamOversizedFixtureResponse(response, prefix, metrics) {
+  // No Content-Length: native capture must cancel discarded/excess bodies
+  // before the 20 MB tail finishes. Pace writes and observe cancellation.
+  const padding = Buffer.alloc(1000000, 32);
+  metrics.bytes = Buffer.byteLength(prefix);
+  response.write(prefix);
+  let remaining = 20, timer;
+  const schedule = () => { if (!response.destroyed) timer = setTimeout(writePadding, 25); };
+  const writePadding = () => {
+    if (response.destroyed) return;
+    if (!remaining--) return response.end();
+    metrics.bytes += padding.length;
+    if (response.write(padding)) schedule();
+    else response.once("drain", schedule);
+  };
+  response.once("close", () => {
+    clearTimeout(timer);
+    metrics.cancelled = !response.writableFinished;
+  });
+  schedule();
+}
+
 async function startFixtureServer() {
-  const state = { summaryRequests: [], jsonRequests: 0, sessionRequests: 0, pasteDescriptorRequests: 0, pasteContentRequests: 0, chatgptRequestUrls: [], claudeRequestUrls: [] };
+  const state = { summaryRequests: [], jsonRequests: 0, sessionRequests: 0, pasteDescriptorRequests: 0, pasteContentRequests: 0, fileReadsActive: 0, fileReadsPeak: 0, chatgptRequestUrls: [], claudeRequestUrls: [] };
+  state.oversizeHistory = { bytes: 0, cancelled: false };
+  state.oversizePaste = { bytes: 0, cancelled: false };
+  state.discardedAuth = { bytes: 0, cancelled: false };
   const telemetryFixture = await createTelemetrySmokeFixture(REPO_ROOT, TELEMETRY_DATABASE_SMOKE);
   state.telemetryRequests = telemetryFixture.received;
-  const network = NETWORK_SOURCE ? networkFixtures(JSON_SOURCE) : null;
+  const network = NETWORK_SOURCE ? networkSmokeFixture(JSON_SOURCE) : null;
+  const pendingFileResponses = [];
   const server = http.createServer(async (request, response) => {
     const url = new URL(request.url, "http://127.0.0.1");
     response.setHeader("Cache-Control", "no-store");
@@ -510,7 +574,19 @@ async function startFixtureServer() {
     if (NETWORK_SOURCE && url.pathname === "/api/file") {
       state.pasteContentRequests++;
       assert.equal(request.headers.authorization, undefined);
-      response.writeHead(200, { "Content-Type": "application/octet-stream" }); response.end(network.files[network.file.id]); return;
+      const id = `file-${url.searchParams.get("file_id")}`;
+      assert.ok(Object.hasOwn(network.files, id));
+      state.fileReadsActive++;
+      state.fileReadsPeak = Math.max(state.fileReadsPeak, state.fileReadsActive);
+      response.on("close", () => { state.fileReadsActive--; });
+      // Hold independent bodies until all four arrive, then complete in reverse
+      // order. This proves browser concurrency without timing-based assertions.
+      pendingFileResponses.push({ response, text: network.files[id] });
+      if (pendingFileResponses.length === 4) for (const item of pendingFileResponses.reverse()) {
+        item.response.writeHead(200, { "Content-Type": "application/octet-stream" });
+        item.response.end(item.text);
+      }
+      return;
     }
     if (NETWORK_SOURCE && ["/_/BardChatUi/data/batchexecute", "/rest/app-chat/conversations/smoke/response-node", "/rest/app-chat/conversations/smoke/load-responses", "/api/v0/chat/history_messages"].includes(url.pathname)) {
       state.jsonRequests++;
@@ -533,6 +609,10 @@ async function startFixtureServer() {
       } else {
         assert.equal(request.headers.authorization, "Bearer AUTH_SENTINEL"); assert.equal(request.headers["x-device-id"], undefined);
         const data = structuredClone(network.data);
+        if (DEEPSEEK_OVERSIZE_SMOKE) {
+          streamOversizedFixtureResponse(response, JSON.stringify(data), state.oversizeHistory);
+          return;
+        }
         if (NETWORK_FAILURE) { data.data.biz_data.cache_control = "MERGE"; data.data.biz_data.chat_messages = []; }
         response.end(JSON.stringify(data));
       }
@@ -559,7 +639,7 @@ async function startFixtureServer() {
       response.end(JSON.stringify({
         summary: SUMMARY_TEXT,
         ...receipt,
-        timing: { inputChars: state.summaryRequests.at(-1)?.conversation?.length || 0, servedBy: "smoke-stub" }
+        timing: { inputChars: state.summaryRequests.at(-1)?.conversation?.length || 0, servedBy: "smoke-stub", model: receipt.summaryModel }
       }));
       return;
     }
@@ -579,7 +659,9 @@ async function startFixtureServer() {
     if (url.pathname === "/backend-api/files/download/file_smoke_paste") {
       state.pasteDescriptorRequests++;
       if (CHATGPT_PASTE_AUTH_SMOKE && state.pasteDescriptorRequests === 1) {
-        response.writeHead(401, { "Content-Type": "application/json" }); response.end("{}"); return;
+        response.writeHead(401, { "Content-Type": "application/json" });
+        streamOversizedFixtureResponse(response, "{}", state.discardedAuth);
+        return;
       }
       assert.equal(request.headers.authorization, CHATGPT_PASTE_AUTH_SMOKE ? "Bearer smoke-refreshed" : "Bearer smoke-only");
       response.writeHead(200, { "Content-Type": "application/json" });
@@ -590,7 +672,8 @@ async function startFixtureServer() {
       state.pasteContentRequests++;
       assert.equal(request.headers.authorization, undefined, "Signed paste content must not receive bearer headers.");
       response.writeHead(200, { "Content-Type": "text/plain; charset=utf-8" });
-      response.end(CHATGPT_USER_PASTE);
+      if (CHATGPT_PASTE_OVERSIZE_SMOKE) streamOversizedFixtureResponse(response, CHATGPT_USER_PASTE, state.oversizePaste);
+      else response.end(CHATGPT_USER_PASTE);
       return;
     }
     if (["/backend-api/conversation/smoke", "/backend-api/conversations/smoke"].includes(url.pathname)) {
@@ -603,25 +686,32 @@ async function startFixtureServer() {
         assert.equal(url.search, "", "The full-tree URL must not carry recent-page parameters.");
       }
       response.writeHead(full && CHATGPT_FAILURE_SMOKE === "ranged" ? 206 : 200, { "Content-Type": "application/json" });
-      response.end(JSON.stringify(full ? chatGptTreeFixture() : { messages: [], page_info: { has_previous_page: true } }));
+      const history = JSON.stringify(full ? chatGptTreeFixture() : { messages: [], page_info: { has_previous_page: true } });
+      if (full && CHATGPT_HISTORY_OVERSIZE_SMOKE) streamOversizedFixtureResponse(response, history, state.oversizeHistory);
+      else response.end(history);
       return;
     }
     if (url.pathname === "/api/organizations/smoke/chat_conversations/smoke") {
       state.jsonRequests++;
       state.claudeRequestUrls.push(url.href);
       response.writeHead(200, { "Content-Type": "application/json" });
-      response.end(JSON.stringify({
+      const history = JSON.stringify({
         uuid: "smoke", current_leaf_message_uuid: "assistant",
         ...(CLAUDE_PARTIAL_SMOKE ? { truncated: true } : {}),
         chat_messages: [
-          { uuid: "user", sender: "human", parent_message_uuid: null, content: [{ type: "text", text: `${SOURCE_SENTINEL}\nJSON_ONLY_SENTINEL: loaded from the API, absent from the DOM.` }], attachments: [
+          { uuid: "user", sender: "human", parent_message_uuid: null, content: [{ type: "text", text: CLAUDE_JSON_USER_TEXT }], attachments: [
             { file_name: "", file_type: "txt", extracted_content: CLAUDE_PASTED_TEXT },
             { file_name: "upload.txt", file_type: "txt", extracted_content: "CLAUDE_ATTACHMENT_IGNORED_SENTINEL" },
             { file_name: "", file_type: "image/png", extracted_content: "CLAUDE_ATTACHMENT_IGNORED_SENTINEL" }
           ] },
           { uuid: "assistant", sender: "assistant", parent_message_uuid: "user", content: [{ type: "text", text: ASSISTANT_SENTINEL }] }
         ]
-      }));
+      });
+      // The initial page-owned routing request stays small and unread. Only the
+      // extension's fresh strong-consistency read receives the oversized tail.
+      if (CLAUDE_OVERSIZE_SMOKE && url.searchParams.get("consistency") === "strong") {
+        streamOversizedFixtureResponse(response, history, state.oversizeHistory);
+      } else response.end(history);
       return;
     }
     if (["/source", "/chat/smoke", "/c/smoke", "/app/smoke", "/a/chat/s/smoke"].includes(url.pathname)) {
@@ -632,6 +722,12 @@ async function startFixtureServer() {
         // returns the full ordered conversation, including the pasted card.
         ? claudePlacementFixture()
         : sourceFixture();
+      if (["gemini", "deepseek"].includes(JSON_SOURCE)) {
+        // Exercise the selected adapter's native composer. A ChatGPT form made
+        // these providers fall back to geometry over unrelated controls and
+        // could not exercise their inline picker ownership on resize.
+        page = providerPlacementFixture(JSON_SOURCE).replace("<body>", `<body>${sourceFixture().match(/<main[\s\S]*?<\/main>/)[0]}`);
+      }
       // Failure scenarios need mounted DOM history to verify the fallback.
       // Successful JSON scenarios still prove capture before native turns mount.
       if (JSON_FALLBACK_SMOKE && JSON_SOURCE === "claude") {
@@ -642,14 +738,16 @@ async function startFixtureServer() {
           .replace('data-message-author-role="assistant"', 'class="response-content message" data-message-author-role="assistant"');
       }
       if (NETWORK_SOURCE) {
-        const boot = JSON_SOURCE === "gemini" ? `window.WIZ_global_data={SNlM0e:"CSRF_SENTINEL"};const xhr=new XMLHttpRequest();xhr.open("POST","/_/BardChatUi/data/batchexecute?rpcids=hNvQHb");xhr.send(new URLSearchParams({at:"CSRF_SENTINEL","f.req":JSON.stringify([[["hNvQHb",JSON.stringify(["c_smoke",10,null,1,[1],[4],null,1]),null,"generic"]]])}));`
+        // Gemini must capture a cached chat without a prior RPC observation.
+        const boot = JSON_SOURCE === "gemini" ? `window.WIZ_global_data={SNlM0e:"CSRF_SENTINEL",cfb2h:"native-build",FdrFJe:"native-session"};window.__geminiMenuClicks=0;`
           : JSON_SOURCE === "deepseek" ? 'const xhr=new XMLHttpRequest();xhr.open("GET","/api/v0/session");xhr.setRequestHeader("Authorization","Bearer AUTH_SENTINEL");xhr.setRequestHeader("x-device-id","CACHE_DEVICE");xhr.send();' : "";
+        if (JSON_SOURCE === "gemini") page = page.replace("</main>", `<model-response><button aria-label="Show more" aria-haspopup="menu" onclick="window.__geminiMenuClicks++"></button><button aria-label="Show more options" onclick="window.__geminiMenuClicks++"></button></model-response></main>`);
         response.end(page.replace("</body>", `<script nonce="smoke">${boot}</script></body>`)); return;
       }
       response.end(url.pathname === "/c/smoke"
-        ? page.replace("</body>", '<script nonce="smoke">fetch("/backend-api/conversations/smoke?num_turns=10", {headers:{Authorization:"Bearer smoke-only","ChatGPT-Account-Id":"smoke-account"}});</script></body>')
+        ? page.replace("</body>", '<script nonce="smoke">fetch("/backend-api/conversations/smoke?num_turns=10", {headers:{Authorization:"Bearer smoke-only","ChatGPT-Account-Id":"smoke-account"}}).then(()=>{window.__capSmokeNativeRequestReady=true;});</script></body>')
         : url.pathname === "/chat/smoke"
-        ? page.replace("</body>", '<script nonce="smoke">fetch("/api/organizations/smoke/chat_conversations/smoke?tree=True");</script></body>')
+        ? page.replace("</body>", '<script nonce="smoke">fetch("/api/organizations/smoke/chat_conversations/smoke?tree=True").then(()=>{window.__capSmokeNativeRequestReady=true;});</script></body>')
         : page);
       return;
     }
@@ -838,16 +936,23 @@ async function verifyPickerProductChanges(session, state) {
   assert.equal(await session.evaluate('getComputedStyle(document.querySelector(".context-generator-speed-lines i")).animationName'), "none");
   await session.call("Emulation.setEmulatedMedia", { features: [] });
   for (const width of [390, 320]) {
-    // Resize intentionally closes inline-owned pickers; reopen on the remounted pill.
+    // Claude freezes an open picker. Explicitly reopen at the new viewport
+    // size to check its initial fit; retention is exercised separately below.
+    if (JSON_SOURCE === "claude") {
+      await session.evaluate('document.getElementById("context-generator-bubble").click()');
+      await waitFor(() => session.evaluate('getComputedStyle(document.getElementById("context-generator-destination-sheet")).display === "none"'), "explicit Claude picker dismissal before resize");
+    }
     await session.call("Emulation.setDeviceMetricsOverride", { width, height: 740, deviceScaleFactor: 1, mobile: false });
-    await waitFor(() => session.evaluate('getComputedStyle(document.getElementById("context-generator-destination-sheet")).display === "none"'), "picker closure on resize");
+    await waitFor(() => session.evaluate('getComputedStyle(document.getElementById("context-generator-destination-sheet")).display === "none"'), "picker closure before narrow reopening");
     await session.evaluate('document.getElementById("context-generator-bubble").click()');
     await waitFor(() => session.evaluate('getComputedStyle(document.getElementById("context-generator-destination-sheet")).opacity === "1"'), "the narrow picker");
     assert.equal(await session.evaluate(`(() => {
       const r = document.getElementById("context-generator-destination-sheet").getBoundingClientRect();
       return r.left >= 0 && r.right <= innerWidth;
     })()`), true, `Picker must fit at ${width}px.`);
-    assert.equal(await session.evaluate(orbVisibleThroughBackdrop), true, `Orb must stay clear/clickable at ${width}px.`);
+    // Let the coalesced placement frame update the backdrop cutout before
+    // testing the orb's actual browser hit target.
+    await waitFor(() => session.evaluate(orbVisibleThroughBackdrop), `the clickable orb at ${width}px`);
   }
   await session.evaluate(`(() => {
     const toggle = document.querySelector(".context-generator-speed-toggle");
@@ -969,6 +1074,7 @@ async function run() {
   let sourceSession = null;
   let claudePlacementSession = null;
   let destinationSession = null;
+  const destinationSessions = new Map();
   let browserOutput = "";
 
   try {
@@ -1047,13 +1153,20 @@ async function run() {
       error.message += `\nTargets: ${JSON.stringify(targets.map(({ type, url }) => ({ type, url })))}\nPage: ${JSON.stringify(pageState)}\nExtension: ${JSON.stringify(extensionState)}\nEvents: ${JSON.stringify(recentEvents)}`;
       throw error;
     }
+    if (["chatgpt", "claude"].includes(JSON_SOURCE)) {
+      // The bubble can mount before the fixture's ordinary page-load request.
+      // Establish that request before counting reload/picker capture activity.
+      await waitFor(() => sourceSession.evaluate("Boolean(window.__capSmokeNativeRequestReady)"), "the fixture's initial native request");
+    }
     process.stdout.write("✓ Brave loaded the unpacked extension on the controlled source page.\n");
     if (!JSON_CAPTURE_SMOKE) {
       await verifyEmptyChatError(sourceSession, browserSession, state, { removeTurns: true, screenshot: true });
       process.stdout.write("✓ Empty ChatGPT shows its error directly, opens no destination, and supports repeated attempts/reduced motion.\n");
     }
 
-    if (!JSON_SOURCE || JSON_SOURCE === "chatgpt") {
+    // The DOM case owns the full placement suite. JSON cases exercise capture,
+    // reload and fallback without repeating unrelated geometry in every run.
+    if (!JSON_CAPTURE_SMOKE) {
       const originalDraft = await sourceSession.evaluate(`document.getElementById('prompt-textarea').textContent`);
       for (const draft of ["", Array.from({length:12},(_,i)=>'Inline draft line '+i).join('\n')]) {
         await sourceSession.evaluate(`(() => {
@@ -1190,6 +1303,7 @@ async function run() {
       process.stdout.write("✓ ChatGPT's 36px inline slot survives empty/long drafts, 760/390/320px widths and editor remount without native-control overlap.\n");
     }
 
+    if (!JSON_CAPTURE_SMOKE) {
     for (const platform of ["gemini", "grok", "deepseek"]) {
       const url = `${origin}/provider-placement?${SMOKE_PLATFORM_QUERY}=${platform}`;
       await browserSession.call("Target.createTarget", { url });
@@ -1315,12 +1429,14 @@ async function run() {
                 .map(n=>[n.className,n.getAttribute('data-context-generator-provider-inline')])};
           })()`))}`;
         } catch { /* Keep the original assertion if the fixture disconnected. */ }
+        await saveSmokeFailure(FAILURE_ARTIFACT_DIR, error, { [platform]: session }, browserOutput, `${platform}-placement`);
         throw error;
       } finally { session.close(); await browserSession.call("Target.closeTarget", { targetId: target.id }); }
     }
 
-    // Grok JSON mode verifies capture independently of unrelated Claude geometry.
-    if (JSON_SOURCE !== "grok") {
+    }
+
+    if (!JSON_CAPTURE_SMOKE) {
     const claudePlacementUrl = `${origin}/new?${SMOKE_PLATFORM_QUERY}=claude`;
     await browserSession.call("Target.createTarget", { url: claudePlacementUrl });
     const claudePlacementTarget = await waitFor(async () => {
@@ -1435,26 +1551,66 @@ async function run() {
     await claudePlacementSession.evaluate(`document.getElementById("model").style.display = ""`);
     await waitFor(() => claudePlacementSession.evaluate(`getComputedStyle(document.getElementById("context-generator-bubble")).position === "static"
       && document.querySelectorAll("[data-context-generator-original-translate]").length === 0`), "Claude attribute-only inline recovery");
+    await claudePlacementSession.evaluate(`document.getElementById("context-generator-bubble").click()`);
+    await waitFor(() => claudePlacementSession.evaluate(`getComputedStyle(document.getElementById("context-generator-destination-sheet")).opacity === "1"`), "Claude picker opening before native reflow");
+    await claudePlacementSession.evaluate(`(() => {
+      window.__claudePickerFocus = [...document.querySelectorAll(".context-generator-destination-tile")].find(tile => !tile.disabled);
+      window.__claudePickerFocus.focus();
+      window.__claudePickerSpeed = document.querySelector(".context-generator-speed-toggle").getAttribute("aria-pressed");
+      const sheet = document.getElementById("context-generator-destination-sheet");
+      window.__claudePickerPosition = [sheet.style.left, sheet.style.top, sheet.style.transformOrigin];
+    })()`);
+    const assertClaudePickerRetained = async label => {
+      const state = await claudePlacementSession.evaluate(`new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(() => {
+        const sheet = document.getElementById("context-generator-destination-sheet");
+        resolve({ open: sheet.getAttribute("aria-hidden") === "false" && getComputedStyle(sheet).opacity === "1",
+          focus: document.activeElement === window.__claudePickerFocus,
+          position: JSON.stringify([sheet.style.left, sheet.style.top, sheet.style.transformOrigin]) === JSON.stringify(window.__claudePickerPosition),
+          speed: document.querySelector(".context-generator-speed-toggle").getAttribute("aria-pressed") === window.__claudePickerSpeed });
+      })))`);
+      assert.deepEqual(state, { open:true, focus:true, position:true, speed:true }, label);
+    };
+    await claudePlacementSession.evaluate(`document.getElementById("model").style.marginRight = "8px"`);
+    await assertClaudePickerRetained("A native toolbar reflow must not move Claude's open picker.");
     for (const wrapper of ["editor", "actions", "host"]) {
-      await claudePlacementSession.evaluate(`document.getElementById("context-generator-bubble").click()`);
       await waitFor(() => claudePlacementSession.evaluate(`getComputedStyle(document.getElementById("context-generator-destination-sheet")).opacity === "1"`), `Claude picker before ${wrapper} replacement`);
       await claudePlacementSession.evaluate(`(() => {
         const old = ${wrapper === "host" ? 'document.getElementById("claude-host")' : `document.querySelector('[data-context-generator-claude-inline="${wrapper}"]')`};
         const next = old.cloneNode(false); next.removeAttribute("data-context-generator-claude-inline");
         old.replaceWith(next); while (old.firstChild) next.appendChild(old.firstChild);
       })()`);
-      await waitFor(() => claudePlacementSession.evaluate(`document.getElementById("context-generator-destination-sheet").style.display === "none"
-        && document.getElementById("context-generator-bubble") === window.__claudeAuditBubble
-        && getComputedStyle(window.__claudeAuditBubble).position === "static"`), "Claude picker invalidation and remount");
+      await assertClaudePickerRetained(`Claude ${wrapper} replacement must preserve its open picker, focus and Speed choice.`);
+      assert.equal(await claudePlacementSession.evaluate(`document.getElementById("context-generator-bubble") === window.__claudeAuditBubble
+        && getComputedStyle(window.__claudeAuditBubble).position === "static"`), true, "Claude must reuse its inline orb after remount.");
     }
-    await claudePlacementSession.evaluate(`document.getElementById("context-generator-bubble").click()`);
-    await waitFor(() => claudePlacementSession.evaluate(`getComputedStyle(document.getElementById("context-generator-destination-sheet")).opacity === "1"`), "Claude picker after host remount");
+    await claudePlacementSession.call("Emulation.setDeviceMetricsOverride", { width:390,height:240,deviceScaleFactor:1,mobile:false });
+    await assertClaudePickerRetained("A narrow/short viewport resize must preserve Claude's picker.");
+    await claudePlacementSession.call("Emulation.clearDeviceMetricsOverride");
+    await claudePlacementSession.evaluate(`(() => {
+      window.__claudeComposerGap = document.getElementById("claude-composer");
+      window.__claudeComposerGapMarker = document.createComment("temporary composer replacement");
+      window.__claudeComposerGap.replaceWith(window.__claudeComposerGapMarker);
+    })()`);
+    await assertClaudePickerRetained("A temporary composer gap must not close Claude's picker.");
+    assert.equal(await claudePlacementSession.evaluate(`document.getElementById("context-generator-destination-backdrop").style.clipPath`), "", "A missing orb must not leave a stale click-through hole.");
+    await claudePlacementSession.evaluate(`window.__claudeComposerGapMarker.replaceWith(window.__claudeComposerGap)`);
+    await assertClaudePickerRetained("Claude's restored composer must preserve the existing picker.");
     assert.equal(await claudePlacementSession.evaluate(`(() => {
       document.getElementById("model").setAttribute("data-state", "closed");
       return new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(() =>
         resolve(document.getElementById("context-generator-destination-sheet").style.display !== "none"))));
     })()`), true, "A native control update after host remount must not close the picker again.");
-    await claudePlacementSession.evaluate(`document.getElementById("context-generator-bubble").click()`);
+    for (const dismissal of ["orb", "backdrop", "outside", "Escape"]) {
+      if (dismissal !== "orb") {
+        await claudePlacementSession.evaluate(`document.getElementById("context-generator-bubble").click()`);
+        await waitFor(() => claudePlacementSession.evaluate(`getComputedStyle(document.getElementById("context-generator-destination-sheet")).opacity === "1"`), `Claude picker before ${dismissal} dismissal`);
+      }
+      await claudePlacementSession.evaluate(dismissal === "Escape"
+        ? `document.dispatchEvent(new KeyboardEvent("keydown", { key:"Escape",bubbles:true,cancelable:true }))`
+        : dismissal === "outside" ? `document.body.click()`
+        : `document.getElementById(${JSON.stringify(dismissal === "orb" ? "context-generator-bubble" : "context-generator-destination-backdrop")}).click()`);
+      await waitFor(() => claudePlacementSession.evaluate(`document.getElementById("context-generator-destination-sheet").style.display === "none"`), `Claude explicit ${dismissal} dismissal`);
+    }
     await claudePlacementSession.evaluate(`(() => {
       const chin = document.createElement("div"); chin.setAttribute("data-cds", "ChatComposerChin");
       document.getElementById("claude-composer").appendChild(chin); chin.appendChild(document.getElementById("model"));
@@ -1463,7 +1619,7 @@ async function run() {
     })()`);
     await waitFor(() => claudePlacementSession.evaluate(`getComputedStyle(document.getElementById("context-generator-bubble")).position === "static"
       && getComputedStyle(document.getElementById("send")).visibility === "hidden"`), "Claude compact empty Voice mode");
-    process.stdout.write("✓ Claude inline handles hidden/popup duplicates, attribute-only inline retention/recovery, picker wrapper remounts and compact Voice mode.\n");
+    process.stdout.write("✓ Claude picker stays at its opening position through reflow, remounts, resize and composer gaps with focus/Speed intact; explicit dismissals pass.\n");
 
     for (const platform of ["chatgpt", "claude"]) {
       const fixtureUrl = `${origin}/free-placement?${SMOKE_PLATFORM_QUERY}=${platform}`;
@@ -1480,7 +1636,10 @@ async function run() {
           const overlaps = rect => rect.width > 0 && r.left < rect.right && r.right > rect.left && r.top < rect.bottom && r.bottom > rect.top;
           const modelVisible = m.width > 0 && m.height > 0;
           const beforeModel = modelVisible && b.nextElementSibling?.contains(model);
-          return r.width === 36 && r.left >= 0 && r.right <= innerWidth && !overlaps(m) && !overlaps(s)
+          // Claude now keeps the picker and its 1.08 active glow on remount.
+          // Verify the 36px layout slot separately from its transformed artwork.
+          const expectedWidth = b.getAttribute("aria-expanded") === "true" ? 36 * 1.08 : 36;
+          return b.offsetWidth === 36 && Math.abs(r.width - expectedWidth) < 0.1 && r.left >= 0 && r.right <= innerWidth && !overlaps(m) && !overlaps(s)
             && (!modelVisible || beforeModel) && document.querySelectorAll("#context-generator-bubble").length === 1
             ? { beforeModel, width: r.width } : null;
         })()`;
@@ -1495,9 +1654,19 @@ async function run() {
           await waitFor(() => session.evaluate(probe), `${platform} free-layout draft placement at ${width}px`);
         }
         await session.call("Emulation.clearDeviceMetricsOverride");
-        // Resize invalidates an open picker. Drain its scheduled placement frames
-        // before testing a click, and require the desktop model anchor to return.
-        await session.evaluate(`new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))`);
+        // CDP can return before the final native resize event. Wait for a quiet
+        // viewport and placement frames before opening a resize-owned picker.
+        await session.evaluate(`new Promise(resolve => {
+          let timer, frame;
+          const finish = () => { removeEventListener("resize", changed); resolve(); };
+          const changed = () => {
+            clearTimeout(timer); cancelAnimationFrame(frame);
+            timer = setTimeout(() => {
+              frame = requestAnimationFrame(() => { frame = requestAnimationFrame(finish); });
+            }, 100);
+          };
+          addEventListener("resize", changed); changed();
+        })`);
         await waitFor(async () => (await session.evaluate(probe))?.beforeModel, `${platform} free-layout desktop anchor after resize`);
         await session.evaluate(`document.getElementById("context-generator-bubble").click()`);
         await waitFor(() => session.evaluate(`getComputedStyle(document.getElementById("context-generator-destination-sheet")).opacity === "1"`), `${platform} free-layout picker`);
@@ -1510,7 +1679,7 @@ async function run() {
           old.replaceWith(next);
         })()`);
         await waitFor(() => session.evaluate(probe), `${platform} free-layout composer replacement`);
-        await waitFor(() => session.evaluate(`document.getElementById("context-generator-destination-sheet").style.display === "none"`), `${platform} replaced editor's picker dismissal`);
+        await waitFor(() => session.evaluate(`document.getElementById("context-generator-destination-sheet").${platform === "claude" ? 'getAttribute("aria-hidden") === "false"' : 'style.display === "none"'}`), `${platform} replaced editor's picker ${platform === "claude" ? "retention" : "dismissal"}`);
         if (platform === "claude") {
           assert.equal(await session.evaluate(`document.getElementById("claude-host").style.getPropertyValue("--cmp-trail-w")`), "44px", "Reply mode must preserve its native Send reservation.");
           for (const page of [claudePlacementFixture(), claudeReplyFixture()]) {
@@ -1521,6 +1690,9 @@ async function run() {
             await waitFor(() => session.evaluate(`(() => {const b=document.getElementById("context-generator-bubble");return b && getComputedStyle(b).position==="static" && getComputedStyle(b).visibility==="visible" && b.closest('[data-cds="ChatComposer"]');})()`), "Claude expanded/reply transition");
           }
           await waitFor(() => session.evaluate(probe), "Claude reply placement after returning from expanded mode");
+          assert.equal(await session.evaluate(`document.getElementById("context-generator-destination-sheet").getAttribute("aria-hidden")`), "false", "Expanded/reply composer replacements must retain the picker.");
+          await session.evaluate(`document.getElementById("context-generator-bubble").click()`);
+          await waitFor(() => session.evaluate(`document.getElementById("context-generator-destination-sheet").style.display === "none"`), "Claude explicit dismissal after composer transitions");
         }
         if (PROVIDER_PLACEMENT_SCREENSHOT_DIR) {
           const screenshot = await session.call("Page.captureScreenshot", { format:"png" });
@@ -1529,10 +1701,11 @@ async function run() {
         }
         process.stdout.write(`✓ ${platform} free layout: desktop/760/390/320px, drafts, picker dismissal and composer replacement.\n`);
       } catch (error) {
-        process.stderr.write(`Free ${platform} diagnostics: ${JSON.stringify(await session.evaluate(`(() => {
+        await saveSmokeFailure(FAILURE_ARTIFACT_DIR, error, { [platform]: session }, browserOutput, `${platform}-free`);
+        try { process.stderr.write(`Free ${platform} diagnostics: ${JSON.stringify(await session.evaluate(`(() => {
           const b=document.getElementById("context-generator-bubble"), s=document.getElementById("context-generator-destination-sheet");
           return { bubble:b?.outerHTML.slice(0,800), sheet:s?.style.cssText, opacity:s&&getComputedStyle(s).opacity, width:innerWidth };
-        })()`))}\n`);
+        })()`))}\n`); } catch { /* Preserve the original failure if the page disconnected. */ }
         throw error;
       } finally { session.close(); await browserSession.call("Target.closeTarget", { targetId }); }
     }
@@ -1569,6 +1742,7 @@ async function run() {
       await sourceSession.evaluate(`document.getElementById("context-generator-${JSON_SOURCE}-json-toggle").click()`);
       assert.equal(await sourceSession.evaluate(`document.getElementById("context-generator-${JSON_SOURCE}-json-toggle").getAttribute("aria-pressed")`), "false");
       await waitFor(() => sourceSession.evaluate(`getComputedStyle(document.getElementById("context-generator-destination-sheet")).opacity === "1"`), "the settled picker before measuring the toggle");
+      await waitFor(async () => await sourceSession.evaluate(`getComputedStyle(document.getElementById("context-generator-${JSON_SOURCE}-json-toggle")).color`) !== "rgb(250, 204, 21)", "the visibly disabled fast-capture color");
       const idleToggle = await sourceSession.evaluate(`(() => {
         const toggle = document.getElementById("context-generator-${JSON_SOURCE}-json-toggle");
         const rect = toggle.getBoundingClientRect();
@@ -1596,12 +1770,18 @@ async function run() {
       assert.equal(state.summaryRequests.length, 0, "Toggling JSON capture must not submit a transcript.");
       assert.equal(state.sessionRequests, 0, "Opening/toggling the picker must not read a session.");
       await sourceSession.evaluate(`document.querySelector("#context-generator-destination-backdrop").click()`);
+      // Dismissal keeps display:block during its exit animation. Reopening
+      // before it becomes none would toggle the still-displayed sheet closed.
+      await waitFor(() => sourceSession.evaluate(`document.getElementById("context-generator-destination-sheet").style.display === "none"`), "capture-toggle picker closure");
     }
 
     if (JSON_SOURCE === "chatgpt") {
       // API capture must work before virtualized turns mount, on project routes,
       // without scroll sweeps or opening any pasted-content panels.
       await sourceSession.evaluate(`if (!${JSON_FALLBACK_SMOKE}) document.querySelectorAll("main article").forEach(node => node.remove()); history.pushState({}, "", "/g/project/c/smoke?${SMOKE_PLATFORM_QUERY}=chatgpt"); true`);
+      const contextId = sourceSession.getExtensionContextId();
+      assert.ok(contextId, "The source must expose its extension context before checking route ownership.");
+      await waitFor(() => sourceSession.evaluate("window.__capSmokeChatGptMountReady()", contextId), "ChatGPT inline mounting on the project route");
     }
     if (NETWORK_SOURCE && !JSON_FALLBACK_SMOKE) await sourceSession.evaluate('document.querySelectorAll("main article").forEach(node => node.remove()); true');
     // Responsive placement runs in a second tab. Restore the source tab before
@@ -1609,6 +1789,7 @@ async function run() {
     await sourceSession.call("Page.bringToFront");
     await verifyPickerProductChanges(sourceSession, state);
     const jsonRequestsBeforeTransfer = state.jsonRequests;
+    if (JSON_SOURCE === "gemini") assert.equal(jsonRequestsBeforeTransfer, 0, "Gemini bootstrap capture must not require earlier native RPC traffic.");
     const extensionContextId = sourceSession.getExtensionContextId();
     assert.ok(extensionContextId, "The smoke source must expose its installed extension context.");
     // Both windows belong to this disposable profile. A different current
@@ -1682,11 +1863,29 @@ async function run() {
     }
     await waitFor(() => state.summaryRequests.length === 1, "one summary backend request");
     const capturedConversation = state.summaryRequests[0]?.conversation || "";
+    if (JSON_SOURCE === "gemini") {
+      assert.equal(await sourceSession.evaluate("window.__geminiMenuClicks"), 0, "JSON capture and DOM fallback must never open Gemini response menus.");
+      process.stdout.write("✓ Gemini capture leaves native response menus untouched.\n");
+    }
     assert.match(capturedConversation, new RegExp(SOURCE_SENTINEL.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
     assert.match(capturedConversation, new RegExp(ASSISTANT_SENTINEL.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
     if (JSON_FALLBACK_SMOKE) {
       assert.doesNotMatch(capturedConversation, /JSON_ONLY_SENTINEL|AUTH_SENTINEL|CSRF_SENTINEL|SIGNED_SENTINEL/);
       assert.equal(state.jsonRequests - jsonRequestsBeforeTransfer, JSON_SOURCE === "grok" ? 2 : 1, "Fast capture must not be retried after failure.");
+      if (CHATGPT_PASTE_OVERSIZE_SMOKE) {
+        assert.equal(state.oversizePaste.cancelled, true, "Brave must cancel the oversized paste response.");
+        assert.ok(state.oversizePaste.bytes < 20000000, "The full oversized paste tail must not be downloaded.");
+        assert.equal(state.pasteDescriptorRequests, CHATGPT_PASTE_AUTH_SMOKE ? 2 : 1);
+        assert.equal(state.pasteContentRequests, 1, "A rejected paste must not be downloaded again.");
+        process.stdout.write(`✓ Brave cancelled oversized paste after ${state.oversizePaste.bytes} fixture bytes.\n`);
+      }
+      if (DEEPSEEK_OVERSIZE_SMOKE || CLAUDE_OVERSIZE_SMOKE || CHATGPT_HISTORY_OVERSIZE_SMOKE) {
+        assert.equal(state.oversizeHistory.cancelled, true, "Brave must cancel the oversized history response.");
+        assert.ok(state.oversizeHistory.bytes < 20000000, "The full oversized tail must not be downloaded.");
+        assert.equal(state.pasteContentRequests, 0, "Rejected history must not begin file downloads.");
+        if (CHATGPT_HISTORY_OVERSIZE_SMOKE) assert.equal(state.pasteDescriptorRequests, 0);
+        process.stdout.write(`✓ Brave cancelled oversized history after ${state.oversizeHistory.bytes} fixture bytes.\n`);
+      }
       process.stdout.write(`✓ ${JSON_SOURCE} failed fast capture fell back to DOM within the same transfer.\n`);
     } else if (JSON_CAPTURE_SMOKE) {
       assert.match(capturedConversation, new RegExp(`^${({claude:"Claude",chatgpt:"ChatGPT",gemini:"Gemini",grok:"Grok",deepseek:"DeepSeek"})[JSON_SOURCE]} conversation:`));
@@ -1694,7 +1893,9 @@ async function run() {
       if (JSON_SOURCE === "claude") {
         assert.deepEqual(Object.fromEntries(new URL(state.claudeRequestUrls.at(-1)).searchParams), { tree: "True", rendering_mode: "messages", render_all_tools: "true", include_inline_comparison: "true", consistency: "strong" });
         assert.ok(capturedConversation.includes(CLAUDE_PASTED_TEXT), "The complete pasted attachment must reach the backend.");
-        assert.equal(capturedConversation.split("CLAUDE_PASTE_START").length - 1, 1, "The pasted text must be included once.");
+        assert.equal(capturedConversation,
+          `Claude conversation:\n\nUser: ${CLAUDE_JSON_USER_TEXT}\n\nAttachment: "upload.txt"\n\nAssistant: ${ASSISTANT_SENTINEL}`,
+          "CRLF inline paste matching must preserve the exact user turn without adding its card twice.");
         assert.ok(capturedConversation.indexOf("CLAUDE_PASTE_END") < capturedConversation.indexOf("Assistant:"), "The paste must remain in its owning user turn.");
         assert.doesNotMatch(capturedConversation, /CLAUDE_ATTACHMENT_IGNORED_SENTINEL/);
       }
@@ -1716,11 +1917,20 @@ async function run() {
         assert.equal(state.pasteContentRequests, 1);
         assert.equal(state.chatgptRequestUrls.at(-1), "/backend-api/conversation/smoke");
         assert.equal(state.sessionRequests, (CHATGPT_RELOAD_SMOKE ? 1 : 0) + (CHATGPT_PASTE_AUTH_SMOKE ? 1 : 0));
+        if (CHATGPT_PASTE_AUTH_SMOKE) {
+          assert.equal(state.discardedAuth.cancelled, true, "Brave must cancel the expired-token body before retrying.");
+          assert.ok(state.discardedAuth.bytes < 20000000, "The discarded authentication tail must not finish downloading.");
+          process.stdout.write(`✓ Brave cancelled expired-token response after ${state.discardedAuth.bytes} fixture bytes, then recovered exact capture.\n`);
+        }
       }
       if (NETWORK_SOURCE) {
-        assert.equal(capturedConversation, networkFixtures(JSON_SOURCE).expected, "Every original own turn/paste/document must reach the backend once and in order.");
+        assert.equal(capturedConversation, networkSmokeFixture(JSON_SOURCE).expected, "Every original own turn/paste/document must reach the backend once and in order.");
         assert.doesNotMatch(capturedConversation, /TOOL_SENTINEL|SIGNED_SENTINEL|AUTH_SENTINEL|CSRF_SENTINEL/);
-        assert.equal(state.pasteContentRequests, JSON_SOURCE === "deepseek" ? 1 : 0);
+        assert.equal(state.pasteContentRequests, JSON_SOURCE === "deepseek" ? 4 : 0);
+        if (JSON_SOURCE === "deepseek") {
+          assert.equal(state.fileReadsPeak, 4, "The installed extension must overlap independent original-file reads.");
+          process.stdout.write("✓ DeepSeek JSON: four overlapping original-file reads, exact source order/bytes and no credential leakage.\n");
+        }
         if (JSON_SOURCE === "grok") process.stdout.write("\u2713 Grok JSON: exact 48-turn transcript, original code/whitespace and zero attachment/tool leakage.\n");
       }
       assert.equal(state.jsonRequests, jsonRequestsBeforeTransfer + (JSON_SOURCE === "gemini" ? 3 : JSON_SOURCE === "grok" ? 2 : 1), "JSON capture must load the full history only after destination selection.");
@@ -1734,14 +1944,20 @@ async function run() {
       );
 
       for (const target of destinationTargets) {
-        const candidateSession = await CdpSession.connect(target.webSocketDebuggerUrl);
+        let candidateSession = destinationSessions.get(target.id);
         try {
+          if (!candidateSession) {
+            candidateSession = await CdpSession.connect(target.webSocketDebuggerUrl);
+            destinationSessions.set(target.id, candidateSession);
+            await candidateSession.call("Runtime.enable");
+          }
           const value = await candidateSession.evaluate('document.querySelector("textarea")?.value || ""');
           if (value === SUMMARY_TEXT) return { session: candidateSession, value };
         } catch {
           // A recovery tab can still be navigating; retry it on the next poll.
+          candidateSession?.close();
+          destinationSessions.delete(target.id);
         }
-        candidateSession.close();
       }
 
       return null;
@@ -1762,16 +1978,20 @@ async function run() {
     assert.ok(statusHistory.some(text => text.startsWith("Context ready.")), "Ready cue follows verified insertion.");
     const workerTarget = (await getTargets(devToolsPort)).find(target => target.type === "service_worker" && target.url.endsWith("/background.js"));
     assert.ok(workerTarget, "Transfer worker must be available for tab-placement verification.");
+    // ChatGPT JSON coverage moves the fixture onto a project route. Locate its
+    // current SPA URL rather than the URL used to create the original page.
+    const currentSourceUrl = await sourceSession.evaluate("location.href");
     const workerSession = await CdpSession.connect(workerTarget.webSocketDebuggerUrl);
     let tabPlacement;
     try {
       tabPlacement = await workerSession.evaluate(`(async () => {
         const tabs = await chrome.tabs.query({});
-        const source = tabs.find(tab => tab.url?.startsWith(${JSON.stringify(sourceUrl)}));
+        const source = tabs.find(tab => tab.url === ${JSON.stringify(currentSourceUrl)});
         const destination = tabs.find(tab => tab.url?.startsWith(${JSON.stringify(`${origin}/destination`)}));
         return { source, destination };
       })()`);
     } finally { workerSession.close(); }
+    assert.ok(tabPlacement.source && tabPlacement.destination, "Both transfer tabs must be found at their current routes.");
     assert.equal(tabPlacement.destination.windowId, tabPlacement.source.windowId);
     assert.equal(tabPlacement.destination.index, tabPlacement.source.index + 1);
     assert.equal(tabPlacement.destination.openerTabId, tabPlacement.source.id);
@@ -1785,12 +2005,19 @@ async function run() {
       const stats = stored?.["context-generator-last-transfer-stats-v1"];
       return stats?.status === "completed" ? stats : null;
     }, "tab performance receipt");
+    if (JSON_SOURCE === "gemini") {
+      if (JSON_FALLBACK_SMOKE) {
+        // A fully mounted short DOM history needs no virtual-window sweep.
+        assert.match(remoteStats.capture.method, /^(structured|sweep)$/);
+        assert.equal(remoteStats.capture.diagnostics.jsonFallbackReason, "incomplete");
+      } else assert.equal(remoteStats.capture.method, "gemini-json");
+    }
     assert.equal(typeof remoteStats.destinationTiming.openMs, "number");
     assert.equal(typeof remoteStats.destinationTiming.pageLoadMs, "number");
     assert.equal(typeof remoteStats.destinationTiming.composerWaitMs, "number");
     const finishStart = remoteStats.timeline.find(mark => mark.label === "handoff finish start");
     const finishEnd = remoteStats.timeline.find(mark => mark.label === "handoff finish done");
-    assert.ok(finishEnd.totalMs - finishStart.totalMs < 800, "Completion must not add the old one-second cosmetic delay.");
+    assert.ok(finishEnd.totalMs - finishStart.totalMs < 800, `Completion must not add the old one-second cosmetic delay (observed ${finishEnd.totalMs - finishStart.totalMs} ms).`);
     process.stdout.write(`ℹ Fixture tab opened: ${remoteStats.destinationTiming.openMs} ms; page loaded: ${remoteStats.destinationTiming.pageLoadMs} ms; composer wait: ${remoteStats.destinationTiming.composerWaitMs} ms; completion cue: ${finishEnd.totalMs - finishStart.totalMs} ms.\n`);
     if (process.env.CAP_CONTEXT_DESTINATION_SCREENSHOT) {
       const capture = await destinationSession.call("Page.captureScreenshot", { format: "png" });
@@ -1858,15 +2085,24 @@ async function run() {
         error.message += `\nSource diagnostics: ${JSON.stringify(await sourceSession.evaluate(`({
           visibility: document.visibilityState,
           errors: [...document.querySelectorAll('[role="alert"]')].map(n => n.textContent),
-          overlay: document.getElementById('context-generator-overlay')?.textContent
+          picker: (() => { const sheet = document.getElementById('context-generator-destination-sheet');
+            return sheet && { display: sheet.style.display, opacity: getComputedStyle(sheet).opacity, hidden: sheet.getAttribute('aria-hidden') }; })(),
+          bubble: (() => { const bubble = document.getElementById('context-generator-bubble');
+            return bubble && { disabled: bubble.disabled, expanded: bubble.getAttribute('aria-expanded'), position: getComputedStyle(bubble).position }; })(),
+          overlay: (() => { const overlay = document.getElementById('context-generator-overlay');
+            return overlay && getComputedStyle(overlay).display !== 'none' ? overlay.textContent : null; })()
         })`))}\nConsole: ${JSON.stringify(sourceSession.getRecentEvents().filter(e =>
           e.method === 'Runtime.exceptionThrown' || e.method === 'Runtime.consoleAPICalled'))}`;
       } catch { /* Preserve the original error if the failed page disconnected. */ }
     }
     if (browserOutput.trim()) error.message += `\nBrave output:\n${browserOutput.trim()}`;
+    await saveSmokeFailure(FAILURE_ARTIFACT_DIR, error,
+      { source: sourceSession, claude: claudePlacementSession,
+        // Keep pre-paste tabs too: the exact-paste assertion may never succeed.
+        ...Object.fromEntries([...destinationSessions].map(([id, session]) => [`destination-${id}`, session])) }, browserOutput);
     throw error;
   } finally {
-    destinationSession?.close();
+    for (const session of destinationSessions.values()) session.close();
     claudePlacementSession?.close();
     sourceSession?.close();
     if (browserSession) {

@@ -3,7 +3,7 @@
   if (!platform || !globalThis.__capNetworkJsonData) return;
   // Advance readiness version with adapter/contract changes: old MAIN closures
   // can survive extension reloads and must be replaced before a new capture.
-  const version = platform === "deepseek" ? 5 : 4, channel = "cap-context-network-json-v1";
+  const version = platform === "deepseek" ? 8 : platform === "gemini" ? 8 : 6, channel = "cap-context-network-json-v1";
   const previous = window.__capNetworkFetchState;
   if (previous?.version === version && window.fetch === previous.fetch
     && (platform === "grok" || previous?.ownsObservation?.())) return;
@@ -88,22 +88,51 @@
     window.navigation?.addEventListener("navigate", changed);
     window.addEventListener("popstate", changed);
     let bytesRead = 0;
-    const read = async (url, options = {}, type = "json") => {
+    const read = async (url, options = {}, type = "json", expectedSize) => {
       check();
       const response = await Reflect.apply(nativeFetch, window, [url, { credentials: "same-origin", ...options, redirect: "error", signal: controller.signal }]);
-      check();
-      if (response.status !== 200 || response.headers.get("content-range")) throw new api.CaptureError("The history request failed or returned a partial response.", response.status === 206 || response.headers.get("content-range") ? "incomplete" : "request_failed");
-      const contentType = response.headers.get("content-type") || "";
-      if (type === "json" && !/application\/json/i.test(contentType)) throw new api.CaptureError("The history request returned an unsupported response.");
-      if (type === "rpc" && !/(application\/json|text\/plain)/i.test(contentType)) throw new api.CaptureError("Gemini returned an unsupported RPC response.");
-      if (type === "file" && !/^(text\/plain|text\/markdown|text\/csv|application\/(json|octet-stream))(;|$)/i.test(contentType)) throw new api.CaptureError("A text attachment returned an unsupported response.");
-      if (Number(response.headers.get("content-length")) > 6000000 - bytesRead) throw new api.CaptureError("size");
-      const bytes = new Uint8Array(await response.arrayBuffer());
-      bytesRead += bytes.length;
-      if (bytesRead > 6000000) throw new api.CaptureError("size");
-      check();
-      const text = new TextDecoder("utf-8", { fatal: true, ignoreBOM: type === "file" }).decode(bytes);
-      return type === "json" ? JSON.parse(text) : { text, size: bytes.length };
+      let reader;
+      try {
+        check();
+        if (response.status !== 200 || response.headers.get("content-range")) throw new api.CaptureError("The history request failed or returned a partial response.", response.status === 206 || response.headers.get("content-range") ? "incomplete" : "request_failed");
+        const contentType = response.headers.get("content-type") || "";
+        if (type === "json" && !/application\/json/i.test(contentType)) throw new api.CaptureError("The history request returned an unsupported response.");
+        if (type === "rpc" && !/(application\/json|text\/plain)/i.test(contentType)) throw new api.CaptureError("Gemini returned an unsupported RPC response.");
+        if (type === "file" && !/^(text\/plain|text\/markdown|text\/csv|application\/(json|octet-stream))(;|$)/i.test(contentType)) throw new api.CaptureError("A text attachment returned an unsupported response.");
+        if (Number(response.headers.get("content-length")) > 6000000 - bytesRead) throw new api.CaptureError("size");
+        // Enforce the shared budget while reading, including history without
+        // Content-Length. Files also stop at their declared original byte count.
+        reader = response.body?.getReader();
+        // Decode accepted chunks directly: retaining bytes and copying them into
+        // a second complete buffer adds no validation. One decoder preserves
+        // split UTF-8/BOM state; the final flush rejects an incomplete codepoint.
+        const decoder = new TextDecoder("utf-8", { fatal: true, ignoreBOM: type === "file" });
+        const parts = [];
+        let size = 0;
+        if (reader) while (true) {
+          const { done, value } = await reader.read();
+          check();
+          if (done) break;
+          size += value.byteLength;
+          bytesRead += value.byteLength;
+          if (type === "file" && size > expectedSize) throw new api.CaptureError("A text attachment is incomplete.");
+          if (bytesRead > 6000000) throw new api.CaptureError("size");
+          const part = decoder.decode(value, { stream: true });
+          if (part) parts.push(part);
+        }
+        check();
+        parts.push(decoder.decode());
+        const text = parts.join("");
+        return type === "json" ? JSON.parse(text) : { text, size };
+      } catch (error) {
+        // Rejected headers still own an unread body. Cancel that body too,
+        // preserving the structural error even if native cancellation fails.
+        if (reader) await reader.cancel().catch(() => {});
+        else await response.body?.cancel().catch(() => {});
+        throw error;
+      } finally {
+        reader?.releaseLock();
+      }
     };
     try {
       check();
@@ -118,12 +147,18 @@
           });
           if (endpoint) geminiTemplate = { url: endpoint };
         }
-        const at = window.WIZ_global_data?.SNlM0e || geminiTemplate?.at;
-        if (!geminiTemplate?.url || typeof at !== "string" || !at) throw new api.CaptureError("Refresh this signed-in Gemini chat to make fast capture ready.", "unavailable");
-        const url = new URL(geminiTemplate.url);
+        const bootstrap = window.WIZ_global_data;
+        const at = bootstrap?.SNlM0e || geminiTemplate?.at;
+        if (typeof at !== "string" || !at) throw new api.CaptureError("Refresh this signed-in Gemini chat to make fast capture ready.", "unavailable");
+        // A cached chat or late install need not have a batchexecute timing entry.
+        // The native bootstrap is sufficient to make this explicit fresh read;
+        // do not click response menus merely to observe a request template.
+        const url = new URL(geminiTemplate?.url || "/_/BardChatUi/data/batchexecute", location.origin);
         url.searchParams.set("rpcids", "hNvQHb");
         url.searchParams.set("source-path", location.pathname);
-        const args = Array.isArray(geminiTemplate.args) ? [...geminiTemplate.args] : [null, 10, null, 1, [1], [4], null, 1];
+        if (typeof bootstrap?.cfb2h === "string") url.searchParams.set("bl", bootstrap.cfb2h);
+        if (typeof bootstrap?.FdrFJe === "string") url.searchParams.set("f.sid", bootstrap.FdrFJe);
+        const args = Array.isArray(geminiTemplate?.args) ? [...geminiTemplate.args] : [null, 10, null, 1, [1], [4], null, 1];
         args[0] = `c_${chat}`; args[1] = 10; args[2] = null;
         const pages = [], cursors = new Set();
         do {
@@ -156,21 +191,48 @@
         const data = await read(`/api/v0/chat/history_messages?chat_session_id=${encodeURIComponent(chat)}`, { headers: { authorization: auth } });
         const branch = api.deepseekBranch(data, chat);
         const files = Object.create(null);
+        const uploads = new Map();
+        let uploadBytes = 0;
         for (const message of branch) {
           if (message.role !== "USER") continue;
           for (const fragment of message.fragments || []) for (const file of fragment.type === "FILE" && Array.isArray(fragment.files) ? fragment.files : []) {
-            if (!api.textFile(file) || Object.hasOwn(files, file.id)) continue;
+            if (!api.textFile(file)) continue;
             if (file.status !== "SUCCESS" || !Number.isSafeInteger(file.file_size) || file.file_size < 0 || file.file_size > 1400000 || typeof file.signed_path !== "string") throw new api.CaptureError("A text attachment is unavailable or incomplete.");
             // DeepSeek's native preview uses this signed file service with ty=r
             // for original bytes. No session bearer/cookies go to that host.
             const url = new URL(file.signed_path.startsWith("/") ? `https://files.deepseeksvc.com/api${file.signed_path}` : file.signed_path);
             if (url.origin !== "https://files.deepseeksvc.com" || url.pathname !== "/api/file" || url.username || url.password || url.searchParams.get("file_id") !== file.id?.replace(/^file-/, "")) throw new api.CaptureError("A text attachment has an unsupported download address.");
             url.searchParams.set("ty", "r");
-            const content = await read(url.href, { credentials: "omit" }, "file");
-            if (content.size !== file.file_size) throw new api.CaptureError("A text attachment is incomplete.");
-            files[file.id] = content.text;
+            if (uploads.has(file.id)) {
+              if (uploads.get(file.id).file.file_size !== file.file_size) throw new api.CaptureError("A text attachment is incomplete.");
+              continue;
+            }
+            uploadBytes += file.file_size;
+            if (uploadBytes > 1400000) throw new api.CaptureError("size");
+            uploads.set(file.id, { file, url });
           }
         }
+        // Independent original-file reads overlap; serialization still follows
+        // branch/fragment order. Validate all descriptors before any download.
+        const pending = [...uploads.values()];
+        let next = 0, failure;
+        const download = async () => {
+          try {
+            while (next < pending.length) {
+              check();
+              const { file, url } = pending[next++];
+              const content = await read(url.href, { credentials: "omit" }, "file", file.file_size);
+              if (content.size !== file.file_size) throw new api.CaptureError("A text attachment is incomplete.");
+              files[file.id] = content.text;
+            }
+          } catch (error) {
+            if (!failure) { failure = error; controller.abort("attachment_failed"); }
+          }
+        };
+        // Wait for aborted siblings to settle before releasing active capture,
+        // so fallback/retry cannot overlap stale downloads or accept partial text.
+        await Promise.all(Array.from({ length: Math.min(4, pending.length) }, download));
+        if (failure) throw failure;
         reply.capture = api.deepseek(data, chat, files);
       }
       check();

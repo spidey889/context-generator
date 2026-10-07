@@ -34,20 +34,35 @@ async function reserveFundedSummaryBudget(req, units, options = {}) {
   const keys = [`cap-context:funded-summary:v1:ip:${digest}:${day}`, `cap-context:funded-summary:v1:global:${day}`];
   const controller = new AbortController();
   const signal = options.signal ? AbortSignal.any([options.signal, controller.signal]) : controller.signal;
+  const deadline = Date.now() + STORE_TIMEOUT_MS;
+  const checkDeadline = () => {
+    // A completed fetch/parser microtask can run before an overdue timer.
+    // options.now selects the accounting day; the deadline uses elapsed runtime.
+    if (Date.now() >= deadline) controller.abort();
+    signal.throwIfAborted();
+  };
   let timer;
   try {
     const operation = (async () => {
+      checkDeadline();
       const response = await (options.fetchImpl || fetch)(url, {
         method: "POST", signal,
         headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
         body: JSON.stringify(["EVAL", RESERVE_SCRIPT, 2, ...keys, units, 86460, ipLimit, globalLimit])
       });
-      if (!response.ok) return false;
+      checkDeadline();
+      if (!response.ok) {
+        // The reservation is rejected; its private body is unused. Stop the
+        // owned fetch before clearing its deadline, without aborting the caller.
+        controller.abort();
+        return false;
+      }
       const body = await response.json();
+      checkDeadline();
       return body.result === 1;
     })();
     return await Promise.race([operation, new Promise((_, reject) => {
-      timer = setTimeout(() => { controller.abort(); reject(new Error("funded_budget_timeout")); }, STORE_TIMEOUT_MS);
+      timer = setTimeout(() => { controller.abort(); reject(new Error("funded_budget_timeout")); }, Math.max(0, deadline - Date.now()));
     })]);
   } catch {
     options.signal?.throwIfAborted();

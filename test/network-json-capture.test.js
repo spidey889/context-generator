@@ -4,12 +4,12 @@ const path = require("node:path");
 const vm = require("node:vm");
 const test = require("node:test");
 const { webcrypto } = require("node:crypto");
-const { clockTest } = require("../testing/clock");
+const { clockTest } = require("./helpers/clock");
 const { fixtures, rpcFrame, geminiTurn, prompt } = require("./network-json-fixtures");
 const files = ["network-json-data.js", "network-fetch-main.js", "network-json-capture.js"];
 const scripts = new Map(files.map(file =>
   [file, new vm.Script(fs.readFileSync(path.join(__dirname, "..", "extension", file), "utf8"), { filename: file })]));
-function setup(platform, fixture = fixtures(platform), { fetchImpl, runtime, schedule = setTimeout, beforeMessage } = {}) {
+function setup(platform, fixture = fixtures(platform), { fetchImpl, responseTransform, runtime, schedule = setTimeout, beforeMessage } = {}) {
   const requests = [], replies = [], listeners = new Set(), navigation = new Set();
   const host = { gemini: "gemini.google.com", grok: "grok.com", deepseek: "chat.deepseek.com" }[platform];
   const pathname = { gemini: "/app/smoke", grok: "/c/smoke", deepseek: "/a/chat/s/smoke" }[platform];
@@ -37,7 +37,7 @@ function setup(platform, fixture = fixtures(platform), { fetchImpl, runtime, sch
     return json({});
   };
   class Xhr { open() {} send() {} setRequestHeader() {} }
-  const window = { fetch: nativeFetch, XMLHttpRequest: Xhr, WIZ_global_data: { SNlM0e: "CSRF_SENTINEL" },
+  const window = { fetch: responseTransform ? async (...args) => responseTransform(await nativeFetch(...args)) : nativeFetch, XMLHttpRequest: Xhr, WIZ_global_data: { SNlM0e: "CSRF_SENTINEL" },
     addEventListener: (type, listener) => (type === "message" ? listeners : navigation).add(listener),
     removeEventListener: (type, listener) => (type === "message" ? listeners : navigation).delete(listener),
     navigation: { addEventListener: (_type, fn) => navigation.add(fn), removeEventListener: (_type, fn) => navigation.delete(fn) },
@@ -61,9 +61,330 @@ function setup(platform, fixture = fixtures(platform), { fetchImpl, runtime, sch
     navigate(pathname = "/new") { const target = new URL(pathname, location.origin); for (const fn of navigation) fn({ destination: { url: target.href } }); location.pathname = target.pathname; location.search = target.search; location.href = target.href; }
   };
 }
+
+function deepseekUploads(count = 6) {
+  const f = fixtures("deepseek", "smoke", 1);
+  const uploads = Array.from({ length: count }, (_, i) => {
+    const text = `\uFEFF  original ${i}\r\n`;
+    const file = { ...f.file, id: `file-upload-${i}`, file_name: `source-${i}.py`, file_size: Buffer.byteLength(text), signed_path: `/file?file_id=upload-${i}&sig=SIGNED_SENTINEL` };
+    f.files[file.id] = text;
+    return file;
+  });
+  f.data.data.biz_data.chat_messages[0].fragments = [{ type: "FILE", files: [...uploads, uploads[0]] }];
+  f.uploads = uploads;
+  f.expected = `DeepSeek conversation:\n\nUser: ${uploads.map(file => `Attachment: ${JSON.stringify(file.file_name)}\n\nFile contents (${file.file_size} UTF-8 bytes):\n${f.files[file.id]}\nEnd attachment: ${JSON.stringify(file.file_name)}`).join("\n\n")}\n\nAssistant: ${f.data.data.biz_data.chat_messages[1].fragments[0].content}`;
+  return f;
+}
+
+// These adapters share one chunk reader. Run its decoder/budget rejection
+// matrix on Grok; retain Unicode success and transport validation per adapter.
 for (const platform of ["gemini", "grok", "deepseek"]) {
-  test(`${platform}: exact complete ordered history with large own paste and document; no tool/file leakage`, async () => {
+  if (platform === "grok") test(`${platform}: invalid UTF-8 stops history consumption immediately and permits a fresh capture`, async () => {
+    let delivered = 0, cancelled = false, healthy = false, body;
+    const padding = new Uint8Array(1000000).fill(32);
+    const h = setup(platform, fixtures(platform), { responseTransform: response => {
+      if (healthy) return response;
+      let first = true, remaining = 5;
+      body = new ReadableStream({
+        pull(controller) {
+          if (first) {
+            first = false; delivered++; controller.enqueue(new Uint8Array([255]));
+          } else if (remaining--) {
+            delivered += padding.length; controller.enqueue(padding);
+          } else controller.close();
+        },
+        cancel() { cancelled = true; }
+      });
+      return new Response(body, { headers: response.headers });
+    } });
+    await h.observe();
+    await assert.rejects(h.window.__capCaptureNetworkJson(), error => {
+      assert.doesNotMatch(error.message, /decoder|encoded data|UTF-8/);
+      return true;
+    });
+    assert.ok(delivered <= 1000001, `Stop at the invalid chunk plus stream prefetch, rather than draining ${delivered} bytes.`);
+    assert.equal(cancelled, true);
+    assert.equal(body.locked, false);
+    assert.equal(h.navigationListeners(), 0);
+    assert.ok(h.replies.every(reply => !reply.capture));
+    healthy = true;
+    assert.equal((await h.window.__capCaptureNetworkJson()).text, h.fixture.expected);
+  });
+
+  if (platform === "grok") test(`${platform}: history streams stop at the raw budget without Content-Length and allow a fresh capture`, async () => {
+    let delivered = 0, cancelled = false, healthy = false, body;
+    const padding = new Uint8Array(1000000).fill(32);
+    const h = setup(platform, fixtures(platform), { responseTransform: async response => {
+      if (healthy) return response;
+      const original = new Uint8Array(await response.arrayBuffer());
+      let sentOriginal = false, paddingChunks = 0;
+      body = new ReadableStream({
+        pull(controller) {
+          if (!sentOriginal) {
+            sentOriginal = true; delivered += original.length; controller.enqueue(original);
+          } else if (paddingChunks++ < 20) {
+            delivered += padding.length; controller.enqueue(padding);
+          } else controller.close();
+        },
+        cancel() { cancelled = true; }
+      });
+      return new Response(body, { headers: response.headers });
+    } });
+    await h.observe();
+    await assert.rejects(h.window.__capCaptureNetworkJson(), error => {
+      assert.equal(error.captureFailureReason, "size_limit");
+      return true;
+    });
+    assert.ok(delivered <= 8000000, `Stop at the first oversized chunk plus stream prefetch; delivered ${delivered} bytes.`);
+    assert.equal(cancelled, true);
+    assert.equal(body.locked, false);
+    assert.equal(h.navigationListeners(), 0);
+    assert.ok(h.replies.every(reply => !reply.capture));
+    healthy = true;
+    assert.equal((await h.window.__capCaptureNetworkJson()).text, h.fixture.expected);
+  });
+
+  test(`${platform}: chunked history preserves split UTF-8/BOM and exact transcripts`, async () => {
+    let splitCodepoints = 0;
+    const h = setup(platform, fixtures(platform, "smoke", 1), { responseTransform: async response => {
+      const original = new Uint8Array(await response.arrayBuffer());
+      const bytes = response.headers.get("content-type")?.includes("application/json")
+        ? Buffer.concat([Buffer.from([239, 187, 191]), original]) : original;
+      // Split the BOM and one actual multibyte character deliberately. The
+      // remaining large paste can use normal chunks instead of thousands of
+      // seven-byte reads that add no new decoding coverage.
+      const unicodeOffset = bytes.findIndex((byte, index) => index >= 3 && byte >= 0xc2);
+      let offset = 0;
+      return new Response(new ReadableStream({
+        pull(controller) {
+          if (offset === bytes.length) return controller.close();
+          const end = offset === 0 ? 2 : offset === 2 && unicodeOffset >= 3 ? unicodeOffset + 1
+            : Math.min(offset + 16385, bytes.length);
+          if (end < bytes.length && (bytes[end] & 0xc0) === 0x80) splitCodepoints++;
+          controller.enqueue(bytes.subarray(offset, end)); offset = end;
+        }
+      }), { headers: response.headers });
+    } });
+    await h.observe();
+    assert.equal((await h.window.__capCaptureNetworkJson()).text, h.fixture.expected);
+    assert.ok(splitCodepoints > 0, "Unicode must actually cross a delivered chunk boundary.");
+  });
+
+  if (platform === "grok") test(`${platform}: an unfinished UTF-8 character after valid history must not be silently dropped`, async () => {
+    let healthy = false;
+    const h = setup(platform, fixtures(platform, "smoke", 1), { responseTransform: async response => {
+      if (healthy || !response.headers.get("content-type")?.includes("application/json")) return response;
+      const bytes = Buffer.concat([Buffer.from(await response.arrayBuffer()), Buffer.from([226, 130])]);
+      return new Response(bytes, { headers: response.headers });
+    } });
+    await h.observe();
+    await assert.rejects(h.window.__capCaptureNetworkJson());
+    assert.ok(h.replies.every(reply => !reply.capture));
+    assert.equal(h.navigationListeners(), 0);
+    healthy = true;
+    assert.equal((await h.window.__capCaptureNetworkJson()).text, h.fixture.expected);
+  });
+
+  test(`${platform}: rejected transport cancels its unread response without exposing cancellation errors`, async () => {
+    for (const [status, headers, reason] of [
+      [206, { "content-type": "application/json" }, "incomplete"],
+      [200, { "content-type": "application/json", "content-range": "bytes 0-2/9" }, "incomplete"],
+      [200, { "content-type": "text/html" }, "incomplete"],
+      [200, { "content-type": "application/json", "content-length": "6000001" }, "size_limit"]
+    ]) {
+      let cancelled = false, body;
+      const h = setup(platform, fixtures(platform), { responseTransform: () => {
+        body = new ReadableStream({ cancel() { cancelled = true; throw new Error("PRIVATE_CANCELLATION_SENTINEL"); } });
+        return new Response(body, { status, headers });
+      } });
+      await h.observe();
+      await assert.rejects(h.window.__capCaptureNetworkJson(), error => {
+        assert.equal(error.captureFailureReason, reason);
+        assert.doesNotMatch(error.message, /PRIVATE_/);
+        return true;
+      });
+      assert.equal(cancelled, true);
+      assert.equal(body.locked, false);
+      assert.equal(h.navigationListeners(), 0);
+      assert.ok(h.replies.every(reply => !reply.capture));
+    }
+  });
+}
+
+clockTest("DeepSeek: independent uploads overlap in bounded waves and preserve exact source order", async () => {
+  const f = deepseekUploads();
+  let active = 0, peak = 0;
+  const completed = [];
+  const h = setup("deepseek", f, { fetchImpl: async request => {
+    if (request.url.pathname.includes("history_messages")) return Response.json(f.data);
+    assert.equal(request.options.credentials, "omit");
+    assert.equal(request.options.headers, undefined);
+    assert.equal(request.options.cache, undefined);
+    assert.equal(request.options.redirect, "error");
+    assert.equal(request.url.searchParams.get("ty"), "r");
+    active++; peak = Math.max(peak, active);
+    const id = `file-${request.url.searchParams.get("file_id")}`;
+    const index = f.uploads.findIndex(file => file.id === id);
+    await new Promise(resolve => setTimeout(resolve, index === 0 ? 60 : 20));
+    active--; completed.push(id);
+    return new Response(f.files[id], { headers: { "content-type": "application/octet-stream" } });
+  } });
+  await h.observe();
+  const started = Date.now();
+  const capture = await h.window.__capCaptureNetworkJson();
+  assert.equal(capture.text, f.expected);
+  assert.equal(capture.messageTurnCount, 2);
+  assert.equal(h.requests.length, 7, "duplicate file IDs must download only once");
+  assert.equal(peak, 4, "four independent reads should overlap, without launching every file");
+  assert.notEqual(completed[0], f.uploads[0].id, "completion order must differ from transcript order");
+  assert.ok(Date.now() - started <= 100, `download waves took ${Date.now() - started} ms`);
+  assert.equal(h.navigationListeners(), 0);
+  assert.doesNotMatch(JSON.stringify(h.replies), /AUTH_SENTINEL|SIGNED_SENTINEL/);
+});
+
+test("DeepSeek: invalid or oversized upload manifests fail before any file download", async () => {
+  for (const mutate of [
+    f => { f.uploads[5].signed_path = "https://other.example/api/file?file_id=upload-5"; },
+    f => { f.uploads[5].status = "PENDING"; },
+    f => { f.uploads[0].file_size = 800000; f.uploads[1].file_size = 800000; }
+  ]) {
+    const f = deepseekUploads(); mutate(f);
+    const h = setup("deepseek", f, { fetchImpl: async request => request.url.pathname.includes("history_messages")
+      ? Response.json(f.data) : new Response(f.files[`file-${request.url.searchParams.get("file_id")}`], { headers: { "content-type": "text/plain" } }) });
+    await h.observe();
+    await assert.rejects(h.window.__capCaptureNetworkJson(), /attachment|too long/);
+    assert.equal(h.requests.length, 1, "validate the entire manifest before reading original bodies");
+    assert.equal(h.navigationListeners(), 0);
+  }
+});
+
+test("DeepSeek: one incomplete upload cancels siblings before fallback or a fresh capture", async () => {
+  const f = deepseekUploads();
+  let healthy = false;
+  const aborted = [];
+  const h = setup("deepseek", f, { fetchImpl: async request => {
+    if (request.url.pathname.includes("history_messages")) return Response.json(f.data);
+    const id = `file-${request.url.searchParams.get("file_id")}`;
+    if (healthy || id === f.uploads[0].id) return new Response(healthy ? f.files[id] : "short", { headers: { "content-type": "text/plain" } });
+    return new Promise((_resolve, reject) => request.options.signal.addEventListener("abort", () => {
+      aborted.push(id); reject(new Error("PRIVATE_FILE_SENTINEL"));
+    }, { once: true }));
+  } });
+  await h.observe();
+  await assert.rejects(h.window.__capCaptureNetworkJson(), error => {
+    assert.match(error.message, /attachment is incomplete/);
+    assert.equal(error.captureFailureReason, "incomplete");
+    return true;
+  });
+  assert.equal(h.requests.length, 5, "failure stops queued downloads");
+  assert.equal(aborted.length, 3);
+  assert.equal(h.window.__capNetworkFetchState.version, 8);
+  assert.ok(h.replies.every(reply => !reply.capture));
+  assert.equal(h.navigationListeners(), 0);
+  assert.equal(h.listeners.size, 1);
+  healthy = true;
+  assert.equal((await h.window.__capCaptureNetworkJson()).text, f.expected);
+  assert.equal(h.requests.length, 12);
+  assert.doesNotMatch(JSON.stringify(h.replies), /PRIVATE_FILE_SENTINEL|SIGNED_SENTINEL|AUTH_SENTINEL/);
+});
+
+test("DeepSeek: streamed bodies preserve split UTF-8 and stop oversized reads without Content-Length", async () => {
+  for (const oversized of [false, true]) {
+    const f = deepseekUploads(1);
+    const text = "\uFEFF  café 🕷️\r\n";
+    f.files[f.uploads[0].id] = text;
+    f.uploads[0].file_size = oversized ? 2 : Buffer.byteLength(text);
+    let reads = 0, cancelled = false, body;
+    const bytes = Buffer.from(text);
+    const h = setup("deepseek", f, { fetchImpl: async request => {
+      if (request.url.pathname.includes("history_messages")) return Response.json(f.data);
+      body = new ReadableStream({
+        pull(controller) {
+          if (reads === bytes.length) return controller.close();
+          controller.enqueue(bytes.subarray(reads, ++reads));
+        },
+        cancel() { cancelled = true; }
+      });
+      return new Response(body, { headers: { "content-type": "application/octet-stream" } });
+    } });
+    await h.observe();
+    if (oversized) {
+      await assert.rejects(h.window.__capCaptureNetworkJson(), /attachment is incomplete/);
+      assert.equal(cancelled, true);
+      assert.ok(reads <= 4, "stop after the first extra byte, allowing one prefetched chunk");
+      assert.ok(h.replies.every(reply => !reply.capture));
+    } else {
+      const capture = await h.window.__capCaptureNetworkJson();
+      assert.ok(capture.text.includes(`File contents (${bytes.length} UTF-8 bytes):\n${text}\nEnd attachment:`));
+      assert.equal(reads, bytes.length);
+    }
+    assert.equal(body.locked, false);
+  }
+});
+
+clockTest("DeepSeek: navigation, auth changes and timeouts abort every overlapping upload", async () => {
+  for (const reason of ["navigate", "auth", "timeout"]) {
+    const f = deepseekUploads();
+    const aborted = [];
+    const h = setup("deepseek", f, { fetchImpl: async request => {
+      if (request.url.pathname.includes("history_messages")) return Response.json(f.data);
+      if (request.url.pathname.endsWith("/session")) return Response.json({});
+      return new Promise((_resolve, reject) => request.options.signal.addEventListener("abort", () => {
+        aborted.push(request.url.searchParams.get("file_id")); reject(new Error("PRIVATE_BODY_SENTINEL"));
+      }, { once: true }));
+    } });
+    await h.observe();
+    const pending = h.window.__capCaptureNetworkJson();
+    const rejected = assert.rejects(pending, error => {
+      assert.equal(error.captureFailureReason, reason === "timeout" ? "timeout" : reason === "auth" ? "request_failed" : undefined);
+      return true;
+    });
+    await new Promise(setImmediate);
+    assert.equal(h.requests.length, 5);
+    if (reason === "navigate") { h.navigate("/a/chat/s/other"); h.navigate("/a/chat/s/smoke"); }
+    if (reason === "auth") await h.window.fetch("/api/v0/session", { headers: { authorization: "Bearer NEW_SESSION" } });
+    await rejected;
+    assert.equal(aborted.length, 4);
+    assert.ok(h.replies.every(reply => !reply.capture));
+    assert.equal(h.navigationListeners(), 0);
+    assert.doesNotMatch(JSON.stringify(h.replies), /PRIVATE_BODY_SENTINEL|SIGNED_SENTINEL|NEW_SESSION/);
+  }
+});
+
+for (const platform of ["gemini", "grok", "deepseek"]) test(`${platform}: the previous hook is replaced while retaining observations`, async () => {
+  const h = setup(platform);
+  await h.observe();
+  const old = h.window.__capNetworkFetchState;
+  old.version = platform === "deepseek" ? 7 : platform === "gemini" ? 7 : 5;
+  h.reinstall(files[1]);
+  assert.notEqual(h.window.__capNetworkFetchState, old);
+  assert.equal(h.window.__capNetworkFetchState.version, platform === "deepseek" ? 8 : platform === "gemini" ? 8 : 6);
+  assert.equal(h.listeners.size, 1);
+  assert.equal((await h.window.__capCaptureNetworkJson()).text, h.fixture.expected);
+});
+
+test("DeepSeek: overlapping body reads share the history's raw byte budget", async () => {
+  const f = deepseekUploads(4);
+  f.data.unused_metadata = "x".repeat(5800000);
+  for (const file of f.uploads) { file.file_size = 70000; f.files[file.id] = "x".repeat(file.file_size); }
+  const h = setup("deepseek", f, { fetchImpl: async request => request.url.pathname.includes("history_messages")
+    ? Response.json(f.data) : new Response(f.files[`file-${request.url.searchParams.get("file_id")}`], { headers: { "content-type": "text/plain" } }) });
+  await h.observe();
+  await assert.rejects(h.window.__capCaptureNetworkJson(), error => {
+    assert.equal(error.captureFailureReason, "size_limit");
+    return true;
+  });
+  assert.ok(h.replies.every(reply => !reply.capture));
+  assert.equal(h.navigationListeners(), 0);
+});
+for (const platform of ["gemini", "grok", "deepseek"]) {
+  test(`${platform}: inert reinstall and data-free ping preserve exact ordered capture without tool/file leakage`, async () => {
     const h = setup(platform); await h.observe(); const before = h.requests.length;
+    h.reinstall(files[1]); h.reinstall(files[2]);
+    h.window.postMessage({ channel: "cap-context-network-json-v1", platform, type: "ping", id: "probe" });
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(h.requests.length, before);
+    assert.equal(h.listeners.size, 1);
     assert.equal(h.replies.length, 0);
     const capture = await h.window.__capCaptureNetworkJson();
     assert.equal(capture.text, h.fixture.expected);
@@ -73,27 +394,11 @@ for (const platform of ["gemini", "grok", "deepseek"]) {
     assert.equal(h.listeners.size, 1);
     assert.equal(h.requests.length - before, platform === "gemini" ? 3 : 2);
   });
-  test(`${platform}: repeated installation is inert and ping never reads data`, async () => {
-    const h = setup(platform); await h.observe(); const before = h.requests.length;
-    h.reinstall(files[1]); h.reinstall(files[2]);
-    h.window.postMessage({ channel: "cap-context-network-json-v1", platform, type: "ping", id: "probe" });
-    await new Promise(resolve => setImmediate(resolve));
-    assert.equal(h.requests.length, before); assert.equal(h.listeners.size, 1);
-    assert.equal((await h.window.__capCaptureNetworkJson()).text, h.fixture.expected);
-  });
   test(`${platform}: navigation cancels capture, never returns stale text`, async () => {
     let h; h = setup(platform, fixtures(platform), { fetchImpl: async request => { if (!request.url.pathname.endsWith("/session")) h.navigate(); return new Response("{}"); } });
     await h.observe();
     await assert.rejects(h.window.__capCaptureNetworkJson(), /conversation changed|cancelled/);
     assert.equal(h.listeners.size, 1);
-  });
-  test(`${platform}: ranged/non-JSON responses fail visibly`, async () => {
-    for (const response of [new Response("{}", { status: 206, headers: { "content-type": "application/json" } }), new Response("{}", { headers: { "content-type": "text/html" } }), new Response("{}", { headers: { "content-type": "application/json", "content-range": "bytes 0-2/9" } })]) {
-      const h = setup(platform, fixtures(platform), { fetchImpl: async () => response });
-      if (platform === "deepseek") { h.context.window.__capNetworkFetchState.dispose(); h.context.window.fetch = async () => response; h.reinstall(files[1]); await h.window.fetch("/api/v0/session", { headers: { authorization: "Bearer AUTH_SENTINEL" } }); }
-      else await h.observe();
-      await assert.rejects(h.window.__capCaptureNetworkJson(), /partial|unsupported/);
-    }
   });
 }
 test("Gemini: Unicode frame lengths, selected candidate, page root and broken chains", () => {
@@ -104,12 +409,45 @@ test("Gemini: Unicode frame lengths, selected candidate, page root and broken ch
   assert.throws(() => h.api.gemini(f.pages.slice(0, 1), "smoke"), /previous/);
   f.pages[1].turns.shift();
   assert.throws(() => h.api.gemini(f.pages, "smoke"), /missing|order/);
-  const t = geminiTurn(0, "smoke", "User", "Selected"); t[3][0].unshift(["rc_other", ["INACTIVE_SENTINEL"]]);
+  const t = geminiTurn(0, "smoke", "User", "Selected"); t[3][0].unshift(["rc_other", ["INACTIVE_SENTINEL"]]); t[3][3] = "rc_0";
   assert.equal(h.api.gemini([{ turns: [t], cursor: null }], "smoke").text, "Gemini conversation:\n\nUser: User\n\nAssistant: Selected");
   t[3][9] = null; // Older, completed native responses omit this unrelated flag.
   assert.equal(h.api.gemini([{ turns: [t], cursor: null }], "smoke").messageTurnCount, 2);
   t[3][3] = "rc_missing";
   assert.throws(() => h.api.gemini([{ turns: [t], cursor: null }], "smoke"), /missing/);
+  t[3][3] = "rc_0";
+  t[3][0].push(["rc_0", ["DUPLICATE_SENTINEL"]]);
+  assert.throws(() => h.api.gemini([{ turns: [t], cursor: null }], "smoke"), /missing/);
+  t[3][0].pop();
+  t[2][0][0] = null;
+  assert.throws(() => h.api.gemini([{ turns: [t], cursor: null }], "smoke"), /user text.*malformed/);
+});
+
+test("Gemini: native parent candidate selects regenerated replies across page boundaries", async () => {
+  const f = fixtures("gemini", "smoke", 11);
+  const older = f.pages[1].turns[0];
+  older[3][0].unshift(["rc_abandoned", ["ABANDONED_SENTINEL"]]);
+  const h = setup("gemini", f);
+  await h.observe();
+  assert.equal((await h.window.__capCaptureNetworkJson()).text, f.expected);
+  f.pages[0].turns.at(-1)[1][2] = "rc_missing";
+  await assert.rejects(h.window.__capCaptureNetworkJson(), /selected.*missing/i);
+  assert.equal(h.navigationListeners(), 0);
+});
+
+test("Gemini: late installation builds a fresh RPC from native bootstrap without earlier traffic", async () => {
+  const h = setup("gemini");
+  h.window.WIZ_global_data.cfb2h = "native-build";
+  h.window.WIZ_global_data.FdrFJe = "native-session";
+  assert.equal((await h.window.__capCaptureNetworkJson()).text, h.fixture.expected);
+  assert.equal(h.requests.length, 3);
+  for (const { url, options } of h.requests) {
+    assert.equal(url.pathname, "/_/BardChatUi/data/batchexecute");
+    assert.equal(url.searchParams.get("bl"), "native-build");
+    assert.equal(url.searchParams.get("f.sid"), "native-session");
+    assert.equal(url.searchParams.get("source-path"), "/app/smoke");
+    assert.equal(new URLSearchParams(options.body).get("at"), "CSRF_SENTINEL");
+  }
 });
 test("Grok: rid selects active branch, ambiguous and missing bodies fail", () => {
   const h = setup("grok"), f = h.fixture;
@@ -226,6 +564,25 @@ test("DeepSeek aborts an active capture when the native session credential chang
   await assert.rejects(pending, /could not be read|cancelled/);
   assert.ok(h.replies.every(reply => !reply.capture));
 });
+
+test("DeepSeek: the shared history/file budget accepts exactly 6 MB and rejects one extra byte", async () => {
+  for (const extra of [0, 1]) {
+    const f = fixtures("deepseek", "smoke", 1);
+    f.data.unused_metadata = "";
+    const historyBytes = Buffer.byteLength(JSON.stringify(f.data));
+    f.data.unused_metadata = " ".repeat(6000000 - historyBytes - f.file.file_size + extra);
+    assert.equal(Buffer.byteLength(JSON.stringify(f.data)) + f.file.file_size, 6000000 + extra);
+    const h = setup("deepseek", f);
+    await h.observe();
+    if (extra) {
+      await assert.rejects(h.window.__capCaptureNetworkJson(), error => {
+        assert.equal(error.captureFailureReason, "size_limit");
+        return true;
+      });
+      assert.ok(h.replies.every(reply => !reply.capture));
+    } else assert.equal((await h.window.__capCaptureNetworkJson()).text, f.expected);
+  }
+});
 test("Native fetch errors cannot expose private strings as adapter error messages", async () => {
   const h = setup("grok", fixtures("grok"), { fetchImpl: async () => { throw new Error("The PRIVATE_SESSION_AND_FILE_URL_SENTINEL failed."); } });
   await assert.rejects(h.window.__capCaptureNetworkJson(), error => {
@@ -268,6 +625,48 @@ test("Grok refuses file-only user turns rather than silently transferring an orp
   assert.equal(h.api.grok(h.fixture.nodes, h.fixture.responses).messageTurnCount, 1);
   Object.assign(h.fixture.responses[0], { message: "CONTROL_SENTINEL", isControl: true, fileAttachments: ["file-id"] });
   assert.doesNotMatch(h.api.grok(h.fixture.nodes, h.fixture.responses).text, /CONTROL_SENTINEL/);
+});
+
+test("Gemini: optional user metadata cannot reject a complete paginated text history", async () => {
+  const f = fixtures("gemini");
+  const metadata = [
+    [["CONTEXT_SENTINEL", { text: "NESTED_BODY_SENTINEL" }]],
+    [null, [null, null, null, null, null]],
+    [[null, null, null, null, [null, { file_name: "GUESS_SENTINEL" }, [null, null, "NOT_A_FILE_SENTINEL"]]]],
+    { text: "UNSUPPORTED_OBJECT_SENTINEL" },
+    "UNSUPPORTED_STRING_SENTINEL"
+  ];
+  f.pages.flatMap(page => page.turns).forEach((item, i) => { item[2][0][4] = metadata[i % metadata.length]; });
+  const h = setup("gemini", f);
+  assert.equal(h.requests.length, 0);
+  const capture = await h.window.__capCaptureNetworkJson();
+  assert.equal(capture.text, f.expected);
+  assert.equal(capture.messageTurnCount, 48);
+  assert.deepEqual([...capture.excludedContentTypes], ["other"]);
+  assert.equal(h.requests.length, 3);
+  assert.doesNotMatch(JSON.stringify(h.replies), /CONTEXT_SENTINEL|NESTED_BODY_SENTINEL|GUESS_SENTINEL|NOT_A_FILE_SENTINEL|UNSUPPORTED_.*_SENTINEL/);
+  assert.equal(h.navigationListeners(), 0);
+});
+
+test("Gemini: known upload names survive mixed optional metadata without guessing other names", async () => {
+  const f = fixtures("gemini", "smoke", 1), item = f.pages[0].turns[0];
+  item[2][0][4] = [
+    null,
+    ["CONTEXT_SENTINEL"],
+    [null, null, null, null, [[null, 11, "Guide.pdf"], ["ID_SENTINEL", null, "NOT_A_FILE_SENTINEL"], { text: "BODY_SENTINEL" }]]
+  ];
+  f.expected = f.expected.replace("\n\nAssistant:", '\n\nAttachment: "Guide.pdf"\n\nAssistant:');
+  const h = setup("gemini", f);
+  const capture = await h.window.__capCaptureNetworkJson();
+  assert.equal(capture.text, f.expected);
+  assert.deepEqual([...capture.excludedContentTypes], ["other", "uploads"]);
+  assert.equal(h.requests.length, 1);
+  assert.doesNotMatch(JSON.stringify(h.replies), /CONTEXT_SENTINEL|ID_SENTINEL|NOT_A_FILE_SENTINEL|BODY_SENTINEL/);
+  // With no own prompt, unknown metadata might be the entire user input.
+  // It must still fall back instead of sending a label/answer-only history.
+  item[2][0][0] = " \r\n";
+  await assert.rejects(h.window.__capCaptureNetworkJson(), error => error.captureFailureReason === "unsupported");
+  assert.equal(h.navigationListeners(), 0);
 });
 
 test("Gemini retains only attachment descriptor names in each user turn", () => {

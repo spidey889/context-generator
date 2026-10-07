@@ -1,5 +1,5 @@
 import { validateTelemetryPayload } from "./validation.mjs";
-import { verifySummaryProof } from "../_shared/summary-proof.mjs";
+import { verifySummaryReceipt } from "../_shared/summary-proof.mjs";
 
 const MAX_BODY_BYTES = 4096;
 
@@ -35,7 +35,8 @@ export function createTelemetryHandler({ createClient, getEnv, log = console.war
       report("signing_not_configured");
       return failure(503, "telemetry_unavailable");
     }
-    const summaryVerified = await verifySummaryProof(payload, signingSecret);
+    const receipt = await verifySummaryReceipt(payload, signingSecret);
+    const summaryVerified = receipt !== null;
     if (payload.summary_proof !== undefined && !summaryVerified) {
       report("summary_proof_invalid");
       return failure(422, "invalid_summary_proof");
@@ -65,8 +66,11 @@ export function createTelemetryHandler({ createClient, getEnv, log = console.war
         p_completed_at: payload.completed_at || null,
         // V1 receipts verify lifetime work, but do not authenticate occurrence time.
         p_summary_confirmed_at: summaryVerified ? payload.summary_confirmed_at || null : null,
-        // Model is accepted only with its v3 HMAC; legacy receipts stay unknown.
-        p_model: summaryVerified ? payload.model || null : null
+        // Includes model recovered from the v3 proof forwarded by an older worker.
+        p_model: receipt?.model || null,
+        // This never grants summary verification. The database distinguishes
+        // observed model reports from authenticated v3 attribution.
+        p_reported_model: payload.reported_model || null
       }), rpcTimeoutMs);
       if (error) {
         if (error.code === "22023") return failure(422, "attempt_identity_mismatch");

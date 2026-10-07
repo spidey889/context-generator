@@ -2,8 +2,8 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
 const test = require("node:test");
-const { clockTest } = require("../testing/clock");
-const { withFundedBudget } = require("../testing/funded-budget");
+const { clockTest } = require("./helpers/clock");
+const { withFundedBudget } = require("./helpers/funded-budget");
 
 const summarizeHandler = require("../api/summarize.js");
 // These cases exercise Google/Mistral compatibility even on machines with a
@@ -66,7 +66,8 @@ test("provider failures log fixed metadata without reflecting arbitrary upstream
 test("normalizes summary into the required Context Carry shape", () => {
   const raw = [
     "```markdown",
-    makeContextCarrySummary("normalize", 90),
+    makeContextCarrySummary("normalize", 90).replace("CONTEXT CARRY - READY TO PASTE",
+      "╔══════════════════════════════════════════╗\n║ CONTEXT CARRY — READY TO PASTE ║\n╚══════════════════════════════════════════╝"),
     "---",
     "PASTE THIS AT THE TOP OF YOUR NEW CHAT",
     "Then write: Continue from where we left off.",
@@ -75,6 +76,7 @@ test("normalizes summary into the required Context Carry shape", () => {
 
   const normalized = normalizeContextCarrySummary(raw);
 
+  assert.equal(validateContextCarrySummary(raw, getSummaryProfile("x".repeat(4000))).ok, true);
   assert.match(normalized, /CONTEXT CARRY/);
   assert.match(normalized, /WHO I AM\nnormalize0 normalize1/);
   assert.match(normalized, /WHAT WE WERE DOING\nDetailed work remains preserved\./);
@@ -133,23 +135,19 @@ test("backend forwards a 350k conversation to Mistral and reports the same input
       url,
       body: JSON.parse(options.body)
     };
-    return {
-      ok: true,
-      status: 200,
-      json: async () => ({
-        usage: {
-          prompt_tokens: 1200,
-          completion_tokens: 320,
-          total_tokens: 1520,
-          prompt_tokens_details: { cached_tokens: 64 }
-        },
-        choices: [{
-          message: {
-            content: makeContextCarrySummary("payload", 1800)
-          }
-        }]
-      })
-    };
+    return new Response(JSON.stringify({
+      usage: {
+        prompt_tokens: 1200,
+        completion_tokens: 320,
+        total_tokens: 1520,
+        prompt_tokens_details: { cached_tokens: 64 }
+      },
+      choices: [{
+        message: {
+          content: makeContextCarrySummary("payload", 1800)
+        }
+      }]
+    }));
   };
 
   const res = createMockResponse();
@@ -208,17 +206,13 @@ test("backend keeps tiny chats local and avoids Mistral", async () => {
   delete process.env.MISTRAL_API_KEY;
   global.fetch = async (_url, options) => {
     requests.push(JSON.parse(options.body));
-    return {
-      ok: true,
-      status: 200,
-      json: async () => ({
-        choices: [{
-          message: {
-            content: makeContextCarrySummary("short", 90)
-          }
-        }]
-      })
-    };
+    return new Response(JSON.stringify({
+      choices: [{
+        message: {
+          content: makeContextCarrySummary("short", 90)
+        }
+      }]
+    }));
   };
 
   const res = createMockResponse();
@@ -276,17 +270,13 @@ test("backend sends small generated chats to Ministral 14B first", async () => {
   process.env.MISTRAL_API_KEY = "test-key";
   global.fetch = async (_url, options) => {
     requests.push(JSON.parse(options.body));
-    return {
-      ok: true,
-      status: 200,
-      json: async () => ({
-        choices: [{
-          message: {
-            content: makeContextCarrySummary("small", 180)
-          }
-        }]
-      })
-    };
+    return new Response(JSON.stringify({
+      choices: [{
+        message: {
+          content: makeContextCarrySummary("small", 180)
+        }
+      }]
+    }));
   };
 
   const res = createMockResponse();
@@ -312,37 +302,6 @@ test("backend sends small generated chats to Ministral 14B first", async () => {
       process.env.MISTRAL_API_KEY = originalApiKey;
     }
   }
-});
-
-test("validator accepts the exact boxed Unicode header requested from providers", () => {
-  const boxedSummary = makeContextCarrySummary("boxed", 90).replace(
-    "CONTEXT CARRY - READY TO PASTE",
-    [
-      "╔══════════════════════════════════════════╗",
-      "║         CONTEXT CARRY — READY TO PASTE        ║",
-      "╚══════════════════════════════════════════╝"
-    ].join("\n")
-  );
-  const profile = getSummaryProfile("x".repeat(4000));
-
-  assert.equal(validateContextCarrySummary(boxedSummary, profile).ok, true);
-  assert.match(normalizeContextCarrySummary(boxedSummary), /CONTEXT CARRY — READY TO PASTE/);
-});
-
-test("validator rejects box borders without the Context Carry title", () => {
-  const borderOnlySummary = makeContextCarrySummary("border-only", 90).replace(
-    "CONTEXT CARRY - READY TO PASTE",
-    [
-      "╔══════════════════════════════════════════╗",
-      "╚══════════════════════════════════════════╝"
-    ].join("\n")
-  );
-  const profile = getSummaryProfile("x".repeat(4000));
-
-  assert.deepEqual(
-    validateContextCarrySummary(borderOnlySummary, profile),
-    { ok: false, reason: "missing Context Carry header" }
-  );
 });
 
 for (const [label, failure] of [
@@ -381,12 +340,6 @@ for (const [label, failure] of [
   });
 }
 
-test("normalizer refuses to disguise free-form output as a valid Context Carry", () => {
-  const normalized = normalizeContextCarrySummary("User is debugging paste reliability.");
-
-  assert.equal(normalized, "");
-});
-
 test("captured prompt injections stay inside the untrusted transcript data envelope", async () => {
   const originalFetch = global.fetch;
   const restoreApiKey = setTemporaryEnv("MISTRAL_API_KEY", "test-mistral-key");
@@ -401,13 +354,9 @@ test("captured prompt injections stay inside the untrusted transcript data envel
 
   global.fetch = async (_url, options) => {
     capturedMessages = JSON.parse(options.body).messages;
-    return {
-      ok: true,
-      status: 200,
-      json: async () => ({
-        choices: [{ message: { content: makeContextCarrySummary("injection-safe", 100) } }]
-      })
-    };
+    return new Response(JSON.stringify({
+      choices: [{ message: { content: makeContextCarrySummary("injection-safe", 100) } }]
+    }));
   };
 
   const res = createMockResponse();
@@ -436,6 +385,7 @@ clockTest("provider exhaustion preserves the exact transcript locally without ex
   const privateProviderBody = "provider echoed private conversation text";
   let responseTextReads = 0;
   let responseJsonReads = 0;
+  let responseBodyCancels = 0;
   const requestTimes = [];
 
   global.fetch = async () => {
@@ -443,6 +393,7 @@ clockTest("provider exhaustion preserves the exact transcript locally without ex
     return {
       ok: false,
       status: 500,
+      body: { cancel: async () => { responseBodyCancels++; } },
       json: async () => {
         responseJsonReads++;
         return { error: { message: privateProviderBody } };
@@ -463,7 +414,8 @@ clockTest("provider exhaustion preserves the exact transcript locally without ex
 
     assert.equal(res.statusCode, 200);
     assert.equal(responseTextReads, 0);
-    assert.equal(responseJsonReads, 2, "both retries must exercise real private JSON error envelopes");
+    assert.equal(responseJsonReads, 0, "private error envelopes must remain unread");
+    assert.equal(responseBodyCancels, 2, "both owned retry response bodies must be cancelled");
     assert.equal(requestTimes.length, 2);
     assert.equal(requestTimes[1] - requestTimes[0], 450, "exhaustion must retain the provider retry delay");
     assert.equal(res.payload.timing.servedBy, "local-direct");
@@ -494,6 +446,9 @@ test("deterministic validation rejects malformed, empty, short, and refusal outp
     .replace(/WHAT WE WERE DOING[\s\S]*?WHERE WE LEFT OFF/, "WHAT WE WERE DOING\nRequest failed because the service is unavailable.\n\nWHERE WE LEFT OFF");
 
   assert.equal(validateContextCarrySummary(valid, smallProfile).ok, true);
+  const borderOnly = valid.replace("CONTEXT CARRY - READY TO PASTE", "╔════╗\n╚════╝");
+  assert.equal(validateContextCarrySummary(borderOnly, smallProfile).reason, "missing Context Carry header");
+  assert.equal(normalizeContextCarrySummary("User is debugging paste reliability."), "");
   assert.match(validateContextCarrySummary(missingSection, smallProfile).reason, /required sections/);
   assert.match(validateContextCarrySummary(emptyImportant, smallProfile).reason, /WHAT WE WERE DOING is empty/);
   assert.match(validateContextCarrySummary(tooShort, smallProfile).reason, /suspiciously short/);
@@ -513,9 +468,9 @@ test("refusal and substantively empty Mistral output fall through to the complet
   let rejectedSummary;
   global.fetch = async (_url, options) => {
     requests.push(JSON.parse(options.body).model);
-    return { ok: true, status: 200, json: async () => ({
+    return new Response(JSON.stringify({
       choices: [{ message: { content: rejectedSummary } }]
-    }) };
+    }));
   };
   try {
     for (const output of ["I cannot summarize this conversation.", getContextCarryTemplate(getSummaryProfile(conversation))]) {
@@ -570,9 +525,9 @@ test("useful token-limited output is delivered without calling a fallback", asyn
   const partial = "KEY CONTEXT\nThe Windows build passed. Linux tests are blocked; next check";
   global.fetch = async () => {
     requests++;
-    return { ok: true, status: 200, json: async () => ({ choices: [{
+    return new Response(JSON.stringify({ choices: [{
       message: { content: partial }, finish_reason: "length"
-    }] }) };
+    }] }));
   };
   try {
     const res = createMockResponse();
@@ -628,9 +583,9 @@ test("provider summaries keep only identical NEXT STEP sections while preserving
   let requests = 0;
   global.fetch = async () => {
     requests++;
-    return { ok: true, status: 200, json: async () => ({ choices: [{
+    return new Response(JSON.stringify({ choices: [{
       message: { content: currentCase.raw }, finish_reason: "stop"
-    }] }) };
+    }] }));
   };
   try {
     for (currentCase of cases) {
@@ -718,25 +673,21 @@ test("backend sends generated summaries to native Gemini first and records Gemin
       headers: options.headers,
       body: JSON.parse(options.body)
     };
-    return {
-      ok: true,
-      status: 200,
-      json: async () => ({
-        usageMetadata: {
-          promptTokenCount: 900,
-          candidatesTokenCount: 240,
-          thoughtsTokenCount: 60,
-          totalTokenCount: 1200,
-          cachedContentTokenCount: 0
-        },
-        candidates: [{
-          finishReason: "STOP",
-          content: {
-            parts: [{ text: makeContextCarrySummary("gemini-primary", 1800) }]
-          }
-        }]
-      })
-    };
+    return new Response(JSON.stringify({
+      usageMetadata: {
+        promptTokenCount: 900,
+        candidatesTokenCount: 240,
+        thoughtsTokenCount: 60,
+        totalTokenCount: 1200,
+        cachedContentTokenCount: 0
+      },
+      candidates: [{
+        finishReason: "STOP",
+        content: {
+          parts: [{ text: makeContextCarrySummary("gemini-primary", 1800) }]
+        }
+      }]
+    }));
   };
 
   const res = createMockResponse();
@@ -808,16 +759,12 @@ test("backend falls from a rate-limited Gemini 3.6 Flash to Gemini 3.5 Flash-Lit
         json: async () => ({ error: { message: "quota exhausted" } })
       };
     }
-    return {
-      ok: true,
-      status: 200,
-      json: async () => ({
-        candidates: [{
-          finishReason: "STOP",
-          content: { parts: [{ text: makeContextCarrySummary("gemini-fallback", 260) }] }
-        }]
-      })
-    };
+    return new Response(JSON.stringify({
+      candidates: [{
+        finishReason: "STOP",
+        content: { parts: [{ text: makeContextCarrySummary("gemini-fallback", 260) }] }
+      }]
+    }));
   };
 
   const res = createMockResponse();
@@ -855,21 +802,13 @@ test("backend falls from empty Gemini output through Flash-Lite to the preserved
     const body = JSON.parse(options.body);
     requests.push({ url, body });
     if (url.includes("generativelanguage.googleapis.com")) {
-      return {
-        ok: true,
-        status: 200,
-        json: async () => ({
-          candidates: [{ finishReason: "STOP", content: { parts: [{ text: "  " }] } }]
-        })
-      };
+      return new Response(JSON.stringify({
+        candidates: [{ finishReason: "STOP", content: { parts: [{ text: "  " }] } }]
+      }));
     }
-    return {
-      ok: true,
-      status: 200,
-      json: async () => ({
-        choices: [{ message: { content: makeContextCarrySummary("mistral-after-gemini", 260) } }]
-      })
-    };
+    return new Response(JSON.stringify({
+      choices: [{ message: { content: makeContextCarrySummary("mistral-after-gemini", 260) } }]
+    }));
   };
 
   const res = createMockResponse();

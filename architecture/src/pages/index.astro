@@ -1,0 +1,26 @@
+---
+import diagram from '../generated/diagram.html?raw';
+import fonts from '../generated/fonts.css?raw';
+import theme from '../generated/theme.js?raw';
+import '../generated/viewer.css';
+---
+<!doctype html>
+<html lang="en" data-theme="dark" data-preset="classic">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="description" content="Explore Cap Context's capture, carry, summary, paste and telemetry architecture with links to the source." />
+    <meta name="generator" content="archify 3.0.1 + Astro" />
+    <meta name="archify-reader-contract" content="declared-wide-v1" />
+    <title>Cap Context — from one chat to the next</title>
+    <!-- Theme must resolve before paint; exports also read this exact font style. -->
+    <script is:inline set:html={theme}></script>
+    <style is:inline id="archify-fonts" set:html={fonts}></style>
+  </head>
+  <body>
+    <Fragment set:html={diagram} />
+    <script>
+      import '../generated/viewer.js';
+    </script>
+  </body>
+</html>

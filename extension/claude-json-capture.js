@@ -109,8 +109,9 @@
             const end = start + normalizedPaste.length;
             const originalStart = start === 0 ? 0 : offset + start;
             const originalEnd = end === matchText.length ? part.length : offset + end;
-            if ((start === 0 || matchText.slice(0, start).endsWith("\n\n"))
-              && (end === matchText.length || matchText.slice(end).startsWith("\n\n"))
+            // Recognize LF/CRLF blank lines without rewriting source offsets.
+            if ((start === 0 || /(?:\r?\n){2}$/.test(matchText.slice(0, start)))
+              && (end === matchText.length || /^(?:\r?\n){2}/.test(matchText.slice(end)))
               && !(inlineCopies.get(index) || []).some(copy => originalStart < copy.end && originalEnd > copy.start)) {
               inlineCopy = { index, start: originalStart, end: originalEnd, text: pastedText };
               break;
@@ -165,7 +166,7 @@
       const receive = event => {
         const reply = event.data;
         if (event.source === window && event.origin === location.origin && reply?.channel === channel
-          && reply.type === "pong" && reply.id === id && reply.version === 4) finish(true);
+          && reply.type === "pong" && reply.id === id && reply.version === 7) finish(true);
       };
       const ping = () => {
         if (settled) return;

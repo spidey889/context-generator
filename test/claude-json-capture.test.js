@@ -4,7 +4,7 @@ const path = require("node:path");
 const vm = require("node:vm");
 const test = require("node:test");
 const { webcrypto, createHash } = require("node:crypto");
-const { clockTest } = require("../testing/clock");
+const { clockTest } = require("./helpers/clock");
 const scripts = new Map(["claude-fetch-main.js", "claude-json-capture.js"].map(file =>
   [file, new vm.Script(fs.readFileSync(path.join(__dirname, "..", "extension", file), "utf8"), { filename: file })]));
 
@@ -49,7 +49,7 @@ function setup(data = fixture(), { status = 200, headers = {}, body, resources =
       for (const listener of [...listeners]) listener({ source: window, origin: location.origin, data: payload });
     })
   };
-  const context = vm.createContext({ window, location, chrome: runtime ? { runtime } : undefined, URL, Request, TextEncoder, AbortController, crypto: webcrypto, Date, setTimeout, clearTimeout });
+  const context = vm.createContext({ window, location, chrome: runtime ? { runtime } : undefined, URL, Request, TextEncoder, TextDecoder, AbortController, crypto: webcrypto, Date, setTimeout, clearTimeout });
   for (const file of ["claude-fetch-main.js", "claude-json-capture.js"]) {
     scripts.get(file).runInContext(context);
   }
@@ -65,15 +65,162 @@ function pastedAttachment(text) {
   return { id: createHash("sha256").update(text).digest("hex"), file_name: "", file_type: "txt", file_size: Buffer.byteLength(text), extracted_content: text };
 }
 
-test("Claude JSON capture preserves a large pasted attachment in its owning user turn", async () => {
+function streamedResponse(chunks, headers = {}, cancelError = false) {
+  const stats = { bytes: 0, cancelled: 0 };
+  let index = 0;
+  const response = new Response(new ReadableStream({
+    pull(controller) {
+      if (index === chunks.length) return controller.close();
+      const chunk = chunks[index++];
+      stats.bytes += chunk.byteLength;
+      controller.enqueue(chunk);
+    },
+    cancel() {
+      stats.cancelled++;
+      if (cancelError) throw new Error("PRIVATE_CANCEL_SENTINEL");
+    }
+  }, { highWaterMark: 0 }), { headers: { "content-type": "application/json", ...headers } });
+  return { response, stats };
+}
+
+for (const length of [undefined, "1", "6000001"]) test(`Claude bounds raw history before decoding with Content-Length ${length ?? "absent"}`, async () => {
+  // A tiny active branch can coexist with large metadata. Transcript bounds
+  // cannot protect the raw read: reject excess transport without clipping it.
+  const prefix = new TextEncoder().encode(JSON.stringify(fixture()).slice(0, -1) + ',"ignored":"');
+  const chunks = [prefix, ...Array(20).fill(new Uint8Array(1000000).fill(32)), new TextEncoder().encode('"}')];
+  const streamed = streamedResponse(chunks, length ? { "content-length": length } : {}, true);
+  let healthy = false;
+  const harness = setup(fixture(), { resources: [endpoint], fetchImpl: async () => healthy
+    ? new Response(JSON.stringify(fixture()), { headers: { "content-type": "application/json" } }) : streamed.response });
+  await assert.rejects(harness.window.__capCaptureClaudeJson(), error => {
+    assert.equal(error.captureFailureReason, "incomplete");
+    assert.doesNotMatch(error.message, /PRIVATE_CANCEL_SENTINEL/);
+    return true;
+  });
+  assert.equal(streamed.stats.cancelled, 1);
+  assert.ok(streamed.stats.bytes <= 7000000, `The oversized body was drained: ${streamed.stats.bytes} bytes.`);
+  if (length === "6000001") assert.equal(streamed.stats.bytes, 0, "Reject an oversized advertised length before reading.");
+  assert.equal(streamed.response.body.locked, false);
+  assert.equal(harness.stats().navigationListeners + harness.stats().popListeners, 0);
+  healthy = true;
+  assert.equal((await harness.window.__capCaptureClaudeJson()).text,
+    "Claude conversation:\n\nUser: Question\n\nAssistant: Private reasoning\n\nSelected answer");
+});
+
+test("Claude rejects invalid UTF-8 before it can silently change captured text or drain the remaining body", async () => {
+  const bytes = Buffer.from(JSON.stringify(fixture()).slice(0, -1) + ',"ignored":"');
+  bytes[bytes.indexOf("Question") + 2] = 0xff;
+  const streamed = streamedResponse([bytes, ...Array(5).fill(new Uint8Array(1000000).fill(32)), new TextEncoder().encode('"}')]);
+  const harness = setup(fixture(), { resources: [endpoint], fetchImpl: async () => streamed.response });
+  await assert.rejects(harness.window.__capCaptureClaudeJson(), error => {
+    assert.equal(error.captureFailureReason, "incomplete");
+    assert.doesNotMatch(error.message, /decoder|encoded data|UTF-8|Question/);
+    return true;
+  });
+  assert.equal(streamed.stats.bytes, bytes.length, "Stop at the malformed chunk, before the irrelevant tail.");
+  assert.equal(streamed.stats.cancelled, 1);
+  assert.equal(streamed.response.body.locked, false);
+});
+
+test("Claude accepts exactly six million raw bytes and preserves split BOM, Unicode and source whitespace", async () => {
   const data = fixture();
-  const pastedText = `PASTE_START\n${"  preserve indentation and full lines\r\n".repeat(1200)}PASTE_END`;
+  const text = "  café🙂\r\n\uFEFF  original text  ";
+  data.chat_messages[0].content = [{ type: "text", text }];
+  const prefix = Buffer.from("\uFEFF" + JSON.stringify(data).slice(0, -1) + ',"ignored":"');
+  const suffix = Buffer.from('"}');
+  const bytes = Buffer.concat([prefix, Buffer.alloc(6000000 - prefix.length - suffix.length, 32), suffix]);
+  const split = bytes.indexOf(Buffer.from("🙂")) + 1;
+  const streamed = streamedResponse([bytes.subarray(0, 1), bytes.subarray(1, 2), bytes.subarray(2, split), bytes.subarray(split, split + 1), bytes.subarray(split + 1)], { "content-length": "6000000" });
+  const harness = setup(data, { resources: [endpoint], fetchImpl: async () => streamed.response });
+  assert.equal((await harness.window.__capCaptureClaudeJson()).text,
+    `Claude conversation:\n\nUser: ${text}\n\nAssistant: Private reasoning\n\nSelected answer`);
+  assert.equal(streamed.stats.bytes, 6000000);
+  assert.equal(streamed.stats.cancelled, 0);
+  assert.equal(streamed.response.body.locked, false);
+});
+
+test("Claude rejects an unfinished UTF-8 codepoint after otherwise complete JSON and permits a fresh capture", async () => {
+  const streamed = streamedResponse([Buffer.from(JSON.stringify(fixture())), new Uint8Array([0xc3])]);
+  let healthy = false;
+  const harness = setup(fixture(), { resources: [endpoint], fetchImpl: async () => healthy
+    ? new Response(JSON.stringify(fixture()), { headers: { "content-type": "application/json" } }) : streamed.response });
+  await assert.rejects(harness.window.__capCaptureClaudeJson(), error => error.captureFailureReason === "incomplete");
+  assert.equal(streamed.response.body.locked, false);
+  healthy = true;
+  assert.equal((await harness.window.__capCaptureClaudeJson()).messageTurnCount, 2);
+});
+
+for (const reason of ["navigation", "timeout"]) clockTest(`Claude cancels a pending streamed body on ${reason} and permits a fresh capture`, async () => {
+  let response, signal, readStarted, healthy = false;
+  const began = new Promise(resolve => { readStarted = resolve; });
+  const harness = setup(fixture(), { resources: [endpoint], fetchImpl: async (_url, options) => {
+    if (healthy) return new Response(JSON.stringify(fixture()), { headers: { "content-type": "application/json" } });
+    signal = options.signal;
+    response = new Response(new ReadableStream({
+      start(controller) {
+        // Native fetch errors an outstanding body read when its signal aborts.
+        signal.addEventListener("abort", () => controller.error(new Error("PRIVATE_ABORT_SENTINEL")), { once: true });
+      },
+      pull() { readStarted(); return new Promise(() => {}); }
+    }, { highWaterMark: 0 }), { headers: { "content-type": "application/json" } });
+    return response;
+  } });
+  const capture = harness.window.__capCaptureClaudeJson();
+  await began;
+  if (reason === "navigation") { harness.navigate("/chat/another"); harness.navigate(`/chat/${chat}`); }
+  await assert.rejects(capture, error => {
+    assert.doesNotMatch(error.message, /PRIVATE_ABORT_SENTINEL/);
+    if (reason === "timeout") assert.equal(error.captureFailureReason, "timeout");
+    else assert.match(error.message, /changed/);
+    return true;
+  });
+  assert.equal(signal.aborted, true);
+  assert.equal(response.body.locked, false);
+  assert.equal(harness.stats().navigationListeners + harness.stats().popListeners, 0);
+  healthy = true;
+  assert.equal((await harness.window.__capCaptureClaudeJson()).messageTurnCount, 2);
+});
+
+test("Claude cancels discarded transport responses and keeps safe fallback reasons when cancellation fails", async () => {
+  for (const [status, headers, reason] of [
+    [401, {}, "unavailable"], [500, {}, "request_failed"],
+    [200, { "content-range": "bytes 0-10/100" }, "incomplete"],
+    [200, { "content-type": "text/html" }, "incomplete"]
+  ]) {
+    let cancelled = 0, healthy = false, discarded;
+    const harness = setup(fixture(), { resources: [endpoint], fetchImpl: async () => {
+      if (healthy) return new Response(JSON.stringify(fixture()), { headers: { "content-type": "application/json" } });
+      discarded = new Response(new ReadableStream({ cancel() { cancelled++; throw new Error("PRIVATE_CANCEL_SENTINEL"); } }),
+        { status, headers: { "content-type": "application/json", ...headers } });
+      return discarded;
+    } });
+    await assert.rejects(harness.window.__capCaptureClaudeJson(), error => {
+      assert.equal(error.captureFailureReason, reason);
+      assert.doesNotMatch(error.message, /PRIVATE_CANCEL_SENTINEL/);
+      return true;
+    });
+    assert.equal(cancelled, 1, "A rejected response must stop its unused stream.");
+    assert.equal(discarded.body.locked, false);
+    assert.equal(harness.stats().navigationListeners + harness.stats().popListeners, 0);
+    healthy = true;
+    assert.equal((await harness.window.__capCaptureClaudeJson()).text,
+      "Claude conversation:\n\nUser: Question\n\nAssistant: Private reasoning\n\nSelected answer");
+  }
+});
+
+test("Claude capture reads its dedicated response once and leaves the page response readable", async () => {
+  const data = fixture();
+  const pastedText = `  café🙂\r\n${"  original pasted line\r\n".repeat(10000)}END  `;
   data.chat_messages[0].attachments = [pastedAttachment(pastedText)];
   const harness = setup(data);
-  await harness.window.fetch(endpoint);
+  const pageResponse = await harness.window.fetch(endpoint);
   const capture = await harness.window.__capCaptureClaudeJson();
   assert.equal(capture.text, `Claude conversation:\n\nUser: Question\n\n${pastedText}\n\nAssistant: Private reasoning\n\nSelected answer`);
   assert.equal(capture.messageTurnCount, 2);
+  assert.equal(harness.stats().requests, 2);
+  assert.equal(harness.stats().clones, 0, "The extension's fresh response has no second reader.");
+  assert.equal(pageResponse.bodyUsed, false, "Observing the page's routing must not consume its body.");
+  assert.deepEqual(await pageResponse.json(), data);
 });
 
 test("Claude JSON capture keeps pasted-only user turns and multiple pasted cards in order", async () => {
@@ -119,6 +266,45 @@ test("Claude inline pasted-card matching preserves original block and card white
   await h.window.fetch(endpoint);
   assert.equal((await h.window.__capCaptureClaudeJson()).text,
     `Claude conversation:\n\nUser: ${pasted}\n\nAssistant: Private reasoning\n\nSelected answer`);
+});
+
+for (const [before, after] of [["\n\n", "\n\n"], ["\r\n\r\n", "\r\n\r\n"], ["\n\r\n", "\r\n\n"]]) {
+  test(`Claude matches a full inline pasted paragraph with ${JSON.stringify([before, after])} separators without changing source text`, async () => {
+    const data = fixture();
+    const pasted = "  café🙂\r\n  original card  ";
+    const original = `  Intro${before}${pasted.trim()}${after}Outro  `;
+    data.chat_messages[0].content = [{ type: "text", text: original }];
+    data.chat_messages[0].attachments = [pastedAttachment(pasted)];
+    const h = setup(data, { resources: [endpoint] });
+    assert.equal((await h.window.__capCaptureClaudeJson()).text,
+      `Claude conversation:\n\nUser: ${original.replace(pasted.trim(), pasted)}\n\nAssistant: Private reasoning\n\nSelected answer`);
+  });
+}
+
+test("Claude restores multiple CRLF inline cards backwards and preserves repeated cards with distinct identities", async () => {
+  const data = fixture();
+  const first = "  First card  ", second = "\tSecond card\r\n";
+  data.chat_messages[0].content = [{ type: "text", text: `Intro\r\n\r\n${first.trim()}\r\n\r\n${second.trim()}\r\n\r\nOutro` }];
+  const firstCard = { ...pastedAttachment(first), id: "first" };
+  data.chat_messages[0].attachments = [firstCard, { ...firstCard }, { ...pastedAttachment(second), id: "second" },
+    { ...pastedAttachment(first), id: "third" }];
+  const h = setup(data, { resources: [endpoint] });
+  const capture = await h.window.__capCaptureClaudeJson();
+  assert.equal(capture.text,
+    `Claude conversation:\n\nUser: Intro\r\n\r\n${first}\r\n\r\n${second}\r\n\r\nOutro\n\n${first}\n\nAssistant: Private reasoning\n\nSelected answer`);
+  assert.equal(capture.messageTurnCount, 2);
+});
+
+test("Claude keeps a pasted card separate when its text is only a substring or is missing a full paragraph boundary", async () => {
+  for (const original of ["Intro\r\nCARD\r\nOutro", "Intro\r\n\r\nCARD_suffix\r\n\r\nOutro",
+    "Intro\r\n\r\nCARD\r\nOutro", "Intro\r\nCARD\r\n\r\nOutro"]) {
+    const data = fixture();
+    data.chat_messages[0].content = [{ type: "text", text: original }];
+    data.chat_messages[0].attachments = [pastedAttachment("CARD")];
+    const h = setup(data, { resources: [endpoint] });
+    assert.equal((await h.window.__capCaptureClaudeJson()).text,
+      `Claude conversation:\n\nUser: ${original}\n\nCARD\n\nAssistant: Private reasoning\n\nSelected answer`);
+  }
 });
 
 test("Claude JSON capture extracts only direct user/assistant text and thinking", async () => {
@@ -312,8 +498,8 @@ clockTest("Claude isolated bridge awaits MAIN reinstallation before requesting c
     let ensures = 0;
     let legacy = stale === "legacy";
     harness = setup(fixture(), { resources: [endpoint], beforeMessage: payload => {
-      // An open tab can still answer probes with the pre-diagnostics protocol.
-      if (legacy && payload.type === "pong") payload.version = 3;
+      // Open tabs can answer probes from the previous hook until it is replaced.
+      if (legacy && payload.type === "pong") payload.version = 6;
     }, runtime: { sendMessage: async message => {
       assert.equal(message.type, "ENSURE_CLAUDE_JSON_HOOK");
       ensures++; legacy = false; harness.window.__capClaudeFetchState.dispose();
@@ -364,7 +550,7 @@ function pickerHarness({ jsonEnabled = true, navigateDuringHandoff = false } = {
     return { text: "Claude conversation:\n\nUser: API-only history", messageTurnCount: 1 };
   } };
   const noop = () => {};
-  const sandbox = require("../testing/transfer-flow").loadTransferFlow({
+  const sandbox = require("./helpers/transfer-flow").loadTransferFlow({
     window, currentPlatform: { id: "claude", name: "Claude" }, claudeJsonCaptureEnabled: jsonEnabled,
     chatGptJsonCaptureEnabled: false, networkJsonCaptureEnabled: false,
     createTransferTrace: () => ({}), startTransferTelemetry: noop, markTransferTrace: noop, finishTransferTrace: noop,

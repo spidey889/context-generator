@@ -2,11 +2,275 @@ const assert = require("node:assert/strict");
 const http = require("node:http");
 const test = require("node:test");
 const { createSummaryWithFallback, getSummaryProfile } = require("../api/summarize.js").__test;
+const { clockTest } = require("./helpers/clock");
+
+function configureProviderRoute(t, provider) {
+  const flags = { OPENROUTER_ENABLED: provider === "OpenRouter", OPENROUTER_LING_ENABLED: true,
+    OPENROUTER_QWEN_ENABLED: false, OPENROUTER_DOTS_ENABLED: false, OPENROUTER_GEMMA_ENABLED: false,
+    MISTRAL_ENABLED: provider === "Mistral" };
+  const previous = Object.keys(flags).map(name => [name, process.env[name]]);
+  for (const [name, enabled] of Object.entries(flags)) process.env[name] = String(enabled);
+  t.after(() => {
+    for (const [name, value] of previous) {
+      if (value === undefined) delete process.env[name]; else process.env[name] = value;
+    }
+  });
+  return {
+    geminiApiKey: provider === "Mistral" ? undefined : "TEST_ONLY_GOOGLE",
+    mistralApiKey: provider === "Mistral" ? "TEST_ONLY_MISTRAL" : undefined,
+    openrouterApiKey: provider === "OpenRouter" ? "TEST_ONLY_OPENROUTER" : undefined
+  };
+}
+
+// All routes share fetchWithRetry. Exercise its boundaries once, retaining a
+// failed-body integration check for each other provider's fallback policy.
+for (const { provider, phase, elapsedMs } of [
+  { provider: "Gemini", phase: "body", elapsedMs: 89999 },
+  { provider: "Gemini", phase: "body", elapsedMs: 90000 },
+  { provider: "Gemini", phase: "headers", elapsedMs: 90000 },
+  { provider: "OpenRouter", phase: "body", elapsedMs: 90000 },
+  { provider: "Mistral", phase: "body", elapsedMs: 90000 }
+]) {
+  const scenario = { phase, elapsedMs };
+  test(`${provider} checks elapsed ${phase} time at ${elapsedMs} ms before delayed abort timers run`, async t => {
+    const keys = configureProviderRoute(t, provider);
+    const originalFetch = global.fetch;
+    t.after(() => { global.fetch = originalFetch; });
+    t.mock.timers.enable({ apis: ["Date", "setTimeout"], now: Date.parse("2026-10-06T10:00:00Z") });
+    const requests = [], bodyReads = [];
+    global.fetch = async (url, options) => {
+      const index = requests.length;
+      requests.push({ url, signal: options.signal });
+      const advanceElapsedTime = () => {
+        // Updating Date alone leaves the abort task queued, like an overdue
+        // timer when response/parser microtasks run first on a busy process.
+        if (index === 0) t.mock.timers.setTime(Date.now() + scenario.elapsedMs);
+      };
+      if (scenario.phase === "headers") advanceElapsedTime();
+      const text = "Build passed; Linux checks remain pending.";
+      const response = new Response(JSON.stringify(url.includes("generativelanguage.googleapis.com")
+        ? { candidates: [{ content: { parts: [{ text }] }, finishReason: "STOP" }] }
+        : { choices: [{ message: { content: text }, finish_reason: "stop" }] }));
+      const readBody = response.arrayBuffer.bind(response);
+      response.arrayBuffer = async () => {
+        bodyReads.push(index);
+        if (scenario.phase === "body") advanceElapsedTime();
+        return readBody();
+      };
+      return response;
+    };
+    const conversation = "Build passed; Linux checks remain pending. ".repeat(100);
+    const result = await createSummaryWithFallback({ conversation, profile: getSummaryProfile(conversation), ...keys });
+    const expired = scenario.elapsedMs >= 90000;
+    const firstModel = { Gemini: "gemini-3.6-flash", OpenRouter: "inclusionai/ling-3.1-flash", Mistral: "ministral-14b-2512" }[provider];
+    const fallbackModel = { Gemini: "gemini-3.5-flash-lite", OpenRouter: "gemini-3.6-flash", Mistral: "local-direct" }[provider];
+    assert.equal(result.model, expired ? fallbackModel : firstModel);
+    assert.equal(requests[0].signal.aborted, expired);
+    assert.equal(requests.length, expired && provider !== "Mistral" ? 2 : 1);
+    assert.equal(bodyReads.includes(0), scenario.phase !== "headers", "Expired headers must not start a body read.");
+    assert.match(result.summary, /Linux checks remain pending/);
+    if (expired && provider === "Mistral") assert.ok(result.summary.includes(conversation.trim()));
+  });
+}
+
+clockTest("a provider retry retains the model deadline when its body beats a delayed abort timer", async t => {
+  const keys = configureProviderRoute(t, "Gemini");
+  const originalFetch = global.fetch;
+  t.after(() => { global.fetch = originalFetch; });
+  const startedAt = Date.parse("2026-10-06T10:00:00Z");
+  t.mock.timers.setTime(startedAt);
+  const requests = [];
+  global.fetch = async (url, options) => {
+    const index = requests.length;
+    requests.push({ url, signal: options.signal, at: Date.now() });
+    if (index === 0) t.mock.timers.setTime(startedAt + 44550);
+    const response = new Response(JSON.stringify(index === 0 ? { error: { message: "TEST_ONLY_UNAVAILABLE" } }
+      : { candidates: [{ content: { parts: [{ text: "Build passed; Linux checks remain pending." }] }, finishReason: "STOP" }] }),
+      { status: index === 0 ? 503 : 200 });
+    const readBody = response.arrayBuffer.bind(response);
+    response.arrayBuffer = async () => {
+      if (index === 1) t.mock.timers.setTime(startedAt + 90000);
+      return readBody();
+    };
+    return response;
+  };
+  const conversation = "Build passed; Linux checks remain pending. ".repeat(100);
+  const result = await createSummaryWithFallback({ conversation, profile: getSummaryProfile(conversation), ...keys });
+  assert.equal(result.model, "gemini-3.5-flash-lite");
+  assert.equal(requests.length, 3);
+  assert.equal(requests[0].url, requests[1].url);
+  assert.equal(requests[1].at, startedAt + 45000, "The normal 450 ms retry delay stays intact.");
+  assert.equal(requests[1].signal.aborted, true);
+  assert.equal(requests[2].signal.aborted, false);
+});
+
+test("elapsed provider headers abort the native unread socket before fallback", { timeout: 5000 }, async t => {
+  const keys = configureProviderRoute(t, "Gemini");
+  const originalFetch = global.fetch;
+  t.after(() => { global.fetch = originalFetch; });
+  t.mock.timers.enable({ apis: ["Date"], now: Date.parse("2026-10-06T10:00:00Z") });
+  let noteClosed, rejectUnexpectedRead, closeTimer, pending, firstSignal;
+  let requests = 0, bodyReads = 0;
+  const closed = new Promise(resolve => { noteClosed = resolve; });
+  const unexpectedRead = new Promise((_, reject) => { rejectUnexpectedRead = reject; });
+  const server = http.createServer((_req, res) => {
+    res.once("close", () => noteClosed(!res.writableEnded));
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.write("{");
+  });
+  await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
+  global.fetch = async (_url, options) => {
+    if (++requests === 1) {
+      firstSignal = options.signal;
+      const response = await originalFetch(`http://127.0.0.1:${server.address().port}`, options);
+      t.mock.timers.setTime(Date.now() + 90000);
+      for (const method of ["json", "arrayBuffer"]) {
+        const readBody = response[method].bind(response);
+        response[method] = () => {
+          bodyReads++;
+          rejectUnexpectedRead(new Error("Expired headers started reading the native body"));
+          return readBody();
+        };
+      }
+      return response;
+    }
+    return new Response(JSON.stringify({ candidates: [{
+      content: { parts: [{ text: "Build passed; Linux checks remain pending." }] }, finishReason: "STOP"
+    }] }), { headers: { "Content-Type": "application/json" } });
+  };
+  try {
+    const conversation = "Build passed; Linux checks remain pending. ".repeat(100);
+    pending = createSummaryWithFallback({ conversation, profile: getSummaryProfile(conversation), ...keys });
+    const result = await Promise.race([pending, unexpectedRead]);
+    assert.equal(result.model, "gemini-3.5-flash-lite");
+    assert.equal(firstSignal.aborted, true);
+    assert.equal(bodyReads, 0);
+    assert.equal(requests, 2);
+    assert.equal(await Promise.race([closed, new Promise(resolve => { closeTimer = setTimeout(() => resolve(false), 1000); })]),
+      true, "The expired owned response must close its unfinished native socket.");
+  } finally {
+    clearTimeout(closeTimer);
+    server.closeAllConnections();
+    await new Promise(resolve => server.close(resolve));
+    await pending?.catch(() => {});
+  }
+});
+
+for (const scenario of [
+  { provider: "Gemini", status: 503, failures: 2, model: "gemini-3.5-flash-lite" },
+  { provider: "OpenRouter", status: 401, failures: 1, model: "gemini-3.6-flash" },
+  { provider: "OpenRouter", status: 429, failures: 1, model: "qwen/qwen3.8-27b:free" },
+  { provider: "Mistral", status: 429, failures: 1, model: "local-direct" }
+]) test(`${scenario.provider} discards a stalled HTTP ${scenario.status} body before retry or fallback`, { timeout: 5000 }, async t => {
+  const keys = configureProviderRoute(t, scenario.provider);
+  if (scenario.provider === "OpenRouter") process.env.OPENROUTER_QWEN_ENABLED = "true";
+  const originalFetch = global.fetch, originalSetTimeout = global.setTimeout, originalClearTimeout = global.clearTimeout;
+  const requests = [], closed = [], retryDelays = [];
+  let noteClosed, rejectUnexpectedRead, closeTimer, pending, bodyReads = 0, reservations = 0;
+  const allClosed = new Promise(resolve => { noteClosed = resolve; });
+  const unexpectedRead = new Promise((_, reject) => { rejectUnexpectedRead = reject; });
+  const server = http.createServer((_req, res) => {
+    res.once("close", () => {
+      closed.push(!res.writableEnded);
+      if (closed.length === scenario.failures) noteClosed(closed.every(Boolean));
+    });
+    res.writeHead(scenario.status, { "Content-Type": "application/json" });
+    res.write("{");
+  });
+  await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
+  t.mock.timers.enable({ apis: ["Date"], now: Date.parse("2026-10-06T10:00:00Z") });
+  global.setTimeout = (callback, ms, ...args) => {
+    // Assert the requested delay, then advance only that retry on a real task.
+    // Native transport timers remain real; mocking them can stall Node 22 I/O.
+    if (ms === 450) {
+      retryDelays.push(ms);
+      return originalSetTimeout(() => {
+        t.mock.timers.setTime(Date.now() + ms);
+        callback(...args);
+      }, 0);
+    }
+    return originalSetTimeout(callback, ms, ...args);
+  };
+  global.fetch = async (url, options) => {
+    requests.push({ url, model: JSON.parse(options.body).model, at: Date.now() });
+    if (requests.length <= scenario.failures) {
+      const response = await originalFetch(`http://127.0.0.1:${server.address().port}`, options);
+      for (const method of ["json", "arrayBuffer"]) {
+        const readBody = response[method].bind(response);
+        response[method] = () => {
+          bodyReads++;
+          rejectUnexpectedRead(new Error("Unused provider error body was read"));
+          return readBody();
+        };
+      }
+      return response;
+    }
+    const text = "Build passed; Linux checks remain pending.";
+    return new Response(JSON.stringify(url.includes("generativelanguage.googleapis.com")
+      ? { candidates: [{ content: { parts: [{ text }] }, finishReason: "STOP" }] }
+      : { choices: [{ message: { content: text }, finish_reason: "stop" }] }));
+  };
+  try {
+    const conversation = "Build passed; Linux checks remain pending. ".repeat(100);
+    pending = createSummaryWithFallback({ conversation, profile: getSummaryProfile(conversation), ...keys,
+      requestContext: { reserveFunded: async () => { reservations++; return true; } } });
+    const result = await Promise.race([pending, unexpectedRead]);
+    assert.equal(result.model, scenario.model);
+    assert.equal(bodyReads, 0);
+    assert.equal(requests.length, scenario.failures + (scenario.model === "local-direct" ? 0 : 1));
+    assert.equal(reservations, scenario.provider === "OpenRouter" ? (scenario.status === 429 ? 0 : 1) : requests.length);
+    assert.deepEqual(retryDelays, scenario.failures === 2 ? [450] : []);
+    if (scenario.failures === 2) {
+      assert.equal(requests[1].at - requests[0].at, 450);
+      assert.equal(requests[0].url, requests[1].url);
+    }
+    if (scenario.provider === "OpenRouter") {
+      assert.deepEqual(result.openrouterModelsTried, scenario.status === 429
+        ? ["inclusionai/ling-3.1-flash", "qwen/qwen3.8-27b:free"] : ["inclusionai/ling-3.1-flash"]);
+    }
+    assert.equal(await Promise.race([allClosed, new Promise(resolve => {
+      closeTimer = originalSetTimeout(() => resolve(false), 1000);
+    })]), true, "Every owned error body must close its unfinished native socket.");
+  } finally {
+    originalClearTimeout(closeTimer);
+    server.closeAllConnections();
+    await new Promise(resolve => server.close(resolve));
+    await pending?.catch(() => {});
+    global.fetch = originalFetch;
+    global.setTimeout = originalSetTimeout;
+    t.mock.timers.reset();
+  }
+});
+
+for (const mode of ["throws", "rejects", "stalls", "absent"]) clockTest(`provider error-body cancellation ${mode} cannot delay status fallback`, async t => {
+  const keys = configureProviderRoute(t, "Gemini");
+  const originalFetch = global.fetch;
+  t.after(() => { global.fetch = originalFetch; });
+  let requests = 0, bodyReads = 0, cancelled = false;
+  global.fetch = async () => {
+    if (++requests > 1) return new Response(JSON.stringify({ candidates: [{
+      content: { parts: [{ text: "Build passed; Linux checks remain pending." }] }, finishReason: "STOP"
+    }] }));
+    return { ok: false, status: 429, body: mode === "absent" ? null : { cancel() {
+      cancelled = true;
+      if (mode === "throws") throw new Error("PRIVATE_CANCEL_ERROR");
+      if (mode === "rejects") return Promise.reject(new Error("PRIVATE_CANCEL_ERROR"));
+      return new Promise(() => {});
+    } }, json: async () => { bodyReads++; throw new Error("PRIVATE_UNUSED_PROVIDER_BODY"); } };
+  };
+  const startedAt = Date.now(), conversation = "Build passed; Linux checks remain pending. ".repeat(100);
+  const result = await createSummaryWithFallback({ conversation, profile: getSummaryProfile(conversation), ...keys });
+  assert.equal(result.model, "gemini-3.5-flash-lite");
+  assert.equal(requests, 2);
+  assert.equal(bodyReads, 0);
+  assert.equal(cancelled, mode !== "absent");
+  assert.ok(Date.now() - startedAt < 1000);
+});
 
 for (const openrouterEnabled of [false, true]) {
-// Both providers use the same body reader before status-specific retry logic.
-// Gemini covers success/error bodies; OpenRouter checks its 90s/60s route budgets.
-for (const status of openrouterEnabled ? [200] : [200, 429, 503]) {
+// Successful bodies still share the bounded reader; OpenRouter checks its
+// 90s/60s route budgets. Non-OK bodies use the cancellation regressions above.
+const status = 200;
   test(`${openrouterEnabled ? "OpenRouter" : "Gemini"} fallback aborts a stalled ${status} response body within its budget`, { timeout: 5000 }, async t => {
     // Exercise this route regardless of a developer's deployed env switches.
     const flags = ["OPENROUTER_ENABLED", "OPENROUTER_QWEN_ENABLED",
@@ -45,8 +309,8 @@ for (const status of openrouterEnabled ? [200] : [200, 429, 503]) {
         stalledSignals.push(options.signal);
         const response = await originalFetch(`http://127.0.0.1:${server.address().port}`, options);
         receivedStalledHeaders = true;
-        const readBody = response.json.bind(response);
-        response.json = () => {
+        const readBody = response.arrayBuffer.bind(response);
+        response.arrayBuffer = () => {
           const pendingBody = readBody();
           pendingBody.catch(() => {}); // Drain rejections even if the clock driver fails.
           const budget = openrouterEnabled && requests.length === 2 ? 60000 : 90000;
@@ -96,5 +360,4 @@ for (const status of openrouterEnabled ? [200] : [200, 429, 503]) {
       global.fetch = originalFetch;
     }
   });
-}
 }

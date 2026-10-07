@@ -97,7 +97,8 @@ test("relay preserves permanent payload failures and retries configuration/netwo
   for (const [status, code, expectedStatus, expectedCode] of [[422, "attempt_identity_mismatch", 422, "attempt_identity_mismatch"],
     [422, "invalid_summary_proof", 422, "invalid_summary_proof"], [413, "request_too_large", 413, "request_too_large"],
     [401, "relay_not_authorized", 503, "telemetry_unavailable"], [503, "telemetry_unavailable", 503, "telemetry_unavailable"],
-    [503, "telemetry_upstream_unavailable", 503, "telemetry_upstream_unavailable"], [400, "PRIVATE_CODE", 503, "telemetry_upstream_unavailable"]]) {
+    [503, "telemetry_upstream_unavailable", 503, "telemetry_upstream_unavailable"], [400, "PRIVATE_CODE", 503, "telemetry_upstream_unavailable"],
+    [500, "", 503, "telemetry_upstream_unavailable"]]) {
     global.fetch = async () => new Response(JSON.stringify({ code, error: "PRIVATE_BODY" }), { status });
     const res = response(); await relay(request, res);
     assert.equal(res.code, expectedStatus); assert.equal(res.body.code, expectedCode);

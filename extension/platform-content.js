@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-05-tab-ux-speed-v109";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-07-orb-cutout-motion-v115";
   const INLINE_PILL_SIZE = 36;
   const ownedUiStyleSheets = new Map();
   const CLAUDE_INLINE_STYLE_ID = "context-generator-claude-inline-styles";
@@ -152,7 +152,7 @@
   const GROK_VIRTUAL_SWEEP_SLOW_CHANGE_TIMEOUT_MS = 160;
   const GROK_VIRTUAL_SWEEP_DELAYED_RENDER_TIMEOUT_MS = 220;
   const COLLAPSED_CONVERSATION_EXPAND_RE = /\b(?:show|see|read|view)\s+(?:more|full|all)\b|\bcontinue\s+(?:reading|message|response)\b|\bexpand\b/i;
-  const COLLAPSED_CONVERSATION_EXPAND_EXCLUDE_RE = /\b(?:continue generating|regenerate|send|submit|stop generating|new chat|settings|menu|voice|microphone)\b/i;
+  const COLLAPSED_CONVERSATION_EXPAND_EXCLUDE_RE = /\b(?:continue generating|regenerate|send|submit|stop generating|new chat|settings|menu|voice|microphone|options|actions|response details)\b/i;
   const PASTED_CONTENT_TITLE_RE = /^\s*pasted\s+(?:content|text)\s*$/i;
   const PASTED_CONTENT_BADGE_RE = /^\s*pasted\s*$/i;
   const CLAUDE_PASTED_TEXT_BUTTON_LABEL_RE = /^\s*pasted\s+text\b/i;
@@ -487,8 +487,10 @@
   let reservedActionCluster = null;
   let reservedComposerSurface = null;
   let destinationSheetAnimationFrame = null;
+  let destinationSheetPathname = null;
   let destinationSheetHideTimer = null;
   let destinationBackdropHideTimer = null;
+  let destinationBackdropCutoutFrame = null;
   let pendingHandoffOrigin = null;
   let handoffOverlayHideTimer = null;
   let handoffScrimHideTimer = null;
@@ -798,6 +800,7 @@
       releaseChatGptInlineMount,
       mountInlineOrLegacyBackup,
       invalidateInlinePicker,
+      toggleDestinationSheet,
       hideDestinationSheet,
       findProviderInlineToolbar,
       mountProviderInlineButton,
@@ -838,6 +841,7 @@
       buildLatestTransferStats,
       getSafeTelemetryFailureReason,
       startFloatingButtonMonitoring,
+      scheduleFloatingButtonUpdate,
       teardownContextGeneratorInstance,
       getOwnedLifecycleResourceCounts,
       delay,
@@ -1016,6 +1020,10 @@
       chars: summary.length,
       background: timing
     });
+    // Receipt signing can be skipped by optional storage, and cached/local
+    // carries have no fresh proof. Report the actual result, never the primary
+    // attempted model; the server keeps this separate from verified accounting.
+    if (trace && timing?.backend?.model) trace.telemetryReportedModel = timing.backend.model;
     advanceTransferTelemetryStage(trace, "summary_completed");
     return summary;
   }
@@ -1864,7 +1872,12 @@
 
   function isCollapsedConversationExpander(element) {
     if (!(element instanceof Element) || !isVisible(element) || isContextGeneratorNode(element)) return false;
-    if (element.closest("nav, header, footer, aside, menu")) return false;
+    if (element.closest("nav, header, footer, aside, menu, [role='menu'], [role='menuitem'], [role='dialog']")) return false;
+    // Native response menus can say "Show more" or contain an expand icon.
+    // Opening them is a side effect, never conversation-text preparation.
+    if (element.hasAttribute("aria-haspopup") && element.getAttribute("aria-haspopup") !== "false") return false;
+    if (element.matches(".mat-menu-trigger, .mat-mdc-menu-trigger")) return false;
+    if (currentPlatform.id === "gemini" && !element.closest("user-query, .query-text, message-content, .response-content")) return false;
 
     const label = getElementLabel(element, true);
     if (!COLLAPSED_CONVERSATION_EXPAND_RE.test(label)) return false;
@@ -2069,7 +2082,8 @@
       characterCount: trace.telemetryCharacterCount ?? (failureReason === "no_conversation" ? 0 : null),
       status,
       lastStage: trace.telemetryLastStage,
-      failureReason: status === "failed" ? failureReason : null
+      failureReason: status === "failed" ? failureReason : null,
+      ...(trace.telemetryReportedModel ? { reportedModel: trace.telemetryReportedModel } : {})
     });
   }
 
@@ -5096,7 +5110,7 @@
       hideOnboardingNudge();
       hideClaudeLimitNudge();
       // Composer loss must never move focus to the Cap Context trigger.
-      hideDestinationSheet({ restoreFocus: false });
+      if (!shouldPreserveClaudePicker()) hideDestinationSheet({ restoreFocus: false });
       releaseBubbleSlot();
       releaseComposerSurface();
       return existingBubble;
@@ -5109,7 +5123,7 @@
         bubble.style.display = "none";
         hideOnboardingNudge();
         hideClaudeLimitNudge();
-        hideDestinationSheet({ restoreFocus: false });
+        if (!shouldPreserveClaudePicker()) hideDestinationSheet({ restoreFocus: false });
         return bubble;
       }
       ensureFloatingOverlay();
@@ -5171,9 +5185,9 @@
       `max-width:${BUBBLE_SIZE}px`,
       `max-height:${BUBBLE_SIZE}px`,
       "border-radius:9999px",
-      "background:transparent",
-      "border:0",
-      "box-shadow:none",
+      "background:transparent !important",
+      "border:0 !important",
+      "box-shadow:none !important",
       "box-sizing:border-box",
       "cursor:pointer",
       "padding:0",
@@ -5231,6 +5245,12 @@
     });
     addOwnedEventListener(bubble, "pointercancel", () => {
       bubble.style.transform = "translate3d(0,0,0) scale(1)";
+    });
+    addOwnedEventListener(bubble, "transitionend", (event) => {
+      if (event.target === bubble && event.propertyName === "transform") updateDestinationBackdropCutout();
+    });
+    addOwnedEventListener(bubble, "transitionrun", (event) => {
+      if (event.target === bubble && event.propertyName === "transform") trackDestinationBackdropCutout();
     });
     addOwnedEventListener(bubble, "click", (event) => {
       event.preventDefault();
@@ -6704,6 +6724,7 @@
     sheet.style.opacity = "0";
     sheet.style.transform = DESTINATION_SHEET_CLOSED_TRANSFORM;
     sheet.style.display = "block";
+    destinationSheetPathname = window.location.pathname;
     delete sheet.dataset.contextGeneratorPositionLocked;
     positionDestinationSheet();
     resetDestinationTiles(sheet);
@@ -6739,6 +6760,7 @@
   }
 
   function hideDestinationSheet({ immediate = false, preserveBackdrop = false, restoreFocus = true } = {}) {
+    destinationSheetPathname = null;
     const sheet = document.getElementById(DESTINATION_SHEET_ID);
     const backdrop = document.getElementById(DESTINATION_SHEET_BACKDROP_ID);
     const reducedMotion = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
@@ -6794,15 +6816,39 @@
     }
   }
 
+  function trackDestinationBackdropCutout() {
+    if (destinationBackdropCutoutFrame) return;
+    const follow = () => {
+      destinationBackdropCutoutFrame = null;
+      const backdrop = document.getElementById(DESTINATION_SHEET_BACKDROP_ID);
+      if (!backdrop || backdrop.style.display !== "block") return;
+      updateDestinationBackdropCutout();
+      const bubble = document.getElementById(BUBBLE_ID);
+      // Follow only the live transform, including dismissal while the scrim
+      // fades. The owned frame stops when motion or the backdrop finishes.
+      if (bubble?.getAnimations?.().some(animation => animation.transitionProperty === "transform" && animation.playState === "running")) {
+        destinationBackdropCutoutFrame = requestAnimationFrame(follow);
+      }
+    };
+    destinationBackdropCutoutFrame = requestAnimationFrame(follow);
+  }
+
   function updateDestinationBackdropCutout() {
     const bubble = document.getElementById(BUBBLE_ID);
     const backdrop = document.getElementById(DESTINATION_SHEET_BACKDROP_ID);
-    if (!bubble || !backdrop || bubble.getAttribute("aria-expanded") !== "true") return;
-    const rect = bubble.getBoundingClientRect();
-    const x = Math.round(rect.left + rect.width / 2);
-    const y = Math.round(rect.top + rect.height / 2);
-    // Match the solid artwork, keeping the native button/background under blur.
-    const radius = Math.max(1, Math.round(Math.min(rect.width, rect.height) * 0.4));
+    // aria-expanded flips before the closing animation ends; its visible
+    // backdrop must keep following the orb until the fade actually finishes.
+    if (!bubble || !backdrop || backdrop.style.display !== "block") return;
+    if (!bubble.isConnected || !isVisible(bubble) || bubble.style.display === "none" || bubble.style.visibility === "hidden") {
+      backdrop.style.clipPath = "";
+      return;
+    }
+    const rect = (bubble.querySelector("img") || bubble).getBoundingClientRect();
+    const x = rect.left + rect.width / 2;
+    const y = rect.top + rect.height / 2;
+    // bubble-icon.png's solid orb occupies 75% of its transparent canvas.
+    // Use the artwork, not the larger button, or the hole exposes a hard disc.
+    const radius = Math.max(1, Math.min(rect.width, rect.height) * 0.375);
     // Inline ancestors trap z-index. Clip the scrim around the real orb instead
     // of moving/cloning it or lifting the native composer's controls above blur.
     // Unlike a CSS mask, this hole also lets pointer clicks reach the orb.
@@ -6891,6 +6937,26 @@
     return Boolean(sheet && sheet.style.display === "block");
   }
 
+  function shouldPreserveClaudePicker() {
+    const sheet = document.getElementById(DESTINATION_SHEET_ID);
+    return currentPlatform.id === "claude" && !isRunning &&
+      destinationSheetPathname === window.location.pathname &&
+      sheet?.style.display === "block" && sheet.getAttribute("aria-hidden") !== "true";
+  }
+
+  function refreshClaudePickerBackdrop() {
+    if (!shouldPreserveClaudePicker()) return;
+    const bubble = document.getElementById(BUBBLE_ID);
+    // Keep the picker locked at its opening coordinates. Only the orb's
+    // click-through hole follows Claude's reflow or composer replacement.
+    if (bubble) {
+      updateDestinationBackdropCutout();
+      return;
+    }
+    const backdrop = document.getElementById(DESTINATION_SHEET_BACKDROP_ID);
+    if (backdrop) backdrop.style.clipPath = "";
+  }
+
   function positionDestinationSheet() {
     const sheet = document.getElementById(DESTINATION_SHEET_ID);
     const bubble = document.getElementById(BUBBLE_ID);
@@ -6900,7 +6966,7 @@
     const bubbleRect = bubble.getBoundingClientRect();
     const margin = 10;
     const sheetWidth = Math.min(DESTINATION_SHEET_WIDTH, window.innerWidth - margin * 2);
-    const sheetHeight = sheet.offsetHeight || 330;
+    const sheetHeight = Math.min(sheet.offsetHeight || 330, Math.max(0, window.innerHeight - margin * 2));
     const left = Math.max(
       margin,
       Math.min(
@@ -6912,7 +6978,7 @@
     const top = preferredTop >= margin ? preferredTop : bubbleRect.bottom + margin;
 
     sheet.style.left = `${Math.round(left)}px`;
-    sheet.style.top = `${Math.round(Math.min(top, window.innerHeight - sheetHeight - margin))}px`;
+    sheet.style.top = `${Math.round(Math.max(margin, Math.min(top, window.innerHeight - sheetHeight - margin)))}px`;
     sheet.style.transformOrigin = preferredTop >= margin ? "bottom right" : "top right";
     sheet.dataset.contextGeneratorPositionLocked = "true";
   }
@@ -9264,7 +9330,7 @@
 
   function scheduleFloatingButtonUpdate(reason = "unspecified") {
     if (floatingButtonMonitoringDisabled) return;
-    if (isDestinationSheetOpen() && !invalidateInlinePicker(reason)) return;
+    if (isDestinationSheetOpen() && !shouldPreserveClaudePicker() && !invalidateInlinePicker(reason)) return;
     pendingFloatingButtonReasons.add(normalizeFloatingButtonUpdateReason(reason));
     if (floatingButtonFrame) return;
     floatingButtonFrame = requestAnimationFrame(() => {
@@ -9272,9 +9338,10 @@
       const recalculationReason = [...pendingFloatingButtonReasons].sort().join("+") || "unspecified";
       pendingFloatingButtonReasons.clear();
       if (floatingButtonMonitoringDisabled) return;
-      if (isDestinationSheetOpen() && !invalidateInlinePicker(recalculationReason)) return;
+      if (isDestinationSheetOpen() && !shouldPreserveClaudePicker() && !invalidateInlinePicker(recalculationReason)) return;
       try {
         ensureFloatingButton(recalculationReason);
+        refreshClaudePickerBackdrop();
         updateClaudeLimitNudge();
       } catch (error) {
         if (isExtensionContextInvalidated(error)) {
@@ -9288,6 +9355,15 @@
 
   function invalidateInlinePicker(reason) {
     if (!INLINE_MOUNT_PLATFORMS.has(currentPlatform.id)) return false;
+    // Layout and transient discovery loss must not dismiss Claude's picker.
+    // Once a tile starts transfer, freeze geometry until the handoff owns it.
+    if (currentPlatform.id === "claude" && isDestinationSheetOpen() && (isRunning || shouldPreserveClaudePicker())) return false;
+    if (currentPlatform.id === "claude" && destinationSheetPathname !== null && destinationSheetPathname !== window.location.pathname) {
+      // Route ownership survives a composer gap, when no mount remains to
+      // compare. Never leave an old chat's picker over the next conversation.
+      hideDestinationSheet({ restoreFocus: false });
+      return true;
+    }
     const input = findPlatformInput();
     const isClaude = currentPlatform.id === "claude";
     const toolbar = isClaude ? findClaudeInlineToolbar(input) : currentPlatform.id === "chatgpt"
@@ -9295,9 +9371,8 @@
     const mount = isClaude ? claudeInlineMount : currentPlatform.id === "chatgpt" ? chatGptInlineMount : providerInlineMount;
     // A fallback picker has no inline owner to invalidate on ordinary updates.
     if (!toolbar && !mount) return false;
-    // A picker belongs to the editor that opened it. On replacement, route
-    // change or resize close it without stealing focus; its opening position
-    // is intentionally locked during the picker-to-handoff animation.
+    // Other inline pickers retain editor ownership. Claude's active picker
+    // reaches this path only after its chat changes or explicit dismissal.
     const changed = !toolbar || !mount ||
       mount.input !== input || mount.left !== toolbar.left ||
       mount.body !== toolbar.body ||

@@ -2,7 +2,9 @@
 
 Date: 2026-10-05. Audited source: `c609165a8fd0fa972467c73907c78434ad87f643`, the refreshed remote `master` used to create `codex/transfer-audit` in a separate worktree.
 
-Integration status: the later T01/T02 fixes now restrict destination delivery to guarded new-chat surfaces and cancel source capture on navigation. This report preserves the original audit evidence and line numbers; its old behavior descriptions are historical, not the current production contract. T03–T07 remain follow-up findings requiring revalidation against current code. See [LOGIC.md](LOGIC.md) for the combined behavior, including later local-carry and Claude delivery fixes.
+Status rechecked on 2026-10-07 against current source: **4 of 7 findings are fixed (T01, T02, T06, T07); 3 remain open (T03, T04, T05).** Destination/source conversation guards, source-window placement and activation-error propagation are implemented. Delivery cancellation, respecting deliberate composer clearing and lost-response reconciliation still need follow-up. This status refresh used source inspection; the original reproductions were not rerun. See [LOGIC.md](LOGIC.md) for the current production behavior.
+
+The finding descriptions, evidence line numbers, likelihood estimates and reproductions below preserve the original 2026-10-05 audit. They describe audit-time behavior unless a current status note says otherwise.
 
 This is a source audit of work after transfer selection: the page lock, cancellation, worker restart, destination preparation, delivery and activation. No application code or existing documentation was changed. No browser was opened, automated or used for execution. Evidence comes from source inspection, existing Node tests and additional in-memory Node/VM fixtures using the repository's actual functions. Chrome API documentation was read to verify window selection. No live accounts, providers, deployment or production telemetry were queried.
 
@@ -10,17 +12,19 @@ Likelihood estimates are qualitative judgments about ordinary use, not measured 
 
 ## Findings at a glance
 
-| ID | Confirmed problem | Normal-user likelihood | Impact |
-| --- | --- | --- | --- |
-| T01 | A prepared destination can become another chat and still receive the carry | Occasional when the user uses the prepared tab; low when they wait in the source | High: private context placed in an unintended conversation |
-| T02 | Direct DOM capture can combine two source chats after navigation | Low overall with Fast capture on; plausible during toolbar/normal capture of long chats | High: unselected conversation text sent to the summary service and destination |
-| T03 | Closing a tab does not reliably cancel delivery already in progress | Low overall; predictable when trying to abort by closing tabs | Moderate: unwanted paste, recreated tabs or focus changes after cancellation |
-| T04 | Paste recovery can undo an intentional clear or reinsert a carry after Send | Occasional for immediate keyboard Send/clear; otherwise low | Moderate: an unwanted duplicate draft or recovery modal |
-| T05 | Lost acknowledgements leave ambiguous delivery; timeouts can create duplicate pastes | Low in healthy sessions; plausible with slow/suspended destinations or worker failure | Moderate: two copies, orphan tabs, apparent failure after successful paste |
-| T06 | Recovery can open the destination in a different browser window | Occasional for multiple-window users when fresh-tab recovery runs | Low to moderate: context appears in another window and focus is taken there |
-| T07 | Activation failure is swallowed and reported as success | Very low: a narrow tab-close race or a window/tab API failure | Moderate: the destination is missing or remains hidden despite reported completion |
+| ID | Current status | Original problem | Audit-time normal-user likelihood | Original impact |
+| --- | --- | --- | --- | --- |
+| T01 | Fixed | A prepared destination can become another chat and still receive the carry | Occasional when the user uses the prepared tab; low when they wait in the source | High: private context placed in an unintended conversation |
+| T02 | Fixed | Direct DOM capture can combine two source chats after navigation | Low overall with Fast capture on; plausible during toolbar/normal capture of long chats | High: unselected conversation text sent to the summary service and destination |
+| T03 | Open | Closing a tab does not reliably cancel delivery already in progress | Low overall; predictable when trying to abort by closing tabs | Moderate: unwanted paste, recreated tabs or focus changes after cancellation |
+| T04 | Open | Paste recovery can undo an intentional clear or reinsert a carry after Send | Occasional for immediate keyboard Send/clear; otherwise low | Moderate: an unwanted duplicate draft or recovery modal |
+| T05 | Open | Lost acknowledgements leave ambiguous delivery; timeouts can create duplicate pastes | Low in healthy sessions; plausible with slow/suspended destinations or worker failure | Moderate: two copies, orphan tabs, apparent failure after successful paste |
+| T06 | Fixed | Recovery can open the destination in a different browser window | Occasional for multiple-window users when fresh-tab recovery runs | Low to moderate: context appears in another window and focus is taken there |
+| T07 | Fixed | Activation failure is swallowed and reported as success | Very low: a narrow tab-close race or a window/tab API failure | Moderate: the destination is missing or remains hidden despite reported completion |
 
 ## T01 — Destination ownership stops at the hostname
+
+**Current status: fixed.** Delivery requires guarded new-chat routes; conversation/navigation guards also cover insertion and delayed recovery.
 
 **Trigger:** Start a transfer, open its inactive prepared destination, and navigate within that site to another chat or start a conversation there before the summary arrives. Leave that conversation's composer empty. A similar change can happen between initial paste and delayed recovery.
 
@@ -33,6 +37,8 @@ Likelihood estimates are qualitative judgments about ordinary use, not measured 
 **Likelihood and harm:** Occasional for users who begin using the prepared tab during a long summary; low for users who simply wait. High impact because unrelated chats can receive private context. This is an unintended draft insertion; submitting that draft remains the user's action. Navigation to a different platform before the reuse check is already rejected, so this finding concerns same-platform state changes and later races.
 
 ## T02 — Direct DOM capture has no source-conversation guard
+
+**Current status: fixed.** Source identity is pinned before capture and checked through DOM capture, attachment work, JSON fallback and dispatch; navigation cancels capture.
 
 **Trigger:** Use the toolbar transfer or disable Fast capture, then switch source chats through the site's SPA navigation while capture is settling or scrolling through history.
 
@@ -86,6 +92,8 @@ Production response budgets are 30/45 seconds, exceeding normal content retry bu
 
 ## T06 — New tabs belong to the last active window, not the source window
 
+**Current status: fixed.** `createDestinationTab()` resolves the source tab's current window and position, then supplies `windowId`, `index` and `openerTabId` for preparation and fresh recovery. A closed source fails instead of opening in an unrelated window.
+
 **Trigger:** Start in window A, switch to window B during the transfer, and encounter fresh-tab recovery later. Initial preparation has a smaller version of the same race during the picker transition.
 
 **What happens:** `createDestinationTab()` supplies URL and activation but no `windowId` or opener. The message handlers do not carry the source window through orchestration. Chrome documents that omitted `tabs.create.windowId` defaults to the current window, which for a service worker falls back to the last active window. The carry can therefore arrive in B, and final activation focuses B. [Tabs creation contract](https://developer.chrome.com/docs/extensions/reference/api/tabs#method-create), [service-worker current-window rule](https://developer.chrome.com/docs/extensions/reference/api/windows#the-current-window).
@@ -98,6 +106,8 @@ Production response budgets are 30/45 seconds, exceeding normal content retry bu
 
 ## T07 — Failed activation is reported as completed
 
+**Current status: fixed.** `activateDestinationTab()` propagates activation/focus failures as `destination_open_failed` and preserves timeout errors. Failed activation cannot silently continue a focused paste or report successful switching.
+
 **Trigger:** The destination disappears after its validation but before `tabs.update()`, or activation/window focus fails after a successful paste.
 
 **What happens:** `activateDestinationTab()` catches every error except `transfer_timeout` and resolves normally. The verified activation handler consequently returns `{ ok: true }`; the source marks completion and releases the lock. The user can be left in the source while the destination is hidden, or with no destination at all.
@@ -108,7 +118,7 @@ Production response budgets are 30/45 seconds, exceeding normal content retry bu
 
 **Likelihood and harm:** Very low for ordinary use because the validation/activation race is narrow; also possible during an API failure. Moderate impact when it occurs: misleading success and a missing/unrevealed carry. The source copy modal is created before deferred activation, so that path retains manual recovery.
 
-## Transfer lock and restart boundaries that already work
+## Transfer lock and restart boundaries observed in the original audit
 
 - The page-local `isRunning` check is set before the first transfer await. Repeated starts in the same document are rejected. Both picker and toolbar starts install the six-minute deadline. Deadline expiry marks the trace expired, finishes it and releases the source lock (`platform-content.js:733–745,1025–1043,6821–6839,9312–9323`). No permanent lock leak was confirmed in the reviewed active-page paths.
 - Continuations check their own trace after asynchronous work; the expired-trace catch paths return before resetting a newer attempt. Expired destination requests reject before initial insertion. This deadline protection does not supply the cancellation/ownership missing in T01–T05.
@@ -118,7 +128,7 @@ Production response budgets are 30/45 seconds, exceeding normal content retry bu
 
 ### What a worker restart can lose at each stage
 
-| Stage when interrupted | Current recovery boundary |
+| Stage when interrupted | Audit-time recovery boundary |
 | --- | --- |
 | Source capture | Source-page capture/lock can survive; a lost preparation response can orphan its tab. |
 | Summary request | In-memory request/cache is lost. On response-channel failure, the surviving source has explicit full-transcript local recovery; it does not resume the remote request (`platform-content.js:965–1004`). |
@@ -126,7 +136,7 @@ Production response budgets are 30/45 seconds, exceeding normal content retry bu
 | Paste complete, activation/response pending | Already-inserted text can remain, but completion/focus can be lost or falsely acknowledged; see T05/T07. |
 | Telemetry delivery only | The outbox, active source metadata and signed receipts have durable restart coverage. This is telemetry recovery, not resumption of a transfer. |
 
-## Validation
+## Original audit validation
 
 Existing focused tests passed: **63/63** across `test/background.test.js`, `test/json-transfer-fallback.test.js` and `test/telemetry-delivery.test.js`; **8/8** selected paste/draft/expiry/paint cases from `test/platform-content.test.js`.
 
@@ -139,4 +149,4 @@ node --test --test-timeout=30000 --test-name-pattern="expired destination paste|
 
 The additional reproductions evaluated existing source and test helpers in memory, with fake DOM/tab/storage boundaries. They created no repository test files and made no backend requests. Their reported outcomes are described under each finding. Passing existing tests establishes the covered safeguards; it does not invalidate the demonstrated races or estimate their production frequency.
 
-Recommended order for a later fix: bind destination/source conversation ownership (T01/T02), make cancellation revoke delivery and recovery (T03), preserve trusted user intent (T04), reconcile delivery outcomes across lost responses/restarts (T05), then bind the window and propagate activation errors (T06/T07). No fixes were applied in this audit.
+Remaining follow-up order: make cancellation revoke delivery and recovery (T03), preserve trusted user intent during paste recovery (T04), then reconcile delivery outcomes across lost responses/restarts (T05). T01/T02/T06/T07 are already fixed. This report's status update changes documentation only.

@@ -3,7 +3,7 @@ const fs = require("node:fs");
 const path = require("node:path");
 const test = require("node:test");
 const vm = require("node:vm");
-const { clockTest } = require("../testing/clock");
+const { clockTest } = require("./helpers/clock");
 
 const source = fs.readFileSync(path.join(__dirname, "..", "extension", "background.js"), "utf8");
 const manifest = JSON.parse(fs.readFileSync(path.join(__dirname, "..", "extension", "manifest.json"), "utf8"));
@@ -12,17 +12,17 @@ const compiledTransferBackground = new vm.Script(`${source}\n;globalThis.__backg
   filename: "extension/background.js"
 });
 
-function loadBackgroundForSummaryTest(fetchImpl, { tabs = [], injections = [], injectionError = false, onMessage = () => {} } = {}) {
+function loadBackgroundForSummaryTest(fetchImpl, { tabs = [], injections = [], injectionError = false, onMessage = () => {}, clock = Date } = {}) {
   let messageListener = null;
   const event = { addListener: () => {} };
   const sandbox = {
     AbortController,
-    Date,
+    Date: clock,
     URL,
     clearTimeout,
     console: { debug() {}, error() {}, log() {}, warn() {} },
     fetch: fetchImpl,
-    performance: { now: () => Date.now() },
+    performance: { now: () => clock.now() },
     setTimeout,
     chrome: {
       action: {
@@ -94,7 +94,8 @@ function loadBackgroundForTransferTest({
     gotten: [],
     sent: [],
     updated: [],
-    injected: []
+    injected: [],
+    fetched: []
   };
   const event = { addListener: () => {} };
   const fastSetTimeout = (callback, _delay, ...args) => setTimeout(callback, 0, ...args);
@@ -104,7 +105,7 @@ function loadBackgroundForTransferTest({
     URL,
     clearTimeout,
     console: { debug() {}, error() {}, log() {}, warn() {} },
-    fetch: async () => { throw new Error("fetch is not expected in transfer tests"); },
+    fetch: async (...args) => { operations.fetched.push(args); throw new Error("fetch is not expected in transfer tests"); },
     performance: { now: () => Date.now() },
     setTimeout: useRealTimers ? setTimeout : fastSetTimeout,
     chrome: {
@@ -213,6 +214,11 @@ test("preparation and fresh recovery open beside the source in its current windo
   const harness = loadBackgroundForTransferTest({ sourceTab: currentSource });
   const prepared = await harness.prepare("claude", senderSnapshot);
   assert.equal(prepared.ok, true);
+  // Warmup may send only a readiness ping and must make no fetch request.
+  await new Promise(setImmediate);
+  assert.ok(harness.operations.sent.length > 0);
+  assert.ok(harness.operations.sent.every(({ message }) => JSON.stringify(message) === '{"type":"CONTEXT_GENERATOR_PING"}'));
+  assert.equal(harness.operations.fetched.length, 0);
   const recovered = await harness.sendTransfer("claude", 41, false, null, senderSnapshot);
   assert.equal(recovered.ok, true);
   assert.equal(harness.operations.created.length, 2);
@@ -289,7 +295,7 @@ clockTest("expired transfer messages cannot fetch summaries, open tabs, paste or
     assert.equal(response.ok, false);
     assert.equal(response.code, "transfer_timeout");
   }
-  assert.deepEqual(harness.operations, { created: [], gotten: [], sent: [], updated: [], injected: [] });
+  assert.deepEqual(harness.operations, { created: [], gotten: [], sent: [], updated: [], injected: [], fetched: [] });
 });
 
 clockTest("a transfer deadline aborts an outstanding summary request", { timeout: 2000 }, async () => {
@@ -311,17 +317,75 @@ clockTest("a transfer deadline aborts an outstanding summary request", { timeout
   assert.equal(response.code, "transfer_timeout");
 });
 
-test("destination preconnect and warmup never include conversation content", () => {
-  const prepareStart = source.indexOf("async function prepareDestination(");
-  const prepareEnd = source.indexOf("async function createDestinationTab(", prepareStart);
-  const warmupStart = source.indexOf("async function warmDestinationTab(");
-  const warmupEnd = source.indexOf("async function pingTab(", warmupStart);
-  const warmupSource = `${source.slice(prepareStart, prepareEnd)}\n${source.slice(warmupStart, warmupEnd)}`;
+clockTest("a shared summary waiter expires at its own deadline without cancelling the original request", async () => {
+  let finish, signal, fetches = 0;
+  const sendSummary = loadBackgroundForSummaryTest(async (_url, options) => {
+    fetches++; signal = options.signal;
+    return new Promise(resolve => {
+      let timer;
+      finish = () => { clearTimeout(timer); resolve({ ok: true, status: 200,
+        json: async () => ({ summary: "Shared complete Context Carry" }) }); };
+      timer = setTimeout(finish, 250);
+    });
+  });
+  const owner = sendSummary("same exact conversation", Date.now() + 1000);
+  await new Promise(setImmediate);
+  const unboundedWaiter = sendSummary("same exact conversation");
+  const deadlineAt = Date.now() + 100;
+  const response = await sendSummary("same exact conversation", deadlineAt);
+  assert.equal(Date.now(), deadlineAt, "Joining an older request must retain the joining transfer's time limit.");
+  assert.equal(response.ok, false);
+  assert.equal(response.code, "transfer_timeout");
+  assert.equal(signal.aborted, false, "A waiting transfer cannot cancel another transfer's request.");
+  const laterWaiter = sendSummary("same exact conversation", Date.now() + 500);
+  finish();
+  for (const result of await Promise.all([owner, unboundedWaiter, laterWaiter])) {
+    assert.equal(result.ok, true);
+    assert.equal(result.summary, "Shared complete Context Carry");
+  }
+  assert.equal(fetches, 1, "Expiry must not evict the still-running shared request.");
+  const cached = await sendSummary("same exact conversation", Date.now() + 500);
+  assert.equal(cached.timing.source, "cache");
+  assert.equal(fetches, 1);
+});
 
-  assert.ok(prepareStart >= 0 && prepareEnd > prepareStart && warmupEnd > warmupStart);
-  assert.match(warmupSource, /pingTab\(tabId\)/);
-  assert.match(source, /sendMessage\(tabId, \{ type: "CONTEXT_GENERATOR_PING" \}\)/);
-  assert.doesNotMatch(warmupSource, /SUMMARIZE_WITH_BACKEND|conversationText|summary|PASTE_CONTEXT/);
+clockTest("shared summary failures retain the backend error and allow a fresh request", async () => {
+  let finish, fetches = 0;
+  const sendSummary = loadBackgroundForSummaryTest(async () => {
+    if (++fetches > 1) return { ok: true, status: 200, json: async () => ({ summary: "Fresh Context Carry" }) };
+    return new Promise(resolve => { finish = () => resolve({ ok: false, status: 503,
+      json: async () => ({ code: "service_busy" }) }); });
+  });
+  const owner = sendSummary("same exact conversation", Date.now() + 1000);
+  await new Promise(setImmediate);
+  const waiter = sendSummary("same exact conversation", Date.now() + 500);
+  finish();
+  for (const response of await Promise.all([owner, waiter])) {
+    assert.equal(response.ok, false);
+    assert.equal(response.code, "service_busy");
+  }
+  assert.equal((await sendSummary("same exact conversation", Date.now() + 500)).summary, "Fresh Context Carry");
+  assert.equal(fetches, 2);
+});
+
+for (const ok of [true, false]) clockTest(`an expired shared waiter rejects a queued ${ok ? "success" : "failure"} before a delayed timer fires`, async () => {
+  let now = Date.now(), finish;
+  class QueuedResultClock extends Date { static now() { return now; } }
+  const sendSummary = loadBackgroundForSummaryTest(async () => new Promise(resolve => {
+    finish = () => resolve({ ok, status: ok ? 200 : 503,
+      json: async () => ok ? { summary: "Complete Context Carry" } : { code: "service_busy" } });
+  }), { clock: QueuedResultClock });
+  const owner = sendSummary("same exact conversation", now + 1000);
+  await new Promise(setImmediate);
+  const waiter = sendSummary("same exact conversation", now + 100);
+  // Advance elapsed time without dispatching timer tasks. Response microtasks
+  // can run first on a busy event loop; the acceptance guard must still apply.
+  now += 150;
+  finish();
+  const response = await waiter;
+  assert.equal(response.ok, false);
+  assert.equal(response.code, "transfer_timeout");
+  assert.equal((await owner).ok, ok);
 });
 
 test("prepared destination is reused only while it remains on the selected platform", async () => {
@@ -375,43 +439,25 @@ test("prepared-tab recovery opens at most one fresh destination", async () => {
   assert.deepEqual(harness.operations.sent.map(({ tabId }) => tabId), [41, 100]);
 });
 
-test("fresh ChatGPT recovery uses the same activation settle as the normal path", async () => {
-  const harness = loadBackgroundForTransferTest({
-    preparedTab: { id: 41, url: "https://chatgpt.com/", windowId: 1 },
-    sendMessageImpl: async (tabId) => {
-      if (tabId === 41) throw new Error("Prepared tab message failed");
-      return { ok: true, timing: { pasteMs: 5 } };
+test("Claude and ChatGPT focus and settle prepared and fresh composers before paste", async () => {
+  for (const [destination, url] of [["claude", "https://claude.ai/new"], ["chatgpt", "https://chatgpt.com/"]]) {
+    const harness = loadBackgroundForTransferTest({
+      preparedTab: { id: 41, url, windowId: 1 },
+      sendMessageImpl: async tabId => {
+        assert.ok(harness.operations.updated.some(update => update.tabId === tabId), "focus precedes delivery");
+        return { ok: tabId !== 41, error: tabId === 41 ? "Startup editor remounted" : undefined };
+      }
+    });
+    const response = await harness.sendTransfer(destination, 41);
+    assert.equal(response.ok, true);
+    assert.equal(harness.operations.created.length, 1);
+    assert.equal(harness.operations.created[0].options.active, false);
+    for (const tabId of [41, 100]) {
+      const focusIndex = response.marks.findIndex(mark => mark.label === "tab activate before paste start" && mark.detail.tabId === tabId);
+      const settleIndex = response.marks.findIndex((mark, index) => index > focusIndex && mark.label === "tab activation settle done");
+      const pasteIndex = response.marks.findIndex(mark => mark.label === "paste message start" && mark.detail.tabId === tabId);
+      assert.ok(focusIndex >= 0 && settleIndex > focusIndex && pasteIndex > settleIndex, `${destination}: tab ${tabId}`);
     }
-  });
-
-  const response = await harness.sendTransfer("chatgpt", 41);
-
-  assert.equal(response.ok, true);
-  assert.equal(harness.operations.created.length, 1);
-  const freshOpenIndex = response.marks.findIndex(({ label }) => label === "fresh fallback tab open done");
-  const recoveryMarks = response.marks.slice(freshOpenIndex + 1).map(({ label }) => label);
-  assert.ok(freshOpenIndex >= 0);
-  assert.ok(recoveryMarks.includes("tab activation settle start"));
-  assert.ok(recoveryMarks.includes("tab activation settle done"));
-});
-
-test("Claude focuses and settles both prepared and fresh composers before paste", async () => {
-  const harness = loadBackgroundForTransferTest({
-    preparedTab: { id: 41, url: "https://claude.ai/new", windowId: 1 },
-    sendMessageImpl: async tabId => {
-      assert.ok(harness.operations.updated.some(update => update.tabId === tabId), "focus precedes delivery");
-      return { ok: tabId !== 41, error: tabId === 41 ? "Startup editor remounted" : undefined };
-    }
-  });
-  const response = await harness.sendTransfer("claude", 41);
-  assert.equal(response.ok, true);
-  assert.equal(harness.operations.created.length, 1);
-  assert.equal(harness.operations.created[0].options.active, false);
-  for (const tabId of [41, 100]) {
-    const focusIndex = response.marks.findIndex(mark => mark.label === "tab activate before paste start" && mark.detail.tabId === tabId);
-    const settleIndex = response.marks.findIndex((mark, index) => index > focusIndex && mark.label === "tab activation settle done");
-    const pasteIndex = response.marks.findIndex(mark => mark.label === "paste message start" && mark.detail.tabId === tabId);
-    assert.ok(focusIndex >= 0 && settleIndex > focusIndex && pasteIndex > settleIndex);
   }
 });
 

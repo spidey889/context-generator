@@ -6,6 +6,7 @@ const DESTINATION_MESSAGE_TIMEOUT_MS = 30000;
 const MESSAGE_RETRY_INTERVAL_MS = 120;
 const DESTINATION_WARMUP_TIMEOUT_MS = 9000;
 const SUMMARY_BACKEND_TIMEOUT_MS = 320000;
+const SUMMARY_TELEMETRY_WAIT_MS = 1000;
 const SUMMARY_SERVICE_WORKER_KEEPALIVE_MS = 25000;
 const SUMMARY_CACHE_TTL_MS = 120000;
 const SUMMARY_CACHE_MAX_ENTRIES = 8;
@@ -29,6 +30,11 @@ const TELEMETRY_CONFIG_RETRY_BASE_MS = 5 * 60 * 1000;
 const TELEMETRY_MAX_CHARACTER_COUNT = 2147483647;
 const TELEMETRY_PLATFORMS = new Set(["claude", "chatgpt", "gemini", "grok", "deepseek"]);
 const TELEMETRY_STATUSES = new Set(["started", "succeeded", "failed"]);
+// Only serving-route identifiers enter reports; transcript text and attempted
+// providers never belong in this field. Keep the catalog aligned with ingress.
+const TELEMETRY_REPORTED_MODELS = new Set(["local-direct", "gemini-3.6-flash", "gemini-3.5-flash-lite", "ministral-14b-2512",
+  "inclusionai/ling-3.1-flash", "qwen/qwen3.8-27b:free", "dots-studio/dots-3-note-preview:free", "google/gemma-4-26b-a4b-it:free"]);
+const TELEMETRY_MODEL_STAGES = new Set(["summary_completed", "paste_started", "completed"]);
 const TELEMETRY_STAGES = new Set([
   "intent_started",
   "capture_started",
@@ -255,13 +261,18 @@ function sameTransferIdentity(first, second) {
 function mergeTransferTelemetryEvents(previous, next) {
   if (!previous) return next;
   // First terminal outcome wins as a unit: never produce failed + completed.
-  if (previous.status !== "started") return previous;
+  if (previous.status !== "started") return {
+    ...previous,
+    ...(TELEMETRY_MODEL_STAGES.has(previous.lastStage) && !previous.reportedModel && next.reportedModel
+      ? { reportedModel: next.reportedModel } : {})
+  };
   const stages = [...TELEMETRY_STAGES];
   return {
     ...next,
     lastStage: next.status === "succeeded" ? "completed"
       : stages.indexOf(previous.lastStage) > stages.indexOf(next.lastStage) ? previous.lastStage : next.lastStage,
-    characterCount: next.characterCount ?? previous.characterCount
+    characterCount: next.characterCount ?? previous.characterCount,
+    ...(previous.reportedModel || next.reportedModel ? { reportedModel: previous.reportedModel || next.reportedModel } : {})
   };
 }
 
@@ -279,6 +290,7 @@ function makeTelemetryPayload(event, installId) {
     failure_reason: event.failureReason,
     extension_version: event.extensionVersion || chrome.runtime.getManifest?.().version || null,
     ...(event.completedAt ? { completed_at: event.completedAt } : {}),
+    ...(event.reportedModel ? { reported_model: event.reportedModel } : {}),
     ...(confirmation ? confirmation : {})
   };
 }
@@ -307,7 +319,11 @@ async function restoreActiveTransferTelemetry() {
       Object.assign(retained[attemptId], confirmation);
     }
   }
-  await activeStorage.set({ [TELEMETRY_ACTIVE_STORAGE_KEY]: retained });
+  // Normal progress rereads clean records; only expiry/schema cleanup needs a
+  // write. Avoid putting unchanged snapshots back on the summary's I/O path.
+  if (JSON.stringify(entries) !== JSON.stringify(retained)) {
+    await activeStorage.set({ [TELEMETRY_ACTIVE_STORAGE_KEY]: retained });
+  }
 }
 
 async function persistActiveTransferTelemetry(attemptId) {
@@ -386,6 +402,8 @@ function sanitizeTransferTelemetryEvent(event, captureCompletionTime = true) {
   if (!TELEMETRY_STAGES.has(event.lastStage)) return null;
   if (event.status === "succeeded" && event.lastStage !== "completed") return null;
   if (event.status !== "succeeded" && event.lastStage === "completed") return null;
+  if (event.reportedModel !== undefined && (!TELEMETRY_REPORTED_MODELS.has(event.reportedModel)
+    || !TELEMETRY_MODEL_STAGES.has(event.lastStage))) return null;
 
   const attemptedAtEpoch = Date.parse(event.attemptedAt || "");
   if (!Number.isFinite(attemptedAtEpoch)) return null;
@@ -409,6 +427,7 @@ function sanitizeTransferTelemetryEvent(event, captureCompletionTime = true) {
     status: event.status,
     lastStage: event.lastStage,
     failureReason,
+    ...(event.reportedModel ? { reportedModel: event.reportedModel } : {}),
     ...(!captureCompletionTime && typeof event.extensionVersion === "string" && /^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/.test(event.extensionVersion)
       ? { extensionVersion: event.extensionVersion } : {}),
     ...(event.status !== "started" && (event.completedAt || captureCompletionTime)
@@ -445,6 +464,14 @@ async function readTelemetryOutbox() {
   const entries = Array.isArray(stored?.[TELEMETRY_OUTBOX_STORAGE_KEY])
     ? stored[TELEMETRY_OUTBOX_STORAGE_KEY]
     : [];
+  const retained = await compactTelemetryOutbox(entries);
+  if (JSON.stringify(entries) !== JSON.stringify(retained)) {
+    await chrome.storage.local.set({ [TELEMETRY_OUTBOX_STORAGE_KEY]: retained });
+  }
+  return retained;
+}
+
+async function compactTelemetryOutbox(entries) {
   const retained = [];
   for (const entry of entries) {
     const payload = sanitizeStoredTelemetryPayload(entry?.payload);
@@ -472,9 +499,6 @@ async function readTelemetryOutbox() {
     await recordTelemetryDiagnostic(removed.payload.status !== "started" ? "overflow_terminal"
       : removed.payload.summary_proof ? "overflow_confirmation" : "overflow_progress", removed.payload);
   }
-  if (JSON.stringify(entries) !== JSON.stringify(retained)) {
-    await chrome.storage.local.set({ [TELEMETRY_OUTBOX_STORAGE_KEY]: retained });
-  }
   return retained;
 }
 
@@ -497,8 +521,10 @@ async function appendTelemetryOutbox(payload) {
   };
   if (previousIndex === -1) outbox.push(entry);
   else outbox[previousIndex] = entry;
-  await chrome.storage.local.set({ [TELEMETRY_OUTBOX_STORAGE_KEY]: outbox });
-  await readTelemetryOutbox();
+  // Validate/prune the new snapshot before its one durable commit. A worker
+  // stopping after this write must never leave an oversized or unsanitized queue.
+  const retained = await compactTelemetryOutbox(outbox);
+  await chrome.storage.local.set({ [TELEMETRY_OUTBOX_STORAGE_KEY]: retained });
 }
 
 async function flushTelemetryOutbox() {
@@ -576,6 +602,11 @@ function mergeTelemetryPayloads(previous, next) {
   };
   if (proof && !proof.summary_confirmed_at) delete merged.summary_confirmed_at;
   if (!proof?.model) delete merged.model;
+  // Later progress and restart compaction must preserve an observed model
+  // independently of the signed proof/model pair.
+  if (TELEMETRY_MODEL_STAGES.has(merged.last_stage) && (previous.reported_model || next.reported_model)) {
+    merged.reported_model = previous.reported_model || next.reported_model;
+  } else delete merged.reported_model;
   if (terminal && !previous.completed_at) delete merged.completed_at;
   return merged;
 }
@@ -594,14 +625,15 @@ function sanitizeSummaryConfirmation(input) {
 
 function sanitizeStoredTelemetryPayload(payload) {
   const keys = new Set(["attempt_id", "install_id", "attempted_at", "source_platform", "destination_platform",
-    "character_count", "status", "last_stage", "failure_reason", "extension_version", "summary_proof", "completed_at", "summary_confirmed_at", "model"]);
+    "character_count", "status", "last_stage", "failure_reason", "extension_version", "summary_proof", "completed_at", "summary_confirmed_at", "model", "reported_model"]);
   if (!payload || typeof payload !== "object" || Array.isArray(payload) || Object.keys(payload).some(key => !keys.has(key))) return null;
   if (!isUuid(payload.install_id) || typeof payload.extension_version !== "string"
     || !/^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/.test(payload.extension_version)) return null;
   const event = sanitizeTransferTelemetryEvent({
     attemptId: payload.attempt_id, attemptedAt: payload.attempted_at, sourcePlatform: payload.source_platform,
     destinationPlatform: payload.destination_platform, characterCount: payload.character_count,
-    status: payload.status, lastStage: payload.last_stage, failureReason: payload.failure_reason, completedAt: payload.completed_at
+    status: payload.status, lastStage: payload.last_stage, failureReason: payload.failure_reason, completedAt: payload.completed_at,
+    reportedModel: payload.reported_model
   }, false);
   if (!event || (payload.completed_at !== undefined && (payload.status === "started" || !Number.isFinite(Date.parse(payload.completed_at))))) return null;
   const confirmation = sanitizeSummaryConfirmation(payload);
@@ -611,7 +643,8 @@ function sanitizeStoredTelemetryPayload(payload) {
     source_platform: event.sourcePlatform, destination_platform: event.destinationPlatform,
     character_count: event.characterCount, status: event.status, last_stage: event.lastStage,
     failure_reason: event.failureReason, extension_version: payload.extension_version,
-    ...(event.completedAt ? { completed_at: event.completedAt } : {}), ...(confirmation || {})
+    ...(event.completedAt ? { completed_at: event.completedAt } : {}),
+    ...(event.reportedModel ? { reported_model: event.reportedModel } : {}), ...(confirmation || {})
   };
 }
 
@@ -839,10 +872,25 @@ async function summarizeWithBackend(conversation, transferId = null, deadlineAt 
 
   const inFlightSummary = summaryInflight.get(conversationText);
   if (inFlightSummary) {
-    return inFlightSummary.then((result) => {
+    let timeout;
+    try {
+      // A joiner's time limit does not own the shared fetch. Expiring here
+      // must neither abort it nor evict it while other transfers still wait.
+      const result = deadlineAt ? await Promise.race([
+        inFlightSummary,
+        new Promise((_, reject) => {
+          timeout = setTimeout(() => reject(createTransferTimeoutError()), Math.max(0, deadlineAt - Date.now()));
+        })
+      ]) : await inFlightSummary;
+      checkTransferDeadline(deadlineAt);
       recordKnownTransferTelemetryStage(transferId, "summary_response_started");
       return result;
-    });
+    } catch (error) {
+      checkTransferDeadline(deadlineAt);
+      throw error;
+    } finally {
+      clearTimeout(timeout);
+    }
   }
 
   const summaryPromise = fetchSummaryFromBackend(conversationText, transferId, deadlineAt)
@@ -862,13 +910,20 @@ async function fetchSummaryFromBackend(conversationText, transferId = null, dead
   checkTransferDeadline(deadlineAt);
   const summaryStartedAt = nowMs();
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), Math.min(SUMMARY_BACKEND_TIMEOUT_MS, deadlineAt ? deadlineAt - Date.now() : SUMMARY_BACKEND_TIMEOUT_MS));
+  const requestDeadlineAt = Math.min(Date.now() + SUMMARY_BACKEND_TIMEOUT_MS, deadlineAt || Infinity);
+  const timeout = setTimeout(() => controller.abort(), Math.max(0, requestDeadlineAt - Date.now()));
   const stopServiceWorkerKeepAlive = startSummaryServiceWorkerKeepAlive();
+  const checkSummaryDeadline = () => {
+    checkTransferDeadline(deadlineAt);
+    // Response/storage microtasks may run before an overdue abort timer.
+    if (Date.now() >= requestDeadlineAt) controller.abort();
+    controller.signal.throwIfAborted();
+  };
 
   try {
-    // Telemetry storage is optional: a failed read/write must not prevent the
-    // summary request, which remains usable without an attribution context.
-    const telemetry = await enqueueTelemetryWork(async () => {
+    // Attribution is optional. Bound stalled storage as well as rejected I/O;
+    // queued work can finish later without holding up the summary request.
+    const telemetry = await waitForSummaryTelemetry(enqueueTelemetryWork(async () => {
       await restoreActiveTransferTelemetry();
       const active = activeTransferTelemetry.get(transferId);
       if (!active || active.status !== "started") return null;
@@ -878,10 +933,8 @@ async function fetchSummaryFromBackend(conversationText, transferId = null, dead
       active.extensionVersion = queuedIdentity?.extension_version || active.extensionVersion || chrome.runtime.getManifest?.().version || null;
       await persistActiveTransferTelemetry(transferId);
       return makeTelemetryPayload(active, await getOrCreateTelemetryInstallId());
-    }).catch(() => null);
-    // Optional storage can finish after the transfer deadline. Do not begin a
-    // request for an already-expired attempt after that wait.
-    checkTransferDeadline(deadlineAt);
+    }), controller.signal);
+    checkSummaryDeadline();
     const fetchStartedAt = nowMs();
     const response = await fetch(SUMMARY_BACKEND_URL, {
       method: "POST",
@@ -913,8 +966,9 @@ async function fetchSummaryFromBackend(conversationText, transferId = null, dead
     });
     if (telemetry && confirmation) {
       // A summary may finish after its source tab closes. Its receipt confirms
-      // generation, never a paste; persist it before returning when storage works.
-      await enqueueTelemetryWork(async () => {
+      // generation, never a paste. Give persistence a bounded head start;
+      // keep the serialized write queued if storage stalls or the wait expires.
+      await waitForSummaryTelemetry(enqueueTelemetryWork(async () => {
         const active = activeTransferTelemetry.get(transferId);
         if (active) summaryProofs.set(transferId, confirmation);
         try {
@@ -924,10 +978,11 @@ async function fetchSummaryFromBackend(conversationText, transferId = null, dead
           // failed. Neither telemetry store may discard a successful summary.
           if (active) await persistActiveTransferTelemetry(transferId);
         }
-      }).catch(() => {});
+      }), controller.signal);
       initializeTelemetryDelivery();
     }
 
+    checkSummaryDeadline();
     const summary = data.summary.trim();
     const timing = {
       source: "backend",
@@ -943,11 +998,29 @@ async function fetchSummaryFromBackend(conversationText, transferId = null, dead
     };
     return { summary, timing };
   } catch (error) {
-    checkTransferDeadline(deadlineAt);
+    checkSummaryDeadline();
     throw error;
   } finally {
     clearTimeout(timeout);
     stopServiceWorkerKeepAlive();
+  }
+}
+
+async function waitForSummaryTelemetry(work, signal) {
+  let timeout, onAbort;
+  try {
+    return await Promise.race([
+      work.catch(() => null),
+      new Promise(resolve => {
+        onAbort = () => resolve(null);
+        if (signal.aborted) return onAbort();
+        signal.addEventListener("abort", onAbort, { once: true });
+        timeout = setTimeout(onAbort, SUMMARY_TELEMETRY_WAIT_MS);
+      })
+    ]);
+  } finally {
+    clearTimeout(timeout);
+    signal.removeEventListener("abort", onAbort);
   }
 }
 
@@ -1059,11 +1132,13 @@ function cacheSummaryResult(conversationText, result) {
 }
 
 function checkTransferDeadline(deadlineAt) {
-  if (deadlineAt && Date.now() >= deadlineAt) {
-    const error = new Error("Transfer timed out. Please try again.");
-    error.code = "transfer_timeout";
-    throw error;
-  }
+  if (deadlineAt && Date.now() >= deadlineAt) throw createTransferTimeoutError();
+}
+
+function createTransferTimeoutError() {
+  const error = new Error("Transfer timed out. Please try again.");
+  error.code = "transfer_timeout";
+  return error;
 }
 
 async function transferToDestination(

@@ -1,5 +1,6 @@
 (() => {
-  const version = 4;
+  const version = 7;
+  const maxHistoryBytes = 6000000;
   const previous = window.__capClaudeFetchState;
   if (previous?.version === version && window.fetch === previous.fetch) return;
   previous?.dispose();
@@ -83,11 +84,41 @@
       if (response.status !== 200 || response.headers.has("content-range") || !response.headers.get("content-type")?.includes("application/json")) {
         captureFailureReason = [401, 403].includes(response.status) ? "unavailable"
           : response.status === 206 || response.headers.has("content-range") || response.status === 200 ? "incomplete" : "request_failed";
+        // The rejected fresh response has no reader. Stop its unused body before
+        // fallback, retaining the safe transport reason even if cleanup rejects.
+        await response.body?.cancel().catch(() => {});
         throw new Error("transport");
       }
-      let data;
-      try { data = await response.clone().json(); }
-      catch (error) { captureFailureReason = "incomplete"; throw error; }
+      let data, reader;
+      try {
+        if (Number(response.headers.get("content-length")) > maxHistoryBytes) throw new Error("size");
+        // Transcript limits apply after parsing. Bound the owned raw stream too,
+        // including inactive/tool metadata and bodies without Content-Length.
+        reader = response.body?.getReader();
+        const decoder = new TextDecoder("utf-8", { fatal: true });
+        const parts = [];
+        let size = 0;
+        if (reader) while (true) {
+          const { done, value } = await reader.read();
+          if (controller.signal.aborted || location.pathname !== `/chat/${chat}`) throw new Error("changed");
+          if (done) break;
+          size += value.byteLength;
+          if (size > maxHistoryBytes) throw new Error("size");
+          const part = decoder.decode(value, { stream: true });
+          if (part) parts.push(part);
+        }
+        // Preserve split UTF-8/BOM state and reject unfinished final bytes;
+        // replacing corrupt bytes would silently change the captured text.
+        parts.push(decoder.decode());
+        data = JSON.parse(parts.join(""));
+      } catch (error) {
+        captureFailureReason = "incomplete";
+        if (reader) await reader.cancel().catch(() => {});
+        else await response.body?.cancel().catch(() => {});
+        throw error;
+      } finally {
+        reader?.releaseLock();
+      }
       if (controller.signal.aborted || location.pathname !== `/chat/${chat}` || data.uuid !== chat) throw new Error("changed");
       reply.data = data;
     } catch {

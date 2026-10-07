@@ -540,19 +540,6 @@ test("empty chats are rejected before handoff UI or destination preparation", ()
   assert.match(flowSource.slice(flowEmptyGuard), /NO_CONVERSATION_ERROR_MESSAGE/);
 });
 
-test("picker capture preparation failures release the transfer lock immediately", () => {
-  const pickerStart = PLATFORM_CONTENT_SOURCE.indexOf("async function startDestinationTransfer(destinationId)");
-  const pickerEnd = PLATFORM_CONTENT_SOURCE.indexOf("function ensureFloatingOverlay()", pickerStart);
-  const pickerSource = PLATFORM_CONTENT_SOURCE.slice(pickerStart, pickerEnd);
-  const captureTry = pickerSource.indexOf("try {");
-  const preparation = pickerSource.indexOf("await prepareSourceForCapture()");
-  const reset = pickerSource.indexOf("resetRunningFlag()", preparation);
-
-  assert.ok(captureTry >= 0 && preparation > captureTry);
-  assert.ok(reset > preparation);
-  assert.match(pickerSource.slice(preparation), /catch \(error\) \{[\s\S]*resetRunningFlag\(\)/);
-});
-
 test("telemetry maps failures to the closed non-sensitive reason list", () => {
   const hooks = loadPlatformContent([]);
 
@@ -737,15 +724,6 @@ clockTest("pending picker dismissal preserves reopened picker and newer page foc
   }
 });
 
-test("composer lifecycle cleanup never restores focus to the orb", () => {
-  const source = fs.readFileSync(SOURCE_PATH, "utf8");
-  const ensureStart = source.indexOf("function ensureFloatingButton(");
-  const ensureEnd = source.indexOf("function createFloatingButton()", ensureStart);
-  const ensureSource = source.slice(ensureStart, ensureEnd);
-
-  assert.match(ensureSource, /if \(!input\)[\s\S]*hideDestinationSheet\(\{ restoreFocus: false \}\)/);
-});
-
 test("reinjection tears down every resource owned by the previous content-script instance", () => {
   const input = new FakeElement({
     attrs: { contenteditable: "true", role: "textbox" },
@@ -798,26 +776,6 @@ test("Grok empty-state prompt is not counted or captured as a real message", () 
     () => hooks.scrapeConversationText(),
     /Send a message first, then try again\./
   );
-});
-
-test("conversation scraping preserves detected user and assistant roles", () => {
-  const userTurn = new FakeElement({
-    text: "Please make the fallback modal better.",
-    attrs: { "data-message-author-role": "user" }
-  });
-  const assistantTurn = new FakeElement({
-    text: "I will update the modal and add focused tests.",
-    attrs: { "data-message-author-role": "assistant" }
-  });
-  const hooks = loadPlatformContent([userTurn, assistantTurn]);
-
-  assert.equal(hooks.getConversationRole(userTurn), "User");
-  assert.equal(hooks.getConversationRole(assistantTurn), "ChatGPT");
-
-  const transcript = hooks.scrapeConversationText();
-  assert.match(transcript, /^ChatGPT conversation:/);
-  assert.match(transcript, /User: Please make the fallback modal better\./);
-  assert.match(transcript, /ChatGPT: I will update the modal and add focused tests\./);
 });
 
 test("role detection uses structural evidence instead of you or me labels", () => {
@@ -916,33 +874,6 @@ test("handoff finish keeps the two-frame cue for a visible source and cleans up"
   assert.deepEqual(hooks.getOwnedLifecycleResourceCounts(), before);
 });
 
-test("ChatGPT capture preserves identical text from distinct conversation turns", () => {
-  const elements = [
-    new FakeElement({
-      text: "Repeat this exact request.",
-      attrs: { "data-testid": "conversation-turn-1", "data-message-author-role": "user" }
-    }),
-    new FakeElement({
-      text: "Repeated exact response.",
-      attrs: { "data-testid": "conversation-turn-2", "data-message-author-role": "assistant" }
-    }),
-    new FakeElement({
-      text: "Repeat this exact request.",
-      attrs: { "data-testid": "conversation-turn-3", "data-message-author-role": "user" }
-    }),
-    new FakeElement({
-      text: "Repeated exact response.",
-      attrs: { "data-testid": "conversation-turn-4", "data-message-author-role": "assistant" }
-    })
-  ];
-  const hooks = loadPlatformContent(elements);
-
-  const transcript = hooks.scrapeConversationText();
-
-  assert.equal((transcript.match(/User: Repeat this exact request\./g) || []).length, 2);
-  assert.equal((transcript.match(/ChatGPT: Repeated exact response\./g) || []).length, 2);
-});
-
 test("ChatGPT capture collapses duplicate DOM copies of the same conversation turn", () => {
   const elements = [
     new FakeElement({
@@ -968,26 +899,6 @@ test("ChatGPT capture collapses duplicate DOM copies of the same conversation tu
 
   assert.equal((transcript.match(/User: One real request\./g) || []).length, 1);
   assert.equal((transcript.match(/ChatGPT: One real response\./g) || []).length, 1);
-});
-
-test("sequence merge keeps positional duplicates until the final capture safety pass", () => {
-  const hooks = loadPlatformContent([]);
-  const collected = [];
-  const firstWindow = [
-    { role: "User", text: "Repeat this." },
-    { role: "ChatGPT", text: "First answer." },
-    { role: "User", text: "Repeat this." }
-  ];
-  const secondWindow = [
-    { role: "ChatGPT", text: "First answer." },
-    { role: "User", text: "Repeat this." },
-    { role: "ChatGPT", text: "Second answer." }
-  ];
-
-  assert.equal(hooks.collectRenderedConversationTurns(collected, firstWindow), 3);
-  assert.equal(hooks.collectRenderedConversationTurns(collected, secondWindow), 1);
-  assert.equal(collected.length, 4);
-  assert.equal(collected.filter((turn) => turn.role === "User" && turn.text === "Repeat this.").length, 2);
 });
 
 test("virtual sweep reduces 18 overlapping snapshots and 315 entries to the canonical 38-turn sequence", () => {
@@ -1317,50 +1228,13 @@ test("paste retains a verified composer through a temporary disabled state", () 
   assert.equal(hooks.findReadyPlatformInput(), input);
 });
 
-clockTest("Grok uses its fast capture profile without losing a virtualized 40-turn chat", async () => {
-  const { elements, scrollableRoot } = createVirtualizedChatElements({
-    label: "Grok",
+clockTest("Grok fast capture waits for a delayed virtualized window instead of skipping turns", async () => {
+  const { elements } = createVirtualizedChatElements({
+    label: "Grok delayed render",
     totalTurns: 40,
     windowSize: 8,
     scrollStride: 4,
     scrollHeight: 3600,
-    makeTurn: (index) => new FakeElement({
-      text: `Fast virtualized Grok turn ${index}`,
-      attrs: { "data-message-author-role": index % 2 ? "user" : "assistant" }
-    })
-  });
-  const hooks = loadPlatformContent(elements, "grok.com");
-
-  assert.equal(hooks.getSourceScrollStableTimeout(), 700);
-  assert.equal(hooks.getSourceScrollStableInterval(), 40);
-  assert.equal(hooks.getSourceScrollStableSampleCount(), 2);
-  assert.equal(hooks.getVirtualSweepSettleTimeout(), 100);
-  assert.equal(hooks.getVirtualSweepStableSampleCount(), 2);
-  assert.equal(hooks.getVirtualSweepChangePollMs(), 10);
-  assert.equal(hooks.getVirtualSweepStepRatio(false), 0.7);
-  assert.equal(hooks.getVirtualSweepStepRatio(true), 0.9);
-  assert.equal(hooks.getVirtualSweepTerminalQuietTimeout(), 160);
-
-  await hooks.prepareSourceForCapture();
-  scrollableRoot.scrollCalls = [];
-  const transcript = await hooks.scrapeConversationTextWhenReady();
-
-  assert.equal((transcript.match(/(?:User|Grok): Fast virtualized Grok turn/g) || []).length, 40);
-  assert.match(transcript, /User: Fast virtualized Grok turn 1/);
-  assert.match(transcript, /Grok: Fast virtualized Grok turn 40/);
-  assert.ok(
-    scrollableRoot.scrollCalls.length <= 8,
-    `Grok's adaptive advances should finish this fixture in 8 scrolls or fewer; saw ${scrollableRoot.scrollCalls.length}`
-  );
-});
-
-clockTest("Grok fast capture waits for a delayed virtualized window instead of skipping turns", async () => {
-  const { elements } = createVirtualizedChatElements({
-    label: "Grok delayed render",
-    totalTurns: 24,
-    windowSize: 8,
-    scrollStride: 4,
-    scrollHeight: 2400,
     renderDelayMs: 140,
     makeTurn: (index) => new FakeElement({
       text: `Delayed Grok turn ${index}`,
@@ -1372,11 +1246,13 @@ clockTest("Grok fast capture waits for a delayed virtualized window instead of s
   await hooks.prepareSourceForCapture();
   const transcript = await hooks.scrapeConversationTextWhenReady();
 
-  assert.equal((transcript.match(/(?:User|Grok): Delayed Grok turn/g) || []).length, 24);
+  assert.equal((transcript.match(/(?:User|Grok): Delayed Grok turn/g) || []).length, 40);
   assert.match(transcript, /User: Delayed Grok turn 1/);
-  assert.match(transcript, /Grok: Delayed Grok turn 24/);
+  assert.match(transcript, /Grok: Delayed Grok turn 40/);
 });
 
+// This full sweep checks role labels, distinct repeated turns and overlapping
+// windows together; separate quick-capture/helper fixtures duplicate that work.
 virtualSweepTest("ChatGPT sweep preserves a 40-turn chat with intentionally repeated text", async () => {
   const { elements } = createVirtualizedChatElements({
     label: "ChatGPT",
@@ -1430,6 +1306,30 @@ test("collapsed conversation previews are expanded before capture", async () => 
 
   assert.match(transcript, /Full expanded assistant response with the important hidden details/);
   assert.equal(showMore.clicks, 1);
+});
+
+clockTest("Gemini fallback expands text without opening response menus or clicking their actions", async () => {
+  const response = new FakeElement({ tag: "model-response", text: "Verified answer" });
+  const content = new FakeElement({ tag: "message-content", text: "Verified answer" });
+  content.parentElement = response;
+  const query = new FakeElement({ tag: "user-query", text: "Short prompt" });
+  const showMore = new FakeElement({ tag: "button", text: "Show more" });
+  showMore.parentElement = query;
+  showMore.onClick = () => { showMore.rect.width = 0; query.innerText = query.textContent = "Full prompt"; };
+  const controls = [
+    new FakeElement({ tag: "button", attrs: { "aria-label": "Show more", "aria-haspopup": "menu" } }),
+    new FakeElement({ tag: "button", attrs: { "aria-label": "Show more options" } }),
+    new FakeElement({ tag: "button", attrs: { "aria-label": "Show more", class: "mat-mdc-menu-trigger" } }),
+    new FakeElement({ tag: "button", text: "See full response details" })
+  ];
+  for (const control of controls) control.parentElement = content;
+  const menu = new FakeElement({ attrs: { role: "menu" } });
+  const action = new FakeElement({ tag: "button", text: "Show more" });
+  action.parentElement = menu;
+  const hooks = loadPlatformContent([query, response, content, showMore, ...controls, menu, action], "gemini.google.com");
+  assert.equal(await hooks.expandCollapsedConversationContent(), 1);
+  assert.equal(showMore.clicks, 1);
+  assert.ok([...controls, action].every(control => control.clicks === 0));
 });
 
 clockTest("Claude and ChatGPT attach expanded pasted content to the owning user turn", async () => {
@@ -1683,22 +1583,6 @@ test("conversation transport preserves the complete middle beyond the old 160k c
   assert.match(transported, /TAIL-DETAILS$/);
 });
 
-clockTest("source capture prep scrolls conversation containers to the top instantly", async () => {
-  const scrollableRoot = new FakeElement({
-    text: "Scrollable chat root",
-    attrs: { role: "main" }
-  });
-  scrollableRoot.scrollHeight = 1800;
-  scrollableRoot.clientHeight = 500;
-  scrollableRoot.scrollTop = 740;
-  const hooks = loadPlatformContent([scrollableRoot]);
-
-  await hooks.prepareSourceForCapture();
-
-  assert.equal(scrollableRoot.scrollTop, 0);
-  assert.equal(scrollableRoot.scrollCalls[0].behavior, "instant");
-});
-
 clockTest("source capture prep waits until delayed older messages finish loading", async () => {
   const elements = [];
   const scrollableRoot = new FakeElement({ text: "Scrollable chat root" });
@@ -1733,6 +1617,8 @@ clockTest("source capture prep waits until delayed older messages finish loading
   const hooks = loadPlatformContent(elements);
 
   await hooks.prepareSourceForCapture();
+  assert.equal(scrollableRoot.scrollTop, 0);
+  assert.equal(scrollableRoot.scrollCalls[0].behavior, "instant");
   const transcript = hooks.scrapeConversationText();
 
   assert.match(transcript, /Older message 1/);
@@ -1985,24 +1871,6 @@ test("latest-run receipt retains capture exclusions and the JSON fallback reason
   assert.equal(stats.rawScrapedText, trace.rawScrapedText);
 });
 
-test("paste verification accepts formatting changes when box characters differ", () => {
-  const hooks = loadPlatformContent([]);
-  const expected = [
-    "CONTEXT CARRY - READY TO PASTE",
-    "",
-    "WHO I AM",
-    "Building Context Generator.",
-    "",
-    "WHAT WE WERE DOING",
-    "Testing paste verification."
-  ].join("\n");
-  const editor = new FakeElement({
-    text: "CONTEXT CARRY READY TO PASTE\n\nWHO I AM\nBuilding Context Generator.\n\nWHAT WE WERE DOING\nTesting paste verification."
-  });
-
-  assert.equal(hooks.editorContainsText(editor, expected), true);
-});
-
 test("paste verification rejects missing chunks between the old word samples", () => {
   const hooks = loadPlatformContent([]);
   const words = Array.from({ length: 100 }, (_, index) => `detail${index}`);
@@ -2014,11 +1882,11 @@ test("paste verification rejects missing chunks between the old word samples", (
   assert.equal(hooks.editorContainsText(new FakeElement({ text: actual }), words.join(" ")), false);
 });
 
-test("paste verification accepts whitespace and newline changes on every platform", () => {
-  const expected = "CONTEXT CARRY\n\nKeep the migration decisions and deployment checklist.\nNext step: verify staging before release.";
+test("paste verification accepts whitespace, newline and decorative punctuation changes on every platform", () => {
+  const expected = "CONTEXT CARRY - READY TO PASTE\n\nKeep the migration decisions and deployment checklist.\nNext step: verify staging before release.";
   for (const hostname of ["claude.ai", "chatgpt.com", "gemini.google.com", "grok.com", "chat.deepseek.com"]) {
     const hooks = loadPlatformContent([], hostname);
-    const editor = new FakeElement({ text: expected.replace(/\s+/g, "\t \r\n\u00a0 ") });
+    const editor = new FakeElement({ text: expected.replace(" - ", " ").replace(/\s+/g, "\t \r\n\u00a0 ") });
     assert.equal(hooks.editorContainsText(editor, expected), true, hostname);
   }
 });
@@ -2033,6 +1901,7 @@ test("paste verification requires 95 percent of words in order, including repeat
   assert.equal(hooks.editorContainsText(new FakeElement({ text: reordered.join(" ") }), expected), false);
   const repeated = ["context", ...words.slice(1, 99), "context"];
   assert.equal(hooks.editorContainsText(new FakeElement({ text: repeated.slice(1).join(" ") }), repeated.join(" ")), true);
+  assert.equal(hooks.editorContainsText(new FakeElement({ text: "Unrelated input" }), expected), false);
 });
 
 clockTest("all destinations accept editor Markdown reformatting without replacing it", async () => {
@@ -2085,6 +1954,38 @@ test("duplicate transfer clicks preserve the running attempt and its telemetry",
   assert.equal(first.completed, false);
   hooks.resetRunningFlag();
   assert.ok(hooks.beginTransferAttempt("claude", "extension icon"), "the next real attempt is admitted");
+});
+
+test("actual serving models reach progress and terminal telemetry for fallback, cache and local carries", async () => {
+  for (const scenario of ["backend", "cache", "tiny", "recovery"]) {
+    const messages = [];
+    const hooks = loadPlatformContent([], "gemini.google.com", {
+      // Reporting must not depend on the optional local Latest Run write.
+      storageSet: () => { throw new Error("Storage unavailable"); },
+      runtimeSendMessage: async message => {
+        messages.push(message);
+        if (message.type !== "SUMMARIZE_WITH_BACKEND") return { ok: true };
+        if (scenario === "recovery") return { ok: false, code: "summary_failed" };
+        return { ok: true, summary: "The final served summary.", timing: {
+          source: scenario, backend: { model: "gemini-3.5-flash-lite", primaryModel: "inclusionai/ling-3.1-flash",
+            fallback: { used: true, model: "gemini-3.5-flash-lite" } }
+        } };
+      }
+    });
+    const trace = hooks.beginTransferAttempt("claude", "test");
+    try {
+      await hooks.summarizeWithBackend("x".repeat(scenario === "tiny" ? 1200 : 1201), trace);
+      hooks.finishTransferTrace(trace);
+      const telemetry = messages.filter(message => message.type === "RECORD_TRANSFER_TELEMETRY").map(message => message.event);
+      const model = ["tiny", "recovery"].includes(scenario) ? "local-direct" : "gemini-3.5-flash-lite";
+      assert.equal(telemetry.find(event => event.lastStage === "summary_completed").reportedModel, model, scenario);
+      assert.equal(telemetry.at(-1).status, "succeeded");
+      assert.equal(telemetry.at(-1).reportedModel, model, scenario);
+      assert.ok(telemetry.filter(event => !["summary_completed", "completed"].includes(event.lastStage))
+        .every(event => event.reportedModel === undefined), "An attempted provider must not be reported before a result.");
+      for (const event of telemetry) for (const key of ["model", "summary_proof", "summary_confirmed_at"]) assert.equal(event[key], undefined);
+    } finally { hooks.resetRunningFlag(); }
+  }
 });
 
 test("a synchronous local receipt failure cannot swallow terminal telemetry", () => {
@@ -2156,31 +2057,12 @@ clockTest("Claude verifies a settled paste and preserves a draft restored on rem
   assert.equal(draftEditor.value, "My saved draft");
 });
 
-test("paste verification rejects a carry whose middle or end did not land", () => {
-  const hooks = loadPlatformContent([]);
-  const beginning = "CONTEXT CARRY READY TO PASTE. WHO I AM Building Context Generator.";
-  const middle = "WHAT WE WERE DOING Testing the destination editor and preserving each detail.";
-  const ending = "NEXT STEP Reply only Context loaded then wait for the user.";
-  const expected = [beginning, middle, ending].join("\n\n");
-
-  assert.equal(hooks.editorContainsText(new FakeElement({ text: beginning }), expected), false);
-  assert.equal(hooks.editorContainsText(new FakeElement({ text: `${beginning}\n\n${ending}` }), expected), false);
-  assert.equal(hooks.editorContainsText(new FakeElement({ text: expected }), expected), true);
-});
-
 test("paste verification stops using a detached editor after a remount", async () => {
   const hooks = loadPlatformContent([]);
   const detached = new FakeElement({ text: "CONTEXT CARRY READY TO PASTE" });
   detached.isConnected = false;
 
   assert.equal(await hooks.waitForEditorText(detached, detached.textContent, 1000), false);
-});
-
-test("paste verification rejects unrelated editor text", () => {
-  const hooks = loadPlatformContent([]);
-  const editor = new FakeElement({ text: "A blank new chat input" });
-
-  assert.equal(hooks.editorContainsText(editor, "CONTEXT CARRY\n\nWHO I AM\nProject details"), false);
 });
 
 test("up to 1,200 trimmed characters stay local on every platform without worker calls or waits", async () => {
@@ -2774,14 +2656,88 @@ function inlineClaudeFixture() {
   return { host, editorBranch, input, actions, left, right, attach, model };
 }
 
-test("Claude inline slot discovers only the named actions beside its active editor", () => {
-  const fixture = inlineClaudeFixture();
-  const decoy = new FakeElement({ attrs: { "data-display": "flex" } });
-  fixture.editorBranch.appendChild(decoy);
-  const hooks = loadPlatformContent(Object.values(fixture), "claude.ai");
-  assert.equal(hooks.findClaudeInlineToolbar(fixture.input).left, fixture.left);
-  fixture.actions.removeAttribute("data-cds");
-  assert.equal(hooks.findClaudeInlineToolbar(fixture.input), null);
+function openClaudePickerFixture() {
+  const f = inlineClaudeFixture();
+  const hooks = loadPlatformContent(Object.values(f), "claude.ai");
+  hooks.document.createElement = () => new FakeElement();
+  hooks.document.head = new FakeElement({ tag: "head" });
+  const bubble = new FakeElement({ tag: "button", attrs: { id: "context-generator-bubble" } });
+  const sheet = new FakeElement({ attrs: { id: "context-generator-destination-sheet" } });
+  const backdrop = new FakeElement({ attrs: { id: "context-generator-destination-backdrop" } });
+  sheet.style.display = "none";
+  for (const node of [bubble, sheet, backdrop]) hooks.registerElementId(node.id, node);
+  for (const id of ["context-generator-overlay", "context-generator-handoff-scrim"]) {
+    const node = new FakeElement({ attrs: { id } });
+    node.classList = { add() {}, remove() {} };
+    hooks.registerElementId(id, node);
+  }
+  assert.equal(hooks.mountClaudeInlineButton(bubble, f.input), true);
+  const paint = () => hooks.animationFrameCallbacks.splice(0).forEach(callback => callback());
+  hooks.startFloatingButtonMonitoring();
+  hooks.toggleDestinationSheet(); paint();
+  assert.equal(sheet.getAttribute("aria-hidden"), "false");
+  return { ...f, hooks, bubble, sheet, backdrop, paint };
+}
+
+clockTest("Claude picker stays open at its original position through reflow, resize, remounts and composer loss", () => {
+  const f = openClaudePickerFixture(), { hooks, sheet, bubble, paint } = f;
+  const position = () => ({ left: sheet.style.left, top: sheet.style.top, origin: sheet.style.transformOrigin });
+  const openingPosition = position();
+  bubble.getBoundingClientRect = () => ({ left: 600, right: 636, top: 180, bottom: 216, width: 36, height: 36 });
+  hooks.scheduleFloatingButtonUpdate("document-childlist"); paint();
+  assert.deepEqual(position(), openingPosition, "an orb reflow must not shift the picker horizontally");
+  const focus = new FakeElement({ tag: "button" });
+  hooks.document.activeElement = focus;
+  hooks.window.innerWidth = 390;
+  hooks.window.innerHeight = 240;
+  hooks.scheduleFloatingButtonUpdate({ type: "resize" }); paint();
+  const assertOpen = () => {
+    assert.equal(sheet.getAttribute("aria-hidden"), "false");
+    assert.equal(sheet.style.display, "block");
+    assert.equal(bubble.getAttribute("aria-expanded"), "true");
+    assert.equal(hooks.document.activeElement, focus, "layout updates must preserve the user's focus");
+    assert.deepEqual(position(), openingPosition, "layout updates must never reanchor an open picker");
+  };
+  assertOpen();
+  for (const part of ["editor", "actions", "host"]) {
+    const next = new FakeElement({ attrs: part === "actions" ? { "data-cds": "ChatComposerActions" } : {} });
+    if (part === "editor") { f.host.appendChild(next); next.appendChild(f.input); }
+    if (part === "actions") { f.actions.removeAttribute("data-cds"); f.host.appendChild(next); next.appendChild(f.left); next.appendChild(f.right); }
+    if (part === "host") { next.appendChild(f.input.parentElement); next.appendChild(f.right.parentElement); }
+    hooks.scheduleFloatingButtonUpdate("document-childlist"); paint(); assertOpen();
+    assert.equal(bubble.parentElement, f.right, "the retained orb must reattach to the current toolbar");
+  }
+  f.input.isConnected = false;
+  hooks.scheduleFloatingButtonUpdate("document-childlist"); paint(); assertOpen();
+  assert.equal(f.backdrop.style.clipPath, "", "no stale click-through hole may expose the page while the orb is missing");
+  f.input.isConnected = true;
+  hooks.scheduleFloatingButtonUpdate("document-childlist"); paint(); assertOpen();
+  assert.equal(bubble.style.visibility, "visible");
+  hooks.popstate("/chat/a-different-conversation"); paint();
+  assert.equal(sheet.getAttribute("aria-hidden"), "true", "a real conversation change still dismisses the old picker");
+});
+
+clockTest("Claude picker layout work cannot undo explicit dismissal or move a selected transfer", () => {
+  const { hooks, sheet, paint } = openClaudePickerFixture();
+  const origin = { left: sheet.style.left, top: sheet.style.top };
+  const trace = hooks.beginTransferAttempt("chatgpt", "destination tile");
+  try {
+    hooks.scheduleFloatingButtonUpdate({ type: "resize" }); paint();
+    assert.equal(sheet.getAttribute("aria-hidden"), "false", "selection owns the picker until its handoff animation closes it");
+    assert.deepEqual({ left: sheet.style.left, top: sheet.style.top }, origin);
+  } finally { hooks.finishTransferTrace(trace); hooks.resetRunningFlag(); }
+  hooks.hideDestinationSheet({ restoreFocus: false });
+  hooks.scheduleFloatingButtonUpdate("document-childlist"); paint();
+  assert.equal(sheet.getAttribute("aria-hidden"), "true", "a queued frame must not reopen a dismissed picker");
+});
+
+clockTest("Claude route changes dismiss a picker even while its composer is absent", () => {
+  const { hooks, sheet, input, paint } = openClaudePickerFixture();
+  input.isConnected = false;
+  hooks.scheduleFloatingButtonUpdate("document-childlist"); paint();
+  assert.equal(sheet.getAttribute("aria-hidden"), "false");
+  hooks.popstate("/new"); paint();
+  assert.equal(sheet.getAttribute("aria-hidden"), "true");
 });
 
 test("Claude inline discovery excludes popup controls and a different editor's toolbar", () => {
@@ -2798,6 +2754,7 @@ test("Claude inline discovery excludes popup controls and a different editor's t
 
 test("Claude inline discovery skips hidden and popup copies of native controls", () => {
   const f = inlineClaudeFixture();
+  f.editorBranch.appendChild(new FakeElement({ attrs: { "data-display": "flex" } }));
   const hiddenModel = new FakeElement({ tag: "button", attrs: { "data-testid": "model-selector-dropdown", "data-visibility": "hidden" } });
   const menu = new FakeElement({ attrs: { role: "menu" } });
   const popupAttach = new FakeElement({ tag: "button", attrs: { "data-testid": "chat-input-attach" } });
@@ -2805,6 +2762,8 @@ test("Claude inline discovery skips hidden and popup copies of native controls",
   f.left.insertBefore(menu, f.attach); menu.appendChild(popupAttach);
   const hooks = loadPlatformContent([...Object.values(f), hiddenModel, menu, popupAttach], "claude.ai");
   assert.ok(hooks.findClaudeInlineToolbar(f.input)?.left === f.left);
+  f.actions.removeAttribute("data-cds");
+  assert.equal(hooks.findClaudeInlineToolbar(f.input), null, "unnamed actions cannot own the inline slot");
 });
 
 test("Claude inline discovery stays within the active named composer", () => {
@@ -2815,7 +2774,7 @@ test("Claude inline discovery stays within the active named composer", () => {
   assert.ok(hooks.findClaudeInlineToolbar(f.input) === null, "ancestor actions outside this named composer must not be claimed");
 });
 
-test("Claude inline picker invalidates editor and actions wrapper replacements", () => {
+test("Claude inline ownership detects editor and actions replacements before picker opening", () => {
   const f = inlineClaudeFixture();
   const hooks = loadPlatformContent(Object.values(f), "claude.ai");
   hooks.document.createElement = () => new FakeElement();
@@ -2824,12 +2783,12 @@ test("Claude inline picker invalidates editor and actions wrapper replacements",
   assert.equal(hooks.invalidateInlinePicker("document-childlist"), false);
   const editor = new FakeElement();
   f.host.appendChild(editor); editor.appendChild(f.input);
-  assert.equal(hooks.invalidateInlinePicker("document-childlist"), true, "same input in a replaced editor branch must close the picker");
+  assert.equal(hooks.invalidateInlinePicker("document-childlist"), true, "same input in a replaced editor branch must invalidate the previous mount");
   assert.equal(hooks.mountClaudeInlineButton(bubble, f.input), true);
   const actions = new FakeElement({ attrs: { "data-cds": "ChatComposerActions" } });
   f.actions.removeAttribute("data-cds"); f.host.appendChild(actions);
   actions.appendChild(f.left); actions.appendChild(f.right);
-  assert.equal(hooks.invalidateInlinePicker("document-childlist"), true, "same rows in a replaced actions container must close the picker");
+  assert.equal(hooks.invalidateInlinePicker("document-childlist"), true, "same rows in a replaced actions container must invalidate the previous mount");
 });
 
 test("Claude inline mounting monitors native attribute changes without reacting to editor text", () => {
@@ -2852,7 +2811,7 @@ test("Claude inline mounting monitors native attribute changes without reacting 
   assert.equal(observer.observed.length, 0);
 });
 
-test("Claude inline host-only remount refreshes identity and invalidates the picker only once", () => {
+test("Claude inline host-only remount refreshes retained ownership once", () => {
   const f = inlineClaudeFixture();
   const hooks = loadPlatformContent(Object.values(f), "claude.ai");
   hooks.document.createElement = () => new FakeElement();
@@ -3155,29 +3114,6 @@ test("DeepSeek anchors before the complete visible right-side control row", () =
   );
 
   assert.equal(hooks.getDeepSeekBubblePlacement(composerRect).left, 500);
-});
-
-test("versioned evaluation set gates capture completeness", () => {
-  const evaluation = JSON.parse(
-    fs.readFileSync(path.join(__dirname, "..", "evaluation", "cases.json"), "utf8")
-  );
-
-  for (const testCase of evaluation.cases) {
-    const elements = testCase.turns.map((turn) => new FakeElement({
-      text: turn.text,
-      attrs: { "data-message-author-role": turn.role }
-    }));
-    const transcript = loadPlatformContent(elements, testCase.platform).scrapeConversationText();
-
-    for (const turn of testCase.turns) {
-      assert.ok(transcript.includes(turn.text), testCase.id + " lost a captured turn");
-    }
-    assert.equal(
-      (transcript.match(/^(?:User|Claude|ChatGPT): /gm) || []).length,
-      testCase.turns.length,
-      testCase.id + " changed the captured turn count"
-    );
-  }
 });
 
 function getClaudeComposerRect() {

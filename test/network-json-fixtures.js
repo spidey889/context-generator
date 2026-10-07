@@ -5,7 +5,9 @@ const document = `NETWORK_DOCUMENT_START\n${"  Long authored document/code line\
 const prompt = `SMOKE_USER_SENTINEL: preserve the deployment checklist.\nJSON_ONLY_SENTINEL: earliest API-only turn.\n${paste}`;
 const answer = `SMOKE_ASSISTANT_SENTINEL: verify staging before release.\n${document}`;
 const geminiTurn = (i, chat = "smoke", user = `User ${i}`, assistant = `Assistant ${i}`) => {
-  const result = []; result[0] = [[`rc_${i}`, [assistant]]]; result[3] = `rc_${i}`; result[9] = true;
+  // Native history can omit the selected-response slot. Older regenerated
+  // candidates are selected by the following turn's parent rc_id instead.
+  const result = []; result[0] = [[`rc_${i}`, [assistant]]]; result[9] = true;
   return [[`c_${chat}`, `r_${i}`], i ? [`c_${chat}`, `r_${i - 1}`, `rc_${i - 1}`] : null, [[user]], result, [1, 0]];
 };
 const rpcFrame = page => {
