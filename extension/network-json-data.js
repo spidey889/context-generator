@@ -69,15 +69,15 @@
     if (!Array.isArray(pages) || !pages.length || pages.at(-1).cursor !== null) fail("Gemini still has previous history pages.");
     const turns = [], seen = new Set();
     const excludedContentTypes = new Set();
-    let expected = null;
+    let expected = null, selectedParentCandidate = null;
     for (const page of pages) for (const item of page.turns) {
       if (!Array.isArray(item) || item[0]?.[0] !== `c_${chat}` || typeof item[0][1] !== "string" || seen.has(item[0][1])) fail("Gemini returned a wrong conversation or duplicate turn.");
       const id = item[0][1];
       if (seen.size && id !== expected) fail("A Gemini history turn is missing or out of order.");
       seen.add(id);
       if (item[1] !== null && (item[1]?.[0] !== `c_${chat}` || typeof item[1]?.[1] !== "string")) fail("Gemini returned an invalid parent turn.");
-      expected = item[1]?.[1] ?? null;
       const user = item[2]?.[0]?.[0];
+      if (typeof user !== "string") fail("A Gemini user text field is missing or malformed.");
       const userParts = [user];
       // hNvQHb user attachment slot: groups contain descriptors at [4], name at [2].
       // Read this slot only, never recursively collect strings from render/tool data.
@@ -93,9 +93,18 @@
         }
       }
       const assistant = item[3];
-      if (!Array.isArray(assistant?.[0]) || typeof assistant[3] !== "string") fail("A Gemini response is missing or unfinished.");
-      const candidate = assistant[0].find(candidate => candidate?.[0] === assistant[3]);
-      if (!candidate || !Array.isArray(candidate[1])) fail("The selected Gemini response is missing.");
+      if (!Array.isArray(assistant?.[0]) || !assistant[0].length) fail("A Gemini response is missing or unfinished.");
+      // hNvQHb often omits assistant[3]. The next chronological turn's parent
+      // triple identifies the older candidate actually continued, even across
+      // pages. For the newest reply, native candidate order supplies the current
+      // response unless the optional explicit selection is present.
+      const selected = selectedParentCandidate ?? (typeof assistant[3] === "string" ? assistant[3] : assistant[0][0]?.[0]);
+      const matches = assistant[0].filter(candidate => candidate?.[0] === selected);
+      const candidate = matches[0];
+      if (typeof selected !== "string" || !selected || matches.length !== 1 || !Array.isArray(candidate[1])) fail("The selected Gemini response is missing.");
+      expected = item[1]?.[1] ?? null;
+      selectedParentCandidate = item[1]?.[2] ?? null;
+      if (selectedParentCandidate !== null && (typeof selectedParentCandidate !== "string" || !selectedParentCandidate)) fail("Gemini returned an invalid parent response.");
       if (candidate[1].some(part => part != null && typeof part !== "string")) excludedContentTypes.add("other");
       // Only the selected response's own text; render blocks duplicate that
       // text and can contain search/tool payloads, so never walk them recursively.

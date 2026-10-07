@@ -2,6 +2,10 @@
 
 A short history of decisions and regressions that matter when changing the code. Read the relevant section of [LOGIC.md](LOGIC.md) for current behavior, ownership and checks; use this file when you need to understand why an approach changed. Entries describe source changes unless deployment is explicitly recorded. Extension packaging, Web Store publication and backend deployment are separate.
 
+## 2026-10-07
+
+- **Gemini JSON capture and response-menu fallback fixed.** Three regressions reproduced native histories being rejected for an omitted candidate-selection field, late installation requiring earlier RPC traffic, and DOM preparation clicking response controls. Fresh capture now uses native bootstrap routing when no template exists and follows parent candidate IDs across paginated regenerated replies. Updated fixtures omit the optional field rather than hiding the incompatibility. DOM expansion excludes popup triggers, menus/dialogs and response actions; Gemini restricts expansion to authored content. Gemini hook readiness advances to v7. Validation passed 195 focused checks, the long-scroll regression and isolated Brave JSON/fallback transfers with zero response-menu clicks. The Gemini browser fixture now uses its native composer and both cases join CI. Live-account completeness and Web Store publication remain separate.
+
 ## 2026-10-06
 
 - **Extension version advanced to 1.4.10.** Updated the manifest and current source/release documentation at the owner's request. This version change preserves existing runtime behavior; Web Store packaging and publication remain separate.

@@ -3,7 +3,7 @@
   if (!platform || !globalThis.__capNetworkJsonData) return;
   // Advance readiness version with adapter/contract changes: old MAIN closures
   // can survive extension reloads and must be replaced before a new capture.
-  const version = platform === "deepseek" ? 8 : 6, channel = "cap-context-network-json-v1";
+  const version = platform === "deepseek" ? 8 : platform === "gemini" ? 7 : 6, channel = "cap-context-network-json-v1";
   const previous = window.__capNetworkFetchState;
   if (previous?.version === version && window.fetch === previous.fetch
     && (platform === "grok" || previous?.ownsObservation?.())) return;
@@ -147,12 +147,18 @@
           });
           if (endpoint) geminiTemplate = { url: endpoint };
         }
-        const at = window.WIZ_global_data?.SNlM0e || geminiTemplate?.at;
-        if (!geminiTemplate?.url || typeof at !== "string" || !at) throw new api.CaptureError("Refresh this signed-in Gemini chat to make fast capture ready.", "unavailable");
-        const url = new URL(geminiTemplate.url);
+        const bootstrap = window.WIZ_global_data;
+        const at = bootstrap?.SNlM0e || geminiTemplate?.at;
+        if (typeof at !== "string" || !at) throw new api.CaptureError("Refresh this signed-in Gemini chat to make fast capture ready.", "unavailable");
+        // A cached chat or late install need not have a batchexecute timing entry.
+        // The native bootstrap is sufficient to make this explicit fresh read;
+        // do not click response menus merely to observe a request template.
+        const url = new URL(geminiTemplate?.url || "/_/BardChatUi/data/batchexecute", location.origin);
         url.searchParams.set("rpcids", "hNvQHb");
         url.searchParams.set("source-path", location.pathname);
-        const args = Array.isArray(geminiTemplate.args) ? [...geminiTemplate.args] : [null, 10, null, 1, [1], [4], null, 1];
+        if (typeof bootstrap?.cfb2h === "string") url.searchParams.set("bl", bootstrap.cfb2h);
+        if (typeof bootstrap?.FdrFJe === "string") url.searchParams.set("f.sid", bootstrap.FdrFJe);
+        const args = Array.isArray(geminiTemplate?.args) ? [...geminiTemplate.args] : [null, 10, null, 1, [1], [4], null, 1];
         args[0] = `c_${chat}`; args[1] = 10; args[2] = null;
         const pages = [], cursors = new Set();
         do {

@@ -351,10 +351,10 @@ for (const platform of ["gemini", "grok", "deepseek"]) test(`${platform}: the pr
   const h = setup(platform);
   await h.observe();
   const old = h.window.__capNetworkFetchState;
-  old.version = platform === "deepseek" ? 7 : 5;
+  old.version = platform === "deepseek" ? 7 : platform === "gemini" ? 6 : 5;
   h.reinstall(files[1]);
   assert.notEqual(h.window.__capNetworkFetchState, old);
-  assert.equal(h.window.__capNetworkFetchState.version, platform === "deepseek" ? 8 : 6);
+  assert.equal(h.window.__capNetworkFetchState.version, platform === "deepseek" ? 8 : platform === "gemini" ? 7 : 6);
   assert.equal(h.listeners.size, 1);
   assert.equal((await h.window.__capCaptureNetworkJson()).text, h.fixture.expected);
 });
@@ -416,12 +416,45 @@ test("Gemini: Unicode frame lengths, selected candidate, page root and broken ch
   assert.throws(() => h.api.gemini(f.pages.slice(0, 1), "smoke"), /previous/);
   f.pages[1].turns.shift();
   assert.throws(() => h.api.gemini(f.pages, "smoke"), /missing|order/);
-  const t = geminiTurn(0, "smoke", "User", "Selected"); t[3][0].unshift(["rc_other", ["INACTIVE_SENTINEL"]]);
+  const t = geminiTurn(0, "smoke", "User", "Selected"); t[3][0].unshift(["rc_other", ["INACTIVE_SENTINEL"]]); t[3][3] = "rc_0";
   assert.equal(h.api.gemini([{ turns: [t], cursor: null }], "smoke").text, "Gemini conversation:\n\nUser: User\n\nAssistant: Selected");
   t[3][9] = null; // Older, completed native responses omit this unrelated flag.
   assert.equal(h.api.gemini([{ turns: [t], cursor: null }], "smoke").messageTurnCount, 2);
   t[3][3] = "rc_missing";
   assert.throws(() => h.api.gemini([{ turns: [t], cursor: null }], "smoke"), /missing/);
+  t[3][3] = "rc_0";
+  t[3][0].push(["rc_0", ["DUPLICATE_SENTINEL"]]);
+  assert.throws(() => h.api.gemini([{ turns: [t], cursor: null }], "smoke"), /missing/);
+  t[3][0].pop();
+  t[2][0][0] = null;
+  assert.throws(() => h.api.gemini([{ turns: [t], cursor: null }], "smoke"), /user text.*malformed/);
+});
+
+test("Gemini: native parent candidate selects regenerated replies across page boundaries", async () => {
+  const f = fixtures("gemini", "smoke", 11);
+  const older = f.pages[1].turns[0];
+  older[3][0].unshift(["rc_abandoned", ["ABANDONED_SENTINEL"]]);
+  const h = setup("gemini", f);
+  await h.observe();
+  assert.equal((await h.window.__capCaptureNetworkJson()).text, f.expected);
+  f.pages[0].turns.at(-1)[1][2] = "rc_missing";
+  await assert.rejects(h.window.__capCaptureNetworkJson(), /selected.*missing/i);
+  assert.equal(h.navigationListeners(), 0);
+});
+
+test("Gemini: late installation builds a fresh RPC from native bootstrap without earlier traffic", async () => {
+  const h = setup("gemini");
+  h.window.WIZ_global_data.cfb2h = "native-build";
+  h.window.WIZ_global_data.FdrFJe = "native-session";
+  assert.equal((await h.window.__capCaptureNetworkJson()).text, h.fixture.expected);
+  assert.equal(h.requests.length, 3);
+  for (const { url, options } of h.requests) {
+    assert.equal(url.pathname, "/_/BardChatUi/data/batchexecute");
+    assert.equal(url.searchParams.get("bl"), "native-build");
+    assert.equal(url.searchParams.get("f.sid"), "native-session");
+    assert.equal(url.searchParams.get("source-path"), "/app/smoke");
+    assert.equal(new URLSearchParams(options.body).get("at"), "CSRF_SENTINEL");
+  }
 });
 test("Grok: rid selects active branch, ambiguous and missing bodies fail", () => {
   const h = setup("grok"), f = h.fixture;

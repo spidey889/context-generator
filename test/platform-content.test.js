@@ -1419,6 +1419,30 @@ test("collapsed conversation previews are expanded before capture", async () => 
   assert.equal(showMore.clicks, 1);
 });
 
+clockTest("Gemini fallback expands text without opening response menus or clicking their actions", async () => {
+  const response = new FakeElement({ tag: "model-response", text: "Verified answer" });
+  const content = new FakeElement({ tag: "message-content", text: "Verified answer" });
+  content.parentElement = response;
+  const query = new FakeElement({ tag: "user-query", text: "Short prompt" });
+  const showMore = new FakeElement({ tag: "button", text: "Show more" });
+  showMore.parentElement = query;
+  showMore.onClick = () => { showMore.rect.width = 0; query.innerText = query.textContent = "Full prompt"; };
+  const controls = [
+    new FakeElement({ tag: "button", attrs: { "aria-label": "Show more", "aria-haspopup": "menu" } }),
+    new FakeElement({ tag: "button", attrs: { "aria-label": "Show more options" } }),
+    new FakeElement({ tag: "button", attrs: { "aria-label": "Show more", class: "mat-mdc-menu-trigger" } }),
+    new FakeElement({ tag: "button", text: "See full response details" })
+  ];
+  for (const control of controls) control.parentElement = content;
+  const menu = new FakeElement({ attrs: { role: "menu" } });
+  const action = new FakeElement({ tag: "button", text: "Show more" });
+  action.parentElement = menu;
+  const hooks = loadPlatformContent([query, response, content, showMore, ...controls, menu, action], "gemini.google.com");
+  assert.equal(await hooks.expandCollapsedConversationContent(), 1);
+  assert.equal(showMore.clicks, 1);
+  assert.ok([...controls, action].every(control => control.clicks === 0));
+});
+
 clockTest("Claude and ChatGPT attach expanded pasted content to the owning user turn", async () => {
   const cases = [
     {

@@ -501,6 +501,11 @@ function chatGptTreeFixture() {
 
 function networkSmokeFixture(platform) {
   const fixture = networkFixtures(platform);
+  if (platform === "gemini") {
+    // Parent triples select older regenerated replies across pages; the optional
+    // assistant selection field is absent from this native-derived fixture.
+    fixture.pages[1].turns[0][3][0].unshift(["rc_abandoned", ["ABANDONED_SENTINEL"]]);
+  }
   if (platform !== "deepseek") return fixture;
   const extraBodies = [];
   for (let i = 1; i <= 3; i++) {
@@ -714,9 +719,10 @@ async function startFixtureServer() {
         // returns the full ordered conversation, including the pasted card.
         ? claudePlacementFixture()
         : sourceFixture();
-      if (JSON_SOURCE === "deepseek") {
+      if (["gemini", "deepseek"].includes(JSON_SOURCE)) {
         // Exercise the selected adapter's native composer. A ChatGPT form made
-        // DeepSeek fall back to geometry over unrelated controls before capture.
+        // these providers fall back to geometry over unrelated controls and
+        // could not exercise their inline picker ownership on resize.
         page = providerPlacementFixture(JSON_SOURCE).replace("<body>", `<body>${sourceFixture().match(/<main[\s\S]*?<\/main>/)[0]}`);
       }
       // Failure scenarios need mounted DOM history to verify the fallback.
@@ -729,8 +735,10 @@ async function startFixtureServer() {
           .replace('data-message-author-role="assistant"', 'class="response-content message" data-message-author-role="assistant"');
       }
       if (NETWORK_SOURCE) {
-        const boot = JSON_SOURCE === "gemini" ? `window.WIZ_global_data={SNlM0e:"CSRF_SENTINEL"};const xhr=new XMLHttpRequest();xhr.open("POST","/_/BardChatUi/data/batchexecute?rpcids=hNvQHb");xhr.send(new URLSearchParams({at:"CSRF_SENTINEL","f.req":JSON.stringify([[["hNvQHb",JSON.stringify(["c_smoke",10,null,1,[1],[4],null,1]),null,"generic"]]])}));`
+        // Gemini must capture a cached chat without a prior RPC observation.
+        const boot = JSON_SOURCE === "gemini" ? `window.WIZ_global_data={SNlM0e:"CSRF_SENTINEL",cfb2h:"native-build",FdrFJe:"native-session"};window.__geminiMenuClicks=0;`
           : JSON_SOURCE === "deepseek" ? 'const xhr=new XMLHttpRequest();xhr.open("GET","/api/v0/session");xhr.setRequestHeader("Authorization","Bearer AUTH_SENTINEL");xhr.setRequestHeader("x-device-id","CACHE_DEVICE");xhr.send();' : "";
+        if (JSON_SOURCE === "gemini") page = page.replace("</main>", `<model-response><button aria-label="Show more" aria-haspopup="menu" onclick="window.__geminiMenuClicks++"></button><button aria-label="Show more options" onclick="window.__geminiMenuClicks++"></button></model-response></main>`);
         response.end(page.replace("</body>", `<script nonce="smoke">${boot}</script></body>`)); return;
       }
       response.end(url.pathname === "/c/smoke"
@@ -1725,6 +1733,7 @@ async function run() {
     await sourceSession.call("Page.bringToFront");
     await verifyPickerProductChanges(sourceSession, state);
     const jsonRequestsBeforeTransfer = state.jsonRequests;
+    if (JSON_SOURCE === "gemini") assert.equal(jsonRequestsBeforeTransfer, 0, "Gemini bootstrap capture must not require earlier native RPC traffic.");
     const extensionContextId = sourceSession.getExtensionContextId();
     assert.ok(extensionContextId, "The smoke source must expose its installed extension context.");
     // Both windows belong to this disposable profile. A different current
@@ -1798,6 +1807,10 @@ async function run() {
     }
     await waitFor(() => state.summaryRequests.length === 1, "one summary backend request");
     const capturedConversation = state.summaryRequests[0]?.conversation || "";
+    if (JSON_SOURCE === "gemini") {
+      assert.equal(await sourceSession.evaluate("window.__geminiMenuClicks"), 0, "JSON capture and DOM fallback must never open Gemini response menus.");
+      process.stdout.write("✓ Gemini capture leaves native response menus untouched.\n");
+    }
     assert.match(capturedConversation, new RegExp(SOURCE_SENTINEL.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
     assert.match(capturedConversation, new RegExp(ASSISTANT_SENTINEL.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
     if (JSON_FALLBACK_SMOKE) {
@@ -1936,6 +1949,7 @@ async function run() {
       const stats = stored?.["context-generator-last-transfer-stats-v1"];
       return stats?.status === "completed" ? stats : null;
     }, "tab performance receipt");
+    if (JSON_SOURCE === "gemini") assert.equal(remoteStats.capture.method, JSON_FALLBACK_SMOKE ? "sweep" : "gemini-json");
     assert.equal(typeof remoteStats.destinationTiming.openMs, "number");
     assert.equal(typeof remoteStats.destinationTiming.pageLoadMs, "number");
     assert.equal(typeof remoteStats.destinationTiming.composerWaitMs, "number");

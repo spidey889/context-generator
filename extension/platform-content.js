@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-05-tab-ux-speed-v109";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-07-gemini-capture-v110";
   const INLINE_PILL_SIZE = 36;
   const ownedUiStyleSheets = new Map();
   const CLAUDE_INLINE_STYLE_ID = "context-generator-claude-inline-styles";
@@ -152,7 +152,7 @@
   const GROK_VIRTUAL_SWEEP_SLOW_CHANGE_TIMEOUT_MS = 160;
   const GROK_VIRTUAL_SWEEP_DELAYED_RENDER_TIMEOUT_MS = 220;
   const COLLAPSED_CONVERSATION_EXPAND_RE = /\b(?:show|see|read|view)\s+(?:more|full|all)\b|\bcontinue\s+(?:reading|message|response)\b|\bexpand\b/i;
-  const COLLAPSED_CONVERSATION_EXPAND_EXCLUDE_RE = /\b(?:continue generating|regenerate|send|submit|stop generating|new chat|settings|menu|voice|microphone)\b/i;
+  const COLLAPSED_CONVERSATION_EXPAND_EXCLUDE_RE = /\b(?:continue generating|regenerate|send|submit|stop generating|new chat|settings|menu|voice|microphone|options|actions|response details)\b/i;
   const PASTED_CONTENT_TITLE_RE = /^\s*pasted\s+(?:content|text)\s*$/i;
   const PASTED_CONTENT_BADGE_RE = /^\s*pasted\s*$/i;
   const CLAUDE_PASTED_TEXT_BUTTON_LABEL_RE = /^\s*pasted\s+text\b/i;
@@ -1864,7 +1864,12 @@
 
   function isCollapsedConversationExpander(element) {
     if (!(element instanceof Element) || !isVisible(element) || isContextGeneratorNode(element)) return false;
-    if (element.closest("nav, header, footer, aside, menu")) return false;
+    if (element.closest("nav, header, footer, aside, menu, [role='menu'], [role='menuitem'], [role='dialog']")) return false;
+    // Native response menus can say "Show more" or contain an expand icon.
+    // Opening them is a side effect, never conversation-text preparation.
+    if (element.hasAttribute("aria-haspopup") && element.getAttribute("aria-haspopup") !== "false") return false;
+    if (element.matches(".mat-menu-trigger, .mat-mdc-menu-trigger")) return false;
+    if (currentPlatform.id === "gemini" && !element.closest("user-query, .query-text, message-content, .response-content")) return false;
 
     const label = getElementLabel(element, true);
     if (!COLLAPSED_CONVERSATION_EXPAND_RE.test(label)) return false;

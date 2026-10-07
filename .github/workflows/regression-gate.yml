@@ -118,6 +118,19 @@ jobs:
         run: |
           mkdir -p "$CAP_CONTEXT_SMOKE_ARTIFACT_DIR"
           xvfb-run -a npm run test:extension-smoke 2>&1 | tee "$CAP_CONTEXT_SMOKE_ARTIFACT_DIR/run.log"
+      - name: Brave Gemini bootstrap JSON capture and response-menu-free fallback
+        timeout-minutes: 3
+        shell: bash
+        env:
+          CAP_CONTEXT_JSON_SMOKE: gemini
+          CAP_CONTEXT_NETWORK_FAILURE_SMOKE: partial
+          CAP_CONTEXT_SMOKE_ARTIFACT_DIR: .gstack/browser-smoke/gemini-capture
+        run: |
+          mkdir -p "$CAP_CONTEXT_SMOKE_ARTIFACT_DIR/complete"
+          CAP_CONTEXT_NETWORK_FAILURE_SMOKE="" CAP_CONTEXT_SMOKE_ARTIFACT_DIR="$CAP_CONTEXT_SMOKE_ARTIFACT_DIR/complete" \
+            xvfb-run -a npm run test:extension-smoke 2>&1 | tee "$CAP_CONTEXT_SMOKE_ARTIFACT_DIR/complete/run.log"
+          mkdir -p "$CAP_CONTEXT_SMOKE_ARTIFACT_DIR"
+          xvfb-run -a npm run test:extension-smoke 2>&1 | tee "$CAP_CONTEXT_SMOKE_ARTIFACT_DIR/run.log"
       - name: Brave DeepSeek concurrent original-file capture
         timeout-minutes: 3
         shell: bash
