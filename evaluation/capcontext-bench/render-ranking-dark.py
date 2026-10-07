@@ -55,7 +55,8 @@ def marker(x, y, index, radius=11):
 text(104, 83, "CapContextBench", 30, bold=True)
 text(1290, 91, "03 OCT 2026", 18, MUTED, anchor="ra")
 legend_x = [104, 401, 737, 1091]
-names = ["Ling 3.1 Flash", "Apodex 1.1 Mini", "Dots3 Note Preview", "Qwen3.8 27B"]
+rows = [row for row in DATA["archive"]["rows"] if row["rank"] is not None]
+names = [row["name"] for row in rows]
 for index, (x, name) in enumerate(zip(legend_x, names)):
     marker(x+10, 184, index, 10)
     text(x+32, 169, name, 23)
@@ -83,7 +84,6 @@ canvas.paste(label_image, (round(116*SCALE-label_image.width/2),
 
 # These are four independent historical judgments, not samples along a curve.
 # Do not connect models or turn ordinal ranks into accuracy percentages.
-rows = [row for row in DATA["archive"]["rows"] if row["rank"] is not None]
 assert [row["rank"] for row in rows] == [1, 2, 3, 4]
 for index, row in enumerate(rows):
     seconds = row["medianElapsedMs"] / 1000

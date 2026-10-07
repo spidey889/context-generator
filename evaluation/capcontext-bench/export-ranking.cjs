@@ -10,7 +10,7 @@ const read = file => fs.readFileSync(path.join(root, file), "utf8").replace(/\r\
 const archiveSource = read(archivePath), reviewSource = read(reviewPath);
 const archive = JSON.parse(archiveSource);
 const definitions = [
-  [1, "Ling 3.1 Flash", "inclusionai/ling-3.1-flash", "Ling 3.1 Flash", "Best preservation; some invented identity and questions remain."],
+  [1, "Space Bunny 2", "inclusionai/ling-3.1-flash", "Ling 3.1 Flash", "Best preservation; some invented identity and questions remain."],
   [2, "Apodex 1.1 Mini", "apodex/apodex-1.1-mini:free", "Apodex 1.1 Mini", "Fast responses; invents ownership and extra requirements."],
   [3, "Dots3 Note Preview", "dots-studio/dots-3-note-preview:free", "Dots3-Note Preview", "Changes unresolved retry choices and invents acceptance."],
   [4, "Qwen3.8 27B", "qwen/qwen3.8-27b:free", "Qwen3.8 27B", "Invents causes and identity; weakens explicit prohibitions."],

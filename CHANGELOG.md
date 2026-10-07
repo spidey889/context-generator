@@ -4,6 +4,8 @@ A short history of decisions and regressions that matter when changing the code.
 
 ## 2026-10-07
 
+- **Finalized benchmark image naming.** Renamed the archived Ling display label to Space Bunny 2 at the owner's request, preserving the provider ID and evidence. The dark plot reads names from the data export. Removed the older light image and its renderer; documentation now points to the single dark image.
+
 - **Added a minimal dark benchmark image.** Matched the owner's reference with a black background, white axes, compact legend and coloured markers. Four historical qualitative ranks are plotted against measured median response times, without invented percentages or curves; Gemma remains unscored. The original detailed leaderboard is retained, and the new PNG has an offline renderer.
 
 - **Rendered the historical model leaderboard.** Added a 2000 × 1640 PNG and reproducible offline data export in `evaluation/capcontext-bench/`. The recorded October 3 factual-usefulness review ranks Ling, Apodex, Dots and Qwen across three shared conversations; all 20 attempts remain represented, including five unscored Gemma 429s. Generated-output counts and median timing/tokens accompany the qualitative ranks. The newer v1 Dots master/candidate scores appear separately because the prompts, cases and rubric differ. Source hashes and result indices preserve provenance; no new model requests or runtime changes were made.

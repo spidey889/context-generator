@@ -74,22 +74,22 @@ This is one reviewer's small development-influenced sample, not a model ranking 
 
 ## Historical model-ranking image
 
-![CapContext historical model ranking and separate v1 Dots check](model-ranking.png)
+![CapContext historical model ranking](model-ranking-dark.png)
 
-[The image](model-ranking.png) presents the **recorded October 3 qualitative order: Ling, Apodex, Dots, Qwen**. It comes from [the archived matched comparison](../results/2026-10-03-openrouter-primary.json) and [its factual-usefulness review](../../docs/openrouter-primary-comparison.md): three shared synthetic conversations, all 20 attempts and all 15 generated summaries. Gemma's five HTTP 429 attempts remain unscored. Counts show generated outputs, not quality passes. Timing and token medians use generated outputs only; repeats were uneven, so these are descriptive efficiency figures.
+[The image](model-ranking-dark.png) presents the **recorded October 3 qualitative order: Space Bunny 2, Apodex, Dots, Qwen**, plotted against median response time. Space Bunny 2 is the owner's display name for the archived Ling 3.1 Flash results; the underlying provider ID and source evidence stay recorded. It comes from [the archived matched comparison](../results/2026-10-03-openrouter-primary.json) and [its factual-usefulness review](../../docs/openrouter-primary-comparison.md): three shared synthetic conversations, all 20 attempts and all 15 generated summaries. Gemma's five HTTP 429 attempts remain unscored. Timing and token medians use generated outputs only; repeats were uneven, so these are descriptive efficiency figures.
 
-The separate lower panel shows the October 7 v1 level-1 Dots handoff pass rates. Its cases, prompts and grading differ from the archive; do not turn the qualitative ranks into accuracy percentages or combine the two panels into a current cross-model v1 ranking. This small, recorded source review does not establish production reliability or a statistically significant winner.
+The data export separately retains the October 7 v1 level-1 Dots handoff pass rates. Its cases, prompts and grading differ from the archive; do not turn the qualitative ranks into accuracy percentages or combine the cohorts into a current cross-model v1 ranking. This small, recorded source review does not establish production reliability or a statistically significant winner.
 
 [model-ranking.json](model-ranking.json) records source hashes, archive result indices, medians and the reviewed v1 scores. Regenerate this dated snapshot offline from the checkout root:
 
 ```powershell
 node evaluation/capcontext-bench/export-ranking.cjs
-python evaluation/capcontext-bench/render-ranking.py
+python evaluation/capcontext-bench/render-ranking-dark.py
 ```
 
-Rendering requires Pillow and Segoe UI (Windows) or DejaVu Sans. The export checks the recorded ranking and archive cohort, and validates the v1 review through the benchmark harness. Neither script makes model requests. They are manual tools with no CI or push integration. The PNG is 2000 × 1640 pixels and is marked binary in Git.
+Rendering requires Pillow and Segoe UI (Windows) or DejaVu Sans. The export checks the recorded ranking and archive cohort, and validates the v1 review through the benchmark harness. Neither script makes model requests. They are manual tools with no CI or push integration. The PNG is 1400 × 1200 pixels and is marked binary in Git.
 
-[The minimal dark plot](model-ranking-dark.png) uses the same archived data: each model has one marker for its qualitative rank and median response time. Rank is ordinal, not a percentage score; independent models are not connected into invented curves. Regenerate with `python evaluation/capcontext-bench/render-ranking-dark.py`. The original detailed image remains available.
+Each model has one marker for its qualitative rank and median response time. Rank is ordinal, not a percentage score; independent models are not connected into invented curves. The older light image and its renderer have been removed.
 
 ## How to investigate a failure
 
