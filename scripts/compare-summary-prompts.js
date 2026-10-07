@@ -170,6 +170,8 @@ async function main() {
       },
       onResult: (result, results) => {
         report.results = results;
+        // Test-only metadata contains a slot/count, never credentials or vault paths.
+        if (globalThis.__capContextTestBudget) report.testRequestBudget = { ...globalThis.__capContextTestBudget };
         fs.mkdirSync(path.dirname(output), { recursive: true });
         fs.writeFileSync(output, JSON.stringify(report, null, 2) + "\n");
         const assessment = result.assessment;

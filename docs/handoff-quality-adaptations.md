@@ -23,7 +23,7 @@ Four fresh synthetic conversations in [handoff-adaptation-cases.json](../evaluat
 
 The comparison alternates prompt order with identical input, selected provider, output allowance and runtime acceptance policy. It retains every full output, hash, usage and failure. Lexical flags are advisory: negated statements and faithful paraphrases can be false positives/omissions, while fluent unsupported implications can pass. Full source/output review decides whether continuation is safe.
 
-Development credentials are loaded only for the evaluation process from a temporary file outside the repository. The configured free/private endpoint policy remains enforced. No customer conversation is used, and no production deployment or master merge is part of this experiment.
+The initial experiments used temporary development credentials outside the repository. Future live tests use the owner's two encrypted testing-only credentials through [the capped local wrapper](handoff-quality.md). The configured free/private endpoint policy remains enforced. No customer conversation is used, and no production deployment or master merge is part of this experiment.
 
 ## Replaced candidates
 
@@ -33,7 +33,7 @@ Development credentials are loaded only for the evaluation process from a tempor
 
 The exact rejected prompt modules are retained under `evaluation/prompts`; their SHA-256 hashes match their reports. v19 adds a direct missing-report versus missing-activity check. These development cases have now been inspected and used for revision; further runs measure regression, not independent generalization.
 
-## Final v19 findings
+## Initial v19 findings
 
 **Recommendation: retain the four principles; the overall quality difference remains inconclusive.** Shared model hallucinations alone do not justify rejecting the candidate. The available comparisons establish neither an overall win nor a consistent regression. Stronger wording does not provide semantic verification.
 
@@ -57,7 +57,7 @@ The report's `candidateRef` is the checkout parent before the uncommitted experi
 
 Final compatibility checks: 28 focused tests passed for provider/template/cache integration, empty-template rejection and comparison integrity. Ground-truth phrase checks and diff checks passed. Routing, output allowances, validation policy, seven headings and trusted destination confirmation remain unchanged. The development environment file was removed after evaluation. No master merge or deployment was performed.
 
-The next quality decision needs an available route, completed failure-prone/long-history comparisons, and full source/output review. Further wording changes alone should not be declared a fix for unsupported facts.
+The initial quality decision needed an available route, completed failure-prone/long-history comparisons, and full source/output review. The dedicated-key follow-up below supplies that missing evidence. Further wording changes alone should not be declared a fix for unsupported facts.
 
 ## Master control and attribution correction
 
@@ -68,3 +68,9 @@ This supports a shared model weakness and demonstrates that the failure is not u
 A [fresh master-first Dots retry](../evaluation/results/2026-10-07-handoff-master-status-recheck-dots.json) returned 429 before either generation. It is retained as an unavailable attempt and adds no quality evidence. No runtime wording or routing was changed for this follow-up.
 
 The earlier merge-hold conclusion was too strong when grounded in shared hallucinations. The relevant acceptance question is whether the candidate preserves more essential context without increasing unsupported claims relative to master, using repeated matched generations. It is not whether the candidate eliminates every failure the same model already exhibits on master. The existing four adaptation recommendations stand; production merge has not been performed or newly authorized.
+
+## Dedicated-key follow-up
+
+The owner's testing keys enabled 17 complete Dots pairs: all seven original short cases, both 90k/280k histories, and two repeats of each adaptation case. Both Ling attempts returned 429 before generation and remain ungraded. Runtime prompt bytes were held fixed throughout. The [full-output review and all four reports](handoff-quality-test-key-comparison.md) retain the new evidence.
+
+Master and candidate both invent budget arithmetic, upgrade accepted CSV inspection into implementation approval, and sometimes turn unreported testing into no testing. Those failures are not unique regressions. The candidate preserves the exact 90k-history paragraph that master drops and more often carries the latest request as pending. Candidate weaknesses remain: losing some exact scope wording, adding a no-deploy prohibition from reported inactivity, and broadening one welcome-card goal beyond the pending review. Retain the four adaptation principles; this small development-influenced comparison does not establish an overall winner or a cross-model quality guarantee. No further prompt edit, master merge or production deployment was made.
