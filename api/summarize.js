@@ -1065,7 +1065,7 @@ async function fetchWithRetry(url, options, requestBudgetMs, context = {}) {
           const bytes = await response.arrayBuffer();
           payload = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes));
         } catch (error) {
-          if (signal.aborted || error?.name === "AbortError") throw error;
+          if (signal.aborted || error?.name === "AbortError" || isRetryableProviderNetworkError(error)) throw error;
           bodyError = error;
         }
       } else {
@@ -1086,17 +1086,16 @@ async function fetchWithRetry(url, options, requestBudgetMs, context = {}) {
           return payload;
         }
       };
-      // Rate limits advance immediately to the next model or full local carry.
-      // Waiting cannot fix a free-tier prompt cap and wastes the transfer budget.
-      const retryableStatus = isRetryableProviderStatus(response.status);
-      if (response.ok || !retryableStatus || attempt === PROVIDER_MAX_ATTEMPTS) {
+      // Only temporary failures retry. OpenRouter may embed an upstream error
+      // in HTTP 200 JSON; rate/account errors still advance without waiting.
+      const retryableStatus = isRetryableProviderResponse(response, payload);
+      if (!retryableStatus || attempt === PROVIDER_MAX_ATTEMPTS) {
         return lastResponse;
       }
     } catch (error) {
       checkAttemptDeadline();
       lastError = error;
-      if (error?.name === "AbortError") throw error;
-      if (attempt === PROVIDER_MAX_ATTEMPTS) throw error;
+      if (!isRetryableProviderNetworkError(error) || attempt === PROVIDER_MAX_ATTEMPTS) throw error;
     } finally {
       clearTimeout(timeout);
     }
@@ -1125,7 +1124,28 @@ function getProviderRequestBudgetMs(model) {
 }
 
 function isRetryableProviderStatus(status) {
-  return status === 500 || status === 502 || status === 503 || status === 504;
+  return status === 500 || status === 502 || status === 503 || status === 504 || status === 529;
+}
+
+function isRetryableProviderResponse(response, payload) {
+  if (!response.ok) return isRetryableProviderStatus(response.status);
+  if (payload?.choices?.[0]?.finish_reason === "content_filter") return false;
+  const error = payload?.error || payload?.choices?.[0]?.error;
+  if (!error) return false;
+  const status = Number(error.code ?? error.status);
+  // A numeric API status takes precedence over symbolic overload labels.
+  if (Number.isInteger(status) && status >= 400) return isRetryableProviderStatus(status);
+  return ["overloaded", "overloaded_error", "provider_overloaded", "model_overloaded", "too_busy",
+    "server_error", "internal", "internal_error", "internal_server_error", "unavailable", "service_unavailable"]
+    .includes(String(error.type || error.status || error.code || "").toLowerCase());
+}
+
+function isRetryableProviderNetworkError(error) {
+  if (error?.name === "AbortError" || error?.name === "TimeoutError") return false;
+  const code = error?.cause?.code || error?.code;
+  return ["ECONNRESET", "ECONNREFUSED", "ECONNABORTED", "ETIMEDOUT", "EAI_AGAIN", "ENOTFOUND", "EPIPE",
+    "UND_ERR_CONNECT_TIMEOUT", "UND_ERR_HEADERS_TIMEOUT", "UND_ERR_BODY_TIMEOUT", "UND_ERR_SOCKET"]
+    .includes(code) || /^(fetch failed|failed to fetch|network error|network request failed|terminated)$/i.test(error?.message || "");
 }
 
 function delay(timeoutMs, signal) {
