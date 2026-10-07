@@ -1,0 +1,136 @@
+{
+  "version": 1,
+  "syntheticOnly": true,
+  "benchmark": {
+    "name": "CapContextBench",
+    "version": 1,
+    "level": "1",
+    "suiteSha256": "aa530a1ad7a4fb99aff90457098e0756e6d2856d8bdab72c215eee0507ccd6f1"
+  },
+  "reviewCriteria": [
+    "Can the next assistant continue the pending task?",
+    "Are essential facts, corrections and constraints faithful?",
+    "Is every claim supported by its source/status?",
+    "Does the delivered handoff retain the seven sections and trusted confirmation?"
+  ],
+  "cases": [
+    {
+      "id": "corrected-export-design",
+      "historyAnchor": "Replace the earlier six-upload choice",
+      "purpose": "A later decision replaces an earlier decision without implying implementation or approval.",
+      "conversation": "ChatGPT conversation:\n\nUser: We are fixing Project Cedar's nightly export worker. Owner is Jules. The production branch is release and the region is ap-south-1. The export times out only for files larger than 30 MB. Database writes are healthy and no customer records were lost. Do not deploy this change.\n\nChatGPT: I suggest six simultaneous uploads and 10 MB chunks. Increasing the global timeout is another option. The timeout symptom alone does not establish why the upload stalls.\n\nUser: Reject increasing the global timeout. Use 10 MB chunks and six simultaneous uploads. Keep the required invoice-format fix; rollback is not approved.\n\nChatGPT: I can implement that after we settle the retry policy. We could use a fixed 400 ms pause, or jitter between 200-600 ms. I have not changed code or run any checks.\n\nUser: Replace the earlier six-upload choice with two simultaneous uploads. Keep the 10 MB chunk size. Retry policy is still undecided: fixed 400 ms or jitter 200-600 ms. We have not started implementation, testing or deployment. Do not infer that Jules is me.\n\nUser: Pick up with a patch proposal for the two-upload design; preserve my no-deploy instruction and both retry options.\n\nUser: The patch target is worker/export.mjs. Its failure log is exactly: upload idle timeout. No owner identity has been linked to my account.",
+      "requiredFacts": [
+        "Project Cedar",
+        "release",
+        "ap-south-1",
+        "Jules",
+        "30 MB",
+        "10 MB",
+        [
+          "two simultaneous",
+          "2 simultaneous",
+          "two concurrent",
+          "2 concurrent"
+        ],
+        "400 ms",
+        "200-600 ms"
+      ],
+      "criticalFacts": [
+        "Do not deploy this change",
+        [
+          "rollback is not approved",
+          "rollback not approved"
+        ],
+        [
+          "have not started",
+          "not started",
+          "has not started"
+        ],
+        [
+          "patch proposal",
+          "propose a patch",
+          "propose the patch"
+        ]
+      ],
+      "forbiddenFacts": [
+        "The user is Jules",
+        "rollback is approved",
+        "deployment completed",
+        "implementation completed",
+        "the backup is intact",
+        "disabling duplicate detection",
+        "Harbor",
+        "Dana"
+      ],
+      "contradictions": [
+        {
+          "label": "superseded upload count treated as current",
+          "pattern": "(?:accepted|current|final) (?:design|decision)[^.!?\\n]{0,60}six simultaneous"
+        }
+      ],
+      "benchmark": {
+        "level": "1",
+        "expectations": {
+          "continuity": "The patch proposal is still pending. Carry worker/export.mjs and the exact upload idle timeout error; do not write the proposal or claim implementation.",
+          "fidelity": "Two uploads replace six; retain 10 MB, ap-south-1, release, Jules as an unlinked owner, both retry options (400 ms / 200-600 ms), no-deploy, rejected timeout increase and unapproved rollback.",
+          "grounding": "Implementation, testing and deployment explicitly have not started. Healthy writes/no lost records are observations, not extra requirements. Do not infer Jules is or is not the user, a root cause, approval or a reason never supplied."
+        },
+        "exactText": [
+          "worker/export.mjs",
+          "upload idle timeout"
+        ]
+      }
+    },
+    {
+      "id": "continue-latest-draft",
+      "historyAnchor": "Here is my replacement draft",
+      "purpose": "Continue editing the actual latest draft rather than reconstructing it from a description.",
+      "conversation": "Claude conversation:\n\nUser: Help me write the opening of a small community newsletter called The Lantern. This is for neighbors, not sponsors. Keep the tone friendly and plain. Do not add invented attendance numbers or quotes.\n\nClaude: We could start with a big claim about the whole town coming together and end with a registration link.\n\nUser: Reject the big claim. There is no registration link. The event is Saturday 18 April at the old library courtyard, 16:00-18:00. Bring a mug; tea is free. Children's books can be exchanged, but selling books is not allowed.\n\nClaude: Draft v1: Our town comes together for a wonderful afternoon of books and tea. Hundreds of neighbors will join us on Saturday.\n\nUser: That is wrong; remove the invented turnout. Here is my replacement draft, which is the current version: 'A spare book, a familiar face, and a cup of tea: join us at the old library courtyard on Saturday 18 April, 16:00-18:00. Bring a mug and a children's book to exchange. Tea is free; books are for swapping, not selling.' Keep that paragraph exactly as written for now.\n\nClaude: We can put practical details in a second paragraph. I have not written that paragraph yet.\n\nUser: Next, write only the second paragraph in the same voice. Do not rewrite my opening or revive v1. Mention that the courtyard is outdoors, and visitors can leave whenever they like.",
+      "requiredFacts": [
+        "The Lantern",
+        "old library courtyard",
+        "Saturday 18 April",
+        "16:00-18:00",
+        "outdoors",
+        [
+          "leave whenever",
+          "leave at any time"
+        ]
+      ],
+      "criticalFacts": [
+        "A spare book, a familiar face, and a cup of tea: join us at the old library courtyard on Saturday 18 April, 16:00-18:00. Bring a mug and a children's book to exchange. Tea is free; books are for swapping, not selling.",
+        [
+          "only the second paragraph",
+          "second paragraph only",
+          "write the second paragraph"
+        ],
+        [
+          "Do not rewrite my opening",
+          "do not rewrite the opening",
+          "keep the opening unchanged"
+        ]
+      ],
+      "forbiddenFacts": [
+        "Hundreds of neighbors will join us",
+        "registration link is",
+        "second paragraph completed",
+        "the backup is intact",
+        "disabling duplicate detection",
+        "Harbor",
+        "Dana"
+      ],
+      "contradictions": [],
+      "benchmark": {
+        "level": "1",
+        "expectations": {
+          "continuity": "Retain the exact current opening so an assistant without file access can write only the pending second paragraph. Do not write it during summarization.",
+          "fidelity": "Preserve friendly/plain tone, outdoors, leaving whenever desired, event date/time/place, mug, free tea, swapping/no selling, no opening rewrite and rejection of v1/registration link.",
+          "grounding": "No invented turnout, quote, service, registration link or completed second paragraph. Old v1 may appear only as clearly rejected history."
+        },
+        "exactText": [
+          "A spare book, a familiar face, and a cup of tea: join us at the old library courtyard on Saturday 18 April, 16:00-18:00. Bring a mug and a children's book to exchange. Tea is free; books are for swapping, not selling."
+        ]
+      }
+    }
+  ]
+}
