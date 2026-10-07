@@ -154,11 +154,12 @@ test("each paused route can be enabled explicitly with the same key; missing key
 test("OpenRouter auth, quota, unavailable endpoints, malformed/error envelopes and empty reasoning all advance safely", async () => {
   const restore = isolateEnv();
   const originalFetch = global.fetch;
+  const temporaryError = () => new Response(JSON.stringify({ error: { code: 502, message: "PRIVATE_BODY" } }));
   const failures = [
+    temporaryError,
     ...[401, 402, 403, 404, 429].map(status => () => new Response(JSON.stringify({ error: { message: "PRIVATE_BODY" } }), { status })),
     () => new Response("not JSON"),
     ...[
-      { error: { code: 502, message: "PRIVATE_BODY" } },
       { choices: [{ error: { message: "PRIVATE_BODY" }, message: { content: "Partial text" } }] },
       { choices: [{ finish_reason: "error", message: { content: "Partial text" } }] },
       { choices: [{ finish_reason: "content_filter", message: { content: "Partial text" } }] },
@@ -179,8 +180,9 @@ test("OpenRouter auth, quota, unavailable endpoints, malformed/error envelopes a
       };
       const result = await run("Build facts. ".repeat(200), { openrouterApiKey: "test-openrouter", geminiApiKey: "test-google" });
       assert.equal(result.model, "gemini-3.6-flash");
-      assert.equal(calls.length, 2);
-      assert.deepEqual(calls, [LING, "gemini-3.6-flash"]);
+      const expectedCalls = failure === temporaryError ? [LING, LING, "gemini-3.6-flash"] : [LING, "gemini-3.6-flash"];
+      assert.equal(calls.length, expectedCalls.length);
+      assert.deepEqual(calls, expectedCalls);
       assert.equal(result.fallback.used, true);
       assert.doesNotMatch(JSON.stringify(result), /PRIVATE_BODY|Unfinished private chain|Partial text/);
     }

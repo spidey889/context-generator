@@ -1143,9 +1143,11 @@ function isRetryableProviderResponse(response, payload) {
 function isRetryableProviderNetworkError(error) {
   if (error?.name === "AbortError" || error?.name === "TimeoutError") return false;
   const code = error?.cause?.code || error?.code;
-  return ["ECONNRESET", "ECONNREFUSED", "ECONNABORTED", "ETIMEDOUT", "EAI_AGAIN", "ENOTFOUND", "EPIPE",
+  if (code) return ["ECONNRESET", "ECONNREFUSED", "ECONNABORTED", "ETIMEDOUT", "EAI_AGAIN", "ENOTFOUND", "EPIPE",
+    "ENETUNREACH", "EHOSTUNREACH", "ENETDOWN",
     "UND_ERR_CONNECT_TIMEOUT", "UND_ERR_HEADERS_TIMEOUT", "UND_ERR_BODY_TIMEOUT", "UND_ERR_SOCKET"]
-    .includes(code) || /^(fetch failed|failed to fetch|network error|network request failed|terminated)$/i.test(error?.message || "");
+    .includes(code);
+  return /^(fetch failed|failed to fetch|network error|network request failed|terminated)$/i.test(error?.message || "");
 }
 
 function delay(timeoutMs, signal) {
