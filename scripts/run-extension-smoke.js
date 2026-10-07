@@ -936,16 +936,24 @@ async function verifyPickerProductChanges(session, state) {
   assert.equal(await session.evaluate('getComputedStyle(document.querySelector(".context-generator-speed-lines i")).animationName'), "none");
   await session.call("Emulation.setEmulatedMedia", { features: [] });
   for (const width of [390, 320]) {
-    // Resize intentionally closes inline-owned pickers; reopen on the remounted pill.
+    // Claude keeps the existing picker; other inline providers retain their
+    // dismissal/reopen lifecycle. Both must fit and keep the real orb clickable.
     await session.call("Emulation.setDeviceMetricsOverride", { width, height: 740, deviceScaleFactor: 1, mobile: false });
-    await waitFor(() => session.evaluate('getComputedStyle(document.getElementById("context-generator-destination-sheet")).display === "none"'), "picker closure on resize");
-    await session.evaluate('document.getElementById("context-generator-bubble").click()');
+    if (JSON_SOURCE === "claude") {
+      await waitFor(() => session.evaluate(`(() => {const sheet=document.getElementById("context-generator-destination-sheet"), r=sheet.getBoundingClientRect();
+        return sheet.getAttribute("aria-hidden")==="false" && r.left>=0 && r.right<=innerWidth;})()`), "Claude picker retention on resize");
+    } else {
+      await waitFor(() => session.evaluate('getComputedStyle(document.getElementById("context-generator-destination-sheet")).display === "none"'), "picker closure on resize");
+      await session.evaluate('document.getElementById("context-generator-bubble").click()');
+    }
     await waitFor(() => session.evaluate('getComputedStyle(document.getElementById("context-generator-destination-sheet")).opacity === "1"'), "the narrow picker");
     assert.equal(await session.evaluate(`(() => {
       const r = document.getElementById("context-generator-destination-sheet").getBoundingClientRect();
       return r.left >= 0 && r.right <= innerWidth;
     })()`), true, `Picker must fit at ${width}px.`);
-    assert.equal(await session.evaluate(orbVisibleThroughBackdrop), true, `Orb must stay clear/clickable at ${width}px.`);
+    // Retention has no exit/open delay; let the coalesced placement frame move
+    // the backdrop cutout before testing the orb's actual browser hit target.
+    await waitFor(() => session.evaluate(orbVisibleThroughBackdrop), `the clickable orb at ${width}px`);
   }
   await session.evaluate(`(() => {
     const toggle = document.querySelector(".context-generator-speed-toggle");
