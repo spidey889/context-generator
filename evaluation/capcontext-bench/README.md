@@ -72,6 +72,23 @@ Gold expectations and exact-payload checks are never sent to the model: the gene
 
 This is one reviewer's small development-influenced sample, not a model ranking or proof that the candidate improves production quality. Levels 2/3 and other models remain unmeasured in CapContextBench v1. The older wider comparison reports are useful historical evidence but are not silently converted into benchmark scores. The live run used eight requests on `test-b`; at completion its local rolling-day count was nine, while `test-a` remained at 35. These are local counts, not server-side remaining quotas.
 
+## Historical model-ranking image
+
+![CapContext historical model ranking and separate v1 Dots check](model-ranking.png)
+
+[The image](model-ranking.png) presents the **recorded October 3 qualitative order: Ling, Apodex, Dots, Qwen**. It comes from [the archived matched comparison](../results/2026-10-03-openrouter-primary.json) and [its factual-usefulness review](../../docs/openrouter-primary-comparison.md): three shared synthetic conversations, all 20 attempts and all 15 generated summaries. Gemma's five HTTP 429 attempts remain unscored. Counts show generated outputs, not quality passes. Timing and token medians use generated outputs only; repeats were uneven, so these are descriptive efficiency figures.
+
+The separate lower panel shows the October 7 v1 level-1 Dots handoff pass rates. Its cases, prompts and grading differ from the archive; do not turn the qualitative ranks into accuracy percentages or combine the two panels into a current cross-model v1 ranking. This small, recorded source review does not establish production reliability or a statistically significant winner.
+
+[model-ranking.json](model-ranking.json) records source hashes, archive result indices, medians and the reviewed v1 scores. Regenerate this dated snapshot offline from the checkout root:
+
+```powershell
+node evaluation/capcontext-bench/export-ranking.cjs
+python evaluation/capcontext-bench/render-ranking.py
+```
+
+Rendering requires Pillow and Segoe UI (Windows) or DejaVu Sans. The export checks the recorded ranking and archive cohort, and validates the v1 review through the benchmark harness. Neither script makes model requests. They are manual tools with no CI or push integration. The PNG is 2000 × 1640 pixels and is marked binary in Git.
+
 ## How to investigate a failure
 
 The scoreboard includes per-case, per-dimension paired counts for both failing, master-only failure, candidate-only failure and both passing. Use those counts and the actual reviewer evidence together:
