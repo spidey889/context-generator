@@ -1949,7 +1949,13 @@ async function run() {
       const stats = stored?.["context-generator-last-transfer-stats-v1"];
       return stats?.status === "completed" ? stats : null;
     }, "tab performance receipt");
-    if (JSON_SOURCE === "gemini") assert.equal(remoteStats.capture.method, JSON_FALLBACK_SMOKE ? "sweep" : "gemini-json");
+    if (JSON_SOURCE === "gemini") {
+      if (JSON_FALLBACK_SMOKE) {
+        // A fully mounted short DOM history needs no virtual-window sweep.
+        assert.match(remoteStats.capture.method, /^(structured|sweep)$/);
+        assert.equal(remoteStats.capture.diagnostics.jsonFallbackReason, "incomplete");
+      } else assert.equal(remoteStats.capture.method, "gemini-json");
+    }
     assert.equal(typeof remoteStats.destinationTiming.openMs, "number");
     assert.equal(typeof remoteStats.destinationTiming.pageLoadMs, "number");
     assert.equal(typeof remoteStats.destinationTiming.composerWaitMs, "number");
