@@ -1,0 +1,63 @@
+{
+  "version": 1,
+  "syntheticOnly": true,
+  "baselineRef": "2c665862a4f3e455bf98bbfc2ec1f0aa62f404ec",
+  "candidateRef": "0f4b23c3f3ac53eeeca00e41757b8e83f7122e76",
+  "candidatePromptSourceSha256": "41a7b0026cbd36ef36d60d6ac28d8c1fa84f6f6bbfa9c021fd09b3239c5341cc",
+  "fixtureSha256": "84532a58db6d426dc15351c1b4915f0e4066828511abd37439bae4bb18313e5a",
+  "model": "google/gemma-4-26b-a4b-it:free",
+  "repeats": 1,
+  "selectedCases": [
+    "corrected-export-design",
+    "continue-latest-draft",
+    "travel-plan-unbooked",
+    "student-corrected-equation",
+    "debugging-reproduction",
+    "separate-project-and-hostile-quote",
+    "review-budget-draft",
+    "continue-latest-draft-long-90000",
+    "corrected-export-design-long-280000"
+  ],
+  "longHistory": true,
+  "comparisonRunnerSha256": "96a89cd2d77d162f01de19be3e3276d236185594d2c0767cae3269d32b0a0cd1",
+  "reviewCriteria": [
+    "Can the next assistant answer the latest user request without asking for information already supplied?",
+    "Are accepted choices, proposals, rejections and unresolved alternatives kept distinct?",
+    "Are prohibitions, user corrections and not-started/not-tested/not-booked states preserved?",
+    "Is the current work product or exact reproduction evidence available when needed to continue?",
+    "Does the handoff avoid invented identity, causes, approvals, completed work and extra tasks?"
+  ],
+  "limitations": "Lexical checks are diagnostics, not semantic grading. Review every full handoff; local fallback is not a successful model generation. Short fixtures force the same generated profile on both variants; production tiny chats still use exact local carry.",
+  "results": [
+    {
+      "caseId": "corrected-export-design",
+      "repeat": 1,
+      "variant": "baseline",
+      "summary": null,
+      "generated": false,
+      "model": "local-direct",
+      "elapsedMs": 956,
+      "inputChars": 1341,
+      "inputSha256": "ef8cc7f79b04ba31cf77b9ece7c0b065a01b6f4648f11fc66e4163d9fe576f66",
+      "systemPromptSha256": "ef4de72be8865c998d80c0e4600a8b863d999c4256798883fb361d82020f829d",
+      "profile": "small",
+      "forcedGeneratedProfile": false,
+      "maxTokens": 1000,
+      "usage": {
+        "promptTokens": 0,
+        "completionTokens": 0,
+        "totalTokens": 0,
+        "cachedTokens": 0
+      },
+      "qualityFlags": [],
+      "fallback": {
+        "attempted": true,
+        "used": true,
+        "servedBy": "local-direct",
+        "model": "local-direct",
+        "reason": "OpenRouter API error 429"
+      },
+      "assessment": null
+    }
+  ]
+}

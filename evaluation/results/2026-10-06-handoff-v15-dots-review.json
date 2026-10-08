@@ -1,0 +1,55 @@
+{
+  "version": 1,
+  "syntheticOnly": true,
+  "baselineRef": "7652aa84bc239e550d32de31bcd8fdc00219e0c0",
+  "candidateRef": "76bf85a30650dd020b632417cdfcf7bd20120f23",
+  "candidatePromptSourceSha256": "18f0f43a5c10f0531803e70a80b3bd5a0cdb1b650c3fdb175ea2a26039e3647d",
+  "fixtureSha256": "84532a58db6d426dc15351c1b4915f0e4066828511abd37439bae4bb18313e5a",
+  "model": "dots-studio/dots-3-note-preview:free",
+  "repeats": 2,
+  "selectedCases": [
+    "review-budget-draft"
+  ],
+  "longHistory": false,
+  "comparisonRunnerSha256": "96a89cd2d77d162f01de19be3e3276d236185594d2c0767cae3269d32b0a0cd1",
+  "reviewCriteria": [
+    "Can the next assistant answer the latest user request without asking for information already supplied?",
+    "Are accepted choices, proposals, rejections and unresolved alternatives kept distinct?",
+    "Are prohibitions, user corrections and not-started/not-tested/not-booked states preserved?",
+    "Is the current work product or exact reproduction evidence available when needed to continue?",
+    "Does the handoff avoid invented identity, causes, approvals, completed work and extra tasks?"
+  ],
+  "limitations": "Lexical checks are diagnostics, not semantic grading. Review every full handoff; local fallback is not a successful model generation. Short fixtures force the same generated profile on both variants; production tiny chats still use exact local carry.",
+  "results": [
+    {
+      "caseId": "review-budget-draft",
+      "repeat": 1,
+      "variant": "baseline",
+      "summary": null,
+      "generated": false,
+      "model": "local-direct",
+      "elapsedMs": 703,
+      "inputChars": 1273,
+      "inputSha256": "9cb78bdef00ea5a4b97dc16f2e04f2266a8381d04d4158b1197a0fdb69c9424b",
+      "systemPromptSha256": "ef4de72be8865c998d80c0e4600a8b863d999c4256798883fb361d82020f829d",
+      "profile": "small",
+      "forcedGeneratedProfile": false,
+      "maxTokens": 1000,
+      "usage": {
+        "promptTokens": 0,
+        "completionTokens": 0,
+        "totalTokens": 0,
+        "cachedTokens": 0
+      },
+      "qualityFlags": [],
+      "fallback": {
+        "attempted": true,
+        "used": true,
+        "servedBy": "local-direct",
+        "model": "local-direct",
+        "reason": "OpenRouter API error 429"
+      },
+      "assessment": null
+    }
+  ]
+}

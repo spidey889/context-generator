@@ -1,0 +1,166 @@
+{
+  "version": 1,
+  "syntheticOnly": true,
+  "baselineRef": "7652aa84bc239e550d32de31bcd8fdc00219e0c0",
+  "candidateRef": "9f546567a093af233e1375f7e2763009d3392262",
+  "candidatePromptSourceSha256": "9201c1b74a0673e6ccdbad95815f5f12ec7bde7736c19352161a943363d81d2e",
+  "fixtureSha256": "84532a58db6d426dc15351c1b4915f0e4066828511abd37439bae4bb18313e5a",
+  "model": "dots-studio/dots-3-note-preview:free",
+  "repeats": 2,
+  "selectedCases": [
+    "review-budget-draft"
+  ],
+  "longHistory": false,
+  "comparisonRunnerSha256": "96a89cd2d77d162f01de19be3e3276d236185594d2c0767cae3269d32b0a0cd1",
+  "reviewCriteria": [
+    "Can the next assistant answer the latest user request without asking for information already supplied?",
+    "Are accepted choices, proposals, rejections and unresolved alternatives kept distinct?",
+    "Are prohibitions, user corrections and not-started/not-tested/not-booked states preserved?",
+    "Is the current work product or exact reproduction evidence available when needed to continue?",
+    "Does the handoff avoid invented identity, causes, approvals, completed work and extra tasks?"
+  ],
+  "limitations": "Lexical checks are diagnostics, not semantic grading. Review every full handoff; local fallback is not a successful model generation. Short fixtures force the same generated profile on both variants; production tiny chats still use exact local carry.",
+  "results": [
+    {
+      "caseId": "review-budget-draft",
+      "repeat": 1,
+      "variant": "baseline",
+      "summary": "╔══════════════════════════════════════════╗\n║         CONTEXT CARRY — READY TO PASTE        ║\n╚══════════════════════════════════════════╝\n\n🧠 WHO I AM\nNone\n\n🎯 WHAT WE WERE DOING\nReviewing a draft quote for the fictional Birch neighborhood event to assess whether it provides sufficient information to make a decision within a 700-credit total budget. The user explicitly requested a review only—no approval, no purchase, no supplier contact.\n\n📍 WHERE WE LEFT OFF\nThe draft quote is: \"Lighting: 180 credits. Audio: 200 credits. Delivery fee: not supplied. Offer expires Friday 12 June.\" No decision has been made about delivery, payment, or ordering. The expiry is a quote deadline, not the event or delivery date. The user has not approved any purchase, and no message has been sent to Ren (the supplier contact).\n\n✅ DECISIONS MADE\n- User corrected the lighting quote from 150 to 180 credits; audio remains 200 credits.\n- User confirmed neither quote has been accepted.\n- User explicitly prohibited contacting Ren or placing an order.\n- User requested the draft wording be preserved exactly for future editing.\n\n⚠️ OPEN QUESTIONS\nNone\n\n📦 KEY CONTEXT\n- Total budget: 700 credits (constraint).\n- Lighting quote: 180 credits (corrected from 150; user-provided fact).\n- Audio quote: 200 credits (unchanged; user-provided fact).\n- Delivery fee: Not supplied (unknown; reported gap in quote).\n- Offer expiry: Friday, 12 June (quote deadline, not event or delivery date).\n- Supplier contact: Ren (not the user; named owner/contact, not user identity).\n- No purchase, payment, or supplier contact has occurred (reported state).\n- No delivery date has been established (reported unknown).\n- User instruction: \"Do not contact Ren or place an order.\" (explicit constraint)\n- User instruction: \"Keep this wording so we can edit it later.\" (explicit constraint)\n- Rejected idea: Proceeding with purchase or sending message to Ren (explicitly prohibited by user).\n\n🔁 NEXT STEP\nReply only: \"Context loaded. Let's pick up right where you left off.\" Then wait for the user.",
+      "generated": true,
+      "model": "dots-studio/dots-3-note-preview:free",
+      "elapsedMs": 8576,
+      "inputChars": 1273,
+      "inputSha256": "9cb78bdef00ea5a4b97dc16f2e04f2266a8381d04d4158b1197a0fdb69c9424b",
+      "systemPromptSha256": "ef4de72be8865c998d80c0e4600a8b863d999c4256798883fb361d82020f829d",
+      "profile": "small",
+      "forcedGeneratedProfile": false,
+      "maxTokens": 1000,
+      "usage": {
+        "promptTokens": 1774,
+        "completionTokens": 513,
+        "totalTokens": 2287,
+        "cachedTokens": 0
+      },
+      "qualityFlags": [],
+      "fallback": {
+        "attempted": false,
+        "used": false,
+        "servedBy": null,
+        "model": null,
+        "reason": null
+      },
+      "assessment": {
+        "missingFacts": [],
+        "missingCriticalFacts": [],
+        "incorrectFacts": []
+      }
+    },
+    {
+      "caseId": "review-budget-draft",
+      "repeat": 1,
+      "variant": "candidate",
+      "summary": "🧠 WHO I AM\nNone\n\n🎯 WHAT WE WERE DOING\nReviewing a draft quote for the fictional Birch neighborhood event to assess whether it provides sufficient information for a decision within a 700-credit total budget. The scope is strictly a review; no purchase, order, or supplier contact is authorized.\n\n📍 WHERE WE LEFT OFF\nThe latest user request is to evaluate whether the current draft quote contains enough information to make a decision within the 700-credit budget, explicitly explaining what is known and what remains unknown. The stopping point is the completion of this review analysis. No decision about delivery, purchase, or supplier contact has been made.\n\n✅ DECISIONS MADE\n- The lighting quote was corrected from 150 to 180 credits; audio remains at 200 credits.\n- Neither quote has been accepted.\n- No contact has been made with Ren (supplier).\n- No purchase, payment, or order has been placed.\n- The draft wording is fixed for now: \"Lighting: 180 credits. Audio: 200 credits. Delivery fee: not supplied. Offer expires Friday 12 June.\"\n- The expiry date (Friday 12 June) is confirmed as a quote deadline, not the event or delivery date.\n\n⚠️ OPEN QUESTIONS\nNone explicitly asked beyond the review task. However, key unknowns remain: delivery fee (not supplied), delivery date (not established), and whether the total fits within 700 credits once delivery is known.\n\n📦 KEY CONTEXT\n- Current draft quote (verbatim): \"Lighting: 180 credits. Audio: 200 credits. Delivery fee: not supplied. Offer expires Friday 12 June.\"\n- Known costs: Lighting = 180 credits, Audio = 200 credits → subtotal = 380 credits.\n- Unknown: Delivery fee (explicitly \"not supplied\"), delivery date, event date.\n- Budget constraint: 700-credit total budget.\n- Supplier contact: Ren (not the user); no contact attempted or authorized.\n- Explicit prohibitions: Do not contact Ren, do not place an order, do not approve a purchase, do not rewrite the draft yet, do not create a new event plan.\n- Reported facts: No purchase, payment, or supplier contact has occurred. The quote does not establish a delivery date.\n\n🔁 NEXT STEP\nReply only: \"Context loaded. Let's pick up right where you left off.\" Then wait for the user.",
+      "generated": true,
+      "model": "dots-studio/dots-3-note-preview:free",
+      "elapsedMs": 8951,
+      "inputChars": 1273,
+      "inputSha256": "9cb78bdef00ea5a4b97dc16f2e04f2266a8381d04d4158b1197a0fdb69c9424b",
+      "systemPromptSha256": "3749661384c1cd281c5ed57fc473b794e74e1ed20e76ded83f375d214f3d4dd7",
+      "profile": "small",
+      "forcedGeneratedProfile": false,
+      "maxTokens": 1000,
+      "usage": {
+        "promptTokens": 1967,
+        "completionTokens": 520,
+        "totalTokens": 2487,
+        "cachedTokens": 0
+      },
+      "qualityFlags": [
+        "bad_structure"
+      ],
+      "fallback": {
+        "attempted": false,
+        "used": false,
+        "servedBy": null,
+        "model": null,
+        "reason": null
+      },
+      "assessment": {
+        "missingFacts": [],
+        "missingCriticalFacts": [],
+        "incorrectFacts": []
+      }
+    },
+    {
+      "caseId": "review-budget-draft",
+      "repeat": 2,
+      "variant": "candidate",
+      "summary": "╔══════════════════════════════════════════╗\n║         CONTEXT CARRY — READY TO PASTE        ║\n╚══════════════════════════════════════════╝\n\n🧠 WHO I AM\nNone\n\n🎯 WHAT WE WERE DOING\nReviewing a draft quote for the fictional Birch neighborhood event to assess whether it provides sufficient information for a budget decision within a 700-credit total budget. The task is strictly a review—no approval, purchase, or supplier contact is authorized.\n\n📍 WHERE WE LEFT OFF\nThe latest user request is to review whether the current draft quote contains enough information to decide within the 700-credit budget, explicitly stating what is known and what remains unknown. The user emphasized: \"Only review this draft; don't rewrite it yet.\" No decision about delivery has been made. The expiry (Friday 12 June) is a quote deadline, not the event or delivery date.\n\n✅ DECISIONS MADE\n- The draft quote wording must be preserved exactly as: \"Lighting: 180 credits. Audio: 200 credits. Delivery fee: not supplied. Offer expires Friday 12 June.\"\n- No purchase, payment, or supplier contact (Ren) is authorized.\n- The review must not include approval, purchase authorization, or a new event plan.\n\n⚠️ OPEN QUESTIONS\nNone\n\n📦 KEY CONTEXT\n- Event: Fictional Birch neighborhood event.\n- Total budget: 700 credits.\n- Supplier contact: Ren (not the user).\n- Current draft quote (exact wording to be preserved): \"Lighting: 180 credits. Audio: 200 credits. Delivery fee: not supplied. Offer expires Friday 12 June.\"\n- Lighting quote: 180 credits (corrected from earlier 150; not accepted).\n- Audio quote: 200 credits (unchanged; not accepted).\n- Delivery fee: Not supplied (unknown).\n- Quote expiry: Friday 12 June (deadline for offer, not event or delivery date).\n- Delivery date: Not established.\n- Purchase status: No purchase, payment, or supplier contact has occurred.\n- Explicit constraints: Do not contact Ren; do not place an order; do not approve a purchase; do not rewrite the draft; review only.\n- Known costs: 180 (lighting) + 200 (audio) = 380 credits.\n- Unknown costs: Delivery fee (not supplied), potential additional event expenses.\n- Remaining budget visibility: 320 credits unallocated, but unknown if delivery or other costs will consume it.\n\n🔁 NEXT STEP\nReply only: \"Context loaded. Let's pick up right where you left off.\" Then wait for the user.",
+      "generated": true,
+      "model": "dots-studio/dots-3-note-preview:free",
+      "elapsedMs": 8674,
+      "inputChars": 1273,
+      "inputSha256": "9cb78bdef00ea5a4b97dc16f2e04f2266a8381d04d4158b1197a0fdb69c9424b",
+      "systemPromptSha256": "3749661384c1cd281c5ed57fc473b794e74e1ed20e76ded83f375d214f3d4dd7",
+      "profile": "small",
+      "forcedGeneratedProfile": false,
+      "maxTokens": 1000,
+      "usage": {
+        "promptTokens": 1967,
+        "completionTokens": 594,
+        "totalTokens": 2561,
+        "cachedTokens": 512
+      },
+      "qualityFlags": [],
+      "fallback": {
+        "attempted": false,
+        "used": false,
+        "servedBy": null,
+        "model": null,
+        "reason": null
+      },
+      "assessment": {
+        "missingFacts": [],
+        "missingCriticalFacts": [],
+        "incorrectFacts": []
+      }
+    },
+    {
+      "caseId": "review-budget-draft",
+      "repeat": 2,
+      "variant": "baseline",
+      "summary": "╔══════════════════════════════════════════╗\n║         CONTEXT CARRY — READY TO PASTE        ║\n╚══════════════════════════════════════════╝\n\n🧠 WHO I AM\nNone\n\n🎯 WHAT WE WERE DOING\nReviewing a draft quote for the fictional Birch neighborhood event within a 700-credit total budget. The task is to evaluate whether the draft contains sufficient information to make a decision, without approving any purchase or initiating contact with the supplier.\n\n📍 WHERE WE LEFT OFF\nThe draft quote is: \"Lighting: 180 credits. Audio: 200 credits. Delivery fee: not supplied. Offer expires Friday 12 June.\" No decision has been made on delivery. The expiry refers only to the quote deadline, not the event or delivery date. The review is limited to assessing the draft's adequacy for budget decision-making; no rewriting or approval is to occur.\n\n✅ DECISIONS MADE\nNone\n\n⚠️ OPEN QUESTIONS\nNone\n\n📦 KEY CONTEXT\n- Reported fact: The Birch neighborhood event has a total budget of 700 credits.\n- Reported fact: Ren is the supplier contact, not the user.\n- Reported fact: The lighting quote is 180 credits (corrected from an earlier 150).\n- Reported fact: The audio quote is 200 credits.\n- Reported fact: Neither quote has been accepted.\n- Reported fact: The delivery fee is not supplied (unknown).\n- Reported fact: No purchase, payment, or supplier contact has occurred.\n- Reported fact: The offer expires Friday 12 June; this is a quote deadline, not the event or delivery date.\n- Reported fact: No delivery date has been established.\n- Constraint: Do not contact Ren or place an order.\n- Constraint: Only review the draft; do not approve a purchase or rewrite it.\n- Constraint: Do not turn this into a new event plan.\n- Rejected idea: Earlier proposal of 150 credits for lighting — replaced by current 180-credit quote.\n- Rejected idea: Proceeding with the quote based on earlier figures — superseded by correction.\n\n🔁 NEXT STEP\nReply only: \"Context loaded. Let's pick up right where you left off.\" Then wait for the user.",
+      "generated": true,
+      "model": "dots-studio/dots-3-note-preview:free",
+      "elapsedMs": 6964,
+      "inputChars": 1273,
+      "inputSha256": "9cb78bdef00ea5a4b97dc16f2e04f2266a8381d04d4158b1197a0fdb69c9424b",
+      "systemPromptSha256": "ef4de72be8865c998d80c0e4600a8b863d999c4256798883fb361d82020f829d",
+      "profile": "small",
+      "forcedGeneratedProfile": false,
+      "maxTokens": 1000,
+      "usage": {
+        "promptTokens": 1774,
+        "completionTokens": 473,
+        "totalTokens": 2247,
+        "cachedTokens": 0
+      },
+      "qualityFlags": [
+        "bad_structure",
+        "missing_section"
+      ],
+      "fallback": {
+        "attempted": false,
+        "used": false,
+        "servedBy": null,
+        "model": null,
+        "reason": null
+      },
+      "assessment": {
+        "missingFacts": [],
+        "missingCriticalFacts": [],
+        "incorrectFacts": []
+      }
+    }
+  ]
+}

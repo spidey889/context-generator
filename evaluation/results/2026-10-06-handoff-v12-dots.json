@@ -1,0 +1,99 @@
+{
+  "version": 1,
+  "syntheticOnly": true,
+  "baselineRef": "7652aa84bc239e550d32de31bcd8fdc00219e0c0",
+  "candidateRef": "9f546567a093af233e1375f7e2763009d3392262",
+  "candidatePromptSourceSha256": "17787d2a64d05c5c9176f57846b4c3be3c5352bbf04f4b69a3b43a84a61f258b",
+  "fixtureSha256": "d601db0e1fc30c9c45f3e6ece49749e0c20854fa6386ff186094a561bfc5915b",
+  "model": "dots-studio/dots-3-note-preview:free",
+  "repeats": 1,
+  "selectedCases": [
+    "continue-latest-draft"
+  ],
+  "longHistory": false,
+  "comparisonRunnerSha256": "96a89cd2d77d162f01de19be3e3276d236185594d2c0767cae3269d32b0a0cd1",
+  "reviewCriteria": [
+    "Can the next assistant answer the latest user request without asking for information already supplied?",
+    "Are accepted choices, proposals, rejections and unresolved alternatives kept distinct?",
+    "Are prohibitions, user corrections and not-started/not-tested/not-booked states preserved?",
+    "Is the current work product or exact reproduction evidence available when needed to continue?",
+    "Does the handoff avoid invented identity, causes, approvals, completed work and extra tasks?"
+  ],
+  "limitations": "Lexical checks are diagnostics, not semantic grading. Review every full handoff; local fallback is not a successful model generation. Short fixtures force the same generated profile on both variants; production tiny chats still use exact local carry.",
+  "results": [
+    {
+      "caseId": "continue-latest-draft",
+      "repeat": 1,
+      "variant": "baseline",
+      "summary": "🧠 WHO I AM\nNone\n\n🎯 WHAT WE WERE DOING\nWriting the opening of a small community newsletter called The Lantern for neighbors, with a friendly and plain tone, avoiding invented attendance numbers or quotes.\n\n📍 WHERE WE LEFT OFF\nThe first paragraph is locked and approved by the user. The assistant has not yet written the second paragraph. The task is to write only the second paragraph, in the same voice, mentioning that the courtyard is outdoors and visitors can leave whenever they like.\n\n✅ DECISIONS MADE\n- Rejected the big claim about the whole town coming together.\n- Rejected the registration link.\n- Rejected the invented turnout of \"hundreds of neighbors.\"\n- Accepted and locked the user's replacement opening paragraph exactly as written.\n- Accepted the instruction to write only the second paragraph, not to rewrite the opening or revive v1.\n\n⚠️ OPEN QUESTIONS\nNone\n\n📦 KEY CONTEXT\n- Event: Saturday 18 April, 16:00–18:00.\n- Location: Old library courtyard (outdoors).\n- Bring a mug; tea is free.\n- Children's books can be exchanged; selling books is not allowed.\n- Visitors can leave whenever they like.\n- Constraint: Do not invent attendance numbers or quotes.\n- Constraint: Do not add a registration link.\n- Rejected idea: \"Our town comes together for a wonderful afternoon of books and tea. Hundreds of neighbors will join us on Saturday.\"\n- Locked opening paragraph (current version): \"A spare book, a familiar face, and a cup of tea: join us at the old library courtyard on Saturday 18 April, 16:00-18:00. Bring a mug and a children's book to exchange. Tea is free; books are for swapping, not selling.\"\n\n🔁 NEXT STEP\nReply only: \"Context loaded. Let's pick up right where you left off.\" Then wait for the user.",
+      "generated": true,
+      "model": "dots-studio/dots-3-note-preview:free",
+      "elapsedMs": 8004,
+      "inputChars": 1368,
+      "inputSha256": "66da686d897a65fd29b016ae24b7ce4948600840f2018b21082cb7b57307c255",
+      "systemPromptSha256": "ef4de72be8865c998d80c0e4600a8b863d999c4256798883fb361d82020f829d",
+      "profile": "small",
+      "forcedGeneratedProfile": false,
+      "maxTokens": 1000,
+      "usage": {
+        "promptTokens": 1785,
+        "completionTokens": 398,
+        "totalTokens": 2183,
+        "cachedTokens": 0
+      },
+      "qualityFlags": [
+        "bad_structure"
+      ],
+      "fallback": {
+        "attempted": false,
+        "used": false,
+        "servedBy": null,
+        "model": null,
+        "reason": null
+      },
+      "assessment": {
+        "missingFacts": [],
+        "missingCriticalFacts": [
+          "Do not rewrite my opening OR do not rewrite the opening OR keep the opening unchanged"
+        ],
+        "incorrectFacts": [
+          "Hundreds of neighbors will join us"
+        ]
+      }
+    },
+    {
+      "caseId": "continue-latest-draft",
+      "repeat": 1,
+      "variant": "candidate",
+      "summary": "╔══════════════════════════════════════════╗\n║         CONTEXT CARRY — READY TO PASTE        ║\n╚══════════════════════════════════════════╝\n\n🧠 WHO I AM\nNone\n\n🎯 WHAT WE WERE DOING\n- Writing the opening of a small community newsletter called The Lantern.\n- Audience: neighbors, not sponsors.\n- Tone requirement: friendly and plain.\n- Constraint: no invented attendance numbers or quotes.\n\n📍 WHERE WE LEFT OFF\n- The first paragraph is fixed and must not be rewritten.\n- The assistant has not yet written the second paragraph.\n- Pending request: write only the second paragraph in the same voice, mentioning that the courtyard is outdoors and visitors can leave whenever they like.\n\n✅ DECISIONS MADE\n- Rejected the big claim about the whole town coming together.\n- Rejected the registration link.\n- Rejected Draft v1 (\"Our town comes together... Hundreds of neighbors...\") due to invented turnout.\n- Accepted the user's replacement opening paragraph as the current version.\n\n⚠️ OPEN QUESTIONS\nNone\n\n📦 KEY CONTEXT\n- Exact current opening paragraph (verbatim, must be preserved): \"A spare book, a familiar face, and a cup of tea: join us at the old library courtyard on Saturday 18 April, 16:00-18:00. Bring a mug and a children's book to exchange. Tea is free; books are for swapping, not selling.\"\n- Event details: Saturday 18 April, 16:00-18:00, old library courtyard.\n- Rules: Bring a mug; tea is free. Children's books can be exchanged; selling books is not allowed.\n- Constraint: Do not rewrite the opening paragraph or revive Draft v1.\n- Second paragraph requirements: same voice, mention courtyard is outdoors, mention visitors can leave whenever they like.\n\n🔁 NEXT STEP\nReply only: \"Context loaded. Let's pick up right where you left off.\" Then wait for the user.",
+      "generated": true,
+      "model": "dots-studio/dots-3-note-preview:free",
+      "elapsedMs": 8272,
+      "inputChars": 1368,
+      "inputSha256": "66da686d897a65fd29b016ae24b7ce4948600840f2018b21082cb7b57307c255",
+      "systemPromptSha256": "3717d98beaa3780ea8906c04aa7797625d180bf0d1ddf19bf8976bda98f3e4c7",
+      "profile": "small",
+      "forcedGeneratedProfile": false,
+      "maxTokens": 1000,
+      "usage": {
+        "promptTokens": 2307,
+        "completionTokens": 438,
+        "totalTokens": 2745,
+        "cachedTokens": 0
+      },
+      "qualityFlags": [],
+      "fallback": {
+        "attempted": false,
+        "used": false,
+        "servedBy": null,
+        "model": null,
+        "reason": null
+      },
+      "assessment": {
+        "missingFacts": [],
+        "missingCriticalFacts": [],
+        "incorrectFacts": []
+      }
+    }
+  ]
+}

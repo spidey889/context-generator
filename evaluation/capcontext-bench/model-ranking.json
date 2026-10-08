@@ -1,0 +1,153 @@
+{
+  "title": "CapContextBench",
+  "asOf": "2026-10-07",
+  "archive": {
+    "date": "2026-10-03",
+    "metric": "Recorded qualitative rank by factual usefulness",
+    "sourceCommit": "0605f265c0960f6892a878479a9c723e1d68e0cf",
+    "sources": [
+      {
+        "path": "evaluation/results/2026-10-03-openrouter-primary.json",
+        "sha256": "b9e9cf0643db5f0800845ba4ac22539cd225730a8ca71a4fd99529ab091b815b"
+      },
+      {
+        "path": "docs/openrouter-primary-comparison.md",
+        "sha256": "16f4e00f00234d2dc6adcd6ba390ce96929db441b37de75f3e4e7add04824e2c"
+      }
+    ],
+    "cases": [
+      {
+        "name": "short",
+        "inputChars": 8456,
+        "sha256": "7f0daaa07862605761be8c3ac5a4dc9019c78d21ffdaa530b08b33ecebac8d4c"
+      },
+      {
+        "name": "long",
+        "inputChars": 305869,
+        "sha256": "50093efb3f178b18825cd2ab14c393c708fbdbc59523cf3faecea5a907d57a96"
+      },
+      {
+        "name": "mixed-incident-long",
+        "inputChars": 286735,
+        "sha256": "59e17327d8facfd7c8f8723ddc7e953762801190bd1c270f3726ac63d6cf7fc0"
+      }
+    ],
+    "attempts": 20,
+    "generated": 15,
+    "rows": [
+      {
+        "rank": 1,
+        "name": "Space Bunny 2",
+        "model": "inclusionai/ling-3.1-flash",
+        "note": "Best preservation; some invented identity and questions remain.",
+        "attempts": 5,
+        "generated": 5,
+        "resultIndices": [
+          6,
+          7,
+          13,
+          18,
+          19
+        ],
+        "medianElapsedMs": 19393,
+        "medianCompletionTokens": 1620
+      },
+      {
+        "rank": 2,
+        "name": "Apodex 1.1 Mini",
+        "model": "apodex/apodex-1.1-mini:free",
+        "note": "Fast responses; invents ownership and extra requirements.",
+        "attempts": 4,
+        "generated": 4,
+        "resultIndices": [
+          10,
+          11,
+          14,
+          17
+        ],
+        "medianElapsedMs": 9185.5,
+        "medianCompletionTokens": 1253
+      },
+      {
+        "rank": 3,
+        "name": "Dots3 Note Preview",
+        "model": "dots-studio/dots-3-note-preview:free",
+        "note": "Changes unresolved retry choices and invents acceptance.",
+        "attempts": 3,
+        "generated": 3,
+        "resultIndices": [
+          2,
+          3,
+          12
+        ],
+        "medianElapsedMs": 13242,
+        "medianCompletionTokens": 792
+      },
+      {
+        "rank": 4,
+        "name": "Qwen3.8 27B",
+        "model": "qwen/qwen3.8-27b:free",
+        "note": "Invents causes and identity; weakens explicit prohibitions.",
+        "attempts": 3,
+        "generated": 3,
+        "resultIndices": [
+          0,
+          1,
+          15
+        ],
+        "medianElapsedMs": 22171,
+        "medianCompletionTokens": 1503
+      },
+      {
+        "rank": null,
+        "name": "Gemma 4 26B A4B",
+        "model": "google/gemma-4-26b-a4b-it:free",
+        "note": "Unscored: all five attempts returned HTTP 429.",
+        "attempts": 5,
+        "generated": 0,
+        "resultIndices": [
+          4,
+          5,
+          8,
+          9,
+          16
+        ],
+        "medianElapsedMs": null,
+        "medianCompletionTokens": null
+      }
+    ],
+    "limitations": "Three synthetic conversations, uneven retained repeats, one recorded manual review. Historical prompts; no general accuracy percentage. Latency is descriptive, not a controlled speed ranking. Gemma is unscored, not last for quality."
+  },
+  "latest": {
+    "date": "2026-10-07",
+    "benchmark": {
+      "name": "CapContextBench",
+      "version": 1,
+      "level": "1",
+      "suiteSha256": "aa530a1ad7a4fb99aff90457098e0756e6d2856d8bdab72c215eee0507ccd6f1"
+    },
+    "source": "evaluation/capcontext-bench/baselines/2026-10-07-dots/review.json",
+    "reportSha256": "a161c643666e0d627eac36ecd61b3f82e3871d58e95b49cab647565b55cc47c2",
+    "reviewer": "Codex source review, 2026-10-07; one reviewer, not a fully blinded assessment",
+    "limitations": "Only level 1 and one model measured. Candidate draft repeat 1 uses verified without a reported verification; that conservative judgment is explicitly available for owner review. No overall model ranking follows from this sample.",
+    "rows": [
+      {
+        "model": "dots-studio/dots-3-note-preview:free",
+        "prompt": "candidate",
+        "label": "Candidate prompt · v19",
+        "passed": 3,
+        "total": 4,
+        "scorePercent": 75
+      },
+      {
+        "model": "dots-studio/dots-3-note-preview:free",
+        "prompt": "baseline",
+        "label": "Master prompt",
+        "passed": 2,
+        "total": 4,
+        "scorePercent": 50
+      }
+    ]
+  },
+  "interpretation": "Archive ordinal ranks and v1 handoff percentages use different prompts/cases. Do not combine them or claim a current cross-model v1 winner. No new provider calls were made."
+}
