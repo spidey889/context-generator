@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-07-orb-cutout-motion-v115";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-08-paste-user-intent-v116";
   const INLINE_PILL_SIZE = 36;
   const ownedUiStyleSheets = new Map();
   const CLAUDE_INLINE_STYLE_ID = "context-generator-claude-inline-styles";
@@ -2394,11 +2394,12 @@
 
     const trimmedText = text.trim();
     const landingPaths = DESTINATION_LANDING_PATHS[destination.id] || [];
-    const guard = createConversationGuard("The destination conversation changed. Use a new chat and try again.", (location) => {
+    const routeGuard = createConversationGuard("The destination conversation changed. Use a new chat and try again.", (location) => {
       const path = location.pathname.replace(/\/+$/, "") || "/";
       // Allow the platform's initial landing redirect until its composer mounts.
       return (landingPaths.includes(path) ? "new-chat" : path) + (location.search || "");
     });
+    const guard = createPasteRecoveryGuard(trimmedText, destination, routeGuard);
     let retainedGuard = false;
     try {
       if (destination.id !== currentPlatform.id || !landingPaths.includes(window.location.pathname.replace(/\/+$/, "") || "/")) {
@@ -2406,8 +2407,10 @@
       }
       const timing = await pasteWithRetry(trimmedText, destination, transferId, deadlineAt, guard);
       checkTransferDeadline({ deadlineAt });
-      guard.check();
-      if (destination.id !== "chatgpt") {
+      // A verified insert followed by the user's Send/edit is already delivered.
+      // Reporting failure here would make the worker paste again in a fresh tab.
+      if (!guard.userHandled) guard.check();
+      if (!guard.userHandled && destination.id !== "chatgpt") {
         schedulePostActivationPasteRecheck(trimmedText, destination, deadlineAt, guard);
         retainedGuard = true;
       }
@@ -2415,6 +2418,60 @@
     } finally {
       if (!retainedGuard) guard.dispose();
     }
+  }
+
+  function createPasteRecoveryGuard(text, destination, routeGuard) {
+    let editor = null;
+    let verified = false;
+    let writing = false;
+    let userHandled = false;
+    const eventTypes = ["beforeinput", "input", "keydown", "click", "submit"];
+    const onUserAction = (event) => {
+      if (!event.isTrusted || writing || userHandled) return;
+      // Delegate to document so a native editor replacement still preserves intent.
+      const inputs = [editor, findPlatformInput(destination)].filter(Boolean);
+      if (!verified) verified = inputs.some(input => editorContainsText(input, text));
+      if (!verified) return;
+      const inEditor = inputs.some(input => input === event.target || input.contains(event.target));
+      let handled = inEditor;
+      if (event.type === "keydown") {
+        handled = inEditor && (["Enter", "Backspace", "Delete"].includes(event.key)
+          || ((event.ctrlKey || event.metaKey) && /^[zy]$/i.test(event.key)));
+      } else if (event.type === "click") {
+        const button = event.target?.closest?.("button, [role='button'], input[type='submit']");
+        handled = Boolean(button && inputs.some(input => {
+          const form = input.closest("form");
+          return (!form || form.contains(button)) && (button.getAttribute("type") === "submit"
+            || /(?:^|[\s_-])(?:send|submit)(?:[\s_-]|$)/i.test(getElementLabel(button, true)));
+        }));
+      } else if (event.type === "submit") {
+        handled = inputs.some(input => event.target === input.closest("form"));
+      }
+      if (!handled) return;
+      userHandled = true;
+      if (pendingPasteRecheck?.guard === guard) cancelPendingPasteRecheck();
+    };
+    const guard = {
+      ...routeGuard,
+      get userHandled() { return userHandled; },
+      observe(input) {
+        editor = input;
+        if (editorContainsText(input, text)) verified = true;
+      },
+      insert(input) {
+        // execCommand can emit trusted input even for our own insertion.
+        writing = true;
+        try { setEditorText(input, text, destination, guard); }
+        finally { writing = false; }
+        this.observe(input);
+      },
+      dispose() {
+        eventTypes.forEach(type => removeOwnedEventListener(document, type, onUserAction, true));
+        routeGuard.dispose();
+      }
+    };
+    eventTypes.forEach(type => addOwnedEventListener(document, type, onUserAction, true));
+    return guard;
   }
 
   async function pasteWithRetry(text, destination, transferId = null, deadlineAt = null, guard = null) {
@@ -2425,9 +2482,16 @@
     let sawInput = false;
     let composerWaitMs = null;
     let lastError = null;
+    const getTiming = () => {
+      // DOMContentLoaded is page load, not SPA composer hydration.
+      const navigationTiming = window.performance?.getEntriesByType?.("navigation")?.[0];
+      return { composerWaitMs, pageLoadMs: navigationTiming?.domContentLoadedEventEnd > 0
+        ? Math.round(navigationTiming.domContentLoadedEventEnd) : null };
+    };
 
     while (Date.now() - startedAt <= retryTimeoutMs) {
       checkTransferDeadline({ deadlineAt });
+      if (guard?.userHandled) return getTiming();
       guard?.check();
       if (getDetectedConversationMessageCount() > 0) throw new Error("The destination is no longer a new chat.");
       const input = findReadyPlatformInput(destination);
@@ -2436,18 +2500,25 @@
         guard?.pin();
         sawInput = true;
         const alreadyPasted = editorContainsText(input, text);
+        guard?.observe(input);
         // A partial paste and a user draft can look alike. Let destination
         // recovery/manual copy handle either without replacing nonempty text.
         if (!alreadyPasted && getElementText(input).trim()) {
           throw new Error(`${destination.name} editor already contains text. Use an empty chat or copy the context manually.`);
         }
         try {
-          if (!alreadyPasted) setEditorText(input, text, destination, guard);
+          if (!alreadyPasted) guard.insert(input);
 
-          if (await waitForEditorText(input, text, verifyTimeoutMs)) {
+          const populated = await waitForEditorText(input, text, verifyTimeoutMs);
+          checkTransferDeadline({ deadlineAt });
+          if (guard.userHandled) return getTiming();
+          if (populated) {
+            guard.observe(input);
             guard?.check();
             if (stabilityMs > 0) {
               await delay(stabilityMs);
+              checkTransferDeadline({ deadlineAt });
+              if (guard.userHandled) return getTiming();
               guard?.check();
               if (!input.isConnected || !editorContainsText(input, text)) {
                 lastError = new Error(`${destination.name} editor cleared the pasted context after first insert.`);
@@ -2458,19 +2529,12 @@
             if (!input.isConnected || !editorContainsText(input, text)) {
               throw new Error(`${destination.name} editor changed while focusing the pasted context.`);
             }
-            // DOMContentLoaded is page load, not SPA composer hydration; keep
-            // the delivery-time composer wait separate in the local receipt.
-            const navigationTiming = window.performance?.getEntriesByType?.("navigation")?.[0];
-            return {
-              composerWaitMs,
-              pageLoadMs: navigationTiming?.domContentLoadedEventEnd > 0
-                ? Math.round(navigationTiming.domContentLoadedEventEnd) : null
-            };
+            return getTiming();
           } else {
             lastError = new Error(`Paste operation failed to populate the ${destination.name} editor.`);
           }
         } catch (error) {
-          if (error?.code === "conversation_changed") throw error;
+          if (["conversation_changed", "transfer_timeout"].includes(error?.code)) throw error;
           lastError = error;
         }
       }
@@ -2538,14 +2602,18 @@
   function cancelPendingPasteRecheck() {
     if (!pendingPasteRecheck) return;
     clearTimeout(pendingPasteRecheck.timer);
+    clearTimeout(pendingPasteRecheck.expiryTimer);
     removeOwnedEventListener(document, "visibilitychange", pendingPasteRecheck.onVisible);
     pendingPasteRecheck.guard?.dispose();
     pendingPasteRecheck = null;
   }
 
   function schedulePostActivationPasteRecheck(text, destination, deadlineAt = null, guard = null) {
-    const pending = { timer: null, onVisible: null, deadlineAt, guard };
+    const pending = { timer: null, expiryTimer: null, onVisible: null, deadlineAt, guard };
     pendingPasteRecheck = pending;
+    pending.expiryTimer = setTimeout(() => {
+      if (pendingPasteRecheck === pending) cancelPendingPasteRecheck();
+    }, Math.max(0, (deadlineAt || Date.now() + RUNNING_AUTO_RESET_MS) - Date.now()));
     pending.onVisible = () => {
       if (deadlineAt && Date.now() >= deadlineAt) {
         if (pendingPasteRecheck === pending) cancelPendingPasteRecheck();
@@ -2569,20 +2637,30 @@
 
   async function recheckPastedContext(text, destination, pending) {
     let needsCopy = true;
-    try {
+    const checkRecovery = () => {
+      if (pendingPasteRecheck !== pending || pending.guard?.userHandled || getDetectedConversationMessageCount() > 0) {
+        needsCopy = false;
+        return false;
+      }
       checkTransferDeadline(pending);
       pending.guard?.check();
+      return true;
+    };
+    try {
+      if (!checkRecovery()) return;
       const input = findReadyPlatformInput(destination);
+      if (input) pending.guard.observe(input);
       if (input && editorContainsText(input, text)) {
         needsCopy = false;
         return;
       }
       // Do not overwrite a draft the user may have started after tab activation.
       if (pendingPasteRecheck === pending && input && !getElementText(input).trim()) {
-        setEditorText(input, text, destination, pending.guard);
+        pending.guard.insert(input);
         if (await waitForEditorText(input, text, destination.pasteVerifyTimeoutMs || PASTE_VERIFY_TIMEOUT_MS)) {
+          if (!checkRecovery()) return;
           await delay(PASTE_STABILITY_MS);
-          pending.guard?.check();
+          if (!checkRecovery()) return;
           if (input.isConnected && editorContainsText(input, text)) {
             needsCopy = false;
             return;
@@ -2593,9 +2671,8 @@
       if (["transfer_timeout", "conversation_changed"].includes(error?.code)) needsCopy = false;
       console.debug("[Context Generator] Delayed paste check failed:", error?.message || error);
     } finally {
-      pending.guard?.dispose();
       if (pendingPasteRecheck === pending) {
-        pendingPasteRecheck = null;
+        cancelPendingPasteRecheck();
         if (needsCopy) showFallbackModal(text, destination.name);
       }
     }

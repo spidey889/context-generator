@@ -464,6 +464,9 @@ function loadPlatformContent(elements = [], hostname = "chatgpt.com", {
       document.visibilityState = state;
       documentListeners.get("visibilitychange")?.forEach((listener) => listener());
     };
+    hooks.dispatchDocumentEvent = (type, event) => {
+      documentListeners.get(type)?.forEach(listener => listener({ type, ...event }));
+    };
     hooks.registerElementId = (id, element) => elementsById.set(id, element);
     hooks.reinject = () => {
       window.__contextGeneratorPlatformLoaded = "previous-content-script-version";
@@ -2040,6 +2043,7 @@ clockTest("Claude verifies a settled paste and preserves a draft restored on rem
   let writes = 0;
   editor.onValueSet = value => {
     if (value !== summary) return;
+    hooks.dispatchDocumentEvent("input", { target: editor, isTrusted: true });
     if (++writes === 1) setTimeout(() => { editor.value = ""; }, 20);
   };
   const hooks = loadPlatformContent([editor], "claude.ai");
@@ -2239,6 +2243,9 @@ clockTest("Claude, Gemini, DeepSeek, and Grok restore a draft cleared after the 
     const hooks = loadPlatformContent([editor], hostname, { visibilityState: hidden ? "hidden" : "visible" });
     await hooks.pasteIntoPlatform(summary, destination);
     assert.equal(editor.value, summary, `${hostname} received the initial paste`);
+    hooks.dispatchDocumentEvent("input", { target: editor, isTrusted: false });
+    hooks.dispatchDocumentEvent("keydown", { target: editor, key: "ArrowLeft", isTrusted: true });
+    hooks.dispatchDocumentEvent("click", { target: new FakeElement({ tag: "button", attrs: { "aria-label": "Attach file" } }), isTrusted: true });
     editor.value = "";
     editor.innerText = "";
     editor.textContent = "";
@@ -2249,6 +2256,86 @@ clockTest("Claude, Gemini, DeepSeek, and Grok restore a draft cleared after the 
     await new Promise((resolve) => setTimeout(resolve, 650));
     assert.equal(editor.value, summary, `${hostname} restored the cleared draft`);
     assert.equal(editor.clicks, 2, `${hostname} retried only once`);
+  }
+});
+
+clockTest("paste recovery respects trusted Send, clear, Undo and edits", async () => {
+  const summary = "CONTEXT CARRY Preserve the deployment plan.";
+  for (const [hostname, destination, action] of [
+    ["claude.ai", "claude", "enter"], ["chatgpt.com", "chatgpt", "delete"],
+    ["gemini.google.com", "gemini", "click"], ["grok.com", "grok", "undo"],
+    ["chat.deepseek.com", "deepseek", "edit"], ["gemini.google.com", "gemini", "submit"]
+  ]) {
+    const editor = new FakeElement({ tag: "textarea", attrs: { placeholder: "Message" } });
+    const form = new FakeElement({ tag: "form" });
+    const send = new FakeElement({ tag: "button", attrs: { "aria-label": "Send message" } });
+    form.appendChild(editor);
+    form.appendChild(send);
+    const elements = [editor];
+    const hooks = loadPlatformContent(elements, hostname);
+    const modal = new FakeElement();
+    hooks.registerElementId("context-generator-fallback-modal", modal);
+    setTimeout(() => {
+      assert.equal(editor.value, summary, `${action}: the user acts on an inserted carry`);
+      let activeEditor = editor;
+      if (action === "undo") {
+        activeEditor = new FakeElement({ tag: "textarea", attrs: { placeholder: "Message" } });
+        activeEditor.value = summary;
+        editor.isConnected = false;
+        elements[0] = activeEditor;
+      }
+      const events = {
+        enter: ["keydown", { target: editor, key: "Enter" }],
+        delete: ["beforeinput", { target: editor, inputType: "deleteContentBackward" }],
+        click: ["click", { target: send }],
+        undo: ["keydown", { target: activeEditor, key: "z", ctrlKey: true }],
+        edit: ["input", { target: editor, inputType: "insertText" }],
+        submit: ["submit", { target: form }]
+      };
+      const [type, event] = events[action];
+      hooks.dispatchDocumentEvent(type, { isTrusted: true, ...event });
+      editor.value = "";
+      activeEditor.value = "";
+      if (action === "enter") hooks.navigate("/chat/sent");
+      if (action === "click") {
+        elements.push(new FakeElement({ text: summary, attrs: { "data-message-author-role": "user" } }));
+      }
+    }, 100);
+    await hooks.pasteIntoPlatform(summary, destination);
+    await new Promise(resolve => setTimeout(resolve, 1250));
+    assert.equal(editor.value, "", `${hostname}: ${action} stays cleared`);
+    assert.equal(elements[0].value, "", `${hostname}: a replacement composer stays cleared`);
+    assert.equal(editor.clicks, 1, `${hostname}: no reinsertion`);
+    assert.notEqual(modal.style.display, "flex", `${hostname}: no unsolicited copy modal`);
+    assert.equal(hooks.getOwnedLifecycleResourceCounts().intervals, 0);
+    hooks.teardownContextGeneratorInstance();
+  }
+});
+
+clockTest("delayed paste recovery stops at its deadline and when same-route history appears", async () => {
+  for (const scenario of ["hidden-expiry", "retry-expiry", "history"]) {
+    const editor = new FakeElement({ tag: "textarea", attrs: { placeholder: "Message" } });
+    const elements = [editor];
+    const hooks = loadPlatformContent(elements, "gemini.google.com", { visibilityState: "hidden" });
+    const modal = new FakeElement();
+    hooks.registerElementId("context-generator-fallback-modal", modal);
+    const deadline = Date.now() + (scenario === "retry-expiry" ? 650 : 900);
+    await hooks.pasteIntoPlatform("private carry", "gemini", null, deadline);
+    editor.value = "";
+    if (scenario === "history") {
+      elements.push(new FakeElement({ text: "A new conversation has already started.", attrs: { "data-message-author-role": "user" } }));
+    }
+    if (scenario === "retry-expiry") {
+      editor.onValueSet = () => { editor.onValueSet = null; setTimeout(() => { editor.value = ""; }, 20); };
+    }
+    if (scenario !== "hidden-expiry") hooks.setVisibility("visible");
+    await new Promise(resolve => setTimeout(resolve, 1300));
+    assert.equal(editor.value, "", scenario);
+    assert.equal(editor.clicks, scenario === "retry-expiry" ? 2 : 1, scenario);
+    assert.notEqual(modal.style.display, "flex", scenario);
+    assert.equal(hooks.getOwnedLifecycleResourceCounts().intervals, 0, scenario);
+    assert.equal(hooks.getOwnedLifecycleResourceCounts().eventListeners, 0, scenario);
+    hooks.teardownContextGeneratorInstance();
   }
 });
 
