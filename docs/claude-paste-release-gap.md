@@ -2,7 +2,13 @@
 
 Inspected October 6, 2026. The owner confirmed user 3 uses the Chrome Web Store extension.
 
-## Evidence
+## October 8 release audit
+
+Google's update service now downloads version 1.4.10. Both that CRX and the existing local `extension/chrome.zip` contain `platform-content-2026-10-05-tab-ux-speed-v109`, while current source contains `v119`. Their `platform-content.js` and `background.js` differ from source. The downloaded files lack the current `CANCEL_TRANSFER` handling/paste guards and `paste_unconfirmed` guard. Matching manifest versions alone therefore do not prove that recent cancellation and duplicate-paste fixes reached installed users. The cached listing page still reports an older version; the downloaded CRX is the artifact evidence.
+
+Source version 1.4.11 prepares the existing fixes for a distinct update. Upload `extension/chrome-1.4.11.zip`, which contains all 22 tracked extension files, byte-verified against this checkout with `manifest.json` at its root. SHA-256: `0f7a89b2cab67010ae4867b0cf2afa17db4ec6d49871cb3f89469966a9be9377`. The old generic `chrome.zip` is retained unchanged; do not use it for this release. Store upload/publication remains separate from GitHub publication. Verify the downloaded package and an installed-version transfer after the Store update.
+
+## October 6 evidence
 
 - The current telemetry row for user 3 is DeepSeek → Claude, attempted at 09:47 IST on October 6, with 296,359 captured characters. Summary work is verified; the outcome is `failed`, reason `paste_failed`, stage `paste_started`, extension version `1.4.8`.
 - The current database contains one attempt for this user. It cannot establish the frequency of earlier failures or recover the native editor error. Source character count is not pasted-summary length.
@@ -25,7 +31,7 @@ These prove defects in the shipped path and explain why the repository fixes can
 
 Source version 1.4.9 and later carry the existing fixes: focus Claude and settle before paste, reacquire replaced editors, preserve restored drafts, verify stability, and retain one fresh-tab recovery plus manual copy. No new paste algorithm or backend/database change is needed for this release gap.
 
-A Git push or backend deployment does not update Web Store installations. The current 1.4.10 package must be uploaded and published through the Chrome Web Store; users must receive that update before this change can affect them. After publication, verify a transfer with the updated installed version. Existing failed telemetry rows remain unchanged.
+A Git push or backend deployment does not update Web Store installations. The package must be uploaded and published through the Chrome Web Store; users must receive that update before source fixes affect them. The October 8 section above records the newly verified artifact gap and current release candidate. Existing failed telemetry rows remain unchanged.
 
 ## Local validation
 
