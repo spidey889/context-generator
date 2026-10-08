@@ -16,10 +16,15 @@ async function readProviderStream(response, provider, { onDelta, checkDeadline }
       : chunk.choices?.find(item => (item.index ?? 0) === 0);
     error = chunk.error || choice?.error;
     if (error) { done = true; return; }
-    const delta = provider === "gemini"
+    let delta = provider === "gemini"
       ? (choice?.content?.parts || []).filter(part => part.thought !== true)
         .map(part => typeof part.text === "string" ? part.text : "").join("")
       : choice?.delta?.content;
+    if (provider === "mistral" && Array.isArray(delta)) {
+      // Mistral may mix strings and typed blocks; only text blocks are answers.
+      delta = delta.filter(part => part?.type === "text" && typeof part.text === "string")
+        .map(part => part.text).join("");
+    }
     if (typeof delta === "string" && delta) { text += delta; onDelta(delta); }
     finishReason = (provider === "gemini" ? choice?.finishReason : choice?.finish_reason) || finishReason;
     usage = (provider === "gemini" ? chunk.usageMetadata : chunk.usage) || usage;

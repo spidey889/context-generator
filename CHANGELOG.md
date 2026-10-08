@@ -4,6 +4,8 @@ A short history of decisions and regressions that matter when changing the code.
 
 ## 2026-10-08
 
+- **Mistral streaming preserves text blocks.** A mixed-format response was accepted while silently losing its array-based text, including a deployment constraint. The SSE parser now retains Mistral string and typed text-block deltas in order while excluding thinking blocks. Added an end-to-end provider regression for the accepted carry, streamed answer, Unicode and usage. Completion, retry, deadline and paste behavior remain unchanged.
+
 - **Picker header orb hover matches the composer.** Added the approved 14% enlargement, 1px lift and artwork-shaped glow to the header orb, preserving the picker layout. Reduced motion applies the change immediately.
 
 - **Real summary streaming uses one client request.** Added opt-in newline-delimited answer chunks to the existing summary POST and native provider SSE reading for OpenRouter, Gemini and Mistral. The worker consumes the stream and uses only the final accepted carry; existing JSON clients/backends remain compatible. Provider retries reset previews, truncated/error streams cannot become accepted summaries, and deadlines, cancellation, receipt signing, route order and full-transcript fallback remain in place. Tab activation and editor insertion still wait for the completed carry. No polling, extra endpoint, dependency or live provider call was added.

@@ -355,7 +355,7 @@ Provider-specific constraints:
 - OpenRouter uses the shared untrusted-transcript envelope, system prompt and OpenRouter/Mistral profile caps. Disable context compression and hidden reasoning; require endpoint support for supplied parameters; enforce zero prompt/completion/request prices and `data_collection: deny`. If no endpoint qualifies, fall through without relaxing policy or using a paid route.
 - OpenRouter HTTP-200 error envelopes, errored/filtered choices, invalid JSON, empty/refusal-only text and unfinished thinking blocks fail safely. Never copy separate reasoning fields into the carry. Logs use fixed messages/numeric status, not arbitrary upstream error strings.
 - Gemini Flash uses `thinkingLevel: MEDIUM`; Flash-Lite uses `MINIMAL`, with existing generation allowances and hidden-thought filtering.
-- Mistral prompt-cache keys use `capcontext-summary-v10-<profile>-<model>`. Prompt changes must consider that namespace.
+- Mistral streamed answer deltas accept both strings and arrays of typed content blocks, including mixed formats within one response. Concatenate only `type: "text"` blocks in order; thinking and other block types never enter previews or the accepted carry. Mistral prompt-cache keys use `capcontext-summary-v10-<profile>-<model>`. Prompt changes must consider that namespace.
 
 Receipts preserve the actual served provider/model, attempted chain, token usage and `openrouterMs` / `geminiMs` / `mistralMs`; OpenRouter attempts also populate `openrouterModelsTried`. `Space Bunny 2` changes display text only. Identical concurrent conversations share a background promise; up to eight exact completed results remain in worker memory for two minutes, preserving original provider metadata on cache hits.
 

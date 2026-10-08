@@ -63,6 +63,32 @@ test("all provider routes stream one request, preserving Unicode, usage and answ
   }
 });
 
+test("Mistral mixed string and text-block deltas preserve the answer without reasoning", async t => {
+  configure(t);
+  const deltas = [];
+  let calls = 0;
+  global.fetch = async () => {
+    calls++;
+    return responseFrom(frame(chatChunk("Preserve "))
+      + frame(chatChunk([
+        { type: "thinking", thinking: [{ type: "text", text: "HIDDEN_THINKING" }] },
+        { type: "text", text: "résumé 🧠. " },
+        { type: "text", text: "Deployment must wait for Linux tests." }
+      ], "stop"))
+      + frame({ choices: [], usage: { prompt_tokens: 50, completion_tokens: 12, total_tokens: 62 } })
+      + "data: [DONE]\r\n\r\n");
+  };
+  const result = await createSummaryWithFallback({ conversation, profile: getSummaryProfile(conversation),
+    mistralApiKey: "test", requestContext: { onDelta: text => deltas.push(text) } });
+  const answer = "Preserve résumé 🧠. Deployment must wait for Linux tests.";
+  assert.equal(calls, 1);
+  assert.equal(result.provider, "mistral");
+  assert.equal(deltas.join(""), answer);
+  assert.ok(result.summary.includes(answer));
+  assert.doesNotMatch(result.summary, /HIDDEN_THINKING/);
+  assert.equal(result.usage.totalTokens, 62);
+});
+
 test("failed and truncated streams cannot become summaries; retry resets and complete local recovery survive", async t => {
   configure(t);
   let calls = 0, resets = 0;
