@@ -5,7 +5,8 @@ const test = require("node:test");
 const vm = require("node:vm");
 const { clockTest } = require("./helpers/clock");
 
-const source = fs.readFileSync(path.join(__dirname, "..", "extension", "background.js"), "utf8");
+const source = fs.readFileSync(path.join(__dirname, "..", "extension", "transfer-diagnostics.js"), "utf8") + "\n"
+  + fs.readFileSync(path.join(__dirname, "..", "extension", "background.js"), "utf8");
 const manifest = JSON.parse(fs.readFileSync(path.join(__dirname, "..", "extension", "manifest.json"), "utf8"));
 const compiledBackground = new vm.Script(source, { filename: "extension/background.js" });
 const compiledTransferBackground = new vm.Script(`${source}\n;globalThis.__backgroundTestHooks = { getPlatformFromUrl, sendMessageWhenReady };`, {
@@ -443,9 +444,32 @@ clockTest("unconfirmed paste replies never re-send or fall back to another tab",
     });
     const response = await harness.sendTransfer("deepseek", 41, true);
     assert.equal(response.code, "paste_unconfirmed");
+    assert.equal(response.diagnostics.error_code, reply instanceof Error ? "message_transport_failed" : reply === undefined ? "message_reply_missing" : "message_reply_invalid");
+    assert.equal(response.diagnostics.message_reply, reply instanceof Error ? "transport_failed" : reply === undefined ? "missing" : "invalid");
     assert.equal(harness.operations.created.length, 0);
     assert.equal(harness.operations.injected.length, 0);
     assert.equal(harness.operations.sent.length, 1);
+  }
+});
+
+clockTest("fresh recovery retains the first editor failure alongside the final destination observations", async () => {
+  for (const finalOk of [true, false]) {
+    const first = { version: 1, error_code: "editor_has_draft", error_origin: "destination", draft_present: true, paste_attempts: 1 };
+    const last = { version: 1, paste_populated: finalOk, editor_seen: true, paste_attempts: 3,
+      ...(finalOk ? {} : { error_code: "paste_not_retained", error_origin: "destination" }) };
+    const harness = loadBackgroundForTransferTest({ preparedTab: { id: 41, url: "https://claude.ai/new" },
+      sendMessageImpl: (tabId, message) => message.type !== "PASTE_CONTEXT" ? { ok: true } : tabId === 41
+        ? { ok: false, error: "PRIVATE first error", diagnostics: first }
+        : { ok: finalOk, error: "PRIVATE final error", diagnostics: last } });
+    const response = await harness.sendTransfer("claude", 41);
+    assert.equal(response.ok, finalOk);
+    assert.deepEqual(JSON.parse(JSON.stringify(response.diagnostics.prepared_diagnostics)), first);
+    assert.equal(response.diagnostics.recovery_error_code, "editor_has_draft");
+    assert.equal(response.diagnostics.fresh_recovery, true);
+    assert.equal(response.diagnostics.paste_populated, finalOk);
+    assert.equal(response.diagnostics.error_code, finalOk ? undefined : "paste_not_retained");
+    assert.doesNotMatch(JSON.stringify(response.diagnostics), /PRIVATE/);
+    assert.equal(harness.operations.created.length, 1);
   }
 });
 
@@ -759,7 +783,7 @@ for (const firstReply of ["missing receiver", "no response"]) {
     const result = await harness.sendMessageWhenReady(41, { type: firstReply === "no response" ? "CONTEXT_GENERATOR_PING" : "PASTE_CONTEXT" }, 1000, "Claude", trace);
     assert.equal(result.ok, true);
     assert.equal(calls, 2);
-    assert.deepEqual(JSON.parse(JSON.stringify(harness.operations.injected)), [{ target: { tabId: 41 }, files: ["platform-content.js"] }]);
+    assert.deepEqual(JSON.parse(JSON.stringify(harness.operations.injected)), [{ target: { tabId: 41 }, files: ["transfer-diagnostics.js", "platform-content.js"] }]);
     assert.deepEqual(Array.from(trace.marks, mark => mark.label), ["content script inject attempt", "tab ready/message response after inject"]);
     assert.equal(trace.marks.at(-1).detail.attempts, 1);
   });
@@ -794,14 +818,14 @@ test("JSON scripts reinstall in MAIN then isolated on the matching platform tabs
   ] });
   await new Promise(resolve => setTimeout(resolve, 0));
   const claude = injections.filter(item => item.target.tabId === 1);
-  assert.deepEqual(claude.map(item => [...item.files]), [["claude-fetch-main.js"], ["claude-json-capture.js"], ["platform-content.js"]]);
+  assert.deepEqual(claude.map(item => [...item.files]), [["claude-fetch-main.js"], ["claude-json-capture.js"], ["transfer-diagnostics.js", "platform-content.js"]]);
   assert.equal(claude[0].world, "MAIN");
   const chatgpt = injections.filter(item => item.target.tabId === 2);
-  assert.deepEqual(chatgpt.map(item => [...item.files]), [["chatgpt-fetch-main.js"], ["chatgpt-json-capture.js"], ["platform-content.js"]]);
+  assert.deepEqual(chatgpt.map(item => [...item.files]), [["chatgpt-fetch-main.js"], ["chatgpt-json-capture.js"], ["transfer-diagnostics.js", "platform-content.js"]]);
   assert.equal(chatgpt[0].world, "MAIN");
   for (const id of [3, 4, 5]) {
     const platform = injections.filter(item => item.target.tabId === id);
-    assert.deepEqual(platform.map(item => [...item.files]), [["network-json-data.js", "network-fetch-main.js"], ["network-json-capture.js"], ["platform-content.js"]]);
+    assert.deepEqual(platform.map(item => [...item.files]), [["network-json-data.js", "network-fetch-main.js"], ["network-json-capture.js"], ["transfer-diagnostics.js", "platform-content.js"]]);
     assert.equal(platform[0].world, "MAIN");
   }
 });

@@ -1,3 +1,4 @@
+const { validate: validateDiagnostics } = require("../extension/transfer-diagnostics.js");
 const TELEMETRY_PLATFORMS = new Set(["claude", "chatgpt", "gemini", "grok", "deepseek"]);
 const TELEMETRY_STATUSES = new Set(["started", "succeeded", "failed"]);
 const TELEMETRY_STAGES = new Set([
@@ -26,7 +27,7 @@ const TELEMETRY_FAILURE_REASONS = new Set([
   "unknown_failure"
 ]);
 const TELEMETRY_MAX_CHARACTER_COUNT = 2147483647;
-const TELEMETRY_MAX_REQUEST_BYTES = 4096;
+const TELEMETRY_MAX_REQUEST_BYTES = 24576;
 // Reports are diagnostics, not HMAC-authenticated model attribution. Keep this
 // bounded catalog aligned with the worker, Edge and configured summary routes.
 const REPORTED_MODELS = new Set(["local-direct", "gemini-3.6-flash", "gemini-3.5-flash-lite", "ministral-14b-2512",
@@ -47,7 +48,8 @@ const TELEMETRY_KEYS = new Set([
   "completed_at",
   "summary_confirmed_at",
   "model",
-  "reported_model"
+  "reported_model",
+  "diagnostics"
 ]);
 
 function validateTelemetryRequest(req) {
@@ -73,6 +75,8 @@ function validateTelemetryRequest(req) {
 function validateTelemetryPayload(input) {
   if (!input || typeof input !== "object" || Array.isArray(input)) return null;
   if (Object.keys(input).some((key) => !TELEMETRY_KEYS.has(key))) return null;
+  const diagnostics = input.diagnostics === undefined ? undefined : validateDiagnostics(input.diagnostics);
+  if (input.diagnostics !== undefined && !diagnostics) return null;
   if (input.summary_proof !== undefined &&
       (typeof input.summary_proof !== "string" || !/^[0-9a-f]{64}$/.test(input.summary_proof))) return null;
   if (!isUuid(input.attempt_id) || !isUuid(input.install_id)) return null;
@@ -118,6 +122,7 @@ function validateTelemetryPayload(input) {
     last_stage: input.last_stage,
     failure_reason: failureReason,
     extension_version: input.extension_version,
+    ...(diagnostics ? { diagnostics } : {}),
     ...(input.summary_proof !== undefined ? { summary_proof: input.summary_proof } : {}),
     ...(completedAt !== undefined ? { completed_at: completedAt } : {}),
     ...(summaryConfirmedAt !== undefined ? { summary_confirmed_at: summaryConfirmedAt } : {}),

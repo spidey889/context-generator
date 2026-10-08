@@ -9,7 +9,7 @@ const SOURCE_PATH = path.join(__dirname, "..", "extension", "platform-content.js
 const MANIFEST_PATH = path.join(__dirname, "..", "extension", "manifest.json");
 const PLATFORM_CONTENT_SOURCE = fs.readFileSync(SOURCE_PATH, "utf8");
 const COMPILED_PLATFORM_CONTENT_SCRIPT = new vm.Script(
-  PLATFORM_CONTENT_SOURCE,
+  fs.readFileSync(path.join(__dirname, "..", "extension", "transfer-diagnostics.js"), "utf8") + "\n" + PLATFORM_CONTENT_SOURCE,
   { filename: SOURCE_PATH }
 );
 const virtualSweepTests = [];
@@ -408,6 +408,7 @@ function loadPlatformContent(elements = [], hostname = "chatgpt.com", {
   };
   if (storageSet) chrome.storage = { local: { set: storageSet } };
   const sandbox = {
+    TextEncoder,
     console: {
       ...console,
       debug: () => {},
@@ -2060,9 +2061,13 @@ clockTest("Claude verifies a settled paste and preserves a draft restored on rem
     if (++writes === 1) setTimeout(() => { editor.value = ""; }, 20);
   };
   const hooks = loadPlatformContent([editor], "claude.ai");
-  await hooks.pasteIntoPlatform(summary, "claude");
+  const delivered = await hooks.pasteIntoPlatform(summary, "claude");
   assert.equal(editor.value, summary);
   assert.equal(writes, 2, "an insert cleared by the native app is retried before reporting success");
+  assert.equal(delivered.diagnostics.editor_last_error_code, "paste_not_retained");
+  assert.equal(delivered.diagnostics.paste_populated, true);
+  assert.equal(delivered.diagnostics.paste_stable, true);
+  assert.ok(delivered.diagnostics.paste_attempts >= 2);
 
   const oldEditor = new FakeElement({ tag: "textarea", attrs: { placeholder: "Message" } });
   const draftEditor = new FakeElement({ tag: "textarea", attrs: { placeholder: "Message" } });
@@ -2070,7 +2075,14 @@ clockTest("Claude verifies a settled paste and preserves a draft restored on rem
   const elements = [oldEditor];
   oldEditor.onClick = () => { oldEditor.isConnected = false; elements[0] = draftEditor; };
   const remountHooks = loadPlatformContent(elements, "claude.ai");
-  await assert.rejects(remountHooks.pasteIntoPlatform(summary, "claude"), /already contains text/);
+  await assert.rejects(remountHooks.pasteIntoPlatform(summary, "claude"), error => {
+    assert.equal(error.diagnostics.error_code, "editor_has_draft");
+    assert.equal(error.diagnostics.error_origin, "destination");
+    assert.equal(error.diagnostics.draft_present, true);
+    assert.ok(error.diagnostics.editor_remounts >= 1);
+    assert.doesNotMatch(JSON.stringify(error.diagnostics), /My saved draft|CONTEXT CARRY/);
+    return /already contains text/.test(error.message);
+  });
   assert.equal(draftEditor.value, "My saved draft");
 });
 
@@ -2242,6 +2254,41 @@ test("local summary recovery retains the capture size boundary before contacting
   } });
   await assert.rejects(hooks.summarizeWithBackend("x".repeat(350001)), /350,000 character limit/);
   assert.equal(requests, 0);
+});
+
+test("source failure telemetry keeps the precise destination observation and never the private message", () => {
+  const sent = [];
+  const hooks = loadPlatformContent([], "chatgpt.com", { runtimeSendMessage: async message => { sent.push(message); return { ok: true }; } });
+  const trace = hooks.beginTransferAttempt("claude", "destination tile");
+  hooks.markCaptureDone(trace, "User: café 🙂");
+  const error = Object.assign(new Error("PRIVATE editor details"), { code: "paste_failed", diagnostics: {
+    version: 1, error_code: "paste_focus_changed", error_origin: "destination", last_operation: "paste_focus",
+    editor_seen: true, editor_connected: false, paste_populated: true, paste_events: [{ event: "paste_focus", at_ms: 650 }]
+  } });
+  hooks.recordTransferFailureDiagnostics(trace, error);
+  trace.marks.push({ label: "failed: PRIVATE editor details" });
+  hooks.finishTransferTrace(trace, "paste_failed");
+  hooks.resetRunningFlag();
+  const terminal = sent.filter(message => message.type === "RECORD_TRANSFER_TELEMETRY").at(-1).event;
+  assert.equal(terminal.diagnostics.error_code, "paste_focus_changed");
+  assert.equal(terminal.diagnostics.error_origin, "destination");
+  assert.equal(terminal.diagnostics.capture_bytes, Buffer.byteLength("User: café 🙂"));
+  assert.equal(terminal.diagnostics.entry_point, "picker");
+  assert.equal(terminal.diagnostics.paste_populated, true);
+  assert.equal(terminal.diagnostics.editor_connected, false);
+  assert.doesNotMatch(JSON.stringify(terminal), /PRIVATE|café/);
+});
+
+clockTest("missing destination editor reports its wait, attempts and observed absence", async () => {
+  const hooks = loadPlatformContent([], "claude.ai");
+  await assert.rejects(hooks.pasteIntoPlatform("A complete carry", "claude"), error => {
+    assert.equal(error.diagnostics.error_code, "editor_missing");
+    assert.equal(error.diagnostics.editor_seen, false);
+    assert.ok(error.diagnostics.paste_attempts > 1);
+    assert.ok(error.diagnostics.paste_ms >= error.diagnostics.paste_retry_limit_ms);
+    assert.equal(error.diagnostics.paste_populated, undefined, "absence is not a measured failed insertion");
+    return true;
+  });
 });
 
 clockTest("unconfirmed paste recovery asks to check the destination and retains the full carry", () => {

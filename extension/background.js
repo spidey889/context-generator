@@ -1,3 +1,4 @@
+if (!globalThis.CapTransferDiagnostics && typeof importScripts === "function") importScripts("transfer-diagnostics.js");
 const SUMMARY_BACKEND_URL = "https://context-generator-five.vercel.app/api/summarize";
 const SUMMARY_CLIENT_HEADER = "cap-context-extension/1";
 const PLATFORM_CONTENT_SCRIPT = "platform-content.js";
@@ -341,6 +342,8 @@ function mergeTransferTelemetryEvents(previous, next) {
   // First terminal outcome wins as a unit: never produce failed + completed.
   if (previous.status !== "started") return {
     ...previous,
+    ...(!previous.diagnostics && next.status === previous.status && next.lastStage === previous.lastStage
+      && next.failureReason === previous.failureReason && next.diagnostics ? { diagnostics: next.diagnostics } : {}),
     ...(TELEMETRY_MODEL_STAGES.has(previous.lastStage) && !previous.reportedModel && next.reportedModel
       ? { reportedModel: next.reportedModel } : {})
   };
@@ -350,6 +353,9 @@ function mergeTransferTelemetryEvents(previous, next) {
     lastStage: next.status === "succeeded" ? "completed"
       : stages.indexOf(previous.lastStage) > stages.indexOf(next.lastStage) ? previous.lastStage : next.lastStage,
     characterCount: next.characterCount ?? previous.characterCount,
+    ...((previous.diagnostics || next.diagnostics) ? { diagnostics: {
+      ...(previous.diagnostics || {}), ...(next.status !== "started" || stages.indexOf(next.lastStage) >= stages.indexOf(previous.lastStage)
+        ? next.diagnostics || {} : {}) } } : {}),
     ...(previous.reportedModel || next.reportedModel ? { reportedModel: previous.reportedModel || next.reportedModel } : {})
   };
 }
@@ -367,6 +373,7 @@ function makeTelemetryPayload(event, installId) {
     last_stage: event.lastStage,
     failure_reason: event.failureReason,
     extension_version: event.extensionVersion || chrome.runtime.getManifest?.().version || null,
+    ...(event.diagnostics ? { diagnostics: event.diagnostics } : {}),
     ...(event.completedAt ? { completed_at: event.completedAt } : {}),
     ...(event.reportedModel ? { reported_model: event.reportedModel } : {}),
     ...(confirmation ? confirmation : {})
@@ -454,7 +461,9 @@ async function recordUserCancelledTransfersForTab(tabId, cancelledIds = []) {
     work.push(recordTransferTelemetry({
       ...active,
       status: "failed",
-      failureReason: "user_cancelled"
+      failureReason: "user_cancelled",
+      diagnostics: { ...(active.diagnostics || { version: 1 }), error_code: sourceTabId === tabId ? "source_tab_closed" : "destination_tab_closed",
+        error_origin: "background", cancelled: true }
     }));
   }
   await Promise.all(work);
@@ -482,6 +491,8 @@ function sanitizeTransferTelemetryEvent(event, captureCompletionTime = true) {
   if (event.status !== "succeeded" && event.lastStage === "completed") return null;
   if (event.reportedModel !== undefined && (!TELEMETRY_REPORTED_MODELS.has(event.reportedModel)
     || !TELEMETRY_MODEL_STAGES.has(event.lastStage))) return null;
+  const diagnostics = event.diagnostics === undefined ? undefined : globalThis.CapTransferDiagnostics?.validate(event.diagnostics);
+  if (event.diagnostics !== undefined && !diagnostics) return null;
 
   const attemptedAtEpoch = Date.parse(event.attemptedAt || "");
   if (!Number.isFinite(attemptedAtEpoch)) return null;
@@ -505,6 +516,7 @@ function sanitizeTransferTelemetryEvent(event, captureCompletionTime = true) {
     status: event.status,
     lastStage: event.lastStage,
     failureReason,
+    ...(diagnostics ? { diagnostics } : {}),
     ...(event.reportedModel ? { reportedModel: event.reportedModel } : {}),
     ...(!captureCompletionTime && typeof event.extensionVersion === "string" && /^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/.test(event.extensionVersion)
       ? { extensionVersion: event.extensionVersion } : {}),
@@ -669,6 +681,9 @@ function mergeTelemetryPayloads(previous, next) {
     last_stage: terminal ? previous.last_stage : next.status === "succeeded" ? "completed"
       : stages.indexOf(previous.last_stage) > stages.indexOf(next.last_stage) ? previous.last_stage : next.last_stage,
     failure_reason: terminal ? previous.failure_reason : next.failure_reason,
+    ...((previous.diagnostics || next.diagnostics) ? { diagnostics: terminal
+      ? previous.diagnostics || (next.status === previous.status && next.last_stage === previous.last_stage && next.failure_reason === previous.failure_reason ? next.diagnostics : undefined)
+      : { ...(previous.diagnostics || {}), ...(next.status !== "started" || stages.indexOf(next.last_stage) >= stages.indexOf(previous.last_stage) ? next.diagnostics || {} : {}) } } : {}),
     // Late incomplete progress cannot erase the known captured count or the
     // extension version authenticated by an already generated receipt.
     character_count: previous.summary_proof ? previous.character_count : next.character_count ?? previous.character_count,
@@ -703,7 +718,7 @@ function sanitizeSummaryConfirmation(input) {
 
 function sanitizeStoredTelemetryPayload(payload) {
   const keys = new Set(["attempt_id", "install_id", "attempted_at", "source_platform", "destination_platform",
-    "character_count", "status", "last_stage", "failure_reason", "extension_version", "summary_proof", "completed_at", "summary_confirmed_at", "model", "reported_model"]);
+    "character_count", "status", "last_stage", "failure_reason", "extension_version", "summary_proof", "completed_at", "summary_confirmed_at", "model", "reported_model", "diagnostics"]);
   if (!payload || typeof payload !== "object" || Array.isArray(payload) || Object.keys(payload).some(key => !keys.has(key))) return null;
   if (!isUuid(payload.install_id) || typeof payload.extension_version !== "string"
     || !/^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/.test(payload.extension_version)) return null;
@@ -711,7 +726,7 @@ function sanitizeStoredTelemetryPayload(payload) {
     attemptId: payload.attempt_id, attemptedAt: payload.attempted_at, sourcePlatform: payload.source_platform,
     destinationPlatform: payload.destination_platform, characterCount: payload.character_count,
     status: payload.status, lastStage: payload.last_stage, failureReason: payload.failure_reason, completedAt: payload.completed_at,
-    reportedModel: payload.reported_model
+    reportedModel: payload.reported_model, diagnostics: payload.diagnostics
   }, false);
   if (!event || (payload.completed_at !== undefined && (payload.status === "started" || !Number.isFinite(Date.parse(payload.completed_at))))) return null;
   const confirmation = sanitizeSummaryConfirmation(payload);
@@ -721,6 +736,7 @@ function sanitizeStoredTelemetryPayload(payload) {
     source_platform: event.sourcePlatform, destination_platform: event.destinationPlatform,
     character_count: event.characterCount, status: event.status, last_stage: event.lastStage,
     failure_reason: event.failureReason, extension_version: payload.extension_version,
+    ...(event.diagnostics ? { diagnostics: event.diagnostics } : {}),
     ...(event.completedAt ? { completed_at: event.completedAt } : {}),
     ...(event.reportedModel ? { reported_model: event.reportedModel } : {}), ...(confirmation || {})
   };
@@ -886,7 +902,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           ok: false,
           error: error.message,
           code: error.code || null,
-          status: error.status || null
+          status: error.status || null,
+          diagnostics: getBackgroundFailureDiagnostics(error, "summary_request")
         });
       });
 
@@ -903,13 +920,13 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       message.deadlineAt,
       sender?.tab
     )
-      .then((result) => sendResponse({ ok: true, timing: result?.timing || null, marks: result?.marks || [] }))
+      .then((result) => sendResponse({ ok: true, timing: result?.timing || null, marks: result?.marks || [], diagnostics: result?.diagnostics || null }))
       .catch((error) => {
         if (error.code !== "user_cancelled") {
           console.error("[Context Generator Relay]", error);
           setBadge("ERR", "#b42318", 5000);
         }
-        sendResponse({ ok: false, error: error.message, code: error.code || "paste_failed" });
+        sendResponse({ ok: false, error: error.message, code: error.code || "paste_failed", diagnostics: error.diagnostics || null });
       });
 
     return true;
@@ -918,7 +935,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message?.type === "ACTIVATE_DESTINATION_TAB") {
     activateVerifiedDestinationTab(message.tabId, message.destination, message.deadlineAt, message.transferId, sender?.tab)
       .then(() => sendResponse({ ok: true }))
-      .catch((error) => sendResponse({ ok: false, error: error.message, code: error.code || "destination_open_failed" }));
+      .catch((error) => sendResponse({ ok: false, error: error.message, code: error.code || "destination_open_failed",
+        diagnostics: getBackgroundFailureDiagnostics(error, "destination_activate") }));
     return true;
   }
 
@@ -927,7 +945,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       .then((result) => sendResponse({ ok: true, tabId: result.tabId, timing: result.timing }))
       .catch((error) => {
         console.error("[Context Generator Relay]", error);
-        sendResponse({ ok: false, error: error.message, code: error.code || "destination_open_failed" });
+        sendResponse({ ok: false, error: error.message, code: error.code || "destination_open_failed",
+          diagnostics: getBackgroundFailureDiagnostics(error, "destination_prepare") });
       });
 
     return true;
@@ -1043,6 +1062,8 @@ async function summarizeWithBackend(conversation, transferId = null, deadlineAt 
 async function fetchSummaryFromBackend(conversationText, transferId = null, deadlineAt = null, requestSignal = null) {
   checkTransferDeadline(deadlineAt);
   const summaryStartedAt = nowMs();
+  const diagnostics = { version: 1, last_operation: "summary_request" };
+  let responseReceived = false;
   const controller = new AbortController();
   const onCancel = () => controller.abort(requestSignal.reason);
   requestSignal?.addEventListener("abort", onCancel, { once: true });
@@ -1083,6 +1104,9 @@ async function fetchSummaryFromBackend(conversationText, transferId = null, dead
       body: JSON.stringify({ conversation: conversationText, ...(telemetry ? { telemetry } : {}) }),
       signal: controller.signal
     });
+    responseReceived = true;
+    globalThis.CapTransferDiagnostics?.update(diagnostics, { summary_http_status: response.status,
+      summary_fetch_ms: Math.round(nowMs() - fetchStartedAt), last_operation: "summary_response" });
     checkSummaryDeadline();
     recordKnownTransferTelemetryStage(transferId, "summary_response_started");
     const fetchMs = Math.round(nowMs() - fetchStartedAt);
@@ -1097,7 +1121,7 @@ async function fetchSummaryFromBackend(conversationText, transferId = null, dead
     if (data?.ok === false || (data?.code && !data?.summary?.trim())) {
       throw createSummaryBackendPayloadError(data, data?.status || response.status);
     }
-    if (!data.summary?.trim()) throw new Error("Backup summarizer returned no summary.");
+    if (!data.summary?.trim()) throw Object.assign(new Error("Backup summarizer returned no summary."), { diagnosticCode: "summary_empty" });
     const confirmation = sanitizeSummaryConfirmation({
       summary_proof: data.summaryProofV3 || data.summaryProofV2 || data.summaryProof,
       ...(data.summaryProofV3 || data.summaryProofV2 ? { summary_confirmed_at: data.summaryConfirmedAt } : {}),
@@ -1137,8 +1161,14 @@ async function fetchSummaryFromBackend(conversationText, transferId = null, dead
     };
     return { summary, timing };
   } catch (error) {
-    checkSummaryDeadline();
-    throw error;
+    let failure = error;
+    try { checkSummaryDeadline(); } catch (deadlineError) { failure = deadlineError; }
+    const fallback = controller.signal.aborted ? "summary_timeout" : responseReceived ? "summary_invalid_response" : "summary_transport_failed";
+    globalThis.CapTransferDiagnostics?.update(diagnostics, { summary_ms: Math.round(nowMs() - summaryStartedAt),
+      error_code: globalThis.CapTransferDiagnostics?.errorCode(failure, fallback),
+      error_origin: responseReceived && diagnostics.summary_http_status >= 400 ? "summary_service" : "background" });
+    failure.diagnostics = globalThis.CapTransferDiagnostics?.validate(diagnostics) || null;
+    throw failure;
   } finally {
     clearTimeout(timeout);
     requestSignal?.removeEventListener("abort", onCancel);
@@ -1281,31 +1311,50 @@ function createTransferTimeoutError() {
   return error;
 }
 
-async function transferToDestination(
+async function transferToDestination(destinationId, text, preparedTabId = null, transferId = null,
+  deferFinalActivation = false, deadlineAt = null, sourceTab = null) {
+  const trace = createBackgroundTrace();
+  trace.diagnostics = { version: 1 };
+  try {
+    const result = await transferToDestinationObserved(destinationId, text, preparedTabId, transferId,
+      deferFinalActivation, deadlineAt, sourceTab, trace);
+    globalThis.CapTransferDiagnostics?.update(trace.diagnostics, { delivery_ms: Math.round(nowMs() - trace.startedAt) });
+    return { ...result, diagnostics: globalThis.CapTransferDiagnostics?.snapshot(trace.diagnostics) || null };
+  } catch (error) {
+    globalThis.CapTransferDiagnostics?.update(trace.diagnostics, { delivery_ms: Math.round(nowMs() - trace.startedAt) });
+    if (!trace.diagnostics.error_code) globalThis.CapTransferDiagnostics?.failure(trace.diagnostics, error, "background", nowMs() - trace.startedAt);
+    error.diagnostics = globalThis.CapTransferDiagnostics?.snapshot(trace.diagnostics) || null;
+    throw error;
+  }
+}
+
+async function transferToDestinationObserved(
   destinationId,
   text,
   preparedTabId = null,
   transferId = null,
   deferFinalActivation = false,
   deadlineAt = null,
-  sourceTab = null
+  sourceTab = null,
+  trace = createBackgroundTrace()
 ) {
   const operation = getTransferOperation(transferId, sourceTab, deadlineAt);
   if (!text?.trim()) {
     const error = new Error("Context summary text was not available.");
     error.code = "paste_failed";
+    error.diagnosticCode = "paste_empty";
     throw error;
   }
 
   checkTransferDeadline(deadlineAt);
   await checkTransferSource(operation);
-  const trace = createBackgroundTrace();
   trace.deadlineAt = deadlineAt;
   trace.operation = operation;
   const destination = DESTINATIONS[destinationId];
   if (!destination) {
     const error = new Error("Unknown AI destination.");
     error.code = "destination_open_failed";
+    error.diagnosticCode = "destination_unsupported";
     throw error;
   }
 
@@ -1333,7 +1382,8 @@ async function transferToDestination(
     } catch (error) {
       checkTransferOperation(operation);
       if (["user_cancelled", "paste_unconfirmed"].includes(error?.code)) throw error;
-      pasteResult = { ok: false, error: error?.message || "Prepared destination paste failed." };
+      pasteResult = { ok: false, error: error?.message || "Prepared destination paste failed.",
+        code: error.code, diagnosticCode: error.diagnosticCode, diagnostics: error.diagnostics };
     }
   } else if (preparedTabId) {
     markBackgroundTrace(trace, "prepared tab rejected", {
@@ -1348,6 +1398,14 @@ async function transferToDestination(
     await checkTransferSource(operation);
     checkTransferDeadline(deadlineAt);
     const recoveringPreparedTab = Boolean(preparedTabId);
+    if (preparedAttempted) {
+      const previous = globalThis.CapTransferDiagnostics?.validate(pasteResult?.diagnostics);
+      if (previous) trace.diagnostics.prepared_diagnostics = previous;
+      globalThis.CapTransferDiagnostics?.update(trace.diagnostics, { recovery_error_code: previous?.error_code || globalThis.CapTransferDiagnostics?.errorCode(pasteResult) });
+      delete trace.diagnostics.error_code;
+      delete trace.diagnostics.error_origin;
+    }
+    if (recoveringPreparedTab) markBackgroundTrace(trace, "fresh recovery");
     if (preparedAttempted) {
       console.debug(
         "[Context Generator Relay] Prepared destination paste failed; retrying in one fresh tab:",
@@ -1384,6 +1442,7 @@ async function transferToDestination(
     if (pasteResult?.code === "user_cancelled") throw createTransferCancelledError();
     const error = new Error(pasteResult?.error || `Could not paste into ${destination.name}.`);
     error.code = "paste_failed";
+    error.diagnosticCode = pasteResult?.diagnostics?.error_code || "unknown_error";
     throw error;
   }
 
@@ -1461,6 +1520,9 @@ async function pasteIntoDestinationWithActivation(
     transferId,
     trace
   );
+  const pasteDiagnostics = globalThis.CapTransferDiagnostics?.validate(pasteResult?.diagnostics);
+  if (pasteDiagnostics) Object.assign(trace.diagnostics ||= { version: 1 }, pasteDiagnostics);
+  globalThis.CapTransferDiagnostics?.update(trace?.diagnostics, { message_reply: pasteResult?.ok ? "ack_success" : "ack_failed" });
   markBackgroundTrace(trace, "paste message done", { tabId, responseTiming: pasteResult?.timing || null });
   return pasteResult;
 }
@@ -1511,6 +1573,7 @@ async function createDestinationTab(destination, options = {}) {
     return destinationTab.id;
   } catch (error) {
     error.code = error.code || "destination_open_failed";
+    error.diagnosticCode ||= "destination_open_failed";
     throw error;
   }
 }
@@ -1533,6 +1596,7 @@ async function activateDestinationTab(tabId, deadlineAt = null, operation = null
     // Never report a successful switch or paste into a hidden tab after failure.
     const activationError = new Error("Could not switch to the destination tab. Return to your original tab and try again.");
     activationError.code = "destination_open_failed";
+    activationError.diagnosticCode = "destination_activation_failed";
     throw activationError;
   }
 }
@@ -1543,10 +1607,10 @@ async function activateVerifiedDestinationTab(tabId, destinationId, deadlineAt =
   if (Number.isInteger(tabId)) operation?.tabIds.add(tabId);
   checkTransferDeadline(deadlineAt);
   if (!Number.isInteger(tabId) || !DESTINATIONS[destinationId]) {
-    throw new Error("Destination tab was not available.");
+    throw Object.assign(new Error("Destination tab was not available."), { diagnosticCode: "destination_tab_unavailable" });
   }
   if (!await isPreparedDestinationTabUsable(tabId, destinationId, operation)) {
-    throw new Error("Destination tab changed before activation.");
+    throw Object.assign(new Error("Destination tab changed before activation."), { diagnosticCode: "destination_not_new_chat" });
   }
   await activateDestinationTab(tabId, deadlineAt, operation);
 }
@@ -1614,7 +1678,7 @@ async function pingTab(tabId) {
 
 async function ensureContentScript(tabId, file = PLATFORM_CONTENT_SCRIPT) {
   try {
-    await chrome.scripting.executeScript({ target: { tabId }, files: [file] });
+    await chrome.scripting.executeScript({ target: { tabId }, files: file === PLATFORM_CONTENT_SCRIPT ? ["transfer-diagnostics.js", file] : [file] });
     return true;
   } catch (error) {
     const message = String(error?.message || error);
@@ -1688,7 +1752,10 @@ async function sendMessageWhenReady(tabId, message, timeoutMs, name, trace = nul
       await checkTransferSource(trace?.operation);
       const response = await sendMessageBeforeDeadline(tabId, message, deadline, name, trace?.operation);
       checkTransferOperation(trace?.operation);
-      if (message.type === "PASTE_CONTEXT" && typeof response?.ok !== "boolean") throw createUnconfirmedPasteError();
+      if (message.type === "PASTE_CONTEXT" && typeof response?.ok !== "boolean") {
+        globalThis.CapTransferDiagnostics?.update(trace?.diagnostics, { message_reply: response === undefined ? "missing" : "invalid" });
+        throw Object.assign(createUnconfirmedPasteError(), { diagnosticCode: response === undefined ? "message_reply_missing" : "message_reply_invalid" });
+      }
       if (response !== undefined) {
         const readyMs = Date.now() - startedAt;
         markBackgroundTrace(trace, label, { tabId, readyMs, attempts });
@@ -1703,7 +1770,9 @@ async function sendMessageWhenReady(tabId, message, timeoutMs, name, trace = nul
       // or timeout may follow insertion, so neither re-send nor open a fresh tab.
       if (message.type === "PASTE_CONTEXT" &&
           !/Receiving end does not exist|Could not establish connection/.test(String(error?.message || ""))) {
-        throw createUnconfirmedPasteError();
+        globalThis.CapTransferDiagnostics?.update(trace?.diagnostics, { message_attempts: attempts, message_ms: Date.now() - startedAt,
+          message_reply: error.code === "message_timeout" ? "timeout" : trace?.diagnostics?.message_reply || "transport_failed" });
+        throw Object.assign(createUnconfirmedPasteError(), { diagnosticCode: error.diagnosticCode || (error.code === "message_timeout" ? "message_timeout" : "message_transport_failed") });
       }
       if (!isRetryableMessageError(error)) {
         throw error;
@@ -1714,6 +1783,7 @@ async function sendMessageWhenReady(tabId, message, timeoutMs, name, trace = nul
 
   while (Date.now() <= deadline) {
     attempts += 1;
+    globalThis.CapTransferDiagnostics?.update(trace?.diagnostics, { message_attempts: attempts, message_ms: Date.now() - startedAt, last_operation: "message_send" });
     let response = await tryMessage("tab ready/message response");
     if (response !== undefined) return response;
 
@@ -1724,6 +1794,7 @@ async function sendMessageWhenReady(tabId, message, timeoutMs, name, trace = nul
       checkTransferOperation(trace?.operation);
       markBackgroundTrace(trace, "content script inject attempt", { tabId, attempts });
       injected = await ensureContentScript(tabId);
+      globalThis.CapTransferDiagnostics?.update(trace?.diagnostics, { script_injected: injected });
       response = await tryMessage("tab ready/message response after inject");
       if (response !== undefined) return response;
     }
@@ -1732,7 +1803,7 @@ async function sendMessageWhenReady(tabId, message, timeoutMs, name, trace = nul
   }
 
   const detail = lastError?.message ? ` Last error: ${lastError.message}` : "";
-  throw new Error(`Timed out connecting to ${name}.${detail}`);
+  throw Object.assign(new Error(`Timed out connecting to ${name}.${detail}`), { diagnosticCode: "message_receiver_missing" });
 }
 
 async function sendMessageBeforeDeadline(tabId, message, deadline, name, operation = null) {
@@ -1822,6 +1893,36 @@ function markBackgroundTrace(trace, label, detail = null) {
   };
   trace.lastAt = at;
   trace.marks.push(mark);
+  const operations = { "prepared tab reused": "prepared_reused", "prepared tab rejected": "prepared_rejected",
+    "fresh recovery": "fresh_recovery", "tab open start": "destination_open", "fresh fallback tab open start": "destination_open",
+    "tab open done": "destination_open", "fresh fallback tab open done": "destination_open",
+    "tab activate before paste start": "destination_activate", "tab activate before paste done": "destination_activate",
+    "final tab activate start": "destination_activate", "final tab activate done": "destination_activate",
+    "tab activation settle start": "destination_settle", "tab activation settle done": "destination_settle",
+    "paste message start": "message_send", "paste message done": "paste_complete",
+    "content script inject attempt": "script_inject", "tab ready/message response": "message_send", "tab ready/message response after inject": "message_send" };
+  const operation = operations[label];
+  if (!operation) return;
+  trace.diagnostics ||= { version: 1 };
+  globalThis.CapTransferDiagnostics?.update(trace.diagnostics, { last_operation: operation,
+    ...(label === "prepared tab reused" ? { prepared_reused: true } : {}),
+    ...(label === "prepared tab rejected" ? { prepared_rejected: true } : {}),
+    ...(label === "fresh recovery" ? { fresh_recovery: true } : {}),
+    ...(label === "content script inject attempt" ? { script_injections: (trace.diagnostics.script_injections || 0) + 1 } : {}),
+    ...(label.includes("message response") ? { message_ms: detail?.readyMs, message_attempts: detail?.attempts } : {}),
+    ...(label === "tab activation settle start" ? { activation_settle_ms: detail?.settleMs } : {}) });
+  globalThis.CapTransferDiagnostics?.event(trace.diagnostics, operation, mark.totalMs, "delivery_events");
+  if (label.endsWith("open start")) trace.diagnosticOpenAt = at;
+  if (label.endsWith("open done")) globalThis.CapTransferDiagnostics?.update(trace.diagnostics, { destination_open_ms: Math.round(at - trace.diagnosticOpenAt) });
+  if (label.endsWith("activate before paste start") || label === "final tab activate start") trace.diagnosticActivateAt = at;
+  if (label.endsWith("activate before paste done") || label === "final tab activate done") globalThis.CapTransferDiagnostics?.update(trace.diagnostics, { activation_ms: Math.round(at - trace.diagnosticActivateAt) });
+}
+
+function getBackgroundFailureDiagnostics(error, operation) {
+  return globalThis.CapTransferDiagnostics?.validate(error?.diagnostics) || {
+    version: 1, error_code: globalThis.CapTransferDiagnostics?.errorCode(error) || "unknown_error",
+    error_origin: "background", last_operation: operation
+  };
 }
 
 function nowMs() {

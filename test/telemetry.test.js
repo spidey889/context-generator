@@ -6,7 +6,8 @@ const vm = require("node:vm");
 const { pathToFileURL } = require("node:url");
 
 const ROOT = path.join(__dirname, "..");
-const BACKGROUND_SOURCE = fs.readFileSync(path.join(ROOT, "extension", "background.js"), "utf8");
+const BACKGROUND_SOURCE = fs.readFileSync(path.join(ROOT, "extension", "transfer-diagnostics.js"), "utf8") + "\n"
+  + fs.readFileSync(path.join(ROOT, "extension", "background.js"), "utf8");
 const VALIDATION_PATH = path.join(ROOT, "supabase", "functions", "transfer-telemetry", "validation.mjs");
 const VERCEL_VALIDATION = require(path.join(ROOT, "api", "telemetry-validation.js"));
 const VERCEL_TELEMETRY_HANDLER = require(path.join(ROOT, "api", "telemetry.js"));

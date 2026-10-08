@@ -60,11 +60,12 @@ async function createTelemetrySmokeFixture(repoRoot, databaseEnabled) {
       const operation = rpcChain.catch(() => {}).then(async () => {
         assert.equal(name, "record_transfer_event");
         const fields = ["attempt_id", "install_id", "attempted_at", "source_platform", "destination_platform", "character_count",
-          "status", "last_stage", "failure_reason", "extension_version", "summary_verified", "completed_at", "summary_confirmed_at", "model", "reported_model"];
-        const types = ["uuid", "text", "timestamptz", "text", "text", "integer", "text", "text", "text", "text", "boolean", "timestamptz", "timestamptz", "text", "text"];
+          "status", "last_stage", "failure_reason", "extension_version", "summary_verified", "completed_at", "summary_confirmed_at", "model", "reported_model", "diagnostics"];
+        const types = ["uuid", "text", "timestamptz", "text", "text", "integer", "text", "text", "text", "text", "boolean", "timestamptz", "timestamptz", "text", "text", "jsonb"];
         await database.exec("set role service_role;");
         try {
-          await database.query(`select public.record_transfer_event(${types.map((type, index) => `$${index + 1}::${type}`).join(",")})`, fields.map(field => args[`p_${field}`]));
+          await database.query(`select public.record_transfer_event(${types.map((type, index) => `$${index + 1}::${type}`).join(",")})`,
+            fields.map(field => field === "diagnostics" ? args.p_diagnostics ? JSON.stringify(args.p_diagnostics) : null : args[`p_${field}`]));
           return { error: null };
         } catch (error) { return { error: { code: error.code } }; }
         finally { await database.exec("reset role;"); }
@@ -131,7 +132,7 @@ async function createTelemetrySmokeFixture(repoRoot, databaseEnabled) {
       if (!databaseEnabled) return;
       await rpcChain;
       const row = (await database.query(`select status, last_stage, failure_reason, summary_verified,
-        received_at::text, summary_confirmed_at::text, model, model_verified, user_no::text, username
+        received_at::text, summary_confirmed_at::text, model, model_verified, user_no::text, username, diagnostics
         from public.transfers where attempt_id=$1`, [context.attempt_id])).rows[0];
       assert.ok(row, "The installed worker event must reach the database.");
       assert.equal(row.status, "succeeded");
@@ -144,7 +145,13 @@ async function createTelemetrySmokeFixture(repoRoot, databaseEnabled) {
       assert.ok(terminal.completed_at, "Older worker completion metadata must remain accepted without storing it.");
       const columns = (await database.query(`select column_name from information_schema.columns
         where table_schema='public' and table_name='transfers'`)).rows.map(column => column.column_name);
-      assert.equal(columns.length, 17);
+      assert.equal(columns.length, 18);
+      assert.ok(row.diagnostics, "Installed extension diagnostics must survive the actual relay, Edge and SQL path.");
+      assert.deepEqual(row.diagnostics, terminal.diagnostics);
+      assert.equal(row.diagnostics.version, 1);
+      assert.equal(row.diagnostics.paste_populated, true);
+      assert.equal(row.diagnostics.message_reply, "ack_success");
+      assert.equal(row.diagnostics.error_code, undefined);
       assert.equal(row.model, "gemini-3.6-flash");
       assert.equal(row.model_verified, true);
       assert.equal(terminal.reported_model, row.model);

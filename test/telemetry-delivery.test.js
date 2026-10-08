@@ -5,7 +5,8 @@ const test = require("node:test");
 const vm = require("node:vm");
 const { clockTest } = require("./helpers/clock");
 
-const SOURCE = fs.readFileSync(path.join(__dirname, "..", "extension", "background.js"), "utf8");
+const SOURCE = fs.readFileSync(path.join(__dirname, "..", "extension", "transfer-diagnostics.js"), "utf8") + "\n"
+  + fs.readFileSync(path.join(__dirname, "..", "extension", "background.js"), "utf8");
 const OUTBOX = "context-generator-telemetry-outbox-v1";
 const ACTIVE = "context-generator-active-transfers-v1";
 const DIAGNOSTICS = "context-generator-telemetry-diagnostics-v1";
@@ -252,6 +253,29 @@ test("configuration failures pause delivery longer and retry delay stays bounded
   assert.equal(background.shared.local[DIAGNOSTICS].retry.failures, 2);
   assert.ok(background.shared.local[DIAGNOSTICS].retry.nextAttemptAt - background.clock.now <= 3600000);
   assert.equal(background.shared.local[OUTBOX].length, 1);
+});
+
+test("detailed failure observations survive compaction, restart and late conflicting progress", async () => {
+  const shared = profile({ [INSTALL]: id(999) });
+  const first = worker(async () => rejection(503, "unavailable"), shared);
+  await first.settled();
+  await first.ack(event(1, { diagnostics: { version: 1, capture_method: "deepseek-json", capture_chars: 300000 } }));
+  await first.ack(event(1, { status: "failed", lastStage: "paste_started", failureReason: "paste_failed",
+    diagnostics: { version: 1, error_code: "editor_missing", error_origin: "destination", editor_seen: false, paste_attempts: 8 } }));
+  await first.settled();
+  const expected = structuredClone(shared.local[OUTBOX][0].payload.diagnostics);
+  const delivered = [];
+  const restarted = worker(async (_url, options) => { delivered.push(JSON.parse(options.body)); return success(); }, shared);
+  await restarted.settled();
+  await restarted.ack(event(1, { lastStage: "capture_completed", diagnostics: { version: 1, capture_chars: 1 } }));
+  await restarted.ack(event(1, { status: "failed", lastStage: "paste_started", failureReason: "paste_failed",
+    diagnostics: { version: 1, error_code: "paste_not_retained" } }));
+  await restarted.settled();
+  await restarted.retry();
+  assert.deepEqual(delivered.at(-1).diagnostics, expected);
+  assert.equal(delivered.at(-1).diagnostics.capture_chars, 300000);
+  assert.equal(delivered.at(-1).diagnostics.error_code, "editor_missing");
+  assert.deepEqual(shared.local[OUTBOX], []);
 });
 
 test("active state and optional v3 served-model receipt survive worker restart before tab cancellation", async () => {

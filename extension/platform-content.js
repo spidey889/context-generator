@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-08-unconfirmed-paste-v119";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-09-transfer-diagnostics-v120";
   const INLINE_PILL_SIZE = 36;
   const ownedUiStyleSheets = new Map();
   const CLAUDE_INLINE_STYLE_ID = "context-generator-claude-inline-styles";
@@ -738,11 +738,11 @@
         .then((timing) => {
           finishStatus(true);
           const pasteMs = Math.round(getNow() - pasteStartedAt);
-          sendResponse({ ok: true, timing: { pasteMs, ...timing } });
+          sendResponse({ ok: true, timing: { pasteMs, ...timing }, diagnostics: timing?.diagnostics || null });
         })
         .catch((error) => {
           finishStatus(error.code === "user_cancelled" ? null : false);
-          sendResponse({ ok: false, error: error.message, code: error.code || null });
+          sendResponse({ ok: false, error: error.message, code: error.code || null, diagnostics: error.diagnostics || null });
         });
 
       return true;
@@ -846,6 +846,7 @@
       startTransferDeadline,
       beginTransferAttempt,
       finishTransferTrace,
+      recordTransferFailureDiagnostics,
       resetRunningFlag,
       markCaptureDone,
       buildLatestTransferStats,
@@ -931,6 +932,7 @@
         deadlineAt: transferTrace.deadlineAt,
         deferFinalActivation: !requiresFocusedPaste
       });
+      mergeTransferDiagnostics(transferTrace, pasteResponse?.diagnostics);
       checkTransferDeadline(transferTrace);
       markTransferTrace(transferTrace, "paste done", pasteResponse?.timing || null);
       // Keep recovery available on the source even if final activation fails.
@@ -958,6 +960,7 @@
         return;
       }
       if (transferTrace.expired || transferTrace.cancelled) return;
+      recordTransferFailureDiagnostics(transferTrace, error);
       markTransferTrace(transferTrace, `failed: ${error.message}`);
       finishTransferTrace(transferTrace, getSafeTelemetryFailureReason(error, transferStage));
       resetRunningFlag();
@@ -1026,6 +1029,10 @@
       } catch (error) {
         if (error?.code === "user_cancelled") throw error;
         checkTransferDeadline(trace);
+        mergeTransferDiagnostics(trace, error?.diagnostics);
+        updateTransferDiagnostics(trace, { summary_error_code: error?.diagnostics?.error_code || globalThis.CapTransferDiagnostics?.errorCode(error),
+          summary_http_status: error?.status, summary_fallback: true, summary_mode: "local_fallback" }, "local_fallback");
+        if (trace?.diagnostics) { delete trace.diagnostics.error_code; delete trace.diagnostics.error_origin; }
         // The verified transcript stays in the source page even when the backend
         // or MV3 worker is unavailable. Paste failure still offers manual copy.
         ({ summary, timing } = createLocalContextCarry(conversationText, "summary_service_unavailable"));
@@ -1036,6 +1043,7 @@
       chars: summary.length,
       background: timing
     });
+    updateTransferDiagnostics(trace, { summary_bytes: new TextEncoder().encode(summary).length });
     // Receipt signing can be skipped by optional storage, and cached/local
     // carries have no fresh proof. Report the actual result, never the primary
     // attempted model; the server keeps this separate from verified accounting.
@@ -1093,8 +1101,10 @@
         tabId: response?.tabId || null,
         background: response?.timing || null
       });
+      updateTransferDiagnostics(trace, { destination_prepared: Number.isInteger(response?.tabId), destination_open_ms: response?.timing?.totalMs });
       return response;
     }).catch((error) => {
+      updateTransferDiagnostics(trace, { destination_prepared: false, recovery_error_code: globalThis.CapTransferDiagnostics?.errorCode(error) });
       if (error?.code === "user_cancelled" && trace) cancelSourceTransfer(trace.id, trace);
       return null;
     });
@@ -1119,6 +1129,8 @@
   function cancelSourceTransfer(transferId, trace = activeTransferTrace) {
     if (!trace || trace.id !== transferId || trace.completed) return;
     trace.cancelled = true;
+    recordTransferFailureDiagnostics(trace, createTransferCancelledError());
+    updateTransferDiagnostics(trace, { cancelled: true }, "cancelled");
     markTransferTrace(trace, "failed: Transfer cancelled.");
     finishTransferTrace(trace, "user_cancelled");
     if (activeTransferTrace === trace) resetRunningFlag();
@@ -1165,6 +1177,8 @@
     trace.deadlineAt = Date.now() + RUNNING_AUTO_RESET_MS;
     runningResetTimer = setTimeout(() => {
       trace.expired = true;
+      recordTransferFailureDiagnostics(trace, Object.assign(new Error("Transfer deadline expired"), { code: "transfer_timeout" }));
+      updateTransferDiagnostics(trace, {}, "deadline_expired");
       markTransferTrace(trace, "failed: Transfer timed out.");
       finishTransferTrace(trace, "client_interrupted");
       resetRunningFlag();
@@ -1196,8 +1210,43 @@
       startedAtEpoch: Date.now(),
       lastAt: null,
       marks: [],
-      completed: false
+      completed: false,
+      diagnostics: { version: 1, entry_point: source === "destination tile" ? "picker" : source === "extension icon" ? "toolbar" : "other",
+        browser: /Firefox\//i.test(globalThis.navigator?.userAgent || "") ? "firefox" : "chromium",
+        visibility: ["visible", "hidden", "prerender"].includes(document.visibilityState) ? document.visibilityState : "unknown",
+        ...(typeof globalThis.navigator?.onLine === "boolean" ? { online: globalThis.navigator.onLine } : {}),
+        last_operation: "admission", events: [{ event: "admission", at_ms: 0 }] }
     };
+  }
+
+  function updateTransferDiagnostics(trace, changes, event = null) {
+    if (!trace) return;
+    trace.diagnostics ||= { version: 1 };
+    globalThis.CapTransferDiagnostics?.update(trace.diagnostics, changes);
+    if (event) globalThis.CapTransferDiagnostics?.event(trace.diagnostics, event, getNow() - trace.startedAt);
+  }
+
+  function mergeTransferDiagnostics(trace, diagnostics) {
+    const safe = globalThis.CapTransferDiagnostics?.validate(diagnostics);
+    if (!trace || !safe) return;
+    // Each component's timeline has its own elapsed clock, never guessed wall time.
+    const sourceEvents = trace.diagnostics?.events;
+    Object.assign(trace.diagnostics ||= { version: 1 }, safe);
+    if (sourceEvents) trace.diagnostics.events = sourceEvents;
+  }
+
+  function recordTransferFailureDiagnostics(trace, error) {
+    mergeTransferDiagnostics(trace, error?.diagnostics);
+    const code = isNoConversationError(error) ? "no_conversation"
+      : isExtensionContextInvalidated(error) ? "extension_reloaded"
+      : error?.diagnostics?.error_code || globalThis.CapTransferDiagnostics?.errorCode(error) || "unknown_error";
+    updateTransferDiagnostics(trace, { error_code: code, error_origin: trace?.diagnostics?.error_origin || "source",
+      source_changed: code === "conversation_changed", cancelled: code === "user_cancelled" });
+    globalThis.CapTransferDiagnostics?.event(trace?.diagnostics, "failure", getNow() - trace.startedAt, "events", code);
+  }
+
+  function createDiagnosticError(message, code) {
+    return Object.assign(new Error(message), { diagnosticCode: code });
   }
 
   function markCaptureDone(trace, conversationText) {
@@ -1205,6 +1254,13 @@
       trace.rawScrapedText = conversationText;
       trace.telemetryCharacterCount = conversationText.length;
     }
+    const metrics = getConversationCaptureMetrics(conversationText);
+    updateTransferDiagnostics(trace, { capture_method: metrics.method, capture_chars: conversationText.length,
+      capture_bytes: new TextEncoder().encode(conversationText).length,
+      candidate_turns: metrics.candidateTurnCount, captured_turns: metrics.messageTurnCount,
+      useful_turns: metrics.usefulTurnCount, raw_candidate_chars: metrics.rawCandidateChars,
+      initial_rendered_turns: metrics.initialRenderedTurnCount, sweep_scrolls: metrics.sweepScrolls,
+      sweep_stale_scrolls: metrics.sweepStaleScrolls, sweep_quiet_checks: metrics.sweepTerminalQuietChecks });
     markTransferTrace(trace, "capture done", {
       chars: conversationText.length,
       ...getConversationCaptureMetrics(conversationText)
@@ -1215,6 +1271,7 @@
 
   async function prepareSourceForCapture() {
     const transferTrace = activeTransferTrace;
+    updateTransferDiagnostics(transferTrace, { last_operation: "capture_prepare" }, "capture_prepare");
     checkTransferDeadline(transferTrace);
     sourceScrollTargetsCache = null;
     chatGptConversationScrollRootCache = null;
@@ -1226,6 +1283,7 @@
     await waitForConversationCaptureToSettle();
     checkTransferDeadline(transferTrace);
     const expandedCount = await expandCollapsedConversationContent();
+    updateTransferDiagnostics(transferTrace, { expanded_blocks: (transferTrace?.diagnostics?.expanded_blocks || 0) + expandedCount });
     if (expandedCount > 0) {
       await waitForConversationCaptureToSettle(Math.min(1200, getSourceScrollStableTimeout()));
     }
@@ -2068,6 +2126,24 @@
     };
     trace.lastAt = now;
     trace.marks.push(mark);
+    const operations = { "capture start": "capture_dom", "capture done": "capture_complete",
+      "summary start": "summary_request", "summary done": "summary_complete", "tab open start": "destination_prepare",
+      "tab open done": "destination_prepare", "paste request start": "paste_start", "paste done": "paste_complete",
+      "final tab activate start": "destination_activate", "final tab activate done": "destination_activate", "transfer complete": "completed" };
+    if (operations[label]) updateTransferDiagnostics(trace, { last_operation: operations[label] }, operations[label]);
+    if (label === "capture start") trace.diagnosticCaptureStartedAt = now;
+    if (label === "capture done" && trace.diagnosticCaptureStartedAt !== undefined)
+      updateTransferDiagnostics(trace, { capture_ms: Math.round(now - trace.diagnosticCaptureStartedAt) });
+    if (label === "summary start") trace.diagnosticSummaryStartedAt = now;
+    if (label === "summary done") {
+      const timing = detail?.background;
+      updateTransferDiagnostics(trace, { summary_chars: detail?.chars,
+        summary_ms: trace.diagnosticSummaryStartedAt !== undefined ? Math.round(now - trace.diagnosticSummaryStartedAt) : undefined,
+        summary_mode: timing?.cacheHit || timing?.source === "cache" ? "cache" : timing?.source === "local" ? (timing?.backend?.fallback?.used ? "local_fallback" : "local") : "remote",
+        summary_fetch_ms: timing?.fetchMs, summary_parse_ms: timing?.parseMs, summary_service_ms: timing?.backend?.totalMs,
+        summary_http_status: timing?.status, summary_provider_attempts: timing?.backend?.providerPasses,
+        summary_cache_hit: Boolean(timing?.cacheHit), summary_fallback: Boolean(timing?.backend?.fallback?.used) });
+    }
   }
 
   function finishTransferTrace(trace, telemetryFailureReason = null) {
@@ -2075,8 +2151,12 @@
     trace.sourceGuard?.dispose();
     trace.completed = true;
     const totalMs = Math.round(getNow() - trace.startedAt);
-    persistLatestTransferStats(trace, totalMs);
     const failed = trace.marks.some((mark) => mark.label.startsWith("failed:"));
+    if (failed && !trace.diagnostics?.error_code) {
+      updateTransferDiagnostics(trace, { error_code: "unknown_error", error_origin: "source" });
+    }
+    updateTransferDiagnostics(trace, { duration_ms: totalMs, deadline_remaining_ms: Math.max(0, Math.round((trace.deadlineAt || Date.now()) - Date.now())) });
+    persistLatestTransferStats(trace, totalMs);
     finishTransferTelemetry(
       trace,
       failed ? "failed" : "succeeded",
@@ -2115,6 +2195,7 @@
       status,
       lastStage: trace.telemetryLastStage,
       failureReason: status === "failed" ? failureReason : null,
+      ...(globalThis.CapTransferDiagnostics?.snapshot(trace.diagnostics) ? { diagnostics: globalThis.CapTransferDiagnostics.snapshot(trace.diagnostics) } : {}),
       ...(trace.telemetryReportedModel ? { reportedModel: trace.telemetryReportedModel } : {})
     });
   }
@@ -2355,6 +2436,7 @@
       const error = new Error(response.error || "Unknown background error");
       error.code = response.code || null;
       error.status = response.status || null;
+      error.diagnostics = globalThis.CapTransferDiagnostics?.validate(response.diagnostics) || null;
       throw error;
     }
     return response;
@@ -2413,15 +2495,32 @@
   }
 
   async function pasteIntoPlatform(text, destinationId, transferId = null, deadlineAt = null, sourceTabId = null) {
+    const startedAt = Date.now();
+    const diagnostics = { version: 1, last_operation: "paste_start", summary_chars: text?.length || 0,
+      visibility: ["visible", "hidden", "prerender"].includes(document.visibilityState) ? document.visibilityState : "unknown" };
+    try {
+      const timing = await pasteIntoPlatformObserved(text, destinationId, transferId, deadlineAt, sourceTabId, diagnostics, startedAt);
+      globalThis.CapTransferDiagnostics?.update(diagnostics, { paste_ms: Date.now() - startedAt, last_operation: "paste_complete" });
+      globalThis.CapTransferDiagnostics?.event(diagnostics, "paste_complete", Date.now() - startedAt, "paste_events");
+      return { ...timing, diagnostics: globalThis.CapTransferDiagnostics?.snapshot(diagnostics) || null };
+    } catch (error) {
+      globalThis.CapTransferDiagnostics?.update(diagnostics, { paste_ms: Date.now() - startedAt });
+      globalThis.CapTransferDiagnostics?.failure(diagnostics, error, "destination", Date.now() - startedAt);
+      error.diagnostics = globalThis.CapTransferDiagnostics?.snapshot(diagnostics) || null;
+      throw error;
+    }
+  }
+
+  async function pasteIntoPlatformObserved(text, destinationId, transferId, deadlineAt, sourceTabId, diagnostics, diagnosticStartedAt) {
     checkTransferDeadline({ deadlineAt });
     cancelPendingPasteRecheck();
     const destination = getPlatform(destinationId) || currentPlatform;
     if (!destination) {
-      throw new Error("This AI destination is not supported.");
+      throw createDiagnosticError("This AI destination is not supported.", "destination_unsupported");
     }
 
     if (!text?.trim()) {
-      throw new Error(`No text was provided for ${destination.name}.`);
+      throw createDiagnosticError(`No text was provided for ${destination.name}.`, "paste_empty");
     }
 
     const trimmedText = text.trim();
@@ -2432,10 +2531,12 @@
       return (landingPaths.includes(path) ? "new-chat" : path) + (location.search || "");
     });
     const guard = createPasteRecoveryGuard(trimmedText, destination, routeGuard, transferId, sourceTabId);
+    guard.diagnostics = diagnostics;
+    guard.diagnosticStartedAt = diagnosticStartedAt;
     let retainedGuard = false;
     try {
       if (destination.id !== currentPlatform.id || !landingPaths.includes(window.location.pathname.replace(/\/+$/, "") || "/")) {
-        throw new Error("The destination is no longer a new chat.");
+        throw createDiagnosticError("The destination is no longer a new chat.", "destination_not_new_chat");
       }
       const timing = await pasteWithRetry(trimmedText, destination, transferId, deadlineAt, guard);
       checkTransferDeadline({ deadlineAt });
@@ -2533,35 +2634,52 @@
     let sawInput = false;
     let composerWaitMs = null;
     let lastError = null;
+    const diagnostics = guard?.diagnostics;
+    let attempts = 0;
+    const observe = (changes, event = null, code = null) => {
+      globalThis.CapTransferDiagnostics?.update(diagnostics, changes);
+      if (event) globalThis.CapTransferDiagnostics?.event(diagnostics, event, Date.now() - startedAt, "paste_events", code);
+    };
+    observe({ paste_retry_limit_ms: retryTimeoutMs, paste_verify_limit_ms: verifyTimeoutMs, paste_stability_ms: stabilityMs });
     const getTiming = () => {
       // DOMContentLoaded is page load, not SPA composer hydration.
       const navigationTiming = window.performance?.getEntriesByType?.("navigation")?.[0];
-      return { composerWaitMs, pageLoadMs: navigationTiming?.domContentLoadedEventEnd > 0
-        ? Math.round(navigationTiming.domContentLoadedEventEnd) : null };
+      const pageLoadMs = navigationTiming?.domContentLoadedEventEnd > 0 ? Math.round(navigationTiming.domContentLoadedEventEnd) : null;
+      observe({ composer_wait_ms: composerWaitMs, page_load_ms: pageLoadMs, user_handled: Boolean(guard?.userHandled) });
+      return { composerWaitMs, pageLoadMs };
     };
 
     while (Date.now() - startedAt <= retryTimeoutMs) {
+      observe({ paste_attempts: ++attempts, last_operation: "editor_wait" });
       checkTransferDeadline({ deadlineAt });
       if (guard?.userHandled) return getTiming();
       await guard?.checkActive();
       guard?.check();
-      if (getDetectedConversationMessageCount() > 0) throw new Error("The destination is no longer a new chat.");
+      if (getDetectedConversationMessageCount() > 0) throw createDiagnosticError("The destination is no longer a new chat.", "destination_not_new_chat");
       const input = findReadyPlatformInput(destination);
+      observe({ editor_seen: sawInput || Boolean(input) });
       if (input) {
         composerWaitMs ??= Date.now() - startedAt;
         guard?.pin();
         sawInput = true;
+        observe({ composer_wait_ms: composerWaitMs, editor_connected: input.isConnected,
+          editor_kind: input instanceof HTMLTextAreaElement ? "textarea" : input instanceof HTMLInputElement ? "input" : input.isContentEditable ? "contenteditable" : "other",
+          editor_text_chars: getElementText(input).length });
         const alreadyPasted = editorContainsText(input, text);
         guard?.observe(input);
         // A partial paste and a user draft can look alike. Let destination
         // recovery/manual copy handle either without replacing nonempty text.
         if (!alreadyPasted && getElementText(input).trim()) {
-          throw new Error(`${destination.name} editor already contains text. Use an empty chat or copy the context manually.`);
+          observe({ draft_present: true });
+          throw createDiagnosticError(`${destination.name} editor already contains text. Use an empty chat or copy the context manually.`, "editor_has_draft");
         }
         try {
+          observe({ draft_present: false, last_operation: "editor_insert", ...(alreadyPasted ? { insertion_method: "already_present" } : {}) }, "editor_insert");
           if (!alreadyPasted) guard.insert(input);
 
+          observe({ last_operation: "paste_verify" }, "paste_verify");
           const populated = await waitForEditorText(input, text, verifyTimeoutMs);
+          observe({ paste_populated: populated, editor_connected: input.isConnected, editor_text_chars: getElementText(input).length });
           checkTransferDeadline({ deadlineAt });
           if (guard.userHandled) return getTiming();
           await guard.checkActive();
@@ -2569,26 +2687,36 @@
             guard.observe(input);
             guard?.check();
             if (stabilityMs > 0) {
+              observe({ last_operation: "paste_stability" }, "paste_stability");
               await delay(stabilityMs);
               checkTransferDeadline({ deadlineAt });
               if (guard.userHandled) return getTiming();
               await guard.checkActive();
               guard?.check();
               if (!input.isConnected || !editorContainsText(input, text)) {
-                lastError = new Error(`${destination.name} editor cleared the pasted context after first insert.`);
+                observe({ paste_stable: false, editor_connected: input.isConnected,
+                  editor_remounts: (diagnostics?.editor_remounts || 0) + (input.isConnected ? 0 : 1),
+                  editor_last_error_code: input.isConnected ? "paste_not_retained" : "editor_detached" }, "editor_remounted", input.isConnected ? "paste_not_retained" : "editor_detached");
+                lastError = createDiagnosticError(`${destination.name} editor cleared the pasted context after first insert.`, input.isConnected ? "paste_not_retained" : "editor_detached");
                 continue;
               }
+              observe({ paste_stable: true });
             }
+            observe({ last_operation: "paste_focus" }, "paste_focus");
             input.focus?.();
             if (!input.isConnected || !editorContainsText(input, text)) {
-              throw new Error(`${destination.name} editor changed while focusing the pasted context.`);
+              observe({ editor_connected: input.isConnected, editor_text_chars: getElementText(input).length });
+              throw createDiagnosticError(`${destination.name} editor changed while focusing the pasted context.`, "paste_focus_changed");
             }
             return getTiming();
           } else {
-            lastError = new Error(`Paste operation failed to populate the ${destination.name} editor.`);
+            lastError = createDiagnosticError(`Paste operation failed to populate the ${destination.name} editor.`, "paste_not_populated");
+            observe({ editor_last_error_code: "paste_not_populated" }, "failure", "paste_not_populated");
           }
         } catch (error) {
           if (["conversation_changed", "transfer_timeout", "user_cancelled"].includes(error?.code)) throw error;
+          if (!error.diagnosticCode && diagnostics?.last_operation === "editor_insert") error.diagnosticCode = "insertion_exception";
+          observe({ editor_last_error_code: globalThis.CapTransferDiagnostics?.errorCode(error, "insertion_exception") }, "failure", globalThis.CapTransferDiagnostics?.errorCode(error, "insertion_exception"));
           lastError = error;
         }
       }
@@ -2597,10 +2725,10 @@
     }
 
     if (!sawInput) {
-      throw new Error(`${destination.name} message input element could not be found.`);
+      throw createDiagnosticError(`${destination.name} message input element could not be found.`, "editor_missing");
     }
 
-    throw lastError || new Error(`Paste operation failed to populate the ${destination.name} editor.`);
+    throw lastError || createDiagnosticError(`Paste operation failed to populate the ${destination.name} editor.`, "paste_not_populated");
   }
 
   function findPlatformInput(platform = currentPlatform, { readyOnly = false } = {}) {
@@ -2765,22 +2893,26 @@
   }
 
   function setEditorText(element, text, destination = currentPlatform, guard = null) {
+    const observe = changes => globalThis.CapTransferDiagnostics?.update(guard?.diagnostics, changes);
+    const remount = () => observe({ editor_connected: false, editor_remounts: (guard?.diagnostics?.editor_remounts || 0) + 1, editor_last_error_code: "editor_detached" });
     element.click();
-    if (!element.isConnected) return;
+    if (!element.isConnected) { remount(); return; }
     element.focus();
     guard?.check();
     // Claude's startup composer can hydrate/remount on click or focus. Never
     // insert into the detached placeholder; pasteWithRetry finds its successor.
-    if (!element.isConnected) return;
+    if (!element.isConnected) { remount(); return; }
     // Focusing a native composer can restore its saved draft synchronously.
     if (getElementText(element).trim()) {
       if (editorContainsText(element, text)) return;
-      throw new Error(`${destination.name} editor already contains text. Use an empty chat or copy the context manually.`);
+      observe({ draft_present: true });
+      throw createDiagnosticError(`${destination.name} editor already contains text. Use an empty chat or copy the context manually.`, "editor_has_draft");
     }
 
     if (element instanceof HTMLTextAreaElement || element instanceof HTMLInputElement) {
       const valueSetter = Object.getOwnPropertyDescriptor(element.constructor.prototype, "value")?.set;
       valueSetter?.call(element, text);
+      observe({ insertion_method: "value_setter" });
       dispatchEditorEvents(element, text);
       return;
     }
@@ -2789,12 +2921,14 @@
     if (isFirefoxBrowser()) {
       selectEditorContents(element);
       if (document.execCommand("insertHTML", false, formatFirefoxContentEditableHtml(text))) {
+        observe({ insertion_method: "insert_html" });
         dispatchEditorEvents(element, text);
         return;
       }
     }
 
     if (destination?.id === "chatgpt") {
+      observe({ insertion_method: "chatgpt" });
       setChatGptEditorText(element, text);
       return;
     }
@@ -2807,6 +2941,7 @@
     selection.addRange(range);
 
     let inserted = document.execCommand("insertText", false, text);
+    observe({ insertion_method: "insert_text" });
     let hasText = editorContainsText(element, text);
 
     if (!inserted || !hasText) {
@@ -2817,6 +2952,7 @@
     }
 
     if (!hasText) {
+      observe({ insertion_method: "dom_text" });
       target.textContent = text;
       hasText = editorContainsText(element, text);
     }
@@ -3035,6 +3171,8 @@
   }
 
   function createConversationCaptureFromMessageTurns(messageTurns, metrics = {}) {
+    updateTransferDiagnostics(activeTransferTrace, { candidate_turns: messageTurns.length,
+      raw_candidate_chars: messageTurns.reduce((total, turn) => total + turn.text.length, 0) });
     if (messageTurns.length === 0) {
       throw new Error(NO_CONVERSATION_ERROR_MESSAGE);
     }
@@ -3071,7 +3209,7 @@
       });
     }
 
-    throw new Error("Chat messages were found, but their user/assistant roles could not be verified. Try again in a moment.");
+    throw createDiagnosticError("Chat messages were found, but their user/assistant roles could not be verified. Try again in a moment.", "capture_roles_unverified");
   }
 
   async function scrapeVirtualConversation(initialCapture, initialMessageTurns) {
@@ -3134,6 +3272,8 @@
       }
 
       scrolls += 1;
+      updateTransferDiagnostics(transferTrace, { sweep_scrolls: scrolls, sweep_stale_scrolls: totalStaleScrolls,
+        sweep_quiet_checks: terminalQuietChecks });
 
       if (!pixelMoved && afterWindowSignature === beforeWindowSignature) {
         checkTransferDeadline(transferTrace);
@@ -3187,6 +3327,7 @@
     }
 
     const sweptTurns = collectedTurns;
+    updateTransferDiagnostics(transferTrace, { sweep_exit: exitReason });
     const sweepMetrics = {
       sweepAttempted: true,
       sweepScrolls: scrolls,
@@ -3567,6 +3708,8 @@
 
     while (Date.now() - startedAt <= timeoutMs) {
       checkTransferDeadline(transferTrace);
+      updateTransferDiagnostics(transferTrace, { capture_retries: (transferTrace?.diagnostics?.capture_retries || 0) + 1,
+        last_operation: "capture_dom" });
       try {
         const capture = await scrapeConversationTextForTransfer();
         checkTransferDeadline(transferTrace);
@@ -7194,12 +7337,17 @@
     const useChatGptJson = hasSavedConversation && currentPlatform.id === "chatgpt" && chatGptJsonCaptureEnabled;
     const chatGptJsonPath = useChatGptJson ? window.location.pathname : null;
     const useNetworkJson = hasSavedConversation && ["gemini", "grok", "deepseek"].includes(currentPlatform.id) && networkJsonCaptureEnabled;
+    updateTransferDiagnostics(trace, { source_saved: hasSavedConversation,
+      speed_enabled: currentPlatform.id === "claude" ? claudeJsonCaptureEnabled : currentPlatform.id === "chatgpt" ? chatGptJsonCaptureEnabled : networkJsonCaptureEnabled,
+      json_attempted: Boolean(useClaudeJson || useChatGptJson || useNetworkJson),
+      initial_rendered_turns: getDetectedConversationMessageCount() });
     const geminiJsonPath = useNetworkJson && currentPlatform.id === "gemini" ? window.location.pathname : null;
     const grokJsonUrl = useNetworkJson && currentPlatform.id === "grok" ? window.location.href : null;
     const deepseekJsonPath = useNetworkJson && currentPlatform.id === "deepseek" ? window.location.pathname : null;
     // The full JSON tree can be ready before its virtualized DOM mounts.
     // JSON validation, rather than rendered turn count, decides whether it is empty.
     if (!useClaudeJson && !useChatGptJson && !useNetworkJson && getDetectedConversationMessageCount() === 0) {
+      recordTransferFailureDiagnostics(trace, createDiagnosticError(NO_CONVERSATION_ERROR_MESSAGE, "no_conversation"));
       markTransferTrace(trace, `failed: ${NO_CONVERSATION_ERROR_MESSAGE}`);
       finishTransferTrace(trace, "no_conversation");
       resetRunningFlag();
@@ -7231,9 +7379,10 @@
       setHandoffProgress("capture", "active");
       let conversationText;
       if (useClaudeJson || useChatGptJson || useNetworkJson) {
+        updateTransferDiagnostics(trace, { last_operation: "capture_json" }, "capture_json");
         try {
           const captureJson = useClaudeJson ? window.__capCaptureClaudeJson : useChatGptJson ? window.__capCaptureChatGptJson : window.__capCaptureNetworkJson;
-          if (typeof captureJson !== "function") throw new Error(`Refresh ${currentPlatform.name} to enable JSON capture.`);
+          if (typeof captureJson !== "function") throw createDiagnosticError(`Refresh ${currentPlatform.name} to enable JSON capture.`, "capture_json_unavailable");
           const capture = useClaudeJson ? await captureJson(claudeJsonPath)
             : useChatGptJson ? await captureJson(chatGptJsonPath)
             : geminiJsonPath ? await captureJson(geminiJsonPath)
@@ -7254,6 +7403,7 @@
           if (window.location.href !== sourceUrl) throw new Error("The conversation changed during capture. Return to the source chat and try again.");
           showFastCaptureFallbackMessage();
           const jsonFallbackReason = sanitizeCaptureDiagnostics({ jsonFallbackReason: error?.captureFailureReason }).jsonFallbackReason || "request_failed";
+          updateTransferDiagnostics(trace, { json_fallback_code: jsonFallbackReason, last_operation: "capture_dom" }, "json_fallback");
           markTransferTrace(trace, "fast capture failed; using normal capture", { jsonFallbackReason });
           await prepareSourceForCapture();
           checkTransferDeadline(trace);
@@ -7271,6 +7421,7 @@
       runContextFlow(destinationId, preparedDestinationPromise, conversationText, trace);
     } catch (error) {
       if (trace.expired) return;
+      recordTransferFailureDiagnostics(trace, error);
       markTransferTrace(trace, `failed: ${error.message}`);
       finishTransferTrace(trace, getSafeTelemetryFailureReason(error, "capture"));
       resetRunningFlag();

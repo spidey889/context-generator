@@ -60,7 +60,7 @@ test("public Supabase credentials cannot reach the privileged writer", async () 
 test("Edge bounds streamed UTF-8 bytes and body time before SQL", async () => {
   const edge = await edgeHarness({ bodyTimeoutMs: 15 });
   assert.equal((await edge.send("{}", { "content-length": "9999999" })).status, 413);
-  assert.equal((await edge.send(JSON.stringify({ value: "🙂".repeat(1500) }))).status, 413);
+  assert.equal((await edge.send(JSON.stringify({ value: "🙂".repeat(7000) }))).status, 413);
   assert.equal((await edge.send("{")).status, 400);
   assert.equal((await edge.send(payload(), { "content-type": "text/plain" })).status, 415);
   let cancelled = false;

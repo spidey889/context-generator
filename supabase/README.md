@@ -4,6 +4,8 @@ Only target **cap-context-telemetry** (`iqkzynzxbmemhtiupwwu`). The first thirte
 
 ## Persistence and reporting
 
+Migration `20261008185417_add_transfer_diagnostics.sql` adds optional versioned JSONB diagnostics with a closed SQL validator and frozen first-terminal observations. The sixteenth RPC argument defaults to NULL, retaining existing callers. Deploy compatible Edge/Vercel support before extension 1.4.12; old rows remain NULL rather than receiving invented causes. See [the schema, observation meanings and investigation query](../docs/transfer-diagnostics.md). Local validation passed 631 checks across 31 migrations and installed Brave-to-relay/Edge/database delivery. Hosted migration/Edge version 13 preserved all 38 existing transfer rows, 10 users, counters and private access; rolled-back service-role probes verified actual writes and immutability.
+
 The current table is `public.transfers`:
 
 | Fields | Purpose |
@@ -12,6 +14,7 @@ The current table is `public.transfers`:
 | user_no, username | Current anonymous `users` number/name linked through install_id; NULL if no user row exists |
 | source_platform, destination_platform | Transfer route, also bound into signed receipts |
 | status, last_stage, failure_reason | Outcome, failure location and safe reason code |
+| diagnostics | Optional versioned closed JSONB observations, precise error codes, counts/timing and capture/summary/editor/delivery conditions; legacy NULL stays unknown |
 | character_count, extension_version | Input size and first-observed client version for debugging |
 | model | Canonical served model from a v3 receipt; positioned immediately after character_count |
 | attempted_at | Client attempt time and immutable signed-receipt identity |

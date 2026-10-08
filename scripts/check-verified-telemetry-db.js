@@ -374,6 +374,8 @@ async function main() {
         checks += await require("./check-transfer-user-labels-db.js").checkTransferUserLabels(db, sql);
       } else if (name.endsWith("_allocate_users_on_transfer_start.sql")) {
         checks += await require("./check-transfer-user-allocation-db.js").checkTransferUserAllocation(db, sql);
+      } else if (name.endsWith("_add_transfer_diagnostics.sql")) {
+        checks += await require("./check-transfer-diagnostics-db.js").checkTransferDiagnostics(db, sql);
       } else await db.exec(sql);
     }
     checks += await require("./check-served-model-db.js").checkStoreModelReceipts(db);

@@ -1,7 +1,7 @@
 import { validateTelemetryPayload } from "./validation.mjs";
 import { verifySummaryReceipt } from "../_shared/summary-proof.mjs";
 
-const MAX_BODY_BYTES = 4096;
+const MAX_BODY_BYTES = 24576;
 
 export function createTelemetryHandler({ createClient, getEnv, log = console.warn, rpcTimeoutMs = 4000, bodyTimeoutMs = 1000 }) {
   const report = reason => log("cap_context_telemetry", { reason });
@@ -70,7 +70,8 @@ export function createTelemetryHandler({ createClient, getEnv, log = console.war
         p_model: receipt?.model || null,
         // This never grants summary verification. The database distinguishes
         // observed model reports from authenticated v3 attribution.
-        p_reported_model: payload.reported_model || null
+        p_reported_model: payload.reported_model || null,
+        ...(payload.diagnostics ? { p_diagnostics: payload.diagnostics } : {})
       }), rpcTimeoutMs);
       if (error) {
         if (error.code === "22023") return failure(422, "attempt_identity_mismatch");

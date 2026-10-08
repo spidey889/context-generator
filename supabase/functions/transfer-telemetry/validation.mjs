@@ -1,3 +1,4 @@
+import "../_shared/transfer-diagnostics.js";
 export const TELEMETRY_PLATFORMS = new Set(["claude", "chatgpt", "gemini", "grok", "deepseek"]);
 export const TELEMETRY_STATUSES = new Set(["started", "succeeded", "failed"]);
 export const TELEMETRY_STAGE_ORDER = [
@@ -47,12 +48,15 @@ const TELEMETRY_KEYS = new Set([
   "completed_at",
   "summary_confirmed_at",
   "model",
-  "reported_model"
+  "reported_model",
+  "diagnostics"
 ]);
 
 export function validateTelemetryPayload(input) {
   if (!input || typeof input !== "object" || Array.isArray(input)) return null;
   if (Object.keys(input).some((key) => !TELEMETRY_KEYS.has(key))) return null;
+  const diagnostics = input.diagnostics === undefined ? undefined : globalThis.CapTransferDiagnostics.validate(input.diagnostics);
+  if (input.diagnostics !== undefined && !diagnostics) return null;
   if (input.summary_proof !== undefined &&
       (typeof input.summary_proof !== "string" || !/^[0-9a-f]{64}$/.test(input.summary_proof))) return null;
   if (!isUuid(input.attempt_id) || !isUuid(input.install_id)) return null;
@@ -98,6 +102,7 @@ export function validateTelemetryPayload(input) {
     last_stage: input.last_stage,
     failure_reason: failureReason,
     extension_version: input.extension_version,
+    ...(diagnostics ? { diagnostics } : {}),
     ...(input.summary_proof !== undefined ? { summary_proof: input.summary_proof } : {}),
     ...(completedAt !== undefined ? { completed_at: completedAt } : {}),
     ...(summaryConfirmedAt !== undefined ? { summary_confirmed_at: summaryConfirmedAt } : {}),
