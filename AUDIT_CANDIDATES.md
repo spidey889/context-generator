@@ -1,28 +1,37 @@
 # Audit Candidates
 
-Each item below is a candidate for its own dedicated audit; this is an inventory, not an audit or fix plan.
+Updated 2026-10-08 against current master (`e7a18e2`). This is a shortlist for future investigation, not a list of confirmed bugs or instructions to implement every item. [LOGIC.md](LOGIC.md) is the current behavior contract; [CHANGELOG.md](CHANGELOG.md) records completed work.
 
-- **Live DOM adapters and orb placement (`extension/platform-content.js`)** — Provider DOMs remount and change without notice, so composer discovery, anchoring, reservation, and visibility can flicker, overlap controls, or lose the orb.
-- **Virtualized conversation capture (`extension/platform-content.js`)** — Scroll settling and window alignment can stop early or miss turns while still producing a plausible transcript.
-- **Claude and ChatGPT pasted-content capture (`extension/platform-content.js`)** — Card expansion, virtualization, and remount reconciliation can duplicate, inflate, misorder, or detach pasted text from its owning turn.
-- **Turn identity and deduplication (`extension/platform-content.js`)** — Non-ChatGPT role-plus-text identity can erase legitimate repeated turns or fail to collapse duplicated DOM copies.
-- **Composer paste and verification (`extension/platform-content.js`)** — Rich editors, disabled states, remounts, browser-specific events, and partial inserts can cause silent or falsely reported paste success.
-- **Picker, focus, and handoff UI lifecycle (`extension/platform-content.js`)** — Shared focus restoration, teardown, animation, reduced-motion, and outside-click paths have historically regressed across platforms.
-- **Content-script reinjection and teardown (`extension/platform-content.js`, `extension/background.js`)** — Manual load identities plus global observers, timers, and listeners can leave stale instances or duplicate page behavior after updates.
-- **Transfer locking and cancellation (`extension/platform-content.js`, `extension/background.js`)** — The six-minute lock does not abort active work, and MV3 worker restarts can lose in-memory cancellation and ownership state.
-- **Prepared destination ownership and recovery (`extension/background.js`)** — Tab warming, navigation, receiver retries, and fresh-tab fallback can race, paste into the wrong state, or leave unused tabs open.
-- **Service-worker lifetime and message delivery (`extension/background.js`)** — Long summaries depend on keepalives, retry loops, and hard deadlines that may behave differently when the MV3 worker is suspended or restarted.
-- **Summary provider routing and deadline budgets (`api/summarize.js`, `extension/background.js`, `vercel.json`)** — Model retries, family budgets, client aborts, and server limits can drift and create late work, false failures, or skipped fallbacks.
-- **Summary grounding and acceptance (`api/summarize.js`, `evaluation/`)** — The temporary non-empty-output policy and structural checks can accept incomplete, truncated, or hallucinated context that looks valid.
-- **Provider response parsing and normalization (`api/summarize.js`)** — Each provider has different error, token, finish-reason, hidden-thought, and output shapes that can be misclassified as success or the wrong fallback reason.
-- **Emergency `local-direct` carry (`api/summarize.js`)** — Provider-wide failure sends the complete transcript, so very large payload usability, destination limits, privacy expectations, and receipt reporting deserve dedicated coverage.
-- **Backend request security and throttling (`api/request-security.js`, `api/request-validation.js`)** — Extension-origin compatibility, marker checks, body limits, proxy assumptions, and instance-local rate/concurrency state form a sensitive abuse boundary.
-- **Telemetry outbox and delivery (`extension/background.js`, `api/telemetry.js`)** — The queue is unbounded and multi-hop retries, timeouts, worker restarts, and stage ordering can lose, duplicate, or indefinitely retain events.
-- **Telemetry schema and database integrity (`api/telemetry-validation.js`, `supabase/`)** — Duplicated validators, Edge Function logic, migrations, RPC upserts, grants, and RLS can drift or corrupt progress and user counters under concurrency.
-- **Latest Run storage and analysis bridge (`extension/analysis-bridge.js`, `analysis/index.html`)** — Raw-transcript expiry and the page-to-extension `postMessage` bridge can leak stale data, fail silently, or render misleading receipt state.
-- **Browser and manifest compatibility (`extension/manifest.json`, `extension/platform-content.js`)** — One hybrid Chromium/Firefox package contains browser-specific background and paste behavior, but automated browser coverage is Brave-only.
-- **Installed-extension smoke coverage (`scripts/run-extension-smoke.js`)** — The smoke is environment-sensitive, excluded from the main gate, and exercises only a narrow controlled route rather than all five platforms.
-- **Regression evaluation (`scripts/run-regression-eval.js`, `evaluation/cases.json`)** — A small live-provider case set and network-dependent scoring may miss real summary failures or produce unstable release signals.
-- **Release packaging and publication (`extension/`, checked-in ZIPs, `manifest.json`)** — Source, manifest version, archives, store contents, and live deployment can drift while each still appears individually valid.
-- **Static site, privacy, and accessibility (`index.html`, `privacy.html`, `PRIVACY.md`)** — Layout, responsive behavior, focus, contrast, reduced motion, canonical URLs, and privacy copy rely mostly on manual review with no visual regression gate.
-- **Core content-script maintainability (`extension/platform-content.js`)** — Capture, five adapters, placement, UI, paste, telemetry, and lifecycle state share one large mutable script, increasing coupling and regression blast radius.
+## Scope
+
+**Exclude legacy DOM capture and placement work:** scroll sweeps, virtualized DOM history, DOM turn identity/deduplication, card expansion and orb/legacy placement. Do not reopen those audits or refactor the large content script merely to make it smaller.
+
+Current JSON capture, summary transport and destination editor insertion remain eligible. Destination paste necessarily interacts with the site's editor; that does not authorize legacy source-capture or placement work.
+
+Before fixing a candidate, establish a concrete normal-user failure or a reproducible current-source gap. Explain any behavior tradeoff, preserve useful recovery and normal database failure reporting, and prefer a small fix. A hypothetical rare case alone does not justify a new subsystem.
+
+## Current candidates
+
+- **JSON capture completeness and attachment ownership** — `extension/claude-json-capture.js`, `extension/chatgpt-json-capture.js`, `extension/network-json-data.js` and their MAIN hooks. Check current response shapes, selected branches, supported user/assistant text, attachment boundaries, auth/navigation cancellation and completeness. Attachment labels and DeepSeek file boundaries are already implemented. Tool/render exclusions need evidence of useful missing context before expanding capture; never recursively dump arbitrary JSON strings or use legacy DOM parity as the goal.
+- **Summary factual quality** — `api/summarize.js`, `evaluation/` and `docs/summary-accuracy-pass.md`. Compare captured facts with the carry: names, prohibitions, accepted/rejected choices and the actual next step. Current acceptance rejects empty/refusal-only output and treats structure/length as advisory; it is not unconditional nonempty acceptance. Propose a policy/model change only with evidence of a better quality, latency and cost tradeoff.
+- **Summary routing and provider transport** — `api/summarize.js`, `extension/background.js`, `vercel.json`. Investigate a demonstrated timeout, cancellation, response-shape or fallback error while preserving the configured route order and budgets. Retries already distinguish temporary failures from account/auth/rate errors. Successful-response byte limits are a deferred measurement idea in `docs/improvement-followups.md`, not a reason to add an arbitrary cap.
+- **Large exact local carries** — `api/summarize.js` and destination insertion in `extension/platform-content.js`. Verify practical destination limits and complete insertion when provider failure preserves a large transcript. Keep the exact transcript and manual-copy recovery unless a demonstrated limit supports a better approach.
+- **Content-script reload and resource ownership** — `extension/platform-content.js`, JSON bridges/MAIN hooks and `extension/background.js`. Investigate only current-instance reinjection, stale hook/readiness or listener/timer leaks with a fixture or user report. Keep legacy placement and DOM capture out of this work.
+- **Telemetry delivery and Latest Run accuracy/privacy** — `extension/background.js`, `api/telemetry.js`, `extension/analysis-bridge.js`, `analysis/index.html`. Focus on lost normal-user reports, incorrect displayed outcome/model or raw-transcript expiry/bridge problems. The outbox is bounded to 500 entries/seven days; existing persistence, retry, proof and schema-parity tests are the baseline. Preserve ordinary failure visibility and separate server-summary proof from paste success.
+- **Browser and release coverage** — `extension/manifest.json`, `scripts/run-extension-smoke.js`, CI and extension packages. Brave smoke is part of the main gate and covers all five provider fixtures plus JSON/reload/fallback modes. Fixtures do not certify current authenticated native sites or Firefox. Check source/package/installed-version mismatch before adding code for an already-fixed report; add a browser case when a specific uncovered behavior warrants it.
+- **Public site privacy and accessibility** — `index.html`, `privacy.html`, `PRIVACY.md`. Check current public copy and user-visible navigation, responsive layout, focus, contrast and reduced motion. This candidate excludes extension orb/legacy placement and does not authorize redesign or publication.
+
+## Already covered; reopen only with new evidence
+
+- Source/destination conversation ownership, source-window tab placement and activation failure propagation.
+- Closing transfer tabs cancels work. Trusted Send/edit/clear/Undo prevent paste recovery from reintroducing context.
+- Unconfirmed paste replies stop automatic re-send/fresh-tab fallback; explicit editor failures retain normal recovery.
+- Live textarea values, tiny exact local carries, summary waiter cancellation, receipt persistence and normal failure attribution have regression coverage.
+
+These safeguards have source/fixture evidence; they are not a claim that every live platform state is proven correct.
+
+## Deferred
+
+- Full worker-restart delivery reconciliation and orphan prepared-tab recovery remain documented limits in LOGIC.md. Do not build a persisted resume protocol without reproducible real-user impact.
+- Anonymous telemetry forgery/abuse concerns do not justify removing ordinary failures from the database or changing user accounting merely to close an audit entry.
+- Live model comparisons and provider-response size measurements in `docs/improvement-followups.md` remain paused; this inventory refresh does not resume them or authorize live quota/credential use.
