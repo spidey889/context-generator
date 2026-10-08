@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-08-paste-user-intent-v116";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-08-live-textarea-v117";
   const INLINE_PILL_SIZE = 36;
   const ownedUiStyleSheets = new Map();
   const CLAUDE_INLINE_STYLE_ID = "context-generator-claude-inline-styles";
@@ -9675,6 +9675,8 @@
   }
 
   function getElementText(element) {
+    // A cleared form field can retain old child text/defaultValue in its HTML.
+    if (element instanceof HTMLTextAreaElement || element instanceof HTMLInputElement) return element.value;
     return element.value || element.innerText || element.textContent || "";
   }
 

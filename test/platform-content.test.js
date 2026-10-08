@@ -1921,6 +1921,19 @@ clockTest("all destinations accept editor Markdown reformatting without replacin
   }
 });
 
+clockTest("textarea paste uses the live value rather than stale default text", async () => {
+  const summary = "CONTEXT CARRY Preserve the deployment plan.";
+  const editor = new FakeElement({ tag: "textarea", text: "An old draft that the user already cleared.", attrs: { placeholder: "Message" } });
+  const hooks = loadPlatformContent([editor], "gemini.google.com");
+  assert.equal(editor.value, "");
+  await hooks.pasteIntoPlatform(summary, "gemini");
+  assert.equal(editor.value, summary, "a cleared textarea accepts the first paste");
+  // Native textarea child text/defaultValue can outlive edits to its live value.
+  editor._value = "";
+  editor.innerText = editor.textContent = summary;
+  assert.equal(hooks.editorContainsText(editor, summary), false, "default text cannot verify an empty composer");
+});
+
 clockTest("initial paste never overwrites a nonempty draft on any destination", async () => {
   const draft = "My unfinished question belongs to me.";
   for (const [hostname, destination] of [["claude.ai", "claude"], ["chatgpt.com", "chatgpt"], ["gemini.google.com", "gemini"], ["grok.com", "grok"], ["chat.deepseek.com", "deepseek"]]) {

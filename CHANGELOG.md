@@ -4,6 +4,8 @@ A short history of decisions and regressions that matter when changing the code.
 
 ## 2026-10-08
 
+- **Cleared textareas accept the first paste.** Reproduced a visibly empty textarea being rejected because its HTML retained an old default draft. Form-field checks now read the live value even when empty; stale default text also cannot falsely verify a lost paste. Added one regression covering both outcomes and retained the existing draft/recovery checks.
+
 - **Paste recovery respects user actions.** Fixed context being reinserted after a quick Send, Delete, edit or Undo across all five destinations. A verified insertion followed by a trusted user action stays delivered, preventing fresh-tab retries and unsolicited copy prompts; document-level tracking survives composer remounts and ignores extension-owned events. The paste audit also bounded hidden recovery by its deadline and stopped delayed insertion when same-route history appears. Native hydration recovery, existing drafts and route guards remain covered; legacy capture and placement are unchanged.
 
 - **Small presentation/docs changes get lightweight CI.** Known public images/videos, docs, CNAME and homepage text/CSS use whitespace plus scope/public-license/image checks. Runtime, scripts, markup/wiring, dependencies, workflow, mixed and unknown changes retain the full suite. Every feature-branch push compares against the default branch so a docs follow-up cannot conceal unmerged code; PRs and default-branch pushes use their complete base ranges. The required `Offline checks` job always runs. Brave setup now has bounded downloads and a two-minute step limit. Local boundary checks and the full GitHub suite passed.
