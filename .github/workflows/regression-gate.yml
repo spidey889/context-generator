@@ -48,11 +48,6 @@ jobs:
       - name: Install locked test dependencies
         if: steps.scope.outputs.mode != 'light'
         run: npm ci --no-audit --no-fund
-      - name: Build Astro architecture page
-        if: steps.scope.outputs.mode != 'light'
-        run: |
-          npm ci --prefix architecture --no-audit --no-fund
-          npm run build --prefix architecture
       - name: Deterministic tests
         if: steps.scope.outputs.mode != 'light'
         run: npm test

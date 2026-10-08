@@ -13,7 +13,7 @@ test("CI light scope admits public media and docs while mixed/runtime/config cha
   assert.equal(classifyChanges(light.map(changed)), "light");
   for (const file of ["extension/icon128.png", "extension/manifest.json", "extension/platform-content.js", "api/summarize.js",
     "supabase/migrations/change.sql", "package-lock.json", ".github/workflows/regression-gate.yml", "scripts/ci-scope.js",
-    "test/ci-scope.test.js", "analysis/index.html", "architecture/src/pages/index.astro", "_config.yml", "unknown.txt", "brag/unsafe.svg"]) {
+    "test/ci-scope.test.js", "analysis/index.html", "tools/helper.js", "_config.yml", "unknown.txt", "brag/unsafe.svg"]) {
     assert.equal(classifyChanges([...light.map(changed), changed(file)]), "full", file);
   }
   for (const mode of ["120000", "160000", "100755"]) {

@@ -1,7 +1,5 @@
-# Astro source has JavaScript front matter; its separate CI build owns it.
 # Preserve the usual dependency exclusions when configuring Jekyll 3.
 exclude:
-  - architecture
   - node_modules
   - vendor
   - Gemfile
