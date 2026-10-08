@@ -6277,6 +6277,13 @@
         border-color: rgba(185,158,228,0.2) !important;
         background: linear-gradient(145deg,rgba(189,158,238,0.18),rgba(102,72,155,0.1)) !important;
         box-shadow: inset 0 1px 0 rgba(255,255,255,0.08),0 7px 18px rgba(74,48,121,0.2) !important;
+        transform: translate3d(0,0,0) scale(1);
+        transition: filter 0.24s ease,transform 0.26s cubic-bezier(0.16,1,0.3,1);
+      }
+      /* Match the composer orb's hover without moving the header layout. */
+      #${DESTINATION_SHEET_ID} .context-generator-destination-home-link:hover .context-generator-destination-brand-icon {
+        transform: translate3d(0,-1px,0) scale(1.14);
+        filter: brightness(1.1) saturate(1.08) drop-shadow(0 0 6px rgba(139,92,246,0.38)) drop-shadow(0 3px 5px rgba(0,0,0,0.18));
       }
       #${DESTINATION_SHEET_ID} .context-generator-destination-title { color: #ffffff !important; }
       #${DESTINATION_SHEET_ID} .context-generator-speed-toggle {
@@ -6489,6 +6496,7 @@
         }
 
         #${DESTINATION_SHEET_ID} .context-generator-destination-tile,
+        #${DESTINATION_SHEET_ID} .context-generator-destination-brand-icon,
         #${DESTINATION_SHEET_ID} .context-generator-speed-toggle {
           transition: none !important;
         }
