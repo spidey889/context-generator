@@ -941,6 +941,44 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   return false;
 });
 
+async function readSummaryResponse(response, checkDeadline) {
+  // Older deployments return ordinary JSON. The new stream still has exactly
+  // one authoritative final result; previews never become pasted context.
+  if (!response.headers?.get("content-type")?.includes("application/x-ndjson")) return response.json();
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder("utf-8", { fatal: true });
+  let buffer = "", result, eof = false;
+  const consume = () => {
+    let newline;
+    while ((newline = buffer.indexOf("\n")) !== -1) {
+      const line = buffer.slice(0, newline).trim();
+      buffer = buffer.slice(newline + 1);
+      if (!line) continue;
+      const event = JSON.parse(line);
+      if (result || !["reset", "delta", "result"].includes(event.type)) throw new Error("Invalid summary stream");
+      if (event.type === "result") {
+        if (!event.data || typeof event.data !== "object") throw new Error("Invalid summary stream result");
+        result = event.data;
+      }
+    }
+  };
+  try {
+    while (!eof) {
+      checkDeadline();
+      const chunk = await reader.read();
+      checkDeadline();
+      eof = chunk.done;
+      buffer += eof ? decoder.decode() : decoder.decode(chunk.value, { stream: true });
+      consume();
+    }
+    if (buffer.trim() || !result) throw new Error("Summary stream ended before completion");
+    return result;
+  } finally {
+    if (!eof) { try { reader.cancel().catch(() => {}); } catch {} }
+    reader.releaseLock();
+  }
+}
+
 async function summarizeWithBackend(conversation, transferId = null, deadlineAt = null, sourceTab = null) {
   const operation = getTransferOperation(transferId, sourceTab, deadlineAt);
   checkTransferDeadline(deadlineAt);
@@ -1039,6 +1077,7 @@ async function fetchSummaryFromBackend(conversationText, transferId = null, dead
       method: "POST",
       headers: {
         "Content-Type": "application/json",
+        "Accept": "application/x-ndjson",
         "X-Cap-Context-Client": SUMMARY_CLIENT_HEADER
       },
       body: JSON.stringify({ conversation: conversationText, ...(telemetry ? { telemetry } : {}) }),
@@ -1053,7 +1092,7 @@ async function fetchSummaryFromBackend(conversationText, transferId = null, dead
     }
 
     const parseStartedAt = nowMs();
-    const data = await response.json();
+    const data = await readSummaryResponse(response, checkSummaryDeadline);
     const parseMs = Math.round(nowMs() - parseStartedAt);
     if (data?.ok === false || (data?.code && !data?.summary?.trim())) {
       throw createSummaryBackendPayloadError(data, data?.status || response.status);

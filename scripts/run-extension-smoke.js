@@ -632,15 +632,21 @@ async function startFixtureServer() {
       for await (const chunk of request) rawBody += chunk;
       state.summaryRequests.push(JSON.parse(rawBody));
       const receipt = await telemetryFixture.signSummary(state.summaryRequests.at(-1)?.telemetry);
+      const streaming = request.headers.accept === "application/x-ndjson";
       response.writeHead(200, {
         "Access-Control-Allow-Origin": "*",
-        "Content-Type": "application/json"
+        "Content-Type": streaming ? "application/x-ndjson" : "application/json"
       });
-      response.end(JSON.stringify({
+      const payload = {
         summary: SUMMARY_TEXT,
         ...receipt,
         timing: { inputChars: state.summaryRequests.at(-1)?.conversation?.length || 0, servedBy: "smoke-stub", model: receipt.summaryModel }
-      }));
+      };
+      if (streaming) {
+        response.write(`${JSON.stringify({ type: "reset" })}\n`);
+        response.write(`${JSON.stringify({ type: "delta", text: SUMMARY_TEXT.slice(0, 20) })}\n`);
+        response.end(`${JSON.stringify({ type: "result", data: payload })}\n`);
+      } else response.end(JSON.stringify(payload));
       return;
     }
     if (request.method === "POST" && ["/api/telemetry", "/smoke/transfer-telemetry"].includes(url.pathname)) {

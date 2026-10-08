@@ -1,5 +1,7 @@
 const PROVIDER_MAX_ATTEMPTS = 2;
 const { reserveFundedSummaryBudget } = require("./funded-summary-budget");
+const { getHeader } = require("./request-validation");
+const { readProviderStream } = require("./provider-stream");
 const {
   applyCorsHeaders,
   isValidPreflightRequest,
@@ -190,11 +192,15 @@ async function handler(req, res) {
   const onClose = () => { if (!res.writableEnded) controller.abort(); };
   res.once?.("close", onClose);
   if (res.destroyed || req.aborted) controller.abort();
+  const responseChannel = createLongSummaryResponse(res, {
+    stream: getHeader(req, "accept").includes("application/x-ndjson")
+  });
   const requestContext = {
     signal: controller.signal,
-    reserveFunded: units => reserveFundedSummaryBudget(req, units, { signal: controller.signal })
+    reserveFunded: units => reserveFundedSummaryBudget(req, units, { signal: controller.signal }),
+    onDelta: responseChannel.delta,
+    onStart: responseChannel.reset
   };
-  const responseChannel = createLongSummaryResponse(res);
   if (validation.telemetry) {
     const send = responseChannel.send;
     responseChannel.send = async (status, payload) => {
@@ -357,23 +363,31 @@ function createLongSummaryResponse(res, options = {}) {
   const heartbeatIntervalMs = options.heartbeatIntervalMs || SUMMARY_HEARTBEAT_INTERVAL_MS;
   const heartbeatChunk = options.heartbeatChunk || SUMMARY_HEARTBEAT_CHUNK;
   const canStream = typeof res?.write === "function" && typeof res?.end === "function";
+  const answerStream = options.stream === true && canStream;
   let streamStarted = false;
   let closed = false;
   let heartbeatTimer = null;
 
-  const writeHeartbeat = () => {
+  const start = () => {
     if (!canStream || closed || res.writableEnded || res.destroyed) return false;
 
     if (!streamStarted) {
-      // Leading JSON whitespace lets Vercel flush bytes without changing the final response shape.
+      // Whitespace keeps both legacy JSON and newline-delimited streams alive.
       res.statusCode = 200;
-      res.setHeader("Content-Type", "application/json; charset=utf-8");
+      res.setHeader("Content-Type", answerStream ? "application/x-ndjson; charset=utf-8" : "application/json; charset=utf-8");
       res.setHeader("Cache-Control", "no-store, no-transform");
-      res.setHeader("X-Cap-Context-Stream", "heartbeat-v1");
+      res.setHeader("X-Cap-Context-Stream", answerStream ? "answer-v1" : "heartbeat-v1");
       if (typeof res.flushHeaders === "function") res.flushHeaders();
       streamStarted = true;
     }
 
+    return true;
+  };
+  const writeEvent = (type, fields = {}) => {
+    if (start()) res.write(`${JSON.stringify({ type, ...fields })}\n`);
+  };
+  const writeHeartbeat = () => {
+    if (!start()) return false;
     res.write(heartbeatChunk);
     return true;
   };
@@ -394,6 +408,11 @@ function createLongSummaryResponse(res, options = {}) {
 
   return {
     send(statusCode, payload) {
+      if (answerStream) {
+        writeEvent("result", { data: statusCode >= 400 ? { ...payload, ok: false, status: statusCode } : payload });
+        close();
+        return res.end();
+      }
       close();
       if (!streamStarted) return res.status(statusCode).json(payload);
 
@@ -404,7 +423,8 @@ function createLongSummaryResponse(res, options = {}) {
       return res.end(JSON.stringify(finalPayload));
     },
     close,
-    writeHeartbeat
+    writeHeartbeat,
+    ...(answerStream ? { delta: text => writeEvent("delta", { text }), reset: () => writeEvent("reset") } : {})
   };
 }
 
@@ -590,12 +610,12 @@ async function createSummaryWithProvider({ provider, apiKey, profile, model, ini
   }
 
   const data = await readResponseJson(initialResponse, provider);
-  // OpenRouter can report upstream failure after sending HTTP 200 headers.
+  // Providers can report failure after sending HTTP 200 stream headers.
   // Never accept partial/error text as a successful summary in that case.
-  if (provider.id === "openrouter" && (data?.error || data?.choices?.[0]?.error
-      || ["error", "content_filter"].includes(data?.choices?.[0]?.finish_reason))) {
+  if (data?.error || data?.choices?.[0]?.error
+      || ["error", "content_filter"].includes(data?.choices?.[0]?.finish_reason)) {
     const reportedStatus = data?.error?.code ?? data?.choices?.[0]?.error?.code;
-    throw createProviderError(provider, "OpenRouter generation failed", 502,
+    throw createProviderError(provider, `${provider.label} generation failed`, 502,
       Number.isInteger(reportedStatus) ? reportedStatus : null);
   }
   const finishReason = getProviderFinishReason(provider, data);
@@ -646,6 +666,8 @@ async function createSummaryWithProvider({ provider, apiKey, profile, model, ini
 
 function requestProviderSummary(provider, apiKey, messages, profile, model, options = {}) {
   const body = getProviderRequestBody(provider, messages, profile, model);
+  const streaming = typeof options.onDelta === "function";
+  if (streaming && provider.id !== "gemini") body.stream = true;
   const headers = {
     "Content-Type": "application/json"
   };
@@ -661,7 +683,7 @@ function requestProviderSummary(provider, apiKey, messages, profile, model, opti
   }
 
   const providerUrl = provider.id === SUMMARY_PROVIDERS.gemini.id
-    ? `${GEMINI_GENERATE_CONTENT_BASE_URL}/${model}:generateContent`
+    ? `${GEMINI_GENERATE_CONTENT_BASE_URL}/${model}:${streaming ? "streamGenerateContent?alt=sse" : "generateContent"}`
     : provider.url;
   const serializedBody = JSON.stringify(body);
   // Weighted work allowance, not a dollar estimate: include the full prompt
@@ -673,6 +695,9 @@ function requestProviderSummary(provider, apiKey, messages, profile, model, opti
     body: serializedBody
   }, options.requestBudgetMs ?? getProviderRequestBudgetMs(model), {
     signal: options.signal,
+    provider: provider.id,
+    onDelta: options.onDelta,
+    onStart: options.onStart,
     reserveFunded: provider.id === "openrouter" || !options.reserveFunded ? null : () => options.reserveFunded(units)
   });
 }
@@ -1052,6 +1077,7 @@ async function fetchWithRetry(url, options, requestBudgetMs, context = {}) {
     try {
       checkAttemptDeadline();
       const signal = context.signal ? AbortSignal.any([context.signal, controller.signal]) : controller.signal;
+      context.onStart?.();
       const response = await fetch(url, { ...options, signal });
       checkAttemptDeadline();
       // fetch resolves at the headers. Successful JSON still belongs to the
@@ -1062,8 +1088,14 @@ async function fetchWithRetry(url, options, requestBudgetMs, context = {}) {
         try {
           // Response.json silently replaces malformed UTF-8, which can corrupt
           // names/facts in otherwise valid JSON. Reject those transport bytes.
-          const bytes = await response.arrayBuffer();
-          payload = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes));
+          if (context.onDelta && response.headers.get("content-type")?.includes("text/event-stream")) {
+            payload = await readProviderStream(response, context.provider, {
+              onDelta: context.onDelta, checkDeadline: checkAttemptDeadline
+            });
+          } else {
+            const bytes = await response.arrayBuffer();
+            payload = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes));
+          }
         } catch (error) {
           if (signal.aborted || error?.name === "AbortError" || isRetryableProviderNetworkError(error)) throw error;
           bodyError = error;

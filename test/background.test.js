@@ -19,6 +19,7 @@ function loadBackgroundForSummaryTest(fetchImpl, { tabs = [], injections = [], i
   const event = { addListener: () => {} };
   const sandbox = {
     AbortController,
+    TextDecoder,
     Date: clock,
     URL,
     clearTimeout,
@@ -324,6 +325,50 @@ test("closing the last source aborts its outstanding backend request", async () 
   await sendSummary.closeTab(9);
   assert.equal((await pending).code, "user_cancelled");
   assert.equal(signal.aborted, true);
+});
+
+test("streaming summary stays pending through previews and preserves the final result in one fetch", async () => {
+  const encoder = new TextEncoder();
+  let controller, fetches = 0, readStarted;
+  const started = new Promise(resolve => { readStarted = resolve; });
+  const sendSummary = loadBackgroundForSummaryTest(async (_url, options) => {
+    fetches++;
+    assert.equal(options.headers.Accept, "application/x-ndjson");
+    return new Response(new ReadableStream({ start(stream) {
+      controller = stream;
+      stream.enqueue(encoder.encode(`${JSON.stringify({ type: "reset" })}\n${JSON.stringify({ type: "delta", text: "Unused preview" })}\n`));
+      readStarted();
+    } }), { headers: { "content-type": "application/x-ndjson" } });
+  });
+  let completed = false;
+  const pending = sendSummary("stream this conversation").then(value => { completed = true; return value; });
+  await started; await new Promise(setImmediate);
+  assert.equal(completed, false);
+  const final = encoder.encode(`${JSON.stringify({ type: "result", data: { summary: "Complete résumé 🧠", timing: { model: "test-model" } } })}\n`);
+  for (let i = 0; i < final.length; i += 3) controller.enqueue(final.slice(i, i + 3));
+  controller.close();
+  const result = await pending;
+  assert.equal(result.ok, true);
+  assert.equal(result.summary, "Complete résumé 🧠");
+  assert.equal(fetches, 1);
+});
+
+test("truncated summary streams fail and source closure cancels an outstanding streamed body", async () => {
+  const encoder = new TextEncoder();
+  const truncated = loadBackgroundForSummaryTest(async () => new Response(`${JSON.stringify({ type: "delta", text: "Partial" })}\n`,
+    { headers: { "content-type": "application/x-ndjson" } }));
+  assert.equal((await truncated("incomplete stream")).ok, false);
+  let started, cancelled = false;
+  const ready = new Promise(resolve => { started = resolve; });
+  const sendSummary = loadBackgroundForSummaryTest(async (_url, options) => new Response(new ReadableStream({ start(controller) {
+    controller.enqueue(encoder.encode(`${JSON.stringify({ type: "delta", text: "Partial" })}\n`));
+    options.signal.addEventListener("abort", () => { cancelled = true; controller.error(options.signal.reason); }, { once: true });
+    started();
+  } }), { headers: { "content-type": "application/x-ndjson" } }), { tabs: [{ id: 9 }] });
+  const pending = sendSummary("cancel this streamed conversation", null, 9);
+  await ready; await sendSummary.closeTab(9);
+  assert.equal((await pending).code, "user_cancelled");
+  assert.equal(cancelled, true);
 });
 
 test("closing one source does not cancel a shared summary needed by another source", async () => {
