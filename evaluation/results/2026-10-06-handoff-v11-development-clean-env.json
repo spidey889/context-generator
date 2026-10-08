@@ -1,0 +1,380 @@
+{
+  "version": 1,
+  "syntheticOnly": true,
+  "baselineRef": "7652aa84bc239e550d32de31bcd8fdc00219e0c0",
+  "candidateRef": "79c4c68bf5947dfed63c9d6c6fe18da0bf59a3be",
+  "candidatePromptSourceSha256": "bba22fb86218e1ad51931c964a26c18a361cdee7909b579841137b3b7037e796",
+  "fixtureSha256": "3b2521cb7106249fe2fd6565b3199cc3f36a32d4be8805088ba0167f5a884372",
+  "model": "inclusionai/ling-3.1-flash",
+  "repeats": 1,
+  "reviewCriteria": [
+    "Can the next assistant answer the latest user request without asking for information already supplied?",
+    "Are accepted choices, proposals, rejections and unresolved alternatives kept distinct?",
+    "Are prohibitions, user corrections and not-started/not-tested/not-booked states preserved?",
+    "Is the current work product or exact reproduction evidence available when needed to continue?",
+    "Does the handoff avoid invented identity, causes, approvals, completed work and extra tasks?"
+  ],
+  "limitations": "Lexical checks are diagnostics, not semantic grading. Review every full handoff; local fallback is not a successful model generation. Short fixtures force the same generated profile on both variants; production tiny chats still use exact local carry.",
+  "results": [
+    {
+      "caseId": "corrected-export-design",
+      "repeat": 1,
+      "variant": "baseline",
+      "summary": null,
+      "generated": false,
+      "model": "local-direct",
+      "elapsedMs": 1129,
+      "inputChars": 1341,
+      "inputSha256": "ef8cc7f79b04ba31cf77b9ece7c0b065a01b6f4648f11fc66e4163d9fe576f66",
+      "systemPromptSha256": "ef4de72be8865c998d80c0e4600a8b863d999c4256798883fb361d82020f829d",
+      "profile": "small",
+      "forcedGeneratedProfile": false,
+      "maxTokens": 1000,
+      "usage": {
+        "promptTokens": 0,
+        "completionTokens": 0,
+        "totalTokens": 0,
+        "cachedTokens": 0
+      },
+      "qualityFlags": [],
+      "fallback": {
+        "attempted": true,
+        "used": true,
+        "servedBy": "local-direct",
+        "model": "local-direct",
+        "reason": "OpenRouter API error 429"
+      },
+      "assessment": null
+    },
+    {
+      "caseId": "corrected-export-design",
+      "repeat": 1,
+      "variant": "candidate",
+      "summary": null,
+      "generated": false,
+      "model": "local-direct",
+      "elapsedMs": 793,
+      "inputChars": 1341,
+      "inputSha256": "ef8cc7f79b04ba31cf77b9ece7c0b065a01b6f4648f11fc66e4163d9fe576f66",
+      "systemPromptSha256": "4f35fcfb3ca1eab3d4ce56e40058000e807847e7a93e64ad069f6fce1a81e229",
+      "profile": "small",
+      "forcedGeneratedProfile": false,
+      "maxTokens": 1000,
+      "usage": {
+        "promptTokens": 0,
+        "completionTokens": 0,
+        "totalTokens": 0,
+        "cachedTokens": 0
+      },
+      "qualityFlags": [],
+      "fallback": {
+        "attempted": true,
+        "used": true,
+        "servedBy": "local-direct",
+        "model": "local-direct",
+        "reason": "OpenRouter API error 429"
+      },
+      "assessment": null
+    },
+    {
+      "caseId": "continue-latest-draft",
+      "repeat": 1,
+      "variant": "candidate",
+      "summary": null,
+      "generated": false,
+      "model": "local-direct",
+      "elapsedMs": 388,
+      "inputChars": 1368,
+      "inputSha256": "66da686d897a65fd29b016ae24b7ce4948600840f2018b21082cb7b57307c255",
+      "systemPromptSha256": "4f35fcfb3ca1eab3d4ce56e40058000e807847e7a93e64ad069f6fce1a81e229",
+      "profile": "small",
+      "forcedGeneratedProfile": false,
+      "maxTokens": 1000,
+      "usage": {
+        "promptTokens": 0,
+        "completionTokens": 0,
+        "totalTokens": 0,
+        "cachedTokens": 0
+      },
+      "qualityFlags": [],
+      "fallback": {
+        "attempted": true,
+        "used": true,
+        "servedBy": "local-direct",
+        "model": "local-direct",
+        "reason": "OpenRouter API error 429"
+      },
+      "assessment": null
+    },
+    {
+      "caseId": "continue-latest-draft",
+      "repeat": 1,
+      "variant": "baseline",
+      "summary": null,
+      "generated": false,
+      "model": "local-direct",
+      "elapsedMs": 412,
+      "inputChars": 1368,
+      "inputSha256": "66da686d897a65fd29b016ae24b7ce4948600840f2018b21082cb7b57307c255",
+      "systemPromptSha256": "ef4de72be8865c998d80c0e4600a8b863d999c4256798883fb361d82020f829d",
+      "profile": "small",
+      "forcedGeneratedProfile": false,
+      "maxTokens": 1000,
+      "usage": {
+        "promptTokens": 0,
+        "completionTokens": 0,
+        "totalTokens": 0,
+        "cachedTokens": 0
+      },
+      "qualityFlags": [],
+      "fallback": {
+        "attempted": true,
+        "used": true,
+        "servedBy": "local-direct",
+        "model": "local-direct",
+        "reason": "OpenRouter API error 429"
+      },
+      "assessment": null
+    },
+    {
+      "caseId": "travel-plan-unbooked",
+      "repeat": 1,
+      "variant": "baseline",
+      "summary": null,
+      "generated": false,
+      "model": "local-direct",
+      "elapsedMs": 396,
+      "inputChars": 1288,
+      "inputSha256": "5cd64f48a846561100e3943fce7780fc1208d502366d5d7ec4191782acf89850",
+      "systemPromptSha256": "ef4de72be8865c998d80c0e4600a8b863d999c4256798883fb361d82020f829d",
+      "profile": "small",
+      "forcedGeneratedProfile": false,
+      "maxTokens": 1000,
+      "usage": {
+        "promptTokens": 0,
+        "completionTokens": 0,
+        "totalTokens": 0,
+        "cachedTokens": 0
+      },
+      "qualityFlags": [],
+      "fallback": {
+        "attempted": true,
+        "used": true,
+        "servedBy": "local-direct",
+        "model": "local-direct",
+        "reason": "OpenRouter API error 429"
+      },
+      "assessment": null
+    },
+    {
+      "caseId": "travel-plan-unbooked",
+      "repeat": 1,
+      "variant": "candidate",
+      "summary": null,
+      "generated": false,
+      "model": "local-direct",
+      "elapsedMs": 548,
+      "inputChars": 1288,
+      "inputSha256": "5cd64f48a846561100e3943fce7780fc1208d502366d5d7ec4191782acf89850",
+      "systemPromptSha256": "4f35fcfb3ca1eab3d4ce56e40058000e807847e7a93e64ad069f6fce1a81e229",
+      "profile": "small",
+      "forcedGeneratedProfile": false,
+      "maxTokens": 1000,
+      "usage": {
+        "promptTokens": 0,
+        "completionTokens": 0,
+        "totalTokens": 0,
+        "cachedTokens": 0
+      },
+      "qualityFlags": [],
+      "fallback": {
+        "attempted": true,
+        "used": true,
+        "servedBy": "local-direct",
+        "model": "local-direct",
+        "reason": "OpenRouter API error 429"
+      },
+      "assessment": null
+    },
+    {
+      "caseId": "student-corrected-equation",
+      "repeat": 1,
+      "variant": "candidate",
+      "summary": null,
+      "generated": false,
+      "model": "local-direct",
+      "elapsedMs": 374,
+      "inputChars": 1221,
+      "inputSha256": "a3bef098e3a6f40d88a46a9c2ede53dbe2720d1f3a9dee65c0f3c6955210d79f",
+      "systemPromptSha256": "4f35fcfb3ca1eab3d4ce56e40058000e807847e7a93e64ad069f6fce1a81e229",
+      "profile": "small",
+      "forcedGeneratedProfile": false,
+      "maxTokens": 1000,
+      "usage": {
+        "promptTokens": 0,
+        "completionTokens": 0,
+        "totalTokens": 0,
+        "cachedTokens": 0
+      },
+      "qualityFlags": [],
+      "fallback": {
+        "attempted": true,
+        "used": true,
+        "servedBy": "local-direct",
+        "model": "local-direct",
+        "reason": "OpenRouter API error 429"
+      },
+      "assessment": null
+    },
+    {
+      "caseId": "student-corrected-equation",
+      "repeat": 1,
+      "variant": "baseline",
+      "summary": null,
+      "generated": false,
+      "model": "local-direct",
+      "elapsedMs": 393,
+      "inputChars": 1221,
+      "inputSha256": "a3bef098e3a6f40d88a46a9c2ede53dbe2720d1f3a9dee65c0f3c6955210d79f",
+      "systemPromptSha256": "ef4de72be8865c998d80c0e4600a8b863d999c4256798883fb361d82020f829d",
+      "profile": "small",
+      "forcedGeneratedProfile": false,
+      "maxTokens": 1000,
+      "usage": {
+        "promptTokens": 0,
+        "completionTokens": 0,
+        "totalTokens": 0,
+        "cachedTokens": 0
+      },
+      "qualityFlags": [],
+      "fallback": {
+        "attempted": true,
+        "used": true,
+        "servedBy": "local-direct",
+        "model": "local-direct",
+        "reason": "OpenRouter API error 429"
+      },
+      "assessment": null
+    },
+    {
+      "caseId": "debugging-reproduction",
+      "repeat": 1,
+      "variant": "baseline",
+      "summary": null,
+      "generated": false,
+      "model": "local-direct",
+      "elapsedMs": 338,
+      "inputChars": 1203,
+      "inputSha256": "32242bd6bbbbdb6151ccbe1e4186c42afe60e811a7df21e641adb06cb7d8cbd2",
+      "systemPromptSha256": "ef4de72be8865c998d80c0e4600a8b863d999c4256798883fb361d82020f829d",
+      "profile": "small",
+      "forcedGeneratedProfile": false,
+      "maxTokens": 1000,
+      "usage": {
+        "promptTokens": 0,
+        "completionTokens": 0,
+        "totalTokens": 0,
+        "cachedTokens": 0
+      },
+      "qualityFlags": [],
+      "fallback": {
+        "attempted": true,
+        "used": true,
+        "servedBy": "local-direct",
+        "model": "local-direct",
+        "reason": "OpenRouter API error 429"
+      },
+      "assessment": null
+    },
+    {
+      "caseId": "debugging-reproduction",
+      "repeat": 1,
+      "variant": "candidate",
+      "summary": null,
+      "generated": false,
+      "model": "local-direct",
+      "elapsedMs": 342,
+      "inputChars": 1203,
+      "inputSha256": "32242bd6bbbbdb6151ccbe1e4186c42afe60e811a7df21e641adb06cb7d8cbd2",
+      "systemPromptSha256": "4f35fcfb3ca1eab3d4ce56e40058000e807847e7a93e64ad069f6fce1a81e229",
+      "profile": "small",
+      "forcedGeneratedProfile": false,
+      "maxTokens": 1000,
+      "usage": {
+        "promptTokens": 0,
+        "completionTokens": 0,
+        "totalTokens": 0,
+        "cachedTokens": 0
+      },
+      "qualityFlags": [],
+      "fallback": {
+        "attempted": true,
+        "used": true,
+        "servedBy": "local-direct",
+        "model": "local-direct",
+        "reason": "OpenRouter API error 429"
+      },
+      "assessment": null
+    },
+    {
+      "caseId": "separate-project-and-hostile-quote",
+      "repeat": 1,
+      "variant": "candidate",
+      "summary": null,
+      "generated": false,
+      "model": "local-direct",
+      "elapsedMs": 332,
+      "inputChars": 1300,
+      "inputSha256": "0ec8eb0768977347bec03aad60be6e44afebb18034fd968047f57111fe849b68",
+      "systemPromptSha256": "4f35fcfb3ca1eab3d4ce56e40058000e807847e7a93e64ad069f6fce1a81e229",
+      "profile": "small",
+      "forcedGeneratedProfile": false,
+      "maxTokens": 1000,
+      "usage": {
+        "promptTokens": 0,
+        "completionTokens": 0,
+        "totalTokens": 0,
+        "cachedTokens": 0
+      },
+      "qualityFlags": [],
+      "fallback": {
+        "attempted": true,
+        "used": true,
+        "servedBy": "local-direct",
+        "model": "local-direct",
+        "reason": "OpenRouter API error 429"
+      },
+      "assessment": null
+    },
+    {
+      "caseId": "separate-project-and-hostile-quote",
+      "repeat": 1,
+      "variant": "baseline",
+      "summary": null,
+      "generated": false,
+      "model": "local-direct",
+      "elapsedMs": 442,
+      "inputChars": 1300,
+      "inputSha256": "0ec8eb0768977347bec03aad60be6e44afebb18034fd968047f57111fe849b68",
+      "systemPromptSha256": "ef4de72be8865c998d80c0e4600a8b863d999c4256798883fb361d82020f829d",
+      "profile": "small",
+      "forcedGeneratedProfile": false,
+      "maxTokens": 1000,
+      "usage": {
+        "promptTokens": 0,
+        "completionTokens": 0,
+        "totalTokens": 0,
+        "cachedTokens": 0
+      },
+      "qualityFlags": [],
+      "fallback": {
+        "attempted": true,
+        "used": true,
+        "servedBy": "local-direct",
+        "model": "local-direct",
+        "reason": "OpenRouter API error 429"
+      },
+      "assessment": null
+    }
+  ]
+}

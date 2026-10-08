@@ -41,8 +41,8 @@ const {
   getSummaryProfile,
   createSummaryWithFallback,
   getContextCarryTemplate,
+  getSummarySystemPrompt,
 } = summarizeHandler.__test;
-const SUMMARIZE_SOURCE = fs.readFileSync(path.join(__dirname, "..", "api", "summarize.js"), "utf8");
 const BACKGROUND_SOURCE = fs.readFileSync(path.join(__dirname, "..", "extension", "background.js"), "utf8");
 
 test("provider failures log fixed metadata without reflecting arbitrary upstream codes or bodies", async t => {
@@ -159,7 +159,7 @@ test("backend forwards a 350k conversation to Mistral and reports the same input
     assert.equal(capturedRequest.url, "https://api.mistral.ai/v1/chat/completions");
     assert.equal(capturedRequest.body.model, "ministral-14b-2512");
     assert.equal(capturedRequest.body.max_tokens, 7000);
-    assert.match(capturedRequest.body.prompt_cache_key, /^capcontext-summary-v10-extra-large-ministral-14b-2512$/);
+    assert.match(capturedRequest.body.prompt_cache_key, /^capcontext-summary-v19-extra-large-ministral-14b-2512$/);
     assert.equal(capturedRequest.body.prediction, undefined);
     const transcriptEnvelope = JSON.parse(capturedRequest.body.messages[1].content);
     assert.deepEqual(transcriptEnvelope, {
@@ -859,9 +859,10 @@ test("prompt and validator reserve None for genuinely unavailable optional facts
       `- Useful concrete context remains available. ${detailWords}`
     );
 
-  assert.match(SUMMARIZE_SOURCE, /search the entire transcript carefully for facts relevant to each section/i);
-  assert.match(SUMMARIZE_SOURCE, /Use "None" only when the transcript genuinely contains no useful information/i);
-  assert.match(SUMMARIZE_SOURCE, /WHAT WE WERE DOING, WHERE WE LEFT OFF, and KEY CONTEXT must always contain strong, grounded content/i);
+  const prompt = getSummarySystemPrompt(smallProfile);
+  assert.match(prompt, /search the entire transcript carefully for facts relevant to each section/i);
+  assert.match(prompt, /Use "None" only when the transcript genuinely contains no useful information/i);
+  assert.match(prompt, /WHAT WE WERE DOING, WHERE WE LEFT OFF, and KEY CONTEXT must always contain strong, grounded content/i);
   assert.equal(validateContextCarrySummary(optionalWhoIsNone, smallProfile).ok, true);
 
   for (const section of ["WHAT WE WERE DOING", "WHERE WE LEFT OFF", "KEY CONTEXT"]) {

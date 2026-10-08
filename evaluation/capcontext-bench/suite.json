@@ -1,0 +1,78 @@
+{
+  "name": "CapContextBench",
+  "version": 1,
+  "levels": {
+    "1": "Preservation: current decisions and exact work",
+    "2": "Grounding: permissions, unknown states and pending work",
+    "3": "Recall: essential work inside long unrelated history"
+  },
+  "cases": [
+    {
+      "source": "evaluation/handoff-quality-cases.json",
+      "id": "corrected-export-design",
+      "level": "1",
+      "expectations": {
+        "continuity": "The patch proposal is still pending. Carry worker/export.mjs and the exact upload idle timeout error; do not write the proposal or claim implementation.",
+        "fidelity": "Two uploads replace six; retain 10 MB, ap-south-1, release, Jules as an unlinked owner, both retry options (400 ms / 200-600 ms), no-deploy, rejected timeout increase and unapproved rollback.",
+        "grounding": "Implementation, testing and deployment explicitly have not started. Healthy writes/no lost records are observations, not extra requirements. Do not infer Jules is or is not the user, a root cause, approval or a reason never supplied."
+      },
+      "exactText": ["worker/export.mjs", "upload idle timeout"]
+    },
+    {
+      "source": "evaluation/handoff-quality-cases.json",
+      "id": "continue-latest-draft",
+      "level": "1",
+      "expectations": {
+        "continuity": "Retain the exact current opening so an assistant without file access can write only the pending second paragraph. Do not write it during summarization.",
+        "fidelity": "Preserve friendly/plain tone, outdoors, leaving whenever desired, event date/time/place, mug, free tea, swapping/no selling, no opening rewrite and rejection of v1/registration link.",
+        "grounding": "No invented turnout, quote, service, registration link or completed second paragraph. Old v1 may appear only as clearly rejected history."
+      },
+      "exactCriticalFact": 0
+    },
+    {
+      "source": "evaluation/handoff-quality-cases.json",
+      "id": "debugging-reproduction",
+      "level": "2",
+      "expectations": {
+        "continuity": "Keep the actual multiline CSV, expected/actual rows and reproduction command usable. The explanation and smallest-change sketch are pending, not performed by the summarizer.",
+        "fidelity": "Keep Grove path/file/branch, line.split(','), comma delimiter, no library switch, and escaped-double-quote behavior undecided. Preserve inspection permission without upgrading it to implementation permission.",
+        "grounding": "No code changed and no tests ran; no landed fix or successful test. The unrelated tab-separated migration does not define Grove's format. Do not invent a fix approval or diagnose beyond the supplied observation."
+      },
+      "exactText": ["name,note\nAda,\"red, blue\"", "[\"Ada\", \"red, blue\"]", "[\"Ada\", \"red\", \" blue\"]", "node scripts/repro.mjs fixtures/quoted-comma.csv"]
+    },
+    {
+      "source": "evaluation/handoff-adaptation-cases.json",
+      "id": "missing-reason-and-unverified-status",
+      "level": "2",
+      "expectations": {
+        "continuity": "Keep the pending requirements/options restatement, UTF-8/Markdown, title/date/body, blank lines and no archived notes. Explain notes/current-export.md as an outline, not code/test results.",
+        "fidelity": "Export button and command-line script remain undecided; settings panel is rejected. Do not select or implement. Reasons are explicitly unstated; preserve absent inspection/test/deployment reports as absent reports.",
+        "grounding": "No test report is not proof of no testing. The inspection promise is not completed inspection. Never import the quoted Alder fully-tested claim into Birch or invent compatibility/security/portability reasons."
+      },
+      "exactCriticalFact": 0
+    },
+    {
+      "source": "evaluation/handoff-quality-cases.json",
+      "id": "review-budget-draft",
+      "level": "2",
+      "expectations": {
+        "continuity": "Keep the exact current quote draft and pending sufficiency review. The summarizer must not calculate, answer that review, rewrite the draft or create an event plan.",
+        "fidelity": "Lighting is 180, replacing 150; audio is 200, budget is 700, delivery fee unknown, neither quote accepted. Friday 12 June is only the quote deadline. Preserve no contact/order/purchase approval and Ren as supplier contact.",
+        "grounding": "Do not introduce a subtotal, remaining budget, delivery date, accepted quote, purchase or user identity. Correct arithmetic is still new work absent from the source."
+      },
+      "exactCriticalFact": 0
+    },
+    {
+      "source": "evaluation/handoff-quality-cases.json",
+      "id": "continue-latest-draft",
+      "level": "3",
+      "targetChars": 90000,
+      "expectations": {
+        "continuity": "Despite unrelated archive blocks, retain the exact current opening and pending second-paragraph-only request without performing it. A description of the paragraph is insufficient.",
+        "fidelity": "Preserve the latest correction and all active event/voice/no-rewrite constraints. Complete original turns remain in order; archive subjects supply no current decisions.",
+        "grounding": "No invented turnout or completed paragraph. Do not import archived project facts/owners, select superseded v1 or fill sections with unrelated archive details."
+      },
+      "exactCriticalFact": 0
+    }
+  ]
+}

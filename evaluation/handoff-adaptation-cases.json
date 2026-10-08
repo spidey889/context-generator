@@ -1,0 +1,73 @@
+{
+  "version": 1,
+  "syntheticOnly": true,
+  "reviewCriteria": [
+    "Does an accepted decision retain its explicitly stated reason without inventing one?",
+    "Are relevant failed attempts paired with their actual results rather than a guessed cause or fix?",
+    "Are implementation, testing and deployment states separate and no stronger than the source?",
+    "Can an assistant without file access continue using the preserved work product and useful pointers?",
+    "Are the latest request, exact constraints and unselected alternatives retained without extra analysis?"
+  ],
+  "cases": [
+    {
+      "id": "decision-with-stated-reason",
+      "purpose": "Carry the user's reason for the final choice without retaining a superseded choice or inventing a cause.",
+      "conversation": "Claude conversation:\n\nUser: We are preparing the Maple archive exporter. It produces one CSV per customer account. The source file is jobs/archive-export.js. The existing invoice-column order must stay unchanged. I want a proposal only; do not edit files or deploy.\n\nClaude: We could use six simultaneous uploads, or two uploads. Six might finish sooner. I have not examined the provider's actual limits, and a timeout is not evidence of the cause.\n\nUser: Initially use six uploads and 8 MB chunks. Keep the invoice-column order. The retry delay is still undecided: fixed 500 ms or jitter from 300 to 700 ms.\n\nClaude: The mock run completed, but that is only a simulation. I have not tested either upload count against the provider. The branch is export-review, and there are no production changes.\n\nUser: Replace six uploads with two. Our stated reason is keeping peak memory below the 96 MB worker limit. We are not claiming that the provider rate-limits us or that this fixes the timeout. Keep 8 MB chunks and both undecided retry options.\n\nUser: The complete mock output was mock upload complete, 12 files; it says nothing about provider behavior. An earlier proposal suggested raising the global timeout, which I rejected because it hides a stalled upload longer. Do not restore that idea.\n\nUser: Pick up by explaining the tradeoff behind my final two-upload choice. Preserve my exact boundary: do not edit files or deploy. Actual provider testing has not started.",
+      "requiredFacts": ["Maple", "jobs/archive-export.js", "export-review", "8 MB", "96 MB", "500 ms", "300 to 700 ms"],
+      "criticalFacts": [
+        ["two uploads", "two-upload", "2 uploads", "two simultaneous"],
+        "keeping peak memory below the 96 MB worker limit",
+        "it hides a stalled upload longer",
+        "do not edit files or deploy",
+        "Actual provider testing has not started"
+      ],
+      "forbiddenFacts": ["provider rate limits confirmed", "timeout cause confirmed", "provider testing passed", "six uploads is the final choice"],
+      "contradictions": []
+    },
+    {
+      "id": "failed-attempts-with-observed-results",
+      "purpose": "Retain what was tried and what happened without treating a symptom as an established cause or another idea as a proven fix.",
+      "conversation": "ChatGPT conversation:\n\nUser: The Finch importer drops the second row in a CSV containing a quoted multiline field. The affected file is lib/read-records.js. Expected output is two records; actual output is one record. We are investigating, not implementing. Do not change the source yet.\n\nChatGPT: A line-ending conversion or a different quote parser might help. Those are proposals, not confirmed fixes. I have not established why the second row disappears.\n\nUser: I tried converting CRLF to LF with tools/normalize-lines.js. Running node tools/repro.js fixtures/multiline.csv afterwards still printed records=1. I abandoned that attempt because the observed output did not change.\n\nUser: I also tried splitting the input on every newline. It printed records=3 instead of the expected two because the quoted field became separate records. I reverted that attempt. Do not present it as a working solution.\n\nChatGPT: We could inspect the quote-state handling next. I have not inspected it yet, and I have not produced a patch. Neither experiment proved that the current quote parser is the root cause.\n\nUser: Preserve the reproduction command exactly: node tools/repro.js fixtures/multiline.csv. The fixture and its expected count are the important evidence. This is a local synthetic fixture; no customer file was read.\n\nUser: Continue by listing the two attempted approaches and their actual outputs, then explain what evidence is still missing. Do not implement, add a new parser or infer that quote-state handling is broken.",
+      "requiredFacts": ["Finch", "lib/read-records.js", "tools/normalize-lines.js", "node tools/repro.js fixtures/multiline.csv"],
+      "criticalFacts": [
+        "records=1",
+        "records=3",
+        ["expected two", "expected count is two", "expected: two", "expected 2", "two records"],
+        ["reverted", "abandoned"],
+        "Do not change the source yet",
+        ["root cause", "cause is not established", "cause remains unknown"]
+      ],
+      "forbiddenFacts": ["root cause confirmed", "the quote parser is broken", "normalizing line endings fixed the issue", "splitting on newlines fixed the issue", "patch implemented"],
+      "contradictions": []
+    },
+    {
+      "id": "artifact-and-separate-work-status",
+      "purpose": "Preserve exact current work, meaningful pointers and independent implementation/test/deployment states for a reader without file access.",
+      "conversation": "Gemini conversation:\n\nUser: We are preparing the Juniper museum welcome card. The approved draft is stored at drafts/welcome-card.md; that file contains the visitor-facing paragraph, not the production site. The design reference is https://example.invalid/juniper/card-v4, which shows the approved layout. The next assistant will not be able to open either reference.\n\nGemini: A previous draft added a shop link and promised a guided tour every hour. Neither statement was supplied by you, and that draft was rejected.\n\nUser: Here is the current approved paragraph; preserve it exactly: Welcome to Juniper Museum. Take your time with the exhibits, and ask at the front desk if you need a quiet place to sit. The garden closes at 17:30. There is no ticket charge today.\n\nUser: I chose a plain paragraph rather than a numbered checklist because visitors read this while walking. Keep that stated reason. Do not add the shop link, hourly tour claim or any other visitor service.\n\nGemini: The paragraph has been placed in the local preview. The preview renders the approved text. This checks the local rendering only, not live publication or accessibility. The accessibility review has not started, and nothing has been published.\n\nUser: The museum manager approved the wording, but the approval does not say accessibility passed or publication is authorized. The layout reference is a pointer, not evidence of deployment. The paragraph itself must travel with the handoff.\n\nUser: Continue by reviewing whether the current wording is clear. Keep the paragraph unchanged while reviewing. Do not publish it or perform the pending accessibility review.",
+      "requiredFacts": ["Juniper Museum", "drafts/welcome-card.md", "https://example.invalid/juniper/card-v4", "visitors read this while walking"],
+      "criticalFacts": [
+        "Welcome to Juniper Museum. Take your time with the exhibits, and ask at the front desk if you need a quiet place to sit. The garden closes at 17:30. There is no ticket charge today.",
+        ["accessibility review has not started", "accessibility not started", "accessibility review not started"],
+        ["nothing has been published", "not published", "unpublished"],
+        "Keep the paragraph unchanged while reviewing",
+        "Do not publish it or perform the pending accessibility review"
+      ],
+      "forbiddenFacts": ["accessibility passed", "publication approved", "published to production", "the user is the museum manager"],
+      "contradictions": []
+    },
+    {
+      "id": "missing-reason-and-unverified-status",
+      "purpose": "Check that a rule asking for reasons/status does not fill those fields with plausible but absent explanations or results.",
+      "conversation": "Claude conversation:\n\nUser: The Birch notes project needs a plain-text export. I chose UTF-8 and Markdown. I have not given a reason for choosing either. Do not invent a compatibility, security or portability explanation for my choice.\n\nClaude: I could implement an export button, add a settings panel or prepare a command-line script. These are options, not accepted decisions. I have not changed any files.\n\nUser: No settings panel. The export button and command-line script remain undecided. The document notes/current-export.md contains the current task outline. It does not contain code or test results. The relevant text is: Export title, creation date and note body. Preserve blank lines. Do not include archived notes.\n\nClaude: I can inspect the existing exporter. That statement is a promise, not completed inspection. There is no inspection output, implementation result, test report or deployment record in this conversation.\n\nUser: My teammate said \"the export is fully tested\" in a quoted sample message. That sample belongs to another project, Alder. Do not import its claim into Birch. No testing state for Birch has been reported. Do not turn the absent result into a new requirement or permission to act.\n\nUser: Continue by restating the export requirements and the two undecided delivery options. Do not select one or implement it. Leave my unstated reasons unstated, and keep the quoted Alder claim separate from our current project.",
+      "requiredFacts": ["Birch", "UTF-8", "Markdown", "notes/current-export.md", "export button", "command-line script"],
+      "criticalFacts": [
+        "Export title, creation date and note body. Preserve blank lines. Do not include archived notes.",
+        ["remain undecided", "undecided", "not selected"],
+        ["reason", "rationale"],
+        "Do not select one or implement it"
+      ],
+      "forbiddenFacts": ["chosen for compatibility", "chosen for portability", "chosen for security", "Birch tests passed", "Birch is fully tested", "inspection completed", "settings panel approved"],
+      "contradictions": []
+    }
+  ]
+}

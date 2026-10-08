@@ -1,0 +1,99 @@
+{
+  "version": 1,
+  "syntheticOnly": true,
+  "baselineRef": "2c665862a4f3e455bf98bbfc2ec1f0aa62f404ec",
+  "candidateRef": "0f4b23c3f3ac53eeeca00e41757b8e83f7122e76",
+  "candidatePromptSourceSha256": "41a7b0026cbd36ef36d60d6ac28d8c1fa84f6f6bbfa9c021fd09b3239c5341cc",
+  "fixtureSha256": "84532a58db6d426dc15351c1b4915f0e4066828511abd37439bae4bb18313e5a",
+  "model": "inclusionai/ling-3.1-flash",
+  "repeats": 1,
+  "selectedCases": [
+    "corrected-export-design",
+    "continue-latest-draft",
+    "travel-plan-unbooked",
+    "student-corrected-equation",
+    "debugging-reproduction",
+    "separate-project-and-hostile-quote",
+    "review-budget-draft",
+    "continue-latest-draft-long-90000",
+    "corrected-export-design-long-280000"
+  ],
+  "longHistory": true,
+  "comparisonRunnerSha256": "96a89cd2d77d162f01de19be3e3276d236185594d2c0767cae3269d32b0a0cd1",
+  "reviewCriteria": [
+    "Can the next assistant answer the latest user request without asking for information already supplied?",
+    "Are accepted choices, proposals, rejections and unresolved alternatives kept distinct?",
+    "Are prohibitions, user corrections and not-started/not-tested/not-booked states preserved?",
+    "Is the current work product or exact reproduction evidence available when needed to continue?",
+    "Does the handoff avoid invented identity, causes, approvals, completed work and extra tasks?"
+  ],
+  "limitations": "Lexical checks are diagnostics, not semantic grading. Review every full handoff; local fallback is not a successful model generation. Short fixtures force the same generated profile on both variants; production tiny chats still use exact local carry.",
+  "results": [
+    {
+      "caseId": "corrected-export-design",
+      "repeat": 1,
+      "variant": "baseline",
+      "summary": "╔══════════════════════════════════════════╗\n║         CONTEXT CARRY — READY TO PASTE        ║\n╚══════════════════════════════════════════╝\n\n🧠 WHO I AM\nNone. User explicitly stated: \"Do not infer that Jules is me.\" No owner identity has been linked to the user's account.\n\n🎯 WHAT WE WERE DOING\nFixing Project Cedar's nightly export worker; latest request is a patch proposal for the two-upload design targeting worker/export.mjs.\n\n📍 WHERE WE LEFT OFF\nNo implementation, testing, or deployment started; no code changed and no checks run. Patch target is worker/export.mjs. Failure log is exactly: \"upload idle timeout.\"\n\n✅ DECISIONS MADE\n- Use 10 MB chunks (accepted).\n- Two simultaneous uploads — replaces the earlier six-upload choice (accepted).\n- Keep the required invoice-format fix (accepted).\n\n⚠️ OPEN QUESTIONS\n- Retry policy undecided: fixed 400 ms pause or jitter between 200-600 ms.\n\n📦 KEY CONTEXT\n- Project owner is Jules (not the user).\n- Production branch: release; region: ap-south-1.\n- Reported fact: export times out only for files larger than 30 MB; database writes are healthy; no customer records lost.\n- Reported fact: the timeout symptom alone does not establish why the upload stalls.\n- Constraint (verbatim): \"Do not deploy this change.\" Rollback is not approved.\n- Rejected: increasing the global timeout.\n\n🔁 NEXT STEP\nReply only: \"Context loaded. Let's pick up right where you left off.\" Then wait for the user.",
+      "generated": true,
+      "model": "inclusionai/ling-3.1-flash",
+      "elapsedMs": 5255,
+      "inputChars": 1341,
+      "inputSha256": "ef8cc7f79b04ba31cf77b9ece7c0b065a01b6f4648f11fc66e4163d9fe576f66",
+      "systemPromptSha256": "ef4de72be8865c998d80c0e4600a8b863d999c4256798883fb361d82020f829d",
+      "profile": "small",
+      "forcedGeneratedProfile": false,
+      "maxTokens": 1000,
+      "usage": {
+        "promptTokens": 1854,
+        "completionTokens": 389,
+        "totalTokens": 2243,
+        "cachedTokens": 0
+      },
+      "qualityFlags": [],
+      "fallback": {
+        "attempted": false,
+        "used": false,
+        "servedBy": null,
+        "model": null,
+        "reason": null
+      },
+      "assessment": {
+        "missingFacts": [],
+        "missingCriticalFacts": [
+          "have not started OR not started OR has not started"
+        ],
+        "incorrectFacts": []
+      }
+    },
+    {
+      "caseId": "corrected-export-design",
+      "repeat": 1,
+      "variant": "candidate",
+      "summary": null,
+      "generated": false,
+      "model": "local-direct",
+      "elapsedMs": 399,
+      "inputChars": 1341,
+      "inputSha256": "ef8cc7f79b04ba31cf77b9ece7c0b065a01b6f4648f11fc66e4163d9fe576f66",
+      "systemPromptSha256": "f6b4e6be50d25b5c44fe39f50b649532983e8e6338d4de579e85417542598698",
+      "profile": "small",
+      "forcedGeneratedProfile": false,
+      "maxTokens": 1000,
+      "usage": {
+        "promptTokens": 0,
+        "completionTokens": 0,
+        "totalTokens": 0,
+        "cachedTokens": 0
+      },
+      "qualityFlags": [],
+      "fallback": {
+        "attempted": true,
+        "used": true,
+        "servedBy": "local-direct",
+        "model": "local-direct",
+        "reason": "OpenRouter API error 429"
+      },
+      "assessment": null
+    }
+  ]
+}

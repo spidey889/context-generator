@@ -1,0 +1,326 @@
+{
+  "version": 1,
+  "syntheticOnly": true,
+  "baselineRef": "a95254190755a55c09341c6626301012b1805726",
+  "candidateRef": "508eb73e3e847618e4a64b0c333d2e316045d539",
+  "candidatePromptSourceSha256": "e315d41ce79c56d116753a6f0ec69bed515512fc2727c498d84b23f7ffb6d4cd",
+  "fixtureSha256": "ae9f3e953eb8a541e6cad08148d9dc47a2b3011dd9ebf1f08365e99c1be35a16",
+  "model": "dots-studio/dots-3-note-preview:free",
+  "repeats": 1,
+  "selectedCases": [
+    "decision-with-stated-reason",
+    "failed-attempts-with-observed-results",
+    "artifact-and-separate-work-status",
+    "missing-reason-and-unverified-status"
+  ],
+  "longHistory": false,
+  "comparisonRunnerSha256": "96a89cd2d77d162f01de19be3e3276d236185594d2c0767cae3269d32b0a0cd1",
+  "reviewCriteria": [
+    "Does an accepted decision retain its explicitly stated reason without inventing one?",
+    "Are relevant failed attempts paired with their actual results rather than a guessed cause or fix?",
+    "Are implementation, testing and deployment states separate and no stronger than the source?",
+    "Can an assistant without file access continue using the preserved work product and useful pointers?",
+    "Are the latest request, exact constraints and unselected alternatives retained without extra analysis?"
+  ],
+  "limitations": "Lexical checks are diagnostics, not semantic grading. Review every full handoff; local fallback is not a successful model generation. Short fixtures force the same generated profile on both variants; production tiny chats still use exact local carry.",
+  "results": [
+    {
+      "caseId": "decision-with-stated-reason",
+      "repeat": 1,
+      "variant": "baseline",
+      "summary": "╔══════════════════════════════════════════╗\n║         CONTEXT CARRY — READY TO PASTE        ║\n╚══════════════════════════════════════════╝\n\n🧠 WHO I AM\nNone\n\n🎯 WHAT WE WERE DOING\nPreparing the Maple archive exporter. The system produces one CSV per customer account from the source file `jobs/archive-export.js`. The current task is to explain the tradeoff behind the user's final two-upload choice while preserving the exact boundary of not editing files or deploying.\n\n📍 WHERE WE LEFT OFF\nThe user has finalized the configuration to two uploads with 8 MB chunks. The mock run completed (12 files), but this was only a simulation. Actual provider testing has not started. The next step is to explain the tradeoff behind the two-upload choice.\n\n✅ DECISIONS MADE\n- Finalized upload count: two uploads (replacing the initial six).\n- Chunk size: 8 MB (retained from initial configuration).\n- Invoice-column order: must remain unchanged (retained throughout).\n- Rejected idea: raising the global timeout (explicitly rejected because it hides a stalled upload longer; do not restore this idea).\n\n⚠️ OPEN QUESTIONS\n- Retry delay: undecided between fixed 500 ms or jitter from 300 to 700 ms.\n\n📦 KEY CONTEXT\n- Source file: `jobs/archive-export.js`.\n- Branch: `export-review` (no production changes).\n- Constraint: \"do not edit files or deploy\" (exact boundary).\n- Reported fact: mock output showed \"mock upload complete, 12 files\"; this says nothing about provider behavior.\n- Reported fact: the user is not claiming that the provider rate-limits them or that the two-upload choice fixes the timeout.\n- Rejected idea: raising the global timeout (user rejected because it hides a stalled upload longer).\n- Undecided choice: retry delay (fixed 500 ms vs. jitter 300–700 ms).\n\n🔁 NEXT STEP\nReply only: \"Context loaded. Let's pick up right where you left off.\" Then wait for the user.",
+      "generated": true,
+      "model": "dots-studio/dots-3-note-preview:free",
+      "elapsedMs": 9711,
+      "inputChars": 1469,
+      "inputSha256": "f405682292b1e1fb0ac0e883d324e38d61bf379878e35ce7086e4ec5b753563e",
+      "systemPromptSha256": "ef4de72be8865c998d80c0e4600a8b863d999c4256798883fb361d82020f829d",
+      "profile": "small",
+      "forcedGeneratedProfile": false,
+      "maxTokens": 1000,
+      "usage": {
+        "promptTokens": 1783,
+        "completionTokens": 462,
+        "totalTokens": 2245,
+        "cachedTokens": 0
+      },
+      "qualityFlags": [],
+      "fallback": {
+        "attempted": false,
+        "used": false,
+        "servedBy": null,
+        "model": null,
+        "reason": null
+      },
+      "assessment": {
+        "missingFacts": [
+          "96 MB"
+        ],
+        "missingCriticalFacts": [
+          "keeping peak memory below the 96 MB worker limit"
+        ],
+        "incorrectFacts": []
+      }
+    },
+    {
+      "caseId": "decision-with-stated-reason",
+      "repeat": 1,
+      "variant": "candidate",
+      "summary": "╔══════════════════════════════════════════╗\n║         CONTEXT CARRY — READY TO PASTE        ║\n╚══════════════════════════════════════════╝\n\n🧠 WHO I AM\nNone\n\n🎯 WHAT WE WERE DOING\nPreparing the Maple archive exporter. It produces one CSV per customer account from the source file jobs/archive-export.js. The task is to explain the tradeoff behind the final two-upload choice, keeping the invoice-column order unchanged, without editing files or deploying.\n\n📍 WHERE WE LEFT OFF\nThe user has directed: pick up by explaining the tradeoff behind the final two-upload choice. Preserve the exact boundary: do not edit files or deploy. Actual provider testing has not started. The last stated configuration is two uploads with 8 MB chunks, keeping the invoice-column order, with retry delay still undecided between fixed 500 ms and jitter from 300 to 700 ms.\n\n✅ DECISIONS MADE\n- Final choice: two uploads (replacing the earlier six-upload proposal).\n- Stated reason: keeping peak memory below the 96 MB worker limit.\n- Explicitly not claimed: that the provider rate-limits us or that this fixes the timeout.\n- Rejected idea: raising the global timeout (rejected because it hides a stalled upload longer). Do not restore this idea.\n- Chunk size fixed at 8 MB.\n- Retry delay remains undecided: fixed 500 ms vs. jitter from 300 to 700 ms.\n\n⚠️ OPEN QUESTIONS\nNone explicitly asked. The retry delay choice (fixed 500 ms vs. jitter 300–700 ms) is undecided but not framed as an open question.\n\n📦 KEY CONTEXT\n- Source file: jobs/archive-export.js\n- Branch: export-review; no production changes.\n- Mock run output: \"mock upload complete, 12 files\" — simulation only, says nothing about provider behavior.\n- Constraint: do not edit files or deploy.\n- Constraint: invoice-column order must stay unchanged.\n- Constraint: peak memory must stay below the 96 MB worker limit.\n- Provider testing has not started; upload count has not been tested against provider limits.\n- A timeout is not evidence of the cause.\n\n🔁 NEXT STEP\nReply only: \"Context loaded. Let's pick up right where you left off.\" Then wait for the user.",
+      "generated": true,
+      "model": "dots-studio/dots-3-note-preview:free",
+      "elapsedMs": 11653,
+      "inputChars": 1469,
+      "inputSha256": "f405682292b1e1fb0ac0e883d324e38d61bf379878e35ce7086e4ec5b753563e",
+      "systemPromptSha256": "5eec383e357482db026b7bc14f1644cf1fa6d3a1f399aa150e44152aba7156a7",
+      "profile": "small",
+      "forcedGeneratedProfile": false,
+      "maxTokens": 1000,
+      "usage": {
+        "promptTokens": 1837,
+        "completionTokens": 518,
+        "totalTokens": 2355,
+        "cachedTokens": 0
+      },
+      "qualityFlags": [],
+      "fallback": {
+        "attempted": false,
+        "used": false,
+        "servedBy": null,
+        "model": null,
+        "reason": null
+      },
+      "assessment": {
+        "missingFacts": [],
+        "missingCriticalFacts": [],
+        "incorrectFacts": []
+      }
+    },
+    {
+      "caseId": "failed-attempts-with-observed-results",
+      "repeat": 1,
+      "variant": "candidate",
+      "summary": "╔══════════════════════════════════════════╗\n║         CONTEXT CARRY — READY TO PASTE        ║\n╚══════════════════════════════════════════╝\n\n🧠 WHO I AM\nNone\n\n🎯 WHAT WE WERE DOING\nInvestigating why the Finch importer drops the second row in a CSV containing a quoted multiline field. Affected file: lib/read-records.js. Expected output: two records; actual output: one record. No implementation or source changes were made.\n\n📍 WHERE WE LEFT OFF\nLatest user request: list the two attempted approaches and their actual outputs, then explain what evidence is still missing. Do not implement, add a new parser, or infer that quote-state handling is broken. Stopping state: investigation ongoing, no root cause established.\n\n✅ DECISIONS MADE\nNone\n\n⚠️ OPEN QUESTIONS\nNone\n\n📦 KEY CONTEXT\n- Reproduction command (must be preserved exactly): node tools/repro.js fixtures/multiline.csv\n- Fixture: fixtures/multiline.csv (local synthetic fixture; no customer file was read)\n- Expected output: two records; actual output: one record\n- Attempted approach 1: CRLF-to-LF conversion via tools/normalize-lines.js. Result: records=1 (no change). Status: abandoned because observed output did not change.\n- Attempted approach 2: Splitting input on every newline. Result: records=3 (over-split; quoted field became separate records). Status: reverted; not a working solution.\n- Reported constraint: do not change the source yet; do not implement, add a new parser, or infer that quote-state handling is broken.\n- Reported observation: neither experiment proved that the current quote parser is the root cause.\n- Stated status: quote-state handling has not been inspected; no patch has been produced.\n\n🔁 NEXT STEP\nReply only: \"Context loaded. Let's pick up right where you left off.\" Then wait for the user.",
+      "generated": true,
+      "model": "dots-studio/dots-3-note-preview:free",
+      "elapsedMs": 9451,
+      "inputChars": 1527,
+      "inputSha256": "641b92af4e24c5eb9a07524f4eefec6a20045baabcd0cef253cd165858ef4be7",
+      "systemPromptSha256": "5eec383e357482db026b7bc14f1644cf1fa6d3a1f399aa150e44152aba7156a7",
+      "profile": "small",
+      "forcedGeneratedProfile": false,
+      "maxTokens": 1000,
+      "usage": {
+        "promptTokens": 1830,
+        "completionTokens": 428,
+        "totalTokens": 2258,
+        "cachedTokens": 0
+      },
+      "qualityFlags": [],
+      "fallback": {
+        "attempted": false,
+        "used": false,
+        "servedBy": null,
+        "model": null,
+        "reason": null
+      },
+      "assessment": {
+        "missingFacts": [],
+        "missingCriticalFacts": [],
+        "incorrectFacts": []
+      }
+    },
+    {
+      "caseId": "failed-attempts-with-observed-results",
+      "repeat": 1,
+      "variant": "baseline",
+      "summary": "🧠 WHO I AM\nNone\n\n🎯 WHAT WE WERE DOING\nInvestigating why the Finch importer in lib/read-records.js drops the second row from a CSV containing a quoted multiline field. Expected output is two records; actual output is one record. No implementation or source changes were made.\n\n📍 WHERE WE LEFT OFF\nThe investigation is ongoing. Two experimental approaches were attempted and abandoned. The reproduction command is `node tools/repro.js fixtures/multiline.csv`, which currently prints `records=1`. The fixture is local and synthetic; no customer files were involved.\n\n✅ DECISIONS MADE\n- Do not change the source code in lib/read-records.js yet.\n- Use `node tools/repro.js fixtures/multiline.csv` as the exact reproduction command.\n- Treat the fixture and its expected count (2 records) as the primary evidence.\n\n⚠️ OPEN QUESTIONS\n- What is the root cause of the second row being dropped?\n- Is the quote-state handling in the parser the actual cause, or is it another component?\n- What additional evidence or diagnostics are needed to confirm the failure mode?\n\n📦 KEY CONTEXT\n- The Finch importer drops the second row in a CSV with a quoted multiline field.\n- File under investigation: `lib/read-records.js`.\n- Expected output: 2 records. Actual output: 1 record.\n- Attempt 1: Converted CRLF to LF using `tools/normalize-lines.js`. Result: `records=1` (no change). This attempt was abandoned.\n- Attempt 2: Split input on every newline. Result: `records=3` (over-split the quoted field). This attempt was reverted and is not a working solution.\n- Constraint: Do not present the newline-splitting approach as a solution.\n- Proposal (not tested): Inspect quote-state handling. Not yet implemented or confirmed as the root cause.\n- No patch has been produced. No new parser has been added.\n- The fixture `fixtures/multiline.csv` is local and synthetic.\n\n🔁 NEXT STEP\nReply only: \"Context loaded. Let's pick up right where you left off.\" Then wait for the user.",
+      "generated": true,
+      "model": "dots-studio/dots-3-note-preview:free",
+      "elapsedMs": 9863,
+      "inputChars": 1527,
+      "inputSha256": "641b92af4e24c5eb9a07524f4eefec6a20045baabcd0cef253cd165858ef4be7",
+      "systemPromptSha256": "ef4de72be8865c998d80c0e4600a8b863d999c4256798883fb361d82020f829d",
+      "profile": "small",
+      "forcedGeneratedProfile": false,
+      "maxTokens": 1000,
+      "usage": {
+        "promptTokens": 1776,
+        "completionTokens": 439,
+        "totalTokens": 2215,
+        "cachedTokens": 0
+      },
+      "qualityFlags": [
+        "bad_structure"
+      ],
+      "fallback": {
+        "attempted": false,
+        "used": false,
+        "servedBy": null,
+        "model": null,
+        "reason": null
+      },
+      "assessment": {
+        "missingFacts": [],
+        "missingCriticalFacts": [
+          "Do not change the source yet"
+        ],
+        "incorrectFacts": []
+      }
+    },
+    {
+      "caseId": "artifact-and-separate-work-status",
+      "repeat": 1,
+      "variant": "baseline",
+      "summary": "╔══════════════════════════════════════════╗\n║         CONTEXT CARRY — READY TO PASTE        ║\n╚══════════════════════════════════════════╝\n\n🧠 WHO I AM\nNone\n\n🎯 WHAT WE WERE DOING\nPreparing the Juniper museum welcome card by reviewing the clarity of an approved visitor-facing paragraph, with no modifications, publication, or accessibility review to be performed.\n\n📍 WHERE WE LEFT OFF\nThe approved paragraph is loaded in a local preview for rendering checks only. Live publication has not occurred, and the accessibility review has not started. The task is currently limited to reviewing the clarity of the existing text without altering it.\n\n✅ DECISIONS MADE\n- A plain paragraph format was chosen over a numbered checklist because visitors read the card while walking.\n- The shop link and the claim of a guided tour every hour were explicitly rejected and must not be added.\n- The approved text must be preserved exactly as provided.\n\n⚠️ OPEN QUESTIONS\nNone\n\n📦 KEY CONTEXT\n- Approved Paragraph (verbatim): \"Welcome to Juniper Museum. Take your time with the exhibits, and ask at the front desk if you need a quiet place to sit. The garden closes at 17:30. There is no ticket charge today.\"\n- Rejected Ideas: Shop link, hourly guided tour claim, numbered checklist format.\n- Constraint: The paragraph must remain unchanged during the clarity review.\n- Constraint: Do not publish the content or perform the pending accessibility review.\n- Reported Fact: The museum manager approved the wording, but this approval does not constitute accessibility clearance or publication authorization.\n- Reported Fact: The layout reference (https://example.invalid/juniper/card-v4) is a design pointer, not evidence of deployment.\n- Reported Fact: The approved draft is stored at drafts/welcome-card.md.\n\n🔁 NEXT STEP\nReply only: \"Context loaded. Let's pick up right where you left off.\" Then wait for the user.",
+      "generated": true,
+      "model": "dots-studio/dots-3-note-preview:free",
+      "elapsedMs": 11984,
+      "inputChars": 1645,
+      "inputSha256": "bbce06864e675b02c3f0dc1a2f75126f550351c65fdca2faf0f75a888c717932",
+      "systemPromptSha256": "ef4de72be8865c998d80c0e4600a8b863d999c4256798883fb361d82020f829d",
+      "profile": "small",
+      "forcedGeneratedProfile": false,
+      "maxTokens": 1000,
+      "usage": {
+        "promptTokens": 1793,
+        "completionTokens": 422,
+        "totalTokens": 2215,
+        "cachedTokens": 0
+      },
+      "qualityFlags": [],
+      "fallback": {
+        "attempted": false,
+        "used": false,
+        "servedBy": null,
+        "model": null,
+        "reason": null
+      },
+      "assessment": {
+        "missingFacts": [
+          "visitors read this while walking"
+        ],
+        "missingCriticalFacts": [
+          "nothing has been published OR not published OR unpublished",
+          "Keep the paragraph unchanged while reviewing",
+          "Do not publish it or perform the pending accessibility review"
+        ],
+        "incorrectFacts": []
+      }
+    },
+    {
+      "caseId": "artifact-and-separate-work-status",
+      "repeat": 1,
+      "variant": "candidate",
+      "summary": "╔══════════════════════════════════════════╗\n║         CONTEXT CARRY — READY TO PASTE        ║\n╚══════════════════════════════════════════╝\n\n🧠 WHO I AM\nNone\n\n🎯 WHAT WE WERE DOING\nPreparing the Juniper Museum welcome card. The task involves reviewing the approved visitor-facing paragraph for clarity, maintaining it as a plain paragraph (not a numbered checklist) due to the stated reason that visitors read it while walking. The paragraph must remain unchanged during review. No publication or accessibility review is authorized.\n\n📍 WHERE WE LEFT OFF\nThe user requested a review of the clarity of the current approved paragraph. The assistant has not yet performed this review. The paragraph is loaded in a local preview for rendering checks only. No publication, live deployment, or accessibility review has been performed or authorized.\n\n✅ DECISIONS MADE\n- The welcome card text is a plain paragraph, not a numbered checklist, because visitors read it while walking (user-stated reason).\n- The shop link and hourly guided tour claim from a previous draft were rejected and must not be added.\n- The approved paragraph text must be preserved exactly as supplied.\n\n⚠️ OPEN QUESTIONS\n- None explicitly stated. The pending task is to review the clarity of the current wording.\n\n📦 KEY CONTEXT\n- **Approved Paragraph (verbatim):** \"Welcome to Juniper Museum. Take your time with the exhibits, and ask at the front desk if you need a quiet place to sit. The garden closes at 17:30. There is no ticket charge today.\"\n- **Draft Location:** `drafts/welcome-card.md` (contains the visitor-facing paragraph, not the production site).\n- **Design Reference:** `https://example.invalid/juniper/card-v4` (shows approved layout; pointer only, not evidence of deployment).\n- **Explicit Constraints:**\n  - Do not add the shop link.\n  - Do not add the hourly tour claim.\n  - Do not add any other visitor service.\n  - Keep the paragraph unchanged while reviewing.\n  - Do not publish the paragraph.\n  - Do not perform the pending accessibility review.\n- **Rejections:** A previous draft adding a shop link and promising a guided tour every hour was rejected.\n- **Status:** Local preview only. Accessibility review has not started. Nothing has been published. Museum manager approval of wording does not imply accessibility passed or publication authorized.\n\n🔁 NEXT STEP\nReply only: \"Context loaded. Let's pick up right where you left off.\" Then wait for the user.",
+      "generated": true,
+      "model": "dots-studio/dots-3-note-preview:free",
+      "elapsedMs": 11341,
+      "inputChars": 1645,
+      "inputSha256": "bbce06864e675b02c3f0dc1a2f75126f550351c65fdca2faf0f75a888c717932",
+      "systemPromptSha256": "5eec383e357482db026b7bc14f1644cf1fa6d3a1f399aa150e44152aba7156a7",
+      "profile": "small",
+      "forcedGeneratedProfile": false,
+      "maxTokens": 1000,
+      "usage": {
+        "promptTokens": 1847,
+        "completionTokens": 542,
+        "totalTokens": 2389,
+        "cachedTokens": 0
+      },
+      "qualityFlags": [],
+      "fallback": {
+        "attempted": false,
+        "used": false,
+        "servedBy": null,
+        "model": null,
+        "reason": null
+      },
+      "assessment": {
+        "missingFacts": [
+          "visitors read this while walking"
+        ],
+        "missingCriticalFacts": [
+          "Do not publish it or perform the pending accessibility review"
+        ],
+        "incorrectFacts": [
+          "accessibility passed"
+        ]
+      }
+    },
+    {
+      "caseId": "missing-reason-and-unverified-status",
+      "repeat": 1,
+      "variant": "candidate",
+      "summary": "╔══════════════════════════════════════════╗\n║         CONTEXT CARRY — READY TO PASTE        ║\n╚══════════════════════════════════════════╝\n\n🧠 WHO I AM\nNone\n\n🎯 WHAT WE WERE DOING\nThe Birch notes project requires a plain-text export feature. The user has specified UTF-8 encoding and Markdown format as the export choices but has not provided reasons for these selections. The task is to implement an export mechanism that includes the title, creation date, and note body, preserves blank lines, and excludes archived notes. Two delivery methods remain undecided: an export button and a command-line script. A settings panel has been explicitly rejected.\n\n📍 WHERE WE LEFT OFF\nThe user instructed to restate the export requirements and the two undecided delivery options without selecting or implementing either. No files have been modified. No inspection, implementation, testing, or deployment has occurred. The current task outline is documented in notes/current-export.md, which contains no code or test results. The stopping point is the restatement of requirements and options as instructed.\n\n✅ DECISIONS MADE\n- UTF-8 encoding selected for export (no reason given)\n- Markdown format selected for export (no reason given)\n- Settings panel rejected explicitly\n- Export button and command-line script remain undecided\n\n⚠️ OPEN QUESTIONS\n- Which delivery method will be chosen: export button or command-line script?\n- Both options remain open with no decision made\n\n📦 KEY CONTEXT\n- Project: Birch notes\n- Export format: UTF-8, Markdown\n- Required fields: title, creation date, note body\n- Formatting rule: preserve blank lines\n- Exclusion rule: do not include archived notes\n- Rejected option: settings panel\n- Undecided options: export button, command-line script\n- Document reference: notes/current-export.md (contains task outline only, no code or test results)\n- Constraint: Do not invent reasons for UTF-8 or Markdown choices\n- Constraint: Do not import testing claims from Alder project\n- Constraint: No testing state has been reported for Birch\n- Quoted claim (Alder project, separate context): \"the export is fully tested\" — not applicable to Birch\n\n🔁 NEXT STEP\nReply only: \"Context loaded. Let's pick up right where you left off.\" Then wait for the user.",
+      "generated": true,
+      "model": "dots-studio/dots-3-note-preview:free",
+      "elapsedMs": 10341,
+      "inputChars": 1452,
+      "inputSha256": "927a1f03a4b84e56ee3cf60ec9eb1c1afb5327a819af422235f03bf3ac856da2",
+      "systemPromptSha256": "5eec383e357482db026b7bc14f1644cf1fa6d3a1f399aa150e44152aba7156a7",
+      "profile": "small",
+      "forcedGeneratedProfile": false,
+      "maxTokens": 1000,
+      "usage": {
+        "promptTokens": 1811,
+        "completionTokens": 504,
+        "totalTokens": 2315,
+        "cachedTokens": 0
+      },
+      "qualityFlags": [],
+      "fallback": {
+        "attempted": false,
+        "used": false,
+        "servedBy": null,
+        "model": null,
+        "reason": null
+      },
+      "assessment": {
+        "missingFacts": [],
+        "missingCriticalFacts": [
+          "Export title, creation date and note body. Preserve blank lines. Do not include archived notes.",
+          "Do not select one or implement it"
+        ],
+        "incorrectFacts": []
+      }
+    },
+    {
+      "caseId": "missing-reason-and-unverified-status",
+      "repeat": 1,
+      "variant": "baseline",
+      "summary": "╔══════════════════════════════════════════╗\n║         CONTEXT CARRY — READY TO PASTE        ║\n╚══════════════════════════════════════════╝\n\n🧠 WHO I AM\nNone\n\n🎯 WHAT WE WERE DOING\nThe Birch notes project requires a plain-text export feature. The user specified UTF-8 encoding and Markdown format but explicitly declined to provide any rationale (compatibility, security, portability, etc.). The task is to restate the export requirements and the two undecided delivery options without selecting or implementing either.\n\n📍 WHERE WE LEFT OFF\nNo implementation, inspection, testing, or deployment has occurred. The assistant previously proposed three options (export button, settings panel, command-line script), but the user rejected the settings panel. The export button and command-line script remain undecided. The document notes/current-export.md contains the current task outline but no code or test results. No testing state for Birch has been reported.\n\n✅ DECISIONS MADE\n- UTF-8 encoding selected for export\n- Markdown format selected for export\n- Settings panel rejected\n- No reason provided for encoding or format choices\n- Quoted claim about \"fully tested\" export belongs to Alder project, not Birch\n\n⚠️ OPEN QUESTIONS\n- Choose between export button and command-line script (both remain undecided)\n- No other explicit unresolved questions stated\n\n📦 KEY CONTEXT\n- Constraint: \"Do not invent a compatibility, security or portability explanation for my choice.\"\n- Constraint: \"No settings panel.\"\n- Constraint: \"Do not import its claim into Birch.\" (referring to Alder's \"fully tested\" claim)\n- Constraint: \"Do not turn the absent result into a new requirement or permission to act.\"\n- Constraint: \"Leave my unstated reasons unstated, and keep the quoted Alder claim separate from our current project.\"\n- Document reference: notes/current-export.md contains task outline only (no code, no test results)\n- Export requirements: Export title, creation date, and note body; preserve blank lines; do not include archived notes\n- Alder project claim: \"the export is fully tested\" — this is a quoted sample from another project and must not be applied to Birch\n\n🔁 NEXT STEP\nReply only: \"Context loaded. Let's pick up right where you left off.\" Then wait for the user.",
+      "generated": true,
+      "model": "dots-studio/dots-3-note-preview:free",
+      "elapsedMs": 9786,
+      "inputChars": 1452,
+      "inputSha256": "927a1f03a4b84e56ee3cf60ec9eb1c1afb5327a819af422235f03bf3ac856da2",
+      "systemPromptSha256": "ef4de72be8865c998d80c0e4600a8b863d999c4256798883fb361d82020f829d",
+      "profile": "small",
+      "forcedGeneratedProfile": false,
+      "maxTokens": 1000,
+      "usage": {
+        "promptTokens": 1757,
+        "completionTokens": 503,
+        "totalTokens": 2260,
+        "cachedTokens": 1024
+      },
+      "qualityFlags": [],
+      "fallback": {
+        "attempted": false,
+        "used": false,
+        "servedBy": null,
+        "model": null,
+        "reason": null
+      },
+      "assessment": {
+        "missingFacts": [],
+        "missingCriticalFacts": [
+          "Export title, creation date and note body. Preserve blank lines. Do not include archived notes.",
+          "Do not select one or implement it"
+        ],
+        "incorrectFacts": []
+      }
+    }
+  ]
+}

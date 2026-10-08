@@ -1,0 +1,321 @@
+{
+  "version": 1,
+  "syntheticOnly": true,
+  "baselineRef": "a95254190755a55c09341c6626301012b1805726",
+  "candidateRef": "e205e677ae5a51e428b9186c7a6a104c066abd61",
+  "candidatePromptSourceSha256": "2f1d3e6fbf4ff421293072f48aedd597d14e6696e1737f905aab43ed7075e70b",
+  "fixtureSha256": "a1c534cdf520172a80ff61965e3853a499bb80b9dededbf70f21d1c2266d753d",
+  "model": "dots-studio/dots-3-note-preview:free",
+  "repeats": 2,
+  "selectedCases": [
+    "corrected-export-design",
+    "continue-latest-draft"
+  ],
+  "longHistory": false,
+  "comparisonRunnerSha256": "7ae7a90df713a6df0b00ece70118438e0581c413dd4a832bc93846c886f1691a",
+  "reviewCriteria": [
+    "Can the next assistant continue the pending task?",
+    "Are essential facts, corrections and constraints faithful?",
+    "Is every claim supported by its source/status?",
+    "Does the delivered handoff retain the seven sections and trusted confirmation?"
+  ],
+  "limitations": "Lexical checks are diagnostics, not semantic grading. Review every full handoff; local fallback is not a successful model generation. Short fixtures force the same generated profile on both variants; production tiny chats still use exact local carry.",
+  "results": [
+    {
+      "caseId": "corrected-export-design",
+      "repeat": 1,
+      "variant": "baseline",
+      "summary": "╔══════════════════════════════════════════╗\n║         CONTEXT CARRY — READY TO PASTE        ║\n╚══════════════════════════════════════════╝\n\n🧠 WHO I AM\nNone (no explicit user identity, role, or preferences stated; Jules is the project owner, not the user)\n\n🎯 WHAT WE WERE DOING\nFixing Project Cedar's nightly export worker (production branch `release`, region `ap-south-1`) for files larger than 30 MB that time out. Database writes are healthy; no customer records were lost. Goal: patch `worker/export.mjs` to resolve upload stalls.\n\n📍 WHERE WE LEFT OFF\nImplementation, testing, and deployment have not started. The failure log is exactly: `upload idle timeout`. A patch proposal for the two-upload design is requested, preserving the no-deploy instruction and both retry policy options.\n\n✅ DECISIONS MADE\n- Rejected: Increasing the global timeout.\n- Accepted: 10 MB chunk size.\n- Accepted: Two simultaneous uploads (replacing the earlier six-upload choice).\n- Rejected: Rollback is not approved.\n- Required: Invoice-format fix must be kept.\n\n⚠️ OPEN QUESTIONS\nRetry policy is undecided between:\n- Fixed 400 ms pause\n- Jitter between 200–600 ms\n\n📦 KEY CONTEXT\n- **Project**: Project Cedar nightly export worker.\n- **Branch**: `release` (production).\n- **Region**: `ap-south-1`.\n- **Symptom**: Upload idle timeout for files > 30 MB.\n- **Constraint**: \"Do not deploy this change.\" (verbatim, unconditional)\n- **Fact**: Database writes are healthy; no customer records lost.\n- **Fact**: Owner is Jules; no owner identity linked to user's account.\n- **Fact**: Failure log is exactly: `upload idle timeout`.\n- **Rejected Idea**: Increasing global timeout.\n- **Rejected Idea**: Rollback (not approved).\n- **Required**: Invoice-format fix must be included.\n\n🔁 NEXT STEP\nReply only: \"Context loaded. Let's pick up right where you left off.\" Then wait for the user.",
+      "generated": true,
+      "model": "dots-studio/dots-3-note-preview:free",
+      "elapsedMs": 9001,
+      "inputChars": 1341,
+      "inputSha256": "ef8cc7f79b04ba31cf77b9ece7c0b065a01b6f4648f11fc66e4163d9fe576f66",
+      "systemPromptSha256": "ef4de72be8865c998d80c0e4600a8b863d999c4256798883fb361d82020f829d",
+      "profile": "small",
+      "forcedGeneratedProfile": false,
+      "maxTokens": 1000,
+      "usage": {
+        "promptTokens": 1776,
+        "completionTokens": 475,
+        "totalTokens": 2251,
+        "cachedTokens": 0
+      },
+      "qualityFlags": [],
+      "fallback": {
+        "attempted": false,
+        "used": false,
+        "servedBy": null,
+        "model": null,
+        "reason": null
+      },
+      "assessment": {
+        "missingFacts": [],
+        "missingCriticalFacts": [],
+        "incorrectFacts": []
+      }
+    },
+    {
+      "caseId": "corrected-export-design",
+      "repeat": 1,
+      "variant": "candidate",
+      "summary": "╔══════════════════════════════════════════╗\n║         CONTEXT CARRY — READY TO PASTE        ║\n╚══════════════════════════════════════════╝\n\n🧠 WHO I AM\nNone\n\n🎯 WHAT WE WERE DOING\nFixing Project Cedar's nightly export worker (owner: Jules; production branch: release; region: ap-south-1). The export times out only for files larger than 30 MB. Database writes are healthy and no customer records were lost. Goal: produce a patch proposal for worker/export.mjs using two simultaneous uploads and 10 MB chunks, while preserving the no-deploy instruction and both retry-policy options.\n\n📍 WHERE WE LEFT OFF\nLatest user request: \"Pick up with a patch proposal for the two-upload design; preserve my no-deploy instruction and both retry options.\" Stopping state: no implementation, testing, or deployment has started. Failure log for worker/export.mjs is exactly: \"upload idle timeout\". No owner identity has been linked to my account.\n\n✅ DECISIONS MADE\n- Rejected: increasing the global timeout (explicit user rejection).\n- Accepted: 10 MB chunk size.\n- Accepted: two simultaneous uploads (replacing the earlier six-upload choice).\n- Accepted: required invoice-format fix; rollback is not approved.\n- Constraint: do not deploy this change (verbatim, unconditional).\n\n⚠️ OPEN QUESTIONS\n- Retry policy is still undecided: fixed 400 ms pause OR jitter between 200–600 ms. Both options remain open; no selection made.\n\n📦 KEY CONTEXT\n- Project: Cedar nightly export worker.\n- Owner: Jules (not linked to my account).\n- Branch: release.\n- Region: ap-south-1.\n- Symptom: export times out only for files > 30 MB.\n- Failure log (verbatim): \"upload idle timeout\".\n- Database writes: healthy.\n- Customer records: none lost.\n- Chunk size: 10 MB (accepted).\n- Simultaneous uploads: 2 (accepted, replacing 6).\n- Invoice-format fix: required; rollback not approved.\n- Global timeout increase: rejected.\n- Deployment: prohibited (verbatim \"Do not deploy this change\").\n- Implementation/testing/deployment status: not started.\n\n🔁 NEXT STEP\nReply only: \"Context loaded. Let's pick up right where you left off.\" Then wait for the user.",
+      "generated": true,
+      "model": "dots-studio/dots-3-note-preview:free",
+      "elapsedMs": 10347,
+      "inputChars": 1341,
+      "inputSha256": "ef8cc7f79b04ba31cf77b9ece7c0b065a01b6f4648f11fc66e4163d9fe576f66",
+      "systemPromptSha256": "37dd8ab714112d13b1cadf1684b6996191f12f8579cfaad27df6a1694f14dbf8",
+      "profile": "small",
+      "forcedGeneratedProfile": false,
+      "maxTokens": 1000,
+      "usage": {
+        "promptTokens": 1881,
+        "completionTokens": 522,
+        "totalTokens": 2403,
+        "cachedTokens": 0
+      },
+      "qualityFlags": [],
+      "fallback": {
+        "attempted": false,
+        "used": false,
+        "servedBy": null,
+        "model": null,
+        "reason": null
+      },
+      "assessment": {
+        "missingFacts": [],
+        "missingCriticalFacts": [],
+        "incorrectFacts": []
+      }
+    },
+    {
+      "caseId": "continue-latest-draft",
+      "repeat": 1,
+      "variant": "candidate",
+      "summary": "╔══════════════════════════════════════════╗\n║         CONTEXT CARRY — READY TO PASTE        ║\n╚══════════════════════════════════════════╝\n\n🧠 WHO I AM\nNone stated.\n\n🎯 WHAT WE WERE DOING\nWriting the opening of a small community newsletter called The Lantern for neighbors. The tone must be friendly and plain. No invented attendance numbers or quotes are allowed.\n\n📍 WHERE WE LEFT OFF\nThe user provided a verified opening paragraph to keep exactly as written: \"A spare book, a familiar face, and a cup of tea: join us at the old library courtyard on Saturday 18 April, 16:00-18:00. Bring a mug and a children's book to exchange. Tea is free; books are for swapping, not selling.\" The user then requested a second paragraph in the same voice, without rewriting the opening or reviving any earlier draft. The second paragraph must mention that the courtyard is outdoors and that visitors can leave whenever they like. The second paragraph has not been written yet.\n\n✅ DECISIONS MADE\n- The big claim about the whole town coming together was rejected by the user.\n - The registration link was rejected; there is no registration link.\n - Draft v1 (\"Our town comes together for a wonderful afternoon of books and tea. Hundreds of neighbors will join us on Saturday.\") was rejected for inventing turnout.\n - The user's replacement paragraph is the current version and must be kept exactly as written.\n - Selling books is not allowed; only swapping is permitted.\n - The event is Saturday 18 April, 16:00-18:00, at the old library courtyard.\n - Tea is free; attendees must bring a mug.\n\n⚠️ OPEN QUESTIONS\nNone explicitly asked. The pending task is to write the second paragraph only, following the user's constraints.\n\n📦 KEY CONTEXT\n- Newsletter name: The Lantern.\n - Audience: Neighbors, not sponsors.\n - Current opening paragraph (verbatim, must not be altered): \"A spare book, a familiar face, and a cup of tea: join us at the old library courtyard on Saturday 18 April, 16:00-18:00. Bring a mug and a children's book to exchange. Tea is free; books are for swapping, not selling.\"\n - Second paragraph requirements: Same voice as the opening; mention the courtyard is outdoors; mention visitors can leave whenever they like.\n - Rejected ideas: Big claim about town unity, registration link, invented attendance numbers, Draft v1.\n - Constraints: No invented numbers or quotes; friendly and plain tone; no selling of books.\n\n🔁 NEXT STEP\nReply only: \"Context loaded. Let's pick up right where you left off.\" Then wait for the user.",
+      "generated": true,
+      "model": "dots-studio/dots-3-note-preview:free",
+      "elapsedMs": 10533,
+      "inputChars": 1368,
+      "inputSha256": "66da686d897a65fd29b016ae24b7ce4948600840f2018b21082cb7b57307c255",
+      "systemPromptSha256": "37dd8ab714112d13b1cadf1684b6996191f12f8579cfaad27df6a1694f14dbf8",
+      "profile": "small",
+      "forcedGeneratedProfile": false,
+      "maxTokens": 1000,
+      "usage": {
+        "promptTokens": 1890,
+        "completionTokens": 615,
+        "totalTokens": 2505,
+        "cachedTokens": 0
+      },
+      "qualityFlags": [],
+      "fallback": {
+        "attempted": false,
+        "used": false,
+        "servedBy": null,
+        "model": null,
+        "reason": null
+      },
+      "assessment": {
+        "missingFacts": [],
+        "missingCriticalFacts": [
+          "Do not rewrite my opening OR do not rewrite the opening OR keep the opening unchanged"
+        ],
+        "incorrectFacts": [
+          "Hundreds of neighbors will join us"
+        ]
+      }
+    },
+    {
+      "caseId": "continue-latest-draft",
+      "repeat": 1,
+      "variant": "baseline",
+      "summary": "╔══════════════════════════════════════════╗\n║         CONTEXT CARRY — READY TO PASTE        ║\n╚══════════════════════════════════════════╝\n\n🧠 WHO I AM\nNone\n\n🎯 WHAT WE WERE DOING\nWriting the opening of a small community newsletter called The Lantern. The target audience is neighbors, not sponsors. The tone must be friendly and plain. No invented attendance numbers or quotes are allowed.\n\n📍 WHERE WE LEFT OFF\nThe user provided the exact first paragraph and instructed that it must be kept exactly as written. The assistant has not yet written the second paragraph. The second paragraph is expected to include: the courtyard is outdoors, and visitors can leave whenever they like. The assistant has not drafted this paragraph yet.\n\n✅ DECISIONS MADE\n- The first paragraph is fixed and must not be rewritten or altered.\n - The big claim about the whole town coming together was rejected.\n - A registration link does not exist and must not be added.\n - The event is Saturday 18 April, 16:00-18:00, at the old library courtyard.\n - Attendees must bring a mug; tea is free.\n - Children's books can be exchanged, but selling books is not allowed.\n - The second paragraph must be written in the same voice as the first.\n\n⚠️ OPEN QUESTIONS\nNone\n\n📦 KEY CONTEXT\n- The newsletter is called The Lantern.\n - The audience is neighbors, not sponsors.\n - The tone must be friendly and plain.\n - No invented attendance numbers or quotes are permitted.\n - The first paragraph is fixed: \"A spare book, a familiar face, and a cup of tea: join us at the old library courtyard on Saturday 18 April, 16:00-18:00. Bring a mug and a children's book to exchange. Tea is free; books are for swapping, not selling.\"\n - The second paragraph must mention that the courtyard is outdoors and that visitors can leave whenever they like.\n - The second paragraph has not been written yet.\n\n🔁 NEXT STEP\nReply only: \"Context loaded. Let's pick up right where you left off.\" Then wait for the user.",
+      "generated": true,
+      "model": "dots-studio/dots-3-note-preview:free",
+      "elapsedMs": 8565,
+      "inputChars": 1368,
+      "inputSha256": "66da686d897a65fd29b016ae24b7ce4948600840f2018b21082cb7b57307c255",
+      "systemPromptSha256": "ef4de72be8865c998d80c0e4600a8b863d999c4256798883fb361d82020f829d",
+      "profile": "small",
+      "forcedGeneratedProfile": false,
+      "maxTokens": 1000,
+      "usage": {
+        "promptTokens": 1785,
+        "completionTokens": 488,
+        "totalTokens": 2273,
+        "cachedTokens": 0
+      },
+      "qualityFlags": [],
+      "fallback": {
+        "attempted": false,
+        "used": false,
+        "servedBy": null,
+        "model": null,
+        "reason": null
+      },
+      "assessment": {
+        "missingFacts": [],
+        "missingCriticalFacts": [
+          "only the second paragraph OR second paragraph only OR write the second paragraph",
+          "Do not rewrite my opening OR do not rewrite the opening OR keep the opening unchanged"
+        ],
+        "incorrectFacts": []
+      }
+    },
+    {
+      "caseId": "corrected-export-design",
+      "repeat": 2,
+      "variant": "candidate",
+      "summary": "╔══════════════════════════════════════════╗\n║         CONTEXT CARRY — READY TO PASTE        ║\n╚══════════════════════════════════════════╝\n\n🧠 WHO I AM\nNone\n\n🎯 WHAT WE WERE DOING\nFixing Project Cedar's nightly export worker. The goal is to resolve upload timeouts for files larger than 30 MB. The production branch is `release`, and the region is `ap-south-1`. Database writes are healthy and no customer records were lost. The failure log shows exactly: \"upload idle timeout\". The patch target is `worker/export.mjs`.\n\n📍 WHERE WE LEFT OFF\nThe latest user request is to produce a patch proposal for the two-upload design. Implementation, testing, and deployment have not started. The no-deploy instruction remains in effect. The retry policy is undecided between fixed 400 ms pause or jitter between 200–600 ms. The earlier six-upload choice was replaced with two simultaneous uploads. The 10 MB chunk size is retained. The required invoice-format fix must be kept; rollback is not approved.\n\n✅ DECISIONS MADE\n- Rejected: Increasing the global timeout.\n- Accepted: Use 10 MB chunks.\n- Accepted: Use two simultaneous uploads (replacing the earlier six-upload choice).\n- Accepted: Keep the required invoice-format fix.\n- Rejected: Rollback is not approved.\n- Constraint: Do not deploy this change.\n- Constraint: Do not infer that Jules is the user.\n\n⚠️ OPEN QUESTIONS\n- Retry policy: fixed 400 ms pause vs. jitter between 200–600 ms (undecided).\n\n📦 KEY CONTEXT\n- Project: Project Cedar\n- Owner: Jules (not linked to the user's account)\n- Branch: `release`\n- Region: `ap-south-1`\n- Failure log: \"upload idle timeout\"\n- Patch target: `worker/export.mjs`\n- Chunk size: 10 MB\n- Simultaneous uploads: 2\n- Invoice-format fix: required, must be kept\n- Rollback: not approved\n- Deployment: prohibited\n- Retry options: fixed 400 ms pause or jitter 200–600 ms (unselected)\n- Implementation status: not started\n- Testing status: not started\n- Deployment status: not started\n\n🔁 NEXT STEP\nReply only: \"Context loaded. Let's pick up right where you left off.\" Then wait for the user.",
+      "generated": true,
+      "model": "dots-studio/dots-3-note-preview:free",
+      "elapsedMs": 10424,
+      "inputChars": 1341,
+      "inputSha256": "ef8cc7f79b04ba31cf77b9ece7c0b065a01b6f4648f11fc66e4163d9fe576f66",
+      "systemPromptSha256": "37dd8ab714112d13b1cadf1684b6996191f12f8579cfaad27df6a1694f14dbf8",
+      "profile": "small",
+      "forcedGeneratedProfile": false,
+      "maxTokens": 1000,
+      "usage": {
+        "promptTokens": 1881,
+        "completionTokens": 547,
+        "totalTokens": 2428,
+        "cachedTokens": 0
+      },
+      "qualityFlags": [],
+      "fallback": {
+        "attempted": false,
+        "used": false,
+        "servedBy": null,
+        "model": null,
+        "reason": null
+      },
+      "assessment": {
+        "missingFacts": [],
+        "missingCriticalFacts": [],
+        "incorrectFacts": []
+      }
+    },
+    {
+      "caseId": "corrected-export-design",
+      "repeat": 2,
+      "variant": "baseline",
+      "summary": "════════════════════════════════════════════\n🧠 WHO I AM\nNone\n\n🎯 WHAT WE WERE DOING\nFixing Project Cedar's nightly export worker, which times out only for files larger than 30 MB. Database writes are healthy and no customer records were lost. The production branch is release, and the region is ap-south-1.\n\n📍 WHERE WE LEFT OFF\nImplementation, testing, and deployment have not started. The patch target is worker/export.mjs. The failure log is exactly: \"upload idle timeout\". No code changes have been made, and no checks have been run.\n\n✅ DECISIONS MADE\n- Use 10 MB chunk size for uploads.\n- Use two simultaneous uploads (replacing the earlier six-upload choice).\n- Reject increasing the global timeout.\n- Keep the required invoice-format fix.\n- Rollback is not approved.\n\n⚠️ OPEN QUESTIONS\nRetry policy is undecided between:\n- Fixed 400 ms pause\n- Jitter between 200–600 ms\n\n📦 KEY CONTEXT\n- Owner is Jules. No owner identity has been linked to the user's account.\n- Do not deploy this change.\n- The export times out only for files larger than 30 MB.\n- Database writes are healthy and no customer records were lost.\n- Production branch is release; region is ap-south-1.\n- Failure log: exactly \"upload idle timeout\".\n- The user explicitly instructed not to infer that Jules is them.\n\n🔁 NEXT STEP\nReply only: \"Context loaded. Let's pick up right where you left off.\" Then wait for the user.",
+      "generated": true,
+      "model": "dots-studio/dots-3-note-preview:free",
+      "elapsedMs": 8047,
+      "inputChars": 1341,
+      "inputSha256": "ef8cc7f79b04ba31cf77b9ece7c0b065a01b6f4648f11fc66e4163d9fe576f66",
+      "systemPromptSha256": "ef4de72be8865c998d80c0e4600a8b863d999c4256798883fb361d82020f829d",
+      "profile": "small",
+      "forcedGeneratedProfile": false,
+      "maxTokens": 1000,
+      "usage": {
+        "promptTokens": 1776,
+        "completionTokens": 347,
+        "totalTokens": 2123,
+        "cachedTokens": 0
+      },
+      "qualityFlags": [
+        "bad_structure"
+      ],
+      "fallback": {
+        "attempted": false,
+        "used": false,
+        "servedBy": null,
+        "model": null,
+        "reason": null
+      },
+      "assessment": {
+        "missingFacts": [],
+        "missingCriticalFacts": [
+          "patch proposal OR propose a patch OR propose the patch"
+        ],
+        "incorrectFacts": []
+      }
+    },
+    {
+      "caseId": "continue-latest-draft",
+      "repeat": 2,
+      "variant": "baseline",
+      "summary": "╔══════════════════════════════════════════╗\n║         CONTEXT CARRY — READY TO PASTE        ║\n╚══════════════════════════════════════════╝\n\n🧠 WHO I AM\nNone\n\n🎯 WHAT WE WERE DOING\nWriting the opening of a small community newsletter called The Lantern for neighbors. The goal is a friendly, plain tone with no invented attendance numbers or quotes.\n\n📍 WHERE WE LEFT OFF\nThe user provided the exact opening paragraph and instructed to keep it exactly as written. The next step is to write only the second paragraph in the same voice, mentioning that the courtyard is outdoors and visitors can leave whenever they like. The second paragraph has not yet been written.\n\n✅ DECISIONS MADE\n- Rejected the big claim about the whole town coming together.\n - Rejected the registration link.\n - Rejected the invented attendance numbers and quotes.\n - Accepted the user's replacement draft as the current opening paragraph.\n - Accepted the instruction to keep the opening paragraph exactly as written.\n - Accepted the instruction to write only the second paragraph in the same voice.\n - Accepted the instruction to mention that the courtyard is outdoors and visitors can leave whenever they like.\n\n⚠️ OPEN QUESTIONS\nNone\n\n📦 KEY CONTEXT\n- The newsletter is called The Lantern.\n - The audience is neighbors, not sponsors.\n - The tone must be friendly and plain.\n - The event is on Saturday 18 April at the old library courtyard, 16:00-18:00.\n - Attendees should bring a mug; tea is free.\n - Children's books can be exchanged, but selling books is not allowed.\n - The opening paragraph is fixed as: 'A spare book, a familiar face, and a cup of tea: join us at the old library courtyard on Saturday 18 April, 16:00-18:00. Bring a mug and a children's book to exchange. Tea is free; books are for swapping, not selling.'\n - The second paragraph must mention that the courtyard is outdoors and visitors can leave whenever they like.\n - The second paragraph must be written in the same voice as the opening.\n - The opening paragraph must not be rewritten or revived from v1.\n\n🔁 NEXT STEP\nReply only: \"Context loaded. Let's pick up right where you left off.\" Then wait for the user.",
+      "generated": true,
+      "model": "dots-studio/dots-3-note-preview:free",
+      "elapsedMs": 10179,
+      "inputChars": 1368,
+      "inputSha256": "66da686d897a65fd29b016ae24b7ce4948600840f2018b21082cb7b57307c255",
+      "systemPromptSha256": "ef4de72be8865c998d80c0e4600a8b863d999c4256798883fb361d82020f829d",
+      "profile": "small",
+      "forcedGeneratedProfile": false,
+      "maxTokens": 1000,
+      "usage": {
+        "promptTokens": 1785,
+        "completionTokens": 520,
+        "totalTokens": 2305,
+        "cachedTokens": 0
+      },
+      "qualityFlags": [],
+      "fallback": {
+        "attempted": false,
+        "used": false,
+        "servedBy": null,
+        "model": null,
+        "reason": null
+      },
+      "assessment": {
+        "missingFacts": [],
+        "missingCriticalFacts": [
+          "Do not rewrite my opening OR do not rewrite the opening OR keep the opening unchanged"
+        ],
+        "incorrectFacts": []
+      }
+    },
+    {
+      "caseId": "continue-latest-draft",
+      "repeat": 2,
+      "variant": "candidate",
+      "summary": "╔══════════════════════════════════════════╗\n║         CONTEXT CARRY — READY TO PASTE        ║\n╚══════════════════════════════════════════╝\n\n🧠 WHO I AM\nNone\n\n🎯 WHAT WE WERE DOING\nWriting the opening of a small community newsletter called The Lantern for neighbors. Tone: friendly and plain. No invented attendance numbers or quotes.\n\n📍 WHERE WE LEFT OFF\nUser provided the exact first paragraph and requested a second paragraph in the same voice. The second paragraph must mention that the courtyard is outdoors and that visitors can leave whenever they like. The first paragraph must not be rewritten. Draft v1 (with invented turnout) was rejected and must not be revived.\n\n✅ DECISIONS MADE\n- Rejected the big claim about the whole town coming together.\n- Rejected the registration link; there is none.\n- Rejected Draft v1 for inventing turnout (\"Hundreds of neighbors will join us\").\n- Accepted user's replacement draft as the current version of the opening paragraph:\n  \"A spare book, a familiar face, and a cup of tea: join us at the old library courtyard on Saturday 18 April, 16:00-18:00. Bring a mug and a children's book to exchange. Tea is free; books are for swapping, not selling.\"\n- Accepted constraint: Keep that paragraph exactly as written for now.\n- Accepted constraint: Do not rewrite the opening or revive v1.\n- Accepted constraint: Second paragraph must mention the courtyard is outdoors and that visitors can leave whenever they like.\n\n⚠️ OPEN QUESTIONS\nNone\n\n📦 KEY CONTEXT\n- Newsletter name: The Lantern\n- Audience: Neighbors, not sponsors\n- Event: Saturday 18 April, 16:00-18:00, old library courtyard\n- Bring: A mug and a children's book to exchange\n- Tea: Free\n- Books: For swapping only; selling is not allowed\n- Courtyard: Outdoors\n- Visitors: Can leave whenever they like\n- Rejected idea: Big claim about the whole town coming together\n- Rejected idea: Registration link (does not exist)\n- Rejected draft: Draft v1 (\"Our town comes together for a wonderful afternoon of books and tea. Hundreds of neighbors will join us on Saturday.\")\n- Current opening paragraph (verbatim, must not be changed):\n  \"A spare book, a familiar face, and a cup of tea: join us at the old library courtyard on Saturday 18 April, 16:00-18:00. Bring a mug and a children's book to exchange. Tea is free; books are for swapping, not selling.\"\n- Second paragraph: Not yet written. Must be in the same voice. Must mention outdoors courtyard and flexible departure.\n\n🔁 NEXT STEP\nReply only: \"Context loaded. Let's pick up right where you left off.\" Then wait for the user.",
+      "generated": true,
+      "model": "dots-studio/dots-3-note-preview:free",
+      "elapsedMs": 10825,
+      "inputChars": 1368,
+      "inputSha256": "66da686d897a65fd29b016ae24b7ce4948600840f2018b21082cb7b57307c255",
+      "systemPromptSha256": "37dd8ab714112d13b1cadf1684b6996191f12f8579cfaad27df6a1694f14dbf8",
+      "profile": "small",
+      "forcedGeneratedProfile": false,
+      "maxTokens": 1000,
+      "usage": {
+        "promptTokens": 1890,
+        "completionTokens": 632,
+        "totalTokens": 2522,
+        "cachedTokens": 0
+      },
+      "qualityFlags": [],
+      "fallback": {
+        "attempted": false,
+        "used": false,
+        "servedBy": null,
+        "model": null,
+        "reason": null
+      },
+      "assessment": {
+        "missingFacts": [],
+        "missingCriticalFacts": [
+          "only the second paragraph OR second paragraph only OR write the second paragraph"
+        ],
+        "incorrectFacts": [
+          "Hundreds of neighbors will join us"
+        ]
+      }
+    }
+  ],
+  "testRequestBudget": {
+    "slot": "test-b",
+    "used": 9,
+    "limit": 50,
+    "windowHours": 24,
+    "blockedLocally": false
+  }
+}

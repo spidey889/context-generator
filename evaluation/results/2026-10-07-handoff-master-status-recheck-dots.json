@@ -1,0 +1,55 @@
+{
+  "version": 1,
+  "syntheticOnly": true,
+  "baselineRef": "a95254190755a55c09341c6626301012b1805726",
+  "candidateRef": "1391ace931d238710650f9d3f5c2dc52651b448e",
+  "candidatePromptSourceSha256": "2f1d3e6fbf4ff421293072f48aedd597d14e6696e1737f905aab43ed7075e70b",
+  "fixtureSha256": "ae9f3e953eb8a541e6cad08148d9dc47a2b3011dd9ebf1f08365e99c1be35a16",
+  "model": "dots-studio/dots-3-note-preview:free",
+  "repeats": 1,
+  "selectedCases": [
+    "missing-reason-and-unverified-status"
+  ],
+  "longHistory": false,
+  "comparisonRunnerSha256": "96a89cd2d77d162f01de19be3e3276d236185594d2c0767cae3269d32b0a0cd1",
+  "reviewCriteria": [
+    "Does an accepted decision retain its explicitly stated reason without inventing one?",
+    "Are relevant failed attempts paired with their actual results rather than a guessed cause or fix?",
+    "Are implementation, testing and deployment states separate and no stronger than the source?",
+    "Can an assistant without file access continue using the preserved work product and useful pointers?",
+    "Are the latest request, exact constraints and unselected alternatives retained without extra analysis?"
+  ],
+  "limitations": "Lexical checks are diagnostics, not semantic grading. Review every full handoff; local fallback is not a successful model generation. Short fixtures force the same generated profile on both variants; production tiny chats still use exact local carry.",
+  "results": [
+    {
+      "caseId": "missing-reason-and-unverified-status",
+      "repeat": 1,
+      "variant": "baseline",
+      "summary": null,
+      "generated": false,
+      "model": "local-direct",
+      "elapsedMs": 816,
+      "inputChars": 1452,
+      "inputSha256": "927a1f03a4b84e56ee3cf60ec9eb1c1afb5327a819af422235f03bf3ac856da2",
+      "systemPromptSha256": "ef4de72be8865c998d80c0e4600a8b863d999c4256798883fb361d82020f829d",
+      "profile": "small",
+      "forcedGeneratedProfile": false,
+      "maxTokens": 1000,
+      "usage": {
+        "promptTokens": 0,
+        "completionTokens": 0,
+        "totalTokens": 0,
+        "cachedTokens": 0
+      },
+      "qualityFlags": [],
+      "fallback": {
+        "attempted": true,
+        "used": true,
+        "servedBy": "local-direct",
+        "model": "local-direct",
+        "reason": "OpenRouter API error 429"
+      },
+      "assessment": null
+    }
+  ]
+}
