@@ -62,6 +62,7 @@ const TELEMETRY_FAILURE_REASONS = new Set([
 ]);
 const summaryCache = new Map();
 const summaryInflight = new Map();
+const transferOperations = new Map();
 const activeTransferTelemetry = new Map();
 const activeTransferSourceTabs = new Map();
 const summaryProofs = new Map();
@@ -119,8 +120,85 @@ chrome.runtime.onInstalled.addListener(initializeBackground);
 chrome.runtime.onStartup.addListener(initializeBackground);
 
 chrome.tabs.onRemoved?.addListener((tabId) => {
-  return recordUserCancelledTransfersForTab(tabId).catch(() => {});
+  // Revoke delivery synchronously; optional telemetry/storage must not delay it.
+  const cancelledIds = [];
+  for (const operation of transferOperations.values()) {
+    if (!operation.tabIds.has(tabId)) continue;
+    cancelTransferOperation(operation);
+    cancelledIds.push(operation.transferId);
+  }
+  return recordUserCancelledTransfersForTab(tabId, cancelledIds).catch(() => {});
 });
+
+function createTransferCancelledError() {
+  const error = new Error("Transfer cancelled because a transfer tab was closed.");
+  error.code = "user_cancelled";
+  return error;
+}
+
+function getTransferOperation(transferId, sourceTab, deadlineAt) {
+  // Legacy/internal calls without an owner retain their existing behavior.
+  if (!transferId || !Number.isInteger(sourceTab?.id)) return null;
+  for (const [id, operation] of transferOperations) {
+    if (operation.expiresAt <= Date.now()) transferOperations.delete(id);
+  }
+  let operation = transferOperations.get(transferId);
+  if (!operation) {
+    operation = { transferId, sourceTabId: sourceTab.id, tabIds: new Set([sourceTab.id]),
+      controller: new AbortController(), deadlineAt, expiresAt: deadlineAt || Date.now() + 360000 };
+    transferOperations.set(transferId, operation);
+  }
+  if (operation.sourceTabId !== sourceTab.id) throw createTransferCancelledError();
+  checkTransferOperation(operation);
+  return operation;
+}
+
+function checkTransferOperation(operation) {
+  operation?.controller.signal.throwIfAborted();
+  checkTransferDeadline(operation?.deadlineAt);
+}
+
+function cancelTransferOperation(operation) {
+  if (operation.controller.signal.aborted) return;
+  operation.controller.abort(createTransferCancelledError());
+  for (const tabId of operation.tabIds) {
+    chrome.tabs.sendMessage(tabId, { type: "CANCEL_TRANSFER", transferId: operation.transferId }).catch(() => {});
+  }
+}
+
+async function checkTransferSource(operation) {
+  checkTransferOperation(operation);
+  if (!operation) return;
+  try { await chrome.tabs.get(operation.sourceTabId); }
+  catch { cancelTransferOperation(operation); }
+  checkTransferOperation(operation);
+}
+
+async function waitForTransferWork(work, operation) {
+  if (!operation) return work;
+  const signal = operation.controller.signal;
+  let onAbort;
+  try {
+    return await Promise.race([work, new Promise((_, reject) => {
+      onAbort = () => reject(signal.reason);
+      signal.addEventListener("abort", onAbort, { once: true });
+      if (signal.aborted) onAbort();
+    })]);
+  } finally { signal.removeEventListener("abort", onAbort); }
+}
+
+async function checkDestinationTransfer(transferId, sourceTabId) {
+  const operation = transferOperations.get(transferId);
+  checkTransferOperation(operation);
+  // Destination work can survive a worker restart. Recheck the source rather
+  // than treating a lost in-memory cancellation token as permission to paste.
+  if (!Number.isInteger(sourceTabId) || (operation && operation.sourceTabId !== sourceTabId)) {
+    throw createTransferCancelledError();
+  }
+  try { await chrome.tabs.get(sourceTabId); }
+  catch { throw createTransferCancelledError(); }
+  checkTransferOperation(operation);
+}
 
 chrome.storage.onChanged.addListener((changes, areaName) => {
   if (areaName !== "local" || !changes[LAST_TRANSFER_STATS_STORAGE_KEY]) return;
@@ -363,11 +441,11 @@ async function persistActiveTransferTelemetry(attemptId) {
   await activeStorage.set({ [TELEMETRY_ACTIVE_STORAGE_KEY]: entries });
 }
 
-async function recordUserCancelledTransfersForTab(tabId) {
+async function recordUserCancelledTransfersForTab(tabId, cancelledIds = []) {
   await enqueueTelemetryWork(() => restoreActiveTransferTelemetry());
   const work = [];
   for (const [attemptId, sourceTabId] of activeTransferSourceTabs.entries()) {
-    if (sourceTabId !== tabId) continue;
+    if (sourceTabId !== tabId && !cancelledIds.includes(attemptId)) continue;
     const active = activeTransferTelemetry.get(attemptId);
     if (!active || active.status !== "started") continue;
 
@@ -759,6 +837,12 @@ chrome.action.onClicked.addListener(async (tab) => {
 });
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  if (message?.type === "CHECK_TRANSFER_ACTIVE") {
+    checkDestinationTransfer(message.transferId, message.sourceTabId)
+      .then(() => sendResponse({ ok: true }))
+      .catch(error => sendResponse({ ok: false, error: error.message, code: "user_cancelled" }));
+    return true;
+  }
   if (message?.type === "ENSURE_NETWORK_JSON_HOOK") {
     if (!sender?.tab?.id || !["gemini", "grok", "deepseek"].includes(getPlatformFromUrl(sender.tab.url)) || sender.frameId !== 0) {
       sendResponse({ ok: false }); return false;
@@ -791,11 +875,13 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
 
   if (message?.type === "SUMMARIZE_WITH_BACKEND") {
-    summarizeWithBackend(message.conversation, message.transferId, message.deadlineAt)
+    summarizeWithBackend(message.conversation, message.transferId, message.deadlineAt, sender?.tab)
       .then((result) => sendResponse({ ok: true, summary: result.summary, timing: result.timing }))
       .catch((error) => {
-        console.error("[Context Generator Relay]", error);
-        setBadge("ERR", "#b42318", 5000);
+        if (error.code !== "user_cancelled") {
+          console.error("[Context Generator Relay]", error);
+          setBadge("ERR", "#b42318", 5000);
+        }
         sendResponse({
           ok: false,
           error: error.message,
@@ -819,8 +905,10 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     )
       .then((result) => sendResponse({ ok: true, timing: result?.timing || null, marks: result?.marks || [] }))
       .catch((error) => {
-        console.error("[Context Generator Relay]", error);
-        setBadge("ERR", "#b42318", 5000);
+        if (error.code !== "user_cancelled") {
+          console.error("[Context Generator Relay]", error);
+          setBadge("ERR", "#b42318", 5000);
+        }
         sendResponse({ ok: false, error: error.message, code: error.code || "paste_failed" });
       });
 
@@ -828,14 +916,14 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
 
   if (message?.type === "ACTIVATE_DESTINATION_TAB") {
-    activateVerifiedDestinationTab(message.tabId, message.destination, message.deadlineAt)
+    activateVerifiedDestinationTab(message.tabId, message.destination, message.deadlineAt, message.transferId, sender?.tab)
       .then(() => sendResponse({ ok: true }))
       .catch((error) => sendResponse({ ok: false, error: error.message, code: error.code || "destination_open_failed" }));
     return true;
   }
 
   if (message?.type === "PREPARE_DESTINATION") {
-    prepareDestination(message.destination, message.deadlineAt, sender?.tab)
+    prepareDestination(message.destination, message.deadlineAt, sender?.tab, message.transferId)
       .then((result) => sendResponse({ ok: true, tabId: result.tabId, timing: result.timing }))
       .catch((error) => {
         console.error("[Context Generator Relay]", error);
@@ -853,8 +941,10 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   return false;
 });
 
-async function summarizeWithBackend(conversation, transferId = null, deadlineAt = null) {
+async function summarizeWithBackend(conversation, transferId = null, deadlineAt = null, sourceTab = null) {
+  const operation = getTransferOperation(transferId, sourceTab, deadlineAt);
   checkTransferDeadline(deadlineAt);
+  await checkTransferSource(operation);
   const conversationText = conversation?.trim();
   if (!conversationText) {
     throw new Error("AI conversation text could not be captured.");
@@ -870,46 +960,55 @@ async function summarizeWithBackend(conversation, transferId = null, deadlineAt 
     summaryCache.delete(conversationText);
   }
 
-  const inFlightSummary = summaryInflight.get(conversationText);
-  if (inFlightSummary) {
-    let timeout;
-    try {
-      // A joiner's time limit does not own the shared fetch. Expiring here
-      // must neither abort it nor evict it while other transfers still wait.
-      const result = deadlineAt ? await Promise.race([
-        inFlightSummary,
-        new Promise((_, reject) => {
-          timeout = setTimeout(() => reject(createTransferTimeoutError()), Math.max(0, deadlineAt - Date.now()));
-        })
-      ]) : await inFlightSummary;
-      checkTransferDeadline(deadlineAt);
-      recordKnownTransferTelemetryStage(transferId, "summary_response_started");
-      return result;
-    } catch (error) {
-      checkTransferDeadline(deadlineAt);
-      throw error;
-    } finally {
-      clearTimeout(timeout);
+  let entry = summaryInflight.get(conversationText);
+  if (!entry) {
+    entry = { controller: new AbortController(), waiters: 0, settled: false };
+    const ownedEntry = entry;
+    entry.promise = fetchSummaryFromBackend(conversationText, transferId, deadlineAt, entry.controller.signal)
+      .then(result => {
+        ownedEntry.controller.signal.throwIfAborted();
+        cacheSummaryResult(conversationText, result);
+        return result;
+      }).finally(() => {
+        ownedEntry.settled = true;
+        if (summaryInflight.get(conversationText) === ownedEntry) summaryInflight.delete(conversationText);
+      });
+    summaryInflight.set(conversationText, entry);
+  }
+  entry.waiters += 1;
+  let timeout;
+  try {
+    // A closed/expired waiter leaves independently; shared work stops only
+    // when nobody still needs it. Preserve the first request's own deadline.
+    const work = deadlineAt ? Promise.race([entry.promise, new Promise((_, reject) => {
+      timeout = setTimeout(() => reject(createTransferTimeoutError()), Math.max(0, deadlineAt - Date.now()));
+    })]) : entry.promise;
+    const result = await waitForTransferWork(work, operation);
+    checkTransferDeadline(deadlineAt);
+    await checkTransferSource(operation);
+    recordKnownTransferTelemetryStage(transferId, "summary_response_started");
+    return result;
+  } catch (error) {
+    checkTransferOperation(operation);
+    checkTransferDeadline(deadlineAt);
+    throw error;
+  } finally {
+    clearTimeout(timeout);
+    entry.waiters -= 1;
+    if (!entry.waiters && !entry.settled) {
+      entry.controller.abort(createTransferCancelledError());
+      if (summaryInflight.get(conversationText) === entry) summaryInflight.delete(conversationText);
     }
   }
-
-  const summaryPromise = fetchSummaryFromBackend(conversationText, transferId, deadlineAt)
-    .then((result) => {
-      cacheSummaryResult(conversationText, result);
-      return result;
-    })
-    .finally(() => {
-      summaryInflight.delete(conversationText);
-    });
-
-  summaryInflight.set(conversationText, summaryPromise);
-  return summaryPromise;
 }
 
-async function fetchSummaryFromBackend(conversationText, transferId = null, deadlineAt = null) {
+async function fetchSummaryFromBackend(conversationText, transferId = null, deadlineAt = null, requestSignal = null) {
   checkTransferDeadline(deadlineAt);
   const summaryStartedAt = nowMs();
   const controller = new AbortController();
+  const onCancel = () => controller.abort(requestSignal.reason);
+  requestSignal?.addEventListener("abort", onCancel, { once: true });
+  if (requestSignal?.aborted) onCancel();
   const requestDeadlineAt = Math.min(Date.now() + SUMMARY_BACKEND_TIMEOUT_MS, deadlineAt || Infinity);
   const timeout = setTimeout(() => controller.abort(), Math.max(0, requestDeadlineAt - Date.now()));
   const stopServiceWorkerKeepAlive = startSummaryServiceWorkerKeepAlive();
@@ -945,6 +1044,7 @@ async function fetchSummaryFromBackend(conversationText, transferId = null, dead
       body: JSON.stringify({ conversation: conversationText, ...(telemetry ? { telemetry } : {}) }),
       signal: controller.signal
     });
+    checkSummaryDeadline();
     recordKnownTransferTelemetryStage(transferId, "summary_response_started");
     const fetchMs = Math.round(nowMs() - fetchStartedAt);
 
@@ -965,8 +1065,8 @@ async function fetchSummaryFromBackend(conversationText, transferId = null, dead
       ...(data.summaryProofV3 ? { model: data.summaryModel } : {})
     });
     if (telemetry && confirmation) {
-      // A summary may finish after its source tab closes. Its receipt confirms
-      // generation, never a paste. Give persistence a bounded head start;
+      // Already received receipts confirm generation, never a paste. Give
+      // persistence a bounded head start;
       // keep the serialized write queued if storage stalls or the wait expires.
       await waitForSummaryTelemetry(enqueueTelemetryWork(async () => {
         const active = activeTransferTelemetry.get(transferId);
@@ -1002,6 +1102,7 @@ async function fetchSummaryFromBackend(conversationText, transferId = null, dead
     throw error;
   } finally {
     clearTimeout(timeout);
+    requestSignal?.removeEventListener("abort", onCancel);
     stopServiceWorkerKeepAlive();
   }
 }
@@ -1150,6 +1251,7 @@ async function transferToDestination(
   deadlineAt = null,
   sourceTab = null
 ) {
+  const operation = getTransferOperation(transferId, sourceTab, deadlineAt);
   if (!text?.trim()) {
     const error = new Error("Context summary text was not available.");
     error.code = "paste_failed";
@@ -1157,8 +1259,10 @@ async function transferToDestination(
   }
 
   checkTransferDeadline(deadlineAt);
+  await checkTransferSource(operation);
   const trace = createBackgroundTrace();
   trace.deadlineAt = deadlineAt;
+  trace.operation = operation;
   const destination = DESTINATIONS[destinationId];
   if (!destination) {
     const error = new Error("Unknown AI destination.");
@@ -1171,7 +1275,9 @@ async function transferToDestination(
   let destinationTabId = null;
   let preparedAttempted = false;
 
-  if (preparedTabId && await isPreparedDestinationTabUsable(preparedTabId, destinationId)) {
+  if (preparedTabId) operation?.tabIds.add(preparedTabId);
+  if (preparedTabId && await isPreparedDestinationTabUsable(preparedTabId, destinationId, operation)) {
+    await checkTransferSource(operation);
     checkTransferDeadline(deadlineAt);
     preparedAttempted = true;
     destinationTabId = preparedTabId;
@@ -1186,6 +1292,8 @@ async function transferToDestination(
         trace
       );
     } catch (error) {
+      checkTransferOperation(operation);
+      if (["user_cancelled", "paste_unconfirmed"].includes(error?.code)) throw error;
       pasteResult = { ok: false, error: error?.message || "Prepared destination paste failed." };
     }
   } else if (preparedTabId) {
@@ -1197,6 +1305,8 @@ async function transferToDestination(
   }
 
   if (!pasteResult?.ok) {
+    if (pasteResult?.code === "user_cancelled") throw createTransferCancelledError();
+    await checkTransferSource(operation);
     checkTransferDeadline(deadlineAt);
     const recoveringPreparedTab = Boolean(preparedTabId);
     if (preparedAttempted) {
@@ -1217,7 +1327,8 @@ async function transferToDestination(
     destinationTabId = await createDestinationTab(destination, {
       active: activateFreshTab,
       sourceTab,
-      deadlineAt
+      deadlineAt,
+      operation
     });
     markBackgroundTrace(trace, `${openLabel} open done`, { tabId: destinationTabId });
     pasteResult = await pasteIntoDestinationWithActivation(
@@ -1231,14 +1342,16 @@ async function transferToDestination(
   }
 
   if (!pasteResult?.ok) {
+    if (pasteResult?.code === "user_cancelled") throw createTransferCancelledError();
     const error = new Error(pasteResult?.error || `Could not paste into ${destination.name}.`);
     error.code = "paste_failed";
     throw error;
   }
 
+  await checkTransferSource(operation);
   if (!deferFinalActivation && !destination.focusBeforePaste) {
     markBackgroundTrace(trace, "final tab activate start", { tabId: destinationTabId });
-    await activateDestinationTab(destinationTabId, deadlineAt);
+    await activateDestinationTab(destinationTabId, deadlineAt, operation);
     markBackgroundTrace(trace, "final tab activate done", { tabId: destinationTabId });
   } else if (deferFinalActivation) {
     markBackgroundTrace(trace, "final tab activation deferred", { tabId: destinationTabId });
@@ -1247,6 +1360,7 @@ async function transferToDestination(
     // wastes an API round-trip and yanks the user back if they switched away.
     markBackgroundTrace(trace, "destination already revealed", { tabId: destinationTabId });
   }
+  checkTransferOperation(operation);
   await setBadge("OK", "#1f8f4d", 2500);
   return {
     timing: {
@@ -1258,13 +1372,18 @@ async function transferToDestination(
   };
 }
 
-async function isPreparedDestinationTabUsable(tabId, destinationId) {
+async function isPreparedDestinationTabUsable(tabId, destinationId, operation = null) {
   try {
     const tab = await chrome.tabs.get(tabId);
     const currentOrPendingUrl = tab?.pendingUrl || tab?.url || "";
     return getPlatformFromUrl(currentOrPendingUrl) === destinationId &&
       DESTINATION_LANDING_PATHS[destinationId]?.includes(new URL(currentOrPendingUrl).pathname.replace(/\/+$/, "") || "/");
   } catch {
+    // A closed transfer tab is cancellation, not a reason to recreate it.
+    if (operation) {
+      cancelTransferOperation(operation);
+      checkTransferOperation(operation);
+    }
     return false;
   }
 }
@@ -1277,12 +1396,13 @@ async function pasteIntoDestinationWithActivation(
   transferId,
   trace
 ) {
+  await checkTransferSource(trace?.operation);
   checkTransferDeadline(trace?.deadlineAt);
   // Focus is a paste prerequisite on these destinations, independent of whether
   // final activation is deferred. Callers sequence the source completion cue first.
   if (destination.focusBeforePaste) {
     markBackgroundTrace(trace, "tab activate before paste start", { tabId });
-    await activateDestinationTab(tabId, trace?.deadlineAt);
+    await activateDestinationTab(tabId, trace?.deadlineAt, trace?.operation);
     markBackgroundTrace(trace, "tab activate before paste done", { tabId });
     if (destination.activationSettleMs) {
       markBackgroundTrace(trace, "tab activation settle start", { tabId, settleMs: destination.activationSettleMs });
@@ -1291,6 +1411,7 @@ async function pasteIntoDestinationWithActivation(
     }
   }
 
+  await checkTransferSource(trace?.operation);
   checkTransferDeadline(trace?.deadlineAt);
   markBackgroundTrace(trace, "paste message start", { tabId, destination: destinationId });
   const pasteResult = await pasteIntoDestinationTab(
@@ -1305,17 +1426,19 @@ async function pasteIntoDestinationWithActivation(
   return pasteResult;
 }
 
-async function prepareDestination(destinationId, deadlineAt = null, sourceTab = null) {
+async function prepareDestination(destinationId, deadlineAt = null, sourceTab = null, transferId = null) {
+  const operation = getTransferOperation(transferId, sourceTab, deadlineAt);
   checkTransferDeadline(deadlineAt);
+  await checkTransferSource(operation);
   const startedAt = nowMs();
   const destination = DESTINATIONS[destinationId];
   if (!destination) {
     throw new Error("Unknown AI destination.");
   }
 
-  const destinationTabId = await createDestinationTab(destination, { active: false, sourceTab, deadlineAt });
+  const destinationTabId = await createDestinationTab(destination, { active: false, sourceTab, deadlineAt, operation });
   const openMs = Math.round(nowMs() - startedAt);
-  warmDestinationTab(destinationTabId, destination);
+  warmDestinationTab(destinationTabId, destination, operation);
   return {
     tabId: destinationTabId,
     timing: { openMs, tabId: destinationTabId }
@@ -1324,6 +1447,7 @@ async function prepareDestination(destinationId, deadlineAt = null, sourceTab = 
 
 async function createDestinationTab(destination, options = {}) {
   try {
+    await checkTransferSource(options.operation);
     let placement = {};
     if (Number.isInteger(options.sourceTab?.id)) {
       // The user can focus a different window while capture runs. Resolve the
@@ -1331,12 +1455,20 @@ async function createDestinationTab(destination, options = {}) {
       const source = await chrome.tabs.get(options.sourceTab.id);
       placement = { windowId: source.windowId, index: source.index + 1, openerTabId: source.id };
     }
+    checkTransferOperation(options.operation);
     checkTransferDeadline(options.deadlineAt);
     const destinationTab = await chrome.tabs.create({
       url: destination.url,
       active: options.active !== false,
       ...placement
     });
+    options.operation?.tabIds.add(destinationTab.id);
+    if (options.operation?.controller.signal.aborted) {
+      // Creation was already submitted when the source closed. Remove only
+      // this newly created tab; never erase an existing draft or pasted carry.
+      await chrome.tabs.remove(destinationTab.id).catch(() => {});
+      checkTransferOperation(options.operation);
+    }
     return destinationTab.id;
   } catch (error) {
     error.code = error.code || "destination_open_failed";
@@ -1344,16 +1476,20 @@ async function createDestinationTab(destination, options = {}) {
   }
 }
 
-async function activateDestinationTab(tabId, deadlineAt = null) {
+async function activateDestinationTab(tabId, deadlineAt = null, operation = null) {
+  await checkTransferSource(operation);
   checkTransferDeadline(deadlineAt);
   try {
     const tab = await chrome.tabs.update(tabId, { active: true });
+    await checkTransferSource(operation);
     checkTransferDeadline(deadlineAt);
     if (tab?.windowId) {
       await chrome.windows.update(tab.windowId, { focused: true });
     }
+    checkTransferOperation(operation);
   } catch (error) {
-    if (error?.code === "transfer_timeout") throw error;
+    checkTransferOperation(operation);
+    if (["transfer_timeout", "user_cancelled"].includes(error?.code)) throw error;
     // Focus is required for several composers to restore their native drafts.
     // Never report a successful switch or paste into a hidden tab after failure.
     const activationError = new Error("Could not switch to the destination tab. Return to your original tab and try again.");
@@ -1362,15 +1498,18 @@ async function activateDestinationTab(tabId, deadlineAt = null) {
   }
 }
 
-async function activateVerifiedDestinationTab(tabId, destinationId, deadlineAt = null) {
+async function activateVerifiedDestinationTab(tabId, destinationId, deadlineAt = null, transferId = null, sourceTab = null) {
+  const operation = getTransferOperation(transferId, sourceTab, deadlineAt);
+  await checkTransferSource(operation);
+  if (Number.isInteger(tabId)) operation?.tabIds.add(tabId);
   checkTransferDeadline(deadlineAt);
   if (!Number.isInteger(tabId) || !DESTINATIONS[destinationId]) {
     throw new Error("Destination tab was not available.");
   }
-  if (!await isPreparedDestinationTabUsable(tabId, destinationId)) {
+  if (!await isPreparedDestinationTabUsable(tabId, destinationId, operation)) {
     throw new Error("Destination tab changed before activation.");
   }
-  await activateDestinationTab(tabId, deadlineAt);
+  await activateDestinationTab(tabId, deadlineAt, operation);
 }
 
 async function pasteIntoDestinationTab(
@@ -1389,6 +1528,7 @@ async function pasteIntoDestinationTab(
         destination: destinationId,
         text,
         transferId,
+        sourceTabId: trace?.operation?.sourceTabId ?? null,
         deadlineAt: trace?.deadlineAt
       },
       destination.messageTimeoutMs || DESTINATION_MESSAGE_TIMEOUT_MS,
@@ -1401,17 +1541,20 @@ async function pasteIntoDestinationTab(
   }
 }
 
-async function warmDestinationTab(tabId, destination) {
+async function warmDestinationTab(tabId, destination, operation = null) {
   try {
     const startedAt = Date.now();
     const timeoutMs = destination.warmupTimeoutMs || DESTINATION_WARMUP_TIMEOUT_MS;
     let injected = false;
     while (Date.now() - startedAt <= timeoutMs) {
+      await checkTransferSource(operation);
       if (await pingTab(tabId)) {
         return;
       }
       if (!injected) {
+        checkTransferOperation(operation);
         injected = await ensureContentScript(tabId);
+        checkTransferOperation(operation);
         if (injected && await pingTab(tabId)) return;
       }
       await delay(MESSAGE_RETRY_INTERVAL_MS);
@@ -1503,7 +1646,10 @@ async function sendMessageWhenReady(tabId, message, timeoutMs, name, trace = nul
   // Both attempts use the same deadline and error policy; injection stays between them.
   async function tryMessage(label) {
     try {
-      const response = await sendMessageBeforeDeadline(tabId, message, deadline, name);
+      await checkTransferSource(trace?.operation);
+      const response = await sendMessageBeforeDeadline(tabId, message, deadline, name, trace?.operation);
+      checkTransferOperation(trace?.operation);
+      if (message.type === "PASTE_CONTEXT" && typeof response?.ok !== "boolean") throw createUnconfirmedPasteError();
       if (response !== undefined) {
         const readyMs = Date.now() - startedAt;
         markBackgroundTrace(trace, label, { tabId, readyMs, attempts });
@@ -1512,7 +1658,14 @@ async function sendMessageWhenReady(tabId, message, timeoutMs, name, trace = nul
       lastError = new Error(`No response from ${name}.`);
     } catch (error) {
       lastError = error;
+      checkTransferOperation(trace?.operation);
       checkTransferDeadline(message.deadlineAt);
+      // Only a missing receiver proves the paste never started. A lost reply
+      // or timeout may follow insertion, so neither re-send nor open a fresh tab.
+      if (message.type === "PASTE_CONTEXT" &&
+          !/Receiving end does not exist|Could not establish connection/.test(String(error?.message || ""))) {
+        throw createUnconfirmedPasteError();
+      }
       if (!isRetryableMessageError(error)) {
         throw error;
       }
@@ -1529,6 +1682,7 @@ async function sendMessageWhenReady(tabId, message, timeoutMs, name, trace = nul
     // A successful injection need not be repeated every 120 ms while the page
     // hydrates. Native navigation installs the manifest script in its new document.
     if (!injected) {
+      checkTransferOperation(trace?.operation);
       markBackgroundTrace(trace, "content script inject attempt", { tabId, attempts });
       injected = await ensureContentScript(tabId);
       response = await tryMessage("tab ready/message response after inject");
@@ -1542,18 +1696,19 @@ async function sendMessageWhenReady(tabId, message, timeoutMs, name, trace = nul
   throw new Error(`Timed out connecting to ${name}.${detail}`);
 }
 
-async function sendMessageBeforeDeadline(tabId, message, deadline, name) {
+async function sendMessageBeforeDeadline(tabId, message, deadline, name, operation = null) {
+  checkTransferOperation(operation);
   const remainingMs = deadline - Date.now();
   if (remainingMs <= 0) throw createMessageTimeoutError(name);
 
   let timeout = null;
   try {
-    return await Promise.race([
+    return await waitForTransferWork(Promise.race([
       sendMessage(tabId, message),
       new Promise((_, reject) => {
         timeout = setTimeout(() => reject(createMessageTimeoutError(name)), remainingMs);
       })
-    ]);
+    ]), operation);
   } finally {
     if (timeout) clearTimeout(timeout);
   }
@@ -1562,6 +1717,12 @@ async function sendMessageBeforeDeadline(tabId, message, deadline, name) {
 function createMessageTimeoutError(name) {
   const error = new Error(`Timed out connecting to ${name}.`);
   error.code = "message_timeout";
+  return error;
+}
+
+function createUnconfirmedPasteError() {
+  const error = new Error("The paste was not confirmed. Check the destination tab before copying your context.");
+  error.code = "paste_unconfirmed";
   return error;
 }
 

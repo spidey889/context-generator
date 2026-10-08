@@ -63,6 +63,7 @@ function loadTelemetryBackground(fetchImpl, initialStorage = {}, manifestVersion
         onChanged: createEvent("storageChanged")
       },
       tabs: {
+        get: async id => ({ id }),
         create: async () => ({}),
         onRemoved: createEvent("tabRemoved"),
         query: async () => [],
@@ -432,19 +433,19 @@ test("background persists server confirmation and never rebinds cached proof to 
     .every(request => request.summary_proof === undefined && request.summary_confirmed_at === undefined));
 });
 
-test("completed server summary retains confirmation after source-tab cancellation", async () => {
-  const { createSummaryProof, verifySummaryProof } = await import("../supabase/functions/_shared/summary-proof.mjs");
-  const key = "test-only-signing-key-0123456789abcdef";
+test("source-tab cancellation stops summary consumption and retains its failure report", async () => {
   const requests = [];
   let releaseSummary;
   let requestStarted;
+  let requestSignal, bodyReads = 0;
   const started = new Promise(resolve => { requestStarted = resolve; });
   const background = loadTelemetryBackground(async (url, options) => {
     const body = JSON.parse(options.body);
     if (url.endsWith("/api/summarize")) {
+      requestSignal = options.signal;
       requestStarted();
       await new Promise(resolve => { releaseSummary = resolve; });
-      return { ok: true, json: async () => ({ summary: "Build passed.", summaryProof: await createSummaryProof(body.telemetry, key) }) };
+      return { ok: true, json: async () => { bodyReads++; return { summary: "Build passed." }; } };
     }
     requests.push(body);
     return { ok: true };
@@ -458,12 +459,11 @@ test("completed server summary retains confirmation after source-tab cancellatio
   await background.listeners.tabRemoved(42);
   await background.drain();
   assert.equal(requests.at(-1).failure_reason, "user_cancelled");
+  assert.equal((await pending).code, "user_cancelled");
+  assert.equal(requestSignal.aborted, true);
   releaseSummary();
-  assert.equal((await pending).ok, true);
+  await new Promise(setImmediate);
   await background.drain();
-  const confirmation = requests.find(request => request.summary_proof);
-  assert.ok(confirmation);
-  assert.equal(confirmation.status, "started");
-  assert.equal(confirmation.last_stage, "summary_completed");
-  assert.equal(await verifySummaryProof(confirmation, key), true);
+  assert.equal(bodyReads, 0, "late headers cannot restart a cancelled request");
+  assert.ok(requests.every(request => request.status !== "succeeded" && !request.summary_proof));
 });

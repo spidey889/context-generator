@@ -14,6 +14,8 @@ const compiledTransferBackground = new vm.Script(`${source}\n;globalThis.__backg
 
 function loadBackgroundForSummaryTest(fetchImpl, { tabs = [], injections = [], injectionError = false, onMessage = () => {}, clock = Date } = {}) {
   let messageListener = null;
+  let tabRemovedListener;
+  const closedTabs = new Set();
   const event = { addListener: () => {} };
   const sandbox = {
     AbortController,
@@ -54,6 +56,12 @@ function loadBackgroundForSummaryTest(fetchImpl, { tabs = [], injections = [], i
         onChanged: event
       },
       tabs: {
+        get: async id => {
+          const tab = tabs.find(tab => tab.id === id);
+          if (!tab || closedTabs.has(id)) throw new Error(`No tab with id: ${id}`);
+          return tab;
+        },
+        onRemoved: { addListener: listener => { tabRemovedListener = listener; } },
         create: async () => ({}),
         query: async () => tabs,
         sendMessage: async () => ({}),
@@ -67,16 +75,18 @@ function loadBackgroundForSummaryTest(fetchImpl, { tabs = [], injections = [], i
   compiledBackground.runInContext(sandbox);
   assert.ok(messageListener, "background summary listener was registered");
 
-  return async function sendSummary(conversation, deadlineAt = null) {
+  const sendSummary = async function (conversation, deadlineAt = null, sourceTabId = null) {
     return new Promise((resolve, reject) => {
       const keepsChannelOpen = messageListener(
-        { type: "SUMMARIZE_WITH_BACKEND", conversation, transferId: "cache-test", deadlineAt },
-        {},
+        { type: "SUMMARIZE_WITH_BACKEND", conversation, transferId: sourceTabId === null ? "cache-test" : `summary-${sourceTabId}`, deadlineAt },
+        { tab: sourceTabId === null ? null : { id: sourceTabId } },
         resolve
       );
       if (keepsChannelOpen !== true) reject(new Error("summary listener did not keep the response channel open"));
     });
   };
+  sendSummary.closeTab = id => { closedTabs.add(id); return tabRemovedListener(id); };
+  return sendSummary;
 }
 
 function loadBackgroundForTransferTest({
@@ -84,10 +94,13 @@ function loadBackgroundForTransferTest({
   sourceTab,
   updateError = false,
   sendMessageImpl,
+  createTabImpl,
   firstCreatedTabId = 100,
   useRealTimers = false
 } = {}) {
   let messageListener = null;
+  let tabRemovedListener;
+  const closedTabs = new Set();
   let nextCreatedTabId = firstCreatedTabId;
   const operations = {
     created: [],
@@ -95,7 +108,8 @@ function loadBackgroundForTransferTest({
     sent: [],
     updated: [],
     injected: [],
-    fetched: []
+    fetched: [],
+    removed: []
   };
   const event = { addListener: () => {} };
   const fastSetTimeout = (callback, _delay, ...args) => setTimeout(callback, 0, ...args);
@@ -137,16 +151,21 @@ function loadBackgroundForTransferTest({
         onChanged: event
       },
       tabs: {
+        onRemoved: { addListener: listener => { tabRemovedListener = listener; } },
         create: async (options) => {
           const tab = { id: nextCreatedTabId++, url: options.url, windowId: options.windowId ?? 1 };
           operations.created.push({ options, tab });
-          return tab;
+          return createTabImpl ? createTabImpl(tab) : tab;
         },
+        remove: async tabId => { operations.removed.push(tabId); closedTabs.add(tabId); },
         get: async (tabId) => {
           operations.gotten.push(tabId);
+          if (closedTabs.has(tabId)) throw new Error(`No tab with id: ${tabId}`);
           if (sourceTab?.id === tabId) return sourceTab;
-          if (!preparedTab) throw new Error(`No tab with id: ${tabId}`);
-          return preparedTab;
+          if (preparedTab?.id === tabId) return preparedTab;
+          const created = operations.created.find(entry => entry.tab.id === tabId);
+          if (created) return created.tab;
+          throw new Error(`No tab with id: ${tabId}`);
         },
         query: async () => [],
         sendMessage: async (tabId, message) => {
@@ -171,9 +190,10 @@ function loadBackgroundForTransferTest({
     operations,
     getPlatformFromUrl: sandbox.__backgroundTestHooks.getPlatformFromUrl,
     sendMessageWhenReady: sandbox.__backgroundTestHooks.sendMessageWhenReady,
+    closeTab(tabId) { closedTabs.add(tabId); return tabRemovedListener(tabId); },
     prepare(destination, senderTab = null, deadlineAt = null) {
       return new Promise(resolve => messageListener(
-        { type: "PREPARE_DESTINATION", destination, deadlineAt },
+        { type: "PREPARE_DESTINATION", destination, deadlineAt, transferId: "transfer-test" },
         { tab: senderTab }, resolve
       ));
     },
@@ -211,7 +231,8 @@ function loadBackgroundForTransferTest({
 test("preparation and fresh recovery open beside the source in its current window", async () => {
   const currentSource = { id: 9, windowId: 7, index: 3 };
   const senderSnapshot = { id: 9, windowId: 1, index: 0 };
-  const harness = loadBackgroundForTransferTest({ sourceTab: currentSource });
+  const harness = loadBackgroundForTransferTest({ sourceTab: currentSource,
+    preparedTab: { id: 41, url: "https://chatgpt.com/c/occupied" } });
   const prepared = await harness.prepare("claude", senderSnapshot);
   assert.equal(prepared.ok, true);
   // Warmup may send only a readiness ping and must make no fetch request.
@@ -237,6 +258,92 @@ clockTest("a closed source cannot open a destination in an unrelated current win
   assert.equal(harness.operations.created.length, 0);
 });
 
+test("closing the source revokes an outstanding paste without recovery or activation", async () => {
+  let acknowledge, pasteStarted;
+  const started = new Promise(resolve => { pasteStarted = resolve; });
+  const sourceTab = { id: 9, windowId: 1, index: 0 };
+  const harness = loadBackgroundForTransferTest({ sourceTab, useRealTimers: true,
+    preparedTab: { id: 41, url: "https://gemini.google.com/app" },
+    sendMessageImpl: (_tabId, message) => {
+      if (message.type !== "PASTE_CONTEXT") return { ok: true };
+      pasteStarted();
+      return new Promise(resolve => { acknowledge = resolve; });
+    }
+  });
+  const pending = harness.sendTransfer("gemini", 41, false, null, sourceTab);
+  await started;
+  await harness.closeTab(9);
+  const response = await pending;
+  assert.equal(response.code, "user_cancelled");
+  acknowledge({ ok: true });
+  await new Promise(setImmediate);
+  assert.equal(harness.operations.created.length, 0);
+  assert.equal(harness.operations.updated.length, 0);
+  assert.ok(harness.operations.sent.some(({ tabId, message }) => tabId === 41 && message.type === "CANCEL_TRANSFER"));
+  assert.equal(harness.operations.sent.filter(({ message }) => message.type === "PASTE_CONTEXT").length, 1);
+});
+
+test("closing the prepared destination cancels the attempt instead of opening a fresh tab", async () => {
+  const sourceTab = { id: 9, windowId: 1, index: 0 };
+  const harness = loadBackgroundForTransferTest({ sourceTab });
+  const prepared = await harness.prepare("gemini", sourceTab);
+  await harness.closeTab(prepared.tabId);
+  const response = await harness.sendTransfer("gemini", prepared.tabId, false, null, sourceTab);
+  assert.equal(response.code, "user_cancelled");
+  assert.equal(harness.operations.created.length, 1);
+  assert.equal(harness.operations.updated.length, 0);
+  assert.ok(harness.operations.sent.every(({ message }) => message.type !== "PASTE_CONTEXT"));
+});
+
+test("a tab creation already submitted before cancellation is cleaned up without delivery", async () => {
+  let finishCreation, creationStarted;
+  const started = new Promise(resolve => { creationStarted = resolve; });
+  const sourceTab = { id: 9, windowId: 1, index: 0 };
+  const harness = loadBackgroundForTransferTest({ sourceTab,
+    createTabImpl: tab => { creationStarted(); return new Promise(resolve => { finishCreation = () => resolve(tab); }); }
+  });
+  const pending = harness.prepare("gemini", sourceTab);
+  await started;
+  await harness.closeTab(9);
+  finishCreation();
+  assert.equal((await pending).code, "user_cancelled");
+  assert.deepEqual(harness.operations.removed, [100]);
+  assert.ok(harness.operations.sent.every(({ message }) => message.type !== "PASTE_CONTEXT" && message.type !== "CONTEXT_GENERATOR_PING"));
+});
+
+test("closing the last source aborts its outstanding backend request", async () => {
+  let requestStarted, signal;
+  const started = new Promise(resolve => { requestStarted = resolve; });
+  const sendSummary = loadBackgroundForSummaryTest(async (_url, options) => {
+    signal = options.signal;
+    requestStarted();
+    return new Promise((_, reject) => signal.addEventListener("abort", () => reject(signal.reason), { once: true }));
+  }, { tabs: [{ id: 9 }] });
+  const pending = sendSummary("Stop this summary when I close its source.", null, 9);
+  await started;
+  await sendSummary.closeTab(9);
+  assert.equal((await pending).code, "user_cancelled");
+  assert.equal(signal.aborted, true);
+});
+
+test("closing one source does not cancel a shared summary needed by another source", async () => {
+  let finish, fetches = 0, signal;
+  const sendSummary = loadBackgroundForSummaryTest(async (_url, options) => {
+    fetches++; signal = options.signal;
+    return new Promise(resolve => { finish = () => resolve({ ok: true, status: 200, json: async () => ({ summary: "Shared context" }) }); });
+  }, { tabs: [{ id: 9 }, { id: 10 }] });
+  const owner = sendSummary("same conversation", null, 9);
+  await new Promise(setImmediate);
+  const waiter = sendSummary("same conversation", null, 10);
+  await new Promise(setImmediate);
+  await sendSummary.closeTab(9);
+  assert.equal((await owner).code, "user_cancelled");
+  assert.equal(signal.aborted, false);
+  finish();
+  assert.equal((await waiter).summary, "Shared context");
+  assert.equal(fetches, 1);
+});
+
 test("focused delivery switches once and never reactivates after verification", async () => {
   for (const [destination, url] of [["claude", "https://claude.ai/new"], ["chatgpt", "https://chatgpt.com/"], ["grok", "https://grok.com/"]]) {
     const harness = loadBackgroundForTransferTest({ preparedTab: { id: 41, url, windowId: 1 } });
@@ -258,24 +365,43 @@ clockTest("activation failure is reported and focused delivery never pastes hidd
   assert.equal(activation.code, "destination_open_failed");
 });
 
-test("destination messaging enforces its deadline while a response is still pending", async () => {
+clockTest("a timed-out paste and its late acknowledgement cannot create a duplicate destination", async (t) => {
+  let acknowledge, pasteStarted;
+  const started = new Promise(resolve => { pasteStarted = resolve; });
   const harness = loadBackgroundForTransferTest({
-    sendMessageImpl: () => new Promise(() => {}),
+    preparedTab: { id: 41, url: "https://chat.deepseek.com/" },
+    sendMessageImpl: (_tabId, message) => {
+      if (message.type !== "PASTE_CONTEXT") return { ok: true };
+      pasteStarted();
+      return new Promise(resolve => { acknowledge = resolve; });
+    },
     useRealTimers: true
   });
-  const startedAt = Date.now();
+  const pending = harness.sendTransfer("deepseek", 41, true);
+  await started;
+  t.mock.timers.tick(30001);
+  assert.equal((await pending).code, "paste_unconfirmed");
+  acknowledge({ ok: true });
+  await new Promise(setImmediate);
+  assert.equal(harness.operations.created.length, 0);
+  assert.equal(harness.operations.updated.length, 0);
+  assert.equal(harness.operations.sent.length, 1, "a late success cannot trigger another paste");
+});
 
-  await assert.rejects(
-    harness.sendMessageWhenReady(
-      41,
-      { type: "PASTE_CONTEXT", destination: "claude", text: "context" },
-      40,
-      "Claude"
-    ),
-    (error) => error?.code === "message_timeout" && error.message === "Timed out connecting to Claude."
-  );
-
-  assert.ok(Date.now() - startedAt < 500, "The in-flight destination response must not outlive its deadline.");
+clockTest("unconfirmed paste replies never re-send or fall back to another tab", async () => {
+  for (const reply of [undefined, null, {}, new Error("The message port closed before a response was received"),
+    new Error("A listener indicated an asynchronous response by returning true, but the message channel closed before a response was received"),
+    new Error("Extension context invalidated")]) {
+    const harness = loadBackgroundForTransferTest({
+      preparedTab: { id: 41, url: "https://chat.deepseek.com/" },
+      sendMessageImpl: () => { if (reply instanceof Error) throw reply; return reply; }
+    });
+    const response = await harness.sendTransfer("deepseek", 41, true);
+    assert.equal(response.code, "paste_unconfirmed");
+    assert.equal(harness.operations.created.length, 0);
+    assert.equal(harness.operations.injected.length, 0);
+    assert.equal(harness.operations.sent.length, 1);
+  }
 });
 
 // Error paths leave a five-second badge timer; scoped clocks also clean it up after these cases.
@@ -295,7 +421,7 @@ clockTest("expired transfer messages cannot fetch summaries, open tabs, paste or
     assert.equal(response.ok, false);
     assert.equal(response.code, "transfer_timeout");
   }
-  assert.deepEqual(harness.operations, { created: [], gotten: [], sent: [], updated: [], injected: [], fetched: [] });
+  assert.deepEqual(harness.operations, { created: [], gotten: [], sent: [], updated: [], injected: [], fetched: [], removed: [] });
 });
 
 clockTest("a transfer deadline aborts an outstanding summary request", { timeout: 2000 }, async () => {
@@ -427,7 +553,7 @@ test("prepared-tab recovery opens at most one fresh destination", async () => {
   const harness = loadBackgroundForTransferTest({
     preparedTab: { id: 41, url: "https://chatgpt.com/", windowId: 1 },
     sendMessageImpl: async (tabId) => {
-      if (tabId === 41) throw new Error("Prepared tab message failed");
+      if (tabId === 41) return { ok: false, error: "Prepared editor unavailable" };
       return { ok: false, error: "Fresh editor unavailable" };
     }
   });
@@ -585,7 +711,7 @@ for (const firstReply of ["missing receiver", "no response"]) {
       return { ok: true };
     } });
     const trace = { startedAt: Date.now(), lastAt: null, marks: [] };
-    const result = await harness.sendMessageWhenReady(41, { type: "PASTE_CONTEXT" }, 1000, "Claude", trace);
+    const result = await harness.sendMessageWhenReady(41, { type: firstReply === "no response" ? "CONTEXT_GENERATOR_PING" : "PASTE_CONTEXT" }, 1000, "Claude", trace);
     assert.equal(result.ok, true);
     assert.equal(calls, 2);
     assert.deepEqual(JSON.parse(JSON.stringify(harness.operations.injected)), [{ target: { tabId: 41 }, files: ["platform-content.js"] }]);
@@ -607,7 +733,7 @@ test("a receiver still mounting after successful injection does not repeatedly r
 
 test("destination messaging stops immediately on a non-retryable failure", async () => {
   const harness = loadBackgroundForTransferTest({ sendMessageImpl: async () => { throw new Error("Tab access denied"); } });
-  await assert.rejects(harness.sendMessageWhenReady(41, { type: "PASTE_CONTEXT" }, 1000, "Claude"), /Tab access denied/);
+  await assert.rejects(harness.sendMessageWhenReady(41, { type: "PASTE_CONTEXT" }, 1000, "Claude"), error => error.code === "paste_unconfirmed");
   assert.equal(harness.operations.sent.length, 1);
   assert.equal(harness.operations.injected.length, 0);
 });

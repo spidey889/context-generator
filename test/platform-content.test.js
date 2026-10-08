@@ -2244,6 +2244,25 @@ test("local summary recovery retains the capture size boundary before contacting
   assert.equal(requests, 0);
 });
 
+clockTest("unconfirmed paste recovery asks to check the destination and retains the full carry", () => {
+  const hooks = loadPlatformContent([], "claude.ai");
+  const modal = new FakeElement();
+  const title = new FakeElement();
+  const desc = new FakeElement();
+  const text = new FakeElement({ tag: "textarea" });
+  for (const [id, element] of [["modal", modal], ["title", title], ["desc", desc], ["text", text]]) {
+    hooks.registerElementId(`context-generator-fallback-${id}`, element);
+  }
+  const summary = "CONTEXT CARRY — READY TO PASTE\nFull private context";
+  hooks.showContextTransferFailure({ code: "paste_unconfirmed" }, { stage: "paste", destinationId: "deepseek", summary });
+  assert.equal(modal.style.display, "flex");
+  assert.equal(title.textContent, "Check your destination tab");
+  assert.match(desc.textContent, /Check that tab first/);
+  assert.doesNotMatch(desc.textContent, /did not land/);
+  assert.equal(text.value, summary);
+  assert.equal(hooks.getSafeTelemetryFailureReason({ code: "paste_unconfirmed" }, "paste"), "paste_failed");
+});
+
 clockTest("Claude, Gemini, DeepSeek, and Grok restore a draft cleared after the first paste", async () => {
   const summary = "CONTEXT CARRY — READY TO PASTE\n\nImportant project context and next steps.";
   for (const [hostname, destination, hidden] of [
@@ -2325,6 +2344,27 @@ clockTest("paste recovery respects trusted Send, clear, Undo and edits", async (
   }
 });
 
+test("source cancellation releases its lock and prevents late summary or local-carry continuation", async () => {
+  const messages = [];
+  let finishSummary;
+  const hooks = loadPlatformContent([], "claude.ai", { runtimeSendMessage: async message => {
+    messages.push(message);
+    if (message.type === "SUMMARIZE_WITH_BACKEND") return new Promise(resolve => { finishSummary = resolve; });
+    return { ok: true };
+  } });
+  const trace = hooks.beginTransferAttempt("gemini", "test");
+  const pending = hooks.summarizeWithBackend("x".repeat(1201), trace);
+  hooks.runtimeMessageListeners[0]({ type: "CANCEL_TRANSFER", transferId: trace.id }, {}, () => {});
+  finishSummary({ ok: true, summary: "A late response must not resume this transfer." });
+  await assert.rejects(pending, error => error.code === "user_cancelled");
+  const telemetry = messages.filter(message => message.type === "RECORD_TRANSFER_TELEMETRY").map(message => message.event);
+  assert.equal(telemetry.at(-1).failureReason, "user_cancelled");
+  assert.equal(telemetry.at(-1).status, "failed");
+  assert.ok(telemetry.every(event => event.lastStage !== "summary_completed"));
+  assert.ok(hooks.beginTransferAttempt("gemini", "next attempt"));
+  hooks.resetRunningFlag();
+});
+
 clockTest("delayed paste recovery stops at its deadline and when same-route history appears", async () => {
   for (const scenario of ["hidden-expiry", "retry-expiry", "history"]) {
     const editor = new FakeElement({ tag: "textarea", attrs: { placeholder: "Message" } });
@@ -2373,6 +2413,51 @@ clockTest("delayed paste recovery offers manual copy if the app clears the retry
   assert.equal(editor.clicks, 2, "only one recovery paste was attempted");
   assert.equal(modal.style.display, "flex");
   assert.equal(copyText.value, summary, "the full summary stays available to copy");
+});
+
+clockTest("a closed source blocks destination insertion before any editor action", async () => {
+  const editor = new FakeElement({ tag: "textarea", attrs: { placeholder: "Message" } });
+  const hooks = loadPlatformContent([editor], "gemini.google.com", {
+    runtimeSendMessage: async message => message.type === "CHECK_TRANSFER_ACTIVE"
+      ? { ok: false, code: "user_cancelled", error: "Source closed" } : { ok: true }
+  });
+  await assert.rejects(hooks.pasteIntoPlatform("private carry", "gemini", "cancel-test", null, 9), error => error.code === "user_cancelled");
+  assert.equal(editor.value, "");
+  assert.equal(editor.clicks, 0);
+  assert.equal(hooks.getOwnedLifecycleResourceCounts().eventListeners, 0);
+});
+
+clockTest("transfer cancellation during editor focus cannot insert or retry text", async () => {
+  const editor = new FakeElement({ tag: "textarea", attrs: { placeholder: "Message" } });
+  const hooks = loadPlatformContent([editor], "gemini.google.com");
+  editor.focus = () => hooks.runtimeMessageListeners[0]({ type: "CANCEL_TRANSFER", transferId: "cancel-test" }, {}, () => {});
+  await assert.rejects(hooks.pasteIntoPlatform("private carry", "gemini", "cancel-test"), error => error.code === "user_cancelled");
+  assert.equal(editor.value, "");
+  assert.equal(editor.clicks, 1);
+});
+
+clockTest("cancelled or missing sources cannot restore a cleared paste or show a copy modal", async () => {
+  for (const notify of [true, false]) {
+    let sourceOpen = true;
+    const editor = new FakeElement({ tag: "textarea", attrs: { placeholder: "Message" } });
+    const hooks = loadPlatformContent([editor], "gemini.google.com", { visibilityState: "hidden",
+      runtimeSendMessage: async message => message.type === "CHECK_TRANSFER_ACTIVE" && !sourceOpen
+        ? { ok: false, code: "user_cancelled", error: "Source closed" } : { ok: true }
+    });
+    const modal = new FakeElement();
+    hooks.registerElementId("context-generator-fallback-modal", modal);
+    await hooks.pasteIntoPlatform("private carry", "gemini", "cancel-test", Date.now() + 5000, 9);
+    editor.value = "";
+    sourceOpen = false;
+    if (notify) hooks.runtimeMessageListeners[0]({ type: "CANCEL_TRANSFER", transferId: "cancel-test" }, {}, () => {});
+    hooks.setVisibility("visible");
+    await new Promise(resolve => setTimeout(resolve, 1300));
+    assert.equal(editor.value, "");
+    assert.equal(editor.clicks, 1);
+    assert.notEqual(modal.style.display, "flex");
+    assert.equal(hooks.getOwnedLifecycleResourceCounts().eventListeners, 0);
+    hooks.teardownContextGeneratorInstance();
+  }
 });
 
 test("Firefox contenteditable paste preserves line breaks without treating text as HTML", () => {

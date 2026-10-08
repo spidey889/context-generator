@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-08-live-textarea-v117";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-08-unconfirmed-paste-v119";
   const INLINE_PILL_SIZE = 36;
   const ownedUiStyleSheets = new Map();
   const CLAUDE_INLINE_STYLE_ID = "context-generator-claude-inline-styles";
@@ -483,6 +483,7 @@
 
   let isRunning = false;
   let activeTransferTrace = null;
+  const activePasteGuards = new Map();
   let runningResetTimer = null;
   let reservedActionCluster = null;
   let reservedComposerSurface = null;
@@ -630,6 +631,7 @@
     instanceActive = false;
     if (activeTransferTrace) activeTransferTrace.expired = true;
     activeTransferTrace?.sourceGuard?.dispose();
+    activePasteGuards.forEach(guard => guard.cancel());
     cancelPendingPasteRecheck();
     extensionRuntime.onMessage.removeListener?.(handleRuntimeMessage);
     disableFloatingButtonMonitoring();
@@ -718,6 +720,12 @@
   }
 
   function handleRuntimeMessage(message, _sender, sendResponse) {
+    if (message?.type === "CANCEL_TRANSFER") {
+      activePasteGuards.get(message.transferId)?.cancel();
+      cancelSourceTransfer(message.transferId);
+      sendResponse({ ok: true });
+      return false;
+    }
     if (message?.type === "CONTEXT_GENERATOR_PING") {
       sendResponse({ ok: true });
       return false;
@@ -726,15 +734,15 @@
     if (message?.type === "PASTE_CONTEXT") {
       const pasteStartedAt = getNow();
       const finishStatus = showDestinationPasteStatus();
-      pasteIntoPlatform(message.text, message.destination, message.transferId, message.deadlineAt)
+      pasteIntoPlatform(message.text, message.destination, message.transferId, message.deadlineAt, message.sourceTabId)
         .then((timing) => {
           finishStatus(true);
           const pasteMs = Math.round(getNow() - pasteStartedAt);
           sendResponse({ ok: true, timing: { pasteMs, ...timing } });
         })
         .catch((error) => {
-          finishStatus(false);
-          sendResponse({ ok: false, error: error.message });
+          finishStatus(error.code === "user_cancelled" ? null : false);
+          sendResponse({ ok: false, error: error.message, code: error.code || null });
         });
 
       return true;
@@ -772,6 +780,7 @@
     return (succeeded) => {
       // Late completion must not replace a newer transfer's cue or recreated UI.
       if (document.getElementById(DESTINATION_STATUS_ID) !== status) return;
+      if (succeeded === null) { status.remove(); return; }
       status.textContent = succeeded
         ? "Context ready. Review it, then send when you’re ready."
         : "Couldn’t add context. Return to your original tab to copy it.";
@@ -787,6 +796,7 @@
       scrapeConversationText,
       summarizeWithBackend,
       getConversationRole,
+      showContextTransferFailure,
       pasteIntoPlatform,
       editorContainsText,
       findReadyPlatformInput,
@@ -932,6 +942,7 @@
         await notifyBackground({
           type: "ACTIVATE_DESTINATION_TAB",
           destination: destinationId,
+          transferId: transferTrace.id,
           deadlineAt: transferTrace.deadlineAt,
           tabId: pasteResponse?.timing?.tabId || null
         });
@@ -942,7 +953,11 @@
       finishTransferTrace(transferTrace);
       resetRunningFlag();
     } catch (error) {
-      if (transferTrace.expired) return;
+      if (error?.code === "user_cancelled") {
+        cancelSourceTransfer(transferTrace.id, transferTrace);
+        return;
+      }
+      if (transferTrace.expired || transferTrace.cancelled) return;
       markTransferTrace(transferTrace, `failed: ${error.message}`);
       finishTransferTrace(transferTrace, getSafeTelemetryFailureReason(error, transferStage));
       resetRunningFlag();
@@ -970,7 +985,7 @@
     }
 
     if (summary) {
-      showFallbackModal(summary, destinationName);
+      showFallbackModal(summary, destinationName, false, error?.code === "paste_unconfirmed");
       return;
     }
 
@@ -1008,7 +1023,8 @@
         }
         summary = response.summary.trim();
         timing = response.timing || null;
-      } catch {
+      } catch (error) {
+        if (error?.code === "user_cancelled") throw error;
         checkTransferDeadline(trace);
         // The verified transcript stays in the source page even when the backend
         // or MV3 worker is unavailable. Paste failure still offers manual copy.
@@ -1078,18 +1094,34 @@
         background: response?.timing || null
       });
       return response;
-    }).catch(() => {
+    }).catch((error) => {
+      if (error?.code === "user_cancelled" && trace) cancelSourceTransfer(trace.id, trace);
       return null;
     });
   }
 
   function checkTransferDeadline(trace) {
+    if (trace?.cancelled) throw createTransferCancelledError();
     if (trace?.expired || (trace?.deadlineAt && Date.now() >= trace.deadlineAt)) {
       const error = new Error("Transfer timed out. Please try again.");
       error.code = "transfer_timeout";
       throw error;
     }
     trace?.sourceGuard?.check();
+  }
+
+  function createTransferCancelledError() {
+    const error = new Error("Transfer cancelled because a transfer tab was closed.");
+    error.code = "user_cancelled";
+    return error;
+  }
+
+  function cancelSourceTransfer(transferId, trace = activeTransferTrace) {
+    if (!trace || trace.id !== transferId || trace.completed) return;
+    trace.cancelled = true;
+    markTransferTrace(trace, "failed: Transfer cancelled.");
+    finishTransferTrace(trace, "user_cancelled");
+    if (activeTransferTrace === trace) resetRunningFlag();
   }
 
   function createConversationGuard(message, identify = (location) => location.pathname + (location.search || "")) {
@@ -2380,7 +2412,7 @@
     return platform ? { ...platform, id: platformId } : null;
   }
 
-  async function pasteIntoPlatform(text, destinationId, transferId = null, deadlineAt = null) {
+  async function pasteIntoPlatform(text, destinationId, transferId = null, deadlineAt = null, sourceTabId = null) {
     checkTransferDeadline({ deadlineAt });
     cancelPendingPasteRecheck();
     const destination = getPlatform(destinationId) || currentPlatform;
@@ -2399,7 +2431,7 @@
       // Allow the platform's initial landing redirect until its composer mounts.
       return (landingPaths.includes(path) ? "new-chat" : path) + (location.search || "");
     });
-    const guard = createPasteRecoveryGuard(trimmedText, destination, routeGuard);
+    const guard = createPasteRecoveryGuard(trimmedText, destination, routeGuard, transferId, sourceTabId);
     let retainedGuard = false;
     try {
       if (destination.id !== currentPlatform.id || !landingPaths.includes(window.location.pathname.replace(/\/+$/, "") || "/")) {
@@ -2409,7 +2441,7 @@
       checkTransferDeadline({ deadlineAt });
       // A verified insert followed by the user's Send/edit is already delivered.
       // Reporting failure here would make the worker paste again in a fresh tab.
-      if (!guard.userHandled) guard.check();
+      if (!guard.userHandled) await guard.checkActive();
       if (!guard.userHandled && destination.id !== "chatgpt") {
         schedulePostActivationPasteRecheck(trimmedText, destination, deadlineAt, guard);
         retainedGuard = true;
@@ -2420,11 +2452,12 @@
     }
   }
 
-  function createPasteRecoveryGuard(text, destination, routeGuard) {
+  function createPasteRecoveryGuard(text, destination, routeGuard, transferId = null, sourceTabId = null) {
     let editor = null;
     let verified = false;
     let writing = false;
     let userHandled = false;
+    let cancelled = false;
     const eventTypes = ["beforeinput", "input", "keydown", "click", "submit"];
     const onUserAction = (event) => {
       if (!event.isTrusted || writing || userHandled) return;
@@ -2454,11 +2487,27 @@
     const guard = {
       ...routeGuard,
       get userHandled() { return userHandled; },
+      check() {
+        if (cancelled) throw createTransferCancelledError();
+        routeGuard.check();
+      },
+      async checkActive() {
+        this.check();
+        if (Number.isInteger(sourceTabId)) {
+          await notifyBackground({ type: "CHECK_TRANSFER_ACTIVE", transferId, sourceTabId });
+          this.check();
+        }
+      },
+      cancel() {
+        cancelled = true;
+        if (pendingPasteRecheck?.guard === guard) cancelPendingPasteRecheck();
+      },
       observe(input) {
         editor = input;
         if (editorContainsText(input, text)) verified = true;
       },
       insert(input) {
+        this.check();
         // execCommand can emit trusted input even for our own insertion.
         writing = true;
         try { setEditorText(input, text, destination, guard); }
@@ -2466,10 +2515,12 @@
         this.observe(input);
       },
       dispose() {
+        if (activePasteGuards.get(transferId) === guard) activePasteGuards.delete(transferId);
         eventTypes.forEach(type => removeOwnedEventListener(document, type, onUserAction, true));
         routeGuard.dispose();
       }
     };
+    if (transferId) activePasteGuards.set(transferId, guard);
     eventTypes.forEach(type => addOwnedEventListener(document, type, onUserAction, true));
     return guard;
   }
@@ -2492,6 +2543,7 @@
     while (Date.now() - startedAt <= retryTimeoutMs) {
       checkTransferDeadline({ deadlineAt });
       if (guard?.userHandled) return getTiming();
+      await guard?.checkActive();
       guard?.check();
       if (getDetectedConversationMessageCount() > 0) throw new Error("The destination is no longer a new chat.");
       const input = findReadyPlatformInput(destination);
@@ -2512,6 +2564,7 @@
           const populated = await waitForEditorText(input, text, verifyTimeoutMs);
           checkTransferDeadline({ deadlineAt });
           if (guard.userHandled) return getTiming();
+          await guard.checkActive();
           if (populated) {
             guard.observe(input);
             guard?.check();
@@ -2519,6 +2572,7 @@
               await delay(stabilityMs);
               checkTransferDeadline({ deadlineAt });
               if (guard.userHandled) return getTiming();
+              await guard.checkActive();
               guard?.check();
               if (!input.isConnected || !editorContainsText(input, text)) {
                 lastError = new Error(`${destination.name} editor cleared the pasted context after first insert.`);
@@ -2534,7 +2588,7 @@
             lastError = new Error(`Paste operation failed to populate the ${destination.name} editor.`);
           }
         } catch (error) {
-          if (["conversation_changed", "transfer_timeout"].includes(error?.code)) throw error;
+          if (["conversation_changed", "transfer_timeout", "user_cancelled"].includes(error?.code)) throw error;
           lastError = error;
         }
       }
@@ -2637,17 +2691,21 @@
 
   async function recheckPastedContext(text, destination, pending) {
     let needsCopy = true;
-    const checkRecovery = () => {
+    const checkRecovery = async () => {
       if (pendingPasteRecheck !== pending || pending.guard?.userHandled || getDetectedConversationMessageCount() > 0) {
         needsCopy = false;
         return false;
       }
       checkTransferDeadline(pending);
-      pending.guard?.check();
+      await pending.guard?.checkActive();
+      if (pendingPasteRecheck !== pending || pending.guard?.userHandled || getDetectedConversationMessageCount() > 0) {
+        needsCopy = false;
+        return false;
+      }
       return true;
     };
     try {
-      if (!checkRecovery()) return;
+      if (!await checkRecovery()) return;
       const input = findReadyPlatformInput(destination);
       if (input) pending.guard.observe(input);
       if (input && editorContainsText(input, text)) {
@@ -2658,9 +2716,9 @@
       if (pendingPasteRecheck === pending && input && !getElementText(input).trim()) {
         pending.guard.insert(input);
         if (await waitForEditorText(input, text, destination.pasteVerifyTimeoutMs || PASTE_VERIFY_TIMEOUT_MS)) {
-          if (!checkRecovery()) return;
+          if (!await checkRecovery()) return;
           await delay(PASTE_STABILITY_MS);
-          if (!checkRecovery()) return;
+          if (!await checkRecovery()) return;
           if (input.isConnected && editorContainsText(input, text)) {
             needsCopy = false;
             return;
@@ -2668,7 +2726,7 @@
         }
       }
     } catch (error) {
-      if (["transfer_timeout", "conversation_changed"].includes(error?.code)) needsCopy = false;
+      if (["transfer_timeout", "conversation_changed", "user_cancelled"].includes(error?.code)) needsCopy = false;
       console.debug("[Context Generator] Delayed paste check failed:", error?.message || error);
     } finally {
       if (pendingPasteRecheck === pending) {
@@ -8411,7 +8469,7 @@
     }, 280);
   }
 
-  function showFallbackModal(text, destinationName, isBackup = false) {
+  function showFallbackModal(text, destinationName, isBackup = false, pasteUnconfirmed = false) {
     let modal = document.getElementById("context-generator-fallback-modal");
     if (!modal) {
       modal = document.createElement("div");
@@ -8657,11 +8715,13 @@
     modal.contextGeneratorPreviousFocus = document.activeElement;
 
     const title = document.getElementById("context-generator-fallback-title");
-    if (title) title.textContent = isBackup ? "In case the paste didn't work" : "Context is ready to copy";
+    if (title) title.textContent = pasteUnconfirmed ? "Check your destination tab" : isBackup ? "In case the paste didn't work" : "Context is ready to copy";
 
     const desc = document.getElementById("context-generator-fallback-desc");
     if (desc) {
-      desc.textContent = isBackup
+      desc.textContent = pasteUnconfirmed
+        ? `The paste into ${destinationName} wasn't confirmed. Check that tab first. If the context is missing, copy it from here.`
+        : isBackup
         ? `If anything got lost on the way to ${destinationName}, no worries—your context is right here. Copy it from here.`
         : `Auto-paste did not land in ${destinationName}. The context is safe here - copy it, paste it into the message box, then send when ready.`;
     }
