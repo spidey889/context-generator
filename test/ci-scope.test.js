@@ -9,7 +9,7 @@ const { classifyChanges, getScope } = require("../scripts/ci-scope");
 const changed = path => ({ path, oldMode: "100644", newMode: "100644" });
 
 test("CI light scope admits public media and docs while mixed/runtime/config changes stay full", () => {
-  const light = ["README.md", "LOGIC.md", "CHANGELOG.md", "PRIVACY.md", "LICENSE", "CNAME", "docs/usage.md", "brag/picker-preview.png", "brag/brag.mp4"];
+  const light = ["README.md", "LOGIC.md", "CHANGELOG.md", "PRIVACY.md", "LICENSE", "CNAME", "docs/usage.md", "brag/brag.jpg", "brag/brag.mp4"];
   assert.equal(classifyChanges(light.map(changed)), "light");
   for (const file of ["extension/icon128.png", "extension/manifest.json", "extension/platform-content.js", "api/summarize.js",
     "supabase/migrations/change.sql", "package-lock.json", ".github/workflows/regression-gate.yml", "scripts/ci-scope.js",
@@ -17,7 +17,7 @@ test("CI light scope admits public media and docs while mixed/runtime/config cha
     assert.equal(classifyChanges([...light.map(changed), changed(file)]), "full", file);
   }
   for (const mode of ["120000", "160000", "100755"]) {
-    assert.equal(classifyChanges([{ ...changed("brag/picker-preview.png"), newMode: mode }]), "full");
+    assert.equal(classifyChanges([{ ...changed("brag/brag.jpg"), newMode: mode }]), "full");
   }
 });
 

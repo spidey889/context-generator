@@ -5,9 +5,7 @@ A fresh launch-video draft built after studying the owner's local Claude Cowork 
 - `brag.mp4`: final 1920 × 1080, 60 fps, 62-second H.264/AAC video.
 - `brag.jpg`: settled message card; replaces frame zero without shifting audio.
 - `share-copy.txt`: postable copy.
-- `reference-study.md` and `brag-plan.md`: measured reference observations and storyboard.
 - `verification.json`: final export, browser playback, source provenance, click positions/sync and story checks.
-- `creative-review.md`: scene/motion review and remaining practical limits.
 - `credits.md`: CC0 piano sample sources and staged-chat disclosure.
 - `work/film.html`: editable pure-time composition; `work/timeline.json` is the shared click/typing/audio clock.
 - `work/native/ui.json`: fresh production DOM/CSS, not old video screenshots. Preview PNGs document the original native states.

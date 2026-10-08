@@ -1,7 +1,7 @@
 .vercel
 supabase/.temp/
 supabase/.branches/
-.gstack/
+.test-artifacts/
 .env*
 node_modules/
 api/mcp.mjs

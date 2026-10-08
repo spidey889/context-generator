@@ -73,7 +73,7 @@ jobs:
         shell: bash
         env:
           CAP_CONTEXT_TELEMETRY_SMOKE: "1"
-          CAP_CONTEXT_SMOKE_ARTIFACT_DIR: .gstack/browser-smoke/dom-telemetry
+          CAP_CONTEXT_SMOKE_ARTIFACT_DIR: .test-artifacts/browser-smoke/dom-telemetry
         run: |
           mkdir -p "$CAP_CONTEXT_SMOKE_ARTIFACT_DIR"
           xvfb-run -a npm run test:extension-smoke 2>&1 | tee "$CAP_CONTEXT_SMOKE_ARTIFACT_DIR/run.log"
@@ -85,7 +85,7 @@ jobs:
           CAP_CONTEXT_JSON_SMOKE: chatgpt
           CAP_CONTEXT_CHATGPT_RELOAD_SMOKE: "1"
           CAP_CONTEXT_CHATGPT_AUTH_SMOKE: paste401
-          CAP_CONTEXT_SMOKE_ARTIFACT_DIR: .gstack/browser-smoke/chatgpt-reload
+          CAP_CONTEXT_SMOKE_ARTIFACT_DIR: .test-artifacts/browser-smoke/chatgpt-reload
         run: |
           mkdir -p "$CAP_CONTEXT_SMOKE_ARTIFACT_DIR"
           xvfb-run -a npm run test:extension-smoke 2>&1 | tee "$CAP_CONTEXT_SMOKE_ARTIFACT_DIR/run.log"
@@ -96,7 +96,7 @@ jobs:
         env:
           CAP_CONTEXT_JSON_SMOKE: chatgpt
           CAP_CONTEXT_CHATGPT_FAILURE_SMOKE: paste-oversize
-          CAP_CONTEXT_SMOKE_ARTIFACT_DIR: .gstack/browser-smoke/paste-budget
+          CAP_CONTEXT_SMOKE_ARTIFACT_DIR: .test-artifacts/browser-smoke/paste-budget
         run: |
           mkdir -p "$CAP_CONTEXT_SMOKE_ARTIFACT_DIR"
           xvfb-run -a npm run test:extension-smoke 2>&1 | tee "$CAP_CONTEXT_SMOKE_ARTIFACT_DIR/run.log"
@@ -107,7 +107,7 @@ jobs:
         env:
           CAP_CONTEXT_JSON_SMOKE: chatgpt
           CAP_CONTEXT_CHATGPT_FAILURE_SMOKE: history-oversize
-          CAP_CONTEXT_SMOKE_ARTIFACT_DIR: .gstack/browser-smoke/chatgpt-history-budget
+          CAP_CONTEXT_SMOKE_ARTIFACT_DIR: .test-artifacts/browser-smoke/chatgpt-history-budget
         run: |
           mkdir -p "$CAP_CONTEXT_SMOKE_ARTIFACT_DIR"
           xvfb-run -a npm run test:extension-smoke 2>&1 | tee "$CAP_CONTEXT_SMOKE_ARTIFACT_DIR/run.log"
@@ -118,7 +118,7 @@ jobs:
         env:
           CAP_CONTEXT_JSON_SMOKE: "1"
           CAP_CONTEXT_CLAUDE_PARTIAL_SMOKE: "1"
-          CAP_CONTEXT_SMOKE_ARTIFACT_DIR: .gstack/browser-smoke/claude-fallback
+          CAP_CONTEXT_SMOKE_ARTIFACT_DIR: .test-artifacts/browser-smoke/claude-fallback
         run: |
           mkdir -p "$CAP_CONTEXT_SMOKE_ARTIFACT_DIR/complete"
           CAP_CONTEXT_CLAUDE_PARTIAL_SMOKE="" CAP_CONTEXT_SMOKE_ARTIFACT_DIR="$CAP_CONTEXT_SMOKE_ARTIFACT_DIR/complete" \
@@ -132,7 +132,7 @@ jobs:
         env:
           CAP_CONTEXT_JSON_SMOKE: "1"
           CAP_CONTEXT_CLAUDE_PARTIAL_SMOKE: oversize
-          CAP_CONTEXT_SMOKE_ARTIFACT_DIR: .gstack/browser-smoke/claude-oversize
+          CAP_CONTEXT_SMOKE_ARTIFACT_DIR: .test-artifacts/browser-smoke/claude-oversize
         run: |
           mkdir -p "$CAP_CONTEXT_SMOKE_ARTIFACT_DIR"
           xvfb-run -a npm run test:extension-smoke 2>&1 | tee "$CAP_CONTEXT_SMOKE_ARTIFACT_DIR/run.log"
@@ -143,7 +143,7 @@ jobs:
         env:
           CAP_CONTEXT_JSON_SMOKE: gemini
           CAP_CONTEXT_NETWORK_FAILURE_SMOKE: partial
-          CAP_CONTEXT_SMOKE_ARTIFACT_DIR: .gstack/browser-smoke/gemini-capture
+          CAP_CONTEXT_SMOKE_ARTIFACT_DIR: .test-artifacts/browser-smoke/gemini-capture
         run: |
           mkdir -p "$CAP_CONTEXT_SMOKE_ARTIFACT_DIR/complete"
           CAP_CONTEXT_NETWORK_FAILURE_SMOKE="" CAP_CONTEXT_SMOKE_ARTIFACT_DIR="$CAP_CONTEXT_SMOKE_ARTIFACT_DIR/complete" \
@@ -156,7 +156,7 @@ jobs:
         shell: bash
         env:
           CAP_CONTEXT_JSON_SMOKE: deepseek
-          CAP_CONTEXT_SMOKE_ARTIFACT_DIR: .gstack/browser-smoke/deepseek-files
+          CAP_CONTEXT_SMOKE_ARTIFACT_DIR: .test-artifacts/browser-smoke/deepseek-files
         run: |
           mkdir -p "$CAP_CONTEXT_SMOKE_ARTIFACT_DIR"
           xvfb-run -a npm run test:extension-smoke 2>&1 | tee "$CAP_CONTEXT_SMOKE_ARTIFACT_DIR/run.log"
@@ -167,7 +167,7 @@ jobs:
         env:
           CAP_CONTEXT_JSON_SMOKE: deepseek
           CAP_CONTEXT_NETWORK_FAILURE_SMOKE: oversize
-          CAP_CONTEXT_SMOKE_ARTIFACT_DIR: .gstack/browser-smoke/history-budget
+          CAP_CONTEXT_SMOKE_ARTIFACT_DIR: .test-artifacts/browser-smoke/history-budget
         run: |
           mkdir -p "$CAP_CONTEXT_SMOKE_ARTIFACT_DIR"
           xvfb-run -a npm run test:extension-smoke 2>&1 | tee "$CAP_CONTEXT_SMOKE_ARTIFACT_DIR/run.log"
@@ -176,7 +176,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: browser-smoke-failure
-          path: .gstack/browser-smoke/
+          path: .test-artifacts/browser-smoke/
           include-hidden-files: true
           if-no-files-found: ignore
           retention-days: 7

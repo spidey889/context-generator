@@ -4,6 +4,8 @@ A short history of decisions and regressions that matter when changing the code.
 
 ## 2026-10-08
 
+- **Abandoned website migration and optional clutter removed.** Kept the static homepage and both videos, including the launch video's poster, editing sources, credits and export verification. Removed the unused picker screenshot, optional video research notes and local `brag-slim` helper, plus the abandoned Astro output/caches and old `.gstack` files. CI browser failure diagnostics now use `.test-artifacts/`. Retained the archived Gemini health note as a short historical reference; current Gemini routing is unaffected.
+
 - **Optional architecture viewer removed.** Removed the Archify diagram project, generated artifacts, local validation output and its CI build step because the viewer was not needed. Cleaned up documentation, Pages configuration and the CI-scope fixture; `LOGIC.md` remains the production architecture reference.
 
 - **Mistral streaming preserves text blocks.** A mixed-format response was accepted while silently losing its array-based text, including a deployment constraint. The SSE parser now retains Mistral string and typed text-block deltas in order while excluding thinking blocks. Added an end-to-end provider regression for the accepted carry, streamed answer, Unicode and usage. Completion, retry, deadline and paste behavior remain unchanged.
