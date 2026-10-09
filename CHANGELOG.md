@@ -4,7 +4,7 @@ A short history of decisions and regressions that matter when changing the code.
 
 ## 2026-10-10
 
-- Renamed the near-end handoff prototype branch from `codex/master-work-1009` to `codex/near-end-handoff`. The worktree directory stays the same so the unpacked extension path remains usable.
+- Renamed the near-end handoff prototype branch from `codex/master-work-1009` to `codex/fast-transfer` (briefly named `codex/near-end-handoff`) so it is easier to recognize. The worktree directory stays the same so the unpacked extension path remains usable.
 
 ## 2026-10-09
 
