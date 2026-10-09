@@ -327,8 +327,8 @@ function sourceFixture(freeGrid = false) {
 </head>
 <body>
   <main aria-label="Conversation">
-    <!-- Keep the backend/receipt smoke above the tiny local-carry boundary. -->
-    <article data-message-author-role="user">${SOURCE_SENTINEL} ${"Deployment context. ".repeat(80)}</article>
+    <!-- Keep the backend/receipt smoke in the AI range (at least 10,000 characters). -->
+    <article data-message-author-role="user">${SOURCE_SENTINEL} ${"Deployment context. ".repeat(600)}</article>
     <article data-message-author-role="assistant"><div class="markdown">${ASSISTANT_SENTINEL}</div></article>
   </main>
   <form data-testid="composer"><div ${freeGrid ? "" : "data-composer-body"}>
@@ -2039,11 +2039,11 @@ async function run() {
       ? "✓ Installed worker → Vercel relay → Edge handler → migrated database: verified completion, one count, drained outbox.\n"
       : "✓ Signed terminal telemetry stayed in the local fixture and the installed worker's outbox drained.\n");
     if (!JSON_CAPTURE_SMOKE) {
-      // Repeat with exactly 1,200 serialized characters: exercise the real local
+      // Repeat at 9,999 captured characters: exercise the real direct boundary
       // branch and prove it cannot reuse the previous remote summary or receipt.
       const prefix = "ChatGPT conversation:\n\nUser: ";
       const suffix = `\n\nChatGPT: ${ASSISTANT_SENTINEL}`;
-      const userText = `${SOURCE_SENTINEL} ${"L".repeat(1200 - prefix.length - suffix.length - SOURCE_SENTINEL.length - 1)}`;
+      const userText = `${SOURCE_SENTINEL} ${"L".repeat(9999 - prefix.length - suffix.length - SOURCE_SENTINEL.length - 1)}`;
       const transcript = prefix + userText + suffix;
       const requestsBefore = state.summaryRequests.length;
       await destinationSession.evaluate('document.querySelector("textarea").value = ""');
@@ -2057,32 +2057,32 @@ async function run() {
         const stored = await sourceSession.evaluate('chrome.storage.local.get("context-generator-last-transfer-stats-v1")', extensionContextId);
         const receipt = stored?.["context-generator-last-transfer-stats-v1"];
         return receipt?.rawScrapedText === transcript ? receipt : null;
-      }, "the exact tiny local transfer receipt");
+      }, "the exact direct JSON transfer receipt");
       assert.equal(stats.status, "completed");
       assert.equal(stats.summary.source, "local");
       assert.equal(stats.summary.model, "local-direct");
-      assert.equal(stats.summary.profile, "tiny");
+      assert.equal(stats.summary.profile, "direct");
       assert.equal(stats.summary.fetchMs, 0);
       assert.deepEqual(stats.summary.modelsTried, []);
       assert.equal(stats.summary.usage.totalTokens, 0);
       assert.equal(stats.summary.fallback.used, false);
-      assert.equal(state.summaryRequests.length, requestsBefore, "Tiny chats must never reach the summary backend.");
+      assert.equal(state.summaryRequests.length, requestsBefore, "Direct chats must never reach the summary backend.");
       let verifiedPaste = false;
       for (const target of (await getTargets(devToolsPort)).filter(target => target.type === "page" && target.url.startsWith(`${origin}/destination`))) {
         const session = await CdpSession.connect(target.webSocketDebuggerUrl);
         try {
           const value = await session.evaluate('document.querySelector("textarea")?.value || ""');
-          if (value.includes(transcript.split("\n").map(line => `> ${line}`).join("\n"))) {
+          if (value.includes(JSON.stringify({ conversation: transcript }))) {
             assert.match(value, /Reply only: "Context loaded/);
             assert.equal(await session.evaluate("window.__capContextSmokeSendClicks"), 0);
             verifiedPaste = true;
           }
         } finally { session.close(); }
       }
-      assert.equal(verifiedPaste, true, "The complete tiny transcript must reach the destination without pressing Send.");
+      assert.equal(verifiedPaste, true, "The complete direct JSON transcript must reach the destination without pressing Send.");
       const terminal = await waitFor(() => state.telemetryRequests.find(payload => payload.attempt_id === stats.transferId && payload.status === "succeeded"), "unsigned local completion telemetry");
       assert.equal(terminal.summary_proof, undefined, "Local work cannot inherit the previous server receipt.");
-      process.stdout.write(`✓ Exactly 1,200 characters: local carry (${stats.summary.summaryMs} ms), zero summary requests, complete paste, no Send click.\n`);
+      process.stdout.write(`✓ Exactly 9,999 characters: direct JSON (${stats.summary.summaryMs} ms), zero summary requests, complete paste, no Send click.\n`);
     }
     process.stdout.write("Cap Context Brave extension smoke passed.\n");
   } catch (error) {

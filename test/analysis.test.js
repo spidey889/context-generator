@@ -44,7 +44,7 @@ test("analysis formats a long provider failure chain as readable lines", () => {
   const { getModelFallbackLabel } = loadModelHelpers();
   assert.equal(getModelFallbackLabel({ model: "unsupported-model", modelsTried: ["unsupported-model"] }), "Not recorded - run a new transfer");
   assert.equal(getModelFallbackLabel({ model: "local-direct", servedBy: "local-direct", modelsTried: [] }), "Local fallback served\nNo provider model needed");
-  assert.equal(getModelFallbackLabel({ model: "local-direct", servedBy: "local-direct", profile: "tiny", modelsTried: [], fallback: { used: false } }), "Local carry served\nNo provider model needed");
+  assert.equal(getModelFallbackLabel({ model: "local-direct", servedBy: "local-direct", profile: "direct", modelsTried: [], fallback: { used: false } }), "Local carry served\nNo provider model needed");
   assert.equal(loadModelHelpers().formatModelDisplayName("local-direct"), "Local carry");
   assert.equal(getModelFallbackLabel({ model: "gemini-3.6-flash", modelsTried: ["gemini-3.6-flash"] }), "Gemini 3.6 Flash served first\nNo fallback needed");
   assert.equal(

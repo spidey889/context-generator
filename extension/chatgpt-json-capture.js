@@ -220,7 +220,7 @@
     });
     if (!turns.length) throw blocked("No usable user or assistant text remains after skipping tools, files, images, and artifacts.");
     const text = `ChatGPT conversation:\n\n${turns.join("\n\n")}`;
-    if (text.length > 350000 || new TextEncoder().encode(text).length > 1400000) throw captureError("This chat is too long to transfer (limit: 350,000 characters). Try a shorter chat.", "size_limit");
+    if (text.length > 500000 || new TextEncoder().encode(text).length > 2000000) throw captureError("This chat is too long to transfer (limit: 500,000 characters). Try a shorter chat.", "size_limit");
     return { text, messageTurnCount: turns.length, excludedContentTypes: [...excludedContentTypes].sort() };
   }
 
@@ -291,7 +291,7 @@
           try {
             if (changed || currentChat() !== chat || reply.chat !== chat) throw new Error("The ChatGPT conversation changed during capture.");
             if (reply.error) {
-              if (reply.error === "size") throw captureError("This chat is too long to transfer (limit: 350,000 characters). Try a shorter chat.", "size_limit");
+              if (reply.error === "size") throw captureError("This chat is too long to transfer (limit: 500,000 characters). Try a shorter chat.", "size_limit");
               const reasons = { auth: "ChatGPT authentication is unavailable. Refresh this signed-in chat.", partial: "ChatGPT returned incomplete, invalid or oversized JSON.", busy: "Another ChatGPT JSON capture is running. Try again after it finishes.", format: "ChatGPT returned a non-JSON response.", changed: "The ChatGPT conversation changed during capture.", timeout: "The full-tree request timed out.", network: "The full-tree request failed or returned invalid JSON." };
               reasons.paste = "A pasted text attachment could not be read completely. Refresh this chat and try again.";
               const reason = reply.error === "http" && Number.isInteger(reply.status) && reply.status >= 100 && reply.status <= 599 ? `The full-tree request returned HTTP ${reply.status}.` : reasons[reply.error] || "The full-tree request failed.";

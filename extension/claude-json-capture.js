@@ -144,8 +144,8 @@
     });
     if (!turns.length) throw captureError("Claude JSON capture found no usable user or assistant text after skipping tools, files, images, and artifacts. Turn JSON capture off to use DOM capture.", "incomplete");
     const text = `Claude conversation:\n\n${turns.join("\n\n")}`;
-    if (text.length > 350000 || new TextEncoder().encode(text).length > 1400000) {
-      throw captureError("Conversation exceeds the supported 350,000 character / 1.4 MB limit.", "size_limit");
+    if (text.length > 500000 || new TextEncoder().encode(text).length > 2000000) {
+      throw captureError("Conversation exceeds the supported 500,000 character / 2 MB limit.", "size_limit");
     }
     return { text, messageTurnCount: turns.length, excludedContentTypes: [...excludedContentTypes].sort() };
   }

@@ -17,7 +17,7 @@
   const transcript = (name, turns, excludedContentTypes = new Set()) => {
     if (!turns.length) fail("No usable user or assistant text was found.");
     const text = `${name} conversation:\n\n${turns.join("\n\n")}`;
-    if (text.length > 350000 || new TextEncoder().encode(text).length > 1400000) fail("size");
+    if (text.length > 500000 || new TextEncoder().encode(text).length > 2000000) fail("size");
     return { text, messageTurnCount: turns.length, excludedContentTypes: [...excludedContentTypes].sort() };
   };
   const turn = (role, parts) => parts.filter(text => typeof text === "string" && text.trim()).length

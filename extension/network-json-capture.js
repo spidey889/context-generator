@@ -51,9 +51,9 @@
           if (event.source !== window || event.origin !== location.origin || reply?.channel !== channel || reply.platform !== platform || reply.type !== "response" || reply.id !== id) return;
           cleanup();
           if (changed || reply.chat !== before.chat || reply.selected !== before.selected || JSON.stringify(current()) !== JSON.stringify(before)) return reject(new Error("The conversation changed during capture."));
-          if (reply.error) return reject(captureError(reply.error === "size" ? "This chat is too long to transfer (limit: 350,000 characters). Try a shorter chat." : `Fast capture failed: ${reply.error} Turn off the lightning button to use standard capture.`, reply.captureFailureReason));
+          if (reply.error) return reject(captureError(reply.error === "size" ? "This chat is too long to transfer (limit: 500,000 characters). Try a shorter chat." : `Fast capture failed: ${reply.error} Turn off the lightning button to use standard capture.`, reply.captureFailureReason));
           const capture = reply.capture;
-          if (typeof capture?.text !== "string" || !capture.text.trim() || !Number.isSafeInteger(capture.messageTurnCount) || capture.messageTurnCount < 1 || capture.text.length > 350000 || new TextEncoder().encode(capture.text).length > 1400000) return reject(captureError("Fast capture returned an invalid or incomplete conversation.", "incomplete"));
+          if (typeof capture?.text !== "string" || !capture.text.trim() || !Number.isSafeInteger(capture.messageTurnCount) || capture.messageTurnCount < 1 || capture.text.length > 500000 || new TextEncoder().encode(capture.text).length > 2000000) return reject(captureError("Fast capture returned an invalid or incomplete conversation.", "incomplete"));
           resolve(capture);
         };
         const timer = setTimeout(() => { cleanup(); reject(captureError("Fast capture timed out. Refresh this chat or turn off the lightning button.", "timeout")); }, 27000);

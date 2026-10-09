@@ -502,19 +502,41 @@ test("DeepSeek keeps distinct identical files and request text, deduplicating fi
   assert.equal(capture.messageTurnCount, 3);
   assert.equal(h.requests.filter(request => request.url.hostname === "files.deepseeksvc.com").length, 2);
 });
+test("Gemini, Grok and DeepSeek capture admit the direct range through 500,000 characters without clipping", async () => {
+  for (const platform of ["gemini", "grok", "deepseek"]) {
+    const baseline = setup(platform);
+    await baseline.observe();
+    const original = await baseline.window.__capCaptureNetworkJson();
+    const f = fixtures(platform);
+    const originalText = platform === "gemini" ? f.pages[0].turns[0][2][0][0]
+      : platform === "grok" ? f.responses[0].message : f.data.data.biz_data.chat_messages[1].fragments[0].content;
+    const overhead = original.text.length - originalText.length;
+    for (const length of [350001, 500000, 500001]) {
+      const f = fixtures(platform), text = "漢".repeat(length - overhead);
+      if (platform === "gemini") f.pages[0].turns[0][2][0][0] = text;
+      else if (platform === "grok") f.responses[0].message = text;
+      else f.data.data.biz_data.chat_messages[1].fragments[0].content = text;
+      const h = setup(platform, f);
+      await h.observe();
+      if (length > 500000) await assert.rejects(h.window.__capCaptureNetworkJson(), /too long/);
+      else assert.equal((await h.window.__capCaptureNetworkJson()).text.length, length, platform);
+    }
+  }
+});
+
 test("All adapters reject zero own text and oversize text without truncation", () => {
   const g = setup("gemini"), t = geminiTurn(0, "smoke", "", "");
   assert.throws(() => g.api.gemini([{ turns: [t], cursor: null }], "smoke"), /No usable/);
-  t[2][0][0] = "x".repeat(350001);
+  t[2][0][0] = "x".repeat(500001);
   assert.throws(() => g.api.gemini([{ turns: [t], cursor: null }], "smoke"), /size/);
   const k = setup("grok"); k.fixture.responses.forEach(message => { message.message = ""; });
   assert.throws(() => k.api.grok(k.fixture.nodes, k.fixture.responses), /No usable/);
-  k.fixture.responses[0].message = "x".repeat(350001);
+  k.fixture.responses[0].message = "x".repeat(500001);
   assert.throws(() => k.api.grok(k.fixture.nodes, k.fixture.responses), /size/);
   const d = setup("deepseek");
   d.fixture.data.data.biz_data.chat_messages.forEach(message => { message.fragments = [{ type: message.role === "USER" ? "REQUEST" : "RESPONSE", content: "" }]; });
   assert.throws(() => d.api.deepseek(d.fixture.data, "smoke"), /No usable/);
-  d.fixture.data.data.biz_data.chat_messages[0].fragments[0].content = "x".repeat(350001);
+  d.fixture.data.data.biz_data.chat_messages[0].fragments[0].content = "x".repeat(500001);
   assert.throws(() => d.api.deepseek(d.fixture.data, "smoke"), /size/);
 });
 test("DeepSeek: disallow arbitrary signed hosts and truncated text downloads", async () => {

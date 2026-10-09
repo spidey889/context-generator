@@ -1991,7 +1991,7 @@ test("actual serving models reach progress and terminal telemetry for fallback, 
     });
     const trace = hooks.beginTransferAttempt("claude", "test");
     try {
-      await hooks.summarizeWithBackend("x".repeat(scenario === "tiny" ? 1200 : 1201), trace);
+      await hooks.summarizeWithBackend("x".repeat(scenario === "tiny" ? 1200 : 10000), trace);
       hooks.finishTransferTrace(trace);
       const telemetry = messages.filter(message => message.type === "RECORD_TRANSFER_TELEMETRY").map(message => message.event);
       const model = ["tiny", "recovery"].includes(scenario) ? "local-direct" : "gemini-3.5-flash-lite";
@@ -2094,7 +2094,7 @@ test("paste verification stops using a detached editor after a remount", async (
   assert.equal(await hooks.waitForEditorText(detached, detached.textContent, 1000), false);
 });
 
-test("up to 1,200 trimmed characters stay local on every platform without worker calls or waits", async () => {
+test("direct and AI ranges use exact captured character boundaries on every platform", async () => {
   for (const hostname of ["claude.ai", "chatgpt.com", "gemini.google.com", "grok.com", "chat.deepseek.com"]) {
     let summaryRequests = 0;
     const hooks = loadPlatformContent([], hostname, {
@@ -2106,22 +2106,23 @@ test("up to 1,200 trimmed characters stay local on every platform without worker
         return { ok: true };
       }
     });
-    for (const length of [1, 1199, 1200]) {
+    for (const length of [1, 9999, 350001, 500000]) {
       const transcript = "x".repeat(length);
       const trace = hooks.createTransferTrace("claude", "test");
       let settled = false;
-      const pending = hooks.summarizeWithBackend(` \r\n${transcript}\n `, trace).then(summary => {
+      const pending = hooks.summarizeWithBackend(transcript, trace).then(summary => {
         settled = true;
         return summary;
       });
       await Promise.resolve();
       assert.equal(settled, true, `${hostname}: ${length} characters must finish without a timer or worker wait`);
       const summary = await pending;
-      assert.ok(summary.includes(`> ${transcript}\n`));
+      const json = summary.split("\n").find(line => line.startsWith('{"conversation":'));
+      assert.equal(JSON.parse(json).conversation, transcript);
       const stats = hooks.buildLatestTransferStats(trace, 1);
       assert.equal(stats.summary.source, "local");
       assert.equal(stats.summary.model, "local-direct");
-      assert.equal(stats.summary.profile, "tiny");
+      assert.equal(stats.summary.profile, "direct");
       assert.equal(stats.summary.fetchMs, 0);
       assert.equal(stats.summary.maxTokens, 0);
       assert.equal(stats.summary.usage.totalTokens, 0);
@@ -2129,10 +2130,17 @@ test("up to 1,200 trimmed characters stay local on every platform without worker
       assert.equal(stats.summary.fallback.used, false);
     }
     assert.equal(summaryRequests, 0, hostname);
-    assert.equal(await hooks.summarizeWithBackend("x".repeat(1201)), "AI must never replace this tiny transcript.");
-    assert.equal(summaryRequests, 1, `${hostname}: 1,201 characters still use the backend`);
+    for (const transcript of ["x".repeat(10000), "x".repeat(350000), `${" ".repeat(9999)}x`]) {
+      assert.equal(await hooks.summarizeWithBackend(transcript), "AI must never replace this tiny transcript.");
+    }
+    assert.equal(summaryRequests, 3, `${hostname}: both inclusive AI boundaries and untrimmed length use the backend`);
+    await assert.rejects(hooks.summarizeWithBackend("x".repeat(500001)), error => {
+      assert.equal(error.code, "conversation_too_large");
+      assert.match(error.message, /500,000 character limit/);
+      return true;
+    });
     await assert.rejects(hooks.summarizeWithBackend("tiny", { deadlineAt: Date.now() - 1 }), /Transfer timed out/);
-    assert.equal(summaryRequests, 1, `${hostname}: expired tiny transfers stay cancelled`);
+    assert.equal(summaryRequests, 3, `${hostname}: oversized and expired transfers never reach the backend`);
   }
 });
 
@@ -2155,7 +2163,7 @@ clockTest("local and remote handoffs reveal without a cosmetic one-second delay"
   }
 });
 
-test("tiny local carry works offline and preserves code, Unicode, roles and blank lines", async () => {
+test("direct JSON carry works offline and preserves code, Unicode, roles and blank lines exactly", async () => {
   let summaryRequests = 0;
   const hooks = loadPlatformContent([], "chatgpt.com", { runtimeSendMessage: async message => {
     if (message.type === "SUMMARIZE_WITH_BACKEND") summaryRequests++;
@@ -2164,7 +2172,8 @@ test("tiny local carry works offline and preserves code, Unicode, roles and blan
   const conversation = "User: Keep this exactly.\r\n\r\nAssistant: 代码 🙂\r\n  const path = 'C:\\work';\u00a0 ";
   const trace = hooks.createTransferTrace("claude", "test");
   const summary = await hooks.summarizeWithBackend(conversation, trace);
-  assert.ok(summary.includes(conversation.replace(/\r\n?/g, "\n").trim().split("\n").map(line => `> ${line}`).join("\n")));
+  const json = summary.split("\n").find(line => line.startsWith('{"conversation":'));
+  assert.equal(JSON.parse(json).conversation, conversation);
   assert.match(summary, /Reply only: "Context loaded\. Let's pick up right where you left off\." Then wait for the user\./);
   assert.equal(summaryRequests, 0);
   assert.equal(hooks.buildLatestTransferStats(trace, 1).summary.fallback.used, false);
@@ -2219,7 +2228,7 @@ clockTest("destination status reports failure without overwriting a restored dra
 });
 
 test("captured context survives backend errors, empty replies, and a missing worker locally", async () => {
-  const conversation = "User: const path = 'C:\\work';\r\nAssistant: Keep this exact decision.\r\n".repeat(25);
+  const conversation = "User: const path = 'C:\\work';\r\nAssistant: Keep this exact decision.\r\n".repeat(200);
   const cases = [
     async () => ({ ok: false, code: "rate_limited", error: "private service body" }),
     async () => ({ ok: false, code: "service_busy" }),
@@ -2252,7 +2261,7 @@ test("local summary recovery retains the capture size boundary before contacting
     requests++;
     return { ok: true };
   } });
-  await assert.rejects(hooks.summarizeWithBackend("x".repeat(350001)), /350,000 character limit/);
+  await assert.rejects(hooks.summarizeWithBackend("x".repeat(500001)), /500,000 character limit/);
   assert.equal(requests, 0);
 });
 
@@ -2400,7 +2409,7 @@ test("source cancellation releases its lock and prevents late summary or local-c
     return { ok: true };
   } });
   const trace = hooks.beginTransferAttempt("gemini", "test");
-  const pending = hooks.summarizeWithBackend("x".repeat(1201), trace);
+  const pending = hooks.summarizeWithBackend("x".repeat(10000), trace);
   hooks.runtimeMessageListeners[0]({ type: "CANCEL_TRANSFER", transferId: trace.id }, {}, () => {});
   finishSummary({ ok: true, summary: "A late response must not resume this transfer." });
   await assert.rejects(pending, error => error.code === "user_cancelled");

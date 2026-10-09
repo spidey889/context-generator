@@ -351,16 +351,30 @@ test("Claude JSON capture still rejects missing parents and cyclic branches", as
   }
 });
 
+test("Claude JSON capture admits the direct range through 500,000 characters without clipping", async () => {
+  const baseline = setup();
+  await baseline.window.fetch(endpoint);
+  const overhead = (await baseline.window.__capCaptureClaudeJson()).text.length - "Selected answer".length;
+  for (const length of [350001, 500000, 500001]) {
+    const data = fixture();
+    data.chat_messages[2].content[1].text = "漢".repeat(length - overhead);
+    const h = setup(data);
+    await h.window.fetch(endpoint);
+    if (length > 500000) await assert.rejects(h.window.__capCaptureClaudeJson(), /500,000/);
+    else assert.equal((await h.window.__capCaptureClaudeJson()).text.length, length);
+  }
+});
+
 test("Claude JSON capture accepts the root sentinel and rejects oversized transcripts", async () => {
   const data = fixture();
   data.chat_messages[0].parent_message_uuid = "00000000-0000-0000-0000-000000000000";
   const harness = setup(data);
   await harness.window.fetch(endpoint);
   assert.equal((await harness.window.__capCaptureClaudeJson()).messageTurnCount, 2);
-  data.chat_messages[2].content[1].text = "x".repeat(350000);
+  data.chat_messages[2].content[1].text = "x".repeat(500000);
   const oversized = setup(data);
   await oversized.window.fetch(endpoint);
-  await assert.rejects(oversized.window.__capCaptureClaudeJson(), /350,000/);
+  await assert.rejects(oversized.window.__capCaptureClaudeJson(), /500,000/);
 });
 
 test("Claude JSON capture rejects explicit partial-history metadata without leaking payloads", async () => {

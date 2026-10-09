@@ -934,7 +934,7 @@
       }
 
       if (tried.length === 1) return `${formatModelDisplayName(tried[0])} served first\nNo fallback needed`;
-      if (summary.profile === "tiny" && servedModel === "local-direct" && !summary.fallback?.used) {
+      if (["tiny", "direct"].includes(summary.profile) && servedModel === "local-direct" && !summary.fallback?.used) {
         return "Local carry served\nNo provider model needed";
       }
       if (summary.servedBy === "local-direct") return "Local fallback served\nNo provider model needed";

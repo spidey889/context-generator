@@ -624,11 +624,11 @@ test("ChatGPT validates paste byte counts, truncation flags and transcript size 
   ]) {
     const { data, files, fetchImpl } = pasteFixture(); mutate(data, files);
     const harness = setup(data, 200, { fetchImpl }); await discover(harness);
-    await assert.rejects(harness.window.__capCaptureChatGptJson(), /JSON capture|350,000/);
+    await assert.rejects(harness.window.__capCaptureChatGptJson(), /JSON capture|500,000/);
   }
-  const { data, fetchImpl } = pasteFixture(["x".repeat(350000)]);
+  const { data, fetchImpl } = pasteFixture(["x".repeat(500000)]);
   const harness = setup(data, 200, { fetchImpl }); await discover(harness);
-  await assert.rejects(harness.window.__capCaptureChatGptJson(), /350,000/);
+  await assert.rejects(harness.window.__capCaptureChatGptJson(), /500,000/);
 });
 
 // Native format inspected in the owner's synthetic table chat on 2026-10-05:
@@ -690,9 +690,9 @@ test("ChatGPT rejects malformed, truncated and oversized recognized Python resul
     const h = setup(data); await discover(h);
     await assert.rejects(h.window.__capCaptureChatGptJson(), /ChatGPT JSON capture blocked/);
   }
-  const data = fixture(); addPythonResult(data, "x".repeat(350000));
+  const data = fixture(); addPythonResult(data, "x".repeat(500000));
   const h = setup(data); await discover(h);
-  await assert.rejects(h.window.__capCaptureChatGptJson(), /350,000/);
+  await assert.rejects(h.window.__capCaptureChatGptJson(), /500,000/);
 });
 
 // Native canvas format observed in both older code.text and newer text.parts
@@ -807,11 +807,25 @@ test("ChatGPT JSON capture rejects absent auth, changed routes, HTTP failures an
   await assert.rejects(moved.window.__capCaptureChatGptJson(), /changed during capture/);
   const forbidden = setup(fixture(), 403); await discover(forbidden);
   await assert.rejects(forbidden.window.__capCaptureChatGptJson(), /HTTP 403/);
-  const data = fixture(); data.mapping.answer.message.content.parts = ["x".repeat(350000)];
+  const data = fixture(); data.mapping.answer.message.content.parts = ["x".repeat(500000)];
   const huge = setup(data); await discover(huge);
-  await assert.rejects(huge.window.__capCaptureChatGptJson(), /350,000/);
+  await assert.rejects(huge.window.__capCaptureChatGptJson(), /500,000/);
 });
 
+
+test("ChatGPT JSON capture admits the direct range through 500,000 characters without clipping", async () => {
+  const baseline = setup();
+  await discover(baseline);
+  const overhead = (await baseline.window.__capCaptureChatGptJson()).text.length - "Selected answer".length;
+  for (const length of [350001, 500000, 500001]) {
+    const data = fixture();
+    data.mapping.answer.message.content.parts = ["漢".repeat(length - overhead)];
+    const h = setup(data);
+    await discover(h);
+    if (length > 500000) await assert.rejects(h.window.__capCaptureChatGptJson(), /500,000/);
+    else assert.equal((await h.window.__capCaptureChatGptJson()).text.length, length);
+  }
+});
 
 function jsonResponse(data, status = 200, headers = {}) {
   return new Response(JSON.stringify(data), { status, headers: { "content-type": "application/json", ...headers } });

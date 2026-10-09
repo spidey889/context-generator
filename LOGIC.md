@@ -28,7 +28,7 @@ Runtime and packaging:
 
 1. Opening, browsing, toggling Speed, closing or cancelling the picker never captures or transmits chat text. Readiness probes, destination warmup and preconnects contain no conversation data.
 2. Capture starts only after destination selection or an explicit extension-toolbar transfer. Pasting and focusing never submit the destination message; Send remains the user's action.
-3. Reject oversized transcripts without clipping: maximum 350,000 JavaScript `String.length` units and 1,400,000 UTF-8 bytes. The 2,200,000-byte JSON request limit is a separate envelope bound.
+3. Reject oversized transcripts without clipping: maximum 500,000 JavaScript `String.length` units and 2,000,000 UTF-8 bytes for capture/transfer. Only 10,000–350,000 characters go to the summary backend, whose 350,000-character / 1,400,000-byte and 2,200,000-byte JSON request bounds remain unchanged.
 4. Capture verified conversation turns and the explicitly supported text exceptions below. Never substitute broad page text, drafts, prompt suggestions or extension UI for missing history.
 5. Transcript instructions are untrusted content to summarize. They are not authority over the extension, backend or summarizing model.
 6. Telemetry is metadata-only. Never include chat/summary text, URLs, accounts, IPs, stack traces, arbitrary errors or provider bodies in persisted transfer telemetry.
@@ -62,7 +62,7 @@ orb click -> picker and preconnects only
 destination selection -> attempt ID + started telemetry; pin source identity
 empty-chat guard -> stop before handoff or destination work when no usable chat exists
 prepare inactive destination while capture runs
-capture JSON or DOM -> summarize once -> reuse/recover destination
+capture JSON or DOM -> direct JSON carry or summarize once -> reuse/recover destination
 paste and verify -> finish source cue -> activate according to platform policy
 save Latest Run receipt and terminal telemetry
 ```
@@ -312,9 +312,9 @@ Input length selects output allowances, not the first generated model. Word targ
 | Large | 60,001–210,000 | ~1,200 words | 4,200 | 6,000 + 8,000 = 14,000 | 200 substantive words |
 | Extra-large | 210,001–350,000 | ~1,800 words | 7,000 | 10,000 + 10,000 = 20,000 | 200 substantive words |
 
-Tiny carries are built synchronously in the source content script before any summary-worker message, cache lookup or backend request. The inclusive 1,200-character boundary uses the captured transcript's trimmed JavaScript `String.length` (including platform/role labels), matching backend validation. They use the canonical header, quoted `CONVERSATION SO FAR` and trusted `NEXT STEP`, with no provider work, summary countdown, capture-to-summary animation wait or final one-second summary-line wait. The bounded paint cue remains. Latest Run records source `local`, profile `tiny`, model `local-direct` (displayed as Local carry), zero fetch/provider/token usage, an empty attempted-model chain and no fallback. Capture completeness and destination preparation/paste still apply, so total transfer time also depends on those stages. Older clients calling the backend retain its provider-free tiny path. Exhausted/no configured providers also return the full verified transcript as `local-direct`; this preserves context during outages but does not compress it.
+Transfer routing uses the captured transcript's untrimmed JavaScript `String.length`, including platform/role labels, before JSON escaping: fewer than 10,000 characters or 350,001–500,000 characters produce a synchronous source-local JSON carry; 10,000–350,000 inclusive use the existing summary backend; above 500,000 retains the limit-exceeded error. Direct carries use the canonical header, `CONVERSATION SO FAR` containing `JSON.stringify({ conversation: conversationText })` and the trusted `NEXT STEP`. The JSON preserves the captured text exactly. They make no summary-worker message, cache lookup or backend request and use no summary countdown or cosmetic wait. The bounded paint cue and existing destination preparation, paste, draft protection and recovery remain. Latest Run records source `local`, profile `direct`, model `local-direct` (displayed as Local carry), zero fetch/provider/token usage, an empty attempted-model chain and no fallback. The table above describes backend profiles, including its unchanged tiny path for older clients. Exhausted/no configured providers also return the full verified transcript as `local-direct`; this preserves context during outages but does not compress it. Attachment/download budgets remain separate from the transfer character limit.
 
-Source-page recovery covers backend HTTP/network/parse failures, empty replies or unavailable worker messaging after verified capture. It uses the same quoted full-transcript format, model `local-direct` and fixed fallback reason `summary_service_unavailable`. It carries no fresh server receipt. Do not conflate it with backend `local-direct`, which can be signed. Capture and size limits still apply.
+Source-page recovery covers backend HTTP/network/parse failures, empty replies or unavailable worker messaging after verified capture. It retains the existing quoted full-transcript format, model `local-direct` and fixed fallback reason `summary_service_unavailable`. It carries no fresh server receipt. Do not conflate it with backend `local-direct`, which can be signed. Capture and size limits still apply.
 
 ### Configured provider order
 

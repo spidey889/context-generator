@@ -115,13 +115,15 @@
   const NO_CONVERSATION_ERROR_MESSAGE = "Send a message first, then try again.";
   const SUMMARY_RETRY_ERROR_TITLE = "Try again";
   const SUMMARY_RETRY_ERROR_MESSAGE = "Try again right now. We might have made a mistake. It almost never happens the second time.";
-  // Keep this aligned with api/request-security.js so unsupported captures never leave the extension.
+  // Only this middle range reaches api/request-security.js; direct carries stay local.
+  const MIN_BACKEND_CONVERSATION_CHARS = 10000;
   const MAX_BACKEND_CONVERSATION_CHARS = 350000;
+  const MAX_TRANSFER_CONVERSATION_CHARS = 500000;
   const TINY_DIRECT_PROFILE_MAX_CHARS = 1200;
   // Claude, ChatGPT and Grok need focus before composer hydration/verification.
   // Their source-side completion cue must finish before the background performs the focused paste.
   const FOCUSED_PASTE_DESTINATIONS = new Set(["claude", "chatgpt", "grok"]);
-  const OVERSIZED_CONVERSATION_ERROR_MESSAGE = "Conversation exceeds the supported 350,000 character limit";
+  const OVERSIZED_CONVERSATION_ERROR_MESSAGE = "Conversation exceeds the supported 500,000 character limit";
   const CONVERSATION_SCRAPE_RETRY_TIMEOUT_MS = 1800;
   const CONVERSATION_SCRAPE_RETRY_INTERVAL_MS = 140;
   const SOURCE_SCROLL_STABLE_TIMEOUT_MS = 1800;
@@ -997,7 +999,7 @@
 
   async function summarizeWithBackend(conversationText, trace = null) {
     checkTransferDeadline(trace);
-    if (conversationText.length > MAX_BACKEND_CONVERSATION_CHARS) {
+    if (conversationText.length > MAX_TRANSFER_CONVERSATION_CHARS) {
       const error = new Error(OVERSIZED_CONVERSATION_ERROR_MESSAGE);
       error.code = "conversation_too_large";
       throw error;
@@ -1008,9 +1010,9 @@
     setHandoffProgress("summary", "active", null, conversationText.length);
     let summary;
     let timing;
-    // Match the backend's trimmed String.length boundary, before messaging the
-    // worker. Tiny carries need neither network/storage work nor cosmetic waits.
-    if (conversationText.trim().length <= TINY_DIRECT_PROFILE_MAX_CHARS) {
+    // Route on the captured String.length before JSON escaping or trimming.
+    // Direct carries need neither a summary-worker request nor cosmetic waits.
+    if (conversationText.length < MIN_BACKEND_CONVERSATION_CHARS || conversationText.length > MAX_BACKEND_CONVERSATION_CHARS) {
       ({ summary, timing } = createLocalContextCarry(conversationText));
     } else {
       try {
@@ -1054,16 +1056,17 @@
 
   function createLocalContextCarry(conversationText, fallbackReason = null) {
     const startedAt = getNow();
-    const inputChars = conversationText.trim().length;
-    const quotedTranscript = conversationText.replace(/\r\n?/g, "\n").trim()
-      .split("\n").map(line => `> ${line}`).join("\n");
-    // Keep the quoted transcript and trusted footer aligned with the backend's
-    // direct carry. Source-local results have no server-signed summary receipt.
+    const inputChars = conversationText.length;
+    const transcript = fallbackReason
+      ? conversationText.replace(/\r\n?/g, "\n").trim().split("\n").map(line => `> ${line}`).join("\n")
+      : JSON.stringify({ conversation: conversationText });
+    // JSON preserves direct captures exactly; service-error recovery retains its
+    // existing quoted format. Both keep the trusted footer and have no server receipt.
     const summary = [
       "╔══════════════════════════════════════════╗",
       "║         CONTEXT CARRY — READY TO PASTE        ║",
       "╚══════════════════════════════════════════╝",
-      "", "💬 CONVERSATION SO FAR", quotedTranscript, "", "🔁 NEXT STEP",
+      "", "💬 CONVERSATION SO FAR", transcript, "", "🔁 NEXT STEP",
       'Reply only: "Context loaded. Let\'s pick up right where you left off." Then wait for the user.'
     ].join("\n");
     return {
@@ -1075,7 +1078,7 @@
         backend: {
           servedBy: "local-direct", provider: "local-direct", primaryModel: "local-direct", model: "local-direct",
           inputChars, outputChars: summary.length,
-          profile: fallbackReason ? null : "tiny", maxTokens: 0,
+          profile: fallbackReason ? null : "direct", maxTokens: 0,
           modelsTried: [], openrouterModelsTried: [], mistralModelsTried: [],
           ...(!fallbackReason ? {
             openrouterMs: 0, geminiMs: 0, mistralMs: 0, providerMs: 0, providerPasses: 0,
