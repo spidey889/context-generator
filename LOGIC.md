@@ -19,7 +19,7 @@ Runtime and packaging:
 
 - Node 22 for backend/scripts/CI. The extension has no build step or runtime npm dependencies; browser checks load `extension/` directly.
 - [extension/manifest.json](extension/manifest.json) is the version and shipped-host authority. It currently declares version `1.4.12`, Chromium service-worker and Firefox background-script variants. Automation uses Brave; that does not certify Firefox compatibility.
-- The extension's backend alias is `https://context-generator-five.vercel.app`. Its Latest Run bridge is injected on `https://spidey889.github.io/context-generator/analysis*`, not on arbitrary copies of the analysis page.
+- The extension's backend alias is `https://context-generator-five.vercel.app`. Its Latest Run bridge is injected on `https://spreadz.in/analysis*` and the legacy `https://spidey889.github.io/context-generator/analysis*` URL. It reads receipts from the same browser's extension storage independently of the Git branch; arbitrary copies of the analysis page do not receive the bridge. Reload the unpacked extension and refresh the analysis page after changing its manifest matches.
 - GitHub Pages publishes the static HTML/CSS homepage and analysis through Jekyll. Root `_config.yml` preserves the usual dependency exclusions. The Astro migration was abandoned; there is no separate website build.
 - The homepage shows the original 62-second demo at `#demo`, linked from the navigation and hero actions. It uses `brag/brag.mp4` and `brag/brag.jpg`, native controls and the existing visibility/reduced-motion/manual-pause playback behavior. The earlier recording `2026-05-10 09-51-15.mp4` is also retained. Both videos, the poster and editable film sources are intentional assets; the temporary picker screenshot was removed.
 - No release ZIP is tracked. Packaging and Web Store publication are separate from repository changes. Source version 1.4.12 adds structured transfer diagnostics to the delivery guards. A backend deployment or Git push cannot update installed content scripts; diagnostics require the new client. Verify the actual downloaded package rather than a cached listing or matching version number alone. Historical artifact evidence is in [the release-gap diagnosis](docs/claude-paste-release-gap.md). Product-film sources, reproduction instructions and credits remain in [brag/README.md](brag/README.md).
@@ -595,7 +595,7 @@ The manual `export-ranking.cjs` and `render-ranking-dark.py` scripts in that dir
 | Background messages/recovery/cache | `node --test test/background.test.js` | `npm test`; installed smoke if cross-tab behavior changes |
 | Prompts/routing/output policy | `node --test test/summarize.test.js test/request-security.test.js`; applicable routing/body-timeout tests | `npm run eval` probes deployed production, so a local prompt change needs a matching test deployment to assess its quality |
 | Telemetry/schema/counters | Telemetry delivery/handler/verified-receipt tests; `node scripts/check-verified-telemetry-db.js` | Backup restore/bounded upgrade, hosted grants/proof/counters when changing deployment, installed database smoke |
-| Latest Run | `node --test test/analysis.test.js` | Matched GitHub Pages analysis with extension loaded |
+| Latest Run | `node --test test/analysis.test.js` | `https://spreadz.in/analysis/` with extension loaded in the same browser |
 | Release/package | `npm test`, `npm run test:slow`, `npm run test:extension-smoke` | Appropriate live evaluation and ZIP hash/resource checks |
 
 Commands and evidence boundaries:

@@ -80,6 +80,7 @@
     },
     {
       "matches": [
+        "https://spreadz.in/analysis*",
         "https://spidey889.github.io/context-generator/analysis*"
       ],
       "js": ["analysis-bridge.js"],
