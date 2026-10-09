@@ -1,0 +1,270 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <title>Near-end handoff — Cap Context prototype</title>
+  <style>
+    :root {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      color: #f5f0ff;
+      background: #151316;
+      --muted: #b5adb9;
+      --accent: #c8b6e9;
+    }
+    * { box-sizing: border-box; }
+    [hidden] { display: none !important; }
+    body { margin: 0; min-width: 280px; }
+    button, textarea { font: inherit; }
+    button { cursor: pointer; }
+    button:disabled { cursor: default; opacity: .45; }
+    button:focus-visible, textarea:focus-visible {
+      outline: 2px solid var(--accent); outline-offset: 4px;
+    }
+    ::selection { background: #6b518a; color: #fff; }
+    .demo-bar {
+      min-height: 72px; padding: 16px 28px; display: flex; align-items: center;
+      justify-content: space-between; gap: 20px; background: #151316;
+    }
+    .demo-title { margin: 0; font-size: 17px; font-weight: 600; }
+    .demo-note { margin: 5px 0 0; font-size: 12px; color: var(--muted); }
+    .controls { display: flex; gap: 8px; flex-wrap: wrap; }
+    button {
+      border: 1px solid #51465e; border-radius: 9px; color: #f5f0ff;
+      background: #2b2433; padding: 9px 13px; font-size: 13px; font-weight: 500;
+    }
+    .primary { background: #c8b6e9; border-color: #c8b6e9; color: #20182c; }
+    button:hover:not(:disabled) { filter: brightness(1.12); }
+    .browser-tabs {
+      display: flex; gap: 6px; padding: 8px 20px 0; background: #211d25;
+      border-bottom: 1px solid #3e3647;
+    }
+    .browser-tab {
+      display: flex; align-items: center; gap: 9px; padding: 12px 17px;
+      border-radius: 10px 10px 0 0; font-size: 12px; color: var(--muted);
+    }
+    .browser-tab[aria-current="page"] { background: #302a35; color: #faf9fc; }
+    .browser-tab img { width: 18px; height: 18px; object-fit: contain; }
+    .workspace { position: relative; min-height: calc(100dvh - 120px); }
+    .chat {
+      min-height: calc(100dvh - 120px); padding: 28px;
+      display: flex; flex-direction: column; background: #212121;
+    }
+    .source { background: #252321; }
+    .chat-name { font-size: 18px; font-weight: 600; margin: 0; }
+    .conversation { width: min(680px, 100%); margin: 55px auto; line-height: 1.75; }
+    .message { margin: 0 0 30px; color: #e9e3dc; }
+    .message.user {
+      margin-left: auto; width: fit-content; max-width: 85%;
+      background: #363330; padding: 15px 20px; border-radius: 16px;
+    }
+    .message p { margin: 0 0 12px; }
+    .source-input { margin: auto auto 12px; width: min(700px, 100%); padding: 22px; border: 1px solid #554e48; border-radius: 16px; color: #bdb6ad; }
+    .handoff {
+      position: absolute; inset: 0; display: grid; place-items: center; padding: 24px;
+      background: rgba(18, 13, 24, .95);
+    }
+    .handoff-content { width: min(440px, 100%); }
+    .brand { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+    .brand strong { font-size: 19px; font-weight: 600; }
+    .countdown {
+      padding: 4px 10px; border-radius: 999px; background: #342b40;
+      color: #e1d6ee; font-size: 12px; font-variant-numeric: tabular-nums;
+    }
+    .handoff h2 { margin: 30px 0 9px; font-size: 27px; font-weight: 500; letter-spacing: -.02em; }
+    .handoff p { margin: 0; color: #c1b3d1; font-size: 14px; line-height: 1.6; }
+    .stages { list-style: none; padding: 0; margin: 30px 0 0; }
+    .stages li { display: flex; align-items: center; gap: 12px; margin: 18px 0; font-size: 13px; color: #b8a8cc; }
+    .stage-marker { width: 8px; height: 8px; flex: 0 0 auto; border-radius: 50%; background: #625470; }
+    .complete .stage-marker, .active .stage-marker { background: #c8b6e9; }
+    .stages .active { color: #f5f0ff; }
+    .stage-line { height: 2px; margin: 10px 0 0 20px; background: #3b2e4b; overflow: hidden; }
+    .stage-fill { width: 100%; height: 100%; background: #c8b6e9; transform: scaleX(.05); transform-origin: left; transition: transform .1s linear; }
+    .destination { min-height: calc(100dvh - 120px); }
+    .destination-center { width: min(730px, 100%); margin: auto; padding: 100px 0 110px; }
+    .destination h2 { margin: 0 0 35px; font-size: 30px; font-weight: 500; text-align: center; letter-spacing: -.02em; }
+    .composer {
+      padding: 18px 20px 12px; border-radius: 24px; background: #303030;
+    }
+    textarea {
+      display: block; width: 100%; min-height: 52px; max-height: 260px;
+      resize: vertical; background: transparent; border: 0; color: #ececec;
+      line-height: 1.6; font-size: 14px; caret-color: #c8b6e9;
+    }
+    textarea::placeholder { color: #bbb; opacity: 1; }
+    .composer-footer { display: flex; justify-content: space-between; align-items: center; color: #bbb; font-size: 12px; padding: 12px 0 0; }
+    .send { width: 32px; height: 32px; display: grid; place-items: center; border-radius: 50%; background: #eee; color: #252525; }
+    .send svg { width: 18px; height: 18px; }
+    .destination-status {
+      position: absolute; top: 24px; left: 50%; transform: translateX(-50%);
+      z-index: 2; width: max-content; max-width: calc(100% - 32px);
+      padding: 12px 18px; border-radius: 14px; background: #211b30;
+      color: #f5f0ff; box-shadow: 0 6px 24px #0004;
+      font: 500 14px/1.5 system-ui, sans-serif; text-align: center;
+      pointer-events: none;
+    }
+    .destination-status::before {
+      content: ""; display: inline-block; width: 6px; height: 6px;
+      margin: 0 10px 2px 0; border-radius: 50%; background: #c8b6e9;
+    }
+    @media (max-width: 600px) {
+      .demo-bar { padding: 15px 16px; align-items: flex-start; flex-direction: column; gap: 12px; }
+      .browser-tabs { padding-left: 10px; }
+      .browser-tab { padding: 12px 10px; font-size: 11px; gap: 6px; }
+      .chat { padding: 22px 16px; }
+      .destination-center { padding: 120px 0 70px; }
+      .destination h2 { font-size: 26px; }
+      .destination-status { top: 64px; }
+      .conversation { margin: 35px auto; }
+    }
+    @media (prefers-reduced-motion: reduce) { .stage-fill { transition: none; } }
+  </style>
+</head>
+<body>
+  <header class="demo-bar">
+    <div>
+      <h1 class="demo-title">Near-end handoff</h1>
+      <p class="demo-note">Interactive prototype · sample chat · simulated tab switch</p>
+    </div>
+    <div class="controls">
+      <button class="primary" id="start" type="button">Try the transfer</button>
+      <button id="skip" type="button" disabled>Skip to tab switch</button>
+    </div>
+  </header>
+  <nav class="browser-tabs" aria-label="Simulated browser tabs">
+    <div class="browser-tab" id="source-tab" aria-current="page">
+      <img src="../extension/logos/claude2download__1_-removebg-preview.png" alt="">
+      <span>Claude · old chat</span>
+    </div>
+    <div class="browser-tab" id="destination-tab">
+      <img src="../extension/logos/gptwhitedownload__1_-removebg-preview.png" alt="">
+      <span>ChatGPT · new chat</span>
+    </div>
+  </nav>
+  <main class="workspace" data-stage="idle">
+    <section class="chat source" id="source" aria-label="Original conversation">
+      <p class="chat-name">Claude</p>
+      <div class="conversation">
+        <div class="message user"><p>I'm building a simple notes app. Let's keep the first version small.</p></div>
+        <div class="message"><p>Start with a list of notes, a title and a text editor. Save changes automatically.</p><p>We can leave accounts and sharing for later. Next, let's decide how to store the notes.</p></div>
+        <div class="message user"><p>Cool, let's continue this in ChatGPT.</p></div>
+      </div>
+      <div class="source-input">Reply to Claude…</div>
+    </section>
+    <section class="handoff" id="handoff" aria-label="Transfer progress" hidden>
+      <div class="handoff-content">
+        <div class="brand"><strong>Cap Context</strong><span class="countdown" id="countdown">~10s</span></div>
+        <h2>Summarizing your chat</h2>
+        <p>Your conversation is on its way to ChatGPT.</p>
+        <ol class="stages">
+          <li class="complete"><span class="stage-marker"></span>Capturing chat</li>
+          <li class="active"><span class="stage-marker"></span>Summarizing</li>
+        </ol>
+        <div class="stage-line"><div class="stage-fill" id="stage-fill"></div></div>
+        <ol class="stages"><li><span class="stage-marker"></span>Pasting into destination</li></ol>
+      </div>
+    </section>
+    <section class="chat destination" id="destination" aria-label="New destination chat" hidden>
+      <p class="chat-name">ChatGPT</p>
+      <div class="destination-status" id="status" role="status" aria-live="polite" aria-atomic="true"></div>
+      <div class="destination-center">
+        <h2>What can I help with?</h2>
+        <div class="composer">
+          <textarea id="composer" aria-label="Demo destination composer" placeholder="Ask anything"></textarea>
+          <div class="composer-footer">
+            <span>Tools</span>
+            <span class="send" aria-label="Demo only; no message is sent">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M12 19V5m-6 6 6-6 6 6"/></svg>
+            </span>
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+  <script>
+    // This is a sample-only visual walkthrough. No extension, network, model or
+    // clipboard API is used. Its clock illustrates a proposal, not real AI work.
+    const CAPTURED_CONTEXT = [
+      "We're building a small notes app.",
+      "",
+      "Decisions so far:",
+      "• First version: a notes list, titles and a text editor.",
+      "• Save changes automatically.",
+      "• Accounts and sharing can wait.",
+      "",
+      "Next: decide how to store the notes.",
+      "",
+      'Reply only: "Context loaded. Let\'s pick up right where you left off." Then wait for the user.'
+    ].join("\n");
+    const ui = Object.fromEntries(
+      ["start", "skip", "source", "source-tab", "destination", "destination-tab",
+       "handoff", "countdown", "stage-fill", "status", "composer"]
+        .map(id => [id, document.getElementById(id)])
+    );
+    const workspace = document.querySelector(".workspace");
+    const SWITCH_AT = 7000;
+    const PASTE_AT = 10000;
+    const READY_AT = 11200;
+    let startedAt = 0;
+    let interval = null;
+    let stage = "idle";
+
+    function setStage(next) {
+      if (stage === next) return;
+      stage = next;
+      workspace.dataset.stage = stage;
+      const onDestination = ["polishing", "pasting", "ready"].includes(stage);
+      ui.source.hidden = onDestination;
+      ui.handoff.hidden = stage !== "summarizing";
+      ui.destination.hidden = !onDestination;
+      ui["source-tab"].toggleAttribute("aria-current", !onDestination);
+      ui["destination-tab"].toggleAttribute("aria-current", onDestination);
+      // aria-current uses a page token, rather than the boolean attribute value.
+      if (onDestination) ui["destination-tab"].setAttribute("aria-current", "page");
+      else ui["source-tab"].setAttribute("aria-current", "page");
+      ui.skip.disabled = stage !== "summarizing";
+      if (stage === "polishing") ui.status.textContent = "Your context is being polished…";
+      if (stage === "pasting") ui.status.textContent = "Pasting your context…";
+      if (stage === "ready") {
+        // Even this demo preserves a draft typed during the waiting period.
+        if (ui.composer.value.trim()) {
+          ui.status.textContent = "You started a draft. We kept it safe.";
+        } else {
+          ui.composer.value = CAPTURED_CONTEXT;
+          ui.composer.style.height = "260px";
+          ui.status.textContent = "Context ready. Send when you’re ready.";
+        }
+        clearInterval(interval);
+        interval = null;
+      }
+    }
+
+    function tick() {
+      const elapsed = performance.now() - startedAt;
+      ui.countdown.textContent = "~" + Math.max(1, Math.ceil((PASTE_AT - elapsed) / 1000)) + "s";
+      ui["stage-fill"].style.transform = "scaleX(" + Math.min(.9, .05 + elapsed / PASTE_AT * .85) + ")";
+      setStage(elapsed >= READY_AT ? "ready" : elapsed >= PASTE_AT ? "pasting"
+        : elapsed >= SWITCH_AT ? "polishing" : "summarizing");
+    }
+
+    ui.start.addEventListener("click", () => {
+      // A replay owns one clock. It cannot leave a previous paste callback alive.
+      clearInterval(interval);
+      ui.composer.value = "";
+      ui.composer.style.height = "";
+      ui.status.textContent = "";
+      ui.start.textContent = "Replay transfer";
+      startedAt = performance.now();
+      tick();
+      interval = setInterval(tick, 100);
+    });
+    ui.skip.addEventListener("click", () => {
+      startedAt = performance.now() - SWITCH_AT;
+      tick();
+    });
+    window.addEventListener("pagehide", () => clearInterval(interval));
+  </script>
+</body>
+</html>
+
