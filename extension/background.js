@@ -932,6 +932,23 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true;
   }
 
+  if (message?.type === "REVEAL_DESTINATION_PROGRESS") {
+    revealDestinationProgress(message.tabId, message.destination, message.deadlineAt, message.transferId, sender?.tab)
+      .then(() => sendResponse({ ok: true }))
+      .catch(error => sendResponse({ ok: false, error: error.message, code: error.code || "destination_open_failed" }));
+    return true;
+  }
+  if (message?.type === "END_DESTINATION_PROGRESS") {
+    const operation = transferOperations.get(message.transferId);
+    if (operation && operation.sourceTabId === sender?.tab?.id && operation.tabIds.has(message.tabId)
+        && message.tabId !== operation.sourceTabId) {
+      chrome.tabs.sendMessage(message.tabId, { type: "FINISH_TRANSFER_PROGRESS", transferId: message.transferId })
+        .catch(() => {});
+    }
+    sendResponse({ ok: true });
+    return false;
+  }
+
   if (message?.type === "ACTIVATE_DESTINATION_TAB") {
     activateVerifiedDestinationTab(message.tabId, message.destination, message.deadlineAt, message.transferId, sender?.tab)
       .then(() => sendResponse({ ok: true }))
@@ -1447,7 +1464,7 @@ async function transferToDestinationObserved(
   }
 
   await checkTransferSource(operation);
-  if (!deferFinalActivation && !destination.focusBeforePaste) {
+  if (!deferFinalActivation && !destination.focusBeforePaste && operation?.earlyRevealedTabId !== destinationTabId) {
     markBackgroundTrace(trace, "final tab activate start", { tabId: destinationTabId });
     await activateDestinationTab(destinationTabId, deadlineAt, operation);
     markBackgroundTrace(trace, "final tab activate done", { tabId: destinationTabId });
@@ -1497,8 +1514,9 @@ async function pasteIntoDestinationWithActivation(
   await checkTransferSource(trace?.operation);
   checkTransferDeadline(trace?.deadlineAt);
   // Focus is a paste prerequisite on these destinations, independent of whether
-  // final activation is deferred. Callers sequence the source completion cue first.
-  if (destination.focusBeforePaste) {
+  // final activation is deferred. Near-end reveal already provides that focus;
+  // ordinary callers sequence the source completion cue first.
+  if (destination.focusBeforePaste && trace?.operation?.earlyRevealedTabId !== tabId) {
     markBackgroundTrace(trace, "tab activate before paste start", { tabId });
     await activateDestinationTab(tabId, trace?.deadlineAt, trace?.operation);
     markBackgroundTrace(trace, "tab activate before paste done", { tabId });
@@ -1509,6 +1527,10 @@ async function pasteIntoDestinationWithActivation(
     }
   }
 
+  if (destination.focusBeforePaste && trace?.operation?.earlyRevealedTabId === tabId) {
+    const remainingSettle = Math.max(0, (destination.activationSettleMs || 0) - (Date.now() - trace.operation.earlyRevealedAt));
+    if (remainingSettle) await delay(remainingSettle);
+  }
   await checkTransferSource(trace?.operation);
   checkTransferDeadline(trace?.deadlineAt);
   markBackgroundTrace(trace, "paste message start", { tabId, destination: destinationId });
@@ -1601,6 +1623,33 @@ async function activateDestinationTab(tabId, deadlineAt = null, operation = null
   }
 }
 
+async function revealDestinationProgress(tabId, destinationId, deadlineAt, transferId, sourceTab) {
+  const operation = getTransferOperation(transferId, sourceTab, deadlineAt);
+  // This text-free status can reveal only the tab prepared for this attempt.
+  if (!operation || !operation.tabIds.has(tabId) || tabId === operation.sourceTabId
+      || !DESTINATIONS[destinationId] || !Number.isFinite(deadlineAt)) {
+    throw new Error("The prepared destination was not available.");
+  }
+  await checkTransferSource(operation);
+  if (!await isPreparedDestinationTabUsable(tabId, destinationId, operation)) {
+    throw new Error("The destination is no longer a new chat.");
+  }
+  try {
+    const response = await sendMessageWhenReady(tabId, {
+      type: "SHOW_TRANSFER_PROGRESS", phase: "polishing", destination: destinationId,
+      transferId, deadlineAt
+    }, 6000, DESTINATIONS[destinationId].name, { ...createBackgroundTrace(), operation });
+    if (response?.ok !== true) throw new Error("The destination was not ready.");
+    await activateVerifiedDestinationTab(tabId, destinationId, deadlineAt, transferId, sourceTab);
+    operation.earlyRevealedTabId = tabId;
+    // Retain native focus settling if the summary finishes immediately.
+    operation.earlyRevealedAt = Date.now();
+  } catch (error) {
+    chrome.tabs.sendMessage(tabId, { type: "FINISH_TRANSFER_PROGRESS", transferId }).catch(() => {});
+    throw error;
+  }
+}
+
 async function activateVerifiedDestinationTab(tabId, destinationId, deadlineAt = null, transferId = null, sourceTab = null) {
   const operation = getTransferOperation(transferId, sourceTab, deadlineAt);
   await checkTransferSource(operation);
@@ -1612,7 +1661,7 @@ async function activateVerifiedDestinationTab(tabId, destinationId, deadlineAt =
   if (!await isPreparedDestinationTabUsable(tabId, destinationId, operation)) {
     throw Object.assign(new Error("Destination tab changed before activation."), { diagnosticCode: "destination_not_new_chat" });
   }
-  await activateDestinationTab(tabId, deadlineAt, operation);
+  if (operation?.earlyRevealedTabId !== tabId) await activateDestinationTab(tabId, deadlineAt, operation);
 }
 
 async function pasteIntoDestinationTab(

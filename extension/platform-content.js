@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-09-transfer-diagnostics-v120";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-09-near-end-handoff-v121";
   const INLINE_PILL_SIZE = 36;
   const ownedUiStyleSheets = new Map();
   const CLAUDE_INLINE_STYLE_ID = "context-generator-claude-inline-styles";
@@ -515,6 +515,7 @@
   let inlinePathnamePollTimer = null;
   let pendingFloatingButtonReasons = new Set();
   let floatingButtonMonitoringDisabled = false;
+  let destinationWaitingStatus = null;
   let handoffCountdownTimer = null;
   let handoffCountdownHideTimer = null;
   let handoffActivityProgressFrame = null;
@@ -725,6 +726,7 @@
     if (message?.type === "CANCEL_TRANSFER") {
       activePasteGuards.get(message.transferId)?.cancel();
       cancelSourceTransfer(message.transferId);
+      finishDestinationWaitingStatus(message.transferId);
       sendResponse({ ok: true });
       return false;
     }
@@ -733,8 +735,32 @@
       return false;
     }
 
+    if (message?.type === "SHOW_TRANSFER_PROGRESS") {
+      const landingPaths = DESTINATION_LANDING_PATHS[currentPlatform.id] || [];
+      if (message.destination !== currentPlatform.id || message.phase !== "polishing"
+          || !message.transferId || !Number.isFinite(message.deadlineAt) || message.deadlineAt <= Date.now()
+          || !landingPaths.includes(window.location.pathname.replace(/\/+$/, "") || "/")
+          || getDetectedConversationMessageCount() > 0) {
+        sendResponse({ ok: false });
+        return false;
+      }
+      finishDestinationWaitingStatus(destinationWaitingStatus?.transferId);
+      const finish = showDestinationPasteStatus("Your context is being polished…");
+      const waiting = { transferId: message.transferId, finish, timer: null };
+      destinationWaitingStatus = waiting;
+      waiting.timer = setTimeout(() => finishDestinationWaitingStatus(message.transferId), message.deadlineAt - Date.now());
+      sendResponse({ ok: true });
+      return false;
+    }
+    if (message?.type === "FINISH_TRANSFER_PROGRESS") {
+      finishDestinationWaitingStatus(message.transferId, false);
+      sendResponse({ ok: true });
+      return false;
+    }
+
     if (message?.type === "PASTE_CONTEXT") {
       const pasteStartedAt = getNow();
+      finishDestinationWaitingStatus(destinationWaitingStatus?.transferId);
       const finishStatus = showDestinationPasteStatus();
       pasteIntoPlatform(message.text, message.destination, message.transferId, message.deadlineAt, message.sourceTabId)
         .then((timing) => {
@@ -767,7 +793,15 @@
     return false;
   }
 
-  function showDestinationPasteStatus() {
+  function finishDestinationWaitingStatus(transferId, result = null) {
+    if (!destinationWaitingStatus || destinationWaitingStatus.transferId !== transferId) return;
+    const waiting = destinationWaitingStatus;
+    destinationWaitingStatus = null;
+    clearTimeout(waiting.timer);
+    waiting.finish(result);
+  }
+
+  function showDestinationPasteStatus(text = "Pasting your context…") {
     if (!document.body) return () => {};
     document.getElementById(DESTINATION_STATUS_ID)?.remove();
     const status = document.createElement("div");
@@ -777,7 +811,7 @@
     status.setAttribute("aria-live", "polite");
     status.setAttribute("aria-atomic", "true");
     status.style.cssText = "position:fixed;top:20px;left:50%;transform:translateX(-50%);z-index:2147483647;box-sizing:border-box;max-width:calc(100vw - 32px);padding:12px 18px;border:1px solid #6b5c92;border-radius:14px;background:#211b30;color:#f5f0ff;box-shadow:0 6px 24px #0004;font:500 14px/1.5 system-ui,sans-serif;text-align:center;pointer-events:none;";
-    status.textContent = "Adding your context…";
+    status.textContent = text;
     document.body.appendChild(status);
     return (succeeded) => {
       // Late completion must not replace a newer transfer's cue or recreated UI.
@@ -860,7 +894,10 @@
       delay,
       getHandoffProgressState,
       getHandoffProgressStatusText,
-      completeHandoffForDestinationReveal
+      completeHandoffForDestinationReveal,
+      createEarlyDestinationReveal,
+      startHandoffCountdown,
+      stopHandoffCountdown
     });
   } else {
     startFloatingButtonMonitoring();
@@ -904,11 +941,20 @@
         showOverlay(destinationId);
       }
       transferStage = "summary";
-      summary = await summarizeWithBackend(conversationText, transferTrace);
+      const earlyReveal = createEarlyDestinationReveal(transferTrace, destinationPrepPromise);
+      try {
+        summary = await summarizeWithBackend(conversationText, transferTrace, earlyReveal.onNearEnd);
+      } finally {
+        earlyReveal.stop();
+        stopHandoffCountdown();
+      }
+      // Serialize an already-started reveal with paste so a late status message
+      // cannot replace the real paste cue or focus the tab after delivery.
       checkTransferDeadline(transferTrace);
-      stopHandoffCountdown();
       markTransferTrace(transferTrace, "summary available", { chars: summary.length });
       setHandoffProgress("summary", "done");
+      await earlyReveal.wait();
+      checkTransferDeadline(transferTrace);
       transferStage = "destination";
       const preparedDestination = destinationPrepPromise ? await destinationPrepPromise : null;
       checkTransferDeadline(transferTrace);
@@ -942,16 +988,18 @@
       if (!requiresFocusedPaste) {
         await completeHandoffForDestinationReveal(transferTrace, true);
         checkTransferDeadline(transferTrace);
-        markTransferTrace(transferTrace, "final tab activate start");
-        await notifyBackground({
-          type: "ACTIVATE_DESTINATION_TAB",
-          destination: destinationId,
-          transferId: transferTrace.id,
-          deadlineAt: transferTrace.deadlineAt,
-          tabId: pasteResponse?.timing?.tabId || null
-        });
-        checkTransferDeadline(transferTrace);
-        markTransferTrace(transferTrace, "final tab activate done");
+        if (transferTrace.earlyDestinationTabId !== pasteResponse?.timing?.tabId) {
+          markTransferTrace(transferTrace, "final tab activate start");
+          await notifyBackground({
+            type: "ACTIVATE_DESTINATION_TAB",
+            destination: destinationId,
+            transferId: transferTrace.id,
+            deadlineAt: transferTrace.deadlineAt,
+            tabId: pasteResponse?.timing?.tabId || null
+          });
+          checkTransferDeadline(transferTrace);
+          markTransferTrace(transferTrace, "final tab activate done");
+        }
       }
       markTransferTrace(transferTrace, "transfer complete");
       finishTransferTrace(transferTrace);
@@ -997,7 +1045,7 @@
     showErrorOverlay(error?.message || "Transfer failed. Please try again.");
   }
 
-  async function summarizeWithBackend(conversationText, trace = null) {
+  async function summarizeWithBackend(conversationText, trace = null, onNearEnd = null) {
     checkTransferDeadline(trace);
     if (conversationText.length > MAX_TRANSFER_CONVERSATION_CHARS) {
       const error = new Error(OVERSIZED_CONVERSATION_ERROR_MESSAGE);
@@ -1016,7 +1064,7 @@
       ({ summary, timing } = createLocalContextCarry(conversationText));
     } else {
       try {
-        startHandoffCountdown(getHandoffSummaryLineDuration(conversationText.length));
+        startHandoffCountdown(getHandoffSummaryLineDuration(conversationText.length), onNearEnd);
         const response = await notifyBackground({
           type: "SUMMARIZE_WITH_BACKEND",
           conversation: conversationText,
@@ -1094,6 +1142,39 @@
             model: fallbackReason ? "local-direct" : null, reason: fallbackReason }
         }
       }
+    };
+  }
+
+  function createEarlyDestinationReveal(trace, preparedDestinationPromise) {
+    let pending = true;
+    let work = null;
+    return {
+      onNearEnd() {
+        if (!pending || work) return;
+        work = (async () => {
+          const prepared = await preparedDestinationPromise;
+          if (!pending || !instanceActive || trace.completed || trace.cancelled || trace.expired || !Number.isInteger(prepared?.tabId)) return;
+          checkTransferDeadline(trace);
+          trace.earlyProgressTabId = prepared.tabId;
+          const response = await notifyBackground({
+            type: "REVEAL_DESTINATION_PROGRESS", destination: trace.destinationId,
+            tabId: prepared.tabId, transferId: trace.id, deadlineAt: trace.deadlineAt
+          });
+          checkTransferDeadline(trace);
+          if (response?.ok === true) {
+            trace.earlyDestinationTabId = prepared.tabId;
+            markTransferTrace(trace, "destination revealed near countdown end", { tabId: prepared.tabId });
+          }
+        })().catch(error => {
+          // Presentation cannot replace the transfer or its recovery path.
+          // Tab closure remains cancellation.
+          if (Number.isInteger(trace.earlyProgressTabId)) notifyBackground({ type: "END_DESTINATION_PROGRESS",
+            transferId: trace.id, tabId: trace.earlyProgressTabId }).catch(() => {});
+          if (error?.code === "user_cancelled") cancelSourceTransfer(trace.id, trace);
+        });
+      },
+      stop() { pending = false; },
+      wait() { return work || Promise.resolve(); }
     };
   }
 
@@ -2158,6 +2239,10 @@
     if (!trace || trace.completed) return;
     trace.sourceGuard?.dispose();
     trace.completed = true;
+    if (telemetryFailureReason && Number.isInteger(trace.earlyProgressTabId)) {
+      notifyBackground({ type: "END_DESTINATION_PROGRESS", transferId: trace.id,
+        tabId: trace.earlyProgressTabId }).catch(() => {});
+    }
     const totalMs = Math.round(getNow() - trace.startedAt);
     const failed = trace.marks.some((mark) => mark.label.startsWith("failed:"));
     if (failed && !trace.diagnostics?.error_code) {
@@ -8383,19 +8468,24 @@
     markTransferTrace(trace, "handoff finish done");
   }
 
-  function startHandoffCountdown(durationMs) {
+  function startHandoffCountdown(durationMs, onNearEnd = null) {
     stopHandoffCountdown();
     const countdown = document.getElementById(HANDOFF_COUNTDOWN_ID);
     if (!countdown) return;
 
     const startMs = durationMs;
     const startedAt = getNow();
+    let revealed = false;
     countdown.setAttribute("aria-label", "Estimated time remaining");
     countdown.style.display = "inline-flex";
     countdown.style.opacity = "1";
 
     const updateCountdown = () => {
       const remainingMs = startMs - (getNow() - startedAt);
+      if (!revealed && remainingMs <= 3000) {
+        revealed = true;
+        onNearEnd?.();
+      }
       if (remainingMs <= 0) {
         hideHandoffCountdown(countdown);
         return;

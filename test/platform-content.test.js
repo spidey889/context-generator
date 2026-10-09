@@ -2176,6 +2176,90 @@ test("direct text carry works offline and preserves code, Unicode, roles and bla
   assert.equal(hooks.buildLatestTransferStats(trace, 1).summary.fallback.used, false);
 });
 
+clockTest("the countdown requests one early reveal with three seconds remaining", (t) => {
+  const hooks = loadPlatformContent([]);
+  hooks.window.performance.now = () => Date.now();
+  const countdown = new FakeElement();
+  hooks.registerElementId("context-generator-handoff-countdown", countdown);
+  let calls = 0;
+  hooks.startHandoffCountdown(20000, () => calls++);
+  t.mock.timers.tick(16750);
+  assert.equal(calls, 0);
+  t.mock.timers.tick(250);
+  assert.equal(calls, 1);
+  t.mock.timers.tick(2750);
+  assert.equal(calls, 1);
+  hooks.stopHandoffCountdown();
+});
+
+test("early reveal uses the prepared tab once and never carries conversation text", async () => {
+  const messages = [];
+  const hooks = loadPlatformContent([], "chatgpt.com", { runtimeSendMessage: async message => {
+    messages.push(message);
+    return { ok: true };
+  } });
+  const trace = hooks.createTransferTrace("claude", "test");
+  trace.destinationId = "claude";
+  trace.deadlineAt = Date.now() + 10000;
+  const reveal = hooks.createEarlyDestinationReveal(trace, Promise.resolve({ tabId: 41 }));
+  reveal.onNearEnd();
+  reveal.onNearEnd();
+  await reveal.wait();
+  reveal.stop();
+  assert.equal(messages.length, 1);
+  assert.equal(messages[0].type, "REVEAL_DESTINATION_PROGRESS");
+  assert.equal(messages[0].tabId, 41);
+  assert.equal(Object.hasOwn(messages[0], "text"), false);
+  assert.equal(Object.hasOwn(messages[0], "conversation"), false);
+  assert.equal(trace.earlyDestinationTabId, 41);
+});
+
+test("summary completion, cancellation and teardown cannot trigger a delayed reveal", async () => {
+  for (const reason of ["summary", "completed", "cancelled", "expired", "teardown"]) {
+    const messages = [];
+    const hooks = loadPlatformContent([], "chatgpt.com", { runtimeSendMessage: async message => {
+      messages.push(message);
+      return { ok: true };
+    } });
+    const trace = hooks.createTransferTrace("claude", "test");
+    let prepare;
+    const reveal = hooks.createEarlyDestinationReveal(trace, new Promise(resolve => { prepare = resolve; }));
+    reveal.onNearEnd();
+    if (reason === "summary") reveal.stop();
+    else if (reason === "teardown") hooks.teardownContextGeneratorInstance();
+    else trace[reason] = true;
+    prepare({ tabId: 41 });
+    await reveal.wait();
+    assert.equal(messages.length, 0, reason);
+  }
+});
+
+clockTest("waiting destination cues expire and ignore cancellation of another attempt", async () => {
+  const input = new FakeElement({ tag: "textarea", attrs: { id: "prompt-textarea" } });
+  input.value = "My waiting draft";
+  const hooks = loadPlatformContent([input]);
+  hooks.document.createElement = () => {
+    const node = new FakeElement();
+    node.remove = () => { node.isConnected = false; };
+    return node;
+  };
+  hooks.document.getElementById = id => hooks.document.body.children.find(node => node.id === id && node.isConnected) || null;
+  const listener = hooks.runtimeMessageListeners[0];
+  const message = { type: "SHOW_TRANSFER_PROGRESS", phase: "polishing", destination: "chatgpt",
+    transferId: "waiting-test", deadlineAt: Date.now() + 1000 };
+  let result;
+  listener(message, {}, response => { result = response; });
+  assert.equal(result.ok, true);
+  const cue = hooks.document.getElementById("context-generator-destination-status");
+  assert.equal(cue.textContent, "Your context is being polished…");
+  assert.equal(input.value, "My waiting draft");
+  listener({ type: "CANCEL_TRANSFER", transferId: "another-attempt" }, {}, () => {});
+  assert.equal(cue.isConnected, true);
+  await hooks.delay(1100);
+  assert.equal(cue.isConnected, false);
+  assert.equal(input.value, "My waiting draft");
+});
+
 clockTest("destination status follows verified insertion and cleans up without submitting", async () => {
   const input = new FakeElement({ tag: "textarea", attrs: { id: "prompt-textarea" } });
   const hooks = loadPlatformContent([input]);
@@ -2191,7 +2275,7 @@ clockTest("destination status follows verified insertion and cleans up without s
   const response = new Promise(resolve => { respond = resolve; });
   assert.equal(listener({ type: "PASTE_CONTEXT", destination: "chatgpt", text: "context ready", deadlineAt: Date.now() + 10000 }, {}, respond), true);
   const cue = hooks.document.getElementById("context-generator-destination-status");
-  assert.equal(cue.textContent, "Adding your context…");
+  assert.equal(cue.textContent, "Pasting your context…");
   assert.equal(cue.getAttribute("role"), "status");
   const result = await response;
   assert.equal(result.ok, true);

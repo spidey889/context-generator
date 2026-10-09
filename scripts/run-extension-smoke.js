@@ -33,6 +33,8 @@ const SUMMARY_TEXT = [
 ].join("\n");
 const SMOKE_PLATFORM_QUERY = "__cap_context_smoke_platform";
 const SMOKE_TIMEOUT_MS = Number(process.env.CAP_CONTEXT_SMOKE_TIMEOUT_MS || 45000);
+const EARLY_HANDOFF_SMOKE = process.env.CAP_CONTEXT_EARLY_HANDOFF_SMOKE === "1";
+const HANDOFF_SCREENSHOT_PATH = process.env.CAP_CONTEXT_HANDOFF_SCREENSHOT || "";
 const CLAUDE_PLACEMENT_SCREENSHOT_PATH = process.env.CAP_CONTEXT_CLAUDE_PLACEMENT_SCREENSHOT || "";
 const CHATGPT_PLACEMENT_SCREENSHOT_PATH = process.env.CAP_CONTEXT_CHATGPT_PLACEMENT_SCREENSHOT || "";
 const PROVIDER_PLACEMENT_SCREENSHOT_DIR = process.env.CAP_CONTEXT_PROVIDER_PLACEMENT_SCREENSHOT_DIR || "";
@@ -631,6 +633,11 @@ async function startFixtureServer() {
       let rawBody = "";
       for await (const chunk of request) rawBody += chunk;
       state.summaryRequests.push(JSON.parse(rawBody));
+      if (EARLY_HANDOFF_SMOKE) {
+        state.summaryPending = true;
+        await new Promise(resolve => setTimeout(resolve, 21000));
+        state.summaryPending = false;
+      }
       const receipt = await telemetryFixture.signSummary(state.summaryRequests.at(-1)?.telemetry);
       const streaming = request.headers.accept === "application/x-ndjson";
       response.writeHead(200, {
@@ -1069,6 +1076,66 @@ async function verifyEmptyChatError(session, browserSession, state, { removeTurn
   })()`);
 }
 
+async function verifyEarlyHandoff({ sourceSession, devToolsPort, origin, state, destinationSessions }) {
+  assert.ok(!JSON_CAPTURE_SMOKE, "Early handoff mode uses the controlled DOM source.");
+  // The broader suite emulates source focus. Turn that off for this check so
+  // the destination focus is owned entirely by the extension's real tab API.
+  await sourceSession.call("Emulation.setFocusEmulationEnabled", { enabled: false });
+  await sourceSession.evaluate(`(() => {
+    document.getElementById("context-generator-bubble").click();
+    const toggle = document.querySelector(".context-generator-speed-toggle");
+    if (toggle?.getAttribute("aria-pressed") === "true") toggle.click();
+    const tile = [...document.querySelectorAll(".context-generator-destination-tile")]
+      .find(node => node.textContent.includes("Claude"));
+    if (!tile) throw new Error("Claude destination tile missing");
+    tile.click();
+    return true;
+  })()`);
+  await waitFor(() => state.summaryRequests.length === 1, "the single pending handoff summary request");
+  const early = await waitFor(async () => {
+    for (const target of (await getTargets(devToolsPort)).filter(target => target.type === "page" && target.url.startsWith(origin + "/destination"))) {
+      let session = destinationSessions.get(target.id);
+      if (!session) {
+        session = await CdpSession.connect(target.webSocketDebuggerUrl);
+        destinationSessions.set(target.id, session);
+        await session.call("Runtime.enable");
+      }
+      const status = await session.evaluate('({ text: document.getElementById("context-generator-destination-status")?.textContent, value: document.querySelector("textarea")?.value })');
+      if (status.text !== "Your context is being polished…" || status.value !== "") continue;
+      // Query native tab/window state: DevTools page attachment can influence
+      // document.visibilityState even when the extension activated the tab.
+      const worker = (await getTargets(devToolsPort)).find(item => item.type === "service_worker" && item.url.endsWith("/background.js"));
+      if (!worker) continue;
+      const workerSession = await CdpSession.connect(worker.webSocketDebuggerUrl);
+      try {
+        const focus = await workerSession.evaluate(`(async () => {
+          const tab = (await chrome.tabs.query({})).find(tab => tab.url === ${JSON.stringify(target.url)});
+          return tab && { active: tab.active, focused: (await chrome.windows.get(tab.windowId)).focused };
+        })()`);
+        if (focus?.active && focus?.focused) return { session, status };
+      } finally { workerSession.close(); }
+    }
+    return null;
+  }, "the early destination reveal before summary completion", 25000);
+  assert.equal(state.summaryPending, true, "Polishing precedes the real summary response.");
+  if (HANDOFF_SCREENSHOT_PATH) {
+    await fs.promises.mkdir(path.dirname(HANDOFF_SCREENSHOT_PATH), { recursive: true });
+    const shot = await early.session.call("Page.captureScreenshot", { format: "png" });
+    await fs.promises.writeFile(HANDOFF_SCREENSHOT_PATH, Buffer.from(shot.data, "base64"));
+  }
+  process.stdout.write("✓ Near-end reveal focuses the prepared tab while the real summary is pending; composer remains empty.\n");
+  await waitFor(async () => await early.session.evaluate('document.querySelector("textarea")?.value') === SUMMARY_TEXT, "the exact real handoff paste");
+  const history = await waitFor(async () => {
+    const values = await early.session.evaluate("window.__capContextSmokeStatusHistory");
+    return values.some(text => text.startsWith("Context ready.")) ? values : null;
+  }, "the verified ready cue");
+  assert.ok(history.indexOf("Your context is being polished…") < history.indexOf("Pasting your context…"));
+  assert.equal(await early.session.evaluate("window.__capContextSmokeSendClicks"), 0);
+  assert.equal(state.summaryRequests.length, 1);
+  assert.equal(destinationSessions.size, 1, "One prepared destination, no duplicate recovery.");
+  process.stdout.write("✓ Polishing → real paste → verified ready; exact text, one summary, one destination, no Send click.\n");
+}
+
 async function run() {
   assert.equal(typeof WebSocket, "function", "This smoke test requires Node.js with the built-in WebSocket client.");
   const braveExecutable = findBraveExecutable();
@@ -1165,6 +1232,10 @@ async function run() {
       await waitFor(() => sourceSession.evaluate("Boolean(window.__capSmokeNativeRequestReady)"), "the fixture's initial native request");
     }
     process.stdout.write("✓ Brave loaded the unpacked extension on the controlled source page.\n");
+    if (EARLY_HANDOFF_SMOKE) {
+      await verifyEarlyHandoff({ sourceSession, devToolsPort, origin, state, destinationSessions });
+      return;
+    }
     if (!JSON_CAPTURE_SMOKE) {
       await verifyEmptyChatError(sourceSession, browserSession, state, { removeTurns: true, screenshot: true });
       process.stdout.write("✓ Empty ChatGPT shows its error directly, opens no destination, and supports repeated attempts/reduced motion.\n");
@@ -1980,7 +2051,7 @@ async function run() {
       const history = await destinationSession.evaluate("window.__capContextSmokeStatusHistory");
       return history.some(text => text.startsWith("Context ready.")) ? history : null;
     }, "the verified destination-ready cue");
-    assert.ok(statusHistory.includes("Adding your context…"), "Destination explains insertion while it is pending.");
+    assert.ok(statusHistory.includes("Pasting your context…"), "Destination explains insertion while it is pending.");
     assert.ok(statusHistory.some(text => text.startsWith("Context ready.")), "Ready cue follows verified insertion.");
     const workerTarget = (await getTargets(devToolsPort)).find(target => target.type === "service_worker" && target.url.endsWith("/background.js"));
     assert.ok(workerTarget, "Transfer worker must be available for tab-placement verification.");

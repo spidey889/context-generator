@@ -217,11 +217,15 @@ function loadBackgroundForTransferTest({
         if (keepsChannelOpen !== true) reject(new Error("transfer listener did not keep the response channel open"));
       });
     },
-    activateDestination(destination, tabId, deadlineAt = null) {
+    revealDestination(destination, tabId, senderTab, deadlineAt = Date.now() + 10000) {
+      return new Promise(resolve => messageListener({ type: "REVEAL_DESTINATION_PROGRESS",
+        destination, tabId, transferId: "transfer-test", deadlineAt }, { tab: senderTab }, resolve));
+    },
+    activateDestination(destination, tabId, deadlineAt = null, senderTab = null) {
       return new Promise((resolve, reject) => {
         const keepsChannelOpen = messageListener(
-          { type: "ACTIVATE_DESTINATION_TAB", destination, tabId, deadlineAt },
-          {},
+          { type: "ACTIVATE_DESTINATION_TAB", destination, tabId, deadlineAt, transferId: "transfer-test" },
+          { tab: senderTab },
           resolve
         );
         if (keepsChannelOpen !== true) reject(new Error("activation listener did not keep the response channel open"));
@@ -388,6 +392,53 @@ test("closing one source does not cancel a shared summary needed by another sour
   finish();
   assert.equal((await waiter).summary, "Shared context");
   assert.equal(fetches, 1);
+});
+
+test("near-end reveal is text-free and subsequent delivery never steals focus again", async () => {
+  for (const destination of ["claude", "chatgpt", "grok", "gemini", "deepseek"]) {
+    const sourceTab = { id: 9, windowId: 1, index: 0 };
+    const harness = loadBackgroundForTransferTest({ sourceTab });
+    const prepared = await harness.prepare(destination, sourceTab);
+    const reveal = await harness.revealDestination(destination, prepared.tabId, sourceTab);
+    assert.equal(reveal.ok, true, destination);
+    const progress = harness.operations.sent.find(({ message }) => message.type === "SHOW_TRANSFER_PROGRESS");
+    assert.equal(progress.message.phase, "polishing");
+    assert.equal(Object.hasOwn(progress.message, "text"), false);
+    assert.equal(harness.operations.updated.length, 1);
+    assert.equal(harness.operations.sent.some(({ message }) => message.type === "PASTE_CONTEXT"), false);
+    const response = await harness.sendTransfer(destination, prepared.tabId, false, null, sourceTab);
+    assert.equal(response.ok, true, destination);
+    assert.equal(harness.operations.updated.length, 1, destination + ": no second focus while delivering");
+    assert.equal(harness.operations.sent.filter(({ message }) => message.type === "PASTE_CONTEXT").length, 1);
+    assert.equal((await harness.activateDestination(destination, prepared.tabId, null, sourceTab)).ok, true);
+    assert.equal(harness.operations.updated.length, 1, "Final reveal also respects the earlier switch.");
+  }
+});
+
+test("early reveal rejects unrelated, navigated and closed destinations", async () => {
+  const sourceTab = { id: 9, windowId: 1, index: 0 };
+  for (const variant of ["unrelated", "navigated", "closed", "expired"]) {
+    const harness = loadBackgroundForTransferTest({ sourceTab });
+    const prepared = await harness.prepare("chatgpt", sourceTab);
+    const created = harness.operations.created[0].tab;
+    if (variant === "navigated") created.url = "https://chatgpt.com/c/saved-chat";
+    if (variant === "closed") await harness.closeTab(prepared.tabId);
+    const result = await harness.revealDestination("chatgpt",
+      variant === "unrelated" ? 999 : prepared.tabId, sourceTab,
+      variant === "expired" ? Date.now() - 1 : Date.now() + 10000);
+    assert.equal(result.ok, false, variant);
+    assert.equal(harness.operations.updated.length, 0, variant);
+    assert.equal(harness.operations.sent.some(({ message }) => message.type === "SHOW_TRANSFER_PROGRESS"), false, variant);
+  }
+});
+
+test("a failed early focus clears its status and retains normal paste recovery", async () => {
+  const sourceTab = { id: 9, windowId: 1, index: 0 };
+  const harness = loadBackgroundForTransferTest({ sourceTab, updateError: true });
+  const prepared = await harness.prepare("claude", sourceTab);
+  assert.equal((await harness.revealDestination("claude", prepared.tabId, sourceTab)).ok, false);
+  assert.ok(harness.operations.sent.some(({ message }) => message.type === "FINISH_TRANSFER_PROGRESS"));
+  assert.equal(harness.operations.sent.some(({ message }) => message.type === "PASTE_CONTEXT"), false);
 });
 
 test("focused delivery switches once and never reactivates after verification", async () => {
