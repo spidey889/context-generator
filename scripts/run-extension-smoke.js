@@ -218,7 +218,12 @@ async function createSmokeExtension(tempRoot, origin) {
   platformSource = replaceOnce(platformSource,
     "  function checkInlinePlacementPathname() {",
     `  window.__capSmokePickerJsonReady = () => pickerJsonCapture?.promise.then(() => true) || Promise.resolve(false);
-  window.__capSmokeSourceRouteReady = () => lastInlinePlacementPathname === window.location.pathname;
+  window.__capSmokeSourceRouteReady = () => {
+    const mount = currentPlatform.id === "claude" ? claudeInlineMount
+      : currentPlatform.id === "chatgpt" ? chatGptInlineMount : providerInlineMount;
+    return lastInlinePlacementPathname === window.location.pathname && !floatingButtonFrame
+      && (!mount || mount.pathname === window.location.pathname);
+  };
   window.__capSmokeChatGptMountReady = () => Boolean(chatGptInlineMount?.input?.isConnected
       && chatGptInlineMount?.bubble?.isConnected && chatGptInlineMount.pathname === window.location.pathname);
   function checkInlinePlacementPathname() {`,
@@ -1751,6 +1756,7 @@ async function run() {
       // verified separately below, without duplicating attachment downloads.
       const toggleSourceUrl = await sourceSession.evaluate("location.href");
       await sourceSession.evaluate(`history.replaceState({}, "", "/?${SMOKE_PLATFORM_QUERY}=${JSON_SOURCE}"); true`);
+      await waitFor(() => sourceSession.evaluate("window.__capSmokeSourceRouteReady()", sourceSession.getExtensionContextId()), "source mounting before the capture-toggle picker");
       await sourceSession.evaluate(`document.getElementById("context-generator-bubble").click()`);
       assert.equal(await sourceSession.evaluate(`document.getElementById("context-generator-${JSON_SOURCE}-json-toggle").getAttribute("aria-pressed")`), "true", "Fast capture must start enabled.");
       await waitFor(async () => await sourceSession.evaluate(`getComputedStyle(document.getElementById("context-generator-${JSON_SOURCE}-json-toggle")).color`) === "rgb(250, 204, 21)", "the default fast-capture enabled color");
@@ -1804,7 +1810,12 @@ async function run() {
     // capture so hidden-tab throttling cannot turn this into a timing test.
     await sourceSession.call("Page.bringToFront");
     const pickerSourceUrl = await sourceSession.evaluate("location.href");
-    if (JSON_CAPTURE_SMOKE) await sourceSession.evaluate(`history.replaceState({}, "", "/?${SMOKE_PLATFORM_QUERY}=${JSON_SOURCE}"); true`);
+    if (JSON_CAPTURE_SMOKE) {
+      await sourceSession.evaluate(`history.replaceState({}, "", "/?${SMOKE_PLATFORM_QUERY}=${JSON_SOURCE}"); true`);
+      // The route poll can finish before its placement frame updates the mount.
+      // Opening with the old owner would correctly dismiss the new picker.
+      await waitFor(() => sourceSession.evaluate("window.__capSmokeSourceRouteReady()", sourceSession.getExtensionContextId()), "source mounting before the product picker");
+    }
     await verifyPickerProductChanges(sourceSession, state);
     if (JSON_CAPTURE_SMOKE) {
       await sourceSession.evaluate(`history.replaceState({}, "", ${JSON.stringify(pickerSourceUrl)}); true`);
