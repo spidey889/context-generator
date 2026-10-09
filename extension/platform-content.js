@@ -7355,9 +7355,10 @@
   function captureSourceJson(expectedPath, shouldRead = () => true) {
     // Native bridges allow one read at a time. A dismissed read may still be
     // finishing; queue its replacement rather than provoking a busy fallback.
+    const transferTrace = isRunning ? activeTransferTrace : null;
     const pending = pendingJsonCapture.then(() => {
       if (!instanceActive || !shouldRead()) throw createDiagnosticError("The conversation changed during capture.", "conversation_changed");
-      if (isRunning) checkTransferDeadline(activeTransferTrace);
+      checkTransferDeadline(transferTrace);
       const captureJson = currentPlatform.id === "claude" ? window.__capCaptureClaudeJson
         : currentPlatform.id === "chatgpt" ? window.__capCaptureChatGptJson : window.__capCaptureNetworkJson;
       if (typeof captureJson !== "function") throw createDiagnosticError(`Refresh ${currentPlatform.name} to enable JSON capture.`, "capture_json_unavailable");
@@ -7382,7 +7383,10 @@
     pickerJsonCapture = entry;
     const path = currentPlatform.id === "grok" ? window.location.href : window.location.pathname;
     // Failures stay silent until selection, when the existing DOM fallback owns them.
-    entry.promise = captureSourceJson(path, () => entry.selected || pickerJsonCapture === entry)
+    entry.promise = captureSourceJson(path, () => {
+      checkTransferDeadline(entry.trace);
+      return entry.selected || pickerJsonCapture === entry;
+    })
       .then(capture => ({ capture }), error => ({ error }));
   }
 
@@ -7399,6 +7403,7 @@
     if (entry) {
       try {
         if (isPickerJsonCaptureCurrent(entry)) {
+          entry.trace = activeTransferTrace;
           entry.selected = true;
           const result = await entry.promise;
           if (isPickerJsonCaptureCurrent(entry)) {
@@ -7414,6 +7419,9 @@
   async function startDestinationTransfer(destinationId) {
     const trace = beginTransferAttempt(destinationId, "destination tile");
     if (!trace) return;
+    // Bind queued prefetch before the handoff yields; cancellation must still
+    // prevent its read after the running lock resets or another attempt starts.
+    if (pickerJsonCapture) pickerJsonCapture.trace = trace;
     const sourceUrl = window.location.href;
     const hasSavedConversation = hasSavedSourceConversation();
     const useClaudeJson = hasSavedConversation && currentPlatform.id === "claude" && claudeJsonCaptureEnabled;

@@ -180,6 +180,24 @@ test("picker failures stay silent and use the existing DOM fallback only after s
   assert.equal(calls.flows[0].text, "DOM transcript");
 });
 
+test("cancelling a selected queued prefetch prevents its native read even after the running flag resets", async () => {
+  const { context, calls } = harness("chatgpt", { mode: "success" });
+  const started = deferred(), response = deferred();
+  context.window.__capCaptureChatGptJson = () => { calls.json++; started.resolve(); return response.promise; };
+  context.startPickerJsonCapture(); await started.promise;
+  context.clearPickerJsonCapture(); context.startPickerJsonCapture();
+  const transfer = context.start("claude");
+  await Promise.resolve(); await Promise.resolve();
+  context.activeTransferTrace.cancelled = true;
+  context.activeTransferTrace = null;
+  context.isRunning = false;
+  response.resolve({ text: "Discarded first picker", messageTurnCount: 2 });
+  await transfer;
+  assert.equal(calls.json, 1);
+  assert.equal(calls.flows.length + calls.dom + calls.notice, 0);
+  assert.match(calls.errors[0], /Transfer cancelled/);
+});
+
 test("Speed off, unsaved chats and teardown skip or discard picker capture", async () => {
   for (const skip of ["speed", "unsaved", "teardown"]) {
     const { context, calls } = harness("chatgpt", { mode: "success" });

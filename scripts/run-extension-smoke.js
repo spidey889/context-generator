@@ -218,6 +218,7 @@ async function createSmokeExtension(tempRoot, origin) {
   platformSource = replaceOnce(platformSource,
     "  function checkInlinePlacementPathname() {",
     `  window.__capSmokePickerJsonReady = () => pickerJsonCapture?.promise.then(() => true) || Promise.resolve(false);
+  window.__capSmokeSourceRouteReady = () => lastInlinePlacementPathname === window.location.pathname;
   window.__capSmokeChatGptMountReady = () => Boolean(chatGptInlineMount?.input?.isConnected
       && chatGptInlineMount?.bubble?.isConnected && chatGptInlineMount.pathname === window.location.pathname);
   function checkInlinePlacementPathname() {`,
@@ -970,6 +971,9 @@ async function verifyPickerProductChanges(session, state) {
   await session.call("Emulation.clearDeviceMetricsOverride");
   await waitFor(() => session.evaluate(`document.activeElement?.matches('[contenteditable="true"], textarea')`),
     "native composer focus after picker dismissal");
+  // display:block persists through the exit animation. A click before it ends
+  // would close the picker again rather than opening it for early capture.
+  await waitFor(() => session.evaluate('document.getElementById("context-generator-destination-sheet").style.display === "none"'), "picker exit before the transfer click");
   assert.deepEqual([state.summaryRequests.length, state.jsonRequests], requestsBefore, "Picker interaction must not read or send chat content.");
   process.stdout.write("✓ Orb stays clear/clickable through picker reopen/narrow layouts; native Tab skips both orbs, focus/motion pass.\n");
 }
@@ -1804,6 +1808,7 @@ async function run() {
     await verifyPickerProductChanges(sourceSession, state);
     if (JSON_CAPTURE_SMOKE) {
       await sourceSession.evaluate(`history.replaceState({}, "", ${JSON.stringify(pickerSourceUrl)}); true`);
+      await waitFor(() => sourceSession.evaluate("window.__capSmokeSourceRouteReady()", sourceSession.getExtensionContextId()), "source route ownership restored before early capture");
       if (JSON_SOURCE === "chatgpt") await waitFor(() => sourceSession.evaluate("window.__capSmokeChatGptMountReady()", sourceSession.getExtensionContextId()), "ChatGPT ownership restored before early capture");
     }
     const jsonRequestsBeforeTransfer = state.jsonRequests;
