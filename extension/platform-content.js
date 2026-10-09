@@ -1059,16 +1059,22 @@
     const inputChars = conversationText.length;
     const transcript = fallbackReason
       ? conversationText.replace(/\r\n?/g, "\n").trim().split("\n").map(line => `> ${line}`).join("\n")
-      : JSON.stringify({ conversation: conversationText });
-    // JSON preserves direct captures exactly; service-error recovery retains its
-    // existing quoted format. Both keep the trusted footer and have no server receipt.
-    const summary = [
+      : JSON.stringify({ conversation: conversationText.split("\n") }, null, 2);
+    // Ordered lines make JSON readable without guessing turn boundaries inside
+    // quoted text/code. Joining with LF reconstructs every captured character.
+    // Service-error recovery retains its existing format; neither path has a server receipt.
+    const summary = (fallbackReason ? [
       "╔══════════════════════════════════════════╗",
       "║         CONTEXT CARRY — READY TO PASTE        ║",
       "╚══════════════════════════════════════════╝",
-      "", "💬 CONVERSATION SO FAR", transcript, "", "🔁 NEXT STEP",
+      "", "💬 CONVERSATION SO FAR", transcript, "", "🔁 NEXT STEP"
+    ] : [
+      "# Context carry", "", "## Conversation history", "",
+      "Previous chat history, in order. Each JSON item is one transcript line; empty items preserve paragraph breaks.",
+      "", "```json", transcript, "```", "", "## Next step", ""
+    ]).concat([
       'Reply only: "Context loaded. Let\'s pick up right where you left off." Then wait for the user.'
-    ].join("\n");
+    ]).join("\n");
     return {
       summary,
       timing: {

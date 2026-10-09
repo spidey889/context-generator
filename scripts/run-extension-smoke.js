@@ -2072,7 +2072,8 @@ async function run() {
         const session = await CdpSession.connect(target.webSocketDebuggerUrl);
         try {
           const value = await session.evaluate('document.querySelector("textarea")?.value || ""');
-          if (value.includes(JSON.stringify({ conversation: transcript }))) {
+          if (value.includes(JSON.stringify({ conversation: transcript.split("\n") }, null, 2))) {
+            assert.match(value, /^# Context carry\n\n## Conversation history\n/);
             assert.match(value, /Reply only: "Context loaded/);
             assert.equal(await session.evaluate("window.__capContextSmokeSendClicks"), 0);
             verifiedPaste = true;
