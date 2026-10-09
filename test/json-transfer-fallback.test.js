@@ -62,6 +62,179 @@ function harness(platform, { mode = "failure", enabled = true, domFails = false,
   } };
 }
 
+const captureKeyFor = platform => platform === "claude" ? "__capCaptureClaudeJson"
+  : platform === "chatgpt" ? "__capCaptureChatGptJson" : "__capCaptureNetworkJson";
+const deferred = () => { let resolve; const promise = new Promise(done => { resolve = done; }); return { promise, resolve }; };
+
+test("picker JSON capture is reused ready or pending on all five platforms, with no transfer before selection", async () => {
+  for (const platform of ["claude", "chatgpt", "gemini", "grok", "deepseek"]) {
+    for (const ready of [false, true]) {
+      const { context, calls } = harness(platform, { mode: "success" });
+      const started = deferred(), response = deferred();
+      context.window[captureKeyFor(platform)] = path => {
+        assert.equal(path, platform === "grok" ? context.window.location.href : context.window.location.pathname);
+        calls.json++; started.resolve(); return response.promise;
+      };
+      context.startPickerJsonCapture();
+      await started.promise;
+      assert.equal(calls.json, 1);
+      assert.equal(calls.destination + calls.dom + calls.prepare + calls.notice + calls.flows.length + calls.errors.length, 0);
+      if (ready) { response.resolve({ text: "JSON ready at orb click", messageTurnCount: 2 }); await context.pickerJsonCapture.promise; }
+      const transfer = context.start("claude");
+      if (!ready) response.resolve({ text: "JSON ready at orb click", messageTurnCount: 2 });
+      await transfer;
+      assert.equal(calls.json, 1, "selection must await the same native read");
+      assert.equal(calls.flows[0].text, "JSON ready at orb click");
+      assert.equal(calls.flows.length, 1);
+      assert.equal(calls.destination, 1);
+      assert.equal(calls.dom + calls.notice, 0);
+      assert.equal(context.pickerJsonCapture, null);
+    }
+  }
+});
+
+test("changed history or away-and-back navigation discards a completed picker snapshot", async () => {
+  for (const change of ["reply", "turn identity", "branch", "navigation"]) {
+    const { context, calls, navigate } = harness("grok", { mode: "success" });
+    let history = "Old reply";
+    let sourceId = "original-turn";
+    context.getConversationTurns = () => [{ sourceId, role: "assistant", text: history }];
+    context.window.__capCaptureNetworkJson = async () => ({ text: `Read ${++calls.json}: ${history}`, messageTurnCount: 2 });
+    context.startPickerJsonCapture(); await context.pickerJsonCapture.promise;
+    if (change === "reply") history = "New reply";
+    else if (change === "turn identity") sourceId = "regenerated-turn";
+    else if (change === "branch") context.window.location.href += "?rid=other";
+    else { navigate("/c/other"); navigate("/c/source"); }
+    await context.start("claude");
+    assert.equal(calls.json, 2);
+    assert.equal(calls.flows[0].text, `Read 2: ${history}`);
+    assert.equal(calls.notice, 0);
+  }
+});
+
+test("history changing during a pending picker read triggers one fresh capture", async () => {
+  const { context, calls } = harness("chatgpt", { mode: "success" });
+  let history = "Old reply";
+  context.getConversationTurns = () => [{ role: "assistant", text: history }];
+  const started = deferred(), response = deferred();
+  context.window.__capCaptureChatGptJson = () => {
+    calls.json++;
+    if (calls.json === 1) { started.resolve(); return response.promise; }
+    return Promise.resolve({ text: history, messageTurnCount: 2 });
+  };
+  context.startPickerJsonCapture(); await started.promise;
+  const transfer = context.start("claude");
+  await Promise.resolve(); await Promise.resolve();
+  history = "New reply";
+  response.resolve({ text: "Old reply", messageTurnCount: 2 });
+  await transfer;
+  assert.equal(calls.json, 2);
+  assert.equal(calls.flows[0].text, "New reply");
+  assert.equal(calls.notice, 0);
+});
+
+test("closed picker results are discarded and reopening never overlaps native reads", async () => {
+  const { context, calls } = harness("claude", { mode: "success" });
+  const started = deferred(), response = deferred();
+  context.window.__capCaptureClaudeJson = () => {
+    calls.json++;
+    if (calls.json === 1) { started.resolve(); return response.promise; }
+    return Promise.resolve({ text: "Fresh reopened picker", messageTurnCount: 2 });
+  };
+  context.startPickerJsonCapture(); await started.promise;
+  context.clearPickerJsonCapture();
+  context.startPickerJsonCapture();
+  await Promise.resolve();
+  assert.equal(calls.json, 1);
+  response.resolve({ text: "Discarded closed picker", messageTurnCount: 2 });
+  await context.pickerJsonCapture.promise;
+  await context.start("claude");
+  assert.equal(calls.json, 2);
+  assert.equal(calls.flows[0].text, "Fresh reopened picker");
+});
+
+test("navigation during a selected pending prefetch cancels without another native read or DOM fallback", async () => {
+  const { context, calls, navigate } = harness("chatgpt", { mode: "success" });
+  const started = deferred(), response = deferred();
+  context.window.__capCaptureChatGptJson = () => { calls.json++; started.resolve(); return response.promise; };
+  context.startPickerJsonCapture(); await started.promise;
+  const transfer = context.start("claude");
+  await Promise.resolve(); await Promise.resolve();
+  navigate("/c/other"); navigate("/c/source");
+  response.resolve({ text: "Old pending capture", messageTurnCount: 2 });
+  await transfer;
+  assert.equal(calls.json, 1);
+  assert.equal(calls.flows.length + calls.dom + calls.notice, 0);
+  assert.match(calls.errors[0], /conversation changed during capture/);
+});
+
+test("picker failures stay silent until selection and honor each platform's recovery", async () => {
+  for (const platform of ["chatgpt", "claude"]) {
+    const { context, calls } = harness(platform);
+    context.startPickerJsonCapture(); await context.pickerJsonCapture.promise;
+    assert.equal(calls.json, 1);
+    assert.equal(calls.notice + calls.dom + calls.prepare + calls.flows.length + calls.errors.length, 0);
+    await context.start("claude");
+    assert.equal(calls.json, 1, "selection must reuse the failed prefetch without a duplicate read");
+    if (platform === "chatgpt") {
+      assert.equal(calls.notice + calls.dom + calls.prepare + calls.flows.length, 0);
+      assert.equal(calls.errors.length, 1);
+      assert.equal(context.isRunning, false);
+    } else {
+      assert.equal(calls.notice, 1);
+      assert.equal(calls.dom, 1);
+      assert.equal(calls.flows[0].text, "DOM transcript");
+    }
+  }
+});
+
+test("cancelling a selected queued prefetch prevents its native read even after the running flag resets", async () => {
+  const { context, calls } = harness("chatgpt", { mode: "success" });
+  const started = deferred(), response = deferred();
+  context.window.__capCaptureChatGptJson = () => { calls.json++; started.resolve(); return response.promise; };
+  context.startPickerJsonCapture(); await started.promise;
+  context.clearPickerJsonCapture(); context.startPickerJsonCapture();
+  const transfer = context.start("claude");
+  await Promise.resolve(); await Promise.resolve();
+  context.activeTransferTrace.cancelled = true;
+  context.activeTransferTrace = null;
+  context.isRunning = false;
+  response.resolve({ text: "Discarded first picker", messageTurnCount: 2 });
+  await transfer;
+  assert.equal(calls.json, 1);
+  assert.equal(calls.flows.length + calls.dom + calls.notice, 0);
+  assert.match(calls.errors[0], /Transfer cancelled/);
+});
+
+test("Speed off, unsaved chats and teardown skip or discard picker capture", async () => {
+  for (const skip of ["speed", "unsaved", "teardown"]) {
+    const { context, calls } = harness("chatgpt", { mode: "success" });
+    if (skip === "speed") context.chatGptJsonCaptureEnabled = false;
+    if (skip === "unsaved") context.window.location.pathname = "/";
+    if (skip === "teardown") context.instanceActive = false;
+    context.startPickerJsonCapture(); await Promise.resolve();
+    assert.equal(context.pickerJsonCapture, null);
+    assert.equal(calls.json, 0);
+  }
+  for (const discard of ["close", "teardown"]) {
+    const { context, calls } = harness("chatgpt", { mode: "success" });
+    context.startPickerJsonCapture();
+    if (discard === "teardown") context.instanceActive = false;
+    context.clearPickerJsonCapture();
+    await context.pendingJsonCapture;
+    assert.equal(calls.json, 0, "a discarded queued capture must never start a native read");
+    assert.equal(calls.flows.length + calls.errors.length, 0);
+  }
+  const { context, calls } = harness("chatgpt", { mode: "success" });
+  context.startPickerJsonCapture(); await context.pickerJsonCapture.promise;
+  context.chatGptJsonCaptureEnabled = false;
+  context.startPickerJsonCapture();
+  await context.start("claude");
+  assert.equal(calls.json, 1);
+  assert.equal(calls.dom, 1);
+  assert.equal(calls.flows[0].text, "DOM transcript");
+});
+
 // Empty admission precedes the platform-specific capture branches.
 test("empty new chat rejects before handoff, capture or destination work with fast capture enabled", async () => {
   const { context, calls } = harness("chatgpt");

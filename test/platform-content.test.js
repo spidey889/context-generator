@@ -1770,7 +1770,7 @@ clockTest("source preparation and summary dispatch reject navigation without tra
   }
 });
 
-test("opening the destination picker does not scrape or summarize", () => {
+test("opening the destination picker starts JSON capture without DOM capture or summarization", () => {
   const source = fs.readFileSync(SOURCE_PATH, "utf8");
   const pickerStart = source.indexOf("function toggleDestinationSheet()");
   const pickerEnd = source.indexOf("function warmDestinationConnections()", pickerStart);
@@ -1781,6 +1781,7 @@ test("opening the destination picker does not scrape or summarize", () => {
   assert.ok(pickerStart >= 0 && pickerEnd > pickerStart && preconnectEnd > pickerEnd);
   assert.doesNotMatch(source, /warmSummary|scheduleWarmSummary|startWarmSummary|ensureWarmSummaryForConversation|conversationFingerprint/);
   assert.doesNotMatch(pickerSource, /scrapeConversation|requestBackendSummary|summarizeWithBackend/);
+  assert.match(pickerSource, /warmDestinationConnections\(\);\s+startPickerJsonCapture\(\);/);
   assert.match(preconnectSource, /link\.rel = "preconnect"/);
   assert.doesNotMatch(preconnectSource, /conversation|scrape|summar|fetch\(|sendMessage|notifyBackground/);
 });
