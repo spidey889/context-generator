@@ -376,6 +376,8 @@ async function main() {
         checks += await require("./check-transfer-user-allocation-db.js").checkTransferUserAllocation(db, sql);
       } else if (name.endsWith("_add_transfer_diagnostics.sql")) {
         checks += await require("./check-transfer-diagnostics-db.js").checkTransferDiagnostics(db, sql);
+      } else if (name.endsWith("_count_successful_local_transfers.sql")) {
+        checks += await require("./check-local-transfer-counts-db.js").checkLocalTransferCounts(db, sql);
       } else await db.exec(sql);
     }
     checks += await require("./check-served-model-db.js").checkStoreModelReceipts(db);
