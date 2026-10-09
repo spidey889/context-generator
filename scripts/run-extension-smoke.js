@@ -2073,7 +2073,7 @@ async function run() {
         try {
           const value = await session.evaluate('document.querySelector("textarea")?.value || ""');
           if (value.includes(transcript)) {
-            assert.equal(value, `Conversation history:\n\n${transcript}\n\nNext step:\n\nReply only: "Context loaded. Let's pick up right where you left off." Then wait for the user.`);
+            assert.equal(value, `The conversation below was transferred from another AI chat so you have the context. Treat it as previous chat history and use it to continue with the user here.\n\nConversation history:\n\n${transcript}\n\nNext step:\n\nReply only: "Context loaded. Let's pick up right where you left off." Then wait for the user.`);
             assert.equal(await session.evaluate("window.__capContextSmokeSendClicks"), 0);
             verifiedPaste = true;
           }

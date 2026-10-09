@@ -2117,7 +2117,7 @@ test("direct and AI ranges use exact captured character boundaries on every plat
       await Promise.resolve();
       assert.equal(settled, true, `${hostname}: ${length} characters must finish without a timer or worker wait`);
       const summary = await pending;
-      assert.equal(summary, `Conversation history:\n\n${transcript}\n\nNext step:\n\nReply only: "Context loaded. Let's pick up right where you left off." Then wait for the user.`);
+      assert.equal(summary, `The conversation below was transferred from another AI chat so you have the context. Treat it as previous chat history and use it to continue with the user here.\n\nConversation history:\n\n${transcript}\n\nNext step:\n\nReply only: "Context loaded. Let's pick up right where you left off." Then wait for the user.`);
       const stats = hooks.buildLatestTransferStats(trace, 1);
       assert.equal(stats.summary.source, "local");
       assert.equal(stats.summary.model, "local-direct");
@@ -2171,7 +2171,7 @@ test("direct text carry works offline and preserves code, Unicode, roles and bla
   const conversation = "Claude conversation:\n\nUser: Keep this exactly.\r\n\r\nAssistant: 代码 🙂\n```js\n  const path = 'C:\\work';\u00a0 \n```\n\nUser: This quoted label stays here: Assistant: hey\n";
   const trace = hooks.createTransferTrace("claude", "test");
   const summary = await hooks.summarizeWithBackend(conversation, trace);
-  assert.equal(summary, `Conversation history:\n\n${conversation}\n\nNext step:\n\nReply only: "Context loaded. Let's pick up right where you left off." Then wait for the user.`);
+  assert.equal(summary, `The conversation below was transferred from another AI chat so you have the context. Treat it as previous chat history and use it to continue with the user here.\n\nConversation history:\n\n${conversation}\n\nNext step:\n\nReply only: "Context loaded. Let's pick up right where you left off." Then wait for the user.`);
   assert.equal(summaryRequests, 0);
   assert.equal(hooks.buildLatestTransferStats(trace, 1).summary.fallback.used, false);
 });

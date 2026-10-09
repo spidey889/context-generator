@@ -1069,6 +1069,7 @@
       "╚══════════════════════════════════════════╝",
       "", "💬 CONVERSATION SO FAR", transcript, "", "🔁 NEXT STEP"
     ] : [
+      "The conversation below was transferred from another AI chat so you have the context. Treat it as previous chat history and use it to continue with the user here.", "",
       "Conversation history:", "", transcript, "", "Next step:", ""
     ]).concat([
       'Reply only: "Context loaded. Let\'s pick up right where you left off." Then wait for the user.'
