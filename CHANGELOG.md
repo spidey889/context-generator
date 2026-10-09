@@ -2,6 +2,10 @@
 
 A short history of decisions and regressions that matter when changing the code. Read the relevant section of [LOGIC.md](LOGIC.md) for current behavior, ownership and checks; use this file when you need to understand why an approach changed. Entries describe source changes unless deployment is explicitly recorded. Extension packaging, Web Store publication and backend deployment are separate.
 
+## 2026-10-10
+
+- Renamed the near-end handoff prototype branch from `codex/master-work-1009` to `codex/near-end-handoff`. The worktree directory stays the same so the unpacked extension path remains usable.
+
 ## 2026-10-09
 
 - **Near-end handoff wired into the extension prototype.** Added the proposed countdown-end switch on `codex/master-work-1009` after the owner tried loading the worktree extension and found the earlier HTML mockup had not changed real behavior. Timed remote summaries reveal the already-prepared new chat with a display-only polishing message; the actual paste message updates the cue, and verified insertion shows ready. Fast/direct carries retain their existing timing. Bound optional status readiness, serialize reveal with delivery, avoid a second focus, preserve native settling and existing draft/cancellation/recovery guards, and expire/clear abandoned cues. All 186 affected transfer tests and three smoke-harness tests passed. The opt-in delayed-summary installed-Brave fixture verified native tab/window focus while the summary was pending, an empty waiting composer, polishing/paste/ready order, exact insertion, one destination and no Send click. Production master and Web Store publication remain separate.
