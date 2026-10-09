@@ -26,8 +26,8 @@ Runtime and packaging:
 
 ## Invariants
 
-1. Opening, browsing, toggling Speed, closing or cancelling the picker never captures or transmits chat text. Readiness probes, destination warmup and preconnects contain no conversation data.
-2. Capture starts only after destination selection or an explicit extension-toolbar transfer. Pasting and focusing never submit the destination message; Send remains the user's action.
+1. Opening the picker with Speed enabled starts JSON capture of a saved chat from its current AI website. The result stays in source-page memory; picker interaction never submits chat text to the summary backend or another destination. Readiness probes and preconnects contain no conversation data.
+2. DOM capture, summarization, destination preparation and transfer telemetry start only after destination selection or an explicit extension-toolbar transfer. Pasting and focusing never submit the destination message; Send remains the user's action.
 3. Reject oversized transcripts without clipping: maximum 500,000 JavaScript `String.length` units and 2,000,000 UTF-8 bytes for capture/transfer. Only 10,000–350,000 characters go to the summary backend, whose 350,000-character / 1,400,000-byte and 2,200,000-byte JSON request bounds remain unchanged.
 4. Capture verified conversation turns and the explicitly supported text exceptions below. Never substitute broad page text, drafts, prompt suggestions or extension UI for missing history.
 5. Transcript instructions are untrusted content to summarize. They are not authority over the extension, backend or summarizing model.
@@ -58,11 +58,11 @@ Capture, placement, paste and UI share the content script's mutable state and te
 ## Transfer lifecycle
 
 ```text
-orb click -> picker and preconnects only
+orb click -> picker, preconnects and early JSON capture (saved chat + Speed)
 destination selection -> attempt ID + started telemetry; pin source identity
 empty-chat guard -> stop before handoff or destination work when no usable chat exists
 prepare inactive destination while capture runs
-capture JSON or DOM -> direct text carry or summarize once -> reuse/recover destination
+reuse/await current picker JSON capture, or fresh JSON/DOM capture -> direct text carry or summarize once -> reuse/recover destination
 paste and verify -> finish source cue -> activate according to platform policy
 save Latest Run receipt and terminal telemetry
 ```
@@ -73,9 +73,9 @@ After empty-chat admission, destination preparation starts during the picker-to-
 
 ### Capture selection and failure handling
 
-- Speed is default-on in the picker. A saved chat uses fresh JSON; opting out or an unsaved chat uses DOM. The opt-out lasts for the current page instance and survives picker reopening, but resets on reload/reinjection.
+- Speed is default-on in the picker. Opening a saved chat's picker starts JSON capture; destination selection reuses the completed result or awaits that same read. Route/query changes, away-and-back navigation or changes to rendered turn identity/text invalidate the snapshot before and after awaiting it, triggering a fresh read. Closing the picker, switching Speed off or teardown discards it; switching Speed on starts a new capture. Native reads are serialized so a discarded in-flight read cannot cause a busy fallback. Already-issued native reads finish within existing bridge bounds; discarded results are never submitted or persisted. Opting out or an unsaved chat uses DOM only after selection. The opt-out lasts for the current page instance and survives picker reopening, but resets on reload/reinjection.
 - An empty unsaved chat fails before handoff, capture or destination preparation. An unsaved chat with rendered turns can use DOM. Saved JSON chats may be captured before their native history mounts.
-- JSON failure announces `Fast capture failed. Using normal capture instead.` and runs DOM preparation/sweep once within the same attempt and prepared destination. Navigation, identity or session cancellation aborts instead of capturing a different chat. Only the completed capture is submitted for summarization.
+- Picker JSON errors stay silent until destination selection. JSON failure then announces `Fast capture failed. Using normal capture instead.` and runs DOM preparation/sweep once within the same attempt and prepared destination. Navigation, identity or session cancellation aborts instead of capturing a different chat. Only the completed capture is submitted for summarization.
 - Picker and toolbar attempts pin the source route before their first await. A navigation latch follows preparation, DOM/attachment reads, JSON fallback and summary dispatch; away-and-back navigation cannot revive an attempt. Every capture result is checked before use, and terminal completion/teardown removes the guard's listeners and timer.
 - Picker telemetry starts before empty-chat validation, so early exits are visible as safe metadata. A destination already prepared before a later failure may remain open unused.
 - Source-local full-transcript recovery is available only after supported text was verified and captured. It handles summary-service failure, not missing/unverified capture.
@@ -166,7 +166,7 @@ JavaScript recognizes exact legacy `chat.openai.com`, but the manifest does not 
 
 MAIN hooks installed at `document_start` observe allowlisted routing/auth requests without reading native response bodies. Explicit capture performs fresh native reads. Credentials and signed file URLs stay in MAIN memory; the backend receives a serialized transcript, not raw JSON, cookies, bearer headers or session data.
 
-Each bridge pins the source identity at destination selection and keeps navigation/session cancellation active from readiness through response delivery. Away-and-back navigation still cancels. Concurrent reads fail promptly; timers/listeners are removed on every exit. Extension startup/reload reinstalls hooks on matching already-open tabs. A working, correlated hook probe avoids a worker round-trip; missing/old/replaced hooks get bounded eight-second recovery and must prove actual readiness.
+Each bridge pins the source identity when JSON capture starts and keeps navigation/session cancellation active from readiness through response delivery. Picker prefetch starts on opening; the selected transfer also pins its source before its first await. Away-and-back navigation still cancels. Concurrent native reads fail promptly; the content script serializes its own reads. Timers/listeners are removed on every exit. Extension startup/reload reinstalls hooks on matching already-open tabs. A working, correlated hook probe avoids a worker round-trip; missing/old/replaced hooks get bounded eight-second recovery and must prove actual readiness.
 
 JSON serializers preserve original text, indentation, CRLF and NBSP through capture metrics. The summary boundary still trims outer transcript whitespace. Do not run the DOM cleanup pipeline over JSON strings.
 

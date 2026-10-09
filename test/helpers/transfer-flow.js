@@ -28,6 +28,8 @@ function loadTransferFlow(overrides) {
     URL, INLINE_PATHNAME_POLL_MS: 80, RUNNING_AUTO_RESET_MS: 360000,
     DESTINATION_SHEET_EXIT_MS: 0, NO_CONVERSATION_ERROR_MESSAGE: "No conversation",
     activeTransferTrace: null, isRunning: false, runningResetTimer: null,
+    pickerJsonCapture: null, pendingJsonCapture: Promise.resolve(), instanceActive: true,
+    getConversationTurns: () => [],
     setTimeout: () => 1, setInterval: () => 1, clearInterval() {},
     addOwnedEventListener: (target, type, listener) => target?.addEventListener?.(type, listener),
     removeOwnedEventListener: (target, type, listener) => target?.removeEventListener?.(type, listener),

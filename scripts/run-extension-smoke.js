@@ -214,10 +214,11 @@ async function createSmokeExtension(tempRoot, origin) {
     "the current-platform resolver"
   );
   // pushState can beat the isolated world's 80 ms route poll. Expose only
-  // fixture-owned mount readiness so a new-route click uses its current owner.
+  // fixture-owned readiness so tests wait for mounting and early capture without exposing text.
   platformSource = replaceOnce(platformSource,
     "  function checkInlinePlacementPathname() {",
-    `  window.__capSmokeChatGptMountReady = () => Boolean(chatGptInlineMount?.input?.isConnected
+    `  window.__capSmokePickerJsonReady = () => pickerJsonCapture?.promise.then(() => true) || Promise.resolve(false);
+  window.__capSmokeChatGptMountReady = () => Boolean(chatGptInlineMount?.input?.isConnected
       && chatGptInlineMount?.bubble?.isConnected && chatGptInlineMount.pathname === window.location.pathname);
   function checkInlinePlacementPathname() {`,
     "the fixture inline-route readiness probe");
@@ -1742,6 +1743,10 @@ async function run() {
     }
     if (JSON_CAPTURE_SMOKE) {
       const before = state.jsonRequests;
+      // Exercise toggle presentation on an unsaved route; native capture is
+      // verified separately below, without duplicating attachment downloads.
+      const toggleSourceUrl = await sourceSession.evaluate("location.href");
+      await sourceSession.evaluate(`history.replaceState({}, "", "/?${SMOKE_PLATFORM_QUERY}=${JSON_SOURCE}"); true`);
       await sourceSession.evaluate(`document.getElementById("context-generator-bubble").click()`);
       assert.equal(await sourceSession.evaluate(`document.getElementById("context-generator-${JSON_SOURCE}-json-toggle").getAttribute("aria-pressed")`), "true", "Fast capture must start enabled.");
       await waitFor(async () => await sourceSession.evaluate(`getComputedStyle(document.getElementById("context-generator-${JSON_SOURCE}-json-toggle")).color`) === "rgb(250, 204, 21)", "the default fast-capture enabled color");
@@ -1779,6 +1784,7 @@ async function run() {
       // Dismissal keeps display:block during its exit animation. Reopening
       // before it becomes none would toggle the still-displayed sheet closed.
       await waitFor(() => sourceSession.evaluate(`document.getElementById("context-generator-destination-sheet").style.display === "none"`), "capture-toggle picker closure");
+      await sourceSession.evaluate(`history.replaceState({}, "", ${JSON.stringify(toggleSourceUrl)}); true`);
     }
 
     if (JSON_SOURCE === "chatgpt") {
@@ -1793,7 +1799,13 @@ async function run() {
     // Responsive placement runs in a second tab. Restore the source tab before
     // capture so hidden-tab throttling cannot turn this into a timing test.
     await sourceSession.call("Page.bringToFront");
+    const pickerSourceUrl = await sourceSession.evaluate("location.href");
+    if (JSON_CAPTURE_SMOKE) await sourceSession.evaluate(`history.replaceState({}, "", "/?${SMOKE_PLATFORM_QUERY}=${JSON_SOURCE}"); true`);
     await verifyPickerProductChanges(sourceSession, state);
+    if (JSON_CAPTURE_SMOKE) {
+      await sourceSession.evaluate(`history.replaceState({}, "", ${JSON.stringify(pickerSourceUrl)}); true`);
+      if (JSON_SOURCE === "chatgpt") await waitFor(() => sourceSession.evaluate("window.__capSmokeChatGptMountReady()", sourceSession.getExtensionContextId()), "ChatGPT ownership restored before early capture");
+    }
     const jsonRequestsBeforeTransfer = state.jsonRequests;
     if (JSON_SOURCE === "gemini") assert.equal(jsonRequestsBeforeTransfer, 0, "Gemini bootstrap capture must not require earlier native RPC traffic.");
     const extensionContextId = sourceSession.getExtensionContextId();
@@ -1804,9 +1816,20 @@ async function run() {
       const otherWindow = await browserSession.call("Target.createTarget", { url: "about:blank", newWindow: true });
       await browserSession.call("Target.activateTarget", { targetId: otherWindow.targetId });
     }
+    if (JSON_CAPTURE_SMOKE) {
+      const beforePickerTabs = (await getTargets(devToolsPort)).filter(target => target.type === "page").length;
+      const beforePickerTelemetry = state.telemetryRequests.length;
+      await sourceSession.evaluate('document.getElementById("context-generator-bubble").click()');
+      assert.equal(await sourceSession.evaluate("window.__capSmokePickerJsonReady()", extensionContextId), true);
+      assert.ok(state.jsonRequests > jsonRequestsBeforeTransfer, "Opening the orb must start native JSON capture before selection.");
+      assert.equal(state.summaryRequests.length, 0, "Orb capture must not start summarization.");
+      assert.equal(state.telemetryRequests.length, beforePickerTelemetry, "Orb capture must not create a transfer attempt.");
+      assert.equal((await getTargets(devToolsPort)).filter(target => target.type === "page").length, beforePickerTabs, "Orb capture must not open a destination tab.");
+      process.stdout.write("✓ Orb click captured JSON before selection, with no summary, destination tab or transfer telemetry.\n");
+    }
     const clickResult = await sourceSession.evaluate(String.raw`(() => {
       const bubble = document.getElementById("context-generator-bubble");
-      bubble.click();
+      if (!${JSON_CAPTURE_SMOKE}) bubble.click();
       // The ordinary smoke exercises the user's explicit DOM opt-out.
       const speedToggle = document.querySelector(".context-generator-speed-toggle");
       if (!${JSON_CAPTURE_SMOKE} && speedToggle?.getAttribute("aria-pressed") === "true") speedToggle.click();
@@ -1939,7 +1962,7 @@ async function run() {
         }
         if (JSON_SOURCE === "grok") process.stdout.write("\u2713 Grok JSON: exact 48-turn transcript, original code/whitespace and zero attachment/tool leakage.\n");
       }
-      assert.equal(state.jsonRequests, jsonRequestsBeforeTransfer + (JSON_SOURCE === "gemini" ? 3 : JSON_SOURCE === "grok" ? 2 : 1), "JSON capture must load the full history only after destination selection.");
+      assert.equal(state.jsonRequests, jsonRequestsBeforeTransfer + (JSON_SOURCE === "gemini" ? 3 : JSON_SOURCE === "grok" ? 2 : 1), "Destination selection must reuse the orb's single full-history capture.");
     }
     process.stdout.write("✓ Capture reached the stub backend exactly once with both conversation turns.\n");
 

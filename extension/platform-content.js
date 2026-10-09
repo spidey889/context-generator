@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-09-transfer-diagnostics-v120";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-09-orb-json-prefetch-v121";
   const INLINE_PILL_SIZE = 36;
   const ownedUiStyleSheets = new Map();
   const CLAUDE_INLINE_STYLE_ID = "context-generator-claude-inline-styles";
@@ -491,6 +491,8 @@
   let reservedComposerSurface = null;
   let destinationSheetAnimationFrame = null;
   let destinationSheetPathname = null;
+  let pickerJsonCapture = null;
+  let pendingJsonCapture = Promise.resolve();
   let destinationSheetHideTimer = null;
   let destinationBackdropHideTimer = null;
   let destinationBackdropCutoutFrame = null;
@@ -631,6 +633,7 @@
   function teardownContextGeneratorInstance() {
     if (!instanceActive) return;
     instanceActive = false;
+    clearPickerJsonCapture();
     if (activeTransferTrace) activeTransferTrace.expired = true;
     activeTransferTrace?.sourceGuard?.dispose();
     activePasteGuards.forEach(guard => guard.cancel());
@@ -6903,6 +6906,7 @@
         else enabled = networkJsonCaptureEnabled = !networkJsonCaptureEnabled;
         toggle.setAttribute("aria-pressed", String(enabled));
         toggle.title = `Fast capture: ${enabled ? "On" : "Off"}`;
+        startPickerJsonCapture();
       });
       topLine.appendChild(toggle);
     }
@@ -7023,6 +7027,7 @@
     positionDestinationSheet();
     resetDestinationTiles(sheet);
     warmDestinationConnections();
+    startPickerJsonCapture();
     const bubble = document.getElementById(BUBBLE_ID);
     if (bubble) {
       bubble.setAttribute("aria-expanded", "true");
@@ -7054,6 +7059,7 @@
   }
 
   function hideDestinationSheet({ immediate = false, preserveBackdrop = false, restoreFocus = true } = {}) {
+    if (!preserveBackdrop) clearPickerJsonCapture();
     destinationSheetPathname = null;
     const sheet = document.getElementById(DESTINATION_SHEET_ID);
     const backdrop = document.getElementById(DESTINATION_SHEET_BACKDROP_ID);
@@ -7335,6 +7341,76 @@
     };
   }
 
+  function getPickerConversationState() {
+    // Compare rendered history, not the draft or picker UI. A new reply, edit,
+    // branch switch or hydration means the early snapshot needs a fresh read.
+    return JSON.stringify(getConversationTurns().map(turn => [turn.sourceId || null, turn.role, turn.text]));
+  }
+
+  function clearPickerJsonCapture() {
+    pickerJsonCapture?.guard.dispose();
+    pickerJsonCapture = null;
+  }
+
+  function captureSourceJson(expectedPath, shouldRead = () => true) {
+    // Native bridges allow one read at a time. A dismissed read may still be
+    // finishing; queue its replacement rather than provoking a busy fallback.
+    const pending = pendingJsonCapture.then(() => {
+      if (!instanceActive || !shouldRead()) throw createDiagnosticError("The conversation changed during capture.", "conversation_changed");
+      if (isRunning) checkTransferDeadline(activeTransferTrace);
+      const captureJson = currentPlatform.id === "claude" ? window.__capCaptureClaudeJson
+        : currentPlatform.id === "chatgpt" ? window.__capCaptureChatGptJson : window.__capCaptureNetworkJson;
+      if (typeof captureJson !== "function") throw createDiagnosticError(`Refresh ${currentPlatform.name} to enable JSON capture.`, "capture_json_unavailable");
+      return captureJson(expectedPath);
+    });
+    // Keep only completion in the queue; unused transcripts/errors are not retained.
+    pendingJsonCapture = pending.then(() => {}, () => {});
+    return pending;
+  }
+
+  function startPickerJsonCapture() {
+    clearPickerJsonCapture();
+    const enabled = currentPlatform.id === "claude" ? claudeJsonCaptureEnabled
+      : currentPlatform.id === "chatgpt" ? chatGptJsonCaptureEnabled : networkJsonCaptureEnabled;
+    if (!enabled || !hasSavedSourceConversation() || !instanceActive || isRunning) return;
+    const entry = {
+      url: window.location.href,
+      state: getPickerConversationState(),
+      guard: createConversationGuard("The conversation changed during capture."),
+      selected: false
+    };
+    pickerJsonCapture = entry;
+    const path = currentPlatform.id === "grok" ? window.location.href : window.location.pathname;
+    // Failures stay silent until selection, when the existing DOM fallback owns them.
+    entry.promise = captureSourceJson(path, () => entry.selected || pickerJsonCapture === entry)
+      .then(capture => ({ capture }), error => ({ error }));
+  }
+
+  function isPickerJsonCaptureCurrent(entry) {
+    try {
+      entry.guard.check();
+      return entry.url === window.location.href && entry.state === getPickerConversationState();
+    } catch { return false; }
+  }
+
+  async function takePickerJsonCapture(expectedPath) {
+    const entry = pickerJsonCapture;
+    pickerJsonCapture = null;
+    if (entry) {
+      try {
+        if (isPickerJsonCaptureCurrent(entry)) {
+          entry.selected = true;
+          const result = await entry.promise;
+          if (isPickerJsonCaptureCurrent(entry)) {
+            if (result.error) throw result.error;
+            return result.capture;
+          }
+        }
+      } finally { entry.guard.dispose(); }
+    }
+    return captureSourceJson(expectedPath);
+  }
+
   async function startDestinationTransfer(destinationId) {
     const trace = beginTransferAttempt(destinationId, "destination tile");
     if (!trace) return;
@@ -7389,12 +7465,7 @@
       if (useClaudeJson || useChatGptJson || useNetworkJson) {
         updateTransferDiagnostics(trace, { last_operation: "capture_json" }, "capture_json");
         try {
-          const captureJson = useClaudeJson ? window.__capCaptureClaudeJson : useChatGptJson ? window.__capCaptureChatGptJson : window.__capCaptureNetworkJson;
-          if (typeof captureJson !== "function") throw createDiagnosticError(`Refresh ${currentPlatform.name} to enable JSON capture.`, "capture_json_unavailable");
-          const capture = useClaudeJson ? await captureJson(claudeJsonPath)
-            : useChatGptJson ? await captureJson(chatGptJsonPath)
-            : geminiJsonPath ? await captureJson(geminiJsonPath)
-            : deepseekJsonPath ? await captureJson(deepseekJsonPath) : grokJsonUrl ? await captureJson(grokJsonUrl) : await captureJson();
+          const capture = await takePickerJsonCapture(claudeJsonPath || chatGptJsonPath || geminiJsonPath || deepseekJsonPath || grokJsonUrl);
           checkTransferDeadline(trace);
           conversationText = createConversationCapture(capture.text, {
             method: `${currentPlatform.id}-json`, messageTurnCount: capture.messageTurnCount,
