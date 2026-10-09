@@ -2057,7 +2057,7 @@ async function run() {
         const stored = await sourceSession.evaluate('chrome.storage.local.get("context-generator-last-transfer-stats-v1")', extensionContextId);
         const receipt = stored?.["context-generator-last-transfer-stats-v1"];
         return receipt?.rawScrapedText === transcript ? receipt : null;
-      }, "the exact direct JSON transfer receipt");
+      }, "the exact direct text transfer receipt");
       assert.equal(stats.status, "completed");
       assert.equal(stats.summary.source, "local");
       assert.equal(stats.summary.model, "local-direct");
@@ -2072,18 +2072,17 @@ async function run() {
         const session = await CdpSession.connect(target.webSocketDebuggerUrl);
         try {
           const value = await session.evaluate('document.querySelector("textarea")?.value || ""');
-          if (value.includes(JSON.stringify({ conversation: transcript.split("\n") }, null, 2))) {
-            assert.match(value, /^# Context carry\n\n## Conversation history\n/);
-            assert.match(value, /Reply only: "Context loaded/);
+          if (value.includes(transcript)) {
+            assert.equal(value, `Conversation history:\n\n${transcript}\n\nNext step:\n\nReply only: "Context loaded. Let's pick up right where you left off." Then wait for the user.`);
             assert.equal(await session.evaluate("window.__capContextSmokeSendClicks"), 0);
             verifiedPaste = true;
           }
         } finally { session.close(); }
       }
-      assert.equal(verifiedPaste, true, "The complete direct JSON transcript must reach the destination without pressing Send.");
+      assert.equal(verifiedPaste, true, "The complete direct text transcript must reach the destination without pressing Send.");
       const terminal = await waitFor(() => state.telemetryRequests.find(payload => payload.attempt_id === stats.transferId && payload.status === "succeeded"), "unsigned local completion telemetry");
       assert.equal(terminal.summary_proof, undefined, "Local work cannot inherit the previous server receipt.");
-      process.stdout.write(`✓ Exactly 9,999 characters: direct JSON (${stats.summary.summaryMs} ms), zero summary requests, complete paste, no Send click.\n`);
+      process.stdout.write(`✓ Exactly 9,999 characters: direct text (${stats.summary.summaryMs} ms), zero summary requests, complete paste, no Send click.\n`);
     }
     process.stdout.write("Cap Context Brave extension smoke passed.\n");
   } catch (error) {

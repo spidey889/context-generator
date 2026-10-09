@@ -4,6 +4,8 @@ A short history of decisions and regressions that matter when changing the code.
 
 ## 2026-10-09
 
+- **Direct carries use plain conversation text.** Replaced the JSON line array and Markdown wrapper with the captured speaker-labelled transcript and simple history/next-step labels separated by blank lines. Preserves every captured character, paragraph and code block without interpreting quoted role labels. Size routing, zero-AI direct paths, destination delivery and service-error recovery are unchanged.
+
 - **Direct carries are readable JSON histories.** Replaced the one-line JSON string, which exposed escaped newlines throughout the conversation, with pretty-printed ordered transcript lines under plain Markdown headings. Empty entries preserve paragraph breaks; joining the lines recovers the exact captured text, including code, Unicode and whitespace. Existing speaker labels remain intact rather than guessing new turn boundaries inside quoted text. The trusted next-step instruction stays outside the history. Size routing, zero-AI direct paths, paste behavior and service-error recovery are unchanged.
 
 - **Analysis connects on the custom domain.** Added `https://spreadz.in/analysis*` to the extension's receipt-bridge matches while retaining the legacy GitHub Pages URL. The domain change had left the hosted analysis page Offline even though transfers still saved local receipts. Branch selection does not affect this bridge; existing unpacked installs need an extension reload and page refresh.

@@ -2117,8 +2117,7 @@ test("direct and AI ranges use exact captured character boundaries on every plat
       await Promise.resolve();
       assert.equal(settled, true, `${hostname}: ${length} characters must finish without a timer or worker wait`);
       const summary = await pending;
-      const json = summary.split("```json\n")[1].split("\n```\n")[0];
-      assert.equal(JSON.parse(json).conversation.join("\n"), transcript);
+      assert.equal(summary, `Conversation history:\n\n${transcript}\n\nNext step:\n\nReply only: "Context loaded. Let's pick up right where you left off." Then wait for the user.`);
       const stats = hooks.buildLatestTransferStats(trace, 1);
       assert.equal(stats.summary.source, "local");
       assert.equal(stats.summary.model, "local-direct");
@@ -2163,7 +2162,7 @@ clockTest("local and remote handoffs reveal without a cosmetic one-second delay"
   }
 });
 
-test("direct JSON carry works offline and preserves code, Unicode, roles and blank lines exactly", async () => {
+test("direct text carry works offline and preserves code, Unicode, roles and blank lines exactly", async () => {
   let summaryRequests = 0;
   const hooks = loadPlatformContent([], "chatgpt.com", { runtimeSendMessage: async message => {
     if (message.type === "SUMMARIZE_WITH_BACKEND") summaryRequests++;
@@ -2172,12 +2171,7 @@ test("direct JSON carry works offline and preserves code, Unicode, roles and bla
   const conversation = "Claude conversation:\n\nUser: Keep this exactly.\r\n\r\nAssistant: 代码 🙂\n```js\n  const path = 'C:\\work';\u00a0 \n```\n\nUser: This quoted label stays here: Assistant: hey\n";
   const trace = hooks.createTransferTrace("claude", "test");
   const summary = await hooks.summarizeWithBackend(conversation, trace);
-  const json = summary.split("```json\n")[1].split("\n```\n")[0];
-  assert.equal(JSON.parse(json).conversation.join("\n"), conversation);
-  assert.match(summary, /^# Context carry\n\n## Conversation history\n/);
-  assert.match(summary, /\n  "conversation": \[\n    "Claude conversation:",\n    "",\n    "User:/);
-  assert.match(summary, /\n```\n\n## Next step\n\nReply only:/);
-  assert.match(summary, /Reply only: "Context loaded\. Let's pick up right where you left off\." Then wait for the user\./);
+  assert.equal(summary, `Conversation history:\n\n${conversation}\n\nNext step:\n\nReply only: "Context loaded. Let's pick up right where you left off." Then wait for the user.`);
   assert.equal(summaryRequests, 0);
   assert.equal(hooks.buildLatestTransferStats(trace, 1).summary.fallback.used, false);
 });
