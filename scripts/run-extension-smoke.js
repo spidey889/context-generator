@@ -53,7 +53,7 @@ const CHATGPT_HISTORY_OVERSIZE_SMOKE = CHATGPT_FAILURE_SMOKE === "history-oversi
 const CHATGPT_PASTE_AUTH_SMOKE = JSON_SOURCE === "chatgpt" && process.env.CAP_CONTEXT_CHATGPT_AUTH_SMOKE === "paste401";
 const CLAUDE_PARTIAL_SMOKE = JSON_SOURCE === "claude" && process.env.CAP_CONTEXT_CLAUDE_PARTIAL_SMOKE === "1";
 const CLAUDE_OVERSIZE_SMOKE = JSON_SOURCE === "claude" && process.env.CAP_CONTEXT_CLAUDE_PARTIAL_SMOKE === "oversize";
-const JSON_FALLBACK_SMOKE = Boolean(CHATGPT_FAILURE_SMOKE || CLAUDE_PARTIAL_SMOKE || CLAUDE_OVERSIZE_SMOKE || NETWORK_FAILURE);
+const JSON_FALLBACK_SMOKE = Boolean(CLAUDE_PARTIAL_SMOKE || CLAUDE_OVERSIZE_SMOKE || NETWORK_FAILURE);
 const TELEMETRY_DATABASE_SMOKE = process.env.CAP_CONTEXT_TELEMETRY_SMOKE === "1";
 const FAILURE_ARTIFACT_DIR = process.env.CAP_CONTEXT_SMOKE_ARTIFACT_DIR || "";
 
@@ -1790,6 +1790,23 @@ async function run() {
       await waitFor(() => sourceSession.evaluate("window.__capSmokeChatGptMountReady()", contextId), "ChatGPT inline mounting on the project route");
     }
     if (NETWORK_SOURCE && !JSON_FALLBACK_SMOKE) await sourceSession.evaluate('document.querySelectorAll("main article").forEach(node => node.remove()); true');
+    if (JSON_SOURCE === "chatgpt") {
+      // A history-shaped scroller must stay untouched even when the API read
+      // fails before conversation messages mount.
+      await sourceSession.evaluate(`(() => {
+        const list = document.createElement("div");
+        list.id = "cap-smoke-chat-history";
+        list.className = "overflow-y-auto";
+        list.style.cssText = "position:fixed;left:0;top:80px;width:280px;height:500px;overflow-y:auto;pointer-events:none";
+        list.innerHTML = '<div style="height:2400px">Projects<br>Recents<br>Previous chats</div>';
+        document.body.appendChild(list);
+        list.scrollTop = 420;
+        list.capScrollCalls = 0;
+        const scroll = list.scrollTo.bind(list);
+        list.scrollTo = (...args) => { list.capScrollCalls++; scroll(...args); };
+        return true;
+      })()`);
+    }
     // Responsive placement runs in a second tab. Restore the source tab before
     // capture so hidden-tab throttling cannot turn this into a timing test.
     await sourceSession.call("Page.bringToFront");
@@ -1867,8 +1884,42 @@ async function run() {
     if (JSON_FALLBACK_SMOKE) {
       await waitFor(() => sourceSession.evaluate(`document.getElementById("context-generator-capture-notice")?.textContent === "Fast capture failed. Using normal capture instead."`), "the safe fast-capture fallback notice");
     }
+    if (JSON_SOURCE === "chatgpt" && CHATGPT_FAILURE_SMOKE) {
+      await waitFor(() => sourceSession.evaluate('Boolean(document.getElementById("context-generator-error-text")?.textContent)'), "the JSON capture error");
+      const failedCapture = await sourceSession.evaluate(`(() => {
+        const list = document.getElementById("cap-smoke-chat-history");
+        return { top: list.scrollTop, calls: list.capScrollCalls,
+          fallbackNotice: Boolean(document.getElementById("context-generator-capture-notice")),
+          error: document.getElementById("context-generator-error-text").textContent };
+      })()`);
+      assert.equal(failedCapture.top, 420, "Failed JSON capture must preserve sidebar position.");
+      assert.equal(failedCapture.calls, 0, "Failed JSON capture must never scroll the sidebar.");
+      assert.equal(failedCapture.fallbackNotice, false, "ChatGPT must not enter legacy DOM recovery.");
+      assert.match(failedCapture.error, /JSON capture|too long|limit|Fast capture/i);
+      assert.equal(state.jsonRequests - jsonRequestsBeforeTransfer, 1, "One fresh API read must precede the error.");
+      assert.equal(state.summaryRequests.length, 0, "A failed JSON read must not submit DOM history.");
+      if (CHATGPT_PASTE_OVERSIZE_SMOKE) {
+        await waitFor(() => state.oversizePaste.cancelled, "oversized paste reader cancellation");
+        assert.ok(state.oversizePaste.bytes < 20000000, "The full oversized paste tail must not be downloaded.");
+        assert.equal(state.pasteDescriptorRequests, CHATGPT_PASTE_AUTH_SMOKE ? 2 : 1);
+        assert.equal(state.pasteContentRequests, 1, "A rejected paste must not be downloaded again.");
+        process.stdout.write(`✓ Brave cancelled oversized paste after ${state.oversizePaste.bytes} fixture bytes.\n`);
+      }
+      if (CHATGPT_HISTORY_OVERSIZE_SMOKE) {
+        await waitFor(() => state.oversizeHistory.cancelled, "oversized history reader cancellation");
+        assert.ok(state.oversizeHistory.bytes < 20000000, "The full oversized history tail must not be downloaded.");
+        assert.equal(state.pasteContentRequests + state.pasteDescriptorRequests, 0, "Rejected history must not begin paste downloads.");
+        process.stdout.write(`✓ Brave cancelled oversized history after ${state.oversizeHistory.bytes} fixture bytes.\n`);
+      }
+      process.stdout.write("✓ ChatGPT JSON failure stops without DOM fallback, sidebar scrolling or summary submission.\n");
+      return;
+    }
     await waitFor(() => state.summaryRequests.length === 1, "one summary backend request");
     const capturedConversation = state.summaryRequests[0]?.conversation || "";
+    if (JSON_SOURCE === "chatgpt") {
+      const sidebar = await sourceSession.evaluate('(() => { const list = document.getElementById("cap-smoke-chat-history"); return { top:list.scrollTop,calls:list.capScrollCalls }; })()');
+      assert.deepEqual(sidebar, { top:420,calls:0 }, "JSON success must leave the history sidebar untouched.");
+    }
     if (JSON_SOURCE === "gemini") {
       assert.equal(await sourceSession.evaluate("window.__geminiMenuClicks"), 0, "JSON capture and DOM fallback must never open Gemini response menus.");
       process.stdout.write("✓ Gemini capture leaves native response menus untouched.\n");
@@ -1878,18 +1929,10 @@ async function run() {
     if (JSON_FALLBACK_SMOKE) {
       assert.doesNotMatch(capturedConversation, /JSON_ONLY_SENTINEL|AUTH_SENTINEL|CSRF_SENTINEL|SIGNED_SENTINEL/);
       assert.equal(state.jsonRequests - jsonRequestsBeforeTransfer, JSON_SOURCE === "grok" ? 2 : 1, "Fast capture must not be retried after failure.");
-      if (CHATGPT_PASTE_OVERSIZE_SMOKE) {
-        assert.equal(state.oversizePaste.cancelled, true, "Brave must cancel the oversized paste response.");
-        assert.ok(state.oversizePaste.bytes < 20000000, "The full oversized paste tail must not be downloaded.");
-        assert.equal(state.pasteDescriptorRequests, CHATGPT_PASTE_AUTH_SMOKE ? 2 : 1);
-        assert.equal(state.pasteContentRequests, 1, "A rejected paste must not be downloaded again.");
-        process.stdout.write(`✓ Brave cancelled oversized paste after ${state.oversizePaste.bytes} fixture bytes.\n`);
-      }
-      if (DEEPSEEK_OVERSIZE_SMOKE || CLAUDE_OVERSIZE_SMOKE || CHATGPT_HISTORY_OVERSIZE_SMOKE) {
+      if (DEEPSEEK_OVERSIZE_SMOKE || CLAUDE_OVERSIZE_SMOKE) {
         assert.equal(state.oversizeHistory.cancelled, true, "Brave must cancel the oversized history response.");
         assert.ok(state.oversizeHistory.bytes < 20000000, "The full oversized tail must not be downloaded.");
         assert.equal(state.pasteContentRequests, 0, "Rejected history must not begin file downloads.");
-        if (CHATGPT_HISTORY_OVERSIZE_SMOKE) assert.equal(state.pasteDescriptorRequests, 0);
         process.stdout.write(`✓ Brave cancelled oversized history after ${state.oversizeHistory.bytes} fixture bytes.\n`);
       }
       process.stdout.write(`✓ ${JSON_SOURCE} failed fast capture fell back to DOM within the same transfer.\n`);

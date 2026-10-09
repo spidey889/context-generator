@@ -7403,12 +7403,14 @@
           });
         } catch (error) {
           checkTransferDeadline(trace);
-          // Recover within this attempt: reuse its destination and call the
-          // summary/paste pipeline only once, after a complete DOM capture.
           // Retain the bridges' navigation/session cancellation, including an
           // away-and-back change that a final URL comparison cannot detect.
           if (/conversation changed during capture\./i.test(error?.message || "")) throw error;
           if (window.location.href !== sourceUrl) throw new Error("The conversation changed during capture. Return to the source chat and try again.");
+          // ChatGPT fast capture owns an API read, not page scrolling. A failed
+          // read must not silently enter the legacy DOM sweep or move history.
+          if (useChatGptJson) throw error;
+          // Other adapters recover within this attempt and reuse its destination.
           showFastCaptureFallbackMessage();
           const jsonFallbackReason = sanitizeCaptureDiagnostics({ jsonFallbackReason: error?.captureFailureReason }).jsonFallbackReason || "request_failed";
           updateTransferDiagnostics(trace, { json_fallback_code: jsonFallbackReason, last_operation: "capture_dom" }, "json_fallback");

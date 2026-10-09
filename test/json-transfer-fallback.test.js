@@ -74,10 +74,24 @@ test("empty new chat rejects before handoff, capture or destination work with fa
   assert.equal(context.isRunning, false);
 });
 
+test("ChatGPT JSON failures never start DOM scrolling and release the lock for retry", async () => {
+  for (const mode of ["failure", "missing"]) {
+    const { context, calls } = harness("chatgpt", { mode });
+    for (let attempt = 1; attempt <= 2; attempt++) {
+      await context.start("claude");
+      assert.equal(calls.json, mode === "missing" ? 0 : attempt);
+      assert.equal(calls.prepare + calls.dom + calls.notice, 0, "Fast capture must not change methods or scroll the page");
+      assert.equal(calls.flows.length, 0, "A failed JSON read cannot dispatch guessed DOM history");
+      assert.equal(calls.errors.length, attempt);
+      assert.equal(context.isRunning, false);
+    }
+  }
+});
+
 for (const platform of ["claude", "chatgpt", "gemini", "grok", "deepseek"]) {
-  // Every bridge retains failure/success wiring checks. A missing bridge uses
-  // the same fallback path; per-adapter readiness recovery is tested separately.
-  for (const mode of platform === "chatgpt" ? ["failure", "missing"] : ["failure"]) {
+  // ChatGPT remains JSON-only on fast-read failure; other adapters retain
+  // their existing recovery. Success and explicit opt-out cover every adapter.
+  for (const mode of platform === "chatgpt" ? [] : ["failure"]) {
     test(`${platform}: ${mode} fast capture falls back once within the same transfer`, async () => {
       const { context, calls, prepared } = harness(platform, { mode });
       await context.start("claude");
@@ -145,7 +159,7 @@ test("JSON completion after source navigation cancels before dispatch or DOM fal
 
 test("capture fallback records only recognized reasons, never arbitrary native errors", async () => {
   for (const reason of ["unavailable", "timeout", "size_limit", "incomplete", "unsupported", "request_failed", "MUST_NOT_APPEAR"]) {
-    const { context, calls } = harness("chatgpt", { failureReason: reason });
+    const { context, calls } = harness("claude", { failureReason: reason });
     await context.start("claude");
     assert.ok(calls.traceDetails.some(detail => detail?.jsonFallbackReason === (reason === "MUST_NOT_APPEAR" ? "request_failed" : reason)));
     assert.doesNotMatch(JSON.stringify(calls.traceDetails), /MUST_NOT_APPEAR|private native/);
@@ -155,7 +169,7 @@ test("capture fallback records only recognized reasons, never arbitrary native e
 
 test("failed source preparation or DOM fallback releases the lock and permits a fresh attempt", async () => {
   for (const prepareFails of [true, false]) {
-    const { context, calls } = harness("chatgpt", { prepareFails, domFails: !prepareFails });
+    const { context, calls } = harness("claude", { prepareFails, domFails: !prepareFails });
     for (let attempt = 1; attempt <= 2; attempt++) {
       await context.start("claude");
       assert.equal(calls.prepare, attempt);
@@ -189,10 +203,11 @@ test("bridge cancellation cannot fall back after an away-and-back navigation", a
 test("normal capture and JSON DOM fallback cancel source navigation before dispatch", async () => {
   for (const enabled of [false, true]) {
     for (const awayAndBack of [false, true]) {
-      const { context, calls, navigate } = harness("chatgpt", { enabled });
+      const { context, calls, navigate } = harness(enabled ? "claude" : "chatgpt", { enabled });
+      const sourcePath = context.window.location.pathname;
       context.scrapeConversationTextWhenReady = async () => {
         navigate("/c/other");
-        if (awayAndBack) navigate("/c/source");
+        if (awayAndBack) navigate(sourcePath);
         return "Other chat must never reach summary or delivery";
       };
       await context.start("claude");
