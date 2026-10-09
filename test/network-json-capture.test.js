@@ -278,7 +278,7 @@ test("DeepSeek: one incomplete upload cancels siblings before fallback or a fres
   });
   assert.equal(h.requests.length, 5, "failure stops queued downloads");
   assert.equal(aborted.length, 3);
-  assert.equal(h.window.__capNetworkFetchState.version, 8);
+  assert.equal(h.window.__capNetworkFetchState.version, 9);
   assert.ok(h.replies.every(reply => !reply.capture));
   assert.equal(h.navigationListeners(), 0);
   assert.equal(h.listeners.size, 1);
@@ -355,10 +355,10 @@ for (const platform of ["gemini", "grok", "deepseek"]) test(`${platform}: the pr
   const h = setup(platform);
   await h.observe();
   const old = h.window.__capNetworkFetchState;
-  old.version = platform === "deepseek" ? 7 : platform === "gemini" ? 7 : 5;
+  old.version = platform === "deepseek" ? 8 : platform === "gemini" ? 8 : 6;
   h.reinstall(files[1]);
   assert.notEqual(h.window.__capNetworkFetchState, old);
-  assert.equal(h.window.__capNetworkFetchState.version, platform === "deepseek" ? 8 : platform === "gemini" ? 8 : 6);
+  assert.equal(h.window.__capNetworkFetchState.version, platform === "deepseek" ? 9 : platform === "gemini" ? 9 : 7);
   assert.equal(h.listeners.size, 1);
   assert.equal((await h.window.__capCaptureNetworkJson()).text, h.fixture.expected);
 });
