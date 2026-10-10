@@ -2,6 +2,10 @@
 
 A short history of decisions and regressions that matter when changing the code. Read the relevant section of [LOGIC.md](LOGIC.md) for current behavior, ownership and checks; use this file when you need to understand why an approach changed. Entries describe source changes unless deployment is explicitly recorded. Extension packaging, Web Store publication and backend deployment are separate.
 
+## 2026-10-11
+
+- **Privacy-policy URL aligned with the HTTPS site.** While investigating the Store's unreachable-policy warning, verified that the public policy pages return HTTP 200 but the old GitHub URL redirects to HTTP because Pages HTTPS enforcement was off. Enabled enforcement on the existing `spreadz.in` site and replaced the policy's old canonical/social URL with `https://spreadz.in/privacy.html`. The Store dashboard cannot be scripted by the available browser tool, so its saved URL and validation still need confirmation; this does not establish the exact cause of the Store warning. Extension source stays 1.4.16.
+
 ## 2026-10-10
 
 - **Paste expiry and delayed recovery fixed; source 1.4.16 prepared.** Reproduced late insertion after an awaited source check and premature manual copy during a temporary composer gap. The mutation guard now checks absolute expiry after awaits, native click/focus and before text-writing fallbacks; disposal also prevents stale work from resuming. Delayed recovery waits within the existing paste window and remaining transfer deadline for missing/disabled or focus-remounted editors, while preserving drafts, user actions, navigation/cancellation and one actual recovery insertion. Added failing-then-passing regressions and an installed Brave mode for native expiry, disabled/detached/focus-remounted editors and restored drafts; full CI now includes it. Offline tests, slow capture and both ordinary/new Brave checks passed locally. No release ZIP or Web Store upload was made.
