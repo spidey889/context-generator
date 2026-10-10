@@ -506,7 +506,7 @@ function chatGptTreeFixture() {
   mapping.python = { parent: "tool", message: { author: { role: "assistant" }, recipient: "python", status: "finished_successfully", content: { content_type: "code", text: "UNSUPPORTED_SENTINEL" }, metadata: { is_complete: true } } };
   mapping.pythonResult = { parent: "python", message: { author: { role: "tool", name: "python" }, recipient: "all", status: "finished_successfully", content: { content_type: "execution_output", text: CHATGPT_PYTHON_RESULT }, metadata: { is_complete: true, aggregate_result: "UNSUPPORTED_SENTINEL" } } };
   mapping.recap = { parent: "pythonResult", message: { author: { role: "assistant" }, content: { content_type: "reasoning_recap", content: "OWN_RECAP_SENTINEL" } } };
-  mapping.thought = { parent: "recap", message: { author: { role: "assistant" }, content: { content_type: "thoughts", thoughts: [{ content: "OWN_THOUGHT_SENTINEL", summary: "UNSUPPORTED_SENTINEL", finished: true }] } } };
+  mapping.thought = { parent: "recap", message: { author: { role: "assistant" }, status: "in_progress", content: { content_type: "thoughts", thoughts: [{ content: "OWN_THOUGHT_SENTINEL", summary: "UNSUPPORTED_SENTINEL", finished: false }] } } };
   mapping.canvas = { parent: "thought", message: { author: { role: "assistant" }, recipient: "canmore.create_textdoc", status: "finished_successfully", end_turn: false, content: { content_type: "code", text: JSON.stringify({ name: "Smoke document", type: "document", content: CHATGPT_CANVAS_TEXT }) } } };
   mapping.canvasResult = { parent: "canvas", message: { author: { role: "tool", name: "canmore.create_textdoc" }, status: "finished_successfully", content: { content_type: "text", parts: ["UNSUPPORTED_SENTINEL"] }, metadata: { command: "create_textdoc", canvas: { textdoc_id: "smoke-document", textdoc_type: "document", version: 1 } } } };
   mapping.canvasEdit = { parent: "canvasResult", message: { author: { role: "assistant" }, recipient: "canmore.update_textdoc", status: "finished_successfully", end_turn: false, content: { content_type: "text", parts: [JSON.stringify({ updates: [{ pattern: "UNSUPPORTED_SENTINEL", replacement: "OWN_CANVAS_EDIT_SENTINEL" }] })] } } };
@@ -514,13 +514,14 @@ function chatGptTreeFixture() {
   // Explicit voice transcript objects are own text; pointer metadata is not.
   mapping.voiceUser = { parent: "canvasEditResult", message: { author: { role: "user" }, content: { content_type: "multimodal_text", parts: [{ content_type: "audio_transcription", text: "OWN_VOICE_USER_SENTINEL", direction: "in" }, { content_type: "audio_asset_pointer", text: "UNSUPPORTED_SENTINEL" }] } } };
   mapping.voiceAssistant = { parent: "voiceUser", message: { author: { role: "assistant" }, content: { content_type: "multimodal_text", parts: [{ content_type: "audio_transcription", text: "OWN_VOICE_ASSISTANT_SENTINEL", direction: "out" }] } } };
-  mapping.code = { parent: "voiceAssistant", message: { author: { role: "assistant" }, status: "finished_partial", end_turn: false, content: { content_type: "code", text: CHATGPT_EXACT_CODE, language: "python" } } };
+  // Capture during generation must deliver exactly the text available now.
+  // Keep this in the normal fixture so every ChatGPT CI smoke covers it.
+  mapping.code = { parent: "voiceAssistant", message: { author: { role: "assistant" }, status: "in_progress", end_turn: false, content: { content_type: "code", text: CHATGPT_EXACT_CODE, language: "python" } } };
   // Unused branches alone exceed the former 6 MB raw guard. The installed
   // extension must still deliver the exact selected history, including files.
   mapping.alternate = { parent: "root", message: { author: { role: "assistant" }, content: { content_type: "text", parts: [`INACTIVE_BRANCH_SENTINEL ${"x".repeat(7000000)}`] } } };
   const data = { conversation_id: "smoke", current_node: "code", mapping, context_truncation_continuation: null };
   if (CHATGPT_FAILURE_SMOKE === "partial") data.has_previous_page = true;
-  if (CHATGPT_FAILURE_SMOKE === "streaming") mapping.code.message.status = "in_progress";
   return data;
 }
 
@@ -2141,7 +2142,7 @@ async function run() {
     if (JSON_FALLBACK_SMOKE) {
       await waitFor(() => sourceSession.evaluate(`document.getElementById("context-generator-capture-notice")?.textContent === "Fast capture failed. Using normal capture instead."`), "the safe fast-capture fallback notice");
     }
-    if (JSON_SOURCE === "chatgpt" && CHATGPT_FAILURE_SMOKE) {
+    if (JSON_SOURCE === "chatgpt" && CHATGPT_FAILURE_SMOKE && CHATGPT_FAILURE_SMOKE !== "streaming") {
       await waitFor(() => sourceSession.evaluate('Boolean(document.getElementById("context-generator-error-text")?.textContent)'), "the JSON capture error");
       const failedCapture = await sourceSession.evaluate(`(() => {
         const list = document.getElementById("cap-smoke-chat-history");

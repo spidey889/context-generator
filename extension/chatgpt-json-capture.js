@@ -55,11 +55,9 @@
       if (typeof node.parent !== "string" || !node.parent) throw blocked("The active branch has an invalid parent/root marker.");
       id = node.parent;
     }
-    if (branch[0]?.status != null && !["finished_successfully", "finished_partial"].includes(branch[0].status)) throw blocked("The active turn is still in progress or failed.");
-    // finished_partial is terminal after a user stop, even if the streaming
-    // end_turn flag was never advanced. Own completeness checks still apply.
-    if (branch[0]?.author?.role === "assistant" && branch[0].end_turn === false
-      && branch[0].status !== "finished_partial") throw blocked("The active assistant turn is still in progress.");
+    // Explicit capture takes the text available now, including a streaming or
+    // interrupted reply. Generation status/end_turn do not describe missing
+    // history; tree, metadata and supported-content validation still apply.
     // Legacy canvas bodies are assistant-authored, but delivered through a
     // canmore operation. Only a successful, adjacent canvas acknowledgement
     // identifies these document fields; never import the tool reply or params.
@@ -136,15 +134,11 @@
         assertComplete(message, "Own-turn message");
         assertComplete(message.metadata, "Own-turn metadata");
         assertComplete(content, "Own-turn content");
-        if (message.status != null && !["finished_successfully", "finished_partial"].includes(message.status)) throw blocked("An own turn is still in progress or failed.");
         return [`User: ${attachmentLabels.join("\n\n")}`];
       }
       assertComplete(message, "Own-turn message");
       assertComplete(message.metadata, "Own-turn metadata");
       assertComplete(content, "Own-turn content");
-      // finished_partial is a terminal, user-interrupted generation, not a
-      // partial network tree. A still-streaming turn must never look complete.
-      if (message.status != null && !["finished_successfully", "finished_partial"].includes(message.status)) throw blocked("An own turn is still in progress or failed.");
       if (content.parts != null && !Array.isArray(content.parts)) throw blocked("An own turn has invalid text parts.");
       if (content.content_type === "text" && !Array.isArray(content.parts)) throw blocked("An own text turn is missing its text parts.");
       // Own strings plus explicitly typed voice transcripts only. Never recurse
@@ -176,7 +170,6 @@
           const value = thought.content.trim() ? thought.content : (typeof thought.summary === "string" && thought.summary.trim() ? thought.summary : "");
           if (value) {
             assertComplete(thought, "Own thought");
-            if (thought.finished === false) throw blocked("An own thought is still in progress.");
             parts.push(value);
           }
         }

@@ -831,6 +831,55 @@ test("ChatGPT JSON capture rejects previous/missing indicators, recent pages and
   }
 });
 
+test("ChatGPT captures available text while the active reply is unfinished or failed", async () => {
+  for (const status of ["in_progress", "finished_successfully", "finished_partial", "failed"]) {
+    const data = fixture();
+    Object.assign(data.mapping.answer.message, { status, end_turn: false });
+    data.mapping.answer.message.content.parts = ["  Available reply\n"];
+    const harness = setup(data); await discover(harness);
+    const capture = await harness.window.__capCaptureChatGptJson();
+    assert.equal(capture.text, "ChatGPT conversation:\n\nUser: Question\n\nAssistant:   Available reply\n");
+    assert.equal(capture.messageTurnCount, 2);
+  }
+});
+
+test("ChatGPT captures unfinished thoughts and skips an empty pending reply", async () => {
+  for (const body of ["  Available thought\n", ""]) {
+    const data = fixture();
+    data.mapping.thought = { parent: "question", message: {
+      author: { role: "assistant" }, status: "in_progress", end_turn: false,
+      content: { content_type: "thoughts", thoughts: [{ content: body, summary: "Visible thought", finished: false }] }
+    } };
+    data.mapping.answer.parent = "thought";
+    Object.assign(data.mapping.answer.message, { status: "in_progress", end_turn: false });
+    data.mapping.answer.message.content.parts = [""];
+    const harness = setup(data); await discover(harness);
+    const capture = await harness.window.__capCaptureChatGptJson();
+    assert.equal(capture.text, `ChatGPT conversation:\n\nUser: Question\n\nAssistant: ${body || "Visible thought"}`);
+    assert.equal(capture.messageTurnCount, 2);
+  }
+  const data = fixture();
+  Object.assign(data.mapping.answer.message, { status: "in_progress", end_turn: false });
+  data.mapping.answer.message.content.parts = [];
+  const harness = setup(data); await discover(harness);
+  const capture = await harness.window.__capCaptureChatGptJson();
+  assert.equal(capture.text, "ChatGPT conversation:\n\nUser: Question");
+  assert.equal(capture.messageTurnCount, 1);
+});
+
+test("ChatGPT captures prior turns while a search tool is still running", async () => {
+  const data = fixture();
+  data.mapping.search = { parent: "answer", message: {
+    author: { role: "assistant" }, recipient: "web.run", status: "in_progress", end_turn: false,
+    content: { content_type: "code", text: "TOOL_SENTINEL" }
+  } };
+  data.current_node = "search";
+  const harness = setup(data); await discover(harness);
+  const capture = await harness.window.__capCaptureChatGptJson();
+  assert.equal(capture.text, "ChatGPT conversation:\n\nUser: Question\n\nAssistant: Selected answer");
+  assert.deepEqual([...capture.excludedContentTypes], ["tools"]);
+});
+
 test("ChatGPT JSON capture never extracts nested tool/file/image/artifact text", async () => {
   const data = fixture();
   data.mapping.question.message.content = { content_type: "multimodal_text", parts: ["Own prompt", { content_type: "image_asset_pointer", text: "IMAGE_SENTINEL" }] };
