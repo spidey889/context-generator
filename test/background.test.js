@@ -95,6 +95,8 @@ function loadBackgroundForTransferTest({
   preparedTab,
   sourceTab,
   updateError = false,
+  tabUpdateImpl,
+  windowUpdateImpl,
   sendMessageImpl,
   createTabImpl,
   firstCreatedTabId = 100,
@@ -177,10 +179,10 @@ function loadBackgroundForTransferTest({
         update: async (tabId, options) => {
           operations.updated.push({ tabId, options });
           if (updateError) throw new Error("No tab with id");
-          return { id: tabId, windowId: 1 };
+          return tabUpdateImpl ? tabUpdateImpl(tabId, options) : { id: tabId, windowId: 1 };
         }
       },
-      windows: { update: async () => ({}) }
+      windows: { update: async (...args) => windowUpdateImpl ? windowUpdateImpl(...args) : ({}) }
     }
   };
 
@@ -220,6 +222,10 @@ function loadBackgroundForTransferTest({
     revealDestination(destination, tabId, senderTab, deadlineAt = Date.now() + 10000) {
       return new Promise(resolve => messageListener({ type: "REVEAL_DESTINATION_PROGRESS",
         destination, tabId, transferId: "transfer-test", deadlineAt }, { tab: senderTab }, resolve));
+    },
+    endProgress(tabId, senderTab) {
+      return new Promise(resolve => messageListener({ type: "END_DESTINATION_PROGRESS",
+        tabId, transferId: "transfer-test" }, { tab: senderTab }, resolve));
     },
     activateDestination(destination, tabId, deadlineAt = null, senderTab = null) {
       return new Promise((resolve, reject) => {
@@ -443,6 +449,69 @@ test("early reveal waits for native navigation and composer readiness before sho
     assert.equal(harness.operations.created.length, 1);
     assert.ok(harness.operations.updated.every(({ options }) => !Object.hasOwn(options, "url")), "Focus never reloads or navigates the destination.");
   }
+});
+
+test("ending a pending early reveal prevents later focus without cancelling real delivery", async () => {
+  const sourceTab = { id: 9, windowId: 1, index: 0 };
+  const harness = loadBackgroundForTransferTest({ sourceTab });
+  const prepared = await harness.prepare("claude", sourceTab);
+  const tab = harness.operations.created[0].tab;
+  tab.status = "loading";
+  const reveal = harness.revealDestination("claude", prepared.tabId, sourceTab);
+  await new Promise(setImmediate);
+  await harness.endProgress(prepared.tabId, sourceTab);
+  tab.status = "complete";
+  const result = await reveal;
+  assert.equal(harness.operations.updated.length, 0, "A finished/failed summary must not trigger a late optional switch.");
+  assert.equal(result.revealed, false);
+  assert.equal(harness.operations.sent.some(({ message }) => message.type === "SHOW_TRANSFER_PROGRESS"), false);
+  assert.equal((await harness.sendTransfer("claude", prepared.tabId, false, null, sourceTab)).ok, true);
+  assert.equal(harness.operations.updated.length, 1, "Real delivery keeps its normal activation.");
+});
+
+test("stopping an already-submitted activation completes window focus without a second switch", async () => {
+  const sourceTab = { id: 9, windowId: 1, index: 0 };
+  let acknowledge, submitted, focuses = 0;
+  const started = new Promise(resolve => { submitted = resolve; });
+  const harness = loadBackgroundForTransferTest({ sourceTab,
+    tabUpdateImpl: () => { submitted(); return new Promise(resolve => { acknowledge = resolve; }); },
+    windowUpdateImpl: async () => { focuses++; return {}; }
+  });
+  const prepared = await harness.prepare("claude", sourceTab);
+  const reveal = harness.revealDestination("claude", prepared.tabId, sourceTab);
+  await started;
+  await harness.endProgress(prepared.tabId, sourceTab);
+  acknowledge({ id: prepared.tabId, windowId: 1 });
+  assert.equal((await reveal).revealed, true);
+  assert.equal(focuses, 1, "An acknowledged tab switch must finish its native window focus.");
+  assert.equal(harness.operations.sent.some(({ message }) => message.type === "SHOW_TRANSFER_PROGRESS"), false);
+  assert.equal((await harness.sendTransfer("claude", prepared.tabId, false, null, sourceTab)).ok, true);
+  assert.equal(harness.operations.updated.length, 1);
+  assert.equal(focuses, 1);
+});
+
+test("navigation during the readiness reply cannot trigger an early switch", async () => {
+  const sourceTab = { id: 9, windowId: 1, index: 0 };
+  const harness = loadBackgroundForTransferTest({ sourceTab, sendMessageImpl: async (_tabId, message) => {
+    if (message.type === "CHECK_TRANSFER_PROGRESS_READY") harness.operations.created[0].tab.url = "https://claude.ai/chat/saved";
+    return { ok: true };
+  } });
+  const prepared = await harness.prepare("claude", sourceTab);
+  assert.equal((await harness.revealDestination("claude", prepared.tabId, sourceTab)).ok, false);
+  assert.equal(harness.operations.updated.length, 0);
+});
+
+test("an early window-focus failure retains ordinary focused-paste recovery", async () => {
+  const sourceTab = { id: 9, windowId: 1, index: 0 };
+  let focuses = 0;
+  const harness = loadBackgroundForTransferTest({ sourceTab, windowUpdateImpl: async () => {
+    if (++focuses === 1) throw new Error("Window focus failed");
+    return {};
+  } });
+  const prepared = await harness.prepare("claude", sourceTab);
+  assert.equal((await harness.revealDestination("claude", prepared.tabId, sourceTab)).ok, false);
+  assert.equal((await harness.sendTransfer("claude", prepared.tabId, false, null, sourceTab)).ok, true);
+  assert.equal(focuses, 2);
 });
 
 clockTest("a destination that stays loading expires readiness without switching or showing a cue", async () => {

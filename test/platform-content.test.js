@@ -2235,6 +2235,30 @@ test("summary completion, cancellation and teardown cannot trigger a delayed rev
   }
 });
 
+test("stopping an in-flight reveal settles promptly and ignores a late completed-transfer acknowledgement", async () => {
+  for (const completed of [false, true]) {
+    const messages = [];
+    let finish;
+    const hooks = loadPlatformContent([], "chatgpt.com", { runtimeSendMessage: async message => {
+      messages.push(message);
+      if (message.type === "REVEAL_DESTINATION_PROGRESS") return new Promise(resolve => { finish = resolve; });
+      if (message.type === "END_DESTINATION_PROGRESS") finish({ ok: true, revealed: completed });
+      return { ok: true };
+    } });
+    const trace = hooks.createTransferTrace("claude", "test");
+    const reveal = hooks.createEarlyDestinationReveal(trace, Promise.resolve({ tabId: 41 }));
+    reveal.onNearEnd();
+    await new Promise(setImmediate);
+    trace.completed = completed;
+    reveal.stop();
+    reveal.stop();
+    await reveal.wait();
+    assert.equal(messages.filter(message => message.type === "END_DESTINATION_PROGRESS").length, 1);
+    assert.equal(trace.earlyDestinationTabId, undefined);
+    assert.equal(trace.marks.some(mark => mark.label === "destination revealed near countdown end"), false);
+  }
+});
+
 clockTest("waiting destination cues wait for load and composer, then survive body replacement without redrawing", () => {
   const input = new FakeElement({ tag: "textarea", attrs: { id: "prompt-textarea" } });
   const hooks = loadPlatformContent([input]);
@@ -2303,6 +2327,23 @@ clockTest("waiting destination cues expire and ignore cancellation of another at
   await hooks.delay(1100);
   assert.equal(cue.isConnected, false);
   assert.equal(input.value, "My waiting draft");
+});
+
+test("a late status message cannot recreate a cancelled or finished waiting cue", () => {
+  for (const type of ["CANCEL_TRANSFER", "FINISH_TRANSFER_PROGRESS"]) {
+    const input = new FakeElement({ tag: "textarea", attrs: { id: "prompt-textarea" } });
+    const hooks = loadPlatformContent([input]);
+    const listener = hooks.runtimeMessageListeners[0];
+    listener({ type, transferId: "late-status" }, {}, () => {});
+    for (const statusType of ["CHECK_TRANSFER_PROGRESS_READY", "SHOW_TRANSFER_PROGRESS"]) {
+      let response;
+      listener({ type: statusType, phase: "polishing", destination: "chatgpt", transferId: "late-status",
+        deadlineAt: Date.now() + 10000 }, {}, result => { response = result; });
+      assert.equal(response.code, "early_reveal_stopped");
+    }
+    assert.equal(hooks.document.getElementById("context-generator-destination-status"), null);
+    assert.equal(input.value, "");
+  }
 });
 
 clockTest("destination status follows verified insertion and cleans up without submitting", async () => {

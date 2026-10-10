@@ -934,7 +934,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
   if (message?.type === "REVEAL_DESTINATION_PROGRESS") {
     revealDestinationProgress(message.tabId, message.destination, message.deadlineAt, message.transferId, sender?.tab)
-      .then(() => sendResponse({ ok: true }))
+      .then(revealed => sendResponse({ ok: true, revealed }))
       .catch(error => sendResponse({ ok: false, error: error.message, code: error.code || "destination_open_failed" }));
     return true;
   }
@@ -942,7 +942,12 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     const operation = transferOperations.get(message.transferId);
     if (operation && operation.sourceTabId === sender?.tab?.id && operation.tabIds.has(message.tabId)
         && message.tabId !== operation.sourceTabId) {
-      chrome.tabs.sendMessage(message.tabId, { type: "FINISH_TRANSFER_PROGRESS", transferId: message.transferId })
+      // Stop only presentation work. The real transfer may already have its
+      // summary and must retain its normal cancellation/deadline token.
+      operation.earlyRevealStopped = true;
+      operation.earlyRevealController?.abort(Object.assign(new Error("Early reveal stopped."), { code: "early_reveal_stopped" }));
+      chrome.tabs.sendMessage(message.tabId, { type: "FINISH_TRANSFER_PROGRESS", transferId: message.transferId,
+        failed: message.failed === true })
         .catch(() => {});
     }
     sendResponse({ ok: true });
@@ -1600,19 +1605,22 @@ async function createDestinationTab(destination, options = {}) {
   }
 }
 
-async function activateDestinationTab(tabId, deadlineAt = null, operation = null) {
+async function activateDestinationTab(tabId, deadlineAt = null, operation = null, completionOperation = operation) {
   await checkTransferSource(operation);
   checkTransferDeadline(deadlineAt);
   try {
     const tab = await chrome.tabs.update(tabId, { active: true });
-    await checkTransferSource(operation);
+    // Once native activation is submitted, finish its window-focus pair even
+    // if optional polishing stops. Real transfer cancellation still revokes it.
+    await checkTransferSource(completionOperation);
     checkTransferDeadline(deadlineAt);
     if (tab?.windowId) {
       await chrome.windows.update(tab.windowId, { focused: true });
     }
-    checkTransferOperation(operation);
+    checkTransferOperation(completionOperation);
+    operation?.onTabActivated?.(tabId);
   } catch (error) {
-    checkTransferOperation(operation);
+    checkTransferOperation(completionOperation);
     if (["transfer_timeout", "user_cancelled"].includes(error?.code)) throw error;
     // Focus is required for several composers to restore their native drafts.
     // Never report a successful switch or paste into a hidden tab after failure.
@@ -1630,10 +1638,23 @@ async function revealDestinationProgress(tabId, destinationId, deadlineAt, trans
       || !DESTINATIONS[destinationId] || !Number.isFinite(deadlineAt)) {
     throw new Error("The prepared destination was not available.");
   }
+  if (operation.earlyRevealStopped) return false;
   await checkTransferSource(operation);
   if (!await isPreparedDestinationTabUsable(tabId, destinationId, operation)) {
     throw new Error("The destination is no longer a new chat.");
   }
+  const controller = new AbortController();
+  operation.earlyRevealController = controller;
+  const onTransferAbort = () => controller.abort(operation.controller.signal.reason);
+  operation.controller.signal.addEventListener("abort", onTransferAbort, { once: true });
+  if (operation.controller.signal.aborted) onTransferAbort();
+  if (operation.earlyRevealStopped) controller.abort(Object.assign(new Error("Early reveal stopped."), { code: "early_reveal_stopped" }));
+  const revealOperation = { ...operation, controller, onTabActivated: () => {
+    // Record completed native activation even if optional status work stopped
+    // while it was in flight; delivery must not refocus or paste hidden.
+    operation.earlyRevealedTabId = tabId;
+    operation.earlyRevealedAt = Date.now();
+  } };
   try {
     const statusMessage = {
       type: "SHOW_TRANSFER_PROGRESS", phase: "polishing", destination: destinationId,
@@ -1642,8 +1663,8 @@ async function revealDestinationProgress(tabId, destinationId, deadlineAt, trans
     const statusDeadlineAt = Math.min(deadlineAt, Date.now() + 6000);
     const waitForProgressReady = async (type) => {
       while (Date.now() < statusDeadlineAt) {
-        await checkTransferSource(operation);
-        if (!await isPreparedDestinationTabUsable(tabId, destinationId, operation)) {
+        await checkTransferSource(revealOperation);
+        if (!await isPreparedDestinationTabUsable(tabId, destinationId, revealOperation)) {
           throw new Error("The destination is no longer a new chat.");
         }
         const tab = await chrome.tabs.get(tabId);
@@ -1651,25 +1672,32 @@ async function revealDestinationProgress(tabId, destinationId, deadlineAt, trans
         if (tab.status === "complete" && !tab.pendingUrl) {
           const response = await sendMessageWhenReady(tabId, { ...statusMessage, type },
             Math.max(1, statusDeadlineAt - Date.now()), DESTINATIONS[destinationId].name,
-            { ...createBackgroundTrace(), operation });
+            { ...createBackgroundTrace(), operation: revealOperation });
           if (response?.ok === true) return;
           if (response?.code !== "destination_loading") throw new Error("The destination was not ready.");
         }
         await waitForTransferWork(delay(Math.min(MESSAGE_RETRY_INTERVAL_MS,
-          Math.max(0, statusDeadlineAt - Date.now()))), operation);
+          Math.max(0, statusDeadlineAt - Date.now()))), revealOperation);
       }
       throw new Error("The destination did not finish loading in time.");
     };
     await waitForProgressReady("CHECK_TRANSFER_PROGRESS_READY");
-    await activateVerifiedDestinationTab(tabId, destinationId, deadlineAt, transferId, sourceTab);
-    operation.earlyRevealedTabId = tabId;
-    // Retain native focus settling if the summary finishes immediately.
-    operation.earlyRevealedAt = Date.now();
+    if (operation.earlyRevealedTabId !== tabId) {
+      if (!await isPreparedDestinationTabUsable(tabId, destinationId, revealOperation)) {
+        throw new Error("The destination is no longer a new chat.");
+      }
+      await activateDestinationTab(tabId, deadlineAt, revealOperation, operation);
+    }
     // Show one cue in the loaded visible document; retries reuse that cue.
     await waitForProgressReady("SHOW_TRANSFER_PROGRESS");
+    return true;
   } catch (error) {
-    chrome.tabs.sendMessage(tabId, { type: "FINISH_TRANSFER_PROGRESS", transferId }).catch(() => {});
+    chrome.tabs.sendMessage(tabId, { type: "FINISH_TRANSFER_PROGRESS", transferId, failed: false }).catch(() => {});
+    if (error?.code === "early_reveal_stopped") return operation.earlyRevealedTabId === tabId;
     throw error;
+  } finally {
+    operation.controller.signal.removeEventListener("abort", onTransferAbort);
+    if (operation.earlyRevealController === controller) delete operation.earlyRevealController;
   }
 }
 

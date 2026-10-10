@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-10-loaded-handoff-v123";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-10-cancelled-reveal-v124";
   const INLINE_PILL_SIZE = 36;
   const ownedUiStyleSheets = new Map();
   const CLAUDE_INLINE_STYLE_ID = "context-generator-claude-inline-styles";
@@ -516,6 +516,7 @@
   let pendingFloatingButtonReasons = new Set();
   let floatingButtonMonitoringDisabled = false;
   let destinationWaitingStatus = null;
+  const endedDestinationProgressIds = new Set();
   let handoffCountdownTimer = null;
   let handoffCountdownHideTimer = null;
   let handoffActivityProgressFrame = null;
@@ -726,7 +727,7 @@
     if (message?.type === "CANCEL_TRANSFER") {
       activePasteGuards.get(message.transferId)?.cancel();
       cancelSourceTransfer(message.transferId);
-      finishDestinationWaitingStatus(message.transferId);
+      endDestinationWaitingStatus(message.transferId);
       sendResponse({ ok: true });
       return false;
     }
@@ -736,6 +737,10 @@
     }
 
     if (message?.type === "CHECK_TRANSFER_PROGRESS_READY" || message?.type === "SHOW_TRANSFER_PROGRESS") {
+      if (endedDestinationProgressIds.has(message.transferId)) {
+        sendResponse({ ok: false, code: "early_reveal_stopped" });
+        return false;
+      }
       const landingPaths = DESTINATION_LANDING_PATHS[currentPlatform.id] || [];
       if (message.destination !== currentPlatform.id || message.phase !== "polishing"
           || !message.transferId || !Number.isFinite(message.deadlineAt) || message.deadlineAt <= Date.now()
@@ -770,13 +775,14 @@
       return false;
     }
     if (message?.type === "FINISH_TRANSFER_PROGRESS") {
-      finishDestinationWaitingStatus(message.transferId, false);
+      endDestinationWaitingStatus(message.transferId, message.failed === true ? false : null);
       sendResponse({ ok: true });
       return false;
     }
 
     if (message?.type === "PASTE_CONTEXT") {
       const pasteStartedAt = getNow();
+      endDestinationWaitingStatus(message.transferId);
       finishDestinationWaitingStatus(destinationWaitingStatus?.transferId);
       const finishStatus = showDestinationPasteStatus() || (() => {});
       pasteIntoPlatform(message.text, message.destination, message.transferId, message.deadlineAt, message.sourceTabId)
@@ -816,6 +822,15 @@
     destinationWaitingStatus = null;
     clearTimeout(waiting.timer);
     waiting.finish(result);
+  }
+
+  function endDestinationWaitingStatus(transferId, result = null) {
+    if (!transferId) return;
+    // A queued status message can arrive after cancellation or real paste.
+    // Retain a small attempt latch so it cannot recreate the polishing cue.
+    endedDestinationProgressIds.add(transferId);
+    if (endedDestinationProgressIds.size > 16) endedDestinationProgressIds.delete(endedDestinationProgressIds.values().next().value);
+    finishDestinationWaitingStatus(transferId, result);
   }
 
   function showDestinationPasteStatus(text = "Pasting your context…") {
@@ -1168,6 +1183,7 @@
   function createEarlyDestinationReveal(trace, preparedDestinationPromise) {
     let pending = true;
     let work = null;
+    let stopping = null;
     return {
       onNearEnd() {
         if (!pending || work) return;
@@ -1181,7 +1197,7 @@
             tabId: prepared.tabId, transferId: trace.id, deadlineAt: trace.deadlineAt
           });
           checkTransferDeadline(trace);
-          if (response?.ok === true) {
+          if (response?.ok === true && response.revealed !== false && instanceActive && !trace.completed && !trace.cancelled && !trace.expired) {
             trace.earlyDestinationTabId = prepared.tabId;
             markTransferTrace(trace, "destination revealed near countdown end", { tabId: prepared.tabId });
           }
@@ -1193,8 +1209,16 @@
           if (error?.code === "user_cancelled") cancelSourceTransfer(trace.id, trace);
         });
       },
-      stop() { pending = false; },
-      wait() { return work || Promise.resolve(); }
+      stop() {
+        pending = false;
+        if (!stopping && Number.isInteger(trace.earlyProgressTabId) && !Number.isInteger(trace.earlyDestinationTabId)) {
+          // A ready/failed summary must not wait for or be followed by a late
+          // optional switch. The worker cancels only the reveal's work token.
+          stopping = notifyBackground({ type: "END_DESTINATION_PROGRESS", transferId: trace.id,
+            tabId: trace.earlyProgressTabId }).catch(() => {});
+        }
+      },
+      wait() { return Promise.all([work, stopping]); }
     };
   }
 
@@ -2261,7 +2285,7 @@
     trace.completed = true;
     if (telemetryFailureReason && Number.isInteger(trace.earlyProgressTabId)) {
       notifyBackground({ type: "END_DESTINATION_PROGRESS", transferId: trace.id,
-        tabId: trace.earlyProgressTabId }).catch(() => {});
+        tabId: trace.earlyProgressTabId, failed: true }).catch(() => {});
     }
     const totalMs = Math.round(getNow() - trace.startedAt);
     const failed = trace.marks.some((mark) => mark.label.startsWith("failed:"));
