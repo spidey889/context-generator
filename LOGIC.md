@@ -59,11 +59,12 @@ Capture, placement, paste and UI share the content script's mutable state and te
 
 ```text
 orb click -> picker, preconnects and early JSON capture (saved chat + Speed)
-destination selection -> attempt ID + started telemetry; pin source identity
+destination selection / Copy -> attempt ID + started telemetry; pin source identity
 empty-chat guard -> stop before handoff or destination work when no usable chat exists
 prepare inactive destination while capture runs
 reuse/await current picker JSON capture, or fresh JSON/DOM capture -> direct text carry or summarize once -> reuse/recover destination
-paste and verify -> finish source cue -> activate according to platform policy
+deliver: paste and verify then activate according to platform policy, or write clipboard without opening a tab
+finish source cue
 save Latest Run receipt and terminal telemetry
 ```
 

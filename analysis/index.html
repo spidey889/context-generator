@@ -826,7 +826,7 @@
           ${metric("Summary", formatNumber(summary.outputChars), `${formatNumber(summary.summaryWordCount)} words`, "accent-violet")}
           ${metric("Tokens", formatNumber(usage.totalTokens), usageDetail, "accent-green")}
           ${metric("Summary time", formatDuration(summary.summaryMs), summaryTimingDetail, "accent-amber")}
-          ${metric(stats.destination?.id === "clipboard" ? "Clipboard time" : "Paste time", formatDuration(stats.destinationTiming?.pasteMs), stats.destination?.id === "clipboard" ? "Context written to clipboard" : `Page: ${formatDuration(stats.destinationTiming?.pageLoadMs)} · Composer wait: ${formatDuration(stats.destinationTiming?.composerWaitMs)}`, "accent-teal")}
+          ${metric(stats.destination?.id === "clipboard" ? "Clipboard time" : "Paste time", formatDuration(stats.destinationTiming?.pasteMs), stats.destination?.id === "clipboard" ? "Clipboard delivery" : `Page: ${formatDuration(stats.destinationTiming?.pageLoadMs)} · Composer wait: ${formatDuration(stats.destinationTiming?.composerWaitMs)}`, "accent-teal")}
         </section>
 
         <section class="raw-panel" id="rawScrapePanel" hidden>
