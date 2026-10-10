@@ -4,7 +4,7 @@ A short history of decisions and regressions that matter when changing the code.
 
 ## 2026-10-10
 
-- **Copy recovery confirms successful retries.** The automatic Copy path showed “Copied to your clipboard”, but the recovery button after a blocked write only showed “Copied!”. Successful retries now also show the same accessible confirmation, without adding feedback for failed, dismissed or replaced recovery. The installed Copy smoke checks the retry message after real clipboard writing.
+- **Recovery feedback stays on the button.** Reverted the audit follow-up that added a success toast to clipboard recovery: the owner wants the existing “Copied!” button feedback there. Automatic picker Copy still shows “Copied to your clipboard”. The installed Copy smoke verifies this distinction with real clipboard writing.
 
 - **Copy context directly from the picker.** Added Copy beside Flash to capture the current chat, prepare its context with existing JSON/DOM and summary/local routing, and write the exact carry to the clipboard. The shared lock and source/deadline guards prevent duplicate clicks and late dispatch after navigation/cancellation. Added clipboard-write permission for asynchronous completion, truthful success feedback and complete-text recovery when copying is blocked. Copy opens no destination and preserves transfer telemetry, counters and Latest Run semantics. Validated with 524 offline tests, isolated Brave DOM/Flash copying and exact OS clipboard readback, blocked-copy recovery, responsive controls and the existing destination-transfer smoke. Added both Copy paths to CI.
 
