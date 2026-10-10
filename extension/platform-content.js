@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-10-minimal-orb-click-v126";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-10-subtle-orb-click-v127";
   const INLINE_PILL_SIZE = 36;
   const ownedUiStyleSheets = new Map();
   const CLAUDE_INLINE_STYLE_ID = "context-generator-claude-inline-styles";
@@ -5515,7 +5515,7 @@
     };
     updateMotion();
     addOwnedEventListener(reducedMotion, "change", updateMotion);
-    // Animate hover only; a click must not introduce a press/rebound cycle.
+    // Hover moves the button; click feedback stays small and inside the artwork.
     const canHover = () => !bubble.disabled && !isRunning && bubble.getAttribute("aria-expanded") !== "true";
     addOwnedEventListener(bubble, "mouseenter", () => {
       if (!canHover()) return;
@@ -5539,8 +5539,16 @@
       event.preventDefault();
       event.stopPropagation();
       if (isRunning) return;
-      // Stop an unfinished hover immediately; opening/closing adds no orb motion.
+      // Finish hover immediately, then acknowledge the click without gating the picker.
       bubble.style.transition = "none";
+      icon.getAnimations?.().forEach(animation => animation.cancel());
+      if (!reducedMotion?.matches) {
+        icon.animate?.([
+          { transform: "scale(1)", filter: "brightness(1)" },
+          { transform: "scale(0.97)", filter: "brightness(0.94)", offset: 0.4 },
+          { transform: "scale(1)", filter: "brightness(1)" }
+        ], { duration: 110, easing: "ease-out" });
+      }
       dismissOnboardingNudge();
       dismissClaudeLimitNudge();
       toggleDestinationSheet();

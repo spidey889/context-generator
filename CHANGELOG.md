@@ -4,6 +4,8 @@ A short history of decisions and regressions that matter when changing the code.
 
 ## 2026-10-10
 
+- **Orb clicks regain subtle feedback.** The motionless follow-up felt too much like clicking text. Added a 110 ms artwork-only pulse with 3% compression and slight dimming, then a direct return. It starts alongside the picker rather than delaying it; repeat clicks replace the pulse, and reduced motion skips it. Preserved hover and the shorter picker entrance. Local visual refinement; no push or release.
+
 - **Composer orb clicks have no press animation.** Removed pointer-down shrink, pointer-up rebound and the extra picker-open scale/glow change. Clicking ends any unfinished hover transition immediately; hover motion returns on the next hover. The picker still opens directly with its shorter entrance. Local follow-up to the responsiveness trial; no push or release.
 
 - **Orb click opens the picker sooner.** Shortened the entrance from 300 to 160 ms, reduced its travel and made sheet/backdrop transitions honor reduced motion. Moved speculative preconnect/JSON capture after the opening paint because rendered-history snapshotting ran inside the click handler. Removed the 180 ms focus delay and cancel queued warmup on dismissal; selecting immediately or toggling Speed retains the existing capture flow. Preserves the picker design and transfer lifecycle. Local UX trial; no push or release.
