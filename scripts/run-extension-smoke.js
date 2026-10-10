@@ -1196,9 +1196,12 @@ async function verifyClipboardFlow(sourceSession, browserSession, state, devTool
     await waitFor(() => sourceSession.evaluate('document.getElementById("context-generator-destination-sheet").style.display === "none"'), "Copy picker closure before resize");
     await sourceSession.call("Emulation.setDeviceMetricsOverride", { width, height: 800, deviceScaleFactor: 1, mobile: false });
     await waitFor(() => sourceSession.evaluate(`innerWidth === ${width}`), "Copy viewport");
+    // innerWidth changes before resize/ResizeObserver placement work completes.
+    // Yield through layout and its following placement frame before reopening.
+    await sourceSession.evaluate("new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))");
     await waitFor(() => sourceSession.evaluate("window.__capSmokeSourceRouteReady()", extensionContextId), "Copy source mount after resize");
     await sourceSession.evaluate('document.getElementById("context-generator-bubble").click()');
-    await waitFor(() => sourceSession.evaluate('getComputedStyle(document.getElementById("context-generator-destination-sheet")).opacity === "1"'), "Copy picker after resize");
+    await waitFor(() => sourceSession.evaluate('getComputedStyle(document.getElementById("context-generator-destination-sheet")).opacity === "1"'), `Copy picker after resize to ${width}px`);
     const geometry = await sourceSession.evaluate(`(() => {
       const sheet = document.getElementById("context-generator-destination-sheet");
       const copy = document.getElementById("context-generator-copy-button");
