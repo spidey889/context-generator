@@ -95,12 +95,13 @@ function jsonStageFixture(stage, responseFor) {
 for (const stage of ["session", "history", "descriptor"]) {
   // All three stages use readJson. Keep its header matrix once, with one
   // oversized streamed response per other stage to protect their wiring.
-  const lengths = stage === "history" ? [undefined, "1", "6000001"] : [undefined];
+  const limit = stage === "history" ? 32000000 : 6000000;
+  const lengths = stage === "history" ? [undefined, "1", String(limit + 1)] : [undefined];
   for (const length of lengths) test(`ChatGPT bounds ${stage} JSON with Content-Length ${length ?? "absent"} and permits recovery`, async () => {
     let streamed;
     const { harness, recover } = jsonStageFixture(stage, data => {
       const prefix = Buffer.from(JSON.stringify(data).slice(0, -1) + ',"ignored":"');
-      streamed = streamJsonChunks([prefix, ...Array(20).fill(new Uint8Array(1000000).fill(32)), Buffer.from('"}')],
+      streamed = streamJsonChunks([prefix, ...Array(40).fill(new Uint8Array(1000000).fill(32)), Buffer.from('"}')],
         length ? { "content-length": length } : {}, true);
       return streamed.response;
     });
@@ -110,8 +111,8 @@ for (const stage of ["session", "history", "descriptor"]) {
       return true;
     });
     assert.equal(streamed.stats.cancelled, 1);
-    assert.ok(streamed.stats.bytes <= 7000000, `The oversized ${stage} body was drained: ${streamed.stats.bytes} bytes.`);
-    if (length === "6000001") assert.equal(streamed.stats.bytes, 0);
+    assert.ok(streamed.stats.bytes <= limit + 1000000, `The oversized ${stage} body was drained: ${streamed.stats.bytes} bytes.`);
+    if (length === String(limit + 1)) assert.equal(streamed.stats.bytes, 0);
     assert.equal(streamed.response.body.locked, false);
     assert.ok(harness.replies.every(reply => !reply.data && !reply.pastedTexts));
     assert.doesNotMatch(JSON.stringify(harness.replies), /PRIVATE_CANCEL_SENTINEL|TEST_ONLY|SIGNED_URL_SENTINEL/);
@@ -151,14 +152,56 @@ function paddedJson(data, size) {
   return Buffer.concat([prefix, Buffer.alloc(size - prefix.length - 2, 32), Buffer.from('"}')]);
 }
 
-test("ChatGPT accepts exactly six million history bytes with split BOM and Unicode while leaving page responses unread", async () => {
+test("ChatGPT discards ten large alternate branches before the bridge and keeps full-tree completeness checks", async () => {
+  const data = fixture();
+  data.mapping.question.children = ["answer", "alternate"];
+  for (let i = 0; i < 10; i++) data.mapping[`unused-${i}`] = { parent: "question", message: {
+    author: { role: "assistant" }, content: { content_type: "text", parts: [`UNSELECTED_SENTINEL ${"x".repeat(750000)}`] },
+    metadata: { attachments: [{ id: "file_unused", is_big_paste: true, mime_type: "text/plain", size: 9999999 }] }
+  } };
+  data.total_node_count = Object.keys(data.mapping).length;
+  data.page_info.total_message_count = data.total_node_count - 1;
+  assert.ok(Buffer.byteLength(JSON.stringify(data)) > 6000000);
+  const harness = setup(data); await discover(harness);
+  assert.equal((await harness.window.__capCaptureChatGptJson()).text,
+    "ChatGPT conversation:\n\nUser: Question\n\nAssistant: Selected answer");
+  const reply = harness.replies.at(-1);
+  assert.deepEqual(Object.keys(reply.data.mapping).sort(), ["answer", "question", "root"]);
+  assert.equal(JSON.stringify(reply.data.mapping.question.children), '["answer"]');
+  assert.equal(reply.sourceTreeCounts.nodes, data.total_node_count);
+  assert.equal(reply.sourceTreeCounts.messages, data.page_info.total_message_count);
+  assert.doesNotMatch(JSON.stringify(reply), /UNSELECTED_SENTINEL|Wrong branch|file_unused/);
+  assert.equal(harness.requests.filter(request => /\/files\/download\//.test(request.url)).length, 0);
+
+  for (const scope of ["conversation", "page_info", "pagination", "metadata"]) for (const key of ["total_node_count", "total_message_count"]) {
+    const incomplete = structuredClone(data);
+    const target = scope === "conversation" ? incomplete : (incomplete[scope] ||= {});
+    target[key] = data.total_node_count + 1;
+    const missing = setup(incomplete); await discover(missing);
+    await assert.rejects(missing.window.__capCaptureChatGptJson(), /missing history/);
+  }
+});
+
+test("ChatGPT reports the selected text limit after reading a history larger than the former raw limit", async () => {
+  const data = fixture();
+  data.mapping.answer.message.content.parts = ["x".repeat(1300000)];
+  data.mapping.answer.message.metadata = { ignored: "x".repeat(5000000) };
+  const harness = setup(data); await discover(harness);
+  await assert.rejects(harness.window.__capCaptureChatGptJson(), error => {
+    assert.equal(error.captureFailureReason, "size_limit");
+    assert.match(error.message, /500,000/);
+    return true;
+  });
+});
+
+test("ChatGPT accepts exactly 32 MB of history with split BOM and Unicode while leaving page responses unread", async () => {
   const data = fixture();
   const text = "  café🙂\r\n\uFEFF  original text  ";
   data.mapping.question.message.content.parts = [text];
-  const bytes = Buffer.concat([Buffer.from("\uFEFF"), paddedJson(data, 5999997)]);
+  const bytes = Buffer.concat([Buffer.from("\uFEFF"), paddedJson(data, 31999997)]);
   const split = bytes.indexOf(Buffer.from("🙂")) + 1;
   const streamed = streamJsonChunks([bytes.subarray(0, 1), bytes.subarray(1, 2), bytes.subarray(2, split),
-    bytes.subarray(split, split + 1), bytes.subarray(split + 1)], { "content-length": "6000000" });
+    bytes.subarray(split, split + 1), bytes.subarray(split + 1)], { "content-length": "32000000" });
   let pageResponse;
   const harness = setup(data, 200, { fetchImpl: request => {
     if (request.url.startsWith("/backend-api/conversation/")) return streamed.response;
@@ -168,14 +211,14 @@ test("ChatGPT accepts exactly six million history bytes with split BOM and Unico
   await discover(harness);
   assert.equal((await harness.window.__capCaptureChatGptJson()).text,
     `ChatGPT conversation:\n\nUser: ${text}\n\nAssistant: Selected answer`);
-  assert.equal(streamed.stats.bytes, 6000000);
+  assert.equal(streamed.stats.bytes, 32000000);
   assert.equal(streamed.stats.cancelled, 0);
   assert.equal(streamed.response.body.locked, false);
   assert.equal(pageResponse.bodyUsed, false);
   assert.deepEqual(await pageResponse.json(), data);
 });
 
-for (const total of [6000000, 6000001]) test(`ChatGPT shares its raw allowance across session, history, descriptor and original paste (${total} bytes)`, async () => {
+for (const total of [32000000, 32000001]) test(`ChatGPT shares its raw allowance across session, history, descriptor and original paste (${total} bytes)`, async () => {
   const { data, files } = pasteFixture(["\uFEFF  café🙂\r\noriginal paste  "]);
   const session = { accessToken: "TEST_ONLY", account: { id: "test-account" } };
   const descriptor = { status: "success", file_size_bytes: files[0].size,
@@ -190,7 +233,7 @@ for (const total of [6000000, 6000001]) test(`ChatGPT shares its raw allowance a
     paste = streamJsonChunks([Buffer.from(files[0].text)], { "content-type": "text/plain" });
     return paste.response;
   } });
-  if (total === 6000000) {
+  if (total === 32000000) {
     assert.equal((await harness.window.__capCaptureChatGptJson()).text,
       `ChatGPT conversation:\n\nUser: ${files[0].text}\n\nAssistant: Selected answer`);
     assert.equal(paste.stats.bytes, files[0].size);
@@ -204,7 +247,7 @@ for (const total of [6000000, 6000001]) test(`ChatGPT shares its raw allowance a
 
 test("ChatGPT starts no file requests when history leaves less raw budget than the complete paste manifest", async () => {
   const { data, fetchImpl } = pasteFixture(["x".repeat(100000)]);
-  const history = paddedJson(data, 5950000);
+  const history = paddedJson(data, 31950000);
   const harness = setup(data, 200, { fetchImpl: request => request.url.startsWith("/backend-api/conversation/")
     ? new Response(history, { headers: { "content-type": "application/json" } }) : fetchImpl(request) });
   await discover(harness);
@@ -215,7 +258,7 @@ test("ChatGPT starts no file requests when history leaves less raw budget than t
 
 test("ChatGPT shares the raw allowance across repeated paste descriptors instead of granting each another budget", async () => {
   const { data, files } = pasteFixture(["First paste", "Second paste"]);
-  const historyBytes = Buffer.byteLength(JSON.stringify(data));
+  const historyBytes = 26000000;
   let last;
   const harness = setup(data, 200, { fetchImpl: request => {
     const url = new URL(request.url, "https://chatgpt.com");
@@ -223,13 +266,14 @@ test("ChatGPT shares the raw allowance across repeated paste descriptors instead
       const file = files.find(entry => url.pathname.endsWith(entry.id));
       const descriptor = { status: "success", file_size_bytes: file.size,
         download_url: `https://chatgpt.com/backend-api/estuary/content?id=${file.id}` };
-      const size = file === files[0] ? 3000000 : 3000001 - historyBytes - files[0].size;
+      const size = file === files[0] ? 3000000 : 3000001 - files[0].size;
       const streamed = streamJsonChunks([paddedJson(descriptor, size)]);
       if (file === files[1]) last = streamed;
       return streamed.response;
     }
     if (url.pathname === "/backend-api/estuary/content") return new Response(files[0].text, { headers: { "content-type": "text/plain" } });
-    return jsonResponse(data);
+    return request.url.startsWith("/backend-api/conversation/")
+      ? new Response(paddedJson(data, historyBytes), { headers: { "content-type": "application/json" } }) : jsonResponse(data);
   } });
   await discover(harness);
   await assert.rejects(harness.window.__capCaptureChatGptJson(), error => error.captureFailureReason === "incomplete");
@@ -475,7 +519,7 @@ test("ChatGPT replaces the previous hook without losing observed authentication"
   old.version = 8;
   harness.reinstall();
   assert.notEqual(harness.window.__capChatGptFetchState, old);
-  assert.equal(harness.window.__capChatGptFetchState.version, 9);
+  assert.equal(harness.window.__capChatGptFetchState.version, 10);
   assert.equal(harness.listeners(), 1);
   assert.equal((await harness.window.__capCaptureChatGptJson()).text,
     "ChatGPT conversation:\n\nUser: Original pasted document\n\nAssistant: Selected answer");
@@ -783,7 +827,7 @@ test("ChatGPT JSON capture rejects previous/missing indicators, recent pages and
   ]) {
     const data = fixture(); mutate(data);
     const harness = setup(data); await discover(harness);
-    await assert.rejects(harness.window.__capCaptureChatGptJson(), /ChatGPT JSON capture blocked/);
+    await assert.rejects(harness.window.__capCaptureChatGptJson(), error => error.captureFailureReason === "incomplete");
   }
 });
 
