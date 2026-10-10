@@ -1640,18 +1640,33 @@ async function revealDestinationProgress(tabId, destinationId, deadlineAt, trans
       transferId, deadlineAt
     };
     const statusDeadlineAt = Math.min(deadlineAt, Date.now() + 6000);
-    const showProgress = () => sendMessageWhenReady(tabId, statusMessage,
-      Math.max(1, statusDeadlineAt - Date.now()), DESTINATIONS[destinationId].name,
-      { ...createBackgroundTrace(), operation });
-    const response = await showProgress();
-    if (response?.ok !== true) throw new Error("The destination was not ready.");
+    const waitForProgressReady = async (type) => {
+      while (Date.now() < statusDeadlineAt) {
+        await checkTransferSource(operation);
+        if (!await isPreparedDestinationTabUsable(tabId, destinationId, operation)) {
+          throw new Error("The destination is no longer a new chat.");
+        }
+        const tab = await chrome.tabs.get(tabId);
+        // A content-script ping alone does not prove the final document loaded.
+        if (tab.status === "complete" && !tab.pendingUrl) {
+          const response = await sendMessageWhenReady(tabId, { ...statusMessage, type },
+            Math.max(1, statusDeadlineAt - Date.now()), DESTINATIONS[destinationId].name,
+            { ...createBackgroundTrace(), operation });
+          if (response?.ok === true) return;
+          if (response?.code !== "destination_loading") throw new Error("The destination was not ready.");
+        }
+        await waitForTransferWork(delay(Math.min(MESSAGE_RETRY_INTERVAL_MS,
+          Math.max(0, statusDeadlineAt - Date.now()))), operation);
+      }
+      throw new Error("The destination did not finish loading in time.");
+    };
+    await waitForProgressReady("CHECK_TRANSFER_PROGRESS_READY");
     await activateVerifiedDestinationTab(tabId, destinationId, deadlineAt, transferId, sourceTab);
     operation.earlyRevealedTabId = tabId;
     // Retain native focus settling if the summary finishes immediately.
     operation.earlyRevealedAt = Date.now();
-    // Activation can finish a navigation begun during background warmup.
-    // Confirm the cue in the visible document before completing the reveal.
-    if ((await showProgress())?.ok !== true) throw new Error("The destination status was not ready.");
+    // Show one cue in the loaded visible document; retries reuse that cue.
+    await waitForProgressReady("SHOW_TRANSFER_PROGRESS");
   } catch (error) {
     chrome.tabs.sendMessage(tabId, { type: "FINISH_TRANSFER_PROGRESS", transferId }).catch(() => {});
     throw error;

@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-10-visible-handoff-v122";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-10-loaded-handoff-v123";
   const INLINE_PILL_SIZE = 36;
   const ownedUiStyleSheets = new Map();
   const CLAUDE_INLINE_STYLE_ID = "context-generator-claude-inline-styles";
@@ -735,7 +735,7 @@
       return false;
     }
 
-    if (message?.type === "SHOW_TRANSFER_PROGRESS") {
+    if (message?.type === "CHECK_TRANSFER_PROGRESS_READY" || message?.type === "SHOW_TRANSFER_PROGRESS") {
       const landingPaths = DESTINATION_LANDING_PATHS[currentPlatform.id] || [];
       if (message.destination !== currentPlatform.id || message.phase !== "polishing"
           || !message.transferId || !Number.isFinite(message.deadlineAt) || message.deadlineAt <= Date.now()
@@ -744,13 +744,26 @@
         sendResponse({ ok: false });
         return false;
       }
+      // A receiver can exist before navigation and composer hydration finish.
+      // Readiness checks never mount UI, focus the editor or reload the page.
+      if (!document.body || document.readyState !== "complete" || !findReadyPlatformInput()) {
+        sendResponse({ ok: false, code: "destination_loading" });
+        return false;
+      }
+      if (message.type === "CHECK_TRANSFER_PROGRESS_READY"
+          || (destinationWaitingStatus?.transferId === message.transferId
+            && document.getElementById(DESTINATION_STATUS_ID) === destinationWaitingStatus.node)) {
+        sendResponse({ ok: true });
+        return false;
+      }
       finishDestinationWaitingStatus(destinationWaitingStatus?.transferId);
       const finish = showDestinationPasteStatus("Polishing your summary…\nIt will be pasted here when it’s ready.");
       if (!finish) {
         sendResponse({ ok: false });
         return false;
       }
-      const waiting = { transferId: message.transferId, finish, timer: null };
+      const waiting = { transferId: message.transferId, finish, timer: null,
+        node: document.getElementById(DESTINATION_STATUS_ID) };
       destinationWaitingStatus = waiting;
       waiting.timer = setTimeout(() => finishDestinationWaitingStatus(message.transferId), message.deadlineAt - Date.now());
       sendResponse({ ok: true });

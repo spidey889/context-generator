@@ -155,7 +155,7 @@ function loadBackgroundForTransferTest({
       tabs: {
         onRemoved: { addListener: listener => { tabRemovedListener = listener; } },
         create: async (options) => {
-          const tab = { id: nextCreatedTabId++, url: options.url, windowId: options.windowId ?? 1 };
+          const tab = { id: nextCreatedTabId++, url: options.url, windowId: options.windowId ?? 1, status: "complete" };
           operations.created.push({ options, tab });
           return createTabImpl ? createTabImpl(tab) : tab;
         },
@@ -404,8 +404,8 @@ test("near-end reveal is text-free and subsequent delivery never steals focus ag
     const progress = harness.operations.sent.find(({ message }) => message.type === "SHOW_TRANSFER_PROGRESS");
     assert.equal(progress.message.phase, "polishing");
     assert.equal(Object.hasOwn(progress.message, "text"), false);
-    assert.equal(harness.operations.sent.filter(({ message }) => message.type === "SHOW_TRANSFER_PROGRESS").length, 2,
-      "Confirm the waiting cue again after native activation.");
+    assert.equal(harness.operations.sent.filter(({ message }) => message.type === "SHOW_TRANSFER_PROGRESS").length, 1,
+      "Show the waiting cue once after native activation.");
     assert.equal(harness.operations.updated.length, 1);
     assert.equal(harness.operations.sent.some(({ message }) => message.type === "PASTE_CONTEXT"), false);
     const response = await harness.sendTransfer(destination, prepared.tabId, false, null, sourceTab);
@@ -417,16 +417,54 @@ test("near-end reveal is text-free and subsequent delivery never steals focus ag
   }
 });
 
-test("a status confirmation failure after switching never causes a second focus during paste", async () => {
+test("early reveal waits for native navigation and composer readiness before showing one cue", async () => {
+  for (const waitingOn of ["load", "pending navigation", "composer"]) {
+    const sourceTab = { id: 9, windowId: 1, index: 0 };
+    let readinessChecks = 0;
+    const harness = loadBackgroundForTransferTest({ sourceTab, sendMessageImpl: async (_tabId, message) => {
+      if (message.type === "CHECK_TRANSFER_PROGRESS_READY") {
+        readinessChecks++;
+        assert.equal(harness.operations.updated.length, 0, "Readiness never focuses the tab.");
+        if (waitingOn === "composer" && readinessChecks === 1) return { ok: false, code: "destination_loading" };
+      }
+      if (message.type === "SHOW_TRANSFER_PROGRESS") assert.equal(harness.operations.updated.length, 1);
+      return { ok: true };
+    } });
+    const prepared = await harness.prepare("claude", sourceTab);
+    const tab = harness.operations.created[0].tab;
+    if (waitingOn === "load") tab.status = "loading";
+    if (waitingOn === "pending navigation") tab.pendingUrl = tab.url;
+    const reveal = harness.revealDestination("claude", prepared.tabId, sourceTab);
+    assert.equal(harness.operations.updated.length, 0);
+    setTimeout(() => { tab.status = "complete"; delete tab.pendingUrl; }, 0);
+    assert.equal((await reveal).ok, true, waitingOn);
+    assert.equal(harness.operations.sent.filter(({ message }) => message.type === "SHOW_TRANSFER_PROGRESS").length, 1);
+    assert.ok(readinessChecks >= (waitingOn === "composer" ? 2 : 1));
+    assert.equal(harness.operations.created.length, 1);
+    assert.ok(harness.operations.updated.every(({ options }) => !Object.hasOwn(options, "url")), "Focus never reloads or navigates the destination.");
+  }
+});
+
+clockTest("a destination that stays loading expires readiness without switching or showing a cue", async () => {
+  const sourceTab = { id: 9, windowId: 1, index: 0 };
+  const harness = loadBackgroundForTransferTest({ sourceTab, useRealTimers: true });
+  const prepared = await harness.prepare("claude", sourceTab);
+  harness.operations.created[0].tab.status = "loading";
+  assert.equal((await harness.revealDestination("claude", prepared.tabId, sourceTab)).ok, false);
+  assert.equal(harness.operations.updated.length, 0);
+  assert.equal(harness.operations.sent.some(({ message }) => message.type === "SHOW_TRANSFER_PROGRESS"), false);
+});
+
+test("a status failure after switching never causes a second focus during paste", async () => {
   const sourceTab = { id: 9, windowId: 1, index: 0 };
   let progressRequests = 0;
   const harness = loadBackgroundForTransferTest({ sourceTab, sendMessageImpl: async (_tabId, message) => {
-    if (message.type === "SHOW_TRANSFER_PROGRESS" && ++progressRequests === 2) return { ok: false };
+    if (message.type === "SHOW_TRANSFER_PROGRESS") { progressRequests++; return { ok: false }; }
     return { ok: true };
   } });
   const prepared = await harness.prepare("claude", sourceTab);
   assert.equal((await harness.revealDestination("claude", prepared.tabId, sourceTab)).ok, false);
-  assert.equal(progressRequests, 2);
+  assert.equal(progressRequests, 1);
   assert.equal(harness.operations.updated.length, 1);
   assert.equal((await harness.sendTransfer("claude", prepared.tabId, false, null, sourceTab)).ok, true);
   assert.equal(harness.operations.updated.length, 1);

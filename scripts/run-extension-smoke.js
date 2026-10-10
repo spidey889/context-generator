@@ -461,7 +461,10 @@ function destinationFixture() {
     window.__capContextSmokeSendClicks = 0;
     window.__capContextSmokeStatusHistory = [];
     window.__capContextSmokeBodyReplaced = false;
-    new MutationObserver(() => {
+    window.__capContextSmokeCueMounts = 0;
+    new MutationObserver(records => {
+      window.__capContextSmokeCueMounts += records.flatMap(record => [...record.addedNodes])
+        .filter(node => node.id === "context-generator-destination-status").length;
       const text = document.getElementById("context-generator-destination-status")?.textContent;
       const history = window.__capContextSmokeStatusHistory;
       if (text && history.at(-1) !== text) history.push(text);
@@ -475,6 +478,7 @@ function destinationFixture() {
     }).observe(document.documentElement, { childList: true, subtree: true, characterData: true });
     document.getElementById("send-button").addEventListener("click", () => { window.__capContextSmokeSendClicks += 1; });
   </script>
+  ${EARLY_HANDOFF_SMOKE ? '<script defer src="/destination-ready.js"></script>' : ""}
 </body>
 </html>`;
 }
@@ -555,7 +559,7 @@ function streamOversizedFixtureResponse(response, prefix, metrics) {
 }
 
 async function startFixtureServer() {
-  const state = { summaryRequests: [], jsonRequests: 0, sessionRequests: 0, pasteDescriptorRequests: 0, pasteContentRequests: 0, fileReadsActive: 0, fileReadsPeak: 0, chatgptRequestUrls: [], claudeRequestUrls: [] };
+  const state = { summaryRequests: [], destinationRequests: 0, jsonRequests: 0, sessionRequests: 0, pasteDescriptorRequests: 0, pasteContentRequests: 0, fileReadsActive: 0, fileReadsPeak: 0, chatgptRequestUrls: [], claudeRequestUrls: [] };
   state.oversizeHistory = { bytes: 0, cancelled: false };
   state.oversizePaste = { bytes: 0, cancelled: false };
   state.discardedAuth = { bytes: 0, cancelled: false };
@@ -781,7 +785,16 @@ async function startFixtureServer() {
       response.end(claudePlacementFixture());
       return;
     }
+    if (EARLY_HANDOFF_SMOKE && url.pathname === "/destination-ready.js") {
+      // A content script can answer while a load resource is still pending.
+      // Keep this delay independent of the source's capture/summary timing.
+      await new Promise(resolve => setTimeout(resolve, 1500));
+      response.writeHead(200, { "Content-Type": "application/javascript" });
+      response.end("window.__capContextSmokeLoadFinished = true;");
+      return;
+    }
     if (url.pathname === "/destination") {
+      state.destinationRequests++;
       response.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
       response.end(destinationFixture());
       return;
@@ -1130,6 +1143,9 @@ async function verifyEarlyHandoff({ sourceSession, devToolsPort, origin, state, 
     return null;
   }, "the early destination reveal before summary completion", 25000);
   assert.equal(state.summaryPending, true, "Polishing precedes the real summary response.");
+  assert.equal(await early.session.evaluate("document.readyState"), "complete");
+  assert.equal(await early.session.evaluate("window.__capContextSmokeLoadFinished"), true);
+  assert.equal(await early.session.evaluate("window.__capContextSmokeCueMounts"), 1, "The waiting message mounts once after page load.");
   assert.equal(await early.session.evaluate("window.__capContextSmokeBodyReplaced"), true);
   const visibleCue = await early.session.evaluate(`(() => {
     const cue = document.getElementById("context-generator-destination-status");
@@ -1153,6 +1169,8 @@ async function verifyEarlyHandoff({ sourceSession, devToolsPort, origin, state, 
   assert.ok(history.indexOf("Polishing your summary…\nIt will be pasted here when it’s ready.") < history.indexOf("Pasting your context…"));
   assert.equal(await early.session.evaluate("window.__capContextSmokeSendClicks"), 0);
   assert.equal(state.summaryRequests.length, 1);
+  assert.equal(state.destinationRequests, 1, "The extension never reloads the prepared destination.");
+  assert.equal(await early.session.evaluate("window.__capContextSmokeCueMounts"), 2, "Only waiting and paste cues mount; ready updates the paste cue.");
   assert.equal(destinationSessions.size, 1, "One prepared destination, no duplicate recovery.");
   process.stdout.write("✓ Polishing → real paste → verified ready; exact text, one summary, one destination, no Send click.\n");
 }

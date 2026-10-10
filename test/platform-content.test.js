@@ -317,6 +317,7 @@ function loadPlatformContent(elements = [], hostname = "chatgpt.com", {
   }
   const document = {
     body: new FakeElement({ tag: "body" }),
+    readyState: "complete",
     documentElement: new FakeElement({ tag: "html" }),
     activeElement: null,
     visibilityState,
@@ -2234,8 +2235,9 @@ test("summary completion, cancellation and teardown cannot trigger a delayed rev
   }
 });
 
-clockTest("waiting destination cues render before body mount and survive body replacement", () => {
-  const hooks = loadPlatformContent([]);
+clockTest("waiting destination cues wait for load and composer, then survive body replacement without redrawing", () => {
+  const input = new FakeElement({ tag: "textarea", attrs: { id: "prompt-textarea" } });
+  const hooks = loadPlatformContent([input]);
   hooks.document.createElement = () => {
     const node = new FakeElement();
     node.remove = () => { node.isConnected = false; };
@@ -2244,13 +2246,34 @@ clockTest("waiting destination cues render before body mount and survive body re
   hooks.document.getElementById = id => hooks.document.documentElement.children.find(node => node.id === id && node.isConnected) || null;
   hooks.document.body = null;
   let result;
-  hooks.runtimeMessageListeners[0]({ type: "SHOW_TRANSFER_PROGRESS", phase: "polishing", destination: "chatgpt",
-    transferId: "mount-test", deadlineAt: Date.now() + 10000 }, {}, response => { result = response; });
+  const message = { type: "SHOW_TRANSFER_PROGRESS", phase: "polishing", destination: "chatgpt",
+    transferId: "mount-test", deadlineAt: Date.now() + 10000 };
+  const send = message => hooks.runtimeMessageListeners[0](message, {}, response => { result = response; });
+  send(message);
+  assert.equal(result.code, "destination_loading");
+  assert.equal(hooks.document.getElementById("context-generator-destination-status"), null);
+  hooks.document.body = new FakeElement({ tag: "body" });
+  hooks.document.readyState = "interactive";
+  send(message);
+  assert.equal(result.code, "destination_loading");
+  hooks.document.readyState = "complete";
+  input.disabled = true;
+  send(message);
+  assert.equal(result.code, "destination_loading");
+  input.disabled = false;
+  send({ ...message, type: "CHECK_TRANSFER_PROGRESS_READY" });
+  assert.equal(result.ok, true);
+  assert.equal(hooks.document.getElementById("context-generator-destination-status"), null);
+  send(message);
   assert.equal(result.ok, true);
   const cue = hooks.document.getElementById("context-generator-destination-status");
-  assert.ok(cue, "A successful status reply must have a mounted banner, even before body exists.");
+  assert.ok(cue);
   assert.equal(cue.textContent, "Polishing your summary…\nIt will be pasted here when it’s ready.");
   hooks.document.body = new FakeElement({ tag: "body" });
+  const timers = hooks.getOwnedLifecycleResourceCounts().timeouts;
+  send(message);
+  assert.equal(result.ok, true);
+  assert.equal(hooks.getOwnedLifecycleResourceCounts().timeouts, timers);
   assert.equal(hooks.document.getElementById(cue.id), cue);
   hooks.runtimeMessageListeners[0]({ type: "CANCEL_TRANSFER", transferId: "mount-test" }, {}, () => {});
   assert.equal(cue.isConnected, false);
