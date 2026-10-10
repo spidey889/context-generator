@@ -32,7 +32,9 @@ Future contract changes require new migrations; applied history stays unchanged.
 - **Delivery:** prepared reuse/rejection, fresh recovery, tab creation/focus/settle
   timing, message attempts, injections and acknowledgement result. The complete
   first destination record survives in `prepared_diagnostics`; top-level paste
-  observations describe the final attempt.
+  observations describe the final attempt. Fresh recovery clears the first
+  destination's editor/paste fields before observing the new tab, so missing
+  observations cannot inherit an earlier draft or editor state.
 - **Editor:** kind, observed presence/connection, draft flag/text length, insertion
   method, retry/verification/stability limits, attempts, remounts, populated/stable
   checks and the last editor error even after recovery.

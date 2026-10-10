@@ -1,6 +1,8 @@
 (() => {
-  const version = 9;
-  const maxCaptureBytes = 6000000;
+  const version = 10;
+  // ChatGPT's native endpoint returns every branch. This is a transport safety
+  // ceiling, not the selected transcript's 500k-character / 2 MB content limit.
+  const maxCaptureBytes = 32000000;
   const channel = "cap-context-chatgpt-json-v2";
   const currentChat = pathname => (pathname ?? location.pathname).match(/\/c\/([^/]+)\/?$/)?.[1];
   const previous = window.__capChatGptFetchState;
@@ -67,20 +69,23 @@
     // Bound the entire owned read, not each request: session refreshes and
     // repeated descriptors share the allowance with history and original files.
     let bytesRead = 0;
-    const readJson = async response => {
+    const readJson = async (response, responseLimit = 6000000) => {
       let reader;
       try {
         if (controller.signal.aborted || currentChat() !== chat) throw new Error("changed");
-        if (Number(response.headers.get("content-length")) > maxCaptureBytes - bytesRead) throw new Error("partial");
+        const remaining = Math.min(responseLimit, maxCaptureBytes - bytesRead);
+        if (Number(response.headers.get("content-length")) > remaining) throw new Error("partial");
         reader = response.body?.getReader();
         const decoder = new TextDecoder("utf-8", { fatal: true });
         const parts = [];
+        let responseBytes = 0;
         if (reader) while (true) {
           const { done, value } = await reader.read();
           if (controller.signal.aborted || currentChat() !== chat) throw new Error("changed");
           if (done) break;
           bytesRead += value.byteLength;
-          if (bytesRead > maxCaptureBytes) throw new Error("partial");
+          responseBytes += value.byteLength;
+          if (responseBytes > remaining) throw new Error("partial");
           const part = decoder.decode(value, { stream: true });
           if (part) parts.push(part);
         }
@@ -177,8 +182,14 @@
       // another workspace on 403; both must fail visibly.
       const response = await fetchAuthenticatedJson(url);
       await checkTransport(response);
-      const data = await readJson(response);
+      const data = await readJson(response, maxCaptureBytes);
       if (controller.signal.aborted || currentChat() !== chat || (data.conversation_id ?? data.id) !== chat) throw new Error("changed");
+      if (!data.mapping || typeof data.mapping !== "object" || Array.isArray(data.mapping)) throw new Error("partial");
+      // Preserve full-response counts for the bridge's advertised-total checks,
+      // then discard alternate branches before crossing the page bridge.
+      const sourceTreeCounts = { nodes: Object.keys(data.mapping).length,
+        messages: Object.values(data.mapping).filter(node => node?.message).length };
+      const selectedMapping = Object.create(null);
       // Big pastes are user text stored as files, not text.parts. Read only
       // active-branch user pastes; never use a tool's extracted/rephrased copy.
       const branch = [];
@@ -188,13 +199,17 @@
         seen.add(nodeId);
         const node = Object.hasOwn(data.mapping || {}, nodeId) ? data.mapping[nodeId] : null;
         if (!node || !Object.hasOwn(node, "parent")) break;
+        selectedMapping[nodeId] = node;
         branch.push(node.message);
         if (node.parent === null) break;
         nodeId = node.parent;
       }
-      // A broken chain is left to the bridge's existing structural validator;
-      // do not fetch attachments until the chain reaches a real root.
       const rooted = data.mapping?.[nodeId]?.parent === null;
+      if (!rooted) throw new Error("partial");
+      for (const node of Object.values(selectedMapping)) {
+        if (Array.isArray(node.children)) node.children = node.children.filter(id => Object.hasOwn(selectedMapping, id));
+      }
+      data.mapping = selectedMapping;
       const pastedTexts = Object.create(null);
       const uploads = new Map();
       let pastedBytes = 0;
@@ -242,6 +257,7 @@
       if (controller.signal.aborted || currentChat() !== chat) throw new Error("changed");
       reply.pastedTexts = pastedTexts;
       reply.data = data;
+      reply.sourceTreeCounts = sourceTreeCounts;
     } catch (error) {
       // Never expose tokens, parser snippets, or arbitrary upstream errors.
       reply.error = navigated || controller.signal.reason === "account_changed" ? "changed" : controller.signal.aborted ? "timeout"

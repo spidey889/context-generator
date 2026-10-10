@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-10-cancelled-reveal-v124";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-10-audited-fast-transfer-v129";
   const INLINE_PILL_SIZE = 36;
   const ownedUiStyleSheets = new Map();
   const CLAUDE_INLINE_STYLE_ID = "context-generator-claude-inline-styles";
@@ -90,7 +90,7 @@
   const TRANSIENT_COMPOSER_PLACEMENT_PLATFORMS = new Set(["gemini", "grok", "deepseek"]);
   const INLINE_PATHNAME_POLL_MS = 80;
   const DESTINATION_SHEET_WIDTH = 352;
-  const DESTINATION_SHEET_CLOSED_TRANSFORM = "translate3d(0,12px,0) scale(0.96)";
+  const DESTINATION_SHEET_CLOSED_TRANSFORM = "translate3d(0,6px,0)";
   const DESTINATION_SHEET_EXIT_MS = 200;
   const DESTINATION_TRANSFER_PRESS_MS = 150;
   const DESTINATION_HANDOFF_OVERLAP_MS = 40;
@@ -490,7 +490,10 @@
   let reservedActionCluster = null;
   let reservedComposerSurface = null;
   let destinationSheetAnimationFrame = null;
+  let destinationSheetWarmupTimer = null;
   let destinationSheetPathname = null;
+  let pickerJsonCapture = null;
+  let pendingJsonCapture = Promise.resolve();
   let destinationSheetHideTimer = null;
   let destinationBackdropHideTimer = null;
   let destinationBackdropCutoutFrame = null;
@@ -632,7 +635,9 @@
 
   function teardownContextGeneratorInstance() {
     if (!instanceActive) return;
+    stopSourceDestinationProgress(activeTransferTrace);
     instanceActive = false;
+    clearPickerJsonCapture();
     if (activeTransferTrace) activeTransferTrace.expired = true;
     activeTransferTrace?.sourceGuard?.dispose();
     activePasteGuards.forEach(guard => guard.cancel());
@@ -1204,8 +1209,7 @@
         })().catch(error => {
           // Presentation cannot replace the transfer or its recovery path.
           // Tab closure remains cancellation.
-          if (Number.isInteger(trace.earlyProgressTabId)) notifyBackground({ type: "END_DESTINATION_PROGRESS",
-            transferId: trace.id, tabId: trace.earlyProgressTabId }).catch(() => {});
+          stopSourceDestinationProgress(trace);
           if (error?.code === "user_cancelled") cancelSourceTransfer(trace.id, trace);
         });
       },
@@ -1214,12 +1218,19 @@
         if (!stopping && Number.isInteger(trace.earlyProgressTabId) && !Number.isInteger(trace.earlyDestinationTabId)) {
           // A ready/failed summary must not wait for or be followed by a late
           // optional switch. The worker cancels only the reveal's work token.
-          stopping = notifyBackground({ type: "END_DESTINATION_PROGRESS", transferId: trace.id,
-            tabId: trace.earlyProgressTabId }).catch(() => {});
+          stopping = stopSourceDestinationProgress(trace);
         }
       },
       wait() { return Promise.all([work, stopping]); }
     };
+  }
+
+  function stopSourceDestinationProgress(trace, failed = false) {
+    if (!Number.isInteger(trace?.earlyProgressTabId)) return Promise.resolve();
+    if (trace.earlyProgressEndPromise && !failed) return trace.earlyProgressEndPromise;
+    trace.earlyProgressEndPromise = notifyBackground({ type: "END_DESTINATION_PROGRESS",
+      transferId: trace.id, tabId: trace.earlyProgressTabId, failed }).catch(() => {});
+    return trace.earlyProgressEndPromise;
   }
 
   function prepareDestinationTab(destinationId, trace = null) {
@@ -1269,12 +1280,15 @@
     if (activeTransferTrace === trace) resetRunningFlag();
   }
 
-  function createConversationGuard(message, identify = (location) => location.pathname + (location.search || "")) {
+  function createConversationGuard(message, identify = (location) => location.pathname + (location.search || ""), onChange = null) {
     let identity = identify(window.location);
     let changed = false;
     const onNavigate = (event) => {
       const location = event?.destination?.url ? new URL(event.destination.url, window.location.href) : window.location;
-      if (identify(location) !== identity) changed = true;
+      if (!changed && identify(location) !== identity) {
+        changed = true;
+        onChange?.();
+      }
     };
     addOwnedEventListener(window.navigation, "navigate", onNavigate);
     addOwnedEventListener(window, "popstate", onNavigate);
@@ -1306,7 +1320,9 @@
     activeTransferTrace = trace;
     // Capture, including DOM fallback, belongs to the chat selected before any
     // animation, scroll or attachment await. A later return cannot revive it.
-    trace.sourceGuard = createConversationGuard("The conversation changed during capture. Return to the source chat and try again.");
+    // Stop pending presentation on navigation without awaiting the summary.
+    trace.sourceGuard = createConversationGuard("The conversation changed during capture. Return to the source chat and try again.",
+      undefined, () => stopSourceDestinationProgress(trace));
     trace.deadlineAt = Date.now() + RUNNING_AUTO_RESET_MS;
     runningResetTimer = setTimeout(() => {
       trace.expired = true;
@@ -2281,11 +2297,13 @@
 
   function finishTransferTrace(trace, telemetryFailureReason = null) {
     if (!trace || trace.completed) return;
+    // Cancellation can finish during handoff, before capture consumption owns
+    // cleanup. Release only this attempt's snapshot, never a newer picker's.
+    if (pickerJsonCapture?.trace === trace) clearPickerJsonCapture();
     trace.sourceGuard?.dispose();
     trace.completed = true;
     if (telemetryFailureReason && Number.isInteger(trace.earlyProgressTabId)) {
-      notifyBackground({ type: "END_DESTINATION_PROGRESS", transferId: trace.id,
-        tabId: trace.earlyProgressTabId, failed: true }).catch(() => {});
+      stopSourceDestinationProgress(trace, true);
     }
     const totalMs = Math.round(getNow() - trace.startedAt);
     const failed = trace.marks.some((mark) => mark.label.startsWith("failed:"));
@@ -5637,28 +5655,18 @@
     };
     updateMotion();
     addOwnedEventListener(reducedMotion, "change", updateMotion);
-    // Picker/handoff owns the pressed scale; hovering must not overwrite it.
+    // Hover moves the button; click feedback stays small and inside the artwork.
     const canHover = () => !bubble.disabled && !isRunning && bubble.getAttribute("aria-expanded") !== "true";
     addOwnedEventListener(bubble, "mouseenter", () => {
       if (!canHover()) return;
+      updateMotion();
       bubble.style.filter = "brightness(1.1) saturate(1.08) drop-shadow(0 0 6px rgba(139,92,246,0.38)) drop-shadow(0 3px 5px rgba(0,0,0,0.18))";
       bubble.style.transform = "translate3d(0,-1px,0) scale(1.14)";
     });
     addOwnedEventListener(bubble, "mouseleave", () => {
       if (!canHover()) return;
+      updateMotion();
       bubble.style.filter = "none";
-      bubble.style.transform = "translate3d(0,0,0) scale(1)";
-    });
-    addOwnedEventListener(bubble, "pointerdown", () => {
-      if (!bubble.disabled) bubble.style.transform = "translate3d(0,0,0) scale(0.95)";
-    });
-    addOwnedEventListener(bubble, "pointerup", () => {
-      if (!canHover()) return;
-      bubble.style.transform = bubble.matches(":hover")
-        ? "translate3d(0,-1px,0) scale(1.14)"
-        : "translate3d(0,0,0) scale(1)";
-    });
-    addOwnedEventListener(bubble, "pointercancel", () => {
       bubble.style.transform = "translate3d(0,0,0) scale(1)";
     });
     addOwnedEventListener(bubble, "transitionend", (event) => {
@@ -5671,6 +5679,16 @@
       event.preventDefault();
       event.stopPropagation();
       if (isRunning) return;
+      // Finish hover immediately, then acknowledge the click without gating the picker.
+      bubble.style.transition = "none";
+      icon.getAnimations?.().forEach(animation => animation.cancel());
+      if (!reducedMotion?.matches) {
+        icon.animate?.([
+          { transform: "scale(1)", filter: "brightness(1)" },
+          { transform: "scale(0.97)", filter: "brightness(0.94)", offset: 0.4 },
+          { transform: "scale(1)", filter: "brightness(1)" }
+        ], { duration: 110, easing: "ease-out" });
+      }
       dismissOnboardingNudge();
       dismissClaudeLimitNudge();
       toggleDestinationSheet();
@@ -6763,6 +6781,11 @@
       }
 
       @media (prefers-reduced-motion: reduce) {
+        #${DESTINATION_SHEET_ID},
+        #${DESTINATION_SHEET_BACKDROP_ID} {
+          transition: none !important;
+        }
+
         #${DESTINATION_SHEET_ID} .context-generator-speed-lines i {
           animation: none;
           opacity: 0.65;
@@ -6817,7 +6840,6 @@
       "border:1px solid rgba(236,229,246,0.17) !important",
       "background:radial-gradient(ellipse 68% 48% at 88% -8%,rgba(145,112,199,0.18),transparent 72%),radial-gradient(ellipse 55% 48% at -8% 110%,rgba(82,57,128,0.15),transparent 74%),linear-gradient(180deg,#111012 0%,#0c0b0e 58%,#09080b 100%) !important",
       "box-shadow:0 34px 88px rgba(0,0,0,0.58),0 14px 34px rgba(0,0,0,0.34),0 0 54px rgba(104,76,154,0.1),0 0 0 1px rgba(0,0,0,0.6),inset 0 1px 0 rgba(255,255,255,0.09) !important",
-      "backdrop-filter:blur(24px) saturate(1.06)",
       "color:#f5f5f5 !important",
       "font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif",
       "max-height:calc(100vh - 20px)",
@@ -6829,7 +6851,7 @@
       `transform:${DESTINATION_SHEET_CLOSED_TRANSFORM}`,
       "transform-origin:bottom right",
       "will-change:transform,opacity",
-      "transition:opacity 0.2s ease, transform 0.3s cubic-bezier(0.22,1,0.36,1)"
+      "transition:opacity 0.12s ease-out, transform 0.16s cubic-bezier(0.16,1,0.3,1)"
     ].join(";");
 
     const header = document.createElement("div");
@@ -7032,6 +7054,7 @@
         else enabled = networkJsonCaptureEnabled = !networkJsonCaptureEnabled;
         toggle.setAttribute("aria-pressed", String(enabled));
         toggle.title = `Fast capture: ${enabled ? "On" : "Off"}`;
+        startPickerJsonCapture();
       });
       topLine.appendChild(toggle);
     }
@@ -7112,7 +7135,7 @@
       "-webkit-backdrop-filter:blur(7px) saturate(0.86)",
       "opacity:0",
       "will-change:opacity",
-      "transition:opacity 0.24s ease"
+      "transition:opacity 0.16s ease-out"
     ].join(";");
     addOwnedEventListener(backdrop, "click", (event) => {
       event.preventDefault();
@@ -7137,6 +7160,8 @@
     const backdrop = ensureDestinationSheetBackdrop();
     clearTimeout(destinationSheetHideTimer);
     clearTimeout(destinationBackdropHideTimer);
+    clearTimeout(destinationSheetWarmupTimer);
+    destinationSheetWarmupTimer = null;
     destinationSheetHideTimer = null;
     destinationBackdropHideTimer = null;
     if (destinationSheetAnimationFrame) cancelAnimationFrame(destinationSheetAnimationFrame);
@@ -7151,12 +7176,9 @@
     delete sheet.dataset.contextGeneratorPositionLocked;
     positionDestinationSheet();
     resetDestinationTiles(sheet);
-    warmDestinationConnections();
     const bubble = document.getElementById(BUBBLE_ID);
     if (bubble) {
       bubble.setAttribute("aria-expanded", "true");
-      bubble.style.filter = "brightness(1.14) saturate(1.12) drop-shadow(0 0 7px rgba(153,110,235,0.58)) drop-shadow(0 3px 8px rgba(78,42,128,0.32))";
-      bubble.style.transform = "translate3d(0,-1px,0) scale(1.08)";
     }
     updateDestinationBackdropCutout();
     if (window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) {
@@ -7164,6 +7186,7 @@
       sheet.style.opacity = "1";
       sheet.style.transform = "translate3d(0,0,0) scale(1)";
       sheet.focus?.({ preventScroll: true });
+      scheduleDestinationPickerWarmup();
       return;
     }
     destinationSheetAnimationFrame = requestAnimationFrame(() => {
@@ -7171,18 +7194,45 @@
       sheet.style.opacity = "1";
       sheet.style.transform = "translate3d(0,0,0) scale(1)";
       destinationSheetAnimationFrame = null;
-      setTimeout(() => {
-        if (
-          isDestinationSheetOpen()
-          && (document.activeElement === bubble || document.activeElement === document.body)
-        ) {
-          sheet.focus?.({ preventScroll: true });
+      if (document.activeElement === bubble || document.activeElement === document.body) {
+        sheet.focus?.({ preventScroll: true });
+      }
+      scheduleDestinationPickerWarmup();
+    });
+  }
+
+  function scheduleDestinationPickerWarmup() {
+    const sourceUrl = window.location.href;
+    // The history snapshot reads rendered text and can force layout on long chats.
+    // Keep it out of the entire entrance, not just its first paint. The timer is
+    // cancelled on dismissal; selection can start capture immediately as usual.
+    destinationSheetAnimationFrame = requestAnimationFrame(() => {
+      destinationSheetAnimationFrame = null;
+      const warmup = () => {
+        destinationSheetWarmupTimer = null;
+        const sheet = document.getElementById(DESTINATION_SHEET_ID);
+        if (isRunning || !isDestinationSheetOpen() || sheet?.getAttribute("aria-hidden") === "true"
+            || destinationSheetPathname !== window.location.pathname
+            || sourceUrl !== window.location.href || pickerJsonCapture) return;
+        // A busy first paint can delay the animation's start beyond wall time.
+        // Recheck its clock before scanning history rather than assuming it ended.
+        const remainingMs = Math.max(0, ...(sheet?.getAnimations?.() || []).map(animation =>
+          (animation.effect?.getComputedTiming?.().endTime || 0) - (animation.currentTime || 0)));
+        if (remainingMs > 0) {
+          destinationSheetWarmupTimer = setTimeout(warmup, Math.ceil(remainingMs));
+          return;
         }
-      }, 180);
+        warmDestinationConnections();
+        startPickerJsonCapture();
+      };
+      destinationSheetWarmupTimer = setTimeout(warmup, 0);
     });
   }
 
   function hideDestinationSheet({ immediate = false, preserveBackdrop = false, restoreFocus = true } = {}) {
+    clearTimeout(destinationSheetWarmupTimer);
+    destinationSheetWarmupTimer = null;
+    if (!preserveBackdrop) clearPickerJsonCapture();
     destinationSheetPathname = null;
     const sheet = document.getElementById(DESTINATION_SHEET_ID);
     const backdrop = document.getElementById(DESTINATION_SHEET_BACKDROP_ID);
@@ -7303,7 +7353,8 @@
   async function transitionDestinationSheetToHandoff() {
     if (window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) {
       pendingHandoffOrigin = null;
-      hideDestinationSheet({ immediate: true, restoreFocus: false });
+      // Selection still owns the prefetched JSON when animations are skipped.
+      hideDestinationSheet({ immediate: true, preserveBackdrop: true, restoreFocus: false });
       return;
     }
 
@@ -7464,9 +7515,94 @@
     };
   }
 
+  function getPickerConversationState() {
+    // Compare rendered history, not the draft or picker UI. A new reply, edit,
+    // branch switch or hydration means the early snapshot needs a fresh read.
+    return JSON.stringify(getConversationTurns().map(turn => [turn.sourceId || null, turn.role, turn.text]));
+  }
+
+  function clearPickerJsonCapture() {
+    const entry = pickerJsonCapture;
+    pickerJsonCapture = null;
+    if (!entry) return;
+    entry.discarded = true;
+    entry.guard.dispose();
+    // A bounded native read may still hold entry until it settles. Drop the
+    // cached transcript promise and rendered-history copy immediately.
+    entry.promise = null;
+    entry.state = null;
+  }
+
+  function captureSourceJson(expectedPath, shouldRead = () => true) {
+    // Native bridges allow one read at a time. A dismissed read may still be
+    // finishing; queue its replacement rather than provoking a busy fallback.
+    const transferTrace = isRunning ? activeTransferTrace : null;
+    const pending = pendingJsonCapture.then(() => {
+      if (!instanceActive || !shouldRead()) throw createDiagnosticError("The conversation changed during capture.", "conversation_changed");
+      checkTransferDeadline(transferTrace);
+      const captureJson = currentPlatform.id === "claude" ? window.__capCaptureClaudeJson
+        : currentPlatform.id === "chatgpt" ? window.__capCaptureChatGptJson : window.__capCaptureNetworkJson;
+      if (typeof captureJson !== "function") throw createDiagnosticError(`Refresh ${currentPlatform.name} to enable JSON capture.`, "capture_json_unavailable");
+      return captureJson(expectedPath);
+    });
+    // Keep only completion in the queue; unused transcripts/errors are not retained.
+    pendingJsonCapture = pending.then(() => {}, () => {});
+    return pending;
+  }
+
+  function startPickerJsonCapture() {
+    clearPickerJsonCapture();
+    const enabled = currentPlatform.id === "claude" ? claudeJsonCaptureEnabled
+      : currentPlatform.id === "chatgpt" ? chatGptJsonCaptureEnabled : networkJsonCaptureEnabled;
+    if (!enabled || !hasSavedSourceConversation() || !instanceActive || isRunning) return;
+    const entry = {
+      url: window.location.href,
+      state: getPickerConversationState(),
+      guard: createConversationGuard("The conversation changed during capture."),
+      selected: false
+    };
+    pickerJsonCapture = entry;
+    const path = currentPlatform.id === "grok" ? window.location.href : window.location.pathname;
+    // Failures stay silent until selection, when platform-specific recovery handles them.
+    entry.promise = captureSourceJson(path, () => {
+      checkTransferDeadline(entry.trace);
+      return entry.selected || pickerJsonCapture === entry;
+    })
+      .then(capture => entry.discarded ? {} : { capture }, error => entry.discarded ? {} : { error });
+  }
+
+  function isPickerJsonCaptureCurrent(entry) {
+    try {
+      entry.guard.check();
+      return entry.url === window.location.href && entry.state === getPickerConversationState();
+    } catch { return false; }
+  }
+
+  async function takePickerJsonCapture(expectedPath) {
+    const entry = pickerJsonCapture;
+    pickerJsonCapture = null;
+    if (entry) {
+      try {
+        if (isPickerJsonCaptureCurrent(entry)) {
+          entry.trace = activeTransferTrace;
+          entry.selected = true;
+          const result = await entry.promise;
+          if (isPickerJsonCaptureCurrent(entry)) {
+            if (result.error) throw result.error;
+            return result.capture;
+          }
+        }
+      } finally { entry.guard.dispose(); }
+    }
+    return captureSourceJson(expectedPath);
+  }
+
   async function startDestinationTransfer(destinationId) {
     const trace = beginTransferAttempt(destinationId, "destination tile");
     if (!trace) return;
+    // Bind queued prefetch before the handoff yields; cancellation must still
+    // prevent its read after the running lock resets or another attempt starts.
+    if (pickerJsonCapture) pickerJsonCapture.trace = trace;
     const sourceUrl = window.location.href;
     const hasSavedConversation = hasSavedSourceConversation();
     const useClaudeJson = hasSavedConversation && currentPlatform.id === "claude" && claudeJsonCaptureEnabled;
@@ -7518,12 +7654,7 @@
       if (useClaudeJson || useChatGptJson || useNetworkJson) {
         updateTransferDiagnostics(trace, { last_operation: "capture_json" }, "capture_json");
         try {
-          const captureJson = useClaudeJson ? window.__capCaptureClaudeJson : useChatGptJson ? window.__capCaptureChatGptJson : window.__capCaptureNetworkJson;
-          if (typeof captureJson !== "function") throw createDiagnosticError(`Refresh ${currentPlatform.name} to enable JSON capture.`, "capture_json_unavailable");
-          const capture = useClaudeJson ? await captureJson(claudeJsonPath)
-            : useChatGptJson ? await captureJson(chatGptJsonPath)
-            : geminiJsonPath ? await captureJson(geminiJsonPath)
-            : deepseekJsonPath ? await captureJson(deepseekJsonPath) : grokJsonUrl ? await captureJson(grokJsonUrl) : await captureJson();
+          const capture = await takePickerJsonCapture(claudeJsonPath || chatGptJsonPath || geminiJsonPath || deepseekJsonPath || grokJsonUrl);
           checkTransferDeadline(trace);
           conversationText = createConversationCapture(capture.text, {
             method: `${currentPlatform.id}-json`, messageTurnCount: capture.messageTurnCount,
@@ -7532,12 +7663,14 @@
           });
         } catch (error) {
           checkTransferDeadline(trace);
-          // Recover within this attempt: reuse its destination and call the
-          // summary/paste pipeline only once, after a complete DOM capture.
           // Retain the bridges' navigation/session cancellation, including an
           // away-and-back change that a final URL comparison cannot detect.
           if (/conversation changed during capture\./i.test(error?.message || "")) throw error;
           if (window.location.href !== sourceUrl) throw new Error("The conversation changed during capture. Return to the source chat and try again.");
+          // ChatGPT fast capture owns an API read, not page scrolling. A failed
+          // read must not silently enter the legacy DOM sweep or move history.
+          if (useChatGptJson) throw error;
+          // Other adapters recover within this attempt and reuse its destination.
           showFastCaptureFallbackMessage();
           const jsonFallbackReason = sanitizeCaptureDiagnostics({ jsonFallbackReason: error?.captureFailureReason }).jsonFallbackReason || "request_failed";
           updateTransferDiagnostics(trace, { json_fallback_code: jsonFallbackReason, last_operation: "capture_dom" }, "json_fallback");
@@ -7587,8 +7720,9 @@
       document.head.appendChild(style);
     }
 
-    // Snapshot only static colors before insertion, using the picker's ignored
-    // stylesheet + scoped priority rules. Progress-state colors live in their CSS.
+    // Snapshot initial colors before insertion, using the picker's ignored
+    // stylesheet + scoped priority rules. Dynamic inline colors must keep their
+    // important priority; progress-state colors live in their CSS.
     const rules = [root, ...root.querySelectorAll("[style]")].map((element, index) => {
       const declarations = ["color", "background", "border-color", "box-shadow"]
         .map((property) => {
@@ -8906,7 +9040,7 @@
       ].join(";");
 
       const setFocusStyle = (button, active) => {
-        button.style.outline = active ? "2px solid rgba(255,255,255,0.42)" : "none";
+        button.style.setProperty("outline", active ? "2px solid rgba(255,255,255,0.42)" : "none", "important");
         button.style.outlineOffset = active ? "3px" : "0";
       };
 
@@ -8929,19 +9063,19 @@
 
         if (!copied) {
           copyBtn.textContent = "Select text and copy manually";
-          copyBtn.style.background = "linear-gradient(180deg,#ffd980,#e8ad37)";
-          copyBtn.style.color = "#211500";
+          copyBtn.style.setProperty("background", "linear-gradient(180deg,#ffd980,#e8ad37)", "important");
+          copyBtn.style.setProperty("color", "#211500", "important");
           return;
         }
 
         copyBtn.textContent = "Copied!";
-        copyBtn.style.background = "linear-gradient(180deg,#69e6a2,#21b36b)";
-        copyBtn.style.color = "#07150d";
+        copyBtn.style.setProperty("background", "linear-gradient(180deg,#69e6a2,#21b36b)", "important");
+        copyBtn.style.setProperty("color", "#07150d", "important");
         setTimeout(() => {
           if (!copyBtn.isConnected) return;
           copyBtn.textContent = "Copy Context";
-          copyBtn.style.background = "linear-gradient(180deg,#f5f5f5,#d8d8d8)";
-          copyBtn.style.color = "#111114";
+          copyBtn.style.setProperty("background", "linear-gradient(180deg,#f5f5f5,#d8d8d8)", "important");
+          copyBtn.style.setProperty("color", "#111114", "important");
         }, 2000);
       });
 
@@ -8998,6 +9132,7 @@
       content.appendChild(buttonContainer);
       buttonContainer.appendChild(copyBtn);
       modal.appendChild(content);
+      protectOverlayPalette(modal);
       document.body.appendChild(modal);
       addOwnedEventListener(document, "keydown", modal.contextGeneratorKeydownHandler);
     } else {

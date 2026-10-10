@@ -2,7 +2,7 @@
   const channel = "cap-context-chatgpt-json-v2";
   const captureError = (message, captureFailureReason) => Object.assign(new Error(message), { captureFailureReason });
   const currentChat = (pathname = location.pathname) => pathname.match(/\/c\/([^/]+)\/?$/)?.[1];
-  function serialize(data, chat, pastedTexts = {}) {
+  function serialize(data, chat, pastedTexts = {}, sourceTreeCounts) {
     const blocked = reason => captureError(`ChatGPT JSON capture blocked: ${reason} Turn JSON capture off to use DOM capture.`, "incomplete");
     const excludedContentTypes = new Set();
     if ((data?.conversation_id ?? data?.id) !== chat) throw blocked("The response belongs to a different conversation.");
@@ -18,8 +18,17 @@
       }
     };
     if (!data.mapping || typeof data.mapping !== "object" || Array.isArray(data.mapping)) throw blocked("The full conversation tree is missing; recent-message pages are not accepted.");
-    const nodeCount = Object.keys(data.mapping).length;
-    const messageCount = Object.values(data.mapping).filter(node => node?.message).length;
+    let nodeCount = Object.keys(data.mapping).length;
+    let messageCount = Object.values(data.mapping).filter(node => node?.message).length;
+    if (sourceTreeCounts != null) {
+      // MAIN sends only the selected path. Native totals still describe the
+      // original tree; pruning must neither look partial nor hide real omissions.
+      if (!Number.isSafeInteger(sourceTreeCounts.nodes) || sourceTreeCounts.nodes < nodeCount
+        || !Number.isSafeInteger(sourceTreeCounts.messages) || sourceTreeCounts.messages < messageCount
+        || sourceTreeCounts.messages > sourceTreeCounts.nodes) throw blocked("The source tree counts are invalid.");
+      nodeCount = sourceTreeCounts.nodes;
+      messageCount = sourceTreeCounts.messages;
+    }
     for (const [scope, label] of [[data, "conversation"], [data.page_info, "page_info"], [data.pagination, "pagination"], [data.metadata, "conversation metadata"]]) {
       assertComplete(scope, label);
       // Compare advertised totals with the entire tree, never the active branch.
@@ -240,7 +249,7 @@
       const receive = event => {
         const reply = event.data;
         if (event.source === window && event.origin === location.origin && reply?.channel === channel
-          && reply.type === "pong" && reply.id === id && reply.version === 9) finish(true);
+          && reply.type === "pong" && reply.id === id && reply.version === 10) finish(true);
       };
       const ping = () => {
         if (settled) return;
@@ -298,7 +307,7 @@
               const failureReason = { auth: "unavailable", busy: "unavailable", partial: "incomplete", format: "incomplete", paste: "incomplete", timeout: "timeout" }[reply.error] || "request_failed";
               throw captureError(`ChatGPT JSON capture failed: ${reason} Turn JSON capture off to use DOM capture.`, failureReason);
             }
-            resolve(serialize(reply.data, chat, reply.pastedTexts));
+            resolve(serialize(reply.data, chat, reply.pastedTexts, reply.sourceTreeCounts));
           } catch (error) { reject(error); }
         };
         const timer = setTimeout(() => { cleanup(); reject(captureError("ChatGPT JSON capture timed out. Refresh or turn JSON capture off.", "timeout")); }, 17000);

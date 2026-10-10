@@ -1771,7 +1771,7 @@ clockTest("source preparation and summary dispatch reject navigation without tra
   }
 });
 
-test("opening the destination picker does not scrape or summarize", () => {
+test("opening the destination picker starts JSON capture without DOM capture or summarization", () => {
   const source = fs.readFileSync(SOURCE_PATH, "utf8");
   const pickerStart = source.indexOf("function toggleDestinationSheet()");
   const pickerEnd = source.indexOf("function warmDestinationConnections()", pickerStart);
@@ -1782,6 +1782,7 @@ test("opening the destination picker does not scrape or summarize", () => {
   assert.ok(pickerStart >= 0 && pickerEnd > pickerStart && preconnectEnd > pickerEnd);
   assert.doesNotMatch(source, /warmSummary|scheduleWarmSummary|startWarmSummary|ensureWarmSummaryForConversation|conversationFingerprint/);
   assert.doesNotMatch(pickerSource, /scrapeConversation|requestBackendSummary|summarizeWithBackend/);
+  assert.match(pickerSource, /warmDestinationConnections\(\);\s+startPickerJsonCapture\(\);/);
   assert.match(preconnectSource, /link\.rel = "preconnect"/);
   assert.doesNotMatch(preconnectSource, /conversation|scrape|summar|fetch\(|sendMessage|notifyBackground/);
 });
@@ -2232,6 +2233,34 @@ test("summary completion, cancellation and teardown cannot trigger a delayed rev
     prepare({ tabId: 41 });
     await reveal.wait();
     assert.equal(messages.length, 0, reason);
+  }
+});
+
+test("source navigation and teardown stop an already-pending reveal", async () => {
+  for (const reason of ["navigation", "teardown"]) {
+    const messages = [];
+    let finish;
+    const hooks = loadPlatformContent([], "chatgpt.com", { runtimeSendMessage: async message => {
+      messages.push(message);
+      if (message.type === "REVEAL_DESTINATION_PROGRESS") return new Promise(resolve => { finish = resolve; });
+      if (message.type === "END_DESTINATION_PROGRESS") finish({ ok: true, revealed: false });
+      return { ok: true };
+    } });
+    const trace = hooks.beginTransferAttempt("claude", "test");
+    const reveal = hooks.createEarlyDestinationReveal(trace, Promise.resolve({ tabId: 41 }));
+    try {
+      reveal.onNearEnd();
+      await new Promise(setImmediate);
+      if (reason === "navigation") { hooks.navigate("/c/other"); hooks.navigate("/"); }
+      else hooks.teardownContextGeneratorInstance();
+      await new Promise(setImmediate);
+      assert.equal(messages.filter(message => message.type === "END_DESTINATION_PROGRESS").length, 1, reason);
+      await reveal.wait();
+      assert.equal(trace.earlyDestinationTabId, undefined);
+    } finally {
+      finish?.({ ok: true, revealed: false });
+      hooks.teardownContextGeneratorInstance();
+    }
   }
 });
 

@@ -89,7 +89,7 @@ jobs:
         run: |
           mkdir -p "$CAP_CONTEXT_SMOKE_ARTIFACT_DIR"
           xvfb-run -a npm run test:extension-smoke 2>&1 | tee "$CAP_CONTEXT_SMOKE_ARTIFACT_DIR/run.log"
-      - name: Brave ChatGPT oversized paste cancellation and fallback
+      - name: Brave ChatGPT oversized paste cancellation without DOM fallback
         if: steps.scope.outputs.mode != 'light'
         timeout-minutes: 3
         shell: bash
@@ -100,7 +100,7 @@ jobs:
         run: |
           mkdir -p "$CAP_CONTEXT_SMOKE_ARTIFACT_DIR"
           xvfb-run -a npm run test:extension-smoke 2>&1 | tee "$CAP_CONTEXT_SMOKE_ARTIFACT_DIR/run.log"
-      - name: Brave ChatGPT oversized history cancellation and fallback
+      - name: Brave ChatGPT oversized history cancellation without DOM fallback
         if: steps.scope.outputs.mode != 'light'
         timeout-minutes: 3
         shell: bash

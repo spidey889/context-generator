@@ -62,6 +62,348 @@ function harness(platform, { mode = "failure", enabled = true, domFails = false,
   } };
 }
 
+const captureKeyFor = platform => platform === "claude" ? "__capCaptureClaudeJson"
+  : platform === "chatgpt" ? "__capCaptureChatGptJson" : "__capCaptureNetworkJson";
+const deferred = () => { let resolve; const promise = new Promise(done => { resolve = done; }); return { promise, resolve }; };
+
+test("picker prefetch waits out the remaining entrance without delaying reduced motion", async t => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const start = source.indexOf("  function scheduleDestinationPickerWarmup()");
+  const end = source.indexOf("  function hideDestinationSheet(", start);
+  const warmup = new vm.Script(source.slice(start, end));
+  for (const animated of [true, false]) {
+    const { context, calls } = harness("chatgpt", { mode: "success" });
+    let frame, animationTime = 40;
+    Object.assign(context, {
+      DESTINATION_SHEET_ID: "picker", destinationSheetAnimationFrame: null, destinationSheetWarmupTimer: null,
+      destinationSheetPathname: context.window.location.pathname,
+      document: { getElementById: () => ({
+        getAttribute: () => "false",
+        getAnimations: () => animated ? [{ currentTime: animationTime, effect: { getComputedTiming: () => ({ endTime: 160 }) } }] : []
+      }) },
+      isDestinationSheetOpen: () => true,
+      requestAnimationFrame: callback => { frame = callback; return 1; },
+      setTimeout, warmDestinationConnections() {}
+    });
+    warmup.runInContext(context);
+    context.scheduleDestinationPickerWarmup(); frame();
+    t.mock.timers.tick(0);
+    if (animated) {
+      t.mock.timers.tick(119);
+      assert.equal(context.pickerJsonCapture, null, "snapshotting must not interrupt the entrance");
+      assert.equal(calls.json, 0);
+      animationTime = 60;
+      t.mock.timers.tick(1);
+      assert.equal(context.pickerJsonCapture, null, "a delayed animation must be rechecked before capture");
+      animationTime = 160;
+      t.mock.timers.tick(100);
+    } else {
+      t.mock.timers.tick(0);
+    }
+    await context.pickerJsonCapture.promise;
+    assert.equal(calls.json, 1);
+    assert.equal(calls.destination + calls.dom + calls.flows.length, 0);
+  }
+});
+
+test("deferred picker warmup cannot capture a dismissed, navigated or selected chat or replace Speed capture", async () => {
+  const start = source.indexOf("  function scheduleDestinationPickerWarmup()");
+  const end = source.indexOf("  function hideDestinationSheet(", start);
+  assert.ok(start >= 0 && end > start);
+  const warmup = new vm.Script(source.slice(start, end));
+  for (const platform of ["claude", "chatgpt", "gemini", "grok", "deepseek"]) {
+    for (const scenario of ["open", "dismissed", "navigated", "selected", "Speed off", "Speed capture"]) {
+      const { context, calls } = harness(platform, { mode: "success" });
+      let frame, task, hidden = false, preconnects = 0;
+      Object.assign(context, {
+        DESTINATION_SHEET_ID: "picker", destinationSheetAnimationFrame: null, destinationSheetWarmupTimer: null,
+        destinationSheetPathname: context.window.location.pathname,
+        document: { getElementById: () => ({ getAttribute: () => hidden ? "true" : "false" }) },
+        isDestinationSheetOpen: () => !hidden,
+        requestAnimationFrame: callback => { frame = callback; return 1; },
+        setTimeout: callback => { task = callback; return 2; },
+        warmDestinationConnections: () => { preconnects++; }
+      });
+      warmup.runInContext(context);
+      context.scheduleDestinationPickerWarmup();
+      assert.equal(calls.json + preconnects, 0, "the opening frame must not scan or capture history");
+      frame();
+      assert.equal(calls.json + preconnects, 0, "capture must yield to paint after its frame");
+      if (scenario === "dismissed") hidden = true;
+      if (scenario === "navigated") context.window.location.href += "?changed";
+      if (scenario === "selected") context.isRunning = true;
+      if (scenario === "Speed off") {
+        context.claudeJsonCaptureEnabled = context.chatGptJsonCaptureEnabled = context.networkJsonCaptureEnabled = false;
+      }
+      if (scenario === "Speed capture") context.startPickerJsonCapture();
+      task();
+      await context.pickerJsonCapture?.promise;
+      assert.equal(calls.json, ["open", "Speed capture"].includes(scenario) ? 1 : 0, `${platform}: ${scenario}`);
+      assert.equal(calls.destination + calls.dom + calls.flows.length, 0, "warmup must never start a transfer");
+    }
+  }
+});
+
+test("picker JSON capture is reused ready or pending on all five platforms, with no transfer before selection", async () => {
+  for (const platform of ["claude", "chatgpt", "gemini", "grok", "deepseek"]) {
+    for (const ready of [false, true]) {
+      const { context, calls } = harness(platform, { mode: "success" });
+      const started = deferred(), response = deferred();
+      context.window[captureKeyFor(platform)] = path => {
+        assert.equal(path, platform === "grok" ? context.window.location.href : context.window.location.pathname);
+        calls.json++; started.resolve(); return response.promise;
+      };
+      context.startPickerJsonCapture();
+      await started.promise;
+      assert.equal(calls.json, 1);
+      assert.equal(calls.destination + calls.dom + calls.prepare + calls.notice + calls.flows.length + calls.errors.length, 0);
+      if (ready) { response.resolve({ text: "JSON ready at orb click", messageTurnCount: 2 }); await context.pickerJsonCapture.promise; }
+      const transfer = context.start("claude");
+      if (!ready) response.resolve({ text: "JSON ready at orb click", messageTurnCount: 2 });
+      await transfer;
+      assert.equal(calls.json, 1, "selection must await the same native read");
+      assert.equal(calls.flows[0].text, "JSON ready at orb click");
+      assert.equal(calls.flows.length, 1);
+      assert.equal(calls.destination, 1);
+      assert.equal(calls.dom + calls.notice, 0);
+      assert.equal(context.pickerJsonCapture, null);
+    }
+  }
+});
+
+test("picker handoff preserves ready and pending JSON with either motion preference", async () => {
+  const hideStart = source.indexOf("  function hideDestinationSheet(");
+  const hideEnd = source.indexOf("  function trackDestinationBackdropCutout(", hideStart);
+  const transitionStart = source.indexOf("  async function transitionDestinationSheetToHandoff(");
+  const transitionEnd = source.indexOf("  function warmDestinationConnections(", transitionStart);
+  assert.ok(hideStart >= 0 && hideEnd > hideStart && transitionStart >= 0 && transitionEnd > transitionStart);
+  // Use the real dismissal and handoff functions; the normal harness replaces
+  // animation and would miss a transition accidentally discarding the capture.
+  const transition = new vm.Script(source.slice(hideStart, hideEnd) + source.slice(transitionStart, transitionEnd));
+  for (const platform of ["claude", "chatgpt", "gemini", "grok", "deepseek"]) {
+    for (const reducedMotion of [false, true]) {
+      for (const ready of [false, true]) {
+        const { context, calls } = harness(platform, { mode: "success" });
+        Object.assign(context, {
+          document: { getElementById: () => null }, clearTimeout() {}, delay: async () => {},
+          DESTINATION_SHEET_ID: "picker", DESTINATION_SHEET_BACKDROP_ID: "backdrop", BUBBLE_ID: "orb",
+          DESTINATION_TRANSFER_PRESS_MS: 0, DESTINATION_HANDOFF_OVERLAP_MS: 0,
+          destinationSheetHideTimer: null, destinationSheetWarmupTimer: null, destinationSheetPathname: null, pendingHandoffOrigin: null,
+          inlineBubble: null, claudeInlineMount: null, chatGptInlineMount: null, providerInlineMount: null
+        });
+        context.window.matchMedia = () => ({ matches: reducedMotion });
+        transition.runInContext(context);
+        const started = deferred(), response = deferred();
+        context.window[captureKeyFor(platform)] = () => { calls.json++; started.resolve(); return response.promise; };
+        context.startPickerJsonCapture(); await started.promise;
+        if (ready) { response.resolve({ text: "Orb snapshot", messageTurnCount: 2 }); await context.pickerJsonCapture.promise; }
+        const transfer = context.start("claude");
+        response.resolve({ text: "Orb snapshot", messageTurnCount: 2 });
+        await transfer;
+        assert.equal(calls.json, 1, `${platform}, reduced motion ${reducedMotion}, ready ${ready}: handoff must reuse capture`);
+        assert.equal(calls.flows[0].text, "Orb snapshot");
+        assert.equal(calls.dom + calls.notice + calls.errors.length, 0);
+        assert.equal(context.pickerJsonCapture, null);
+      }
+    }
+  }
+});
+
+test("changed history or away-and-back navigation discards a completed picker snapshot", async () => {
+  for (const change of ["reply", "turn identity", "branch", "navigation"]) {
+    const { context, calls, navigate } = harness("grok", { mode: "success" });
+    let history = "Old reply";
+    let sourceId = "original-turn";
+    context.getConversationTurns = () => [{ sourceId, role: "assistant", text: history }];
+    context.window.__capCaptureNetworkJson = async () => ({ text: `Read ${++calls.json}: ${history}`, messageTurnCount: 2 });
+    context.startPickerJsonCapture(); await context.pickerJsonCapture.promise;
+    if (change === "reply") history = "New reply";
+    else if (change === "turn identity") sourceId = "regenerated-turn";
+    else if (change === "branch") context.window.location.href += "?rid=other";
+    else { navigate("/c/other"); navigate("/c/source"); }
+    await context.start("claude");
+    assert.equal(calls.json, 2);
+    assert.equal(calls.flows[0].text, `Read 2: ${history}`);
+    assert.equal(calls.notice, 0);
+  }
+});
+
+test("history changing during a pending picker read triggers one fresh capture", async () => {
+  const { context, calls } = harness("chatgpt", { mode: "success" });
+  let history = "Old reply";
+  context.getConversationTurns = () => [{ role: "assistant", text: history }];
+  const started = deferred(), response = deferred();
+  context.window.__capCaptureChatGptJson = () => {
+    calls.json++;
+    if (calls.json === 1) { started.resolve(); return response.promise; }
+    return Promise.resolve({ text: history, messageTurnCount: 2 });
+  };
+  context.startPickerJsonCapture(); await started.promise;
+  const transfer = context.start("claude");
+  await Promise.resolve(); await Promise.resolve();
+  history = "New reply";
+  response.resolve({ text: "Old reply", messageTurnCount: 2 });
+  await transfer;
+  assert.equal(calls.json, 2);
+  assert.equal(calls.flows[0].text, "New reply");
+  assert.equal(calls.notice, 0);
+});
+
+test("closed picker results are discarded and reopening never overlaps native reads", async () => {
+  const { context, calls } = harness("claude", { mode: "success" });
+  const started = deferred(), response = deferred();
+  context.window.__capCaptureClaudeJson = () => {
+    calls.json++;
+    if (calls.json === 1) { started.resolve(); return response.promise; }
+    return Promise.resolve({ text: "Fresh reopened picker", messageTurnCount: 2 });
+  };
+  context.startPickerJsonCapture(); await started.promise;
+  context.clearPickerJsonCapture();
+  context.startPickerJsonCapture();
+  await Promise.resolve();
+  assert.equal(calls.json, 1);
+  response.resolve({ text: "Discarded closed picker", messageTurnCount: 2 });
+  await context.pickerJsonCapture.promise;
+  await context.start("claude");
+  assert.equal(calls.json, 2);
+  assert.equal(calls.flows[0].text, "Fresh reopened picker");
+});
+
+test("closing the picker immediately releases its snapshot and drops late results", async () => {
+  for (const ready of [false, true]) {
+    const { context, calls } = harness("chatgpt", { mode: "success" });
+    const started = deferred(), response = deferred();
+    context.window.__capCaptureChatGptJson = () => { calls.json++; started.resolve(); return response.promise; };
+    context.startPickerJsonCapture(); await started.promise;
+    const entry = context.pickerJsonCapture, pending = entry.promise;
+    if (ready) { response.resolve({ text: "Discard this captured text", messageTurnCount: 2 }); await pending; }
+    context.clearPickerJsonCapture();
+    assert.equal(context.pickerJsonCapture, null);
+    assert.equal(entry.promise, null);
+    assert.equal(entry.state, null);
+    if (!ready) {
+      response.resolve({ text: "Discard this late text", messageTurnCount: 2 });
+      assert.equal((await pending).capture, undefined);
+    }
+    assert.equal(calls.flows.length + calls.errors.length, 0);
+  }
+});
+
+test("cancelling during handoff immediately releases the picker capture and its navigation timer", async () => {
+  const start = source.indexOf("  function finishTransferTrace(");
+  const end = source.indexOf("  function formatTraceDetail(", start);
+  assert.ok(start >= 0 && end > start);
+  const finish = new vm.Script(source.slice(start, end));
+  for (const ready of [false, true]) {
+    const { context, calls } = harness("chatgpt", { mode: "success" });
+    const timers = new Set(); let nextId = 0;
+    context.setInterval = () => { const id = ++nextId; timers.add(id); return id; };
+    context.clearInterval = id => timers.delete(id);
+    context.createTransferTrace = () => ({ id: "cancelled-handoff", marks: [], startedAt: Date.now() });
+    context.persistLatestTransferStats = () => {};
+    context.finishTransferTelemetry = () => {};
+    finish.runInContext(context);
+    const started = deferred(), response = deferred();
+    context.window.__capCaptureChatGptJson = () => { calls.json++; started.resolve(); return response.promise; };
+    context.startPickerJsonCapture(); await started.promise;
+    const entry = context.pickerJsonCapture, pending = entry.promise;
+    if (ready) { response.resolve({ text: "Cancelled snapshot", messageTurnCount: 2 }); await pending; }
+    context.transitionDestinationSheetToHandoff = async () => {
+      context.cancelSourceTransfer(context.activeTransferTrace.id);
+      assert.equal(context.pickerJsonCapture, null);
+      assert.equal(timers.size, 0);
+    };
+    await context.start("claude");
+    assert.equal(entry.promise, null);
+    assert.equal(entry.state, null);
+    response.resolve({ text: "Cancelled late snapshot", messageTurnCount: 2 });
+    if (!ready) assert.equal((await pending).capture, undefined);
+    assert.equal(calls.flows.length + calls.dom, 0);
+  }
+});
+
+test("navigation during a selected pending prefetch cancels without another native read or DOM fallback", async () => {
+  const { context, calls, navigate } = harness("chatgpt", { mode: "success" });
+  const started = deferred(), response = deferred();
+  context.window.__capCaptureChatGptJson = () => { calls.json++; started.resolve(); return response.promise; };
+  context.startPickerJsonCapture(); await started.promise;
+  const transfer = context.start("claude");
+  await Promise.resolve(); await Promise.resolve();
+  navigate("/c/other"); navigate("/c/source");
+  response.resolve({ text: "Old pending capture", messageTurnCount: 2 });
+  await transfer;
+  assert.equal(calls.json, 1);
+  assert.equal(calls.flows.length + calls.dom + calls.notice, 0);
+  assert.match(calls.errors[0], /conversation changed during capture/);
+});
+
+test("picker failures stay silent until selection and honor each platform's recovery", async () => {
+  for (const platform of ["chatgpt", "claude"]) {
+    const { context, calls } = harness(platform);
+    context.startPickerJsonCapture(); await context.pickerJsonCapture.promise;
+    assert.equal(calls.json, 1);
+    assert.equal(calls.notice + calls.dom + calls.prepare + calls.flows.length + calls.errors.length, 0);
+    await context.start("claude");
+    assert.equal(calls.json, 1, "selection must reuse the failed prefetch without a duplicate read");
+    if (platform === "chatgpt") {
+      assert.equal(calls.notice + calls.dom + calls.prepare + calls.flows.length, 0);
+      assert.equal(calls.errors.length, 1);
+      assert.equal(context.isRunning, false);
+    } else {
+      assert.equal(calls.notice, 1);
+      assert.equal(calls.dom, 1);
+      assert.equal(calls.flows[0].text, "DOM transcript");
+    }
+  }
+});
+
+test("cancelling a selected queued prefetch prevents its native read even after the running flag resets", async () => {
+  const { context, calls } = harness("chatgpt", { mode: "success" });
+  const started = deferred(), response = deferred();
+  context.window.__capCaptureChatGptJson = () => { calls.json++; started.resolve(); return response.promise; };
+  context.startPickerJsonCapture(); await started.promise;
+  context.clearPickerJsonCapture(); context.startPickerJsonCapture();
+  const transfer = context.start("claude");
+  await Promise.resolve(); await Promise.resolve();
+  context.activeTransferTrace.cancelled = true;
+  context.activeTransferTrace = null;
+  context.isRunning = false;
+  response.resolve({ text: "Discarded first picker", messageTurnCount: 2 });
+  await transfer;
+  assert.equal(calls.json, 1);
+  assert.equal(calls.flows.length + calls.dom + calls.notice, 0);
+  assert.match(calls.errors[0], /Transfer cancelled/);
+});
+
+test("Speed off, unsaved chats and teardown skip or discard picker capture", async () => {
+  for (const skip of ["speed", "unsaved", "teardown"]) {
+    const { context, calls } = harness("chatgpt", { mode: "success" });
+    if (skip === "speed") context.chatGptJsonCaptureEnabled = false;
+    if (skip === "unsaved") context.window.location.pathname = "/";
+    if (skip === "teardown") context.instanceActive = false;
+    context.startPickerJsonCapture(); await Promise.resolve();
+    assert.equal(context.pickerJsonCapture, null);
+    assert.equal(calls.json, 0);
+  }
+  for (const discard of ["close", "teardown"]) {
+    const { context, calls } = harness("chatgpt", { mode: "success" });
+    context.startPickerJsonCapture();
+    if (discard === "teardown") context.instanceActive = false;
+    context.clearPickerJsonCapture();
+    await context.pendingJsonCapture;
+    assert.equal(calls.json, 0, "a discarded queued capture must never start a native read");
+    assert.equal(calls.flows.length + calls.errors.length, 0);
+  }
+  const { context, calls } = harness("chatgpt", { mode: "success" });
+  context.startPickerJsonCapture(); await context.pickerJsonCapture.promise;
+  context.chatGptJsonCaptureEnabled = false;
+  context.startPickerJsonCapture();
+  await context.start("claude");
+  assert.equal(calls.json, 1);
+  assert.equal(calls.dom, 1);
+  assert.equal(calls.flows[0].text, "DOM transcript");
+});
+
 // Empty admission precedes the platform-specific capture branches.
 test("empty new chat rejects before handoff, capture or destination work with fast capture enabled", async () => {
   const { context, calls } = harness("chatgpt");
@@ -74,10 +416,24 @@ test("empty new chat rejects before handoff, capture or destination work with fa
   assert.equal(context.isRunning, false);
 });
 
+test("ChatGPT JSON failures never start DOM scrolling and release the lock for retry", async () => {
+  for (const mode of ["failure", "missing"]) {
+    const { context, calls } = harness("chatgpt", { mode });
+    for (let attempt = 1; attempt <= 2; attempt++) {
+      await context.start("claude");
+      assert.equal(calls.json, mode === "missing" ? 0 : attempt);
+      assert.equal(calls.prepare + calls.dom + calls.notice, 0, "Fast capture must not change methods or scroll the page");
+      assert.equal(calls.flows.length, 0, "A failed JSON read cannot dispatch guessed DOM history");
+      assert.equal(calls.errors.length, attempt);
+      assert.equal(context.isRunning, false);
+    }
+  }
+});
+
 for (const platform of ["claude", "chatgpt", "gemini", "grok", "deepseek"]) {
-  // Every bridge retains failure/success wiring checks. A missing bridge uses
-  // the same fallback path; per-adapter readiness recovery is tested separately.
-  for (const mode of platform === "chatgpt" ? ["failure", "missing"] : ["failure"]) {
+  // ChatGPT remains JSON-only on fast-read failure; other adapters retain
+  // their existing recovery. Success and explicit opt-out cover every adapter.
+  for (const mode of platform === "chatgpt" ? [] : ["failure"]) {
     test(`${platform}: ${mode} fast capture falls back once within the same transfer`, async () => {
       const { context, calls, prepared } = harness(platform, { mode });
       await context.start("claude");
@@ -145,7 +501,7 @@ test("JSON completion after source navigation cancels before dispatch or DOM fal
 
 test("capture fallback records only recognized reasons, never arbitrary native errors", async () => {
   for (const reason of ["unavailable", "timeout", "size_limit", "incomplete", "unsupported", "request_failed", "MUST_NOT_APPEAR"]) {
-    const { context, calls } = harness("chatgpt", { failureReason: reason });
+    const { context, calls } = harness("claude", { failureReason: reason });
     await context.start("claude");
     assert.ok(calls.traceDetails.some(detail => detail?.jsonFallbackReason === (reason === "MUST_NOT_APPEAR" ? "request_failed" : reason)));
     assert.doesNotMatch(JSON.stringify(calls.traceDetails), /MUST_NOT_APPEAR|private native/);
@@ -155,7 +511,7 @@ test("capture fallback records only recognized reasons, never arbitrary native e
 
 test("failed source preparation or DOM fallback releases the lock and permits a fresh attempt", async () => {
   for (const prepareFails of [true, false]) {
-    const { context, calls } = harness("chatgpt", { prepareFails, domFails: !prepareFails });
+    const { context, calls } = harness("claude", { prepareFails, domFails: !prepareFails });
     for (let attempt = 1; attempt <= 2; attempt++) {
       await context.start("claude");
       assert.equal(calls.prepare, attempt);
@@ -189,10 +545,11 @@ test("bridge cancellation cannot fall back after an away-and-back navigation", a
 test("normal capture and JSON DOM fallback cancel source navigation before dispatch", async () => {
   for (const enabled of [false, true]) {
     for (const awayAndBack of [false, true]) {
-      const { context, calls, navigate } = harness("chatgpt", { enabled });
+      const { context, calls, navigate } = harness(enabled ? "claude" : "chatgpt", { enabled });
+      const sourcePath = context.window.location.pathname;
       context.scrapeConversationTextWhenReady = async () => {
         navigate("/c/other");
-        if (awayAndBack) navigate("/c/source");
+        if (awayAndBack) navigate(sourcePath);
         return "Other chat must never reach summary or delivery";
       };
       await context.start("claude");

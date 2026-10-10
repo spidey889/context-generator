@@ -55,7 +55,7 @@ const CHATGPT_HISTORY_OVERSIZE_SMOKE = CHATGPT_FAILURE_SMOKE === "history-oversi
 const CHATGPT_PASTE_AUTH_SMOKE = JSON_SOURCE === "chatgpt" && process.env.CAP_CONTEXT_CHATGPT_AUTH_SMOKE === "paste401";
 const CLAUDE_PARTIAL_SMOKE = JSON_SOURCE === "claude" && process.env.CAP_CONTEXT_CLAUDE_PARTIAL_SMOKE === "1";
 const CLAUDE_OVERSIZE_SMOKE = JSON_SOURCE === "claude" && process.env.CAP_CONTEXT_CLAUDE_PARTIAL_SMOKE === "oversize";
-const JSON_FALLBACK_SMOKE = Boolean(CHATGPT_FAILURE_SMOKE || CLAUDE_PARTIAL_SMOKE || CLAUDE_OVERSIZE_SMOKE || NETWORK_FAILURE);
+const JSON_FALLBACK_SMOKE = Boolean(CLAUDE_PARTIAL_SMOKE || CLAUDE_OVERSIZE_SMOKE || NETWORK_FAILURE);
 const TELEMETRY_DATABASE_SMOKE = process.env.CAP_CONTEXT_TELEMETRY_SMOKE === "1";
 const FAILURE_ARTIFACT_DIR = process.env.CAP_CONTEXT_SMOKE_ARTIFACT_DIR || "";
 
@@ -216,10 +216,19 @@ async function createSmokeExtension(tempRoot, origin) {
     "the current-platform resolver"
   );
   // pushState can beat the isolated world's 80 ms route poll. Expose only
-  // fixture-owned mount readiness so a new-route click uses its current owner.
+  // fixture-owned probes so tests wait for mounting and early capture. The
+  // recovery probe uses synthetic text and exists only in the copied extension.
   platformSource = replaceOnce(platformSource,
     "  function checkInlinePlacementPathname() {",
-    `  window.__capSmokeChatGptMountReady = () => Boolean(chatGptInlineMount?.input?.isConnected
+    `  window.__capSmokePickerJsonReady = () => pickerJsonCapture?.promise.then(() => true) || Promise.resolve(false);
+  window.__capSmokeShowRecovery = () => showFallbackModal("Synthetic recovery context. Preserve the dialog palette.", "Claude", true);
+  window.__capSmokeSourceRouteReady = () => {
+    const mount = currentPlatform.id === "claude" ? claudeInlineMount
+      : currentPlatform.id === "chatgpt" ? chatGptInlineMount : providerInlineMount;
+    return lastInlinePlacementPathname === window.location.pathname && !floatingButtonFrame
+      && (!mount || mount.pathname === window.location.pathname);
+  };
+  window.__capSmokeChatGptMountReady = () => Boolean(chatGptInlineMount?.input?.isConnected
       && chatGptInlineMount?.bubble?.isConnected && chatGptInlineMount.pathname === window.location.pathname);
   function checkInlinePlacementPathname() {`,
     "the fixture inline-route readiness probe");
@@ -506,7 +515,9 @@ function chatGptTreeFixture() {
   mapping.voiceUser = { parent: "canvasEditResult", message: { author: { role: "user" }, content: { content_type: "multimodal_text", parts: [{ content_type: "audio_transcription", text: "OWN_VOICE_USER_SENTINEL", direction: "in" }, { content_type: "audio_asset_pointer", text: "UNSUPPORTED_SENTINEL" }] } } };
   mapping.voiceAssistant = { parent: "voiceUser", message: { author: { role: "assistant" }, content: { content_type: "multimodal_text", parts: [{ content_type: "audio_transcription", text: "OWN_VOICE_ASSISTANT_SENTINEL", direction: "out" }] } } };
   mapping.code = { parent: "voiceAssistant", message: { author: { role: "assistant" }, status: "finished_partial", end_turn: false, content: { content_type: "code", text: CHATGPT_EXACT_CODE, language: "python" } } };
-  mapping.alternate = { parent: "root", message: { author: { role: "assistant" }, content: { content_type: "text", parts: ["INACTIVE_BRANCH_SENTINEL"] } } };
+  // Unused branches alone exceed the former 6 MB raw guard. The installed
+  // extension must still deliver the exact selected history, including files.
+  mapping.alternate = { parent: "root", message: { author: { role: "assistant" }, content: { content_type: "text", parts: [`INACTIVE_BRANCH_SENTINEL ${"x".repeat(7000000)}`] } } };
   const data = { conversation_id: "smoke", current_node: "code", mapping, context_truncation_continuation: null };
   if (CHATGPT_FAILURE_SMOKE === "partial") data.has_previous_page = true;
   if (CHATGPT_FAILURE_SMOKE === "streaming") mapping.code.message.status = "in_progress";
@@ -536,13 +547,13 @@ function networkSmokeFixture(platform) {
   return fixture;
 }
 
-function streamOversizedFixtureResponse(response, prefix, metrics) {
+function streamOversizedFixtureResponse(response, prefix, metrics, tailMegabytes = 20) {
   // No Content-Length: native capture must cancel discarded/excess bodies
-  // before the 20 MB tail finishes. Pace writes and observe cancellation.
+  // before the oversized tail finishes. Pace writes and observe cancellation.
   const padding = Buffer.alloc(1000000, 32);
   metrics.bytes = Buffer.byteLength(prefix);
   response.write(prefix);
-  let remaining = 20, timer;
+  let remaining = tailMegabytes, timer;
   const schedule = () => { if (!response.destroyed) timer = setTimeout(writePadding, 25); };
   const writePadding = () => {
     if (response.destroyed) return;
@@ -716,7 +727,7 @@ async function startFixtureServer() {
       }
       response.writeHead(full && CHATGPT_FAILURE_SMOKE === "ranged" ? 206 : 200, { "Content-Type": "application/json" });
       const history = JSON.stringify(full ? chatGptTreeFixture() : { messages: [], page_info: { has_previous_page: true } });
-      if (full && CHATGPT_HISTORY_OVERSIZE_SMOKE) streamOversizedFixtureResponse(response, history, state.oversizeHistory);
+      if (full && CHATGPT_HISTORY_OVERSIZE_SMOKE) streamOversizedFixtureResponse(response, history, state.oversizeHistory, 40);
       else response.end(history);
       return;
     }
@@ -1001,6 +1012,9 @@ async function verifyPickerProductChanges(session, state) {
   await session.call("Emulation.clearDeviceMetricsOverride");
   await waitFor(() => session.evaluate(`document.activeElement?.matches('[contenteditable="true"], textarea')`),
     "native composer focus after picker dismissal");
+  // display:block persists through the exit animation. A click before it ends
+  // would close the picker again rather than opening it for early capture.
+  await waitFor(() => session.evaluate('document.getElementById("context-generator-destination-sheet").style.display === "none"'), "picker exit before the transfer click");
   assert.deepEqual([state.summaryRequests.length, state.jsonRequests], requestsBefore, "Picker interaction must not read or send chat content.");
   process.stdout.write("✓ Orb stays clear/clickable through picker reopen/narrow layouts; native Tab skips both orbs, focus/motion pass.\n");
 }
@@ -1175,6 +1189,94 @@ async function verifyEarlyHandoff({ sourceSession, devToolsPort, origin, state, 
   process.stdout.write("✓ Polishing → real paste → verified ready; exact text, one summary, one destination, no Send click.\n");
 }
 
+async function verifyRecoveryPalette(session, contextId) {
+  const result = await session.evaluate(`(async () => {
+    const modal = document.getElementById("context-generator-fallback-modal");
+    const copy = document.getElementById("context-generator-fallback-copy");
+    const dismiss = document.getElementById("context-generator-fallback-dismiss");
+    if (!modal || !copy || !dismiss) return { available: false };
+    const properties = [
+      ["background-image", "bgimage", "linear-gradient(red,red)", "background"],
+      ["background-color", "bgcolor", "red", "background"],
+      ["border-color", "border", "red", "border-color"],
+      ["color", "color", "red", "color"],
+      ["box-shadow", "boxshadow", "0 0 20px red", "box-shadow"]
+    ];
+    const cases = [modal, ...modal.querySelectorAll("[style]")].flatMap(element =>
+      properties.filter(([, , , source]) => element.style.getPropertyValue(source))
+        .map(([property, key, value]) => [element, property, key, value])
+    );
+    const before = cases.map(([element, property]) => getComputedStyle(element).getPropertyValue(property));
+    const originalBackground = getComputedStyle(copy).backgroundImage;
+    const originalColor = getComputedStyle(copy).color;
+    const clipboard = navigator.clipboard;
+    const originalWrite = Object.getOwnPropertyDescriptor(clipboard, "writeText");
+    const originalExec = Object.getOwnPropertyDescriptor(document, "execCommand");
+    const rules = document.createElement("style");
+    let copiedText = null;
+    let failCopy = false;
+    try {
+      // Match Dark Reader's inline variables and important rules, without
+      // installing another extension or touching the user's real clipboard.
+      for (const [element, , key, value] of cases) {
+        element.setAttribute("data-darkreader-inline-" + key, "");
+        element.style.setProperty("--darkreader-inline-" + key, value);
+      }
+      rules.textContent = properties.map(([property, key]) =>
+        "[data-darkreader-inline-" + key + "]{" + property + ":var(--darkreader-inline-" + key + ") !important}"
+      ).join("\\n");
+      rules.textContent += '[data-darkreader-inline-outline]{outline-color:red !important}';
+      document.head.appendChild(rules);
+      const preserved = cases.every(([element, property], index) =>
+        getComputedStyle(element).getPropertyValue(property) === before[index]);
+      dismiss.setAttribute("data-darkreader-inline-outline", "");
+      dismiss.focus();
+      const focusPreserved = getComputedStyle(dismiss).outlineColor === dismiss.style.outlineColor;
+      Object.defineProperty(clipboard, "writeText", { configurable: true, value: async text => {
+        if (failCopy) throw new Error("Simulated clipboard failure");
+        copiedText = text;
+      } });
+      Object.defineProperty(document, "execCommand", { configurable: true, value: () => false });
+      const buttonPalettePreserved = () => getComputedStyle(copy).backgroundImage === copy.style.backgroundImage
+        && getComputedStyle(copy).color === copy.style.color;
+      copy.click();
+      await new Promise(resolve => setTimeout(resolve, 0));
+      const successPreserved = copy.textContent === "Copied!" && buttonPalettePreserved()
+        && getComputedStyle(copy).backgroundImage !== originalBackground
+        && copiedText === document.getElementById("context-generator-fallback-text").value;
+      await new Promise(resolve => setTimeout(resolve, 2100));
+      const resetPreserved = copy.textContent === "Copy Context"
+        && getComputedStyle(copy).backgroundImage === originalBackground
+        && getComputedStyle(copy).color === originalColor;
+      failCopy = true;
+      copy.click();
+      await new Promise(resolve => setTimeout(resolve, 0));
+      return { available: true, checked: cases.length, preserved, focusPreserved, successPreserved, resetPreserved,
+        failurePreserved: copy.textContent === "Select text and copy manually" && buttonPalettePreserved()
+          && getComputedStyle(copy).backgroundImage !== originalBackground };
+    } finally {
+      if (originalWrite) Object.defineProperty(clipboard, "writeText", originalWrite);
+      else delete clipboard.writeText;
+      if (originalExec) Object.defineProperty(document, "execCommand", originalExec);
+      else delete document.execCommand;
+      rules.remove();
+      for (const [element, , key] of cases) {
+        element.removeAttribute("data-darkreader-inline-" + key);
+        element.style.removeProperty("--darkreader-inline-" + key);
+      }
+      dismiss.removeAttribute("data-darkreader-inline-outline");
+      copy.textContent = "Copy Context";
+      copy.style.setProperty("background", "linear-gradient(180deg,#f5f5f5,#d8d8d8)", "important");
+      copy.style.setProperty("color", "#111114", "important");
+    }
+  })()`, contextId);
+  assert.equal(result.available, true, "The recovery dialog must be available after delivery.");
+  for (const key of ["preserved", "focusPreserved", "successPreserved", "resetPreserved", "failurePreserved"]) {
+    assert.equal(result[key], true, `Dark Reader must not override recovery ${key}: ${JSON.stringify(result)}`);
+  }
+  process.stdout.write(`✓ Recovery dialog: ${result.checked} palette checks resist Dark Reader; focus, copy success/reset/failure colors preserved.\n`);
+}
+
 async function run() {
   assert.equal(typeof WebSocket, "function", "This smoke test requires Node.js with the built-in WebSocket client.");
   const braveExecutable = findBraveExecutable();
@@ -1273,6 +1375,13 @@ async function run() {
     process.stdout.write("✓ Brave loaded the unpacked extension on the controlled source page.\n");
     if (EARLY_HANDOFF_SMOKE) {
       await verifyEarlyHandoff({ sourceSession, devToolsPort, origin, state, destinationSessions });
+      return;
+    }
+    if (process.env.CAP_CONTEXT_RECOVERY_PALETTE_SMOKE === "1") {
+      const contextId = sourceSession.getExtensionContextId();
+      await sourceSession.evaluate("window.__capSmokeShowRecovery()", contextId);
+      await verifyRecoveryPalette(sourceSession, contextId);
+      process.stdout.write("Cap Context Brave recovery palette smoke passed.\n");
       return;
     }
     if (!JSON_CAPTURE_SMOKE) {
@@ -1752,10 +1861,9 @@ async function run() {
           const overlaps = rect => rect.width > 0 && r.left < rect.right && r.right > rect.left && r.top < rect.bottom && r.bottom > rect.top;
           const modelVisible = m.width > 0 && m.height > 0;
           const beforeModel = modelVisible && b.nextElementSibling?.contains(model);
-          // Claude now keeps the picker and its 1.08 active glow on remount.
-          // Verify the 36px layout slot separately from its transformed artwork.
-          const expectedWidth = b.getAttribute("aria-expanded") === "true" ? 36 * 1.08 : 36;
-          return b.offsetWidth === 36 && Math.abs(r.width - expectedWidth) < 0.1 && r.left >= 0 && r.right <= innerWidth && !overlaps(m) && !overlaps(s)
+          // Opening pulses only the icon, so the retained picker must not
+          // enlarge the button's 36px footprint after a composer remount.
+          return b.offsetWidth === 36 && Math.abs(r.width - 36) < 0.1 && r.left >= 0 && r.right <= innerWidth && !overlaps(m) && !overlaps(s)
             && (!modelVisible || beforeModel) && document.querySelectorAll("#context-generator-bubble").length === 1
             ? { beforeModel, width: r.width } : null;
         })()`;
@@ -1852,6 +1960,11 @@ async function run() {
     }
     if (JSON_CAPTURE_SMOKE) {
       const before = state.jsonRequests;
+      // Exercise toggle presentation on an unsaved route; native capture is
+      // verified separately below, without duplicating attachment downloads.
+      const toggleSourceUrl = await sourceSession.evaluate("location.href");
+      await sourceSession.evaluate(`history.replaceState({}, "", "/?${SMOKE_PLATFORM_QUERY}=${JSON_SOURCE}"); true`);
+      await waitFor(() => sourceSession.evaluate("window.__capSmokeSourceRouteReady()", sourceSession.getExtensionContextId()), "source mounting before the capture-toggle picker");
       await sourceSession.evaluate(`document.getElementById("context-generator-bubble").click()`);
       assert.equal(await sourceSession.evaluate(`document.getElementById("context-generator-${JSON_SOURCE}-json-toggle").getAttribute("aria-pressed")`), "true", "Fast capture must start enabled.");
       await waitFor(async () => await sourceSession.evaluate(`getComputedStyle(document.getElementById("context-generator-${JSON_SOURCE}-json-toggle")).color`) === "rgb(250, 204, 21)", "the default fast-capture enabled color");
@@ -1889,6 +2002,7 @@ async function run() {
       // Dismissal keeps display:block during its exit animation. Reopening
       // before it becomes none would toggle the still-displayed sheet closed.
       await waitFor(() => sourceSession.evaluate(`document.getElementById("context-generator-destination-sheet").style.display === "none"`), "capture-toggle picker closure");
+      await sourceSession.evaluate(`history.replaceState({}, "", ${JSON.stringify(toggleSourceUrl)}); true`);
     }
 
     if (JSON_SOURCE === "chatgpt") {
@@ -1900,10 +2014,39 @@ async function run() {
       await waitFor(() => sourceSession.evaluate("window.__capSmokeChatGptMountReady()", contextId), "ChatGPT inline mounting on the project route");
     }
     if (NETWORK_SOURCE && !JSON_FALLBACK_SMOKE) await sourceSession.evaluate('document.querySelectorAll("main article").forEach(node => node.remove()); true');
+    if (JSON_SOURCE === "chatgpt") {
+      // A history-shaped scroller must stay untouched even when the API read
+      // fails before conversation messages mount.
+      await sourceSession.evaluate(`(() => {
+        const list = document.createElement("div");
+        list.id = "cap-smoke-chat-history";
+        list.className = "overflow-y-auto";
+        list.style.cssText = "position:fixed;left:0;top:80px;width:280px;height:500px;overflow-y:auto;pointer-events:none";
+        list.innerHTML = '<div style="height:2400px">Projects<br>Recents<br>Previous chats</div>';
+        document.body.appendChild(list);
+        list.scrollTop = 420;
+        list.capScrollCalls = 0;
+        const scroll = list.scrollTo.bind(list);
+        list.scrollTo = (...args) => { list.capScrollCalls++; scroll(...args); };
+        return true;
+      })()`);
+    }
     // Responsive placement runs in a second tab. Restore the source tab before
     // capture so hidden-tab throttling cannot turn this into a timing test.
     await sourceSession.call("Page.bringToFront");
+    const pickerSourceUrl = await sourceSession.evaluate("location.href");
+    if (JSON_CAPTURE_SMOKE) {
+      await sourceSession.evaluate(`history.replaceState({}, "", "/?${SMOKE_PLATFORM_QUERY}=${JSON_SOURCE}"); true`);
+      // The route poll can finish before its placement frame updates the mount.
+      // Opening with the old owner would correctly dismiss the new picker.
+      await waitFor(() => sourceSession.evaluate("window.__capSmokeSourceRouteReady()", sourceSession.getExtensionContextId()), "source mounting before the product picker");
+    }
     await verifyPickerProductChanges(sourceSession, state);
+    if (JSON_CAPTURE_SMOKE) {
+      await sourceSession.evaluate(`history.replaceState({}, "", ${JSON.stringify(pickerSourceUrl)}); true`);
+      await waitFor(() => sourceSession.evaluate("window.__capSmokeSourceRouteReady()", sourceSession.getExtensionContextId()), "source route ownership restored before early capture");
+      if (JSON_SOURCE === "chatgpt") await waitFor(() => sourceSession.evaluate("window.__capSmokeChatGptMountReady()", sourceSession.getExtensionContextId()), "ChatGPT ownership restored before early capture");
+    }
     const jsonRequestsBeforeTransfer = state.jsonRequests;
     if (JSON_SOURCE === "gemini") assert.equal(jsonRequestsBeforeTransfer, 0, "Gemini bootstrap capture must not require earlier native RPC traffic.");
     const extensionContextId = sourceSession.getExtensionContextId();
@@ -1914,9 +2057,24 @@ async function run() {
       const otherWindow = await browserSession.call("Target.createTarget", { url: "about:blank", newWindow: true });
       await browserSession.call("Target.activateTarget", { targetId: otherWindow.targetId });
     }
+    if (JSON_CAPTURE_SMOKE) {
+      const beforePickerTabs = (await getTargets(devToolsPort)).filter(target => target.type === "page").length;
+      const beforePickerTelemetry = state.telemetryRequests.length;
+      // Exercise capture reuse through the immediate handoff too; the other
+      // JSON platforms and ordinary DOM smoke retain the animated transition.
+      if (JSON_SOURCE === "chatgpt") await sourceSession.call("Emulation.setEmulatedMedia", { features: [{ name: "prefers-reduced-motion", value: "reduce" }] });
+      await sourceSession.evaluate('document.getElementById("context-generator-bubble").click()');
+      // Opening yields to paint before prefetch starts; the first probe may be false.
+      await waitFor(() => sourceSession.evaluate("window.__capSmokePickerJsonReady()", extensionContextId), "picker JSON capture after its opening paint");
+      assert.ok(state.jsonRequests > jsonRequestsBeforeTransfer, "Opening the orb must start native JSON capture before selection.");
+      assert.equal(state.summaryRequests.length, 0, "Orb capture must not start summarization.");
+      assert.equal(state.telemetryRequests.length, beforePickerTelemetry, "Orb capture must not create a transfer attempt.");
+      assert.equal((await getTargets(devToolsPort)).filter(target => target.type === "page").length, beforePickerTabs, "Orb capture must not open a destination tab.");
+      process.stdout.write("✓ Orb click captured JSON before selection, with no summary, destination tab or transfer telemetry.\n");
+    }
     const clickResult = await sourceSession.evaluate(String.raw`(() => {
       const bubble = document.getElementById("context-generator-bubble");
-      bubble.click();
+      if (!${JSON_CAPTURE_SMOKE}) bubble.click();
       // The ordinary smoke exercises the user's explicit DOM opt-out.
       const speedToggle = document.querySelector(".context-generator-speed-toggle");
       if (!${JSON_CAPTURE_SMOKE} && speedToggle?.getAttribute("aria-pressed") === "true") speedToggle.click();
@@ -1925,6 +2083,10 @@ async function run() {
       const tiles = [...document.querySelectorAll(".context-generator-destination-tile")];
       const claudeTile = tiles.find((tile) => tile.textContent.includes(${JSON.stringify(JSON_SOURCE === "claude" ? "ChatGPT" : "Claude")}));
       if (!claudeTile) return { ok: false, destinations: tiles.map((tile) => tile.textContent.trim()) };
+      // Earlier keyboard/resize checks can leave this tile active. Establish
+      // idle explicitly so hover coverage compares two distinct visual states.
+      if (document.activeElement === claudeTile) sheet.focus({ preventScroll: true });
+      claudeTile.dispatchEvent(new Event("mouseleave"));
       // Reproduce Dark Reader's injected important rules without installing it in
       // the isolated smoke profile. The extension's visible palette must win.
       const cases = [
@@ -1965,20 +2127,55 @@ async function run() {
         palettePreserved,
         hoverPreserved: hoverBackground !== idleBackground && !hoverBackground.includes("red"),
         selectedPreserved: selectedBackground !== idleBackground && !selectedBackground.includes("red"),
+        backgrounds: { idle: idleBackground, hover: hoverBackground, selected: selectedBackground },
         pickerStyleIgnored: sheet.ownerDocument.getElementById("context-generator-destination-sheet-styles")?.classList.contains("darkreader")
       };
     })()`);
     assert.equal(clickResult?.ok, true, `Claude destination tile was unavailable: ${JSON.stringify(clickResult)}`);
     assert.equal(clickResult.palettePreserved, true, "Dark Reader must not recolor the picker's idle palette.");
-    assert.equal(clickResult.hoverPreserved, true, "Dark Reader must not recolor the picker's hover palette.");
+    assert.equal(clickResult.hoverPreserved, true, `Dark Reader must not recolor the picker's hover palette: ${JSON.stringify(clickResult.backgrounds)}`);
     assert.equal(clickResult.selectedPreserved, true, "Dark Reader must not recolor the selected destination tile.");
     assert.equal(clickResult.pickerStyleIgnored, true, "Dark Reader must leave the picker stylesheet alone.");
 
     if (JSON_FALLBACK_SMOKE) {
       await waitFor(() => sourceSession.evaluate(`document.getElementById("context-generator-capture-notice")?.textContent === "Fast capture failed. Using normal capture instead."`), "the safe fast-capture fallback notice");
     }
+    if (JSON_SOURCE === "chatgpt" && CHATGPT_FAILURE_SMOKE) {
+      await waitFor(() => sourceSession.evaluate('Boolean(document.getElementById("context-generator-error-text")?.textContent)'), "the JSON capture error");
+      const failedCapture = await sourceSession.evaluate(`(() => {
+        const list = document.getElementById("cap-smoke-chat-history");
+        return { top: list.scrollTop, calls: list.capScrollCalls,
+          fallbackNotice: Boolean(document.getElementById("context-generator-capture-notice")),
+          error: document.getElementById("context-generator-error-text").textContent };
+      })()`);
+      assert.equal(failedCapture.top, 420, "Failed JSON capture must preserve sidebar position.");
+      assert.equal(failedCapture.calls, 0, "Failed JSON capture must never scroll the sidebar.");
+      assert.equal(failedCapture.fallbackNotice, false, "ChatGPT must not enter legacy DOM recovery.");
+      assert.match(failedCapture.error, /JSON capture|too long|limit|Fast capture/i);
+      assert.equal(state.jsonRequests - jsonRequestsBeforeTransfer, 1, "One fresh API read must precede the error.");
+      assert.equal(state.summaryRequests.length, 0, "A failed JSON read must not submit DOM history.");
+      if (CHATGPT_PASTE_OVERSIZE_SMOKE) {
+        await waitFor(() => state.oversizePaste.cancelled, "oversized paste reader cancellation");
+        assert.ok(state.oversizePaste.bytes < 20000000, "The full oversized paste tail must not be downloaded.");
+        assert.equal(state.pasteDescriptorRequests, CHATGPT_PASTE_AUTH_SMOKE ? 2 : 1);
+        assert.equal(state.pasteContentRequests, 1, "A rejected paste must not be downloaded again.");
+        process.stdout.write(`✓ Brave cancelled oversized paste after ${state.oversizePaste.bytes} fixture bytes.\n`);
+      }
+      if (CHATGPT_HISTORY_OVERSIZE_SMOKE) {
+        await waitFor(() => state.oversizeHistory.cancelled, "oversized history reader cancellation");
+        assert.ok(state.oversizeHistory.bytes < 40000000, "The full oversized history tail must not be downloaded.");
+        assert.equal(state.pasteContentRequests + state.pasteDescriptorRequests, 0, "Rejected history must not begin paste downloads.");
+        process.stdout.write(`✓ Brave cancelled oversized history after ${state.oversizeHistory.bytes} fixture bytes.\n`);
+      }
+      process.stdout.write("✓ ChatGPT JSON failure stops without DOM fallback, sidebar scrolling or summary submission.\n");
+      return;
+    }
     await waitFor(() => state.summaryRequests.length === 1, "one summary backend request");
     const capturedConversation = state.summaryRequests[0]?.conversation || "";
+    if (JSON_SOURCE === "chatgpt") {
+      const sidebar = await sourceSession.evaluate('(() => { const list = document.getElementById("cap-smoke-chat-history"); return { top:list.scrollTop,calls:list.capScrollCalls }; })()');
+      assert.deepEqual(sidebar, { top:420,calls:0 }, "JSON success must leave the history sidebar untouched.");
+    }
     if (JSON_SOURCE === "gemini") {
       assert.equal(await sourceSession.evaluate("window.__geminiMenuClicks"), 0, "JSON capture and DOM fallback must never open Gemini response menus.");
       process.stdout.write("✓ Gemini capture leaves native response menus untouched.\n");
@@ -1988,18 +2185,10 @@ async function run() {
     if (JSON_FALLBACK_SMOKE) {
       assert.doesNotMatch(capturedConversation, /JSON_ONLY_SENTINEL|AUTH_SENTINEL|CSRF_SENTINEL|SIGNED_SENTINEL/);
       assert.equal(state.jsonRequests - jsonRequestsBeforeTransfer, JSON_SOURCE === "grok" ? 2 : 1, "Fast capture must not be retried after failure.");
-      if (CHATGPT_PASTE_OVERSIZE_SMOKE) {
-        assert.equal(state.oversizePaste.cancelled, true, "Brave must cancel the oversized paste response.");
-        assert.ok(state.oversizePaste.bytes < 20000000, "The full oversized paste tail must not be downloaded.");
-        assert.equal(state.pasteDescriptorRequests, CHATGPT_PASTE_AUTH_SMOKE ? 2 : 1);
-        assert.equal(state.pasteContentRequests, 1, "A rejected paste must not be downloaded again.");
-        process.stdout.write(`✓ Brave cancelled oversized paste after ${state.oversizePaste.bytes} fixture bytes.\n`);
-      }
-      if (DEEPSEEK_OVERSIZE_SMOKE || CLAUDE_OVERSIZE_SMOKE || CHATGPT_HISTORY_OVERSIZE_SMOKE) {
+      if (DEEPSEEK_OVERSIZE_SMOKE || CLAUDE_OVERSIZE_SMOKE) {
         assert.equal(state.oversizeHistory.cancelled, true, "Brave must cancel the oversized history response.");
         assert.ok(state.oversizeHistory.bytes < 20000000, "The full oversized tail must not be downloaded.");
         assert.equal(state.pasteContentRequests, 0, "Rejected history must not begin file downloads.");
-        if (CHATGPT_HISTORY_OVERSIZE_SMOKE) assert.equal(state.pasteDescriptorRequests, 0);
         process.stdout.write(`✓ Brave cancelled oversized history after ${state.oversizeHistory.bytes} fixture bytes.\n`);
       }
       process.stdout.write(`✓ ${JSON_SOURCE} failed fast capture fell back to DOM within the same transfer.\n`);
@@ -2049,7 +2238,7 @@ async function run() {
         }
         if (JSON_SOURCE === "grok") process.stdout.write("\u2713 Grok JSON: exact 48-turn transcript, original code/whitespace and zero attachment/tool leakage.\n");
       }
-      assert.equal(state.jsonRequests, jsonRequestsBeforeTransfer + (JSON_SOURCE === "gemini" ? 3 : JSON_SOURCE === "grok" ? 2 : 1), "JSON capture must load the full history only after destination selection.");
+      assert.equal(state.jsonRequests, jsonRequestsBeforeTransfer + (JSON_SOURCE === "gemini" ? 3 : JSON_SOURCE === "grok" ? 2 : 1), "Destination selection must reuse the orb's single full-history capture.");
     }
     process.stdout.write("✓ Capture reached the stub backend exactly once with both conversation turns.\n");
 
@@ -2148,6 +2337,7 @@ async function run() {
     process.stdout.write(TELEMETRY_DATABASE_SMOKE
       ? "✓ Installed worker → Vercel relay → Edge handler → migrated database: verified completion, one count, drained outbox.\n"
       : "✓ Signed terminal telemetry stayed in the local fixture and the installed worker's outbox drained.\n");
+    await verifyRecoveryPalette(sourceSession, extensionContextId);
     if (!JSON_CAPTURE_SMOKE) {
       // Repeat at 9,999 captured characters: exercise the real direct boundary
       // branch and prove it cannot reuse the previous remote summary or receipt.
