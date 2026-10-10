@@ -4,6 +4,8 @@ A short history of decisions and regressions that matter when changing the code.
 
 ## 2026-10-10
 
+- **Orb click opens the picker sooner.** Shortened the entrance from 300 to 160 ms, reduced its travel and made sheet/backdrop transitions honor reduced motion. Moved speculative preconnect/JSON capture after the opening paint because rendered-history snapshotting ran inside the click handler. Removed the 180 ms focus delay and cancel queued warmup on dismissal; selecting immediately or toggling Speed retains the existing capture flow. Preserves the picker design and transfer lifecycle. Local UX trial; no push or release.
+
 - **Recovery dialog keeps its palette under Dark Reader.** The source-side copy dialog lacked the palette protection used by the picker/progress overlay, allowing ChatGPT's Dark Reader rules to flatten its gradient, borders, shadows and button contrast. Protect its initial colors before insertion and keep copy success/failure/reset and focus colors at inline priority. Preserve the existing design; the Brave smoke now checks computed colors under simulated Dark Reader rules and exercises clipboard success/failure without touching the real clipboard.
 
 - **Fresh recovery keeps editor diagnostics with their own destination.** The second batch of ten commits exposed first-tab draft/editor observations leaking into the final recovery result. Preserve them in `prepared_diagnostics` and clear their top-level fields before opening the fresh destination. Regressions cover recovery success, lost pasted text and a missing editor without inheriting the earlier draft, editor kind, text length, wait or timeline.

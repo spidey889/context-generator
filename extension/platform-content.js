@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-10-recovery-palette-v124";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-10-responsive-picker-v125";
   const INLINE_PILL_SIZE = 36;
   const ownedUiStyleSheets = new Map();
   const CLAUDE_INLINE_STYLE_ID = "context-generator-claude-inline-styles";
@@ -90,7 +90,7 @@
   const TRANSIENT_COMPOSER_PLACEMENT_PLATFORMS = new Set(["gemini", "grok", "deepseek"]);
   const INLINE_PATHNAME_POLL_MS = 80;
   const DESTINATION_SHEET_WIDTH = 352;
-  const DESTINATION_SHEET_CLOSED_TRANSFORM = "translate3d(0,12px,0) scale(0.96)";
+  const DESTINATION_SHEET_CLOSED_TRANSFORM = "translate3d(0,6px,0) scale(0.985)";
   const DESTINATION_SHEET_EXIT_MS = 200;
   const DESTINATION_TRANSFER_PRESS_MS = 150;
   const DESTINATION_HANDOFF_OVERLAP_MS = 40;
@@ -490,6 +490,7 @@
   let reservedActionCluster = null;
   let reservedComposerSurface = null;
   let destinationSheetAnimationFrame = null;
+  let destinationSheetWarmupTimer = null;
   let destinationSheetPathname = null;
   let pickerJsonCapture = null;
   let pendingJsonCapture = Promise.resolve();
@@ -6640,6 +6641,11 @@
       }
 
       @media (prefers-reduced-motion: reduce) {
+        #${DESTINATION_SHEET_ID},
+        #${DESTINATION_SHEET_BACKDROP_ID} {
+          transition: none !important;
+        }
+
         #${DESTINATION_SHEET_ID} .context-generator-speed-lines i {
           animation: none;
           opacity: 0.65;
@@ -6706,7 +6712,7 @@
       `transform:${DESTINATION_SHEET_CLOSED_TRANSFORM}`,
       "transform-origin:bottom right",
       "will-change:transform,opacity",
-      "transition:opacity 0.2s ease, transform 0.3s cubic-bezier(0.22,1,0.36,1)"
+      "transition:opacity 0.12s ease-out, transform 0.16s cubic-bezier(0.16,1,0.3,1)"
     ].join(";");
 
     const header = document.createElement("div");
@@ -6990,7 +6996,7 @@
       "-webkit-backdrop-filter:blur(7px) saturate(0.86)",
       "opacity:0",
       "will-change:opacity",
-      "transition:opacity 0.24s ease"
+      "transition:opacity 0.16s ease-out"
     ].join(";");
     addOwnedEventListener(backdrop, "click", (event) => {
       event.preventDefault();
@@ -7015,6 +7021,8 @@
     const backdrop = ensureDestinationSheetBackdrop();
     clearTimeout(destinationSheetHideTimer);
     clearTimeout(destinationBackdropHideTimer);
+    clearTimeout(destinationSheetWarmupTimer);
+    destinationSheetWarmupTimer = null;
     destinationSheetHideTimer = null;
     destinationBackdropHideTimer = null;
     if (destinationSheetAnimationFrame) cancelAnimationFrame(destinationSheetAnimationFrame);
@@ -7029,8 +7037,6 @@
     delete sheet.dataset.contextGeneratorPositionLocked;
     positionDestinationSheet();
     resetDestinationTiles(sheet);
-    warmDestinationConnections();
-    startPickerJsonCapture();
     const bubble = document.getElementById(BUBBLE_ID);
     if (bubble) {
       bubble.setAttribute("aria-expanded", "true");
@@ -7043,6 +7049,7 @@
       sheet.style.opacity = "1";
       sheet.style.transform = "translate3d(0,0,0) scale(1)";
       sheet.focus?.({ preventScroll: true });
+      scheduleDestinationPickerWarmup();
       return;
     }
     destinationSheetAnimationFrame = requestAnimationFrame(() => {
@@ -7050,18 +7057,34 @@
       sheet.style.opacity = "1";
       sheet.style.transform = "translate3d(0,0,0) scale(1)";
       destinationSheetAnimationFrame = null;
-      setTimeout(() => {
-        if (
-          isDestinationSheetOpen()
-          && (document.activeElement === bubble || document.activeElement === document.body)
-        ) {
-          sheet.focus?.({ preventScroll: true });
-        }
-      }, 180);
+      if (document.activeElement === bubble || document.activeElement === document.body) {
+        sheet.focus?.({ preventScroll: true });
+      }
+      scheduleDestinationPickerWarmup();
+    });
+  }
+
+  function scheduleDestinationPickerWarmup() {
+    const sourceUrl = window.location.href;
+    // The history snapshot reads rendered text and can force layout on long chats.
+    // Give the opening frame a paint before doing speculative capture work.
+    destinationSheetAnimationFrame = requestAnimationFrame(() => {
+      destinationSheetAnimationFrame = null;
+      destinationSheetWarmupTimer = setTimeout(() => {
+        destinationSheetWarmupTimer = null;
+        const sheet = document.getElementById(DESTINATION_SHEET_ID);
+        if (isRunning || !isDestinationSheetOpen() || sheet?.getAttribute("aria-hidden") === "true"
+            || destinationSheetPathname !== window.location.pathname
+            || sourceUrl !== window.location.href || pickerJsonCapture) return;
+        warmDestinationConnections();
+        startPickerJsonCapture();
+      }, 0);
     });
   }
 
   function hideDestinationSheet({ immediate = false, preserveBackdrop = false, restoreFocus = true } = {}) {
+    clearTimeout(destinationSheetWarmupTimer);
+    destinationSheetWarmupTimer = null;
     if (!preserveBackdrop) clearPickerJsonCapture();
     destinationSheetPathname = null;
     const sheet = document.getElementById(DESTINATION_SHEET_ID);

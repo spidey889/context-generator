@@ -66,6 +66,44 @@ const captureKeyFor = platform => platform === "claude" ? "__capCaptureClaudeJso
   : platform === "chatgpt" ? "__capCaptureChatGptJson" : "__capCaptureNetworkJson";
 const deferred = () => { let resolve; const promise = new Promise(done => { resolve = done; }); return { promise, resolve }; };
 
+test("deferred picker warmup cannot capture a dismissed, navigated or selected chat or replace Speed capture", async () => {
+  const start = source.indexOf("  function scheduleDestinationPickerWarmup()");
+  const end = source.indexOf("  function hideDestinationSheet(", start);
+  assert.ok(start >= 0 && end > start);
+  const warmup = new vm.Script(source.slice(start, end));
+  for (const platform of ["claude", "chatgpt", "gemini", "grok", "deepseek"]) {
+    for (const scenario of ["open", "dismissed", "navigated", "selected", "Speed off", "Speed capture"]) {
+      const { context, calls } = harness(platform, { mode: "success" });
+      let frame, task, hidden = false, preconnects = 0;
+      Object.assign(context, {
+        DESTINATION_SHEET_ID: "picker", destinationSheetAnimationFrame: null, destinationSheetWarmupTimer: null,
+        destinationSheetPathname: context.window.location.pathname,
+        document: { getElementById: () => ({ getAttribute: () => hidden ? "true" : "false" }) },
+        isDestinationSheetOpen: () => !hidden,
+        requestAnimationFrame: callback => { frame = callback; return 1; },
+        setTimeout: callback => { task = callback; return 2; },
+        warmDestinationConnections: () => { preconnects++; }
+      });
+      warmup.runInContext(context);
+      context.scheduleDestinationPickerWarmup();
+      assert.equal(calls.json + preconnects, 0, "the opening frame must not scan or capture history");
+      frame();
+      assert.equal(calls.json + preconnects, 0, "capture must yield to paint after its frame");
+      if (scenario === "dismissed") hidden = true;
+      if (scenario === "navigated") context.window.location.href += "?changed";
+      if (scenario === "selected") context.isRunning = true;
+      if (scenario === "Speed off") {
+        context.claudeJsonCaptureEnabled = context.chatGptJsonCaptureEnabled = context.networkJsonCaptureEnabled = false;
+      }
+      if (scenario === "Speed capture") context.startPickerJsonCapture();
+      task();
+      await context.pickerJsonCapture?.promise;
+      assert.equal(calls.json, ["open", "Speed capture"].includes(scenario) ? 1 : 0, `${platform}: ${scenario}`);
+      assert.equal(calls.destination + calls.dom + calls.flows.length, 0, "warmup must never start a transfer");
+    }
+  }
+});
+
 test("picker JSON capture is reused ready or pending on all five platforms, with no transfer before selection", async () => {
   for (const platform of ["claude", "chatgpt", "gemini", "grok", "deepseek"]) {
     for (const ready of [false, true]) {
@@ -110,7 +148,7 @@ test("picker handoff preserves ready and pending JSON with either motion prefere
           document: { getElementById: () => null }, clearTimeout() {}, delay: async () => {},
           DESTINATION_SHEET_ID: "picker", DESTINATION_SHEET_BACKDROP_ID: "backdrop", BUBBLE_ID: "orb",
           DESTINATION_TRANSFER_PRESS_MS: 0, DESTINATION_HANDOFF_OVERLAP_MS: 0,
-          destinationSheetHideTimer: null, destinationSheetPathname: null, pendingHandoffOrigin: null,
+          destinationSheetHideTimer: null, destinationSheetWarmupTimer: null, destinationSheetPathname: null, pendingHandoffOrigin: null,
           inlineBubble: null, claudeInlineMount: null, chatGptInlineMount: null, providerInlineMount: null
         });
         context.window.matchMedia = () => ({ matches: reducedMotion });

@@ -1953,7 +1953,8 @@ async function run() {
       // JSON platforms and ordinary DOM smoke retain the animated transition.
       if (JSON_SOURCE === "chatgpt") await sourceSession.call("Emulation.setEmulatedMedia", { features: [{ name: "prefers-reduced-motion", value: "reduce" }] });
       await sourceSession.evaluate('document.getElementById("context-generator-bubble").click()');
-      assert.equal(await sourceSession.evaluate("window.__capSmokePickerJsonReady()", extensionContextId), true);
+      // Opening yields to paint before prefetch starts; the first probe may be false.
+      await waitFor(() => sourceSession.evaluate("window.__capSmokePickerJsonReady()", extensionContextId), "picker JSON capture after its opening paint");
       assert.ok(state.jsonRequests > jsonRequestsBeforeTransfer, "Opening the orb must start native JSON capture before selection.");
       assert.equal(state.summaryRequests.length, 0, "Orb capture must not start summarization.");
       assert.equal(state.telemetryRequests.length, beforePickerTelemetry, "Orb capture must not create a transfer attempt.");
