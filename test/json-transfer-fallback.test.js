@@ -93,6 +93,44 @@ test("picker JSON capture is reused ready or pending on all five platforms, with
   }
 });
 
+test("picker handoff preserves ready and pending JSON with either motion preference", async () => {
+  const hideStart = source.indexOf("  function hideDestinationSheet(");
+  const hideEnd = source.indexOf("  function trackDestinationBackdropCutout(", hideStart);
+  const transitionStart = source.indexOf("  async function transitionDestinationSheetToHandoff(");
+  const transitionEnd = source.indexOf("  function warmDestinationConnections(", transitionStart);
+  assert.ok(hideStart >= 0 && hideEnd > hideStart && transitionStart >= 0 && transitionEnd > transitionStart);
+  // Use the real dismissal and handoff functions; the normal harness replaces
+  // animation and would miss a transition accidentally discarding the capture.
+  const transition = new vm.Script(source.slice(hideStart, hideEnd) + source.slice(transitionStart, transitionEnd));
+  for (const platform of ["claude", "chatgpt", "gemini", "grok", "deepseek"]) {
+    for (const reducedMotion of [false, true]) {
+      for (const ready of [false, true]) {
+        const { context, calls } = harness(platform, { mode: "success" });
+        Object.assign(context, {
+          document: { getElementById: () => null }, clearTimeout() {}, delay: async () => {},
+          DESTINATION_SHEET_ID: "picker", DESTINATION_SHEET_BACKDROP_ID: "backdrop", BUBBLE_ID: "orb",
+          DESTINATION_TRANSFER_PRESS_MS: 0, DESTINATION_HANDOFF_OVERLAP_MS: 0,
+          destinationSheetHideTimer: null, destinationSheetPathname: null, pendingHandoffOrigin: null,
+          inlineBubble: null, claudeInlineMount: null, chatGptInlineMount: null, providerInlineMount: null
+        });
+        context.window.matchMedia = () => ({ matches: reducedMotion });
+        transition.runInContext(context);
+        const started = deferred(), response = deferred();
+        context.window[captureKeyFor(platform)] = () => { calls.json++; started.resolve(); return response.promise; };
+        context.startPickerJsonCapture(); await started.promise;
+        if (ready) { response.resolve({ text: "Orb snapshot", messageTurnCount: 2 }); await context.pickerJsonCapture.promise; }
+        const transfer = context.start("claude");
+        response.resolve({ text: "Orb snapshot", messageTurnCount: 2 });
+        await transfer;
+        assert.equal(calls.json, 1, `${platform}, reduced motion ${reducedMotion}, ready ${ready}: handoff must reuse capture`);
+        assert.equal(calls.flows[0].text, "Orb snapshot");
+        assert.equal(calls.dom + calls.notice + calls.errors.length, 0);
+        assert.equal(context.pickerJsonCapture, null);
+      }
+    }
+  }
+});
+
 test("changed history or away-and-back navigation discards a completed picker snapshot", async () => {
   for (const change of ["reply", "turn identity", "branch", "navigation"]) {
     const { context, calls, navigate } = harness("grok", { mode: "success" });

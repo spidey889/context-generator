@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-09-orb-json-prefetch-v121";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-10-orb-json-prefetch-v122";
   const INLINE_PILL_SIZE = 36;
   const ownedUiStyleSheets = new Map();
   const CLAUDE_INLINE_STYLE_ID = "context-generator-claude-inline-styles";
@@ -7180,7 +7180,8 @@
   async function transitionDestinationSheetToHandoff() {
     if (window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) {
       pendingHandoffOrigin = null;
-      hideDestinationSheet({ immediate: true, restoreFocus: false });
+      // Selection still owns the prefetched JSON when animations are skipped.
+      hideDestinationSheet({ immediate: true, preserveBackdrop: true, restoreFocus: false });
       return;
     }
 

@@ -2,6 +2,10 @@
 
 A short history of decisions and regressions that matter when changing the code. Read the relevant section of [LOGIC.md](LOGIC.md) for current behavior, ownership and checks; use this file when you need to understand why an approach changed. Entries describe source changes unless deployment is explicitly recorded. Extension packaging, Web Store publication and backend deployment are separate.
 
+## 2026-10-10
+
+- **Reduced-motion handoff retains orb capture.** The immediate picker-to-handoff transition discarded its JSON snapshot, causing destination selection to read the same chat again. It now preserves the capture just like the animated transition. A regression reproduces the duplicate read and checks ready/pending reuse on all five platforms with either motion preference; the installed-Brave ChatGPT JSON fixture also exercises reduced motion.
+
 ## 2026-10-09
 
 - **ChatGPT fast capture cannot start legacy scrolling.** Recent fast attempts failed their JSON reads and automatically entered DOM preparation, which could scroll the Projects/Recents list. ChatGPT fast capture now stops with its existing capture error and releases its lock; it never switches to the scrolling method. Successful JSON reads, summary-service local recovery, explicit Speed opt-out and other platforms retain their behavior. Integration with orb prefetch preserves silent errors before selection and ensures prefetched ChatGPT errors also stop before DOM recovery. Added orchestrator retry/side-effect checks and installed-Brave success/failure probes that preserve a history sidebar position and prevent summary submission after failed JSON reads. Validation: 502 offline tests passed; isolated Brave fixtures passed complete JSON delivery plus incomplete-history, oversized-history and oversized-paste failures with zero sidebar scrolling or failed-capture summary requests.
