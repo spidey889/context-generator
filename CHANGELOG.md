@@ -4,6 +4,8 @@ A short history of decisions and regressions that matter when changing the code.
 
 ## 2026-10-10
 
+- **ChatGPT drops alternate branches before the extension bridge.** Replaced the 6 MB full-tree bottleneck with a separate 32 MB bounded download allowance, preserving the 15-second deadline, smaller session/descriptor guards and selected transcript limits. MAIN keeps only the current parent chain and its child references; original tree counts preserve advertised-total completeness checks. Ten unused branches totaling over 7 MB now allow an exact small selected transfer. A live oversized chat also had 855,027 visible user/assistant plain-text characters on its selected path, so branch removal cannot make that particular history fit the existing 500,000-character limit. Added large-branch delivery and transport-cancellation regressions; advance MAIN/bridge readiness together to replace old closures after extension reload. Web Store publication remains separate.
+
 - **Orb clicks regain subtle feedback.** The motionless follow-up felt too much like clicking text. Added a 110 ms artwork-only pulse with 3% compression and slight dimming, then a direct return. It starts alongside the picker rather than delaying it; repeat clicks replace the pulse, and reduced motion skips it. Preserved hover and the shorter picker entrance. Local visual refinement; no push or release.
 
 - **Composer orb clicks have no press animation.** Removed pointer-down shrink, pointer-up rebound and the extra picker-open scale/glow change. Clicking ends any unfinished hover transition immediately; hover motion returns on the next hover. The picker still opens directly with its shorter entrance. Local follow-up to the responsiveness trial; no push or release.

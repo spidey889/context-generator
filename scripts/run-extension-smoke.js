@@ -501,7 +501,9 @@ function chatGptTreeFixture() {
   mapping.voiceUser = { parent: "canvasEditResult", message: { author: { role: "user" }, content: { content_type: "multimodal_text", parts: [{ content_type: "audio_transcription", text: "OWN_VOICE_USER_SENTINEL", direction: "in" }, { content_type: "audio_asset_pointer", text: "UNSUPPORTED_SENTINEL" }] } } };
   mapping.voiceAssistant = { parent: "voiceUser", message: { author: { role: "assistant" }, content: { content_type: "multimodal_text", parts: [{ content_type: "audio_transcription", text: "OWN_VOICE_ASSISTANT_SENTINEL", direction: "out" }] } } };
   mapping.code = { parent: "voiceAssistant", message: { author: { role: "assistant" }, status: "finished_partial", end_turn: false, content: { content_type: "code", text: CHATGPT_EXACT_CODE, language: "python" } } };
-  mapping.alternate = { parent: "root", message: { author: { role: "assistant" }, content: { content_type: "text", parts: ["INACTIVE_BRANCH_SENTINEL"] } } };
+  // Unused branches alone exceed the former 6 MB raw guard. The installed
+  // extension must still deliver the exact selected history, including files.
+  mapping.alternate = { parent: "root", message: { author: { role: "assistant" }, content: { content_type: "text", parts: [`INACTIVE_BRANCH_SENTINEL ${"x".repeat(7000000)}`] } } };
   const data = { conversation_id: "smoke", current_node: "code", mapping, context_truncation_continuation: null };
   if (CHATGPT_FAILURE_SMOKE === "partial") data.has_previous_page = true;
   if (CHATGPT_FAILURE_SMOKE === "streaming") mapping.code.message.status = "in_progress";
@@ -531,13 +533,13 @@ function networkSmokeFixture(platform) {
   return fixture;
 }
 
-function streamOversizedFixtureResponse(response, prefix, metrics) {
+function streamOversizedFixtureResponse(response, prefix, metrics, tailMegabytes = 20) {
   // No Content-Length: native capture must cancel discarded/excess bodies
-  // before the 20 MB tail finishes. Pace writes and observe cancellation.
+  // before the oversized tail finishes. Pace writes and observe cancellation.
   const padding = Buffer.alloc(1000000, 32);
   metrics.bytes = Buffer.byteLength(prefix);
   response.write(prefix);
-  let remaining = 20, timer;
+  let remaining = tailMegabytes, timer;
   const schedule = () => { if (!response.destroyed) timer = setTimeout(writePadding, 25); };
   const writePadding = () => {
     if (response.destroyed) return;
@@ -702,7 +704,7 @@ async function startFixtureServer() {
       }
       response.writeHead(full && CHATGPT_FAILURE_SMOKE === "ranged" ? 206 : 200, { "Content-Type": "application/json" });
       const history = JSON.stringify(full ? chatGptTreeFixture() : { messages: [], page_info: { has_previous_page: true } });
-      if (full && CHATGPT_HISTORY_OVERSIZE_SMOKE) streamOversizedFixtureResponse(response, history, state.oversizeHistory);
+      if (full && CHATGPT_HISTORY_OVERSIZE_SMOKE) streamOversizedFixtureResponse(response, history, state.oversizeHistory, 40);
       else response.end(history);
       return;
     }
@@ -2047,7 +2049,7 @@ async function run() {
       }
       if (CHATGPT_HISTORY_OVERSIZE_SMOKE) {
         await waitFor(() => state.oversizeHistory.cancelled, "oversized history reader cancellation");
-        assert.ok(state.oversizeHistory.bytes < 20000000, "The full oversized history tail must not be downloaded.");
+        assert.ok(state.oversizeHistory.bytes < 40000000, "The full oversized history tail must not be downloaded.");
         assert.equal(state.pasteContentRequests + state.pasteDescriptorRequests, 0, "Rejected history must not begin paste downloads.");
         process.stdout.write(`✓ Brave cancelled oversized history after ${state.oversizeHistory.bytes} fixture bytes.\n`);
       }
