@@ -66,6 +66,46 @@ const captureKeyFor = platform => platform === "claude" ? "__capCaptureClaudeJso
   : platform === "chatgpt" ? "__capCaptureChatGptJson" : "__capCaptureNetworkJson";
 const deferred = () => { let resolve; const promise = new Promise(done => { resolve = done; }); return { promise, resolve }; };
 
+test("picker prefetch waits out the remaining entrance without delaying reduced motion", async t => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const start = source.indexOf("  function scheduleDestinationPickerWarmup()");
+  const end = source.indexOf("  function hideDestinationSheet(", start);
+  const warmup = new vm.Script(source.slice(start, end));
+  for (const animated of [true, false]) {
+    const { context, calls } = harness("chatgpt", { mode: "success" });
+    let frame, animationTime = 40;
+    Object.assign(context, {
+      DESTINATION_SHEET_ID: "picker", destinationSheetAnimationFrame: null, destinationSheetWarmupTimer: null,
+      destinationSheetPathname: context.window.location.pathname,
+      document: { getElementById: () => ({
+        getAttribute: () => "false",
+        getAnimations: () => animated ? [{ currentTime: animationTime, effect: { getComputedTiming: () => ({ endTime: 160 }) } }] : []
+      }) },
+      isDestinationSheetOpen: () => true,
+      requestAnimationFrame: callback => { frame = callback; return 1; },
+      setTimeout, warmDestinationConnections() {}
+    });
+    warmup.runInContext(context);
+    context.scheduleDestinationPickerWarmup(); frame();
+    t.mock.timers.tick(0);
+    if (animated) {
+      t.mock.timers.tick(119);
+      assert.equal(context.pickerJsonCapture, null, "snapshotting must not interrupt the entrance");
+      assert.equal(calls.json, 0);
+      animationTime = 60;
+      t.mock.timers.tick(1);
+      assert.equal(context.pickerJsonCapture, null, "a delayed animation must be rechecked before capture");
+      animationTime = 160;
+      t.mock.timers.tick(100);
+    } else {
+      t.mock.timers.tick(0);
+    }
+    await context.pickerJsonCapture.promise;
+    assert.equal(calls.json, 1);
+    assert.equal(calls.destination + calls.dom + calls.flows.length, 0);
+  }
+});
+
 test("deferred picker warmup cannot capture a dismissed, navigated or selected chat or replace Speed capture", async () => {
   const start = source.indexOf("  function scheduleDestinationPickerWarmup()");
   const end = source.indexOf("  function hideDestinationSheet(", start);

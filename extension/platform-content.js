@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-10-subtle-orb-click-v127";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-10-smooth-picker-v128";
   const INLINE_PILL_SIZE = 36;
   const ownedUiStyleSheets = new Map();
   const CLAUDE_INLINE_STYLE_ID = "context-generator-claude-inline-styles";
@@ -90,7 +90,7 @@
   const TRANSIENT_COMPOSER_PLACEMENT_PLATFORMS = new Set(["gemini", "grok", "deepseek"]);
   const INLINE_PATHNAME_POLL_MS = 80;
   const DESTINATION_SHEET_WIDTH = 352;
-  const DESTINATION_SHEET_CLOSED_TRANSFORM = "translate3d(0,6px,0) scale(0.985)";
+  const DESTINATION_SHEET_CLOSED_TRANSFORM = "translate3d(0,6px,0)";
   const DESTINATION_SHEET_EXIT_MS = 200;
   const DESTINATION_TRANSFER_PRESS_MS = 150;
   const DESTINATION_HANDOFF_OVERLAP_MS = 40;
@@ -6700,7 +6700,6 @@
       "border:1px solid rgba(236,229,246,0.17) !important",
       "background:radial-gradient(ellipse 68% 48% at 88% -8%,rgba(145,112,199,0.18),transparent 72%),radial-gradient(ellipse 55% 48% at -8% 110%,rgba(82,57,128,0.15),transparent 74%),linear-gradient(180deg,#111012 0%,#0c0b0e 58%,#09080b 100%) !important",
       "box-shadow:0 34px 88px rgba(0,0,0,0.58),0 14px 34px rgba(0,0,0,0.34),0 0 54px rgba(104,76,154,0.1),0 0 0 1px rgba(0,0,0,0.6),inset 0 1px 0 rgba(255,255,255,0.09) !important",
-      "backdrop-filter:blur(24px) saturate(1.06)",
       "color:#f5f5f5 !important",
       "font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif",
       "max-height:calc(100vh - 20px)",
@@ -7065,18 +7064,28 @@
   function scheduleDestinationPickerWarmup() {
     const sourceUrl = window.location.href;
     // The history snapshot reads rendered text and can force layout on long chats.
-    // Give the opening frame a paint before doing speculative capture work.
+    // Keep it out of the entire entrance, not just its first paint. The timer is
+    // cancelled on dismissal; selection can start capture immediately as usual.
     destinationSheetAnimationFrame = requestAnimationFrame(() => {
       destinationSheetAnimationFrame = null;
-      destinationSheetWarmupTimer = setTimeout(() => {
+      const warmup = () => {
         destinationSheetWarmupTimer = null;
         const sheet = document.getElementById(DESTINATION_SHEET_ID);
         if (isRunning || !isDestinationSheetOpen() || sheet?.getAttribute("aria-hidden") === "true"
             || destinationSheetPathname !== window.location.pathname
             || sourceUrl !== window.location.href || pickerJsonCapture) return;
+        // A busy first paint can delay the animation's start beyond wall time.
+        // Recheck its clock before scanning history rather than assuming it ended.
+        const remainingMs = Math.max(0, ...(sheet?.getAnimations?.() || []).map(animation =>
+          (animation.effect?.getComputedTiming?.().endTime || 0) - (animation.currentTime || 0)));
+        if (remainingMs > 0) {
+          destinationSheetWarmupTimer = setTimeout(warmup, Math.ceil(remainingMs));
+          return;
+        }
         warmDestinationConnections();
         startPickerJsonCapture();
-      }, 0);
+      };
+      destinationSheetWarmupTimer = setTimeout(warmup, 0);
     });
   }
 
