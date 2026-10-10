@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-10-orb-json-prefetch-cleanup-v123";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-10-recovery-palette-v124";
   const INLINE_PILL_SIZE = 36;
   const ownedUiStyleSheets = new Map();
   const CLAUDE_INLINE_STYLE_ID = "context-generator-claude-inline-styles";
@@ -7550,8 +7550,9 @@
       document.head.appendChild(style);
     }
 
-    // Snapshot only static colors before insertion, using the picker's ignored
-    // stylesheet + scoped priority rules. Progress-state colors live in their CSS.
+    // Snapshot initial colors before insertion, using the picker's ignored
+    // stylesheet + scoped priority rules. Dynamic inline colors must keep their
+    // important priority; progress-state colors live in their CSS.
     const rules = [root, ...root.querySelectorAll("[style]")].map((element, index) => {
       const declarations = ["color", "background", "border-color", "box-shadow"]
         .map((property) => {
@@ -8864,7 +8865,7 @@
       ].join(";");
 
       const setFocusStyle = (button, active) => {
-        button.style.outline = active ? "2px solid rgba(255,255,255,0.42)" : "none";
+        button.style.setProperty("outline", active ? "2px solid rgba(255,255,255,0.42)" : "none", "important");
         button.style.outlineOffset = active ? "3px" : "0";
       };
 
@@ -8887,19 +8888,19 @@
 
         if (!copied) {
           copyBtn.textContent = "Select text and copy manually";
-          copyBtn.style.background = "linear-gradient(180deg,#ffd980,#e8ad37)";
-          copyBtn.style.color = "#211500";
+          copyBtn.style.setProperty("background", "linear-gradient(180deg,#ffd980,#e8ad37)", "important");
+          copyBtn.style.setProperty("color", "#211500", "important");
           return;
         }
 
         copyBtn.textContent = "Copied!";
-        copyBtn.style.background = "linear-gradient(180deg,#69e6a2,#21b36b)";
-        copyBtn.style.color = "#07150d";
+        copyBtn.style.setProperty("background", "linear-gradient(180deg,#69e6a2,#21b36b)", "important");
+        copyBtn.style.setProperty("color", "#07150d", "important");
         setTimeout(() => {
           if (!copyBtn.isConnected) return;
           copyBtn.textContent = "Copy Context";
-          copyBtn.style.background = "linear-gradient(180deg,#f5f5f5,#d8d8d8)";
-          copyBtn.style.color = "#111114";
+          copyBtn.style.setProperty("background", "linear-gradient(180deg,#f5f5f5,#d8d8d8)", "important");
+          copyBtn.style.setProperty("color", "#111114", "important");
         }, 2000);
       });
 
@@ -8956,6 +8957,7 @@
       content.appendChild(buttonContainer);
       buttonContainer.appendChild(copyBtn);
       modal.appendChild(content);
+      protectOverlayPalette(modal);
       document.body.appendChild(modal);
       addOwnedEventListener(document, "keydown", modal.contextGeneratorKeydownHandler);
     } else {

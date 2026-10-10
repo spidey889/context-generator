@@ -214,10 +214,12 @@ async function createSmokeExtension(tempRoot, origin) {
     "the current-platform resolver"
   );
   // pushState can beat the isolated world's 80 ms route poll. Expose only
-  // fixture-owned readiness so tests wait for mounting and early capture without exposing text.
+  // fixture-owned probes so tests wait for mounting and early capture. The
+  // recovery probe uses synthetic text and exists only in the copied extension.
   platformSource = replaceOnce(platformSource,
     "  function checkInlinePlacementPathname() {",
     `  window.__capSmokePickerJsonReady = () => pickerJsonCapture?.promise.then(() => true) || Promise.resolve(false);
+  window.__capSmokeShowRecovery = () => showFallbackModal("Synthetic recovery context. Preserve the dialog palette.", "Claude", true);
   window.__capSmokeSourceRouteReady = () => {
     const mount = currentPlatform.id === "claude" ? claudeInlineMount
       : currentPlatform.id === "chatgpt" ? chatGptInlineMount : providerInlineMount;
@@ -1079,6 +1081,94 @@ async function verifyEmptyChatError(session, browserSession, state, { removeTurn
   })()`);
 }
 
+async function verifyRecoveryPalette(session, contextId) {
+  const result = await session.evaluate(`(async () => {
+    const modal = document.getElementById("context-generator-fallback-modal");
+    const copy = document.getElementById("context-generator-fallback-copy");
+    const dismiss = document.getElementById("context-generator-fallback-dismiss");
+    if (!modal || !copy || !dismiss) return { available: false };
+    const properties = [
+      ["background-image", "bgimage", "linear-gradient(red,red)", "background"],
+      ["background-color", "bgcolor", "red", "background"],
+      ["border-color", "border", "red", "border-color"],
+      ["color", "color", "red", "color"],
+      ["box-shadow", "boxshadow", "0 0 20px red", "box-shadow"]
+    ];
+    const cases = [modal, ...modal.querySelectorAll("[style]")].flatMap(element =>
+      properties.filter(([, , , source]) => element.style.getPropertyValue(source))
+        .map(([property, key, value]) => [element, property, key, value])
+    );
+    const before = cases.map(([element, property]) => getComputedStyle(element).getPropertyValue(property));
+    const originalBackground = getComputedStyle(copy).backgroundImage;
+    const originalColor = getComputedStyle(copy).color;
+    const clipboard = navigator.clipboard;
+    const originalWrite = Object.getOwnPropertyDescriptor(clipboard, "writeText");
+    const originalExec = Object.getOwnPropertyDescriptor(document, "execCommand");
+    const rules = document.createElement("style");
+    let copiedText = null;
+    let failCopy = false;
+    try {
+      // Match Dark Reader's inline variables and important rules, without
+      // installing another extension or touching the user's real clipboard.
+      for (const [element, , key, value] of cases) {
+        element.setAttribute("data-darkreader-inline-" + key, "");
+        element.style.setProperty("--darkreader-inline-" + key, value);
+      }
+      rules.textContent = properties.map(([property, key]) =>
+        "[data-darkreader-inline-" + key + "]{" + property + ":var(--darkreader-inline-" + key + ") !important}"
+      ).join("\\n");
+      rules.textContent += '[data-darkreader-inline-outline]{outline-color:red !important}';
+      document.head.appendChild(rules);
+      const preserved = cases.every(([element, property], index) =>
+        getComputedStyle(element).getPropertyValue(property) === before[index]);
+      dismiss.setAttribute("data-darkreader-inline-outline", "");
+      dismiss.focus();
+      const focusPreserved = getComputedStyle(dismiss).outlineColor === dismiss.style.outlineColor;
+      Object.defineProperty(clipboard, "writeText", { configurable: true, value: async text => {
+        if (failCopy) throw new Error("Simulated clipboard failure");
+        copiedText = text;
+      } });
+      Object.defineProperty(document, "execCommand", { configurable: true, value: () => false });
+      const buttonPalettePreserved = () => getComputedStyle(copy).backgroundImage === copy.style.backgroundImage
+        && getComputedStyle(copy).color === copy.style.color;
+      copy.click();
+      await new Promise(resolve => setTimeout(resolve, 0));
+      const successPreserved = copy.textContent === "Copied!" && buttonPalettePreserved()
+        && getComputedStyle(copy).backgroundImage !== originalBackground
+        && copiedText === document.getElementById("context-generator-fallback-text").value;
+      await new Promise(resolve => setTimeout(resolve, 2100));
+      const resetPreserved = copy.textContent === "Copy Context"
+        && getComputedStyle(copy).backgroundImage === originalBackground
+        && getComputedStyle(copy).color === originalColor;
+      failCopy = true;
+      copy.click();
+      await new Promise(resolve => setTimeout(resolve, 0));
+      return { available: true, checked: cases.length, preserved, focusPreserved, successPreserved, resetPreserved,
+        failurePreserved: copy.textContent === "Select text and copy manually" && buttonPalettePreserved()
+          && getComputedStyle(copy).backgroundImage !== originalBackground };
+    } finally {
+      if (originalWrite) Object.defineProperty(clipboard, "writeText", originalWrite);
+      else delete clipboard.writeText;
+      if (originalExec) Object.defineProperty(document, "execCommand", originalExec);
+      else delete document.execCommand;
+      rules.remove();
+      for (const [element, , key] of cases) {
+        element.removeAttribute("data-darkreader-inline-" + key);
+        element.style.removeProperty("--darkreader-inline-" + key);
+      }
+      dismiss.removeAttribute("data-darkreader-inline-outline");
+      copy.textContent = "Copy Context";
+      copy.style.setProperty("background", "linear-gradient(180deg,#f5f5f5,#d8d8d8)", "important");
+      copy.style.setProperty("color", "#111114", "important");
+    }
+  })()`, contextId);
+  assert.equal(result.available, true, "The recovery dialog must be available after delivery.");
+  for (const key of ["preserved", "focusPreserved", "successPreserved", "resetPreserved", "failurePreserved"]) {
+    assert.equal(result[key], true, `Dark Reader must not override recovery ${key}: ${JSON.stringify(result)}`);
+  }
+  process.stdout.write(`✓ Recovery dialog: ${result.checked} palette checks resist Dark Reader; focus, copy success/reset/failure colors preserved.\n`);
+}
+
 async function run() {
   assert.equal(typeof WebSocket, "function", "This smoke test requires Node.js with the built-in WebSocket client.");
   const braveExecutable = findBraveExecutable();
@@ -1175,6 +1265,13 @@ async function run() {
       await waitFor(() => sourceSession.evaluate("Boolean(window.__capSmokeNativeRequestReady)"), "the fixture's initial native request");
     }
     process.stdout.write("✓ Brave loaded the unpacked extension on the controlled source page.\n");
+    if (process.env.CAP_CONTEXT_RECOVERY_PALETTE_SMOKE === "1") {
+      const contextId = sourceSession.getExtensionContextId();
+      await sourceSession.evaluate("window.__capSmokeShowRecovery()", contextId);
+      await verifyRecoveryPalette(sourceSession, contextId);
+      process.stdout.write("Cap Context Brave recovery palette smoke passed.\n");
+      return;
+    }
     if (!JSON_CAPTURE_SMOKE) {
       await verifyEmptyChatError(sourceSession, browserSession, state, { removeTurns: true, screenshot: true });
       process.stdout.write("✓ Empty ChatGPT shows its error directly, opens no destination, and supports repeated attempts/reduced motion.\n");
@@ -2123,6 +2220,7 @@ async function run() {
     process.stdout.write(TELEMETRY_DATABASE_SMOKE
       ? "✓ Installed worker → Vercel relay → Edge handler → migrated database: verified completion, one count, drained outbox.\n"
       : "✓ Signed terminal telemetry stayed in the local fixture and the installed worker's outbox drained.\n");
+    await verifyRecoveryPalette(sourceSession, extensionContextId);
     if (!JSON_CAPTURE_SMOKE) {
       // Repeat at 9,999 captured characters: exercise the real direct boundary
       // branch and prove it cannot reuse the previous remote summary or receipt.

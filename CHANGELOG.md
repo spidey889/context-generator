@@ -4,6 +4,8 @@ A short history of decisions and regressions that matter when changing the code.
 
 ## 2026-10-10
 
+- **Recovery dialog keeps its palette under Dark Reader.** The source-side copy dialog lacked the palette protection used by the picker/progress overlay, allowing ChatGPT's Dark Reader rules to flatten its gradient, borders, shadows and button contrast. Protect its initial colors before insertion and keep copy success/failure/reset and focus colors at inline priority. Preserve the existing design; the Brave smoke now checks computed colors under simulated Dark Reader rules and exercises clipboard success/failure without touching the real clipboard.
+
 - **Fresh recovery keeps editor diagnostics with their own destination.** The second batch of ten commits exposed first-tab draft/editor observations leaking into the final recovery result. Preserve them in `prepared_diagnostics` and clear their top-level fields before opening the fresh destination. Regressions cover recovery success, lost pasted text and a missing editor without inheriting the earlier draft, editor kind, text length, wait or timeline.
 
 - **Counter documentation distinguishes verified work from local delivery.** Aligned both privacy disclosures and the database checklist with prospective counting of successful, unverified local transfers alongside verified backend summaries. Clarified the combined totals in `LOGIC.md` and added a dated counter-rule update to the October 5 backend audit. Unsigned remote successes stay uncounted; retries and later receipts cannot double-count an attempt, and historical local attempts are not backfilled.
