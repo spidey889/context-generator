@@ -1400,7 +1400,14 @@ async function transferToDestinationObserved(
     const recoveringPreparedTab = Boolean(preparedTabId);
     if (preparedAttempted) {
       const previous = globalThis.CapTransferDiagnostics?.validate(pasteResult?.diagnostics);
-      if (previous) trace.diagnostics.prepared_diagnostics = previous;
+      if (previous) {
+        // These observations belong to the first editor. A fresh destination's
+        // missing fields mean unobserved, not a carry-over draft or editor state.
+        for (const key of Object.keys(previous)) {
+          if (key !== "version" && key !== "last_operation") delete trace.diagnostics[key];
+        }
+        trace.diagnostics.prepared_diagnostics = previous;
+      }
       globalThis.CapTransferDiagnostics?.update(trace.diagnostics, { recovery_error_code: previous?.error_code || globalThis.CapTransferDiagnostics?.errorCode(pasteResult) });
       delete trace.diagnostics.error_code;
       delete trace.diagnostics.error_origin;

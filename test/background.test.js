@@ -453,10 +453,15 @@ clockTest("unconfirmed paste replies never re-send or fall back to another tab",
 });
 
 clockTest("fresh recovery retains the first editor failure alongside the final destination observations", async () => {
-  for (const finalOk of [true, false]) {
-    const first = { version: 1, error_code: "editor_has_draft", error_origin: "destination", draft_present: true, paste_attempts: 1 };
-    const last = { version: 1, paste_populated: finalOk, editor_seen: true, paste_attempts: 3,
-      ...(finalOk ? {} : { error_code: "paste_not_retained", error_origin: "destination" }) };
+  for (const outcome of ["success", "not_retained", "missing_editor"]) {
+    const finalOk = outcome === "success";
+    const first = { version: 1, error_code: "editor_has_draft", error_origin: "destination", draft_present: true,
+      editor_kind: "textarea", editor_text_chars: 42, composer_wait_ms: 10, paste_attempts: 1,
+      paste_events: [{ event: "failure", at_ms: 10, code: "editor_has_draft" }] };
+    const last = outcome === "missing_editor"
+      ? { version: 1, error_code: "editor_missing", error_origin: "destination", editor_seen: false, paste_attempts: 3 }
+      : { version: 1, paste_populated: finalOk, editor_seen: true, paste_attempts: 3, draft_present: false,
+        ...(finalOk ? {} : { error_code: "paste_not_retained", error_origin: "destination" }) };
     const harness = loadBackgroundForTransferTest({ preparedTab: { id: 41, url: "https://claude.ai/new" },
       sendMessageImpl: (tabId, message) => message.type !== "PASTE_CONTEXT" ? { ok: true } : tabId === 41
         ? { ok: false, error: "PRIVATE first error", diagnostics: first }
@@ -466,8 +471,10 @@ clockTest("fresh recovery retains the first editor failure alongside the final d
     assert.deepEqual(JSON.parse(JSON.stringify(response.diagnostics.prepared_diagnostics)), first);
     assert.equal(response.diagnostics.recovery_error_code, "editor_has_draft");
     assert.equal(response.diagnostics.fresh_recovery, true);
-    assert.equal(response.diagnostics.paste_populated, finalOk);
-    assert.equal(response.diagnostics.error_code, finalOk ? undefined : "paste_not_retained");
+    for (const key of ["paste_populated", "draft_present", "editor_seen", "editor_kind", "editor_text_chars", "composer_wait_ms", "paste_events"]) {
+      assert.deepEqual(response.diagnostics[key], last[key], `${outcome}: ${key} must describe only the fresh destination`);
+    }
+    assert.equal(response.diagnostics.error_code, last.error_code);
     assert.doesNotMatch(JSON.stringify(response.diagnostics), /PRIVATE/);
     assert.equal(harness.operations.created.length, 1);
   }

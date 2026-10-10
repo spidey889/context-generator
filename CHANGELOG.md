@@ -4,6 +4,8 @@ A short history of decisions and regressions that matter when changing the code.
 
 ## 2026-10-10
 
+- **Fresh recovery keeps editor diagnostics with their own destination.** The second batch of ten commits exposed first-tab draft/editor observations leaking into the final recovery result. Preserve them in `prepared_diagnostics` and clear their top-level fields before opening the fresh destination. Regressions cover recovery success, lost pasted text and a missing editor without inheriting the earlier draft, editor kind, text length, wait or timeline.
+
 - **Counter documentation distinguishes verified work from local delivery.** Aligned both privacy disclosures and the database checklist with prospective counting of successful, unverified local transfers alongside verified backend summaries. Clarified the combined totals in `LOGIC.md` and added a dated counter-rule update to the October 5 backend audit. Unsigned remote successes stay uncounted; retries and later receipts cannot double-count an attempt, and historical local attempts are not backfilled.
 
 - **Discarded orb captures release their memory immediately.** Closing or opting out clears the cached capture promise, rendered-history copy and navigation guard; an already-issued native read cannot recache its late result. Finishing an attempt also discards its unconsumed picker capture, fixing the transcript/timer retention when cancellation arrives during handoff. Ready/pending regressions cover immediate cleanup and late-result disposal.
