@@ -77,6 +77,20 @@ jobs:
         run: |
           mkdir -p "$CAP_CONTEXT_SMOKE_ARTIFACT_DIR"
           xvfb-run -a npm run test:extension-smoke 2>&1 | tee "$CAP_CONTEXT_SMOKE_ARTIFACT_DIR/run.log"
+      - name: Brave Copy to clipboard with DOM and Flash capture
+        if: steps.scope.outputs.mode != 'light'
+        timeout-minutes: 3
+        shell: bash
+        env:
+          CAP_CONTEXT_COPY_SMOKE: "1"
+          CAP_CONTEXT_SMOKE_ARTIFACT_DIR: .test-artifacts/browser-smoke/copy
+        run: |
+          mkdir -p "$CAP_CONTEXT_SMOKE_ARTIFACT_DIR/dom"
+          CAP_CONTEXT_SMOKE_ARTIFACT_DIR="$CAP_CONTEXT_SMOKE_ARTIFACT_DIR/dom" \
+            xvfb-run -a npm run test:extension-smoke 2>&1 | tee "$CAP_CONTEXT_SMOKE_ARTIFACT_DIR/dom/run.log"
+          mkdir -p "$CAP_CONTEXT_SMOKE_ARTIFACT_DIR/flash"
+          CAP_CONTEXT_JSON_SMOKE=chatgpt CAP_CONTEXT_SMOKE_ARTIFACT_DIR="$CAP_CONTEXT_SMOKE_ARTIFACT_DIR/flash" \
+            xvfb-run -a npm run test:extension-smoke 2>&1 | tee "$CAP_CONTEXT_SMOKE_ARTIFACT_DIR/flash/run.log"
       - name: Brave ChatGPT fast capture after reload and expired-token cancellation
         if: steps.scope.outputs.mode != 'light'
         timeout-minutes: 3

@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-10-smooth-picker-v128";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-10-copy-context-v129";
   const INLINE_PILL_SIZE = 36;
   const ownedUiStyleSheets = new Map();
   const CLAUDE_INLINE_STYLE_ID = "context-generator-claude-inline-styles";
@@ -30,6 +30,8 @@
   const BUBBLE_ID = "context-generator-bubble";
   const OVERLAY_ID = "context-generator-overlay";
   const HANDOFF_SCRIM_ID = "context-generator-handoff-scrim";
+  const CLIPBOARD_DESTINATION_ID = "clipboard";
+  const COPY_STATUS_ID = "context-generator-copy-status";
   const DESTINATION_STATUS_ID = "context-generator-destination-status";
   const OVERLAY_PALETTE_STYLE_ID = "context-generator-overlay-palette-styles";
   const ONBOARDING_ID = "context-generator-onboarding";
@@ -682,6 +684,7 @@
       PROVIDER_INLINE_STYLE_ID,
       OVERLAY_ID,
       DESTINATION_STATUS_ID,
+      COPY_STATUS_ID,
       HANDOFF_SCRIM_ID,
       OVERLAY_PALETTE_STYLE_ID,
       ONBOARDING_ID,
@@ -852,6 +855,7 @@
       startTransferDeadline,
       beginTransferAttempt,
       finishTransferTrace,
+      runClipboardFlow,
       recordTransferFailureDiagnostics,
       resetRunningFlag,
       markCaptureDone,
@@ -2171,7 +2175,9 @@
       updateTransferDiagnostics(trace, { error_code: "unknown_error", error_origin: "source" });
     }
     updateTransferDiagnostics(trace, { duration_ms: totalMs, deadline_remaining_ms: Math.max(0, Math.round((trace.deadlineAt || Date.now()) - Date.now())) });
-    persistLatestTransferStats(trace, totalMs);
+    // Clipboard work has no destination delivery. Keep transfer receipts and
+    // counters meaningful instead of inventing a platform or a successful paste.
+    if (trace.destinationId !== CLIPBOARD_DESTINATION_ID) persistLatestTransferStats(trace, totalMs);
     finishTransferTelemetry(
       trace,
       failed ? "failed" : "succeeded",
@@ -2185,7 +2191,7 @@
   }
 
   function startTransferTelemetry(trace) {
-    if (!trace || trace.telemetryStarted) return;
+    if (!trace || trace.destinationId === CLIPBOARD_DESTINATION_ID || trace.telemetryStarted) return;
     trace.telemetryStarted = true;
     trace.telemetryLastStage = "intent_started";
     sendTransferTelemetrySnapshot(trace, "started", null);
@@ -2216,7 +2222,7 @@
   }
 
   function finishTransferTelemetry(trace, status, failureReason) {
-    if (!trace || trace.telemetryFinished) return;
+    if (!trace || trace.destinationId === CLIPBOARD_DESTINATION_ID || trace.telemetryFinished) return;
     trace.telemetryFinished = true;
     if (status === "succeeded") trace.telemetryLastStage = "completed";
     sendTransferTelemetrySnapshot(trace, status, failureReason);
@@ -6444,6 +6450,37 @@
         filter: brightness(1.1) saturate(1.08) drop-shadow(0 0 6px rgba(139,92,246,0.38)) drop-shadow(0 3px 5px rgba(0,0,0,0.18));
       }
       #${DESTINATION_SHEET_ID} .context-generator-destination-title { color: #ffffff !important; }
+      #${DESTINATION_SHEET_ID} .context-generator-copy-button {
+        appearance: none;
+        position: relative !important;
+        inset: auto !important;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        gap: 5px;
+        height: 32px;
+        padding: 0 8px;
+        border: 1px solid rgba(255,255,255,0.12) !important;
+        border-radius: 10px;
+        background: rgba(255,255,255,0.04) !important;
+        color: #d3ccdf !important;
+        font: 600 11.5px/1 -apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
+        cursor: pointer;
+      }
+      #${DESTINATION_SHEET_ID} .context-generator-copy-button:hover {
+        background: rgba(255,255,255,0.09) !important;
+        color: #ffffff !important;
+      }
+      #${DESTINATION_SHEET_ID} .context-generator-copy-button:focus-visible {
+        outline: 2px solid rgba(190,162,233,0.78) !important;
+        outline-offset: 3px;
+      }
+      #${DESTINATION_SHEET_ID} .context-generator-copy-button svg {
+        width: 14px;
+        height: 14px;
+        fill: none !important;
+        stroke: currentColor !important;
+      }
       #${DESTINATION_SHEET_ID} .context-generator-speed-toggle {
         appearance: none;
         position: relative !important;
@@ -6895,6 +6932,9 @@
 
     sheet.appendChild(grid);
 
+    const headerActions = document.createElement("div");
+    headerActions.style.cssText = "display:flex;align-items:center;gap:6px;flex:0 0 auto";
+    topLine.appendChild(headerActions);
     if (["claude", "chatgpt", "gemini", "grok", "deepseek"].includes(currentPlatform.id)) {
       const toggle = document.createElement("button");
       toggle.type = "button";
@@ -6916,8 +6956,21 @@
         toggle.title = `Fast capture: ${enabled ? "On" : "Off"}`;
         startPickerJsonCapture();
       });
-      topLine.appendChild(toggle);
+      headerActions.appendChild(toggle);
     }
+
+    const copyButton = document.createElement("button");
+    copyButton.id = "context-generator-copy-button";
+    copyButton.type = "button";
+    copyButton.className = "context-generator-copy-button";
+    copyButton.setAttribute("aria-label", "Copy chat context to clipboard");
+    copyButton.title = "Capture, summarize, and copy context";
+    copyButton.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h3"/></svg><span>Copy</span>';
+    addOwnedEventListener(copyButton, "click", () => {
+      if (isRunning) return;
+      startDestinationTransfer(CLIPBOARD_DESTINATION_ID);
+    });
+    headerActions.appendChild(copyButton);
 
     const footer = document.createElement("div");
     footer.className = "context-generator-destination-helper";
@@ -6962,7 +7015,7 @@
       }
       if (event.key !== "Tab") return;
 
-      const focusableTiles = [...sheet.querySelectorAll(".context-generator-destination-tile, .context-generator-speed-toggle")]
+      const focusableTiles = [...sheet.querySelectorAll(".context-generator-destination-tile, .context-generator-speed-toggle, .context-generator-copy-button")]
         .filter((tile) => !tile.disabled && tile.getAttribute("aria-disabled") !== "true");
       if (focusableTiles.length === 0) return;
       const focusedIndex = focusableTiles.indexOf(document.activeElement);
@@ -7458,8 +7511,11 @@
   }
 
   async function startDestinationTransfer(destinationId) {
-    const trace = beginTransferAttempt(destinationId, "destination tile");
+    const copyOnly = destinationId === CLIPBOARD_DESTINATION_ID;
+    const trace = beginTransferAttempt(destinationId, copyOnly ? "copy button" : "destination tile");
     if (!trace) return;
+    document.getElementById(COPY_STATUS_ID)?.remove();
+    if (copyOnly) document.getElementById("context-generator-fallback-modal")?.contextGeneratorClose?.();
     // Bind queued prefetch before the handoff yields; cancellation must still
     // prevent its read after the running lock resets or another attempt starts.
     if (pickerJsonCapture) pickerJsonCapture.trace = trace;
@@ -7494,7 +7550,7 @@
       // Start navigation during the picker bridge, after empty-chat admission.
       // These probes contain no chat text and do not wait on cosmetic motion.
       let preparedDestinationPromise = null;
-      if (useClaudeJson || useChatGptJson || useNetworkJson || getDetectedConversationMessageCount() > 0) {
+      if (!copyOnly && (useClaudeJson || useChatGptJson || useNetworkJson || getDetectedConversationMessageCount() > 0)) {
         preparedDestinationPromise = prepareDestinationTab(destinationId, trace);
       }
       await transitionDestinationSheetToHandoff();
@@ -7504,7 +7560,7 @@
       advanceTransferTelemetryStage(trace, "capture_started");
       if (!useClaudeJson && !useChatGptJson && !useNetworkJson) await prepareSourceForCapture();
       checkTransferDeadline(trace);
-      if (!preparedDestinationPromise && (useClaudeJson || useChatGptJson || useNetworkJson || getDetectedConversationMessageCount() > 0)) {
+      if (!copyOnly && !preparedDestinationPromise && (useClaudeJson || useChatGptJson || useNetworkJson || getDetectedConversationMessageCount() > 0)) {
         preparedDestinationPromise = prepareDestinationTab(destinationId, trace);
       }
 
@@ -7547,8 +7603,12 @@
       checkTransferDeadline(trace);
       markCaptureDone(trace, conversationText);
 
-      preparedDestinationPromise = preparedDestinationPromise || prepareDestinationTab(destinationId, trace);
-      runContextFlow(destinationId, preparedDestinationPromise, conversationText, trace);
+      if (copyOnly) {
+        await runClipboardFlow(conversationText, trace);
+      } else {
+        preparedDestinationPromise = preparedDestinationPromise || prepareDestinationTab(destinationId, trace);
+        runContextFlow(destinationId, preparedDestinationPromise, conversationText, trace);
+      }
     } catch (error) {
       if (trace.expired) return;
       recordTransferFailureDiagnostics(trace, error);
@@ -7557,6 +7617,55 @@
       resetRunningFlag();
       showErrorOverlay(error.message);
     }
+  }
+
+  async function runClipboardFlow(conversationText, trace) {
+    let summary = "";
+    try {
+      summary = await summarizeWithBackend(conversationText, trace);
+      checkTransferDeadline(trace);
+      stopHandoffCountdown();
+      setHandoffProgress("summary", "done");
+      setHandoffProgress("paste", "active");
+      // clipboardWrite permits this delayed write after capture/summarization.
+      // A hidden/unfocused document can still reject; retain its prepared carry.
+      if (!navigator.clipboard?.writeText) throw new Error("Clipboard API unavailable.");
+      await navigator.clipboard.writeText(summary);
+      checkTransferDeadline(trace);
+      setHandoffProgress("paste", "done");
+      markTransferTrace(trace, "transfer complete");
+      finishTransferTrace(trace);
+      resetRunningFlag();
+      showClipboardSuccess();
+    } catch (error) {
+      if (error?.code === "user_cancelled") {
+        cancelSourceTransfer(trace.id, trace);
+        return;
+      }
+      if (trace.expired || trace.cancelled) return;
+      recordTransferFailureDiagnostics(trace, error);
+      markTransferTrace(trace, `failed: ${error.message}`);
+      finishTransferTrace(trace, getSafeTelemetryFailureReason(error, summary ? "paste" : "summary"));
+      resetRunningFlag();
+      if (error.code === "conversation_changed") showErrorOverlay(error.message);
+      else if (summary) showFallbackModal(summary, CLIPBOARD_DESTINATION_ID);
+      else showContextTransferFailure(error, { stage: "summary" });
+    }
+  }
+
+  function showClipboardSuccess() {
+    document.getElementById(COPY_STATUS_ID)?.remove();
+    const status = document.createElement("div");
+    status.id = COPY_STATUS_ID;
+    status.dataset.contextGeneratorOwned = "true";
+    status.setAttribute("role", "status");
+    status.setAttribute("aria-live", "polite");
+    status.setAttribute("aria-atomic", "true");
+    status.style.cssText = "position:fixed;top:20px;left:50%;transform:translateX(-50%);z-index:2147483647;box-sizing:border-box;max-width:calc(100vw - 32px);padding:12px 18px;border:1px solid #6b5c92;border-radius:14px;background:#211b30;color:#f5f0ff;box-shadow:0 6px 24px #0004;font:500 14px/1.5 system-ui,sans-serif;text-align:center;pointer-events:none;";
+    status.textContent = "Copied to your clipboard";
+    protectOverlayPalette(status);
+    document.body.appendChild(status);
+    setTimeout(() => status.remove(), 4000);
   }
 
   function showFastCaptureFallbackMessage() {
@@ -8148,7 +8257,7 @@
       clearTimeout(handoffScrimHideTimer);
       handoffOverlayHideTimer = null;
       handoffScrimHideTimer = null;
-      const destinationName = getPlatform(destinationId)?.name || "destination";
+      const destinationName = destinationId === CLIPBOARD_DESTINATION_ID ? CLIPBOARD_DESTINATION_ID : getPlatform(destinationId)?.name || "destination";
       overlay.dataset.contextGeneratorDestinationName = destinationName;
       overlay.setAttribute("aria-hidden", "false");
       overlay.setAttribute("aria-busy", "true");
@@ -8271,7 +8380,7 @@
 
       return {
         id: stage.id,
-        label: stage.id === "paste" ? `Pasting into ${destinationName || "destination"}` : stage.label,
+        label: stage.id === "paste" ? (destinationName === CLIPBOARD_DESTINATION_ID ? "Copying to clipboard" : `Pasting into ${destinationName || "destination"}`) : stage.label,
         state
       };
     });
@@ -8282,11 +8391,11 @@
     if (phase === "done") {
       if (stageId === "capture") return "Chat captured";
       if (stageId === "summary") return "Summary ready";
-      if (stageId === "paste") return `Pasted into ${safeDestinationName}`;
+      if (stageId === "paste") return safeDestinationName === CLIPBOARD_DESTINATION_ID ? "Copied to your clipboard" : `Pasted into ${safeDestinationName}`;
     }
 
     if (stageId === "summary") return "Summarizing";
-    if (stageId === "paste") return `Pasting into ${safeDestinationName}`;
+    if (stageId === "paste") return safeDestinationName === CLIPBOARD_DESTINATION_ID ? "Copying to clipboard" : `Pasting into ${safeDestinationName}`;
     return "Capturing chat";
   }
 
@@ -9010,7 +9119,9 @@
 
     const desc = document.getElementById("context-generator-fallback-desc");
     if (desc) {
-      desc.textContent = pasteUnconfirmed
+      desc.textContent = destinationName === CLIPBOARD_DESTINATION_ID
+        ? "Your context is ready, but the browser blocked clipboard access. Copy it below, or select the text and copy manually."
+        : pasteUnconfirmed
         ? `The paste into ${destinationName} wasn't confirmed. Check that tab first. If the context is missing, copy it from here.`
         : isBackup
         ? `If anything got lost on the way to ${destinationName}, no worries—your context is right here. Copy it from here.`

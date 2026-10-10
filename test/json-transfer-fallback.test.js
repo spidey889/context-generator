@@ -585,3 +585,126 @@ test("fallback notice uses fixed safe copy in the handoff and announces it", () 
   assert.equal(node.role, "status");
   assert.equal(node.textContent, "Fast capture failed. Using normal capture instead.");
 });
+
+
+function clipboardHarness(platform, options = {}) {
+  const fixture = harness(platform, { mode: "success", ...options });
+  const { context, calls } = fixture;
+  Object.assign(calls, { summaries: [], copied: [], confirmations: 0, recovery: [], finished: [] });
+  Object.assign(context, {
+    summarizeWithBackend: async text => { calls.summaries.push(text); return "Prepared context \u{1f680}\nwith exact text"; },
+    navigator: { clipboard: { writeText: async text => { calls.copied.push(text); } } },
+    stopHandoffCountdown() {},
+    showClipboardSuccess: () => { calls.confirmations++; },
+    showFallbackModal: (text, destination) => { calls.recovery.push({ text, destination }); },
+    showContextTransferFailure: error => { calls.errors.push(error.message); },
+    finishTransferTrace: (_trace, reason) => { calls.finished.push(reason || "success"); }
+  });
+  return fixture;
+}
+
+test("Copy shares all five JSON adapters and ends at the clipboard without a destination", async () => {
+  for (const platform of ["claude", "chatgpt", "gemini", "grok", "deepseek"]) {
+    const { context, calls } = clipboardHarness(platform);
+    await context.start("clipboard");
+    assert.equal(calls.json, 1, platform);
+    assert.deepEqual(calls.summaries, ["JSON transcript"], platform);
+    assert.deepEqual(calls.copied, ["Prepared context \u{1f680}\nwith exact text"], platform);
+    assert.equal(calls.confirmations, 1, platform);
+    assert.equal(calls.destination + calls.prepare + calls.dom + calls.flows.length, 0, platform);
+    assert.equal(context.isRunning, false, platform);
+  }
+});
+
+test("Copy respects normal capture and each platform's existing JSON failure policy", async () => {
+  for (const platform of ["claude", "chatgpt", "gemini", "grok", "deepseek"]) {
+    for (const enabled of [false, true]) {
+      const { context, calls } = clipboardHarness(platform, { enabled, mode: "failure" });
+      await context.start("clipboard");
+      const rejected = enabled && platform === "chatgpt";
+      assert.equal(calls.json, enabled ? 1 : 0);
+      assert.equal(calls.dom, rejected ? 0 : 1);
+      assert.equal(calls.summaries.length, rejected ? 0 : 1);
+      assert.equal(calls.confirmations, rejected ? 0 : 1);
+      assert.equal(calls.destination + calls.flows.length, 0);
+      assert.equal(context.isRunning, false);
+    }
+  }
+});
+
+test("Copy reuses current picker capture and rejects empty chats before summary or clipboard work", async () => {
+  const { context, calls } = clipboardHarness("chatgpt");
+  context.startPickerJsonCapture();
+  await context.pickerJsonCapture.promise;
+  await context.start("clipboard");
+  assert.equal(calls.json, 1, "Copy consumes the same validated early read");
+  for (const platform of ["claude", "chatgpt", "gemini", "grok", "deepseek"]) {
+    const { context, calls } = clipboardHarness(platform, { enabled: false });
+    context.getDetectedConversationMessageCount = () => 0;
+    await context.start("clipboard");
+    assert.equal(calls.summaries.length + calls.copied.length + calls.destination + calls.handoff, 0);
+    assert.deepEqual(calls.errors, ["No conversation"]);
+    assert.equal(context.isRunning, false);
+  }
+});
+
+test("Copy is single-flight and confirms only after the clipboard write resolves", async () => {
+  const { context, calls } = clipboardHarness("chatgpt");
+  const pending = deferred();
+  let writing = false;
+  context.navigator.clipboard.writeText = text => { calls.copied.push(text); writing = true; return pending.promise; };
+  const first = context.start("clipboard");
+  for (let turn = 0; turn < 30 && !writing; turn++) await Promise.resolve();
+  assert.equal(writing, true);
+  await context.start("clipboard");
+  assert.equal(calls.json, 1);
+  assert.equal(calls.summaries.length, 1);
+  assert.equal(calls.copied.length, 1);
+  assert.equal(calls.confirmations, 0);
+  assert.equal(context.isRunning, true);
+  pending.resolve();
+  await first;
+  assert.equal(calls.confirmations, 1);
+  assert.equal(context.isRunning, false);
+});
+
+test("Blocked clipboard preserves the exact prepared carry and allows a fresh attempt", async () => {
+  const { context, calls } = clipboardHarness("chatgpt");
+  context.navigator.clipboard.writeText = async () => { throw new Error("Document is not focused"); };
+  await context.start("clipboard");
+  assert.equal(calls.confirmations, 0);
+  assert.deepEqual(calls.recovery, [{ text: "Prepared context \u{1f680}\nwith exact text", destination: "clipboard" }]);
+  assert.equal(context.isRunning, false);
+  context.navigator.clipboard.writeText = async text => calls.copied.push(text);
+  await context.start("clipboard");
+  assert.equal(calls.confirmations, 1);
+  assert.equal(context.isRunning, false);
+});
+
+test("Copy cannot write a late summary after navigation, teardown, cancellation or expiry", async () => {
+  for (const interruption of ["navigation", "teardown", "cancellation", "expiry"]) {
+    const { context, calls, navigate } = clipboardHarness("chatgpt");
+    const pending = deferred();
+    context.summarizeWithBackend = text => { calls.summaries.push(text); return pending.promise; };
+    const copying = context.start("clipboard");
+    for (let turn = 0; turn < 30 && calls.summaries.length === 0; turn++) await Promise.resolve();
+    assert.equal(calls.summaries.length, 1);
+    if (interruption === "navigation") { navigate("/c/another"); navigate("/c/source"); }
+    else if (interruption === "cancellation") context.cancelSourceTransfer("same-attempt");
+    else { context.activeTransferTrace.expired = true; context.resetRunningFlag(); }
+    pending.resolve("Late summary must never be copied");
+    await copying;
+    assert.equal(calls.copied.length + calls.confirmations + calls.recovery.length, 0, interruption);
+    assert.equal(context.isRunning, false, interruption);
+  }
+});
+
+
+test("Background cancellation of Copy releases ownership without clipboard or recovery UI", async () => {
+  const { context, calls } = clipboardHarness("chatgpt");
+  context.summarizeWithBackend = async () => { throw Object.assign(new Error("Source closed"), { code: "user_cancelled" }); };
+  await context.start("clipboard");
+  assert.equal(calls.copied.length + calls.confirmations + calls.recovery.length + calls.errors.length, 0);
+  assert.equal(context.isRunning, false);
+  assert.deepEqual(calls.finished, ["user_cancelled"]);
+});

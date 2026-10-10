@@ -37,6 +37,7 @@ const CLAUDE_PLACEMENT_SCREENSHOT_PATH = process.env.CAP_CONTEXT_CLAUDE_PLACEMEN
 const CHATGPT_PLACEMENT_SCREENSHOT_PATH = process.env.CAP_CONTEXT_CHATGPT_PLACEMENT_SCREENSHOT || "";
 const PROVIDER_PLACEMENT_SCREENSHOT_DIR = process.env.CAP_CONTEXT_PROVIDER_PLACEMENT_SCREENSHOT_DIR || "";
 const PICKER_SCREENSHOT_PATH = process.env.CAP_CONTEXT_PICKER_SCREENSHOT || "";
+const COPY_SMOKE = process.env.CAP_CONTEXT_COPY_SMOKE === "1";
 const ERROR_SCREENSHOT_PATH = process.env.CAP_CONTEXT_ERROR_SCREENSHOT || "";
 const JSON_SOURCE = ["chatgpt", "gemini", "grok", "deepseek"].includes(process.env.CAP_CONTEXT_JSON_SMOKE) ? process.env.CAP_CONTEXT_JSON_SMOKE : process.env.CAP_CONTEXT_JSON_SMOKE === "1" ? "claude" : null;
 const NETWORK_SOURCE = ["gemini", "grok", "deepseek"].includes(JSON_SOURCE);
@@ -642,7 +643,9 @@ async function startFixtureServer() {
       let rawBody = "";
       for await (const chunk of request) rawBody += chunk;
       state.summaryRequests.push(JSON.parse(rawBody));
-      const receipt = await telemetryFixture.signSummary(state.summaryRequests.at(-1)?.telemetry);
+      // Copy requests intentionally have no platform-transfer identity/proof.
+      const receipt = COPY_SMOKE ? { summaryModel: "gemini-3.6-flash" }
+        : await telemetryFixture.signSummary(state.summaryRequests.at(-1)?.telemetry);
       const streaming = request.headers.accept === "application/x-ndjson";
       response.writeHead(200, {
         "Access-Control-Allow-Origin": "*",
@@ -883,7 +886,7 @@ async function verifyPickerProductChanges(session, state) {
   const product = await session.evaluate(`(() => {
     const sheet = document.getElementById("context-generator-destination-sheet");
     const home = sheet.querySelector(".context-generator-destination-home-link");
-    const controls = [...sheet.querySelectorAll(".context-generator-destination-tile, .context-generator-speed-toggle")]
+    const controls = [...sheet.querySelectorAll(".context-generator-destination-tile, .context-generator-speed-toggle, .context-generator-copy-button")]
       .filter(node => !node.disabled && node.getAttribute("aria-disabled") !== "true");
     controls[0].focus();
     const toggle = sheet.querySelector(".context-generator-speed-toggle");
@@ -910,7 +913,7 @@ async function verifyPickerProductChanges(session, state) {
   assert.equal(product.bubbleTabIndex, -1);
   const focusedPickerIndex = `(() => {
     const sheet = document.getElementById("context-generator-destination-sheet");
-    return [...sheet.querySelectorAll(".context-generator-destination-tile, .context-generator-speed-toggle")]
+    return [...sheet.querySelectorAll(".context-generator-destination-tile, .context-generator-speed-toggle, .context-generator-copy-button")]
       .filter(node => !node.disabled && node.getAttribute("aria-disabled") !== "true")
       .indexOf(document.activeElement);
   })()`;
@@ -1171,6 +1174,101 @@ async function verifyRecoveryPalette(session, contextId) {
   process.stdout.write(`✓ Recovery dialog: ${result.checked} palette checks resist Dark Reader; focus, copy success/reset/failure colors preserved.\n`);
 }
 
+async function verifyClipboardFlow(sourceSession, browserSession, state, devToolsPort, extensionContextId) {
+  const pagesBefore = (await getTargets(devToolsPort)).filter(target => target.type === "page").map(target => target.id).sort();
+  const telemetryBefore = state.telemetryRequests.length;
+  await sourceSession.evaluate('chrome.storage.local.set({"context-generator-last-transfer-stats-v1": {transferId: "previous-transfer", status: "completed"}})', extensionContextId);
+  const statsBefore = await sourceSession.evaluate('chrome.storage.local.get("context-generator-last-transfer-stats-v1")', extensionContextId);
+  await sourceSession.call("Page.bringToFront");
+  await sourceSession.evaluate(`(() => {
+    const picker = document.getElementById("context-generator-destination-sheet");
+    if (picker?.getAttribute("aria-hidden") !== "false") document.getElementById("context-generator-bubble").click();
+    const speed = document.querySelector(".context-generator-speed-toggle");
+    if (!${JSON_CAPTURE_SMOKE} && speed.getAttribute("aria-pressed") === "true") speed.click();
+  })()`);
+  await waitFor(() => sourceSession.evaluate('getComputedStyle(document.getElementById("context-generator-destination-sheet")).opacity === "1"'), "Copy picker presentation");
+  // The DOM case owns responsive layout coverage. Native cases keep their
+  // original composer mount and exercise the API capture/clipboard boundary.
+  for (const width of (JSON_CAPTURE_SMOKE ? [] : [390, 320, 1280])) {
+    // An open picker intentionally retains its opening position. Reopen at the
+    // new viewport instead of treating that stable anchor as a layout failure.
+    await sourceSession.evaluate('document.getElementById("context-generator-destination-backdrop").click()');
+    await waitFor(() => sourceSession.evaluate('document.getElementById("context-generator-destination-sheet").style.display === "none"'), "Copy picker closure before resize");
+    await sourceSession.call("Emulation.setDeviceMetricsOverride", { width, height: 800, deviceScaleFactor: 1, mobile: false });
+    await waitFor(() => sourceSession.evaluate(`innerWidth === ${width}`), "Copy viewport");
+    await waitFor(() => sourceSession.evaluate("window.__capSmokeSourceRouteReady()", extensionContextId), "Copy source mount after resize");
+    await sourceSession.evaluate('document.getElementById("context-generator-bubble").click()');
+    await waitFor(() => sourceSession.evaluate('getComputedStyle(document.getElementById("context-generator-destination-sheet")).opacity === "1"'), "Copy picker after resize");
+    const geometry = await sourceSession.evaluate(`(() => {
+      const sheet = document.getElementById("context-generator-destination-sheet");
+      const copy = document.getElementById("context-generator-copy-button");
+      const speed = sheet.querySelector(".context-generator-speed-toggle");
+      const c = copy.getBoundingClientRect(), f = speed.getBoundingClientRect(), h = copy.parentElement.parentElement.getBoundingClientRect();
+      return { copy: c.toJSON(), flash: f.toJSON(), header: h.toJSON(), label: copy.getAttribute("aria-label"),
+        beside: copy.previousElementSibling === speed,
+        fits: c.left >= h.left - 1 && c.right <= h.right + 1 && f.left >= h.left - 1 && h.right <= innerWidth + 1,
+        focusable: copy.tabIndex === 0 };
+    })()`);
+    assert.equal(geometry.beside, true, "Copy must sit beside Flash");
+    assert.equal(geometry.fits, true, `Header controls must fit at ${width}px: ${JSON.stringify(geometry)}`);
+    assert.equal(geometry.focusable, true);
+    assert.equal(geometry.label, "Copy chat context to clipboard");
+  }
+  if (PICKER_SCREENSHOT_PATH) {
+    const clip = await sourceSession.evaluate(`(() => { const r = document.getElementById("context-generator-destination-sheet").getBoundingClientRect(); return { x: r.x - 8, y: r.y - 8, width: r.width + 16, height: r.height + 16, scale: 1 }; })()`);
+    const screenshot = await sourceSession.call("Page.captureScreenshot", { format: "png", clip });
+    await fs.promises.mkdir(path.dirname(PICKER_SCREENSHOT_PATH), { recursive: true });
+    await fs.promises.writeFile(PICKER_SCREENSHOT_PATH, Buffer.from(screenshot.data, "base64"));
+  }
+  // Consume the actual OS clipboard with a native paste shortcut. Do not grant
+  // page clipboard privileges, which would hide missing extension permissions.
+  const assertNativeClipboard = async expected => {
+    await sourceSession.evaluate(`(() => {
+      document.getElementById("cap-smoke-clipboard-probe")?.remove();
+      const probe = document.createElement("textarea"); probe.id = "cap-smoke-clipboard-probe";
+      probe.dataset.contextGeneratorOwned = "true";
+      document.body.appendChild(probe); probe.focus();
+    })()`);
+    await sourceSession.call("Input.dispatchKeyEvent", { type: "keyDown", key: "v", code: "KeyV", windowsVirtualKeyCode: 86, modifiers: 2 });
+    await sourceSession.call("Input.dispatchKeyEvent", { type: "keyUp", key: "v", code: "KeyV", windowsVirtualKeyCode: 86, modifiers: 2 });
+    await waitFor(() => sourceSession.evaluate(`document.getElementById("cap-smoke-clipboard-probe").value === ${JSON.stringify(expected)}`), "the exact context in the OS clipboard");
+    await sourceSession.evaluate('document.getElementById("cap-smoke-clipboard-probe").remove()');
+  };
+  await sourceSession.evaluate('document.getElementById("context-generator-copy-button").click(); document.getElementById("context-generator-copy-button").click();');
+  await waitFor(() => sourceSession.evaluate('document.getElementById("context-generator-copy-status")?.textContent === "Copied to your clipboard"'), "confirmed automatic copy");
+  assert.equal(state.summaryRequests.length, 1, "Repeated Copy clicks must make one backend request");
+  if (JSON_CAPTURE_SMOKE) assert.ok(state.jsonRequests > 0, "Flash Copy must use the native JSON adapter");
+  assert.ok(state.summaryRequests[0].conversation.includes(SOURCE_SENTINEL), "Copy must summarize the captured source");
+  await assertNativeClipboard(SUMMARY_TEXT);
+  assert.deepEqual((await getTargets(devToolsPort)).filter(target => target.type === "page").map(target => target.id).sort(), pagesBefore, "Copy must not create or navigate a destination");
+  assert.equal(state.telemetryRequests.length, telemetryBefore, "Copy cannot fabricate a transfer or paste outcome");
+  assert.deepEqual(await sourceSession.evaluate('chrome.storage.local.get("context-generator-last-transfer-stats-v1")', extensionContextId), statsBefore, "Copy leaves the transfer receipt intact");
+
+  await waitFor(() => sourceSession.evaluate('document.getElementById("context-generator-bubble").disabled === false'), "Copy lock release");
+  await sourceSession.evaluate(`(() => {
+    window.__capCopyClipboardDescriptor = Object.getOwnPropertyDescriptor(navigator, "clipboard");
+    window.__capCopyExecDescriptor = Object.getOwnPropertyDescriptor(document, "execCommand");
+    Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText: async () => { throw new Error("Blocked clipboard fixture"); } } });
+    Object.defineProperty(document, "execCommand", { configurable: true, value: () => false });
+    document.getElementById("context-generator-bubble").click();
+    document.getElementById("context-generator-copy-button").click();
+  })()`, extensionContextId);
+  await waitFor(() => sourceSession.evaluate('document.getElementById("context-generator-fallback-text")?.value === ' + JSON.stringify(SUMMARY_TEXT)), "exact carry recovery after blocked clipboard");
+  assert.equal(await sourceSession.evaluate('Boolean(document.getElementById("context-generator-copy-status"))'), false, "Blocked copy must not announce success");
+  assert.match(await sourceSession.evaluate('document.getElementById("context-generator-fallback-desc").textContent'), /browser blocked clipboard access/);
+  await sourceSession.evaluate('document.getElementById("context-generator-fallback-copy").click()', extensionContextId);
+  await waitFor(() => sourceSession.evaluate('document.getElementById("context-generator-fallback-copy").textContent === "Select text and copy manually"'), "truthful blocked retry");
+  await sourceSession.evaluate(`(() => {
+    if (window.__capCopyClipboardDescriptor) Object.defineProperty(navigator, "clipboard", window.__capCopyClipboardDescriptor); else delete navigator.clipboard;
+    if (window.__capCopyExecDescriptor) Object.defineProperty(document, "execCommand", window.__capCopyExecDescriptor); else delete document.execCommand;
+    document.getElementById("context-generator-fallback-copy").click();
+  })()`, extensionContextId);
+  await waitFor(() => sourceSession.evaluate('document.getElementById("context-generator-fallback-copy").textContent === "Copied!"'), "successful clipboard retry");
+  await assertNativeClipboard(SUMMARY_TEXT);
+  assert.equal(state.summaryRequests.length, 1, "Clipboard recovery must reuse the prepared/cached carry");
+  process.stdout.write("✓ Copy: exact OS clipboard, one summary, no destination/transfer telemetry, responsive controls, truthful failure and retry.\n");
+}
+
 async function run() {
   assert.equal(typeof WebSocket, "function", "This smoke test requires Node.js with the built-in WebSocket client.");
   const braveExecutable = findBraveExecutable();
@@ -1267,6 +1365,13 @@ async function run() {
       await waitFor(() => sourceSession.evaluate("Boolean(window.__capSmokeNativeRequestReady)"), "the fixture's initial native request");
     }
     process.stdout.write("✓ Brave loaded the unpacked extension on the controlled source page.\n");
+    if (COPY_SMOKE) {
+      const extensionContextId = sourceSession.getExtensionContextId();
+      assert.ok(extensionContextId, "Copy smoke needs the installed extension context");
+      await verifyClipboardFlow(sourceSession, browserSession, state, devToolsPort, extensionContextId);
+      process.stdout.write("Cap Context Brave Copy smoke passed.\n");
+      return;
+    }
     if (process.env.CAP_CONTEXT_RECOVERY_PALETTE_SMOKE === "1") {
       const contextId = sourceSession.getExtensionContextId();
       await sourceSession.evaluate("window.__capSmokeShowRecovery()", contextId);
@@ -1865,11 +1970,11 @@ async function run() {
       const idleToggle = await sourceSession.evaluate(`(() => {
         const toggle = document.getElementById("context-generator-${JSON_SOURCE}-json-toggle");
         const rect = toggle.getBoundingClientRect();
-        const header = toggle.parentElement.getBoundingClientRect();
+        const header = toggle.parentElement.parentElement.getBoundingClientRect();
         // Transformed rect edges differed by 0.00003px at browser zoom. Allow
         // rounding noise while still rejecting any visible header overflow.
         const epsilon = 0.01;
-        return { icon: Boolean(toggle.querySelector("svg[aria-hidden='true']")), header: toggle.parentElement.contains(document.querySelector(".context-generator-destination-brand")), inHeader: rect.top >= header.top - epsilon && rect.bottom <= header.bottom + epsilon && rect.left >= header.left - epsilon && rect.right <= header.right + epsilon, color: getComputedStyle(toggle).color, bounds: rect.toJSON(), headerBounds: header.toJSON() };
+        return { icon: Boolean(toggle.querySelector("svg[aria-hidden='true']")), header: toggle.parentElement.parentElement.contains(document.querySelector(".context-generator-destination-brand")), inHeader: rect.top >= header.top - epsilon && rect.bottom <= header.bottom + epsilon && rect.left >= header.left - epsilon && rect.right <= header.right + epsilon, color: getComputedStyle(toggle).color, bounds: rect.toJSON(), headerBounds: header.toJSON() };
       })()`);
       assert.equal(idleToggle.icon, true, "Fast capture must use a decorative vector icon.");
       assert.equal(idleToggle.header, true, "The fast-capture control must sit in the brand header.");
@@ -1941,6 +2046,7 @@ async function run() {
     if (JSON_SOURCE === "gemini") assert.equal(jsonRequestsBeforeTransfer, 0, "Gemini bootstrap capture must not require earlier native RPC traffic.");
     const extensionContextId = sourceSession.getExtensionContextId();
     assert.ok(extensionContextId, "The smoke source must expose its installed extension context.");
+
     // Both windows belong to this disposable profile. A different current
     // window must not steal preparation tabs from the source's window.
     if (!JSON_CAPTURE_SMOKE) {

@@ -25,6 +25,7 @@ function loadTransferFlow(overrides) {
     CapTransferDiagnostics: require("../../extension/transfer-diagnostics.js"),
     getNow: () => Date.now(), isNoConversationError: error => error?.message === "No conversation",
     isExtensionContextInvalidated: error => /extension context invalidated/i.test(error?.message || ""),
+    document: { getElementById: () => null }, CLIPBOARD_DESTINATION_ID: "clipboard", COPY_STATUS_ID: "copy-status",
     URL, INLINE_PATHNAME_POLL_MS: 80, RUNNING_AUTO_RESET_MS: 360000,
     DESTINATION_SHEET_EXIT_MS: 0, NO_CONVERSATION_ERROR_MESSAGE: "No conversation",
     activeTransferTrace: null, isRunning: false, runningResetTimer: null,
