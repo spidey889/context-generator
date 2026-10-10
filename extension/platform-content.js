@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-10-audited-fast-transfer-v129";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-10-fast-transfer-orb-tap-v130";
   const INLINE_PILL_SIZE = 36;
   const ownedUiStyleSheets = new Map();
   const CLAUDE_INLINE_STYLE_ID = "context-generator-claude-inline-styles";
@@ -5655,7 +5655,7 @@
     };
     updateMotion();
     addOwnedEventListener(reducedMotion, "change", updateMotion);
-    // Hover moves the button; click feedback stays small and inside the artwork.
+    // Picker/handoff owns the active scale; hover must not overwrite it.
     const canHover = () => !bubble.disabled && !isRunning && bubble.getAttribute("aria-expanded") !== "true";
     addOwnedEventListener(bubble, "mouseenter", () => {
       if (!canHover()) return;
@@ -5669,6 +5669,22 @@
       bubble.style.filter = "none";
       bubble.style.transform = "translate3d(0,0,0) scale(1)";
     });
+    addOwnedEventListener(bubble, "pointerdown", () => {
+      if (!bubble.disabled && !isRunning && !reducedMotion?.matches) {
+        bubble.style.transform = "translate3d(0,0,0) scale(0.95)";
+      }
+    });
+    addOwnedEventListener(bubble, "pointerup", () => {
+      if (!canHover()) return;
+      bubble.style.transform = bubble.matches(":hover")
+        ? "translate3d(0,-1px,0) scale(1.14)"
+        : "translate3d(0,0,0) scale(1)";
+    });
+    addOwnedEventListener(bubble, "pointercancel", () => {
+      bubble.style.transform = bubble.getAttribute("aria-expanded") === "true"
+        ? "translate3d(0,-1px,0) scale(1.08)"
+        : "translate3d(0,0,0) scale(1)";
+    });
     addOwnedEventListener(bubble, "transitionend", (event) => {
       if (event.target === bubble && event.propertyName === "transform") updateDestinationBackdropCutout();
     });
@@ -5679,16 +5695,6 @@
       event.preventDefault();
       event.stopPropagation();
       if (isRunning) return;
-      // Finish hover immediately, then acknowledge the click without gating the picker.
-      bubble.style.transition = "none";
-      icon.getAnimations?.().forEach(animation => animation.cancel());
-      if (!reducedMotion?.matches) {
-        icon.animate?.([
-          { transform: "scale(1)", filter: "brightness(1)" },
-          { transform: "scale(0.97)", filter: "brightness(0.94)", offset: 0.4 },
-          { transform: "scale(1)", filter: "brightness(1)" }
-        ], { duration: 110, easing: "ease-out" });
-      }
       dismissOnboardingNudge();
       dismissClaudeLimitNudge();
       toggleDestinationSheet();
@@ -7179,6 +7185,9 @@
     const bubble = document.getElementById(BUBBLE_ID);
     if (bubble) {
       bubble.setAttribute("aria-expanded", "true");
+      // Orb feedback is independent of the picker's entrance and capture work.
+      bubble.style.filter = "brightness(1.14) saturate(1.12) drop-shadow(0 0 7px rgba(153,110,235,0.58)) drop-shadow(0 3px 8px rgba(78,42,128,0.32))";
+      bubble.style.transform = "translate3d(0,-1px,0) scale(1.08)";
     }
     updateDestinationBackdropCutout();
     if (window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) {
