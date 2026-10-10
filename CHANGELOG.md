@@ -4,6 +4,8 @@ A short history of decisions and regressions that matter when changing the code.
 
 ## 2026-10-10
 
+- **Counter documentation distinguishes verified work from local delivery.** Aligned both privacy disclosures and the database checklist with prospective counting of successful, unverified local transfers alongside verified backend summaries. Clarified the combined totals in `LOGIC.md` and added a dated counter-rule update to the October 5 backend audit. Unsigned remote successes stay uncounted; retries and later receipts cannot double-count an attempt, and historical local attempts are not backfilled.
+
 - **Discarded orb captures release their memory immediately.** Closing or opting out clears the cached capture promise, rendered-history copy and navigation guard; an already-issued native read cannot recache its late result. Finishing an attempt also discards its unconsumed picker capture, fixing the transcript/timer retention when cancellation arrives during handoff. Ready/pending regressions cover immediate cleanup and late-result disposal.
 
 - **Reduced-motion handoff retains orb capture.** The immediate picker-to-handoff transition discarded its JSON snapshot, causing destination selection to read the same chat again. It now preserves the capture just like the animated transition. A regression reproduces the duplicate read and checks ready/pending reuse on all five platforms with either motion preference; the installed-Brave ChatGPT JSON fixture also exercises reduced motion.
