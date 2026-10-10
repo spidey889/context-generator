@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-10-orb-json-prefetch-v122";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-10-orb-json-prefetch-cleanup-v123";
   const INLINE_PILL_SIZE = 36;
   const ownedUiStyleSheets = new Map();
   const CLAUDE_INLINE_STYLE_ID = "context-generator-claude-inline-styles";
@@ -2159,6 +2159,9 @@
 
   function finishTransferTrace(trace, telemetryFailureReason = null) {
     if (!trace || trace.completed) return;
+    // Cancellation can finish during handoff, before capture consumption owns
+    // cleanup. Release only this attempt's snapshot, never a newer picker's.
+    if (pickerJsonCapture?.trace === trace) clearPickerJsonCapture();
     trace.sourceGuard?.dispose();
     trace.completed = true;
     const totalMs = Math.round(getNow() - trace.startedAt);
@@ -7349,8 +7352,15 @@
   }
 
   function clearPickerJsonCapture() {
-    pickerJsonCapture?.guard.dispose();
+    const entry = pickerJsonCapture;
     pickerJsonCapture = null;
+    if (!entry) return;
+    entry.discarded = true;
+    entry.guard.dispose();
+    // A bounded native read may still hold entry until it settles. Drop the
+    // cached transcript promise and rendered-history copy immediately.
+    entry.promise = null;
+    entry.state = null;
   }
 
   function captureSourceJson(expectedPath, shouldRead = () => true) {
@@ -7388,7 +7398,7 @@
       checkTransferDeadline(entry.trace);
       return entry.selected || pickerJsonCapture === entry;
     })
-      .then(capture => ({ capture }), error => ({ error }));
+      .then(capture => entry.discarded ? {} : { capture }, error => entry.discarded ? {} : { error });
   }
 
   function isPickerJsonCaptureCurrent(entry) {

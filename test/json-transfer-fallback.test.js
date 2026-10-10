@@ -191,6 +191,59 @@ test("closed picker results are discarded and reopening never overlaps native re
   assert.equal(calls.flows[0].text, "Fresh reopened picker");
 });
 
+test("closing the picker immediately releases its snapshot and drops late results", async () => {
+  for (const ready of [false, true]) {
+    const { context, calls } = harness("chatgpt", { mode: "success" });
+    const started = deferred(), response = deferred();
+    context.window.__capCaptureChatGptJson = () => { calls.json++; started.resolve(); return response.promise; };
+    context.startPickerJsonCapture(); await started.promise;
+    const entry = context.pickerJsonCapture, pending = entry.promise;
+    if (ready) { response.resolve({ text: "Discard this captured text", messageTurnCount: 2 }); await pending; }
+    context.clearPickerJsonCapture();
+    assert.equal(context.pickerJsonCapture, null);
+    assert.equal(entry.promise, null);
+    assert.equal(entry.state, null);
+    if (!ready) {
+      response.resolve({ text: "Discard this late text", messageTurnCount: 2 });
+      assert.equal((await pending).capture, undefined);
+    }
+    assert.equal(calls.flows.length + calls.errors.length, 0);
+  }
+});
+
+test("cancelling during handoff immediately releases the picker capture and its navigation timer", async () => {
+  const start = source.indexOf("  function finishTransferTrace(");
+  const end = source.indexOf("  function formatTraceDetail(", start);
+  assert.ok(start >= 0 && end > start);
+  const finish = new vm.Script(source.slice(start, end));
+  for (const ready of [false, true]) {
+    const { context, calls } = harness("chatgpt", { mode: "success" });
+    const timers = new Set(); let nextId = 0;
+    context.setInterval = () => { const id = ++nextId; timers.add(id); return id; };
+    context.clearInterval = id => timers.delete(id);
+    context.createTransferTrace = () => ({ id: "cancelled-handoff", marks: [], startedAt: Date.now() });
+    context.persistLatestTransferStats = () => {};
+    context.finishTransferTelemetry = () => {};
+    finish.runInContext(context);
+    const started = deferred(), response = deferred();
+    context.window.__capCaptureChatGptJson = () => { calls.json++; started.resolve(); return response.promise; };
+    context.startPickerJsonCapture(); await started.promise;
+    const entry = context.pickerJsonCapture, pending = entry.promise;
+    if (ready) { response.resolve({ text: "Cancelled snapshot", messageTurnCount: 2 }); await pending; }
+    context.transitionDestinationSheetToHandoff = async () => {
+      context.cancelSourceTransfer(context.activeTransferTrace.id);
+      assert.equal(context.pickerJsonCapture, null);
+      assert.equal(timers.size, 0);
+    };
+    await context.start("claude");
+    assert.equal(entry.promise, null);
+    assert.equal(entry.state, null);
+    response.resolve({ text: "Cancelled late snapshot", messageTurnCount: 2 });
+    if (!ready) assert.equal((await pending).capture, undefined);
+    assert.equal(calls.flows.length + calls.dom, 0);
+  }
+});
+
 test("navigation during a selected pending prefetch cancels without another native read or DOM fallback", async () => {
   const { context, calls, navigate } = harness("chatgpt", { mode: "success" });
   const started = deferred(), response = deferred();
