@@ -643,9 +643,8 @@ async function startFixtureServer() {
       let rawBody = "";
       for await (const chunk of request) rawBody += chunk;
       state.summaryRequests.push(JSON.parse(rawBody));
-      // Copy requests intentionally have no platform-transfer identity/proof.
-      const receipt = COPY_SMOKE ? { summaryModel: "gemini-3.6-flash" }
-        : await telemetryFixture.signSummary(state.summaryRequests.at(-1)?.telemetry);
+      // Copy uses the same route-bound summary receipt as other transfers.
+      const receipt = state.summaryRequests.at(-1)?.telemetry ? await telemetryFixture.signSummary(state.summaryRequests.at(-1).telemetry) : { summaryModel: "gemini-3.6-flash" };
       const streaming = request.headers.accept === "application/x-ndjson";
       response.writeHead(200, {
         "Access-Control-Allow-Origin": "*",
@@ -1174,11 +1173,9 @@ async function verifyRecoveryPalette(session, contextId) {
   process.stdout.write(`✓ Recovery dialog: ${result.checked} palette checks resist Dark Reader; focus, copy success/reset/failure colors preserved.\n`);
 }
 
-async function verifyClipboardFlow(sourceSession, browserSession, state, devToolsPort, extensionContextId) {
+async function verifyClipboardFlow(sourceSession, browserSession, state, devToolsPort, extensionContextId, telemetryFixture) {
   const pagesBefore = (await getTargets(devToolsPort)).filter(target => target.type === "page").map(target => target.id).sort();
-  const telemetryBefore = state.telemetryRequests.length;
   await sourceSession.evaluate('chrome.storage.local.set({"context-generator-last-transfer-stats-v1": {transferId: "previous-transfer", status: "completed"}})', extensionContextId);
-  const statsBefore = await sourceSession.evaluate('chrome.storage.local.get("context-generator-last-transfer-stats-v1")', extensionContextId);
   await sourceSession.call("Page.bringToFront");
   await sourceSession.evaluate(`(() => {
     const picker = document.getElementById("context-generator-destination-sheet");
@@ -1244,8 +1241,21 @@ async function verifyClipboardFlow(sourceSession, browserSession, state, devTool
   assert.ok(state.summaryRequests[0].conversation.includes(SOURCE_SENTINEL), "Copy must summarize the captured source");
   await assertNativeClipboard(SUMMARY_TEXT);
   assert.deepEqual((await getTargets(devToolsPort)).filter(target => target.type === "page").map(target => target.id).sort(), pagesBefore, "Copy must not create or navigate a destination");
-  assert.equal(state.telemetryRequests.length, telemetryBefore, "Copy cannot fabricate a transfer or paste outcome");
-  assert.deepEqual(await sourceSession.evaluate('chrome.storage.local.get("context-generator-last-transfer-stats-v1")', extensionContextId), statsBefore, "Copy leaves the transfer receipt intact");
+  const metadata = state.summaryRequests[0].telemetry;
+  assert.ok(metadata, "Copy must send normal summary metadata.");
+  assert.equal(metadata.destination_platform, "clipboard");
+  await waitFor(() => state.telemetryRequests.some(event => event.attempt_id === metadata.attempt_id && event.status === "succeeded"), "Copy terminal telemetry");
+  const terminal = state.telemetryRequests.findLast(event => event.attempt_id === metadata.attempt_id && event.status === "succeeded");
+  assert.equal(terminal.last_stage, "completed");
+  assert.equal(terminal.destination_platform, "clipboard");
+  assert.ok(terminal.summary_proof, "Copy retains the normal authenticated summary receipt");
+  await waitFor(async () => (await sourceSession.evaluate('chrome.storage.local.get("context-generator-last-transfer-stats-v1")', extensionContextId))["context-generator-last-transfer-stats-v1"]?.transferId === metadata.attempt_id, "Copy Latest Run receipt");
+  const stats = (await sourceSession.evaluate('chrome.storage.local.get("context-generator-last-transfer-stats-v1")', extensionContextId))["context-generator-last-transfer-stats-v1"];
+  assert.equal(stats.status, "completed");
+  assert.deepEqual(stats.destination, { id: "clipboard", name: "Clipboard" });
+  assert.ok(stats.destinationTiming.pasteMs >= 0);
+  assert.ok(stats.rawScrapedText.includes(SOURCE_SENTINEL));
+  await telemetryFixture.verifyDatabaseOutcome(metadata);
 
   await waitFor(() => sourceSession.evaluate('document.getElementById("context-generator-bubble").disabled === false'), "Copy lock release");
   await sourceSession.evaluate(`(() => {
@@ -1259,6 +1269,13 @@ async function verifyClipboardFlow(sourceSession, browserSession, state, devTool
   await waitFor(() => sourceSession.evaluate('document.getElementById("context-generator-fallback-text")?.value === ' + JSON.stringify(SUMMARY_TEXT)), "exact carry recovery after blocked clipboard");
   assert.equal(await sourceSession.evaluate('Boolean(document.getElementById("context-generator-copy-status"))'), false, "Blocked copy must not announce success");
   assert.match(await sourceSession.evaluate('document.getElementById("context-generator-fallback-desc").textContent'), /browser blocked clipboard access/);
+  await waitFor(() => state.telemetryRequests.some(event => event.destination_platform === "clipboard" && event.status === "failed"), "blocked Copy terminal telemetry");
+  const failed = state.telemetryRequests.findLast(event => event.destination_platform === "clipboard" && event.status === "failed");
+  assert.equal(failed.last_stage, "paste_started");
+  assert.equal(failed.failure_reason, "paste_failed");
+  assert.notEqual(failed.attempt_id, metadata.attempt_id);
+  await telemetryFixture.verifyClipboardFailure(failed);
+  assert.deepEqual((await getTargets(devToolsPort)).filter(target => target.type === "page").map(target => target.id).sort(), pagesBefore, "Blocked Copy opens no destination either");
   await sourceSession.evaluate('document.getElementById("context-generator-fallback-copy").click()', extensionContextId);
   await waitFor(() => sourceSession.evaluate('document.getElementById("context-generator-fallback-copy").textContent === "Select text and copy manually"'), "truthful blocked retry");
   await sourceSession.evaluate(`(() => {
@@ -1270,7 +1287,7 @@ async function verifyClipboardFlow(sourceSession, browserSession, state, devTool
   assert.equal(await sourceSession.evaluate('Boolean(document.getElementById("context-generator-copy-status"))'), false, "Recovery success stays on its Copied! button");
   await assertNativeClipboard(SUMMARY_TEXT);
   assert.equal(state.summaryRequests.length, 1, "Clipboard recovery must reuse the prepared/cached carry");
-  process.stdout.write("✓ Copy: exact OS clipboard, one summary, no destination/transfer telemetry, responsive controls, truthful failure and retry.\n");
+  process.stdout.write("✓ Copy: exact OS clipboard, one summary, normal transfer telemetry/receipt, no destination tab, responsive controls, truthful failure and retry.\n");
 }
 
 async function run() {
@@ -1372,7 +1389,7 @@ async function run() {
     if (COPY_SMOKE) {
       const extensionContextId = sourceSession.getExtensionContextId();
       assert.ok(extensionContextId, "Copy smoke needs the installed extension context");
-      await verifyClipboardFlow(sourceSession, browserSession, state, devToolsPort, extensionContextId);
+      await verifyClipboardFlow(sourceSession, browserSession, state, devToolsPort, extensionContextId, telemetryFixture);
       process.stdout.write("Cap Context Brave Copy smoke passed.\n");
       return;
     }

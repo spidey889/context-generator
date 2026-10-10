@@ -83,6 +83,7 @@ jobs:
         shell: bash
         env:
           CAP_CONTEXT_COPY_SMOKE: "1"
+          CAP_CONTEXT_TELEMETRY_SMOKE: "1"
           CAP_CONTEXT_SMOKE_ARTIFACT_DIR: .test-artifacts/browser-smoke/copy
         run: |
           mkdir -p "$CAP_CONTEXT_SMOKE_ARTIFACT_DIR/dom"

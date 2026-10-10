@@ -149,8 +149,10 @@ async function createTelemetrySmokeFixture(repoRoot, databaseEnabled) {
       assert.ok(row.diagnostics, "Installed extension diagnostics must survive the actual relay, Edge and SQL path.");
       assert.deepEqual(row.diagnostics, terminal.diagnostics);
       assert.equal(row.diagnostics.version, 1);
-      assert.equal(row.diagnostics.paste_populated, true);
-      assert.equal(row.diagnostics.message_reply, "ack_success");
+      if (context.destination_platform !== "clipboard") {
+        assert.equal(row.diagnostics.paste_populated, true);
+        assert.equal(row.diagnostics.message_reply, "ack_success");
+      }
       assert.equal(row.diagnostics.error_code, undefined);
       assert.equal(row.model, "gemini-3.6-flash");
       assert.equal(row.model_verified, true);
@@ -166,6 +168,14 @@ async function createTelemetrySmokeFixture(repoRoot, databaseEnabled) {
       assert.deepEqual({ user_no: row.user_no, username: row.username }, { user_no, username });
       assert.deepEqual(counts, { total: 1, today: 1, failed: 0 });
       assert.equal((await database.query("select count(*)::int as count from public.transfers where summary_verified")).rows[0].count, 1);
+    },
+    async verifyClipboardFailure(event) {
+      if (!databaseEnabled) return;
+      await rpcChain;
+      const row = (await database.query("select status,last_stage,failure_reason,destination_platform from public.transfers where attempt_id=$1", [event.attempt_id])).rows[0];
+      assert.deepEqual(row, { status: "failed",last_stage: "paste_started",failure_reason: "paste_failed",destination_platform: "clipboard" });
+      const counts = (await database.query("select lifetime_summaries::int as total,today_summaries::int as today,today_failed_attempts::int as failed from public.users where install_id=$1", [event.install_id])).rows[0];
+      assert.deepEqual(counts, { total: 1,today: 1,failed: 1 }, "Cached Copy failures do not count another signed summary");
     },
     async close() {
       for (const [name, value] of previousEnvironment) {

@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-10-copy-feedback-v131";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-10-copy-telemetry-v132";
   const INLINE_PILL_SIZE = 36;
   const ownedUiStyleSheets = new Map();
   const CLAUDE_INLINE_STYLE_ID = "context-generator-claude-inline-styles";
@@ -855,7 +855,7 @@
       startTransferDeadline,
       beginTransferAttempt,
       finishTransferTrace,
-      runClipboardFlow,
+      runContextFlow,
       recordTransferFailureDiagnostics,
       resetRunningFlag,
       markCaptureDone,
@@ -877,6 +877,7 @@
   async function runContextFlow(destinationId, preparedDestinationPromise = null, scrapedConversationText = null, trace = null) {
     const transferTrace = trace || createTransferTrace(destinationId, "transfer");
     transferTrace.destinationId = destinationId;
+    const copyOnly = destinationId === CLIPBOARD_DESTINATION_ID;
     startTransferTelemetry(transferTrace);
     let transferStage = "capture";
     let summary = "";
@@ -891,13 +892,13 @@
         if (!isHandoffOverlayVisible()) {
           showOverlay(destinationId);
         }
-        if (!destinationPrepPromise && getDetectedConversationMessageCount() > 0) {
+        if (!copyOnly && !destinationPrepPromise && getDetectedConversationMessageCount() > 0) {
           destinationPrepPromise = prepareDestinationTab(destinationId, transferTrace);
         }
         advanceTransferTelemetryStage(transferTrace, "capture_started");
         await prepareSourceForCapture();
         checkTransferDeadline(transferTrace);
-        if (!destinationPrepPromise && getDetectedConversationMessageCount() > 0) {
+        if (!copyOnly && !destinationPrepPromise && getDetectedConversationMessageCount() > 0) {
           destinationPrepPromise = prepareDestinationTab(destinationId, transferTrace);
         }
         transferStage = "capture";
@@ -907,7 +908,7 @@
         checkTransferDeadline(transferTrace);
         markCaptureDone(transferTrace, conversationText);
       }
-      destinationPrepPromise = destinationPrepPromise || prepareDestinationTab(destinationId, transferTrace);
+      if (!copyOnly) destinationPrepPromise ||= prepareDestinationTab(destinationId, transferTrace);
       if (!isHandoffOverlayVisible()) {
         showOverlay(destinationId);
       }
@@ -917,6 +918,25 @@
       stopHandoffCountdown();
       markTransferTrace(transferTrace, "summary available", { chars: summary.length });
       setHandoffProgress("summary", "done");
+      if (copyOnly) {
+        transferStage = "paste";
+        markTransferTrace(transferTrace, "paste request start");
+        advanceTransferTelemetryStage(transferTrace, "paste_started");
+        setHandoffProgress("paste", "active");
+        const copyStartedAt = getNow();
+        // clipboardWrite supports asynchronous capture. Keep the prepared carry
+        // for manual recovery when the browser rejects an unfocused write.
+        if (!navigator.clipboard?.writeText) throw new Error("Clipboard API unavailable.");
+        await navigator.clipboard.writeText(summary);
+        checkTransferDeadline(transferTrace);
+        markTransferTrace(transferTrace, "paste done", { pasteMs: Math.round(getNow() - copyStartedAt) });
+        setHandoffProgress("paste", "done");
+        markTransferTrace(transferTrace, "transfer complete");
+        finishTransferTrace(transferTrace);
+        resetRunningFlag();
+        showClipboardSuccess();
+        return;
+      }
       transferStage = "destination";
       const preparedDestination = destinationPrepPromise ? await destinationPrepPromise : null;
       checkTransferDeadline(transferTrace);
@@ -986,7 +1006,12 @@
   function showContextTransferFailure(error, details = {}) {
     const stage = details.stage || "transfer";
     const summary = details.summary?.trim?.() || "";
-    const destinationName = getPlatform(details.destinationId)?.name || "the destination";
+    const destinationName = details.destinationId === CLIPBOARD_DESTINATION_ID
+      ? CLIPBOARD_DESTINATION_ID : getPlatform(details.destinationId)?.name || "the destination";
+    if (error?.code === "conversation_changed") {
+      showErrorOverlay(error.message);
+      return;
+    }
 
     if (stage === "summary") {
       if (["conversation_too_large", "request_too_large", "rate_limited", "service_busy", "client_not_allowed"].includes(error?.code)) {
@@ -1227,7 +1252,7 @@
       lastAt: null,
       marks: [],
       completed: false,
-      diagnostics: { version: 1, entry_point: source === "destination tile" ? "picker" : source === "extension icon" ? "toolbar" : "other",
+      diagnostics: { version: 1, entry_point: ["destination tile", "copy button"].includes(source) ? "picker" : source === "extension icon" ? "toolbar" : "other",
         browser: /Firefox\//i.test(globalThis.navigator?.userAgent || "") ? "firefox" : "chromium",
         visibility: ["visible", "hidden", "prerender"].includes(document.visibilityState) ? document.visibilityState : "unknown",
         ...(typeof globalThis.navigator?.onLine === "boolean" ? { online: globalThis.navigator.onLine } : {}),
@@ -2175,9 +2200,7 @@
       updateTransferDiagnostics(trace, { error_code: "unknown_error", error_origin: "source" });
     }
     updateTransferDiagnostics(trace, { duration_ms: totalMs, deadline_remaining_ms: Math.max(0, Math.round((trace.deadlineAt || Date.now()) - Date.now())) });
-    // Clipboard work has no destination delivery. Keep transfer receipts and
-    // counters meaningful instead of inventing a platform or a successful paste.
-    if (trace.destinationId !== CLIPBOARD_DESTINATION_ID) persistLatestTransferStats(trace, totalMs);
+    persistLatestTransferStats(trace, totalMs);
     finishTransferTelemetry(
       trace,
       failed ? "failed" : "succeeded",
@@ -2191,7 +2214,7 @@
   }
 
   function startTransferTelemetry(trace) {
-    if (!trace || trace.destinationId === CLIPBOARD_DESTINATION_ID || trace.telemetryStarted) return;
+    if (!trace || trace.telemetryStarted) return;
     trace.telemetryStarted = true;
     trace.telemetryLastStage = "intent_started";
     sendTransferTelemetrySnapshot(trace, "started", null);
@@ -2222,7 +2245,7 @@
   }
 
   function finishTransferTelemetry(trace, status, failureReason) {
-    if (!trace || trace.destinationId === CLIPBOARD_DESTINATION_ID || trace.telemetryFinished) return;
+    if (!trace || trace.telemetryFinished) return;
     trace.telemetryFinished = true;
     if (status === "succeeded") trace.telemetryLastStage = "completed";
     sendTransferTelemetrySnapshot(trace, status, failureReason);
@@ -2297,7 +2320,7 @@
       },
       destination: {
         id: trace.destinationId || null,
-        name: trace.destinationId ? getPlatform(trace.destinationId)?.name || trace.destinationId : null
+        name: trace.destinationId === CLIPBOARD_DESTINATION_ID ? "Clipboard" : trace.destinationId ? getPlatform(trace.destinationId)?.name || trace.destinationId : null
       },
       startedAt: new Date(trace.startedAtEpoch || Date.now()).toISOString(),
       completedAt: new Date(completedAtEpoch).toISOString(),
@@ -7603,12 +7626,8 @@
       checkTransferDeadline(trace);
       markCaptureDone(trace, conversationText);
 
-      if (copyOnly) {
-        await runClipboardFlow(conversationText, trace);
-      } else {
-        preparedDestinationPromise = preparedDestinationPromise || prepareDestinationTab(destinationId, trace);
-        runContextFlow(destinationId, preparedDestinationPromise, conversationText, trace);
-      }
+      if (!copyOnly) preparedDestinationPromise ||= prepareDestinationTab(destinationId, trace);
+      await runContextFlow(destinationId, preparedDestinationPromise, conversationText, trace);
     } catch (error) {
       if (trace.expired) return;
       recordTransferFailureDiagnostics(trace, error);
@@ -7616,40 +7635,6 @@
       finishTransferTrace(trace, getSafeTelemetryFailureReason(error, "capture"));
       resetRunningFlag();
       showErrorOverlay(error.message);
-    }
-  }
-
-  async function runClipboardFlow(conversationText, trace) {
-    let summary = "";
-    try {
-      summary = await summarizeWithBackend(conversationText, trace);
-      checkTransferDeadline(trace);
-      stopHandoffCountdown();
-      setHandoffProgress("summary", "done");
-      setHandoffProgress("paste", "active");
-      // clipboardWrite permits this delayed write after capture/summarization.
-      // A hidden/unfocused document can still reject; retain its prepared carry.
-      if (!navigator.clipboard?.writeText) throw new Error("Clipboard API unavailable.");
-      await navigator.clipboard.writeText(summary);
-      checkTransferDeadline(trace);
-      setHandoffProgress("paste", "done");
-      markTransferTrace(trace, "transfer complete");
-      finishTransferTrace(trace);
-      resetRunningFlag();
-      showClipboardSuccess();
-    } catch (error) {
-      if (error?.code === "user_cancelled") {
-        cancelSourceTransfer(trace.id, trace);
-        return;
-      }
-      if (trace.expired || trace.cancelled) return;
-      recordTransferFailureDiagnostics(trace, error);
-      markTransferTrace(trace, `failed: ${error.message}`);
-      finishTransferTrace(trace, getSafeTelemetryFailureReason(error, summary ? "paste" : "summary"));
-      resetRunningFlag();
-      if (error.code === "conversation_changed") showErrorOverlay(error.message);
-      else if (summary) showFallbackModal(summary, CLIPBOARD_DESTINATION_ID);
-      else showContextTransferFailure(error, { stage: "summary" });
     }
   }
 

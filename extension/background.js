@@ -30,6 +30,7 @@ const TELEMETRY_RETRY_MAX_MS = 60 * 60 * 1000;
 const TELEMETRY_CONFIG_RETRY_BASE_MS = 5 * 60 * 1000;
 const TELEMETRY_MAX_CHARACTER_COUNT = 2147483647;
 const TELEMETRY_PLATFORMS = new Set(["claude", "chatgpt", "gemini", "grok", "deepseek"]);
+const TELEMETRY_DESTINATIONS = new Set([...TELEMETRY_PLATFORMS, "clipboard"]);
 const TELEMETRY_STATUSES = new Set(["started", "succeeded", "failed"]);
 // Only serving-route identifiers enter reports; transcript text and attempted
 // providers never belong in this field. Keep the catalog aligned with ingress.
@@ -484,7 +485,7 @@ function sanitizeTransferTelemetryEvent(event, captureCompletionTime = true) {
   if (!event || typeof event !== "object") return null;
   if (!isUuid(event.attemptId)) return null;
   if (!TELEMETRY_PLATFORMS.has(event.sourcePlatform)) return null;
-  if (!TELEMETRY_PLATFORMS.has(event.destinationPlatform)) return null;
+  if (!TELEMETRY_DESTINATIONS.has(event.destinationPlatform)) return null;
   if (!TELEMETRY_STATUSES.has(event.status)) return null;
   if (!TELEMETRY_STAGES.has(event.lastStage)) return null;
   if (event.status === "succeeded" && event.lastStage !== "completed") return null;

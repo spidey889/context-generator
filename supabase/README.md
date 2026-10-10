@@ -36,6 +36,8 @@ User labels are maintained by database triggers. The first transfer RPC creates 
 
 Retained metadata is kept at the current small volume. There is no automatic event deletion, invented historical verification or stale-row failure backfill. The removed timestamp values remain in the encrypted pre-cleanup export. The worker queue is best-effort, bounded to 500 attempts/seven days, with diagnosed drops and permanent rejection quarantine; diagnostics do not retain replayable rejected payloads.
 
+Copy uses `clipboard` as a destination, with the same identity, verified-summary/local-direct counters and terminal outcome rules. Source platforms remain the five supported AI sites. Apply `20261010090000_allow_clipboard_destination.sql`, deploy the compatible Edge validator, then deploy the Vercel relay before loading the updated extension. No existing rows, counters, RPC signatures or privileges change.
+
 ## Access and deployment order
 
 RLS is enabled on both tables with no client policies. anon and authenticated cannot access tables, views, sequences or RPC. service_role receives explicit SELECT/INSERT/UPDATE and necessary sequence/RPC permissions, without DELETE/TRUNCATE. Functions are security invoker with empty search paths; there are no active public reporting views. New objects created by the application postgres role default private. Hosted postgres cannot change platform-owned supabase_admin defaults: application migrations must run as postgres, never impersonate the managed owner.

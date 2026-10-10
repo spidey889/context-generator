@@ -3,7 +3,7 @@ const fs = require("node:fs");
 const path = require("node:path");
 const test = require("node:test");
 const vm = require("node:vm");
-const { loadTransferFlow } = require("./helpers/transfer-flow");
+const { loadTransferFlow, loadContextFlow } = require("./helpers/transfer-flow");
 
 const source = fs.readFileSync(path.join(__dirname, "../extension/platform-content.js"), "utf8");
 
@@ -590,14 +590,19 @@ test("fallback notice uses fixed safe copy in the handoff and announces it", () 
 function clipboardHarness(platform, options = {}) {
   const fixture = harness(platform, { mode: "success", ...options });
   const { context, calls } = fixture;
-  Object.assign(calls, { summaries: [], copied: [], confirmations: 0, recovery: [], finished: [] });
+  loadContextFlow(context);
+  Object.assign(calls, { summaries: [], copied: [], confirmations: 0, recovery: [], finished: [], stages: [] });
   Object.assign(context, {
     summarizeWithBackend: async text => { calls.summaries.push(text); return "Prepared context \u{1f680}\nwith exact text"; },
     navigator: { clipboard: { writeText: async text => { calls.copied.push(text); } } },
     stopHandoffCountdown() {},
     showClipboardSuccess: () => { calls.confirmations++; },
     showFallbackModal: (text, destination) => { calls.recovery.push({ text, destination }); },
-    showContextTransferFailure: error => { calls.errors.push(error.message); },
+    isHandoffOverlayVisible: () => true,
+    notifyBackground: async () => {},
+    advanceTransferTelemetryStage: (_trace, stage) => calls.stages.push(stage),
+    getPlatform: id => ({ name: id }),
+    SUMMARY_RETRY_ERROR_MESSAGE: "Summary failed. Try again.",
     finishTransferTrace: (_trace, reason) => { calls.finished.push(reason || "success"); }
   });
   return fixture;
@@ -611,6 +616,9 @@ test("Copy shares all five JSON adapters and ends at the clipboard without a des
     assert.deepEqual(calls.summaries, ["JSON transcript"], platform);
     assert.deepEqual(calls.copied, ["Prepared context \u{1f680}\nwith exact text"], platform);
     assert.equal(calls.confirmations, 1, platform);
+    assert.ok(calls.stages.includes("paste_started"), "Copy reports the normal final delivery stage");
+    assert.ok(calls.traces.includes("paste done"));
+    assert.deepEqual(calls.finished, ["success"]);
     assert.equal(calls.destination + calls.prepare + calls.dom + calls.flows.length, 0, platform);
     assert.equal(context.isRunning, false, platform);
   }

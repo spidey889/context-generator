@@ -1,5 +1,6 @@
 import "../_shared/transfer-diagnostics.js";
 export const TELEMETRY_PLATFORMS = new Set(["claude", "chatgpt", "gemini", "grok", "deepseek"]);
+const TELEMETRY_DESTINATIONS = new Set([...TELEMETRY_PLATFORMS, "clipboard"]);
 export const TELEMETRY_STATUSES = new Set(["started", "succeeded", "failed"]);
 export const TELEMETRY_STAGE_ORDER = [
   "intent_started",
@@ -61,7 +62,7 @@ export function validateTelemetryPayload(input) {
       (typeof input.summary_proof !== "string" || !/^[0-9a-f]{64}$/.test(input.summary_proof))) return null;
   if (!isUuid(input.attempt_id) || !isUuid(input.install_id)) return null;
   if (!TELEMETRY_PLATFORMS.has(input.source_platform)) return null;
-  if (!TELEMETRY_PLATFORMS.has(input.destination_platform)) return null;
+  if (!TELEMETRY_DESTINATIONS.has(input.destination_platform)) return null;
   if (!TELEMETRY_STATUSES.has(input.status)) return null;
   if (!TELEMETRY_STAGES.has(input.last_stage)) return null;
   if (input.status === "succeeded" && input.last_stage !== "completed") return null;

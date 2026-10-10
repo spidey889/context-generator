@@ -39,4 +39,8 @@ function loadTransferFlow(overrides) {
   code.runInContext(context);
   return context;
 }
-module.exports = { loadTransferFlow };
+function loadContextFlow(context) {
+  new vm.Script(sliceBetween("  async function runContextFlow(", "  async function summarizeWithBackend("),
+    { filename: "platform-context-flow.js" }).runInContext(context);
+}
+module.exports = { loadTransferFlow, loadContextFlow };

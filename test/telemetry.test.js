@@ -468,3 +468,20 @@ test("source-tab cancellation stops summary consumption and retains its failure 
   assert.equal(bodyReads, 0, "late headers cannot restart a cancelled request");
   assert.ok(requests.every(request => request.status !== "succeeded" && !request.summary_proof));
 });
+
+
+test("Copy destination survives the worker, relay and Edge validation without accepting clipboard sources", async () => {
+  const requests = [];
+  const worker = loadTelemetryBackground(async (_url, options) => { requests.push(JSON.parse(options.body)); return { ok: true }; });
+  await worker.drain();
+  await worker.sendTelemetry(makeEvent({ destinationPlatform: "clipboard", status: "succeeded", lastStage: "completed", characterCount: 50, reportedModel: "local-direct" }));
+  assert.equal(requests.length, 1);
+  const edge = await import(pathToFileURL(VALIDATION_PATH).href);
+  for (const validate of [VERCEL_VALIDATION.validateTelemetryPayload, edge.validateTelemetryPayload]) {
+    assert.equal(validate(requests[0]).destination_platform, "clipboard");
+    assert.equal(validate({ ...requests[0], source_platform: "clipboard" }), null);
+    assert.equal(validate({ ...requests[0], destination_platform: "unknown" }), null);
+  }
+  await worker.sendTelemetry(makeEvent({ sourcePlatform: "clipboard", destinationPlatform: "chatgpt" }));
+  assert.equal(requests.length, 1);
+});

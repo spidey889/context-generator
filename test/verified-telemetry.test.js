@@ -329,3 +329,16 @@ test("server receipts cover remote success and emergency carry, and missing keys
   assert.ok(res.body.summary);
   assert.equal(res.body.summaryProof, undefined);
 });
+
+
+test("Copy summary receipts authenticate the actual clipboard route through Edge", async () => {
+  const { createSummaryProof } = await proofHelpers();
+  const edge = await edgeHarness();
+  const report = payload({ destination_platform: "clipboard", summary_confirmed_at: new Date().toISOString(), model: "gemini-3.6-flash", reported_model: "gemini-3.6-flash" });
+  report.summary_proof = await createSummaryProof(report, KEY);
+  assert.equal((await edge.send(report)).status, 204);
+  assert.equal(edge.calls[0].args.p_destination_platform, "clipboard");
+  assert.equal(edge.calls[0].args.p_summary_verified, true);
+  assert.equal(edge.calls[0].args.p_model, "gemini-3.6-flash");
+  assert.equal((await edge.send({ ...report, destination_platform: "claude" })).status, 422);
+});
