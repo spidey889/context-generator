@@ -460,11 +460,19 @@ function destinationFixture() {
   <script>
     window.__capContextSmokeSendClicks = 0;
     window.__capContextSmokeStatusHistory = [];
+    window.__capContextSmokeBodyReplaced = false;
     new MutationObserver(() => {
       const text = document.getElementById("context-generator-destination-status")?.textContent;
       const history = window.__capContextSmokeStatusHistory;
       if (text && history.at(-1) !== text) history.push(text);
-    }).observe(document.body, { childList: true, subtree: true, characterData: true });
+      if (${EARLY_HANDOFF_SMOKE} && text?.startsWith("Polishing your summary") && !window.__capContextSmokeBodyReplaced) {
+        window.__capContextSmokeBodyReplaced = true;
+        // Model a destination replacing its body during initial hydration.
+        const replacement = document.body.cloneNode(false);
+        replacement.append(...document.body.childNodes);
+        document.body.replaceWith(replacement);
+      }
+    }).observe(document.documentElement, { childList: true, subtree: true, characterData: true });
     document.getElementById("send-button").addEventListener("click", () => { window.__capContextSmokeSendClicks += 1; });
   </script>
 </body>
@@ -638,7 +646,11 @@ async function startFixtureServer() {
         await new Promise(resolve => setTimeout(resolve, 21000));
         state.summaryPending = false;
       }
-      const receipt = await telemetryFixture.signSummary(state.summaryRequests.at(-1)?.telemetry);
+      const summaryTelemetry = state.summaryRequests.at(-1)?.telemetry;
+      // This status-only mode also accepts an unattributed summary: optional
+      // initial storage may time out without blocking the actual transfer.
+      const receipt = EARLY_HANDOFF_SMOKE && !summaryTelemetry
+        ? {} : await telemetryFixture.signSummary(summaryTelemetry);
       const streaming = request.headers.accept === "application/x-ndjson";
       response.writeHead(200, {
         "Access-Control-Allow-Origin": "*",
@@ -1101,7 +1113,7 @@ async function verifyEarlyHandoff({ sourceSession, devToolsPort, origin, state, 
         await session.call("Runtime.enable");
       }
       const status = await session.evaluate('({ text: document.getElementById("context-generator-destination-status")?.textContent, value: document.querySelector("textarea")?.value })');
-      if (status.text !== "Your context is being polished…" || status.value !== "") continue;
+      if (status.text !== "Polishing your summary…\nIt will be pasted here when it’s ready." || status.value !== "") continue;
       // Query native tab/window state: DevTools page attachment can influence
       // document.visibilityState even when the extension activated the tab.
       const worker = (await getTargets(devToolsPort)).find(item => item.type === "service_worker" && item.url.endsWith("/background.js"));
@@ -1118,6 +1130,15 @@ async function verifyEarlyHandoff({ sourceSession, devToolsPort, origin, state, 
     return null;
   }, "the early destination reveal before summary completion", 25000);
   assert.equal(state.summaryPending, true, "Polishing precedes the real summary response.");
+  assert.equal(await early.session.evaluate("window.__capContextSmokeBodyReplaced"), true);
+  const visibleCue = await early.session.evaluate(`(() => {
+    const cue = document.getElementById("context-generator-destination-status");
+    const rect = cue.getBoundingClientRect();
+    const style = getComputedStyle(cue);
+    return rect.width > 0 && rect.height > 0 && rect.top >= 0 && rect.bottom <= innerHeight
+      && style.visibility === "visible" && style.display !== "none" && Number(style.opacity) > 0;
+  })()`);
+  assert.equal(visibleCue, true, "The cue stays visible through destination hydration and the native tab switch.");
   if (HANDOFF_SCREENSHOT_PATH) {
     await fs.promises.mkdir(path.dirname(HANDOFF_SCREENSHOT_PATH), { recursive: true });
     const shot = await early.session.call("Page.captureScreenshot", { format: "png" });
@@ -1129,7 +1150,7 @@ async function verifyEarlyHandoff({ sourceSession, devToolsPort, origin, state, 
     const values = await early.session.evaluate("window.__capContextSmokeStatusHistory");
     return values.some(text => text.startsWith("Context ready.")) ? values : null;
   }, "the verified ready cue");
-  assert.ok(history.indexOf("Your context is being polished…") < history.indexOf("Pasting your context…"));
+  assert.ok(history.indexOf("Polishing your summary…\nIt will be pasted here when it’s ready.") < history.indexOf("Pasting your context…"));
   assert.equal(await early.session.evaluate("window.__capContextSmokeSendClicks"), 0);
   assert.equal(state.summaryRequests.length, 1);
   assert.equal(destinationSessions.size, 1, "One prepared destination, no duplicate recovery.");

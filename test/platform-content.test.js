@@ -2234,6 +2234,28 @@ test("summary completion, cancellation and teardown cannot trigger a delayed rev
   }
 });
 
+clockTest("waiting destination cues render before body mount and survive body replacement", () => {
+  const hooks = loadPlatformContent([]);
+  hooks.document.createElement = () => {
+    const node = new FakeElement();
+    node.remove = () => { node.isConnected = false; };
+    return node;
+  };
+  hooks.document.getElementById = id => hooks.document.documentElement.children.find(node => node.id === id && node.isConnected) || null;
+  hooks.document.body = null;
+  let result;
+  hooks.runtimeMessageListeners[0]({ type: "SHOW_TRANSFER_PROGRESS", phase: "polishing", destination: "chatgpt",
+    transferId: "mount-test", deadlineAt: Date.now() + 10000 }, {}, response => { result = response; });
+  assert.equal(result.ok, true);
+  const cue = hooks.document.getElementById("context-generator-destination-status");
+  assert.ok(cue, "A successful status reply must have a mounted banner, even before body exists.");
+  assert.equal(cue.textContent, "Polishing your summary…\nIt will be pasted here when it’s ready.");
+  hooks.document.body = new FakeElement({ tag: "body" });
+  assert.equal(hooks.document.getElementById(cue.id), cue);
+  hooks.runtimeMessageListeners[0]({ type: "CANCEL_TRANSFER", transferId: "mount-test" }, {}, () => {});
+  assert.equal(cue.isConnected, false);
+});
+
 clockTest("waiting destination cues expire and ignore cancellation of another attempt", async () => {
   const input = new FakeElement({ tag: "textarea", attrs: { id: "prompt-textarea" } });
   input.value = "My waiting draft";
@@ -2243,7 +2265,7 @@ clockTest("waiting destination cues expire and ignore cancellation of another at
     node.remove = () => { node.isConnected = false; };
     return node;
   };
-  hooks.document.getElementById = id => hooks.document.body.children.find(node => node.id === id && node.isConnected) || null;
+  hooks.document.getElementById = id => hooks.document.documentElement.children.find(node => node.id === id && node.isConnected) || null;
   const listener = hooks.runtimeMessageListeners[0];
   const message = { type: "SHOW_TRANSFER_PROGRESS", phase: "polishing", destination: "chatgpt",
     transferId: "waiting-test", deadlineAt: Date.now() + 1000 };
@@ -2251,7 +2273,7 @@ clockTest("waiting destination cues expire and ignore cancellation of another at
   listener(message, {}, response => { result = response; });
   assert.equal(result.ok, true);
   const cue = hooks.document.getElementById("context-generator-destination-status");
-  assert.equal(cue.textContent, "Your context is being polished…");
+  assert.equal(cue.textContent, "Polishing your summary…\nIt will be pasted here when it’s ready.");
   assert.equal(input.value, "My waiting draft");
   listener({ type: "CANCEL_TRANSFER", transferId: "another-attempt" }, {}, () => {});
   assert.equal(cue.isConnected, true);
@@ -2268,7 +2290,7 @@ clockTest("destination status follows verified insertion and cleans up without s
     node.remove = () => { node.isConnected = false; };
     return node;
   };
-  hooks.document.getElementById = id => hooks.document.body.children.find(node => node.id === id && node.isConnected) || null;
+  hooks.document.getElementById = id => hooks.document.documentElement.children.find(node => node.id === id && node.isConnected) || null;
   hooks.window.performance.getEntriesByType = () => [{ domContentLoadedEventEnd: 42.4 }];
   const listener = hooks.runtimeMessageListeners[0];
   let respond;
@@ -2297,7 +2319,7 @@ clockTest("destination status reports failure without overwriting a restored dra
     node.remove = () => { node.isConnected = false; };
     return node;
   };
-  hooks.document.getElementById = id => hooks.document.body.children.find(node => node.id === id && node.isConnected) || null;
+  hooks.document.getElementById = id => hooks.document.documentElement.children.find(node => node.id === id && node.isConnected) || null;
   const result = await new Promise(resolve => hooks.runtimeMessageListeners[0](
     { type: "PASTE_CONTEXT", destination: "chatgpt", text: "carry" }, {}, resolve
   ));

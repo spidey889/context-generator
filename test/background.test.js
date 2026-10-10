@@ -404,6 +404,8 @@ test("near-end reveal is text-free and subsequent delivery never steals focus ag
     const progress = harness.operations.sent.find(({ message }) => message.type === "SHOW_TRANSFER_PROGRESS");
     assert.equal(progress.message.phase, "polishing");
     assert.equal(Object.hasOwn(progress.message, "text"), false);
+    assert.equal(harness.operations.sent.filter(({ message }) => message.type === "SHOW_TRANSFER_PROGRESS").length, 2,
+      "Confirm the waiting cue again after native activation.");
     assert.equal(harness.operations.updated.length, 1);
     assert.equal(harness.operations.sent.some(({ message }) => message.type === "PASTE_CONTEXT"), false);
     const response = await harness.sendTransfer(destination, prepared.tabId, false, null, sourceTab);
@@ -413,6 +415,21 @@ test("near-end reveal is text-free and subsequent delivery never steals focus ag
     assert.equal((await harness.activateDestination(destination, prepared.tabId, null, sourceTab)).ok, true);
     assert.equal(harness.operations.updated.length, 1, "Final reveal also respects the earlier switch.");
   }
+});
+
+test("a status confirmation failure after switching never causes a second focus during paste", async () => {
+  const sourceTab = { id: 9, windowId: 1, index: 0 };
+  let progressRequests = 0;
+  const harness = loadBackgroundForTransferTest({ sourceTab, sendMessageImpl: async (_tabId, message) => {
+    if (message.type === "SHOW_TRANSFER_PROGRESS" && ++progressRequests === 2) return { ok: false };
+    return { ok: true };
+  } });
+  const prepared = await harness.prepare("claude", sourceTab);
+  assert.equal((await harness.revealDestination("claude", prepared.tabId, sourceTab)).ok, false);
+  assert.equal(progressRequests, 2);
+  assert.equal(harness.operations.updated.length, 1);
+  assert.equal((await harness.sendTransfer("claude", prepared.tabId, false, null, sourceTab)).ok, true);
+  assert.equal(harness.operations.updated.length, 1);
 });
 
 test("early reveal rejects unrelated, navigated and closed destinations", async () => {

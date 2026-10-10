@@ -1635,15 +1635,23 @@ async function revealDestinationProgress(tabId, destinationId, deadlineAt, trans
     throw new Error("The destination is no longer a new chat.");
   }
   try {
-    const response = await sendMessageWhenReady(tabId, {
+    const statusMessage = {
       type: "SHOW_TRANSFER_PROGRESS", phase: "polishing", destination: destinationId,
       transferId, deadlineAt
-    }, 6000, DESTINATIONS[destinationId].name, { ...createBackgroundTrace(), operation });
+    };
+    const statusDeadlineAt = Math.min(deadlineAt, Date.now() + 6000);
+    const showProgress = () => sendMessageWhenReady(tabId, statusMessage,
+      Math.max(1, statusDeadlineAt - Date.now()), DESTINATIONS[destinationId].name,
+      { ...createBackgroundTrace(), operation });
+    const response = await showProgress();
     if (response?.ok !== true) throw new Error("The destination was not ready.");
     await activateVerifiedDestinationTab(tabId, destinationId, deadlineAt, transferId, sourceTab);
     operation.earlyRevealedTabId = tabId;
     // Retain native focus settling if the summary finishes immediately.
     operation.earlyRevealedAt = Date.now();
+    // Activation can finish a navigation begun during background warmup.
+    // Confirm the cue in the visible document before completing the reveal.
+    if ((await showProgress())?.ok !== true) throw new Error("The destination status was not ready.");
   } catch (error) {
     chrome.tabs.sendMessage(tabId, { type: "FINISH_TRANSFER_PROGRESS", transferId }).catch(() => {});
     throw error;

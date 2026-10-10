@@ -4,6 +4,8 @@ A short history of decisions and regressions that matter when changing the code.
 
 ## 2026-10-10
 
+- **Waiting text survives the fast-transfer tab switch.** Fixed a successful status reply with no banner when destination warmup preceded body creation. Mounted the cue outside the page body, confirmed it again after native activation within the existing readiness budget, and replaced the waiting copy with “Polishing your summary…” / “It will be pasted here when it’s ready.” The existing paste/ready sequence remains. All 171 scoped tests and the isolated Brave check passed, including visible waiting text through body replacement/native activation, exact insertion, one destination and no Send click. The status-only fixture accepts optional missing attribution when initial storage is slow; regular telemetry checks remain strict.
+
 - Renamed the near-end handoff prototype branch from `codex/master-work-1009` to `codex/fast-transfer` (briefly named `codex/near-end-handoff`) so it is easier to recognize. The worktree directory stays the same so the unpacked extension path remains usable.
 
 ## 2026-10-09

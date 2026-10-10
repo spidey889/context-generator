@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-09-near-end-handoff-v121";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-10-visible-handoff-v122";
   const INLINE_PILL_SIZE = 36;
   const ownedUiStyleSheets = new Map();
   const CLAUDE_INLINE_STYLE_ID = "context-generator-claude-inline-styles";
@@ -745,7 +745,11 @@
         return false;
       }
       finishDestinationWaitingStatus(destinationWaitingStatus?.transferId);
-      const finish = showDestinationPasteStatus("Your context is being polished…");
+      const finish = showDestinationPasteStatus("Polishing your summary…\nIt will be pasted here when it’s ready.");
+      if (!finish) {
+        sendResponse({ ok: false });
+        return false;
+      }
       const waiting = { transferId: message.transferId, finish, timer: null };
       destinationWaitingStatus = waiting;
       waiting.timer = setTimeout(() => finishDestinationWaitingStatus(message.transferId), message.deadlineAt - Date.now());
@@ -761,7 +765,7 @@
     if (message?.type === "PASTE_CONTEXT") {
       const pasteStartedAt = getNow();
       finishDestinationWaitingStatus(destinationWaitingStatus?.transferId);
-      const finishStatus = showDestinationPasteStatus();
+      const finishStatus = showDestinationPasteStatus() || (() => {});
       pasteIntoPlatform(message.text, message.destination, message.transferId, message.deadlineAt, message.sourceTabId)
         .then((timing) => {
           finishStatus(true);
@@ -802,7 +806,10 @@
   }
 
   function showDestinationPasteStatus(text = "Pasting your context…") {
-    if (!document.body) return () => {};
+    // Warmup can run before body exists; page hydration can also replace body.
+    // Keep the cue outside that mount so a successful reply means visible UI.
+    const statusRoot = document.documentElement || document.body;
+    if (!statusRoot) return null;
     document.getElementById(DESTINATION_STATUS_ID)?.remove();
     const status = document.createElement("div");
     status.id = DESTINATION_STATUS_ID;
@@ -810,9 +817,9 @@
     status.setAttribute("role", "status");
     status.setAttribute("aria-live", "polite");
     status.setAttribute("aria-atomic", "true");
-    status.style.cssText = "position:fixed;top:20px;left:50%;transform:translateX(-50%);z-index:2147483647;box-sizing:border-box;max-width:calc(100vw - 32px);padding:12px 18px;border:1px solid #6b5c92;border-radius:14px;background:#211b30;color:#f5f0ff;box-shadow:0 6px 24px #0004;font:500 14px/1.5 system-ui,sans-serif;text-align:center;pointer-events:none;";
+    status.style.cssText = "position:fixed;top:20px;left:50%;transform:translateX(-50%);z-index:2147483647;box-sizing:border-box;max-width:calc(100vw - 32px);padding:12px 18px;border:1px solid #6b5c92;border-radius:14px;background:#211b30;color:#f5f0ff;box-shadow:0 6px 24px #0004;font:500 14px/1.5 system-ui,sans-serif;text-align:center;white-space:pre-line;pointer-events:none;";
     status.textContent = text;
-    document.body.appendChild(status);
+    statusRoot.appendChild(status);
     return (succeeded) => {
       // Late completion must not replace a newer transfer's cue or recreated UI.
       if (document.getElementById(DESTINATION_STATUS_ID) !== status) return;
