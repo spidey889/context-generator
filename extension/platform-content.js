@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-10-responsive-picker-v125";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-10-minimal-orb-click-v126";
   const INLINE_PILL_SIZE = 36;
   const ownedUiStyleSheets = new Map();
   const CLAUDE_INLINE_STYLE_ID = "context-generator-claude-inline-styles";
@@ -5515,28 +5515,18 @@
     };
     updateMotion();
     addOwnedEventListener(reducedMotion, "change", updateMotion);
-    // Picker/handoff owns the pressed scale; hovering must not overwrite it.
+    // Animate hover only; a click must not introduce a press/rebound cycle.
     const canHover = () => !bubble.disabled && !isRunning && bubble.getAttribute("aria-expanded") !== "true";
     addOwnedEventListener(bubble, "mouseenter", () => {
       if (!canHover()) return;
+      updateMotion();
       bubble.style.filter = "brightness(1.1) saturate(1.08) drop-shadow(0 0 6px rgba(139,92,246,0.38)) drop-shadow(0 3px 5px rgba(0,0,0,0.18))";
       bubble.style.transform = "translate3d(0,-1px,0) scale(1.14)";
     });
     addOwnedEventListener(bubble, "mouseleave", () => {
       if (!canHover()) return;
+      updateMotion();
       bubble.style.filter = "none";
-      bubble.style.transform = "translate3d(0,0,0) scale(1)";
-    });
-    addOwnedEventListener(bubble, "pointerdown", () => {
-      if (!bubble.disabled) bubble.style.transform = "translate3d(0,0,0) scale(0.95)";
-    });
-    addOwnedEventListener(bubble, "pointerup", () => {
-      if (!canHover()) return;
-      bubble.style.transform = bubble.matches(":hover")
-        ? "translate3d(0,-1px,0) scale(1.14)"
-        : "translate3d(0,0,0) scale(1)";
-    });
-    addOwnedEventListener(bubble, "pointercancel", () => {
       bubble.style.transform = "translate3d(0,0,0) scale(1)";
     });
     addOwnedEventListener(bubble, "transitionend", (event) => {
@@ -5549,6 +5539,8 @@
       event.preventDefault();
       event.stopPropagation();
       if (isRunning) return;
+      // Stop an unfinished hover immediately; opening/closing adds no orb motion.
+      bubble.style.transition = "none";
       dismissOnboardingNudge();
       dismissClaudeLimitNudge();
       toggleDestinationSheet();
@@ -7040,8 +7032,6 @@
     const bubble = document.getElementById(BUBBLE_ID);
     if (bubble) {
       bubble.setAttribute("aria-expanded", "true");
-      bubble.style.filter = "brightness(1.14) saturate(1.12) drop-shadow(0 0 7px rgba(153,110,235,0.58)) drop-shadow(0 3px 8px rgba(78,42,128,0.32))";
-      bubble.style.transform = "translate3d(0,-1px,0) scale(1.08)";
     }
     updateDestinationBackdropCutout();
     if (window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) {
