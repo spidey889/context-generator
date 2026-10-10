@@ -77,6 +77,16 @@ jobs:
         run: |
           mkdir -p "$CAP_CONTEXT_SMOKE_ARTIFACT_DIR"
           xvfb-run -a npm run test:extension-smoke 2>&1 | tee "$CAP_CONTEXT_SMOKE_ARTIFACT_DIR/run.log"
+      - name: Brave paste deadlines and delayed composer recovery
+        if: steps.scope.outputs.mode != 'light'
+        timeout-minutes: 2
+        shell: bash
+        env:
+          CAP_CONTEXT_PASTE_RECOVERY_SMOKE: "1"
+          CAP_CONTEXT_SMOKE_ARTIFACT_DIR: .test-artifacts/browser-smoke/paste-recovery
+        run: |
+          mkdir -p "$CAP_CONTEXT_SMOKE_ARTIFACT_DIR"
+          xvfb-run -a npm run test:extension-smoke 2>&1 | tee "$CAP_CONTEXT_SMOKE_ARTIFACT_DIR/run.log"
       - name: Brave ChatGPT fast capture after reload and expired-token cancellation
         if: steps.scope.outputs.mode != 'light'
         timeout-minutes: 3

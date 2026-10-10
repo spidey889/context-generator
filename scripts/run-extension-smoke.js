@@ -222,6 +222,9 @@ async function createSmokeExtension(tempRoot, origin) {
     "  function checkInlinePlacementPathname() {",
     `  window.__capSmokePickerJsonReady = () => pickerJsonCapture?.promise.then(() => true) || Promise.resolve(false);
   window.__capSmokeShowRecovery = () => showFallbackModal("Synthetic recovery context. Preserve the dialog palette.", "Claude", true);
+  window.__capSmokePaste = (text, deadlineAt) => pasteIntoPlatform(text, currentPlatform.id, "smoke-paste-recovery", deadlineAt);
+  window.__capSmokePasteState = () => ({ pending: Boolean(pendingPasteRecheck), userHandled: pendingPasteRecheck?.guard?.userHandled,
+    active: instanceActive, visibility: document.visibilityState, turns: getDetectedConversationMessageCount(), ready: Boolean(findReadyPlatformInput()) });
   window.__capSmokeSourceRouteReady = () => {
     const mount = currentPlatform.id === "claude" ? claudeInlineMount
       : currentPlatform.id === "chatgpt" ? chatGptInlineMount : providerInlineMount;
@@ -1278,6 +1281,70 @@ async function verifyRecoveryPalette(session, contextId) {
   process.stdout.write(`✓ Recovery dialog: ${result.checked} palette checks resist Dark Reader; focus, copy success/reset/failure colors preserved.\n`);
 }
 
+async function verifyPasteRecovery({ browserSession, devToolsPort, origin }) {
+  const carry = "Synthetic carry: preserve every character.\nSecond line.";
+  for (const scenario of ["expired-focus", "disabled", "detached", "focus-remount", "draft"]) {
+    const { targetId } = await browserSession.call("Target.createTarget", {
+      url: `${origin}/destination?${SMOKE_PLATFORM_QUERY}=claude`
+    });
+    let session;
+    try {
+      const target = await waitFor(async () => (await getTargets(devToolsPort)).find(item => item.id === targetId), "paste-recovery fixture tab");
+      session = await CdpSession.connect(target.webSocketDebuggerUrl);
+      await session.call("Runtime.enable");
+      await session.call("Page.bringToFront");
+      await waitFor(() => session.getExtensionContextId() && session.evaluate("typeof window.__capSmokePaste === 'function'", session.getExtensionContextId()), "installed paste-recovery probe");
+      const contextId = session.getExtensionContextId();
+      await browserSession.call("Target.activateTarget", { targetId });
+      await waitFor(() => session.evaluate("document.visibilityState === 'visible'"), "visible paste-recovery destination");
+      if (scenario === "expired-focus") {
+        await session.evaluate(`document.querySelector('textarea').addEventListener('focus', () => {
+          const until = Date.now() + 200; while (Date.now() < until) {}
+        }, { once: true }); true`);
+        const result = await session.evaluate(`window.__capSmokePaste(${JSON.stringify(carry)}, Date.now() + 100)
+          .then(() => 'unexpected-success', error => error.code)`, contextId);
+        assert.equal(result, "transfer_timeout");
+        assert.equal(await session.evaluate("document.querySelector('textarea').value"), "", "expired native focus must perform zero writes");
+      } else {
+        await session.evaluate("window.__recoveryWrites = 0; document.querySelector('form').addEventListener('input', () => window.__recoveryWrites++); true");
+        await session.evaluate(`window.__capSmokePaste(${JSON.stringify(carry)}, Date.now() + 10000)`, contextId);
+        await session.evaluate(`(() => {
+          const editor = document.querySelector('textarea'); editor.value = '';
+          if (${JSON.stringify(scenario)} === 'focus-remount') {
+            editor.blur();
+            editor.addEventListener('focus', () => editor.replaceWith(editor.cloneNode(false)), { once: true });
+          } else if (${JSON.stringify(scenario)} === 'detached') {
+            const replacement = editor.cloneNode(false); editor.remove();
+            setTimeout(() => document.querySelector('form').prepend(replacement), 1700);
+          } else {
+            editor.disabled = true;
+            setTimeout(() => { editor.disabled = false; ${scenario === "draft" ? "editor.value = 'Native draft';" : ""} }, 1700);
+          }
+          return true;
+        })()`);
+        const expected = scenario === "draft" ? "Native draft" : carry;
+        try {
+          await waitFor(() => session.evaluate(`document.querySelector('textarea')?.value === ${JSON.stringify(expected)}`), `${scenario} composer recovery`, 8000);
+        } catch (error) {
+          error.message += `\nRecovery: ${JSON.stringify(await session.evaluate("window.__capSmokePasteState()", contextId))}`;
+          error.message += `\nEditor: ${JSON.stringify(await session.evaluate("({value:document.querySelector('textarea')?.value, disabled:document.querySelector('textarea')?.disabled, writes:window.__recoveryWrites, copy:document.getElementById('context-generator-fallback-modal')?.style.display})"))}`;
+          throw error;
+        }
+        if (scenario === "draft") await waitFor(() => session.evaluate("document.getElementById('context-generator-fallback-modal')?.style.display === 'flex'"), "draft-preserving manual copy");
+        // Allow verification/stability to finish before checking for a late copy dialog.
+        await session.evaluate("new Promise(resolve => setTimeout(resolve, 800))");
+        assert.equal(await session.evaluate("window.__recoveryWrites"), scenario === "draft" ? 1 : 2, "only one actual recovery write");
+        assert.equal(await session.evaluate("document.getElementById('context-generator-fallback-modal')?.style.display === 'flex'"), scenario === "draft");
+      }
+      assert.equal(await session.evaluate("window.__capContextSmokeSendClicks"), 0);
+      process.stdout.write(`✓ Installed Brave paste recovery: ${scenario}, exact text/draft protection and no Send.\n`);
+    } finally {
+      session?.close();
+      await browserSession.call("Target.closeTarget", { targetId });
+    }
+  }
+}
+
 async function run() {
   assert.equal(typeof WebSocket, "function", "This smoke test requires Node.js with the built-in WebSocket client.");
   const braveExecutable = findBraveExecutable();
@@ -1374,6 +1441,10 @@ async function run() {
       await waitFor(() => sourceSession.evaluate("Boolean(window.__capSmokeNativeRequestReady)"), "the fixture's initial native request");
     }
     process.stdout.write("✓ Brave loaded the unpacked extension on the controlled source page.\n");
+    if (process.env.CAP_CONTEXT_PASTE_RECOVERY_SMOKE === "1") {
+      await verifyPasteRecovery({ browserSession, devToolsPort, origin });
+      return;
+    }
     if (EARLY_HANDOFF_SMOKE) {
       await verifyEarlyHandoff({ sourceSession, devToolsPort, origin, state, destinationSessions });
       return;

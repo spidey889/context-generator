@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-10-fast-transfer-orb-tap-v130";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-10-paste-deadline-recovery-v131";
   const INLINE_PILL_SIZE = 36;
   const ownedUiStyleSheets = new Map();
   const CLAUDE_INLINE_STYLE_ID = "context-generator-claude-inline-styles";
@@ -2685,7 +2685,7 @@
       // Allow the platform's initial landing redirect until its composer mounts.
       return (landingPaths.includes(path) ? "new-chat" : path) + (location.search || "");
     });
-    const guard = createPasteRecoveryGuard(trimmedText, destination, routeGuard, transferId, sourceTabId);
+    const guard = createPasteRecoveryGuard(trimmedText, destination, routeGuard, transferId, sourceTabId, deadlineAt);
     guard.diagnostics = diagnostics;
     guard.diagnosticStartedAt = diagnosticStartedAt;
     let retainedGuard = false;
@@ -2708,7 +2708,7 @@
     }
   }
 
-  function createPasteRecoveryGuard(text, destination, routeGuard, transferId = null, sourceTabId = null) {
+  function createPasteRecoveryGuard(text, destination, routeGuard, transferId = null, sourceTabId = null, deadlineAt = null) {
     let editor = null;
     let verified = false;
     let writing = false;
@@ -2744,7 +2744,10 @@
       ...routeGuard,
       get userHandled() { return userHandled; },
       check() {
-        if (cancelled) throw createTransferCancelledError();
+        if (cancelled || !instanceActive) throw createTransferCancelledError();
+        // Awaited source checks and synchronous native focus/input handlers can
+        // cross expiry before its timer runs. Enforce it at the write boundary.
+        checkTransferDeadline({ deadlineAt });
         routeGuard.check();
       },
       async checkActive() {
@@ -2766,11 +2769,14 @@
         this.check();
         // execCommand can emit trusted input even for our own insertion.
         writing = true;
-        try { setEditorText(input, text, destination, guard); }
+        let inserted;
+        try { inserted = setEditorText(input, text, destination, guard); }
         finally { writing = false; }
         this.observe(input);
+        return inserted;
       },
       dispose() {
+        cancelled = true;
         if (activePasteGuards.get(transferId) === guard) activePasteGuards.delete(transferId);
         eventTypes.forEach(type => removeOwnedEventListener(document, type, onUserAction, true));
         routeGuard.dispose();
@@ -2974,6 +2980,8 @@
 
   async function recheckPastedContext(text, destination, pending) {
     let needsCopy = true;
+    const recoveryDeadlineAt = Math.min(pending.deadlineAt || Infinity,
+      Date.now() + (destination.pasteRetryTimeoutMs || PASTE_RETRY_TIMEOUT_MS));
     const checkRecovery = async () => {
       if (pendingPasteRecheck !== pending || pending.guard?.userHandled || getDetectedConversationMessageCount() > 0) {
         needsCopy = false;
@@ -2988,25 +2996,34 @@
       return true;
     };
     try {
-      if (!await checkRecovery()) return;
-      const input = findReadyPlatformInput(destination);
-      if (input) pending.guard.observe(input);
-      if (input && editorContainsText(input, text)) {
-        needsCopy = false;
-        return;
-      }
-      // Do not overwrite a draft the user may have started after tab activation.
-      if (pendingPasteRecheck === pending && input && !getElementText(input).trim()) {
-        pending.guard.insert(input);
-        if (await waitForEditorText(input, text, destination.pasteVerifyTimeoutMs || PASTE_VERIFY_TIMEOUT_MS)) {
-          if (!await checkRecovery()) return;
-          await delay(PASTE_STABILITY_MS);
-          if (!await checkRecovery()) return;
-          if (input.isConnected && editorContainsText(input, text)) {
+      // Hydration can temporarily remove/disable the composer, including on
+      // click/focus. Retry discovery within the normal paste window, but allow
+      // only one actual recovery write: repeated app clears require manual copy.
+      while (Date.now() < recoveryDeadlineAt) {
+        if (!await checkRecovery()) return;
+        if (Date.now() >= recoveryDeadlineAt) break;
+        const input = findReadyPlatformInput(destination);
+        if (input) {
+          pending.guard.observe(input);
+          if (editorContainsText(input, text)) {
             needsCopy = false;
             return;
           }
+          // Preserve drafts restored on focus or typed while discovery waits.
+          if (getElementText(input).trim()) return;
+          if (pending.guard.insert(input) !== false) {
+            const verifyMs = Math.min(destination.pasteVerifyTimeoutMs || PASTE_VERIFY_TIMEOUT_MS,
+              Math.max(0, recoveryDeadlineAt - Date.now()));
+            if (await waitForEditorText(input, text, verifyMs)) {
+              if (!await checkRecovery()) return;
+              await delay(Math.min(PASTE_STABILITY_MS, Math.max(0, recoveryDeadlineAt - Date.now())));
+              if (!await checkRecovery()) return;
+              if (input.isConnected && editorContainsText(input, text)) needsCopy = false;
+            }
+            return;
+          }
         }
+        await delay(Math.min(PASTE_RETRY_INTERVAL_MS, Math.max(0, recoveryDeadlineAt - Date.now())));
       }
     } catch (error) {
       if (["transfer_timeout", "conversation_changed", "user_cancelled"].includes(error?.code)) needsCopy = false;
@@ -3050,42 +3067,48 @@
   function setEditorText(element, text, destination = currentPlatform, guard = null) {
     const observe = changes => globalThis.CapTransferDiagnostics?.update(guard?.diagnostics, changes);
     const remount = () => observe({ editor_connected: false, editor_remounts: (guard?.diagnostics?.editor_remounts || 0) + 1, editor_last_error_code: "editor_detached" });
+    guard?.check();
     element.click();
-    if (!element.isConnected) { remount(); return; }
+    guard?.check();
+    if (!element.isConnected) { remount(); return false; }
     element.focus();
     guard?.check();
     // Claude's startup composer can hydrate/remount on click or focus. Never
     // insert into the detached placeholder; pasteWithRetry finds its successor.
-    if (!element.isConnected) { remount(); return; }
+    if (!element.isConnected) { remount(); return false; }
+    if (!isEditorReady(element)) return false;
     // Focusing a native composer can restore its saved draft synchronously.
     if (getElementText(element).trim()) {
-      if (editorContainsText(element, text)) return;
+      if (editorContainsText(element, text)) return true;
       observe({ draft_present: true });
       throw createDiagnosticError(`${destination.name} editor already contains text. Use an empty chat or copy the context manually.`, "editor_has_draft");
     }
 
     if (element instanceof HTMLTextAreaElement || element instanceof HTMLInputElement) {
       const valueSetter = Object.getOwnPropertyDescriptor(element.constructor.prototype, "value")?.set;
+      guard?.check();
       valueSetter?.call(element, text);
       observe({ insertion_method: "value_setter" });
       dispatchEditorEvents(element, text);
-      return;
+      return true;
     }
 
     // Firefox flattens newlines passed to insertText in contenteditable editors.
     if (isFirefoxBrowser()) {
       selectEditorContents(element);
-      if (document.execCommand("insertHTML", false, formatFirefoxContentEditableHtml(text))) {
+      const html = formatFirefoxContentEditableHtml(text);
+      guard?.check();
+      if (document.execCommand("insertHTML", false, html)) {
         observe({ insertion_method: "insert_html" });
         dispatchEditorEvents(element, text);
-        return;
+        return true;
       }
     }
 
     if (destination?.id === "chatgpt") {
       observe({ insertion_method: "chatgpt" });
-      setChatGptEditorText(element, text);
-      return;
+      setChatGptEditorText(element, text, guard);
+      return true;
     }
 
     const target = element.querySelector("p") || element;
@@ -3095,51 +3118,63 @@
     selection.removeAllRanges();
     selection.addRange(range);
 
+    guard?.check();
     let inserted = document.execCommand("insertText", false, text);
     observe({ insertion_method: "insert_text" });
     let hasText = editorContainsText(element, text);
 
     if (!inserted || !hasText) {
+      guard?.check();
       element.focus();
+      guard?.check();
       document.execCommand("selectAll", false, null);
+      guard?.check();
       inserted = document.execCommand("insertText", false, text);
       hasText = editorContainsText(element, text);
     }
 
     if (!hasText) {
       observe({ insertion_method: "dom_text" });
+      guard?.check();
       target.textContent = text;
       hasText = editorContainsText(element, text);
     }
 
     if (!hasText) {
+      guard?.check();
       element.textContent = text;
     }
 
     dispatchEditorEvents(target, text);
     if (target !== element) dispatchEditorEvents(element, text);
+    return true;
   }
 
-  function setChatGptEditorText(element, text) {
+  function setChatGptEditorText(element, text, guard = null) {
     selectEditorContents(element);
+    guard?.check();
     dispatchBeforeInputPasteEvent(element, text);
 
     if (!editorContainsText(element, text)) {
       selectEditorContents(element);
+      guard?.check();
       dispatchClipboardPasteEvent(element, text);
     }
 
     if (!editorContainsText(element, text)) {
       selectEditorContents(element);
+      guard?.check();
       document.execCommand("insertText", false, text);
     }
 
     if (!editorContainsText(element, text)) {
       document.execCommand("selectAll", false, null);
+      guard?.check();
       document.execCommand("insertText", false, text);
     }
 
     if (!editorContainsText(element, text)) {
+      guard?.check();
       element.textContent = text;
     }
 

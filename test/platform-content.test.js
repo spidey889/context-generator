@@ -410,6 +410,7 @@ function loadPlatformContent(elements = [], hostname = "chatgpt.com", {
   if (storageSet) chrome.storage = { local: { set: storageSet } };
   const sandbox = {
     TextEncoder,
+    navigator: { userAgent: "Chrome" },
     console: {
       ...console,
       debug: () => {},
@@ -2665,6 +2666,175 @@ clockTest("delayed paste recovery offers manual copy if the app clears the retry
   assert.equal(editor.clicks, 2, "only one recovery paste was attempted");
   assert.equal(modal.style.display, "flex");
   assert.equal(copyText.value, summary, "the full summary stays available to copy");
+});
+
+clockTest("paste deadline prevents writes after source checks, click and focus on every destination", async (t) => {
+  for (const [hostname, destination] of [["claude.ai", "claude"], ["chatgpt.com", "chatgpt"], ["gemini.google.com", "gemini"], ["grok.com", "grok"], ["chat.deepseek.com", "deepseek"]]) {
+    for (const boundary of ["source", "click", "focus"]) {
+      const editor = new FakeElement({ tag: "textarea", attrs: { placeholder: "Message" } });
+      let writes = 0;
+      editor.onValueSet = () => writes++;
+      const hooks = loadPlatformContent([editor], hostname, { runtimeSendMessage: async message => {
+        if (boundary === "source" && message.type === "CHECK_TRANSFER_ACTIVE") {
+          await new Promise(resolve => setTimeout(resolve, 200));
+        }
+        return { ok: true };
+      } });
+      // Advance elapsed time without running overdue timers: the write guard
+      // itself must enforce expiry even before a timer gets CPU time.
+      const expire = () => t.mock.timers.setTime(Date.now() + 200);
+      if (boundary === "click") editor.onClick = expire;
+      if (boundary === "focus") editor.focus = expire;
+      await assert.rejects(hooks.pasteIntoPlatform("private carry", destination, "deadline-test", Date.now() + 100, 9),
+        error => error.code === "transfer_timeout", `${destination}: ${boundary}`);
+      assert.equal(writes, 0, `${destination}: ${boundary} must not write`);
+      assert.equal(editor.value, "");
+      if (boundary === "source") assert.equal(editor.clicks, 0);
+      hooks.teardownContextGeneratorInstance();
+    }
+  }
+});
+
+clockTest("paste deadline stops contenteditable fallbacks after native handlers expire it", async (t) => {
+  for (const destination of ["chatgpt", "gemini"]) {
+    const editor = new FakeElement({ attrs: { contenteditable: "true", role: "textbox" } });
+    editor.isContentEditable = true;
+    const hooks = loadPlatformContent([editor], destination === "chatgpt" ? "chatgpt.com" : "gemini.google.com");
+    const commands = [];
+    hooks.window.getSelection = () => ({ removeAllRanges() {}, addRange() {} });
+    hooks.document.createRange = () => ({ selectNodeContents() {} });
+    const expire = () => t.mock.timers.setTime(Date.now() + 200);
+    hooks.document.execCommand = command => { commands.push(command); expire(); return false; };
+    if (destination === "chatgpt") editor.dispatchEvent = event => {
+      if (event.type === "beforeinput") expire();
+      return true;
+    };
+    await assert.rejects(hooks.pasteIntoPlatform("private carry", destination, "fallback-expiry", Date.now() + 100),
+      error => error.code === "transfer_timeout");
+    assert.deepEqual(commands, destination === "chatgpt" ? [] : ["insertText"], "no later native fallback after expiry");
+    assert.equal(editor.textContent, "", "no direct DOM fallback after expiry");
+    hooks.teardownContextGeneratorInstance();
+  }
+});
+
+clockTest("delayed paste recovery cannot write after a late source reply or expiring native focus", async (t) => {
+  for (const boundary of ["source", "focus"]) {
+    let recovery = false;
+    const editor = new FakeElement({ tag: "textarea", attrs: { placeholder: "Message" } });
+    const hooks = loadPlatformContent([editor], "gemini.google.com", { visibilityState: "hidden", runtimeSendMessage: async message => {
+      if (recovery && boundary === "source" && message.type === "CHECK_TRANSFER_ACTIVE") await new Promise(resolve => setTimeout(resolve, 800));
+      return { ok: true };
+    } });
+    const modal = new FakeElement();
+    hooks.registerElementId("context-generator-fallback-modal", modal);
+    await hooks.pasteIntoPlatform("private carry", "gemini", "late-recovery", Date.now() + 1100, 9);
+    editor.value = "";
+    recovery = true;
+    if (boundary === "focus") editor.focus = () => t.mock.timers.setTime(Date.now() + 800);
+    hooks.setVisibility("visible");
+    await new Promise(resolve => setTimeout(resolve, 2000));
+    assert.equal(editor.value, "", boundary);
+    assert.equal(editor.clicks, boundary === "source" ? 1 : 2, boundary);
+    assert.notEqual(modal.style.display, "flex", "expired recovery must not offer manual copy");
+    hooks.teardownContextGeneratorInstance();
+  }
+});
+
+clockTest("delayed paste recovery waits for missing, disabled and focus-remounted composers", async () => {
+  for (const [hostname, destination] of [["claude.ai", "claude"], ["gemini.google.com", "gemini"], ["grok.com", "grok"], ["chat.deepseek.com", "deepseek"]]) {
+    for (const gap of ["detached", "disabled", "focus"]) {
+      const editor = new FakeElement({ tag: "textarea", attrs: { placeholder: "Message" } });
+      const elements = [editor];
+      const hooks = loadPlatformContent(elements, hostname, { visibilityState: "hidden" });
+      const modal = new FakeElement();
+      hooks.registerElementId("context-generator-fallback-modal", modal);
+      const carry = "Context that must survive hydration.";
+      await hooks.pasteIntoPlatform(carry, destination, "recovery-gap", Date.now() + 10000);
+      editor.value = "";
+      let replacement = editor;
+      if (gap === "focus") {
+        replacement = new FakeElement({ tag: "textarea", attrs: { placeholder: "Message" } });
+        editor.focus = () => { editor.isConnected = false; elements[0] = replacement; };
+      } else {
+        setTimeout(() => {
+          if (gap === "detached") { editor.isConnected = false; elements.length = 0; }
+          else editor.setAttribute("aria-disabled", "true");
+        }, 500);
+        setTimeout(() => {
+          if (gap === "detached") {
+            replacement = new FakeElement({ tag: "textarea", attrs: { placeholder: "Message" } });
+            elements.push(replacement);
+          } else editor.removeAttribute("aria-disabled");
+        }, 1500);
+      }
+      hooks.setVisibility("visible");
+      await new Promise(resolve => setTimeout(resolve, 2500));
+      assert.equal(replacement.value, carry, `${destination}: ${gap}`);
+      assert.notEqual(modal.style.display, "flex", `${destination}: ${gap} needs no manual copy`);
+      assert.equal(replacement.clicks, gap === "disabled" ? 2 : 1, "exactly one successful recovery insertion");
+      hooks.teardownContextGeneratorInstance();
+    }
+  }
+});
+
+clockTest("waiting paste recovery preserves drafts and stops for user actions, navigation, replacement and expiry", async () => {
+  for (const stop of ["draft", "edit", "send", "navigate", "cancel", "replace", "deadline", "teardown"]) {
+    const editor = new FakeElement({ tag: "textarea", attrs: { placeholder: "Message" } });
+    const hooks = loadPlatformContent([editor], "gemini.google.com", { visibilityState: "hidden" });
+    const modal = new FakeElement();
+    hooks.registerElementId("context-generator-fallback-modal", modal);
+    const deadline = Date.now() + (stop === "deadline" ? 1100 : 10000);
+    await hooks.pasteIntoPlatform("original carry", "gemini", "old-recovery", deadline);
+    editor.value = "";
+    editor.setAttribute("aria-disabled", "true");
+    hooks.setVisibility("visible");
+    setTimeout(() => {
+      if (stop === "draft") editor.value = "Restored native draft";
+      if (stop === "edit") {
+        hooks.dispatchDocumentEvent("input", { target: editor, isTrusted: true });
+        editor.value = "My new question";
+      }
+      if (stop === "send") hooks.dispatchDocumentEvent("keydown", { target: editor, key: "Enter", isTrusted: true });
+      if (stop === "navigate") hooks.navigate("/app/another-chat");
+      if (stop === "cancel") hooks.runtimeMessageListeners[0]({ type: "CANCEL_TRANSFER", transferId: "old-recovery" }, {}, () => {});
+      if (stop === "replace") {
+        editor.removeAttribute("aria-disabled");
+        void hooks.pasteIntoPlatform("new carry", "gemini", "new-recovery", Date.now() + 5000);
+      }
+      if (stop === "teardown") hooks.teardownContextGeneratorInstance();
+    }, 800);
+    setTimeout(() => editor.removeAttribute("aria-disabled"), 1600);
+    await new Promise(resolve => setTimeout(resolve, 2600));
+    const expected = stop === "draft" ? "Restored native draft" : stop === "edit" ? "My new question" : stop === "replace" ? "new carry" : "";
+    assert.equal(editor.value, expected, stop);
+    assert.equal(modal.style.display === "flex", stop === "draft", `${stop}: only a real draft needs manual copy`);
+    assert.equal(editor.clicks, stop === "replace" ? 2 : 1, `${stop}: old recovery must not insert`);
+    hooks.teardownContextGeneratorInstance();
+  }
+});
+
+clockTest("delayed paste recovery bounds a permanent editor gap and retains the complete carry", async () => {
+  const editor = new FakeElement({ tag: "textarea", attrs: { placeholder: "Message" } });
+  const hooks = loadPlatformContent([editor], "gemini.google.com", { visibilityState: "hidden" });
+  const modal = new FakeElement();
+  const copyText = new FakeElement({ tag: "textarea" });
+  hooks.registerElementId("context-generator-fallback-modal", modal);
+  hooks.registerElementId("context-generator-fallback-text", copyText);
+  await hooks.pasteIntoPlatform("complete carry", "gemini");
+  editor.value = "";
+  editor.setAttribute("aria-disabled", "true");
+  const started = Date.now();
+  hooks.setVisibility("visible");
+  await new Promise(resolve => setTimeout(resolve, 1500));
+  assert.notEqual(modal.style.display, "flex", "a transient gap must still be waiting");
+  await new Promise(resolve => setTimeout(resolve, 23000));
+  assert.equal(modal.style.display, "flex", "composer discovery is bounded by the normal paste window");
+  assert.equal(copyText.value, "complete carry");
+  assert.equal(editor.clicks, 1);
+  assert.ok(Date.now() - started < 25000);
+  assert.equal(hooks.getOwnedLifecycleResourceCounts().intervals, 0);
+  hooks.teardownContextGeneratorInstance();
+  assert.equal(hooks.getOwnedLifecycleResourceCounts().eventListeners, 0);
 });
 
 clockTest("a closed source blocks destination insertion before any editor action", async () => {

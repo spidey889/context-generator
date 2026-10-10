@@ -16,7 +16,7 @@ Cap Context prepares your conversation for another AI and places it in the new m
 
 Open the [Chrome Web Store page](https://chromewebstore.google.com/detail/cap-context/lpkaciijlhckkdhbgidbjfkldigghnjf), select **Add to Chrome**, and you are good to go. It works in Brave too.
 
-The checked-in extension source is version 1.4.11. Web Store publication of this version is tracked separately.
+The checked-in extension source is version 1.4.16. Web Store publication of this version is tracked separately.
 
 ### Load the local extension
 
