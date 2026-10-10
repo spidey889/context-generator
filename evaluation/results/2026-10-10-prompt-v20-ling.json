@@ -1,0 +1,95 @@
+{
+  "version": 1,
+  "syntheticOnly": true,
+  "baselineRef": "4c90320749f7e57fe4447b7e828a2c5901f570f2",
+  "candidateRef": "4c90320749f7e57fe4447b7e828a2c5901f570f2",
+  "candidatePromptSourceSha256": "d0ca375999add59507911d330e47cd38d675e8343e1a4f9d16d25431627bdb58",
+  "fixtureSha256": "bae3f3e5e49b0b84ee3ee85a2ac4deb3cdbf8ad66b7b9981f6c2e102b510406c",
+  "model": "inclusionai/ling-3.1-flash",
+  "repeats": 1,
+  "selectedCases": [
+    "corrected-export-design"
+  ],
+  "longHistory": false,
+  "comparisonRunnerSha256": "772b0899f0f9d29ed8c4d99920e2b6f9e8f0298805ab4a2f6c33f9f917bdf51b",
+  "reviewCriteria": [
+    "Can the next assistant continue the pending task?",
+    "Are essential facts, corrections and constraints faithful?",
+    "Is every claim supported by its source/status?",
+    "Does the delivered handoff retain the seven sections and trusted confirmation?"
+  ],
+  "limitations": "Lexical checks are diagnostics, not semantic grading. Review every full handoff; local fallback is not a successful model generation. Short fixtures force the same generated profile on both variants; production tiny chats still use exact local carry.",
+  "results": [
+    {
+      "caseId": "corrected-export-design",
+      "repeat": 1,
+      "variant": "baseline",
+      "summary": "╔══════════════════════════════════════════╗\n║         CONTEXT CARRY — READY TO PASTE        ║\n╚══════════════════════════════════════════╝\n\n🧠 WHO I AM\nNone. User explicitly stated: \"Do not infer that Jules is me.\" Jules is the reported owner of Project Cedar, not the user. No owner identity has been linked to the user's account.\n\n🎯 WHAT WE WERE DOING\nFixing Project Cedar's nightly export worker, which reportedly times out only for files larger than 30 MB. Reported facts: database writes are healthy and no customer records were lost. Production branch is release; region is ap-south-1.\n\n📍 WHERE WE LEFT OFF\nUser requested a patch proposal for the two-upload design, targeting worker/export.mjs. Implementation, testing, and deployment have not started. No code changed and no checks run.\n\n✅ DECISIONS MADE\n- Use 10 MB chunks (accepted).\n- Use two simultaneous uploads — replaces the earlier six-upload choice (user-made replacement).\n- Keep the required invoice-format fix (accepted).\n\n⚠️ OPEN QUESTIONS\n- Retry policy undecided: fixed 400 ms pause OR jitter between 200-600 ms. Both options remain live; neither selected.\n\n📦 KEY CONTEXT\n- Verbatim constraint: \"Do not deploy this change.\" Rollback is not approved.\n- Rejected: increasing the global timeout (user rejected it).\n- Patch target: worker/export.mjs. Failure log exactly: \"upload idle timeout.\"\n- The timeout symptom alone does not establish why the upload stalls.\n\n🔁 NEXT STEP\nReply only: \"Context loaded. Let's pick up right where you left off.\" Then wait for the user.",
+      "generated": true,
+      "model": "inclusionai/ling-3.1-flash",
+      "elapsedMs": 5371,
+      "inputChars": 1341,
+      "inputSha256": "ef8cc7f79b04ba31cf77b9ece7c0b065a01b6f4648f11fc66e4163d9fe576f66",
+      "systemPromptSha256": "37dd8ab714112d13b1cadf1684b6996191f12f8579cfaad27df6a1694f14dbf8",
+      "profile": "small",
+      "forcedGeneratedProfile": false,
+      "maxTokens": 1000,
+      "usage": {
+        "promptTokens": 1955,
+        "completionTokens": 404,
+        "totalTokens": 2359,
+        "cachedTokens": 0
+      },
+      "qualityFlags": [],
+      "fallback": {
+        "attempted": false,
+        "used": false,
+        "servedBy": null,
+        "model": null,
+        "reason": null
+      },
+      "assessment": {
+        "missingFacts": [],
+        "missingCriticalFacts": [],
+        "incorrectFacts": []
+      }
+    },
+    {
+      "caseId": "corrected-export-design",
+      "repeat": 1,
+      "variant": "candidate",
+      "summary": null,
+      "generated": false,
+      "model": "local-direct",
+      "elapsedMs": 464,
+      "inputChars": 1341,
+      "inputSha256": "ef8cc7f79b04ba31cf77b9ece7c0b065a01b6f4648f11fc66e4163d9fe576f66",
+      "systemPromptSha256": "f9ce719278995edb906ba38a5c2ae2aa2251e03561bf905df94b3cff038ba688",
+      "profile": "small",
+      "forcedGeneratedProfile": false,
+      "maxTokens": 1000,
+      "usage": {
+        "promptTokens": 0,
+        "completionTokens": 0,
+        "totalTokens": 0,
+        "cachedTokens": 0
+      },
+      "qualityFlags": [],
+      "fallback": {
+        "attempted": true,
+        "used": true,
+        "servedBy": "local-direct",
+        "model": "local-direct",
+        "reason": "OpenRouter API error 429"
+      },
+      "assessment": null
+    }
+  ],
+  "testRequestBudget": {
+    "slot": "test-b",
+    "used": 2,
+    "limit": 50,
+    "windowHours": 24,
+    "blockedLocally": false
+  }
+}

@@ -63,10 +63,10 @@ test("Ling serves first with full input, private free routing, usage and truthfu
     assert.equal(body.models, undefined, "paused models must not enter server-side automatic fallback");
     assert.deepEqual(body.provider, { require_parameters: true, data_collection: "deny", max_price: { prompt: 0, completion: 0, request: 0 } });
     assert.deepEqual(body.plugins, [{ id: "context-compression", enabled: false }]);
-    assert.match(body.messages[0].content, /Word counts and section budgets are guidance/);
+    assert.match(body.messages[0].content, /allowance .* is guidance, not a minimum/);
     assert.doesNotMatch(body.messages[0].content, /output is below .* words, expand/);
-    assert.match(body.messages[0].content, /named project\/incident owner is not necessarily the user/);
-    assert.match(body.messages[0].content, /Missing information alone is not an open question/);
+    assert.match(body.messages[0].content, /named project\/incident owners in KEY CONTEXT unless explicitly identified as the user/);
+    assert.match(body.messages[0].content, /Missing information alone is not a question/);
     assert.deepEqual(body.reasoning, { enabled: false, exclude: true });
     return response("<think>private chain</think>Windows passed; Linux validation remains pending.");
   };

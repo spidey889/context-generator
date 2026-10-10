@@ -68,7 +68,12 @@ function loadBaseline(ref) {
     fs.rmSync(target, { recursive: true, force: true });
   };
   try {
-    fs.writeFileSync(archive, execFileSync("git", ["archive", "--format=tar", ref, "api", "supabase/functions/_shared"], { cwd: root }));
+    // Newer backend validators import shared extension diagnostics. Older refs
+    // lack that file; avoid archiving the full extension and its large media.
+    const diagnostics = execFileSync("git", ["ls-tree", "--name-only", ref, "--", "extension/transfer-diagnostics.js"],
+      { cwd: root, encoding: "utf8" }).trim();
+    const sources = ["api", "supabase/functions/_shared", ...(diagnostics ? [diagnostics] : [])];
+    fs.writeFileSync(archive, execFileSync("git", ["archive", "--format=tar", ref, ...sources], { cwd: root }));
     execFileSync("tar", ["-xf", archive, "-C", directory]);
     const backend = require(path.join(directory, "api", "summarize.js")).__test;
     return { backend, cleanup };

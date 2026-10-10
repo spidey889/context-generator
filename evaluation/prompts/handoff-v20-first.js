@@ -14,9 +14,8 @@ function getSummarySystemPrompt(profile, options = {}) {
     ? `- Start with the plain-text title exactly: ${CONTEXT_CARRY_TITLE}. Do not draw box-border lines; the backend adds the canonical box after validation.`
     : "- Start with the boxed header exactly as shown in the template.";
 
-  // Only the final template uses standalone output headings: weaker models can
-  // otherwise copy the section guide as a second, incomplete template.
-  // Do not add realistic example facts: models have copied them into carries.
+  // Keep the task first, section-specific rules together, and the source check
+  // last. Do not add realistic example facts: models have copied them into carries.
   return `Create a factual handoff for the next assistant. Preserve the current work and stopping point. Do not answer the pending user request or do new arithmetic, diagnosis, recommendations, drafts or plans.
 
 Follow these steps in order. Steps 1, 2 and 4 are private checks, not output sections.
@@ -30,34 +29,33 @@ Follow these steps in order. Steps 1, 2 and 4 are private checks, not output sec
 - For each useful fact, collect its subject, exact wording, source and status: reported fact, accepted decision, proposal, rejection, constraint, undecided choice or explicit question. Read all turns, including earlier ones. Keep this checklist private.
 - Keep earlier constraints, rejections and unresolved choices unless the user explicitly changes them later. Label replaced or historical facts if still relevant.
 - Use only what the transcript supports. Do not guess identities, responsibilities, requirements, causes, blockers, approvals, completed actions, counts or next work. A symptom does not prove its cause. Missing evidence does not create a release gate or permission to act.
-- Keep results within their stated scope. Separate implementation, testing and deployment. Design approval proves none of them. Local checks do not prove external verification. Proposals and assistant recommendations are not user decisions. Assistant promises are not completed work. Approval to inspect, review or propose is not approval to implement.
+- Keep results within their stated scope. Separate implementation, testing and deployment. Design approval proves none of them. Local checks do not prove external verification. Proposals and assistant recommendations are not user decisions. Assistant promises are not completed work.
 - Keep "not started", "not tested", "not approved" and "unknown" distinct. Preserve missing-result wording exactly: "not reported" must never become "not run", "not started" or "not done". No report means the activity's status is unknown, not that the activity never happened.
 - Keep facts separate from requirements. Data being intact is a reported fact, not a constraint or objective. Use "Reported fact:" and "Constraint:" if needed. Keep observations as observations.
 - Keep exact relevant names, owners, regions, paths, URLs, identifiers, commands, errors, numbers/ranges, test results and integrity/work states. Retain every fact the user asks to carry. Do not calculate totals or include irrelevant archive chatter and reference counts.
 
 3. FILL THE SEVEN SECTIONS
-WHO I AM rules:
-- Include only explicit user identity, role or preferences. Do not turn the task into a biography or assign responsibilities. If none are stated, write exactly None, without explanation.
-- Put named project/incident owners in KEY CONTEXT unless explicitly identified as the user. An unlinked owner's relationship to the user is unknown: do not claim they are or are not the user.
+🧠 WHO I AM
+- Include only explicit user identity, role or preferences. Do not turn the task into a biography or assign responsibilities. Put named project/incident owners in KEY CONTEXT unless explicitly identified as the user. If no user identity, role or preference is stated, write exactly None.
 
-WHAT WE WERE DOING rules:
+🎯 WHAT WE WERE DOING
 - State the supported task and purpose. Do not invent goals, requirements or responsibilities.
 
-WHERE WE LEFT OFF rules:
-- State the latest pending user request explicitly, including its scope and restrictions, and the reported stopping point. Do not perform the request or invent a missing-evidence checklist. Include relevant work states with their original scope.
+📍 WHERE WE LEFT OFF
+- Keep the latest user request pending and the reported stopping point. Do not perform the request or invent a missing-evidence checklist. Include relevant work states with their original scope.
 
-DECISIONS MADE rules:
+✅ DECISIONS MADE
 - Include only choices the user made or accepted, with their stated reasons. Omit reasons that were not given. Put rejections in KEY CONTEXT and undecided choices in OPEN QUESTIONS.
 
-OPEN QUESTIONS rules:
+⚠️ OPEN QUESTIONS
 - Include only explicitly asked unresolved questions or explicitly undecided choices. Keep all options and exact values; do not select one. Missing information alone is not a question, task or requirement. Put untested, unimplemented or unknown states in WHERE WE LEFT OFF or KEY CONTEXT. If no explicit unresolved question or choice exists, write None.
 
-KEY CONTEXT rules:
+📦 KEY CONTEXT
 - Copy operational prohibitions and important explicit constraints verbatim, with their subject if needed. Keep their scope. Do not weaken unconditional prohibitions, add conditions or invent exceptions. Mark rejected ideas as rejected, not future options.
-- Copy current drafts, code/formulas, failing input, expected/actual output and reproduction commands verbatim when requested or needed to continue. Include relevant failed attempts, their observed results and any stated reason for abandoning them. Do not infer their cause or claim another approach works.
+- Preserve the usable current draft, code/formula, failing input, expected/actual output and reproduction command verbatim where needed to continue. Include relevant failed attempts, their observed results and any stated reason for abandoning them. Do not infer their cause or claim another approach works.
 - Include supplied artifact paths/URLs with their stated purpose. Also carry essential text/code/evidence because the next assistant may lack file access. Include named owners and other relevant facts.
 
-NEXT STEP rules:
+🔁 NEXT STEP
 - Copy the template's fixed confirmation instruction. Put the pending task in WHERE WE LEFT OFF.
 
 4. WRITE CONCISELY AND CHECK BEFORE RETURNING
@@ -70,7 +68,7 @@ OUTPUT RULES
 - Return only the filled context block below. No intro, commentary, markdown fence, private checklist or retired skill-template footer.
 ${headerRule}
 - Use the template's seven headings exactly, once each, in order on standalone lines. Keep their emoji and capitalization. Replace bracket hints with supported content or None.
-- The 🔁 NEXT STEP section must be exactly: ${DESTINATION_CONFIRMATION_INSTRUCTION}
+- The 🔁 NEXT STEP section must contain exactly the fixed instruction above. Do not place the pending task there.
 
 Required template:
 ${getContextCarryTemplate(profile, options)}`;

@@ -1,0 +1,922 @@
+{
+  "version": 1,
+  "syntheticOnly": true,
+  "baselineRef": "4c90320749f7e57fe4447b7e828a2c5901f570f2",
+  "candidateRef": "4c90320749f7e57fe4447b7e828a2c5901f570f2",
+  "candidatePromptSourceSha256": "d0ca375999add59507911d330e47cd38d675e8343e1a4f9d16d25431627bdb58",
+  "fixtureSha256": "bae3f3e5e49b0b84ee3ee85a2ac4deb3cdbf8ad66b7b9981f6c2e102b510406c",
+  "model": "dots-studio/dots-3-note-preview:free",
+  "repeats": 2,
+  "selectedCases": [
+    "corrected-export-design",
+    "continue-latest-draft",
+    "debugging-reproduction",
+    "missing-reason-and-unverified-status",
+    "review-budget-draft",
+    "continue-latest-draft-long-90000"
+  ],
+  "longHistory": false,
+  "comparisonRunnerSha256": "772b0899f0f9d29ed8c4d99920e2b6f9e8f0298805ab4a2f6c33f9f917bdf51b",
+  "reviewCriteria": [
+    "Can the next assistant continue the pending task?",
+    "Are essential facts, corrections and constraints faithful?",
+    "Is every claim supported by its source/status?",
+    "Does the delivered handoff retain the seven sections and trusted confirmation?"
+  ],
+  "limitations": "Lexical checks are diagnostics, not semantic grading. Review every full handoff; local fallback is not a successful model generation. Short fixtures force the same generated profile on both variants; production tiny chats still use exact local carry.",
+  "results": [
+    {
+      "caseId": "corrected-export-design",
+      "repeat": 1,
+      "variant": "baseline",
+      "summary": "╔══════════════════════════════════════════╗\n║         CONTEXT CARRY — READY TO PASTE        ║\n╚══════════════════════════════════════════╝\n\n🧠 WHO I AM\nNone\n\n🎯 WHAT WE WERE DOING\nFixing Project Cedar's nightly export worker (worker/export.mjs) in production branch \"release\", region \"ap-south-1\". The export times out only for files larger than 30 MB. Database writes are healthy and no customer records were lost. The failure log is exactly: \"upload idle timeout\". The goal is to resolve the timeout by adjusting upload concurrency and chunking, while preserving a required invoice-format fix and avoiding a global timeout increase.\n\n📍 WHERE WE LEFT OFF\nThe user requested a patch proposal for a two-upload design with 10 MB chunks, preserving the no-deploy instruction and both retry policy options (fixed 400 ms or jitter 200-600 ms). Implementation, testing, and deployment have not started. The owner is Jules, but no owner identity has been linked to the user's account.\n\n✅ DECISIONS MADE\n- Rejected: Increasing the global timeout.\n- Accepted: Using 10 MB chunks.\n- Accepted: Two simultaneous uploads (replacing the earlier six-upload choice).\n- Accepted: Keep the required invoice-format fix; rollback is not approved.\n- Undecided: Retry policy (fixed 400 ms pause vs. jitter between 200-600 ms).\n\n⚠️ OPEN QUESTIONS\n- Which retry policy to implement: fixed 400 ms pause or jitter between 200-600 ms?\n\n📦 KEY CONTEXT\n- Project: Project Cedar nightly export worker.\n- File: worker/export.mjs.\n- Branch: release.\n- Region: ap-south-1.\n- Failure log: \"upload idle timeout\".\n- Symptom: Timeout only for files > 30 MB.\n- Constraint: Do not deploy this change.\n- Constraint: Rollback is not approved.\n- Constraint: Keep the required invoice-format fix.\n- Owner: Jules (not linked to user account).\n- Rejected idea: Increasing the global timeout.\n- Current design: Two simultaneous uploads, 10 MB chunks.\n- Retry options: Fixed 400 ms pause OR jitter 200-600 ms.\n\n🔁 NEXT STEP\nReply only: \"Context loaded. Let's pick up right where you left off.\" Then wait for the user.",
+      "generated": true,
+      "model": "dots-studio/dots-3-note-preview:free",
+      "elapsedMs": 9928,
+      "inputChars": 1341,
+      "inputSha256": "ef8cc7f79b04ba31cf77b9ece7c0b065a01b6f4648f11fc66e4163d9fe576f66",
+      "systemPromptSha256": "37dd8ab714112d13b1cadf1684b6996191f12f8579cfaad27df6a1694f14dbf8",
+      "profile": "small",
+      "forcedGeneratedProfile": false,
+      "maxTokens": 1000,
+      "usage": {
+        "promptTokens": 1881,
+        "completionTokens": 542,
+        "totalTokens": 2423,
+        "cachedTokens": 0
+      },
+      "qualityFlags": [],
+      "fallback": {
+        "attempted": false,
+        "used": false,
+        "servedBy": null,
+        "model": null,
+        "reason": null
+      },
+      "assessment": {
+        "missingFacts": [],
+        "missingCriticalFacts": [],
+        "incorrectFacts": []
+      }
+    },
+    {
+      "caseId": "corrected-export-design",
+      "repeat": 1,
+      "variant": "candidate",
+      "summary": "╔══════════════════════════════════════════╗\n║         CONTEXT CARRY — READY TO PASTE        ║\n╚══════════════════════════════════════════╝\n\n🧠 WHO I AM\nNone (no explicit user identity, role, or preferences stated; Jules is explicitly identified as the project owner, not the user).\n\n🎯 WHAT WE WERE DOING\nFixing Project Cedar's nightly export worker (owner: Jules) to resolve upload timeouts for files >30 MB in region ap-south-1 on the release branch. The goal is to implement a patch proposal for a two-upload design with 10 MB chunks, preserving the no-deploy instruction and both retry policy options.\n\n📍 WHERE WE LEFT OFF\nThe user requested a patch proposal for the two-upload design. The target file is worker/export.mjs. The failure log is exactly: \"upload idle timeout\". Implementation, testing, and deployment have not started. No code changes have been made. No checks have been run. The no-deploy instruction remains active.\n\n✅ DECISIONS MADE\n- Rejected: Increasing the global timeout.\n- Accepted: Use 10 MB chunk size.\n- Accepted: Use two simultaneous uploads (replacing the earlier six-upload choice).\n- Accepted: Keep the required invoice-format fix; rollback is not approved.\n- Undecided: Retry policy (fixed 400 ms pause vs. jitter between 200-600 ms).\n\n⚠️ OPEN QUESTIONS\n- Which retry policy to implement: fixed 400 ms pause or jitter between 200-600 ms?\n\n📦 KEY CONTEXT\n- Project: Project Cedar nightly export worker.\n- Owner: Jules (explicitly not the user).\n- Branch: release.\n- Region: ap-south-1.\n- Symptom: Upload idle timeout for files >30 MB.\n- Status: Database writes are healthy; no customer records were lost.\n- Target file: worker/export.mjs.\n- Failure log: \"upload idle timeout\".\n- Constraints: Do not deploy this change. Do not infer that Jules is the user. No owner identity has been linked to the user's account.\n- Current design: Two simultaneous uploads, 10 MB chunks, invoice-format fix required, rollback not approved.\n- Retry options: Fixed 400 ms pause OR jitter 200-600 ms.\n\n🔁 NEXT STEP\nReply only: \"Context loaded. Let's pick up right where you left off.\" Then wait for the user.",
+      "generated": true,
+      "model": "dots-studio/dots-3-note-preview:free",
+      "elapsedMs": 7781,
+      "inputChars": 1341,
+      "inputSha256": "ef8cc7f79b04ba31cf77b9ece7c0b065a01b6f4648f11fc66e4163d9fe576f66",
+      "systemPromptSha256": "f9ce719278995edb906ba38a5c2ae2aa2251e03561bf905df94b3cff038ba688",
+      "profile": "small",
+      "forcedGeneratedProfile": false,
+      "maxTokens": 1000,
+      "usage": {
+        "promptTokens": 1821,
+        "completionTokens": 547,
+        "totalTokens": 2368,
+        "cachedTokens": 0
+      },
+      "qualityFlags": [],
+      "fallback": {
+        "attempted": false,
+        "used": false,
+        "servedBy": null,
+        "model": null,
+        "reason": null
+      },
+      "assessment": {
+        "missingFacts": [],
+        "missingCriticalFacts": [],
+        "incorrectFacts": []
+      }
+    },
+    {
+      "caseId": "continue-latest-draft",
+      "repeat": 1,
+      "variant": "candidate",
+      "summary": "╔══════════════════════════════════════════╗\n║         CONTEXT CARRY — READY TO PASTE        ║\n╚══════════════════════════════════════════╝\n\n🧠 WHO I AM\nNone\n\n🎯 WHAT WE WERE DOING\nWriting the opening of a small community newsletter called The Lantern for neighbors, not sponsors. Tone must be friendly and plain. No invented attendance numbers or quotes. The current task is to write only the second paragraph of the newsletter, matching the voice of the first paragraph, without rewriting or altering the existing opening.\n\n📍 WHERE WE LEFT OFF\nThe user provided the first paragraph verbatim and requested a second paragraph in the same voice. The second paragraph must include that the courtyard is outdoors and that visitors can leave whenever they like. The assistant has not yet written the second paragraph. The first paragraph is locked and must not be changed.\n\n✅ DECISIONS MADE\n- The first paragraph is fixed and must not be rewritten or revived from earlier drafts.\n- The big claim about town-wide turnout was rejected.\n- There is no registration link.\n- The event is Saturday 18 April, 16:00–18:00, at the old library courtyard.\n- Attendees must bring a mug; tea is free.\n- Children’s books may be exchanged, but selling books is not allowed.\n- The second paragraph must be written in the same voice as the first and must mention the outdoor setting and flexible departure.\n\n⚠️ OPEN QUESTIONS\nNone\n\n📦 KEY CONTEXT\n- Newsletter name: The Lantern\n- Audience: Neighbors, not sponsors\n- Tone: Friendly and plain\n- First paragraph (locked, verbatim): 'A spare book, a familiar face, and a cup of tea: join us at the old library courtyard on Saturday 18 April, 16:00-18:00. Bring a mug and a children's book to exchange. Tea is free; books are for swapping, not selling.'\n- Rejected content: Big claim about town-wide turnout, invented attendance numbers, registration link\n- Second paragraph requirements: Same voice as first, mention outdoor courtyard, mention visitors can leave anytime\n- Not yet written: Second paragraph\n\n🔁 NEXT STEP\nReply only: \"Context loaded. Let's pick up right where you left off.\" Then wait for the user.",
+      "generated": true,
+      "model": "dots-studio/dots-3-note-preview:free",
+      "elapsedMs": 7469,
+      "inputChars": 1368,
+      "inputSha256": "66da686d897a65fd29b016ae24b7ce4948600840f2018b21082cb7b57307c255",
+      "systemPromptSha256": "f9ce719278995edb906ba38a5c2ae2aa2251e03561bf905df94b3cff038ba688",
+      "profile": "small",
+      "forcedGeneratedProfile": false,
+      "maxTokens": 1000,
+      "usage": {
+        "promptTokens": 1830,
+        "completionTokens": 507,
+        "totalTokens": 2337,
+        "cachedTokens": 0
+      },
+      "qualityFlags": [],
+      "fallback": {
+        "attempted": false,
+        "used": false,
+        "servedBy": null,
+        "model": null,
+        "reason": null
+      },
+      "assessment": {
+        "missingFacts": [],
+        "missingCriticalFacts": [
+          "Do not rewrite my opening OR do not rewrite the opening OR keep the opening unchanged"
+        ],
+        "incorrectFacts": []
+      }
+    },
+    {
+      "caseId": "continue-latest-draft",
+      "repeat": 1,
+      "variant": "baseline",
+      "summary": "╔══════════════════════════════════════════╗\n║         CONTEXT CARRY — READY TO PASTE        ║\n╚══════════════════════════════════════════╝\n\n🧠 WHO I AM\nNone\n\n🎯 WHAT WE WERE DOING\nWriting the opening of a small community newsletter called The Lantern for neighbors. The goal is a friendly, plain tone with no invented attendance numbers or quotes. The newsletter covers a Saturday 18 April event at the old library courtyard, 16:00–18:00, with free tea (bring a mug) and children's book exchange (no selling).\n\n📍 WHERE WE LEFT OFF\nThe user provided the exact first paragraph: 'A spare book, a familiar face, and a cup of tea: join us at the old library courtyard on Saturday 18 April, 16:00-18:00. Bring a mug and a children's book to exchange. Tea is free; books are for swapping, not selling.' The user instructed to keep this paragraph exactly as written. The assistant has not yet written the second paragraph, which should include that the courtyard is outdoors and visitors can leave whenever they like, in the same voice, without rewriting the opening or reviving the rejected v1 draft.\n\n✅ DECISIONS MADE\n- The user rejected the assistant's initial proposal of a big claim about the whole town coming together and a registration link.\n- The user rejected the assistant's Draft v1 for inventing turnout (\"Hundreds of neighbors will join us\") and provided the current, approved opening paragraph.\n- The user explicitly instructed to keep the provided opening paragraph exactly as written for now.\n- The user instructed the assistant to write only the second paragraph, in the same voice, without rewriting the opening or reviving v1.\n\n⚠️ OPEN QUESTIONS\nNone\n\n📦 KEY CONTEXT\n- Newsletter name: The Lantern\n- Event date/time: Saturday 18 April, 16:00–18:00\n- Location: old library courtyard\n- Requirements: Bring a mug; tea is free\n- Book exchange rule: Children's books can be exchanged; selling books is not allowed\n- Current approved opening paragraph (verbatim): 'A spare book, a familiar face, and a cup of tea: join us at the old library courtyard on Saturday 18 April, 16:00-18:00. Bring a mug and a children's book to exchange. Tea is free; books are for swapping, not selling.'\n- Rejected content: Assistant's initial big claim proposal; Draft v1 with invented turnout (\"Hundreds of neighbors will join us\"); any revival of v1\n- Pending instruction: Write only the second paragraph, mentioning that the courtyard is outdoors and visitors can leave whenever they like, in the same friendly, plain voice.\n\n🔁 NEXT STEP\nReply only: \"Context loaded. Let's pick up right where you left off.\" Then wait for the user.",
+      "generated": true,
+      "model": "dots-studio/dots-3-note-preview:free",
+      "elapsedMs": 7917,
+      "inputChars": 1368,
+      "inputSha256": "66da686d897a65fd29b016ae24b7ce4948600840f2018b21082cb7b57307c255",
+      "systemPromptSha256": "37dd8ab714112d13b1cadf1684b6996191f12f8579cfaad27df6a1694f14dbf8",
+      "profile": "small",
+      "forcedGeneratedProfile": false,
+      "maxTokens": 1000,
+      "usage": {
+        "promptTokens": 1890,
+        "completionTokens": 610,
+        "totalTokens": 2500,
+        "cachedTokens": 1536
+      },
+      "qualityFlags": [
+        "bad_structure",
+        "missing_section"
+      ],
+      "fallback": {
+        "attempted": false,
+        "used": false,
+        "servedBy": null,
+        "model": null,
+        "reason": null
+      },
+      "assessment": {
+        "missingFacts": [],
+        "missingCriticalFacts": [
+          "Do not rewrite my opening OR do not rewrite the opening OR keep the opening unchanged"
+        ],
+        "incorrectFacts": [
+          "Hundreds of neighbors will join us"
+        ]
+      }
+    },
+    {
+      "caseId": "debugging-reproduction",
+      "repeat": 1,
+      "variant": "baseline",
+      "summary": "╔══════════════════════════════════════════╗\n║         CONTEXT CARRY — READY TO PASTE        ║\n╚══════════════════════════════════════════╝\n\n🧠 WHO I AM\nNone\n\n🎯 WHAT WE WERE DOING\nDebug the Grove CSV importer located at C:\\lab\\grove\\src\\import.mjs on branch csv-quoted-fields. The goal is to fix parsing of quoted fields containing commas without changing the delimiter or switching libraries.\n\n📍 WHERE WE LEFT OFF\nThe user provided exact input:\nname,note\nAda,\"red, blue\"\n\nExpected row: [\"Ada\", \"red, blue\"]\nActual row: [\"Ada\", \"red\", \" blue\"]\nReproduction command: node scripts/repro.mjs fixtures/quoted-comma.csv\n\nThe current parser uses line.split(','), which cannot distinguish quoted commas from field separators. A quote-aware state machine was proposed and accepted for inspection. No code has been modified, no tests have been run. Escaped double quotes remain an undecided edge case.\n\n✅ DECISIONS MADE\n- Accept inspecting a quote-aware state machine as the fix approach.\n- Do not change the delimiter.\n- Do not suggest switching libraries.\n- Do not claim a fix has landed; no code changes or test executions have occurred.\n\n⚠️ OPEN QUESTIONS\n- How should escaped double quotes (e.g., \"\" inside quoted fields) be handled? This behavior is explicitly undecided.\n\n📦 KEY CONTEXT\n- File to modify: src\\import.mjs (branch: csv-quoted-fields)\n- Current broken logic: line.split(',')\n- Proposed solution: state machine tracking quote state (inside/outside quotes)\n- Background note: An unrelated migration tool used tab-separated files; not relevant to Grove.\n- Constraint: Preserve exact reproduction input and output expectations.\n- Escaped quote handling: Not decided; must not be assumed or implemented without user decision.\n\n🔁 NEXT STEP\nReply only: \"Context loaded. Let's pick up right where you left off.\" Then wait for the user.",
+      "generated": true,
+      "model": "dots-studio/dots-3-note-preview:free",
+      "elapsedMs": 6382,
+      "inputChars": 1203,
+      "inputSha256": "32242bd6bbbbdb6151ccbe1e4186c42afe60e811a7df21e641adb06cb7d8cbd2",
+      "systemPromptSha256": "37dd8ab714112d13b1cadf1684b6996191f12f8579cfaad27df6a1694f14dbf8",
+      "profile": "small",
+      "forcedGeneratedProfile": false,
+      "maxTokens": 1000,
+      "usage": {
+        "promptTokens": 1840,
+        "completionTokens": 438,
+        "totalTokens": 2278,
+        "cachedTokens": 0
+      },
+      "qualityFlags": [],
+      "fallback": {
+        "attempted": false,
+        "used": false,
+        "servedBy": null,
+        "model": null,
+        "reason": null
+      },
+      "assessment": {
+        "missingFacts": [
+          "src/import.mjs"
+        ],
+        "missingCriticalFacts": [
+          "no code has changed OR no code changed OR code unchanged",
+          "no tests have run OR no tests run OR tests not run"
+        ],
+        "incorrectFacts": [
+          "fix has landed"
+        ]
+      }
+    },
+    {
+      "caseId": "debugging-reproduction",
+      "repeat": 1,
+      "variant": "candidate",
+      "summary": "╔══════════════════════════════════════════╗\n║         CONTEXT CARRY — READY TO PASTE        ║\n╚══════════════════════════════════════════╝\n\n🧠 WHO I AM\nNone\n\n🎯 WHAT WE WERE DOING\nDebugging the Grove CSV importer located at `C:\\lab\\grove`. The specific file under review is `src/import.mjs` on the branch `csv-quoted-fields`. The goal is to fix a parsing bug where a quoted comma inside a field is incorrectly treated as a field delimiter.\n\n📍 WHERE WE LEFT OFF\nThe user has accepted the proposal to inspect a quote-aware state machine for the parser. No code has been modified yet, and no tests have been run. The current implementation uses `line.split(',')`, which cannot distinguish between a quoted comma and a field separator. The behavior of escaped double quotes remains undecided.\n\n✅ DECISIONS MADE\n- Accepted the approach of implementing a quote-aware state machine.\n- Explicitly rejected changing the delimiter or switching libraries.\n- Decided not to address escaped double quotes at this stage.\n\n⚠️ OPEN QUESTIONS\n- How should escaped double quotes be handled? This is explicitly deferred and undecided.\n\n📦 KEY CONTEXT\n- **Input file content:**\n  ```\n  name,note\n  Ada,\"red, blue\"\n  ```\n- **Expected row:** `[\"Ada\", \"red, blue\"]`\n- **Actual row:** `[\"Ada\", \"red\", \" blue\"]`\n- **Reproduction command:** `node scripts/repro.mjs fixtures/quoted-comma.csv`\n- **Current parser logic:** `line.split(',')`\n- **Background note:** A previous unrelated migration tool used tab-separated files; this is not the format for Grove.\n- **Constraints:**\n  - Do not change the delimiter.\n  - Do not suggest switching libraries.\n  - Do not claim a fix has landed; no code has changed and no tests have run.\n  - Escaped double quotes are a separate edge case and are not yet decided.\n\n🔁 NEXT STEP\nReply only: \"Context loaded. Let's pick up right where you left off.\" Then wait for the user.",
+      "generated": true,
+      "model": "dots-studio/dots-3-note-preview:free",
+      "elapsedMs": 5828,
+      "inputChars": 1203,
+      "inputSha256": "32242bd6bbbbdb6151ccbe1e4186c42afe60e811a7df21e641adb06cb7d8cbd2",
+      "systemPromptSha256": "f9ce719278995edb906ba38a5c2ae2aa2251e03561bf905df94b3cff038ba688",
+      "profile": "small",
+      "forcedGeneratedProfile": false,
+      "maxTokens": 1000,
+      "usage": {
+        "promptTokens": 1780,
+        "completionTokens": 466,
+        "totalTokens": 2246,
+        "cachedTokens": 0
+      },
+      "qualityFlags": [],
+      "fallback": {
+        "attempted": false,
+        "used": false,
+        "servedBy": null,
+        "model": null,
+        "reason": null
+      },
+      "assessment": {
+        "missingFacts": [],
+        "missingCriticalFacts": [],
+        "incorrectFacts": [
+          "fix has landed"
+        ]
+      }
+    },
+    {
+      "caseId": "missing-reason-and-unverified-status",
+      "repeat": 1,
+      "variant": "candidate",
+      "summary": "╔══════════════════════════════════════════╗\n║         CONTEXT CARRY — READY TO PASTE        ║\n╚══════════════════════════════════════════╝\n\n🧠 WHO I AM\nNone\n\n🎯 WHAT WE WERE DOING\nThe Birch notes project needs a plain-text export feature. The user selected UTF-8 encoding and Markdown format but has not provided reasons for these choices. The task is to restate the export requirements and the two undecided delivery options without selecting one or implementing anything.\n\n📍 WHERE WE LEFT OFF\nThe user requested a restatement of the export requirements and the two undecided delivery options. No implementation has begun. The current task outline is in `notes/current-export.md` and contains no code or test results. The two undecided delivery options are: an export button and a command-line script. A settings panel was explicitly rejected by the user.\n\n✅ DECISIONS MADE\n- UTF-8 encoding chosen for the export (reason not provided by user)\n- Markdown format chosen for the export (reason not provided by user)\n- Settings panel rejected by the user\n\n⚠️ OPEN QUESTIONS\n- Which delivery option should be implemented: export button or command-line script? (Undecided)\n- The user has not provided reasons for choosing UTF-8 or Markdown.\n\n📦 KEY CONTEXT\n- The Birch project requires a plain-text export feature.\n- The current task outline is located at `notes/current-export.md`.\n- The outline specifies: export title, creation date, and note body; preserve blank lines; do not include archived notes.\n- A quoted message from a teammate about Alder project (\"the export is fully tested\") is unrelated to Birch and must not be imported as a fact or requirement.\n- No testing state for Birch has been reported.\n- The user explicitly stated: \"Do not invent a compatibility, security or portability explanation for my choice.\"\n- The user explicitly stated: \"Do not turn the absent result into a new requirement or permission to act.\"\n\n🔁 NEXT STEP\nReply only: \"Context loaded. Let's pick up right where you left off.\" Then wait for the user.",
+      "generated": true,
+      "model": "dots-studio/dots-3-note-preview:free",
+      "elapsedMs": 7884,
+      "inputChars": 1452,
+      "inputSha256": "927a1f03a4b84e56ee3cf60ec9eb1c1afb5327a819af422235f03bf3ac856da2",
+      "systemPromptSha256": "f9ce719278995edb906ba38a5c2ae2aa2251e03561bf905df94b3cff038ba688",
+      "profile": "small",
+      "forcedGeneratedProfile": false,
+      "maxTokens": 1000,
+      "usage": {
+        "promptTokens": 1802,
+        "completionTokens": 456,
+        "totalTokens": 2258,
+        "cachedTokens": 0
+      },
+      "qualityFlags": [],
+      "fallback": {
+        "attempted": false,
+        "used": false,
+        "servedBy": null,
+        "model": null,
+        "reason": null
+      },
+      "assessment": {
+        "missingFacts": [],
+        "missingCriticalFacts": [
+          "Export title, creation date and note body. Preserve blank lines. Do not include archived notes.",
+          "Do not select one or implement it"
+        ],
+        "incorrectFacts": []
+      }
+    },
+    {
+      "caseId": "missing-reason-and-unverified-status",
+      "repeat": 1,
+      "variant": "baseline",
+      "summary": "╔══════════════════════════════════════════╗\n║         CONTEXT CARRY — READY TO PASTE        ║\n╚══════════════════════════════════════════╝\n\n🧠 WHO I AM\nNone\n\n🎯 WHAT WE WERE DOING\nThe Birch notes project requires a plain-text export feature. The user selected UTF-8 encoding and Markdown format but explicitly stated no reason was given for these choices, and no compatibility, security, or portability explanation should be invented. The current task outline is in notes/current-export.md, which contains no code or test results. The export must include the title, creation date, and note body, preserve blank lines, and exclude archived notes. Two delivery options—export button and command-line script—remain undecided. A settings panel was rejected.\n\n📍 WHERE WE LEFT OFF\nThe user instructed to restate the export requirements and the two undecided delivery options without selecting one or implementing anything. No implementation, testing, or deployment has occurred. No files have been inspected or modified. The user emphasized that a quoted claim about testing from a separate project (Alder) must not be imported into Birch, and no testing state for Birch has been reported.\n\n✅ DECISIONS MADE\n- UTF-8 encoding selected for export.\n- Markdown format selected for export.\n- Settings panel rejected.\n- Export button and command-line script remain undecided.\n\n⚠️ OPEN QUESTIONS\n- Which delivery method will be used: export button or command-line script? (Undecided)\n- No testing, implementation, or deployment status has been established for Birch.\n\n📦 KEY CONTEXT\n- File: notes/current-export.md — contains task outline only; no code or test results.\n- Export requirements: title, creation date, note body; preserve blank lines; exclude archived notes.\n- Encoding: UTF-8 (user-chosen, no stated reason).\n- Format: Markdown (user-chosen, no stated reason).\n- Rejected: settings panel.\n- Undecided: export button vs. command-line script.\n- Quoted claim: \"the export is fully tested\" — attributed to Alder project, not Birch; must not be imported or treated as evidence for Birch.\n- No testing state reported for Birch; absence of results does not imply testing occurred or did not occur.\n\n🔁 NEXT STEP\nReply only: \"Context loaded. Let's pick up right where you left off.\" Then wait for the user.",
+      "generated": true,
+      "model": "dots-studio/dots-3-note-preview:free",
+      "elapsedMs": 6398,
+      "inputChars": 1452,
+      "inputSha256": "927a1f03a4b84e56ee3cf60ec9eb1c1afb5327a819af422235f03bf3ac856da2",
+      "systemPromptSha256": "37dd8ab714112d13b1cadf1684b6996191f12f8579cfaad27df6a1694f14dbf8",
+      "profile": "small",
+      "forcedGeneratedProfile": false,
+      "maxTokens": 1000,
+      "usage": {
+        "promptTokens": 1862,
+        "completionTokens": 514,
+        "totalTokens": 2376,
+        "cachedTokens": 0
+      },
+      "qualityFlags": [],
+      "fallback": {
+        "attempted": false,
+        "used": false,
+        "servedBy": null,
+        "model": null,
+        "reason": null
+      },
+      "assessment": {
+        "missingFacts": [],
+        "missingCriticalFacts": [
+          "Export title, creation date and note body. Preserve blank lines. Do not include archived notes.",
+          "Do not select one or implement it"
+        ],
+        "incorrectFacts": []
+      }
+    },
+    {
+      "caseId": "review-budget-draft",
+      "repeat": 1,
+      "variant": "baseline",
+      "summary": "╔══════════════════════════════════════════╗\n║         CONTEXT CARRY — READY TO PASTE        ║\n╚══════════════════════════════════════════╝\n\n🧠 WHO I AM\nNone\n\n🎯 WHAT WE WERE DOING\nReviewing a draft quote for the fictional Birch neighborhood event within a 700-credit total budget. The user explicitly requested only a review of the draft, not approval to buy anything, and not a rewrite or new event plan.\n\n📍 WHERE WE LEFT OFF\nThe user asked: \"Next, review whether this draft gives enough information to decide within the 700-credit budget. Explain what is known and what remains unknown. Do not approve a purchase or turn this into a new event plan.\" The assistant has not yet provided a response to this request.\n\n✅ DECISIONS MADE\nNone\n\n⚠️ OPEN QUESTIONS\nNone\n\n📦 KEY CONTEXT\n- User: Reviewing a quote for the fictional Birch neighborhood event. Ren is the supplier contact, not the user. The event has a 700-credit total budget. Only a review of the draft is wanted, not approval to buy anything.\n- Current draft wording (verbatim): \"Lighting: 180 credits. Audio: 200 credits. Delivery fee: not supplied. Offer expires Friday 12 June.\"\n- Known costs: Lighting = 180 credits; Audio = 200 credits. Total known = 380 credits.\n- Unknown costs: Delivery fee (not supplied).\n- Budget: 700 credits total.\n- Status: Neither quote has been accepted. No purchase, payment, or supplier contact has been made. No delivery date has been established.\n- Expiry: Friday 12 June is a quote deadline, not the event date or delivery date.\n- Explicit constraints: Do not contact Ren or place an order. Do not approve a purchase. Do not rewrite the draft or create a new event plan. Only review the draft as-is.\n\n🔁 NEXT STEP\nReply only: \"Context loaded. Let's pick up right where you left off.\" Then wait for the user.",
+      "generated": true,
+      "model": "dots-studio/dots-3-note-preview:free",
+      "elapsedMs": 6084,
+      "inputChars": 1273,
+      "inputSha256": "9cb78bdef00ea5a4b97dc16f2e04f2266a8381d04d4158b1197a0fdb69c9424b",
+      "systemPromptSha256": "37dd8ab714112d13b1cadf1684b6996191f12f8579cfaad27df6a1694f14dbf8",
+      "profile": "small",
+      "forcedGeneratedProfile": false,
+      "maxTokens": 1000,
+      "usage": {
+        "promptTokens": 1879,
+        "completionTokens": 441,
+        "totalTokens": 2320,
+        "cachedTokens": 0
+      },
+      "qualityFlags": [
+        "bad_structure",
+        "missing_section"
+      ],
+      "fallback": {
+        "attempted": false,
+        "used": false,
+        "servedBy": null,
+        "model": null,
+        "reason": null
+      },
+      "assessment": {
+        "missingFacts": [],
+        "missingCriticalFacts": [],
+        "incorrectFacts": []
+      }
+    },
+    {
+      "caseId": "review-budget-draft",
+      "repeat": 1,
+      "variant": "candidate",
+      "summary": "╔══════════════════════════════════════════╗\n║         CONTEXT CARRY — READY TO PASTE        ║\n╚══════════════════════════════════════════╝\n\n🧠 WHO I AM\nNone\n\n🎯 WHAT WE WERE DOING\nReviewing a draft quote for the fictional Birch neighborhood event to assess whether it provides sufficient information for a decision within a 700-credit total budget. No purchase, approval, or supplier contact is authorized.\n\n📍 WHERE WE LEFT OFF\nThe user requested a review of the draft quote: \"Lighting: 180 credits. Audio: 200 credits. Delivery fee: not supplied. Offer expires Friday 12 June.\" The assistant must explain what is known and what remains unknown, without approving a purchase or creating a new event plan. No decision about delivery has been made. The expiry is a quote deadline, not the event or delivery date. Only review the draft; do not rewrite it.\n\n✅ DECISIONS MADE\n- The user corrected the lighting quote from 150 to 180 credits; audio remains 200 credits.\n- Neither quote has been accepted.\n- No contact has been made with Ren (supplier), and no order has been placed.\n- The draft wording is to be preserved exactly for future editing.\n\n⚠️ OPEN QUESTIONS\nNone explicitly asked beyond the review request.\n\n📦 KEY CONTEXT\n- Total event budget: 700 credits (reported fact).\n- Lighting quote: 180 credits (corrected by user).\n- Audio quote: 200 credits (unchanged).\n- Delivery fee: not supplied (unknown).\n- Offer expiry: Friday, 12 June (quote deadline, not event/delivery date).\n- Supplier contact: Ren (not contacted; no message sent).\n- No purchase, payment, or delivery date established.\n- Draft wording must be kept verbatim: \"Lighting: 180 credits. Audio: 200 credits. Delivery fee: not supplied. Offer expires Friday 12 June.\"\n- User explicitly forbade: contacting Ren, placing orders, approving purchases, rewriting the draft, or creating a new event plan.\n\n🔁 NEXT STEP\nReply only: \"Context loaded. Let's pick up right where you left off.\" Then wait for the user.",
+      "generated": true,
+      "model": "dots-studio/dots-3-note-preview:free",
+      "elapsedMs": 6808,
+      "inputChars": 1273,
+      "inputSha256": "9cb78bdef00ea5a4b97dc16f2e04f2266a8381d04d4158b1197a0fdb69c9424b",
+      "systemPromptSha256": "f9ce719278995edb906ba38a5c2ae2aa2251e03561bf905df94b3cff038ba688",
+      "profile": "small",
+      "forcedGeneratedProfile": false,
+      "maxTokens": 1000,
+      "usage": {
+        "promptTokens": 1819,
+        "completionTokens": 502,
+        "totalTokens": 2321,
+        "cachedTokens": 0
+      },
+      "qualityFlags": [],
+      "fallback": {
+        "attempted": false,
+        "used": false,
+        "servedBy": null,
+        "model": null,
+        "reason": null
+      },
+      "assessment": {
+        "missingFacts": [],
+        "missingCriticalFacts": [
+          "Do not contact Ren OR do not contact OR no supplier contact"
+        ],
+        "incorrectFacts": []
+      }
+    },
+    {
+      "caseId": "continue-latest-draft-long-90000",
+      "repeat": 1,
+      "variant": "candidate",
+      "summary": "🧠 WHO I AM\nNone\n\n🎯 WHAT WE WERE DOING\nWriting the opening of a small community newsletter called The Lantern for neighbors. The tone must be friendly and plain, with no invented attendance numbers or quotes.\n\n📍 WHERE WE LEFT OFF\nThe user provided the approved first paragraph, which must be kept exactly as written:\n\"A spare book, a familiar face, and a cup of tea: join us at the old library courtyard on Saturday 18 April, 16:00-18:00. Bring a mug and a children's book to exchange. Tea is free; books are for swapping, not selling.\"\nThe pending task is to write only the second paragraph in the same voice. It must not rewrite the opening or revive v1. It must mention that the courtyard is outdoors and that visitors can leave whenever they like. The second paragraph has not been written yet.\n\n✅ DECISIONS MADE\n- The user rejected the initial big claim and the registration link.\n- The user rejected the assistant's Draft v1 (which contained invented turnout numbers).\n- The user supplied and approved the exact wording of the first paragraph, which is now the current version.\n- The user instructed that the second paragraph must be written next, in the same voice, and must include specific details (outdoors, leave anytime) while avoiding rewriting the opening or reviving v1.\n\n⚠️ OPEN QUESTIONS\nNone\n\n📦 KEY CONTEXT\n- Event details: Saturday 18 April, 16:00-18:00, old library courtyard.\n- Rules: Bring a mug; tea is free. Children's books can be exchanged, but selling books is not allowed.\n- Current draft (first paragraph, verbatim): \"A spare book, a familiar face, and a cup of tea: join us at the old library courtyard on Saturday 18 April, 16:00-18:00. Bring a mug and a children's book to exchange. Tea is free; books are for swapping, not selling.\"\n- Constraints: No invented attendance numbers or quotes. Tone must be friendly and plain. Second paragraph must mention the courtyard is outdoors and that visitors can leave whenever they like.\n- Archived references (historical background only, not active project requirements): Meadow bookmark project (green star icon), sample cooking exercise (oats and apples), fictional reading club (poetry anthology), old neighborhood bulletin (two-column layout), Kite puzzle discussion (arrow keys).\n\n🔁 NEXT STEP\nContext loaded. Let's pick up right where you left off.\n\n🔁 NEXT STEP\nReply only: \"Context loaded. Let's pick up right where you left off.\" Then wait for the user.",
+      "generated": true,
+      "model": "dots-studio/dots-3-note-preview:free",
+      "elapsedMs": 7257,
+      "inputChars": 90056,
+      "inputSha256": "577d1190cbfe9263830a6217469173ac8723a29af66780c139ac1cb3355391fe",
+      "systemPromptSha256": "89f84fa3acfa7f3aa4261793b0bf8a7b1595b8d092eddfb1adac5e59edffef67",
+      "profile": "large",
+      "forcedGeneratedProfile": false,
+      "maxTokens": 4200,
+      "usage": {
+        "promptTokens": 19137,
+        "completionTokens": 527,
+        "totalTokens": 19664,
+        "cachedTokens": 0
+      },
+      "qualityFlags": [
+        "bad_structure"
+      ],
+      "fallback": {
+        "attempted": false,
+        "used": false,
+        "servedBy": null,
+        "model": null,
+        "reason": null
+      },
+      "assessment": {
+        "missingFacts": [],
+        "missingCriticalFacts": [
+          "Do not rewrite my opening OR do not rewrite the opening OR keep the opening unchanged"
+        ],
+        "incorrectFacts": []
+      }
+    },
+    {
+      "caseId": "continue-latest-draft-long-90000",
+      "repeat": 1,
+      "variant": "baseline",
+      "summary": "╔══════════════════════════════════════════╗\n║         CONTEXT CARRY — READY TO PASTE        ║\n╚══════════════════════════════════════════╝\n\n🧠 WHO I AM\nNone\n\n🎯 WHAT WE WERE DOING\nWriting the opening of a small community newsletter called The Lantern. The target audience is neighbors, not sponsors. The tone must be friendly and plain. No invented attendance numbers or quotes are permitted.\n\n📍 WHERE WE LEFT OFF\nThe user provided a replacement draft for the opening paragraph and instructed that it be kept exactly as written. The assistant has not yet written the second paragraph. The user's latest request is to write only the second paragraph in the same voice, without rewriting the opening or reviving the rejected v1 draft. The second paragraph must mention that the courtyard is outdoors and that visitors can leave whenever they like.\n\n✅ DECISIONS MADE\n- Rejected the initial draft that claimed \"hundreds of neighbors\" would attend and included a registration link. The user explicitly rejected the big claim and confirmed there is no registration link.\n- Accepted the user's replacement opening paragraph as the current version: \"A spare book, a familiar face, and a cup of tea: join us at the old library courtyard on Saturday 18 April, 16:00-18:00. Bring a mug and a children's book to exchange. Tea is free; books are for swapping, not selling.\"\n- Confirmed event details: Saturday 18 April, 16:00-18:00, old library courtyard. Bring a mug; tea is free. Children's books can be exchanged, but selling books is not allowed.\n\n⚠️ OPEN QUESTIONS\nNone\n\n📦 KEY CONTEXT\n- Current opening paragraph (verbatim, must not be altered): \"A spare book, a familiar face, and a cup of tea: join us at the old library courtyard on Saturday 18 April, 16:00-18:00. Bring a mug and a children's book to exchange. Tea is free; books are for swapping, not selling.\"\n- Rejected draft v1 (do not revive): \"Our town comes together for a wonderful afternoon of books and tea. Hundreds of neighbors will join us on Saturday.\" This draft was rejected for inventing turnout numbers.\n- Rejected assistant proposal: Starting with a big claim about the whole town coming together and ending with a registration link. Both elements were rejected by the user.\n- Constraints: No invented attendance numbers. No quotes. No registration link. Selling books is not allowed. Tone must be friendly and plain. Audience is neighbors, not sponsors.\n- Unrelated archived references (historical background only, not active project requirements): Meadow bookmark project (green star icon), cooking exercise (oats and apples), fictional reading club (poetry anthology), old neighborhood bulletin (two-column layout), Kite puzzle discussion (arrow keys preference). These are all retired or unrelated projects and supply no decisions for the current work.\n- Pending task: Write only the second paragraph in the same voice. Must mention that the courtyard is outdoors and that visitors can leave whenever they like.\n\n🔁 NEXT STEP\nReply only: \"Context loaded. Let's pick up right where you left off.\" Then wait for the user.",
+      "generated": true,
+      "model": "dots-studio/dots-3-note-preview:free",
+      "elapsedMs": 8604,
+      "inputChars": 90056,
+      "inputSha256": "577d1190cbfe9263830a6217469173ac8723a29af66780c139ac1cb3355391fe",
+      "systemPromptSha256": "096e4d146760bc9d3ce511b5207cb37572e86cf1181fd99d02d958843421fb29",
+      "profile": "large",
+      "forcedGeneratedProfile": false,
+      "maxTokens": 4200,
+      "usage": {
+        "promptTokens": 19197,
+        "completionTokens": 703,
+        "totalTokens": 19900,
+        "cachedTokens": 0
+      },
+      "qualityFlags": [],
+      "fallback": {
+        "attempted": false,
+        "used": false,
+        "servedBy": null,
+        "model": null,
+        "reason": null
+      },
+      "assessment": {
+        "missingFacts": [],
+        "missingCriticalFacts": [
+          "Do not rewrite my opening OR do not rewrite the opening OR keep the opening unchanged"
+        ],
+        "incorrectFacts": [
+          "Hundreds of neighbors will join us"
+        ]
+      }
+    },
+    {
+      "caseId": "corrected-export-design",
+      "repeat": 2,
+      "variant": "candidate",
+      "summary": "╔══════════════════════════════════════════╗\n║         CONTEXT CARRY — READY TO PASTE        ║\n╚══════════════════════════════════════════╝\n\n🧠 WHO I AM\nNone\n\n🎯 WHAT WE WERE DOING\nFixing Project Cedar's nightly export worker. The production branch is \"release\" and the region is \"ap-south-1\". The export times out only for files larger than 30 MB. Database writes are healthy and no customer records were lost. The patch target is `worker/export.mjs`. The failure log is exactly: \"upload idle timeout\". The required invoice-format fix must be kept; rollback is not approved.\n\n📍 WHERE WE LEFT OFF\nThe latest user request is to \"Pick up with a patch proposal for the two-upload design; preserve my no-deploy instruction and both retry options.\" Implementation, testing, and deployment have not started. The design uses two simultaneous uploads and 10 MB chunks. The retry policy remains undecided between a fixed 400 ms pause or jitter between 200-600 ms. No code has been changed and no checks have been run.\n\n✅ DECISIONS MADE\n- Rejected: Increasing the global timeout.\n- Accepted: 10 MB chunk size.\n- Accepted: Two simultaneous uploads (replacing the earlier six-upload choice).\n- Accepted: Required invoice-format fix must be kept.\n- Rejected: Rollback is not approved.\n- Constraint: Do not deploy this change.\n- Constraint: Do not infer that Jules is the user.\n\n⚠️ OPEN QUESTIONS\n- Retry policy: Should it use a fixed 400 ms pause or jitter between 200-600 ms?\n\n📦 KEY CONTEXT\n- Owner: Jules (not linked to the user's account).\n- Project: Project Cedar.\n- Branch: release.\n- Region: ap-south-1.\n- Symptom: Export times out for files larger than 30 MB.\n- Log: \"upload idle timeout\".\n- Target file: `worker/export.mjs`.\n- Constraint: Do not deploy.\n- Rejected: Global timeout increase, rollback.\n- Undecided: Retry policy (fixed 400 ms vs. jitter 200-600 ms).\n\n🔁 NEXT STEP\nReply only: \"Context loaded. Let's pick up right where you left off.\" Then wait for the user.",
+      "generated": true,
+      "model": "dots-studio/dots-3-note-preview:free",
+      "elapsedMs": 6613,
+      "inputChars": 1341,
+      "inputSha256": "ef8cc7f79b04ba31cf77b9ece7c0b065a01b6f4648f11fc66e4163d9fe576f66",
+      "systemPromptSha256": "f9ce719278995edb906ba38a5c2ae2aa2251e03561bf905df94b3cff038ba688",
+      "profile": "small",
+      "forcedGeneratedProfile": false,
+      "maxTokens": 1000,
+      "usage": {
+        "promptTokens": 1821,
+        "completionTokens": 522,
+        "totalTokens": 2343,
+        "cachedTokens": 0
+      },
+      "qualityFlags": [],
+      "fallback": {
+        "attempted": false,
+        "used": false,
+        "servedBy": null,
+        "model": null,
+        "reason": null
+      },
+      "assessment": {
+        "missingFacts": [],
+        "missingCriticalFacts": [],
+        "incorrectFacts": []
+      }
+    },
+    {
+      "caseId": "corrected-export-design",
+      "repeat": 2,
+      "variant": "baseline",
+      "summary": "╔══════════════════════════════════════════╗\n║         CONTEXT CARRY — READY TO PASTE        ║\n╚══════════════════════════════════════════╝\n\n🧠 WHO I AM\nNone\n\n🎯 WHAT WE WERE DOING\nFixing Project Cedar's nightly export worker to handle files larger than 30 MB without timing out. The goal is to implement a patch for worker/export.mjs using two simultaneous uploads and 10 MB chunks, while preserving the no-deploy instruction and keeping both retry policy options open.\n\n📍 WHERE WE LEFT OFF\nThe user requested a patch proposal for the two-upload design. Implementation, testing, and deployment have not started. The failure log is exactly: \"upload idle timeout\". No owner identity has been linked to the user's account.\n\n✅ DECISIONS MADE\n- Rejected increasing the global timeout.\n- Accepted 10 MB chunk size.\n- Changed from six simultaneous uploads to two simultaneous uploads.\n- Required invoice-format fix must be kept; rollback is not approved.\n- Retry policy remains undecided between fixed 400 ms pause and jitter 200-600 ms.\n\n⚠️ OPEN QUESTIONS\n- Which retry policy to use: fixed 400 ms or jitter 200-600 ms?\n\n📦 KEY CONTEXT\n- Project: Cedar nightly export worker\n- Owner: Jules (not linked to user account)\n- Production branch: release\n- Region: ap-south-1\n- Symptom: Export times out only for files > 30 MB\n- Database writes: Healthy\n- Customer records: No loss\n- Constraint: Do not deploy this change\n- Target file: worker/export.mjs\n- Failure log: \"upload idle timeout\"\n- Chunk size: 10 MB\n- Simultaneous uploads: 2\n- Retry options: Fixed 400 ms pause OR jitter 200-600 ms\n- Required fix: Invoice-format fix (rollback not approved)\n\n🔁 NEXT STEP\nReply only: \"Context loaded. Let's pick up right where you left off.\" Then wait for the user.",
+      "generated": true,
+      "model": "dots-studio/dots-3-note-preview:free",
+      "elapsedMs": 6290,
+      "inputChars": 1341,
+      "inputSha256": "ef8cc7f79b04ba31cf77b9ece7c0b065a01b6f4648f11fc66e4163d9fe576f66",
+      "systemPromptSha256": "37dd8ab714112d13b1cadf1684b6996191f12f8579cfaad27df6a1694f14dbf8",
+      "profile": "small",
+      "forcedGeneratedProfile": false,
+      "maxTokens": 1000,
+      "usage": {
+        "promptTokens": 1881,
+        "completionTokens": 467,
+        "totalTokens": 2348,
+        "cachedTokens": 0
+      },
+      "qualityFlags": [],
+      "fallback": {
+        "attempted": false,
+        "used": false,
+        "servedBy": null,
+        "model": null,
+        "reason": null
+      },
+      "assessment": {
+        "missingFacts": [],
+        "missingCriticalFacts": [],
+        "incorrectFacts": []
+      }
+    },
+    {
+      "caseId": "continue-latest-draft",
+      "repeat": 2,
+      "variant": "baseline",
+      "summary": "╔══════════════════════════════════════════╗\n║         CONTEXT CARRY — READY TO PASTE        ║\n╚══════════════════════════════════════════╝\n\n🧠 WHO I AM\nNone\n\n🎯 WHAT WE WERE DOING\nWriting the opening of a small community newsletter called The Lantern. The target audience is neighbors, not sponsors. The tone must be friendly and plain. No invented attendance numbers or quotes are permitted.\n\n📍 WHERE WE LEFT OFF\nThe user provided a finalized opening paragraph and instructed that it must be kept exactly as written. They then requested a second paragraph in the same voice, containing only practical details, with specific instructions to mention that the courtyard is outdoors and that visitors may leave whenever they like. The assistant has not yet written this second paragraph.\n\n✅ DECISIONS MADE\n- Rejected the assistant's initial proposal of a big claim about the whole town coming together and ending with a registration link.\n- Rejected the assistant's Draft v1 for inventing turnout (\"Hundreds of neighbors will join us\").\n- Accepted the user's replacement opening paragraph as the current version.\n- Accepted the instruction to keep the opening paragraph exactly as written and not to rewrite it or revive Draft v1.\n\n⚠️ OPEN QUESTIONS\nNone\n\n📦 KEY CONTEXT\n- Newsletter name: The Lantern\n- Audience: Neighbors, not sponsors\n- Tone: Friendly and plain\n- Event date and time: Saturday 18 April, 16:00–18:00\n- Location: Old library courtyard\n- Outdoor setting: Yes\n- Visitors may leave whenever they like: Yes\n- Bring a mug: Yes\n- Tea is free: Yes\n- Children's books can be exchanged: Yes\n- Selling books is not allowed: Yes\n- No registration link: Yes\n- Current opening paragraph (verbatim, must not be altered):\n  \"A spare book, a familiar face, and a cup of tea: join us at the old library courtyard on Saturday 18 April, 16:00-18:00. Bring a mug and a children's book to exchange. Tea is free; books are for swapping, not selling.\"\n- Second paragraph: Not yet written. Must be in the same voice. Must mention that the courtyard is outdoors and that visitors can leave whenever they like. Must not rewrite the opening or revive Draft v1.\n\n🔁 NEXT STEP\nReply only: \"Context loaded. Let's pick up right where you left off.\" Then wait for the user.",
+      "generated": true,
+      "model": "dots-studio/dots-3-note-preview:free",
+      "elapsedMs": 8045,
+      "inputChars": 1368,
+      "inputSha256": "66da686d897a65fd29b016ae24b7ce4948600840f2018b21082cb7b57307c255",
+      "systemPromptSha256": "37dd8ab714112d13b1cadf1684b6996191f12f8579cfaad27df6a1694f14dbf8",
+      "profile": "small",
+      "forcedGeneratedProfile": false,
+      "maxTokens": 1000,
+      "usage": {
+        "promptTokens": 1890,
+        "completionTokens": 543,
+        "totalTokens": 2433,
+        "cachedTokens": 0
+      },
+      "qualityFlags": [],
+      "fallback": {
+        "attempted": false,
+        "used": false,
+        "servedBy": null,
+        "model": null,
+        "reason": null
+      },
+      "assessment": {
+        "missingFacts": [],
+        "missingCriticalFacts": [
+          "only the second paragraph OR second paragraph only OR write the second paragraph",
+          "Do not rewrite my opening OR do not rewrite the opening OR keep the opening unchanged"
+        ],
+        "incorrectFacts": [
+          "Hundreds of neighbors will join us"
+        ]
+      }
+    },
+    {
+      "caseId": "continue-latest-draft",
+      "repeat": 2,
+      "variant": "candidate",
+      "summary": "╔══════════════════════════════════════════╗\n║         CONTEXT CARRY — READY TO PASTE        ║\n╚══════════════════════════════════════════╝\n\n🧠 WHO I AM\nNone\n\n🎯 WHAT WE WERE DOING\nWriting the opening of a small community newsletter called The Lantern for neighbors, not sponsors. The goal is a friendly, plain tone with no invented attendance numbers or quotes.\n\n📍 WHERE WE LEFT OFF\nThe user provided the exact first paragraph and requested a second paragraph in the same voice. The second paragraph must mention that the courtyard is outdoors and that visitors can leave whenever they like. The first paragraph must remain unchanged.\n\n✅ DECISIONS MADE\n- Rejected the big claim about the whole town coming together.\n- Rejected any registration link.\n- Accepted the user's exact opening paragraph as the current version.\n- Confirmed the event is Saturday 18 April, 16:00–18:00, at the old library courtyard.\n- Confirmed tea is free, attendees must bring a mug, and children's books are for exchange only—no selling.\n\n⚠️ OPEN QUESTIONS\nNone\n\n📦 KEY CONTEXT\n- Current first paragraph (verbatim): \"A spare book, a familiar face, and a cup of tea: join us at the old library courtyard on Saturday 18 April, 16:00-18:00. Bring a mug and a children's book to exchange. Tea is free; books are for swapping, not selling.\"\n- Constraint: Do not rewrite or revive v1.\n- Constraint: Second paragraph must be in the same voice.\n- Constraint: Second paragraph must mention the courtyard is outdoors and that visitors can leave whenever they like.\n- Constraint: No invented attendance numbers or quotes.\n\n🔁 NEXT STEP\nReply only: \"Context loaded. Let's pick up right where you left off.\" Then wait for the user.",
+      "generated": true,
+      "model": "dots-studio/dots-3-note-preview:free",
+      "elapsedMs": 6272,
+      "inputChars": 1368,
+      "inputSha256": "66da686d897a65fd29b016ae24b7ce4948600840f2018b21082cb7b57307c255",
+      "systemPromptSha256": "f9ce719278995edb906ba38a5c2ae2aa2251e03561bf905df94b3cff038ba688",
+      "profile": "small",
+      "forcedGeneratedProfile": false,
+      "maxTokens": 1000,
+      "usage": {
+        "promptTokens": 1830,
+        "completionTokens": 419,
+        "totalTokens": 2249,
+        "cachedTokens": 0
+      },
+      "qualityFlags": [],
+      "fallback": {
+        "attempted": false,
+        "used": false,
+        "servedBy": null,
+        "model": null,
+        "reason": null
+      },
+      "assessment": {
+        "missingFacts": [],
+        "missingCriticalFacts": [
+          "only the second paragraph OR second paragraph only OR write the second paragraph",
+          "Do not rewrite my opening OR do not rewrite the opening OR keep the opening unchanged"
+        ],
+        "incorrectFacts": []
+      }
+    },
+    {
+      "caseId": "debugging-reproduction",
+      "repeat": 2,
+      "variant": "candidate",
+      "summary": "╔══════════════════════════════════════════╗\n║         CONTEXT CARRY — READY TO PASTE        ║\n╚══════════════════════════════════════════╝\n\n🧠 WHO I AM\nNone\n\n🎯 WHAT WE WERE DOING\nDebug the Grove CSV importer located in C:\\lab\\grove. The specific file under investigation is src/import.mjs on the branch csv-quoted-fields. The goal is to fix the parser so that quoted fields containing commas are correctly preserved as single fields, without changing the delimiter or switching libraries.\n\n📍 WHERE WE LEFT OFF\nThe user provided the exact input:\nname,note\nAda,\"red, blue\"\n\nExpected row: [\"Ada\", \"red, blue\"]\nActual row: [\"Ada\", \"red\", \" blue\"]\n\nReproduction command: node scripts/repro.mjs fixtures/quoted-comma.csv\n\nThe current parser uses line.split(','), which cannot distinguish between a quoted comma (inside a field) and a field separator. A quote-aware state machine has been proposed and accepted for inspection. No code has been modified, and no tests have been run. Escaped double quotes (e.g., \"\" inside a quoted field) are explicitly noted as a separate, undecided edge case.\n\n✅ DECISIONS MADE\n- The user accepted the proposal to inspect a quote-aware state machine.\n- The user explicitly rejected changing the delimiter or switching libraries.\n- The user confirmed that no fix has landed yet: no code changed, no tests run.\n- The user declared escaped double quotes as a separate, undecided edge case.\n\n⚠️ OPEN QUESTIONS\n- How should escaped double quotes (e.g., \"\" within a quoted field) be handled? This behavior is explicitly undecided.\n\n📦 KEY CONTEXT\n- File to modify: src/import.mjs\n- Branch: csv-quoted-fields\n- Reproduction command: node scripts/repro.mjs fixtures/quoted-comma.csv\n- Input fixture content:\n  name,note\n  Ada,\"red, blue\"\n- Expected output: [\"Ada\", \"red, blue\"]\n- Actual output: [\"Ada\", \"red\", \" blue\"]\n- Current implementation: line.split(',') — naive split, no quote awareness.\n- Background note: A previous unrelated migration tool used tab-separated files; this is not the format for Grove.\n- Constraint: Do not change the delimiter or suggest switching libraries.\n- Constraint: Do not claim a fix has landed unless code has actually changed and tests have run.\n\n🔁 NEXT STEP\nReply only: \"Context loaded. Let's pick up right where you left off.\" Then wait for the user.",
+      "generated": true,
+      "model": "dots-studio/dots-3-note-preview:free",
+      "elapsedMs": 6961,
+      "inputChars": 1203,
+      "inputSha256": "32242bd6bbbbdb6151ccbe1e4186c42afe60e811a7df21e641adb06cb7d8cbd2",
+      "systemPromptSha256": "f9ce719278995edb906ba38a5c2ae2aa2251e03561bf905df94b3cff038ba688",
+      "profile": "small",
+      "forcedGeneratedProfile": false,
+      "maxTokens": 1000,
+      "usage": {
+        "promptTokens": 1780,
+        "completionTokens": 553,
+        "totalTokens": 2333,
+        "cachedTokens": 0
+      },
+      "qualityFlags": [],
+      "fallback": {
+        "attempted": false,
+        "used": false,
+        "servedBy": null,
+        "model": null,
+        "reason": null
+      },
+      "assessment": {
+        "missingFacts": [],
+        "missingCriticalFacts": [],
+        "incorrectFacts": [
+          "fix has landed"
+        ]
+      }
+    },
+    {
+      "caseId": "debugging-reproduction",
+      "repeat": 2,
+      "variant": "baseline",
+      "summary": "╔══════════════════════════════════════════╗\n║         CONTEXT CARRY — READY TO PASTE        ║\n╚══════════════════════════════════════════╝\n\n🧠 WHO I AM\nNone\n\n🎯 WHAT WE WERE DOING\nDebug the Grove CSV importer located at `C:\\lab\\grove\\src\\import.mjs` on the `csv-quoted-fields` branch. The goal is to fix a parsing bug where quoted commas are incorrectly treated as field delimiters, without changing the delimiter or switching libraries.\n\n📍 WHERE WE LEFT OFF\nThe user accepted a proposal to implement a quote-aware state machine in `src\\import.mjs`. No code has been modified and no tests have been run. The user explicitly stated: \"Do not say a fix has landed: no code has changed and no tests have run.\" The exact reproduction input is:\n```\nname,note\nAda,\"red, blue\"\n```\nExpected row: `[\"Ada\", \"red, blue\"]`\nActual row: `[\"Ada\", \"red\", \" blue\"]`\nReproduction command: `node scripts/repro.mjs fixtures/quoted-comma.csv`\n\n✅ DECISIONS MADE\n- Accept the proposal to implement a quote-aware state machine to handle quoted commas.\n- Do not change the delimiter.\n- Do not suggest switching libraries.\n- Escaped double quotes are explicitly deferred as a separate, undecided edge case.\n\n⚠️ OPEN QUESTIONS\n- How should escaped double quotes (e.g., `\"\"` inside a quoted field) be handled? This behavior is undecided.\n\n📦 KEY CONTEXT\n- **File to modify**: `src\\import.mjs` (current branch: `csv-quoted-fields`)\n- **Current failing logic**: Uses `line.split(',')`, which cannot distinguish quoted commas from delimiters.\n- **Reproduction command**: `node scripts/repro.mjs fixtures/quoted-comma.csv`\n- **Input fixture**: `fixtures/quoted-comma.csv` containing:\n  ```\n  name,note\n  Ada,\"red, blue\"\n  ```\n- **Expected output**: `[\"Ada\", \"red, blue\"]`\n- **Actual output**: `[\"Ada\", \"red\", \" blue\"]`\n- **Constraint**: Do not change the delimiter or switch libraries.\n- **Deferred**: Escaped double quote handling is not yet decided.\n- **Background**: A previous unrelated migration tool used tab-separated files; this is not the format for Grove.\n\n🔁 NEXT STEP\nReply only: \"Context loaded. Let's pick up right where you left off.\" Then wait for the user.",
+      "generated": true,
+      "model": "dots-studio/dots-3-note-preview:free",
+      "elapsedMs": 7343,
+      "inputChars": 1203,
+      "inputSha256": "32242bd6bbbbdb6151ccbe1e4186c42afe60e811a7df21e641adb06cb7d8cbd2",
+      "systemPromptSha256": "37dd8ab714112d13b1cadf1684b6996191f12f8579cfaad27df6a1694f14dbf8",
+      "profile": "small",
+      "forcedGeneratedProfile": false,
+      "maxTokens": 1000,
+      "usage": {
+        "promptTokens": 1840,
+        "completionTokens": 553,
+        "totalTokens": 2393,
+        "cachedTokens": 1536
+      },
+      "qualityFlags": [],
+      "fallback": {
+        "attempted": false,
+        "used": false,
+        "servedBy": null,
+        "model": null,
+        "reason": null
+      },
+      "assessment": {
+        "missingFacts": [
+          "src/import.mjs"
+        ],
+        "missingCriticalFacts": [],
+        "incorrectFacts": [
+          "fix has landed"
+        ]
+      }
+    },
+    {
+      "caseId": "missing-reason-and-unverified-status",
+      "repeat": 2,
+      "variant": "baseline",
+      "summary": "╔══════════════════════════════════════════╗\n║         CONTEXT CARRY — READY TO PASTE        ║\n╚══════════════════════════════════════════╝\n\n🧠 WHO I AM\nNone\n\n🎯 WHAT WE WERE DOING\nAdding a plain-text export feature to the Birch notes project, with UTF-8 encoding and Markdown format selected. The goal is to export the title, creation date, and note body while preserving blank lines and excluding archived notes.\n\n📍 WHERE WE LEFT OFF\nThe user requested a restatement of the export requirements and the two undecided delivery options (export button and command-line script), without selecting or implementing either. No code has been written, no files modified, and no testing has occurred. The current task outline is in `notes/current-export.md`, which contains only text requirements—no code or test results.\n\n✅ DECISIONS MADE\n- UTF-8 encoding selected for export\n- Markdown format selected for export\n- Settings panel explicitly rejected\n- Export requirements defined: include title, creation date, note body; preserve blank lines; exclude archived notes\n\n⚠️ OPEN QUESTIONS\n- Whether to implement the export as a button or a command-line script (both remain undecided)\n\n📦 KEY CONTEXT\n- File: `notes/current-export.md` — contains task outline only; no code or test results\n- Requirements: Export title, creation date, note body; preserve blank lines; do not include archived notes\n- Rejected option: Settings panel\n- Undecided options: Export button, command-line script\n- Constraint: Do not invent compatibility, security, or portability justifications for the UTF-8/Markdown choice\n- Constraint: Do not import testing claims from Alder project; no testing state reported for Birch\n- Reported fact: A quoted message from a teammate in the Alder project claims \"the export is fully tested\" — this does not apply to Birch\n\n🔁 NEXT STEP\nReply only: \"Context loaded. Let's pick up right where you left off.\" Then wait for the user.",
+      "generated": true,
+      "model": "dots-studio/dots-3-note-preview:free",
+      "elapsedMs": 7432,
+      "inputChars": 1452,
+      "inputSha256": "927a1f03a4b84e56ee3cf60ec9eb1c1afb5327a819af422235f03bf3ac856da2",
+      "systemPromptSha256": "37dd8ab714112d13b1cadf1684b6996191f12f8579cfaad27df6a1694f14dbf8",
+      "profile": "small",
+      "forcedGeneratedProfile": false,
+      "maxTokens": 1000,
+      "usage": {
+        "promptTokens": 1862,
+        "completionTokens": 443,
+        "totalTokens": 2305,
+        "cachedTokens": 1536
+      },
+      "qualityFlags": [],
+      "fallback": {
+        "attempted": false,
+        "used": false,
+        "servedBy": null,
+        "model": null,
+        "reason": null
+      },
+      "assessment": {
+        "missingFacts": [],
+        "missingCriticalFacts": [
+          "Export title, creation date and note body. Preserve blank lines. Do not include archived notes.",
+          "reason OR rationale",
+          "Do not select one or implement it"
+        ],
+        "incorrectFacts": []
+      }
+    },
+    {
+      "caseId": "missing-reason-and-unverified-status",
+      "repeat": 2,
+      "variant": "candidate",
+      "summary": "╔══════════════════════════════════════════╗\n║         CONTEXT CARRY — READY TO PASTE        ║\n╚══════════════════════════════════════════╝\n\n🧠 WHO I AM\nNone\n\n🎯 WHAT WE WERE DOING\nAdding a plain-text export feature to the Birch notes project. The user selected UTF-8 encoding and Markdown format but did not provide reasons for these choices.\n\n📍 WHERE WE LEFT OFF\nPending restatement of export requirements and delivery options. No implementation, testing, or deployment has occurred. The following are pending user decisions:\n- Export button (undecided)\n- Command-line script (undecided)\n- Settings panel (rejected)\n\nExport requirements (from notes/current-export.md):\n- Export title, creation date, and note body\n- Preserve blank lines\n- Exclude archived notes\n- UTF-8 encoding\n- Markdown format\n\nNo code, test results, or implementation artifacts exist for Birch. The file notes/current-export.md contains only the task outline, not code or test data.\n\n✅ DECISIONS MADE\n- UTF-8 encoding selected (no reason given)\n- Markdown format selected (no reason given)\n- Settings panel rejected\n\n⚠️ OPEN QUESTIONS\n- Whether to implement an export button\n- Whether to implement a command-line script\n\n📦 KEY CONTEXT\n- Quoted message from teammate: \"the export is fully tested\" — this claim belongs to the Alder project and must not be applied to Birch. No testing state has been reported for Birch.\n- Unstated reasons for UTF-8 and Markdown choices must remain unstated; no compatibility, security, or portability explanations should be inferred.\n- notes/current-export.md exists but contains only requirements text, no code or test results.\n- No files have been inspected, modified, or created during this conversation.\n\n🔁 NEXT STEP\nReply only: \"Context loaded. Let's pick up right where you left off.\" Then wait for the user.",
+      "generated": true,
+      "model": "dots-studio/dots-3-note-preview:free",
+      "elapsedMs": 6878,
+      "inputChars": 1452,
+      "inputSha256": "927a1f03a4b84e56ee3cf60ec9eb1c1afb5327a819af422235f03bf3ac856da2",
+      "systemPromptSha256": "f9ce719278995edb906ba38a5c2ae2aa2251e03561bf905df94b3cff038ba688",
+      "profile": "small",
+      "forcedGeneratedProfile": false,
+      "maxTokens": 1000,
+      "usage": {
+        "promptTokens": 1802,
+        "completionTokens": 422,
+        "totalTokens": 2224,
+        "cachedTokens": 0
+      },
+      "qualityFlags": [],
+      "fallback": {
+        "attempted": false,
+        "used": false,
+        "servedBy": null,
+        "model": null,
+        "reason": null
+      },
+      "assessment": {
+        "missingFacts": [],
+        "missingCriticalFacts": [
+          "Export title, creation date and note body. Preserve blank lines. Do not include archived notes.",
+          "Do not select one or implement it"
+        ],
+        "incorrectFacts": []
+      }
+    },
+    {
+      "caseId": "review-budget-draft",
+      "repeat": 2,
+      "variant": "candidate",
+      "summary": "╔══════════════════════════════════════════╗\n║         CONTEXT CARRY — READY TO PASTE        ║\n╚══════════════════════════════════════════╝\n\n🧠 WHO I AM\nNone\n\n🎯 WHAT WE WERE DOING\nReviewing a draft quote for the fictional Birch neighborhood event. Purpose: assess whether the draft provides sufficient information to make a decision within a 700-credit total budget. No purchase, approval, or supplier contact is intended.\n\n📍 WHERE WE LEFT OFF\nLatest user request: Review whether the current draft gives enough information to decide within the 700-credit budget. Explain what is known and what remains unknown. Do not approve a purchase or turn this into a new event plan.\n\nCurrent draft (exact wording, not to be rewritten yet):\n\"Lighting: 180 credits. Audio: 200 credits. Delivery fee: not supplied. Offer expires Friday 12 June.\"\n\nKnown:\n- Lighting quote: 180 credits (corrected from earlier 150)\n- Audio quote: 200 credits\n- Total budget: 700 credits\n- Offer expiry: Friday 12 June (quote deadline, not event or delivery date)\n\nUnknown:\n- Delivery fee (explicitly \"not supplied\")\n- Event date\n- Delivery date\n- Any other costs (e.g., setup, taxes, additional equipment)\n- Terms of payment or cancellation\n\nStatus:\n- No quote accepted\n- No purchase made\n- No payment issued\n- No supplier contact initiated (Ren not contacted)\n- No order placed\n- No decision about delivery made\n\n✅ DECISIONS MADE\n- User corrected lighting quote from 150 to 180 credits; audio remains 200.\n- User instructed: do not contact Ren or place an order.\n- User instructed: keep draft wording exactly as is for later editing.\n- User instructed: only review the draft; do not rewrite it or create a new event plan.\n- User confirmed: expiry is a quote deadline, not event or delivery date.\n- User confirmed: no decision about delivery has been made.\n\n⚠️ OPEN QUESTIONS\nNone explicitly asked. User requested a review of sufficiency for budget decision — this is the pending task, not an open question.\n\n📦 KEY CONTEXT\n- Supplier contact: Ren (not the user; not to be contacted)\n- Event: Fictional Birch neighborhood event\n- Total budget: 700 credits\n- Draft quote text (verbatim, do not alter yet):\n  \"Lighting: 180 credits. Audio: 200 credits. Delivery fee: not supplied. Offer expires Friday 12 June.\"\n- Expiry interpretation: quote deadline only — not event date, not delivery date\n- No purchase, payment, order, or supplier contact has occurred\n- Delivery fee: explicitly unknown / not supplied\n- Event date: not reported\n- Delivery date: not reported\n- Additional costs: not reported\n- User constraints: review only; no approval, no rewriting, no new planning, no contacting Ren\n\n🔁 NEXT STEP\nReply only: \"Context loaded. Let's pick up right where you left off.\" Then wait for the user.",
+      "generated": true,
+      "model": "dots-studio/dots-3-note-preview:free",
+      "elapsedMs": 8955,
+      "inputChars": 1273,
+      "inputSha256": "9cb78bdef00ea5a4b97dc16f2e04f2266a8381d04d4158b1197a0fdb69c9424b",
+      "systemPromptSha256": "f9ce719278995edb906ba38a5c2ae2aa2251e03561bf905df94b3cff038ba688",
+      "profile": "small",
+      "forcedGeneratedProfile": false,
+      "maxTokens": 1000,
+      "usage": {
+        "promptTokens": 1819,
+        "completionTokens": 693,
+        "totalTokens": 2512,
+        "cachedTokens": 0
+      },
+      "qualityFlags": [],
+      "fallback": {
+        "attempted": false,
+        "used": false,
+        "servedBy": null,
+        "model": null,
+        "reason": null
+      },
+      "assessment": {
+        "missingFacts": [],
+        "missingCriticalFacts": [
+          "not accepted OR Neither quote OR neither quote"
+        ],
+        "incorrectFacts": [
+          "order placed"
+        ]
+      }
+    },
+    {
+      "caseId": "review-budget-draft",
+      "repeat": 2,
+      "variant": "baseline",
+      "summary": "╔══════════════════════════════════════════╗\n║         CONTEXT CARRY — READY TO PASTE        ║\n╚══════════════════════════════════════════╝\n\n🧠 WHO I AM\nNone\n\n🎯 WHAT WE WERE DOING\nReviewing a draft quote for the fictional Birch neighborhood event. The task is to assess whether the draft contains sufficient information to make a decision within a 700-credit total budget. The user explicitly stated they want a review only, not approval to buy anything, and not a rewrite of the draft.\n\n📍 WHERE WE LEFT OFF\nThe latest user request is to review whether the draft provides enough information to decide within the 700-credit budget, explaining what is known and what remains unknown. No approval, purchase, or supplier contact has occurred. The draft wording is fixed and must not be altered.\n\n✅ DECISIONS MADE\nNone\n\n⚠️ OPEN QUESTIONS\nNone\n\n📦 KEY CONTEXT\n- Event: Fictional Birch neighborhood event\n- Total budget: 700 credits\n- Supplier contact: Ren (not the user)\n- Draft quote wording (exact, to be preserved): \"Lighting: 180 credits. Audio: 200 credits. Delivery fee: not supplied. Offer expires Friday 12 June.\"\n- Lighting quote: 180 credits (corrected from earlier 150; not accepted)\n- Audio quote: 200 credits (not accepted)\n- Delivery fee: Not supplied (unknown)\n- Expiry: Friday 12 June (quote deadline, not event or delivery date)\n- No purchase, payment, or supplier contact has occurred\n- No delivery date has been established\n- Explicit constraint: Do not contact Ren or place an order\n- Explicit constraint: Only review the draft; do not rewrite it\n- Explicit constraint: Do not approve a purchase or create a new event plan\n\n🔁 NEXT STEP\nReply only: \"Context loaded. Let's pick up right where you left off.\" Then wait for the user.",
+      "generated": true,
+      "model": "dots-studio/dots-3-note-preview:free",
+      "elapsedMs": 6014,
+      "inputChars": 1273,
+      "inputSha256": "9cb78bdef00ea5a4b97dc16f2e04f2266a8381d04d4158b1197a0fdb69c9424b",
+      "systemPromptSha256": "37dd8ab714112d13b1cadf1684b6996191f12f8579cfaad27df6a1694f14dbf8",
+      "profile": "small",
+      "forcedGeneratedProfile": false,
+      "maxTokens": 1000,
+      "usage": {
+        "promptTokens": 1879,
+        "completionTokens": 447,
+        "totalTokens": 2326,
+        "cachedTokens": 0
+      },
+      "qualityFlags": [],
+      "fallback": {
+        "attempted": false,
+        "used": false,
+        "servedBy": null,
+        "model": null,
+        "reason": null
+      },
+      "assessment": {
+        "missingFacts": [],
+        "missingCriticalFacts": [],
+        "incorrectFacts": []
+      }
+    },
+    {
+      "caseId": "continue-latest-draft-long-90000",
+      "repeat": 2,
+      "variant": "baseline",
+      "summary": "╔══════════════════════════════════════════╗\n║         CONTEXT CARRY — READY TO PASTE        ║\n╚══════════════════════════════════════════╝\n\n🧠 WHO I AM\nNone\n\n🎯 WHAT WE WERE DOING\nWriting the opening of a small community newsletter called The Lantern for neighbors. The tone must be friendly and plain. No invented attendance numbers or quotes. The first paragraph is locked; the second paragraph is the pending deliverable.\n\n📍 WHERE WE LEFT OFF\nThe user provided the final first paragraph and instructed: \"Next, write only the second paragraph in the same voice. Do not rewrite my opening or revive v1. Mention that the courtyard is outdoors, and visitors can leave whenever they like.\" No second paragraph has been written yet.\n\n✅ DECISIONS MADE\n- Rejected the initial big claim (\"Our town comes together... Hundreds of neighbors will join us\") because it contained invented attendance numbers and a nonexistent registration link.\n- Accepted the user's replacement draft as the current first paragraph: \"A spare book, a familiar face, and a cup of tea: join us at the old library courtyard on Saturday 18 April, 16:00-18:00. Bring a mug and a children's book to exchange. Tea is free; books are for swapping, not selling.\"\n- Constraint: Keep that paragraph exactly as written for now.\n- Constraint: Selling books is not allowed; only swapping/exchanging is permitted.\n- Constraint: The event is Saturday 18 April, 16:00-18:00, at the old library courtyard.\n- Constraint: Bring a mug; tea is free.\n- Constraint: The second paragraph must be written in the same friendly, plain voice.\n- Constraint: The second paragraph must mention that the courtyard is outdoors and that visitors can leave whenever they like.\n- Constraint: Do not rewrite the opening or revive v1.\n\n⚠️ OPEN QUESTIONS\nNone\n\n📦 KEY CONTEXT\n- Current first paragraph (verbatim, locked): \"A spare book, a familiar face, and a cup of tea: join us at the old library courtyard on Saturday 18 April, 16:00-18:00. Bring a mug and a children's book to exchange. Tea is free; books are for swapping, not selling.\"\n- Event details: Saturday 18 April, 16:00-18:00, old library courtyard.\n- Rules: Bring a mug; tea is free; children's books can be exchanged; selling books is not allowed.\n- Second paragraph requirements: same voice, mention outdoors, mention visitors can leave whenever they like.\n- Rejected v1 draft: \"Our town comes together for a wonderful afternoon of books and tea. Hundreds of neighbors will join us on Saturday.\" (Rejected for invented turnout and registration link.)\n- Archived references (1-480): All are historical background only and supply no decisions for the current task. They include unrelated topics: retired Meadow bookmark project (green star icon), sample cooking exercise (oats and apples), fictional reading club (poetry anthology), old neighborhood bulletin (two-column layout), and archived Kite puzzle discussion (arrow keys preference). None affect the active newsletter task.\n\n🔁 NEXT STEP\nReply only: \"Context loaded. Let's pick up right where you left off.\" Then wait for the user.",
+      "generated": true,
+      "model": "dots-studio/dots-3-note-preview:free",
+      "elapsedMs": 8637,
+      "inputChars": 90056,
+      "inputSha256": "577d1190cbfe9263830a6217469173ac8723a29af66780c139ac1cb3355391fe",
+      "systemPromptSha256": "096e4d146760bc9d3ce511b5207cb37572e86cf1181fd99d02d958843421fb29",
+      "profile": "large",
+      "forcedGeneratedProfile": false,
+      "maxTokens": 4200,
+      "usage": {
+        "promptTokens": 19197,
+        "completionTokens": 725,
+        "totalTokens": 19922,
+        "cachedTokens": 0
+      },
+      "qualityFlags": [],
+      "fallback": {
+        "attempted": false,
+        "used": false,
+        "servedBy": null,
+        "model": null,
+        "reason": null
+      },
+      "assessment": {
+        "missingFacts": [],
+        "missingCriticalFacts": [],
+        "incorrectFacts": [
+          "Hundreds of neighbors will join us"
+        ]
+      }
+    },
+    {
+      "caseId": "continue-latest-draft-long-90000",
+      "repeat": 2,
+      "variant": "candidate",
+      "summary": "🧠 WHO I AM\nNone\n\n🎯 WHAT WE WERE DOING\nWriting the opening of a small community newsletter called The Lantern. The first paragraph was finalized by the user and must not be changed. The current task is to write a second paragraph in the same friendly, plain voice, covering practical details.\n\n📍 WHERE WE LEFT OFF\nThe user's latest instruction is to write only the second paragraph. The second paragraph must mention that the courtyard is outdoors and that visitors can leave whenever they like. The first paragraph is locked and must not be rewritten or revived from earlier drafts.\n\n✅ DECISIONS MADE\n- The first paragraph is locked: \"A spare book, a familiar face, and a cup of tea: join us at the old library courtyard on Saturday 18 April, 16:00-18:00. Bring a mug and a children's book to exchange. Tea is free; books are for swapping, not selling.\"\n- The event is Saturday 18 April, 16:00-18:00, at the old library courtyard.\n- Bring a mug; tea is free.\n- Children's books can be exchanged; selling books is not allowed.\n- No invented attendance numbers or quotes.\n- No registration link exists.\n- Tone must be friendly and plain.\n- The second paragraph must mention the courtyard is outdoors and visitors can leave whenever they like.\n\n⚠️ OPEN QUESTIONS\nNone\n\n📦 KEY CONTEXT\n- First paragraph (locked, verbatim): \"A spare book, a familiar face, and a cup of tea: join us at the old library courtyard on Saturday 18 April, 16:00-18:00. Bring a mug and a children's book to exchange. Tea is free; books are for swapping, not selling.\"\n- Second paragraph requirements: mention outdoors, mention visitors can leave whenever they like, same voice, no rewriting of first paragraph, no revival of v1.\n- Rejected: Draft v1 (\"Our town comes together for a wonderful afternoon of books and tea. Hundreds of neighbors will join us on Saturday.\") — rejected for invented turnout.\n- Rejected: Big claim about whole town coming together and ending with a registration link — rejected; no registration link exists.\n- Archived references (1, 3, 5, 7, 9, 11, 13, 15, 17, 19, 21, 23, 25, 27, 29, 31, 33, 35, 37, 39, 41, 43, 45, 47, 49, 51, 53, 55, 57, 59, 61, 63, 65, 67, 69, 71, 73, 75, 77, 79, 81, 83, 85, 87, 89, 91, 93, 95, 97, 99, 101, 103, 105, 107, 109, 111, 113, 115, 117, 119, 121, 123, 125, 127, 129, 131, 133, 135, 137, 139, 141, 143, 145, 147, 149, 151, 153, 155, 157, 159, 161, 163, 165, 167, 169, 171, 173, 175, 177, 179, 181, 183, 185, 187, 189, 191, 193, 195, 197, 199, 201, 203, 205, 207, 209, 211, 213, 215, 217, 219, 221, 223, 225, 227, 229, 231, 233, 235, 237, 239, 241, 243, 245, 247, 249, 251, 253, 255, 257, 259, 261, 263, 265, 267, 269, 271, 273, 275, 277, 279, 281, 283, 285, 287, 289, 291, 293, 295, 297, 299, 301, 303, 305, 307, 309, 311, 313, 315, 317, 319, 321, 323, 325, 327, 329, 331, 333, 335, 337, 339, 341, 343, 345, 347, 349, 351, 353, 355, 357, 359, 361, 363, 365, 367, 369, 371, 373, 375, 377, 379, 381, 383, 385, 387, 389, 391, 393, 395, 397, 399, 401, 403, 405, 407, 409, 411, 413, 415, 417, 419, 421, 423, 425, 427, 429, 431, 433, 435, 437, 439, 441, 443, 445, 447, 449, 451, 453, 455, 457, 459, 461, 463, 465, 467, 469, 471, 473, 475, 477, 479, 481) — all historical background only; none affect the current task.\n\n🔁 NEXT STEP\nContext loaded. Let's pick up right where you left off.\n\n🔁 NEXT STEP\nReply only: \"Context loaded. Let's pick up right where you left off.\" Then wait for the user.",
+      "generated": true,
+      "model": "dots-studio/dots-3-note-preview:free",
+      "elapsedMs": 17013,
+      "inputChars": 90056,
+      "inputSha256": "577d1190cbfe9263830a6217469173ac8723a29af66780c139ac1cb3355391fe",
+      "systemPromptSha256": "89f84fa3acfa7f3aa4261793b0bf8a7b1595b8d092eddfb1adac5e59edffef67",
+      "profile": "large",
+      "forcedGeneratedProfile": false,
+      "maxTokens": 4200,
+      "usage": {
+        "promptTokens": 19137,
+        "completionTokens": 1647,
+        "totalTokens": 20784,
+        "cachedTokens": 0
+      },
+      "qualityFlags": [
+        "bad_structure"
+      ],
+      "fallback": {
+        "attempted": false,
+        "used": false,
+        "servedBy": null,
+        "model": null,
+        "reason": null
+      },
+      "assessment": {
+        "missingFacts": [],
+        "missingCriticalFacts": [
+          "Do not rewrite my opening OR do not rewrite the opening OR keep the opening unchanged"
+        ],
+        "incorrectFacts": [
+          "Hundreds of neighbors will join us"
+        ]
+      }
+    }
+  ],
+  "testRequestBudget": {
+    "slot": "test-a",
+    "used": 24,
+    "limit": 50,
+    "windowHours": 24,
+    "blockedLocally": false
+  }
+}
