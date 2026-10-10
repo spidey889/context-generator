@@ -1973,6 +1973,10 @@ async function run() {
       const tiles = [...document.querySelectorAll(".context-generator-destination-tile")];
       const claudeTile = tiles.find((tile) => tile.textContent.includes(${JSON.stringify(JSON_SOURCE === "claude" ? "ChatGPT" : "Claude")}));
       if (!claudeTile) return { ok: false, destinations: tiles.map((tile) => tile.textContent.trim()) };
+      // Earlier keyboard/resize checks can leave this tile active. Establish
+      // idle explicitly so hover coverage compares two distinct visual states.
+      if (document.activeElement === claudeTile) sheet.focus({ preventScroll: true });
+      claudeTile.dispatchEvent(new Event("mouseleave"));
       // Reproduce Dark Reader's injected important rules without installing it in
       // the isolated smoke profile. The extension's visible palette must win.
       const cases = [
@@ -2013,12 +2017,13 @@ async function run() {
         palettePreserved,
         hoverPreserved: hoverBackground !== idleBackground && !hoverBackground.includes("red"),
         selectedPreserved: selectedBackground !== idleBackground && !selectedBackground.includes("red"),
+        backgrounds: { idle: idleBackground, hover: hoverBackground, selected: selectedBackground },
         pickerStyleIgnored: sheet.ownerDocument.getElementById("context-generator-destination-sheet-styles")?.classList.contains("darkreader")
       };
     })()`);
     assert.equal(clickResult?.ok, true, `Claude destination tile was unavailable: ${JSON.stringify(clickResult)}`);
     assert.equal(clickResult.palettePreserved, true, "Dark Reader must not recolor the picker's idle palette.");
-    assert.equal(clickResult.hoverPreserved, true, "Dark Reader must not recolor the picker's hover palette.");
+    assert.equal(clickResult.hoverPreserved, true, `Dark Reader must not recolor the picker's hover palette: ${JSON.stringify(clickResult.backgrounds)}`);
     assert.equal(clickResult.selectedPreserved, true, "Dark Reader must not recolor the selected destination tile.");
     assert.equal(clickResult.pickerStyleIgnored, true, "Dark Reader must leave the picker stylesheet alone.");
 
