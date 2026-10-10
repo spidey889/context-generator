@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-10-copy-context-v129";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-10-copy-retry-v130";
   const INLINE_PILL_SIZE = 36;
   const ownedUiStyleSheets = new Map();
   const CLAUDE_INLINE_STYLE_ID = "context-generator-claude-inline-styles";
@@ -9010,6 +9010,7 @@
 
       addOwnedEventListener(copyBtn, "click", async () => {
         const currentText = textarea.value || "";
+        const clipboardOnly = modal.dataset.contextGeneratorDestination === CLIPBOARD_DESTINATION_ID;
         let copied = false;
         try {
           if (!navigator.clipboard?.writeText) throw new Error("Clipboard API unavailable.");
@@ -9032,6 +9033,11 @@
           return;
         }
 
+        // The dialog is reused; a dismissed or replaced copy must not add stale feedback.
+        if (clipboardOnly && instanceActive && modal.isConnected
+            && modal.dataset.contextGeneratorDestination === CLIPBOARD_DESTINATION_ID && textarea.value === currentText) {
+          showClipboardSuccess();
+        }
         copyBtn.textContent = "Copied!";
         copyBtn.style.setProperty("background", "linear-gradient(180deg,#69e6a2,#21b36b)", "important");
         copyBtn.style.setProperty("color", "#07150d", "important");
@@ -9112,6 +9118,7 @@
       }
     }
 
+    modal.dataset.contextGeneratorDestination = destinationName;
     modal.contextGeneratorPreviousFocus = document.activeElement;
 
     const title = document.getElementById("context-generator-fallback-title");

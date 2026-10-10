@@ -1267,6 +1267,7 @@ async function verifyClipboardFlow(sourceSession, browserSession, state, devTool
     document.getElementById("context-generator-fallback-copy").click();
   })()`, extensionContextId);
   await waitFor(() => sourceSession.evaluate('document.getElementById("context-generator-fallback-copy").textContent === "Copied!"'), "successful clipboard retry");
+  await waitFor(() => sourceSession.evaluate('document.getElementById("context-generator-copy-status")?.textContent === "Copied to your clipboard"'), "confirmed clipboard retry");
   await assertNativeClipboard(SUMMARY_TEXT);
   assert.equal(state.summaryRequests.length, 1, "Clipboard recovery must reuse the prepared/cached carry");
   process.stdout.write("✓ Copy: exact OS clipboard, one summary, no destination/transfer telemetry, responsive controls, truthful failure and retry.\n");
