@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-10-paste-deadline-recovery-v131";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-12-claude-page-diagnostics-v132";
   const INLINE_PILL_SIZE = 36;
   const ownedUiStyleSheets = new Map();
   const CLAUDE_INLINE_STYLE_ID = "context-generator-claude-inline-styles";
@@ -2708,7 +2708,15 @@
     guard.diagnosticStartedAt = diagnosticStartedAt;
     let retainedGuard = false;
     try {
-      if (destination.id !== currentPlatform.id || !landingPaths.includes(window.location.pathname.replace(/\/+$/, "") || "/")) {
+      const platformMatches = destination.id === currentPlatform.id;
+      const routeAllowed = landingPaths.includes(window.location.pathname.replace(/\/+$/, "") || "/");
+      if (destination.id === "claude") {
+        globalThis.CapTransferDiagnostics?.update(diagnostics, {
+          claude_page: globalThis.CapTransferDiagnostics.claudePage(`https://${window.location.hostname}${window.location.pathname}`),
+          destination_platform_match: platformMatches, destination_route_allowed: routeAllowed
+        });
+      }
+      if (!platformMatches || !routeAllowed) {
         throw createDiagnosticError("The destination is no longer a new chat.", "destination_not_new_chat");
       }
       const timing = await pasteWithRetry(trimmedText, destination, transferId, deadlineAt, guard);
@@ -2834,7 +2842,9 @@
       if (guard?.userHandled) return getTiming();
       await guard?.checkActive();
       guard?.check();
-      if (getDetectedConversationMessageCount() > 0) throw createDiagnosticError("The destination is no longer a new chat.", "destination_not_new_chat");
+      const destinationMessageCount = getDetectedConversationMessageCount();
+      if (destination.id === "claude") observe({ destination_message_count: destinationMessageCount });
+      if (destinationMessageCount > 0) throw createDiagnosticError("The destination is no longer a new chat.", "destination_not_new_chat");
       const input = findReadyPlatformInput(destination);
       observe({ editor_seen: sawInput || Boolean(input) });
       if (input) {

@@ -151,6 +151,14 @@ async function createTelemetrySmokeFixture(repoRoot, databaseEnabled) {
       assert.equal(row.diagnostics.version, 1);
       assert.equal(row.diagnostics.paste_populated, true);
       assert.equal(row.diagnostics.message_reply, "ack_success");
+      if (row.destination_platform === "claude") {
+        // The isolated fixture has a localhost URL, which must collapse to a
+        // fixed page label while preserving its successful guard observations.
+        assert.equal(row.diagnostics.claude_page, "other_site");
+        assert.equal(row.diagnostics.destination_platform_match, true);
+        assert.equal(row.diagnostics.destination_route_allowed, true);
+        assert.equal(row.diagnostics.destination_message_count, 0);
+      }
       assert.equal(row.diagnostics.error_code, undefined);
       assert.equal(row.model, "gemini-3.6-flash");
       assert.equal(row.model_verified, true);

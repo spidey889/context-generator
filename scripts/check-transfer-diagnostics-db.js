@@ -10,7 +10,11 @@ async function checkTransferDiagnostics(db, sql) {
   const users = await rows("select to_jsonb(u) as row from public.users u order by install_id");
   const security = await rows("select relname,relacl::text,relrowsecurity from pg_class where oid in ('public.transfers'::regclass,'public.users'::regclass) order by relname");
   const rules = JSON.parse(sql.match(/rules constant jsonb := '([^']+)'::jsonb/)[1]);
-  equal(rules, contract.schema);
+  // Validate the historical contract at its own migration boundary. Later
+  // additive page diagnostics have a separate preservation/ingress check.
+  const historicSchema = { ...contract.schema };
+  for (const key of ["claude_page", "destination_route_allowed", "destination_platform_match", "destination_message_count"]) delete historicSchema[key];
+  equal(rules, historicSchema);
   await db.exec(sql);
   equal(await rows("select to_jsonb(t)-'diagnostics' as row from public.transfers t order by attempt_id"), before);
   equal(await rows("select to_jsonb(u) as row from public.users u order by install_id"), users);
@@ -18,7 +22,7 @@ async function checkTransferDiagnostics(db, sql) {
   equal((await one("select count(*)::int as count from public.transfers where diagnostics is not null")).count, 0);
   const valid = async value => (await one("select public.is_valid_transfer_diagnostics($1::jsonb) as valid", [JSON.stringify(value)])).valid;
   const samples = [];
-  for (const [key, rule] of Object.entries(contract.schema)) {
+  for (const [key, rule] of Object.entries(rules)) {
     const value = rule.values?.[0] ?? (rule.type === "boolean" ? false : rule.type === "number" ? 23 : rule.type === "object"
       ? { version: 1, error_code: "editor_missing", paste_events: [{ event: "failure", at_ms: 23, code: "editor_missing" }] }
       : [{ event: "admission", at_ms: 0 }]);

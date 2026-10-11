@@ -1,6 +1,6 @@
 // Metadata contract shared by the worker, content scripts and telemetry relay.
 // The Edge copy is checked byte-for-byte in tests. Never admit free-form errors,
-// selectors, URLs, chat text or summaries here, even when a failure is unknown.
+// selectors, raw URLs, chat text or summaries here, even when a failure is unknown.
 (function (root) {
   const codes = ["unknown_error", "no_conversation", "conversation_too_large", "request_too_large",
     "capture_roles_unverified", "capture_json_unavailable", "capture_json_failed", "capture_dom_failed",
@@ -19,6 +19,11 @@
   const events = [...operations, "json_fallback", "local_fallback", "prepared_reused", "prepared_rejected",
     "fresh_recovery", "editor_remounted", "failure", "cancelled", "deadline_expired"];
   const enums = {
+    // Fixed page labels only: chat/project IDs, unknown paths and query values
+    // must never become telemetry. The worker and destination use this helper.
+    claude_page: ["claude.ai/", "claude.ai/new", "claude.ai/chat/:id", "claude.ai/project/:id",
+      "claude.ai/login", "claude.ai/signup", "claude.ai/onboarding", "claude.ai/settings",
+      "claude.ai/other", "claude_subdomain", "other_site", "unavailable"],
     error_code: codes, recovery_error_code: codes, summary_error_code: codes, editor_last_error_code: codes,
     error_origin: ["source", "background", "destination", "summary_service"],
     last_operation: operations, entry_point: ["picker", "toolbar", "other"],
@@ -34,7 +39,7 @@
   const booleans = ["online", "source_saved", "speed_enabled", "json_attempted", "source_changed", "cancelled",
     "destination_prepared", "prepared_reused", "prepared_rejected", "fresh_recovery", "script_injected",
     "editor_seen", "editor_connected", "draft_present", "paste_populated", "paste_stable", "user_handled",
-    "summary_cache_hit", "summary_fallback", "events_truncated"];
+    "summary_cache_hit", "summary_fallback", "events_truncated", "destination_route_allowed", "destination_platform_match"];
   const numbers = ["duration_ms", "deadline_remaining_ms", "capture_ms", "capture_chars", "capture_bytes",
     "candidate_turns", "captured_turns", "useful_turns", "raw_candidate_chars", "initial_rendered_turns",
     "sweep_scrolls", "sweep_stale_scrolls", "sweep_quiet_checks", "capture_retries", "expanded_blocks",
@@ -42,7 +47,7 @@
     "summary_provider_attempts", "summary_http_status", "destination_open_ms", "activation_ms", "activation_settle_ms",
     "delivery_ms", "message_ms", "message_attempts", "script_injections", "paste_ms", "paste_attempts",
     "composer_wait_ms", "paste_retry_limit_ms", "paste_verify_limit_ms", "paste_stability_ms", "editor_remounts",
-    "editor_text_chars", "page_load_ms"];
+    "editor_text_chars", "page_load_ms", "destination_message_count"];
   const schema = { version: { type: "number", values: [1] },
     ...Object.fromEntries(Object.entries(enums).map(([key, values]) => [key, { type: "string", values }])),
     ...Object.fromEntries(booleans.map(key => [key, { type: "boolean" }])),
@@ -111,11 +116,23 @@
     return codes.includes(error?.diagnosticCode) ? error.diagnosticCode
       : codes.includes(error?.code) ? error.code : fallback;
   }
+  function claudePage(url) {
+    try {
+      const parsed = new URL(url);
+      if (parsed.protocol !== "https:") return "other_site";
+      if (parsed.hostname !== "claude.ai") return parsed.hostname.endsWith(".claude.ai") ? "claude_subdomain" : "other_site";
+      const path = parsed.pathname.replace(/\/+$/, "") || "/";
+      if (["/", "/new", "/login", "/signup", "/onboarding", "/settings"].includes(path)) return `claude.ai${path}`;
+      if (/^\/chat\/[\w-]+$/.test(path)) return "claude.ai/chat/:id";
+      if (/^\/project\/[\w-]+$/.test(path)) return "claude.ai/project/:id";
+      return "claude.ai/other";
+    } catch { return "unavailable"; }
+  }
   function failure(target, error, origin, atMs) {
     update(target, { error_code: errorCode(error), error_origin: origin });
     event(target, "failure", atMs, origin === "destination" ? "paste_events" : origin === "background" ? "delivery_events" : "events", errorCode(error));
   }
-  const api = { schema, codes, operations, events, validate, snapshot, update, event, errorCode, failure };
+  const api = { schema, codes, operations, events, validate, snapshot, update, event, errorCode, failure, claudePage };
   root.CapTransferDiagnostics = api;
   if (typeof module !== "undefined" && module.exports) module.exports = api;
 })(globalThis);

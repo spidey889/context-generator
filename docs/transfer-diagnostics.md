@@ -35,6 +35,16 @@ Future contract changes require new migrations; applied history stays unchanged.
   observations describe the final attempt. Fresh recovery clears the first
   destination's editor/paste fields before observing the new tab, so missing
   observations cannot inherit an earlier draft or editor state.
+  Claude transfers also record `claude_page`, a fixed redacted page label such as
+  `claude.ai/`, `claude.ai/new`, `claude.ai/chat/:id` or `claude.ai/login`.
+  Unknown paths become `claude.ai/other`; subdomains and external sites receive
+  fixed labels, never their actual host/path. The worker observes the URL used
+  for the prepared-tab check (pending navigation takes precedence) and native
+  activation when available; destination observations take precedence at paste.
+  A rejected prepared page survives separately in `prepared_diagnostics`.
+  `destination_platform_match` and `destination_route_allowed` record the two
+  initial guard checks. `destination_message_count` records detected conversation
+  messages only when the paste loop actually runs; absence stays unknown.
 - **Editor:** kind, observed presence/connection, draft flag/text length, insertion
   method, retry/verification/stability limits, attempts, remounts, populated/stable
   checks and the last editor error even after recovery.
@@ -54,10 +64,12 @@ set `events_truncated`, and retain counters. Producer snapshots retain at most
 and Edge cap requests at 24 KiB UTF-8; SQL checks types, enums, depth, timelines
 and a 16 KiB normalized JSONB bound independently.
 
-Absent fields mean **not observed**, not false/zero. No chat/summary text, URL,
+Absent fields mean **not observed**, not false/zero. No chat/summary text, raw URL,
 selector, account, stack, arbitrary exception/provider text or extra browser
 identifier is admitted. Text length is a count. These observations narrow causes;
 they do not independently prove native UI behavior or identify a person.
+The Claude page labels are a closed enum, not arbitrary URL storage: queries,
+fragments, chat/project IDs and unrecognized path text cannot enter the payload.
 
 ## Persistence and rollout
 

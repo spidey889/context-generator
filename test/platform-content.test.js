@@ -2521,12 +2521,35 @@ clockTest("missing destination editor reports its wait, attempts and observed ab
   const hooks = loadPlatformContent([], "claude.ai");
   await assert.rejects(hooks.pasteIntoPlatform("A complete carry", "claude"), error => {
     assert.equal(error.diagnostics.error_code, "editor_missing");
+    assert.equal(error.diagnostics.claude_page, "claude.ai/");
+    assert.equal(error.diagnostics.destination_route_allowed, true);
+    assert.equal(error.diagnostics.destination_platform_match, true);
+    assert.equal(error.diagnostics.destination_message_count, 0);
     assert.equal(error.diagnostics.editor_seen, false);
     assert.ok(error.diagnostics.paste_attempts > 1);
     assert.ok(error.diagnostics.paste_ms >= error.diagnostics.paste_retry_limit_ms);
     assert.equal(error.diagnostics.paste_populated, undefined, "absence is not a measured failed insertion");
     return true;
   });
+});
+
+test("Claude new-chat rejection records the route and platform checks without private URLs", async () => {
+  for (const [hostname, pathname, page, platformMatches, routeAllowed] of [
+    ["claude.ai", "/chat/PRIVATE", "claude.ai/chat/:id", true, false],
+    ["claude.ai", "/login", "claude.ai/login", true, false],
+    ["chatgpt.com", "/", "other_site", false, true]
+  ]) {
+    const hooks = loadPlatformContent([], hostname, { pathname, search: "?token=PRIVATE" });
+    await assert.rejects(hooks.pasteIntoPlatform("PRIVATE carry", "claude"), error => {
+      assert.equal(error.diagnostics.error_code, "destination_not_new_chat");
+      assert.equal(error.diagnostics.claude_page, page);
+      assert.equal(error.diagnostics.destination_platform_match, platformMatches);
+      assert.equal(error.diagnostics.destination_route_allowed, routeAllowed);
+      assert.equal(error.diagnostics.destination_message_count, undefined);
+      assert.doesNotMatch(JSON.stringify(error.diagnostics), /PRIVATE/);
+      return true;
+    });
+  }
 });
 
 clockTest("unconfirmed paste recovery asks to check the destination and retains the full carry", () => {

@@ -1462,7 +1462,7 @@ async function transferToDestinationObserved(
   let preparedAttempted = false;
 
   if (preparedTabId) operation?.tabIds.add(preparedTabId);
-  if (preparedTabId && await isPreparedDestinationTabUsable(preparedTabId, destinationId, operation)) {
+  if (preparedTabId && await isPreparedDestinationTabUsable(preparedTabId, destinationId, operation, trace.diagnostics)) {
     await checkTransferSource(operation);
     checkTransferDeadline(deadlineAt);
     preparedAttempted = true;
@@ -1484,6 +1484,14 @@ async function transferToDestinationObserved(
         code: error.code, diagnosticCode: error.diagnosticCode, diagnostics: error.diagnostics };
     }
   } else if (preparedTabId) {
+    if (destinationId === "claude" && trace.diagnostics.claude_page) {
+      trace.diagnostics.prepared_diagnostics = { version: 1, claude_page: trace.diagnostics.claude_page,
+        destination_platform_match: trace.diagnostics.destination_platform_match,
+        destination_route_allowed: trace.diagnostics.destination_route_allowed };
+      delete trace.diagnostics.claude_page;
+      delete trace.diagnostics.destination_platform_match;
+      delete trace.diagnostics.destination_route_allowed;
+    }
     markBackgroundTrace(trace, "prepared tab rejected", {
       tabId: preparedTabId,
       destination: destinationId,
@@ -1509,6 +1517,7 @@ async function transferToDestinationObserved(
       globalThis.CapTransferDiagnostics?.update(trace.diagnostics, { recovery_error_code: previous?.error_code || globalThis.CapTransferDiagnostics?.errorCode(pasteResult) });
       delete trace.diagnostics.error_code;
       delete trace.diagnostics.error_origin;
+      for (const key of ["claude_page", "destination_platform_match", "destination_route_allowed", "destination_message_count"]) delete trace.diagnostics[key];
     }
     if (recoveringPreparedTab) markBackgroundTrace(trace, "fresh recovery");
     if (preparedAttempted) {
@@ -1575,12 +1584,23 @@ async function transferToDestinationObserved(
   };
 }
 
-async function isPreparedDestinationTabUsable(tabId, destinationId, operation = null) {
+async function isPreparedDestinationTabUsable(tabId, destinationId, operation = null, diagnostics = null) {
   try {
     const tab = await chrome.tabs.get(tabId);
     const currentOrPendingUrl = tab?.pendingUrl || tab?.url || "";
-    return getPlatformFromUrl(currentOrPendingUrl) === destinationId &&
-      DESTINATION_LANDING_PATHS[destinationId]?.includes(new URL(currentOrPendingUrl).pathname.replace(/\/+$/, "") || "/");
+    if (destinationId === "claude" && currentOrPendingUrl) {
+      globalThis.CapTransferDiagnostics?.update(diagnostics, {
+        claude_page: globalThis.CapTransferDiagnostics.claudePage(currentOrPendingUrl)
+      });
+    }
+    const platformMatches = getPlatformFromUrl(currentOrPendingUrl) === destinationId;
+    let routeAllowed = false;
+    try { routeAllowed = Boolean(DESTINATION_LANDING_PATHS[destinationId]?.includes(new URL(currentOrPendingUrl).pathname.replace(/\/+$/, "") || "/")); }
+    catch { /* An invalid URL is unusable; observing it must not cancel a live tab. */ }
+    if (destinationId === "claude") globalThis.CapTransferDiagnostics?.update(diagnostics, {
+      destination_platform_match: platformMatches, destination_route_allowed: routeAllowed
+    });
+    return platformMatches && routeAllowed;
   } catch {
     // A closed transfer tab is cancellation, not a reason to recreate it.
     if (operation) {
@@ -1606,7 +1626,8 @@ async function pasteIntoDestinationWithActivation(
   // ordinary callers sequence the source completion cue first.
   if (destination.focusBeforePaste && trace?.operation?.earlyRevealedTabId !== tabId) {
     markBackgroundTrace(trace, "tab activate before paste start", { tabId });
-    await activateDestinationTab(tabId, trace?.deadlineAt, trace?.operation);
+    await activateDestinationTab(tabId, trace?.deadlineAt, trace?.operation, trace?.operation,
+      destinationId === "claude" ? trace?.diagnostics : null);
     markBackgroundTrace(trace, "tab activate before paste done", { tabId });
     if (destination.activationSettleMs) {
       markBackgroundTrace(trace, "tab activation settle start", { tabId, settleMs: destination.activationSettleMs });
@@ -1688,11 +1709,14 @@ async function createDestinationTab(destination, options = {}) {
   }
 }
 
-async function activateDestinationTab(tabId, deadlineAt = null, operation = null, completionOperation = operation) {
+async function activateDestinationTab(tabId, deadlineAt = null, operation = null, completionOperation = operation, diagnostics = null) {
   await checkTransferSource(operation);
   checkTransferDeadline(deadlineAt);
   try {
     const tab = await chrome.tabs.update(tabId, { active: true });
+    if (tab?.url) globalThis.CapTransferDiagnostics?.update(diagnostics, {
+      claude_page: globalThis.CapTransferDiagnostics.claudePage(tab.url)
+    });
     // Once native activation is submitted, finish its window-focus pair even
     // if optional polishing stops. Real transfer cancellation still revokes it.
     await checkTransferSource(completionOperation);

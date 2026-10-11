@@ -682,6 +682,25 @@ clockTest("unconfirmed paste replies never re-send or fall back to another tab",
   }
 });
 
+test("Claude recovery preserves the rejected prepared page and observes the activated page without extra reads", async () => {
+  const harness = loadBackgroundForTransferTest({
+    preparedTab: { id: 41, url: "https://claude.ai/new", pendingUrl: "https://claude.ai/chat/PRIVATE?secret=PRIVATE" },
+    tabUpdateImpl: async tabId => ({ id: tabId, windowId: 1, url: "https://claude.ai/login?returnTo=PRIVATE" }),
+    sendMessageImpl: async (_tabId, message) => message.type === "PASTE_CONTEXT"
+      ? { ok: false, diagnostics: { version: 1, error_code: "destination_not_new_chat" } } : { ok: true }
+  });
+  const response = await harness.sendTransfer("claude", 41);
+  assert.equal(response.ok, false);
+  assert.equal(response.diagnostics.prepared_diagnostics.claude_page, "claude.ai/chat/:id");
+  assert.equal(response.diagnostics.prepared_diagnostics.destination_route_allowed, false);
+  assert.equal(response.diagnostics.prepared_diagnostics.destination_platform_match, true);
+  assert.equal(response.diagnostics.claude_page, "claude.ai/login");
+  assert.equal(response.diagnostics.destination_route_allowed, undefined);
+  assert.equal(harness.operations.created.length, 1);
+  assert.deepEqual(harness.operations.gotten, [41]);
+  assert.doesNotMatch(JSON.stringify(response.diagnostics), /PRIVATE/);
+});
+
 clockTest("fresh recovery retains the first editor failure alongside the final destination observations", async () => {
   for (const outcome of ["success", "not_retained", "missing_editor"]) {
     const finalOk = outcome === "success";

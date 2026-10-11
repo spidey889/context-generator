@@ -37,6 +37,35 @@ test("unknown errors preserve observations without inventing a cause or copying 
   assert.doesNotMatch(JSON.stringify(record), /PRIVATE|account|URL|chat/);
 });
 
+test("Claude page observations redact IDs, queries, fragments and unknown paths at every ingress", async () => {
+  const edge = await import("../supabase/functions/transfer-telemetry/validation.mjs");
+  for (const [url, page] of [
+    ["https://claude.ai/?secret=PRIVATE#PRIVATE", "claude.ai/"],
+    ["https://claude.ai/new/", "claude.ai/new"],
+    ["https://claude.ai/chat/PRIVATE?token=PRIVATE", "claude.ai/chat/:id"],
+    ["https://claude.ai/project/PRIVATE", "claude.ai/project/:id"],
+    ["https://claude.ai/login?returnTo=PRIVATE", "claude.ai/login"],
+    ["https://claude.ai/PRIVATE/PRIVATE", "claude.ai/other"],
+    ["https://PRIVATE.claude.ai/PRIVATE", "claude_subdomain"],
+    ["https://claude.ai.PRIVATE/PRIVATE", "other_site"],
+    ["https://PRIVATE@PRIVATE/PRIVATE", "other_site"],
+    ["PRIVATE", "unavailable"]
+  ]) {
+    assert.equal(diagnostics.claudePage(url), page);
+    const safe = { version: 1, claude_page: page, destination_route_allowed: false,
+      destination_platform_match: true, destination_message_count: 0, prepared_diagnostics: { version: 1, claude_page: page } };
+    assert.ok(validateTelemetryPayload(payload({ diagnostics: safe })));
+    assert.ok(edge.validateTelemetryPayload(payload({ diagnostics: safe })));
+    assert.doesNotMatch(JSON.stringify(safe), /PRIVATE/);
+  }
+  for (const value of ["https://claude.ai/", "claude.ai/chat/PRIVATE", "claude.ai/new?token=PRIVATE", "PRIVATE"]) {
+    for (const safe of [{ version: 1, claude_page: value }, { version: 1, prepared_diagnostics: { version: 1, claude_page: value } }]) {
+      assert.equal(validateTelemetryPayload(payload({ diagnostics: safe })), null);
+      assert.equal(edge.validateTelemetryPayload(payload({ diagnostics: safe })), null);
+    }
+  }
+});
+
 test("retry storms retain bounded first and last observations and the counts", () => {
   const record = { version: 1, paste_attempts: 200 };
   for (let i = 0; i < 200; i++) diagnostics.event(record, "paste_verify", i, "paste_events");
