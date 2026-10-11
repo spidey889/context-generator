@@ -7942,7 +7942,7 @@
         "z-index:1",
         "display:flex",
         "min-height:42px",
-        "align-items:center",
+        "align-items:baseline",
         "justify-content:flex-start",
         "font-size:34px",
         "font-family:Georgia,'Times New Roman',serif",
@@ -8092,10 +8092,9 @@
             display:none;
             flex:0 0 auto;
             position:relative;
-            margin-left:12px;
+            margin-left:3px;
             align-items:center;
-            align-self:center;
-            height:16px;
+            height:5px;
             gap:5px;
             color:#C8B6E9 !important;
             letter-spacing:0;
