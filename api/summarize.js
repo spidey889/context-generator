@@ -20,6 +20,7 @@ const {
 } = require("./request-security");
 const PROVIDER_RETRY_INTERVAL_MS = 450;
 const PROVIDER_ATTEMPT_TIMEOUT_MS = 90000;
+const PROVIDER_FIRST_ANSWER_TIMEOUT_MS = 30000;
 const SUMMARY_HEARTBEAT_INTERVAL_MS = 15000;
 const SUMMARY_HEARTBEAT_CHUNK = `\n${" ".repeat(2048)}\n`;
 const GEMINI_PRIMARY_MODEL = "gemini-3.6-flash";
@@ -998,11 +999,19 @@ async function fetchWithRetry(url, options, requestBudgetMs, context = {}) {
     const controller = new AbortController();
     const attemptDeadline = Math.min(deadline, Date.now() + PROVIDER_ATTEMPT_TIMEOUT_MS);
     const timeout = setTimeout(() => controller.abort(), Math.max(0, attemptDeadline - Date.now()));
+    // Headers/heartbeats are not generated answers. Only real answer text
+    // disarms this watchdog; the full completion deadline stays in force.
+    const firstAnswerDeadline = context.onDelta ? Math.min(attemptDeadline, Date.now() + PROVIDER_FIRST_ANSWER_TIMEOUT_MS) : null;
+    let answerStarted = false;
+    const abortSilentProvider = () => controller.abort(Object.assign(new Error("Provider did not start an answer in time"), { name: "AbortError" }));
+    const firstAnswerTimeout = firstAnswerDeadline === null ? null
+      : setTimeout(abortSilentProvider, Math.max(0, firstAnswerDeadline - Date.now()));
     const checkAttemptDeadline = () => {
       context.signal?.throwIfAborted();
       // Response/parser microtasks can beat an overdue abort timer on a busy
       // process. Elapsed time and the attempt signal both remain authoritative.
       if (Date.now() >= attemptDeadline) controller.abort();
+      if (!answerStarted && firstAnswerDeadline !== null && Date.now() >= firstAnswerDeadline) abortSilentProvider();
       controller.signal.throwIfAborted();
     };
     try {
@@ -1021,7 +1030,12 @@ async function fetchWithRetry(url, options, requestBudgetMs, context = {}) {
           // names/facts in otherwise valid JSON. Reject those transport bytes.
           if (context.onDelta && response.headers.get("content-type")?.includes("text/event-stream")) {
             payload = await readProviderStream(response, context.provider, {
-              onDelta: context.onDelta, checkDeadline: checkAttemptDeadline
+              onDelta: context.onDelta, checkDeadline: checkAttemptDeadline,
+              onAnswerStart() {
+                checkAttemptDeadline();
+                answerStarted = true;
+                clearTimeout(firstAnswerTimeout);
+              }
             });
           } else {
             const bytes = await response.arrayBuffer();
@@ -1061,6 +1075,7 @@ async function fetchWithRetry(url, options, requestBudgetMs, context = {}) {
       if (!isRetryableProviderNetworkError(error) || attempt === PROVIDER_MAX_ATTEMPTS) throw error;
     } finally {
       clearTimeout(timeout);
+      clearTimeout(firstAnswerTimeout);
     }
 
     const retryDelayMs = Math.min(

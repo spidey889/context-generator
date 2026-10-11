@@ -1,10 +1,10 @@
 // Fold provider SSE into the existing result shape. Only completed results may
 // pass summary validation; deltas are previews and reset on every retry/route.
-async function readProviderStream(response, provider, { onDelta, checkDeadline }) {
+async function readProviderStream(response, provider, { onDelta, checkDeadline, onAnswerStart }) {
   const reader = response.body.getReader();
   const decoder = new TextDecoder("utf-8", { fatal: true });
   let buffer = "", dataLines = [], text = "", finishReason = null;
-  let usage, error, done = false, eof = false;
+  let usage, error, done = false, eof = false, answerStarted = false;
   const dispatch = () => {
     if (!dataLines.length) return;
     const raw = dataLines.join("\n");
@@ -25,7 +25,14 @@ async function readProviderStream(response, provider, { onDelta, checkDeadline }
       delta = delta.filter(part => part?.type === "text" && typeof part.text === "string")
         .map(part => part.text).join("");
     }
-    if (typeof delta === "string" && delta) { text += delta; onDelta(delta); }
+    if (typeof delta === "string" && delta) {
+      text += delta;
+      if (!answerStarted && hasAnswerText(text, provider)) {
+        onAnswerStart?.();
+        answerStarted = true;
+      }
+      onDelta(delta);
+    }
     finishReason = (provider === "gemini" ? choice?.finishReason : choice?.finish_reason) || finishReason;
     usage = (provider === "gemini" ? chunk.usageMetadata : chunk.usage) || usage;
   };
@@ -60,6 +67,16 @@ async function readProviderStream(response, provider, { onDelta, checkDeadline }
     if (!eof) { try { reader.cancel().catch(() => {}); } catch {} }
     reader.releaseLock();
   }
+}
+
+function hasAnswerText(text, provider) {
+  if (provider !== "openrouter") return /\S/.test(text);
+  // Match final-answer extraction, including <think> tags split across chunks.
+  let answer = text.replace(/<think>[\s\S]*?<\/think>/gi, "");
+  if (/<think>/i.test(answer)) return false;
+  const tagStart = answer.lastIndexOf("<");
+  if (tagStart !== -1 && "<think>".startsWith(answer.slice(tagStart).toLowerCase())) answer = answer.slice(0, tagStart);
+  return /\S/.test(answer);
 }
 
 module.exports = { readProviderStream };

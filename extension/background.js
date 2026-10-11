@@ -65,6 +65,7 @@ const summaryCache = new Map();
 const summaryInflight = new Map();
 const transferOperations = new Map();
 const activeTransferTelemetry = new Map();
+const preparedSummaryTelemetry = new Map();
 const activeTransferSourceTabs = new Map();
 const summaryProofs = new Map();
 let telemetryInstallIdPromise = null;
@@ -308,6 +309,9 @@ function enqueueTelemetryWork(work) {
 async function recordTransferTelemetry(event, sourceTabId = null) {
   const sanitizedEvent = sanitizeTransferTelemetryEvent(event);
   if (!sanitizedEvent) return;
+  // Once capture has resolved the durable identity, later progress can update
+  // its memory snapshot without waiting behind unrelated storage writes.
+  updatePreparedSummaryTelemetry(sanitizedEvent);
   return enqueueTelemetryWork(async () => {
     await restoreActiveTransferTelemetry();
     const known = activeTransferTelemetry.get(sanitizedEvent.attemptId);
@@ -326,10 +330,35 @@ async function recordTransferTelemetry(event, sourceTabId = null) {
     if (Number.isInteger(sourceTabId)) activeTransferSourceTabs.set(mergedEvent.attemptId, sourceTabId);
     const installId = await getOrCreateTelemetryInstallId();
     const payload = makeTelemetryPayload(mergedEvent, installId);
+    updatePreparedSummaryTelemetry(mergedEvent, installId);
     await appendTelemetryOutbox(payload);
     await persistActiveTransferTelemetry(mergedEvent.attemptId);
     initializeTelemetryDelivery();
   });
+}
+
+function updatePreparedSummaryTelemetry(event, installId = null) {
+  const previous = preparedSummaryTelemetry.get(event.attemptId);
+  if (!installId && (!previous || previous.expiresAt <= Date.now())) return;
+  if (previous && !sameTransferIdentity(previous.event, event)) return;
+  preparedSummaryTelemetry.set(event.attemptId, {
+    event: previous ? { ...mergeTransferTelemetryEvents(previous.event, event), extensionVersion: event.extensionVersion || previous.event.extensionVersion } : event,
+    installId: installId || previous.installId,
+    expiresAt: installId ? Date.now() + TELEMETRY_ACTIVE_MAX_AGE_MS : previous.expiresAt
+  });
+  while (preparedSummaryTelemetry.size > TELEMETRY_OUTBOX_MAX_ENTRIES) {
+    preparedSummaryTelemetry.delete(preparedSummaryTelemetry.keys().next().value);
+  }
+}
+
+function getPreparedSummaryTelemetry(transferId) {
+  const prepared = preparedSummaryTelemetry.get(transferId);
+  if (!prepared) return null;
+  if (prepared.expiresAt <= Date.now()) {
+    preparedSummaryTelemetry.delete(transferId);
+    return null;
+  }
+  return prepared.event.status === "started" ? makeTelemetryPayload(prepared.event, prepared.installId) : null;
 }
 
 function sameTransferIdentity(first, second) {
@@ -404,6 +433,14 @@ async function restoreActiveTransferTelemetry() {
       Object.assign(retained[attemptId], confirmation);
     }
   }
+  for (const [attemptId, prepared] of preparedSummaryTelemetry) {
+    const restored = activeTransferTelemetry.get(attemptId);
+    if (!restored || !sameTransferIdentity(prepared.event, restored)) preparedSummaryTelemetry.delete(attemptId);
+    else {
+      updatePreparedSummaryTelemetry(restored);
+      preparedSummaryTelemetry.get(attemptId).expiresAt = retained[attemptId].expiresAt;
+    }
+  }
   // Normal progress rereads clean records; only expiry/schema cleanup needs a
   // write. Avoid putting unchanged snapshots back on the summary's I/O path.
   if (JSON.stringify(entries) !== JSON.stringify(retained)) {
@@ -424,6 +461,7 @@ async function persistActiveTransferTelemetry(attemptId) {
     if (event?.status === "started") await recordTelemetryDiagnostic("outcome_unknown", makeTelemetryPayload(event, null));
     delete entries[id];
     activeTransferTelemetry.delete(id);
+    preparedSummaryTelemetry.delete(id);
     activeTransferSourceTabs.delete(id);
     summaryProofs.delete(id);
   }
@@ -442,6 +480,7 @@ async function persistActiveTransferTelemetry(attemptId) {
     if (removed.event?.status === "started") await recordTelemetryDiagnostic("outcome_unknown", makeTelemetryPayload(removed.event, null));
     delete entries[oldestId];
     activeTransferTelemetry.delete(oldestId);
+    preparedSummaryTelemetry.delete(oldestId);
     activeTransferSourceTabs.delete(oldestId);
     summaryProofs.delete(oldestId);
   }
@@ -1136,9 +1175,9 @@ async function fetchSummaryFromBackend(conversationText, transferId = null, dead
   };
 
   try {
-    // Attribution is optional. Bound stalled storage as well as rejected I/O;
-    // queued work can finish later without holding up the summary request.
-    const telemetry = await waitForSummaryTelemetry(enqueueTelemetryWork(async () => {
+    // Capture normally prepares this identity before the AI request. A cold
+    // worker/legacy attempt still gets the bounded storage recovery path.
+    const telemetry = getPreparedSummaryTelemetry(transferId) || await waitForSummaryTelemetry(enqueueTelemetryWork(async () => {
       await restoreActiveTransferTelemetry();
       const active = activeTransferTelemetry.get(transferId);
       if (!active || active.status !== "started") return null;
@@ -1147,7 +1186,9 @@ async function fetchSummaryFromBackend(conversationText, transferId = null, dead
       const queuedIdentity = (await readTelemetryOutbox()).find(entry => entry.payload.attempt_id === transferId)?.payload;
       active.extensionVersion = queuedIdentity?.extension_version || active.extensionVersion || chrome.runtime.getManifest?.().version || null;
       await persistActiveTransferTelemetry(transferId);
-      return makeTelemetryPayload(active, await getOrCreateTelemetryInstallId());
+      const installId = await getOrCreateTelemetryInstallId();
+      updatePreparedSummaryTelemetry(active, installId);
+      return getPreparedSummaryTelemetry(transferId);
     }), controller.signal);
     checkSummaryDeadline();
     const fetchStartedAt = nowMs();

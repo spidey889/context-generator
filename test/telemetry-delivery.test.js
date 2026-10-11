@@ -632,14 +632,14 @@ for (const area of ["local", "session"]) {
       assert.equal(response?.ok, true, "A stalled attribution read must not hold the summary indefinitely.");
       assert.equal(response.summary, "available summary");
       assert.equal(response.timing.backend.model, "gemini-3.5-flash-lite");
-      assert.ok(Date.now() - NOW <= 1000, "Optional storage gets at most one second.");
+      assert.ok(Date.now() - NOW < 100, "Prepared attribution must bypass the blocked storage queue.");
       const cached = await summaryWithin(background, NOW + 5000).observed;
       assert.equal(cached?.timing.source, "cache");
       assert.equal(cached?.timing.backend.model, "gemini-3.5-flash-lite");
       later = summaryWithin(background, NOW + 5000, "Another captured transcript");
       assert.equal((await later.observed)?.ok, true, "The blocked queue must not freeze later summaries.");
       assert.equal(summaryRequests.length, 2);
-      assert.ok(summaryRequests.every(input => input.telemetry === undefined));
+      assert.ok(summaryRequests.every(input => input.telemetry?.attempt_id === id(1)), "Prepared attribution survives stalled storage.");
     } finally {
       release();
       await first.request;
@@ -714,7 +714,11 @@ for (const area of ["local", "session"]) {
     await background.settled();
     await background.ack(event());
     await background.settled();
-    if (stage === "snapshot") release = blockStorage(background, area, "get");
+    if (stage === "snapshot") {
+      // A restarted worker has durable capture state but no prepared memory snapshot.
+      background.evaluate("preparedSummaryTelemetry.clear()");
+      release = blockStorage(background, area, "get");
+    }
     const operation = summaryWithin(background, NOW + 50);
     try {
       const response = await operation.observed;
@@ -767,7 +771,7 @@ for (const area of ["local", "session"]) {
     }
   });
 
-  test(`telemetry storage ${area} read failure cannot block summary generation`, async () => {
+  for (const prepared of [false, true]) test(`telemetry storage ${area} read failure cannot block a ${prepared ? "prepared" : "cold"} summary`, async () => {
     const summaryRequests = [];
     const background = worker(async (url, options) => {
       if (url.endsWith("/api/telemetry")) throw new Error("offline");
@@ -777,6 +781,7 @@ for (const area of ["local", "session"]) {
     await background.settled();
     await background.ack(event());
     await background.settled();
+    if (!prepared) background.evaluate("preparedSummaryTelemetry.clear()");
     background.evaluate(`chrome.storage.${area}.get = async () => { throw new Error("storage unavailable"); }`);
     const response = await new Promise(resolve => background.listeners.message({
       type: "SUMMARIZE_WITH_BACKEND", conversation: "transcript", transferId: id(1)
@@ -785,7 +790,7 @@ for (const area of ["local", "session"]) {
     assert.equal(response.ok, true);
     assert.equal(response.summary, "available summary");
     assert.equal(summaryRequests.length, 1);
-    assert.equal(summaryRequests[0].telemetry, undefined);
+    assert.equal(summaryRequests[0].telemetry?.attempt_id, prepared ? id(1) : undefined);
   });
 
   test(`telemetry storage ${area} write failure cannot discard a successful summary or its recoverable receipt`, async () => {
@@ -825,6 +830,79 @@ for (const area of ["local", "session"]) {
     assert.equal(queued[0].payload.summary_confirmed_at, confirmedAt);
   });
 }
+
+clockTest("prepared capture metadata starts AI immediately through a blocked progress write and retains its signed receipt", async t => {
+  t.mock.timers.setTime(NOW);
+  const proof = "e".repeat(64), confirmedAt = new Date(NOW).toISOString();
+  let request, fetchedAt;
+  const background = worker(async (url, options) => {
+    if (url.endsWith("/api/telemetry")) throw new Error("offline");
+    fetchedAt = Date.now(); request = JSON.parse(options.body);
+    return { ok: true, status: 200, json: async () => ({ summary: "generated summary", summaryProofV3: proof,
+      summaryModel: "gemini-3.5-flash-lite", summaryConfirmedAt: confirmedAt }) };
+  }, profile(), () => Date.now());
+  await background.settled();
+  await background.ack(event(1, { lastStage: "capture_started", characterCount: null }));
+  await background.settled();
+  const release = blockStorage(background, "session", "set");
+  const progress = background.ack(event(1, { lastStage: "capture_completed", characterCount: 40000 }));
+  await release.began;
+  const latest = background.ack(event(1, { lastStage: "summary_request_started", characterCount: 40000 }));
+  const operation = summaryWithin(background, NOW + 5000);
+  try {
+    assert.equal((await operation.observed)?.summary, "generated summary");
+    assert.ok(fetchedAt - NOW < 100, "AI starts before optional receipt persistence waits.");
+    assert.equal(request.telemetry.character_count, 40000);
+    assert.equal(request.telemetry.last_stage, "summary_request_started");
+  } finally {
+    release(); await progress; await latest; await operation.request; await background.settled();
+  }
+  await background.ack(event(1, { status: "succeeded", lastStage: "completed", characterCount: 40000 }));
+  await background.settled();
+  const terminal = background.shared.local[OUTBOX][0].payload;
+  assert.equal(terminal.summary_proof, proof);
+  assert.equal(terminal.model, "gemini-3.5-flash-lite");
+  assert.equal(terminal.character_count, 40000);
+});
+
+for (const area of ["local", "session"]) {
+  clockTest(`a cold worker still bounds stalled ${area} attribution recovery`, async t => {
+    t.mock.timers.setTime(NOW);
+    let request;
+    const background = worker(async (url, options) => {
+      if (url.endsWith("/api/telemetry")) throw new Error("offline");
+      request = JSON.parse(options.body);
+      return { ok: true, status: 200, json: async () => ({ summary: "available summary" }) };
+    }, profile({ [INSTALL]: id(999) }, { [ACTIVE]: { [id(1)]: { event: event(), tabId: 42, expiresAt: NOW + 300000 } } }), () => Date.now());
+    await background.settled();
+    const release = blockStorage(background, area, "get");
+    const operation = summaryWithin(background, NOW + 5000);
+    try {
+      assert.equal((await operation.observed)?.summary, "available summary");
+      assert.equal(request.telemetry, undefined);
+      assert.equal(Date.now() - NOW, 1000);
+    } finally {
+      release(); await operation.request; await background.settled();
+    }
+  });
+}
+
+test("prepared attribution rejects conflicting identity and preserves terminal and expiry boundaries", async () => {
+  const background = worker(async () => { throw new Error("offline"); });
+  await background.settled();
+  await background.ack(event());
+  await background.ack(event(1, { sourcePlatform: "gemini", characterCount: 999 }));
+  const prepared = background.evaluate(`getPreparedSummaryTelemetry("${id(1)}")`);
+  assert.equal(prepared.source_platform, "claude");
+  assert.equal(prepared.character_count, 30);
+  await background.ack(event(1, { status: "failed", failureReason: "paste_failed" }));
+  await background.ack(event(1, { lastStage: "summary_request_started" }));
+  assert.equal(background.evaluate(`getPreparedSummaryTelemetry("${id(1)}")`), null);
+  await background.ack(event(2));
+  background.clock.now += 360001;
+  assert.equal(background.evaluate(`getPreparedSummaryTelemetry("${id(2)}")`), null);
+  await background.settled();
+});
 
 clockTest("the summary transport deadline also interrupts receipt storage without a transfer deadline", async t => {
   t.mock.timers.setTime(NOW);

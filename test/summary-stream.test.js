@@ -1,6 +1,7 @@
 const assert = require("node:assert/strict");
 const http = require("node:http");
 const test = require("node:test");
+const { clockTest } = require("./helpers/clock");
 const handler = require("../api/summarize");
 const { createSummaryWithFallback, getSummaryProfile } = handler.__test;
 
@@ -33,6 +34,87 @@ function configure(t) {
   });
 }
 const conversation = "User: Preserve our agreed project state and résumé 🧠.\n".repeat(45);
+
+function answerStream(provider, text = "Preserve the agreed project plan.") {
+  return provider === "gemini"
+    ? frame({ candidates: [{ index: 0, content: { parts: [{ text }] }, finishReason: "STOP" }] })
+    : frame(chatChunk(text, "stop")) + "data: [DONE]\n\n";
+}
+
+for (const provider of ["openrouter", "gemini", "mistral"]) {
+  for (const phase of ["headers", "body", "json body"]) {
+    clockTest(`${provider} switches after 30 seconds without answer text in ${phase}`, async t => {
+      configure(t);
+      const requests = [];
+      global.fetch = async (url, options) => {
+        requests.push({ url, at: Date.now(), signal: options.signal });
+        if (requests.length > 1) return responseFrom(answerStream("gemini"));
+        if (phase === "headers") return new Promise((_, reject) => options.signal.addEventListener("abort", () => reject(options.signal.reason), { once: true }));
+        return new Response(new ReadableStream({ start(controller) {
+          const noise = provider === "gemini"
+            ? frame({ candidates: [{ content: { parts: [{ thought: true, text: "HIDDEN_THINKING" }, { text: " \n" }] } }] })
+            : frame({ choices: [{ index: 0, delta: { role: "assistant", reasoning: "HIDDEN_THINKING" } }] })
+              + frame(chatChunk(" \n")) + frame({ choices: [], usage: { total_tokens: 5 } })
+              + (provider === "openrouter" ? frame(chatChunk("<th")) + frame(chatChunk("ink>HIDDEN_THINKING</think>")) : "");
+          controller.enqueue(encoder.encode(phase === "json body" ? "{" : ": heartbeat\n\n" + noise));
+          options.signal.addEventListener("abort", () => controller.error(options.signal.reason), { once: true });
+        } }), { headers: { "content-type": phase === "json body" ? "application/json" : "text/event-stream" } });
+      };
+      const startedAt = Date.now();
+      const result = await createSummaryWithFallback({ conversation, profile: getSummaryProfile(conversation),
+        openrouterApiKey: provider === "openrouter" ? "test" : undefined,
+        geminiApiKey: provider !== "mistral" ? "test" : undefined,
+        mistralApiKey: provider === "mistral" ? "test" : undefined,
+        requestContext: { onDelta() {} } });
+      assert.equal(Date.now() - startedAt, 30000);
+      assert.equal(requests[0].signal.aborted, true);
+      assert.equal(requests.length, provider === "mistral" ? 1 : 2, "Silence advances the route without retrying the silent model.");
+      assert.equal(result.model, provider === "mistral" ? "local-direct" : provider === "gemini" ? "gemini-3.5-flash-lite" : "gemini-3.6-flash");
+      if (requests[1]) assert.equal(requests[1].at - startedAt, 30000);
+      assert.doesNotMatch(result.summary, /HIDDEN_THINKING/);
+    });
+  }
+
+  clockTest(`${provider} keeps its completion budget after an answer starts and clears the silence timer`, async t => {
+    configure(t);
+    let requests = 0, signal;
+    const startedAt = Date.now();
+    global.fetch = async (_url, options) => {
+      requests++; signal = options.signal;
+      return new Response(new ReadableStream({ start(controller) {
+        const first = provider === "gemini"
+          ? frame({ candidates: [{ content: { parts: [{ text: "Preserve " }] } }] }) : frame(chatChunk("Preserve "));
+        controller.enqueue(encoder.encode(first));
+        setTimeout(() => { controller.enqueue(encoder.encode(answerStream(provider, "the agreed project plan."))); controller.close(); }, 45000);
+        signal.addEventListener("abort", () => controller.error(signal.reason), { once: true });
+      } }), { headers: { "content-type": "text/event-stream" } });
+    };
+    const result = await createSummaryWithFallback({ conversation, profile: getSummaryProfile(conversation),
+      openrouterApiKey: provider === "openrouter" ? "test" : undefined,
+      geminiApiKey: provider === "gemini" ? "test" : undefined,
+      mistralApiKey: provider === "mistral" ? "test" : undefined,
+      requestContext: { onDelta() {} } });
+    assert.equal(Date.now() - startedAt, 45000);
+    assert.equal(requests, 1); assert.equal(result.provider, provider);
+    assert.match(result.summary, /Preserve the agreed project plan/);
+    t.mock.timers.tick(45001);
+    assert.equal(signal.aborted, false, "Completed requests leave neither timeout armed.");
+  });
+}
+
+test("a late answer cannot beat an overdue silence timer", async t => {
+  configure(t);
+  t.mock.timers.enable({ apis: ["Date", "setTimeout"], now: Date.now() });
+  let requests = 0;
+  global.fetch = async () => {
+    if (++requests === 1) t.mock.timers.setTime(Date.now() + 30000);
+    return responseFrom(answerStream("gemini"));
+  };
+  const result = await createSummaryWithFallback({ conversation, profile: getSummaryProfile(conversation),
+    geminiApiKey: "test", requestContext: { onDelta() {} } });
+  assert.equal(requests, 2);
+  assert.equal(result.model, "gemini-3.5-flash-lite");
+});
 
 test("all provider routes stream one request, preserving Unicode, usage and answer-only text", async t => {
   configure(t);
