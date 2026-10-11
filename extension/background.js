@@ -1080,7 +1080,7 @@ async function summarizeWithBackend(conversation, transferId = null, deadlineAt 
   await checkTransferSource(operation);
   const conversationText = conversation?.trim();
   if (!conversationText) {
-    throw new Error("AI conversation text could not be captured.");
+    throw Object.assign(new Error("AI conversation text could not be captured."), { diagnosticCode: "capture_dom_failed" });
   }
 
   const payload = messages ? { platform, messages } : { conversation: conversationText };
@@ -1158,7 +1158,7 @@ async function summarizeWithBackend(conversation, transferId = null, deadlineAt 
 async function fetchSummaryFromBackend(conversationText, transferId = null, deadlineAt = null, requestSignal = null, onNearEnd = () => {}, payload = { conversation: conversationText }) {
   checkTransferDeadline(deadlineAt);
   const summaryStartedAt = nowMs();
-  const diagnostics = { version: 1, last_operation: "summary_request" };
+  const diagnostics = { version: 1, diagnostics_revision: 2, last_operation: "summary_request" };
   let responseReceived = false;
   const controller = new AbortController();
   const onCancel = () => controller.abort(requestSignal.reason);
@@ -1263,8 +1263,9 @@ async function fetchSummaryFromBackend(conversationText, transferId = null, dead
     try { checkSummaryDeadline(); } catch (deadlineError) { failure = deadlineError; }
     const fallback = controller.signal.aborted ? "summary_timeout" : responseReceived ? "summary_invalid_response" : "summary_transport_failed";
     globalThis.CapTransferDiagnostics?.update(diagnostics, { summary_ms: Math.round(nowMs() - summaryStartedAt),
+      ...globalThis.CapTransferDiagnostics?.errorDetails(failure, responseReceived ? "summary_response" : "summary_request"),
       error_code: globalThis.CapTransferDiagnostics?.errorCode(failure, fallback),
-      error_origin: responseReceived && diagnostics.summary_http_status >= 400 ? "summary_service" : "background" });
+      error_origin: responseReceived && (diagnostics.summary_http_status >= 400 || failure.summaryServiceFailure) ? "summary_service" : "background" });
     failure.diagnostics = globalThis.CapTransferDiagnostics?.validate(diagnostics) || null;
     throw failure;
   } finally {
@@ -1338,7 +1339,9 @@ function createSummaryBackendPayloadError(payload, status) {
     client_not_allowed: "This Cap Context extension version could not access the summary service."
   };
   const error = new Error(publicMessages[code] || "Cap Context could not create the summary. Please try again.");
+  error.diagnostics = globalThis.CapTransferDiagnostics?.validate(payload?.diagnostics) || undefined;
   error.code = code;
+  error.summaryServiceFailure = true;
   error.status = Number(status) || 500;
   return error;
 }
@@ -1412,7 +1415,7 @@ function createTransferTimeoutError() {
 async function transferToDestination(destinationId, text, preparedTabId = null, transferId = null,
   deferFinalActivation = false, deadlineAt = null, sourceTab = null) {
   const trace = createBackgroundTrace();
-  trace.diagnostics = { version: 1 };
+  trace.diagnostics = { version: 1, diagnostics_revision: 2 };
   try {
     const result = await transferToDestinationObserved(destinationId, text, preparedTabId, transferId,
       deferFinalActivation, deadlineAt, sourceTab, trace);
@@ -1485,7 +1488,7 @@ async function transferToDestinationObserved(
     }
   } else if (preparedTabId) {
     if (destinationId === "claude" && trace.diagnostics.claude_page) {
-      trace.diagnostics.prepared_diagnostics = { version: 1, claude_page: trace.diagnostics.claude_page,
+      trace.diagnostics.prepared_diagnostics = { version: 1, diagnostics_revision: 2, claude_page: trace.diagnostics.claude_page,
         destination_platform_match: trace.diagnostics.destination_platform_match,
         destination_route_allowed: trace.diagnostics.destination_route_allowed };
       delete trace.diagnostics.claude_page;
@@ -1587,6 +1590,7 @@ async function transferToDestinationObserved(
 async function isPreparedDestinationTabUsable(tabId, destinationId, operation = null, diagnostics = null) {
   try {
     const tab = await chrome.tabs.get(tabId);
+    globalThis.CapTransferDiagnostics?.update(diagnostics, { destination_tab_status: tab?.status });
     const currentOrPendingUrl = tab?.pendingUrl || tab?.url || "";
     if (destinationId === "claude" && currentOrPendingUrl) {
       globalThis.CapTransferDiagnostics?.update(diagnostics, {
@@ -1597,7 +1601,7 @@ async function isPreparedDestinationTabUsable(tabId, destinationId, operation = 
     let routeAllowed = false;
     try { routeAllowed = Boolean(DESTINATION_LANDING_PATHS[destinationId]?.includes(new URL(currentOrPendingUrl).pathname.replace(/\/+$/, "") || "/")); }
     catch { /* An invalid URL is unusable; observing it must not cancel a live tab. */ }
-    if (destinationId === "claude") globalThis.CapTransferDiagnostics?.update(diagnostics, {
+    globalThis.CapTransferDiagnostics?.update(diagnostics, {
       destination_platform_match: platformMatches, destination_route_allowed: routeAllowed
     });
     return platformMatches && routeAllowed;
@@ -1665,7 +1669,7 @@ async function prepareDestination(destinationId, deadlineAt = null, sourceTab = 
   const startedAt = nowMs();
   const destination = DESTINATIONS[destinationId];
   if (!destination) {
-    throw new Error("Unknown AI destination.");
+    throw Object.assign(new Error("Unknown AI destination."), { diagnosticCode: "destination_unsupported" });
   }
 
   const destinationTabId = await createDestinationTab(destination, { active: false, sourceTab, deadlineAt, operation });
@@ -1743,12 +1747,12 @@ async function revealDestinationProgress(tabId, destinationId, deadlineAt, trans
   // This text-free status can reveal only the tab prepared for this attempt.
   if (!operation || !operation.tabIds.has(tabId) || tabId === operation.sourceTabId
       || !DESTINATIONS[destinationId] || !Number.isFinite(deadlineAt)) {
-    throw new Error("The prepared destination was not available.");
+    throw Object.assign(new Error("The prepared destination was not available."), { diagnosticCode: "destination_tab_unavailable" });
   }
   if (operation.earlyRevealStopped) return false;
   await checkTransferSource(operation);
   if (!await isPreparedDestinationTabUsable(tabId, destinationId, operation)) {
-    throw new Error("The destination is no longer a new chat.");
+    throw Object.assign(new Error("The destination is no longer a new chat."), { diagnosticCode: "destination_not_new_chat" });
   }
   const controller = new AbortController();
   operation.earlyRevealController = controller;
@@ -1772,7 +1776,7 @@ async function revealDestinationProgress(tabId, destinationId, deadlineAt, trans
       while (Date.now() < statusDeadlineAt) {
         await checkTransferSource(revealOperation);
         if (!await isPreparedDestinationTabUsable(tabId, destinationId, revealOperation)) {
-          throw new Error("The destination is no longer a new chat.");
+          throw Object.assign(new Error("The destination is no longer a new chat."), { diagnosticCode: "destination_not_new_chat" });
         }
         const tab = await chrome.tabs.get(tabId);
         // A content-script ping alone does not prove the final document loaded.
@@ -1781,17 +1785,17 @@ async function revealDestinationProgress(tabId, destinationId, deadlineAt, trans
             Math.max(1, statusDeadlineAt - Date.now()), DESTINATIONS[destinationId].name,
             { ...createBackgroundTrace(), operation: revealOperation });
           if (response?.ok === true) return;
-          if (response?.code !== "destination_loading") throw new Error("The destination was not ready.");
+          if (response?.code !== "destination_loading") throw Object.assign(new Error("The destination was not ready."), { diagnosticCode: "destination_tab_unavailable" });
         }
         await waitForTransferWork(delay(Math.min(MESSAGE_RETRY_INTERVAL_MS,
           Math.max(0, statusDeadlineAt - Date.now()))), revealOperation);
       }
-      throw new Error("The destination did not finish loading in time.");
+      throw Object.assign(new Error("The destination did not finish loading in time."), { diagnosticCode: "message_timeout" });
     };
     await waitForProgressReady("CHECK_TRANSFER_PROGRESS_READY");
     if (operation.earlyRevealedTabId !== tabId) {
       if (!await isPreparedDestinationTabUsable(tabId, destinationId, revealOperation)) {
-        throw new Error("The destination is no longer a new chat.");
+        throw Object.assign(new Error("The destination is no longer a new chat."), { diagnosticCode: "destination_not_new_chat" });
       }
       await activateDestinationTab(tabId, deadlineAt, revealOperation, operation);
     }
@@ -2127,7 +2131,8 @@ function markBackgroundTrace(trace, label, detail = null) {
 
 function getBackgroundFailureDiagnostics(error, operation) {
   return globalThis.CapTransferDiagnostics?.validate(error?.diagnostics) || {
-    version: 1, error_code: globalThis.CapTransferDiagnostics?.errorCode(error) || "unknown_error",
+    version: 1, ...globalThis.CapTransferDiagnostics?.errorDetails(error, operation),
+    error_code: globalThis.CapTransferDiagnostics?.errorCode(error, globalThis.CapTransferDiagnostics.operationErrorCode(operation)) || "unknown_error",
     error_origin: "background", last_operation: operation
   };
 }

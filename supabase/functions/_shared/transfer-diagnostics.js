@@ -19,12 +19,21 @@
   const events = [...operations, "json_fallback", "local_fallback", "prepared_reused", "prepared_rejected",
     "fresh_recovery", "editor_remounted", "failure", "cancelled", "deadline_expired"];
   const enums = {
+    error_type: ["Error", "TypeError", "SyntaxError", "RangeError", "ReferenceError", "AbortError", "TimeoutError", "SecurityError", "NotAllowedError", "NotFoundError", "InvalidStateError", "other"],
+    error_file: ["background.js", "platform-content.js", "chatgpt-json-capture.js", "chatgpt-fetch-main.js", "claude-json-capture.js", "claude-fetch-main.js", "network-json-capture.js", "network-fetch-main.js", "network-json-data.js"],
+    failure_site: [...operations, "capture_hook", "capture_session", "capture_history", "capture_attachment_descriptor", "capture_attachment_body", "capture_serialize", "clipboard_write"],
+    capture_request_stage: ["hook", "session", "history", "attachment_descriptor", "attachment_body", "serialize"],
+    capture_detail: ["auth_missing", "hook_unavailable", "busy", "http_error", "network_error", "invalid_json", "non_json_response", "partial_response", "incomplete_history", "invalid_branch", "branch_cycle", "parent_missing", "count_mismatch", "text_invalid", "canvas_invalid", "missing_text", "attachment_failed", "size_limit", "timeout", "conversation_changed", "unsupported_content", "routing_unavailable"],
+    document_ready_state: ["loading", "interactive", "complete"],
+    destination_tab_status: ["loading", "complete"],
+    summary_failed_provider: ["openrouter", "gemini", "mistral"],
+    summary_failure_detail: ["provider_http_error", "provider_timeout", "provider_request_failed", "provider_invalid_json", "provider_generation_failed", "provider_empty", "provider_output_rejected", "funded_budget_unavailable", "providers_unavailable", "unexpected_exception"],
     // Fixed page labels only: chat/project IDs, unknown paths and query values
     // must never become telemetry. The worker and destination use this helper.
     claude_page: ["claude.ai/", "claude.ai/new", "claude.ai/chat/:id", "claude.ai/project/:id",
       "claude.ai/login", "claude.ai/signup", "claude.ai/onboarding", "claude.ai/settings",
       "claude.ai/other", "claude_subdomain", "other_site", "unavailable"],
-    error_code: codes, recovery_error_code: codes, summary_error_code: codes, editor_last_error_code: codes,
+    error_code: codes, recovery_error_code: codes, summary_error_code: codes, capture_error_code: codes, editor_last_error_code: codes,
     error_origin: ["source", "background", "destination", "summary_service"],
     last_operation: operations, entry_point: ["picker", "toolbar", "other"],
     browser: ["chromium", "firefox"], visibility: ["visible", "hidden", "prerender", "unknown"],
@@ -36,6 +45,8 @@
     editor_kind: ["textarea", "input", "contenteditable", "other"],
     insertion_method: ["value_setter", "insert_text", "insert_html", "dom_text", "chatgpt", "already_present"]
   };
+  enums.summary_failure_site = enums.capture_failure_site = enums.failure_site;
+  enums.summary_error_type = enums.capture_error_type = enums.error_type;
   const booleans = ["online", "source_saved", "speed_enabled", "json_attempted", "source_changed", "cancelled",
     "destination_prepared", "prepared_reused", "prepared_rejected", "fresh_recovery", "script_injected",
     "editor_seen", "editor_connected", "draft_present", "paste_populated", "paste_stable", "user_handled",
@@ -47,18 +58,20 @@
     "summary_provider_attempts", "summary_http_status", "destination_open_ms", "activation_ms", "activation_settle_ms",
     "delivery_ms", "message_ms", "message_attempts", "script_injections", "paste_ms", "paste_attempts",
     "composer_wait_ms", "paste_retry_limit_ms", "paste_verify_limit_ms", "paste_stability_ms", "editor_remounts",
-    "editor_text_chars", "page_load_ms", "destination_message_count"];
+    "editor_text_chars", "page_load_ms", "destination_message_count", "diagnostics_revision", "error_line", "error_column"];
   const schema = { version: { type: "number", values: [1] },
     ...Object.fromEntries(Object.entries(enums).map(([key, values]) => [key, { type: "string", values }])),
     ...Object.fromEntries(booleans.map(key => [key, { type: "boolean" }])),
     ...Object.fromEntries(numbers.map(key => [key, { type: "number", max: 2147483647 }])),
+    capture_http_status: { type: "number", min: 100, max: 599 },
+    summary_provider_status: { type: "number", min: 100, max: 599 },
     events: { type: "array" }, delivery_events: { type: "array" }, paste_events: { type: "array" }, prepared_diagnostics: { type: "object" }
   };
   function validField(key, value) {
     const rule = schema[key];
     if (!rule || typeof value !== rule.type) return false;
     if (rule.values) return rule.values.includes(value);
-    return rule.type !== "number" || (Number.isInteger(value) && value >= 0 && value <= rule.max);
+    return rule.type !== "number" || (Number.isInteger(value) && value >= (rule.min || 0) && value <= rule.max);
   }
   function validate(input, depth = 0) {
     if (!input || typeof input !== "object" || Array.isArray(input) || input.version !== 1) return null;
@@ -113,8 +126,41 @@
     entries.push(entry);
   }
   function errorCode(error, fallback = "unknown_error") {
-    return codes.includes(error?.diagnosticCode) ? error.diagnosticCode
-      : codes.includes(error?.code) ? error.code : fallback;
+    // A generic wrapper must not erase a known inner failure. Broad capture
+    // categories are evidence, but never infer network/auth causes from prose.
+    if (codes.includes(error?.diagnosticCode) && error.diagnosticCode !== "unknown_error") return error.diagnosticCode;
+    if (codes.includes(error?.code) && error.code !== "unknown_error") return error.code;
+    return ({ size_limit: "conversation_too_large", unavailable: "capture_json_unavailable",
+      timeout: "capture_json_failed", incomplete: "capture_json_failed", unsupported: "capture_json_failed",
+      request_failed: "capture_json_failed" })[error?.captureFailureReason] || fallback;
+  }
+  function errorDetails(error, operation) {
+    const details = { diagnostics_revision: 2 };
+    // Only fixed observations cross contexts. Exception messages/stacks can
+    // contain response snippets, tokens or conversation content.
+    const safe = validate(error?.diagnostics);
+    if (safe) update(details, safe);
+    // Retain only a packaged extension filename and numeric location from the
+    // first matching frame. Never send a stack, extension ID, host or path.
+    if (!safe?.error_file && typeof error?.stack === "string") {
+      const frame = error.stack.match(/(?:chrome|moz)-extension:\/\/[\w-]+\/([\w-]+\.js):(\d+):(\d+)/);
+      if (frame && enums.error_file.includes(frame[1])) update(details, {
+        error_file: frame[1], error_line: Number(frame[2]), error_column: Number(frame[3])
+      });
+    }
+    update(details, { error_type: safe?.error_type || (enums.error_type.includes(error?.name) ? error.name : "other"),
+      failure_site: safe?.failure_site || operation });
+    return details;
+  }
+  function operationErrorCode(operation) {
+    if (operation === "capture_json") return "capture_json_failed";
+    if (["capture_prepare", "capture_dom", "capture_complete"].includes(operation)) return "capture_dom_failed";
+    if (operation?.startsWith("summary_")) return "summary_failed";
+    if (operation === "destination_prepare" || operation === "destination_open") return "destination_open_failed";
+    if (operation === "destination_activate") return "destination_activation_failed";
+    if (operation === "editor_insert") return "insertion_exception";
+    if (operation?.startsWith("paste_") || operation === "editor_wait") return "paste_failed";
+    return "unknown_error";
   }
   function claudePage(url) {
     try {
@@ -129,10 +175,11 @@
     } catch { return "unavailable"; }
   }
   function failure(target, error, origin, atMs) {
-    update(target, { error_code: errorCode(error), error_origin: origin });
-    event(target, "failure", atMs, origin === "destination" ? "paste_events" : origin === "background" ? "delivery_events" : "events", errorCode(error));
+    const code = errorCode(error, operationErrorCode(target?.last_operation));
+    update(target, { ...errorDetails(error, target?.last_operation), error_code: code, error_origin: origin });
+    event(target, "failure", atMs, origin === "destination" ? "paste_events" : origin === "background" ? "delivery_events" : "events", code);
   }
-  const api = { schema, codes, operations, events, validate, snapshot, update, event, errorCode, failure, claudePage };
+  const api = { schema, codes, operations, events, validate, snapshot, update, event, errorCode, errorDetails, operationErrorCode, failure, claudePage };
   root.CapTransferDiagnostics = api;
   if (typeof module !== "undefined" && module.exports) module.exports = api;
 })(globalThis);

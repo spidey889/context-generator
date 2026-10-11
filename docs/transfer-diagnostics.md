@@ -26,9 +26,24 @@ Future contract changes require new migrations; applied history stays unchanged.
 - **Capture:** saved-chat/Speed selection, JSON attempt/fallback category, actual
   capture method, candidate/useful/captured turns, source characters/UTF-8 bytes,
   expanded blocks, retries, sweep advances/stale/quiet checks and exit reason.
+  Updated diagnostics (`diagnostics_revision = 2`) retain `capture_detail`
+  (auth/hook unavailable, busy, HTTP/network/JSON failure, incomplete history,
+  branch/count/text/canvas/attachment validation, size or timeout), the exact
+  `capture_request_stage` and observed `capture_http_status` (100–599).
+  All five adapters report structured errors. `capture_error_code`,
+  `capture_failure_site` and `capture_error_type` survive successful DOM recovery;
+  they describe the JSON attempt, while final failure fields describe the outcome.
 - **Summary:** output characters/bytes, local/remote/cache/recovery mode, observed
   HTTP status, request/fetch/parse/service timing, provider passes and fallback.
   Recovered service errors remain separately in `summary_error_code`.
+  Backend responses retain the last failed provider's closed
+  `summary_failure_detail`, `summary_failed_provider` and observed
+  `summary_provider_status`, including HTTP failure, timeout, invalid JSON,
+  empty/rejected output or exhausted funded budget. This evidence survives
+  provider/direct-carry recovery. It describes the last failed route; it is not
+  a complete provider history. `summary_provider_attempts` counts attempted model
+  routes when supplied. Local fallback preserves `summary_failure_site` and
+  `summary_error_type` separately.
 - **Delivery:** prepared reuse/rejection, fresh recovery, tab creation/focus/settle
   timing, message attempts, injections and acknowledgement result. The complete
   first destination record survives in `prepared_diagnostics`; top-level paste
@@ -54,7 +69,15 @@ component, and `last_operation` its checkpoint. Specific examples include
 `editor_missing`, `editor_has_draft`, `paste_not_populated`, `paste_not_retained`,
 `paste_focus_changed`, `destination_activation_failed`, `message_reply_missing`,
 `message_reply_invalid`, `message_transport_failed` and `message_timeout`.
-Unknown exceptions stay `unknown_error`; route/size do not justify reclassification.
+Unexpected errors in an observed operation use that operation's broad failure
+code (such as `capture_json_failed`), `failure_site` and `error_type`. This locates
+the failure without claiming a network/auth cause. Where available, `error_file`,
+`error_line`, and `error_column` identify the first packaged extension frame.
+Only allowlisted filenames and integers are kept from the local stack; the
+stack, extension ID and URL are discarded. Wrappers preserve inner evidence.
+`document_ready_state` and `destination_tab_status` separate page hydration
+observations from editor observations. An error without a known operation/cause
+remains unknown; route/size never justify inventing a cause.
 
 Source `events`, worker `delivery_events` and destination `paste_events` use
 separate elapsed clocks. Do not concatenate them as an exact global chronology.
@@ -100,3 +123,12 @@ a measurable boundary that separates hypotheses, add a closed observation/code
 and regression, and ship it. Never backfill speculative historic causes. A tab or
 worker shutdown/storage/network loss can still leave an attempt without terminal
 observations; diagnostics do not restore or resume interrupted transfers.
+
+For a single attempt, inspect the final code/site/type and safe file/line,
+capture detail/request stage/status, summary provider/detail/status and
+`prepared_diagnostics`. For example, `capture_session + http_error + 401`
+proves the session request was rejected; `editor_missing + editor_wait +
+editor_seen=false` means no editor was found within the measured wait.
+Online/status/visibility alone do not explain the underlying cause. Anonymous
+users' local receipts are not required for the normal diagnostic path.
+Historic missing evidence cannot be reconstructed.

@@ -1,4 +1,5 @@
 const PROVIDER_MAX_ATTEMPTS = 2;
+const transferDiagnostics = require("../extension/transfer-diagnostics");
 const { reserveFundedSummaryBudget } = require("./funded-summary-budget");
 const { getHeader } = require("./request-validation");
 const { readProviderStream } = require("./provider-stream");
@@ -343,6 +344,7 @@ async function handleSummary(conversation, responseChannel, requestContext = {})
         qualityFlags: providerResult.qualityFlags,
         validationReason: providerResult.validationReason,
         fallback: providerResult.fallback,
+        failureDiagnostics: providerResult.failureDiagnostics,
         inputChars,
         outputChars: providerResult.summary.length,
         usage: providerResult.usage
@@ -358,7 +360,8 @@ async function handleSummary(conversation, responseChannel, requestContext = {})
     });
     return responseChannel.send(error.statusCode || 500, {
       code: "summary_failed",
-      error: error.publicMessage || "Unexpected summarization error"
+      error: error.publicMessage || "Unexpected summarization error",
+      diagnostics: providerFailureDiagnostics(error)
     });
   }
 }
@@ -514,6 +517,7 @@ async function createSummaryWithFallback({ conversation, messages, platform, pro
       console.info("[Context Generator] Summary served:", { provider: provider.id, model, reason: modelReason });
       return {
         ...result, ...timings, modelReason, modelsTried, mistralModelsTried, openrouterModelsTried,
+        failureDiagnostics: lastProviderFailure ? providerFailureDiagnostics(lastProviderFailure) : undefined,
         fallback: failedModels.length ? createFallbackMetadata({
           attempted: true, used: true, servedBy: provider.id, model,
           reason: getProviderFailureReason(lastProviderFailure)
@@ -524,7 +528,8 @@ async function createSummaryWithFallback({ conversation, messages, platform, pro
       timings[`${provider.id}Ms`] += Date.now() - startedAt;
       // Only fixed diagnostics are allowed in receipts/logs, never upstream bodies.
       lastProviderFailure = error?.publicMessage ? error : createProviderError(provider,
-        error?.name === "AbortError" ? `${provider.label} request timed out` : `${provider.label} request failed`);
+        error?.name === "AbortError" ? `${provider.label} request timed out` : `${provider.label} request failed`, 502, null,
+        error?.code === "funded_budget_unavailable" ? "funded_budget_unavailable" : error?.name === "AbortError" ? "provider_timeout" : "provider_request_failed");
       // All OpenRouter models share this key/account. Another model cannot fix
       // rejected credentials or an exhausted credit balance. Model-specific
       // failures and 429s still retain the ordinary configured fallback order.
@@ -586,7 +591,8 @@ function createEmergencyDirectCarryResult({
       servedBy: LOCAL_DIRECT_MODEL,
       model: LOCAL_DIRECT_MODEL,
       reason: getProviderFailureReason(lastProviderFailure)
-    })
+    }),
+    failureDiagnostics: lastProviderFailure ? providerFailureDiagnostics(lastProviderFailure) : { version: 1, summary_failure_detail: "providers_unavailable" }
   };
 }
 
@@ -620,7 +626,7 @@ async function createSummaryWithProvider({ provider, apiKey, profile, model, ini
       || ["error", "content_filter"].includes(data?.choices?.[0]?.finish_reason)) {
     const reportedStatus = data?.error?.code ?? data?.choices?.[0]?.error?.code;
     throw createProviderError(provider, `${provider.label} generation failed`, 502,
-      Number.isInteger(reportedStatus) ? reportedStatus : null);
+      Number.isInteger(reportedStatus) ? reportedStatus : null, "provider_generation_failed");
   }
   const finishReason = getProviderFinishReason(provider, data);
   const initialUsage = normalizeProviderUsage(provider, data);
@@ -629,7 +635,7 @@ async function createSummaryWithProvider({ provider, apiKey, profile, model, ini
   const contentRejection = getSummaryContentRejectionReason(rawSummary, profile);
   if (contentRejection) {
     const reason = rawSummary.trim() ? contentRejection : "an empty summary";
-    throw createProviderError(provider, `${provider.label} returned ${reason}`, 502);
+    throw createProviderError(provider, `${provider.label} returned ${reason}`, 502, null, rawSummary.trim() ? "provider_output_rejected" : "provider_empty");
   }
 
   const validation = validateContextCarrySummary(rawSummary, profile);
@@ -870,13 +876,24 @@ function createFallbackMetadata(overrides = {}) {
   };
 }
 
-function createProviderError(provider, publicMessage, statusCode = 502, providerStatus = null) {
+function createProviderError(provider, publicMessage, statusCode = 502, providerStatus = null, failureDetail = providerStatus ? "provider_http_error" : "provider_request_failed") {
   const error = new Error(publicMessage);
   error.provider = provider.id;
   error.publicMessage = publicMessage;
   error.statusCode = statusCode;
   error.providerStatus = providerStatus;
+  error.summaryFailureDetail = failureDetail;
   return error;
+}
+
+function providerFailureDiagnostics(error) {
+  const diagnostics = { version: 1 };
+  // Keep the last failed route even when another provider/direct carry recovers.
+  // Public messages and provider bodies never become persistent diagnostics.
+  transferDiagnostics.update(diagnostics, { summary_failed_provider: error?.provider,
+    summary_provider_status: error?.providerStatus,
+    summary_failure_detail: error?.summaryFailureDetail || "unexpected_exception" });
+  return diagnostics;
 }
 
 function getProviderFailureReason(error) {
@@ -899,7 +916,7 @@ async function readResponseJson(response, provider) {
     throw createProviderError(
       provider,
       `${provider.label} returned invalid JSON`,
-      502
+      502, null, "provider_invalid_json"
     );
   }
 }

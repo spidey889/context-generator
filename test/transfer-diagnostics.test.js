@@ -27,13 +27,15 @@ test("every relay uses the same diagnostic contract and rejects private data at 
   assert.ok(validateTelemetryPayload(payload()), "Old clients retain the metadata API.");
 });
 
-test("unknown errors preserve observations without inventing a cause or copying error text", () => {
+test("unexpected exceptions retain their observed operation and type without inventing a cause", () => {
   const record = { version: 1, last_operation: "paste_verify", editor_seen: true, paste_populated: false };
   diagnostics.failure(record, new Error("PRIVATE account URL and chat text"), "destination", 500);
-  assert.equal(record.error_code, "unknown_error");
+  assert.equal(record.error_code, "paste_failed");
+  assert.equal(record.failure_site, "paste_verify");
+  assert.equal(record.error_type, "Error");
   assert.equal(record.last_operation, "paste_verify");
   assert.equal(record.editor_seen, true);
-  assert.equal(record.paste_events[0].code, "unknown_error");
+  assert.equal(record.paste_events[0].code, "paste_failed");
   assert.doesNotMatch(JSON.stringify(record), /PRIVATE|account|URL|chat/);
 });
 
@@ -66,6 +68,46 @@ test("Claude page observations redact IDs, queries, fragments and unknown paths 
   }
 });
 
+test("precise failure evidence survives every ingress and wrapper without private stack data", async () => {
+  const edge = await import("../supabase/functions/transfer-telemetry/validation.mjs");
+  const error = Object.assign(new TypeError("PRIVATE response and token"), {
+    stack: "TypeError: PRIVATE\n at read (chrome-extension://PRIVATE/network-fetch-main.js:123:9)\n at https://PRIVATE/c/PRIVATE:1:2"
+  });
+  const record = { version: 1, last_operation: "capture_json" };
+  diagnostics.failure(record, error, "source", 500);
+  assert.equal(record.error_code, "capture_json_failed");
+  assert.equal(record.error_type, "TypeError");
+  assert.equal(record.failure_site, "capture_json");
+  assert.equal(record.error_file, "network-fetch-main.js");
+  assert.equal(record.error_line, 123);
+  assert.equal(record.error_column, 9);
+  const wrapped = diagnostics.errorDetails(Object.assign(new Error("PRIVATE wrapper"), { diagnostics: record }), "message_send");
+  assert.equal(wrapped.error_type, "TypeError");
+  assert.equal(wrapped.failure_site, "capture_json");
+  assert.doesNotMatch(JSON.stringify(wrapped), /PRIVATE|chrome-extension|https|token|stack/);
+  const safe = { ...record, capture_detail: "http_error", capture_request_stage: "session", capture_http_status: 403,
+    summary_failure_detail: "provider_timeout", summary_failed_provider: "gemini" };
+  assert.ok(validateTelemetryPayload(payload({ diagnostics: safe })));
+  assert.ok(edge.validateTelemetryPayload(payload({ diagnostics: safe })));
+  for (const extra of [{ capture_http_status: 99 }, { capture_http_status: 600 }, { capture_detail: "PRIVATE" },
+    { failure_site: "https://PRIVATE" }, { error_file: "PRIVATE.js" }, { error_line: -1 }, { error_type: "PRIVATE" }]) {
+    for (const value of [{ ...safe, ...extra }, { version: 1, prepared_diagnostics: { ...safe, ...extra } }]) {
+      assert.equal(validateTelemetryPayload(payload({ diagnostics: value })), null);
+      assert.equal(edge.validateTelemetryPayload(payload({ diagnostics: value })), null);
+    }
+  }
+});
+
+test("legacy broad capture categories and explicit inner codes remain useful", () => {
+  assert.equal(diagnostics.errorCode({ captureFailureReason: "size_limit" }), "conversation_too_large");
+  assert.equal(diagnostics.errorCode({ captureFailureReason: "unavailable" }), "capture_json_unavailable");
+  assert.equal(diagnostics.errorCode({ diagnosticCode: "unknown_error", code: "message_timeout" }), "message_timeout");
+  const record = { version: 1, last_operation: "admission" };
+  diagnostics.failure(record, new Error("PRIVATE unknown cause"), "source", 0);
+  assert.equal(record.error_code, "unknown_error", "No known cause or operation must stay uncertain.");
+  assert.equal(record.error_type, "Error");
+});
+
 test("retry storms retain bounded first and last observations and the counts", () => {
   const record = { version: 1, paste_attempts: 200 };
   for (let i = 0; i < 200; i++) diagnostics.event(record, "paste_verify", i, "paste_events");
@@ -77,7 +119,7 @@ test("retry storms retain bounded first and last observations and the counts", (
   const maximal = { version: 1 };
   for (const [key, rule] of Object.entries(diagnostics.schema)) {
     if (rule.type === "string") maximal[key] = rule.values.reduce((a, b) => a.length > b.length ? a : b);
-    if (rule.type === "number") maximal[key] = rule.values?.[0] || 2147483647;
+    if (rule.type === "number") maximal[key] = rule.values?.[0] || rule.max;
     if (rule.type === "boolean") maximal[key] = true;
     if (rule.type === "array") maximal[key] = Array(32).fill({ event: "destination_activate", at_ms: 2147483647, code: "destination_activation_failed" });
   }

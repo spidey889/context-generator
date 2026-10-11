@@ -380,6 +380,8 @@ async function main() {
         checks += await require("./check-local-transfer-counts-db.js").checkLocalTransferCounts(db, sql);
       } else if (name.endsWith("_add_claude_page_diagnostics.sql")) {
         checks += await require("./check-claude-page-diagnostics-db.js").checkClaudePageDiagnostics(db, sql);
+      } else if (name.endsWith("_useful_transfer_diagnostics.sql")) {
+        checks += await require("./check-useful-diagnostics-db.js").checkUsefulDiagnostics(db, sql);
       } else await db.exec(sql);
     }
     checks += await require("./check-served-model-db.js").checkStoreModelReceipts(db);

@@ -10,6 +10,16 @@ const scripts = new Map(["claude-fetch-main.js", "claude-json-capture.js"].map(f
 
 const chat = "test-chat";
 const endpoint = `https://claude.ai/api/organizations/test-org/chat_conversations/${chat}?tree=True`;
+test("Claude retains the observed HTTP rejection without organization IDs or response content", async () => {
+  await assert.rejects(setup(undefined, { status: 503, resources: [endpoint] }).window.__capCaptureClaudeJson(), error => {
+    assert.equal(error.diagnosticCode, "capture_json_failed");
+    assert.equal(error.diagnostics.capture_detail, "http_error");
+    assert.equal(error.diagnostics.capture_http_status, 503);
+    assert.equal(error.diagnostics.failure_site, "capture_history");
+    assert.doesNotMatch(JSON.stringify(error.diagnostics), /test-org|test-chat/);
+    return true;
+  });
+});
 function fixture() {
   return {
     uuid: chat, current_leaf_message_uuid: "answer",

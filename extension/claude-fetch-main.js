@@ -1,5 +1,5 @@
 (() => {
-  const version = 7;
+  const version = 8;
   const maxHistoryBytes = 6000000;
   const previous = window.__capClaudeFetchState;
   if (previous?.version === version && window.fetch === previous.fetch) return;
@@ -71,6 +71,7 @@
       if (controller.signal.aborted || location.pathname !== `/chat/${chat}`) throw new Error("changed");
       if (!endpoints.has(chat)) {
         captureFailureReason = "unavailable";
+        reply.captureDetail = "routing_unavailable";
         throw new Error("routing");
       }
       const captureUrl = new URL(endpoints.get(chat));
@@ -81,9 +82,12 @@
       captureUrl.searchParams.set("include_inline_comparison", "true");
       captureUrl.searchParams.set("consistency", "strong");
       const response = await Reflect.apply(nativeFetch, window, [captureUrl.href, { credentials: "same-origin", cache: "no-store", signal: controller.signal }]);
+      reply.status = response.status;
       if (response.status !== 200 || response.headers.has("content-range") || !response.headers.get("content-type")?.includes("application/json")) {
         captureFailureReason = [401, 403].includes(response.status) ? "unavailable"
           : response.status === 206 || response.headers.has("content-range") || response.status === 200 ? "incomplete" : "request_failed";
+        reply.captureDetail = response.status !== 200 && response.status !== 206 ? "http_error"
+          : response.status === 206 || response.headers.has("content-range") ? "partial_response" : "non_json_response";
         // The rejected fresh response has no reader. Stop its unused body before
         // fallback, retaining the safe transport reason even if cleanup rejects.
         await response.body?.cancel().catch(() => {});
@@ -121,10 +125,13 @@
       }
       if (controller.signal.aborted || location.pathname !== `/chat/${chat}` || data.uuid !== chat) throw new Error("changed");
       reply.data = data;
-    } catch {
+    } catch (error) {
       // Upstream/network/JSON-parser errors may contain private response content.
       reply.error = "capture_failed";
       reply.captureFailureReason = controller.signal.reason === "capture_timeout" ? "timeout" : captureFailureReason;
+      reply.captureDetail = controller.signal.reason === "capture_timeout" ? "timeout"
+        : error?.message === "changed" ? "conversation_changed" : reply.captureDetail
+        || (error?.message === "size" ? "size_limit" : error?.name === "SyntaxError" ? "invalid_json" : captureFailureReason === "incomplete" ? "partial_response" : "network_error");
     } finally {
       clearTimeout(timer);
       window.navigation?.removeEventListener("navigate", changed);

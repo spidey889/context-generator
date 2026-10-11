@@ -72,6 +72,27 @@ async function discover(harness) {
   await harness.window.fetch(new Request(`https://chatgpt.com/backend-api/conversations/${chat}?num_turns=10`, { headers: { Authorization: "Bearer TEST_ONLY", "ChatGPT-Account-Id": "test-account" } }));
 }
 
+test("ChatGPT forwards the failing request stage and HTTP status as closed diagnostics", async () => {
+  const harness = setup(undefined, 403);
+  await discover(harness);
+  await assert.rejects(harness.window.__capCaptureChatGptJson(), error => {
+    assert.equal(error.diagnosticCode, "capture_json_failed");
+    assert.equal(error.diagnostics.capture_detail, "http_error");
+    assert.equal(error.diagnostics.capture_request_stage, "history");
+    assert.equal(error.diagnostics.capture_http_status, 403);
+    assert.doesNotMatch(JSON.stringify(error.diagnostics), /TEST_ONLY|test-account/);
+    return true;
+  });
+  const invalid = setup(undefined, 200, { body: "PRIVATE not valid JSON" });
+  await discover(invalid);
+  await assert.rejects(invalid.window.__capCaptureChatGptJson(), error => {
+    assert.equal(error.diagnostics.capture_detail, "invalid_json");
+    assert.equal(error.diagnostics.capture_request_stage, "history");
+    assert.doesNotMatch(JSON.stringify(error.diagnostics), /PRIVATE/);
+    return true;
+  });
+});
+
 function streamJsonChunks(chunks, headers = {}, cancelError = false) {
   const stats = { bytes: 0, cancelled: 0 };
   let index = 0;
@@ -531,7 +552,7 @@ test("ChatGPT replaces the previous hook without losing observed authentication"
   old.version = 8;
   harness.reinstall();
   assert.notEqual(harness.window.__capChatGptFetchState, old);
-  assert.equal(harness.window.__capChatGptFetchState.version, 10);
+  assert.equal(harness.window.__capChatGptFetchState.version, 11);
   assert.equal(harness.listeners(), 1);
   assert.equal((await harness.window.__capCaptureChatGptJson()).text,
     "ChatGPT conversation:\n\nUser: Original pasted document\n\nAssistant: Selected answer");

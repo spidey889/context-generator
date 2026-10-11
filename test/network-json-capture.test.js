@@ -9,6 +9,18 @@ const { fixtures, rpcFrame, geminiTurn, prompt } = require("./network-json-fixtu
 const files = ["network-json-data.js", "network-fetch-main.js", "network-json-capture.js"];
 const scripts = new Map(files.map(file =>
   [file, new vm.Script(fs.readFileSync(path.join(__dirname, "..", "extension", file), "utf8"), { filename: file })]));
+for (const platform of ["gemini", "grok", "deepseek"]) test(`${platform}: native HTTP failures preserve their actual status and read boundary`, async () => {
+  const h = setup(platform, undefined, { fetchImpl: () => new Response("PRIVATE response", { status: 403 }) });
+  await h.observe();
+  await assert.rejects(h.window.__capCaptureNetworkJson(), error => {
+    assert.equal(error.diagnosticCode, "capture_json_failed");
+    assert.equal(error.diagnostics.capture_detail, "http_error");
+    assert.equal(error.diagnostics.capture_http_status, 403);
+    assert.equal(error.diagnostics.capture_request_stage, "history");
+    assert.doesNotMatch(JSON.stringify(error.diagnostics), /PRIVATE|AUTH_SENTINEL|CSRF_SENTINEL/);
+    return true;
+  });
+});
 function setup(platform, fixture = fixtures(platform), { fetchImpl, responseTransform, runtime, schedule = setTimeout, beforeMessage } = {}) {
   const requests = [], replies = [], listeners = new Set(), navigation = new Set();
   const host = { gemini: "gemini.google.com", grok: "grok.com", deepseek: "chat.deepseek.com" }[platform];
@@ -278,7 +290,7 @@ test("DeepSeek: one incomplete upload cancels siblings before fallback or a fres
   });
   assert.equal(h.requests.length, 5, "failure stops queued downloads");
   assert.equal(aborted.length, 3);
-  assert.equal(h.window.__capNetworkFetchState.version, 10);
+  assert.equal(h.window.__capNetworkFetchState.version, 11);
   assert.ok(h.replies.every(reply => !reply.capture));
   assert.equal(h.navigationListeners(), 0);
   assert.equal(h.listeners.size, 1);
@@ -358,7 +370,7 @@ for (const platform of ["gemini", "grok", "deepseek"]) test(`${platform}: the pr
   old.version = platform === "deepseek" ? 9 : platform === "gemini" ? 9 : 7;
   h.reinstall(files[1]);
   assert.notEqual(h.window.__capNetworkFetchState, old);
-  assert.equal(h.window.__capNetworkFetchState.version, platform === "deepseek" ? 10 : platform === "gemini" ? 10 : 8);
+  assert.equal(h.window.__capNetworkFetchState.version, platform === "deepseek" ? 11 : platform === "gemini" ? 11 : 9);
   assert.equal(h.listeners.size, 1);
   assert.equal((await h.window.__capCaptureNetworkJson()).text, h.fixture.expected);
 });

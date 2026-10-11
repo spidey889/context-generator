@@ -819,6 +819,20 @@ clockTest("shared summary failures retain the backend error and allow a fresh re
   assert.equal(fetches, 2);
 });
 
+test("summary errors after HTTP 200 retain service origin and closed provider evidence", async () => {
+  const sendSummary = loadBackgroundForSummaryTest(async () => ({ ok: true, status: 200, json: async () => ({
+    ok: false, code: "summary_failed", status: 502, error: "PRIVATE provider body",
+    diagnostics: { version: 1, summary_failed_provider: "gemini", summary_provider_status: 429, summary_failure_detail: "provider_http_error" }
+  }) }));
+  const response = await sendSummary("Complete captured conversation");
+  assert.equal(response.ok, false);
+  assert.equal(response.diagnostics.error_origin, "summary_service");
+  assert.equal(response.diagnostics.summary_http_status, 200);
+  assert.equal(response.diagnostics.summary_provider_status, 429);
+  assert.equal(response.diagnostics.summary_failure_detail, "provider_http_error");
+  assert.doesNotMatch(JSON.stringify(response.diagnostics), /PRIVATE|body/);
+});
+
 for (const ok of [true, false]) clockTest(`an expired shared waiter rejects a queued ${ok ? "success" : "failure"} before a delayed timer fires`, async () => {
   let now = Date.now(), finish;
   class QueuedResultClock extends Date { static now() { return now; } }

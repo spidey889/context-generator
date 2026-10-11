@@ -822,6 +822,7 @@ test("backend falls from a rate-limited Gemini 3.6 Flash to Gemini 3.5 Flash-Lit
     assert.equal(res.payload.timing.fallback.servedBy, "gemini");
     assert.equal(res.payload.timing.fallback.model, "gemini-3.5-flash-lite");
     assert.match(res.payload.timing.fallback.reason, /Gemini API error 429/);
+    assert.deepEqual(res.payload.timing.failureDiagnostics, { version: 1, summary_failed_provider: "gemini", summary_provider_status: 429, summary_failure_detail: "provider_http_error" });
   } finally {
     restoreMistralKey();
     restoreGeminiKey();
@@ -876,6 +877,7 @@ test("backend falls from empty Gemini output through Flash-Lite to the preserved
     assert.equal(res.payload.timing.fallback.used, true);
     assert.equal(res.payload.timing.fallback.servedBy, "mistral");
     assert.match(res.payload.timing.fallback.reason, /Gemini returned an empty summary/);
+    assert.deepEqual(res.payload.timing.failureDiagnostics, { version: 1, summary_failed_provider: "gemini", summary_failure_detail: "provider_empty" });
     assert.match(
       res.payload.timing.modelReason,
       /gemini-3\.6-flash -> gemini-3\.5-flash-lite failed; fell back to ministral-14b-2512/

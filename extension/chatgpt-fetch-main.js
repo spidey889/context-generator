@@ -1,5 +1,5 @@
 (() => {
-  const version = 10;
+  const version = 11;
   // ChatGPT's native endpoint returns every branch. This is a transport safety
   // ceiling, not the selected transcript's 500k-character / 2 MB content limit.
   const maxCaptureBytes = 32000000;
@@ -60,9 +60,12 @@
     const timer = setTimeout(() => controller.abort(), 15000);
     window.navigation?.addEventListener("navigate", changed);
     window.addEventListener("popstate", changed);
-    const fetchJson = (url, options = {}) => Reflect.apply(nativeFetch, window, [url, {
+    const fetchJson = (url, options = {}) => {
+      delete reply.status;
+      return Reflect.apply(nativeFetch, window, [url, {
       ...options, credentials: "same-origin", cache: "no-store", signal: controller.signal
-    }]);
+      }]);
+    };
     // Discard owned responses before retry/fallback; cleanup must never replace
     // the bounded capture error with private upstream cancellation details.
     const discardResponse = response => response.body?.cancel().catch(() => {});
@@ -93,7 +96,8 @@
         // text; parse only a complete, strictly decoded response.
         parts.push(decoder.decode());
         return JSON.parse(parts.join(""));
-      } catch {
+      } catch (error) {
+        if (error?.name === "SyntaxError") reply.captureDetail = "invalid_json";
         if (reader) await reader.cancel().catch(() => {});
         else await discardResponse(response);
         throw new Error("partial");
@@ -135,6 +139,7 @@
       }
     };
     const checkTransport = async response => {
+      reply.status = response.status;
       try {
         if (response.status !== 200) { reply.status = response.status; throw new Error("http"); }
         if (response.headers.has("content-range")) throw new Error("partial");
@@ -142,6 +147,8 @@
       } catch (error) { await discardResponse(response); throw error; }
     };
     const refreshAuth = async () => {
+      const previousStage = reply.captureRequestStage;
+      reply.captureRequestStage = "session";
       // Late hooks cannot recover headers from resource timing. Read the existing
       // same-origin session only on explicit capture, keeping tokens in MAIN.
       const revision = authRevision;
@@ -154,6 +161,7 @@
       headers.set("authorization", `Bearer ${session.accessToken}`);
       if (!headers.has("chatgpt-account-id") && typeof session.account?.id === "string") headers.set("chatgpt-account-id", session.account.id);
       auth = headers;
+      reply.captureRequestStage = previousStage;
       return new Headers(headers);
     };
     let authRetried = false;
@@ -176,6 +184,7 @@
       return response;
     };
     try {
+      reply.captureRequestStage = "history";
       if (!chat || request.chat !== chat) throw new Error("changed");
       const url = `/backend-api/conversation/${encodeURIComponent(chat)}`;
       // Retry an expired bearer token once. Never retry a partial tree or guess
@@ -234,9 +243,12 @@
       if (pastedBytes > maxCaptureBytes - bytesRead) throw new Error("paste");
       for (const file of uploads.values()) {
         try {
+          reply.captureRequestStage = "attachment_descriptor";
           const descriptorResponse = await fetchAuthenticatedJson(`/backend-api/files/download/${encodeURIComponent(file.id)}`, { redirect: "error" });
+          reply.status = descriptorResponse.status;
           if (descriptorResponse.status !== 200 || descriptorResponse.headers.has("content-range")
             || !descriptorResponse.headers.get("content-type")?.includes("application/json")) {
+            reply.status = descriptorResponse.status;
             await discardResponse(descriptorResponse);
             throw new Error("paste");
           }
@@ -250,7 +262,9 @@
           // Descriptor/session reads also consume the budget. Recheck before
           // starting a signed download whose declared body cannot fit.
           if (file.size > maxCaptureBytes - bytesRead) throw new Error("paste");
+          reply.captureRequestStage = "attachment_body";
           const textResponse = await fetchJson(download.href, { redirect: "error" });
+          reply.status = textResponse.status;
           pastedTexts[file.id] = await readPaste(textResponse, file.size);
         } catch { throw new Error("paste"); }
       }
@@ -261,7 +275,7 @@
     } catch (error) {
       // Never expose tokens, parser snippets, or arbitrary upstream errors.
       reply.error = navigated || controller.signal.reason === "account_changed" ? "changed" : controller.signal.aborted ? "timeout"
-        : ["http", "partial", "format", "auth", "changed", "paste", "size"].includes(error?.message) ? error.message : "network";
+        : ["http", "partial", "format", "auth", "changed", "paste", "size"].includes(error?.message) ? error.message : error?.name === "SyntaxError" ? "invalid_json" : "network";
     } finally {
       clearTimeout(timer);
       window.navigation?.removeEventListener("navigate", changed);

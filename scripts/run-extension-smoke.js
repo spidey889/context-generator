@@ -2268,6 +2268,13 @@ async function run() {
       assert.match(failedCapture.error, /JSON capture|too long|limit|Fast capture/i);
       assert.equal(state.jsonRequests - jsonRequestsBeforeTransfer, 1, "One fresh API read must precede the error.");
       assert.equal(state.summaryRequests.length, 0, "A failed JSON read must not submit DOM history.");
+      if (TELEMETRY_DATABASE_SMOKE) {
+        const terminal = await waitFor(() => state.telemetryRequests.find(payload => payload.status === "failed"), "the installed worker's failed capture telemetry");
+        await telemetryFixture.verifyFailureOutcome(terminal);
+        assert.equal(terminal.diagnostics.failure_site, CHATGPT_FAILURE_SMOKE === "partial" ? "capture_serialize" : "capture_history");
+        if (CHATGPT_FAILURE_SMOKE === "ranged") assert.equal(terminal.diagnostics.capture_http_status, 206);
+        process.stdout.write("✓ Precise capture failure reached the real local relay, Edge and SQL without private content.\n");
+      }
       if (CHATGPT_PASTE_OVERSIZE_SMOKE) {
         await waitFor(() => state.oversizePaste.cancelled, "oversized paste reader cancellation");
         assert.ok(state.oversizePaste.bytes < 20000000, "The full oversized paste tail must not be downloaded.");

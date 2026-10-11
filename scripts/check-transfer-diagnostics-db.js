@@ -12,8 +12,7 @@ async function checkTransferDiagnostics(db, sql) {
   const rules = JSON.parse(sql.match(/rules constant jsonb := '([^']+)'::jsonb/)[1]);
   // Validate the historical contract at its own migration boundary. Later
   // additive page diagnostics have a separate preservation/ingress check.
-  const historicSchema = { ...contract.schema };
-  for (const key of ["claude_page", "destination_route_allowed", "destination_platform_match", "destination_message_count"]) delete historicSchema[key];
+  const historicSchema = Object.fromEntries(Object.keys(rules).map(key => [key, contract.schema[key]]));
   equal(rules, historicSchema);
   await db.exec(sql);
   equal(await rows("select to_jsonb(t)-'diagnostics' as row from public.transfers t order by attempt_id"), before);

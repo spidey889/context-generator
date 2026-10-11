@@ -3,7 +3,7 @@
   if (!platform || !globalThis.__capNetworkJsonData) return;
   // Advance readiness version with adapter/contract changes: old MAIN closures
   // can survive extension reloads and must be replaced before a new capture.
-  const version = platform === "deepseek" ? 10 : platform === "gemini" ? 10 : 8, channel = "cap-context-network-json-v1";
+  const version = platform === "deepseek" ? 11 : platform === "gemini" ? 11 : 9, channel = "cap-context-network-json-v1";
   const previous = window.__capNetworkFetchState;
   if (previous?.version === version && window.fetch === previous.fetch
     && (platform === "grok" || previous?.ownsObservation?.())) return;
@@ -69,14 +69,14 @@
     if (request.type !== "request") return;
     const { chat, selected } = current();
     const reply = { channel, type: "response", platform, chat, selected, id: request.id };
-    if (active) { window.postMessage({ ...reply, error: "Another fast capture is running. Try again after it finishes.", captureFailureReason: "unavailable" }, location.origin); return; }
+    if (active) { window.postMessage({ ...reply, error: "Another fast capture is running. Try again after it finishes.", captureFailureReason: "unavailable", captureDetail: "busy", captureRequestStage: "history" }, location.origin); return; }
     const controller = new AbortController();
     active = controller;
     const timer = setTimeout(() => controller.abort("capture_timeout"), 25000);
     const check = () => {
       const now = current();
-      if (controller.signal.aborted) throw new api.CaptureError("The capture request timed out or was cancelled.", controller.signal.reason === "capture_timeout" ? "timeout" : "request_failed");
-      if (!chat || request.chat !== chat || request.selected !== selected || now.chat !== chat || now.selected !== selected) throw new api.CaptureError("The conversation changed during capture.");
+      if (controller.signal.aborted) throw new api.CaptureError("The capture request timed out or was cancelled.", controller.signal.reason === "capture_timeout" ? "timeout" : "request_failed", controller.signal.reason === "capture_timeout" ? "timeout" : "conversation_changed");
+      if (!chat || request.chat !== chat || request.selected !== selected || now.chat !== chat || now.selected !== selected) throw new api.CaptureError("The conversation changed during capture.", "request_failed", "conversation_changed");
     };
     const changed = event => {
       if (event?.destination?.url) {
@@ -90,15 +90,15 @@
     let bytesRead = 0;
     const read = async (url, options = {}, type = "json", expectedSize) => {
       check();
-      const response = await Reflect.apply(nativeFetch, window, [url, { credentials: "same-origin", ...options, redirect: "error", signal: controller.signal }]);
-      let reader;
+      let response, reader;
       try {
+        response = await Reflect.apply(nativeFetch, window, [url, { credentials: "same-origin", ...options, redirect: "error", signal: controller.signal }]);
         check();
-        if (response.status !== 200 || response.headers.get("content-range")) throw new api.CaptureError("The history request failed or returned a partial response.", response.status === 206 || response.headers.get("content-range") ? "incomplete" : "request_failed");
+        if (response.status !== 200 || response.headers.get("content-range")) throw new api.CaptureError("The history request failed or returned a partial response.", response.status === 206 || response.headers.get("content-range") ? "incomplete" : "request_failed", response.status === 206 || response.headers.get("content-range") ? "partial_response" : "http_error");
         const contentType = response.headers.get("content-type") || "";
-        if (type === "json" && !/application\/json/i.test(contentType)) throw new api.CaptureError("The history request returned an unsupported response.");
-        if (type === "rpc" && !/(application\/json|text\/plain)/i.test(contentType)) throw new api.CaptureError("Gemini returned an unsupported RPC response.");
-        if (type === "file" && !/^(text\/plain|text\/markdown|text\/csv|application\/(json|octet-stream))(;|$)/i.test(contentType)) throw new api.CaptureError("A text attachment returned an unsupported response.");
+        if (type === "json" && !/application\/json/i.test(contentType)) throw new api.CaptureError("The history request returned an unsupported response.", "incomplete", "non_json_response");
+        if (type === "rpc" && !/(application\/json|text\/plain)/i.test(contentType)) throw new api.CaptureError("Gemini returned an unsupported RPC response.", "incomplete", "non_json_response");
+        if (type === "file" && !/^(text\/plain|text\/markdown|text\/csv|application\/(json|octet-stream))(;|$)/i.test(contentType)) throw new api.CaptureError("A text attachment returned an unsupported response.", "incomplete", "non_json_response");
         if (Number(response.headers.get("content-length")) > 6000000 - bytesRead) throw new api.CaptureError("size");
         // Enforce the shared budget while reading, including history without
         // Content-Length. Files also stop at their declared original byte count.
@@ -115,7 +115,7 @@
           if (done) break;
           size += value.byteLength;
           bytesRead += value.byteLength;
-          if (type === "file" && size > expectedSize) throw new api.CaptureError("A text attachment is incomplete.");
+          if (type === "file" && size > expectedSize) throw new api.CaptureError("A text attachment is incomplete.", "incomplete", "attachment_failed");
           if (bytesRead > 6000000) throw new api.CaptureError("size");
           const part = decoder.decode(value, { stream: true });
           if (part) parts.push(part);
@@ -125,10 +125,14 @@
         const text = parts.join("");
         return type === "json" ? JSON.parse(text) : { text, size };
       } catch (error) {
+        // Per-read metadata stays on the error: overlapping attachment reads
+        // must never replace the failing request's status with a sibling's.
+        error.captureRequestStage = type === "file" ? "attachment_body" : "history";
+        error.captureHttpStatus = response?.status;
         // Rejected headers still own an unread body. Cancel that body too,
         // preserving the structural error even if native cancellation fails.
         if (reader) await reader.cancel().catch(() => {});
-        else await response.body?.cancel().catch(() => {});
+        else await response?.body?.cancel().catch(() => {});
         throw error;
       } finally {
         reader?.releaseLock();
@@ -149,7 +153,7 @@
         }
         const bootstrap = window.WIZ_global_data;
         const at = bootstrap?.SNlM0e || geminiTemplate?.at;
-        if (typeof at !== "string" || !at) throw new api.CaptureError("Refresh this signed-in Gemini chat to make fast capture ready.", "unavailable");
+        if (typeof at !== "string" || !at) throw new api.CaptureError("Refresh this signed-in Gemini chat to make fast capture ready.", "unavailable", "auth_missing");
         // A cached chat or late install need not have a batchexecute timing entry.
         // The native bootstrap is sufficient to make this explicit fresh read;
         // do not click response menus merely to observe a request template.
@@ -187,7 +191,7 @@
       } else {
         // Omitting x-device-id/cache client headers makes DeepSeek return a
         // full REPLACE snapshot. A MERGE/delta must never count as full history.
-        if (!auth) throw new api.CaptureError("Refresh this signed-in DeepSeek chat to make fast capture ready.", "unavailable");
+        if (!auth) throw new api.CaptureError("Refresh this signed-in DeepSeek chat to make fast capture ready.", "unavailable", "auth_missing");
         const data = await read(`/api/v0/chat/history_messages?chat_session_id=${encodeURIComponent(chat)}`, { headers: { authorization: auth } });
         const branch = api.deepseekBranch(data, chat);
         const files = Object.create(null);
@@ -197,14 +201,14 @@
           if (message.role !== "USER") continue;
           for (const fragment of message.fragments || []) for (const file of fragment.type === "FILE" && Array.isArray(fragment.files) ? fragment.files : []) {
             if (!api.textFile(file)) continue;
-            if (file.status !== "SUCCESS" || !Number.isSafeInteger(file.file_size) || file.file_size < 0 || file.file_size > 1400000 || typeof file.signed_path !== "string") throw new api.CaptureError("A text attachment is unavailable or incomplete.");
+            if (file.status !== "SUCCESS" || !Number.isSafeInteger(file.file_size) || file.file_size < 0 || file.file_size > 1400000 || typeof file.signed_path !== "string") throw new api.CaptureError("A text attachment is unavailable or incomplete.", "incomplete", "attachment_failed");
             // DeepSeek's native preview uses this signed file service with ty=r
             // for original bytes. No session bearer/cookies go to that host.
             const url = new URL(file.signed_path.startsWith("/") ? `https://files.deepseeksvc.com/api${file.signed_path}` : file.signed_path);
-            if (url.origin !== "https://files.deepseeksvc.com" || url.pathname !== "/api/file" || url.username || url.password || url.searchParams.get("file_id") !== file.id?.replace(/^file-/, "")) throw new api.CaptureError("A text attachment has an unsupported download address.");
+            if (url.origin !== "https://files.deepseeksvc.com" || url.pathname !== "/api/file" || url.username || url.password || url.searchParams.get("file_id") !== file.id?.replace(/^file-/, "")) throw new api.CaptureError("A text attachment has an unsupported download address.", "incomplete", "attachment_failed");
             url.searchParams.set("ty", "r");
             if (uploads.has(file.id)) {
-              if (uploads.get(file.id).file.file_size !== file.file_size) throw new api.CaptureError("A text attachment is incomplete.");
+              if (uploads.get(file.id).file.file_size !== file.file_size) throw new api.CaptureError("A text attachment is incomplete.", "incomplete", "attachment_failed");
               continue;
             }
             uploadBytes += file.file_size;
@@ -222,7 +226,7 @@
               check();
               const { file, url } = pending[next++];
               const content = await read(url.href, { credentials: "omit" }, "file", file.file_size);
-              if (content.size !== file.file_size) throw new api.CaptureError("A text attachment is incomplete.");
+              if (content.size !== file.file_size) throw new api.CaptureError("A text attachment is incomplete.", "incomplete", "attachment_failed");
               files[file.id] = content.text;
             }
           } catch (error) {
@@ -245,6 +249,10 @@
         ? reason : "The conversation could not be read completely. Refresh this chat and try again.";
       reply.captureFailureReason = error instanceof api.CaptureError ? error.captureFailureReason
         : controller.signal.reason === "capture_timeout" ? "timeout" : "request_failed";
+      reply.captureDetail = controller.signal.reason === "capture_timeout" ? "timeout"
+        : error?.captureDetail || (error?.name === "SyntaxError" ? "invalid_json" : "network_error");
+      reply.captureRequestStage = error?.captureRequestStage || "serialize";
+      if (Number.isInteger(error?.captureHttpStatus)) reply.status = error.captureHttpStatus;
     } finally {
       clearTimeout(timer);
       window.navigation?.removeEventListener("navigate", changed);

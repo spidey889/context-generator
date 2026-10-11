@@ -1,9 +1,14 @@
 (() => {
   const channel = "cap-context-chatgpt-json-v2";
-  const captureError = (message, captureFailureReason) => Object.assign(new Error(message), { captureFailureReason });
+  const captureError = (message, captureFailureReason, detail = "incomplete_history", stage = "serialize", status) => Object.assign(new Error(message), {
+    captureFailureReason, diagnosticCode: captureFailureReason === "size_limit" ? "conversation_too_large"
+      : detail === "conversation_changed" ? "conversation_changed" : captureFailureReason === "unavailable" ? "capture_json_unavailable" : "capture_json_failed",
+    diagnostics: { version: 1, capture_detail: captureFailureReason === "size_limit" ? "size_limit" : detail, capture_request_stage: stage, failure_site: `capture_${stage}`,
+      ...(Number.isInteger(status) && status >= 100 && status <= 599 ? { capture_http_status: status } : {}) }
+  });
   const currentChat = (pathname = location.pathname) => pathname.match(/\/c\/([^/]+)\/?$/)?.[1];
   function serialize(data, chat, pastedTexts = {}, sourceTreeCounts) {
-    const blocked = reason => captureError(`ChatGPT JSON capture blocked: ${reason} Turn JSON capture off to use DOM capture.`, "incomplete");
+    const blocked = (reason, detail = "incomplete_history") => captureError(`ChatGPT JSON capture blocked: ${reason} Turn JSON capture off to use DOM capture.`, "incomplete", detail);
     const excludedContentTypes = new Set();
     if ((data?.conversation_id ?? data?.id) !== chat) throw blocked("The response belongs to a different conversation.");
     const assertComplete = (scope, label) => {
@@ -25,7 +30,7 @@
       // original tree; pruning must neither look partial nor hide real omissions.
       if (!Number.isSafeInteger(sourceTreeCounts.nodes) || sourceTreeCounts.nodes < nodeCount
         || !Number.isSafeInteger(sourceTreeCounts.messages) || sourceTreeCounts.messages < messageCount
-        || sourceTreeCounts.messages > sourceTreeCounts.nodes) throw blocked("The source tree counts are invalid.");
+        || sourceTreeCounts.messages > sourceTreeCounts.nodes) throw blocked("The source tree counts are invalid.", "count_mismatch");
       nodeCount = sourceTreeCounts.nodes;
       messageCount = sourceTreeCounts.messages;
     }
@@ -33,26 +38,26 @@
       assertComplete(scope, label);
       // Compare advertised totals with the entire tree, never the active branch.
       for (const [key, count] of [["total_node_count", nodeCount], ["total_nodes", nodeCount], ["total_message_count", messageCount], ["total_messages", messageCount]]) {
-        if (scope?.[key] != null && (!Number.isSafeInteger(scope[key]) || scope[key] < 0 || scope[key] > count)) throw blocked(`${label}.${key} indicates missing history or an invalid count.`);
+        if (scope?.[key] != null && (!Number.isSafeInteger(scope[key]) || scope[key] < 0 || scope[key] > count)) throw blocked(`${label}.${key} indicates missing history or an invalid count.`, "count_mismatch");
       }
     }
-    if (typeof data.current_node !== "string" || !data.current_node) throw blocked("The active branch's current_node is missing or invalid.");
+    if (typeof data.current_node !== "string" || !data.current_node) throw blocked("The active branch's current_node is missing or invalid.", "invalid_branch");
     const branch = [];
     const seen = new Set();
     let id = data.current_node;
     while (true) {
       const node = Object.hasOwn(data.mapping, id) ? data.mapping[id] : null;
-      if (!node || typeof node !== "object" || Array.isArray(node)) throw blocked("A node or parent is missing or invalid in the active branch.");
-      if (node.id != null && node.id !== id) throw blocked("An active-branch node has a mismatched ID.");
-      if (seen.has(id)) throw blocked("The active branch contains a parent cycle.");
-      if (!Object.hasOwn(node, "parent")) throw blocked("An active-branch node has no parent field; completeness cannot be verified.");
-      if (node.message != null && (typeof node.message !== "object" || Array.isArray(node.message))) throw blocked("An active-branch message is invalid.");
-      if (node.message?.id != null && node.message.id !== id) throw blocked("An active-branch message has a mismatched ID.");
-      if (!node.message && node.parent !== null) throw blocked("An active-branch message is missing from a non-root node.");
+      if (!node || typeof node !== "object" || Array.isArray(node)) throw blocked("A node or parent is missing or invalid in the active branch.", "parent_missing");
+      if (node.id != null && node.id !== id) throw blocked("An active-branch node has a mismatched ID.", "invalid_branch");
+      if (seen.has(id)) throw blocked("The active branch contains a parent cycle.", "branch_cycle");
+      if (!Object.hasOwn(node, "parent")) throw blocked("An active-branch node has no parent field; completeness cannot be verified.", "parent_missing");
+      if (node.message != null && (typeof node.message !== "object" || Array.isArray(node.message))) throw blocked("An active-branch message is invalid.", "invalid_branch");
+      if (node.message?.id != null && node.message.id !== id) throw blocked("An active-branch message has a mismatched ID.", "invalid_branch");
+      if (!node.message && node.parent !== null) throw blocked("An active-branch message is missing from a non-root node.", "invalid_branch");
       seen.add(id);
       if (node.message) branch.push(node.message);
       if (node.parent === null) break;
-      if (typeof node.parent !== "string" || !node.parent) throw blocked("The active branch has an invalid parent/root marker.");
+      if (typeof node.parent !== "string" || !node.parent) throw blocked("The active branch has an invalid parent/root marker.", "invalid_branch");
       id = node.parent;
     }
     // Explicit capture takes the text available now, including a streaming or
@@ -73,22 +78,22 @@
       assertComplete(message, "Canvas message");
       assertComplete(message.metadata, "Canvas metadata");
       assertComplete(message.content, "Canvas content");
-      if (message.status != null && message.status !== "finished_successfully") throw blocked("A canvas document is still in progress or failed.");
+      if (message.status != null && message.status !== "finished_successfully") throw blocked("A canvas document is still in progress or failed.", "canvas_invalid");
       const content = message.content;
       const raw = content?.content_type === "code" ? content.text
         : content?.content_type === "text" && Array.isArray(content.parts) && content.parts.every(part => typeof part === "string") ? content.parts.join("") : null;
       let payload;
-      try { payload = JSON.parse(raw); } catch { throw blocked("A canvas document has invalid JSON."); }
-      if (!payload || typeof payload !== "object" || Array.isArray(payload)) throw blocked("A canvas document is missing its text fields.");
+      try { payload = JSON.parse(raw); } catch { throw blocked("A canvas document has invalid JSON.", "canvas_invalid"); }
+      if (!payload || typeof payload !== "object" || Array.isArray(payload)) throw blocked("A canvas document is missing its text fields.", "canvas_invalid");
       assertComplete(payload, "Canvas document");
       if (command === "create_textdoc") {
-        if (payload.type !== canvas.textdoc_type || typeof payload.content !== "string" || typeof payload.name !== "string") throw blocked("A canvas document is missing its complete content string.");
+        if (payload.type !== canvas.textdoc_type || typeof payload.content !== "string" || typeof payload.name !== "string") throw blocked("A canvas document is missing its complete content string.", "canvas_invalid");
         return payload.content.trim() ? [`Canvas: ${payload.name}\n\n${payload.content}`] : [];
       }
-      if (!Array.isArray(payload.updates) || !payload.updates.length) throw blocked("A canvas edit is missing its replacement text.");
+      if (!Array.isArray(payload.updates) || !payload.updates.length) throw blocked("A canvas edit is missing its replacement text.", "canvas_invalid");
       const parts = [];
       for (const update of payload.updates) {
-        if (typeof update?.replacement !== "string") throw blocked("A canvas edit is missing its replacement text.");
+        if (typeof update?.replacement !== "string") throw blocked("A canvas edit is missing its replacement text.", "canvas_invalid");
         assertComplete(update, "Canvas edit");
         // Preserve authored edit text in this turn, not regex patterns or a
         // guessed reconstruction of the latest document (edits can be partial).
@@ -107,7 +112,7 @@
         || call.status !== "finished_successfully" || message.status !== "finished_successfully") return null;
       for (const [scope, label] of [[call, "Python call"], [call.metadata, "Python call metadata"], [call.content, "Python call content"],
         [message, "Python result"], [message.metadata, "Python result metadata"], [message.content, "Python result content"]]) assertComplete(scope, label);
-      if (typeof message.content.text !== "string") throw blocked("A Python result is missing its complete text string.");
+      if (typeof message.content.text !== "string") throw blocked("A Python result is missing its complete text string.", "text_invalid");
       return message.content.text.trim() ? message.content.text : null;
     };
     const turns = branch.reverse().flatMap((message, index) => {
@@ -139,8 +144,8 @@
       assertComplete(message, "Own-turn message");
       assertComplete(message.metadata, "Own-turn metadata");
       assertComplete(content, "Own-turn content");
-      if (content.parts != null && !Array.isArray(content.parts)) throw blocked("An own turn has invalid text parts.");
-      if (content.content_type === "text" && !Array.isArray(content.parts)) throw blocked("An own text turn is missing its text parts.");
+      if (content.parts != null && !Array.isArray(content.parts)) throw blocked("An own turn has invalid text parts.", "text_invalid");
+      if (content.content_type === "text" && !Array.isArray(content.parts)) throw blocked("An own text turn is missing its text parts.", "text_invalid");
       // Own strings plus explicitly typed voice transcripts only. Never recurse
       // into tools, audio/image pointers, artifacts, files or their metadata.
       const parts = Array.isArray(content.parts) ? content.parts.flatMap(part => {
@@ -151,21 +156,21 @@
         }
         assertComplete(part, "Voice transcription");
         assertComplete(part.metadata, "Voice transcription metadata");
-        if (typeof part.text !== "string") throw blocked("A voice transcription is missing its complete text string.");
+        if (typeof part.text !== "string") throw blocked("A voice transcription is missing its complete text string.", "text_invalid");
         return part.text.trim() ? [part.text] : [];
       }) : [];
       if (!parts.length && ["thinking", "code", "reasoning_recap"].includes(content.content_type)) {
         const value = content.content_type === "thinking" ? (content.thinking ?? content.text)
           : content.content_type === "reasoning_recap" ? content.content : content.text;
-        if (value != null && typeof value !== "string") throw blocked("An own text/thinking string is invalid.");
+        if (value != null && typeof value !== "string") throw blocked("An own text/thinking string is invalid.", "text_invalid");
         if (typeof value === "string" && value.trim()) parts.push(value);
       }
       // Live ChatGPT's own thoughts are explicit entries, not generic nested
       // tool text. content is the full body; summary/chunks can repeat it.
       if (content.content_type === "thoughts") {
-        if (!Array.isArray(content.thoughts)) throw blocked("An own thoughts turn is missing its thoughts array.");
+        if (!Array.isArray(content.thoughts)) throw blocked("An own thoughts turn is missing its thoughts array.", "text_invalid");
         for (const thought of content.thoughts) {
-          if (typeof thought?.content !== "string") throw blocked("An own thought is missing its complete content string.");
+          if (typeof thought?.content !== "string") throw blocked("An own thought is missing its complete content string.", "text_invalid");
           // Some live thoughts expose only their visible summary (empty body).
           const value = thought.content.trim() ? thought.content : (typeof thought.summary === "string" && thought.summary.trim() ? thought.summary : "");
           if (value) {
@@ -182,7 +187,7 @@
           if (file?.is_big_paste !== true || file.mime_type !== "text/plain") continue;
           assertComplete(file, "Pasted text attachment");
           const pasted = Object.hasOwn(pastedTexts, file.id) ? pastedTexts[file.id] : null;
-          if (typeof pasted !== "string" || !Number.isSafeInteger(file.size) || new TextEncoder().encode(pasted).length !== file.size) throw blocked("A pasted text attachment is missing or incomplete.");
+          if (typeof pasted !== "string" || !Number.isSafeInteger(file.size) || new TextEncoder().encode(pasted).length !== file.size) throw blocked("A pasted text attachment is missing or incomplete.", "attachment_failed");
           if (!pasted.trim() || pastedIds.has(file.id)) continue;
           pastedIds.add(file.id);
           // Attachment identity, not substring overlap, decides duplication.
@@ -220,7 +225,7 @@
       parts.push(...attachmentLabels);
       return parts.length ? [{ role, text: parts.join("\n\n") }] : [];
     });
-    if (!turns.length) throw blocked("No usable user or assistant text remains after skipping tools, files, images, and artifacts.");
+    if (!turns.length) throw blocked("No usable user or assistant text remains after skipping tools, files, images, and artifacts.", "missing_text");
     const text = `ChatGPT conversation:\n\n${turns.map(turn => `${turn.role === "user" ? "User" : "Assistant"}: ${turn.text}`).join("\n\n")}`;
     if (text.length > 500000 || new TextEncoder().encode(text).length > 2000000) throw captureError("This chat is too long to transfer (limit: 500,000 characters). Try a shorter chat.", "size_limit");
     return { text, messages: turns, messageTurnCount: turns.length, excludedContentTypes: [...excludedContentTypes].sort() };
@@ -242,7 +247,7 @@
       const receive = event => {
         const reply = event.data;
         if (event.source === window && event.origin === location.origin && reply?.channel === channel
-          && reply.type === "pong" && reply.id === id && reply.version === 10) finish(true);
+          && reply.type === "pong" && reply.id === id && reply.version === 11) finish(true);
       };
       const ping = () => {
         if (settled) return;
@@ -263,7 +268,7 @@
 
   window.__capCaptureChatGptJson = async (expectedPath = location.pathname) => {
     const chat = currentChat(expectedPath);
-    if (!chat) throw new Error("Open a saved ChatGPT conversation to use JSON capture.");
+    if (!chat) throw captureError("Open a saved ChatGPT conversation to use JSON capture.", "unavailable", "routing_unavailable", "hook");
     let changed = currentChat() !== chat;
     const navigated = event => {
       const destination = event?.destination ? new URL(event.destination.url) : location;
@@ -274,15 +279,15 @@
     window.navigation?.addEventListener("navigate", navigated);
     window.addEventListener("popstate", navigated);
     try {
-      if (changed) throw new Error("The ChatGPT conversation changed during capture.");
+      if (changed) throw captureError("The ChatGPT conversation changed during capture.", "request_failed", "conversation_changed", "hook");
       // Usually document_start already installed MAIN; don't wake/reinstall it
       // on every capture. Missing/older/replaced hooks get bounded recovery.
       if (!await waitForHook(250)) {
         if (typeof chrome === "undefined" || !chrome.runtime?.sendMessage || !await waitForHook(8000, true)) {
-          throw captureError("Fast capture isn't ready yet. Refresh this chat and try again, or turn off the lightning button.", "unavailable");
+          throw captureError("Fast capture isn't ready yet. Refresh this chat and try again, or turn off the lightning button.", "unavailable", "hook_unavailable", "hook");
         }
       }
-      if (changed || currentChat() !== chat) throw new Error("The ChatGPT conversation changed during capture.");
+      if (changed || currentChat() !== chat) throw captureError("The ChatGPT conversation changed during capture.", "request_failed", "conversation_changed", "hook");
       return await new Promise((resolve, reject) => {
         const id = crypto.randomUUID();
         const cleanup = () => { clearTimeout(timer); window.removeEventListener("message", receive); };
@@ -291,19 +296,21 @@
           if (event.source !== window || event.origin !== location.origin || reply?.channel !== channel || reply.type !== "response" || reply.id !== id) return;
           cleanup();
           try {
-            if (changed || currentChat() !== chat || reply.chat !== chat) throw new Error("The ChatGPT conversation changed during capture.");
+            if (changed || currentChat() !== chat || reply.chat !== chat) throw captureError("The ChatGPT conversation changed during capture.", "request_failed", "conversation_changed", "history");
             if (reply.error) {
-              if (reply.error === "size") throw captureError("This chat is too long to transfer (limit: 500,000 characters). Try a shorter chat.", "size_limit");
+              if (reply.error === "size") throw captureError("This chat is too long to transfer (limit: 500,000 characters). Try a shorter chat.", "size_limit", "size_limit", "history");
               const reasons = { auth: "ChatGPT authentication is unavailable. Refresh this signed-in chat.", partial: "ChatGPT returned incomplete, invalid or oversized JSON.", busy: "Another ChatGPT JSON capture is running. Try again after it finishes.", format: "ChatGPT returned a non-JSON response.", changed: "The ChatGPT conversation changed during capture.", timeout: "The full-tree request timed out.", network: "The full-tree request failed or returned invalid JSON." };
               reasons.paste = "A pasted text attachment could not be read completely. Refresh this chat and try again.";
               const reason = reply.error === "http" && Number.isInteger(reply.status) && reply.status >= 100 && reply.status <= 599 ? `The full-tree request returned HTTP ${reply.status}.` : reasons[reply.error] || "The full-tree request failed.";
               const failureReason = { auth: "unavailable", busy: "unavailable", partial: "incomplete", format: "incomplete", paste: "incomplete", timeout: "timeout" }[reply.error] || "request_failed";
-              throw captureError(`ChatGPT JSON capture failed: ${reason} Turn JSON capture off to use DOM capture.`, failureReason);
+              const detail = reply.captureDetail === "invalid_json" ? "invalid_json" : { auth: "auth_missing", busy: "busy", partial: "partial_response", format: "non_json_response", changed: "conversation_changed", timeout: "timeout", network: "network_error", http: "http_error", paste: "attachment_failed", invalid_json: "invalid_json" }[reply.error] || "network_error";
+              const stage = ["session", "history", "attachment_descriptor", "attachment_body"].includes(reply.captureRequestStage) ? reply.captureRequestStage : "history";
+              throw captureError(`ChatGPT JSON capture failed: ${reason} Turn JSON capture off to use DOM capture.`, failureReason, detail, stage, reply.status);
             }
             resolve(serialize(reply.data, chat, reply.pastedTexts, reply.sourceTreeCounts));
           } catch (error) { reject(error); }
         };
-        const timer = setTimeout(() => { cleanup(); reject(captureError("ChatGPT JSON capture timed out. Refresh or turn JSON capture off.", "timeout")); }, 17000);
+        const timer = setTimeout(() => { cleanup(); reject(captureError("ChatGPT JSON capture timed out. Refresh or turn JSON capture off.", "timeout", "timeout", "history")); }, 17000);
         window.addEventListener("message", receive);
         window.postMessage({ channel, type: "request", id, chat }, location.origin);
       });

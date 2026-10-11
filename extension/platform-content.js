@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-12-claude-page-diagnostics-v132";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-12-useful-diagnostics-v133";
   const INLINE_PILL_SIZE = 36;
   const ownedUiStyleSheets = new Map();
   const CLAUDE_INLINE_STYLE_ID = "context-generator-claude-inline-styles";
@@ -1136,9 +1136,11 @@
         if (error?.code === "user_cancelled") throw error;
         checkTransferDeadline(trace);
         mergeTransferDiagnostics(trace, error?.diagnostics);
+        const failureDetails = globalThis.CapTransferDiagnostics?.errorDetails(error, "summary_request");
         updateTransferDiagnostics(trace, { summary_error_code: error?.diagnostics?.error_code || globalThis.CapTransferDiagnostics?.errorCode(error),
+          summary_failure_site: failureDetails?.failure_site, summary_error_type: failureDetails?.error_type,
           summary_http_status: error?.status, summary_fallback: true, summary_mode: "local_fallback" }, "local_fallback");
-        if (trace?.diagnostics) { delete trace.diagnostics.error_code; delete trace.diagnostics.error_origin; }
+        if (trace?.diagnostics) { for (const key of ["error_code", "error_origin", "failure_site", "error_type", "error_file", "error_line", "error_column"]) delete trace.diagnostics[key]; }
         // The verified transcript stays in the source page even when the backend
         // or MV3 worker is unavailable. Paste failure still offers manual copy.
         ({ summary, timing } = createLocalContextCarry(conversationText, "summary_service_unavailable"));
@@ -1378,7 +1380,7 @@
       lastAt: null,
       marks: [],
       completed: false,
-      diagnostics: { version: 1, entry_point: source === "destination tile" ? "picker" : source === "extension icon" ? "toolbar" : "other",
+      diagnostics: { version: 1, diagnostics_revision: 2, entry_point: source === "destination tile" ? "picker" : source === "extension icon" ? "toolbar" : "other",
         browser: /Firefox\//i.test(globalThis.navigator?.userAgent || "") ? "firefox" : "chromium",
         visibility: ["visible", "hidden", "prerender"].includes(document.visibilityState) ? document.visibilityState : "unknown",
         ...(typeof globalThis.navigator?.onLine === "boolean" ? { online: globalThis.navigator.onLine } : {}),
@@ -1404,10 +1406,12 @@
 
   function recordTransferFailureDiagnostics(trace, error) {
     mergeTransferDiagnostics(trace, error?.diagnostics);
+    const contract = globalThis.CapTransferDiagnostics;
     const code = isNoConversationError(error) ? "no_conversation"
       : isExtensionContextInvalidated(error) ? "extension_reloaded"
-      : error?.diagnostics?.error_code || globalThis.CapTransferDiagnostics?.errorCode(error) || "unknown_error";
-    updateTransferDiagnostics(trace, { error_code: code, error_origin: trace?.diagnostics?.error_origin || "source",
+      : error?.diagnostics?.error_code || contract?.errorCode(error, contract.operationErrorCode(trace?.diagnostics?.last_operation)) || "unknown_error";
+    updateTransferDiagnostics(trace, { ...contract?.errorDetails(error, trace?.diagnostics?.last_operation),
+      error_code: code, error_origin: trace?.diagnostics?.error_origin || "source",
       source_changed: code === "conversation_changed", cancelled: code === "user_cancelled" });
     globalThis.CapTransferDiagnostics?.event(trace?.diagnostics, "failure", getNow() - trace.startedAt, "events", code);
   }
@@ -2304,11 +2308,13 @@
     if (label === "summary start") trace.diagnosticSummaryStartedAt = now;
     if (label === "summary done") {
       const timing = detail?.background;
+      const recoveredServiceFailure = globalThis.CapTransferDiagnostics?.validate(timing?.backend?.failureDiagnostics);
+      if (recoveredServiceFailure) updateTransferDiagnostics(trace, recoveredServiceFailure);
       updateTransferDiagnostics(trace, { summary_chars: detail?.chars,
         summary_ms: trace.diagnosticSummaryStartedAt !== undefined ? Math.round(now - trace.diagnosticSummaryStartedAt) : undefined,
         summary_mode: timing?.cacheHit || timing?.source === "cache" ? "cache" : timing?.source === "local" ? (timing?.backend?.fallback?.used ? "local_fallback" : "local") : "remote",
         summary_fetch_ms: timing?.fetchMs, summary_parse_ms: timing?.parseMs, summary_service_ms: timing?.backend?.totalMs,
-        summary_http_status: timing?.status, summary_provider_attempts: timing?.backend?.providerPasses,
+        summary_http_status: timing?.status, summary_provider_attempts: Array.isArray(timing?.backend?.modelsTried) ? timing.backend.modelsTried.length : timing?.backend?.providerPasses,
         summary_cache_hit: Boolean(timing?.cacheHit), summary_fallback: Boolean(timing?.backend?.fallback?.used) });
     }
   }
@@ -2669,7 +2675,8 @@
 
   async function pasteIntoPlatform(text, destinationId, transferId = null, deadlineAt = null, sourceTabId = null) {
     const startedAt = Date.now();
-    const diagnostics = { version: 1, last_operation: "paste_start", summary_chars: text?.length || 0,
+    const diagnostics = { version: 1, diagnostics_revision: 2, last_operation: "paste_start", summary_chars: text?.length || 0,
+      document_ready_state: document.readyState,
       visibility: ["visible", "hidden", "prerender"].includes(document.visibilityState) ? document.visibilityState : "unknown" };
     try {
       const timing = await pasteIntoPlatformObserved(text, destinationId, transferId, deadlineAt, sourceTabId, diagnostics, startedAt);
@@ -7738,13 +7745,18 @@
           });
         } catch (error) {
           checkTransferDeadline(trace);
+          const captureFailure = globalThis.CapTransferDiagnostics?.errorDetails(error, "capture_json");
+          updateTransferDiagnostics(trace, { ...captureFailure,
+            capture_error_code: globalThis.CapTransferDiagnostics?.errorCode(error, "capture_json_failed"),
+            capture_failure_site: captureFailure?.failure_site, capture_error_type: captureFailure?.error_type });
           // Retain the bridges' navigation/session cancellation, including an
           // away-and-back change that a final URL comparison cannot detect.
           if (/conversation changed during capture\./i.test(error?.message || "")) throw error;
-          if (window.location.href !== sourceUrl) throw new Error("The conversation changed during capture. Return to the source chat and try again.");
+          if (window.location.href !== sourceUrl) throw createDiagnosticError("The conversation changed during capture. Return to the source chat and try again.", "conversation_changed");
           // ChatGPT fast capture owns an API read, not page scrolling. A failed
           // read must not silently enter the legacy DOM sweep or move history.
           if (useChatGptJson) throw error;
+          if (trace?.diagnostics) { for (const key of ["error_code", "error_origin", "failure_site", "error_type", "error_file", "error_line", "error_column"]) delete trace.diagnostics[key]; }
           // Other adapters recover within this attempt and reuse its destination.
           showFastCaptureFallbackMessage();
           const jsonFallbackReason = sanitizeCaptureDiagnostics({ jsonFallbackReason: error?.captureFailureReason }).jsonFallbackReason || "request_failed";
@@ -7754,7 +7766,7 @@
           checkTransferDeadline(trace);
           conversationText = await scrapeConversationTextWhenReady();
           checkTransferDeadline(trace);
-          if (window.location.href !== sourceUrl) throw new Error("The conversation changed during capture. Return to the source chat and try again.");
+          if (window.location.href !== sourceUrl) throw createDiagnosticError("The conversation changed during capture. Return to the source chat and try again.", "conversation_changed");
         }
       } else {
         conversationText = await scrapeConversationTextWhenReady();

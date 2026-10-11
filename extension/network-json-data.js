@@ -1,11 +1,12 @@
 (() => {
   class CaptureError extends Error {
-    constructor(reason, captureFailureReason = "incomplete") {
+    constructor(reason, captureFailureReason = "incomplete", captureDetail = "incomplete_history") {
       super(reason);
       this.captureFailureReason = reason === "size" ? "size_limit" : captureFailureReason;
+      this.captureDetail = reason === "size" ? "size_limit" : captureFailureReason === "unsupported" ? "unsupported_content" : captureDetail;
     }
   }
-  const fail = (reason, captureFailureReason) => { throw new CaptureError(reason, captureFailureReason); };
+  const fail = (reason, captureFailureReason, detail) => { throw new CaptureError(reason, captureFailureReason, detail); };
   const complete = value => {
     if (!value || typeof value !== "object") return;
     for (const key of ["has_more", "has_next_page", "has_previous_page", "is_partial", "is_incomplete", "is_truncated", "partial", "truncated", "incomplete", "missing_messages", "next_cursor", "previous_cursor", "hasMore", "hasNextPage", "hasPreviousPage", "isPartial", "isIncomplete", "isTruncated", "missingMessages", "nextCursor", "previousCursor"]) {
@@ -15,7 +16,7 @@
     if (value.is_complete === false || value.complete === false || value.isComplete === false) fail("Incomplete history was returned.");
   };
   const transcript = (name, turns, excludedContentTypes = new Set()) => {
-    if (!turns.length) fail("No usable user or assistant text was found.");
+    if (!turns.length) fail("No usable user or assistant text was found.", undefined, "missing_text");
     const text = `${name} conversation:\n\n${turns.map(turn => `${turn.role === "user" ? "User" : "Assistant"}: ${turn.text}`).join("\n\n")}`;
     if (text.length > 500000 || new TextEncoder().encode(text).length > 2000000) fail("size");
     return { text, messages: turns, messageTurnCount: turns.length, excludedContentTypes: [...excludedContentTypes].sort() };
@@ -27,21 +28,21 @@
     const mapping = new Map();
     for (const item of items) {
       const id = item?.[idKey];
-      if ((typeof id !== "string" && !Number.isSafeInteger(id)) || mapping.has(id) || !Object.hasOwn(item, parentKey)) fail("Invalid or duplicate message IDs were returned.");
+      if ((typeof id !== "string" && !Number.isSafeInteger(id)) || mapping.has(id) || !Object.hasOwn(item, parentKey)) fail("Invalid or duplicate message IDs were returned.", undefined, "invalid_branch");
       mapping.set(id, item);
     }
     const branch = [], seen = new Set();
     let id = leaf;
     while (true) {
       const item = mapping.get(id);
-      if (!item || seen.has(id)) fail("A message is missing or the branch contains a cycle.");
+      if (!item || seen.has(id)) fail("A message is missing or the branch contains a cycle.", undefined, "branch_cycle");
       seen.add(id); branch.push(item);
       const parent = item[parentKey];
       if (parent === null) break;
       // Grok's first human node points at a synthetic root absent from the
       // response tree. All other parents must be real returned nodes.
       if (externalRoot && !mapping.has(parent) && item === items[0] && item.sender === "human" && typeof parent === "string" && parent) break;
-      if ((typeof parent !== "string" && !Number.isSafeInteger(parent)) || !mapping.has(parent)) fail("A parent message is missing from the history.");
+      if ((typeof parent !== "string" && !Number.isSafeInteger(parent)) || !mapping.has(parent)) fail("A parent message is missing from the history.", undefined, "parent_missing");
       id = parent;
     }
     return branch.reverse();
@@ -71,13 +72,13 @@
     const excludedContentTypes = new Set();
     let expected = null, selectedParentCandidate = null;
     for (const page of pages) for (const item of page.turns) {
-      if (!Array.isArray(item) || item[0]?.[0] !== `c_${chat}` || typeof item[0][1] !== "string" || seen.has(item[0][1])) fail("Gemini returned a wrong conversation or duplicate turn.");
+      if (!Array.isArray(item) || item[0]?.[0] !== `c_${chat}` || typeof item[0][1] !== "string" || seen.has(item[0][1])) fail("Gemini returned a wrong conversation or duplicate turn.", undefined, "invalid_branch");
       const id = item[0][1];
-      if (seen.size && id !== expected) fail("A Gemini history turn is missing or out of order.");
+      if (seen.size && id !== expected) fail("A Gemini history turn is missing or out of order.", undefined, "invalid_branch");
       seen.add(id);
       if (item[1] !== null && (item[1]?.[0] !== `c_${chat}` || typeof item[1]?.[1] !== "string")) fail("Gemini returned an invalid parent turn.");
       const user = item[2]?.[0]?.[0];
-      if (typeof user !== "string") fail("A Gemini user text field is missing or malformed.");
+      if (typeof user !== "string") fail("A Gemini user text field is missing or malformed.", undefined, "text_invalid");
       const userParts = [user];
       // hNvQHb user attachment slot: groups contain descriptors at [4], name at [2].
       // Read this slot only, never recursively collect strings from render/tool data.
@@ -102,7 +103,7 @@
         // labels must not discard verified own text; keep unknown data excluded.
         // Without a prompt, that data could be the entire user input, so fallback
         // is still required rather than accepting a label/answer-only history.
-        if (!user.trim()) fail("Gemini attachment labels have an unsupported shape.", "unsupported");
+        if (!user.trim()) fail("Gemini attachment labels have an unsupported shape.", "unsupported", "attachment_failed");
         excludedContentTypes.add("other");
       }
       const assistant = item[3];
@@ -123,7 +124,7 @@
       // text and can contain search/tool payloads, so never walk them recursively.
       turns.unshift(...turn("User", userParts), ...turn("Assistant", candidate[1].filter(part => typeof part === "string")));
     }
-    if (expected !== null || !seen.size) fail("Gemini's oldest history turn is missing.");
+    if (expected !== null || !seen.size) fail("Gemini's oldest history turn is missing.", undefined, "parent_missing");
     return transcript("Gemini", turns, excludedContentTypes);
   };
   const grokBranch = (data, selected) => {
@@ -133,7 +134,7 @@
     const parents = new Set(data.responseNodes.map(node => node.parentResponseId));
     const leaves = data.responseNodes.filter(node => !parents.has(node.responseId));
     const leaf = selected || (leaves.length === 1 ? leaves[0].responseId : null);
-    if (!leaf) fail("The active Grok branch could not be identified.");
+    if (!leaf) fail("The active Grok branch could not be identified.", undefined, "invalid_branch");
     return chain(data.responseNodes, leaf, "responseId", "parentResponseId", true);
   };
   const grok = (nodes, responses, selected) => {
@@ -142,7 +143,7 @@
     const mapping = new Map();
     const excludedContentTypes = new Set();
     for (const message of responses) {
-      if (mapping.has(message?.responseId)) fail("Grok returned duplicate message bodies.");
+      if (mapping.has(message?.responseId)) fail("Grok returned duplicate message bodies.", undefined, "invalid_branch");
       mapping.set(message?.responseId, message);
     }
     const turns = branch.flatMap(node => {
@@ -153,7 +154,7 @@
       if (!["human", "assistant"].includes(message.sender) || message.isControl) return [];
       if ([message.fileAttachments, message.fileAttachmentsMetadata].some(files => Array.isArray(files) && files.length)) excludedContentTypes.add("uploads");
       if (Array.isArray(message.toolResponses) && message.toolResponses.length) excludedContentTypes.add("tools");
-      if (typeof message.message !== "string") fail("A Grok own-turn text field is missing.");
+      if (typeof message.message !== "string") fail("A Grok own-turn text field is missing.", undefined, "text_invalid");
       // File bodies are unsupported here. Do not accept an answer-only transcript
       // when its authored user turn consists solely of an attachment.
       if (message.sender === "human" && !message.message.trim() && [message.fileAttachments, message.fileAttachmentsMetadata].some(files => Array.isArray(files) && files.length)) fail("Grok has a file-only user turn that fast capture cannot read.", "unsupported");
@@ -193,7 +194,7 @@
       for (const fragment of message.fragments) {
         if ((message.role === "USER" && fragment.type === "REQUEST") || (message.role === "ASSISTANT" && ["RESPONSE", "THINK"].includes(fragment.type))) {
           complete(fragment);
-          if (typeof fragment.content !== "string") fail("A DeepSeek own-turn text field is missing.");
+          if (typeof fragment.content !== "string") fail("A DeepSeek own-turn text field is missing.", undefined, "text_invalid");
           parts.push(fragment.content);
         } else if (message.role === "USER" && fragment.type === "FILE") {
           for (const file of Array.isArray(fragment.files) ? fragment.files : []) {
@@ -201,7 +202,7 @@
             if (!textFile(file)) { excludedContentTypes.add(file?.is_image === true ? "media" : "uploads"); continue; }
             complete(file);
             const text = Object.hasOwn(files, file.id) ? files[file.id] : null;
-            if (file.status !== "SUCCESS" || typeof text !== "string" || new TextEncoder().encode(text).length !== file.file_size) fail("A DeepSeek text attachment is missing or incomplete.");
+            if (file.status !== "SUCCESS" || typeof text !== "string" || new TextEncoder().encode(text).length !== file.file_size) fail("A DeepSeek text attachment is missing or incomplete.", undefined, "attachment_failed");
             // Identity, not text equality, identifies a repeated attachment.
             // The same file may legitimately appear again in another turn.
             if (!fileIds.has(file.id)) {

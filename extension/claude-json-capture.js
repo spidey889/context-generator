@@ -1,9 +1,15 @@
 (() => {
   const channel = "cap-context-claude-json-v2";
-  const captureError = (message, captureFailureReason) => Object.assign(new Error(message), { captureFailureReason });
+  const changedError = message => Object.assign(new Error(message), { diagnosticCode: "conversation_changed", diagnostics: { version: 1, capture_detail: "conversation_changed", failure_site: "capture_history" } });
+  const captureError = (message, captureFailureReason, detail = "incomplete_history", stage = "serialize", status) => Object.assign(new Error(message), {
+    captureFailureReason, diagnosticCode: captureFailureReason === "size_limit" ? "conversation_too_large"
+      : detail === "conversation_changed" ? "conversation_changed" : captureFailureReason === "unavailable" ? "capture_json_unavailable" : "capture_json_failed",
+    diagnostics: { version: 1, capture_detail: captureFailureReason === "size_limit" ? "size_limit" : detail, capture_request_stage: stage, failure_site: `capture_${stage}`,
+      ...(Number.isInteger(status) && status >= 100 && status <= 599 ? { capture_http_status: status } : {}) }
+  });
   function serialize(data, chat) {
     // Report structural metadata only, never message text, file names, or tool payloads.
-    const unsupported = reason => captureError(`This conversation has incomplete or unsupported JSON content: ${reason} Turn JSON capture off to use DOM capture.`, "incomplete");
+    const unsupported = (reason, detail = "incomplete_history") => captureError(`This conversation has incomplete or unsupported JSON content: ${reason} Turn JSON capture off to use DOM capture.`, "incomplete", detail);
     const excludedContentTypes = new Set();
     const assertComplete = (value, label) => {
       if (value == null) return;
@@ -27,34 +33,34 @@
     for (const [value, label] of [[data, "conversation"], [data.page_info, "page_info"], [data.pagination, "pagination"]]) {
       assertComplete(value, label);
       for (const field of ["total_messages", "total_message_count"]) {
-        if (value?.[field] != null && (!Number.isSafeInteger(value[field]) || value[field] < 0 || value[field] > data.chat_messages.length)) throw unsupported(`${label}.${field} indicates missing history or an invalid message count.`);
+        if (value?.[field] != null && (!Number.isSafeInteger(value[field]) || value[field] < 0 || value[field] > data.chat_messages.length)) throw unsupported(`${label}.${field} indicates missing history or an invalid message count.`, "count_mismatch");
       }
     }
-    if (typeof data.current_leaf_message_uuid !== "string" || !data.current_leaf_message_uuid) throw unsupported("The active branch's last-message ID is missing or invalid.");
+    if (typeof data.current_leaf_message_uuid !== "string" || !data.current_leaf_message_uuid) throw unsupported("The active branch's last-message ID is missing or invalid.", "invalid_branch");
     if (data.chat_messages.some(message => typeof message?.uuid !== "string" || !message.uuid)) throw unsupported("A message ID is missing or invalid.");
     const messages = new Map(data.chat_messages.map(message => [message.uuid, message]));
-    if (messages.size !== data.chat_messages.length) throw unsupported("The response contains duplicate message IDs.");
+    if (messages.size !== data.chat_messages.length) throw unsupported("The response contains duplicate message IDs.", "invalid_branch");
     const branch = [];
     const seen = new Set();
     let id = data.current_leaf_message_uuid;
     while (id) {
       const message = messages.get(id);
       if (!message) throw unsupported(branch.length ? "A parent message is missing from the active branch (possibly an unrecognized root marker)." : "The active branch's last message is missing from the response.");
-      if (seen.has(id)) throw unsupported("The active branch's parent links form a cycle.");
-      if (!Object.hasOwn(message, "parent_message_uuid")) throw unsupported("A message in the active branch has no parent_message_uuid field.");
+      if (seen.has(id)) throw unsupported("The active branch's parent links form a cycle.", "branch_cycle");
+      if (!Object.hasOwn(message, "parent_message_uuid")) throw unsupported("A message in the active branch has no parent_message_uuid field.", "parent_missing");
       seen.add(id);
       branch.push(message);
       const parent = message.parent_message_uuid;
       // Claude's root parent can be the all-zero UUID rather than null.
       if (parent === null || parent === "00000000-0000-0000-0000-000000000000" || parent === "00000000-0000-4000-8000-000000000000") break;
-      if (typeof parent !== "string" || !parent) throw unsupported("The active branch has an invalid parent/root marker.");
+      if (typeof parent !== "string" || !parent) throw unsupported("The active branch has an invalid parent/root marker.", "invalid_branch");
       id = parent;
     }
     const turns = branch.reverse().flatMap(message => {
       if (!["human", "assistant"].includes(message.sender)) return [];
       assertComplete(message, "Active-branch message");
       if (message.sender === "assistant" && Object.hasOwn(message, "stop_reason") && message.stop_reason == null) throw unsupported("An assistant turn is still in progress.");
-      if (message.content != null && !Array.isArray(message.content)) throw unsupported("An active-branch message has invalid structured content.");
+      if (message.content != null && !Array.isArray(message.content)) throw unsupported("An active-branch message has invalid structured content.", "invalid_branch");
       const blocks = Array.isArray(message.content) ? message.content : [];
       if ((Array.isArray(message.files) && message.files.length) || (Array.isArray(message.attachments) && message.attachments.some(file => file?.file_type !== "txt" || file.file_name !== ""))) excludedContentTypes.add("uploads");
       if (Array.isArray(message.sync_sources) && message.sync_sources.length) excludedContentTypes.add("other");
@@ -71,8 +77,8 @@
         // no captured text; unlike truncation of an actual text/thinking string.
         if (block?.type === "text" || (block?.type === "thinking" && typeof value === "string" && value.trim())) {
           assertComplete(block, `${block.type} block`);
-          if (Object.hasOwn(block, "stop_timestamp") && block.stop_timestamp === null) throw unsupported("A captured text/thinking block is still in progress.");
-          if (typeof value !== "string") throw unsupported("A text block has no complete text string.");
+          if (Object.hasOwn(block, "stop_timestamp") && block.stop_timestamp === null) throw unsupported("A captured text/thinking block is still in progress.", "text_invalid");
+          if (typeof value !== "string") throw unsupported("A text block has no complete text string.", "text_invalid");
         }
         // Trim only to test emptiness; indentation and line endings are source data.
         return typeof value === "string" && value.trim() ? [value] : [];
@@ -90,8 +96,8 @@
       for (const attachment of attachments) {
         if (attachment?.file_type !== "txt" || attachment.file_name !== "") continue;
         assertComplete(attachment, "Pasted-text attachment");
-        if (typeof attachment.extracted_content !== "string" || (attachment.file_size > 0 && attachment.extracted_content.length === 0)) throw unsupported("A pasted-text attachment is missing its complete extracted_content string.");
-        if (attachment.file_size != null && (!Number.isSafeInteger(attachment.file_size) || attachment.file_size < 0 || new TextEncoder().encode(attachment.extracted_content).length !== attachment.file_size)) throw unsupported("A pasted-text attachment's extracted_content does not match its file_size; completeness cannot be verified.");
+        if (typeof attachment.extracted_content !== "string" || (attachment.file_size > 0 && attachment.extracted_content.length === 0)) throw unsupported("A pasted-text attachment is missing its complete extracted_content string.", "attachment_failed");
+        if (attachment.file_size != null && (!Number.isSafeInteger(attachment.file_size) || attachment.file_size < 0 || new TextEncoder().encode(attachment.extracted_content).length !== attachment.file_size)) throw unsupported("A pasted-text attachment's extracted_content does not match its file_size; completeness cannot be verified.", "attachment_failed");
         const pastedText = attachment.extracted_content;
         // Text overlap is not attachment identity: two cards may intentionally
         // contain the same text, or one may be a substring of another.
@@ -145,7 +151,7 @@
     if (!turns.length) throw captureError("Claude JSON capture found no usable user or assistant text after skipping tools, files, images, and artifacts. Turn JSON capture off to use DOM capture.", "incomplete");
     const text = `Claude conversation:\n\n${turns.map(turn => `${turn.role === "user" ? "User" : "Assistant"}: ${turn.text}`).join("\n\n")}`;
     if (text.length > 500000 || new TextEncoder().encode(text).length > 2000000) {
-      throw captureError("Conversation exceeds the supported 500,000 character / 2 MB limit.", "size_limit");
+      throw captureError("Conversation exceeds the supported 500,000 character / 2 MB limit.", "size_limit", "size_limit");
     }
     return { text, messages: turns, messageTurnCount: turns.length, excludedContentTypes: [...excludedContentTypes].sort() };
   }
@@ -166,7 +172,7 @@
       const receive = event => {
         const reply = event.data;
         if (event.source === window && event.origin === location.origin && reply?.channel === channel
-          && reply.type === "pong" && reply.id === id && reply.version === 7) finish(true);
+          && reply.type === "pong" && reply.id === id && reply.version === 8) finish(true);
       };
       const ping = () => {
         if (settled) return;
@@ -197,13 +203,13 @@
     window.navigation?.addEventListener("navigate", navigated);
     window.addEventListener("popstate", navigated);
     try {
-      if (changed) throw new Error("The Claude conversation changed during capture.");
+      if (changed) throw changedError("The Claude conversation changed during capture.");
       if (!await waitForHook(250)) {
         if (typeof chrome === "undefined" || !chrome.runtime?.sendMessage || !await waitForHook(8000, true)) {
-          throw captureError("Claude JSON hook is not ready. Refresh this chat and try again, or turn JSON capture off.", "unavailable");
+          throw captureError("Claude JSON hook is not ready. Refresh this chat and try again, or turn JSON capture off.", "unavailable", "hook_unavailable", "hook");
         }
       }
-      if (changed || location.pathname !== expectedPath) throw new Error("The Claude conversation changed during capture.");
+      if (changed || location.pathname !== expectedPath) throw changedError("The Claude conversation changed during capture.");
       return await new Promise((resolve, reject) => {
         const id = crypto.randomUUID();
         const cleanup = () => { clearTimeout(timer); window.removeEventListener("message", receive); };
@@ -212,12 +218,13 @@
           if (event.source !== window || event.origin !== location.origin || reply?.channel !== channel || reply.type !== "response" || reply.id !== id) return;
           cleanup();
           try {
-            if (changed || location.pathname !== expectedPath || reply.chat !== chat) throw new Error("The Claude conversation changed during capture.");
-            if (reply.error) throw captureError("Claude JSON capture failed. Refresh this conversation or turn JSON capture off.", reply.error === "busy" ? "unavailable" : reply.captureFailureReason || "request_failed");
+            if (changed || location.pathname !== expectedPath || reply.chat !== chat) throw changedError("The Claude conversation changed during capture.");
+            if (reply.error) throw captureError("Claude JSON capture failed. Refresh this conversation or turn JSON capture off.", reply.error === "busy" ? "unavailable" : reply.captureFailureReason || "request_failed",
+              reply.error === "busy" ? "busy" : reply.captureDetail || "network_error", "history", reply.status);
             resolve(serialize(reply.data, chat));
           } catch (error) { reject(error); }
         };
-        const timer = setTimeout(() => { cleanup(); reject(captureError("Claude JSON capture timed out. Refresh or turn JSON capture off.", "timeout")); }, 17000);
+        const timer = setTimeout(() => { cleanup(); reject(captureError("Claude JSON capture timed out. Refresh or turn JSON capture off.", "timeout", "timeout", "history")); }, 17000);
         window.addEventListener("message", receive);
         window.postMessage({ channel, type: "request", id, chat }, location.origin);
       });

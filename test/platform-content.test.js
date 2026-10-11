@@ -2517,6 +2517,26 @@ test("source failure telemetry keeps the precise destination observation and nev
   assert.doesNotMatch(JSON.stringify(terminal), /PRIVATE|café/);
 });
 
+test("capture failure detail survives terminal source telemetry without the local error message", () => {
+  const sent = [];
+  const hooks = loadPlatformContent([], "chatgpt.com", { runtimeSendMessage: async message => { sent.push(message); return { ok: true }; } });
+  const trace = hooks.beginTransferAttempt("deepseek", "destination tile");
+  trace.diagnostics.last_operation = "capture_json";
+  const error = Object.assign(new Error("PRIVATE account response"), { captureFailureReason: "request_failed", diagnostics: {
+    version: 1, capture_detail: "http_error", capture_request_stage: "session", failure_site: "capture_session", capture_http_status: 401
+  } });
+  hooks.recordTransferFailureDiagnostics(trace, error);
+  trace.marks.push({ label: "failed: PRIVATE account response" });
+  hooks.finishTransferTrace(trace, "capture_failed");
+  hooks.resetRunningFlag();
+  const terminal = sent.filter(message => message.type === "RECORD_TRANSFER_TELEMETRY").at(-1).event;
+  assert.equal(terminal.diagnostics.error_code, "capture_json_failed");
+  assert.equal(terminal.diagnostics.failure_site, "capture_session");
+  assert.equal(terminal.diagnostics.capture_http_status, 401);
+  assert.equal(terminal.diagnostics.diagnostics_revision, 2);
+  assert.doesNotMatch(JSON.stringify(terminal), /PRIVATE|account/);
+});
+
 clockTest("missing destination editor reports its wait, attempts and observed absence", async () => {
   const hooks = loadPlatformContent([], "claude.ai");
   await assert.rejects(hooks.pasteIntoPlatform("A complete carry", "claude"), error => {

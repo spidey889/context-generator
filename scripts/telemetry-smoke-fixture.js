@@ -149,6 +149,7 @@ async function createTelemetrySmokeFixture(repoRoot, databaseEnabled) {
       assert.ok(row.diagnostics, "Installed extension diagnostics must survive the actual relay, Edge and SQL path.");
       assert.deepEqual(row.diagnostics, terminal.diagnostics);
       assert.equal(row.diagnostics.version, 1);
+      assert.equal(row.diagnostics.diagnostics_revision, 2);
       assert.equal(row.diagnostics.paste_populated, true);
       assert.equal(row.diagnostics.message_reply, "ack_success");
       if (row.destination_platform === "claude") {
@@ -174,6 +175,22 @@ async function createTelemetrySmokeFixture(repoRoot, databaseEnabled) {
       assert.deepEqual({ user_no: row.user_no, username: row.username }, { user_no, username });
       assert.deepEqual(counts, { total: 1, today: 1, failed: 0 });
       assert.equal((await database.query("select count(*)::int as count from public.transfers where summary_verified")).rows[0].count, 1);
+    },
+    async verifyFailureOutcome(terminal) {
+      if (!databaseEnabled) return;
+      await rpcChain;
+      const row = (await database.query("select status,failure_reason,summary_verified,diagnostics from public.transfers where attempt_id=$1", [terminal.attempt_id])).rows[0];
+      assert.equal(row.status, "failed");
+      assert.equal(row.failure_reason, "capture_failed");
+      assert.equal(row.summary_verified, false);
+      assert.deepEqual(row.diagnostics, terminal.diagnostics);
+      assert.equal(row.diagnostics.error_code, "capture_json_failed");
+      assert.equal(row.diagnostics.diagnostics_revision, 2);
+      assert.ok(row.diagnostics.capture_detail);
+      assert.notEqual(row.diagnostics.failure_site, "unknown_error");
+      assert.doesNotMatch(JSON.stringify(row.diagnostics), /SESSION_TOKEN|SIGNED|smoke-account|PRIVATE|chatgpt\.com/);
+      const counts = (await database.query("select lifetime_summaries::int as total,today_summaries::int as today,today_failed_attempts::int as failed from public.users where install_id=$1", [terminal.install_id])).rows[0];
+      assert.deepEqual(counts, { total: 0, today: 0, failed: 1 });
     },
     async close() {
       for (const [name, value] of previousEnvironment) {
