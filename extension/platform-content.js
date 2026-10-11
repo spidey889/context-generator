@@ -7968,7 +7968,7 @@
       for (let index = 0; index < 3; index += 1) {
         const dot = document.createElement("span");
         dot.className = "context-generator-summary-activity-dot";
-        dot.textContent = ".";
+        // CSS circles keep activity independent of the headline font's punctuation metrics.
         summaryActivity.appendChild(dot);
       }
       statusText.appendChild(summaryActivity);
@@ -8041,9 +8041,9 @@
             from{opacity:0.36;transform:translate3d(0,5px,0)}
             to{opacity:1;transform:translate3d(0,0,0)}
           }
-          @keyframes contextGeneratorSummaryDotHop{
-            0%,48%,100%{opacity:0.54;transform:translate3d(0,0,0)}
-            18%{opacity:1;transform:translate3d(0,-3px,0)}
+          @keyframes contextGeneratorSummaryDotWave{
+            0%,60%,100%{opacity:0.38;transform:translate3d(0,0,0)}
+            30%{opacity:1;transform:translate3d(0,-2px,0)}
           }
           @keyframes contextGeneratorStageHalo{
             0%,100%{opacity:0.22;transform:scale(0.9)}
@@ -8092,13 +8092,12 @@
             display:none;
             flex:0 0 auto;
             position:relative;
-            top:1px;
-            margin-left:1px;
-            align-items:baseline;
-            gap:0;
-            color:#f2f0f6 !important;
-            font:inherit;
-            line-height:inherit;
+            margin-left:12px;
+            align-items:center;
+            align-self:center;
+            height:16px;
+            gap:5px;
+            color:#C8B6E9 !important;
             letter-spacing:0;
             pointer-events:none;
           }
@@ -8116,14 +8115,17 @@
           }
           #context-generator-text .context-generator-summary-activity-dot{
             display:inline-block;
-            color:inherit !important;
-            opacity:0.54;
+            width:5px;
+            height:5px;
+            border-radius:50%;
+            background:#C8B6E9 !important;
+            opacity:0.38;
             transform:translate3d(0,0,0);
-            animation:contextGeneratorSummaryDotHop 1800ms cubic-bezier(0.45,0,0.55,1) infinite;
+            animation:contextGeneratorSummaryDotWave 1500ms cubic-bezier(0.45,0,0.55,1) infinite;
             will-change:transform,opacity;
           }
-          #context-generator-text .context-generator-summary-activity-dot:nth-child(2){animation-delay:220ms}
-          #context-generator-text .context-generator-summary-activity-dot:nth-child(3){animation-delay:440ms}
+          #context-generator-text .context-generator-summary-activity-dot:nth-child(2){animation-delay:150ms}
+          #context-generator-text .context-generator-summary-activity-dot:nth-child(3){animation-delay:300ms}
           #context-generator-handoff-progress .context-generator-handoff-stage{
             position:relative;
             min-width:0;
