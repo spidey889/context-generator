@@ -1123,6 +1123,7 @@
         const response = await notifyBackground({
           type: "SUMMARIZE_WITH_BACKEND",
           conversation: conversationText,
+          ...(trace?.conversationMessages ? { messages: trace.conversationMessages, platform: currentPlatform.name } : {}),
           transferId: trace?.id || null,
           deadlineAt: trace?.deadlineAt
         });
@@ -7717,6 +7718,9 @@
         try {
           const capture = await takePickerJsonCapture(claudeJsonPath || chatGptJsonPath || geminiJsonPath || deepseekJsonPath || grokJsonUrl);
           checkTransferDeadline(trace);
+          // Boundaries come from the native serializer, never from role labels
+          // that a user can also quote inside a message. Keep this source-local.
+          trace.conversationMessages = capture.messages;
           conversationText = createConversationCapture(capture.text, {
             method: `${currentPlatform.id}-json`, messageTurnCount: capture.messageTurnCount,
             usefulTurnCount: capture.messageTurnCount, candidateTurnCount: capture.messageTurnCount,

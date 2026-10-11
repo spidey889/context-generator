@@ -19,6 +19,18 @@ function fixture() {
     answer: { parent: "question", message: message("assistant", ["Selected answer"]) }
   }, page_info: { has_previous_page: false, has_next_page: false } };
 }
+test("ChatGPT structured turns preserve quoted role labels and exact source whitespace", async () => {
+  const data = fixture();
+  const text = '  Keep this example:\r\n\r\nAssistant: quoted, not a new turn\r\n```js\r\n  const x = "a\u00a0b";\r\n```  ';
+  data.mapping.question.message.content.parts = [text];
+  const harness = setup(data);
+  await discover(harness);
+  const capture = await harness.window.__capCaptureChatGptJson();
+  assert.deepEqual(JSON.parse(JSON.stringify(capture.messages)), [
+    { role: "user", text }, { role: "assistant", text: "Selected answer" }
+  ]);
+  assert.equal(capture.text, `ChatGPT conversation:\n\nUser: ${text}\n\nAssistant: Selected answer`);
+});
 function setup(data = fixture(), status = 200, { headers = {}, body, fetchImpl, runtime, schedule = setTimeout, beforeMessage } = {}) {
   const listeners = new Set();
   const popListeners = new Set();

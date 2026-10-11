@@ -224,7 +224,9 @@ async function handler(req, res) {
   }
   try {
     controller.signal.throwIfAborted();
-    return await handleSummary(validation.conversation, responseChannel, requestContext);
+    return await handleSummary(validation.messages ? validation.conversation.trim() : validation.conversation, responseChannel, {
+      ...requestContext, messages: validation.messages, platform: validation.platform
+    });
   } catch (error) {
     if (!controller.signal.aborted) throw error;
   } finally {
@@ -292,6 +294,8 @@ async function handleSummary(conversation, responseChannel, requestContext = {})
     logModelSelection(modelSelection);
     const providerResult = await createSummaryWithFallback({
       conversation,
+      messages: requestContext.messages,
+      platform: requestContext.platform,
       profile: summaryProfile,
       geminiApiKey,
       mistralApiKey,
@@ -454,9 +458,9 @@ function getEnabledOpenRouterModels() {
     : process.env[enabledEnv] === "true").map(({ model }) => model);
 }
 
-async function createSummaryWithFallback({ conversation, profile, geminiApiKey, mistralApiKey, openrouterApiKey, requestContext = {} }) {
-  const fallbackMessages = getInitialSummaryMessages(conversation, profile);
-  const geminiMessages = getInitialSummaryMessages(conversation, profile, { plainHeader: true });
+async function createSummaryWithFallback({ conversation, messages, platform, profile, geminiApiKey, mistralApiKey, openrouterApiKey, requestContext = {} }) {
+  const fallbackMessages = getInitialSummaryMessages(conversation, profile, { messages, platform });
+  const geminiMessages = getInitialSummaryMessages(conversation, profile, { messages, platform, plainHeader: true });
   const routes = [];
   if (openrouterApiKey) {
     for (const model of getEnabledOpenRouterModels()) {
@@ -791,9 +795,9 @@ function getInitialSummaryMessages(conversation, profile, options = {}) {
     {
       role: "user",
       content: JSON.stringify({
-        schema: "cap-context-conversation-v1",
+        schema: options.messages ? "cap-context-conversation-v2" : "cap-context-conversation-v1",
         dataType: "untrusted-conversation-transcript",
-        conversation
+        ...(options.messages ? { platform: options.platform, messages: options.messages } : { conversation })
       }),
     },
   ];

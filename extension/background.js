@@ -891,7 +891,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
 
   if (message?.type === "SUMMARIZE_WITH_BACKEND") {
-    summarizeWithBackend(message.conversation, message.transferId, message.deadlineAt, sender?.tab)
+    summarizeWithBackend(message.conversation, message.transferId, message.deadlineAt, sender?.tab, message.messages, message.platform)
       .then((result) => sendResponse({ ok: true, summary: result.summary, timing: result.timing }))
       .catch((error) => {
         if (error.code !== "user_cancelled") {
@@ -1035,7 +1035,7 @@ async function readSummaryResponse(response, checkDeadline, onNearEnd = () => {}
   }
 }
 
-async function summarizeWithBackend(conversation, transferId = null, deadlineAt = null, sourceTab = null) {
+async function summarizeWithBackend(conversation, transferId = null, deadlineAt = null, sourceTab = null, messages = null, platform = null) {
   const operation = getTransferOperation(transferId, sourceTab, deadlineAt);
   checkTransferDeadline(deadlineAt);
   await checkTransferSource(operation);
@@ -1044,17 +1044,21 @@ async function summarizeWithBackend(conversation, transferId = null, deadlineAt 
     throw new Error("AI conversation text could not be captured.");
   }
 
-  const cachedEntry = getCachedSummaryEntry(conversationText);
+  const payload = messages ? { platform, messages } : { conversation: conversationText };
+  // Identical flattened text can represent different native message boundaries.
+  // Cache and share only requests with the same complete model input.
+  const cacheKey = JSON.stringify(payload);
+  const cachedEntry = getCachedSummaryEntry(cacheKey);
   if (cachedEntry) {
     const cachedResult = createCacheHitSummaryResult(cachedEntry);
     if (cachedResult) {
       recordKnownTransferTelemetryStage(transferId, "summary_response_started");
       return cachedResult;
     }
-    summaryCache.delete(conversationText);
+    summaryCache.delete(cacheKey);
   }
 
-  let entry = summaryInflight.get(conversationText);
+  let entry = summaryInflight.get(cacheKey);
   if (!entry) {
     entry = { controller: new AbortController(), waiters: 0, settled: false, nearEnd: false, progressListeners: new Set() };
     const ownedEntry = entry;
@@ -1062,16 +1066,16 @@ async function summarizeWithBackend(conversation, transferId = null, deadlineAt 
       if (ownedEntry.nearEnd === nearEnd) return;
       ownedEntry.nearEnd = nearEnd;
       if (nearEnd) for (const listener of ownedEntry.progressListeners) listener();
-    })
+    }, payload)
       .then(result => {
         ownedEntry.controller.signal.throwIfAborted();
-        cacheSummaryResult(conversationText, result);
+        cacheSummaryResult(cacheKey, result);
         return result;
       }).finally(() => {
         ownedEntry.settled = true;
-        if (summaryInflight.get(conversationText) === ownedEntry) summaryInflight.delete(conversationText);
+        if (summaryInflight.get(cacheKey) === ownedEntry) summaryInflight.delete(cacheKey);
       });
-    summaryInflight.set(conversationText, entry);
+    summaryInflight.set(cacheKey, entry);
   }
   entry.waiters += 1;
   const reportNearEnd = () => {
@@ -1107,12 +1111,12 @@ async function summarizeWithBackend(conversation, transferId = null, deadlineAt 
     entry.waiters -= 1;
     if (!entry.waiters && !entry.settled) {
       entry.controller.abort(createTransferCancelledError());
-      if (summaryInflight.get(conversationText) === entry) summaryInflight.delete(conversationText);
+      if (summaryInflight.get(cacheKey) === entry) summaryInflight.delete(cacheKey);
     }
   }
 }
 
-async function fetchSummaryFromBackend(conversationText, transferId = null, deadlineAt = null, requestSignal = null, onNearEnd = () => {}) {
+async function fetchSummaryFromBackend(conversationText, transferId = null, deadlineAt = null, requestSignal = null, onNearEnd = () => {}, payload = { conversation: conversationText }) {
   checkTransferDeadline(deadlineAt);
   const summaryStartedAt = nowMs();
   const diagnostics = { version: 1, last_operation: "summary_request" };
@@ -1154,7 +1158,7 @@ async function fetchSummaryFromBackend(conversationText, transferId = null, dead
         "Accept": "application/x-ndjson",
         "X-Cap-Context-Client": SUMMARY_CLIENT_HEADER
       },
-      body: JSON.stringify({ conversation: conversationText, ...(telemetry ? { telemetry } : {}) }),
+      body: JSON.stringify({ ...payload, ...(telemetry ? { telemetry } : {}) }),
       signal: controller.signal
     });
     responseReceived = true;

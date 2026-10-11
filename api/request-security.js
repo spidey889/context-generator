@@ -104,8 +104,10 @@ function validateSummarizeRequest(req) {
   }
 
   const keys = Object.keys(body);
-  if (!keys.includes("conversation") || keys.some(key => !["conversation", "telemetry"].includes(key))) {
-    return invalid(400, "invalid_schema", "JSON body must contain conversation and optionally telemetry");
+  const structured = Object.hasOwn(body, "messages");
+  if (structured === Object.hasOwn(body, "conversation")
+    || keys.some(key => !(structured ? ["messages", "platform", "telemetry"] : ["conversation", "telemetry"]).includes(key))) {
+    return invalid(400, "invalid_schema", "JSON body must contain conversation or platform/messages, and optionally telemetry");
   }
 
   let telemetry = null;
@@ -116,7 +118,19 @@ function validateSummarizeRequest(req) {
     }
   }
 
-  const conversation = body.conversation;
+  let conversation = body.conversation;
+  if (structured) {
+    if (!["ChatGPT", "Claude", "Gemini", "Grok", "DeepSeek"].includes(body.platform)
+      || !Array.isArray(body.messages) || !body.messages.length
+      || body.messages.some(turn => !turn || typeof turn !== "object" || Array.isArray(turn)
+        || Object.keys(turn).length !== 2 || !Object.hasOwn(turn, "role") || !Object.hasOwn(turn, "text")
+        || !["user", "assistant"].includes(turn.role) || typeof turn.text !== "string" || !turn.text.trim())) {
+      return invalid(400, "invalid_schema", "messages must contain user/assistant text turns and a supported platform");
+    }
+    // Reconstruct only for unchanged size/profile accounting and exact recovery.
+    // The provider receives the original structured turns, not parsed role labels.
+    conversation = `${body.platform} conversation:\n\n${body.messages.map(turn => `${turn.role === "user" ? "User" : "Assistant"}: ${turn.text}`).join("\n\n")}`;
+  }
   if (typeof conversation !== "string") {
     return invalid(400, "invalid_schema", "conversation must be a string");
   }
@@ -134,7 +148,7 @@ function validateSummarizeRequest(req) {
     return invalid(413, "conversation_too_large", "Conversation exceeds the supported encoded size");
   }
 
-  return { ok: true, conversation, requestBytes, ...(telemetry ? { telemetry } : {}) };
+  return { ok: true, conversation, requestBytes, ...(structured ? { messages: body.messages, platform: body.platform } : {}), ...(telemetry ? { telemetry } : {}) };
 }
 
 function consumeRateLimit(req, now = Date.now()) {

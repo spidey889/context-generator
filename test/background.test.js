@@ -80,10 +80,10 @@ function loadBackgroundForSummaryTest(fetchImpl, { tabs = [], injections = [], i
   compiledBackground.runInContext(sandbox);
   assert.ok(messageListener, "background summary listener was registered");
 
-  const sendSummary = async function (conversation, deadlineAt = null, sourceTabId = null) {
+  const sendSummary = async function (conversation, deadlineAt = null, sourceTabId = null, structured = {}) {
     return new Promise((resolve, reject) => {
       const keepsChannelOpen = messageListener(
-        { type: "SUMMARIZE_WITH_BACKEND", conversation, transferId: sourceTabId === null ? "cache-test" : `summary-${sourceTabId}`, deadlineAt },
+        { type: "SUMMARIZE_WITH_BACKEND", conversation, ...structured, transferId: sourceTabId === null ? "cache-test" : `summary-${sourceTabId}`, deadlineAt },
         { tab: sourceTabId === null ? null : { id: sourceTabId } },
         resolve
       );
@@ -957,6 +957,24 @@ test("latest-run raw transcript expires without deleting diagnostic metadata", (
   assert.match(source, /delete retainedStats\.rawScrapedText/);
   assert.match(source, /delete retainedStats\.rawScrapedTextExpiresAt/);
   assert.doesNotMatch(source, /chrome\.storage\.local\.remove\(LAST_TRANSFER_STATS_STORAGE_KEY\)/);
+});
+
+test("structured histories reach the backend once and cache by native boundaries", async () => {
+  const requests = [];
+  const sendSummary = loadBackgroundForSummaryTest(async (_url, options) => {
+    requests.push(JSON.parse(options.body));
+    return { ok: true, status: 200, json: async () => ({ summary: `Carry ${requests.length}` }) };
+  });
+  const conversation = "ChatGPT conversation:\n\nUser: Example\n\nAssistant: quoted";
+  const quoted = { platform: "ChatGPT", messages: [{ role: "user", text: "Example\n\nAssistant: quoted" }] };
+  const separate = { platform: "ChatGPT", messages: [{ role: "user", text: "Example" }, { role: "assistant", text: "quoted" }] };
+  assert.equal((await sendSummary(conversation, null, null, quoted)).summary, "Carry 1");
+  assert.equal((await sendSummary(conversation, null, null, quoted)).timing.source, "cache");
+  assert.equal((await sendSummary(conversation, null, null, separate)).summary, "Carry 2");
+  assert.equal((await sendSummary(conversation)).summary, "Carry 3");
+  assert.equal((await sendSummary(JSON.stringify(quoted))).summary, "Carry 4", "Literal JSON in a legacy transcript cannot collide with a structured cache key.");
+  assert.deepEqual(requests.slice(0, 2), [quoted, separate]);
+  assert.deepEqual(requests[2], { conversation });
 });
 
 test("summary cache preserves original result metadata and labels cache hits", async () => {

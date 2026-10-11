@@ -115,14 +115,14 @@
       if (role === "tool") {
         const output = message.metadata?.is_visually_hidden_from_conversation ? null : pythonResult(message, branch[index - 1]);
         if (output === null) { excludedContentTypes.add("tools"); return []; }
-        return [`Assistant: Python result:\n\n${output}`];
+        return [{ role: "assistant", text: `Python result:\n\n${output}` }];
       }
       if (!["user", "assistant"].includes(role) || message.metadata?.is_visually_hidden_from_conversation) return [];
       if (role === "user" && Array.isArray(message.metadata?.attachments) && message.metadata.attachments.some(file => file?.is_big_paste !== true || file.mime_type !== "text/plain")) excludedContentTypes.add("uploads");
       if (message.recipient && message.recipient !== "all") {
         const parts = role === "assistant" ? canvasParts(message, branch[index + 1]) : [];
         if (!parts.length) excludedContentTypes.add("tools");
-        return parts.length ? [`Assistant: ${parts.join("\n\n")}`] : [];
+        return parts.length ? [{ role: "assistant", text: parts.join("\n\n") }] : [];
       }
       const attachmentLabels = role === "user" && Array.isArray(message.metadata?.attachments)
         ? message.metadata.attachments.flatMap(file => file?.is_big_paste !== true && typeof file?.name === "string" && file.name.trim()
@@ -134,7 +134,7 @@
         assertComplete(message, "Own-turn message");
         assertComplete(message.metadata, "Own-turn metadata");
         assertComplete(content, "Own-turn content");
-        return [`User: ${attachmentLabels.join("\n\n")}`];
+        return [{ role: "user", text: attachmentLabels.join("\n\n") }];
       }
       assertComplete(message, "Own-turn message");
       assertComplete(message.metadata, "Own-turn metadata");
@@ -218,12 +218,12 @@
       }
       // Only explicit upload names; never serialize signed pointers or nested metadata.
       parts.push(...attachmentLabels);
-      return parts.length ? [`${role === "user" ? "User" : "Assistant"}: ${parts.join("\n\n")}`] : [];
+      return parts.length ? [{ role, text: parts.join("\n\n") }] : [];
     });
     if (!turns.length) throw blocked("No usable user or assistant text remains after skipping tools, files, images, and artifacts.");
-    const text = `ChatGPT conversation:\n\n${turns.join("\n\n")}`;
+    const text = `ChatGPT conversation:\n\n${turns.map(turn => `${turn.role === "user" ? "User" : "Assistant"}: ${turn.text}`).join("\n\n")}`;
     if (text.length > 500000 || new TextEncoder().encode(text).length > 2000000) throw captureError("This chat is too long to transfer (limit: 500,000 characters). Try a shorter chat.", "size_limit");
-    return { text, messageTurnCount: turns.length, excludedContentTypes: [...excludedContentTypes].sort() };
+    return { text, messages: turns, messageTurnCount: turns.length, excludedContentTypes: [...excludedContentTypes].sort() };
   }
 
   function waitForHook(timeoutMs, install = false) {

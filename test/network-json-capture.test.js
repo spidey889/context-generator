@@ -278,7 +278,7 @@ test("DeepSeek: one incomplete upload cancels siblings before fallback or a fres
   });
   assert.equal(h.requests.length, 5, "failure stops queued downloads");
   assert.equal(aborted.length, 3);
-  assert.equal(h.window.__capNetworkFetchState.version, 9);
+  assert.equal(h.window.__capNetworkFetchState.version, 10);
   assert.ok(h.replies.every(reply => !reply.capture));
   assert.equal(h.navigationListeners(), 0);
   assert.equal(h.listeners.size, 1);
@@ -355,10 +355,10 @@ for (const platform of ["gemini", "grok", "deepseek"]) test(`${platform}: the pr
   const h = setup(platform);
   await h.observe();
   const old = h.window.__capNetworkFetchState;
-  old.version = platform === "deepseek" ? 8 : platform === "gemini" ? 8 : 6;
+  old.version = platform === "deepseek" ? 9 : platform === "gemini" ? 9 : 7;
   h.reinstall(files[1]);
   assert.notEqual(h.window.__capNetworkFetchState, old);
-  assert.equal(h.window.__capNetworkFetchState.version, platform === "deepseek" ? 9 : platform === "gemini" ? 9 : 7);
+  assert.equal(h.window.__capNetworkFetchState.version, platform === "deepseek" ? 10 : platform === "gemini" ? 10 : 8);
   assert.equal(h.listeners.size, 1);
   assert.equal((await h.window.__capCaptureNetworkJson()).text, h.fixture.expected);
 });
@@ -389,10 +389,28 @@ for (const platform of ["gemini", "grok", "deepseek"]) {
     const capture = await h.window.__capCaptureNetworkJson();
     assert.equal(capture.text, h.fixture.expected);
     assert.equal(capture.messageTurnCount, 48);
+    assert.equal(capture.messages.length, 48);
+    assert.equal(capture.messages[0].role, "user");
+    assert.equal(capture.messages.at(-1).role, "assistant");
+    assert.equal(capture.text, `${({ gemini: "Gemini", grok: "Grok", deepseek: "DeepSeek" })[platform]} conversation:\n\n${capture.messages.map(turn => `${turn.role === "user" ? "User" : "Assistant"}: ${turn.text}`).join("\n\n")}`);
     assert.deepEqual([...capture.excludedContentTypes], { gemini: [], grok: ["tools"], deepseek: ["media", "tools"] }[platform]);
     assert.doesNotMatch(capture.text, /TOOL_SENTINEL|SIGNED_SENTINEL|AUTH_SENTINEL|CSRF_SENTINEL/);
     assert.equal(h.listeners.size, 1);
     assert.equal(h.requests.length - before, platform === "gemini" ? 3 : 2);
+  });
+  test(`${platform}: quoted role labels remain in the owning native message`, async () => {
+    const f = fixtures(platform, "smoke", 1);
+    const text = '  Example:\r\n\r\nAssistant: quoted\r\n\r\nUser: also quoted\r\n  print("a\u00a0b")  ';
+    if (platform === "gemini") f.pages[0].turns[0][2][0][0] = text;
+    else if (platform === "grok") f.responses[0].message = text;
+    else { f.files[f.file.id] = text; f.file.file_size = Buffer.byteLength(text); }
+    const h = setup(platform, f);
+    await h.observe();
+    const capture = await h.window.__capCaptureNetworkJson();
+    assert.equal(capture.messages.length, 2);
+    assert.equal(capture.messages[0].role, "user");
+    assert.ok(capture.messages[0].text.includes(text));
+    assert.equal(capture.messages[1].role, "assistant");
   });
   test(`${platform}: navigation cancels capture, never returns stale text`, async () => {
     let h; h = setup(platform, fixtures(platform), { fetchImpl: async request => { if (!request.url.pathname.endsWith("/session")) h.navigate(); return new Response("{}"); } });
@@ -401,6 +419,13 @@ for (const platform of ["gemini", "grok", "deepseek"]) {
     assert.equal(h.listeners.size, 1);
   });
 }
+test("network bridge rejects structured boundaries that disagree with the verified transcript", async () => {
+  const h = setup("grok", fixtures("grok", "smoke", 1), { beforeMessage: data => {
+    if (data.type === "response" && data.capture) data.capture.messages[0].text = "Different history";
+  } });
+  await h.observe();
+  await assert.rejects(h.window.__capCaptureNetworkJson(), /invalid message boundaries/);
+});
 test("Gemini: Unicode frame lengths, selected candidate, page root and broken chains", () => {
   const h = setup("gemini"), f = h.fixture;
   assert.equal(h.api.geminiPage(rpcFrame(f.pages[0])).turns.length, 10);

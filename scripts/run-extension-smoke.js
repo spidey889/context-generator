@@ -8,6 +8,7 @@ const { spawn } = require("node:child_process");
 const { fixtures: networkFixtures, rpcFrame } = require("../test/network-json-fixtures");
 const { createTelemetrySmokeFixture } = require("./telemetry-smoke-fixture");
 const { saveSmokeFailure } = require("./smoke-failure-artifacts");
+const { validateSummarizeRequest } = require("../api/request-security");
 
 const REPO_ROOT = path.resolve(__dirname, "..");
 const SOURCE_SENTINEL = "SMOKE_USER_SENTINEL: preserve the deployment checklist.";
@@ -673,6 +674,8 @@ async function startFixtureServer() {
       let rawBody = "";
       for await (const chunk of request) rawBody += chunk;
       state.summaryRequests.push(JSON.parse(rawBody));
+      const validated = validateSummarizeRequest({ headers: request.headers, body: rawBody });
+      assert.equal(validated.ok, true, "Installed extension must satisfy the actual backend input contract.");
       if (EARLY_HANDOFF_SMOKE && !EARLY_HANDOFF_STREAM_SMOKE) {
         state.summaryPending = true;
         await new Promise(resolve => setTimeout(resolve, 21000));
@@ -691,7 +694,7 @@ async function startFixtureServer() {
       const payload = {
         summary: SUMMARY_TEXT,
         ...receipt,
-        timing: { inputChars: state.summaryRequests.at(-1)?.conversation?.length || 0, servedBy: "smoke-stub", model: receipt.summaryModel }
+        timing: { inputChars: validated.conversation.trim().length, servedBy: "smoke-stub", model: receipt.summaryModel }
       };
       if (streaming) {
         response.write(`${JSON.stringify({ type: "reset" })}\n`);
@@ -2282,7 +2285,8 @@ async function run() {
       return;
     }
     await waitFor(() => state.summaryRequests.length === 1, "one summary backend request");
-    const capturedConversation = state.summaryRequests[0]?.conversation || "";
+    const summaryInput = state.summaryRequests[0];
+    const capturedConversation = validateSummarizeRequest({ headers: { "content-type": "application/json" }, body: summaryInput }).conversation;
     if (JSON_SOURCE === "chatgpt") {
       const sidebar = await sourceSession.evaluate('(() => { const list = document.getElementById("cap-smoke-chat-history"); return { top:list.scrollTop,calls:list.capScrollCalls }; })()');
       assert.deepEqual(sidebar, { top:420,calls:0 }, "JSON success must leave the history sidebar untouched.");
@@ -2304,6 +2308,10 @@ async function run() {
       }
       process.stdout.write(`✓ ${JSON_SOURCE} failed fast capture fell back to DOM within the same transfer.\n`);
     } else if (JSON_CAPTURE_SMOKE) {
+      assert.equal(summaryInput.conversation, undefined, "JSON capture sends one structured history, without a duplicate transcript.");
+      assert.ok(summaryInput.messages.length >= 2);
+      assert.equal(summaryInput.messages[0].role, "user");
+      assert.equal(summaryInput.messages.at(-1).role, "assistant");
       assert.match(capturedConversation, new RegExp(`^${({claude:"Claude",chatgpt:"ChatGPT",gemini:"Gemini",grok:"Grok",deepseek:"DeepSeek"})[JSON_SOURCE]} conversation:`));
       assert.match(capturedConversation, /JSON_ONLY_SENTINEL/);
       if (JSON_SOURCE === "claude") {

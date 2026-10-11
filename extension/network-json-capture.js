@@ -14,7 +14,7 @@
     const finish = ready => { if (settled) return; settled = true; clearTimeout(timer); clearTimeout(poll); window.removeEventListener("message", receive); resolve(ready); };
     const receive = event => {
       const reply = event.data;
-      if (event.source === window && event.origin === location.origin && reply?.channel === channel && reply.platform === platform && reply.type === "pong" && reply.id === id && reply.version === (platform === "deepseek" ? 9 : platform === "gemini" ? 9 : 7)) finish(true);
+      if (event.source === window && event.origin === location.origin && reply?.channel === channel && reply.platform === platform && reply.type === "pong" && reply.id === id && reply.version === (platform === "deepseek" ? 10 : platform === "gemini" ? 10 : 8)) finish(true);
     };
     const ping = () => { if (settled) return; window.postMessage({ channel, platform, type: "ping", id }, location.origin); poll = setTimeout(ping, 100); };
     const timer = setTimeout(() => finish(false), timeout);
@@ -54,6 +54,12 @@
           if (reply.error) return reject(captureError(reply.error === "size" ? "This chat is too long to transfer (limit: 500,000 characters). Try a shorter chat." : `Fast capture failed: ${reply.error} Turn off the lightning button to use standard capture.`, reply.captureFailureReason));
           const capture = reply.capture;
           if (typeof capture?.text !== "string" || !capture.text.trim() || !Number.isSafeInteger(capture.messageTurnCount) || capture.messageTurnCount < 1 || capture.text.length > 500000 || new TextEncoder().encode(capture.text).length > 2000000) return reject(captureError("Fast capture returned an invalid or incomplete conversation.", "incomplete"));
+          const name = { gemini: "Gemini", grok: "Grok", deepseek: "DeepSeek" }[platform];
+          // MAIN owns the native adapter. Verify both views agree before accepting
+          // its message boundaries; never infer roles from flattened text.
+          if (!Array.isArray(capture.messages) || capture.messages.length !== capture.messageTurnCount
+            || capture.messages.some(turn => !turn || !["user", "assistant"].includes(turn.role) || typeof turn.text !== "string" || !turn.text.trim())
+            || capture.text !== `${name} conversation:\n\n${capture.messages.map(turn => `${turn.role === "user" ? "User" : "Assistant"}: ${turn.text}`).join("\n\n")}`) return reject(captureError("Fast capture returned invalid message boundaries.", "incomplete"));
           resolve(capture);
         };
         const timer = setTimeout(() => { cleanup(); reject(captureError("Fast capture timed out. Refresh this chat or turn off the lightning button.", "timeout")); }, 27000);

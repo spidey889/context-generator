@@ -20,6 +20,16 @@ function fixture() {
     ]
   };
 }
+test("Claude structured turns preserve quoted role labels, thinking and source whitespace", async () => {
+  const data = fixture();
+  const text = '  Keep this example:\r\n\r\nAssistant: quoted, not a new turn\r\n```js\r\n  const x = "a\u00a0b";\r\n```  ';
+  data.chat_messages[0].content[0].text = text;
+  const capture = await setup(data, { resources: [endpoint] }).window.__capCaptureClaudeJson();
+  assert.deepEqual(JSON.parse(JSON.stringify(capture.messages)), [
+    { role: "user", text }, { role: "assistant", text: "Private reasoning\n\nSelected answer" }
+  ]);
+  assert.equal(capture.text, `Claude conversation:\n\nUser: ${text}\n\nAssistant: Private reasoning\n\nSelected answer`);
+});
 function setup(data = fixture(), { status = 200, headers = {}, body, resources = [], fetchImpl, runtime, beforeMessage } = {}) {
   const listeners = new Set();
   const navigationListeners = new Set();

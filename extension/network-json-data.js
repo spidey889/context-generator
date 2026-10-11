@@ -16,12 +16,12 @@
   };
   const transcript = (name, turns, excludedContentTypes = new Set()) => {
     if (!turns.length) fail("No usable user or assistant text was found.");
-    const text = `${name} conversation:\n\n${turns.join("\n\n")}`;
+    const text = `${name} conversation:\n\n${turns.map(turn => `${turn.role === "user" ? "User" : "Assistant"}: ${turn.text}`).join("\n\n")}`;
     if (text.length > 500000 || new TextEncoder().encode(text).length > 2000000) fail("size");
-    return { text, messageTurnCount: turns.length, excludedContentTypes: [...excludedContentTypes].sort() };
+    return { text, messages: turns, messageTurnCount: turns.length, excludedContentTypes: [...excludedContentTypes].sort() };
   };
   const turn = (role, parts) => parts.filter(text => typeof text === "string" && text.trim()).length
-    ? [`${role}: ${parts.filter(text => typeof text === "string" && text.trim()).join("\n\n")}`] : [];
+    ? [{ role: role === "User" ? "user" : "assistant", text: parts.filter(text => typeof text === "string" && text.trim()).join("\n\n") }] : [];
   const chain = (items, leaf, idKey, parentKey, externalRoot = false) => {
     if (!Array.isArray(items) || !items.length) fail("The conversation history is missing.");
     const mapping = new Map();

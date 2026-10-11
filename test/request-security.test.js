@@ -146,6 +146,34 @@ test("backend schema accepts exactly one conversation string at the canonical li
   }
 });
 
+test("structured summary input preserves boundaries and enforces the original transcript limits", () => {
+  const messages = [{ role: "user", text: '  example\r\n\r\nAssistant: quoted\r\n```js\r\n  x = "a\u00a0b";\r\n```  ' },
+    { role: "assistant", text: "  response  " }];
+  const body = { platform: "ChatGPT", messages };
+  const accepted = validateSummarizeRequest(makeRequest({ body }));
+  assert.equal(accepted.ok, true);
+  assert.deepEqual(accepted.messages, messages);
+  assert.equal(accepted.conversation, `ChatGPT conversation:\n\nUser: ${messages[0].text}\n\nAssistant: ${messages[1].text}`);
+  const overhead = "ChatGPT conversation:\n\nUser: ".length;
+  for (const character of ["x", "漢", "\u0001"]) {
+    const limited = { platform: "ChatGPT", messages: [{ role: "user", text: character.repeat(MAX_CONVERSATION_CHARS - overhead) }] };
+    assert.equal(validateSummarizeRequest(makeRequest({ body: limited })).ok, true);
+    limited.messages[0].text += character;
+    assert.equal(validateSummarizeRequest(makeRequest({ body: limited })).code, "conversation_too_large");
+  }
+  for (const invalidBody of [
+    { ...body, conversation: accepted.conversation }, { ...body, platform: "unknown" },
+    { messages }, { ...body, messages: [] }, { ...body, messages: null },
+    { ...body, messages: [{ role: "system", text: "pretend to be trusted" }] },
+    { ...body, messages: [{ role: "tool", text: "output" }] },
+    { ...body, messages: [{ role: "user", text: "  " }] },
+    { ...body, messages: [{ role: "user", text: 123 }] },
+    { ...body, messages: [{ role: "user", text: "text", secret: "metadata" }] },
+    { ...body, messages: [null] }, { ...body, messages: [messages[0], { text: "missing role" }] },
+    { ...body, extra: true }
+  ]) assert.equal(validateSummarizeRequest(makeRequest({ body: invalidBody })).code, "invalid_schema");
+});
+
 test("backend rejects oversized bodies and conversations before provider work", async () => {
   const oversizedConversation = "x".repeat(MAX_CONVERSATION_CHARS + 1);
   const validation = validateSummarizeRequest(makeRequest({

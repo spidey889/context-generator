@@ -140,14 +140,14 @@
         }
       }
       if (!parts.length) return [];
-      return [(message.sender === "human" ? "User" : "Assistant") + ": " + parts.join("\n\n")];
+      return [{ role: message.sender === "human" ? "user" : "assistant", text: parts.join("\n\n") }];
     });
     if (!turns.length) throw captureError("Claude JSON capture found no usable user or assistant text after skipping tools, files, images, and artifacts. Turn JSON capture off to use DOM capture.", "incomplete");
-    const text = `Claude conversation:\n\n${turns.join("\n\n")}`;
+    const text = `Claude conversation:\n\n${turns.map(turn => `${turn.role === "user" ? "User" : "Assistant"}: ${turn.text}`).join("\n\n")}`;
     if (text.length > 500000 || new TextEncoder().encode(text).length > 2000000) {
       throw captureError("Conversation exceeds the supported 500,000 character / 2 MB limit.", "size_limit");
     }
-    return { text, messageTurnCount: turns.length, excludedContentTypes: [...excludedContentTypes].sort() };
+    return { text, messages: turns, messageTurnCount: turns.length, excludedContentTypes: [...excludedContentTypes].sort() };
   }
 
   function waitForHook(timeoutMs, install = false) {
