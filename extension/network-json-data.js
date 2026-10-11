@@ -107,6 +107,15 @@
         excludedContentTypes.add("other");
       }
       const assistant = item[3];
+      // The newest prompt can exist before Gemini has produced a response.
+      // Preserve that prompt and its verified parents without waiting for text.
+      if (seen.size === 1 && (assistant == null || (Array.isArray(assistant?.[0]) && !assistant[0].length))) {
+        expected = item[1]?.[1] ?? null;
+        selectedParentCandidate = item[1]?.[2] ?? null;
+        if (selectedParentCandidate !== null && (typeof selectedParentCandidate !== "string" || !selectedParentCandidate)) fail("Gemini returned an invalid parent response.");
+        turns.unshift(...turn("User", userParts));
+        continue;
+      }
       if (!Array.isArray(assistant?.[0]) || !assistant[0].length) fail("A Gemini response is missing or unfinished.");
       // hNvQHb often omits assistant[3]. The next chronological turn's parent
       // triple identifies the older candidate actually continued, even across
@@ -129,7 +138,7 @@
   };
   const grokBranch = (data, selected) => {
     complete(data);
-    if (!Array.isArray(data?.responseNodes) || !Array.isArray(data.inflightResponses) || data.inflightResponses.length) fail("Grok history is missing or a response is still in progress.");
+    if (!Array.isArray(data?.responseNodes) || !Array.isArray(data.inflightResponses)) fail("Grok history is missing.");
     if ([data.total_count, data.totalCount, data.totalResponses].some(count => count != null && (!Number.isSafeInteger(count) || count > data.responseNodes.length))) fail("Grok history has missing responses.");
     const parents = new Set(data.responseNodes.map(node => node.parentResponseId));
     const leaves = data.responseNodes.filter(node => !parents.has(node.responseId));
@@ -148,12 +157,16 @@
     }
     const turns = branch.flatMap(node => {
       const message = mapping.get(node.responseId);
+      if (!message && node.sender === "assistant" && nodes.inflightResponses.some(reply => reply?.responseId === node.responseId)) return [];
       if (!message || message.sender !== node.sender || message.parentResponseId !== node.parentResponseId) fail("A Grok message body is missing or mismatched.");
-      complete(message);
-      if (message.partial === true || message.streamErrors?.length) fail("A Grok response is incomplete.");
+      // An assistant's generation state is not a missing-history marker. Keep
+      // its current own text, including a stopped reply, without polling it.
+      if (message.sender === "assistant") { const { partial, ...metadata } = message; complete(metadata); }
+      else complete(message);
       if (!["human", "assistant"].includes(message.sender) || message.isControl) return [];
       if ([message.fileAttachments, message.fileAttachmentsMetadata].some(files => Array.isArray(files) && files.length)) excludedContentTypes.add("uploads");
       if (Array.isArray(message.toolResponses) && message.toolResponses.length) excludedContentTypes.add("tools");
+      if (message.sender === "assistant" && message.partial === true && message.message == null) return [];
       if (typeof message.message !== "string") fail("A Grok own-turn text field is missing.", undefined, "text_invalid");
       // File bodies are unsupported here. Do not accept an answer-only transcript
       // when its authored user turn consists solely of an attachment.
@@ -187,12 +200,15 @@
     const turns = deepseekBranch(data, chat).flatMap(message => {
       if (!["USER", "ASSISTANT"].includes(message.role)) return [];
       complete(message);
-      if (message.status !== "FINISHED" || message.incomplete_message != null || message.has_pending_fragment || message.auto_continue) fail("A DeepSeek turn is unfinished or incomplete.");
+      // WIP/pending/continuing describe future generation, not missing parents.
+      // The fresh REPLACE snapshot already contains the text available now.
       if (!Array.isArray(message.fragments)) fail("DeepSeek turn fragments are missing.");
       const parts = [];
       const fileIds = new Set();
       for (const fragment of message.fragments) {
         if ((message.role === "USER" && fragment.type === "REQUEST") || (message.role === "ASSISTANT" && ["RESPONSE", "THINK"].includes(fragment.type))) {
+          if (fragment.content == null && message.role === "ASSISTANT"
+            && (message.status === "WIP" || message.has_pending_fragment === true || message.auto_continue === true)) continue;
           complete(fragment);
           if (typeof fragment.content !== "string") fail("A DeepSeek own-turn text field is missing.", undefined, "text_invalid");
           parts.push(fragment.content);

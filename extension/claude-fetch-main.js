@@ -1,5 +1,5 @@
 (() => {
-  const version = 8;
+  const version = 9;
   const maxHistoryBytes = 6000000;
   const previous = window.__capClaudeFetchState;
   if (previous?.version === version && window.fetch === previous.fetch) return;

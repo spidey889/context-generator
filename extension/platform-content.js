@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-12-useful-diagnostics-v133";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-12-reply-snapshot-v134";
   const INLINE_PILL_SIZE = 36;
   const ownedUiStyleSheets = new Map();
   const CLAUDE_INLINE_STYLE_ID = "context-generator-claude-inline-styles";
@@ -26,6 +26,7 @@
   let claudeJsonCaptureEnabled = true;
   let chatGptJsonCaptureEnabled = true;
   let networkJsonCaptureEnabled = true;
+  let sourceReplySnapshot = null;
   const INSTANCE_TEARDOWN_KEY = "__contextGeneratorPlatformTeardown";
   const BUBBLE_ID = "context-generator-bubble";
   const OVERLAY_ID = "context-generator-overlay";
@@ -638,6 +639,7 @@
     stopSourceDestinationProgress(activeTransferTrace);
     instanceActive = false;
     clearPickerJsonCapture();
+    sourceReplySnapshot = null;
     if (activeTransferTrace) activeTransferTrace.expired = true;
     activeTransferTrace?.sourceGuard?.dispose();
     activePasteGuards.forEach(guard => guard.cancel());
@@ -918,6 +920,7 @@
       retainTransientComposerPlacement,
       checkInlinePlacementPathname,
       prepareSourceForCapture,
+      isSourceReplyInProgress,
       getSourceScrollStableTimeout,
       getSourceScrollStableInterval,
       getSourceScrollStableSampleCount,
@@ -1444,6 +1447,13 @@
     const transferTrace = activeTransferTrace;
     updateTransferDiagnostics(transferTrace, { last_operation: "capture_prepare" }, "capture_prepare");
     checkTransferDeadline(transferTrace);
+    sourceReplySnapshot = null;
+    if (isSourceReplyInProgress()) {
+      // Freeze before any await or scroll. The reply may finish or grow before
+      // the caller resumes; neither should change this explicit snapshot.
+      sourceReplySnapshot = { trace: transferTrace, url: window.location.href, text: scrapeConversationText() };
+      return;
+    }
     sourceScrollTargetsCache = null;
     chatGptConversationScrollRootCache = null;
     // Captured panel text belongs only to one transfer. Reset both collections so
@@ -3387,9 +3397,24 @@
     return createConversationCaptureFromMessageTurns(messageTurns);
   }
 
+  function isSourceReplyInProgress() {
+    const nativeReply = window.__capNetworkReplyState;
+    if (nativeReply?.active && nativeReply.pathname === window.location.pathname) return true;
+    const selector = ["[data-testid='stop-button']", "[data-testid='stop-response']", "[data-is-streaming='true']",
+      "[data-message-streaming='true']", "[data-streaming='true']", "button[aria-label*='stop' i]",
+      "[role='button'][aria-label*='stop' i]", "button[title*='stop' i]"].join(",");
+    return Array.from(document.querySelectorAll(selector)).some(element => {
+      if (!element.matches(selector) || !isVisible(element) || isContextGeneratorNode(element)) return false;
+      if (element.matches("[data-testid='stop-button'], [data-testid='stop-response'], [data-is-streaming='true'], [data-message-streaming='true'], [data-streaming='true']")) return true;
+      const label = element.getAttribute("aria-label") || element.getAttribute("title") || "";
+      return /^stop(?:\s+(?:generating|generation|response|reply|responding|streaming))?(?:\s*\([^)]*\))?$/i.test(label);
+    });
+  }
+
   async function scrapeConversationTextForTransfer() {
     const initialMessageTurns = getConversationTurns();
     const initialCapture = createConversationCaptureFromMessageTurns(initialMessageTurns);
+    if (isSourceReplyInProgress()) return initialCapture;
     // Every chat enters the same capture loop. The loop itself decides when it is done from
     // real scroll movement, rendered-window changes, and bounded terminal quiet checks.
     return scrapeVirtualConversation(initialCapture, initialMessageTurns);
@@ -3452,6 +3477,7 @@
 
     while (true) {
       checkTransferDeadline(transferTrace);
+      if (isSourceReplyInProgress()) return initialCapture;
       const expandedCount = await expandCollapsedConversationContent();
       checkTransferDeadline(transferTrace);
       if (expandedCount > 0) {
@@ -3928,6 +3954,10 @@
   async function scrapeConversationTextWhenReady(timeoutMs = CONVERSATION_SCRAPE_RETRY_TIMEOUT_MS) {
     const transferTrace = activeTransferTrace;
     checkTransferDeadline(transferTrace);
+    const replySnapshot = sourceReplySnapshot;
+    sourceReplySnapshot = null;
+    if (replySnapshot && replySnapshot.trace === transferTrace && replySnapshot.url === window.location.href) return replySnapshot.text;
+    if (isSourceReplyInProgress()) return scrapeConversationText();
     const startedAt = Date.now();
     let lastEmptyError = null;
 
@@ -7755,7 +7785,7 @@
           if (window.location.href !== sourceUrl) throw createDiagnosticError("The conversation changed during capture. Return to the source chat and try again.", "conversation_changed");
           // ChatGPT fast capture owns an API read, not page scrolling. A failed
           // read must not silently enter the legacy DOM sweep or move history.
-          if (useChatGptJson) throw error;
+          if (useChatGptJson && !isSourceReplyInProgress()) throw error;
           if (trace?.diagnostics) { for (const key of ["error_code", "error_origin", "failure_site", "error_type", "error_file", "error_line", "error_column"]) delete trace.diagnostics[key]; }
           // Other adapters recover within this attempt and reuse its destination.
           showFastCaptureFallbackMessage();
@@ -10215,6 +10245,7 @@
   }
 
   function resetRunningFlag() {
+    sourceReplySnapshot = null;
     isRunning = false;
     activeTransferTrace = null;
     clearRunningResetTimer();

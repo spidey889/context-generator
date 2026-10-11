@@ -177,6 +177,7 @@ jobs:
         env:
           CAP_CONTEXT_JSON_SMOKE: deepseek
           CAP_CONTEXT_SMOKE_ARTIFACT_DIR: .test-artifacts/browser-smoke/deepseek-files
+          CAP_CONTEXT_REPLY_SNAPSHOT_SMOKE: "1"
         run: |
           mkdir -p "$CAP_CONTEXT_SMOKE_ARTIFACT_DIR"
           xvfb-run -a npm run test:extension-smoke 2>&1 | tee "$CAP_CONTEXT_SMOKE_ARTIFACT_DIR/run.log"

@@ -544,6 +544,11 @@ function chatGptTreeFixture() {
 
 function networkSmokeFixture(platform) {
   const fixture = networkFixtures(platform);
+  if (platform === "deepseek" && process.env.CAP_CONTEXT_REPLY_SNAPSHOT_SMOKE === "1") {
+    Object.assign(fixture.data.data.biz_data.chat_messages.at(-1), {
+      status: "WIP", has_pending_fragment: true, auto_continue: true, incomplete_message: "Still generating"
+    });
+  }
   if (platform === "gemini") {
     // Parent triples select older regenerated replies across pages; the optional
     // assistant selection field is absent from this native-derived fixture.

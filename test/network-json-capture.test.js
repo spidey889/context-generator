@@ -48,7 +48,12 @@ function setup(platform, fixture = fixtures(platform), { fetchImpl, responseTran
     }
     return json({});
   };
-  class Xhr { open() {} send() {} setRequestHeader() {} }
+  class Xhr {
+    constructor() { this.listeners = new Map(); }
+    open() {} send() {} setRequestHeader() {}
+    addEventListener(type, listener) { this.listeners.set(type, listener); }
+    finish() { this.listeners.get("loadend")?.(); this.listeners.delete("loadend"); }
+  }
   const window = { fetch: responseTransform ? async (...args) => responseTransform(await nativeFetch(...args)) : nativeFetch, XMLHttpRequest: Xhr, WIZ_global_data: { SNlM0e: "CSRF_SENTINEL" },
     addEventListener: (type, listener) => (type === "message" ? listeners : navigation).add(listener),
     removeEventListener: (type, listener) => (type === "message" ? listeners : navigation).delete(listener),
@@ -68,7 +73,7 @@ function setup(platform, fixture = fixtures(platform), { fetchImpl, responseTran
       xhr.setRequestHeader("Authorization", "Bearer AUTH_SENTINEL"); xhr.setRequestHeader("x-device-id", "CACHE_DEVICE"); xhr.send();
     }
   };
-  return { window, api, requests, replies, context, fixture, observe, reinstall, listeners, location,
+  return { window, api, requests, replies, context, fixture, observe, reinstall, listeners, location, newXhr: () => new Xhr(),
     navigationListeners: () => navigation.size,
     navigate(pathname = "/new") { const target = new URL(pathname, location.origin); for (const fn of navigation) fn({ destination: { url: target.href } }); location.pathname = target.pathname; location.search = target.search; location.href = target.href; }
   };
@@ -87,6 +92,60 @@ function deepseekUploads(count = 6) {
   f.expected = `DeepSeek conversation:\n\nUser: ${uploads.map(file => `Attachment: ${JSON.stringify(file.file_name)}\n\nFile contents (${file.file_size} UTF-8 bytes):\n${f.files[file.id]}\nEnd attachment: ${JSON.stringify(file.file_name)}`).join("\n\n")}\n\nAssistant: ${f.data.data.biz_data.chat_messages[1].fragments[0].content}`;
   return f;
 }
+
+test("DeepSeek JSON snapshots WIP, continuing and stopped own text without waiting for completion", async () => {
+  for (const status of ["WIP", "INCOMPLETE", "FINISHED"]) {
+    const h = setup("deepseek");
+    const reply = h.fixture.data.data.biz_data.chat_messages.at(-1);
+    Object.assign(reply, { status, has_pending_fragment: true, auto_continue: true, incomplete_message: "Generation has not finished" });
+    reply.fragments.push({ type: "RESPONSE", content: null });
+    await h.observe();
+    const capture = await h.window.__capCaptureNetworkJson();
+    assert.equal(capture.text, h.fixture.expected);
+    reply.fragments[0].content += "FUTURE_TEXT_SENTINEL";
+    assert.doesNotMatch(capture.text, /FUTURE_TEXT_SENTINEL/);
+    assert.equal(h.requests.filter(request => request.url.pathname.includes("history_messages")).length, 1);
+  }
+});
+
+test("Grok JSON snapshots a partial assistant while another response remains in flight", async () => {
+  const h = setup("grok"), reply = h.fixture.responses.at(-1);
+  h.fixture.nodes.inflightResponses.push({ responseId: reply.responseId });
+  Object.assign(reply, { partial: true, message: "Text already generated" });
+  const capture = await h.window.__capCaptureNetworkJson();
+  assert.equal(capture.messages.at(-1).text, "Text already generated");
+  assert.equal(capture.messages.length, 48);
+  reply.message += "FUTURE_TEXT_SENTINEL";
+  assert.doesNotMatch(capture.text, /FUTURE_TEXT_SENTINEL/);
+  reply.message = null;
+  assert.equal(h.api.grok(h.fixture.nodes, h.fixture.responses).messages.at(-1).role, "user");
+  h.fixture.responses.pop();
+  assert.equal(h.api.grok(h.fixture.nodes, h.fixture.responses).messages.at(-1).role, "user");
+});
+
+test("Gemini JSON keeps the newest prompt when its response has not arrived yet", async () => {
+  const f = fixtures("gemini", "smoke", 2);
+  f.pages[0].turns[0][3] = null;
+  const h = setup("gemini", f);
+  await h.observe();
+  const capture = await h.window.__capCaptureNetworkJson();
+  assert.equal(capture.messages.length, 3);
+  assert.equal(capture.messages.at(-1).role, "user");
+  assert.equal(capture.messages.at(-1).text, "User 1\n  Original pasted line  \r\n");
+  assert.ok(capture.text.includes("JSON_ONLY_SENTINEL"));
+});
+
+test("DeepSeek native reply lifetime reaches the bridge, including overlap and completion", async () => {
+  const h = setup("deepseek"), first = h.newXhr(), second = h.newXhr();
+  for (const xhr of [first, second]) { xhr.open("POST", `${h.location.origin}/api/v0/chat/completion`); xhr.send("PRIVATE_NATIVE_BODY"); }
+  await new Promise(setImmediate);
+  assert.equal(h.window.__capNetworkReplyState.active, true);
+  first.finish(); await new Promise(setImmediate);
+  assert.equal(h.window.__capNetworkReplyState.active, true);
+  second.finish(); await new Promise(setImmediate);
+  assert.equal(h.window.__capNetworkReplyState.active, false);
+  assert.doesNotMatch(JSON.stringify(h.window.__capNetworkReplyState), /PRIVATE_NATIVE_BODY|AUTH_SENTINEL/);
+});
 
 // These adapters share one chunk reader. Run its decoder/budget rejection
 // matrix on Grok; retain Unicode success and transport validation per adapter.
@@ -290,10 +349,10 @@ test("DeepSeek: one incomplete upload cancels siblings before fallback or a fres
   });
   assert.equal(h.requests.length, 5, "failure stops queued downloads");
   assert.equal(aborted.length, 3);
-  assert.equal(h.window.__capNetworkFetchState.version, 11);
+  assert.equal(h.window.__capNetworkFetchState.version, 12);
   assert.ok(h.replies.every(reply => !reply.capture));
   assert.equal(h.navigationListeners(), 0);
-  assert.equal(h.listeners.size, 1);
+  assert.equal(h.listeners.size, 2);
   healthy = true;
   assert.equal((await h.window.__capCaptureNetworkJson()).text, f.expected);
   assert.equal(h.requests.length, 12);
@@ -370,8 +429,8 @@ for (const platform of ["gemini", "grok", "deepseek"]) test(`${platform}: the pr
   old.version = platform === "deepseek" ? 9 : platform === "gemini" ? 9 : 7;
   h.reinstall(files[1]);
   assert.notEqual(h.window.__capNetworkFetchState, old);
-  assert.equal(h.window.__capNetworkFetchState.version, platform === "deepseek" ? 11 : platform === "gemini" ? 11 : 9);
-  assert.equal(h.listeners.size, 1);
+  assert.equal(h.window.__capNetworkFetchState.version, platform === "deepseek" ? 12 : platform === "gemini" ? 12 : 10);
+  assert.equal(h.listeners.size, 2);
   assert.equal((await h.window.__capCaptureNetworkJson()).text, h.fixture.expected);
 });
 
@@ -396,7 +455,7 @@ for (const platform of ["gemini", "grok", "deepseek"]) {
     h.window.postMessage({ channel: "cap-context-network-json-v1", platform, type: "ping", id: "probe" });
     await new Promise(resolve => setImmediate(resolve));
     assert.equal(h.requests.length, before);
-    assert.equal(h.listeners.size, 1);
+    assert.equal(h.listeners.size, 2);
     assert.equal(h.replies.length, 0);
     const capture = await h.window.__capCaptureNetworkJson();
     assert.equal(capture.text, h.fixture.expected);
@@ -407,7 +466,7 @@ for (const platform of ["gemini", "grok", "deepseek"]) {
     assert.equal(capture.text, `${({ gemini: "Gemini", grok: "Grok", deepseek: "DeepSeek" })[platform]} conversation:\n\n${capture.messages.map(turn => `${turn.role === "user" ? "User" : "Assistant"}: ${turn.text}`).join("\n\n")}`);
     assert.deepEqual([...capture.excludedContentTypes], { gemini: [], grok: ["tools"], deepseek: ["media", "tools"] }[platform]);
     assert.doesNotMatch(capture.text, /TOOL_SENTINEL|SIGNED_SENTINEL|AUTH_SENTINEL|CSRF_SENTINEL/);
-    assert.equal(h.listeners.size, 1);
+    assert.equal(h.listeners.size, 2);
     assert.equal(h.requests.length - before, platform === "gemini" ? 3 : 2);
   });
   test(`${platform}: quoted role labels remain in the owning native message`, async () => {
@@ -428,7 +487,7 @@ for (const platform of ["gemini", "grok", "deepseek"]) {
     let h; h = setup(platform, fixtures(platform), { fetchImpl: async request => { if (!request.url.pathname.endsWith("/session")) h.navigate(); return new Response("{}"); } });
     await h.observe();
     await assert.rejects(h.window.__capCaptureNetworkJson(), /conversation changed|cancelled/);
-    assert.equal(h.listeners.size, 1);
+    assert.equal(h.listeners.size, 2);
   });
 }
 test("network bridge rejects structured boundaries that disagree with the verified transcript", async () => {
@@ -495,13 +554,12 @@ test("Grok: rid selects active branch, ambiguous and missing bodies fail", () =>
   f.responses[2].partial = true;
   assert.throws(() => h.api.grok(f.nodes, f.responses, "answer_23"), /Incomplete|incomplete/);
   f.nodes.inflightResponses.push({ responseId: "pending" });
-  assert.throws(() => h.api.grokBranch(f.nodes, "answer_23"), /progress/);
+  assert.equal(h.api.grokBranch(f.nodes, "answer_23").length, f.nodes.responseNodes.length - 1);
 });
-test("DeepSeek: reject cache deltas, missing parents, unfinished fragments and incomplete uploads", () => {
+test("DeepSeek: reject cache deltas, missing parents and incomplete uploads", () => {
   for (const mutate of [
     f => { f.data.data.biz_data.cache_control = "MERGE"; },
     f => { f.data.data.biz_data.chat_messages.splice(4, 1); },
-    f => { f.data.data.biz_data.chat_messages[1].has_pending_fragment = true; },
     f => { f.file.file_size++; },
     f => { f.data.code = 40003; }
   ]) {
@@ -608,7 +666,7 @@ for (const platform of ["gemini", "grok", "deepseek"]) {
     const started = Date.now();
     assert.equal((await h.window.__capCaptureNetworkJson()).text, h.fixture.expected);
     assert.ok(Date.now() - started >= 250 && Date.now() - started < 8250, "live readiness must win over the stalled worker callback");
-    assert.equal(installs, 1); assert.equal(h.listeners.size, 1);
+    assert.equal(installs, 1); assert.equal(h.listeners.size, 2);
     assert.equal(h.navigationListeners(), 0);
   });
 }
@@ -662,7 +720,7 @@ clockTest("Grok native request deadline reports a bounded timeout reason", async
     return true;
   });
   assert.equal(h.navigationListeners(), 0);
-  assert.equal(h.listeners.size, 1);
+  assert.equal(h.listeners.size, 2);
 });
 
 test("Grok refuses file-only user turns rather than silently transferring an orphan answer", async () => {

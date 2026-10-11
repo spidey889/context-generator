@@ -59,7 +59,8 @@
     const turns = branch.reverse().flatMap(message => {
       if (!["human", "assistant"].includes(message.sender)) return [];
       assertComplete(message, "Active-branch message");
-      if (message.sender === "assistant" && Object.hasOwn(message, "stop_reason") && message.stop_reason == null) throw unsupported("An assistant turn is still in progress.");
+      // Generation can continue after this read. Capture the strings available
+      // now; missing history and truncated payloads remain separate errors.
       if (message.content != null && !Array.isArray(message.content)) throw unsupported("An active-branch message has invalid structured content.", "invalid_branch");
       const blocks = Array.isArray(message.content) ? message.content : [];
       if ((Array.isArray(message.files) && message.files.length) || (Array.isArray(message.attachments) && message.attachments.some(file => file?.file_type !== "txt" || file.file_name !== ""))) excludedContentTypes.add("uploads");
@@ -69,6 +70,9 @@
       const parts = blocks.flatMap(block => {
         const value = block?.type === "text" ? block.text
           : block?.type === "thinking" ? (block.thinking ?? block.text) : null;
+        if (["text", "thinking"].includes(block?.type) && value == null && message.sender === "assistant"
+          && ((Object.hasOwn(message, "stop_reason") && message.stop_reason == null)
+            || (Object.hasOwn(block, "stop_timestamp") && block.stop_timestamp == null))) return [];
         if (block?.type && !["text", "thinking"].includes(block.type)) {
           excludedContentTypes.add(["tool_use", "tool_result"].includes(block.type) ? "tools"
             : block.type === "artifact" ? "artifacts" : ["image", "audio", "video"].includes(block.type) ? "media" : "other");
@@ -77,7 +81,6 @@
         // no captured text; unlike truncation of an actual text/thinking string.
         if (block?.type === "text" || (block?.type === "thinking" && typeof value === "string" && value.trim())) {
           assertComplete(block, `${block.type} block`);
-          if (Object.hasOwn(block, "stop_timestamp") && block.stop_timestamp === null) throw unsupported("A captured text/thinking block is still in progress.", "text_invalid");
           if (typeof value !== "string") throw unsupported("A text block has no complete text string.", "text_invalid");
         }
         // Trim only to test emptiness; indentation and line endings are source data.
@@ -172,7 +175,7 @@
       const receive = event => {
         const reply = event.data;
         if (event.source === window && event.origin === location.origin && reply?.channel === channel
-          && reply.type === "pong" && reply.id === id && reply.version === 8) finish(true);
+          && reply.type === "pong" && reply.id === id && reply.version === 9) finish(true);
       };
       const ping = () => {
         if (settled) return;

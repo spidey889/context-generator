@@ -2,6 +2,16 @@
   const platform = ({ "gemini.google.com": "gemini", "grok.com": "grok", "chat.deepseek.com": "deepseek" })[location.hostname];
   if (!platform) return;
   const channel = "cap-context-network-json-v1";
+  window.__capNetworkReplyObserver?.();
+  const observeReply = event => {
+    const reply = event.data;
+    if (event.source === window && event.origin === location.origin && reply?.channel === channel && reply.platform === platform
+      && reply.type === "generation" && reply.pathname === location.pathname && typeof reply.active === "boolean") {
+      window.__capNetworkReplyState = { pathname: reply.pathname, active: reply.active };
+    }
+  };
+  window.addEventListener("message", observeReply);
+  window.__capNetworkReplyObserver = () => window.removeEventListener("message", observeReply);
   const changedError = message => Object.assign(new Error(message), { diagnosticCode: "conversation_changed", diagnostics: { version: 1, capture_detail: "conversation_changed", failure_site: "capture_history" } });
   const captureError = (message, captureFailureReason, detail = "incomplete_history", stage = "serialize", status) => Object.assign(new Error(message), {
     captureFailureReason, diagnosticCode: captureFailureReason === "size_limit" ? "conversation_too_large"
@@ -20,7 +30,7 @@
     const finish = ready => { if (settled) return; settled = true; clearTimeout(timer); clearTimeout(poll); window.removeEventListener("message", receive); resolve(ready); };
     const receive = event => {
       const reply = event.data;
-      if (event.source === window && event.origin === location.origin && reply?.channel === channel && reply.platform === platform && reply.type === "pong" && reply.id === id && reply.version === (platform === "deepseek" ? 11 : platform === "gemini" ? 11 : 9)) finish(true);
+      if (event.source === window && event.origin === location.origin && reply?.channel === channel && reply.platform === platform && reply.type === "pong" && reply.id === id && reply.version === (platform === "deepseek" ? 12 : platform === "gemini" ? 12 : 10)) finish(true);
     };
     const ping = () => { if (settled) return; window.postMessage({ channel, platform, type: "ping", id }, location.origin); poll = setTimeout(ping, 100); };
     const timer = setTimeout(() => finish(false), timeout);

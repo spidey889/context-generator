@@ -3,7 +3,7 @@
   if (!platform || !globalThis.__capNetworkJsonData) return;
   // Advance readiness version with adapter/contract changes: old MAIN closures
   // can survive extension reloads and must be replaced before a new capture.
-  const version = platform === "deepseek" ? 11 : platform === "gemini" ? 11 : 9, channel = "cap-context-network-json-v1";
+  const version = platform === "deepseek" ? 12 : platform === "gemini" ? 12 : 10, channel = "cap-context-network-json-v1";
   const previous = window.__capNetworkFetchState;
   if (previous?.version === version && window.fetch === previous.fetch
     && (platform === "grok" || previous?.ownsObservation?.())) return;
@@ -46,12 +46,34 @@
   const xhr = platform !== "grok" ? window.XMLHttpRequest?.prototype : null;
   const nativeOpen = xhr?.open, nativeSend = xhr?.send, nativeSetHeader = xhr?.setRequestHeader;
   const xhrRequests = new WeakMap();
+  const replyingRequests = new Set();
+  let disposed = false;
   const wrappedOpen = function (...args) { xhrRequests.set(this, { url: args[1], headers: new Headers() }); return Reflect.apply(nativeOpen, this, args); };
   const wrappedSetHeader = function (...args) {
     try { xhrRequests.get(this)?.headers.append(args[0], args[1]); } catch { /* Native XHR owns header validation. */ }
     return Reflect.apply(nativeSetHeader, this, args);
   };
-  const wrappedSend = function (...args) { const meta = xhrRequests.get(this); observe(meta?.url, { headers: meta?.headers, body: args[0] }); return Reflect.apply(nativeSend, this, args); };
+  const publishReplyState = () => {
+    if (!disposed) window.postMessage({ channel, platform, type: "generation", pathname: location.pathname,
+      active: [...replyingRequests].some(request => request.pathname === location.pathname) }, location.origin);
+  };
+  const wrappedSend = function (...args) {
+    const meta = xhrRequests.get(this);
+    observe(meta?.url, { headers: meta?.headers, body: args[0] });
+    // DeepSeek's stop control has no stable accessible label. Observe only the
+    // native request lifetime; never read its stream or change its response.
+    let url;
+    try { url = new URL(meta?.url || location.href, location.href); } catch { /* Observation cannot reject native requests. */ }
+    if (platform === "deepseek" && url?.origin === location.origin && /^\/api\/v0\/chat\/(?:completion|continue)$/.test(url.pathname) && typeof this.addEventListener === "function") {
+      const request = { pathname: location.pathname };
+      replyingRequests.add(request);
+      const finished = () => { replyingRequests.delete(request); publishReplyState(); };
+      this.addEventListener("loadend", finished, { once: true });
+      publishReplyState();
+      try { return Reflect.apply(nativeSend, this, args); } catch (error) { finished(); throw error; }
+    }
+    return Reflect.apply(nativeSend, this, args);
+  };
   if (xhr) { xhr.open = wrappedOpen; xhr.send = wrappedSend; if (nativeSetHeader) xhr.setRequestHeader = wrappedSetHeader; }
   // Gemini and DeepSeek use XHR as well as fetch. A replacement of either surface
   // makes the cached observer stale and must trigger bounded hook recovery.
@@ -63,6 +85,7 @@
     const request = event.data;
     if (event.source !== window || event.origin !== location.origin || request?.channel !== channel || request.platform !== platform || typeof request.id !== "string" || request.id.length > 80) return;
     if (request.type === "ping") {
+      publishReplyState();
       if (platform === "grok" || ownsObservation()) window.postMessage({ channel, type: "pong", platform, version, id: request.id }, location.origin);
       return;
     }
@@ -264,6 +287,7 @@
   window.addEventListener("message", receive);
   window.__capNetworkFetchState = { version, fetch: wrappedFetch, ownsObservation, auth: () => auth, template: () => geminiTemplate,
     dispose() {
+      replyingRequests.clear(); publishReplyState(); disposed = true;
       active?.abort(); window.removeEventListener("message", receive);
       if (window.fetch === wrappedFetch) window.fetch = nativeFetch;
       if (xhr?.open === wrappedOpen) xhr.open = nativeOpen;

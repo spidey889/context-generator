@@ -422,15 +422,24 @@ test("Claude JSON capture rejects explicit partial-history metadata without leak
   }
 });
 
+test("Claude JSON snapshots current thinking and reply text without requiring generation to finish", async () => {
+  const data = fixture(), reply = data.chat_messages[2];
+  reply.stop_reason = null;
+  for (const block of reply.content) block.stop_timestamp = null;
+  reply.content.push({ type: "text", text: null, stop_timestamp: null });
+  const capture = await setup(data, { resources: [endpoint] }).window.__capCaptureClaudeJson();
+  assert.equal(capture.messages.at(-1).text, "Private reasoning\n\nSelected answer");
+  reply.content[1].text += "FUTURE_TEXT_SENTINEL";
+  assert.doesNotMatch(capture.text, /FUTURE_TEXT_SENTINEL/);
+});
+
 test("Claude JSON capture rejects truncated active turns and captured text/thinking blocks", async () => {
   for (const mutate of [
     data => { data.chat_messages[0].truncated = true; },
     data => { data.chat_messages[2].truncated = true; },
     data => { data.chat_messages[2].content[0].truncated = true; },
     data => { data.chat_messages[2].content[1].truncated = true; },
-    data => { data.chat_messages[2].content[1].cut_off = true; },
-    data => { data.chat_messages[2].content[1].stop_timestamp = null; },
-    data => { data.chat_messages[2].stop_reason = null; }
+    data => { data.chat_messages[2].content[1].cut_off = true; }
   ]) {
     const data = fixture();
     mutate(data);

@@ -15,6 +15,35 @@ const COMPILED_PLATFORM_CONTENT_SCRIPT = new vm.Script(
 const virtualSweepTests = [];
 const loadedInstances = new Set();
 
+for (const hostname of ["claude.ai", "chatgpt.com", "gemini.google.com", "grok.com", "chat.deepseek.com"]) {
+  test(`${hostname}: an active reply freezes existing DOM text without scrolling or taking future text`, async () => {
+    const user = new FakeElement({ text: "Keep this existing user request in the transfer.", attrs: { "data-message-author-role": "user" } });
+    const assistant = new FakeElement({ text: "This is the reply text already available.", attrs: { "data-message-author-role": "assistant" } });
+    const stop = new FakeElement({ tag: "button", attrs: { "data-testid": "stop-button" } });
+    const hooks = loadPlatformContent([user, assistant, stop], hostname);
+    await hooks.prepareSourceForCapture();
+    assistant.innerText += " FUTURE_TEXT_SENTINEL";
+    assistant.textContent = assistant.innerText;
+    stop.attrs["data-display"] = "none";
+    const capture = await hooks.scrapeConversationTextWhenReady();
+    assert.ok(capture.includes("This is the reply text already available."));
+    assert.doesNotMatch(capture, /FUTURE_TEXT_SENTINEL/);
+    assert.equal(hooks.window.scrollY, 400);
+    assert.equal(user.scrollCalls.length + assistant.scrollCalls.length + stop.scrollCalls.length, 0);
+  });
+}
+
+test("DeepSeek's native reply state prevents DOM scrolling without a labelled stop button", async () => {
+  const user = new FakeElement({ text: "Existing DeepSeek question with enough text to capture.", attrs: { "data-message-author-role": "user" } });
+  const hooks = loadPlatformContent([user], "chat.deepseek.com", { pathname: "/a/chat/s/source" });
+  hooks.window.__capNetworkReplyState = { pathname: "/a/chat/s/source", active: true };
+  await hooks.prepareSourceForCapture();
+  assert.ok((await hooks.scrapeConversationTextWhenReady()).includes("Existing DeepSeek question"));
+  assert.equal(hooks.window.scrollY, 400);
+  hooks.window.__capNetworkReplyState.pathname = "/a/chat/s/other";
+  assert.equal(hooks.isSourceReplyInProgress(), false);
+});
+
 test.after(() => {
   for (const hooks of loadedInstances) hooks.teardownContextGeneratorInstance();
   loadedInstances.clear();

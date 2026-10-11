@@ -31,6 +31,7 @@ function loadTransferFlow(overrides) {
     activeTransferTrace: null, isRunning: false, runningResetTimer: null,
     pickerJsonCapture: null, pendingJsonCapture: Promise.resolve(), instanceActive: true,
     getConversationTurns: () => [],
+    isSourceReplyInProgress: () => false,
     setTimeout: () => 1, setInterval: () => 1, clearInterval() {},
     addOwnedEventListener: (target, type, listener) => target?.addEventListener?.(type, listener),
     removeOwnedEventListener: (target, type, listener) => target?.removeEventListener?.(type, listener),
