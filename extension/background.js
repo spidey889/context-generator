@@ -982,13 +982,14 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   return false;
 });
 
-async function readSummaryResponse(response, checkDeadline) {
+async function readSummaryResponse(response, checkDeadline, onNearEnd = () => {}) {
   // Older deployments return ordinary JSON. The new stream still has exactly
   // one authoritative final result; previews never become pasted context.
   if (!response.headers?.get("content-type")?.includes("application/x-ndjson")) return response.json();
   const reader = response.body.getReader();
   const decoder = new TextDecoder("utf-8", { fatal: true });
   let buffer = "", result, eof = false;
+  let tail = "", hasKeyContext = false, nearEnd = false;
   const consume = () => {
     let newline;
     while ((newline = buffer.indexOf("\n")) !== -1) {
@@ -997,6 +998,18 @@ async function readSummaryResponse(response, checkDeadline) {
       if (!line) continue;
       const event = JSON.parse(line);
       if (result || !["reset", "delta", "result"].includes(event.type)) throw new Error("Invalid summary stream");
+      if (event.type === "reset") {
+        tail = ""; hasKeyContext = false; nearEnd = false;
+        onNearEnd(false);
+      }
+      if (event.type === "delta" && typeof event.text === "string") {
+        // Keep only a bounded suffix for split headings. This is a presentation
+        // hint, never summary acceptance, and retries discard the old attempt.
+        const text = tail + event.text;
+        hasKeyContext ||= /(?:^|\n)📦 KEY CONTEXT\s*(?:\n|$)/u.test(text);
+        nearEnd ||= hasKeyContext && /(?:^|\n)🔁 NEXT STEP\s*(?:\n|$)/u.test(text);
+        tail = text.slice(-256);
+      }
       if (event.type === "result") {
         if (!event.data || typeof event.data !== "object") throw new Error("Invalid summary stream result");
         result = event.data;
@@ -1011,6 +1024,8 @@ async function readSummaryResponse(response, checkDeadline) {
       eof = chunk.done;
       buffer += eof ? decoder.decode() : decoder.decode(chunk.value, { stream: true });
       consume();
+      // A buffered final result needs immediate delivery, not another switch.
+      if (!result && nearEnd) onNearEnd(true);
     }
     if (buffer.trim() || !result) throw new Error("Summary stream ended before completion");
     return result;
@@ -1041,9 +1056,13 @@ async function summarizeWithBackend(conversation, transferId = null, deadlineAt 
 
   let entry = summaryInflight.get(conversationText);
   if (!entry) {
-    entry = { controller: new AbortController(), waiters: 0, settled: false };
+    entry = { controller: new AbortController(), waiters: 0, settled: false, nearEnd: false, progressListeners: new Set() };
     const ownedEntry = entry;
-    entry.promise = fetchSummaryFromBackend(conversationText, transferId, deadlineAt, entry.controller.signal)
+    entry.promise = fetchSummaryFromBackend(conversationText, transferId, deadlineAt, entry.controller.signal, nearEnd => {
+      if (ownedEntry.nearEnd === nearEnd) return;
+      ownedEntry.nearEnd = nearEnd;
+      if (nearEnd) for (const listener of ownedEntry.progressListeners) listener();
+    })
       .then(result => {
         ownedEntry.controller.signal.throwIfAborted();
         cacheSummaryResult(conversationText, result);
@@ -1055,6 +1074,17 @@ async function summarizeWithBackend(conversation, transferId = null, deadlineAt 
     summaryInflight.set(conversationText, entry);
   }
   entry.waiters += 1;
+  const reportNearEnd = () => {
+    if (!transferId || !Number.isInteger(operation?.sourceTabId) || operation.controller.signal.aborted || entry.settled
+        || (deadlineAt && Date.now() >= deadlineAt)) return;
+    // Fan out only a text-free hint to each live source sharing this request.
+    // Optional UI messaging cannot hold up the stream or the final carry.
+    try {
+      chrome.tabs.sendMessage(operation.sourceTabId, { type: "SUMMARY_NEAR_END", transferId }).catch(() => {});
+    } catch {}
+  };
+  entry.progressListeners.add(reportNearEnd);
+  if (entry.nearEnd) reportNearEnd();
   let timeout;
   try {
     // A closed/expired waiter leaves independently; shared work stops only
@@ -1073,6 +1103,7 @@ async function summarizeWithBackend(conversation, transferId = null, deadlineAt 
     throw error;
   } finally {
     clearTimeout(timeout);
+    entry.progressListeners.delete(reportNearEnd);
     entry.waiters -= 1;
     if (!entry.waiters && !entry.settled) {
       entry.controller.abort(createTransferCancelledError());
@@ -1081,7 +1112,7 @@ async function summarizeWithBackend(conversation, transferId = null, deadlineAt 
   }
 }
 
-async function fetchSummaryFromBackend(conversationText, transferId = null, deadlineAt = null, requestSignal = null) {
+async function fetchSummaryFromBackend(conversationText, transferId = null, deadlineAt = null, requestSignal = null, onNearEnd = () => {}) {
   checkTransferDeadline(deadlineAt);
   const summaryStartedAt = nowMs();
   const diagnostics = { version: 1, last_operation: "summary_request" };
@@ -1138,7 +1169,7 @@ async function fetchSummaryFromBackend(conversationText, transferId = null, dead
     }
 
     const parseStartedAt = nowMs();
-    const data = await readSummaryResponse(response, checkSummaryDeadline);
+    const data = await readSummaryResponse(response, checkSummaryDeadline, onNearEnd);
     const parseMs = Math.round(nowMs() - parseStartedAt);
     if (data?.ok === false || (data?.code && !data?.summary?.trim())) {
       throw createSummaryBackendPayloadError(data, data?.status || response.status);

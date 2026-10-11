@@ -4,6 +4,8 @@ A short history of decisions and regressions that matter when changing the code.
 
 ## 2026-10-11
 
+- **Destination focus starts earlier and follows streamed progress.** Moved the estimated reveal from three to five seconds remaining and added a text-free final-section hint from the existing answer stream, catching summaries that finish before the countdown. Split headings, provider resets and shared live requests retain their own attempt guards; buffered final results skip optional reveal messaging. The waiting cue requires a loaded destination page but no longer blocks on a composer that may hydrate only after focus. Actual paste still uses the complete accepted carry and existing draft/cancellation/recovery safeguards; the final Copy dialog is unchanged. Focused regressions and an isolated Brave stream fixture cover early native focus, delayed composer hydration, exact insertion, one destination and no Send. Five seconds remains an estimate, not a provider completion guarantee; reload the unpacked extension to use the change.
+
 - **Privacy-policy URL aligned with the HTTPS site.** While investigating the Store's unreachable-policy warning, verified that the public policy pages return HTTP 200 but the old GitHub URL redirects to HTTP because Pages HTTPS enforcement was off. Enabled enforcement on the existing `spreadz.in` site and replaced the policy's old canonical/social URL with `https://spreadz.in/privacy.html`. The Store dashboard cannot be scripted by the available browser tool, so its saved URL and validation still need confirmation; this does not establish the exact cause of the Store warning. Extension source stays 1.4.16.
 
 ## 2026-10-10

@@ -2179,14 +2179,14 @@ test("direct text carry works offline and preserves code, Unicode, roles and bla
   assert.equal(hooks.buildLatestTransferStats(trace, 1).summary.fallback.used, false);
 });
 
-clockTest("the countdown requests one early reveal with three seconds remaining", (t) => {
+clockTest("the countdown requests one early reveal with five seconds remaining", (t) => {
   const hooks = loadPlatformContent([]);
   hooks.window.performance.now = () => Date.now();
   const countdown = new FakeElement();
   hooks.registerElementId("context-generator-handoff-countdown", countdown);
   let calls = 0;
   hooks.startHandoffCountdown(20000, () => calls++);
-  t.mock.timers.tick(16750);
+  t.mock.timers.tick(14750);
   assert.equal(calls, 0);
   t.mock.timers.tick(250);
   assert.equal(calls, 1);
@@ -2289,7 +2289,7 @@ test("stopping an in-flight reveal settles promptly and ignores a late completed
   }
 });
 
-clockTest("waiting destination cues wait for load and composer, then survive body replacement without redrawing", () => {
+clockTest("waiting destination cues require page load but allow a composer that wakes after focus", () => {
   const input = new FakeElement({ tag: "textarea", attrs: { id: "prompt-textarea" } });
   const hooks = loadPlatformContent([input]);
   hooks.document.createElement = () => {
@@ -2312,9 +2312,6 @@ clockTest("waiting destination cues wait for load and composer, then survive bod
   assert.equal(result.code, "destination_loading");
   hooks.document.readyState = "complete";
   input.disabled = true;
-  send(message);
-  assert.equal(result.code, "destination_loading");
-  input.disabled = false;
   send({ ...message, type: "CHECK_TRANSFER_PROGRESS_READY" });
   assert.equal(result.ok, true);
   assert.equal(hooks.document.getElementById("context-generator-destination-status"), null);
@@ -2323,6 +2320,8 @@ clockTest("waiting destination cues wait for load and composer, then survive bod
   const cue = hooks.document.getElementById("context-generator-destination-status");
   assert.ok(cue);
   assert.equal(cue.textContent, "Polishing your summary…\nIt will be pasted here when it’s ready.");
+  assert.equal(input.disabled, true, "The waiting cue never changes or focuses the composer.");
+  assert.equal(input.value, "");
   hooks.document.body = new FakeElement({ tag: "body" });
   const timers = hooks.getOwnedLifecycleResourceCounts().timeouts;
   send(message);
@@ -2331,6 +2330,39 @@ clockTest("waiting destination cues wait for load and composer, then survive bod
   assert.equal(hooks.document.getElementById(cue.id), cue);
   hooks.runtimeMessageListeners[0]({ type: "CANCEL_TRANSFER", transferId: "mount-test" }, {}, () => {});
   assert.equal(cue.isConnected, false);
+});
+
+test("stream near-end hints reveal only the current pending summary and ignore late or unrelated messages", async () => {
+  let finishSummary, requestStarted;
+  const started = new Promise(resolve => { requestStarted = resolve; });
+  const messages = [];
+  const hooks = loadPlatformContent([], "chatgpt.com", { runtimeSendMessage: message => {
+    messages.push(message);
+    if (message.type === "SUMMARIZE_WITH_BACKEND") {
+      requestStarted();
+      return new Promise(resolve => { finishSummary = resolve; });
+    }
+    return Promise.resolve({ ok: true });
+  } });
+  const trace = hooks.createTransferTrace("claude", "test");
+  trace.destinationId = "claude";
+  hooks.startTransferDeadline(trace);
+  const reveal = hooks.createEarlyDestinationReveal(trace, Promise.resolve({ tabId: 41 }));
+  const pending = hooks.summarizeWithBackend("x".repeat(10000), trace, reveal.onNearEnd);
+  await started;
+  const hint = transferId => hooks.runtimeMessageListeners[0]({ type: "SUMMARY_NEAR_END", transferId }, {}, () => {});
+  hint("another-attempt");
+  await new Promise(setImmediate);
+  assert.equal(messages.some(message => message.type === "REVEAL_DESTINATION_PROGRESS"), false);
+  hint(trace.id); hint(trace.id);
+  await reveal.wait();
+  assert.equal(messages.filter(message => message.type === "REVEAL_DESTINATION_PROGRESS").length, 1);
+  finishSummary({ ok: true, summary: "Accepted complete carry" });
+  await pending;
+  reveal.stop();
+  hint(trace.id);
+  assert.equal(trace.onSummaryNearEnd, undefined);
+  assert.equal(messages.filter(message => message.type === "REVEAL_DESTINATION_PROGRESS").length, 1);
 });
 
 clockTest("waiting destination cues expire and ignore cancellation of another attempt", async () => {

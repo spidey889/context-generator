@@ -13,7 +13,7 @@ const compiledTransferBackground = new vm.Script(`${source}\n;globalThis.__backg
   filename: "extension/background.js"
 });
 
-function loadBackgroundForSummaryTest(fetchImpl, { tabs = [], injections = [], injectionError = false, onMessage = () => {}, clock = Date } = {}) {
+function loadBackgroundForSummaryTest(fetchImpl, { tabs = [], injections = [], injectionError = false, onMessage = () => {}, clock = Date, progressMessages = [] } = {}) {
   let messageListener = null;
   let tabRemovedListener;
   const closedTabs = new Set();
@@ -66,7 +66,10 @@ function loadBackgroundForSummaryTest(fetchImpl, { tabs = [], injections = [], i
         onRemoved: { addListener: listener => { tabRemovedListener = listener; } },
         create: async () => ({}),
         query: async () => tabs,
-        sendMessage: async () => ({}),
+        sendMessage: async (tabId, message) => {
+          if (message.type === "SUMMARY_NEAR_END") progressMessages.push({ tabId, message });
+          return {};
+        },
         update: async () => ({})
       },
       windows: { update: async () => ({}) }
@@ -364,6 +367,58 @@ test("streaming summary stays pending through previews and preserves the final r
   assert.equal(fetches, 1);
 });
 
+test("stream near-end hints handle split headings, retries and shared live sources without forwarding text", async (t) => {
+  const encoder = new TextEncoder();
+  const progressMessages = [];
+  let controller, fetches = 0;
+  t.after(() => { try { controller?.close(); } catch {} });
+  const sendSummary = loadBackgroundForSummaryTest(async () => {
+    fetches++;
+    return new Response(new ReadableStream({ start(stream) { controller = stream; } }),
+      { headers: { "content-type": "application/x-ndjson" } });
+  }, { tabs: [{ id: 9 }, { id: 10 }, { id: 11 }], progressMessages });
+  const first = sendSummary("shared streamed chat", null, 9);
+  await new Promise(setImmediate);
+  const second = sendSummary("shared streamed chat", null, 10);
+  await new Promise(setImmediate);
+  const chunk = events => controller.enqueue(encoder.encode(events.map(event => JSON.stringify(event) + "\n").join("")));
+  chunk([{ type: "delta", text: "📦 KEY CONTEXT\nPrivate preview" }, { type: "reset" }, { type: "delta", text: "\n🔁 NEXT STEP\n" }]);
+  await new Promise(setImmediate);
+  assert.equal(progressMessages.length, 0, "A discarded attempt cannot complete the new attempt's headings.");
+  await sendSummary.closeTab(9);
+  assert.equal((await first).code, "user_cancelled");
+  chunk([{ type: "reset" }, { type: "delta", text: "📦 KEY CON" }]);
+  chunk([{ type: "delta", text: "TEXT\nPrivate preview\n🔁 NEXT" }]);
+  await new Promise(setImmediate);
+  assert.equal(progressMessages.length, 0);
+  chunk([{ type: "delta", text: " STEP\nReply only:" }]);
+  await new Promise(setImmediate);
+  assert.deepEqual(progressMessages.map(({ tabId, message }) => ({ tabId, ...message })),
+    [{ tabId: 10, type: "SUMMARY_NEAR_END", transferId: "summary-10" }]);
+  const late = sendSummary("shared streamed chat", null, 11);
+  await new Promise(setImmediate);
+  chunk([{ type: "delta", text: "More final instruction" }]);
+  await new Promise(setImmediate);
+  assert.equal(progressMessages.length, 2, "Each live waiter gets one text-free hint, including a late joiner.");
+  assert.equal(progressMessages[1].tabId, 11);
+  chunk([{ type: "result", data: { summary: "Accepted complete carry" } }]);
+  controller.close();
+  assert.equal((await second).summary, "Accepted complete carry");
+  assert.equal((await late).summary, "Accepted complete carry");
+  assert.equal(fetches, 1);
+});
+
+test("a final result buffered with preview headings skips optional near-end messaging", async () => {
+  const progressMessages = [];
+  const sendSummary = loadBackgroundForSummaryTest(async () => new Response([
+    { type: "delta", text: "📦 KEY CONTEXT\nContext\n🔁 NEXT STEP\n" },
+    { type: "result", data: { summary: "Already finished" } }
+  ].map(event => JSON.stringify(event) + "\n").join(""), { headers: { "content-type": "application/x-ndjson" } }),
+  { tabs: [{ id: 9 }], progressMessages });
+  assert.equal((await sendSummary("buffered summary", null, 9)).summary, "Already finished");
+  assert.equal(progressMessages.length, 0);
+});
+
 test("truncated summary streams fail and source closure cancels an outstanding streamed body", async () => {
   const encoder = new TextEncoder();
   const truncated = loadBackgroundForSummaryTest(async () => new Response(`${JSON.stringify({ type: "delta", text: "Partial" })}\n`,
@@ -423,15 +478,15 @@ test("near-end reveal is text-free and subsequent delivery never steals focus ag
   }
 });
 
-test("early reveal waits for native navigation and composer readiness before showing one cue", async () => {
-  for (const waitingOn of ["load", "pending navigation", "composer"]) {
+test("early reveal waits for native navigation and document readiness before showing one cue", async () => {
+  for (const waitingOn of ["load", "pending navigation", "document"]) {
     const sourceTab = { id: 9, windowId: 1, index: 0 };
     let readinessChecks = 0;
     const harness = loadBackgroundForTransferTest({ sourceTab, sendMessageImpl: async (_tabId, message) => {
       if (message.type === "CHECK_TRANSFER_PROGRESS_READY") {
         readinessChecks++;
         assert.equal(harness.operations.updated.length, 0, "Readiness never focuses the tab.");
-        if (waitingOn === "composer" && readinessChecks === 1) return { ok: false, code: "destination_loading" };
+        if (waitingOn === "document" && readinessChecks === 1) return { ok: false, code: "destination_loading" };
       }
       if (message.type === "SHOW_TRANSFER_PROGRESS") assert.equal(harness.operations.updated.length, 1);
       return { ok: true };
@@ -445,7 +500,7 @@ test("early reveal waits for native navigation and composer readiness before sho
     setTimeout(() => { tab.status = "complete"; delete tab.pendingUrl; }, 0);
     assert.equal((await reveal).ok, true, waitingOn);
     assert.equal(harness.operations.sent.filter(({ message }) => message.type === "SHOW_TRANSFER_PROGRESS").length, 1);
-    assert.ok(readinessChecks >= (waitingOn === "composer" ? 2 : 1));
+    assert.ok(readinessChecks >= (waitingOn === "document" ? 2 : 1));
     assert.equal(harness.operations.created.length, 1);
     assert.ok(harness.operations.updated.every(({ options }) => !Object.hasOwn(options, "url")), "Focus never reloads or navigates the destination.");
   }

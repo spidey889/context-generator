@@ -729,6 +729,17 @@
   }
 
   function handleRuntimeMessage(message, _sender, sendResponse) {
+    if (message?.type === "SUMMARY_NEAR_END") {
+      const trace = activeTransferTrace;
+      if (trace?.id === message.transferId && trace.onSummaryNearEnd) {
+        try {
+          checkTransferDeadline(trace);
+          trace.onSummaryNearEnd("stream");
+        } catch {}
+      }
+      sendResponse({ ok: true });
+      return false;
+    }
     if (message?.type === "CANCEL_TRANSFER") {
       activePasteGuards.get(message.transferId)?.cancel();
       cancelSourceTransfer(message.transferId);
@@ -756,7 +767,10 @@
       }
       // A receiver can exist before navigation and composer hydration finish.
       // Readiness checks never mount UI, focus the editor or reload the page.
-      if (!document.body || document.readyState !== "complete" || !findReadyPlatformInput()) {
+      // A hidden chat may mount/enable its composer only after native focus.
+      // The waiting cue needs the loaded page; actual paste still requires a
+      // usable composer and protects any draft restored by that activation.
+      if (!document.body || document.readyState !== "complete") {
         sendResponse({ ok: false, code: "destination_loading" });
         return false;
       }
@@ -1104,6 +1118,7 @@
       ({ summary, timing } = createLocalContextCarry(conversationText));
     } else {
       try {
+        if (trace) trace.onSummaryNearEnd = onNearEnd;
         startHandoffCountdown(getHandoffSummaryLineDuration(conversationText.length), onNearEnd);
         const response = await notifyBackground({
           type: "SUMMARIZE_WITH_BACKEND",
@@ -1126,6 +1141,8 @@
         // The verified transcript stays in the source page even when the backend
         // or MV3 worker is unavailable. Paste failure still offers manual copy.
         ({ summary, timing } = createLocalContextCarry(conversationText, "summary_service_unavailable"));
+      } finally {
+        if (trace) delete trace.onSummaryNearEnd;
       }
     }
     checkTransferDeadline(trace);
@@ -1190,7 +1207,7 @@
     let work = null;
     let stopping = null;
     return {
-      onNearEnd() {
+      onNearEnd(reason = "countdown") {
         if (!pending || work) return;
         work = (async () => {
           const prepared = await preparedDestinationPromise;
@@ -1204,7 +1221,7 @@
           checkTransferDeadline(trace);
           if (response?.ok === true && response.revealed !== false && instanceActive && !trace.completed && !trace.cancelled && !trace.expired) {
             trace.earlyDestinationTabId = prepared.tabId;
-            markTransferTrace(trace, "destination revealed near countdown end", { tabId: prepared.tabId });
+            markTransferTrace(trace, "destination revealed near summary end", { tabId: prepared.tabId, trigger: reason });
           }
         })().catch(error => {
           // Presentation cannot replace the transfer or its recovery path.
@@ -8704,7 +8721,7 @@
 
     const updateCountdown = () => {
       const remainingMs = startMs - (getNow() - startedAt);
-      if (!revealed && remainingMs <= 3000) {
+      if (!revealed && remainingMs <= 5000) {
         revealed = true;
         onNearEnd?.();
       }

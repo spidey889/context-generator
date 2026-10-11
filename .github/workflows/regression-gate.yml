@@ -87,6 +87,16 @@ jobs:
         run: |
           mkdir -p "$CAP_CONTEXT_SMOKE_ARTIFACT_DIR"
           xvfb-run -a npm run test:extension-smoke 2>&1 | tee "$CAP_CONTEXT_SMOKE_ARTIFACT_DIR/run.log"
+      - name: Brave streaming summary reveals the destination before completion
+        if: steps.scope.outputs.mode != 'light'
+        timeout-minutes: 2
+        shell: bash
+        env:
+          CAP_CONTEXT_EARLY_HANDOFF_SMOKE: stream
+          CAP_CONTEXT_SMOKE_ARTIFACT_DIR: .test-artifacts/browser-smoke/early-handoff
+        run: |
+          mkdir -p "$CAP_CONTEXT_SMOKE_ARTIFACT_DIR"
+          xvfb-run -a npm run test:extension-smoke 2>&1 | tee "$CAP_CONTEXT_SMOKE_ARTIFACT_DIR/run.log"
       - name: Brave ChatGPT fast capture after reload and expired-token cancellation
         if: steps.scope.outputs.mode != 'light'
         timeout-minutes: 3

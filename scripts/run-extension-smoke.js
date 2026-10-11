@@ -33,7 +33,8 @@ const SUMMARY_TEXT = [
 ].join("\n");
 const SMOKE_PLATFORM_QUERY = "__cap_context_smoke_platform";
 const SMOKE_TIMEOUT_MS = Number(process.env.CAP_CONTEXT_SMOKE_TIMEOUT_MS || 45000);
-const EARLY_HANDOFF_SMOKE = process.env.CAP_CONTEXT_EARLY_HANDOFF_SMOKE === "1";
+const EARLY_HANDOFF_STREAM_SMOKE = process.env.CAP_CONTEXT_EARLY_HANDOFF_SMOKE === "stream";
+const EARLY_HANDOFF_SMOKE = process.env.CAP_CONTEXT_EARLY_HANDOFF_SMOKE === "1" || EARLY_HANDOFF_STREAM_SMOKE;
 const HANDOFF_SCREENSHOT_PATH = process.env.CAP_CONTEXT_HANDOFF_SCREENSHOT || "";
 const CLAUDE_PLACEMENT_SCREENSHOT_PATH = process.env.CAP_CONTEXT_CLAUDE_PLACEMENT_SCREENSHOT || "";
 const CHATGPT_PLACEMENT_SCREENSHOT_PATH = process.env.CAP_CONTEXT_CHATGPT_PLACEMENT_SCREENSHOT || "";
@@ -480,6 +481,7 @@ function destinationFixture() {
       const text = document.getElementById("context-generator-destination-status")?.textContent;
       const history = window.__capContextSmokeStatusHistory;
       if (text && history.at(-1) !== text) history.push(text);
+      if (text?.startsWith("Polishing your summary")) window.__capContextSmokeWakeComposer?.();
       if (${EARLY_HANDOFF_SMOKE} && text?.startsWith("Polishing your summary") && !window.__capContextSmokeBodyReplaced) {
         window.__capContextSmokeBodyReplaced = true;
         // Model a destination replacing its body during initial hydration.
@@ -489,6 +491,17 @@ function destinationFixture() {
       }
     }).observe(document.documentElement, { childList: true, subtree: true, characterData: true });
     document.getElementById("send-button").addEventListener("click", () => { window.__capContextSmokeSendClicks += 1; });
+    if (${EARLY_HANDOFF_STREAM_SMOKE}) {
+      // Keep the composer disabled until the post-activation cue. DevTools can
+      // alter visibilityState; verify native tab/window focus separately below.
+      const editor = document.querySelector("textarea");
+      editor.disabled = true;
+      window.__capContextSmokeWakeComposer = () => {
+        if (window.__capContextSmokeComposerWaking) return;
+        window.__capContextSmokeComposerWaking = true;
+        setTimeout(() => { editor.disabled = false; }, 1000);
+      };
+    }
   </script>
   ${EARLY_HANDOFF_SMOKE ? '<script defer src="/destination-ready.js"></script>' : ""}
 </body>
@@ -660,7 +673,7 @@ async function startFixtureServer() {
       let rawBody = "";
       for await (const chunk of request) rawBody += chunk;
       state.summaryRequests.push(JSON.parse(rawBody));
-      if (EARLY_HANDOFF_SMOKE) {
+      if (EARLY_HANDOFF_SMOKE && !EARLY_HANDOFF_STREAM_SMOKE) {
         state.summaryPending = true;
         await new Promise(resolve => setTimeout(resolve, 21000));
         state.summaryPending = false;
@@ -682,7 +695,17 @@ async function startFixtureServer() {
       };
       if (streaming) {
         response.write(`${JSON.stringify({ type: "reset" })}\n`);
-        response.write(`${JSON.stringify({ type: "delta", text: SUMMARY_TEXT.slice(0, 20) })}\n`);
+        response.write(`${JSON.stringify({ type: "delta", text: EARLY_HANDOFF_STREAM_SMOKE ? "📦 KEY CONTEXT\nVerified fixture context." : SUMMARY_TEXT.slice(0, 20) })}\n`);
+        if (EARLY_HANDOFF_STREAM_SMOKE) {
+          state.summaryPending = true;
+          await new Promise(resolve => setTimeout(resolve, 11000));
+          response.write(`${JSON.stringify({ type: "delta", text: "\n🔁 NEXT" })}\n`);
+          await new Promise(resolve => setTimeout(resolve, 100));
+          state.summaryNearEndAt = Date.now();
+          response.write(`${JSON.stringify({ type: "delta", text: " STEP\nReply only:" })}\n`);
+          await new Promise(resolve => setTimeout(resolve, 5000));
+          state.summaryPending = false;
+        }
         response.end(`${JSON.stringify({ type: "result", data: payload })}\n`);
       } else response.end(JSON.stringify(payload));
       return;
@@ -1135,6 +1158,11 @@ async function verifyEarlyHandoff({ sourceSession, devToolsPort, origin, state, 
     return true;
   })()`);
   await waitFor(() => state.summaryRequests.length === 1, "the single pending handoff summary request");
+  if (HANDOFF_SCREENSHOT_PATH) {
+    const shot = await sourceSession.call("Page.captureScreenshot", { format: "png" });
+    await fs.promises.mkdir(path.dirname(HANDOFF_SCREENSHOT_PATH), { recursive: true });
+    await fs.promises.writeFile(HANDOFF_SCREENSHOT_PATH.replace(/\.png$/, "-source.png"), Buffer.from(shot.data, "base64"));
+  }
   const early = await waitFor(async () => {
     for (const target of (await getTargets(devToolsPort)).filter(target => target.type === "page" && target.url.startsWith(origin + "/destination"))) {
       let session = destinationSessions.get(target.id);
@@ -1161,6 +1189,12 @@ async function verifyEarlyHandoff({ sourceSession, devToolsPort, origin, state, 
     return null;
   }, "the early destination reveal before summary completion", 25000);
   assert.equal(state.summaryPending, true, "Polishing precedes the real summary response.");
+  if (EARLY_HANDOFF_STREAM_SMOKE) {
+    assert.ok(state.summaryNearEndAt && Date.now() - state.summaryNearEndAt < 2500,
+      "The stream hint reveals before the 15-second countdown threshold.");
+    assert.equal(await early.session.evaluate("window.__capContextSmokeComposerWaking"), true,
+      "Native focus starts destination composer hydration.");
+  }
   assert.equal(await early.session.evaluate("document.readyState"), "complete");
   assert.equal(await early.session.evaluate("window.__capContextSmokeLoadFinished"), true);
   assert.equal(await early.session.evaluate("window.__capContextSmokeCueMounts"), 1, "The waiting message mounts once after page load.");
@@ -1190,6 +1224,10 @@ async function verifyEarlyHandoff({ sourceSession, devToolsPort, origin, state, 
   assert.equal(state.destinationRequests, 1, "The extension never reloads the prepared destination.");
   assert.equal(await early.session.evaluate("window.__capContextSmokeCueMounts"), 2, "Only waiting and paste cues mount; ready updates the paste cue.");
   assert.equal(destinationSessions.size, 1, "One prepared destination, no duplicate recovery.");
+  if (HANDOFF_SCREENSHOT_PATH) {
+    const shot = await early.session.call("Page.captureScreenshot", { format: "png" });
+    await fs.promises.writeFile(HANDOFF_SCREENSHOT_PATH.replace(/\.png$/, "-ready.png"), Buffer.from(shot.data, "base64"));
+  }
   process.stdout.write("✓ Polishing → real paste → verified ready; exact text, one summary, one destination, no Send click.\n");
 }
 
