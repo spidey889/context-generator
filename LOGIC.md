@@ -210,7 +210,7 @@ Routing and lifecycle:
 
 Included content:
 
-- Follow `current_leaf_message_uuid` through human/assistant parents to null or a recognized root marker. Accept both the all-zero UUID and `00000000-0000-4000-8000-000000000000`; malformed or false-like roots fail.
+- Follow the native `current_leaf_message_uuid` through parents to capture the selected answer and its history, independent of array order. Missing/invalid IDs and duplicate IDs outside this selected path are ignored; missing or ambiguous IDs on the path still fail. Do not guess the selected answer from the last array entry or timestamps. Accept null, the all-zero UUID and `00000000-0000-4000-8000-000000000000` as root markers; malformed or false-like roots fail.
 - Extract direct `text` and `thinking` block strings. Use legacy `message.text` only when structured content is absent/empty, never in addition to structured blocks. Skip empty turns; fail if the whole active branch has no supported text.
 - Preserve each original block/legacy string, including its leading indentation and trailing whitespace. Trim only for emptiness and pasted-card matching; translate inline-card matches back to original block offsets before restoration.
 - Human `message.attachments` qualify as pasted cards only for `file_type: "txt"`, empty `file_name`, and nonempty string `extracted_content`. Named uploads and other types remain excluded. Missing recognized pasted text fails; supplied `file_size` must match the untrimmed extracted UTF-8 byte count.

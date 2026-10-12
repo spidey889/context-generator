@@ -47,6 +47,37 @@ test("Claude structured turns preserve quoted role labels, thinking and source w
   ]);
   assert.equal(capture.text, `Claude conversation:\n\nUser: ${text}\n\nAssistant: Private reasoning\n\nSelected answer`);
 });
+
+test("Claude follows the selected leaf despite malformed IDs and duplicate unused replies", async () => {
+  const data = fixture();
+  const [question, alternate, answer] = data.chat_messages;
+  data.chat_messages = [answer, null, { ...alternate, uuid: undefined }, { ...alternate, uuid: 42 }, question,
+    { ...alternate, truncated: true, text: "UNUSED_REPLY_SENTINEL" },
+    { ...alternate, text: "LAST_UNUSED_REPLY_SENTINEL" }];
+  const capture = await setup(data, { resources: [endpoint] }).window.__capCaptureClaudeJson();
+  assert.equal(capture.text, "Claude conversation:\n\nUser: Question\n\nAssistant: Private reasoning\n\nSelected answer");
+  assert.equal(capture.messageTurnCount, 2);
+  assert.deepEqual(JSON.parse(JSON.stringify(capture.messages)), [
+    { role: "user", text: "Question" }, { role: "assistant", text: "Private reasoning\n\nSelected answer" }
+  ]);
+});
+
+test("Claude still rejects missing or ambiguous IDs on the selected path", async () => {
+  for (const mutate of [
+    data => { delete data.chat_messages[2].uuid; },
+    data => { delete data.chat_messages[0].uuid; },
+    data => { data.chat_messages.push({ ...data.chat_messages[2], text: "CONFLICT_SENTINEL" }); },
+    data => { data.chat_messages.push({ ...data.chat_messages[0] }); }
+  ]) {
+    const data = fixture(); mutate(data);
+    await assert.rejects(setup(data, { resources: [endpoint] }).window.__capCaptureClaudeJson(), error => {
+      assert.equal(error.captureFailureReason, "incomplete");
+      assert.doesNotMatch(error.message, /CONFLICT_SENTINEL/);
+      return true;
+    });
+  }
+});
+
 function setup(data = fixture(), { status = 200, headers = {}, body, resources = [], fetchImpl, runtime, beforeMessage } = {}) {
   const listeners = new Set();
   const navigationListeners = new Set();

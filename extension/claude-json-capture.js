@@ -37,13 +37,20 @@
       }
     }
     if (typeof data.current_leaf_message_uuid !== "string" || !data.current_leaf_message_uuid) throw unsupported("The active branch's last-message ID is missing or invalid.", "invalid_branch");
-    if (data.chat_messages.some(message => typeof message?.uuid !== "string" || !message.uuid)) throw unsupported("A message ID is missing or invalid.");
-    const messages = new Map(data.chat_messages.map(message => [message.uuid, message]));
-    if (messages.size !== data.chat_messages.length) throw unsupported("The response contains duplicate message IDs.", "invalid_branch");
+    // The native leaf selects the displayed answer, not array order. Broken
+    // unused replies cannot invalidate that path; ambiguous IDs on it still fail.
+    const messages = new Map();
+    const duplicateIds = new Set();
+    for (const message of data.chat_messages) {
+      if (typeof message?.uuid !== "string" || !message.uuid) continue;
+      if (messages.has(message.uuid)) duplicateIds.add(message.uuid);
+      else messages.set(message.uuid, message);
+    }
     const branch = [];
     const seen = new Set();
     let id = data.current_leaf_message_uuid;
     while (id) {
+      if (duplicateIds.has(id)) throw unsupported("The active branch contains duplicate message IDs.", "invalid_branch");
       const message = messages.get(id);
       if (!message) throw unsupported(branch.length ? "A parent message is missing from the active branch (possibly an unrecognized root marker)." : "The active branch's last message is missing from the response.");
       if (seen.has(id)) throw unsupported("The active branch's parent links form a cycle.", "branch_cycle");
