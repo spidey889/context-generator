@@ -1,6 +1,7 @@
 const assert = require("node:assert/strict");
 const test = require("node:test");
-const { CdpSession } = require("../scripts/run-extension-smoke.js");
+const { EventEmitter } = require("node:events");
+const { CdpSession, waitForProcessExit } = require("../scripts/run-extension-smoke.js");
 
 class FakeSocket {
   constructor() { this.listeners = new Map(); }
@@ -37,4 +38,32 @@ test("smoke rejects malformed expressions and synchronous socket failures locall
   socket.send = () => { throw new Error("Socket not open"); };
   await assert.rejects(session.call("Runtime.evaluate"), /Socket not open/);
   assert.equal(session.pending.size, 0);
+});
+
+test("smoke shutdown handles exited, signalled and hung browsers without leftover listeners", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const child = () => Object.assign(new EventEmitter(), { exitCode: null, signalCode: null });
+  await waitForProcessExit(null, 20);
+  for (const outcome of [{ exitCode: 0 }, { signalCode: "SIGTERM" }]) {
+    const stopped = Object.assign(child(), outcome);
+    await waitForProcessExit(stopped, 20);
+    assert.equal(stopped.listenerCount("exit"), 0);
+  }
+  const exiting = child();
+  const exited = waitForProcessExit(exiting, 20);
+  assert.equal(exiting.listenerCount("exit"), 1);
+  exiting.emit("exit", 0);
+  await exited;
+  assert.equal(exiting.listenerCount("exit"), 0);
+
+  const hung = child();
+  let finished = false;
+  const deadline = waitForProcessExit(hung, 20).then(() => { finished = true; });
+  t.mock.timers.tick(19);
+  await Promise.resolve();
+  assert.equal(finished, false, "A running browser retains its shutdown grace period.");
+  t.mock.timers.tick(1);
+  await deadline;
+  assert.equal(hung.listenerCount("exit"), 0);
+  assert.doesNotThrow(() => hung.emit("exit", null, "SIGTERM"));
 });

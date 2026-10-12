@@ -891,11 +891,18 @@ async function waitFor(check, description, timeoutMs = SMOKE_TIMEOUT_MS, interva
 }
 
 async function waitForProcessExit(child, timeoutMs) {
-  if (!child || child.exitCode !== null) return;
-  await Promise.race([
-    new Promise((resolve) => child.once("exit", resolve)),
-    new Promise((resolve) => setTimeout(resolve, timeoutMs))
-  ]);
+  if (!child || child.exitCode !== null || child.signalCode != null) return;
+  await new Promise(resolve => {
+    const finish = () => {
+      clearTimeout(timeout);
+      child.removeListener("exit", finish);
+      resolve();
+    };
+    // Cancel the losing wait: a live timeout keeps Node running after Brave exits,
+    // and a stale exit listener survives when the shutdown deadline wins.
+    const timeout = setTimeout(finish, timeoutMs);
+    child.once("exit", finish);
+  });
 }
 
 async function readDevToolsPort(profileRoot) {
@@ -1291,7 +1298,8 @@ async function verifyDraftTransfer({ sourceSession, devToolsPort, origin, state,
   assert.equal(state.summaryRequests.length, 1);
   assert.equal(await destination.evaluate("document.getElementById('context-generator-destination-status')"), null, "The draft box replaces the paste failure banner.");
   await telemetryFixture.verifyDraftOutcome(terminal);
-  await verifyRecoveryPalette(sourceSession, sourceSession.getExtensionContextId());
+  // The DOM run covers this same default dialog's copy/palette behavior. Here
+  // both boxes' exact payloads are checked above, and the draft variant below.
   await verifyRecoveryPalette(destination, destination.getExtensionContextId());
   // The ordinary remote summary has no hidden local-carry wrapper. Exercise
   // that payload too, inside this existing browser run, so copying a compact
@@ -1413,10 +1421,12 @@ async function verifyRecoveryPalette(session, contextId, { nativeCopy = false } 
       }
       copy.click();
       await new Promise(resolve => setTimeout(resolve, 0));
+      const manualText = document.getElementById("context-generator-fallback-text");
       return { available: true, checked: cases.length, preserved, focusPreserved, successPreserved, resetPreserved, nativeCopyPreserved,
         failurePreserved: copy.textContent === "Select text and copy manually" && buttonPalettePreserved()
           && getComputedStyle(copy).background !== originalComputedBackground
-          && document.getElementById("context-generator-fallback-text").value === modal.contextGeneratorCopyText };
+          && manualText.value === modal.contextGeneratorCopyText
+          && manualText.selectionStart === 0 && manualText.selectionEnd === manualText.value.length };
     } finally {
       if (originalWrite) Object.defineProperty(clipboard, "writeText", originalWrite);
       else delete clipboard.writeText;
@@ -2307,18 +2317,22 @@ async function run() {
     // Responsive placement runs in a second tab. Restore the source tab before
     // capture so hidden-tab throttling cannot turn this into a timing test.
     await sourceSession.call("Page.bringToFront");
-    const pickerSourceUrl = await sourceSession.evaluate("location.href");
-    if (JSON_CAPTURE_SMOKE) {
-      await sourceSession.evaluate(`history.replaceState({}, "", "/?${SMOKE_PLATFORM_QUERY}=${JSON_SOURCE}"); true`);
-      // The route poll can finish before its placement frame updates the mount.
-      // Opening with the old owner would correctly dismiss the new picker.
-      await waitFor(() => sourceSession.evaluate("window.__capSmokeSourceRouteReady()", sourceSession.getExtensionContextId()), "source mounting before the product picker");
-    }
-    await verifyPickerProductChanges(sourceSession, state);
-    if (JSON_CAPTURE_SMOKE) {
-      await sourceSession.evaluate(`history.replaceState({}, "", ${JSON.stringify(pickerSourceUrl)}); true`);
-      await waitFor(() => sourceSession.evaluate("window.__capSmokeSourceRouteReady()", sourceSession.getExtensionContextId()), "source route ownership restored before early capture");
-      if (JSON_SOURCE === "chatgpt") await waitFor(() => sourceSession.evaluate("window.__capSmokeChatGptMountReady()", sourceSession.getExtensionContextId()), "ChatGPT ownership restored before early capture");
+    // Shared keyboard/layout/motion checks belong to the regular DOM run.
+    // JSON runs retain their platform toggles, route ownership and actual picker
+    // prefetch/retry below. A requested picker screenshot still runs its checks.
+    if (!JSON_CAPTURE_SMOKE || PICKER_SCREENSHOT_PATH) {
+      const pickerSourceUrl = await sourceSession.evaluate("location.href");
+      if (JSON_CAPTURE_SMOKE) {
+        await sourceSession.evaluate(`history.replaceState({}, "", "/?${SMOKE_PLATFORM_QUERY}=${JSON_SOURCE}"); true`);
+        // Opening with the old route owner would correctly dismiss the picker.
+        await waitFor(() => sourceSession.evaluate("window.__capSmokeSourceRouteReady()", sourceSession.getExtensionContextId()), "source mounting before the product picker");
+      }
+      await verifyPickerProductChanges(sourceSession, state);
+      if (JSON_CAPTURE_SMOKE) {
+        await sourceSession.evaluate(`history.replaceState({}, "", ${JSON.stringify(pickerSourceUrl)}); true`);
+        await waitFor(() => sourceSession.evaluate("window.__capSmokeSourceRouteReady()", sourceSession.getExtensionContextId()), "source route ownership restored before early capture");
+        if (JSON_SOURCE === "chatgpt") await waitFor(() => sourceSession.evaluate("window.__capSmokeChatGptMountReady()", sourceSession.getExtensionContextId()), "ChatGPT ownership restored before early capture");
+      }
     }
     const jsonRequestsBeforeTransfer = state.jsonRequests;
     if (JSON_SOURCE === "gemini") assert.equal(jsonRequestsBeforeTransfer, 0, "Gemini bootstrap capture must not require earlier native RPC traffic.");
@@ -2671,8 +2685,8 @@ async function run() {
     process.stdout.write(TELEMETRY_DATABASE_SMOKE
       ? "✓ Installed worker → Vercel relay → Edge handler → migrated database: verified completion, one count, drained outbox.\n"
       : "✓ Signed terminal telemetry stayed in the local fixture and the installed worker's outbox drained.\n");
-    await verifyRecoveryPalette(sourceSession, extensionContextId);
     if (!JSON_CAPTURE_SMOKE) {
+      await verifyRecoveryPalette(sourceSession, extensionContextId);
       // Repeat at 9,999 captured characters: exercise the real direct boundary
       // branch and prove it cannot reuse the previous remote summary or receipt.
       const prefix = "ChatGPT conversation:\n\nUser: ";
@@ -2780,4 +2794,4 @@ if (require.main === module) {
   });
 }
 
-module.exports = { CdpSession };
+module.exports = { CdpSession, waitForProcessExit };
