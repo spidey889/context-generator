@@ -149,6 +149,11 @@
       assertComplete(content, "Own-turn content");
       if (content.parts != null && !Array.isArray(content.parts)) throw blocked("An own turn has invalid text parts.", "text_invalid");
       if (content.content_type === "text" && !Array.isArray(content.parts)) throw blocked("An own text turn is missing its text parts.", "text_invalid");
+      // Plain-text parts must all be strings. Preserve the rendered message via
+      // normal capture instead of silently submitting only its readable prefix.
+      if (content.content_type === "text" && content.parts.some(part => typeof part !== "string")) {
+        throw Object.assign(captureError("A ChatGPT text message has invalid parts.", "incomplete", "text_invalid"), { allowDomFallback: true });
+      }
       // Own strings plus explicitly typed voice transcripts only. Never recurse
       // into tools, audio/image pointers, artifacts, files or their metadata.
       const parts = Array.isArray(content.parts) ? content.parts.flatMap(part => {

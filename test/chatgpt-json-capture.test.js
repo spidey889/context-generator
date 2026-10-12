@@ -31,6 +31,30 @@ test("ChatGPT structured turns preserve quoted role labels and exact source whit
   ]);
   assert.equal(capture.text, `ChatGPT conversation:\n\nUser: ${text}\n\nAssistant: Selected answer`);
 });
+
+test("ChatGPT rejects malformed plain-text parts and marks only that case for DOM recovery", async () => {
+  for (const part of [{ text: "PRIVATE_DETAILS_SENTINEL" }, 42, null]) {
+    const data = fixture();
+    data.mapping.question.message.content.parts = ["Supported text", part];
+    const harness = setup(data); await discover(harness);
+    await assert.rejects(harness.window.__capCaptureChatGptJson(), error => {
+      assert.equal(error.captureFailureReason, "incomplete");
+      assert.equal(error.diagnostics.capture_detail, "text_invalid");
+      assert.equal(error.allowDomFallback, true);
+      assert.doesNotMatch(error.message, /PRIVATE_DETAILS_SENTINEL/);
+      return true;
+    });
+  }
+  const data = fixture();
+  data.mapping.question.message.content.parts = null;
+  const harness = setup(data); await discover(harness);
+  await assert.rejects(harness.window.__capCaptureChatGptJson(), error => {
+    assert.equal(error.diagnostics.capture_detail, "text_invalid");
+    assert.equal(error.allowDomFallback, undefined);
+    return true;
+  });
+});
+
 function setup(data = fixture(), status = 200, { headers = {}, body, fetchImpl, runtime, schedule = setTimeout, beforeMessage } = {}) {
   const listeners = new Set();
   const popListeners = new Set();
@@ -1004,6 +1028,7 @@ test("ChatGPT JSON capture never extracts nested tool/file/image/artifact text",
   data.mapping.question.message.metadata = { attachments: [{ text: "FILE_SENTINEL" }] };
   data.mapping.tool = { parent: "question", message: { author: { role: "tool" }, content: { content_type: "text", parts: ["TOOL_SENTINEL"] } } };
   data.mapping.answer.parent = "tool";
+  data.mapping.answer.message.content.content_type = "multimodal_text";
   data.mapping.answer.message.content.parts = ["Own answer", { type: "tool_result", content: [{ type: "text", text: "NESTED_SENTINEL" }] }, { type: "artifact", text: "ARTIFACT_SENTINEL" }];
   const harness = setup(data); await discover(harness);
   const capture = await harness.window.__capCaptureChatGptJson();

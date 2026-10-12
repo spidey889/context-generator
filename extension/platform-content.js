@@ -7881,11 +7881,13 @@
             code: "conversation_too_large", diagnosticCode: "conversation_too_large",
             captureFailureReason: "size_limit", diagnostics: error?.diagnostics
           });
-          // ChatGPT fast capture owns an API read, not page scrolling. A failed
-          // read must not silently enter the legacy DOM sweep or move history.
-          if (useChatGptJson && !isSourceReplyInProgress()) throw error;
+          // Only the serializer's malformed plain-text-parts error opts into
+          // normal capture; other ChatGPT failures retain their existing policy.
+          const malformedTextParts = error?.allowDomFallback === true
+            && error.captureFailureReason === "incomplete" && error.diagnostics?.capture_detail === "text_invalid";
+          if (useChatGptJson && !malformedTextParts && !isSourceReplyInProgress()) throw error;
           if (trace?.diagnostics) { for (const key of ["error_code", "error_origin", "failure_site", "error_type", "error_file", "error_line", "error_column"]) delete trace.diagnostics[key]; }
-          // Other adapters recover within this attempt and reuse its destination.
+          // Recovery stays within this attempt and reuses its destination.
           showFastCaptureFallbackMessage();
           const jsonFallbackReason = sanitizeCaptureDiagnostics({ jsonFallbackReason: error?.captureFailureReason }).jsonFallbackReason || "request_failed";
           updateTransferDiagnostics(trace, { json_fallback_code: jsonFallbackReason, last_operation: "capture_dom" }, "json_fallback");

@@ -629,7 +629,7 @@ test("empty new chat rejects before handoff, capture or destination work with fa
   assert.equal(context.isRunning, false);
 });
 
-test("ChatGPT JSON failures never start DOM scrolling and release the lock for retry", async () => {
+test("ChatGPT ordinary JSON failures never start DOM scrolling and release the lock for retry", async () => {
   for (const mode of ["failure", "missing"]) {
     const { context, calls } = harness("chatgpt", { mode });
     for (let attempt = 1; attempt <= 2; attempt++) {
@@ -643,8 +643,41 @@ test("ChatGPT JSON failures never start DOM scrolling and release the lock for r
   }
 });
 
+test("ChatGPT malformed plain-text parts recover by scraping once, including a cached picker failure", async () => {
+  const adapter = vm.createContext({ window: {}, TextEncoder });
+  const adapterSource = fs.readFileSync(path.join(__dirname, "../extension/chatgpt-json-capture.js"), "utf8");
+  // Expose only the real serializer in this isolated test; the product keeps it private.
+  new vm.Script(adapterSource.replace("  function serialize(", "  globalThis.serialize = serialize;\n  function serialize(")).runInContext(adapter);
+  const data = { conversation_id: "source", current_node: "answer", mapping: {
+    root: { parent: null, message: null },
+    question: { parent: "root", message: { author: { role: "user" }, content: { content_type: "text", parts: ["Partial JSON text", { text: "PRIVATE_DETAILS_SENTINEL" }] } } },
+    answer: { parent: "question", message: { author: { role: "assistant" }, content: { content_type: "text", parts: ["Reply"] } } }
+  } };
+  for (const prefetched of [false, true]) {
+    const { context, calls, prepared } = harness("chatgpt", { mode: "success" });
+    context.window.__capCaptureChatGptJson = async () => { calls.json++; return adapter.serialize(data, "source"); };
+    if (prefetched) {
+      context.startPickerJsonCapture(); await context.pickerJsonCapture.promise;
+      assert.equal(calls.prepare + calls.dom + calls.notice + calls.destination, 0);
+    }
+    await context.start("claude");
+    assert.equal(calls.json, 1, "Malformed content must not trigger a JSON retry.");
+    assert.equal(calls.prepare, 1);
+    assert.equal(calls.dom, 1);
+    assert.equal(calls.notice, 1);
+    assert.equal(calls.destination, 1);
+    assert.equal(calls.flows.length, 1);
+    assert.equal(calls.flows[0].prep, prepared);
+    assert.equal(calls.flows[0].text, "DOM transcript");
+    assert.equal(calls.flows[0].trace.conversationMessages, undefined);
+    assert.equal(calls.flows[0].trace.diagnostics.json_fallback_code, "incomplete");
+    assert.equal(calls.errors.length, 0);
+    assert.doesNotMatch(JSON.stringify(calls.traceDetails), /PRIVATE_DETAILS_SENTINEL|Partial JSON text/);
+  }
+});
+
 for (const platform of ["claude", "chatgpt", "gemini", "grok", "deepseek"]) {
-  // ChatGPT remains JSON-only on fast-read failure; other adapters retain
+  // Unclassified ChatGPT failures remain terminal; other adapters retain
   // their existing recovery. Success and explicit opt-out cover every adapter.
   for (const mode of platform === "chatgpt" ? [] : ["failure"]) {
     test(`${platform}: ${mode} fast capture falls back once within the same transfer`, async () => {
