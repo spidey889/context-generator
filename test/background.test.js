@@ -199,7 +199,7 @@ function loadBackgroundForTransferTest({
     operations,
     getPlatformFromUrl: sandbox.__backgroundTestHooks.getPlatformFromUrl,
     sendMessageWhenReady: sandbox.__backgroundTestHooks.sendMessageWhenReady,
-    closeTab(tabId) { closedTabs.add(tabId); return tabRemovedListener(tabId); },
+    closeTab(tabId, notify = true) { closedTabs.add(tabId); return notify ? tabRemovedListener(tabId) : undefined; },
     prepare(destination, senderTab = null, deadlineAt = null) {
       return new Promise(resolve => messageListener(
         { type: "PREPARE_DESTINATION", destination, deadlineAt, transferId: "transfer-test" },
@@ -300,16 +300,44 @@ test("closing the source revokes an outstanding paste without recovery or activa
   assert.equal(harness.operations.sent.filter(({ message }) => message.type === "PASTE_CONTEXT").length, 1);
 });
 
-test("closing the prepared destination cancels the attempt instead of opening a fresh tab", async () => {
+for (const notify of [true, false]) test(`a closed prepared destination reopens with the ready carry (removal event: ${notify})`, async () => {
   const sourceTab = { id: 9, windowId: 1, index: 0 };
   const harness = loadBackgroundForTransferTest({ sourceTab });
   const prepared = await harness.prepare("gemini", sourceTab);
-  await harness.closeTab(prepared.tabId);
+  await harness.closeTab(prepared.tabId, notify);
   const response = await harness.sendTransfer("gemini", prepared.tabId, false, null, sourceTab);
-  assert.equal(response.code, "user_cancelled");
+  assert.equal(response.ok, true);
+  assert.equal(harness.operations.created.length, 2, "Reuse the existing single fresh-tab recovery.");
+  const paste = harness.operations.sent.filter(({ message }) => message.type === "PASTE_CONTEXT");
+  assert.equal(paste.length, 1);
+  assert.equal(paste[0].tabId, response.timing.tabId);
+  assert.notEqual(paste[0].tabId, prepared.tabId);
+  assert.equal(paste[0].message.transferId, "transfer-test");
+  assert.equal(paste[0].message.text, "CONTEXT CARRY — READY TO PASTE\nUseful transfer context");
+  assert.equal(harness.operations.fetched.length, 0, "Keep the ready carry without another summary request.");
+  assert.ok(harness.operations.sent.every(({ message }) => message.type !== "CANCEL_TRANSFER"));
+});
+
+test("closing the prepared destination during paste uses one fresh tab with the same carry", async () => {
+  const sourceTab = { id: 9, windowId: 1, index: 0 };
+  const harness = loadBackgroundForTransferTest({ sourceTab,
+    preparedTab: { id: 41, url: "https://gemini.google.com/app" },
+    sendMessageImpl: async (tabId, message) => {
+      if (tabId === 41 && message.type === "PASTE_CONTEXT") {
+        await harness.closeTab(tabId);
+        throw new Error("The message port closed before a response was received");
+      }
+      return { ok: true };
+    }
+  });
+  const response = await harness.sendTransfer("gemini", 41, false, null, sourceTab);
+  assert.equal(response.ok, true);
   assert.equal(harness.operations.created.length, 1);
-  assert.equal(harness.operations.updated.length, 0);
-  assert.ok(harness.operations.sent.every(({ message }) => message.type !== "PASTE_CONTEXT"));
+  const pastes = harness.operations.sent.filter(({ message }) => message.type === "PASTE_CONTEXT");
+  assert.equal(pastes.length, 2);
+  assert.equal(pastes[0].message.text, pastes[1].message.text);
+  assert.equal(pastes[0].message.transferId, pastes[1].message.transferId);
+  assert.ok(harness.operations.sent.every(({ message }) => message.type !== "CANCEL_TRANSFER"));
 });
 
 test("a tab creation already submitted before cancellation is cleaned up without delivery", async () => {
@@ -667,14 +695,16 @@ clockTest("a timed-out paste and its late acknowledgement cannot create a duplic
 });
 
 clockTest("unconfirmed paste replies never re-send or fall back to another tab", async () => {
+  const sourceTab = { id: 9, windowId: 1, index: 0 };
   for (const reply of [undefined, null, {}, new Error("The message port closed before a response was received"),
     new Error("A listener indicated an asynchronous response by returning true, but the message channel closed before a response was received"),
     new Error("Extension context invalidated")]) {
     const harness = loadBackgroundForTransferTest({
+      sourceTab,
       preparedTab: { id: 41, url: "https://chat.deepseek.com/" },
       sendMessageImpl: () => { if (reply instanceof Error) throw reply; return reply; }
     });
-    const response = await harness.sendTransfer("deepseek", 41, true);
+    const response = await harness.sendTransfer("deepseek", 41, true, null, sourceTab);
     assert.equal(response.code, "paste_unconfirmed");
     assert.equal(response.diagnostics.error_code, reply instanceof Error ? "message_transport_failed" : reply === undefined ? "message_reply_missing" : "message_reply_invalid");
     assert.equal(response.diagnostics.message_reply, reply instanceof Error ? "transport_failed" : reply === undefined ? "missing" : "invalid");

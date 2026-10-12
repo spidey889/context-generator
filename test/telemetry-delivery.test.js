@@ -278,6 +278,19 @@ test("detailed failure observations survive compaction, restart and late conflic
   assert.deepEqual(shared.local[OUTBOX], []);
 });
 
+test("closing a tracked destination leaves the transfer and its telemetry active", async () => {
+  const background = worker(async () => { throw new Error("offline"); });
+  await background.settled();
+  await background.ack(event());
+  await background.settled();
+  background.evaluate(`getTransferOperation("${id(1)}", { id: 42 }).tabIds.add(100)`);
+  await background.listeners.removed(100);
+  await background.settled();
+  assert.equal(background.shared.session[ACTIVE][id(1)].event.status, "started");
+  assert.ok(background.shared.local[OUTBOX].every(entry => entry.payload.status === "started"));
+  assert.equal(background.evaluate(`transferOperations.get("${id(1)}").controller.signal.aborted`), false);
+});
+
 test("active state and optional v3 served-model receipt survive worker restart before tab cancellation", async () => {
   for (const withReceipt of [false, true]) {
     const shared = profile();

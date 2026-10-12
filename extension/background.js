@@ -122,14 +122,13 @@ chrome.runtime.onInstalled.addListener(initializeBackground);
 chrome.runtime.onStartup.addListener(initializeBackground);
 
 chrome.tabs.onRemoved?.addListener((tabId) => {
-  // Revoke delivery synchronously; optional telemetry/storage must not delay it.
-  const cancelledIds = [];
+  // Only losing the source cancels. A closed destination uses fresh-tab recovery
+  // once the carry is ready, without discarding capture or provider work.
   for (const operation of transferOperations.values()) {
-    if (!operation.tabIds.has(tabId)) continue;
-    cancelTransferOperation(operation);
-    cancelledIds.push(operation.transferId);
+    if (operation.sourceTabId === tabId) cancelTransferOperation(operation);
+    else operation.tabIds.delete(tabId);
   }
-  return recordUserCancelledTransfersForTab(tabId, cancelledIds).catch(() => {});
+  return recordUserCancelledTransfersForTab(tabId).catch(() => {});
 });
 
 function createTransferCancelledError() {
@@ -487,11 +486,11 @@ async function persistActiveTransferTelemetry(attemptId) {
   await activeStorage.set({ [TELEMETRY_ACTIVE_STORAGE_KEY]: entries });
 }
 
-async function recordUserCancelledTransfersForTab(tabId, cancelledIds = []) {
+async function recordUserCancelledTransfersForTab(tabId) {
   await enqueueTelemetryWork(() => restoreActiveTransferTelemetry());
   const work = [];
   for (const [attemptId, sourceTabId] of activeTransferSourceTabs.entries()) {
-    if (sourceTabId !== tabId && !cancelledIds.includes(attemptId)) continue;
+    if (sourceTabId !== tabId) continue;
     const active = activeTransferTelemetry.get(attemptId);
     if (!active || active.status !== "started") continue;
 
@@ -501,7 +500,7 @@ async function recordUserCancelledTransfersForTab(tabId, cancelledIds = []) {
       ...active,
       status: "failed",
       failureReason: "user_cancelled",
-      diagnostics: { ...(active.diagnostics || { version: 1 }), error_code: sourceTabId === tabId ? "source_tab_closed" : "destination_tab_closed",
+      diagnostics: { ...(active.diagnostics || { version: 1 }), error_code: "source_tab_closed",
         error_origin: "background", cancelled: true }
     }));
   }
@@ -1610,11 +1609,8 @@ async function isPreparedDestinationTabUsable(tabId, destinationId, operation = 
     });
     return platformMatches && routeAllowed;
   } catch {
-    // A closed transfer tab is cancellation, not a reason to recreate it.
-    if (operation) {
-      cancelTransferOperation(operation);
-      checkTransferOperation(operation);
-    }
+    // Missing destinations are recoverable even if the removal event was lost.
+    checkTransferOperation(operation);
     return false;
   }
 }
@@ -1981,8 +1977,20 @@ async function sendMessageWhenReady(tabId, message, timeoutMs, name, trace = nul
       lastError = error;
       checkTransferOperation(trace?.operation);
       checkTransferDeadline(message.deadlineAt);
-      // Only a missing receiver proves the paste never started. A lost reply
-      // or timeout may follow insertion, so neither re-send nor open a fresh tab.
+      if (message.type === "PASTE_CONTEXT" && trace?.operation) {
+        try { await chrome.tabs.get(tabId); }
+        catch (tabError) {
+          // A gone tab cannot retain a paste. Let the existing fresh-tab path
+          // recover; lost acknowledgements from live tabs remain unconfirmed.
+          if (/No tab with id/i.test(String(tabError?.message || ""))) {
+            throw Object.assign(new Error("The destination tab was closed."), {
+              code: "destination_open_failed", diagnosticCode: "destination_tab_closed"
+            });
+          }
+        }
+      }
+      // For a live tab, only a missing receiver proves the paste never started.
+      // A lost reply or timeout may follow insertion, so never duplicate it.
       if (message.type === "PASTE_CONTEXT" &&
           !/Receiving end does not exist|Could not establish connection/.test(String(error?.message || ""))) {
         globalThis.CapTransferDiagnostics?.update(trace?.diagnostics, { message_attempts: attempts, message_ms: Date.now() - startedAt,
