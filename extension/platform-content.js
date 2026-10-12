@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-12-draft-both-tabs-v138";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-12-draft-translucent-v139";
   const INLINE_PILL_SIZE = 36;
   const ownedUiStyleSheets = new Map();
   const CLAUDE_INLINE_STYLE_ID = "context-generator-claude-inline-styles";
@@ -9104,7 +9104,8 @@
         draftPresent ? "padding:22px" : "padding:26px",
         draftPresent ? "border-radius:22px" : "border-radius:26px",
         draftPresent ? "border:1px solid rgba(189,165,224,0.23)" : "border:1px solid rgba(255,255,255,0.14)",
-        draftPresent ? "background:#18131f" : "background:linear-gradient(180deg,#171719 0%,#101012 58%,#09090b 100%)",
+        draftPresent ? "background:rgba(24,19,31,0.68)" : "background:linear-gradient(180deg,#171719 0%,#101012 58%,#09090b 100%)",
+        draftPresent ? "backdrop-filter:blur(16px)" : "backdrop-filter:none",
         "color:#f5f5f5",
         "box-shadow:0 28px 84px rgba(0,0,0,0.58),0 0 0 1px rgba(0,0,0,0.72),inset 0 1px 0 rgba(255,255,255,0.08)",
         draftPresent ? "max-height:calc(100dvh - 36px);overflow:auto" : "overflow:hidden"
