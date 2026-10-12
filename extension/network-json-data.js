@@ -28,7 +28,7 @@
     const mapping = new Map();
     for (const item of items) {
       const id = item?.[idKey];
-      if ((typeof id !== "string" && !Number.isSafeInteger(id)) || mapping.has(id) || !Object.hasOwn(item, parentKey)) fail("Invalid or duplicate message IDs were returned.", undefined, "invalid_branch");
+      if ((typeof id !== "string" && !Number.isSafeInteger(id)) || mapping.has(id) || (!externalRoot && !Object.hasOwn(item, parentKey))) fail("Invalid or duplicate message IDs were returned.", undefined, "invalid_branch");
       mapping.set(id, item);
     }
     let externalRootParent = null;
@@ -37,7 +37,9 @@
       // message IDs are UUIDv4. A missing ordinary parent is lost history, not
       // a synthetic root. Unknown marker shapes fail into normal capture.
       // The UUID shape is a compatibility guard, not proof of server completeness.
-      const roots = items.filter(item => item[parentKey] !== null && !mapping.has(item[parentKey]));
+      // Grok may include an unused regenerated reply without a parent field.
+      // Validate that field when walking the selected path, not unused replies.
+      const roots = items.filter(item => Object.hasOwn(item, parentKey) && item[parentKey] !== null && !mapping.has(item[parentKey]));
       if (roots.length) {
         const parent = roots[0][parentKey];
         if (typeof parent !== "string" || !/^[0-9a-f]{8}-[0-9a-f]{4}-5[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(parent)
@@ -53,6 +55,7 @@
     while (true) {
       const item = mapping.get(id);
       if (!item || seen.has(id)) fail("A message is missing or the branch contains a cycle.", undefined, "branch_cycle");
+      if (!Object.hasOwn(item, parentKey)) fail("A selected message has no parent field.", undefined, "parent_missing");
       seen.add(id); branch.push(item);
       const parent = item[parentKey];
       if (parent === null) break;

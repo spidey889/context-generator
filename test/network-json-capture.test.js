@@ -459,7 +459,7 @@ for (const platform of ["gemini", "grok", "deepseek"]) test(`${platform}: the pr
   old.version = platform === "deepseek" ? 9 : platform === "gemini" ? 9 : 7;
   h.reinstall(files[1]);
   assert.notEqual(h.window.__capNetworkFetchState, old);
-  assert.equal(h.window.__capNetworkFetchState.version, platform === "deepseek" ? 14 : 12);
+  assert.equal(h.window.__capNetworkFetchState.version, platform === "deepseek" ? 14 : platform === "grok" ? 13 : 12);
   assert.equal(h.listeners.size, 2);
   assert.equal((await h.window.__capCaptureNetworkJson()).text, h.fixture.expected);
 });
@@ -610,6 +610,23 @@ test("Grok rejects broken internal links and ambiguous external roots even with 
     const h = setup("grok", f);
     assert.throws(() => h.api.grokBranch(f.nodes, "answer_2"), /missing|cycle/);
   }
+});
+
+test("Grok ignores an unused reply without a parent field but rejects one on the selected path", async () => {
+  const f = fixtures("grok", "smoke", 3);
+  f.nodes.responseNodes.push({ responseId: "unused-reply", sender: "assistant" });
+  const h = setup("grok", f);
+  h.location.href += "?rid=answer_2";
+  const capture = await h.window.__capCaptureNetworkJson();
+  assert.equal(capture.text, f.expected);
+  const loaded = h.requests.find(request => request.url.pathname.endsWith("load-responses"));
+  assert.deepEqual(JSON.parse(loaded.options.body).responseIds,
+    ["user_0", "answer_0", "user_1", "answer_1", "user_2", "answer_2"]);
+  delete f.nodes.responseNodes[2].parentResponseId;
+  assert.throws(() => h.api.grokBranch(f.nodes, "answer_2"), error => {
+    assert.equal(error.captureFailureReason, "incomplete");
+    return true;
+  });
 });
 
 test("Grok rejects a missing oldest pair rather than accepting an ordinary message ID as its root", async () => {
