@@ -1293,10 +1293,41 @@ async function verifyDraftTransfer({ sourceSession, devToolsPort, origin, state,
   await telemetryFixture.verifyDraftOutcome(terminal);
   await verifyRecoveryPalette(sourceSession, sourceSession.getExtensionContextId());
   await verifyRecoveryPalette(destination, destination.getExtensionContextId());
+  // The ordinary remote summary has no hidden local-carry wrapper. Exercise
+  // that payload too, inside this existing browser run, so copying a compact
+  // preview cannot silently omit instructions when Clipboard API access fails.
+  await destination.evaluate("window.__capSmokeShowDraftRecovery()", destination.getExtensionContextId());
+  await verifyCompactDraftPayload(destination, destination.getExtensionContextId());
+  await verifyRecoveryPalette(destination, destination.getExtensionContextId(), { nativeCopy: true });
+  assert.equal(await destination.evaluate("document.querySelector('form textarea').value"), "My existing draft");
+  assert.equal(await destination.evaluate("window.__capContextSmokeSendClicks"), 0);
   process.stdout.write("✓ Draft detected on first check: one destination, intact draft, both copy boxes hold the exact carry, no Send.\n");
 }
 
-async function verifyRecoveryPalette(session, contextId) {
+async function verifyCompactDraftPayload(session, contextId) {
+  const details = await session.evaluate(`({ title: document.getElementById("context-generator-fallback-title").textContent,
+    desc: document.getElementById("context-generator-fallback-desc").textContent,
+    text: document.getElementById("context-generator-fallback-text").value,
+    carry: document.getElementById("context-generator-fallback-modal").contextGeneratorCopyText })`, contextId);
+  assert.equal(details.title, "Your draft is safe");
+  assert.equal(details.desc, "We noticed your text box has text in it. Here’s your conversation, ready to be copied.");
+  assert.match(details.text, /Conversation from your previous chat/);
+  assert.ok(!details.text.includes("The conversation below was transferred"), "The compact preview starts with the conversation.");
+  assert.match(details.carry, /^The conversation below was transferred/);
+  const expanded = await session.evaluate(`(() => {
+    const more = document.getElementById("context-generator-fallback-more");
+    const text = document.getElementById("context-generator-fallback-text");
+    more.click();
+    return { value: text.value, expanded: more.getAttribute("aria-expanded"), label: more.textContent };
+  })()`, contextId);
+  assert.equal(expanded.value, details.carry);
+  assert.equal(expanded.expanded, "true");
+  assert.equal(expanded.label, "Show less");
+  await session.evaluate("document.getElementById('context-generator-fallback-more').click()", contextId);
+  assert.equal(await session.evaluate("document.getElementById('context-generator-fallback-text').value", contextId), details.text);
+}
+
+async function verifyRecoveryPalette(session, contextId, { nativeCopy = false } = {}) {
   const result = await session.evaluate(`(async () => {
     const modal = document.getElementById("context-generator-fallback-modal");
     const copy = document.getElementById("context-generator-fallback-copy");
@@ -1325,6 +1356,7 @@ async function verifyRecoveryPalette(session, contextId) {
     const rules = document.createElement("style");
     let copiedText = null;
     let failCopy = false;
+    let nativeCopyPreserved = true;
     try {
       // Match Dark Reader's inline variables and important rules, without
       // installing another extension or touching the user's real clipboard.
@@ -1364,9 +1396,24 @@ async function verifyRecoveryPalette(session, contextId) {
         && getComputedStyle(copy).background === originalComputedBackground
         && getComputedStyle(copy).color === originalColor;
       failCopy = true;
+      if (${nativeCopy}) {
+        let selectedText = null;
+        Object.defineProperty(document, "execCommand", { configurable: true, value: command => {
+          if (command !== "copy") return false;
+          const text = document.getElementById("context-generator-fallback-text");
+          selectedText = text.value.slice(text.selectionStart, text.selectionEnd);
+          return true;
+        } });
+        copy.click();
+        await new Promise(resolve => setTimeout(resolve, 0));
+        nativeCopyPreserved = copy.textContent === "Copied!" && selectedText === modal.contextGeneratorCopyText;
+        await new Promise(resolve => setTimeout(resolve, 2100));
+        modal.contextGeneratorSetExpanded?.(false);
+        Object.defineProperty(document, "execCommand", { configurable: true, value: () => false });
+      }
       copy.click();
       await new Promise(resolve => setTimeout(resolve, 0));
-      return { available: true, checked: cases.length, preserved, focusPreserved, successPreserved, resetPreserved,
+      return { available: true, checked: cases.length, preserved, focusPreserved, successPreserved, resetPreserved, nativeCopyPreserved,
         failurePreserved: copy.textContent === "Select text and copy manually" && buttonPalettePreserved()
           && getComputedStyle(copy).background !== originalComputedBackground
           && document.getElementById("context-generator-fallback-text").value === modal.contextGeneratorCopyText };
@@ -1390,9 +1437,10 @@ async function verifyRecoveryPalette(session, contextId) {
     }
   })()`, contextId);
   assert.equal(result.available, true, "The recovery dialog must be available after delivery.");
-  for (const key of ["preserved", "focusPreserved", "successPreserved", "resetPreserved", "failurePreserved"]) {
+  for (const key of ["preserved", "focusPreserved", "successPreserved", "resetPreserved", "failurePreserved", "nativeCopyPreserved"]) {
     assert.equal(result[key], true, `Dark Reader must not override recovery ${key}: ${JSON.stringify(result)}`);
   }
+  if (nativeCopy) process.stdout.write("✓ Compact draft preview expands/collapses; Clipboard API, native fallback and manual selection keep the complete carry.\n");
   process.stdout.write(`✓ Recovery dialog: ${result.checked} palette checks resist Dark Reader; focus, copy success/reset/failure colors preserved.\n`);
 }
 
@@ -1576,29 +1624,8 @@ async function run() {
       const contextId = sourceSession.getExtensionContextId();
       const draftRecovery = process.env.CAP_CONTEXT_DRAFT_RECOVERY_SMOKE === "1";
       await sourceSession.evaluate(draftRecovery ? "window.__capSmokeShowDraftRecovery()" : "window.__capSmokeShowRecovery()", contextId);
-      if (draftRecovery) {
-        const details = await sourceSession.evaluate(`({ title: document.getElementById("context-generator-fallback-title").textContent,
-          desc: document.getElementById("context-generator-fallback-desc").textContent,
-          text: document.getElementById("context-generator-fallback-text").value,
-          carry: document.getElementById("context-generator-fallback-modal").contextGeneratorCopyText })`, contextId);
-        assert.equal(details.title, "Your draft is safe");
-        assert.equal(details.desc, "We noticed your text box has text in it. Here’s your conversation, ready to be copied.");
-        assert.match(details.text, /Conversation from your previous chat/);
-        assert.ok(!details.text.includes("The conversation below was transferred"), "The compact preview starts with the conversation.");
-        assert.match(details.carry, /^The conversation below was transferred/);
-        const expanded = await sourceSession.evaluate(`(() => {
-          const more = document.getElementById("context-generator-fallback-more");
-          const text = document.getElementById("context-generator-fallback-text");
-          more.click();
-          return { value: text.value, expanded: more.getAttribute("aria-expanded"), label: more.textContent };
-        })()`, contextId);
-        assert.equal(expanded.value, details.carry);
-        assert.equal(expanded.expanded, "true");
-        assert.equal(expanded.label, "Show less");
-        await sourceSession.evaluate("document.getElementById('context-generator-fallback-more').click()", contextId);
-        assert.equal(await sourceSession.evaluate("document.getElementById('context-generator-fallback-text').value", contextId), details.text);
-      }
-      await verifyRecoveryPalette(sourceSession, contextId);
+      if (draftRecovery) await verifyCompactDraftPayload(sourceSession, contextId);
+      await verifyRecoveryPalette(sourceSession, contextId, { nativeCopy: draftRecovery });
       if (process.env.CAP_CONTEXT_RECOVERY_SCREENSHOT) {
         const shot = await sourceSession.call("Page.captureScreenshot", { format: "png" });
         await fs.promises.writeFile(path.resolve(process.env.CAP_CONTEXT_RECOVERY_SCREENSHOT), Buffer.from(shot.data, "base64"));

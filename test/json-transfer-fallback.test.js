@@ -459,6 +459,47 @@ test("a pending prefetch that fails after selection gets one fresh JSON read", a
   assert.equal(calls.errors.length + calls.dom + calls.notice, 0);
 });
 
+test("changing chats while the JSON retry is pending never transfers its returned text", async () => {
+  const { context, calls, navigate } = harness("chatgpt");
+  const retryStarted = deferred(), response = deferred();
+  context.window.__capCaptureChatGptJson = async () => {
+    calls.json++;
+    if (calls.json === 1) throw transientError();
+    retryStarted.resolve();
+    return response.promise;
+  };
+  const transfer = context.start("claude");
+  await retryStarted.promise;
+  navigate("/c/other"); navigate("/c/source");
+  response.resolve({ text: "WRONG_CHAT_SENTINEL", messageTurnCount: 2 });
+  await transfer;
+  assert.equal(calls.json, 2);
+  assert.equal(calls.flows.length + calls.captureMetrics.length + calls.dom + calls.notice, 0);
+  assert.match(calls.errors[0], /conversation changed during capture/);
+  assert.equal(context.isRunning, false);
+});
+
+test("a new user attempt gets its own JSON retry after both previous reads failed", async () => {
+  const { context, calls } = harness("chatgpt", { mode: "success" });
+  const capture = context.window.__capCaptureChatGptJson;
+  context.window.__capCaptureChatGptJson = async () => {
+    if (calls.json < 3) { calls.json++; throw transientError(); }
+    return capture();
+  };
+  await context.start("claude");
+  assert.equal(calls.json, 2);
+  assert.equal(calls.errors.length, 1);
+  assert.equal(calls.flows.length, 0);
+  assert.equal(context.isRunning, false);
+  await context.start("claude");
+  assert.equal(calls.json, 4);
+  assert.equal(calls.errors.length, 1, "The recovered second attempt must add no frontend error.");
+  assert.equal(calls.flows.length, 1);
+  assert.equal(calls.flows[0].text, "JSON transcript");
+  assert.equal(calls.destination, 2, "One destination per user-selected attempt.");
+  assert.equal(calls.dom + calls.notice, 0);
+});
+
 test("navigation, cancellation or deadline expiry prevents a transient JSON retry", async () => {
   for (const stop of ["navigation", "cancelled", "expired"]) {
     const { context, calls, navigate } = harness("chatgpt");
