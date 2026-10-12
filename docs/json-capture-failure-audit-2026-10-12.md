@@ -86,7 +86,7 @@ These synthetic cases demonstrate current behavior. Their frequency and presence
 
 | Case | Observed behavior | Assessment |
 | --- | --- | --- |
-| Shared network completeness has `complete: "false"` or an array-shaped value | Literal-false checks do not reject these shapes. | Validation gap; differs from the stricter ChatGPT/Claude object/boolean checks. |
+| Shared network completeness has an array-shaped value | Array-shaped completeness values are ignored. | Validation gap; no demonstrated loss of useful text from this metadata shape. |
 | Grok advertised total is negative | Negative count passes the current safe-integer / greater-than-returned-count check. | Malformed count validation gap. |
 | Gemini newest reply has two candidates and no explicit selection | First native candidate is selected. | Intentional assumption. A mismatch with the displayed candidate was not demonstrated on a live account. |
 | Supported own turn carries a completeness marker such as `complete: false` | Claude/ChatGPT reject it even if the direct text looks complete. | Intentional fail-closed rule; the marker's scope matters. |

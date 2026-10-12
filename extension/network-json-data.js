@@ -13,7 +13,9 @@
       const flag = value[key];
       if (flag != null && flag !== false && flag !== 0 && flag !== "" && !(Array.isArray(flag) && !flag.length)) fail("Incomplete history was returned.");
     }
-    if (value.is_complete === false || value.complete === false || value.isComplete === false) fail("Incomplete history was returned.");
+    // A textual false carries the same explicit warning as the boolean value.
+    if ([value.is_complete, value.complete, value.isComplete].some(flag => flag === false
+      || (typeof flag === "string" && flag.trim().toLowerCase() === "false"))) fail("Incomplete history was returned.");
   };
   const transcript = (name, turns, excludedContentTypes = new Set()) => {
     if (!turns.length) fail("No usable user or assistant text was found.", undefined, "missing_text");

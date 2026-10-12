@@ -4,6 +4,8 @@ A short history of decisions and regressions that matter when changing the code.
 
 ## 2026-10-13
 
+- **Textual false completeness markers use existing incomplete-history recovery.** Grok and DeepSeek now recognize `"false"` alongside boolean `false` in the three supported completeness fields, including casing and surrounding whitespace. Other metadata shapes keep their existing handling. Advanced affected MAIN/bridge readiness together and aligned the existing version assertion. Removed the resolved string-value finding from the audit while retaining its separate array-shape note. Tests were not run; native occurrence remains unconfirmed.
+
 - **DeepSeek single-file objects use the existing text-file capture path.** Normalize `FILE.files` from either a list or one object in both MAIN download discovery and serialization, retaining existing file validation and exclusions. Advanced DeepSeek readiness to v15 and aligned the existing version assertion; no new tests were added or run, as requested. Removed the resolved synthetic finding from the audit. Native occurrence remains unconfirmed.
 
 - **Unused Grok replies without parent fields no longer block the selected chat.** Validate the missing field on the selected path rather than rejecting every unused node. Retained the existing duplicate-ID/root/body checks and DeepSeek validation. Advanced Grok MAIN/bridge readiness to v13 to replace old adapter closures. The regression verifies exact selected JSON capture and body-request IDs, plus rejection when a selected ancestor lacks its parent field. All 111 focused network capture/transfer tests passed; the case was reproduced with test data, not observed live.
