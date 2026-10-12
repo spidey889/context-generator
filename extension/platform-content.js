@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-12-draft-copy-v136";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-12-close-nowrap-v137";
   const INLINE_PILL_SIZE = 36;
   const ownedUiStyleSheets = new Map();
   const CLAUDE_INLINE_STYLE_ID = "context-generator-claude-inline-styles";
@@ -9155,6 +9155,8 @@
       dismissBtn.textContent = "Close";
       dismissBtn.style.cssText = [
         "height:32px",
+        "flex-shrink:0",
+        "white-space:nowrap",
         "padding:0 12px",
         "border-radius:999px",
         "border:1px solid rgba(255,255,255,0.14)",
