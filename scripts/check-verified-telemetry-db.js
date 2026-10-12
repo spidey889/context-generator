@@ -382,6 +382,8 @@ async function main() {
         checks += await require("./check-claude-page-diagnostics-db.js").checkClaudePageDiagnostics(db, sql);
       } else if (name.endsWith("_useful_transfer_diagnostics.sql")) {
         checks += await require("./check-useful-diagnostics-db.js").checkUsefulDiagnostics(db, sql);
+      } else if (name.endsWith("_record_draft_copy_recovery.sql")) {
+        checks += await require("./check-draft-copy-recovery-db.js").checkDraftCopyRecovery(db, sql);
       } else await db.exec(sql);
     }
     checks += await require("./check-served-model-db.js").checkStoreModelReceipts(db);

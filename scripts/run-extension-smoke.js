@@ -1274,6 +1274,10 @@ async function verifyDraftTransfer({ sourceSession, devToolsPort, origin, state,
   assert.equal(await destination.evaluate("window.__capContextSmokeSendClicks"), 0);
   const terminal = await waitFor(() => state.telemetryRequests.findLast(payload => payload.status === "failed"), "the draft outcome telemetry");
   assert.equal(terminal.diagnostics.error_code, "editor_has_draft");
+  assert.ok(terminal.diagnostics.events.some(event => event.event === "local_fallback" && event.code === "editor_has_draft"), "Only a displayed copy box acknowledges draft recovery.");
+  const latest = await sourceSession.evaluate("chrome.storage.local.get('context-generator-last-transfer-stats-v1').then(value => value['context-generator-last-transfer-stats-v1'])", sourceSession.getExtensionContextId());
+  assert.equal(latest.status, "copy_ready");
+  assert.equal(latest.failure, null);
   assert.equal(terminal.diagnostics.paste_attempts, 1);
   assert.ok(terminal.diagnostics.paste_ms < 1000, "An existing draft must fail on the first check without a retry wait.");
   assert.equal(terminal.diagnostics.fresh_recovery, undefined);
@@ -1572,7 +1576,7 @@ async function run() {
           text: document.getElementById("context-generator-fallback-text").value,
           carry: document.getElementById("context-generator-fallback-modal").contextGeneratorCopyText })`, contextId);
         assert.equal(details.title, "Your draft is safe");
-        assert.equal(details.desc, "We noticed your input box has text in it. Here’s your conversation, ready to be copied.");
+        assert.equal(details.desc, "We noticed your text box has text in it. Here’s your conversation, ready to be copied.");
         assert.match(details.text, /Conversation from your previous chat/);
         assert.ok(!details.text.includes("The conversation below was transferred"), "The compact preview starts with the conversation.");
         assert.match(details.carry, /^The conversation below was transferred/);

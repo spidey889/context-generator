@@ -4,6 +4,8 @@ Only target **cap-context-telemetry** (`iqkzynzxbmemhtiupwwu`). The first thirte
 
 ## Persistence and reporting
 
+Migration `20261012110425_record_draft_copy_recovery.sql` adds the terminal `copy_ready` outcome (“Copy box shown”). Only a `failed`/`paste_failed` report at `paste_started` with `diagnostics.error_code = editor_has_draft` and a matching `local_fallback` event is normalized. The extension emits that event after its source copy dialog was actually displayed. The database clears `failure_reason`, retains the technical draft cause, and excludes this handled outcome from failed-attempt counters. It does not claim successful paste or clipboard copy; signed summary accounting remains independent. This uses the existing relay/Edge contract and preserves older rows without the acknowledgement, function grants, private access and terminal immutability.
+
 Migration `20261008185417_add_transfer_diagnostics.sql` adds optional versioned JSONB diagnostics with a closed SQL validator and frozen first-terminal observations. The sixteenth RPC argument defaults to NULL, retaining existing callers. Deploy compatible Edge/Vercel support before extension 1.4.12; old rows remain NULL rather than receiving invented causes. See [the schema, observation meanings and investigation query](../docs/transfer-diagnostics.md). Local validation passed 631 checks across 31 migrations and installed Brave-to-relay/Edge/database delivery. Hosted migration/Edge version 13 preserved all 38 existing transfer rows, 10 users, counters and private access; rolled-back service-role probes verified actual writes and immutability.
 
 The current table is `public.transfers`:

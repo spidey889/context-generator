@@ -799,7 +799,7 @@
               </div>
             </div>
             <div class="hero-footer">
-              ${mini("Status", stats.status === "completed" ? "Completed" : "Failed")}
+              ${mini("Status", stats.status === "completed" ? "Completed" : stats.status === "copy_ready" ? "Copy box shown" : "Failed")}
               ${mini("Served model", formatModelDisplayName(summary.model))}
               ${mini("Profile", summary.profile || "n/a")}
             </div>

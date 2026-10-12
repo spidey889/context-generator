@@ -180,8 +180,8 @@ async function createTelemetrySmokeFixture(repoRoot, databaseEnabled) {
       if (!databaseEnabled) return;
       await rpcChain;
       const row = (await database.query("select status,failure_reason,summary_verified,diagnostics from public.transfers where attempt_id=$1", [terminal.attempt_id])).rows[0];
-      assert.equal(row.status, "failed");
-      assert.equal(row.failure_reason, "paste_failed");
+      assert.equal(row.status, "copy_ready");
+      assert.equal(row.failure_reason, null);
       assert.equal(row.summary_verified, Boolean(terminal.summary_proof));
       assert.deepEqual(row.diagnostics, terminal.diagnostics);
       assert.equal(row.diagnostics.error_code, "editor_has_draft");
@@ -189,7 +189,7 @@ async function createTelemetrySmokeFixture(repoRoot, databaseEnabled) {
       assert.equal(row.diagnostics.fresh_recovery, undefined);
       const counts = (await database.query("select lifetime_summaries::int as total,today_summaries::int as today,today_failed_attempts::int as failed from public.users where install_id=$1", [terminal.install_id])).rows[0];
       const summaries = terminal.summary_proof ? 1 : 0;
-      assert.deepEqual(counts, { total: summaries, today: summaries, failed: 1 });
+      assert.deepEqual(counts, { total: summaries, today: summaries, failed: 0 });
     },
     async verifyFailureOutcome(terminal) {
       if (!databaseEnabled) return;

@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-12-draft-compact-v140";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-12-draft-copy-ready-v141";
   const INLINE_PILL_SIZE = 36;
   const ownedUiStyleSheets = new Map();
   const CLAUDE_INLINE_STYLE_ID = "context-generator-claude-inline-styles";
@@ -1072,15 +1072,29 @@
       }
       if (transferTrace.expired || transferTrace.cancelled) return;
       recordTransferFailureDiagnostics(transferTrace, error);
-      markTransferTrace(transferTrace, `failed: ${error.message}`);
+      const draftPresent = transferStage === "paste" && transferTrace.diagnostics?.error_code === "editor_has_draft";
+      if (draftPresent && summary) {
+        try {
+          transferTrace.copyBoxShown = showContextTransferFailure(error, { destinationId, stage: transferStage, summary }) === true;
+        } catch {
+          // A recovery UI failure must remain a failed attempt, never a claimed recovery.
+          transferTrace.copyBoxShown = false;
+        }
+      }
+      if (transferTrace.copyBoxShown) {
+        globalThis.CapTransferDiagnostics?.event(transferTrace.diagnostics, "local_fallback", Math.round(getNow() - transferTrace.startedAt), "events", "editor_has_draft");
+        markTransferTrace(transferTrace, "copy box shown");
+      } else {
+        markTransferTrace(transferTrace, `failed: ${error.message}`);
+      }
       finishTransferTrace(transferTrace, getSafeTelemetryFailureReason(error, transferStage));
       resetRunningFlag();
-      showContextTransferFailure(error, {
+      if (!draftPresent) showContextTransferFailure(error, {
         destinationId,
         stage: transferStage,
         summary
       });
-      await notifyBackground({ type: "CONTEXT_TRANSFER_ERROR", error: error.message }).catch(() => {});
+      if (!transferTrace.copyBoxShown) await notifyBackground({ type: "CONTEXT_TRANSFER_ERROR", error: error.message }).catch(() => {});
     }
   }
 
@@ -1101,8 +1115,7 @@
     if (summary) {
       // Source recovery keeps its original copy dialog. The destination owns
       // the draft-specific explanation where the existing input is visible.
-      showFallbackModal(summary, destinationName, false, error?.code === "paste_unconfirmed");
-      return;
+      return showFallbackModal(summary, destinationName, false, error?.code === "paste_unconfirmed");
     }
 
     showErrorOverlay(error?.message || "Transfer failed. Please try again.");
@@ -2364,7 +2377,7 @@
     trace.sourceGuard?.dispose();
     trace.completed = true;
     if (telemetryFailureReason && Number.isInteger(trace.earlyProgressTabId)) {
-      stopSourceDestinationProgress(trace, true);
+      stopSourceDestinationProgress(trace, !trace.copyBoxShown);
     }
     const totalMs = Math.round(getNow() - trace.startedAt);
     const failed = trace.marks.some((mark) => mark.label.startsWith("failed:"));
@@ -2377,8 +2390,10 @@
     persistLatestTransferStats(trace, totalMs);
     finishTransferTelemetry(
       trace,
-      failed ? "failed" : "succeeded",
-      failed ? telemetryFailureReason || "unknown_failure" : null
+      // Keep the existing relay contract. SQL recognizes the acknowledged local
+      // draft fallback and stores copy_ready without incrementing failed counters.
+      failed || trace.copyBoxShown ? "failed" : "succeeded",
+      trace.copyBoxShown ? "paste_failed" : failed ? telemetryFailureReason || "unknown_failure" : null
     );
   }
 
@@ -2486,7 +2501,7 @@
     return {
       version: 1,
       transferId: trace.id,
-      status: failureMark ? "failed" : "completed",
+      status: trace.copyBoxShown ? "copy_ready" : failureMark ? "failed" : "completed",
       failure: failureMark?.label.replace(/^failed:\s*/, "") || null,
       source: {
         id: trace.sourcePlatformId,
@@ -9377,7 +9392,7 @@
     const desc = document.getElementById("context-generator-fallback-desc");
     if (desc) {
       desc.textContent = draftPresent
-        ? "We noticed your input box has text in it. Here’s your conversation, ready to be copied."
+        ? "We noticed your text box has text in it. Here’s your conversation, ready to be copied."
         : pasteUnconfirmed
         ? `The paste into ${destinationName} wasn't confirmed. Check that tab first. If the context is missing, copy it from here.`
         : isBackup
@@ -9402,6 +9417,7 @@
     setTimeout(() => {
       document.getElementById("context-generator-fallback-copy")?.focus?.({ preventScroll: true });
     }, 0);
+    return true;
   }
 
   function updateFloatingButtonPosition(recalculationReason = "direct") {
