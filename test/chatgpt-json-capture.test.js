@@ -444,10 +444,28 @@ function pasteFixture(texts = ["Original pasted document"], authorization = "Bea
   return { data, files, fetchImpl };
 }
 
+test("ChatGPT accepts combined pastes above 1.4 MB through 2.1 MB, retaining the transcript limit", async () => {
+  for (const lengths of [[470000], [235000, 235000], [350000, 350000]]) {
+    const characters = lengths.reduce((sum, length) => sum + length, 0);
+    const texts = lengths.map(length => "文".repeat(length));
+    const { data, fetchImpl } = pasteFixture(texts);
+    const harness = setup(data, 200, { fetchImpl });
+    await discover(harness);
+    const capture = harness.window.__capCaptureChatGptJson();
+    if (characters === 470000) {
+      assert.equal((await capture).text, `ChatGPT conversation:\n\nUser: ${texts.join("\n\n")}\n\nAssistant: Selected answer`);
+    } else {
+      await assert.rejects(capture, error => error.captureFailureReason === "size_limit");
+    }
+    assert.equal(harness.requests.filter(request => request.url.includes("/estuary/content")).length, texts.length,
+      "Files fit the combined allowance, including exactly 2.1 MB; the final transcript is checked separately.");
+  }
+});
+
 for (const [name, mutate, reason] of [
   ["invalid ID", files => { files[1].id = "file_invalid/path"; }, "paste"],
   ["invalid size", files => { files[1].size = "6"; }, "paste"],
-  ["oversized total", files => { files[1].size = 1400000; }, "size"],
+  ["oversized total", files => { files[1].size = 2100001 - files[0].size; }, "size"],
   ["conflicting duplicate", files => { files[1].id = files[0].id; files[1].size = files[0].size + 1; }, "paste"]
 ]) test(`ChatGPT manifest rejects a later ${name} before any file request`, async () => {
   const { data, fetchImpl } = pasteFixture(["First paste", "Second paste"]);
@@ -552,7 +570,7 @@ test("ChatGPT replaces the previous hook without losing observed authentication"
   old.version = 8;
   harness.reinstall();
   assert.notEqual(harness.window.__capChatGptFetchState, old);
-  assert.equal(harness.window.__capChatGptFetchState.version, 11);
+  assert.equal(harness.window.__capChatGptFetchState.version, 12);
   assert.equal(harness.listeners(), 1);
   assert.equal((await harness.window.__capCaptureChatGptJson()).text,
     "ChatGPT conversation:\n\nUser: Original pasted document\n\nAssistant: Selected answer");
@@ -697,7 +715,7 @@ test("ChatGPT validates paste byte counts, truncation flags and transcript size 
     (data, files) => { data.mapping.question.message.metadata.attachments[0].size--; },
     data => { data.mapping.question.message.metadata.attachments[0].truncated = true; },
     data => { data.mapping.question.message.metadata.attachments[0].id = "../outside"; },
-    data => { data.mapping.question.message.metadata.attachments[0].size = 1400001; }
+    data => { data.mapping.question.message.metadata.attachments[0].size = 2100001; }
   ]) {
     const { data, files, fetchImpl } = pasteFixture(); mutate(data, files);
     const harness = setup(data, 200, { fetchImpl }); await discover(harness);

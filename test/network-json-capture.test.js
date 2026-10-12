@@ -313,11 +313,35 @@ clockTest("DeepSeek: independent uploads overlap in bounded waves and preserve e
   assert.doesNotMatch(JSON.stringify(h.replies), /AUTH_SENTINEL|SIGNED_SENTINEL/);
 });
 
+test("DeepSeek: combined text files above 1.4 MB through 2.1 MB retain the final transcript limit", async () => {
+  for (const lengths of [[470000], [235000, 235000], [350000, 350000]]) {
+    const characters = lengths.reduce((sum, length) => sum + length, 0);
+    const f = deepseekUploads(lengths.length);
+    const texts = lengths.map(length => "文".repeat(length));
+    f.uploads.forEach((file, index) => {
+      f.files[file.id] = texts[index];
+      file.file_size = Buffer.byteLength(texts[index]);
+    });
+    const h = setup("deepseek", f, { fetchImpl: request => request.url.pathname.includes("history_messages")
+      ? Response.json(f.data) : new Response(f.files[`file-${request.url.searchParams.get("file_id")}`], { headers: { "content-type": "text/plain" } }) });
+    await h.observe();
+    const capture = h.window.__capCaptureNetworkJson();
+    if (characters === 470000) {
+      const expected = `DeepSeek conversation:\n\nUser: ${f.uploads.map(file => `Attachment: ${JSON.stringify(file.file_name)}\n\nFile contents (${file.file_size} UTF-8 bytes):\n${f.files[file.id]}\nEnd attachment: ${JSON.stringify(file.file_name)}`).join("\n\n")}\n\nAssistant: ${f.data.data.biz_data.chat_messages[1].fragments[0].content}`;
+      assert.equal((await capture).text, expected);
+    } else {
+      await assert.rejects(capture, error => error.captureFailureReason === "size_limit");
+    }
+    assert.equal(h.requests.filter(request => request.url.hostname === "files.deepseeksvc.com").length, texts.length,
+      "Unique files fit the combined allowance, including exactly 2.1 MB; duplicate IDs still download once.");
+  }
+});
+
 test("DeepSeek: invalid or oversized upload manifests fail before any file download", async () => {
   for (const mutate of [
     f => { f.uploads[5].signed_path = "https://other.example/api/file?file_id=upload-5"; },
     f => { f.uploads[5].status = "PENDING"; },
-    f => { f.uploads[0].file_size = 800000; f.uploads[1].file_size = 800000; }
+    f => { f.uploads[0].file_size = 1100000; f.uploads[1].file_size = 1100000; }
   ]) {
     const f = deepseekUploads(); mutate(f);
     const h = setup("deepseek", f, { fetchImpl: async request => request.url.pathname.includes("history_messages")
@@ -349,7 +373,7 @@ test("DeepSeek: one incomplete upload cancels siblings before fallback or a fres
   });
   assert.equal(h.requests.length, 5, "failure stops queued downloads");
   assert.equal(aborted.length, 3);
-  assert.equal(h.window.__capNetworkFetchState.version, 12);
+  assert.equal(h.window.__capNetworkFetchState.version, 13);
   assert.ok(h.replies.every(reply => !reply.capture));
   assert.equal(h.navigationListeners(), 0);
   assert.equal(h.listeners.size, 2);
@@ -429,7 +453,7 @@ for (const platform of ["gemini", "grok", "deepseek"]) test(`${platform}: the pr
   old.version = platform === "deepseek" ? 9 : platform === "gemini" ? 9 : 7;
   h.reinstall(files[1]);
   assert.notEqual(h.window.__capNetworkFetchState, old);
-  assert.equal(h.window.__capNetworkFetchState.version, platform === "deepseek" ? 12 : platform === "gemini" ? 12 : 10);
+  assert.equal(h.window.__capNetworkFetchState.version, platform === "deepseek" ? 13 : platform === "gemini" ? 12 : 10);
   assert.equal(h.listeners.size, 2);
   assert.equal((await h.window.__capCaptureNetworkJson()).text, h.fixture.expected);
 });

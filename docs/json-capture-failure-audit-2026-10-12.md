@@ -13,6 +13,8 @@ Evidence labels:
 
 Implementation follow-up (2026-10-12): finding 1 now receives one fresh JSON read at destination selection for a recognized temporary failure, including a failed prefetch or fresh read. Network/timeouts, readiness and explicit temporary HTTP errors qualify; hard limits, invalid history/content, access/rate-limit rejection, unknown errors and navigation/session changes retain their existing handling. A successful retry stays silent and keeps JSON capture; a failed retry follows the existing platform recovery once. The original snapshot, findings and aggregate counts below remain historical evidence, not a current database inventory. See [current capture behavior](../LOGIC.md#capture-selection-and-failure-handling).
 
+Attachment-limit follow-up (2026-10-12): finding 3's 1,400,000-byte allowance was replaced with 2,100,000 bytes combined across unique qualifying ChatGPT pasted-file IDs and DeepSeek supported text-file IDs. It is a shared capture allowance, not a per-file allowance. The final 500,000-character / 2,000,000-byte conversation limits still apply. The original limits and reproduction below describe the audited snapshot.
+
 ## Most useful findings first
 
 | Priority | Finding | Evidence and effect |
