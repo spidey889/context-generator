@@ -227,6 +227,7 @@ async function createSmokeExtension(tempRoot, origin) {
     "  function checkInlinePlacementPathname() {",
     `  window.__capSmokePickerJsonReady = () => pickerJsonCapture?.promise.then(() => true) || Promise.resolve(false);
   window.__capSmokeShowRecovery = () => showFallbackModal("Synthetic recovery context. Preserve the dialog palette.", "Claude", true);
+  window.__capSmokeShowDraftRecovery = () => showContextTransferFailure({ code: "paste_failed", diagnostics: { version: 1, error_code: "editor_has_draft" } }, { stage: "paste", destinationId: "chatgpt", summary: "Conversation from your previous chat\\n\\nUser: Let’s pick up where we left off.\\nAssistant: Here’s the context we prepared for your next chat." });
   window.__capSmokePaste = (text, deadlineAt) => pasteIntoPlatform(text, currentPlatform.id, "smoke-paste-recovery", deadlineAt);
   window.__capSmokePasteState = () => ({ pending: Boolean(pendingPasteRecheck), userHandled: pendingPasteRecheck?.guard?.userHandled,
     active: instanceActive, visibility: document.visibilityState, turns: getDetectedConversationMessageCount(), ready: Boolean(findReadyPlatformInput()) });
@@ -1262,6 +1263,7 @@ async function verifyRecoveryPalette(session, contextId) {
     const before = cases.map(([element, property]) => getComputedStyle(element).getPropertyValue(property));
     const originalBackground = getComputedStyle(copy).backgroundImage;
     const originalColor = getComputedStyle(copy).color;
+    const originalLabel = copy.textContent;
     const clipboard = navigator.clipboard;
     const originalWrite = Object.getOwnPropertyDescriptor(clipboard, "writeText");
     const originalExec = Object.getOwnPropertyDescriptor(document, "execCommand");
@@ -1298,7 +1300,7 @@ async function verifyRecoveryPalette(session, contextId) {
         && getComputedStyle(copy).backgroundImage !== originalBackground
         && copiedText === document.getElementById("context-generator-fallback-text").value;
       await new Promise(resolve => setTimeout(resolve, 2100));
-      const resetPreserved = copy.textContent === "Copy Context"
+      const resetPreserved = copy.textContent === originalLabel
         && getComputedStyle(copy).backgroundImage === originalBackground
         && getComputedStyle(copy).color === originalColor;
       failCopy = true;
@@ -1318,9 +1320,11 @@ async function verifyRecoveryPalette(session, contextId) {
         element.style.removeProperty("--darkreader-inline-" + key);
       }
       dismiss.removeAttribute("data-darkreader-inline-outline");
-      copy.textContent = "Copy Context";
-      copy.style.setProperty("background", "linear-gradient(180deg,#f5f5f5,#d8d8d8)", "important");
-      copy.style.setProperty("color", "#111114", "important");
+      copy.textContent = originalLabel;
+      copy.style.setProperty("background", originalBackground, "important");
+      copy.style.setProperty("color", originalColor, "important");
+      document.getElementById("context-generator-fallback-text").setSelectionRange(0, 0);
+      copy.focus();
     }
   })()`, contextId);
   assert.equal(result.available, true, "The recovery dialog must be available after delivery.");
@@ -1379,7 +1383,11 @@ async function verifyPasteRecovery({ browserSession, devToolsPort, origin }) {
           error.message += `\nEditor: ${JSON.stringify(await session.evaluate("({value:document.querySelector('textarea')?.value, disabled:document.querySelector('textarea')?.disabled, writes:window.__recoveryWrites, copy:document.getElementById('context-generator-fallback-modal')?.style.display})"))}`;
           throw error;
         }
-        if (scenario === "draft") await waitFor(() => session.evaluate("document.getElementById('context-generator-fallback-modal')?.style.display === 'flex'"), "draft-preserving manual copy");
+        if (scenario === "draft") {
+          await waitFor(() => session.evaluate("document.getElementById('context-generator-fallback-modal')?.style.display === 'flex'"), "draft-preserving manual copy");
+          assert.equal(await session.evaluate("document.getElementById('context-generator-fallback-title').textContent"), "Your draft is safe");
+          assert.equal(await session.evaluate("document.getElementById('context-generator-fallback-text').value"), carry);
+        }
         // Allow verification/stability to finish before checking for a late copy dialog.
         await session.evaluate("new Promise(resolve => setTimeout(resolve, 800))");
         assert.equal(await session.evaluate("window.__recoveryWrites"), scenario === "draft" ? 1 : 2, "only one actual recovery write");
@@ -1498,10 +1506,29 @@ async function run() {
       await verifyEarlyHandoff({ sourceSession, devToolsPort, origin, state, destinationSessions });
       return;
     }
-    if (process.env.CAP_CONTEXT_RECOVERY_PALETTE_SMOKE === "1") {
+    if (process.env.CAP_CONTEXT_RECOVERY_PALETTE_SMOKE === "1" || process.env.CAP_CONTEXT_DRAFT_RECOVERY_SMOKE === "1") {
       const contextId = sourceSession.getExtensionContextId();
-      await sourceSession.evaluate("window.__capSmokeShowRecovery()", contextId);
+      const draftRecovery = process.env.CAP_CONTEXT_DRAFT_RECOVERY_SMOKE === "1";
+      await sourceSession.evaluate(draftRecovery ? "window.__capSmokeShowDraftRecovery()" : "window.__capSmokeShowRecovery()", contextId);
+      if (draftRecovery) {
+        const details = await sourceSession.evaluate(`({ title: document.getElementById("context-generator-fallback-title").textContent,
+          desc: document.getElementById("context-generator-fallback-desc").textContent,
+          text: document.getElementById("context-generator-fallback-text").value })`, contextId);
+        assert.equal(details.title, "Your draft is safe");
+        assert.match(details.desc, /draft in the input box/);
+        assert.match(details.text, /Conversation from your previous chat/);
+      }
       await verifyRecoveryPalette(sourceSession, contextId);
+      if (process.env.CAP_CONTEXT_RECOVERY_SCREENSHOT) {
+        const shot = await sourceSession.call("Page.captureScreenshot", { format: "png" });
+        await fs.promises.writeFile(path.resolve(process.env.CAP_CONTEXT_RECOVERY_SCREENSHOT), Buffer.from(shot.data, "base64"));
+        await sourceSession.call("Emulation.setDeviceMetricsOverride", { width: 390, height: 844, deviceScaleFactor: 1, mobile: false });
+        const mobile = await sourceSession.call("Page.captureScreenshot", { format: "png" });
+        await fs.promises.writeFile(path.resolve(process.env.CAP_CONTEXT_RECOVERY_SCREENSHOT.replace(/\.png$/, "-mobile.png")), Buffer.from(mobile.data, "base64"));
+        const fits = await sourceSession.evaluate(`(() => { const card = document.getElementById("context-generator-fallback-modal").firstElementChild.getBoundingClientRect();
+          return card.left >= 0 && card.right <= innerWidth && card.top >= 0 && card.bottom <= innerHeight; })()`);
+        assert.ok(fits, "The copy dialog must fit the narrow viewport.");
+      }
       process.stdout.write("Cap Context Brave recovery palette smoke passed.\n");
       return;
     }

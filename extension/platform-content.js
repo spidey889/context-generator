@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-12-capture-progress-v135";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-12-draft-copy-v136";
   const INLINE_PILL_SIZE = 36;
   const ownedUiStyleSheets = new Map();
   const CLAUDE_INLINE_STYLE_ID = "context-generator-claude-inline-styles";
@@ -1098,7 +1098,10 @@
     }
 
     if (summary) {
-      showFallbackModal(summary, destinationName, false, error?.code === "paste_unconfirmed");
+      // The worker wraps paste failures; the destination's closed diagnostic
+      // retains the actual draft guard instead of inferring it from error prose.
+      const draftPresent = [error?.code, error?.diagnosticCode, error?.diagnostics?.error_code].includes("editor_has_draft");
+      showFallbackModal(summary, destinationName, false, error?.code === "paste_unconfirmed", draftPresent);
       return;
     }
 
@@ -3051,6 +3054,7 @@
 
   async function recheckPastedContext(text, destination, pending) {
     let needsCopy = true;
+    let draftPresent = false;
     const recoveryDeadlineAt = Math.min(pending.deadlineAt || Infinity,
       Date.now() + (destination.pasteRetryTimeoutMs || PASTE_RETRY_TIMEOUT_MS));
     const checkRecovery = async () => {
@@ -3081,7 +3085,7 @@
             return;
           }
           // Preserve drafts restored on focus or typed while discovery waits.
-          if (getElementText(input).trim()) return;
+          if (getElementText(input).trim()) { draftPresent = true; return; }
           if (pending.guard.insert(input) !== false) {
             const verifyMs = Math.min(destination.pasteVerifyTimeoutMs || PASTE_VERIFY_TIMEOUT_MS,
               Math.max(0, recoveryDeadlineAt - Date.now()));
@@ -3102,7 +3106,7 @@
     } finally {
       if (pendingPasteRecheck === pending) {
         cancelPendingPasteRecheck();
-        if (needsCopy) showFallbackModal(text, destination.name);
+        if (needsCopy) showFallbackModal(text, destination.name, false, false, draftPresent);
       }
     }
   }
@@ -9050,12 +9054,24 @@
     }, 280);
   }
 
-  function showFallbackModal(text, destinationName, isBackup = false, pasteUnconfirmed = false) {
+  function showFallbackModal(text, destinationName, isBackup = false, pasteUnconfirmed = false, draftPresent = false) {
+    const variant = draftPresent ? "draft" : "default";
+    const copyLabel = draftPresent ? "Copy conversation" : "Copy Context";
+    const copyBackground = draftPresent ? "linear-gradient(180deg,#ede4fc,#d2bce8)" : "linear-gradient(180deg,#f5f5f5,#d8d8d8)";
+    const copyColor = draftPresent ? "#2b1d3d" : "#111114";
     let modal = document.getElementById("context-generator-fallback-modal");
+    // Rebuild only when the purpose changes so its protected palette, listeners
+    // and copy-button reset state all belong to the same dialog variant.
+    if (modal?.dataset.variant && modal.dataset.variant !== variant) {
+      modal.contextGeneratorClose?.();
+      modal.remove();
+      modal = null;
+    }
     if (!modal) {
       modal = document.createElement("div");
       modal.id = "context-generator-fallback-modal";
       modal.dataset.contextGeneratorOwned = "true";
+      modal.dataset.variant = variant;
       modal.setAttribute("role", "dialog");
       modal.setAttribute("aria-modal", "true");
       modal.setAttribute("aria-labelledby", "context-generator-fallback-title");
@@ -9077,20 +9093,19 @@
       const content = document.createElement("div");
       content.style.cssText = [
         "position:relative",
-        "width:min(560px,100%)",
+        draftPresent ? "width:min(460px,100%)" : "width:min(560px,100%)",
         "box-sizing:border-box",
         "display:flex",
         "flex-direction:column",
-        "gap:16px",
-        "padding:26px",
-        "border-radius:26px",
-        "border:1px solid rgba(255,255,255,0.14)",
-        "background:linear-gradient(180deg,#171719 0%,#101012 58%,#09090b 100%)",
+        draftPresent ? "gap:14px" : "gap:16px",
+        draftPresent ? "padding:22px" : "padding:26px",
+        draftPresent ? "border-radius:22px" : "border-radius:26px",
+        draftPresent ? "border:1px solid rgba(189,165,224,0.23)" : "border:1px solid rgba(255,255,255,0.14)",
+        draftPresent ? "background:#18131f" : "background:linear-gradient(180deg,#171719 0%,#101012 58%,#09090b 100%)",
         "color:#f5f5f5",
         "box-shadow:0 28px 84px rgba(0,0,0,0.58),0 0 0 1px rgba(0,0,0,0.72),inset 0 1px 0 rgba(255,255,255,0.08)",
-        "overflow:hidden"
+        draftPresent ? "max-height:calc(100dvh - 36px);overflow:auto" : "overflow:hidden"
       ].join(";");
-
       const accent = document.createElement("div");
       accent.style.cssText = [
         "position:absolute",
@@ -9098,12 +9113,20 @@
         "pointer-events:none",
         "background:radial-gradient(circle at 50% -18%,rgba(255,255,255,0.12),transparent 36%),linear-gradient(180deg,rgba(255,255,255,0.045),transparent 48%)"
       ].join(";");
+      if (draftPresent) accent.style.display = "none";
 
       const header = document.createElement("div");
       header.style.cssText = "position:relative;z-index:1;display:flex;align-items:flex-start;justify-content:space-between;gap:16px";
 
       const copyWrap = document.createElement("div");
       copyWrap.style.cssText = "display:flex;flex-direction:column;gap:7px;min-width:0";
+      if (draftPresent) {
+        const orb = document.createElement("img");
+        orb.src = BUBBLE_ICON_URL;
+        orb.alt = "";
+        orb.style.cssText = "width:34px;height:34px;object-fit:contain;margin:0 0 2px -4px";
+        copyWrap.appendChild(orb);
+      }
 
       const title = document.createElement("div");
       title.id = "context-generator-fallback-title";
@@ -9149,18 +9172,18 @@
       textarea.style.cssText = [
         "position:relative",
         "z-index:1",
-        "height:min(230px,38vh)",
-        "min-height:150px",
+        draftPresent ? "height:min(180px,30vh)" : "height:min(230px,38vh)",
+        draftPresent ? "min-height:110px" : "min-height:150px",
         "box-sizing:border-box",
         "resize:vertical",
         "padding:14px",
         "border-radius:14px",
-        "border:1px solid rgba(255,255,255,0.13)",
-        "background:rgba(0,0,0,0.34)",
+        draftPresent ? "border:1px solid rgba(189,165,224,0.2)" : "border:1px solid rgba(255,255,255,0.13)",
+        draftPresent ? "background:#100d15" : "background:rgba(0,0,0,0.34)",
         "box-shadow:inset 0 1px 0 rgba(255,255,255,0.04)",
         "color:#f0f0f0",
-        "font-family:'SFMono-Regular',Consolas,'Liberation Mono',monospace",
-        "font-size:12px",
+        draftPresent ? "font-family:inherit" : "font-family:'SFMono-Regular',Consolas,'Liberation Mono',monospace",
+        draftPresent ? "font-size:13px" : "font-size:12px",
         "line-height:1.5",
         "outline:none"
       ].join(";");
@@ -9171,15 +9194,15 @@
       const copyBtn = document.createElement("button");
       copyBtn.id = "context-generator-fallback-copy";
       copyBtn.type = "button";
-      copyBtn.textContent = "Copy Context";
+      copyBtn.textContent = copyLabel;
       copyBtn.style.cssText = [
         "height:38px",
         "padding:0 16px",
         "border-radius:999px",
         "border:1px solid rgba(255,255,255,0.18)",
-        "background:linear-gradient(180deg,#f5f5f5,#d8d8d8)",
+        `background:${copyBackground}`,
         "box-shadow:0 10px 24px rgba(0,0,0,0.24),inset 0 1px 0 rgba(255,255,255,0.7)",
-        "color:#111114",
+        `color:${copyColor}`,
         "font-size:13px",
         "font-weight:750",
         "cursor:pointer"
@@ -9219,9 +9242,9 @@
         copyBtn.style.setProperty("color", "#07150d", "important");
         setTimeout(() => {
           if (!copyBtn.isConnected) return;
-          copyBtn.textContent = "Copy Context";
-          copyBtn.style.setProperty("background", "linear-gradient(180deg,#f5f5f5,#d8d8d8)", "important");
-          copyBtn.style.setProperty("color", "#111114", "important");
+          copyBtn.textContent = copyLabel;
+          copyBtn.style.setProperty("background", copyBackground, "important");
+          copyBtn.style.setProperty("color", copyColor, "important");
         }, 2000);
       });
 
@@ -9297,11 +9320,13 @@
     modal.contextGeneratorPreviousFocus = document.activeElement;
 
     const title = document.getElementById("context-generator-fallback-title");
-    if (title) title.textContent = pasteUnconfirmed ? "Check your destination tab" : isBackup ? "In case the paste didn't work" : "Context is ready to copy";
+    if (title) title.textContent = draftPresent ? "Your draft is safe" : pasteUnconfirmed ? "Check your destination tab" : isBackup ? "In case the paste didn't work" : "Context is ready to copy";
 
     const desc = document.getElementById("context-generator-fallback-desc");
     if (desc) {
-      desc.textContent = pasteUnconfirmed
+      desc.textContent = draftPresent
+        ? "We noticed you have a draft in the input box. Here’s your conversation, ready to copy."
+        : pasteUnconfirmed
         ? `The paste into ${destinationName} wasn't confirmed. Check that tab first. If the context is missing, copy it from here.`
         : isBackup
         ? `If anything got lost on the way to ${destinationName}, no worries—your context is right here. Copy it from here.`

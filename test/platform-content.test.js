@@ -2684,6 +2684,28 @@ clockTest("unconfirmed paste recovery asks to check the destination and retains 
   assert.equal(hooks.getSafeTelemetryFailureReason({ code: "paste_unconfirmed" }, "paste"), "paste_failed");
 });
 
+clockTest("draft paste recovery explains direct and worker-wrapped failures and preserves the prepared carry", () => {
+  for (const error of [
+    { diagnosticCode: "editor_has_draft" },
+    { code: "paste_failed", diagnostics: { version: 1, error_code: "editor_has_draft" } }
+  ]) {
+    const editor = new FakeElement({ tag: "textarea", attrs: { placeholder: "Message" } });
+    editor.value = "My existing draft";
+    const hooks = loadPlatformContent([editor], "chatgpt.com");
+    const modal = new FakeElement(), title = new FakeElement(), desc = new FakeElement(), text = new FakeElement({ tag: "textarea" });
+    for (const [id, element] of [["modal", modal], ["title", title], ["desc", desc], ["text", text]]) {
+      hooks.registerElementId(`context-generator-fallback-${id}`, element);
+    }
+    const summary = "Full prepared conversation\nwith every character retained.";
+    hooks.showContextTransferFailure(error, { stage: "paste", destinationId: "chatgpt", summary });
+    assert.equal(modal.style.display, "flex");
+    assert.equal(title.textContent, "Your draft is safe");
+    assert.match(desc.textContent, /draft in the input box/);
+    assert.equal(text.value, summary);
+    assert.equal(editor.value, "My existing draft");
+  }
+});
+
 clockTest("Claude, Gemini, DeepSeek, and Grok restore a draft cleared after the first paste", async () => {
   const summary = "CONTEXT CARRY — READY TO PASTE\n\nImportant project context and next steps.";
   for (const [hostname, destination, hidden] of [
