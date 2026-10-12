@@ -158,7 +158,7 @@ async function checkSnapshot(snapshot, { applyPending = false, throughVersion } 
     const columns = {};
     const hashes = {};
     for (const table of tables) {
-      columns[table] = (await db.query(`select column_name, data_type from information_schema.columns
+      columns[table] = (await db.query(`select column_name, data_type, is_generated from information_schema.columns
         where table_schema='public' and table_name=$1 order by column_name`, [table])).rows;
       assert.ok(columns[table].length > 0);
       for (const row of snapshot[table]) {
@@ -172,8 +172,11 @@ async function checkSnapshot(snapshot, { applyPending = false, throughVersion } 
     await db.exec("begin;");
     try {
       for (const table of tables) {
-        await db.query(`insert into public.${table} overriding system value
-          select * from jsonb_populate_recordset(null::public.${table}, $1::jsonb)`, [JSON.stringify(snapshot[table])]);
+        // Generated diagnostic labels are captured and compared, but PostgreSQL
+        // recomputes them from restored source fields instead of accepting writes.
+        const writable = columns[table].filter(column => column.is_generated === "NEVER").map(column => column.column_name).join(",");
+        await db.query(`insert into public.${table} (${writable}) overriding system value
+          select ${writable} from jsonb_populate_recordset(null::public.${table}, $1::jsonb)`, [JSON.stringify(snapshot[table])]);
       }
       if (snapshot.users_sequence) {
         assert.match(String(snapshot.users_sequence.last_value), /^\d+$/);

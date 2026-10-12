@@ -472,7 +472,13 @@ for (const [name, mutate, reason] of [
   mutate(data.mapping.question.message.metadata.attachments);
   const harness = setup(data, 200, { fetchImpl });
   await discover(harness);
-  await assert.rejects(harness.window.__capCaptureChatGptJson());
+  await assert.rejects(harness.window.__capCaptureChatGptJson(), error => {
+    if (reason === "size") {
+      assert.equal(error.diagnostics.capture_detail, "attachment_size_limit");
+      assert.equal(error.diagnostics.capture_request_stage, "attachment_descriptor");
+    }
+    return true;
+  });
   assert.equal(harness.replies.at(-1).error, reason);
   assert.equal(harness.requests.filter(request => /\/files\/download\/|\/estuary\/content/.test(request.url)).length, 0,
     "An invalid later file must reject the complete manifest before any file request.");
@@ -570,7 +576,7 @@ test("ChatGPT replaces the previous hook without losing observed authentication"
   old.version = 8;
   harness.reinstall();
   assert.notEqual(harness.window.__capChatGptFetchState, old);
-  assert.equal(harness.window.__capChatGptFetchState.version, 12);
+  assert.equal(harness.window.__capChatGptFetchState.version, 13);
   assert.equal(harness.listeners(), 1);
   assert.equal((await harness.window.__capCaptureChatGptJson()).text,
     "ChatGPT conversation:\n\nUser: Original pasted document\n\nAssistant: Selected answer");
@@ -719,7 +725,7 @@ test("ChatGPT validates paste byte counts, truncation flags and transcript size 
   ]) {
     const { data, files, fetchImpl } = pasteFixture(); mutate(data, files);
     const harness = setup(data, 200, { fetchImpl }); await discover(harness);
-    await assert.rejects(harness.window.__capCaptureChatGptJson(), /JSON capture|500,000/);
+    await assert.rejects(harness.window.__capCaptureChatGptJson(), /JSON capture|500,000|2\.1 MB/);
   }
   const { data, fetchImpl } = pasteFixture(["x".repeat(500000)]);
   const harness = setup(data, 200, { fetchImpl }); await discover(harness);

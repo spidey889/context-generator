@@ -347,7 +347,13 @@ test("DeepSeek: invalid or oversized upload manifests fail before any file downl
     const h = setup("deepseek", f, { fetchImpl: async request => request.url.pathname.includes("history_messages")
       ? Response.json(f.data) : new Response(f.files[`file-${request.url.searchParams.get("file_id")}`], { headers: { "content-type": "text/plain" } }) });
     await h.observe();
-    await assert.rejects(h.window.__capCaptureNetworkJson(), /attachment|too long/);
+    await assert.rejects(h.window.__capCaptureNetworkJson(), error => {
+      if (error.captureFailureReason === "size_limit") {
+        assert.equal(error.diagnostics.capture_detail, "attachment_size_limit");
+        assert.equal(error.diagnostics.capture_request_stage, "attachment_descriptor");
+      } else assert.match(error.message, /attachment/);
+      return true;
+    });
     assert.equal(h.requests.length, 1, "validate the entire manifest before reading original bodies");
     assert.equal(h.navigationListeners(), 0);
   }
@@ -373,7 +379,7 @@ test("DeepSeek: one incomplete upload cancels siblings before fallback or a fres
   });
   assert.equal(h.requests.length, 5, "failure stops queued downloads");
   assert.equal(aborted.length, 3);
-  assert.equal(h.window.__capNetworkFetchState.version, 13);
+  assert.equal(h.window.__capNetworkFetchState.version, 14);
   assert.ok(h.replies.every(reply => !reply.capture));
   assert.equal(h.navigationListeners(), 0);
   assert.equal(h.listeners.size, 2);
@@ -453,7 +459,7 @@ for (const platform of ["gemini", "grok", "deepseek"]) test(`${platform}: the pr
   old.version = platform === "deepseek" ? 9 : platform === "gemini" ? 9 : 7;
   h.reinstall(files[1]);
   assert.notEqual(h.window.__capNetworkFetchState, old);
-  assert.equal(h.window.__capNetworkFetchState.version, platform === "deepseek" ? 13 : platform === "gemini" ? 12 : 10);
+  assert.equal(h.window.__capNetworkFetchState.version, platform === "deepseek" ? 14 : platform === "gemini" ? 12 : 10);
   assert.equal(h.listeners.size, 2);
   assert.equal((await h.window.__capCaptureNetworkJson()).text, h.fixture.expected);
 });

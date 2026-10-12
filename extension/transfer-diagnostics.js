@@ -23,7 +23,7 @@
     error_file: ["background.js", "platform-content.js", "chatgpt-json-capture.js", "chatgpt-fetch-main.js", "claude-json-capture.js", "claude-fetch-main.js", "network-json-capture.js", "network-fetch-main.js", "network-json-data.js"],
     failure_site: [...operations, "capture_hook", "capture_session", "capture_history", "capture_attachment_descriptor", "capture_attachment_body", "capture_serialize", "clipboard_write"],
     capture_request_stage: ["hook", "session", "history", "attachment_descriptor", "attachment_body", "serialize"],
-    capture_detail: ["auth_missing", "hook_unavailable", "busy", "http_error", "network_error", "invalid_json", "non_json_response", "partial_response", "incomplete_history", "invalid_branch", "branch_cycle", "parent_missing", "count_mismatch", "text_invalid", "canvas_invalid", "missing_text", "attachment_failed", "size_limit", "timeout", "conversation_changed", "unsupported_content", "routing_unavailable"],
+    capture_detail: ["auth_missing", "hook_unavailable", "busy", "http_error", "network_error", "invalid_json", "non_json_response", "partial_response", "incomplete_history", "invalid_branch", "branch_cycle", "parent_missing", "count_mismatch", "text_invalid", "canvas_invalid", "missing_text", "attachment_failed", "attachment_size_limit", "size_limit", "timeout", "conversation_changed", "unsupported_content", "routing_unavailable"],
     document_ready_state: ["loading", "interactive", "complete"],
     destination_tab_status: ["loading", "complete"],
     summary_failed_provider: ["openrouter", "gemini", "mistral"],

@@ -3,7 +3,7 @@
   const captureError = (message, captureFailureReason, detail = "incomplete_history", stage = "serialize", status) => Object.assign(new Error(message), {
     captureFailureReason, diagnosticCode: captureFailureReason === "size_limit" ? "conversation_too_large"
       : detail === "conversation_changed" ? "conversation_changed" : captureFailureReason === "unavailable" ? "capture_json_unavailable" : "capture_json_failed",
-    diagnostics: { version: 1, capture_detail: captureFailureReason === "size_limit" ? "size_limit" : detail, capture_request_stage: stage, failure_site: `capture_${stage}`,
+    diagnostics: { version: 1, capture_detail: captureFailureReason === "size_limit" && detail !== "attachment_size_limit" ? "size_limit" : detail, capture_request_stage: stage, failure_site: `capture_${stage}`,
       ...(Number.isInteger(status) && status >= 100 && status <= 599 ? { capture_http_status: status } : {}) }
   });
   const currentChat = (pathname = location.pathname) => pathname.match(/\/c\/([^/]+)\/?$/)?.[1];
@@ -247,7 +247,7 @@
       const receive = event => {
         const reply = event.data;
         if (event.source === window && event.origin === location.origin && reply?.channel === channel
-          && reply.type === "pong" && reply.id === id && reply.version === 12) finish(true);
+          && reply.type === "pong" && reply.id === id && reply.version === 13) finish(true);
       };
       const ping = () => {
         if (settled) return;
@@ -298,7 +298,11 @@
           try {
             if (changed || currentChat() !== chat || reply.chat !== chat) throw captureError("The ChatGPT conversation changed during capture.", "request_failed", "conversation_changed", "history");
             if (reply.error) {
-              if (reply.error === "size") throw captureError("This chat is too long to transfer (limit: 500,000 characters). Try a shorter chat.", "size_limit", "size_limit", "history");
+              if (reply.error === "size") {
+                const fileLimit = reply.captureDetail === "attachment_size_limit";
+                throw captureError(fileLimit ? "Text attachments exceed the combined 2.1 MB capture limit." : "This chat is too long to transfer (limit: 500,000 characters). Try a shorter chat.",
+                  "size_limit", fileLimit ? "attachment_size_limit" : "size_limit", fileLimit ? "attachment_descriptor" : "history");
+              }
               const reasons = { auth: "ChatGPT authentication is unavailable. Refresh this signed-in chat.", partial: "ChatGPT returned incomplete, invalid or oversized JSON.", busy: "Another ChatGPT JSON capture is running. Try again after it finishes.", format: "ChatGPT returned a non-JSON response.", changed: "The ChatGPT conversation changed during capture.", timeout: "The full-tree request timed out.", network: "The full-tree request failed or returned invalid JSON." };
               reasons.paste = "A pasted text attachment could not be read completely. Refresh this chat and try again.";
               const reason = reply.error === "http" && Number.isInteger(reply.status) && reply.status >= 100 && reply.status <= 599 ? `The full-tree request returned HTTP ${reply.status}.` : reasons[reply.error] || "The full-tree request failed.";

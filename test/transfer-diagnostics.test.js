@@ -89,6 +89,9 @@ test("precise failure evidence survives every ingress and wrapper without privat
     summary_failure_detail: "provider_timeout", summary_failed_provider: "gemini" };
   assert.ok(validateTelemetryPayload(payload({ diagnostics: safe })));
   assert.ok(edge.validateTelemetryPayload(payload({ diagnostics: safe })));
+  const fileLimit = { version: 1, capture_detail: "attachment_size_limit", capture_request_stage: "attachment_descriptor" };
+  assert.ok(validateTelemetryPayload(payload({ diagnostics: fileLimit })));
+  assert.ok(edge.validateTelemetryPayload(payload({ diagnostics: fileLimit })));
   for (const extra of [{ capture_http_status: 99 }, { capture_http_status: 600 }, { capture_detail: "PRIVATE" },
     { failure_site: "https://PRIVATE" }, { error_file: "PRIVATE.js" }, { error_line: -1 }, { error_type: "PRIVATE" }]) {
     for (const value of [{ ...safe, ...extra }, { version: 1, prepared_diagnostics: { ...safe, ...extra } }]) {

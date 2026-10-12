@@ -1,5 +1,5 @@
 (() => {
-  const version = 12;
+  const version = 13;
   // ChatGPT's native endpoint returns every branch. This is a transport safety
   // ceiling, not the selected transcript's 500k-character / 2 MB content limit.
   const maxCaptureBytes = 32000000;
@@ -236,7 +236,11 @@
             continue;
           }
           pastedBytes += file.size;
-          if (pastedBytes > maxPastedBytes) throw new Error("size");
+          if (pastedBytes > maxPastedBytes) {
+            reply.captureDetail = "attachment_size_limit";
+            reply.captureRequestStage = "attachment_descriptor";
+            throw new Error("size");
+          }
           uploads.set(file.id, file);
         }
       }

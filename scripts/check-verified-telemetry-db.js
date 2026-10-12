@@ -386,6 +386,8 @@ async function main() {
         checks += await require("./check-draft-copy-recovery-db.js").checkDraftCopyRecovery(db, sql);
       } else if (name.endsWith("_rename_draft_outcome_text_box.sql")) {
         checks += await require("./check-draft-copy-recovery-db.js").checkDraftCopyRecovery(db, sql, "text_box");
+      } else if (name.endsWith("_add_attachment_size_failure_reason.sql")) {
+        checks += await require("./check-useful-diagnostics-db.js").checkAttachmentSizeFailure(db, sql);
       } else await db.exec(sql);
     }
     checks += await require("./check-served-model-db.js").checkStoreModelReceipts(db);

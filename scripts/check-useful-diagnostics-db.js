@@ -14,11 +14,16 @@ async function checkUsefulDiagnostics(db, sql) {
   const before = await snapshot();
   await db.exec(sql);
   equal(await snapshot(), before);
-  equal(JSON.parse(sql.match(/rules constant jsonb := '([^']+)'::jsonb/)[1]), contract.schema);
+  const historicalRules = JSON.parse(sql.match(/rules constant jsonb := '([^']+)'::jsonb/)[1]);
+  // The later file-limit migration extends this enum. Keep this historical
+  // replay check tied to the contract that existed when this migration shipped.
+  const historicalContract = structuredClone(contract.schema);
+  historicalContract.capture_detail.values = historicalContract.capture_detail.values.filter(value => value !== "attachment_size_limit");
+  equal(historicalRules, historicalContract);
   const valid = async value => (await db.query("select public.is_valid_transfer_diagnostics($1::jsonb) as valid", [JSON.stringify(value)])).rows[0].valid;
   // Every new observation must survive both final and prepared recovery records.
   for (const key of ["failure_site", "error_type", "error_file", "capture_detail", "capture_request_stage", "summary_failure_detail", "summary_failed_provider"]) {
-    for (const value of contract.schema[key].values) {
+    for (const value of historicalRules[key].values) {
       equal(await valid({ version: 1, [key]: value, prepared_diagnostics: { version: 1, [key]: value } }), true);
     }
     equal(await valid({ version: 1, [key]: "PRIVATE URL/text" }), false);
@@ -34,4 +39,48 @@ async function checkUsefulDiagnostics(db, sql) {
     has_function_privilege('service_role','public.is_valid_transfer_diagnostics(jsonb,integer)','execute') as service`)).rows[0], { anon: false, authenticated: false, service: true });
   return checks;
 }
-module.exports = { checkUsefulDiagnostics };
+async function checkAttachmentSizeFailure(db, sql) {
+  let checks = 0;
+  const equal = (a, b) => { assert.deepEqual(a, b); checks++; };
+  const snapshot = async () => (await db.query(`select jsonb_build_object(
+    'transfers',(select jsonb_agg(to_jsonb(t)-'file_size_failure_reason' order by attempt_id) from public.transfers t),
+    'users',(select jsonb_agg(to_jsonb(u) order by install_id) from public.users u),
+    'access',(select jsonb_agg(jsonb_build_array(relacl::text,relrowsecurity) order by oid)
+      from pg_class where oid in ('public.transfers'::regclass,'public.users'::regclass)),
+    'function_access',(select proacl::text from pg_proc where oid='public.is_valid_transfer_diagnostics(jsonb,integer)'::regprocedure)
+  ) as value`)).rows[0].value;
+  const before = await snapshot();
+  await db.exec(sql);
+  equal(await snapshot(), before);
+  equal((await db.query("select count(*)::int as count from public.transfers where file_size_failure_reason is not null")).rows[0].count, 0);
+  equal((await db.query("select public.is_valid_transfer_diagnostics($1::jsonb) as valid", [JSON.stringify({ version: 1, capture_detail: "attachment_size_limit", capture_request_stage: "attachment_descriptor" })])).rows[0].valid, true);
+  equal((await db.query("select public.is_valid_transfer_diagnostics($1::jsonb) as valid", [JSON.stringify({ version: 1, capture_detail: "PRIVATE" })])).rows[0].valid, false);
+  await db.exec("begin;");
+  try {
+    const installId = (await db.query("select install_id from public.users limit 1")).rows[0].install_id;
+    for (const [index, detail] of ["attachment_size_limit", "size_limit", "attachment_failed"].entries()) {
+      const attemptId = `aaaaaaaa-aaaa-4aaa-8aaa-${String(900 + index).padStart(12, "0")}`;
+      await db.query(`select public.record_transfer_event(
+        p_attempt_id => $1::uuid, p_install_id => $2::text, p_attempted_at => now(),
+        p_source_platform => 'chatgpt', p_destination_platform => 'claude', p_character_count => null,
+        p_status => 'failed', p_last_stage => 'capture_started', p_failure_reason => 'conversation_too_large',
+        p_extension_version => '1.4.16', p_diagnostics => $3::jsonb)`,
+        [attemptId, installId, JSON.stringify({ version: 1, capture_detail: detail, capture_request_stage: "attachment_descriptor" })]);
+      equal((await db.query("select file_size_failure_reason from public.transfers where attempt_id=$1", [attemptId])).rows[0].file_size_failure_reason,
+        index === 0 ? "Combined text files exceeded the 2.1 MB limit before download." : null);
+    }
+    // Restore a current snapshot including a populated generated label. The
+    // database must recompute it instead of accepting its captured value.
+    const { checkSnapshot } = require("./check-telemetry-backup.js");
+    const fs = require("node:fs"), path = require("node:path");
+    const directory = path.join(__dirname, "../supabase/migrations");
+    const snapshotData = { transfers: (await db.query("select to_jsonb(t) as row from public.transfers t")).rows.map(value => value.row),
+      users: (await db.query("select to_jsonb(u) as row from public.users u")).rows.map(value => value.row),
+      migrations: fs.readdirSync(directory).filter(name => name.endsWith(".sql")).sort()
+        .map(name => ({ version: name.slice(0, 14), statements: [fs.readFileSync(path.join(directory, name), "utf8")] })) };
+    equal((await checkSnapshot(snapshotData)).originalValuesPreserved, true);
+  } finally { await db.exec("rollback;"); }
+  equal(await snapshot(), before);
+  return checks;
+}
+module.exports = { checkUsefulDiagnostics, checkAttachmentSizeFailure };
