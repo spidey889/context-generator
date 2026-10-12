@@ -1,6 +1,6 @@
 const assert = require("node:assert/strict");
 
-async function checkDraftCopyRecovery(db, sql) {
+async function checkDraftCopyRecovery(db, sql, expectedStatus = "copy_ready") {
   let checks = 0;
   const equal = (actual, expected) => { assert.deepEqual(actual, expected); checks++; };
   const snapshot = async () => (await db.query(`select jsonb_build_object(
@@ -11,11 +11,19 @@ async function checkDraftCopyRecovery(db, sql) {
     'function_access',(select proacl::text from pg_proc where oid='public.preserve_transfer_event_invariants()'::regprocedure)
   ) as value`)).rows[0].value;
   const before = await snapshot();
+  if (expectedStatus === "text_box") {
+    // Existing handled outcomes change only their label; counters and all
+    // other row fields/access rules must survive the actual migration.
+    for (const transfer of before.transfers || []) {
+      if (transfer.status === "copy_ready") transfer.status = "text_box";
+    }
+  }
   await db.exec(sql);
   equal(await snapshot(), before);
 
-  const install = "d0c0a111-1111-4111-8111-111111111111";
-  const id = number => `d0c0a222-2222-4222-8222-${String(number).padStart(12, "0")}`;
+  const prefix = expectedStatus === "text_box" ? "d0c0b" : "d0c0a";
+  const install = `${prefix}111-1111-4111-8111-111111111111`;
+  const id = number => `${prefix}222-2222-4222-8222-${String(number).padStart(12, "0")}`;
   const acknowledged = { version: 1, error_code: "editor_has_draft", draft_present: true,
     events: [{ event: "local_fallback", at_ms: 100, code: "editor_has_draft" }] };
   const report = (number, diagnostics = acknowledged, options = {}) => db.query(`select public.record_transfer_event(
@@ -32,17 +40,17 @@ async function checkDraftCopyRecovery(db, sql) {
   try {
     await report(1, null, { status: "started", failure: null });
     await report(1);
-    equal(await outcome(1), { status: "copy_ready", failure_reason: null });
+    equal(await outcome(1), { status: expectedStatus, failure_reason: null });
     equal(await counts(), { summaries: 0, failed: 0 });
     await report(1);
     await report(1, { version: 1, error_code: "paste_not_retained" });
-    equal(await outcome(1), { status: "copy_ready", failure_reason: null });
+    equal(await outcome(1), { status: expectedStatus, failure_reason: null });
     equal(await counts(), { summaries: 0, failed: 0 });
 
     // A later authenticated summary still counts once, independently of delivery.
     await report(1, acknowledged, { verified: true });
     await report(1, acknowledged, { verified: true });
-    equal(await outcome(1), { status: "copy_ready", failure_reason: null });
+    equal(await outcome(1), { status: expectedStatus, failure_reason: null });
     equal(await counts(), { summaries: 1, failed: 0 });
 
     await report(2, { version: 1, error_code: "editor_has_draft" });
@@ -51,7 +59,7 @@ async function checkDraftCopyRecovery(db, sql) {
     equal(await outcome(3), { status: "failed", failure_reason: "paste_failed" });
     equal(await counts(), { summaries: 1, failed: 2 });
 
-    await assert.rejects(report(4, null, { status: "copy_ready", failure: null }), error => error.code === "23514"); checks++;
+    await assert.rejects(report(4, null, { status: expectedStatus, failure: null }), error => error.code === "23514"); checks++;
     await assert.rejects(db.query("update public.transfers set status='succeeded',last_stage='completed' where attempt_id=$1", [id(1)]), error => error.code === "22023"); checks++;
     await assert.rejects(db.query("update public.transfers set attempted_at=clock_timestamp() where attempt_id=$1", [id(1)]), error => error.code === "22023"); checks++;
     equal(await counts(), { summaries: 1, failed: 2 });

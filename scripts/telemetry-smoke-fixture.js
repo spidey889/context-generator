@@ -180,7 +180,7 @@ async function createTelemetrySmokeFixture(repoRoot, databaseEnabled) {
       if (!databaseEnabled) return;
       await rpcChain;
       const row = (await database.query("select status,failure_reason,summary_verified,diagnostics from public.transfers where attempt_id=$1", [terminal.attempt_id])).rows[0];
-      assert.equal(row.status, "copy_ready");
+      assert.equal(row.status, "text_box");
       assert.equal(row.failure_reason, null);
       assert.equal(row.summary_verified, Boolean(terminal.summary_proof));
       assert.deepEqual(row.diagnostics, terminal.diagnostics);
