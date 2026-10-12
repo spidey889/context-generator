@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-12-reply-snapshot-v134";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-12-capture-progress-v135";
   const INLINE_PILL_SIZE = 36;
   const ownedUiStyleSheets = new Map();
   const CLAUDE_INLINE_STYLE_ID = "context-generator-claude-inline-styles";
@@ -940,6 +940,8 @@
       beginTransferAttempt,
       finishTransferTrace,
       recordTransferFailureDiagnostics,
+      recordJsonCaptureFailure,
+      reportCaptureProgress,
       resetRunningFlag,
       markCaptureDone,
       buildLatestTransferStats,
@@ -980,6 +982,7 @@
         if (!destinationPrepPromise && getDetectedConversationMessageCount() > 0) {
           destinationPrepPromise = prepareDestinationTab(destinationId, transferTrace);
         }
+        reportCaptureProgress(transferTrace, "structured");
         advanceTransferTelemetryStage(transferTrace, "capture_started");
         await prepareSourceForCapture();
         checkTransferDeadline(transferTrace);
@@ -1396,6 +1399,27 @@
     trace.diagnostics ||= { version: 1 };
     globalThis.CapTransferDiagnostics?.update(trace.diagnostics, changes);
     if (event) globalThis.CapTransferDiagnostics?.event(trace.diagnostics, event, getNow() - trace.startedAt);
+  }
+
+  function reportCaptureProgress(trace, method = null, force = false) {
+    if (!trace || trace.completed || trace.telemetryFinished) return;
+    trace.diagnosticCaptureStartedAt ??= getNow();
+    updateTransferDiagnostics(trace, { capture_method: method,
+      capture_ms: Math.round(getNow() - trace.diagnosticCaptureStartedAt) });
+    // Same-stage snapshots preserve slow capture evidence without a timer or
+    // sending a request per scroll. Final capture size still requires completion.
+    if (!trace.telemetryStarted || trace.telemetryLastStage !== "capture_started") return;
+    const now = Date.now();
+    if (!force && now - (trace.captureProgressReportedAt ?? trace.startedAtEpoch) < 30000) return;
+    trace.captureProgressReportedAt = now;
+    sendTransferTelemetrySnapshot(trace, "started", null);
+  }
+
+  function recordJsonCaptureFailure(trace, error) {
+    const details = globalThis.CapTransferDiagnostics?.errorDetails(error, "capture_json");
+    updateTransferDiagnostics(trace, { ...details,
+      capture_error_code: globalThis.CapTransferDiagnostics?.errorCode(error, "capture_json_failed"),
+      capture_failure_site: details?.failure_site, capture_error_type: details?.error_type });
   }
 
   function mergeTransferDiagnostics(trace, diagnostics) {
@@ -2312,7 +2336,7 @@
       "tab open done": "destination_prepare", "paste request start": "paste_start", "paste done": "paste_complete",
       "final tab activate start": "destination_activate", "final tab activate done": "destination_activate", "transfer complete": "completed" };
     if (operations[label]) updateTransferDiagnostics(trace, { last_operation: operations[label] }, operations[label]);
-    if (label === "capture start") trace.diagnosticCaptureStartedAt = now;
+    if (label === "capture start") trace.diagnosticCaptureStartedAt ??= now;
     if (label === "capture done" && trace.diagnosticCaptureStartedAt !== undefined)
       updateTransferDiagnostics(trace, { capture_ms: Math.round(now - trace.diagnosticCaptureStartedAt) });
     if (label === "summary start") trace.diagnosticSummaryStartedAt = now;
@@ -2341,6 +2365,8 @@
     }
     const totalMs = Math.round(getNow() - trace.startedAt);
     const failed = trace.marks.some((mark) => mark.label.startsWith("failed:"));
+    if (trace.telemetryLastStage === "capture_started" && trace.diagnosticCaptureStartedAt !== undefined)
+      updateTransferDiagnostics(trace, { capture_ms: Math.round(getNow() - trace.diagnosticCaptureStartedAt) });
     if (failed && !trace.diagnostics?.error_code) {
       updateTransferDiagnostics(trace, { error_code: "unknown_error", error_origin: "source" });
     }
@@ -3465,6 +3491,8 @@
   async function scrapeVirtualConversation(initialCapture, initialMessageTurns) {
     const transferTrace = activeTransferTrace;
     checkTransferDeadline(transferTrace);
+    if (isSourceReplyInProgress()) return initialCapture;
+    reportCaptureProgress(transferTrace, "sweep", true);
     const initialMetrics = lastConversationCaptureMetrics || {};
     const collectedTurns = [];
     const sweepStartedAt = Date.now();
@@ -3525,6 +3553,7 @@
       scrolls += 1;
       updateTransferDiagnostics(transferTrace, { sweep_scrolls: scrolls, sweep_stale_scrolls: totalStaleScrolls,
         sweep_quiet_checks: terminalQuietChecks });
+      reportCaptureProgress(transferTrace);
 
       if (!pixelMoved && afterWindowSignature === beforeWindowSignature) {
         checkTransferDeadline(transferTrace);
@@ -7750,6 +7779,7 @@
       checkTransferDeadline(trace);
       showOverlay(destinationId);
       releaseDestinationSheetBackdrop();
+      reportCaptureProgress(trace, useClaudeJson || useChatGptJson || useNetworkJson ? `${currentPlatform.id}-json` : "structured");
       advanceTransferTelemetryStage(trace, "capture_started");
       if (!useClaudeJson && !useChatGptJson && !useNetworkJson) await prepareSourceForCapture();
       checkTransferDeadline(trace);
@@ -7775,10 +7805,7 @@
           });
         } catch (error) {
           checkTransferDeadline(trace);
-          const captureFailure = globalThis.CapTransferDiagnostics?.errorDetails(error, "capture_json");
-          updateTransferDiagnostics(trace, { ...captureFailure,
-            capture_error_code: globalThis.CapTransferDiagnostics?.errorCode(error, "capture_json_failed"),
-            capture_failure_site: captureFailure?.failure_site, capture_error_type: captureFailure?.error_type });
+          recordJsonCaptureFailure(trace, error);
           // Retain the bridges' navigation/session cancellation, including an
           // away-and-back change that a final URL comparison cannot detect.
           if (/conversation changed during capture\./i.test(error?.message || "")) throw error;
@@ -7791,6 +7818,7 @@
           showFastCaptureFallbackMessage();
           const jsonFallbackReason = sanitizeCaptureDiagnostics({ jsonFallbackReason: error?.captureFailureReason }).jsonFallbackReason || "request_failed";
           updateTransferDiagnostics(trace, { json_fallback_code: jsonFallbackReason, last_operation: "capture_dom" }, "json_fallback");
+          reportCaptureProgress(trace, "structured", true);
           markTransferTrace(trace, "fast capture failed; using normal capture", { jsonFallbackReason });
           await prepareSourceForCapture();
           checkTransferDeadline(trace);

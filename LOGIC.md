@@ -440,6 +440,8 @@ Capture notes retain local-only observed exclusion categories (`uploads`, `media
 
 ### Payload, proof and serving-model trust
 
+Capture diagnostics record the selected JSON/DOM method at `capture_started` and switch to `sweep` when scrolling actually begins. A JSON-to-DOM fallback immediately queues its safe error code, request stage, detail and observed HTTP status; later scraping or delivery errors retain that JSON evidence. The sweep queues the existing metadata snapshot at most once per 30 seconds, with elapsed capture time and current counters. The durable outbox may combine quick progress updates; its final report retains these observations. Capture failure also retains elapsed time; final character count still requires completed capture. These fields stay inside `diagnostics`, with no new column or visible panel. Loop checkpoints drive progress without an additional timer, and terminal attempts stop sending it.
+
 Delivery: `content script -> background outbox -> Vercel /api/telemetry -> Supabase Edge -> record_transfer_event`.
 
 Every layer rejects unknown fields. Allowed payload fields are `install_id`, `attempt_id`, `attempted_at`, `source_platform`, `destination_platform`, `character_count`, `status`, `last_stage`, `failure_reason`, `extension_version`, and optional `completed_at`, `summary_proof`, `summary_confirmed_at`, `model`, `reported_model`, `diagnostics`. Client completion time is accepted for compatibility but not stored. `reported_model` is limited to the serving-route catalog and post-summary stages; it reports an observed result without claiming a server receipt.

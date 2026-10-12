@@ -2463,6 +2463,17 @@ async function run() {
       const stored = await sourceSession.evaluate(`chrome.storage.local.get("context-generator-telemetry-outbox-v1")`, extensionContextId);
       return Array.isArray(stored?.["context-generator-telemetry-outbox-v1"]) && stored["context-generator-telemetry-outbox-v1"].length === 0;
     }, "the installed worker's drained durable telemetry outbox");
+    // Short captures can coalesce progress in the durable outbox. Their final
+    // report must still retain the method and recovered JSON failure evidence.
+    const captureReport = state.telemetryRequests.findLast(payload => payload.status === "succeeded");
+    assert.equal(captureReport?.diagnostics?.capture_method, remoteStats.capture.method);
+    assert.equal(typeof captureReport.diagnostics.capture_ms, "number");
+    if (JSON_FALLBACK_SMOKE) {
+      assert.equal(captureReport.diagnostics.json_fallback_code, "incomplete");
+      assert.ok(captureReport.diagnostics.capture_detail, "The specific JSON failure detail must survive fallback.");
+      assert.notEqual(captureReport.diagnostics.capture_error_code, "unknown_error");
+      assert.ok(captureReport.diagnostics.capture_request_stage);
+    }
     assert.ok(telemetryFixture.responses.every(status => status === 204), "Every local telemetry report must be accepted.");
     await telemetryFixture.verifyDatabaseOutcome(summaryContext);
     process.stdout.write(TELEMETRY_DATABASE_SMOKE

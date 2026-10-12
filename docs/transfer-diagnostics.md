@@ -96,6 +96,16 @@ fragments, chat/project IDs and unrecognized path text cannot enter the payload.
 
 ## Persistence and rollout
 
+`capture_method` is reported before capture completes and changes to `sweep`
+when DOM scrolling starts. JSON fallback immediately queues the existing safe
+failure code, detail, request stage and observed HTTP status. Scraping sends
+elapsed time and current counters at most once per 30 seconds from its loop;
+failure keeps the elapsed capture time and JSON evidence. No new column or
+visible panel is required: these observations remain in `diagnostics`. Final
+`character_count` still requires successful capture, and missing historic or
+unobserved causes must never be invented. The durable outbox can combine quick
+progress updates; the final report retains their observations.
+
 Progress merges monotonically by pipeline stage. Older progress cannot overwrite
 newer observations. First terminal diagnostics freeze with the outcome through
 outbox compaction/restart. A NULL terminal record can be filled once by the same

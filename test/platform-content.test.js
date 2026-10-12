@@ -2546,6 +2546,70 @@ test("source failure telemetry keeps the precise destination observation and nev
   assert.doesNotMatch(JSON.stringify(terminal), /PRIVATE|café/);
 });
 
+test("slow capture reports its method and bounded progress before completion, then stops at terminal", () => {
+  const sent = [];
+  const hooks = loadPlatformContent([], "chat.deepseek.com", { runtimeSendMessage: async message => { sent.push(message); return { ok: true }; } });
+  let elapsed = 0;
+  hooks.window.performance.now = () => 1000 + elapsed;
+  const trace = hooks.beginTransferAttempt("chatgpt", "extension icon");
+  trace.telemetryLastStage = "capture_started";
+  const snapshots = () => sent.filter(message => message.type === "RECORD_TRANSFER_TELEMETRY").map(message => message.event);
+  hooks.reportCaptureProgress(trace, "structured", true);
+  assert.equal(snapshots().at(-1).diagnostics.capture_method, "structured");
+  hooks.reportCaptureProgress(trace, "sweep", true);
+  const initialCount = snapshots().length;
+  assert.equal(snapshots().at(-1).diagnostics.capture_method, "sweep");
+  assert.equal(snapshots().at(-1).characterCount, null);
+  elapsed = 29000;
+  hooks.reportCaptureProgress(trace);
+  assert.equal(snapshots().length, initialCount, "no request per scroll");
+  elapsed = 30000;
+  trace.captureProgressReportedAt = Date.now() - 30000;
+  trace.diagnostics.sweep_scrolls = 20;
+  hooks.reportCaptureProgress(trace);
+  assert.equal(snapshots().length, initialCount + 1);
+  assert.equal(snapshots().at(-1).diagnostics.capture_ms, 30000);
+  assert.equal(snapshots().at(-1).diagnostics.sweep_scrolls, 20);
+  elapsed = 360000;
+  hooks.recordTransferFailureDiagnostics(trace, Object.assign(new Error("Timed out"), { code: "transfer_timeout" }));
+  hooks.finishTransferTrace(trace, "client_interrupted");
+  assert.equal(snapshots().at(-1).diagnostics.capture_ms, 360000);
+  assert.equal(snapshots().at(-1).diagnostics.capture_method, "sweep");
+  const terminalCount = snapshots().length;
+  hooks.reportCaptureProgress(trace, "structured", true);
+  assert.equal(snapshots().length, terminalCount);
+  hooks.resetRunningFlag();
+});
+
+test("JSON failure retains exact safe details through scraping progress and a later timeout", () => {
+  const sent = [];
+  const hooks = loadPlatformContent([], "gemini.google.com", { runtimeSendMessage: async message => { sent.push(message); return { ok: true }; } });
+  const trace = hooks.beginTransferAttempt("chatgpt", "destination tile");
+  trace.telemetryLastStage = "capture_started";
+  hooks.reportCaptureProgress(trace, "gemini-json", true);
+  const snapshots = () => sent.filter(message => message.type === "RECORD_TRANSFER_TELEMETRY").map(message => message.event);
+  assert.equal(snapshots().at(-1).diagnostics.capture_method, "gemini-json");
+  hooks.recordJsonCaptureFailure(trace, Object.assign(new Error("PRIVATE account response"), { captureFailureReason: "request_failed", diagnostics: {
+    version: 1, capture_detail: "http_error", capture_request_stage: "history", failure_site: "capture_history", capture_http_status: 403
+  } }));
+  trace.diagnostics.json_fallback_code = "request_failed";
+  hooks.reportCaptureProgress(trace, "sweep", true);
+  assert.equal(snapshots().at(-1).diagnostics.capture_http_status, 403);
+  hooks.recordTransferFailureDiagnostics(trace, Object.assign(new Error("Timed out"), { code: "transfer_timeout" }));
+  hooks.finishTransferTrace(trace, "client_interrupted");
+  const terminal = snapshots().at(-1);
+  assert.equal(terminal.diagnostics.capture_method, "sweep");
+  assert.equal(terminal.diagnostics.error_code, "transfer_timeout");
+  assert.equal(terminal.diagnostics.capture_error_code, "capture_json_failed");
+  assert.equal(terminal.diagnostics.capture_detail, "http_error");
+  assert.equal(terminal.diagnostics.capture_request_stage, "history");
+  assert.equal(terminal.diagnostics.capture_http_status, 403);
+  assert.equal(terminal.diagnostics.capture_failure_site, "capture_history");
+  assert.equal(terminal.diagnostics.json_fallback_code, "request_failed");
+  assert.doesNotMatch(JSON.stringify(terminal), /PRIVATE|account|unknown_error/);
+  hooks.resetRunningFlag();
+});
+
 test("capture failure detail survives terminal source telemetry without the local error message", () => {
   const sent = [];
   const hooks = loadPlatformContent([], "chatgpt.com", { runtimeSendMessage: async message => { sent.push(message); return { ok: true }; } });
