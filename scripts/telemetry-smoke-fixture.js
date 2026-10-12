@@ -176,6 +176,21 @@ async function createTelemetrySmokeFixture(repoRoot, databaseEnabled) {
       assert.deepEqual(counts, { total: 1, today: 1, failed: 0 });
       assert.equal((await database.query("select count(*)::int as count from public.transfers where summary_verified")).rows[0].count, 1);
     },
+    async verifyDraftOutcome(terminal) {
+      if (!databaseEnabled) return;
+      await rpcChain;
+      const row = (await database.query("select status,failure_reason,summary_verified,diagnostics from public.transfers where attempt_id=$1", [terminal.attempt_id])).rows[0];
+      assert.equal(row.status, "failed");
+      assert.equal(row.failure_reason, "paste_failed");
+      assert.equal(row.summary_verified, Boolean(terminal.summary_proof));
+      assert.deepEqual(row.diagnostics, terminal.diagnostics);
+      assert.equal(row.diagnostics.error_code, "editor_has_draft");
+      assert.equal(row.diagnostics.paste_attempts, 1);
+      assert.equal(row.diagnostics.fresh_recovery, undefined);
+      const counts = (await database.query("select lifetime_summaries::int as total,today_summaries::int as today,today_failed_attempts::int as failed from public.users where install_id=$1", [terminal.install_id])).rows[0];
+      const summaries = terminal.summary_proof ? 1 : 0;
+      assert.deepEqual(counts, { total: summaries, today: summaries, failed: 1 });
+    },
     async verifyFailureOutcome(terminal) {
       if (!databaseEnabled) return;
       await rpcChain;

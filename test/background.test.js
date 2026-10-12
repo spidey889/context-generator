@@ -116,7 +116,9 @@ function loadBackgroundForTransferTest({
     updated: [],
     injected: [],
     fetched: [],
-    removed: []
+    removed: [],
+    errors: [],
+    badges: []
   };
   const event = { addListener: () => {} };
   const fastSetTimeout = (callback, _delay, ...args) => setTimeout(callback, 0, ...args);
@@ -125,7 +127,7 @@ function loadBackgroundForTransferTest({
     Date,
     URL,
     clearTimeout,
-    console: { debug() {}, error() {}, log() {}, warn() {} },
+    console: { debug() {}, error(...args) { operations.errors.push(args); }, log() {}, warn() {} },
     fetch: async (...args) => { operations.fetched.push(args); throw new Error("fetch is not expected in transfer tests"); },
     performance: { now: () => Date.now() },
     setTimeout: useRealTimers ? setTimeout : fastSetTimeout,
@@ -133,7 +135,7 @@ function loadBackgroundForTransferTest({
       action: {
         onClicked: event,
         setBadgeBackgroundColor: async () => {},
-        setBadgeText: async () => {}
+        setBadgeText: async options => { operations.badges.push(options.text); }
       },
       alarms: {
         clear: async () => true,
@@ -717,6 +719,8 @@ clockTest("the first destination draft rejection returns immediately without ope
     const pastes = harness.operations.sent.filter(({ message }) => message.type === "PASTE_CONTEXT");
     assert.equal(pastes.length, 1);
     assert.equal(pastes[0].tabId, 41);
+    assert.equal(harness.operations.errors.length, 0, "an expected draft must not be logged as a crash");
+    assert.ok(!harness.operations.badges.includes("ERR"));
   }
 });
 
@@ -765,7 +769,10 @@ clockTest("expired transfer messages cannot fetch summaries, open tabs, paste or
     assert.equal(response.ok, false);
     assert.equal(response.code, "transfer_timeout");
   }
-  assert.deepEqual(harness.operations, { created: [], gotten: [], sent: [], updated: [], injected: [], fetched: [], removed: [] });
+  const { errors, badges, ...transferOperations } = harness.operations;
+  assert.deepEqual(transferOperations, { created: [], gotten: [], sent: [], updated: [], injected: [], fetched: [], removed: [] });
+  assert.equal(errors[0][1].code, "transfer_timeout", "real failures must still be logged");
+  assert.ok(badges.includes("ERR"));
 });
 
 clockTest("a transfer deadline aborts an outstanding summary request", { timeout: 2000 }, async () => {

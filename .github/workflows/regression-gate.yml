@@ -87,6 +87,17 @@ jobs:
         run: |
           mkdir -p "$CAP_CONTEXT_SMOKE_ARTIFACT_DIR"
           xvfb-run -a npm run test:extension-smoke 2>&1 | tee "$CAP_CONTEXT_SMOKE_ARTIFACT_DIR/run.log"
+      - name: Brave first draft opens both copy dialogs without another tab
+        if: steps.scope.outputs.mode != 'light'
+        timeout-minutes: 2
+        shell: bash
+        env:
+          CAP_CONTEXT_DRAFT_TRANSFER_SMOKE: "1"
+          CAP_CONTEXT_TELEMETRY_SMOKE: "1"
+          CAP_CONTEXT_SMOKE_ARTIFACT_DIR: .test-artifacts/browser-smoke/draft-transfer
+        run: |
+          mkdir -p "$CAP_CONTEXT_SMOKE_ARTIFACT_DIR"
+          xvfb-run -a npm run test:extension-smoke 2>&1 | tee "$CAP_CONTEXT_SMOKE_ARTIFACT_DIR/run.log"
       - name: Brave streaming summary reveals the destination before completion
         if: steps.scope.outputs.mode != 'light'
         timeout-minutes: 2

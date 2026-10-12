@@ -1973,6 +1973,7 @@ clockTest("initial paste never overwrites a nonempty draft on any destination", 
     const editor = new FakeElement({ tag: "textarea", attrs: { placeholder: "Message" } });
     editor.value = draft;
     const hooks = loadPlatformContent([editor], hostname);
+    hooks.registerElementId("context-generator-fallback-modal", new FakeElement());
     await assert.rejects(hooks.pasteIntoPlatform("CONTEXT CARRY Keep the deployment plan.", destination), /already contains text/);
     assert.equal(editor.value, draft, hostname);
     assert.equal(editor.clicks, 0, hostname);
@@ -2107,6 +2108,7 @@ clockTest("Claude verifies a settled paste and preserves a draft restored on rem
   const elements = [oldEditor];
   oldEditor.onClick = () => { oldEditor.isConnected = false; elements[0] = draftEditor; };
   const remountHooks = loadPlatformContent(elements, "claude.ai");
+  remountHooks.registerElementId("context-generator-fallback-modal", new FakeElement());
   await assert.rejects(remountHooks.pasteIntoPlatform(summary, "claude"), error => {
     assert.equal(error.diagnostics.error_code, "editor_has_draft");
     assert.equal(error.diagnostics.error_origin, "destination");
@@ -2684,7 +2686,7 @@ clockTest("unconfirmed paste recovery asks to check the destination and retains 
   assert.equal(hooks.getSafeTelemetryFailureReason({ code: "paste_unconfirmed" }, "paste"), "paste_failed");
 });
 
-clockTest("draft paste recovery explains direct and worker-wrapped failures and preserves the prepared carry", () => {
+clockTest("source draft recovery keeps its original copy dialog and prepared carry", () => {
   for (const error of [
     { diagnosticCode: "editor_has_draft" },
     { code: "paste_failed", diagnostics: { version: 1, error_code: "editor_has_draft" } }
@@ -2699,10 +2701,35 @@ clockTest("draft paste recovery explains direct and worker-wrapped failures and 
     const summary = "Full prepared conversation\nwith every character retained.";
     hooks.showContextTransferFailure(error, { stage: "paste", destinationId: "chatgpt", summary });
     assert.equal(modal.style.display, "flex");
-    assert.equal(title.textContent, "Your draft is safe");
-    assert.match(desc.textContent, /draft in the input box/);
+    assert.equal(title.textContent, "Context is ready to copy");
+    assert.match(desc.textContent, /Auto-paste did not land in ChatGPT/);
     assert.equal(text.value, summary);
     assert.equal(editor.value, "My existing draft");
+  }
+});
+
+clockTest("destinations show the draft copy box on the first check without touching input text", async () => {
+  for (const [hostname, destination] of [["claude.ai", "claude"], ["chatgpt.com", "chatgpt"],
+    ["gemini.google.com", "gemini"], ["grok.com", "grok"], ["chat.deepseek.com", "deepseek"]]) {
+    const editor = new FakeElement({ tag: "textarea", attrs: { placeholder: "Message" } });
+    editor.value = "My existing draft";
+    const hooks = loadPlatformContent([editor], hostname);
+    const modal = new FakeElement(), title = new FakeElement(), desc = new FakeElement(), text = new FakeElement({ tag: "textarea" });
+    for (const [id, element] of [["modal", modal], ["title", title], ["desc", desc], ["text", text]]) {
+      hooks.registerElementId(`context-generator-fallback-${id}`, element);
+    }
+    const carry = "Exact prepared context\nSecond line.";
+    await assert.rejects(hooks.pasteIntoPlatform(carry, destination), error => {
+      assert.equal(error.diagnostics.error_code, "editor_has_draft");
+      assert.equal(error.diagnostics.paste_attempts, 1);
+      assert.equal(title.textContent, "Your draft is safe", "dialog is visible before the rejection is returned");
+      return true;
+    });
+    assert.equal(modal.style.display, "flex");
+    assert.match(desc.textContent, /draft in the input box/);
+    assert.equal(text.value, carry);
+    assert.equal(editor.value, "My existing draft");
+    assert.equal(editor.clicks, 0);
   }
 });
 

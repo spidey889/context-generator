@@ -961,7 +961,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     )
       .then((result) => sendResponse({ ok: true, timing: result?.timing || null, marks: result?.marks || [], diagnostics: result?.diagnostics || null }))
       .catch((error) => {
-        if (error.code !== "user_cancelled") {
+        const draftPresent = [error?.code, error?.diagnosticCode, error?.diagnostics?.error_code].includes("editor_has_draft");
+        if (error.code !== "user_cancelled" && !draftPresent) {
           console.error("[Context Generator Relay]", error);
           setBadge("ERR", "#b42318", 5000);
         }

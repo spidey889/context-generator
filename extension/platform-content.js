@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-12-close-nowrap-v137";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-12-draft-both-tabs-v138";
   const INLINE_PILL_SIZE = 36;
   const ownedUiStyleSheets = new Map();
   const CLAUDE_INLINE_STYLE_ID = "context-generator-claude-inline-styles";
@@ -813,7 +813,8 @@
           sendResponse({ ok: true, timing: { pasteMs, ...timing }, diagnostics: timing?.diagnostics || null });
         })
         .catch((error) => {
-          finishStatus(error.code === "user_cancelled" ? null : false);
+          const draftPresent = error?.diagnostics?.error_code === "editor_has_draft";
+          finishStatus(error.code === "user_cancelled" || draftPresent ? null : false);
           sendResponse({ ok: false, error: error.message, code: error.code || null, diagnostics: error.diagnostics || null });
         });
 
@@ -1098,10 +1099,9 @@
     }
 
     if (summary) {
-      // The worker wraps paste failures; the destination's closed diagnostic
-      // retains the actual draft guard instead of inferring it from error prose.
-      const draftPresent = [error?.code, error?.diagnosticCode, error?.diagnostics?.error_code].includes("editor_has_draft");
-      showFallbackModal(summary, destinationName, false, error?.code === "paste_unconfirmed", draftPresent);
+      // Source recovery keeps its original copy dialog. The destination owns
+      // the draft-specific explanation where the existing input is visible.
+      showFallbackModal(summary, destinationName, false, error?.code === "paste_unconfirmed");
       return;
     }
 
@@ -2726,6 +2726,9 @@
       globalThis.CapTransferDiagnostics?.update(diagnostics, { paste_ms: Date.now() - startedAt });
       globalThis.CapTransferDiagnostics?.failure(diagnostics, error, "destination", Date.now() - startedAt);
       error.diagnostics = globalThis.CapTransferDiagnostics?.snapshot(diagnostics) || null;
+      if (diagnostics.error_code === "editor_has_draft") {
+        showFallbackModal(text, getPlatform(destinationId)?.name || "the destination", false, false, true);
+      }
       throw error;
     }
   }

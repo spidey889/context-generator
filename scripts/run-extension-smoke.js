@@ -227,7 +227,7 @@ async function createSmokeExtension(tempRoot, origin) {
     "  function checkInlinePlacementPathname() {",
     `  window.__capSmokePickerJsonReady = () => pickerJsonCapture?.promise.then(() => true) || Promise.resolve(false);
   window.__capSmokeShowRecovery = () => showFallbackModal("Synthetic recovery context. Preserve the dialog palette.", "Claude", true);
-  window.__capSmokeShowDraftRecovery = () => showContextTransferFailure({ code: "paste_failed", diagnostics: { version: 1, error_code: "editor_has_draft" } }, { stage: "paste", destinationId: "chatgpt", summary: "Conversation from your previous chat\\n\\nUser: Let’s pick up where we left off.\\nAssistant: Here’s the context we prepared for your next chat." });
+  window.__capSmokeShowDraftRecovery = () => showFallbackModal("Conversation from your previous chat\\n\\nUser: Let’s pick up where we left off.\\nAssistant: Here’s the context we prepared for your next chat.", "ChatGPT", false, false, true);
   window.__capSmokePaste = (text, deadlineAt) => pasteIntoPlatform(text, currentPlatform.id, "smoke-paste-recovery", deadlineAt);
   window.__capSmokePasteState = () => ({ pending: Boolean(pendingPasteRecheck), userHandled: pendingPasteRecheck?.guard?.userHandled,
     active: instanceActive, visibility: document.visibilityState, turns: getDetectedConversationMessageCount(), ready: Boolean(findReadyPlatformInput()) });
@@ -477,6 +477,7 @@ function destinationFixture() {
   </form>
   <script>
     window.__capContextSmokeSendClicks = 0;
+    if (${process.env.CAP_CONTEXT_DRAFT_TRANSFER_SMOKE === "1"}) document.querySelector("textarea").value = "My existing draft";
     window.__capContextSmokeStatusHistory = [];
     window.__capContextSmokeBodyReplaced = false;
     window.__capContextSmokeCueMounts = 0;
@@ -691,9 +692,9 @@ async function startFixtureServer() {
         state.summaryPending = false;
       }
       const summaryTelemetry = state.summaryRequests.at(-1)?.telemetry;
-      // This status-only mode also accepts an unattributed summary: optional
+      // UI-only modes also accept an unattributed summary: optional
       // initial storage may time out without blocking the actual transfer.
-      const receipt = EARLY_HANDOFF_SMOKE && !summaryTelemetry
+      const receipt = (EARLY_HANDOFF_SMOKE || process.env.CAP_CONTEXT_DRAFT_TRANSFER_SMOKE === "1") && !summaryTelemetry
         ? {} : await telemetryFixture.signSummary(summaryTelemetry);
       const streaming = request.headers.accept === "application/x-ndjson";
       response.writeHead(200, {
@@ -1243,6 +1244,45 @@ async function verifyEarlyHandoff({ sourceSession, devToolsPort, origin, state, 
   process.stdout.write("✓ Polishing → real paste → verified ready; exact text, one summary, one destination, no Send click.\n");
 }
 
+async function verifyDraftTransfer({ sourceSession, devToolsPort, origin, state, destinationSessions, telemetryFixture }) {
+  await sourceSession.evaluate(`(() => {
+    document.getElementById("context-generator-bubble").click();
+    const speed = document.querySelector(".context-generator-speed-toggle");
+    if (speed?.getAttribute("aria-pressed") === "true") speed.click();
+    [...document.querySelectorAll(".context-generator-destination-tile")].find(tile => tile.textContent.includes("Claude")).click();
+  })()`);
+  const target = await waitFor(async () => (await getTargets(devToolsPort)).find(item => item.type === "page" && item.url.startsWith(origin + "/destination")), "the single draft destination");
+  const destination = await CdpSession.connect(target.webSocketDebuggerUrl);
+  destinationSessions.set(target.id, destination);
+  await destination.call("Runtime.enable");
+  const readBox = session => session.evaluate(`(() => { const modal = document.getElementById("context-generator-fallback-modal");
+    return modal?.style.display === "flex" ? { variant: modal.dataset.variant,
+      title: document.getElementById("context-generator-fallback-title").textContent,
+      text: document.getElementById("context-generator-fallback-text").value } : null; })()`);
+  const destinationBox = await waitFor(() => readBox(destination), "the destination draft copy box");
+  const sourceBox = await waitFor(() => readBox(sourceSession), "the source's original copy box");
+  assert.equal(destinationBox.title, "Your draft is safe");
+  assert.equal(destinationBox.variant, "draft");
+  assert.equal(sourceBox.title, "Context is ready to copy");
+  assert.equal(sourceBox.variant, "default");
+  assert.equal(sourceBox.text, SUMMARY_TEXT);
+  assert.equal(destinationBox.text, sourceBox.text);
+  assert.equal(await destination.evaluate("document.querySelector('form textarea').value"), "My existing draft");
+  assert.equal(await destination.evaluate("window.__capContextSmokeSendClicks"), 0);
+  const terminal = await waitFor(() => state.telemetryRequests.findLast(payload => payload.status === "failed"), "the draft outcome telemetry");
+  assert.equal(terminal.diagnostics.error_code, "editor_has_draft");
+  assert.equal(terminal.diagnostics.paste_attempts, 1);
+  assert.ok(terminal.diagnostics.paste_ms < 1000, "An existing draft must fail on the first check without a retry wait.");
+  assert.equal(terminal.diagnostics.fresh_recovery, undefined);
+  assert.equal(state.destinationRequests, 1, "A draft must never create or reload a second destination.");
+  assert.equal(state.summaryRequests.length, 1);
+  assert.equal(await destination.evaluate("document.getElementById('context-generator-destination-status')"), null, "The draft box replaces the paste failure banner.");
+  await telemetryFixture.verifyDraftOutcome(terminal);
+  await verifyRecoveryPalette(sourceSession, sourceSession.getExtensionContextId());
+  await verifyRecoveryPalette(destination, destination.getExtensionContextId());
+  process.stdout.write("✓ Draft detected on first check: one destination, intact draft, both copy boxes hold the exact carry, no Send.\n");
+}
+
 async function verifyRecoveryPalette(session, contextId) {
   const result = await session.evaluate(`(async () => {
     const modal = document.getElementById("context-generator-fallback-modal");
@@ -1498,6 +1538,10 @@ async function run() {
       await waitFor(() => sourceSession.evaluate("Boolean(window.__capSmokeNativeRequestReady)"), "the fixture's initial native request");
     }
     process.stdout.write("✓ Brave loaded the unpacked extension on the controlled source page.\n");
+    if (process.env.CAP_CONTEXT_DRAFT_TRANSFER_SMOKE === "1") {
+      await verifyDraftTransfer({ sourceSession, devToolsPort, origin, state, destinationSessions, telemetryFixture });
+      return;
+    }
     if (process.env.CAP_CONTEXT_PASTE_RECOVERY_SMOKE === "1") {
       await verifyPasteRecovery({ browserSession, devToolsPort, origin });
       return;
