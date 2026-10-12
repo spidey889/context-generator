@@ -171,7 +171,7 @@ jobs:
             xvfb-run -a npm run test:extension-smoke 2>&1 | tee "$CAP_CONTEXT_SMOKE_ARTIFACT_DIR/complete/run.log"
           mkdir -p "$CAP_CONTEXT_SMOKE_ARTIFACT_DIR"
           xvfb-run -a npm run test:extension-smoke 2>&1 | tee "$CAP_CONTEXT_SMOKE_ARTIFACT_DIR/run.log"
-      - name: Brave Claude oversized history cancellation and fallback
+      - name: Brave Claude oversized history cancellation and plain error
         if: steps.scope.outputs.mode != 'light' && inputs.extended_browser_checks == true
         timeout-minutes: 3
         shell: bash
@@ -207,7 +207,7 @@ jobs:
         run: |
           mkdir -p "$CAP_CONTEXT_SMOKE_ARTIFACT_DIR"
           xvfb-run -a npm run test:extension-smoke 2>&1 | tee "$CAP_CONTEXT_SMOKE_ARTIFACT_DIR/run.log"
-      - name: Brave oversized history cancellation and fallback
+      - name: Brave DeepSeek oversized history cancellation and plain error
         if: steps.scope.outputs.mode != 'light' && inputs.extended_browser_checks == true
         timeout-minutes: 3
         shell: bash

@@ -192,15 +192,15 @@ async function createTelemetrySmokeFixture(repoRoot, databaseEnabled) {
       const summaries = terminal.summary_proof ? 1 : 0;
       assert.deepEqual(counts, { total: summaries, today: summaries, failed: 0 });
     },
-    async verifyFailureOutcome(terminal) {
+    async verifyFailureOutcome(terminal, sizeLimit = false) {
       if (!databaseEnabled) return;
       await rpcChain;
       const row = (await database.query("select status,failure_reason,summary_verified,diagnostics from public.transfers where attempt_id=$1", [terminal.attempt_id])).rows[0];
       assert.equal(row.status, "failed");
-      assert.equal(row.failure_reason, "capture_failed");
+      assert.equal(row.failure_reason, sizeLimit ? "conversation_too_large" : "capture_failed");
       assert.equal(row.summary_verified, false);
       assert.deepEqual(row.diagnostics, terminal.diagnostics);
-      assert.equal(row.diagnostics.error_code, "capture_json_failed");
+      assert.equal(row.diagnostics.error_code, sizeLimit ? "conversation_too_large" : "capture_json_failed");
       assert.equal(row.diagnostics.diagnostics_revision, 2);
       assert.ok(row.diagnostics.capture_detail);
       assert.notEqual(row.diagnostics.failure_site, "unknown_error");

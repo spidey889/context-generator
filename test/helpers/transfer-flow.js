@@ -11,7 +11,8 @@ function sliceBetween(startMarker, endMarker) {
   return source.slice(start, end);
 }
 const code = new vm.Script(
-  sliceBetween("  function updateTransferDiagnostics(", "  function markCaptureDone(")
+  source.match(/  const OVERSIZED_CONVERSATION_ERROR_MESSAGE = .+;/)[0] + "\n"
+  + sliceBetween("  function updateTransferDiagnostics(", "  function markCaptureDone(")
   + sliceBetween("  function stopSourceDestinationProgress(", "  function prepareDestinationTab(")
   + sliceBetween("  function checkTransferDeadline(", "  function createTransferTrace(")
   + sliceBetween("  function hasSavedSourceConversation()", "  function showFastCaptureFallbackMessage(")

@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-12-json-transient-retry-v142";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-12-capture-size-stop-v143";
   const INLINE_PILL_SIZE = 36;
   const ownedUiStyleSheets = new Map();
   const CLAUDE_INLINE_STYLE_ID = "context-generator-claude-inline-styles";
@@ -124,7 +124,7 @@
   // Claude, ChatGPT and Grok need focus before composer hydration/verification.
   // Their source-side completion cue must finish before the background performs the focused paste.
   const FOCUSED_PASTE_DESTINATIONS = new Set(["claude", "chatgpt", "grok"]);
-  const OVERSIZED_CONVERSATION_ERROR_MESSAGE = "Conversation exceeds the supported 500,000 character limit";
+  const OVERSIZED_CONVERSATION_ERROR_MESSAGE = "This chat is too long to transfer. Next time, try summarizing it earlier.";
   const CONVERSATION_SCRAPE_RETRY_TIMEOUT_MS = 1800;
   const CONVERSATION_SCRAPE_RETRY_INTERVAL_MS = 140;
   const SOURCE_SCROLL_STABLE_TIMEOUT_MS = 1800;
@@ -7738,13 +7738,20 @@
     } catch { return false; }
   }
 
+  function isCaptureSizeLimitError(error) {
+    return error?.captureFailureReason === "size_limit"
+      || ["size_limit", "attachment_size_limit"].includes(error?.diagnostics?.capture_detail)
+      || [error?.code, error?.diagnosticCode].includes("conversation_too_large");
+  }
+
   function shouldRetrySourceJson(error) {
     const { capture_detail: detail, capture_http_status: status } = error?.diagnostics || {};
     // Retry transport/readiness, never a rejected history or hard byte limit.
     // A broad request_failed code alone can also mean invalid JSON or navigation.
-    if (!["request_failed", "timeout", "unavailable", "incomplete"].includes(error?.captureFailureReason)
-      || detail === "conversation_changed" || detail === "size_limit"
-      || ["conversation_changed", "conversation_too_large", "user_cancelled", "transfer_timeout"].includes(error?.diagnosticCode || error?.code)
+    if (isCaptureSizeLimitError(error)
+      || !["request_failed", "timeout", "unavailable", "incomplete"].includes(error?.captureFailureReason)
+      || detail === "conversation_changed"
+      || ["conversation_changed", "user_cancelled", "transfer_timeout"].includes(error?.diagnosticCode || error?.code)
       || isExtensionContextInvalidated(error)) return false;
     // Attachment readers can classify a temporary HTTP failure as incomplete;
     // only its explicit retryable status overrides that broad category.
@@ -7868,6 +7875,12 @@
           // away-and-back change that a final URL comparison cannot detect.
           if (/conversation changed during capture\./i.test(error?.message || "")) throw error;
           if (window.location.href !== sourceUrl) throw createDiagnosticError("The conversation changed during capture. Return to the source chat and try again.", "conversation_changed");
+          // A hard size rejection cannot be repaired by scrolling. Preserve its
+          // capture details, but end here before DOM recovery hides it as a timeout.
+          if (isCaptureSizeLimitError(error)) throw Object.assign(new Error(OVERSIZED_CONVERSATION_ERROR_MESSAGE), {
+            code: "conversation_too_large", diagnosticCode: "conversation_too_large",
+            captureFailureReason: "size_limit", diagnostics: error?.diagnostics
+          });
           // ChatGPT fast capture owns an API read, not page scrolling. A failed
           // read must not silently enter the legacy DOM sweep or move history.
           if (useChatGptJson && !isSourceReplyInProgress()) throw error;

@@ -58,10 +58,10 @@ const CHATGPT_HISTORY_OVERSIZE_SMOKE = CHATGPT_FAILURE_SMOKE === "history-oversi
 const CHATGPT_PASTE_AUTH_SMOKE = JSON_SOURCE === "chatgpt" && process.env.CAP_CONTEXT_CHATGPT_AUTH_SMOKE === "paste401";
 const CLAUDE_PARTIAL_SMOKE = JSON_SOURCE === "claude" && process.env.CAP_CONTEXT_CLAUDE_PARTIAL_SMOKE === "1";
 const CLAUDE_OVERSIZE_SMOKE = JSON_SOURCE === "claude" && process.env.CAP_CONTEXT_CLAUDE_PARTIAL_SMOKE === "oversize";
-const JSON_FALLBACK_SMOKE = Boolean(CLAUDE_PARTIAL_SMOKE || CLAUDE_OVERSIZE_SMOKE || NETWORK_FAILURE);
-// Recoverable fixtures retain their own JSON cause: a raw-size rejection or
-// unsupported file-only input must not be relabelled as partial history.
-const EXPECTED_JSON_FALLBACK_REASON = GROK_FILE_ONLY_SMOKE ? "unsupported" : DEEPSEEK_OVERSIZE_SMOKE ? "size_limit" : "incomplete";
+const SIZE_CAPTURE_SMOKE = Boolean(CLAUDE_OVERSIZE_SMOKE || DEEPSEEK_OVERSIZE_SMOKE || CHATGPT_PASTE_OVERSIZE_SMOKE || CHATGPT_HISTORY_OVERSIZE_SMOKE);
+const JSON_FALLBACK_SMOKE = Boolean(CLAUDE_PARTIAL_SMOKE || NETWORK_FAILURE) && !SIZE_CAPTURE_SMOKE;
+// Hard size limits now stop capture; only recoverable fixtures enter DOM fallback.
+const EXPECTED_JSON_FALLBACK_REASON = GROK_FILE_ONLY_SMOKE ? "unsupported" : "incomplete";
 const TELEMETRY_DATABASE_SMOKE = process.env.CAP_CONTEXT_TELEMETRY_SMOKE === "1";
 const FAILURE_ARTIFACT_DIR = process.env.CAP_CONTEXT_SMOKE_ARTIFACT_DIR || "";
 
@@ -2424,25 +2424,36 @@ async function run() {
     if (JSON_FALLBACK_SMOKE) {
       await waitFor(() => sourceSession.evaluate(`document.getElementById("context-generator-capture-notice")?.textContent === "Fast capture failed. Using normal capture instead."`), "the safe fast-capture fallback notice");
     }
-    if (JSON_SOURCE === "chatgpt" && CHATGPT_FAILURE_SMOKE && CHATGPT_FAILURE_SMOKE !== "streaming") {
+    if (SIZE_CAPTURE_SMOKE || JSON_SOURCE === "chatgpt" && CHATGPT_FAILURE_SMOKE && CHATGPT_FAILURE_SMOKE !== "streaming") {
       await waitFor(() => sourceSession.evaluate('Boolean(document.getElementById("context-generator-error-text")?.textContent)'), "the JSON capture error");
       const failedCapture = await sourceSession.evaluate(`(() => {
         const list = document.getElementById("cap-smoke-chat-history");
-        return { top: list.scrollTop, calls: list.capScrollCalls,
+        return { top: list?.scrollTop, calls: list?.capScrollCalls,
           fallbackNotice: Boolean(document.getElementById("context-generator-capture-notice")),
           error: document.getElementById("context-generator-error-text").textContent };
       })()`);
-      assert.equal(failedCapture.top, 420, "Failed JSON capture must preserve sidebar position.");
-      assert.equal(failedCapture.calls, 0, "Failed JSON capture must never scroll the sidebar.");
-      assert.equal(failedCapture.fallbackNotice, false, "ChatGPT must not enter legacy DOM recovery.");
+      if (JSON_SOURCE === "chatgpt") {
+        assert.equal(failedCapture.top, 420, "Failed JSON capture must preserve sidebar position.");
+        assert.equal(failedCapture.calls, 0, "Failed JSON capture must never scroll the sidebar.");
+      }
+      assert.equal(failedCapture.fallbackNotice, false, "Terminal capture errors must not enter DOM recovery.");
       assert.match(failedCapture.error, /JSON capture|too long|limit|Fast capture/i);
+      if (SIZE_CAPTURE_SMOKE) assert.equal(failedCapture.error,
+        "This chat is too long to transfer. Next time, try summarizing it earlier.");
       assert.equal(state.jsonRequests - jsonRequestsBeforeTransfer, 1, "One fresh API read must precede the error.");
       assert.equal(state.summaryRequests.length, 0, "A failed JSON read must not submit DOM history.");
       if (TELEMETRY_DATABASE_SMOKE) {
         const terminal = await waitFor(() => state.telemetryRequests.find(payload => payload.status === "failed"), "the installed worker's failed capture telemetry");
-        await telemetryFixture.verifyFailureOutcome(terminal);
+        await telemetryFixture.verifyFailureOutcome(terminal, SIZE_CAPTURE_SMOKE);
         assert.equal(terminal.diagnostics.failure_site, CHATGPT_FAILURE_SMOKE === "partial" ? "capture_serialize" : "capture_history");
         if (CHATGPT_FAILURE_SMOKE === "ranged") assert.equal(terminal.diagnostics.capture_http_status, 206);
+        if (SIZE_CAPTURE_SMOKE) {
+          assert.equal(terminal.failure_reason, "conversation_too_large");
+          assert.equal(terminal.diagnostics.error_code, "conversation_too_large");
+          assert.equal(terminal.diagnostics.capture_detail, "size_limit");
+          assert.equal(terminal.diagnostics.json_fallback_code, undefined);
+          assert.ok(!terminal.diagnostics.events.some(event => event.event === "capture_prepare"), "A size error must not prepare DOM scrolling.");
+        }
         process.stdout.write("✓ Precise capture failure reached the real local relay, Edge and SQL without private content.\n");
       }
       if (CHATGPT_PASTE_OVERSIZE_SMOKE) {
@@ -2458,7 +2469,11 @@ async function run() {
         assert.equal(state.pasteContentRequests + state.pasteDescriptorRequests, 0, "Rejected history must not begin paste downloads.");
         process.stdout.write(`✓ Brave cancelled oversized history after ${state.oversizeHistory.bytes} fixture bytes.\n`);
       }
-      process.stdout.write("✓ ChatGPT JSON failure stops without DOM fallback, sidebar scrolling or summary submission.\n");
+      if (DEEPSEEK_OVERSIZE_SMOKE || CLAUDE_OVERSIZE_SMOKE) {
+        await waitFor(() => state.oversizeHistory.cancelled, "oversized history reader cancellation");
+        assert.ok(state.oversizeHistory.bytes < 8000000, "The full oversized history tail must not be downloaded.");
+      }
+      process.stdout.write("✓ JSON capture failure stops without DOM fallback or summary submission.\n");
       return;
     }
     await waitFor(() => state.summaryRequests.length === 1, "one summary backend request");

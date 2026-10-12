@@ -10,7 +10,7 @@ const source = fs.readFileSync(path.join(__dirname, "../extension/platform-conte
 // Exercise the actual picker orchestrator; substitute only its UI, capture and
 // transfer boundaries to count side effects without native timers or a browser.
 function harness(platform, { mode = "failure", enabled = true, domFails = false, prepareFails = false, failureReason } = {}) {
-  const calls = { json: 0, prepare: 0, dom: 0, notice: 0, handoff: 0, destination: 0, flows: [], errors: [], traces: [], traceDetails: [], captureMetrics: [] };
+  const calls = { json: 0, prepare: 0, dom: 0, notice: 0, handoff: 0, destination: 0, flows: [], errors: [], traces: [], traceDetails: [], captureMetrics: [], finished: [] };
   const prepared = Promise.resolve({ tabId: 42 });
   const pathname = { claude: "/chat/source", chatgpt: "/c/source", gemini: "/app/source", grok: "/c/source", deepseek: "/a/chat/s/source" }[platform];
   const location = { href: `https://example.test${pathname}`, pathname };
@@ -22,7 +22,8 @@ function harness(platform, { mode = "failure", enabled = true, domFails = false,
     } }, currentPlatform: { id: platform, name: platform },
     claudeJsonCaptureEnabled: enabled, chatGptJsonCaptureEnabled: enabled, networkJsonCaptureEnabled: enabled,
     createTransferTrace: () => ({ id: "same-attempt" }), startTransferTelemetry() {},
-    markTransferTrace: (_trace, message, detail) => { calls.traces.push(message); calls.traceDetails.push(detail); }, finishTransferTrace() {},
+    markTransferTrace: (_trace, message, detail) => { calls.traces.push(message); calls.traceDetails.push(detail); },
+    finishTransferTrace: trace => calls.finished.push(trace),
     clearRunningResetTimer() {}, resetRunningFlag: () => { context.isRunning = false; },
     getDetectedConversationMessageCount: () => 2,
     transitionDestinationSheetToHandoff: async () => {}, showOverlay: () => { calls.handoff++; }, releaseDestinationSheetBackdrop() {},
@@ -363,6 +364,36 @@ const transientError = (reason = "request_failed", detail = "network_error", sta
     ...(status === undefined ? {} : { capture_http_status: status }) }
 });
 
+test("size failures end all five platforms before DOM recovery, including active replies and cached errors", async () => {
+  const cases = [
+    ["deepseek", true, transientError("size_limit", "attachment_size_limit")],
+    ["gemini", false, transientError("size_limit", "size_limit")],
+    ["grok", true, transientError("incomplete", "size_limit")],
+    ["claude", false, Object.assign(transientError(), { code: "conversation_too_large" })],
+    ["chatgpt", false, Object.assign(transientError(), { diagnosticCode: "conversation_too_large" })]
+  ];
+  for (const [platform, prefetched, error] of cases) {
+    const { context, calls } = harness(platform);
+    context.isSourceReplyInProgress = () => true;
+    context.window[captureKeyFor(platform)] = async () => { calls.json++; throw error; };
+    if (prefetched) {
+      context.startPickerJsonCapture(); await context.pickerJsonCapture.promise;
+      assert.equal(calls.errors.length, 0, "Keep picker errors silent until selection.");
+    }
+    await context.start("claude");
+    assert.equal(calls.json, 1);
+    assert.equal(calls.prepare + calls.dom + calls.notice + calls.flows.length, 0);
+    assert.equal(calls.errors[0], "This chat is too long to transfer. Next time, try summarizing it earlier.");
+    assert.equal(calls.errors.length, 1);
+    assert.equal(context.isRunning, false);
+    const diagnostics = calls.finished[0].diagnostics;
+    assert.equal(diagnostics.error_code, "conversation_too_large");
+    assert.equal(diagnostics.capture_detail, error.diagnostics.capture_detail);
+    assert.equal(diagnostics.json_fallback_code, undefined);
+    assert.doesNotMatch(JSON.stringify(calls.finished), /MUST_NOT_APPEAR/);
+  }
+});
+
 async function recoverJsonOnce(platform, error, prefetched = false) {
   const { context, calls } = harness(platform, { mode: "success" });
   const key = captureKeyFor(platform), capture = context.window[key];
@@ -417,14 +448,14 @@ test("hard and unknown failures are not retried, including a cached Claude size 
     if (prefetched) { context.startPickerJsonCapture(); await context.pickerJsonCapture.promise; }
     await context.start("claude");
     assert.equal(calls.json, 1);
-    assert.equal(calls.dom, platform === "chatgpt" ? 0 : 1);
-    assert.equal(calls.errors.length, platform === "chatgpt" ? 1 : 0);
+    assert.equal(calls.dom, 0);
+    assert.equal(calls.errors.length, 1);
   }
 });
 
 test("a failed JSON retry stops or falls back once, retaining its final cause", async () => {
   for (const [platform, prefetched, secondHard] of [
-    ["chatgpt", false, false], ["chatgpt", true, true], ["claude", true, false], ["claude", false, true]
+    ["chatgpt", false, false], ["chatgpt", true, true], ["claude", true, false], ["claude", false, true], ["deepseek", true, true]
   ]) {
     const { context, calls } = harness(platform);
     context.window[captureKeyFor(platform)] = async () => {
@@ -435,10 +466,12 @@ test("a failed JSON retry stops or falls back once, retaining its final cause", 
     await context.start("claude");
     assert.equal(calls.json, 2, "Never loop or retry a failed retry.");
     assert.equal(calls.destination, 1);
-    assert.equal(calls.dom, platform === "chatgpt" ? 0 : 1);
-    assert.equal(calls.errors.length, platform === "chatgpt" ? 1 : 0);
-    assert.equal(calls.flows.length, platform === "chatgpt" ? 0 : 1);
-    if (platform !== "chatgpt") assert.equal(calls.flows[0].trace.diagnostics.json_fallback_code, secondHard ? "size_limit" : "request_failed");
+    const stops = platform === "chatgpt" || secondHard;
+    assert.equal(calls.dom, stops ? 0 : 1);
+    assert.equal(calls.errors.length, stops ? 1 : 0);
+    assert.equal(calls.flows.length, stops ? 0 : 1);
+    if (!stops) assert.equal(calls.flows[0].trace.diagnostics.json_fallback_code, "request_failed");
+    if (secondHard) assert.match(calls.errors[0], /too long to transfer.*summarizing it earlier/);
   }
 });
 
@@ -680,7 +713,7 @@ test("JSON completion after source navigation cancels before dispatch or DOM fal
 });
 
 test("capture fallback records only recognized reasons, never arbitrary native errors", async () => {
-  for (const reason of ["unavailable", "timeout", "size_limit", "incomplete", "unsupported", "request_failed", "MUST_NOT_APPEAR"]) {
+  for (const reason of ["unavailable", "timeout", "incomplete", "unsupported", "request_failed", "MUST_NOT_APPEAR"]) {
     const { context, calls } = harness("claude", { failureReason: reason });
     await context.start("claude");
     assert.ok(calls.traceDetails.some(detail => detail?.jsonFallbackReason === (reason === "MUST_NOT_APPEAR" ? "request_failed" : reason)));
