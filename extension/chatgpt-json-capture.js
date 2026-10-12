@@ -1,5 +1,8 @@
 (() => {
   const channel = "cap-context-chatgpt-json-v2";
+  // Keep the MAIN download gate and serializer aligned for parameterized MIME labels.
+  const isPlainTextPaste = file => file?.is_big_paste === true && typeof file.mime_type === "string"
+    && file.mime_type.split(";", 1)[0].trim().toLowerCase() === "text/plain";
   const captureError = (message, captureFailureReason, detail = "incomplete_history", stage = "serialize", status) => Object.assign(new Error(message), {
     captureFailureReason, diagnosticCode: captureFailureReason === "size_limit" ? "conversation_too_large"
       : detail === "conversation_changed" ? "conversation_changed" : captureFailureReason === "unavailable" ? "capture_json_unavailable" : "capture_json_failed",
@@ -123,7 +126,7 @@
         return [{ role: "assistant", text: `Python result:\n\n${output}` }];
       }
       if (!["user", "assistant"].includes(role) || message.metadata?.is_visually_hidden_from_conversation) return [];
-      if (role === "user" && Array.isArray(message.metadata?.attachments) && message.metadata.attachments.some(file => file?.is_big_paste !== true || file.mime_type !== "text/plain")) excludedContentTypes.add("uploads");
+      if (role === "user" && Array.isArray(message.metadata?.attachments) && message.metadata.attachments.some(file => !isPlainTextPaste(file))) excludedContentTypes.add("uploads");
       if (message.recipient && message.recipient !== "all") {
         const parts = role === "assistant" ? canvasParts(message, branch[index + 1]) : [];
         if (!parts.length) excludedContentTypes.add("tools");
@@ -184,7 +187,7 @@
         const inlineCopies = new Map();
         const pastedIds = new Set();
         for (const file of Array.isArray(message.metadata?.attachments) ? message.metadata.attachments : []) {
-          if (file?.is_big_paste !== true || file.mime_type !== "text/plain") continue;
+          if (!isPlainTextPaste(file)) continue;
           assertComplete(file, "Pasted text attachment");
           const pasted = Object.hasOwn(pastedTexts, file.id) ? pastedTexts[file.id] : null;
           if (typeof pasted !== "string" || !Number.isSafeInteger(file.size) || new TextEncoder().encode(pasted).length !== file.size) throw blocked("A pasted text attachment is missing or incomplete.", "attachment_failed");
@@ -247,7 +250,7 @@
       const receive = event => {
         const reply = event.data;
         if (event.source === window && event.origin === location.origin && reply?.channel === channel
-          && reply.type === "pong" && reply.id === id && reply.version === 14) finish(true);
+          && reply.type === "pong" && reply.id === id && reply.version === 15) finish(true);
       };
       const ping = () => {
         if (settled) return;

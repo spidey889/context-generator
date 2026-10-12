@@ -1,7 +1,10 @@
 (() => {
-  const version = 14;
+  const version = 15;
   // HTTP media types ignore casing; parameters do not change the base type.
   const responseMediaType = response => response.headers.get("content-type")?.split(";", 1)[0].trim().toLowerCase();
+  // Match MIME metadata by base type, keeping the serializer's paste gate aligned.
+  const isPlainTextPaste = file => file?.is_big_paste === true && typeof file.mime_type === "string"
+    && file.mime_type.split(";", 1)[0].trim().toLowerCase() === "text/plain";
   // ChatGPT's native endpoint returns every branch. This is a transport safety
   // ceiling, not the selected transcript's 500k-character / 2 MB content limit.
   const maxCaptureBytes = 32000000;
@@ -230,7 +233,7 @@
         if (message?.author?.role !== "user" || message.metadata?.is_visually_hidden_from_conversation
           || (message.recipient && message.recipient !== "all")) continue;
         for (const file of Array.isArray(message.metadata?.attachments) ? message.metadata.attachments : []) {
-          if (file?.is_big_paste !== true || file.mime_type !== "text/plain") continue;
+          if (!isPlainTextPaste(file)) continue;
           if (typeof file.id !== "string" || !/^file[-_][a-zA-Z0-9_-]+$/.test(file.id)
             || !Number.isSafeInteger(file.size) || file.size < 0) throw new Error("paste");
           if (uploads.has(file.id)) {

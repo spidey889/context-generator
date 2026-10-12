@@ -474,6 +474,36 @@ function pasteFixture(texts = ["Original pasted document"], authorization = "Bea
   return { data, files, fetchImpl };
 }
 
+test("ChatGPT captures the full big paste with parameterized or mixed-case MIME metadata", async () => {
+  const text = "Original pasted text: café\r\nAssistant: quoted label\n".repeat(300);
+  for (const mimeType of ["text/plain; charset=utf-8", " Text/Plain ; charset=UTF-8 "]) {
+    const { data, files, fetchImpl } = pasteFixture([text]);
+    data.mapping.question.message.metadata.attachments[0].mime_type = mimeType;
+    const harness = setup(data, 200, { fetchImpl }); await discover(harness);
+    const capture = await harness.window.__capCaptureChatGptJson();
+    assert.equal(capture.text, `ChatGPT conversation:\n\nUser: ${text}\n\nAssistant: Selected answer`);
+    assert.equal(capture.messages.length, 2);
+    assert.equal(capture.messages[0].role, "user");
+    assert.equal(capture.messages[0].text, text);
+    assert.deepEqual([...capture.excludedContentTypes], []);
+    assert.equal(harness.requests.filter(r => r.url.includes(`/files/download/${files[0].id}`)).length, 1);
+    assert.equal(harness.requests.filter(r => r.url.includes("/estuary/content")).length, 1);
+  }
+});
+
+test("ChatGPT does not treat misleading MIME metadata as a plain-text paste", async () => {
+  for (const mimeType of ["text/plain-extra; charset=utf-8", "application/octet-stream; note=text/plain", null, {}]) {
+    const { data, fetchImpl } = pasteFixture();
+    data.mapping.question.message.content.parts = ["Own text"];
+    data.mapping.question.message.metadata.attachments[0].mime_type = mimeType;
+    const harness = setup(data, 200, { fetchImpl }); await discover(harness);
+    const capture = await harness.window.__capCaptureChatGptJson();
+    assert.equal(capture.text, "ChatGPT conversation:\n\nUser: Own text\n\nAssistant: Selected answer");
+    assert.deepEqual([...capture.excludedContentTypes], ["uploads"]);
+    assert.equal(harness.requests.filter(r => /files\/download|estuary\/content/.test(r.url)).length, 0);
+  }
+});
+
 test("ChatGPT accepts combined pastes above 1.4 MB through 2.1 MB, retaining the transcript limit", async () => {
   for (const lengths of [[470000], [235000, 235000], [350000, 350000]]) {
     const characters = lengths.reduce((sum, length) => sum + length, 0);
@@ -607,7 +637,7 @@ test("ChatGPT replaces the previous hook without losing observed authentication"
   old.version = 8;
   harness.reinstall();
   assert.notEqual(harness.window.__capChatGptFetchState, old);
-  assert.equal(harness.window.__capChatGptFetchState.version, 14);
+  assert.equal(harness.window.__capChatGptFetchState.version, 15);
   assert.equal(harness.listeners(), 1);
   assert.equal((await harness.window.__capCaptureChatGptJson()).text,
     "ChatGPT conversation:\n\nUser: Original pasted document\n\nAssistant: Selected answer");
