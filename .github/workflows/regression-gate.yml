@@ -120,6 +120,18 @@ jobs:
         run: |
           mkdir -p "$CAP_CONTEXT_SMOKE_ARTIFACT_DIR"
           xvfb-run -a npm run test:extension-smoke 2>&1 | tee "$CAP_CONTEXT_SMOKE_ARTIFACT_DIR/run.log"
+      - name: Brave JSON retry after offline picker capture
+        if: steps.scope.outputs.mode != 'light'
+        timeout-minutes: 2
+        shell: bash
+        env:
+          CAP_CONTEXT_JSON_SMOKE: chatgpt
+          CAP_CONTEXT_JSON_RETRY_SMOKE: "1"
+          CAP_CONTEXT_TELEMETRY_SMOKE: "1"
+          CAP_CONTEXT_SMOKE_ARTIFACT_DIR: .test-artifacts/browser-smoke/json-retry
+        run: |
+          mkdir -p "$CAP_CONTEXT_SMOKE_ARTIFACT_DIR"
+          xvfb-run -a npm run test:extension-smoke 2>&1 | tee "$CAP_CONTEXT_SMOKE_ARTIFACT_DIR/run.log"
       - name: Brave ChatGPT oversized paste cancellation without DOM fallback
         if: steps.scope.outputs.mode != 'light'
         timeout-minutes: 3

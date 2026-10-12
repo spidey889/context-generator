@@ -11,6 +11,8 @@ Evidence labels:
 - **Rule:** an intentional boundary visible in current code.
 - **Unverified:** a compatibility assumption whose live behavior was not checked.
 
+Implementation follow-up (2026-10-12): finding 1 now receives one fresh JSON read at destination selection for a recognized temporary failure, including a failed prefetch or fresh read. Network/timeouts, readiness and explicit temporary HTTP errors qualify; hard limits, invalid history/content, access/rate-limit rejection, unknown errors and navigation/session changes retain their existing handling. A successful retry stays silent and keeps JSON capture; a failed retry follows the existing platform recovery once. The original snapshot, findings and aggregate counts below remain historical evidence, not a current database inventory. See [current capture behavior](../LOGIC.md#capture-selection-and-failure-handling).
+
 ## Most useful findings first
 
 | Priority | Finding | Evidence and effect |

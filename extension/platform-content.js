@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-12-draft-copy-ready-v141";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-12-json-transient-retry-v142";
   const INLINE_PILL_SIZE = 36;
   const ownedUiStyleSheets = new Map();
   const CLAUDE_INLINE_STYLE_ID = "context-generator-claude-inline-styles";
@@ -7738,23 +7738,59 @@
     } catch { return false; }
   }
 
+  function shouldRetrySourceJson(error) {
+    const { capture_detail: detail, capture_http_status: status } = error?.diagnostics || {};
+    // Retry transport/readiness, never a rejected history or hard byte limit.
+    // A broad request_failed code alone can also mean invalid JSON or navigation.
+    if (!["request_failed", "timeout", "unavailable", "incomplete"].includes(error?.captureFailureReason)
+      || detail === "conversation_changed" || detail === "size_limit"
+      || ["conversation_changed", "conversation_too_large", "user_cancelled", "transfer_timeout"].includes(error?.diagnosticCode || error?.code)
+      || isExtensionContextInvalidated(error)) return false;
+    // Attachment readers can classify a temporary HTTP failure as incomplete;
+    // only its explicit retryable status overrides that broad category.
+    if (Number.isInteger(status) && status >= 400) return [408, 500, 502, 503, 504].includes(status);
+    return error.captureFailureReason !== "incomplete" && (error.captureFailureReason === "timeout"
+      || ["network_error", "busy", "hook_unavailable", "auth_missing", "routing_unavailable"].includes(detail));
+  }
+
   async function takePickerJsonCapture(expectedPath) {
     const entry = pickerJsonCapture;
+    const trace = activeTransferTrace;
     pickerJsonCapture = null;
-    if (entry) {
-      try {
-        if (isPickerJsonCaptureCurrent(entry)) {
-          entry.trace = activeTransferTrace;
-          entry.selected = true;
-          const result = await entry.promise;
+    // Keep the original attempt bound while a replacement waits for a native
+    // read to finish, even if cancellation clears the global running trace.
+    const read = () => captureSourceJson(expectedPath, () => {
+      checkTransferDeadline(trace);
+      return true;
+    });
+    try {
+      if (entry) {
+        try {
           if (isPickerJsonCaptureCurrent(entry)) {
-            if (result.error) throw result.error;
-            return result.capture;
+            entry.trace = trace;
+            entry.selected = true;
+            const result = await entry.promise;
+            if (isPickerJsonCaptureCurrent(entry)) {
+              if (result.error) throw result.error;
+              return result.capture;
+            }
           }
-        }
-      } finally { entry.guard.dispose(); }
+        } finally { entry.guard.dispose(); }
+      }
+      return await read();
+    } catch (error) {
+      checkTransferDeadline(trace);
+      if (!shouldRetrySourceJson(error)) throw error;
+      recordJsonCaptureFailure(trace, error);
+      if (trace?.diagnostics) {
+        for (const key of ["error_code", "error_origin", "failure_site", "error_type", "error_file", "error_line", "error_column"]) delete trace.diagnostics[key];
+      }
+      updateTransferDiagnostics(trace, { last_operation: "capture_json" }, "capture_json");
+      markTransferTrace(trace, "retrying JSON capture");
+      // One fresh read at selection, including a failed picker prefetch. Keep
+      // the retry outside the catch so its failure uses normal recovery once.
+      return read();
     }
-    return captureSourceJson(expectedPath);
   }
 
   async function startDestinationTransfer(destinationId) {

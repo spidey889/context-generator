@@ -337,14 +337,14 @@ test("navigation during a selected pending prefetch cancels without another nati
   assert.match(calls.errors[0], /conversation changed during capture/);
 });
 
-test("picker failures stay silent until selection and honor each platform's recovery", async () => {
+test("non-retryable picker failures stay silent until selection and honor each platform's recovery", async () => {
   for (const platform of ["chatgpt", "claude"]) {
     const { context, calls } = harness(platform);
     context.startPickerJsonCapture(); await context.pickerJsonCapture.promise;
     assert.equal(calls.json, 1);
     assert.equal(calls.notice + calls.dom + calls.prepare + calls.flows.length + calls.errors.length, 0);
     await context.start("claude");
-    assert.equal(calls.json, 1, "selection must reuse the failed prefetch without a duplicate read");
+    assert.equal(calls.json, 1, "selection must not retry an unclassified prefetch failure");
     if (platform === "chatgpt") {
       assert.equal(calls.notice + calls.dom + calls.prepare + calls.flows.length, 0);
       assert.equal(calls.errors.length, 1);
@@ -355,6 +355,143 @@ test("picker failures stay silent until selection and honor each platform's reco
       assert.equal(calls.flows[0].text, "DOM transcript");
     }
   }
+});
+
+const transientError = (reason = "request_failed", detail = "network_error", status) => Object.assign(new Error("Private response MUST_NOT_APPEAR"), {
+  captureFailureReason: reason,
+  diagnostics: { version: 1, capture_detail: detail, capture_request_stage: "history", failure_site: "capture_history",
+    ...(status === undefined ? {} : { capture_http_status: status }) }
+});
+
+for (const platform of ["chatgpt", "claude", "gemini", "grok", "deepseek"]) {
+  test(`${platform}: transient prefetched and fresh JSON failures recover once without frontend errors or DOM`, async () => {
+    const errors = [transientError(), transientError("timeout", "timeout"), transientError("incomplete", "attachment_failed", 503),
+      ...["busy", "hook_unavailable", "auth_missing", "routing_unavailable"].map(detail => transientError("unavailable", detail)),
+      ...[408, 500, 502, 503, 504].map(status => transientError("request_failed", "http_error", status))];
+    for (const prefetched of [false, true]) {
+      for (const error of errors) {
+        const { context, calls, prepared } = harness(platform, { mode: "success" });
+        const key = captureKeyFor(platform), capture = context.window[key];
+        context.window[key] = async () => {
+          if (!calls.json) { calls.json++; throw error; }
+          return capture();
+        };
+        if (prefetched) {
+          context.startPickerJsonCapture(); await context.pickerJsonCapture.promise;
+          assert.equal(calls.json, 1, "The open picker must not retry or start transfer work on its own.");
+          assert.equal(calls.errors.length + calls.notice + calls.destination, 0);
+        }
+        await context.start("claude");
+        assert.equal(calls.json, 2);
+        assert.equal(calls.dom + calls.prepare + calls.notice + calls.errors.length, 0);
+        assert.equal(calls.destination, 1);
+        assert.equal(calls.flows.length, 1);
+        assert.equal(calls.flows[0].prep, prepared);
+        assert.equal(calls.flows[0].text, "JSON transcript");
+        assert.equal(calls.flows[0].trace.diagnostics.capture_detail, error.diagnostics.capture_detail);
+        assert.equal(calls.flows[0].trace.diagnostics.error_code, undefined);
+        assert.equal(calls.flows[0].trace.diagnostics.json_fallback_code, undefined);
+        assert.equal(calls.flows[0].trace.diagnostics.failure_site, undefined);
+        assert.doesNotMatch(JSON.stringify(calls.traceDetails), /MUST_NOT_APPEAR/);
+      }
+    }
+  });
+
+  test(`${platform}: hard or unclassified JSON failures are never retried`, async () => {
+    const errors = [transientError("size_limit", "size_limit"), transientError("incomplete", "size_limit"),
+      transientError("incomplete", "incomplete_history"), transientError("unsupported", "unsupported_content"),
+      transientError("request_failed", "invalid_json"), transientError("incomplete", "partial_response", 206),
+      transientError("request_failed", "network_error", 413), transientError("request_failed", "other"),
+      ...[400, 401, 403, 404, 429, 501, 505].map(status => transientError("request_failed", "http_error", status)),
+      Object.assign(transientError("timeout", "timeout"), { diagnosticCode: "conversation_too_large" })];
+    for (const prefetched of [false, true]) {
+      for (const error of errors) {
+        const { context, calls } = harness(platform);
+        context.window[captureKeyFor(platform)] = async () => { calls.json++; throw error; };
+        if (prefetched) { context.startPickerJsonCapture(); await context.pickerJsonCapture.promise; }
+        await context.start("claude");
+        assert.equal(calls.json, 1);
+        assert.equal(calls.destination, 1);
+        assert.equal(calls.dom, platform === "chatgpt" ? 0 : 1);
+        assert.equal(calls.errors.length, platform === "chatgpt" ? 1 : 0);
+      }
+    }
+  });
+
+  test(`${platform}: the second JSON failure uses existing recovery once, with its final cause`, async () => {
+    for (const prefetched of [false, true]) {
+      for (const secondHard of [false, true]) {
+        const { context, calls } = harness(platform);
+        context.window[captureKeyFor(platform)] = async () => {
+          calls.json++;
+          throw secondHard && calls.json === 2 ? transientError("size_limit", "size_limit") : transientError();
+        };
+        if (prefetched) { context.startPickerJsonCapture(); await context.pickerJsonCapture.promise; }
+        await context.start("claude");
+        assert.equal(calls.json, 2, "Never loop or retry a failed retry.");
+        assert.equal(calls.destination, 1);
+        assert.equal(calls.dom, platform === "chatgpt" ? 0 : 1);
+        assert.equal(calls.notice, platform === "chatgpt" ? 0 : 1);
+        assert.equal(calls.errors.length, platform === "chatgpt" ? 1 : 0);
+        assert.equal(calls.flows.length, platform === "chatgpt" ? 0 : 1);
+        if (platform !== "chatgpt") assert.equal(calls.flows[0].trace.diagnostics.json_fallback_code, secondHard ? "size_limit" : "request_failed");
+      }
+    }
+  });
+}
+
+test("a pending prefetch that fails after selection gets one fresh JSON read", async () => {
+  const { context, calls } = harness("chatgpt", { mode: "success" });
+  const started = deferred(), response = deferred();
+  context.window.__capCaptureChatGptJson = async () => {
+    calls.json++;
+    if (calls.json === 1) { started.resolve(); await response.promise; throw transientError(); }
+    return { text: "Recovered JSON", messageTurnCount: 2 };
+  };
+  context.startPickerJsonCapture(); await started.promise;
+  const transfer = context.start("claude");
+  response.resolve();
+  await transfer;
+  assert.equal(calls.json, 2);
+  assert.equal(calls.flows[0].text, "Recovered JSON");
+  assert.equal(calls.errors.length + calls.dom + calls.notice, 0);
+});
+
+test("navigation, cancellation or deadline expiry prevents a transient JSON retry", async () => {
+  for (const stop of ["navigation", "cancelled", "expired"]) {
+    const { context, calls, navigate } = harness("chatgpt");
+    context.window.__capCaptureChatGptJson = async () => {
+      calls.json++;
+      if (stop === "navigation") { navigate("/c/other"); navigate("/c/source"); }
+      else context.activeTransferTrace[stop] = true;
+      throw transientError();
+    };
+    await context.start("claude");
+    assert.equal(calls.json, 1);
+    assert.equal(calls.flows.length + calls.dom + calls.notice, 0);
+    assert.equal(calls.traces.includes("retrying JSON capture"), false);
+  }
+});
+
+test("a queued JSON retry stays bound to its cancelled attempt after globals reset", async () => {
+  const { context, calls } = harness("chatgpt");
+  const blocked = deferred();
+  context.window.__capCaptureChatGptJson = async () => { calls.json++; throw transientError(); };
+  const mark = context.markTransferTrace;
+  context.markTransferTrace = (trace, label, detail) => {
+    mark(trace, label, detail);
+    if (label === "retrying JSON capture") {
+      context.pendingJsonCapture = blocked.promise;
+      trace.cancelled = true;
+      context.activeTransferTrace = null;
+      context.isRunning = false;
+      blocked.resolve();
+    }
+  };
+  await context.start("claude");
+  assert.equal(calls.json, 1);
+  assert.equal(calls.flows.length + calls.dom + calls.notice, 0);
+  assert.match(calls.errors[0], /Transfer cancelled/);
 });
 
 test("cancelling a selected queued prefetch prevents its native read even after the running flag resets", async () => {

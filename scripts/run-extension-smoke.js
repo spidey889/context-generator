@@ -48,6 +48,7 @@ const GROK_FILE_ONLY_SMOKE = JSON_SOURCE === "grok" && process.env.CAP_CONTEXT_N
 const DEEPSEEK_OVERSIZE_SMOKE = JSON_SOURCE === "deepseek" && process.env.CAP_CONTEXT_NETWORK_FAILURE_SMOKE === "oversize";
 const NETWORK_FAILURE = (NETWORK_SOURCE && process.env.CAP_CONTEXT_NETWORK_FAILURE_SMOKE === "partial") || GROK_FILE_ONLY_SMOKE || DEEPSEEK_OVERSIZE_SMOKE;
 const JSON_CAPTURE_SMOKE = Boolean(JSON_SOURCE);
+const JSON_RETRY_SMOKE = JSON_SOURCE === "chatgpt" && process.env.CAP_CONTEXT_JSON_RETRY_SMOKE === "1";
 const CLAUDE_RELOAD_SMOKE = JSON_SOURCE === "claude" && process.env.CAP_CONTEXT_CLAUDE_RELOAD_SMOKE === "1";
 const CHATGPT_RELOAD_SMOKE = JSON_SOURCE === "chatgpt" && process.env.CAP_CONTEXT_CHATGPT_RELOAD_SMOKE === "1";
 const JSON_RELOAD_SMOKE = CLAUDE_RELOAD_SMOKE || CHATGPT_RELOAD_SMOKE;
@@ -226,6 +227,11 @@ async function createSmokeExtension(tempRoot, origin) {
   platformSource = replaceOnce(platformSource,
     "  function checkInlinePlacementPathname() {",
     `  window.__capSmokePickerJsonReady = () => pickerJsonCapture?.promise.then(() => true) || Promise.resolve(false);
+  window.__capSmokePickerJsonFailure = () => pickerJsonCapture?.promise.then(result => result.error?.diagnostics?.capture_detail) || Promise.resolve(null);
+  window.__capSmokeJsonRetryState = () => activeTransferTrace && ({
+    retryMarks: activeTransferTrace.marks.filter(mark => mark.label === "retrying JSON capture").length,
+    detail: activeTransferTrace.diagnostics.capture_detail, fallback: activeTransferTrace.diagnostics.json_fallback_code
+  });
   window.__capSmokeShowRecovery = () => showFallbackModal("Synthetic recovery context. Preserve the dialog palette.", "Claude", true);
   window.__capSmokeShowDraftRecovery = () => showFallbackModal(createLocalContextCarry("Conversation from your previous chat\\n\\nUser: Let’s pick up where we left off.\\nAssistant: Here’s the context we prepared for your next chat.").summary, "ChatGPT", false, false, true);
   window.__capSmokePaste = (text, deadlineAt) => pasteIntoPlatform(text, currentPlatform.id, "smoke-paste-recovery", deadlineAt);
@@ -2303,10 +2309,21 @@ async function run() {
       // Exercise capture reuse through the immediate handoff too; the other
       // JSON platforms and ordinary DOM smoke retain the animated transition.
       if (JSON_SOURCE === "chatgpt") await sourceSession.call("Emulation.setEmulatedMedia", { features: [{ name: "prefers-reduced-motion", value: "reduce" }] });
+      if (JSON_RETRY_SMOKE) {
+        // The disposable source tab goes offline for prefetch, then returns
+        // online with its picker still open: the user's actual failure sequence.
+        await sourceSession.call("Network.enable");
+        await sourceSession.call("Network.emulateNetworkConditions", { offline: true, latency: 0, downloadThroughput: -1, uploadThroughput: -1 });
+      }
       await sourceSession.evaluate('document.getElementById("context-generator-bubble").click()');
       // Opening yields to paint before prefetch starts; the first probe may be false.
       await waitFor(() => sourceSession.evaluate("window.__capSmokePickerJsonReady()", extensionContextId), "picker JSON capture after its opening paint");
-      assert.ok(state.jsonRequests > jsonRequestsBeforeTransfer, "Opening the orb must start native JSON capture before selection.");
+      if (JSON_RETRY_SMOKE) {
+        assert.equal(await sourceSession.evaluate("window.__capSmokePickerJsonFailure()", extensionContextId), "network_error");
+        assert.equal(state.jsonRequests, jsonRequestsBeforeTransfer, "Offline prefetch must fail before reaching the fixture server.");
+        assert.equal(await sourceSession.evaluate('Boolean(document.getElementById("context-generator-error-text"))'), false);
+        await sourceSession.call("Network.emulateNetworkConditions", { offline: false, latency: 0, downloadThroughput: -1, uploadThroughput: -1 });
+      } else assert.ok(state.jsonRequests > jsonRequestsBeforeTransfer, "Opening the orb must start native JSON capture before selection.");
       assert.equal(state.summaryRequests.length, 0, "Orb capture must not start summarization.");
       assert.equal(state.telemetryRequests.length, beforePickerTelemetry, "Orb capture must not create a transfer attempt.");
       assert.equal((await getTargets(devToolsPort)).filter(target => target.type === "page").length, beforePickerTabs, "Orb capture must not open a destination tab.");
@@ -2491,6 +2508,18 @@ async function run() {
         if (JSON_SOURCE === "grok") process.stdout.write("\u2713 Grok JSON: exact 48-turn transcript, original code/whitespace and zero attachment/tool leakage.\n");
       }
       assert.equal(state.jsonRequests, jsonRequestsBeforeTransfer + (JSON_SOURCE === "gemini" ? 3 : JSON_SOURCE === "grok" ? 2 : 1), "Destination selection must reuse the orb's single full-history capture.");
+      if (JSON_RETRY_SMOKE) {
+        const recovered = await sourceSession.evaluate(`(() => {
+          return { ...window.__capSmokeJsonRetryState(),
+            frontendError: Boolean(document.getElementById("context-generator-error-text")),
+            notice: Boolean(document.getElementById("context-generator-capture-notice")) };
+        })()`, extensionContextId);
+        assert.equal(recovered.retryMarks, 1);
+        assert.equal(recovered.detail, "network_error");
+        assert.equal(recovered.fallback, undefined);
+        assert.equal(recovered.frontendError || recovered.notice, false);
+        process.stdout.write("✓ Offline picker JSON failure recovered once after reconnect: exact JSON, no frontend error, no DOM or second destination.\n");
+      }
     }
     process.stdout.write("✓ Capture reached the stub backend exactly once with both conversation turns.\n");
 
