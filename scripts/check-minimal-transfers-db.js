@@ -71,16 +71,12 @@ async function checkMinimalTransfers(db, sql, migrations) {
   equal((await one("select count(*)::int as n from pg_constraint where conrelid='public.transfers'::regclass and conname in ('transfers_completion_terminal','transfers_summary_receipt_consistent','transfers_terminal_receipt_consistent')")).n, 0);
 
   const { checkSnapshot } = require("./check-telemetry-backup.js");
-  const oldRestore = await checkSnapshot(oldSnapshot);
-  equal(oldRestore.originalValuesPreserved, true);
-  equal(oldRestore.pendingMigrations, 0);
+  // This upgrade checks both captured rows and intentional column removals.
+  // Default restores are already covered before the rename and at final schema.
   const upgraded = await checkSnapshot(oldSnapshot, { applyPending: true, throughVersion: migrations.at(-1).version });
   equal(upgraded.retainedValuesPreserved, true);
   equal(upgraded.removedColumns.sort(), removed.map(name => `transfers.${name}`).sort());
   equal(upgraded.capturedCronJobsRestored, true);
-  const newRestore = await checkSnapshot(await snapshot(migrations));
-  equal(newRestore.originalValuesPreserved, true);
-  equal(newRestore.removedColumns, []);
 
   // The existing user avoids consuming additional finite name-pool entries.
   await db.query("update public.users set lifetime_summaries=0,today_summaries=0,today_failed_attempts=0,today_date=(clock_timestamp() at time zone 'Asia/Kolkata')::date where install_id=$1", [install]);

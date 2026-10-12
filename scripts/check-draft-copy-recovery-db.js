@@ -39,6 +39,15 @@ async function checkDraftCopyRecovery(db, sql, expectedStatus = "copy_ready") {
   await db.exec("set role service_role");
   try {
     await report(1, null, { status: "started", failure: null });
+    if (expectedStatus === "copy_ready") {
+      // Seed one authentic historical handled outcome for the next rename's
+      // full-row/counter preservation check. Run the behavior matrix once with
+      // the final label rather than repeating it for both spellings.
+      await report(1, acknowledged, { verified: true });
+      equal(await outcome(1), { status: expectedStatus, failure_reason: null });
+      equal(await counts(), { summaries: 1, failed: 0 });
+      return checks;
+    }
     await report(1);
     equal(await outcome(1), { status: expectedStatus, failure_reason: null });
     equal(await counts(), { summaries: 0, failed: 0 });

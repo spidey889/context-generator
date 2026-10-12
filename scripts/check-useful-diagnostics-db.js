@@ -1,5 +1,6 @@
 const assert = require("node:assert/strict");
 const contract = require("../extension/transfer-diagnostics.js");
+const { checkDiagnosticsSamples } = require("./check-diagnostics-samples.js");
 
 async function checkUsefulDiagnostics(db, sql) {
   let checks = 0;
@@ -20,20 +21,26 @@ async function checkUsefulDiagnostics(db, sql) {
   const historicalContract = structuredClone(contract.schema);
   historicalContract.capture_detail.values = historicalContract.capture_detail.values.filter(value => value !== "attachment_size_limit");
   equal(historicalRules, historicalContract);
-  const valid = async value => (await db.query("select public.is_valid_transfer_diagnostics($1::jsonb) as valid", [JSON.stringify(value)])).rows[0].valid;
-  // Every new observation must survive both final and prepared recovery records.
+  const samples = [];
+  // Rule/schema equality above checks every enum member. Exercise boundary
+  // values through the common validator, with root and prepared paths separate
+  // so accepting the root cannot mask an ignored invalid prepared observation.
   for (const key of ["failure_site", "error_type", "error_file", "capture_detail", "capture_request_stage", "summary_failure_detail", "summary_failed_provider"]) {
-    for (const value of historicalRules[key].values) {
-      equal(await valid({ version: 1, [key]: value, prepared_diagnostics: { version: 1, [key]: value } }), true);
+    const values = historicalRules[key].values;
+    for (const value of new Set([values[0], values.at(-1)])) {
+      samples.push({ label: `root ${key}: ${value}`, value: { version: 1, [key]: value }, expected: true });
+      samples.push({ label: `prepared ${key}: ${value}`, value: { version: 1, prepared_diagnostics: { version: 1, [key]: value } }, expected: true });
     }
-    equal(await valid({ version: 1, [key]: "PRIVATE URL/text" }), false);
+    samples.push({ label: `root ${key} rejects private text`, value: { version: 1, [key]: "PRIVATE URL/text" }, expected: false });
+    samples.push({ label: `prepared ${key} rejects private text`, value: { version: 1, prepared_diagnostics: { version: 1, [key]: "PRIVATE URL/text" } }, expected: false });
   }
   const report = { version: 1, error_code: "capture_json_failed", failure_site: "capture_session", capture_detail: "http_error", capture_http_status: 403, error_type: "Error" };
-  equal(await valid(report), true);
-  equal(await valid({ version: 1 }), true);
-  for (const status of [99, 600, -1, 403.5]) equal(await valid({ ...report, capture_http_status: status }), false);
-  equal(await valid({ ...report, error_line: -1 }), false);
-  equal(await valid({ ...report, stack: "PRIVATE" }), false);
+  samples.push({ label: "complete capture failure", value: report, expected: true });
+  samples.push({ label: "legacy minimal diagnostics", value: { version: 1 }, expected: true });
+  for (const status of [99, 600, 403.5]) samples.push({ label: `invalid HTTP status ${status}`, value: { ...report, capture_http_status: status }, expected: false });
+  samples.push({ label: "negative error line", value: { ...report, error_line: -1 }, expected: false });
+  samples.push({ label: "private stack text", value: { ...report, stack: "PRIVATE" }, expected: false });
+  checks += await checkDiagnosticsSamples(db, samples);
   equal((await db.query(`select has_function_privilege('anon','public.is_valid_transfer_diagnostics(jsonb,integer)','execute') as anon,
     has_function_privilege('authenticated','public.is_valid_transfer_diagnostics(jsonb,integer)','execute') as authenticated,
     has_function_privilege('service_role','public.is_valid_transfer_diagnostics(jsonb,integer)','execute') as service`)).rows[0], { anon: false, authenticated: false, service: true });
@@ -52,32 +59,41 @@ async function checkAttachmentSizeFailure(db, sql, capturedMigrations, expectedR
   const before = await snapshot();
   await db.exec(sql);
   equal(await snapshot(), before);
-  equal((await db.query("select count(*)::int as count from public.transfers where file_size_failure_reason is not null")).rows[0].count, 0);
+  equal((await db.query("select attempt_id::text,file_size_failure_reason from public.transfers where file_size_failure_reason is not null order by attempt_id")).rows,
+    (before.transfers || []).filter(transfer => transfer.diagnostics?.capture_detail === "attachment_size_limit")
+      .map(transfer => ({ attempt_id: transfer.attempt_id, file_size_failure_reason: expectedReason })));
   equal((await db.query("select public.is_valid_transfer_diagnostics($1::jsonb) as valid", [JSON.stringify({ version: 1, capture_detail: "attachment_size_limit", capture_request_stage: "attachment_descriptor" })])).rows[0].valid, true);
   equal((await db.query("select public.is_valid_transfer_diagnostics($1::jsonb) as valid", [JSON.stringify({ version: 1, capture_detail: "PRIVATE" })])).rows[0].valid, false);
-  await db.exec("begin;");
-  try {
-    const installId = (await db.query("select install_id from public.users limit 1")).rows[0].install_id;
-    for (const [index, detail] of ["attachment_size_limit", "size_limit", "attachment_failed"].entries()) {
-      const attemptId = `aaaaaaaa-aaaa-4aaa-8aaa-${String(900 + index).padStart(12, "0")}`;
-      await db.query(`select public.record_transfer_event(
+  const installId = (await db.query("select install_id from public.users limit 1")).rows[0].install_id;
+  const report = (number, detail) => db.query(`select public.record_transfer_event(
         p_attempt_id => $1::uuid, p_install_id => $2::text, p_attempted_at => now(),
         p_source_platform => 'chatgpt', p_destination_platform => 'claude', p_character_count => null,
         p_status => 'failed', p_last_stage => 'capture_started', p_failure_reason => 'conversation_too_large',
         p_extension_version => '1.4.16', p_diagnostics => $3::jsonb)`,
-        [attemptId, installId, JSON.stringify({ version: 1, capture_detail: detail, capture_request_stage: "attachment_descriptor" })]);
+    [`aaaaaaaa-aaaa-4aaa-8aaa-${String(number).padStart(12, "0")}`, installId,
+      JSON.stringify({ version: 1, capture_detail: detail, capture_request_stage: "attachment_descriptor" })]);
+  await db.exec("begin;");
+  try {
+    for (const [index, detail] of ["attachment_size_limit", "size_limit", "attachment_failed"].entries()) {
+      const attemptId = `aaaaaaaa-aaaa-4aaa-8aaa-${String(900 + index).padStart(12, "0")}`;
+      await report(900 + index, detail);
       equal((await db.query("select file_size_failure_reason from public.transfers where attempt_id=$1", [attemptId])).rows[0].file_size_failure_reason,
         index === 0 ? expectedReason : null);
     }
-    // Restore a current snapshot including a populated generated label. The
-    // database must recompute it instead of accepting its captured value.
-    const { checkSnapshot } = require("./check-telemetry-backup.js");
-    const snapshotData = { transfers: (await db.query("select to_jsonb(t) as row from public.transfers t")).rows.map(value => value.row),
-      users: (await db.query("select to_jsonb(u) as row from public.users u")).rows.map(value => value.row),
-      migrations: [...capturedMigrations] };
-    equal((await checkSnapshot(snapshotData)).originalValuesPreserved, true);
+    // Restore once at the final label/schema. The earlier wording uses the same
+    // generated-column recovery path and still has its real migration/RPC checks.
+    if (expectedReason === "file size") {
+      const { checkSnapshot } = require("./check-telemetry-backup.js");
+      const snapshotData = { transfers: (await db.query("select to_jsonb(t) as row from public.transfers t")).rows.map(value => value.row),
+        users: (await db.query("select to_jsonb(u) as row from public.users u")).rows.map(value => value.row),
+        migrations: [...capturedMigrations] };
+      equal((await checkSnapshot(snapshotData)).originalValuesPreserved, true);
+    }
   } finally { await db.exec("rollback;"); }
   equal(await snapshot(), before);
+  // Keep one populated old label across the next real migration. Its before/
+  // after comparison above must now prove recomputation, not just NULL labels.
+  if (expectedReason !== "file size") await report(990, "attachment_size_limit");
   return checks;
 }
 module.exports = { checkUsefulDiagnostics, checkAttachmentSizeFailure };

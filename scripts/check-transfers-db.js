@@ -99,11 +99,6 @@ async function checkTransfers(db, sql, migrations) {
   equal(upgraded.retainedValuesPreserved, true);
   equal(upgraded.originalValuesPreserved, false);
   equal(upgraded.removedColumns, ["transfer_events.id"]);
-  const newRestore = await checkSnapshot(await snapshot("transfers", migrations));
-  equal(newRestore.originalValuesPreserved, true);
-  equal(newRestore.removedColumns, []);
-  equal(newRestore.transferEvents, beforeRows.length);
-
   // Backup recovery must restore the captured job, including non-default
   // targets/owners, disabled state and extra jobs, without scheduling anything.
   const currentSnapshot = await snapshot("transfers", migrations);
@@ -115,12 +110,14 @@ async function checkTransfers(db, sql, migrations) {
       active: true, nodename: "second.invalid", nodeport: 7432, database: "second_database", username: "second_owner" }
   ] };
   const customJobRestore = await checkSnapshot(customJobSnapshot);
+  // The custom-job restore also proves current-table data recovery. Check the
+  // rows here instead of rebuilding the same database with only default jobs.
+  equal(customJobRestore.originalValuesPreserved, true);
+  equal(customJobRestore.removedColumns, []);
+  equal(customJobRestore.transferEvents, beforeRows.length);
   equal(customJobRestore.capturedCronJobsRestored, true);
   equal(customJobRestore.capturedCronJobs, 2);
   assert.match(customJobRestore.capturedCronJobHash, /^[0-9a-f]{64}$/); checks++;
-  equal(customJobRestore.originalColumnHashes, newRestore.originalColumnHashes);
-  const { cron_jobs: ignoredJobs, ...legacyWithoutJobs } = currentSnapshot;
-  equal((await checkSnapshot(legacyWithoutJobs)).capturedCronJobsRestored, false);
 
   // Exercise drift refusal without creating files in the active migration
   // folder. Only an explicit boundary above recorded history permits an upgrade.

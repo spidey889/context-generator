@@ -1,5 +1,6 @@
 const assert = require("node:assert/strict");
 const contract = require("../extension/transfer-diagnostics.js");
+const { checkDiagnosticsSamples } = require("./check-diagnostics-samples.js");
 
 async function checkClaudePageDiagnostics(db, sql) {
   let checks = 0;
@@ -16,20 +17,21 @@ async function checkClaudePageDiagnostics(db, sql) {
   equal(await snapshot(), before);
   const rules = JSON.parse(sql.match(/rules constant jsonb := '([^']+)'::jsonb/)[1]);
   equal(rules, Object.fromEntries(Object.keys(rules).map(key => [key, contract.schema[key]])));
-  const valid = async value => (await db.query("select public.is_valid_transfer_diagnostics($1::jsonb) as valid", [JSON.stringify(value)])).rows[0].valid;
+  const samples = [];
   for (const page of contract.schema.claude_page.values) {
     const sample = { version: 1, claude_page: page, destination_route_allowed: true,
       destination_platform_match: true, destination_message_count: 0,
       prepared_diagnostics: { version: 1, claude_page: page } };
-    equal(await valid(sample), true);
+    samples.push({ label: `allowed Claude page ${page}`, value: sample, expected: true });
   }
-  for (const sample of [{ version: 1 }, { version: 1, error_code: "editor_missing" }]) equal(await valid(sample), true);
+  samples.push({ label: "legacy editor failure", value: { version: 1, error_code: "editor_missing" }, expected: true });
   for (const page of ["https://claude.ai/new", "claude.ai/chat/PRIVATE", "claude.ai/?secret=PRIVATE", "PRIVATE"]) {
-    equal(await valid({ version: 1, claude_page: page }), false);
-    equal(await valid({ version: 1, prepared_diagnostics: { version: 1, claude_page: page } }), false);
+    samples.push({ label: `private Claude page ${page}`, value: { version: 1, claude_page: page }, expected: false });
+    samples.push({ label: `private prepared Claude page ${page}`, value: { version: 1, prepared_diagnostics: { version: 1, claude_page: page } }, expected: false });
   }
-  equal(await valid({ version: 1, destination_message_count: -1 }), false);
-  equal(await valid({ version: 1, destination_route_allowed: "true" }), false);
+  samples.push({ label: "negative destination message count", value: { version: 1, destination_message_count: -1 }, expected: false });
+  samples.push({ label: "string instead of route boolean", value: { version: 1, destination_route_allowed: "true" }, expected: false });
+  checks += await checkDiagnosticsSamples(db, samples);
   return checks;
 }
 module.exports = { checkClaudePageDiagnostics };

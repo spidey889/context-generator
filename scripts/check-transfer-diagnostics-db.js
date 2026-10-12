@@ -1,5 +1,6 @@
 const assert = require("node:assert/strict");
 const contract = require("../extension/transfer-diagnostics.js");
+const { checkDiagnosticsSamples } = require("./check-diagnostics-samples.js");
 
 async function checkTransferDiagnostics(db, sql) {
   let checks = 0;
@@ -19,13 +20,12 @@ async function checkTransferDiagnostics(db, sql) {
   equal(await rows("select to_jsonb(u) as row from public.users u order by install_id"), users);
   equal(await rows("select relname,relacl::text,relrowsecurity from pg_class where oid in ('public.transfers'::regclass,'public.users'::regclass) order by relname"), security);
   equal((await one("select count(*)::int as count from public.transfers where diagnostics is not null")).count, 0);
-  const valid = async value => (await one("select public.is_valid_transfer_diagnostics($1::jsonb) as valid", [JSON.stringify(value)])).valid;
   const samples = [];
   for (const [key, rule] of Object.entries(rules)) {
     const value = rule.values?.[0] ?? (rule.type === "boolean" ? false : rule.type === "number" ? 23 : rule.type === "object"
       ? { version: 1, error_code: "editor_missing", paste_events: [{ event: "failure", at_ms: 23, code: "editor_missing" }] }
       : [{ event: "admission", at_ms: 0 }]);
-    samples.push({ version: 1, [key]: value });
+    samples.push({ label: `historical field ${key}`, value: { version: 1, [key]: value }, expected: true });
   }
   const malformed = [{}, [], null, { version: 2 }, { version: 1, raw_error: "PRIVATE" },
     { version: 1, capture_chars: -1 }, { version: 1, capture_chars: 1.5 }, { version: 1, paste_attempts: 2147483648 },
@@ -33,11 +33,12 @@ async function checkTransferDiagnostics(db, sql) {
     { version: 1, events: [{ event: "admission", at_ms: -1 }] }, { version: 1, events: [{ event: "admission", at_ms: 0, text: "PRIVATE" }] },
     { version: 1, events: [{ event: "admission" }] }, { version: 1, events: Array(33).fill({ event: "admission", at_ms: 0 }) },
     { version: 1, prepared_diagnostics: { version: 1, prepared_diagnostics: { version: 1 } } }];
-  for (const sample of [...samples, ...malformed.filter(value => value !== null)]) {
-    equal(await valid(sample), Boolean(contract.validate(sample)));
+  malformed.forEach((value, index) => samples.push({ label: `malformed historical diagnostics ${index}`, value, expected: Boolean(contract.validate(value)) }));
+  for (const value of [{ version: 2 }, { version: 1, raw_error: "PRIVATE" }, { version: 1, online: "true" }, { version: 1, capture_chars: -1 }]) {
+    samples.push({ label: `prepared diagnostics must reject ${JSON.stringify(value)}`, value: { version: 1, prepared_diagnostics: value }, expected: false });
   }
+  checks += await checkDiagnosticsSamples(db, samples);
   // SQL NULL is the compatibility absence, distinct from invalid JSON null.
-  equal(await valid(null), false);
   equal((await one("select public.is_valid_transfer_diagnostics(null::jsonb) as valid")).valid, true);
   await db.exec("begin");
   const install = "d1a60000-0000-4000-8000-000000000001";

@@ -248,12 +248,6 @@ async function main() {
     assert.match(JSON.stringify(indexedPlan.rows), /transfer_events_install_id_attempted_at_idx/); checks++;
     const { checkSnapshot } = require("./check-telemetry-backup.js");
     const upgradeOptions = { applyPending: true, throughVersion: "20261002073711" };
-    const restoredBackup = await checkSnapshot(legacySnapshot, upgradeOptions);
-    equal(restoredBackup.originalValuesPreserved, true);
-    equal(restoredBackup.capturedMigrations, 10);
-    equal(restoredBackup.pendingMigrations, 3);
-    equal(restoredBackup.transferEvents, legacySnapshot.transfer_events.length);
-    equal(restoredBackup.users, legacySnapshot.users.length);
     // Supabase CLI migration history stores parsed statements without trailing
     // semicolons, whereas MCP can store one whole SQL file. Replay both formats.
     const splitStatementSnapshot = { ...legacySnapshot, migrations: legacySnapshot.migrations.map((migration, index) => {
@@ -264,9 +258,15 @@ async function main() {
       assert.ok(statements.length > 1, "Fixture must contain distinct unterminated SQL statements");
       return { ...migration, statements };
     }) };
-    const restoredSplitBackup = await checkSnapshot(splitStatementSnapshot, upgradeOptions);
-    equal(restoredSplitBackup.originalValuesPreserved, true);
-    equal(restoredSplitBackup.originalColumnHashes, restoredBackup.originalColumnHashes);
+    // One mixed-format restore covers CLI statement arrays and whole-file MCP
+    // history together; a second identical database adds no independent coverage.
+    const restoredBackup = await checkSnapshot(splitStatementSnapshot, upgradeOptions);
+    equal(restoredBackup.originalValuesPreserved, true);
+    equal(restoredBackup.capturedMigrations, 10);
+    equal(restoredBackup.pendingMigrations, 3);
+    equal(restoredBackup.transferEvents, legacySnapshot.transfer_events.length);
+    equal(restoredBackup.users, legacySnapshot.users.length);
+    equal(restoredBackup.capturedCronJobsRestored, false);
     const { checkMinimalUsers } = require("./check-minimal-users-db.js");
     for (const name of names.filter(name => name.slice(0, 14) > "20261002073711")) {
       const sql = fs.readFileSync(path.join(directory, name), "utf8");
