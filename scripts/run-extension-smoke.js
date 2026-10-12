@@ -227,7 +227,7 @@ async function createSmokeExtension(tempRoot, origin) {
     "  function checkInlinePlacementPathname() {",
     `  window.__capSmokePickerJsonReady = () => pickerJsonCapture?.promise.then(() => true) || Promise.resolve(false);
   window.__capSmokeShowRecovery = () => showFallbackModal("Synthetic recovery context. Preserve the dialog palette.", "Claude", true);
-  window.__capSmokeShowDraftRecovery = () => showFallbackModal("Conversation from your previous chat\\n\\nUser: Let’s pick up where we left off.\\nAssistant: Here’s the context we prepared for your next chat.", "ChatGPT", false, false, true);
+  window.__capSmokeShowDraftRecovery = () => showFallbackModal(createLocalContextCarry("Conversation from your previous chat\\n\\nUser: Let’s pick up where we left off.\\nAssistant: Here’s the context we prepared for your next chat.").summary, "ChatGPT", false, false, true);
   window.__capSmokePaste = (text, deadlineAt) => pasteIntoPlatform(text, currentPlatform.id, "smoke-paste-recovery", deadlineAt);
   window.__capSmokePasteState = () => ({ pending: Boolean(pendingPasteRecheck), userHandled: pendingPasteRecheck?.guard?.userHandled,
     active: instanceActive, visibility: document.visibilityState, turns: getDetectedConversationMessageCount(), ready: Boolean(findReadyPlatformInput()) });
@@ -1255,10 +1255,12 @@ async function verifyDraftTransfer({ sourceSession, devToolsPort, origin, state,
   const destination = await CdpSession.connect(target.webSocketDebuggerUrl);
   destinationSessions.set(target.id, destination);
   await destination.call("Runtime.enable");
+  // The full copy payload is extension-world state; only the preview is shared DOM.
   const readBox = session => session.evaluate(`(() => { const modal = document.getElementById("context-generator-fallback-modal");
     return modal?.style.display === "flex" ? { variant: modal.dataset.variant,
       title: document.getElementById("context-generator-fallback-title").textContent,
-      text: document.getElementById("context-generator-fallback-text").value } : null; })()`);
+      text: modal.contextGeneratorCopyText,
+      preview: document.getElementById("context-generator-fallback-text").value } : null; })()`, session.getExtensionContextId());
   const destinationBox = await waitFor(() => readBox(destination), "the destination draft copy box");
   const sourceBox = await waitFor(() => readBox(sourceSession), "the source's original copy box");
   assert.equal(destinationBox.title, "Your draft is safe");
@@ -1267,6 +1269,7 @@ async function verifyDraftTransfer({ sourceSession, devToolsPort, origin, state,
   assert.equal(sourceBox.variant, "default");
   assert.equal(sourceBox.text, SUMMARY_TEXT);
   assert.equal(destinationBox.text, sourceBox.text);
+  assert.equal(sourceBox.preview, sourceBox.text, "The source retains its original complete text box.");
   assert.equal(await destination.evaluate("document.querySelector('form textarea').value"), "My existing draft");
   assert.equal(await destination.evaluate("window.__capContextSmokeSendClicks"), 0);
   const terminal = await waitFor(() => state.telemetryRequests.findLast(payload => payload.status === "failed"), "the draft outcome telemetry");
@@ -1301,9 +1304,11 @@ async function verifyRecoveryPalette(session, contextId) {
         .map(([property, key, value]) => [element, property, key, value])
     );
     const before = cases.map(([element, property]) => getComputedStyle(element).getPropertyValue(property));
-    const originalBackground = getComputedStyle(copy).backgroundImage;
+    const originalBackground = copy.style.getPropertyValue("background");
+    const originalComputedBackground = getComputedStyle(copy).background;
     const originalColor = getComputedStyle(copy).color;
     const originalLabel = copy.textContent;
+    const originalContent = [...copy.childNodes].map(node => node.cloneNode(true));
     const clipboard = navigator.clipboard;
     const originalWrite = Object.getOwnPropertyDescriptor(clipboard, "writeText");
     const originalExec = Object.getOwnPropertyDescriptor(document, "execCommand");
@@ -1332,23 +1337,29 @@ async function verifyRecoveryPalette(session, contextId) {
         copiedText = text;
       } });
       Object.defineProperty(document, "execCommand", { configurable: true, value: () => false });
-      const buttonPalettePreserved = () => getComputedStyle(copy).backgroundImage === copy.style.backgroundImage
-        && getComputedStyle(copy).color === copy.style.color;
+      const buttonPalettePreserved = () => {
+        const computed = getComputedStyle(copy);
+        // Solid/gradient shorthands reset the other component to its CSS initial value.
+        const image = copy.style.backgroundImage === "initial" ? "none" : copy.style.backgroundImage;
+        const color = copy.style.backgroundColor === "initial" ? "rgba(0, 0, 0, 0)" : copy.style.backgroundColor;
+        return computed.backgroundImage === image && computed.backgroundColor === color && computed.color === copy.style.color;
+      };
       copy.click();
       await new Promise(resolve => setTimeout(resolve, 0));
       const successPreserved = copy.textContent === "Copied!" && buttonPalettePreserved()
-        && getComputedStyle(copy).backgroundImage !== originalBackground
-        && copiedText === document.getElementById("context-generator-fallback-text").value;
+        && getComputedStyle(copy).background !== originalComputedBackground
+        && copiedText === modal.contextGeneratorCopyText;
       await new Promise(resolve => setTimeout(resolve, 2100));
       const resetPreserved = copy.textContent === originalLabel
-        && getComputedStyle(copy).backgroundImage === originalBackground
+        && getComputedStyle(copy).background === originalComputedBackground
         && getComputedStyle(copy).color === originalColor;
       failCopy = true;
       copy.click();
       await new Promise(resolve => setTimeout(resolve, 0));
       return { available: true, checked: cases.length, preserved, focusPreserved, successPreserved, resetPreserved,
         failurePreserved: copy.textContent === "Select text and copy manually" && buttonPalettePreserved()
-          && getComputedStyle(copy).backgroundImage !== originalBackground };
+          && getComputedStyle(copy).background !== originalComputedBackground
+          && document.getElementById("context-generator-fallback-text").value === modal.contextGeneratorCopyText };
     } finally {
       if (originalWrite) Object.defineProperty(clipboard, "writeText", originalWrite);
       else delete clipboard.writeText;
@@ -1360,10 +1371,11 @@ async function verifyRecoveryPalette(session, contextId) {
         element.style.removeProperty("--darkreader-inline-" + key);
       }
       dismiss.removeAttribute("data-darkreader-inline-outline");
-      copy.textContent = originalLabel;
+      copy.replaceChildren(...originalContent);
       copy.style.setProperty("background", originalBackground, "important");
       copy.style.setProperty("color", originalColor, "important");
       document.getElementById("context-generator-fallback-text").setSelectionRange(0, 0);
+      modal.contextGeneratorSetExpanded?.(false);
       copy.focus();
     }
   })()`, contextId);
@@ -1557,10 +1569,24 @@ async function run() {
       if (draftRecovery) {
         const details = await sourceSession.evaluate(`({ title: document.getElementById("context-generator-fallback-title").textContent,
           desc: document.getElementById("context-generator-fallback-desc").textContent,
-          text: document.getElementById("context-generator-fallback-text").value })`, contextId);
+          text: document.getElementById("context-generator-fallback-text").value,
+          carry: document.getElementById("context-generator-fallback-modal").contextGeneratorCopyText })`, contextId);
         assert.equal(details.title, "Your draft is safe");
-        assert.match(details.desc, /draft in the input box/);
+        assert.match(details.desc, /ChatGPT already has a draft/);
         assert.match(details.text, /Conversation from your previous chat/);
+        assert.ok(!details.text.includes("The conversation below was transferred"), "The compact preview starts with the conversation.");
+        assert.match(details.carry, /^The conversation below was transferred/);
+        const expanded = await sourceSession.evaluate(`(() => {
+          const more = document.getElementById("context-generator-fallback-more");
+          const text = document.getElementById("context-generator-fallback-text");
+          more.click();
+          return { value: text.value, expanded: more.getAttribute("aria-expanded"), label: more.textContent };
+        })()`, contextId);
+        assert.equal(expanded.value, details.carry);
+        assert.equal(expanded.expanded, "true");
+        assert.equal(expanded.label, "Show less");
+        await sourceSession.evaluate("document.getElementById('context-generator-fallback-more').click()", contextId);
+        assert.equal(await sourceSession.evaluate("document.getElementById('context-generator-fallback-text').value", contextId), details.text);
       }
       await verifyRecoveryPalette(sourceSession, contextId);
       if (process.env.CAP_CONTEXT_RECOVERY_SCREENSHOT) {
@@ -1572,6 +1598,23 @@ async function run() {
         const fits = await sourceSession.evaluate(`(() => { const card = document.getElementById("context-generator-fallback-modal").firstElementChild.getBoundingClientRect();
           return card.left >= 0 && card.right <= innerWidth && card.top >= 0 && card.bottom <= innerHeight; })()`);
         assert.ok(fits, "The copy dialog must fit the narrow viewport.");
+      }
+      if (draftRecovery) {
+        const keyboard = await sourceSession.evaluate(`(() => {
+          const copy = document.getElementById("context-generator-fallback-copy");
+          const close = document.getElementById("context-generator-fallback-dismiss");
+          copy.focus();
+          document.dispatchEvent(new KeyboardEvent("keydown", { key: "Tab", bubbles: true, cancelable: true }));
+          const wrapsForward = document.activeElement === close;
+          document.dispatchEvent(new KeyboardEvent("keydown", { key: "Tab", shiftKey: true, bubbles: true, cancelable: true }));
+          const wrapsBackward = document.activeElement === copy;
+          document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }));
+          const escapes = !document.getElementById("context-generator-fallback-modal");
+          window.__capSmokeShowDraftRecovery();
+          document.getElementById("context-generator-fallback-dismiss").click();
+          return { wrapsForward, wrapsBackward, escapes, closes: !document.getElementById("context-generator-fallback-modal") };
+        })()`, contextId);
+        assert.deepEqual(keyboard, { wrapsForward: true, wrapsBackward: true, escapes: true, closes: true });
       }
       process.stdout.write("Cap Context Brave recovery palette smoke passed.\n");
       return;

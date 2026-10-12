@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-12-draft-translucent-v139";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-12-draft-compact-v140";
   const INLINE_PILL_SIZE = 36;
   const ownedUiStyleSheets = new Map();
   const CLAUDE_INLINE_STYLE_ID = "context-generator-claude-inline-styles";
@@ -9060,8 +9060,8 @@
   function showFallbackModal(text, destinationName, isBackup = false, pasteUnconfirmed = false, draftPresent = false) {
     const variant = draftPresent ? "draft" : "default";
     const copyLabel = draftPresent ? "Copy conversation" : "Copy Context";
-    const copyBackground = draftPresent ? "linear-gradient(180deg,#ede4fc,#d2bce8)" : "linear-gradient(180deg,#f5f5f5,#d8d8d8)";
-    const copyColor = draftPresent ? "#2b1d3d" : "#111114";
+    const copyBackground = draftPresent ? "#e2daef" : "linear-gradient(180deg,#f5f5f5,#d8d8d8)";
+    const copyColor = draftPresent ? "#24202d" : "#111114";
     let modal = document.getElementById("context-generator-fallback-modal");
     // Rebuild only when the purpose changes so its protected palette, listeners
     // and copy-button reset state all belong to the same dialog variant.
@@ -9088,26 +9088,25 @@
         "justify-content:center",
         "box-sizing:border-box",
         "padding:18px",
-        "background:rgba(0,0,0,0.68)",
-        "backdrop-filter:blur(12px)",
+        draftPresent ? "background:rgba(5,5,7,0.48)" : "background:rgba(0,0,0,0.68)",
+        draftPresent ? "backdrop-filter:blur(5px)" : "backdrop-filter:blur(12px)",
         "font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif"
       ].join(";");
 
       const content = document.createElement("div");
       content.style.cssText = [
         "position:relative",
-        draftPresent ? "width:min(460px,100%)" : "width:min(560px,100%)",
+        draftPresent ? "width:min(400px,100%)" : "width:min(560px,100%)",
         "box-sizing:border-box",
         "display:flex",
         "flex-direction:column",
-        draftPresent ? "gap:14px" : "gap:16px",
+        draftPresent ? "gap:0" : "gap:16px",
         draftPresent ? "padding:22px" : "padding:26px",
-        draftPresent ? "border-radius:22px" : "border-radius:26px",
-        draftPresent ? "border:1px solid rgba(189,165,224,0.23)" : "border:1px solid rgba(255,255,255,0.14)",
-        draftPresent ? "background:rgba(24,19,31,0.68)" : "background:linear-gradient(180deg,#171719 0%,#101012 58%,#09090b 100%)",
-        draftPresent ? "backdrop-filter:blur(16px)" : "backdrop-filter:none",
+        draftPresent ? "border-radius:16px" : "border-radius:26px",
+        draftPresent ? "border:1px solid rgba(255,255,255,0.07)" : "border:1px solid rgba(255,255,255,0.14)",
+        draftPresent ? "background:#18181c" : "background:linear-gradient(180deg,#171719 0%,#101012 58%,#09090b 100%)",
         "color:#f5f5f5",
-        "box-shadow:0 28px 84px rgba(0,0,0,0.58),0 0 0 1px rgba(0,0,0,0.72),inset 0 1px 0 rgba(255,255,255,0.08)",
+        draftPresent ? "box-shadow:0 18px 45px rgba(0,0,0,0.33)" : "box-shadow:0 28px 84px rgba(0,0,0,0.58),0 0 0 1px rgba(0,0,0,0.72),inset 0 1px 0 rgba(255,255,255,0.08)",
         draftPresent ? "max-height:calc(100dvh - 36px);overflow:auto" : "overflow:hidden"
       ].join(";");
       const accent = document.createElement("div");
@@ -9120,27 +9119,26 @@
       if (draftPresent) accent.style.display = "none";
 
       const header = document.createElement("div");
-      header.style.cssText = "position:relative;z-index:1;display:flex;align-items:flex-start;justify-content:space-between;gap:16px";
+      header.style.cssText = `position:relative;z-index:1;display:flex;align-items:${draftPresent ? "center" : "flex-start"};justify-content:space-between;gap:16px`;
 
       const copyWrap = document.createElement("div");
-      copyWrap.style.cssText = "display:flex;flex-direction:column;gap:7px;min-width:0";
+      copyWrap.style.cssText = draftPresent ? "display:flex;align-items:center;gap:9px;min-width:0" : "display:flex;flex-direction:column;gap:7px;min-width:0";
       if (draftPresent) {
-        const orb = document.createElement("img");
-        orb.src = BUBBLE_ICON_URL;
-        orb.alt = "";
-        orb.style.cssText = "width:34px;height:34px;object-fit:contain;margin:0 0 2px -4px";
-        copyWrap.appendChild(orb);
+        const mark = document.createElement("span");
+        mark.setAttribute("aria-hidden", "true");
+        mark.style.cssText = "width:16px;height:16px;flex-shrink:0;border-radius:50%;background:radial-gradient(circle at 35% 30%,#d4bbff,#8958cf 40%,#422263 80%);box-shadow:inset 0 0 0 1px rgba(228,199,255,0.22)";
+        copyWrap.appendChild(mark);
       }
 
       const title = document.createElement("div");
       title.id = "context-generator-fallback-title";
       title.style.cssText = [
-        "font-family:Georgia,'Times New Roman',serif",
-        "font-size:22px",
-        "font-weight:500",
-        "line-height:1.1",
-        "letter-spacing:0",
-        "color:#ffffff"
+        draftPresent ? "font-family:inherit" : "font-family:Georgia,'Times New Roman',serif",
+        draftPresent ? "font-size:19px" : "font-size:22px",
+        draftPresent ? "font-weight:600" : "font-weight:500",
+        draftPresent ? "line-height:1.25" : "line-height:1.1",
+        draftPresent ? "letter-spacing:-0.25px" : "letter-spacing:0",
+        draftPresent ? "color:#eeedf2" : "color:#ffffff"
       ].join(";");
       title.textContent = "Context is ready to copy";
 
@@ -9148,8 +9146,8 @@
       desc.id = "context-generator-fallback-desc";
       desc.style.cssText = [
         "font-size:13px",
-        "line-height:1.5",
-        "color:rgba(255,255,255,0.64)",
+        draftPresent ? "line-height:1.6;margin:10px 0 18px" : "line-height:1.5",
+        draftPresent ? "color:#b0acb8" : "color:rgba(255,255,255,0.64)",
         "max-width:430px"
       ].join(";");
 
@@ -9157,6 +9155,7 @@
       dismissBtn.id = "context-generator-fallback-dismiss";
       dismissBtn.type = "button";
       dismissBtn.textContent = "Close";
+      dismissBtn.setAttribute("aria-label", "Close");
       dismissBtn.style.cssText = [
         "height:32px",
         "flex-shrink:0",
@@ -9170,6 +9169,10 @@
         "font-weight:650",
         "cursor:pointer"
       ].join(";");
+      if (draftPresent) {
+        dismissBtn.textContent = "×";
+        dismissBtn.style.cssText = "width:26px;height:26px;display:grid;place-items:center;flex-shrink:0;padding:0;border:0;border-radius:5px;background:transparent;color:#a6a1af;font-family:inherit;font-size:22px;line-height:1;cursor:pointer";
+      }
 
       const textarea = document.createElement("textarea");
       textarea.id = "context-generator-fallback-text";
@@ -9178,24 +9181,47 @@
       textarea.style.cssText = [
         "position:relative",
         "z-index:1",
-        draftPresent ? "height:min(180px,30vh)" : "height:min(230px,38vh)",
-        draftPresent ? "min-height:110px" : "min-height:150px",
+        draftPresent ? "height:137px" : "height:min(230px,38vh)",
+        draftPresent ? "min-height:100px;width:100%;margin:0 0 16px" : "min-height:150px",
         "box-sizing:border-box",
-        "resize:vertical",
-        "padding:14px",
-        "border-radius:14px",
-        draftPresent ? "border:1px solid rgba(189,165,224,0.2)" : "border:1px solid rgba(255,255,255,0.13)",
-        draftPresent ? "background:#100d15" : "background:rgba(0,0,0,0.34)",
-        "box-shadow:inset 0 1px 0 rgba(255,255,255,0.04)",
-        "color:#f0f0f0",
+        draftPresent ? "resize:none;scrollbar-width:thin;scrollbar-color:#47434e #101013" : "resize:vertical",
+        draftPresent ? "padding:12px 13px" : "padding:14px",
+        draftPresent ? "border-radius:9px" : "border-radius:14px",
+        draftPresent ? "border:1px solid rgba(255,255,255,0.04)" : "border:1px solid rgba(255,255,255,0.13)",
+        draftPresent ? "background:#101013" : "background:rgba(0,0,0,0.34)",
+        draftPresent ? "box-shadow:none" : "box-shadow:inset 0 1px 0 rgba(255,255,255,0.04)",
+        draftPresent ? "color:#dbd8e1" : "color:#f0f0f0",
         draftPresent ? "font-family:inherit" : "font-family:'SFMono-Regular',Consolas,'Liberation Mono',monospace",
-        draftPresent ? "font-size:13px" : "font-size:12px",
-        "line-height:1.5",
+        "font-size:12px",
+        draftPresent ? "line-height:1.65" : "line-height:1.5",
         "outline:none"
       ].join(";");
 
       const buttonContainer = document.createElement("div");
       buttonContainer.style.cssText = "position:relative;z-index:1;display:flex;justify-content:flex-end;gap:10px;flex-wrap:wrap";
+
+      let previewLabel;
+      if (draftPresent) {
+        previewLabel = document.createElement("div");
+        previewLabel.style.cssText = "display:flex;align-items:center;justify-content:space-between;margin:0 0 7px;color:#a6a2ad;font-size:11px";
+        const label = document.createElement("span");
+        label.textContent = "Conversation preview";
+        const more = document.createElement("button");
+        more.id = "context-generator-fallback-more";
+        more.type = "button";
+        more.setAttribute("aria-controls", textarea.id);
+        more.style.cssText = "border:0;padding:3px 0;background:transparent;color:#b9accf;font-family:inherit;font-size:11px;cursor:pointer";
+        modal.contextGeneratorSetExpanded = (expanded) => {
+          more.setAttribute("aria-expanded", String(expanded));
+          more.textContent = expanded ? "Show less" : "Show more";
+          textarea.value = expanded ? modal.contextGeneratorCopyText : modal.contextGeneratorPreviewText;
+          textarea.style.height = expanded ? "min(210px,40vh)" : "137px";
+          textarea.scrollTop = 0;
+        };
+        addOwnedEventListener(more, "click", () => modal.contextGeneratorSetExpanded(more.getAttribute("aria-expanded") !== "true"));
+        previewLabel.appendChild(label);
+        previewLabel.appendChild(more);
+      }
 
       const copyBtn = document.createElement("button");
       copyBtn.id = "context-generator-fallback-copy";
@@ -9213,6 +9239,22 @@
         "font-weight:750",
         "cursor:pointer"
       ].join(";");
+      const resetCopyLabel = () => {
+        copyBtn.textContent = copyLabel;
+        if (!draftPresent) return;
+        const icon = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+        icon.setAttribute("viewBox", "0 0 24 24");
+        icon.setAttribute("aria-hidden", "true");
+        icon.style.cssText = "width:15px;height:15px;fill:none;stroke:currentColor;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round;flex-shrink:0";
+        const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+        path.setAttribute("d", "M10 8h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2h-8a2 2 0 0 1-2-2v-8a2 2 0 0 1 2-2ZM16 8V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h3");
+        icon.appendChild(path);
+        copyBtn.prepend(icon);
+      };
+      if (draftPresent) {
+        copyBtn.style.cssText = `width:100%;min-height:41px;display:flex;align-items:center;justify-content:center;gap:8px;padding:0 12px;border:0;border-radius:9px;background:${copyBackground};color:${copyColor};font-family:inherit;font-size:13px;font-weight:600;cursor:pointer`;
+      }
+      resetCopyLabel();
 
       const setFocusStyle = (button, active) => {
         button.style.setProperty("outline", active ? "2px solid rgba(255,255,255,0.42)" : "none", "important");
@@ -9220,13 +9262,15 @@
       };
 
       addOwnedEventListener(copyBtn, "click", async () => {
-        const currentText = textarea.value || "";
+        // A concise preview must never shorten the payload sent to the clipboard.
+        const currentText = (draftPresent ? modal.contextGeneratorCopyText : textarea.value) || "";
         let copied = false;
         try {
           if (!navigator.clipboard?.writeText) throw new Error("Clipboard API unavailable.");
           await navigator.clipboard.writeText(currentText);
           copied = true;
         } catch (_error) {
+          modal.contextGeneratorSetExpanded?.(true);
           textarea.focus();
           textarea.select();
           try {
@@ -9244,11 +9288,11 @@
         }
 
         copyBtn.textContent = "Copied!";
-        copyBtn.style.setProperty("background", "linear-gradient(180deg,#69e6a2,#21b36b)", "important");
-        copyBtn.style.setProperty("color", "#07150d", "important");
+        copyBtn.style.setProperty("background", draftPresent ? "#cbebd8" : "linear-gradient(180deg,#69e6a2,#21b36b)", "important");
+        copyBtn.style.setProperty("color", draftPresent ? "#173e27" : "#07150d", "important");
         setTimeout(() => {
           if (!copyBtn.isConnected) return;
-          copyBtn.textContent = copyLabel;
+          resetCopyLabel();
           copyBtn.style.setProperty("background", copyBackground, "important");
           copyBtn.style.setProperty("color", copyColor, "important");
         }, 2000);
@@ -9290,19 +9334,21 @@
         if (event.target === modal) closeModal();
       });
       addOwnedEventListener(content, "click", (event) => event.stopPropagation());
-      [copyBtn, dismissBtn].forEach((button) => {
+      [copyBtn, dismissBtn, ...(previewLabel ? previewLabel.querySelectorAll("button") : [])].forEach((button) => {
         addOwnedEventListener(button, "focus", () => setFocusStyle(button, true));
         addOwnedEventListener(button, "blur", () => setFocusStyle(button, false));
       });
       addOwnedEventListener(dismissBtn, "click", closeModal);
 
       copyWrap.appendChild(title);
-      copyWrap.appendChild(desc);
+      if (!draftPresent) copyWrap.appendChild(desc);
       header.appendChild(copyWrap);
       header.appendChild(dismissBtn);
 
       content.appendChild(accent);
       content.appendChild(header);
+      if (draftPresent) content.appendChild(desc);
+      if (previewLabel) content.appendChild(previewLabel);
       content.appendChild(textarea);
       content.appendChild(buttonContainer);
       buttonContainer.appendChild(copyBtn);
@@ -9331,7 +9377,7 @@
     const desc = document.getElementById("context-generator-fallback-desc");
     if (desc) {
       desc.textContent = draftPresent
-        ? "We noticed you have a draft in the input box. Here’s your conversation, ready to copy."
+        ? `${destinationName} already has a draft. Copy your conversation when you’re ready.`
         : pasteUnconfirmed
         ? `The paste into ${destinationName} wasn't confirmed. Check that tab first. If the context is missing, copy it from here.`
         : isBackup
@@ -9341,7 +9387,15 @@
 
     const textarea = document.getElementById("context-generator-fallback-text");
     if (textarea) {
-      textarea.value = text;
+      modal.contextGeneratorCopyText = text;
+      // Only hide our exact local carry wrapper in the preview; arbitrary summaries
+      // and conversation text stay verbatim. Show more/manual copy restores it all.
+      const prefix = "The conversation below was transferred from another AI chat so you have the context. Treat it as previous chat history and use it to continue with the user here.\n\nConversation history:\n\n";
+      const suffix = '\n\nNext step:\n\nReply only: "Context loaded. Let\'s pick up right where you left off." Then wait for the user.';
+      modal.contextGeneratorPreviewText = draftPresent && text.startsWith(prefix) && text.endsWith(suffix)
+        ? text.slice(prefix.length, -suffix.length) : text;
+      textarea.value = modal.contextGeneratorPreviewText;
+      modal.contextGeneratorSetExpanded?.(false);
       textarea.scrollTop = 0;
     }
 

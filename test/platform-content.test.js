@@ -2726,7 +2726,7 @@ clockTest("destinations show the draft copy box on the first check without touch
       return true;
     });
     assert.equal(modal.style.display, "flex");
-    assert.match(desc.textContent, /draft in the input box/);
+    assert.match(desc.textContent, /already has a draft/);
     assert.equal(text.value, carry);
     assert.equal(editor.value, "My existing draft");
     assert.equal(editor.clicks, 0);
