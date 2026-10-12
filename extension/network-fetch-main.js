@@ -3,7 +3,7 @@
   if (!platform || !globalThis.__capNetworkJsonData) return;
   // Advance readiness version with adapter/contract changes: old MAIN closures
   // can survive extension reloads and must be replaced before a new capture.
-  const version = platform === "deepseek" ? 14 : platform === "grok" ? 13 : 12, channel = "cap-context-network-json-v1";
+  const version = platform === "deepseek" ? 15 : platform === "grok" ? 13 : 12, channel = "cap-context-network-json-v1";
   // Shared across unique text files; the final transcript has its own limits.
   const maxUploadBytes = 2100000;
   const previous = window.__capNetworkFetchState;
@@ -224,7 +224,7 @@
         let uploadBytes = 0;
         for (const message of branch) {
           if (message.role !== "USER") continue;
-          for (const fragment of message.fragments || []) for (const file of fragment.type === "FILE" && Array.isArray(fragment.files) ? fragment.files : []) {
+          for (const fragment of message.fragments || []) for (const file of fragment.type === "FILE" ? api.fileList(fragment.files) : []) {
             if (!api.textFile(file)) continue;
             if (file.status !== "SUCCESS" || !Number.isSafeInteger(file.file_size) || file.file_size < 0 || typeof file.signed_path !== "string") throw new api.CaptureError("A text attachment is unavailable or incomplete.", "incomplete", "attachment_failed");
             // DeepSeek's native preview uses this signed file service with ty=r

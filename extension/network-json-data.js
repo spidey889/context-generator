@@ -213,6 +213,8 @@
   // Keep binary/Office/PDF formats excluded; original UTF-8 and exact byte
   // counts are still verified by MAIN before any file text reaches the bridge.
   const textFile = file => file?.is_image === false && /\.(txt|md|markdown|csv|json|py|js|ts|tsx|jsx|java|kt|swift|c|h|cpp|hpp|cs|go|rs|rb|php|sh|bash|zsh|lua|r|scala|dart|html|htm|css|scss|vue|svelte|xml|yaml|yml|toml|tsv|sql|ipynb|log)$/i.test(file.file_name || "");
+  // Keep descriptor discovery and serialization aligned for a single-file object.
+  const fileList = value => Array.isArray(value) ? value : value && typeof value === "object" ? [value] : [];
   const deepseek = (data, chat, files = {}) => {
     const excludedContentTypes = new Set();
     const turns = deepseekBranch(data, chat).flatMap(message => {
@@ -231,7 +233,7 @@
           if (typeof fragment.content !== "string") fail("A DeepSeek own-turn text field is missing.", undefined, "text_invalid");
           parts.push(fragment.content);
         } else if (message.role === "USER" && fragment.type === "FILE") {
-          for (const file of Array.isArray(fragment.files) ? fragment.files : []) {
+          for (const file of fileList(fragment.files)) {
             if (typeof file?.file_name === "string" && file.file_name.trim() && !fileIds.has(file.id)) parts.push(`Attachment: ${JSON.stringify(file.file_name)}`);
             if (!textFile(file)) { excludedContentTypes.add(file?.is_image === true ? "media" : "uploads"); continue; }
             complete(file);
@@ -254,5 +256,5 @@
     });
     return transcript("DeepSeek", turns, excludedContentTypes);
   };
-  globalThis.__capNetworkJsonData = { CaptureError, complete, geminiPage, gemini, grokBranch, grok, deepseekBranch, deepseek, textFile };
+  globalThis.__capNetworkJsonData = { CaptureError, complete, geminiPage, gemini, grokBranch, grok, deepseekBranch, deepseek, textFile, fileList };
 })();
