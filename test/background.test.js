@@ -91,6 +91,7 @@ function loadBackgroundForSummaryTest(fetchImpl, { tabs = [], injections = [], i
     });
   };
   sendSummary.closeTab = id => { closedTabs.add(id); return tabRemovedListener(id); };
+  sendSummary.backendError = response => sandbox.createSummaryBackendError(response);
   return sendSummary;
 }
 
@@ -1033,19 +1034,25 @@ test("ordinary OpenAI pages are never classified as ChatGPT", () => {
   assert.equal(harness.getPlatformFromUrl("https://openai.com/research"), null);
 });
 
-test("backend errors expose only bounded user-safe messages", () => {
-  assert.match(source, /conversation_too_large/);
-  assert.match(source, /rate_limited/);
-  assert.match(source, /payload\.error\.length <= 240/);
-  assert.doesNotMatch(source, /response\.text\(\)/);
-});
-
-test("latest-run raw transcript expires without deleting diagnostic metadata", () => {
-  assert.ok(manifest.permissions.includes("alarms"));
-  assert.match(source, /const RAW_TRANSCRIPT_RETENTION_MS = 24 \* 60 \* 60 \* 1000/);
-  assert.match(source, /delete retainedStats\.rawScrapedText/);
-  assert.match(source, /delete retainedStats\.rawScrapedTextExpiresAt/);
-  assert.doesNotMatch(source, /chrome\.storage\.local\.remove\(LAST_TRANSFER_STATS_STORAGE_KEY\)/);
+test("backend errors expose bounded known messages and suppress private or malformed bodies", async () => {
+  const { backendError } = loadBackgroundForSummaryTest(() => assert.fail("Error formatting must not fetch"));
+  for (const [payload, expected] of [
+    [{ code: "conversation_too_large", error: "x".repeat(240) }, "x".repeat(240)],
+    [{ code: "conversation_too_large", error: "x".repeat(241) }, "This conversation is too large for Cap Context to transfer."],
+    [{ code: "rate_limited", error: "PRIVATE_SENTINEL" }, "Too many transfers were started from this network. Wait a moment, then try again."],
+    [{ code: "unknown", error: "PRIVATE_SENTINEL" }, "Cap Context could not create the summary. Please try again."],
+    [null, "Cap Context could not create the summary. Please try again."]
+  ]) {
+    const error = await backendError({ status: 429, json: async () => payload, text() { assert.fail("Unread private bodies must stay unread"); } });
+    assert.equal(error.message, expected);
+    assert.equal(error.status, 429);
+    assert.equal(error.summaryServiceFailure, true);
+    assert.doesNotMatch(error.message, /PRIVATE_SENTINEL/);
+  }
+  const malformed = await backendError({ status: 502, json() { throw new Error("PRIVATE_PARSE_SENTINEL"); }, text() { assert.fail("Never read raw provider errors"); } });
+  assert.equal(malformed.message, "Cap Context could not create the summary. Please try again.");
+  assert.equal(malformed.code, "summary_failed");
+  assert.equal(malformed.status, 502);
 });
 
 test("structured histories reach the backend once and cache by native boundaries", async () => {

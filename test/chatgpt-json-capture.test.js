@@ -185,11 +185,12 @@ function paddedJson(data, size) {
   return Buffer.concat([prefix, Buffer.alloc(size - prefix.length - 2, 32), Buffer.from('"}')]);
 }
 
-test("ChatGPT discards ten large alternate branches before the bridge and keeps full-tree completeness checks", async () => {
+test("ChatGPT discards large alternate branches and descendants before the bridge and keeps full-tree counts", async () => {
   const data = fixture();
   data.mapping.question.children = ["answer", "alternate"];
-  for (let i = 0; i < 10; i++) data.mapping[`unused-${i}`] = { parent: "question", message: {
-    author: { role: "assistant" }, content: { content_type: "text", parts: [`UNSELECTED_SENTINEL ${"x".repeat(750000)}`] },
+  data.mapping.question.children.push("unused-0");
+  for (let i = 0; i < 2; i++) data.mapping[`unused-${i}`] = { parent: i === 0 ? "question" : "unused-0", children: i === 0 ? ["unused-1"] : [], message: {
+    author: { role: "assistant" }, content: { content_type: "text", parts: [`UNSELECTED_SENTINEL ${"x".repeat(3100000)}`] },
     metadata: { attachments: [{ id: "file_unused", is_big_paste: true, mime_type: "text/plain", size: 9999999 }] }
   } };
   data.total_node_count = Object.keys(data.mapping).length;
@@ -206,10 +207,16 @@ test("ChatGPT discards ten large alternate branches before the bridge and keeps 
   assert.doesNotMatch(JSON.stringify(reply), /UNSELECTED_SENTINEL|Wrong branch|file_unused/);
   assert.equal(harness.requests.filter(request => /\/files\/download\//.test(request.url)).length, 0);
 
+  // Count-validation wiring does not depend on megabytes of irrelevant text.
+  // Keep the full metadata matrix on a small tree with an unselected branch.
+  const small = fixture();
+  const fullCount = Object.keys(small.mapping).length;
+  small.total_node_count = fullCount;
+  small.page_info.total_message_count = fullCount - 1;
   for (const scope of ["conversation", "page_info", "pagination", "metadata"]) for (const key of ["total_node_count", "total_message_count"]) {
-    const incomplete = structuredClone(data);
+    const incomplete = structuredClone(small);
     const target = scope === "conversation" ? incomplete : (incomplete[scope] ||= {});
-    target[key] = data.total_node_count + 1;
+    target[key] = fullCount + 1;
     const missing = setup(incomplete); await discover(missing);
     await assert.rejects(missing.window.__capCaptureChatGptJson(), /missing history/);
   }

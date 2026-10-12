@@ -43,41 +43,39 @@ test("complete Git ranges, first branch pushes, PRs and ambiguous metadata selec
     fs.rmSync(cwd, { recursive: true, force: true });
   });
   const git = (...args) => execFileSync("git", args, { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
-  const write = (file, content) => {
-    fs.mkdirSync(path.dirname(path.join(cwd, file)), { recursive: true });
-    fs.writeFileSync(path.join(cwd, file), content);
-  };
-  const commit = () => { git("add", "--all"); git("commit", "-qm", "fixture"); return git("rev-parse", "HEAD"); };
   git("init", "-q", "-b", "master");
-  git("config", "user.email", "ci-fixture@example.invalid");
-  git("config", "user.name", "CI fixture");
-  write("README.md", "Initial\n");
-  write("brag/image.png", "Initial image");
-  write("api/runtime.js", "module.exports = 1;\n");
-  const base = commit();
+  // Build the same real commit graph in one import instead of repeatedly
+  // spawning add/commit/rev-parse. Explicit identities/dates avoid signing,
+  // hooks and machine Git configuration changing this disposable fixture.
+  const data = content => `data ${Buffer.byteLength(content)}\n${content}\n`;
+  const commit = (mark, parent, files, extra = "") =>
+    `commit refs/heads/${mark === 1 ? "master" : "codex/light"}\nmark :${mark}\n`
+    + `committer CI fixture <ci-fixture@example.invalid> ${1700000000 + mark} +0000\n`
+    + data("fixture") + (parent ? `from :${parent}\n` : "")
+    + Object.entries(files).map(([file, content]) => `M 100644 inline ${JSON.stringify(file)}\n${data(content)}`).join("")
+    + extra + "\n";
+  const history = commit(1, null, { "README.md": "Initial\n", "brag/image.png": "Initial image", "api/runtime.js": "module.exports = 1;\n" })
+    + commit(2, 1, { "README.md": "New copy\n", "docs/space name.md": "Café documentation\n" })
+    + commit(3, 2, { "brag/image.png": "New image" })
+    + commit(4, 3, { "api/runtime.js": "module.exports = 2;\n" })
+    + commit(5, 4, { "README.md": "Latest commit is docs only\n" })
+    + commit(6, 5, {}, "R brag/image.png api/renamed.png\n") + "done\n";
+  const marksPath = path.join(cwd, "fixture-marks");
+  execFileSync("git", ["fast-import", "--quiet", "--done", `--export-marks=${marksPath}`],
+    { cwd, input: history, encoding: "utf8", stdio: ["pipe", "pipe", "pipe"] });
+  const marks = new Map(fs.readFileSync(marksPath, "utf8").trim().split("\n").map(line => line.trim().split(" ")));
+  const [base, docs, lightHead, runtimeHead, mixedHead, renamedHead] = [1, 2, 3, 4, 5, 6].map(mark => marks.get(`:${mark}`));
+  assert.ok([base, docs, lightHead, runtimeHead, mixedHead, renamedHead].every(sha => /^[0-9a-f]{40}$/.test(sha)));
   git("remote", "add", "origin", cwd);
-  git("checkout", "-qb", "codex/light");
-  write("README.md", "New copy\n");
-  const docs = commit();
-  write("brag/image.png", "New image");
-  const lightHead = commit();
   const repository = { default_branch: "master" };
   const push = head => ({ eventName: "push", event: { before: base, repository }, head, ref: "refs/heads/codex/light", cwd });
-  assert.equal(getScope(push(lightHead)).mode, "light");
-  assert.equal(getScope({ ...push(lightHead), event: { before: "0".repeat(40), repository: { default_branch: "master" } } }).mode, "light");
-  assert.equal(getScope({ ...push(lightHead), eventName: "pull_request", event: { pull_request: { base: { sha: base } } } }).mode, "light");
-  write("api/runtime.js", "module.exports = 2;\n");
-  const runtimeHead = commit();
-  write("README.md", "Latest commit is docs only\n");
-  const mixedHead = commit();
-  assert.equal(getScope(push(mixedHead)).mode, "full", "earlier runtime changes cannot hide behind the latest docs commit");
-  assert.equal(getScope({ ...push(mixedHead), event: { before: runtimeHead, repository } }).mode, "full",
+  assert.deepEqual(getScope({ ...push(lightHead), event: { before: "0".repeat(40), repository } }), { mode: "light", base });
+  assert.deepEqual(getScope({ ...push(lightHead), eventName: "pull_request", event: { pull_request: { base: { sha: base } } } }), { mode: "light", base });
+  assert.deepEqual(getScope({ ...push(mixedHead), event: { before: runtimeHead, repository } }), { mode: "full", base },
     "a docs-only push after unmerged runtime code must still run full checks");
-  assert.equal(getScope({ ...push(lightHead), event: { before: docs, repository }, ref: "refs/heads/master" }).mode, "light");
-  assert.equal(getScope({ ...push(mixedHead), event: { before: "0".repeat(40), repository: { default_branch: "master" } } }).mode, "full");
-  assert.equal(getScope({ ...push(mixedHead), eventName: "pull_request", event: { pull_request: { base: { sha: docs } } } }).mode, "full");
-  git("mv", "brag/image.png", "api/renamed.png");
-  assert.equal(getScope(push(commit())).mode, "full", "renaming a media asset into runtime scope cannot bypass checks");
+  assert.deepEqual(getScope({ ...push(lightHead), event: { before: docs, repository }, ref: "refs/heads/master" }), { mode: "light", base: docs });
+  assert.deepEqual(getScope({ ...push(mixedHead), eventName: "pull_request", event: { pull_request: { base: { sha: docs } } } }), { mode: "full", base: docs });
+  assert.deepEqual(getScope(push(renamedHead)), { mode: "full", base }, "renaming a media asset into runtime scope cannot bypass checks");
   for (const override of [{ eventName: "workflow_dispatch" }, { event: { before: base, forced: true } }, { event: {} }, { head: "invalid" }]) {
     assert.equal(getScope({ ...push(lightHead), ...override }).mode, "full");
   }

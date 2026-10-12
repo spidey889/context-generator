@@ -7,6 +7,8 @@ const { clockTest } = require("./helpers/clock");
 
 const SOURCE = fs.readFileSync(path.join(__dirname, "..", "extension", "transfer-diagnostics.js"), "utf8") + "\n"
   + fs.readFileSync(path.join(__dirname, "..", "extension", "background.js"), "utf8");
+// Compile once; each worker still owns a fresh context, storage and lifecycle.
+const COMPILED_WORKER = new vm.Script(SOURCE, { filename: "background.js" });
 const OUTBOX = "context-generator-telemetry-outbox-v1";
 const ACTIVE = "context-generator-active-transfers-v1";
 const DIAGNOSTICS = "context-generator-telemetry-diagnostics-v1";
@@ -78,7 +80,7 @@ function worker(fetchImpl, shared = profile(), now = NOW, version = "1.4.6") {
     }
   };
   vm.createContext(sandbox);
-  new vm.Script(SOURCE, { filename: "background.js" }).runInContext(sandbox);
+  COMPILED_WORKER.runInContext(sandbox);
   const evaluate = expression => new vm.Script(expression).runInContext(sandbox);
   return {
     shared, listeners, alarms, clock, evaluate,
@@ -131,6 +133,31 @@ function summaryWithin(background, deadlineAt = null, conversation = "Complete c
     .finally(() => clearTimeout(timeout));
   return { request, observed };
 }
+
+test("raw transcript expiry removes only private text at the deadline and recovers legacy receipts", async () => {
+  const key = "context-generator-last-transfer-stats-v1";
+  const day = 24 * 60 * 60 * 1000;
+  for (const kind of ["scheduled", "legacy", "missing time"]) {
+    const metadata = { status: "completed", model: "gemini-3.6-flash", diagnostics: { version: 1, paste_populated: true },
+      ...(kind === "missing time" ? {} : { completedAt: new Date(NOW - day).toISOString() }) };
+    const stats = { ...metadata, rawScrapedText: "PRIVATE_TRANSCRIPT_SENTINEL",
+      ...(kind === "scheduled" ? { rawScrapedTextExpiresAt: new Date(NOW + day).toISOString() } : {}) };
+    const shared = profile({ [key]: stats });
+    const background = worker(success, shared);
+    await background.settled();
+    await new Promise(setImmediate);
+    if (kind === "scheduled") {
+      assert.deepEqual(shared.local[key], stats, "Unexpired text must remain available");
+      const alarmName = background.evaluate("RAW_TRANSCRIPT_EXPIRY_ALARM");
+      assert.ok(background.alarms.some(alarm => alarm.name === alarmName && alarm.when === NOW + day));
+      background.clock.now = NOW + day;
+      background.listeners.alarm({ name: alarmName });
+      await new Promise(setImmediate);
+    }
+    assert.deepEqual(shared.local[key], metadata, `${kind}: keep the complete receipt after removing expired text`);
+    assert.doesNotMatch(JSON.stringify(shared.local[key]), /PRIVATE_TRANSCRIPT_SENTINEL/);
+  }
+});
 
 test("slow delivery never blocks durable terminal appends, and acknowledgement preserves newer revisions", async () => {
   let release;

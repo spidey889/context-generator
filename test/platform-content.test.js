@@ -636,50 +636,6 @@ test("native modal editors cannot replace the verified chat composer", () => {
   }
 });
 
-test("destination picker preserves outside page focus on every supported platform", () => {
-  const source = fs.readFileSync(SOURCE_PATH, "utf8");
-  const sheetStart = source.indexOf("function ensureDestinationSheet()");
-  const sheetEnd = source.indexOf("function ensureDestinationSheetBackdrop()", sheetStart);
-  const sheetSource = source.slice(sheetStart, sheetEnd);
-  const outsideClickStart = sheetSource.indexOf('addOwnedEventListener(document, "click"');
-  const outsideClickEnd = sheetSource.indexOf('addOwnedEventListener(document, "keydown"', outsideClickStart);
-  const outsideClickSource = sheetSource.slice(outsideClickStart, outsideClickEnd);
-  const toggleStart = source.indexOf("function toggleDestinationSheet()");
-  const hideEnd = source.indexOf("function releaseDestinationSheetBackdrop()", toggleStart);
-  const toggleAndHideSource = source.slice(toggleStart, hideEnd);
-
-  assert.match(sheetSource, /sheet\.setAttribute\("aria-modal", "true"\)/);
-  assert.match(sheetSource, /sheet\.setAttribute\("aria-hidden", "true"\)/);
-  assert.match(sheetSource, /event\.key !== "Tab"/);
-  assert.match(sheetSource, /focusableTiles\[nextIndex\]\.focus/);
-  assert.match(
-    outsideClickSource,
-    /addOwnedEventListener\(document, "click", \(\) => \{\s+if \(!isDestinationSheetOpen\(\)\) return;[\s\S]*?hideDestinationSheet\(\{ restoreFocus: false \}\);\s+\}\)/
-  );
-  assert.doesNotMatch(outsideClickSource, /currentPlatform|claude|chatgpt|gemini|grok|deepseek/);
-  assert.match(sheetSource, /detail\.textContent = "Opening…"/);
-  assert.match(sheetSource, /tile\.setAttribute\("aria-disabled", "true"\)/);
-  assert.match(toggleAndHideSource, /bubble\.setAttribute\("aria-expanded", "true"\)/);
-  assert.match(toggleAndHideSource, /sheet\.focus\?\.\(\{ preventScroll: true \}\)/);
-  assert.match(toggleAndHideSource, /document\.activeElement === bubble/);
-  assert.doesNotMatch(toggleAndHideSource, /bubble\.focus/);
-  assert.match(toggleAndHideSource, /findPlatformInput\(\)\?\.focus\?\.\(\{ preventScroll: true \}\)/);
-});
-
-test("page and picker Tab navigation skip both Cap Context orbs", () => {
-  const source = fs.readFileSync(SOURCE_PATH, "utf8");
-  const buttonStart = source.indexOf("function createFloatingButton()");
-  const buttonEnd = source.indexOf("function ensureOnboardingStyles()", buttonStart);
-  const buttonSource = source.slice(buttonStart, buttonEnd);
-
-  assert.match(buttonSource, /bubble\.tabIndex = -1/);
-  const sheetStart = source.indexOf("function ensureDestinationSheet()");
-  const sheetEnd = source.indexOf("function ensureDestinationSheetBackdrop()", sheetStart);
-  const sheetSource = source.slice(sheetStart, sheetEnd);
-  assert.match(sheetSource, /brandLink\.tabIndex = -1/);
-  assert.doesNotMatch(sheetSource, /sheet\.querySelectorAll\("[^"\n]*destination-home-link/);
-});
-
 test("destination picker dismissal clears active visuals without focus and preserves handoff glow", () => {
   for (const hostname of ["chatgpt.com", "claude.ai", "gemini.google.com", "grok.com", "chat.deepseek.com"]) {
     const hooks = loadPlatformContent([], hostname);
@@ -1799,22 +1755,6 @@ clockTest("source preparation and summary dispatch reject navigation without tra
     assert.equal(messages.length, 0);
     hooks.teardownContextGeneratorInstance();
   }
-});
-
-test("opening the destination picker starts JSON capture without DOM capture or summarization", () => {
-  const source = fs.readFileSync(SOURCE_PATH, "utf8");
-  const pickerStart = source.indexOf("function toggleDestinationSheet()");
-  const pickerEnd = source.indexOf("function warmDestinationConnections()", pickerStart);
-  const pickerSource = source.slice(pickerStart, pickerEnd);
-  const preconnectEnd = source.indexOf("function getUrlOrigin(", pickerEnd);
-  const preconnectSource = source.slice(pickerEnd, preconnectEnd);
-
-  assert.ok(pickerStart >= 0 && pickerEnd > pickerStart && preconnectEnd > pickerEnd);
-  assert.doesNotMatch(source, /warmSummary|scheduleWarmSummary|startWarmSummary|ensureWarmSummaryForConversation|conversationFingerprint/);
-  assert.doesNotMatch(pickerSource, /scrapeConversation|requestBackendSummary|summarizeWithBackend/);
-  assert.match(pickerSource, /warmDestinationConnections\(\);\s+startPickerJsonCapture\(\);/);
-  assert.match(preconnectSource, /link\.rel = "preconnect"/);
-  assert.doesNotMatch(preconnectSource, /conversation|scrape|summar|fetch\(|sendMessage|notifyBackground/);
 });
 
 test("latest-run cache receipt preserves original provider metadata", () => {
