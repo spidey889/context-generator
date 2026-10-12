@@ -86,7 +86,6 @@ These synthetic cases demonstrate current behavior. Their frequency and presence
 
 | Case | Observed behavior | Assessment |
 | --- | --- | --- |
-| Claude two pasted attachments share an ID but contain different valid bodies | First body survives; second is deduplicated without rejecting the conflict. | Identity-conflict validation gap. |
 | DeepSeek a `FILE` fragment has an object instead of an array in `files` | File data is silently excluded while other prompt/answer text can succeed. | Malformed attachment-container validation gap. |
 | Shared network completeness has `complete: "false"` or an array-shaped value | Literal-false checks do not reject these shapes. | Validation gap; differs from the stricter ChatGPT/Claude object/boolean checks. |
 | Grok advertised total is negative | Negative count passes the current safe-integer / greater-than-returned-count check. | Malformed count validation gap. |

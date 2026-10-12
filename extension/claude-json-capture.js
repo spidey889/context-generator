@@ -95,18 +95,22 @@
       const attachments = message.sender === "human" && Array.isArray(message.attachments) ? message.attachments : [];
       const inlineParts = [...parts];
       const inlineCopies = new Map();
-      const pastedIds = new Set();
+      const pastedBodiesById = new Map();
       for (const attachment of attachments) {
         if (attachment?.file_type !== "txt" || attachment.file_name !== "") continue;
         assertComplete(attachment, "Pasted-text attachment");
         if (typeof attachment.extracted_content !== "string" || (attachment.file_size > 0 && attachment.extracted_content.length === 0)) throw unsupported("A pasted-text attachment is missing its complete extracted_content string.", "attachment_failed");
         if (attachment.file_size != null && (!Number.isSafeInteger(attachment.file_size) || attachment.file_size < 0 || new TextEncoder().encode(attachment.extracted_content).length !== attachment.file_size)) throw unsupported("A pasted-text attachment's extracted_content does not match its file_size; completeness cannot be verified.", "attachment_failed");
         const pastedText = attachment.extracted_content;
-        // Text overlap is not attachment identity: two cards may intentionally
-        // contain the same text, or one may be a substring of another.
-        const duplicate = typeof attachment.id === "string" && pastedIds.has(attachment.id);
-        if (typeof attachment.id === "string" && attachment.id) pastedIds.add(attachment.id);
-        if (!pastedText.trim() || duplicate) continue;
+        // A repeated ID alone cannot prove a duplicate. Keep differing bodies;
+        // only exact repeats of the same ID and original text share one card.
+        const id = typeof attachment.id === "string" && attachment.id ? attachment.id : null;
+        const seenBodies = id ? pastedBodiesById.get(id) : null;
+        if (!pastedText.trim() || seenBodies?.has(pastedText)) continue;
+        if (id) {
+          if (seenBodies) seenBodies.add(pastedText);
+          else pastedBodiesById.set(id, new Set([pastedText]));
+        }
         const normalizedPaste = pastedText.trim();
         let inlineCopy = null;
         for (const [index, part] of inlineParts.entries()) {

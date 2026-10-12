@@ -324,6 +324,26 @@ test("Claude restores multiple CRLF inline cards backwards and preserves repeate
   assert.equal(capture.messageTurnCount, 2);
 });
 
+test("Claude keeps different pasted bodies with one ID and skips only exact repeats in that turn", async () => {
+  const data = fixture();
+  const first = "Budget is ₹1,000.", second = "  Deadline is Friday.\r\n";
+  const card = text => ({ ...pastedAttachment(text), id: "shared-paste-id" });
+  data.chat_messages[0].content = [];
+  data.chat_messages[0].attachments = [card(first), card(second), card(first), card(second)];
+  data.chat_messages.push({ uuid: "next", sender: "human", parent_message_uuid: "answer",
+    content: [], attachments: [card(second)] });
+  data.current_leaf_message_uuid = "next";
+  const h = setup(data, { resources: [endpoint] });
+  const capture = await h.window.__capCaptureClaudeJson();
+  assert.equal(capture.text,
+    `Claude conversation:\n\nUser: ${first}\n\n${second}\n\nAssistant: Private reasoning\n\nSelected answer\n\nUser: ${second}`);
+  assert.deepEqual(JSON.parse(JSON.stringify(capture.messages)), [
+    { role: "user", text: `${first}\n\n${second}` },
+    { role: "assistant", text: "Private reasoning\n\nSelected answer" },
+    { role: "user", text: second }
+  ]);
+});
+
 test("Claude keeps a pasted card separate when its text is only a substring or is missing a full paragraph boundary", async () => {
   for (const original of ["Intro\r\nCARD\r\nOutro", "Intro\r\n\r\nCARD_suffix\r\n\r\nOutro",
     "Intro\r\n\r\nCARD\r\nOutro", "Intro\r\nCARD\r\n\r\nOutro"]) {

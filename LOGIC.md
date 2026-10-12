@@ -214,7 +214,7 @@ Included content:
 - Extract direct `text` and `thinking` block strings. Use legacy `message.text` only when structured content is absent/empty, never in addition to structured blocks. Skip empty turns; fail if the whole active branch has no supported text.
 - Preserve each original block/legacy string, including its leading indentation and trailing whitespace. Trim only for emptiness and pasted-card matching; translate inline-card matches back to original block offsets before restoration.
 - Human `message.attachments` qualify as pasted cards only for `file_type: "txt"`, empty `file_name`, and nonempty string `extracted_content`. Named uploads and other types remain excluded. Missing recognized pasted text fails; supplied `file_size` must match the untrimmed extracted UTF-8 byte count.
-- Preserve cards in their owning turn, including pasted-only turns. Deduplicate repeated attachment IDs within that turn only. Distinct identical/overlapping cards remain distinct. One complete matching inline paragraph may represent one card with restored original whitespace. Paragraph boundaries accept LF, CRLF and mixed blank lines without normalizing source text or shifting offsets; substrings and single newlines do not represent a duplicate card.
+- Preserve cards in their owning turn, including pasted-only turns. Deduplicate only exact repeats of both attachment ID and original text within that turn. A repeated ID with differing complete bodies keeps each distinct body, in attachment order, without another request or DOM recovery. Distinct identical/overlapping cards with different IDs remain distinct. One complete matching inline paragraph may represent one card with restored original whitespace. Paragraph boundaries accept LF, CRLF and mixed blank lines without normalizing source text or shifting offsets; substrings and single newlines do not represent a duplicate card.
 
 Excluded content and completeness:
 
@@ -229,7 +229,7 @@ Files: `chatgpt-fetch-main.js` owns fresh native/session/paste reads; `chatgpt-j
 
 Auth and lifecycle:
 
-- Current readiness probes the v14 MAIN hook on `cap-context-chatgpt-json-v2`. The hook responds only while it owns the current fetch wrapper. Replacement retains page-memory auth, and same-chat project path aliases remain valid.
+- Current readiness probes the v15 MAIN hook on `cap-context-chatgpt-json-v2`. The hook responds only while it owns the current fetch wrapper. Replacement retains page-memory auth, and same-chat project path aliases remain valid.
 - Observe only allowlisted auth/account headers on same-origin `/backend-api/` requests. Auth is session/account scoped: cached sidebar/project navigation need not emit a new conversation-specific request.
 - Explicit capture fetches fresh `GET /backend-api/conversation/{id}` with browser cookies and the latest observed headers, without pagination parameters. Late installation obtains `accessToken` and account ID from `/api/auth/session` only during explicit capture.
 - One HTTP 401 retry is shared across tree and paste-descriptor reads. Prefer newer same-workspace observed auth, otherwise refresh the session once; recheck navigation/account cancellation before retrying. Do not retry HTTP 403 or partial history, or redirect to a guessed workspace.
