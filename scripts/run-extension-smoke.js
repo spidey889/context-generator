@@ -1572,7 +1572,7 @@ async function run() {
           text: document.getElementById("context-generator-fallback-text").value,
           carry: document.getElementById("context-generator-fallback-modal").contextGeneratorCopyText })`, contextId);
         assert.equal(details.title, "Your draft is safe");
-        assert.match(details.desc, /ChatGPT already has a draft/);
+        assert.equal(details.desc, "We noticed your input box has text in it. Here’s your conversation, ready to be copied.");
         assert.match(details.text, /Conversation from your previous chat/);
         assert.ok(!details.text.includes("The conversation below was transferred"), "The compact preview starts with the conversation.");
         assert.match(details.carry, /^The conversation below was transferred/);

@@ -9377,7 +9377,7 @@
     const desc = document.getElementById("context-generator-fallback-desc");
     if (desc) {
       desc.textContent = draftPresent
-        ? `${destinationName} already has a draft. Copy your conversation when you’re ready.`
+        ? "We noticed your input box has text in it. Here’s your conversation, ready to be copied."
         : pasteUnconfirmed
         ? `The paste into ${destinationName} wasn't confirmed. Check that tab first. If the context is missing, copy it from here.`
         : isBackup
