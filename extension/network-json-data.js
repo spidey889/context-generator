@@ -31,6 +31,21 @@
       if ((typeof id !== "string" && !Number.isSafeInteger(id)) || mapping.has(id) || !Object.hasOwn(item, parentKey)) fail("Invalid or duplicate message IDs were returned.", undefined, "invalid_branch");
       mapping.set(id, item);
     }
+    let externalRootParent = null;
+    if (externalRoot) {
+      // List position is not root evidence. Grok may omit a synthetic root;
+      // all orphan human nodes must share that one ID, with no competing null
+      // root. This permits reordered/branched starts but rejects broken links.
+      const roots = items.filter(item => item[parentKey] !== null && !mapping.has(item[parentKey]));
+      if (roots.length) {
+        const parent = roots[0][parentKey];
+        if (typeof parent !== "string" || !parent || items.some(item => item[parentKey] === null)
+          || roots.some(item => item.sender !== "human" || item[parentKey] !== parent)) {
+          fail("A parent message is missing from the history.", undefined, "parent_missing");
+        }
+        externalRootParent = parent;
+      }
+    }
     const branch = [], seen = new Set();
     let id = leaf;
     while (true) {
@@ -39,9 +54,7 @@
       seen.add(id); branch.push(item);
       const parent = item[parentKey];
       if (parent === null) break;
-      // Grok's first human node points at a synthetic root absent from the
-      // response tree. All other parents must be real returned nodes.
-      if (externalRoot && !mapping.has(parent) && item === items[0] && item.sender === "human" && typeof parent === "string" && parent) break;
+      if (externalRootParent !== null && parent === externalRootParent) break;
       if ((typeof parent !== "string" && !Number.isSafeInteger(parent)) || !mapping.has(parent)) fail("A parent message is missing from the history.", undefined, "parent_missing");
       id = parent;
     }

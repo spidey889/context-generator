@@ -17,8 +17,7 @@ The original snapshot, findings and aggregate counts below remain historical evi
 
 | Priority | Finding | Evidence and effect |
 | --- | --- | --- |
-| 1 | Grok root validation depends on array position | **Reproduced.** Reverse the node array of an otherwise complete tree and capture fails with a missing-parent error. The external synthetic-root exception requires the root human node to be `items[0]`. The actual native endpoint's ordering guarantee was not verified. |
-| 2 | Grok can accept a truncated oldest boundary | **Reproduced blind spot.** Remove the oldest user/assistant pair without adding partial/count metadata. The next human node becomes `items[0]`, so its missing real parent is accepted as the external synthetic root. Capture succeeds with only the suffix. Distinguishing an actual synthetic root requires stronger native evidence. |
+| 1 | Grok can accept a truncated oldest boundary | **Reproduced blind spot.** Remove the oldest user/assistant pair without adding partial/count metadata. The suffix can still have one human boundary whose missing real parent looks like an omitted synthetic root. Capture succeeds with only the suffix. Distinguishing an actual synthetic root requires stronger native evidence; the ordering fix does not resolve this ambiguity. |
 
 Source pointers:
 
@@ -108,7 +107,7 @@ Additional probes reused the test fixtures/harnesses and exposed serializers onl
 
 Suggested follow-up order, subject to separate implementation authorization:
 
-1. Verify Grok root identity/order against current native evidence before changing that integrity rule.
+1. Verify Grok root identity against current native evidence to distinguish an omitted synthetic root from a truncated prefix.
 2. Add targeted malformed-content/conflicting-attachment checks where silently accepting the remaining text can hide a supported-content loss.
 
 No fix is claimed by this report. Source changes, installed extension distribution and backend deployment remain separate.

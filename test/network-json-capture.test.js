@@ -459,7 +459,7 @@ for (const platform of ["gemini", "grok", "deepseek"]) test(`${platform}: the pr
   old.version = platform === "deepseek" ? 9 : platform === "gemini" ? 9 : 7;
   h.reinstall(files[1]);
   assert.notEqual(h.window.__capNetworkFetchState, old);
-  assert.equal(h.window.__capNetworkFetchState.version, platform === "deepseek" ? 14 : platform === "gemini" ? 12 : 10);
+  assert.equal(h.window.__capNetworkFetchState.version, platform === "deepseek" ? 14 : platform === "gemini" ? 12 : 11);
   assert.equal(h.listeners.size, 2);
   assert.equal((await h.window.__capCaptureNetworkJson()).text, h.fixture.expected);
 });
@@ -575,6 +575,51 @@ test("Gemini: late installation builds a fresh RPC from native bootstrap without
     assert.equal(new URLSearchParams(options.body).get("at"), "CSRF_SENTINEL");
   }
 });
+test("Grok orders shuffled nodes and bodies before returning the transcript", async () => {
+  for (const nullRoot of [false, true]) {
+    const f = fixtures("grok", "smoke", 3);
+    if (nullRoot) {
+      f.nodes.responseNodes[0].parentResponseId = null;
+      f.responses[0].parentResponseId = null;
+    }
+    f.nodes.responseNodes.reverse();
+    const h = setup("grok", f);
+    assert.equal(h.api.grok(f.nodes, [...f.responses].reverse()).text, f.expected);
+    const capture = await h.window.__capCaptureNetworkJson();
+    assert.equal(capture.text, f.expected);
+    assert.equal(capture.messageTurnCount, 6);
+    const loaded = h.requests.find(request => request.url.pathname.endsWith("load-responses"));
+    assert.deepEqual(JSON.parse(loaded.options.body).responseIds,
+      ["user_0", "answer_0", "user_1", "answer_1", "user_2", "answer_2"]);
+  }
+});
+
+test("Grok rejects broken internal links and ambiguous external roots even with a selected leaf", () => {
+  for (const mutate of [
+    f => { f.nodes.responseNodes.splice(1, 1); },
+    f => { f.nodes.responseNodes.splice(2, 1); },
+    f => { f.nodes.responseNodes[2].parentResponseId = "missing-parent"; },
+    f => { f.nodes.responseNodes[2].parentResponseId = null; },
+    f => { f.nodes.responseNodes[0].sender = "assistant"; },
+    f => { f.nodes.responseNodes[0].parentResponseId = ""; },
+    f => { f.nodes.responseNodes[0].parentResponseId = 123; },
+    f => { f.nodes.responseNodes[0].parentResponseId = "answer_2"; }
+  ]) {
+    const f = fixtures("grok", "smoke", 3);
+    mutate(f);
+    const h = setup("grok", f);
+    assert.throws(() => h.api.grokBranch(f.nodes, "answer_2"), /missing|cycle/);
+  }
+});
+
+test("Grok shared external roots retain explicit first-turn branch selection regardless of node order", () => {
+  const f = fixtures("grok", "smoke", 1);
+  f.nodes.responseNodes.unshift({ responseId: "other-user", parentResponseId: "external-root", sender: "human" });
+  const h = setup("grok", f);
+  assert.equal(h.api.grok(f.nodes, f.responses, "answer_0").text, f.expected);
+  assert.throws(() => h.api.grokBranch(f.nodes), /active/);
+});
+
 test("Grok: rid selects active branch, ambiguous and missing bodies fail", () => {
   const h = setup("grok"), f = h.fixture;
   f.nodes.responseNodes.push({ responseId: "alternate", parentResponseId: "user_0", sender: "assistant" });
