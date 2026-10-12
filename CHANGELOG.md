@@ -4,6 +4,8 @@ A short history of decisions and regressions that matter when changing the code.
 
 ## 2026-10-13
 
+- **JSON response labels accept valid capitalization.** Claude and ChatGPT now compare HTTP media types case-insensitively, ignoring optional parameters, so `Application/JSON` and ChatGPT signed `Text/Plain` downloads no longer fail only because of capitalization. Exact base-type matching also rejects misleading substrings such as `application/jsonp`. Advanced MAIN/bridge readiness together to replace older hooks on open tabs. Added regressions across session/history/paste descriptor/content reads and rejected-body cancellation; all 622 regular tests pass. Removed the resolved finding from the local audit. Reload/distribute the extension to use the client fix.
+
 - **Normal tests reduce setup work and improve behavioral coverage.** Build the real CI Git graph in one import, remove duplicate range scenarios and verify the exact selected base, including Unicode content and a filename with spaces. Capture completeness checks use small fixtures instead of repeatedly cloning megabytes, while large unselected branches/descendants and original byte limits remain covered. Telemetry workers share compiled code but retain isolated contexts. Replaced source-string error/expiry assertions with executable safe-message, exact expiry, legacy-receipt and metadata-preservation checks; removed three picker snapshots covered by real orchestration and installed Brave. All 616 normal tests pass, down from 619; comparable local full runs improved from 15.5 to 13.6 seconds and the Git fixture from 9.2 to 4.9 seconds. Application behavior, test selection and dependencies stay unchanged.
 
 ## 2026-10-12

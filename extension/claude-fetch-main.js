@@ -1,5 +1,7 @@
 (() => {
-  const version = 9;
+  const version = 10;
+  // HTTP media types ignore casing; parameters do not change the base type.
+  const responseMediaType = response => response.headers.get("content-type")?.split(";", 1)[0].trim().toLowerCase();
   const maxHistoryBytes = 6000000;
   const previous = window.__capClaudeFetchState;
   if (previous?.version === version && window.fetch === previous.fetch) return;
@@ -83,7 +85,7 @@
       captureUrl.searchParams.set("consistency", "strong");
       const response = await Reflect.apply(nativeFetch, window, [captureUrl.href, { credentials: "same-origin", cache: "no-store", signal: controller.signal }]);
       reply.status = response.status;
-      if (response.status !== 200 || response.headers.has("content-range") || !response.headers.get("content-type")?.includes("application/json")) {
+      if (response.status !== 200 || response.headers.has("content-range") || responseMediaType(response) !== "application/json") {
         captureFailureReason = [401, 403].includes(response.status) ? "unavailable"
           : response.status === 206 || response.headers.has("content-range") || response.status === 200 ? "incomplete" : "request_failed";
         reply.captureDetail = response.status !== 200 && response.status !== 206 ? "http_error"

@@ -10,6 +10,13 @@ const scripts = new Map(["claude-fetch-main.js", "claude-json-capture.js"].map(f
 
 const chat = "test-chat";
 const endpoint = `https://claude.ai/api/organizations/test-org/chat_conversations/${chat}?tree=True`;
+test("Claude accepts case-insensitive JSON response media types with optional parameters", async () => {
+  for (const contentType of ["Application/JSON; charset=utf-8", "APPLICATION/JSON"]) {
+    const capture = await setup(fixture(), { resources: [endpoint], headers: { "content-type": contentType } }).window.__capCaptureClaudeJson();
+    assert.equal(capture.text, "Claude conversation:\n\nUser: Question\n\nAssistant: Private reasoning\n\nSelected answer");
+  }
+});
+
 test("Claude retains the observed HTTP rejection without organization IDs or response content", async () => {
   await assert.rejects(setup(undefined, { status: 503, resources: [endpoint] }).window.__capCaptureClaudeJson(), error => {
     assert.equal(error.diagnosticCode, "capture_json_failed");
@@ -205,7 +212,9 @@ test("Claude cancels discarded transport responses and keeps safe fallback reaso
   for (const [status, headers, reason] of [
     [401, {}, "unavailable"], [500, {}, "request_failed"],
     [200, { "content-range": "bytes 0-10/100" }, "incomplete"],
-    [200, { "content-type": "text/html" }, "incomplete"]
+    [200, { "content-type": "text/html" }, "incomplete"],
+    [200, { "content-type": "application/jsonp" }, "incomplete"],
+    [200, { "content-type": "text/html; note=application/json" }, "incomplete"]
   ]) {
     let cancelled = 0, healthy = false, discarded;
     const harness = setup(fixture(), { resources: [endpoint], fetchImpl: async () => {

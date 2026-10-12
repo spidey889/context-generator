@@ -11,27 +11,18 @@ Evidence labels:
 - **Rule:** an intentional boundary visible in current code.
 - **Unverified:** a compatibility assumption whose live behavior was not checked.
 
-Implementation follow-up (2026-10-12): finding 1 now receives one fresh JSON read at destination selection for a recognized temporary failure, including a failed prefetch or fresh read. Network/timeouts, readiness and explicit temporary HTTP errors qualify; hard limits, invalid history/content, access/rate-limit rejection, unknown errors and navigation/session changes retain their existing handling. A successful retry stays silent and keeps JSON capture; a failed retry follows the existing platform recovery once. The original snapshot, findings and aggregate counts below remain historical evidence, not a current database inventory. See [current capture behavior](../LOGIC.md#capture-selection-and-failure-handling).
-
-Attachment-limit follow-up (2026-10-12): finding 3's 1,400,000-byte allowance was replaced with 2,100,000 bytes combined across unique qualifying ChatGPT pasted-file IDs and DeepSeek supported text-file IDs. It is a shared capture allowance, not a per-file allowance. The final 500,000-character / 2,000,000-byte conversation limits still apply. The original limits and reproduction below describe the audited snapshot.
+The original snapshot, findings and aggregate counts below remain historical evidence, not a current database inventory. See [current capture behavior](../LOGIC.md#capture-selection-and-failure-handling).
 
 ## Most useful findings first
 
 | Priority | Finding | Evidence and effect |
 | --- | --- | --- |
-| 1 | Failed picker prefetch stays cached after recovery | **Reproduced.** Open the picker while the native read fails, let that prefetch settle, then make the reader healthy without changing the rendered conversation. Destination selection reuses the old error without a fresh read. ChatGPT stops; DeepSeek goes straight to DOM fallback. |
-| 2 | Download size differs from transferable text size | **Recorded and reproduced.** Claude/Gemini/Grok/DeepSeek have a 6,000,000-byte raw-read allowance; ChatGPT has 32,000,000 bytes. Metadata, unused branches and supported file reads consume these budgets. A short selected transcript can therefore fail JSON capture. Network adapters report the misleading 500,000-character error for a raw-size failure. |
-| 3 | Attachment allowance is lower than the transcript allowance | **Reproduced.** A 470,000-character CJK text file is 1,410,000 UTF-8 bytes. It fits the 500,000-character / 2,000,000-byte transcript limits, including ordinary transcript labels, but exceeds the separate 1,400,000-byte attachment allowance. ChatGPT reports a size failure; DeepSeek rejects the file as unavailable/incomplete before download. |
-| 4 | Valid JSON media-type casing is rejected | **Reproduced.** ChatGPT and Claude accept `application/json` but reject `Application/JSON; charset=utf-8`. Their checks are case-sensitive even though HTTP media-type tokens are case-insensitive. ChatGPT's signed paste reader also compares `text/plain` case-sensitively. |
-| 5 | Grok root validation depends on array position | **Reproduced.** Reverse the node array of an otherwise complete tree and capture fails with a missing-parent error. The external synthetic-root exception requires the root human node to be `items[0]`. The actual native endpoint's ordering guarantee was not verified. |
-| 6 | Grok can accept a truncated oldest boundary | **Reproduced blind spot.** Remove the oldest user/assistant pair without adding partial/count metadata. The next human node becomes `items[0]`, so its missing real parent is accepted as the external synthetic root. Capture succeeds with only the suffix. Distinguishing an actual synthetic root requires stronger native evidence. |
+| 1 | Grok root validation depends on array position | **Reproduced.** Reverse the node array of an otherwise complete tree and capture fails with a missing-parent error. The external synthetic-root exception requires the root human node to be `items[0]`. The actual native endpoint's ordering guarantee was not verified. |
+| 2 | Grok can accept a truncated oldest boundary | **Reproduced blind spot.** Remove the oldest user/assistant pair without adding partial/count metadata. The next human node becomes `items[0]`, so its missing real parent is accepted as the external synthetic root. Capture succeeds with only the suffix. Distinguishing an actual synthetic root requires stronger native evidence. |
 
 Source pointers:
 
-- Cached result/error reuse: [platform-content.js](../extension/platform-content.js), `startPickerJsonCapture`, `isPickerJsonCaptureCurrent`, `takePickerJsonCapture`; ordinary ChatGPT failure policy in `startDestinationTransfer`.
-- Raw and attachment budgets: [chatgpt-fetch-main.js](../extension/chatgpt-fetch-main.js), [claude-fetch-main.js](../extension/claude-fetch-main.js), [network-fetch-main.js](../extension/network-fetch-main.js).
 - Grok root exception: [network-json-data.js](../extension/network-json-data.js), `chain` and `grokBranch`.
-- Media-type semantics: [RFC 9110, section 8.3.1](https://www.rfc-editor.org/rfc/rfc9110.html#section-8.3.1).
 
 ## Recorded database evidence
 
@@ -117,10 +108,7 @@ Additional probes reused the test fixtures/harnesses and exposed serializers onl
 
 Suggested follow-up order, subject to separate implementation authorization:
 
-1. Decide whether recoverable failed prefetches should receive a bounded fresh read on selection.
-2. Distinguish raw-download, attachment and final-transcript limits in diagnostics and user copy; review the observed size incidents using future detailed evidence.
-3. Correct standards-compliant media-type handling while preserving transport validation.
-4. Verify Grok root identity/order against current native evidence before changing that integrity rule.
-5. Add targeted malformed-content/conflicting-attachment checks where silently accepting the remaining text can hide a supported-content loss.
+1. Verify Grok root identity/order against current native evidence before changing that integrity rule.
+2. Add targeted malformed-content/conflicting-attachment checks where silently accepting the remaining text can hide a supported-content loss.
 
 No fix is claimed by this report. Source changes, installed extension distribution and backend deployment remain separate.

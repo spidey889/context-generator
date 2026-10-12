@@ -1,5 +1,7 @@
 (() => {
-  const version = 13;
+  const version = 14;
+  // HTTP media types ignore casing; parameters do not change the base type.
+  const responseMediaType = response => response.headers.get("content-type")?.split(";", 1)[0].trim().toLowerCase();
   // ChatGPT's native endpoint returns every branch. This is a transport safety
   // ceiling, not the selected transcript's 500k-character / 2 MB content limit.
   const maxCaptureBytes = 32000000;
@@ -112,7 +114,7 @@
       try {
         if (controller.signal.aborted || currentChat() !== chat) throw new Error("changed");
         if (response.status !== 200 || response.headers.has("content-range")
-          || response.headers.get("content-type")?.split(";", 1)[0].trim() !== "text/plain"
+          || responseMediaType(response) !== "text/plain"
           || Number(response.headers.get("content-length")) > expectedSize) throw new Error("paste");
         if (expectedSize > maxCaptureBytes - bytesRead) throw new Error("paste");
         // The manifest bounds this allocation. Never buffer an oversized body
@@ -145,7 +147,7 @@
       try {
         if (response.status !== 200) { reply.status = response.status; throw new Error("http"); }
         if (response.headers.has("content-range")) throw new Error("partial");
-        if (!response.headers.get("content-type")?.includes("application/json")) throw new Error("format");
+        if (responseMediaType(response) !== "application/json") throw new Error("format");
       } catch (error) { await discardResponse(response); throw error; }
     };
     const refreshAuth = async () => {
@@ -253,7 +255,7 @@
           const descriptorResponse = await fetchAuthenticatedJson(`/backend-api/files/download/${encodeURIComponent(file.id)}`, { redirect: "error" });
           reply.status = descriptorResponse.status;
           if (descriptorResponse.status !== 200 || descriptorResponse.headers.has("content-range")
-            || !descriptorResponse.headers.get("content-type")?.includes("application/json")) {
+            || responseMediaType(descriptorResponse) !== "application/json") {
             reply.status = descriptorResponse.status;
             await discardResponse(descriptorResponse);
             throw new Error("paste");

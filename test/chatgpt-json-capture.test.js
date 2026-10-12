@@ -72,6 +72,26 @@ async function discover(harness) {
   await harness.window.fetch(new Request(`https://chatgpt.com/backend-api/conversations/${chat}?num_turns=10`, { headers: { Authorization: "Bearer TEST_ONLY", "ChatGPT-Account-Id": "test-account" } }));
 }
 
+test("ChatGPT accepts case-insensitive response media types across session, history and pasted-file reads", async () => {
+  for (const [jsonType, textType] of [["Application/JSON; charset=utf-8", "Text/Plain; charset=utf-8"], ["APPLICATION/JSON", "TEXT/PLAIN"]]) {
+    const { data, fetchImpl } = pasteFixture();
+    const stages = new Set();
+    const harness = setup(data, 200, { fetchImpl: async request => {
+      const pathname = new URL(request.url, "https://chatgpt.com").pathname;
+      const stage = pathname === "/api/auth/session" ? "session"
+        : pathname.startsWith("/backend-api/files/download/") ? "descriptor"
+          : pathname === "/backend-api/estuary/content" ? "content" : "history";
+      stages.add(stage);
+      const response = stage === "session" ? jsonResponse({ accessToken: "TEST_ONLY" }) : await fetchImpl(request);
+      response.headers.set("content-type", stage === "content" ? textType : jsonType);
+      return response;
+    } });
+    assert.equal((await harness.window.__capCaptureChatGptJson()).text,
+      "ChatGPT conversation:\n\nUser: Original pasted document\n\nAssistant: Selected answer");
+    assert.deepEqual([...stages], ["session", "history", "descriptor", "content"]);
+  }
+});
+
 test("ChatGPT forwards the failing request stage and HTTP status as closed diagnostics", async () => {
   const harness = setup(undefined, 403);
   await discover(harness);
@@ -374,6 +394,9 @@ for (const [stage, status, headers, reason] of [
   ["session", 403, {}, "http"],
   ["history", 206, {}, "http"],
   ["history", 200, { "content-type": "text/html" }, "format"],
+  ["session", 200, { "content-type": "application/jsonp" }, "format"],
+  ["history", 200, { "content-type": "text/html; note=application/json" }, "format"],
+  ["descriptor", 200, { "content-type": "application/json-invalid" }, "paste"],
   ["descriptor", 200, { "content-range": "bytes 0-10/100" }, "paste"]
 ]) test(`ChatGPT cancels discarded ${stage} responses (${reason}) without exposing cancellation errors`, async () => {
   const { data, fetchImpl } = pasteFixture();
@@ -553,6 +576,7 @@ test("ChatGPT rejects paste transport before reading and preserves safe errors w
   for (const [status, headers] of [
     [206, { "content-type": "text/plain" }],
     [200, { "content-type": "text/html" }],
+    [200, { "content-type": "text/plain-invalid" }],
     [200, { "content-type": "text/plain", "content-range": "bytes 0-23/100" }],
     [200, { "content-type": "text/plain", "content-length": "100" }]
   ]) {
@@ -583,7 +607,7 @@ test("ChatGPT replaces the previous hook without losing observed authentication"
   old.version = 8;
   harness.reinstall();
   assert.notEqual(harness.window.__capChatGptFetchState, old);
-  assert.equal(harness.window.__capChatGptFetchState.version, 13);
+  assert.equal(harness.window.__capChatGptFetchState.version, 14);
   assert.equal(harness.listeners(), 1);
   assert.equal((await harness.window.__capCaptureChatGptJson()).text,
     "ChatGPT conversation:\n\nUser: Original pasted document\n\nAssistant: Selected answer");
