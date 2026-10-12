@@ -13,11 +13,15 @@ Evidence labels:
 
 The original snapshot, findings and aggregate counts below remain historical evidence, not a current database inventory. See [current capture behavior](../LOGIC.md#capture-selection-and-failure-handling).
 
+Native-sample follow-up (2026-10-13): two user-provided native node responses used omitted UUIDv5 starting markers and UUIDv4 own message IDs. The longer sample returned all 44 selected-branch message bodies, including the user-recognized original opening, in the linked order. No missing-history incident was demonstrated. These samples support a compatibility guard, not a universal native ordering/completeness guarantee; private text and identifiers are not copied into this report or the fixtures.
+
+Implementation follow-up (2026-10-13): a missing ordinary parent or an unrecognized starting-marker format now rejects JSON as `incomplete` / `parent_missing` before loading its suffix. Grok then uses its existing one normal capture within the same transfer. The recognized UUIDv5 starting-marker format retains JSON capture without an additional request. A UUID format alone cannot authenticate a synthetic root; the residual blind spot below remains explicit.
+
 ## Most useful findings first
 
 | Priority | Finding | Evidence and effect |
 | --- | --- | --- |
-| 1 | Grok can accept a truncated oldest boundary | **Reproduced blind spot.** Remove the oldest user/assistant pair without adding partial/count metadata. The suffix can still have one human boundary whose missing real parent looks like an omitted synthetic root. Capture succeeds with only the suffix. Distinguishing an actual synthetic root requires stronger native evidence; the ordering fix does not resolve this ambiguity. |
+| 1 | Grok lacks independent proof for a plausible starting boundary | **Residual blind spot.** The original oldest-pair omission now fails when its missing real parent is an ordinary UUIDv4 message ID or an unknown marker. However, a shortened response with a plausible UUIDv5 boundary and no partial/count metadata could still resemble a genuine omitted synthetic root. The UUID guard is not root authentication; distinguishing that case requires an independent native identity/count signal. No such live failure was observed in the inspected samples. |
 
 Source pointers:
 

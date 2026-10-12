@@ -32,8 +32,10 @@ function fixtures(platform, chat = "smoke", count = 24) {
     return { pages, expected };
   }
   if (platform === "grok") {
+    // Sanitized UUIDv5 starting marker from the observed native root shape.
+    const root = "11111111-2222-5333-8444-555555555555";
     const responses = turns.flatMap(([user, assistant], i) => [
-      { responseId: `user_${i}`, parentResponseId: i ? `answer_${i - 1}` : "external-root", sender: "human", message: user, partial: false, inputChunks: [], fileAttachments: [] },
+      { responseId: `user_${i}`, parentResponseId: i ? `answer_${i - 1}` : root, sender: "human", message: user, partial: false, inputChunks: [], fileAttachments: [] },
       { responseId: `answer_${i}`, parentResponseId: `user_${i}`, sender: "assistant", message: assistant, partial: false, outputChunks: [], toolResponses: [{ text: "TOOL_SENTINEL" }] }
     ]);
     return { nodes: { responseNodes: responses.map(({ responseId, parentResponseId, sender }) => ({ responseId, parentResponseId, sender })), inflightResponses: [] }, responses, expected };

@@ -684,6 +684,30 @@ for (const platform of ["claude", "chatgpt", "gemini", "grok", "deepseek"]) {
   });
 }
 
+test("Grok's missing starting history enters normal capture once and submits only its recovered transcript", async () => {
+  const { fixtures } = require("./network-json-fixtures");
+  const adapter = vm.createContext({ TextEncoder });
+  new vm.Script(fs.readFileSync(path.join(__dirname, "../extension/network-json-data.js"), "utf8")).runInContext(adapter);
+  const f = fixtures("grok", "source", 3);
+  f.nodes.responseNodes.splice(0, 2);
+  const { context, calls } = harness("grok", { mode: "success" });
+  const capture = context.window.__capCaptureNetworkJson;
+  context.window.__capCaptureNetworkJson = async (...args) => {
+    await capture(...args);
+    return adapter.__capNetworkJsonData.grok(f.nodes, f.responses);
+  };
+  await context.start("chatgpt");
+  assert.equal(calls.json, 1, "Missing history is not a temporary JSON error to retry.");
+  assert.equal(calls.dom, 1);
+  assert.equal(calls.prepare, 1);
+  assert.equal(calls.notice, 1);
+  assert.equal(calls.destination, 1);
+  assert.equal(calls.flows.length, 1);
+  assert.equal(calls.flows[0].text, "DOM transcript");
+  assert.equal(calls.flows[0].trace.diagnostics.json_fallback_code, "incomplete");
+  assert.equal(calls.errors.length, 0);
+});
+
 test("JSON completion after source navigation cancels before dispatch or DOM fallback on every platform", async () => {
   for (const platform of ["claude", "chatgpt", "gemini", "grok", "deepseek"]) {
     for (const succeeds of [true, false]) {

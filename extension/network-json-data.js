@@ -33,13 +33,15 @@
     }
     let externalRootParent = null;
     if (externalRoot) {
-      // List position is not root evidence. Grok may omit a synthetic root;
-      // all orphan human nodes must share that one ID, with no competing null
-      // root. This permits reordered/branched starts but rejects broken links.
+      // Real native samples use an omitted UUIDv5 starting marker, while own
+      // message IDs are UUIDv4. A missing ordinary parent is lost history, not
+      // a synthetic root. Unknown marker shapes fail into normal capture.
+      // The UUID shape is a compatibility guard, not proof of server completeness.
       const roots = items.filter(item => item[parentKey] !== null && !mapping.has(item[parentKey]));
       if (roots.length) {
         const parent = roots[0][parentKey];
-        if (typeof parent !== "string" || !parent || items.some(item => item[parentKey] === null)
+        if (typeof parent !== "string" || !/^[0-9a-f]{8}-[0-9a-f]{4}-5[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(parent)
+          || items.some(item => item[parentKey] === null)
           || roots.some(item => item.sender !== "human" || item[parentKey] !== parent)) {
           fail("A parent message is missing from the history.", undefined, "parent_missing");
         }
