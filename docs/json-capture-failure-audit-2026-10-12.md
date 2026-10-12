@@ -11,7 +11,7 @@ Evidence labels:
 - **Rule:** an intentional boundary visible in current code.
 - **Unverified:** a compatibility assumption whose live behavior was not checked.
 
-The original snapshot, findings and aggregate counts below remain historical evidence, not a current database inventory. See [current capture behavior](../LOGIC.md#capture-selection-and-failure-handling).
+The original snapshot and aggregate counts below remain historical evidence, not a current database inventory. Resolved and dismissed findings are removed from the issue tables; [CHANGELOG.md](../CHANGELOG.md) records those decisions. See [current capture behavior](../LOGIC.md#capture-selection-and-failure-handling).
 
 Native-sample follow-up (2026-10-13): two user-provided native node responses used omitted UUIDv5 starting markers and UUIDv4 own message IDs. The longer sample returned all 44 selected-branch message bodies, including the user-recognized original opening, in the linked order. No missing-history incident was demonstrated. These samples support a compatibility guard, not a universal native ordering/completeness guarantee; private text and identifiers are not copied into this report or the fixtures.
 
@@ -86,7 +86,6 @@ These synthetic cases demonstrate current behavior. Their frequency and presence
 
 | Case | Observed behavior | Assessment |
 | --- | --- | --- |
-| Claude thinking block has a numeric body | Block is silently skipped alongside otherwise valid text. | Malformed supported-block validation gap. |
 | Claude two pasted attachments share an ID but contain different valid bodies | First body survives; second is deduplicated without rejecting the conflict. | Identity-conflict validation gap. |
 | DeepSeek a `FILE` fragment has an object instead of an array in `files` | File data is silently excluded while other prompt/answer text can succeed. | Malformed attachment-container validation gap. |
 | Shared network completeness has `complete: "false"` or an array-shaped value | Literal-false checks do not reject these shapes. | Validation gap; differs from the stricter ChatGPT/Claude object/boolean checks. |
@@ -112,4 +111,4 @@ Suggested follow-up order, subject to separate implementation authorization:
 1. Verify Grok root identity against current native evidence to distinguish an omitted synthetic root from a truncated prefix.
 2. Add targeted malformed-content/conflicting-attachment checks where silently accepting the remaining text can hide a supported-content loss.
 
-No fix is claimed by this report. Source changes, installed extension distribution and backend deployment remain separate.
+The remaining findings are not marked fixed. Source changes, installed extension distribution and backend deployment remain separate.
