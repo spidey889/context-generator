@@ -5,8 +5,8 @@ Older attempts retain NULL; their missing observations cannot be recovered.
 The existing `failure_reason` and `last_stage` remain compatible.
 
 `transfers.file_size_failure_reason` is a readable generated column. An exact
-`diagnostics.capture_detail = "attachment_size_limit"` produces “Combined text
-files exceeded the 2.1 MB limit before download.” Other causes remain NULL.
+`diagnostics.capture_detail = "attachment_size_limit"` produces `file size`.
+Other causes remain NULL.
 The marker is emitted only when unique supported ChatGPT pasted files or
 DeepSeek text files exceed the combined file allowance before body downloads.
 Raw JSON limits, final transcript limits and malformed attachments do not use it.

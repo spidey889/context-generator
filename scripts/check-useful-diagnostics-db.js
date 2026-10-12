@@ -39,7 +39,7 @@ async function checkUsefulDiagnostics(db, sql) {
     has_function_privilege('service_role','public.is_valid_transfer_diagnostics(jsonb,integer)','execute') as service`)).rows[0], { anon: false, authenticated: false, service: true });
   return checks;
 }
-async function checkAttachmentSizeFailure(db, sql) {
+async function checkAttachmentSizeFailure(db, sql, capturedMigrations, expectedReason = "Combined text files exceeded the 2.1 MB limit before download.") {
   let checks = 0;
   const equal = (a, b) => { assert.deepEqual(a, b); checks++; };
   const snapshot = async () => (await db.query(`select jsonb_build_object(
@@ -67,17 +67,14 @@ async function checkAttachmentSizeFailure(db, sql) {
         p_extension_version => '1.4.16', p_diagnostics => $3::jsonb)`,
         [attemptId, installId, JSON.stringify({ version: 1, capture_detail: detail, capture_request_stage: "attachment_descriptor" })]);
       equal((await db.query("select file_size_failure_reason from public.transfers where attempt_id=$1", [attemptId])).rows[0].file_size_failure_reason,
-        index === 0 ? "Combined text files exceeded the 2.1 MB limit before download." : null);
+        index === 0 ? expectedReason : null);
     }
     // Restore a current snapshot including a populated generated label. The
     // database must recompute it instead of accepting its captured value.
     const { checkSnapshot } = require("./check-telemetry-backup.js");
-    const fs = require("node:fs"), path = require("node:path");
-    const directory = path.join(__dirname, "../supabase/migrations");
     const snapshotData = { transfers: (await db.query("select to_jsonb(t) as row from public.transfers t")).rows.map(value => value.row),
       users: (await db.query("select to_jsonb(u) as row from public.users u")).rows.map(value => value.row),
-      migrations: fs.readdirSync(directory).filter(name => name.endsWith(".sql")).sort()
-        .map(name => ({ version: name.slice(0, 14), statements: [fs.readFileSync(path.join(directory, name), "utf8")] })) };
+      migrations: [...capturedMigrations] };
     equal((await checkSnapshot(snapshotData)).originalValuesPreserved, true);
   } finally { await db.exec("rollback;"); }
   equal(await snapshot(), before);

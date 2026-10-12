@@ -1,8 +1,8 @@
 # Telemetry database operations
 
 `transfers.file_size_failure_reason` is generated from the exact
-`attachment_size_limit` capture detail and displays “Combined text files exceeded
-the 2.1 MB limit before download.” It records the JSON failure independently of
+`attachment_size_limit` capture detail and displays `file size`.
+It records the JSON failure independently of
 the final outcome, including successful DOM recovery. Historic generic size
 errors stay NULL. The additive migration preserves existing rows, counters,
 permissions and RPC arguments. Deploy compatible SQL, Edge and relay validation
