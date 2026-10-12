@@ -58,6 +58,9 @@ const CHATGPT_PASTE_AUTH_SMOKE = JSON_SOURCE === "chatgpt" && process.env.CAP_CO
 const CLAUDE_PARTIAL_SMOKE = JSON_SOURCE === "claude" && process.env.CAP_CONTEXT_CLAUDE_PARTIAL_SMOKE === "1";
 const CLAUDE_OVERSIZE_SMOKE = JSON_SOURCE === "claude" && process.env.CAP_CONTEXT_CLAUDE_PARTIAL_SMOKE === "oversize";
 const JSON_FALLBACK_SMOKE = Boolean(CLAUDE_PARTIAL_SMOKE || CLAUDE_OVERSIZE_SMOKE || NETWORK_FAILURE);
+// Recoverable fixtures retain their own JSON cause: a raw-size rejection or
+// unsupported file-only input must not be relabelled as partial history.
+const EXPECTED_JSON_FALLBACK_REASON = GROK_FILE_ONLY_SMOKE ? "unsupported" : DEEPSEEK_OVERSIZE_SMOKE ? "size_limit" : "incomplete";
 const TELEMETRY_DATABASE_SMOKE = process.env.CAP_CONTEXT_TELEMETRY_SMOKE === "1";
 const FAILURE_ARTIFACT_DIR = process.env.CAP_CONTEXT_SMOKE_ARTIFACT_DIR || "";
 
@@ -2445,7 +2448,7 @@ async function run() {
       if (JSON_FALLBACK_SMOKE) {
         // A fully mounted short DOM history needs no virtual-window sweep.
         assert.match(remoteStats.capture.method, /^(structured|sweep)$/);
-        assert.equal(remoteStats.capture.diagnostics.jsonFallbackReason, "incomplete");
+        assert.equal(remoteStats.capture.diagnostics.jsonFallbackReason, EXPECTED_JSON_FALLBACK_REASON);
       } else assert.equal(remoteStats.capture.method, "gemini-json");
     }
     assert.equal(typeof remoteStats.destinationTiming.openMs, "number");
@@ -2469,7 +2472,7 @@ async function run() {
     assert.equal(captureReport?.diagnostics?.capture_method, remoteStats.capture.method);
     assert.equal(typeof captureReport.diagnostics.capture_ms, "number");
     if (JSON_FALLBACK_SMOKE) {
-      assert.equal(captureReport.diagnostics.json_fallback_code, "incomplete");
+      assert.equal(captureReport.diagnostics.json_fallback_code, EXPECTED_JSON_FALLBACK_REASON);
       assert.ok(captureReport.diagnostics.capture_detail, "The specific JSON failure detail must survive fallback.");
       assert.notEqual(captureReport.diagnostics.capture_error_code, "unknown_error");
       assert.ok(captureReport.diagnostics.capture_request_stage);
