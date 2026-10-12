@@ -1502,7 +1502,10 @@ async function transferToDestinationObserved(
     });
   }
 
-  if (!pasteResult?.ok) {
+  // A draft is intentional user state. Report the first rejection directly so
+  // the source can offer its copy dialog without opening a second destination.
+  const pasteErrorCode = pasteResult?.diagnostics?.error_code || globalThis.CapTransferDiagnostics?.errorCode(pasteResult);
+  if (!pasteResult?.ok && pasteErrorCode !== "editor_has_draft") {
     if (pasteResult?.code === "user_cancelled") throw createTransferCancelledError();
     await checkTransferSource(operation);
     checkTransferDeadline(deadlineAt);
@@ -1559,7 +1562,7 @@ async function transferToDestinationObserved(
     if (pasteResult?.code === "user_cancelled") throw createTransferCancelledError();
     const error = new Error(pasteResult?.error || `Could not paste into ${destination.name}.`);
     error.code = "paste_failed";
-    error.diagnosticCode = pasteResult?.diagnostics?.error_code || "unknown_error";
+    error.diagnosticCode = pasteResult?.diagnostics?.error_code || globalThis.CapTransferDiagnostics?.errorCode(pasteResult) || "unknown_error";
     throw error;
   }
 

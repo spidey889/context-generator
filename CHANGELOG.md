@@ -4,6 +4,8 @@ A short history of decisions and regressions that matter when changing the code.
 
 ## 2026-10-12
 
+- **The first destination draft stops tab recovery.** Return `editor_has_draft` directly to the existing draft copy dialog, preserving the prepared carry and avoiding a second destination tab or paste attempt. Other recoverable failures keep their existing fresh-tab behavior.
+
 - **Existing drafts get a friendly copy dialog.** A direct or worker-wrapped `editor_has_draft` failure now says “Your draft is safe” and explains that the input already contains a draft. A compact lavender copy box with the existing orb keeps the exact prepared carry, with “Copy conversation,” actual clipboard success/failure feedback and the existing focus/Escape behavior. A draft restored during delayed recovery gets the same message. Other recovery variants and draft protection remain intact. All 200 scoped tests passed; isolated Brave checked desktop and 390px layouts, 25 Dark Reader palette/state observations, and five installed paste-recovery scenarios, including the preserved native draft and exact copy text. Reload/distribute the updated extension to use it.
 
 - **Recovered JSON smoke checks retain the scenario's failure reason.** The master-push gate completed DeepSeek's oversized-history cancellation, DOM fallback and exact paste, then failed because its new telemetry assertion hardcoded `incomplete` instead of `size_limit`. Match the fixture's exact category, including Grok's `unsupported` file-only input, while retaining the specific detail/stage and verified-delivery checks. The affected isolated Brave DeepSeek fixture and three DevTools harness tests passed. Production behavior is unchanged.

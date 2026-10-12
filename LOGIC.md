@@ -84,6 +84,8 @@ After empty-chat admission, destination preparation starts during the picker-to-
 
 ### Paste and activation order
 
+A prepared destination's first `editor_has_draft` rejection is returned immediately to the source copy dialog. It never opens a fresh destination or retries paste in another tab; other recoverable delivery failures retain their existing one-fresh-tab recovery.
+
 An observed `editor_has_draft` failure opens a compact copy-recovery dialog headed “Your draft is safe,” explains that the input already contains a draft, and offers the exact prepared carry with “Copy conversation.” This covers the worker-wrapped destination error and a draft restored during delayed recovery. The draft guard still prevents insertion; copying confirms only after actual clipboard success. Other failure and unconfirmed-paste messages retain their existing dialog variants.
 
 | Destination | Before paste | After paste |

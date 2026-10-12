@@ -701,12 +701,31 @@ test("Claude recovery preserves the rejected prepared page and observes the acti
   assert.doesNotMatch(JSON.stringify(response.diagnostics), /PRIVATE/);
 });
 
+clockTest("the first destination draft rejection returns immediately without opening or pasting into another tab", async () => {
+  for (const report of [
+    { code: "editor_has_draft" },
+    { diagnostics: { version: 1, error_code: "editor_has_draft", error_origin: "destination", draft_present: true } }
+  ]) {
+    const harness = loadBackgroundForTransferTest({ preparedTab: { id: 41, url: "https://claude.ai/new" },
+      sendMessageImpl: (_tabId, message) => message.type === "PASTE_CONTEXT" ? { ok: false, ...report } : { ok: true } });
+    const response = await harness.sendTransfer("claude", 41);
+    assert.equal(response.ok, false);
+    assert.equal(response.code, "paste_failed");
+    assert.equal(response.diagnostics.error_code, "editor_has_draft");
+    assert.equal(response.diagnostics.fresh_recovery, undefined);
+    assert.equal(harness.operations.created.length, 0);
+    const pastes = harness.operations.sent.filter(({ message }) => message.type === "PASTE_CONTEXT");
+    assert.equal(pastes.length, 1);
+    assert.equal(pastes[0].tabId, 41);
+  }
+});
+
 clockTest("fresh recovery retains the first editor failure alongside the final destination observations", async () => {
   for (const outcome of ["success", "not_retained", "missing_editor"]) {
     const finalOk = outcome === "success";
-    const first = { version: 1, error_code: "editor_has_draft", error_origin: "destination", draft_present: true,
+    const first = { version: 1, error_code: "paste_not_retained", error_origin: "destination", draft_present: false,
       editor_kind: "textarea", editor_text_chars: 42, composer_wait_ms: 10, paste_attempts: 1,
-      paste_events: [{ event: "failure", at_ms: 10, code: "editor_has_draft" }] };
+      paste_events: [{ event: "failure", at_ms: 10, code: "paste_not_retained" }] };
     const last = outcome === "missing_editor"
       ? { version: 1, error_code: "editor_missing", error_origin: "destination", editor_seen: false, paste_attempts: 3 }
       : { version: 1, paste_populated: finalOk, editor_seen: true, paste_attempts: 3, draft_present: false,
@@ -718,7 +737,7 @@ clockTest("fresh recovery retains the first editor failure alongside the final d
     const response = await harness.sendTransfer("claude", 41);
     assert.equal(response.ok, finalOk);
     assert.deepEqual(JSON.parse(JSON.stringify(response.diagnostics.prepared_diagnostics)), first);
-    assert.equal(response.diagnostics.recovery_error_code, "editor_has_draft");
+    assert.equal(response.diagnostics.recovery_error_code, "paste_not_retained");
     assert.equal(response.diagnostics.fresh_recovery, true);
     for (const key of ["paste_populated", "draft_present", "editor_seen", "editor_kind", "editor_text_chars", "composer_wait_ms", "paste_events"]) {
       assert.deepEqual(response.diagnostics[key], last[key], `${outcome}: ${key} must describe only the fresh destination`);
