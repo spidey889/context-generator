@@ -5,6 +5,7 @@ const vm = require("node:vm");
 const test = require("node:test");
 const { webcrypto } = require("node:crypto");
 const { clockTest } = require("./helpers/clock");
+const shouldRetryJson = require("./helpers/transfer-flow").loadTransferFlow().shouldRetrySourceJson;
 // Reuse compiled code; every setup still executes it in a fresh VM with its own hook state.
 const scripts = new Map(["chatgpt-fetch-main.js", "chatgpt-json-capture.js"].map(file =>
   [file, new vm.Script(fs.readFileSync(path.join(__dirname, "..", "extension", file), "utf8"), { filename: file })]));
@@ -169,6 +170,38 @@ function jsonStageFixture(stage, responseFor) {
   return { harness, recover() { healthy = true; } };
 }
 
+for (const stage of ["session", "history", "descriptor"]) test("ChatGPT interrupted " + stage + " body stays retryable and a fresh capture keeps the exact full text", async () => {
+  let interrupted;
+  const { harness, recover } = jsonStageFixture(stage, data => {
+    const bytes = Buffer.from(JSON.stringify(data));
+    let first = true;
+    interrupted = new Response(new ReadableStream({
+      pull(controller) {
+        if (first) { first = false; controller.enqueue(bytes.subarray(0, Math.floor(bytes.length / 2))); }
+        else controller.error(new TypeError("PRIVATE_READ_SENTINEL"));
+      }
+    }, { highWaterMark: 0 }), { headers: { "content-type": "application/json" } });
+    return interrupted;
+  });
+  if (stage !== "session") await discover(harness);
+  await assert.rejects(harness.window.__capCaptureChatGptJson(), error => {
+    assert.equal(error.captureFailureReason, "request_failed");
+    assert.equal(error.diagnostics.capture_detail, "network_error");
+    assert.equal(shouldRetryJson(error), true, "The real transfer retry policy must accept this body-network failure.");
+    assert.equal(error.diagnostics.capture_request_stage, stage === "descriptor" ? "attachment_descriptor" : stage);
+    assert.equal(error.diagnostics.capture_http_status, 200);
+    assert.doesNotMatch(error.message + JSON.stringify(error.diagnostics), /PRIVATE_READ_SENTINEL/);
+    return true;
+  });
+  assert.equal(interrupted.body.locked, false);
+  assert.equal(harness.navigationListeners(), 0);
+  assert.ok(harness.replies.every(reply => !reply.data && !reply.pastedTexts));
+  assert.doesNotMatch(JSON.stringify(harness.replies), /PRIVATE_READ_SENTINEL|TEST_ONLY|SIGNED_URL_SENTINEL/);
+  recover();
+  assert.equal((await harness.window.__capCaptureChatGptJson()).text,
+    "ChatGPT conversation:\n\nUser: Original pasted document\n\nAssistant: Selected answer");
+});
+
 for (const stage of ["session", "history", "descriptor"]) {
   // All three stages use readJson. Keep its header matrix once, with one
   // oversized streamed response per other stage to protect their wiring.
@@ -185,6 +218,7 @@ for (const stage of ["session", "history", "descriptor"]) {
     if (stage !== "session") await discover(harness);
     await assert.rejects(harness.window.__capCaptureChatGptJson(), error => {
       assert.equal(error.captureFailureReason, "incomplete");
+      assert.equal(shouldRetryJson(error), false, "A raw-size rejection is not a body-network failure.");
       return true;
     });
     assert.equal(streamed.stats.cancelled, 1);
@@ -210,7 +244,11 @@ test("ChatGPT rejects corrupt history text before draining its tail and permits 
     return streamed.response;
   });
   await discover(harness);
-  await assert.rejects(harness.window.__capCaptureChatGptJson(), error => error.captureFailureReason === "incomplete");
+  await assert.rejects(harness.window.__capCaptureChatGptJson(), error => {
+    assert.equal(error.captureFailureReason, "incomplete");
+    assert.equal(shouldRetryJson(error), false, "Invalid UTF-8 must not become a retryable network error.");
+    return true;
+  });
   assert.equal(streamed.stats.bytes, firstSize);
   assert.equal(streamed.stats.cancelled, 1);
   assert.equal(streamed.response.body.locked, false);
@@ -220,7 +258,11 @@ test("ChatGPT rejects corrupt history text before draining its tail and permits 
   assert.equal((await harness.window.__capCaptureChatGptJson()).messageTurnCount, 2);
   const malformed = setup(fixture(), 200, { body: '{PRIVATE_SENTINEL' });
   await discover(malformed);
-  await assert.rejects(malformed.window.__capCaptureChatGptJson(), /JSON capture failed/);
+  await assert.rejects(malformed.window.__capCaptureChatGptJson(), error => {
+    assert.equal(error.diagnostics.capture_detail, "invalid_json");
+    assert.equal(shouldRetryJson(error), false);
+    return true;
+  });
   assert.doesNotMatch(JSON.stringify(malformed.replies), /PRIVATE_SENTINEL|TEST_ONLY/);
 });
 
@@ -661,7 +703,7 @@ test("ChatGPT replaces the previous hook without losing observed authentication"
   old.version = 8;
   harness.reinstall();
   assert.notEqual(harness.window.__capChatGptFetchState, old);
-  assert.equal(harness.window.__capChatGptFetchState.version, 15);
+  assert.equal(harness.window.__capChatGptFetchState.version, 16);
   assert.equal(harness.listeners(), 1);
   assert.equal((await harness.window.__capCaptureChatGptJson()).text,
     "ChatGPT conversation:\n\nUser: Original pasted document\n\nAssistant: Selected answer");

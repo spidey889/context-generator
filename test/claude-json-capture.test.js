@@ -5,6 +5,7 @@ const vm = require("node:vm");
 const test = require("node:test");
 const { webcrypto, createHash } = require("node:crypto");
 const { clockTest } = require("./helpers/clock");
+const shouldRetryJson = require("./helpers/transfer-flow").loadTransferFlow().shouldRetrySourceJson;
 const scripts = new Map(["claude-fetch-main.js", "claude-json-capture.js"].map(file =>
   [file, new vm.Script(fs.readFileSync(path.join(__dirname, "..", "extension", file), "utf8"), { filename: file })]));
 
@@ -141,6 +142,37 @@ function streamedResponse(chunks, headers = {}, cancelError = false) {
   return { response, stats };
 }
 
+test("Claude interrupted history body stays retryable and a fresh capture keeps the exact full text", async () => {
+  const bytes = Buffer.from(JSON.stringify(fixture()));
+  const replies = [];
+  let first = true, healthy = false;
+  const interrupted = new Response(new ReadableStream({
+    pull(controller) {
+      if (first) { first = false; controller.enqueue(bytes.subarray(0, Math.floor(bytes.length / 2))); }
+      else controller.error(new TypeError("PRIVATE_READ_SENTINEL"));
+    }
+  }, { highWaterMark: 0 }), { headers: { "content-type": "application/json" } });
+  const harness = setup(fixture(), { resources: [endpoint],
+    beforeMessage: reply => { if (reply.type === "response") replies.push(reply); },
+    fetchImpl: () => healthy ? new Response(bytes, { headers: { "content-type": "application/json" } }) : interrupted });
+  await assert.rejects(harness.window.__capCaptureClaudeJson(), error => {
+    assert.equal(error.captureFailureReason, "request_failed");
+    assert.equal(error.diagnostics.capture_detail, "network_error");
+    assert.equal(shouldRetryJson(error), true, "The real transfer retry policy must accept this body-network failure.");
+    assert.equal(error.diagnostics.capture_request_stage, "history");
+    assert.equal(error.diagnostics.capture_http_status, 200);
+    assert.doesNotMatch(error.message + JSON.stringify(error.diagnostics), /PRIVATE_READ_SENTINEL/);
+    return true;
+  });
+  assert.equal(interrupted.body.locked, false);
+  assert.equal(harness.stats().navigationListeners + harness.stats().popListeners, 0);
+  assert.ok(replies.every(reply => !reply.data));
+  assert.doesNotMatch(JSON.stringify(replies), /PRIVATE_READ_SENTINEL/);
+  healthy = true;
+  assert.equal((await harness.window.__capCaptureClaudeJson()).text,
+    "Claude conversation:\n\nUser: Question\n\nAssistant: Private reasoning\n\nSelected answer");
+});
+
 for (const length of [undefined, "1", "6000001"]) test(`Claude bounds raw history before decoding with Content-Length ${length ?? "absent"}`, async () => {
   // A tiny active branch can coexist with large metadata. Transcript bounds
   // cannot protect the raw read: reject excess transport without clipping it.
@@ -152,6 +184,7 @@ for (const length of [undefined, "1", "6000001"]) test(`Claude bounds raw histor
     ? new Response(JSON.stringify(fixture()), { headers: { "content-type": "application/json" } }) : streamed.response });
   await assert.rejects(harness.window.__capCaptureClaudeJson(), error => {
     assert.equal(error.captureFailureReason, "incomplete");
+    assert.equal(shouldRetryJson(error), false, "A raw-size rejection must not get a JSON retry.");
     assert.doesNotMatch(error.message, /PRIVATE_CANCEL_SENTINEL/);
     return true;
   });
@@ -172,6 +205,7 @@ test("Claude rejects invalid UTF-8 before it can silently change captured text o
   const harness = setup(fixture(), { resources: [endpoint], fetchImpl: async () => streamed.response });
   await assert.rejects(harness.window.__capCaptureClaudeJson(), error => {
     assert.equal(error.captureFailureReason, "incomplete");
+    assert.equal(shouldRetryJson(error), false, "Invalid UTF-8 must not become a retryable network error.");
     assert.doesNotMatch(error.message, /decoder|encoded data|UTF-8|Question/);
     return true;
   });

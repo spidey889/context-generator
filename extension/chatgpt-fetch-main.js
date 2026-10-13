@@ -1,5 +1,5 @@
 (() => {
-  const version = 15;
+  const version = 16;
   // HTTP media types ignore casing; parameters do not change the base type.
   const responseMediaType = response => response.headers.get("content-type")?.split(";", 1)[0].trim().toLowerCase();
   // Match MIME metadata by base type, keeping the serializer's paste gate aligned.
@@ -80,7 +80,7 @@
     // repeated descriptors share the allowance with history and original files.
     let bytesRead = 0;
     const readJson = async (response, responseLimit = 6000000) => {
-      let reader;
+      let reader, bodyReadFailed = false;
       try {
         if (controller.signal.aborted || currentChat() !== chat) throw new Error("changed");
         const remaining = Math.min(responseLimit, maxCaptureBytes - bytesRead);
@@ -90,7 +90,12 @@
         const parts = [];
         let responseBytes = 0;
         if (reader) while (true) {
-          const { done, value } = await reader.read();
+          // Retry a rejected network read, not decoder/JSON/size failures.
+          const { done, value } = await reader.read().catch(() => {
+            if (controller.signal.aborted || currentChat() !== chat) throw new Error("changed");
+            bodyReadFailed = true;
+            throw new Error("network");
+          });
           if (controller.signal.aborted || currentChat() !== chat) throw new Error("changed");
           if (done) break;
           bytesRead += value.byteLength;
@@ -107,7 +112,7 @@
         if (error?.name === "SyntaxError") reply.captureDetail = "invalid_json";
         if (reader) await reader.cancel().catch(() => {});
         else await discardResponse(response);
-        throw new Error("partial");
+        throw new Error(bodyReadFailed ? "network" : "partial");
       } finally {
         reader?.releaseLock();
       }
@@ -277,7 +282,10 @@
           const textResponse = await fetchJson(download.href, { redirect: "error" });
           reply.status = textResponse.status;
           pastedTexts[file.id] = await readPaste(textResponse, file.size);
-        } catch { throw new Error("paste"); }
+        } catch (error) {
+          // Preserve readJson's transport marker; file validation stays closed.
+          throw new Error(error?.message === "network" ? "network" : "paste");
+        }
       }
       if (controller.signal.aborted || currentChat() !== chat) throw new Error("changed");
       reply.pastedTexts = pastedTexts;

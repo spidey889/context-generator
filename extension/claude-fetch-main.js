@@ -1,5 +1,5 @@
 (() => {
-  const version = 10;
+  const version = 11;
   // HTTP media types ignore casing; parameters do not change the base type.
   const responseMediaType = response => response.headers.get("content-type")?.split(";", 1)[0].trim().toLowerCase();
   const maxHistoryBytes = 6000000;
@@ -95,7 +95,7 @@
         await response.body?.cancel().catch(() => {});
         throw new Error("transport");
       }
-      let data, reader;
+      let data, reader, bodyReadFailed = false;
       try {
         if (Number(response.headers.get("content-length")) > maxHistoryBytes) throw new Error("size");
         // Transcript limits apply after parsing. Bound the owned raw stream too,
@@ -105,7 +105,12 @@
         const parts = [];
         let size = 0;
         if (reader) while (true) {
-          const { done, value } = await reader.read();
+          // Only a rejected native read qualifies for the existing JSON retry.
+          const { done, value } = await reader.read().catch(() => {
+            if (controller.signal.aborted || location.pathname !== `/chat/${chat}`) throw new Error("changed");
+            bodyReadFailed = true;
+            throw new Error("network");
+          });
           if (controller.signal.aborted || location.pathname !== `/chat/${chat}`) throw new Error("changed");
           if (done) break;
           size += value.byteLength;
@@ -118,7 +123,7 @@
         parts.push(decoder.decode());
         data = JSON.parse(parts.join(""));
       } catch (error) {
-        captureFailureReason = "incomplete";
+        captureFailureReason = bodyReadFailed ? "request_failed" : "incomplete";
         if (reader) await reader.cancel().catch(() => {});
         else await response.body?.cancel().catch(() => {});
         throw error;

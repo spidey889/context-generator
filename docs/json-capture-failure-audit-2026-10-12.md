@@ -6,13 +6,13 @@ Updated: **2026-10-13, Asia/Kolkata**. Current source inspected: `b31d7286007bcd
 
 “JSON failed” here means the extension could not finish native-history capture. It does **not** necessarily mean `JSON.parse` failed: authentication, routing, transport, branch selection, files and size checks can stop capture too.
 
-This is an investigation and work queue, not a runtime change. [LOGIC.md](../LOGIC.md#capture) owns current behavior; [CHANGELOG.md](../CHANGELOG.md) owns implementation history. Source fixes do not establish which build an installed extension runs.
+This is an investigation and work queue. Implementation follow-up on `codex/json-capture-failures`: interrupted ChatGPT/Claude body reads now use the existing fresh JSON retry; this is a source fix, not an installed-client release. [LOGIC.md](../LOGIC.md#capture) owns current behavior; [CHANGELOG.md](../CHANGELOG.md) owns implementation history. Source fixes do not establish which build an installed extension runs.
 
 ## Read this first
 
 | Finding | Assessment | Next action |
 | --- | --- | --- |
-| A connection drops **after** ChatGPT/Claude response headers arrive. | **Confirmed missed recovery:** the body-read error becomes `incomplete` / `partial_response`, which skips the existing one JSON retry. A healthy fresh read succeeds in the controlled reproduction. | First small fix to consider: distinguish a failed network read from invalid content. |
+| A connection drops **after** ChatGPT/Claude response headers arrive. | **Fixed in source:** a rejected native body read is `request_failed` / `network_error` and qualifies for the existing one fresh retry. Invalid bytes/JSON/limits still reject. | Completed; reload/distribute the updated extension. |
 | An unused Grok/DeepSeek reply has broken structural metadata. | **Confirmed unnecessary rejection in controlled inputs:** valid selected history can fail because validation examines unused nodes. Live frequency is unknown. | Limit validation to what proves the selected path, while retaining checks for ambiguity and conflicting boundaries. |
 | Older telemetry records size, incomplete and unavailable failures without the underlying detail. | **Recorded failures, unresolved causes.** They cannot identify a particular validator or justify removing it. | Use fresh, specific capture diagnostics before tuning budgets/auth/deadlines. |
 | The actual selected text, transport or supported file is incomplete, wrong or too large. | **Keep the rejection.** Accepting the readable prefix would hide lost context. | Explain the specific limit/cause; do not clip or guess. |
@@ -32,7 +32,7 @@ These protect the conversation or the user's session. Keep them even when reduci
 | --- | --- | --- |
 | The source chat, selected Grok `rid`, account or session changes during capture. | The result could belong to another conversation or user. | Cancel the pinned attempt, including navigation away and back. Do not recover by reading the newly opened chat. |
 | The native endpoint denies access or rate limits the read. | HTTP 401/403/429 is not complete history. | Keep access checks. ChatGPT already has one internal 401 auth recovery; the outer temporary-error retry does not loop on these statuses. |
-| Transport is explicitly partial or invalid. | HTTP 206, `Content-Range`, invalid JSON/UTF-8 or a rejected response type cannot prove an intact response. | Discard the body/prefix. A connection interruption may justify a fresh read, as section 2 explains; invalid decoded content does not automatically qualify. |
+| Transport is explicitly partial or invalid. | HTTP 206, `Content-Range`, invalid JSON/UTF-8 or a rejected response type cannot prove an intact response. | Discard the body/prefix. A connection interruption now qualifies for the existing one fresh read; invalid decoded content does not automatically qualify. |
 | Selected history has a missing ancestor, cycle, wrong identity, ambiguous selected node, remaining page or explicit truncation. | A readable suffix is not the whole selected history. | Validate the selected chain and authoritative history/page completeness. An explicit count showing omitted messages must still fail. |
 | A recognized supported pasted card/text file is unavailable, unfinished or byte-inconsistent. | Silently skipping it can remove the main user prompt. | Keep parse status, signed-address, file identity and exact original-byte checks. Temporary file HTTP failures can already qualify for the one outer retry. |
 | No supported conversation text remains. | There is no verified text to transfer. | Do not substitute broad page text, suggestions, drafts or nested tool payloads. Empty pending assistant content can be skipped when earlier supported text exists. |
@@ -55,26 +55,7 @@ Sources: [ChatGPT MAIN](../extension/chatgpt-fetch-main.js), [Claude MAIN](../ex
 
 ## 2. Avoidable failures: valid JSON capture should be recoverable
 
-### A. A mid-body connection interruption skips the JSON retry
-
-**Status: confirmed code behavior, reproduced for ChatGPT and Claude. Live occurrence/count unknown.**
-
-Example: the history request returns HTTP 200 and begins downloading, then the connection drops. The current read must fail; the unnecessary part is treating it as rejected content and immediately giving up on JSON.
-
-- ChatGPT `readJson` catches body-reading and decoding/parsing failures together, then throws `partial`. The bridge reports `incomplete` / `partial_response`.
-- Claude's body-reader catch similarly sets `captureFailureReason = "incomplete"`; a stream rejection gets `partial_response`.
-- `shouldRetrySourceJson` excludes those errors. The same native request failing before a response instead becomes a retryable network error.
-- Controlled probes used an HTTP 200 stream that returned one chunk, then rejected its next read. Both adapters skipped retry eligibility. Removing the simulated interruption allowed an exact fresh capture with the same harness/chat.
-
-**Small fix direction:** classify a rejection from `reader.read()` separately from decoder/JSON/size/structural rejection. Let an actual temporary network interruption use the existing one serialized fresh JSON retry, with the same source guard and transfer deadline. Never expose raw exception text.
-
-Do **not** make every `incomplete` error retryable: invalid UTF-8, malformed JSON, oversized reads and missing selected history still need their own rejection.
-
-Acceptance: one interrupted body followed by a healthy body stays on JSON without DOM or partial submission; persistent interruption stops after the existing retry allowance; invalid content and source/account changes do not acquire a new retry path.
-
-Source: [chatgpt-fetch-main.js](../extension/chatgpt-fetch-main.js), `readJson`; [claude-fetch-main.js](../extension/claude-fetch-main.js), body-reader catch; [platform-content.js](../extension/platform-content.js), `shouldRetrySourceJson` and `takePickerJsonCapture`.
-
-### B. Unused replies can still invalidate an intact selected path
+### A. Unused replies can still invalidate an intact selected path
 
 **Status: confirmed code behavior, reproduced. Live frequency unknown; do not assume these inputs are common.**
 
@@ -91,7 +72,7 @@ The baseline selected transcript passed exactly before adding the unused node. T
 
 Acceptance: unchanged selected text and turn order survive an unrelated bad node; moving the same missing parent onto the selected path still rejects; no alternate text or extra body/file requests enter capture.
 
-Source: [network-json-data.js](../extension/network-json-data.js), `chain`, `grokBranch`, `deepseekBranch`. Investigate this after A unless fresh `invalid_branch`/`parent_missing` evidence makes it more urgent.
+Source: [network-json-data.js](../extension/network-json-data.js), `chain`, `grokBranch`, `deepseekBranch`. Prioritize this when fresh `invalid_branch`/`parent_missing` evidence supports real user impact.
 
 ## 3. High-cost failures and correctness risks
 
@@ -99,7 +80,7 @@ Source: [network-json-data.js](../extension/network-json-data.js), `chain`, `gro
 
 The same label can mean very different work:
 
-- `incomplete` can mean missing selected history, malformed text, invalid bytes, a body-network interruption or a raw-byte ceiling.
+- `incomplete` can mean missing selected history, malformed text, invalid bytes or a raw-byte ceiling. Older builds also misclassified body-network interruptions this way.
 - `unavailable` can mean hook readiness, missing native routing/auth observation or access denial.
 - `size_limit`/`attachment_size_limit` must be read with the stage; they are not interchangeable with final transcript size.
 
@@ -111,7 +92,7 @@ Future work should distinguish raw-response, file and final-transcript exhaustio
 
 Historical size fallbacks reached DOM captures of **50,691**, **64,947**, **128,367** and **205,041 characters**. This shows that JSON resource rejection and DOM transcript size were different; it does not prove the DOM transcript was complete or equal to the JSON-selected text.
 
-Current recognized hard-size failures stop the attempt instead of starting the former expensive sweep. Preserve that behavior. For non-size failures, Claude/Gemini/Grok/DeepSeek can still use one normal DOM recovery after eligible JSON retry; ordinary ChatGPT failures remain terminal except its malformed-text and active-reply exceptions. Fixing A can avoid both terminal ChatGPT failure and unnecessary Claude scrolling.
+Current recognized hard-size failures stop the attempt instead of starting the former expensive sweep. Preserve that behavior. For non-size failures, Claude/Gemini/Grok/DeepSeek can still use one normal DOM recovery after eligible JSON retry; ordinary ChatGPT failures remain terminal except its malformed-text and active-reply exceptions. The interrupted-body fix can avoid both terminal ChatGPT failure and unnecessary Claude scrolling.
 
 An active-reply DOM snapshot contains only verified rendered text and does not sweep earlier virtualized history. It is an intentional recovery boundary, not independent proof that every earlier turn was present.
 
@@ -153,11 +134,12 @@ Gemini's newest unmarked candidate uses native first-candidate order; older sele
 
 These are already supported or intentional bypasses. Keep them out of the open bug queue:
 
+- **A ChatGPT/Claude native JSON body read rejects after headers arrive.** The current source discards the partial response and preserves a retryable network cause, including ChatGPT session and paste-descriptor reads. One existing serialized fresh retry starts from the beginning. Four reader regressions failed before this fix and pass afterward; invalid content, limits and cancellation retain their rejection.
 - **A reply is still generating or was stopped.** Capture supported current own text without waiting. Generation markers alone are not missing-history proof.
 - **An unknown optional Gemini metadata block accompanies verified user text.** Exclude unknown metadata; keep the text. A blank prompt remains a separate case.
 - **JSON MIME casing/parameters and ChatGPT pasted-text MIME parameters.** Current supported base-type matching handles them.
 - **Shuffled Grok node/body arrays.** Parent links determine chronology.
-- **Malformed unused Claude IDs; an unused Grok reply merely lacking its parent field.** The recent narrow fixes already handle these. Section 2B describes different remaining checks.
+- **Malformed unused Claude IDs; an unused Grok reply merely lacking its parent field.** The recent narrow fixes already handle these. Section 2A describes different remaining checks.
 - **Different complete Claude pasted bodies share an attachment ID.** Preserve each distinct body; only exact repeats are deduplicated within the turn.
 - **DeepSeek `FILE.files` is one object instead of a list.** Current descriptor discovery and serialization normalize both.
 - **Picker JSON failed temporarily before selection.** Selection can already make one serialized fresh read for recognized temporary errors.
@@ -170,8 +152,8 @@ See [CHANGELOG.md](../CHANGELOG.md) for the completed changes. Source handling s
 
 ## 6. Practical work order
 
-1. **Repair the mid-body network classification.** It affects an ordinary transport failure and can reuse the existing retry path. Prove healthy retry, bounded persistent failure and retained content/source safeguards.
-2. **Narrow unused-node rejection where selection remains provable.** Reuse the two controlled cases in section 2B; retain failures on the selected path. Move this up only when real diagnostics support it.
+1. **Verify the interrupted-body fix in the updated client when this failure recurs.** The source fix and four regressions are complete; a Git push does not update installed scripts.
+2. **Narrow unused-node rejection where selection remains provable.** Reuse the two controlled cases in section 2A; retain failures on the selected path. Move this up only when real diagnostics support it.
 3. **Use fresh detail to rank auth/routing, resource and timeout failures.** Tune the observed bottleneck rather than replaying the historical broad labels. Keep raw/file/transcript limits distinguishable.
 4. **Check the installed build when source-supported cases recur.** Compare relevant hook/script build evidence; a manifest version or Git push alone does not prove client parity.
 
@@ -183,6 +165,8 @@ Defer speculative malformed-count/array-metadata permutations and broad private-
 
 ## Verification and scope of this update
 
+The first three items below describe the original report update before the interrupted-body implementation; the implementation verification is listed separately.
+
 - Traced current MAIN readers, serializers, bridges, outer retry and fallback handling, and recent capture changes.
 - **Six controlled probes passed:** ChatGPT/Claude interrupted body reads and healthy fresh reads; Grok/DeepSeek intact selected paths rejected by unused nodes; ChatGPT/Claude raw-limit classification. Probes reused the real source and existing harnesses in memory; no runtime/test/fixture files were changed.
 - The existing four-file JSON capture/transfer suite completed successfully, **222 tests, exit code 0**:
@@ -191,5 +175,5 @@ Defer speculative malformed-count/array-metadata permutations and broad private-
   node --test --test-timeout=30000 --test-reporter=dot test/chatgpt-json-capture.test.js test/claude-json-capture.test.js test/network-json-capture.test.js test/json-transfer-fallback.test.js
   ```
 
-- No fresh database query, live-account native capture or installed-build inspection was performed. Historical counts and native sample descriptions remain explicitly dated. Neither new reproduced issue has a measured production frequency.
-- Runtime fixes, deployment and extension publication are outside this documentation update. Keep completed items in the changelog, keep this work queue current, and require exact complete selected-text evidence before declaring a speed fix successful.
+- No fresh database query, live-account native capture or installed-build inspection was performed. Historical counts and native sample descriptions remain explicitly dated. Neither reproduced issue has a measured production frequency. The interrupted-body issue is now fixed in source; unused-node rejection remains open.
+- Implementation follow-up: all **159 focused ChatGPT/Claude capture and transfer-fallback tests passed** after the interrupted-body fix, including the four new regressions. Command: `node --test --test-timeout=30000 --test-reporter=spec test/chatgpt-json-capture.test.js test/claude-json-capture.test.js test/json-transfer-fallback.test.js`. Extension publication/deployment are separate. Keep completed items in the changelog and require exact complete selected-text evidence before declaring a speed fix successful.
