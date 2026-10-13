@@ -33,18 +33,15 @@ test("ChatGPT structured turns preserve quoted role labels and exact source whit
   assert.equal(capture.text, `ChatGPT conversation:\n\nUser: ${text}\n\nAssistant: Selected answer`);
 });
 
-test("ChatGPT rejects malformed plain-text parts and marks only that case for DOM recovery", async () => {
+test("ChatGPT keeps readable JSON text and flags malformed plain-text parts", async () => {
   for (const part of [{ text: "PRIVATE_DETAILS_SENTINEL" }, 42, null]) {
     const data = fixture();
     data.mapping.question.message.content.parts = ["Supported text", part];
     const harness = setup(data); await discover(harness);
-    await assert.rejects(harness.window.__capCaptureChatGptJson(), error => {
-      assert.equal(error.captureFailureReason, "incomplete");
-      assert.equal(error.diagnostics.capture_detail, "text_invalid");
-      assert.equal(error.allowDomFallback, true);
-      assert.doesNotMatch(error.message, /PRIVATE_DETAILS_SENTINEL/);
-      return true;
-    });
+    const capture = await harness.window.__capCaptureChatGptJson();
+    assert.equal(capture.text, "ChatGPT conversation:\n\nUser: Supported text\n\nAssistant: Selected answer");
+    assert.equal(capture.captureWarning, "text_invalid");
+    assert.doesNotMatch(JSON.stringify(capture), /PRIVATE_DETAILS_SENTINEL/);
   }
   const data = fixture();
   data.mapping.question.message.content.parts = null;
@@ -54,6 +51,8 @@ test("ChatGPT rejects malformed plain-text parts and marks only that case for DO
     assert.equal(error.allowDomFallback, undefined);
     return true;
   });
+  const clean = setup(); await discover(clean);
+  assert.equal((await clean.window.__capCaptureChatGptJson()).captureWarning, undefined);
 });
 
 function setup(data = fixture(), status = 200, { headers = {}, body, fetchImpl, runtime, schedule = setTimeout, beforeMessage } = {}) {

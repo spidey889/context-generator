@@ -2338,6 +2338,10 @@ async function run() {
     if (JSON_SOURCE === "gemini") assert.equal(jsonRequestsBeforeTransfer, 0, "Gemini bootstrap capture must not require earlier native RPC traffic.");
     const extensionContextId = sourceSession.getExtensionContextId();
     assert.ok(extensionContextId, "The smoke source must expose its installed extension context.");
+    // Route restoration and removed fixture turns can leave placement queued.
+    // Wait for its owner before opening: a busy frame otherwise dismisses the
+    // picker as belonging to the previous route and cancels JSON prefetch.
+    if (JSON_CAPTURE_SMOKE) await waitFor(() => sourceSession.evaluate("window.__capSmokeSourceRouteReady()", extensionContextId), "settled source route before orb capture");
     // Both windows belong to this disposable profile. A different current
     // window must not steal preparation tabs from the source's window.
     if (!JSON_CAPTURE_SMOKE) {

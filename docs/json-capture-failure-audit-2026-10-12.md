@@ -1,12 +1,12 @@
 # JSON capture failures: what to keep and what to remove
 
-Updated: **2026-10-13, Asia/Kolkata**. Current capture source inspected: `codex/json-capture-failures`, including the interrupted-body retry and DeepSeek late-auth follow-ups. Original audit: 2026-10-12, source `1cf75964fbe710ecaca7e2c661149ad6a154dd7b`.
+Updated: **2026-10-14, Asia/Kolkata**. Current capture source inspected: `codex/json-capture-failures`, integrating master through `0f19996` with the interrupted-body retry and DeepSeek late-auth follow-ups. Original audit: 2026-10-12, source `1cf75964fbe710ecaca7e2c661149ad6a154dd7b`.
 
 **Goal: keep complete, supported conversations on fast JSON capture whenever possible.** Remove unnecessary rejection and missed recovery before spending time on faster DOM scrolling. A faster capture is useful only if it preserves the selected conversation.
 
 “JSON failed” here means the extension could not finish native-history capture. It does **not** necessarily mean `JSON.parse` failed: authentication, routing, transport, branch selection, files and size checks can stop capture too.
 
-This is an investigation and work queue. Implementation follow-up on `codex/json-capture-failures`: interrupted ChatGPT/Claude body reads now use the existing fresh JSON retry; this is a source fix, not an installed-client release. [LOGIC.md](../LOGIC.md#capture) owns current behavior; [CHANGELOG.md](../CHANGELOG.md) owns implementation history. Source fixes do not establish which build an installed extension runs.
+This is an investigation and work queue. The combined source includes interrupted-body retry, bounded DeepSeek auth observation, selected-path handling for broken unused Grok/DeepSeek replies, and explicitly partial ChatGPT text delivery. These are source changes; installed-client parity remains separate. [LOGIC.md](../LOGIC.md#capture) owns current behavior; [CHANGELOG.md](../CHANGELOG.md) owns implementation history. Source fixes do not establish which build an installed extension runs.
 
 ## Completed fixes and checked behavior
 
@@ -17,18 +17,19 @@ This is an investigation and work queue. Implementation follow-up on `codex/json
 | DeepSeek late login-header observation | **Fixed in source:** allow up to 1.5 seconds for normal native auth to arrive; ready sessions skip the wait. Missing credentials still reject. | Three new regressions failed before the fix and pass afterward; all 114 focused tests passed. The three historical unavailable captures remain undiagnosed; see section 4. |
 | DeepSeek incomplete capture | **Pending: needs a fresh failure with the exact cause.** Investigation found no unnecessary rejection; keep completeness guards. | Four recorded cases have no specific cause markers. Seven targeted checks passed; see section 4. |
 | JSON size-limit tuning | **Deferred: needs a real failure example.** Keep the current raw-download, file and final-transcript limits. | Historical size labels do not identify the boundary or prove metadata caused rejection. ChatGPT already has a larger allowance for unused reply branches. See section 4. |
-| Broken metadata on an unused reply | **Deferred, not an active fix priority.** Only reproduced after deliberately corrupting unused reply data. | No failing native response or real-user incident has confirmed this cause. See section 4. |
+| Broken metadata on an unused Grok/DeepSeek reply | **Fixed in source on master.** Ignore broken unused nodes while validating the complete selected path. | Controlled capture/transfer and Brave checks passed; live frequency remains unknown. See section 4 and the changelog. |
+| Unexpected entries in ChatGPT own-text parts | **Explicitly partial JSON delivery on master.** Keep known strings, skip unexpected entries and record `failed` / `capture_failed`; no retry or scraping. | Capture, picker, terminal-outcome and isolated browser/relay/database checks passed. See section 5 and the changelog. |
 
-The pushed fix remains on the worktree branch. These statuses do not establish a production merge or extension-store release. Earlier completed compatibility fixes are listed in section 5 and the changelog.
+The retry/auth follow-ups are being integrated with the newer master fixes on the worktree branch. These statuses do not establish an extension-store release. Earlier completed compatibility fixes are listed in section 5 and the changelog.
 
 ## Read this first
 
 | Finding | Assessment | Next action |
 | --- | --- | --- |
 | A connection drops **after** ChatGPT/Claude response headers arrive. | **Fixed in source:** a rejected native body read is `request_failed` / `network_error` and qualifies for the existing one fresh retry. Invalid bytes/JSON/limits still reject. | Completed; reload/distribute the updated extension. |
-| An unused Grok/DeepSeek reply has broken structural metadata. | **Deferred synthetic case:** damaged unused nodes can cause rejection; normal regeneration checks and a user trial succeeded. | Await a real failing native response before prioritizing a change. |
+| An unused Grok/DeepSeek reply has broken structural metadata. | **Fixed in source:** intact selected paths survive damaged unused nodes; selected ambiguity and missing parents still reject. | Verify the updated client when this case recurs; native frequency is unconfirmed. |
 | Older telemetry records size, incomplete and unavailable failures without the underlying detail. | **Recorded failures, unresolved causes.** They cannot identify a particular validator or justify removing it. | Use fresh, specific capture diagnostics before tuning budgets/auth/deadlines. |
-| The actual selected text, transport or supported file is incomplete, wrong or too large. | **Keep the rejection.** Accepting the readable prefix would hide lost context. | Explain the specific limit/cause; do not clip or guess. |
+| Selected history, transport or a supported file is incomplete, wrong or too large. | **Keep the rejection.** A readable prefix does not establish complete history. | Explain the specific cause; do not clip or guess. ChatGPT malformed own-text entries have an explicit partial-delivery policy, with a failed outcome. |
 
 Evidence labels used below:
 
@@ -70,7 +71,7 @@ Sources: [ChatGPT MAIN](../extension/chatgpt-fetch-main.js), [Claude MAIN](../ex
 
 Interrupted-body retry classification and the reproduced DeepSeek late-auth timing gap are fixed in source. Use fresh capture diagnostics to select the next useful implementation.
 
-Normal regeneration is working behavior. Size-limit tuning and the corrupted-unused-reply case are retained under section 4 pending real failure evidence, outside the active fix queue.
+Normal regeneration already works. Master also fixes controlled broken-unused-reply rejection without weakening selected-history checks. No further common unnecessary rejection is confirmed by this audit. DeepSeek historical incomplete/unavailable incidents and size-limit tuning require fresh evidence before another implementation.
 
 ## 3. High-cost failures and correctness risks
 
@@ -90,7 +91,7 @@ Future work should distinguish raw-response, file and final-transcript exhaustio
 
 Historical size fallbacks reached DOM captures of **50,691**, **64,947**, **128,367** and **205,041 characters**. This shows that JSON resource rejection and DOM transcript size were different; it does not prove the DOM transcript was complete or equal to the JSON-selected text.
 
-Current recognized hard-size failures stop the attempt instead of starting the former expensive sweep. Preserve that behavior. For non-size failures, Claude/Gemini/Grok/DeepSeek can still use one normal DOM recovery after eligible JSON retry; ordinary ChatGPT failures remain terminal except its malformed-text and active-reply exceptions. The interrupted-body fix can avoid both terminal ChatGPT failure and unnecessary Claude scrolling.
+Current recognized hard-size failures stop the attempt instead of starting the former expensive sweep. Preserve that behavior. For non-size failures, Claude/Gemini/Grok/DeepSeek can still use one normal DOM recovery after eligible JSON retry; ordinary ChatGPT failures remain terminal except active-reply recovery. Unexpected own-text entries instead retain readable JSON with an explicit failed transfer outcome, without scraping. The interrupted-body fix can avoid both terminal ChatGPT failure and unnecessary Claude scrolling.
 
 An active-reply DOM snapshot contains only verified rendered text and does not sweep earlier virtualized history. It is an intentional recovery boundary, not independent proof that every earlier turn was present.
 
@@ -142,7 +143,7 @@ The initial investigation used three controlled checks with the actual MAIN/brid
 
 Four existing focused tests passed: retained observations across hook replacement, missing-hook recovery, cancellation on changed credentials, and the shared temporary-error retry policy. This verifies current mechanisms, not the causes of old incidents. MAIN is normally installed at `document_start`; missing-header rejection must not be presented as the normal signed-in flow.
 
-**Implementation follow-up: late-auth timing is fixed; historical causes remain unknown.** A focused reproduction showed that capture rejected even when a normal authenticated DeepSeek request arrived 100 ms later. MAIN now waits up to 1.5 seconds only when authorization is missing, resumes immediately when native same-origin fetch/XHR supplies it, and keeps the existing capture deadline. Already-ready sessions start immediately. Missing auth still reports `unavailable` / `auth_missing` without issuing a history request; navigation and hook replacement cancel and clean the wait. No login/storage probe or permission bypass is added. Three new regressions failed before this fix and passed afterward, including exact recovered text, timeout, cancellation, clean subsequent capture and secret exclusion; all 114 focused tests passed. DeepSeek MAIN/bridge readiness advances to v17. This controlled timing fix does not establish the cause of the three historical incidents.
+**Implementation follow-up: late-auth timing is fixed; historical causes remain unknown.** A focused reproduction showed that capture rejected even when a normal authenticated DeepSeek request arrived 100 ms later. MAIN now waits up to 1.5 seconds only when authorization is missing, resumes immediately when native same-origin fetch/XHR supplies it, and keeps the existing capture deadline. Already-ready sessions start immediately. Missing auth still reports `unavailable` / `auth_missing` without issuing a history request; navigation and hook replacement cancel and clean the wait. No login/storage probe or permission bypass is added. Three new regressions failed before this fix and passed afterward, including exact recovered text, timeout, cancellation, clean subsequent capture and secret exclusion; all 114 focused tests passed. The initial late-auth fix advanced DeepSeek readiness to v17. Integration advances both MAIN and bridge to v18 because master independently used v17 for selected-path handling; open tabs must replace either old closure. This controlled timing fix does not establish the cause of the three historical incidents.
 
 Sources: [network MAIN](../extension/network-fetch-main.js), [network bridge](../extension/network-json-capture.js), [manifest](../extension/manifest.json), [capture tests](../test/network-json-capture.test.js). No database writes, private row exports, live-account capture or installed-script inspection were performed.
 
@@ -170,27 +171,27 @@ Reopen this item only when a real failing capture identifies the platform/build,
 
 Move to the next common failure supported by real diagnostics. Do not raise or remove limits based on the old broad labels.
 
-### Deferred: malformed unused replies
+### Completed in source: malformed unused replies
 
-Follow-up on 2026-10-13: controlled Grok/DeepSeek captures with a regenerated reply kept only the selected new answer, skipped its old alternative and preserved all six selected turns. Grok requested only selected-path bodies. Six existing targeted tests covering reply selection/regeneration passed. The user then reported that regeneration and JSON capture worked; the platform and installed build were not recorded.
+The original October 13 investigation found that normal regenerated Grok/DeepSeek chats captured the selected new answer and all earlier selected turns. A user regeneration trial also passed. Broken-unused-reply rejection was then reproduced only with deliberately damaged fixtures; no native incident established its live frequency.
 
-The failure appeared only after deliberately damaging an unused reply: Grok pointed it to an absent ordinary parent, or DeepSeek omitted its parent field. These inputs still produce `parent_missing` / `invalid_branch`, respectively. This establishes validation behavior, not a demonstrated native incident.
+Master subsequently fixed those controlled cases. Grok validates the selected chain and human roots without rejecting broken parent links on unused assistant replies. DeepSeek selects the explicit current path before validating IDs/parents: invalid or duplicate IDs and missing parents outside that path cannot reject an intact chat. Duplicate selected IDs, missing selected parents, cycles, contradictory completeness/counts and file limits still reject. Only selected files are read.
 
-Keep this case **pending evidence**. Promote it only when a real failing native response proves that the selected history is complete and the unrelated malformed node caused rejection. Preserve selected-path ambiguity, root, identity and completeness safeguards. Selected-answer capture already keeps the chosen new reply; no new selection behavior is needed.
+The Grok and DeepSeek source fixes have focused capture/transfer regressions and isolated Brave evidence. This closes the demonstrated code issue, while its real-user frequency remains unknown. Verify client hook versions before reopening it; new unsupported shapes need actual evidence.
 
-Source: [network-json-data.js](../extension/network-json-data.js), `chain`, `grokBranch`, `deepseekBranch`.
+Sources: [network-json-data.js](../extension/network-json-data.js), `chain`, `grokBranch`, `deepseekBranch`; [CHANGELOG.md](../CHANGELOG.md), the selected-path fixes.
 
 ## 5. Things that should not create new JSON failures
 
 These are already supported or intentional bypasses. Keep them out of the open bug queue:
 
-- **An answer is regenerated and the new answer is selected.** Capture follows selected history and skips unused alternatives. Targeted checks and a user regeneration trial passed; deliberately corrupted unused nodes remain pending native evidence in section 4.
+- **An answer is regenerated and the new answer is selected.** Capture follows selected history and skips unused alternatives. Targeted checks and a user regeneration trial passed; the subsequently reproduced broken-unused-node cases are now fixed in source, as recorded in section 4.
 - **A ChatGPT/Claude native JSON body read rejects after headers arrive.** The current source discards the partial response and preserves a retryable network cause, including ChatGPT session and paste-descriptor reads. One existing serialized fresh retry starts from the beginning. Four reader regressions failed before this fix and pass afterward; invalid content, limits and cancellation retain their rejection.
 - **A reply is still generating or was stopped.** Capture supported current own text without waiting. Generation markers alone are not missing-history proof.
 - **An unknown optional Gemini metadata block accompanies verified user text.** Exclude unknown metadata; keep the text. A blank prompt remains a separate case.
 - **JSON MIME casing/parameters and ChatGPT pasted-text MIME parameters.** Current supported base-type matching handles them.
 - **Shuffled Grok node/body arrays.** Parent links determine chronology.
-- **Malformed unused Claude IDs; an unused Grok reply merely lacking its parent field.** The recent narrow fixes already handle these. Section 4 retains corrupted unused nodes pending native evidence.
+- **Malformed unused Claude/DeepSeek messages and unused Grok replies with broken parent data.** Selected-path handling preserves the intact chosen conversation and retains selected-message and conflicting-root checks.
 - **Different complete Claude pasted bodies share an attachment ID.** Preserve each distinct body; only exact repeats are deduplicated within the turn.
 - **DeepSeek `FILE.files` is one object instead of a list.** Current descriptor discovery and serialization normalize both.
 - **DeepSeek native login information arrives just after capture starts.** When initially missing, capture allows up to 1.5 seconds for observed same-origin auth within the existing deadline. Ready sessions do not wait; genuinely missing credentials still reject.
@@ -198,14 +199,14 @@ These are already supported or intentional bypasses. Keep them out of the open b
 - **Speed off, toolbar transfer or an unsaved chat.** These select DOM intentionally; they are not failed JSON attempts.
 - **Excluded tools, binary/media and separate editor state.** Exclusion is not itself a capture failure. Do not recursively collect unrelated payloads just to increase captured characters.
 
-ChatGPT malformed plain-text parts currently get announced normal DOM recovery rather than accepting a readable prefix. That compatibility case is not fixed JSON serialization and should not be described as silent JSON success.
+ChatGPT unexpected entries in a plain-text parts array now keep known JSON strings without scraping. A fixed `text_invalid` warning survives fresh/cached picker capture, and the delivered attempt is recorded as `failed` / `capture_failed`, not successful or `text_box`. This is explicitly partial delivery, not complete JSON success. Missing/non-array parts, no usable text, selected-history errors and size limits retain rejection. Actual verified summary work remains independently counted.
 
 See [CHANGELOG.md](../CHANGELOG.md) for the completed changes. Source handling still needs the updated client to reach an installed user.
 
 ## 6. Practical work order
 
 1. **Verify the interrupted-body fix in the updated client when this failure recurs.** The source fix and four regressions are complete; a Git push does not update installed scripts.
-2. **Choose the next fix from real failure detail.** Keep DeepSeek incomplete-capture incidents, size-limit changes and malformed unused replies deferred until a fresh detailed failure identifies an actionable cause; normal regeneration needs no new selection behavior.
+2. **Choose the next fix from real failure detail.** Keep DeepSeek incomplete-capture incidents and size-limit changes deferred until a fresh detailed failure identifies an actionable cause; normal regeneration needs no new selection behavior.
 3. **Use fresh detail to rank auth/routing, resource and timeout failures.** Tune the observed bottleneck rather than replaying the historical broad labels. Keep raw/file/transcript limits distinguishable.
 4. **Check the installed build when source-supported cases recur.** Compare relevant hook/script build evidence; a manifest version or Git push alone does not prove client parity.
 
@@ -227,7 +228,7 @@ The first three items below describe the original report update before the inter
   node --test --test-timeout=30000 --test-reporter=dot test/chatgpt-json-capture.test.js test/claude-json-capture.test.js test/network-json-capture.test.js test/json-transfer-fallback.test.js
   ```
 
-- The original report/source-update checks did not refresh telemetry. The DeepSeek-only aggregate follow-up below now refreshes that subset; original overall counts remain dated. No agent-run live-account capture or installed-build inspection was performed. The user reported successful regeneration/JSON capture, with platform/build unrecorded. Interrupted-body retry is fixed in source; corrupted unused-node rejection is deferred with no confirmed native incident.
+- The original report/source-update checks did not refresh telemetry. The DeepSeek-only aggregate follow-up below now refreshes that subset; original overall counts remain dated. No agent-run live-account capture or installed-build inspection was performed. The user reported successful regeneration/JSON capture, with platform/build unrecorded. Interrupted-body retry is fixed in source. The original corrupted-unused-node probes were controlled reproductions, not native incidents; master subsequently fixed the demonstrated rejection.
 - Implementation follow-up: all **159 focused ChatGPT/Claude capture and transfer-fallback tests passed** after the interrupted-body fix, including the four new regressions. Command: `node --test --test-timeout=30000 --test-reporter=spec test/chatgpt-json-capture.test.js test/claude-json-capture.test.js test/json-transfer-fallback.test.js`. Extension publication/deployment are separate. Keep completed items in the changelog and require exact complete selected-text evidence before declaring a speed fix successful.
 
 - Regeneration follow-up: six targeted tests and four controlled Grok/DeepSeek checks passed (normal regenerated capture, then deliberately corrupted unused-node rejection on each adapter). This investigation changed no runtime/test files.
@@ -238,3 +239,5 @@ The first three items below describe the original report update before the inter
 - DeepSeek late-auth implementation: three new regressions were red before the fix and green afterward; the complete focused network capture/transfer-fallback suite passed 114/114. Existing credentials, permission checks, raw/file/transcript budgets and capture deadline remain intact. No browser-account trial or attribution of the historical unavailable failures was performed.
 
 - DeepSeek incomplete-history investigation: fresh read-only aggregates and seven targeted tests passed. Command: `node --test --test-timeout=30000 --test-name-pattern="^DeepSeek JSON snapshots|^DeepSeek: (reject cache deltas|own thoughts|one incomplete upload|disallow arbitrary|streamed bodies)|^DeepSeek captures supported original" --test-reporter=spec test/network-json-capture.test.js`. The four historical causes remain unobserved; this update changes documentation only.
+
+- October 14 integration: preserved master's selected-path and ChatGPT partial-text behavior, replaced conflicting DeepSeek v17 closures with v18, and reconciled completed/pending statuses. All 235 focused capture/recovery tests, 651 regular tests and the release lifecycle check passed. A controlled delayed-layout/poll-fallback Brave probe reproduced picker dismissal before prefetch; waiting for restored route ownership made the same exact-file/transfer/no-Send sequence pass. This validates the demonstrated setup race, not an independently observed cause marker from the historical CI run.

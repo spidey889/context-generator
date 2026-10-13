@@ -1978,6 +1978,40 @@ test("actual serving models reach progress and terminal telemetry for fallback, 
   }
 });
 
+test("unreadable ChatGPT JSON is a failed transfer even after paste or draft recovery", () => {
+  for (const scenario of ["partial", "partial-draft", "clean"]) {
+    const messages = [];
+    const hooks = loadPlatformContent([], "chatgpt.com", { runtimeSendMessage: async message => {
+      messages.push(message); return { ok: true };
+    } });
+    const trace = hooks.beginTransferAttempt("claude", "destination tile");
+    trace.captureHadInvalidText = scenario !== "clean";
+    trace.telemetryLastStage = "paste_started";
+    trace.telemetryReportedModel = "local-direct";
+    if (scenario === "partial-draft") {
+      trace.copyBoxShown = true;
+      hooks.recordTransferFailureDiagnostics(trace, Object.assign(new Error("Private draft details"), {
+        code: "paste_failed", diagnostics: { version: 1, error_code: "editor_has_draft", error_origin: "destination" }
+      }));
+    }
+    hooks.finishTransferTrace(trace);
+    hooks.finishTransferTrace(trace);
+    const terminals = messages.filter(message => message.type === "RECORD_TRANSFER_TELEMETRY" && message.event.status !== "started");
+    assert.equal(terminals.length, 1);
+    const terminal = terminals[0].event;
+    assert.equal(terminal.status, scenario === "clean" ? "succeeded" : "failed");
+    assert.equal(terminal.lastStage, scenario === "clean" ? "completed" : "paste_started");
+    assert.equal(terminal.failureReason, scenario === "clean" ? null : "capture_failed");
+    assert.equal(terminal.reportedModel, "local-direct");
+    if (scenario !== "clean") {
+      assert.equal(terminal.diagnostics.capture_detail, "text_invalid");
+      assert.equal(terminal.diagnostics.error_code, "capture_json_failed");
+      assert.equal(hooks.buildLatestTransferStats(trace, 1).status, "failed");
+    }
+    hooks.resetRunningFlag();
+  }
+});
+
 test("a synchronous local receipt failure cannot swallow terminal telemetry", () => {
   const messages = [];
   const hooks = loadPlatformContent([], "chatgpt.com", {

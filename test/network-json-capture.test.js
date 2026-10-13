@@ -436,7 +436,7 @@ test("DeepSeek: one incomplete upload cancels siblings before fallback or a fres
   });
   assert.equal(h.requests.length, 5, "failure stops queued downloads");
   assert.equal(aborted.length, 3);
-  assert.equal(h.window.__capNetworkFetchState.version, 17);
+  assert.equal(h.window.__capNetworkFetchState.version, 18);
   assert.ok(h.replies.every(reply => !reply.capture));
   assert.equal(h.navigationListeners(), 0);
   assert.equal(h.listeners.size, 2);
@@ -513,10 +513,11 @@ for (const platform of ["gemini", "grok", "deepseek"]) test(`${platform}: the pr
   const h = setup(platform);
   await h.observe();
   const old = h.window.__capNetworkFetchState;
-  old.version = platform === "deepseek" ? 9 : platform === "gemini" ? 9 : 7;
+  // Master and the late-auth branch both used DeepSeek v17 before integration.
+  old.version = platform === "deepseek" ? 17 : platform === "gemini" ? 9 : 7;
   h.reinstall(files[1]);
   assert.notEqual(h.window.__capNetworkFetchState, old);
-  assert.equal(h.window.__capNetworkFetchState.version, platform === "deepseek" ? 17 : platform === "grok" ? 14 : 12);
+  assert.equal(h.window.__capNetworkFetchState.version, platform === "deepseek" ? 18 : platform === "grok" ? 15 : 12);
   assert.equal(h.listeners.size, 2);
   assert.equal((await h.window.__capCaptureNetworkJson()).text, h.fixture.expected);
 });
@@ -660,12 +661,47 @@ test("Grok rejects broken internal links and ambiguous external roots even with 
     f => { f.nodes.responseNodes[0].sender = "assistant"; },
     f => { f.nodes.responseNodes[0].parentResponseId = ""; },
     f => { f.nodes.responseNodes[0].parentResponseId = 123; },
-    f => { f.nodes.responseNodes[0].parentResponseId = "answer_2"; }
+    f => { f.nodes.responseNodes[0].parentResponseId = "answer_2"; },
+    f => { f.nodes.responseNodes.push({ responseId: "competing-start", parentResponseId: "aaaaaaaa-bbbb-5ccc-8ddd-eeeeeeeeeeee", sender: "human" }); }
   ]) {
     const f = fixtures("grok", "smoke", 3);
     mutate(f);
     const h = setup("grok", f);
     assert.throws(() => h.api.grokBranch(f.nodes, "answer_2"), /missing|cycle/);
+  }
+});
+
+test("Grok keeps JSON on the selected branch despite broken parents on unused replies", async () => {
+  for (const nullRoot of [false, true]) for (const parent of ["00000000-0000-4000-8000-000000000099", null]) {
+    const f = fixtures("grok", "smoke", 3);
+    if (nullRoot) f.nodes.responseNodes[0].parentResponseId = f.responses[0].parentResponseId = null;
+    f.nodes.responseNodes.push({ responseId: "unused-reply", parentResponseId: parent, sender: "assistant" });
+    f.responses.push({ responseId: "unused-reply", parentResponseId: parent, sender: "assistant", message: "UNUSED_REPLY_SENTINEL" });
+    const h = setup("grok", f);
+    h.location.href += "?rid=answer_2";
+    const capture = await h.window.__capCaptureNetworkJson();
+    assert.equal(capture.text, f.expected);
+    assert.equal(capture.messageTurnCount, 6);
+    assert.equal(h.requests.length, 2);
+    const loaded = h.requests.find(request => request.url.pathname.endsWith("load-responses"));
+    assert.deepEqual(JSON.parse(loaded.options.body).responseIds,
+      ["user_0", "answer_0", "user_1", "answer_1", "user_2", "answer_2"]);
+  }
+});
+
+test("Grok rejects the same broken parents when they belong to the selected reply", async () => {
+  const root = fixtures("grok", "smoke", 3).nodes.responseNodes[0].parentResponseId;
+  for (const parent of ["00000000-0000-4000-8000-000000000099", root, null]) {
+    const f = fixtures("grok", "smoke", 3);
+    f.nodes.responseNodes.at(-1).parentResponseId = f.responses.at(-1).parentResponseId = parent;
+    const h = setup("grok", f);
+    h.location.href += "?rid=answer_2";
+    await assert.rejects(h.window.__capCaptureNetworkJson(), error => {
+      assert.equal(error.captureFailureReason, "incomplete");
+      assert.equal(error.diagnostics.capture_detail, "parent_missing");
+      return true;
+    });
+    assert.equal(h.requests.length, 1, "Reject the broken selected path before downloading bodies.");
   }
 });
 
@@ -741,6 +777,44 @@ test("Grok: rid selects active branch, ambiguous and missing bodies fail", () =>
   f.nodes.inflightResponses.push({ responseId: "pending" });
   assert.equal(h.api.grokBranch(f.nodes, "answer_23").length, f.nodes.responseNodes.length - 1);
 });
+test("DeepSeek keeps selected JSON despite broken or duplicate unused replies", async () => {
+  const f = fixtures("deepseek", "smoke", 3);
+  const history = f.data.data.biz_data;
+  history.chat_messages.unshift(null, { message_id: {}, role: "ASSISTANT" });
+  history.chat_messages.push(
+    { message_id: 99, role: "ASSISTANT", truncated: true, fragments: [{ type: "RESPONSE", content: "UNUSED_REPLY_SENTINEL" }] },
+    { message_id: 99, parent_id: 987, role: "ASSISTANT", fragments: [] },
+    { message_id: 100, role: "USER", fragments: [{ type: "FILE", files: [{ ...f.file, id: "unused-file", file_size: 9999999 }] }] }
+  );
+  const h = setup("deepseek", f); await h.observe();
+  const capture = await h.window.__capCaptureNetworkJson();
+  assert.equal(capture.text, f.expected);
+  assert.equal(capture.messageTurnCount, 6);
+  assert.equal(h.requests.filter(request => request.url.pathname.includes("history_messages")).length, 1);
+  assert.equal(h.requests.filter(request => request.url.hostname === "files.deepseeksvc.com").length, 1,
+    "Only the selected user file may be downloaded.");
+  assert.equal(h.navigationListeners(), 0);
+});
+
+test("DeepSeek still rejects missing or ambiguous selected messages before file reads", async () => {
+  for (const [mutate, detail] of [
+    [history => { delete history.chat_messages.at(-1).parent_id; }, "parent_missing"],
+    [history => { history.chat_messages.push({ ...history.chat_messages.at(-1) }); }, "invalid_branch"],
+    [history => { history.chat_messages.push({ ...history.chat_messages[0], parent_id: 99 }); }, "invalid_branch"],
+    [history => { history.chat_messages[0].parent_id = history.chat_messages.at(-1).message_id; }, "branch_cycle"]
+  ]) {
+    const f = fixtures("deepseek", "smoke", 3); mutate(f.data.data.biz_data);
+    const h = setup("deepseek", f); await h.observe();
+    await assert.rejects(h.window.__capCaptureNetworkJson(), error => {
+      assert.equal(error.captureFailureReason, "incomplete");
+      assert.equal(error.diagnostics.capture_detail, detail);
+      return true;
+    });
+    assert.equal(h.requests.length, 1, "Do not read files or return partial text for a broken selected path.");
+    assert.equal(h.navigationListeners(), 0);
+  }
+});
+
 test("DeepSeek: reject cache deltas, missing parents and incomplete uploads", () => {
   for (const mutate of [
     f => { f.data.data.biz_data.cache_control = "MERGE"; },

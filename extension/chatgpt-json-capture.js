@@ -13,6 +13,7 @@
   function serialize(data, chat, pastedTexts = {}, sourceTreeCounts) {
     const blocked = (reason, detail = "incomplete_history") => captureError(`ChatGPT JSON capture blocked: ${reason} Turn JSON capture off to use DOM capture.`, "incomplete", detail);
     const excludedContentTypes = new Set();
+    let captureWarning;
     if ((data?.conversation_id ?? data?.id) !== chat) throw blocked("The response belongs to a different conversation.");
     const assertComplete = (scope, label) => {
       if (scope == null) return;
@@ -149,10 +150,10 @@
       assertComplete(content, "Own-turn content");
       if (content.parts != null && !Array.isArray(content.parts)) throw blocked("An own turn has invalid text parts.", "text_invalid");
       if (content.content_type === "text" && !Array.isArray(content.parts)) throw blocked("An own text turn is missing its text parts.", "text_invalid");
-      // Plain-text parts must all be strings. Preserve the rendered message via
-      // normal capture instead of silently submitting only its readable prefix.
+      // Keep known strings without guessing nested content. The owning transfer
+      // must report this best-effort capture as failed even if delivery completes.
       if (content.content_type === "text" && content.parts.some(part => typeof part !== "string")) {
-        throw Object.assign(captureError("A ChatGPT text message has invalid parts.", "incomplete", "text_invalid"), { allowDomFallback: true });
+        captureWarning = "text_invalid";
       }
       // Own strings plus explicitly typed voice transcripts only. Never recurse
       // into tools, audio/image pointers, artifacts, files or their metadata.
@@ -236,7 +237,8 @@
     if (!turns.length) throw blocked("No usable user or assistant text remains after skipping tools, files, images, and artifacts.", "missing_text");
     const text = `ChatGPT conversation:\n\n${turns.map(turn => `${turn.role === "user" ? "User" : "Assistant"}: ${turn.text}`).join("\n\n")}`;
     if (text.length > 500000 || new TextEncoder().encode(text).length > 2000000) throw captureError("This chat is too long to transfer (limit: 500,000 characters). Try a shorter chat.", "size_limit");
-    return { text, messages: turns, messageTurnCount: turns.length, excludedContentTypes: [...excludedContentTypes].sort() };
+    return { text, messages: turns, messageTurnCount: turns.length, excludedContentTypes: [...excludedContentTypes].sort(),
+      ...(captureWarning ? { captureWarning } : {}) };
   }
 
   function waitForHook(timeoutMs, install = false) {

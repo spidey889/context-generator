@@ -25,12 +25,22 @@
   };
   const turn = (role, parts) => parts.filter(text => typeof text === "string" && text.trim()).length
     ? [{ role: role === "User" ? "user" : "assistant", text: parts.filter(text => typeof text === "string" && text.trim()).join("\n\n") }] : [];
-  const chain = (items, leaf, idKey, parentKey, externalRoot = false) => {
+  const chain = (items, leaf, idKey, parentKey, { externalRoot = false, selectedOnly = false } = {}) => {
     if (!Array.isArray(items) || !items.length) fail("The conversation history is missing.");
     const mapping = new Map();
+    const duplicateIds = new Set();
     for (const item of items) {
       const id = item?.[idKey];
-      if ((typeof id !== "string" && !Number.isSafeInteger(id)) || mapping.has(id) || (!externalRoot && !Object.hasOwn(item, parentKey))) fail("Invalid or duplicate message IDs were returned.", undefined, "invalid_branch");
+      if (typeof id !== "string" && !Number.isSafeInteger(id)) {
+        if (selectedOnly) continue;
+        fail("Invalid or duplicate message IDs were returned.", undefined, "invalid_branch");
+      }
+      if (mapping.has(id)) {
+        if (!selectedOnly) fail("Invalid or duplicate message IDs were returned.", undefined, "invalid_branch");
+        duplicateIds.add(id);
+        continue;
+      }
+      if (!externalRoot && !selectedOnly && !Object.hasOwn(item, parentKey)) fail("Invalid or duplicate message IDs were returned.", undefined, "invalid_branch");
       mapping.set(id, item);
     }
     let externalRootParent = null;
@@ -39,13 +49,21 @@
       // message IDs are UUIDv4. A missing ordinary parent is lost history, not
       // a synthetic root. Unknown marker shapes fail into normal capture.
       // The UUID shape is a compatibility guard, not proof of server completeness.
-      // Grok may include an unused regenerated reply without a parent field.
-      // Validate that field when walking the selected path, not unused replies.
-      const roots = items.filter(item => Object.hasOwn(item, parentKey) && item[parentKey] !== null && !mapping.has(item[parentKey]));
+      // Keep selected nodes and human starting points in root checks. Broken
+      // unused assistant replies must not invalidate the selected path; selected
+      // orphan replies and genuinely competing human roots must still fail.
+      const selectedIds = new Set();
+      let selectedId = leaf;
+      while (mapping.has(selectedId) && !selectedIds.has(selectedId)) {
+        selectedIds.add(selectedId);
+        selectedId = mapping.get(selectedId)[parentKey];
+      }
+      const rootItems = items.filter(item => item.sender === "human" || selectedIds.has(item[idKey]));
+      const roots = rootItems.filter(item => Object.hasOwn(item, parentKey) && item[parentKey] !== null && !mapping.has(item[parentKey]));
       if (roots.length) {
         const parent = roots[0][parentKey];
         if (typeof parent !== "string" || !/^[0-9a-f]{8}-[0-9a-f]{4}-5[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(parent)
-          || items.some(item => item[parentKey] === null)
+          || rootItems.some(item => item[parentKey] === null)
           || roots.some(item => item.sender !== "human" || item[parentKey] !== parent)) {
           fail("A parent message is missing from the history.", undefined, "parent_missing");
         }
@@ -55,6 +73,10 @@
     const branch = [], seen = new Set();
     let id = leaf;
     while (true) {
+      // DeepSeek's explicit current message chooses the path. Unused bad IDs or
+      // missing parent fields cannot invalidate it, but any duplicate selected
+      // ID remains ambiguous, even when one duplicate is otherwise malformed.
+      if (duplicateIds.has(id)) fail("The selected branch contains duplicate message IDs.", undefined, "invalid_branch");
       const item = mapping.get(id);
       if (!item || seen.has(id)) fail("A message is missing or the branch contains a cycle.", undefined, "branch_cycle");
       if (!Object.hasOwn(item, parentKey)) fail("A selected message has no parent field.", undefined, "parent_missing");
@@ -164,7 +186,7 @@
     const leaves = data.responseNodes.filter(node => !parents.has(node.responseId));
     const leaf = selected || (leaves.length === 1 ? leaves[0].responseId : null);
     if (!leaf) fail("The active Grok branch could not be identified.", undefined, "invalid_branch");
-    return chain(data.responseNodes, leaf, "responseId", "parentResponseId", true);
+    return chain(data.responseNodes, leaf, "responseId", "parentResponseId", { externalRoot: true });
   };
   const grok = (nodes, responses, selected) => {
     const branch = grokBranch(nodes, selected);
@@ -209,7 +231,7 @@
     complete(history?.pagination);
     complete(history?.chat_session);
     if (history?.chat_session?.id !== chat || history.cache_control !== "REPLACE") fail("DeepSeek returned a cache update instead of the full history.");
-    return chain(history.chat_messages, history.chat_session.current_message_id, "message_id", "parent_id");
+    return chain(history.chat_messages, history.chat_session.current_message_id, "message_id", "parent_id", { selectedOnly: true });
   };
   // DeepSeek accepts ordinary source/config/data uploads as well as .txt.
   // Keep binary/Office/PDF formats excluded; original UTF-8 and exact byte
