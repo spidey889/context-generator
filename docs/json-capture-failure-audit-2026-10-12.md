@@ -15,7 +15,7 @@ This is an investigation and work queue. Implementation follow-up on `codex/json
 | Interrupted ChatGPT/Claude JSON body downloads | **Fixed and pushed** in [8d8b6e8](https://github.com/spidey889/context-generator/commit/8d8b6e82abd5b6aa3dc5ad805cab4ee7ae43769c). Discard partial data and retry the whole read once. Invalid content, limits and cancellation remain protected. | Four regressions failed before the fix; 159 focused tests and [exact-commit Offline checks](https://github.com/spidey889/context-generator/actions/runs/38424329550) passed. |
 | Regenerated reply selection | **Already works; no new code fix needed.** Keep the selected new reply, skip the unused old alternative and retain earlier selected history. | Six targeted tests and controlled Grok/DeepSeek captures passed. The user also reported regeneration followed by successful JSON capture; platform/build were not recorded. |
 | DeepSeek late login-header observation | **Fixed in source:** allow up to 1.5 seconds for normal native auth to arrive; ready sessions skip the wait. Missing credentials still reject. | Three new regressions failed before the fix and pass afterward; all 114 focused tests passed. The three historical unavailable captures remain undiagnosed; see section 4. |
-| DeepSeek incomplete capture | **Investigated; no unnecessary rejection established.** Keep selected-history and original-file completeness guards. | Four recorded cases have no specific cause markers. Seven targeted checks passed; see section 4. |
+| DeepSeek incomplete capture | **Pending: needs a fresh failure with the exact cause.** Investigation found no unnecessary rejection; keep completeness guards. | Four recorded cases have no specific cause markers. Seven targeted checks passed; see section 4. |
 | JSON size-limit tuning | **Deferred: needs a real failure example.** Keep the current raw-download, file and final-transcript limits. | Historical size labels do not identify the boundary or prove metadata caused rejection. ChatGPT already has a larger allowance for unused reply branches. See section 4. |
 | Broken metadata on an unused reply | **Deferred, not an active fix priority.** Only reproduced after deliberately corrupting unused reply data. | No failing native response or real-user incident has confirmed this cause. See section 4. |
 
@@ -146,7 +146,7 @@ Four existing focused tests passed: retained observations across hook replacemen
 
 Sources: [network MAIN](../extension/network-fetch-main.js), [network bridge](../extension/network-json-capture.js), [manifest](../extension/manifest.json), [capture tests](../test/network-json-capture.test.js). No database writes, private row exports, live-account capture or installed-script inspection were performed.
 
-### Checked: DeepSeek incomplete capture
+### Deferred: DeepSeek incomplete capture
 
 **Read-only follow-up, 2026-10-13.** Fresh aggregate queries confirm four DeepSeek `incomplete` JSON fallbacks, all reporting extension version 1.4.16. None records a capture detail, request stage, HTTP status, error file/line or diagnostics revision; no nested capture detail/stage/status was found. Their later outcomes were two DOM-capture timeouts, one user cancellation during DOM capture, and one successful DOM sweep. Those outcomes establish recovery cost, not which JSON check failed.
 
@@ -154,7 +154,7 @@ Current source requires a successful full `REPLACE` history for the selected cha
 
 Seven targeted existing tests passed: available reply snapshots; cache-delta/missing-parent/incomplete-file rejection; original fragment order; incomplete-file sibling cancellation and fresh recovery; split UTF-8/bounded streams; truncated signed-file rejection; and exact supported original-file capture. No live failing response was reproduced or attributed to these tests.
 
-**Decision: keep the completeness checks and leave these incidents unresolved.** No common unnecessary rejection was demonstrated. Inspect a fresh failure from the updated client with its `capture_detail`, stage and HTTP status before choosing a fix. Current source already emits these bounded observations; adding guesses or removing guards cannot reconstruct missing historical evidence.
+**Status: pending evidence; outside the active fix queue.** Keep the completeness checks and leave these incidents unresolved. No common unnecessary rejection was demonstrated. Inspect a fresh failure from the updated client with its `capture_detail`, stage and HTTP status before choosing a fix. Current source already emits these bounded observations; adding guesses or removing guards cannot reconstruct missing historical evidence.
 
 Sources: [DeepSeek adapter](../extension/network-json-data.js), [MAIN reader](../extension/network-fetch-main.js), [capture tests](../test/network-json-capture.test.js). No runtime/test files or database data were changed.
 
@@ -205,7 +205,7 @@ See [CHANGELOG.md](../CHANGELOG.md) for the completed changes. Source handling s
 ## 6. Practical work order
 
 1. **Verify the interrupted-body fix in the updated client when this failure recurs.** The source fix and four regressions are complete; a Git push does not update installed scripts.
-2. **Choose the next fix from real failure detail.** Keep size-limit changes and malformed unused replies deferred until a real failing capture confirms their impact; normal regeneration needs no new selection behavior.
+2. **Choose the next fix from real failure detail.** Keep DeepSeek incomplete-capture incidents, size-limit changes and malformed unused replies deferred until a fresh detailed failure identifies an actionable cause; normal regeneration needs no new selection behavior.
 3. **Use fresh detail to rank auth/routing, resource and timeout failures.** Tune the observed bottleneck rather than replaying the historical broad labels. Keep raw/file/transcript limits distinguishable.
 4. **Check the installed build when source-supported cases recur.** Compare relevant hook/script build evidence; a manifest version or Git push alone does not prove client parity.
 
