@@ -13,7 +13,7 @@ This is an investigation and work queue, not a runtime change. [LOGIC.md](../LOG
 | Finding | Assessment | Next action |
 | --- | --- | --- |
 | A connection drops **after** ChatGPT/Claude response headers arrive. | **Confirmed missed recovery:** the body-read error becomes `incomplete` / `partial_response`, which skips the existing one JSON retry. A healthy fresh read succeeds in the controlled reproduction. | First small fix to consider: distinguish a failed network read from invalid content. |
-| An unused Grok/DeepSeek reply has broken structural metadata. | **Confirmed unnecessary rejection in controlled inputs:** valid selected history can fail because validation examines unused nodes. Live frequency is unknown. | Limit validation to what proves the selected path, while retaining checks for ambiguity and conflicting boundaries. |
+| An unused DeepSeek reply has broken structural metadata. | **Confirmed unnecessary rejection in controlled inputs:** valid selected history can fail because validation examines unused nodes. Live frequency is unknown. Grok's corresponding unused-assistant parent issue is now fixed in source. | Limit validation to what proves the selected path, while retaining checks for ambiguity and conflicting boundaries. |
 | Older telemetry records size, incomplete and unavailable failures without the underlying detail. | **Recorded failures, unresolved causes.** They cannot identify a particular validator or justify removing it. | Use fresh, specific capture diagnostics before tuning budgets/auth/deadlines. |
 | The actual selected text, transport or supported file is incomplete, wrong or too large. | **Keep the rejection.** Accepting the readable prefix would hide lost context. | Explain the specific limit/cause; do not clip or guess. |
 
@@ -74,24 +74,23 @@ Acceptance: one interrupted body followed by a healthy body stays on JSON withou
 
 Source: [chatgpt-fetch-main.js](../extension/chatgpt-fetch-main.js), `readJson`; [claude-fetch-main.js](../extension/claude-fetch-main.js), body-reader catch; [platform-content.js](../extension/platform-content.js), `shouldRetrySourceJson` and `takePickerJsonCapture`.
 
-### B. Unused replies can still invalidate an intact selected path
+### B. Unused DeepSeek replies can still invalidate an intact selected path
 
 **Status: confirmed code behavior, reproduced. Live frequency unknown; do not assume these inputs are common.**
 
-Recent fixes already ignore a missing parent field on unused Grok replies and malformed/duplicate unused Claude IDs. The remaining shared network `chain` still has broader checks:
+Grok now excludes unused assistant replies from external-root validation while retaining selected-path and human-start checks. Missing/null parent links on those unused replies keep JSON capture and its exact selected transcript. Malformed/duplicate unused Claude IDs are also handled. The remaining DeepSeek `chain` still has broader checks:
 
 | Adapter | Controlled input | Current result |
 | --- | --- | --- |
-| Grok | A valid two-turn selected branch, explicitly selected by `rid`, plus an unused assistant node pointing to an absent ordinary parent. | The global external-root scan reports `parent_missing` before selected body loading, although the selected branch is unchanged. |
 | DeepSeek | A valid selected branch plus an unused assistant node with a distinct ID but no parent field. | The global mapping pass reports `invalid_branch`, although that node is outside the selected chain. |
 
 The baseline selected transcript passed exactly before adding the unused node. These are adapter reproductions, not observations of damaged native traffic.
 
-**Small fix direction:** once the selected leaf/path is unambiguous, unrelated reply metadata should not reject its complete supported text. Preserve selected-node ambiguity, selected duplicate IDs, parent linkage and genuinely conflicting root/completeness checks. Grok's omitted-root rule needs care; ignoring all competing roots would weaken it.
+**Small fix direction:** once the selected leaf/path is unambiguous, unrelated DeepSeek reply metadata should not reject its complete supported text. Preserve selected-node ambiguity, selected duplicate IDs, parent linkage and completeness checks. Keep Grok's selected-node and competing-human-root protections intact.
 
 Acceptance: unchanged selected text and turn order survive an unrelated bad node; moving the same missing parent onto the selected path still rejects; no alternate text or extra body/file requests enter capture.
 
-Source: [network-json-data.js](../extension/network-json-data.js), `chain`, `grokBranch`, `deepseekBranch`. Investigate this after A unless fresh `invalid_branch`/`parent_missing` evidence makes it more urgent.
+Source: [network-json-data.js](../extension/network-json-data.js), `chain`, `deepseekBranch`. Investigate this after A unless fresh `invalid_branch`/`parent_missing` evidence makes it more urgent.
 
 ## 3. High-cost failures and correctness risks
 

@@ -459,7 +459,7 @@ for (const platform of ["gemini", "grok", "deepseek"]) test(`${platform}: the pr
   old.version = platform === "deepseek" ? 9 : platform === "gemini" ? 9 : 7;
   h.reinstall(files[1]);
   assert.notEqual(h.window.__capNetworkFetchState, old);
-  assert.equal(h.window.__capNetworkFetchState.version, platform === "deepseek" ? 16 : platform === "grok" ? 14 : 12);
+  assert.equal(h.window.__capNetworkFetchState.version, platform === "deepseek" ? 16 : platform === "grok" ? 15 : 12);
   assert.equal(h.listeners.size, 2);
   assert.equal((await h.window.__capCaptureNetworkJson()).text, h.fixture.expected);
 });
@@ -603,12 +603,47 @@ test("Grok rejects broken internal links and ambiguous external roots even with 
     f => { f.nodes.responseNodes[0].sender = "assistant"; },
     f => { f.nodes.responseNodes[0].parentResponseId = ""; },
     f => { f.nodes.responseNodes[0].parentResponseId = 123; },
-    f => { f.nodes.responseNodes[0].parentResponseId = "answer_2"; }
+    f => { f.nodes.responseNodes[0].parentResponseId = "answer_2"; },
+    f => { f.nodes.responseNodes.push({ responseId: "competing-start", parentResponseId: "aaaaaaaa-bbbb-5ccc-8ddd-eeeeeeeeeeee", sender: "human" }); }
   ]) {
     const f = fixtures("grok", "smoke", 3);
     mutate(f);
     const h = setup("grok", f);
     assert.throws(() => h.api.grokBranch(f.nodes, "answer_2"), /missing|cycle/);
+  }
+});
+
+test("Grok keeps JSON on the selected branch despite broken parents on unused replies", async () => {
+  for (const nullRoot of [false, true]) for (const parent of ["00000000-0000-4000-8000-000000000099", null]) {
+    const f = fixtures("grok", "smoke", 3);
+    if (nullRoot) f.nodes.responseNodes[0].parentResponseId = f.responses[0].parentResponseId = null;
+    f.nodes.responseNodes.push({ responseId: "unused-reply", parentResponseId: parent, sender: "assistant" });
+    f.responses.push({ responseId: "unused-reply", parentResponseId: parent, sender: "assistant", message: "UNUSED_REPLY_SENTINEL" });
+    const h = setup("grok", f);
+    h.location.href += "?rid=answer_2";
+    const capture = await h.window.__capCaptureNetworkJson();
+    assert.equal(capture.text, f.expected);
+    assert.equal(capture.messageTurnCount, 6);
+    assert.equal(h.requests.length, 2);
+    const loaded = h.requests.find(request => request.url.pathname.endsWith("load-responses"));
+    assert.deepEqual(JSON.parse(loaded.options.body).responseIds,
+      ["user_0", "answer_0", "user_1", "answer_1", "user_2", "answer_2"]);
+  }
+});
+
+test("Grok rejects the same broken parents when they belong to the selected reply", async () => {
+  const root = fixtures("grok", "smoke", 3).nodes.responseNodes[0].parentResponseId;
+  for (const parent of ["00000000-0000-4000-8000-000000000099", root, null]) {
+    const f = fixtures("grok", "smoke", 3);
+    f.nodes.responseNodes.at(-1).parentResponseId = f.responses.at(-1).parentResponseId = parent;
+    const h = setup("grok", f);
+    h.location.href += "?rid=answer_2";
+    await assert.rejects(h.window.__capCaptureNetworkJson(), error => {
+      assert.equal(error.captureFailureReason, "incomplete");
+      assert.equal(error.diagnostics.capture_detail, "parent_missing");
+      return true;
+    });
+    assert.equal(h.requests.length, 1, "Reject the broken selected path before downloading bodies.");
   }
 });
 

@@ -717,6 +717,29 @@ for (const platform of ["claude", "chatgpt", "gemini", "grok", "deepseek"]) {
   });
 }
 
+test("Grok's unused broken reply stays on JSON and submits only the selected transcript", async () => {
+  const { fixtures } = require("./network-json-fixtures");
+  const adapter = vm.createContext({ TextEncoder });
+  new vm.Script(fs.readFileSync(path.join(__dirname, "../extension/network-json-data.js"), "utf8")).runInContext(adapter);
+  const f = fixtures("grok", "source", 3);
+  f.nodes.responseNodes.push({ responseId: "unused-reply", parentResponseId: "missing-old-parent", sender: "assistant" });
+  const { context, calls } = harness("grok", { mode: "success" });
+  const capture = context.window.__capCaptureNetworkJson;
+  context.window.__capCaptureNetworkJson = async (...args) => {
+    await capture(...args);
+    return adapter.__capNetworkJsonData.grok(f.nodes, f.responses, "answer_2");
+  };
+  await context.start("chatgpt");
+  assert.equal(calls.json, 1);
+  assert.equal(calls.dom, 0);
+  assert.equal(calls.prepare, 0);
+  assert.equal(calls.notice, 0);
+  assert.equal(calls.destination, 1);
+  assert.equal(calls.flows.length, 1);
+  assert.equal(calls.flows[0].text, f.expected);
+  assert.equal(calls.errors.length, 0);
+});
+
 test("Grok's missing starting history enters normal capture once and submits only its recovered transcript", async () => {
   const { fixtures } = require("./network-json-fixtures");
   const adapter = vm.createContext({ TextEncoder });

@@ -39,13 +39,21 @@
       // message IDs are UUIDv4. A missing ordinary parent is lost history, not
       // a synthetic root. Unknown marker shapes fail into normal capture.
       // The UUID shape is a compatibility guard, not proof of server completeness.
-      // Grok may include an unused regenerated reply without a parent field.
-      // Validate that field when walking the selected path, not unused replies.
-      const roots = items.filter(item => Object.hasOwn(item, parentKey) && item[parentKey] !== null && !mapping.has(item[parentKey]));
+      // Keep selected nodes and human starting points in root checks. Broken
+      // unused assistant replies must not invalidate the selected path; selected
+      // orphan replies and genuinely competing human roots must still fail.
+      const selectedIds = new Set();
+      let selectedId = leaf;
+      while (mapping.has(selectedId) && !selectedIds.has(selectedId)) {
+        selectedIds.add(selectedId);
+        selectedId = mapping.get(selectedId)[parentKey];
+      }
+      const rootItems = items.filter(item => item.sender === "human" || selectedIds.has(item[idKey]));
+      const roots = rootItems.filter(item => Object.hasOwn(item, parentKey) && item[parentKey] !== null && !mapping.has(item[parentKey]));
       if (roots.length) {
         const parent = roots[0][parentKey];
         if (typeof parent !== "string" || !/^[0-9a-f]{8}-[0-9a-f]{4}-5[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(parent)
-          || items.some(item => item[parentKey] === null)
+          || rootItems.some(item => item[parentKey] === null)
           || roots.some(item => item.sender !== "human" || item[parentKey] !== parent)) {
           fail("A parent message is missing from the history.", undefined, "parent_missing");
         }
