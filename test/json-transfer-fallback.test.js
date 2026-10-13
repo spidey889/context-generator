@@ -741,6 +741,27 @@ test("Grok's unused broken reply stays on JSON and submits only the selected tra
   assert.equal(calls.errors.length, 0);
 });
 
+test("DeepSeek's unused broken answer stays on JSON without scraping or another transfer", async () => {
+  const { fixtures } = require("./network-json-fixtures");
+  const adapter = vm.createContext({ TextEncoder });
+  new vm.Script(fs.readFileSync(path.join(__dirname, "../extension/network-json-data.js"), "utf8")).runInContext(adapter);
+  const f = fixtures("deepseek", "source", 3);
+  f.data.data.biz_data.chat_messages.push({ message_id: 99, role: "ASSISTANT", fragments: [] });
+  const { context, calls } = harness("deepseek", { mode: "success" });
+  const capture = context.window.__capCaptureNetworkJson;
+  context.window.__capCaptureNetworkJson = async (...args) => {
+    await capture(...args);
+    return adapter.__capNetworkJsonData.deepseek(f.data, "source", f.files);
+  };
+  await context.start("claude");
+  assert.equal(calls.json, 1);
+  assert.equal(calls.dom + calls.prepare + calls.notice, 0);
+  assert.equal(calls.destination, 1);
+  assert.equal(calls.flows.length, 1);
+  assert.equal(calls.flows[0].text, f.expected);
+  assert.equal(calls.errors.length, 0);
+});
+
 test("Grok's missing starting history enters normal capture once and submits only its recovered transcript", async () => {
   const { fixtures } = require("./network-json-fixtures");
   const adapter = vm.createContext({ TextEncoder });

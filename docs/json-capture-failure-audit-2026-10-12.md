@@ -13,7 +13,6 @@ This is an investigation and work queue, not a runtime change. [LOGIC.md](../LOG
 | Finding | Assessment | Next action |
 | --- | --- | --- |
 | A connection drops **after** ChatGPT/Claude response headers arrive. | **Confirmed missed recovery:** the body-read error becomes `incomplete` / `partial_response`, which skips the existing one JSON retry. A healthy fresh read succeeds in the controlled reproduction. | First small fix to consider: distinguish a failed network read from invalid content. |
-| An unused DeepSeek reply has broken structural metadata. | **Confirmed unnecessary rejection in controlled inputs:** valid selected history can fail because validation examines unused nodes. Live frequency is unknown. Grok's corresponding unused-assistant parent issue is now fixed in source. | Limit validation to what proves the selected path, while retaining checks for ambiguity and conflicting boundaries. |
 | Older telemetry records size, incomplete and unavailable failures without the underlying detail. | **Recorded failures, unresolved causes.** They cannot identify a particular validator or justify removing it. | Use fresh, specific capture diagnostics before tuning budgets/auth/deadlines. |
 | The actual selected text, transport or supported file is incomplete, wrong or too large. | **Keep the rejection.** Accepting the readable prefix would hide lost context. | Explain the specific limit/cause; do not clip or guess. |
 
@@ -74,23 +73,9 @@ Acceptance: one interrupted body followed by a healthy body stays on JSON withou
 
 Source: [chatgpt-fetch-main.js](../extension/chatgpt-fetch-main.js), `readJson`; [claude-fetch-main.js](../extension/claude-fetch-main.js), body-reader catch; [platform-content.js](../extension/platform-content.js), `shouldRetrySourceJson` and `takePickerJsonCapture`.
 
-### B. Unused DeepSeek replies can still invalidate an intact selected path
+### B. Unused DeepSeek reply rejection is fixed in source
 
-**Status: confirmed code behavior, reproduced. Live frequency unknown; do not assume these inputs are common.**
-
-Grok now excludes unused assistant replies from external-root validation while retaining selected-path and human-start checks. Missing/null parent links on those unused replies keep JSON capture and its exact selected transcript. Malformed/duplicate unused Claude IDs are also handled. The remaining DeepSeek `chain` still has broader checks:
-
-| Adapter | Controlled input | Current result |
-| --- | --- | --- |
-| DeepSeek | A valid selected branch plus an unused assistant node with a distinct ID but no parent field. | The global mapping pass reports `invalid_branch`, although that node is outside the selected chain. |
-
-The baseline selected transcript passed exactly before adding the unused node. These are adapter reproductions, not observations of damaged native traffic.
-
-**Small fix direction:** once the selected leaf/path is unambiguous, unrelated DeepSeek reply metadata should not reject its complete supported text. Preserve selected-node ambiguity, selected duplicate IDs, parent linkage and completeness checks. Keep Grok's selected-node and competing-human-root protections intact.
-
-Acceptance: unchanged selected text and turn order survive an unrelated bad node; moving the same missing parent onto the selected path still rejects; no alternate text or extra body/file requests enter capture.
-
-Source: [network-json-data.js](../extension/network-json-data.js), `chain`, `deepseekBranch`. Investigate this after A unless fresh `invalid_branch`/`parent_missing` evidence makes it more urgent.
+The controlled missing-parent-field case now keeps the exact selected transcript on JSON. DeepSeek ignores invalid IDs and missing/duplicate metadata outside the path chosen by `current_message_id`; every selected node retains duplicate-ID, parent and cycle checks. File reads remain limited to selected turns, and no new retry or scraping is added. Grok's selected-path/human-root checks and Claude's selected-ID checks remain intact. Live frequency of the original case is still unknown. See [CHANGELOG.md](../CHANGELOG.md) for the implementation and [network-json-data.js](../extension/network-json-data.js), `chain` / `deepseekBranch`, for the current rule.
 
 ## 3. High-cost failures and correctness risks
 
@@ -156,7 +141,7 @@ These are already supported or intentional bypasses. Keep them out of the open b
 - **An unknown optional Gemini metadata block accompanies verified user text.** Exclude unknown metadata; keep the text. A blank prompt remains a separate case.
 - **JSON MIME casing/parameters and ChatGPT pasted-text MIME parameters.** Current supported base-type matching handles them.
 - **Shuffled Grok node/body arrays.** Parent links determine chronology.
-- **Malformed unused Claude IDs; an unused Grok reply merely lacking its parent field.** The recent narrow fixes already handle these. Section 2B describes different remaining checks.
+- **Malformed unused Claude/DeepSeek messages and unused Grok replies with broken parent data.** Current selected-path handling preserves intact chosen text while retaining selected-message and conflicting-root checks.
 - **Different complete Claude pasted bodies share an attachment ID.** Preserve each distinct body; only exact repeats are deduplicated within the turn.
 - **DeepSeek `FILE.files` is one object instead of a list.** Current descriptor discovery and serialization normalize both.
 - **Picker JSON failed temporarily before selection.** Selection can already make one serialized fresh read for recognized temporary errors.
@@ -170,7 +155,7 @@ See [CHANGELOG.md](../CHANGELOG.md) for the completed changes. Source handling s
 ## 6. Practical work order
 
 1. **Repair the mid-body network classification.** It affects an ordinary transport failure and can reuse the existing retry path. Prove healthy retry, bounded persistent failure and retained content/source safeguards.
-2. **Narrow unused-node rejection where selection remains provable.** Reuse the two controlled cases in section 2B; retain failures on the selected path. Move this up only when real diagnostics support it.
+2. **Verify selected-path handling if native evidence exposes another unused-message case.** The controlled DeepSeek case in section 2B is fixed; retain missing/duplicate/cycle rejection on selected messages.
 3. **Use fresh detail to rank auth/routing, resource and timeout failures.** Tune the observed bottleneck rather than replaying the historical broad labels. Keep raw/file/transcript limits distinguishable.
 4. **Check the installed build when source-supported cases recur.** Compare relevant hook/script build evidence; a manifest version or Git push alone does not prove client parity.
 
