@@ -4,17 +4,20 @@ Extension 1.4.12 attaches one optional JSONB record to `transfers.diagnostics`.
 Older attempts retain NULL; their missing observations cannot be recovered.
 The existing `failure_reason` and `last_stage` remain compatible.
 
-`transfers.file_size_failure_reason` is a readable generated column. An exact
-`diagnostics.capture_detail = "attachment_size_limit"` produces `file size`.
-Other causes remain NULL.
-The marker is emitted only when unique supported ChatGPT pasted files or
-DeepSeek text files exceed the combined file allowance before body downloads.
-Raw JSON limits, final transcript limits and malformed attachments do not use it.
-The column describes the JSON capture failure even after successful DOM recovery;
-`status` still describes the final transfer outcome. Older generic size errors
-cannot establish this cause. Deployment must update SQL, Edge and relay validators
-before distributing the updated extension. Backups capture the column but restore
-its underlying diagnostics so PostgreSQL recomputes its value.
+Migration `20261013092328` removes the separate `file_size_failure_reason` column.
+The database instead stores `failure_reason = "file_size_limit"` when the first
+failed outcome reports `conversation_too_large` with the exact
+`diagnostics.capture_detail = "attachment_size_limit"`. Existing extension,
+relay and Edge payloads keep their current format; the user message stays
+“This chat is too long to transfer. Next time, try summarizing it earlier.”
+The marker covers qualifying ChatGPT pasted files or DeepSeek text files exceeding
+the combined 2.1 MB allowance before downloads. Other size limits keep
+`conversation_too_large`. Only historic failed size rows with that exact marker
+are reclassified. Recovered causes remain in diagnostics without a failure reason
+on successful outcomes; a late diagnostic fill preserves the first terminal reason.
+The migration preserves counters, permissions, receipt trust and RPC arguments.
+Older backups still restore their captured schema and recompute its generated
+column; new backups restore the reason in the existing field.
 
 ## First-principles design
 

@@ -193,7 +193,8 @@ async function checkSnapshot(snapshot, { applyPending = false, throughVersion } 
     }
     for (const table of tables) await db.exec(`alter table public.${table} enable trigger user;`);
 
-    const compareOriginalColumns = async (cleanupApplied = false, timestampsRemoved = false) => {
+    let reclassifiedFileSizeFailures = 0;
+    const compareOriginalColumns = async (cleanupApplied = false, timestampsRemoved = false, fileSizeReasonMoved = false) => {
       const removedColumns = [];
       for (const table of tables) {
         const renamed = cleanupApplied && table === "transfer_events";
@@ -207,7 +208,8 @@ async function checkSnapshot(snapshot, { applyPending = false, throughVersion } 
         // columns. Default recovery still restores every original value.
         const allowedRemoved = table === "users" ? [] : [
           ...(renamed ? ["id"] : []),
-          ...(timestampsRemoved ? ["updated_at", "completed_at", "summary_received_at", "terminal_received_at"] : [])
+          ...(timestampsRemoved ? ["updated_at", "completed_at", "summary_received_at", "terminal_received_at"] : []),
+          ...(fileSizeReasonMoved ? ["file_size_failure_reason"] : [])
         ];
         assert.deepEqual(removed.map(column => column.column_name).sort(),
           columns[table].filter(column => allowedRemoved.includes(column.column_name)).map(column => column.column_name).sort(),
@@ -218,7 +220,15 @@ async function checkSnapshot(snapshot, { applyPending = false, throughVersion } 
           "Original column type changed during restore/upgrade");
         const restored = (await db.query(`select to_jsonb(row_value) as row from public.${restoredTable} as row_value`)).rows.map(value => value.row);
         assert.equal(restored.length, snapshot[table].length, "Row count changed during restore/upgrade");
-        assert.equal(digest(restored, retained), digest(snapshot[table], retained), "Original retained row values changed during restore/upgrade");
+        // Only an explicitly requested upgrade may reclassify observed failed
+        // file-size rows. Default restoration must retain the captured reason.
+        const expectedRows = fileSizeReasonMoved && table !== "users" ? snapshot[table].map(row => {
+          if (row.status !== "failed" || row.failure_reason !== "conversation_too_large"
+            || row.diagnostics?.capture_detail !== "attachment_size_limit") return row;
+          reclassifiedFileSizeFailures++;
+          return { ...row, failure_reason: "file_size_limit" };
+        }) : snapshot[table];
+        assert.equal(digest(restored, retained), digest(expectedRows, retained), "Original retained row values changed during restore/upgrade");
       }
       return removedColumns;
     };
@@ -232,7 +242,8 @@ async function checkSnapshot(snapshot, { applyPending = false, throughVersion } 
     phase = "upgraded row hash comparison";
     const cleanupApplied = pending.some(name => name.slice(0, 14) === "20261002163357");
     const timestampsRemoved = pending.some(name => name.slice(0, 14) === "20261002221512");
-    const removedColumns = await compareOriginalColumns(cleanupApplied, timestampsRemoved);
+    const fileSizeReasonMoved = pending.some(name => name.slice(0, 14) === "20261013092328");
+    const removedColumns = await compareOriginalColumns(cleanupApplied, timestampsRemoved, fileSizeReasonMoved);
 
     // Verify identity allocation will continue above the restored largest ID.
     phase = "restored identity sequence verification";
@@ -246,8 +257,8 @@ async function checkSnapshot(snapshot, { applyPending = false, throughVersion } 
       "Restored next identity must be above the existing maximum");
     return { transferEvents: snapshot[transferTable].length, users: snapshot.users.length,
       capturedMigrations: captured.length, pendingMigrations: pending.length,
-      originalColumnHashes: hashes, originalValuesPreserved: removedColumns.length === 0,
-      removedColumns, retainedValuesPreserved: true,
+      originalColumnHashes: hashes, originalValuesPreserved: removedColumns.length === 0 && reclassifiedFileSizeFailures === 0,
+      removedColumns, retainedValuesPreserved: true, reclassifiedFileSizeFailures,
       capturedCronJobsRestored: capturedCronJobs !== null, capturedCronJobs, capturedCronJobHash,
       capturedDefinitionsPreserved: Boolean(snapshot.functions && snapshot.views) };
   } catch (error) {

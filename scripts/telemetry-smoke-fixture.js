@@ -145,8 +145,8 @@ async function createTelemetrySmokeFixture(repoRoot, databaseEnabled) {
       assert.ok(terminal.completed_at, "Older worker completion metadata must remain accepted without storing it.");
       const columns = (await database.query(`select column_name from information_schema.columns
         where table_schema='public' and table_name='transfers'`)).rows.map(column => column.column_name);
-      assert.equal(columns.length, 19);
-      assert.ok(columns.includes("file_size_failure_reason"));
+      assert.equal(columns.length, 18);
+      assert.ok(!columns.includes("file_size_failure_reason"));
       assert.ok(row.diagnostics, "Installed extension diagnostics must survive the actual relay, Edge and SQL path.");
       assert.deepEqual(row.diagnostics, terminal.diagnostics);
       assert.equal(row.diagnostics.version, 1);

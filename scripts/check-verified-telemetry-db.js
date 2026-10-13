@@ -390,6 +390,8 @@ async function main() {
         checks += await require("./check-useful-diagnostics-db.js").checkAttachmentSizeFailure(db, sql, appliedMigrations);
       } else if (name.endsWith("_short_file_size_reason.sql")) {
         checks += await require("./check-useful-diagnostics-db.js").checkAttachmentSizeFailure(db, sql, appliedMigrations, "file size");
+      } else if (name.endsWith("_file_size_in_failure_reason.sql")) {
+        checks += await require("./check-file-size-failure-db.js").checkFileSizeFailureReason(db, sql, appliedMigrations);
       } else await db.exec(sql);
     }
     checks += await require("./check-served-model-db.js").checkStoreModelReceipts(db);

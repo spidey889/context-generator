@@ -1,13 +1,14 @@
 # Telemetry database operations
 
-`transfers.file_size_failure_reason` is generated from the exact
-`attachment_size_limit` capture detail and displays `file size`.
-It records the JSON failure independently of
-the final outcome, including successful DOM recovery. Historic generic size
-errors stay NULL. The additive migration preserves existing rows, counters,
-permissions and RPC arguments. Deploy compatible SQL, Edge and relay validation
-before distributing the updated extension. Restore diagnostics from backups;
-PostgreSQL recomputes this generated column.
+Migration `20261013092328` removes `transfers.file_size_failure_reason` and stores
+the specific cause in the existing `failure_reason` as `file_size_limit`. SQL
+normalizes the installed client's `conversation_too_large` report only when its
+exact capture detail is `attachment_size_limit` and this is the first failed
+outcome. It reclassifies only matching historic failed size rows; recovered or
+unclassified errors retain their final outcomes. Original diagnostics, counters,
+permissions, receipt trust and RPC arguments remain intact. No extension, Edge
+or Vercel rollout is needed for this database change. Old backups still restore
+their captured schema; new backups use the existing failure-reason field.
 
 Only target **cap-context-telemetry** (`iqkzynzxbmemhtiupwwu`). The first thirteen migrations preserve existing data. Migration fifteen only reorders/shortens users columns and narrows names to 40 well-known Naruto characters, preserving user numbers, installation keys, counters, sequence state and the original reset boundary. Migration fourteen is the owner's explicit one-time **users-only reset**, clearing old user/count test data and restarting numbering at 1. It preserves all transfer-event rows/columns. Never edit recorded migrations. The archived activity-view migration was never applied and must stay outside the active migration folder.
 

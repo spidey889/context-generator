@@ -4,6 +4,8 @@ A short history of decisions and regressions that matter when changing the code.
 
 ## 2026-10-13
 
+- **File-size failures use the existing reason field.** Added a migration that stores `file_size_limit` in `failure_reason` for observed failed attachment-size rejections and removes the generated `file_size_failure_reason` column. Existing client reports and the plain user message stay unchanged. Exact historical evidence permits scoped reclassification; generic size errors and recovered outcomes retain their meaning. Preserved counters, first-terminal protection, late diagnostic fills, RPC compatibility and archived backup restoration. Database deployment is separate from this source change.
+
 - **Textual false completeness markers use existing incomplete-history recovery.** Grok and DeepSeek now recognize `"false"` alongside boolean `false` in the three supported completeness fields, including casing and surrounding whitespace. Other metadata shapes keep their existing handling. Advanced affected MAIN/bridge readiness together and aligned the existing version assertion. Removed the resolved string-value finding from the audit while retaining its separate array-shape note. Tests were not run; native occurrence remains unconfirmed.
 
 - **DeepSeek single-file objects use the existing text-file capture path.** Normalize `FILE.files` from either a list or one object in both MAIN download discovery and serialization, retaining existing file validation and exclusions. Advanced DeepSeek readiness to v15 and aligned the existing version assertion; no new tests were added or run, as requested. Removed the resolved synthetic finding from the audit. Native occurrence remains unconfirmed.
