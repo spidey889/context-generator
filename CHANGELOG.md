@@ -4,6 +4,8 @@ A short history of decisions and regressions that matter when changing the code.
 
 ## 2026-10-13
 
+- **DeepSeek unavailable failures investigated without guessing a fix.** Fresh aggregate telemetry still has three unavailable JSON captures without specific cause markers. Controlled reads confirm missing observed authorization blocks capture until native fetch/XHR supplies it; existing hook recovery preserves authorization and succeeds. Three in-memory checks and four focused tests passed. The audit separates these confirmed readiness conditions from the unknown historical causes and records later capture/summary failures separately. Documentation only; no runtime or database changes.
+
 - **JSON size-limit tuning deferred pending a real failure.** Keep the current raw-download, supported-file and final-transcript limits. The historical size labels do not identify which boundary failed or establish metadata as the cause. ChatGPT already has its larger full-tree allowance; the audit now requires a real failing capture with exact boundary/size evidence before revisiting these limits and removes tuning from the active fix queue. Documentation only.
 
 - **JSON audit records completed retry work and working regeneration.** Linked the pushed interrupted-download fix and its passing focused-test/Offline CI evidence, refreshed the capture source snapshot, and recorded the user's successful regeneration check. Normal regeneration already keeps the selected reply; moved deliberately corrupted unused-node cases out of the active fix queue into pending native evidence. Retained historical observations and safety boundaries. Documentation only.

@@ -14,6 +14,7 @@ This is an investigation and work queue. Implementation follow-up on `codex/json
 | --- | --- | --- |
 | Interrupted ChatGPT/Claude JSON body downloads | **Fixed and pushed** in [8d8b6e8](https://github.com/spidey889/context-generator/commit/8d8b6e82abd5b6aa3dc5ad805cab4ee7ae43769c). Discard partial data and retry the whole read once. Invalid content, limits and cancellation remain protected. | Four regressions failed before the fix; 159 focused tests and [exact-commit Offline checks](https://github.com/spidey889/context-generator/actions/runs/38424329550) passed. |
 | Regenerated reply selection | **Already works; no new code fix needed.** Keep the selected new reply, skip the unused old alternative and retain earlier selected history. | Six targeted tests and controlled Grok/DeepSeek captures passed. The user also reported regeneration followed by successful JSON capture; platform/build were not recorded. |
+| DeepSeek unavailable capture | **Investigated; historical cause still unknown.** A missing observed login header is a confirmed readiness condition, not a diagnosed native incident. Existing hook recovery works. | Fresh aggregate telemetry still has three unavailable captures without specific cause markers. Three controlled checks and four focused tests passed; see section 4. |
 | JSON size-limit tuning | **Deferred: needs a real failure example.** Keep the current raw-download, file and final-transcript limits. | Historical size labels do not identify the boundary or prove metadata caused rejection. ChatGPT already has a larger allowance for unused reply branches. See section 4. |
 | Broken metadata on an unused reply | **Deferred, not an active fix priority.** Only reproduced after deliberately corrupting unused reply data. | No failing native response or real-user incident has confirmed this cause. See section 4. |
 
@@ -102,7 +103,7 @@ Source: [network-json-data.js](../extension/network-json-data.js), external-root
 
 ## 4. Recorded failures whose actual causes are still unknown
 
-The original aggregate query covered retained attempts from **October 9, 18:17:47 to October 12, 11:56:56 IST**: **82 rows**, **77 with diagnostics**. These counts have **not** been refreshed in this update. They are historical evidence, not today's failure rate.
+The original aggregate query covered retained attempts from **October 9, 18:17:47 to October 12, 11:56:56 IST**: **82 rows**, **77 with diagnostics**. These original overall counts have **not** been refreshed. Only the DeepSeek subset was freshly checked on 2026-10-13, as described below. The overall table remains historical evidence, not today's failure rate.
 
 | Recorded JSON fallback category | Attempts | Final transfer succeeded | Final transfer failed |
 | --- | ---: | ---: | ---: |
@@ -118,13 +119,31 @@ The inspected historical groups lack specific capture detail/stage/error observa
 
 | Question worth checking | Current mechanism | Evidence needed before changing behavior |
 | --- | --- | --- |
-| Is DeepSeek's unavailable capture a late-hook/auth problem? | Without an observed authorization header, it cannot issue the authenticated history read. One outer retry cannot create missing credentials by itself; signed-in refresh is the current recovery. | Fresh `auth_missing` versus `hook_unavailable` versus HTTP status, hook version, and whether native authenticated traffic occurred. Do not read arbitrary storage for tokens. |
+| Is DeepSeek's unavailable capture a late-hook/auth problem? | **Checked, historical cause unresolved.** Missing observed auth blocks the read; native fetch/XHR observation restores it, and stale/missing-hook recovery already works. | The three recorded unavailable captures have no specific markers. Require a new `auth_missing`, `hook_unavailable` or `busy` observation and loaded-script evidence before proposing a fix. Do not read arbitrary storage for tokens. |
 | Is Claude routing unavailable despite the chat being usable? | Needs the selected chat's observed organization endpoint; retained routes/resource timing and a 1.5-second observation wait recover it when available. | Fresh `routing_unavailable`, current hook ownership, and whether a matching route was observed. Do not guess another organization. |
 | Is a raw budget rejecting otherwise transferable history? | **Deferred; keep current limits.** Raw trees/pages/files and final selected text have separate bounds. | A real failing capture identifying the boundary, native byte consumption and exact complete selected-text size. A small DOM result alone is insufficient. |
 | Is a supported file temporarily inaccessible? | Signed-body HTTP error, processing status and byte mismatch can share attachment failure categories. | Descriptor/body stage and actual HTTP status or bounded validation detail. Distinguish supported-file corruption from unsupported-file exclusion. |
 | Is valid history simply too slow? | Native deadlines cover auth, pages and files together. | Which stage consumed the time, total bytes/pages/files and result of the existing retry. Do not lengthen all deadlines without measurements. |
 
 Gemini's newest unmarked candidate uses native first-candidate order; older selections follow parent links. A displayed-candidate mismatch has not been demonstrated. Validate it only if a real capture/display disagreement appears.
+
+### Checked: DeepSeek unavailable capture
+
+**Read-only follow-up, 2026-10-13.** Queried only aggregate telemetry for DeepSeek in `cap-context-telemetry`: 34 retained attempts dated October 9-13, 30 with diagnostics. The same three attempts record JSON fallback `unavailable`; all three report extension version 1.4.16. None contains a specific capture detail, request stage or HTTP status, and no nested `auth_missing`, `hook_unavailable` or `busy` marker was found. The manifest version does not establish which hook code was loaded.
+
+One of those transfers succeeded through normal capture. Of the two failed outcomes, one timed out during DOM capture and the other had already reached the summary stage before its reported failure. These outcomes do not prove a common JSON root cause or establish that JSON alone caused the final failures.
+
+Three controlled checks reused the actual MAIN/bridge and existing harness without editing runtime or test files:
+
+- Without any observed native authorization header, two fresh captures return `unavailable` / `auth_missing` before making a network request. After an authenticated native XHR is observed, the exact complete JSON transcript succeeds.
+- Observing the header through native fetch also restores exact JSON capture.
+- If the page replaces the XHR observer, the existing on-demand hook reinstall repairs observation and preserves previously seen authorization; exact capture succeeds.
+
+Four existing focused tests passed: retained observations across hook replacement, missing-hook recovery, cancellation on changed credentials, and the shared temporary-error retry policy. This verifies current mechanisms, not the causes of old incidents. MAIN is normally installed at `document_start`; missing-header rejection must not be presented as the normal signed-in flow.
+
+**Decision: no code fix justified yet.** Late installation or a missed native login header is a possible readiness problem, but it has not been connected to these recorded failures. Current source already emits the specific closed cause markers. Inspect the next failure from the updated client before adding another retry, guessing credentials or changing authentication.
+
+Sources: [network MAIN](../extension/network-fetch-main.js), [network bridge](../extension/network-json-capture.js), [manifest](../extension/manifest.json), [capture tests](../test/network-json-capture.test.js). No database writes, private row exports, live-account capture or installed-script inspection were performed.
 
 ### Deferred: changing JSON size limits
 
@@ -194,8 +213,10 @@ The first three items below describe the original report update before the inter
   node --test --test-timeout=30000 --test-reporter=dot test/chatgpt-json-capture.test.js test/claude-json-capture.test.js test/network-json-capture.test.js test/json-transfer-fallback.test.js
   ```
 
-- No fresh database query, agent-run live-account capture or installed-build inspection was performed. Historical counts remain dated. The user reported successful regeneration/JSON capture, with platform/build unrecorded. Interrupted-body retry is fixed in source; corrupted unused-node rejection is deferred with no confirmed native incident.
+- The original report/source-update checks did not refresh telemetry. The DeepSeek-only aggregate follow-up below now refreshes that subset; original overall counts remain dated. No agent-run live-account capture or installed-build inspection was performed. The user reported successful regeneration/JSON capture, with platform/build unrecorded. Interrupted-body retry is fixed in source; corrupted unused-node rejection is deferred with no confirmed native incident.
 - Implementation follow-up: all **159 focused ChatGPT/Claude capture and transfer-fallback tests passed** after the interrupted-body fix, including the four new regressions. Command: `node --test --test-timeout=30000 --test-reporter=spec test/chatgpt-json-capture.test.js test/claude-json-capture.test.js test/json-transfer-fallback.test.js`. Extension publication/deployment are separate. Keep completed items in the changelog and require exact complete selected-text evidence before declaring a speed fix successful.
 
 - Regeneration follow-up: six targeted tests and four controlled Grok/DeepSeek checks passed (normal regenerated capture, then deliberately corrupted unused-node rejection on each adapter). This investigation changed no runtime/test files.
 - Size-limit follow-up: rechecked current reader constants, the recorded ChatGPT branch-pruning change and its controlled large-unused-branch coverage. Deferred tuning until a real failure identifies its boundary. This documentation-only decision changes no limits or capture behavior; no new live payload or telemetry query was inspected.
+
+- DeepSeek readiness follow-up: three in-memory checks passed and four existing focused tests passed. Command: `node --test --test-timeout=30000 --test-name-pattern="^deepseek: (the previous hook|a missing MAIN hook)|^DeepSeek aborts an active capture|^temporary failure categories get one fresh JSON retry" --test-reporter=spec test/network-json-capture.test.js test/json-transfer-fallback.test.js`. Fresh aggregate telemetry confirms missing historical cause markers; no runtime, test or database behavior was changed.
