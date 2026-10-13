@@ -643,7 +643,7 @@ test("ChatGPT ordinary JSON failures never start DOM scrolling and release the l
   }
 });
 
-test("ChatGPT malformed plain-text parts recover by scraping once, including a cached picker failure", async () => {
+test("ChatGPT malformed plain-text parts keep JSON and flag failure, including a cached picker capture", async () => {
   const adapter = vm.createContext({ window: {}, TextEncoder });
   const adapterSource = fs.readFileSync(path.join(__dirname, "../extension/chatgpt-json-capture.js"), "utf8");
   // Expose only the real serializer in this isolated test; the product keeps it private.
@@ -662,15 +662,16 @@ test("ChatGPT malformed plain-text parts recover by scraping once, including a c
     }
     await context.start("claude");
     assert.equal(calls.json, 1, "Malformed content must not trigger a JSON retry.");
-    assert.equal(calls.prepare, 1);
-    assert.equal(calls.dom, 1);
-    assert.equal(calls.notice, 1);
+    assert.equal(calls.prepare, 0);
+    assert.equal(calls.dom, 0);
+    assert.equal(calls.notice, 0);
     assert.equal(calls.destination, 1);
     assert.equal(calls.flows.length, 1);
     assert.equal(calls.flows[0].prep, prepared);
-    assert.equal(calls.flows[0].text, "DOM transcript");
-    assert.equal(calls.flows[0].trace.conversationMessages, undefined);
-    assert.equal(calls.flows[0].trace.diagnostics.json_fallback_code, "incomplete");
+    assert.equal(calls.flows[0].text, "ChatGPT conversation:\n\nUser: Partial JSON text\n\nAssistant: Reply");
+    assert.equal(calls.flows[0].trace.captureHadInvalidText, true);
+    assert.equal(calls.flows[0].trace.diagnostics.capture_detail, "text_invalid");
+    assert.equal(calls.flows[0].trace.diagnostics.json_fallback_code, undefined);
     assert.equal(calls.errors.length, 0);
     assert.doesNotMatch(JSON.stringify(calls.traceDetails), /PRIVATE_DETAILS_SENTINEL|Partial JSON text/);
   }

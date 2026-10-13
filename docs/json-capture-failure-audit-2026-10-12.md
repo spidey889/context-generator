@@ -110,7 +110,7 @@ Future work should distinguish raw-response, file and final-transcript exhaustio
 
 Historical size fallbacks reached DOM captures of **50,691**, **64,947**, **128,367** and **205,041 characters**. This shows that JSON resource rejection and DOM transcript size were different; it does not prove the DOM transcript was complete or equal to the JSON-selected text.
 
-Current recognized hard-size failures stop the attempt instead of starting the former expensive sweep. Preserve that behavior. For non-size failures, Claude/Gemini/Grok/DeepSeek can still use one normal DOM recovery after eligible JSON retry; ordinary ChatGPT failures remain terminal except its malformed-text and active-reply exceptions. Fixing A can avoid both terminal ChatGPT failure and unnecessary Claude scrolling.
+Current recognized hard-size failures stop the attempt instead of starting the former expensive sweep. Preserve that behavior. For non-size failures, Claude/Gemini/Grok/DeepSeek can still use one normal DOM recovery after eligible JSON retry; ordinary ChatGPT failures remain terminal except its active-reply recovery. Unexpected plain-text entries now keep readable JSON strings with an explicit failed transfer outcome instead of scraping. Fixing A can avoid both terminal ChatGPT failure and unnecessary Claude scrolling.
 
 An active-reply DOM snapshot contains only verified rendered text and does not sweep earlier virtualized history. It is an intentional recovery boundary, not independent proof that every earlier turn was present.
 
@@ -163,7 +163,7 @@ These are already supported or intentional bypasses. Keep them out of the open b
 - **Speed off, toolbar transfer or an unsaved chat.** These select DOM intentionally; they are not failed JSON attempts.
 - **Excluded tools, binary/media and separate editor state.** Exclusion is not itself a capture failure. Do not recursively collect unrelated payloads just to increase captured characters.
 
-ChatGPT malformed plain-text parts currently get announced normal DOM recovery rather than accepting a readable prefix. That compatibility case is not fixed JSON serialization and should not be described as silent JSON success.
+ChatGPT unexpected entries in a plain-text parts array now keep known JSON strings without scraping. A fixed `text_invalid` warning survives fresh/cached picker capture, and the delivered attempt is recorded as `failed` / `capture_failed`, not successful or `text_box`. This is explicitly partial delivery, not complete JSON success. Missing/non-array parts, no usable text, selected-history errors and size limits retain rejection. Actual verified summary work remains independently counted.
 
 See [CHANGELOG.md](../CHANGELOG.md) for the completed changes. Source handling still needs the updated client to reach an installed user.
 

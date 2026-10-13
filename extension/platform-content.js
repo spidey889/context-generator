@@ -2380,7 +2380,15 @@
       stopSourceDestinationProgress(trace, !trace.copyBoxShown);
     }
     const totalMs = Math.round(getNow() - trace.startedAt);
-    const failed = trace.marks.some((mark) => mark.label.startsWith("failed:"));
+    const captureFailed = trace.captureHadInvalidText === true;
+    const failed = captureFailed || trace.marks.some((mark) => mark.label.startsWith("failed:"));
+    if (captureFailed) {
+      // Delivery may finish, but partial source text is never a successful
+      // transfer or a draft text-box outcome. Preserve this cause after paste
+      // diagnostics merge, without ending telemetry before summary receipts.
+      updateTransferDiagnostics(trace, { error_code: "capture_json_failed", error_origin: "source",
+        capture_detail: "text_invalid", capture_request_stage: "serialize", failure_site: "capture_serialize" });
+    }
     if (trace.telemetryLastStage === "capture_started" && trace.diagnosticCaptureStartedAt !== undefined)
       updateTransferDiagnostics(trace, { capture_ms: Math.round(getNow() - trace.diagnosticCaptureStartedAt) });
     if (failed && !trace.diagnostics?.error_code) {
@@ -2393,7 +2401,7 @@
       // Keep the existing relay contract. SQL recognizes the acknowledged local
       // draft fallback and stores copy_ready without incrementing failed counters.
       failed || trace.copyBoxShown ? "failed" : "succeeded",
-      trace.copyBoxShown ? "paste_failed" : failed ? telemetryFailureReason || "unknown_failure" : null
+      captureFailed ? "capture_failed" : trace.copyBoxShown ? "paste_failed" : failed ? telemetryFailureReason || "unknown_failure" : null
     );
   }
 
@@ -2501,8 +2509,8 @@
     return {
       version: 1,
       transferId: trace.id,
-      status: trace.copyBoxShown ? "copy_ready" : failureMark ? "failed" : "completed",
-      failure: failureMark?.label.replace(/^failed:\s*/, "") || null,
+      status: trace.captureHadInvalidText ? "failed" : trace.copyBoxShown ? "copy_ready" : failureMark ? "failed" : "completed",
+      failure: trace.captureHadInvalidText ? "Some ChatGPT text could not be read." : failureMark?.label.replace(/^failed:\s*/, "") || null,
       source: {
         id: trace.sourcePlatformId,
         name: trace.sourcePlatformName
@@ -7863,6 +7871,11 @@
           // Boundaries come from the native serializer, never from role labels
           // that a user can also quote inside a message. Keep this source-local.
           trace.conversationMessages = capture.messages;
+          if (useChatGptJson && capture.captureWarning === "text_invalid") {
+            trace.captureHadInvalidText = true;
+            updateTransferDiagnostics(trace, { capture_detail: "text_invalid", capture_request_stage: "serialize" });
+            markTransferTrace(trace, "JSON continued with unreadable text parts");
+          }
           conversationText = createConversationCapture(capture.text, {
             method: `${currentPlatform.id}-json`, messageTurnCount: capture.messageTurnCount,
             usefulTurnCount: capture.messageTurnCount, candidateTurnCount: capture.messageTurnCount,
@@ -7881,11 +7894,9 @@
             code: "conversation_too_large", diagnosticCode: "conversation_too_large",
             captureFailureReason: "size_limit", diagnostics: error?.diagnostics
           });
-          // Only the serializer's malformed plain-text-parts error opts into
-          // normal capture; other ChatGPT failures retain their existing policy.
-          const malformedTextParts = error?.allowDomFallback === true
-            && error.captureFailureReason === "incomplete" && error.diagnostics?.capture_detail === "text_invalid";
-          if (useChatGptJson && !malformedTextParts && !isSourceReplyInProgress()) throw error;
+          // Best-effort plain-text capture returns with a warning above. Actual
+          // ChatGPT JSON failures retain their existing active-reply exception.
+          if (useChatGptJson && !isSourceReplyInProgress()) throw error;
           if (trace?.diagnostics) { for (const key of ["error_code", "error_origin", "failure_site", "error_type", "error_file", "error_line", "error_column"]) delete trace.diagnostics[key]; }
           // Recovery stays within this attempt and reuses its destination.
           showFastCaptureFallbackMessage();
