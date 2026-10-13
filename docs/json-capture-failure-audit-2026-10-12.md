@@ -1,6 +1,6 @@
 # JSON capture failures: what to keep and what to remove
 
-Updated: **2026-10-13, Asia/Kolkata**. Current source inspected: `b31d7286007bcdcdd4f0a701fdc8b29b8f64eb79` on `master`. Original audit: 2026-10-12, source `1cf75964fbe710ecaca7e2c661149ad6a154dd7b`.
+Updated: **2026-10-13, Asia/Kolkata**. Current capture source inspected: `8d8b6e82abd5b6aa3dc5ad805cab4ee7ae43769c` on `codex/json-capture-failures`. Original audit: 2026-10-12, source `1cf75964fbe710ecaca7e2c661149ad6a154dd7b`.
 
 **Goal: keep complete, supported conversations on fast JSON capture whenever possible.** Remove unnecessary rejection and missed recovery before spending time on faster DOM scrolling. A faster capture is useful only if it preserves the selected conversation.
 
@@ -8,12 +8,22 @@ Updated: **2026-10-13, Asia/Kolkata**. Current source inspected: `b31d7286007bcd
 
 This is an investigation and work queue. Implementation follow-up on `codex/json-capture-failures`: interrupted ChatGPT/Claude body reads now use the existing fresh JSON retry; this is a source fix, not an installed-client release. [LOGIC.md](../LOGIC.md#capture) owns current behavior; [CHANGELOG.md](../CHANGELOG.md) owns implementation history. Source fixes do not establish which build an installed extension runs.
 
+## Completed fixes and checked behavior
+
+| Item | Current status | Evidence |
+| --- | --- | --- |
+| Interrupted ChatGPT/Claude JSON body downloads | **Fixed and pushed** in [8d8b6e8](https://github.com/spidey889/context-generator/commit/8d8b6e82abd5b6aa3dc5ad805cab4ee7ae43769c). Discard partial data and retry the whole read once. Invalid content, limits and cancellation remain protected. | Four regressions failed before the fix; 159 focused tests and [exact-commit Offline checks](https://github.com/spidey889/context-generator/actions/runs/38424329550) passed. |
+| Regenerated reply selection | **Already works; no new code fix needed.** Keep the selected new reply, skip the unused old alternative and retain earlier selected history. | Six targeted tests and controlled Grok/DeepSeek captures passed. The user also reported regeneration followed by successful JSON capture; platform/build were not recorded. |
+| Broken metadata on an unused reply | **Deferred, not an active fix priority.** Only reproduced after deliberately corrupting unused reply data. | No failing native response or real-user incident has confirmed this cause. See section 4. |
+
+The pushed fix remains on the worktree branch. These statuses do not establish a production merge or extension-store release. Earlier completed compatibility fixes are listed in section 5 and the changelog.
+
 ## Read this first
 
 | Finding | Assessment | Next action |
 | --- | --- | --- |
 | A connection drops **after** ChatGPT/Claude response headers arrive. | **Fixed in source:** a rejected native body read is `request_failed` / `network_error` and qualifies for the existing one fresh retry. Invalid bytes/JSON/limits still reject. | Completed; reload/distribute the updated extension. |
-| An unused Grok/DeepSeek reply has broken structural metadata. | **Confirmed unnecessary rejection in controlled inputs:** valid selected history can fail because validation examines unused nodes. Live frequency is unknown. | Limit validation to what proves the selected path, while retaining checks for ambiguity and conflicting boundaries. |
+| An unused Grok/DeepSeek reply has broken structural metadata. | **Deferred synthetic case:** damaged unused nodes can cause rejection; normal regeneration checks and a user trial succeeded. | Await a real failing native response before prioritizing a change. |
 | Older telemetry records size, incomplete and unavailable failures without the underlying detail. | **Recorded failures, unresolved causes.** They cannot identify a particular validator or justify removing it. | Use fresh, specific capture diagnostics before tuning budgets/auth/deadlines. |
 | The actual selected text, transport or supported file is incomplete, wrong or too large. | **Keep the rejection.** Accepting the readable prefix would hide lost context. | Explain the specific limit/cause; do not clip or guess. |
 
@@ -53,26 +63,11 @@ Keep bounded downloads and cancellation. Consider reducing native payload or cha
 
 Sources: [ChatGPT MAIN](../extension/chatgpt-fetch-main.js), [Claude MAIN](../extension/claude-fetch-main.js), [network MAIN](../extension/network-fetch-main.js), the serializers and [current capture contracts](../LOGIC.md#shared-json-contract).
 
-## 2. Avoidable failures: valid JSON capture should be recoverable
+## 2. Avoidable failures still needing implementation
 
-### A. Unused replies can still invalidate an intact selected path
+The first prioritized fix, interrupted-body retry classification, is complete. Use fresh capture diagnostics to select the next useful implementation.
 
-**Status: confirmed code behavior, reproduced. Live frequency unknown; do not assume these inputs are common.**
-
-Recent fixes already ignore a missing parent field on unused Grok replies and malformed/duplicate unused Claude IDs. The remaining shared network `chain` still has broader checks:
-
-| Adapter | Controlled input | Current result |
-| --- | --- | --- |
-| Grok | A valid two-turn selected branch, explicitly selected by `rid`, plus an unused assistant node pointing to an absent ordinary parent. | The global external-root scan reports `parent_missing` before selected body loading, although the selected branch is unchanged. |
-| DeepSeek | A valid selected branch plus an unused assistant node with a distinct ID but no parent field. | The global mapping pass reports `invalid_branch`, although that node is outside the selected chain. |
-
-The baseline selected transcript passed exactly before adding the unused node. These are adapter reproductions, not observations of damaged native traffic.
-
-**Small fix direction:** once the selected leaf/path is unambiguous, unrelated reply metadata should not reject its complete supported text. Preserve selected-node ambiguity, selected duplicate IDs, parent linkage and genuinely conflicting root/completeness checks. Grok's omitted-root rule needs care; ignoring all competing roots would weaken it.
-
-Acceptance: unchanged selected text and turn order survive an unrelated bad node; moving the same missing parent onto the selected path still rejects; no alternate text or extra body/file requests enter capture.
-
-Source: [network-json-data.js](../extension/network-json-data.js), `chain`, `grokBranch`, `deepseekBranch`. Prioritize this when fresh `invalid_branch`/`parent_missing` evidence supports real user impact.
+Normal regeneration is working behavior. The corrupted-unused-reply case is retained under section 4 pending native evidence, outside the active fix queue.
 
 ## 3. High-cost failures and correctness risks
 
@@ -130,16 +125,27 @@ The inspected historical groups lack specific capture detail/stage/error observa
 
 Gemini's newest unmarked candidate uses native first-candidate order; older selections follow parent links. A displayed-candidate mismatch has not been demonstrated. Validate it only if a real capture/display disagreement appears.
 
+### Deferred: malformed unused replies
+
+Follow-up on 2026-10-13: controlled Grok/DeepSeek captures with a regenerated reply kept only the selected new answer, skipped its old alternative and preserved all six selected turns. Grok requested only selected-path bodies. Six existing targeted tests covering reply selection/regeneration passed. The user then reported that regeneration and JSON capture worked; the platform and installed build were not recorded.
+
+The failure appeared only after deliberately damaging an unused reply: Grok pointed it to an absent ordinary parent, or DeepSeek omitted its parent field. These inputs still produce `parent_missing` / `invalid_branch`, respectively. This establishes validation behavior, not a demonstrated native incident.
+
+Keep this case **pending evidence**. Promote it only when a real failing native response proves that the selected history is complete and the unrelated malformed node caused rejection. Preserve selected-path ambiguity, root, identity and completeness safeguards. Selected-answer capture already keeps the chosen new reply; no new selection behavior is needed.
+
+Source: [network-json-data.js](../extension/network-json-data.js), `chain`, `grokBranch`, `deepseekBranch`.
+
 ## 5. Things that should not create new JSON failures
 
 These are already supported or intentional bypasses. Keep them out of the open bug queue:
 
+- **An answer is regenerated and the new answer is selected.** Capture follows selected history and skips unused alternatives. Targeted checks and a user regeneration trial passed; deliberately corrupted unused nodes remain pending native evidence in section 4.
 - **A ChatGPT/Claude native JSON body read rejects after headers arrive.** The current source discards the partial response and preserves a retryable network cause, including ChatGPT session and paste-descriptor reads. One existing serialized fresh retry starts from the beginning. Four reader regressions failed before this fix and pass afterward; invalid content, limits and cancellation retain their rejection.
 - **A reply is still generating or was stopped.** Capture supported current own text without waiting. Generation markers alone are not missing-history proof.
 - **An unknown optional Gemini metadata block accompanies verified user text.** Exclude unknown metadata; keep the text. A blank prompt remains a separate case.
 - **JSON MIME casing/parameters and ChatGPT pasted-text MIME parameters.** Current supported base-type matching handles them.
 - **Shuffled Grok node/body arrays.** Parent links determine chronology.
-- **Malformed unused Claude IDs; an unused Grok reply merely lacking its parent field.** The recent narrow fixes already handle these. Section 2A describes different remaining checks.
+- **Malformed unused Claude IDs; an unused Grok reply merely lacking its parent field.** The recent narrow fixes already handle these. Section 4 retains corrupted unused nodes pending native evidence.
 - **Different complete Claude pasted bodies share an attachment ID.** Preserve each distinct body; only exact repeats are deduplicated within the turn.
 - **DeepSeek `FILE.files` is one object instead of a list.** Current descriptor discovery and serialization normalize both.
 - **Picker JSON failed temporarily before selection.** Selection can already make one serialized fresh read for recognized temporary errors.
@@ -153,7 +159,7 @@ See [CHANGELOG.md](../CHANGELOG.md) for the completed changes. Source handling s
 ## 6. Practical work order
 
 1. **Verify the interrupted-body fix in the updated client when this failure recurs.** The source fix and four regressions are complete; a Git push does not update installed scripts.
-2. **Narrow unused-node rejection where selection remains provable.** Reuse the two controlled cases in section 2A; retain failures on the selected path. Move this up only when real diagnostics support it.
+2. **Choose the next fix from real failure detail.** Keep malformed unused replies deferred until a failing native response confirms their impact; normal regeneration needs no new selection behavior.
 3. **Use fresh detail to rank auth/routing, resource and timeout failures.** Tune the observed bottleneck rather than replaying the historical broad labels. Keep raw/file/transcript limits distinguishable.
 4. **Check the installed build when source-supported cases recur.** Compare relevant hook/script build evidence; a manifest version or Git push alone does not prove client parity.
 
@@ -175,5 +181,7 @@ The first three items below describe the original report update before the inter
   node --test --test-timeout=30000 --test-reporter=dot test/chatgpt-json-capture.test.js test/claude-json-capture.test.js test/network-json-capture.test.js test/json-transfer-fallback.test.js
   ```
 
-- No fresh database query, live-account native capture or installed-build inspection was performed. Historical counts and native sample descriptions remain explicitly dated. Neither reproduced issue has a measured production frequency. The interrupted-body issue is now fixed in source; unused-node rejection remains open.
+- No fresh database query, agent-run live-account capture or installed-build inspection was performed. Historical counts remain dated. The user reported successful regeneration/JSON capture, with platform/build unrecorded. Interrupted-body retry is fixed in source; corrupted unused-node rejection is deferred with no confirmed native incident.
 - Implementation follow-up: all **159 focused ChatGPT/Claude capture and transfer-fallback tests passed** after the interrupted-body fix, including the four new regressions. Command: `node --test --test-timeout=30000 --test-reporter=spec test/chatgpt-json-capture.test.js test/claude-json-capture.test.js test/json-transfer-fallback.test.js`. Extension publication/deployment are separate. Keep completed items in the changelog and require exact complete selected-text evidence before declaring a speed fix successful.
+
+- Regeneration follow-up: six targeted tests and four controlled Grok/DeepSeek checks passed (normal regenerated capture, then deliberately corrupted unused-node rejection on each adapter). This investigation changed no runtime/test files.
