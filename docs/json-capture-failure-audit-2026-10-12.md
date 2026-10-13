@@ -14,6 +14,7 @@ This is an investigation and work queue. Implementation follow-up on `codex/json
 | --- | --- | --- |
 | Interrupted ChatGPT/Claude JSON body downloads | **Fixed and pushed** in [8d8b6e8](https://github.com/spidey889/context-generator/commit/8d8b6e82abd5b6aa3dc5ad805cab4ee7ae43769c). Discard partial data and retry the whole read once. Invalid content, limits and cancellation remain protected. | Four regressions failed before the fix; 159 focused tests and [exact-commit Offline checks](https://github.com/spidey889/context-generator/actions/runs/38424329550) passed. |
 | Regenerated reply selection | **Already works; no new code fix needed.** Keep the selected new reply, skip the unused old alternative and retain earlier selected history. | Six targeted tests and controlled Grok/DeepSeek captures passed. The user also reported regeneration followed by successful JSON capture; platform/build were not recorded. |
+| JSON size-limit tuning | **Deferred: needs a real failure example.** Keep the current raw-download, file and final-transcript limits. | Historical size labels do not identify the boundary or prove metadata caused rejection. ChatGPT already has a larger allowance for unused reply branches. See section 4. |
 | Broken metadata on an unused reply | **Deferred, not an active fix priority.** Only reproduced after deliberately corrupting unused reply data. | No failing native response or real-user incident has confirmed this cause. See section 4. |
 
 The pushed fix remains on the worktree branch. These statuses do not establish a production merge or extension-store release. Earlier completed compatibility fixes are listed in section 5 and the changelog.
@@ -67,7 +68,7 @@ Sources: [ChatGPT MAIN](../extension/chatgpt-fetch-main.js), [Claude MAIN](../ex
 
 The first prioritized fix, interrupted-body retry classification, is complete. Use fresh capture diagnostics to select the next useful implementation.
 
-Normal regeneration is working behavior. The corrupted-unused-reply case is retained under section 4 pending native evidence, outside the active fix queue.
+Normal regeneration is working behavior. Size-limit tuning and the corrupted-unused-reply case are retained under section 4 pending real failure evidence, outside the active fix queue.
 
 ## 3. High-cost failures and correctness risks
 
@@ -119,11 +120,23 @@ The inspected historical groups lack specific capture detail/stage/error observa
 | --- | --- | --- |
 | Is DeepSeek's unavailable capture a late-hook/auth problem? | Without an observed authorization header, it cannot issue the authenticated history read. One outer retry cannot create missing credentials by itself; signed-in refresh is the current recovery. | Fresh `auth_missing` versus `hook_unavailable` versus HTTP status, hook version, and whether native authenticated traffic occurred. Do not read arbitrary storage for tokens. |
 | Is Claude routing unavailable despite the chat being usable? | Needs the selected chat's observed organization endpoint; retained routes/resource timing and a 1.5-second observation wait recover it when available. | Fresh `routing_unavailable`, current hook ownership, and whether a matching route was observed. Do not guess another organization. |
-| Is a raw budget rejecting otherwise transferable history? | Raw trees/pages/files and final selected text have separate bounds. | Actual failing boundary, native byte consumption and exact complete selected-text size. A small DOM result alone is insufficient. |
+| Is a raw budget rejecting otherwise transferable history? | **Deferred; keep current limits.** Raw trees/pages/files and final selected text have separate bounds. | A real failing capture identifying the boundary, native byte consumption and exact complete selected-text size. A small DOM result alone is insufficient. |
 | Is a supported file temporarily inaccessible? | Signed-body HTTP error, processing status and byte mismatch can share attachment failure categories. | Descriptor/body stage and actual HTTP status or bounded validation detail. Distinguish supported-file corruption from unsupported-file exclusion. |
 | Is valid history simply too slow? | Native deadlines cover auth, pages and files together. | Which stage consumed the time, total bytes/pages/files and result of the existing retry. Do not lengthen all deadlines without measurements. |
 
 Gemini's newest unmarked candidate uses native first-candidate order; older selections follow parent links. A displayed-candidate mismatch has not been demonstrated. Validate it only if a real capture/display disagreement appears.
+
+### Deferred: changing JSON size limits
+
+**Decision, 2026-10-13: skip size-limit changes for now.** Keep the existing raw-download, supported-file and final-transcript limits. This is an investigation awaiting evidence, not a confirmed remaining size bug.
+
+The possible failure is a complete selected conversation that fits the final transcript limit while the whole native download exceeds its separate budget. No inspected real failure establishes this cause. The historical `size_limit` rows do not identify the boundary, and metadata has not been demonstrated as the reason for those failures.
+
+ChatGPT's earlier 6 MB full-tree bottleneck was already replaced by a 32 MB total allowance before this investigation. A controlled regression covers unused replies totaling over 7 MB while the selected chat is small; it does not prove that exactly 32 MB is necessary in real usage. See the recorded branch-pruning change in [CHANGELOG.md](../CHANGELOG.md).
+
+Reopen this item only when a real failing capture identifies the platform/build, failing stage and boundary, native bytes consumed, and complete selected-text size. Distinguish raw-download, supported-file and final-transcript rejection before choosing a fix. Retain safe counts and bounded diagnostics without logging private conversation text or signed addresses.
+
+Move to the next common failure supported by real diagnostics. Do not raise or remove limits based on the old broad labels.
 
 ### Deferred: malformed unused replies
 
@@ -159,7 +172,7 @@ See [CHANGELOG.md](../CHANGELOG.md) for the completed changes. Source handling s
 ## 6. Practical work order
 
 1. **Verify the interrupted-body fix in the updated client when this failure recurs.** The source fix and four regressions are complete; a Git push does not update installed scripts.
-2. **Choose the next fix from real failure detail.** Keep malformed unused replies deferred until a failing native response confirms their impact; normal regeneration needs no new selection behavior.
+2. **Choose the next fix from real failure detail.** Keep size-limit changes and malformed unused replies deferred until a real failing capture confirms their impact; normal regeneration needs no new selection behavior.
 3. **Use fresh detail to rank auth/routing, resource and timeout failures.** Tune the observed bottleneck rather than replaying the historical broad labels. Keep raw/file/transcript limits distinguishable.
 4. **Check the installed build when source-supported cases recur.** Compare relevant hook/script build evidence; a manifest version or Git push alone does not prove client parity.
 
@@ -185,3 +198,4 @@ The first three items below describe the original report update before the inter
 - Implementation follow-up: all **159 focused ChatGPT/Claude capture and transfer-fallback tests passed** after the interrupted-body fix, including the four new regressions. Command: `node --test --test-timeout=30000 --test-reporter=spec test/chatgpt-json-capture.test.js test/claude-json-capture.test.js test/json-transfer-fallback.test.js`. Extension publication/deployment are separate. Keep completed items in the changelog and require exact complete selected-text evidence before declaring a speed fix successful.
 
 - Regeneration follow-up: six targeted tests and four controlled Grok/DeepSeek checks passed (normal regenerated capture, then deliberately corrupted unused-node rejection on each adapter). This investigation changed no runtime/test files.
+- Size-limit follow-up: rechecked current reader constants, the recorded ChatGPT branch-pruning change and its controlled large-unused-branch coverage. Deferred tuning until a real failure identifies its boundary. This documentation-only decision changes no limits or capture behavior; no new live payload or telemetry query was inspected.
