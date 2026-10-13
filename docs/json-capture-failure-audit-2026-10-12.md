@@ -1,6 +1,6 @@
 # JSON capture failures: what to keep and what to remove
 
-Updated: **2026-10-13, Asia/Kolkata**. Current capture source inspected: `8d8b6e82abd5b6aa3dc5ad805cab4ee7ae43769c` on `codex/json-capture-failures`. Original audit: 2026-10-12, source `1cf75964fbe710ecaca7e2c661149ad6a154dd7b`.
+Updated: **2026-10-13, Asia/Kolkata**. Current capture source inspected: `codex/json-capture-failures`, including the interrupted-body retry and DeepSeek late-auth follow-ups. Original audit: 2026-10-12, source `1cf75964fbe710ecaca7e2c661149ad6a154dd7b`.
 
 **Goal: keep complete, supported conversations on fast JSON capture whenever possible.** Remove unnecessary rejection and missed recovery before spending time on faster DOM scrolling. A faster capture is useful only if it preserves the selected conversation.
 
@@ -14,7 +14,7 @@ This is an investigation and work queue. Implementation follow-up on `codex/json
 | --- | --- | --- |
 | Interrupted ChatGPT/Claude JSON body downloads | **Fixed and pushed** in [8d8b6e8](https://github.com/spidey889/context-generator/commit/8d8b6e82abd5b6aa3dc5ad805cab4ee7ae43769c). Discard partial data and retry the whole read once. Invalid content, limits and cancellation remain protected. | Four regressions failed before the fix; 159 focused tests and [exact-commit Offline checks](https://github.com/spidey889/context-generator/actions/runs/38424329550) passed. |
 | Regenerated reply selection | **Already works; no new code fix needed.** Keep the selected new reply, skip the unused old alternative and retain earlier selected history. | Six targeted tests and controlled Grok/DeepSeek captures passed. The user also reported regeneration followed by successful JSON capture; platform/build were not recorded. |
-| DeepSeek unavailable capture | **Investigated; historical cause still unknown.** A missing observed login header is a confirmed readiness condition, not a diagnosed native incident. Existing hook recovery works. | Fresh aggregate telemetry still has three unavailable captures without specific cause markers. Three controlled checks and four focused tests passed; see section 4. |
+| DeepSeek late login-header observation | **Fixed in source:** allow up to 1.5 seconds for normal native auth to arrive; ready sessions skip the wait. Missing credentials still reject. | Three new regressions failed before the fix and pass afterward; all 114 focused tests passed. The three historical unavailable captures remain undiagnosed; see section 4. |
 | JSON size-limit tuning | **Deferred: needs a real failure example.** Keep the current raw-download, file and final-transcript limits. | Historical size labels do not identify the boundary or prove metadata caused rejection. ChatGPT already has a larger allowance for unused reply branches. See section 4. |
 | Broken metadata on an unused reply | **Deferred, not an active fix priority.** Only reproduced after deliberately corrupting unused reply data. | No failing native response or real-user incident has confirmed this cause. See section 4. |
 
@@ -67,7 +67,7 @@ Sources: [ChatGPT MAIN](../extension/chatgpt-fetch-main.js), [Claude MAIN](../ex
 
 ## 2. Avoidable failures still needing implementation
 
-The first prioritized fix, interrupted-body retry classification, is complete. Use fresh capture diagnostics to select the next useful implementation.
+Interrupted-body retry classification and the reproduced DeepSeek late-auth timing gap are fixed in source. Use fresh capture diagnostics to select the next useful implementation.
 
 Normal regeneration is working behavior. Size-limit tuning and the corrupted-unused-reply case are retained under section 4 pending real failure evidence, outside the active fix queue.
 
@@ -133,7 +133,7 @@ Gemini's newest unmarked candidate uses native first-candidate order; older sele
 
 One of those transfers succeeded through normal capture. Of the two failed outcomes, one timed out during DOM capture and the other had already reached the summary stage before its reported failure. These outcomes do not prove a common JSON root cause or establish that JSON alone caused the final failures.
 
-Three controlled checks reused the actual MAIN/bridge and existing harness without editing runtime or test files:
+The initial investigation used three controlled checks with the actual MAIN/bridge and existing harness, before the late-auth fix:
 
 - Without any observed native authorization header, two fresh captures return `unavailable` / `auth_missing` before making a network request. After an authenticated native XHR is observed, the exact complete JSON transcript succeeds.
 - Observing the header through native fetch also restores exact JSON capture.
@@ -141,7 +141,7 @@ Three controlled checks reused the actual MAIN/bridge and existing harness witho
 
 Four existing focused tests passed: retained observations across hook replacement, missing-hook recovery, cancellation on changed credentials, and the shared temporary-error retry policy. This verifies current mechanisms, not the causes of old incidents. MAIN is normally installed at `document_start`; missing-header rejection must not be presented as the normal signed-in flow.
 
-**Decision: no code fix justified yet.** Late installation or a missed native login header is a possible readiness problem, but it has not been connected to these recorded failures. Current source already emits the specific closed cause markers. Inspect the next failure from the updated client before adding another retry, guessing credentials or changing authentication.
+**Implementation follow-up: late-auth timing is fixed; historical causes remain unknown.** A focused reproduction showed that capture rejected even when a normal authenticated DeepSeek request arrived 100 ms later. MAIN now waits up to 1.5 seconds only when authorization is missing, resumes immediately when native same-origin fetch/XHR supplies it, and keeps the existing capture deadline. Already-ready sessions start immediately. Missing auth still reports `unavailable` / `auth_missing` without issuing a history request; navigation and hook replacement cancel and clean the wait. No login/storage probe or permission bypass is added. Three new regressions failed before this fix and passed afterward, including exact recovered text, timeout, cancellation, clean subsequent capture and secret exclusion; all 114 focused tests passed. DeepSeek MAIN/bridge readiness advances to v17. This controlled timing fix does not establish the cause of the three historical incidents.
 
 Sources: [network MAIN](../extension/network-fetch-main.js), [network bridge](../extension/network-json-capture.js), [manifest](../extension/manifest.json), [capture tests](../test/network-json-capture.test.js). No database writes, private row exports, live-account capture or installed-script inspection were performed.
 
@@ -180,6 +180,7 @@ These are already supported or intentional bypasses. Keep them out of the open b
 - **Malformed unused Claude IDs; an unused Grok reply merely lacking its parent field.** The recent narrow fixes already handle these. Section 4 retains corrupted unused nodes pending native evidence.
 - **Different complete Claude pasted bodies share an attachment ID.** Preserve each distinct body; only exact repeats are deduplicated within the turn.
 - **DeepSeek `FILE.files` is one object instead of a list.** Current descriptor discovery and serialization normalize both.
+- **DeepSeek native login information arrives just after capture starts.** When initially missing, capture allows up to 1.5 seconds for observed same-origin auth within the existing deadline. Ready sessions do not wait; genuinely missing credentials still reject.
 - **Picker JSON failed temporarily before selection.** Selection can already make one serialized fresh read for recognized temporary errors.
 - **Speed off, toolbar transfer or an unsaved chat.** These select DOM intentionally; they are not failed JSON attempts.
 - **Excluded tools, binary/media and separate editor state.** Exclusion is not itself a capture failure. Do not recursively collect unrelated payloads just to increase captured characters.
@@ -220,3 +221,5 @@ The first three items below describe the original report update before the inter
 - Size-limit follow-up: rechecked current reader constants, the recorded ChatGPT branch-pruning change and its controlled large-unused-branch coverage. Deferred tuning until a real failure identifies its boundary. This documentation-only decision changes no limits or capture behavior; no new live payload or telemetry query was inspected.
 
 - DeepSeek readiness follow-up: three in-memory checks passed and four existing focused tests passed. Command: `node --test --test-timeout=30000 --test-name-pattern="^deepseek: (the previous hook|a missing MAIN hook)|^DeepSeek aborts an active capture|^temporary failure categories get one fresh JSON retry" --test-reporter=spec test/network-json-capture.test.js test/json-transfer-fallback.test.js`. Fresh aggregate telemetry confirms missing historical cause markers; no runtime, test or database behavior was changed.
+
+- DeepSeek late-auth implementation: three new regressions were red before the fix and green afterward; the complete focused network capture/transfer-fallback suite passed 114/114. Existing credentials, permission checks, raw/file/transcript budgets and capture deadline remain intact. No browser-account trial or attribution of the historical unavailable failures was performed.

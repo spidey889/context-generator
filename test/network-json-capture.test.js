@@ -93,6 +93,63 @@ function deepseekUploads(count = 6) {
   return f;
 }
 
+clockTest("DeepSeek waits briefly for late native auth and does not delay ready sessions", async () => {
+  for (const transport of ["xhr", "fetch"]) {
+    const h = setup("deepseek"), started = Date.now();
+    const pending = h.window.__capCaptureNetworkJson();
+    let settled = false;
+    pending.then(() => { settled = true; }, () => { settled = true; });
+    await new Promise(resolve => setTimeout(resolve, 100));
+    assert.equal(settled, false, "capture must allow the native login request to arrive");
+    assert.equal(h.requests.length, 0, "never request private history without observed auth");
+    if (transport === "xhr") await h.observe();
+    else await h.window.fetch("/api/v0/session", { headers: { authorization: "Bearer AUTH_SENTINEL" } });
+    assert.equal((await pending).text, h.fixture.expected);
+    assert.ok(Date.now() - started <= 200, "observed auth must release the wait immediately");
+    const readyStarted = Date.now();
+    assert.equal((await h.window.__capCaptureNetworkJson()).text, h.fixture.expected);
+    assert.ok(Date.now() - readyStarted < 100, "ready sessions must skip the grace period");
+    assert.equal(h.navigationListeners(), 0);
+    assert.doesNotMatch(JSON.stringify(h.replies), /AUTH_SENTINEL|SIGNED_SENTINEL/);
+  }
+});
+
+clockTest("DeepSeek missing auth stays bounded and a later native request enables a fresh capture", async () => {
+  const h = setup("deepseek"), started = Date.now();
+  await assert.rejects(h.window.__capCaptureNetworkJson(), error => {
+    assert.equal(error.captureFailureReason, "unavailable");
+    assert.equal(error.diagnostics.capture_detail, "auth_missing");
+    return true;
+  });
+  assert.ok(Date.now() - started >= 1500 && Date.now() - started < 1600);
+  assert.equal(h.requests.length, 0);
+  assert.equal(h.navigationListeners(), 0);
+  assert.ok(h.replies.every(reply => !reply.capture));
+  await h.observe();
+  assert.equal((await h.window.__capCaptureNetworkJson()).text, h.fixture.expected);
+});
+
+clockTest("DeepSeek cancels a pending auth wait on chat change or hook replacement", async () => {
+  for (const reason of ["navigate", "reinstall"]) {
+    const h = setup("deepseek");
+    const pending = h.window.__capCaptureNetworkJson();
+    pending.catch(() => {}); // Handle early rejection while advancing the clock; assert cancellation below.
+    await new Promise(resolve => setTimeout(resolve, 100));
+    if (reason === "navigate") { h.navigate("/a/chat/s/other"); h.navigate("/a/chat/s/smoke"); }
+    else { h.window.__capNetworkFetchState.version = 0; h.reinstall(files[1]); }
+    await assert.rejects(pending, error => error.diagnosticCode === "conversation_changed");
+    assert.equal(h.requests.length, 0);
+    assert.equal(h.navigationListeners(), 0);
+    assert.ok(h.replies.every(reply => !reply.capture));
+    await h.observe();
+    assert.equal((await h.window.__capCaptureNetworkJson()).text, h.fixture.expected);
+    const replies = h.replies.length;
+    await new Promise(resolve => setTimeout(resolve, 1600));
+    assert.equal(h.replies.length, replies, "cancelled waits must not deliver a late response");
+    assert.doesNotMatch(JSON.stringify(h.replies), /AUTH_SENTINEL|SIGNED_SENTINEL/);
+  }
+});
+
 test("DeepSeek JSON snapshots WIP, continuing and stopped own text without waiting for completion", async () => {
   for (const status of ["WIP", "INCOMPLETE", "FINISHED"]) {
     const h = setup("deepseek");
@@ -379,7 +436,7 @@ test("DeepSeek: one incomplete upload cancels siblings before fallback or a fres
   });
   assert.equal(h.requests.length, 5, "failure stops queued downloads");
   assert.equal(aborted.length, 3);
-  assert.equal(h.window.__capNetworkFetchState.version, 16);
+  assert.equal(h.window.__capNetworkFetchState.version, 17);
   assert.ok(h.replies.every(reply => !reply.capture));
   assert.equal(h.navigationListeners(), 0);
   assert.equal(h.listeners.size, 2);
@@ -459,7 +516,7 @@ for (const platform of ["gemini", "grok", "deepseek"]) test(`${platform}: the pr
   old.version = platform === "deepseek" ? 9 : platform === "gemini" ? 9 : 7;
   h.reinstall(files[1]);
   assert.notEqual(h.window.__capNetworkFetchState, old);
-  assert.equal(h.window.__capNetworkFetchState.version, platform === "deepseek" ? 16 : platform === "grok" ? 14 : 12);
+  assert.equal(h.window.__capNetworkFetchState.version, platform === "deepseek" ? 17 : platform === "grok" ? 14 : 12);
   assert.equal(h.listeners.size, 2);
   assert.equal((await h.window.__capCaptureNetworkJson()).text, h.fixture.expected);
 });

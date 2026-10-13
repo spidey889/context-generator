@@ -3,7 +3,7 @@
   if (!platform || !globalThis.__capNetworkJsonData) return;
   // Advance readiness version with adapter/contract changes: old MAIN closures
   // can survive extension reloads and must be replaced before a new capture.
-  const version = platform === "deepseek" ? 16 : platform === "grok" ? 14 : 12, channel = "cap-context-network-json-v1";
+  const version = platform === "deepseek" ? 17 : platform === "grok" ? 14 : 12, channel = "cap-context-network-json-v1";
   // Shared across unique text files; the final transcript has its own limits.
   const maxUploadBytes = 2100000;
   const previous = window.__capNetworkFetchState;
@@ -18,7 +18,7 @@
     const pattern = platform === "gemini" ? /\/app\/([^/]+)\/?$/ : platform === "grok" ? /\/c\/([^/]+)\/?$/ : /\/a\/chat\/s\/([^/]+)\/?$/;
     return { chat: location.pathname.match(pattern)?.[1], selected: platform === "grok" ? new URL(location.href).searchParams.get("rid") : null };
   };
-  let active = null;
+  let active = null, onAuthObserved = null;
   const observe = (input, options) => {
     try {
       const url = new URL(input instanceof Request ? input.url : input, location.href);
@@ -28,6 +28,7 @@
         if (headers.get("authorization")) {
           if (auth && auth !== headers.get("authorization")) active?.abort();
           auth = headers.get("authorization");
+          onAuthObserved?.();
         }
       }
       if (platform === "gemini" && url.pathname === "/_/BardChatUi/data/batchexecute") {
@@ -41,6 +42,23 @@
       }
     } catch { /* Observing must never change the site's native fetch/XHR. */ }
   };
+  // A native login request can arrive just after capture starts. Wait only for
+  // observed same-origin auth; this grace period shares the capture deadline.
+  const waitForAuth = signal => new Promise(resolve => {
+    let timer, settled = false;
+    const finish = () => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      signal.removeEventListener("abort", finish);
+      if (onAuthObserved === finish) onAuthObserved = null;
+      resolve();
+    };
+    onAuthObserved = finish;
+    signal.addEventListener("abort", finish, { once: true });
+    timer = setTimeout(finish, 1500);
+    if (auth || signal.aborted) finish();
+  });
   const wrappedFetch = function (...args) { observe(args[0], args[1]); return Reflect.apply(nativeFetch, this, args); };
   window.fetch = wrappedFetch;
   // Gemini's RPC and DeepSeek's authenticated history both use native XHR.
@@ -216,6 +234,7 @@
       } else {
         // Omitting x-device-id/cache client headers makes DeepSeek return a
         // full REPLACE snapshot. A MERGE/delta must never count as full history.
+        if (!auth) { await waitForAuth(controller.signal); check(); }
         if (!auth) throw new api.CaptureError("Refresh this signed-in DeepSeek chat to make fast capture ready.", "unavailable", "auth_missing");
         const data = await read(`/api/v0/chat/history_messages?chat_session_id=${encodeURIComponent(chat)}`, { headers: { authorization: auth } });
         const branch = api.deepseekBranch(data, chat);
