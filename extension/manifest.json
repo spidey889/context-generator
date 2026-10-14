@@ -82,7 +82,8 @@
     {
       "matches": [
         "https://spreadz.in/analysis*",
-        "https://spidey889.github.io/context-generator/analysis*"
+        "https://spidey889.github.io/context-generator/analysis*",
+        "https://context-generator-git-codex-tok-1ef029-vinits-projects-9bc84d4f.vercel.app/analysis*"
       ],
       "js": ["analysis-bridge.js"],
       "run_at": "document_idle"
