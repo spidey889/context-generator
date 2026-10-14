@@ -19,7 +19,7 @@ behavior are unchanged. New records contain numbers and closed labels only.
   This verifies ChatGPT's existing raw guard and incomplete outcome; its original
   no-scraping/no-summary behavior was preserved. No model call or receipt was invented.
 
-Validation: 661 offline tests, release scroll check, 41 migrations / 1,414 database
+Validation: 662 offline tests, release scroll check, 41 migrations / 1,414 database
 checks, source/destination handoff matrix, retry/outbox persistence, all five installed
 Brave JSON flows, DeepSeek/Claude size-to-DOM recovery with original copy and exact
 paste/no Send. Ordinary browser telemetry stayed local. The explicit live smoke

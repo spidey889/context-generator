@@ -150,6 +150,27 @@ test("ChatGPT forwards the failing request stage and HTTP status as closed diagn
   });
 });
 
+test("ChatGPT file failures report their own HTTP status and preserve guard order", async () => {
+  for (const stage of ["attachment_descriptor", "attachment_body"]) {
+    const { data, fetchImpl } = pasteFixture();
+    const h = setup(data, 200, { fetchImpl: request => {
+      const pathname = new URL(request.url, "https://chatgpt.com").pathname;
+      const failing = stage === "attachment_descriptor" ? pathname.startsWith("/backend-api/files/download/") : pathname === "/backend-api/estuary/content";
+      return failing ? new Response("unavailable", { status: 503, headers: { "content-type": "text/plain", "content-length": "4000000" } }) : fetchImpl(request);
+    } });
+    await discover(h);
+    await assert.rejects(h.window.__capCaptureChatGptJson(), error => {
+      assert.equal(error.captureFailureReason, "incomplete", "Keep the existing file error classification.");
+      assert.equal(error.diagnostics.capture_http_status, 503);
+      assert.equal(error.jsonCapture.http_status, 503);
+      assert.equal(error.jsonCapture.failure_stage, stage);
+      if (stage === "attachment_body") assert.equal(error.jsonCapture.failure_check, "http_error", "HTTP rejects before the advertised-size guard.");
+      assert.equal(error.jsonCapture.transcript_chars, undefined);
+      return true;
+    });
+  }
+});
+
 function streamJsonChunks(chunks, headers = {}, cancelError = false) {
   const stats = { bytes: 0, cancelled: 0 };
   let index = 0;

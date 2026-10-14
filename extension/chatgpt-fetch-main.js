@@ -71,11 +71,13 @@
     window.addEventListener("popstate", changed);
     const fetchJson = async (url, options = {}) => {
       delete reply.status;
+      delete metrics.data.http_status;
       metrics.add("requests");
       const began = Date.now();
-      try { return await Reflect.apply(nativeFetch, window, [url, {
+      try { const response = await Reflect.apply(nativeFetch, window, [url, {
       ...options, credentials: "same-origin", cache: "no-store", signal: controller.signal
-      }]); } finally { metrics.add("download_ms", Date.now() - began); }
+      }]); metrics.set({ http_status: response.status }); return response;
+      } finally { metrics.add("download_ms", Date.now() - began); }
     };
     // Discard owned responses before retry/fallback; cleanup must never replace
     // the bounded capture error with private upstream cancellation details.
@@ -134,10 +136,15 @@
       const observation = metrics.response("attachment_body", maxCaptureBytes - bytesRead, response.headers.get("content-length"), false);
       try {
         if (controller.signal.aborted || currentChat() !== chat) throw new Error("changed");
-        if (Number(response.headers.get("content-length")) > expectedSize) metrics.fail("attachment_length_mismatch", "attachment_body", "content_length", Number(response.headers.get("content-length")), expectedSize, response.status);
         if (response.status !== 200 || response.headers.has("content-range")
-          || responseMediaType(response) !== "text/plain"
-          || Number(response.headers.get("content-length")) > expectedSize) throw new Error("paste");
+          || responseMediaType(response) !== "text/plain") {
+          metrics.fail(response.status !== 200 ? "http_error" : response.headers.has("content-range") ? "partial_response" : "non_json_response", "attachment_body", undefined, undefined, undefined, response.status);
+          throw new Error("paste");
+        }
+        if (Number(response.headers.get("content-length")) > expectedSize) {
+          metrics.fail("attachment_length_mismatch", "attachment_body", "content_length", Number(response.headers.get("content-length")), expectedSize, response.status);
+          throw new Error("paste");
+        }
         if (expectedSize > maxCaptureBytes - bytesRead) { metrics.fail("raw_remaining_files_limit", "attachment_body", "declared_files", expectedSize, maxCaptureBytes - bytesRead); throw new Error("paste"); }
         // The manifest bounds this allocation. Never buffer an oversized body
         // first: reject the first excess chunk, including without Content-Length.
