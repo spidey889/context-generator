@@ -4,10 +4,10 @@
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
-const { PGlite } = require(process.env.PGLITE_MODULE_PATH || "@electric-sql/pglite");
+const { createVerificationDatabase, checkSnapshot } = require("./check-telemetry-backup.js");
 
 async function main() {
-  const db = new PGlite();
+  const db = await createVerificationDatabase();
   let checks = 0;
   const equal = (actual, expected) => { assert.deepEqual(actual, expected); checks++; };
   const one = async (sql, params = []) => (await db.query(sql, params)).rows[0];
@@ -246,7 +246,6 @@ async function main() {
     await db.exec("set enable_seqscan=off;");
     const indexedPlan = await db.query("explain (format json) select attempt_id from public.transfer_events where install_id=$1 order by attempted_at desc limit 50", [install]);
     assert.match(JSON.stringify(indexedPlan.rows), /transfer_events_install_id_attempted_at_idx/); checks++;
-    const { checkSnapshot } = require("./check-telemetry-backup.js");
     const upgradeOptions = { applyPending: true, throughVersion: "20261002073711" };
     // Supabase CLI migration history stores parsed statements without trailing
     // semicolons, whereas MCP can store one whole SQL file. Replay both formats.
@@ -392,8 +391,12 @@ async function main() {
         checks += await require("./check-useful-diagnostics-db.js").checkAttachmentSizeFailure(db, sql, appliedMigrations, "file size");
       } else if (name.endsWith("_file_size_in_failure_reason.sql")) {
         checks += await require("./check-file-size-failure-db.js").checkFileSizeFailureReason(db, sql, appliedMigrations);
-      } else if (name.endsWith("_json_capture_attempt_diagnostics.sql") || name.endsWith("_json_capture_transport_check_labels.sql")) {
+      } else if (name.endsWith("_json_capture_attempt_diagnostics.sql")) {
         checks += await require("./check-json-capture-diagnostics-db.js").checkJsonCaptureDiagnostics(db, sql);
+      } else if (name.endsWith("_json_capture_transport_check_labels.sql")) {
+        const previous = appliedMigrations.find(migration => migration.name === "json_capture_attempt_diagnostics");
+        assert.ok(previous, "Original JSON diagnostics migration must be replayed before its label update"); checks++;
+        checks += await require("./check-json-capture-diagnostics-db.js").checkJsonCaptureDiagnostics(db, sql, previous.statements.join("\n"));
       } else await db.exec(sql);
     }
     checks += await require("./check-served-model-db.js").checkStoreModelReceipts(db);
