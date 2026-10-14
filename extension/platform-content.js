@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-12-capture-size-stop-v143";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-14-size-dom-fallback-v144";
   const INLINE_PILL_SIZE = 36;
   const ownedUiStyleSheets = new Map();
   const CLAUDE_INLINE_STYLE_ID = "context-generator-claude-inline-styles";
@@ -7888,19 +7888,17 @@
           // away-and-back change that a final URL comparison cannot detect.
           if (/conversation changed during capture\./i.test(error?.message || "")) throw error;
           if (window.location.href !== sourceUrl) throw createDiagnosticError("The conversation changed during capture. Return to the source chat and try again.", "conversation_changed");
-          // A hard size rejection cannot be repaired by scrolling. Preserve its
-          // capture details, but end here before DOM recovery hides it as a timeout.
-          if (isCaptureSizeLimitError(error)) throw Object.assign(new Error(OVERSIZED_CONVERSATION_ERROR_MESSAGE), {
-            code: "conversation_too_large", diagnosticCode: "conversation_too_large",
-            captureFailureReason: "size_limit", diagnostics: error?.diagnostics
-          });
+          // Native downloads/files can exceed their limits even when the DOM
+          // transcript fits. Keep the rejection detail and try normal capture once.
+          const sizeLimit = isCaptureSizeLimitError(error);
           // Best-effort plain-text capture returns with a warning above. Actual
           // ChatGPT JSON failures retain their existing active-reply exception.
-          if (useChatGptJson && !isSourceReplyInProgress()) throw error;
+          if (useChatGptJson && !sizeLimit && !isSourceReplyInProgress()) throw error;
           if (trace?.diagnostics) { for (const key of ["error_code", "error_origin", "failure_site", "error_type", "error_file", "error_line", "error_column"]) delete trace.diagnostics[key]; }
           // Recovery stays within this attempt and reuses its destination.
-          showFastCaptureFallbackMessage();
-          const jsonFallbackReason = sanitizeCaptureDiagnostics({ jsonFallbackReason: error?.captureFailureReason }).jsonFallbackReason || "request_failed";
+          showFastCaptureFallbackMessage(sizeLimit);
+          const jsonFallbackReason = sizeLimit ? "size_limit"
+            : sanitizeCaptureDiagnostics({ jsonFallbackReason: error?.captureFailureReason }).jsonFallbackReason || "request_failed";
           updateTransferDiagnostics(trace, { json_fallback_code: jsonFallbackReason, last_operation: "capture_dom" }, "json_fallback");
           reportCaptureProgress(trace, "structured", true);
           markTransferTrace(trace, "fast capture failed; using normal capture", { jsonFallbackReason });
@@ -7928,14 +7926,17 @@
     }
   }
 
-  function showFastCaptureFallbackMessage() {
+  function showFastCaptureFallbackMessage(sizeLimit = false) {
     const group = document.getElementById("context-generator-status-group");
     if (!group) return;
     const notice = document.createElement("div");
     notice.id = "context-generator-capture-notice";
     notice.setAttribute("role", "status");
     notice.style.cssText = "font-size:12px;line-height:1.4;color:inherit";
-    notice.textContent = "Fast capture failed. Using normal capture instead.";
+    if (sizeLimit) notice.style.whiteSpace = "pre-line";
+    notice.textContent = sizeLimit
+      ? `${OVERSIZED_CONVERSATION_ERROR_MESSAGE}\n\nFast capture skipped. Using slower capture.`
+      : "Fast capture failed. Using normal capture instead.";
     group.appendChild(notice);
   }
 

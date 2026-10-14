@@ -58,10 +58,14 @@ const CHATGPT_HISTORY_OVERSIZE_SMOKE = CHATGPT_FAILURE_SMOKE === "history-oversi
 const CHATGPT_PASTE_AUTH_SMOKE = JSON_SOURCE === "chatgpt" && process.env.CAP_CONTEXT_CHATGPT_AUTH_SMOKE === "paste401";
 const CLAUDE_PARTIAL_SMOKE = JSON_SOURCE === "claude" && process.env.CAP_CONTEXT_CLAUDE_PARTIAL_SMOKE === "1";
 const CLAUDE_OVERSIZE_SMOKE = JSON_SOURCE === "claude" && process.env.CAP_CONTEXT_CLAUDE_PARTIAL_SMOKE === "oversize";
-const SIZE_CAPTURE_SMOKE = Boolean(CLAUDE_OVERSIZE_SMOKE || DEEPSEEK_OVERSIZE_SMOKE || CHATGPT_PASTE_OVERSIZE_SMOKE || CHATGPT_HISTORY_OVERSIZE_SMOKE);
-const JSON_FALLBACK_SMOKE = Boolean(CLAUDE_PARTIAL_SMOKE || NETWORK_FAILURE) && !SIZE_CAPTURE_SMOKE;
-// Hard size limits now stop capture; only recoverable fixtures enter DOM fallback.
-const EXPECTED_JSON_FALLBACK_REASON = GROK_FILE_ONLY_SMOKE ? "unsupported" : "incomplete";
+// ChatGPT's raw-history/file-body fixtures retain their incomplete classification.
+const SIZE_CAPTURE_SMOKE = Boolean(CLAUDE_OVERSIZE_SMOKE || DEEPSEEK_OVERSIZE_SMOKE);
+const JSON_FALLBACK_SMOKE = Boolean(CLAUDE_PARTIAL_SMOKE || NETWORK_FAILURE || SIZE_CAPTURE_SMOKE);
+// Size failures still cancel the native read, then use the same DOM recovery.
+const EXPECTED_JSON_FALLBACK_REASON = SIZE_CAPTURE_SMOKE ? "size_limit" : GROK_FILE_ONLY_SMOKE ? "unsupported" : "incomplete";
+const EXPECTED_JSON_FALLBACK_NOTICE = SIZE_CAPTURE_SMOKE
+  ? "This chat is too long to transfer. Next time, try summarizing it earlier.\n\nFast capture skipped. Using slower capture."
+  : "Fast capture failed. Using normal capture instead.";
 const TELEMETRY_DATABASE_SMOKE = process.env.CAP_CONTEXT_TELEMETRY_SMOKE === "1";
 const FAILURE_ARTIFACT_DIR = process.env.CAP_CONTEXT_SMOKE_ARTIFACT_DIR || "";
 
@@ -2440,9 +2444,9 @@ async function run() {
     assert.equal(clickResult.pickerStyleIgnored, true, "Dark Reader must leave the picker stylesheet alone.");
 
     if (JSON_FALLBACK_SMOKE) {
-      await waitFor(() => sourceSession.evaluate(`document.getElementById("context-generator-capture-notice")?.textContent === "Fast capture failed. Using normal capture instead."`), "the safe fast-capture fallback notice");
+      await waitFor(() => sourceSession.evaluate(`document.getElementById("context-generator-capture-notice")?.textContent === ${JSON.stringify(EXPECTED_JSON_FALLBACK_NOTICE)}`), "the safe fast-capture fallback notice");
     }
-    if (SIZE_CAPTURE_SMOKE || JSON_SOURCE === "chatgpt" && CHATGPT_FAILURE_SMOKE && CHATGPT_FAILURE_SMOKE !== "streaming") {
+    if (JSON_SOURCE === "chatgpt" && CHATGPT_FAILURE_SMOKE && CHATGPT_FAILURE_SMOKE !== "streaming") {
       await waitFor(() => sourceSession.evaluate('Boolean(document.getElementById("context-generator-error-text")?.textContent)'), "the JSON capture error");
       const failedCapture = await sourceSession.evaluate(`(() => {
         const list = document.getElementById("cap-smoke-chat-history");
@@ -2456,22 +2460,13 @@ async function run() {
       }
       assert.equal(failedCapture.fallbackNotice, false, "Terminal capture errors must not enter DOM recovery.");
       assert.match(failedCapture.error, /JSON capture|too long|limit|Fast capture/i);
-      if (SIZE_CAPTURE_SMOKE) assert.equal(failedCapture.error,
-        "This chat is too long to transfer. Next time, try summarizing it earlier.");
       assert.equal(state.jsonRequests - jsonRequestsBeforeTransfer, 1, "One fresh API read must precede the error.");
       assert.equal(state.summaryRequests.length, 0, "A failed JSON read must not submit DOM history.");
       if (TELEMETRY_DATABASE_SMOKE) {
         const terminal = await waitFor(() => state.telemetryRequests.find(payload => payload.status === "failed"), "the installed worker's failed capture telemetry");
-        await telemetryFixture.verifyFailureOutcome(terminal, SIZE_CAPTURE_SMOKE);
+        await telemetryFixture.verifyFailureOutcome(terminal, false);
         assert.equal(terminal.diagnostics.failure_site, CHATGPT_FAILURE_SMOKE === "partial" ? "capture_serialize" : "capture_history");
         if (CHATGPT_FAILURE_SMOKE === "ranged") assert.equal(terminal.diagnostics.capture_http_status, 206);
-        if (SIZE_CAPTURE_SMOKE) {
-          assert.equal(terminal.failure_reason, "conversation_too_large");
-          assert.equal(terminal.diagnostics.error_code, "conversation_too_large");
-          assert.equal(terminal.diagnostics.capture_detail, "size_limit");
-          assert.equal(terminal.diagnostics.json_fallback_code, undefined);
-          assert.ok(!terminal.diagnostics.events.some(event => event.event === "capture_prepare"), "A size error must not prepare DOM scrolling.");
-        }
         process.stdout.write("✓ Precise capture failure reached the real local relay, Edge and SQL without private content.\n");
       }
       if (CHATGPT_PASTE_OVERSIZE_SMOKE) {
@@ -2486,10 +2481,6 @@ async function run() {
         assert.ok(state.oversizeHistory.bytes < 40000000, "The full oversized history tail must not be downloaded.");
         assert.equal(state.pasteContentRequests + state.pasteDescriptorRequests, 0, "Rejected history must not begin paste downloads.");
         process.stdout.write(`✓ Brave cancelled oversized history after ${state.oversizeHistory.bytes} fixture bytes.\n`);
-      }
-      if (DEEPSEEK_OVERSIZE_SMOKE || CLAUDE_OVERSIZE_SMOKE) {
-        await waitFor(() => state.oversizeHistory.cancelled, "oversized history reader cancellation");
-        assert.ok(state.oversizeHistory.bytes < 8000000, "The full oversized history tail must not be downloaded.");
       }
       process.stdout.write("✓ JSON capture failure stops without DOM fallback or summary submission.\n");
       return;
@@ -2512,6 +2503,7 @@ async function run() {
       assert.equal(state.jsonRequests - jsonRequestsBeforeTransfer, JSON_SOURCE === "grok" ? 2 : 1, "Fast capture must not be retried after failure.");
       if (DEEPSEEK_OVERSIZE_SMOKE || CLAUDE_OVERSIZE_SMOKE) {
         assert.equal(state.oversizeHistory.cancelled, true, "Brave must cancel the oversized history response.");
+        // Server totals include queued bytes; capture tests verify the exact client limit.
         assert.ok(state.oversizeHistory.bytes < 20000000, "The full oversized tail must not be downloaded.");
         assert.equal(state.pasteContentRequests, 0, "Rejected history must not begin file downloads.");
         process.stdout.write(`✓ Brave cancelled oversized history after ${state.oversizeHistory.bytes} fixture bytes.\n`);
