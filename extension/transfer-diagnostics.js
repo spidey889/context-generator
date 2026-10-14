@@ -47,6 +47,33 @@
   };
   enums.summary_failure_site = enums.capture_failure_site = enums.failure_site;
   enums.summary_error_type = enums.capture_error_type = enums.error_type;
+  // JSON measurements survive DOM recovery. A closed, flat record keeps this
+  // useful on failures without allowing native responses or private file data.
+  const jsonAttemptEnums = {
+    outcome: ["succeeded", "partial", "failed", "cancelled"],
+    mode: ["prefetch", "fresh", "retry"],
+    failure_check: ["raw_header_limit", "raw_total_stream_limit", "supported_files_limit", "transcript_char_limit", "transcript_byte_limit",
+      "auth_missing", "hook_unavailable", "busy", "http_error", "network_error", "invalid_json", "invalid_utf8", "non_json_response",
+      "partial_response", "incomplete_history", "invalid_branch", "branch_cycle", "parent_missing", "duplicate_id", "count_mismatch",
+      "text_invalid", "canvas_invalid", "missing_text", "attachment_failed", "attachment_length_mismatch", "timeout", "conversation_changed",
+      "unsupported_content", "routing_unavailable", "cancelled", "unknown"],
+    failure_value_source: ["content_length", "reader_bytes", "declared_files", "string_length", "utf8_bytes"],
+    failure_stage: enums.capture_request_stage,
+    raw_response_stage: enums.capture_request_stage,
+    raw_header_stage: enums.capture_request_stage,
+    numeric_saturated: ["lower_bound"]
+  };
+  const jsonAttemptNumbers = ["adapter_version", "failure_value", "failure_limit", "http_status", "raw_bytes", "raw_limit_bytes",
+    "raw_response_bytes", "raw_response_limit_bytes", "raw_header_bytes", "raw_header_limit_bytes", "history_bytes", "session_bytes",
+    "descriptor_bytes", "file_body_bytes", "requests", "pages", "history_items", "selected_turns", "files_supported", "files_ignored",
+    "files_ignored_pdf", "files_ignored_image", "files_ignored_other", "files_declared_bytes", "files_downloaded_bytes", "files_limit_bytes",
+    "transcript_chars", "transcript_bytes", "transcript_char_limit", "transcript_byte_limit", "hook_ms", "auth_ms", "download_ms",
+    "parse_ms", "serialize_ms", "total_ms", "deadline_ms", "auth_refreshes"];
+  const jsonAttemptSchema = {
+    ...Object.fromEntries(Object.entries(jsonAttemptEnums).map(([key, values]) => [key, { type: "string", values }])),
+    ...Object.fromEntries(jsonAttemptNumbers.map(key => [key, { type: "number", max: 2147483647 }])),
+    http_status: { type: "number", min: 100, max: 599 }
+  };
   const booleans = ["online", "source_saved", "speed_enabled", "json_attempted", "source_changed", "cancelled",
     "destination_prepared", "prepared_reused", "prepared_rejected", "fresh_recovery", "script_injected",
     "editor_seen", "editor_connected", "draft_present", "paste_populated", "paste_stable", "user_handled",
@@ -65,13 +92,24 @@
     ...Object.fromEntries(numbers.map(key => [key, { type: "number", max: 2147483647 }])),
     capture_http_status: { type: "number", min: 100, max: 599 },
     summary_provider_status: { type: "number", min: 100, max: 599 },
-    events: { type: "array" }, delivery_events: { type: "array" }, paste_events: { type: "array" }, prepared_diagnostics: { type: "object" }
+    events: { type: "array" }, delivery_events: { type: "array" }, paste_events: { type: "array" }, json_attempts: { type: "array" }, prepared_diagnostics: { type: "object" }
   };
-  function validField(key, value) {
-    const rule = schema[key];
+  function validField(key, value, rules = schema) {
+    const rule = rules[key];
     if (!rule || typeof value !== rule.type) return false;
     if (rule.values) return rule.values.includes(value);
     return rule.type !== "number" || (Number.isInteger(value) && value >= (rule.min || 0) && value <= rule.max);
+  }
+  function validateJsonAttempt(input) {
+    if (!input || typeof input !== "object" || Array.isArray(input)
+      || !jsonAttemptEnums.outcome.includes(input.outcome) || !jsonAttemptEnums.mode.includes(input.mode)) return null;
+    if (Object.entries(input).some(([key, value]) => !validField(key, value, jsonAttemptSchema))) return null;
+    return { ...input };
+  }
+  function jsonAttempt(target, input) {
+    const safe = validateJsonAttempt(input);
+    if (!target || !safe || (target.json_attempts?.length || 0) >= 2) return;
+    (target.json_attempts || (target.json_attempts = [])).push(safe);
   }
   function validate(input, depth = 0) {
     if (!input || typeof input !== "object" || Array.isArray(input) || input.version !== 1) return null;
@@ -81,6 +119,10 @@
         if (depth >= 1) return null;
         result[key] = validate(value, depth + 1);
         if (!result[key]) return null;
+      } else if (key === "json_attempts") {
+        if (!Array.isArray(value) || value.length > 2) return null;
+        result[key] = value.map(validateJsonAttempt);
+        if (result[key].some(entry => !entry)) return null;
       } else if (["events", "delivery_events", "paste_events"].includes(key)) {
         if (!Array.isArray(value) || value.length > 32) return null;
         if (value.some(event => !event || typeof event !== "object" || Array.isArray(event)
@@ -135,7 +177,7 @@
       request_failed: "capture_json_failed" })[error?.captureFailureReason] || fallback;
   }
   function errorDetails(error, operation) {
-    const details = { diagnostics_revision: 2 };
+    const details = { diagnostics_revision: 3 };
     // Only fixed observations cross contexts. Exception messages/stacks can
     // contain response snippets, tokens or conversation content.
     const safe = validate(error?.diagnostics);
@@ -179,7 +221,7 @@
     update(target, { ...errorDetails(error, target?.last_operation), error_code: code, error_origin: origin });
     event(target, "failure", atMs, origin === "destination" ? "paste_events" : origin === "background" ? "delivery_events" : "events", code);
   }
-  const api = { schema, codes, operations, events, validate, snapshot, update, event, errorCode, errorDetails, operationErrorCode, failure, claudePage };
+  const api = { schema, jsonAttemptSchema, validateJsonAttempt, jsonAttempt, codes, operations, events, validate, snapshot, update, event, errorCode, errorDetails, operationErrorCode, failure, claudePage };
   root.CapTransferDiagnostics = api;
   if (typeof module !== "undefined" && module.exports) module.exports = api;
 })(globalThis);

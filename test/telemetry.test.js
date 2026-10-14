@@ -313,6 +313,24 @@ test("Vercel and Supabase enforce the same metadata-only telemetry schema", asyn
   }
 });
 
+test("JSON observations are accepted or rejected identically by extension, relay and Edge", async () => {
+  const contract = require("../extension/transfer-diagnostics.js");
+  assert.equal(fs.readFileSync(path.join(ROOT, "extension/transfer-diagnostics.js"), "utf8"),
+    fs.readFileSync(path.join(ROOT, "supabase/functions/_shared/transfer-diagnostics.js"), "utf8"));
+  const { validateTelemetryPayload: edgeValidate } = await import(pathToFileURL(VALIDATION_PATH).href);
+  const entry = { outcome: "failed", mode: "fresh", failure_check: "raw_header_limit", failure_value_source: "content_length",
+    failure_value: 8000000, failure_limit: 6000000, raw_limit_bytes: 6000000 };
+  for (const [attempts, accepted] of [[[], true], [[entry], true], [[entry, { outcome: "succeeded", mode: "retry" }], true],
+    [[entry, entry, entry], false], [[{ ...entry, url: "PRIVATE" }], false], [[{ ...entry, failure_check: "PRIVATE" }], false],
+    [[{ ...entry, raw_bytes: -1 }], false], [[{ ...entry, raw_bytes: 0.1 }], false]]) {
+    const diagnostics = { version: 1, diagnostics_revision: 3, json_attempts: attempts };
+    const payload = makeTelemetryPayload({ diagnostics });
+    assert.equal(!!contract.validate(diagnostics), accepted);
+    assert.equal(!!VERCEL_VALIDATION.validateTelemetryPayload(payload), accepted);
+    assert.equal(!!edgeValidate(payload), accepted);
+  }
+});
+
 test("Vercel forwards valid telemetry with server-only Supabase credentials", async (t) => {
   const originalFetch = global.fetch;
   const originalUrl = process.env.SUPABASE_TELEMETRY_FUNCTION_URL;
