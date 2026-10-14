@@ -7,7 +7,8 @@
     diagnostics: { version: 1, capture_detail: captureFailureReason === "size_limit" ? "size_limit" : detail, capture_request_stage: stage, failure_site: `capture_${stage}`,
       ...(Number.isInteger(status) && status >= 100 && status <= 599 ? { capture_http_status: status } : {}) }
   });
-  function serialize(data, chat) {
+  function serialize(data, chat, metrics) {
+    metrics?.set({ files_supported: 0, files_ignored: 0, files_declared_bytes: 0, files_downloaded_bytes: 0 });
     // Report structural metadata only, never message text, file names, or tool payloads.
     const unsupported = (reason, detail = "incomplete_history") => captureError(`This conversation has incomplete or unsupported JSON content: ${reason} Turn JSON capture off to use DOM capture.`, "incomplete", detail);
     const excludedContentTypes = new Set();
@@ -50,7 +51,7 @@
     const seen = new Set();
     let id = data.current_leaf_message_uuid;
     while (id) {
-      if (duplicateIds.has(id)) throw unsupported("The active branch contains duplicate message IDs.", "invalid_branch");
+      if (duplicateIds.has(id)) { metrics?.fail("duplicate_id", "serialize"); throw unsupported("The active branch contains duplicate message IDs.", "invalid_branch"); }
       const message = messages.get(id);
       if (!message) throw unsupported(branch.length ? "A parent message is missing from the active branch (possibly an unrecognized root marker)." : "The active branch's last message is missing from the response.");
       if (seen.has(id)) throw unsupported("The active branch's parent links form a cycle.", "branch_cycle");
@@ -65,6 +66,13 @@
     }
     const turns = branch.reverse().flatMap(message => {
       if (!["human", "assistant"].includes(message.sender)) return [];
+      const fileMetadata = Array.isArray(message.attachments) && message.attachments.length ? message.attachments
+        : Array.isArray(message.files) ? message.files : [];
+      for (const file of fileMetadata) {
+        if (file?.file_type === "txt" && file.file_name === "") continue;
+        metrics?.ignored(file?.file_type === "pdf" || (typeof file?.file_name === "string" && /\.pdf$/i.test(file.file_name)) ? "pdf" : "other",
+          typeof file?.file_type === "string" && /^image\//i.test(file.file_type) || typeof file?.file_name === "string" && /\.(png|jpe?g|gif|webp|svg)$/i.test(file.file_name));
+      }
       assertComplete(message, "Active-branch message");
       // Generation can continue after this read. Capture the strings available
       // now; missing history and truncated payloads remain separate errors.
@@ -114,6 +122,8 @@
         const id = typeof attachment.id === "string" && attachment.id ? attachment.id : null;
         const seenBodies = id ? pastedBodiesById.get(id) : null;
         if (!pastedText.trim() || seenBodies?.has(pastedText)) continue;
+        metrics?.add("files_supported");
+        if (Number.isSafeInteger(attachment.file_size)) metrics?.add("files_declared_bytes", attachment.file_size);
         if (id) {
           if (seenBodies) seenBodies.add(pastedText);
           else pastedBodiesById.set(id, new Set([pastedText]));
@@ -164,7 +174,8 @@
     });
     if (!turns.length) throw captureError("Claude JSON capture found no usable user or assistant text after skipping tools, files, images, and artifacts. Turn JSON capture off to use DOM capture.", "incomplete");
     const text = `Claude conversation:\n\n${turns.map(turn => `${turn.role === "user" ? "User" : "Assistant"}: ${turn.text}`).join("\n\n")}`;
-    if (text.length > 500000 || new TextEncoder().encode(text).length > 2000000) {
+    metrics?.set({ selected_turns: turns.length });
+    if (metrics ? !metrics.transcript(text) : text.length > 500000 || new TextEncoder().encode(text).length > 2000000) {
       throw captureError("Conversation exceeds the supported 500,000 character / 2 MB limit.", "size_limit", "size_limit");
     }
     return { text, messages: turns, messageTurnCount: turns.length, excludedContentTypes: [...excludedContentTypes].sort() };
@@ -186,7 +197,7 @@
       const receive = event => {
         const reply = event.data;
         if (event.source === window && event.origin === location.origin && reply?.channel === channel
-          && reply.type === "pong" && reply.id === id && reply.version === 11) finish(true);
+          && reply.type === "pong" && reply.id === id && reply.version === 12) finish(true);
       };
       const ping = () => {
         if (settled) return;
@@ -205,7 +216,8 @@
     });
   }
 
-  window.__capCaptureClaudeJson = async (expectedPath = location.pathname) => {
+  window.__capCaptureClaudeJson = async (expectedPath = location.pathname, metrics) => {
+    const hookStarted = Date.now();
     const chat = expectedPath.match(/^\/chat\/([^/]+)$/)?.[1];
     if (!chat) throw new Error("Open a saved Claude conversation to use JSON capture.");
     let changed = location.pathname !== expectedPath;
@@ -223,6 +235,7 @@
           throw captureError("Claude JSON hook is not ready. Refresh this chat and try again, or turn JSON capture off.", "unavailable", "hook_unavailable", "hook");
         }
       }
+      metrics.set({ hook_ms: Date.now() - hookStarted, adapter_version: 12 });
       if (changed || location.pathname !== expectedPath) throw changedError("The Claude conversation changed during capture.");
       return await new Promise((resolve, reject) => {
         const id = crypto.randomUUID();
@@ -231,11 +244,12 @@
           const reply = event.data;
           if (event.source !== window || event.origin !== location.origin || reply?.channel !== channel || reply.type !== "response" || reply.id !== id) return;
           cleanup();
+          metrics.adopt(reply.jsonCapture);
           try {
             if (changed || location.pathname !== expectedPath || reply.chat !== chat) throw changedError("The Claude conversation changed during capture.");
             if (reply.error) throw captureError("Claude JSON capture failed. Refresh this conversation or turn JSON capture off.", reply.error === "busy" ? "unavailable" : reply.captureFailureReason || "request_failed",
               reply.error === "busy" ? "busy" : reply.captureDetail || "network_error", "history", reply.status);
-            resolve(serialize(reply.data, chat));
+            resolve(metrics.timed("serialize_ms", () => serialize(reply.data, chat, metrics)));
           } catch (error) { reject(error); }
         };
         const timer = setTimeout(() => { cleanup(); reject(captureError("Claude JSON capture timed out. Refresh or turn JSON capture off.", "timeout", "timeout", "history")); }, 17000);
@@ -246,5 +260,18 @@
       window.navigation?.removeEventListener("navigate", navigated);
       window.removeEventListener("popstate", navigated);
     }
+  };
+
+  // Only an accepted source attempt is persisted by platform-content. Unused
+  // picker snapshots stay in memory and never create telemetry reports.
+  const readCapture = window.__capCaptureClaudeJson;
+  window.__capCaptureClaudeJson = async expectedPath => {
+    const metrics = globalThis.CapJsonCaptureMetrics.create({ deadline_ms: 17000 });
+    try {
+      const capture = await readCapture(expectedPath, metrics);
+      metrics.set({ selected_turns: capture.messageTurnCount });
+      if (capture.captureWarning) metrics.set({ outcome: "partial", failure_check: "text_invalid", failure_stage: "serialize" });
+      return { ...capture, jsonCapture: metrics.finish() };
+    } catch (error) { error.jsonCapture = metrics.finish(error); throw error; }
   };
 })();

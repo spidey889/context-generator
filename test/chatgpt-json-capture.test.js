@@ -7,7 +7,7 @@ const { webcrypto } = require("node:crypto");
 const { clockTest } = require("./helpers/clock");
 const shouldRetryJson = require("./helpers/transfer-flow").loadTransferFlow().shouldRetrySourceJson;
 // Reuse compiled code; every setup still executes it in a fresh VM with its own hook state.
-const scripts = new Map(["chatgpt-fetch-main.js", "chatgpt-json-capture.js"].map(file =>
+const scripts = new Map(["transfer-diagnostics.js", "json-capture-metrics.js", "chatgpt-fetch-main.js", "chatgpt-json-capture.js"].map(file =>
   [file, new vm.Script(fs.readFileSync(path.join(__dirname, "..", "extension", file), "utf8"), { filename: file })]));
 const chat = "test-chat";
 const fullUrl = `https://chatgpt.com/backend-api/conversation/${chat}`;
@@ -41,6 +41,8 @@ test("ChatGPT keeps readable JSON text and flags malformed plain-text parts", as
     const capture = await harness.window.__capCaptureChatGptJson();
     assert.equal(capture.text, "ChatGPT conversation:\n\nUser: Supported text\n\nAssistant: Selected answer");
     assert.equal(capture.captureWarning, "text_invalid");
+    assert.equal(capture.jsonCapture.outcome, "partial");
+    assert.equal(capture.jsonCapture.failure_check, "text_invalid");
     assert.doesNotMatch(JSON.stringify(capture), /PRIVATE_DETAILS_SENTINEL/);
   }
   const data = fixture();
@@ -53,6 +55,17 @@ test("ChatGPT keeps readable JSON text and flags malformed plain-text parts", as
   });
   const clean = setup(); await discover(clean);
   assert.equal((await clean.window.__capCaptureChatGptJson()).captureWarning, undefined);
+});
+
+test("ChatGPT JSON measurements keep the raw and final text limits separate", async () => {
+  const h = setup(); await discover(h);
+  const capture = await h.window.__capCaptureChatGptJson();
+  assert.equal(capture.jsonCapture.raw_limit_bytes, 32000000);
+  assert.equal(capture.jsonCapture.transcript_chars, capture.text.length);
+  assert.equal(capture.jsonCapture.transcript_bytes, Buffer.byteLength(capture.text));
+  assert.equal(capture.jsonCapture.history_items, 4);
+  assert.equal(capture.jsonCapture.selected_turns, 2);
+  assert.equal(capture.jsonCapture.failure_check, undefined);
 });
 
 function setup(data = fixture(), status = 200, { headers = {}, body, fetchImpl, runtime, schedule = setTimeout, beforeMessage } = {}) {
@@ -84,7 +97,7 @@ function setup(data = fixture(), status = 200, { headers = {}, body, fetchImpl, 
   };
   const context = vm.createContext({ window, location, chrome: runtime ? { runtime } : undefined, URL, Headers, Request, TextEncoder, TextDecoder, AbortController, crypto: webcrypto, Date, setTimeout: schedule, clearTimeout });
   const reinstall = (file = "chatgpt-fetch-main.js") => scripts.get(file).runInContext(context);
-  for (const file of ["chatgpt-fetch-main.js", "chatgpt-json-capture.js"]) reinstall(file);
+  for (const file of ["transfer-diagnostics.js", "json-capture-metrics.js", "chatgpt-fetch-main.js", "chatgpt-json-capture.js"]) reinstall(file);
   return { window, location, requests, replies, pings, reads: () => reads, reinstall,
     emitMessage: event => [...listeners].forEach(listener => listener(event)),
     listeners: () => listeners.size,
@@ -702,7 +715,7 @@ test("ChatGPT replaces the previous hook without losing observed authentication"
   old.version = 8;
   harness.reinstall();
   assert.notEqual(harness.window.__capChatGptFetchState, old);
-  assert.equal(harness.window.__capChatGptFetchState.version, 16);
+  assert.equal(harness.window.__capChatGptFetchState.version, 17);
   assert.equal(harness.listeners(), 1);
   assert.equal((await harness.window.__capCaptureChatGptJson()).text,
     "ChatGPT conversation:\n\nUser: Original pasted document\n\nAssistant: Selected answer");

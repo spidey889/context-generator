@@ -1169,14 +1169,14 @@ test("JSON scripts reinstall in MAIN then isolated on the matching platform tabs
   ] });
   await new Promise(resolve => setTimeout(resolve, 0));
   const claude = injections.filter(item => item.target.tabId === 1);
-  assert.deepEqual(claude.map(item => [...item.files]), [["claude-fetch-main.js"], ["claude-json-capture.js"], ["transfer-diagnostics.js", "platform-content.js"]]);
+  assert.deepEqual(claude.map(item => [...item.files]), [["json-capture-metrics-main.js", "claude-fetch-main.js"], ["transfer-diagnostics.js", "json-capture-metrics.js", "claude-json-capture.js"], ["transfer-diagnostics.js", "platform-content.js"]]);
   assert.equal(claude[0].world, "MAIN");
   const chatgpt = injections.filter(item => item.target.tabId === 2);
-  assert.deepEqual(chatgpt.map(item => [...item.files]), [["chatgpt-fetch-main.js"], ["chatgpt-json-capture.js"], ["transfer-diagnostics.js", "platform-content.js"]]);
+  assert.deepEqual(chatgpt.map(item => [...item.files]), [["json-capture-metrics-main.js", "chatgpt-fetch-main.js"], ["transfer-diagnostics.js", "json-capture-metrics.js", "chatgpt-json-capture.js"], ["transfer-diagnostics.js", "platform-content.js"]]);
   assert.equal(chatgpt[0].world, "MAIN");
   for (const id of [3, 4, 5]) {
     const platform = injections.filter(item => item.target.tabId === id);
-    assert.deepEqual(platform.map(item => [...item.files]), [["network-json-data.js", "network-fetch-main.js"], ["network-json-capture.js"], ["transfer-diagnostics.js", "platform-content.js"]]);
+    assert.deepEqual(platform.map(item => [...item.files]), [["json-capture-metrics-main.js", "network-json-data.js", "network-fetch-main.js"], ["transfer-diagnostics.js", "json-capture-metrics.js", "network-json-capture.js"], ["transfer-diagnostics.js", "platform-content.js"]]);
     assert.equal(platform[0].world, "MAIN");
   }
 });
@@ -1193,7 +1193,7 @@ test("Claude on-demand MAIN installation accepts only a Claude top-frame sender"
   assert.equal((await request({ tab: { id: 1, url: "https://claude.ai/chat/a" }, frameId: 0 })).ok, true);
   assert.equal(injections.length, 1);
   assert.equal(injections[0].world, "MAIN");
-  assert.deepEqual([...injections[0].files], ["claude-fetch-main.js"]);
+  assert.deepEqual([...injections[0].files], ["json-capture-metrics-main.js", "claude-fetch-main.js"]);
 });
 
 test("Claude MAIN installation failures are returned without affecting default startup injection", async () => {
@@ -1214,7 +1214,7 @@ test("ChatGPT on-demand MAIN readiness is restricted to its top-frame source", a
   assert.equal((await request({ tab: { id: 1, url: "https://chatgpt.com/g/project/c/a" }, frameId: 0 })).ok, true);
   assert.equal(injections.length, 1);
   assert.equal(injections[0].world, "MAIN");
-  assert.deepEqual([...injections[0].files], ["chatgpt-fetch-main.js"]);
+  assert.deepEqual([...injections[0].files], ["json-capture-metrics-main.js", "chatgpt-fetch-main.js"]);
 });
 
 test("New network MAIN readiness accepts only Gemini/Grok/DeepSeek top frames", async () => {

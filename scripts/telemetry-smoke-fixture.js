@@ -89,7 +89,7 @@ async function createTelemetrySmokeFixture(repoRoot, databaseEnabled) {
     },
     async signSummary(telemetry) {
       const metadata = validateTelemetryPayload(telemetry);
-      assert.ok(metadata && metadata.status === "started", "The installed worker must send valid summary metadata.");
+      assert.ok(metadata && metadata.status === "started", `The installed worker must send valid summary metadata (present=${!!telemetry}, fields=${Object.keys(telemetry || {}).join(",")}).`);
       const summaryConfirmedAt = new Date().toISOString();
       return {
         summaryProof: await createSummaryProof(metadata, SIGNING_KEY),
@@ -150,7 +150,7 @@ async function createTelemetrySmokeFixture(repoRoot, databaseEnabled) {
       assert.ok(row.diagnostics, "Installed extension diagnostics must survive the actual relay, Edge and SQL path.");
       assert.deepEqual(row.diagnostics, terminal.diagnostics);
       assert.equal(row.diagnostics.version, 1);
-      assert.equal(row.diagnostics.diagnostics_revision, 2);
+      assert.equal(row.diagnostics.diagnostics_revision, 3);
       assert.equal(row.diagnostics.paste_populated, true);
       assert.equal(row.diagnostics.message_reply, "ack_success");
       if (row.destination_platform === "claude") {
@@ -201,7 +201,7 @@ async function createTelemetrySmokeFixture(repoRoot, databaseEnabled) {
       assert.equal(row.summary_verified, false);
       assert.deepEqual(row.diagnostics, terminal.diagnostics);
       assert.equal(row.diagnostics.error_code, sizeLimit ? "conversation_too_large" : "capture_json_failed");
-      assert.equal(row.diagnostics.diagnostics_revision, 2);
+      assert.equal(row.diagnostics.diagnostics_revision, 3);
       assert.ok(row.diagnostics.capture_detail);
       assert.notEqual(row.diagnostics.failure_site, "unknown_error");
       assert.doesNotMatch(JSON.stringify(row.diagnostics), /SESSION_TOKEN|SIGNED|smoke-account|PRIVATE|chatgpt\.com/);

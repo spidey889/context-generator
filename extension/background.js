@@ -1889,7 +1889,7 @@ async function pingTab(tabId) {
 
 async function ensureContentScript(tabId, file = PLATFORM_CONTENT_SCRIPT) {
   try {
-    await chrome.scripting.executeScript({ target: { tabId }, files: file === PLATFORM_CONTENT_SCRIPT ? ["transfer-diagnostics.js", file] : [file] });
+    await chrome.scripting.executeScript({ target: { tabId }, files: file === PLATFORM_CONTENT_SCRIPT ? ["transfer-diagnostics.js", file] : ["transfer-diagnostics.js", "json-capture-metrics.js", file] });
     return true;
   } catch (error) {
     const message = String(error?.message || error);
@@ -1902,21 +1902,21 @@ async function ensureContentScript(tabId, file = PLATFORM_CONTENT_SCRIPT) {
 
 async function ensureClaudeJsonHook(tabId) {
   try {
-    await chrome.scripting.executeScript({ target: { tabId }, world: "MAIN", files: ["claude-fetch-main.js"] });
+    await chrome.scripting.executeScript({ target: { tabId }, world: "MAIN", files: ["json-capture-metrics-main.js", "claude-fetch-main.js"] });
     return true;
   } catch { return false; }
 }
 
 async function ensureChatGptJsonHook(tabId) {
   try {
-    await chrome.scripting.executeScript({ target: { tabId }, world: "MAIN", files: ["chatgpt-fetch-main.js"] });
+    await chrome.scripting.executeScript({ target: { tabId }, world: "MAIN", files: ["json-capture-metrics-main.js", "chatgpt-fetch-main.js"] });
     return true;
   } catch { return false; }
 }
 
 async function ensureNetworkJsonHook(tabId) {
   try {
-    await chrome.scripting.executeScript({ target: { tabId }, world: "MAIN", files: ["network-json-data.js", "network-fetch-main.js"] });
+    await chrome.scripting.executeScript({ target: { tabId }, world: "MAIN", files: ["json-capture-metrics-main.js", "network-json-data.js", "network-fetch-main.js"] });
     return true;
   } catch { return false; }
 }

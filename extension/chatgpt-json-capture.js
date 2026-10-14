@@ -10,7 +10,7 @@
       ...(Number.isInteger(status) && status >= 100 && status <= 599 ? { capture_http_status: status } : {}) }
   });
   const currentChat = (pathname = location.pathname) => pathname.match(/\/c\/([^/]+)\/?$/)?.[1];
-  function serialize(data, chat, pastedTexts = {}, sourceTreeCounts) {
+  function serialize(data, chat, pastedTexts = {}, sourceTreeCounts, metrics) {
     const blocked = (reason, detail = "incomplete_history") => captureError(`ChatGPT JSON capture blocked: ${reason} Turn JSON capture off to use DOM capture.`, "incomplete", detail);
     const excludedContentTypes = new Set();
     let captureWarning;
@@ -236,7 +236,8 @@
     });
     if (!turns.length) throw blocked("No usable user or assistant text remains after skipping tools, files, images, and artifacts.", "missing_text");
     const text = `ChatGPT conversation:\n\n${turns.map(turn => `${turn.role === "user" ? "User" : "Assistant"}: ${turn.text}`).join("\n\n")}`;
-    if (text.length > 500000 || new TextEncoder().encode(text).length > 2000000) throw captureError("This chat is too long to transfer (limit: 500,000 characters). Try a shorter chat.", "size_limit");
+    metrics?.set({ selected_turns: turns.length });
+    if (metrics ? !metrics.transcript(text) : text.length > 500000 || new TextEncoder().encode(text).length > 2000000) throw captureError("This chat is too long to transfer (limit: 500,000 characters). Try a shorter chat.", "size_limit");
     return { text, messages: turns, messageTurnCount: turns.length, excludedContentTypes: [...excludedContentTypes].sort(),
       ...(captureWarning ? { captureWarning } : {}) };
   }
@@ -257,7 +258,7 @@
       const receive = event => {
         const reply = event.data;
         if (event.source === window && event.origin === location.origin && reply?.channel === channel
-          && reply.type === "pong" && reply.id === id && reply.version === 16) finish(true);
+          && reply.type === "pong" && reply.id === id && reply.version === 17) finish(true);
       };
       const ping = () => {
         if (settled) return;
@@ -276,7 +277,8 @@
     });
   }
 
-  window.__capCaptureChatGptJson = async (expectedPath = location.pathname) => {
+  window.__capCaptureChatGptJson = async (expectedPath = location.pathname, metrics) => {
+    const hookStarted = Date.now();
     const chat = currentChat(expectedPath);
     if (!chat) throw captureError("Open a saved ChatGPT conversation to use JSON capture.", "unavailable", "routing_unavailable", "hook");
     let changed = currentChat() !== chat;
@@ -297,6 +299,7 @@
           throw captureError("Fast capture isn't ready yet. Refresh this chat and try again, or turn off the lightning button.", "unavailable", "hook_unavailable", "hook");
         }
       }
+      metrics.set({ hook_ms: Date.now() - hookStarted, adapter_version: 17 });
       if (changed || currentChat() !== chat) throw captureError("The ChatGPT conversation changed during capture.", "request_failed", "conversation_changed", "hook");
       return await new Promise((resolve, reject) => {
         const id = crypto.randomUUID();
@@ -305,6 +308,7 @@
           const reply = event.data;
           if (event.source !== window || event.origin !== location.origin || reply?.channel !== channel || reply.type !== "response" || reply.id !== id) return;
           cleanup();
+          metrics.adopt(reply.jsonCapture);
           try {
             if (changed || currentChat() !== chat || reply.chat !== chat) throw captureError("The ChatGPT conversation changed during capture.", "request_failed", "conversation_changed", "history");
             if (reply.error) {
@@ -321,7 +325,7 @@
               const stage = ["session", "history", "attachment_descriptor", "attachment_body"].includes(reply.captureRequestStage) ? reply.captureRequestStage : "history";
               throw captureError(`ChatGPT JSON capture failed: ${reason} Turn JSON capture off to use DOM capture.`, failureReason, detail, stage, reply.status);
             }
-            resolve(serialize(reply.data, chat, reply.pastedTexts, reply.sourceTreeCounts));
+            resolve(metrics.timed("serialize_ms", () => serialize(reply.data, chat, reply.pastedTexts, reply.sourceTreeCounts, metrics)));
           } catch (error) { reject(error); }
         };
         const timer = setTimeout(() => { cleanup(); reject(captureError("ChatGPT JSON capture timed out. Refresh or turn JSON capture off.", "timeout", "timeout", "history")); }, 17000);
@@ -332,5 +336,18 @@
       window.navigation?.removeEventListener("navigate", navigated);
       window.removeEventListener("popstate", navigated);
     }
+  };
+
+  // Only an accepted source attempt is persisted by platform-content. Unused
+  // picker snapshots stay in memory and never create telemetry reports.
+  const readCapture = window.__capCaptureChatGptJson;
+  window.__capCaptureChatGptJson = async expectedPath => {
+    const metrics = globalThis.CapJsonCaptureMetrics.create({ deadline_ms: 17000 });
+    try {
+      const capture = await readCapture(expectedPath, metrics);
+      metrics.set({ selected_turns: capture.messageTurnCount });
+      if (capture.captureWarning) metrics.set({ outcome: "partial", failure_check: "text_invalid", failure_stage: "serialize" });
+      return { ...capture, jsonCapture: metrics.finish() };
+    } catch (error) { error.jsonCapture = metrics.finish(error); throw error; }
   };
 })();

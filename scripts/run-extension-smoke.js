@@ -67,6 +67,11 @@ const EXPECTED_JSON_FALLBACK_NOTICE = SIZE_CAPTURE_SMOKE
   ? "This chat is too long to transfer. Next time, try summarizing it earlier.\n\nFast capture skipped. Using slower capture."
   : "Fast capture failed. Using normal capture instead.";
 const TELEMETRY_DATABASE_SMOKE = process.env.CAP_CONTEXT_TELEMETRY_SMOKE === "1";
+// Explicit opt-in uses the installed worker's real production endpoint. Mirror
+// its metadata-only reports locally for assertions; never send fixture receipts.
+const LIVE_TELEMETRY_SMOKE = process.env.CAP_CONTEXT_LIVE_TELEMETRY_SMOKE === "1";
+if (LIVE_TELEMETRY_SMOKE && !(TELEMETRY_DATABASE_SMOKE && CHATGPT_HISTORY_OVERSIZE_SMOKE))
+  throw new Error("Live telemetry is restricted to the unsigned ChatGPT history-failure smoke.");
 const FAILURE_ARTIFACT_DIR = process.env.CAP_CONTEXT_SMOKE_ARTIFACT_DIR || "";
 
 class CdpSession {
@@ -232,6 +237,8 @@ async function createSmokeExtension(tempRoot, origin) {
     "  function checkInlinePlacementPathname() {",
     `  window.__capSmokePickerJsonReady = () => pickerJsonCapture?.promise.then(() => true) || Promise.resolve(false);
   window.__capSmokePickerJsonFailure = () => pickerJsonCapture?.promise.then(result => result.error?.diagnostics?.capture_detail) || Promise.resolve(null);
+  window.__capSmokePickerJsonErrorCode = () => pickerJsonCapture?.promise.then(result => result.error?.diagnosticCode || result.error?.name || "none") || Promise.resolve("none");
+  window.__capSmokeMissingIdentifier = () => pickerJsonCapture?.promise.then(result => result.error?.name === "ReferenceError" ? result.error.message.match(/^([A-Za-z_][A-Za-z0-9_]*) is not defined$/)?.[1] : "none") || Promise.resolve("none");
   window.__capSmokeJsonRetryState = () => activeTransferTrace && ({
     retryMarks: activeTransferTrace.marks.filter(mark => mark.label === "retrying JSON capture").length,
     detail: activeTransferTrace.diagnostics.capture_detail, fallback: activeTransferTrace.diagnostics.json_fallback_code
@@ -289,12 +296,21 @@ async function createSmokeExtension(tempRoot, origin) {
     `const SUMMARY_BACKEND_URL = ${JSON.stringify(`${origin}/api/summarize`)};`,
     "the summary backend URL"
   );
-  backgroundSource = replaceOnce(
+  if (!LIVE_TELEMETRY_SMOKE) backgroundSource = replaceOnce(
     backgroundSource,
     'const TELEMETRY_ENDPOINT_URL = "https://context-generator-five.vercel.app/api/telemetry";',
     `const TELEMETRY_ENDPOINT_URL = ${JSON.stringify(`${origin}/api/telemetry`)};`,
     "the telemetry backend URL"
   );
+  else backgroundSource = `const smokeNativeFetch = globalThis.fetch;
+globalThis.fetch = async function(input, options) {
+  const response = await Reflect.apply(smokeNativeFetch, this, [input, options]);
+  if (input === "https://context-generator-five.vercel.app/api/telemetry" && options?.method === "POST") {
+    await smokeNativeFetch(${JSON.stringify(`${origin}/api/telemetry`)}, { method: "POST",
+      headers: { "content-type": "application/json", "x-cap-context-client": "cap-context-extension/1", "x-smoke-live-status": String(response.status) }, body: options.body });
+  }
+  return response;
+};\n` + backgroundSource;
   for (const [platformId, productionUrl] of Object.entries(platformUrls)) {
     backgroundSource = replaceOnce(
       backgroundSource,
@@ -734,6 +750,7 @@ async function startFixtureServer() {
       return;
     }
     if (request.method === "POST" && ["/api/telemetry", "/smoke/transfer-telemetry"].includes(url.pathname)) {
+      if (LIVE_TELEMETRY_SMOKE && url.pathname === "/api/telemetry") assert.equal(request.headers["x-smoke-live-status"], "204", "Production must accept the installed worker's report.");
       let rawBody = "";
       for await (const chunk of request) rawBody += chunk;
       if (url.pathname === "/api/telemetry") await telemetryFixture.handleTelemetry(request, response, rawBody);
@@ -2365,6 +2382,8 @@ async function run() {
         await sourceSession.call("Network.emulateNetworkConditions", { offline: true, latency: 0, downloadThroughput: -1, uploadThroughput: -1 });
       }
       await sourceSession.evaluate('document.getElementById("context-generator-bubble").click()');
+      const dependencies = await sourceSession.evaluate("({metrics:typeof globalThis.CapJsonCaptureMetrics,windowMetrics:typeof window.CapJsonCaptureMetrics,contract:typeof globalThis.CapTransferDiagnostics,same:globalThis===window,network:typeof window.__capCaptureNetworkJson})", extensionContextId);
+      assert.equal(dependencies.metrics, "object", `The isolated JSON bridge must have its metrics dependency: ${JSON.stringify(dependencies)}`);
       // Opening yields to paint before prefetch starts; the first probe may be false.
       await waitFor(() => sourceSession.evaluate("window.__capSmokePickerJsonReady()", extensionContextId), "picker JSON capture after its opening paint");
       if (JSON_RETRY_SMOKE) {
@@ -2372,7 +2391,8 @@ async function run() {
         assert.equal(state.jsonRequests, jsonRequestsBeforeTransfer, "Offline prefetch must fail before reaching the fixture server.");
         assert.equal(await sourceSession.evaluate('Boolean(document.getElementById("context-generator-error-text"))'), false);
         await sourceSession.call("Network.emulateNetworkConditions", { offline: false, latency: 0, downloadThroughput: -1, uploadThroughput: -1 });
-      } else assert.ok(state.jsonRequests > jsonRequestsBeforeTransfer, "Opening the orb must start native JSON capture before selection.");
+      } else assert.ok(state.jsonRequests > jsonRequestsBeforeTransfer,
+        `Opening the orb must start native JSON capture before selection (detail=${await sourceSession.evaluate("window.__capSmokePickerJsonFailure()", extensionContextId)}, code=${await sourceSession.evaluate("window.__capSmokePickerJsonErrorCode()", extensionContextId)}, missing=${await sourceSession.evaluate("window.__capSmokeMissingIdentifier()", extensionContextId)}).`);
       assert.equal(state.summaryRequests.length, 0, "Orb capture must not start summarization.");
       assert.equal(state.telemetryRequests.length, beforePickerTelemetry, "Orb capture must not create a transfer attempt.");
       assert.equal((await getTargets(devToolsPort)).filter(target => target.type === "page").length, beforePickerTabs, "Orb capture must not open a destination tab.");
@@ -2465,6 +2485,7 @@ async function run() {
       if (TELEMETRY_DATABASE_SMOKE) {
         const terminal = await waitFor(() => state.telemetryRequests.find(payload => payload.status === "failed"), "the installed worker's failed capture telemetry");
         await telemetryFixture.verifyFailureOutcome(terminal, false);
+        if (LIVE_TELEMETRY_SMOKE) process.stdout.write(`✓ LIVE transfer record: ${terminal.attempt_id}; JSON checks: ${JSON.stringify(terminal.diagnostics.json_attempts)}\n`);
         assert.equal(terminal.diagnostics.failure_site, CHATGPT_FAILURE_SMOKE === "partial" ? "capture_serialize" : "capture_history");
         if (CHATGPT_FAILURE_SMOKE === "ranged") assert.equal(terminal.diagnostics.capture_http_status, 206);
         process.stdout.write("✓ Precise capture failure reached the real local relay, Edge and SQL without private content.\n");
@@ -2670,6 +2691,17 @@ async function run() {
     const captureReport = state.telemetryRequests.findLast(payload => payload.status === "succeeded");
     assert.equal(captureReport?.diagnostics?.capture_method, remoteStats.capture.method);
     assert.equal(typeof captureReport.diagnostics.capture_ms, "number");
+    if (JSON_CAPTURE_SMOKE) {
+      const attempts = captureReport.diagnostics.json_attempts;
+      assert.ok(attempts?.length >= 1 && attempts.length <= 2);
+      assert.equal(attempts.at(-1).outcome, JSON_FALLBACK_SMOKE ? "failed" : "succeeded");
+      assert.ok(attempts.at(-1).raw_bytes > 0);
+      if (!JSON_FALLBACK_SMOKE) {
+        assert.ok(attempts.at(-1).transcript_chars > 0);
+        assert.ok(attempts.at(-1).transcript_bytes > 0);
+      } else assert.ok(attempts.at(-1).failure_check);
+      assert.doesNotMatch(JSON.stringify(attempts), /SENTINEL|Bearer|Original source|https:/);
+    }
     if (JSON_FALLBACK_SMOKE) {
       assert.equal(captureReport.diagnostics.json_fallback_code, EXPECTED_JSON_FALLBACK_REASON);
       assert.ok(captureReport.diagnostics.capture_detail, "The specific JSON failure detail must survive fallback.");

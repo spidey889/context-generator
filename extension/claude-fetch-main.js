@@ -1,5 +1,5 @@
 (() => {
-  const version = 11;
+  const version = 12;
   // HTTP media types ignore casing; parameters do not change the base type.
   const responseMediaType = response => response.headers.get("content-type")?.split(";", 1)[0].trim().toLowerCase();
   const maxHistoryBytes = 6000000;
@@ -52,9 +52,11 @@
       return;
     }
     const controller = new AbortController();
+    const metrics = globalThis.CapJsonCaptureMetrics.create({ adapter_version: version, deadline_ms: 15000, raw_limit_bytes: maxHistoryBytes, raw_bytes: 0, requests: 0 });
     active = controller;
     const timer = setTimeout(() => controller.abort("capture_timeout"), 15000);
     let captureFailureReason = "request_failed";
+    let observation;
     const changed = event => {
       const destination = event?.destination ? new URL(event.destination.url) : location;
       if (destination.origin !== location.origin || destination.pathname !== `/chat/${chat}`) controller.abort();
@@ -65,11 +67,13 @@
       if (!chat || request.chat !== chat) throw new Error("changed");
       // Give an in-flight initial/SPA load a bounded opportunity to expose routing.
       const deadline = Date.now() + 1500;
+      const routingStarted = Date.now();
       while (!endpoints.has(chat) && Date.now() < deadline && !controller.signal.aborted) {
         recover();
         if (endpoints.has(chat)) break;
         await new Promise(resolve => setTimeout(resolve, 50));
       }
+      metrics.set({ auth_ms: Date.now() - routingStarted });
       if (controller.signal.aborted || location.pathname !== `/chat/${chat}`) throw new Error("changed");
       if (!endpoints.has(chat)) {
         captureFailureReason = "unavailable";
@@ -83,13 +87,18 @@
       captureUrl.searchParams.set("render_all_tools", "true");
       captureUrl.searchParams.set("include_inline_comparison", "true");
       captureUrl.searchParams.set("consistency", "strong");
+      observation = metrics.response("history", maxHistoryBytes);
       const response = await Reflect.apply(nativeFetch, window, [captureUrl.href, { credentials: "same-origin", cache: "no-store", signal: controller.signal }]);
       reply.status = response.status;
+      metrics.set({ http_status: response.status });
+      observation.header(response.headers.get("content-length"));
       if (response.status !== 200 || response.headers.has("content-range") || responseMediaType(response) !== "application/json") {
         captureFailureReason = [401, 403].includes(response.status) ? "unavailable"
           : response.status === 206 || response.headers.has("content-range") || response.status === 200 ? "incomplete" : "request_failed";
         reply.captureDetail = response.status !== 200 && response.status !== 206 ? "http_error"
           : response.status === 206 || response.headers.has("content-range") ? "partial_response" : "non_json_response";
+        metrics.fail(reply.captureDetail, "history", undefined, undefined, undefined, response.status);
+        observation.end();
         // The rejected fresh response has no reader. Stop its unused body before
         // fallback, retaining the safe transport reason even if cleanup rejects.
         await response.body?.cancel().catch(() => {});
@@ -97,7 +106,7 @@
       }
       let data, reader, bodyReadFailed = false;
       try {
-        if (Number(response.headers.get("content-length")) > maxHistoryBytes) throw new Error("size");
+        if (Number(response.headers.get("content-length")) > maxHistoryBytes) { metrics.fail("raw_header_limit", "history", "content_length", Number(response.headers.get("content-length")), maxHistoryBytes, response.status); throw new Error("size"); }
         // Transcript limits apply after parsing. Bound the owned raw stream too,
         // including inactive/tool metadata and bodies without Content-Length.
         reader = response.body?.getReader();
@@ -109,29 +118,35 @@
           const { done, value } = await reader.read().catch(() => {
             if (controller.signal.aborted || location.pathname !== `/chat/${chat}`) throw new Error("changed");
             bodyReadFailed = true;
+            metrics.fail("network_error", "history");
             throw new Error("network");
           });
           if (controller.signal.aborted || location.pathname !== `/chat/${chat}`) throw new Error("changed");
           if (done) break;
           size += value.byteLength;
-          if (size > maxHistoryBytes) throw new Error("size");
-          const part = decoder.decode(value, { stream: true });
+          observation.chunk(value.byteLength);
+          if (size > maxHistoryBytes) { metrics.fail("raw_total_stream_limit", "history", "reader_bytes", size, maxHistoryBytes, response.status); throw new Error("size"); }
+          let part;
+          try { part = decoder.decode(value, { stream: true }); } catch (error) { metrics.fail("invalid_utf8", "history"); throw error; }
           if (part) parts.push(part);
         }
         // Preserve split UTF-8/BOM state and reject unfinished final bytes;
         // replacing corrupt bytes would silently change the captured text.
-        parts.push(decoder.decode());
-        data = JSON.parse(parts.join(""));
+        try { parts.push(decoder.decode()); } catch (error) { metrics.fail("invalid_utf8", "history"); throw error; }
+        observation.end();
+        data = metrics.timed("parse_ms", () => JSON.parse(parts.join("")));
       } catch (error) {
         captureFailureReason = bodyReadFailed ? "request_failed" : "incomplete";
         if (reader) await reader.cancel().catch(() => {});
         else await response.body?.cancel().catch(() => {});
         throw error;
       } finally {
+        observation.end();
         reader?.releaseLock();
       }
       if (controller.signal.aborted || location.pathname !== `/chat/${chat}` || data.uuid !== chat) throw new Error("changed");
       reply.data = data;
+      metrics.set({ history_items: data.chat_messages?.length });
     } catch (error) {
       // Upstream/network/JSON-parser errors may contain private response content.
       reply.error = "capture_failed";
@@ -139,12 +154,15 @@
       reply.captureDetail = controller.signal.reason === "capture_timeout" ? "timeout"
         : error?.message === "changed" ? "conversation_changed" : reply.captureDetail
         || (error?.message === "size" ? "size_limit" : error?.name === "SyntaxError" ? "invalid_json" : captureFailureReason === "incomplete" ? "partial_response" : "network_error");
+      metrics.finish({ captureDetail: reply.captureDetail, captureRequestStage: "history" });
     } finally {
+      observation?.end();
       clearTimeout(timer);
       window.navigation?.removeEventListener("navigate", changed);
       window.removeEventListener("popstate", changed);
       if (active === controller) active = null;
     }
+    reply.jsonCapture = metrics.finish();
     window.postMessage(reply, location.origin);
   };
   window.addEventListener("message", receive);

@@ -2602,7 +2602,7 @@ test("capture failure detail survives terminal source telemetry without the loca
   assert.equal(terminal.diagnostics.error_code, "capture_json_failed");
   assert.equal(terminal.diagnostics.failure_site, "capture_session");
   assert.equal(terminal.diagnostics.capture_http_status, 401);
-  assert.equal(terminal.diagnostics.diagnostics_revision, 2);
+  assert.equal(terminal.diagnostics.diagnostics_revision, 3);
   assert.doesNotMatch(JSON.stringify(terminal), /PRIVATE|account/);
 });
 

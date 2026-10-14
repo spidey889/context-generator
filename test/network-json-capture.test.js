@@ -7,8 +7,77 @@ const { webcrypto } = require("node:crypto");
 const { clockTest } = require("./helpers/clock");
 const { fixtures, rpcFrame, geminiTurn, prompt } = require("./network-json-fixtures");
 const files = ["network-json-data.js", "network-fetch-main.js", "network-json-capture.js"];
-const scripts = new Map(files.map(file =>
+const scripts = new Map(["transfer-diagnostics.js", "json-capture-metrics.js", ...files].map(file =>
   [file, new vm.Script(fs.readFileSync(path.join(__dirname, "..", "extension", file), "utf8"), { filename: file })]));
+for (const platform of ["gemini", "grok", "deepseek"]) test(`${platform}: successful JSON records transport and transcript headroom without content`, async () => {
+  const h = setup(platform); await h.observe();
+  const capture = await h.window.__capCaptureNetworkJson();
+  const stats = capture.jsonCapture;
+  assert.equal(stats.outcome, "succeeded");
+  assert.equal(stats.raw_limit_bytes, 6000000);
+  assert.ok(stats.raw_bytes > 0 && stats.raw_bytes < stats.raw_limit_bytes);
+  assert.equal(stats.transcript_chars, capture.text.length);
+  assert.equal(stats.transcript_bytes, Buffer.byteLength(capture.text));
+  assert.equal(stats.selected_turns, capture.messageTurnCount);
+  assert.ok(stats.history_items >= 24 && stats.requests >= 1);
+  assert.doesNotMatch(JSON.stringify(stats), /SENTINEL|Original source|https:|Bearer|smoke/);
+});
+test("DeepSeek logs the exact raw header guard even though no body bytes were read", async () => {
+  const h = setup("deepseek", undefined, { fetchImpl: () => new Response("{}", { headers: { "content-type": "application/json", "content-length": "6000001" } }) });
+  await h.observe();
+  await assert.rejects(h.window.__capCaptureNetworkJson(), error => {
+    assert.equal(error.captureFailureReason, "size_limit");
+    assert.equal(error.jsonCapture.failure_check, "raw_header_limit");
+    assert.equal(error.jsonCapture.failure_value, 6000001);
+    assert.equal(error.jsonCapture.failure_limit, 6000000);
+    assert.equal(error.jsonCapture.failure_value_source, "content_length");
+    assert.equal(error.jsonCapture.raw_bytes, 0);
+    assert.equal(error.jsonCapture.transcript_chars, undefined);
+    return true;
+  });
+});
+test("DeepSeek distinguishes a streamed raw excess from an oversized selected transcript", async () => {
+  const raw = setup("deepseek", undefined, { fetchImpl: () => new Response(" ".repeat(6000001), { headers: { "content-type": "application/json" } }) });
+  await raw.observe();
+  await assert.rejects(raw.window.__capCaptureNetworkJson(), error => {
+    assert.equal(error.jsonCapture.failure_check, "raw_total_stream_limit");
+    assert.equal(error.jsonCapture.failure_value, 6000001);
+    assert.equal(error.jsonCapture.raw_bytes, 6000001);
+    return true;
+  });
+  const f = fixtures("deepseek", "smoke", 2);
+  f.data.data.biz_data.chat_messages.at(-1).fragments[0].content = "x".repeat(500001);
+  const transcript = setup("deepseek", f); await transcript.observe();
+  await assert.rejects(transcript.window.__capCaptureNetworkJson(), error => {
+    assert.equal(error.jsonCapture.failure_check, "transcript_char_limit");
+    assert.equal(error.jsonCapture.failure_limit, 500000);
+    assert.equal(error.jsonCapture.failure_value, error.jsonCapture.transcript_chars);
+    assert.equal(error.jsonCapture.transcript_bytes, undefined, "The existing char guard must still short circuit encoding.");
+    assert.ok(error.jsonCapture.raw_bytes < 6000000);
+    return true;
+  });
+});
+test("DeepSeek logs supported manifest excess and ignores a large PDF without downloading it", async () => {
+  const f = fixtures("deepseek"); f.file.file_size = 2400000;
+  const h = setup("deepseek", f); await h.observe();
+  await assert.rejects(h.window.__capCaptureNetworkJson(), error => {
+    assert.equal(error.jsonCapture.failure_check, "supported_files_limit");
+    assert.equal(error.jsonCapture.failure_value, 2400000);
+    assert.equal(error.jsonCapture.failure_limit, 2100000);
+    assert.equal(error.jsonCapture.files_supported, 1);
+    assert.equal(error.jsonCapture.files_downloaded_bytes, 0);
+    return true;
+  });
+  assert.equal(h.requests.length, 1);
+  f.file.file_name = "PRIVATE_PDF_SENTINEL.pdf";
+  const ignored = setup("deepseek", f); await ignored.observe();
+  const capture = await ignored.window.__capCaptureNetworkJson();
+  assert.equal(capture.jsonCapture.files_supported, 0);
+  assert.equal(capture.jsonCapture.files_ignored_pdf, 1);
+  assert.equal(capture.jsonCapture.files_downloaded_bytes, 0);
+  assert.equal(ignored.requests.length, 1);
+  assert.doesNotMatch(JSON.stringify(capture.jsonCapture), /PRIVATE_PDF_SENTINEL/);
+});
 for (const platform of ["gemini", "grok", "deepseek"]) test(`${platform}: native HTTP failures preserve their actual status and read boundary`, async () => {
   const h = setup(platform, undefined, { fetchImpl: () => new Response("PRIVATE response", { status: 403 }) });
   await h.observe();
@@ -62,7 +131,7 @@ function setup(platform, fixture = fixtures(platform), { fetchImpl, responseTran
   };
   const context = vm.createContext({ window, location, chrome: runtime ? { runtime } : undefined, performance: { getEntriesByType: () => [] }, URL, URLSearchParams, Headers, Request, TextEncoder, TextDecoder, AbortController, crypto: webcrypto, Date, setTimeout: schedule, clearTimeout });
   const reinstall = file => scripts.get(file).runInContext(context);
-  files.forEach(reinstall);
+  ["transfer-diagnostics.js", "json-capture-metrics.js", ...files].forEach(reinstall);
   const api = vm.runInContext("__capNetworkJsonData", context);
   const observe = async () => {
     if (platform === "gemini") {
@@ -436,7 +505,7 @@ test("DeepSeek: one incomplete upload cancels siblings before fallback or a fres
   });
   assert.equal(h.requests.length, 5, "failure stops queued downloads");
   assert.equal(aborted.length, 3);
-  assert.equal(h.window.__capNetworkFetchState.version, 18);
+  assert.equal(h.window.__capNetworkFetchState.version, 19);
   assert.ok(h.replies.every(reply => !reply.capture));
   assert.equal(h.navigationListeners(), 0);
   assert.equal(h.listeners.size, 2);
@@ -517,7 +586,7 @@ for (const platform of ["gemini", "grok", "deepseek"]) test(`${platform}: the pr
   old.version = platform === "deepseek" ? 17 : platform === "gemini" ? 9 : 7;
   h.reinstall(files[1]);
   assert.notEqual(h.window.__capNetworkFetchState, old);
-  assert.equal(h.window.__capNetworkFetchState.version, platform === "deepseek" ? 18 : platform === "grok" ? 15 : 12);
+  assert.equal(h.window.__capNetworkFetchState.version, platform === "deepseek" ? 19 : platform === "grok" ? 16 : 13);
   assert.equal(h.listeners.size, 2);
   assert.equal((await h.window.__capCaptureNetworkJson()).text, h.fixture.expected);
 });

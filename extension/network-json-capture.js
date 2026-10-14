@@ -30,14 +30,15 @@
     const finish = ready => { if (settled) return; settled = true; clearTimeout(timer); clearTimeout(poll); window.removeEventListener("message", receive); resolve(ready); };
     const receive = event => {
       const reply = event.data;
-      if (event.source === window && event.origin === location.origin && reply?.channel === channel && reply.platform === platform && reply.type === "pong" && reply.id === id && reply.version === (platform === "deepseek" ? 18 : platform === "grok" ? 15 : 12)) finish(true);
+      if (event.source === window && event.origin === location.origin && reply?.channel === channel && reply.platform === platform && reply.type === "pong" && reply.id === id && reply.version === (platform === "deepseek" ? 19 : platform === "grok" ? 16 : 13)) finish(true);
     };
     const ping = () => { if (settled) return; window.postMessage({ channel, platform, type: "ping", id }, location.origin); poll = setTimeout(ping, 100); };
     const timer = setTimeout(() => finish(false), timeout);
     window.addEventListener("message", receive); ping();
     if (install) Promise.resolve().then(() => chrome.runtime.sendMessage({ type: "ENSURE_NETWORK_JSON_HOOK" })).then(reply => { if (!reply?.ok) finish(false); }, () => finish(false));
   });
-  window.__capCaptureNetworkJson = async (expectedPath = platform === "grok" ? location.href : location.pathname) => {
+  window.__capCaptureNetworkJson = async (expectedPath = platform === "grok" ? location.href : location.pathname, metrics) => {
+    const hookStarted = Date.now();
     // Grok branch selection lives in the query string; pin it with the clicked chat.
     const expectedUrl = platform === "grok" ? new URL(expectedPath, location.origin) : null;
     const before = expectedUrl ? current(expectedUrl.pathname, expectedUrl.searchParams.get("rid")) : current(expectedPath);
@@ -58,6 +59,7 @@
       if (!await waitForHook(250)) {
         if (typeof chrome === "undefined" || !chrome.runtime?.sendMessage || !await waitForHook(8000, true)) throw captureError("Fast capture isn't ready yet. Refresh this chat and try again, or turn off the lightning button.", "unavailable", "hook_unavailable", "hook");
       }
+      metrics.set({ hook_ms: Date.now() - hookStarted });
       if (changed || JSON.stringify(current()) !== JSON.stringify(before)) throw changedError("The conversation changed during capture.");
       return await new Promise((resolve, reject) => {
         const id = crypto.randomUUID();
@@ -66,6 +68,7 @@
           const reply = event.data;
           if (event.source !== window || event.origin !== location.origin || reply?.channel !== channel || reply.platform !== platform || reply.type !== "response" || reply.id !== id) return;
           cleanup();
+          metrics.adopt(reply.jsonCapture);
           if (changed || reply.chat !== before.chat || reply.selected !== before.selected || JSON.stringify(current()) !== JSON.stringify(before)) return reject(changedError("The conversation changed during capture."));
           if (reply.error) return reject(captureError(reply.error === "size" ? "This chat is too long to transfer (limit: 500,000 characters). Try a shorter chat." : `Fast capture failed: ${reply.error} Turn off the lightning button to use standard capture.`, reply.captureFailureReason,
             reply.captureDetail || "network_error", reply.captureRequestStage || "history", reply.status));
@@ -89,5 +92,18 @@
         window.removeEventListener("popstate", navigated);
       }
     }
+  };
+
+  // Only an accepted source attempt is persisted by platform-content. Unused
+  // picker snapshots stay in memory and never create telemetry reports.
+  const readCapture = window.__capCaptureNetworkJson;
+  window.__capCaptureNetworkJson = async expectedPath => {
+    const metrics = globalThis.CapJsonCaptureMetrics.create({ deadline_ms: 27000 });
+    try {
+      const capture = await readCapture(expectedPath, metrics);
+      metrics.set({ selected_turns: capture.messageTurnCount });
+      if (capture.captureWarning) metrics.set({ outcome: "partial", failure_check: "text_invalid", failure_stage: "serialize" });
+      return { ...capture, jsonCapture: metrics.finish() };
+    } catch (error) { error.jsonCapture = metrics.finish(error); throw error; }
   };
 })();

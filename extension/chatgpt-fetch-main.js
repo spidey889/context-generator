@@ -1,5 +1,5 @@
 (() => {
-  const version = 16;
+  const version = 17;
   // HTTP media types ignore casing; parameters do not change the base type.
   const responseMediaType = response => response.headers.get("content-type")?.split(";", 1)[0].trim().toLowerCase();
   // Match MIME metadata by base type, keeping the serializer's paste gate aligned.
@@ -55,6 +55,8 @@
     const reply = { channel, type: "response", id: request.id, chat };
     if (active) { window.postMessage({ ...reply, error: "busy" }, location.origin); return; }
     const controller = new AbortController();
+    const metrics = globalThis.CapJsonCaptureMetrics.create({ adapter_version: version, deadline_ms: 15000, raw_limit_bytes: maxCaptureBytes,
+      raw_bytes: 0, requests: 0, auth_refreshes: 0 });
     active = controller;
     let navigated = false;
     const changed = event => {
@@ -67,11 +69,13 @@
     const timer = setTimeout(() => controller.abort(), 15000);
     window.navigation?.addEventListener("navigate", changed);
     window.addEventListener("popstate", changed);
-    const fetchJson = (url, options = {}) => {
+    const fetchJson = async (url, options = {}) => {
       delete reply.status;
-      return Reflect.apply(nativeFetch, window, [url, {
+      metrics.add("requests");
+      const began = Date.now();
+      try { return await Reflect.apply(nativeFetch, window, [url, {
       ...options, credentials: "same-origin", cache: "no-store", signal: controller.signal
-      }]);
+      }]); } finally { metrics.add("download_ms", Date.now() - began); }
     };
     // Discard owned responses before retry/fallback; cleanup must never replace
     // the bounded capture error with private upstream cancellation details.
@@ -81,10 +85,12 @@
     let bytesRead = 0;
     const readJson = async (response, responseLimit = 6000000) => {
       let reader, bodyReadFailed = false;
+      const stage = reply.captureRequestStage || "history";
+      const remaining = Math.min(responseLimit, maxCaptureBytes - bytesRead);
+      const observation = metrics.response(stage, remaining, response.headers.get("content-length"), false);
       try {
         if (controller.signal.aborted || currentChat() !== chat) throw new Error("changed");
-        const remaining = Math.min(responseLimit, maxCaptureBytes - bytesRead);
-        if (Number(response.headers.get("content-length")) > remaining) throw new Error("partial");
+        if (Number(response.headers.get("content-length")) > remaining) { metrics.fail("raw_header_limit", stage, "content_length", Number(response.headers.get("content-length")), remaining, response.status); throw new Error("partial"); }
         reader = response.body?.getReader();
         const decoder = new TextDecoder("utf-8", { fatal: true });
         const parts = [];
@@ -94,37 +100,45 @@
           const { done, value } = await reader.read().catch(() => {
             if (controller.signal.aborted || currentChat() !== chat) throw new Error("changed");
             bodyReadFailed = true;
+            metrics.fail("network_error", stage);
             throw new Error("network");
           });
           if (controller.signal.aborted || currentChat() !== chat) throw new Error("changed");
           if (done) break;
           bytesRead += value.byteLength;
           responseBytes += value.byteLength;
-          if (responseBytes > remaining) throw new Error("partial");
-          const part = decoder.decode(value, { stream: true });
+          observation.chunk(value.byteLength);
+          if (responseBytes > remaining) { metrics.fail("raw_response_stream_limit", stage, "reader_bytes", responseBytes, remaining, response.status); throw new Error("partial"); }
+          let part;
+          try { part = decoder.decode(value, { stream: true }); } catch (error) { metrics.fail("invalid_utf8", stage); throw error; }
           if (part) parts.push(part);
         }
         // Flush partial UTF-8 at EOF. Silent replacement would alter source
         // text; parse only a complete, strictly decoded response.
-        parts.push(decoder.decode());
-        return JSON.parse(parts.join(""));
+        try { parts.push(decoder.decode()); } catch (error) { metrics.fail("invalid_utf8", stage); throw error; }
+        observation.end();
+        return metrics.timed("parse_ms", () => JSON.parse(parts.join("")));
       } catch (error) {
+        if (error?.name === "SyntaxError") metrics.fail("invalid_json", stage);
         if (error?.name === "SyntaxError") reply.captureDetail = "invalid_json";
         if (reader) await reader.cancel().catch(() => {});
         else await discardResponse(response);
         throw new Error(bodyReadFailed ? "network" : "partial");
       } finally {
+        observation.end();
         reader?.releaseLock();
       }
     };
     const readPaste = async (response, expectedSize) => {
       let reader;
+      const observation = metrics.response("attachment_body", maxCaptureBytes - bytesRead, response.headers.get("content-length"), false);
       try {
         if (controller.signal.aborted || currentChat() !== chat) throw new Error("changed");
+        if (Number(response.headers.get("content-length")) > expectedSize) metrics.fail("attachment_length_mismatch", "attachment_body", "content_length", Number(response.headers.get("content-length")), expectedSize, response.status);
         if (response.status !== 200 || response.headers.has("content-range")
           || responseMediaType(response) !== "text/plain"
           || Number(response.headers.get("content-length")) > expectedSize) throw new Error("paste");
-        if (expectedSize > maxCaptureBytes - bytesRead) throw new Error("paste");
+        if (expectedSize > maxCaptureBytes - bytesRead) { metrics.fail("raw_remaining_files_limit", "attachment_body", "declared_files", expectedSize, maxCaptureBytes - bytesRead); throw new Error("paste"); }
         // The manifest bounds this allocation. Never buffer an oversized body
         // first: reject the first excess chunk, including without Content-Length.
         const bytes = new Uint8Array(expectedSize);
@@ -134,31 +148,36 @@
           const { done, value } = await reader.read();
           if (controller.signal.aborted || currentChat() !== chat) throw new Error("changed");
           if (done) break;
-          if (size + value.byteLength > expectedSize) throw new Error("paste");
+          observation.chunk(value.byteLength);
+          if (size + value.byteLength > expectedSize) { metrics.fail("attachment_length_mismatch", "attachment_body", "reader_bytes", size + value.byteLength, expectedSize); throw new Error("paste"); }
           bytesRead += value.byteLength;
-          if (bytesRead > maxCaptureBytes) throw new Error("paste");
+          if (bytesRead > maxCaptureBytes) { metrics.fail("raw_total_stream_limit", "attachment_body", "reader_bytes", bytesRead, maxCaptureBytes); throw new Error("paste"); }
           bytes.set(value, size); size += value.byteLength;
         }
-        if (size !== expectedSize) throw new Error("paste");
+        if (size !== expectedSize) { metrics.fail("attachment_length_mismatch", "attachment_body", "reader_bytes", size, expectedSize); throw new Error("paste"); }
         // Preserve complete UTF-8, BOM and whitespace through chunk boundaries.
-        return new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(bytes);
+        try { return new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(bytes); } catch (error) { metrics.fail("invalid_utf8", "attachment_body"); throw error; }
       } catch (error) {
         if (reader) await reader.cancel().catch(() => {});
         else await discardResponse(response);
         throw error;
       } finally {
+        observation.end();
         reader?.releaseLock();
       }
     };
     const checkTransport = async response => {
       reply.status = response.status;
+      metrics.set({ http_status: response.status });
       try {
         if (response.status !== 200) { reply.status = response.status; throw new Error("http"); }
         if (response.headers.has("content-range")) throw new Error("partial");
         if (responseMediaType(response) !== "application/json") throw new Error("format");
-      } catch (error) { await discardResponse(response); throw error; }
+      } catch (error) { metrics.fail(({ http: "http_error", partial: "partial_response", format: "non_json_response" })[error?.message], reply.captureRequestStage, undefined, undefined, undefined, response.status); await discardResponse(response); throw error; }
     };
     const refreshAuth = async () => {
+      metrics.add("auth_refreshes");
+      const authStarted = Date.now();
       const previousStage = reply.captureRequestStage;
       reply.captureRequestStage = "session";
       // Late hooks cannot recover headers from resource timing. Read the existing
@@ -167,6 +186,7 @@
       const response = await fetchJson("/api/auth/session");
       await checkTransport(response);
       const session = await readJson(response);
+      metrics.add("auth_ms", Date.now() - authStarted);
       if (typeof session.accessToken !== "string" || !session.accessToken) throw new Error("auth");
       if (revision !== authRevision && auth) return new Headers(auth);
       const headers = new Headers(auth || undefined);
@@ -210,6 +230,8 @@
       // then discard alternate branches before crossing the page bridge.
       const sourceTreeCounts = { nodes: Object.keys(data.mapping).length,
         messages: Object.values(data.mapping).filter(node => node?.message).length };
+      metrics.set({ history_items: sourceTreeCounts.nodes, files_limit_bytes: maxPastedBytes,
+        files_supported: 0, files_ignored: 0, files_declared_bytes: 0, files_downloaded_bytes: 0 });
       const selectedMapping = Object.create(null);
       // Big pastes are user text stored as files, not text.parts. Read only
       // active-branch user pastes; never use a tool's extracted/rephrased copy.
@@ -238,7 +260,7 @@
         if (message?.author?.role !== "user" || message.metadata?.is_visually_hidden_from_conversation
           || (message.recipient && message.recipient !== "all")) continue;
         for (const file of Array.isArray(message.metadata?.attachments) ? message.metadata.attachments : []) {
-          if (!isPlainTextPaste(file)) continue;
+          if (!isPlainTextPaste(file)) { metrics.ignored(typeof file?.mime_type === "string" && /^application\/pdf(?:;|$)/i.test(file.mime_type) ? "pdf" : "other", typeof file?.mime_type === "string" && /^image\//i.test(file.mime_type)); continue; }
           if (typeof file.id !== "string" || !/^file[-_][a-zA-Z0-9_-]+$/.test(file.id)
             || !Number.isSafeInteger(file.size) || file.size < 0) throw new Error("paste");
           if (uploads.has(file.id)) {
@@ -246,9 +268,11 @@
             continue;
           }
           pastedBytes += file.size;
+          metrics.add("files_supported"); metrics.set({ files_declared_bytes: pastedBytes });
           if (pastedBytes > maxPastedBytes) {
             reply.captureDetail = "attachment_size_limit";
             reply.captureRequestStage = "attachment_descriptor";
+            metrics.fail("supported_files_limit", "attachment_descriptor", "declared_files", pastedBytes, maxPastedBytes);
             throw new Error("size");
           }
           uploads.set(file.id, file);
@@ -256,7 +280,7 @@
       }
       // Validate the complete qualifying manifest before remote file work.
       // Repeated IDs share one read, but every declaration must match its bytes.
-      if (pastedBytes > maxCaptureBytes - bytesRead) throw new Error("paste");
+      if (pastedBytes > maxCaptureBytes - bytesRead) { metrics.fail("raw_remaining_files_limit", "attachment_descriptor", "declared_files", pastedBytes, maxCaptureBytes - bytesRead); throw new Error("paste"); }
       for (const file of uploads.values()) {
         try {
           reply.captureRequestStage = "attachment_descriptor";
@@ -277,7 +301,7 @@
             || download.searchParams.get("id") !== file.id) throw new Error("paste");
           // Descriptor/session reads also consume the budget. Recheck before
           // starting a signed download whose declared body cannot fit.
-          if (file.size > maxCaptureBytes - bytesRead) throw new Error("paste");
+          if (file.size > maxCaptureBytes - bytesRead) { metrics.fail("raw_remaining_files_limit", "attachment_body", "declared_files", file.size, maxCaptureBytes - bytesRead); throw new Error("paste"); }
           reply.captureRequestStage = "attachment_body";
           const textResponse = await fetchJson(download.href, { redirect: "error" });
           reply.status = textResponse.status;
@@ -295,12 +319,14 @@
       // Never expose tokens, parser snippets, or arbitrary upstream errors.
       reply.error = navigated || controller.signal.reason === "account_changed" ? "changed" : controller.signal.aborted ? "timeout"
         : ["http", "partial", "format", "auth", "changed", "paste", "size"].includes(error?.message) ? error.message : error?.name === "SyntaxError" ? "invalid_json" : "network";
+      metrics.finish({ captureDetail: ({ http: "http_error", partial: "partial_response", format: "non_json_response", auth: "auth_missing", changed: "conversation_changed", paste: "attachment_failed", timeout: "timeout", invalid_json: "invalid_json", network: "network_error" })[reply.error], captureRequestStage: reply.captureRequestStage });
     } finally {
       clearTimeout(timer);
       window.navigation?.removeEventListener("navigate", changed);
       window.removeEventListener("popstate", changed);
       if (active === controller) active = null;
     }
+    reply.jsonCapture = metrics.finish();
     window.postMessage(reply, location.origin);
   };
   window.addEventListener("message", receive);

@@ -1,6 +1,6 @@
 # Transfer diagnostics
 
-Extension 1.4.12 attaches one optional JSONB record to `transfers.diagnostics`.
+Extension 1.4.12 introduced one optional JSONB record to `transfers.diagnostics`.
 Older attempts retain NULL; their missing observations cannot be recovered.
 The existing `failure_reason` and `last_stage` remain compatible.
 
@@ -41,7 +41,7 @@ Future contract changes require new migrations; applied history stays unchanged.
 - **Capture:** saved-chat/Speed selection, JSON attempt/fallback category, actual
   capture method, candidate/useful/captured turns, source characters/UTF-8 bytes,
   expanded blocks, retries, sweep advances/stale/quiet checks and exit reason.
-  Updated diagnostics (`diagnostics_revision = 2`) retain `capture_detail`
+  Updated diagnostics (`diagnostics_revision = 3`) retain `capture_detail`
   (auth/hook unavailable, busy, HTTP/network/JSON failure, incomplete history,
   branch/count/text/canvas/attachment validation, size or timeout), the exact
   `capture_request_stage` and observed `capture_http_status` (100–599).
@@ -110,6 +110,69 @@ The Claude page labels are a closed enum, not arbitrary URL storage: queries,
 fragments, chat/project IDs and unrecognized path text cannot enter the payload.
 
 ## Persistence and rollout
+
+### JSON capture observations in 1.4.18
+
+`diagnostics_revision = 3` adds optional `json_attempts` (at most two flat records):
+the current source's accepted picker read or fresh read, then the existing one
+temporary-error retry if used. Discarded or stale picker reads never create a
+transfer report. The same records survive every destination, DOM recovery,
+summary/paste errors, prepared-tab recovery and durable outbox restart.
+`diagnostics.version` stays 1; old clients and queued records remain valid.
+
+| Observation | Meaning |
+| --- | --- |
+| `outcome`, `mode`, `adapter_version` | `succeeded`/`partial`/`failed`/`cancelled`; `prefetch`/`fresh`/`retry`; actual hook version when observed |
+| `failure_check`, `failure_stage` | First closed guard label before wrappers/cancelled sibling downloads can erase it |
+| `failure_value`, `failure_limit`, `failure_value_source` | Exact comparison, with `content_length`, `reader_bytes`, `declared_files`, `string_length` or `utf8_bytes` |
+| `raw_bytes`, `raw_limit_bytes` | Bytes actually received by owned readers, including a rejected excess chunk; original native budget |
+| `raw_response_bytes`, `raw_response_limit_bytes`, `raw_response_stage` | Response with the highest observed budget fraction, paired with that response's effective allowance and stage |
+| `raw_header_bytes`, `raw_header_limit_bytes`, `raw_header_stage` | Highest advertised budget fraction; absence means no observed numeric Content-Length |
+| `history_bytes`, `session_bytes`, `descriptor_bytes`, `file_body_bytes` | Breakdown of received bytes. File bodies already belong to `raw_bytes` |
+| `files_supported`, `files_declared_bytes`, `files_downloaded_bytes`, `files_limit_bytes` | Unique supported selected-user downloads in DeepSeek/ChatGPT; declared sum and actual received body bytes. Only these adapters have the separate 2,100,000-byte download budget |
+| `files_ignored`, `files_ignored_pdf`, `files_ignored_image`, `files_ignored_other` | Descriptor occurrences skipped by the selected-branch file loops; coarse labels only. No recursive search through native metadata |
+| `transcript_chars`, `transcript_bytes`, `transcript_char_limit`, `transcript_byte_limit` | Final JS String.length units and UTF-8 bytes against 500,000 and 2,000,000. Bytes stay absent when the earlier character check rejects |
+| `history_items`, `selected_turns`, `requests`, `pages`, `auth_refreshes` | Native items (Gemini pairs, Grok/ChatGPT nodes, DeepSeek/Claude messages), serialized own turns, owned requests, Gemini pages, ChatGPT session refreshes |
+| `hook_ms`, `auth_ms`, `download_ms`, `parse_ms`, `serialize_ms`, `total_ms`, `deadline_ms`, `http_status` | Observed durations and native/bridge deadline/status. Concurrent file work and auth/download intervals can overlap; do not sum them into a global timeline |
+
+The size labels distinguish `raw_header_limit`, `raw_total_stream_limit`,
+`raw_response_stream_limit`, `raw_remaining_files_limit`, `supported_files_limit`,
+`transcript_char_limit` and `transcript_byte_limit`. ChatGPT keeps its existing
+32,000,000-byte aggregate/history allowance and 6,000,000-byte auxiliary-response
+allowance; the other four adapters keep 6,000,000 bytes. All existing transcript,
+file, summary/request, deadline, retry and fallback limits/behavior remain intact.
+The new labels do not change ChatGPT's existing incomplete classification for
+raw-history/file-body excess. Unsupported PDF/image bodies are not fetched by
+these file loops; any bytes already embedded in history still count as raw.
+Claude's supported pasted cards are already inline: their declared bytes/counts
+are observed, with zero extra file download bytes and no invented file budget.
+
+Only numeric fields and closed labels are accepted. Missing measurements stay
+absent. Values above the integer telemetry ceiling saturate at 2,147,483,647 with
+`numeric_saturated: lower_bound`; this does not change capture limits. Envelope
+limits remain 12/16/24 KiB. Adding an array name alone is insufficient: the JS
+contract/byte-identical Edge copy and SQL validator independently validate every
+attempt key, type, enum and the two-record bound.
+
+MAIN uses generated `json-capture-metrics-main.js`; isolated bridges use the
+canonical `transfer-diagnostics.js` and `json-capture-metrics.js`. Distinct filenames
+avoid the missing-helper setup reproduced in Brave with reused filenames across
+worlds. Rebuild with `node scripts/build-json-capture-metrics.js` after changing
+either input; tests enforce bundle parity and both manifest/on-demand paths.
+
+Rollout: apply `20261014075318_json_capture_attempt_diagnostics.sql`, then
+`20261014080744_json_capture_transport_check_labels.sql`, deploy `transfer-telemetry`
+with the matching shared allowlist, and deploy the relay's imported contract
+before distributing the extension. No table, column or RPC argument was added.
+Version remains **1.4.18** at the owner's request.
+
+For the guarded live browser round trip, run the ChatGPT history-failure smoke
+with `CAP_CONTEXT_JSON_SMOKE=chatgpt`, `CAP_CONTEXT_CHATGPT_FAILURE_SMOKE=history-oversize`,
+`CAP_CONTEXT_TELEMETRY_SMOKE=1` and `CAP_CONTEXT_LIVE_TELEMETRY_SMOKE=1`.
+The installed worker calls the production relay directly and mirrors only its
+telemetry reports/status locally for assertions. This scenario submits no summary,
+provider request or fabricated receipt. It intentionally writes synthetic failed
+transfer records to production; ordinary smoke runs remain local.
 
 `capture_method` is reported before capture completes and changes to `sweep`
 when DOM scrolling starts. JSON fallback immediately queues the existing safe

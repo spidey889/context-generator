@@ -6,7 +6,7 @@ const test = require("node:test");
 const { webcrypto, createHash } = require("node:crypto");
 const { clockTest } = require("./helpers/clock");
 const shouldRetryJson = require("./helpers/transfer-flow").loadTransferFlow().shouldRetrySourceJson;
-const scripts = new Map(["claude-fetch-main.js", "claude-json-capture.js"].map(file =>
+const scripts = new Map(["transfer-diagnostics.js", "json-capture-metrics.js", "claude-fetch-main.js", "claude-json-capture.js"].map(file =>
   [file, new vm.Script(fs.readFileSync(path.join(__dirname, "..", "extension", file), "utf8"), { filename: file })]));
 
 const chat = "test-chat";
@@ -109,7 +109,7 @@ function setup(data = fixture(), { status = 200, headers = {}, body, resources =
     })
   };
   const context = vm.createContext({ window, location, chrome: runtime ? { runtime } : undefined, URL, Request, TextEncoder, TextDecoder, AbortController, crypto: webcrypto, Date, setTimeout, clearTimeout });
-  for (const file of ["claude-fetch-main.js", "claude-json-capture.js"]) {
+  for (const file of ["transfer-diagnostics.js", "json-capture-metrics.js", "claude-fetch-main.js", "claude-json-capture.js"]) {
     scripts.get(file).runInContext(context);
   }
   return { window, location,

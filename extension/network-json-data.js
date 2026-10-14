@@ -1,12 +1,13 @@
 (() => {
   class CaptureError extends Error {
-    constructor(reason, captureFailureReason = "incomplete", captureDetail = "incomplete_history") {
+    constructor(reason, captureFailureReason = "incomplete", captureDetail = "incomplete_history", jsonFailureCheck) {
       super(reason);
       this.captureFailureReason = reason === "size" ? "size_limit" : captureFailureReason;
       this.captureDetail = reason === "size" ? "size_limit" : captureFailureReason === "unsupported" ? "unsupported_content" : captureDetail;
+      this.jsonFailureCheck = jsonFailureCheck;
     }
   }
-  const fail = (reason, captureFailureReason, detail) => { throw new CaptureError(reason, captureFailureReason, detail); };
+  const fail = (reason, captureFailureReason, detail, check) => { throw new CaptureError(reason, captureFailureReason, detail, check); };
   const complete = value => {
     if (!value || typeof value !== "object") return;
     for (const key of ["has_more", "has_next_page", "has_previous_page", "is_partial", "is_incomplete", "is_truncated", "partial", "truncated", "incomplete", "missing_messages", "next_cursor", "previous_cursor", "hasMore", "hasNextPage", "hasPreviousPage", "isPartial", "isIncomplete", "isTruncated", "missingMessages", "nextCursor", "previousCursor"]) {
@@ -17,10 +18,11 @@
     if ([value.is_complete, value.complete, value.isComplete].some(flag => flag === false
       || (typeof flag === "string" && flag.trim().toLowerCase() === "false"))) fail("Incomplete history was returned.");
   };
-  const transcript = (name, turns, excludedContentTypes = new Set()) => {
+  const transcript = (name, turns, excludedContentTypes = new Set(), metrics) => {
     if (!turns.length) fail("No usable user or assistant text was found.", undefined, "missing_text");
     const text = `${name} conversation:\n\n${turns.map(turn => `${turn.role === "user" ? "User" : "Assistant"}: ${turn.text}`).join("\n\n")}`;
-    if (text.length > 500000 || new TextEncoder().encode(text).length > 2000000) fail("size");
+    metrics?.set({ selected_turns: turns.length });
+    if (metrics ? !metrics.transcript(text) : text.length > 500000 || new TextEncoder().encode(text).length > 2000000) fail("size");
     return { text, messages: turns, messageTurnCount: turns.length, excludedContentTypes: [...excludedContentTypes].sort() };
   };
   const turn = (role, parts) => parts.filter(text => typeof text === "string" && text.trim()).length
@@ -36,7 +38,7 @@
         fail("Invalid or duplicate message IDs were returned.", undefined, "invalid_branch");
       }
       if (mapping.has(id)) {
-        if (!selectedOnly) fail("Invalid or duplicate message IDs were returned.", undefined, "invalid_branch");
+        if (!selectedOnly) fail("Invalid or duplicate message IDs were returned.", undefined, "invalid_branch", "duplicate_id");
         duplicateIds.add(id);
         continue;
       }
@@ -76,7 +78,7 @@
       // DeepSeek's explicit current message chooses the path. Unused bad IDs or
       // missing parent fields cannot invalidate it, but any duplicate selected
       // ID remains ambiguous, even when one duplicate is otherwise malformed.
-      if (duplicateIds.has(id)) fail("The selected branch contains duplicate message IDs.", undefined, "invalid_branch");
+      if (duplicateIds.has(id)) fail("The selected branch contains duplicate message IDs.", undefined, "invalid_branch", "duplicate_id");
       const item = mapping.get(id);
       if (!item || seen.has(id)) fail("A message is missing or the branch contains a cycle.", undefined, "branch_cycle");
       if (!Object.hasOwn(item, parentKey)) fail("A selected message has no parent field.", undefined, "parent_missing");
@@ -108,7 +110,8 @@
     if (!Array.isArray(page?.[0]) || (page[1] != null && (typeof page[1] !== "string" || !page[1]))) fail("Invalid Gemini history page.");
     return { turns: page[0], cursor: page[1] ?? null };
   };
-  const gemini = (pages, chat) => {
+  const gemini = (pages, chat, metrics) => {
+    metrics?.set({ files_supported: 0, files_ignored: 0 });
     if (!Array.isArray(pages) || !pages.length || pages.at(-1).cursor !== null) fail("Gemini still has previous history pages.");
     const turns = [], seen = new Set();
     const excludedContentTypes = new Set();
@@ -135,6 +138,7 @@
         for (const file of group[4]) {
           if (file == null) continue;
           if (Array.isArray(file) && typeof file[1] === "number" && typeof file[2] === "string" && file[2].trim()) {
+            metrics?.ignored(/\.pdf$/i.test(file[2]) ? "pdf" : "other", /\.(png|jpe?g|gif|webp|svg)$/i.test(file[2]));
             userParts.push(`Attachment: ${JSON.stringify(file[2])}`);
             excludedContentTypes.add("uploads");
           } else unrecognizedMetadata = true;
@@ -176,7 +180,7 @@
       turns.unshift(...turn("User", userParts), ...turn("Assistant", candidate[1].filter(part => typeof part === "string")));
     }
     if (expected !== null || !seen.size) fail("Gemini's oldest history turn is missing.", undefined, "parent_missing");
-    return transcript("Gemini", turns, excludedContentTypes);
+    return transcript("Gemini", turns, excludedContentTypes, metrics);
   };
   const grokBranch = (data, selected) => {
     complete(data);
@@ -188,13 +192,14 @@
     if (!leaf) fail("The active Grok branch could not be identified.", undefined, "invalid_branch");
     return chain(data.responseNodes, leaf, "responseId", "parentResponseId", { externalRoot: true });
   };
-  const grok = (nodes, responses, selected) => {
+  const grok = (nodes, responses, selected, metrics) => {
+    metrics?.set({ files_supported: 0, files_ignored: 0 });
     const branch = grokBranch(nodes, selected);
     if (!Array.isArray(responses)) fail("Grok message bodies are missing.");
     const mapping = new Map();
     const excludedContentTypes = new Set();
     for (const message of responses) {
-      if (mapping.has(message?.responseId)) fail("Grok returned duplicate message bodies.", undefined, "invalid_branch");
+      if (mapping.has(message?.responseId)) fail("Grok returned duplicate message bodies.", undefined, "invalid_branch", "duplicate_id");
       mapping.set(message?.responseId, message);
     }
     const turns = branch.flatMap(node => {
@@ -206,6 +211,10 @@
       if (message.sender === "assistant") { const { partial, ...metadata } = message; complete(metadata); }
       else complete(message);
       if (!["human", "assistant"].includes(message.sender) || message.isControl) return [];
+      const fileMetadata = Array.isArray(message.fileAttachmentsMetadata) && message.fileAttachmentsMetadata.length
+        ? message.fileAttachmentsMetadata : Array.isArray(message.fileAttachments) ? message.fileAttachments : [];
+      for (const file of fileMetadata) metrics?.ignored(typeof file?.fileName === "string" && /\.pdf$/i.test(file.fileName) ? "pdf" : "other",
+        typeof file?.fileName === "string" && /\.(png|jpe?g|gif|webp|svg)$/i.test(file.fileName));
       if ([message.fileAttachments, message.fileAttachmentsMetadata].some(files => Array.isArray(files) && files.length)) excludedContentTypes.add("uploads");
       if (Array.isArray(message.toolResponses) && message.toolResponses.length) excludedContentTypes.add("tools");
       if (message.sender === "assistant" && message.partial === true && message.message == null) return [];
@@ -221,7 +230,7 @@
       }
       return turn(message.sender === "human" ? "User" : "Assistant", parts);
     });
-    return transcript("Grok", turns, excludedContentTypes);
+    return transcript("Grok", turns, excludedContentTypes, metrics);
   };
   const deepseekBranch = (data, chat) => {
     if (data?.code !== 0 || data.data?.biz_code !== 0) fail("DeepSeek could not load the conversation.");
@@ -239,7 +248,7 @@
   const textFile = file => file?.is_image === false && /\.(txt|md|markdown|csv|json|py|js|ts|tsx|jsx|java|kt|swift|c|h|cpp|hpp|cs|go|rs|rb|php|sh|bash|zsh|lua|r|scala|dart|html|htm|css|scss|vue|svelte|xml|yaml|yml|toml|tsv|sql|ipynb|log)$/i.test(file.file_name || "");
   // Keep descriptor discovery and serialization aligned for a single-file object.
   const fileList = value => Array.isArray(value) ? value : value && typeof value === "object" ? [value] : [];
-  const deepseek = (data, chat, files = {}) => {
+  const deepseek = (data, chat, files = {}, metrics) => {
     const excludedContentTypes = new Set();
     const turns = deepseekBranch(data, chat).flatMap(message => {
       if (!["USER", "ASSISTANT"].includes(message.role)) return [];
@@ -278,7 +287,7 @@
       }
       return turn(message.role === "USER" ? "User" : "Assistant", parts);
     });
-    return transcript("DeepSeek", turns, excludedContentTypes);
+    return transcript("DeepSeek", turns, excludedContentTypes, metrics);
   };
   globalThis.__capNetworkJsonData = { CaptureError, complete, geminiPage, gemini, grokBranch, grok, deepseekBranch, deepseek, textFile, fileList };
 })();

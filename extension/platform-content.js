@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-14-size-dom-fallback-v144";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-14-json-capture-diagnostics-v145";
   const INLINE_PILL_SIZE = 36;
   const ownedUiStyleSheets = new Map();
   const CLAUDE_INLINE_STYLE_ID = "context-generator-claude-inline-styles";
@@ -1402,7 +1402,7 @@
       lastAt: null,
       marks: [],
       completed: false,
-      diagnostics: { version: 1, diagnostics_revision: 2, entry_point: source === "destination tile" ? "picker" : source === "extension icon" ? "toolbar" : "other",
+      diagnostics: { version: 1, diagnostics_revision: 3, entry_point: source === "destination tile" ? "picker" : source === "extension icon" ? "toolbar" : "other",
         browser: /Firefox\//i.test(globalThis.navigator?.userAgent || "") ? "firefox" : "chromium",
         visibility: ["visible", "hidden", "prerender"].includes(document.visibilityState) ? document.visibilityState : "unknown",
         ...(typeof globalThis.navigator?.onLine === "boolean" ? { online: globalThis.navigator.onLine } : {}),
@@ -7774,10 +7774,23 @@
     pickerJsonCapture = null;
     // Keep the original attempt bound while a replacement waits for a native
     // read to finish, even if cancellation clears the global running trace.
-    const read = () => captureSourceJson(expectedPath, () => {
-      checkTransferDeadline(trace);
-      return true;
-    });
+    const record = (value, mode) => {
+      const observations = value?.jsonCapture || (typeof value?.text === "string" ? { outcome: "succeeded" }
+        : { outcome: value?.diagnosticCode === "conversation_changed" ? "cancelled" : "failed",
+          failure_check: value?.diagnosticCode === "capture_json_unavailable" ? "hook_unavailable"
+            : value?.diagnosticCode === "conversation_changed" ? "conversation_changed" : "unknown" });
+      globalThis.CapTransferDiagnostics?.jsonAttempt?.(trace?.diagnostics, { ...observations, mode });
+    };
+    const read = async (mode = "fresh") => {
+      try {
+        const capture = await captureSourceJson(expectedPath, () => {
+          checkTransferDeadline(trace);
+          return true;
+        });
+        record(capture, mode);
+        return capture;
+      } catch (error) { record(error, mode); throw error; }
+    };
     try {
       if (entry) {
         try {
@@ -7786,6 +7799,7 @@
             entry.selected = true;
             const result = await entry.promise;
             if (isPickerJsonCaptureCurrent(entry)) {
+              record(result.error || result.capture, "prefetch");
               if (result.error) throw result.error;
               return result.capture;
             }
@@ -7804,7 +7818,7 @@
       markTransferTrace(trace, "retrying JSON capture");
       // One fresh read at selection, including a failed picker prefetch. Keep
       // the retry outside the catch so its failure uses normal recovery once.
-      return read();
+      return read("retry");
     }
   }
 

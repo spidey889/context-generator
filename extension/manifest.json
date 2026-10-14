@@ -36,35 +36,35 @@
   "content_scripts": [
     {
       "matches": ["https://gemini.google.com/*", "https://grok.com/*", "https://chat.deepseek.com/*"],
-      "js": ["network-json-data.js", "network-fetch-main.js"],
+      "js": ["json-capture-metrics-main.js", "network-json-data.js", "network-fetch-main.js"],
       "world": "MAIN",
       "run_at": "document_start"
     },
     {
       "matches": ["https://gemini.google.com/*", "https://grok.com/*", "https://chat.deepseek.com/*"],
-      "js": ["network-json-capture.js"],
+      "js": ["transfer-diagnostics.js", "json-capture-metrics.js", "network-json-capture.js"],
       "run_at": "document_start"
     },
     {
       "matches": ["https://chatgpt.com/*"],
-      "js": ["chatgpt-fetch-main.js"],
+      "js": ["json-capture-metrics-main.js", "chatgpt-fetch-main.js"],
       "world": "MAIN",
       "run_at": "document_start"
     },
     {
       "matches": ["https://chatgpt.com/*"],
-      "js": ["chatgpt-json-capture.js"],
+      "js": ["transfer-diagnostics.js", "json-capture-metrics.js", "chatgpt-json-capture.js"],
       "run_at": "document_start"
     },
     {
       "matches": ["https://claude.ai/*"],
-      "js": ["claude-fetch-main.js"],
+      "js": ["json-capture-metrics-main.js", "claude-fetch-main.js"],
       "world": "MAIN",
       "run_at": "document_start"
     },
     {
       "matches": ["https://claude.ai/*"],
-      "js": ["claude-json-capture.js"],
+      "js": ["transfer-diagnostics.js", "json-capture-metrics.js", "claude-json-capture.js"],
       "run_at": "document_start"
     },
     {

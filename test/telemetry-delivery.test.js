@@ -286,11 +286,14 @@ test("detailed failure observations survive compaction, restart and late conflic
   const shared = profile({ [INSTALL]: id(999) });
   const first = worker(async () => rejection(503, "unavailable"), shared);
   await first.settled();
-  await first.ack(event(1, { diagnostics: { version: 1, capture_method: "deepseek-json", capture_chars: 300000 } }));
+  const jsonAttempts = [{ outcome: "failed", mode: "prefetch", failure_check: "network_error", raw_bytes: 200 },
+    { outcome: "succeeded", mode: "retry", raw_bytes: 400, raw_limit_bytes: 6000000 }];
+  await first.ack(event(1, { diagnostics: { version: 1, capture_method: "deepseek-json", capture_chars: 300000, json_attempts: jsonAttempts } }));
   await first.ack(event(1, { status: "failed", lastStage: "paste_started", failureReason: "paste_failed",
     diagnostics: { version: 1, error_code: "editor_missing", error_origin: "destination", editor_seen: false, paste_attempts: 8 } }));
   await first.settled();
   const expected = structuredClone(shared.local[OUTBOX][0].payload.diagnostics);
+  assert.deepEqual(expected.json_attempts, jsonAttempts);
   const delivered = [];
   const restarted = worker(async (_url, options) => { delivered.push(JSON.parse(options.body)); return success(); }, shared);
   await restarted.settled();

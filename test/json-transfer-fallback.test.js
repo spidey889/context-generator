@@ -364,6 +364,30 @@ const transientError = (reason = "request_failed", detail = "network_error", sta
     ...(status === undefined ? {} : { capture_http_status: status }) }
 });
 
+test("JSON attempt observations survive source-to-destination handoff and one retry", async () => {
+  const platforms = ["chatgpt", "claude", "gemini", "grok", "deepseek"];
+  for (const source of platforms) for (const destination of platforms.filter(value => value !== source)) {
+    const { context, calls } = harness(source, { mode: "success" });
+    const read = context.window[captureKeyFor(source)];
+    context.window[captureKeyFor(source)] = async () => ({ ...await read(), jsonCapture: { outcome: "succeeded", mode: "fresh", raw_bytes: 1234, raw_limit_bytes: source === "chatgpt" ? 32000000 : 6000000 } });
+    await context.start(destination);
+    assert.equal(calls.flows[0].trace.diagnostics.json_attempts[0].raw_bytes, 1234);
+    assert.equal(calls.flows[0].trace.diagnostics.json_attempts[0].outcome, "succeeded");
+  }
+  const { context, calls } = harness("deepseek", { mode: "success" });
+  const read = context.window.__capCaptureNetworkJson;
+  let count = 0;
+  context.window.__capCaptureNetworkJson = async () => {
+    if (!count++) throw Object.assign(transientError(), { jsonCapture: { outcome: "failed", mode: "fresh", failure_check: "network_error", raw_bytes: 100 } });
+    return { ...await read(), jsonCapture: { outcome: "succeeded", mode: "fresh", raw_bytes: 200 } };
+  };
+  context.startPickerJsonCapture(); await context.pickerJsonCapture.promise;
+  await context.start("claude");
+  const attempts = calls.flows[0].trace.diagnostics.json_attempts;
+  assert.deepEqual(JSON.parse(JSON.stringify(attempts)).map(value => [value.mode, value.outcome, value.raw_bytes]),
+    [["prefetch", "failed", 100], ["retry", "succeeded", 200]]);
+});
+
 test("size failures use one DOM recovery on all five platforms, including active replies and cached errors", async () => {
   const cases = [
     ["deepseek", true, transientError("size_limit", "attachment_size_limit")],
@@ -373,6 +397,7 @@ test("size failures use one DOM recovery on all five platforms, including active
     ["chatgpt", false, Object.assign(transientError(), { diagnosticCode: "conversation_too_large" })]
   ];
   for (const [platform, prefetched, error] of cases) {
+    error.jsonCapture = { outcome: "failed", mode: "fresh", failure_check: "raw_total_stream_limit", failure_value: 6000001, failure_limit: 6000000 };
     const { context, calls, prepared } = harness(platform);
     context.isSourceReplyInProgress = () => platform === "grok";
     context.window[captureKeyFor(platform)] = async () => { calls.json++; throw error; };
@@ -395,6 +420,8 @@ test("size failures use one DOM recovery on all five platforms, including active
     assert.equal(diagnostics.error_code, undefined);
     assert.equal(diagnostics.capture_detail, error.diagnostics.capture_detail);
     assert.equal(diagnostics.json_fallback_code, "size_limit");
+    assert.equal(diagnostics.json_attempts[0].failure_check, "raw_total_stream_limit");
+    assert.equal(diagnostics.json_attempts[0].failure_value, 6000001);
     assert.doesNotMatch(JSON.stringify(diagnostics), /MUST_NOT_APPEAR/);
   }
 });
