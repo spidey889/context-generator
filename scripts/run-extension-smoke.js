@@ -1359,6 +1359,7 @@ async function verifyCompactDraftPayload(session, contextId) {
 async function verifyRecoveryPalette(session, contextId, { nativeCopy = false } = {}) {
   const result = await session.evaluate(`(async () => {
     const modal = document.getElementById("context-generator-fallback-modal");
+    const title = document.getElementById("context-generator-fallback-title");
     const copy = document.getElementById("context-generator-fallback-copy");
     const dismiss = document.getElementById("context-generator-fallback-dismiss");
     if (!modal || !copy || !dismiss) return { available: false };
@@ -1397,7 +1398,11 @@ async function verifyRecoveryPalette(session, contextId, { nativeCopy = false } 
         "[data-darkreader-inline-" + key + "]{" + property + ":var(--darkreader-inline-" + key + ") !important}"
       ).join("\\n");
       rules.textContent += '[data-darkreader-inline-outline]{outline-color:red !important}';
+      // A missing background is also vulnerable, even without an initial fill.
+      rules.textContent += '#context-generator-fallback-title{background:linear-gradient(90deg,#a67bec,#482465) !important}';
       document.head.appendChild(rules);
+      const titleBackgroundPreserved = getComputedStyle(title).backgroundImage === "none"
+        && getComputedStyle(title).backgroundColor === "rgba(0, 0, 0, 0)";
       const preserved = cases.every(([element, property], index) =>
         getComputedStyle(element).getPropertyValue(property) === before[index]);
       dismiss.setAttribute("data-darkreader-inline-outline", "");
@@ -1443,7 +1448,7 @@ async function verifyRecoveryPalette(session, contextId, { nativeCopy = false } 
       copy.click();
       await new Promise(resolve => setTimeout(resolve, 0));
       const manualText = document.getElementById("context-generator-fallback-text");
-      return { available: true, checked: cases.length, preserved, focusPreserved, successPreserved, resetPreserved, nativeCopyPreserved,
+      return { available: true, checked: cases.length, preserved, titleBackgroundPreserved, focusPreserved, successPreserved, resetPreserved, nativeCopyPreserved,
         failurePreserved: copy.textContent === "Select text and copy manually" && buttonPalettePreserved()
           && getComputedStyle(copy).background !== originalComputedBackground
           && manualText.value === modal.contextGeneratorCopyText
@@ -1468,7 +1473,7 @@ async function verifyRecoveryPalette(session, contextId, { nativeCopy = false } 
     }
   })()`, contextId);
   assert.equal(result.available, true, "The recovery dialog must be available after delivery.");
-  for (const key of ["preserved", "focusPreserved", "successPreserved", "resetPreserved", "failurePreserved", "nativeCopyPreserved"]) {
+  for (const key of ["preserved", "titleBackgroundPreserved", "focusPreserved", "successPreserved", "resetPreserved", "failurePreserved", "nativeCopyPreserved"]) {
     assert.equal(result[key], true, `Dark Reader must not override recovery ${key}: ${JSON.stringify(result)}`);
   }
   if (nativeCopy) process.stdout.write("✓ Compact draft preview expands/collapses; Clipboard API, native fallback and manual selection keep the complete carry.\n");

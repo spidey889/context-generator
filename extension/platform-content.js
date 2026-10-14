@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-14-json-capture-diagnostics-v145";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-14-recovery-title-background-v147";
   const INLINE_PILL_SIZE = 36;
   const ownedUiStyleSheets = new Map();
   const CLAUDE_INLINE_STYLE_ID = "context-generator-claude-inline-styles";
@@ -9224,7 +9224,9 @@
 
       const title = document.createElement("div");
       title.id = "context-generator-fallback-title";
+      // Protect the absent fill too: page/theme CSS can otherwise paint a strip.
       title.style.cssText = [
+        "background:transparent",
         draftPresent ? "font-family:inherit" : "font-family:Georgia,'Times New Roman',serif",
         draftPresent ? "font-size:19px" : "font-size:22px",
         draftPresent ? "font-weight:600" : "font-weight:500",
