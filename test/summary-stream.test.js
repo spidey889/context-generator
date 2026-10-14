@@ -2,6 +2,7 @@ const assert = require("node:assert/strict");
 const http = require("node:http");
 const test = require("node:test");
 const { clockTest } = require("./helpers/clock");
+const { loadTokenHarborRoute } = require("./helpers/tokenharbor-route");
 const handler = require("../api/summarize");
 const { createSummaryWithFallback, getSummaryProfile } = handler.__test;
 
@@ -42,7 +43,7 @@ function answerStream(provider, text = "Preserve the agreed project plan.") {
 }
 
 for (const provider of ["tokenharbor", "openrouter", "gemini", "mistral"]) {
-  const firstAnswerMs = provider === "tokenharbor" ? 45000 : 30000;
+  const firstAnswerMs = 30000;
   for (const phase of ["headers", "body", "json body"]) {
     clockTest(`${provider} switches after ${firstAnswerMs / 1000} seconds without answer text in ${phase}`, async t => {
       configure(t);
@@ -107,6 +108,7 @@ for (const provider of ["tokenharbor", "openrouter", "gemini", "mistral"]) {
 
 test("DeepSeek can finish thinking after 30s within its existing 45s slice", async t => {
   configure(t);
+  const { createSummaryWithFallback: createDeepSeekSummary } = loadTokenHarborRoute("deepseek-v4.1-flash:free");
   t.mock.timers.enable({ apis: ["Date", "setTimeout"], now: Date.now() });
   let calls = 0;
   const deltas = [];
@@ -118,7 +120,7 @@ test("DeepSeek can finish thinking after 30s within its existing 45s slice", asy
     return responseFrom(frame({ choices: [{ index: 0, delta: { reasoning_content: "PRIVATE_THINKING" } }] })
       + answerStream("tokenharbor", "The green triangle is ready for inspection."));
   };
-  const result = await createSummaryWithFallback({ conversation, profile: getSummaryProfile(conversation),
+  const result = await createDeepSeekSummary({ conversation, profile: getSummaryProfile(conversation),
     tokenharborApiKey: "test", openrouterApiKey: "test", requestContext: { onDelta: delta => deltas.push(delta) } });
   assert.equal(calls, 1, "Thinking must not prematurely send this run to OpenRouter");
   assert.equal(result.model, "deepseek-v4.1-flash:free");

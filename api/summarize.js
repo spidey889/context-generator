@@ -38,8 +38,8 @@ const TOKENHARBOR_ENABLED = true;
 // Use the first enabled entry only: switching models keeps one TokenHarbor slice
 // in the shared free-provider window. Retain paused entries for easy rollback.
 const TOKENHARBOR_MODELS = [
-  { model: "deepseek-v4.1-flash:free", enabled: true },
-  { model: "claude-haiku-5.5:free", enabled: false }
+  { model: "deepseek-v4.1-flash:free", enabled: false },
+  { model: "claude-haiku-5.5:free", enabled: true }
 ];
 const TOKENHARBOR_CHAT_COMPLETIONS_URL = "https://tokenharbor.ai/v1/chat/completions";
 const TOKENHARBOR_SHARED_SLICE_MS = 45000;
