@@ -1158,7 +1158,7 @@ async function summarizeWithBackend(conversation, transferId = null, deadlineAt 
 async function fetchSummaryFromBackend(conversationText, transferId = null, deadlineAt = null, requestSignal = null, onNearEnd = () => {}, payload = { conversation: conversationText }) {
   checkTransferDeadline(deadlineAt);
   const summaryStartedAt = nowMs();
-  const diagnostics = { version: 1, diagnostics_revision: 2, last_operation: "summary_request" };
+  const diagnostics = { version: 1, diagnostics_revision: 3, last_operation: "summary_request" };
   let responseReceived = false;
   const controller = new AbortController();
   const onCancel = () => controller.abort(requestSignal.reason);
@@ -1415,7 +1415,7 @@ function createTransferTimeoutError() {
 async function transferToDestination(destinationId, text, preparedTabId = null, transferId = null,
   deferFinalActivation = false, deadlineAt = null, sourceTab = null) {
   const trace = createBackgroundTrace();
-  trace.diagnostics = { version: 1, diagnostics_revision: 2 };
+  trace.diagnostics = { version: 1, diagnostics_revision: 3 };
   try {
     const result = await transferToDestinationObserved(destinationId, text, preparedTabId, transferId,
       deferFinalActivation, deadlineAt, sourceTab, trace);
@@ -1488,7 +1488,7 @@ async function transferToDestinationObserved(
     }
   } else if (preparedTabId) {
     if (destinationId === "claude" && trace.diagnostics.claude_page) {
-      trace.diagnostics.prepared_diagnostics = { version: 1, diagnostics_revision: 2, claude_page: trace.diagnostics.claude_page,
+      trace.diagnostics.prepared_diagnostics = { version: 1, diagnostics_revision: 3, claude_page: trace.diagnostics.claude_page,
         destination_platform_match: trace.diagnostics.destination_platform_match,
         destination_route_allowed: trace.diagnostics.destination_route_allowed };
       delete trace.diagnostics.claude_page;

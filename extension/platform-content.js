@@ -2737,7 +2737,7 @@
 
   async function pasteIntoPlatform(text, destinationId, transferId = null, deadlineAt = null, sourceTabId = null) {
     const startedAt = Date.now();
-    const diagnostics = { version: 1, diagnostics_revision: 2, last_operation: "paste_start", summary_chars: text?.length || 0,
+    const diagnostics = { version: 1, diagnostics_revision: 3, last_operation: "paste_start", summary_chars: text?.length || 0,
       document_ready_state: document.readyState,
       visibility: ["visible", "hidden", "prerender"].includes(document.visibilityState) ? document.visibilityState : "unknown" };
     try {
