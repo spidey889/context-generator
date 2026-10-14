@@ -4,6 +4,8 @@ A short history of decisions and regressions that matter when changing the code.
 
 ## 2026-10-14
 
+- **Extension 1.4.18 prepared.** Bumped the manifest and current-source documentation from 1.4.16 to 1.4.18 for the next Chrome Web Store upload. The owner deferred the long-chat scrolling capture completeness fix to a later release. Deleted the stale local `extension/chrome.zip`; no replacement ZIP or Web Store upload was made.
+
 - **JSON capture fixes integrated without losing newer master behavior.** Combined interrupted ChatGPT/Claude body-read retry and bounded DeepSeek native-auth observation with the Grok/DeepSeek unused-reply fixes and ChatGPT explicit partial-text outcome. Both independent DeepSeek implementations used v17, so MAIN/bridge now use v18 and the retained-observation regression checks replacement of v17. Grok stays v15. Reconciled the audit so completed source fixes and unresolved historical incidents are distinct.
 
 - **Brave JSON smoke waits for restored route ownership.** Controlled delayed-layout/poll-fallback reproduction opened the orb while its mount still belonged to the temporary root route; placement then correctly dismissed the picker before prefetch, matching the CI timeout. The fixture now waits for its existing route/mount readiness probe after restoring the chat and removing rendered turns. The same stressed sequence failed before the wait and passed afterward with exact original files, one summary request, exact paste and zero Send clicks. No product timing or capture limits changed. All 651 regular tests and the release lifecycle check passed.
