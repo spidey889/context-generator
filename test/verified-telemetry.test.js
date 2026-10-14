@@ -248,7 +248,7 @@ test("server receipts cover remote success and emergency carry, and missing keys
   const { verifySummaryProof, verifySummaryReceipt } = await proofHelpers();
   const originalFetch = global.fetch;
   const names = ["TELEMETRY_SIGNING_KEY", "GEMINI_API_KEY", "MISTRAL_API_KEY", "MISTRAL_ENABLED",
-    "OPENROUTER_API_KEY", "OPENROUTER_ENABLED", "OPENROUTER_LING_ENABLED",
+    "OPENROUTER_API_KEY", "OPENROUTER_ENABLED",
     "OPENROUTER_QWEN_ENABLED", "OPENROUTER_DOTS_ENABLED", "OPENROUTER_GEMMA_ENABLED"];
   const previous = Object.fromEntries(names.map(name => [name, process.env[name]]));
   t.after(() => {
@@ -262,8 +262,8 @@ test("server receipts cover remote success and emergency carry, and missing keys
   process.env.MISTRAL_API_KEY = "test-provider-key";
   process.env.MISTRAL_ENABLED = "true";
   process.env.OPENROUTER_API_KEY = "test-openrouter-key";
-  process.env.OPENROUTER_LING_ENABLED = "true";
-  for (const name of ["OPENROUTER_QWEN_ENABLED", "OPENROUTER_DOTS_ENABLED", "OPENROUTER_GEMMA_ENABLED"]) process.env[name] = "false";
+  process.env.OPENROUTER_DOTS_ENABLED = "true";
+  for (const name of ["OPENROUTER_QWEN_ENABLED", "OPENROUTER_GEMMA_ENABLED"]) process.env[name] = "false";
   const context = payload({ status: "started", last_stage: "summary_request_started", failure_reason: null });
   const req = { method: "POST", headers: { "content-type": "application/json", "x-cap-context-client": "cap-context-extension/1" }, body: {
     conversation: "User: Windows build passed.\nClaude: Linux checks remain pending.\n".repeat(80), telemetry: context
@@ -293,11 +293,11 @@ test("server receipts cover remote success and emergency carry, and missing keys
     await withFundedBudget(() => summarize(req, res));
     assert.equal(res.code, 200);
     assert.equal(res.body.timing.provider, provider);
-    if (provider === "openrouter") assert.equal(res.body.timing.primaryModel, "inclusionai/ling-3.1-flash");
+    if (provider === "openrouter") assert.equal(res.body.timing.primaryModel, "dots-studio/dots-3-note-preview:free");
     assert.equal(await verifySummaryProof({ ...context, summary_proof: res.body.summaryProof }, KEY), true);
     const signedV2 = { ...context, last_stage: "summary_completed",
       summary_proof: res.body.summaryProofV2, summary_confirmed_at: res.body.summaryConfirmedAt };
-    const expectedModel = { openrouter: "inclusionai/ling-3.1-flash", mistral: "ministral-14b-2512",
+    const expectedModel = { openrouter: "dots-studio/dots-3-note-preview:free", mistral: "ministral-14b-2512",
       gemini: "gemini-3.5-flash-lite", "local-direct": "local-direct" }[provider];
     assert.deepEqual(await verifySummaryReceipt(signedV2, KEY), { model: expectedModel });
     const edge = await edgeHarness();
@@ -321,7 +321,8 @@ test("server receipts cover remote success and emergency carry, and missing keys
   await withFundedBudget(() => summarize(req, allRoutes));
   assert.equal(allRoutes.code, 200);
   const { LEGACY_RECEIPT_MODELS } = await proofHelpers();
-  assert.deepEqual(new Set([...allRoutes.body.timing.modelsTried, "local-direct"]), new Set(LEGACY_RECEIPT_MODELS));
+  assert.deepEqual(new Set([...allRoutes.body.timing.modelsTried, "local-direct"]),
+    new Set(LEGACY_RECEIPT_MODELS.filter(model => model !== "inclusionai/ling-3.1-flash")));
   delete process.env.TELEMETRY_SIGNING_KEY;
   const res = response();
   await summarize(req, res);

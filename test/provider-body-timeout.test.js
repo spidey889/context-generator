@@ -5,8 +5,8 @@ const { createSummaryWithFallback, getSummaryProfile } = require("../api/summari
 const { clockTest } = require("./helpers/clock");
 
 function configureProviderRoute(t, provider) {
-  const flags = { OPENROUTER_ENABLED: provider === "OpenRouter", OPENROUTER_LING_ENABLED: true,
-    OPENROUTER_QWEN_ENABLED: false, OPENROUTER_DOTS_ENABLED: false, OPENROUTER_GEMMA_ENABLED: false,
+  const flags = { OPENROUTER_ENABLED: provider === "OpenRouter", OPENROUTER_DOTS_ENABLED: true,
+    OPENROUTER_QWEN_ENABLED: false, OPENROUTER_GEMMA_ENABLED: false,
     MISTRAL_ENABLED: provider === "Mistral" };
   const previous = Object.keys(flags).map(name => [name, process.env[name]]);
   for (const [name, enabled] of Object.entries(flags)) process.env[name] = String(enabled);
@@ -62,7 +62,7 @@ for (const { provider, phase, elapsedMs } of [
     const conversation = "Build passed; Linux checks remain pending. ".repeat(100);
     const result = await createSummaryWithFallback({ conversation, profile: getSummaryProfile(conversation), ...keys });
     const expired = scenario.elapsedMs >= 90000;
-    const firstModel = { Gemini: "gemini-3.6-flash", OpenRouter: "inclusionai/ling-3.1-flash", Mistral: "ministral-14b-2512" }[provider];
+    const firstModel = { Gemini: "gemini-3.6-flash", OpenRouter: "dots-studio/dots-3-note-preview:free", Mistral: "ministral-14b-2512" }[provider];
     const fallbackModel = { Gemini: "gemini-3.5-flash-lite", OpenRouter: "gemini-3.6-flash", Mistral: "local-direct" }[provider];
     assert.equal(result.model, expired ? fallbackModel : firstModel);
     assert.equal(requests[0].signal.aborted, expired);
@@ -226,7 +226,7 @@ for (const scenario of [
     }
     if (scenario.provider === "OpenRouter") {
       assert.deepEqual(result.openrouterModelsTried, scenario.status === 429
-        ? ["inclusionai/ling-3.1-flash", "qwen/qwen3.8-27b:free"] : ["inclusionai/ling-3.1-flash"]);
+        ? ["dots-studio/dots-3-note-preview:free", "qwen/qwen3.8-27b:free"] : ["dots-studio/dots-3-note-preview:free"]);
     }
     assert.equal(await Promise.race([allClosed, new Promise(resolve => {
       closeTimer = originalSetTimeout(() => resolve(false), 1000);
@@ -274,10 +274,10 @@ const status = 200;
   test(`${openrouterEnabled ? "OpenRouter" : "Gemini"} fallback aborts a stalled ${status} response body within its budget`, { timeout: 5000 }, async t => {
     // Exercise this route regardless of a developer's deployed env switches.
     const flags = ["OPENROUTER_ENABLED", "OPENROUTER_QWEN_ENABLED",
-      "OPENROUTER_DOTS_ENABLED", "OPENROUTER_GEMMA_ENABLED", "OPENROUTER_LING_ENABLED",
+      "OPENROUTER_DOTS_ENABLED", "OPENROUTER_GEMMA_ENABLED",
       ...(openrouterEnabled ? ["MISTRAL_ENABLED"] : [])];
     const previous = flags.map(name => process.env[name]);
-    flags.forEach(name => { process.env[name] = openrouterEnabled && ["OPENROUTER_ENABLED", "OPENROUTER_LING_ENABLED", "MISTRAL_ENABLED"].includes(name) ? "true" : "false"; });
+    flags.forEach(name => { process.env[name] = openrouterEnabled && ["OPENROUTER_ENABLED", "OPENROUTER_DOTS_ENABLED", "MISTRAL_ENABLED"].includes(name) ? "true" : "false"; });
     t.after(() => flags.forEach((name, i) => {
       if (previous[i] === undefined) delete process.env[name]; else process.env[name] = previous[i];
     }));
@@ -346,7 +346,7 @@ const status = 200;
       assert.deepEqual(budgets, openrouterEnabled ? [90000, 60000, 60000] : [90000, 90000]);
       assert.deepEqual(bodyDeadlineChecks, openrouterEnabled ? [[false, true], [false, true]] : [[false, true]], "real bodies must abort exactly at their deadlines");
       if (openrouterEnabled) {
-        assert.deepEqual(result.openrouterModelsTried, ["inclusionai/ling-3.1-flash"]);
+        assert.deepEqual(result.openrouterModelsTried, ["dots-studio/dots-3-note-preview:free"]);
       }
       assert.equal(result.model, "gemini-3.5-flash-lite");
       assert.match(result.summary, /Linux checks remain pending/);

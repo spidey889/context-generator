@@ -24,7 +24,7 @@ function response() {
 function isolate(t, values = {}) {
   const names = ["KV_REST_API_URL", "KV_REST_API_TOKEN", "UPSTASH_REDIS_REST_URL", "UPSTASH_REDIS_REST_TOKEN",
     "FUNDED_SUMMARY_IP_DAILY_UNITS", "FUNDED_SUMMARY_GLOBAL_DAILY_UNITS", "GEMINI_API_KEY",
-    "MISTRAL_API_KEY", "MISTRAL_ENABLED", "OPENROUTER_API_KEY", "OPENROUTER_ENABLED", "OPENROUTER_LING_ENABLED"];
+    "MISTRAL_API_KEY", "MISTRAL_ENABLED", "OPENROUTER_API_KEY", "OPENROUTER_ENABLED", "OPENROUTER_DOTS_ENABLED"];
   const saved = names.map(name => process.env[name]);
   const originalFetch = global.fetch;
   names.forEach(name => { delete process.env[name]; });
@@ -274,7 +274,7 @@ test("Mistral is reserved too; zero-price OpenRouter succeeds without funded acc
   process.env.KV_REST_API_URL = "";
   process.env.OPENROUTER_ENABLED = "true";
   process.env.OPENROUTER_API_KEY = "test-free";
-  process.env.OPENROUTER_LING_ENABLED = "true";
+  process.env.OPENROUTER_DOTS_ENABLED = "true";
   global.fetch = async (url, options) => {
     assert.equal(url, "https://openrouter.ai/api/v1/chat/completions");
     assert.deepEqual(JSON.parse(options.body).provider.max_price, { prompt: 0, completion: 0, request: 0 });
