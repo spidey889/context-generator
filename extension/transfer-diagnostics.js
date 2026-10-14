@@ -52,7 +52,7 @@
   const jsonAttemptEnums = {
     outcome: ["succeeded", "partial", "failed", "cancelled"],
     mode: ["prefetch", "fresh", "retry"],
-    failure_check: ["raw_header_limit", "raw_total_stream_limit", "supported_files_limit", "transcript_char_limit", "transcript_byte_limit",
+    failure_check: ["raw_header_limit", "raw_total_stream_limit", "raw_response_stream_limit", "raw_remaining_files_limit", "supported_files_limit", "transcript_char_limit", "transcript_byte_limit",
       "auth_missing", "hook_unavailable", "busy", "http_error", "network_error", "invalid_json", "invalid_utf8", "non_json_response",
       "partial_response", "incomplete_history", "invalid_branch", "branch_cycle", "parent_missing", "duplicate_id", "count_mismatch",
       "text_invalid", "canvas_invalid", "missing_text", "attachment_failed", "attachment_length_mismatch", "timeout", "conversation_changed",

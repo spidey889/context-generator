@@ -7,7 +7,10 @@ async function checkJsonCaptureDiagnostics(db, sql) {
   await db.exec(sql);
   assert.deepEqual((await db.query("select md5(coalesce(jsonb_agg(to_jsonb(t))::text,'')) as hash from public.transfers t")).rows, before);
   assert.deepEqual(JSON.parse(sql.match(/rules constant jsonb := '([^']+)'::jsonb/)[1]), contract.schema);
-  assert.deepEqual(JSON.parse(sql.match(/attempt_rules constant jsonb := '([^']+)'::jsonb/)[1]), contract.jsonAttemptSchema);
+  const attemptRules = structuredClone(contract.jsonAttemptSchema);
+  if (!sql.includes('"raw_response_stream_limit"')) attemptRules.failure_check.values = attemptRules.failure_check.values
+    .filter(value => !["raw_response_stream_limit", "raw_remaining_files_limit"].includes(value));
+  assert.deepEqual(JSON.parse(sql.match(/attempt_rules constant jsonb := '([^']+)'::jsonb/)[1]), attemptRules);
   const attempt = { outcome: "failed", mode: "prefetch", failure_check: "raw_total_stream_limit", failure_value: 6000001,
     failure_limit: 6000000, failure_value_source: "reader_bytes", raw_bytes: 6000001, raw_limit_bytes: 6000000 };
   const report = value => ({ version: 1, diagnostics_revision: 3, json_attempts: value });
@@ -17,7 +20,7 @@ async function checkJsonCaptureDiagnostics(db, sql) {
     { label: "two attempts maximum", value: report([attempt, attempt, attempt]), expected: false },
     { label: "missing outcome", value: report([{ mode: "fresh" }]), expected: false }
   ];
-  for (const [key, rule] of Object.entries(contract.jsonAttemptSchema)) {
+  for (const [key, rule] of Object.entries(attemptRules)) {
     for (const value of rule.values || [rule.min || 0, rule.max]) samples.push({ label: `observation ${key}`, value: report([{ ...attempt, [key]: value }]), expected: true });
     samples.push({ label: `private/invalid ${key}`, value: report([{ ...attempt, [key]: "PRIVATE text/url/token" }]), expected: false });
     if (rule.type === "number") for (const value of [-1, 0.5, rule.max + 1]) samples.push({ label: `number boundary ${key}`, value: report([{ ...attempt, [key]: value }]), expected: false });
