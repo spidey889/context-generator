@@ -392,8 +392,12 @@ async function main() {
         checks += await require("./check-useful-diagnostics-db.js").checkAttachmentSizeFailure(db, sql, appliedMigrations, "file size");
       } else if (name.endsWith("_file_size_in_failure_reason.sql")) {
         checks += await require("./check-file-size-failure-db.js").checkFileSizeFailureReason(db, sql, appliedMigrations);
-      } else if (name.endsWith("_json_capture_attempt_diagnostics.sql") || name.endsWith("_json_capture_transport_check_labels.sql")) {
+      } else if (name.endsWith("_json_capture_attempt_diagnostics.sql")) {
         checks += await require("./check-json-capture-diagnostics-db.js").checkJsonCaptureDiagnostics(db, sql);
+      } else if (name.endsWith("_json_capture_transport_check_labels.sql")) {
+        const previous = appliedMigrations.find(migration => migration.name === "json_capture_attempt_diagnostics");
+        assert.ok(previous, "Original JSON diagnostics migration must be replayed before its label update"); checks++;
+        checks += await require("./check-json-capture-diagnostics-db.js").checkJsonCaptureDiagnostics(db, sql, previous.statements.join("\n"));
       } else await db.exec(sql);
     }
     checks += await require("./check-served-model-db.js").checkStoreModelReceipts(db);
