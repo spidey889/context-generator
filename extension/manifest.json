@@ -19,7 +19,8 @@
     "https://gemini.google.com/*",
     "https://grok.com/*",
     "https://chat.deepseek.com/*",
-    "https://context-generator-five.vercel.app/*"
+    "https://context-generator-five.vercel.app/*",
+    "https://context-generator-git-codex-tok-1ef029-vinits-projects-9bc84d4f.vercel.app/*"
   ],
   "background": {
   "service_worker": "background.js",

@@ -298,7 +298,7 @@ async function createSmokeExtension(tempRoot, origin) {
   backgroundSource = translateLandingPaths(backgroundSource);
   backgroundSource = replaceOnce(
     backgroundSource,
-    'const SUMMARY_BACKEND_URL = "https://context-generator-five.vercel.app/api/summarize";',
+    backgroundSource.match(/^const SUMMARY_BACKEND_URL = "[^"\r\n]+";$/m)?.[0] || "missing summary endpoint declaration",
     `const SUMMARY_BACKEND_URL = ${JSON.stringify(`${origin}/api/summarize`)};`,
     "the summary backend URL"
   );
