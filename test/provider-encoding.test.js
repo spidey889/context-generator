@@ -6,8 +6,8 @@ const conversation = "Build passed; José owns the rollout. ".repeat(100);
 const text = "Build passed; José owns the rollout. 中文 🚀 Literal replacement character: �.";
 
 function configure(t, provider) {
-  const flags = { OPENROUTER_ENABLED: provider === "OpenRouter", OPENROUTER_LING_ENABLED: true,
-    OPENROUTER_QWEN_ENABLED: false, OPENROUTER_DOTS_ENABLED: false, OPENROUTER_GEMMA_ENABLED: false,
+  const flags = { OPENROUTER_ENABLED: provider === "OpenRouter", OPENROUTER_DOTS_ENABLED: true,
+    OPENROUTER_QWEN_ENABLED: false, OPENROUTER_GEMMA_ENABLED: false,
     MISTRAL_ENABLED: provider === "Mistral" };
   const previous = Object.keys(flags).map(name => [name, process.env[name]]);
   const originalFetch = global.fetch;
@@ -64,7 +64,7 @@ for (const provider of ["Gemini", "OpenRouter"]) {
       } }));
     };
     const result = await createSummaryWithFallback({ conversation, profile: getSummaryProfile(conversation), ...keys });
-    const model = provider === "Gemini" ? "gemini-3.6-flash" : "inclusionai/ling-3.1-flash";
+    const model = provider === "Gemini" ? "gemini-3.6-flash" : "dots-studio/dots-3-note-preview:free";
     assert.equal(result.model, model);
     assert.equal(requests, 1);
     assert.ok(result.summary.startsWith(text));

@@ -116,20 +116,19 @@ async function main() {
     "case-id": { type: "string" },
     "long-history": { type: "boolean", default: false },
     repeats: { type: "string", default: "1" },
-    model: { type: "string", default: "inclusionai/ling-3.1-flash" }
+    model: { type: "string", default: "dots-studio/dots-3-note-preview:free" }
   } });
   const repeats = Number(values.repeats);
   if (!Number.isInteger(repeats) || repeats < 1 || repeats > 3) throw new Error("repeats must be between 1 and 3");
   if (!process.env.OPENROUTER_API_KEY) throw new Error("OPENROUTER_API_KEY is required");
   const flags = {
-    "inclusionai/ling-3.1-flash": "OPENROUTER_LING_ENABLED",
     "qwen/qwen3.8-27b:free": "OPENROUTER_QWEN_ENABLED",
     "dots-studio/dots-3-note-preview:free": "OPENROUTER_DOTS_ENABLED",
     "google/gemma-4-26b-a4b-it:free": "OPENROUTER_GEMMA_ENABLED"
   };
   if (!flags[values.model]) throw new Error("Only configured free experiment routes are supported");
   process.env.OPENROUTER_ENABLED = "true";
-  for (const flag of ["OPENROUTER_LING_ENABLED", "OPENROUTER_QWEN_ENABLED", "OPENROUTER_DOTS_ENABLED", "OPENROUTER_GEMMA_ENABLED"]) {
+  for (const flag of ["OPENROUTER_QWEN_ENABLED", "OPENROUTER_DOTS_ENABLED", "OPENROUTER_GEMMA_ENABLED"]) {
     process.env[flag] = flag === flags[values.model] ? "true" : "false";
   }
   const casesPath = path.resolve(root, values.cases);

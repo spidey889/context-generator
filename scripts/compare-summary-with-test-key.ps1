@@ -1,6 +1,6 @@
 param(
   [ValidateSet('test-a','test-b')][string]$TestKey = 'test-a',
-  [ValidateSet('ling','dots','qwen')][string]$Model = 'ling',
+  [ValidateSet('dots','qwen')][string]$Model = 'dots',
   [string]$BaselineRef = 'master',
   [string]$Cases = 'evaluation/handoff-quality-cases.json',
   [ValidateRange(1,3)][int]$Repeats = 1,
@@ -18,7 +18,6 @@ try {
   exit 1
 }
 $testModels = @{
-  ling = 'inclusionai/ling-3.1-flash'
   dots = 'dots-studio/dots-3-note-preview:free'
   qwen = 'qwen/qwen3.8-27b:free'
 }

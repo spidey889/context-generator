@@ -20,7 +20,7 @@ test("failed requests consume the fiftieth slot and the next attempt never reach
   fs.writeFileSync(file, JSON.stringify({ requests: Array(49).fill(now - 60000) }));
   let calls = 0;
   const fetch = createGuardedFetch(async () => { calls++; return new Response("{}", { status: 502 }); }, { key: "test-only", ledgerPath: file, slot: "test-a", clock: () => now });
-  const options = { headers: { Authorization: "Bearer test-only" }, body: JSON.stringify({ model: "inclusionai/ling-3.1-flash", provider: { data_collection: "deny", max_price: { prompt: 0, completion: 0, request: 0 } } }) };
+  const options = { headers: { Authorization: "Bearer test-only" }, body: JSON.stringify({ model: "dots-studio/dots-3-note-preview:free", provider: { data_collection: "deny", max_price: { prompt: 0, completion: 0, request: 0 } } }) };
   assert.equal((await fetch("https://openrouter.ai/api/v1/chat/completions", options)).status, 502);
   assert.equal((await fetch("https://openrouter.ai/api/v1/chat/completions", options)).status, 429);
   assert.equal(calls, 1);
@@ -48,6 +48,7 @@ test("a paid route or different credential cannot reach the provider", async t =
   const file = ledger(t);
   const fetch = createGuardedFetch(async () => { calls++; }, { key: "test-only", ledgerPath: file, slot: "test-a" });
   await assert.rejects(fetch("https://openrouter.ai/api/v1/chat/completions", { headers: { Authorization: "Bearer another-key" }, body: JSON.stringify({ model: "paid-model" }) }), /free\/private routes/);
+  await assert.rejects(fetch("https://openrouter.ai/api/v1/chat/completions", { headers: { Authorization: "Bearer test-only" }, body: JSON.stringify({ model: "inclusionai/ling-3.1-flash", provider: { data_collection: "deny", max_price: { prompt: 0, completion: 0, request: 0 } } }) }), /free\/private routes/);
   assert.equal(calls, 0);
   assert.equal(fs.existsSync(file), false);
 });

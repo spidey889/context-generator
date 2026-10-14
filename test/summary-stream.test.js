@@ -17,8 +17,8 @@ function responseFrom(text) {
   } }), { headers: { "content-type": "text/event-stream" } });
 }
 function configure(t) {
-  const values = { OPENROUTER_ENABLED: "true", OPENROUTER_LING_ENABLED: "true",
-    OPENROUTER_QWEN_ENABLED: "false", OPENROUTER_DOTS_ENABLED: "false", OPENROUTER_GEMMA_ENABLED: "false",
+  const values = { OPENROUTER_ENABLED: "true", OPENROUTER_DOTS_ENABLED: "true",
+    OPENROUTER_QWEN_ENABLED: "false", OPENROUTER_GEMMA_ENABLED: "false",
     MISTRAL_ENABLED: "true", OPENROUTER_API_KEY: "STREAM_TEST_KEY", GEMINI_API_KEY: undefined,
     MISTRAL_API_KEY: undefined, TELEMETRY_SIGNING_KEY: "STREAM_TEST_SECRET_0123456789abcdef" };
   const saved = Object.keys(values).map(name => [name, process.env[name]]);

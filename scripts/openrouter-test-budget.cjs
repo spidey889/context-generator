@@ -3,7 +3,7 @@ const fs = require("node:fs");
 const LIMIT = 50;
 const WINDOW_MS = 24 * 60 * 60 * 1000;
 const SPACING_MS = 3100;
-const MODELS = new Set(["inclusionai/ling-3.1-flash", "dots-studio/dots-3-note-preview:free", "qwen/qwen3.8-27b:free"]);
+const MODELS = new Set(["dots-studio/dots-3-note-preview:free", "qwen/qwen3.8-27b:free"]);
 
 function reserveRequest(ledgerPath, now = Date.now()) {
   // Count before sending, including failures. A rolling window is conservative
