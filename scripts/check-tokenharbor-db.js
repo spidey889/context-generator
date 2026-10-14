@@ -1,7 +1,7 @@
 const assert = require("node:assert/strict");
 const contract = require("../extension/transfer-diagnostics");
 
-async function checkTokenHarbor(db, sql) {
+async function checkTokenHarbor(db, sql, model = "claude-haiku-5.5:free") {
   let checks = 0;
   const equal = (actual, expected) => { assert.deepEqual(actual, expected); checks++; };
   const rows = async query => (await db.query(query)).rows;
@@ -22,14 +22,14 @@ async function checkTokenHarbor(db, sql) {
   // grant a summary count; a later authenticated receipt can upgrade it once.
   await db.exec("begin; set local role service_role;");
   try {
-    const report = verified => db.exec(`select public.record_transfer_event(
+    const report = verified => db.query(`select public.record_transfer_event(
       'c0de5714-0000-4000-8000-000000000001'::uuid,'c0de5714-0000-4000-8000-000000000002','2026-10-14T00:00:00Z'::timestamptz,
       'chatgpt','claude',12000,'started','summary_completed',null,'1.4.18',${verified},null,
-      ${verified ? "'2026-10-14T00:00:00Z'::timestamptz" : "null"},${verified ? "'claude-haiku-5.5:free'" : "null"},
-      'claude-haiku-5.5:free','{"version":1,"summary_failed_provider":"tokenharbor"}'::jsonb)`);
+      ${verified ? "'2026-10-14T00:00:00Z'::timestamptz" : "null"},$1::text,
+      $2::text,'{"version":1,"summary_failed_provider":"tokenharbor"}'::jsonb)`, [verified ? model : null, model]);
     await report(false);
     equal(await rows("select model,model_verified,summary_verified from public.transfers where attempt_id='c0de5714-0000-4000-8000-000000000001'"),
-      [{ model: "claude-haiku-5.5:free", model_verified: false, summary_verified: false }]);
+      [{ model, model_verified: false, summary_verified: false }]);
     const count = () => rows("select lifetime_summaries::int as total from public.users where install_id='c0de5714-0000-4000-8000-000000000002'");
     equal(await count(), [{ total: 0 }]);
     await report(true);

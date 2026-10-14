@@ -3,7 +3,7 @@ const test = require("node:test");
 const handler = require("../api/summarize");
 const { clockTest } = require("./helpers/clock");
 const { createSummaryWithFallback, getConfiguredSummaryRoutes, getSummaryProfile } = handler.__test;
-const MODEL = "claude-haiku-5.5:free";
+const MODEL = "deepseek-v4.1-flash:free";
 const DOTS = "dots-studio/dots-3-note-preview:free";
 const conversation = "User: Windows passed. Linux is pending. Do not deploy.\n".repeat(220);
 const keys = { tokenharborApiKey: "TEST_ONLY_TOKENHARBOR", openrouterApiKey: "TEST_ONLY_OPENROUTER",
@@ -84,6 +84,7 @@ test("TokenHarbor serves first through the handler with exact structured history
 test("the code switch off and a missing key omit TokenHarbor from routing", t => {
   configure(t);
   const legacy = [DOTS, "gemini-3.6-flash", "gemini-3.5-flash-lite", "ministral-14b-2512"];
+  assert.deepEqual(getConfiguredSummaryRoutes(keys).map(route => route.model), [MODEL, ...legacy], "DeepSeek leads; paused Haiku is never attempted");
   assert.deepEqual(getConfiguredSummaryRoutes({ ...keys, tokenharborEnabled: false }).map(route => route.model), legacy);
   assert.deepEqual(getConfiguredSummaryRoutes({ ...keys, tokenharborApiKey: undefined }).map(route => route.model), legacy);
 });

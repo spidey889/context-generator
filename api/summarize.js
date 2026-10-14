@@ -35,7 +35,12 @@ const OPENROUTER_CHAT_COMPLETIONS_URL = "https://openrouter.ai/api/v1/chat/compl
 // Owner-controlled code switch. Keep the key in server environment variables;
 // changing this flag never adds a picker/settings control or a paid route.
 const TOKENHARBOR_ENABLED = true;
-const TOKENHARBOR_MODEL = "claude-haiku-5.5:free";
+// Use the first enabled entry only: switching models keeps one TokenHarbor slice
+// in the shared free-provider window. Retain paused entries for easy rollback.
+const TOKENHARBOR_MODELS = [
+  { model: "deepseek-v4.1-flash:free", enabled: true },
+  { model: "claude-haiku-5.5:free", enabled: false }
+];
 const TOKENHARBOR_CHAT_COMPLETIONS_URL = "https://tokenharbor.ai/v1/chat/completions";
 const TOKENHARBOR_SHARED_SLICE_MS = 45000;
 // A single key serves these pinned routes. Dots leads; other OpenRouter routes are paused.
@@ -480,8 +485,9 @@ function getEnabledOpenRouterModels() {
 
 function getConfiguredSummaryRoutes({ geminiApiKey, mistralApiKey, openrouterApiKey, tokenharborApiKey, tokenharborEnabled = TOKENHARBOR_ENABLED }) {
   const routes = [];
-  if (tokenharborEnabled && tokenharborApiKey) {
-    routes.push({ provider: SUMMARY_PROVIDERS.tokenharbor, model: TOKENHARBOR_MODEL, apiKey: tokenharborApiKey });
+  const tokenharborRoute = TOKENHARBOR_MODELS.find(route => route.enabled);
+  if (tokenharborEnabled && tokenharborApiKey && tokenharborRoute) {
+    routes.push({ provider: SUMMARY_PROVIDERS.tokenharbor, model: tokenharborRoute.model, apiKey: tokenharborApiKey });
   }
   if (openrouterApiKey) {
     for (const model of getEnabledOpenRouterModels()) {
@@ -1161,7 +1167,7 @@ function createTimeoutError() {
 
 function getProviderRequestBudgetMs(model) {
   return [GEMINI_PRIMARY_MODEL, FLASH_LITE_FALLBACK_MODEL, MISTRAL_PRIMARY_MODEL,
-    TOKENHARBOR_MODEL, ...OPENROUTER_MODELS.map((route) => route.model)].includes(model) ? PROVIDER_ATTEMPT_TIMEOUT_MS : 15000;
+    ...TOKENHARBOR_MODELS.map((route) => route.model), ...OPENROUTER_MODELS.map((route) => route.model)].includes(model) ? PROVIDER_ATTEMPT_TIMEOUT_MS : 15000;
 }
 
 function isRetryableProviderStatus(status) {

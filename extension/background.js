@@ -37,7 +37,7 @@ const TELEMETRY_STATUSES = new Set(["started", "succeeded", "failed"]);
 // Only serving-route identifiers enter reports; transcript text and attempted
 // providers never belong in this field. Keep the catalog aligned with ingress.
 const TELEMETRY_REPORTED_MODELS = new Set(["local-direct", "gemini-3.6-flash", "gemini-3.5-flash-lite", "ministral-14b-2512",
-  "inclusionai/ling-3.1-flash", "qwen/qwen3.8-27b:free", "dots-studio/dots-3-note-preview:free", "google/gemma-4-26b-a4b-it:free", "claude-haiku-5.5:free"]);
+  "inclusionai/ling-3.1-flash", "qwen/qwen3.8-27b:free", "dots-studio/dots-3-note-preview:free", "google/gemma-4-26b-a4b-it:free", "claude-haiku-5.5:free", "deepseek-v4.1-flash:free"]);
 const TELEMETRY_MODEL_STAGES = new Set(["summary_completed", "paste_started", "completed"]);
 const TELEMETRY_STAGES = new Set([
   "intent_started",

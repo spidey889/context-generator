@@ -8,7 +8,7 @@ const encoder = new TextEncoder();
 export const LEGACY_RECEIPT_MODELS = Object.freeze([
   "local-direct", "gemini-3.6-flash", "gemini-3.5-flash-lite", "ministral-14b-2512",
   "inclusionai/ling-3.1-flash", "qwen/qwen3.8-27b:free",
-  "dots-studio/dots-3-note-preview:free", "google/gemma-4-26b-a4b-it:free", "claude-haiku-5.5:free"
+  "dots-studio/dots-3-note-preview:free", "google/gemma-4-26b-a4b-it:free", "claude-haiku-5.5:free", "deepseek-v4.1-flash:free"
 ]);
 
 function confirmationMessage(payload) {
