@@ -4,6 +4,8 @@ A short history of decisions and regressions that matter when changing the code.
 
 ## 2026-10-14
 
+- **Local database verification shares only empty engine setup.** Profiling found nine independent backup restores spending about 25 seconds on setup/replay. Cached a pristine in-memory PGlite image before roles, migrations or rows exist, then loaded separate instances for every verifier. Kept all migration replay, backup/counter/privilege checks and private-error masking. All 1,114 checks passed; isolated local runs took 10.3 and 16.7 seconds versus the 32.1-second baseline. A concurrent-instance probe also confirmed separate tables, roles and session settings. No production database or migration changes.
+
 - **Database checks stop repeating the JSON validation matrix.** The original migration runs the complete matrix once; its label-only successor proves unchanged SQL/grants and checks the two new labels before and after application. Kept every migration, row-preservation/schema check, counter transition, privilege check and backup scenario. All 41 migrations replayed with 1,114 passing database checks, down from 1,414. Remaining database helpers are referenced; old files were retained where they cover distinct historical behavior.
 
 - **Migration history retained; database guide clarified.** Kept the ordered SQL history and never-applied archive because repeated function definitions represent later changes and replay/backup recovery depend on the original versions. Documented that retention rule, corrected client-reported versus authenticated model attribution, and replaced outdated PGlite-install and unexecuted-IST-test notes with the current workflow.

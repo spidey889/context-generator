@@ -4,10 +4,10 @@
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
-const { PGlite } = require(process.env.PGLITE_MODULE_PATH || "@electric-sql/pglite");
+const { createVerificationDatabase, checkSnapshot } = require("./check-telemetry-backup.js");
 
 async function main() {
-  const db = new PGlite();
+  const db = await createVerificationDatabase();
   let checks = 0;
   const equal = (actual, expected) => { assert.deepEqual(actual, expected); checks++; };
   const one = async (sql, params = []) => (await db.query(sql, params)).rows[0];
@@ -246,7 +246,6 @@ async function main() {
     await db.exec("set enable_seqscan=off;");
     const indexedPlan = await db.query("explain (format json) select attempt_id from public.transfer_events where install_id=$1 order by attempted_at desc limit 50", [install]);
     assert.match(JSON.stringify(indexedPlan.rows), /transfer_events_install_id_attempted_at_idx/); checks++;
-    const { checkSnapshot } = require("./check-telemetry-backup.js");
     const upgradeOptions = { applyPending: true, throughVersion: "20261002073711" };
     // Supabase CLI migration history stores parsed statements without trailing
     // semicolons, whereas MCP can store one whole SQL file. Replay both formats.

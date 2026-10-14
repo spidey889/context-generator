@@ -8,6 +8,25 @@ const fs = require("node:fs");
 const path = require("node:path");
 const { PGlite } = require(process.env.PGLITE_MODULE_PATH || "@electric-sql/pglite");
 
+// Cache only a pristine engine image in this process, before roles, migrations
+// or private rows exist. Every caller gets its own database and still replays
+// every captured migration; no completed restore or fixture state is reused.
+let emptyDataDir;
+async function createVerificationDatabase() {
+  if (emptyDataDir) return new PGlite({ loadDataDir: await emptyDataDir });
+  const db = new PGlite();
+  const baseline = db.waitReady.then(() => db.dumpDataDir("none"));
+  emptyDataDir = baseline;
+  try {
+    await baseline;
+    return db;
+  } catch (error) {
+    emptyDataDir = undefined;
+    await db.close().catch(() => {});
+    throw error;
+  }
+}
+
 function digest(rows, columns) {
   const canonicalRows = rows.map(row => {
     const result = {};
@@ -42,9 +61,11 @@ function selectPendingMigrations(names, capturedVersions, throughVersion) {
 // Restore captured state by default. Applying future migrations is opt-in:
 // the owner-authorized users reset intentionally discards old user counters.
 async function checkSnapshot(snapshot, { applyPending = false, throughVersion } = {}) {
-  const db = new PGlite();
-  let phase = "snapshot validation";
+  let db;
+  let phase = "database setup";
   try {
+    db = await createVerificationDatabase();
+    phase = "snapshot validation";
     // Restore each snapshot's recorded schema, including backups made before
     // the table rename. Accept one known key rather than guessing identifiers.
     const transferKeys = ["transfers", "transfer_events"].filter(key => Object.hasOwn(snapshot, key));
@@ -266,7 +287,7 @@ async function checkSnapshot(snapshot, { applyPending = false, throughVersion } 
     // diagnostics to a fixed phase label and optional standard SQLSTATE.
     const sqlstate = /^[A-Z0-9]{5}$/.test(error.code || "") ? ` SQLSTATE ${error.code}.` : "";
     throw new Error(`Application backup verification failed during ${phase}.${sqlstate}`);
-  } finally { await db.close(); }
+  } finally { if (db) await db.close(); }
 }
 
 if (require.main === module) {
@@ -280,4 +301,4 @@ if (require.main === module) {
       .catch(error => { console.error(error.message.startsWith("Application backup") ? error.message : "Application backup input could not be read or parsed."); process.exitCode = 1; });
   }
 }
-module.exports = { checkSnapshot, selectPendingMigrations };
+module.exports = { checkSnapshot, selectPendingMigrations, createVerificationDatabase };
