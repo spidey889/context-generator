@@ -43,6 +43,10 @@ const TOKENHARBOR_MODELS = [
 ];
 const TOKENHARBOR_CHAT_COMPLETIONS_URL = "https://tokenharbor.ai/v1/chat/completions";
 const TOKENHARBOR_SHARED_SLICE_MS = 45000;
+// DeepSeek counts thinking against max_tokens. The shared summary caps alone
+// can end a response before any answer; reserve separate room without changing
+// its default thinking mode, the desired carry length or the route deadline.
+const TOKENHARBOR_DEEPSEEK_REASONING_TOKENS = 8192;
 // A single key serves these pinned routes. Dots leads; other OpenRouter routes are paused.
 // Enabling another model must be deliberate and cannot extend the deadline.
 const OPENROUTER_MODELS = [
@@ -757,6 +761,7 @@ function requestProviderSummary(provider, apiKey, messages, profile, model, opti
   }, options.requestBudgetMs ?? getProviderRequestBudgetMs(model), {
     signal: options.signal,
     provider: provider.id,
+    model,
     onDelta: options.onDelta,
     onStart: options.onStart,
     // Both gateways are pinned to explicit never-billed free IDs. Gemini and
@@ -794,6 +799,9 @@ function getProviderRequestBody(provider, messages, profile, model) {
   }
 
   const body = { model, temperature: 0.1, max_tokens: profile.maxTokens, messages };
+  if (provider.id === "tokenharbor" && model === "deepseek-v4.1-flash:free") {
+    body.max_tokens += TOKENHARBOR_DEEPSEEK_REASONING_TOKENS;
+  }
   if (provider.id === "openrouter") {
     // Do not let a reasoning model spend the summary allowance on hidden text,
     // route to a paid endpoint, or silently relax the data policy on fallback.
@@ -1070,7 +1078,11 @@ async function fetchWithRetry(url, options, requestBudgetMs, context = {}) {
     const timeout = setTimeout(() => controller.abort(), Math.max(0, attemptDeadline - Date.now()));
     // Headers/heartbeats are not generated answers. Only real answer text
     // disarms this watchdog; the full completion deadline stays in force.
-    const firstAnswerDeadline = context.onDelta ? Math.min(attemptDeadline, Date.now() + PROVIDER_FIRST_ANSWER_TIMEOUT_MS) : null;
+    // Thinking stays on for DeepSeek. Allow it to start its answer within the
+    // existing 45s slice; neither this watchdog nor output room renews that slice.
+    const firstAnswerBudgetMs = context.provider === "tokenharbor" && context.model === "deepseek-v4.1-flash:free"
+      ? TOKENHARBOR_SHARED_SLICE_MS : PROVIDER_FIRST_ANSWER_TIMEOUT_MS;
+    const firstAnswerDeadline = context.onDelta ? Math.min(attemptDeadline, Date.now() + firstAnswerBudgetMs) : null;
     let answerStarted = false;
     const abortSilentProvider = () => controller.abort(Object.assign(new Error("Provider did not start an answer in time"), { name: "AbortError" }));
     const firstAnswerTimeout = firstAnswerDeadline === null ? null

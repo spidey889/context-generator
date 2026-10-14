@@ -42,8 +42,9 @@ function answerStream(provider, text = "Preserve the agreed project plan.") {
 }
 
 for (const provider of ["tokenharbor", "openrouter", "gemini", "mistral"]) {
+  const firstAnswerMs = provider === "tokenharbor" ? 45000 : 30000;
   for (const phase of ["headers", "body", "json body"]) {
-    clockTest(`${provider} switches after 30 seconds without answer text in ${phase}`, async t => {
+    clockTest(`${provider} switches after ${firstAnswerMs / 1000} seconds without answer text in ${phase}`, async t => {
       configure(t);
       const requests = [];
       global.fetch = async (url, options) => {
@@ -67,11 +68,11 @@ for (const provider of ["tokenharbor", "openrouter", "gemini", "mistral"]) {
         geminiApiKey: provider !== "mistral" ? "test" : undefined,
         mistralApiKey: provider === "mistral" ? "test" : undefined,
         requestContext: { onDelta() {} } });
-      assert.equal(Date.now() - startedAt, 30000);
+      assert.equal(Date.now() - startedAt, firstAnswerMs);
       assert.equal(requests[0].signal.aborted, true);
       assert.equal(requests.length, provider === "mistral" ? 1 : 2, "Silence advances the route without retrying the silent model.");
       assert.equal(result.model, provider === "mistral" ? "local-direct" : provider === "gemini" ? "gemini-3.5-flash-lite" : "gemini-3.6-flash");
-      if (requests[1]) assert.equal(requests[1].at - startedAt, 30000);
+      if (requests[1]) assert.equal(requests[1].at - startedAt, firstAnswerMs);
       assert.doesNotMatch(result.summary, /HIDDEN_THINKING/);
     });
   }
@@ -103,6 +104,27 @@ for (const provider of ["tokenharbor", "openrouter", "gemini", "mistral"]) {
     assert.equal(signal.aborted, false, "Completed requests leave neither timeout armed.");
   });
 }
+
+test("DeepSeek can finish thinking after 30s within its existing 45s slice", async t => {
+  configure(t);
+  t.mock.timers.enable({ apis: ["Date", "setTimeout"], now: Date.now() });
+  let calls = 0;
+  const deltas = [];
+  global.fetch = async (url, options) => {
+    if (++calls === 1) {
+      assert.equal(JSON.parse(options.body).model, "deepseek-v4.1-flash:free");
+      t.mock.timers.setTime(Date.now() + 35000);
+    }
+    return responseFrom(frame({ choices: [{ index: 0, delta: { reasoning_content: "PRIVATE_THINKING" } }] })
+      + answerStream("tokenharbor", "The green triangle is ready for inspection."));
+  };
+  const result = await createSummaryWithFallback({ conversation, profile: getSummaryProfile(conversation),
+    tokenharborApiKey: "test", openrouterApiKey: "test", requestContext: { onDelta: delta => deltas.push(delta) } });
+  assert.equal(calls, 1, "Thinking must not prematurely send this run to OpenRouter");
+  assert.equal(result.model, "deepseek-v4.1-flash:free");
+  assert.match(result.summary, /green triangle/);
+  assert.doesNotMatch(JSON.stringify({ result, deltas }), /PRIVATE_THINKING/);
+});
 
 test("a late answer cannot beat an overdue silence timer", async t => {
   configure(t);
