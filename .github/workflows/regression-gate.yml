@@ -71,6 +71,13 @@ jobs:
           sudo curl --connect-timeout 10 --max-time 30 --retry 2 --retry-max-time 60 -fsSLo /etc/apt/sources.list.d/brave-browser-release.sources https://brave-browser-apt-release.s3.brave.com/brave-browser.sources
           sudo apt-get update -qq
           sudo apt-get install -y --no-install-recommends brave-browser xvfb
+      - name: Brave handoff palette resists theme copies under strict CSP
+        if: steps.scope.outputs.mode != 'light'
+        timeout-minutes: 1
+        env:
+          CAP_CONTEXT_HANDOFF_PALETTE_SMOKE: "1"
+          CAP_CONTEXT_HANDOFF_CSP_SMOKE: "1"
+        run: xvfb-run -a npm run test:extension-smoke
       - name: Brave DOM transfer, placement and local telemetry database
         if: steps.scope.outputs.mode != 'light'
         timeout-minutes: 3

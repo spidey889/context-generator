@@ -891,6 +891,23 @@ chrome.action.onClicked.addListener(async (tab) => {
 });
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  if (message?.type === "PROTECT_HANDOFF_PALETTE") {
+    // This private UI channel may style only the sending AI page's top document.
+    // Document targeting prevents a delayed worker wakeup styling a new page.
+    if (!sender?.tab?.id || !getPlatformFromUrl(sender.tab.url) || sender.frameId !== 0
+        || sender.id !== chrome.runtime.id || !["apply", "remove"].includes(message.operation)
+        || typeof message.css !== "string" || message.css.length > 65536
+        || !message.css.startsWith("/* Cap Context handoff ") || !message.css.includes("#context-generator-overlay")) {
+      sendResponse({ ok: false }); return false;
+    }
+    const target = sender.documentId
+      ? { tabId: sender.tab.id, documentIds: [sender.documentId] }
+      : { tabId: sender.tab.id, frameIds: [0] };
+    const method = message.operation === "remove" ? "removeCSS" : "insertCSS";
+    Promise.resolve().then(() => chrome.scripting[method]({ target, css: message.css, origin: "USER" }))
+      .then(() => sendResponse({ ok: true })).catch(() => sendResponse({ ok: false }));
+    return true;
+  }
   if (message?.type === "CHECK_TRANSFER_ACTIVE") {
     checkDestinationTransfer(message.transferId, message.sourceTabId)
       .then(() => sendResponse({ ok: true }))

@@ -4,6 +4,8 @@ A short history of decisions and regressions that matter when changing the code.
 
 ## 2026-10-14
 
+- **Handoff palette stays consistent with Dark Reader.** Reproduced Dark Reader 4.9.133 turning the lavender activity dots gray and recoloring glow/progress rules copied from adopted stylesheets. Reused the existing palette at browser USER origin across all five platforms, with sender/document checks, bounded CSS and instance-specific teardown. Preserved the design, messages, limits and transfer sequencing; the content load ID advances while the manifest stays 1.4.18. Added a focused offline strict-CSP/copied-style regression and verified all four states plus rebuild with real Dark Reader in isolated Brave.
+
 - **Copy-dialog titles block unwanted background strips.** Explicitly reset the title background to transparent so existing palette protection also covers its previously absent fill. The focused Brave check reproduces a purple page/theme gradient before the fix and rejects it afterward, including the compact draft dialog and existing copy/focus states. Advanced the content-script load ID so refreshed tabs replace older instances.
 
 - **Dots replaces retired Ling in summary routing.** Enabled Dots3-Note Preview as the default first OpenRouter route and removed Ling/Space Bunny 2 from active generation and local comparison tools after its free endpoint disappeared. Qwen and Gemma stay paused; free/private endpoint restrictions, retry rules and total deadlines stay unchanged. Historical Ling labels, signed receipts and delayed telemetry remain accepted.

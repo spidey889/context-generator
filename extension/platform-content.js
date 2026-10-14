@@ -1,7 +1,10 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-14-recovery-title-background-v147";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-14-handoff-palette-v148";
   const INLINE_PILL_SIZE = 36;
   const ownedUiStyleSheets = new Map();
+  let handoffUserCss = "";
+  let handoffUserCssRequest = null;
+  let handoffScrimPalette = "";
   const CLAUDE_INLINE_STYLE_ID = "context-generator-claude-inline-styles";
   const CLAUDE_INLINE_MARKER = "data-context-generator-claude-inline";
   const CHATGPT_INLINE_STYLE_ID = "context-generator-chatgpt-inline-styles";
@@ -667,6 +670,14 @@
   }
 
   function cleanupContextGeneratorNodes() {
+    const css = handoffUserCss;
+    const request = handoffUserCssRequest;
+    handoffUserCss = "";
+    handoffUserCssRequest = null;
+    handoffScrimPalette = "";
+    if (css && request) {
+      request.then(() => extensionRuntime.sendMessage({ type: "PROTECT_HANDOFF_PALETTE", operation: "remove", css })).catch(() => {});
+    }
     releaseClaudeInlineMount();
     releaseChatGptInlineMount();
     releaseProviderInlineMount();
@@ -7968,7 +7979,7 @@
     // stylesheet + scoped priority rules. Dynamic inline colors must keep their
     // important priority; progress-state colors live in their CSS.
     const rules = [root, ...root.querySelectorAll("[style]")].map((element, index) => {
-      const declarations = ["color", "background", "border-color", "box-shadow"]
+      const declarations = ["color", "background", "border-color", "border-top-color", "border-right-color", "border-bottom-color", "border-left-color", "box-shadow"]
         .map((property) => {
           const value = element.style.getPropertyValue(property);
           if (!value) return "";
@@ -7982,8 +7993,26 @@
         : `#${root.id}`;
       return `${selector}{${declarations}}`;
     });
-    style.textContent += rules.join("\n");
+    const css = rules.join("\n");
+    style.textContent += css;
     applyOwnedUiStyleSheet(style);
+    return css;
+  }
+
+  function protectHandoffUserPalette(css) {
+    // Dark Reader also copies adopted sheets, which have no ignored owner node.
+    // USER-origin important rules outrank those AUTHOR copies, including pseudo-
+    // elements and live progress states, while retaining our CSP-safe fallback.
+    // An instance-specific comment prevents late teardown from removing a new
+    // instance's identical rules: removeCSS matches the complete CSS string.
+    handoffUserCss = `/* Cap Context handoff ${CONTENT_SCRIPT_LOAD_ID}:${Date.now()}:${Math.random()} */\n${css}`;
+    try {
+      handoffUserCssRequest = Promise.resolve(extensionRuntime.sendMessage({
+        type: "PROTECT_HANDOFF_PALETTE", operation: "apply", css: handoffUserCss
+      })).catch(() => ({ ok: false }));
+    } catch (_) {
+      handoffUserCssRequest = null;
+    }
   }
 
   function ensureFloatingOverlay() {
@@ -8003,7 +8032,7 @@
         "opacity:0",
         "transition:opacity 240ms ease"
       ].join(";");
-      protectOverlayPalette(scrim);
+      handoffScrimPalette = protectOverlayPalette(scrim);
       document.body.appendChild(scrim);
     }
 
@@ -8515,8 +8544,9 @@
       overlay.appendChild(brand);
       overlay.appendChild(statusGroup);
       overlay.appendChild(progress);
-      protectOverlayPalette(overlay);
+      const palette = protectOverlayPalette(overlay);
       document.body.appendChild(overlay);
+      protectHandoffUserPalette(`${handoffScrimPalette}\n${document.getElementById("context-generator-styles").textContent}\n${palette}`);
     }
   }
 

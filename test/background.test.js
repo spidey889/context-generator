@@ -13,7 +13,7 @@ const compiledTransferBackground = new vm.Script(`${source}\n;globalThis.__backg
   filename: "extension/background.js"
 });
 
-function loadBackgroundForSummaryTest(fetchImpl, { tabs = [], injections = [], injectionError = false, onMessage = () => {}, clock = Date, progressMessages = [] } = {}) {
+function loadBackgroundForSummaryTest(fetchImpl, { tabs = [], injections = [], injectionError = false, cssCalls = [], cssError = false, onMessage = () => {}, clock = Date, progressMessages = [] } = {}) {
   let messageListener = null;
   let tabRemovedListener;
   const closedTabs = new Set();
@@ -40,6 +40,7 @@ function loadBackgroundForSummaryTest(fetchImpl, { tabs = [], injections = [], i
         onAlarm: event
       },
       runtime: {
+        id: "cap-context-test",
         onInstalled: event,
         onStartup: event,
         onMessage: {
@@ -49,7 +50,11 @@ function loadBackgroundForSummaryTest(fetchImpl, { tabs = [], injections = [], i
           }
         }
       },
-      scripting: { executeScript: async args => { injections.push(args); if (injectionError) throw new Error("not available"); } },
+      scripting: {
+        executeScript: async args => { injections.push(args); if (injectionError) throw new Error("not available"); },
+        insertCSS: async args => { cssCalls.push({ operation: "apply", ...args }); if (cssError) throw new Error("not available"); },
+        removeCSS: async args => { cssCalls.push({ operation: "remove", ...args }); if (cssError) throw new Error("not available"); }
+      },
       storage: {
         local: {
           get: async () => ({}),
@@ -1179,6 +1184,36 @@ test("JSON scripts reinstall in MAIN then isolated on the matching platform tabs
     assert.deepEqual(platform.map(item => [...item.files]), [["json-capture-metrics-main.js", "network-json-data.js", "network-fetch-main.js"], ["transfer-diagnostics.js", "json-capture-metrics.js", "network-json-capture.js"], ["transfer-diagnostics.js", "platform-content.js"]]);
     assert.equal(platform[0].world, "MAIN");
   }
+});
+
+test("handoff palette uses USER origin on the sending AI document and removes only its exact CSS", async () => {
+  let listener; const cssCalls = [];
+  loadBackgroundForSummaryTest(async () => {}, { cssCalls, onMessage: value => { listener = value; } });
+  const css = "/* Cap Context handoff test */\n#context-generator-overlay{color:#C8B6E9 !important}";
+  for (const host of ["chatgpt.com", "claude.ai", "gemini.google.com", "grok.com", "chat.deepseek.com"]) {
+    const sender = { id: "cap-context-test", tab: { id: 7, url: `https://${host}/` }, frameId: 0, documentId: "source-document" };
+    const reply = await new Promise(resolve => listener({ type: "PROTECT_HANDOFF_PALETTE", operation: "apply", css, tabId: 999 }, sender, resolve));
+    assert.equal(reply.ok, true);
+    assert.deepEqual(JSON.parse(JSON.stringify(cssCalls.at(-1))), { operation: "apply", css, origin: "USER", target: { tabId: 7, documentIds: ["source-document"] } });
+  }
+  const reply = await new Promise(resolve => listener({ type: "PROTECT_HANDOFF_PALETTE", operation: "remove", css },
+    { id: "cap-context-test", tab: { id: 7, url: "https://chatgpt.com/" }, frameId: 0 }, resolve));
+  assert.equal(reply.ok, true);
+  assert.deepEqual(JSON.parse(JSON.stringify(cssCalls.at(-1))), { operation: "remove", css, origin: "USER", target: { tabId: 7, frameIds: [0] } });
+});
+
+test("handoff styling rejects untrusted or oversized requests and reports API failure safely", async () => {
+  let listener; const cssCalls = [];
+  loadBackgroundForSummaryTest(async () => {}, { cssCalls, cssError: true, onMessage: value => { listener = value; } });
+  const css = "/* Cap Context handoff test */\n#context-generator-overlay{color:white !important}";
+  const message = { type: "PROTECT_HANDOFF_PALETTE", operation: "apply", css };
+  const sender = { id: "cap-context-test", tab: { id: 7, url: "https://chatgpt.com/" }, frameId: 0 };
+  for (const invalid of [{}, { ...sender, id: "another-extension" }, { ...sender, frameId: 2 }, { ...sender, tab: { id: 7, url: "https://example.com/" } }]) {
+    assert.equal((await new Promise(resolve => listener(message, invalid, resolve))).ok, false);
+  }
+  assert.equal((await new Promise(resolve => listener({ ...message, css: css + " ".repeat(65536) }, sender, resolve))).ok, false);
+  assert.equal(cssCalls.length, 0);
+  assert.equal((await new Promise(resolve => listener(message, sender, resolve))).ok, false);
 });
 
 test("Claude on-demand MAIN installation accepts only a Claude top-frame sender", async () => {

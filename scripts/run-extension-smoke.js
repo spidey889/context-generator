@@ -244,6 +244,9 @@ async function createSmokeExtension(tempRoot, origin) {
     detail: activeTransferTrace.diagnostics.capture_detail, fallback: activeTransferTrace.diagnostics.json_fallback_code
   });
   window.__capSmokeShowRecovery = () => showFallbackModal("Synthetic recovery context. Preserve the dialog palette.", "Claude", true);
+  window.__capSmokeHandoffStage = (stage, phase = "active") => { showOverlay("claude"); setHandoffProgress(stage, phase, "Claude", 20000); };
+  window.__capSmokeHandoffStylesReady = () => handoffUserCssRequest;
+  window.__capSmokeRebuildHandoff = () => { cleanupContextGeneratorNodes(); ensureFloatingOverlay(); };
   window.__capSmokeShowDraftRecovery = () => showFallbackModal(createLocalContextCarry("Conversation from your previous chat\\n\\nUser: Let’s pick up where we left off.\\nAssistant: Here’s the context we prepared for your next chat.").summary, "ChatGPT", false, false, true);
   window.__capSmokePaste = (text, deadlineAt) => pasteIntoPlatform(text, currentPlatform.id, "smoke-paste-recovery", deadlineAt);
   window.__capSmokePasteState = () => ({ pending: Boolean(pendingPasteRecheck), userHandled: pendingPasteRecheck?.guard?.userHandled,
@@ -823,12 +826,16 @@ async function startFixtureServer() {
     }
     if (["/source", "/chat/smoke", "/c/smoke", "/app/smoke", "/a/chat/s/smoke"].includes(url.pathname)) {
       if (url.pathname !== "/source") response.setHeader("Content-Security-Policy", "script-src 'nonce-smoke'; object-src 'none'; base-uri 'none'; connect-src 'self'");
+      if (process.env.CAP_CONTEXT_HANDOFF_CSP_SMOKE === "1") {
+        response.setHeader("Content-Security-Policy", "script-src 'nonce-smoke'; style-src-elem 'nonce-smoke'; style-src-attr 'unsafe-inline'; object-src 'none'; base-uri 'none'; connect-src 'self'");
+      }
       response.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
       let page = url.pathname === "/chat/smoke"
         // Claude JSON must work before native history mounts. The API still
         // returns the full ordered conversation, including the pasted card.
         ? claudePlacementFixture()
         : sourceFixture();
+      if (process.env.CAP_CONTEXT_HANDOFF_CSP_SMOKE === "1") page = page.replaceAll("<style>", '<style nonce="smoke">');
       if (["gemini", "deepseek"].includes(JSON_SOURCE)) {
         // Exercise the selected adapter's native composer. A ChatGPT form made
         // these providers fall back to geometry over unrelated controls and
@@ -1548,6 +1555,98 @@ async function verifyPasteRecovery({ browserSession, devToolsPort, origin }) {
   }
 }
 
+async function verifyHandoffPalette(session) {
+  const contextId = session.getExtensionContextId();
+  await session.call("Emulation.setEmulatedMedia", { features: [{ name: "prefers-reduced-motion", value: "reduce" }] });
+  await session.evaluate(`window.__capHandoffPaletteSnapshot = () => {
+    const root = document.getElementById("context-generator-overlay");
+    const properties = ["color", "background-color", "background-image", "border-top-color", "border-right-color", "border-bottom-color", "border-left-color", "box-shadow"];
+    return [root, ...root.querySelectorAll("*")].flatMap((element, index) =>
+      [null, "::before", "::after"].flatMap(pseudo => {
+        const style = getComputedStyle(element, pseudo);
+        if (pseudo && ["none", "normal"].includes(style.content)) return [];
+        return properties.map(property => ({ index, element: element.id || element.className || element.tagName,
+          pseudo, property, value: style.getPropertyValue(property) }));
+      }));
+  }; true`);
+  const stages = [["capture", "active"], ["summary", "active"], ["paste", "active"], ["paste", "done"]];
+  const baseline = [];
+  for (const [stage, phase] of stages) {
+    await session.evaluate(`window.__capSmokeHandoffStage(${JSON.stringify(stage)}, ${JSON.stringify(phase)})`, contextId);
+    await session.evaluate("window.__capSmokeHandoffStylesReady()", contextId);
+    await session.evaluate("new Promise(resolve => setTimeout(resolve, 250))");
+    baseline.push(await session.evaluate("window.__capHandoffPaletteSnapshot()"));
+  }
+  if (process.env.CAP_CONTEXT_DARK_READER_SCRIPT) {
+    const reader = await fs.promises.readFile(process.env.CAP_CONTEXT_DARK_READER_SCRIPT, "utf8");
+    await session.evaluate(reader);
+    await session.evaluate("DarkReader.enable({brightness:100,contrast:100,sepia:0}); true");
+    await session.evaluate("new Promise(resolve => setTimeout(resolve, 1500))");
+  } else {
+    // Offline CI reproduces the missing owner-node protection: copy our adopted
+    // palette rules into a later AUTHOR sheet, then add Dark Reader inline rules.
+    await session.evaluate(`(() => {
+      const palette = {color:"red", "background-color":"red", "background-image":"linear-gradient(red,red)",
+        "border-top-color":"red", "border-right-color":"red", "border-bottom-color":"red", "border-left-color":"red", "box-shadow":"0 0 20px red"};
+      const rules = [];
+      const copy = list => { for (const rule of list) {
+        if (rule.selectorText && rule.selectorText.includes("context-generator")) {
+          const declarations = Object.entries(palette).filter(([property]) => rule.style.getPropertyValue(property))
+            .map(([property, value]) => property + ":" + value + " !important;").join("");
+          if (declarations) rules.push(rule.selectorText + "{" + declarations + "}");
+        } else if (rule.cssRules) copy(rule.cssRules);
+      } };
+      document.adoptedStyleSheets.forEach(sheet => copy(sheet.cssRules));
+      const mirror = new CSSStyleSheet(); mirror.replaceSync(rules.join("\\n"));
+      document.adoptedStyleSheets = [...document.adoptedStyleSheets, mirror];
+      const inline = new CSSStyleSheet(); inline.replaceSync('[data-darkreader-inline-color]{color:var(--darkreader-inline-color) !important}[data-darkreader-inline-bgcolor]{background-color:var(--darkreader-inline-bgcolor) !important}');
+      document.adoptedStyleSheets = [...document.adoptedStyleSheets, inline];
+      const root = document.getElementById("context-generator-overlay");
+      for (const element of [root, ...root.querySelectorAll("[style]")]) {
+        if (element.style.getPropertyValue("color")) {
+          element.setAttribute("data-darkreader-inline-color", ""); element.style.setProperty("--darkreader-inline-color", "red");
+        }
+        if (element.style.getPropertyValue("background")) {
+          element.setAttribute("data-darkreader-inline-bgcolor", ""); element.style.setProperty("--darkreader-inline-bgcolor", "red");
+        }
+        // Dark Reader's inline rewriting can also drop the original priority.
+        for (const property of ["color", "background"]) {
+          const value = element.style.getPropertyValue(property);
+          if (value) element.style.setProperty(property, value);
+        }
+      }
+      return rules.length;
+    })()`);
+  }
+  const differences = [];
+  for (const [index, [stage, phase]] of stages.entries()) {
+    await session.evaluate(`window.__capSmokeHandoffStage(${JSON.stringify(stage)}, ${JSON.stringify(phase)})`, contextId);
+    await session.evaluate("new Promise(resolve => setTimeout(resolve, 250))");
+    const actual = await session.evaluate("window.__capHandoffPaletteSnapshot()");
+    actual.forEach((value, item) => {
+      if (value.value !== baseline[index][item]?.value) differences.push({ stage, phase, ...value, expected: baseline[index][item]?.value });
+    });
+  }
+  assert.equal(differences.length, 0, `Dark Reader changed handoff colors: ${JSON.stringify(differences.slice(0, 8))}`);
+  // Rebuild while the theme is already active. Old removal deliberately queues
+  // after the new insertion; its exact CSS must not remove the new instance.
+  await session.evaluate("window.__capSmokeRebuildHandoff(); window.__capSmokeHandoffStage('summary'); window.__capSmokeHandoffStylesReady()", contextId);
+  await session.evaluate("new Promise(resolve => setTimeout(resolve, 500))");
+  assert.deepEqual(await session.evaluate("window.__capHandoffPaletteSnapshot()"), baseline[1], "Rebuilt handoff keeps its palette after late cleanup.");
+  if (process.env.CAP_CONTEXT_HANDOFF_CSP_SMOKE === "1") {
+    assert.equal(await session.evaluate(`(() => {
+      const probe = document.createElement("style"); probe.textContent = "body{color:red !important}";
+      document.head.appendChild(probe); const rejected = probe.sheet === null; probe.remove(); return rejected;
+    })()`), true, "The strict fixture must actually reject page-created inline styles.");
+  }
+  if (process.env.CAP_CONTEXT_HANDOFF_SCREENSHOT) {
+    await session.evaluate('window.__capSmokeHandoffStage("summary")', contextId);
+    const shot = await session.call("Page.captureScreenshot", { format: "png" });
+    await fs.promises.writeFile(path.resolve(process.env.CAP_CONTEXT_HANDOFF_SCREENSHOT), Buffer.from(shot.data, "base64"));
+  }
+  process.stdout.write(`✓ Handoff: ${baseline.reduce((count, values) => count + values.length, 0)} palette comparisons retain all four states and rebuilt UI under ${process.env.CAP_CONTEXT_DARK_READER_SCRIPT ? "real Dark Reader" : "copied stylesheet/inline overrides"}${process.env.CAP_CONTEXT_HANDOFF_CSP_SMOKE === "1" ? " with strict CSP" : ""}.\n`);
+}
+
 async function run() {
   assert.equal(typeof WebSocket, "function", "This smoke test requires Node.js with the built-in WebSocket client.");
   const braveExecutable = findBraveExecutable();
@@ -1644,6 +1743,11 @@ async function run() {
       await waitFor(() => sourceSession.evaluate("Boolean(window.__capSmokeNativeRequestReady)"), "the fixture's initial native request");
     }
     process.stdout.write("✓ Brave loaded the unpacked extension on the controlled source page.\n");
+    if (process.env.CAP_CONTEXT_HANDOFF_PALETTE_SMOKE === "1") {
+      await verifyHandoffPalette(sourceSession);
+      assert.equal(state.summaryRequests.length, 0, "The palette check must never call a model.");
+      return;
+    }
     if (process.env.CAP_CONTEXT_DRAFT_TRANSFER_SMOKE === "1") {
       await verifyDraftTransfer({ sourceSession, devToolsPort, origin, state, destinationSessions, telemetryFixture });
       return;
