@@ -248,7 +248,7 @@ test("server receipts cover remote success and emergency carry, and missing keys
   const { verifySummaryProof, verifySummaryReceipt } = await proofHelpers();
   const originalFetch = global.fetch;
   const names = ["TELEMETRY_SIGNING_KEY", "GEMINI_API_KEY", "MISTRAL_API_KEY", "MISTRAL_ENABLED",
-    "OPENROUTER_API_KEY", "OPENROUTER_ENABLED",
+    "OPENROUTER_API_KEY", "OPENROUTER_ENABLED", "TOKENHARBOR_API_KEY",
     "OPENROUTER_QWEN_ENABLED", "OPENROUTER_DOTS_ENABLED", "OPENROUTER_GEMMA_ENABLED"];
   const previous = Object.fromEntries(names.map(name => [name, process.env[name]]));
   t.after(() => {
@@ -270,7 +270,9 @@ test("server receipts cover remote success and emergency carry, and missing keys
   } };
   // The merged router must sign every completion path for the current Edge
   // contract, including OpenRouter and the exact emergency local carry.
-  for (const provider of ["openrouter", "mistral", "gemini", "local-direct"]) {
+  for (const provider of ["tokenharbor", "openrouter", "mistral", "gemini", "local-direct"]) {
+    if (provider === "tokenharbor") process.env.TOKENHARBOR_API_KEY = "test-tokenharbor-key";
+    else delete process.env.TOKENHARBOR_API_KEY;
     process.env.OPENROUTER_ENABLED = ["mistral", "gemini"].includes(provider) ? "false" : "true";
     if (provider === "gemini") process.env.GEMINI_API_KEY = "test-gemini-key";
     else delete process.env.GEMINI_API_KEY;
@@ -285,7 +287,7 @@ test("server receipts cover remote success and emergency carry, and missing keys
       if (provider === "local-direct") {
         return new Response(JSON.stringify({ error: { code: "unavailable" } }), { status: 400 });
       }
-      assert.equal(url, provider === "openrouter"
+      assert.equal(url, provider === "tokenharbor" ? "https://tokenharbor.ai/v1/chat/completions" : provider === "openrouter"
         ? "https://openrouter.ai/api/v1/chat/completions" : "https://api.mistral.ai/v1/chat/completions");
       return new Response(JSON.stringify({ choices: [{ message: { content: "Windows build passed; Linux checks remain pending." } }] }));
     };
@@ -297,7 +299,7 @@ test("server receipts cover remote success and emergency carry, and missing keys
     assert.equal(await verifySummaryProof({ ...context, summary_proof: res.body.summaryProof }, KEY), true);
     const signedV2 = { ...context, last_stage: "summary_completed",
       summary_proof: res.body.summaryProofV2, summary_confirmed_at: res.body.summaryConfirmedAt };
-    const expectedModel = { openrouter: "dots-studio/dots-3-note-preview:free", mistral: "ministral-14b-2512",
+    const expectedModel = { tokenharbor: "claude-haiku-5.5:free", openrouter: "dots-studio/dots-3-note-preview:free", mistral: "ministral-14b-2512",
       gemini: "gemini-3.5-flash-lite", "local-direct": "local-direct" }[provider];
     assert.deepEqual(await verifySummaryReceipt(signedV2, KEY), { model: expectedModel });
     const edge = await edgeHarness();
@@ -314,6 +316,7 @@ test("server receipts cover remote success and emergency carry, and missing keys
   // Fail the full configured chain so every runtime route appears in the receipt
   // diagnostics. A newly added route must also be recoverable by old workers.
   process.env.GEMINI_API_KEY = "test-gemini-key";
+  process.env.TOKENHARBOR_API_KEY = "test-tokenharbor-key";
   process.env.OPENROUTER_ENABLED = "true";
   for (const name of ["OPENROUTER_QWEN_ENABLED", "OPENROUTER_DOTS_ENABLED", "OPENROUTER_GEMMA_ENABLED"]) process.env[name] = "true";
   global.fetch = async () => new Response("{}", { status: 400 });

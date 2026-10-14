@@ -11,7 +11,7 @@ const { validateTelemetryPayload } = require("../api/telemetry-validation");
 const SIGNING_KEY = "smoke-only-signing-key-0123456789abcdef";
 const RELAY_KEY = "smoke-only-private-relay-0123456789abcdef";
 
-async function createTelemetrySmokeFixture(repoRoot, databaseEnabled) {
+async function createTelemetrySmokeFixture(repoRoot, databaseEnabled, summaryModel = "gemini-3.6-flash") {
   const { createSummaryProof, verifySummaryProof } = await import(pathToFileURL(path.join(repoRoot, "supabase/functions/_shared/summary-proof.mjs")).href);
   let database = null;
   let rpcChain = Promise.resolve();
@@ -94,8 +94,8 @@ async function createTelemetrySmokeFixture(repoRoot, databaseEnabled) {
       return {
         summaryProof: await createSummaryProof(metadata, SIGNING_KEY),
         summaryProofV2: await createSummaryProof({ ...metadata, summary_confirmed_at: summaryConfirmedAt }, SIGNING_KEY),
-        summaryProofV3: await createSummaryProof({ ...metadata, summary_confirmed_at: summaryConfirmedAt, model: "gemini-3.6-flash" }, SIGNING_KEY),
-        summaryModel: "gemini-3.6-flash",
+        summaryProofV3: await createSummaryProof({ ...metadata, summary_confirmed_at: summaryConfirmedAt, model: summaryModel }, SIGNING_KEY),
+        summaryModel,
         summaryConfirmedAt
       };
     },
@@ -162,7 +162,7 @@ async function createTelemetrySmokeFixture(repoRoot, databaseEnabled) {
         assert.equal(row.diagnostics.destination_message_count, 0);
       }
       assert.equal(row.diagnostics.error_code, undefined);
-      assert.equal(row.model, "gemini-3.6-flash");
+      assert.equal(row.model, summaryModel);
       assert.equal(row.model_verified, true);
       assert.equal(terminal.reported_model, row.model);
       assert.equal(terminal.model, row.model);

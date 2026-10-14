@@ -32,6 +32,12 @@ const MISTRAL_PRIMARY_MODEL = "ministral-14b-2512";
 const FLASH_LITE_FALLBACK_MODEL = "gemini-3.5-flash-lite";
 const REMOTE_CHAIN_BUDGET_MS = 270000;
 const OPENROUTER_CHAT_COMPLETIONS_URL = "https://openrouter.ai/api/v1/chat/completions";
+// Owner-controlled code switch. Keep the key in server environment variables;
+// changing this flag never adds a picker/settings control or a paid route.
+const TOKENHARBOR_ENABLED = true;
+const TOKENHARBOR_MODEL = "claude-haiku-5.5:free";
+const TOKENHARBOR_CHAT_COMPLETIONS_URL = "https://tokenharbor.ai/v1/chat/completions";
+const TOKENHARBOR_SHARED_SLICE_MS = 45000;
 // A single key serves these pinned routes. Dots leads; other OpenRouter routes are paused.
 // Enabling another model must be deliberate and cannot extend the deadline.
 const OPENROUTER_MODELS = [
@@ -40,6 +46,11 @@ const OPENROUTER_MODELS = [
   { model: "google/gemma-4-26b-a4b-it:free", enabledEnv: "OPENROUTER_GEMMA_ENABLED", defaultEnabled: false }
 ];
 const SUMMARY_PROVIDERS = {
+  tokenharbor: {
+    id: "tokenharbor",
+    label: "TokenHarbor",
+    url: TOKENHARBOR_CHAT_COMPLETIONS_URL
+  },
   openrouter: {
     id: "openrouter",
     label: "OpenRouter",
@@ -255,6 +266,7 @@ async function handleSummary(conversation, responseChannel, requestContext = {})
       summary,
       timing: {
         totalMs: Date.now() - startedAt,
+        tokenharborMs: 0,
         openrouterMs: 0,
         geminiMs: 0,
         mistralMs: 0,
@@ -275,6 +287,7 @@ async function handleSummary(conversation, responseChannel, requestContext = {})
         expansion,
         fallback: createFallbackMetadata(),
         modelsTried: [],
+        tokenharborModelsTried: [],
         mistralModelsTried: [],
         openrouterModelsTried: [],
         inputChars,
@@ -288,8 +301,9 @@ async function handleSummary(conversation, responseChannel, requestContext = {})
     const geminiApiKey = process.env.GEMINI_API_KEY;
     const openrouterApiKey = process.env.OPENROUTER_API_KEY;
     const mistralApiKey = process.env.MISTRAL_ENABLED === "false" ? undefined : process.env.MISTRAL_API_KEY;
+    const tokenharborApiKey = TOKENHARBOR_ENABLED ? process.env.TOKENHARBOR_API_KEY : undefined;
     const modelSelection = getGeneratedModelSelection(
-      conversation, Boolean(geminiApiKey), Boolean(openrouterApiKey), Boolean(mistralApiKey)
+      conversation, Boolean(geminiApiKey), Boolean(openrouterApiKey), Boolean(mistralApiKey), Boolean(tokenharborApiKey)
     );
     logModelSelection(modelSelection);
     const providerResult = await createSummaryWithFallback({
@@ -300,6 +314,7 @@ async function handleSummary(conversation, responseChannel, requestContext = {})
       geminiApiKey,
       mistralApiKey,
       openrouterApiKey,
+      tokenharborApiKey,
       requestContext
     });
 
@@ -314,6 +329,7 @@ async function handleSummary(conversation, responseChannel, requestContext = {})
       summary: providerResult.summary,
       timing: {
         totalMs: Date.now() - startedAt,
+        tokenharborMs: providerResult.tokenharborMs,
         openrouterMs: providerResult.openrouterMs,
         geminiMs: providerResult.geminiMs,
         mistralMs: providerResult.mistralMs,
@@ -327,6 +343,7 @@ async function handleSummary(conversation, responseChannel, requestContext = {})
         model: providerResult.model,
         modelReason: providerResult.modelReason,
         modelsTried: providerResult.modelsTried,
+        tokenharborModelsTried: providerResult.tokenharborModelsTried,
         mistralModelsTried: providerResult.mistralModelsTried,
         openrouterModelsTried: providerResult.openrouterModelsTried,
         profile: summaryProfile.id,
@@ -443,6 +460,7 @@ module.exports.__test = {
   getMinimumValidSummaryWords,
   getProviderRequestBudgetMs,
   getEnabledOpenRouterModels,
+  getConfiguredSummaryRoutes,
   getGeminiGenerationBudget,
   stripContextCarryFooter,
   countWords,
@@ -460,10 +478,11 @@ function getEnabledOpenRouterModels() {
     : process.env[enabledEnv] === "true").map(({ model }) => model);
 }
 
-async function createSummaryWithFallback({ conversation, messages, platform, profile, geminiApiKey, mistralApiKey, openrouterApiKey, requestContext = {} }) {
-  const fallbackMessages = getInitialSummaryMessages(conversation, profile, { messages, platform });
-  const geminiMessages = getInitialSummaryMessages(conversation, profile, { messages, platform, plainHeader: true });
+function getConfiguredSummaryRoutes({ geminiApiKey, mistralApiKey, openrouterApiKey, tokenharborApiKey, tokenharborEnabled = TOKENHARBOR_ENABLED }) {
   const routes = [];
+  if (tokenharborEnabled && tokenharborApiKey) {
+    routes.push({ provider: SUMMARY_PROVIDERS.tokenharbor, model: TOKENHARBOR_MODEL, apiKey: tokenharborApiKey });
+  }
   if (openrouterApiKey) {
     for (const model of getEnabledOpenRouterModels()) {
       routes.push({ provider: SUMMARY_PROVIDERS.openrouter, model, apiKey: openrouterApiKey });
@@ -477,29 +496,53 @@ async function createSummaryWithFallback({ conversation, messages, platform, pro
   if (mistralApiKey && process.env.MISTRAL_ENABLED !== "false") {
     routes.push({ provider: SUMMARY_PROVIDERS.mistral, model: MISTRAL_PRIMARY_MODEL, apiKey: mistralApiKey });
   }
+  return routes;
+}
+
+async function createSummaryWithFallback({ conversation, messages, platform, profile, geminiApiKey, mistralApiKey, openrouterApiKey, tokenharborApiKey, tokenharborEnabled = TOKENHARBOR_ENABLED, requestContext = {} }) {
+  const fallbackMessages = getInitialSummaryMessages(conversation, profile, { messages, platform });
+  const geminiMessages = getInitialSummaryMessages(conversation, profile, { messages, platform, plainHeader: true });
+  const routes = getConfiguredSummaryRoutes({ geminiApiKey, mistralApiKey, openrouterApiKey, tokenharborApiKey, tokenharborEnabled });
 
   const modelsTried = [];
+  const tokenharborModelsTried = [];
   const mistralModelsTried = [];
   const openrouterModelsTried = [];
-  const timings = { openrouterMs: 0, geminiMs: 0, mistralMs: 0 };
+  const timings = { tokenharborMs: 0, openrouterMs: 0, geminiMs: 0, mistralMs: 0 };
   const unavailableProviders = new Set();
   const deadline = Date.now() + REMOTE_CHAIN_BUDGET_MS;
-  // Give the first route 90s and divide the remainder fairly among fallbacks.
-  // Default: Dots 90s + Google/Flash-Lite/Mistral 60s each.
-  // Without OpenRouter, the original three 90s slots remain unchanged.
-  const fallbackBudgetMs = routes.length > 1
-    ? Math.min(PROVIDER_ATTEMPT_TIMEOUT_MS, Math.floor((REMOTE_CHAIN_BUDGET_MS - PROVIDER_ATTEMPT_TIMEOUT_MS) / (routes.length - 1)))
+  const sharedFreeWindow = routes[0]?.provider.id === "tokenharbor";
+  const freeRouteCount = routes.filter(route => ["tokenharbor", "openrouter"].includes(route.provider.id)).length;
+  const freeDeadline = sharedFreeWindow ? deadline - REMOTE_CHAIN_BUDGET_MS + PROVIDER_ATTEMPT_TIMEOUT_MS : null;
+  // TokenHarbor and OpenRouter occupy ONE original 90s slot. Never count
+  // TokenHarbor as another funded fallback or renew this window on retries.
+  // With the code switch off/missing key, retain the original route budgets.
+  const fallbackCount = sharedFreeWindow ? routes.length - freeRouteCount : routes.length - 1;
+  const fallbackBudgetMs = fallbackCount > 0
+    ? Math.min(PROVIDER_ATTEMPT_TIMEOUT_MS, Math.floor((REMOTE_CHAIN_BUDGET_MS - PROVIDER_ATTEMPT_TIMEOUT_MS) / fallbackCount))
     : PROVIDER_ATTEMPT_TIMEOUT_MS;
   let lastProviderFailure = null;
 
   for (const [index, route] of routes.entries()) {
     requestContext.signal?.throwIfAborted();
     if (unavailableProviders.has(route.provider.id)) continue;
-    const requestBudgetMs = Math.min(index === 0 ? PROVIDER_ATTEMPT_TIMEOUT_MS : fallbackBudgetMs, deadline - Date.now());
-    if (requestBudgetMs <= 0) break;
     const { provider, model, apiKey } = route;
+    const remainingMs = deadline - Date.now();
+    if (remainingMs <= 0) break;
+    let routeBudgetMs = index === 0 ? PROVIDER_ATTEMPT_TIMEOUT_MS : fallbackBudgetMs;
+    if (sharedFreeWindow && ["tokenharbor", "openrouter"].includes(provider.id)) {
+      const freeRemainingMs = freeDeadline - Date.now();
+      if (freeRemainingMs <= 0) continue; // Funded fallbacks still have their own time.
+      const remainingOpenRouterRoutes = routes.slice(index).filter(item => item.provider.id === "openrouter" && !unavailableProviders.has(item.provider.id)).length;
+      routeBudgetMs = provider.id === "tokenharbor"
+        ? Math.min(remainingOpenRouterRoutes ? TOKENHARBOR_SHARED_SLICE_MS : PROVIDER_ATTEMPT_TIMEOUT_MS, freeRemainingMs)
+        : Math.floor(freeRemainingMs / Math.max(1, remainingOpenRouterRoutes));
+    }
+    const requestBudgetMs = Math.min(routeBudgetMs, remainingMs);
+    if (requestBudgetMs <= 0) continue;
     const startedAt = Date.now();
     modelsTried.push(model);
+    if (provider.id === "tokenharbor") tokenharborModelsTried.push(model);
     if (provider.id === "openrouter") openrouterModelsTried.push(model);
     if (provider.id === "mistral") mistralModelsTried.push(model);
     try {
@@ -514,7 +557,7 @@ async function createSummaryWithFallback({ conversation, messages, platform, pro
         : `${model} served as the first model in the configured chain`;
       console.info("[Context Generator] Summary served:", { provider: provider.id, model, reason: modelReason });
       return {
-        ...result, ...timings, modelReason, modelsTried, mistralModelsTried, openrouterModelsTried,
+        ...result, ...timings, modelReason, modelsTried, tokenharborModelsTried, mistralModelsTried, openrouterModelsTried,
         failureDiagnostics: lastProviderFailure ? providerFailureDiagnostics(lastProviderFailure) : undefined,
         fallback: failedModels.length ? createFallbackMetadata({
           attempted: true, used: true, servedBy: provider.id, model,
@@ -539,7 +582,7 @@ async function createSummaryWithFallback({ conversation, messages, platform, pro
     }
   }
   return createEmergencyDirectCarryResult({
-    conversation, modelsTried, mistralModelsTried, openrouterModelsTried,
+    conversation, modelsTried, tokenharborModelsTried, mistralModelsTried, openrouterModelsTried,
     ...timings, lastProviderFailure
   });
 }
@@ -547,9 +590,11 @@ async function createSummaryWithFallback({ conversation, messages, platform, pro
 function createEmergencyDirectCarryResult({
   conversation,
   modelsTried,
+  tokenharborModelsTried,
   mistralModelsTried,
   openrouterModelsTried,
   openrouterMs,
+  tokenharborMs,
   geminiMs,
   mistralMs,
   lastProviderFailure
@@ -578,9 +623,11 @@ function createEmergencyDirectCarryResult({
     usage: createZeroUsage(),
     modelReason: `${attemptedChain} failed; preserved the complete transcript with ${LOCAL_DIRECT_MODEL}`,
     modelsTried,
+    tokenharborModelsTried,
     mistralModelsTried,
     openrouterModelsTried,
     openrouterMs,
+    tokenharborMs,
     geminiMs,
     mistralMs,
     fallback: createFallbackMetadata({
@@ -706,7 +753,9 @@ function requestProviderSummary(provider, apiKey, messages, profile, model, opti
     provider: provider.id,
     onDelta: options.onDelta,
     onStart: options.onStart,
-    reserveFunded: provider.id === "openrouter" || !options.reserveFunded ? null : () => options.reserveFunded(units)
+    // Both gateways are pinned to explicit never-billed free IDs. Gemini and
+    // Mistral keep their existing funded reservation, including on retries.
+    reserveFunded: ["openrouter", "tokenharbor"].includes(provider.id) || !options.reserveFunded ? null : () => options.reserveFunded(units)
   });
 }
 
@@ -784,7 +833,7 @@ function getProviderSummaryText(provider, data) {
   if (typeof content !== "string") return "";
   // Some compatible providers put thinking tags in content despite exclusion.
   // Fail closed on an unfinished thinking block; separate reasoning fields are ignored.
-  if (provider.id === "openrouter") {
+  if (["openrouter", "tokenharbor"].includes(provider.id)) {
     const answer = content.replace(/<think>[\s\S]*?<\/think>/gi, "");
     return /<think>/i.test(answer) ? "" : answer.trim();
   }
@@ -828,12 +877,11 @@ function getLocalDirectModelSelection(conversation) {
   };
 }
 
-function getGeneratedModelSelection(conversation, geminiConfigured, openrouterConfigured = false, mistralConfigured = true) {
-  const models = [
-    ...(openrouterConfigured ? getEnabledOpenRouterModels() : []),
-    ...(geminiConfigured ? [GEMINI_PRIMARY_MODEL, FLASH_LITE_FALLBACK_MODEL] : []),
-    ...(mistralConfigured && process.env.MISTRAL_ENABLED !== "false" ? [MISTRAL_PRIMARY_MODEL] : [])
-  ];
+function getGeneratedModelSelection(conversation, geminiConfigured, openrouterConfigured = false, mistralConfigured = true, tokenharborConfigured = false) {
+  const models = getConfiguredSummaryRoutes({
+    geminiApiKey: geminiConfigured, openrouterApiKey: openrouterConfigured,
+    mistralApiKey: mistralConfigured, tokenharborApiKey: tokenharborConfigured
+  }).map(route => route.model);
   return {
     model: models[0] || LOCAL_DIRECT_MODEL,
     reason: `generated summaries try ${[...models, LOCAL_DIRECT_MODEL].join(" -> ")}`,
@@ -1113,7 +1161,7 @@ function createTimeoutError() {
 
 function getProviderRequestBudgetMs(model) {
   return [GEMINI_PRIMARY_MODEL, FLASH_LITE_FALLBACK_MODEL, MISTRAL_PRIMARY_MODEL,
-    ...OPENROUTER_MODELS.map((route) => route.model)].includes(model) ? PROVIDER_ATTEMPT_TIMEOUT_MS : 15000;
+    TOKENHARBOR_MODEL, ...OPENROUTER_MODELS.map((route) => route.model)].includes(model) ? PROVIDER_ATTEMPT_TIMEOUT_MS : 15000;
 }
 
 function isRetryableProviderStatus(status) {

@@ -27,7 +27,7 @@
     capture_detail: ["auth_missing", "hook_unavailable", "busy", "http_error", "network_error", "invalid_json", "non_json_response", "partial_response", "incomplete_history", "invalid_branch", "branch_cycle", "parent_missing", "count_mismatch", "text_invalid", "canvas_invalid", "missing_text", "attachment_failed", "attachment_size_limit", "size_limit", "timeout", "conversation_changed", "unsupported_content", "routing_unavailable"],
     document_ready_state: ["loading", "interactive", "complete"],
     destination_tab_status: ["loading", "complete"],
-    summary_failed_provider: ["openrouter", "gemini", "mistral"],
+    summary_failed_provider: ["tokenharbor", "openrouter", "gemini", "mistral"],
     summary_failure_detail: ["provider_http_error", "provider_timeout", "provider_request_failed", "provider_invalid_json", "provider_generation_failed", "provider_empty", "provider_output_rejected", "funded_budget_unavailable", "providers_unavailable", "unexpected_exception"],
     // Fixed page labels only: chat/project IDs, unknown paths and query values
     // must never become telemetry. The worker and destination use this helper.

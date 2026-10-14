@@ -70,7 +70,7 @@ async function readProviderStream(response, provider, { onDelta, checkDeadline, 
 }
 
 function hasAnswerText(text, provider) {
-  if (provider !== "openrouter") return /\S/.test(text);
+  if (!["openrouter", "tokenharbor"].includes(provider)) return /\S/.test(text);
   // Match final-answer extraction, including <think> tags split across chunks.
   let answer = text.replace(/<think>[\s\S]*?<\/think>/gi, "");
   if (/<think>/i.test(answer)) return false;

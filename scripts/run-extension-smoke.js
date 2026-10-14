@@ -34,6 +34,9 @@ const SUMMARY_TEXT = [
 ].join("\n");
 const SMOKE_PLATFORM_QUERY = "__cap_context_smoke_platform";
 const SMOKE_TIMEOUT_MS = Number(process.env.CAP_CONTEXT_SMOKE_TIMEOUT_MS || 45000);
+// Reuse the ordinary installed transfer/SQL fixture to verify a new model's
+// receipts. This synthetic backend never calls TokenHarbor or spends AI quota.
+const TOKENHARBOR_SMOKE = process.env.CAP_CONTEXT_TOKENHARBOR_SMOKE === "1";
 const EARLY_HANDOFF_STREAM_SMOKE = process.env.CAP_CONTEXT_EARLY_HANDOFF_SMOKE === "stream";
 const EARLY_HANDOFF_SMOKE = process.env.CAP_CONTEXT_EARLY_HANDOFF_SMOKE === "1" || EARLY_HANDOFF_STREAM_SMOKE;
 const HANDOFF_SCREENSHOT_PATH = process.env.CAP_CONTEXT_HANDOFF_SCREENSHOT || "";
@@ -631,7 +634,8 @@ async function startFixtureServer() {
   state.oversizeHistory = { bytes: 0, cancelled: false };
   state.oversizePaste = { bytes: 0, cancelled: false };
   state.discardedAuth = { bytes: 0, cancelled: false };
-  const telemetryFixture = await createTelemetrySmokeFixture(REPO_ROOT, TELEMETRY_DATABASE_SMOKE);
+  const telemetryFixture = await createTelemetrySmokeFixture(REPO_ROOT, TELEMETRY_DATABASE_SMOKE,
+    TOKENHARBOR_SMOKE ? "claude-haiku-5.5:free" : "gemini-3.6-flash");
   state.telemetryRequests = telemetryFixture.received;
   const network = NETWORK_SOURCE ? networkSmokeFixture(JSON_SOURCE) : null;
   const pendingFileResponses = [];

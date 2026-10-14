@@ -16,6 +16,7 @@ test("analysis receipt shows the served model and does not report it as failed",
   };
 
   for (const [model, label] of [
+    ["claude-haiku-5.5:free", "Claude Haiku 5.5 (Free)"],
     ["qwen/qwen3.8-27b:free", "Qwen3.8 27B"],
     ["dots-studio/dots-3-note-preview:free", "Dots3-Note Preview"],
     ["google/gemma-4-26b-a4b-it:free", "Gemma 4 26B A4B"],
@@ -27,6 +28,7 @@ test("analysis receipt shows the served model and does not report it as failed",
   ]) assert.equal(formatModelDisplayName(model), label);
   assert.equal(formatModelDisplayName("unsupported-model"), "n/a");
   assert.equal(formatBackendLabel({ servedBy: "openrouter" }), "OpenRouter");
+  assert.equal(formatBackendLabel({ servedBy: "tokenharbor" }), "TokenHarbor");
   assert.equal(getModelFallbackLabel({ model: "inclusionai/ling-3.1-flash", modelsTried: ["inclusionai/ling-3.1-flash"] }), "Space Bunny 2 served first\nNo fallback needed");
   assert.equal(getModelFallbackLabel({ model: "gemini-3.6-flash", modelsTried: ["inclusionai/ling-3.1-flash", "gemini-3.6-flash"] }), "Tried this run\nSpace Bunny 2 — failed\nGemini 3.6 Flash — served");
   assert.equal(formatBackendLabel({ servedBy: "gemini" }), "Google Gemini");

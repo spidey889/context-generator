@@ -31,7 +31,11 @@ async function checkJsonCaptureDiagnostics(db, sql, previousSql = null) {
   const before = (await db.query("select md5(coalesce(jsonb_agg(to_jsonb(t))::text,'')) as hash from public.transfers t")).rows;
   await db.exec(sql);
   assert.deepEqual((await db.query("select md5(coalesce(jsonb_agg(to_jsonb(t))::text,'')) as hash from public.transfers t")).rows, before);
-  assert.deepEqual(JSON.parse(sql.match(/rules constant jsonb := '([^']+)'::jsonb/)[1]), contract.schema);
+  // These historical migrations precede the additive TokenHarbor provider label.
+  // Its later migration verifies the complete current schema separately.
+  const historicalSchema = structuredClone(contract.schema);
+  historicalSchema.summary_failed_provider.values = historicalSchema.summary_failed_provider.values.filter(provider => provider !== "tokenharbor");
+  assert.deepEqual(JSON.parse(sql.match(/rules constant jsonb := '([^']+)'::jsonb/)[1]), historicalSchema);
   assert.deepEqual(JSON.parse(sql.match(attemptRulesDeclaration)[1]), attemptRules);
   checks += 3;
   if (addedSamples) return checks + await checkDiagnosticsSamples(db, addedSamples);

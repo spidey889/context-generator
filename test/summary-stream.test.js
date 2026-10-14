@@ -41,7 +41,7 @@ function answerStream(provider, text = "Preserve the agreed project plan.") {
     : frame(chatChunk(text, "stop")) + "data: [DONE]\n\n";
 }
 
-for (const provider of ["openrouter", "gemini", "mistral"]) {
+for (const provider of ["tokenharbor", "openrouter", "gemini", "mistral"]) {
   for (const phase of ["headers", "body", "json body"]) {
     clockTest(`${provider} switches after 30 seconds without answer text in ${phase}`, async t => {
       configure(t);
@@ -55,7 +55,7 @@ for (const provider of ["openrouter", "gemini", "mistral"]) {
             ? frame({ candidates: [{ content: { parts: [{ thought: true, text: "HIDDEN_THINKING" }, { text: " \n" }] } }] })
             : frame({ choices: [{ index: 0, delta: { role: "assistant", reasoning: "HIDDEN_THINKING" } }] })
               + frame(chatChunk(" \n")) + frame({ choices: [], usage: { total_tokens: 5 } })
-              + (provider === "openrouter" ? frame(chatChunk("<th")) + frame(chatChunk("ink>HIDDEN_THINKING</think>")) : "");
+              + (["openrouter", "tokenharbor"].includes(provider) ? frame(chatChunk("<th")) + frame(chatChunk("ink>HIDDEN_THINKING</think>")) : "");
           controller.enqueue(encoder.encode(phase === "json body" ? "{" : ": heartbeat\n\n" + noise));
           options.signal.addEventListener("abort", () => controller.error(options.signal.reason), { once: true });
         } }), { headers: { "content-type": phase === "json body" ? "application/json" : "text/event-stream" } });
@@ -63,6 +63,7 @@ for (const provider of ["openrouter", "gemini", "mistral"]) {
       const startedAt = Date.now();
       const result = await createSummaryWithFallback({ conversation, profile: getSummaryProfile(conversation),
         openrouterApiKey: provider === "openrouter" ? "test" : undefined,
+        tokenharborApiKey: provider === "tokenharbor" ? "test" : undefined,
         geminiApiKey: provider !== "mistral" ? "test" : undefined,
         mistralApiKey: provider === "mistral" ? "test" : undefined,
         requestContext: { onDelta() {} } });
@@ -91,6 +92,7 @@ for (const provider of ["openrouter", "gemini", "mistral"]) {
     };
     const result = await createSummaryWithFallback({ conversation, profile: getSummaryProfile(conversation),
       openrouterApiKey: provider === "openrouter" ? "test" : undefined,
+      tokenharborApiKey: provider === "tokenharbor" ? "test" : undefined,
       geminiApiKey: provider === "gemini" ? "test" : undefined,
       mistralApiKey: provider === "mistral" ? "test" : undefined,
       requestContext: { onDelta() {} } });
@@ -118,7 +120,7 @@ test("a late answer cannot beat an overdue silence timer", async t => {
 
 test("all provider routes stream one request, preserving Unicode, usage and answer-only text", async t => {
   configure(t);
-  for (const provider of ["openrouter", "gemini", "mistral"]) {
+  for (const provider of ["tokenharbor", "openrouter", "gemini", "mistral"]) {
     const deltas = [], calls = [];
     global.fetch = async (url, options) => {
       calls.push({ url, body: JSON.parse(options.body) });
@@ -131,6 +133,7 @@ test("all provider routes stream one request, preserving Unicode, usage and answ
     };
     const result = await createSummaryWithFallback({ conversation, profile: getSummaryProfile(conversation),
       openrouterApiKey: provider === "openrouter" ? "test" : undefined,
+      tokenharborApiKey: provider === "tokenharbor" ? "test" : undefined,
       geminiApiKey: provider === "gemini" ? "test" : undefined,
       mistralApiKey: provider === "mistral" ? "test" : undefined,
       requestContext: { onDelta: text => deltas.push(text) } });

@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-14-handoff-palette-v148";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-14-tokenharbor-v149";
   const INLINE_PILL_SIZE = 36;
   const ownedUiStyleSheets = new Map();
   let handoffUserCss = "";
@@ -1225,9 +1225,9 @@
           servedBy: "local-direct", provider: "local-direct", primaryModel: "local-direct", model: "local-direct",
           inputChars, outputChars: summary.length,
           profile: fallbackReason ? null : "direct", maxTokens: 0,
-          modelsTried: [], openrouterModelsTried: [], mistralModelsTried: [],
+          modelsTried: [], tokenharborModelsTried: [], openrouterModelsTried: [], mistralModelsTried: [],
           ...(!fallbackReason ? {
-            openrouterMs: 0, geminiMs: 0, mistralMs: 0, providerMs: 0, providerPasses: 0,
+            tokenharborMs: 0, openrouterMs: 0, geminiMs: 0, mistralMs: 0, providerMs: 0, providerPasses: 0,
             usage: { promptTokens: 0, completionTokens: 0, totalTokens: 0, cachedTokens: 0 }
           } : {}),
           fallback: { attempted: Boolean(fallbackReason), used: Boolean(fallbackReason),
@@ -2565,6 +2565,7 @@
         requestChars: summaryTiming?.requestChars ?? null,
         backendInputChars: summaryTiming?.backendInputChars ?? backendTiming?.inputChars ?? null,
         backendTotalMs: backendTiming?.totalMs ?? null,
+        tokenharborMs: backendTiming?.tokenharborMs ?? null,
         openrouterMs: backendTiming?.openrouterMs ?? null,
         geminiMs: backendTiming?.geminiMs ?? null,
         mistralMs: backendTiming?.mistralMs ?? null,
@@ -2576,6 +2577,7 @@
         model: backendTiming?.model || null,
         modelReason: backendTiming?.modelReason || null,
         modelsTried: sanitizeModelChainForStats(backendTiming?.modelsTried),
+        tokenharborModelsTried: sanitizeModelChainForStats(backendTiming?.tokenharborModelsTried),
         mistralModelsTried: sanitizeModelChainForStats(backendTiming?.mistralModelsTried),
         openrouterModelsTried: sanitizeModelChainForStats(backendTiming?.openrouterModelsTried),
         modelInputChars: backendTiming?.modelInputChars ?? null,

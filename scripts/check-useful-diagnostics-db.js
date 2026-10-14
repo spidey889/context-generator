@@ -19,6 +19,7 @@ async function checkUsefulDiagnostics(db, sql) {
   // The later file-limit migration extends this enum. Keep this historical
   // replay check tied to the contract that existed when this migration shipped.
   const historicalContract = structuredClone(contract.schema);
+  historicalContract.summary_failed_provider.values = historicalContract.summary_failed_provider.values.filter(provider => provider !== "tokenharbor");
   delete historicalContract.json_attempts;
   historicalContract.capture_detail.values = historicalContract.capture_detail.values.filter(value => value !== "attachment_size_limit");
   equal(historicalRules, historicalContract);

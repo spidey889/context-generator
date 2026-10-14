@@ -397,6 +397,8 @@ async function main() {
         const previous = appliedMigrations.find(migration => migration.name === "json_capture_attempt_diagnostics");
         assert.ok(previous, "Original JSON diagnostics migration must be replayed before its label update"); checks++;
         checks += await require("./check-json-capture-diagnostics-db.js").checkJsonCaptureDiagnostics(db, sql, previous.statements.join("\n"));
+      } else if (name.endsWith("_tokenharbor_summary_route.sql")) {
+        checks += await require("./check-tokenharbor-db.js").checkTokenHarbor(db, sql);
       } else await db.exec(sql);
     }
     checks += await require("./check-served-model-db.js").checkStoreModelReceipts(db);
