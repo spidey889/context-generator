@@ -1242,26 +1242,33 @@ async function verifyEscapeCancellation({ sourceSession, devToolsPort, origin, s
   // synthetic panel dismissal, which deliberately cannot cancel a transfer.
   await session.call("Page.bringToFront");
   await session.call("Emulation.setFocusEmulationEnabled", { enabled: true });
-  await session.call("Input.dispatchKeyEvent", { type: "keyDown", key: "Escape", code: "Escape", windowsVirtualKeyCode: 27 });
-  const local = await session.evaluate(`(() => {
-    const overlay = document.getElementById("context-generator-overlay");
-    return { overlay: overlay?.style.display, cue: !!document.getElementById("context-generator-destination-status"), error: !!document.getElementById("context-generator-error-overlay") };
-  })()`);
-  assert.ok(!local.overlay || local.overlay === "none", "Escape hides the handoff before any network acknowledgement.");
-  assert.equal(local.cue, false);
-  assert.equal(local.error, false);
-  await session.call("Input.dispatchKeyEvent", { type: "keyUp", key: "Escape", code: "Escape", windowsVirtualKeyCode: 27 });
+  assert.equal(await destination.evaluate('document.querySelector("textarea").value'), "");
+  assert.equal(await destination.evaluate("window.__capContextSmokeSendClicks"), 0);
+  try {
+    await session.call("Input.dispatchKeyEvent", { type: "keyDown", key: "Escape", code: "Escape", windowsVirtualKeyCode: 27 });
+  } catch (error) {
+    // Closing the destination can beat the key-event acknowledgement itself.
+    if (ESCAPE_SMOKE !== "destination" || (await getTargets(devToolsPort)).some(item => item.id === target.id)) throw error;
+  }
+  if (ESCAPE_SMOKE === "source") {
+    const local = await sourceSession.evaluate(`(() => {
+      const overlay = document.getElementById("context-generator-overlay");
+      return { overlay: overlay?.style.display, error: !!document.getElementById("context-generator-error-overlay") };
+    })()`);
+    assert.ok(!local.overlay || local.overlay === "none", "Escape hides the handoff before any network acknowledgement.");
+    assert.equal(local.error, false);
+    await sourceSession.call("Input.dispatchKeyEvent", { type: "keyUp", key: "Escape", code: "Escape", windowsVirtualKeyCode: 27 });
+  }
+  await waitFor(async () => !(await getTargets(devToolsPort)).some(item => item.id === target.id), "the extension-created destination tab to close");
+  destinationSessions.delete(target.id);
   await waitFor(() => state.summaryCancelled, "the worker closing the real summary socket");
   const latest = await waitFor(() => sourceSession.evaluate("chrome.storage.local.get('context-generator-last-transfer-stats-v1').then(v => v['context-generator-last-transfer-stats-v1'])", sourceSession.getExtensionContextId()).then(value => value?.failure === "Transfer cancelled." ? value : null), "the cancelled source receipt");
   assert.equal(latest.status, "failed");
   const terminal = await waitFor(() => state.telemetryRequests.findLast(payload => payload.status === "failed"), "cancelled transfer telemetry");
   assert.equal(terminal.failure_reason, "user_cancelled");
-  assert.equal(await destination.evaluate('document.querySelector("textarea").value'), "");
   assert.equal(state.summaryRequests.length, 1);
-  assert.equal(destinationSessions.size, 1);
-  // A second real transfer must succeed while the cancelled destination stays
-  // empty. This also catches late callbacks resetting a newer attempt's lock.
-  await destination.call("Emulation.setFocusEmulationEnabled", { enabled: false });
+  // A second real transfer must succeed without recreating the cancelled tab.
+  // This also catches late callbacks resetting a newer attempt's lock.
   await sourceSession.call("Page.bringToFront");
   await sourceSession.call("Emulation.setFocusEmulationEnabled", { enabled: true });
   await sourceSession.evaluate(start);
@@ -1274,9 +1281,9 @@ async function verifyEscapeCancellation({ sourceSession, devToolsPort, origin, s
     }
     return false;
   }, "successful delivery from the next attempt");
-  assert.equal(await destination.evaluate('document.querySelector("textarea").value'), "");
-  assert.equal(await destination.evaluate("window.__capContextSmokeSendClicks"), 0);
-  process.stdout.write(`✓ Trusted Escape in ${ESCAPE_SMOKE}: immediate UI dismissal, aborted summary socket, no cancelled paste; next transfer succeeds.\n`);
+  assert.equal((await getTargets(devToolsPort)).some(item => item.id === target.id), false);
+  assert.equal(state.destinationRequests, 2, "Cancellation must not create another recovery tab.");
+  process.stdout.write(`✓ Trusted Escape in ${ESCAPE_SMOKE}: destination tab closed, summary socket aborted; source stays open and next transfer succeeds.\n`);
 }
 
 async function verifyEarlyHandoff({ sourceSession, devToolsPort, origin, state, destinationSessions }) {

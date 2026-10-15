@@ -145,7 +145,7 @@ function getTransferOperation(transferId, sourceTab, deadlineAt) {
   }
   let operation = transferOperations.get(transferId);
   if (!operation) {
-    operation = { transferId, sourceTabId: sourceTab.id, tabIds: new Set([sourceTab.id]),
+    operation = { transferId, sourceTabId: sourceTab.id, tabIds: new Set([sourceTab.id]), createdTabIds: new Set(),
       controller: new AbortController(), deadlineAt, expiresAt: deadlineAt || Date.now() + 360000 };
     transferOperations.set(transferId, operation);
   }
@@ -159,12 +159,16 @@ function checkTransferOperation(operation) {
   checkTransferDeadline(operation?.deadlineAt);
 }
 
-function cancelTransferOperation(operation) {
-  if (operation.controller.signal.aborted) return;
-  operation.controller.abort(createTransferCancelledError());
-  for (const tabId of operation.tabIds) {
-    chrome.tabs.sendMessage(tabId, { type: "CANCEL_TRANSFER", transferId: operation.transferId }).catch(() => {});
+function cancelTransferOperation(operation, { closeDestinations = false } = {}) {
+  if (!operation.controller.signal.aborted) {
+    operation.controller.abort(createTransferCancelledError());
+    for (const tabId of operation.tabIds) {
+      chrome.tabs.sendMessage(tabId, { type: "CANCEL_TRANSFER", transferId: operation.transferId }).catch(() => {});
+    }
   }
+  // Associated tabs can include an existing caller-supplied destination. Escape
+  // closes only tabs actually created by this attempt, never the source.
+  if (closeDestinations) return Promise.all([...operation.createdTabIds].map(tabId => chrome.tabs.remove(tabId).catch(() => {})));
 }
 
 async function checkTransferSource(operation) {
@@ -902,9 +906,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     // Retain a cancelled token even if Escape beats the first preparation
     // message. Late requests for this attempt must never start new work.
     if (!operation) operation = getTransferOperation(message.transferId, sender.tab);
-    cancelTransferOperation(operation);
-    sendResponse({ ok: true });
-    return false;
+    cancelTransferOperation(operation, { closeDestinations: true }).then(() => sendResponse({ ok: true }));
+    return true;
   }
   if (message?.type === "PROTECT_HANDOFF_PALETTE") {
     // This private UI channel may style only the sending AI page's top document.
@@ -1733,9 +1736,10 @@ async function createDestinationTab(destination, options = {}) {
       ...placement
     });
     options.operation?.tabIds.add(destinationTab.id);
+    options.operation?.createdTabIds.add(destinationTab.id);
     if (options.operation?.controller.signal.aborted) {
-      // Creation was already submitted when the source closed. Remove only
-      // this newly created tab; never erase an existing draft or pasted carry.
+      // Creation was already submitted when Escape or source closure cancelled
+      // the attempt. Its late result must not leave a new destination behind.
       await chrome.tabs.remove(destinationTab.id).catch(() => {});
       checkTransferOperation(options.operation);
     }

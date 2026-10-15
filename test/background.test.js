@@ -354,7 +354,7 @@ test("closing the prepared destination during paste uses one fresh tab with the 
   assert.ok(harness.operations.sent.every(({ message }) => message.type !== "CANCEL_TRANSFER"));
 });
 
-test("a tab creation already submitted before cancellation is cleaned up without delivery", async () => {
+for (const stop of ["source closure", "Escape"]) test(`a tab creation already submitted before ${stop} is cleaned up without delivery`, async () => {
   let finishCreation, creationStarted;
   const started = new Promise(resolve => { creationStarted = resolve; });
   const sourceTab = { id: 9, windowId: 1, index: 0 };
@@ -363,7 +363,8 @@ test("a tab creation already submitted before cancellation is cleaned up without
   });
   const pending = harness.prepare("gemini", sourceTab);
   await started;
-  await harness.closeTab(9);
+  if (stop === "Escape") await harness.cancel(9);
+  else await harness.closeTab(9);
   finishCreation();
   assert.equal((await pending).code, "user_cancelled");
   assert.deepEqual(harness.operations.removed, [100]);
@@ -528,16 +529,38 @@ test("Escape cancels an active summary body and rejects late work for that attem
   assert.equal(fetches, 1, "A late request cannot restart generation.");
 });
 
-test("Escape from a prepared destination revokes delivery without another tab or activation", async () => {
+for (const from of ["source", "destination"]) test(`Escape from the ${from} closes its created destination and revokes delivery`, async () => {
   const sourceTab = { id: 9, windowId: 1, index: 0 };
   const harness = loadBackgroundForTransferTest({ sourceTab });
   const prepared = await harness.prepare("gemini", sourceTab);
-  assert.equal((await harness.cancel(prepared.tabId)).ok, true);
+  assert.equal((await harness.cancel(from === "source" ? sourceTab.id : prepared.tabId)).ok, true);
+  assert.deepEqual(harness.operations.removed, [prepared.tabId]);
   assert.equal((await harness.sendTransfer("gemini", prepared.tabId, false, null, sourceTab)).code, "user_cancelled");
   assert.equal(harness.operations.created.length, 1);
   assert.equal(harness.operations.updated.length, 0);
   assert.equal(harness.operations.sent.filter(({ message }) => message.type === "PASTE_CONTEXT").length, 0);
   assert.ok(harness.operations.sent.some(({ tabId, message }) => tabId === 9 && message.type === "CANCEL_TRANSFER"));
+});
+
+test("Escape closes a fresh recovery tab while preserving an existing destination", async () => {
+  let pasteStarted, acknowledge;
+  const started = new Promise(resolve => { pasteStarted = resolve; });
+  const sourceTab = { id: 9, windowId: 1, index: 0 };
+  const harness = loadBackgroundForTransferTest({ sourceTab, useRealTimers: true,
+    preparedTab: { id: 41, url: "https://gemini.google.com/app" },
+    sendMessageImpl: (_tabId, message) => {
+      if (message.type !== "PASTE_CONTEXT") return { ok: true };
+      if (_tabId === 41) return { ok: false, code: "paste_failed", error: "Composer unavailable" };
+      pasteStarted(); return new Promise(resolve => { acknowledge = resolve; });
+    }
+  });
+  const pending = harness.sendTransfer("gemini", 41, false, null, sourceTab);
+  await started;
+  assert.equal((await harness.cancel(9)).ok, true);
+  assert.equal((await pending).code, "user_cancelled");
+  acknowledge({ ok: true });
+  assert.equal(harness.operations.created.length, 1);
+  assert.deepEqual(harness.operations.removed, [harness.operations.created[0].tab.id], "Only the fresh recovery tab can be closed.");
 });
 
 test("Escape before preparation latches cancellation before any destination work", async () => {
