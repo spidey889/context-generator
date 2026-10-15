@@ -311,8 +311,9 @@ async function handleSummary(conversation, responseChannel, requestContext = {})
     const openrouterApiKey = process.env.OPENROUTER_API_KEY;
     const mistralApiKey = process.env.MISTRAL_ENABLED === "false" ? undefined : process.env.MISTRAL_API_KEY;
     const tokenharborApiKey = TOKENHARBOR_ENABLED ? process.env.TOKENHARBOR_API_KEY : undefined;
+    const tokenharborBackupApiKey = TOKENHARBOR_ENABLED ? process.env.TOKENHARBOR_BACKUP_API_KEY : undefined;
     const modelSelection = getGeneratedModelSelection(
-      conversation, Boolean(geminiApiKey), Boolean(openrouterApiKey), Boolean(mistralApiKey), Boolean(tokenharborApiKey)
+      conversation, Boolean(geminiApiKey), Boolean(openrouterApiKey), Boolean(mistralApiKey), Boolean(tokenharborApiKey?.trim() || tokenharborBackupApiKey?.trim())
     );
     logModelSelection(modelSelection);
     const providerResult = await createSummaryWithFallback({
@@ -324,6 +325,7 @@ async function handleSummary(conversation, responseChannel, requestContext = {})
       mistralApiKey,
       openrouterApiKey,
       tokenharborApiKey,
+      tokenharborBackupApiKey,
       requestContext
     });
 
@@ -487,11 +489,16 @@ function getEnabledOpenRouterModels() {
     : process.env[enabledEnv] === "true").map(({ model }) => model);
 }
 
-function getConfiguredSummaryRoutes({ geminiApiKey, mistralApiKey, openrouterApiKey, tokenharborApiKey, tokenharborEnabled = TOKENHARBOR_ENABLED }) {
+function getConfiguredSummaryRoutes({ geminiApiKey, mistralApiKey, openrouterApiKey, tokenharborApiKey, tokenharborBackupApiKey, tokenharborEnabled = TOKENHARBOR_ENABLED }) {
   const routes = [];
   const tokenharborRoute = TOKENHARBOR_MODELS.find(route => route.enabled);
-  if (tokenharborEnabled && tokenharborApiKey && tokenharborRoute) {
-    routes.push({ provider: SUMMARY_PROVIDERS.tokenharbor, model: tokenharborRoute.model, apiKey: tokenharborApiKey });
+  // One model route owns both credentials; never create another time slice or
+  // model attempt for a second key. Selection diagnostics also use booleans here.
+  const [primaryKey, backupKey] = [...new Set([tokenharborApiKey, tokenharborBackupApiKey]
+    .map(key => typeof key === "string" ? key.trim() : key).filter(Boolean))];
+  if (tokenharborEnabled && primaryKey && tokenharborRoute) {
+    routes.push({ provider: SUMMARY_PROVIDERS.tokenharbor, model: tokenharborRoute.model, apiKey: primaryKey,
+      ...(backupKey ? { backupApiKey: backupKey } : {}) });
   }
   if (openrouterApiKey) {
     for (const model of getEnabledOpenRouterModels()) {
@@ -509,10 +516,10 @@ function getConfiguredSummaryRoutes({ geminiApiKey, mistralApiKey, openrouterApi
   return routes;
 }
 
-async function createSummaryWithFallback({ conversation, messages, platform, profile, geminiApiKey, mistralApiKey, openrouterApiKey, tokenharborApiKey, tokenharborEnabled = TOKENHARBOR_ENABLED, requestContext = {} }) {
+async function createSummaryWithFallback({ conversation, messages, platform, profile, geminiApiKey, mistralApiKey, openrouterApiKey, tokenharborApiKey, tokenharborBackupApiKey, tokenharborEnabled = TOKENHARBOR_ENABLED, requestContext = {} }) {
   const fallbackMessages = getInitialSummaryMessages(conversation, profile, { messages, platform });
   const geminiMessages = getInitialSummaryMessages(conversation, profile, { messages, platform, plainHeader: true });
-  const routes = getConfiguredSummaryRoutes({ geminiApiKey, mistralApiKey, openrouterApiKey, tokenharborApiKey, tokenharborEnabled });
+  const routes = getConfiguredSummaryRoutes({ geminiApiKey, mistralApiKey, openrouterApiKey, tokenharborApiKey, tokenharborBackupApiKey, tokenharborEnabled });
 
   const modelsTried = [];
   const tokenharborModelsTried = [];
@@ -536,7 +543,7 @@ async function createSummaryWithFallback({ conversation, messages, platform, pro
   for (const [index, route] of routes.entries()) {
     requestContext.signal?.throwIfAborted();
     if (unavailableProviders.has(route.provider.id)) continue;
-    const { provider, model, apiKey } = route;
+    const { provider, model, apiKey, backupApiKey } = route;
     const remainingMs = deadline - Date.now();
     if (remainingMs <= 0) break;
     let routeBudgetMs = index === 0 ? PROVIDER_ATTEMPT_TIMEOUT_MS : fallbackBudgetMs;
@@ -557,7 +564,7 @@ async function createSummaryWithFallback({ conversation, messages, platform, pro
     if (provider.id === "mistral") mistralModelsTried.push(model);
     try {
       const result = await createSummaryWithProvider({
-        provider, apiKey, profile, model, requestBudgetMs, requestContext,
+        provider, apiKey, backupApiKey, profile, model, requestBudgetMs, requestContext,
         initialMessages: provider.id === "gemini" ? geminiMessages : fallbackMessages
       });
       timings[`${provider.id}Ms`] += result.providerMs;
@@ -651,7 +658,24 @@ function createEmergencyDirectCarryResult({
   };
 }
 
-async function createSummaryWithProvider({ provider, apiKey, profile, model, initialMessages, requestBudgetMs, requestContext }) {
+async function createSummaryWithProvider({ backupApiKey, ...options }) {
+  if (!backupApiKey) return createSummaryWithProviderAttempt(options);
+  const startedAt = Date.now();
+  try {
+    return await createSummaryWithProviderAttempt(options);
+  } catch (error) {
+    options.requestContext.signal?.throwIfAborted();
+    // Preserve the original route deadline, including same-key retries and
+    // body reads. An exhausted primary leaves no new allowance for the backup.
+    const remainingMs = options.requestBudgetMs - (Date.now() - startedAt);
+    if (remainingMs <= 0) throw error;
+    const result = await createSummaryWithProviderAttempt({ ...options, apiKey: backupApiKey, requestBudgetMs: remainingMs });
+    const elapsedMs = Date.now() - startedAt;
+    return { ...result, providerMs: elapsedMs, initialMs: elapsedMs };
+  }
+}
+
+async function createSummaryWithProviderAttempt({ provider, apiKey, profile, model, initialMessages, requestBudgetMs, requestContext }) {
   const providerStartedAt = Date.now();
   const initialStartedAt = Date.now();
   const initialResponse = await requestProviderSummary(
