@@ -4,6 +4,8 @@ A short history of decisions and regressions that matter when changing the code.
 
 ## 2026-10-15
 
+- **Reduced repeated JSON capture test setup.** Claude's completeness matrix keeps all 63 marker/container checks in one resettable harness and verifies a healthy capture afterward. Character-boundary fixtures avoid large unused discovery responses, and the exact 6 MB Claude fixture fills one final buffer. Removed one duplicate UTF-8 paste success test; the exact large-paste fixture retains its byte-before-trim and whitespace regressions. Trimmed repeated paste body, HTTP and size examples while keeping their stronger cancellation, privacy and boundary checks. All 680 regular tests passed. Test construction and coverage consolidation only; production behavior is unchanged.
+
 - **Reduced large ChatGPT test-fixture copies.** Exact-size histories now allocate their final buffer once, including the split-BOM case. The alternate-branch and selected-text-limit fixtures encode owned history once and return a small unread auth-discovery body. Retained real 32 MB acceptance/one-byte overflow, exact Unicode and source payloads, stream cleanup, manifest guard order and all existing test cases. Test construction only; production code is unchanged.
 
 - **Moved the real-Git CI-scope fixture to the slow suite.** The regular command skips that fixture; `npm run test:slow` now includes it alongside the physical-scroll regression. Its temporary Git history and all assertions remain intact. The full gate still runs both suites, and lightweight CI retains its direct CI-scope check. This changes test selection only.

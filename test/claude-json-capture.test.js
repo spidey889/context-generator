@@ -219,8 +219,10 @@ test("Claude accepts exactly six million raw bytes and preserves split BOM, Unic
   const text = "  café🙂\r\n\uFEFF  original text  ";
   data.chat_messages[0].content = [{ type: "text", text }];
   const prefix = Buffer.from("\uFEFF" + JSON.stringify(data).slice(0, -1) + ',"ignored":"');
-  const suffix = Buffer.from('"}');
-  const bytes = Buffer.concat([prefix, Buffer.alloc(6000000 - prefix.length - suffix.length, 32), suffix]);
+  // Fill the final body once instead of allocating and copying 6 MB of padding.
+  const bytes = Buffer.alloc(6000000, 32);
+  prefix.copy(bytes);
+  bytes.write('"}', bytes.length - 2);
   const split = bytes.indexOf(Buffer.from("🙂")) + 1;
   const streamed = streamedResponse([bytes.subarray(0, 1), bytes.subarray(1, 2), bytes.subarray(2, split), bytes.subarray(split, split + 1), bytes.subarray(split + 1)], { "content-length": "6000000" });
   const harness = setup(data, { resources: [endpoint], fetchImpl: async () => streamed.response });
@@ -304,6 +306,7 @@ test("Claude cancels discarded transport responses and keeps safe fallback reaso
 
 test("Claude capture reads its dedicated response once and leaves the page response readable", async () => {
   const data = fixture();
+  // Multibyte text and edge spaces also guard UTF-8 byte counting before trimming.
   const pastedText = `  café🙂\r\n${"  original pasted line\r\n".repeat(10000)}END  `;
   data.chat_messages[0].attachments = [pastedAttachment(pastedText)];
   const harness = setup(data);
@@ -466,29 +469,23 @@ test("Claude JSON capture still rejects missing parents and cyclic branches", as
 });
 
 test("Claude JSON capture admits the direct range through 500,000 characters without clipping", async () => {
-  const baseline = setup();
-  await baseline.window.fetch(endpoint);
+  const baseline = setup(fixture(), { resources: [endpoint] });
   const overhead = (await baseline.window.__capCaptureClaudeJson()).text.length - "Selected answer".length;
   for (const length of [350001, 500000, 500001]) {
     const data = fixture();
     data.chat_messages[2].content[1].text = "漢".repeat(length - overhead);
-    const h = setup(data);
-    await h.window.fetch(endpoint);
+    const h = setup(data, { resources: [endpoint] });
     if (length > 500000) await assert.rejects(h.window.__capCaptureClaudeJson(), /500,000/);
     else assert.equal((await h.window.__capCaptureClaudeJson()).text.length, length);
   }
 });
 
-test("Claude JSON capture accepts the root sentinel and rejects oversized transcripts", async () => {
+test("Claude JSON capture accepts the all-zero root sentinel", async () => {
   const data = fixture();
   data.chat_messages[0].parent_message_uuid = "00000000-0000-0000-0000-000000000000";
   const harness = setup(data);
   await harness.window.fetch(endpoint);
   assert.equal((await harness.window.__capCaptureClaudeJson()).messageTurnCount, 2);
-  data.chat_messages[2].content[1].text = "x".repeat(500000);
-  const oversized = setup(data);
-  await oversized.window.fetch(endpoint);
-  await assert.rejects(oversized.window.__capCaptureClaudeJson(), /500,000/);
 });
 
 test("Claude JSON capture rejects explicit partial-history metadata without leaking payloads", async () => {
@@ -499,21 +496,24 @@ test("Claude JSON capture rejects explicit partial-history metadata without leak
     next_cursor: "PRIVATE_SENTINEL", previous_cursor: "PRIVATE_SENTINEL", next_page: 2, previous_page: 1,
     missing_messages: ["PRIVATE_SENTINEL"], missing_message_ids: ["PRIVATE_SENTINEL"], missing_message_uuids: ["PRIVATE_SENTINEL"]
   };
+  // Only response metadata varies; each capture still owns a fresh response.
+  const data = fixture();
+  const harness = setup(data, { resources: [endpoint] });
   for (const container of [null, "page_info", "pagination"]) {
     for (const [field, value] of Object.entries(signals)) {
-      const data = fixture();
       if (container) data[container] = { [field]: value };
       else data[field] = value;
-      const harness = setup(data);
-      await harness.window.fetch(endpoint);
       await assert.rejects(harness.window.__capCaptureClaudeJson(), error => {
         assert.match(error.message, /incomplete or unsupported JSON/);
         assert.ok(error.message.includes(field));
         assert.doesNotMatch(error.message, /PRIVATE_SENTINEL|Question|Selected answer/);
         return true;
       });
+      if (container) delete data[container];
+      else delete data[field];
     }
   }
+  assert.equal((await harness.window.__capCaptureClaudeJson()).messageTurnCount, 2);
 });
 
 test("Claude JSON snapshots current thinking and reply text without requiring generation to finish", async () => {
@@ -562,14 +562,6 @@ test("Claude JSON capture rejects missing/truncated pasted content rather than s
   }
 });
 
-test("Claude pasted-text size validation uses UTF-8 bytes before trimming", async () => {
-  const data = fixture();
-  data.chat_messages[0].attachments = [pastedAttachment("  café\r\n🙂  ")];
-  const harness = setup(data);
-  await harness.window.fetch(endpoint);
-  assert.match((await harness.window.__capCaptureClaudeJson()).text, /User: Question\n\n  café\r\n🙂  /);
-});
-
 test("Claude JSON capture requires a real root and rejects malformed completeness structures", async () => {
   for (const mutate of [
     ...[undefined, "", false, 0, {}].map(parent => data => { data.chat_messages[0].parent_message_uuid = parent; }),
@@ -607,10 +599,7 @@ test("Claude aborts navigation away and back, and rejects concurrent captures pr
 clockTest("Claude native failures retain safe fallback reasons instead of labelling every failure a request error", async () => {
   const cases = [
     [{ status: 206 }, "incomplete"],
-    [{ headers: { "content-range": "bytes 0-10/100" } }, "incomplete"],
     [{ body: "PRIVATE_INVALID_JSON" }, "incomplete"],
-    [{ status: 401 }, "unavailable"],
-    [{ status: 500 }, "request_failed"],
     [{ resources: [] }, "unavailable"],
     [{ fetchImpl: (_url, options) => new Promise((_resolve, reject) => {
       options.signal.addEventListener("abort", () => reject(new Error("PRIVATE_TIMEOUT_ERROR")), { once: true });

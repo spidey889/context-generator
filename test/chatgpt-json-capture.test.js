@@ -714,6 +714,7 @@ test("ChatGPT streamed pastes preserve split UTF-8/BOM and reject short, invalid
     else {
       await assert.rejects(harness.window.__capCaptureChatGptJson(), /pasted text attachment could not be read completely/);
       assert.ok(harness.replies.every(reply => !reply.data && !reply.pastedTexts));
+      assert.doesNotMatch(JSON.stringify(harness.replies), /TEST_ONLY|SIGNED_URL_SENTINEL/);
     }
     assert.equal(body.locked, false);
   }
@@ -743,6 +744,7 @@ test("ChatGPT rejects paste transport before reading and preserves safe errors w
     assert.equal(cancelled, true);
     assert.equal(body.locked, false);
     assert.ok(harness.replies.every(reply => !reply.data && !reply.pastedTexts));
+    assert.doesNotMatch(JSON.stringify(harness.replies), /TEST_ONLY|SIGNED_URL_SENTINEL|PRIVATE_CANCEL_SENTINEL/);
   }
 });
 
@@ -874,23 +876,18 @@ test("ChatGPT fetches only active visible user big pastes, excluding uploads, to
   assert.equal(harness.requests.length, 4);
 });
 
-test("ChatGPT fails visibly on missing, partial, wrong-file or invalid pasted text", async () => {
-  for (const badResponse of [
+test("ChatGPT rejects denied, mismatched or wrong-file paste descriptors", async () => {
+  for (const badDescriptor of [
     request => request.url.includes("/files/download/") ? new Response("Denied", { status: 403 }) : null,
     request => request.url.includes("/files/download/") ? jsonResponse({ status: "success", file_size_bytes: 5, download_url: "https://chatgpt.com/backend-api/estuary/content?id=file_test_0" }) : null,
     request => request.url.includes("/files/download/") ? jsonResponse({ status: "success", file_size_bytes: 24, download_url: "https://other.example/private?id=file_test_0" }) : null,
-    request => request.url.includes("/files/download/") ? jsonResponse({ status: "success", file_size_bytes: 24, download_url: "https://chatgpt.com/backend-api/estuary/content?id=file_wrong" }) : null,
-    request => request.url.includes("/estuary/content") ? new Response("Original pasted document", { status: 206, headers: { "content-type": "text/plain" } }) : null,
-    request => request.url.includes("/estuary/content") ? new Response("Original pasted document", { headers: { "content-type": "text/plain", "content-range": "bytes 0-23/100" } }) : null,
-    request => request.url.includes("/estuary/content") ? new Response("Truncated", { headers: { "content-type": "text/plain" } }) : null,
-    request => request.url.includes("/estuary/content") ? new Response("Original pasted document", { headers: { "content-type": "text/html" } }) : null,
-    request => request.url.includes("/estuary/content") ? new Response(new Uint8Array(24).fill(255), { headers: { "content-type": "text/plain" } }) : null
+    request => request.url.includes("/files/download/") ? jsonResponse({ status: "success", file_size_bytes: 24, download_url: "https://chatgpt.com/backend-api/estuary/content?id=file_wrong" }) : null
   ]) {
     const { data, fetchImpl } = pasteFixture();
-    const harness = setup(data, 200, { fetchImpl: request => badResponse(request) || fetchImpl(request) }); await discover(harness);
+    const harness = setup(data, 200, { fetchImpl: request => badDescriptor(request) || fetchImpl(request) }); await discover(harness);
     await assert.rejects(harness.window.__capCaptureChatGptJson(), /pasted text attachment could not be read completely/);
     assert.equal(harness.replies.at(-1).data, undefined, "An incomplete paste must not produce a successful tree response.");
-    assert.doesNotMatch(JSON.stringify(harness.replies), /TEST_ONLY|SIGNED_URL_SENTINEL|Denied|Truncated/);
+    assert.doesNotMatch(JSON.stringify(harness.replies), /TEST_ONLY|SIGNED_URL_SENTINEL|Denied/);
   }
 });
 
@@ -1128,17 +1125,12 @@ test("ChatGPT JSON capture never extracts nested tool/file/image/artifact text",
   assert.equal(capture.text, "ChatGPT conversation:\n\nUser: Own prompt\n\nAssistant: Own answer");
 });
 
-test("ChatGPT JSON capture rejects absent auth, changed routes, HTTP failures and size overflow", async () => {
+test("ChatGPT JSON capture rejects absent auth and changed routes", async () => {
   const noAuth = setup(); await noAuth.window.fetch(fullUrl);
   await assert.rejects(noAuth.window.__capCaptureChatGptJson(), /authentication is unavailable/);
   assert.equal(noAuth.requests.length, 2);
   const moved = setup(); await discover(moved); moved.location.pathname = "/c/other";
   await assert.rejects(moved.window.__capCaptureChatGptJson(), /changed during capture/);
-  const forbidden = setup(fixture(), 403); await discover(forbidden);
-  await assert.rejects(forbidden.window.__capCaptureChatGptJson(), /HTTP 403/);
-  const data = fixture(); data.mapping.answer.message.content.parts = ["x".repeat(500000)];
-  const huge = setup(data); await discover(huge);
-  await assert.rejects(huge.window.__capCaptureChatGptJson(), /500,000/);
 });
 
 
@@ -1149,7 +1141,12 @@ test("ChatGPT JSON capture admits the direct range through 500,000 characters wi
   for (const length of [350001, 500000, 500001]) {
     const data = fixture();
     data.mapping.answer.message.content.parts = ["漢".repeat(length - overhead)];
-    const h = setup(data);
+    // Discovery observes headers only; encode the large owned history once.
+    const history = Buffer.from(JSON.stringify(data));
+    const h = setup(data, 200, { fetchImpl: request => new Response(
+      request.url.startsWith("/backend-api/conversation/") ? history : "{}",
+      { headers: { "content-type": "application/json" } }
+    ) });
     await discover(h);
     if (length > 500000) await assert.rejects(h.window.__capCaptureChatGptJson(), /500,000/);
     else assert.equal((await h.window.__capCaptureChatGptJson()).text.length, length);
