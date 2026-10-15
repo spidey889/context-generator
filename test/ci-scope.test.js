@@ -35,7 +35,9 @@ test("homepage copy/CSS qualify, while scripts, handlers, links and markup remai
   assert.equal(classifyChanges([{ ...changed("index.html"), oldMode: "000000" }]), "full");
 });
 
-test("complete Git ranges, first branch pushes, PRs and ambiguous metadata select the correct gate", t => {
+// Real Git subprocesses belong in the slow suite. Lightweight CI still runs
+// this file explicitly, preserving its gate-selection integration coverage.
+test("slow/release: complete Git ranges, first branch pushes, PRs and ambiguous metadata select the correct gate", t => {
   const cwd = fs.mkdtempSync(path.join(os.tmpdir(), "cap-context-ci-scope-"));
   t.after(() => {
     assert.equal(path.dirname(path.resolve(cwd)), path.resolve(os.tmpdir()));
