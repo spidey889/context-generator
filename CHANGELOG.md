@@ -2,6 +2,10 @@
 
 A short history of decisions and regressions that matter when changing the code. Read the relevant section of [LOGIC.md](LOGIC.md) for current behavior, ownership and checks; use this file when you need to understand why an approach changed. Entries describe source changes unless deployment is explicitly recorded. Extension packaging, Web Store publication and backend deployment are separate.
 
+## 2026-10-16
+
+- **ChatGPT long transfers insert only one copy.** Replaced synthetic paste events with direct native text insertion, preventing ChatGPT's long-paste attachment conversion from accompanying an inline fallback copy. Removed the unused clipboard-paste helpers, advanced the content-script load ID and retained text verification, draft protection, cancellation, deadlines and recovery. Regressions cover complete multiline/Unicode carries above 10,000 characters, native insertion failure and repeat delivery; an isolated installed-Brave fixture checks exact text, no attachment and untouched Send.
+
 ## 2026-10-15
 
 - **Escape also closes the transfer's destination tabs.** Track tabs actually created by each attempt separately from associated source/existing tabs. Escape cancels work and closes its prepared/recovery tabs; an in-flight creation is removed when it finishes. Source closure keeps its existing cancellation behavior. Regression checks cover Escape in either tab, late creation and preservation of pre-existing tabs; installed Brave fixtures verify native tab removal and a successful next transfer.

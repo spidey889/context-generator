@@ -455,7 +455,7 @@ function loadPlatformContent(elements = [], hostname = "chatgpt.com", {
       constructor(type) { this.type = type; }
     },
     InputEvent: class FakeInputEvent {
-      constructor(type) { this.type = type; }
+      constructor(type, options = {}) { this.type = type; Object.assign(this, options); }
     },
     HTMLTextAreaElement: FakeHTMLTextAreaElement,
     HTMLInputElement: FakeHTMLInputElement,
@@ -2994,6 +2994,33 @@ clockTest("paste deadline prevents writes after source checks, click and focus o
   }
 });
 
+for (const nativeInsert of [true, false]) clockTest(`ChatGPT long carries stay in the editor once without creating a paste attachment (native insert ${nativeInsert})`, async () => {
+  const carry = "CONTEXT CARRY — READY TO PASTE\n" + "Keep exact code and whitespace: Résumé 🧠\r\n  const x = 1;\n".repeat(230) + "END_OF_CARRY";
+  const editor = new FakeElement({ attrs: { contenteditable: "true", role: "textbox" } });
+  editor.isContentEditable = true;
+  const hooks = loadPlatformContent([editor], "chatgpt.com");
+  const attachments = [], commands = [];
+  hooks.window.getSelection = () => ({ removeAllRanges() {}, addRange() {} });
+  hooks.document.createRange = () => ({ selectNodeContents() {} });
+  editor.dispatchEvent = event => {
+    // ChatGPT accepts a long paste as a card outside the editable text.
+    if (event.type === "paste" || event.inputType === "insertFromPaste") attachments.push(carry);
+    return true;
+  };
+  hooks.document.execCommand = (command, _ui, text) => {
+    commands.push(command);
+    if (command === "insertText" && nativeInsert) editor.innerText = editor.textContent = text;
+    return nativeInsert;
+  };
+  await hooks.pasteIntoPlatform(carry, "chatgpt");
+  assert.ok(carry.length > 10000);
+  assert.equal(editor.textContent, carry, "Keep the complete multiline carry exactly once");
+  assert.equal(attachments.length, 0, "A card must not accompany the editor copy");
+  const inserted = commands.length;
+  await hooks.pasteIntoPlatform(carry, "chatgpt");
+  assert.equal(commands.length, inserted, "An already delivered carry is never reinserted");
+});
+
 clockTest("paste deadline stops contenteditable fallbacks after native handlers expire it", async (t) => {
   for (const destination of ["chatgpt", "gemini"]) {
     const editor = new FakeElement({ attrs: { contenteditable: "true", role: "textbox" } });
@@ -3004,13 +3031,9 @@ clockTest("paste deadline stops contenteditable fallbacks after native handlers 
     hooks.document.createRange = () => ({ selectNodeContents() {} });
     const expire = () => t.mock.timers.setTime(Date.now() + 200);
     hooks.document.execCommand = command => { commands.push(command); expire(); return false; };
-    if (destination === "chatgpt") editor.dispatchEvent = event => {
-      if (event.type === "beforeinput") expire();
-      return true;
-    };
     await assert.rejects(hooks.pasteIntoPlatform("private carry", destination, "fallback-expiry", Date.now() + 100),
       error => error.code === "transfer_timeout");
-    assert.deepEqual(commands, destination === "chatgpt" ? [] : ["insertText"], "no later native fallback after expiry");
+    assert.deepEqual(commands, ["insertText"], "no later native fallback after expiry");
     assert.equal(editor.textContent, "", "no direct DOM fallback after expiry");
     hooks.teardownContextGeneratorInstance();
   }

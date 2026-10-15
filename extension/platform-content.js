@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-15-escape-cancel-v155";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-15-chatgpt-direct-insert-v156";
   const INLINE_PILL_SIZE = 36;
   const ownedUiStyleSheets = new Map();
   let handoffUserCss = "";
@@ -3312,21 +3312,12 @@
   function setChatGptEditorText(element, text, guard = null) {
     selectEditorContents(element);
     guard?.check();
-    dispatchBeforeInputPasteEvent(element, text);
+    // ChatGPT turns long clipboard pastes into attachments outside the editor.
+    // Insert as text so a hidden card cannot trigger a second fallback copy.
+    document.execCommand("insertText", false, text);
 
     if (!editorContainsText(element, text)) {
-      selectEditorContents(element);
       guard?.check();
-      dispatchClipboardPasteEvent(element, text);
-    }
-
-    if (!editorContainsText(element, text)) {
-      selectEditorContents(element);
-      guard?.check();
-      document.execCommand("insertText", false, text);
-    }
-
-    if (!editorContainsText(element, text)) {
       document.execCommand("selectAll", false, null);
       guard?.check();
       document.execCommand("insertText", false, text);
@@ -3358,39 +3349,6 @@
       .replace(/</g, "&lt;")
       .replace(/>/g, "&gt;")
       .replace(/\r\n?|\n/g, "<br>");
-  }
-
-  function dispatchBeforeInputPasteEvent(element, text) {
-    try {
-      element.dispatchEvent(new InputEvent("beforeinput", {
-        bubbles: true,
-        cancelable: true,
-        inputType: "insertFromPaste",
-        data: text
-      }));
-    } catch {
-      element.dispatchEvent(new Event("beforeinput", { bubbles: true, cancelable: true }));
-    }
-  }
-
-  function dispatchClipboardPasteEvent(element, text) {
-    let clipboardData = null;
-    try {
-      clipboardData = new DataTransfer();
-      clipboardData.setData("text/plain", text);
-    } catch (_error) {
-      return;
-    }
-
-    try {
-      element.dispatchEvent(new ClipboardEvent("paste", {
-        bubbles: true,
-        cancelable: true,
-        clipboardData
-      }));
-    } catch (_error) {
-      // Some browsers ignore synthetic clipboard payloads. execCommand fallback follows.
-    }
   }
 
   function dispatchEditorEvents(element, text) {

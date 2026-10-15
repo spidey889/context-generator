@@ -96,6 +96,12 @@ jobs:
           for side in source destination; do
             CAP_CONTEXT_ESCAPE_SMOKE="$side" xvfb-run -a npm run test:extension-smoke
           done
+      - name: Brave ChatGPT long paste stays in the editor once
+        if: steps.scope.outputs.mode != 'light'
+        timeout-minutes: 2
+        env:
+          CAP_CONTEXT_CHATGPT_PASTE_SMOKE: "1"
+        run: xvfb-run -a npm run test:extension-smoke
       - name: Brave paste deadlines and delayed composer recovery
         if: steps.scope.outputs.mode != 'light' && inputs.extended_browser_checks == true
         timeout-minutes: 2

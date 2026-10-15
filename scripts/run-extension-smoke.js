@@ -1577,6 +1577,52 @@ async function verifyRecoveryPalette(session, contextId, { nativeCopy = false } 
   process.stdout.write(`✓ Recovery dialog: ${result.checked} palette checks resist Dark Reader; focus, copy success/reset/failure colors preserved.\n`);
 }
 
+async function verifyChatGptLongPaste(session) {
+  const carry = "CONTEXT CARRY — READY TO PASTE\n\n" + "Keep this complete line: Résumé 🧠, code `const x = 1;`, and indentation.\n  Continue from here.\n".repeat(180) + "END_OF_CARRY";
+  await session.evaluate(`(() => {
+    history.replaceState(null, '', '/destination?' + new URL(location.href).searchParams);
+    document.querySelector('main').replaceChildren();
+    window.__longPasteEvents = 0;
+    window.__longPasteSendClicks = 0;
+    const editor = document.getElementById('prompt-textarea');
+    editor.addEventListener('paste', event => {
+      window.__longPasteEvents++;
+      const text = event.clipboardData?.getData('text/plain') || '';
+      if (text.length <= 10000) return;
+      event.preventDefault();
+      const card = document.createElement('div');
+      card.className = 'native-paste-card';
+      card.textContent = 'Show in text field';
+      editor.parentElement.before(card);
+    });
+    document.getElementById('gpt-send').addEventListener('click', () => window.__longPasteSendClicks++);
+    return true;
+  })()`);
+  const contextId = session.getExtensionContextId();
+  await waitFor(() => session.evaluate("window.__capSmokeSourceRouteReady()", contextId), "new-chat paste fixture route");
+  let renderedText;
+  for (let attempt = 0; attempt < 2; attempt++) {
+    await session.evaluate(`window.__capSmokePaste(${JSON.stringify(carry)}, Date.now() + 10000)`, contextId);
+    const result = await session.evaluate(`({text:document.getElementById('prompt-textarea').innerText,
+      cards:document.querySelectorAll('.native-paste-card').length, pasteEvents:window.__longPasteEvents,
+      sends:window.__longPasteSendClicks})`);
+    // Chromium represents an empty inserted line as a div/br, adding a visual
+    // newline in innerText. Keep every other character, including indentation.
+    assert.equal(result.text.replace(/\n{3,}/g, "\n\n"), carry, "The complete long carry appears exactly once");
+    renderedText ??= result.text;
+    assert.equal(result.text, renderedText, "Repeat delivery must not change the editor");
+    assert.equal(result.cards, 0, "No attachment accompanies the editor copy");
+    assert.equal(result.pasteEvents, 0, "Do not trigger ChatGPT's long-paste attachment handler");
+    assert.equal(result.sends, 0);
+  }
+  if (FAILURE_ARTIFACT_DIR) {
+    await fs.promises.mkdir(FAILURE_ARTIFACT_DIR, { recursive: true });
+    const shot = await session.call('Page.captureScreenshot', { format: 'png' });
+    await fs.promises.writeFile(path.join(FAILURE_ARTIFACT_DIR, 'chatgpt-long-paste.png'), Buffer.from(shot.data, 'base64'));
+  }
+  process.stdout.write(`✓ Installed Brave ChatGPT: ${carry.length} characters exactly once, no attachment/paste event, repeat delivery safe, no Send.\n`);
+}
+
 async function verifyPasteRecovery({ browserSession, devToolsPort, origin }) {
   const carry = "Synthetic carry: preserve every character.\nSecond line.";
   for (const scenario of ["expired-focus", "disabled", "detached", "focus-remount", "draft"]) {
@@ -1860,6 +1906,10 @@ async function run() {
     }
     if (process.env.CAP_CONTEXT_PASTE_RECOVERY_SMOKE === "1") {
       await verifyPasteRecovery({ browserSession, devToolsPort, origin });
+      return;
+    }
+    if (process.env.CAP_CONTEXT_CHATGPT_PASTE_SMOKE === "1") {
+      await verifyChatGptLongPaste(sourceSession);
       return;
     }
     if (ESCAPE_SMOKE) {
