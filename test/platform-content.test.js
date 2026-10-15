@@ -2053,6 +2053,29 @@ clockTest("toolbar opens the shared picker without an orb and reuses it across r
   assert.deepEqual(messages, [], "opening never starts transfer telemetry, summary or destination work");
 });
 
+clockTest("toolbar opening before the first composer placement survives its queued frame", () => {
+  const f = inlineChatGptFixture();
+  const hooks = loadPlatformContent(Object.values(f));
+  hooks.document.createElement = () => new FakeElement();
+  hooks.document.head = new FakeElement({ tag: "head" });
+  const bubble = new FakeElement({ tag: "button", attrs: { id: "context-generator-bubble" } });
+  const sheet = new FakeElement({ attrs: { id: "context-generator-destination-sheet", "aria-hidden": "true" } });
+  sheet.style.display = "none";
+  for (const node of [bubble, sheet]) hooks.registerElementId(node.id, node);
+  for (const id of ["context-generator-destination-backdrop", "context-generator-overlay", "context-generator-handoff-scrim"]) {
+    hooks.registerElementId(id, new FakeElement({ attrs: { id } }));
+  }
+  hooks.startFloatingButtonMonitoring();
+  assert.equal(bubble.parentElement, null, "toolbar message arrives before the scheduled mount");
+  let response;
+  hooks.runtimeMessageListeners[0]({ type: "OPEN_DESTINATION_PICKER" }, {}, result => { response = result; });
+  assert.equal(response.ok, true);
+  assert.equal(bubble.parentElement, f.right, "mount ownership must exist before picker opening");
+  hooks.animationFrameCallbacks.splice(0).forEach(callback => callback());
+  assert.equal(sheet.getAttribute("aria-hidden"), "false", "the first placement frame must not discard the toolbar picker");
+  assert.equal(sheet.style.display, "block");
+});
+
 test("duplicate transfer clicks preserve the running attempt and its telemetry", () => {
   const messages = [];
   const hooks = loadPlatformContent([], "chatgpt.com", { runtimeSendMessage: async message => {

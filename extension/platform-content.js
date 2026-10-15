@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-16-toolbar-picker-v159";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-16-toolbar-mount-v160";
   const INLINE_PILL_SIZE = 36;
   const ownedUiStyleSheets = new Map();
   let handoffUserCss = "";
@@ -860,6 +860,9 @@
 
     if (message?.type === "OPEN_DESTINATION_PICKER") {
       if (!isRunning) {
+        // Reinjection registers this receiver before its first placement frame.
+        // Establish the owner now so that frame cannot dismiss the new picker.
+        if (!isDestinationSheetOpen()) ensureFloatingButton("toolbar");
         dismissOnboardingNudge();
         dismissClaudeLimitNudge();
         toggleDestinationSheet({ openOnly: true });
