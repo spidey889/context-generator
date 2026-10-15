@@ -71,3 +71,27 @@ test("CI timeouts and cancellation fail the case and release its process", async
   assert.equal(result.passed, false);
   assert.equal(result.reason, "Cancelled");
 });
+
+test("native-input fixtures wait for both workers and run alone before the queue resumes", async () => {
+  const started = [];
+  const releases = new Map();
+  const checks = ["a", "b", "native", "after"].map(id => ({ id, name: id, exclusive: id === "native" }));
+  const running = runChecks(checks, async item => {
+    started.push(item.id);
+    await new Promise(resolve => releases.set(item.id, resolve));
+    return { ...item, passed: true };
+  });
+  const tick = () => new Promise(resolve => setImmediate(resolve));
+  assert.deepEqual(started, ["a", "b"]);
+  releases.get("a")();
+  await tick();
+  assert.deepEqual(started, ["a", "b"], "Native input must wait for the second worker too.");
+  releases.get("b")();
+  await tick();
+  assert.deepEqual(started, ["a", "b", "native"]);
+  releases.get("native")();
+  await tick();
+  assert.deepEqual(started, ["a", "b", "native", "after"]);
+  releases.get("after")();
+  assert.equal((await running).every(result => result.passed), true);
+});

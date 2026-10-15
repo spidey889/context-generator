@@ -8,10 +8,11 @@ const check = (id, name, seconds, env = {}) => ({ id, name, timeoutMs: seconds *
 
 function getBrowserChecks(extended = false) {
   const regular = [
+    // Native key delivery remains serial, as in the original gate.
+    { ...check("escape-source", "Escape cancels the source transfer", 120, { CAP_CONTEXT_ESCAPE_SMOKE: "source" }), exclusive: true },
+    { ...check("escape-destination", "Escape cancels the destination transfer", 120, { CAP_CONTEXT_ESCAPE_SMOKE: "destination" }), exclusive: true },
     check("dom-telemetry", "DOM transfer, placement and local telemetry database", 180, { CAP_CONTEXT_TELEMETRY_SMOKE: "1" }),
     check("handoff-palette", "Handoff palette under strict CSP", 60, { CAP_CONTEXT_HANDOFF_PALETTE_SMOKE: "1", CAP_CONTEXT_HANDOFF_CSP_SMOKE: "1" }),
-    check("escape-source", "Escape cancels the source transfer", 120, { CAP_CONTEXT_ESCAPE_SMOKE: "source" }),
-    check("escape-destination", "Escape cancels the destination transfer", 120, { CAP_CONTEXT_ESCAPE_SMOKE: "destination" }),
     check("chatgpt-paste", "ChatGPT long paste stays in the editor once", 120, { CAP_CONTEXT_CHATGPT_PASTE_SMOKE: "1" }),
     check("draft-transfer", "First draft opens both copy dialogs", 120, { CAP_CONTEXT_DRAFT_TRANSFER_SMOKE: "1", CAP_CONTEXT_TELEMETRY_SMOKE: "1" }),
     check("chatgpt-reload", "ChatGPT reload and expired-token cancellation", 180, { CAP_CONTEXT_JSON_SMOKE: "chatgpt", CAP_CONTEXT_CHATGPT_RELOAD_SMOKE: "1", CAP_CONTEXT_TOOLBAR_SMOKE: "1", CAP_CONTEXT_CHATGPT_AUTH_SMOKE: "paste401" }),
@@ -101,21 +102,31 @@ async function runChecks(checks, execute, { concurrency = 2, signal, onResult = 
   if (!Number.isInteger(concurrency) || concurrency < 1) throw new Error("Concurrency must be a positive integer.");
   let next = 0;
   const results = new Array(checks.length);
-  await Promise.all(Array.from({ length: Math.min(concurrency, checks.length) }, async () => {
-    while (next < checks.length) {
-      const index = next++;
-      const item = checks[index];
-      try {
-        results[index] = signal?.aborted
-          ? { id: item.id, name: item.name, passed: false, reason: "Cancelled", durationMs: 0 }
-          : await execute(item, index);
-      } catch (error) {
-        results[index] = { id: item.id, name: item.name, passed: false, reason: error.message, durationMs: 0 };
-      }
-      // A failed fixture stays red, but never hides the other fixture results.
-      onResult(results[index]);
+  const executeOne = async index => {
+    const item = checks[index];
+    try {
+      results[index] = signal?.aborted
+        ? { id: item.id, name: item.name, passed: false, reason: "Cancelled", durationMs: 0 }
+        : await execute(item, index);
+    } catch (error) {
+      results[index] = { id: item.id, name: item.name, passed: false, reason: error.message, durationMs: 0 };
     }
-  }));
+    // A failed fixture stays red, but never hides the other fixture results.
+    onResult(results[index]);
+  };
+  while (next < checks.length) {
+    if (checks[next].exclusive) {
+      await executeOne(next++);
+      continue;
+    }
+    // Drain the current parallel batch before a native-input fixture starts;
+    // limiting just its own worker would still let another browser overlap it.
+    let end = next;
+    while (end < checks.length && !checks[end].exclusive) end++;
+    await Promise.all(Array.from({ length: Math.min(concurrency, end - next) }, async () => {
+      while (next < end) await executeOne(next++);
+    }));
+  }
   return results;
 }
 
