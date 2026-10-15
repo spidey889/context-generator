@@ -53,6 +53,8 @@ const DEEPSEEK_OVERSIZE_SMOKE = JSON_SOURCE === "deepseek" && process.env.CAP_CO
 const DEEPSEEK_TRANSCRIPT_OVERSIZE_SMOKE = JSON_SOURCE === "deepseek" && process.env.CAP_CONTEXT_NETWORK_FAILURE_SMOKE === "transcript-oversize";
 const NETWORK_FAILURE = (NETWORK_SOURCE && process.env.CAP_CONTEXT_NETWORK_FAILURE_SMOKE === "partial") || GROK_FILE_ONLY_SMOKE || DEEPSEEK_OVERSIZE_SMOKE;
 const JSON_CAPTURE_SMOKE = Boolean(JSON_SOURCE);
+const TOOLBAR_SMOKE = process.env.CAP_CONTEXT_TOOLBAR_SMOKE === "1";
+if (TOOLBAR_SMOKE && !JSON_CAPTURE_SMOKE) throw new Error("Toolbar smoke requires a JSON source to verify production capture defaults.");
 const JSON_RETRY_SMOKE = JSON_SOURCE === "chatgpt" && process.env.CAP_CONTEXT_JSON_RETRY_SMOKE === "1";
 const CLAUDE_RELOAD_SMOKE = JSON_SOURCE === "claude" && process.env.CAP_CONTEXT_CLAUDE_RELOAD_SMOKE === "1";
 const CHATGPT_RELOAD_SMOKE = JSON_SOURCE === "chatgpt" && process.env.CAP_CONTEXT_CHATGPT_RELOAD_SMOKE === "1";
@@ -196,6 +198,25 @@ function replaceOnce(source, needle, replacement, label) {
 
 function addUnique(list, value) {
   if (!list.includes(value)) list.push(value);
+}
+
+async function openPickerViaToolbar(sourceSession, devToolsPort) {
+  const sourceUrl = await sourceSession.evaluate("location.href");
+  const worker = await waitFor(async () => (await getTargets(devToolsPort))
+    .find(target => target.type === "service_worker" && target.url.endsWith("/background.js")), "the toolbar worker");
+  const session = await CdpSession.connect(worker.webSocketDebuggerUrl);
+  try {
+    // Invoke the registered action handler in the installed worker with its real
+    // browser tab. CDP cannot click the browser's native Extensions menu.
+    const badge = await session.evaluate(`(async () => {
+      const tabs = await chrome.tabs.query({});
+      const tab = tabs.find(tab => tab.url === ${JSON.stringify(sourceUrl)});
+      if (!tab) throw new Error("Toolbar source tab missing");
+      await handleToolbarClick(tab);
+      return chrome.action.getBadgeText({ tabId: tab.id });
+    })()`);
+    assert.equal(badge, "", "Opening the picker must not claim a running transfer or failure.");
+  } finally { session.close(); }
 }
 
 async function createSmokeExtension(tempRoot, origin) {
@@ -2568,7 +2589,7 @@ async function run() {
     // capture so hidden-tab throttling cannot turn this into a timing test.
     await sourceSession.call("Page.bringToFront");
     // Shared keyboard/layout/motion checks belong to the regular DOM run.
-    // JSON runs retain their platform toggles, route ownership and actual picker
+    // JSON runs retain production defaults, route ownership and actual picker
     // prefetch/retry below. A requested picker screenshot still runs its checks.
     if (!JSON_CAPTURE_SMOKE || PICKER_SCREENSHOT_PATH) {
       const pickerSourceUrl = await sourceSession.evaluate("location.href");
@@ -2610,7 +2631,12 @@ async function run() {
         await sourceSession.call("Network.enable");
         await sourceSession.call("Network.emulateNetworkConditions", { offline: true, latency: 0, downloadThroughput: -1, uploadThroughput: -1 });
       }
-      await sourceSession.evaluate('document.getElementById("context-generator-bubble").click()');
+      if (TOOLBAR_SMOKE) {
+        // Model an open tab whose page receiver is missing after an extension
+        // update. The real action must reinstall JSON helpers and picker UI.
+        await sourceSession.evaluate("window.__contextGeneratorPlatformTeardown(); true", extensionContextId);
+        await openPickerViaToolbar(sourceSession, devToolsPort);
+      } else await sourceSession.evaluate('document.getElementById("context-generator-bubble").click()');
       const dependencies = await sourceSession.evaluate("({metrics:typeof globalThis.CapJsonCaptureMetrics,windowMetrics:typeof window.CapJsonCaptureMetrics,contract:typeof globalThis.CapTransferDiagnostics,same:globalThis===window,network:typeof window.__capCaptureNetworkJson})", extensionContextId);
       assert.equal(dependencies.metrics, "object", `The isolated JSON bridge must have its metrics dependency: ${JSON.stringify(dependencies)}`);
       // Opening yields to paint before prefetch starts; the first probe may be false.
@@ -2622,10 +2648,16 @@ async function run() {
         await sourceSession.call("Network.emulateNetworkConditions", { offline: false, latency: 0, downloadThroughput: -1, uploadThroughput: -1 });
       } else assert.ok(state.jsonRequests > jsonRequestsBeforeTransfer,
         `Opening the orb must start native JSON capture before selection (detail=${await sourceSession.evaluate("window.__capSmokePickerJsonFailure()", extensionContextId)}, code=${await sourceSession.evaluate("window.__capSmokePickerJsonErrorCode()", extensionContextId)}, missing=${await sourceSession.evaluate("window.__capSmokeMissingIdentifier()", extensionContextId)}).`);
-      assert.equal(state.summaryRequests.length, 0, "Orb capture must not start summarization.");
-      assert.equal(state.telemetryRequests.length, beforePickerTelemetry, "Orb capture must not create a transfer attempt.");
-      assert.equal((await getTargets(devToolsPort)).filter(target => target.type === "page").length, beforePickerTabs, "Orb capture must not open a destination tab.");
-      process.stdout.write("✓ Orb click captured JSON before selection, with no summary, destination tab or transfer telemetry.\n");
+      if (TOOLBAR_SMOKE) {
+        const reads = state.jsonRequests;
+        await openPickerViaToolbar(sourceSession, devToolsPort);
+        assert.equal(await sourceSession.evaluate('document.getElementById("context-generator-destination-sheet").getAttribute("aria-hidden")'), "false");
+        assert.equal(state.jsonRequests, reads, "Repeated toolbar clicks must reuse the existing JSON prefetch.");
+      }
+      assert.equal(state.summaryRequests.length, 0, "Picker capture must not start summarization.");
+      assert.equal(state.telemetryRequests.length, beforePickerTelemetry, "Picker capture must not create a transfer attempt.");
+      assert.equal((await getTargets(devToolsPort)).filter(target => target.type === "page").length, beforePickerTabs, "Picker capture must not open a destination tab.");
+      process.stdout.write(`✓ ${TOOLBAR_SMOKE ? "Toolbar handler" : "Orb click"} captured JSON before selection, with no summary, destination tab or transfer telemetry.\n`);
     }
     const clickResult = await sourceSession.evaluate(String.raw`(() => {
       const bubble = document.getElementById("context-generator-bubble");

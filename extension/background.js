@@ -871,7 +871,7 @@ function isUuid(value) {
     && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
 }
 
-chrome.action.onClicked.addListener(async (tab) => {
+async function handleToolbarClick(tab) {
   try {
     clearBadge();
 
@@ -880,23 +880,23 @@ chrome.action.onClicked.addListener(async (tab) => {
       throw new Error("Open a supported AI chat, then click the extension icon.");
     }
 
-    const startResult = await sendMessageWhenReady(
+    const pickerResult = await sendMessageWhenReady(
       tab.id,
-      { type: "START_CONTEXT_TRANSFER" },
+      { type: "OPEN_DESTINATION_PICKER" },
       SOURCE_MESSAGE_TIMEOUT_MS,
       "source AI tab"
     );
 
-    if (!startResult?.ok) {
-      throw new Error(startResult?.error || "Could not start context transfer.");
+    if (!pickerResult?.ok) {
+      throw new Error(pickerResult?.error || "Could not open the destination picker.");
     }
-
-    await setBadge("RUN", "#565add");
   } catch (error) {
     console.error("[Context Generator Relay]", error);
     await setBadge("ERR", "#b42318", 5000);
   }
-});
+}
+
+chrome.action.onClicked.addListener(handleToolbarClick);
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message?.type === "CANCEL_TRANSFER") {
@@ -1963,25 +1963,27 @@ async function ensureNetworkJsonHook(tabId) {
   } catch { return false; }
 }
 
+async function ensureSourceContentScripts(tabId, platform) {
+  if (platform === "claude") {
+    await ensureClaudeJsonHook(tabId);
+    await ensureContentScript(tabId, "claude-json-capture.js");
+  } else if (platform === "chatgpt") {
+    await ensureChatGptJsonHook(tabId);
+    await ensureContentScript(tabId, "chatgpt-json-capture.js");
+  } else if (["gemini", "grok", "deepseek"].includes(platform)) {
+    await ensureNetworkJsonHook(tabId);
+    await ensureContentScript(tabId, "network-json-capture.js");
+  } else return false;
+  return ensureContentScript(tabId, PLATFORM_CONTENT_SCRIPT);
+}
+
 async function injectIntoOpenSupportedTabs() {
   try {
     const tabs = await chrome.tabs.query({});
     await Promise.all(
       tabs
         .filter((tab) => tab.id && getPlatformFromUrl(tab.url))
-        .map(async (tab) => {
-          if (getPlatformFromUrl(tab.url) === "claude") {
-            await ensureClaudeJsonHook(tab.id);
-            await ensureContentScript(tab.id, "claude-json-capture.js");
-          } else if (getPlatformFromUrl(tab.url) === "chatgpt") {
-            await ensureChatGptJsonHook(tab.id);
-            await ensureContentScript(tab.id, "chatgpt-json-capture.js");
-          } else if (["gemini", "grok", "deepseek"].includes(getPlatformFromUrl(tab.url))) {
-            await ensureNetworkJsonHook(tab.id);
-            await ensureContentScript(tab.id, "network-json-capture.js");
-          }
-          return ensureContentScript(tab.id, PLATFORM_CONTENT_SCRIPT);
-        })
+        .map(tab => ensureSourceContentScripts(tab.id, getPlatformFromUrl(tab.url)))
     );
   } catch (error) {
     console.debug("[Context Generator Relay] Startup content script injection skipped:", error?.message || error);
@@ -2058,7 +2060,10 @@ async function sendMessageWhenReady(tabId, message, timeoutMs, name, trace = nul
     if (!injected) {
       checkTransferOperation(trace?.operation);
       markBackgroundTrace(trace, "content script inject attempt", { tabId, attempts });
-      injected = await ensureContentScript(tabId);
+      // A toolbar source needs its JSON bridge as well as the picker receiver.
+      injected = message.type === "OPEN_DESTINATION_PICKER"
+        ? await ensureSourceContentScripts(tabId, getPlatformFromUrl((await chrome.tabs.get(tabId)).url))
+        : await ensureContentScript(tabId);
       globalThis.CapTransferDiagnostics?.update(trace?.diagnostics, { script_injected: injected });
       response = await tryMessage("tab ready/message response after inject");
       if (response !== undefined) return response;

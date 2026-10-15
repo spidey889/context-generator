@@ -115,6 +115,7 @@ function loadBackgroundForTransferTest({
   useRealTimers = false
 } = {}) {
   let messageListener = null;
+  let toolbarClickListener = null;
   let tabRemovedListener;
   const closedTabs = new Set();
   let nextCreatedTabId = firstCreatedTabId;
@@ -143,7 +144,7 @@ function loadBackgroundForTransferTest({
     setTimeout: useRealTimers ? setTimeout : fastSetTimeout,
     chrome: {
       action: {
-        onClicked: event,
+        onClicked: { addListener: listener => { toolbarClickListener = listener; } },
         setBadgeBackgroundColor: async () => {},
         setBadgeText: async options => { operations.badges.push(options.text); }
       },
@@ -206,9 +207,11 @@ function loadBackgroundForTransferTest({
   vm.createContext(sandbox);
   compiledTransferBackground.runInContext(sandbox);
   assert.ok(messageListener, "background transfer listener was registered");
+  assert.ok(toolbarClickListener, "toolbar listener was registered");
 
   return {
     operations,
+    clickToolbar: toolbarClickListener,
     cancel(tabId, sender = {}) {
       return new Promise(resolve => messageListener({ type: "CANCEL_TRANSFER", transferId: "transfer-test" },
         { id: "cap-context-test", frameId: 0, tab: { id: tabId }, ...sender }, resolve));
@@ -260,6 +263,42 @@ function loadBackgroundForTransferTest({
     }
   };
 }
+
+test("toolbar opens the picker on supported tabs without starting a transfer or RUN badge", async () => {
+  for (const url of ["https://chatgpt.com/c/source", "https://claude.ai/chat/source", "https://gemini.google.com/app/source", "https://grok.com/c/source", "https://chat.deepseek.com/a/chat/s/source"]) {
+    const { clickToolbar, operations } = loadBackgroundForTransferTest();
+    await clickToolbar({ id: 7, url });
+    assert.equal(operations.sent.length, 1, url);
+    assert.equal(operations.sent[0].tabId, 7);
+    assert.deepEqual(JSON.parse(JSON.stringify(operations.sent[0].message)), { type: "OPEN_DESTINATION_PICKER" });
+    assert.equal(operations.created.length + operations.fetched.length, 0);
+    assert.deepEqual(operations.badges, [""], "opening the picker only clears an old badge");
+  }
+});
+
+test("toolbar repairs a missing receiver but rejects unsupported tabs and failed picker replies", async () => {
+  const sourceTab = { id: 7, url: "https://chatgpt.com/c/source" };
+  let sends = 0;
+  const repaired = loadBackgroundForTransferTest({ sourceTab, sendMessageImpl: () => {
+    if (++sends === 1) throw new Error("Could not establish connection. Receiving end does not exist.");
+    return { ok: true };
+  } });
+  await repaired.clickToolbar(sourceTab);
+  assert.deepEqual(repaired.operations.injected.map(item => [...item.files]), [
+    ["json-capture-metrics-main.js", "chatgpt-fetch-main.js"],
+    ["transfer-diagnostics.js", "json-capture-metrics.js", "chatgpt-json-capture.js"],
+    ["transfer-diagnostics.js", "platform-content.js"]
+  ], "repair must restore JSON before opening the picker");
+  assert.deepEqual(repaired.operations.sent.map(entry => entry.message.type), ["OPEN_DESTINATION_PICKER", "OPEN_DESTINATION_PICKER"]);
+  assert.equal(repaired.operations.created.length, 0);
+  for (const tab of [{ id: 7, url: "https://example.com/" }, { url: sourceTab.url }, sourceTab]) {
+    const rejected = loadBackgroundForTransferTest({ sendMessageImpl: () => ({ ok: false, error: "Picker unavailable" }) });
+    await rejected.clickToolbar(tab);
+    assert.equal(rejected.operations.sent.length, tab === sourceTab ? 1 : 0);
+    assert.equal(rejected.operations.badges.at(-1), "ERR");
+    assert.equal(rejected.operations.created.length, 0);
+  }
+});
 
 test("preparation and fresh recovery open beside the source in its current window", async () => {
   const currentSource = { id: 9, windowId: 7, index: 3 };

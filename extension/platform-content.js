@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-16-picker-no-speed-v158";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-16-toolbar-picker-v159";
   const INLINE_PILL_SIZE = 36;
   const ownedUiStyleSheets = new Map();
   let handoffUserCss = "";
@@ -858,17 +858,14 @@
       return true;
     }
 
-    if (message?.type === "START_CONTEXT_TRANSFER") {
-      const destination = message.destination || getDefaultDestinationId();
-      const trace = beginTransferAttempt(destination, "extension icon");
-      if (!trace) {
-        sendResponse({ ok: false, error: "Context transfer is already running." });
-        return false;
+    if (message?.type === "OPEN_DESTINATION_PICKER") {
+      if (!isRunning) {
+        dismissOnboardingNudge();
+        dismissClaudeLimitNudge();
+        toggleDestinationSheet({ openOnly: true });
       }
-
+      // Match a disabled orb during transfer; opening the picker is not an attempt.
       sendResponse({ ok: true });
-      markTransferTrace(trace, "click", { source: "extension icon" });
-      runContextFlow(destination, null, null, trace);
       return false;
     }
 
@@ -2787,10 +2784,6 @@
 
   function isExtensionContextInvalidated(error) {
     return /extension context invalidated/i.test(error?.message || "");
-  }
-
-  function getDefaultDestinationId() {
-    return currentPlatform.id === "chatgpt" ? "claude" : "chatgpt";
   }
 
   function getCurrentPlatform() {
@@ -7256,14 +7249,21 @@
     return backdrop;
   }
 
-  function toggleDestinationSheet() {
+  function toggleDestinationSheet({ openOnly = false } = {}) {
     hideErrorOverlay(undefined, { immediate: true });
     hideOnboardingNudge();
     hideClaudeLimitNudge();
     const existingSheet = document.getElementById(DESTINATION_SHEET_ID);
     if (existingSheet?.style.display === "block") {
-      hideDestinationSheet();
-      return;
+      if (!openOnly) {
+        hideDestinationSheet();
+        return;
+      }
+      // Repeated toolbar clicks or a retried acknowledgement must reuse prefetch.
+      if (existingSheet.getAttribute("aria-hidden") !== "true") {
+        existingSheet.focus?.({ preventScroll: true });
+        return;
+      }
     }
 
     const sheet = ensureDestinationSheet();
@@ -7307,7 +7307,7 @@
       sheet.style.opacity = "1";
       sheet.style.transform = "translate3d(0,0,0) scale(1)";
       destinationSheetAnimationFrame = null;
-      if (document.activeElement === bubble || document.activeElement === document.body) {
+      if (openOnly || document.activeElement === bubble || document.activeElement === document.body) {
         sheet.focus?.({ preventScroll: true });
       }
       scheduleDestinationPickerWarmup();
@@ -7547,11 +7547,14 @@
   function positionDestinationSheet() {
     const sheet = document.getElementById(DESTINATION_SHEET_ID);
     const bubble = document.getElementById(BUBBLE_ID);
-    if (!sheet || !bubble || sheet.style.display === "none") return;
+    if (!sheet || sheet.style.display === "none") return;
     if (sheet.dataset.contextGeneratorPositionLocked === "true") return;
 
-    const bubbleRect = bubble.getBoundingClientRect();
     const margin = 10;
+    const orbRect = bubble?.getBoundingClientRect();
+    // The toolbar remains usable while the native composer/orb is absent.
+    const bubbleRect = orbRect?.width > 0 && orbRect?.height > 0 ? orbRect
+      : { right: window.innerWidth - margin, top: window.innerHeight, bottom: window.innerHeight };
     const sheetWidth = Math.min(DESTINATION_SHEET_WIDTH, window.innerWidth - margin * 2);
     const sheetHeight = Math.min(sheet.offsetHeight || 330, Math.max(0, window.innerHeight - margin * 2));
     const left = Math.max(

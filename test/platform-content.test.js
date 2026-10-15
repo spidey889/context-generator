@@ -2018,6 +2018,41 @@ clockTest("initial paste never overwrites a nonempty draft on any destination", 
   }
 });
 
+clockTest("toolbar opens the shared picker without an orb and reuses it across repeated messages", () => {
+  const messages = [];
+  const hooks = loadPlatformContent([], "chatgpt.com", { pathname: "/c/source", runtimeSendMessage: async message => {
+    messages.push(message); return { ok: true };
+  } });
+  const sheet = new FakeElement({ attrs: { id: "context-generator-destination-sheet", "aria-hidden": "true" } });
+  sheet.style.display = "none";
+  let focuses = 0;
+  sheet.focus = () => { focuses++; };
+  hooks.registerElementId(sheet.id, sheet);
+  hooks.registerElementId("context-generator-destination-backdrop", new FakeElement());
+  const open = () => {
+    let response;
+    assert.equal(hooks.runtimeMessageListeners[0]({ type: "OPEN_DESTINATION_PICKER" }, {}, result => { response = result; }), false);
+    assert.equal(response.ok, true);
+  };
+  open();
+  assert.equal(sheet.style.display, "block");
+  assert.equal(sheet.getAttribute("aria-hidden"), "false");
+  assert.equal(sheet.style.left, "918px", "missing composer anchors the picker inside the viewport");
+  assert.equal(sheet.style.top, "380px");
+  hooks.animationFrameCallbacks.splice(0).forEach(callback => callback());
+  const openingFrames = hooks.animationFrameCallbacks.length;
+  assert.equal(focuses, 1, "toolbar opening focuses the picker even if a native editor owned focus");
+  open();
+  assert.equal(hooks.animationFrameCallbacks.length, openingFrames, "a repeated message does not restart capture warmup");
+  assert.equal(sheet.style.display, "block");
+  assert.equal(focuses, 2);
+  hooks.hideDestinationSheet();
+  assert.equal(sheet.getAttribute("aria-hidden"), "true");
+  open();
+  assert.equal(sheet.getAttribute("aria-hidden"), "false", "toolbar can reopen during the closing animation");
+  assert.deepEqual(messages, [], "opening never starts transfer telemetry, summary or destination work");
+});
+
 test("duplicate transfer clicks preserve the running attempt and its telemetry", () => {
   const messages = [];
   const hooks = loadPlatformContent([], "chatgpt.com", { runtimeSendMessage: async message => {
@@ -2028,9 +2063,9 @@ test("duplicate transfer clicks preserve the running attempt and its telemetry",
   assert.ok(first);
   assert.equal(hooks.beginTransferAttempt("deepseek", "destination tile"), null);
   let response;
-  hooks.runtimeMessageListeners[0]({ type: "START_CONTEXT_TRANSFER", destination: "claude" }, {}, result => { response = result; });
-  assert.equal(response.ok, false);
-  assert.match(response.error, /already running/);
+  hooks.runtimeMessageListeners[0]({ type: "OPEN_DESTINATION_PICKER" }, {}, result => { response = result; });
+  assert.equal(response.ok, true, "toolbar matches a disabled orb without reporting a transfer failure");
+  assert.equal(hooks.document.getElementById("context-generator-destination-sheet"), null);
   const telemetry = messages.filter(message => message.type === "RECORD_TRANSFER_TELEMETRY");
   assert.equal(telemetry.length, 1);
   assert.equal(telemetry[0].event.attemptId, first.id);
