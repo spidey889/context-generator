@@ -14,6 +14,8 @@ The configured order is TokenHarbor Haiku -> OpenRouter Dots -> Gemini Flash -> 
 
 Only the first enabled TokenHarbor model is selected. `OPENROUTER_ENABLED=false` bypasses all OpenRouter models; enabled entries keep table order. Retired Ling and Apodex flags have no effect. Never substitute a paid model, strip `:free` or use automatic model selection. The [Haiku free route](https://tokenharbor.ai/models/claude-haiku-5.5:free) is explicitly never billed; recheck terms and availability before changing routes.
 
+Optional server-only `TOKENHARBOR_BACKUP_API_KEY` tries the same model if the main key fails, after existing temporary retries and within the original TokenHarbor time slice. Both rejected keys continue to Dots; a fully exhausted slice skips backup. Blank/duplicate keys are skipped, backup-only configuration works, and neither key enters receipts or logs. TokenHarbor account verification and shared account limits still apply; another key does not guarantee additional quota.
+
 Transcripts under 10,000 characters and 350,001-500,000 characters use exact local carries; above 500,000 fails without clipping. The frontend handles admitted local carries without a backend summary request. Remote summaries use the existing profile output caps, with extra thinking room only for the paused TokenHarbor DeepSeek route.
 
 TokenHarbor and OpenRouter share one 90-second free-provider window. With both configured, Haiku gets at most 45 seconds and Dots uses the remaining window. The three funded routes then receive at most 60 seconds each, within the unchanged 270-second chain deadline. Without TokenHarbor, the original first-route 90-second allocation and remaining-route division apply. Vercel allows 300 seconds and the worker waits 320 seconds.
