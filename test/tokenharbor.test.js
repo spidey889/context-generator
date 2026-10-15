@@ -11,7 +11,7 @@ const conversation = "User: Windows passed. Linux is pending. Do not deploy.\n".
 const keys = { tokenharborApiKey: "TEST_ONLY_TOKENHARBOR", openrouterApiKey: "TEST_ONLY_OPENROUTER",
   geminiApiKey: "TEST_ONLY_GOOGLE", mistralApiKey: "TEST_ONLY_MISTRAL" };
 function configure(t, values = {}) {
-  const env = { TOKENHARBOR_API_KEY: undefined, OPENROUTER_API_KEY: undefined, GEMINI_API_KEY: undefined,
+  const env = { TOKENHARBOR_API_KEY: undefined, TOKENHARBOR_BACKUP_API_KEY: undefined, OPENROUTER_API_KEY: undefined, GEMINI_API_KEY: undefined,
     MISTRAL_API_KEY: undefined, OPENROUTER_ENABLED: "true", OPENROUTER_DOTS_ENABLED: "true",
     OPENROUTER_QWEN_ENABLED: "false", OPENROUTER_GEMMA_ENABLED: "false", MISTRAL_ENABLED: "true", ...values };
   const saved = Object.keys(env).map(name => [name, process.env[name]]);
@@ -125,6 +125,139 @@ test("the code switch off and a missing key omit TokenHarbor from routing", t =>
   assert.deepEqual(getConfiguredSummaryRoutes(keys).map(route => route.model), [MODEL, ...legacy], "Haiku leads; paused DeepSeek is never attempted");
   assert.deepEqual(getConfiguredSummaryRoutes({ ...keys, tokenharborEnabled: false }).map(route => route.model), legacy);
   assert.deepEqual(getConfiguredSummaryRoutes({ ...keys, tokenharborApiKey: undefined }).map(route => route.model), legacy);
+  const backupOnly = getConfiguredSummaryRoutes({ ...keys, tokenharborApiKey: undefined, tokenharborBackupApiKey: "TEST_ONLY_BACKUP" });
+  assert.equal(backupOnly[0].model, DEEPSEEK);
+  assert.equal(backupOnly[0].apiKey, "TEST_ONLY_BACKUP");
+  assert.deepEqual(getConfiguredSummaryRoutes({ ...keys, tokenharborBackupApiKey: "TEST_ONLY_BACKUP" }).map(route => route.model), [MODEL, DEEPSEEK, ...legacy]);
+  assert.deepEqual(getConfiguredSummaryRoutes({ ...keys, tokenharborBackupApiKey: ` ${keys.tokenharborApiKey} ` }).map(route => route.model), [MODEL, ...legacy]);
+  assert.deepEqual(getConfiguredSummaryRoutes({ ...keys, tokenharborBackupApiKey: "TEST_ONLY_BACKUP", tokenharborEnabled: false }).map(route => route.model), legacy);
+});
+
+test("the handler uses DeepSeek on the backup key after Haiku rejection, preserving model attribution and secret isolation", async t => {
+  configure(t, { TOKENHARBOR_API_KEY: "TEST_ONLY_MAIN", TOKENHARBOR_BACKUP_API_KEY: "TEST_ONLY_BACKUP" });
+  for (const primaryStatus of [200, 401, 429, null]) {
+    if (primaryStatus === null) delete process.env.TOKENHARBOR_API_KEY;
+    const credentials = [];
+    let payload;
+    global.fetch = async (url, options) => {
+      assert.equal(url, "https://tokenharbor.ai/v1/chat/completions");
+      credentials.push(options.headers.Authorization);
+      const body = JSON.parse(options.body);
+      const mainKey = options.headers.Authorization === "Bearer TEST_ONLY_MAIN";
+      assert.equal(body.model, mainKey ? MODEL : DEEPSEEK);
+      assert.equal(body.max_tokens, mainKey ? 1900 : 10092);
+      assert.equal(body.thinking, undefined);
+      return primaryStatus !== 200 && options.headers.Authorization === "Bearer TEST_ONLY_MAIN"
+        ? new Response("PRIVATE_REJECTION", { status: primaryStatus }) : answer();
+    };
+    await handler({ method: "POST", headers: { "content-type": "application/json", "x-cap-context-client": "cap-context-extension/1", "x-forwarded-for": "198.51.100.172" }, body: { conversation } },
+      { setHeader() {}, status(code) { assert.equal(code, 200); return this; }, json(data) { payload = data; } });
+    assert.deepEqual(credentials, primaryStatus === 200 ? ["Bearer TEST_ONLY_MAIN"] : primaryStatus === null
+      ? ["Bearer TEST_ONLY_BACKUP"] : ["Bearer TEST_ONLY_MAIN", "Bearer TEST_ONLY_BACKUP"]);
+    assert.equal(payload.timing.primaryModel, primaryStatus === null ? DEEPSEEK : MODEL);
+    assert.equal(payload.timing.provider, "tokenharbor");
+    assert.equal(payload.timing.model, primaryStatus === 200 ? MODEL : DEEPSEEK);
+    assert.deepEqual(payload.timing.modelsTried, primaryStatus === 200 ? [MODEL] : primaryStatus === null ? [DEEPSEEK] : [MODEL, DEEPSEEK]);
+    assert.deepEqual(payload.timing.tokenharborModelsTried, payload.timing.modelsTried);
+    assert.equal(payload.timing.fallback.used, primaryStatus !== 200 && primaryStatus !== null);
+    assert.doesNotMatch(JSON.stringify(payload), /TEST_ONLY_MAIN|TEST_ONLY_BACKUP|PRIVATE_REJECTION/);
+  }
+});
+
+clockTest("both TokenHarbor keys share the original slice, including retries, before OpenRouter", async t => {
+  configure(t);
+  const budgets = watchBudgets(t);
+  const credentials = [];
+  global.fetch = async (url, options) => {
+    credentials.push(options.headers.Authorization);
+    if (credentials.length <= 2) { t.mock.timers.tick(10000); return new Response("PRIVATE_REJECTION", { status: 503 }); }
+    if (url.includes("tokenharbor")) { t.mock.timers.tick(budgets.at(-1)); return answer("EXPIRED_BACKUP"); }
+    return answer();
+  };
+  const result = await run({ tokenharborBackupApiKey: "TEST_ONLY_BACKUP" });
+  assert.deepEqual(credentials, [`Bearer ${keys.tokenharborApiKey}`, `Bearer ${keys.tokenharborApiKey}`, "Bearer TEST_ONLY_BACKUP", `Bearer ${keys.openrouterApiKey}`]);
+  assert.deepEqual(budgets, [45000, 34550, 24550, 45000]);
+  assert.equal(result.tokenharborMs, 45000);
+  assert.equal(result.provider, "openrouter");
+  assert.deepEqual(result.modelsTried, [MODEL, DEEPSEEK, DOTS]);
+  assert.doesNotMatch(result.summary, /EXPIRED_BACKUP/);
+});
+
+clockTest("backup success includes primary time and cancellation never sends the backup", async t => {
+  configure(t);
+  const budgets = watchBudgets(t);
+  let calls = 0;
+  const controller = new AbortController();
+  global.fetch = async () => {
+    if (++calls === 1) { t.mock.timers.tick(10000); return new Response("", { status: 403 }); }
+    t.mock.timers.tick(1000);
+    return answer();
+  };
+  const result = await run({ tokenharborBackupApiKey: "TEST_ONLY_BACKUP" });
+  assert.deepEqual(budgets, [45000, 35000]);
+  assert.equal(result.tokenharborMs, 11000);
+  assert.equal(result.providerMs, 1000);
+  assert.equal(result.initialMs, 1000);
+  assert.equal(result.model, DEEPSEEK);
+  assert.equal(result.fallback.used, true);
+  global.fetch = async () => { calls++; controller.abort(); throw new DOMException("Cancelled", "AbortError"); };
+  await assert.rejects(run({ tokenharborBackupApiKey: "TEST_ONLY_BACKUP", requestContext: { signal: controller.signal } }), { name: "AbortError" });
+  assert.equal(calls, 3, "Cancellation sends only the outstanding main-key request");
+});
+
+clockTest("a primary exhausting the full TokenHarbor slice skips backup without extending the free window", async t => {
+  configure(t);
+  const budgets = watchBudgets(t);
+  const credentials = [];
+  global.fetch = async (url, options) => {
+    credentials.push(options.headers.Authorization);
+    if (url.includes("tokenharbor")) t.mock.timers.tick(45000);
+    return answer();
+  };
+  const result = await run({ tokenharborBackupApiKey: "TEST_ONLY_BACKUP" });
+  assert.deepEqual(credentials, [`Bearer ${keys.tokenharborApiKey}`, `Bearer ${keys.openrouterApiKey}`]);
+  assert.deepEqual(budgets, [45000, 45000]);
+  assert.equal(result.provider, "openrouter");
+  assert.equal(result.tokenharborMs, 45000);
+});
+
+test("a successful DeepSeek backup gets its own model-bound signed receipt", async t => {
+  configure(t, { TOKENHARBOR_API_KEY: "TEST_ONLY_MAIN", TOKENHARBOR_BACKUP_API_KEY: "TEST_ONLY_BACKUP",
+    TELEMETRY_SIGNING_KEY: "TEST_ONLY_SIGNING_SECRET_0123456789abcdef" });
+  const telemetry = { attempt_id: "11111111-1111-4111-8111-111111111112", install_id: "22222222-2222-4222-8222-222222222222",
+    attempted_at: new Date().toISOString(), source_platform: "chatgpt", destination_platform: "claude", character_count: conversation.length,
+    status: "started", last_stage: "summary_request_started", failure_reason: null, extension_version: "1.4.18" };
+  let payload;
+  global.fetch = async (_url, options) => options.headers.Authorization === "Bearer TEST_ONLY_MAIN"
+    ? new Response("PRIVATE_REJECTION", { status: 403 }) : answer();
+  await handler({ method: "POST", headers: { "content-type": "application/json", "x-cap-context-client": "cap-context-extension/1", "x-forwarded-for": "198.51.100.173" }, body: { conversation, telemetry } },
+    { setHeader() {}, status(code) { assert.equal(code, 200); return this; }, json(data) { payload = data; } });
+  assert.equal(payload.timing.model, DEEPSEEK);
+  assert.equal(payload.timing.fallback.model, DEEPSEEK);
+  assert.equal(payload.timing.failureDiagnostics.summary_provider_status, 403);
+  const { verifySummaryProof } = await import("../supabase/functions/_shared/summary-proof.mjs");
+  const receipt = { ...telemetry, model: DEEPSEEK, summary_confirmed_at: payload.summaryConfirmedAt, summary_proof: payload.summaryProofV3 };
+  assert.equal(await verifySummaryProof(receipt, process.env.TELEMETRY_SIGNING_KEY), true);
+  assert.equal(await verifySummaryProof({ ...receipt, model: MODEL }, process.env.TELEMETRY_SIGNING_KEY), false);
+});
+
+clockTest("without OpenRouter both TokenHarbor models share 90s before funded fallbacks", async t => {
+  configure(t);
+  const budgets = watchBudgets(t);
+  const models = [];
+  global.fetch = async (url, options) => {
+    const model = JSON.parse(options.body).model;
+    models.push(model || "google");
+    if (model === MODEL) { t.mock.timers.tick(10000); return new Response("", { status: 401 }); }
+    t.mock.timers.tick(budgets.at(-1));
+    return answer("EXPIRED_ANSWER");
+  };
+  const result = await run({ openrouterApiKey: undefined, tokenharborBackupApiKey: "TEST_ONLY_BACKUP" });
+  assert.deepEqual(models, [MODEL, DEEPSEEK, "google", "google", "ministral-14b-2512"]);
+  assert.deepEqual(budgets, [90000, 80000, 60000, 60000, 60000]);
+  assert.equal(result.tokenharborMs, 90000);
+  assert.equal(result.model, "local-direct");
+  assert.doesNotMatch(result.summary, /EXPIRED_ANSWER/);
 });
 
 clockTest("TokenHarbor and enabled OpenRouter candidates share exactly 90s; funded fallbacks retain 60s each", async t => {

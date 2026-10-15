@@ -499,6 +499,9 @@ function loadPlatformContent(elements = [], hostname = "chatgpt.com", {
     hooks.dispatchDocumentEvent = (type, event) => {
       documentListeners.get(type)?.forEach(listener => listener({ type, ...event }));
     };
+    hooks.dispatchWindowEvent = (type) => {
+      windowListeners.get(type)?.forEach(listener => listener({ type }));
+    };
     hooks.registerElementId = (id, element) => elementsById.set(id, element);
     hooks.reinject = () => {
       window.__contextGeneratorPlatformLoaded = "previous-content-script-version";
@@ -633,6 +636,65 @@ test("native modal editors cannot replace the verified chat composer", () => {
 
     input.isConnected = false;
     assert.equal(hooks.findPlatformInput(), null, `${hostname} should reject the modal editor`);
+  }
+});
+
+clockTest("picker UI preloads after page load and idle without opening or starting a transfer", async (t) => {
+  const messages = [];
+  const hooks = loadPlatformContent([], "chatgpt.com", {
+    runtimeSendMessage: async (message) => { messages.push(message); return { ok: true }; }
+  });
+  const sheet = new FakeElement({ attrs: { id: "context-generator-destination-sheet", "aria-hidden": "true" } });
+  const image = new FakeElement({ tag: "img" });
+  let decodes = 0;
+  image.decode = async () => { decodes++; };
+  sheet.appendChild(image);
+  sheet.style.display = "none";
+  hooks.registerElementId(sheet.id, sheet);
+  hooks.registerElementId("context-generator-destination-backdrop", new FakeElement());
+  const fonts = [];
+  hooks.document.fonts = { load: async (font) => { fonts.push(font); } };
+  hooks.document.readyState = "interactive";
+  const focus = hooks.document.activeElement;
+  let idle;
+  let schedules = 0;
+  hooks.window.requestIdleCallback = (callback) => { schedules++; idle = callback; return 1; };
+  hooks.window.cancelIdleCallback = () => {};
+  hooks.scheduleDestinationSheetPreload();
+  t.mock.timers.tick(2000);
+  assert.equal(schedules, 0, "page loading keeps priority");
+  hooks.document.readyState = "complete";
+  hooks.dispatchWindowEvent("load");
+  hooks.scheduleDestinationSheetPreload();
+  assert.equal(schedules, 1, "prepare only once per page instance");
+  assert.equal(decodes, 0, "asset work waits for idle");
+  idle();
+  await Promise.resolve();
+  assert.equal(decodes, 1);
+  assert.deepEqual(fonts, ['18px "Cap Context EB Garamond"']);
+  assert.equal(sheet.style.display, "none");
+  assert.equal(sheet.getAttribute("aria-hidden"), "true");
+  assert.equal(hooks.document.activeElement, focus);
+  assert.deepEqual(messages, [], "UI preparation must not capture, summarize or create a tab");
+});
+
+clockTest("picker UI preload cancels on teardown and supports browsers without idle callbacks", (t) => {
+  for (const useIdle of [true, false]) {
+    const hooks = loadPlatformContent();
+    let cancelled = null;
+    let idle;
+    if (useIdle) {
+      hooks.window.requestIdleCallback = (callback) => { idle = callback; return 7; };
+      hooks.window.cancelIdleCallback = (id) => { cancelled = id; };
+    }
+    hooks.scheduleDestinationSheetPreload();
+    assert.equal(hooks.getOwnedLifecycleResourceCounts().timeouts, useIdle ? 0 : 1);
+    hooks.teardownContextGeneratorInstance();
+    assert.equal(cancelled, useIdle ? 7 : null);
+    // Even an already-dispatched idle callback cannot recreate UI after teardown.
+    idle?.();
+    t.mock.timers.tick(2000);
+    assert.equal(hooks.document.getElementById("context-generator-destination-sheet"), null);
   }
 });
 

@@ -43,7 +43,7 @@ function answerStream(provider, text = "Preserve the agreed project plan.") {
 }
 
 for (const provider of ["tokenharbor", "openrouter", "gemini", "mistral"]) {
-  const firstAnswerMs = 30000;
+  const firstAnswerMs = provider === "tokenharbor" ? 20000 : 30000;
   for (const phase of ["headers", "body", "json body"]) {
     clockTest(`${provider} switches after ${firstAnswerMs / 1000} seconds without answer text in ${phase}`, { tickMs: 100 }, async t => {
       configure(t);
@@ -106,6 +106,30 @@ for (const provider of ["tokenharbor", "openrouter", "gemini", "mistral"]) {
     assert.equal(signal.aborted, false, "Completed requests leave neither timeout armed.");
   });
 }
+
+clockTest("Haiku silence uses 20s and leaves only 25s for DeepSeek before Dots", async t => {
+  configure(t);
+  const requests = [];
+  const startedAt = Date.now();
+  global.fetch = async (url, options) => {
+    const model = JSON.parse(options.body).model;
+    requests.push({ model, at: Date.now() - startedAt, signal: options.signal });
+    if (url.includes("tokenharbor")) return new Promise((_, reject) => options.signal.addEventListener("abort", () => reject(options.signal.reason), { once: true }));
+    return responseFrom(answerStream("openrouter"));
+  };
+  const result = await createSummaryWithFallback({ conversation, profile: getSummaryProfile(conversation),
+    tokenharborApiKey: "test-main", tokenharborBackupApiKey: "test-backup", openrouterApiKey: "test-openrouter",
+    requestContext: { onDelta() {} } });
+  assert.deepEqual(requests.map(({ model, at }) => ({ model, at })), [
+    { model: "claude-haiku-5.5:free", at: 0 },
+    { model: "deepseek-v4.1-flash:free", at: 20000 },
+    { model: "dots-studio/dots-3-note-preview:free", at: 45000 }
+  ]);
+  assert.equal(requests[0].signal.aborted, true);
+  assert.equal(requests[1].signal.aborted, true);
+  assert.equal(result.model, "dots-studio/dots-3-note-preview:free");
+  assert.equal(result.tokenharborMs, 45000);
+});
 
 test("DeepSeek can finish thinking after 30s within its existing 45s slice", async t => {
   configure(t);

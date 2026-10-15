@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-15-size-stop-v152";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-15-picker-preload-v153";
   const INLINE_PILL_SIZE = 36;
   const ownedUiStyleSheets = new Map();
   let handoffUserCss = "";
@@ -495,6 +495,8 @@
   let reservedComposerSurface = null;
   let destinationSheetAnimationFrame = null;
   let destinationSheetWarmupTimer = null;
+  let destinationSheetPreloadScheduled = false;
+  let destinationSheetPreloadIdleCallback = null;
   let destinationSheetPathname = null;
   let pickerJsonCapture = null;
   let pendingJsonCapture = Promise.resolve();
@@ -625,6 +627,10 @@
   }
 
   function clearOwnedLifecycleResources() {
+    if (destinationSheetPreloadIdleCallback !== null) {
+      window.cancelIdleCallback(destinationSheetPreloadIdleCallback);
+      destinationSheetPreloadIdleCallback = null;
+    }
     [...ownedObservers].forEach((observer) => observer.disconnect());
     [...ownedTimeouts].forEach((timer) => window.clearTimeout(timer));
     [...ownedIntervals].forEach((timer) => window.clearInterval(timer));
@@ -916,6 +922,7 @@
       invalidateInlinePicker,
       toggleDestinationSheet,
       hideDestinationSheet,
+      scheduleDestinationSheetPreload,
       findProviderInlineToolbar,
       mountProviderInlineButton,
       releaseProviderInlineMount,
@@ -972,6 +979,7 @@
     });
   } else {
     startFloatingButtonMonitoring();
+    scheduleDestinationSheetPreload();
   }
 
   async function runContextFlow(destinationId, preparedDestinationPromise = null, scrapedConversationText = null, trace = null) {
@@ -6990,6 +6998,31 @@
     `).join("");
     (document.head || document.documentElement).appendChild(style);
     applyOwnedUiStyleSheet(style);
+  }
+
+  function scheduleDestinationSheetPreload() {
+    if (!instanceActive || destinationSheetPreloadScheduled) return;
+    if (document.readyState !== "complete") {
+      addOwnedEventListener(window, "load", scheduleDestinationSheetPreload);
+      return;
+    }
+    removeOwnedEventListener(window, "load", scheduleDestinationSheetPreload);
+    destinationSheetPreloadScheduled = true;
+    const preload = () => {
+      destinationSheetPreloadIdleCallback = null;
+      if (!instanceActive || !document.body || isRunning || isDestinationSheetOpen()) return;
+      // Prepare only local UI. Capture still belongs to opening/selection, and
+      // an early click can synchronously create this same sheet as before.
+      const sheet = ensureDestinationSheet();
+      sheet.querySelectorAll("img").forEach(image => image.decode?.().catch(() => {}));
+      // display:none does not request a font, so explicitly load the title face.
+      document.fonts?.load('18px "Cap Context EB Garamond"').catch(() => {});
+    };
+    if (typeof window.requestIdleCallback === "function" && typeof window.cancelIdleCallback === "function") {
+      destinationSheetPreloadIdleCallback = window.requestIdleCallback(preload, { timeout: 1500 });
+    } else {
+      setTimeout(preload, 250);
+    }
   }
 
   function ensureDestinationSheet() {

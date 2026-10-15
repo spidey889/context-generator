@@ -988,6 +988,8 @@ async function verifyPickerProductChanges(session, state) {
     }
   }
   await session.evaluate('document.getElementById("context-generator-bubble").click()');
+  assert.equal(await session.evaluate('document.getElementById("context-generator-destination-sheet") === window.__smokePreloadedPicker'), true,
+    "The first click must reuse the picker prepared after page load.");
   await waitFor(() => session.evaluate('getComputedStyle(document.getElementById("context-generator-destination-sheet")).opacity === "1"'), "the product picker");
   const orbPoint = await session.evaluate(`(() => {
     const rect = document.getElementById("context-generator-bubble").getBoundingClientRect();
@@ -1753,6 +1755,22 @@ async function run() {
       await waitFor(() => sourceSession.evaluate("Boolean(window.__capSmokeNativeRequestReady)"), "the fixture's initial native request");
     }
     process.stdout.write("✓ Brave loaded the unpacked extension on the controlled source page.\n");
+    const preloadRequests = [state.summaryRequests.length, state.jsonRequests];
+    await waitFor(() => sourceSession.evaluate(`(() => {
+      const sheet = document.getElementById("context-generator-destination-sheet");
+      return Boolean(sheet && [...sheet.querySelectorAll("img")].every(image => image.complete && image.naturalWidth > 0)
+        && [...document.fonts].some(face => face.family.includes("Cap Context EB Garamond") && face.status === "loaded"));
+    })()`), "hidden picker, decoded logos and title font before the first click");
+    assert.equal(await sourceSession.evaluate(`(() => {
+      const sheet = document.getElementById("context-generator-destination-sheet");
+      window.__smokePreloadedPicker = sheet;
+      return getComputedStyle(sheet).display === "none" && sheet.getAttribute("aria-hidden") === "true"
+        && getComputedStyle(document.getElementById("context-generator-destination-backdrop")).display === "none"
+        && document.activeElement !== sheet;
+    })()`), true, "Preloading must leave the picker closed and preserve page focus.");
+    assert.deepEqual([state.summaryRequests.length, state.jsonRequests], preloadRequests,
+      "Preparing UI before the first click must not start conversation work.");
+    process.stdout.write("✓ Picker, logos and title font ready before the first click; no capture or summary request.\n");
     if (process.env.CAP_CONTEXT_HANDOFF_PALETTE_SMOKE === "1") {
       await verifyHandoffPalette(sourceSession);
       assert.equal(state.summaryRequests.length, 0, "The palette check must never call a model.");
