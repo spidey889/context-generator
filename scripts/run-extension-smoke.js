@@ -1284,7 +1284,7 @@ async function verifyEarlyHandoff({ sourceSession, devToolsPort, origin, state, 
     const values = await early.session.evaluate("window.__capContextSmokeStatusHistory");
     return values.some(text => text.startsWith("Context ready.")) ? values : null;
   }, "the verified ready cue");
-  assert.ok(history.indexOf("Polishing your summary…\nIt will be pasted here when it’s ready.") < history.indexOf("Pasting your context…"));
+  assert.ok(history.indexOf("Polishing your summary…\nIt will be pasted here when it’s ready.") < history.indexOf("Pasting your context...."));
   assert.equal(await early.session.evaluate("window.__capContextSmokeSendClicks"), 0);
   assert.equal(state.summaryRequests.length, 1);
   assert.equal(state.destinationRequests, 1, "The extension never reloads the prepared destination.");
@@ -2791,7 +2791,7 @@ async function run() {
       const history = await destinationSession.evaluate("window.__capContextSmokeStatusHistory");
       return history.some(text => text.startsWith("Context ready.")) ? history : null;
     }, "the verified destination-ready cue");
-    assert.ok(statusHistory.includes("Pasting your context…"), "Destination explains insertion while it is pending.");
+    assert.ok(statusHistory.includes("Pasting your context...."), "Destination explains insertion while it is pending.");
     assert.ok(statusHistory.some(text => text.startsWith("Context ready.")), "Ready cue follows verified insertion.");
     const workerTarget = (await getTargets(devToolsPort)).find(target => target.type === "service_worker" && target.url.endsWith("/background.js"));
     assert.ok(workerTarget, "Transfer worker must be available for tab-placement verification.");
