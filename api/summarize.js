@@ -44,6 +44,7 @@ const TOKENHARBOR_MODELS = [
 const TOKENHARBOR_BACKUP_MODEL = "deepseek-v4.1-flash:free";
 const TOKENHARBOR_CHAT_COMPLETIONS_URL = "https://tokenharbor.ai/v1/chat/completions";
 const TOKENHARBOR_SHARED_SLICE_MS = 45000;
+const TOKENHARBOR_HAIKU_FIRST_ANSWER_TIMEOUT_MS = 20000;
 // DeepSeek counts thinking against max_tokens. The shared summary caps alone
 // can end a response before any answer; reserve separate room without changing
 // its default thinking mode, the desired carry length or the route deadline.
@@ -1093,10 +1094,12 @@ async function fetchWithRetry(url, options, requestBudgetMs, context = {}) {
     const timeout = setTimeout(() => controller.abort(), Math.max(0, attemptDeadline - Date.now()));
     // Headers/heartbeats are not generated answers. Only real answer text
     // disarms this watchdog; the full completion deadline stays in force.
-    // Thinking stays on for DeepSeek. Allow it to start its answer within the
-    // existing 45s slice; neither this watchdog nor output room renews that slice.
+    // Haiku gets 20s to start answering; unused shared time remains for DeepSeek.
+    // DeepSeek thinking stays on, bounded by the original 45s shared slice.
     const firstAnswerBudgetMs = context.provider === "tokenharbor" && context.model === "deepseek-v4.1-flash:free"
-      ? TOKENHARBOR_SHARED_SLICE_MS : PROVIDER_FIRST_ANSWER_TIMEOUT_MS;
+      ? TOKENHARBOR_SHARED_SLICE_MS
+      : context.provider === "tokenharbor" && context.model === "claude-haiku-5.5:free"
+        ? TOKENHARBOR_HAIKU_FIRST_ANSWER_TIMEOUT_MS : PROVIDER_FIRST_ANSWER_TIMEOUT_MS;
     const firstAnswerDeadline = context.onDelta ? Math.min(attemptDeadline, Date.now() + firstAnswerBudgetMs) : null;
     let answerStarted = false;
     const abortSilentProvider = () => controller.abort(Object.assign(new Error("Provider did not start an answer in time"), { name: "AbortError" }));
