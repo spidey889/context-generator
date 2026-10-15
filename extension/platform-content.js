@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-16-priority-cancel-v157";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-16-picker-no-speed-v158";
   const INLINE_PILL_SIZE = 36;
   const ownedUiStyleSheets = new Map();
   let handoffUserCss = "";
@@ -25,7 +25,7 @@
   let chatGptPlacementResizeTargets = [];
   let chatGptPlacementMutationObserver = null;
   let chatGptPlacementMutationRoot = null;
-  // Start fast capture on for each page instance; a manual opt-out lasts until reload.
+  // Keep JSON-first capture enabled; the picker no longer exposes a mode toggle.
   let claudeJsonCaptureEnabled = true;
   let chatGptJsonCaptureEnabled = true;
   let networkJsonCaptureEnabled = true;
@@ -6787,95 +6787,6 @@
         filter: brightness(1.1) saturate(1.08) drop-shadow(0 0 6px rgba(139,92,246,0.38)) drop-shadow(0 3px 5px rgba(0,0,0,0.18));
       }
       #${DESTINATION_SHEET_ID} .context-generator-destination-title { color: #ffffff !important; }
-      #${DESTINATION_SHEET_ID} .context-generator-speed-toggle {
-        appearance: none;
-        position: relative !important;
-        inset: auto !important;
-        display: inline-flex;
-        align-items: center;
-        justify-content: center;
-        flex: 0 0 auto;
-        width: 32px;
-        height: 32px;
-        margin: 0 0 0 34px;
-        padding: 0;
-        border: 1px solid transparent !important;
-        border-radius: 10px;
-        background: transparent !important;
-        color: #a9a3b2 !important;
-        box-shadow: none !important;
-        cursor: pointer;
-        transition: background 140ms ease, border-color 140ms ease, color 140ms ease;
-      }
-      #${DESTINATION_SHEET_ID} .context-generator-speed-toggle:hover {
-        background: rgba(255,255,255,0.07) !important;
-        border-color: rgba(255,255,255,0.18) !important;
-        color: #f1edf7 !important;
-      }
-      #${DESTINATION_SHEET_ID} .context-generator-speed-toggle[aria-pressed="true"] {
-        color: #facc15 !important;
-      }
-      #${DESTINATION_SHEET_ID} .context-generator-speed-toggle:focus-visible {
-        outline: 2px solid rgba(190,162,233,0.78) !important;
-        outline-offset: 3px;
-      }
-      #${DESTINATION_SHEET_ID} .context-generator-speed-toggle svg {
-        display: block;
-        position: relative;
-        z-index: 1;
-        width: 16px;
-        height: 16px;
-        fill: none !important;
-        stroke: currentColor !important;
-      }
-      /* Reserve room behind the bolt so trails stay inside the picker header.
-         aria-pressed owns the effect; disabling speed removes its animations. */
-      #${DESTINATION_SHEET_ID} .context-generator-speed-lines {
-        display: none;
-        position: absolute;
-        right: 14px;
-        top: 8px;
-        width: 42px;
-        height: 16px;
-        overflow: visible;
-        pointer-events: none;
-        mask-image: linear-gradient(90deg,transparent,#000 28%);
-      }
-      #${DESTINATION_SHEET_ID} .context-generator-speed-toggle[aria-pressed="true"] .context-generator-speed-lines {
-        display: block;
-      }
-      #${DESTINATION_SHEET_ID} .context-generator-speed-lines i {
-        position: absolute;
-        right: 1px;
-        top: 2px;
-        width: 18px;
-        height: 1.5px;
-        border-radius: 999px;
-        background: linear-gradient(90deg,transparent,rgba(250,204,21,0.6) 45%,#fde68a) !important;
-        box-shadow: 0 0 4px rgba(250,204,21,0.18) !important;
-        transform-origin: right center;
-        opacity: 0;
-        animation: contextGeneratorSpeedStreak 420ms linear infinite;
-      }
-      #${DESTINATION_SHEET_ID} .context-generator-speed-lines i:nth-child(2) {
-        /* Each origin follows the bolt's sloped left edge, rather than one plane. */
-        right: 5px;
-        top: 7px;
-        width: 27px;
-        animation-delay: -140ms;
-      }
-      #${DESTINATION_SHEET_ID} .context-generator-speed-lines i:nth-child(3) {
-        right: 2px;
-        top: 12px;
-        width: 15px;
-        animation-delay: -280ms;
-      }
-      @keyframes contextGeneratorSpeedStreak {
-        0% { opacity: 0; transform: translateX(0) scaleX(0.45); }
-        8% { opacity: 0.85; }
-        48% { opacity: 0.7; }
-        100% { opacity: 0; transform: translateX(-34px) scaleX(1.15); }
-      }
       #${DESTINATION_SHEET_ID} .context-generator-destination-tile {
         border-color: rgba(255,255,255,0.1) !important;
         background: linear-gradient(180deg,rgba(255,255,255,0.05),rgba(255,255,255,0.022)) !important;
@@ -6989,10 +6900,6 @@
           transition: none !important;
         }
 
-        #${DESTINATION_SHEET_ID} .context-generator-speed-lines i {
-          animation: none;
-          opacity: 0.65;
-        }
         .context-generator-tile-aura {
           animation: none;
         }
@@ -7002,8 +6909,7 @@
         }
 
         #${DESTINATION_SHEET_ID} .context-generator-destination-tile,
-        #${DESTINATION_SHEET_ID} .context-generator-destination-brand-icon,
-        #${DESTINATION_SHEET_ID} .context-generator-speed-toggle {
+        #${DESTINATION_SHEET_ID} .context-generator-destination-brand-icon {
           transition: none !important;
         }
       }
@@ -7263,30 +7169,6 @@
 
     sheet.appendChild(grid);
 
-    if (["claude", "chatgpt", "gemini", "grok", "deepseek"].includes(currentPlatform.id)) {
-      const toggle = document.createElement("button");
-      toggle.type = "button";
-      toggle.id = `context-generator-${currentPlatform.id}-json-toggle`;
-      toggle.className = "context-generator-speed-toggle";
-      const enabled = currentPlatform.id === "claude" ? claudeJsonCaptureEnabled
-        : currentPlatform.id === "chatgpt" ? chatGptJsonCaptureEnabled : networkJsonCaptureEnabled;
-      toggle.setAttribute("aria-pressed", String(enabled));
-      toggle.setAttribute("aria-label", "Fast capture");
-      toggle.title = `Fast capture: ${enabled ? "On" : "Off"}`;
-      toggle.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="m13 2-9 12h7l-1 8 10-12h-7l1-8Z"/></svg><span class="context-generator-speed-lines" aria-hidden="true"><i></i><i></i><i></i></span>';
-      addOwnedEventListener(toggle, "click", () => {
-        if (isRunning) return;
-        let enabled;
-        if (currentPlatform.id === "claude") enabled = claudeJsonCaptureEnabled = !claudeJsonCaptureEnabled;
-        else if (currentPlatform.id === "chatgpt") enabled = chatGptJsonCaptureEnabled = !chatGptJsonCaptureEnabled;
-        else enabled = networkJsonCaptureEnabled = !networkJsonCaptureEnabled;
-        toggle.setAttribute("aria-pressed", String(enabled));
-        toggle.title = `Fast capture: ${enabled ? "On" : "Off"}`;
-        startPickerJsonCapture();
-      });
-      topLine.appendChild(toggle);
-    }
-
     const footer = document.createElement("div");
     footer.className = "context-generator-destination-helper";
     footer.textContent = DESTINATION_HELPER_TEXT;
@@ -7330,7 +7212,7 @@
       }
       if (event.key !== "Tab") return;
 
-      const focusableTiles = [...sheet.querySelectorAll(".context-generator-destination-tile, .context-generator-speed-toggle")]
+      const focusableTiles = [...sheet.querySelectorAll(".context-generator-destination-tile")]
         .filter((tile) => !tile.disabled && tile.getAttribute("aria-disabled") !== "true");
       if (focusableTiles.length === 0) return;
       const focusedIndex = focusableTiles.indexOf(document.activeElement);

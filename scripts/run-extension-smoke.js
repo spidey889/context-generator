@@ -214,6 +214,13 @@ async function createSmokeExtension(tempRoot, origin) {
 
   const platformPath = path.join(extensionRoot, "platform-content.js");
   let platformSource = (await fs.promises.readFile(platformPath, "utf8")).replace(/\r\n/g, "\n");
+  // The picker is always JSON-first. Keep DOM coverage in this disposable copy
+  // without adding a production control or changing the JSON smoke defaults.
+  if (!JSON_CAPTURE_SMOKE) {
+    for (const flag of ["claudeJsonCaptureEnabled", "chatGptJsonCaptureEnabled", "networkJsonCaptureEnabled"]) {
+      platformSource = replaceOnce(platformSource, `let ${flag} = true;`, `let ${flag} = false;`, `${flag} DOM fixture`);
+    }
+  }
   const currentPlatformNeedle = [
     "  function getCurrentPlatform() {",
     "    const hostname = window.location.hostname;"
@@ -1020,16 +1027,13 @@ async function verifyPickerProductChanges(session, state) {
   const product = await session.evaluate(`(() => {
     const sheet = document.getElementById("context-generator-destination-sheet");
     const home = sheet.querySelector(".context-generator-destination-home-link");
-    const controls = [...sheet.querySelectorAll(".context-generator-destination-tile, .context-generator-speed-toggle")]
+    const controls = [...sheet.querySelectorAll(".context-generator-destination-tile")]
       .filter(node => !node.disabled && node.getAttribute("aria-disabled") !== "true");
     controls[0].focus();
-    const toggle = sheet.querySelector(".context-generator-speed-toggle");
-    window.__smokeSpeedWasEnabled = toggle.getAttribute("aria-pressed") === "true";
-    if (!window.__smokeSpeedWasEnabled) toggle.click();
     return { href: home.href, target: home.target, rel: home.rel, label: home.getAttribute("aria-label"),
       homeTabIndex: home.tabIndex, bubbleTabIndex: document.getElementById("context-generator-bubble").tabIndex,
       controlCount: controls.length,
-      trailCount: sheet.querySelectorAll(".context-generator-speed-lines i").length };
+      speedControlCount: sheet.querySelectorAll('.context-generator-speed-toggle, [aria-label="Fast capture"]').length };
   })()`);
   const orbVisibleThroughBackdrop = `(() => {
     const orb = document.getElementById("context-generator-bubble");
@@ -1047,7 +1051,7 @@ async function verifyPickerProductChanges(session, state) {
   assert.equal(product.bubbleTabIndex, -1);
   const focusedPickerIndex = `(() => {
     const sheet = document.getElementById("context-generator-destination-sheet");
-    return [...sheet.querySelectorAll(".context-generator-destination-tile, .context-generator-speed-toggle")]
+    return [...sheet.querySelectorAll(".context-generator-destination-tile")]
       .filter(node => !node.disabled && node.getAttribute("aria-disabled") !== "true")
       .indexOf(document.activeElement);
   })()`;
@@ -1060,12 +1064,13 @@ async function verifyPickerProductChanges(session, state) {
     for (let step = 0; step < product.controlCount; step++) {
       await pressTab(shift);
       const index = await session.evaluate(focusedPickerIndex);
-      assert.ok(index >= 0, "Picker keyboard navigation must stay on destinations and Speed, skipping both orbs.");
+      assert.ok(index >= 0, "Picker keyboard navigation must stay on destinations, skipping both orbs.");
       reached.add(index);
     }
     assert.equal(reached.size, product.controlCount, "Every enabled picker control must remain reachable.");
   }
-  assert.equal(product.trailCount, 3);
+  assert.equal(product.speedControlCount, 0, "The picker must not expose a Speed control.");
+  assert.equal(product.controlCount, 4, "All four destinations must remain reachable.");
   if (PICKER_SCREENSHOT_PATH) {
     const clip = await session.evaluate(`(() => {
       const sheet = document.getElementById("context-generator-destination-sheet").getBoundingClientRect();
@@ -1079,15 +1084,8 @@ async function verifyPickerProductChanges(session, state) {
     await fs.promises.mkdir(path.dirname(PICKER_SCREENSHOT_PATH), { recursive: true });
     await fs.promises.writeFile(PICKER_SCREENSHOT_PATH, Buffer.from(screenshot.data, "base64"));
   }
-  await waitFor(() => session.evaluate(`(() => {
-    const line = document.querySelector(".context-generator-speed-lines i");
-    return line.getAnimations().some(animation => animation.playState === "running" && animation.currentTime > 0);
-  })()`), "the moving lightning trails");
-  await session.evaluate('document.querySelector(".context-generator-speed-toggle").click()');
-  assert.equal(await session.evaluate('getComputedStyle(document.querySelector(".context-generator-speed-lines")).display'), "none");
-  await session.evaluate('document.querySelector(".context-generator-speed-toggle").click()');
   await session.call("Emulation.setEmulatedMedia", { features: [{ name: "prefers-reduced-motion", value: "reduce" }] });
-  assert.equal(await session.evaluate('getComputedStyle(document.querySelector(".context-generator-speed-lines i")).animationName'), "none");
+  assert.equal(await session.evaluate('getComputedStyle(document.getElementById("context-generator-destination-sheet")).transitionDuration'), "0s");
   await session.call("Emulation.setEmulatedMedia", { features: [] });
   for (const width of [390, 320]) {
     // Claude freezes an open picker. Explicitly reopen at the new viewport
@@ -1109,9 +1107,6 @@ async function verifyPickerProductChanges(session, state) {
     await waitFor(() => session.evaluate(orbVisibleThroughBackdrop), `the clickable orb at ${width}px`);
   }
   await session.evaluate(`(() => {
-    const toggle = document.querySelector(".context-generator-speed-toggle");
-    if ((toggle.getAttribute("aria-pressed") === "true") !== window.__smokeSpeedWasEnabled) toggle.click();
-    delete window.__smokeSpeedWasEnabled;
     document.getElementById("context-generator-destination-backdrop").click();
   })()`);
   await session.call("Emulation.clearDeviceMetricsOverride");
@@ -1224,8 +1219,6 @@ async function verifyEscapeCancellation({ sourceSession, devToolsPort, origin, s
   await sourceSession.call("Emulation.setFocusEmulationEnabled", { enabled: false });
   const start = `(() => {
     document.getElementById("context-generator-bubble").click();
-    const speed = document.querySelector(".context-generator-speed-toggle");
-    if (speed?.getAttribute("aria-pressed") === "true") speed.click();
     [...document.querySelectorAll(".context-generator-destination-tile")].find(tile => tile.textContent.includes("Claude")).click();
   })()`;
   await sourceSession.evaluate(start);
@@ -1295,8 +1288,6 @@ async function verifyEarlyHandoff({ sourceSession, devToolsPort, origin, state, 
   await sourceSession.call("Emulation.setFocusEmulationEnabled", { enabled: false });
   await sourceSession.evaluate(`(() => {
     document.getElementById("context-generator-bubble").click();
-    const toggle = document.querySelector(".context-generator-speed-toggle");
-    if (toggle?.getAttribute("aria-pressed") === "true") toggle.click();
     const tile = [...document.querySelectorAll(".context-generator-destination-tile")]
       .find(node => node.textContent.includes("Claude"));
     if (!tile) throw new Error("Claude destination tile missing");
@@ -1380,8 +1371,6 @@ async function verifyEarlyHandoff({ sourceSession, devToolsPort, origin, state, 
 async function verifyDraftTransfer({ sourceSession, devToolsPort, origin, state, destinationSessions, telemetryFixture }) {
   await sourceSession.evaluate(`(() => {
     document.getElementById("context-generator-bubble").click();
-    const speed = document.querySelector(".context-generator-speed-toggle");
-    if (speed?.getAttribute("aria-pressed") === "true") speed.click();
     [...document.querySelectorAll(".context-generator-destination-tile")].find(tile => tile.textContent.includes("Claude")).click();
   })()`);
   const target = await waitFor(async () => (await getTargets(devToolsPort)).find(item => item.type === "page" && item.url.startsWith(origin + "/destination")), "the single draft destination");
@@ -2355,7 +2344,6 @@ async function run() {
     await claudePlacementSession.evaluate(`(() => {
       window.__claudePickerFocus = [...document.querySelectorAll(".context-generator-destination-tile")].find(tile => !tile.disabled);
       window.__claudePickerFocus.focus();
-      window.__claudePickerSpeed = document.querySelector(".context-generator-speed-toggle").getAttribute("aria-pressed");
       const sheet = document.getElementById("context-generator-destination-sheet");
       window.__claudePickerPosition = [sheet.style.left, sheet.style.top, sheet.style.transformOrigin];
     })()`);
@@ -2364,10 +2352,9 @@ async function run() {
         const sheet = document.getElementById("context-generator-destination-sheet");
         resolve({ open: sheet.getAttribute("aria-hidden") === "false" && getComputedStyle(sheet).opacity === "1",
           focus: document.activeElement === window.__claudePickerFocus,
-          position: JSON.stringify([sheet.style.left, sheet.style.top, sheet.style.transformOrigin]) === JSON.stringify(window.__claudePickerPosition),
-          speed: document.querySelector(".context-generator-speed-toggle").getAttribute("aria-pressed") === window.__claudePickerSpeed });
+          position: JSON.stringify([sheet.style.left, sheet.style.top, sheet.style.transformOrigin]) === JSON.stringify(window.__claudePickerPosition) });
       })))`);
-      assert.deepEqual(state, { open:true, focus:true, position:true, speed:true }, label);
+      assert.deepEqual(state, { open:true, focus:true, position:true }, label);
     };
     await claudePlacementSession.evaluate(`document.getElementById("model").style.marginRight = "8px"`);
     await assertClaudePickerRetained("A native toolbar reflow must not move Claude's open picker.");
@@ -2378,7 +2365,7 @@ async function run() {
         const next = old.cloneNode(false); next.removeAttribute("data-context-generator-claude-inline");
         old.replaceWith(next); while (old.firstChild) next.appendChild(old.firstChild);
       })()`);
-      await assertClaudePickerRetained(`Claude ${wrapper} replacement must preserve its open picker, focus and Speed choice.`);
+      await assertClaudePickerRetained(`Claude ${wrapper} replacement must preserve its open picker and focus.`);
       assert.equal(await claudePlacementSession.evaluate(`document.getElementById("context-generator-bubble") === window.__claudeAuditBubble
         && getComputedStyle(window.__claudeAuditBubble).position === "static"`), true, "Claude must reuse its inline orb after remount.");
     }
@@ -2418,7 +2405,7 @@ async function run() {
     })()`);
     await waitFor(() => claudePlacementSession.evaluate(`getComputedStyle(document.getElementById("context-generator-bubble")).position === "static"
       && getComputedStyle(document.getElementById("send")).visibility === "hidden"`), "Claude compact empty Voice mode");
-    process.stdout.write("✓ Claude picker stays at its opening position through reflow, remounts, resize and composer gaps with focus/Speed intact; explicit dismissals pass.\n");
+    process.stdout.write("✓ Claude picker stays at its opening position through reflow, remounts, resize and composer gaps with focus intact; explicit dismissals pass.\n");
 
     for (const platform of ["chatgpt", "claude"]) {
       const fixtureUrl = `${origin}/free-placement?${SMOKE_PLATFORM_QUERY}=${platform}`;
@@ -2535,49 +2522,20 @@ async function run() {
     }
     if (JSON_CAPTURE_SMOKE) {
       const before = state.jsonRequests;
-      // Exercise toggle presentation on an unsaved route; native capture is
-      // verified separately below, without duplicating attachment downloads.
-      const toggleSourceUrl = await sourceSession.evaluate("location.href");
+      // Check the picker on an unsaved route without repeating native downloads.
+      const sourceUrl = await sourceSession.evaluate("location.href");
       await sourceSession.evaluate(`history.replaceState({}, "", "/?${SMOKE_PLATFORM_QUERY}=${JSON_SOURCE}"); true`);
-      await waitFor(() => sourceSession.evaluate("window.__capSmokeSourceRouteReady()", sourceSession.getExtensionContextId()), "source mounting before the capture-toggle picker");
-      await sourceSession.evaluate(`document.getElementById("context-generator-bubble").click()`);
-      assert.equal(await sourceSession.evaluate(`document.getElementById("context-generator-${JSON_SOURCE}-json-toggle").getAttribute("aria-pressed")`), "true", "Fast capture must start enabled.");
-      await waitFor(async () => await sourceSession.evaluate(`getComputedStyle(document.getElementById("context-generator-${JSON_SOURCE}-json-toggle")).color`) === "rgb(250, 204, 21)", "the default fast-capture enabled color");
-      await sourceSession.evaluate(`document.getElementById("context-generator-${JSON_SOURCE}-json-toggle").click()`);
-      assert.equal(await sourceSession.evaluate(`document.getElementById("context-generator-${JSON_SOURCE}-json-toggle").getAttribute("aria-pressed")`), "false");
-      await waitFor(() => sourceSession.evaluate(`getComputedStyle(document.getElementById("context-generator-destination-sheet")).opacity === "1"`), "the settled picker before measuring the toggle");
-      await waitFor(async () => await sourceSession.evaluate(`getComputedStyle(document.getElementById("context-generator-${JSON_SOURCE}-json-toggle")).color`) !== "rgb(250, 204, 21)", "the visibly disabled fast-capture color");
-      const idleToggle = await sourceSession.evaluate(`(() => {
-        const toggle = document.getElementById("context-generator-${JSON_SOURCE}-json-toggle");
-        const rect = toggle.getBoundingClientRect();
-        const header = toggle.parentElement.getBoundingClientRect();
-        // Transformed rect edges differed by 0.00003px at browser zoom. Allow
-        // rounding noise while still rejecting any visible header overflow.
-        const epsilon = 0.01;
-        return { icon: Boolean(toggle.querySelector("svg[aria-hidden='true']")), header: toggle.parentElement.contains(document.querySelector(".context-generator-destination-brand")), inHeader: rect.top >= header.top - epsilon && rect.bottom <= header.bottom + epsilon && rect.left >= header.left - epsilon && rect.right <= header.right + epsilon, color: getComputedStyle(toggle).color, bounds: rect.toJSON(), headerBounds: header.toJSON() };
-      })()`);
-      assert.equal(idleToggle.icon, true, "Fast capture must use a decorative vector icon.");
-      assert.equal(idleToggle.header, true, "The fast-capture control must sit in the brand header.");
-      assert.equal(idleToggle.inHeader, true, `Host button styles must not move the fast-capture control outside the header: ${JSON.stringify(idleToggle)}`);
-      await sourceSession.evaluate(`document.getElementById("context-generator-${JSON_SOURCE}-json-toggle").click()`);
-      assert.equal(await sourceSession.evaluate(`document.getElementById("context-generator-${JSON_SOURCE}-json-toggle").getAttribute("aria-pressed")`), "true");
-      await waitFor(async () => await sourceSession.evaluate(`getComputedStyle(document.getElementById("context-generator-${JSON_SOURCE}-json-toggle")).color`) === "rgb(250, 204, 21)", "the fast-capture enabled color");
-      assert.notEqual(idleToggle.color, "rgb(250, 204, 21)", "The enabled state must be visibly distinct.");
-      if (PICKER_SCREENSHOT_PATH) {
-        await waitFor(async () => await sourceSession.evaluate(`getComputedStyle(document.getElementById("context-generator-destination-sheet")).opacity`) === "1", "the visible picker");
-        const clip = await sourceSession.evaluate(`(() => { const r = document.getElementById("context-generator-destination-sheet").getBoundingClientRect(); return { x: r.x - 12, y: r.y - 12, width: r.width + 24, height: r.height + 24, scale: 1 }; })()`);
-        const screenshot = await sourceSession.call("Page.captureScreenshot", { format: "png", clip });
-        await fs.promises.writeFile(PICKER_SCREENSHOT_PATH, Buffer.from(screenshot.data, "base64"));
-      }
-      assert.equal(state.jsonRequests, before, "Toggling JSON capture must not fetch a conversation.");
-      assert.equal(state.pasteDescriptorRequests + state.pasteContentRequests, 0, "Toggling capture must not read pasted files.");
-      assert.equal(state.summaryRequests.length, 0, "Toggling JSON capture must not submit a transcript.");
-      assert.equal(state.sessionRequests, 0, "Opening/toggling the picker must not read a session.");
-      await sourceSession.evaluate(`document.querySelector("#context-generator-destination-backdrop").click()`);
-      // Dismissal keeps display:block during its exit animation. Reopening
-      // before it becomes none would toggle the still-displayed sheet closed.
-      await waitFor(() => sourceSession.evaluate(`document.getElementById("context-generator-destination-sheet").style.display === "none"`), "capture-toggle picker closure");
-      await sourceSession.evaluate(`history.replaceState({}, "", ${JSON.stringify(toggleSourceUrl)}); true`);
+      await waitFor(() => sourceSession.evaluate("window.__capSmokeSourceRouteReady()", sourceSession.getExtensionContextId()), "source mounting before the unsaved-chat picker");
+      await sourceSession.evaluate('document.getElementById("context-generator-bubble").click()');
+      await waitFor(() => sourceSession.evaluate('getComputedStyle(document.getElementById("context-generator-destination-sheet")).opacity === "1"'), "the unsaved-chat picker");
+      assert.equal(await sourceSession.evaluate('Boolean(document.querySelector(".context-generator-speed-toggle"))'), false, "The JSON-first picker must not expose a Speed control.");
+      assert.equal(state.jsonRequests, before, "Opening an unsaved-chat picker must not fetch a conversation.");
+      assert.equal(state.pasteDescriptorRequests + state.pasteContentRequests, 0, "Opening an unsaved-chat picker must not read pasted files.");
+      assert.equal(state.summaryRequests.length, 0, "Opening the picker must not submit a transcript.");
+      assert.equal(state.sessionRequests, 0, "Opening an unsaved-chat picker must not read a session.");
+      await sourceSession.evaluate('document.getElementById("context-generator-destination-backdrop").click()');
+      await waitFor(() => sourceSession.evaluate('document.getElementById("context-generator-destination-sheet").style.display === "none"'), "unsaved-chat picker closure");
+      await sourceSession.evaluate(`history.replaceState({}, "", ${JSON.stringify(sourceUrl)}); true`);
     }
 
     if (JSON_SOURCE === "chatgpt") {
@@ -2672,9 +2630,6 @@ async function run() {
     const clickResult = await sourceSession.evaluate(String.raw`(() => {
       const bubble = document.getElementById("context-generator-bubble");
       if (!${JSON_CAPTURE_SMOKE}) bubble.click();
-      // The ordinary smoke exercises the user's explicit DOM opt-out.
-      const speedToggle = document.querySelector(".context-generator-speed-toggle");
-      if (!${JSON_CAPTURE_SMOKE} && speedToggle?.getAttribute("aria-pressed") === "true") speedToggle.click();
       const sheet = document.getElementById("context-generator-destination-sheet");
       const backdrop = document.getElementById("context-generator-destination-backdrop");
       const tiles = [...document.querySelectorAll(".context-generator-destination-tile")];
