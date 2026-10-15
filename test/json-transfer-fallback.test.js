@@ -614,7 +614,7 @@ test("a queued JSON retry stays bound to its cancelled attempt after globals res
   await context.start("claude");
   assert.equal(calls.json, 1);
   assert.equal(calls.flows.length + calls.dom + calls.notice, 0);
-  assert.match(calls.errors[0], /Transfer cancelled/);
+  assert.equal(calls.errors.length, 0, "Cancelled work must stay silent after the next attempt starts.");
 });
 
 test("cancelling a selected queued prefetch prevents its native read even after the running flag resets", async () => {
@@ -632,7 +632,7 @@ test("cancelling a selected queued prefetch prevents its native read even after 
   await transfer;
   assert.equal(calls.json, 1);
   assert.equal(calls.flows.length + calls.dom + calls.notice, 0);
-  assert.match(calls.errors[0], /Transfer cancelled/);
+  assert.equal(calls.errors.length, 0, "Cancelled prefetch must not reopen an error overlay.");
 });
 
 test("Speed off, unsaved chats and teardown skip or discard picker capture", async () => {

@@ -96,6 +96,9 @@ function loadBackgroundForSummaryTest(fetchImpl, { tabs = [], injections = [], i
     });
   };
   sendSummary.closeTab = id => { closedTabs.add(id); return tabRemovedListener(id); };
+  sendSummary.cancel = (id, sender = {}) => new Promise(resolve => messageListener(
+    { type: "CANCEL_TRANSFER", transferId: `summary-${id}` },
+    { id: "cap-context-test", frameId: 0, tab: { id }, ...sender }, resolve));
   sendSummary.backendError = response => sandbox.createSummaryBackendError(response);
   return sendSummary;
 }
@@ -149,6 +152,7 @@ function loadBackgroundForTransferTest({
         onAlarm: event
       },
       runtime: {
+        id: "cap-context-test",
         onInstalled: event,
         onStartup: event,
         onMessage: {
@@ -203,6 +207,10 @@ function loadBackgroundForTransferTest({
 
   return {
     operations,
+    cancel(tabId, sender = {}) {
+      return new Promise(resolve => messageListener({ type: "CANCEL_TRANSFER", transferId: "transfer-test" },
+        { id: "cap-context-test", frameId: 0, tab: { id: tabId }, ...sender }, resolve));
+    },
     getPlatformFromUrl: sandbox.__backgroundTestHooks.getPlatformFromUrl,
     sendMessageWhenReady: sandbox.__backgroundTestHooks.sendMessageWhenReady,
     closeTab(tabId, notify = true) { closedTabs.add(tabId); return notify ? tabRemovedListener(tabId) : undefined; },
@@ -494,6 +502,50 @@ test("closing one source does not cancel a shared summary needed by another sour
   finish();
   assert.equal((await waiter).summary, "Shared context");
   assert.equal(fetches, 1);
+});
+
+test("Escape cancels an active summary body and rejects late work for that attempt", async () => {
+  let started, signal, fetches = 0;
+  const ready = new Promise(resolve => { started = resolve; });
+  const sendSummary = loadBackgroundForSummaryTest(async (_url, options) => {
+    fetches++;
+    signal = options.signal;
+    return new Response(new ReadableStream({ start(controller) {
+      controller.enqueue(new TextEncoder().encode('{"type":"delta","text":"Halfway"}\n'));
+      signal.addEventListener("abort", () => controller.error(signal.reason), { once: true });
+      started();
+    } }), { headers: { "content-type": "application/x-ndjson" } });
+  }, { tabs: [{ id: 9 }, { id: 10 }] });
+  const pending = sendSummary("cancel pending summary", null, 9);
+  await ready;
+  assert.equal((await sendSummary.cancel(9, { tab: { id: 10 } })).ok, false, "An unrelated tab cannot cancel this attempt.");
+  assert.equal((await sendSummary.cancel(9, { frameId: 1 })).ok, false);
+  assert.equal(signal.aborted, false);
+  assert.equal((await sendSummary.cancel(9)).ok, true);
+  assert.equal((await pending).code, "user_cancelled");
+  assert.equal(signal.aborted, true);
+  assert.equal((await sendSummary("cancel pending summary", null, 9)).code, "user_cancelled");
+  assert.equal(fetches, 1, "A late request cannot restart generation.");
+});
+
+test("Escape from a prepared destination revokes delivery without another tab or activation", async () => {
+  const sourceTab = { id: 9, windowId: 1, index: 0 };
+  const harness = loadBackgroundForTransferTest({ sourceTab });
+  const prepared = await harness.prepare("gemini", sourceTab);
+  assert.equal((await harness.cancel(prepared.tabId)).ok, true);
+  assert.equal((await harness.sendTransfer("gemini", prepared.tabId, false, null, sourceTab)).code, "user_cancelled");
+  assert.equal(harness.operations.created.length, 1);
+  assert.equal(harness.operations.updated.length, 0);
+  assert.equal(harness.operations.sent.filter(({ message }) => message.type === "PASTE_CONTEXT").length, 0);
+  assert.ok(harness.operations.sent.some(({ tabId, message }) => tabId === 9 && message.type === "CANCEL_TRANSFER"));
+});
+
+test("Escape before preparation latches cancellation before any destination work", async () => {
+  const sourceTab = { id: 9, windowId: 1, index: 0 };
+  const harness = loadBackgroundForTransferTest({ sourceTab });
+  assert.equal((await harness.cancel(9)).ok, true);
+  assert.equal((await harness.prepare("gemini", sourceTab)).code, "user_cancelled");
+  assert.equal(harness.operations.created.length, 0);
 });
 
 test("near-end reveal is text-free and subsequent delivery never steals focus again", async () => {

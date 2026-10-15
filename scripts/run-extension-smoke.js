@@ -39,6 +39,7 @@ const SMOKE_TIMEOUT_MS = Number(process.env.CAP_CONTEXT_SMOKE_TIMEOUT_MS || 4500
 const TOKENHARBOR_SMOKE = process.env.CAP_CONTEXT_TOKENHARBOR_SMOKE === "1";
 const EARLY_HANDOFF_STREAM_SMOKE = process.env.CAP_CONTEXT_EARLY_HANDOFF_SMOKE === "stream";
 const EARLY_HANDOFF_SMOKE = process.env.CAP_CONTEXT_EARLY_HANDOFF_SMOKE === "1" || EARLY_HANDOFF_STREAM_SMOKE;
+const ESCAPE_SMOKE = ["source", "destination"].includes(process.env.CAP_CONTEXT_ESCAPE_SMOKE) ? process.env.CAP_CONTEXT_ESCAPE_SMOKE : null;
 const HANDOFF_SCREENSHOT_PATH = process.env.CAP_CONTEXT_HANDOFF_SCREENSHOT || "";
 const CLAUDE_PLACEMENT_SCREENSHOT_PATH = process.env.CAP_CONTEXT_CLAUDE_PLACEMENT_SCREENSHOT || "";
 const CHATGPT_PLACEMENT_SCREENSHOT_PATH = process.env.CAP_CONTEXT_CHATGPT_PLACEMENT_SCREENSHOT || "";
@@ -725,6 +726,17 @@ async function startFixtureServer() {
       state.summaryRequests.push(JSON.parse(rawBody));
       const validated = validateSummarizeRequest({ headers: request.headers, body: rawBody });
       assert.equal(validated.ok, true, "Installed extension must satisfy the actual backend input contract.");
+      if (ESCAPE_SMOKE && state.summaryRequests.length === 1) {
+        state.summaryPending = true;
+        response.writeHead(200, { "Access-Control-Allow-Origin": "*", "Content-Type": "application/x-ndjson" });
+        response.write(`${JSON.stringify({ type: "delta", text: ESCAPE_SMOKE === "destination"
+          ? "📦 KEY CONTEXT\nVerified fixture context.\n🔁 NEXT STEP\n" : "Halfway through the fixture summary." })}\n`);
+        // Keep a real response body open until the installed worker aborts it.
+        await new Promise(resolve => response.once("close", resolve));
+        state.summaryCancelled = !response.writableFinished;
+        state.summaryPending = false;
+        return;
+      }
       if (EARLY_HANDOFF_SMOKE && !EARLY_HANDOFF_STREAM_SMOKE) {
         state.summaryPending = true;
         await new Promise(resolve => setTimeout(resolve, 21000));
@@ -1206,6 +1218,65 @@ async function verifyEmptyChatError(session, browserSession, state, { removeTurn
     if (${removeTurns}) document.querySelector("main").innerHTML = window.__emptySmokeOriginal.html;
     history.replaceState({}, "", window.__emptySmokeOriginal.url);
   })()`);
+}
+
+async function verifyEscapeCancellation({ sourceSession, devToolsPort, origin, state, destinationSessions }) {
+  await sourceSession.call("Emulation.setFocusEmulationEnabled", { enabled: false });
+  const start = `(() => {
+    document.getElementById("context-generator-bubble").click();
+    const speed = document.querySelector(".context-generator-speed-toggle");
+    if (speed?.getAttribute("aria-pressed") === "true") speed.click();
+    [...document.querySelectorAll(".context-generator-destination-tile")].find(tile => tile.textContent.includes("Claude")).click();
+  })()`;
+  await sourceSession.evaluate(start);
+  await waitFor(() => state.summaryPending, "a pending streamed summary to cancel");
+  const target = await waitFor(async () => (await getTargets(devToolsPort)).find(item => item.type === "page" && item.url.startsWith(origin + "/destination")), "the prepared Escape destination");
+  const destination = await CdpSession.connect(target.webSocketDebuggerUrl);
+  destinationSessions.set(target.id, destination);
+  await destination.call("Runtime.enable");
+  const session = ESCAPE_SMOKE === "destination" ? destination : sourceSession;
+  if (ESCAPE_SMOKE === "destination") {
+    await waitFor(() => destination.evaluate('document.getElementById("context-generator-destination-status")?.textContent.startsWith("Polishing")'), "the revealed summary waiting cue");
+  }
+  // CDP delivers a trusted native key event; dispatchEvent would only verify
+  // synthetic panel dismissal, which deliberately cannot cancel a transfer.
+  await session.call("Page.bringToFront");
+  await session.call("Emulation.setFocusEmulationEnabled", { enabled: true });
+  await session.call("Input.dispatchKeyEvent", { type: "keyDown", key: "Escape", code: "Escape", windowsVirtualKeyCode: 27 });
+  const local = await session.evaluate(`(() => {
+    const overlay = document.getElementById("context-generator-overlay");
+    return { overlay: overlay?.style.display, cue: !!document.getElementById("context-generator-destination-status"), error: !!document.getElementById("context-generator-error-overlay") };
+  })()`);
+  assert.ok(!local.overlay || local.overlay === "none", "Escape hides the handoff before any network acknowledgement.");
+  assert.equal(local.cue, false);
+  assert.equal(local.error, false);
+  await session.call("Input.dispatchKeyEvent", { type: "keyUp", key: "Escape", code: "Escape", windowsVirtualKeyCode: 27 });
+  await waitFor(() => state.summaryCancelled, "the worker closing the real summary socket");
+  const latest = await waitFor(() => sourceSession.evaluate("chrome.storage.local.get('context-generator-last-transfer-stats-v1').then(v => v['context-generator-last-transfer-stats-v1'])", sourceSession.getExtensionContextId()).then(value => value?.failure === "Transfer cancelled." ? value : null), "the cancelled source receipt");
+  assert.equal(latest.status, "failed");
+  const terminal = await waitFor(() => state.telemetryRequests.findLast(payload => payload.status === "failed"), "cancelled transfer telemetry");
+  assert.equal(terminal.failure_reason, "user_cancelled");
+  assert.equal(await destination.evaluate('document.querySelector("textarea").value'), "");
+  assert.equal(state.summaryRequests.length, 1);
+  assert.equal(destinationSessions.size, 1);
+  // A second real transfer must succeed while the cancelled destination stays
+  // empty. This also catches late callbacks resetting a newer attempt's lock.
+  await destination.call("Emulation.setFocusEmulationEnabled", { enabled: false });
+  await sourceSession.call("Page.bringToFront");
+  await sourceSession.call("Emulation.setFocusEmulationEnabled", { enabled: true });
+  await sourceSession.evaluate(start);
+  await waitFor(() => state.summaryRequests.length === 2, "the next admitted summary request");
+  await waitFor(async () => {
+    for (const next of (await getTargets(devToolsPort)).filter(item => item.type === "page" && item.url.startsWith(origin + "/destination") && item.id !== target.id)) {
+      let nextSession = destinationSessions.get(next.id);
+      if (!nextSession) { nextSession = await CdpSession.connect(next.webSocketDebuggerUrl); destinationSessions.set(next.id, nextSession); await nextSession.call("Runtime.enable"); }
+      if (await nextSession.evaluate('document.querySelector("textarea")?.value') === SUMMARY_TEXT) return true;
+    }
+    return false;
+  }, "successful delivery from the next attempt");
+  assert.equal(await destination.evaluate('document.querySelector("textarea").value'), "");
+  assert.equal(await destination.evaluate("window.__capContextSmokeSendClicks"), 0);
+  process.stdout.write(`✓ Trusted Escape in ${ESCAPE_SMOKE}: immediate UI dismissal, aborted summary socket, no cancelled paste; next transfer succeeds.\n`);
 }
 
 async function verifyEarlyHandoff({ sourceSession, devToolsPort, origin, state, destinationSessions }) {
@@ -1782,6 +1853,10 @@ async function run() {
     }
     if (process.env.CAP_CONTEXT_PASTE_RECOVERY_SMOKE === "1") {
       await verifyPasteRecovery({ browserSession, devToolsPort, origin });
+      return;
+    }
+    if (ESCAPE_SMOKE) {
+      await verifyEscapeCancellation({ sourceSession, devToolsPort, origin, state, destinationSessions });
       return;
     }
     if (EARLY_HANDOFF_SMOKE) {

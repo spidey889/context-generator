@@ -88,6 +88,14 @@ jobs:
         run: |
           mkdir -p "$CAP_CONTEXT_SMOKE_ARTIFACT_DIR"
           xvfb-run -a npm run test:extension-smoke 2>&1 | tee "$CAP_CONTEXT_SMOKE_ARTIFACT_DIR/run.log"
+      - name: Brave Escape cancels source and destination transfers
+        if: steps.scope.outputs.mode != 'light'
+        timeout-minutes: 2
+        shell: bash
+        run: |
+          for side in source destination; do
+            CAP_CONTEXT_ESCAPE_SMOKE="$side" xvfb-run -a npm run test:extension-smoke
+          done
       - name: Brave paste deadlines and delayed composer recovery
         if: steps.scope.outputs.mode != 'light' && inputs.extended_browser_checks == true
         timeout-minutes: 2

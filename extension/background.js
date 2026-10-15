@@ -132,7 +132,7 @@ chrome.tabs.onRemoved?.addListener((tabId) => {
 });
 
 function createTransferCancelledError() {
-  const error = new Error("Transfer cancelled because a transfer tab was closed.");
+  const error = new Error("Transfer cancelled.");
   error.code = "user_cancelled";
   return error;
 }
@@ -891,6 +891,21 @@ chrome.action.onClicked.addListener(async (tab) => {
 });
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  if (message?.type === "CANCEL_TRANSFER") {
+    const tabId = sender?.tab?.id;
+    let operation = transferOperations.get(message.transferId);
+    if (!Number.isInteger(tabId) || sender.frameId !== 0 || sender.id !== chrome.runtime.id
+        || typeof message.transferId !== "string" || !message.transferId || message.transferId.length > 128
+        || (operation && !operation.tabIds.has(tabId))) {
+      sendResponse({ ok: false }); return false;
+    }
+    // Retain a cancelled token even if Escape beats the first preparation
+    // message. Late requests for this attempt must never start new work.
+    if (!operation) operation = getTransferOperation(message.transferId, sender.tab);
+    cancelTransferOperation(operation);
+    sendResponse({ ok: true });
+    return false;
+  }
   if (message?.type === "PROTECT_HANDOFF_PALETTE") {
     // This private UI channel may style only the sending AI page's top document.
     // Document targeting prevents a delayed worker wakeup styling a new page.
@@ -1022,7 +1037,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     prepareDestination(message.destination, message.deadlineAt, sender?.tab, message.transferId)
       .then((result) => sendResponse({ ok: true, tabId: result.tabId, timing: result.timing }))
       .catch((error) => {
-        console.error("[Context Generator Relay]", error);
+        if (error.code !== "user_cancelled") console.error("[Context Generator Relay]", error);
         sendResponse({ ok: false, error: error.message, code: error.code || "destination_open_failed",
           diagnostics: getBackgroundFailureDiagnostics(error, "destination_prepare") });
       });

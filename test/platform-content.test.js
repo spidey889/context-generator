@@ -2867,6 +2867,56 @@ test("source cancellation releases its lock and prevents late summary or local-c
   hooks.resetRunningFlag();
 });
 
+test("trusted Escape releases the source immediately while cancellation messaging is pending", async () => {
+  const messages = [];
+  let finishSummary;
+  const hooks = loadPlatformContent([], "claude.ai", { runtimeSendMessage: async message => {
+    messages.push(message);
+    if (message.type === "SUMMARIZE_WITH_BACKEND") return new Promise(resolve => { finishSummary = resolve; });
+    if (message.type === "CANCEL_TRANSFER") return new Promise(() => {});
+    return { ok: true };
+  } });
+  const trace = hooks.beginTransferAttempt("gemini", "test");
+  const pending = hooks.summarizeWithBackend("x".repeat(10000), trace);
+  const escape = { key: "Escape", preventDefault() {}, stopImmediatePropagation() {} };
+  hooks.dispatchDocumentEvent("keydown", { ...escape, isTrusted: false });
+  assert.equal(trace.cancelled, undefined, "Synthetic panel dismissal cannot cancel a transfer.");
+  hooks.dispatchDocumentEvent("keydown", { ...escape, isTrusted: true });
+  assert.equal(trace.cancelled, true);
+  assert.equal(trace.completed, true);
+  assert.ok(messages.some(message => message.type === "CANCEL_TRANSFER" && message.transferId === trace.id));
+  const next = hooks.beginTransferAttempt("gemini", "next attempt");
+  assert.ok(next, "The next transfer is admitted before any cancellation acknowledgement.");
+  finishSummary({ ok: true, summary: "Late carry" });
+  await assert.rejects(pending, error => error.code === "user_cancelled");
+  assert.equal(next.completed, false);
+  assert.equal(hooks.beginTransferAttempt("gemini", "duplicate"), null, "Late work cannot unlock the newer transfer.");
+  const terminal = messages.filter(message => message.type === "RECORD_TRANSFER_TELEMETRY" && message.event.status === "failed");
+  assert.equal(terminal.length, 1);
+  assert.equal(terminal[0].event.failureReason, "user_cancelled");
+  hooks.teardownContextGeneratorInstance();
+});
+
+clockTest("Escape at destination focus blocks insertion and queued paste messages", async () => {
+  const editor = new FakeElement({ tag: "textarea", attrs: { placeholder: "Message" } });
+  const messages = [];
+  const hooks = loadPlatformContent([editor], "gemini.google.com", { runtimeSendMessage: async message => {
+    messages.push(message); return { ok: true };
+  } });
+  editor.focus = () => hooks.dispatchDocumentEvent("keydown", {
+    key: "Escape", isTrusted: true, preventDefault() {}, stopImmediatePropagation() {}
+  });
+  await assert.rejects(hooks.pasteIntoPlatform("private carry", "gemini", "escape-paste"), error => error.code === "user_cancelled");
+  assert.equal(editor.value, "");
+  assert.equal(editor.clicks, 1);
+  let reply;
+  hooks.runtimeMessageListeners[0]({ type: "PASTE_CONTEXT", transferId: "escape-paste", destination: "gemini", text: "late carry" }, {}, value => { reply = value; });
+  assert.equal(reply.code, "user_cancelled");
+  assert.equal(editor.clicks, 1);
+  assert.ok(messages.some(message => message.type === "CANCEL_TRANSFER"));
+  hooks.teardownContextGeneratorInstance();
+});
+
 clockTest("delayed paste recovery stops at its deadline and when same-route history appears", async () => {
   for (const scenario of ["hidden-expiry", "retry-expiry", "history"]) {
     const editor = new FakeElement({ tag: "textarea", attrs: { placeholder: "Message" } });
@@ -2889,7 +2939,7 @@ clockTest("delayed paste recovery stops at its deadline and when same-route hist
     assert.equal(editor.clicks, scenario === "retry-expiry" ? 2 : 1, scenario);
     assert.notEqual(modal.style.display, "flex", scenario);
     assert.equal(hooks.getOwnedLifecycleResourceCounts().intervals, 0, scenario);
-    assert.equal(hooks.getOwnedLifecycleResourceCounts().eventListeners, 0, scenario);
+    assert.equal(hooks.getOwnedLifecycleResourceCounts().eventListeners, 1, scenario); // Instance Escape listener remains until teardown.
     hooks.teardownContextGeneratorInstance();
   }
 });
@@ -3095,7 +3145,7 @@ clockTest("a closed source blocks destination insertion before any editor action
   await assert.rejects(hooks.pasteIntoPlatform("private carry", "gemini", "cancel-test", null, 9), error => error.code === "user_cancelled");
   assert.equal(editor.value, "");
   assert.equal(editor.clicks, 0);
-  assert.equal(hooks.getOwnedLifecycleResourceCounts().eventListeners, 0);
+  assert.equal(hooks.getOwnedLifecycleResourceCounts().eventListeners, 1); // Instance Escape listener.
 });
 
 clockTest("transfer cancellation during editor focus cannot insert or retry text", async () => {
@@ -3126,7 +3176,7 @@ clockTest("cancelled or missing sources cannot restore a cleared paste or show a
     assert.equal(editor.value, "");
     assert.equal(editor.clicks, 1);
     assert.notEqual(modal.style.display, "flex");
-    assert.equal(hooks.getOwnedLifecycleResourceCounts().eventListeners, 0);
+    assert.equal(hooks.getOwnedLifecycleResourceCounts().eventListeners, 1); // Instance Escape listener.
     hooks.teardownContextGeneratorInstance();
   }
 });

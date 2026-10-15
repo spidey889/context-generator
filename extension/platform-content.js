@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-15-paste-four-dots-v154";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-15-escape-cancel-v155";
   const INLINE_PILL_SIZE = 36;
   const ownedUiStyleSheets = new Map();
   let handoffUserCss = "";
@@ -490,6 +490,7 @@
   let isRunning = false;
   let activeTransferTrace = null;
   const activePasteGuards = new Map();
+  const cancelledTransferIds = new Set();
   let runningResetTimer = null;
   let reservedActionCluster = null;
   let reservedComposerSurface = null;
@@ -760,9 +761,7 @@
       return false;
     }
     if (message?.type === "CANCEL_TRANSFER") {
-      activePasteGuards.get(message.transferId)?.cancel();
-      cancelSourceTransfer(message.transferId);
-      endDestinationWaitingStatus(message.transferId);
+      cancelLocalTransfer(message.transferId);
       sendResponse({ ok: true });
       return false;
     }
@@ -819,6 +818,10 @@
     }
 
     if (message?.type === "PASTE_CONTEXT") {
+      if (cancelledTransferIds.has(message.transferId)) {
+        sendResponse({ ok: false, code: "user_cancelled", error: "Transfer cancelled." });
+        return false;
+      }
       const pasteStartedAt = getNow();
       endDestinationWaitingStatus(message.transferId);
       finishDestinationWaitingStatus(destinationWaitingStatus?.transferId);
@@ -899,6 +902,7 @@
   }
 
   extensionRuntime.onMessage.addListener(handleRuntimeMessage);
+  addOwnedEventListener(document, "keydown", handleTransferEscape, true);
   window[INSTANCE_TEARDOWN_KEY] = teardownContextGeneratorInstance;
 
   if (window.__CONTEXT_GENERATOR_TEST_HOOKS__?.register) {
@@ -1026,7 +1030,7 @@
         summary = await summarizeWithBackend(conversationText, transferTrace, earlyReveal.onNearEnd);
       } finally {
         earlyReveal.stop();
-        stopHandoffCountdown();
+        if (activeTransferTrace === transferTrace) stopHandoffCountdown();
       }
       // Serialize an already-started reveal with paste so a late status message
       // cannot replace the real paste cue or focus the tab after delivery.
@@ -1326,7 +1330,7 @@
   }
 
   function createTransferCancelledError() {
-    const error = new Error("Transfer cancelled because a transfer tab was closed.");
+    const error = new Error("Transfer cancelled.");
     error.code = "user_cancelled";
     return error;
   }
@@ -1334,11 +1338,43 @@
   function cancelSourceTransfer(transferId, trace = activeTransferTrace) {
     if (!trace || trace.id !== transferId || trace.completed) return;
     trace.cancelled = true;
+    if (activeTransferTrace === trace) {
+      resetRunningFlag({ immediate: true });
+      document.getElementById("context-generator-fallback-modal")?.remove();
+    }
     recordTransferFailureDiagnostics(trace, createTransferCancelledError());
     updateTransferDiagnostics(trace, { cancelled: true }, "cancelled");
     markTransferTrace(trace, "failed: Transfer cancelled.");
     finishTransferTrace(trace, "user_cancelled");
-    if (activeTransferTrace === trace) resetRunningFlag();
+  }
+
+  function cancelLocalTransfer(transferId) {
+    if (!transferId) return;
+    const ownsStatus = activePasteGuards.has(transferId) || destinationWaitingStatus?.transferId === transferId;
+    // Latch before cancelling guards: a queued paste can arrive after Escape
+    // while the worker is still waking up to revoke the remote operation.
+    cancelledTransferIds.add(transferId);
+    if (cancelledTransferIds.size > 32) cancelledTransferIds.delete(cancelledTransferIds.values().next().value);
+    activePasteGuards.get(transferId)?.cancel();
+    endDestinationWaitingStatus(transferId);
+    cancelSourceTransfer(transferId);
+    if (ownsStatus) document.getElementById(DESTINATION_STATUS_ID)?.remove();
+  }
+
+  function handleTransferEscape(event) {
+    // Capture before native composer handlers. Our own synthetic Escape used
+    // to close attachment panels must never cancel a user's transfer.
+    if (event.key !== "Escape" || !event.isTrusted) return;
+    const ids = new Set(activePasteGuards.keys());
+    if (activeTransferTrace && !activeTransferTrace.completed) ids.add(activeTransferTrace.id);
+    if (destinationWaitingStatus) ids.add(destinationWaitingStatus.transferId);
+    if (!ids.size) return;
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    // Release visible UI and block local writes synchronously; no worker,
+    // telemetry or network acknowledgement belongs on this critical path.
+    for (const id of ids) cancelLocalTransfer(id);
+    for (const id of ids) notifyBackground({ type: "CANCEL_TRANSFER", transferId: id }).catch(() => {});
   }
 
   function createConversationGuard(message, identify = (location) => location.pathname + (location.search || ""), onChange = null) {
@@ -2778,6 +2814,7 @@
   }
 
   async function pasteIntoPlatformObserved(text, destinationId, transferId, deadlineAt, sourceTabId, diagnostics, diagnosticStartedAt) {
+    if (cancelledTransferIds.has(transferId)) throw createTransferCancelledError();
     checkTransferDeadline({ deadlineAt });
     cancelPendingPasteRecheck();
     const destination = getPlatform(destinationId) || currentPlatform;
@@ -8001,7 +8038,11 @@
       preparedDestinationPromise = preparedDestinationPromise || prepareDestinationTab(destinationId, trace);
       runContextFlow(destinationId, preparedDestinationPromise, conversationText, trace);
     } catch (error) {
-      if (trace.expired) return;
+      if (error?.code === "user_cancelled") {
+        cancelSourceTransfer(trace.id, trace);
+        return;
+      }
+      if (trace.expired || trace.cancelled) return;
       recordTransferFailureDiagnostics(trace, error);
       markTransferTrace(trace, `failed: ${error.message}`);
       finishTransferTrace(trace, getSafeTelemetryFailureReason(error, "capture"));
@@ -10538,12 +10579,12 @@
     scheduleFloatingButtonUpdate("focusin");
   }
 
-  function resetRunningFlag() {
+  function resetRunningFlag({ immediate = false } = {}) {
     sourceReplySnapshot = null;
     isRunning = false;
     activeTransferTrace = null;
     clearRunningResetTimer();
-    hideOverlay();
+    hideOverlay({ immediate });
   }
 
   function clearRunningResetTimer() {

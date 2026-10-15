@@ -31,6 +31,7 @@ function loadTransferFlow(overrides) {
     DESTINATION_SHEET_EXIT_MS: 0, NO_CONVERSATION_ERROR_MESSAGE: "No conversation",
     activeTransferTrace: null, isRunning: false, runningResetTimer: null,
     pickerJsonCapture: null, pendingJsonCapture: Promise.resolve(), instanceActive: true,
+    document: { getElementById: () => null },
     getConversationTurns: () => [],
     isSourceReplyInProgress: () => false,
     setTimeout: () => 1, setInterval: () => 1, clearInterval() {},
