@@ -35,12 +35,13 @@ const OPENROUTER_CHAT_COMPLETIONS_URL = "https://openrouter.ai/api/v1/chat/compl
 // Owner-controlled code switch. Keep the key in server environment variables;
 // changing this flag never adds a picker/settings control or a paid route.
 const TOKENHARBOR_ENABLED = true;
-// Use the first enabled entry only: switching models keeps one TokenHarbor slice
-// in the shared free-provider window. Retain paused entries for easy rollback.
+// Select the main key's first enabled model. The second key has its own pinned
+// backup model; both attempts share one TokenHarbor slice, including retries.
 const TOKENHARBOR_MODELS = [
   { model: "deepseek-v4.1-flash:free", enabled: false },
   { model: "claude-haiku-5.5:free", enabled: true }
 ];
+const TOKENHARBOR_BACKUP_MODEL = "deepseek-v4.1-flash:free";
 const TOKENHARBOR_CHAT_COMPLETIONS_URL = "https://tokenharbor.ai/v1/chat/completions";
 const TOKENHARBOR_SHARED_SLICE_MS = 45000;
 // DeepSeek counts thinking against max_tokens. The shared summary caps alone
@@ -313,7 +314,8 @@ async function handleSummary(conversation, responseChannel, requestContext = {})
     const tokenharborApiKey = TOKENHARBOR_ENABLED ? process.env.TOKENHARBOR_API_KEY : undefined;
     const tokenharborBackupApiKey = TOKENHARBOR_ENABLED ? process.env.TOKENHARBOR_BACKUP_API_KEY : undefined;
     const modelSelection = getGeneratedModelSelection(
-      conversation, Boolean(geminiApiKey), Boolean(openrouterApiKey), Boolean(mistralApiKey), Boolean(tokenharborApiKey?.trim() || tokenharborBackupApiKey?.trim())
+      conversation, Boolean(geminiApiKey), Boolean(openrouterApiKey), Boolean(mistralApiKey), Boolean(tokenharborApiKey?.trim()),
+      Boolean(tokenharborBackupApiKey?.trim() && tokenharborBackupApiKey.trim() !== tokenharborApiKey?.trim())
     );
     logModelSelection(modelSelection);
     const providerResult = await createSummaryWithFallback({
@@ -492,13 +494,13 @@ function getEnabledOpenRouterModels() {
 function getConfiguredSummaryRoutes({ geminiApiKey, mistralApiKey, openrouterApiKey, tokenharborApiKey, tokenharborBackupApiKey, tokenharborEnabled = TOKENHARBOR_ENABLED }) {
   const routes = [];
   const tokenharborRoute = TOKENHARBOR_MODELS.find(route => route.enabled);
-  // One model route owns both credentials; never create another time slice or
-  // model attempt for a second key. Selection diagnostics also use booleans here.
-  const [primaryKey, backupKey] = [...new Set([tokenharborApiKey, tokenharborBackupApiKey]
-    .map(key => typeof key === "string" ? key.trim() : key).filter(Boolean))];
+  const [primaryKey, backupKey] = [tokenharborApiKey, tokenharborBackupApiKey]
+    .map(key => typeof key === "string" ? key.trim() : key);
   if (tokenharborEnabled && primaryKey && tokenharborRoute) {
-    routes.push({ provider: SUMMARY_PROVIDERS.tokenharbor, model: tokenharborRoute.model, apiKey: primaryKey,
-      ...(backupKey ? { backupApiKey: backupKey } : {}) });
+    routes.push({ provider: SUMMARY_PROVIDERS.tokenharbor, model: tokenharborRoute.model, apiKey: primaryKey });
+  }
+  if (tokenharborEnabled && backupKey && backupKey !== primaryKey) {
+    routes.push({ provider: SUMMARY_PROVIDERS.tokenharbor, model: TOKENHARBOR_BACKUP_MODEL, apiKey: backupKey });
   }
   if (openrouterApiKey) {
     for (const model of getEnabledOpenRouterModels()) {
@@ -527,10 +529,15 @@ async function createSummaryWithFallback({ conversation, messages, platform, pro
   const openrouterModelsTried = [];
   const timings = { tokenharborMs: 0, openrouterMs: 0, geminiMs: 0, mistralMs: 0 };
   const unavailableProviders = new Set();
-  const deadline = Date.now() + REMOTE_CHAIN_BUDGET_MS;
+  const chainStartedAt = Date.now();
+  const deadline = chainStartedAt + REMOTE_CHAIN_BUDGET_MS;
   const sharedFreeWindow = routes[0]?.provider.id === "tokenharbor";
   const freeRouteCount = routes.filter(route => ["tokenharbor", "openrouter"].includes(route.provider.id)).length;
-  const freeDeadline = sharedFreeWindow ? deadline - REMOTE_CHAIN_BUDGET_MS + PROVIDER_ATTEMPT_TIMEOUT_MS : null;
+  const freeDeadline = sharedFreeWindow ? chainStartedAt + PROVIDER_ATTEMPT_TIMEOUT_MS : null;
+  // Main Haiku and backup DeepSeek own ONE absolute allowance. A second key
+  // must not restart the clock or consume OpenRouter's remaining free window.
+  const tokenharborDeadline = sharedFreeWindow ? chainStartedAt + (routes.some(route => route.provider.id === "openrouter")
+    ? TOKENHARBOR_SHARED_SLICE_MS : PROVIDER_ATTEMPT_TIMEOUT_MS) : null;
   // TokenHarbor and OpenRouter occupy ONE original 90s slot. Never count
   // TokenHarbor as another funded fallback or renew this window on retries.
   // With the code switch off/missing key, retain the original route budgets.
@@ -543,7 +550,7 @@ async function createSummaryWithFallback({ conversation, messages, platform, pro
   for (const [index, route] of routes.entries()) {
     requestContext.signal?.throwIfAborted();
     if (unavailableProviders.has(route.provider.id)) continue;
-    const { provider, model, apiKey, backupApiKey } = route;
+    const { provider, model, apiKey } = route;
     const remainingMs = deadline - Date.now();
     if (remainingMs <= 0) break;
     let routeBudgetMs = index === 0 ? PROVIDER_ATTEMPT_TIMEOUT_MS : fallbackBudgetMs;
@@ -552,7 +559,7 @@ async function createSummaryWithFallback({ conversation, messages, platform, pro
       if (freeRemainingMs <= 0) continue; // Funded fallbacks still have their own time.
       const remainingOpenRouterRoutes = routes.slice(index).filter(item => item.provider.id === "openrouter" && !unavailableProviders.has(item.provider.id)).length;
       routeBudgetMs = provider.id === "tokenharbor"
-        ? Math.min(remainingOpenRouterRoutes ? TOKENHARBOR_SHARED_SLICE_MS : PROVIDER_ATTEMPT_TIMEOUT_MS, freeRemainingMs)
+        ? Math.min(tokenharborDeadline - Date.now(), freeRemainingMs)
         : Math.floor(freeRemainingMs / Math.max(1, remainingOpenRouterRoutes));
     }
     const requestBudgetMs = Math.min(routeBudgetMs, remainingMs);
@@ -564,7 +571,7 @@ async function createSummaryWithFallback({ conversation, messages, platform, pro
     if (provider.id === "mistral") mistralModelsTried.push(model);
     try {
       const result = await createSummaryWithProvider({
-        provider, apiKey, backupApiKey, profile, model, requestBudgetMs, requestContext,
+        provider, apiKey, profile, model, requestBudgetMs, requestContext,
         initialMessages: provider.id === "gemini" ? geminiMessages : fallbackMessages
       });
       timings[`${provider.id}Ms`] += result.providerMs;
@@ -658,24 +665,7 @@ function createEmergencyDirectCarryResult({
   };
 }
 
-async function createSummaryWithProvider({ backupApiKey, ...options }) {
-  if (!backupApiKey) return createSummaryWithProviderAttempt(options);
-  const startedAt = Date.now();
-  try {
-    return await createSummaryWithProviderAttempt(options);
-  } catch (error) {
-    options.requestContext.signal?.throwIfAborted();
-    // Preserve the original route deadline, including same-key retries and
-    // body reads. An exhausted primary leaves no new allowance for the backup.
-    const remainingMs = options.requestBudgetMs - (Date.now() - startedAt);
-    if (remainingMs <= 0) throw error;
-    const result = await createSummaryWithProviderAttempt({ ...options, apiKey: backupApiKey, requestBudgetMs: remainingMs });
-    const elapsedMs = Date.now() - startedAt;
-    return { ...result, providerMs: elapsedMs, initialMs: elapsedMs };
-  }
-}
-
-async function createSummaryWithProviderAttempt({ provider, apiKey, profile, model, initialMessages, requestBudgetMs, requestContext }) {
+async function createSummaryWithProvider({ provider, apiKey, profile, model, initialMessages, requestBudgetMs, requestContext }) {
   const providerStartedAt = Date.now();
   const initialStartedAt = Date.now();
   const initialResponse = await requestProviderSummary(
@@ -915,10 +905,11 @@ function getLocalDirectModelSelection(conversation) {
   };
 }
 
-function getGeneratedModelSelection(conversation, geminiConfigured, openrouterConfigured = false, mistralConfigured = true, tokenharborConfigured = false) {
+function getGeneratedModelSelection(conversation, geminiConfigured, openrouterConfigured = false, mistralConfigured = true, tokenharborConfigured = false, tokenharborBackupConfigured = false) {
   const models = getConfiguredSummaryRoutes({
     geminiApiKey: geminiConfigured, openrouterApiKey: openrouterConfigured,
-    mistralApiKey: mistralConfigured, tokenharborApiKey: tokenharborConfigured
+    mistralApiKey: mistralConfigured, tokenharborApiKey: tokenharborConfigured,
+    tokenharborBackupApiKey: tokenharborBackupConfigured ? "configured-backup" : undefined
   }).map(route => route.model);
   return {
     model: models[0] || LOCAL_DIRECT_MODEL,
