@@ -2602,11 +2602,13 @@ async function run() {
       assert.equal(state.jsonRequests - jsonRequestsBeforeTransfer, 1, "One fresh API read must precede the error.");
       assert.equal(state.summaryRequests.length, 0, "A failed JSON read must not submit DOM history.");
       if (SIZE_CAPTURE_SMOKE) {
-        assert.match(failedCapture.error, DEEPSEEK_TRANSCRIPT_OVERSIZE_SMOKE ? /[\d,]+ characters.*500,000 characters/ : /[\d,]+ bytes.*[\d,]+ bytes/);
+        assert.match(failedCapture.error, DEEPSEEK_TRANSCRIPT_OVERSIZE_SMOKE ? /too large.*limit is 500,000 characters/ : /too large.*limit is [\d,]+ bytes/);
         const terminal = await waitFor(() => state.telemetryRequests.find(payload => payload.status === "failed"), "the terminal size rejection");
         assert.equal(terminal.last_stage, "capture_started", "Size rejection must stop before summary or paste.");
         assert.equal(terminal.failure_reason, "conversation_too_large");
         assert.equal(terminal.diagnostics.json_fallback_code, undefined);
+        const observedSize = terminal.diagnostics.json_attempts[0].failure_value;
+        assert.ok(!failedCapture.error.includes(observedSize.toLocaleString("en-US")), "The user's measured size stays in diagnostics, outside the error message.");
         if (DEEPSEEK_TRANSCRIPT_OVERSIZE_SMOKE) {
           assert.equal(terminal.diagnostics.json_attempts[0].failure_check, "transcript_char_limit");
           assert.ok(terminal.diagnostics.json_attempts[0].failure_value > 1000000);

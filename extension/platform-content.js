@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-15-size-stop-v150";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-15-size-stop-v151";
   const INLINE_PILL_SIZE = 36;
   const ownedUiStyleSheets = new Map();
   let handoffUserCss = "";
@@ -127,7 +127,7 @@
   // Claude, ChatGPT and Grok need focus before composer hydration/verification.
   // Their source-side completion cue must finish before the background performs the focused paste.
   const FOCUSED_PASTE_DESTINATIONS = new Set(["claude", "chatgpt", "grok"]);
-  const OVERSIZED_CONVERSATION_ERROR_MESSAGE = "This chat exceeds our limit of 500,000 characters. Try a smaller chat.";
+  const OVERSIZED_CONVERSATION_ERROR_MESSAGE = "This chat is too large to transfer. Our limit is 500,000 characters. Try a smaller chat.";
   const CONVERSATION_SCRAPE_RETRY_TIMEOUT_MS = 1800;
   const CONVERSATION_SCRAPE_RETRY_INTERVAL_MS = 140;
   const SOURCE_SCROLL_STABLE_TIMEOUT_MS = 1800;
@@ -7772,11 +7772,10 @@
   function getCaptureSizeLimitMessage(error) {
     const observation = error?.jsonCapture;
     const check = observation?.failure_check;
-    const value = observation?.failure_value;
     const limit = observation?.failure_limit;
-    // Use numeric guard observations only; native error prose may contain
-    // private response text. Bytes and transcript characters are distinct caps.
-    if (!Number.isSafeInteger(value) || !Number.isSafeInteger(limit) || value <= limit || limit <= 0) {
+    // Show our guard limit, keeping the user's measured size in diagnostics.
+    // Native error prose may contain private response text.
+    if (!Number.isSafeInteger(limit) || limit <= 0) {
       return error?.diagnostics?.capture_detail === "attachment_size_limit"
         ? "Text attachments exceed our limit of 2,100,000 bytes. Try smaller files."
         : OVERSIZED_CONVERSATION_ERROR_MESSAGE;
@@ -7784,7 +7783,7 @@
     const unit = check === "transcript_char_limit" ? "characters" : "bytes";
     const subject = check === "supported_files_limit" ? "Text attachments are"
       : check?.startsWith("raw_") ? "Chat data is" : "This chat is";
-    return `${subject} too large to transfer (${value.toLocaleString("en-US")} ${unit}). Our limit is ${limit.toLocaleString("en-US")} ${unit}. Try a smaller chat.`;
+    return `${subject} too large to transfer. Our limit is ${limit.toLocaleString("en-US")} ${unit}. Try a smaller chat.`;
   }
 
   function shouldRetrySourceJson(error) {

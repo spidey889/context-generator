@@ -414,7 +414,8 @@ test("size failures stop all five platforms without partial DOM transfer, includ
     assert.equal(calls.prepare + calls.dom + calls.notice + calls.flows.length, 0, "Never substitute the smaller visible history for rejected full content.");
     assert.equal(calls.destination, 1);
     assert.equal(calls.errors.length, 1);
-    assert.match(calls.errors[0], transcriptLimit ? /1,003,622 characters.*500,000 characters/ : /6,000,001 bytes.*6,000,000 bytes/);
+    assert.match(calls.errors[0], transcriptLimit ? /too large.*limit is 500,000 characters/ : /too large.*limit is 6,000,000 bytes/);
+    assert.doesNotMatch(calls.errors[0], /1,003,622|6,000,001/);
     assert.equal(context.isRunning, false);
     const diagnostics = calls.finished[0].diagnostics;
     assert.equal(diagnostics.error_code, "conversation_too_large");
@@ -434,7 +435,8 @@ test("attachment and transcript byte rejections show their own numeric limits", 
     context.window.__capCaptureNetworkJson = async () => { throw error; };
     await context.start("claude");
     assert.equal(calls.errors.length, 1);
-    assert.match(calls.errors[0], new RegExp(`${(limit + 1).toLocaleString("en-US")} bytes.*${limit.toLocaleString("en-US")} bytes`));
+    assert.match(calls.errors[0], new RegExp(`limit is ${limit.toLocaleString("en-US")} bytes`));
+    assert.ok(!calls.errors[0].includes((limit + 1).toLocaleString("en-US")));
     assert.equal(calls.dom + calls.flows.length, 0);
   }
 });
