@@ -299,9 +299,15 @@ test("ChatGPT rejects corrupt history text before draining its tail and permits 
   assert.doesNotMatch(JSON.stringify(malformed.replies), /PRIVATE_SENTINEL|TEST_ONLY/);
 });
 
-function paddedJson(data, size) {
-  const prefix = Buffer.from(JSON.stringify(data).slice(0, -1) + ',"ignored":"');
-  return Buffer.concat([prefix, Buffer.alloc(size - prefix.length - 2, 32), Buffer.from('"}')]);
+function paddedJson(data, size, { bom = false } = {}) {
+  const prefix = Buffer.from((bom ? "\uFEFF" : "") + JSON.stringify(data).slice(0, -1) + ',"ignored":"');
+  assert.ok(size >= prefix.length + 2, "The exact-size JSON fixture must fit its prefix and closing bytes.");
+  // Fill the final body once; a separate padding buffer would copy another
+  // 26-32 MB per fixture. Include any BOM here to avoid a second full-body copy.
+  const bytes = Buffer.alloc(size, 32);
+  prefix.copy(bytes);
+  bytes.write('"}', size - 2);
+  return bytes;
 }
 
 test("ChatGPT discards large alternate branches and descendants before the bridge and keeps full-tree counts", async () => {
@@ -314,8 +320,15 @@ test("ChatGPT discards large alternate branches and descendants before the bridg
   } };
   data.total_node_count = Object.keys(data.mapping).length;
   data.page_info.total_message_count = data.total_node_count - 1;
-  assert.ok(Buffer.byteLength(JSON.stringify(data)) > 6000000);
-  const harness = setup(data); await discover(harness);
+  const history = Buffer.from(JSON.stringify(data));
+  assert.ok(history.length > 6000000);
+  // Discovery observes auth headers only; its native response stays unread.
+  // Encode the large owned-capture history once, without a throwaway copy.
+  const harness = setup(data, 200, { fetchImpl: request => new Response(
+    request.url.startsWith("/backend-api/conversation/") ? history : "{}",
+    { headers: { "content-type": "application/json" } }
+  ) });
+  await discover(harness);
   assert.equal((await harness.window.__capCaptureChatGptJson()).text,
     "ChatGPT conversation:\n\nUser: Question\n\nAssistant: Selected answer");
   const reply = harness.replies.at(-1);
@@ -345,7 +358,12 @@ test("ChatGPT reports the selected text limit after reading a history larger tha
   const data = fixture();
   data.mapping.answer.message.content.parts = ["x".repeat(1300000)];
   data.mapping.answer.message.metadata = { ignored: "x".repeat(5000000) };
-  const harness = setup(data); await discover(harness);
+  const history = Buffer.from(JSON.stringify(data));
+  const harness = setup(data, 200, { fetchImpl: request => new Response(
+    request.url.startsWith("/backend-api/conversation/") ? history : "{}",
+    { headers: { "content-type": "application/json" } }
+  ) });
+  await discover(harness);
   await assert.rejects(harness.window.__capCaptureChatGptJson(), error => {
     assert.equal(error.captureFailureReason, "size_limit");
     assert.match(error.message, /500,000/);
@@ -357,7 +375,7 @@ test("ChatGPT accepts exactly 32 MB of history with split BOM and Unicode while 
   const data = fixture();
   const text = "  café🙂\r\n\uFEFF  original text  ";
   data.mapping.question.message.content.parts = [text];
-  const bytes = Buffer.concat([Buffer.from("\uFEFF"), paddedJson(data, 31999997)]);
+  const bytes = paddedJson(data, 32000000, { bom: true });
   const split = bytes.indexOf(Buffer.from("🙂")) + 1;
   const streamed = streamJsonChunks([bytes.subarray(0, 1), bytes.subarray(1, 2), bytes.subarray(2, split),
     bytes.subarray(split, split + 1), bytes.subarray(split + 1)], { "content-length": "32000000" });

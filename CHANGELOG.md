@@ -4,6 +4,8 @@ A short history of decisions and regressions that matter when changing the code.
 
 ## 2026-10-15
 
+- **Reduced large ChatGPT test-fixture copies.** Exact-size histories now allocate their final buffer once, including the split-BOM case. The alternate-branch and selected-text-limit fixtures encode owned history once and return a small unread auth-discovery body. Retained real 32 MB acceptance/one-byte overflow, exact Unicode and source payloads, stream cleanup, manifest guard order and all existing test cases. Test construction only; production code is unchanged.
+
 - **Moved the real-Git CI-scope fixture to the slow suite.** The regular command skips that fixture; `npm run test:slow` now includes it alongside the physical-scroll regression. Its temporary Git history and all assertions remain intact. The full gate still runs both suites, and lightweight CI retains its direct CI-scope check. This changes test selection only.
 
 - **Ran a four-request summary screen.** Compared Haiku 5.5, DeepSeek V4.1 Flash, MiMo V2.6 Flash and Dots once each on the same 1,341-character synthetic case and v21 prompt. Source review tied DeepSeek/MiMo first; Haiku changed a required heading, while Dots omitted the header and changed rollback from unapproved to rejected. Retained complete outputs, usage, timings and hash-bound review evidence. Added a dated image in the existing dark style, preserving ties and the older archive. This small screen is not a full v1 level or general reliability claim; no production behavior changed. See [results and limitations](evaluation/capcontext-bench/baselines/2026-10-15-small-screen/README.md).
