@@ -52,200 +52,56 @@ jobs:
       - name: Install locked test dependencies
         if: steps.scope.outputs.mode != 'light'
         run: npm ci --no-audit --no-fund
-      - name: Deterministic tests
+      - name: Code and SQL checks alongside Brave installation
         if: steps.scope.outputs.mode != 'light'
-        run: npm test
-      - name: Long capture regressions
-        if: steps.scope.outputs.mode != 'light'
-        run: npm run test:slow
+        shell: bash
+        run: |
+          mkdir -p .test-artifacts/ci-setup
+          # Independent setup only: preserve test order and wait for both exits.
+          (
+            set -e
+            echo "Running deterministic tests"
+            npm test
+            echo "Running long capture regressions"
+            npm run test:slow
+            echo "Replaying SQL and verifying telemetry contracts"
+            timeout --kill-after=5s 300s node scripts/check-verified-telemetry-db.js
+          ) > .test-artifacts/ci-setup/code.log 2>&1 &
+          checks_pid=$!
 
-      - name: Replay real SQL and verify telemetry contracts
+          install_status=0
+          timeout --kill-after=5s 120s bash -e -o pipefail -c '
+            sudo curl --connect-timeout 10 --max-time 30 --retry 2 --retry-max-time 60 -fsSLo /usr/share/keyrings/brave-browser-archive-keyring.gpg https://brave-browser-apt-release.s3.brave.com/brave-browser-archive-keyring.gpg
+            sudo curl --connect-timeout 10 --max-time 30 --retry 2 --retry-max-time 60 -fsSLo /etc/apt/sources.list.d/brave-browser-release.sources https://brave-browser-apt-release.s3.brave.com/brave-browser.sources
+            sudo apt-get update -qq
+            sudo apt-get install -y --no-install-recommends brave-browser xvfb
+          ' > .test-artifacts/ci-setup/brave-install.log 2>&1 || install_status=$?
+
+          checks_status=0
+          wait "$checks_pid" || checks_status=$?
+          echo "::group::Code and SQL checks"
+          cat .test-artifacts/ci-setup/code.log
+          echo "::endgroup::"
+          echo "::group::Brave installation"
+          cat .test-artifacts/ci-setup/brave-install.log
+          echo "::endgroup::"
+          if (( checks_status != 0 || install_status != 0 )); then
+            echo "::error::Code/SQL exit: $checks_status; Brave installation exit: $install_status"
+            exit 1
+          fi
+      - name: Brave fixtures on two isolated displays
         if: steps.scope.outputs.mode != 'light'
-        timeout-minutes: 5
-        run: node scripts/check-verified-telemetry-db.js
-      - name: Install Brave for local browser fixtures
-        if: steps.scope.outputs.mode != 'light'
-        timeout-minutes: 2
-        run: |
-          sudo curl --connect-timeout 10 --max-time 30 --retry 2 --retry-max-time 60 -fsSLo /usr/share/keyrings/brave-browser-archive-keyring.gpg https://brave-browser-apt-release.s3.brave.com/brave-browser-archive-keyring.gpg
-          sudo curl --connect-timeout 10 --max-time 30 --retry 2 --retry-max-time 60 -fsSLo /etc/apt/sources.list.d/brave-browser-release.sources https://brave-browser-apt-release.s3.brave.com/brave-browser.sources
-          sudo apt-get update -qq
-          sudo apt-get install -y --no-install-recommends brave-browser xvfb
-      - name: Brave handoff palette resists theme copies under strict CSP
-        if: steps.scope.outputs.mode != 'light'
-        timeout-minutes: 1
         env:
-          CAP_CONTEXT_HANDOFF_PALETTE_SMOKE: "1"
-          CAP_CONTEXT_HANDOFF_CSP_SMOKE: "1"
-        run: xvfb-run -a npm run test:extension-smoke
-      - name: Brave DOM transfer, placement and local telemetry database
-        if: steps.scope.outputs.mode != 'light'
-        timeout-minutes: 3
-        shell: bash
-        env:
-          CAP_CONTEXT_TELEMETRY_SMOKE: "1"
-          CAP_CONTEXT_SMOKE_ARTIFACT_DIR: .test-artifacts/browser-smoke/dom-telemetry
-        run: |
-          mkdir -p "$CAP_CONTEXT_SMOKE_ARTIFACT_DIR"
-          xvfb-run -a npm run test:extension-smoke 2>&1 | tee "$CAP_CONTEXT_SMOKE_ARTIFACT_DIR/run.log"
-      - name: Brave Escape cancels source and destination transfers
-        if: steps.scope.outputs.mode != 'light'
-        timeout-minutes: 2
-        shell: bash
-        run: |
-          for side in source destination; do
-            CAP_CONTEXT_ESCAPE_SMOKE="$side" xvfb-run -a npm run test:extension-smoke
-          done
-      - name: Brave ChatGPT long paste stays in the editor once
-        if: steps.scope.outputs.mode != 'light'
-        timeout-minutes: 2
-        env:
-          CAP_CONTEXT_CHATGPT_PASTE_SMOKE: "1"
-        run: xvfb-run -a npm run test:extension-smoke
-      - name: Brave paste deadlines and delayed composer recovery
-        if: steps.scope.outputs.mode != 'light' && inputs.extended_browser_checks == true
-        timeout-minutes: 2
-        shell: bash
-        env:
-          CAP_CONTEXT_PASTE_RECOVERY_SMOKE: "1"
-          CAP_CONTEXT_SMOKE_ARTIFACT_DIR: .test-artifacts/browser-smoke/paste-recovery
-        run: |
-          mkdir -p "$CAP_CONTEXT_SMOKE_ARTIFACT_DIR"
-          xvfb-run -a npm run test:extension-smoke 2>&1 | tee "$CAP_CONTEXT_SMOKE_ARTIFACT_DIR/run.log"
-      - name: Brave first draft opens both copy dialogs without another tab
-        if: steps.scope.outputs.mode != 'light'
-        timeout-minutes: 2
-        shell: bash
-        env:
-          CAP_CONTEXT_DRAFT_TRANSFER_SMOKE: "1"
-          CAP_CONTEXT_TELEMETRY_SMOKE: "1"
-          CAP_CONTEXT_SMOKE_ARTIFACT_DIR: .test-artifacts/browser-smoke/draft-transfer
-        run: |
-          mkdir -p "$CAP_CONTEXT_SMOKE_ARTIFACT_DIR"
-          xvfb-run -a npm run test:extension-smoke 2>&1 | tee "$CAP_CONTEXT_SMOKE_ARTIFACT_DIR/run.log"
-      - name: Brave streaming summary reveals the destination before completion
-        if: steps.scope.outputs.mode != 'light' && inputs.extended_browser_checks == true
-        timeout-minutes: 2
-        shell: bash
-        env:
-          CAP_CONTEXT_EARLY_HANDOFF_SMOKE: stream
-          CAP_CONTEXT_SMOKE_ARTIFACT_DIR: .test-artifacts/browser-smoke/early-handoff
-        run: |
-          mkdir -p "$CAP_CONTEXT_SMOKE_ARTIFACT_DIR"
-          xvfb-run -a npm run test:extension-smoke 2>&1 | tee "$CAP_CONTEXT_SMOKE_ARTIFACT_DIR/run.log"
-      - name: Brave ChatGPT fast capture after reload and expired-token cancellation
-        if: steps.scope.outputs.mode != 'light'
-        timeout-minutes: 3
-        shell: bash
-        env:
-          CAP_CONTEXT_JSON_SMOKE: chatgpt
-          CAP_CONTEXT_CHATGPT_RELOAD_SMOKE: "1"
-          CAP_CONTEXT_TOOLBAR_SMOKE: "1"
-          CAP_CONTEXT_CHATGPT_AUTH_SMOKE: paste401
-          CAP_CONTEXT_SMOKE_ARTIFACT_DIR: .test-artifacts/browser-smoke/chatgpt-reload
-        run: |
-          mkdir -p "$CAP_CONTEXT_SMOKE_ARTIFACT_DIR"
-          xvfb-run -a npm run test:extension-smoke 2>&1 | tee "$CAP_CONTEXT_SMOKE_ARTIFACT_DIR/run.log"
-      - name: Brave JSON retry after offline picker capture
-        if: steps.scope.outputs.mode != 'light'
-        timeout-minutes: 2
-        shell: bash
-        env:
-          CAP_CONTEXT_JSON_SMOKE: chatgpt
-          CAP_CONTEXT_JSON_RETRY_SMOKE: "1"
-          CAP_CONTEXT_SMOKE_ARTIFACT_DIR: .test-artifacts/browser-smoke/json-retry
-        run: |
-          mkdir -p "$CAP_CONTEXT_SMOKE_ARTIFACT_DIR"
-          xvfb-run -a npm run test:extension-smoke 2>&1 | tee "$CAP_CONTEXT_SMOKE_ARTIFACT_DIR/run.log"
-      - name: Brave ChatGPT oversized paste cancellation without DOM fallback
-        if: steps.scope.outputs.mode != 'light' && inputs.extended_browser_checks == true
-        timeout-minutes: 3
-        shell: bash
-        env:
-          CAP_CONTEXT_JSON_SMOKE: chatgpt
-          CAP_CONTEXT_CHATGPT_FAILURE_SMOKE: paste-oversize
-          CAP_CONTEXT_SMOKE_ARTIFACT_DIR: .test-artifacts/browser-smoke/paste-budget
-        run: |
-          mkdir -p "$CAP_CONTEXT_SMOKE_ARTIFACT_DIR"
-          xvfb-run -a npm run test:extension-smoke 2>&1 | tee "$CAP_CONTEXT_SMOKE_ARTIFACT_DIR/run.log"
-      - name: Brave ChatGPT oversized history cancellation without DOM fallback
-        if: steps.scope.outputs.mode != 'light' && inputs.extended_browser_checks == true
-        timeout-minutes: 3
-        shell: bash
-        env:
-          CAP_CONTEXT_JSON_SMOKE: chatgpt
-          CAP_CONTEXT_CHATGPT_FAILURE_SMOKE: history-oversize
-          CAP_CONTEXT_SMOKE_ARTIFACT_DIR: .test-artifacts/browser-smoke/chatgpt-history-budget
-        run: |
-          mkdir -p "$CAP_CONTEXT_SMOKE_ARTIFACT_DIR"
-          xvfb-run -a npm run test:extension-smoke 2>&1 | tee "$CAP_CONTEXT_SMOKE_ARTIFACT_DIR/run.log"
-      - name: Brave Claude CRLF pasted-card capture and partial fallback
-        if: steps.scope.outputs.mode != 'light' && inputs.extended_browser_checks == true
-        timeout-minutes: 3
-        shell: bash
-        env:
-          CAP_CONTEXT_JSON_SMOKE: "1"
-          CAP_CONTEXT_CLAUDE_PARTIAL_SMOKE: "1"
-          CAP_CONTEXT_SMOKE_ARTIFACT_DIR: .test-artifacts/browser-smoke/claude-fallback
-        run: |
-          mkdir -p "$CAP_CONTEXT_SMOKE_ARTIFACT_DIR/complete"
-          CAP_CONTEXT_CLAUDE_PARTIAL_SMOKE="" CAP_CONTEXT_SMOKE_ARTIFACT_DIR="$CAP_CONTEXT_SMOKE_ARTIFACT_DIR/complete" \
-            xvfb-run -a npm run test:extension-smoke 2>&1 | tee "$CAP_CONTEXT_SMOKE_ARTIFACT_DIR/complete/run.log"
-          mkdir -p "$CAP_CONTEXT_SMOKE_ARTIFACT_DIR"
-          xvfb-run -a npm run test:extension-smoke 2>&1 | tee "$CAP_CONTEXT_SMOKE_ARTIFACT_DIR/run.log"
-      - name: Brave Claude oversized history cancellation without DOM fallback
-        if: steps.scope.outputs.mode != 'light' && inputs.extended_browser_checks == true
-        timeout-minutes: 3
-        shell: bash
-        env:
-          CAP_CONTEXT_JSON_SMOKE: "1"
-          CAP_CONTEXT_CLAUDE_PARTIAL_SMOKE: oversize
-          CAP_CONTEXT_SMOKE_ARTIFACT_DIR: .test-artifacts/browser-smoke/claude-oversize
-        run: |
-          mkdir -p "$CAP_CONTEXT_SMOKE_ARTIFACT_DIR"
-          xvfb-run -a npm run test:extension-smoke 2>&1 | tee "$CAP_CONTEXT_SMOKE_ARTIFACT_DIR/run.log"
-      - name: Brave Gemini bootstrap JSON capture and response-menu-free fallback
-        if: steps.scope.outputs.mode != 'light' && inputs.extended_browser_checks == true
-        timeout-minutes: 3
-        shell: bash
-        env:
-          CAP_CONTEXT_JSON_SMOKE: gemini
-          CAP_CONTEXT_NETWORK_FAILURE_SMOKE: partial
-          CAP_CONTEXT_SMOKE_ARTIFACT_DIR: .test-artifacts/browser-smoke/gemini-capture
-        run: |
-          mkdir -p "$CAP_CONTEXT_SMOKE_ARTIFACT_DIR/complete"
-          CAP_CONTEXT_NETWORK_FAILURE_SMOKE="" CAP_CONTEXT_SMOKE_ARTIFACT_DIR="$CAP_CONTEXT_SMOKE_ARTIFACT_DIR/complete" \
-            xvfb-run -a npm run test:extension-smoke 2>&1 | tee "$CAP_CONTEXT_SMOKE_ARTIFACT_DIR/complete/run.log"
-          mkdir -p "$CAP_CONTEXT_SMOKE_ARTIFACT_DIR"
-          xvfb-run -a npm run test:extension-smoke 2>&1 | tee "$CAP_CONTEXT_SMOKE_ARTIFACT_DIR/run.log"
-      - name: Brave DeepSeek concurrent original-file capture
-        if: steps.scope.outputs.mode != 'light'
-        timeout-minutes: 3
-        shell: bash
-        env:
-          CAP_CONTEXT_JSON_SMOKE: deepseek
-          CAP_CONTEXT_SMOKE_ARTIFACT_DIR: .test-artifacts/browser-smoke/deepseek-files
-          CAP_CONTEXT_REPLY_SNAPSHOT_SMOKE: "1"
-        run: |
-          mkdir -p "$CAP_CONTEXT_SMOKE_ARTIFACT_DIR"
-          xvfb-run -a npm run test:extension-smoke 2>&1 | tee "$CAP_CONTEXT_SMOKE_ARTIFACT_DIR/run.log"
-      - name: Brave DeepSeek oversized history cancellation without DOM fallback
-        if: steps.scope.outputs.mode != 'light' && inputs.extended_browser_checks == true
-        timeout-minutes: 3
-        shell: bash
-        env:
-          CAP_CONTEXT_JSON_SMOKE: deepseek
-          CAP_CONTEXT_NETWORK_FAILURE_SMOKE: oversize
-          CAP_CONTEXT_SMOKE_ARTIFACT_DIR: .test-artifacts/browser-smoke/history-budget
-        run: |
-          mkdir -p "$CAP_CONTEXT_SMOKE_ARTIFACT_DIR"
-          xvfb-run -a npm run test:extension-smoke 2>&1 | tee "$CAP_CONTEXT_SMOKE_ARTIFACT_DIR/run.log"
+          CI_EXTENDED_BROWSER_CHECKS: ${{ inputs.extended_browser_checks }}
+        run: node scripts/run-ci-browser-checks.js
       - name: Browser failure screenshots and logs
         if: failure() && !cancelled()
         uses: actions/upload-artifact@v4
         with:
           name: browser-smoke-failure
-          path: .test-artifacts/browser-smoke/
+          path: |
+            .test-artifacts/browser-smoke/
+            .test-artifacts/ci-setup/
           include-hidden-files: true
           if-no-files-found: ignore
           retention-days: 7
