@@ -1262,8 +1262,8 @@ async function verifyEscapeCancellation({ sourceSession, devToolsPort, origin, s
   assert.equal(await destination.evaluate("window.__capContextSmokeSendClicks"), 0);
   // A tab activation acknowledgement can precede native editor focus. Target
   // the composer and await that state before sending the one trusted Escape.
-  await session.evaluate('document.querySelector("textarea").focus()');
-  await waitFor(() => session.evaluate('document.visibilityState === "visible" && document.hasFocus() && document.activeElement === document.querySelector("textarea")'), "the focused Escape composer");
+  await session.evaluate('document.querySelector(\'textarea, [contenteditable="true"]\').focus()');
+  await waitFor(() => session.evaluate('document.visibilityState === "visible" && document.hasFocus() && document.activeElement === document.querySelector(\'textarea, [contenteditable="true"]\')'), "the focused Escape composer");
   const escapeStartedAt = Date.now();
   try {
     await session.call("Input.dispatchKeyEvent", { type: "keyDown", key: "Escape", code: "Escape", windowsVirtualKeyCode: 27 });
