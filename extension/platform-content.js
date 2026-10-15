@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-15-picker-preload-v153";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-15-paste-four-dots-v154";
   const INLINE_PILL_SIZE = 36;
   const ownedUiStyleSheets = new Map();
   let handoffUserCss = "";
@@ -872,7 +872,7 @@
     finishDestinationWaitingStatus(transferId, result);
   }
 
-  function showDestinationPasteStatus(text = "Pasting your context…") {
+  function showDestinationPasteStatus(text = "Pasting your context....") {
     // Warmup can run before body exists; page hydration can also replace body.
     // Keep the cue outside that mount so a successful reply means visible UI.
     const statusRoot = document.documentElement || document.body;

@@ -2486,7 +2486,7 @@ clockTest("destination status follows verified insertion and cleans up without s
   const response = new Promise(resolve => { respond = resolve; });
   assert.equal(listener({ type: "PASTE_CONTEXT", destination: "chatgpt", text: "context ready", deadlineAt: Date.now() + 10000 }, {}, respond), true);
   const cue = hooks.document.getElementById("context-generator-destination-status");
-  assert.equal(cue.textContent, "Pasting your context…");
+  assert.equal(cue.textContent, "Pasting your context....");
   assert.equal(cue.getAttribute("role"), "status");
   const result = await response;
   assert.equal(result.ok, true);
