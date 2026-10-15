@@ -61,12 +61,13 @@ const CHATGPT_RELOAD_SMOKE = JSON_SOURCE === "chatgpt" && process.env.CAP_CONTEX
 const JSON_RELOAD_SMOKE = CLAUDE_RELOAD_SMOKE || CHATGPT_RELOAD_SMOKE;
 const CHATGPT_FAILURE_SMOKE = JSON_SOURCE === "chatgpt" ? process.env.CAP_CONTEXT_CHATGPT_FAILURE_SMOKE || "" : "";
 const CHATGPT_PASTE_OVERSIZE_SMOKE = CHATGPT_FAILURE_SMOKE === "paste-oversize";
+const CHATGPT_DECLARED_PASTE_OVERSIZE_SMOKE = CHATGPT_FAILURE_SMOKE === "paste-declared-oversize";
 const CHATGPT_HISTORY_OVERSIZE_SMOKE = CHATGPT_FAILURE_SMOKE === "history-oversize";
 const CHATGPT_PASTE_AUTH_SMOKE = JSON_SOURCE === "chatgpt" && process.env.CAP_CONTEXT_CHATGPT_AUTH_SMOKE === "paste401";
 const CLAUDE_PARTIAL_SMOKE = JSON_SOURCE === "claude" && process.env.CAP_CONTEXT_CLAUDE_PARTIAL_SMOKE === "1";
 const CLAUDE_OVERSIZE_SMOKE = JSON_SOURCE === "claude" && process.env.CAP_CONTEXT_CLAUDE_PARTIAL_SMOKE === "oversize";
 const SIZE_CAPTURE_SMOKE = Boolean(CLAUDE_OVERSIZE_SMOKE || DEEPSEEK_OVERSIZE_SMOKE || DEEPSEEK_TRANSCRIPT_OVERSIZE_SMOKE
-  || CHATGPT_PASTE_OVERSIZE_SMOKE || CHATGPT_HISTORY_OVERSIZE_SMOKE);
+  || CHATGPT_DECLARED_PASTE_OVERSIZE_SMOKE || CHATGPT_HISTORY_OVERSIZE_SMOKE);
 const JSON_FALLBACK_SMOKE = Boolean((CLAUDE_PARTIAL_SMOKE || NETWORK_FAILURE) && !SIZE_CAPTURE_SMOKE);
 const EXPECTED_JSON_FALLBACK_REASON = GROK_FILE_ONLY_SMOKE ? "unsupported" : "incomplete";
 const EXPECTED_JSON_FALLBACK_NOTICE = "Fast capture failed. Using normal capture instead.";
@@ -574,12 +575,13 @@ function destinationFixture() {
 }
 
 function chatGptTreeFixture() {
+  // One byte above the real pasted-file cap tests admission without downloading.
   const mapping = { root: { id: "root", parent: null, message: null } };
   let parent = "root";
   // A long tree with older API-only turns; the rendered fixture has two turns.
   for (let i = 0; i < 60; i++) {
     const user = `user-${i}`, assistant = `assistant-${i}`;
-    mapping[user] = { id: user, parent, message: { author: { role: "user" }, status: "finished_successfully", ...(i === 0 ? { metadata: { attachments: [{ id: "file_smoke_paste", is_big_paste: true, mime_type: "text/plain", size: Buffer.byteLength(CHATGPT_USER_PASTE) }] } } : {}), content: { content_type: "multimodal_text", parts: [i === 0 ? "" : `User history ${i}`, { content_type: "image_asset_pointer", text: "UNSUPPORTED_SENTINEL" }] } } };
+    mapping[user] = { id: user, parent, message: { author: { role: "user" }, status: "finished_successfully", ...(i === 0 ? { metadata: { attachments: [{ id: "file_smoke_paste", is_big_paste: true, mime_type: "text/plain", size: CHATGPT_DECLARED_PASTE_OVERSIZE_SMOKE ? 2100001 : Buffer.byteLength(CHATGPT_USER_PASTE) }] } } : {}), content: { content_type: "multimodal_text", parts: [i === 0 ? "" : `User history ${i}`, { content_type: "image_asset_pointer", text: "UNSUPPORTED_SENTINEL" }] } } };
     mapping[assistant] = { id: assistant, parent: user, message: { author: { role: "assistant" }, status: "finished_successfully", metadata: { is_complete: true }, content: { content_type: "text", parts: [i === 59 ? ASSISTANT_SENTINEL : `Assistant history ${i}`] } } };
     parent = assistant;
   }
@@ -1258,6 +1260,10 @@ async function verifyEscapeCancellation({ sourceSession, devToolsPort, origin, s
   await session.call("Emulation.setFocusEmulationEnabled", { enabled: true });
   assert.equal(await destination.evaluate('document.querySelector("textarea").value'), "");
   assert.equal(await destination.evaluate("window.__capContextSmokeSendClicks"), 0);
+  // A tab activation acknowledgement can precede native editor focus. Target
+  // the composer and await that state before sending the one trusted Escape.
+  await session.evaluate('document.querySelector("textarea").focus()');
+  await waitFor(() => session.evaluate('document.visibilityState === "visible" && document.hasFocus() && document.activeElement === document.querySelector("textarea")'), "the focused Escape composer");
   const escapeStartedAt = Date.now();
   try {
     await session.call("Input.dispatchKeyEvent", { type: "keyDown", key: "Escape", code: "Escape", windowsVirtualKeyCode: 27 });
@@ -2761,7 +2767,19 @@ async function run() {
         if (CHATGPT_FAILURE_SMOKE === "ranged") assert.equal(terminal.diagnostics.capture_http_status, 206);
         process.stdout.write("✓ Precise capture failure reached the real local relay, Edge and SQL without private content.\n");
       }
+      if (CHATGPT_DECLARED_PASTE_OVERSIZE_SMOKE) {
+        assert.equal(state.pasteDescriptorRequests, 0, "An over-budget paste manifest stops before descriptor reads.");
+        assert.equal(state.pasteContentRequests, 0, "An over-budget paste manifest starts no download.");
+        const terminal = state.telemetryRequests.find(payload => payload.status === "failed");
+        assert.equal(terminal.diagnostics.json_attempts[0].failure_check, "supported_files_limit");
+      }
       if (CHATGPT_PASTE_OVERSIZE_SMOKE) {
+        // This body contradicts its small declared size. It must hit the
+        // attachment-length guard, not masquerade as a conversation-size limit.
+        const terminal = await waitFor(() => state.telemetryRequests.find(payload => payload.status === "failed"), "the rejected paste length telemetry");
+        assert.equal(terminal.failure_reason, "capture_failed");
+        assert.equal(terminal.last_stage, "capture_started");
+        assert.equal(terminal.diagnostics.json_attempts[0].failure_check, "attachment_length_mismatch");
         await waitFor(() => state.oversizePaste.cancelled, "oversized paste reader cancellation");
         assert.ok(state.oversizePaste.bytes < 20000000, "The full oversized paste tail must not be downloaded.");
         assert.equal(state.pasteDescriptorRequests, CHATGPT_PASTE_AUTH_SMOKE ? 2 : 1);
