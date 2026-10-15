@@ -401,6 +401,8 @@ async function main() {
         checks += await require("./check-tokenharbor-db.js").checkTokenHarbor(db, sql);
       } else if (name.endsWith("_tokenharbor_deepseek_route.sql")) {
         checks += await require("./check-tokenharbor-db.js").checkTokenHarbor(db, sql, "deepseek-v4.1-flash:free");
+      } else if (name.endsWith("_short_dots_model_name.sql")) {
+        checks += await require("./check-served-model-db.js").checkDotsModelLabel(db, sql);
       } else await db.exec(sql);
     }
     checks += await require("./check-served-model-db.js").checkStoreModelReceipts(db);

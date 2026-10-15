@@ -4,6 +4,8 @@ A short history of decisions and regressions that matter when changing the code.
 
 ## 2026-10-15
 
+- **Shortened the database's Dots model name to `dots (free)`.** Applied migration `20261015172555` to existing and future attributed rows. Requests and signed receipts retain the full provider ID; queued retries, unsigned reports, later receipt upgrades and immutable verified models keep their existing behavior. All 1,158 real-SQL checks passed. Hosted verification confirmed exactly two renamed rows, all other values across 52 transfers unchanged, and identical users, counters, sequence, private access, other functions and reset job. Rolled-back service-role probes also verified new reports, receipt upgrades and duplicate counting.
+
 - **Project instructions now live in `AGENTS.md`.** Saved the owner's workspace, browser, documentation and automatic-push rules in the repository so future chats can discover them. Linked verification guidance to `LOGIC.md` and documented the existing exact-commit CI requirement for protected `master`.
 
 - **Picker setup moves before the first click.** After page load, idle preparation builds the hidden menu/styles, decodes its local logos and loads its title font. Later clicks reuse that UI; early clicks retain immediate creation. Preparation leaves focus and the existing entrance unchanged, starts no conversation work and is cancelled on teardown. Added lifecycle regressions and an installed-Brave check for loaded assets and hidden UI before the first opening. Extension distribution remains separate.

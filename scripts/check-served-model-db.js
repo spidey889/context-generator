@@ -135,7 +135,7 @@ async function checkStoreModelReceipts(db) {
     return response;
   };
   const counts = async () => (await db.query("select lifetime_summaries::int as total,today_summaries::int as today,today_failed_attempts::int as failed from public.users where install_id=$1", [install])).rows[0];
-  for (const [index, model] of ["local-direct", "inclusionai/ling-3.1-flash", "gemini-3.5-flash-lite"].entries()) {
+  for (const [index, model] of ["local-direct", "inclusionai/ling-3.1-flash", "gemini-3.5-flash-lite", "dots-studio/dots-3-note-preview:free"].entries()) {
     const event = { attempt_id: `c0de5706-0000-4000-8000-${String(index + 1).padStart(12, "0")}`,
       install_id: install, attempted_at: attempted, source_platform: "chatgpt", destination_platform: "claude",
       character_count: 5000, status: "started", last_stage: "summary_completed", failure_reason: null,
@@ -149,7 +149,7 @@ async function checkStoreModelReceipts(db) {
     const legacyProof = await createSummaryProof(event, secret);
     equal((await send({ ...terminal, summary_proof: legacyProof })).status, 204);
     const row = (await db.query("select model,status,failure_reason,summary_verified from public.transfers where attempt_id=$1", [event.attempt_id])).rows[0];
-    equal(row, { model: model === "inclusionai/ling-3.1-flash" ? "space bunny 2" : model,
+    equal(row, { model: model === "inclusionai/ling-3.1-flash" ? "space bunny 2" : model === "dots-studio/dots-3-note-preview:free" ? "dots (free)" : model,
       status: "failed", failure_reason: "paste_failed", summary_verified: true });
     equal(await counts(), { total: index + 1, today: index + 1, failed: index + 1 });
     equal((await send({ ...terminal, model: "made-up-model" })).status, 422);
@@ -241,4 +241,63 @@ async function checkReportedModelAttribution(db, sql) {
   console.log(`PASS: ${checks} reported/verified model, migration preservation, receipt priority and unchanged-counter checks.`);
   return checks;
 }
-module.exports = { checkServedModel, checkStoreModelReceipts, checkServedModelLabel, checkReportedModelAttribution };
+async function checkDotsModelLabel(db, sql) {
+  const provider = "dots-studio/dots-3-note-preview:free";
+  const install = "c0de5715-0000-4000-8000-000000000002";
+  const id = n => `c0de5715-0000-4000-8000-${String(n).padStart(12, "0")}`;
+  const confirmed = new Date().toISOString();
+  let checks = 0;
+  const equal = (actual, expected) => { assert.deepEqual(actual, expected); checks++; };
+  const rows = async (query, params = []) => (await db.query(query, params)).rows;
+  const report = async (n, verified, status = "succeeded", model = provider) => {
+    await db.exec("set role service_role");
+    try {
+      await db.query(`select public.record_transfer_event(
+        $1::uuid,$2::text,$3::timestamptz,'chatgpt','claude',12000,$4::text,$5::text,$6::text,
+        '1.4.18',$7::boolean,null,$8::timestamptz,$9::text,$10::text)`,
+      [id(n), install, confirmed, status, status === "failed" ? "paste_started" : "completed",
+        status === "failed" ? "paste_failed" : null, verified, verified ? confirmed : null,
+        verified ? model : null, model]);
+    } finally { await db.exec("reset role"); }
+  };
+  const snapshot = async () => ({
+    transfers: await rows("select to_jsonb(t)-'model' as row from public.transfers t order by attempt_id"),
+    users: await rows("select to_jsonb(u) as row from public.users u order by install_id"),
+    sequence: await rows("select last_value,is_called from public.users_user_no_seq"),
+    cron: await rows("select to_jsonb(j) as row from cron.job j order by jobid"),
+    access: await rows("select oid::regclass::text,relacl::text,relrowsecurity from pg_class where oid in ('public.transfers'::regclass,'public.users'::regclass) order by oid"),
+    functions: await rows("select proname,pg_get_functiondef(oid) as definition,proacl::text from pg_proc where pronamespace='public'::regnamespace and proname<>'preserve_transfer_event_invariants' order by oid")
+  });
+  const model = n => rows("select model,model_verified from public.transfers where attempt_id=$1", [id(n)]);
+  await report(1, true);
+  await report(2, false);
+  await report(3, true, "failed");
+  equal(await model(1), [{ model: provider, model_verified: true }]);
+  equal(await model(2), [{ model: provider, model_verified: false }]);
+  const before = await snapshot();
+  const otherModels = await rows("select attempt_id,model from public.transfers where model is distinct from $1 order by attempt_id", [provider]);
+  await db.exec(sql);
+  equal(await snapshot(), before);
+  equal(await rows("select attempt_id,model from public.transfers where model<>'dots (free)' or model is null order by attempt_id"), otherModels);
+  for (const [n, verified] of [[1, true], [2, false], [3, true]]) {
+    equal(await model(n), [{ model: "dots (free)", model_verified: verified }]);
+  }
+  await report(1, true); // Queued provider-ID receipts remain idempotent after renaming.
+  await report(2, false);
+  await report(3, true, "failed");
+  equal(await snapshot(), before);
+  await report(2, true); // A client report can still receive its genuine receipt.
+  equal(await model(2), [{ model: "dots (free)", model_verified: true }]);
+  const afterUpgrade = await snapshot();
+  await report(2, true);
+  equal(await snapshot(), afterUpgrade);
+  for (const [n, verified] of [[4, true], [5, false]]) {
+    await report(n, verified);
+    equal(await model(n), [{ model: "dots (free)", model_verified: verified }]);
+  }
+  await assert.rejects(() => db.query("update public.transfers set model='local-direct' where attempt_id=$1", [id(1)]), error => error.code === "22023"); checks++;
+  await assert.rejects(() => db.query("update public.transfers set model_verified=false where attempt_id=$1", [id(1)]), error => error.code === "22023"); checks++;
+  console.log(`PASS: ${checks} Dots label, historical preservation, queued receipt, report upgrade and immutable-model checks.`);
+  return checks;
+}
+module.exports = { checkServedModel, checkStoreModelReceipts, checkServedModelLabel, checkReportedModelAttribution, checkDotsModelLabel };
