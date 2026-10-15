@@ -1,0 +1,100 @@
+{
+  "reportSha256": "173871fb3c578b3db93d336bd0f2628c2025e358506642e87cca740eea515b32",
+  "reviewer": "Codex source review; one reviewer, no judge requests",
+  "scope": "One existing synthetic preservation case, one output per model, shared v21 prompt. Not a full v1 level or an independent holdout.",
+  "rankingRule": "Qualitative competition ranks: complete handoffs tie first; faithful content with a structure failure follows; a changed decision state plus a structure failure follows that. Timing is not a quality tiebreaker. No accuracy percentage is inferred.",
+  "entries": [
+    {
+      "model": "claude-haiku-5.5:free",
+      "rank": 3,
+      "sourceReviewed": true,
+      "continuity": {
+        "pass": true,
+        "evidence": "Latest request remains a patch proposal for worker/export.mjs, with exact upload idle timeout and both pending retry choices; it does not implement the proposal."
+      },
+      "fidelity": {
+        "pass": true,
+        "evidence": "Two uploads explicitly replace six; preserves 10 MB, 30 MB symptom, release, ap-south-1, invoice fix, no deployment, rollback not approved and all three not-started states."
+      },
+      "grounding": {
+        "pass": true,
+        "evidence": "Jules's relationship to the user stays unknown. Healthy writes and no lost records remain reported facts; no root cause, implementation, verification or approval is invented."
+      },
+      "notes": "Raw heading is WHERE LEFT OFF, omitting WE. Production does not recognize that section; its useful-output path retains the malformed heading. Structure fails deterministically.",
+      "automatic": {
+        "structure": false,
+        "missingExactText": []
+      },
+      "handoffPass": false
+    },
+    {
+      "model": "deepseek-v4.1-flash:free",
+      "rank": 1,
+      "sourceReviewed": true,
+      "continuity": {
+        "pass": true,
+        "evidence": "Quotes the pending patch-proposal request, retains worker/export.mjs, exact upload idle timeout and both unresolved retry choices without doing the task."
+      },
+      "fidelity": {
+        "pass": true,
+        "evidence": "Preserves two replacing six, 10 MB, 30 MB symptom, release, ap-south-1, invoice fix, no deployment, rollback not approved, and implementation/testing/deployment not started."
+      },
+      "grounding": {
+        "pass": true,
+        "evidence": "Jules is named only as project owner with relationship unknown. No root cause, implementation, test success, deployment or approval is asserted."
+      },
+      "notes": "The phrase proposed cause not accepted as fact is looser than the source's symptom-only warning, but asserts no cause or accepted diagnosis. Recorded as a wording caution, not a semantic failure.",
+      "automatic": {
+        "structure": true,
+        "missingExactText": []
+      },
+      "handoffPass": true
+    },
+    {
+      "model": "mimo-v2.6-flash:free",
+      "rank": 1,
+      "sourceReviewed": true,
+      "continuity": {
+        "pass": true,
+        "evidence": "Retains the pending patch proposal, worker/export.mjs, exact upload idle timeout and both pending retry options; no proposal is written during summarization."
+      },
+      "fidelity": {
+        "pass": true,
+        "evidence": "Two uploads replace six, 10 MB and both retry timings remain; release, ap-south-1, invoice fix, no-deploy, rollback not approved and all not-started states survive."
+      },
+      "grounding": {
+        "pass": true,
+        "evidence": "User identity remains unlinked to Jules. Database health stays a reported observation, and no cause, completed work, verification or permission is invented."
+      },
+      "notes": "Labels the exact symptom-does-not-establish-cause quote as a stated reason under decisions. That placement is misleading, but the quoted content itself supplies no invented cause or new decision. This judgment is open to owner review.",
+      "automatic": {
+        "structure": true,
+        "missingExactText": []
+      },
+      "handoffPass": true
+    },
+    {
+      "model": "dots-studio/dots-3-note-preview:free",
+      "rank": 4,
+      "sourceReviewed": true,
+      "continuity": {
+        "pass": true,
+        "evidence": "The proposal is pending, target/error are exact, both retry choices remain, and no patch is written."
+      },
+      "fidelity": {
+        "pass": false,
+        "evidence": "Source says rollback is not approved. Decisions instead says Rejected: rollback. An unapproved option has been upgraded to a rejection, even though another section retains the correct status."
+      },
+      "grounding": {
+        "pass": false,
+        "evidence": "Rejected: rollback asserts a user decision absent from the source. This is the same underlying decision-state error as the fidelity failure, not two independent failures."
+      },
+      "notes": "Raw output starts with the literal placeholder <Boxed Header>. Production's useful-output path does not manufacture the canonical header, so structure also fails.",
+      "automatic": {
+        "structure": false,
+        "missingExactText": []
+      },
+      "handoffPass": false
+    }
+  ]
+}

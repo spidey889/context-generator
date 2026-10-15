@@ -647,6 +647,8 @@ Owner-authorized live comparisons use `scripts/compare-summary-with-test-key.ps1
 
 The manual `export-ranking.cjs` and `render-ranking-dark.py` scripts in that directory reproduce a dated minimal rank-versus-time PNG from archived comparison data, without provider calls. Space Bunny 2 is the display name for the archived Ling 3.1 Flash results; its provider ID remains explicit in the export. The historical qualitative model order and exported newer v1 handoff percentages remain separate cohorts; the export retains unavailable attempts and records source hashes. Historical ranks are not current v1 accuracy scores.
 
+The separately dated `screen-2026-10-15.cjs` is a bounded manual screen: one existing short synthetic case and one generation per each of four named free routes, with no retries, judge calls or output-token cap. It freezes the current production prompt and source, records attempts before sending, uses the guarded dedicated key for OpenRouter and accepts a TokenHarbor credential through masked stdin. Its offline `postprocess` mode uses the actual production normalization/advisory-output path; malformed structures are not repaired for scoring. `render-screen-2026-10-15.py` validates the report/review hash and reproduces the dated image without network access. This partial screen, its qualitative tied ranks and single-observation response times stay separate from full v1 scores and historical cohorts.
+
 | Change | Focused check | Additional evidence when relevant |
 | --- | --- | --- |
 | DOM capture, pasted cards, placement, picker/handoff, paste | `node --test --test-skip-pattern="^slow/release:" test/platform-content.test.js` | `npm run test:slow` for capture changes; installed Brave smoke for meaningful extension/UI changes |
