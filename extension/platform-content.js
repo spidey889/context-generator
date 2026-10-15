@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-15-size-stop-v151";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-15-size-stop-v152";
   const INLINE_PILL_SIZE = 36;
   const ownedUiStyleSheets = new Map();
   let handoffUserCss = "";
@@ -127,7 +127,7 @@
   // Claude, ChatGPT and Grok need focus before composer hydration/verification.
   // Their source-side completion cue must finish before the background performs the focused paste.
   const FOCUSED_PASTE_DESTINATIONS = new Set(["claude", "chatgpt", "grok"]);
-  const OVERSIZED_CONVERSATION_ERROR_MESSAGE = "This chat is too large to transfer. Our limit is 500,000 characters. Try a smaller chat.";
+  const OVERSIZED_CONVERSATION_ERROR_MESSAGE = "This chat is too large to transfer. Our limit is 500,000 characters.";
   const CONVERSATION_SCRAPE_RETRY_TIMEOUT_MS = 1800;
   const CONVERSATION_SCRAPE_RETRY_INTERVAL_MS = 140;
   const SOURCE_SCROLL_STABLE_TIMEOUT_MS = 1800;
@@ -7777,13 +7777,13 @@
     // Native error prose may contain private response text.
     if (!Number.isSafeInteger(limit) || limit <= 0) {
       return error?.diagnostics?.capture_detail === "attachment_size_limit"
-        ? "Text attachments exceed our limit of 2,100,000 bytes. Try smaller files."
+        ? "Text attachments exceed our limit of 2,100,000 bytes."
         : OVERSIZED_CONVERSATION_ERROR_MESSAGE;
     }
     const unit = check === "transcript_char_limit" ? "characters" : "bytes";
     const subject = check === "supported_files_limit" ? "Text attachments are"
       : check?.startsWith("raw_") ? "Chat data is" : "This chat is";
-    return `${subject} too large to transfer. Our limit is ${limit.toLocaleString("en-US")} ${unit}. Try a smaller chat.`;
+    return `${subject} too large to transfer. Our limit is ${limit.toLocaleString("en-US")} ${unit}.`;
   }
 
   function shouldRetrySourceJson(error) {
