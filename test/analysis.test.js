@@ -16,7 +16,7 @@ test("analysis receipt shows the served model and does not report it as failed",
   };
 
   for (const [model, label] of [
-    ["claude-haiku-5.5:free", "Claude Haiku 5.5 (Free)"],
+    ["claude-haiku-5.5:free", "Haiku 5.5 (free)"],
     ["deepseek-v4.1-flash:free", "DeepSeek V4.1 Flash (Free)"],
     ["qwen/qwen3.8-27b:free", "Qwen3.8 27B"],
     ["dots-studio/dots-3-note-preview:free", "Dots3-Note Preview"],
