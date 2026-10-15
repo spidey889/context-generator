@@ -381,8 +381,13 @@ test("streaming summary stays pending through previews and preserves the final r
   const encoder = new TextEncoder();
   let controller, fetches = 0, readStarted;
   const started = new Promise(resolve => { readStarted = resolve; });
-  const sendSummary = loadBackgroundForSummaryTest(async (_url, options) => {
+  const sendSummary = loadBackgroundForSummaryTest(async (url, options) => {
     fetches++;
+    assert.equal(url, "https://context-generator-five.vercel.app/api/summarize");
+    assert.equal(options.credentials, "omit");
+    assert.equal(options.redirect, "error");
+    assert.ok(manifest.host_permissions.includes(new URL(url).origin + "/*"));
+    assert.ok(manifest.host_permissions.every(host => !host.includes("context-generator-git-")));
     assert.equal(options.headers.Accept, "application/x-ndjson");
     return new Response(new ReadableStream({ start(stream) {
       controller = stream;

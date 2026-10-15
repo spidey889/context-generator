@@ -1,8 +1,5 @@
 if (!globalThis.CapTransferDiagnostics && typeof importScripts === "function") importScripts("transfer-diagnostics.js");
-// This experiment branch uses its protected preview. Open this origin in the
-// same browser and sign in to Vercel once; send that cookie, never a source key.
-// Restore the production endpoint before merging/publishing the extension.
-const SUMMARY_BACKEND_URL = "https://context-generator-git-codex-tok-1ef029-vinits-projects-9bc84d4f.vercel.app/api/summarize";
+const SUMMARY_BACKEND_URL = "https://context-generator-five.vercel.app/api/summarize";
 const SUMMARY_CLIENT_HEADER = "cap-context-extension/1";
 const PLATFORM_CONTENT_SCRIPT = "platform-content.js";
 const SOURCE_MESSAGE_TIMEOUT_MS = 12000;
@@ -1214,8 +1211,8 @@ async function fetchSummaryFromBackend(conversationText, transferId = null, dead
     const fetchStartedAt = nowMs();
     const response = await fetch(SUMMARY_BACKEND_URL, {
       method: "POST",
-      credentials: "include",
-      redirect: "error", // An expired preview login must not forward chat text to a login redirect.
+      credentials: "omit",
+      redirect: "error", // Never forward conversation text to another origin on a redirect.
       headers: {
         "Content-Type": "application/json",
         "Accept": "application/x-ndjson",

@@ -19,8 +19,7 @@
     "https://gemini.google.com/*",
     "https://grok.com/*",
     "https://chat.deepseek.com/*",
-    "https://context-generator-five.vercel.app/*",
-    "https://context-generator-git-codex-tok-1ef029-vinits-projects-9bc84d4f.vercel.app/*"
+    "https://context-generator-five.vercel.app/*"
   ],
   "background": {
   "service_worker": "background.js",
@@ -82,8 +81,7 @@
     {
       "matches": [
         "https://spreadz.in/analysis*",
-        "https://spidey889.github.io/context-generator/analysis*",
-        "https://context-generator-git-codex-tok-1ef029-vinits-projects-9bc84d4f.vercel.app/analysis*"
+        "https://spidey889.github.io/context-generator/analysis*"
       ],
       "js": ["analysis-bridge.js"],
       "run_at": "document_idle"

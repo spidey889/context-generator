@@ -3,6 +3,7 @@
 async function readProviderStream(response, provider, { onDelta, checkDeadline, onAnswerStart }) {
   const reader = response.body.getReader();
   const decoder = new TextDecoder("utf-8", { fatal: true });
+  const filterAnswer = ["openrouter", "tokenharbor"].includes(provider) ? createThinkingFilter() : delta => delta;
   let buffer = "", dataLines = [], text = "", finishReason = null;
   let usage, error, done = false, eof = false, answerStarted = false;
   const dispatch = () => {
@@ -27,11 +28,12 @@ async function readProviderStream(response, provider, { onDelta, checkDeadline, 
     }
     if (typeof delta === "string" && delta) {
       text += delta;
-      if (!answerStarted && hasAnswerText(text, provider)) {
+      delta = filterAnswer(delta);
+      if (!answerStarted && /\S/.test(delta)) {
         onAnswerStart?.();
         answerStarted = true;
       }
-      onDelta(delta);
+      if (delta) onDelta(delta);
     }
     finishReason = (provider === "gemini" ? choice?.finishReason : choice?.finish_reason) || finishReason;
     usage = (provider === "gemini" ? chunk.usageMetadata : chunk.usage) || usage;
@@ -69,14 +71,30 @@ async function readProviderStream(response, provider, { onDelta, checkDeadline, 
   }
 }
 
-function hasAnswerText(text, provider) {
-  if (!["openrouter", "tokenharbor"].includes(provider)) return /\S/.test(text);
-  // Match final-answer extraction, including <think> tags split across chunks.
-  let answer = text.replace(/<think>[\s\S]*?<\/think>/gi, "");
-  if (/<think>/i.test(answer)) return false;
-  const tagStart = answer.lastIndexOf("<");
-  if (tagStart !== -1 && "<think>".startsWith(answer.slice(tagStart).toLowerCase())) answer = answer.slice(0, tagStart);
-  return /\S/.test(answer);
+function createThinkingFilter() {
+  let pending = "", thinking = false;
+  return delta => {
+    pending += delta;
+    let answer = "";
+    while (pending) {
+      const tag = thinking ? "</think>" : "<think>";
+      const index = pending.toLowerCase().indexOf(tag);
+      if (index !== -1) {
+        if (!thinking) answer += pending.slice(0, index);
+        pending = pending.slice(index + tag.length);
+        thinking = !thinking;
+        continue;
+      }
+      // Keep only a possible split tag. Hidden headings must never reach the
+      // worker's near-completion hint or disarm the first-answer watchdog.
+      let keep = Math.min(tag.length - 1, pending.length);
+      while (keep && !tag.startsWith(pending.slice(-keep).toLowerCase())) keep--;
+      if (!thinking) answer += pending.slice(0, pending.length - keep);
+      pending = keep ? pending.slice(-keep) : "";
+      break;
+    }
+    return answer;
+  };
 }
 
 module.exports = { readProviderStream };

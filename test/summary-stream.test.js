@@ -47,7 +47,7 @@ for (const provider of ["tokenharbor", "openrouter", "gemini", "mistral"]) {
   for (const phase of ["headers", "body", "json body"]) {
     clockTest(`${provider} switches after ${firstAnswerMs / 1000} seconds without answer text in ${phase}`, async t => {
       configure(t);
-      const requests = [];
+      const requests = [], deltas = [];
       global.fetch = async (url, options) => {
         requests.push({ url, at: Date.now(), signal: options.signal });
         if (requests.length > 1) return responseFrom(answerStream("gemini"));
@@ -68,13 +68,14 @@ for (const provider of ["tokenharbor", "openrouter", "gemini", "mistral"]) {
         tokenharborApiKey: provider === "tokenharbor" ? "test" : undefined,
         geminiApiKey: provider !== "mistral" ? "test" : undefined,
         mistralApiKey: provider === "mistral" ? "test" : undefined,
-        requestContext: { onDelta() {} } });
+        requestContext: { onDelta: text => deltas.push(text) } });
       assert.equal(Date.now() - startedAt, firstAnswerMs);
       assert.equal(requests[0].signal.aborted, true);
       assert.equal(requests.length, provider === "mistral" ? 1 : 2, "Silence advances the route without retrying the silent model.");
       assert.equal(result.model, provider === "mistral" ? "local-direct" : provider === "gemini" ? "gemini-3.5-flash-lite" : "gemini-3.6-flash");
       if (requests[1]) assert.equal(requests[1].at - startedAt, firstAnswerMs);
       assert.doesNotMatch(result.summary, /HIDDEN_THINKING/);
+      assert.doesNotMatch(deltas.join(""), /HIDDEN_THINKING|<think>/i);
     });
   }
 
@@ -169,6 +170,27 @@ test("all provider routes stream one request, preserving Unicode, usage and answ
     assert.equal(result.usage.completionTokens, provider === "gemini" ? 15 : 12);
     if (provider === "gemini") assert.match(calls[0].url, /:streamGenerateContent\?alt=sse$/);
     else assert.equal(calls[0].body.stream, true);
+  }
+});
+
+test("gateway previews exclude split thinking blocks and their near-completion headings", async t => {
+  configure(t);
+  for (const provider of ["tokenharbor", "openrouter"]) {
+    const deltas = [];
+    global.fetch = async () => responseFrom(frame(chatChunk("<th"))
+      + frame(chatChunk("ink>PRIVATE_THINKING\n📦 KEY CONTEXT\nHidden plan\n🔁 NEXT STEP\n</TH"))
+      + frame(chatChunk("INK>Preserve résumé 🧠. <thi"))
+      + frame(chatChunk("nk>SECOND_PRIVATE_BLOCK</think>Keep <thing> literal. "))
+      + answerStream(provider, "Continue the agreed work."));
+    const result = await createSummaryWithFallback({ conversation, profile: getSummaryProfile(conversation),
+      tokenharborApiKey: provider === "tokenharbor" ? "test" : undefined,
+      openrouterApiKey: provider === "openrouter" ? "test" : undefined,
+      requestContext: { onDelta: text => deltas.push(text) } });
+    const answer = "Preserve résumé 🧠. Keep <thing> literal. Continue the agreed work.";
+    assert.equal(result.provider, provider);
+    assert.equal(deltas.join(""), answer, "Thinking must not leak or trigger the worker's near-completion hint");
+    assert.ok(result.summary.includes(answer));
+    assert.doesNotMatch(JSON.stringify({ deltas, summary: result.summary }), /PRIVATE|<think>|Hidden plan/i);
   }
 });
 
