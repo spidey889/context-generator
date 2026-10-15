@@ -43,7 +43,7 @@ function answerStream(provider, text = "Preserve the agreed project plan.") {
 }
 
 for (const provider of ["tokenharbor", "openrouter", "gemini", "mistral"]) {
-  const firstAnswerMs = provider === "tokenharbor" ? 20000 : 30000;
+  const firstAnswerMs = provider === "tokenharbor" ? 45000 : 30000;
   for (const phase of ["headers", "body", "json body"]) {
     clockTest(`${provider} switches after ${firstAnswerMs / 1000} seconds without answer text in ${phase}`, { tickMs: 100 }, async t => {
       configure(t);
@@ -107,7 +107,7 @@ for (const provider of ["tokenharbor", "openrouter", "gemini", "mistral"]) {
   });
 }
 
-clockTest("Haiku silence uses 20s and leaves only 25s for DeepSeek before Dots", async t => {
+clockTest("silent main-key DeepSeek exhausts the shared 45s and skips the backup before Dots", async t => {
   configure(t);
   const requests = [];
   const startedAt = Date.now();
@@ -121,12 +121,11 @@ clockTest("Haiku silence uses 20s and leaves only 25s for DeepSeek before Dots",
     tokenharborApiKey: "test-main", tokenharborBackupApiKey: "test-backup", openrouterApiKey: "test-openrouter",
     requestContext: { onDelta() {} } });
   assert.deepEqual(requests.map(({ model, at }) => ({ model, at })), [
-    { model: "claude-haiku-5.5:free", at: 0 },
-    { model: "deepseek-v4.1-flash:free", at: 20000 },
+    { model: "deepseek-v4.1-flash:free", at: 0 },
     { model: "dots-studio/dots-3-note-preview:free", at: 45000 }
   ]);
   assert.equal(requests[0].signal.aborted, true);
-  assert.equal(requests[1].signal.aborted, true);
+  assert.equal(requests[1].signal.aborted, false);
   assert.equal(result.model, "dots-studio/dots-3-note-preview:free");
   assert.equal(result.tokenharborMs, 45000);
 });

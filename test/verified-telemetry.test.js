@@ -302,7 +302,7 @@ test("server receipts cover remote success and emergency carry, and missing keys
     assert.equal(await verifySummaryProof({ ...context, summary_proof: res.body.summaryProof }, KEY), true);
     const signedV2 = { ...context, last_stage: "summary_completed",
       summary_proof: res.body.summaryProofV2, summary_confirmed_at: res.body.summaryConfirmedAt };
-    const expectedModel = { tokenharbor: "claude-haiku-5.5:free", openrouter: "dots-studio/dots-3-note-preview:free", mistral: "ministral-14b-2512",
+    const expectedModel = { tokenharbor: "deepseek-v4.1-flash:free", openrouter: "dots-studio/dots-3-note-preview:free", mistral: "ministral-14b-2512",
       gemini: "gemini-3.5-flash-lite", "local-direct": "local-direct" }[provider];
     assert.deepEqual(await verifySummaryReceipt(signedV2, KEY), { model: expectedModel });
     const edge = await edgeHarness();
@@ -328,7 +328,7 @@ test("server receipts cover remote success and emergency carry, and missing keys
   assert.equal(allRoutes.code, 200);
   const { LEGACY_RECEIPT_MODELS } = await proofHelpers();
   assert.deepEqual(new Set([...allRoutes.body.timing.modelsTried, "local-direct"]),
-    new Set(LEGACY_RECEIPT_MODELS.filter(model => !["inclusionai/ling-3.1-flash", "deepseek-v4.1-flash:free"].includes(model))));
+    new Set(LEGACY_RECEIPT_MODELS.filter(model => !["inclusionai/ling-3.1-flash", "claude-haiku-5.5:free"].includes(model))));
   delete process.env.TELEMETRY_SIGNING_KEY;
   const res = response();
   await summarize(req, res);

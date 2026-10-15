@@ -4,6 +4,8 @@ A short history of decisions and regressions that matter when changing the code.
 
 ## 2026-10-15
 
+- **Removed Haiku from live TokenHarbor routing.** Both the main and backup keys now request only `deepseek-v4.1-flash:free`, following repeated Haiku 404 responses. Removed Haiku's special first-answer timer and updated routing, streaming, receipt and browser fixtures. DeepSeek keeps its existing thinking/output allowance and both keys share the existing time budget; an exhausted main request skips backup. Historical signed Haiku receipts remain readable and verifiable.
+
 - **Shortened the database's Dots model name to `dots (free)`.** Applied migration `20261015172555` to existing and future attributed rows. Requests and signed receipts retain the full provider ID; queued retries, unsigned reports, later receipt upgrades and immutable verified models keep their existing behavior. All 1,158 real-SQL checks passed. Hosted verification confirmed exactly two renamed rows, all other values across 52 transfers unchanged, and identical users, counters, sequence, private access, other functions and reset job. Rolled-back service-role probes also verified new reports, receipt upgrades and duplicate counting.
 
 - **Project instructions now live in `AGENTS.md`.** Saved the owner's workspace, browser, documentation and automatic-push rules in the repository so future chats can discover them. Linked verification guidance to `LOGIC.md` and documented the existing exact-commit CI requirement for protected `master`.

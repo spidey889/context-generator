@@ -641,7 +641,7 @@ async function startFixtureServer() {
   state.oversizePaste = { bytes: 0, cancelled: false };
   state.discardedAuth = { bytes: 0, cancelled: false };
   const telemetryFixture = await createTelemetrySmokeFixture(REPO_ROOT, TELEMETRY_DATABASE_SMOKE,
-    TOKENHARBOR_SMOKE ? "claude-haiku-5.5:free" : "gemini-3.6-flash");
+    TOKENHARBOR_SMOKE ? "deepseek-v4.1-flash:free" : "gemini-3.6-flash");
   state.telemetryRequests = telemetryFixture.received;
   const network = NETWORK_SOURCE ? networkSmokeFixture(JSON_SOURCE) : null;
   const pendingFileResponses = [];
