@@ -5,11 +5,13 @@ Offline only. Never import the generation runner or make provider requests.
 import hashlib
 import json
 import math
+import sys
 from pathlib import Path
 from PIL import Image, ImageDraw, ImageFont
 
 HERE = Path(__file__).resolve().parent
-BASE = HERE / "baselines/2026-10-15-small-screen"
+LONG_HISTORY = "--long-history" in sys.argv
+BASE = HERE / f"baselines/2026-10-15-{'long' if LONG_HISTORY else 'small'}-screen"
 report_bytes = (BASE / "generations.json").read_bytes()
 report = json.loads(report_bytes)
 review = json.loads((BASE / "review.json").read_text(encoding="utf-8"))
@@ -20,7 +22,8 @@ assert len(results) == len(reviews) == 4
 assert all(row["sourceReviewed"] for row in reviews.values())
 assert all(isinstance(row[dimension]["pass"], bool) and row[dimension]["evidence"] for row in reviews.values() for dimension in ("continuity", "fidelity", "grounding"))
 assert all(row["status"] == "generated" and row["attempt"] == 1 for row in results.values())
-assert sorted(row["rank"] for row in reviews.values()) == [1, 1, 3, 4]
+# Competition ranks preserve equal reviews without assigning a speed tiebreaker.
+assert all(row["rank"] == 1 + sum(other["rank"] < row["rank"] for other in reviews.values()) for row in reviews.values())
 
 # Keep Dots' established blue star; new routes use the other original marks.
 order = ["claude-haiku-5.5:free", "deepseek-v4.1-flash:free", "dots-studio/dots-3-note-preview:free", "mimo-v2.6-flash:free"]
@@ -74,8 +77,9 @@ for index, (x, model) in enumerate(zip([104, 370, 770, 1110], order)):
 
 LEFT, RIGHT, TOP, BOTTOM = 240, 1270, 260, 1000
 line([(LEFT, TOP), (LEFT, BOTTOM), (RIGHT, BOTTOM)], width=1.4)
-max_seconds = 30
-for seconds in range(0, max_seconds + 1, 5):
+max_seconds = max(30, math.ceil(max(row["elapsedMs"] for row in results.values()) / 10000) * 10)
+tick_seconds = 5 if max_seconds <= 30 else max_seconds // 6
+for seconds in range(0, max_seconds + 1, tick_seconds):
     x = LEFT + seconds / max_seconds * (RIGHT-LEFT)
     line([(x, BOTTOM), (x, BOTTOM+9)])
     text(x, BOTTOM+30, f"{seconds}s", 23, anchor="mm")
@@ -103,8 +107,11 @@ for index, model in enumerate(order):
     marker(x, y, index, 14)
     text(x, y-36, f"{seconds:.1f}s", 22, COLORS[index], anchor="mm")
 
-text(LEFT, 1148, "1 shared case · 1 request/model · #1 tied", 18, MUTED)
+first_count = sum(row["rank"] == 1 for row in reviews.values())
+scope = f"{report['inputChars']:,} chars" if LONG_HISTORY else "1 shared case"
+tie_note = " · #1 tied" if first_count > 1 else ""
+text(LEFT, 1148, f"{scope} · 1 request/model{tie_note}", 18, MUTED)
 text(RIGHT, 1148, "4 requests · screening only", 18, MUTED, anchor="ra")
-output = HERE / "model-ranking-dark-2026-10-15.png"
+output = HERE / ("model-ranking-dark-2026-10-15-long.png" if LONG_HISTORY else "model-ranking-dark-2026-10-15.png")
 canvas.resize((W, H), Image.Resampling.LANCZOS).save(output, optimize=True)
 print(f"Saved {W} x {H}: {output}")

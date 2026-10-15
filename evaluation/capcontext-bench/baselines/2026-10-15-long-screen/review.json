@@ -1,0 +1,100 @@
+{
+  "reportSha256": "d5d687d6afe39f7196f5b1cf2d6fd25107ddf300405613ef4737be3f5963fdfe",
+  "reviewer": "Codex source review; one reviewer, no judge requests",
+  "scope": "One 90,029-character synthetic preservation case per model, using the same original source turns and gold as the earlier short screen. Not a full v1 level or independent holdout.",
+  "rankingRule": "Qualitative competition ranks: complete faithful handoffs tie first; an ambiguous rejected/not-approved label follows; an explicit rejection and blanket prohibition absent from the source follows that. Speed is not a quality tiebreaker.",
+  "entries": [
+    {
+      "model": "claude-haiku-5.5:free",
+      "rank": 3,
+      "sourceReviewed": true,
+      "continuity": {
+        "pass": true,
+        "evidence": "Retains the pending patch proposal, worker/export.mjs, exact upload idle timeout, no-deploy instruction and both unresolved retry choices; does not write the patch."
+      },
+      "fidelity": {
+        "pass": false,
+        "evidence": "KEY CONTEXT says Rejected: rollback is not approved (user). The Rejected label changes the source's not-approved state even though DECISIONS correctly says Not approved: rollback. Both occur in the delivered handoff."
+      },
+      "grounding": {
+        "pass": false,
+        "evidence": "The source supplies no rollback rejection decision. The Rejected label is conservatively treated as an unsupported decision-state assertion; this is the same issue as fidelity, not a second independent failure."
+      },
+      "notes": "This is a borderline label inconsistency: a reader may interpret the preserved literal not-approved wording correctly. The conservative failure is open to owner review. All important facts, constraints, corrected values and separate work states are otherwise retained; unrelated archive facts are identified as historical.",
+      "automatic": {
+        "structure": true,
+        "missingExactText": []
+      },
+      "handoffPass": false
+    },
+    {
+      "model": "deepseek-v4.1-flash:free",
+      "rank": 1,
+      "sourceReviewed": true,
+      "continuity": {
+        "pass": true,
+        "evidence": "Quotes the pending patch-proposal request and final source turn with worker/export.mjs and exact upload idle timeout. Both retry choices stay undecided; no new patch or diagnosis is performed."
+      },
+      "fidelity": {
+        "pass": true,
+        "evidence": "Two uploads explicitly supersede six; preserves 10 MB, 30 MB symptom, release, ap-south-1, invoice fix, rejection of timeout increase, no-deploy, rollback not approved, and implementation/testing/deployment not started."
+      },
+      "grounding": {
+        "pass": true,
+        "evidence": "Jules's relationship to the user stays unknown. Healthy writes/no lost records remain reported observations; no cause, implementation, test success, approval or archive-derived requirement is invented."
+      },
+      "notes": "The raw bottom box border differs in length; production recognizes the header and normalizes it to the canonical box. Mentions the rejected timeout increase again as an assistant observation, but labels it rejected elsewhere. No active option or cause is invented. Gateway reports 1,024 cached input tokens.",
+      "automatic": {
+        "structure": true,
+        "missingExactText": []
+      },
+      "handoffPass": true
+    },
+    {
+      "model": "mimo-v2.6-flash:free",
+      "rank": 1,
+      "sourceReviewed": true,
+      "continuity": {
+        "pass": true,
+        "evidence": "Keeps the pending patch proposal, exact target/error, both retry options and all three not-started states without implementing the requested proposal."
+      },
+      "fidelity": {
+        "pass": true,
+        "evidence": "Retains two replacing six, 10 MB, 30 MB symptom, release, ap-south-1, invoice fix, no deployment, rollback not approved and rejected timeout increase. Earlier six-upload choice is explicitly labelled later replaced."
+      },
+      "grounding": {
+        "pass": true,
+        "evidence": "No identity inference, cause, test success, implementation, deployment, extra approval or archive-derived current requirement is asserted. Assistant's no-changes/no-checks statement is attributed as reported."
+      },
+      "notes": "All active facts and constraints remain available. Historical six-upload choice is included with an explicit replacement label. Cache usage is not supplied by the gateway.",
+      "automatic": {
+        "structure": true,
+        "missingExactText": []
+      },
+      "handoffPass": true
+    },
+    {
+      "model": "dots-studio/dots-3-note-preview:free",
+      "rank": 4,
+      "sourceReviewed": true,
+      "continuity": {
+        "pass": true,
+        "evidence": "Keeps the pending patch proposal, exact file/error, current two-upload/10 MB choice and both undecided retry timings without doing the task."
+      },
+      "fidelity": {
+        "pass": false,
+        "evidence": "DECISIONS says reject rollback and KEY CONTEXT says Constraints: no deployment; no rollback. Source states only rollback is not approved; it never rejects the option or imposes a blanket no-rollback constraint."
+      },
+      "grounding": {
+        "pass": false,
+        "evidence": "The rollback rejection and blanket prohibition are new unsupported decision/constraint claims. These are one underlying status-strengthening error, shared with this model's short output."
+      },
+      "notes": "Mixed case in WHAT WE WERE DOing is recognized and normalized by production, so delivered structure passes. All measured exact payloads survive. Cache usage reports zero.",
+      "automatic": {
+        "structure": true,
+        "missingExactText": []
+      },
+      "handoffPass": false
+    }
+  ]
+}

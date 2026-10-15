@@ -6,6 +6,7 @@ const { createHash } = require('node:crypto');
 const { execFileSync } = require('node:child_process');
 const Module = require('node:module');
 const { createGuardedFetch } = require('../../scripts/openrouter-test-budget.cjs');
+const { withLongHistory } = require('../../scripts/compare-summary-prompts.js');
 // Reuse the actual private delivery helper instead of repairing malformed model
 // output more generously than production. This only compiles an in-memory copy.
 const backendFile = require.resolve('../../api/summarize.js');
@@ -16,8 +17,13 @@ backendModule._compile(fs.readFileSync(backendFile, 'utf8') + '\nmodule.exports.
 const backend = backendModule.exports.__test;
 const { SUMMARY_PROMPT_CACHE_VERSION } = require('../../api/summary-prompt.js');
 const root = path.resolve(__dirname, '../..');
-const output = path.join(__dirname, 'baselines/2026-10-15-small-screen/generations.json');
-const testCase = require('../handoff-quality-cases.json').cases.find(c => c.id === 'corrected-export-design');
+const longHistory = process.argv.includes('--long-history');
+const output = path.join(__dirname, `baselines/2026-10-15-${longHistory ? 'long' : 'small'}-screen/generations.json`);
+const baseCase = require('../handoff-quality-cases.json').cases.find(c => c.id === 'corrected-export-design');
+// Keep the same complete original turns and gold as the short screen. The
+// existing generator puts the correction between unrelated archive blocks.
+const testCase = longHistory ? withLongHistory(baseCase, 90000) : baseCase;
+const requestTimeoutMs = longHistory ? 180000 : 90000;
 const hash = value => createHash('sha256').update(value).digest('hex');
 const system = backend.getSummarySystemPrompt(backend.getSummaryProfile(testCase.conversation));
 const messages = [{ role: 'system', content: system }, { role: 'user', content: JSON.stringify({ conversation: testCase.conversation }) }];
@@ -33,6 +39,9 @@ const plan = [
 ];
 async function main() {
   const provider = process.argv[2];
+  if (provider === 'inspect') {
+    console.log(JSON.stringify({ syntheticOnly: true, caseId: testCase.id, inputChars: testCase.conversation.length, systemPromptChars: system.length, inputSha256: hash(testCase.conversation), promptSha256: hash(system), requestCountLimit: 4, requestTimeoutMs, preservesAllSourceTurns: baseCase.conversation.split('\n\n').every(turn => testCase.conversation.includes(turn)) })); return;
+  }
   if (provider === 'postprocess') {
     const report = JSON.parse(fs.readFileSync(output, 'utf8'));
     if (report.inputSha256 !== hash(testCase.conversation) || report.systemPromptSha256 !== hash(system)) throw Error('Frozen input/prompt changed');
@@ -81,12 +90,13 @@ async function main() {
   }
   const inputHash = hash(testCase.conversation), promptHash = hash(system);
   let report = fs.existsSync(output) ? JSON.parse(fs.readFileSync(output, 'utf8')) : {
-    name: 'CapContextBench small screen', date: '2026-10-15', syntheticOnly: true,
+    name: `CapContextBench ${longHistory ? 'long' : 'small'} screen`, date: '2026-10-15', syntheticOnly: true,
     sourceCommit: execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).trim(),
     caseId: testCase.id, case: testCase, inputChars: testCase.conversation.length,
     systemPromptChars: system.length, inputSha256: inputHash, systemPromptSha256: promptHash,
     promptVersion: SUMMARY_PROMPT_CACHE_VERSION, systemPrompt: system, requestCountLimit: 4,
-    settings: { temperature: 0.1, maxTokens: null, retries: 0, streaming: false },
+    settings: { temperature: 0.1, maxTokens: null, retries: 0, streaming: false, requestTimeoutMs },
+    longHistory, baseCaseId: baseCase.id, targetChars: longHistory ? 90000 : null,
     caveat: 'One synthetic case per model; not the complete v1 suite or a reliability estimate. Provider labels are unverified gateway claims.',
     results: []
   };
@@ -105,7 +115,7 @@ async function main() {
     });
     const start = performance.now();
     try {
-      const response = await request(url, { method: 'POST', headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' }, body: JSON.stringify(body), signal: AbortSignal.timeout(90000) });
+      const response = await request(url, { method: 'POST', headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' }, body: JSON.stringify(body), signal: AbortSignal.timeout(requestTimeoutMs) });
       row.httpStatus = response.status;
       const data = await response.json();
       row.elapsedMs = Math.round(performance.now() - start);

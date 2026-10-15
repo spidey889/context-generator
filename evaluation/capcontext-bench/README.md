@@ -76,6 +76,8 @@ This is one reviewer's small development-influenced sample, not a model ranking 
 
 The [October 15 small screen](baselines/2026-10-15-small-screen/README.md) compares Haiku 5.5, DeepSeek V4.1 Flash, MiMo V2.6 Flash and Dots on one shared short case, with exactly four generation requests. Its [dated image](model-ranking-dark-2026-10-15.png) keeps the same dark design and preserves tied reviews. It stays separate from complete v1 level scores and the October 3 archive below.
 
+The follow-up [90,029-character screen](baselines/2026-10-15-long-screen/README.md) retains those original source turns between unrelated synthetic history blocks, with one additional request per model. Its [long-screen image](model-ranking-dark-2026-10-15-long.png) uses the same design. Source-review cautions, cache usage and changed profile guidance remain explicit in the results; the two screens do not establish general model rankings.
+
 ![CapContext historical model ranking](model-ranking-dark.png)
 
 [The image](model-ranking-dark.png) presents the **recorded October 3 qualitative order: Space Bunny 2, Apodex, Dots, Qwen**, plotted against median response time. Space Bunny 2 is the owner's display name for the archived Ling 3.1 Flash results; the underlying provider ID and source evidence stay recorded. It comes from [the archived matched comparison](../results/2026-10-03-openrouter-primary.json) and [its factual-usefulness review](../../docs/openrouter-primary-comparison.md): three shared synthetic conversations, all 20 attempts and all 15 generated summaries. Gemma's five HTTP 429 attempts remain unscored. Timing and token medians use generated outputs only; repeats were uneven, so these are descriptive efficiency figures.
