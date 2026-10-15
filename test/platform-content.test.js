@@ -816,8 +816,10 @@ test("new-chat routes never bypass empty detection, while saved JSON chats may b
     ["chat.deepseek.com", ["/", "/a/chat"], ["/a/chat/s/saved/"]]
   ];
   for (const [hostname, newPaths, savedPaths] of routes) {
+    const hooks = loadPlatformContent([], hostname);
     for (const pathname of [...newPaths, ...savedPaths]) {
-      const hooks = loadPlatformContent([], hostname, { pathname });
+      // Route classification reads only the current pathname; keep one instance per host.
+      hooks.window.location.pathname = pathname;
       assert.equal(hooks.getDetectedConversationMessageCount(), 0);
       assert.equal(hooks.hasSavedSourceConversation(), savedPaths.includes(pathname), `${hostname}${pathname}`);
     }
@@ -1965,15 +1967,20 @@ test("actual serving models reach progress and terminal telemetry for fallback, 
     const trace = hooks.beginTransferAttempt("claude", "test");
     try {
       await hooks.summarizeWithBackend("x".repeat(scenario === "tiny" ? 1200 : 10000), trace);
-      hooks.finishTransferTrace(trace);
+      assert.doesNotThrow(() => hooks.finishTransferTrace(trace));
       const telemetry = messages.filter(message => message.type === "RECORD_TRANSFER_TELEMETRY").map(message => message.event);
       const model = ["tiny", "recovery"].includes(scenario) ? "local-direct" : "gemini-3.5-flash-lite";
       assert.equal(telemetry.find(event => event.lastStage === "summary_completed").reportedModel, model, scenario);
+      assert.equal(telemetry.filter(event => event.status !== "started").length, 1);
       assert.equal(telemetry.at(-1).status, "succeeded");
+      assert.equal(telemetry.at(-1).lastStage, "completed");
       assert.equal(telemetry.at(-1).reportedModel, model, scenario);
       assert.ok(telemetry.filter(event => !["summary_completed", "completed"].includes(event.lastStage))
         .every(event => event.reportedModel === undefined), "An attempted provider must not be reported before a result.");
       for (const event of telemetry) for (const key of ["model", "summary_proof", "summary_confirmed_at"]) assert.equal(event[key], undefined);
+      // Reuse the instance whose receipt write failed to verify its lock was released.
+      hooks.resetRunningFlag();
+      assert.ok(hooks.beginTransferAttempt("claude", "next attempt"));
     } finally { hooks.resetRunningFlag(); }
   }
 });
@@ -2010,21 +2017,6 @@ test("unreadable ChatGPT JSON is a failed transfer even after paste or draft rec
     }
     hooks.resetRunningFlag();
   }
-});
-
-test("a synchronous local receipt failure cannot swallow terminal telemetry", () => {
-  const messages = [];
-  const hooks = loadPlatformContent([], "chatgpt.com", {
-    storageSet: () => { throw new Error("Storage unavailable"); },
-    runtimeSendMessage: async message => { messages.push(message); return { ok: true }; }
-  });
-  const trace = hooks.beginTransferAttempt("claude", "destination tile");
-  assert.doesNotThrow(() => hooks.finishTransferTrace(trace));
-  hooks.resetRunningFlag();
-  const telemetry = messages.filter(message => message.type === "RECORD_TRANSFER_TELEMETRY");
-  assert.deepEqual(telemetry.map(message => message.event.status), ["started", "succeeded"]);
-  assert.equal(telemetry[1].event.lastStage, "completed");
-  assert.ok(hooks.beginTransferAttempt("claude", "destination tile"));
 });
 
 clockTest("paste reacquires a composer replaced by click or focus before writing", async () => {
@@ -2105,8 +2097,10 @@ test("paste verification stops using a detached editor after a remount", async (
 test("direct and AI ranges use exact captured character boundaries on every platform", async () => {
   for (const hostname of ["claude.ai", "chatgpt.com", "gemini.google.com", "grok.com", "chat.deepseek.com"]) {
     let summaryRequests = 0;
+    let runtimeRequests = 0;
     const hooks = loadPlatformContent([], hostname, {
       runtimeSendMessage: async message => {
+        runtimeRequests++;
         if (message.type === "SUMMARIZE_WITH_BACKEND") {
           summaryRequests++;
           return { ok: true, summary: "AI must never replace this tiny transcript." };
@@ -2141,6 +2135,7 @@ test("direct and AI ranges use exact captured character boundaries on every plat
       assert.equal(await hooks.summarizeWithBackend(transcript), "AI must never replace this tiny transcript.");
     }
     assert.equal(summaryRequests, 3, `${hostname}: both inclusive AI boundaries and untrimmed length use the backend`);
+    const requestsBeforeRejectedTransfers = runtimeRequests;
     await assert.rejects(hooks.summarizeWithBackend("x".repeat(500001)), error => {
       assert.equal(error.code, "conversation_too_large");
       assert.match(error.message, /limit is 500,000 characters/);
@@ -2148,6 +2143,7 @@ test("direct and AI ranges use exact captured character boundaries on every plat
     });
     await assert.rejects(hooks.summarizeWithBackend("tiny", { deadlineAt: Date.now() - 1 }), /Transfer timed out/);
     assert.equal(summaryRequests, 3, `${hostname}: oversized and expired transfers never reach the backend`);
+    assert.equal(runtimeRequests, requestsBeforeRejectedTransfers, `${hostname}: rejection sends no worker messages`);
   }
 });
 
@@ -2472,12 +2468,22 @@ test("captured context survives backend errors, empty replies, and a missing wor
     async () => null,
     async () => { throw new Error("Extension context invalidated"); }
   ];
+  let activeReply;
+  let summaryRequests = 0;
+  const hooks = loadPlatformContent([], "chatgpt.com", {
+    runtimeSendMessage: message => {
+      if (message.type !== "SUMMARIZE_WITH_BACKEND") return { ok: true };
+      summaryRequests++;
+      return activeReply();
+    }
+  });
   for (const reply of cases) {
-    const hooks = loadPlatformContent([], "chatgpt.com", {
-      runtimeSendMessage: message => message.type === "SUMMARIZE_WITH_BACKEND" ? reply() : { ok: true }
-    });
+    activeReply = reply;
+    const requestsBefore = summaryRequests;
+    // Share the page instance, but keep diagnostics and receipts separate per response.
     const trace = hooks.createTransferTrace("claude", "test");
     const summary = await hooks.summarizeWithBackend(conversation, trace);
+    assert.equal(summaryRequests, requestsBefore + 1, "each failure response must reach the worker");
     assert.ok(summary.includes(conversation.replace(/\r\n?/g, "\n").trim()
       .split("\n").map(line => `> ${line}`).join("\n")));
     assert.match(summary, /Reply only: "Context loaded/);
@@ -2487,16 +2493,6 @@ test("captured context survives backend errors, empty replies, and a missing wor
     assert.equal(timing.backend.fallback.used, true);
     assert.doesNotMatch(JSON.stringify(trace), /private service body|Extension context invalidated/);
   }
-});
-
-test("local summary recovery retains the capture size boundary before contacting the backend", async () => {
-  let requests = 0;
-  const hooks = loadPlatformContent([], "chatgpt.com", { runtimeSendMessage: async () => {
-    requests++;
-    return { ok: true };
-  } });
-  await assert.rejects(hooks.summarizeWithBackend("x".repeat(500001)), /limit is 500,000 characters/);
-  assert.equal(requests, 0);
 });
 
 test("source failure telemetry keeps the precise destination observation and never the private message", () => {
@@ -3871,6 +3867,8 @@ test("Gemini bubble anchors to the left of the Flash selector", () => {
 
 test("Grok bubble keeps the Fast placement across every visible mode", () => {
   const composerRect = getClaudeComposerRect();
+  const elements = [];
+  const hooks = loadPlatformContent(elements, "grok.com");
 
   for (const mode of ["Fast", "Build Beta", "Auto", "Expert", "Heavy"]) {
     const selector = new FakeElement({
@@ -3884,7 +3882,7 @@ test("Grok bubble keeps the Fast placement across every visible mode", () => {
       attrs: { "aria-label": "Microphone" },
       rect: { left: 804, right: 840, top: 166, bottom: 202, width: 36, height: 36 }
     });
-    const hooks = loadPlatformContent([selector, mic], "grok.com");
+    elements.splice(0, elements.length, selector, mic);
     const placement = hooks.getGrokBubblePlacement(composerRect);
 
     assert.equal(placement.left, 550, `${mode} should anchor before its visible selector`);

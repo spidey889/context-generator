@@ -1,5 +1,6 @@
 const assert = require("node:assert/strict");
 const test = require("node:test");
+const { clockTest } = require("./helpers/clock");
 const handler = require("../api/summarize.js");
 const { createSummaryWithFallback, getSummaryProfile, getEnabledOpenRouterModels } = handler.__test;
 const DOTS = "dots-studio/dots-3-note-preview:free";
@@ -151,7 +152,7 @@ test("each paused route can be enabled explicitly with the same key; missing key
   } finally { global.fetch = originalFetch; restore(); }
 });
 
-test("OpenRouter auth, quota, unavailable endpoints, malformed/error envelopes and empty reasoning all advance safely", async () => {
+clockTest("OpenRouter auth, quota, unavailable endpoints, malformed/error envelopes and empty reasoning all advance safely", async () => {
   const restore = isolateEnv();
   const originalFetch = global.fetch;
   const temporaryError = () => new Response(JSON.stringify({ error: { code: 502, message: "PRIVATE_BODY" } }));

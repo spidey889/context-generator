@@ -722,6 +722,7 @@ test("Grok orders shuffled nodes and bodies before returning the transcript", as
 });
 
 test("Grok rejects broken internal links and ambiguous external roots even with a selected leaf", () => {
+  const h = setup("grok");
   for (const mutate of [
     f => { f.nodes.responseNodes.splice(1, 1); },
     f => { f.nodes.responseNodes.splice(2, 1); },
@@ -735,7 +736,6 @@ test("Grok rejects broken internal links and ambiguous external roots even with 
   ]) {
     const f = fixtures("grok", "smoke", 3);
     mutate(f);
-    const h = setup("grok", f);
     assert.throws(() => h.api.grokBranch(f.nodes, "answer_2"), /missing|cycle/);
   }
 });
@@ -885,13 +885,14 @@ test("DeepSeek still rejects missing or ambiguous selected messages before file 
 });
 
 test("DeepSeek: reject cache deltas, missing parents and incomplete uploads", () => {
+  const h = setup("deepseek");
   for (const mutate of [
     f => { f.data.data.biz_data.cache_control = "MERGE"; },
     f => { f.data.data.biz_data.chat_messages.splice(4, 1); },
     f => { f.file.file_size++; },
     f => { f.data.code = 40003; }
   ]) {
-    const h = setup("deepseek"), f = h.fixture; mutate(f);
+    const f = fixtures("deepseek"); mutate(f);
     assert.throws(() => h.api.deepseek(f.data, "smoke", f.files), /cache|missing|unfinished|incomplete|could not/);
   }
 });

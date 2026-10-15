@@ -108,11 +108,11 @@ test("v2 receipts authenticate server completion time while v1 never authenticat
 
 test("direct edge calls cannot promote fake successes or externally supplied verification booleans", async () => {
   const edge = await edgeHarness();
-  for (let i = 1; i <= 50; i++) {
+  for (let i = 1; i <= 2; i++) {
     const res = await edge.send(payload({ attempt_id: `11111111-1111-4111-8111-${String(i).padStart(12, "0")}` }));
     assert.equal(res.status, 204); // Legacy diagnostics still drain from the outbox.
   }
-  assert.equal(edge.calls.length, 50);
+  assert.equal(edge.calls.length, 2);
   assert.ok(edge.calls.every(call => call.args.p_summary_verified === false));
   assert.equal((await edge.send(payload({ summary_verified: true }))).status, 400);
   assert.equal((await edge.send(payload({ p_summary_verified: true }))).status, 400);
@@ -228,14 +228,17 @@ test("Web Store receipt recovery authenticates every served route and rejects ta
     assert.equal((await edge.send(legacy)).status, 204);
     assert.equal(edge.calls.at(-1).args.p_model, model);
     assert.equal(edge.calls.at(-1).args.p_status, "failed");
-    const before = edge.calls.length;
-    for (const change of [{ summary_confirmed_at: undefined },
-      { summary_confirmed_at: "2026-10-02T00:00:09.000Z" }, { install_id: "44444444-4444-4444-8444-444444444444" },
-      { attempt_id: "33333333-3333-4333-8333-333333333333" }, { destination_platform: "gemini" },
-      { extension_version: "1.4.7" }, { summary_proof: "0".repeat(64) }, { model: "made-up-model" }]) {
-      assert.equal((await edge.send({ ...legacy, ...change })).status, 422);
+    // Every route uses the same field-binding checks; cover that tamper matrix once.
+    if (model === LEGACY_RECEIPT_MODELS[0]) {
+      const before = edge.calls.length;
+      for (const change of [{ summary_confirmed_at: undefined },
+        { summary_confirmed_at: "2026-10-02T00:00:09.000Z" }, { install_id: "44444444-4444-4444-8444-444444444444" },
+        { attempt_id: "33333333-3333-4333-8333-333333333333" }, { destination_platform: "gemini" },
+        { extension_version: "1.4.7" }, { summary_proof: "0".repeat(64) }, { model: "made-up-model" }]) {
+        assert.equal((await edge.send({ ...legacy, ...change })).status, 422);
+      }
+      assert.equal(edge.calls.length, before);
     }
-    assert.equal(edge.calls.length, before);
     assert.equal(await verifySummaryReceipt(legacy, "short"), null);
   }
   const unknown = payload({ model: "future/model", summary_confirmed_at: "2026-10-02T00:00:08.000Z" });

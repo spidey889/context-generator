@@ -45,7 +45,7 @@ function answerStream(provider, text = "Preserve the agreed project plan.") {
 for (const provider of ["tokenharbor", "openrouter", "gemini", "mistral"]) {
   const firstAnswerMs = 30000;
   for (const phase of ["headers", "body", "json body"]) {
-    clockTest(`${provider} switches after ${firstAnswerMs / 1000} seconds without answer text in ${phase}`, async t => {
+    clockTest(`${provider} switches after ${firstAnswerMs / 1000} seconds without answer text in ${phase}`, { tickMs: 100 }, async t => {
       configure(t);
       const requests = [], deltas = [];
       global.fetch = async (url, options) => {
@@ -79,7 +79,7 @@ for (const provider of ["tokenharbor", "openrouter", "gemini", "mistral"]) {
     });
   }
 
-  clockTest(`${provider} keeps its completion budget after an answer starts and clears the silence timer`, async t => {
+  clockTest(`${provider} keeps its completion budget after an answer starts and clears the silence timer`, { tickMs: 100 }, async t => {
     configure(t);
     let requests = 0, signal;
     const startedAt = Date.now();
@@ -220,16 +220,21 @@ test("Mistral mixed string and text-block deltas preserve the answer without rea
   assert.equal(result.usage.totalTokens, 62);
 });
 
-test("failed and truncated streams cannot become summaries; retry resets and complete local recovery survive", async t => {
+clockTest("failed and truncated streams cannot become summaries; retry resets and complete local recovery survive", async t => {
   configure(t);
   let calls = 0, resets = 0;
-  global.fetch = async () => ++calls === 1
-    ? responseFrom(frame(chatChunk("REJECTED_PARTIAL")) + frame({ error: { code: 503, message: "PRIVATE_PROVIDER_ERROR" } }))
-    : responseFrom(frame(chatChunk("Keep the accepted project plan.", "stop")) + "data: [DONE]\n\n");
+  const requestTimes = [];
+  global.fetch = async () => {
+    requestTimes.push(Date.now());
+    return ++calls === 1
+      ? responseFrom(frame(chatChunk("REJECTED_PARTIAL")) + frame({ error: { code: 503, message: "PRIVATE_PROVIDER_ERROR" } }))
+      : responseFrom(frame(chatChunk("Keep the accepted project plan.", "stop")) + "data: [DONE]\n\n");
+  };
   const result = await createSummaryWithFallback({ conversation, profile: getSummaryProfile(conversation), openrouterApiKey: "test",
     requestContext: { onDelta() {}, onStart: () => resets++ } });
   assert.equal(calls, 2);
   assert.equal(resets, 2);
+  assert.equal(requestTimes[1] - requestTimes[0], 450, "Retry backoff is preserved in simulated time.");
   assert.doesNotMatch(result.summary, /REJECTED_PARTIAL|PRIVATE_PROVIDER_ERROR/);
   for (const stream of [frame(chatChunk("TRUNCATED")), "data: {broken}\n\n",
     frame(chatChunk("TRUNCATED", "stop")), frame({ error: { code: 403 } })]) {
