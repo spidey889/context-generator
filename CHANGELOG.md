@@ -4,6 +4,8 @@ A short history of decisions and regressions that matter when changing the code.
 
 ## 2026-10-15
 
+- **Project instructions now live in `AGENTS.md`.** Saved the owner's workspace, browser, documentation and automatic-push rules in the repository so future chats can discover them. Linked verification guidance to `LOGIC.md` and documented the existing exact-commit CI requirement for protected `master`.
+
 - **Picker setup moves before the first click.** After page load, idle preparation builds the hidden menu/styles, decodes its local logos and loads its title font. Later clicks reuse that UI; early clicks retain immediate creation. Preparation leaves focus and the existing entrance unchanged, starts no conversation work and is cancelled on teardown. Added lifecycle regressions and an installed-Brave check for loaded assets and hidden UI before the first opening. Extension distribution remains separate.
 
 - **Haiku starts answering within 20 seconds.** Reduced only TokenHarbor Haiku's streamed first-answer wait from 30 to 20 seconds. Silence advances to second-key DeepSeek with up to 25 seconds left in their existing shared 45-second allowance. Other models, temporary retries, successful-answer completion budgets and the overall chain deadline are unchanged. Simulated-time checks cover stalled headers/body/JSON and the exact Haiku-to-DeepSeek-to-Dots transition.
