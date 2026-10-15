@@ -2143,7 +2143,7 @@ test("direct and AI ranges use exact captured character boundaries on every plat
     assert.equal(summaryRequests, 3, `${hostname}: both inclusive AI boundaries and untrimmed length use the backend`);
     await assert.rejects(hooks.summarizeWithBackend("x".repeat(500001)), error => {
       assert.equal(error.code, "conversation_too_large");
-      assert.match(error.message, /too long to transfer.*summarizing it earlier/);
+      assert.match(error.message, /limit of 500,000 characters/);
       return true;
     });
     await assert.rejects(hooks.summarizeWithBackend("tiny", { deadlineAt: Date.now() - 1 }), /Transfer timed out/);
@@ -2495,7 +2495,7 @@ test("local summary recovery retains the capture size boundary before contacting
     requests++;
     return { ok: true };
   } });
-  await assert.rejects(hooks.summarizeWithBackend("x".repeat(500001)), /too long to transfer.*summarizing it earlier/);
+  await assert.rejects(hooks.summarizeWithBackend("x".repeat(500001)), /limit of 500,000 characters/);
   assert.equal(requests, 0);
 });
 

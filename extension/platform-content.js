@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-14-tokenharbor-v149";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-15-size-stop-v150";
   const INLINE_PILL_SIZE = 36;
   const ownedUiStyleSheets = new Map();
   let handoffUserCss = "";
@@ -127,7 +127,7 @@
   // Claude, ChatGPT and Grok need focus before composer hydration/verification.
   // Their source-side completion cue must finish before the background performs the focused paste.
   const FOCUSED_PASTE_DESTINATIONS = new Set(["claude", "chatgpt", "grok"]);
-  const OVERSIZED_CONVERSATION_ERROR_MESSAGE = "This chat is too long to transfer. Next time, try summarizing it earlier.";
+  const OVERSIZED_CONVERSATION_ERROR_MESSAGE = "This chat exceeds our limit of 500,000 characters. Try a smaller chat.";
   const CONVERSATION_SCRAPE_RETRY_TIMEOUT_MS = 1800;
   const CONVERSATION_SCRAPE_RETRY_INTERVAL_MS = 140;
   const SOURCE_SCROLL_STABLE_TIMEOUT_MS = 1800;
@@ -7762,7 +7762,29 @@
   function isCaptureSizeLimitError(error) {
     return error?.captureFailureReason === "size_limit"
       || ["size_limit", "attachment_size_limit"].includes(error?.diagnostics?.capture_detail)
-      || [error?.code, error?.diagnosticCode].includes("conversation_too_large");
+      || [error?.code, error?.diagnosticCode].includes("conversation_too_large")
+      // Some native readers retain a broad incomplete category. The measured
+      // hard guard still forbids replacing rejected content with a DOM subset.
+      || ["transcript_char_limit", "transcript_byte_limit", "supported_files_limit", "raw_header_limit",
+        "raw_total_stream_limit", "raw_response_stream_limit", "raw_remaining_files_limit"].includes(error?.jsonCapture?.failure_check);
+  }
+
+  function getCaptureSizeLimitMessage(error) {
+    const observation = error?.jsonCapture;
+    const check = observation?.failure_check;
+    const value = observation?.failure_value;
+    const limit = observation?.failure_limit;
+    // Use numeric guard observations only; native error prose may contain
+    // private response text. Bytes and transcript characters are distinct caps.
+    if (!Number.isSafeInteger(value) || !Number.isSafeInteger(limit) || value <= limit || limit <= 0) {
+      return error?.diagnostics?.capture_detail === "attachment_size_limit"
+        ? "Text attachments exceed our limit of 2,100,000 bytes. Try smaller files."
+        : OVERSIZED_CONVERSATION_ERROR_MESSAGE;
+    }
+    const unit = check === "transcript_char_limit" ? "characters" : "bytes";
+    const subject = check === "supported_files_limit" ? "Text attachments are"
+      : check?.startsWith("raw_") ? "Chat data is" : "This chat is";
+    return `${subject} too large to transfer (${value.toLocaleString("en-US")} ${unit}). Our limit is ${limit.toLocaleString("en-US")} ${unit}. Try a smaller chat.`;
   }
 
   function shouldRetrySourceJson(error) {
@@ -7915,17 +7937,20 @@
           // away-and-back change that a final URL comparison cannot detect.
           if (/conversation changed during capture\./i.test(error?.message || "")) throw error;
           if (window.location.href !== sourceUrl) throw createDiagnosticError("The conversation changed during capture. Return to the source chat and try again.", "conversation_changed");
-          // Native downloads/files can exceed their limits even when the DOM
-          // transcript fits. Keep the rejection detail and try normal capture once.
-          const sizeLimit = isCaptureSizeLimitError(error);
+          // A shorter DOM read cannot replace full content rejected for size:
+          // attachments and offscreen turns could disappear from the carry.
+          if (isCaptureSizeLimitError(error)) {
+            error.code = "conversation_too_large";
+            error.message = getCaptureSizeLimitMessage(error);
+            throw error;
+          }
           // Best-effort plain-text capture returns with a warning above. Actual
           // ChatGPT JSON failures retain their existing active-reply exception.
-          if (useChatGptJson && !sizeLimit && !isSourceReplyInProgress()) throw error;
+          if (useChatGptJson && !isSourceReplyInProgress()) throw error;
           if (trace?.diagnostics) { for (const key of ["error_code", "error_origin", "failure_site", "error_type", "error_file", "error_line", "error_column"]) delete trace.diagnostics[key]; }
           // Recovery stays within this attempt and reuses its destination.
-          showFastCaptureFallbackMessage(sizeLimit);
-          const jsonFallbackReason = sizeLimit ? "size_limit"
-            : sanitizeCaptureDiagnostics({ jsonFallbackReason: error?.captureFailureReason }).jsonFallbackReason || "request_failed";
+          showFastCaptureFallbackMessage();
+          const jsonFallbackReason = sanitizeCaptureDiagnostics({ jsonFallbackReason: error?.captureFailureReason }).jsonFallbackReason || "request_failed";
           updateTransferDiagnostics(trace, { json_fallback_code: jsonFallbackReason, last_operation: "capture_dom" }, "json_fallback");
           reportCaptureProgress(trace, "structured", true);
           markTransferTrace(trace, "fast capture failed; using normal capture", { jsonFallbackReason });
@@ -7953,17 +7978,14 @@
     }
   }
 
-  function showFastCaptureFallbackMessage(sizeLimit = false) {
+  function showFastCaptureFallbackMessage() {
     const group = document.getElementById("context-generator-status-group");
     if (!group) return;
     const notice = document.createElement("div");
     notice.id = "context-generator-capture-notice";
     notice.setAttribute("role", "status");
     notice.style.cssText = "font-size:12px;line-height:1.4;color:inherit";
-    if (sizeLimit) notice.style.whiteSpace = "pre-line";
-    notice.textContent = sizeLimit
-      ? `${OVERSIZED_CONVERSATION_ERROR_MESSAGE}\n\nFast capture skipped. Using slower capture.`
-      : "Fast capture failed. Using normal capture instead.";
+    notice.textContent = "Fast capture failed. Using normal capture instead.";
     group.appendChild(notice);
   }
 

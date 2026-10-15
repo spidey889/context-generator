@@ -49,6 +49,7 @@ const JSON_SOURCE = ["chatgpt", "gemini", "grok", "deepseek"].includes(process.e
 const NETWORK_SOURCE = ["gemini", "grok", "deepseek"].includes(JSON_SOURCE);
 const GROK_FILE_ONLY_SMOKE = JSON_SOURCE === "grok" && process.env.CAP_CONTEXT_NETWORK_FAILURE_SMOKE === "file-only";
 const DEEPSEEK_OVERSIZE_SMOKE = JSON_SOURCE === "deepseek" && process.env.CAP_CONTEXT_NETWORK_FAILURE_SMOKE === "oversize";
+const DEEPSEEK_TRANSCRIPT_OVERSIZE_SMOKE = JSON_SOURCE === "deepseek" && process.env.CAP_CONTEXT_NETWORK_FAILURE_SMOKE === "transcript-oversize";
 const NETWORK_FAILURE = (NETWORK_SOURCE && process.env.CAP_CONTEXT_NETWORK_FAILURE_SMOKE === "partial") || GROK_FILE_ONLY_SMOKE || DEEPSEEK_OVERSIZE_SMOKE;
 const JSON_CAPTURE_SMOKE = Boolean(JSON_SOURCE);
 const JSON_RETRY_SMOKE = JSON_SOURCE === "chatgpt" && process.env.CAP_CONTEXT_JSON_RETRY_SMOKE === "1";
@@ -61,14 +62,11 @@ const CHATGPT_HISTORY_OVERSIZE_SMOKE = CHATGPT_FAILURE_SMOKE === "history-oversi
 const CHATGPT_PASTE_AUTH_SMOKE = JSON_SOURCE === "chatgpt" && process.env.CAP_CONTEXT_CHATGPT_AUTH_SMOKE === "paste401";
 const CLAUDE_PARTIAL_SMOKE = JSON_SOURCE === "claude" && process.env.CAP_CONTEXT_CLAUDE_PARTIAL_SMOKE === "1";
 const CLAUDE_OVERSIZE_SMOKE = JSON_SOURCE === "claude" && process.env.CAP_CONTEXT_CLAUDE_PARTIAL_SMOKE === "oversize";
-// ChatGPT's raw-history/file-body fixtures retain their incomplete classification.
-const SIZE_CAPTURE_SMOKE = Boolean(CLAUDE_OVERSIZE_SMOKE || DEEPSEEK_OVERSIZE_SMOKE);
-const JSON_FALLBACK_SMOKE = Boolean(CLAUDE_PARTIAL_SMOKE || NETWORK_FAILURE || SIZE_CAPTURE_SMOKE);
-// Size failures still cancel the native read, then use the same DOM recovery.
-const EXPECTED_JSON_FALLBACK_REASON = SIZE_CAPTURE_SMOKE ? "size_limit" : GROK_FILE_ONLY_SMOKE ? "unsupported" : "incomplete";
-const EXPECTED_JSON_FALLBACK_NOTICE = SIZE_CAPTURE_SMOKE
-  ? "This chat is too long to transfer. Next time, try summarizing it earlier.\n\nFast capture skipped. Using slower capture."
-  : "Fast capture failed. Using normal capture instead.";
+const SIZE_CAPTURE_SMOKE = Boolean(CLAUDE_OVERSIZE_SMOKE || DEEPSEEK_OVERSIZE_SMOKE || DEEPSEEK_TRANSCRIPT_OVERSIZE_SMOKE
+  || CHATGPT_PASTE_OVERSIZE_SMOKE || CHATGPT_HISTORY_OVERSIZE_SMOKE);
+const JSON_FALLBACK_SMOKE = Boolean((CLAUDE_PARTIAL_SMOKE || NETWORK_FAILURE) && !SIZE_CAPTURE_SMOKE);
+const EXPECTED_JSON_FALLBACK_REASON = GROK_FILE_ONLY_SMOKE ? "unsupported" : "incomplete";
+const EXPECTED_JSON_FALLBACK_NOTICE = "Fast capture failed. Using normal capture instead.";
 const TELEMETRY_DATABASE_SMOKE = process.env.CAP_CONTEXT_TELEMETRY_SMOKE === "1";
 // Explicit opt-in uses the installed worker's real production endpoint. Mirror
 // its metadata-only reports locally for assertions; never send fixture receipts.
@@ -595,6 +593,14 @@ function networkSmokeFixture(platform) {
     fixture.pages[2].turns[0][2][0][4] = [["CONTEXT_METADATA_SENTINEL"], null];
   }
   if (platform !== "deepseek") return fixture;
+  if (DEEPSEEK_TRANSCRIPT_OVERSIZE_SMOKE) {
+    // Match the real incident: a valid ~1 MB text file passes download limits,
+    // then exceeds the 500,000-character transcript cap. DOM omits this file.
+    const text = "x".repeat(999998);
+    fixture.files[fixture.file.id] = text;
+    fixture.file.file_size = Buffer.byteLength(text);
+    return fixture;
+  }
   const extraBodies = [];
   for (let i = 1; i <= 3; i++) {
     const text = `\uFEFF  original upload ${i}: café 🕷️\r\n`;
@@ -665,10 +671,10 @@ async function startFixtureServer() {
       state.fileReadsActive++;
       state.fileReadsPeak = Math.max(state.fileReadsPeak, state.fileReadsActive);
       response.on("close", () => { state.fileReadsActive--; });
-      // Hold independent bodies until all four arrive, then complete in reverse
-      // order. This proves browser concurrency without timing-based assertions.
+      // The normal scenario holds four independent bodies, then completes in
+      // reverse order to prove concurrency. The size scenario has one file.
       pendingFileResponses.push({ response, text: network.files[id] });
-      if (pendingFileResponses.length === 4) for (const item of pendingFileResponses.reverse()) {
+      if (pendingFileResponses.length === (DEEPSEEK_TRANSCRIPT_OVERSIZE_SMOKE ? 1 : 4)) for (const item of pendingFileResponses.reverse()) {
         item.response.writeHead(200, { "Content-Type": "application/octet-stream" });
         item.response.end(item.text);
       }
@@ -2579,7 +2585,7 @@ async function run() {
     if (JSON_FALLBACK_SMOKE) {
       await waitFor(() => sourceSession.evaluate(`document.getElementById("context-generator-capture-notice")?.textContent === ${JSON.stringify(EXPECTED_JSON_FALLBACK_NOTICE)}`), "the safe fast-capture fallback notice");
     }
-    if (JSON_SOURCE === "chatgpt" && CHATGPT_FAILURE_SMOKE && CHATGPT_FAILURE_SMOKE !== "streaming") {
+    if (SIZE_CAPTURE_SMOKE || (JSON_SOURCE === "chatgpt" && CHATGPT_FAILURE_SMOKE && CHATGPT_FAILURE_SMOKE !== "streaming")) {
       await waitFor(() => sourceSession.evaluate('Boolean(document.getElementById("context-generator-error-text")?.textContent)'), "the JSON capture error");
       const failedCapture = await sourceSession.evaluate(`(() => {
         const list = document.getElementById("cap-smoke-chat-history");
@@ -2591,15 +2597,26 @@ async function run() {
         assert.equal(failedCapture.top, 420, "Failed JSON capture must preserve sidebar position.");
         assert.equal(failedCapture.calls, 0, "Failed JSON capture must never scroll the sidebar.");
       }
-      assert.equal(failedCapture.fallbackNotice, false, "Terminal capture errors must not enter DOM recovery.");
+      assert.equal(failedCapture.fallbackNotice, false, `Terminal capture errors must not enter DOM recovery: ${JSON.stringify(failedCapture)}`);
       assert.match(failedCapture.error, /JSON capture|too long|limit|Fast capture/i);
       assert.equal(state.jsonRequests - jsonRequestsBeforeTransfer, 1, "One fresh API read must precede the error.");
       assert.equal(state.summaryRequests.length, 0, "A failed JSON read must not submit DOM history.");
+      if (SIZE_CAPTURE_SMOKE) {
+        assert.match(failedCapture.error, DEEPSEEK_TRANSCRIPT_OVERSIZE_SMOKE ? /[\d,]+ characters.*500,000 characters/ : /[\d,]+ bytes.*[\d,]+ bytes/);
+        const terminal = await waitFor(() => state.telemetryRequests.find(payload => payload.status === "failed"), "the terminal size rejection");
+        assert.equal(terminal.last_stage, "capture_started", "Size rejection must stop before summary or paste.");
+        assert.equal(terminal.failure_reason, "conversation_too_large");
+        assert.equal(terminal.diagnostics.json_fallback_code, undefined);
+        if (DEEPSEEK_TRANSCRIPT_OVERSIZE_SMOKE) {
+          assert.equal(terminal.diagnostics.json_attempts[0].failure_check, "transcript_char_limit");
+          assert.ok(terminal.diagnostics.json_attempts[0].failure_value > 1000000);
+        }
+      }
       if (TELEMETRY_DATABASE_SMOKE) {
         const terminal = await waitFor(() => state.telemetryRequests.find(payload => payload.status === "failed"), "the installed worker's failed capture telemetry");
-        await telemetryFixture.verifyFailureOutcome(terminal, false);
+        await telemetryFixture.verifyFailureOutcome(terminal, SIZE_CAPTURE_SMOKE);
         if (LIVE_TELEMETRY_SMOKE) process.stdout.write(`✓ LIVE transfer record: ${terminal.attempt_id}; JSON checks: ${JSON.stringify(terminal.diagnostics.json_attempts)}\n`);
-        assert.equal(terminal.diagnostics.failure_site, CHATGPT_FAILURE_SMOKE === "partial" ? "capture_serialize" : "capture_history");
+        assert.equal(terminal.diagnostics.failure_site, DEEPSEEK_TRANSCRIPT_OVERSIZE_SMOKE || CHATGPT_FAILURE_SMOKE === "partial" ? "capture_serialize" : "capture_history");
         if (CHATGPT_FAILURE_SMOKE === "ranged") assert.equal(terminal.diagnostics.capture_http_status, 206);
         process.stdout.write("✓ Precise capture failure reached the real local relay, Edge and SQL without private content.\n");
       }
@@ -2615,6 +2632,21 @@ async function run() {
         assert.ok(state.oversizeHistory.bytes < 40000000, "The full oversized history tail must not be downloaded.");
         assert.equal(state.pasteContentRequests + state.pasteDescriptorRequests, 0, "Rejected history must not begin paste downloads.");
         process.stdout.write(`✓ Brave cancelled oversized history after ${state.oversizeHistory.bytes} fixture bytes.\n`);
+      }
+      if (DEEPSEEK_OVERSIZE_SMOKE || CLAUDE_OVERSIZE_SMOKE) {
+        await waitFor(() => state.oversizeHistory.cancelled, "oversized history reader cancellation");
+        assert.ok(state.oversizeHistory.bytes < 20000000, "The full oversized tail must not be downloaded.");
+        assert.equal(state.pasteContentRequests, 0, "Rejected history must not begin file downloads.");
+      }
+      if (ERROR_SCREENSHOT_PATH) {
+        await sourceSession.call("Page.bringToFront");
+        await waitFor(() => sourceSession.evaluate(`(() => {
+          const overlay = document.getElementById("context-generator-error-overlay");
+          return overlay?.style.display === "flex" && getComputedStyle(overlay).opacity === "1";
+        })()`), "the visible size error before its screenshot");
+        const capture = await sourceSession.call("Page.captureScreenshot", { format: "png" });
+        await fs.promises.mkdir(path.dirname(ERROR_SCREENSHOT_PATH), { recursive: true });
+        await fs.promises.writeFile(ERROR_SCREENSHOT_PATH, Buffer.from(capture.data, "base64"));
       }
       process.stdout.write("✓ JSON capture failure stops without DOM fallback or summary submission.\n");
       return;
@@ -2635,13 +2667,6 @@ async function run() {
     if (JSON_FALLBACK_SMOKE) {
       assert.doesNotMatch(capturedConversation, /JSON_ONLY_SENTINEL|AUTH_SENTINEL|CSRF_SENTINEL|SIGNED_SENTINEL/);
       assert.equal(state.jsonRequests - jsonRequestsBeforeTransfer, JSON_SOURCE === "grok" ? 2 : 1, "Fast capture must not be retried after failure.");
-      if (DEEPSEEK_OVERSIZE_SMOKE || CLAUDE_OVERSIZE_SMOKE) {
-        assert.equal(state.oversizeHistory.cancelled, true, "Brave must cancel the oversized history response.");
-        // Server totals include queued bytes; capture tests verify the exact client limit.
-        assert.ok(state.oversizeHistory.bytes < 20000000, "The full oversized tail must not be downloaded.");
-        assert.equal(state.pasteContentRequests, 0, "Rejected history must not begin file downloads.");
-        process.stdout.write(`✓ Brave cancelled oversized history after ${state.oversizeHistory.bytes} fixture bytes.\n`);
-      }
       process.stdout.write(`✓ ${JSON_SOURCE} failed fast capture fell back to DOM within the same transfer.\n`);
     } else if (JSON_CAPTURE_SMOKE) {
       assert.equal(summaryInput.conversation, undefined, "JSON capture sends one structured history, without a duplicate transcript.");

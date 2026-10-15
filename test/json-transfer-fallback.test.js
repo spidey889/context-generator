@@ -10,7 +10,7 @@ const source = fs.readFileSync(path.join(__dirname, "../extension/platform-conte
 // Exercise the actual picker orchestrator; substitute only its UI, capture and
 // transfer boundaries to count side effects without native timers or a browser.
 function harness(platform, { mode = "failure", enabled = true, domFails = false, prepareFails = false, failureReason } = {}) {
-  const calls = { json: 0, prepare: 0, dom: 0, notice: 0, noticeSizes: [], handoff: 0, destination: 0, flows: [], errors: [], traces: [], traceDetails: [], captureMetrics: [], finished: [] };
+  const calls = { json: 0, prepare: 0, dom: 0, notice: 0, handoff: 0, destination: 0, flows: [], errors: [], traces: [], traceDetails: [], captureMetrics: [], finished: [] };
   const prepared = Promise.resolve({ tabId: 42 });
   const pathname = { claude: "/chat/source", chatgpt: "/c/source", gemini: "/app/source", grok: "/c/source", deepseek: "/a/chat/s/source" }[platform];
   const location = { href: `https://example.test${pathname}`, pathname };
@@ -39,7 +39,7 @@ function harness(platform, { mode = "failure", enabled = true, domFails = false,
       return "DOM transcript";
     },
     createConversationCapture: (text, metrics) => { calls.captureMetrics.push(metrics); return text; },
-    showFastCaptureFallbackMessage: sizeLimit => { calls.notice++; calls.noticeSizes.push(sizeLimit); },
+    showFastCaptureFallbackMessage: () => { calls.notice++; },
     runContextFlow: (destination, prep, text, trace) => { calls.flows.push({ destination, prep, text, trace }); },
     getSafeTelemetryFailureReason: () => "capture_failed",
     showErrorOverlay: message => calls.errors.push(message)
@@ -388,18 +388,22 @@ test("JSON attempt observations survive source-to-destination handoff and one re
     [["prefetch", "failed", 100], ["retry", "succeeded", 200]]);
 });
 
-test("size failures use one DOM recovery on all five platforms, including active replies and cached errors", async () => {
+test("size failures stop all five platforms without partial DOM transfer, including active replies and cached errors", async () => {
   const cases = [
-    ["deepseek", true, transientError("size_limit", "attachment_size_limit")],
+    ["deepseek", true, transientError("size_limit", "size_limit")],
     ["gemini", false, transientError("size_limit", "size_limit")],
     ["grok", true, transientError("incomplete", "size_limit")],
     ["claude", false, Object.assign(transientError(), { code: "conversation_too_large" })],
-    ["chatgpt", false, Object.assign(transientError(), { diagnosticCode: "conversation_too_large" })]
+    ["chatgpt", false, Object.assign(transientError(), { diagnosticCode: "conversation_too_large" })],
+    ["chatgpt", true, transientError("incomplete", "partial_response")]
   ];
   for (const [platform, prefetched, error] of cases) {
-    error.jsonCapture = { outcome: "failed", mode: "fresh", failure_check: "raw_total_stream_limit", failure_value: 6000001, failure_limit: 6000000 };
-    const { context, calls, prepared } = harness(platform);
-    context.isSourceReplyInProgress = () => platform === "grok";
+    const transcriptLimit = platform === "deepseek";
+    error.jsonCapture = { outcome: "failed", mode: "fresh",
+      failure_check: transcriptLimit ? "transcript_char_limit" : "raw_total_stream_limit",
+      failure_value: transcriptLimit ? 1003622 : 6000001, failure_limit: transcriptLimit ? 500000 : 6000000 };
+    const { context, calls } = harness(platform);
+    context.isSourceReplyInProgress = () => ["grok", "chatgpt"].includes(platform);
     context.window[captureKeyFor(platform)] = async () => { calls.json++; throw error; };
     if (prefetched) {
       context.startPickerJsonCapture(); await context.pickerJsonCapture.promise;
@@ -407,22 +411,31 @@ test("size failures use one DOM recovery on all five platforms, including active
     }
     await context.start("claude");
     assert.equal(calls.json, 1);
-    assert.equal(calls.prepare, 1);
-    assert.equal(calls.dom, 1);
-    assert.equal(calls.notice, 1);
-    assert.deepEqual(calls.noticeSizes, [true]);
+    assert.equal(calls.prepare + calls.dom + calls.notice + calls.flows.length, 0, "Never substitute the smaller visible history for rejected full content.");
     assert.equal(calls.destination, 1);
-    assert.equal(calls.flows.length, 1);
-    assert.equal(calls.flows[0].prep, prepared);
-    assert.equal(calls.flows[0].text, "DOM transcript");
-    assert.equal(calls.errors.length, 0);
-    const diagnostics = calls.flows[0].trace.diagnostics;
-    assert.equal(diagnostics.error_code, undefined);
+    assert.equal(calls.errors.length, 1);
+    assert.match(calls.errors[0], transcriptLimit ? /1,003,622 characters.*500,000 characters/ : /6,000,001 bytes.*6,000,000 bytes/);
+    assert.equal(context.isRunning, false);
+    const diagnostics = calls.finished[0].diagnostics;
+    assert.equal(diagnostics.error_code, "conversation_too_large");
     assert.equal(diagnostics.capture_detail, error.diagnostics.capture_detail);
-    assert.equal(diagnostics.json_fallback_code, "size_limit");
-    assert.equal(diagnostics.json_attempts[0].failure_check, "raw_total_stream_limit");
-    assert.equal(diagnostics.json_attempts[0].failure_value, 6000001);
-    assert.doesNotMatch(JSON.stringify(diagnostics), /MUST_NOT_APPEAR/);
+    assert.equal(diagnostics.json_fallback_code, undefined);
+    assert.equal(diagnostics.json_attempts[0].failure_check, error.jsonCapture.failure_check);
+    assert.equal(diagnostics.json_attempts[0].failure_value, error.jsonCapture.failure_value);
+    assert.doesNotMatch(JSON.stringify(diagnostics) + calls.errors[0], /MUST_NOT_APPEAR/);
+  }
+});
+
+test("attachment and transcript byte rejections show their own numeric limits", async () => {
+  for (const [check, detail, limit] of [["supported_files_limit", "attachment_size_limit", 2100000], ["transcript_byte_limit", "size_limit", 2000000]]) {
+    const { context, calls } = harness("deepseek");
+    const error = transientError("size_limit", detail);
+    error.jsonCapture = { outcome: "failed", failure_check: check, failure_value: limit + 1, failure_limit: limit };
+    context.window.__capCaptureNetworkJson = async () => { throw error; };
+    await context.start("claude");
+    assert.equal(calls.errors.length, 1);
+    assert.match(calls.errors[0], new RegExp(`${(limit + 1).toLocaleString("en-US")} bytes.*${limit.toLocaleString("en-US")} bytes`));
+    assert.equal(calls.dom + calls.flows.length, 0);
   }
 });
 
@@ -480,9 +493,8 @@ test("hard and unknown failures are not retried, including a cached Claude size 
     if (prefetched) { context.startPickerJsonCapture(); await context.pickerJsonCapture.promise; }
     await context.start("claude");
     assert.equal(calls.json, 1);
-    const sizeLimit = context.isCaptureSizeLimitError(error);
-    assert.equal(calls.dom, sizeLimit ? 1 : 0);
-    assert.equal(calls.errors.length, sizeLimit ? 0 : 1);
+    assert.equal(calls.dom, 0);
+    assert.equal(calls.errors.length, 1);
   }
 });
 
@@ -499,11 +511,11 @@ test("a failed JSON retry stops or falls back once, retaining its final cause", 
     await context.start("claude");
     assert.equal(calls.json, 2, "Never loop or retry a failed retry.");
     assert.equal(calls.destination, 1);
-    const stops = platform === "chatgpt" && !secondHard;
+    const stops = secondHard || platform === "chatgpt";
     assert.equal(calls.dom, stops ? 0 : 1);
     assert.equal(calls.errors.length, stops ? 1 : 0);
     assert.equal(calls.flows.length, stops ? 0 : 1);
-    if (!stops) assert.equal(calls.flows[0].trace.diagnostics.json_fallback_code, secondHard ? "size_limit" : "request_failed");
+    if (!stops) assert.equal(calls.flows[0].trace.diagnostics.json_fallback_code, "request_failed");
     assert.equal(calls.notice, stops ? 0 : 1);
   }
 });
@@ -928,14 +940,10 @@ test("fallback notice uses fixed safe copy in the handoff and announces it", () 
   const node = { style: {}, setAttribute: (key, value) => { node[key] = value; } };
   const group = { appendChild: child => { group.child = child; } };
   const context = vm.createContext({
-    OVERSIZED_CONVERSATION_ERROR_MESSAGE: "This chat is too long to transfer. Next time, try summarizing it earlier.",
     document: { getElementById: () => group, createElement: () => node }
   });
   vm.runInContext(`${source.slice(noticeStart, noticeEnd)}; showFastCaptureFallbackMessage();`, context);
   assert.equal(group.child, node);
   assert.equal(node.role, "status");
   assert.equal(node.textContent, "Fast capture failed. Using normal capture instead.");
-  vm.runInContext("showFastCaptureFallbackMessage(true);", context);
-  assert.equal(node.textContent, "This chat is too long to transfer. Next time, try summarizing it earlier.\n\nFast capture skipped. Using slower capture.");
-  assert.equal(node.style.whiteSpace, "pre-line");
 });

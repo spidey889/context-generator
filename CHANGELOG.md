@@ -2,6 +2,10 @@
 
 A short history of decisions and regressions that matter when changing the code. Read the relevant section of [LOGIC.md](LOGIC.md) for current behavior, ownership and checks; use this file when you need to understand why an approach changed. Entries describe source changes unless deployment is explicitly recorded. Extension packaging, Web Store publication and backend deployment are separate.
 
+## 2026-10-15
+
+- **Oversized captures stop instead of transferring a smaller subset.** A real DeepSeek transfer rejected a 1,003,622-character transcript containing a 999,998-byte text file, then scraped only 1,760 characters and continued toward Claude. Removed size-error DOM recovery across all five platforms, including picker prefetch, active replies and the temporary-error retry. Measured raw-response guards also stop when their older error category says incomplete. Errors now show the observed size and exceeded numeric character/byte limit when available. Original diagnostics remain; non-size recovery is unchanged. Added the real failure shape to transfer regressions and a synthetic installed-Brave attachment scenario; updated oversized-response browser assertions. Extension distribution remains separate.
+
 ## 2026-10-14
 
 - **Haiku restored as the first TokenHarbor preview model; DeepSeek paused.** Flipped only the two code flags. Retained DeepSeek's thinking/output fix and both model receipt catalogs. Haiku uses its original profile caps and 30-second first-answer check; shared free-provider limits and backups stay unchanged. Paused-model regressions now load an isolated test configuration so future code switches do not erase coverage.
