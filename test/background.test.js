@@ -119,6 +119,7 @@ function loadBackgroundForTransferTest({
   const closedTabs = new Set();
   let nextCreatedTabId = firstCreatedTabId;
   const operations = {
+    cancellationOrder: [],
     created: [],
     gotten: [],
     sent: [],
@@ -176,7 +177,7 @@ function loadBackgroundForTransferTest({
           operations.created.push({ options, tab });
           return createTabImpl ? createTabImpl(tab) : tab;
         },
-        remove: async tabId => { operations.removed.push(tabId); closedTabs.add(tabId); },
+        remove: async tabId => { operations.cancellationOrder.push("remove"); operations.removed.push(tabId); closedTabs.add(tabId); },
         get: async (tabId) => {
           operations.gotten.push(tabId);
           if (closedTabs.has(tabId)) throw new Error(`No tab with id: ${tabId}`);
@@ -188,6 +189,7 @@ function loadBackgroundForTransferTest({
         },
         query: async () => [],
         sendMessage: async (tabId, message) => {
+          if (message.type === "CANCEL_TRANSFER") operations.cancellationOrder.push("notify");
           operations.sent.push({ tabId, message });
           return sendMessageImpl ? sendMessageImpl(tabId, message) : { ok: true };
         },
@@ -214,13 +216,13 @@ function loadBackgroundForTransferTest({
     getPlatformFromUrl: sandbox.__backgroundTestHooks.getPlatformFromUrl,
     sendMessageWhenReady: sandbox.__backgroundTestHooks.sendMessageWhenReady,
     closeTab(tabId, notify = true) { closedTabs.add(tabId); return notify ? tabRemovedListener(tabId) : undefined; },
-    prepare(destination, senderTab = null, deadlineAt = null) {
+    prepare(destination, senderTab = null, deadlineAt = null, transferId = "transfer-test") {
       return new Promise(resolve => messageListener(
-        { type: "PREPARE_DESTINATION", destination, deadlineAt, transferId: "transfer-test" },
+        { type: "PREPARE_DESTINATION", destination, deadlineAt, transferId },
         { tab: senderTab }, resolve
       ));
     },
-    sendTransfer(destination, preparedTabId = null, deferFinalActivation = false, deadlineAt = null, senderTab = null) {
+    sendTransfer(destination, preparedTabId = null, deferFinalActivation = false, deadlineAt = null, senderTab = null, transferId = "transfer-test") {
       return new Promise((resolve, reject) => {
         const keepsChannelOpen = messageListener(
           {
@@ -228,7 +230,7 @@ function loadBackgroundForTransferTest({
             destination,
             text: "CONTEXT CARRY — READY TO PASTE\nUseful transfer context",
             preparedTabId,
-            transferId: "transfer-test",
+            transferId,
             deferFinalActivation,
             deadlineAt
           },
@@ -535,6 +537,7 @@ for (const from of ["source", "destination"]) test(`Escape from the ${from} clos
   const prepared = await harness.prepare("gemini", sourceTab);
   assert.equal((await harness.cancel(from === "source" ? sourceTab.id : prepared.tabId)).ok, true);
   assert.deepEqual(harness.operations.removed, [prepared.tabId]);
+  assert.equal(harness.operations.cancellationOrder[0], "remove", "Native closure is issued before cancellation notifications.");
   assert.equal((await harness.sendTransfer("gemini", prepared.tabId, false, null, sourceTab)).code, "user_cancelled");
   assert.equal(harness.operations.created.length, 1);
   assert.equal(harness.operations.updated.length, 0);
@@ -569,6 +572,23 @@ test("Escape before preparation latches cancellation before any destination work
   assert.equal((await harness.cancel(9)).ok, true);
   assert.equal((await harness.prepare("gemini", sourceTab)).code, "user_cancelled");
   assert.equal(harness.operations.created.length, 0);
+});
+
+test("a new transfer opens and delivers after Escape on every destination", async () => {
+  for (const destination of ["claude", "chatgpt", "gemini", "grok", "deepseek"]) {
+    const sourceTab = { id: 9, windowId: 1, index: 0 };
+    const harness = loadBackgroundForTransferTest({ sourceTab });
+    const first = await harness.prepare(destination, sourceTab);
+    assert.equal(first.ok, true, destination);
+    await harness.cancel(sourceTab.id);
+    const next = await harness.prepare(destination, sourceTab, null, "next-attempt");
+    assert.equal(next.ok, true, `${destination}: cancellation cannot poison a later attempt`);
+    const delivered = await harness.sendTransfer(destination, next.tabId, false, null, sourceTab, "next-attempt");
+    assert.equal(delivered.ok, true, destination);
+    assert.deepEqual(harness.operations.removed, [first.tabId], destination);
+    assert.equal(harness.operations.created.length, 2, destination);
+    assert.ok(harness.operations.sent.some(({ tabId, message }) => tabId === next.tabId && message.type === "PASTE_CONTEXT"), destination);
+  }
 });
 
 test("near-end reveal is text-free and subsequent delivery never steals focus again", async () => {
@@ -886,7 +906,7 @@ clockTest("expired transfer messages cannot fetch summaries, open tabs, paste or
     assert.equal(response.code, "transfer_timeout");
   }
   const { errors, badges, ...transferOperations } = harness.operations;
-  assert.deepEqual(transferOperations, { created: [], gotten: [], sent: [], updated: [], injected: [], fetched: [], removed: [] });
+  assert.deepEqual(transferOperations, { cancellationOrder: [], created: [], gotten: [], sent: [], updated: [], injected: [], fetched: [], removed: [] });
   assert.equal(errors[0][1].code, "transfer_timeout", "real failures must still be logged");
   assert.ok(badges.includes("ERR"));
 });

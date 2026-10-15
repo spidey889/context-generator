@@ -4,6 +4,10 @@ A short history of decisions and regressions that matter when changing the code.
 
 ## 2026-10-16
 
+- **Retire stale page code after extension reloads.** A real failed Claude-to-Grok run left summary progress without a working prepared destination; the source console contained multiple invalidated extension worlds. Timers, observers, animation frames, idle preload and page events now detect an invalid runtime and release their own resources without deleting replacement UI. Invalidated summary messaging reports the refresh instruction instead of pretending a local carry can still be delivered. Regressions cover stale callbacks, replacement UI ownership and no false summary completion; normal and cancel-then-retry transfers retain their existing guards.
+
+- **Prioritized Escape tab closure while preserving new transfers.** Dispatch the small cancel/close request after the local UI stops and before copying the Latest Run receipt or terminal telemetry. The worker revokes the old operation before native tab removal, then broadcasts cancellation; tab closure does not wait for receipt/backend cleanup. Added ordering checks and a cancel-then-open-and-deliver regression for all five destinations, advanced the content-script load ID and recorded native Brave closure timing.
+
 - **ChatGPT long transfers insert only one copy.** Replaced synthetic paste events with direct native text insertion, preventing ChatGPT's long-paste attachment conversion from accompanying an inline fallback copy. Removed the unused clipboard-paste helpers, advanced the content-script load ID and retained text verification, draft protection, cancellation, deadlines and recovery. Regressions cover complete multiline/Unicode carries above 10,000 characters, native insertion failure and repeat delivery; an isolated installed-Brave fixture checks exact text, no attachment and untouched Send.
 
 ## 2026-10-15

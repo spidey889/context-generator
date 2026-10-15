@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-15-chatgpt-direct-insert-v156";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-16-priority-cancel-v157";
   const INLINE_PILL_SIZE = 36;
   const ownedUiStyleSheets = new Map();
   let handoffUserCss = "";
@@ -544,12 +544,22 @@
   const ownedObservers = new Set();
   const ownedEventListeners = [];
 
+  function ensureLiveExtensionInstance() {
+    if (!instanceActive) return false;
+    try { if (extensionRuntime.id) return true; } catch {}
+    // Reload creates another isolated world. Its window globals cannot invoke
+    // this world's teardown, so stale callbacks must retire themselves without
+    // removing the replacement world's UI from the shared document.
+    teardownContextGeneratorInstance({ preserveSharedUi: true });
+    return false;
+  }
+
   function setTimeout(callback, delayMs, ...args) {
     if (!instanceActive) return null;
     let timer = null;
     timer = window.setTimeout((...callbackArgs) => {
       ownedTimeouts.delete(timer);
-      if (instanceActive) callback(...callbackArgs);
+      if (ensureLiveExtensionInstance()) callback(...callbackArgs);
     }, delayMs, ...args);
     ownedTimeouts.add(timer);
     return timer;
@@ -564,7 +574,7 @@
   function setInterval(callback, delayMs, ...args) {
     if (!instanceActive) return null;
     const timer = window.setInterval((...callbackArgs) => {
-      if (instanceActive) callback(...callbackArgs);
+      if (ensureLiveExtensionInstance()) callback(...callbackArgs);
     }, delayMs, ...args);
     ownedIntervals.add(timer);
     return timer;
@@ -581,7 +591,7 @@
     let frame = null;
     frame = window.requestAnimationFrame((timestamp) => {
       ownedAnimationFrames.delete(frame);
-      if (instanceActive) callback(timestamp);
+      if (ensureLiveExtensionInstance()) callback(timestamp);
     });
     ownedAnimationFrames.add(frame);
     return frame;
@@ -594,7 +604,9 @@
   }
 
   function createOwnedObserver(ObserverType, callback) {
-    const observer = new ObserverType(callback);
+    const observer = new ObserverType(function (...args) {
+      if (ensureLiveExtensionInstance()) callback.apply(this, args);
+    });
     const nativeDisconnect = observer.disconnect.bind(observer);
     observer.disconnect = () => {
       ownedObservers.delete(observer);
@@ -612,19 +624,24 @@
       entry.options === options
     ));
     if (!target?.addEventListener || alreadyRegistered) return;
-    target.addEventListener(type, listener, options);
-    ownedEventListeners.push({ target, type, listener, options });
+    const wrapped = function (...args) {
+      if (ensureLiveExtensionInstance()) listener.apply(this, args);
+    };
+    target.addEventListener(type, wrapped, options);
+    ownedEventListeners.push({ target, type, listener, wrapped, options });
   }
 
   function removeOwnedEventListener(target, type, listener, options) {
-    target?.removeEventListener?.(type, listener, options);
     const index = ownedEventListeners.findIndex((entry) => (
       entry.target === target &&
       entry.type === type &&
       entry.listener === listener &&
       entry.options === options
     ));
-    if (index >= 0) ownedEventListeners.splice(index, 1);
+    if (index >= 0) {
+      const [entry] = ownedEventListeners.splice(index, 1);
+      target?.removeEventListener?.(type, entry.wrapped, options);
+    }
   }
 
   function clearOwnedLifecycleResources() {
@@ -639,14 +656,14 @@
     ownedTimeouts.clear();
     ownedIntervals.clear();
     ownedAnimationFrames.clear();
-    ownedEventListeners.splice(0).forEach(({ target, type, listener, options }) => {
-      target?.removeEventListener?.(type, listener, options);
+    ownedEventListeners.splice(0).forEach(({ target, type, wrapped, options }) => {
+      target?.removeEventListener?.(type, wrapped, options);
     });
   }
 
-  function teardownContextGeneratorInstance() {
+  function teardownContextGeneratorInstance({ preserveSharedUi = false } = {}) {
     if (!instanceActive) return;
-    stopSourceDestinationProgress(activeTransferTrace);
+    if (!preserveSharedUi) stopSourceDestinationProgress(activeTransferTrace);
     instanceActive = false;
     clearPickerJsonCapture();
     sourceReplySnapshot = null;
@@ -654,10 +671,10 @@
     activeTransferTrace?.sourceGuard?.dispose();
     activePasteGuards.forEach(guard => guard.cancel());
     cancelPendingPasteRecheck();
-    extensionRuntime.onMessage.removeListener?.(handleRuntimeMessage);
-    disableFloatingButtonMonitoring();
+    try { extensionRuntime.onMessage.removeListener?.(handleRuntimeMessage); } catch {}
+    if (!preserveSharedUi) disableFloatingButtonMonitoring();
     clearOwnedLifecycleResources();
-    cleanupContextGeneratorNodes();
+    if (!preserveSharedUi) cleanupContextGeneratorNodes();
     if (window[INSTANCE_TEARDOWN_KEY] === teardownContextGeneratorInstance) {
       delete window[INSTANCE_TEARDOWN_KEY];
     }
@@ -1127,7 +1144,7 @@
     const destinationName = getPlatform(details.destinationId)?.name || "the destination";
 
     if (stage === "summary") {
-      if (["conversation_too_large", "request_too_large", "rate_limited", "service_busy", "client_not_allowed"].includes(error?.code)) {
+      if (["conversation_too_large", "request_too_large", "rate_limited", "service_busy", "client_not_allowed", "extension_reloaded"].includes(error?.code)) {
         showErrorOverlay(error.message);
         return;
       }
@@ -1178,7 +1195,7 @@
         summary = response.summary.trim();
         timing = response.timing || null;
       } catch (error) {
-        if (error?.code === "user_cancelled") throw error;
+        if (["user_cancelled", "extension_reloaded"].includes(error?.code)) throw error;
         checkTransferDeadline(trace);
         mergeTransferDiagnostics(trace, error?.diagnostics);
         const failureDetails = globalThis.CapTransferDiagnostics?.errorDetails(error, "summary_request");
@@ -1335,20 +1352,26 @@
     return error;
   }
 
-  function cancelSourceTransfer(transferId, trace = activeTransferTrace) {
-    if (!trace || trace.id !== transferId || trace.completed) return;
-    trace.cancelled = true;
-    if (activeTransferTrace === trace) {
-      resetRunningFlag({ immediate: true });
-      document.getElementById("context-generator-fallback-modal")?.remove();
+  function cancelSourceTransfer(transferId, trace = activeTransferTrace, { notifyWorker = false } = {}) {
+    const ownsTrace = trace && trace.id === transferId && !trace.completed;
+    if (ownsTrace) {
+      trace.cancelled = true;
+      if (activeTransferTrace === trace) {
+        resetRunningFlag({ immediate: true });
+        document.getElementById("context-generator-fallback-modal")?.remove();
+      }
     }
+    // Dispatch the small close/cancel request before serializing the local
+    // transcript receipt or telemetry. Destination-only callers have no trace.
+    if (notifyWorker) notifyBackground({ type: "CANCEL_TRANSFER", transferId }).catch(() => {});
+    if (!ownsTrace) return;
     recordTransferFailureDiagnostics(trace, createTransferCancelledError());
     updateTransferDiagnostics(trace, { cancelled: true }, "cancelled");
     markTransferTrace(trace, "failed: Transfer cancelled.");
     finishTransferTrace(trace, "user_cancelled");
   }
 
-  function cancelLocalTransfer(transferId) {
+  function cancelLocalTransfer(transferId, { notifyWorker = false } = {}) {
     if (!transferId) return;
     const ownsStatus = activePasteGuards.has(transferId) || destinationWaitingStatus?.transferId === transferId;
     // Latch before cancelling guards: a queued paste can arrive after Escape
@@ -1357,8 +1380,8 @@
     if (cancelledTransferIds.size > 32) cancelledTransferIds.delete(cancelledTransferIds.values().next().value);
     activePasteGuards.get(transferId)?.cancel();
     endDestinationWaitingStatus(transferId);
-    cancelSourceTransfer(transferId);
     if (ownsStatus) document.getElementById(DESTINATION_STATUS_ID)?.remove();
+    cancelSourceTransfer(transferId, activeTransferTrace, { notifyWorker });
   }
 
   function handleTransferEscape(event) {
@@ -1373,8 +1396,7 @@
     event.stopImmediatePropagation();
     // Release visible UI and block local writes synchronously; no worker,
     // telemetry or network acknowledgement belongs on this critical path.
-    for (const id of ids) cancelLocalTransfer(id);
-    for (const id of ids) notifyBackground({ type: "CANCEL_TRANSFER", transferId: id }).catch(() => {});
+    for (const id of ids) cancelLocalTransfer(id, { notifyWorker: true });
   }
 
   function createConversationGuard(message, identify = (location) => location.pathname + (location.search || ""), onChange = null) {
@@ -2725,7 +2747,7 @@
       response = await extensionRuntime.sendMessage(message);
     } catch (error) {
       if (isExtensionContextInvalidated(error)) {
-        throw new Error("Extension was reloaded. Refresh this AI tab once, then try Cap-Context again.");
+        throw Object.assign(new Error("Extension was reloaded. Refresh this AI tab once, then try Cap-Context again."), { code: "extension_reloaded" });
       }
       throw error;
     }
@@ -2751,7 +2773,7 @@
   function getExtensionRuntime() {
     try {
       const runtime = globalThis.chrome?.runtime;
-      if (!runtime?.onMessage?.addListener || !runtime?.sendMessage) return null;
+      if (!runtime?.id || !runtime?.onMessage?.addListener || !runtime?.sendMessage) return null;
       return runtime;
     } catch (_error) {
       return null;
@@ -7005,7 +7027,7 @@
     destinationSheetPreloadScheduled = true;
     const preload = () => {
       destinationSheetPreloadIdleCallback = null;
-      if (!instanceActive || !document.body || isRunning || isDestinationSheetOpen()) return;
+      if (!ensureLiveExtensionInstance() || !document.body || isRunning || isDestinationSheetOpen()) return;
       // Prepare only local UI. Capture still belongs to opening/selection, and
       // an early click can synchronously create this same sheet as before.
       const sheet = ensureDestinationSheet();

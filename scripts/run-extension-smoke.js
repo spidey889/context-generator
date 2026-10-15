@@ -1244,6 +1244,7 @@ async function verifyEscapeCancellation({ sourceSession, devToolsPort, origin, s
   await session.call("Emulation.setFocusEmulationEnabled", { enabled: true });
   assert.equal(await destination.evaluate('document.querySelector("textarea").value'), "");
   assert.equal(await destination.evaluate("window.__capContextSmokeSendClicks"), 0);
+  const escapeStartedAt = Date.now();
   try {
     await session.call("Input.dispatchKeyEvent", { type: "keyDown", key: "Escape", code: "Escape", windowsVirtualKeyCode: 27 });
   } catch (error) {
@@ -1259,7 +1260,8 @@ async function verifyEscapeCancellation({ sourceSession, devToolsPort, origin, s
     assert.equal(local.error, false);
     await sourceSession.call("Input.dispatchKeyEvent", { type: "keyUp", key: "Escape", code: "Escape", windowsVirtualKeyCode: 27 });
   }
-  await waitFor(async () => !(await getTargets(devToolsPort)).some(item => item.id === target.id), "the extension-created destination tab to close");
+  await waitFor(async () => !(await getTargets(devToolsPort)).some(item => item.id === target.id), "the extension-created destination tab to close", SMOKE_TIMEOUT_MS, 20);
+  const escapeCloseMs = Date.now() - escapeStartedAt;
   destinationSessions.delete(target.id);
   await waitFor(() => state.summaryCancelled, "the worker closing the real summary socket");
   const latest = await waitFor(() => sourceSession.evaluate("chrome.storage.local.get('context-generator-last-transfer-stats-v1').then(v => v['context-generator-last-transfer-stats-v1'])", sourceSession.getExtensionContextId()).then(value => value?.failure === "Transfer cancelled." ? value : null), "the cancelled source receipt");
@@ -1283,7 +1285,7 @@ async function verifyEscapeCancellation({ sourceSession, devToolsPort, origin, s
   }, "successful delivery from the next attempt");
   assert.equal((await getTargets(devToolsPort)).some(item => item.id === target.id), false);
   assert.equal(state.destinationRequests, 2, "Cancellation must not create another recovery tab.");
-  process.stdout.write(`✓ Trusted Escape in ${ESCAPE_SMOKE}: destination tab closed, summary socket aborted; source stays open and next transfer succeeds.\n`);
+  process.stdout.write(`✓ Trusted Escape in ${ESCAPE_SMOKE}: destination tab closed in ${escapeCloseMs}ms, summary socket aborted; source stays open and next transfer succeeds.\n`);
 }
 
 async function verifyEarlyHandoff({ sourceSession, devToolsPort, origin, state, destinationSessions }) {

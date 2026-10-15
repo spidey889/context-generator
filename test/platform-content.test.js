@@ -425,6 +425,7 @@ function loadPlatformContent(elements = [], hostname = "chatgpt.com", {
   };
   const chrome = {
     runtime: {
+      id: "cap-context-test",
       onMessage: {
         addListener: (listener) => runtimeMessageListeners.push(listener),
         removeListener: (listener) => {
@@ -503,6 +504,7 @@ function loadPlatformContent(elements = [], hostname = "chatgpt.com", {
       windowListeners.get(type)?.forEach(listener => listener({ type }));
     };
     hooks.registerElementId = (id, element) => elementsById.set(id, element);
+    hooks.invalidateRuntime = () => { chrome.runtime.id = undefined; };
     hooks.reinject = () => {
       window.__contextGeneratorPlatformLoaded = "previous-content-script-version";
       COMPILED_PLATFORM_CONTENT_SCRIPT.runInContext(sandbox);
@@ -814,6 +816,33 @@ test("reinjection tears down every resource owned by the previous content-script
   assert.ok(previousHooks.resizeObservers.every((observer) => observer.observed.length === 0));
   assert.equal(previousHooks.runtimeMessageListeners.length, 1);
   assert.equal(currentHooks.window.__contextGeneratorPlatformTeardown, currentHooks.teardownContextGeneratorInstance);
+});
+
+clockTest("invalidated page worlds retire on callbacks without deleting replacement UI", (t) => {
+  for (const callback of ["event", "observer", "timer", "idle"]) {
+    const messages = [];
+    const hooks = loadPlatformContent([], "claude.ai", { runtimeSendMessage: async message => { messages.push(message); return { ok: true }; } });
+    const replacement = new FakeElement({ attrs: { id: "context-generator-bubble" } });
+    let removed = false, prevented = false, idle;
+    replacement.remove = () => { removed = true; };
+    hooks.registerElementId(replacement.id, replacement);
+    hooks.startFloatingButtonMonitoring();
+    if (callback === "idle") {
+      hooks.window.requestIdleCallback = fn => { idle = fn; return 1; };
+      hooks.window.cancelIdleCallback = () => {};
+      hooks.scheduleDestinationSheetPreload();
+    }
+    hooks.invalidateRuntime();
+    if (callback === "event") hooks.dispatchDocumentEvent("keydown", { key: "Escape", isTrusted: true,
+      preventDefault() { prevented = true; }, stopImmediatePropagation() { prevented = true; } });
+    if (callback === "observer") hooks.mutationObservers[0].callback([]);
+    if (callback === "timer") t.mock.timers.tick(200);
+    if (callback === "idle") idle();
+    assert.equal(removed, false, `${callback}: stale worlds cannot remove the current UI`);
+    assert.equal(prevented, false, `${callback}: stale handlers cannot swallow the current user's key`);
+    assert.deepEqual(messages, [], `${callback}: stale code must not create or cancel transfers`);
+    assert.ok(Object.values(hooks.getOwnedLifecycleResourceCounts()).every(value => value === 0), callback);
+  }
 });
 
 test("Grok empty-state prompt is not counted or captured as a real message", () => {
@@ -2527,8 +2556,7 @@ test("captured context survives backend errors, empty replies, and a missing wor
     async () => ({ ok: false, code: "client_not_allowed" }),
     async () => ({ ok: false, code: "summary_failed" }),
     async () => ({ ok: true, summary: " \n " }),
-    async () => null,
-    async () => { throw new Error("Extension context invalidated"); }
+    async () => null
   ];
   let activeReply;
   let summaryRequests = 0;
@@ -2555,6 +2583,21 @@ test("captured context survives backend errors, empty replies, and a missing wor
     assert.equal(timing.backend.fallback.used, true);
     assert.doesNotMatch(JSON.stringify(trace), /private service body|Extension context invalidated/);
   }
+});
+
+test("an extension reload cannot pretend to summarize locally with a dead worker connection", async () => {
+  const hooks = loadPlatformContent([], "claude.ai", { runtimeSendMessage: async message => {
+    if (message.type === "SUMMARIZE_WITH_BACKEND") throw new Error("Extension context invalidated");
+    return { ok: true };
+  } });
+  const trace = hooks.createTransferTrace("grok", "test");
+  await assert.rejects(hooks.summarizeWithBackend("x".repeat(10000), trace), error => {
+    assert.equal(error.code, "extension_reloaded");
+    assert.match(error.message, /Refresh this AI tab/);
+    return true;
+  });
+  assert.ok(trace.marks.every(mark => mark.label !== "summary done"));
+  hooks.teardownContextGeneratorInstance();
 });
 
 test("source failure telemetry keeps the precise destination observation and never the private message", () => {
@@ -2869,12 +2912,16 @@ test("source cancellation releases its lock and prevents late summary or local-c
 
 test("trusted Escape releases the source immediately while cancellation messaging is pending", async () => {
   const messages = [];
+  const cancellationOrder = [];
   let finishSummary;
   const hooks = loadPlatformContent([], "claude.ai", { runtimeSendMessage: async message => {
     messages.push(message);
     if (message.type === "SUMMARIZE_WITH_BACKEND") return new Promise(resolve => { finishSummary = resolve; });
-    if (message.type === "CANCEL_TRANSFER") return new Promise(() => {});
+    if (message.type === "CANCEL_TRANSFER") { cancellationOrder.push("cancel"); return new Promise(() => {}); }
+    if (message.type === "RECORD_TRANSFER_TELEMETRY" && message.event.status === "failed") cancellationOrder.push("telemetry");
     return { ok: true };
+  }, storageSet: async value => {
+    if (value["context-generator-last-transfer-stats-v1"]) cancellationOrder.push("receipt");
   } });
   const trace = hooks.beginTransferAttempt("gemini", "test");
   const pending = hooks.summarizeWithBackend("x".repeat(10000), trace);
@@ -2884,6 +2931,7 @@ test("trusted Escape releases the source immediately while cancellation messagin
   hooks.dispatchDocumentEvent("keydown", { ...escape, isTrusted: true });
   assert.equal(trace.cancelled, true);
   assert.equal(trace.completed, true);
+  assert.deepEqual(cancellationOrder, ["cancel", "receipt", "telemetry"], "Tab closure is dispatched before copying receipt/telemetry data.");
   assert.ok(messages.some(message => message.type === "CANCEL_TRANSFER" && message.transferId === trace.id));
   const next = hooks.beginTransferAttempt("gemini", "next attempt");
   assert.ok(next, "The next transfer is admitted before any cancellation acknowledgement.");

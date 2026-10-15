@@ -160,15 +160,19 @@ function checkTransferOperation(operation) {
 }
 
 function cancelTransferOperation(operation, { closeDestinations = false } = {}) {
-  if (!operation.controller.signal.aborted) {
-    operation.controller.abort(createTransferCancelledError());
+  const newlyCancelled = !operation.controller.signal.aborted;
+  if (newlyCancelled) operation.controller.abort(createTransferCancelledError());
+  // Revoke ownership before touching browser tabs, then submit closure before
+  // notifications/receipts. A removed destination must never start recovery.
+  // Association alone never grants permission to close a pre-existing tab.
+  const closing = closeDestinations
+    ? Promise.all([...operation.createdTabIds].map(tabId => chrome.tabs.remove(tabId).catch(() => {}))) : undefined;
+  if (newlyCancelled) {
     for (const tabId of operation.tabIds) {
       chrome.tabs.sendMessage(tabId, { type: "CANCEL_TRANSFER", transferId: operation.transferId }).catch(() => {});
     }
   }
-  // Associated tabs can include an existing caller-supplied destination. Escape
-  // closes only tabs actually created by this attempt, never the source.
-  if (closeDestinations) return Promise.all([...operation.createdTabIds].map(tabId => chrome.tabs.remove(tabId).catch(() => {})));
+  return closing;
 }
 
 async function checkTransferSource(operation) {
