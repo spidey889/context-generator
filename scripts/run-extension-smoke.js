@@ -275,7 +275,7 @@ async function createSmokeExtension(tempRoot, origin) {
     detail: activeTransferTrace.diagnostics.capture_detail, fallback: activeTransferTrace.diagnostics.json_fallback_code
   });
   window.__capSmokeShowRecovery = () => showFallbackModal("Synthetic recovery context. Preserve the dialog palette.", "Claude", true);
-  window.__capSmokeHandoffStage = (stage, phase = "active") => { showOverlay("claude"); setHandoffProgress(stage, phase, "Claude", 20000); };
+  window.__capSmokeHandoffStage = (stage, phase = "active") => { if (!isHandoffOverlayVisible()) showOverlay("claude"); setHandoffProgress(stage, phase, "Claude", 20000); };
   window.__capSmokeHandoffStylesReady = () => handoffUserCssRequest;
   window.__capSmokeRebuildHandoff = () => { cleanupContextGeneratorNodes(); ensureFloatingOverlay(); };
   window.__capSmokeShowDraftRecovery = () => showFallbackModal(createLocalContextCarry("Conversation from your previous chat\\n\\nUser: Let’s pick up where we left off.\\nAssistant: Here’s the context we prepared for your next chat.").summary, "ChatGPT", false, false, true);
@@ -1714,6 +1714,19 @@ async function verifyHandoffPalette(session) {
   // Inspect the first frame, not just settled data-state attributes: a fading
   // capture badge can still look active after the heading says Summarizing.
   await session.call("Emulation.setEmulatedMedia", { features: [{ name: "prefers-reduced-motion", value: "no-preference" }] });
+  await session.evaluate('window.__capSmokeHandoffStage("capture"); window.__capSmokeHandoffStage("capture", "done"); window.__capSmokeHandoffStage("summary")', contextId);
+  const firstCaption = await session.evaluate('new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve(document.getElementById("context-generator-text-label").textContent))))');
+  assert.equal(firstCaption, "Capturing chat", "Instant JSON capture must paint its own caption before the summary caption");
+  await waitFor(async () => await session.evaluate('document.getElementById("context-generator-text-label").textContent') === "Summarizing", "the capture cue completing before summary presentation");
+  assert.ok(await session.evaluate(`(() => {
+    const capture = document.querySelector('[data-context-generator-stage="capture"]');
+    return capture.querySelector('.context-generator-handoff-stage-connector-fill').getBoundingClientRect().width
+      / capture.querySelector('.context-generator-handoff-stage-connector').getBoundingClientRect().width >= 0.99;
+  })()`), "The capture line must be complete when Summarizing appears");
+  await session.evaluate('window.__capSmokeRebuildHandoff(); window.__capSmokeHandoffStage("capture"); window.__capSmokeHandoffStage("capture", "done"); window.__capSmokeHandoffStage("summary"); window.__capSmokeHandoffStage("paste", "done")', contextId);
+  await session.evaluate("new Promise(resolve => setTimeout(resolve, 500))");
+  assert.equal(await session.evaluate('document.getElementById("context-generator-text-label").textContent'), "Pasted into Claude",
+    "A ready transfer must supersede the capture cue without a late Summarizing caption");
   await session.evaluate('window.__capSmokeHandoffStage("capture")', contextId);
   await session.evaluate("window.__capSmokeHandoffStylesReady()", contextId);
   await session.evaluate("new Promise(resolve => setTimeout(resolve, 400))");

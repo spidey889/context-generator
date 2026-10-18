@@ -4,6 +4,8 @@ A short history of decisions and regressions that matter when changing the code.
 
 ## 2026-10-18
 
+- **Fast JSON capture keeps its own visible caption.** A cached native capture completed before the handoff's first paint, replacing the heading with `Summarizing` while the capture connector was still starting its old 1.35-second fill. Keep `Capturing chat` with a short 400 ms presentation sweep while AI starts concurrently, then advance with capture fully complete. Ready/paste/cancel states supersede that UI timer. Added a first-painted-frame regression; this corrects the fast-path defect that the earlier badge-color check did not cover.
+
 - **Handoff heading and highlighted step switch together.** Reproduced the first frame showing `Summarizing` while the capture badge still retained its active border/color and the summary badge had not gained its highlight. Removed the stage identity color transitions, preserving the ring, shimmer and connector animations. The Brave regression now checks the immediate transition as well as settled palette states.
 
 - **Capture and summary headlines gain a subtle shimmer.** Added a pale lavender light sweep while `Capturing chat` or `Summarizing` is active. The small CSS effect uses the handoff's theme protection, keeps the text stationary and restores solid text for reduced motion. Ready/paste labels stay solid; dots, step-ring motion and transfer timing are preserved.

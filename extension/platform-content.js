@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-18-handoff-stage-sync-v169";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-18-fast-capture-cue-v170";
   const INLINE_PILL_SIZE = 36;
   const ownedUiStyleSheets = new Map();
   let handoffUserCss = "";
@@ -212,6 +212,7 @@
     { id: "paste", label: "Pasting into destination" }
   ];
   const HANDOFF_CAPTURE_LINE_MIN = 0.04;
+  const HANDOFF_CAPTURE_CUE_MS = 400;
   const HANDOFF_CAPTURE_LINE_MAX = 0.94;
   const HANDOFF_ACTIVITY_LINE_START = 0.05;
   const HANDOFF_ACTIVITY_LINE_MAX = 0.9;
@@ -531,6 +532,8 @@
   let handoffCountdownHideTimer = null;
   let handoffActivityProgressFrame = null;
   let handoffCaptureProgressFrame = null;
+  let handoffCapturePresentation = null;
+  let handoffStageAdvanceTimer = null;
   let onboardingTimer = null;
   let onboardingDismissedThisSession = false;
   let claudeLimitNudgeDismissedUntilLimitClears = false;
@@ -8392,6 +8395,11 @@
           #context-generator-handoff-progress .context-generator-handoff-stage[data-state="complete"] .context-generator-handoff-stage-progress-head{
             opacity:0;
           }
+          #context-generator-handoff-progress .context-generator-handoff-stage[data-state="complete"] .context-generator-handoff-stage-connector-fill,
+          #context-generator-handoff-progress .context-generator-handoff-stage[data-state="complete"] .context-generator-handoff-stage-progress-head{
+            /* Changing a duration does not cancel a transition already running. */
+            transition:none!important;
+          }
           #context-generator-handoff-progress .context-generator-handoff-stage-marker{
             position:relative;
             z-index:1;
@@ -8567,6 +8575,8 @@
       overlay.dataset.contextGeneratorDestinationName = destinationName;
       overlay.setAttribute("aria-hidden", "false");
       overlay.setAttribute("aria-busy", "true");
+      const capturePresentation = { paintedAt: null };
+      handoffCapturePresentation = capturePresentation;
       setHandoffProgress("capture", "active", destinationName);
       stopHandoffCountdown();
       overlay.classList.remove("context-generator-handoff-entering");
@@ -8587,6 +8597,7 @@
         overlay.classList.add("context-generator-handoff-entering");
         requestAnimationFrame(() => {
           if (overlay.getAttribute("aria-hidden") === "true") return;
+          capturePresentation.paintedAt = getNow();
           overlay.style.opacity = "1";
           overlay.style.transform = "translate3d(-50%,-50%,0) translateY(0) scale(1)";
           if (scrim) scrim.style.opacity = "1";
@@ -8794,6 +8805,9 @@
 
   function stopHandoffLiveProgress() {
     stopHandoffActivityProgress();
+    clearTimeout(handoffStageAdvanceTimer);
+    handoffStageAdvanceTimer = null;
+    handoffCapturePresentation = null;
     if (handoffCaptureProgressFrame) {
       cancelAnimationFrame(handoffCaptureProgressFrame);
       handoffCaptureProgressFrame = null;
@@ -8807,6 +8821,33 @@
     const statusLabel = document.getElementById("context-generator-text-label");
     const summaryActivity = statusText?.querySelector(".context-generator-summary-activity");
     if (!progress || !statusText || !statusLabel || !summaryActivity) return;
+
+    clearTimeout(handoffStageAdvanceTimer);
+    handoffStageAdvanceTimer = null;
+    // Ready JSON can finish before the card's first paint. Keep the capture
+    // caption with its short completion sweep; never await this UI-only timer
+    // before sending the AI request. Ready/paste/cancel states supersede it.
+    const finishingCapture = (stageId === "capture" && phase === "done")
+      || (stageId === "summary" && phase === "active");
+    if (finishingCapture && handoffCapturePresentation && isHandoffOverlayVisible()
+        && document.visibilityState !== "hidden"
+        && !window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) {
+      const paintedAt = handoffCapturePresentation.paintedAt ?? getNow();
+      const remaining = Math.max(0, HANDOFF_CAPTURE_CUE_MS - (getNow() - paintedAt));
+      if (remaining > 0) {
+        if (stageId === "capture") {
+          const captureStage = progress.querySelector("[data-context-generator-stage='capture']");
+          captureStage?.style.setProperty("--context-generator-stage-progress-duration", `${remaining}ms`);
+          setHandoffStageLineProgress("capture", 1);
+        }
+        handoffStageAdvanceTimer = setTimeout(() => {
+          handoffStageAdvanceTimer = null;
+          if (instanceActive && isHandoffOverlayVisible()) setHandoffProgress(stageId, phase, destinationName, inputChars);
+        }, remaining);
+        return;
+      }
+    }
+    if (stageId !== "capture") handoffCapturePresentation = null;
 
     const resolvedDestinationName = destinationName
       || overlay?.dataset.contextGeneratorDestinationName
@@ -8822,7 +8863,7 @@
       const label = stageElement.querySelector(".context-generator-handoff-stage-label");
 
       stageElement.dataset.state = stage.state;
-      stageElement.style.setProperty("--context-generator-stage-progress-duration", "1.35s");
+      stageElement.style.setProperty("--context-generator-stage-progress-duration", stage.state === "complete" ? "0ms" : "1.35s");
       stageElement.style.setProperty("--context-generator-stage-progress-easing", "linear");
       setHandoffStageLineProgress(
         stage.id,
