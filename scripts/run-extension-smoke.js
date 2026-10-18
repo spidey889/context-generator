@@ -1714,8 +1714,14 @@ async function verifyHandoffPalette(session) {
   // Inspect the first frame, not just settled data-state attributes: a fading
   // capture badge can still look active after the heading says Summarizing.
   await session.call("Emulation.setEmulatedMedia", { features: [{ name: "prefers-reduced-motion", value: "no-preference" }] });
-  await session.evaluate('window.__capSmokeHandoffStage("capture"); window.__capSmokeHandoffStage("capture", "done"); window.__capSmokeHandoffStage("summary")', contextId);
-  const firstCaption = await session.evaluate('new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve(document.getElementById("context-generator-text-label").textContent))))');
+  // Start and sample in one browser task: a second CDP request can arrive
+  // after the entire 400 ms cue on a busy runner, missing its first frame.
+  const firstCaption = await session.evaluate(`new Promise(resolve => {
+    window.__capSmokeHandoffStage("capture");
+    window.__capSmokeHandoffStage("capture", "done");
+    window.__capSmokeHandoffStage("summary");
+    requestAnimationFrame(() => resolve(document.getElementById("context-generator-text-label").textContent));
+  })`, contextId);
   assert.equal(firstCaption, "Capturing chat", "Instant JSON capture must paint its own caption before the summary caption");
   await waitFor(async () => await session.evaluate('document.getElementById("context-generator-text-label").textContent') === "Summarizing", "the capture cue completing before summary presentation");
   assert.ok(await session.evaluate(`(() => {
@@ -3044,11 +3050,11 @@ async function run() {
       : "✓ Signed terminal telemetry stayed in the local fixture and the installed worker's outbox drained.\n");
     if (!JSON_CAPTURE_SMOKE) {
       await verifyRecoveryPalette(sourceSession, extensionContextId);
-      // Repeat at 350,001 captured characters: exercise the real direct boundary
+      // Repeat at 9,999 captured characters: exercise the real direct boundary
       // branch and prove it cannot reuse the previous remote summary or receipt.
       const prefix = "ChatGPT conversation:\n\nUser: ";
       const suffix = `\n\nChatGPT: ${ASSISTANT_SENTINEL}`;
-      const userText = `${SOURCE_SENTINEL} ${"L".repeat(350001 - prefix.length - suffix.length - SOURCE_SENTINEL.length - 1)}`;
+      const userText = `${SOURCE_SENTINEL} ${"L".repeat(9999 - prefix.length - suffix.length - SOURCE_SENTINEL.length - 1)}`;
       const transcript = prefix + userText + suffix;
       const requestsBefore = state.summaryRequests.length;
       await destinationSession.evaluate('document.querySelector("textarea").value = ""');

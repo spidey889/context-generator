@@ -4,6 +4,8 @@ A short history of decisions and regressions that matter when changing the code.
 
 ## 2026-10-18
 
+- **Restore normal summary routing before merging handoff UI.** Ended the branch-only zero-threshold experiment: source transfers below 10,000 characters stay local again, and the backend retains its 1,200-character direct shortcut for older clients. Restored their boundary checks and documentation while preserving the accepted handoff visuals and fast-capture caption fix. The browser regression samples that first frame in the same browser task so a delayed debugging request cannot miss the short cue.
+
 - **Fast JSON capture keeps its own visible caption.** A cached native capture completed before the handoff's first paint, replacing the heading with `Summarizing` while the capture connector was still starting its old 1.35-second fill. Keep `Capturing chat` with a short 400 ms presentation sweep while AI starts concurrently, then advance with capture fully complete. Ready/paste/cancel states supersede that UI timer. Added a first-painted-frame regression; this corrects the fast-path defect that the earlier badge-color check did not cover.
 
 - **Handoff heading and highlighted step switch together.** Reproduced the first frame showing `Summarizing` while the capture badge still retained its active border/color and the summary badge had not gained its highlight. Removed the stage identity color transitions, preserving the ring, shimmer and connector animations. The Brave regression now checks the immediate transition as well as settled palette states.

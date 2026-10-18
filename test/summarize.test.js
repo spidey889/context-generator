@@ -197,12 +197,66 @@ test("backend forwards a 350k conversation to Mistral and reports the same input
   }
 });
 
-test("handoff testing uses generated profiles even for the shortest nonempty chats", () => {
-  for (const length of [1, 1200, 1201, 8000]) {
-    const profile = getSummaryProfile("x".repeat(length));
-    assert.equal(profile.id, "small");
-    assert.equal(profile.directCarry, undefined);
-    assert.equal(profile.maxTokens, 1000);
+test("backend keeps tiny chats local and avoids Mistral", async () => {
+  const originalFetch = global.fetch;
+  const originalApiKey = process.env.MISTRAL_API_KEY;
+  const conversation = "User: Firefox manifest setting?\nAssistant: Use the exact setting you can defend.";
+  const requests = [];
+
+  delete process.env.MISTRAL_API_KEY;
+  global.fetch = async (_url, options) => {
+    requests.push(JSON.parse(options.body));
+    return new Response(JSON.stringify({
+      choices: [{
+        message: {
+          content: makeContextCarrySummary("short", 90)
+        }
+      }]
+    }));
+  };
+
+  const res = createMockResponse();
+
+  try {
+    await summarize({ method: "POST", body: { conversation } }, res);
+
+    assert.equal(res.statusCode, 200);
+    assert.equal(requests.length, 0);
+    assert.equal(res.payload.timing.profile, "tiny");
+    assert.equal(res.payload.timing.servedBy, "local-direct");
+    assert.equal(res.payload.timing.model, "local-direct");
+    assert.equal(res.payload.timing.modelThresholdChars, null);
+    assert.doesNotMatch(res.payload.timing.modelReason, /20000/);
+    assert.equal(res.payload.timing.fallback.attempted, false);
+    assert.equal(res.payload.timing.maxTokens, 0);
+    assert.equal(res.payload.timing.targetWords, 120);
+    assert.equal(res.payload.timing.mistralMs, 0);
+    assert.equal(res.payload.timing.mistralPasses, 0);
+    assert.equal(res.payload.timing.expansion.attempted, false);
+    assert.deepEqual(res.payload.timing.usage, {
+      promptTokens: 0,
+      completionTokens: 0,
+      totalTokens: 0,
+      cachedTokens: 0
+    });
+    assert.match(res.payload.summary, /💬 CONVERSATION SO FAR/);
+    assert.match(res.payload.summary, /> User: Firefox manifest setting\?/);
+    assert.match(res.payload.summary, /> Assistant: Use the exact setting you can defend\./);
+    assert.match(
+      res.payload.summary,
+      /Reply only: "Context loaded\. Let's pick up right where you left off\." Then wait for the user\./
+    );
+    assert.doesNotMatch(
+      res.payload.summary,
+      /WHO I AM|WHAT WE WERE DOING|None unless stated|source excerpt|backend preserved/i
+    );
+  } finally {
+    global.fetch = originalFetch;
+    if (originalApiKey === undefined) {
+      delete process.env.MISTRAL_API_KEY;
+    } else {
+      process.env.MISTRAL_API_KEY = originalApiKey;
+    }
   }
 });
 
@@ -210,7 +264,7 @@ test("backend sends small generated chats to Ministral 14B first", async () => {
   const originalFetch = global.fetch;
   const originalApiKey = process.env.MISTRAL_API_KEY;
   const restoreMistralModel = setTemporaryEnv("MISTRAL_MODEL", undefined);
-  const conversation = "User: Firefox manifest setting?\nAssistant: Use the exact setting you can defend.";
+  const conversation = "small context ".repeat(200);
   const requests = [];
 
   process.env.MISTRAL_API_KEY = "test-key";
