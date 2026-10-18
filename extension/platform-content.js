@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-18-draft-logo-v164";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-18-draft-logo-v165";
   const INLINE_PILL_SIZE = 36;
   const ownedUiStyleSheets = new Map();
   let handoffUserCss = "";
@@ -9218,7 +9218,7 @@
         mark.alt = "";
         mark.draggable = false;
         mark.setAttribute("aria-hidden", "true");
-        mark.style.cssText = "width:16px;height:16px;flex-shrink:0;object-fit:contain;display:block";
+        mark.style.cssText = "width:24px;height:24px;flex-shrink:0;object-fit:contain;display:block";
         copyWrap.appendChild(mark);
       }
 
