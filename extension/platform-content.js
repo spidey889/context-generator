@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-18-handoff-dots-v166";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-18-draft-logo-v165";
   const INLINE_PILL_SIZE = 36;
   const ownedUiStyleSheets = new Map();
   let handoffUserCss = "";
@@ -8219,8 +8219,8 @@
             to{opacity:1;transform:translate3d(0,0,0)}
           }
           @keyframes contextGeneratorSummaryDotWave{
-            0%,100%{opacity:0.42;transform:translate3d(0,0,0)}
-            50%{opacity:1;transform:translate3d(0,-3px,0)}
+            0%,60%,100%{opacity:0.38;transform:translate3d(0,0,0)}
+            30%{opacity:1;transform:translate3d(0,-2px,0)}
           }
           @keyframes contextGeneratorStageHalo{
             0%,100%{opacity:0.22;transform:translate3d(0,0,0) scale(0.9)}
@@ -8272,7 +8272,7 @@
             margin-left:3px;
             align-items:center;
             height:5px;
-            gap:4px;
+            gap:5px;
             color:#C8B6E9 !important;
             letter-spacing:0;
             pointer-events:none;
@@ -8295,15 +8295,13 @@
             height:5px;
             border-radius:50%;
             background:#C8B6E9 !important;
-            opacity:0.42;
+            opacity:0.38;
             transform:translate3d(0,0,0);
-            animation:contextGeneratorSummaryDotWave 1800ms cubic-bezier(0.45,0,0.55,1) infinite;
-            /* Even phases keep the wave flowing; negative delays avoid a still start. */
-            animation-delay:-1200ms;
+            animation:contextGeneratorSummaryDotWave 1500ms cubic-bezier(0.45,0,0.55,1) infinite;
             will-change:transform,opacity;
           }
-          #context-generator-text .context-generator-summary-activity-dot:nth-child(2){animation-delay:-600ms}
-          #context-generator-text .context-generator-summary-activity-dot:nth-child(3){animation-delay:0ms}
+          #context-generator-text .context-generator-summary-activity-dot:nth-child(2){animation-delay:150ms}
+          #context-generator-text .context-generator-summary-activity-dot:nth-child(3){animation-delay:300ms}
           #context-generator-handoff-progress .context-generator-handoff-stage{
             position:relative;
             min-width:0;
