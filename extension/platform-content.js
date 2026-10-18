@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-18-capture-shimmer-v168";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-18-handoff-stage-sync-v169";
   const INLINE_PILL_SIZE = 36;
   const ownedUiStyleSheets = new Map();
   let handoffUserCss = "";
@@ -8407,7 +8407,8 @@
             color:rgba(245,243,249,0.44) !important;
             font-size:10px;
             font-weight:700;
-            transition:background 180ms ease,border-color 180ms ease,color 180ms ease,box-shadow 180ms ease;
+            /* Stage identity switches with the heading; the outer halo still animates. */
+            transition:none!important;
           }
           #context-generator-handoff-progress .context-generator-handoff-stage-marker::after{
             content:"";
@@ -8425,7 +8426,7 @@
             font-weight:600;
             line-height:1.22;
             letter-spacing:0.005em;
-            transition:color 180ms ease,font-weight 180ms ease,opacity 180ms ease;
+            transition:none!important;
           }
           #context-generator-handoff-progress .context-generator-handoff-stage[data-state="active"]{
             color:#f4f2f7 !important;

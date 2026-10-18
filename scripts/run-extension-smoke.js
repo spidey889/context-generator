@@ -1711,6 +1711,25 @@ async function verifyPasteRecovery({ browserSession, devToolsPort, origin }) {
 
 async function verifyHandoffPalette(session) {
   const contextId = session.getExtensionContextId();
+  // Inspect the first frame, not just settled data-state attributes: a fading
+  // capture badge can still look active after the heading says Summarizing.
+  await session.call("Emulation.setEmulatedMedia", { features: [{ name: "prefers-reduced-motion", value: "no-preference" }] });
+  await session.evaluate('window.__capSmokeHandoffStage("capture")', contextId);
+  await session.evaluate("window.__capSmokeHandoffStylesReady()", contextId);
+  await session.evaluate("new Promise(resolve => setTimeout(resolve, 400))");
+  await session.evaluate('window.__capSmokeHandoffStage("summary")', contextId);
+  const markerStyles = `(() => {
+    const root = document.getElementById("context-generator-overlay");
+    return [...root.querySelectorAll(".context-generator-handoff-stage-marker")].map(marker => {
+      const style = getComputedStyle(marker);
+      return [style.color, style.backgroundColor, style.borderTopColor, style.boxShadow];
+    });
+  })()`;
+  assert.equal(await session.evaluate('document.getElementById("context-generator-text-label").textContent'), "Summarizing");
+  const firstFrameMarkers = await session.evaluate(markerStyles);
+  await session.evaluate("new Promise(resolve => setTimeout(resolve, 400))");
+  assert.deepEqual(firstFrameMarkers, await session.evaluate(markerStyles),
+    "Capture must lose its highlight and summary must gain it in the same frame as the heading");
   await session.call("Emulation.setEmulatedMedia", { features: [{ name: "prefers-reduced-motion", value: "reduce" }] });
   await session.evaluate(`window.__capHandoffPaletteSnapshot = () => {
     const root = document.getElementById("context-generator-overlay");

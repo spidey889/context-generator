@@ -4,6 +4,8 @@ A short history of decisions and regressions that matter when changing the code.
 
 ## 2026-10-18
 
+- **Handoff heading and highlighted step switch together.** Reproduced the first frame showing `Summarizing` while the capture badge still retained its active border/color and the summary badge had not gained its highlight. Removed the stage identity color transitions, preserving the ring, shimmer and connector animations. The Brave regression now checks the immediate transition as well as settled palette states.
+
 - **Capture and summary headlines gain a subtle shimmer.** Added a pale lavender light sweep while `Capturing chat` or `Summarizing` is active. The small CSS effect uses the handoff's theme protection, keeps the text stationary and restores solid text for reduced motion. Ready/paste labels stay solid; dots, step-ring motion and transfer timing are preserved.
 
 - **Handoff step ring keeps its visible movement.** The opacity-only trial looked stationary and was rejected. Restored the expanding/contracting ring with a slower 3.2-second cycle and transform/opacity layer hints. Preserved its palette, stage layout, reduced-motion behavior and transfer timing.
