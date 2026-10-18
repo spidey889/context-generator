@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-18-handoff-ai-v161";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-18-handoff-ring-v162";
   const INLINE_PILL_SIZE = 36;
   const ownedUiStyleSheets = new Map();
   let handoffUserCss = "";
@@ -8223,8 +8223,8 @@
             30%{opacity:1;transform:translate3d(0,-2px,0)}
           }
           @keyframes contextGeneratorStageHalo{
-            0%,100%{opacity:0.22;transform:scale(0.9)}
-            50%{opacity:0.62;transform:scale(1.08)}
+            0%,100%{opacity:0.22}
+            50%{opacity:0.62}
           }
           @keyframes contextGeneratorAuroraDrift{
             0%,100%{opacity:0.62;transform:translate3d(0,0,0) scale(1)}
@@ -8399,7 +8399,6 @@
             border:1px solid rgba(169,139,226,0.46) !important;
             border-radius:999px;
             opacity:0;
-            transform:scale(0.9);
           }
           #context-generator-handoff-progress .context-generator-handoff-stage-label{
             min-height:30px;
@@ -8419,7 +8418,9 @@
             box-shadow:0 0 0 3px rgba(141,108,207,0.15),0 6px 16px rgba(63,43,98,0.34),inset 0 1px 0 rgba(255,255,255,0.22) !important;
           }
           #context-generator-handoff-progress .context-generator-handoff-stage[data-state="active"] .context-generator-handoff-stage-marker::after{
-            animation:contextGeneratorStageHalo 2400ms cubic-bezier(0.45,0,0.55,1) infinite;
+            /* Keep the thin ring's edge fixed: scaling it causes subpixel shimmer. */
+            will-change:opacity;
+            animation:contextGeneratorStageHalo 3200ms cubic-bezier(0.45,0,0.55,1) infinite;
           }
           #context-generator-handoff-progress .context-generator-handoff-stage[data-state="active"] .context-generator-handoff-stage-label{
             color:#fff !important;
