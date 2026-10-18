@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-18-handoff-ring-v163";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-18-draft-logo-v164";
   const INLINE_PILL_SIZE = 36;
   const ownedUiStyleSheets = new Map();
   let handoffUserCss = "";
@@ -9213,9 +9213,12 @@
       const copyWrap = document.createElement("div");
       copyWrap.style.cssText = draftPresent ? "display:flex;align-items:center;gap:9px;min-width:0" : "display:flex;flex-direction:column;gap:7px;min-width:0";
       if (draftPresent) {
-        const mark = document.createElement("span");
+        const mark = document.createElement("img");
+        mark.src = getExtensionAssetUrl("icon128.png");
+        mark.alt = "";
+        mark.draggable = false;
         mark.setAttribute("aria-hidden", "true");
-        mark.style.cssText = "width:16px;height:16px;flex-shrink:0;border-radius:50%;background:radial-gradient(circle at 35% 30%,#d4bbff,#8958cf 40%,#422263 80%);box-shadow:inset 0 0 0 1px rgba(228,199,255,0.22)";
+        mark.style.cssText = "width:16px;height:16px;flex-shrink:0;object-fit:contain;display:block";
         copyWrap.appendChild(mark);
       }
 
