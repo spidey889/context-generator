@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-18-summary-shimmer-v167";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-18-capture-shimmer-v168";
   const INLINE_PILL_SIZE = 36;
   const ownedUiStyleSheets = new Map();
   let handoffUserCss = "";
@@ -8847,7 +8847,9 @@
     statusText.style.animation = "none";
     statusLabel.textContent = currentStatus;
     summaryActivity.dataset.active = String(stageId === "summary" && phase === "active");
-    statusLabel.dataset.contextGeneratorShimmer = summaryActivity.dataset.active;
+    statusLabel.dataset.contextGeneratorShimmer = String(
+      phase === "active" && (stageId === "capture" || stageId === "summary")
+    );
     if (shouldAnimateHeadline) {
       void statusText.offsetWidth;
       statusText.style.animation = "contextGeneratorHeadlineIn 340ms cubic-bezier(0.16,1,0.3,1) both";

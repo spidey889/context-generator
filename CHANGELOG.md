@@ -4,7 +4,7 @@ A short history of decisions and regressions that matter when changing the code.
 
 ## 2026-10-18
 
-- **Summarizing headline gains a subtle shimmer.** Added a pale lavender light sweep to the existing word only while AI summarization is active. The small CSS effect uses the handoff's theme protection, keeps the text stationary and restores solid text for reduced motion. Dots, step-ring motion and transfer timing are preserved.
+- **Capture and summary headlines gain a subtle shimmer.** Added a pale lavender light sweep while `Capturing chat` or `Summarizing` is active. The small CSS effect uses the handoff's theme protection, keeps the text stationary and restores solid text for reduced motion. Ready/paste labels stay solid; dots, step-ring motion and transfer timing are preserved.
 
 - **Handoff step ring keeps its visible movement.** The opacity-only trial looked stationary and was rejected. Restored the expanding/contracting ring with a slower 3.2-second cycle and transform/opacity layer hints. Preserved its palette, stage layout, reduced-motion behavior and transfer timing.
 
