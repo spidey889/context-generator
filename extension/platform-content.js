@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-18-draft-logo-v165";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-18-summary-shimmer-v167";
   const INLINE_PILL_SIZE = 36;
   const ownedUiStyleSheets = new Map();
   let handoffUserCss = "";
@@ -8222,6 +8222,24 @@
             0%,60%,100%{opacity:0.38;transform:translate3d(0,0,0)}
             30%{opacity:1;transform:translate3d(0,-2px,0)}
           }
+          @keyframes contextGeneratorSummaryShimmer{
+            from{background-position:100% 50%}
+            to{background-position:0% 50%}
+          }
+          @supports ((background-clip:text) or (-webkit-background-clip:text)){
+            #context-generator-text-label[data-context-generator-shimmer="true"]{
+              /* Keep this in the protected sheet so page themes cannot erase the highlight. */
+              background-image:linear-gradient(105deg,#B8B0C6 40%,#FAF7FF 50%,#B8B0C6 60%) !important;
+              background-size:250% 100%;
+              background-position:100% 50%;
+              background-repeat:no-repeat;
+              -webkit-background-clip:text;
+              background-clip:text;
+              color:transparent !important;
+              -webkit-text-fill-color:transparent !important;
+              animation:contextGeneratorSummaryShimmer 2400ms linear infinite;
+            }
+          }
           @keyframes contextGeneratorStageHalo{
             0%,100%{opacity:0.22;transform:translate3d(0,0,0) scale(0.9)}
             50%{opacity:0.62;transform:translate3d(0,0,0) scale(1.08)}
@@ -8436,8 +8454,22 @@
             color:#C8B6E9 !important;
             box-shadow:inset 0 1px 0 rgba(255,255,255,0.055) !important;
           }
+          @media (forced-colors: active){
+            #${OVERLAY_ID} #context-generator-text-label[data-context-generator-shimmer="true"]{
+              animation:none!important;
+              background-image:none!important;
+              color:CanvasText!important;
+              -webkit-text-fill-color:currentColor!important;
+            }
+          }
           @media (prefers-reduced-motion: reduce){
             #context-generator-text{animation:none!important}
+            #context-generator-text-label[data-context-generator-shimmer="true"]{
+              animation:none!important;
+              background-image:none!important;
+              color:#f2f0f6!important;
+              -webkit-text-fill-color:currentColor!important;
+            }
             #${OVERLAY_ID}.context-generator-handoff-entering #context-generator-overlay-brand,
             #${OVERLAY_ID}.context-generator-handoff-entering #context-generator-status-group,
             #${OVERLAY_ID}.context-generator-handoff-entering #context-generator-handoff-progress{animation:none!important}
@@ -8815,6 +8847,7 @@
     statusText.style.animation = "none";
     statusLabel.textContent = currentStatus;
     summaryActivity.dataset.active = String(stageId === "summary" && phase === "active");
+    statusLabel.dataset.contextGeneratorShimmer = summaryActivity.dataset.active;
     if (shouldAnimateHeadline) {
       void statusText.offsetWidth;
       statusText.style.animation = "contextGeneratorHeadlineIn 340ms cubic-bezier(0.16,1,0.3,1) both";
