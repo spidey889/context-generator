@@ -4,7 +4,7 @@ A short history of decisions and regressions that matter when changing the code.
 
 ## 2026-10-18
 
-- **Handoff step ring pulses more smoothly.** Replaced the thin halo's repeated scaling with a slower opacity-only pulse, keeping the circle's edge steady. Preserved its palette, stage layout, reduced-motion behavior and transfer timing.
+- **Handoff step ring keeps its visible movement.** The opacity-only trial looked stationary and was rejected. Restored the expanding/contracting ring with a slower 3.2-second cycle and transform/opacity layer hints. Preserved its palette, stage layout, reduced-motion behavior and transfer timing.
 
 - **Handoff branch lowers the AI threshold for UI iteration.** Set the source minimum from 10,000 to zero and disable the backend's 1,200-character direct shortcut, so every nonempty captured chat through 350,000 characters attempts AI summarization. Keep larger-chat local carries, empty-chat rejection and service-failure recovery. This is a temporary branch change for repeatedly viewing handoff progress; backend deployment remains separate.
 
