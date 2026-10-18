@@ -2,6 +2,10 @@
 
 A short history of decisions and regressions that matter when changing the code. Read the relevant section of [LOGIC.md](LOGIC.md) for current behavior, ownership and checks; use this file when you need to understand why an approach changed. Entries describe source changes unless deployment is explicitly recorded. Extension packaging, Web Store publication and backend deployment are separate.
 
+## 2026-10-18
+
+- **Handoff branch lowers the AI threshold for UI iteration.** Set the source minimum from 10,000 to zero and disable the backend's 1,200-character direct shortcut, so every nonempty captured chat through 350,000 characters attempts AI summarization. Keep larger-chat local carries, empty-chat rejection and service-failure recovery. This is a temporary branch change for repeatedly viewing handoff progress; backend deployment remains separate.
+
 ## 2026-10-16
 
 - **CI overlaps independent work without reducing checks.** Code/SQL checks retain their order while Brave installs; both must succeed. A bounded two-process browser runner keeps all nine regular and ten original opt-in extended scenarios, original assertions and time allowances, with separate X servers/profiles/ports/databases. Failures remain red while other selected fixtures finish, and every case saves its full log and timing plus existing failure screenshots. Timeout/cancellation stops each browser process group. Kept the required job name, eight-minute gate, scope selection, live-production schedule and read-only permissions. Extended verification exposed a pre-existing paste fixture expecting a size error from a body that contradicts its declared length: kept the streamed cancellation case with exact length-failure diagnostics and added a separate one-byte-over declared-size check. Native Escape now waits for composer focus before its single trusted key event. Repeated full runs exposed intermittent key delivery during parallel load, so both native Escape fixtures run exclusively before the independent browser batch; other checks retain bounded parallelism.

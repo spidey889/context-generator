@@ -2118,7 +2118,7 @@ test("actual serving models reach progress and terminal telemetry for fallback, 
       await hooks.summarizeWithBackend("x".repeat(scenario === "tiny" ? 1200 : 10000), trace);
       assert.doesNotThrow(() => hooks.finishTransferTrace(trace));
       const telemetry = messages.filter(message => message.type === "RECORD_TRANSFER_TELEMETRY").map(message => message.event);
-      const model = ["tiny", "recovery"].includes(scenario) ? "local-direct" : "gemini-3.5-flash-lite";
+      const model = scenario === "recovery" ? "local-direct" : "gemini-3.5-flash-lite";
       assert.equal(telemetry.find(event => event.lastStage === "summary_completed").reportedModel, model, scenario);
       assert.equal(telemetry.filter(event => event.status !== "started").length, 1);
       assert.equal(telemetry.at(-1).status, "succeeded");
@@ -2252,12 +2252,12 @@ test("direct and AI ranges use exact captured character boundaries on every plat
         runtimeRequests++;
         if (message.type === "SUMMARIZE_WITH_BACKEND") {
           summaryRequests++;
-          return { ok: true, summary: "AI must never replace this tiny transcript." };
+          return { ok: true, summary: "AI summary for handoff testing." };
         }
         return { ok: true };
       }
     });
-    for (const length of [1, 9999, 350001, 500000]) {
+    for (const length of [350001, 500000]) {
       const transcript = "x".repeat(length);
       const trace = hooks.createTransferTrace("claude", "test");
       let settled = false;
@@ -2280,10 +2280,12 @@ test("direct and AI ranges use exact captured character boundaries on every plat
       assert.equal(stats.summary.fallback.used, false);
     }
     assert.equal(summaryRequests, 0, hostname);
-    for (const transcript of ["x".repeat(10000), "x".repeat(350000), `${" ".repeat(9999)}x`]) {
-      assert.equal(await hooks.summarizeWithBackend(transcript), "AI must never replace this tiny transcript.");
+    const aiTranscripts = [1, 1200, 9999, 10000, 350000].map(length => "x".repeat(length));
+    aiTranscripts.push(`${" ".repeat(9999)}x`);
+    for (const transcript of aiTranscripts) {
+      assert.equal(await hooks.summarizeWithBackend(transcript), "AI summary for handoff testing.");
     }
-    assert.equal(summaryRequests, 3, `${hostname}: both inclusive AI boundaries and untrimmed length use the backend`);
+    assert.equal(summaryRequests, aiTranscripts.length, `${hostname}: all nonempty chats through 350k use the backend`);
     const requestsBeforeRejectedTransfers = runtimeRequests;
     await assert.rejects(hooks.summarizeWithBackend("x".repeat(500001)), error => {
       assert.equal(error.code, "conversation_too_large");
@@ -2291,7 +2293,7 @@ test("direct and AI ranges use exact captured character boundaries on every plat
       return true;
     });
     await assert.rejects(hooks.summarizeWithBackend("tiny", { deadlineAt: Date.now() - 1 }), /Transfer timed out/);
-    assert.equal(summaryRequests, 3, `${hostname}: oversized and expired transfers never reach the backend`);
+    assert.equal(summaryRequests, aiTranscripts.length, `${hostname}: oversized and expired transfers never reach the backend`);
     assert.equal(runtimeRequests, requestsBeforeRejectedTransfers, `${hostname}: rejection sends no worker messages`);
   }
 });
@@ -2321,7 +2323,7 @@ test("direct text carry works offline and preserves code, Unicode, roles and bla
     if (message.type === "SUMMARIZE_WITH_BACKEND") summaryRequests++;
     throw new Error("Extension context invalidated");
   } });
-  const conversation = "Claude conversation:\n\nUser: Keep this exactly.\r\n\r\nAssistant: 代码 🙂\n```js\n  const path = 'C:\\work';\u00a0 \n```\n\nUser: This quoted label stays here: Assistant: hey\n";
+  const conversation = "Claude conversation:\n\nUser: Keep this exactly.\r\n\r\nAssistant: 代码 🙂\n```js\n  const path = 'C:\\work';\u00a0 \n```\n\nUser: This quoted label stays here: Assistant: hey\n".padEnd(350001, " ");
   const trace = hooks.createTransferTrace("claude", "test");
   const summary = await hooks.summarizeWithBackend(conversation, trace);
   assert.equal(summary, `The conversation below was transferred from another AI chat so you have the context. Treat it as previous chat history and use it to continue with the user here.\n\nConversation history:\n\n${conversation}\n\nNext step:\n\nReply only: "Context loaded. Let's pick up right where you left off." Then wait for the user.`);

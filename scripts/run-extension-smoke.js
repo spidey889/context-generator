@@ -3012,11 +3012,11 @@ async function run() {
       : "✓ Signed terminal telemetry stayed in the local fixture and the installed worker's outbox drained.\n");
     if (!JSON_CAPTURE_SMOKE) {
       await verifyRecoveryPalette(sourceSession, extensionContextId);
-      // Repeat at 9,999 captured characters: exercise the real direct boundary
+      // Repeat at 350,001 captured characters: exercise the real direct boundary
       // branch and prove it cannot reuse the previous remote summary or receipt.
       const prefix = "ChatGPT conversation:\n\nUser: ";
       const suffix = `\n\nChatGPT: ${ASSISTANT_SENTINEL}`;
-      const userText = `${SOURCE_SENTINEL} ${"L".repeat(9999 - prefix.length - suffix.length - SOURCE_SENTINEL.length - 1)}`;
+      const userText = `${SOURCE_SENTINEL} ${"L".repeat(350001 - prefix.length - suffix.length - SOURCE_SENTINEL.length - 1)}`;
       const transcript = prefix + userText + suffix;
       const requestsBefore = state.summaryRequests.length;
       await destinationSession.evaluate('document.querySelector("textarea").value = ""');

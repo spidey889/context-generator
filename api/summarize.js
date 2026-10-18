@@ -89,7 +89,8 @@ const GENERATED_SUMMARY_HINTS = {
 const SUMMARY_PROFILES = [
   {
     id: "tiny",
-    maxInputChars: 1200,
+    // Handoff UI iteration: every nonempty chat uses a generated profile.
+    maxInputChars: 0,
     targetWords: 120,
     minWords: 0,
     maxTokens: 0,

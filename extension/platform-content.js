@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-16-toolbar-mount-v160";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-18-handoff-ai-v161";
   const INLINE_PILL_SIZE = 36;
   const ownedUiStyleSheets = new Map();
   let handoffUserCss = "";
@@ -119,8 +119,8 @@
   const NO_CONVERSATION_ERROR_MESSAGE = "Send a message first, then try again.";
   const SUMMARY_RETRY_ERROR_TITLE = "Try again";
   const SUMMARY_RETRY_ERROR_MESSAGE = "Try again right now. We might have made a mistake. It almost never happens the second time.";
-  // Only this middle range reaches api/request-security.js; direct carries stay local.
-  const MIN_BACKEND_CONVERSATION_CHARS = 10000;
+  // Handoff UI iteration: send even short chats to AI; restore 10000 after testing.
+  const MIN_BACKEND_CONVERSATION_CHARS = 0;
   const MAX_BACKEND_CONVERSATION_CHARS = 350000;
   const MAX_TRANSFER_CONVERSATION_CHARS = 500000;
   const TINY_DIRECT_PROFILE_MAX_CHARS = 1200;
