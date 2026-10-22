@@ -42,6 +42,7 @@ const TOKENHARBOR_MODELS = [
 ];
 const TOKENHARBOR_BACKUP_MODEL = "deepseek-v4.1-flash:free";
 const TOKENHARBOR_CHAT_COMPLETIONS_URL = "https://tokenharbor.ai/v1/chat/completions";
+const OPENROUTER_PRIMARY_SLICE_MS = 45000;
 const TOKENHARBOR_SHARED_SLICE_MS = 45000;
 // DeepSeek counts thinking against max_tokens. The shared summary caps alone
 // can end a response before any answer; reserve separate room without changing
@@ -492,6 +493,11 @@ function getEnabledOpenRouterModels() {
 
 function getConfiguredSummaryRoutes({ geminiApiKey, mistralApiKey, openrouterApiKey, tokenharborApiKey, tokenharborBackupApiKey, tokenharborEnabled = TOKENHARBOR_ENABLED }) {
   const routes = [];
+  if (openrouterApiKey) {
+    for (const model of getEnabledOpenRouterModels()) {
+      routes.push({ provider: SUMMARY_PROVIDERS.openrouter, model, apiKey: openrouterApiKey });
+    }
+  }
   const tokenharborRoute = TOKENHARBOR_MODELS.find(route => route.enabled);
   const [primaryKey, backupKey] = [tokenharborApiKey, tokenharborBackupApiKey]
     .map(key => typeof key === "string" ? key.trim() : key);
@@ -500,11 +506,6 @@ function getConfiguredSummaryRoutes({ geminiApiKey, mistralApiKey, openrouterApi
   }
   if (tokenharborEnabled && backupKey && backupKey !== primaryKey) {
     routes.push({ provider: SUMMARY_PROVIDERS.tokenharbor, model: TOKENHARBOR_BACKUP_MODEL, apiKey: backupKey });
-  }
-  if (openrouterApiKey) {
-    for (const model of getEnabledOpenRouterModels()) {
-      routes.push({ provider: SUMMARY_PROVIDERS.openrouter, model, apiKey: openrouterApiKey });
-    }
   }
   if (geminiApiKey) {
     for (const model of [GEMINI_PRIMARY_MODEL, FLASH_LITE_FALLBACK_MODEL]) {
@@ -530,13 +531,14 @@ async function createSummaryWithFallback({ conversation, messages, platform, pro
   const unavailableProviders = new Set();
   const chainStartedAt = Date.now();
   const deadline = chainStartedAt + REMOTE_CHAIN_BUDGET_MS;
-  const sharedFreeWindow = routes[0]?.provider.id === "tokenharbor";
+  const sharedFreeWindow = routes.some(route => route.provider.id === "tokenharbor");
+  const bothGatewaysConfigured = sharedFreeWindow && routes.some(route => route.provider.id === "openrouter");
   const freeRouteCount = routes.filter(route => ["tokenharbor", "openrouter"].includes(route.provider.id)).length;
   const freeDeadline = sharedFreeWindow ? chainStartedAt + PROVIDER_ATTEMPT_TIMEOUT_MS : null;
-  // Both DeepSeek keys own ONE absolute allowance. A second key
-  // must not restart the clock or consume OpenRouter's remaining free window.
-  const tokenharborDeadline = sharedFreeWindow ? chainStartedAt + (routes.some(route => route.provider.id === "openrouter")
-    ? TOKENHARBOR_SHARED_SLICE_MS : PROVIDER_ATTEMPT_TIMEOUT_MS) : null;
+  const openrouterDeadline = bothGatewaysConfigured ? chainStartedAt + OPENROUTER_PRIMARY_SLICE_MS : freeDeadline;
+  // TokenHarbor's clock starts only when that stage is reached. Both keys and
+  // retries share it; an early OpenRouter failure cannot enlarge either stage.
+  let tokenharborDeadline = null;
   // TokenHarbor and OpenRouter occupy ONE original 90s slot. Never count
   // TokenHarbor as another funded fallback or renew this window on retries.
   // With the code switch off/missing key, retain the original route budgets.
@@ -557,9 +559,14 @@ async function createSummaryWithFallback({ conversation, messages, platform, pro
       const freeRemainingMs = freeDeadline - Date.now();
       if (freeRemainingMs <= 0) continue; // Funded fallbacks still have their own time.
       const remainingOpenRouterRoutes = routes.slice(index).filter(item => item.provider.id === "openrouter" && !unavailableProviders.has(item.provider.id)).length;
-      routeBudgetMs = provider.id === "tokenharbor"
-        ? Math.min(tokenharborDeadline - Date.now(), freeRemainingMs)
-        : Math.floor(freeRemainingMs / Math.max(1, remainingOpenRouterRoutes));
+      if (provider.id === "tokenharbor") {
+        tokenharborDeadline ??= Math.min(freeDeadline, Date.now() + (bothGatewaysConfigured
+          ? TOKENHARBOR_SHARED_SLICE_MS : PROVIDER_ATTEMPT_TIMEOUT_MS));
+        routeBudgetMs = Math.min(tokenharborDeadline - Date.now(), freeRemainingMs);
+      } else {
+        routeBudgetMs = Math.floor(Math.min(openrouterDeadline - Date.now(), freeRemainingMs)
+          / Math.max(1, remainingOpenRouterRoutes));
+      }
     }
     const requestBudgetMs = Math.min(routeBudgetMs, remainingMs);
     if (requestBudgetMs <= 0) continue;

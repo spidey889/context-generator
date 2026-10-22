@@ -107,27 +107,30 @@ for (const provider of ["tokenharbor", "openrouter", "gemini", "mistral"]) {
   });
 }
 
-clockTest("silent main-key DeepSeek exhausts the shared 45s and skips the backup before Dots", async t => {
+clockTest("silent OpenRouter advances at 30s, then DeepSeek gets its own 45s before Gemini", { tickMs: 100, maxElapsedMs: 90000 }, async t => {
   configure(t);
   const requests = [];
   const startedAt = Date.now();
   global.fetch = async (url, options) => {
     const model = JSON.parse(options.body).model;
     requests.push({ model, at: Date.now() - startedAt, signal: options.signal });
-    if (url.includes("tokenharbor")) return new Promise((_, reject) => options.signal.addEventListener("abort", () => reject(options.signal.reason), { once: true }));
-    return responseFrom(answerStream("openrouter"));
+    if (url.includes("openrouter") || url.includes("tokenharbor")) return new Promise((_, reject) => options.signal.addEventListener("abort", () => reject(options.signal.reason), { once: true }));
+    return responseFrom(answerStream("gemini"));
   };
   const result = await createSummaryWithFallback({ conversation, profile: getSummaryProfile(conversation),
-    tokenharborApiKey: "test-main", tokenharborBackupApiKey: "test-backup", openrouterApiKey: "test-openrouter",
+    tokenharborApiKey: "test-main", tokenharborBackupApiKey: "test-backup", openrouterApiKey: "test-openrouter", geminiApiKey: "test-gemini",
     requestContext: { onDelta() {} } });
   assert.deepEqual(requests.map(({ model, at }) => ({ model, at })), [
-    { model: "deepseek-v4.1-flash:free", at: 0 },
-    { model: "dots-studio/dots-3-note-preview:free", at: 45000 }
+    { model: "dots-studio/dots-3-note-preview:free", at: 0 },
+    { model: "deepseek-v4.1-flash:free", at: 30000 },
+    { model: undefined, at: 75000 }
   ]);
   assert.equal(requests[0].signal.aborted, true);
-  assert.equal(requests[1].signal.aborted, false);
-  assert.equal(result.model, "dots-studio/dots-3-note-preview:free");
+  assert.equal(requests[1].signal.aborted, true);
+  assert.equal(requests[2].signal.aborted, false);
+  assert.equal(result.model, "gemini-3.6-flash");
   assert.equal(result.tokenharborMs, 45000);
+  assert.equal(result.openrouterMs, 30000);
 });
 
 test("DeepSeek can finish thinking after 30s within its existing 45s slice", async t => {
@@ -137,7 +140,9 @@ test("DeepSeek can finish thinking after 30s within its existing 45s slice", asy
   let calls = 0;
   const deltas = [];
   global.fetch = async (url, options) => {
-    if (++calls === 1) {
+    calls++;
+    if (url.includes("openrouter")) return new Response("", { status: 429 });
+    if (calls === 2) {
       assert.equal(JSON.parse(options.body).model, "deepseek-v4.1-flash:free");
       t.mock.timers.setTime(Date.now() + 35000);
     }
@@ -146,7 +151,7 @@ test("DeepSeek can finish thinking after 30s within its existing 45s slice", asy
   };
   const result = await createDeepSeekSummary({ conversation, profile: getSummaryProfile(conversation),
     tokenharborApiKey: "test", openrouterApiKey: "test", requestContext: { onDelta: delta => deltas.push(delta) } });
-  assert.equal(calls, 1, "Thinking must not prematurely send this run to OpenRouter");
+  assert.equal(calls, 2, "After OpenRouter rejection DeepSeek keeps its own thinking allowance");
   assert.equal(result.model, "deepseek-v4.1-flash:free");
   assert.match(result.summary, /green triangle/);
   assert.doesNotMatch(JSON.stringify({ result, deltas }), /PRIVATE_THINKING/);

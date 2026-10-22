@@ -1,0 +1,99 @@
+{
+  "syntheticOnly": true,
+  "branch": "codex/openrouter-primary-20261022",
+  "sourceSha256": "c4900774a9b80ba5019cd7da3ad10b129b8bbb88e7c890c27cbb8973c6b09cf0",
+  "results": [
+    {
+      "inputChars": 40187,
+      "profile": "medium",
+      "maxTokens": 1900,
+      "firstAnswerMs": 1566,
+      "totalMs": 6297,
+      "model": "dots-studio/dots-3-note-preview:free",
+      "provider": "openrouter",
+      "modelsTried": [
+        "dots-studio/dots-3-note-preview:free"
+      ],
+      "fallback": {
+        "attempted": false,
+        "used": false,
+        "servedBy": null,
+        "model": null,
+        "reason": null
+      },
+      "usage": {
+        "promptTokens": 9472,
+        "completionTokens": 523,
+        "totalTokens": 9995,
+        "cachedTokens": 0
+      },
+      "assessment": {
+        "missingFacts": [],
+        "missingCriticalFacts": [],
+        "incorrectFacts": []
+      },
+      "summary": "╔══════════════════════════════════════════╗\n║         CONTEXT CARRY — READY TO PASTE        ║\n╚══════════════════════════════════════════╝\n\n🧠 WHO I AM\nThe user is the owner of Project Cedar. The project owner is Jules. The user has explicitly instructed not to infer that Jules is the user.\n\n🎯 WHAT WE WERE DOING\nFixing Project Cedar's nightly export worker, which times out only for files larger than 30 MB in the `ap-south-1` region on the `release` branch. Database writes are healthy and no customer records were lost. The goal is to resolve the \"upload idle timeout\" failure log in `worker/export.mjs` using a two-upload design with 10 MB chunks, while preserving the no-deploy instruction and both retry policy options.\n\n📍 WHERE WE LEFT OFF\nThe latest user request is to pick up with a patch proposal for the two-upload design in `worker/export.mjs`. The failure log is exactly \"upload idle timeout\". No owner identity has been linked to the user's account. Implementation, testing, and deployment have not started. The no-deploy instruction must be preserved.\n\n✅ DECISIONS MADE\n- Reject increasing the global timeout.\n- Use 10 MB chunks and two simultaneous uploads (replacing the earlier six-upload choice).\n- Keep the required invoice-format fix; rollback is not approved.\n- Retry policy is still undecided: fixed 400 ms pause or jitter between 200-600 ms.\n\n⚠️ OPEN QUESTIONS\n- Which retry policy should be used: fixed 400 ms pause or jitter between 200-600 ms?\n\n📦 KEY CONTEXT\n- Project: Project Cedar nightly export worker.\n- Owner: Jules (not linked to the user's account).\n- Branch: `release`.\n- Region: `ap-south-1`.\n- Failure log: \"upload idle timeout\".\n- Target file: `worker/export.mjs`.\n- Constraint: Do not deploy this change.\n- Constraint: Keep the required invoice-format fix; rollback is not approved.\n- Rejected idea: Increasing the global timeout.\n- Archived references (1-210) are historical background only and unrelated to the active task.\n\n🔁 NEXT STEP\nReply only: \"Context loaded. Let's pick up right where you left off.\" Then wait for the user.",
+      "testBudget": {
+        "slot": "test-a",
+        "used": 1,
+        "limit": 50,
+        "windowHours": 24,
+        "blockedLocally": false
+      },
+      "manualReview": {
+        "criticalConstraintsRetained": true,
+        "scope": "Model attribution quality limitation; prompt and acceptance policy are unchanged by this routing patch.",
+        "unsupportedClaim": "WHO I AM incorrectly calls the user the owner of Project Cedar; the source explicitly leaves owner identity unlinked."
+      }
+    },
+    {
+      "inputChars": 90029,
+      "profile": "large",
+      "maxTokens": 4200,
+      "firstAnswerMs": 1872,
+      "totalMs": 6457,
+      "model": "dots-studio/dots-3-note-preview:free",
+      "provider": "openrouter",
+      "modelsTried": [
+        "dots-studio/dots-3-note-preview:free"
+      ],
+      "fallback": {
+        "attempted": false,
+        "used": false,
+        "servedBy": null,
+        "model": null,
+        "reason": null
+      },
+      "usage": {
+        "promptTokens": 19247,
+        "completionTokens": 494,
+        "totalTokens": 19741,
+        "cachedTokens": 0
+      },
+      "assessment": {
+        "missingFacts": [],
+        "missingCriticalFacts": [],
+        "incorrectFacts": []
+      },
+      "summary": "╔══════════════════════════════════════════╗\n║         CONTEXT CARRY — READY TO PASTE        ║\n╚══════════════════════════════════════════╝\n\n🧠 WHO I AM\nNone (explicitly stated: \"Do not infer that Jules is me.\")\n\n🎯 WHAT WE WERE DOING\nFixing Project Cedar's nightly export worker. The goal is to resolve upload timeouts for files larger than 30 MB on the `release` branch in region `ap-south-1`. Database writes are healthy and no customer records were lost.\n\n📍 WHERE WE LEFT OFF\nThe user requested a patch proposal for the two-upload design targeting `worker/export.mjs`. The failure log is exactly: `upload idle timeout`. No owner identity has been linked to the user's account. Implementation, testing, and deployment have not started. The user explicitly instructed: \"Do not deploy this change.\"\n\n✅ DECISIONS MADE\n- **Rejected**: Increasing the global timeout.\n- **Accepted**: Use 10 MB chunks.\n- **Accepted**: Use two simultaneous uploads (replacing the previously proposed six simultaneous uploads).\n- **Required**: Keep the required invoice-format fix; rollback is not approved.\n- **Constraint**: Do not deploy this change.\n\n⚠️ OPEN QUESTIONS\n- Retry policy is undecided: fixed 400 ms pause vs. jitter between 200-600 ms.\n\n📦 KEY CONTEXT\n- **Project**: Project Cedar\n- **Owner**: Jules (relationship to user is unknown; user stated: \"Do not infer that Jules is me.\")\n- **Branch**: `release`\n- **Region**: `ap-south-1`\n- **Symptom**: Upload times out only for files larger than 30 MB; failure log is exactly: `upload idle timeout`.\n- **Health Status**: Database writes are healthy; no customer records were lost.\n- **Target File**: `worker/export.mjs`\n- **Archived References**: Multiple historical references (Meadow bookmark, cooking exercise, reading club, neighborhood bulletin, Kite puzzle) were provided as historical background only and contain no active project requirements or decisions.\n\n🔁 NEXT STEP\nReply only: \"Context loaded. Let's pick up right where you left off.\" Then wait for the user.",
+      "testBudget": {
+        "slot": "test-a",
+        "used": 2,
+        "limit": 50,
+        "windowHours": 24,
+        "blockedLocally": false
+      },
+      "manualReview": {
+        "criticalConstraintsRetained": true,
+        "notes": "Retains the owner-identity distinction, two-upload correction, both retry choices, exact failure log and no-deploy restriction.",
+        "unsupportedClaim": null
+      }
+    }
+  ],
+  "checkedOnIstDate": "2026-10-23",
+  "limitations": [
+    "Two synthetic OpenRouter test-key generations establish observed routing and timing, not general provider availability or model quality.",
+    "TokenHarbor fallback, retries, deadlines and receipts were tested with controlled responses and isolated Brave/local SQL; no dedicated TokenHarbor testing credential was available.",
+    "No production credentials, production traffic or production database writes were used for these checks."
+  ]
+}

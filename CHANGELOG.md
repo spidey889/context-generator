@@ -2,6 +2,11 @@
 
 A short history of decisions and regressions that matter when changing the code. Read the relevant section of [LOGIC.md](LOGIC.md) for current behavior, ownership and checks; use this file when you need to understand why an approach changed. Entries describe source changes unless deployment is explicitly recorded. Extension packaging, Web Store publication and backend deployment are separate.
 
+## 2026-10-23
+
+- **OpenRouter first, TokenHarbor second (branch candidate).** Put Dots and explicitly enabled OpenRouter candidates before DeepSeek. With both gateways configured, give OpenRouter at most 45 seconds and then start one 45-second TokenHarbor stage shared by its keys/retries. Keep the absolute 90-second gateway window, 270-second total, funded fallbacks, single-gateway budgets, token/thinking policy, cancellation and model-bound receipts. This branch requires owner approval before merging to master.
+  - Validation: 711 deterministic tests and the installed Brave/local-SQL transfer fixture passed. Dedicated OpenRouter testing-key runs completed synthetic 40k/90k-character histories in 6.3/6.5 seconds with no fallback. [Retained results and manual review](evaluation/results/2026-10-23-openrouter-primary-routing.json) distinguish routing evidence from model quality: the 40k result introduced an unsupported user-owner attribution; the prompt and acceptance policy were not changed. TokenHarbor failures were simulated rather than charged to a production key.
+
 ## 2026-10-22
 
 - **Prepare picker assets when the site opens.** Move the UI content script to DOM readiness and start hidden picker styles, local logo decoding and title-font loading immediately. The previous preload waited for the entire page and then browser idle time, leaving slow pages exposed to first-click setup. Preserve the accepted picker appearance, focus, capture/transfer timing and early-click fallback; teardown still cancels pending DOM readiness.
