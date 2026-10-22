@@ -95,5 +95,7 @@
     "Two synthetic OpenRouter test-key generations establish observed routing and timing, not general provider availability or model quality.",
     "TokenHarbor fallback, retries, deadlines and receipts were tested with controlled responses and isolated Brave/local SQL; no dedicated TokenHarbor testing credential was available.",
     "No production credentials, production traffic or production database writes were used for these checks."
-  ]
+  ],
+  "sourceLfSha256": "ae3b6a31b7acc4b9b32e2f42e62fb8ffca2be7c87393dcd2ccc691c6d293f80c",
+  "sourceHashNote": "sourceSha256 identifies the live-tested Windows checkout bytes; sourceLfSha256 identifies the same source with Git LF line endings. Their normalized text was verified identical."
 }
