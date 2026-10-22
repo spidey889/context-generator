@@ -521,6 +521,7 @@ function loadPlatformContent(elements = [], hostname = "chatgpt.com", {
 test("ChatGPT startup excludes ordinary OpenAI pages", () => {
   const manifest = JSON.parse(fs.readFileSync(MANIFEST_PATH, "utf8"));
   const platformContent = manifest.content_scripts.find((entry) => entry.js.includes("platform-content.js"));
+  assert.equal(platformContent.run_at, "document_end", "picker assets must start before slow page resources finish");
   const analysisContent = manifest.content_scripts.find((entry) => entry.js.includes("analysis-bridge.js"));
   const platformResources = manifest.web_accessible_resources.find((entry) => entry.resources.includes("bubble-icon.png"));
   const matchGroups = [manifest.host_permissions, platformContent.matches, platformResources.matches];
@@ -641,7 +642,7 @@ test("native modal editors cannot replace the verified chat composer", () => {
   }
 });
 
-clockTest("picker UI preloads after page load and idle without opening or starting a transfer", async (t) => {
+test("picker UI preloads while page resources are loading without opening or starting a transfer", async () => {
   const messages = [];
   const hooks = loadPlatformContent([], "chatgpt.com", {
     runtimeSendMessage: async (message) => { messages.push(message); return { ok: true }; }
@@ -658,21 +659,17 @@ clockTest("picker UI preloads after page load and idle without opening or starti
   hooks.document.fonts = { load: async (font) => { fonts.push(font); } };
   hooks.document.readyState = "interactive";
   const focus = hooks.document.activeElement;
-  let idle;
   let schedules = 0;
-  hooks.window.requestIdleCallback = (callback) => { schedules++; idle = callback; return 1; };
+  hooks.window.requestIdleCallback = () => { schedules++; return 1; };
   hooks.window.cancelIdleCallback = () => {};
   hooks.scheduleDestinationSheetPreload();
-  t.mock.timers.tick(2000);
-  assert.equal(schedules, 0, "page loading keeps priority");
+  assert.equal(decodes, 1, "local assets start before window.load or the first click");
+  assert.equal(schedules, 0, "a busy page cannot postpone UI assets until idle");
   hooks.document.readyState = "complete";
   hooks.dispatchWindowEvent("load");
   hooks.scheduleDestinationSheetPreload();
-  assert.equal(schedules, 1, "prepare only once per page instance");
-  assert.equal(decodes, 0, "asset work waits for idle");
-  idle();
   await Promise.resolve();
-  assert.equal(decodes, 1);
+  assert.equal(decodes, 1, "prepare only once per page instance");
   assert.deepEqual(fonts, ['18px "Cap Context EB Garamond"']);
   assert.equal(sheet.style.display, "none");
   assert.equal(sheet.getAttribute("aria-hidden"), "true");
@@ -680,23 +677,28 @@ clockTest("picker UI preloads after page load and idle without opening or starti
   assert.deepEqual(messages, [], "UI preparation must not capture, summarize or create a tab");
 });
 
-clockTest("picker UI preload cancels on teardown and supports browsers without idle callbacks", (t) => {
-  for (const useIdle of [true, false]) {
+test("picker UI preload waits only for the DOM and cancels on teardown", () => {
+  for (const teardown of [true, false]) {
     const hooks = loadPlatformContent();
-    let cancelled = null;
-    let idle;
-    if (useIdle) {
-      hooks.window.requestIdleCallback = (callback) => { idle = callback; return 7; };
-      hooks.window.cancelIdleCallback = (id) => { cancelled = id; };
-    }
+    const body = hooks.document.body;
+    hooks.document.body = null;
     hooks.scheduleDestinationSheetPreload();
-    assert.equal(hooks.getOwnedLifecycleResourceCounts().timeouts, useIdle ? 0 : 1);
-    hooks.teardownContextGeneratorInstance();
-    assert.equal(cancelled, useIdle ? 7 : null);
-    // Even an already-dispatched idle callback cannot recreate UI after teardown.
-    idle?.();
-    t.mock.timers.tick(2000);
     assert.equal(hooks.document.getElementById("context-generator-destination-sheet"), null);
+    if (teardown) hooks.teardownContextGeneratorInstance();
+    let decodes = 0;
+    if (!teardown) {
+      const sheet = new FakeElement({ attrs: { id: "context-generator-destination-sheet" } });
+      const image = new FakeElement({ tag: "img" });
+      image.decode = async () => { decodes++; };
+      sheet.appendChild(image);
+      hooks.registerElementId(sheet.id, sheet);
+      hooks.registerElementId("context-generator-destination-backdrop", new FakeElement());
+    }
+    hooks.document.body = body;
+    hooks.document.readyState = "interactive";
+    hooks.dispatchDocumentEvent("DOMContentLoaded");
+    assert.equal(Boolean(hooks.document.getElementById("context-generator-destination-sheet")), !teardown);
+    assert.equal(decodes, teardown ? 0 : 1);
   }
 });
 
@@ -819,25 +821,26 @@ test("reinjection tears down every resource owned by the previous content-script
 });
 
 clockTest("invalidated page worlds retire on callbacks without deleting replacement UI", (t) => {
-  for (const callback of ["event", "observer", "timer", "idle"]) {
+  for (const callback of ["event", "observer", "timer", "dom-ready"]) {
     const messages = [];
     const hooks = loadPlatformContent([], "claude.ai", { runtimeSendMessage: async message => { messages.push(message); return { ok: true }; } });
     const replacement = new FakeElement({ attrs: { id: "context-generator-bubble" } });
-    let removed = false, prevented = false, idle;
+    let removed = false, prevented = false;
     replacement.remove = () => { removed = true; };
     hooks.registerElementId(replacement.id, replacement);
     hooks.startFloatingButtonMonitoring();
-    if (callback === "idle") {
-      hooks.window.requestIdleCallback = fn => { idle = fn; return 1; };
-      hooks.window.cancelIdleCallback = () => {};
+    if (callback === "dom-ready") {
+      const body = hooks.document.body;
+      hooks.document.body = null;
       hooks.scheduleDestinationSheetPreload();
+      hooks.document.body = body;
     }
     hooks.invalidateRuntime();
     if (callback === "event") hooks.dispatchDocumentEvent("keydown", { key: "Escape", isTrusted: true,
       preventDefault() { prevented = true; }, stopImmediatePropagation() { prevented = true; } });
     if (callback === "observer") hooks.mutationObservers[0].callback([]);
     if (callback === "timer") t.mock.timers.tick(200);
-    if (callback === "idle") idle();
+    if (callback === "dom-ready") hooks.dispatchDocumentEvent("DOMContentLoaded");
     assert.equal(removed, false, `${callback}: stale worlds cannot remove the current UI`);
     assert.equal(prevented, false, `${callback}: stale handlers cannot swallow the current user's key`);
     assert.deepEqual(messages, [], `${callback}: stale code must not create or cancel transfers`);

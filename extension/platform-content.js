@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-18-handoff-production-v171";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-22-picker-startup-v172";
   const INLINE_PILL_SIZE = 36;
   const ownedUiStyleSheets = new Map();
   let handoffUserCss = "";
@@ -498,7 +498,6 @@
   let destinationSheetAnimationFrame = null;
   let destinationSheetWarmupTimer = null;
   let destinationSheetPreloadScheduled = false;
-  let destinationSheetPreloadIdleCallback = null;
   let destinationSheetPathname = null;
   let pickerJsonCapture = null;
   let pendingJsonCapture = Promise.resolve();
@@ -648,10 +647,6 @@
   }
 
   function clearOwnedLifecycleResources() {
-    if (destinationSheetPreloadIdleCallback !== null) {
-      window.cancelIdleCallback(destinationSheetPreloadIdleCallback);
-      destinationSheetPreloadIdleCallback = null;
-    }
     [...ownedObservers].forEach((observer) => observer.disconnect());
     [...ownedTimeouts].forEach((timer) => window.clearTimeout(timer));
     [...ownedIntervals].forEach((timer) => window.clearInterval(timer));
@@ -6924,27 +6919,20 @@
 
   function scheduleDestinationSheetPreload() {
     if (!instanceActive || destinationSheetPreloadScheduled) return;
-    if (document.readyState !== "complete") {
-      addOwnedEventListener(window, "load", scheduleDestinationSheetPreload);
+    if (!document.body) {
+      addOwnedEventListener(document, "DOMContentLoaded", scheduleDestinationSheetPreload);
       return;
     }
-    removeOwnedEventListener(window, "load", scheduleDestinationSheetPreload);
+    removeOwnedEventListener(document, "DOMContentLoaded", scheduleDestinationSheetPreload);
     destinationSheetPreloadScheduled = true;
-    const preload = () => {
-      destinationSheetPreloadIdleCallback = null;
-      if (!ensureLiveExtensionInstance() || !document.body || isRunning || isDestinationSheetOpen()) return;
-      // Prepare only local UI. Capture still belongs to opening/selection, and
-      // an early click can synchronously create this same sheet as before.
-      const sheet = ensureDestinationSheet();
-      sheet.querySelectorAll("img").forEach(image => image.decode?.().catch(() => {}));
-      // display:none does not request a font, so explicitly load the title face.
-      document.fonts?.load('18px "Cap Context EB Garamond"').catch(() => {});
-    };
-    if (typeof window.requestIdleCallback === "function" && typeof window.cancelIdleCallback === "function") {
-      destinationSheetPreloadIdleCallback = window.requestIdleCallback(preload, { timeout: 1500 });
-    } else {
-      setTimeout(preload, 250);
-    }
+    if (!ensureLiveExtensionInstance() || isRunning || isDestinationSheetOpen()) return;
+    // Start local UI assets as soon as the DOM exists. Waiting for window.load
+    // or idle leaves the first click doing setup on pages with slow resources.
+    // The sheet stays hidden; conversation work still starts only on interaction.
+    const sheet = ensureDestinationSheet();
+    sheet.querySelectorAll("img").forEach(image => image.decode?.().catch(() => {}));
+    // display:none does not request a font, so explicitly load the title face.
+    document.fonts?.load('18px "Cap Context EB Garamond"').catch(() => {});
   }
 
   function ensureDestinationSheet() {

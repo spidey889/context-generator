@@ -668,6 +668,14 @@ function streamOversizedFixtureResponse(response, prefix, metrics, tailMegabytes
 
 async function startFixtureServer() {
   const state = { summaryRequests: [], destinationRequests: 0, jsonRequests: 0, sessionRequests: 0, pasteDescriptorRequests: 0, pasteContentRequests: 0, fileReadsActive: 0, fileReadsPeak: 0, chatgptRequestUrls: [], claudeRequestUrls: [] };
+  const pickerLoadResponses = new Set();
+  const pickerLoadImage = '<svg xmlns="http://www.w3.org/2000/svg" width="1" height="1"/>';
+  state.pickerPreloadChecked = false;
+  state.releasePickerLoad = () => {
+    state.pickerPreloadChecked = true;
+    for (const response of pickerLoadResponses) response.end(pickerLoadImage);
+    pickerLoadResponses.clear();
+  };
   state.oversizeHistory = { bytes: 0, cancelled: false };
   state.oversizePaste = { bytes: 0, cancelled: false };
   state.discardedAuth = { bytes: 0, cancelled: false };
@@ -679,6 +687,15 @@ async function startFixtureServer() {
   const server = http.createServer(async (request, response) => {
     const url = new URL(request.url, "http://127.0.0.1");
     response.setHeader("Cache-Control", "no-store");
+    if (url.pathname === "/picker-preload-wait") {
+      response.writeHead(200, { "Content-Type": "image/svg+xml" });
+      if (state.pickerPreloadChecked) response.end(pickerLoadImage);
+      else {
+        pickerLoadResponses.add(response);
+        response.on("close", () => pickerLoadResponses.delete(response));
+      }
+      return;
+    }
     if (url.pathname === "/free-placement") {
       response.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
       response.end(url.searchParams.get(SMOKE_PLATFORM_QUERY) === "claude" ? claudeReplyFixture() : sourceFixture(true));
@@ -903,6 +920,9 @@ async function startFixtureServer() {
         page = page.replace('data-message-author-role="user"', 'class="query-text message" data-message-author-role="user"')
           .replace('data-message-author-role="assistant"', 'class="response-content message" data-message-author-role="assistant"');
       }
+      // Keep window.load pending until picker assets are ready. A preload gated
+      // on full page load must fail instead of passing on a fast fixture.
+      if (!state.pickerPreloadChecked) page = page.replace("</body>", '<img hidden src="/picker-preload-wait" alt=""></body>');
       if (NETWORK_SOURCE) {
         // Gemini must capture a cached chat without a prior RPC observation.
         const boot = JSON_SOURCE === "gemini" ? `window.WIZ_global_data={SNlM0e:"CSRF_SENTINEL",cfb2h:"native-build",FdrFJe:"native-session"};window.__geminiMenuClicks=0;`
@@ -1941,6 +1961,9 @@ async function run() {
       return Boolean(sheet && [...sheet.querySelectorAll("img")].every(image => image.complete && image.naturalWidth > 0)
         && [...document.fonts].some(face => face.family.includes("Cap Context EB Garamond") && face.status === "loaded"));
     })()`), "hidden picker, decoded logos and title font before the first click");
+    assert.equal(await sourceSession.evaluate("document.readyState"), "interactive",
+      "Picker assets must be ready while a page resource still blocks window.load.");
+    state.releasePickerLoad();
     assert.equal(await sourceSession.evaluate(`(() => {
       const sheet = document.getElementById("context-generator-destination-sheet");
       window.__smokePreloadedPicker = sheet;
@@ -1950,7 +1973,7 @@ async function run() {
     })()`), true, "Preloading must leave the picker closed and preserve page focus.");
     assert.deepEqual([state.summaryRequests.length, state.jsonRequests], preloadRequests,
       "Preparing UI before the first click must not start conversation work.");
-    process.stdout.write("✓ Picker, logos and title font ready before the first click; no capture or summary request.\n");
+    process.stdout.write("✓ Picker, logos and title font ready before window.load and the first click; no capture or summary request.\n");
     if (process.env.CAP_CONTEXT_HANDOFF_PALETTE_SMOKE === "1") {
       await verifyHandoffPalette(sourceSession);
       assert.equal(state.summaryRequests.length, 0, "The palette check must never call a model.");
@@ -3138,6 +3161,7 @@ async function run() {
       braveProcess.kill();
       await waitForProcessExit(braveProcess, 2000);
     }
+    state.releasePickerLoad();
     await new Promise((resolve) => server.close(resolve));
     await telemetryFixture.close();
     const safeTempRoot = path.resolve(tempRoot);

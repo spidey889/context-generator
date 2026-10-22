@@ -2,6 +2,10 @@
 
 A short history of decisions and regressions that matter when changing the code. Read the relevant section of [LOGIC.md](LOGIC.md) for current behavior, ownership and checks; use this file when you need to understand why an approach changed. Entries describe source changes unless deployment is explicitly recorded. Extension packaging, Web Store publication and backend deployment are separate.
 
+## 2026-10-22
+
+- **Prepare picker assets when the site opens.** Move the UI content script to DOM readiness and start hidden picker styles, local logo decoding and title-font loading immediately. The previous preload waited for the entire page and then browser idle time, leaving slow pages exposed to first-click setup. Preserve the accepted picker appearance, focus, capture/transfer timing and early-click fallback; teardown still cancels pending DOM readiness.
+
 ## 2026-10-18
 
 - **Extension 1.4.20 prepared.** Bumped the authoritative manifest and current-source references from 1.4.18 to 1.4.20. Packaging and Chrome Web Store publication remain separate.
