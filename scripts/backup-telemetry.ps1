@@ -39,6 +39,7 @@ select jsonb_build_object(
   'snapshot_at',now(), 'project_ref','iqkzynzxbmemhtiupwwu', 'server_version',version(),
   'transfers',(select coalesce(jsonb_agg(to_jsonb(t) order by attempt_id),'[]') from public.transfers t),
   'users',(select coalesce(jsonb_agg(to_jsonb(u) order by user_no),'[]') from public.users u),
+  'provider_failures',(select coalesce(jsonb_agg(to_jsonb(f) order by id),'[]') from public.provider_failures f),
   'users_sequence',(select jsonb_build_object('last_value',last_value::text,'is_called',is_called) from public.users_user_no_seq),
   'migrations',(select jsonb_agg(to_jsonb(m) order by version) from supabase_migrations.schema_migrations m),
   'functions',(select jsonb_agg(pg_get_functiondef(p.oid)) from pg_proc p join pg_namespace n on n.oid=p.pronamespace where n.nspname='public'),

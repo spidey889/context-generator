@@ -1,11 +1,11 @@
 // Fold provider SSE into the existing result shape. Only completed results may
 // pass summary validation; deltas are previews and reset on every retry/route.
-async function readProviderStream(response, provider, { onDelta, checkDeadline, onAnswerStart }) {
+async function readProviderStream(response, provider, { onDelta, checkDeadline, onAnswerStart, onProgress }) {
   const reader = response.body.getReader();
   const decoder = new TextDecoder("utf-8", { fatal: true });
   const filterAnswer = ["openrouter", "tokenharbor"].includes(provider) ? createThinkingFilter() : delta => delta;
   let buffer = "", dataLines = [], text = "", finishReason = null;
-  let usage, error, done = false, eof = false, answerStarted = false;
+  let usage, error, done = false, eof = false, answerStarted = false, answerChars = 0;
   const dispatch = () => {
     if (!dataLines.length) return;
     const raw = dataLines.join("\n");
@@ -29,6 +29,7 @@ async function readProviderStream(response, provider, { onDelta, checkDeadline, 
     if (typeof delta === "string" && delta) {
       text += delta;
       delta = filterAnswer(delta);
+      answerChars += delta.length;
       if (!answerStarted && /\S/.test(delta)) {
         onAnswerStart?.();
         answerStarted = true;
@@ -37,6 +38,14 @@ async function readProviderStream(response, provider, { onDelta, checkDeadline, 
     }
     finishReason = (provider === "gemini" ? choice?.finishReason : choice?.finish_reason) || finishReason;
     usage = (provider === "gemini" ? chunk.usageMetadata : chunk.usage) || usage;
+    // Keep observations even when the stream stalls before its final frame.
+    // Only counts leave the parser; private thinking remains inside the stream.
+    const reasoning = choice?.delta?.reasoning_content ?? choice?.delta?.reasoning;
+    onProgress?.({ answerChars, finishReason,
+      ...(typeof reasoning === "string" ? { reasoningChars: reasoning.length } : {}),
+      promptTokens: provider === "gemini" ? usage?.promptTokenCount : usage?.prompt_tokens,
+      completionTokens: provider === "gemini" ? usage?.candidatesTokenCount : usage?.completion_tokens,
+      reasoningTokens: provider === "gemini" ? usage?.thoughtsTokenCount : usage?.completion_tokens_details?.reasoning_tokens });
   };
   const consume = () => {
     let newline;

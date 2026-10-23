@@ -14,6 +14,8 @@ This Privacy Policy explains how Cap Context ("we", "our", or "us") handles user
 
 ## Data Retention and Security
 
+- **Provider Failure Logs**: The backend retains metadata about failed AI-provider requests for up to 30 days, with daily cleanup. This includes provider/model names, fixed failure stages and reasons, timing, input/output sizes and limits, and observed token counts. A random server request ID and an optional transfer-attempt ID connect related records. No conversation, summary or thinking text, credentials, raw errors or provider response bodies are stored. These records remain private and help diagnose failures even when a fallback succeeds.
+
 - **Transfer Diagnostics**: Updated clients also send bounded diagnostic codes, component timelines, capture method and turn/size counts, summary size and timing, retry/recovery counts, browser family, visibility/online flags, and editor presence/connection/draft/insertion/verification observations. Successful attempts include basic measurements for comparison. These contain no chat or summary text, page URLs, account details, stack traces, arbitrary error messages or provider bodies. A draft observation records only presence/length, never its contents. Unknown causes remain explicitly unknown; diagnostics are client reports, not verified identities or causes.
 
 - **Temporary Backend Processing**: The backend does not permanently store or intentionally log chat content. Conversation text is processed for the duration of the summary request and returned to the extension. The background worker may keep a recent exact summary in memory for up to two minutes; this disappears with the worker and is not persistent storage. Local extension retention is described below.

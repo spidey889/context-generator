@@ -72,6 +72,10 @@ async function checkSnapshot(snapshot, { applyPending = false, throughVersion } 
     assert.equal(transferKeys.length, 1, "Snapshot must contain exactly one transfer table");
     const transferTable = transferKeys[0];
     const tables = [transferTable, "users"];
+    if (Object.hasOwn(snapshot, "provider_failures")) {
+      assert.ok(Array.isArray(snapshot.provider_failures));
+      tables.push("provider_failures");
+    }
     assert.ok(Array.isArray(snapshot[transferTable]) && Array.isArray(snapshot.users));
     assert.ok(Array.isArray(snapshot.migrations) && snapshot.migrations.length > 0);
     if (applyPending) assert.match(throughVersion || "", /^\d{14}$/, "Pending upgrades require an explicit migration boundary");
@@ -277,6 +281,7 @@ async function checkSnapshot(snapshot, { applyPending = false, throughVersion } 
     assert.ok(snapshot.users.length === 0 || sequence.is_called || BigInt(sequence.last_value) > BigInt(maximum),
       "Restored next identity must be above the existing maximum");
     return { transferEvents: snapshot[transferTable].length, users: snapshot.users.length,
+      providerFailures: snapshot.provider_failures?.length || 0,
       capturedMigrations: captured.length, pendingMigrations: pending.length,
       originalColumnHashes: hashes, originalValuesPreserved: removedColumns.length === 0 && reclassifiedFileSizeFailures === 0,
       removedColumns, retainedValuesPreserved: true, reclassifiedFileSizeFailures,

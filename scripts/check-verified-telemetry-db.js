@@ -403,6 +403,8 @@ async function main() {
         checks += await require("./check-tokenharbor-db.js").checkTokenHarbor(db, sql, "deepseek-v4.1-flash:free");
       } else if (name.endsWith("_short_dots_model_name.sql")) {
         checks += await require("./check-served-model-db.js").checkDotsModelLabel(db, sql);
+      } else if (name.endsWith("_provider_failure_logs.sql")) {
+        checks += await require("./check-provider-failures-db.js").checkProviderFailures(db, sql, appliedMigrations);
       } else await db.exec(sql);
     }
     checks += await require("./check-served-model-db.js").checkStoreModelReceipts(db);

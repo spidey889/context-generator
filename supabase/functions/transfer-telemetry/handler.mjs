@@ -1,5 +1,6 @@
 import { validateTelemetryPayload } from "./validation.mjs";
 import { verifySummaryReceipt } from "../_shared/summary-proof.mjs";
+import "../_shared/provider-failure.js";
 
 const MAX_BODY_BYTES = 24576;
 
@@ -27,17 +28,21 @@ export function createTelemetryHandler({ createClient, getEnv, log = console.war
     catch (error) { return failure(error.status || 400, error.code || "invalid_payload"); }
     let input;
     try { input = JSON.parse(rawBody); } catch { return failure(400, "invalid_payload"); }
-    const payload = validateTelemetryPayload(input);
-    if (!payload) return failure(400, "invalid_payload");
+    // This branch is reachable only after private relay authentication. Public
+    // extension telemetry cannot submit server-observed provider failures.
+    const providerEvent = input?.kind === "provider_failure" && Object.keys(input).length === 2
+      ? globalThis.CapProviderFailure.validate(input.event) : null;
+    const payload = providerEvent ? null : validateTelemetryPayload(input);
+    if (!payload && !providerEvent) return failure(400, "invalid_payload");
 
     const signingSecret = getEnv("TELEMETRY_SIGNING_KEY");
-    if (payload.summary_proof !== undefined && (!signingSecret || new TextEncoder().encode(signingSecret).length < 32)) {
+    if (payload?.summary_proof !== undefined && (!signingSecret || new TextEncoder().encode(signingSecret).length < 32)) {
       report("signing_not_configured");
       return failure(503, "telemetry_unavailable");
     }
-    const receipt = await verifySummaryReceipt(payload, signingSecret);
+    const receipt = payload ? await verifySummaryReceipt(payload, signingSecret) : null;
     const summaryVerified = receipt !== null;
-    if (payload.summary_proof !== undefined && !summaryVerified) {
+    if (payload?.summary_proof !== undefined && !summaryVerified) {
       report("summary_proof_invalid");
       return failure(422, "invalid_summary_proof");
     }
@@ -51,7 +56,9 @@ export function createTelemetryHandler({ createClient, getEnv, log = console.war
         auth: { persistSession: false, autoRefreshToken: false },
         global: { fetch: (url, options) => fetch(url, { ...options, signal: AbortSignal.timeout(rpcTimeoutMs) }) }
       });
-      const { error } = await deadline(supabase.rpc("record_transfer_event", {
+      const { error } = await deadline(supabase.rpc(providerEvent ? "record_provider_failure" : "record_transfer_event", providerEvent ? {
+        p_event: providerEvent
+      } : {
         p_attempt_id: payload.attempt_id,
         p_install_id: payload.install_id,
         p_attempted_at: payload.attempted_at,
@@ -74,7 +81,7 @@ export function createTelemetryHandler({ createClient, getEnv, log = console.war
         ...(payload.diagnostics ? { p_diagnostics: payload.diagnostics } : {})
       }), rpcTimeoutMs);
       if (error) {
-        if (error.code === "22023") return failure(422, "attempt_identity_mismatch");
+        if (error.code === "22023") return failure(422, providerEvent ? "invalid_payload" : "attempt_identity_mismatch");
         if (["23514", "23502", "22P02", "22007", "22008"].includes(error.code)) return failure(422, "invalid_payload");
         const configuration = ["42501", "PGRST202", "PGRST301", "PGRST302"].includes(error.code);
         report(configuration ? "database_configuration" : "database_unavailable");

@@ -439,6 +439,10 @@ Response diagnostics are bounded `validationReason` and `qualityFlags`: `bad_str
 
 ## Telemetry and local receipts
 
+Provider failures also have a separate backend-only log in `public.provider_failures`. The summary service sends each failed HTTP attempt or rejected final output through the private telemetry relay, including failures recovered by retry or another provider. It records fixed provider/model/reason/stage labels, main/backup key slot (never its value), route/retry index, input/request sizes, configured output and time budgets, headers/first-answer timing, observed answer/thinking character counts, HTTP status, finish reason and token counts when supplied. Missing usage remains unknown. `waiting_answer` can include hidden thinking; observed separate thinking characters do not prove the provider's full reasoning cost. The logs cannot establish upstream queue time or semantic answer quality.
+
+Writes start during fallback work and are awaited before the response ends, including caller cancellation. A bounded five-second delivery window and one idempotent retry prevent logging from blocking transfers; unavailable logging produces a fixed server warning. A Supabase outage or process termination can still lose a log. The Edge writer authenticates the private relay and validates the closed metadata schema before an invoker RPC; public clients cannot insert or read these rows. Each request has a server-generated grouping ID and an optional client-reported attempt ID for correlation. Logs contain no chat/summary/reasoning text, credentials, arbitrary errors or provider bodies. Daily cleanup retains 30 days. Existing transfer outcomes, counters, receipts and client diagnostics are unchanged; installed clients need no update. The encrypted backup includes the new table and restores remain compatible with older snapshots.
+
 ### Storage and Latest Run
 
 | Key/alarm | Scope and purpose |
