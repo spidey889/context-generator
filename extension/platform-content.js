@@ -127,7 +127,7 @@
   // Claude, ChatGPT and Grok need focus before composer hydration/verification.
   // Their source-side completion cue must finish before the background performs the focused paste.
   const FOCUSED_PASTE_DESTINATIONS = new Set(["claude", "chatgpt", "grok"]);
-  const OVERSIZED_CONVERSATION_ERROR_MESSAGE = "This chat is too large to transfer. Our limit is 500,000 characters.";
+  const OVERSIZED_CONVERSATION_ERROR_MESSAGE = "This chat is too large to transfer. Our limit is 500,000 characters. Try a shorter chat.";
   const CONVERSATION_SCRAPE_RETRY_TIMEOUT_MS = 1800;
   const CONVERSATION_SCRAPE_RETRY_INTERVAL_MS = 140;
   const SOURCE_SCROLL_STABLE_TIMEOUT_MS = 1800;
@@ -7739,7 +7739,7 @@
     const unit = check === "transcript_char_limit" ? "characters" : "bytes";
     const subject = check === "supported_files_limit" ? "Text attachments are"
       : check?.startsWith("raw_") ? "Chat data is" : "This chat is";
-    return `${subject} too large to transfer. Our limit is ${limit.toLocaleString("en-US")} ${unit}.`;
+    return `${subject} too large to transfer. Our limit is ${limit.toLocaleString("en-US")} ${unit}.${unit === "characters" ? " Try a shorter chat." : ""}`;
   }
 
   function shouldRetrySourceJson(error) {
