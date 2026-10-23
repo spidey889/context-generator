@@ -963,7 +963,7 @@ test("ChatGPT preserves completed Python Analysis results exactly without code o
   const h = setup(data); await discover(h);
   const capture = await h.window.__capCaptureChatGptJson();
   assert.equal(capture.text, `ChatGPT conversation:\n\nUser: Question\n\nAssistant: Python result:\n\n${output}\n\nAssistant: The table is ready.`);
-  assert.equal(capture.messageTurnCount, 3);
+  assert.equal(capture.messageTurnCount, 2);
   assert.doesNotMatch(capture.text, /PRIVATE_|NESTED_/);
   assert.equal(h.requests.length, 2, "Python results need no additional file or tool fetch.");
 });
@@ -1027,7 +1027,7 @@ test("ChatGPT preserves complete long canvas documents in their owning assistant
     const harness = setup(data); await discover(harness);
     const capture = await harness.window.__capCaptureChatGptJson();
     assert.equal(capture.text, `ChatGPT conversation:\n\nUser: Question\n\nAssistant: Canvas: Document title\n\n${body}\n\nAssistant: Selected answer`);
-    assert.equal(capture.messageTurnCount, 3);
+    assert.equal(capture.messageTurnCount, 2);
     assert.doesNotMatch(capture.text, /TOOL_ACK_SENTINEL|PARAM_SENTINEL|canmore|textdoc_id/);
   }
 });
@@ -1192,6 +1192,32 @@ function jsonResponse(data, status = 200, headers = {}) {
   return new Response(JSON.stringify(data), { status, headers: { "content-type": "application/json", ...headers } });
 }
 
+test("ChatGPT counts assistant replies once while retaining every reasoning block", async () => {
+  const data = fixture();
+  data.mapping = { root: { parent: null, message: null } };
+  let parent = "root";
+  const expected = [];
+  const append = (id, role, content, text) => {
+    data.mapping[id] = { parent, message: { author: { role }, recipient: "all", content } };
+    parent = id;
+    expected.push({ role, text });
+  };
+  for (let i = 0; i < 6; i++) {
+    append(`user-${i}`, "user", { content_type: "text", parts: [`Batch ${i}`] }, `Batch ${i}`);
+    append(`thought-${i}`, "assistant", { content_type: "thoughts", thoughts: [{ content: `Thinking ${i}` }] }, `Thinking ${i}`);
+    if (i < 3) append(`recap-${i}`, "assistant", { content_type: "reasoning_recap", content: `Recap ${i}` }, `Recap ${i}`);
+    append(`answer-${i}`, "assistant", { content_type: "text", parts: ["OK"] }, "OK");
+  }
+  data.current_node = parent;
+  const harness = setup(data); await discover(harness);
+  const capture = await harness.window.__capCaptureChatGptJson();
+  assert.equal(capture.messageTurnCount, 12);
+  assert.equal(capture.jsonCapture.selected_turns, 12);
+  assert.equal(capture.messages.length, 21);
+  assert.deepEqual(JSON.parse(JSON.stringify(capture.messages)), expected);
+  assert.equal(capture.text, `ChatGPT conversation:\n\n${expected.map(turn => `${turn.role === "user" ? "User" : "Assistant"}: ${turn.text}`).join("\n\n")}`);
+});
+
 test("ChatGPT preserves large pasted strings, own code, reasoning recap and thoughts in the active branch", async () => {
   const data = fixture();
   const pasted = `PASTE_START\n${"  all lines and indentation\n".repeat(1600)}PASTE_END`;
@@ -1204,7 +1230,7 @@ test("ChatGPT preserves large pasted strings, own code, reasoning recap and thou
   const harness = setup(data); await discover(harness);
   const capture = await harness.window.__capCaptureChatGptJson();
   assert.equal(capture.text, `ChatGPT conversation:\n\nUser: ${pasted}\n\nAssistant: ${recap}\n\nAssistant: ${thought}\n\nAssistant: ${code}`);
-  assert.equal(capture.messageTurnCount, 4);
+  assert.equal(capture.messageTurnCount, 2);
 });
 
 clockTest("ChatGPT bridge waits for MAIN installation and fails visibly if readiness is unavailable", async () => {

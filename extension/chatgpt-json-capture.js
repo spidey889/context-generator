@@ -239,10 +239,14 @@
       return parts.length ? [{ role, text: parts.join("\n\n") }] : [];
     });
     if (!turns.length) throw blocked("No usable user or assistant text remains after skipping tools, files, images, and artifacts.", "missing_text");
+    // Reasoning, canvas and Python result blocks belong to one assistant reply.
+    // Keep every payload block intact; only the reported message count groups them.
+    const messageTurnCount = turns.reduce((count, turn, index) => count +
+      (turn.role === "assistant" && turns[index - 1]?.role === "assistant" ? 0 : 1), 0);
     const text = `ChatGPT conversation:\n\n${turns.map(turn => `${turn.role === "user" ? "User" : "Assistant"}: ${turn.text}`).join("\n\n")}`;
-    metrics?.set({ selected_turns: turns.length });
+    metrics?.set({ selected_turns: messageTurnCount });
     if (metrics ? !metrics.transcript(text) : text.length > 1000000 || new TextEncoder().encode(text).length > 4000000) throw captureError("This chat is too long to transfer (limit: 1,000,000 characters). Try a shorter chat.", "size_limit");
-    return { text, messages: turns, messageTurnCount: turns.length, excludedContentTypes: [...excludedContentTypes].sort(),
+    return { text, messages: turns, messageTurnCount, excludedContentTypes: [...excludedContentTypes].sort(),
       ...(captureWarning ? { captureWarning } : {}) };
   }
 
