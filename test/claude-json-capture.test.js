@@ -205,11 +205,11 @@ test("Claude interrupted history body stays retryable and a fresh capture keeps 
     "Claude conversation:\n\nUser: Question\n\nAssistant: Private reasoning\n\nSelected answer");
 });
 
-for (const length of [undefined, "1", "12000001"]) test(`Claude bounds raw history before decoding with Content-Length ${length ?? "absent"}`, async () => {
+for (const length of [undefined, "1", "32000001"]) test(`Claude bounds raw history before decoding with Content-Length ${length ?? "absent"}`, async () => {
   // A tiny active branch can coexist with large metadata. Transcript bounds
   // cannot protect the raw read: reject excess transport without clipping it.
   const prefix = new TextEncoder().encode(JSON.stringify(fixture()).slice(0, -1) + ',"ignored":"');
-  const chunks = [prefix, ...Array(20).fill(new Uint8Array(1000000).fill(32)), new TextEncoder().encode('"}')];
+  const chunks = [prefix, ...Array(40).fill(new Uint8Array(1000000).fill(32)), new TextEncoder().encode('"}')];
   const streamed = streamedResponse(chunks, length ? { "content-length": length } : {}, true);
   let healthy = false;
   const harness = setup(fixture(), { resources: [endpoint], fetchImpl: async () => healthy
@@ -221,8 +221,8 @@ for (const length of [undefined, "1", "12000001"]) test(`Claude bounds raw histo
     return true;
   });
   assert.equal(streamed.stats.cancelled, 1);
-  assert.ok(streamed.stats.bytes <= 13000000, `The oversized body was drained: ${streamed.stats.bytes} bytes.`);
-  if (length === "12000001") assert.equal(streamed.stats.bytes, 0, "Reject an oversized advertised length before reading.");
+  assert.ok(streamed.stats.bytes <= 33000000, `The oversized body was drained: ${streamed.stats.bytes} bytes.`);
+  if (length === "32000001") assert.equal(streamed.stats.bytes, 0, "Reject an oversized advertised length before reading.");
   assert.equal(streamed.response.body.locked, false);
   assert.equal(harness.stats().navigationListeners + harness.stats().popListeners, 0);
   healthy = true;
@@ -246,21 +246,22 @@ test("Claude rejects invalid UTF-8 before it can silently change captured text o
   assert.equal(streamed.response.body.locked, false);
 });
 
-test("Claude accepts exactly six million raw bytes and preserves split BOM, Unicode and source whitespace", async () => {
+test("Claude accepts exactly 32 million raw bytes with a large unused branch and preserves split BOM, Unicode and source whitespace", async () => {
   const data = fixture();
   const text = "  café🙂\r\n\uFEFF  original text  ";
   data.chat_messages[0].content = [{ type: "text", text }];
+  data.chat_messages[1].text = "UNUSED_BRANCH_SENTINEL" + "x".repeat(13000000);
   const prefix = Buffer.from("\uFEFF" + JSON.stringify(data).slice(0, -1) + ',"ignored":"');
-  // Fill the final body once instead of allocating and copying 6 MB of padding.
-  const bytes = Buffer.alloc(12000000, 32);
+  // Fill the final body once instead of copying another complete 32 MB buffer.
+  const bytes = Buffer.alloc(32000000, 32);
   prefix.copy(bytes);
   bytes.write('"}', bytes.length - 2);
   const split = bytes.indexOf(Buffer.from("🙂")) + 1;
-  const streamed = streamedResponse([bytes.subarray(0, 1), bytes.subarray(1, 2), bytes.subarray(2, split), bytes.subarray(split, split + 1), bytes.subarray(split + 1)], { "content-length": "12000000" });
+  const streamed = streamedResponse([bytes.subarray(0, 1), bytes.subarray(1, 2), bytes.subarray(2, split), bytes.subarray(split, split + 1), bytes.subarray(split + 1)], { "content-length": "32000000" });
   const harness = setup(data, { resources: [endpoint], fetchImpl: async () => streamed.response });
   assert.equal((await harness.window.__capCaptureClaudeJson()).text,
     `Claude conversation:\n\nUser: ${text}\n\nAssistant: Private reasoning\n\nSelected answer`);
-  assert.equal(streamed.stats.bytes, 12000000);
+  assert.equal(streamed.stats.bytes, 32000000);
   assert.equal(streamed.stats.cancelled, 0);
   assert.equal(streamed.response.body.locked, false);
 });
@@ -657,7 +658,7 @@ clockTest("Claude isolated bridge awaits MAIN reinstallation before requesting c
     let legacy = stale === "legacy";
     harness = setup(fixture(), { resources: [endpoint], beforeMessage: payload => {
       // Open tabs can answer probes from the previous hook until it is replaced.
-      if (legacy && payload.type === "pong") payload.version = 6;
+      if (legacy && payload.type === "pong") payload.version = 14;
     }, runtime: { sendMessage: async message => {
       assert.equal(message.type, "ENSURE_CLAUDE_JSON_HOOK");
       ensures++; legacy = false; harness.window.__capClaudeFetchState.dispose();

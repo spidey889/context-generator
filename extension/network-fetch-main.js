@@ -3,7 +3,9 @@
   if (!platform || !globalThis.__capNetworkJsonData) return;
   // Advance readiness version with adapter/contract changes: old MAIN closures
   // can survive extension reloads and must be replaced before a new capture.
-  const version = platform === "deepseek" ? 24 : platform === "grok" ? 19 : 16, channel = "cap-context-network-json-v1";
+  const version = platform === "deepseek" ? 25 : platform === "grok" ? 20 : 17, channel = "cap-context-network-json-v1";
+  // Bound the whole download, including unused branches, separately from text.
+  const maxCaptureBytes = 32000000;
   // Shared across unique text files; the final transcript has its own limits.
   const maxUploadBytes = 4100000;
   const previous = window.__capNetworkFetchState;
@@ -118,7 +120,7 @@
     const reply = { channel, type: "response", platform, chat, selected, id: request.id };
     if (active) { window.postMessage({ ...reply, error: "Another fast capture is running. Try again after it finishes.", captureFailureReason: "unavailable", captureDetail: "busy", captureRequestStage: "history" }, location.origin); return; }
     const controller = new AbortController();
-    const metrics = globalThis.CapJsonCaptureMetrics.create({ adapter_version: version, deadline_ms: 25000, raw_limit_bytes: 12000000, raw_bytes: 0, requests: 0 });
+    const metrics = globalThis.CapJsonCaptureMetrics.create({ adapter_version: version, deadline_ms: 25000, raw_limit_bytes: maxCaptureBytes, raw_bytes: 0, requests: 0 });
     const measureOnly = request.measureOnly === true;
     // The independent DOM size check reports numbers only. Its best-effort
     // strings must never pass through ordinary capture's acceptance path.
@@ -149,7 +151,7 @@
       let response, reader, size = 0, phase = "fetch";
       const began = Date.now();
       const stage = type === "file" ? "attachment_body" : "history";
-      const remaining = 12000000 - bytesRead;
+      const remaining = maxCaptureBytes - bytesRead;
       const observation = metrics.response(stage, remaining);
       // Capture only what the browser actually exposed. A rejected fetch may
       // hide CORS/redirect/DNS causes; never infer them or copy exception prose.
@@ -189,8 +191,8 @@
         const header = response.headers.get("content-length");
         metrics.set({ http_status: response.status });
         observation.header(header);
-        if (Number(header) > 12000000 - bytesRead) {
-          failRead("raw_header_limit", null, "content_length", Number(header), 12000000 - bytesRead);
+        if (Number(header) > maxCaptureBytes - bytesRead) {
+          failRead("raw_header_limit", null, "content_length", Number(header), maxCaptureBytes - bytesRead);
           throw new api.CaptureError("size");
         }
         // Enforce the shared budget while reading, including history without
@@ -213,8 +215,8 @@
             failRead("attachment_length_mismatch", null, "reader_bytes", size, expectedSize);
             throw new api.CaptureError("A text attachment is incomplete.", "incomplete", "attachment_failed");
           }
-          if (bytesRead > 12000000) {
-            failRead("raw_total_stream_limit", null, "reader_bytes", bytesRead, 12000000);
+          if (bytesRead > maxCaptureBytes) {
+            failRead("raw_total_stream_limit", null, "reader_bytes", bytesRead, maxCaptureBytes);
             throw new api.CaptureError("size");
           }
           phase = "decode";

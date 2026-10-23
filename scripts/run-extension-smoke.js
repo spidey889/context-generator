@@ -644,6 +644,10 @@ function networkSmokeFixture(platform) {
     fixture.pages[2].turns[0][2][0][4] = [["CONTEXT_METADATA_SENTINEL"], null];
   }
   if (platform !== "deepseek") return fixture;
+  // The full download may exceed 12 MB while the selected chat stays small.
+  // Append only after updating the selected reply in the snapshot scenario.
+  fixture.data.data.biz_data.chat_messages.push({ message_id: 9999, parent_id: 1, role: "ASSISTANT",
+    fragments: [{ type: "RESPONSE", content: "UNUSED_BRANCH_SENTINEL" + "x".repeat(13000000) }] });
   if (DEEPSEEK_TRANSCRIPT_OVERSIZE_SMOKE) {
     // Match the real incident: a valid ~1 MB text file passes download limits,
     // then exceeds the 1,000,000-character transcript cap. DOM omits this file.
@@ -795,7 +799,7 @@ async function startFixtureServer() {
         assert.equal(request.headers.authorization, "Bearer AUTH_SENTINEL"); assert.equal(request.headers["x-device-id"], undefined);
         const data = structuredClone(network.data);
         if (DEEPSEEK_OVERSIZE_SMOKE) {
-          streamOversizedFixtureResponse(response, JSON.stringify(data), state.oversizeHistory);
+          streamOversizedFixtureResponse(response, JSON.stringify(data), state.oversizeHistory, 40);
           return;
         }
         if (NETWORK_FAILURE) { data.data.biz_data.cache_control = "MERGE"; data.data.biz_data.chat_messages = []; }
@@ -938,7 +942,7 @@ async function startFixtureServer() {
       // The initial page-owned routing request stays small and unread. Only the
       // extension's fresh strong-consistency read receives the oversized tail.
       if (CLAUDE_OVERSIZE_SMOKE && url.searchParams.get("consistency") === "strong") {
-        streamOversizedFixtureResponse(response, history, state.oversizeHistory);
+        streamOversizedFixtureResponse(response, history, state.oversizeHistory, 40);
       } else response.end(history);
       return;
     }
@@ -2924,7 +2928,7 @@ async function run() {
       }
       if (DEEPSEEK_OVERSIZE_SMOKE || CLAUDE_OVERSIZE_SMOKE) {
         await waitFor(() => state.oversizeHistory.cancelled, "oversized history reader cancellation");
-        assert.ok(state.oversizeHistory.bytes < 20000000, "The full oversized tail must not be downloaded.");
+        assert.ok(state.oversizeHistory.bytes < 40000000, "The full oversized tail must not be downloaded.");
         assert.equal(state.pasteContentRequests, 0, "Rejected history must not begin file downloads.");
       }
       if (ERROR_SCREENSHOT_PATH) {
@@ -3131,6 +3135,10 @@ async function run() {
       if (!JSON_FALLBACK_SMOKE) {
         assert.ok(attempts.at(-1).transcript_chars > 0);
         assert.ok(attempts.at(-1).transcript_bytes > 0);
+        if (JSON_SOURCE === "deepseek") {
+          assert.equal(attempts.at(-1).raw_limit_bytes, 32000000);
+          assert.ok(attempts.at(-1).raw_bytes > 12000000, "The unused branch must exercise the larger native download allowance.");
+        }
       } else assert.ok(attempts.at(-1).failure_check);
       assert.doesNotMatch(JSON.stringify(attempts), /SENTINEL|Bearer|Original source|https:/);
     }

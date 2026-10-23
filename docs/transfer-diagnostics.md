@@ -165,7 +165,7 @@ The size labels distinguish `raw_header_limit`, `raw_total_stream_limit`,
 `raw_response_stream_limit`, `raw_remaining_files_limit`, `supported_files_limit`,
 `transcript_char_limit` and `transcript_byte_limit`. ChatGPT keeps its existing
 32,000,000-byte aggregate/history allowance and 6,000,000-byte auxiliary-response
-allowance; the other four adapters allow 12,000,000 bytes. These transport budgets
+allowance; the other four adapters also allow 32,000,000 bytes. These transport budgets
 are separate from the final transcript, supported-file and summary-request limits.
 The new labels do not change ChatGPT's existing incomplete classification for
 raw-history/file-body excess. Unsupported PDF/image bodies are not fetched by

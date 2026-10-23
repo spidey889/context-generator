@@ -446,7 +446,7 @@ test("JSON attempt observations survive source-to-destination handoff and one re
   for (const source of platforms) for (const destination of platforms.filter(value => value !== source)) {
     const { context, calls } = harness(source, { mode: "success" });
     const read = context.window[captureKeyFor(source)];
-    context.window[captureKeyFor(source)] = async () => ({ ...await read(), jsonCapture: { outcome: "succeeded", mode: "fresh", raw_bytes: 1234, raw_limit_bytes: source === "chatgpt" ? 32000000 : 12000000 } });
+    context.window[captureKeyFor(source)] = async () => ({ ...await read(), jsonCapture: { outcome: "succeeded", mode: "fresh", raw_bytes: 1234, raw_limit_bytes: 32000000 } });
     await context.start(destination);
     assert.equal(calls.flows[0].trace.diagnostics.json_attempts[0].raw_bytes, 1234);
     assert.equal(calls.flows[0].trace.diagnostics.json_attempts[0].outcome, "succeeded");
@@ -478,7 +478,7 @@ test("size failures stop all five platforms without partial DOM transfer, includ
     const transcriptLimit = platform === "deepseek";
     error.jsonCapture = { outcome: "failed", mode: "fresh",
       failure_check: transcriptLimit ? "transcript_char_limit" : "raw_total_stream_limit",
-      failure_value: transcriptLimit ? 1003622 : 12000001, failure_limit: transcriptLimit ? 1000000 : 12000000 };
+      failure_value: transcriptLimit ? 1003622 : 32000001, failure_limit: transcriptLimit ? 1000000 : 32000000 };
     const { context, calls } = harness(platform);
     context.isSourceReplyInProgress = () => ["grok", "chatgpt"].includes(platform);
     context.window[captureKeyFor(platform)] = async () => { calls.json++; throw error; };
@@ -491,8 +491,8 @@ test("size failures stop all five platforms without partial DOM transfer, includ
     assert.equal(calls.prepare + calls.dom + calls.notice + calls.flows.length, 0, "Never substitute the smaller visible history for rejected full content.");
     assert.equal(calls.destination, 1);
     assert.equal(calls.errors.length, 1);
-    assert.match(calls.errors[0], transcriptLimit ? /too large.*limit is 1,000,000 characters/ : /too large.*limit is 12,000,000 bytes/);
-    assert.doesNotMatch(calls.errors[0], /1,003,622|6,000,001/);
+    assert.match(calls.errors[0], transcriptLimit ? /too large.*limit is 1,000,000 characters/ : /too large.*limit is 32,000,000 bytes/);
+    assert.doesNotMatch(calls.errors[0], /1,003,622|32,000,001/);
     assert.equal(context.isRunning, false);
     const diagnostics = calls.finished[0].diagnostics;
     assert.equal(diagnostics.error_code, "conversation_too_large");
