@@ -19,6 +19,7 @@ function loadTelemetryBackground(fetchImpl, initialStorage = {}, manifestVersion
   let uuidSequence = 1;
   const createEvent = (name) => ({ addListener(listener) { listeners[name] = listener; } });
   const sandbox = {
+    TextEncoder,
     AbortController,
     URL,
     clearTimeout,
@@ -327,7 +328,7 @@ test("JSON observations are accepted or rejected identically by extension, relay
       failure_file_index: 1, failure_file_bytes: 100, failure_read_bytes: 0, failure_request_ms: 1200,
       failure_abort: "none", failure_online: "online", failure_content_type: "missing" }], true],
     [[{ ...entry, failure_error_type: "PRIVATE message" }], false], [[{ ...entry, failure_http_status: 0 }], false],
-    [[{ ...entry, failure_file_index: 0 }], false], [[{ ...entry, failure_file_bytes: 2100001 }], false]]) {
+    [[{ ...entry, failure_file_index: 0 }], false], [[{ ...entry, failure_file_bytes: 4100001 }], false]]) {
     const diagnostics = { version: 1, diagnostics_revision: 3, json_attempts: attempts };
     const payload = makeTelemetryPayload({ diagnostics });
     assert.equal(!!contract.validate(diagnostics), accepted);

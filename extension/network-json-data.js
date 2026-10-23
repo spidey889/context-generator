@@ -22,7 +22,7 @@
     if (!turns.length) fail("No usable user or assistant text was found.", undefined, "missing_text");
     const text = `${name} conversation:\n\n${turns.map(turn => `${turn.role === "user" ? "User" : "Assistant"}: ${turn.text}`).join("\n\n")}`;
     metrics?.set({ selected_turns: turns.length });
-    if (metrics ? !metrics.transcript(text) : text.length > 500000 || new TextEncoder().encode(text).length > 2000000) fail("size");
+    if (metrics ? !metrics.transcript(text) : text.length > 1000000 || new TextEncoder().encode(text).length > 4000000) fail("size");
     return { text, messages: turns, messageTurnCount: turns.length, excludedContentTypes: [...excludedContentTypes].sort() };
   };
   const turn = (role, parts) => parts.filter(text => typeof text === "string" && text.trim()).length

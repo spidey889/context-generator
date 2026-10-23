@@ -3,9 +3,9 @@
   if (!platform || !globalThis.__capNetworkJsonData) return;
   // Advance readiness version with adapter/contract changes: old MAIN closures
   // can survive extension reloads and must be replaced before a new capture.
-  const version = platform === "deepseek" ? 20 : platform === "grok" ? 16 : 13, channel = "cap-context-network-json-v1";
+  const version = platform === "deepseek" ? 21 : platform === "grok" ? 17 : 14, channel = "cap-context-network-json-v1";
   // Shared across unique text files; the final transcript has its own limits.
-  const maxUploadBytes = 2100000;
+  const maxUploadBytes = 4100000;
   const previous = window.__capNetworkFetchState;
   if (previous?.version === version && window.fetch === previous.fetch
     && (platform === "grok" || previous?.ownsObservation?.())) return;
@@ -114,7 +114,7 @@
     const reply = { channel, type: "response", platform, chat, selected, id: request.id };
     if (active) { window.postMessage({ ...reply, error: "Another fast capture is running. Try again after it finishes.", captureFailureReason: "unavailable", captureDetail: "busy", captureRequestStage: "history" }, location.origin); return; }
     const controller = new AbortController();
-    const metrics = globalThis.CapJsonCaptureMetrics.create({ adapter_version: version, deadline_ms: 25000, raw_limit_bytes: 6000000, raw_bytes: 0, requests: 0 });
+    const metrics = globalThis.CapJsonCaptureMetrics.create({ adapter_version: version, deadline_ms: 25000, raw_limit_bytes: 12000000, raw_bytes: 0, requests: 0 });
     active = controller;
     const timer = setTimeout(() => controller.abort("capture_timeout"), 25000);
     const check = () => {
@@ -137,7 +137,7 @@
       let response, reader, size = 0, phase = "fetch";
       const began = Date.now();
       const stage = type === "file" ? "attachment_body" : "history";
-      const remaining = 6000000 - bytesRead;
+      const remaining = 12000000 - bytesRead;
       const observation = metrics.response(stage, remaining);
       // Capture only what the browser actually exposed. A rejected fetch may
       // hide CORS/redirect/DNS causes; never infer them or copy exception prose.
@@ -170,8 +170,8 @@
         const header = response.headers.get("content-length");
         metrics.set({ http_status: response.status });
         observation.header(header);
-        if (Number(header) > 6000000 - bytesRead) {
-          failRead("raw_header_limit", null, "content_length", Number(header), 6000000 - bytesRead);
+        if (Number(header) > 12000000 - bytesRead) {
+          failRead("raw_header_limit", null, "content_length", Number(header), 12000000 - bytesRead);
           throw new api.CaptureError("size");
         }
         // Enforce the shared budget while reading, including history without
@@ -194,8 +194,8 @@
             failRead("attachment_length_mismatch", null, "reader_bytes", size, expectedSize);
             throw new api.CaptureError("A text attachment is incomplete.", "incomplete", "attachment_failed");
           }
-          if (bytesRead > 6000000) {
-            failRead("raw_total_stream_limit", null, "reader_bytes", bytesRead, 6000000);
+          if (bytesRead > 12000000) {
+            failRead("raw_total_stream_limit", null, "reader_bytes", bytesRead, 12000000);
             throw new api.CaptureError("size");
           }
           phase = "decode";
@@ -306,7 +306,7 @@
             uploadBytes += file.file_size;
             metrics.add("files_supported"); metrics.set({ files_declared_bytes: uploadBytes });
             if (uploadBytes > maxUploadBytes) { metrics.fail("supported_files_limit", "attachment_descriptor", "declared_files", uploadBytes, maxUploadBytes); throw Object.assign(
-              new api.CaptureError("Text attachments exceed the combined 2.1 MB capture limit.", "size_limit", "attachment_size_limit"),
+              new api.CaptureError("Text attachments exceed the combined 4.1 MB capture limit.", "size_limit", "attachment_size_limit"),
               { captureRequestStage: "attachment_descriptor" }); }
             uploads.set(file.id, { file, url });
           }

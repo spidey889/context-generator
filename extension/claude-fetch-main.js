@@ -1,8 +1,8 @@
 (() => {
-  const version = 12;
+  const version = 13;
   // HTTP media types ignore casing; parameters do not change the base type.
   const responseMediaType = response => response.headers.get("content-type")?.split(";", 1)[0].trim().toLowerCase();
-  const maxHistoryBytes = 6000000;
+  const maxHistoryBytes = 12000000;
   const previous = window.__capClaudeFetchState;
   if (previous?.version === version && window.fetch === previous.fetch) return;
   previous?.dispose();

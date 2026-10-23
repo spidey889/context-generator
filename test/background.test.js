@@ -21,6 +21,7 @@ function loadBackgroundForSummaryTest(fetchImpl, { tabs = [], injections = [], i
   const sandbox = {
     AbortController,
     TextDecoder,
+    TextEncoder,
     Date: clock,
     URL,
     clearTimeout,
@@ -263,6 +264,24 @@ function loadBackgroundForTransferTest({
     }
   };
 }
+
+test("summary worker rejects oversized JSON before fetch and admits a full Unicode million-character chat", async () => {
+  let calls = 0;
+  const send = loadBackgroundForSummaryTest(async (_url, request) => {
+    calls++;
+    const { conversation } = JSON.parse(request.body);
+    assert.equal(conversation, "漢".repeat(1000000));
+    return new Response(JSON.stringify({ summary: "The full conversation was summarized." }));
+  });
+  const rejected = await send("\u0001".repeat(1000000));
+  assert.equal(rejected.ok, false);
+  assert.equal(rejected.code, "request_too_large");
+  assert.equal(calls, 0);
+  assert.match(rejected.error, /4\.4 MB/);
+  const accepted = await send("漢".repeat(1000000));
+  assert.equal(accepted.ok, true);
+  assert.equal(calls, 1);
+});
 
 test("toolbar opens the picker on supported tabs without starting a transfer or RUN badge", async () => {
   for (const url of ["https://chatgpt.com/c/source", "https://claude.ai/chat/source", "https://gemini.google.com/app/source", "https://grok.com/c/source", "https://chat.deepseek.com/a/chat/s/source"]) {

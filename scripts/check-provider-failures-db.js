@@ -8,7 +8,10 @@ async function checkProviderFailures(db, sql, migrations) {
   const rows = async (query, args = []) => (await db.query(query, args)).rows;
   const before = await rows("select (select jsonb_agg(t) from public.transfers t) as transfers,(select jsonb_agg(u) from public.users u) as users");
   await db.exec(sql);
-  equal(JSON.parse(sql.match(/rules constant jsonb := '([^']+)'::jsonb/)[1]), contract.schema);
+  // This replay boundary predates the million-character admission migration.
+  const historicalSchema = structuredClone(contract.schema);
+  historicalSchema.input_chars.max = 350000;
+  equal(JSON.parse(sql.match(/rules constant jsonb := '([^']+)'::jsonb/)[1]), historicalSchema);
   equal((await rows("select relrowsecurity from pg_class where oid='public.provider_failures'::regclass"))[0].relrowsecurity, true);
   for (const role of ["anon", "authenticated"]) {
     equal(await rows(`select has_table_privilege('${role}','public.provider_failures','select') as read,

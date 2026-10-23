@@ -147,6 +147,11 @@ async function main() {
   assert.ok(!fs.existsSync(output), 'Refusing to overwrite an existing capacity report');
   const originalProfile = backend.getSummaryProfile(fixture.conversation);
   const profile = lengthSpec.promptOverride ? { ...originalProfile, targetWords: lengthSpec.targetWords, maxTokens: lengthSpec.maxTokens } : originalProfile;
+  const admission = require('../../api/request-security').validateSummarizeRequest({
+    headers: { 'content-type': 'application/json' }, body: JSON.stringify({ platform, messages: fixture.messages })
+  });
+  assert.equal(admission.ok, true, 'Synthetic fixture must pass the current backend admission checks');
+  assert.equal(admission.conversation, fixture.conversation);
   const report = {
     version: 1, syntheticOnly: true, model,
     sourceCommit: execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).trim(),
@@ -158,12 +163,13 @@ async function main() {
     inputChars: fixture.conversation.length, inputUtf8Bytes: Buffer.byteLength(fixture.conversation),
     inputSha256: hash(fixture.conversation), messageCount: fixture.messages.length, anchors: fixture.anchors,
     profile: profile.id, targetWords: profile.targetWords, advisoryMinWords: profile.minWords,
-    maxOutputTokens: profile.maxTokens, firstAnswerLimitMs: 30000, experimentDeadlineMs: deadlineSeconds * 1000,
+    maxOutputTokens: profile.maxTokens, firstAnswerLimitMs: deadlineSeconds > 90 ? deadlineSeconds * 1000 : 90000, experimentDeadlineMs: deadlineSeconds * 1000,
+    admission: { accepted: admission.ok, requestBytes: admission.requestBytes, inputChars: admission.conversation.length },
     fixtureType: values.fixture, activeEvidenceCases: fixture.cases?.length || 0,
     promptTreatment: values['length-mode'], requestedMinWords: lengthSpec.requestedMinWords,
     experimentalLengthInstruction: lengthSpec.promptOverride,
-    coverage: `${lengthSpec.promptOverride ? 'Process-only length instruction on the current structured prompt' : 'Current structured prompt'}, provider body, retry logic, SSE parser, validation and normalization. Local provider pipeline; no deployed HTTP endpoint, capture, paste, or real telemetry writes. Existing 350k summary and 500k capture admission are bypassed by invoking the provider pipeline directly.`,
-    timingNote: deadlineSeconds === 45 ? 'Only the test-key Dots route is configured (its code budget is 90s); an outer 45s deadline bounds each run to the production dual-gateway OpenRouter stage. The unchanged 30s first-answer watchdog is active.' : `Output-length diagnostic allows ${deadlineSeconds}s, not the production dual-gateway 45s stage. Above 90s, only the in-memory provider-attempt constant is overridden. The unchanged 30s first-answer watchdog is active; production files/deadlines are unchanged.`,
+    coverage: `${lengthSpec.promptOverride ? 'Process-only length instruction on the current structured prompt' : 'Current structured prompt'}, backend input validation, provider body, retry logic, SSE parser, validation and normalization. Local provider pipeline; no deployed HTTP endpoint, capture, paste, or real telemetry writes. Only the test-key Dots route is configured.`,
+    timingNote: `The current >350k policy allows one 90s gateway attempt with a 90s first-answer deadline. This experiment adds an outer ${deadlineSeconds}s deadline. Above 90s, only the in-memory provider-attempt constant is overridden. The runner does not edit production files.`,
     productionLimitsChanged: false, results: []
   };
   const save = () => { fs.mkdirSync(path.dirname(output), { recursive: true }); fs.writeFileSync(output, JSON.stringify(report, null, 2) + '\n'); };

@@ -1,4 +1,8 @@
 const PROVIDER_MAX_ATTEMPTS = 2;
+// Preserve all established profiles/routing through this boundary. Larger
+// inputs use only the two free gateways, once each, with independent budgets.
+const LARGE_CONVERSATION_THRESHOLD = 350000;
+const LARGE_CONVERSATION_MAX_TOKENS = 10000;
 const transferDiagnostics = require("../extension/transfer-diagnostics");
 const { reserveFundedSummaryBudget } = require("./funded-summary-budget");
 const { getHeader } = require("./request-validation");
@@ -500,7 +504,7 @@ function getEnabledOpenRouterModels() {
     : process.env[enabledEnv] === "true").map(({ model }) => model);
 }
 
-function getConfiguredSummaryRoutes({ geminiApiKey, mistralApiKey, openrouterApiKey, tokenharborApiKey, tokenharborBackupApiKey, tokenharborEnabled = TOKENHARBOR_ENABLED }) {
+function getConfiguredSummaryRoutes({ geminiApiKey, mistralApiKey, openrouterApiKey, tokenharborApiKey, tokenharborBackupApiKey, tokenharborEnabled = TOKENHARBOR_ENABLED, largeInput = false }) {
   const routes = [];
   if (openrouterApiKey) {
     for (const model of getEnabledOpenRouterModels()) {
@@ -524,13 +528,20 @@ function getConfiguredSummaryRoutes({ geminiApiKey, mistralApiKey, openrouterApi
   if (mistralApiKey && process.env.MISTRAL_ENABLED !== "false") {
     routes.push({ provider: SUMMARY_PROVIDERS.mistral, model: MISTRAL_PRIMARY_MODEL, apiKey: mistralApiKey });
   }
+  if (largeInput) {
+    // A second TokenHarbor key is an alternative when the main key is absent,
+    // not a third attempt. Opt-in OpenRouter models retain their normal path only.
+    return [routes.find(route => route.provider.id === "openrouter" && route.model === OPENROUTER_MODELS[0].model),
+      routes.find(route => route.provider.id === "tokenharbor")].filter(Boolean);
+  }
   return routes;
 }
 
 async function createSummaryWithFallback({ conversation, messages, platform, profile, geminiApiKey, mistralApiKey, openrouterApiKey, tokenharborApiKey, tokenharborBackupApiKey, tokenharborEnabled = TOKENHARBOR_ENABLED, requestContext = {} }) {
+  const largeInput = conversation.length > LARGE_CONVERSATION_THRESHOLD;
   const fallbackMessages = getInitialSummaryMessages(conversation, profile, { messages, platform });
   const geminiMessages = getInitialSummaryMessages(conversation, profile, { messages, platform, plainHeader: true });
-  const routes = getConfiguredSummaryRoutes({ geminiApiKey, mistralApiKey, openrouterApiKey, tokenharborApiKey, tokenharborBackupApiKey, tokenharborEnabled });
+  const routes = getConfiguredSummaryRoutes({ geminiApiKey, mistralApiKey, openrouterApiKey, tokenharborApiKey, tokenharborBackupApiKey, tokenharborEnabled, largeInput });
 
   const modelsTried = [];
   const tokenharborModelsTried = [];
@@ -539,8 +550,8 @@ async function createSummaryWithFallback({ conversation, messages, platform, pro
   const timings = { tokenharborMs: 0, openrouterMs: 0, geminiMs: 0, mistralMs: 0 };
   const unavailableProviders = new Set();
   const chainStartedAt = Date.now();
-  const deadline = chainStartedAt + REMOTE_CHAIN_BUDGET_MS;
-  const sharedFreeWindow = routes.some(route => route.provider.id === "tokenharbor");
+  const deadline = chainStartedAt + (largeInput ? 2 * PROVIDER_ATTEMPT_TIMEOUT_MS : REMOTE_CHAIN_BUDGET_MS);
+  const sharedFreeWindow = !largeInput && routes.some(route => route.provider.id === "tokenharbor");
   const bothGatewaysConfigured = sharedFreeWindow && routes.some(route => route.provider.id === "openrouter");
   const freeRouteCount = routes.filter(route => ["tokenharbor", "openrouter"].includes(route.provider.id)).length;
   const freeDeadline = sharedFreeWindow ? chainStartedAt + PROVIDER_ATTEMPT_TIMEOUT_MS : null;
@@ -548,7 +559,7 @@ async function createSummaryWithFallback({ conversation, messages, platform, pro
   // TokenHarbor's clock starts only when that stage is reached. Both keys and
   // retries share it; an early OpenRouter failure cannot enlarge either stage.
   let tokenharborDeadline = null;
-  // TokenHarbor and OpenRouter occupy ONE original 90s slot. Never count
+  // Through 350k, TokenHarbor and OpenRouter occupy ONE original 90s slot. Never count
   // TokenHarbor as another funded fallback or renew this window on retries.
   // With the code switch off/missing key, retain the original route budgets.
   const fallbackCount = sharedFreeWindow ? routes.length - freeRouteCount : routes.length - 1;
@@ -589,6 +600,7 @@ async function createSummaryWithFallback({ conversation, messages, platform, pro
         provider, apiKey, profile, model, requestBudgetMs,
         initialMessages: provider.id === "gemini" ? geminiMessages : fallbackMessages,
         requestContext: { ...requestContext, inputChars: conversation.length, routeIndex: index + 1,
+          ...(largeInput ? { maxAttempts: 1, firstAnswerTimeoutMs: PROVIDER_ATTEMPT_TIMEOUT_MS } : {}),
           ...(provider.id === "tokenharbor" ? { keySlot: typeof tokenharborBackupApiKey === "string"
             && apiKey === tokenharborBackupApiKey.trim() && apiKey !== tokenharborApiKey?.trim() ? "backup" : "primary" } : {}) }
       });
@@ -804,6 +816,8 @@ function requestProviderSummary(provider, apiKey, messages, profile, model, opti
     keySlot: options.keySlot,
     requestBytes: Buffer.byteLength(serializedBody, "utf8"),
     maxOutputTokens: body.max_tokens ?? body.generationConfig.maxOutputTokens,
+    maxAttempts: options.maxAttempts,
+    firstAnswerTimeoutMs: options.firstAnswerTimeoutMs,
     // Both gateways are pinned to explicit never-billed free IDs. Gemini and
     // Mistral keep their existing funded reservation, including on retries.
     reserveFunded: ["openrouter", "tokenharbor"].includes(provider.id) || !options.reserveFunded ? null : () => options.reserveFunded(units)
@@ -1068,7 +1082,10 @@ function normalizeTokenCount(value) {
 
 function getSummaryProfile(conversation) {
   const inputChars = String(conversation || "").length;
-  return SUMMARY_PROFILES.find((profile) => inputChars <= profile.maxInputChars) || SUMMARY_PROFILES[SUMMARY_PROFILES.length - 1];
+  const profile = SUMMARY_PROFILES.find((profile) => inputChars <= profile.maxInputChars) || SUMMARY_PROFILES[SUMMARY_PROFILES.length - 1];
+  // Keep the same prompt and soft word target; add headroom without forcing
+  // the model to continue or altering the <=350k output allowance.
+  return inputChars > LARGE_CONVERSATION_THRESHOLD ? { ...profile, maxTokens: LARGE_CONVERSATION_MAX_TOKENS } : profile;
 }
 
 function buildDirectContextCarrySummary(conversation) {
@@ -1102,8 +1119,9 @@ async function fetchWithRetry(url, options, requestBudgetMs, context = {}) {
   let lastError = null;
   let lastResponse = null;
   const deadline = Date.now() + requestBudgetMs;
+  const maxAttempts = context.maxAttempts ?? PROVIDER_MAX_ATTEMPTS;
 
-  for (let attempt = 1; attempt <= PROVIDER_MAX_ATTEMPTS; attempt += 1) {
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
     context.signal?.throwIfAborted();
     if (Date.now() >= deadline) break;
     if (context.reserveFunded && !await context.reserveFunded()) {
@@ -1121,10 +1139,11 @@ async function fetchWithRetry(url, options, requestBudgetMs, context = {}) {
     const timeout = setTimeout(() => controller.abort(), Math.max(0, attemptDeadline - Date.now()));
     // Headers/heartbeats are not generated answers. Only real answer text
     // disarms this watchdog; the full completion deadline stays in force.
-    // DeepSeek thinking stays on, bounded by the original 45s shared slice.
-    const firstAnswerBudgetMs = context.provider === "tokenharbor" && context.model === "deepseek-v4.1-flash:free"
+    // DeepSeek thinking stays on. The larger-chat policy explicitly overrides
+    // the normal 30s/45s first-answer limits with its full 90s attempt budget.
+    const firstAnswerBudgetMs = context.firstAnswerTimeoutMs ?? (context.provider === "tokenharbor" && context.model === "deepseek-v4.1-flash:free"
       ? TOKENHARBOR_SHARED_SLICE_MS
-      : PROVIDER_FIRST_ANSWER_TIMEOUT_MS;
+      : PROVIDER_FIRST_ANSWER_TIMEOUT_MS);
     const firstAnswerDeadline = context.onDelta ? Math.min(attemptDeadline, Date.now() + firstAnswerBudgetMs) : null;
     let answerStarted = false;
     const observed = { provider: context.provider, model: context.model,
@@ -1245,7 +1264,7 @@ async function fetchWithRetry(url, options, requestBudgetMs, context = {}) {
       if (!response.ok) recordFailure("provider_http_error");
       else if (payload?.error || payload?.choices?.[0]?.error
         || ["error", "content_filter"].includes(payload?.choices?.[0]?.finish_reason)) recordFailure("provider_generation_failed");
-      if (!retryableStatus || attempt === PROVIDER_MAX_ATTEMPTS) {
+      if (!retryableStatus || attempt === maxAttempts) {
         return lastResponse;
       }
     } catch (error) {
@@ -1253,7 +1272,7 @@ async function fetchWithRetry(url, options, requestBudgetMs, context = {}) {
       recordFailure(timedOut ? "provider_timeout" : "provider_request_failed");
       checkAttemptDeadline();
       lastError = error;
-      if (!isRetryableProviderNetworkError(error) || attempt === PROVIDER_MAX_ATTEMPTS) throw error;
+      if (!isRetryableProviderNetworkError(error) || attempt === maxAttempts) throw error;
     } finally {
       clearTimeout(timeout);
       clearTimeout(firstAnswerTimeout);

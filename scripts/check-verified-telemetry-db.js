@@ -409,6 +409,8 @@ async function main() {
         checks += await require("./check-provider-diagnostics-db.js").checkProviderDiagnostics(db, sql, appliedMigrations);
       } else if (name.endsWith("_deepseek_file_diagnostics.sql")) {
         checks += await require("./check-json-capture-diagnostics-db.js").checkFileDiagnostics(db, sql);
+      } else if (name.endsWith("_raise_million_character_limits.sql")) {
+        checks += await require("./check-million-character-limits-db.js").checkMillionCharacterLimits(db, sql);
       } else await db.exec(sql);
     }
     checks += await require("./check-served-model-db.js").checkStoreModelReceipts(db);

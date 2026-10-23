@@ -81,7 +81,7 @@
     http_status: { type: "number", min: 100, max: 599 },
     failure_http_status: { type: "number", min: 100, max: 599 },
     failure_file_index: { type: "number", min: 1, max: 2147483647 },
-    failure_file_bytes: { type: "number", max: 2100000 }
+    failure_file_bytes: { type: "number", max: 4100000 }
   };
   const booleans = ["online", "source_saved", "speed_enabled", "json_attempted", "source_changed", "cancelled",
     "destination_prepared", "prepared_reused", "prepared_rejected", "fresh_recovery", "script_injected",

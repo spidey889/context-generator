@@ -71,7 +71,10 @@ async function checkFileDiagnostics(db, sql) {
   await db.exec(sql);
   assert.deepEqual(await snapshot(), before); checks++;
   const definition = (await rows("select pg_get_functiondef('public.is_valid_client_transfer_diagnostics(jsonb,integer)'::regprocedure) sql"))[0].sql;
-  assert.deepEqual(JSON.parse(definition.match(/attempt_rules constant jsonb := '([^']+)'::jsonb/)[1]), contract.jsonAttemptSchema); checks++;
+  // At this historical boundary text files still have the 2.1 MB allowance.
+  const historicalAttemptSchema = structuredClone(contract.jsonAttemptSchema);
+  historicalAttemptSchema.failure_file_bytes.max = 2100000;
+  assert.deepEqual(JSON.parse(definition.match(/attempt_rules constant jsonb := '([^']+)'::jsonb/)[1]), historicalAttemptSchema); checks++;
   const attempt = { outcome: "failed", mode: "prefetch", failure_check: "network_error", failure_stage: "attachment_body",
     failure_phase: "fetch", failure_error_type: "TypeError", failure_response_type: "none", failure_file_index: 2,
     failure_file_bytes: 61218, failure_read_bytes: 0, failure_request_ms: 2000, failure_abort: "none",

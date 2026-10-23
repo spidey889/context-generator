@@ -175,8 +175,8 @@
     if (!turns.length) throw captureError("Claude JSON capture found no usable user or assistant text after skipping tools, files, images, and artifacts. Turn JSON capture off to use DOM capture.", "incomplete");
     const text = `Claude conversation:\n\n${turns.map(turn => `${turn.role === "user" ? "User" : "Assistant"}: ${turn.text}`).join("\n\n")}`;
     metrics?.set({ selected_turns: turns.length });
-    if (metrics ? !metrics.transcript(text) : text.length > 500000 || new TextEncoder().encode(text).length > 2000000) {
-      throw captureError("Conversation exceeds the supported 500,000 character / 2 MB limit.", "size_limit", "size_limit");
+    if (metrics ? !metrics.transcript(text) : text.length > 1000000 || new TextEncoder().encode(text).length > 4000000) {
+      throw captureError("Conversation exceeds the supported 1,000,000 character / 4 MB limit.", "size_limit", "size_limit");
     }
     return { text, messages: turns, messageTurnCount: turns.length, excludedContentTypes: [...excludedContentTypes].sort() };
   }
@@ -197,7 +197,7 @@
       const receive = event => {
         const reply = event.data;
         if (event.source === window && event.origin === location.origin && reply?.channel === channel
-          && reply.type === "pong" && reply.id === id && reply.version === 12) finish(true);
+          && reply.type === "pong" && reply.id === id && reply.version === 13) finish(true);
       };
       const ping = () => {
         if (settled) return;

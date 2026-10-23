@@ -18,7 +18,7 @@
       "provider_generation_failed", "provider_empty", "provider_output_rejected"]),
     phase: enumeration(["waiting_headers", "reading_body", "waiting_answer", "answer_stream", "parsing_response", "validating_output", "http_error"]),
     timeout_kind: enumeration(["first_answer", "completion"]), key_slot: enumeration(["primary", "backup"]),
-    route_index: integer(1, 16), request_attempt: integer(1, 2), input_chars: integer(0, 350000),
+    route_index: integer(1, 16), request_attempt: integer(1, 2), input_chars: integer(0, 1000000),
     request_bytes: integer(0, 10000000), max_output_tokens: integer(1, 1000000),
     elapsed_ms: integer(0, 360000), budget_ms: integer(1, 90000), first_answer_budget_ms: integer(1, 90000), headers_ms: integer(0, 360000),
     first_answer_ms: integer(0, 360000), answer_chars: integer(), reasoning_chars: integer(), stream_chunks: integer(),
