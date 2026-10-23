@@ -665,6 +665,8 @@ Owner-authorized live comparisons use `scripts/compare-summary-with-test-key.ps1
 
 The manual `export-ranking.cjs` and `render-ranking-dark.py` scripts in that directory reproduce a dated minimal rank-versus-time PNG from archived comparison data, without provider calls. Space Bunny 2 is the display name for the archived Ling 3.1 Flash results; its provider ID remains explicit in the export. The historical qualitative model order and exported newer v1 handoff percentages remain separate cohorts; the export retains unavailable attempts and records source hashes. Historical ranks are not current v1 accuracy scores.
 
+The opt-in [Dots 500k experiment](evaluation/capacity/README.md) generates a deterministic 500,000-character structured chat and invokes the current local provider pipeline with a dedicated testing key. It retains full outputs, streaming timings, hashes and source review. This deliberately bypasses the unchanged 350k extension/HTTP admission and does not test capture, paste, hosted deployment or telemetry persistence; capacity results are not end-to-end production evidence. It is never invoked by CI or normal tests.
+
 | Change | Focused check | Additional evidence when relevant |
 | --- | --- | --- |
 | DOM capture, pasted cards, placement, picker/handoff, paste | `node --test --test-skip-pattern="^slow/release:" test/platform-content.test.js` | `npm run test:slow` for capture changes; installed Brave smoke for meaningful extension/UI changes |
