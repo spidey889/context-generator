@@ -52,11 +52,11 @@
       try { return fn(); } finally { add(key, clock() - began); }
     };
     const transcript = text => {
-      set({ transcript_chars: text.length, transcript_char_limit: 500000, transcript_byte_limit: 2000000 });
-      if (text.length > 500000) { fail("transcript_char_limit", "serialize", "string_length", text.length, 500000); return false; }
+      set({ transcript_chars: text.length, transcript_char_limit: 1000000, transcript_byte_limit: 4000000 });
+      if (text.length > 1000000) { fail("transcript_char_limit", "serialize", "string_length", text.length, 1000000); return false; }
       const bytes = new TextEncoder().encode(text).length;
       set({ transcript_bytes: bytes });
-      if (bytes > 2000000) { fail("transcript_byte_limit", "serialize", "utf8_bytes", bytes, 2000000); return false; }
+      if (bytes > 4000000) { fail("transcript_byte_limit", "serialize", "utf8_bytes", bytes, 4000000); return false; }
       return true;
     };
     const ignored = (type, image = false) => {

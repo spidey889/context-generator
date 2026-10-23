@@ -62,6 +62,7 @@ function worker(fetchImpl, shared = profile(), now = NOW, version = "1.4.6") {
   const math = Object.create(Math);
   math.random = () => 0.5;
   const sandbox = {
+    TextEncoder,
     AbortController, URL, Date: ClockDate, Math: math, clearTimeout, setTimeout,
     console: { debug() {}, error() {}, log() {}, warn() {} },
     crypto: { randomUUID: () => id(uuidSequence++) },

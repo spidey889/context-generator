@@ -239,10 +239,14 @@
       return parts.length ? [{ role, text: parts.join("\n\n") }] : [];
     });
     if (!turns.length) throw blocked("No usable user or assistant text remains after skipping tools, files, images, and artifacts.", "missing_text");
+    // Reasoning, canvas and Python result blocks belong to one assistant reply.
+    // Keep every payload block intact; only the reported message count groups them.
+    const messageTurnCount = turns.reduce((count, turn, index) => count +
+      (turn.role === "assistant" && turns[index - 1]?.role === "assistant" ? 0 : 1), 0);
     const text = `ChatGPT conversation:\n\n${turns.map(turn => `${turn.role === "user" ? "User" : "Assistant"}: ${turn.text}`).join("\n\n")}`;
-    metrics?.set({ selected_turns: turns.length });
-    if (metrics ? !metrics.transcript(text) : text.length > 500000 || new TextEncoder().encode(text).length > 2000000) throw captureError("This chat is too long to transfer (limit: 500,000 characters). Try a shorter chat.", "size_limit");
-    return { text, messages: turns, messageTurnCount: turns.length, excludedContentTypes: [...excludedContentTypes].sort(),
+    metrics?.set({ selected_turns: messageTurnCount });
+    if (metrics ? !metrics.transcript(text) : text.length > 1000000 || new TextEncoder().encode(text).length > 4000000) throw captureError("This chat is too long to transfer (limit: 1,000,000 characters). Try a shorter chat.", "size_limit");
+    return { text, messages: turns, messageTurnCount, excludedContentTypes: [...excludedContentTypes].sort(),
       ...(captureWarning ? { captureWarning } : {}) };
   }
 
@@ -264,7 +268,7 @@
       const receive = event => {
         const reply = event.data;
         if (event.source === window && event.origin === location.origin && reply?.channel === channel
-          && reply.type === "pong" && reply.id === id && reply.version === 19) finish(true);
+          && reply.type === "pong" && reply.id === id && reply.version === 20) finish(true);
       };
       const ping = () => {
         if (settled) return;
@@ -327,7 +331,7 @@
             if (reply.error) {
               if (reply.error === "size") {
                 const fileLimit = reply.captureDetail === "attachment_size_limit";
-                throw captureError(fileLimit ? "Text attachments exceed the combined 2.1 MB capture limit." : "This chat is too long to transfer (limit: 500,000 characters). Try a shorter chat.",
+                throw captureError(fileLimit ? "Text attachments exceed the combined 4.1 MB capture limit." : "This chat is too long to transfer (limit: 1,000,000 characters). Try a shorter chat.",
                   "size_limit", fileLimit ? "attachment_size_limit" : "size_limit", fileLimit ? "attachment_descriptor" : "history");
               }
               const reasons = { auth: "ChatGPT authentication is unavailable. Refresh this signed-in chat.", partial: "ChatGPT returned incomplete, invalid or oversized JSON.", busy: "Another ChatGPT JSON capture is running. Try again after it finishes.", format: "ChatGPT returned a non-JSON response.", changed: "The ChatGPT conversation changed during capture.", timeout: "The full-tree request timed out.", network: "The full-tree request failed or returned invalid JSON." };

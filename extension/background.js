@@ -1,6 +1,9 @@
 if (!globalThis.CapTransferDiagnostics && typeof importScripts === "function") importScripts("transfer-diagnostics.js");
 const SUMMARY_BACKEND_URL = "https://context-generator-five.vercel.app/api/summarize";
 const SUMMARY_CLIENT_HEADER = "cap-context-extension/1";
+// Keep the serialized body below Vercel's 4.5 MB ceiling. Character count
+// alone cannot bound JSON escaping; never submit a clipped conversation.
+const SUMMARY_MAX_REQUEST_BYTES = 4400000;
 const PLATFORM_CONTENT_SCRIPT = "platform-content.js";
 const SOURCE_MESSAGE_TIMEOUT_MS = 12000;
 const DESTINATION_MESSAGE_TIMEOUT_MS = 30000;
@@ -1230,6 +1233,12 @@ async function fetchSummaryFromBackend(conversationText, transferId = null, dead
       return getPreparedSummaryTelemetry(transferId);
     }), controller.signal);
     checkSummaryDeadline();
+    const requestBody = JSON.stringify({ ...payload, ...(telemetry ? { telemetry } : {}) });
+    if (new TextEncoder().encode(requestBody).byteLength > SUMMARY_MAX_REQUEST_BYTES) {
+      throw Object.assign(new Error("This chat is too large to send for an AI summary. Our request limit is 4.4 MB."), {
+        code: "request_too_large", diagnosticCode: "request_too_large"
+      });
+    }
     const fetchStartedAt = nowMs();
     const response = await fetch(SUMMARY_BACKEND_URL, {
       method: "POST",
@@ -1240,7 +1249,7 @@ async function fetchSummaryFromBackend(conversationText, transferId = null, dead
         "Accept": "application/x-ndjson",
         "X-Cap-Context-Client": SUMMARY_CLIENT_HEADER
       },
-      body: JSON.stringify({ ...payload, ...(telemetry ? { telemetry } : {}) }),
+      body: requestBody,
       signal: controller.signal
     });
     responseReceived = true;

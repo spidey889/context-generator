@@ -1,15 +1,15 @@
 (() => {
-  const version = 19;
+  const version = 20;
   // HTTP media types ignore casing; parameters do not change the base type.
   const responseMediaType = response => response.headers.get("content-type")?.split(";", 1)[0].trim().toLowerCase();
   // Match MIME metadata by base type, keeping the serializer's paste gate aligned.
   const isPlainTextPaste = file => file?.is_big_paste === true && typeof file.mime_type === "string"
     && file.mime_type.split(";", 1)[0].trim().toLowerCase() === "text/plain";
   // ChatGPT's native endpoint returns every branch. This is a transport safety
-  // ceiling, not the selected transcript's 500k-character / 2 MB content limit.
+  // ceiling, not the selected transcript's 1M-character / 4 MB content limit.
   const maxCaptureBytes = 32000000;
   // Shared across unique pasted files; the final transcript has its own limits.
-  const maxPastedBytes = 2100000;
+  const maxPastedBytes = 4100000;
   const channel = "cap-context-chatgpt-json-v2";
   const currentChat = pathname => (pathname ?? location.pathname).match(/\/c\/([^/]+)\/?$/)?.[1];
   const previous = window.__capChatGptFetchState;

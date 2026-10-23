@@ -90,16 +90,22 @@ function assess(summary) {
 }
 
 async function main() {
-  const { values } = parseArgs({ options: { 'prepare-only': { type: 'boolean' }, chars: { type: 'string', default: '500000' }, repeats: { type: 'string', default: '2' }, output: { type: 'string' } } });
+  const { values } = parseArgs({ options: { 'prepare-only': { type: 'boolean' }, chars: { type: 'string', default: '500000' }, repeats: { type: 'string', default: '2' }, output: { type: 'string' }, fixture: { type: 'string', default: 'original' }, 'length-mode': { type: 'string', default: 'current' }, 'deadline-seconds': { type: 'string', default: '45' } } });
   const repeats = Number(values.repeats);
   assert.ok(Number.isInteger(repeats) && repeats >= 1 && repeats <= 3);
-  const fixture = makeFixture(Number(values.chars));
+  const lengthExperiment = require('./output-length-config.cjs');
+  const lengthSpec = lengthExperiment.getLengthSpec(values['length-mode']);
+  assert.ok(['original', 'dense'].includes(values.fixture));
+  const deadlineSeconds = Number(values['deadline-seconds']);
+  assert.ok([45, 90, 180].includes(deadlineSeconds));
+  const baseFixture = makeFixture(Number(values.chars));
+  const fixture = values.fixture === 'dense' ? lengthExperiment.makeDenseFixture(baseFixture) : baseFixture;
   const sizeLabel = fixture.conversation.length === 1000000 ? '1m' : '500k';
-  const fixturePath = path.join(root, `.test-artifacts/dots-${sizeLabel}/fixture.json`);
+  const fixturePath = path.join(root, `.test-artifacts/dots-${sizeLabel}/${values.fixture}-fixture.json`);
   fs.mkdirSync(path.dirname(fixturePath), { recursive: true });
   fs.writeFileSync(fixturePath, JSON.stringify(fixture, null, 2) + '\n');
   if (values['prepare-only']) {
-    console.log(JSON.stringify({ inputChars: fixture.conversation.length, utf8Bytes: Buffer.byteLength(fixture.conversation), turns: fixture.messages.length, anchors: fixture.anchors }));
+    console.log(JSON.stringify({ inputChars: fixture.conversation.length, utf8Bytes: Buffer.byteLength(fixture.conversation), turns: fixture.messages.length, cases: fixture.cases?.length, anchors: fixture.anchors }));
     return;
   }
   assert.ok(['test-a', 'test-b'].includes(process.env.CAP_CONTEXT_TEST_KEY_SLOT), 'An encrypted testing-key slot is required');
@@ -109,25 +115,61 @@ async function main() {
   process.env.OPENROUTER_QWEN_ENABLED = 'false';
   process.env.OPENROUTER_GEMMA_ENABLED = 'false';
   const unguardedFetch = globalThis.fetch;
-  const backend = require('../../api/summarize').__test;
+  const promptModule = require('../../api/summary-prompt');
+  const originalPrompt = promptModule.getSummarySystemPrompt;
+  // Override only this experiment process before the backend captures its import.
+  // The production prompt, cache version and configured profiles stay unchanged.
+  promptModule.getSummarySystemPrompt = (profile, options) => lengthExperiment.expandPrompt(originalPrompt(profile, options), profile, lengthSpec);
+  const backendPath = path.join(root, 'api/summarize.js');
+  let experimentalBackendSha256 = null;
+  let backend;
+  if (deadlineSeconds > 90) {
+    // Isolate long-generation capacity from the production 90s attempt cap.
+    // Compile an explicit in-memory timeout variant; never rewrite API sources.
+    const Module = require('node:module');
+    const backendSource = fs.readFileSync(backendPath, 'utf8');
+    const oldTimeout = 'const PROVIDER_ATTEMPT_TIMEOUT_MS = 90000;';
+    assert.ok(backendSource.includes(oldTimeout), 'Inspect changed backend timeout before running');
+    const diagnosticSource = backendSource.replace(oldTimeout, `const PROVIDER_ATTEMPT_TIMEOUT_MS = ${deadlineSeconds * 1000};`);
+    const diagnosticModule = new Module(backendPath, module);
+    diagnosticModule.filename = backendPath;
+    diagnosticModule.paths = Module._nodeModulePaths(path.dirname(backendPath));
+    diagnosticModule._compile(diagnosticSource, backendPath);
+    backend = diagnosticModule.exports.__test;
+    experimentalBackendSha256 = hash(diagnosticSource);
+  } else {
+    backend = require('../../api/summarize').__test;
+  }
   // Importing the guard also installs it. Capture native fetch first so the
   // explicitly instrumented guard below reserves once per actual HTTP attempt.
   const guard = require('../../scripts/openrouter-test-budget.cjs');
   const output = path.resolve(root, values.output || `evaluation/results/2026-10-23-dots-${sizeLabel}.json`);
   assert.ok(!fs.existsSync(output), 'Refusing to overwrite an existing capacity report');
-  const profile = backend.getSummaryProfile(fixture.conversation);
+  const originalProfile = backend.getSummaryProfile(fixture.conversation);
+  const profile = lengthSpec.promptOverride ? { ...originalProfile, targetWords: lengthSpec.targetWords, maxTokens: lengthSpec.maxTokens } : originalProfile;
+  const admission = require('../../api/request-security').validateSummarizeRequest({
+    headers: { 'content-type': 'application/json' }, body: JSON.stringify({ platform, messages: fixture.messages })
+  });
+  assert.equal(admission.ok, true, 'Synthetic fixture must pass the current backend admission checks');
+  assert.equal(admission.conversation, fixture.conversation);
   const report = {
     version: 1, syntheticOnly: true, model,
     sourceCommit: execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).trim(),
     promptSha256: hash(fs.readFileSync(path.join(root, 'api/summary-prompt.js'))),
     backendSha256: hash(fs.readFileSync(path.join(root, 'api/summarize.js'))),
     runnerSha256: hash(fs.readFileSync(__filename)),
+    lengthConfigSha256: hash(fs.readFileSync(path.join(__dirname, 'output-length-config.cjs'))),
+    experimentalBackendSha256,
     inputChars: fixture.conversation.length, inputUtf8Bytes: Buffer.byteLength(fixture.conversation),
     inputSha256: hash(fixture.conversation), messageCount: fixture.messages.length, anchors: fixture.anchors,
     profile: profile.id, targetWords: profile.targetWords, advisoryMinWords: profile.minWords,
-    maxOutputTokens: profile.maxTokens, firstAnswerLimitMs: 30000, experimentDeadlineMs: 45000,
-    coverage: 'Current structured prompt, provider body, retry logic, SSE parser, validation and normalization. Local provider pipeline; no deployed HTTP endpoint, capture, paste, or real telemetry writes. Existing 350k summary and 500k capture admission are bypassed by invoking the provider pipeline directly.',
-    timingNote: 'Only the test-key Dots route is configured (its code budget is 90s); an outer 45s deadline bounds each run to the production dual-gateway OpenRouter stage. The unchanged 30s first-answer watchdog is active.',
+    maxOutputTokens: profile.maxTokens, firstAnswerLimitMs: deadlineSeconds > 90 ? deadlineSeconds * 1000 : 90000, experimentDeadlineMs: deadlineSeconds * 1000,
+    admission: { accepted: admission.ok, requestBytes: admission.requestBytes, inputChars: admission.conversation.length },
+    fixtureType: values.fixture, activeEvidenceCases: fixture.cases?.length || 0,
+    promptTreatment: values['length-mode'], requestedMinWords: lengthSpec.requestedMinWords,
+    experimentalLengthInstruction: lengthSpec.promptOverride,
+    coverage: `${lengthSpec.promptOverride ? 'Process-only length instruction on the current structured prompt' : 'Current structured prompt'}, backend input validation, provider body, retry logic, SSE parser, validation and normalization. Local provider pipeline; no deployed HTTP endpoint, capture, paste, or real telemetry writes. Only the test-key Dots route is configured.`,
+    timingNote: `The current >350k policy allows one 90s gateway attempt with a 90s first-answer deadline. This experiment adds an outer ${deadlineSeconds}s deadline. Above 90s, only the in-memory provider-attempt constant is overridden. The runner does not edit production files.`,
     productionLimitsChanged: false, results: []
   };
   const save = () => { fs.mkdirSync(path.dirname(output), { recursive: true }); fs.writeFileSync(output, JSON.stringify(report, null, 2) + '\n'); };
@@ -135,14 +177,14 @@ async function main() {
   for (let repeat = 1; repeat <= repeats; repeat++) {
     const startedAt = Date.now();
     const attempts = [], failures = [];
-    let firstAnswerMs = null, deltas = 0;
+    let firstAnswerMs = null, deltas = 0, streamedText = '';
     const guardedFetch = guard.createGuardedFetch(unguardedFetch, { key: process.env.OPENROUTER_API_KEY,
       slot: process.env.CAP_CONTEXT_TEST_KEY_SLOT, ledgerPath: process.env.CAP_CONTEXT_TEST_LEDGER_PATH });
     globalThis.fetch = async (url, options) => {
       const body = JSON.parse(options.body);
       assert.equal(body.model, model);
       assert.equal(body.stream, true);
-      assert.equal(body.max_tokens, 7000);
+      assert.equal(body.max_tokens, profile.maxTokens);
       assert.deepEqual(body.reasoning, { enabled: false, exclude: true });
       const envelope = JSON.parse(body.messages[1].content);
       assert.equal(envelope.schema, 'cap-context-conversation-v2');
@@ -157,30 +199,35 @@ async function main() {
     };
     let result;
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 45000);
+    const timer = setTimeout(() => controller.abort(), deadlineSeconds * 1000);
     try {
       const generated = await backend.createSummaryWithFallback({ conversation: fixture.conversation,
         messages: fixture.messages, platform, profile, openrouterApiKey: process.env.OPENROUTER_API_KEY,
         requestContext: { signal: controller.signal,
-          onDelta: text => { deltas++; if (firstAnswerMs === null && /\S/.test(text)) firstAnswerMs = Date.now() - startedAt; },
+          onDelta: text => { streamedText += text; deltas++; if (firstAnswerMs === null && /\S/.test(text)) firstAnswerMs = Date.now() - startedAt; },
           onStart: () => {}, onProviderFailure: failure => failures.push(failure) } });
       result = { generated: generated.model === model, elapsedMs: Date.now() - startedAt, firstAnswerMs, deltas,
         model: generated.model, finishReason: generated.finishReason, usage: generated.usage,
         summary: generated.model === model ? generated.summary : null,
         structure: generated.model === model ? backend.validateContextCarrySummary(generated.summary, profile) : null,
         summaryWordCount: generated.summaryWordCount, qualityFloorMet: generated.qualityFloorMet, qualityFlags: generated.qualityFlags,
-        fallback: generated.fallback, assessment: generated.model === model ? assess(generated.summary) : null };
+        fallback: generated.fallback, assessment: generated.model === model ? assess(generated.summary) : null,
+        caseCoverage: generated.model === model ? lengthExperiment.assessCases(generated.summary, fixture.cases) : null };
     } catch (error) {
       // Arbitrary errors can carry credentials or signed URLs; retain fixed labels only.
       result = { generated: false, elapsedMs: Date.now() - startedAt, firstAnswerMs, deltas,
-        error: controller.signal.aborted ? 'experiment_45s_deadline' : error.name === 'AbortError' ? 'provider_deadline' : 'generation_failed' };
+        error: controller.signal.aborted ? `experiment_${deadlineSeconds}s_deadline` : error.name === 'AbortError' ? 'provider_deadline' : 'generation_failed' };
     } finally { clearTimeout(timer); globalThis.fetch = unguardedFetch; }
-    report.results.push({ repeat, ...result, attempts, failures, testBudget: globalThis.__capContextTestBudget });
+    result.metRequestedMinimum = lengthSpec.requestedMinWords === null ? null : Boolean(result.generated && result.summaryWordCount >= lengthSpec.requestedMinWords);
+    result.modelStoppedNormally = Boolean(result.generated && result.finishReason === 'stop');
+    result.withinProduction45sStage = Boolean(result.generated && result.elapsedMs <= 45000);
+    report.results.push({ repeat, ...result, streamedText, streamedWordCount: backend.countWords(streamedText), attempts, failures, testBudget: globalThis.__capContextTestBudget });
     save();
     console.log(JSON.stringify({ repeat, generated: result.generated, elapsedMs: result.elapsedMs, firstAnswerMs,
-      finishReason: result.finishReason, usage: result.usage, qualityFlags: result.qualityFlags,
+      finishReason: result.finishReason, usage: result.usage, qualityFlags: result.qualityFlags, words: result.summaryWordCount,
+      streamedWords: backend.countWords(streamedText), metRequestedMinimum: result.metRequestedMinimum, missingCaseIds: result.caseCoverage?.idsMissing?.length,
       missingLexicalChecks: result.assessment?.missing, error: result.error, attempts: attempts.map(({ httpStatus, headersMs }) => ({ httpStatus, headersMs })) }));
-    if (!result.generated || attempts.some(item => [401, 402, 404, 429].includes(item.httpStatus))) { process.exitCode = 1; break; }
+    if (!result.modelStoppedNormally || result.metRequestedMinimum === false || attempts.some(item => [401, 402, 404, 429].includes(item.httpStatus))) { process.exitCode = 1; break; }
   }
 }
 

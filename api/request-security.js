@@ -1,8 +1,10 @@
-const MAX_CONVERSATION_CHARS = 350000;
-const MAX_CONVERSATION_BYTES = 1400000;
+const MAX_CONVERSATION_CHARS = 1000000;
+const MAX_CONVERSATION_BYTES = 4000000;
 // JSON escaping can make the request body larger than the UTF-8 transcript.
 // Keep enough headroom for the full conversation while staying below Vercel's 4.5 MB body limit.
-const MAX_REQUEST_BYTES = 2200000;
+// This remains a separate wire-size bound: unusual JSON escaping can exceed it
+// even within the character limit. The worker checks before sending as well.
+const MAX_REQUEST_BYTES = 4400000;
 const CLIENT_HEADER_NAME = "x-cap-context-client";
 const CLIENT_HEADER_VALUE = "cap-context-extension/1";
 const RATE_LIMIT_MINUTE_MS = 60000;

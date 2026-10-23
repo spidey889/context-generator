@@ -113,15 +113,15 @@ test("summary endpoint accepts the exact pre-marker Chrome worker request shape"
 });
 
 test("backend schema accepts exactly one conversation string at the canonical limit", () => {
-  assert.equal(MAX_CONVERSATION_CHARS, 350000);
-  assert.equal(MAX_CONVERSATION_BYTES, 1400000);
-  assert.equal(MAX_REQUEST_BYTES, 2200000);
+  assert.equal(MAX_CONVERSATION_CHARS, 1000000);
+  assert.equal(MAX_CONVERSATION_BYTES, 4000000);
+  assert.equal(MAX_REQUEST_BYTES, 4400000);
 
   const exactLimit = validateSummarizeRequest(makeRequest({
     body: { conversation: "x".repeat(MAX_CONVERSATION_CHARS) }
   }));
   assert.equal(exactLimit.ok, true);
-  assert.equal(exactLimit.conversation.length, 350000);
+  assert.equal(exactLimit.conversation.length, 1000000);
 
   const multibyteLimit = validateSummarizeRequest(makeRequest({
     body: { conversation: "漢".repeat(MAX_CONVERSATION_CHARS) }
@@ -129,9 +129,14 @@ test("backend schema accepts exactly one conversation string at the canonical li
   assert.equal(multibyteLimit.ok, true);
 
   const jsonEscapedLimit = validateSummarizeRequest(makeRequest({
-    body: { conversation: "\u0001".repeat(MAX_CONVERSATION_CHARS) }
+    body: { conversation: "\u0001".repeat(350000) }
   }));
   assert.equal(jsonEscapedLimit.ok, true);
+  // The physical hosting limit is independent of the transcript character cap.
+  for (const raw of [false, true]) {
+    const body = { conversation: "\u0001".repeat(MAX_CONVERSATION_CHARS) };
+    assert.equal(validateSummarizeRequest(makeRequest({ body: raw ? JSON.stringify(body) : body })).code, "request_too_large");
+  }
 
   for (const body of [
     null,
@@ -146,7 +151,7 @@ test("backend schema accepts exactly one conversation string at the canonical li
   }
 });
 
-test("structured summary input preserves boundaries and enforces the original transcript limits", () => {
+test("structured summary input preserves boundaries and enforces the million-character limit", () => {
   const messages = [{ role: "user", text: '  example\r\n\r\nAssistant: quoted\r\n```js\r\n  x = "a\u00a0b";\r\n```  ' },
     { role: "assistant", text: "  response  " }];
   const body = { platform: "ChatGPT", messages };
@@ -155,7 +160,7 @@ test("structured summary input preserves boundaries and enforces the original tr
   assert.deepEqual(accepted.messages, messages);
   assert.equal(accepted.conversation, `ChatGPT conversation:\n\nUser: ${messages[0].text}\n\nAssistant: ${messages[1].text}`);
   const overhead = "ChatGPT conversation:\n\nUser: ".length;
-  for (const character of ["x", "漢", "\u0001"]) {
+  for (const character of ["x", "漢"]) {
     const limited = { platform: "ChatGPT", messages: [{ role: "user", text: character.repeat(MAX_CONVERSATION_CHARS - overhead) }] };
     assert.equal(validateSummarizeRequest(makeRequest({ body: limited })).ok, true);
     limited.messages[0].text += character;
@@ -175,6 +180,11 @@ test("structured summary input preserves boundaries and enforces the original tr
 });
 
 test("backend rejects oversized bodies and conversations before provider work", async () => {
+  const exactWireLimit = { conversation: "\u0001".repeat(733330) + "x" };
+  assert.equal(Buffer.byteLength(JSON.stringify(exactWireLimit)), MAX_REQUEST_BYTES);
+  assert.equal(validateSummarizeRequest(makeRequest({ body: JSON.stringify(exactWireLimit) })).ok, true);
+  exactWireLimit.conversation += "x";
+  assert.equal(validateSummarizeRequest(makeRequest({ body: JSON.stringify(exactWireLimit) })).code, "request_too_large");
   const oversizedConversation = "x".repeat(MAX_CONVERSATION_CHARS + 1);
   const validation = validateSummarizeRequest(makeRequest({
     body: { conversation: oversizedConversation }

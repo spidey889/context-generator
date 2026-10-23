@@ -137,6 +137,8 @@ The [historical v19 investigation](deepseek-file-failure-investigation.md) confi
 
 `failure_file_index` is a one-based position among unique supported files, with declared `failure_file_bytes`, observed `failure_read_bytes` and per-request `failure_request_ms`. `failure_response_type`, `failure_content_type`, `failure_online` and `failure_abort` use closed labels only. First-failure observations are captured before cancelling siblings and cannot be replaced by their aborts. No file name/ID, signed address, headers, credentials, body or exception prose is included. Browsers may conceal whether a rejected fetch was caused by CORS, redirect policy, DNS or another network failure; these logs preserve what was observed without inventing that cause. Retry, download and scrolling behavior are unchanged. Apply migration `20261023123334_deepseek_file_diagnostics`, then deploy compatible Edge/Vercel validators before updating/reloading the extension. This adds no table or column; existing deployed clients do not emit these fields yet.
 
+The million-character rollout additionally requires `20261023172555_raise_million_character_limits` after that file-diagnostics migration. It raises the provider-failure `input_chars` validator to 1,000,000 and `failure_file_bytes` to 4,100,000. Deploy the matching `transfer-telemetry` Edge function before the larger-chat backend/extension; otherwise new diagnostics can be rejected by the older hosted validators. These are existing-validator updates, with no new tables or columns.
+
 `diagnostics_revision = 3` adds optional `json_attempts` (at most two flat records):
 the current source's accepted picker read or fresh read, then the existing one
 temporary-error retry if used. Discarded or stale picker reads never create a
@@ -153,18 +155,18 @@ summary/paste errors, prepared-tab recovery and durable outbox restart.
 | `raw_response_bytes`, `raw_response_limit_bytes`, `raw_response_stage` | Response with the highest observed budget fraction, paired with that response's effective allowance and stage |
 | `raw_header_bytes`, `raw_header_limit_bytes`, `raw_header_stage` | Highest advertised budget fraction; absence means no observed numeric Content-Length |
 | `history_bytes`, `session_bytes`, `descriptor_bytes`, `file_body_bytes` | Breakdown of received bytes. File bodies already belong to `raw_bytes` |
-| `files_supported`, `files_declared_bytes`, `files_downloaded_bytes`, `files_limit_bytes` | Unique supported selected-user downloads in DeepSeek/ChatGPT; declared sum and actual received body bytes. Only these adapters have the separate 2,100,000-byte download budget |
+| `files_supported`, `files_declared_bytes`, `files_downloaded_bytes`, `files_limit_bytes` | Unique supported selected-user downloads in DeepSeek/ChatGPT; declared sum and actual received body bytes. Only these adapters have the separate 4,100,000-byte download budget |
 | `files_ignored`, `files_ignored_pdf`, `files_ignored_image`, `files_ignored_other` | Descriptor occurrences skipped by the selected-branch file loops; coarse labels only. No recursive search through native metadata |
-| `transcript_chars`, `transcript_bytes`, `transcript_char_limit`, `transcript_byte_limit` | Final JS String.length units and UTF-8 bytes against 500,000 and 2,000,000. Bytes stay absent when the earlier character check rejects |
-| `history_items`, `selected_turns`, `requests`, `pages`, `auth_refreshes` | Native items (Gemini pairs, Grok/ChatGPT nodes, DeepSeek/Claude messages), serialized own turns, owned requests, Gemini pages, ChatGPT session refreshes |
+| `transcript_chars`, `transcript_bytes`, `transcript_char_limit`, `transcript_byte_limit` | Final JS String.length units and UTF-8 bytes against 1,000,000 and 4,000,000. Bytes stay absent when the earlier character check rejects |
+| `history_items`, `selected_turns`, `requests`, `pages`, `auth_refreshes` | Native items (Gemini pairs, Grok/ChatGPT nodes, DeepSeek/Claude messages), captured messages, owned requests, Gemini pages, ChatGPT session refreshes. ChatGPT groups consecutive assistant blocks as one reply for this count while preserving each payload block |
 | `hook_ms`, `auth_ms`, `download_ms`, `parse_ms`, `serialize_ms`, `total_ms`, `deadline_ms`, `http_status` | Observed durations and native/bridge deadline/status. Concurrent file work and auth/download intervals can overlap; do not sum them into a global timeline |
 
 The size labels distinguish `raw_header_limit`, `raw_total_stream_limit`,
 `raw_response_stream_limit`, `raw_remaining_files_limit`, `supported_files_limit`,
 `transcript_char_limit` and `transcript_byte_limit`. ChatGPT keeps its existing
 32,000,000-byte aggregate/history allowance and 6,000,000-byte auxiliary-response
-allowance; the other four adapters keep 6,000,000 bytes. All existing transcript,
-file, summary/request, deadline, retry and fallback limits/behavior remain intact.
+allowance; the other four adapters allow 12,000,000 bytes. These transport budgets
+are separate from the final transcript, supported-file and summary-request limits.
 The new labels do not change ChatGPT's existing incomplete classification for
 raw-history/file-body excess. Unsupported PDF/image bodies are not fetched by
 these file loops; any bytes already embedded in history still count as raw.

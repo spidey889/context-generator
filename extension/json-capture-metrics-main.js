@@ -82,7 +82,7 @@
     http_status: { type: "number", min: 100, max: 599 },
     failure_http_status: { type: "number", min: 100, max: 599 },
     failure_file_index: { type: "number", min: 1, max: 2147483647 },
-    failure_file_bytes: { type: "number", max: 2100000 }
+    failure_file_bytes: { type: "number", max: 4100000 }
   };
   const booleans = ["online", "source_saved", "speed_enabled", "json_attempted", "source_changed", "cancelled",
     "destination_prepared", "prepared_reused", "prepared_rejected", "fresh_recovery", "script_injected",
@@ -290,11 +290,11 @@
       try { return fn(); } finally { add(key, clock() - began); }
     };
     const transcript = text => {
-      set({ transcript_chars: text.length, transcript_char_limit: 500000, transcript_byte_limit: 2000000 });
-      if (text.length > 500000) { fail("transcript_char_limit", "serialize", "string_length", text.length, 500000); return false; }
+      set({ transcript_chars: text.length, transcript_char_limit: 1000000, transcript_byte_limit: 4000000 });
+      if (text.length > 1000000) { fail("transcript_char_limit", "serialize", "string_length", text.length, 1000000); return false; }
       const bytes = new TextEncoder().encode(text).length;
       set({ transcript_bytes: bytes });
-      if (bytes > 2000000) { fail("transcript_byte_limit", "serialize", "utf8_bytes", bytes, 2000000); return false; }
+      if (bytes > 4000000) { fail("transcript_byte_limit", "serialize", "utf8_bytes", bytes, 4000000); return false; }
       return true;
     };
     const ignored = (type, image = false) => {

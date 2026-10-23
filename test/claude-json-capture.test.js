@@ -53,12 +53,12 @@ test("Claude fresh DOM size check counts readable file text despite another inco
   const data = fixture();
   data.chat_messages[0].attachments = [
     { file_type: "txt", file_name: "", file_size: 100 },
-    { file_type: "txt", file_name: "", file_size: 500001, extracted_content: "x".repeat(500001) }
+    { file_type: "txt", file_name: "", file_size: 1000001, extracted_content: "x".repeat(1000001) }
   ];
   const h = setup(data, { resources: [endpoint] });
   await assert.rejects(h.window.__capCaptureClaudeJson());
   const result = await h.window.__capMeasureClaudeJson();
-  assert.ok(result.characterCount > 500000);
+  assert.ok(result.characterCount > 1000000);
   assert.deepEqual(Object.keys(result), ["characterCount"]);
   await assert.rejects(h.window.__capCaptureClaudeJson(), "Ordinary capture must still reject unreadable files.");
 });
@@ -205,7 +205,7 @@ test("Claude interrupted history body stays retryable and a fresh capture keeps 
     "Claude conversation:\n\nUser: Question\n\nAssistant: Private reasoning\n\nSelected answer");
 });
 
-for (const length of [undefined, "1", "6000001"]) test(`Claude bounds raw history before decoding with Content-Length ${length ?? "absent"}`, async () => {
+for (const length of [undefined, "1", "12000001"]) test(`Claude bounds raw history before decoding with Content-Length ${length ?? "absent"}`, async () => {
   // A tiny active branch can coexist with large metadata. Transcript bounds
   // cannot protect the raw read: reject excess transport without clipping it.
   const prefix = new TextEncoder().encode(JSON.stringify(fixture()).slice(0, -1) + ',"ignored":"');
@@ -221,8 +221,8 @@ for (const length of [undefined, "1", "6000001"]) test(`Claude bounds raw histor
     return true;
   });
   assert.equal(streamed.stats.cancelled, 1);
-  assert.ok(streamed.stats.bytes <= 7000000, `The oversized body was drained: ${streamed.stats.bytes} bytes.`);
-  if (length === "6000001") assert.equal(streamed.stats.bytes, 0, "Reject an oversized advertised length before reading.");
+  assert.ok(streamed.stats.bytes <= 13000000, `The oversized body was drained: ${streamed.stats.bytes} bytes.`);
+  if (length === "12000001") assert.equal(streamed.stats.bytes, 0, "Reject an oversized advertised length before reading.");
   assert.equal(streamed.response.body.locked, false);
   assert.equal(harness.stats().navigationListeners + harness.stats().popListeners, 0);
   healthy = true;
@@ -252,15 +252,15 @@ test("Claude accepts exactly six million raw bytes and preserves split BOM, Unic
   data.chat_messages[0].content = [{ type: "text", text }];
   const prefix = Buffer.from("\uFEFF" + JSON.stringify(data).slice(0, -1) + ',"ignored":"');
   // Fill the final body once instead of allocating and copying 6 MB of padding.
-  const bytes = Buffer.alloc(6000000, 32);
+  const bytes = Buffer.alloc(12000000, 32);
   prefix.copy(bytes);
   bytes.write('"}', bytes.length - 2);
   const split = bytes.indexOf(Buffer.from("🙂")) + 1;
-  const streamed = streamedResponse([bytes.subarray(0, 1), bytes.subarray(1, 2), bytes.subarray(2, split), bytes.subarray(split, split + 1), bytes.subarray(split + 1)], { "content-length": "6000000" });
+  const streamed = streamedResponse([bytes.subarray(0, 1), bytes.subarray(1, 2), bytes.subarray(2, split), bytes.subarray(split, split + 1), bytes.subarray(split + 1)], { "content-length": "12000000" });
   const harness = setup(data, { resources: [endpoint], fetchImpl: async () => streamed.response });
   assert.equal((await harness.window.__capCaptureClaudeJson()).text,
     `Claude conversation:\n\nUser: ${text}\n\nAssistant: Private reasoning\n\nSelected answer`);
-  assert.equal(streamed.stats.bytes, 6000000);
+  assert.equal(streamed.stats.bytes, 12000000);
   assert.equal(streamed.stats.cancelled, 0);
   assert.equal(streamed.response.body.locked, false);
 });
@@ -500,14 +500,14 @@ test("Claude JSON capture still rejects missing parents and cyclic branches", as
   }
 });
 
-test("Claude JSON capture admits the direct range through 500,000 characters without clipping", async () => {
+test("Claude JSON capture admits transcripts through 1,000,000 characters without clipping", async () => {
   const baseline = setup(fixture(), { resources: [endpoint] });
   const overhead = (await baseline.window.__capCaptureClaudeJson()).text.length - "Selected answer".length;
-  for (const length of [350001, 500000, 500001]) {
+  for (const length of [350001, 1000000, 1000001]) {
     const data = fixture();
     data.chat_messages[2].content[1].text = "漢".repeat(length - overhead);
     const h = setup(data, { resources: [endpoint] });
-    if (length > 500000) await assert.rejects(h.window.__capCaptureClaudeJson(), /500,000/);
+    if (length > 1000000) await assert.rejects(h.window.__capCaptureClaudeJson(), /1,000,000/);
     else assert.equal((await h.window.__capCaptureClaudeJson()).text.length, length);
   }
 });

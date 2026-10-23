@@ -20,7 +20,7 @@ test("provider failure schema rejects private content, invalid limits and mismat
   assert.ok(schema.validate(event()));
   for (const changes of [{ error: "PRIVATE_BODY" }, { prompt: "PRIVATE_CHAT" }, { reasoning: "PRIVATE_THINKING" },
     { elapsed_ms: -1 }, { max_output_tokens: 0 }, { phase: "https://private.invalid" }, { provider: "gemini" },
-    { request_attempt: 3 }, { input_chars: 350001 }, { occurred_at: "2026-02-31T00:00:00.000Z" },
+    { request_attempt: 3 }, { input_chars: 1000001 }, { occurred_at: "2026-02-31T00:00:00.000Z" },
     { failure_reason: "provider_empty", timeout_kind: "completion" }]) assert.equal(schema.validate(event(changes)), null);
 });
 

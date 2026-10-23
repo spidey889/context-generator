@@ -2261,7 +2261,7 @@ test("direct and AI ranges use exact captured character boundaries on every plat
         return { ok: true };
       }
     });
-    for (const length of [1, 9999, 350001, 500000]) {
+    for (const length of [1, 9999]) {
       const transcript = "x".repeat(length);
       const trace = hooks.createTransferTrace("claude", "test");
       let settled = false;
@@ -2284,20 +2284,28 @@ test("direct and AI ranges use exact captured character boundaries on every plat
       assert.equal(stats.summary.fallback.used, false);
     }
     assert.equal(summaryRequests, 0, hostname);
-    for (const transcript of ["x".repeat(10000), "x".repeat(350000), `${" ".repeat(9999)}x`]) {
+    for (const transcript of ["x".repeat(10000), "x".repeat(350000), "x".repeat(350001), "x".repeat(500000), "x".repeat(1000000), `${" ".repeat(9999)}x`]) {
       assert.equal(await hooks.summarizeWithBackend(transcript), "AI must never replace this tiny transcript.");
     }
-    assert.equal(summaryRequests, 3, `${hostname}: both inclusive AI boundaries and untrimmed length use the backend`);
+    assert.equal(summaryRequests, 6, `${hostname}: both inclusive AI boundaries and untrimmed length use the backend`);
     const requestsBeforeRejectedTransfers = runtimeRequests;
-    await assert.rejects(hooks.summarizeWithBackend("x".repeat(500001)), error => {
+    await assert.rejects(hooks.summarizeWithBackend("x".repeat(1000001)), error => {
       assert.equal(error.code, "conversation_too_large");
-      assert.match(error.message, /limit is 500,000 characters/);
+      assert.match(error.message, /limit is 1,000,000 characters/);
       return true;
     });
     await assert.rejects(hooks.summarizeWithBackend("tiny", { deadlineAt: Date.now() - 1 }), /Transfer timed out/);
-    assert.equal(summaryRequests, 3, `${hostname}: oversized and expired transfers never reach the backend`);
+    assert.equal(summaryRequests, 6, `${hostname}: oversized and expired transfers never reach the backend`);
     assert.equal(runtimeRequests, requestsBeforeRejectedTransfers, `${hostname}: rejection sends no worker messages`);
   }
+});
+
+test("oversized summary JSON surfaces its size error without silently making a local carry", async () => {
+  const hooks = loadPlatformContent([], "chatgpt.com", { runtimeSendMessage: async message => {
+    assert.equal(message.type, "SUMMARIZE_WITH_BACKEND");
+    return { ok: false, code: "request_too_large", error: "This chat exceeds the 4.4 MB request limit." };
+  } });
+  await assert.rejects(hooks.summarizeWithBackend("x".repeat(500000)), error => error.code === "request_too_large");
 });
 
 clockTest("local and remote handoffs reveal without a cosmetic one-second delay", async () => {

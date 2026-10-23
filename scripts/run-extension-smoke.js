@@ -13,8 +13,8 @@ const { validateSummarizeRequest } = require("../api/request-security");
 const REPO_ROOT = path.resolve(__dirname, "..");
 const SOURCE_SENTINEL = "SMOKE_USER_SENTINEL: preserve the deployment checklist.";
 const ASSISTANT_SENTINEL = "SMOKE_ASSISTANT_SENTINEL: verify staging before release.";
-const CHATGPT_PASTED_TEXT = `CHATGPT_PASTE_START\n${"  Original pasted line, absent from the DOM.\n".repeat(1000)}CHATGPT_PASTE_END`;
-const CHATGPT_USER_PASTE = `${SOURCE_SENTINEL}\nJSON_ONLY_SENTINEL: earliest API-only turn.\n${CHATGPT_PASTED_TEXT}`;
+let CHATGPT_PASTED_TEXT = `CHATGPT_PASTE_START\n${"  Original pasted line, absent from the DOM.\n".repeat(1000)}CHATGPT_PASTE_END`;
+let CHATGPT_USER_PASTE = `${SOURCE_SENTINEL}\nJSON_ONLY_SENTINEL: earliest API-only turn.\n${CHATGPT_PASTED_TEXT}`;
 const CHATGPT_CANVAS_TEXT = `CHATGPT_CANVAS_START\n${"  Complete canvas line, absent from the DOM.\n".repeat(500)}CHATGPT_CANVAS_MIDDLE\n${"  Final canvas line.\n".repeat(500)}CHATGPT_CANVAS_END\n`;
 const CHATGPT_EXACT_CODE = '  OWN_CODE_SENTINEL\n  print("a\u00a0b")  \nCODE_END_SENTINEL';
 const CHATGPT_PYTHON_RESULT = "  Test code Item  Value\n0  JV3XLMSP    A   6791\n1  JV3XLMSP    B   3197\n2  JV3XLMSP    C   7083";
@@ -54,6 +54,16 @@ const DEEPSEEK_TRANSCRIPT_OVERSIZE_SMOKE = JSON_SOURCE === "deepseek" && process
 const DEEPSEEK_DOM_SIZE_SMOKE = JSON_SOURCE === "deepseek" && process.env.CAP_CONTEXT_NETWORK_FAILURE_SMOKE === "dom-size-check";
 const NETWORK_FAILURE = (NETWORK_SOURCE && process.env.CAP_CONTEXT_NETWORK_FAILURE_SMOKE === "partial") || GROK_FILE_ONLY_SMOKE || DEEPSEEK_OVERSIZE_SMOKE;
 const JSON_CAPTURE_SMOKE = Boolean(JSON_SOURCE);
+// Opt-in native capture/worker/backend-admission/paste coverage at the new
+// boundary. Unicode also exercises the raised text-file and UTF-8 byte limits.
+const LARGE_CHAT_SMOKE_CHARS = Number(process.env.CAP_CONTEXT_LARGE_CHAT_SMOKE || 0);
+if (LARGE_CHAT_SMOKE_CHARS) {
+  assert.ok(JSON_SOURCE === "chatgpt" && [500000, 1000000].includes(LARGE_CHAT_SMOKE_CHARS), "Large-chat smoke requires ChatGPT JSON and 500000 or 1000000 characters.");
+  const padding = "漢".repeat(LARGE_CHAT_SMOKE_CHARS - expectedChatGptConversation().length);
+  CHATGPT_PASTED_TEXT = CHATGPT_PASTED_TEXT.replace("CHATGPT_PASTE_END", `${padding}CHATGPT_PASTE_END`);
+  CHATGPT_USER_PASTE = `${SOURCE_SENTINEL}\nJSON_ONLY_SENTINEL: earliest API-only turn.\n${CHATGPT_PASTED_TEXT}`;
+  assert.equal(expectedChatGptConversation().length, LARGE_CHAT_SMOKE_CHARS);
+}
 const TOOLBAR_SMOKE = process.env.CAP_CONTEXT_TOOLBAR_SMOKE === "1";
 if (TOOLBAR_SMOKE && !JSON_CAPTURE_SMOKE) throw new Error("Toolbar smoke requires a JSON source to verify production capture defaults.");
 const JSON_RETRY_SMOKE = JSON_SOURCE === "chatgpt" && process.env.CAP_CONTEXT_JSON_RETRY_SMOKE === "1";
@@ -575,6 +585,15 @@ function destinationFixture() {
 </html>`;
 }
 
+function expectedChatGptConversation() {
+  const turns = Array.from({ length: 60 }, (_, i) => [
+    `User: ${i === 0 ? CHATGPT_USER_PASTE : `User history ${i}`}`,
+    `Assistant: ${i === 59 ? ASSISTANT_SENTINEL : `Assistant history ${i}`}`
+  ]).flat();
+  turns.push(`Assistant: Python result:\n\n${CHATGPT_PYTHON_RESULT}`, "Assistant: OWN_RECAP_SENTINEL", "Assistant: OWN_THOUGHT_SENTINEL", `Assistant: Canvas: Smoke document\n\n${CHATGPT_CANVAS_TEXT}`, "Assistant: Canvas edit:\n\nOWN_CANVAS_EDIT_SENTINEL", "User: OWN_VOICE_USER_SENTINEL", "Assistant: OWN_VOICE_ASSISTANT_SENTINEL", `Assistant: ${CHATGPT_EXACT_CODE}`);
+  return `ChatGPT conversation:\n\n${turns.join("\n\n")}`;
+}
+
 function chatGptTreeFixture() {
   // One byte above the real pasted-file cap tests admission without downloading.
   const mapping = { root: { id: "root", parent: null, message: null } };
@@ -582,7 +601,7 @@ function chatGptTreeFixture() {
   // A long tree with older API-only turns; the rendered fixture has two turns.
   for (let i = 0; i < 60; i++) {
     const user = `user-${i}`, assistant = `assistant-${i}`;
-    mapping[user] = { id: user, parent, message: { author: { role: "user" }, status: "finished_successfully", ...(i === 0 ? { metadata: { attachments: [{ id: "file_smoke_paste", is_big_paste: true, mime_type: "text/plain", size: CHATGPT_DECLARED_PASTE_OVERSIZE_SMOKE ? 2100001 : Buffer.byteLength(CHATGPT_USER_PASTE) }] } } : {}), content: { content_type: "multimodal_text", parts: [i === 0 ? "" : `User history ${i}`, { content_type: "image_asset_pointer", text: "UNSUPPORTED_SENTINEL" }] } } };
+    mapping[user] = { id: user, parent, message: { author: { role: "user" }, status: "finished_successfully", ...(i === 0 ? { metadata: { attachments: [{ id: "file_smoke_paste", is_big_paste: true, mime_type: "text/plain", size: CHATGPT_DECLARED_PASTE_OVERSIZE_SMOKE ? 4100001 : Buffer.byteLength(CHATGPT_USER_PASTE) }] } } : {}), content: { content_type: "multimodal_text", parts: [i === 0 ? "" : `User history ${i}`, { content_type: "image_asset_pointer", text: "UNSUPPORTED_SENTINEL" }] } } };
     mapping[assistant] = { id: assistant, parent: user, message: { author: { role: "assistant" }, status: "finished_successfully", metadata: { is_complete: true }, content: { content_type: "text", parts: [i === 59 ? ASSISTANT_SENTINEL : `Assistant history ${i}`] } } };
     parent = assistant;
   }
@@ -627,7 +646,7 @@ function networkSmokeFixture(platform) {
   if (platform !== "deepseek") return fixture;
   if (DEEPSEEK_TRANSCRIPT_OVERSIZE_SMOKE) {
     // Match the real incident: a valid ~1 MB text file passes download limits,
-    // then exceeds the 500,000-character transcript cap. DOM omits this file.
+    // then exceeds the 1,000,000-character transcript cap. DOM omits this file.
     const text = "x".repeat(999998);
     fixture.files[fixture.file.id] = text;
     fixture.file.file_size = Buffer.byteLength(text);
@@ -639,8 +658,8 @@ function networkSmokeFixture(platform) {
     const file = { ...fixture.file, id: `file-concurrent-${i}`, file_name: `original-${i}.py`, file_size: Buffer.byteLength(text), signed_path: `/file?file_id=concurrent-${i}&sig=SIGNED_SENTINEL` };
     fixture.files[file.id] = text;
     if (DEEPSEEK_DOM_SIZE_SMOKE && i === 1) {
-      fixture.files[file.id] = "x".repeat(500001);
-      file.file_size = 500001;
+      fixture.files[file.id] = "x".repeat(1000001);
+      file.file_size = 1000001;
     }
     fixture.data.data.biz_data.chat_messages[0].fragments[0].files.push(file);
     extraBodies.push(`Attachment: ${JSON.stringify(file.file_name)}\n\nFile contents (${file.file_size} UTF-8 bytes):\n${text}\nEnd attachment: ${JSON.stringify(file.file_name)}`);
@@ -794,11 +813,15 @@ async function startFixtureServer() {
       return;
     }
     if (request.method === "POST" && url.pathname === "/api/summarize") {
-      let rawBody = "";
-      for await (const chunk of request) rawBody += chunk;
+      // A network chunk can split a UTF-8 character in a large transcript.
+      // Decode once, matching the hosted JSON parser rather than corrupting
+      // each Buffer separately through implicit string concatenation.
+      const chunks = [];
+      for await (const chunk of request) chunks.push(chunk);
+      const rawBody = new TextDecoder("utf-8", { fatal: true }).decode(Buffer.concat(chunks));
       state.summaryRequests.push(JSON.parse(rawBody));
       const validated = validateSummarizeRequest({ headers: request.headers, body: rawBody });
-      assert.equal(validated.ok, true, "Installed extension must satisfy the actual backend input contract.");
+      assert.equal(validated.ok, true, `Installed extension must satisfy the actual backend input contract (${validated.code || "accepted"}).`);
       if (ESCAPE_SMOKE && state.summaryRequests.length === 1) {
         state.summaryPending = true;
         response.writeHead(200, { "Access-Control-Allow-Origin": "*", "Content-Type": "application/x-ndjson" });
@@ -2821,7 +2844,7 @@ async function run() {
         notice: Boolean(document.getElementById("context-generator-capture-notice")),
         error: document.getElementById("context-generator-error-text").textContent
       })`);
-      assert.match(result.error, /500,000/);
+      assert.match(result.error, /1,000,000/);
       assert.ok(state.jsonRequests - jsonRequestsBeforeTransfer >= 3, "Capture, retry and independent DOM count must each fetch fresh history.");
       assert.equal(state.summaryRequests.length, 0, "Oversized DOM recovery must stop before summary or paste.");
       const terminal = await waitFor(() => state.telemetryRequests.find(payload => payload.status === "failed"), "the DOM size-limit telemetry");
@@ -2831,7 +2854,7 @@ async function run() {
       assert.ok(terminal.diagnostics.json_fallback_code, "The transfer must actually enter DOM recovery.");
       assert.equal(terminal.diagnostics.json_attempts.length, 2, "The background measurement is not another JSON transfer attempt.");
       assert.equal(terminal.diagnostics.error_code, "conversation_too_large");
-      process.stdout.write("✓ Fresh background count included a healthy 500k text file despite a broken file and stopped DOM recovery before summary/paste.\n");
+      process.stdout.write("✓ Fresh background count included a healthy 1M text file despite a broken file and stopped DOM recovery before summary/paste.\n");
       return;
     }
     if (JSON_FALLBACK_SMOKE) {
@@ -2854,7 +2877,7 @@ async function run() {
       assert.equal(state.jsonRequests - jsonRequestsBeforeTransfer, 1, "One fresh API read must precede the error.");
       assert.equal(state.summaryRequests.length, 0, "A failed JSON read must not submit DOM history.");
       if (SIZE_CAPTURE_SMOKE) {
-        assert.match(failedCapture.error, DEEPSEEK_TRANSCRIPT_OVERSIZE_SMOKE ? /too large.*limit is 500,000 characters/ : /too large.*limit is [\d,]+ bytes/);
+        assert.match(failedCapture.error, DEEPSEEK_TRANSCRIPT_OVERSIZE_SMOKE ? /too large.*limit is 1,000,000 characters/ : /too large.*limit is [\d,]+ bytes/);
         const terminal = await waitFor(() => state.telemetryRequests.find(payload => payload.status === "failed"), "the terminal size rejection");
         assert.equal(terminal.last_stage, "capture_started", "Size rejection must stop before summary or paste.");
         assert.equal(terminal.failure_reason, "conversation_too_large");
@@ -2951,12 +2974,11 @@ async function run() {
         assert.doesNotMatch(capturedConversation, /CLAUDE_ATTACHMENT_IGNORED_SENTINEL/);
       }
       if (JSON_SOURCE === "chatgpt") {
-        const expectedTurns = Array.from({ length: 60 }, (_, i) => [
-          `User: ${i === 0 ? CHATGPT_USER_PASTE : `User history ${i}`}`,
-          `Assistant: ${i === 59 ? ASSISTANT_SENTINEL : `Assistant history ${i}`}`
-        ]).flat();
-        expectedTurns.push(`Assistant: Python result:\n\n${CHATGPT_PYTHON_RESULT}`, "Assistant: OWN_RECAP_SENTINEL", "Assistant: OWN_THOUGHT_SENTINEL", `Assistant: Canvas: Smoke document\n\n${CHATGPT_CANVAS_TEXT}`, "Assistant: Canvas edit:\n\nOWN_CANVAS_EDIT_SENTINEL", "User: OWN_VOICE_USER_SENTINEL", "Assistant: OWN_VOICE_ASSISTANT_SENTINEL", `Assistant: ${CHATGPT_EXACT_CODE}`);
-        assert.equal(capturedConversation, `ChatGPT conversation:\n\n${expectedTurns.join("\n\n")}`, "Every own turn must reach the backend exactly once, including all middle history.");
+        assert.equal(capturedConversation, expectedChatGptConversation(), "Every own turn must reach the backend exactly once, including all middle history.");
+        if (LARGE_CHAT_SMOKE_CHARS) {
+          assert.equal(capturedConversation.length, LARGE_CHAT_SMOKE_CHARS);
+          process.stdout.write(`✓ Exact ${LARGE_CHAT_SMOKE_CHARS.toLocaleString("en-US")}-character Unicode transcript reached the backend in one request.\n`);
+        }
         assert.ok(capturedConversation.includes(CHATGPT_PASTED_TEXT), "Full pasted text must remain in its owning user turn.");
         assert.match(capturedConversation, /Assistant history 0/);
         assert.match(capturedConversation, /User history 59/);
@@ -3069,6 +3091,11 @@ async function run() {
       const stats = stored?.["context-generator-last-transfer-stats-v1"];
       return stats?.status === "completed" ? stats : null;
     }, "tab performance receipt");
+    if (LARGE_CHAT_SMOKE_CHARS) {
+      assert.equal(remoteStats.capture.messageTurnCount, 122);
+      assert.equal(remoteStats.capture.usefulTurnCount, 122);
+      assert.equal(state.summaryRequests[0].messages.length, 128, "Grouped counts must preserve every payload block.");
+    }
     if (JSON_SOURCE === "gemini") {
       if (JSON_FALLBACK_SMOKE) {
         // A fully mounted short DOM history needs no virtual-window sweep.
