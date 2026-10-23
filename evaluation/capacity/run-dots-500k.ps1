@@ -2,6 +2,9 @@ param(
   [ValidateSet('test-a','test-b')][string]$TestKey = 'test-a',
   [ValidateSet(500000,1000000)][int]$InputChars = 500000,
   [ValidateRange(1,3)][int]$Repeats = 2,
+  [ValidateSet('original','dense')][string]$Fixture = 'original',
+  [ValidateSet('current','3000','6000','detail-first')][string]$LengthMode = 'current',
+  [ValidateSet(45,90,180)][int]$DeadlineSeconds = 45,
   [string]$Output
 )
 $ErrorActionPreference = 'Stop'
@@ -21,7 +24,7 @@ try {
   $env:OPENROUTER_API_KEY = $capacityCredential.GetNetworkCredential().Password
   $env:CAP_CONTEXT_TEST_KEY_SLOT = $TestKey
   $env:CAP_CONTEXT_TEST_LEDGER_PATH = Join-Path $capacityVaultPath ($TestKey + '.usage.json')
-  $capacityArguments = @('--chars',"$InputChars",'--repeats',"$Repeats")
+  $capacityArguments = @('--chars',"$InputChars",'--repeats',"$Repeats",'--fixture',$Fixture,'--length-mode',$LengthMode,'--deadline-seconds',"$DeadlineSeconds")
   if ($Output) { $capacityArguments += @('--output',$Output) }
   & node (Join-Path $PSScriptRoot 'dots-500k.cjs') @capacityArguments
   $capacityExitCode = $LASTEXITCODE

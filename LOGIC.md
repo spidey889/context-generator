@@ -667,6 +667,8 @@ The manual `export-ranking.cjs` and `render-ranking-dark.py` scripts in that dir
 
 The opt-in [Dots capacity experiments](evaluation/capacity/README.md) generate deterministic 500,000- or 1,000,000-character structured chats and invoke the current local provider pipeline with a dedicated testing key. They retain full outputs, streaming timings, hashes and source review. This deliberately bypasses the unchanged 350k summary and 500k capture admission and does not test capture, paste, hosted deployment or telemetry persistence; capacity results are not end-to-end production evidence. They are never invoked by CI or normal tests.
 
+The same manual runner supports dense 500k output-length diagnostics with process-only prompt/profile variants. Diagnostic 90/180-second windows exceed the current 45-second production OpenRouter stage; the 180-second variant compiles only a timeout change in memory. They preserve partial and token-limited attempts alongside completions and require source review beyond structural flags. These settings are not production defaults; see the [output-length review](evaluation/results/2026-10-23-dots-500k-length-review.md).
+
 | Change | Focused check | Additional evidence when relevant |
 | --- | --- | --- |
 | DOM capture, pasted cards, placement, picker/handoff, paste | `node --test --test-skip-pattern="^slow/release:" test/platform-content.test.js` | `npm run test:slow` for capture changes; installed Brave smoke for meaningful extension/UI changes |
