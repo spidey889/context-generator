@@ -7,7 +7,7 @@
     diagnostics: { version: 1, capture_detail: captureFailureReason === "size_limit" ? "size_limit" : detail, capture_request_stage: stage, failure_site: `capture_${stage}`,
       ...(Number.isInteger(status) && status >= 100 && status <= 599 ? { capture_http_status: status } : {}) }
   });
-  function serialize(data, chat, metrics) {
+  function serialize(data, chat, metrics, measureOnly = false) {
     metrics?.set({ files_supported: 0, files_ignored: 0, files_declared_bytes: 0, files_downloaded_bytes: 0 });
     // Report structural metadata only, never message text, file names, or tool payloads.
     const unsupported = (reason, detail = "incomplete_history") => captureError(`This conversation has incomplete or unsupported JSON content: ${reason} Turn JSON capture off to use DOM capture.`, "incomplete", detail);
@@ -113,9 +113,10 @@
       const pastedBodiesById = new Map();
       for (const attachment of attachments) {
         if (attachment?.file_type !== "txt" || attachment.file_name !== "") continue;
-        assertComplete(attachment, "Pasted-text attachment");
+        if (measureOnly && (typeof attachment.extracted_content !== "string" || (attachment.file_size > 0 && !attachment.extracted_content.length))) continue;
+        if (!measureOnly) assertComplete(attachment, "Pasted-text attachment");
         if (typeof attachment.extracted_content !== "string" || (attachment.file_size > 0 && attachment.extracted_content.length === 0)) throw unsupported("A pasted-text attachment is missing its complete extracted_content string.", "attachment_failed");
-        if (attachment.file_size != null && (!Number.isSafeInteger(attachment.file_size) || attachment.file_size < 0 || new TextEncoder().encode(attachment.extracted_content).length !== attachment.file_size)) throw unsupported("A pasted-text attachment's extracted_content does not match its file_size; completeness cannot be verified.", "attachment_failed");
+        if (!measureOnly && attachment.file_size != null && (!Number.isSafeInteger(attachment.file_size) || attachment.file_size < 0 || new TextEncoder().encode(attachment.extracted_content).length !== attachment.file_size)) throw unsupported("A pasted-text attachment's extracted_content does not match its file_size; completeness cannot be verified.", "attachment_failed");
         const pastedText = attachment.extracted_content;
         // A repeated ID alone cannot prove a duplicate. Keep differing bodies;
         // only exact repeats of the same ID and original text share one card.
@@ -216,7 +217,7 @@
     });
   }
 
-  window.__capCaptureClaudeJson = async (expectedPath = location.pathname, metrics) => {
+  window.__capCaptureClaudeJson = async (expectedPath = location.pathname, metrics, measureOnly = false) => {
     const hookStarted = Date.now();
     const chat = expectedPath.match(/^\/chat\/([^/]+)$/)?.[1];
     if (!chat) throw new Error("Open a saved Claude conversation to use JSON capture.");
@@ -249,7 +250,7 @@
             if (changed || location.pathname !== expectedPath || reply.chat !== chat) throw changedError("The Claude conversation changed during capture.");
             if (reply.error) throw captureError("Claude JSON capture failed. Refresh this conversation or turn JSON capture off.", reply.error === "busy" ? "unavailable" : reply.captureFailureReason || "request_failed",
               reply.error === "busy" ? "busy" : reply.captureDetail || "network_error", "history", reply.status);
-            resolve(metrics.timed("serialize_ms", () => serialize(reply.data, chat, metrics)));
+            resolve(metrics.timed("serialize_ms", () => serialize(reply.data, chat, metrics, measureOnly)));
           } catch (error) { reject(error); }
         };
         const timer = setTimeout(() => { cleanup(); reject(captureError("Claude JSON capture timed out. Refresh or turn JSON capture off.", "timeout", "timeout", "history")); }, 17000);
@@ -265,6 +266,12 @@
   // Only an accepted source attempt is persisted by platform-content. Unused
   // picker snapshots stay in memory and never create telemetry reports.
   const readCapture = window.__capCaptureClaudeJson;
+  window.__capMeasureClaudeJson = async expectedPath => {
+    const metrics = globalThis.CapJsonCaptureMetrics.create({ deadline_ms: 17000 });
+    metrics.transcript = () => true;
+    const capture = await readCapture(expectedPath, metrics, true);
+    return { characterCount: capture.text.length };
+  };
   window.__capCaptureClaudeJson = async expectedPath => {
     const metrics = globalThis.CapJsonCaptureMetrics.create({ deadline_ms: 17000 });
     try {

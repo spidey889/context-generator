@@ -9,6 +9,19 @@ const { fixtures, rpcFrame, geminiTurn, prompt } = require("./network-json-fixtu
 const files = ["network-json-data.js", "network-fetch-main.js", "network-json-capture.js"];
 const scripts = new Map(["transfer-diagnostics.js", "json-capture-metrics.js", ...files].map(file =>
   [file, new vm.Script(fs.readFileSync(path.join(__dirname, "..", "extension", file), "utf8"), { filename: file })]));
+for (const platform of ["gemini", "grok", "deepseek"]) test(`${platform}: independent count returns only a number from a new native read`, async () => {
+  const h = setup(platform); await h.observe();
+  const capture = await h.window.__capCaptureNetworkJson();
+  const requests = h.requests.length;
+  const result = await h.window.__capMeasureNetworkJson();
+  assert.equal(result.characterCount, capture.text.length);
+  assert.deepEqual(Object.keys(result), ["characterCount"]);
+  assert.ok(h.requests.length > requests);
+  if (platform === "deepseek") {
+    assert.ok(h.replies.at(-1).characterCount > 0);
+    assert.equal(h.replies.at(-1).capture, undefined);
+  }
+});
 for (const platform of ["gemini", "grok", "deepseek"]) test(`${platform}: successful JSON records transport and transcript headroom without content`, async () => {
   const h = setup(platform); await h.observe();
   const capture = await h.window.__capCaptureNetworkJson();
@@ -56,6 +69,74 @@ test("DeepSeek distinguishes a streamed raw excess from an oversized selected tr
     assert.ok(error.jsonCapture.raw_bytes < 6000000);
     return true;
   });
+});
+
+test("DeepSeek: fresh size check keeps downloading healthy files after another file fails", async () => {
+  const f = deepseekUploads(2);
+  f.files[f.uploads[1].id] = "x".repeat(500001);
+  f.uploads[1].file_size = 500001;
+  let historyReads = 0;
+  const h = setup("deepseek", f, { fetchImpl: request => {
+    if (request.url.pathname.includes("history_messages")) { historyReads++; return Response.json(f.data); }
+    const id = `file-${request.url.searchParams.get("file_id")}`;
+    if (id === f.uploads[0].id) throw new TypeError("PRIVATE_FILE_DOWNLOAD_FAILURE");
+    return new Response(f.files[id], { headers: { "content-type": "text/plain" } });
+  } });
+  await h.observe();
+  await assert.rejects(h.window.__capCaptureNetworkJson());
+  const result = await h.window.__capMeasureNetworkJson();
+  assert.equal(historyReads, 2, "Size checking must fetch again, not reuse the failed capture's history.");
+  assert.ok(result.characterCount > 500000, "The successfully downloaded file must contribute to the count.");
+  assert.deepEqual(Object.keys(result), ["characterCount"]);
+  assert.doesNotMatch(JSON.stringify(result), /PRIVATE|SENTINEL|source-/);
+});
+
+test("DeepSeek: count-only failures leave a usable lower bound without weakening ordinary capture", async () => {
+  const f = deepseekUploads(3);
+  f.uploads[0].signed_path = "https://other.example/api/file?file_id=upload-0";
+  const h = setup("deepseek", f, { fetchImpl: request => {
+    if (request.url.pathname.includes("history_messages")) return Response.json(f.data);
+    const id = `file-${request.url.searchParams.get("file_id")}`;
+    if (id === f.uploads[1].id) throw new TypeError("PRIVATE_FILE_DOWNLOAD_FAILURE");
+    return new Response(f.files[id], { headers: { "content-type": "text/plain" } });
+  } });
+  await h.observe();
+  const result = await h.window.__capMeasureNetworkJson();
+  const healthyOnly = h.api.deepseek(f.data, "smoke", { [f.uploads[2].id]: f.files[f.uploads[2].id] }, { set() {}, transcript: () => true }, true);
+  assert.equal(result.characterCount, healthyOnly.text.length);
+  assert.ok(result.characterCount < 500000);
+  assert.equal(h.requests.filter(request => request.url.hostname === "other.example").length, 0);
+  assert.equal(h.requests.filter(request => request.url.searchParams.get("file_id") === "upload-2").length, 1);
+  await assert.rejects(h.window.__capCaptureNetworkJson(), error => error.captureFailureReason === "incomplete");
+});
+
+test("DeepSeek: fresh size check selects the current branch and keeps the exact 500k boundary", async () => {
+  for (const extra of [0, 1]) {
+    const f = fixtures("deepseek", "smoke", 1);
+    const messages = f.data.data.biz_data.chat_messages;
+    const prefix = "DeepSeek conversation:\n\nUser: x\n\nAssistant: ";
+    messages[0].fragments = [{ type: "REQUEST", content: "x" }];
+    messages[1].fragments = [{ type: "RESPONSE", content: "a".repeat(500000 - prefix.length + extra) }];
+    messages.push({ message_id: 100, parent_id: null, role: "ASSISTANT", fragments: [{ type: "RESPONSE", content: "z".repeat(500001) }] });
+    const h = setup("deepseek", f); await h.observe();
+    const result = await h.window.__capMeasureNetworkJson();
+    assert.equal(result.characterCount, 500000 + extra);
+    assert.equal(h.requests.length, 1);
+  }
+});
+
+test("DeepSeek: a count from a changed native session cannot stop the DOM attempt", async () => {
+  const f = fixtures("deepseek", "smoke", 1);
+  const h = setup("deepseek", f, { fetchImpl: request => {
+    if (request.url.pathname.includes("history_messages")) return Response.json(f.data);
+    const xhr = h.newXhr();
+    xhr.open("GET", `${h.location.origin}/api/v0/session`);
+    xhr.setRequestHeader("authorization", "Bearer CHANGED_SESSION");
+    xhr.send();
+    return new Response(f.files[f.file.id], { headers: { "content-type": "text/plain" } });
+  } });
+  await h.observe();
+  await assert.rejects(h.window.__capMeasureNetworkJson(), error => error.diagnosticCode === "conversation_changed");
 });
 test("DeepSeek logs supported manifest excess and ignores a large PDF without downloading it", async () => {
   const f = fixtures("deepseek"); f.file.file_size = 2400000;
@@ -559,7 +640,7 @@ test("DeepSeek: one incomplete upload cancels siblings before fallback or a fres
   });
   assert.equal(h.requests.length, 5, "failure stops queued downloads");
   assert.equal(aborted.length, 3);
-  assert.equal(h.window.__capNetworkFetchState.version, 20);
+  assert.equal(h.window.__capNetworkFetchState.version, 21);
   assert.ok(h.replies.every(reply => !reply.capture));
   assert.equal(h.navigationListeners(), 0);
   assert.equal(h.listeners.size, 2);
@@ -640,7 +721,7 @@ for (const platform of ["gemini", "grok", "deepseek"]) test(`${platform}: the pr
   old.version = platform === "deepseek" ? 17 : platform === "gemini" ? 9 : 7;
   h.reinstall(files[1]);
   assert.notEqual(h.window.__capNetworkFetchState, old);
-  assert.equal(h.window.__capNetworkFetchState.version, platform === "deepseek" ? 20 : platform === "grok" ? 16 : 13);
+  assert.equal(h.window.__capNetworkFetchState.version, platform === "deepseek" ? 21 : platform === "grok" ? 17 : 14);
   assert.equal(h.listeners.size, 2);
   assert.equal((await h.window.__capCaptureNetworkJson()).text, h.fixture.expected);
 });

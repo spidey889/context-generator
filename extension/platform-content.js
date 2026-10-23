@@ -1342,6 +1342,7 @@
       throw error;
     }
     trace?.sourceGuard?.check();
+    if (trace?.domSizeCheck?.active && trace.domSizeCheck.error) throw trace.domSizeCheck.error;
   }
 
   function createTransferCancelledError() {
@@ -1569,6 +1570,7 @@
       sourceReplySnapshot = { trace: transferTrace, url: window.location.href, text: scrapeConversationText() };
       return;
     }
+    startDomCaptureSizeCheck(transferTrace);
     sourceScrollTargetsCache = null;
     chatGptConversationScrollRootCache = null;
     // Captured panel text belongs only to one transfer. Reset both collections so
@@ -7643,15 +7645,40 @@
     entry.state = null;
   }
 
-  function captureSourceJson(expectedPath, shouldRead = () => true) {
+  function startDomCaptureSizeCheck(trace) {
+    if (!trace || trace.domSizeCheck || !hasSavedSourceConversation()) return;
+    const state = { active: true, error: null };
+    trace.domSizeCheck = state;
+    const sourceUrl = window.location.href;
+    const isCurrent = () => state.active && instanceActive && isRunning && activeTransferTrace === trace
+      && !trace.cancelled && !trace.expired && window.location.href === sourceUrl;
+    const expectedPath = currentPlatform.id === "grok" ? sourceUrl : window.location.pathname;
+    // Start DOM work immediately. This is a NEW native read alongside it, never
+    // the picker's earlier history or a replacement JSON carry. Count whatever
+    // chat/file text can be read; unknown/missing text cannot prove excess.
+    captureSourceJson(expectedPath, isCurrent, true).then(result => {
+      if (!isCurrent()) return;
+      try { trace.sourceGuard?.check(); } catch { return; }
+      if (!Number.isSafeInteger(result?.characterCount) || result.characterCount <= MAX_TRANSFER_CONVERSATION_CHARS) return;
+      state.error = Object.assign(new Error(OVERSIZED_CONVERSATION_ERROR_MESSAGE), {
+        code: "conversation_too_large",
+        diagnostics: { version: 1, capture_detail: "size_limit", capture_request_stage: "serialize", failure_site: "capture_serialize" }
+      });
+    }, () => {}); // An unavailable count must not fail or delay the DOM path.
+  }
+
+  function captureSourceJson(expectedPath, shouldRead = () => true, measureOnly = false) {
     // Native bridges allow one read at a time. A dismissed read may still be
     // finishing; queue its replacement rather than provoking a busy fallback.
     const transferTrace = isRunning ? activeTransferTrace : null;
     const pending = pendingJsonCapture.then(() => {
       if (!instanceActive || !shouldRead()) throw createDiagnosticError("The conversation changed during capture.", "conversation_changed");
       checkTransferDeadline(transferTrace);
-      const captureJson = currentPlatform.id === "claude" ? window.__capCaptureClaudeJson
-        : currentPlatform.id === "chatgpt" ? window.__capCaptureChatGptJson : window.__capCaptureNetworkJson;
+      const captureJson = measureOnly
+        ? currentPlatform.id === "claude" ? window.__capMeasureClaudeJson
+          : currentPlatform.id === "chatgpt" ? window.__capMeasureChatGptJson : window.__capMeasureNetworkJson
+        : currentPlatform.id === "claude" ? window.__capCaptureClaudeJson
+          : currentPlatform.id === "chatgpt" ? window.__capCaptureChatGptJson : window.__capCaptureNetworkJson;
       if (typeof captureJson !== "function") throw createDiagnosticError(`Refresh ${currentPlatform.name} to enable JSON capture.`, "capture_json_unavailable");
       return captureJson(expectedPath);
     });
@@ -7892,6 +7919,7 @@
         conversationText = await scrapeConversationTextWhenReady();
       }
       checkTransferDeadline(trace);
+      if (trace.domSizeCheck) trace.domSizeCheck.active = false;
       markCaptureDone(trace, conversationText);
 
       preparedDestinationPromise = preparedDestinationPromise || prepareDestinationTab(destinationId, trace);
@@ -10518,6 +10546,7 @@
   }
 
   function resetRunningFlag({ immediate = false } = {}) {
+    if (activeTransferTrace?.domSizeCheck) activeTransferTrace.domSizeCheck.active = false;
     sourceReplySnapshot = null;
     isRunning = false;
     activeTransferTrace = null;

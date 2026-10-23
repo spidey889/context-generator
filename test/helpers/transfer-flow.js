@@ -27,7 +27,7 @@ function loadTransferFlow(overrides) {
     CapTransferDiagnostics: require("../../extension/transfer-diagnostics.js"),
     getNow: () => Date.now(), isNoConversationError: error => error?.message === "No conversation",
     isExtensionContextInvalidated: error => /extension context invalidated/i.test(error?.message || ""),
-    URL, INLINE_PATHNAME_POLL_MS: 80, RUNNING_AUTO_RESET_MS: 360000,
+    URL, INLINE_PATHNAME_POLL_MS: 80, RUNNING_AUTO_RESET_MS: 360000, MAX_TRANSFER_CONVERSATION_CHARS: 500000,
     DESTINATION_SHEET_EXIT_MS: 0, NO_CONVERSATION_ERROR_MESSAGE: "No conversation",
     activeTransferTrace: null, isRunning: false, runningResetTimer: null,
     pickerJsonCapture: null, pendingJsonCapture: Promise.resolve(), instanceActive: true,

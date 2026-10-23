@@ -49,6 +49,20 @@ test("Claude structured turns preserve quoted role labels, thinking and source w
   assert.equal(capture.text, `Claude conversation:\n\nUser: ${text}\n\nAssistant: Private reasoning\n\nSelected answer`);
 });
 
+test("Claude fresh DOM size check counts readable file text despite another incomplete file", async () => {
+  const data = fixture();
+  data.chat_messages[0].attachments = [
+    { file_type: "txt", file_name: "", file_size: 100 },
+    { file_type: "txt", file_name: "", file_size: 500001, extracted_content: "x".repeat(500001) }
+  ];
+  const h = setup(data, { resources: [endpoint] });
+  await assert.rejects(h.window.__capCaptureClaudeJson());
+  const result = await h.window.__capMeasureClaudeJson();
+  assert.ok(result.characterCount > 500000);
+  assert.deepEqual(Object.keys(result), ["characterCount"]);
+  await assert.rejects(h.window.__capCaptureClaudeJson(), "Ordinary capture must still reject unreadable files.");
+});
+
 test("Claude follows the selected leaf despite malformed IDs and duplicate unused replies", async () => {
   const data = fixture();
   const [question, alternate, answer] = data.chat_messages;
