@@ -1,7 +1,8 @@
 param(
   [ValidateSet('test-a','test-b')][string]$TestKey = 'test-a',
+  [ValidateSet(500000,1000000)][int]$InputChars = 500000,
   [ValidateRange(1,3)][int]$Repeats = 2,
-  [string]$Output = 'evaluation/results/2026-10-23-dots-500k.json'
+  [string]$Output
 )
 $ErrorActionPreference = 'Stop'
 $capacityVaultPath = Join-Path $env:LOCALAPPDATA 'CapContext\testing'
@@ -20,7 +21,9 @@ try {
   $env:OPENROUTER_API_KEY = $capacityCredential.GetNetworkCredential().Password
   $env:CAP_CONTEXT_TEST_KEY_SLOT = $TestKey
   $env:CAP_CONTEXT_TEST_LEDGER_PATH = Join-Path $capacityVaultPath ($TestKey + '.usage.json')
-  & node (Join-Path $PSScriptRoot 'dots-500k.cjs') --repeats "$Repeats" --output $Output
+  $capacityArguments = @('--chars',"$InputChars",'--repeats',"$Repeats")
+  if ($Output) { $capacityArguments += @('--output',$Output) }
+  & node (Join-Path $PSScriptRoot 'dots-500k.cjs') @capacityArguments
   $capacityExitCode = $LASTEXITCODE
 } finally {
   foreach ($capacityName in $capacityEnvironmentNames) { [Environment]::SetEnvironmentVariable($capacityName,$capacitySavedEnvironment[$capacityName],'Process') }
