@@ -2,6 +2,10 @@
 
 A short history of decisions and regressions that matter when changing the code. Read the relevant section of [LOGIC.md](LOGIC.md) for current behavior, ownership and checks; use this file when you need to understand why an approach changed. Entries describe source changes unless deployment is explicitly recorded. Extension packaging, Web Store publication and backend deployment are separate.
 
+## 2026-10-24
+
+- **Reproduce a matching DeepSeek file-download failure.** Compared current public DeepSeek code with archived adapter v19. Native text preview follows redirects; our downloader rejects them. A real local HTTP redirect reproduced the saved file-stage network error with zero file bytes, while ordinary fetch read the same file. Also confirmed that our query setter can change signed-query encoding, unlike the native append-only builder. Recorded both findings and their limits in [the investigation](docs/deepseek-file-failure-investigation.md): neither establishes what happened to the original user's unavailable file. No runtime or hosted change.
+
 ## 2026-10-23
 
 - **Investigate the historical DeepSeek file failure.** Rechecked only the previously selected transfer: both v19 JSON attempts read history but failed at the file-body step before recording file bytes, then DOM fallback reached the transfer deadline. The stored broad error cannot establish the failing file, response or underlying cause, and online state does not prove a disconnection. Read-only hosted checks found the detailed-file validator migration absent and its new fields unsupported. Recorded the evidence and required rollout/reproduction in [the investigation note](docs/deepseek-file-failure-investigation.md); the focused three-phase diagnosis fixture passed. No runtime or hosted changes and no speculative historical cause.
