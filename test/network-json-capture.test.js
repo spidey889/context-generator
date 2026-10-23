@@ -1,5 +1,6 @@
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
+const http = require("node:http");
 const path = require("node:path");
 const vm = require("node:vm");
 const test = require("node:test");
@@ -586,6 +587,75 @@ for (const platform of ["gemini", "grok", "deepseek"]) {
   });
 }
 
+test("DeepSeek: redirected original files retain exact text and byte guards", async t => {
+  const f = fixtures("deepseek", "smoke", 1);
+  const original = f.files[f.file.id];
+  let mode = "complete", redirectedReads = 0;
+  const server = http.createServer((request, response) => {
+    assert.equal(request.headers.authorization, undefined);
+    assert.equal(request.headers.cookie, undefined);
+    assert.equal(request.headers.referer, undefined);
+    if (request.url.startsWith("/api/file?")) {
+      response.writeHead(302, { Location: "/original" }); response.end(); return;
+    }
+    redirectedReads++;
+    response.writeHead(200, { "Content-Type": "text/plain" });
+    response.end(mode === "short" ? original.slice(0, -1) : mode === "excess" ? original + "x" : original);
+  });
+  await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
+  t.after(() => new Promise(resolve => server.close(resolve)));
+  const origin = "http://127.0.0.1:" + server.address().port;
+  for (mode of ["complete", "short", "excess"]) {
+    const h = setup("deepseek", f, { fetchImpl: request => {
+      if (request.url.pathname.includes("history_messages")) {
+        assert.equal(request.options.redirect, "error", "Authenticated history must never follow redirects.");
+        return Response.json(f.data);
+      }
+      return fetch(origin + request.url.pathname + request.url.search, request.options);
+    } });
+    await h.observe();
+    if (mode === "complete") {
+      assert.equal((await h.window.__capCaptureNetworkJson()).text, f.expected);
+      assert.equal((await h.window.__capMeasureNetworkJson()).characterCount, f.expected.length);
+    } else await assert.rejects(h.window.__capCaptureNetworkJson(), error =>
+      error.jsonCapture.failure_check === "attachment_length_mismatch");
+    const fileRequest = h.requests.find(request => request.url.hostname === "files.deepseeksvc.com");
+    assert.equal(fileRequest.options.credentials, "omit");
+    assert.equal(fileRequest.options.headers, undefined);
+    assert.equal(fileRequest.options.referrerPolicy, "no-referrer");
+  }
+  assert.equal(redirectedReads, 4, "Capture, measurement and rejected byte guards must reach the redirected file.");
+});
+
+test("Network: authenticated history never follows a redirect", async t => {
+  let redirectedReads = 0;
+  const server = http.createServer((request, response) => {
+    if (request.url === "/redirect-target") { redirectedReads++; response.end("{}"); return; }
+    response.writeHead(302, { Location: "/redirect-target" }); response.end();
+  });
+  await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
+  t.after(() => new Promise(resolve => server.close(resolve)));
+  const origin = "http://127.0.0.1:" + server.address().port;
+  for (const platform of ["gemini", "grok", "deepseek"]) {
+    const h = setup(platform, fixtures(platform), { fetchImpl: request =>
+      fetch(origin + request.url.pathname, request.options) });
+    await h.observe();
+    await assert.rejects(h.window.__capCaptureNetworkJson(), error =>
+      error.jsonCapture.failure_check === "network_error" && error.jsonCapture.failure_stage === "history");
+  }
+  assert.equal(redirectedReads, 0, "A file compatibility fix must not redirect authenticated requests.");
+});
+
+test("DeepSeek: appending original-file type preserves the signed query encoding", async () => {
+  const f = fixtures("deepseek", "smoke", 1);
+  f.file.signed_path = "/file?file_id=test-paste&sig=a%20b~c%2fd";
+  const h = setup("deepseek", f);
+  await h.observe();
+  assert.equal((await h.window.__capCaptureNetworkJson()).text, f.expected);
+  assert.equal(h.requests.find(request => request.url.hostname === "files.deepseeksvc.com").url.search,
+    "?file_id=test-paste&sig=a%20b~c%2fd&ty=r");
+});
+
 clockTest("DeepSeek: independent uploads overlap in bounded waves and preserve exact source order", async () => {
   const f = deepseekUploads();
   let active = 0, peak = 0;
@@ -595,7 +665,8 @@ clockTest("DeepSeek: independent uploads overlap in bounded waves and preserve e
     assert.equal(request.options.credentials, "omit");
     assert.equal(request.options.headers, undefined);
     assert.equal(request.options.cache, undefined);
-    assert.equal(request.options.redirect, "error");
+    assert.equal(request.options.redirect, "follow");
+    assert.equal(request.options.referrerPolicy, "no-referrer");
     assert.equal(request.url.searchParams.get("ty"), "r");
     active++; peak = Math.max(peak, active);
     const id = `file-${request.url.searchParams.get("file_id")}`;
@@ -683,7 +754,7 @@ test("DeepSeek: one incomplete upload cancels siblings before fallback or a fres
   });
   assert.equal(h.requests.length, 5, "failure stops queued downloads");
   assert.equal(aborted.length, 3);
-  assert.equal(h.window.__capNetworkFetchState.version, 23);
+  assert.equal(h.window.__capNetworkFetchState.version, 24);
   assert.ok(h.replies.every(reply => !reply.capture));
   assert.equal(h.navigationListeners(), 0);
   assert.equal(h.listeners.size, 2);
@@ -760,11 +831,11 @@ for (const platform of ["gemini", "grok", "deepseek"]) test(`${platform}: the pr
   const h = setup(platform);
   await h.observe();
   const old = h.window.__capNetworkFetchState;
-  // Master and the late-auth branch both used DeepSeek v17 before integration.
-  old.version = platform === "deepseek" ? 17 : platform === "gemini" ? 9 : 7;
+  // Master and the million-character branch both used DeepSeek v23.
+  old.version = platform === "deepseek" ? 23 : platform === "gemini" ? 9 : 7;
   h.reinstall(files[1]);
   assert.notEqual(h.window.__capNetworkFetchState, old);
-  assert.equal(h.window.__capNetworkFetchState.version, platform === "deepseek" ? 23 : platform === "grok" ? 19 : 16);
+  assert.equal(h.window.__capNetworkFetchState.version, platform === "deepseek" ? 24 : platform === "grok" ? 19 : 16);
   assert.equal(h.listeners.size, 2);
   assert.equal((await h.window.__capCaptureNetworkJson()).text, h.fixture.expected);
 });
