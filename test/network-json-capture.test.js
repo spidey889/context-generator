@@ -125,6 +125,49 @@ test("DeepSeek: fresh size check selects the current branch and keeps the exact 
   }
 });
 
+test("DeepSeek: bad repeated-file metadata cannot erase another readable oversized file", async () => {
+  const f = deepseekUploads(2);
+  f.files[f.uploads[1].id] = "x".repeat(500001);
+  f.uploads[1].file_size = 500001;
+  f.data.data.biz_data.chat_messages[0].fragments[0].files.push({ ...f.uploads[0], status: "PENDING" });
+  const h = setup("deepseek", f, { fetchImpl: request => request.url.pathname.includes("history_messages")
+    ? Response.json(f.data)
+    : new Response(f.files[`file-${request.url.searchParams.get("file_id")}`], { headers: { "content-type": "text/plain" } }) });
+  await h.observe();
+  const result = await h.window.__capMeasureNetworkJson();
+  assert.ok(result.characterCount > 500000, "A malformed file entry must not discard healthy file text from the count.");
+});
+
+for (const platform of ["gemini", "grok", "deepseek"]) test(`${platform}: cancelling a background count releases native capture for the next transfer`, async () => {
+  let stall = true;
+  const started = {};
+  started.promise = new Promise(resolve => { started.resolve = resolve; });
+  const h = setup(platform, undefined, { fetchImpl: async request => {
+    if (stall) {
+      started.resolve();
+      return new Promise((_, reject) => request.options.signal.addEventListener("abort", () => reject(new Error("aborted")), { once: true }));
+    }
+    if (platform === "gemini") {
+      const args = JSON.parse(JSON.parse(new URLSearchParams(request.options.body).get("f.req"))[0][0][1]);
+      return new Response(rpcFrame(h.fixture.pages[args[2] ? Number(args[2].split("_")[1]) : 0]), { headers: { "content-type": "application/json" } });
+    }
+    if (platform === "grok") return Response.json(request.url.pathname.endsWith("response-node") ? h.fixture.nodes : { responses: h.fixture.responses.filter(message => JSON.parse(request.options.body).responseIds.includes(message.responseId)) });
+    return request.url.pathname.includes("history_messages") ? Response.json(h.fixture.data)
+      : new Response(h.fixture.files[h.fixture.file.id], { headers: { "content-type": "text/plain" } });
+  } });
+  await h.observe();
+  const controller = new AbortController();
+  const count = h.window.__capMeasureNetworkJson(undefined, controller.signal);
+  const stopped = count.then(() => false, () => true);
+  await started.promise;
+  controller.abort();
+  stall = false;
+  const outcome = await Promise.race([stopped, new Promise(resolve => setTimeout(() => resolve("still running"), 100))]);
+  if (outcome !== true) { h.navigate("/app/cleanup"); await stopped; }
+  assert.equal(outcome, true, "Cancellation should settle promptly, not hold the JSON queue for 25 seconds.");
+  assert.equal((await h.window.__capCaptureNetworkJson()).text, h.fixture.expected);
+});
+
 test("DeepSeek: a count from a changed native session cannot stop the DOM attempt", async () => {
   const f = fixtures("deepseek", "smoke", 1);
   const h = setup("deepseek", f, { fetchImpl: request => {
@@ -640,7 +683,7 @@ test("DeepSeek: one incomplete upload cancels siblings before fallback or a fres
   });
   assert.equal(h.requests.length, 5, "failure stops queued downloads");
   assert.equal(aborted.length, 3);
-  assert.equal(h.window.__capNetworkFetchState.version, 21);
+  assert.equal(h.window.__capNetworkFetchState.version, 22);
   assert.ok(h.replies.every(reply => !reply.capture));
   assert.equal(h.navigationListeners(), 0);
   assert.equal(h.listeners.size, 2);
@@ -721,7 +764,7 @@ for (const platform of ["gemini", "grok", "deepseek"]) test(`${platform}: the pr
   old.version = platform === "deepseek" ? 17 : platform === "gemini" ? 9 : 7;
   h.reinstall(files[1]);
   assert.notEqual(h.window.__capNetworkFetchState, old);
-  assert.equal(h.window.__capNetworkFetchState.version, platform === "deepseek" ? 21 : platform === "grok" ? 17 : 14);
+  assert.equal(h.window.__capNetworkFetchState.version, platform === "deepseek" ? 22 : platform === "grok" ? 18 : 15);
   assert.equal(h.listeners.size, 2);
   assert.equal((await h.window.__capCaptureNetworkJson()).text, h.fixture.expected);
 });

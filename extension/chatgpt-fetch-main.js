@@ -1,5 +1,5 @@
 (() => {
-  const version = 18;
+  const version = 19;
   // HTTP media types ignore casing; parameters do not change the base type.
   const responseMediaType = response => response.headers.get("content-type")?.split(";", 1)[0].trim().toLowerCase();
   // Match MIME metadata by base type, keeping the serializer's paste gate aligned.
@@ -17,7 +17,7 @@
   let auth = previous?.headers?.() || null;
   previous?.dispose();
   const nativeFetch = window.fetch;
-  let active = null;
+  let active = null, activeMeasurementId = null;
   let authRevision = 0;
   const authKeys = ["authorization", "chatgpt-account-id", "oai-did", "oai-language", "originator"];
 
@@ -44,8 +44,12 @@
 
   const receive = async event => {
     const request = event.data;
-    if (event.source !== window || event.origin !== location.origin || request?.channel !== channel || !["request", "ping"].includes(request.type)) return;
+    if (event.source !== window || event.origin !== location.origin || request?.channel !== channel || !["request", "ping", "cancel_measurement"].includes(request.type)) return;
     if (typeof request.id !== "string" || request.id.length > 80) return;
+    if (request.type === "cancel_measurement") {
+      if (activeMeasurementId === request.id) active?.abort("measurement_cancelled");
+      return;
+    }
     // Readiness probes never fetch session data or conversation messages.
     if (request.type === "ping") {
       if (window.fetch === wrappedFetch) window.postMessage({ channel, type: "pong", id: request.id, version }, location.origin);
@@ -58,6 +62,7 @@
     const metrics = globalThis.CapJsonCaptureMetrics.create({ adapter_version: version, deadline_ms: 15000, raw_limit_bytes: maxCaptureBytes,
       raw_bytes: 0, requests: 0, auth_refreshes: 0 });
     active = controller;
+    activeMeasurementId = request.measureOnly === true ? request.id : null;
     let navigated = false;
     const changed = event => {
       const destination = event?.destination ? new URL(event.destination.url) : location;
@@ -335,7 +340,7 @@
       clearTimeout(timer);
       window.navigation?.removeEventListener("navigate", changed);
       window.removeEventListener("popstate", changed);
-      if (active === controller) active = null;
+      if (active === controller) { active = null; activeMeasurementId = null; }
     }
     reply.jsonCapture = metrics.finish();
     window.postMessage(reply, location.origin);

@@ -275,7 +275,10 @@
             if (measureOnly && !Object.hasOwn(files, file.id)) { fileIds.add(file.id); continue; }
             if (!measureOnly) complete(file);
             const text = Object.hasOwn(files, file.id) ? files[file.id] : null;
-            if (file.status !== "SUCCESS" || typeof text !== "string" || new TextEncoder().encode(text).length !== file.file_size) fail("A DeepSeek text attachment is missing or incomplete.", undefined, "attachment_failed");
+            if (file.status !== "SUCCESS" || typeof text !== "string" || new TextEncoder().encode(text).length !== file.file_size) {
+              if (measureOnly) continue;
+              fail("A DeepSeek text attachment is missing or incomplete.", undefined, "attachment_failed");
+            }
             // Identity, not text equality, identifies a repeated attachment.
             // The same file may legitimately appear again in another turn.
             if (!fileIds.has(file.id)) {

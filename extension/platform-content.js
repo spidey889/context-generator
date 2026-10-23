@@ -662,6 +662,7 @@
   function teardownContextGeneratorInstance({ preserveSharedUi = false } = {}) {
     if (!instanceActive) return;
     if (!preserveSharedUi) stopSourceDestinationProgress(activeTransferTrace);
+    stopDomCaptureSizeCheck(activeTransferTrace);
     instanceActive = false;
     clearPickerJsonCapture();
     sourceReplySnapshot = null;
@@ -7647,7 +7648,7 @@
 
   function startDomCaptureSizeCheck(trace) {
     if (!trace || trace.domSizeCheck || !hasSavedSourceConversation()) return;
-    const state = { active: true, error: null };
+    const state = { active: true, error: null, controller: new AbortController() };
     trace.domSizeCheck = state;
     const sourceUrl = window.location.href;
     const isCurrent = () => state.active && instanceActive && isRunning && activeTransferTrace === trace
@@ -7667,6 +7668,15 @@
     }, () => {}); // An unavailable count must not fail or delay the DOM path.
   }
 
+  function stopDomCaptureSizeCheck(trace) {
+    const state = trace?.domSizeCheck;
+    if (!state) return;
+    state.active = false;
+    // End the native read too: dropping only its result leaves a slow probe at
+    // the head of the shared JSON queue and delays the user's next transfer.
+    state.controller.abort();
+  }
+
   function captureSourceJson(expectedPath, shouldRead = () => true, measureOnly = false) {
     // Native bridges allow one read at a time. A dismissed read may still be
     // finishing; queue its replacement rather than provoking a busy fallback.
@@ -7680,7 +7690,7 @@
         : currentPlatform.id === "claude" ? window.__capCaptureClaudeJson
           : currentPlatform.id === "chatgpt" ? window.__capCaptureChatGptJson : window.__capCaptureNetworkJson;
       if (typeof captureJson !== "function") throw createDiagnosticError(`Refresh ${currentPlatform.name} to enable JSON capture.`, "capture_json_unavailable");
-      return captureJson(expectedPath);
+      return captureJson(expectedPath, measureOnly ? transferTrace?.domSizeCheck?.controller.signal : undefined);
     });
     // Keep only completion in the queue; unused transcripts/errors are not retained.
     pendingJsonCapture = pending.then(() => {}, () => {});
@@ -7919,7 +7929,7 @@
         conversationText = await scrapeConversationTextWhenReady();
       }
       checkTransferDeadline(trace);
-      if (trace.domSizeCheck) trace.domSizeCheck.active = false;
+      stopDomCaptureSizeCheck(trace);
       markCaptureDone(trace, conversationText);
 
       preparedDestinationPromise = preparedDestinationPromise || prepareDestinationTab(destinationId, trace);
@@ -10546,7 +10556,7 @@
   }
 
   function resetRunningFlag({ immediate = false } = {}) {
-    if (activeTransferTrace?.domSizeCheck) activeTransferTrace.domSizeCheck.active = false;
+    stopDomCaptureSizeCheck(activeTransferTrace);
     sourceReplySnapshot = null;
     isRunning = false;
     activeTransferTrace = null;

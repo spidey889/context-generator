@@ -49,6 +49,25 @@ test("ChatGPT fresh DOM size check includes healthy pasted files after a failed 
   await assert.rejects(h.window.__capCaptureChatGptJson(), "Ordinary capture must still reject unreadable files.");
 });
 
+test("ChatGPT cancelling a background count releases the native read before a new capture", async () => {
+  const data = fixture();
+  let stalled = false, started;
+  const began = new Promise(resolve => { started = resolve; });
+  const h = setup(data, 200, { fetchImpl: request => {
+    if (!stalled) return Response.json(data);
+    started();
+    return new Promise((_, reject) => request.options.signal.addEventListener("abort", () => reject(new Error("aborted")), { once: true }));
+  } });
+  await discover(h); stalled = true;
+  const controller = new AbortController();
+  const count = h.window.__capMeasureChatGptJson(undefined, controller.signal);
+  const stopped = count.then(() => false, () => true);
+  await began;
+  controller.abort(); stalled = false;
+  assert.equal(await stopped, true);
+  assert.ok((await h.window.__capCaptureChatGptJson()).text.includes("Selected answer"));
+});
+
 test("ChatGPT keeps readable JSON text and flags malformed plain-text parts", async () => {
   for (const part of [{ text: "PRIVATE_DETAILS_SENTINEL" }, 42, null]) {
     const data = fixture();
@@ -772,7 +791,7 @@ test("ChatGPT replaces the previous hook without losing observed authentication"
   old.version = 8;
   harness.reinstall();
   assert.notEqual(harness.window.__capChatGptFetchState, old);
-  assert.equal(harness.window.__capChatGptFetchState.version, 18);
+  assert.equal(harness.window.__capChatGptFetchState.version, 19);
   assert.equal(harness.listeners(), 1);
   assert.equal((await harness.window.__capCaptureChatGptJson()).text,
     "ChatGPT conversation:\n\nUser: Original pasted document\n\nAssistant: Selected answer");

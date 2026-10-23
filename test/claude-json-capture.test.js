@@ -63,6 +63,24 @@ test("Claude fresh DOM size check counts readable file text despite another inco
   await assert.rejects(h.window.__capCaptureClaudeJson(), "Ordinary capture must still reject unreadable files.");
 });
 
+test("Claude cancelling a background count releases the native read before a new capture", async () => {
+  const data = fixture();
+  let stalled = true, started;
+  const began = new Promise(resolve => { started = resolve; });
+  const h = setup(data, { resources: [endpoint], fetchImpl: (_url, options) => {
+    if (!stalled) return Response.json(data);
+    started();
+    return new Promise((_, reject) => options.signal.addEventListener("abort", () => reject(new Error("aborted")), { once: true }));
+  } });
+  const controller = new AbortController();
+  const count = h.window.__capMeasureClaudeJson(undefined, controller.signal);
+  const stopped = count.then(() => false, () => true);
+  await began;
+  controller.abort(); stalled = false;
+  assert.equal(await stopped, true);
+  assert.ok((await h.window.__capCaptureClaudeJson()).text.includes("Selected answer"));
+});
+
 test("Claude follows the selected leaf despite malformed IDs and duplicate unused replies", async () => {
   const data = fixture();
   const [question, alternate, answer] = data.chat_messages;

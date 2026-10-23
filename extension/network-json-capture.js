@@ -24,20 +24,23 @@
     const pattern = platform === "gemini" ? /\/app\/([^/]+)\/?$/ : platform === "grok" ? /\/c\/([^/]+)\/?$/ : /\/a\/chat\/s\/([^/]+)\/?$/;
     return { chat: pathname.match(pattern)?.[1], selected };
   };
-  const waitForHook = (timeout, install = false) => new Promise(resolve => {
+  const waitForHook = (timeout, install = false, signal) => new Promise(resolve => {
+    if (signal?.aborted) return resolve(false);
     const id = crypto.randomUUID();
     let poll, settled = false;
-    const finish = ready => { if (settled) return; settled = true; clearTimeout(timer); clearTimeout(poll); window.removeEventListener("message", receive); resolve(ready); };
+    const finish = ready => { if (settled) return; settled = true; clearTimeout(timer); clearTimeout(poll); window.removeEventListener("message", receive); signal?.removeEventListener("abort", onAbort); resolve(ready); };
+    const onAbort = () => finish(false);
     const receive = event => {
       const reply = event.data;
-      if (event.source === window && event.origin === location.origin && reply?.channel === channel && reply.platform === platform && reply.type === "pong" && reply.id === id && reply.version === (platform === "deepseek" ? 21 : platform === "grok" ? 17 : 14)) finish(true);
+      if (event.source === window && event.origin === location.origin && reply?.channel === channel && reply.platform === platform && reply.type === "pong" && reply.id === id && reply.version === (platform === "deepseek" ? 22 : platform === "grok" ? 18 : 15)) finish(true);
     };
     const ping = () => { if (settled) return; window.postMessage({ channel, platform, type: "ping", id }, location.origin); poll = setTimeout(ping, 100); };
     const timer = setTimeout(() => finish(false), timeout);
+    signal?.addEventListener("abort", onAbort, { once: true });
     window.addEventListener("message", receive); ping();
     if (install) Promise.resolve().then(() => chrome.runtime.sendMessage({ type: "ENSURE_NETWORK_JSON_HOOK" })).then(reply => { if (!reply?.ok) finish(false); }, () => finish(false));
   });
-  window.__capCaptureNetworkJson = async (expectedPath = platform === "grok" ? location.href : location.pathname, metrics, measureOnly = false) => {
+  window.__capCaptureNetworkJson = async (expectedPath = platform === "grok" ? location.href : location.pathname, metrics, measureOnly = false, signal) => {
     const hookStarted = Date.now();
     // Grok branch selection lives in the query string; pin it with the clicked chat.
     const expectedUrl = platform === "grok" ? new URL(expectedPath, location.origin) : null;
@@ -56,18 +59,24 @@
     }
     try {
       if (pinChat && (expectedUrl && expectedUrl.origin !== location.origin || JSON.stringify(current()) !== JSON.stringify(before))) throw changedError("The conversation changed during capture.");
-      if (!await waitForHook(250)) {
-        if (typeof chrome === "undefined" || !chrome.runtime?.sendMessage || !await waitForHook(8000, true)) throw captureError("Fast capture isn't ready yet. Refresh this chat and try again, or turn off the lightning button.", "unavailable", "hook_unavailable", "hook");
+      if (!await waitForHook(250, false, signal)) {
+        if (signal?.aborted) throw new Error("Size check cancelled.");
+        if (typeof chrome === "undefined" || !chrome.runtime?.sendMessage || !await waitForHook(8000, true, signal)) throw captureError("Fast capture isn't ready yet. Refresh this chat and try again, or turn off the lightning button.", "unavailable", "hook_unavailable", "hook");
       }
+      if (signal?.aborted) throw new Error("Size check cancelled.");
       metrics.set({ hook_ms: Date.now() - hookStarted });
       if (changed || JSON.stringify(current()) !== JSON.stringify(before)) throw changedError("The conversation changed during capture.");
       return await new Promise((resolve, reject) => {
         const id = crypto.randomUUID();
-        const cleanup = () => { clearTimeout(timer); window.removeEventListener("message", receive); };
+        // Await the native cancellation reply before releasing the shared read
+        // queue; rejecting immediately could race a still-active old download.
+        const onAbort = () => window.postMessage({ channel, platform, type: "cancel_measurement", id }, location.origin);
+        const cleanup = () => { clearTimeout(timer); window.removeEventListener("message", receive); signal?.removeEventListener("abort", onAbort); };
         const receive = event => {
           const reply = event.data;
           if (event.source !== window || event.origin !== location.origin || reply?.channel !== channel || reply.platform !== platform || reply.type !== "response" || reply.id !== id) return;
           cleanup();
+          if (signal?.aborted) return reject(new Error("Size check cancelled."));
           metrics.adopt(reply.jsonCapture);
           if (changed || reply.chat !== before.chat || reply.selected !== before.selected || JSON.stringify(current()) !== JSON.stringify(before)) return reject(changedError("The conversation changed during capture."));
           if (measureOnly && reply.captureDetail === "conversation_changed") return reject(changedError("The conversation changed during capture."));
@@ -85,8 +94,10 @@
           resolve(capture);
         };
         const timer = setTimeout(() => { cleanup(); reject(captureError("Fast capture timed out. Refresh this chat or turn off the lightning button.", "timeout", "timeout", "history")); }, 27000);
+        signal?.addEventListener("abort", onAbort, { once: true });
         window.addEventListener("message", receive);
         window.postMessage({ channel, platform, type: "request", id, ...before, ...(measureOnly ? { measureOnly: true } : {}) }, location.origin);
+        if (signal?.aborted) onAbort();
       });
     } finally {
       if (pinChat) {
@@ -99,8 +110,8 @@
   // Only an accepted source attempt is persisted by platform-content. Unused
   // picker snapshots stay in memory and never create telemetry reports.
   const readCapture = window.__capCaptureNetworkJson;
-  window.__capMeasureNetworkJson = expectedPath => readCapture(expectedPath,
-    globalThis.CapJsonCaptureMetrics.create({ deadline_ms: 27000 }), true);
+  window.__capMeasureNetworkJson = (expectedPath, signal) => readCapture(expectedPath,
+    globalThis.CapJsonCaptureMetrics.create({ deadline_ms: 27000 }), true, signal);
   window.__capCaptureNetworkJson = async expectedPath => {
     const metrics = globalThis.CapJsonCaptureMetrics.create({ deadline_ms: 27000 });
     try {

@@ -123,6 +123,27 @@ test("DOM count failures, exact-cap results and late replies never delay or repl
   }
 });
 
+test("finishing DOM capture aborts its background count and releases the shared JSON queue", async () => {
+  for (const platform of ["claude", "chatgpt", "gemini", "grok", "deepseek"]) {
+    const { context, calls } = harness(platform, { enabled: false, mode: "success" });
+    const probe = deferred();
+    let probeSignal;
+    const key = platform === "claude" ? "__capMeasureClaudeJson" : platform === "chatgpt" ? "__capMeasureChatGptJson" : "__capMeasureNetworkJson";
+    context.window[key] = (_path, signal) => {
+      probeSignal = signal;
+      signal?.addEventListener("abort", () => probe.resolve({ characterCount: 1 }), { once: true });
+      return probe.promise;
+    };
+    context.prepareSourceForCapture = async () => context.startDomCaptureSizeCheck(context.activeTransferTrace);
+    await context.start("claude");
+    assert.equal(calls.flows.length, 1);
+    assert.equal(probeSignal?.aborted, true, "Completing DOM capture must stop its outstanding size read.");
+    context.resetRunningFlag();
+    assert.equal((await context.captureSourceJson(context.window.location.pathname)).text, "JSON transcript");
+    assert.equal(calls.json, 1, "The next read must not remain behind an abandoned count.");
+  }
+});
+
 test("picker prefetch waits out the remaining entrance without delaying reduced motion", async t => {
   t.mock.timers.enable({ apis: ["setTimeout"] });
   const start = source.indexOf("  function scheduleDestinationPickerWarmup()");

@@ -440,6 +440,7 @@ function loadPlatformContent(elements = [], hostname = "chatgpt.com", {
   if (storageSet) chrome.storage = { local: { set: storageSet } };
   const sandbox = {
     TextEncoder,
+    AbortController,
     navigator: { userAgent: "Chrome" },
     console: {
       ...console,

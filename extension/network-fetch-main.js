@@ -3,7 +3,7 @@
   if (!platform || !globalThis.__capNetworkJsonData) return;
   // Advance readiness version with adapter/contract changes: old MAIN closures
   // can survive extension reloads and must be replaced before a new capture.
-  const version = platform === "deepseek" ? 21 : platform === "grok" ? 17 : 14, channel = "cap-context-network-json-v1";
+  const version = platform === "deepseek" ? 22 : platform === "grok" ? 18 : 15, channel = "cap-context-network-json-v1";
   // Shared across unique text files; the final transcript has its own limits.
   const maxUploadBytes = 2100000;
   const previous = window.__capNetworkFetchState;
@@ -18,7 +18,7 @@
     const pattern = platform === "gemini" ? /\/app\/([^/]+)\/?$/ : platform === "grok" ? /\/c\/([^/]+)\/?$/ : /\/a\/chat\/s\/([^/]+)\/?$/;
     return { chat: location.pathname.match(pattern)?.[1], selected: platform === "grok" ? new URL(location.href).searchParams.get("rid") : null };
   };
-  let active = null, onAuthObserved = null;
+  let active = null, activeMeasurementId = null, onAuthObserved = null;
   const observe = (input, options) => {
     try {
       const url = new URL(input instanceof Request ? input.url : input, location.href);
@@ -104,6 +104,10 @@
   const receive = async event => {
     const request = event.data;
     if (event.source !== window || event.origin !== location.origin || request?.channel !== channel || request.platform !== platform || typeof request.id !== "string" || request.id.length > 80) return;
+    if (request.type === "cancel_measurement") {
+      if (activeMeasurementId === request.id) active?.abort("measurement_cancelled");
+      return;
+    }
     if (request.type === "ping") {
       publishReplyState();
       if (platform === "grok" || ownsObservation()) window.postMessage({ channel, type: "pong", platform, version, id: request.id }, location.origin);
@@ -123,6 +127,7 @@
       reply.characterCount = capture.text.length;
     };
     active = controller;
+    activeMeasurementId = measureOnly ? request.id : null;
     const timer = setTimeout(() => controller.abort("capture_timeout"), 25000);
     const check = () => {
       const now = current();
@@ -392,7 +397,7 @@
       clearTimeout(timer);
       window.navigation?.removeEventListener("navigate", changed);
       window.removeEventListener("popstate", changed);
-      if (active === controller) active = null;
+      if (active === controller) { active = null; activeMeasurementId = null; }
       // Release the native read before resolving its count, so a new transfer
       // cannot race cancelled sibling downloads and get a false busy failure.
       if (measureOnly) {
