@@ -131,6 +131,10 @@ fragments, chat/project IDs and unrecognized path text cannot enter the payload.
 
 ### JSON capture observations in 1.4.18
 
+DeepSeek v20 adds file-download failure details to each existing `json_attempts` entry (branch candidate). `failure_phase` distinguishes a rejected fetch before a response, rejected headers, interrupted body, decoding or parsing. `failure_error_type` is a fixed native error name, never its message. `failure_http_status` belongs to the actual failing request; omit it if no response arrived. The older `http_status` can describe an earlier successful history request and must not be used to infer that a file download succeeded.
+
+`failure_file_index` is a one-based position among unique supported files, with declared `failure_file_bytes`, observed `failure_read_bytes` and per-request `failure_request_ms`. `failure_response_type`, `failure_content_type`, `failure_online` and `failure_abort` use closed labels only. First-failure observations are captured before cancelling siblings and cannot be replaced by their aborts. No file name/ID, signed address, headers, credentials, body or exception prose is included. Browsers may conceal whether a rejected fetch was caused by CORS, redirect policy, DNS or another network failure; these logs preserve what was observed without inventing that cause. Retry, download and scrolling behavior are unchanged. Apply migration `20261023123334_deepseek_file_diagnostics`, then deploy compatible Edge/Vercel validators before updating/reloading the extension. This adds no table or column; existing deployed clients do not emit these fields yet.
+
 `diagnostics_revision = 3` adds optional `json_attempts` (at most two flat records):
 the current source's accepted picker read or fresh read, then the existing one
 temporary-error retry if used. Discarded or stale picker reads never create a

@@ -322,7 +322,12 @@ test("JSON observations are accepted or rejected identically by extension, relay
     failure_value: 8000000, failure_limit: 6000000, raw_limit_bytes: 6000000 };
   for (const [attempts, accepted] of [[[], true], [[entry], true], [[entry, { outcome: "succeeded", mode: "retry" }], true],
     [[entry, entry, entry], false], [[{ ...entry, url: "PRIVATE" }], false], [[{ ...entry, failure_check: "PRIVATE" }], false],
-    [[{ ...entry, raw_bytes: -1 }], false], [[{ ...entry, raw_bytes: 0.1 }], false]]) {
+    [[{ ...entry, raw_bytes: -1 }], false], [[{ ...entry, raw_bytes: 0.1 }], false],
+    [[{ ...entry, failure_phase: "fetch", failure_response_type: "none", failure_error_type: "TypeError",
+      failure_file_index: 1, failure_file_bytes: 100, failure_read_bytes: 0, failure_request_ms: 1200,
+      failure_abort: "none", failure_online: "online", failure_content_type: "missing" }], true],
+    [[{ ...entry, failure_error_type: "PRIVATE message" }], false], [[{ ...entry, failure_http_status: 0 }], false],
+    [[{ ...entry, failure_file_index: 0 }], false], [[{ ...entry, failure_file_bytes: 2100001 }], false]]) {
     const diagnostics = { version: 1, diagnostics_revision: 3, json_attempts: attempts };
     const payload = makeTelemetryPayload({ diagnostics });
     assert.equal(!!contract.validate(diagnostics), accepted);

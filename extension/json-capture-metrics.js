@@ -16,11 +16,11 @@
       }
     };
     const add = (key, value = 1) => set({ [key]: (data[key] || 0) + value });
-    const fail = (check, stage, source, value, limit, status) => {
+    const fail = (check, stage, source, value, limit, status, details) => {
       // Concurrent files may fail together. Retain the first actual guard,
       // rather than replacing it with a sibling's abort after cancellation.
       if (data.failure_check) return;
-      set({ failure_check: check, failure_stage: stage, failure_value_source: source,
+      set({ ...details, failure_check: check, failure_stage: stage, failure_value_source: source,
         failure_value: value, failure_limit: limit, http_status: status });
     };
     const response = (stage, limit, header, countRequest = true) => {

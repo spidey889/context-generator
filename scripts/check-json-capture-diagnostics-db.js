@@ -5,6 +5,10 @@ const { checkDiagnosticsSamples } = require("./check-diagnostics-samples.js");
 async function checkJsonCaptureDiagnostics(db, sql, previousSql = null) {
   const attemptRulesDeclaration = /attempt_rules constant jsonb := '([^']+)'::jsonb/;
   const attemptRules = structuredClone(contract.jsonAttemptSchema);
+  // Historical validators predate file-download detail. The forward migration
+  // below independently checks the complete current contract.
+  for (const key of ["failure_phase", "failure_error_type", "failure_response_type", "failure_abort", "failure_online",
+    "failure_content_type", "failure_http_status", "failure_file_index", "failure_file_bytes", "failure_read_bytes", "failure_request_ms"]) delete attemptRules[key];
   if (!sql.includes('"raw_response_stream_limit"')) attemptRules.failure_check.values = attemptRules.failure_check.values
     .filter(value => !["raw_response_stream_limit", "raw_remaining_files_limit"].includes(value));
   const attempt = { outcome: "failed", mode: "prefetch", failure_check: "raw_total_stream_limit", failure_value: 6000001,
@@ -54,4 +58,40 @@ async function checkJsonCaptureDiagnostics(db, sql, previousSql = null) {
   for (const key of ["text", "filename", "url", "token", "stack"]) samples.push({ label: `private key ${key}`, value: report([{ ...attempt, [key]: "PRIVATE" }]), expected: false });
   return checks + await checkDiagnosticsSamples(db, samples);
 }
-module.exports = { checkJsonCaptureDiagnostics };
+async function checkFileDiagnostics(db, sql) {
+  let checks = 0;
+  const rows = async (query, args = []) => (await db.query(query, args)).rows;
+  const snapshot = () => rows(`select
+    (select md5(jsonb_agg(to_jsonb(t) order by attempt_id)::text) from public.transfers t) transfers,
+    (select md5(jsonb_agg(to_jsonb(u) order by user_no)::text) from public.users u) users,
+    (select jsonb_agg(jsonb_build_array(proname,proacl,prosecdef,proconfig) order by proname) from pg_proc
+      where oid in ('public.is_valid_client_transfer_diagnostics(jsonb,integer)'::regprocedure,
+        'public.is_valid_transfer_diagnostics(jsonb,integer)'::regprocedure)) access`);
+  const before = await snapshot();
+  await db.exec(sql);
+  assert.deepEqual(await snapshot(), before); checks++;
+  const definition = (await rows("select pg_get_functiondef('public.is_valid_client_transfer_diagnostics(jsonb,integer)'::regprocedure) sql"))[0].sql;
+  assert.deepEqual(JSON.parse(definition.match(/attempt_rules constant jsonb := '([^']+)'::jsonb/)[1]), contract.jsonAttemptSchema); checks++;
+  const attempt = { outcome: "failed", mode: "prefetch", failure_check: "network_error", failure_stage: "attachment_body",
+    failure_phase: "fetch", failure_error_type: "TypeError", failure_response_type: "none", failure_file_index: 2,
+    failure_file_bytes: 61218, failure_read_bytes: 0, failure_request_ms: 2000, failure_abort: "none",
+    failure_online: "online", failure_content_type: "missing" };
+  const report = entry => ({ version: 1, json_attempts: [entry] });
+  const samples = [{ label: "file-fetch diagnosis", value: report(attempt), expected: true }];
+  for (const change of [{ failure_http_status: 403 }, { failure_phase: "body", failure_response_type: "cors", failure_read_bytes: 10 }])
+    samples.push({ label: "observed file response", value: report({ ...attempt, ...change }), expected: true });
+  for (const change of [{ url: "PRIVATE" }, { failure_error_type: "PRIVATE" }, { failure_phase: "PRIVATE" },
+    { failure_file_index: 0 }, { failure_file_bytes: 2100001 }, { failure_http_status: 0 }, { failure_read_bytes: -1 }])
+    samples.push({ label: "invalid/private file diagnosis", value: report({ ...attempt, ...change }), expected: false });
+  checks += await checkDiagnosticsSamples(db, samples);
+  await db.exec("begin; set local role service_role;");
+  try {
+    await db.query(`select public.record_transfer_event('c0de5724-0000-4000-8000-000000000001'::uuid,
+      'c0de5724-0000-4000-8000-000000000002',now(),'deepseek','chatgpt',null,'failed','capture_started',
+      'capture_failed','1.4.20',false,null,null,null,null,$1::jsonb)`, [JSON.stringify(report(attempt))]);
+    assert.deepEqual((await rows("select diagnostics from public.transfers where attempt_id='c0de5724-0000-4000-8000-000000000001'"))[0].diagnostics, report(attempt)); checks++;
+  } finally { await db.exec("rollback; reset role;"); }
+  assert.deepEqual(await snapshot(), before); checks++;
+  return checks;
+}
+module.exports = { checkJsonCaptureDiagnostics, checkFileDiagnostics };

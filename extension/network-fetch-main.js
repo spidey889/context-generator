@@ -3,7 +3,7 @@
   if (!platform || !globalThis.__capNetworkJsonData) return;
   // Advance readiness version with adapter/contract changes: old MAIN closures
   // can survive extension reloads and must be replaced before a new capture.
-  const version = platform === "deepseek" ? 19 : platform === "grok" ? 16 : 13, channel = "cap-context-network-json-v1";
+  const version = platform === "deepseek" ? 22 : platform === "grok" ? 18 : 15, channel = "cap-context-network-json-v1";
   // Shared across unique text files; the final transcript has its own limits.
   const maxUploadBytes = 2100000;
   const previous = window.__capNetworkFetchState;
@@ -18,7 +18,7 @@
     const pattern = platform === "gemini" ? /\/app\/([^/]+)\/?$/ : platform === "grok" ? /\/c\/([^/]+)\/?$/ : /\/a\/chat\/s\/([^/]+)\/?$/;
     return { chat: location.pathname.match(pattern)?.[1], selected: platform === "grok" ? new URL(location.href).searchParams.get("rid") : null };
   };
-  let active = null, onAuthObserved = null;
+  let active = null, activeMeasurementId = null, onAuthObserved = null;
   const observe = (input, options) => {
     try {
       const url = new URL(input instanceof Request ? input.url : input, location.href);
@@ -104,6 +104,10 @@
   const receive = async event => {
     const request = event.data;
     if (event.source !== window || event.origin !== location.origin || request?.channel !== channel || request.platform !== platform || typeof request.id !== "string" || request.id.length > 80) return;
+    if (request.type === "cancel_measurement") {
+      if (activeMeasurementId === request.id) active?.abort("measurement_cancelled");
+      return;
+    }
     if (request.type === "ping") {
       publishReplyState();
       if (platform === "grok" || ownsObservation()) window.postMessage({ channel, type: "pong", platform, version, id: request.id }, location.origin);
@@ -115,7 +119,15 @@
     if (active) { window.postMessage({ ...reply, error: "Another fast capture is running. Try again after it finishes.", captureFailureReason: "unavailable", captureDetail: "busy", captureRequestStage: "history" }, location.origin); return; }
     const controller = new AbortController();
     const metrics = globalThis.CapJsonCaptureMetrics.create({ adapter_version: version, deadline_ms: 25000, raw_limit_bytes: 6000000, raw_bytes: 0, requests: 0 });
+    const measureOnly = request.measureOnly === true;
+    // The independent DOM size check reports numbers only. Its best-effort
+    // strings must never pass through ordinary capture's acceptance path.
+    if (measureOnly) metrics.transcript = () => true;
+    const publishCount = capture => {
+      reply.characterCount = capture.text.length;
+    };
     active = controller;
+    activeMeasurementId = measureOnly ? request.id : null;
     const timer = setTimeout(() => controller.abort("capture_timeout"), 25000);
     const check = () => {
       const now = current();
@@ -132,14 +144,35 @@
     window.navigation?.addEventListener("navigate", changed);
     window.addEventListener("popstate", changed);
     let bytesRead = 0;
-    const read = async (url, options = {}, type = "json", expectedSize) => {
+    const read = async (url, options = {}, type = "json", expectedSize, fileIndex) => {
       check();
-      let response, reader;
+      let response, reader, size = 0, phase = "fetch";
+      const began = Date.now();
       const stage = type === "file" ? "attachment_body" : "history";
       const remaining = 6000000 - bytesRead;
       const observation = metrics.response(stage, remaining);
+      // Capture only what the browser actually exposed. A rejected fetch may
+      // hide CORS/redirect/DNS causes; never infer them or copy exception prose.
+      const failRead = (reason, error, source, value, limit) => {
+        const rules = globalThis.CapTransferDiagnostics.jsonAttemptSchema;
+        const mime = response?.headers?.get("content-type")?.split(";", 1)[0].trim().toLowerCase();
+        const errorType = error instanceof api.CaptureError ? "CaptureError" : error?.name;
+        metrics.fail(reason, stage, source, value, limit, response?.status, type === "file" ? {
+          failure_phase: phase,
+          failure_error_type: rules.failure_error_type.values.includes(errorType) ? errorType : "other",
+          failure_response_type: response ? (rules.failure_response_type.values.includes(response.type) ? response.type : "other") : "none",
+          failure_abort: !controller.signal.aborted ? "none" : ["capture_timeout", "attachment_failed"].includes(controller.signal.reason) ? controller.signal.reason : "other",
+          failure_online: typeof navigator === "undefined" || typeof navigator.onLine !== "boolean" ? "unknown" : navigator.onLine ? "online" : "offline",
+          failure_content_type: !mime ? "missing" : mime === "text/html" ? "html" : mime === "application/json" ? "json"
+            : mime === "application/octet-stream" ? "octet_stream" : mime.startsWith("text/") ? "text" : "other",
+          failure_http_status: response?.status,
+          failure_file_index: fileIndex, failure_file_bytes: expectedSize,
+          failure_read_bytes: size, failure_request_ms: Date.now() - began
+        } : undefined);
+      };
       try {
         response = await Reflect.apply(nativeFetch, window, [url, { credentials: "same-origin", ...options, redirect: "error", signal: controller.signal }]);
+        phase = "headers";
         check();
         if (response.status !== 200 || response.headers.get("content-range")) throw new api.CaptureError("The history request failed or returned a partial response.", response.status === 206 || response.headers.get("content-range") ? "incomplete" : "request_failed", response.status === 206 || response.headers.get("content-range") ? "partial_response" : "http_error");
         const contentType = response.headers.get("content-type") || "";
@@ -150,7 +183,7 @@
         metrics.set({ http_status: response.status });
         observation.header(header);
         if (Number(header) > 6000000 - bytesRead) {
-          metrics.fail("raw_header_limit", stage, "content_length", Number(header), 6000000 - bytesRead, response.status);
+          failRead("raw_header_limit", null, "content_length", Number(header), 6000000 - bytesRead);
           throw new api.CaptureError("size");
         }
         // Enforce the shared budget while reading, including history without
@@ -161,32 +194,35 @@
         // split UTF-8/BOM state; the final flush rejects an incomplete codepoint.
         const decoder = new TextDecoder("utf-8", { fatal: true, ignoreBOM: type === "file" });
         const parts = [];
-        let size = 0;
         if (reader) while (true) {
-          const { done, value } = await reader.read().catch(error => { metrics.fail(controller.signal.reason === "capture_timeout" ? "timeout" : controller.signal.aborted ? "conversation_changed" : "network_error", stage); throw error; });
+          phase = "body";
+          const { done, value } = await reader.read().catch(error => { failRead(controller.signal.reason === "capture_timeout" ? "timeout" : controller.signal.aborted ? "conversation_changed" : "network_error", error); throw error; });
           check();
           if (done) break;
           size += value.byteLength;
           bytesRead += value.byteLength;
           observation.chunk(value.byteLength);
           if (type === "file" && size > expectedSize) {
-            metrics.fail("attachment_length_mismatch", stage, "reader_bytes", size, expectedSize, response.status);
+            failRead("attachment_length_mismatch", null, "reader_bytes", size, expectedSize);
             throw new api.CaptureError("A text attachment is incomplete.", "incomplete", "attachment_failed");
           }
           if (bytesRead > 6000000) {
-            metrics.fail("raw_total_stream_limit", stage, "reader_bytes", bytesRead, 6000000, response.status);
+            failRead("raw_total_stream_limit", null, "reader_bytes", bytesRead, 6000000);
             throw new api.CaptureError("size");
           }
-          const part = metrics.timed("parse_ms", () => { try { return decoder.decode(value, { stream: true }); } catch (error) { metrics.fail("invalid_utf8", stage); throw error; } });
+          phase = "decode";
+          const part = metrics.timed("parse_ms", () => { try { return decoder.decode(value, { stream: true }); } catch (error) { failRead("invalid_utf8", error); throw error; } });
           if (part) parts.push(part);
         }
         check();
-        try { parts.push(decoder.decode()); } catch (error) { metrics.fail("invalid_utf8", stage); throw error; }
+        phase = "decode";
+        try { parts.push(decoder.decode()); } catch (error) { failRead("invalid_utf8", error); throw error; }
         observation.end();
         const text = parts.join("");
+        phase = "parse";
         return type === "json" ? metrics.timed("parse_ms", () => JSON.parse(text)) : { text, size };
       } catch (error) {
-        metrics.fail(error?.captureDetail || (error?.name === "SyntaxError" ? "invalid_json" : "network_error"), stage, undefined, undefined, undefined, response?.status);
+        failRead(error?.captureDetail || (error?.name === "SyntaxError" ? "invalid_json" : "network_error"), error);
         // Per-read metadata stays on the error: overlapping attachment reads
         // must never replace the failing request's status with a sibling's.
         error.captureRequestStage = type === "file" ? "attachment_body" : "history";
@@ -237,7 +273,7 @@
           if (page.cursor !== null && (cursors.has(page.cursor) || !page.turns.length)) throw new api.CaptureError("Gemini history pagination did not advance.");
           cursors.add(page.cursor); args[2] = page.cursor;
         } while (args[2] !== null);
-        reply.capture = metrics.timed("serialize_ms", () => api.gemini(pages, chat, metrics));
+        reply.capture = metrics.timed("serialize_ms", () => api.gemini(pages, chat, metrics, measureOnly));
       } else if (platform === "grok") {
         const base = `/rest/app-chat/conversations/${encodeURIComponent(chat)}`;
         const nodes = await read(`${base}/response-node`);
@@ -252,7 +288,7 @@
           if (!Array.isArray(data?.responses)) throw new api.CaptureError("Grok returned incomplete message bodies.");
           responses.push(...data.responses);
         }
-        reply.capture = metrics.timed("serialize_ms", () => api.grok(nodes, responses, selected, metrics));
+        reply.capture = metrics.timed("serialize_ms", () => api.grok(nodes, responses, selected, metrics, measureOnly));
       } else {
         // Omitting x-device-id/cache client headers makes DeepSeek return a
         // full REPLACE snapshot. A MERGE/delta must never count as full history.
@@ -263,28 +299,46 @@
           files_supported: 0, files_ignored: 0, files_declared_bytes: 0, files_downloaded_bytes: 0 });
         const branch = api.deepseekBranch(data, chat);
         const files = Object.create(null);
+        const measureDeepseek = () => {
+          try { publishCount(api.deepseek(data, chat, files, metrics, true)); }
+          catch (error) {
+            // A file-only turn may have no readable text until its download
+            // finishes. Zero here means unknown content, never safe admission.
+            if (error.captureDetail !== "missing_text") throw error;
+            reply.characterCount = 0;
+          }
+        };
+        if (measureOnly) {
+          measureDeepseek();
+          // The fresh history alone can already prove excess. Otherwise fetch
+          // text files too; their contents may be what pushes it over the cap.
+          if (reply.characterCount > 500000) return;
+        }
         const uploads = new Map();
         let uploadBytes = 0;
         for (const message of branch) {
           if (message.role !== "USER") continue;
           for (const fragment of message.fragments || []) for (const file of fragment.type === "FILE" ? api.fileList(fragment.files) : []) {
-            if (!api.textFile(file)) { metrics.ignored(typeof file?.file_name === "string" && /\.pdf$/i.test(file.file_name) ? "pdf" : "other", file?.is_image === true); continue; }
-            if (file.status !== "SUCCESS" || !Number.isSafeInteger(file.file_size) || file.file_size < 0 || typeof file.signed_path !== "string") throw new api.CaptureError("A text attachment is unavailable or incomplete.", "incomplete", "attachment_failed");
-            // DeepSeek's native preview uses this signed file service with ty=r
-            // for original bytes. No session bearer/cookies go to that host.
-            const url = new URL(file.signed_path.startsWith("/") ? `https://files.deepseeksvc.com/api${file.signed_path}` : file.signed_path);
-            if (url.origin !== "https://files.deepseeksvc.com" || url.pathname !== "/api/file" || url.username || url.password || url.searchParams.get("file_id") !== file.id?.replace(/^file-/, "")) throw new api.CaptureError("A text attachment has an unsupported download address.", "incomplete", "attachment_failed");
-            url.searchParams.set("ty", "r");
-            if (uploads.has(file.id)) {
-              if (uploads.get(file.id).file.file_size !== file.file_size) throw new api.CaptureError("A text attachment is incomplete.", "incomplete", "attachment_failed");
-              continue;
-            }
-            uploadBytes += file.file_size;
-            metrics.add("files_supported"); metrics.set({ files_declared_bytes: uploadBytes });
-            if (uploadBytes > maxUploadBytes) { metrics.fail("supported_files_limit", "attachment_descriptor", "declared_files", uploadBytes, maxUploadBytes); throw Object.assign(
-              new api.CaptureError("Text attachments exceed the combined 2.1 MB capture limit.", "size_limit", "attachment_size_limit"),
-              { captureRequestStage: "attachment_descriptor" }); }
-            uploads.set(file.id, { file, url });
+            try {
+              if (!api.textFile(file)) { metrics.ignored(typeof file?.file_name === "string" && /\.pdf$/i.test(file.file_name) ? "pdf" : "other", file?.is_image === true); continue; }
+              if (file.status !== "SUCCESS" || !Number.isSafeInteger(file.file_size) || file.file_size < 0 || typeof file.signed_path !== "string") throw new api.CaptureError("A text attachment is unavailable or incomplete.", "incomplete", "attachment_failed");
+              // DeepSeek's native preview uses this signed file service with ty=r
+              // for original bytes. No session bearer/cookies go to that host.
+              const url = new URL(file.signed_path.startsWith("/") ? `https://files.deepseeksvc.com/api${file.signed_path}` : file.signed_path);
+              if (url.origin !== "https://files.deepseeksvc.com" || url.pathname !== "/api/file" || url.username || url.password || url.searchParams.get("file_id") !== file.id?.replace(/^file-/, "")) throw new api.CaptureError("A text attachment has an unsupported download address.", "incomplete", "attachment_failed");
+              url.searchParams.set("ty", "r");
+              if (uploads.has(file.id)) {
+                if (uploads.get(file.id).file.file_size !== file.file_size) throw new api.CaptureError("A text attachment is incomplete.", "incomplete", "attachment_failed");
+                continue;
+              }
+              const nextUploadBytes = uploadBytes + file.file_size;
+              metrics.add("files_supported"); metrics.set({ files_declared_bytes: nextUploadBytes });
+              if (nextUploadBytes > maxUploadBytes) { metrics.fail("supported_files_limit", "attachment_descriptor", "declared_files", nextUploadBytes, maxUploadBytes); throw Object.assign(
+                new api.CaptureError("Text attachments exceed the combined 2.1 MB capture limit.", "size_limit", "attachment_size_limit"),
+                { captureRequestStage: "attachment_descriptor" }); }
+              uploadBytes = nextUploadBytes;
+              uploads.set(file.id, { file, url });
+            } catch (error) { if (!measureOnly) throw error; }
           }
         }
         // Independent original-file reads overlap; serialization still follows
@@ -295,22 +349,35 @@
           try {
             while (next < pending.length) {
               check();
-              const { file, url } = pending[next++];
-              const content = await read(url.href, { credentials: "omit" }, "file", file.file_size);
-              if (content.size !== file.file_size) { metrics.fail("attachment_length_mismatch", "attachment_body", "reader_bytes", content.size, file.file_size); throw new api.CaptureError("A text attachment is incomplete.", "incomplete", "attachment_failed"); }
-              files[file.id] = content.text;
+              const fileIndex = next++;
+              const { file, url } = pending[fileIndex];
+              try {
+                const content = await read(url.href, { credentials: "omit" }, "file", file.file_size, fileIndex + 1);
+                if (content.size !== file.file_size) { metrics.fail("attachment_length_mismatch", "attachment_body", "reader_bytes", content.size, file.file_size); throw new api.CaptureError("A text attachment is incomplete.", "incomplete", "attachment_failed"); }
+                files[file.id] = content.text;
+                if (measureOnly) {
+                  measureDeepseek();
+                  if (reply.characterCount > 500000) { controller.abort("size_limit"); return; }
+                }
+              } catch (error) { if (!measureOnly) throw error; check(); }
             }
           } catch (error) {
-            if (!failure) { failure = error; controller.abort("attachment_failed"); }
+            if (!failure) { failure = error; if (!measureOnly) controller.abort("attachment_failed"); }
           }
         };
         // Wait for aborted siblings to settle before releasing active capture,
         // so fallback/retry cannot overlap stale downloads or accept partial text.
         await Promise.all(Array.from({ length: Math.min(4, pending.length) }, download));
-        if (failure) throw failure;
+        if (failure && !measureOnly) throw failure;
+        if (measureOnly) {
+          if (controller.signal.reason !== "size_limit") check();
+          measureDeepseek();
+          return;
+        }
         reply.capture = metrics.timed("serialize_ms", () => api.deepseek(data, chat, files, metrics));
       }
       check();
+      if (measureOnly) { publishCount(reply.capture); delete reply.capture; }
     } catch (error) {
       delete reply.capture;
       metrics.fail(error?.jsonFailureCheck || error?.captureDetail, error?.captureRequestStage || "serialize");
@@ -330,8 +397,15 @@
       clearTimeout(timer);
       window.navigation?.removeEventListener("navigate", changed);
       window.removeEventListener("popstate", changed);
-      if (active === controller) active = null;
+      if (active === controller) { active = null; activeMeasurementId = null; }
+      // Release the native read before resolving its count, so a new transfer
+      // cannot race cancelled sibling downloads and get a false busy failure.
+      if (measureOnly) {
+        delete reply.capture;
+        window.postMessage(reply, location.origin);
+      }
     }
+    if (measureOnly) return;
     reply.jsonCapture = metrics.finish();
     window.postMessage(reply, location.origin);
   };

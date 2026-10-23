@@ -1,5 +1,5 @@
 (() => {
-  const version = 12;
+  const version = 13;
   // HTTP media types ignore casing; parameters do not change the base type.
   const responseMediaType = response => response.headers.get("content-type")?.split(";", 1)[0].trim().toLowerCase();
   const maxHistoryBytes = 6000000;
@@ -8,7 +8,7 @@
   previous?.dispose();
   const nativeFetch = window.fetch;
   const endpoints = new Map();
-  let active = null;
+  let active = null, activeMeasurementId = null;
   const channel = "cap-context-claude-json-v2";
   const remember = input => {
     try {
@@ -40,6 +40,10 @@
     const request = event.data;
     if (event.source !== window || event.origin !== location.origin || request?.channel !== channel) return;
     if (typeof request.id !== "string" || request.id.length > 80) return;
+    if (request.type === "cancel_measurement") {
+      if (activeMeasurementId === request.id) active?.abort("measurement_cancelled");
+      return;
+    }
     if (request.type === "ping") {
       if (window.fetch === wrappedFetch) window.postMessage({ channel, type: "pong", id: request.id, version }, location.origin);
       return;
@@ -54,6 +58,7 @@
     const controller = new AbortController();
     const metrics = globalThis.CapJsonCaptureMetrics.create({ adapter_version: version, deadline_ms: 15000, raw_limit_bytes: maxHistoryBytes, raw_bytes: 0, requests: 0 });
     active = controller;
+    activeMeasurementId = request.measureOnly === true ? request.id : null;
     const timer = setTimeout(() => controller.abort("capture_timeout"), 15000);
     let captureFailureReason = "request_failed";
     let observation;
@@ -160,7 +165,7 @@
       clearTimeout(timer);
       window.navigation?.removeEventListener("navigate", changed);
       window.removeEventListener("popstate", changed);
-      if (active === controller) active = null;
+      if (active === controller) { active = null; activeMeasurementId = null; }
     }
     reply.jsonCapture = metrics.finish();
     window.postMessage(reply, location.origin);
