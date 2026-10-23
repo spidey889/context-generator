@@ -658,8 +658,8 @@ function networkSmokeFixture(platform) {
     const file = { ...fixture.file, id: `file-concurrent-${i}`, file_name: `original-${i}.py`, file_size: Buffer.byteLength(text), signed_path: `/file?file_id=concurrent-${i}&sig=SIGNED_SENTINEL` };
     fixture.files[file.id] = text;
     if (DEEPSEEK_DOM_SIZE_SMOKE && i === 1) {
-      fixture.files[file.id] = "x".repeat(500001);
-      file.file_size = 500001;
+      fixture.files[file.id] = "x".repeat(1000001);
+      file.file_size = 1000001;
     }
     fixture.data.data.biz_data.chat_messages[0].fragments[0].files.push(file);
     extraBodies.push(`Attachment: ${JSON.stringify(file.file_name)}\n\nFile contents (${file.file_size} UTF-8 bytes):\n${text}\nEnd attachment: ${JSON.stringify(file.file_name)}`);
@@ -2829,7 +2829,7 @@ async function run() {
         notice: Boolean(document.getElementById("context-generator-capture-notice")),
         error: document.getElementById("context-generator-error-text").textContent
       })`);
-      assert.match(result.error, /500,000/);
+      assert.match(result.error, /1,000,000/);
       assert.ok(state.jsonRequests - jsonRequestsBeforeTransfer >= 3, "Capture, retry and independent DOM count must each fetch fresh history.");
       assert.equal(state.summaryRequests.length, 0, "Oversized DOM recovery must stop before summary or paste.");
       const terminal = await waitFor(() => state.telemetryRequests.find(payload => payload.status === "failed"), "the DOM size-limit telemetry");
@@ -2839,7 +2839,7 @@ async function run() {
       assert.ok(terminal.diagnostics.json_fallback_code, "The transfer must actually enter DOM recovery.");
       assert.equal(terminal.diagnostics.json_attempts.length, 2, "The background measurement is not another JSON transfer attempt.");
       assert.equal(terminal.diagnostics.error_code, "conversation_too_large");
-      process.stdout.write("✓ Fresh background count included a healthy 500k text file despite a broken file and stopped DOM recovery before summary/paste.\n");
+      process.stdout.write("✓ Fresh background count included a healthy 1M text file despite a broken file and stopped DOM recovery before summary/paste.\n");
       return;
     }
     if (JSON_FALLBACK_SMOKE) {
