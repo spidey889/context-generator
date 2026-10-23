@@ -3,7 +3,7 @@
   if (!platform || !globalThis.__capNetworkJsonData) return;
   // Advance readiness version with adapter/contract changes: old MAIN closures
   // can survive extension reloads and must be replaced before a new capture.
-  const version = platform === "deepseek" ? 19 : platform === "grok" ? 16 : 13, channel = "cap-context-network-json-v1";
+  const version = platform === "deepseek" ? 20 : platform === "grok" ? 16 : 13, channel = "cap-context-network-json-v1";
   // Shared across unique text files; the final transcript has its own limits.
   const maxUploadBytes = 2100000;
   const previous = window.__capNetworkFetchState;
@@ -132,14 +132,35 @@
     window.navigation?.addEventListener("navigate", changed);
     window.addEventListener("popstate", changed);
     let bytesRead = 0;
-    const read = async (url, options = {}, type = "json", expectedSize) => {
+    const read = async (url, options = {}, type = "json", expectedSize, fileIndex) => {
       check();
-      let response, reader;
+      let response, reader, size = 0, phase = "fetch";
+      const began = Date.now();
       const stage = type === "file" ? "attachment_body" : "history";
       const remaining = 6000000 - bytesRead;
       const observation = metrics.response(stage, remaining);
+      // Capture only what the browser actually exposed. A rejected fetch may
+      // hide CORS/redirect/DNS causes; never infer them or copy exception prose.
+      const failRead = (reason, error, source, value, limit) => {
+        const rules = globalThis.CapTransferDiagnostics.jsonAttemptSchema;
+        const mime = response?.headers?.get("content-type")?.split(";", 1)[0].trim().toLowerCase();
+        const errorType = error instanceof api.CaptureError ? "CaptureError" : error?.name;
+        metrics.fail(reason, stage, source, value, limit, response?.status, type === "file" ? {
+          failure_phase: phase,
+          failure_error_type: rules.failure_error_type.values.includes(errorType) ? errorType : "other",
+          failure_response_type: response ? (rules.failure_response_type.values.includes(response.type) ? response.type : "other") : "none",
+          failure_abort: !controller.signal.aborted ? "none" : ["capture_timeout", "attachment_failed"].includes(controller.signal.reason) ? controller.signal.reason : "other",
+          failure_online: typeof navigator === "undefined" || typeof navigator.onLine !== "boolean" ? "unknown" : navigator.onLine ? "online" : "offline",
+          failure_content_type: !mime ? "missing" : mime === "text/html" ? "html" : mime === "application/json" ? "json"
+            : mime === "application/octet-stream" ? "octet_stream" : mime.startsWith("text/") ? "text" : "other",
+          failure_http_status: response?.status,
+          failure_file_index: fileIndex, failure_file_bytes: expectedSize,
+          failure_read_bytes: size, failure_request_ms: Date.now() - began
+        } : undefined);
+      };
       try {
         response = await Reflect.apply(nativeFetch, window, [url, { credentials: "same-origin", ...options, redirect: "error", signal: controller.signal }]);
+        phase = "headers";
         check();
         if (response.status !== 200 || response.headers.get("content-range")) throw new api.CaptureError("The history request failed or returned a partial response.", response.status === 206 || response.headers.get("content-range") ? "incomplete" : "request_failed", response.status === 206 || response.headers.get("content-range") ? "partial_response" : "http_error");
         const contentType = response.headers.get("content-type") || "";
@@ -150,7 +171,7 @@
         metrics.set({ http_status: response.status });
         observation.header(header);
         if (Number(header) > 6000000 - bytesRead) {
-          metrics.fail("raw_header_limit", stage, "content_length", Number(header), 6000000 - bytesRead, response.status);
+          failRead("raw_header_limit", null, "content_length", Number(header), 6000000 - bytesRead);
           throw new api.CaptureError("size");
         }
         // Enforce the shared budget while reading, including history without
@@ -161,32 +182,35 @@
         // split UTF-8/BOM state; the final flush rejects an incomplete codepoint.
         const decoder = new TextDecoder("utf-8", { fatal: true, ignoreBOM: type === "file" });
         const parts = [];
-        let size = 0;
         if (reader) while (true) {
-          const { done, value } = await reader.read().catch(error => { metrics.fail(controller.signal.reason === "capture_timeout" ? "timeout" : controller.signal.aborted ? "conversation_changed" : "network_error", stage); throw error; });
+          phase = "body";
+          const { done, value } = await reader.read().catch(error => { failRead(controller.signal.reason === "capture_timeout" ? "timeout" : controller.signal.aborted ? "conversation_changed" : "network_error", error); throw error; });
           check();
           if (done) break;
           size += value.byteLength;
           bytesRead += value.byteLength;
           observation.chunk(value.byteLength);
           if (type === "file" && size > expectedSize) {
-            metrics.fail("attachment_length_mismatch", stage, "reader_bytes", size, expectedSize, response.status);
+            failRead("attachment_length_mismatch", null, "reader_bytes", size, expectedSize);
             throw new api.CaptureError("A text attachment is incomplete.", "incomplete", "attachment_failed");
           }
           if (bytesRead > 6000000) {
-            metrics.fail("raw_total_stream_limit", stage, "reader_bytes", bytesRead, 6000000, response.status);
+            failRead("raw_total_stream_limit", null, "reader_bytes", bytesRead, 6000000);
             throw new api.CaptureError("size");
           }
-          const part = metrics.timed("parse_ms", () => { try { return decoder.decode(value, { stream: true }); } catch (error) { metrics.fail("invalid_utf8", stage); throw error; } });
+          phase = "decode";
+          const part = metrics.timed("parse_ms", () => { try { return decoder.decode(value, { stream: true }); } catch (error) { failRead("invalid_utf8", error); throw error; } });
           if (part) parts.push(part);
         }
         check();
-        try { parts.push(decoder.decode()); } catch (error) { metrics.fail("invalid_utf8", stage); throw error; }
+        phase = "decode";
+        try { parts.push(decoder.decode()); } catch (error) { failRead("invalid_utf8", error); throw error; }
         observation.end();
         const text = parts.join("");
+        phase = "parse";
         return type === "json" ? metrics.timed("parse_ms", () => JSON.parse(text)) : { text, size };
       } catch (error) {
-        metrics.fail(error?.captureDetail || (error?.name === "SyntaxError" ? "invalid_json" : "network_error"), stage, undefined, undefined, undefined, response?.status);
+        failRead(error?.captureDetail || (error?.name === "SyntaxError" ? "invalid_json" : "network_error"), error);
         // Per-read metadata stays on the error: overlapping attachment reads
         // must never replace the failing request's status with a sibling's.
         error.captureRequestStage = type === "file" ? "attachment_body" : "history";
@@ -295,8 +319,9 @@
           try {
             while (next < pending.length) {
               check();
-              const { file, url } = pending[next++];
-              const content = await read(url.href, { credentials: "omit" }, "file", file.file_size);
+              const fileIndex = next++;
+              const { file, url } = pending[fileIndex];
+              const content = await read(url.href, { credentials: "omit" }, "file", file.file_size, fileIndex + 1);
               if (content.size !== file.file_size) { metrics.fail("attachment_length_mismatch", "attachment_body", "reader_bytes", content.size, file.file_size); throw new api.CaptureError("A text attachment is incomplete.", "incomplete", "attachment_failed"); }
               files[file.id] = content.text;
             }

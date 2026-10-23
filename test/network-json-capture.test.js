@@ -162,6 +162,60 @@ function deepseekUploads(count = 6) {
   return f;
 }
 
+test("DeepSeek: diagnosis distinguishes file fetch rejection, HTTP rejection and interrupted body", async () => {
+  for (const phase of ["fetch", "headers", "body"]) {
+    const f = deepseekUploads(1);
+    let reads = 0;
+    const h = setup("deepseek", f, { fetchImpl: async request => {
+      if (request.url.pathname.includes("history_messages")) return Response.json(f.data);
+      if (phase === "fetch") throw new TypeError("PRIVATE file address or browser message");
+      if (phase === "headers") return new Response("PRIVATE rejected body", { status: 403 });
+      return { status: 200, type: "cors", headers: new Headers({ "content-type": "text/plain" }),
+        body: { getReader: () => ({ read: async () => {
+          if (!reads++) return { done: false, value: new TextEncoder().encode("ab") };
+          throw new TypeError("PRIVATE interrupted file");
+        }, cancel: async () => {}, releaseLock() {} }) } };
+    } });
+    vm.runInContext("globalThis.navigator = { onLine: true }", h.context);
+    await h.observe();
+    await assert.rejects(h.window.__capCaptureNetworkJson(), error => {
+      const stats = error.jsonCapture;
+      assert.equal(stats.failure_phase, phase);
+      assert.equal(stats.failure_file_index, 1);
+      assert.equal(stats.failure_file_bytes, f.uploads[0].file_size);
+      assert.equal(stats.failure_read_bytes, phase === "body" ? 2 : 0);
+      assert.equal(stats.failure_error_type, phase === "headers" ? "CaptureError" : "TypeError");
+      assert.equal(stats.failure_response_type, phase === "fetch" ? "none" : phase === "headers" ? "default" : "cors");
+      assert.equal(stats.failure_http_status, phase === "fetch" ? undefined : phase === "headers" ? 403 : 200);
+      assert.equal(stats.failure_abort, "none");
+      assert.equal(stats.failure_online, "online");
+      assert.ok(Number.isInteger(stats.failure_request_ms));
+      if (phase === "fetch") assert.equal(stats.http_status, 200, "History success must not masquerade as a file response.");
+      assert.doesNotMatch(JSON.stringify(stats), /PRIVATE|SIGNED_SENTINEL|AUTH_SENTINEL|source-0|files\.deepseeksvc/);
+      return true;
+    });
+  }
+});
+
+test("DeepSeek: aborted sibling cannot replace the first file's failure evidence", async () => {
+  const f = deepseekUploads(2);
+  const h = setup("deepseek", f, { fetchImpl: async request => {
+    if (request.url.pathname.includes("history_messages")) return Response.json(f.data);
+    if (request.url.searchParams.get("file_id") === "upload-0") return new Response(null, { status: 403 });
+    return new Promise((_, reject) => request.options.signal.addEventListener("abort", () =>
+      reject(Object.assign(new Error("PRIVATE sibling"), { name: "AbortError" })), { once: true }));
+  } });
+  await h.observe();
+  await assert.rejects(h.window.__capCaptureNetworkJson(), error => {
+    assert.equal(error.jsonCapture.failure_file_index, 1);
+    assert.equal(error.jsonCapture.failure_phase, "headers");
+    assert.equal(error.jsonCapture.failure_http_status, 403);
+    assert.equal(error.jsonCapture.failure_error_type, "CaptureError");
+    assert.equal(error.jsonCapture.failure_abort, "none");
+    return true;
+  });
+});
+
 clockTest("DeepSeek waits briefly for late native auth and does not delay ready sessions", async () => {
   for (const transport of ["xhr", "fetch"]) {
     const h = setup("deepseek"), started = Date.now();
@@ -505,7 +559,7 @@ test("DeepSeek: one incomplete upload cancels siblings before fallback or a fres
   });
   assert.equal(h.requests.length, 5, "failure stops queued downloads");
   assert.equal(aborted.length, 3);
-  assert.equal(h.window.__capNetworkFetchState.version, 19);
+  assert.equal(h.window.__capNetworkFetchState.version, 20);
   assert.ok(h.replies.every(reply => !reply.capture));
   assert.equal(h.navigationListeners(), 0);
   assert.equal(h.listeners.size, 2);
@@ -586,7 +640,7 @@ for (const platform of ["gemini", "grok", "deepseek"]) test(`${platform}: the pr
   old.version = platform === "deepseek" ? 17 : platform === "gemini" ? 9 : 7;
   h.reinstall(files[1]);
   assert.notEqual(h.window.__capNetworkFetchState, old);
-  assert.equal(h.window.__capNetworkFetchState.version, platform === "deepseek" ? 19 : platform === "grok" ? 16 : 13);
+  assert.equal(h.window.__capNetworkFetchState.version, platform === "deepseek" ? 20 : platform === "grok" ? 16 : 13);
   assert.equal(h.listeners.size, 2);
   assert.equal((await h.window.__capCaptureNetworkJson()).text, h.fixture.expected);
 });

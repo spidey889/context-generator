@@ -62,6 +62,12 @@
     failure_stage: enums.capture_request_stage,
     raw_response_stage: enums.capture_request_stage,
     raw_header_stage: enums.capture_request_stage,
+    failure_phase: ["fetch", "headers", "body", "decode", "parse"],
+    failure_error_type: [...enums.error_type, "CaptureError"],
+    failure_response_type: ["none", "basic", "cors", "default", "opaque", "opaqueredirect", "error", "other"],
+    failure_abort: ["none", "capture_timeout", "attachment_failed", "other"],
+    failure_online: ["online", "offline", "unknown"],
+    failure_content_type: ["text", "json", "html", "octet_stream", "other", "missing"],
     numeric_saturated: ["lower_bound"]
   };
   const jsonAttemptNumbers = ["adapter_version", "failure_value", "failure_limit", "http_status", "raw_bytes", "raw_limit_bytes",
@@ -69,11 +75,14 @@
     "descriptor_bytes", "file_body_bytes", "requests", "pages", "history_items", "selected_turns", "files_supported", "files_ignored",
     "files_ignored_pdf", "files_ignored_image", "files_ignored_other", "files_declared_bytes", "files_downloaded_bytes", "files_limit_bytes",
     "transcript_chars", "transcript_bytes", "transcript_char_limit", "transcript_byte_limit", "hook_ms", "auth_ms", "download_ms",
-    "parse_ms", "serialize_ms", "total_ms", "deadline_ms", "auth_refreshes"];
+    "parse_ms", "serialize_ms", "total_ms", "deadline_ms", "auth_refreshes", "failure_read_bytes", "failure_request_ms"];
   const jsonAttemptSchema = {
     ...Object.fromEntries(Object.entries(jsonAttemptEnums).map(([key, values]) => [key, { type: "string", values }])),
     ...Object.fromEntries(jsonAttemptNumbers.map(key => [key, { type: "number", max: 2147483647 }])),
-    http_status: { type: "number", min: 100, max: 599 }
+    http_status: { type: "number", min: 100, max: 599 },
+    failure_http_status: { type: "number", min: 100, max: 599 },
+    failure_file_index: { type: "number", min: 1, max: 2147483647 },
+    failure_file_bytes: { type: "number", max: 2100000 }
   };
   const booleans = ["online", "source_saved", "speed_enabled", "json_attempted", "source_changed", "cancelled",
     "destination_prepared", "prepared_reused", "prepared_rejected", "fresh_recovery", "script_injected",
@@ -245,11 +254,11 @@
       }
     };
     const add = (key, value = 1) => set({ [key]: (data[key] || 0) + value });
-    const fail = (check, stage, source, value, limit, status) => {
+    const fail = (check, stage, source, value, limit, status, details) => {
       // Concurrent files may fail together. Retain the first actual guard,
       // rather than replacing it with a sibling's abort after cancellation.
       if (data.failure_check) return;
-      set({ failure_check: check, failure_stage: stage, failure_value_source: source,
+      set({ ...details, failure_check: check, failure_stage: stage, failure_value_source: source,
         failure_value: value, failure_limit: limit, http_status: status });
     };
     const response = (stage, limit, header, countRequest = true) => {
