@@ -17,7 +17,7 @@ async function checkMillionCharacterLimits(db, sql) {
     occurred_at: new Date().toISOString(), environment: "development", provider: "openrouter", model: "dots-studio/dots-3-note-preview:free",
     failure_reason: "provider_timeout", phase: "waiting_answer", route_index: 1, request_attempt: 1,
     input_chars: 1000000, request_bytes: 3000000, max_output_tokens: 10000, elapsed_ms: 90000, budget_ms: 90000 };
-  const file = { version: 1, json_attempts: [{ outcome: "failed", failure_file_bytes: 4100000 }] };
+  const file = { version: 1, json_attempts: [{ outcome: "failed", mode: "fresh", failure_file_bytes: 4100000 }] };
   const validProvider = value => rows("select public.is_valid_provider_failure($1::jsonb) valid", [JSON.stringify(value)]);
   const validClient = value => rows("select public.is_valid_transfer_diagnostics($1::jsonb) valid", [JSON.stringify(value)]);
   equal((await validProvider(event))[0].valid, false);
@@ -28,12 +28,13 @@ async function checkMillionCharacterLimits(db, sql) {
     pg_get_functiondef('public.is_valid_client_transfer_diagnostics(jsonb,integer)'::regprocedure) client`))[0];
   equal(JSON.parse(definitions.provider.match(/rules constant jsonb := '([^']+)'::jsonb/)[1]), provider.schema);
   equal(JSON.parse(definitions.client.match(/attempt_rules constant jsonb := '([^']+)'::jsonb/)[1]), diagnostics.jsonAttemptSchema);
+  equal((await validClient(file))[0].valid, true);
   for (const count of [350000, 350001, 500000, 1000000, 1000001]) {
     const sample = { ...event, input_chars: count };
     equal((await validProvider(sample))[0].valid, provider.validate(sample) !== null);
   }
   for (const count of [2100000, 2100001, 4100000, 4100001]) {
-    const sample = { version: 1, json_attempts: [{ outcome: "failed", failure_file_bytes: count }] };
+    const sample = { version: 1, json_attempts: [{ outcome: "failed", mode: "fresh", failure_file_bytes: count }] };
     equal((await validClient(sample))[0].valid, diagnostics.validate(sample) !== null);
   }
   // Exercise the real RPC under its restricted role, not only the pure predicate.
