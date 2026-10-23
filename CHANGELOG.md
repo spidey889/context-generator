@@ -4,6 +4,8 @@ A short history of decisions and regressions that matter when changing the code.
 
 ## 2026-10-24
 
+- **Fix DeepSeek redirected-file compatibility.** By owner request, allow only validated, credential-free DeepSeek file GETs to follow redirects, matching native text preview; suppress the source referrer and keep authenticated history strict. Preserve signed query bytes when appending the original-file type. All existing descriptor, file/raw/transcript size, UTF-8, cancellation and four-download concurrency guards remain. Advance the DeepSeek hook/bridge together to v23. Added regressions that fail before the fix plus real cross-origin redirects in the ordinary isolated Brave fixture. This repairs a reproduced compatibility issue, not a proven diagnosis of the historical transfer; extension publication/reload remains separate.
+
 - **Reproduce a matching DeepSeek file-download failure.** Compared current public DeepSeek code with archived adapter v19. Native text preview follows redirects; our downloader rejects them. A real local HTTP redirect reproduced the saved file-stage network error with zero file bytes, while ordinary fetch read the same file. Also confirmed that our query setter can change signed-query encoding, unlike the native append-only builder. Recorded both findings and their limits in [the investigation](docs/deepseek-file-failure-investigation.md): neither establishes what happened to the original user's unavailable file. No runtime or hosted change.
 
 ## 2026-10-23

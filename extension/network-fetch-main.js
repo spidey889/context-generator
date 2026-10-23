@@ -3,7 +3,7 @@
   if (!platform || !globalThis.__capNetworkJsonData) return;
   // Advance readiness version with adapter/contract changes: old MAIN closures
   // can survive extension reloads and must be replaced before a new capture.
-  const version = platform === "deepseek" ? 22 : platform === "grok" ? 18 : 15, channel = "cap-context-network-json-v1";
+  const version = platform === "deepseek" ? 23 : platform === "grok" ? 18 : 15, channel = "cap-context-network-json-v1";
   // Shared across unique text files; the final transcript has its own limits.
   const maxUploadBytes = 2100000;
   const previous = window.__capNetworkFetchState;
@@ -171,7 +171,14 @@
         } : undefined);
       };
       try {
-        response = await Reflect.apply(nativeFetch, window, [url, { credentials: "same-origin", ...options, redirect: "error", signal: controller.signal }]);
+        // Native text preview follows its file service's redirects. Only these
+        // validated signed GETs may do so: never send login cookies or a chat
+        // referrer, and keep authenticated history requests redirect-strict.
+        const fileDownload = platform === "deepseek" && type === "file";
+        response = await Reflect.apply(nativeFetch, window, [url, { ...options,
+          credentials: fileDownload ? "omit" : options.credentials || "same-origin",
+          redirect: fileDownload ? "follow" : "error",
+          ...(fileDownload ? { referrerPolicy: "no-referrer" } : {}), signal: controller.signal }]);
         phase = "headers";
         check();
         if (response.status !== 200 || response.headers.get("content-range")) throw new api.CaptureError("The history request failed or returned a partial response.", response.status === 206 || response.headers.get("content-range") ? "incomplete" : "request_failed", response.status === 206 || response.headers.get("content-range") ? "partial_response" : "http_error");
@@ -326,7 +333,9 @@
               // for original bytes. No session bearer/cookies go to that host.
               const url = new URL(file.signed_path.startsWith("/") ? `https://files.deepseeksvc.com/api${file.signed_path}` : file.signed_path);
               if (url.origin !== "https://files.deepseeksvc.com" || url.pathname !== "/api/file" || url.username || url.password || url.searchParams.get("file_id") !== file.id?.replace(/^file-/, "")) throw new api.CaptureError("A text attachment has an unsupported download address.", "incomplete", "attachment_failed");
-              url.searchParams.set("ty", "r");
+              // Match the native append-only builder. URLSearchParams.set
+              // re-encodes existing signed query bytes (%20, ~, hex case).
+              url.search += (url.search ? "&" : "?") + "ty=r";
               if (uploads.has(file.id)) {
                 if (uploads.get(file.id).file.file_size !== file.file_size) throw new api.CaptureError("A text attachment is incomplete.", "incomplete", "attachment_failed");
                 continue;

@@ -59,8 +59,8 @@ The same archived-hook harness also reproduced the broad saved label for a
 rejected fetch, a first-body-read failure and a locked reader. An exposed HTTP
 403 instead produced `http_error`; an unsupported response type produced
 `non_json_response`. These alternatives prevent uniquely identifying the
-historical cause from this record. No runtime policy was changed based on the
-hypotheses, and no other user's files or additional transfer records were read.
+historical cause from this record. During that comparison, no runtime policy was changed and no other user's
+files or additional transfer records were read.
 
 ## Next useful step
 
@@ -77,5 +77,25 @@ reproducing the failure. Merely merging source does not enable these observation
 in installed clients or the hosted validator. Even the new fields cannot reveal
 browser-hidden CORS/DNS/redirect details without a browser network trace.
 
-No runtime fix or hosted change was made: the original file failure's root cause
-remains unproven. Status: **DONE_WITH_CONCERNS**.
+## Owner-approved compatibility fix
+
+The worktree branch now lets only validated DeepSeek file GETs follow redirects,
+with credentials omitted and no source referrer. History/RPC requests remain
+redirect-strict. Original signed query bytes are preserved when appending the
+file type. File identity, exact byte/UTF-8 validation, raw/transcript limits,
+cancellation and bounded download concurrency remain in place. The DeepSeek
+hook and bridge advance together to v23 so stale injected hooks are replaced.
+
+The two new regressions failed before this change and passed afterward: a real
+redirect now returns the exact file text (including measurement), short/excess
+bodies still fail, and signed query encoding stays intact. The ordinary Brave
+fixture now redirects file requests to a different loopback origin with CORS,
+checks credential/referrer isolation on both hops, and retains exact capture,
+four-way overlap and destination checks.
+
+Validation passed: 742 deterministic tests, both long-capture checks, the ordinary
+Brave redirected-file transfer and the Brave background-size rejection case.
+
+This fixes a demonstrated compatibility issue. The historical transfer's actual
+cause remains unproven, and no hosted migration or extension publication is
+implied. Status: **DONE_WITH_CONCERNS**.

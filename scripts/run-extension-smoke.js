@@ -672,7 +672,7 @@ function streamOversizedFixtureResponse(response, prefix, metrics, tailMegabytes
 }
 
 async function startFixtureServer() {
-  const state = { summaryRequests: [], destinationRequests: 0, jsonRequests: 0, sessionRequests: 0, pasteDescriptorRequests: 0, pasteContentRequests: 0, fileReadsActive: 0, fileReadsPeak: 0, chatgptRequestUrls: [], claudeRequestUrls: [] };
+  const state = { summaryRequests: [], destinationRequests: 0, jsonRequests: 0, sessionRequests: 0, pasteDescriptorRequests: 0, pasteContentRequests: 0, fileReadsActive: 0, fileReadsPeak: 0, fileRedirects: 0, chatgptRequestUrls: [], claudeRequestUrls: [] };
   const pickerLoadResponses = new Set();
   const pickerLoadImage = '<svg xmlns="http://www.w3.org/2000/svg" width="1" height="1"/>';
   state.pickerPreloadChecked = false;
@@ -717,6 +717,19 @@ async function startFixtureServer() {
       response.writeHead(200, { "Content-Type": "application/json" }); response.end("{}"); return;
     }
     if (NETWORK_SOURCE && url.pathname === "/api/file") {
+      state.fileRedirects++;
+      assert.equal(request.headers.authorization, undefined);
+      assert.equal(request.headers.cookie, undefined);
+      assert.equal(request.headers.referer, undefined);
+      // A different loopback hostname exercises a real cross-origin redirect
+      // and CORS in Brave, including credential/referrer isolation on both hops.
+      response.writeHead(302, { Location: `http://localhost:${server.address().port}/api/file-original${url.search}` });
+      response.end(); return;
+    }
+    if (NETWORK_SOURCE && url.pathname === "/api/file-original") {
+      response.setHeader("Access-Control-Allow-Origin", "*");
+      assert.equal(request.headers.cookie, undefined);
+      assert.equal(request.headers.referer, undefined);
       state.pasteContentRequests++;
       assert.equal(request.headers.authorization, undefined);
       const id = `file-${url.searchParams.get("file_id")}`;
@@ -742,6 +755,7 @@ async function startFixtureServer() {
     }
     if (NETWORK_SOURCE && ["/_/BardChatUi/data/batchexecute", "/rest/app-chat/conversations/smoke/response-node", "/rest/app-chat/conversations/smoke/load-responses", "/api/v0/chat/history_messages"].includes(url.pathname)) {
       state.jsonRequests++;
+      if (JSON_SOURCE === "deepseek") response.setHeader("Set-Cookie", "cap_file_smoke=SOURCE_COOKIE_SENTINEL; Path=/; SameSite=Lax");
       response.writeHead(200, { "Content-Type": "application/json" });
       if (JSON_SOURCE === "gemini") {
         let raw = ""; for await (const chunk of request) raw += chunk;
@@ -906,9 +920,10 @@ async function startFixtureServer() {
       return;
     }
     if (["/source", "/chat/smoke", "/c/smoke", "/app/smoke", "/a/chat/s/smoke"].includes(url.pathname)) {
-      if (url.pathname !== "/source") response.setHeader("Content-Security-Policy", "script-src 'nonce-smoke'; object-src 'none'; base-uri 'none'; connect-src 'self'");
+      const connectSrc = JSON_SOURCE === "deepseek" ? `'self' http://localhost:${server.address().port}` : "'self'";
+      if (url.pathname !== "/source") response.setHeader("Content-Security-Policy", "script-src 'nonce-smoke'; object-src 'none'; base-uri 'none'; connect-src " + connectSrc);
       if (process.env.CAP_CONTEXT_HANDOFF_CSP_SMOKE === "1") {
-        response.setHeader("Content-Security-Policy", "script-src 'nonce-smoke'; style-src-elem 'nonce-smoke'; style-src-attr 'unsafe-inline'; object-src 'none'; base-uri 'none'; connect-src 'self'");
+        response.setHeader("Content-Security-Policy", "script-src 'nonce-smoke'; style-src-elem 'nonce-smoke'; style-src-attr 'unsafe-inline'; object-src 'none'; base-uri 'none'; connect-src " + connectSrc);
       }
       response.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
       let page = url.pathname === "/chat/smoke"
@@ -2965,7 +2980,8 @@ async function run() {
         assert.equal(state.pasteContentRequests, JSON_SOURCE === "deepseek" ? 4 : 0);
         if (JSON_SOURCE === "deepseek") {
           assert.equal(state.fileReadsPeak, 4, "The installed extension must overlap independent original-file reads.");
-          process.stdout.write("✓ DeepSeek JSON: four overlapping original-file reads, exact source order/bytes and no credential leakage.\n");
+          assert.equal(state.fileRedirects, 4, "Each file must follow its redirect without retrying history or falling back.");
+          process.stdout.write("✓ DeepSeek JSON: four redirected cross-origin file reads, exact source order/bytes and no credential/referrer leakage.\n");
         }
         if (JSON_SOURCE === "grok") process.stdout.write("\u2713 Grok JSON: exact 48-turn transcript, original code/whitespace and zero attachment/tool leakage.\n");
       }
