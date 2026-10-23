@@ -127,7 +127,7 @@
   // Claude, ChatGPT and Grok need focus before composer hydration/verification.
   // Their source-side completion cue must finish before the background performs the focused paste.
   const FOCUSED_PASTE_DESTINATIONS = new Set(["claude", "chatgpt", "grok"]);
-  const OVERSIZED_CONVERSATION_ERROR_MESSAGE = "This chat is too large to transfer. Our limit is 1,000,000 characters.";
+  const OVERSIZED_CONVERSATION_ERROR_MESSAGE = "This chat is too large to transfer. Our limit is 1,000,000 characters. Try a shorter chat.";
   const CONVERSATION_SCRAPE_RETRY_TIMEOUT_MS = 1800;
   const CONVERSATION_SCRAPE_RETRY_INTERVAL_MS = 140;
   const SOURCE_SCROLL_STABLE_TIMEOUT_MS = 1800;
@@ -662,6 +662,7 @@
   function teardownContextGeneratorInstance({ preserveSharedUi = false } = {}) {
     if (!instanceActive) return;
     if (!preserveSharedUi) stopSourceDestinationProgress(activeTransferTrace);
+    stopDomCaptureSizeCheck(activeTransferTrace);
     instanceActive = false;
     clearPickerJsonCapture();
     sourceReplySnapshot = null;
@@ -1342,6 +1343,7 @@
       throw error;
     }
     trace?.sourceGuard?.check();
+    if (trace?.domSizeCheck?.active && trace.domSizeCheck.error) throw trace.domSizeCheck.error;
   }
 
   function createTransferCancelledError() {
@@ -1569,6 +1571,7 @@
       sourceReplySnapshot = { trace: transferTrace, url: window.location.href, text: scrapeConversationText() };
       return;
     }
+    startDomCaptureSizeCheck(transferTrace);
     sourceScrollTargetsCache = null;
     chatGptConversationScrollRootCache = null;
     // Captured panel text belongs only to one transfer. Reset both collections so
@@ -7643,17 +7646,51 @@
     entry.state = null;
   }
 
-  function captureSourceJson(expectedPath, shouldRead = () => true) {
+  function startDomCaptureSizeCheck(trace) {
+    if (!trace || trace.domSizeCheck || !hasSavedSourceConversation()) return;
+    const state = { active: true, error: null, controller: new AbortController() };
+    trace.domSizeCheck = state;
+    const sourceUrl = window.location.href;
+    const isCurrent = () => state.active && instanceActive && isRunning && activeTransferTrace === trace
+      && !trace.cancelled && !trace.expired && window.location.href === sourceUrl;
+    const expectedPath = currentPlatform.id === "grok" ? sourceUrl : window.location.pathname;
+    // Start DOM work immediately. This is a NEW native read alongside it, never
+    // the picker's earlier history or a replacement JSON carry. Count whatever
+    // chat/file text can be read; unknown/missing text cannot prove excess.
+    captureSourceJson(expectedPath, isCurrent, true).then(result => {
+      if (!isCurrent()) return;
+      try { trace.sourceGuard?.check(); } catch { return; }
+      if (!Number.isSafeInteger(result?.characterCount) || result.characterCount <= MAX_TRANSFER_CONVERSATION_CHARS) return;
+      state.error = Object.assign(new Error(OVERSIZED_CONVERSATION_ERROR_MESSAGE), {
+        code: "conversation_too_large",
+        diagnostics: { version: 1, capture_detail: "size_limit", capture_request_stage: "serialize", failure_site: "capture_serialize" }
+      });
+    }, () => {}); // An unavailable count must not fail or delay the DOM path.
+  }
+
+  function stopDomCaptureSizeCheck(trace) {
+    const state = trace?.domSizeCheck;
+    if (!state) return;
+    state.active = false;
+    // End the native read too: dropping only its result leaves a slow probe at
+    // the head of the shared JSON queue and delays the user's next transfer.
+    state.controller.abort();
+  }
+
+  function captureSourceJson(expectedPath, shouldRead = () => true, measureOnly = false) {
     // Native bridges allow one read at a time. A dismissed read may still be
     // finishing; queue its replacement rather than provoking a busy fallback.
     const transferTrace = isRunning ? activeTransferTrace : null;
     const pending = pendingJsonCapture.then(() => {
       if (!instanceActive || !shouldRead()) throw createDiagnosticError("The conversation changed during capture.", "conversation_changed");
       checkTransferDeadline(transferTrace);
-      const captureJson = currentPlatform.id === "claude" ? window.__capCaptureClaudeJson
-        : currentPlatform.id === "chatgpt" ? window.__capCaptureChatGptJson : window.__capCaptureNetworkJson;
+      const captureJson = measureOnly
+        ? currentPlatform.id === "claude" ? window.__capMeasureClaudeJson
+          : currentPlatform.id === "chatgpt" ? window.__capMeasureChatGptJson : window.__capMeasureNetworkJson
+        : currentPlatform.id === "claude" ? window.__capCaptureClaudeJson
+          : currentPlatform.id === "chatgpt" ? window.__capCaptureChatGptJson : window.__capCaptureNetworkJson;
       if (typeof captureJson !== "function") throw createDiagnosticError(`Refresh ${currentPlatform.name} to enable JSON capture.`, "capture_json_unavailable");
-      return captureJson(expectedPath);
+      return captureJson(expectedPath, measureOnly ? transferTrace?.domSizeCheck?.controller.signal : undefined);
     });
     // Keep only completion in the queue; unused transcripts/errors are not retained.
     pendingJsonCapture = pending.then(() => {}, () => {});
@@ -7712,7 +7749,7 @@
     const unit = check === "transcript_char_limit" ? "characters" : "bytes";
     const subject = check === "supported_files_limit" ? "Text attachments are"
       : check?.startsWith("raw_") ? "Chat data is" : "This chat is";
-    return `${subject} too large to transfer. Our limit is ${limit.toLocaleString("en-US")} ${unit}.`;
+    return `${subject} too large to transfer. Our limit is ${limit.toLocaleString("en-US")} ${unit}.${unit === "characters" ? " Try a shorter chat." : ""}`;
   }
 
   function shouldRetrySourceJson(error) {
@@ -7892,6 +7929,7 @@
         conversationText = await scrapeConversationTextWhenReady();
       }
       checkTransferDeadline(trace);
+      stopDomCaptureSizeCheck(trace);
       markCaptureDone(trace, conversationText);
 
       preparedDestinationPromise = preparedDestinationPromise || prepareDestinationTab(destinationId, trace);
@@ -10518,6 +10556,7 @@
   }
 
   function resetRunningFlag({ immediate = false } = {}) {
+    stopDomCaptureSizeCheck(activeTransferTrace);
     sourceReplySnapshot = null;
     isRunning = false;
     activeTransferTrace = null;

@@ -110,7 +110,7 @@
     if (!Array.isArray(page?.[0]) || (page[1] != null && (typeof page[1] !== "string" || !page[1]))) fail("Invalid Gemini history page.");
     return { turns: page[0], cursor: page[1] ?? null };
   };
-  const gemini = (pages, chat, metrics) => {
+  const gemini = (pages, chat, metrics, measureOnly = false) => {
     metrics?.set({ files_supported: 0, files_ignored: 0 });
     if (!Array.isArray(pages) || !pages.length || pages.at(-1).cursor !== null) fail("Gemini still has previous history pages.");
     const turns = [], seen = new Set();
@@ -149,7 +149,7 @@
         // labels must not discard verified own text; keep unknown data excluded.
         // Without a prompt, that data could be the entire user input, so fallback
         // is still required rather than accepting a label/answer-only history.
-        if (!user.trim()) fail("Gemini attachment labels have an unsupported shape.", "unsupported", "attachment_failed");
+        if (!measureOnly && !user.trim()) fail("Gemini attachment labels have an unsupported shape.", "unsupported", "attachment_failed");
         excludedContentTypes.add("other");
       }
       const assistant = item[3];
@@ -192,7 +192,7 @@
     if (!leaf) fail("The active Grok branch could not be identified.", undefined, "invalid_branch");
     return chain(data.responseNodes, leaf, "responseId", "parentResponseId", { externalRoot: true });
   };
-  const grok = (nodes, responses, selected, metrics) => {
+  const grok = (nodes, responses, selected, metrics, measureOnly = false) => {
     metrics?.set({ files_supported: 0, files_ignored: 0 });
     const branch = grokBranch(nodes, selected);
     if (!Array.isArray(responses)) fail("Grok message bodies are missing.");
@@ -221,7 +221,7 @@
       if (typeof message.message !== "string") fail("A Grok own-turn text field is missing.", undefined, "text_invalid");
       // File bodies are unsupported here. Do not accept an answer-only transcript
       // when its authored user turn consists solely of an attachment.
-      if (message.sender === "human" && !message.message.trim() && [message.fileAttachments, message.fileAttachmentsMetadata].some(files => Array.isArray(files) && files.length)) fail("Grok has a file-only user turn that fast capture cannot read.", "unsupported");
+      if (!measureOnly && message.sender === "human" && !message.message.trim() && [message.fileAttachments, message.fileAttachmentsMetadata].some(files => Array.isArray(files) && files.length)) fail("Grok has a file-only user turn that fast capture cannot read.", "unsupported");
       const parts = [message.message];
       if (message.sender === "human" && Array.isArray(message.fileAttachmentsMetadata)) {
         for (const file of message.fileAttachmentsMetadata) {
@@ -248,7 +248,7 @@
   const textFile = file => file?.is_image === false && /\.(txt|md|markdown|csv|json|py|js|ts|tsx|jsx|java|kt|swift|c|h|cpp|hpp|cs|go|rs|rb|php|sh|bash|zsh|lua|r|scala|dart|html|htm|css|scss|vue|svelte|xml|yaml|yml|toml|tsv|sql|ipynb|log)$/i.test(file.file_name || "");
   // Keep descriptor discovery and serialization aligned for a single-file object.
   const fileList = value => Array.isArray(value) ? value : value && typeof value === "object" ? [value] : [];
-  const deepseek = (data, chat, files = {}, metrics) => {
+  const deepseek = (data, chat, files = {}, metrics, measureOnly = false) => {
     const excludedContentTypes = new Set();
     const turns = deepseekBranch(data, chat).flatMap(message => {
       if (!["USER", "ASSISTANT"].includes(message.role)) return [];
@@ -267,11 +267,18 @@
           parts.push(fragment.content);
         } else if (message.role === "USER" && fragment.type === "FILE") {
           for (const file of fileList(fragment.files)) {
+            if (measureOnly && (!file || typeof file !== "object")) continue;
             if (typeof file?.file_name === "string" && file.file_name.trim() && !fileIds.has(file.id)) parts.push(`Attachment: ${JSON.stringify(file.file_name)}`);
             if (!textFile(file)) { excludedContentTypes.add(file?.is_image === true ? "media" : "uploads"); continue; }
-            complete(file);
+            // Count all successfully read files, but do not let one unreadable
+            // file discard the rest. This subset is never a transferable carry.
+            if (measureOnly && !Object.hasOwn(files, file.id)) { fileIds.add(file.id); continue; }
+            if (!measureOnly) complete(file);
             const text = Object.hasOwn(files, file.id) ? files[file.id] : null;
-            if (file.status !== "SUCCESS" || typeof text !== "string" || new TextEncoder().encode(text).length !== file.file_size) fail("A DeepSeek text attachment is missing or incomplete.", undefined, "attachment_failed");
+            if (file.status !== "SUCCESS" || typeof text !== "string" || new TextEncoder().encode(text).length !== file.file_size) {
+              if (measureOnly) continue;
+              fail("A DeepSeek text attachment is missing or incomplete.", undefined, "attachment_failed");
+            }
             // Identity, not text equality, identifies a repeated attachment.
             // The same file may legitimately appear again in another turn.
             if (!fileIds.has(file.id)) {

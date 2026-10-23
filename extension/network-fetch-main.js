@@ -3,7 +3,7 @@
   if (!platform || !globalThis.__capNetworkJsonData) return;
   // Advance readiness version with adapter/contract changes: old MAIN closures
   // can survive extension reloads and must be replaced before a new capture.
-  const version = platform === "deepseek" ? 21 : platform === "grok" ? 17 : 14, channel = "cap-context-network-json-v1";
+  const version = platform === "deepseek" ? 23 : platform === "grok" ? 19 : 16, channel = "cap-context-network-json-v1";
   // Shared across unique text files; the final transcript has its own limits.
   const maxUploadBytes = 4100000;
   const previous = window.__capNetworkFetchState;
@@ -18,7 +18,7 @@
     const pattern = platform === "gemini" ? /\/app\/([^/]+)\/?$/ : platform === "grok" ? /\/c\/([^/]+)\/?$/ : /\/a\/chat\/s\/([^/]+)\/?$/;
     return { chat: location.pathname.match(pattern)?.[1], selected: platform === "grok" ? new URL(location.href).searchParams.get("rid") : null };
   };
-  let active = null, onAuthObserved = null;
+  let active = null, activeMeasurementId = null, onAuthObserved = null;
   const observe = (input, options) => {
     try {
       const url = new URL(input instanceof Request ? input.url : input, location.href);
@@ -104,6 +104,10 @@
   const receive = async event => {
     const request = event.data;
     if (event.source !== window || event.origin !== location.origin || request?.channel !== channel || request.platform !== platform || typeof request.id !== "string" || request.id.length > 80) return;
+    if (request.type === "cancel_measurement") {
+      if (activeMeasurementId === request.id) active?.abort("measurement_cancelled");
+      return;
+    }
     if (request.type === "ping") {
       publishReplyState();
       if (platform === "grok" || ownsObservation()) window.postMessage({ channel, type: "pong", platform, version, id: request.id }, location.origin);
@@ -115,7 +119,15 @@
     if (active) { window.postMessage({ ...reply, error: "Another fast capture is running. Try again after it finishes.", captureFailureReason: "unavailable", captureDetail: "busy", captureRequestStage: "history" }, location.origin); return; }
     const controller = new AbortController();
     const metrics = globalThis.CapJsonCaptureMetrics.create({ adapter_version: version, deadline_ms: 25000, raw_limit_bytes: 12000000, raw_bytes: 0, requests: 0 });
+    const measureOnly = request.measureOnly === true;
+    // The independent DOM size check reports numbers only. Its best-effort
+    // strings must never pass through ordinary capture's acceptance path.
+    if (measureOnly) metrics.transcript = () => true;
+    const publishCount = capture => {
+      reply.characterCount = capture.text.length;
+    };
     active = controller;
+    activeMeasurementId = measureOnly ? request.id : null;
     const timer = setTimeout(() => controller.abort("capture_timeout"), 25000);
     const check = () => {
       const now = current();
@@ -261,7 +273,7 @@
           if (page.cursor !== null && (cursors.has(page.cursor) || !page.turns.length)) throw new api.CaptureError("Gemini history pagination did not advance.");
           cursors.add(page.cursor); args[2] = page.cursor;
         } while (args[2] !== null);
-        reply.capture = metrics.timed("serialize_ms", () => api.gemini(pages, chat, metrics));
+        reply.capture = metrics.timed("serialize_ms", () => api.gemini(pages, chat, metrics, measureOnly));
       } else if (platform === "grok") {
         const base = `/rest/app-chat/conversations/${encodeURIComponent(chat)}`;
         const nodes = await read(`${base}/response-node`);
@@ -276,7 +288,7 @@
           if (!Array.isArray(data?.responses)) throw new api.CaptureError("Grok returned incomplete message bodies.");
           responses.push(...data.responses);
         }
-        reply.capture = metrics.timed("serialize_ms", () => api.grok(nodes, responses, selected, metrics));
+        reply.capture = metrics.timed("serialize_ms", () => api.grok(nodes, responses, selected, metrics, measureOnly));
       } else {
         // Omitting x-device-id/cache client headers makes DeepSeek return a
         // full REPLACE snapshot. A MERGE/delta must never count as full history.
@@ -287,28 +299,46 @@
           files_supported: 0, files_ignored: 0, files_declared_bytes: 0, files_downloaded_bytes: 0 });
         const branch = api.deepseekBranch(data, chat);
         const files = Object.create(null);
+        const measureDeepseek = () => {
+          try { publishCount(api.deepseek(data, chat, files, metrics, true)); }
+          catch (error) {
+            // A file-only turn may have no readable text until its download
+            // finishes. Zero here means unknown content, never safe admission.
+            if (error.captureDetail !== "missing_text") throw error;
+            reply.characterCount = 0;
+          }
+        };
+        if (measureOnly) {
+          measureDeepseek();
+          // The fresh history alone can already prove excess. Otherwise fetch
+          // text files too; their contents may be what pushes it over the cap.
+          if (reply.characterCount > 1000000) return;
+        }
         const uploads = new Map();
         let uploadBytes = 0;
         for (const message of branch) {
           if (message.role !== "USER") continue;
           for (const fragment of message.fragments || []) for (const file of fragment.type === "FILE" ? api.fileList(fragment.files) : []) {
-            if (!api.textFile(file)) { metrics.ignored(typeof file?.file_name === "string" && /\.pdf$/i.test(file.file_name) ? "pdf" : "other", file?.is_image === true); continue; }
-            if (file.status !== "SUCCESS" || !Number.isSafeInteger(file.file_size) || file.file_size < 0 || typeof file.signed_path !== "string") throw new api.CaptureError("A text attachment is unavailable or incomplete.", "incomplete", "attachment_failed");
-            // DeepSeek's native preview uses this signed file service with ty=r
-            // for original bytes. No session bearer/cookies go to that host.
-            const url = new URL(file.signed_path.startsWith("/") ? `https://files.deepseeksvc.com/api${file.signed_path}` : file.signed_path);
-            if (url.origin !== "https://files.deepseeksvc.com" || url.pathname !== "/api/file" || url.username || url.password || url.searchParams.get("file_id") !== file.id?.replace(/^file-/, "")) throw new api.CaptureError("A text attachment has an unsupported download address.", "incomplete", "attachment_failed");
-            url.searchParams.set("ty", "r");
-            if (uploads.has(file.id)) {
-              if (uploads.get(file.id).file.file_size !== file.file_size) throw new api.CaptureError("A text attachment is incomplete.", "incomplete", "attachment_failed");
-              continue;
-            }
-            uploadBytes += file.file_size;
-            metrics.add("files_supported"); metrics.set({ files_declared_bytes: uploadBytes });
-            if (uploadBytes > maxUploadBytes) { metrics.fail("supported_files_limit", "attachment_descriptor", "declared_files", uploadBytes, maxUploadBytes); throw Object.assign(
-              new api.CaptureError("Text attachments exceed the combined 4.1 MB capture limit.", "size_limit", "attachment_size_limit"),
-              { captureRequestStage: "attachment_descriptor" }); }
-            uploads.set(file.id, { file, url });
+            try {
+              if (!api.textFile(file)) { metrics.ignored(typeof file?.file_name === "string" && /\.pdf$/i.test(file.file_name) ? "pdf" : "other", file?.is_image === true); continue; }
+              if (file.status !== "SUCCESS" || !Number.isSafeInteger(file.file_size) || file.file_size < 0 || typeof file.signed_path !== "string") throw new api.CaptureError("A text attachment is unavailable or incomplete.", "incomplete", "attachment_failed");
+              // DeepSeek's native preview uses this signed file service with ty=r
+              // for original bytes. No session bearer/cookies go to that host.
+              const url = new URL(file.signed_path.startsWith("/") ? `https://files.deepseeksvc.com/api${file.signed_path}` : file.signed_path);
+              if (url.origin !== "https://files.deepseeksvc.com" || url.pathname !== "/api/file" || url.username || url.password || url.searchParams.get("file_id") !== file.id?.replace(/^file-/, "")) throw new api.CaptureError("A text attachment has an unsupported download address.", "incomplete", "attachment_failed");
+              url.searchParams.set("ty", "r");
+              if (uploads.has(file.id)) {
+                if (uploads.get(file.id).file.file_size !== file.file_size) throw new api.CaptureError("A text attachment is incomplete.", "incomplete", "attachment_failed");
+                continue;
+              }
+              const nextUploadBytes = uploadBytes + file.file_size;
+              metrics.add("files_supported"); metrics.set({ files_declared_bytes: nextUploadBytes });
+              if (nextUploadBytes > maxUploadBytes) { metrics.fail("supported_files_limit", "attachment_descriptor", "declared_files", nextUploadBytes, maxUploadBytes); throw Object.assign(
+                new api.CaptureError("Text attachments exceed the combined 4.1 MB capture limit.", "size_limit", "attachment_size_limit"),
+                { captureRequestStage: "attachment_descriptor" }); }
+              uploadBytes = nextUploadBytes;
+              uploads.set(file.id, { file, url });
+            } catch (error) { if (!measureOnly) throw error; }
           }
         }
         // Independent original-file reads overlap; serialization still follows
@@ -321,21 +351,33 @@
               check();
               const fileIndex = next++;
               const { file, url } = pending[fileIndex];
-              const content = await read(url.href, { credentials: "omit" }, "file", file.file_size, fileIndex + 1);
-              if (content.size !== file.file_size) { metrics.fail("attachment_length_mismatch", "attachment_body", "reader_bytes", content.size, file.file_size); throw new api.CaptureError("A text attachment is incomplete.", "incomplete", "attachment_failed"); }
-              files[file.id] = content.text;
+              try {
+                const content = await read(url.href, { credentials: "omit" }, "file", file.file_size, fileIndex + 1);
+                if (content.size !== file.file_size) { metrics.fail("attachment_length_mismatch", "attachment_body", "reader_bytes", content.size, file.file_size); throw new api.CaptureError("A text attachment is incomplete.", "incomplete", "attachment_failed"); }
+                files[file.id] = content.text;
+                if (measureOnly) {
+                  measureDeepseek();
+                  if (reply.characterCount > 1000000) { controller.abort("size_limit"); return; }
+                }
+              } catch (error) { if (!measureOnly) throw error; check(); }
             }
           } catch (error) {
-            if (!failure) { failure = error; controller.abort("attachment_failed"); }
+            if (!failure) { failure = error; if (!measureOnly) controller.abort("attachment_failed"); }
           }
         };
         // Wait for aborted siblings to settle before releasing active capture,
         // so fallback/retry cannot overlap stale downloads or accept partial text.
         await Promise.all(Array.from({ length: Math.min(4, pending.length) }, download));
-        if (failure) throw failure;
+        if (failure && !measureOnly) throw failure;
+        if (measureOnly) {
+          if (controller.signal.reason !== "size_limit") check();
+          measureDeepseek();
+          return;
+        }
         reply.capture = metrics.timed("serialize_ms", () => api.deepseek(data, chat, files, metrics));
       }
       check();
+      if (measureOnly) { publishCount(reply.capture); delete reply.capture; }
     } catch (error) {
       delete reply.capture;
       metrics.fail(error?.jsonFailureCheck || error?.captureDetail, error?.captureRequestStage || "serialize");
@@ -355,8 +397,15 @@
       clearTimeout(timer);
       window.navigation?.removeEventListener("navigate", changed);
       window.removeEventListener("popstate", changed);
-      if (active === controller) active = null;
+      if (active === controller) { active = null; activeMeasurementId = null; }
+      // Release the native read before resolving its count, so a new transfer
+      // cannot race cancelled sibling downloads and get a false busy failure.
+      if (measureOnly) {
+        delete reply.capture;
+        window.postMessage(reply, location.origin);
+      }
     }
+    if (measureOnly) return;
     reply.jsonCapture = metrics.finish();
     window.postMessage(reply, location.origin);
   };

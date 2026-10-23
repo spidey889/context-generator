@@ -1,5 +1,5 @@
 (() => {
-  const version = 18;
+  const version = 20;
   // HTTP media types ignore casing; parameters do not change the base type.
   const responseMediaType = response => response.headers.get("content-type")?.split(";", 1)[0].trim().toLowerCase();
   // Match MIME metadata by base type, keeping the serializer's paste gate aligned.
@@ -17,7 +17,7 @@
   let auth = previous?.headers?.() || null;
   previous?.dispose();
   const nativeFetch = window.fetch;
-  let active = null;
+  let active = null, activeMeasurementId = null;
   let authRevision = 0;
   const authKeys = ["authorization", "chatgpt-account-id", "oai-did", "oai-language", "originator"];
 
@@ -44,8 +44,12 @@
 
   const receive = async event => {
     const request = event.data;
-    if (event.source !== window || event.origin !== location.origin || request?.channel !== channel || !["request", "ping"].includes(request.type)) return;
+    if (event.source !== window || event.origin !== location.origin || request?.channel !== channel || !["request", "ping", "cancel_measurement"].includes(request.type)) return;
     if (typeof request.id !== "string" || request.id.length > 80) return;
+    if (request.type === "cancel_measurement") {
+      if (activeMeasurementId === request.id) active?.abort("measurement_cancelled");
+      return;
+    }
     // Readiness probes never fetch session data or conversation messages.
     if (request.type === "ping") {
       if (window.fetch === wrappedFetch) window.postMessage({ channel, type: "pong", id: request.id, version }, location.origin);
@@ -58,6 +62,7 @@
     const metrics = globalThis.CapJsonCaptureMetrics.create({ adapter_version: version, deadline_ms: 15000, raw_limit_bytes: maxCaptureBytes,
       raw_bytes: 0, requests: 0, auth_refreshes: 0 });
     active = controller;
+    activeMeasurementId = request.measureOnly === true ? request.id : null;
     let navigated = false;
     const changed = event => {
       const destination = event?.destination ? new URL(event.destination.url) : location;
@@ -267,27 +272,30 @@
         if (message?.author?.role !== "user" || message.metadata?.is_visually_hidden_from_conversation
           || (message.recipient && message.recipient !== "all")) continue;
         for (const file of Array.isArray(message.metadata?.attachments) ? message.metadata.attachments : []) {
-          if (!isPlainTextPaste(file)) { metrics.ignored(typeof file?.mime_type === "string" && /^application\/pdf(?:;|$)/i.test(file.mime_type) ? "pdf" : "other", typeof file?.mime_type === "string" && /^image\//i.test(file.mime_type)); continue; }
-          if (typeof file.id !== "string" || !/^file[-_][a-zA-Z0-9_-]+$/.test(file.id)
-            || !Number.isSafeInteger(file.size) || file.size < 0) throw new Error("paste");
-          if (uploads.has(file.id)) {
-            if (uploads.get(file.id).size !== file.size) throw new Error("paste");
-            continue;
-          }
-          pastedBytes += file.size;
-          metrics.add("files_supported"); metrics.set({ files_declared_bytes: pastedBytes });
-          if (pastedBytes > maxPastedBytes) {
-            reply.captureDetail = "attachment_size_limit";
-            reply.captureRequestStage = "attachment_descriptor";
-            metrics.fail("supported_files_limit", "attachment_descriptor", "declared_files", pastedBytes, maxPastedBytes);
-            throw new Error("size");
-          }
-          uploads.set(file.id, file);
+          try {
+            if (!isPlainTextPaste(file)) { metrics.ignored(typeof file?.mime_type === "string" && /^application\/pdf(?:;|$)/i.test(file.mime_type) ? "pdf" : "other", typeof file?.mime_type === "string" && /^image\//i.test(file.mime_type)); continue; }
+            if (typeof file.id !== "string" || !/^file[-_][a-zA-Z0-9_-]+$/.test(file.id)
+              || !Number.isSafeInteger(file.size) || file.size < 0) throw new Error("paste");
+            if (uploads.has(file.id)) {
+              if (uploads.get(file.id).size !== file.size) throw new Error("paste");
+              continue;
+            }
+            const nextPastedBytes = pastedBytes + file.size;
+            metrics.add("files_supported"); metrics.set({ files_declared_bytes: nextPastedBytes });
+            if (nextPastedBytes > maxPastedBytes) {
+              reply.captureDetail = "attachment_size_limit";
+              reply.captureRequestStage = "attachment_descriptor";
+              metrics.fail("supported_files_limit", "attachment_descriptor", "declared_files", nextPastedBytes, maxPastedBytes);
+              throw new Error("size");
+            }
+            pastedBytes = nextPastedBytes;
+            uploads.set(file.id, file);
+          } catch (error) { if (request.measureOnly !== true) throw error; }
         }
       }
       // Validate the complete qualifying manifest before remote file work.
       // Repeated IDs share one read, but every declaration must match its bytes.
-      if (pastedBytes > maxCaptureBytes - bytesRead) { metrics.fail("raw_remaining_files_limit", "attachment_descriptor", "declared_files", pastedBytes, maxCaptureBytes - bytesRead); throw new Error("paste"); }
+      if (request.measureOnly !== true && pastedBytes > maxCaptureBytes - bytesRead) { metrics.fail("raw_remaining_files_limit", "attachment_descriptor", "declared_files", pastedBytes, maxCaptureBytes - bytesRead); throw new Error("paste"); }
       for (const file of uploads.values()) {
         try {
           reply.captureRequestStage = "attachment_descriptor";
@@ -314,6 +322,7 @@
           reply.status = textResponse.status;
           pastedTexts[file.id] = await readPaste(textResponse, file.size);
         } catch (error) {
+          if (request.measureOnly === true && !controller.signal.aborted && currentChat() === chat) continue;
           // Preserve readJson's transport marker; file validation stays closed.
           throw new Error(error?.message === "network" ? "network" : "paste");
         }
@@ -331,7 +340,7 @@
       clearTimeout(timer);
       window.navigation?.removeEventListener("navigate", changed);
       window.removeEventListener("popstate", changed);
-      if (active === controller) active = null;
+      if (active === controller) { active = null; activeMeasurementId = null; }
     }
     reply.jsonCapture = metrics.finish();
     window.postMessage(reply, location.origin);

@@ -33,6 +33,41 @@ test("ChatGPT structured turns preserve quoted role labels and exact source whit
   assert.equal(capture.text, `ChatGPT conversation:\n\nUser: ${text}\n\nAssistant: Selected answer`);
 });
 
+test("ChatGPT fresh DOM size check includes healthy pasted files after a failed download", async () => {
+  const { data, files, fetchImpl } = pasteFixture(["broken file", "x".repeat(1000001)]);
+  const h = setup(data, 200, { fetchImpl: request => {
+    const url = new URL(request.url, "https://chatgpt.com");
+    if (url.pathname === `/backend-api/files/download/${files[0].id}`) throw new TypeError("PRIVATE_FILE_FAILURE");
+    return fetchImpl(request);
+  } });
+  await discover(h);
+  await assert.rejects(h.window.__capCaptureChatGptJson());
+  const result = await h.window.__capMeasureChatGptJson();
+  assert.ok(result.characterCount > 500000);
+  assert.deepEqual(Object.keys(result), ["characterCount"]);
+  assert.ok(h.requests.some(request => new URL(request.url, "https://chatgpt.com").searchParams.get("id") === files[1].id));
+  await assert.rejects(h.window.__capCaptureChatGptJson(), "Ordinary capture must still reject unreadable files.");
+});
+
+test("ChatGPT cancelling a background count releases the native read before a new capture", async () => {
+  const data = fixture();
+  let stalled = false, started;
+  const began = new Promise(resolve => { started = resolve; });
+  const h = setup(data, 200, { fetchImpl: request => {
+    if (!stalled) return Response.json(data);
+    started();
+    return new Promise((_, reject) => request.options.signal.addEventListener("abort", () => reject(new Error("aborted")), { once: true }));
+  } });
+  await discover(h); stalled = true;
+  const controller = new AbortController();
+  const count = h.window.__capMeasureChatGptJson(undefined, controller.signal);
+  const stopped = count.then(() => false, () => true);
+  await began;
+  controller.abort(); stalled = false;
+  assert.equal(await stopped, true);
+  assert.ok((await h.window.__capCaptureChatGptJson()).text.includes("Selected answer"));
+});
+
 test("ChatGPT keeps readable JSON text and flags malformed plain-text parts", async () => {
   for (const part of [{ text: "PRIVATE_DETAILS_SENTINEL" }, 42, null]) {
     const data = fixture();
@@ -756,7 +791,7 @@ test("ChatGPT replaces the previous hook without losing observed authentication"
   old.version = 8;
   harness.reinstall();
   assert.notEqual(harness.window.__capChatGptFetchState, old);
-  assert.equal(harness.window.__capChatGptFetchState.version, 18);
+  assert.equal(harness.window.__capChatGptFetchState.version, 20);
   assert.equal(harness.listeners(), 1);
   assert.equal((await harness.window.__capCaptureChatGptJson()).text,
     "ChatGPT conversation:\n\nUser: Original pasted document\n\nAssistant: Selected answer");

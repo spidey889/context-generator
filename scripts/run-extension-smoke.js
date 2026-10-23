@@ -51,6 +51,7 @@ const NETWORK_SOURCE = ["gemini", "grok", "deepseek"].includes(JSON_SOURCE);
 const GROK_FILE_ONLY_SMOKE = JSON_SOURCE === "grok" && process.env.CAP_CONTEXT_NETWORK_FAILURE_SMOKE === "file-only";
 const DEEPSEEK_OVERSIZE_SMOKE = JSON_SOURCE === "deepseek" && process.env.CAP_CONTEXT_NETWORK_FAILURE_SMOKE === "oversize";
 const DEEPSEEK_TRANSCRIPT_OVERSIZE_SMOKE = JSON_SOURCE === "deepseek" && process.env.CAP_CONTEXT_NETWORK_FAILURE_SMOKE === "transcript-oversize";
+const DEEPSEEK_DOM_SIZE_SMOKE = JSON_SOURCE === "deepseek" && process.env.CAP_CONTEXT_NETWORK_FAILURE_SMOKE === "dom-size-check";
 const NETWORK_FAILURE = (NETWORK_SOURCE && process.env.CAP_CONTEXT_NETWORK_FAILURE_SMOKE === "partial") || GROK_FILE_ONLY_SMOKE || DEEPSEEK_OVERSIZE_SMOKE;
 const JSON_CAPTURE_SMOKE = Boolean(JSON_SOURCE);
 // Opt-in native capture/worker/backend-admission/paste coverage at the new
@@ -656,6 +657,10 @@ function networkSmokeFixture(platform) {
     const text = `\uFEFF  original upload ${i}: café 🕷️\r\n`;
     const file = { ...fixture.file, id: `file-concurrent-${i}`, file_name: `original-${i}.py`, file_size: Buffer.byteLength(text), signed_path: `/file?file_id=concurrent-${i}&sig=SIGNED_SENTINEL` };
     fixture.files[file.id] = text;
+    if (DEEPSEEK_DOM_SIZE_SMOKE && i === 1) {
+      fixture.files[file.id] = "x".repeat(500001);
+      file.file_size = 500001;
+    }
     fixture.data.data.biz_data.chat_messages[0].fragments[0].files.push(file);
     extraBodies.push(`Attachment: ${JSON.stringify(file.file_name)}\n\nFile contents (${file.file_size} UTF-8 bytes):\n${text}\nEnd attachment: ${JSON.stringify(file.file_name)}`);
   }
@@ -738,6 +743,13 @@ async function startFixtureServer() {
       state.fileReadsActive++;
       state.fileReadsPeak = Math.max(state.fileReadsPeak, state.fileReadsActive);
       response.on("close", () => { state.fileReadsActive--; });
+      if (DEEPSEEK_DOM_SIZE_SMOKE) {
+        // Both ordinary reads fail on this file. The independent count must
+        // fetch again, ignore this failure and count the other large text file.
+        response.writeHead(id === network.file.id ? 503 : 200, { "Content-Type": "application/octet-stream" });
+        response.end(id === network.file.id ? "" : network.files[id]);
+        return;
+      }
       // The normal scenario holds four independent bodies, then completes in
       // reverse order to prove concurrency. The size scenario has one file.
       pendingFileResponses.push({ response, text: network.files[id] });
@@ -2811,6 +2823,25 @@ async function run() {
     assert.equal(clickResult.selectedPreserved, true, "Dark Reader must not recolor the selected destination tile.");
     assert.equal(clickResult.pickerStyleIgnored, true, "Dark Reader must leave the picker stylesheet alone.");
 
+    if (DEEPSEEK_DOM_SIZE_SMOKE) {
+      await waitFor(() => sourceSession.evaluate('Boolean(document.getElementById("context-generator-error-text")?.textContent)'), "the background DOM size rejection");
+      const result = await sourceSession.evaluate(`({
+        notice: Boolean(document.getElementById("context-generator-capture-notice")),
+        error: document.getElementById("context-generator-error-text").textContent
+      })`);
+      assert.match(result.error, /500,000/);
+      assert.ok(state.jsonRequests - jsonRequestsBeforeTransfer >= 3, "Capture, retry and independent DOM count must each fetch fresh history.");
+      assert.equal(state.summaryRequests.length, 0, "Oversized DOM recovery must stop before summary or paste.");
+      const terminal = await waitFor(() => state.telemetryRequests.find(payload => payload.status === "failed"), "the DOM size-limit telemetry");
+      assert.equal(terminal.failure_reason, "conversation_too_large");
+      assert.equal(terminal.last_stage, "capture_started");
+      assert.ok(terminal.diagnostics.events.some(item => item.event === "capture_prepare"), "DOM scraping must have started while the size check ran.");
+      assert.ok(terminal.diagnostics.json_fallback_code, "The transfer must actually enter DOM recovery.");
+      assert.equal(terminal.diagnostics.json_attempts.length, 2, "The background measurement is not another JSON transfer attempt.");
+      assert.equal(terminal.diagnostics.error_code, "conversation_too_large");
+      process.stdout.write("✓ Fresh background count included a healthy 500k text file despite a broken file and stopped DOM recovery before summary/paste.\n");
+      return;
+    }
     if (JSON_FALLBACK_SMOKE) {
       await waitFor(() => sourceSession.evaluate(`document.getElementById("context-generator-capture-notice")?.textContent === ${JSON.stringify(EXPECTED_JSON_FALLBACK_NOTICE)}`), "the safe fast-capture fallback notice");
     }

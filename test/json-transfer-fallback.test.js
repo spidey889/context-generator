@@ -67,6 +67,83 @@ const captureKeyFor = platform => platform === "claude" ? "__capCaptureClaudeJso
   : platform === "chatgpt" ? "__capCaptureChatGptJson" : "__capCaptureNetworkJson";
 const deferred = () => { let resolve; const promise = new Promise(done => { resolve = done; }); return { promise, resolve }; };
 
+test("DOM fallback starts immediately alongside a fresh count and blocks excess before summary or paste", async () => {
+  for (const platform of ["claude", "gemini", "grok", "deepseek"]) {
+    const { context, calls } = harness(platform);
+    const measurement = deferred(), started = deferred(), scrolling = deferred();
+    let measurements = 0;
+    const key = platform === "claude" ? "__capMeasureClaudeJson" : "__capMeasureNetworkJson";
+    context.window[key] = async expectedPath => {
+      measurements++;
+      assert.equal(expectedPath, platform === "grok" ? context.window.location.href : context.window.location.pathname);
+      started.resolve();
+      return measurement.promise;
+    };
+    context.prepareSourceForCapture = async () => {
+      calls.prepare++;
+      context.startDomCaptureSizeCheck(context.activeTransferTrace);
+    };
+    context.scrapeConversationTextWhenReady = async () => {
+      calls.dom++;
+      await scrolling.promise;
+      context.checkTransferDeadline(context.activeTransferTrace);
+      return "DOM transcript";
+    };
+    const transfer = context.start("chatgpt");
+    await started.promise;
+    await new Promise(setImmediate);
+    assert.equal(calls.dom, 1, "DOM scrolling must not wait for the fresh count.");
+    assert.equal(calls.json, 1, "Size checking must not restart the ordinary capture.");
+    measurement.resolve({ characterCount: 1000001 });
+    await new Promise(setImmediate);
+    scrolling.resolve();
+    await transfer;
+    assert.equal(measurements, 1);
+    assert.equal(calls.flows.length, 0);
+    assert.match(calls.errors[0], /1,000,000/);
+    assert.equal(calls.finished[0].diagnostics.error_code, "conversation_too_large");
+    assert.equal(context.isRunning, false);
+  }
+});
+
+test("DOM count failures, exact-cap results and late replies never delay or replace DOM capture", async () => {
+  for (const scenario of ["failed", "exact cap", "pending", "late excess"]) {
+    const { context, calls } = harness("deepseek");
+    const measurement = deferred();
+    context.window.__capMeasureNetworkJson = () => scenario === "failed" ? Promise.reject(new Error("private"))
+      : scenario === "exact cap" ? Promise.resolve({ characterCount: 1000000 }) : measurement.promise;
+    context.prepareSourceForCapture = async () => context.startDomCaptureSizeCheck(context.activeTransferTrace);
+    await context.start("claude");
+    assert.equal(calls.flows.length, 1, scenario);
+    assert.equal(calls.flows[0].text, "DOM transcript");
+    measurement.resolve({ characterCount: 1000001 });
+    await new Promise(setImmediate);
+    assert.equal(calls.errors.length, 0, "A late count must not affect a completed DOM capture.");
+    assert.equal(calls.flows[0].trace.domSizeCheck.active, false);
+  }
+});
+
+test("finishing DOM capture aborts its background count and releases the shared JSON queue", async () => {
+  for (const platform of ["claude", "chatgpt", "gemini", "grok", "deepseek"]) {
+    const { context, calls } = harness(platform, { enabled: false, mode: "success" });
+    const probe = deferred();
+    let probeSignal;
+    const key = platform === "claude" ? "__capMeasureClaudeJson" : platform === "chatgpt" ? "__capMeasureChatGptJson" : "__capMeasureNetworkJson";
+    context.window[key] = (_path, signal) => {
+      probeSignal = signal;
+      signal?.addEventListener("abort", () => probe.resolve({ characterCount: 1 }), { once: true });
+      return probe.promise;
+    };
+    context.prepareSourceForCapture = async () => context.startDomCaptureSizeCheck(context.activeTransferTrace);
+    await context.start("claude");
+    assert.equal(calls.flows.length, 1);
+    assert.equal(probeSignal?.aborted, true, "Completing DOM capture must stop its outstanding size read.");
+    context.resetRunningFlag();
+    assert.equal((await context.captureSourceJson(context.window.location.pathname)).text, "JSON transcript");
+    assert.equal(calls.json, 1, "The next read must not remain behind an abandoned count.");
+  }
+});
+
 test("picker prefetch waits out the remaining entrance without delaying reduced motion", async t => {
   t.mock.timers.enable({ apis: ["setTimeout"] });
   const start = source.indexOf("  function scheduleDestinationPickerWarmup()");
@@ -369,7 +446,7 @@ test("JSON attempt observations survive source-to-destination handoff and one re
   for (const source of platforms) for (const destination of platforms.filter(value => value !== source)) {
     const { context, calls } = harness(source, { mode: "success" });
     const read = context.window[captureKeyFor(source)];
-    context.window[captureKeyFor(source)] = async () => ({ ...await read(), jsonCapture: { outcome: "succeeded", mode: "fresh", raw_bytes: 1234, raw_limit_bytes: source === "chatgpt" ? 32000000 : 6000000 } });
+    context.window[captureKeyFor(source)] = async () => ({ ...await read(), jsonCapture: { outcome: "succeeded", mode: "fresh", raw_bytes: 1234, raw_limit_bytes: source === "chatgpt" ? 32000000 : 12000000 } });
     await context.start(destination);
     assert.equal(calls.flows[0].trace.diagnostics.json_attempts[0].raw_bytes, 1234);
     assert.equal(calls.flows[0].trace.diagnostics.json_attempts[0].outcome, "succeeded");
@@ -401,7 +478,7 @@ test("size failures stop all five platforms without partial DOM transfer, includ
     const transcriptLimit = platform === "deepseek";
     error.jsonCapture = { outcome: "failed", mode: "fresh",
       failure_check: transcriptLimit ? "transcript_char_limit" : "raw_total_stream_limit",
-      failure_value: transcriptLimit ? 1003622 : 6000001, failure_limit: transcriptLimit ? 500000 : 6000000 };
+      failure_value: transcriptLimit ? 1003622 : 12000001, failure_limit: transcriptLimit ? 1000000 : 12000000 };
     const { context, calls } = harness(platform);
     context.isSourceReplyInProgress = () => ["grok", "chatgpt"].includes(platform);
     context.window[captureKeyFor(platform)] = async () => { calls.json++; throw error; };
@@ -414,7 +491,7 @@ test("size failures stop all five platforms without partial DOM transfer, includ
     assert.equal(calls.prepare + calls.dom + calls.notice + calls.flows.length, 0, "Never substitute the smaller visible history for rejected full content.");
     assert.equal(calls.destination, 1);
     assert.equal(calls.errors.length, 1);
-    assert.match(calls.errors[0], transcriptLimit ? /too large.*limit is 500,000 characters/ : /too large.*limit is 6,000,000 bytes/);
+    assert.match(calls.errors[0], transcriptLimit ? /too large.*limit is 1,000,000 characters/ : /too large.*limit is 12,000,000 bytes/);
     assert.doesNotMatch(calls.errors[0], /1,003,622|6,000,001/);
     assert.equal(context.isRunning, false);
     const diagnostics = calls.finished[0].diagnostics;
@@ -428,7 +505,7 @@ test("size failures stop all five platforms without partial DOM transfer, includ
 });
 
 test("attachment and transcript byte rejections show their own numeric limits", async () => {
-  for (const [check, detail, limit] of [["supported_files_limit", "attachment_size_limit", 2100000], ["transcript_byte_limit", "size_limit", 2000000]]) {
+  for (const [check, detail, limit] of [["supported_files_limit", "attachment_size_limit", 4100000], ["transcript_byte_limit", "size_limit", 4000000]]) {
     const { context, calls } = harness("deepseek");
     const error = transientError("size_limit", detail);
     error.jsonCapture = { outcome: "failed", failure_check: check, failure_value: limit + 1, failure_limit: limit };
