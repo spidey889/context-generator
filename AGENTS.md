@@ -5,6 +5,7 @@
 - Always work from `C:\Users\vinit\Desktop\context-generator`. Do not use older OneDrive copies or `C:\Users\vinit\Desktop\coding projects\context-generator` unless the user explicitly asks.
 - At the beginning of every new chat, read `AGENTS.md`, `LOGIC.md` and `CHANGELOG.md` when they exist. Create missing `LOGIC.md` or `CHANGELOG.md` when needed.
 - Keep work lean: inspect the relevant files, use focused checks and avoid unrelated changes. Preserve other work already present in the checkout.
+- Ask the owner before making a major design decision, such as adding/removing database tables or columns, changing the architecture, or replacing an existing approach. Explain the proposed change simply and wait for approval. Routine work within an already approved decision can proceed.
 
 ## Documentation
 

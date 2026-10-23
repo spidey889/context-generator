@@ -222,7 +222,7 @@ async function handler(req, res) {
     onDelta: responseChannel.delta,
     onStart: responseChannel.reset
   };
-  const failureLog = createProviderFailureLog({ attemptId: validation.telemetry?.attempt_id });
+  const failureLog = createProviderFailureLog({ attemptId: validation.telemetry?.attempt_id, telemetry: validation.telemetry });
   requestContext.onProviderFailure = observation => failureLog.record(observation);
   const sendWithFailureLog = responseChannel.send;
   responseChannel.send = async (status, payload) => {

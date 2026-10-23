@@ -34,20 +34,17 @@ column; new backups restore the reason in the existing field.
 
 ### Server-side provider failures
 
-`public.provider_failures` stores separate backend observations, including failures recovered by retries or successful fallback. It works with already-installed extensions and does not depend on delivery of their terminal telemetry. The private relay authenticates each write; the Edge validator and `record_provider_failure(jsonb)` RPC reject unknown fields. Anonymous/authenticated clients have no access. This table does not grant summary verification or modify user counters.
+`public.transfers.diagnostics.provider_failures` is the single home for backend failure observations alongside the existing capture, summary and paste diagnosis. It holds up to 64 errors per transfer, including failures recovered by retry or fallback. There is no separate failure table or new column. The private relay authenticates writes; public clients cannot supply server failure entries. Appends preserve the first terminal outcome, existing diagnosis and counters, including late or duplicate delivery.
 
-Each row identifies its production/preview/development environment, fixed provider/model, route and HTTP retry, primary/backup key slot, reason and phase: `waiting_headers`, `reading_body`, `waiting_answer`, `answer_stream`, `parsing_response`, `validating_output` or `http_error`. Timeouts distinguish the first-answer watchdog from completion expiry. Counts include input characters, serialized request bytes, output-token allowance, effective time budgets, observed header/answer timing, stream frames and answer/separate-reasoning characters. Actual tokens and finish reason are present only when observed; absent values are unknown. A timeout does not by itself prove queueing, quota exhaustion, poor model quality or a token limit.
+Each entry identifies its production/preview/development environment, fixed provider/model, route and HTTP retry, primary/backup key slot, reason and phase: `waiting_headers`, `reading_body`, `waiting_answer`, `answer_stream`, `parsing_response`, `validating_output` or `http_error`. Timeouts distinguish the first-answer watchdog from completion expiry. Counts include input characters, serialized request bytes, output-token allowance, effective time budgets, observed header/answer timing, stream frames and answer/separate-reasoning characters. Actual tokens and finish reason are present only when observed; absent values are unknown. A timeout does not by itself prove queueing, quota exhaustion, poor model quality or a token limit.
 
-The server-generated `request_id` groups failures; optional `attempt_id` links the client-reported transfer without authenticating its owner. No install identifier or conversation content is added. Writes overlap provider fallback, are awaited before shutdown, and get one retry with the same event UUID inside a five-second window. Logging failure cannot fail a transfer; its fixed server warning means delivery is unconfirmed. Daily cleanup deletes rows older than 30 days. Old failures remain unchanged.
+The server-generated `request_id` groups failures; `attempt_id` links the supplied transfer. The backend forwards its already-validated transfer context so the existing attempt can be recorded if its started event is still queued. Identity must match; no summary verification is granted. Callers without transfer context cannot save an attached diagnosis and produce a fixed warning instead. Writes overlap fallback, are awaited before shutdown, and get one retry with the same event UUID inside five seconds. An outage or process termination can still lose observations; missing evidence remains unknown. Entries share their transfer's retention and encrypted backup. The former extra table and its separate cleanup job are removed by a forward migration that refuses to discard unmatched historical records.
 
 ```sql
-select occurred_at, provider, model, failure_reason, phase, timeout_kind,
-       input_chars, max_output_tokens, elapsed_ms, budget_ms,
-       first_answer_budget_ms, headers_ms, first_answer_ms,
-       answer_chars, reasoning_chars, finish_reason, completion_tokens
-from public.provider_failures
-where environment = 'production'
-order by occurred_at desc
+select user_no, attempted_at, status, failure_reason, diagnostics
+from public.transfers
+where diagnostics ? 'provider_failures'
+order by attempted_at desc
 limit 20;
 ```
 

@@ -3,7 +3,7 @@ const { validate } = require("../supabase/functions/_shared/provider-failure");
 
 // Start writes immediately, overlap them with fallback work, then await them
 // before ending the response. Detached promises can be lost in serverless runs.
-function createProviderFailureLog({ attemptId, fetchImpl = (...args) => fetch(...args), timeoutMs = 5000,
+function createProviderFailureLog({ attemptId, telemetry, fetchImpl = (...args) => fetch(...args), timeoutMs = 5000,
   warn = (...args) => console.warn(...args) } = {}) {
   const url = process.env.SUPABASE_TELEMETRY_FUNCTION_URL;
   const key = process.env.SUPABASE_TELEMETRY_PUBLISHABLE_KEY;
@@ -26,7 +26,7 @@ function createProviderFailureLog({ attemptId, fetchImpl = (...args) => fetch(..
           const response = await Promise.race([fetchImpl(url, { method: "POST", redirect: "error",
             signal: AbortSignal.any([controller.signal, attemptController.signal]),
             headers: { "Content-Type": "application/json", apikey: key, "X-Cap-Context-Relay": secret },
-            body: JSON.stringify({ kind: "provider_failure", event }) }), new Promise((_, reject) => {
+            body: JSON.stringify({ kind: "provider_failure", event, ...(telemetry ? { context: telemetry } : {}) }) }), new Promise((_, reject) => {
             attemptTimer = setTimeout(() => { attemptController.abort(); reject(new Error("attempt_timeout")); },
               attempt === 0 ? Math.min(2000, Math.ceil(timeoutMs / 2), remainingMs) : remainingMs);
           })]);
@@ -49,6 +49,12 @@ function createProviderFailureLog({ attemptId, fetchImpl = (...args) => fetch(..
   }
   return {
     record(observation) {
+      // A diagnosis belongs to a real transfer. Never invent a transfer/user
+      // for older callers that supplied no transfer identity.
+      if (!attemptId) {
+        if (!configurationReported) { report("missing_transfer_context"); configurationReported = true; }
+        return;
+      }
       if (!configured) {
         if (!configurationReported) { report("not_configured"); configurationReported = true; }
         return;

@@ -49,7 +49,7 @@ async function checkProviderFailures(db, sql, migrations) {
     let calls = 0;
     try {
       Object.assign(process.env, config);
-      const recorder = createProviderFailureLog({ fetchImpl: async (url, options) => {
+      const recorder = createProviderFailureLog({ attemptId: "c0de5714-0000-4000-8000-000000000004", fetchImpl: async (url, options) => {
         const response = await writer(new Request(url, options));
         equal(response.status, 204);
         // Simulate a lost acknowledgement AFTER the database committed.
@@ -76,7 +76,7 @@ async function checkProviderFailures(db, sql, migrations) {
     equal(restored.providerFailures, 2);
     equal(restored.originalValuesPreserved, true);
     equal(await rows("select (select jsonb_agg(t) from public.transfers t) as transfers,(select jsonb_agg(u) from public.users u) as users"), before);
-  } finally { await db.exec("reset role; rollback;"); }
+  } finally { await db.exec("rollback; reset role;"); }
   return checks;
 }
 module.exports = { checkProviderFailures };

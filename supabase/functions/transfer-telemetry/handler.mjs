@@ -30,8 +30,12 @@ export function createTelemetryHandler({ createClient, getEnv, log = console.war
     try { input = JSON.parse(rawBody); } catch { return failure(400, "invalid_payload"); }
     // This branch is reachable only after private relay authentication. Public
     // extension telemetry cannot submit server-observed provider failures.
-    const providerEvent = input?.kind === "provider_failure" && Object.keys(input).length === 2
+    const providerEvent = input?.kind === "provider_failure" && Object.keys(input).every(key => ["kind", "event", "context"].includes(key))
       ? globalThis.CapProviderFailure.validate(input.event) : null;
+    const providerContext = providerEvent && input.context !== undefined ? validateTelemetryPayload(input.context) : null;
+    if (providerEvent && (input.context !== undefined && (!providerContext || providerContext.status !== "started"
+      || providerContext.attempt_id !== providerEvent.attempt_id || providerContext.summary_proof !== undefined
+      || providerContext.summary_confirmed_at !== undefined))) return failure(400, "invalid_payload");
     const payload = providerEvent ? null : validateTelemetryPayload(input);
     if (!payload && !providerEvent) return failure(400, "invalid_payload");
 
@@ -57,7 +61,8 @@ export function createTelemetryHandler({ createClient, getEnv, log = console.war
         global: { fetch: (url, options) => fetch(url, { ...options, signal: AbortSignal.timeout(rpcTimeoutMs) }) }
       });
       const { error } = await deadline(supabase.rpc(providerEvent ? "record_provider_failure" : "record_transfer_event", providerEvent ? {
-        p_event: providerEvent
+        p_event: providerEvent,
+        ...(providerContext ? { p_context: providerContext } : {})
       } : {
         p_attempt_id: payload.attempt_id,
         p_install_id: payload.install_id,

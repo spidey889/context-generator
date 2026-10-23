@@ -28,7 +28,7 @@ test("failure writes retry the same ID, overlap fallback work and flush before s
   configure(t);
   const calls = [];
   let release;
-  const recorder = createProviderFailureLog({ fetchImpl: async (_url, options) => {
+  const recorder = createProviderFailureLog({ attemptId: "33333333-3333-4333-8333-333333333333", fetchImpl: async (_url, options) => {
     calls.push(JSON.parse(options.body));
     if (calls.length === 1) return new Response(null, { status: 503 });
     return new Promise(resolve => { release = () => resolve(new Response(null, { status: 204 })); });
@@ -47,7 +47,7 @@ test("logging outages, stalled transports and rejected auth never block or expos
   configure(t);
   for (const status of [401, 500, null]) {
     const warnings = [], calls = [];
-    const recorder = createProviderFailureLog({ timeoutMs: 15, warn: (...args) => warnings.push(args),
+    const recorder = createProviderFailureLog({ attemptId: "33333333-3333-4333-8333-333333333333", timeoutMs: 15, warn: (...args) => warnings.push(args),
       fetchImpl: async (_url, options) => { calls.push(options); return status === null ? new Promise(() => {})
         : new Response("PRIVATE_PROVIDER_BODY", { status }); } });
     recorder.record(event()); await recorder.flush();
@@ -134,7 +134,7 @@ test("empty output exhausted by thinking retains actual tokens and the length fi
   assert.doesNotMatch(JSON.stringify(observations), /PRIVATE_THINKING|TEST_ONLY/);
 });
 
-test("summary handler waits for failure persistence even for an older client without telemetry", async t => {
+test("summary callers without transfer identity do not create unrelated diagnosis records", async t => {
   configure(t);
   const env = { OPENROUTER_API_KEY: "TEST_ONLY", TOKENHARBOR_API_KEY: undefined, TOKENHARBOR_BACKUP_API_KEY: undefined,
     GEMINI_API_KEY: undefined, MISTRAL_API_KEY: undefined, OPENROUTER_ENABLED: "true",
@@ -144,23 +144,18 @@ test("summary handler waits for failure persistence even for an older client wit
     t.after(() => old === undefined ? delete process.env[name] : process.env[name] = old);
   }
   const oldFetch = global.fetch; t.after(() => { global.fetch = oldFetch; });
-  let release, recorded, sent = false;
+  let recorded, sent = false;
   global.fetch = async (url, options) => {
     if (url.includes("edge.invalid")) {
       recorded = JSON.parse(options.body).event;
-      return new Promise(resolve => { release = () => resolve(new Response(null, { status: 204 })); });
+      return new Response(null, { status: 204 });
     }
     return new Response("PRIVATE_PROVIDER_BODY", { status: 401 });
   };
   const res = { setHeader() {}, status() { return this; }, json() { sent = true; return this; } };
   const done = require("../api/summarize")({ method: "POST", headers: { "content-type": "application/json", "x-cap-context-client": "cap-context-extension/1" },
     body: { conversation: "User: Prepare the quiet library for review.\n".repeat(300) } }, res);
-  await new Promise(resolve => setImmediate(resolve));
-  assert.ok(recorded);
-  assert.equal(recorded.attempt_id, undefined);
-  assert.equal(recorded.failure_reason, "provider_http_error");
-  assert.equal(recorded.http_status, 401);
-  assert.equal(sent, false);
-  release(); await done;
+  await done;
+  assert.equal(recorded, undefined);
   assert.equal(sent, true);
 });
