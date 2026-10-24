@@ -1450,6 +1450,8 @@ async function verifySourceReloadReport({ sourceSession, devToolsPort, origin, s
   const terminal = await waitFor(() => state.telemetryRequests.find(payload => payload.attempt_id === attemptId && payload.status === "failed"), "the worker's retained interruption report");
   assert.equal(terminal.failure_reason, "client_interrupted");
   assert.equal(terminal.diagnostics.error_code, "conversation_changed");
+  assert.equal(terminal.diagnostics.source_changed, true);
+  assert.ok(terminal.diagnostics.events.some(event => event.event === "cancelled" && event.code === "conversation_changed"));
   await waitFor(() => state.summaryCancelled, "the interrupted summary socket to close");
   assert.equal(await firstDestination.evaluate('document.querySelector("textarea").value'), "");
   assert.equal(await firstDestination.evaluate("window.__capContextSmokeSendClicks"), 0);
