@@ -3,7 +3,7 @@
   if (!platform || !globalThis.__capNetworkJsonData) return;
   // Advance readiness version with adapter/contract changes: old MAIN closures
   // can survive extension reloads and must be replaced before a new capture.
-  const version = platform === "deepseek" ? 25 : platform === "grok" ? 20 : 17, channel = "cap-context-network-json-v1";
+  const version = platform === "deepseek" ? 26 : platform === "grok" ? 20 : 17, channel = "cap-context-network-json-v1";
   // Bound the whole download, including unused branches, separately from text.
   const maxCaptureBytes = 32000000;
   // Shared across unique text files; the final transcript has its own limits.
@@ -21,6 +21,15 @@
     return { chat: location.pathname.match(pattern)?.[1], selected: platform === "grok" ? new URL(location.href).searchParams.get("rid") : null };
   };
   let active = null, activeMeasurementId = null, onAuthObserved = null;
+  // A cached chat or extension reload can precede our request observer. Use
+  // DeepSeek's own current session, not a request that may never happen again.
+  // Keep this credential in MAIN memory and send it only to same-origin history.
+  const readDeepSeekAuth = () => {
+    try {
+      const token = JSON.parse(window.localStorage.getItem("userToken"))?.value;
+      return typeof token === "string" && token.length > 0 && !/\s/.test(token) ? `Bearer ${token}` : null;
+    } catch { return null; } // Storage can be blocked; native observation still works.
+  };
   const observe = (input, options) => {
     try {
       const url = new URL(input instanceof Request ? input.url : input, location.href);
@@ -120,6 +129,7 @@
     const reply = { channel, type: "response", platform, chat, selected, id: request.id };
     if (active) { window.postMessage({ ...reply, error: "Another fast capture is running. Try again after it finishes.", captureFailureReason: "unavailable", captureDetail: "busy", captureRequestStage: "history" }, location.origin); return; }
     const controller = new AbortController();
+    let storedAuth = null;
     const metrics = globalThis.CapJsonCaptureMetrics.create({ adapter_version: version, deadline_ms: 25000, raw_limit_bytes: maxCaptureBytes, raw_bytes: 0, requests: 0 });
     const measureOnly = request.measureOnly === true;
     // The independent DOM size check reports numbers only. Its best-effort
@@ -135,6 +145,10 @@
       const now = current();
       if (controller.signal.aborted) throw new api.CaptureError("The capture request timed out or was cancelled.", controller.signal.reason === "capture_timeout" ? "timeout" : "request_failed", controller.signal.reason === "capture_timeout" ? "timeout" : "conversation_changed");
       if (!chat || request.chat !== chat || request.selected !== selected || now.chat !== chat || now.selected !== selected) throw new api.CaptureError("The conversation changed during capture.", "request_failed", "conversation_changed");
+      if (storedAuth && readDeepSeekAuth() !== storedAuth) {
+        controller.abort("session_changed");
+        throw new api.CaptureError("The conversation changed during capture.", "request_failed", "conversation_changed");
+      }
     };
     const changed = event => {
       if (event?.destination?.url) {
@@ -145,6 +159,10 @@
     };
     window.navigation?.addEventListener("navigate", changed);
     window.addEventListener("popstate", changed);
+    const sessionChanged = event => {
+      if (storedAuth && (event.key === "userToken" || event.key === null) && readDeepSeekAuth() !== storedAuth) controller.abort("session_changed");
+    };
+    if (platform === "deepseek") window.addEventListener("storage", sessionChanged);
     let bytesRead = 0;
     const read = async (url, options = {}, type = "json", expectedSize, fileIndex) => {
       check();
@@ -301,9 +319,13 @@
       } else {
         // Omitting x-device-id/cache client headers makes DeepSeek return a
         // full REPLACE snapshot. A MERGE/delta must never count as full history.
-        if (!auth) { const began = Date.now(); await waitForAuth(controller.signal); metrics.set({ auth_ms: Date.now() - began }); check(); }
-        if (!auth) throw new api.CaptureError("Refresh this signed-in DeepSeek chat to make fast capture ready.", "unavailable", "auth_missing");
-        const data = await read(`/api/v0/chat/history_messages?chat_session_id=${encodeURIComponent(chat)}`, { headers: { authorization: auth } });
+        storedAuth = readDeepSeekAuth();
+        if (!storedAuth && !auth) { const began = Date.now(); await waitForAuth(controller.signal); metrics.set({ auth_ms: Date.now() - began }); check(); }
+        // Login may have completed while waiting, without another observed request.
+        storedAuth = readDeepSeekAuth();
+        const captureAuth = storedAuth || auth;
+        if (!captureAuth) throw new api.CaptureError("Refresh this signed-in DeepSeek chat to make fast capture ready.", "unavailable", "auth_missing");
+        const data = await read(`/api/v0/chat/history_messages?chat_session_id=${encodeURIComponent(chat)}`, { headers: { authorization: captureAuth } });
         metrics.set({ history_items: data?.data?.biz_data?.chat_messages?.length, files_limit_bytes: maxUploadBytes,
           files_supported: 0, files_ignored: 0, files_declared_bytes: 0, files_downloaded_bytes: 0 });
         const branch = api.deepseekBranch(data, chat);
@@ -391,6 +413,7 @@
       if (measureOnly) { publishCount(reply.capture); delete reply.capture; }
     } catch (error) {
       delete reply.capture;
+      if (controller.signal.reason === "session_changed") error = new api.CaptureError("The conversation changed during capture.", "request_failed", "conversation_changed");
       metrics.fail(error?.jsonFailureCheck || error?.captureDetail, error?.captureRequestStage || "serialize");
       // Adapter errors contain structural reasons only. Never return fetch,
       // JSON parser or decoder errors, which can contain private response text.
@@ -408,6 +431,7 @@
       clearTimeout(timer);
       window.navigation?.removeEventListener("navigate", changed);
       window.removeEventListener("popstate", changed);
+      if (platform === "deepseek") window.removeEventListener("storage", sessionChanged);
       if (active === controller) { active = null; activeMeasurementId = null; }
       // Release the native read before resolving its count, so a new transfer
       // cannot race cancelled sibling downloads and get a false busy failure.

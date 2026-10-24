@@ -48,6 +48,7 @@ const PICKER_SCREENSHOT_PATH = process.env.CAP_CONTEXT_PICKER_SCREENSHOT || "";
 const ERROR_SCREENSHOT_PATH = process.env.CAP_CONTEXT_ERROR_SCREENSHOT || "";
 const JSON_SOURCE = ["chatgpt", "gemini", "grok", "deepseek"].includes(process.env.CAP_CONTEXT_JSON_SMOKE) ? process.env.CAP_CONTEXT_JSON_SMOKE : process.env.CAP_CONTEXT_JSON_SMOKE === "1" ? "claude" : null;
 const NETWORK_SOURCE = ["gemini", "grok", "deepseek"].includes(JSON_SOURCE);
+const DEEPSEEK_SESSION_SMOKE = JSON_SOURCE === "deepseek" && process.env.CAP_CONTEXT_DEEPSEEK_SESSION_SMOKE === "1";
 const GROK_FILE_ONLY_SMOKE = JSON_SOURCE === "grok" && process.env.CAP_CONTEXT_NETWORK_FAILURE_SMOKE === "file-only";
 const DEEPSEEK_OVERSIZE_SMOKE = JSON_SOURCE === "deepseek" && process.env.CAP_CONTEXT_NETWORK_FAILURE_SMOKE === "oversize";
 const DEEPSEEK_TRANSCRIPT_OVERSIZE_SMOKE = JSON_SOURCE === "deepseek" && process.env.CAP_CONTEXT_NETWORK_FAILURE_SMOKE === "transcript-oversize";
@@ -1004,6 +1005,7 @@ async function startFixtureServer() {
       if (NETWORK_SOURCE) {
         // Gemini must capture a cached chat without a prior RPC observation.
         const boot = JSON_SOURCE === "gemini" ? `window.WIZ_global_data={SNlM0e:"CSRF_SENTINEL",cfb2h:"native-build",FdrFJe:"native-session"};window.__geminiMenuClicks=0;`
+          : DEEPSEEK_SESSION_SMOKE ? 'localStorage.setItem("userToken",JSON.stringify({value:"AUTH_SENTINEL",__version:"0"}));'
           : JSON_SOURCE === "deepseek" ? 'const xhr=new XMLHttpRequest();xhr.open("GET","/api/v0/session");xhr.setRequestHeader("Authorization","Bearer AUTH_SENTINEL");xhr.setRequestHeader("x-device-id","CACHE_DEVICE");xhr.send();' : "";
         if (JSON_SOURCE === "gemini") page = page.replace("</main>", `<model-response><button aria-label="Show more" aria-haspopup="menu" onclick="window.__geminiMenuClicks++"></button><button aria-label="Show more options" onclick="window.__geminiMenuClicks++"></button></model-response></main>`);
         response.end(page.replace("</body>", `<script nonce="smoke">${boot}</script></body>`)); return;
@@ -3035,6 +3037,7 @@ async function run() {
         assert.doesNotMatch(capturedConversation, /TOOL_SENTINEL|SIGNED_SENTINEL|AUTH_SENTINEL|CSRF_SENTINEL/);
         assert.equal(state.pasteContentRequests, JSON_SOURCE === "deepseek" ? 4 : 0);
         if (JSON_SOURCE === "deepseek") {
+          if (DEEPSEEK_SESSION_SMOKE) process.stdout.write("✓ DeepSeek cached signed-in session captured without a prior native auth request.\n");
           assert.equal(state.fileReadsPeak, 4, "The installed extension must overlap independent original-file reads.");
           assert.equal(state.fileRedirects, 4, "Each file must follow its redirect without retrying history or falling back.");
           process.stdout.write("✓ DeepSeek JSON: four redirected cross-origin file reads, exact source order/bytes and no credential/referrer leakage.\n");
