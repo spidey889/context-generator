@@ -1,7 +1,7 @@
 const assert = require("node:assert/strict");
 const { createProviderFailureLog } = require("../api/provider-failure-log");
 
-async function checkProviderDiagnostics(db, sql, migrations) {
+async function checkProviderDiagnostics(db, sql) {
   let checks = 0;
   const equal = (actual, expected) => { assert.deepEqual(actual, expected); checks++; };
   const rows = async (query, args = []) => (await db.query(query, args)).rows;
@@ -93,13 +93,6 @@ async function checkProviderDiagnostics(db, sql, migrations) {
     } finally {
       for (const [key, value] of Object.entries(saved)) value === undefined ? delete process.env[key] : process.env[key] = value;
     }
-    await db.exec("reset role;");
-    const restored = await require("./check-telemetry-backup").checkSnapshot({
-      transfers: (await rows("select to_jsonb(t) row from public.transfers t")).map(value => value.row),
-      users: (await rows("select to_jsonb(u) row from public.users u")).map(value => value.row), migrations,
-      users_sequence: (await rows("select last_value::text,is_called from public.users_user_no_seq"))[0]
-    });
-    equal(restored.originalValuesPreserved, true);
   } finally { await db.exec("rollback; reset role;"); }
   return checks;
 }

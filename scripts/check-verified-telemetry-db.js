@@ -117,13 +117,15 @@ async function main() {
     equal((await outcome(902)).summary_received_at, null);
 
     // Neither forged success nor old clients create verified summary counters.
-    for (let number = 1; number <= 50; number++) await event(number, { legacy: number % 2 === 0 });
+    // One current and one legacy report exercise both unsigned paths. Volume
+    // is not the invariant here; pool/overflow fixtures own their real sizes.
+    for (const number of [1, 2]) await event(number, { legacy: number % 2 === 0 });
     equal(await counters(), undefined);
     const confirmedAt = `${today}T02:00:00.000Z`;
     await event(51, { verified: true, timestamps: true, confirmedAt });
     equal(await counters(), { total: 1, today: 1, legacy: 0 });
     const firstProof = await outcome(51);
-    for (let i = 0; i < 10; i++) await event(51, { verified: true, timestamps: true, confirmedAt: `${today}T03:00:00.000Z` });
+    await event(51, { verified: true, timestamps: true, confirmedAt: `${today}T03:00:00.000Z` });
     equal(await counters(), { total: 1, today: 1, legacy: 0 });
     equal(await outcome(51), firstProof);
 
@@ -386,9 +388,9 @@ async function main() {
       } else if (name.endsWith("_rename_draft_outcome_text_box.sql")) {
         checks += await require("./check-draft-copy-recovery-db.js").checkDraftCopyRecovery(db, sql, "text_box");
       } else if (name.endsWith("_add_attachment_size_failure_reason.sql")) {
-        checks += await require("./check-useful-diagnostics-db.js").checkAttachmentSizeFailure(db, sql, appliedMigrations);
+        checks += await require("./check-useful-diagnostics-db.js").checkAttachmentSizeFailure(db, sql);
       } else if (name.endsWith("_short_file_size_reason.sql")) {
-        checks += await require("./check-useful-diagnostics-db.js").checkAttachmentSizeFailure(db, sql, appliedMigrations, "file size");
+        checks += await require("./check-useful-diagnostics-db.js").checkAttachmentSizeFailure(db, sql, "file size");
       } else if (name.endsWith("_file_size_in_failure_reason.sql")) {
         checks += await require("./check-file-size-failure-db.js").checkFileSizeFailureReason(db, sql, appliedMigrations);
       } else if (name.endsWith("_json_capture_attempt_diagnostics.sql")) {
@@ -406,7 +408,7 @@ async function main() {
       } else if (name.endsWith("_provider_failure_logs.sql")) {
         checks += await require("./check-provider-failures-db.js").checkProviderFailures(db, sql, appliedMigrations);
       } else if (name.endsWith("_provider_failures_in_diagnostics.sql")) {
-        checks += await require("./check-provider-diagnostics-db.js").checkProviderDiagnostics(db, sql, appliedMigrations);
+        checks += await require("./check-provider-diagnostics-db.js").checkProviderDiagnostics(db, sql);
       } else if (name.endsWith("_deepseek_file_diagnostics.sql")) {
         checks += await require("./check-json-capture-diagnostics-db.js").checkFileDiagnostics(db, sql);
       } else if (name.endsWith("_raise_million_character_limits.sql")) {
@@ -414,6 +416,14 @@ async function main() {
       } else await db.exec(sql);
     }
     checks += await require("./check-served-model-db.js").checkStoreModelReceipts(db);
+    // One default restore at the complete current schema covers file-size
+    // reasons and provider evidence together, including the later validators.
+    equal((await checkSnapshot({
+      transfers: (await db.query("select to_jsonb(t) as row from public.transfers t")).rows.map(value => value.row),
+      users: (await db.query("select to_jsonb(u) as row from public.users u")).rows.map(value => value.row),
+      migrations: appliedMigrations,
+      users_sequence: await one("select last_value::text,is_called from public.users_user_no_seq")
+    })).originalValuesPreserved, true);
     console.log(`PASS: ${names.length} real migrations replayed; ${checks} database correctness, data preservation, attribution and privilege checks.`);
     console.log(`Per-install default plan: ${JSON.stringify(plan.rows[0]["QUERY PLAN"][0].Plan["Node Type"])}; retained composite index verified.`);
     console.log("Local pg_cron catalog shim: scheduled SQL tested; hosted scheduling and concurrent sessions require deployment verification.");

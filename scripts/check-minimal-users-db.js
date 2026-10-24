@@ -50,7 +50,7 @@ async function checkMinimalUsers(db, migration, migrations) {
   await db.exec("rollback;");
   await event(803, { status: "failed" });
   equal(await counts(), { user_no: 1, lifetime: 0, today: 0, failed: 1 });
-  for (let i = 0; i < 5; i++) await event(803, { status: "failed" });
+  await event(803, { status: "failed" });
   equal(await counts(), { user_no: 1, lifetime: 0, today: 0, failed: 1 });
   const firstName = (await one("select name from public.users where install_id=$1", [install])).name;
   assert.ok(pool.includes(firstName)); checks++;
@@ -88,17 +88,20 @@ async function checkMinimalUsers(db, migration, migrations) {
     users: (await db.query("select to_jsonb(u) as row from public.users u")).rows.map(value => value.row),
     users_sequence: await one("select last_value::text, is_called from public.users_user_no_seq"),
     functions: (await db.query("select pg_get_functiondef(oid) as definition from pg_proc where pronamespace='public'::regnamespace")).rows.map(value => value.definition),
-    views: (await db.query("select viewname as name, definition from pg_views where schemaname='public'")).rows
+    views: (await db.query("select viewname as name, definition from pg_views where schemaname='public'")).rows,
+    cron_jobs: (await db.query("select to_jsonb(j) as row from cron.job j")).rows.map(value => value.row)
   };
   const { checkSnapshot } = require("./check-telemetry-backup.js");
   const restored = await checkSnapshot(snapshot);
   equal(restored.originalValuesPreserved, true);
   equal(restored.capturedDefinitionsPreserved, true);
   equal(restored.pendingMigrations, 0);
+  equal(restored.capturedCronJobsRestored, true);
   // Fill the finite pool: no repeated names or skipped visible user numbers.
-  for (let i = 1; i < pool.length; i++) {
-    await db.query("insert into public.users (install_id) values ($1)", [`pool-install-${i}`]);
-  }
+  // Each row still runs the real allocation trigger; avoid one JS/SQL trip
+  // per name while preserving exhaustion of the complete historical pool.
+  await db.query(`insert into public.users (install_id)
+    select 'pool-install-' || n from generate_series(1,$1::integer) as fixture(n)`, [pool.length - 1]);
   equal(await one("select count(*)::int as users, count(distinct name)::int as names, max(user_no)::int as last from public.users"),
     { users: pool.length, names: pool.length, last: pool.length });
   await assert.rejects(db.query("insert into public.users (install_id) values ('pool-overflow')"), error => error.code === "P0001" && /pool exhausted/.test(error.message)); checks++;

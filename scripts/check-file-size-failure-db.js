@@ -49,6 +49,8 @@ async function checkFileSizeFailureReason(db, sql, migrations) {
   equal(await outcome(4), { status: "failed", failure_reason: "paste_failed" });
   equal(await outcome(5), { status: "started", failure_reason: null });
   const { checkSnapshot } = require("./check-telemetry-backup.js");
+  // Recovery verifies the generated label before this explicit upgrade.
+  // check-verified-telemetry-db.js owns default recovery at the final schema.
   const upgraded = await checkSnapshot(legacyBackup, { applyPending: true, throughVersion: "20261013092328" });
   equal(upgraded.removedColumns, ["transfers.file_size_failure_reason"]);
   equal(upgraded.reclassifiedFileSizeFailures, before.transfers.filter(row => row.status === "failed"
@@ -76,10 +78,6 @@ async function checkFileSizeFailureReason(db, sql, migrations) {
     await db.exec("savepoint immutable;");
     await assert.rejects(db.query("update public.transfers set failure_reason='conversation_too_large' where attempt_id=$1", [id(7)]), error => error.code === "22023"); checks++;
     await db.exec("rollback to savepoint immutable;");
-
-    const current = { transfers: (await db.query("select to_jsonb(t) as row from public.transfers t")).rows.map(value => value.row),
-      users: (await db.query("select to_jsonb(u) as row from public.users u")).rows.map(value => value.row), migrations: [...migrations] };
-    equal((await checkSnapshot(current)).originalValuesPreserved, true);
   } finally { await db.exec("rollback;"); }
   equal(await snapshot(), expected);
   return checks;
