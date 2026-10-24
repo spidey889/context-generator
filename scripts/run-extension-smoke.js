@@ -40,6 +40,7 @@ const TOKENHARBOR_SMOKE = process.env.CAP_CONTEXT_TOKENHARBOR_SMOKE === "1";
 const EARLY_HANDOFF_STREAM_SMOKE = process.env.CAP_CONTEXT_EARLY_HANDOFF_SMOKE === "stream";
 const EARLY_HANDOFF_SMOKE = process.env.CAP_CONTEXT_EARLY_HANDOFF_SMOKE === "1" || EARLY_HANDOFF_STREAM_SMOKE;
 const ESCAPE_SMOKE = ["source", "destination"].includes(process.env.CAP_CONTEXT_ESCAPE_SMOKE) ? process.env.CAP_CONTEXT_ESCAPE_SMOKE : null;
+const SOURCE_RELOAD_SMOKE = process.env.CAP_CONTEXT_SOURCE_RELOAD_SMOKE === "1";
 const HANDOFF_SCREENSHOT_PATH = process.env.CAP_CONTEXT_HANDOFF_SCREENSHOT || "";
 const CLAUDE_PLACEMENT_SCREENSHOT_PATH = process.env.CAP_CONTEXT_CLAUDE_PLACEMENT_SCREENSHOT || "";
 const CHATGPT_PLACEMENT_SCREENSHOT_PATH = process.env.CAP_CONTEXT_CHATGPT_PLACEMENT_SCREENSHOT || "";
@@ -48,6 +49,7 @@ const PICKER_SCREENSHOT_PATH = process.env.CAP_CONTEXT_PICKER_SCREENSHOT || "";
 const ERROR_SCREENSHOT_PATH = process.env.CAP_CONTEXT_ERROR_SCREENSHOT || "";
 const JSON_SOURCE = ["chatgpt", "gemini", "grok", "deepseek"].includes(process.env.CAP_CONTEXT_JSON_SMOKE) ? process.env.CAP_CONTEXT_JSON_SMOKE : process.env.CAP_CONTEXT_JSON_SMOKE === "1" ? "claude" : null;
 const NETWORK_SOURCE = ["gemini", "grok", "deepseek"].includes(JSON_SOURCE);
+const DEEPSEEK_SESSION_SMOKE = JSON_SOURCE === "deepseek" && process.env.CAP_CONTEXT_DEEPSEEK_SESSION_SMOKE === "1";
 const GROK_FILE_ONLY_SMOKE = JSON_SOURCE === "grok" && process.env.CAP_CONTEXT_NETWORK_FAILURE_SMOKE === "file-only";
 const DEEPSEEK_OVERSIZE_SMOKE = JSON_SOURCE === "deepseek" && process.env.CAP_CONTEXT_NETWORK_FAILURE_SMOKE === "oversize";
 const DEEPSEEK_TRANSCRIPT_OVERSIZE_SMOKE = JSON_SOURCE === "deepseek" && process.env.CAP_CONTEXT_NETWORK_FAILURE_SMOKE === "transcript-oversize";
@@ -865,7 +867,7 @@ async function startFixtureServer() {
       state.summaryRequests.push(JSON.parse(rawBody));
       const validated = validateSummarizeRequest({ headers: request.headers, body: rawBody });
       assert.equal(validated.ok, true, `Installed extension must satisfy the actual backend input contract (${validated.code || "accepted"}).`);
-      if (ESCAPE_SMOKE && state.summaryRequests.length === 1) {
+      if ((ESCAPE_SMOKE || SOURCE_RELOAD_SMOKE) && state.summaryRequests.length === 1) {
         state.summaryPending = true;
         response.writeHead(200, { "Access-Control-Allow-Origin": "*", "Content-Type": "application/x-ndjson" });
         response.write(`${JSON.stringify({ type: "delta", text: ESCAPE_SMOKE === "destination"
@@ -1019,7 +1021,8 @@ async function startFixtureServer() {
       if (NETWORK_SOURCE) {
         // Gemini must capture a cached chat without a prior RPC observation.
         const boot = JSON_SOURCE === "gemini" ? `window.WIZ_global_data={SNlM0e:"CSRF_SENTINEL",cfb2h:"native-build",FdrFJe:"native-session"};window.__geminiMenuClicks=0;`
-          : JSON_SOURCE === "deepseek" ? 'const xhr=new XMLHttpRequest();xhr.open("GET","/api/v0/session");xhr.setRequestHeader("Authorization","Bearer AUTH_SENTINEL");xhr.setRequestHeader("x-device-id","CACHE_DEVICE");xhr.send();' : "";
+          : JSON_SOURCE === "deepseek" ? 'localStorage.setItem("userToken",JSON.stringify({value:"AUTH_SENTINEL",__version:"0"}));'
+            + (DEEPSEEK_SESSION_SMOKE ? "" : 'const xhr=new XMLHttpRequest();xhr.open("GET","/api/v0/session");xhr.setRequestHeader("Authorization","Bearer AUTH_SENTINEL");xhr.setRequestHeader("x-device-id","CACHE_DEVICE");xhr.send();') : "";
         if (JSON_SOURCE === "gemini") page = page.replace("</main>", `<model-response><button aria-label="Show more" aria-haspopup="menu" onclick="window.__geminiMenuClicks++"></button><button aria-label="Show more options" onclick="window.__geminiMenuClicks++"></button></model-response></main>`);
         response.end(page.replace("</body>", `<script nonce="smoke">${boot}</script></body>`)); return;
       }
@@ -1377,6 +1380,9 @@ async function verifyEscapeCancellation({ sourceSession, devToolsPort, origin, s
   // the composer and await that state before sending the one trusted Escape.
   await session.evaluate('document.querySelector(\'textarea, [contenteditable="true"]\').focus()');
   await waitFor(() => session.evaluate('document.visibilityState === "visible" && document.hasFocus() && document.activeElement === document.querySelector(\'textarea, [contenteditable="true"]\')'), "the focused Escape composer");
+  await session.evaluate(`window.__capSmokeEscapeKeys = []; window.addEventListener('keydown', event => {
+    window.__capSmokeEscapeKeys.push({ key: event.key, trusted: event.isTrusted, visible: document.visibilityState, focused: document.hasFocus() });
+  }, true);`);
   const escapeStartedAt = Date.now();
   try {
     await session.call("Input.dispatchKeyEvent", { type: "keyDown", key: "Escape", code: "Escape", windowsVirtualKeyCode: 27 });
@@ -1393,7 +1399,12 @@ async function verifyEscapeCancellation({ sourceSession, devToolsPort, origin, s
     assert.equal(local.error, false);
     await sourceSession.call("Input.dispatchKeyEvent", { type: "keyUp", key: "Escape", code: "Escape", windowsVirtualKeyCode: 27 });
   }
-  await waitFor(async () => !(await getTargets(devToolsPort)).some(item => item.id === target.id), "the extension-created destination tab to close", SMOKE_TIMEOUT_MS, 20);
+  try {
+    await waitFor(async () => !(await getTargets(devToolsPort)).some(item => item.id === target.id), "the extension-created destination tab to close", SMOKE_TIMEOUT_MS, 20);
+  } catch (error) {
+    try { error.message += `\nNative Escape observations: ${JSON.stringify(await session.evaluate("window.__capSmokeEscapeKeys"))}`; } catch {}
+    throw error;
+  }
   const escapeCloseMs = Date.now() - escapeStartedAt;
   destinationSessions.delete(target.id);
   await waitFor(() => state.summaryCancelled, "the worker closing the real summary socket");
@@ -1419,6 +1430,45 @@ async function verifyEscapeCancellation({ sourceSession, devToolsPort, origin, s
   assert.equal((await getTargets(devToolsPort)).some(item => item.id === target.id), false);
   assert.equal(state.destinationRequests, 2, "Cancellation must not create another recovery tab.");
   process.stdout.write(`✓ Trusted Escape in ${ESCAPE_SMOKE}: destination tab closed in ${escapeCloseMs}ms, summary socket aborted; source stays open and next transfer succeeds.\n`);
+}
+
+async function verifySourceReloadReport({ sourceSession, devToolsPort, origin, state, destinationSessions }) {
+  const start = `(() => {
+    document.getElementById("context-generator-bubble").click();
+    [...document.querySelectorAll(".context-generator-destination-tile")].find(tile => tile.textContent.includes("Claude")).click();
+  })()`;
+  await sourceSession.evaluate(start);
+  await waitFor(() => state.summaryPending, "the first transfer's pending summary");
+  const attemptId = (await waitFor(() => state.telemetryRequests.find(payload => payload.status === "started"), "the first admitted transfer report")).attempt_id;
+  const firstTarget = await waitFor(async () => (await getTargets(devToolsPort)).find(item => item.type === "page" && item.url.startsWith(origin + "/destination")), "the first prepared destination");
+  const firstDestination = await CdpSession.connect(firstTarget.webSocketDebuggerUrl);
+  destinationSessions.set(firstTarget.id, firstDestination);
+  await firstDestination.call("Runtime.enable");
+  // This destroys the old source document and its final-report callback. The
+  // installed worker must observe Chrome's real tab event and retain the report.
+  await sourceSession.call("Page.reload", { ignoreCache: true });
+  const terminal = await waitFor(() => state.telemetryRequests.find(payload => payload.attempt_id === attemptId && payload.status === "failed"), "the worker's retained interruption report");
+  assert.equal(terminal.failure_reason, "client_interrupted");
+  assert.equal(terminal.diagnostics.error_code, "conversation_changed");
+  await waitFor(() => state.summaryCancelled, "the interrupted summary socket to close");
+  assert.equal(await firstDestination.evaluate('document.querySelector("textarea").value'), "");
+  assert.equal(await firstDestination.evaluate("window.__capContextSmokeSendClicks"), 0);
+  await waitFor(() => sourceSession.evaluate('Boolean(document.getElementById("context-generator-bubble"))'), "the new document's extension controls");
+  await sourceSession.evaluate(start);
+  const next = await waitFor(() => state.telemetryRequests.find(payload => payload.attempt_id !== attemptId && payload.status === "succeeded"), "the next document's successful transfer");
+  assert.equal(next.last_stage, "completed");
+  assert.equal(state.summaryRequests.length, 2);
+  const nextTarget = (await getTargets(devToolsPort)).find(item => item.type === "page" && item.id !== firstTarget.id && item.url.startsWith(origin + "/destination"));
+  assert.ok(nextTarget, "The next transfer must have its own destination.");
+  const nextDestination = await CdpSession.connect(nextTarget.webSocketDebuggerUrl);
+  destinationSessions.set(nextTarget.id, nextDestination);
+  await nextDestination.call("Runtime.enable");
+  assert.equal(await nextDestination.evaluate('document.querySelector("textarea").value'), SUMMARY_TEXT);
+  assert.equal(await nextDestination.evaluate("window.__capContextSmokeSendClicks"), 0);
+  assert.equal(await firstDestination.evaluate('document.querySelector("textarea").value'), "", "Late callbacks must not paste into the interrupted destination.");
+  assert.equal(state.telemetryRequests.some(payload => payload.attempt_id === attemptId && payload.status === "succeeded"), false);
+  process.stdout.write("✓ Source reload retained a worker interruption report, aborted the old summary and left its destination empty.\n");
+  process.stdout.write("✓ A new transfer from the reloaded document succeeded without changing the old outcome.\n");
 }
 
 async function verifyEarlyHandoff({ sourceSession, devToolsPort, origin, state, destinationSessions }) {
@@ -2124,6 +2174,11 @@ async function run() {
     }
     if (process.env.CAP_CONTEXT_CHATGPT_PASTE_SMOKE === "1") {
       await verifyChatGptLongPaste(sourceSession);
+      return;
+    }
+    if (SOURCE_RELOAD_SMOKE) {
+      await verifySourceReloadReport({ sourceSession, devToolsPort, origin, state, destinationSessions });
+      assert.ok(telemetryFixture.responses.every(status => status === 204), "Reload reports must pass the real telemetry validators.");
       return;
     }
     if (ESCAPE_SMOKE) {
@@ -3092,6 +3147,7 @@ async function run() {
         assert.doesNotMatch(capturedConversation, /TOOL_SENTINEL|SIGNED_SENTINEL|AUTH_SENTINEL|CSRF_SENTINEL/);
         assert.equal(state.pasteContentRequests, JSON_SOURCE === "deepseek" ? 4 : 0);
         if (JSON_SOURCE === "deepseek") {
+          if (DEEPSEEK_SESSION_SMOKE) process.stdout.write("✓ DeepSeek cached signed-in session captured without a prior native auth request.\n");
           assert.equal(state.fileReadsPeak, 4, "The installed extension must overlap independent original-file reads.");
           assert.equal(state.fileRedirects, 4, "Each file must follow its redirect without retrying history or falling back.");
           process.stdout.write("✓ DeepSeek JSON: four redirected cross-origin file reads, exact source order/bytes and no credential/referrer leakage.\n");
