@@ -1874,7 +1874,7 @@ clockTest("source preparation and summary dispatch reject navigation without tra
     else change();
     await assert.rejects(stage === "prepare" ? hooks.prepareSourceForCapture() : hooks.summarizeWithBackend("verified source text", trace),
       error => error.code === "conversation_changed");
-    assert.equal(messages.length, 0);
+    assert.ok(messages.every(message => message.type === "EXTEND_DOM_CAPTURE_DEADLINE"), "Navigation sends no conversation data.");
     hooks.teardownContextGeneratorInstance();
   }
 });
@@ -4214,4 +4214,56 @@ test("shared composer resize monitoring reuses targets and releases remounted no
     hooks.stopPlatformPlacementResizeMonitoring();
     assert.equal(second.observed.length, 0, hostname);
   }
+});
+
+test("DOM allowance clears the six-minute watchdog, grows for the estimate, and cannot affect a new attempt", t => {
+  t.mock.timers.enable({ apis: ["Date", "setTimeout", "setInterval"], now: Date.now() });
+  const sent = [];
+  const hooks = loadPlatformContent([], "chat.deepseek.com", { runtimeSendMessage: async message => { sent.push(message); return { ok: true }; } });
+  try {
+    const trace = hooks.beginTransferAttempt("claude", "test");
+    const original = trace.deadlineAt;
+    hooks.extendDomCaptureDeadline(trace);
+    assert.equal(trace.deadlineAt - trace.domCaptureStartedAt, 26 * 60000);
+    t.mock.timers.tick(360001);
+    assert.equal(trace.expired, undefined);
+    assert.equal(trace.completed, false);
+    const estimate = hooks.estimateDomCaptureTime({ characterCount: 500000, messageTurnCount: 200 });
+    assert.equal(estimate, 11 * 60000);
+    hooks.extendDomCaptureDeadline(trace, estimate);
+    assert.equal(trace.deadlineAt - trace.domCaptureStartedAt, 30 * 60000);
+    const extended = trace.deadlineAt;
+    hooks.extendDomCaptureDeadline(trace, 60000);
+    assert.equal(trace.deadlineAt, extended, "An estimate can never shorten the allowance.");
+    assert.ok(sent.some(message => message.type === "EXTEND_DOM_CAPTURE_DEADLINE" && message.deadlineAt > original));
+    t.mock.timers.tick(extended - Date.now() - 1000);
+    hooks.markCaptureDone(trace, "User: Complete captured history.");
+    assert.equal(trace.deadlineAt - Date.now(), 360000, "Capture completion retains the normal summary/delivery budget.");
+    hooks.resetRunningFlag();
+    const next = hooks.beginTransferAttempt("claude", "new");
+    hooks.extendDomCaptureDeadline(trace, 120 * 60000);
+    assert.equal(next.deadlineAt - Date.now(), 360000);
+    assert.equal(hooks.estimateDomCaptureTime({ characterCount: NaN, messageTurnCount: -1 }), null);
+  } finally { hooks.teardownContextGeneratorInstance(); t.mock.timers.reset(); }
+});
+
+test("active DOM capture keeps scrolling past 480 advances and captures the last turn", async t => {
+  t.mock.timers.enable({ apis: ["Date", "setTimeout", "setInterval"], now: Date.now() });
+  const { elements } = createVirtualizedChatElements({ label: "ChatGPT", totalTurns: 800, windowSize: 4,
+    scrollStride: 1, scrollHeight: 300000,
+    makeTurn: i => new FakeElement({ text: `Unique tall-window message ${i} with full preserved source text.`,
+      attrs: { "data-message-author-role": i % 2 ? "user" : "assistant" } }) });
+  const hooks = loadPlatformContent(elements, "chatgpt.com");
+  try {
+    const trace = hooks.beginTransferAttempt("claude", "test");
+    let done = false;
+    const pending = (async () => { await hooks.prepareSourceForCapture(); return hooks.scrapeConversationTextWhenReady(); })();
+    pending.then(() => { done = true; }, () => { done = true; });
+    for (let i = 0; !done && i < 12000; i++) { await new Promise(setImmediate); t.mock.timers.tick(140); }
+    assert.ok(done, "Long capture must settle within its extended budget.");
+    const text = await pending;
+    assert.match(text, /message 800 with full preserved source text/);
+    assert.ok(trace.diagnostics.sweep_scrolls > 480);
+    assert.notEqual(trace.diagnostics.sweep_exit, "max-advances-reached");
+  } finally { hooks.teardownContextGeneratorInstance(); t.mock.timers.reset(); }
 });

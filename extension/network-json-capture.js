@@ -32,7 +32,7 @@
     const onAbort = () => finish(false);
     const receive = event => {
       const reply = event.data;
-      if (event.source === window && event.origin === location.origin && reply?.channel === channel && reply.platform === platform && reply.type === "pong" && reply.id === id && reply.version === (platform === "deepseek" ? 25 : platform === "grok" ? 20 : 17)) finish(true);
+      if (event.source === window && event.origin === location.origin && reply?.channel === channel && reply.platform === platform && reply.type === "pong" && reply.id === id && reply.version === (platform === "deepseek" ? 26 : platform === "grok" ? 21 : 18)) finish(true);
     };
     const ping = () => { if (settled) return; window.postMessage({ channel, platform, type: "ping", id }, location.origin); poll = setTimeout(ping, 100); };
     const timer = setTimeout(() => finish(false), timeout);
@@ -40,7 +40,7 @@
     window.addEventListener("message", receive); ping();
     if (install) Promise.resolve().then(() => chrome.runtime.sendMessage({ type: "ENSURE_NETWORK_JSON_HOOK" })).then(reply => { if (!reply?.ok) finish(false); }, () => finish(false));
   });
-  window.__capCaptureNetworkJson = async (expectedPath = platform === "grok" ? location.href : location.pathname, metrics, measureOnly = false, signal) => {
+  window.__capCaptureNetworkJson = async (expectedPath = platform === "grok" ? location.href : location.pathname, metrics, measureOnly = false, signal, onEstimate) => {
     const hookStarted = Date.now();
     // Grok branch selection lives in the query string; pin it with the clicked chat.
     const expectedUrl = platform === "grok" ? new URL(expectedPath, location.origin) : null;
@@ -74,13 +74,23 @@
         const cleanup = () => { clearTimeout(timer); window.removeEventListener("message", receive); signal?.removeEventListener("abort", onAbort); };
         const receive = event => {
           const reply = event.data;
-          if (event.source !== window || event.origin !== location.origin || reply?.channel !== channel || reply.platform !== platform || reply.type !== "response" || reply.id !== id) return;
+          if (event.source !== window || event.origin !== location.origin || reply?.channel !== channel || reply.platform !== platform || !["response", "measurement_progress"].includes(reply.type) || reply.id !== id) return;
+          if (reply.type === "measurement_progress") {
+            if (measureOnly && !signal?.aborted && !changed && reply.chat === before.chat && reply.selected === before.selected
+                && JSON.stringify(current()) === JSON.stringify(before) && Number.isSafeInteger(reply.messageTurnCount)
+                && reply.messageTurnCount > 0 && Number.isSafeInteger(reply.estimatedCharacterCount) && reply.estimatedCharacterCount >= 0) {
+              try { onEstimate?.({ messageTurnCount: reply.messageTurnCount, estimatedCharacterCount: reply.estimatedCharacterCount }); } catch {}
+            }
+            return;
+          }
           cleanup();
           if (signal?.aborted) return reject(new Error("Size check cancelled."));
           metrics.adopt(reply.jsonCapture);
           if (changed || reply.chat !== before.chat || reply.selected !== before.selected || JSON.stringify(current()) !== JSON.stringify(before)) return reject(changedError("The conversation changed during capture."));
           if (measureOnly && reply.captureDetail === "conversation_changed") return reject(changedError("The conversation changed during capture."));
-          if (measureOnly && Number.isSafeInteger(reply.characterCount) && reply.characterCount >= 0) return resolve({ characterCount: reply.characterCount });
+          if (measureOnly && Number.isSafeInteger(reply.characterCount) && reply.characterCount >= 0) return resolve({ characterCount: reply.characterCount,
+            ...(Number.isSafeInteger(reply.messageTurnCount) && reply.messageTurnCount >= 0 ? { messageTurnCount: reply.messageTurnCount } : {}),
+            ...(Number.isSafeInteger(reply.estimatedCharacterCount) && reply.estimatedCharacterCount >= 0 ? { estimatedCharacterCount: reply.estimatedCharacterCount } : {}) });
           if (reply.error) return reject(captureError(reply.error === "size" ? "This chat is too long to transfer (limit: 1,000,000 characters). Try a shorter chat." : `Fast capture failed: ${reply.error} Turn off the lightning button to use standard capture.`, reply.captureFailureReason,
             reply.captureDetail || "network_error", reply.captureRequestStage || "history", reply.status));
           const capture = reply.capture;
@@ -110,8 +120,8 @@
   // Only an accepted source attempt is persisted by platform-content. Unused
   // picker snapshots stay in memory and never create telemetry reports.
   const readCapture = window.__capCaptureNetworkJson;
-  window.__capMeasureNetworkJson = (expectedPath, signal) => readCapture(expectedPath,
-    globalThis.CapJsonCaptureMetrics.create({ deadline_ms: 27000 }), true, signal);
+  window.__capMeasureNetworkJson = (expectedPath, signal, onEstimate) => readCapture(expectedPath,
+    globalThis.CapJsonCaptureMetrics.create({ deadline_ms: 27000 }), true, signal, onEstimate);
   window.__capCaptureNetworkJson = async expectedPath => {
     const metrics = globalThis.CapJsonCaptureMetrics.create({ deadline_ms: 27000 });
     try {

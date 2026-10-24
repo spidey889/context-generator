@@ -296,5 +296,35 @@
     });
     return transcript("DeepSeek", turns, excludedContentTypes, metrics);
   };
-  globalThis.__capNetworkJsonData = { CaptureError, complete, geminiPage, gemini, grokBranch, grok, deepseekBranch, deepseek, textFile, fileList };
+  // Presentation only: tolerate partial/unsupported history without turning it
+  // into an accepted transcript or a size-limit decision. Never count tools.
+  const roughSize = (platform, history, selected, chat) => {
+    let messages = [];
+    if (platform === "gemini") {
+      const turns = history.flatMap(page => page.turns || []).filter(item => item?.[0]?.[0] === `c_${chat}`);
+      return { messageTurnCount: turns.length * 2, estimatedCharacterCount: turns.reduce((n, item) => n
+        + (typeof item?.[2]?.[0]?.[0] === "string" ? item[2][0][0].length : 0)
+        + (typeof item?.[3]?.[0]?.[0]?.[1]?.[0] === "string" ? item[3][0][0][1][0].length : 0), 0) };
+    }
+    const items = platform === "grok" ? history?.responseNodes : history?.chat_messages;
+    if (!Array.isArray(items)) return {};
+    const idKey = platform === "grok" ? "responseId" : "message_id";
+    const parentKey = platform === "grok" ? "parentResponseId" : "parent_id";
+    const mapping = new Map(items.map(item => [item?.[idKey], item]));
+    if (selected == null && platform === "grok") {
+      const parents = new Set(items.map(item => item?.[parentKey]));
+      const leaves = items.filter(item => !parents.has(item?.[idKey]));
+      if (leaves.length === 1) selected = leaves[0][idKey];
+    }
+    const seen = new Set();
+    while (selected != null && mapping.has(selected) && !seen.has(selected)) {
+      seen.add(selected); const item = mapping.get(selected); messages.push(item); selected = item[parentKey];
+    }
+    messages = messages.filter(item => platform === "grok" ? ["human", "assistant"].includes(item.sender) : ["USER", "ASSISTANT"].includes(item.role));
+    return { messageTurnCount: messages.length, estimatedCharacterCount: messages.reduce((sum, item) => sum
+      + (typeof item.message === "string" ? item.message.length : 0)
+      + (Array.isArray(item.fragments) ? item.fragments : []).reduce((n, part) => n
+        + (["REQUEST", "RESPONSE", "THINK"].includes(part?.type) && typeof part.content === "string" ? part.content.length : 0), 0), 0) };
+  };
+  globalThis.__capNetworkJsonData = { roughSize, CaptureError, complete, geminiPage, gemini, grokBranch, grok, deepseekBranch, deepseek, textFile, fileList };
 })();

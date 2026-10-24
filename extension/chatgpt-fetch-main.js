@@ -1,5 +1,5 @@
 (() => {
-  const version = 20;
+  const version = 21;
   // HTTP media types ignore casing; parameters do not change the base type.
   const responseMediaType = response => response.headers.get("content-type")?.split(";", 1)[0].trim().toLowerCase();
   // Match MIME metadata by base type, keeping the serializer's paste gate aligned.
@@ -265,6 +265,13 @@
         if (Array.isArray(node.children)) node.children = node.children.filter(id => Object.hasOwn(selectedMapping, id));
       }
       data.mapping = selectedMapping;
+      if (request.measureOnly === true) {
+        const messages = branch.filter(message => ["user", "assistant"].includes(message?.author?.role)
+          && !message.metadata?.is_visually_hidden_from_conversation);
+        window.postMessage({ channel, type: "measurement_progress", id: request.id, chat, messageTurnCount: messages.length,
+          estimatedCharacterCount: messages.reduce((sum, message) => sum + (typeof message.content?.text === "string" ? message.content.text.length : 0)
+            + (Array.isArray(message.content?.parts) ? message.content.parts : []).reduce((n, part) => n + (typeof part === "string" ? part.length : 0), 0), 0) }, location.origin);
+      }
       const pastedTexts = Object.create(null);
       const uploads = new Map();
       let pastedBytes = 0;

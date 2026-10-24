@@ -44,7 +44,7 @@ test("ChatGPT fresh DOM size check includes healthy pasted files after a failed 
   await assert.rejects(h.window.__capCaptureChatGptJson());
   const result = await h.window.__capMeasureChatGptJson();
   assert.ok(result.characterCount > 500000);
-  assert.deepEqual(Object.keys(result), ["characterCount"]);
+  assert.deepEqual(Object.keys(result), ["characterCount", "messageTurnCount"]);
   assert.ok(h.requests.some(request => new URL(request.url, "https://chatgpt.com").searchParams.get("id") === files[1].id));
   await assert.rejects(h.window.__capCaptureChatGptJson(), "Ordinary capture must still reject unreadable files.");
 });
@@ -791,7 +791,7 @@ test("ChatGPT replaces the previous hook without losing observed authentication"
   old.version = 8;
   harness.reinstall();
   assert.notEqual(harness.window.__capChatGptFetchState, old);
-  assert.equal(harness.window.__capChatGptFetchState.version, 20);
+  assert.equal(harness.window.__capChatGptFetchState.version, 21);
   assert.equal(harness.listeners(), 1);
   assert.equal((await harness.window.__capCaptureChatGptJson()).text,
     "ChatGPT conversation:\n\nUser: Original pasted document\n\nAssistant: Selected answer");
@@ -1317,4 +1317,29 @@ test("ChatGPT retains file-only upload names without pointers, bodies or other b
     assert.doesNotMatch(capture.text, /SENTINEL/);
     assert.equal(h.requests.length, 2); // Route discovery plus history, no file downloads.
   }
+});
+
+test("ChatGPT can estimate incomplete content without relaxing ordinary capture", async () => {
+  const data = fixture(); data.is_partial = true;
+  const h = setup(data); await discover(h);
+  await assert.rejects(h.window.__capCaptureChatGptJson());
+  const result = await h.window.__capMeasureChatGptJson();
+  assert.equal(result.characterCount, 0);
+  assert.ok(result.messageTurnCount > 0 && result.estimatedCharacterCount > 0);
+  assert.ok(Object.values(result).every(value => Number.isSafeInteger(value)));
+});
+
+test("ChatGPT publishes the rough estimate while original pasted-file reads are pending", async () => {
+  const { data, files, fetchImpl } = pasteFixture(["A pasted source body"]);
+  let observed, releaseFile, finished = false;
+  const estimateReady = new Promise(resolve => { observed = resolve; });
+  const file = new Promise(resolve => { releaseFile = resolve; });
+  const h = setup(data, 200, { fetchImpl: request => new URL(request.url, "https://chatgpt.com").searchParams.get("id") === files[0].id ? file : fetchImpl(request) });
+  await discover(h);
+  const pending = h.window.__capMeasureChatGptJson(undefined, undefined, observed).then(result => { finished = true; return result; });
+  const estimate = await estimateReady;
+  assert.ok(estimate.messageTurnCount > 0);
+  assert.equal(finished, false);
+  releaseFile(new Response("A pasted source body", { headers: { "content-type": "text/plain" } }));
+  assert.ok((await pending).characterCount > 0);
 });

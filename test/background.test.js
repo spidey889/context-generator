@@ -212,6 +212,7 @@ function loadBackgroundForTransferTest({
 
   return {
     operations,
+    message(message, sender) { let reply; messageListener(message, sender, value => { reply = value; }); return reply; },
     clickToolbar: toolbarClickListener,
     cancel(tabId, sender = {}) {
       return new Promise(resolve => messageListener({ type: "CANCEL_TRANSFER", transferId: "transfer-test" },
@@ -1466,4 +1467,32 @@ test("New network MAIN readiness accepts only Gemini/Grok/DeepSeek top frames", 
   for (const url of ["https://gemini.google.com/app/a", "https://grok.com/c/a", "https://chat.deepseek.com/a/chat/s/a"]) assert.equal((await request({ tab: { id: 1, url }, frameId: 0 })).ok, true);
   assert.equal(injections.length, 3);
   assert.ok(injections.every(item => item.world === "MAIN"));
+});
+
+clockTest("DOM extension survives the old deadline with the same prepared destination and cancellation token", async t => {
+  const sourceTab = { id: 9, url: "https://chat.deepseek.com/a/chat/s/source", windowId: 1, index: 0 };
+  const h = loadBackgroundForTransferTest({ sourceTab });
+  const prepared = await h.prepare("deepseek", sourceTab, Date.now() + 360000);
+  const message = { type: "EXTEND_DOM_CAPTURE_DEADLINE", transferId: "transfer-test", deadlineAt: Date.now() + 26 * 60000 };
+  const sender = { id: "cap-context-test", frameId: 0, tab: sourceTab };
+  for (const bad of [{ ...sender, frameId: 1 }, { ...sender, id: "other" }, { ...sender, tab: { ...sourceTab, id: 10 } }])
+    assert.equal(h.message(message, bad).ok, false);
+  assert.equal(h.message({ ...message, deadlineAt: Date.now() + 127 * 60000 }, sender).ok, false);
+  assert.equal(h.message(message, sender).ok, true);
+  t.mock.timers.tick(360001);
+  const delivered = await h.sendTransfer("deepseek", prepared.tabId, true, message.deadlineAt, sourceTab);
+  assert.equal(delivered.ok, true);
+  assert.equal(h.operations.created.length, 1, "Keep the already prepared destination past six minutes.");
+  await h.cancel(sourceTab.id);
+  assert.equal(h.message({ ...message, deadlineAt: message.deadlineAt + 60000 }, sender).ok, false);
+  assert.equal((await h.sendTransfer("deepseek", prepared.tabId, true, message.deadlineAt, sourceTab)).code, "user_cancelled");
+});
+
+clockTest("a delayed DOM extension cannot revive an expired transfer", async t => {
+  const sourceTab = { id: 9, url: "https://claude.ai/chat/source", windowId: 1, index: 0 };
+  const h = loadBackgroundForTransferTest({ sourceTab });
+  await h.prepare("deepseek", sourceTab, Date.now() + 100);
+  t.mock.timers.tick(101);
+  assert.equal(h.message({ type: "EXTEND_DOM_CAPTURE_DEADLINE", transferId: "transfer-test", deadlineAt: Date.now() + 600000 },
+    { id: "cap-context-test", frameId: 0, tab: sourceTab }).ok, false);
 });

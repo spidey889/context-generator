@@ -10,13 +10,14 @@ const { fixtures, rpcFrame, geminiTurn, prompt } = require("./network-json-fixtu
 const files = ["network-json-data.js", "network-fetch-main.js", "network-json-capture.js"];
 const scripts = new Map(["transfer-diagnostics.js", "json-capture-metrics.js", ...files].map(file =>
   [file, new vm.Script(fs.readFileSync(path.join(__dirname, "..", "extension", file), "utf8"), { filename: file })]));
-for (const platform of ["gemini", "grok", "deepseek"]) test(`${platform}: independent count returns only a number from a new native read`, async () => {
+for (const platform of ["gemini", "grok", "deepseek"]) test(`${platform}: independent count returns only numeric size and turn metadata from a new native read`, async () => {
   const h = setup(platform); await h.observe();
   const capture = await h.window.__capCaptureNetworkJson();
   const requests = h.requests.length;
   const result = await h.window.__capMeasureNetworkJson();
   assert.equal(result.characterCount, capture.text.length);
-  assert.deepEqual(Object.keys(result), ["characterCount"]);
+  assert.equal(result.messageTurnCount, capture.messageTurnCount);
+  assert.deepEqual(Object.keys(result), ["characterCount", "messageTurnCount"]);
   assert.ok(h.requests.length > requests);
   if (platform === "deepseek") {
     assert.ok(h.replies.at(-1).characterCount > 0);
@@ -88,7 +89,7 @@ test("DeepSeek: fresh size check keeps downloading healthy files after another f
   const result = await h.window.__capMeasureNetworkJson();
   assert.equal(historyReads, 2, "Size checking must fetch again, not reuse the failed capture's history.");
   assert.ok(result.characterCount > 1000000, "The successfully downloaded file must contribute to the count.");
-  assert.deepEqual(Object.keys(result), ["characterCount"]);
+  assert.deepEqual(Object.keys(result), ["characterCount", "messageTurnCount"]);
   assert.doesNotMatch(JSON.stringify(result), /PRIVATE|SENTINEL|source-/);
 });
 
@@ -754,7 +755,7 @@ test("DeepSeek: one incomplete upload cancels siblings before fallback or a fres
   });
   assert.equal(h.requests.length, 5, "failure stops queued downloads");
   assert.equal(aborted.length, 3);
-  assert.equal(h.window.__capNetworkFetchState.version, 25);
+  assert.equal(h.window.__capNetworkFetchState.version, 26);
   assert.ok(h.replies.every(reply => !reply.capture));
   assert.equal(h.navigationListeners(), 0);
   assert.equal(h.listeners.size, 2);
@@ -835,7 +836,7 @@ for (const platform of ["gemini", "grok", "deepseek"]) test(`${platform}: the pr
   old.version = platform === "deepseek" ? 24 : platform === "gemini" ? 16 : 19;
   h.reinstall(files[1]);
   assert.notEqual(h.window.__capNetworkFetchState, old);
-  assert.equal(h.window.__capNetworkFetchState.version, platform === "deepseek" ? 25 : platform === "grok" ? 20 : 17);
+  assert.equal(h.window.__capNetworkFetchState.version, platform === "deepseek" ? 26 : platform === "grok" ? 21 : 18);
   assert.equal(h.listeners.size, 2);
   assert.equal((await h.window.__capCaptureNetworkJson()).text, h.fixture.expected);
 });
@@ -1417,4 +1418,36 @@ test("DeepSeek file boundaries preserve empty files, Unicode bytes and exact tra
   assert.equal(capture.messageTurnCount, 2);
   code.file_size++;
   assert.throws(() => h.api.deepseek(h.fixture.data, "smoke", { empty: "", code: source }), /incomplete/);
+});
+
+for (const platform of ["gemini", "grok", "deepseek"]) test(`${platform}: rough estimation survives strict history rejection without a false size rejection`, async () => {
+  const f = fixtures(platform);
+  if (platform === "deepseek") f.data.data.biz_data.is_partial = true;
+  else if (platform === "grok") f.nodes.is_partial = true;
+  else f.pages[0].turns[0][1] = ["c_smoke", "missing_parent", "missing_response"];
+  const h = setup(platform, f); await h.observe();
+  await assert.rejects(h.window.__capCaptureNetworkJson());
+  const result = await h.window.__capMeasureNetworkJson();
+  assert.equal(result.characterCount, 0);
+  assert.ok(result.messageTurnCount > 0);
+  assert.ok(Object.values(result).every(value => Number.isSafeInteger(value)));
+  assert.equal(h.replies.at(-1).capture, undefined);
+});
+
+test("DeepSeek publishes a rough estimate before file downloads finish without releasing the native read", async () => {
+  const f = fixtures("deepseek", "smoke", 2);
+  let observed, finished = false, releaseFile;
+  const estimateReady = new Promise(resolve => { observed = resolve; });
+  const file = new Promise(resolve => { releaseFile = resolve; });
+  const h = setup("deepseek", f, { fetchImpl: request => request.url.pathname.includes("history_messages") ? Response.json(f.data) : file });
+  await h.observe();
+  const pending = h.window.__capMeasureNetworkJson(undefined, undefined, observed).then(result => { finished = true; return result; });
+  const estimate = await estimateReady;
+  assert.equal(estimate.messageTurnCount, 4);
+  assert.ok(estimate.estimatedCharacterCount > 0);
+  assert.equal(finished, false);
+  releaseFile(new Response(f.files[f.file.id], { headers: { "content-type": "text/plain" } }));
+  const final = await pending;
+  assert.ok(final.characterCount > estimate.estimatedCharacterCount, "The final guard includes downloaded supported text.");
+  assert.equal(final.messageTurnCount, 4);
 });

@@ -12,6 +12,7 @@ function getBrowserChecks(extended = false) {
     { ...check("escape-source", "Escape cancels the source transfer", 120, { CAP_CONTEXT_ESCAPE_SMOKE: "source" }), exclusive: true },
     { ...check("escape-destination", "Escape cancels the destination transfer", 120, { CAP_CONTEXT_ESCAPE_SMOKE: "destination" }), exclusive: true },
     check("dom-telemetry", "DOM transfer, placement and local telemetry database", 180, { CAP_CONTEXT_TELEMETRY_SMOKE: "1" }),
+    check("dom-estimate", "DOM fallback estimate and native Cancel", 90, { CAP_CONTEXT_JSON_SMOKE: "deepseek", CAP_CONTEXT_DOM_ESTIMATE_SMOKE: "1" }),
     check("handoff-palette", "Handoff palette under strict CSP", 60, { CAP_CONTEXT_HANDOFF_PALETTE_SMOKE: "1", CAP_CONTEXT_HANDOFF_CSP_SMOKE: "1" }),
     check("chatgpt-paste", "ChatGPT long paste stays in the editor once", 120, { CAP_CONTEXT_CHATGPT_PASTE_SMOKE: "1" }),
     check("draft-transfer", "First draft opens both copy dialogs", 120, { CAP_CONTEXT_DRAFT_TRANSFER_SMOKE: "1", CAP_CONTEXT_TELEMETRY_SMOKE: "1" }),

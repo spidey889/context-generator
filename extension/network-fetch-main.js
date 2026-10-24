@@ -3,7 +3,7 @@
   if (!platform || !globalThis.__capNetworkJsonData) return;
   // Advance readiness version with adapter/contract changes: old MAIN closures
   // can survive extension reloads and must be replaced before a new capture.
-  const version = platform === "deepseek" ? 25 : platform === "grok" ? 20 : 17, channel = "cap-context-network-json-v1";
+  const version = platform === "deepseek" ? 26 : platform === "grok" ? 21 : 18, channel = "cap-context-network-json-v1";
   // Bound the whole download, including unused branches, separately from text.
   const maxCaptureBytes = 32000000;
   // Shared across unique text files; the final transcript has its own limits.
@@ -127,6 +127,12 @@
     if (measureOnly) metrics.transcript = () => true;
     const publishCount = capture => {
       reply.characterCount = capture.text.length;
+      reply.messageTurnCount = capture.messageTurnCount;
+    };
+    let roughEstimate;
+    const publishEstimate = value => {
+      roughEstimate = value;
+      window.postMessage({ channel, platform, type: "measurement_progress", id: request.id, chat, selected, ...value }, location.origin);
     };
     active = controller;
     activeMeasurementId = measureOnly ? request.id : null;
@@ -279,6 +285,7 @@
           const page = metrics.timed("parse_ms", () => api.geminiPage(response.text));
           metrics.add("pages"); metrics.add("history_items", page.turns.length);
           pages.push(page);
+          if (measureOnly) publishEstimate(api.roughSize(platform, pages, null, chat));
           if (page.cursor !== null && (cursors.has(page.cursor) || !page.turns.length)) throw new api.CaptureError("Gemini history pagination did not advance.");
           cursors.add(page.cursor); args[2] = page.cursor;
         } while (args[2] !== null);
@@ -287,6 +294,7 @@
         const base = `/rest/app-chat/conversations/${encodeURIComponent(chat)}`;
         const nodes = await read(`${base}/response-node`);
         metrics.set({ history_items: nodes?.responseNodes?.length });
+        if (measureOnly) publishEstimate(api.roughSize(platform, nodes, selected));
         const branch = api.grokBranch(nodes, selected);
         const responses = [];
         // Load only the active branch, bounded batches using the site's native
@@ -304,6 +312,8 @@
         if (!auth) { const began = Date.now(); await waitForAuth(controller.signal); metrics.set({ auth_ms: Date.now() - began }); check(); }
         if (!auth) throw new api.CaptureError("Refresh this signed-in DeepSeek chat to make fast capture ready.", "unavailable", "auth_missing");
         const data = await read(`/api/v0/chat/history_messages?chat_session_id=${encodeURIComponent(chat)}`, { headers: { authorization: auth } });
+        if (measureOnly && data?.code === 0 && data?.data?.biz_code === 0 && data.data.biz_data?.chat_session?.id === chat)
+          publishEstimate(api.roughSize(platform, data.data.biz_data, data.data.biz_data.chat_session.current_message_id));
         metrics.set({ history_items: data?.data?.biz_data?.chat_messages?.length, files_limit_bytes: maxUploadBytes,
           files_supported: 0, files_ignored: 0, files_declared_bytes: 0, files_downloaded_bytes: 0 });
         const branch = api.deepseekBranch(data, chat);
@@ -413,6 +423,8 @@
       // cannot race cancelled sibling downloads and get a false busy failure.
       if (measureOnly) {
         delete reply.capture;
+        if (reply.captureDetail !== "conversation_changed" && !controller.signal.aborted && roughEstimate?.messageTurnCount > 0
+            && reply.characterCount === undefined) Object.assign(reply, { characterCount: 0 }, roughEstimate);
         window.postMessage(reply, location.origin);
       }
     }

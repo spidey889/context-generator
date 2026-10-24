@@ -59,7 +59,7 @@ test("Claude fresh DOM size check counts readable file text despite another inco
   await assert.rejects(h.window.__capCaptureClaudeJson());
   const result = await h.window.__capMeasureClaudeJson();
   assert.ok(result.characterCount > 1000000);
-  assert.deepEqual(Object.keys(result), ["characterCount"]);
+  assert.deepEqual(Object.keys(result), ["characterCount", "messageTurnCount"]);
   await assert.rejects(h.window.__capCaptureClaudeJson(), "Ordinary capture must still reject unreadable files.");
 });
 
@@ -759,4 +759,16 @@ test("Claude preserves named upload labels without bodies, in the active owning 
   assert.equal(capture.messageTurnCount, 2);
   assert.doesNotMatch(capture.text, /SENTINEL/);
   assert.doesNotMatch(JSON.stringify(capture.excludedContentTypes), /réview|notes|fake/);
+});
+
+test("Claude can estimate unsupported history without admitting it or counting an unused branch for limits", async () => {
+  const data = fixture(); data.is_partial = true;
+  data.chat_messages[1].text = "x".repeat(1000001);
+  const h = setup(data, { resources: [endpoint] });
+  await assert.rejects(h.window.__capCaptureClaudeJson());
+  const result = await h.window.__capMeasureClaudeJson();
+  assert.equal(result.characterCount, 0, "A rough estimate never proves a size violation.");
+  assert.equal(result.messageTurnCount, 2);
+  assert.ok(result.estimatedCharacterCount > 0 && result.estimatedCharacterCount < 1000);
+  assert.ok(Object.values(result).every(value => Number.isSafeInteger(value)));
 });

@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-24-gemini-welcome-v174";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-24-dom-estimate-v175";
   const INLINE_PILL_SIZE = 36;
   const ownedUiStyleSheets = new Map();
   let handoffUserCss = "";
@@ -100,8 +100,10 @@
   const DESTINATION_HANDOFF_OVERLAP_MS = 40;
   const HANDOFF_OVERLAY_CLOSED_TRANSFORM = "translate3d(-50%,-50%,0) translateY(10px) scale(0.985)";
   const HANDOFF_OVERLAY_EXIT_MS = 220;
-  // Covers the 210-second summary ceiling plus one prepared and one fresh paste attempt.
+  // Default JSON transfer budget; also reserved after the DOM capture allowance.
   const RUNNING_AUTO_RESET_MS = 360000;
+  const DOM_CAPTURE_MIN_ALLOWANCE_MS = 20 * 60 * 1000;
+  const DOM_CAPTURE_MAX_ALLOWANCE_MS = 2 * 60 * 60 * 1000;
   // Keep aligned with background.js: delivery is restricted to new-chat routes.
   const DESTINATION_LANDING_PATHS = {
     claude: ["/", "/new"], chatgpt: ["/"], gemini: ["/", "/app"],
@@ -976,6 +978,10 @@
       getVirtualSweepTerminalQuietTimeout,
       createTransferTrace,
       startTransferDeadline,
+      extendDomCaptureDeadline,
+      estimateDomCaptureTime,
+      showDomCaptureEstimate,
+      startDomCaptureSizeCheck,
       beginTransferAttempt,
       finishTransferTrace,
       recordTransferFailureDiagnostics,
@@ -1442,7 +1448,12 @@
     // Stop pending presentation on navigation without awaiting the summary.
     trace.sourceGuard = createConversationGuard("The conversation changed during capture. Return to the source chat and try again.",
       undefined, () => stopSourceDestinationProgress(trace));
-    trace.deadlineAt = Date.now() + RUNNING_AUTO_RESET_MS;
+    setTransferDeadline(trace, Date.now() + RUNNING_AUTO_RESET_MS);
+  }
+
+  function setTransferDeadline(trace, deadlineAt) {
+    clearRunningResetTimer();
+    trace.deadlineAt = deadlineAt;
     runningResetTimer = setTimeout(() => {
       trace.expired = true;
       recordTransferFailureDiagnostics(trace, Object.assign(new Error("Transfer deadline expired"), { code: "transfer_timeout" }));
@@ -1451,7 +1462,35 @@
       finishTransferTrace(trace, "client_interrupted");
       resetRunningFlag();
       showErrorOverlay("Transfer timed out. Please try again.");
-    }, RUNNING_AUTO_RESET_MS);
+    }, Math.max(0, deadlineAt - Date.now()));
+  }
+
+  function extendDomCaptureDeadline(trace, estimateMs = 0) {
+    if (!trace || trace !== activeTransferTrace || trace.completed || trace.cancelled || trace.expired) return;
+    checkTransferDeadline(trace);
+    trace.domCaptureStartedAt ??= Date.now();
+    // Give scrolling room to overrun its rough estimate, then reserve the usual
+    // summary/delivery budget. Never shorten an allowance or revive an old attempt.
+    const allowance = Math.min(DOM_CAPTURE_MAX_ALLOWANCE_MS,
+      Math.max(DOM_CAPTURE_MIN_ALLOWANCE_MS, estimateMs * 2 + 120000));
+    const deadlineAt = Math.max(trace.domCaptureStartedAt + allowance + RUNNING_AUTO_RESET_MS,
+      Date.now() + RUNNING_AUTO_RESET_MS);
+    if (deadlineAt <= trace.deadlineAt) return;
+    setTransferDeadline(trace, deadlineAt);
+    notifyBackground({ type: "EXTEND_DOM_CAPTURE_DEADLINE", transferId: trace.id, deadlineAt }).catch(() => {});
+  }
+
+  function estimateDomCaptureTime(result) {
+    const chars = Math.max(0, ...[result?.characterCount, result?.estimatedCharacterCount]
+      .filter(value => Number.isSafeInteger(value) && value >= 0 && value <= 32000000));
+    const turns = Number.isSafeInteger(result?.messageTurnCount) && result.messageTurnCount > 0
+      && result.messageTurnCount <= 1000000 ? result.messageTurnCount : 0;
+    if (!chars && !turns) return null;
+    // Display-only heuristic, not measured throughput: turns account for mounting
+    // and expansion; text accounts for responses taller than a viewport. Grok has
+    // shorter settle waits. Round up rather than presenting a precise countdown.
+    const speed = currentPlatform.id === "grok" ? 2 : 1;
+    return Math.ceil((15000 + (turns * 1500 + chars / 1500 * 1000) / speed) / 60000) * 60000;
   }
 
   function beginTransferAttempt(destinationId, source) {
@@ -1541,6 +1580,9 @@
   }
 
   function markCaptureDone(trace, conversationText) {
+    // A slow capture may use its headroom too. Preserve the normal summary/paste
+    // allowance from actual completion rather than spending it while scrolling.
+    if (trace?.domCaptureStartedAt !== undefined) extendDomCaptureDeadline(trace, trace.domSizeCheck?.estimateMs || 0);
     if (trace) {
       trace.rawScrapedText = conversationText;
       trace.telemetryCharacterCount = conversationText.length;
@@ -1571,6 +1613,8 @@
       sourceReplySnapshot = { trace: transferTrace, url: window.location.href, text: scrapeConversationText() };
       return;
     }
+    extendDomCaptureDeadline(transferTrace);
+    showDomCaptureEstimate(transferTrace);
     startDomCaptureSizeCheck(transferTrace);
     sourceScrollTargetsCache = null;
     chatGptConversationScrollRootCache = null;
@@ -3583,7 +3627,9 @@
 
       const renderedSnapshot = getRenderedConversationSnapshot();
       const added = collectRenderedConversationTurns(collectedTurns, renderedSnapshot.turns);
-      if (scrolls >= VIRTUAL_SWEEP_MAX_SCROLLS) {
+      // Real transfers are bounded by their cancellable deadline. The old 480
+      // advances could silently return a prefix despite the longer allowance.
+      if (!transferTrace && scrolls >= VIRTUAL_SWEEP_MAX_SCROLLS) {
         exitReason = "max-advances-reached";
         break;
       }
@@ -3671,6 +3717,12 @@
 
       const afterScrollState = getVirtualSweepScrollLogState();
       reportHandoffCaptureProgress(afterScrollState);
+      const estimateMs = transferTrace?.domSizeCheck?.estimateMs;
+      if (estimateMs && Date.now() - transferTrace.domCaptureStartedAt > estimateMs) {
+        const estimate = document.getElementById("context-generator-dom-capture-estimate");
+        const text = "Still capturing. This is taking longer than estimated. Esc to cancel.";
+        if (estimate && estimate.textContent !== text) estimate.textContent = text;
+      }
 
       if (exitReason === "stale-limit-hit") break;
     }
@@ -7661,18 +7713,33 @@
     const isCurrent = () => state.active && instanceActive && isRunning && activeTransferTrace === trace
       && !trace.cancelled && !trace.expired && window.location.href === sourceUrl;
     const expectedPath = currentPlatform.id === "grok" ? sourceUrl : window.location.pathname;
+    state.onEstimate = result => {
+      if (!isCurrent()) return;
+      try { trace.sourceGuard?.check(); } catch { return; }
+      const estimateMs = estimateDomCaptureTime(result);
+      if (estimateMs) {
+        state.estimateMs = estimateMs;
+        extendDomCaptureDeadline(trace, state.estimateMs);
+        showDomCaptureEstimate(trace);
+      }
+    };
     // Start DOM work immediately. This is a NEW native read alongside it, never
     // the picker's earlier history or a replacement JSON carry. Count whatever
     // chat/file text can be read; unknown/missing text cannot prove excess.
     captureSourceJson(expectedPath, isCurrent, true).then(result => {
       if (!isCurrent()) return;
       try { trace.sourceGuard?.check(); } catch { return; }
-      if (!Number.isSafeInteger(result?.characterCount) || result.characterCount <= MAX_TRANSFER_CONVERSATION_CHARS) return;
-      state.error = Object.assign(new Error(OVERSIZED_CONVERSATION_ERROR_MESSAGE), {
-        code: "conversation_too_large",
-        diagnostics: { version: 1, capture_detail: "size_limit", capture_request_stage: "serialize", failure_site: "capture_serialize" }
-      });
-    }, () => {}); // An unavailable count must not fail or delay the DOM path.
+      // Rough estimates can contain missing/unsupported content. Only the existing
+      // observed selected-transcript count is authority for the size rejection.
+      if (Number.isSafeInteger(result?.characterCount) && result.characterCount > MAX_TRANSFER_CONVERSATION_CHARS) {
+        state.error = Object.assign(new Error(OVERSIZED_CONVERSATION_ERROR_MESSAGE), {
+          code: "conversation_too_large",
+          diagnostics: { version: 1, capture_detail: "size_limit", capture_request_stage: "serialize", failure_site: "capture_serialize" }
+        });
+        return;
+      }
+      state.onEstimate(result);
+    }).catch(() => {}); // An unavailable count must not fail or delay the DOM path.
   }
 
   function stopDomCaptureSizeCheck(trace) {
@@ -7697,7 +7764,8 @@
         : currentPlatform.id === "claude" ? window.__capCaptureClaudeJson
           : currentPlatform.id === "chatgpt" ? window.__capCaptureChatGptJson : window.__capCaptureNetworkJson;
       if (typeof captureJson !== "function") throw createDiagnosticError(`Refresh ${currentPlatform.name} to enable JSON capture.`, "capture_json_unavailable");
-      return captureJson(expectedPath, measureOnly ? transferTrace?.domSizeCheck?.controller.signal : undefined);
+      return captureJson(expectedPath, measureOnly ? transferTrace?.domSizeCheck?.controller.signal : undefined,
+        measureOnly ? transferTrace?.domSizeCheck?.onEstimate : undefined);
     });
     // Keep only completion in the queue; unused transcripts/errors are not retained.
     pendingJsonCapture = pending.then(() => {}, () => {});
@@ -7958,12 +8026,54 @@
   function showFastCaptureFallbackMessage() {
     const group = document.getElementById("context-generator-status-group");
     if (!group) return;
+    if (document.getElementById("context-generator-capture-notice")) return;
     const notice = document.createElement("div");
     notice.id = "context-generator-capture-notice";
     notice.setAttribute("role", "status");
     notice.style.cssText = "font-size:12px;line-height:1.4;color:inherit";
     notice.textContent = "Fast capture failed. Using normal capture instead.";
     group.appendChild(notice);
+  }
+
+  function clearDomCaptureNotice() {
+    const notice = document.getElementById("context-generator-dom-capture");
+    if (!notice) return;
+    removeOwnedEventListener(notice.querySelector("button"), "click", notice.cancelCapture);
+    notice.remove();
+  }
+
+  function showDomCaptureEstimate(trace) {
+    if (!trace || trace !== activeTransferTrace || trace.completed || trace.cancelled || trace.expired) return;
+    const group = document.getElementById("context-generator-status-group");
+    if (!group) return;
+    let notice = document.getElementById("context-generator-dom-capture");
+    if (!notice) {
+      notice = document.createElement("div");
+      notice.id = "context-generator-dom-capture";
+      notice.style.cssText = "display:flex;align-items:center;gap:12px;margin-top:10px;font-size:12px;line-height:1.5;color:inherit";
+      const text = document.createElement("span");
+      text.id = "context-generator-dom-capture-estimate";
+      text.setAttribute("role", "status");
+      text.style.cssText = "flex:1;min-width:0";
+      const cancel = document.createElement("button");
+      cancel.type = "button";
+      cancel.textContent = "Cancel";
+      cancel.setAttribute("aria-label", "Cancel capture (Esc)");
+      cancel.title = "Esc to cancel";
+      cancel.style.cssText = "flex:none;font:inherit;color:inherit;background:transparent;border:1px solid currentColor;border-radius:8px;padding:5px 10px;cursor:pointer";
+      notice.cancelCapture = () => {
+        if (activeTransferTrace === trace && !trace.completed) cancelLocalTransfer(trace.id, { notifyWorker: true });
+      };
+      addOwnedEventListener(cancel, "click", notice.cancelCapture);
+      notice.appendChild(text);
+      notice.appendChild(cancel);
+      group.appendChild(notice);
+    }
+    document.getElementById("context-generator-capture-notice")?.remove();
+    const estimateMs = trace.domSizeCheck?.estimateMs;
+    document.getElementById("context-generator-dom-capture-estimate").textContent = estimateMs
+      ? `This chat may take about ${Math.round(estimateMs / 60000)} ${estimateMs === 60000 ? "minute" : "minutes"} to capture. Esc to cancel.`
+      : "Reading your chat by scrolling. This may take several minutes. Esc to cancel.";
   }
 
   function protectOverlayPalette(root) {
@@ -8595,6 +8705,7 @@
     hideErrorOverlay(undefined, { immediate: true });
     ensureFloatingOverlay();
     document.getElementById("context-generator-capture-notice")?.remove();
+    clearDomCaptureNotice();
     const overlay = document.getElementById(OVERLAY_ID);
     const scrim = document.getElementById(HANDOFF_SCRIM_ID);
     const bubble = document.getElementById(BUBBLE_ID);
@@ -8662,6 +8773,7 @@
   }
 
   function hideOverlay({ immediate = false } = {}) {
+    clearDomCaptureNotice();
     const overlay = document.getElementById(OVERLAY_ID);
     const scrim = document.getElementById(HANDOFF_SCRIM_ID);
     const bubble = document.getElementById(BUBBLE_ID);
@@ -8881,6 +8993,7 @@
       }
     }
     if (stageId !== "capture") handoffCapturePresentation = null;
+    if (stageId !== "capture" || phase === "done") clearDomCaptureNotice();
 
     const resolvedDestinationName = destinationName
       || overlay?.dataset.contextGeneratorDestinationName

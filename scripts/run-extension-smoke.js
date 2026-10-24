@@ -54,6 +54,8 @@ const DEEPSEEK_TRANSCRIPT_OVERSIZE_SMOKE = JSON_SOURCE === "deepseek" && process
 const DEEPSEEK_DOM_SIZE_SMOKE = JSON_SOURCE === "deepseek" && process.env.CAP_CONTEXT_NETWORK_FAILURE_SMOKE === "dom-size-check";
 const NETWORK_FAILURE = (NETWORK_SOURCE && process.env.CAP_CONTEXT_NETWORK_FAILURE_SMOKE === "partial") || GROK_FILE_ONLY_SMOKE || DEEPSEEK_OVERSIZE_SMOKE;
 const JSON_CAPTURE_SMOKE = Boolean(JSON_SOURCE);
+const DOM_ESTIMATE_SMOKE = process.env.CAP_CONTEXT_DOM_ESTIMATE_SMOKE === "1";
+if (DOM_ESTIMATE_SMOKE) assert.equal(JSON_SOURCE, "deepseek", "DOM estimate smoke uses native DeepSeek count recovery.");
 const GEMINI_DESTINATION_SMOKE = process.env.CAP_CONTEXT_GEMINI_DESTINATION_SMOKE === "1";
 // Opt-in native capture/worker/backend-admission/paste coverage at the new
 // boundary. Unicode also exercises the raised text-file and UTF-8 byte limits.
@@ -80,7 +82,7 @@ const CLAUDE_PARTIAL_SMOKE = JSON_SOURCE === "claude" && process.env.CAP_CONTEXT
 const CLAUDE_OVERSIZE_SMOKE = JSON_SOURCE === "claude" && process.env.CAP_CONTEXT_CLAUDE_PARTIAL_SMOKE === "oversize";
 const SIZE_CAPTURE_SMOKE = Boolean(CLAUDE_OVERSIZE_SMOKE || DEEPSEEK_OVERSIZE_SMOKE || DEEPSEEK_TRANSCRIPT_OVERSIZE_SMOKE
   || CHATGPT_DECLARED_PASTE_OVERSIZE_SMOKE || CHATGPT_HISTORY_OVERSIZE_SMOKE);
-const JSON_FALLBACK_SMOKE = Boolean((CLAUDE_PARTIAL_SMOKE || NETWORK_FAILURE) && !SIZE_CAPTURE_SMOKE);
+const JSON_FALLBACK_SMOKE = Boolean(DOM_ESTIMATE_SMOKE || (CLAUDE_PARTIAL_SMOKE || NETWORK_FAILURE) && !SIZE_CAPTURE_SMOKE);
 const EXPECTED_JSON_FALLBACK_REASON = GROK_FILE_ONLY_SMOKE ? "unsupported" : "incomplete";
 const EXPECTED_JSON_FALLBACK_NOTICE = "Fast capture failed. Using normal capture instead.";
 const TELEMETRY_DATABASE_SMOKE = process.env.CAP_CONTEXT_TELEMETRY_SMOKE === "1";
@@ -288,6 +290,10 @@ async function createSmokeExtension(tempRoot, origin) {
   });
   window.__capSmokeShowRecovery = () => showFallbackModal("Synthetic recovery context. Preserve the dialog palette.", "Claude", true);
   window.__capSmokeHandoffStage = (stage, phase = "active") => { if (!isHandoffOverlayVisible()) showOverlay("claude"); setHandoffProgress(stage, phase, "Claude", 20000); };
+  window.__capSmokeStartDomTransfer = () => { startDestinationTransfer("claude"); return true; };
+  window.__capSmokeDomState = () => activeTransferTrace && ({ deadlineAt: activeTransferTrace.deadlineAt,
+    startedAt: activeTransferTrace.domCaptureStartedAt, estimateMs: activeTransferTrace.domSizeCheck?.estimateMs,
+    cancelled: activeTransferTrace.cancelled, completed: activeTransferTrace.completed });
   window.__capSmokeHandoffStylesReady = () => handoffUserCssRequest;
   window.__capSmokeRebuildHandoff = () => { cleanupContextGeneratorNodes(); ensureFloatingOverlay(); };
   window.__capSmokeShowDraftRecovery = () => showFallbackModal(createLocalContextCarry("Conversation from your previous chat\\n\\nUser: Let’s pick up where we left off.\\nAssistant: Here’s the context we prepared for your next chat.").summary, "ChatGPT", false, false, true);
@@ -322,6 +328,14 @@ async function createSmokeExtension(tempRoot, origin) {
       `const DESTINATION_LANDING_PATHS = ${JSON.stringify(smokeLandingPaths)};`, "new-chat landing paths");
   };
   platformSource = translateLandingPaths(platformSource);
+  if (DOM_ESTIMATE_SMOKE) {
+    // Hold the fixture's DOM read (not its independent native count) so the
+    // installed handoff can be inspected/cancelled while capture is outstanding.
+    platformSource = replaceOnce(platformSource,
+      "  async function scrapeConversationTextWhenReady(timeoutMs = CONVERSATION_SCRAPE_RETRY_TIMEOUT_MS) {",
+      "  async function scrapeConversationTextWhenReady(timeoutMs = CONVERSATION_SCRAPE_RETRY_TIMEOUT_MS) { await delay(40000); checkTransferDeadline(activeTransferTrace);",
+      "controlled slow DOM capture");
+  }
   for (const [platformId, productionUrl] of Object.entries(platformUrls)) {
     const fixtureUrl = `${origin}/destination?${SMOKE_PLATFORM_QUERY}=${platformId}`;
     platformSource = replaceOnce(
@@ -826,6 +840,7 @@ async function startFixtureServer() {
           streamOversizedFixtureResponse(response, JSON.stringify(data), state.oversizeHistory, 40);
           return;
         }
+        if (DOM_ESTIMATE_SMOKE) data.data.biz_data.is_partial = true;
         if (NETWORK_FAILURE) { data.data.biz_data.cache_control = "MERGE"; data.data.biz_data.chat_messages = []; }
         response.end(JSON.stringify(data));
       }
@@ -2052,6 +2067,48 @@ async function run() {
     assert.deepEqual([state.summaryRequests.length, state.jsonRequests], preloadRequests,
       "Preparing UI before the first click must not start conversation work.");
     process.stdout.write("✓ Picker, logos and title font ready before window.load and the first click; no capture or summary request.\n");
+    if (DOM_ESTIMATE_SMOKE) {
+      const contextId = sourceSession.getExtensionContextId();
+      const before = state.jsonRequests;
+      await sourceSession.evaluate("window.__capSmokeStartDomTransfer()", contextId);
+      await waitFor(() => sourceSession.evaluate("document.getElementById('context-generator-dom-capture-estimate')?.textContent.includes('about')"), "the native rough-count estimate during DOM fallback");
+      const capture = await sourceSession.evaluate("window.__capSmokeDomState()", contextId);
+      assert.ok(capture.estimateMs > 0);
+      assert.ok(capture.deadlineAt - capture.startedAt >= 26 * 60000);
+      assert.ok(state.jsonRequests - before >= 2, "Fallback and independent count each read native history.");
+      assert.equal(state.summaryRequests.length, 0);
+      const desktop = await sourceSession.evaluate("document.getElementById('context-generator-dom-capture-estimate').textContent");
+      await sourceSession.call("Emulation.setDeviceMetricsOverride", { width: 390, height: 844, deviceScaleFactor: 1, mobile: false });
+      const layout = await sourceSession.evaluate(`(() => {
+        const notice = document.getElementById('context-generator-dom-capture');
+        const overlay = notice.closest('[aria-label="Context transfer status"]');
+        const button = notice.querySelector('button');
+        const a = notice.getBoundingClientRect(), b = button.getBoundingClientRect();
+        return { width: a.width, right: b.right, bottom: b.bottom, scrollWidth: notice.scrollWidth, clientWidth: notice.clientWidth,
+          overlayBottom: overlay?.getBoundingClientRect().bottom };
+      })()`);
+      assert.ok(layout.right <= 390 && layout.scrollWidth <= layout.clientWidth + 1
+        && layout.bottom <= layout.overlayBottom, "Estimate and Cancel fit at 390px.");
+      if (HANDOFF_SCREENSHOT_PATH) {
+        const shot = await sourceSession.call("Page.captureScreenshot", { format: "png", captureBeyondViewport: false });
+        await fs.promises.writeFile(HANDOFF_SCREENSHOT_PATH, Buffer.from(shot.data, "base64"));
+      }
+      process.stdout.write(`✓ Native JSON content rejection recovered a numeric estimate: ${desktop}\n`);
+      const inspectMs = Math.min(30000, Math.max(0, Number(process.env.CAP_CONTEXT_DOM_ESTIMATE_INSPECT_MS || 0)));
+      if (inspectMs) await new Promise(resolve => setTimeout(resolve, inspectMs));
+      const cancelPoint = await sourceSession.evaluate("(() => { const r = document.querySelector('#context-generator-dom-capture button').getBoundingClientRect(); return {x:r.x+r.width/2,y:r.y+r.height/2}; })()");
+      await sourceSession.call("Input.dispatchMouseEvent", { type: "mousePressed", ...cancelPoint, button: "left", clickCount: 1 });
+      await sourceSession.call("Input.dispatchMouseEvent", { type: "mouseReleased", ...cancelPoint, button: "left", clickCount: 1 });
+      await waitFor(() => state.telemetryRequests.some(event => event.failure_reason === "user_cancelled"), "Cancel terminal telemetry");
+      const terminal = await sourceSession.evaluate("window.__capSmokeDomState()", contextId);
+      // Finishing releases activeTransferTrace; the telemetry proves the owning
+      // attempt ended, rather than relying on the disappearing UI alone.
+      assert.ok(!terminal || terminal.cancelled && terminal.completed);
+      assert.equal(await sourceSession.evaluate("document.getElementById('context-generator-dom-capture')"), null, "Cancellation removes the notice and its listener.");
+      assert.equal(state.summaryRequests.length, 0);
+      process.stdout.write("✓ Cancel ends the installed fallback before summary/paste; narrow layout fits.\n");
+      return;
+    }
     if (process.env.CAP_CONTEXT_HANDOFF_PALETTE_SMOKE === "1") {
       await verifyHandoffPalette(sourceSession);
       assert.equal(state.summaryRequests.length, 0, "The palette check must never call a model.");
@@ -2892,7 +2949,7 @@ async function run() {
       return;
     }
     if (JSON_FALLBACK_SMOKE) {
-      await waitFor(() => sourceSession.evaluate(`document.getElementById("context-generator-capture-notice")?.textContent === ${JSON.stringify(EXPECTED_JSON_FALLBACK_NOTICE)}`), "the safe fast-capture fallback notice");
+      await waitFor(() => sourceSession.evaluate(`Boolean(document.getElementById("context-generator-dom-capture-estimate")?.textContent)`), "the safe fast-capture fallback notice");
     }
     if (SIZE_CAPTURE_SMOKE || (JSON_SOURCE === "chatgpt" && CHATGPT_FAILURE_SMOKE && CHATGPT_FAILURE_SMOKE !== "streaming")) {
       await waitFor(() => sourceSession.evaluate('Boolean(document.getElementById("context-generator-error-text")?.textContent)'), "the JSON capture error");

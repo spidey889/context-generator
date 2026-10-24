@@ -7,6 +7,21 @@
     diagnostics: { version: 1, capture_detail: captureFailureReason === "size_limit" ? "size_limit" : detail, capture_request_stage: stage, failure_site: `capture_${stage}`,
       ...(Number.isInteger(status) && status >= 100 && status <= 599 ? { capture_http_status: status } : {}) }
   });
+  // Estimates never authorize size rejection or become a transferable transcript.
+  function roughCaptureSize(data) {
+    const items = Array.isArray(data?.chat_messages) ? data.chat_messages : [];
+    const mapping = new Map(items.map(item => [item?.uuid, item]));
+    let id = data?.current_leaf_message_uuid;
+    const seen = new Set(), selected = [];
+    while (id && !seen.has(id) && mapping.has(id)) {
+      seen.add(id); const item = mapping.get(id); selected.push(item); id = item.parent_message_uuid;
+    }
+    const messages = selected.filter(item => ["human", "assistant"].includes(item.sender));
+    const estimatedCharacterCount = messages.reduce((sum, item) => sum + (typeof item.text === "string" ? item.text.length : 0)
+      + (Array.isArray(item.content) ? item.content : []).reduce((n, part) => n + (["text", "thinking"].includes(part?.type)
+        ? String(part.text || part.thinking || "").length : 0), 0), 0);
+    return { text: "", messageTurnCount: messages.length, estimatedCharacterCount };
+  }
   function serialize(data, chat, metrics, measureOnly = false) {
     metrics?.set({ files_supported: 0, files_ignored: 0, files_declared_bytes: 0, files_downloaded_bytes: 0 });
     // Report structural metadata only, never message text, file names, or tool payloads.
@@ -259,7 +274,11 @@
             if (changed || location.pathname !== expectedPath || reply.chat !== chat) throw changedError("The Claude conversation changed during capture.");
             if (reply.error) throw captureError("Claude JSON capture failed. Refresh this conversation or turn JSON capture off.", reply.error === "busy" ? "unavailable" : reply.captureFailureReason || "request_failed",
               reply.error === "busy" ? "busy" : reply.captureDetail || "network_error", "history", reply.status);
-            resolve(metrics.timed("serialize_ms", () => serialize(reply.data, chat, metrics, measureOnly)));
+            try { resolve(metrics.timed("serialize_ms", () => serialize(reply.data, chat, metrics, measureOnly))); }
+            catch (error) {
+              if (!measureOnly) throw error;
+              resolve(roughCaptureSize(reply.data));
+            }
           } catch (error) { reject(error); }
         };
         const timer = setTimeout(() => { cleanup(); reject(captureError("Claude JSON capture timed out. Refresh or turn JSON capture off.", "timeout", "timeout", "history")); }, 17000);
@@ -281,7 +300,8 @@
     const metrics = globalThis.CapJsonCaptureMetrics.create({ deadline_ms: 17000 });
     metrics.transcript = () => true;
     const capture = await readCapture(expectedPath, metrics, true, signal);
-    return { characterCount: capture.text.length };
+    return { characterCount: capture.text.length, messageTurnCount: capture.messageTurnCount,
+      ...(capture.estimatedCharacterCount !== undefined ? { estimatedCharacterCount: capture.estimatedCharacterCount } : {}) };
   };
   window.__capCaptureClaudeJson = async expectedPath => {
     const metrics = globalThis.CapJsonCaptureMetrics.create({ deadline_ms: 17000 });

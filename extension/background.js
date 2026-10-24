@@ -358,7 +358,8 @@ function updatePreparedSummaryTelemetry(event, installId = null) {
   preparedSummaryTelemetry.set(event.attemptId, {
     event: previous ? { ...mergeTransferTelemetryEvents(previous.event, event), extensionVersion: event.extensionVersion || previous.event.extensionVersion } : event,
     installId: installId || previous.installId,
-    expiresAt: installId ? Date.now() + TELEMETRY_ACTIVE_MAX_AGE_MS : previous.expiresAt
+    expiresAt: installId ? Math.max(Date.now() + TELEMETRY_ACTIVE_MAX_AGE_MS,
+      transferOperations.get(event.attemptId)?.expiresAt || 0) : previous.expiresAt
   });
   while (preparedSummaryTelemetry.size > TELEMETRY_OUTBOX_MAX_ENTRIES) {
     preparedSummaryTelemetry.delete(preparedSummaryTelemetry.keys().next().value);
@@ -482,7 +483,7 @@ async function persistActiveTransferTelemetry(attemptId) {
   if (currentEvent) entries[attemptId] = {
     event: currentEvent,
     tabId: currentSourceTabId ?? null,
-    expiresAt: Date.now() + TELEMETRY_ACTIVE_MAX_AGE_MS,
+    expiresAt: Math.max(Date.now() + TELEMETRY_ACTIVE_MAX_AGE_MS, transferOperations.get(attemptId)?.expiresAt || 0),
     ...(currentConfirmation || {})
   };
   if (currentEvent) activeTransferTelemetry.set(attemptId, currentEvent);
@@ -972,6 +973,23 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       .then(() => sendResponse({ ok: true }))
       .catch(() => sendResponse({ ok: false }));
     return true;
+  }
+
+  if (message?.type === "EXTEND_DOM_CAPTURE_DEADLINE") {
+    const operation = transferOperations.get(message.transferId);
+    const now = Date.now();
+    if (sender?.id !== chrome.runtime.id || sender.frameId !== 0 || !Number.isInteger(sender.tab?.id) || !getPlatformFromUrl(sender.tab?.url)
+        || typeof message.transferId !== "string" || !message.transferId || message.transferId.length > 128
+        || !Number.isSafeInteger(message.deadlineAt) || message.deadlineAt <= now
+        || message.deadlineAt > now + 126 * 60 * 1000
+        || (operation && (operation.sourceTabId !== sender.tab.id || operation.controller.signal.aborted
+          || operation.expiresAt <= now))) {
+      sendResponse({ ok: false }); return false;
+    }
+    const owned = operation || getTransferOperation(message.transferId, sender.tab, message.deadlineAt);
+    owned.deadlineAt = Math.max(owned.deadlineAt || 0, message.deadlineAt);
+    owned.expiresAt = owned.deadlineAt;
+    sendResponse({ ok: true }); return false;
   }
 
   if (message?.type === "SUMMARIZE_WITH_BACKEND") {

@@ -1019,10 +1019,31 @@ test("fallback notice uses fixed safe copy in the handoff and announces it", () 
   const node = { style: {}, setAttribute: (key, value) => { node[key] = value; } };
   const group = { appendChild: child => { group.child = child; } };
   const context = vm.createContext({
-    document: { getElementById: () => group, createElement: () => node }
+    document: { getElementById: id => id === "context-generator-status-group" ? group : null, createElement: () => node }
   });
   vm.runInContext(`${source.slice(noticeStart, noticeEnd)}; showFastCaptureFallbackMessage();`, context);
   assert.equal(group.child, node);
   assert.equal(node.role, "status");
   assert.equal(node.textContent, "Fast capture failed. Using normal capture instead.");
+});
+
+test("rough progress reaches the owning DOM handoff before the final count and never fails on estimated excess", async () => {
+  const { context, calls } = harness("deepseek");
+  const ready = deferred(), finishDom = deferred(), final = deferred();
+  let callback;
+  context.window.__capMeasureNetworkJson = (_path, _signal, onEstimate) => { callback = onEstimate; ready.resolve(); return final.promise; };
+  context.prepareSourceForCapture = async () => { context.extendDomCaptureDeadline(context.activeTransferTrace); context.startDomCaptureSizeCheck(context.activeTransferTrace); };
+  context.scrapeConversationTextWhenReady = async () => { await finishDom.promise; context.checkTransferDeadline(context.activeTransferTrace); return "DOM transcript"; };
+  const transfer = context.start("claude"); await ready.promise;
+  const trace = context.activeTransferTrace;
+  callback({ messageTurnCount: 200, estimatedCharacterCount: 1000001 });
+  assert.ok(trace.domSizeCheck.estimateMs > 0);
+  assert.equal(trace.domSizeCheck.error, null, "Estimated excess never rejects an otherwise valid DOM capture.");
+  finishDom.resolve(); await transfer;
+  assert.equal(calls.flows.length, 1);
+  const deadline = trace.deadlineAt;
+  callback({ messageTurnCount: 10000, estimatedCharacterCount: 30000000 });
+  final.resolve({ characterCount: 1000001 }); await new Promise(setImmediate);
+  assert.equal(trace.deadlineAt, deadline, "Late progress cannot extend completed capture.");
+  assert.equal(calls.errors.length, 0);
 });

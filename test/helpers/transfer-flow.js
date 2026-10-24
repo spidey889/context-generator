@@ -12,6 +12,8 @@ function sliceBetween(startMarker, endMarker) {
 }
 const code = new vm.Script(
   source.match(/  const OVERSIZED_CONVERSATION_ERROR_MESSAGE = .+;/)[0] + "\n"
+  + source.match(/  const DOM_CAPTURE_MIN_ALLOWANCE_MS = .+;/)[0] + "\n"
+  + source.match(/  const DOM_CAPTURE_MAX_ALLOWANCE_MS = .+;/)[0] + "\n"
   + sliceBetween("  function updateTransferDiagnostics(", "  function markCaptureDone(")
   + sliceBetween("  function stopSourceDestinationProgress(", "  function prepareDestinationTab(")
   + sliceBetween("  function checkTransferDeadline(", "  function createTransferTrace(")
@@ -34,7 +36,8 @@ function loadTransferFlow(overrides) {
     document: { getElementById: () => null },
     getConversationTurns: () => [],
     isSourceReplyInProgress: () => false,
-    setTimeout: () => 1, setInterval: () => 1, clearInterval() {},
+    setTimeout: () => 1, setInterval: () => 1, clearTimeout() {}, clearInterval() {},
+    notifyBackground: async () => ({ ok: true }), showDomCaptureEstimate() {},
     addOwnedEventListener: (target, type, listener) => target?.addEventListener?.(type, listener),
     removeOwnedEventListener: (target, type, listener) => target?.removeEventListener?.(type, listener),
     ...overrides
