@@ -543,6 +543,7 @@ function destinationFixture() {
   </style>
 </head>
 <body>
+  ${GEMINI_DESTINATION_SMOKE ? '<modular-zero-state><div class="zero-state-container"><assistant-messages-primary><div class="assistant-messages-primary-container visible-primary-message"><h1><span class="message-text">Where should we start?</span></h1></div></assistant-messages-primary></div></modular-zero-state>' : ''}
   <form data-testid="composer">
     ${GEMINI_DESTINATION_SMOKE ? '<div class="text-input-field"><rich-textarea><div id="gemini-editor" class="ql-editor" role="textbox" aria-label="Enter a prompt for Gemini" contenteditable="false" aria-disabled="true"></div></rich-textarea></div>' : '<textarea aria-label="Message Claude"></textarea>'}
     <button id="send-button" type="button">Send</button>

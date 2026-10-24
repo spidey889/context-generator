@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-24-gemini-destination-v173";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-24-gemini-welcome-v174";
   const INLINE_PILL_SIZE = 36;
   const ownedUiStyleSheets = new Map();
   let handoffUserCss = "";
@@ -2861,7 +2861,11 @@
       const routeAllowed = landingPaths.includes(window.location.pathname.replace(/\/+$/, "") || "/");
       if (destination.id === "claude") {
         globalThis.CapTransferDiagnostics?.update(diagnostics, {
-          claude_page: globalThis.CapTransferDiagnostics.claudePage(`https://${window.location.hostname}${window.location.pathname}`),
+          claude_page: globalThis.CapTransferDiagnostics.claudePage(`https://${window.location.hostname}${window.location.pathname}`)
+        });
+      }
+      if (destination.id === "claude" || destination.id === "gemini") {
+        globalThis.CapTransferDiagnostics?.update(diagnostics, {
           destination_platform_match: platformMatches, destination_route_allowed: routeAllowed
         });
       }
@@ -2992,7 +2996,7 @@
       await guard?.checkActive();
       guard?.check();
       const destinationMessageCount = getDetectedConversationMessageCount();
-      if (destination.id === "claude") observe({ destination_message_count: destinationMessageCount });
+      if (destination.id === "claude" || destination.id === "gemini") observe({ destination_message_count: destinationMessageCount });
       if (destinationMessageCount > 0) throw createDiagnosticError("The destination is no longer a new chat.", "destination_not_new_chat");
       const input = findReadyPlatformInput(destination);
       observe({ editor_seen: sawInput || Boolean(input) });
@@ -4525,6 +4529,9 @@
 
   function isConversationCandidateElement(element, platformInput = null) {
     if (!element || isContextGeneratorNode(element) || !isVisible(element)) return false;
+    // Gemini's welcome screen uses assistant/message classes too. Exclude its
+    // native zero-state boundary, not the greeting text a real turn may contain.
+    if (currentPlatform.id === "gemini" && element.closest("modular-zero-state, .zero-state-container")) return false;
     if (element.matches("input, textarea, button, select, [role='button'], [contenteditable='true']")) return false;
     // Animated composer prompts can live in message-shaped wrappers or child spans.
     // Neither the active input nor any DOM that owns/belongs to it is conversation history.

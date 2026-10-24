@@ -864,6 +864,31 @@ test("Grok empty-state prompt is not counted or captured as a real message", () 
   );
 });
 
+clockTest("Gemini's native welcome screen stays empty and accepts a destination paste", async () => {
+  for (const root of [new FakeElement({ tag: "modular-zero-state" }), new FakeElement({ attrs: { class: "zero-state-container" } })]) {
+    const welcome = new FakeElement({ text: "Where should we start?", attrs: { class: "assistant-messages-primary-container visible-primary-message" } });
+    root.appendChild(welcome);
+    const editor = new FakeElement({ tag: "textarea", attrs: { placeholder: "Ask Gemini" } });
+    const hooks = loadPlatformContent([root, welcome, editor], "gemini.google.com", { pathname: "/app" });
+    assert.equal(hooks.getDetectedConversationMessageCount(), 0, "Welcome copy is not chat history.");
+    assert.throws(() => hooks.scrapeConversationText(), /Send a message first/);
+    await hooks.pasteIntoPlatform("Complete test context", "gemini");
+    assert.equal(editor.value, "Complete test context");
+  }
+});
+
+test("Gemini keeps real messages that use the welcome heading's words", async () => {
+  for (const tag of ["user-query", "model-response"]) {
+    const turn = new FakeElement({ tag, text: "Where should we start?" });
+    const editor = new FakeElement({ tag: "textarea", attrs: { placeholder: "Ask Gemini" } });
+    const hooks = loadPlatformContent([turn, editor], "gemini.google.com", { pathname: "/app" });
+    assert.equal(hooks.getDetectedConversationMessageCount(), 1);
+    assert.ok(hooks.scrapeConversationText().includes("Where should we start?"));
+    await assert.rejects(hooks.pasteIntoPlatform("Complete test context", "gemini"), error => error.diagnostics.error_code === "destination_not_new_chat");
+    assert.equal(editor.value, "", "Keep the existing conversation untouched.");
+  }
+});
+
 test("role detection uses structural evidence instead of you or me labels", () => {
   const vagueYouLabel = new FakeElement({
     text: "Account navigation",
