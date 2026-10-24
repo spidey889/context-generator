@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-24-dom-estimate-v175";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-24-dom-notice-ui-v176";
   const INLINE_PILL_SIZE = 36;
   const ownedUiStyleSheets = new Map();
   let handoffUserCss = "";
@@ -8036,6 +8036,8 @@
   }
 
   function clearDomCaptureNotice() {
+    const overlay = document.getElementById(OVERLAY_ID);
+    if (overlay) delete overlay.dataset.contextGeneratorDomNotice;
     const notice = document.getElementById("context-generator-dom-capture");
     if (!notice) return;
     removeOwnedEventListener(notice.querySelector("button"), "click", notice.cancelCapture);
@@ -8050,26 +8052,30 @@
     if (!notice) {
       notice = document.createElement("div");
       notice.id = "context-generator-dom-capture";
-      notice.style.cssText = "display:flex;align-items:center;gap:12px;margin-top:10px;font-size:12px;line-height:1.5;color:inherit";
+      const icon = document.createElement("span");
+      icon.className = "context-generator-dom-notice-icon";
+      icon.setAttribute("aria-hidden", "true");
+      icon.innerHTML = '<svg width="18" height="18" viewBox="0 0 20 20" fill="none"><circle cx="10" cy="10" r="7.25" stroke="currentColor" stroke-width="1.3"/><path d="M10 9v4M10 6.6v.1" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>';
       const text = document.createElement("span");
       text.id = "context-generator-dom-capture-estimate";
       text.setAttribute("role", "status");
-      text.style.cssText = "flex:1;min-width:0";
       const cancel = document.createElement("button");
       cancel.type = "button";
       cancel.textContent = "Cancel";
       cancel.setAttribute("aria-label", "Cancel capture (Esc)");
       cancel.title = "Esc to cancel";
-      cancel.style.cssText = "flex:none;font:inherit;color:inherit;background:transparent;border:1px solid currentColor;border-radius:8px;padding:5px 10px;cursor:pointer";
       notice.cancelCapture = () => {
         if (activeTransferTrace === trace && !trace.completed) cancelLocalTransfer(trace.id, { notifyWorker: true });
       };
       addOwnedEventListener(cancel, "click", notice.cancelCapture);
+      notice.appendChild(icon);
       notice.appendChild(text);
       notice.appendChild(cancel);
       group.appendChild(notice);
     }
     document.getElementById("context-generator-capture-notice")?.remove();
+    const overlay = document.getElementById(OVERLAY_ID);
+    if (overlay) overlay.dataset.contextGeneratorDomNotice = "true";
     const estimateMs = trace.domSizeCheck?.estimateMs;
     document.getElementById("context-generator-dom-capture-estimate").textContent = estimateMs
       ? `This chat may take about ${Math.round(estimateMs / 60000)} ${estimateMs === 60000 ? "minute" : "minutes"} to capture. Esc to cancel.`
@@ -8356,6 +8362,37 @@
         styleSheet.className = "darkreader";
         styleSheet.dataset.contextGeneratorOwned = "true";
         styleSheet.textContent = `
+          /* Only the slow-capture notice can grow the card; ordinary handoff
+             stages retain their original fixed geometry. */
+          #${OVERLAY_ID}[data-context-generator-dom-notice="true"]{
+            height:auto!important;min-height:286px!important;max-height:none!important;gap:18px!important;
+          }
+          #${OVERLAY_ID} #context-generator-dom-capture{
+            display:flex;align-items:center;gap:11px;width:100%;box-sizing:border-box;
+            margin-top:14px;padding:11px 12px;border-radius:12px;text-align:left;
+            background:rgba(174,145,214,0.055)!important;border:1px solid rgba(190,166,224,0.15)!important;
+            color:#d1cbd9!important;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
+          }
+          #${OVERLAY_ID} .context-generator-dom-notice-icon{
+            display:flex;align-items:center;justify-content:center;flex:0 0 18px;color:#b6a3cf!important;
+          }
+          #${OVERLAY_ID} #context-generator-dom-capture-estimate{
+            flex:1;min-width:0;font-size:12px;font-weight:400;line-height:1.55;letter-spacing:0;
+          }
+          #${OVERLAY_ID} #context-generator-dom-capture button{
+            appearance:none;display:inline-flex;align-items:center;justify-content:center;flex:none;
+            min-height:32px;padding:6px 11px;box-sizing:border-box;border-radius:8px;cursor:pointer;
+            font:600 11.5px/1.2 -apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;letter-spacing:0;
+            color:#f1aaaa!important;background:rgba(212,94,105,0.12)!important;
+            border:1px solid rgba(225,121,131,0.26)!important;box-shadow:none!important;
+            transition:background 140ms ease,border-color 140ms ease;
+          }
+          #${OVERLAY_ID} #context-generator-dom-capture button:hover{
+            background:rgba(212,94,105,0.22)!important;border-color:rgba(225,121,131,0.46)!important;
+          }
+          #${OVERLAY_ID} #context-generator-dom-capture button:focus-visible{
+            outline:2px solid #f1aaaa!important;outline-offset:3px;
+          }
           @keyframes contextGeneratorHeadlineIn{
             from{opacity:0.62;transform:translate3d(0,4px,0)}
             to{opacity:1;transform:translate3d(0,0,0)}
