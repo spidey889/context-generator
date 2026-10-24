@@ -3327,6 +3327,22 @@ async function run() {
       await destinationSession.evaluate('document.querySelector("textarea").value = ""');
       await sourceSession.call("Page.bringToFront");
       await sourceSession.evaluate(`(() => {
+        // Sample rendered frames through the real direct transfer. Settled
+        // data-state checks miss a card that first paints already completed.
+        window.__capDirectHandoffFrames = [];
+        const startedAt = performance.now();
+        const sample = () => {
+          const overlay = document.getElementById("context-generator-overlay");
+          if (overlay?.getAttribute("aria-hidden") === "false") {
+            window.__capDirectHandoffFrames.push([...overlay.querySelectorAll(".context-generator-handoff-stage")].slice(0, 2).map(stage => ({
+              state: stage.dataset.state,
+              progress: stage.querySelector(".context-generator-handoff-stage-connector-fill").getBoundingClientRect().width
+                / stage.querySelector(".context-generator-handoff-stage-connector").getBoundingClientRect().width
+            })));
+          }
+          if (performance.now() - startedAt < 10000) requestAnimationFrame(sample);
+        };
+        requestAnimationFrame(sample);
         document.querySelector('article[data-message-author-role="user"]').textContent = ${JSON.stringify(userText)};
         document.getElementById("context-generator-bubble").click();
         [...document.querySelectorAll(".context-generator-destination-tile")].find(tile => tile.textContent.includes("Claude")).click();
@@ -3337,6 +3353,13 @@ async function run() {
         return receipt?.rawScrapedText === transcript ? receipt : null;
       }, "the exact direct text transfer receipt");
       assert.equal(stats.status, "completed");
+      const directFrames = await sourceSession.evaluate("window.__capDirectHandoffFrames");
+      assert.ok(directFrames.some(([capture, summary]) => capture.state === "active" && capture.progress < 0.95 && summary.state === "upcoming"),
+        "Direct transfers must paint capture in progress before showing completed bars.");
+      assert.ok(directFrames.some(([capture, summary]) => capture.progress >= 0.99 && summary.state === "active" && summary.progress > 0.15 && summary.progress < 0.95),
+        "Direct transfers must visibly sweep the second bar after capture completes.");
+      assert.ok(directFrames.some(stages => stages.every(stage => stage.state === "complete")),
+        "Both sweeps must finish before the destination takes focus.");
       assert.equal(stats.summary.source, "local");
       assert.equal(stats.summary.model, "local-direct");
       assert.equal(stats.summary.profile, "direct");

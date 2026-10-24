@@ -4,6 +4,8 @@ A short history of decisions and regressions that matter when changing the code.
 
 ## 2026-10-24
 
+- **Animate fast transfers before switching tabs.** A local carry could mark capture and preparation complete before the handoff painted, cancelling its capture cue. Keep the short capture sweep, then a 180 ms preparation sweep, while destination setup continues. Hidden/reduced-motion views skip the cues, and cancelled or replaced attempts cannot update the card later. Add one installed-Brave regression check that samples the real direct transfer's rendered bars in order, retaining exact text, zero AI requests and no Send click.
+
 - **Audit DOM notice integration before landing.** Keep the newer DeepSeek login ownership and source-reload reporting fixes while integrating DOM estimates. Advance the combined DeepSeek MAIN/bridge to v28 so an already-loaded v27 session hook is replaced, and give every signed-in DeepSeek browser fixture matching fake login storage. Preserve strict destination Escape cancellation checks and record received native key events on failure for diagnosis. Notice wording, styles and backend budgets remain unchanged.
 
 - **Refine the DOM capture notice.** Put the estimate in a subtle bordered panel with an info icon and muted red Cancel action, including hover and keyboard focus. Let only this slow-capture state grow to fit narrow screens; warning wording, capture/timer behavior and ordinary handoff styling stay unchanged.
