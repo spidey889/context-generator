@@ -4,6 +4,8 @@ A short history of decisions and regressions that matter when changing the code.
 
 ## 2026-10-25
 
+- **Audit recent transfer changes and persist the longer capture allowance.** Reviewed handoff sequencing, JSON retry/fallback, DOM estimates/deadlines, cancellation and worker interruption reports. Found that accepting a longer DOM deadline updated only the live operation; its saved active report could still expire at the old six-minute limit before another scroll snapshot. Persist the allowance through the existing storage queue, without another telemetry event or delaying capture. A regression covers worker restart after seven minutes and the subsequent source-reload report. No schema, provider or permission changes.
+
 - **Land the direct handoff animation with current retry behavior.** Preserve the newer JSON retry cooldown while integrating the fast local-transfer sweeps. Advance the combined content script to v178 so already-loaded page instances are replaced.
 
 ## 2026-10-24
