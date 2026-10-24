@@ -4,6 +4,8 @@ A short history of decisions and regressions that matter when changing the code.
 
 ## 2026-10-25
 
+- **Minimal login/signup clue with unchanged extension permissions.** By owner request, save only `destination_auth_prompt` in the existing transfer diagnosis. Recognize explicit login/signup routes during existing worker checks and visible native login/signup controls at paste; exclude chat/code text, hidden controls and extension UI. Preserve the rejected prepared tab's clue separately from its replacement. Missing/false evidence never proves a signed-in account. Keep manifest, host access, transfer behavior and browser/network requests unchanged; advance content readiness to v179. Add the same boolean to the relay/Edge/SQL contracts with no new table/column, plus focused privacy/recovery checks and an installed-Brave-to-database assertion. Hosted migration `20261024193856` and Edge version 24 were verified; all 83 transfer and 26 user rows remained byte-for-byte unchanged. Older attempts remain unclassified; installed clients need the updated extension.
+
 - **Land the direct handoff animation with current retry behavior.** Preserve the newer JSON retry cooldown while integrating the fast local-transfer sweeps. Advance the combined content script to v178 so already-loaded page instances are replaced.
 
 ## 2026-10-24

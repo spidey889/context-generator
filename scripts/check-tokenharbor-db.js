@@ -15,7 +15,10 @@ async function checkTokenHarbor(db, sql, model = "claude-haiku-5.5:free") {
   await db.exec(sql);
   equal(await snapshot(), before);
   const definition = (await rows("select pg_get_functiondef('public.is_valid_transfer_diagnostics(jsonb,integer)'::regprocedure) as sql"))[0].sql;
-  equal(JSON.parse(definition.match(/rules constant jsonb := '([^']+)'::jsonb/)[1]), contract.schema);
+  // The minimal auth clue is added by a later migration, checked separately.
+  const historicalSchema = { ...contract.schema };
+  delete historicalSchema.destination_auth_prompt;
+  equal(JSON.parse(definition.match(/rules constant jsonb := '([^']+)'::jsonb/)[1]), historicalSchema);
   equal(await rows(`select public.is_valid_transfer_diagnostics('{"version":1,"summary_failed_provider":"tokenharbor"}') as valid,
     public.is_valid_transfer_diagnostics('{"version":1,"summary_failed_provider":"PRIVATE"}') as invalid`), [{ valid: true, invalid: false }]);
   // Exercise the new reported model through the real role/RPC. Reporting cannot

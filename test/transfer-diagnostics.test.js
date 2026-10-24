@@ -79,6 +79,24 @@ test("Claude page observations redact IDs, queries, fragments and unknown paths 
   }
 });
 
+test("login clues retain only a boolean through every relay and prepared diagnosis", async () => {
+  const edge = await import("../supabase/functions/transfer-telemetry/validation.mjs");
+  for (const [url, expected] of [
+    ["https://chat.deepseek.com/a/sign_in?token=PRIVATE", true],
+    ["https://claude.ai/login", true], ["https://chatgpt.com/auth/login", true],
+    ["https://grok.com/sign-up", true], ["https://gemini.google.com/signup", true],
+    ["https://chat.deepseek.com/a/chat/s/login?signup=PRIVATE", false],
+    ["https://claude.ai/?next=/login", false], ["https://chatgpt.com/c/signup", false],
+    ["https://accounts.google.com/login?token=PRIVATE", undefined], ["PRIVATE", undefined]
+  ]) assert.equal(diagnostics.authPromptFromUrl(url), expected, url);
+  for (const value of [true, false, "https://PRIVATE/login", "login", null]) {
+    const safe = { version: 1, destination_auth_prompt: value,
+      prepared_diagnostics: { version: 1, destination_auth_prompt: value } };
+    assert.equal(Boolean(validateTelemetryPayload(payload({ diagnostics: safe }))), typeof value === "boolean");
+    assert.equal(Boolean(edge.validateTelemetryPayload(payload({ diagnostics: safe }))), typeof value === "boolean");
+  }
+});
+
 test("precise failure evidence survives every ingress and wrapper without private stack data", async () => {
   const edge = await import("../supabase/functions/transfer-telemetry/validation.mjs");
   const error = Object.assign(new TypeError("PRIVATE response and token"), {

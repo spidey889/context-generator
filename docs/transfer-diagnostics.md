@@ -4,6 +4,22 @@ Extension 1.4.12 introduced one optional JSONB record to `transfers.diagnostics`
 Older attempts retain NULL; their missing observations cannot be recovered.
 The existing `failure_reason` and `last_stage` remain compatible.
 
+## Minimal login/signup clue
+
+`destination_auth_prompt` is an optional boolean in the existing diagnosis:
+
+- `true`: an explicit login/signup path or a visible native login/signup control was observed.
+- `false`: no such clue was seen. This does not prove the user was signed in.
+- Missing: the page could not be observed, or the client predates this clue.
+
+The rejected prepared tab keeps its own clue in `prepared_diagnostics`; a fresh
+replacement does not inherit it. No page URL, HTML, control text or credential is
+saved. Checks exclude chat/code content, hidden elements and extension UI.
+English control wording and known route patterns are best effort; external
+authentication sites may be inaccessible with the current permissions.
+The extension manifest and permissions are unchanged. No extra requests,
+navigation tracking, polling or paste decisions are added.
+
 ## Small clues for missing final reports
 
 These are saved in the same `transfers.diagnostics` record:

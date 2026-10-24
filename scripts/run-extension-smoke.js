@@ -560,6 +560,7 @@ function destinationFixture() {
   </style>
 </head>
 <body>
+  ${process.env.CAP_CONTEXT_DRAFT_TRANSFER_SMOKE === "1" ? '<button type="button">Sign in</button>' : ''}
   ${GEMINI_DESTINATION_SMOKE ? '<modular-zero-state><div class="zero-state-container"><assistant-messages-primary><div class="assistant-messages-primary-container visible-primary-message"><h1><span class="message-text">Where should we start?</span></h1></div></assistant-messages-primary></div></modular-zero-state>' : ''}
   <form data-testid="composer">
     ${GEMINI_DESTINATION_SMOKE ? '<div class="text-input-field"><rich-textarea><div id="gemini-editor" class="ql-editor" role="textbox" aria-label="Enter a prompt for Gemini" contenteditable="false" aria-disabled="true"></div></rich-textarea></div>' : '<textarea aria-label="Message Claude"></textarea>'}
@@ -1598,6 +1599,7 @@ async function verifyDraftTransfer({ sourceSession, devToolsPort, origin, state,
   assert.equal(await destination.evaluate("window.__capContextSmokeSendClicks"), 0);
   const terminal = await waitFor(() => state.telemetryRequests.findLast(payload => payload.status === "failed"), "the draft outcome telemetry");
   assert.equal(terminal.diagnostics.error_code, "editor_has_draft");
+  assert.equal(terminal.diagnostics.destination_auth_prompt, true, "The visible native Sign in control must reach terminal diagnosis.");
   assert.ok(terminal.diagnostics.events.some(event => event.event === "local_fallback" && event.code === "editor_has_draft"), "Only a displayed copy box acknowledges draft recovery.");
   const latest = await sourceSession.evaluate("chrome.storage.local.get('context-generator-last-transfer-stats-v1').then(value => value['context-generator-last-transfer-stats-v1'])", sourceSession.getExtensionContextId());
   assert.equal(latest.status, "copy_ready");
@@ -1609,6 +1611,7 @@ async function verifyDraftTransfer({ sourceSession, devToolsPort, origin, state,
   assert.equal(state.summaryRequests.length, 1);
   assert.equal(await destination.evaluate("document.getElementById('context-generator-destination-status')"), null, "The draft box replaces the paste failure banner.");
   await telemetryFixture.verifyDraftOutcome(terminal);
+  process.stdout.write("✓ The native login/signup clue reached the saved diagnosis without page text or URLs.\n");
   // The DOM run covers this same default dialog's copy/palette behavior. Here
   // both boxes' exact payloads are checked above, and the draft variant below.
   await verifyRecoveryPalette(destination, destination.getExtensionContextId());

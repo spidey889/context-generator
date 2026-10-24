@@ -38,6 +38,7 @@ async function checkJsonCaptureDiagnostics(db, sql, previousSql = null) {
   // These historical migrations precede the additive TokenHarbor provider label.
   // Its later migration verifies the complete current schema separately.
   const historicalSchema = structuredClone(contract.schema);
+  delete historicalSchema.destination_auth_prompt;
   historicalSchema.summary_failed_provider.values = historicalSchema.summary_failed_provider.values.filter(provider => provider !== "tokenharbor");
   assert.deepEqual(JSON.parse(sql.match(/rules constant jsonb := '([^']+)'::jsonb/)[1]), historicalSchema);
   assert.deepEqual(JSON.parse(sql.match(attemptRulesDeclaration)[1]), attemptRules);

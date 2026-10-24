@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-25-direct-handoff-retry-v178";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-25-login-page-clue-v179";
   const SOURCE_JSON_RETRY_DELAY_MS = 2000;
   const INLINE_PILL_SIZE = 36;
   const ownedUiStyleSheets = new Map();
@@ -2862,6 +2862,21 @@
     return platform ? { ...platform, id: platformId } : null;
   }
 
+  function observeDestinationAuthPrompt() {
+    try {
+      if (globalThis.CapTransferDiagnostics?.authPromptFromUrl(window.location.href) === true) return true;
+      const messages = [...currentPlatform.conversationSelectors, ...GENERIC_CONVERSATION_SELECTORS, "pre", "code"].join(",");
+      // Inspect visible native controls, never a chat's words or HTML source.
+      for (const control of document.querySelectorAll("button, a[href], [role='button'], input[type='submit']")) {
+        if (!isVisible(control) || isContextGeneratorNode(control)
+          || control.closest(messages) || control.closest("[hidden], [aria-hidden='true']")) continue;
+        const label = control.getAttribute("aria-label") || control.innerText || control.textContent || control.value || "";
+        if (/^(?:log\s?in|sign\s?in|sign\s?up|register|create (?:an? )?account)(?:[.!]?$|\s+(?:with|to)\b)/i.test(label.trim())) return true;
+      }
+      return false;
+    } catch { return undefined; } // Optional diagnosis must never affect pasting.
+  }
+
   async function pasteIntoPlatform(text, destinationId, transferId = null, deadlineAt = null, sourceTabId = null) {
     const startedAt = Date.now();
     const diagnostics = { version: 1, diagnostics_revision: 3, last_operation: "paste_start", summary_chars: text?.length || 0,
@@ -2934,6 +2949,7 @@
       }
       return timing;
     } finally {
+      globalThis.CapTransferDiagnostics?.update(diagnostics, { destination_auth_prompt: observeDestinationAuthPrompt() });
       if (!retainedGuard) guard.dispose();
     }
   }

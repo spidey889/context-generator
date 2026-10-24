@@ -900,6 +900,22 @@ test("Claude recovery preserves the rejected prepared page and observes the acti
   assert.doesNotMatch(JSON.stringify(response.diagnostics), /PRIVATE/);
 });
 
+test("DeepSeek recovery keeps the prepared login clue separate from the replacement", async () => {
+  for (const fresh of [undefined, false]) {
+    const harness = loadBackgroundForTransferTest({
+      preparedTab: { id: 41, url: "https://chat.deepseek.com/a/sign_in?token=PRIVATE" },
+      sendMessageImpl: async (_tabId, message) => message.type === "PASTE_CONTEXT"
+        ? { ok: false, diagnostics: { version: 1, error_code: "editor_missing",
+          ...(fresh === undefined ? {} : { destination_auth_prompt: fresh }) } } : { ok: true }
+    });
+    const response = await harness.sendTransfer("deepseek", 41);
+    assert.equal(response.diagnostics.prepared_diagnostics.destination_auth_prompt, true);
+    assert.equal(response.diagnostics.destination_auth_prompt, fresh);
+    assert.equal(harness.operations.created.length, 1);
+    assert.doesNotMatch(JSON.stringify(response.diagnostics), /PRIVATE|sign_in/);
+  }
+});
+
 test("Gemini recovery keeps a rejected tab's route observations out of the fresh destination", async () => {
   const harness = loadBackgroundForTransferTest({
     preparedTab: { id: 41, url: "https://example.invalid/PRIVATE" },

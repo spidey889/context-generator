@@ -86,7 +86,7 @@
   const booleans = ["online", "source_saved", "speed_enabled", "json_attempted", "source_changed", "cancelled",
     "destination_prepared", "prepared_reused", "prepared_rejected", "fresh_recovery", "script_injected",
     "editor_seen", "editor_connected", "draft_present", "paste_populated", "paste_stable", "user_handled",
-    "summary_cache_hit", "summary_fallback", "events_truncated", "destination_route_allowed", "destination_platform_match"];
+    "summary_cache_hit", "summary_fallback", "events_truncated", "destination_route_allowed", "destination_platform_match", "destination_auth_prompt"];
   const numbers = ["duration_ms", "deadline_remaining_ms", "capture_ms", "capture_chars", "capture_bytes",
     "candidate_turns", "captured_turns", "useful_turns", "raw_candidate_chars", "initial_rendered_turns",
     "sweep_scrolls", "sweep_stale_scrolls", "sweep_quiet_checks", "capture_retries", "expanded_blocks",
@@ -213,6 +213,15 @@
     if (operation?.startsWith("paste_") || operation === "editor_wait") return "paste_failed";
     return "unknown_error";
   }
+  // False means no explicit login/signup route was observed, not signed in.
+  // Only inspect sites already covered by the manifest; never return URL data.
+  function authPromptFromUrl(url) {
+    try {
+      const parsed = new URL(url);
+      if (parsed.protocol !== "https:" || !["claude.ai", "chatgpt.com", "gemini.google.com", "grok.com", "chat.deepseek.com"].includes(parsed.hostname)) return undefined;
+      return /^\/(?:a\/|auth\/)?(?:log[-_]?in|sign[-_]?in|sign[-_]?up|register)(?:\/|$)/i.test(parsed.pathname);
+    } catch { return undefined; }
+  }
   function claudePage(url) {
     try {
       const parsed = new URL(url);
@@ -230,7 +239,7 @@
     update(target, { ...errorDetails(error, target?.last_operation), error_code: code, error_origin: origin });
     event(target, "failure", atMs, origin === "destination" ? "paste_events" : origin === "background" ? "delivery_events" : "events", code);
   }
-  const api = { schema, jsonAttemptSchema, validateJsonAttempt, jsonAttempt, codes, operations, events, validate, snapshot, update, event, errorCode, errorDetails, operationErrorCode, failure, claudePage };
+  const api = { schema, jsonAttemptSchema, validateJsonAttempt, jsonAttempt, codes, operations, events, validate, snapshot, update, event, errorCode, errorDetails, operationErrorCode, failure, claudePage, authPromptFromUrl };
   root.CapTransferDiagnostics = api;
   if (typeof module !== "undefined" && module.exports) module.exports = api;
 })(globalThis);

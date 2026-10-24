@@ -1599,14 +1599,15 @@ async function transferToDestinationObserved(
     }
   } else if (preparedTabId) {
     // These checks describe the rejected prepared tab, not its replacement.
-    if ((destinationId === "claude" && trace.diagnostics.claude_page)
-      || (destinationId === "gemini" && typeof trace.diagnostics.destination_platform_match === "boolean")) {
+    if (typeof trace.diagnostics.destination_platform_match === "boolean") {
       trace.diagnostics.prepared_diagnostics = { version: 1, diagnostics_revision: 3, claude_page: trace.diagnostics.claude_page,
+        destination_auth_prompt: trace.diagnostics.destination_auth_prompt,
         destination_platform_match: trace.diagnostics.destination_platform_match,
         destination_route_allowed: trace.diagnostics.destination_route_allowed };
       delete trace.diagnostics.claude_page;
       delete trace.diagnostics.destination_platform_match;
       delete trace.diagnostics.destination_route_allowed;
+      delete trace.diagnostics.destination_auth_prompt;
     }
     markBackgroundTrace(trace, "prepared tab rejected", {
       tabId: preparedTabId,
@@ -1636,7 +1637,7 @@ async function transferToDestinationObserved(
       globalThis.CapTransferDiagnostics?.update(trace.diagnostics, { recovery_error_code: previous?.error_code || globalThis.CapTransferDiagnostics?.errorCode(pasteResult) });
       delete trace.diagnostics.error_code;
       delete trace.diagnostics.error_origin;
-      for (const key of ["claude_page", "destination_platform_match", "destination_route_allowed", "destination_message_count"]) delete trace.diagnostics[key];
+      for (const key of ["claude_page", "destination_platform_match", "destination_route_allowed", "destination_message_count", "destination_auth_prompt"]) delete trace.diagnostics[key];
     }
     if (recoveringPreparedTab) markBackgroundTrace(trace, "fresh recovery");
     if (preparedAttempted) {
@@ -1718,7 +1719,8 @@ async function isPreparedDestinationTabUsable(tabId, destinationId, operation = 
     try { routeAllowed = Boolean(DESTINATION_LANDING_PATHS[destinationId]?.includes(new URL(currentOrPendingUrl).pathname.replace(/\/+$/, "") || "/")); }
     catch { /* An invalid URL is unusable; observing it must not cancel a live tab. */ }
     globalThis.CapTransferDiagnostics?.update(diagnostics, {
-      destination_platform_match: platformMatches, destination_route_allowed: routeAllowed
+      destination_platform_match: platformMatches, destination_route_allowed: routeAllowed,
+      destination_auth_prompt: globalThis.CapTransferDiagnostics?.authPromptFromUrl(currentOrPendingUrl)
     });
     return platformMatches && routeAllowed;
   } catch {

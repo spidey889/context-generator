@@ -21,6 +21,7 @@ async function checkUsefulDiagnostics(db, sql) {
   const historicalContract = structuredClone(contract.schema);
   historicalContract.summary_failed_provider.values = historicalContract.summary_failed_provider.values.filter(provider => provider !== "tokenharbor");
   delete historicalContract.json_attempts;
+  delete historicalContract.destination_auth_prompt;
   historicalContract.capture_detail.values = historicalContract.capture_detail.values.filter(value => value !== "attachment_size_limit");
   equal(historicalRules, historicalContract);
   const samples = [];

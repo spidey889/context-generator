@@ -2818,6 +2818,37 @@ clockTest("missing destination editor reports its wait, attempts and observed ab
   });
 });
 
+test("destination login clues observe visible controls without scanning conversation words", async () => {
+  for (const [label, kind, expected] of [
+    ["Log in", "button", true], ["Sign up", "button", true],
+    ["Sign in with Google", "button", true], ["Sign up", "hidden", false],
+    ["Log in", "message", false], ["Log in", "extension", false],
+    ["Explain how to log in", "button", false], ["Send", "button", false]
+  ]) {
+    const control = new FakeElement({ tag: "button", text: label,
+      ...(kind === "hidden" ? { rect: { width: 0, height: 0 } } : {}) });
+    if (kind === "message") new FakeElement({ attrs: { class: "ds-markdown" } }).appendChild(control);
+    if (kind === "extension") control.dataset.contextGeneratorOwned = "true";
+    const hooks = loadPlatformContent([control], "chat.deepseek.com", { pathname: "/blocked" });
+    await assert.rejects(hooks.pasteIntoPlatform("PRIVATE carry", "deepseek"), error => {
+      assert.equal(error.diagnostics.destination_auth_prompt, expected, `${kind}: ${label}`);
+      assert.doesNotMatch(JSON.stringify(error.diagnostics), /PRIVATE|Google|Sign up/);
+      return true;
+    });
+  }
+  for (const [host, id, pathname] of [["chat.deepseek.com", "deepseek", "/a/sign_in"],
+    ["claude.ai", "claude", "/login"], ["chatgpt.com", "chatgpt", "/auth/login"],
+    ["grok.com", "grok", "/sign-up"], ["gemini.google.com", "gemini", "/signup"]]) {
+    const hooks = loadPlatformContent([], host, { pathname });
+    hooks.window.location.href = `https://${host}${pathname}?token=PRIVATE`;
+    await assert.rejects(hooks.pasteIntoPlatform("PRIVATE carry", id), error => {
+      assert.equal(error.diagnostics.destination_auth_prompt, true);
+      assert.equal(error.diagnostics.error_code, "destination_not_new_chat");
+      return true;
+    });
+  }
+});
+
 test("Claude new-chat rejection records the route and platform checks without private URLs", async () => {
   for (const [hostname, pathname, page, platformMatches, routeAllowed] of [
     ["claude.ai", "/chat/PRIVATE", "claude.ai/chat/:id", true, false],

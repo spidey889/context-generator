@@ -411,6 +411,29 @@ async function main() {
         checks += await require("./check-provider-diagnostics-db.js").checkProviderDiagnostics(db, sql);
       } else if (name.endsWith("_deepseek_file_diagnostics.sql")) {
         checks += await require("./check-json-capture-diagnostics-db.js").checkFileDiagnostics(db, sql);
+      } else if (name.endsWith("_destination_auth_prompt.sql")) {
+        const snapshot = async () => (await db.query(`select jsonb_build_object(
+          'transfers',(select jsonb_agg(to_jsonb(t) order by attempt_id) from public.transfers t),
+          'users',(select jsonb_agg(to_jsonb(u) order by install_id) from public.users u),
+          'access',(select jsonb_agg(jsonb_build_array(oid::text,proacl::text) order by oid) from pg_proc
+            where oid in ('public.is_valid_transfer_diagnostics(jsonb,integer)'::regprocedure,
+              'public.is_valid_client_transfer_diagnostics(jsonb,integer)'::regprocedure))) value`)).rows[0].value;
+        const before = await snapshot();
+        const definition = async () => (await db.query("select pg_get_functiondef('public.is_valid_client_transfer_diagnostics(jsonb,integer)'::regprocedure) value")).rows[0].value;
+        const original = await definition();
+        const sample = value => ({ version: 1, destination_auth_prompt: value,
+          prepared_diagnostics: { version: 1, destination_auth_prompt: value } });
+        equal((await db.query("select public.is_valid_transfer_diagnostics($1::jsonb) valid", [JSON.stringify(sample(true))])).rows[0].valid, false);
+        await db.exec(sql);
+        equal(await snapshot(), before);
+        const updated = await definition();
+        const pattern = /rules constant jsonb := '([^']+)'::jsonb/;
+        equal(updated.replace(pattern, "RULES"), original.replace(pattern, "RULES"));
+        equal(JSON.parse(updated.match(pattern)[1]), { ...JSON.parse(original.match(pattern)[1]), destination_auth_prompt: { type: "boolean" } });
+        equal(JSON.parse(updated.match(pattern)[1]), require("../extension/transfer-diagnostics.js").schema);
+        checks += await require("./check-diagnostics-samples.js").checkDiagnosticsSamples(db,
+          [true, false, "https://PRIVATE/login", 1, null].map(value => ({ label: `auth clue ${JSON.stringify(value)}`,
+            value: sample(value), expected: typeof value === "boolean" })));
       } else if (name.endsWith("_raise_million_character_limits.sql")) {
         checks += await require("./check-million-character-limits-db.js").checkMillionCharacterLimits(db, sql);
       } else await db.exec(sql);
