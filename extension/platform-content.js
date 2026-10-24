@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-22-picker-startup-v172";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-24-gemini-destination-v173";
   const INLINE_PILL_SIZE = 36;
   const ownedUiStyleSheets = new Map();
   let handoffUserCss = "";
@@ -124,9 +124,9 @@
   const MAX_BACKEND_CONVERSATION_CHARS = 1000000;
   const MAX_TRANSFER_CONVERSATION_CHARS = 1000000;
   const TINY_DIRECT_PROFILE_MAX_CHARS = 1200;
-  // Claude, ChatGPT and Grok need focus before composer hydration/verification.
+  // Claude, ChatGPT, Gemini and Grok need focus before composer hydration/verification.
   // Their source-side completion cue must finish before the background performs the focused paste.
-  const FOCUSED_PASTE_DESTINATIONS = new Set(["claude", "chatgpt", "grok"]);
+  const FOCUSED_PASTE_DESTINATIONS = new Set(["claude", "chatgpt", "gemini", "grok"]);
   const OVERSIZED_CONVERSATION_ERROR_MESSAGE = "This chat is too large to transfer. Our limit is 1,000,000 characters. Try a shorter chat.";
   const CONVERSATION_SCRAPE_RETRY_TIMEOUT_MS = 1800;
   const CONVERSATION_SCRAPE_RETRY_INTERVAL_MS = 140;
@@ -339,7 +339,7 @@
       name: "Gemini",
       detail: "Google",
       host: "gemini.google.com",
-      url: "https://gemini.google.com/",
+      url: "https://gemini.google.com/app",
       accent: "#8ab4f8",
       logoSize: 22,
       logo: "logos/gemini-download__1_-removebg-preview.png",

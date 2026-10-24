@@ -363,13 +363,15 @@ test("closing the source revokes an outstanding paste without recovery or activa
   });
   const pending = harness.sendTransfer("gemini", 41, false, null, sourceTab);
   await started;
+  const activationsBeforeClose = harness.operations.updated.length;
+  assert.equal(activationsBeforeClose, 1, "Gemini is shown before paste begins.");
   await harness.closeTab(9);
   const response = await pending;
   assert.equal(response.code, "user_cancelled");
   acknowledge({ ok: true });
   await new Promise(setImmediate);
   assert.equal(harness.operations.created.length, 0);
-  assert.equal(harness.operations.updated.length, 0);
+  assert.equal(harness.operations.updated.length, activationsBeforeClose, "Source closure must prevent any later activation.");
   assert.ok(harness.operations.sent.some(({ tabId, message }) => tabId === 41 && message.type === "CANCEL_TRANSFER"));
   assert.equal(harness.operations.sent.filter(({ message }) => message.type === "PASTE_CONTEXT").length, 1);
 });
@@ -897,24 +899,46 @@ test("Claude recovery preserves the rejected prepared page and observes the acti
   assert.doesNotMatch(JSON.stringify(response.diagnostics), /PRIVATE/);
 });
 
+test("Gemini recovery keeps a rejected tab's route observations out of the fresh destination", async () => {
+  const harness = loadBackgroundForTransferTest({
+    preparedTab: { id: 41, url: "https://example.invalid/PRIVATE" },
+    sendMessageImpl: async (_tabId, message) => message.type === "PASTE_CONTEXT"
+      ? { ok: false, diagnostics: { version: 1, error_code: "editor_missing" } } : { ok: true }
+  });
+  const response = await harness.sendTransfer("gemini", 41);
+  assert.equal(response.ok, false);
+  assert.equal(response.diagnostics.prepared_diagnostics.destination_platform_match, false);
+  assert.equal(response.diagnostics.prepared_diagnostics.destination_route_allowed, false);
+  assert.equal(response.diagnostics.destination_platform_match, undefined, "The fresh route was not observed.");
+  assert.equal(response.diagnostics.destination_route_allowed, undefined);
+  assert.equal(harness.operations.created.length, 1);
+  assert.doesNotMatch(JSON.stringify(response.diagnostics), /PRIVATE/);
+});
+
 clockTest("the first destination draft rejection returns immediately without opening or pasting into another tab", async () => {
-  for (const report of [
-    { code: "editor_has_draft" },
-    { diagnostics: { version: 1, error_code: "editor_has_draft", error_origin: "destination", draft_present: true } }
-  ]) {
-    const harness = loadBackgroundForTransferTest({ preparedTab: { id: 41, url: "https://claude.ai/new" },
-      sendMessageImpl: (_tabId, message) => message.type === "PASTE_CONTEXT" ? { ok: false, ...report } : { ok: true } });
-    const response = await harness.sendTransfer("claude", 41);
-    assert.equal(response.ok, false);
-    assert.equal(response.code, "paste_failed");
-    assert.equal(response.diagnostics.error_code, "editor_has_draft");
-    assert.equal(response.diagnostics.fresh_recovery, undefined);
-    assert.equal(harness.operations.created.length, 0);
-    const pastes = harness.operations.sent.filter(({ message }) => message.type === "PASTE_CONTEXT");
-    assert.equal(pastes.length, 1);
-    assert.equal(pastes[0].tabId, 41);
-    assert.equal(harness.operations.errors.length, 0, "an expected draft must not be logged as a crash");
-    assert.ok(!harness.operations.badges.includes("ERR"));
+  for (const [destination, url] of [["claude", "https://claude.ai/new"], ["gemini", "https://gemini.google.com/app"]]) {
+    for (const report of [
+      { code: "editor_has_draft" },
+      { diagnostics: { version: 1, error_code: "editor_has_draft", error_origin: "destination", draft_present: true } }
+    ]) {
+      const harness = loadBackgroundForTransferTest({ preparedTab: { id: 41, url },
+        sendMessageImpl: (_tabId, message) => {
+          if (message.type !== "PASTE_CONTEXT") return { ok: true };
+          assert.equal(harness.operations.updated.length, 1, "Check the draft after native focus can restore it.");
+          return { ok: false, ...report };
+        } });
+      const response = await harness.sendTransfer(destination, 41);
+      assert.equal(response.ok, false);
+      assert.equal(response.code, "paste_failed");
+      assert.equal(response.diagnostics.error_code, "editor_has_draft");
+      assert.equal(response.diagnostics.fresh_recovery, undefined);
+      assert.equal(harness.operations.created.length, 0);
+      const pastes = harness.operations.sent.filter(({ message }) => message.type === "PASTE_CONTEXT");
+      assert.equal(pastes.length, 1);
+      assert.equal(pastes[0].tabId, 41);
+      assert.equal(harness.operations.errors.length, 0, "an expected draft must not be logged as a crash");
+      assert.ok(!harness.operations.badges.includes("ERR"));
+    }
   }
 });
 
@@ -1124,8 +1148,8 @@ test("prepared-tab recovery opens at most one fresh destination", async () => {
   assert.deepEqual(harness.operations.sent.map(({ tabId }) => tabId), [41, 100]);
 });
 
-test("Claude and ChatGPT focus and settle prepared and fresh composers before paste", async () => {
-  for (const [destination, url] of [["claude", "https://claude.ai/new"], ["chatgpt", "https://chatgpt.com/"]]) {
+test("Claude, ChatGPT and Gemini focus and settle prepared and fresh composers before paste", async () => {
+  for (const [destination, url] of [["claude", "https://claude.ai/new"], ["chatgpt", "https://chatgpt.com/"], ["gemini", "https://gemini.google.com/app"]]) {
     const harness = loadBackgroundForTransferTest({
       preparedTab: { id: 41, url, windowId: 1 },
       sendMessageImpl: async tabId => {
@@ -1146,13 +1170,36 @@ test("Claude and ChatGPT focus and settle prepared and fresh composers before pa
   }
 });
 
+test("Gemini opens its native new-chat app directly", async () => {
+  const harness = loadBackgroundForTransferTest();
+  assert.equal((await harness.prepare("gemini")).ok, true);
+  assert.equal(harness.operations.created[0].options.url, "https://gemini.google.com/app");
+});
+
+clockTest("Gemini activates before recovering a receiver that waits for visibility", { tickMs: 100, maxElapsedMs: 90000 }, async () => {
+  const sourceTab = { id: 9, windowId: 4, index: 1, url: "https://chatgpt.com/c/source" };
+  const harness = loadBackgroundForTransferTest({ sourceTab,
+    preparedTab: { id: 41, url: "https://gemini.google.com/app", windowId: 4 },
+    sendMessageImpl: async (tabId, message) => {
+      if (message.type === "PASTE_CONTEXT" && !harness.operations.updated.some(update => update.tabId === tabId)) {
+        throw new Error("Could not establish connection. Receiving end does not exist.");
+      }
+      return { ok: true };
+    } });
+  const response = await harness.sendTransfer("gemini", 41, false, null, sourceTab);
+  assert.equal(response.ok, true, "A receiver waiting for a visible tab must not time out.");
+  assert.equal(harness.operations.created.length, 0, "Keep the prepared Gemini tab instead of opening another.");
+  assert.equal(harness.operations.sent.filter(entry => entry.message.type === "PASTE_CONTEXT").length, 1);
+  assert.equal(harness.operations.updated.filter(update => update.tabId === 41).length, 1);
+});
+
 test("successful paste defers destination activation until the completion UI finishes", async () => {
   const harness = loadBackgroundForTransferTest({
-    preparedTab: { id: 41, url: "https://gemini.google.com/app", windowId: 1 },
+    preparedTab: { id: 41, url: "https://chat.deepseek.com/", windowId: 1 },
     sendMessageImpl: async () => ({ ok: true, timing: { pasteMs: 5 } })
   });
 
-  const response = await harness.sendTransfer("gemini", 41, true);
+  const response = await harness.sendTransfer("deepseek", 41, true);
 
   assert.equal(response.ok, true);
   assert.equal(response.timing.tabId, 41);
@@ -1160,7 +1207,7 @@ test("successful paste defers destination activation until the completion UI fin
   assert.equal(harness.operations.updated.length, 0);
   assert.equal("showHandoffCompletion" in harness.operations.sent[0].message, false);
 
-  const activation = await harness.activateDestination("gemini", 41);
+  const activation = await harness.activateDestination("deepseek", 41);
   assert.equal(activation.ok, true);
   assert.deepEqual(
     JSON.parse(JSON.stringify(harness.operations.updated)),

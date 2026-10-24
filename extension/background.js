@@ -94,7 +94,11 @@ const DESTINATIONS = {
   },
   gemini: {
     name: "Gemini",
-    url: "https://gemini.google.com/"
+    // Use Gemini's own New chat route, avoiding the root-to-app redirect.
+    // Visibility lets the app finish mounting/restoring its native composer.
+    url: "https://gemini.google.com/app",
+    focusBeforePaste: true,
+    activationSettleMs: 350
   },
   grok: {
     name: "Grok",
@@ -1537,7 +1541,9 @@ async function transferToDestinationObserved(
         code: error.code, diagnosticCode: error.diagnosticCode, diagnostics: error.diagnostics };
     }
   } else if (preparedTabId) {
-    if (destinationId === "claude" && trace.diagnostics.claude_page) {
+    // These checks describe the rejected prepared tab, not its replacement.
+    if ((destinationId === "claude" && trace.diagnostics.claude_page)
+      || (destinationId === "gemini" && typeof trace.diagnostics.destination_platform_match === "boolean")) {
       trace.diagnostics.prepared_diagnostics = { version: 1, diagnostics_revision: 3, claude_page: trace.diagnostics.claude_page,
         destination_platform_match: trace.diagnostics.destination_platform_match,
         destination_route_allowed: trace.diagnostics.destination_route_allowed };

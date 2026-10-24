@@ -54,6 +54,7 @@ const DEEPSEEK_TRANSCRIPT_OVERSIZE_SMOKE = JSON_SOURCE === "deepseek" && process
 const DEEPSEEK_DOM_SIZE_SMOKE = JSON_SOURCE === "deepseek" && process.env.CAP_CONTEXT_NETWORK_FAILURE_SMOKE === "dom-size-check";
 const NETWORK_FAILURE = (NETWORK_SOURCE && process.env.CAP_CONTEXT_NETWORK_FAILURE_SMOKE === "partial") || GROK_FILE_ONLY_SMOKE || DEEPSEEK_OVERSIZE_SMOKE;
 const JSON_CAPTURE_SMOKE = Boolean(JSON_SOURCE);
+const GEMINI_DESTINATION_SMOKE = process.env.CAP_CONTEXT_GEMINI_DESTINATION_SMOKE === "1";
 // Opt-in native capture/worker/backend-admission/paste coverage at the new
 // boundary. Unicode also exercises the raised text-file and UTF-8 byte limits.
 const LARGE_CHAT_SMOKE_CHARS = Number(process.env.CAP_CONTEXT_LARGE_CHAT_SMOKE || 0);
@@ -306,7 +307,7 @@ async function createSmokeExtension(tempRoot, origin) {
   const platformUrls = {
     claude: "https://claude.ai/",
     chatgpt: "https://chatgpt.com/",
-    gemini: "https://gemini.google.com/",
+    gemini: "https://gemini.google.com/app",
     grok: "https://grok.com/",
     deepseek: "https://chat.deepseek.com/"
   };
@@ -537,18 +538,40 @@ function destinationFixture() {
   <style>
     body{margin:0;min-height:100vh;background:#f4f0e8;color:#26221e;font:16px system-ui}
     form{position:fixed;left:50%;bottom:34px;width:min(760px,calc(100vw - 48px));transform:translateX(-50%);padding:18px;background:white;border:1px solid #d8d0c4;border-radius:18px}
-    textarea{display:block;width:100%;min-height:180px;box-sizing:border-box;border:0;outline:none;resize:none;font:14px/1.5 system-ui}
+    textarea,.ql-editor{display:block;width:100%;min-height:180px;box-sizing:border-box;border:0;outline:none;resize:none;font:14px/1.5 system-ui;white-space:pre-wrap}
     button{margin-top:10px;padding:9px 16px}
   </style>
 </head>
 <body>
   <form data-testid="composer">
-    <textarea aria-label="Message Claude"></textarea>
+    ${GEMINI_DESTINATION_SMOKE ? '<div class="text-input-field"><rich-textarea><div id="gemini-editor" class="ql-editor" role="textbox" aria-label="Enter a prompt for Gemini" contenteditable="false" aria-disabled="true"></div></rich-textarea></div>' : '<textarea aria-label="Message Claude"></textarea>'}
     <button id="send-button" type="button">Send</button>
   </form>
   <script>
     window.__capContextSmokeSendClicks = 0;
-    if (${process.env.CAP_CONTEXT_DRAFT_TRANSFER_SMOKE === "1"}) document.querySelector("textarea").value = "My existing draft";
+    if (${GEMINI_DESTINATION_SMOKE}) {
+      // Model Gemini mounting/restoring its native editor only after activation.
+      // This keeps the fixture cold while preparation runs in a background tab.
+      const mountGeminiComposer = () => {
+        // CDP attachment can report "hidden" for an active tab. Use real focus
+        // here and verify native tab/window activation separately after paste.
+        if (!document.hasFocus() || window.__capGeminiMountStarted) return;
+        window.__capGeminiMountStarted = true;
+        setTimeout(() => {
+          const old = document.getElementById("gemini-editor"), editor = old.cloneNode(false);
+          editor.contentEditable = "true"; editor.removeAttribute("aria-disabled");
+          if (${process.env.CAP_CONTEXT_DRAFT_TRANSFER_SMOKE === "1"}) editor.textContent = "My existing draft";
+          old.replaceWith(editor);
+          window.__capGeminiComposerReady = true;
+        }, 120);
+      };
+      document.addEventListener("visibilitychange", mountGeminiComposer);
+      window.addEventListener("focus", mountGeminiComposer);
+      document.addEventListener("input", event => {
+        if (event.target.id === "gemini-editor") window.__capGeminiPasteWasFocused = document.hasFocus();
+      });
+      mountGeminiComposer();
+    } else if (${process.env.CAP_CONTEXT_DRAFT_TRANSFER_SMOKE === "1"}) document.querySelector("textarea").value = "My existing draft";
     window.__capContextSmokeStatusHistory = [];
     window.__capContextSmokeBodyReplaced = false;
     window.__capContextSmokeCueMounts = 0;
@@ -2780,13 +2803,19 @@ async function run() {
       assert.equal((await getTargets(devToolsPort)).filter(target => target.type === "page").length, beforePickerTabs, "Picker capture must not open a destination tab.");
       process.stdout.write(`✓ ${TOOLBAR_SMOKE ? "Toolbar handler" : "Orb click"} captured JSON before selection, with no summary, destination tab or transfer telemetry.\n`);
     }
+    if (GEMINI_DESTINATION_SMOKE) {
+      // A forced-visible source can prevent Chromium from delivering native
+      // visibility changes to Gemini even after tabs.update activates it.
+      await sourceSession.call("Emulation.setFocusEmulationEnabled", { enabled: false });
+      await sourceSession.call("Page.bringToFront");
+    }
     const clickResult = await sourceSession.evaluate(String.raw`(() => {
       const bubble = document.getElementById("context-generator-bubble");
       if (!${JSON_CAPTURE_SMOKE}) bubble.click();
       const sheet = document.getElementById("context-generator-destination-sheet");
       const backdrop = document.getElementById("context-generator-destination-backdrop");
       const tiles = [...document.querySelectorAll(".context-generator-destination-tile")];
-      const claudeTile = tiles.find((tile) => tile.textContent.includes(${JSON.stringify(JSON_SOURCE === "claude" ? "ChatGPT" : "Claude")}));
+      const claudeTile = tiles.find((tile) => tile.textContent.includes(${JSON.stringify(GEMINI_DESTINATION_SMOKE ? "Gemini" : JSON_SOURCE === "claude" ? "ChatGPT" : "Claude")}));
       if (!claudeTile) return { ok: false, destinations: tiles.map((tile) => tile.textContent.trim()) };
       // Earlier keyboard/resize checks can leave this tile active. Establish
       // idle explicitly so hover coverage compares two distinct visual states.
@@ -3041,7 +3070,14 @@ async function run() {
             destinationSessions.set(target.id, candidateSession);
             await candidateSession.call("Runtime.enable");
           }
-          const value = await candidateSession.evaluate('document.querySelector("textarea")?.value || ""');
+          const value = await candidateSession.evaluate(`(() => {
+            const editor = document.getElementById("gemini-editor");
+            // Chromium represents contenteditable line breaks with blocks.
+            // Allow only paragraph-spacing/trailing-newline differences; every
+            // other character must still match the complete stub summary.
+            return editor ? editor.innerText.replace(/\\r\\n?/g, "\\n").replace(/\\n{3,}/g, "\\n\\n").trimEnd()
+              : document.querySelector("textarea")?.value || "";
+          })()`);
           if (value === SUMMARY_TEXT) return { session: candidateSession, value };
         } catch {
           // A recovery tab can still be navigating; retry it on the next poll.
@@ -3059,6 +3095,12 @@ async function run() {
     const sendClicks = await destinationSession.evaluate("window.__capContextSmokeSendClicks");
     assert.equal(sendClicks, 0, "The extension must never press the destination Send button.");
     assert.equal(state.summaryRequests.length, 1, "The extension must send exactly one summary request per transfer.");
+    if (GEMINI_DESTINATION_SMOKE) {
+      assert.equal(await destinationSession.evaluate("window.__capGeminiComposerReady"), true);
+      assert.equal(await destinationSession.evaluate("window.__capGeminiPasteWasFocused"), true, "Gemini must receive focus before insertion.");
+      assert.equal(state.destinationRequests, 1, "Reuse the prepared Gemini tab without another destination.");
+      process.stdout.write("✓ Gemini mounted its native composer after activation; one exact paste, one destination, no Send.\n");
+    }
     process.stdout.write("✓ The exact summary was pasted and Send remained untouched.\n");
     const statusHistory = await waitFor(async () => {
       const history = await destinationSession.evaluate("window.__capContextSmokeStatusHistory");
@@ -3078,13 +3120,17 @@ async function run() {
         const tabs = await chrome.tabs.query({});
         const source = tabs.find(tab => tab.url === ${JSON.stringify(currentSourceUrl)});
         const destination = tabs.find(tab => tab.url?.startsWith(${JSON.stringify(`${origin}/destination`)}));
-        return { source, destination };
+        return { source, destination, destinationWindowFocused: destination && (await chrome.windows.get(destination.windowId)).focused };
       })()`);
     } finally { workerSession.close(); }
     assert.ok(tabPlacement.source && tabPlacement.destination, "Both transfer tabs must be found at their current routes.");
     assert.equal(tabPlacement.destination.windowId, tabPlacement.source.windowId);
     assert.equal(tabPlacement.destination.index, tabPlacement.source.index + 1);
     assert.equal(tabPlacement.destination.openerTabId, tabPlacement.source.id);
+    if (GEMINI_DESTINATION_SMOKE) {
+      assert.equal(tabPlacement.destination.active, true, "Gemini's native tab must be active.");
+      assert.equal(tabPlacement.destinationWindowFocused, true, "Gemini's native window must be focused.");
+    }
     process.stdout.write("✓ Destination opens beside its source, stays in that window, and shows pending/ready cues.\n");
     const summaryContext = state.summaryRequests[0].telemetry;
     await waitFor(() => state.telemetryRequests.some(payload => payload.attempt_id === summaryContext.attempt_id
@@ -3202,6 +3248,18 @@ async function run() {
     }
     process.stdout.write("Cap Context Brave extension smoke passed.\n");
   } catch (error) {
+    if (GEMINI_DESTINATION_SMOKE) {
+      const terminal = state.telemetryRequests.findLast(payload => payload.status !== "started");
+      error.message += `\nGemini transfer result: ${JSON.stringify({ status: terminal?.status, reason: terminal?.failure_reason,
+        code: terminal?.diagnostics?.error_code, paste: terminal?.diagnostics?.paste_events, delivery: terminal?.diagnostics?.delivery_events })}`;
+      for (const [id, session] of destinationSessions) {
+        try { error.message += `\nGemini page ${id}: ${JSON.stringify(await session.evaluate(`({
+          visibility: document.visibilityState, focused: document.hasFocus(), ready: window.__capGeminiComposerReady,
+          mounting: window.__capGeminiMountStarted, text: document.getElementById("gemini-editor")?.innerText.slice(0, 1500),
+          editor: document.getElementById("gemini-editor")?.outerHTML.slice(0, 1500)
+        })`))}`; } catch { /* Keep the actual test failure if the page closed. */ }
+      }
+    }
     if (sourceSession) {
       try {
         error.message += `\nSource diagnostics: ${JSON.stringify(await sourceSession.evaluate(`({
