@@ -7,6 +7,10 @@
 - Keep work lean: inspect the relevant files, use focused checks and avoid unrelated changes. Preserve other work already present in the checkout.
 - Ask the owner before making a major design decision, such as adding/removing database tables or columns, changing the architecture, or replacing an existing approach. Explain the proposed change simply and wait for approval. Routine work within an already approved decision can proceed.
 
+## Communication
+
+- When the owner explicitly asks for a simple answer, keep it short, use everyday words and make it clear on the first read. Include only the details needed to answer the question. For a bug, plainly explain what went wrong and how it was fixed. Use technical terms only when helpful, with a brief plain-language explanation. Match this level: "We counted the welcome text as a message, so pasting stopped. We fixed it by ignoring the welcome screen." Apply this extra-simple style only when requested; otherwise use the detail the task needs.
+
 ## Documentation
 
 - `LOGIC.md` is the source of truth for current production architecture and behavior. Update it after meaningful behavior changes and remove descriptions of dead, replaced or disabled behavior.
