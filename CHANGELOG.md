@@ -2,9 +2,15 @@
 
 A short history of decisions and regressions that matter when changing the code. Read the relevant section of [LOGIC.md](LOGIC.md) for current behavior, ownership and checks; use this file when you need to understand why an approach changed. Entries describe source changes unless deployment is explicitly recorded. Extension packaging, Web Store publication and backend deployment are separate.
 
+## 2026-10-25
+
+- **Land the direct handoff animation with current retry behavior.** Preserve the newer JSON retry cooldown while integrating the fast local-transfer sweeps. Advance the combined content script to v178 so already-loaded page instances are replaced.
+
 ## 2026-10-24
 
 - **Wait and retry temporary chat-reading failures before scraping.** By owner request, include HTTP 429 and temporary overload (529) in the shared source JSON retry policy. Wait 2 seconds before the existing single fresh retry, retaining source identity, cancellation and the transfer deadline. If that retry also fails temporarily, all five platforms may use normal DOM capture once, including ChatGPT; skip the count-only native probe after exhaustion so the failing provider does not receive an immediate third read. Hard size/content/access failures keep their existing rules. Preserve the same attempt, prepared tab, summary and bounded two-attempt diagnosis. Advance the content script to v177. Added real cooldown, attachment-429, cancellation-during-wait and exhausted-retry regressions; the existing DeepSeek browser/CI fixture now rejects its first native history request with 429 before verifying delayed recovery and exact file/paste behavior.
+
+- **Animate fast transfers before switching tabs.** A local carry could mark capture and preparation complete before the handoff painted, cancelling its capture cue. Keep the short capture sweep, then a 180 ms preparation sweep, while destination setup continues. Hidden/reduced-motion views skip the cues, and cancelled or replaced attempts cannot update the card later. Add one installed-Brave regression check that samples the real direct transfer's rendered bars in order, retaining exact text, zero AI requests and no Send click.
 
 - **Audit DOM notice integration before landing.** Keep the newer DeepSeek login ownership and source-reload reporting fixes while integrating DOM estimates. Advance the combined DeepSeek MAIN/bridge to v28 so an already-loaded v27 session hook is replaced, and give every signed-in DeepSeek browser fixture matching fake login storage. Preserve strict destination Escape cancellation checks and record received native key events on failure for diagnosis. Notice wording, styles and backend budgets remain unchanged.
 

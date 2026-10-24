@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-24-json-retry-backoff-v177";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-25-direct-handoff-retry-v178";
   const SOURCE_JSON_RETRY_DELAY_MS = 2000;
   const INLINE_PILL_SIZE = 36;
   const ownedUiStyleSheets = new Map();
@@ -216,6 +216,7 @@
   ];
   const HANDOFF_CAPTURE_LINE_MIN = 0.04;
   const HANDOFF_CAPTURE_CUE_MS = 400;
+  const HANDOFF_DIRECT_READY_CUE_MS = 180;
   const HANDOFF_CAPTURE_LINE_MAX = 0.94;
   const HANDOFF_ACTIVITY_LINE_START = 0.05;
   const HANDOFF_ACTIVITY_LINE_MAX = 0.9;
@@ -1059,11 +1060,16 @@
       // cannot replace the real paste cue or focus the tab after delivery.
       checkTransferDeadline(transferTrace);
       markTransferTrace(transferTrace, "summary available", { chars: summary.length });
-      setHandoffProgress("summary", "done");
+      // Local carries can finish before the overlay's first paint. Present their
+      // two quick sweeps while destination preparation continues in parallel.
+      const directHandoffPresentation = conversationText.length < MIN_BACKEND_CONVERSATION_CHARS
+        ? completeDirectHandoffPresentation(transferTrace) : null;
+      if (!directHandoffPresentation) setHandoffProgress("summary", "done");
       await earlyReveal.wait();
       checkTransferDeadline(transferTrace);
       transferStage = "destination";
       const preparedDestination = destinationPrepPromise ? await destinationPrepPromise : null;
+      await directHandoffPresentation;
       checkTransferDeadline(transferTrace);
       markTransferTrace(transferTrace, "tab open done", {
         tabId: preparedDestination?.tabId || null,
@@ -1181,7 +1187,7 @@
     let summary;
     let timing;
     // Route on the captured String.length before JSON escaping or trimming.
-    // Direct carries need neither a summary-worker request nor cosmetic waits.
+    // Local processing is synchronous; its brief handoff cues run separately.
     if (conversationText.length < MIN_BACKEND_CONVERSATION_CHARS || conversationText.length > MAX_BACKEND_CONVERSATION_CHARS) {
       ({ summary, timing } = createLocalContextCarry(conversationText));
     } else {
@@ -9125,6 +9131,27 @@
     if (!skipMotion) await delay(durationMs);
   }
 
+  async function completeDirectHandoffPresentation(trace) {
+    const canPresent = () => instanceActive && activeTransferTrace === trace && !trace.cancelled
+      && isHandoffOverlayVisible() && document.visibilityState !== "hidden"
+      && !window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
+    if (!canPresent()) return;
+    clearTimeout(handoffStageAdvanceTimer);
+    handoffStageAdvanceTimer = null;
+    await waitForHandoffPaint();
+    if (!canPresent()) return;
+    if (handoffCapturePresentation) {
+      const paintedAt = handoffCapturePresentation.paintedAt ?? getNow();
+      await completeHandoffStageLine("capture", Math.max(0, HANDOFF_CAPTURE_CUE_MS - (getNow() - paintedAt)));
+      if (!canPresent()) return;
+      handoffCapturePresentation = null;
+    }
+    setHandoffProgress("summary", "active");
+    stopHandoffActivityProgress();
+    await completeHandoffStageLine("summary", HANDOFF_DIRECT_READY_CUE_MS);
+    if (canPresent()) setHandoffProgress("summary", "done");
+  }
+
   async function completeHandoffForDestinationReveal(trace = null, pasteCompleted = false) {
     markTransferTrace(trace, "handoff finish start");
     stopHandoffActivityProgress();
@@ -9133,6 +9160,11 @@
     await completeHandoffStageLine("summary", 0);
 
     setHandoffProgress("paste", pasteCompleted ? "done" : "active");
+    await waitForHandoffPaint();
+    markTransferTrace(trace, "handoff finish done");
+  }
+
+  async function waitForHandoffPaint() {
     // Background tabs can suspend animation frames indefinitely. A painted tick
     // is cosmetic: never let it hold destination activation or receipt saving.
     const reducedMotion = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
@@ -9156,7 +9188,6 @@
         });
       });
     }
-    markTransferTrace(trace, "handoff finish done");
   }
 
   function startHandoffCountdown(durationMs, onNearEnd = null) {
