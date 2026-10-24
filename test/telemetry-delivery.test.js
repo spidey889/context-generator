@@ -557,9 +557,11 @@ for (const scenario of [
   const proof = "d".repeat(64);
   const incoming = event(501, { status: scenario.terminal ? "succeeded" : "started",
     lastStage: scenario.terminal ? "completed" : scenario.signed ? "summary_completed" : "capture_completed" });
-  const entries = Array.from({ length: 500 }, (_, i) => ({ deliveryId: id(i + 10000), queuedAt: NOW,
-    payload: payload(i + 1, scenario.terminals ? { status: "succeeded", last_stage: "completed" } : {}) }));
-  const shared = profile({ [OUTBOX]: entries,
+  // Match persisted field order so the single-write guard observes the append,
+  // rather than a preliminary serialization cleanup.
+  const entries = Array.from({ length: 500 }, (_, i) => ({ deliveryId: id(i + 10000),
+    payload: payload(i + 1, scenario.terminals ? { status: "succeeded", last_stage: "completed" } : {}), queuedAt: NOW }));
+  const shared = profile({
     [DIAGNOSTICS]: { counts: {}, recent: [], retry: { failures: 1, nextAttemptAt: NOW + 60000, kind: "retry" } }
   }, scenario.signed ? { [ACTIVE]: { [id(501)]: {
     event: event(501), tabId: 42, expiresAt: NOW + 300000, summary_proof: proof,
@@ -567,6 +569,9 @@ for (const scenario of [
   } } } : {});
   const background = worker(async () => { throw new Error("offline"); }, shared);
   await background.settled();
+  // Seed after startup: this fixture owns append atomicity. The preceding
+  // queue-bounds test covers restoring full queues, including 601 terminals.
+  shared.local[OUTBOX] = entries;
   // Simulate storage becoming unavailable after its first outbox commit.
   // A post-write cleanup cannot repair an already oversized durable snapshot.
   background.evaluate(`globalThis.outboxWriteSizes = []; const originalSet = chrome.storage.local.set;
@@ -578,7 +583,8 @@ for (const scenario of [
       }
       return originalSet(entries);
     };`);
-  assert.equal((await background.ack(incoming)).ok, true);
+  const acknowledgement = await background.ack(incoming);
+  assert.equal(acknowledgement.ok, true, JSON.stringify(acknowledgement));
   await background.settled();
   assert.deepEqual(Array.from(background.evaluate("outboxWriteSizes")), [500]);
   assert.equal(shared.local[OUTBOX].length, 500);

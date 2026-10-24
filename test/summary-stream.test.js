@@ -9,13 +9,17 @@ const { createSummaryWithFallback, getSummaryProfile } = handler.__test;
 const encoder = new TextEncoder();
 const frame = data => `data: ${JSON.stringify(data)}\r\n\r\n`;
 const chatChunk = (text, finish_reason = null) => ({ choices: [{ index: 0, delta: { content: text }, finish_reason }] });
-function responseFrom(text) {
+function responseFrom(text, chunkBytes = null) {
+  const headers = { "content-type": "text/event-stream" };
+  // Only the decoder boundary matrix needs three-byte transport chunks.
+  // Thinking-tag tests still split tags across distinct provider delta frames.
+  if (chunkBytes === null) return new Response(text, { headers });
   const bytes = encoder.encode(text);
   return new Response(new ReadableStream({ start(controller) {
     // Split inside Unicode, CRLF and JSON tokens, rather than one event per read.
-    for (let i = 0; i < bytes.length; i += 3) controller.enqueue(bytes.slice(i, i + 3));
+    for (let i = 0; i < bytes.length; i += chunkBytes) controller.enqueue(bytes.slice(i, i + chunkBytes));
     controller.close();
-  } }), { headers: { "content-type": "text/event-stream" } });
+  } }), { headers });
 }
 function configure(t) {
   const values = { OPENROUTER_ENABLED: "true", OPENROUTER_DOTS_ENABLED: "true",
@@ -42,10 +46,12 @@ function answerStream(provider, text = "Preserve the agreed project plan.") {
     : frame(chatChunk(text, "stop")) + "data: [DONE]\n\n";
 }
 
+// These no-retry deadlines align to whole seconds. Retry and overdue-timer
+// regressions below retain their fine clock steps and elapsed-time checks.
 for (const provider of ["tokenharbor", "openrouter", "gemini", "mistral"]) {
   const firstAnswerMs = provider === "tokenharbor" ? 45000 : 30000;
   for (const phase of ["headers", "body", "json body"]) {
-    clockTest(`${provider} switches after ${firstAnswerMs / 1000} seconds without answer text in ${phase}`, { tickMs: 100 }, async t => {
+    clockTest(`${provider} switches after ${firstAnswerMs / 1000} seconds without answer text in ${phase}`, { tickMs: 1000 }, async t => {
       configure(t);
       const requests = [], deltas = [];
       global.fetch = async (url, options) => {
@@ -79,7 +85,7 @@ for (const provider of ["tokenharbor", "openrouter", "gemini", "mistral"]) {
     });
   }
 
-  clockTest(`${provider} keeps its completion budget after an answer starts and clears the silence timer`, { tickMs: 100 }, async t => {
+  clockTest(`${provider} keeps its completion budget after an answer starts and clears the silence timer`, { tickMs: 1000 }, async t => {
     configure(t);
     let requests = 0, signal;
     const startedAt = Date.now();
@@ -107,7 +113,7 @@ for (const provider of ["tokenharbor", "openrouter", "gemini", "mistral"]) {
   });
 }
 
-clockTest("silent OpenRouter advances at 30s, then DeepSeek gets its own 45s before Gemini", { tickMs: 100, maxElapsedMs: 90000 }, async t => {
+clockTest("silent OpenRouter advances at 30s, then DeepSeek gets its own 45s before Gemini", { tickMs: 1000, maxElapsedMs: 90000 }, async t => {
   configure(t);
   const requests = [];
   const startedAt = Date.now();
@@ -182,7 +188,7 @@ test("all provider routes stream one request, preserving Unicode, usage and answ
           + frame({ candidates: [{ index: 0, content: { parts: [{ text: "Continue the agreed work." }] }, finishReason: "STOP" }], usageMetadata: { promptTokenCount: 50, candidatesTokenCount: 12, thoughtsTokenCount: 3, totalTokenCount: 65 } })
         : ": processing\r\n\r\n" + frame({ choices: [{ index: 0, delta: { reasoning: "HIDDEN_THINKING" } }] })
           + frame(chatChunk("Preserve résumé 🧠. ")) + frame(chatChunk("Continue the agreed work.", "stop"))
-          + frame({ choices: [], usage: { prompt_tokens: 50, completion_tokens: 12, total_tokens: 62 } }) + "data: [DONE]\r\n\r\n");
+          + frame({ choices: [], usage: { prompt_tokens: 50, completion_tokens: 12, total_tokens: 62 } }) + "data: [DONE]\r\n\r\n", 3);
     };
     const result = await createSummaryWithFallback({ conversation, profile: getSummaryProfile(conversation),
       openrouterApiKey: provider === "openrouter" ? "test" : undefined,

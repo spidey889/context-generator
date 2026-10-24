@@ -66,7 +66,10 @@ test("provider failures log fixed metadata without reflecting arbitrary upstream
 test("normalizes summary into the required Context Carry shape", () => {
   const raw = [
     "```markdown",
-    makeContextCarrySummary("normalize", 90).replace("CONTEXT CARRY - READY TO PASTE",
+    makeContextCarrySummary("normalize", 90)
+      .replace('Reply only: "Context loaded. Let\'s pick up right where you left off." Then wait for the user.',
+        "Continue from the transferred context.")
+      .replace("CONTEXT CARRY - READY TO PASTE",
       "╔══════════════════════════════════════════╗\n║ CONTEXT CARRY — READY TO PASTE ║\n╚══════════════════════════════════════════╝"),
     "---",
     "PASTE THIS AT THE TOP OF YOUR NEW CHAT",
@@ -83,8 +86,9 @@ test("normalizes summary into the required Context Carry shape", () => {
   assert.doesNotMatch(normalized, /PASTE THIS AT THE TOP|Then write: Continue/i);
   assert.match(
     normalized,
-    /Reply only: "Context loaded\. Let's pick up right where you left off\." Then wait for the user\./
+    /Reply only: "Context loaded\. Let's pick up right where you left off\." Then wait for the user\.$/
   );
+  assert.doesNotMatch(normalized, /Continue from the transferred context/);
 });
 
 test("Gemini budgets switch at exact profile boundaries", () => {
@@ -682,20 +686,6 @@ test("validator canonicalizes numbered provider headings without weakening secti
   const normalized = normalizeContextCarrySummary(numbered);
   assert.doesNotMatch(normalized, /^\d+[.)]\s+/m);
   headings.forEach((heading) => assert.match(normalized, new RegExp(`(?:^|\\n)[^\\n]*${heading}\\n`)));
-});
-
-test("normalizer safely replaces provider-written NEXT STEP wording", () => {
-  const profile = getSummaryProfile("x".repeat(4000));
-  const providerWording = makeContextCarrySummary("provider wording", 90).replace(
-    'Reply only: "Context loaded. Let\'s pick up right where you left off." Then wait for the user.',
-    "Continue from the transferred context."
-  );
-
-  assert.equal(validateContextCarrySummary(providerWording, profile).ok, true);
-  assert.match(
-    normalizeContextCarrySummary(providerWording),
-    /Reply only: "Context loaded\. Let's pick up right where you left off\." Then wait for the user\.$/
-  );
 });
 
 test("backend sends generated summaries to native Gemini first and records Gemini usage", async () => {

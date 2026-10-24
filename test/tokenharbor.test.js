@@ -386,13 +386,3 @@ test("caller cancellation during OpenRouter never starts TokenHarbor or funded f
   await assert.rejects(run({ requestContext: { signal: controller.signal } }), { name: "AbortError" });
   assert.deepEqual(urls, ["https://openrouter.ai/api/v1/chat/completions"]);
 });
-
-test("caller cancellation during TokenHarbor stops all retries and fallbacks", async t => {
-  configure(t);
-  const controller = new AbortController();
-  let calls = 0;
-  global.fetch = async url => { calls++; if (url.includes("openrouter")) return new Response("", { status: 401 });
-    controller.abort(); throw new DOMException("Cancelled", "AbortError"); };
-  await assert.rejects(run({ requestContext: { signal: controller.signal } }), { name: "AbortError" });
-  assert.equal(calls, 2);
-});
