@@ -1,5 +1,6 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-24-dom-notice-ui-v176";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-24-json-retry-backoff-v177";
+  const SOURCE_JSON_RETRY_DELAY_MS = 2000;
   const INLINE_PILL_SIZE = 36;
   const ownedUiStyleSheets = new Map();
   let handoffUserCss = "";
@@ -7706,7 +7707,9 @@
   }
 
   function startDomCaptureSizeCheck(trace) {
-    if (!trace || trace.domSizeCheck || !hasSavedSourceConversation()) return;
+    // Two native reads just failed temporarily; do not send a third count-only
+    // request to the same provider while switching to page capture.
+    if (!trace || trace.domSizeCheck || trace.sourceJsonRetryExhausted || !hasSavedSourceConversation()) return;
     const state = { active: true, error: null, controller: new AbortController() };
     trace.domSizeCheck = state;
     const sourceUrl = window.location.href;
@@ -7838,7 +7841,7 @@
       || isExtensionContextInvalidated(error)) return false;
     // Attachment readers can classify a temporary HTTP failure as incomplete;
     // only its explicit retryable status overrides that broad category.
-    if (Number.isInteger(status) && status >= 400) return [408, 500, 502, 503, 504].includes(status);
+    if (Number.isInteger(status) && status >= 400) return [408, 429, 500, 502, 503, 504, 529].includes(status);
     return error.captureFailureReason !== "incomplete" && (error.captureFailureReason === "timeout"
       || ["network_error", "busy", "hook_unavailable", "auth_missing", "routing_unavailable"].includes(detail));
   }
@@ -7891,9 +7894,17 @@
       }
       updateTransferDiagnostics(trace, { last_operation: "capture_json" }, "capture_json");
       markTransferTrace(trace, "retrying JSON capture");
-      // One fresh read at selection, including a failed picker prefetch. Keep
-      // the retry outside the catch so its failure uses normal recovery once.
-      return read("retry");
+      // Give rate limits and temporary provider failures time to clear. Keep
+      // this within the same deadline and recheck the original chat after it.
+      await delay(Math.min(SOURCE_JSON_RETRY_DELAY_MS, Math.max(0, (trace?.deadlineAt || Infinity) - Date.now())));
+      checkTransferDeadline(trace);
+      // One fresh read at selection, including a failed picker prefetch. Its
+      // failure leaves this block for normal recovery; never retry in a loop.
+      try { return await read("retry"); }
+      catch (retryError) {
+        if (trace && shouldRetrySourceJson(retryError)) trace.sourceJsonRetryExhausted = true;
+        throw retryError;
+      }
     }
   }
 
@@ -7984,9 +7995,9 @@
             error.message = getCaptureSizeLimitMessage(error);
             throw error;
           }
-          // Best-effort plain-text capture returns with a warning above. Actual
-          // ChatGPT JSON failures retain their existing active-reply exception.
-          if (useChatGptJson && !isSourceReplyInProgress()) throw error;
+          // Exhausted temporary provider failures may use normal page capture
+          // on every platform. Other ChatGPT failures retain the reply exception.
+          if (useChatGptJson && !trace.sourceJsonRetryExhausted && !isSourceReplyInProgress()) throw error;
           if (trace?.diagnostics) { for (const key of ["error_code", "error_origin", "failure_site", "error_type", "error_file", "error_line", "error_column"]) delete trace.diagnostics[key]; }
           // Recovery stays within this attempt and reuses its destination.
           showFastCaptureFallbackMessage();

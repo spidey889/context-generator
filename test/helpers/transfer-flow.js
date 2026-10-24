@@ -12,6 +12,7 @@ function sliceBetween(startMarker, endMarker) {
 }
 const code = new vm.Script(
   source.match(/  const OVERSIZED_CONVERSATION_ERROR_MESSAGE = .+;/)[0] + "\n"
+  + source.match(/  const SOURCE_JSON_RETRY_DELAY_MS = .+;/)[0] + "\n"
   + source.match(/  const DOM_CAPTURE_MIN_ALLOWANCE_MS = .+;/)[0] + "\n"
   + source.match(/  const DOM_CAPTURE_MAX_ALLOWANCE_MS = .+;/)[0] + "\n"
   + sliceBetween("  function updateTransferDiagnostics(", "  function markCaptureDone(")

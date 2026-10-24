@@ -4,18 +4,20 @@ const path = require("node:path");
 const test = require("node:test");
 const vm = require("node:vm");
 const { loadTransferFlow } = require("./helpers/transfer-flow");
+const { clockTest } = require("./helpers/clock");
 
 const source = fs.readFileSync(path.join(__dirname, "../extension/platform-content.js"), "utf8");
 
 // Exercise the actual picker orchestrator; substitute only its UI, capture and
 // transfer boundaries to count side effects without native timers or a browser.
 function harness(platform, { mode = "failure", enabled = true, domFails = false, prepareFails = false, failureReason } = {}) {
-  const calls = { json: 0, prepare: 0, dom: 0, notice: 0, handoff: 0, destination: 0, flows: [], errors: [], traces: [], traceDetails: [], captureMetrics: [], finished: [] };
+  const calls = { json: 0, prepare: 0, dom: 0, notice: 0, handoff: 0, destination: 0, waits: [], flows: [], errors: [], traces: [], traceDetails: [], captureMetrics: [], finished: [] };
   const prepared = Promise.resolve({ tabId: 42 });
   const pathname = { claude: "/chat/source", chatgpt: "/c/source", gemini: "/app/source", grok: "/c/source", deepseek: "/a/chat/s/source" }[platform];
   const location = { href: `https://example.test${pathname}`, pathname };
   const navigationListeners = new Set();
   const context = loadTransferFlow({
+    Date, delay: async ms => { calls.waits.push(ms); },
     window: { location, navigation: {
       addEventListener: (_type, listener) => navigationListeners.add(listener),
       removeEventListener: (_type, listener) => navigationListeners.delete(listener)
@@ -548,12 +550,63 @@ test("all five platforms recover a failed picker prefetch silently with one JSON
   }
 });
 
+clockTest("temporary provider failures wait before retrying JSON", async () => {
+  const { context, calls } = harness("deepseek", { mode: "success" });
+  const capture = context.window.__capCaptureNetworkJson;
+  const requestedAt = [];
+  context.delay = ms => new Promise(resolve => setTimeout(resolve, ms));
+  context.window.__capCaptureNetworkJson = async () => {
+    requestedAt.push(Date.now());
+    if (!calls.json) { calls.json++; throw transientError("incomplete", "attachment_failed", 429); }
+    return capture();
+  };
+  await context.start("claude");
+  assert.equal(requestedAt.length, 2);
+  assert.ok(requestedAt[1] - requestedAt[0] >= 2000, "the provider needs a real cooldown before another native read");
+  assert.equal(calls.dom, 0);
+});
+
+test("all five platforms scrape after one cooled-down 429 retry, without a third native size probe", async () => {
+  for (const platform of ["claude", "chatgpt", "gemini", "grok", "deepseek"]) {
+    const { context, calls } = harness(platform);
+    let probes = 0;
+    context.window[captureKeyFor(platform)] = async () => { calls.json++; throw transientError("incomplete", "attachment_failed", 429); };
+    const measurementKey = platform === "claude" ? "__capMeasureClaudeJson" : platform === "chatgpt" ? "__capMeasureChatGptJson" : "__capMeasureNetworkJson";
+    context.window[measurementKey] = async () => { probes++; return { characterCount: 10 }; };
+    context.prepareSourceForCapture = async () => { calls.prepare++; context.startDomCaptureSizeCheck(context.activeTransferTrace); };
+    await context.start("claude");
+    assert.equal(calls.json, 2);
+    assert.deepEqual(calls.waits, [2000]);
+    assert.equal(calls.dom, 1);
+    assert.equal(probes, 0, "an exhausted provider must not immediately receive another background JSON request");
+    assert.equal(calls.destination, 1);
+    assert.equal(calls.flows[0].text, "DOM transcript");
+  }
+});
+
+test("navigation or cancellation during retry cooldown never starts another native read", async () => {
+  for (const stop of ["navigation", "cancelled", "expired"]) {
+    const { context, calls, navigate } = harness("deepseek");
+    const waiting = deferred(), release = deferred();
+    context.window.__capCaptureNetworkJson = async () => { calls.json++; throw transientError(); };
+    context.delay = async () => { waiting.resolve(); await release.promise; };
+    const transfer = context.start("claude");
+    await waiting.promise;
+    if (stop === "navigation") { navigate("/a/chat/s/other"); navigate("/a/chat/s/source"); }
+    else context.activeTransferTrace[stop] = true;
+    release.resolve();
+    await transfer;
+    assert.equal(calls.json, 1);
+    assert.equal(calls.dom + calls.flows.length, 0);
+  }
+});
+
 test("temporary failure categories get one fresh JSON retry", async () => {
   // Classification is shared; test each category once rather than multiplying
   // it by every platform and prefetch mode. Platform wiring is covered above.
   const errors = [transientError(), transientError("timeout", "timeout"), transientError("incomplete", "attachment_failed", 503),
     ...["busy", "hook_unavailable", "auth_missing", "routing_unavailable"].map(detail => transientError("unavailable", detail)),
-    ...[408, 500, 502, 503, 504].map(status => transientError("request_failed", "http_error", status))];
+    ...[408, 429, 500, 502, 503, 504, 529].map(status => transientError("request_failed", "http_error", status))];
   for (const error of errors) await recoverJsonOnce("chatgpt", error);
 });
 
@@ -562,7 +615,7 @@ test("hard and unknown failures are not retried, including a cached Claude size 
     transientError("incomplete", "incomplete_history"), transientError("unsupported", "unsupported_content"),
     transientError("request_failed", "invalid_json"), transientError("incomplete", "partial_response", 206),
     transientError("request_failed", "network_error", 413), transientError("request_failed", "other"),
-    ...[400, 401, 403, 404, 429, 501, 505].map(status => transientError("request_failed", "http_error", status)),
+    ...[400, 401, 403, 404, 501, 505].map(status => transientError("request_failed", "http_error", status)),
     Object.assign(transientError("timeout", "timeout"), { diagnosticCode: "conversation_too_large" })];
   const cases = errors.map(error => ["chatgpt", false, error]);
   cases.push(["claude", true, transientError("incomplete", "size_limit")]);
@@ -590,7 +643,7 @@ test("a failed JSON retry stops or falls back once, retaining its final cause", 
     await context.start("claude");
     assert.equal(calls.json, 2, "Never loop or retry a failed retry.");
     assert.equal(calls.destination, 1);
-    const stops = secondHard || platform === "chatgpt";
+    const stops = secondHard;
     assert.equal(calls.dom, stops ? 0 : 1);
     assert.equal(calls.errors.length, stops ? 1 : 0);
     assert.equal(calls.flows.length, stops ? 0 : 1);
@@ -638,6 +691,8 @@ test("changing chats while the JSON retry is pending never transfers its returne
 
 test("a new user attempt gets its own JSON retry after both previous reads failed", async () => {
   const { context, calls } = harness("chatgpt", { mode: "success" });
+  const flow = context.runContextFlow;
+  context.runContextFlow = (...args) => { flow(...args); context.isRunning = false; };
   const capture = context.window.__capCaptureChatGptJson;
   context.window.__capCaptureChatGptJson = async () => {
     if (calls.json < 3) { calls.json++; throw transientError(); }
@@ -645,16 +700,17 @@ test("a new user attempt gets its own JSON retry after both previous reads faile
   };
   await context.start("claude");
   assert.equal(calls.json, 2);
-  assert.equal(calls.errors.length, 1);
-  assert.equal(calls.flows.length, 0);
+  assert.equal(calls.errors.length, 0);
+  assert.equal(calls.flows.length, 1);
+  assert.equal(calls.flows[0].text, "DOM transcript");
   assert.equal(context.isRunning, false);
   await context.start("claude");
   assert.equal(calls.json, 4);
-  assert.equal(calls.errors.length, 1, "The recovered second attempt must add no frontend error.");
-  assert.equal(calls.flows.length, 1);
-  assert.equal(calls.flows[0].text, "JSON transcript");
+  assert.equal(calls.errors.length, 0, "The recovered second attempt must add no frontend error.");
+  assert.equal(calls.flows.length, 2);
+  assert.equal(calls.flows[1].text, "JSON transcript");
   assert.equal(calls.destination, 2, "One destination per user-selected attempt.");
-  assert.equal(calls.dom + calls.notice, 0);
+  assert.equal(calls.dom + calls.notice, 2, "Only the first attempt needs page capture.");
 });
 
 test("navigation, cancellation or deadline expiry prevents a transient JSON retry", async () => {

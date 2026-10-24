@@ -50,6 +50,7 @@ const ERROR_SCREENSHOT_PATH = process.env.CAP_CONTEXT_ERROR_SCREENSHOT || "";
 const JSON_SOURCE = ["chatgpt", "gemini", "grok", "deepseek"].includes(process.env.CAP_CONTEXT_JSON_SMOKE) ? process.env.CAP_CONTEXT_JSON_SMOKE : process.env.CAP_CONTEXT_JSON_SMOKE === "1" ? "claude" : null;
 const NETWORK_SOURCE = ["gemini", "grok", "deepseek"].includes(JSON_SOURCE);
 const DEEPSEEK_SESSION_SMOKE = JSON_SOURCE === "deepseek" && process.env.CAP_CONTEXT_DEEPSEEK_SESSION_SMOKE === "1";
+const RATE_LIMIT_RETRY_SMOKE = JSON_SOURCE === "deepseek" && process.env.CAP_CONTEXT_RATE_LIMIT_RETRY_SMOKE === "1";
 const GROK_FILE_ONLY_SMOKE = JSON_SOURCE === "grok" && process.env.CAP_CONTEXT_NETWORK_FAILURE_SMOKE === "file-only";
 const DEEPSEEK_OVERSIZE_SMOKE = JSON_SOURCE === "deepseek" && process.env.CAP_CONTEXT_NETWORK_FAILURE_SMOKE === "oversize";
 const DEEPSEEK_TRANSCRIPT_OVERSIZE_SMOKE = JSON_SOURCE === "deepseek" && process.env.CAP_CONTEXT_NETWORK_FAILURE_SMOKE === "transcript-oversize";
@@ -818,6 +819,15 @@ async function startFixtureServer() {
     }
     if (NETWORK_SOURCE && ["/_/BardChatUi/data/batchexecute", "/rest/app-chat/conversations/smoke/response-node", "/rest/app-chat/conversations/smoke/load-responses", "/api/v0/chat/history_messages"].includes(url.pathname)) {
       state.jsonRequests++;
+      if (RATE_LIMIT_RETRY_SMOKE) {
+        if (!state.rateLimitRejectedAt) {
+          state.rateLimitRejectedAt = Date.now();
+          response.writeHead(429, { "Content-Type": "application/json" });
+          response.end("{}");
+          return;
+        }
+        state.rateLimitRetryAt ||= Date.now();
+      }
       if (JSON_SOURCE === "deepseek") response.setHeader("Set-Cookie", "cap_file_smoke=SOURCE_COOKIE_SENTINEL; Path=/; SameSite=Lax");
       response.writeHead(200, { "Content-Type": "application/json" });
       if (JSON_SOURCE === "gemini") {
@@ -2905,6 +2915,9 @@ async function run() {
         assert.equal(state.jsonRequests, jsonRequestsBeforeTransfer, "Offline prefetch must fail before reaching the fixture server.");
         assert.equal(await sourceSession.evaluate('Boolean(document.getElementById("context-generator-error-text"))'), false);
         await sourceSession.call("Network.emulateNetworkConditions", { offline: false, latency: 0, downloadThroughput: -1, uploadThroughput: -1 });
+      } else if (RATE_LIMIT_RETRY_SMOKE) {
+        assert.equal(await sourceSession.evaluate("window.__capSmokePickerJsonFailure()", extensionContextId), "http_error");
+        assert.equal(state.jsonRequests, jsonRequestsBeforeTransfer + 1, "The picker must not retry a rate limit before destination selection.");
       } else assert.ok(state.jsonRequests > jsonRequestsBeforeTransfer,
         `Opening the orb must start native JSON capture before selection (detail=${await sourceSession.evaluate("window.__capSmokePickerJsonFailure()", extensionContextId)}, code=${await sourceSession.evaluate("window.__capSmokePickerJsonErrorCode()", extensionContextId)}, missing=${await sourceSession.evaluate("window.__capSmokeMissingIdentifier()", extensionContextId)}).`);
       if (TOOLBAR_SMOKE) {
@@ -3156,7 +3169,11 @@ async function run() {
         }
         if (JSON_SOURCE === "grok") process.stdout.write("\u2713 Grok JSON: exact 48-turn transcript, original code/whitespace and zero attachment/tool leakage.\n");
       }
-      assert.equal(state.jsonRequests, jsonRequestsBeforeTransfer + (JSON_SOURCE === "gemini" ? 3 : JSON_SOURCE === "grok" ? 2 : 1), "Destination selection must reuse the orb's single full-history capture.");
+      assert.equal(state.jsonRequests, jsonRequestsBeforeTransfer + (JSON_SOURCE === "gemini" ? 3 : JSON_SOURCE === "grok" ? 2 : RATE_LIMIT_RETRY_SMOKE ? 2 : 1), "Destination selection must reuse capture or perform its one allowed JSON retry.");
+      if (RATE_LIMIT_RETRY_SMOKE) {
+        assert.ok(state.rateLimitRetryAt - state.rateLimitRejectedAt >= 2000, "A native 429 must cool down before the fresh history request.");
+        process.stdout.write("✓ Native 429 cooled down for at least two seconds, then one fresh JSON retry preserved exact capture and paste.\n");
+      }
       if (JSON_RETRY_SMOKE) {
         const recovered = await sourceSession.evaluate(`(() => {
           return { ...window.__capSmokeJsonRetryState(),
