@@ -467,6 +467,56 @@ test("compaction keeps a newer signed receipt paired with its authenticated vers
   assert.equal(await verifySummaryProof(received[0], signingKey), true);
 });
 
+test("worker delivery checkpoints survive without the source's final report", async () => {
+  for (const outcome of ["success", "failure"]) {
+    const delivered = [];
+    const background = worker(async (_url, options) => { delivered.push(JSON.parse(options.body)); return success(); });
+    await background.settled();
+    await background.ack(event(1, { destinationPlatform: "grok", lastStage: "paste_started", reportedModel: "local-direct" }));
+    await background.settled();
+    background.evaluate(`transferToDestinationObserved = (...args) => new Promise((resolve, reject) => {
+      const trace = args[7];
+      globalThis.finishFixtureDelivery = () => {
+        CapTransferDiagnostics.update(trace.diagnostics, { message_reply: "${outcome === "success" ? "ack_success" : "ack_failed"}",
+          ...( ${outcome === "success"} ? { paste_populated: true } : {}) });
+        if (${outcome === "success"}) resolve({ timing: {} });
+        else reject(Object.assign(new Error("PRIVATE_NATIVE_ERROR"), { code: "paste_failed", diagnosticCode: "message_receiver_missing" }));
+      };
+    });`);
+    const pending = background.evaluate(`transferToDestination("grok", "PRIVATE_CARRY", null, "${id(1)}", true, null, { id: 42 })`);
+    pending.catch(() => {});
+    await new Promise(setImmediate);
+    await background.settled();
+    assert.equal(delivered.at(-1).diagnostics?.delivery_events?.[0]?.event, "paste_start");
+    background.evaluate("finishFixtureDelivery()");
+    if (outcome === "success") await pending;
+    else await assert.rejects(pending, /PRIVATE_NATIVE_ERROR/);
+    await background.settled();
+    const checkpoint = delivered.at(-1);
+    assert.equal(checkpoint.status, "started", "a delivery checkpoint cannot invent the source's final outcome");
+    assert.equal(checkpoint.last_stage, "paste_started");
+    assert.equal(checkpoint.diagnostics.message_reply, outcome === "success" ? "ack_success" : "ack_failed");
+    if (outcome === "success") assert.equal(checkpoint.diagnostics.paste_populated, true);
+    else assert.equal(checkpoint.diagnostics.error_code, "message_receiver_missing");
+    assert.doesNotMatch(JSON.stringify(delivered), /PRIVATE_CARRY|PRIVATE_NATIVE_ERROR/);
+  }
+});
+
+test("delivery diagnosis never waits for blocked storage", async () => {
+  const background = worker(success);
+  await background.settled();
+  await background.ack(event(1, { destinationPlatform: "grok", lastStage: "paste_started" }));
+  await background.settled();
+  background.evaluate('transferToDestinationObserved = async () => ({ timing: {} })');
+  const release = blockStorage(background, "session", "get");
+  let finished = false;
+  const pending = background.evaluate(`transferToDestination("grok", "PRIVATE_CARRY", null, "${id(1)}", true, null, { id: 42 })`).then(() => { finished = true; });
+  try {
+    for (let round = 0; round < 10 && !finished; round++) await new Promise(setImmediate);
+    assert.equal(finished, true, "optional diagnosis cannot block the delivery reply");
+  } finally { release(); await pending; await background.settled(); }
+});
+
 test("source document reload retains an interrupted report when the old page cannot reply", async () => {
   const delivered = [];
   const background = worker(async (_url, options) => { delivered.push(JSON.parse(options.body)); return success(); });
@@ -479,6 +529,8 @@ test("source document reload retains an interrupted report when the old page can
   assert.equal(delivered.at(-1).failure_reason, "client_interrupted");
   assert.equal(delivered.at(-1).last_stage, "paste_started");
   assert.equal(delivered.at(-1).diagnostics.error_code, "conversation_changed");
+  assert.equal(delivered.at(-1).diagnostics.source_changed, true);
+  assert.equal(delivered.at(-1).diagnostics.events.at(-1).code, "conversation_changed");
   assert.equal(delivered.at(-1).reported_model, "local-direct");
   assert.doesNotMatch(JSON.stringify(delivered), /PRIVATE_CHAT|deepseek\.invalid/);
 });

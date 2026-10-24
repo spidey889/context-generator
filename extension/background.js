@@ -529,12 +529,15 @@ async function recordInterruptedTransfersForTab(tabId, failureReason, errorCode,
 
     // Tab closure is a user cancellation; document replacement is an observed
     // interruption. Neither tells us whether an unacknowledged paste happened.
+    const diagnostics = { ...(active.diagnostics || { version: 1 }), error_code: errorCode,
+      error_origin: "background", cancelled: true };
+    if (errorCode === "conversation_changed") diagnostics.source_changed = true;
+    globalThis.CapTransferDiagnostics?.event(diagnostics, "cancelled", Date.now() - Date.parse(active.attemptedAt), "events", errorCode);
     work.push(recordTransferTelemetry({
       ...active,
       status: "failed",
       failureReason,
-      diagnostics: { ...(active.diagnostics || { version: 1 }), error_code: errorCode,
-        error_origin: "background", cancelled: true }
+      diagnostics
     }));
   }
   await Promise.all(work);
@@ -549,6 +552,20 @@ function recordKnownTransferTelemetryStage(attemptId, lastStage) {
     lastStage,
     failureReason: null
   }).catch(() => {});
+}
+
+function recordDeliveryDiagnostics(attemptId, destinationId, sourceTab, diagnostics) {
+  const snapshot = globalThis.CapTransferDiagnostics?.snapshot(diagnostics);
+  if (!attemptId || !snapshot || !Number.isInteger(sourceTab?.id)) return;
+  // Independent of the reply channel: a source reload must not erase what the
+  // worker observed. Optional logging never waits on storage before delivery.
+  enqueueTelemetryWork(async () => {
+    await restoreActiveTransferTelemetry();
+    const active = activeTransferTelemetry.get(attemptId);
+    if (active?.status !== "started" || active.destinationPlatform !== destinationId
+      || activeTransferSourceTabs.get(attemptId) !== sourceTab.id) return null;
+    return { ...active, lastStage: "paste_started", diagnostics: { ...(active.diagnostics || {}), ...snapshot } };
+  }).then(event => event && recordTransferTelemetry(event, sourceTab.id)).catch(() => {});
 }
 
 function sanitizeTransferTelemetryEvent(event, captureCompletionTime = true) {
@@ -1488,15 +1505,19 @@ async function transferToDestination(destinationId, text, preparedTabId = null, 
   deferFinalActivation = false, deadlineAt = null, sourceTab = null) {
   const trace = createBackgroundTrace();
   trace.diagnostics = { version: 1, diagnostics_revision: 3 };
+  globalThis.CapTransferDiagnostics?.event(trace.diagnostics, "paste_start", 0, "delivery_events");
+  recordDeliveryDiagnostics(transferId, destinationId, sourceTab, trace.diagnostics);
   try {
     const result = await transferToDestinationObserved(destinationId, text, preparedTabId, transferId,
       deferFinalActivation, deadlineAt, sourceTab, trace);
     globalThis.CapTransferDiagnostics?.update(trace.diagnostics, { delivery_ms: Math.round(nowMs() - trace.startedAt) });
+    recordDeliveryDiagnostics(transferId, destinationId, sourceTab, trace.diagnostics);
     return { ...result, diagnostics: globalThis.CapTransferDiagnostics?.snapshot(trace.diagnostics) || null };
   } catch (error) {
     globalThis.CapTransferDiagnostics?.update(trace.diagnostics, { delivery_ms: Math.round(nowMs() - trace.startedAt) });
     if (!trace.diagnostics.error_code) globalThis.CapTransferDiagnostics?.failure(trace.diagnostics, error, "background", nowMs() - trace.startedAt);
     error.diagnostics = globalThis.CapTransferDiagnostics?.snapshot(trace.diagnostics) || null;
+    recordDeliveryDiagnostics(transferId, destinationId, sourceTab, trace.diagnostics);
     throw error;
   }
 }

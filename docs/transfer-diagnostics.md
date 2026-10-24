@@ -4,6 +4,23 @@ Extension 1.4.12 introduced one optional JSONB record to `transfers.diagnostics`
 Older attempts retain NULL; their missing observations cannot be recovered.
 The existing `failure_reason` and `last_stage` remain compatible.
 
+## Small clues for missing final reports
+
+These are saved in the same `transfers.diagnostics` record:
+
+| Clue | Meaning |
+| --- | --- |
+| `delivery_events: paste_start` | The background worker received the paste request. |
+| `message_reply`, `paste_populated`, `delivery_ms` and a fixed `error_code` when available | The destination replied, or delivery failed, and how long the worker waited. |
+| `events: cancelled` with `conversation_changed`, plus `source_changed: true` | The source document reloaded or navigated away. This does not distinguish a manual refresh from other navigation. |
+| `events: cancelled` with `source_tab_closed` | The source tab closed. |
+
+The worker saves delivery checkpoints independently of the source's final reply,
+without making delivery wait for storage. Checkpoints retain `started` until a
+real terminal outcome arrives; an acknowledgement never manufactures success.
+All clues use existing closed fields and labels. No chat text, URL, login detail,
+raw error, new table or new column is added.
+
 Migration `20261013092328` removes the separate `file_size_failure_reason` column.
 The database instead stores `failure_reason = "file_size_limit"` when the first
 failed outcome reports `conversation_too_large` with the exact
