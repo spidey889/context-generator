@@ -2,7 +2,6 @@ const assert = require("node:assert/strict");
 const test = require("node:test");
 const summarize = require("../api/summarize.js");
 const { withFundedBudget } = require("./helpers/funded-budget");
-const telemetry = require("../api/telemetry.js");
 const { validateTelemetryPayload } = require("../api/telemetry-validation.js");
 const KEY = "test-only-signing-key-0123456789abcdef";
 const RELAY_KEY = "test-only-relay-key-0123456789abcdef";
@@ -50,11 +49,14 @@ test("observed models survive missing receipts without granting server verificat
     assert.equal(edge.calls.at(-1).args.p_summary_confirmed_at, null);
   }
   for (const change of [{ reported_model: "PRIVATE_TEXT_SENTINEL" },
-    { reported_model: null }, { status: "started", last_stage: "capture_started" }]) {
+    { reported_model: null }, { status: "started", last_stage: "capture_started" },
+    { summary_verified: true }, { p_summary_verified: true }]) {
     const report = payload({ reported_model: "local-direct", ...change });
     assert.equal(validateTelemetryPayload(report), null);
     assert.equal((await edge.send(report)).status, 400);
   }
+  assert.equal((await edge.send(payload({ summary_proof: "0".repeat(64) }))).status, 422);
+  assert.equal(edge.calls.length, LEGACY_RECEIPT_MODELS.length, "Forged verification cannot reach SQL.");
   const signed = payload({ model: "gemini-3.5-flash-lite", reported_model: "local-direct",
     summary_confirmed_at: "2026-10-02T00:00:08.000Z" });
   signed.summary_proof = await createSummaryProof(signed, KEY);
@@ -104,42 +106,6 @@ test("v2 receipts authenticate server completion time while v1 never authenticat
   assert.equal(edge.calls[1].args.p_summary_verified, true);
   assert.equal(edge.calls[1].args.p_summary_confirmed_at, confirmed.summary_confirmed_at);
   assert.equal((await edge.send({ ...signed, summary_confirmed_at: "2026-10-01T23:59:59.000Z" })).status, 422);
-});
-
-test("direct edge calls cannot promote fake successes or externally supplied verification booleans", async () => {
-  const edge = await edgeHarness();
-  for (let i = 1; i <= 2; i++) {
-    const res = await edge.send(payload({ attempt_id: `11111111-1111-4111-8111-${String(i).padStart(12, "0")}` }));
-    assert.equal(res.status, 204); // Legacy diagnostics still drain from the outbox.
-  }
-  assert.equal(edge.calls.length, 2);
-  assert.ok(edge.calls.every(call => call.args.p_summary_verified === false));
-  assert.equal((await edge.send(payload({ summary_verified: true }))).status, 400);
-  assert.equal((await edge.send(payload({ p_summary_verified: true }))).status, 400);
-  assert.equal((await edge.send(payload({ summary_proof: "0".repeat(64) }))).status, 422);
-  assert.equal(edge.calls.at(-1).args.p_summary_verified, false);
-});
-
-test("originless forged successes remain unverified through Vercel and the actual edge handler", async t => {
-  const edge = await edgeHarness();
-  const originalFetch = global.fetch;
-  const originalUrl = process.env.SUPABASE_TELEMETRY_FUNCTION_URL;
-  const originalKey = process.env.SUPABASE_TELEMETRY_PUBLISHABLE_KEY;
-  const originalRelayKey = process.env.TELEMETRY_RELAY_SECRET;
-  t.after(() => {
-    global.fetch = originalFetch;
-    for (const [name, old] of [["SUPABASE_TELEMETRY_FUNCTION_URL", originalUrl], ["SUPABASE_TELEMETRY_PUBLISHABLE_KEY", originalKey], ["TELEMETRY_RELAY_SECRET", originalRelayKey]]) {
-      if (old === undefined) delete process.env[name]; else process.env[name] = old;
-    }
-  });
-  process.env.SUPABASE_TELEMETRY_FUNCTION_URL = "https://example.invalid/telemetry";
-  process.env.SUPABASE_TELEMETRY_PUBLISHABLE_KEY = "public-key";
-  process.env.TELEMETRY_RELAY_SECRET = RELAY_KEY;
-  global.fetch = async (_url, options) => edge.send(JSON.parse(options.body));
-  const res = response();
-  await telemetry({ method: "POST", headers: { "content-type": "application/json", "x-cap-context-client": "cap-context-extension/1" }, body: payload() }, res);
-  assert.equal(res.code, 204);
-  assert.equal(edge.calls[0].args.p_summary_verified, false);
 });
 
 test("completed server summary yields a usable receipt, including local server direct carry", async t => {

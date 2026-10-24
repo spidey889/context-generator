@@ -1,5 +1,6 @@
 const assert = require("node:assert/strict");
 const test = require("node:test");
+const { clockTest } = require("./helpers/clock");
 const relay = require("../api/telemetry.js");
 const { consumeTelemetryRateLimit, resetTelemetryRateLimitForTests } = require("../api/telemetry-rate-limit.js");
 const RELAY_KEY = "test-only-private-relay-0123456789abcdef";
@@ -57,7 +58,7 @@ test("public Supabase credentials cannot reach the privileged writer", async () 
   assert.equal(missing.calls.length, 0);
 });
 
-test("Edge bounds streamed UTF-8 bytes and body time before SQL", async () => {
+clockTest("Edge bounds streamed UTF-8 bytes and body time before SQL", async () => {
   const edge = await edgeHarness({ bodyTimeoutMs: 15 });
   assert.equal((await edge.send("{}", { "content-length": "9999999" })).status, 413);
   assert.equal((await edge.send(JSON.stringify({ value: "🙂".repeat(7000) }))).status, 413);
@@ -71,7 +72,7 @@ test("Edge bounds streamed UTF-8 bytes and body time before SQL", async () => {
   assert.equal(edge.calls.length, 0);
 });
 
-test("Edge SQL failures have safe permanent/configuration/transient classification", async () => {
+clockTest("Edge SQL failures have safe permanent/configuration/transient classification", async () => {
   for (const [error, status, code] of [[{ code: "22023", message: "PRIVATE_BODY" }, 422, "attempt_identity_mismatch"],
     [{ code: "23514", details: "PRIVATE_BODY" }, 422, "invalid_payload"], [{ code: "42501" }, 503, "telemetry_unavailable"],
     [{ code: "PGRST202" }, 503, "telemetry_unavailable"], [{ code: "08006", message: "PRIVATE_BODY" }, 503, "telemetry_upstream_unavailable"]]) {
@@ -112,12 +113,10 @@ test("relay preserves permanent payload failures and retries configuration/netwo
   assert.equal(throttled.code, 429); assert.equal(throttled.headers["retry-after"], "90");
 });
 
-test("relay times out both stalled headers and stalled error bodies before the worker deadline", async t => {
+clockTest("relay times out both stalled headers and stalled error bodies before the worker deadline", async t => {
   relayEnv(t);
-  const originalSetTimeout = global.setTimeout;
-  global.setTimeout = (callback, ms, ...args) => originalSetTimeout(callback, ms === 5000 ? 20 : ms, ...args);
-  t.after(() => { global.setTimeout = originalSetTimeout; });
   for (const stalledBody of [false, true]) {
+    const startedAt = Date.now();
     let signal;
     global.fetch = async (_url, options) => {
       signal = options.signal;
@@ -127,6 +126,7 @@ test("relay times out both stalled headers and stalled error bodies before the w
     const res = response();
     await relay({ method: "POST", headers: { "content-type": "application/json", "x-cap-context-client": "cap-context-extension/1" }, body: payload() }, res);
     assert.equal(res.code, 503); assert.equal(res.body.code, "telemetry_upstream_unavailable"); assert.equal(signal.aborted, true);
+    assert.equal(Date.now() - startedAt, 5000, "Exercise the real relay timeout in simulated time.");
   }
 });
 
@@ -165,7 +165,7 @@ test("distributed limiter is atomic across invocation state, hashes identifiers 
   assert.equal(daily.allowed, false); assert.equal(daily.retryAfterSeconds, 86339);
 });
 
-test("Redis failures/timeouts fall back to bounded local limits without losing all telemetry", async () => {
+clockTest("Redis failures/timeouts fall back to bounded local limits without losing all telemetry", async () => {
   resetTelemetryRateLimitForTests();
   const logs = [], env = { KV_REST_API_URL: "https://example.invalid/redis", KV_REST_API_TOKEN: "private" };
   const options = { env, now: 1000, fetchImpl: async () => { throw new Error("PRIVATE_STORE_ERROR"); }, log: (...args) => logs.push(args) };

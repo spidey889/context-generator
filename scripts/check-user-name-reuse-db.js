@@ -32,15 +32,19 @@ async function checkUserNameReuse(db, sql) {
     const id = n => `f00df00d-f00d-4f00-8f00-${String(n).padStart(12, "0")}`;
     const install = n => `name-pool-regression-${n}`;
     const attempted = new Date().toISOString(), confirmed = new Date().toISOString();
-    const report = (n, verified = false) => asService(() => db.query(`select public.record_transfer_event(
+    const report = (n, verified = false) => db.query(`select public.record_transfer_event(
       $1::uuid,$2::text,$4::timestamptz,'claude','chatgpt',50,
       'failed','paste_started','paste_failed','1.4.8',$3::boolean,null,
       case when $3::boolean then $5::timestamptz else null end,
-      case when $3::boolean then 'local-direct' else null end)`, [id(n), install(n), verified, attempted, confirmed]));
+      case when $3::boolean then 'local-direct' else null end)`, [id(n), install(n), verified, attempted, confirmed]);
     // Unsigned failures previously exhausted the pool and rolled back the next
     // legitimate counted transfer. Exercise more than TWO complete pools.
     const count = pool.length * 2 + 3;
-    for (let n = 1; n <= count; n++) await report(n);
+    // Keep every RPC and its restricted role; change roles once for the
+    // sequential pool-fill block instead of twice for every installation.
+    await asService(async () => {
+      for (let n = 1; n <= count; n++) await report(n);
+    });
     const allocated = await rows(`select user_no::int as number,name,lifetime_summaries::int as total,
       today_failed_attempts::int as failed from public.users where install_id like 'name-pool-regression-%' order by user_no`);
     equal(allocated.length, count);
@@ -53,8 +57,10 @@ async function checkUserNameReuse(db, sql) {
 
     // A new signed summary, duplicate deliveries and an old client arity must
     // continue counting correctly after all names are occupied.
-    await report(count + 1, true);
-    await report(count + 1, true);
+    await asService(async () => {
+      await report(count + 1, true);
+      await report(count + 1, true);
+    });
     const verified = await one("select lifetime_summaries::int as total,today_summaries::int as today,today_failed_attempts::int as failed from public.users where install_id=$1", [install(count + 1)]);
     equal(verified, { total: 1, today: 1, failed: 1 });
     await asService(() => db.query(`select public.record_transfer_event(

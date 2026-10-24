@@ -8,6 +8,9 @@ const { pathToFileURL } = require("node:url");
 const ROOT = path.join(__dirname, "..");
 const BACKGROUND_SOURCE = fs.readFileSync(path.join(ROOT, "extension", "transfer-diagnostics.js"), "utf8") + "\n"
   + fs.readFileSync(path.join(ROOT, "extension", "background.js"), "utf8");
+// Reuse compiled code only; every worker keeps its own VM and storage.
+const COMPILED_WORKER = new vm.Script(BACKGROUND_SOURCE, { filename: "extension/background.js" });
+const WORKER_CHAINS = new vm.Script("[telemetryWorkChain, telemetryDeliveryChain]");
 const VALIDATION_PATH = path.join(ROOT, "supabase", "functions", "transfer-telemetry", "validation.mjs");
 const VERCEL_VALIDATION = require(path.join(ROOT, "api", "telemetry-validation.js"));
 const VERCEL_TELEMETRY_HANDLER = require(path.join(ROOT, "api", "telemetry.js"));
@@ -77,7 +80,7 @@ function loadTelemetryBackground(fetchImpl, initialStorage = {}, manifestVersion
   };
 
   vm.createContext(sandbox);
-  new vm.Script(BACKGROUND_SOURCE, { filename: "extension/background.js" }).runInContext(sandbox);
+  COMPILED_WORKER.runInContext(sandbox);
 
   return {
     storage,
@@ -98,9 +101,9 @@ function loadTelemetryBackground(fetchImpl, initialStorage = {}, manifestVersion
       // Delivery is separate from persistence; wait for both chains and any
       // follow-up storage tasks enqueued while a request was completing.
       for (let round = 0; round < 10; round += 1) {
-        const chains = new vm.Script("[telemetryWorkChain, telemetryDeliveryChain]").runInContext(sandbox);
+        const chains = WORKER_CHAINS.runInContext(sandbox);
         await Promise.all(chains);
-        const next = new vm.Script("[telemetryWorkChain, telemetryDeliveryChain]").runInContext(sandbox);
+        const next = WORKER_CHAINS.runInContext(sandbox);
         if (chains[0] === next[0] && chains[1] === next[1]) return;
       }
     }
@@ -250,29 +253,6 @@ test("telemetry keeps one install id across summaries, browser restarts, and ext
   assert.deepEqual(updatedWorker.storage["context-generator-telemetry-outbox-v1"], []);
 });
 
-test("Supabase payload validation rejects content, unknown stages, and arbitrary failures", async () => {
-  const { validateTelemetryPayload } = await import(pathToFileURL(VALIDATION_PATH).href);
-  const valid = makeTelemetryPayload({ extension_version: "1.3.0" });
-
-  assert.deepEqual(validateTelemetryPayload(valid), valid);
-  assert.equal(validateTelemetryPayload({ ...valid, conversation: "raw chat" }), null);
-  assert.equal(validateTelemetryPayload({ ...valid, summary: "generated summary" }), null);
-  assert.equal(validateTelemetryPayload({ ...valid, error: "full JS error" }), null);
-  assert.equal(validateTelemetryPayload({ ...valid, last_stage: "provider_response_body_received" }), null);
-  assert.equal(validateTelemetryPayload({ ...valid, status: "succeeded", failure_reason: null }), null);
-  assert.equal(validateTelemetryPayload({ ...valid, last_stage: "completed" }), null);
-  assert.equal(validateTelemetryPayload({ ...valid, failure_reason: "provider said secret detail" }), null);
-  assert.deepEqual(
-    validateTelemetryPayload({ ...valid, failure_reason: "user_cancelled" }),
-    { ...valid, failure_reason: "user_cancelled" }
-  );
-  assert.equal(validateTelemetryPayload({
-    ...valid,
-    character_count: 210001,
-    failure_reason: "conversation_too_large"
-  }).character_count, 210001);
-});
-
 test("Vercel and Supabase enforce the same metadata-only telemetry schema", async () => {
   const { validateTelemetryPayload: validateSupabasePayload } = await import(pathToFileURL(VALIDATION_PATH).href);
   const succeeded = (changes = {}) => makeTelemetryPayload({
@@ -307,10 +287,20 @@ test("Vercel and Supabase enforce the same metadata-only telemetry schema", asyn
   }
   // Parity alone could let both validators accept the same invalid scalar/date.
   assert.ok(VERCEL_VALIDATION.validateTelemetryPayload(succeeded({ completed_at: "2026-10-02T05:30:10+05:30" })));
-  for (const changes of [{ character_count: true }, { character_count: "50" }, { attempted_at: "1" },
+  for (const changes of [{ conversation: "raw chat" }, { summary: "generated summary" }, { error: "full JS error" },
+    { last_stage: "provider_response_body_received" }, { status: "failed", last_stage: "paste_started", failure_reason: "provider said secret detail" },
+    { last_stage: "paste_started" }, { status: "failed", failure_reason: "paste_failed" },
+    { character_count: true }, { character_count: "50" }, { attempted_at: "1" },
     { attempted_at: "2026-02-31T00:00:00.000Z" }, { attempted_at: "2026-10-02T24:00:00.000Z" },
     { completed_at: null }, { summary_verified: true }]) {
     assert.equal(VERCEL_VALIDATION.validateTelemetryPayload(succeeded(changes)), null);
+    assert.equal(validateSupabasePayload(succeeded(changes)), null);
+  }
+  for (const changes of [{ failure_reason: "user_cancelled" },
+    { character_count: 210001, failure_reason: "conversation_too_large" }]) {
+    const valid = makeTelemetryPayload(changes);
+    assert.deepEqual(VERCEL_VALIDATION.validateTelemetryPayload(valid), valid);
+    assert.deepEqual(validateSupabasePayload(valid), valid);
   }
 });
 
@@ -381,7 +371,8 @@ test("Vercel forwards valid telemetry with server-only Supabase credentials", as
 
   for (const [index, payload] of [makeTelemetryPayload(),
     makeTelemetryPayload({ status: "succeeded", last_stage: "completed", failure_reason: null })].entries()) {
-    const res = await invokeTelemetryHandler(payload);
+    // The unsigned success also covers clients that omit Origin entirely.
+    const res = await invokeTelemetryHandler(payload, { headers: index === 1 ? { origin: undefined } : {} });
     assert.equal(res.statusCode, 204);
     assert.equal(upstreamRequests.length, index + 1);
     assert.equal(upstreamRequests[index].url, process.env.SUPABASE_TELEMETRY_FUNCTION_URL);

@@ -48,7 +48,7 @@ async function checkUsefulDiagnostics(db, sql) {
     has_function_privilege('service_role','public.is_valid_transfer_diagnostics(jsonb,integer)','execute') as service`)).rows[0], { anon: false, authenticated: false, service: true });
   return checks;
 }
-async function checkAttachmentSizeFailure(db, sql, capturedMigrations, expectedReason = "Combined text files exceeded the 2.1 MB limit before download.") {
+async function checkAttachmentSizeFailure(db, sql, expectedReason = "Combined text files exceeded the 2.1 MB limit before download.") {
   let checks = 0;
   const equal = (a, b) => { assert.deepEqual(a, b); checks++; };
   const snapshot = async () => (await db.query(`select jsonb_build_object(
@@ -82,17 +82,10 @@ async function checkAttachmentSizeFailure(db, sql, capturedMigrations, expectedR
       equal((await db.query("select file_size_failure_reason from public.transfers where attempt_id=$1", [attemptId])).rows[0].file_size_failure_reason,
         index === 0 ? expectedReason : null);
     }
-    // Restore once at the final label/schema. The earlier wording uses the same
-    // generated-column recovery path and still has its real migration/RPC checks.
-    if (expectedReason === "file size") {
-      const { checkSnapshot } = require("./check-telemetry-backup.js");
-      const snapshotData = { transfers: (await db.query("select to_jsonb(t) as row from public.transfers t")).rows.map(value => value.row),
-        users: (await db.query("select to_jsonb(u) as row from public.users u")).rows.map(value => value.row),
-        migrations: [...capturedMigrations] };
-      equal((await checkSnapshot(snapshotData)).originalValuesPreserved, true);
-    }
   } finally { await db.exec("rollback;"); }
   equal(await snapshot(), before);
+  // The next file-size migration's backup upgrade restores this generated
+  // column and compares its hash before removing it; no extra restore here.
   // Keep one populated old label across the next real migration. Its before/
   // after comparison above must now prove recomputation, not just NULL labels.
   if (expectedReason !== "file size") await report(990, "attachment_size_limit");

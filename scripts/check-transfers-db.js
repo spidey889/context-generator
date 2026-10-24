@@ -48,8 +48,9 @@ async function checkTransfers(db, sql, migrations) {
   const security = await one("select oid::text,relrowsecurity,relforcerowsecurity,relacl::text from pg_class where oid='public.transfer_events'::regclass");
   const beforePolicies = (await db.query("select polname,polcmd,polpermissive,polroles::text,pg_get_expr(polqual,polrelid) as qualifier,pg_get_expr(polwithcheck,polrelid) as check_expression from pg_policy where polrelid='public.transfer_events'::regclass order by polname")).rows;
 
-  // Exercise captured-only recovery of both schemas and the explicit upgrade;
-  // the old snapshot must retain its original UUIDs until cleanup is requested.
+  // The minimal-users fixture owns default old-table recovery, definitions
+  // and cron. This explicit upgrade also hashes every original column before
+  // applying cleanup, so a second default restore adds no separate path.
   const snapshot = async (table, history) => ({
     [table]: (await db.query(`select to_jsonb(t) as row from public.${table} t`)).rows.map(value => value.row),
     users: (await db.query("select to_jsonb(u) as row from public.users u")).rows.map(value => value.row),
@@ -90,11 +91,6 @@ async function checkTransfers(db, sql, migrations) {
     and i.indkey::text=(select attnum::text from pg_attribute where attrelid=i.indrelid and attname='attempt_id')`)).n, 1);
   equal((await one("select count(*)::int as n from pg_trigger where tgrelid='public.transfers'::regclass and not tgisinternal")).n, 3);
   const { checkSnapshot, selectPendingMigrations } = require("./check-telemetry-backup.js");
-  const oldRestore = await checkSnapshot(oldSnapshot);
-  equal(oldRestore.originalValuesPreserved, true);
-  equal(oldRestore.pendingMigrations, 0);
-  equal(oldRestore.removedColumns, []);
-  equal(oldRestore.capturedCronJobsRestored, true);
   const upgraded = await checkSnapshot(oldSnapshot, { applyPending: true, throughVersion: "20261002163357" });
   equal(upgraded.retainedValuesPreserved, true);
   equal(upgraded.originalValuesPreserved, false);

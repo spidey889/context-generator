@@ -1,6 +1,5 @@
 const assert = require("node:assert/strict");
 const contract = require("../supabase/functions/_shared/provider-failure");
-const { createProviderFailureLog } = require("../api/provider-failure-log");
 
 async function checkProviderFailures(db, sql, migrations) {
   let checks = 0;
@@ -38,32 +37,12 @@ async function checkProviderFailures(db, sql, migrations) {
     await db.exec("set local role service_role;");
     for (let n = 0; n < 2; n++) await db.query("select public.record_provider_failure($1::jsonb)", [JSON.stringify(sample)]);
     equal((await rows("select count(*)::int as count from public.provider_failures"))[0].count, 1);
+    // The final provider-diagnostics fixture owns recorder -> Edge -> SQL
+    // retry/idempotency. This historical table still needs its own retention
+    // and backup rows, without repeating that same transport integration.
+    await db.query("select public.record_provider_failure($1::jsonb)",
+      [JSON.stringify({ ...sample, id: "c0de5714-0000-4000-8000-000000000004" })]);
     await db.exec("reset role;");
-    const { createTelemetryHandler } = await import("../supabase/functions/transfer-telemetry/handler.mjs");
-    const config = { SUPABASE_TELEMETRY_FUNCTION_URL: "https://edge.invalid", SUPABASE_TELEMETRY_PUBLISHABLE_KEY: "TEST_ONLY_PUBLIC",
-      TELEMETRY_RELAY_SECRET: "TEST_ONLY_RELAY_01234567890123456789" };
-    const saved = Object.fromEntries(Object.keys(config).map(key => [key, process.env[key]]));
-    const writer = createTelemetryHandler({ getEnv: name => ({ ...config, SUPABASE_URL: "https://db.invalid",
-      SUPABASE_SERVICE_ROLE_KEY: "TEST_ONLY_PRIVATE" })[name], createClient: () => ({ rpc: async (name, args) => {
-      equal(name, "record_provider_failure");
-      await db.query("select public.record_provider_failure($1::jsonb)", [JSON.stringify(args.p_event)]);
-      return { error: null };
-    } }) });
-    let calls = 0;
-    try {
-      Object.assign(process.env, config);
-      const recorder = createProviderFailureLog({ attemptId: "c0de5714-0000-4000-8000-000000000004", fetchImpl: async (url, options) => {
-        const response = await writer(new Request(url, options));
-        equal(response.status, 204);
-        // Simulate a lost acknowledgement AFTER the database committed.
-        return ++calls === 1 ? new Response(null, { status: 503 }) : response;
-      } });
-      recorder.record(sample); await recorder.flush();
-      equal(calls, 2);
-      equal((await rows("select count(*)::int as count from public.provider_failures"))[0].count, 2);
-    } finally {
-      for (const [key, value] of Object.entries(saved)) { if (value === undefined) delete process.env[key]; else process.env[key] = value; }
-    }
     const old = { ...sample, id: "c0de5714-0000-4000-8000-000000000003", occurred_at: "2000-01-01T00:00:00.000Z" };
     await db.query("select public.record_provider_failure($1::jsonb)", [JSON.stringify(old)]);
     const job = (await rows("select command,schedule from cron.job where jobname='prune-provider-failures'"))[0];

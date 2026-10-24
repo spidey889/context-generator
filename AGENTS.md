@@ -17,6 +17,12 @@
 - Record meaningful decisions, changes, replaced approaches and useful historical context in `CHANGELOG.md`. Skip insignificant changes and routine command transcripts.
 - Add comments or notes when they explain non-obvious logic, fragile behavior, important tradeoffs or information useful in a later session. Do not comment everything.
 
+## Tests and checks
+
+- After a change, run focused tests or checks for the affected behavior. Do not run the full suite automatically after every change.
+- Run the full suite only when the change is large, affects several components, or focused checks are not enough to verify it. Run slow, database and browser checks when the affected behavior needs them.
+- For documentation-only changes, a diff/format check is usually enough. Required CI and branch-protection checks still apply.
+
 ## Browser testing
 
 - Use Brave unless another browser is specifically required. Open a new window for testing; do not take over the owner's main window. Automated fixtures should use their isolated profiles.

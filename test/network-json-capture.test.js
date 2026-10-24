@@ -1176,7 +1176,7 @@ test("DeepSeek keeps distinct identical files and request text, deduplicating fi
   assert.equal(capture.messageTurnCount, 3);
   assert.equal(h.requests.filter(request => request.url.hostname === "files.deepseeksvc.com").length, 2);
 });
-test("Gemini, Grok and DeepSeek capture admit transcripts through 1,000,000 characters without clipping", async () => {
+test("slow/release: Gemini, Grok and DeepSeek capture admit transcripts through 1,000,000 characters without clipping", async () => {
   for (const platform of ["gemini", "grok", "deepseek"]) {
     const baseline = setup(platform);
     await baseline.observe();
@@ -1261,7 +1261,7 @@ test("DeepSeek aborts an active capture when the native session credential chang
   assert.ok(h.replies.every(reply => !reply.capture));
 });
 
-test("DeepSeek: the shared history/file budget accepts exactly 32 MB and rejects one extra byte", async () => {
+test("slow/release: DeepSeek: the shared history/file budget accepts exactly 32 MB and rejects one extra byte", async () => {
   for (const extra of [0, 1]) {
     const f = fixtures("deepseek", "smoke", 1);
     f.data.unused_metadata = "";
