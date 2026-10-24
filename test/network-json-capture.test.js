@@ -370,6 +370,30 @@ test("DeepSeek rejects a stored-session change during history capture", async ()
   }
 });
 
+test("DeepSeek current stored login is not cancelled by an older observed login", async () => {
+  const f = fixtures("deepseek");
+  let h;
+  h = setup("deepseek", f, { localStorage: { getItem: () => JSON.stringify({ value: "CURRENT_SESSION", __version: "0" }) }, fetchImpl(request) {
+    if (request.url.hostname === "files.deepseeksvc.com") return new Response(f.files[f.file.id], { headers: { "content-type": "application/octet-stream" } });
+    assert.equal(request.options.headers.authorization, "Bearer CURRENT_SESSION");
+    const xhr = h.newXhr(); xhr.open("GET", "/api/v0/session");
+    xhr.setRequestHeader("authorization", "Bearer CURRENT_SESSION"); xhr.send();
+    return Response.json(f.data);
+  } });
+  await h.observe(); // The hook still remembers a request from the previous login.
+  assert.equal((await h.window.__capCaptureNetworkJson()).text, f.expected);
+  assert.doesNotMatch(JSON.stringify(h.replies), /AUTH_SENTINEL|CURRENT_SESSION/);
+});
+
+clockTest("DeepSeek a cleared native login cannot reuse the old observed credential", async () => {
+  for (const saved of [null, JSON.stringify({ value: "" }), JSON.stringify({ value: null })]) {
+    const h = setup("deepseek", undefined, { localStorage: { getItem: () => saved } });
+    await h.observe();
+    await assert.rejects(h.window.__capCaptureNetworkJson(), error => error.diagnostics.capture_detail === "auth_missing");
+    assert.equal(h.requests.length, 0, "a cleared login must not send the previous account's credential");
+  }
+});
+
 clockTest("DeepSeek logout in another tab cancels a pending history read and cleans up", async () => {
   let saved = JSON.stringify({ value: "AUTH_SENTINEL", __version: "0" });
   let aborted = false;
@@ -814,7 +838,7 @@ test("DeepSeek: one incomplete upload cancels siblings before fallback or a fres
   });
   assert.equal(h.requests.length, 5, "failure stops queued downloads");
   assert.equal(aborted.length, 3);
-  assert.equal(h.window.__capNetworkFetchState.version, 26);
+  assert.equal(h.window.__capNetworkFetchState.version, 27);
   assert.ok(h.replies.every(reply => !reply.capture));
   assert.equal(h.navigationListeners(), 0);
   assert.equal(h.listeners.size, 2);
@@ -892,10 +916,10 @@ for (const platform of ["gemini", "grok", "deepseek"]) test(`${platform}: the pr
   await h.observe();
   const old = h.window.__capNetworkFetchState;
   // Open tabs may retain the preceding reader after extension reload.
-  old.version = platform === "deepseek" ? 25 : platform === "gemini" ? 16 : 19;
+  old.version = platform === "deepseek" ? 26 : platform === "gemini" ? 16 : 19;
   h.reinstall(files[1]);
   assert.notEqual(h.window.__capNetworkFetchState, old);
-  assert.equal(h.window.__capNetworkFetchState.version, platform === "deepseek" ? 26 : platform === "grok" ? 20 : 17);
+  assert.equal(h.window.__capNetworkFetchState.version, platform === "deepseek" ? 27 : platform === "grok" ? 20 : 17);
   assert.equal(h.listeners.size, 2);
   assert.equal((await h.window.__capCaptureNetworkJson()).text, h.fixture.expected);
 });
@@ -1317,7 +1341,7 @@ test("DeepSeek aborts an active capture when the native session credential chang
   await h.observe(); const pending = h.window.__capCaptureNetworkJson();
   await new Promise(resolve => setImmediate(resolve));
   await h.window.fetch("/api/v0/session", { headers: { authorization: "Bearer NEW_SESSION" } });
-  await assert.rejects(pending, /could not be read|cancelled/);
+  await assert.rejects(pending, error => error.diagnosticCode === "conversation_changed");
   assert.ok(h.replies.every(reply => !reply.capture));
 });
 
