@@ -76,7 +76,7 @@ function worker(fetchImpl, shared = profile(), now = NOW, version = "1.4.6") {
       },
       scripting: { executeScript: async () => {} },
       storage: { local: storageArea(shared.local), session: storageArea(shared.session), onChanged: addEvent("storageChanged") },
-      tabs: { onRemoved: addEvent("removed"), query: async () => [], create: async () => ({}), sendMessage: async () => ({}), update: async () => ({}) },
+      tabs: { onRemoved: addEvent("removed"), onUpdated: addEvent("updated"), query: async () => [], create: async () => ({}), sendMessage: async () => ({}), update: async () => ({}) },
       windows: { update: async () => ({}) }
     }
   };
@@ -465,6 +465,42 @@ test("compaction keeps a newer signed receipt paired with its authenticated vers
   assert.equal(received.length, 1);
   assert.equal(received[0].extension_version, "1.4.6");
   assert.equal(await verifySummaryProof(received[0], signingKey), true);
+});
+
+test("source document reload retains an interrupted report when the old page cannot reply", async () => {
+  const delivered = [];
+  const background = worker(async (_url, options) => { delivered.push(JSON.parse(options.body)); return success(); });
+  await background.settled();
+  await background.ack(event(1, { lastStage: "paste_started", reportedModel: "local-direct" }));
+  await background.settled();
+  await background.listeners.updated?.(42, { status: "loading", url: "https://deepseek.invalid/PRIVATE_CHAT" });
+  await background.settled();
+  assert.equal(delivered.at(-1).status, "failed");
+  assert.equal(delivered.at(-1).failure_reason, "client_interrupted");
+  assert.equal(delivered.at(-1).last_stage, "paste_started");
+  assert.equal(delivered.at(-1).diagnostics.error_code, "conversation_changed");
+  assert.equal(delivered.at(-1).reported_model, "local-direct");
+  assert.doesNotMatch(JSON.stringify(delivered), /PRIVATE_CHAT|deepseek\.invalid/);
+});
+
+test("source reload cancels only its owned work and preserves completed and newer reports", async () => {
+  const background = worker(async () => { throw new Error("offline"); });
+  await background.settled();
+  await background.ack(event(1, { lastStage: "paste_started" }));
+  await background.ack(event(2, { status: "succeeded", lastStage: "completed" }));
+  await background.ack(event(3, { attemptedAt: new Date(NOW + 1).toISOString() }));
+  await background.settled();
+  background.evaluate(`getTransferOperation("${id(1)}", { id: 42 }).tabIds.add(100); getTransferOperation("other-source", { id: 99 }).tabIds.add(42);`);
+  await background.listeners.updated(100, { status: "loading" });
+  await background.listeners.updated(42, { status: "complete" });
+  assert.equal(background.shared.session[ACTIVE][id(1)].event.status, "started");
+  await background.listeners.updated(42, { status: "loading" });
+  await background.settled();
+  assert.equal(background.shared.session[ACTIVE][id(1)].event.failureReason, "client_interrupted");
+  assert.equal(background.shared.session[ACTIVE][id(2)].event.status, "succeeded");
+  assert.equal(background.shared.session[ACTIVE][id(3)].event.status, "started");
+  assert.equal(background.evaluate(`transferOperations.get("${id(1)}").controller.signal.aborted`), true);
+  assert.equal(background.evaluate('transferOperations.get("other-source").controller.signal.aborted'), false);
 });
 
 test("expired active attempts become unknown diagnostics without manufactured failure events", async () => {

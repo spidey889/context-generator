@@ -17,6 +17,7 @@ function getBrowserChecks(extended = false) {
     check("draft-transfer", "First draft opens both copy dialogs", 120, { CAP_CONTEXT_DRAFT_TRANSFER_SMOKE: "1", CAP_CONTEXT_TELEMETRY_SMOKE: "1" }),
     check("chatgpt-reload", "ChatGPT reload, expired-token cancellation and Gemini delivery", 180, { CAP_CONTEXT_JSON_SMOKE: "chatgpt", CAP_CONTEXT_CHATGPT_RELOAD_SMOKE: "1", CAP_CONTEXT_TOOLBAR_SMOKE: "1", CAP_CONTEXT_CHATGPT_AUTH_SMOKE: "paste401", CAP_CONTEXT_GEMINI_DESTINATION_SMOKE: "1" }),
     check("json-retry", "JSON retry after offline picker capture", 120, { CAP_CONTEXT_JSON_SMOKE: "chatgpt", CAP_CONTEXT_JSON_RETRY_SMOKE: "1" }),
+    check("source-reload", "Source reload retains its interruption report and the next transfer succeeds", 120, { CAP_CONTEXT_SOURCE_RELOAD_SMOKE: "1" }),
     check("chatgpt-million", "Million-character Unicode capture, summary request and paste", 180, { CAP_CONTEXT_JSON_SMOKE: "chatgpt", CAP_CONTEXT_LARGE_CHAT_SMOKE: "1000000" }),
     check("deepseek-files", "DeepSeek cached-session and concurrent original-file capture", 180, { CAP_CONTEXT_JSON_SMOKE: "deepseek", CAP_CONTEXT_REPLY_SNAPSHOT_SMOKE: "1", CAP_CONTEXT_DEEPSEEK_SESSION_SMOKE: "1" })
   ];

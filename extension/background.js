@@ -138,6 +138,17 @@ chrome.tabs.onRemoved?.addListener((tabId) => {
   return recordUserCancelledTransfersForTab(tabId).catch(() => {});
 });
 
+chrome.tabs.onUpdated?.addListener((tabId, changeInfo) => {
+  if (changeInfo.status !== "loading") return;
+  // A new document destroys the source's pending reply/final-report code even
+  // though its tab ID survives. Record the observed interruption in the worker.
+  const interruptedAt = Date.now();
+  for (const operation of transferOperations.values()) {
+    if (operation.sourceTabId === tabId) cancelTransferOperation(operation);
+  }
+  return recordInterruptedTransfersForTab(tabId, "client_interrupted", "conversation_changed", interruptedAt).catch(() => {});
+});
+
 function createTransferCancelledError() {
   const error = new Error("Transfer cancelled.");
   error.code = "user_cancelled";
@@ -502,20 +513,27 @@ async function persistActiveTransferTelemetry(attemptId) {
 }
 
 async function recordUserCancelledTransfersForTab(tabId) {
+  return recordInterruptedTransfersForTab(tabId, "user_cancelled", "source_tab_closed");
+}
+
+async function recordInterruptedTransfersForTab(tabId, failureReason, errorCode, interruptedAt = Infinity) {
   await enqueueTelemetryWork(() => restoreActiveTransferTelemetry());
   const work = [];
   for (const [attemptId, sourceTabId] of activeTransferSourceTabs.entries()) {
     if (sourceTabId !== tabId) continue;
     const active = activeTransferTelemetry.get(attemptId);
     if (!active || active.status !== "started") continue;
+    // Storage work can finish after the new document starts its next transfer.
+    // A delayed interruption must never finalize that newer attempt.
+    if (Date.parse(active.attemptedAt) > interruptedAt) continue;
 
-    // Closing the source tab is the one unambiguous user-side cancellation
-    // signal available after a transfer has started.
+    // Tab closure is a user cancellation; document replacement is an observed
+    // interruption. Neither tells us whether an unacknowledged paste happened.
     work.push(recordTransferTelemetry({
       ...active,
       status: "failed",
-      failureReason: "user_cancelled",
-      diagnostics: { ...(active.diagnostics || { version: 1 }), error_code: "source_tab_closed",
+      failureReason,
+      diagnostics: { ...(active.diagnostics || { version: 1 }), error_code: errorCode,
         error_origin: "background", cancelled: true }
     }));
   }
