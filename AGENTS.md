@@ -25,6 +25,8 @@
 
 ## Browser testing
 
+- Use Computer Use proactively when seeing or interacting with the real app would help investigate, implement or verify a task. Use it early; do not wait for the owner to ask again. Follow any explicit instruction limiting browser or Computer Use.
+- For UI issues, inspect the real page, reproduce the problem and confirm its cause before changing code. Verify the fix through the actual user flow and use what you observe to improve the regression fixtures. The Gemini welcome-screen bug is a reminder: a fixture can pass while missing the real page element that causes the failure.
 - Use Brave unless another browser is specifically required. Open a new window for testing; do not take over the owner's main window. Automated fixtures should use their isolated profiles.
 - Load the Brave unpacked extension from `C:\Users\vinit\Desktop\context-generator\extension`.
 - If Brave is blocked, use Zen or Chrome. Zen has the owner's signed-in sessions.
