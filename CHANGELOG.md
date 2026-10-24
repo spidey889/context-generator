@@ -4,6 +4,8 @@ A short history of decisions and regressions that matter when changing the code.
 
 ## 2026-10-25
 
+- **Use lightweight CI for version-only bumps.** Keep the required Offline checks status, but admit an existing manifest only when its valid numeric version strictly increases and every other parsed field stays identical. Documentation may accompany the bump; permissions, scripts, runtime/config changes and unmerged code still require the full gate. Added malformed-version, downgrade, permission-change and complete-Git-range regressions; manual/ambiguous runs keep full validation.
+
 - **Bump source version to 1.4.26.** Updated the extension manifest and current-version documentation by owner request. Web Store publication remains a separate release step.
 
 - **Minimal login/signup clue with unchanged extension permissions.** By owner request, save only `destination_auth_prompt` in the existing transfer diagnosis. Recognize explicit login/signup routes during existing worker checks and visible native login/signup controls at paste; exclude chat/code text, hidden controls and extension UI. Preserve the rejected prepared tab's clue separately from its replacement. Missing/false evidence never proves a signed-in account. Keep manifest, host access, transfer behavior and browser/network requests unchanged; advance content readiness to v179. Add the same boolean to the relay/Edge/SQL contracts with no new table/column, plus focused privacy/recovery checks and an installed-Brave-to-database assertion. Hosted migration `20261024193856` and Edge version 24 were verified; all 83 transfer and 26 user rows remained byte-for-byte unchanged. Older attempts remain unclassified; installed clients need the updated extension.

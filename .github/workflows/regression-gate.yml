@@ -42,7 +42,7 @@ jobs:
       - name: Select checks from the complete change
         id: scope
         run: node scripts/ci-scope.js
-      - name: Lightweight public site and scope checks
+      - name: Lightweight manifest, public site and scope checks
         if: steps.scope.outputs.mode == 'light'
         env:
           CI_BASE_SHA: ${{ steps.scope.outputs.base }}
