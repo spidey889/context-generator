@@ -215,8 +215,8 @@ function loadBackgroundForTransferTest({
     operations,
     message(message, sender) { let reply; messageListener(message, sender, value => { reply = value; }); return reply; },
     clickToolbar: toolbarClickListener,
-    cancel(tabId, sender = {}) {
-      return new Promise(resolve => messageListener({ type: "CANCEL_TRANSFER", transferId: "transfer-test" },
+    cancel(tabId, sender = {}, options = {}) {
+      return new Promise(resolve => messageListener({ type: "CANCEL_TRANSFER", transferId: "transfer-test", ...options },
         { id: "cap-context-test", frameId: 0, tab: { id: tabId }, ...sender }, resolve));
     },
     getPlatformFromUrl: sandbox.__backgroundTestHooks.getPlatformFromUrl,
@@ -592,6 +592,48 @@ test("Escape cancels an active summary body and rejects late work for that attem
   assert.equal(signal.aborted, true);
   assert.equal((await sendSummary("cancel pending summary", null, 9)).code, "user_cancelled");
   assert.equal(fetches, 1, "A late request cannot restart generation.");
+});
+
+test("manual takeover waits for destination cancellation, keeps its tab and blocks late delivery", async () => {
+  let acknowledge;
+  const sourceTab = { id: 9, windowId: 1, index: 0 };
+  const harness = loadBackgroundForTransferTest({ sourceTab, useRealTimers: true, sendMessageImpl: (_tabId, message) =>
+    message.type === "CANCEL_TRANSFER" ? new Promise(resolve => { acknowledge = resolve; }) : { ok: true }
+  });
+  const prepared = await harness.prepare("chatgpt", sourceTab);
+  assert.equal((await harness.cancel(prepared.tabId, {}, { preserveDestination: true })).ok, false, "Only the source can request manual takeover.");
+  let settled = false;
+  const stopping = harness.cancel(9, {}, { preserveDestination: true }).then(value => { settled = true; return value; });
+  await new Promise(setImmediate);
+  assert.equal(settled, false, "Stopping is not confirmed before the destination revokes its guards.");
+  assert.deepEqual(harness.operations.removed, []);
+  assert.equal((await harness.sendTransfer("chatgpt", prepared.tabId, false, null, sourceTab)).code, "user_cancelled");
+  acknowledge({ ok: true });
+  assert.equal((await stopping).ok, true);
+  assert.ok(harness.operations.sent.every(({ tabId, message }) => message.type !== "CANCEL_TRANSFER" || tabId !== 9));
+  const next = await harness.prepare("chatgpt", sourceTab, null, "after-manual-copy");
+  assert.equal((await harness.sendTransfer("chatgpt", next.tabId, false, null, sourceTab, "after-manual-copy")).ok, true);
+});
+
+test("manual takeover after worker state loss latches cancellation without claiming destination acknowledgement", async () => {
+  const sourceTab = { id: 9, windowId: 1, index: 0 };
+  const harness = loadBackgroundForTransferTest({ sourceTab });
+  assert.equal((await harness.cancel(9, {}, { preserveDestination: true })).ok, false);
+  assert.equal((await harness.prepare("gemini", sourceTab)).code, "user_cancelled");
+  assert.deepEqual(harness.operations.removed, []);
+});
+
+for (const result of ["missing", "unknown", "rejected", "timeout"]) test(`manual takeover handles ${result} cancellation acknowledgement without closing tabs`, async () => {
+  const sourceTab = { id: 9, windowId: 1, index: 0 };
+  const harness = loadBackgroundForTransferTest({ sourceTab, useRealTimers: true, sendMessageImpl: (_tabId, message) => {
+    if (message.type !== "CANCEL_TRANSFER") return { ok: true };
+    if (result === "timeout") return new Promise(() => {});
+    if (result === "rejected") return { ok: false };
+    throw new Error(result === "missing" ? "Could not establish connection. Receiving end does not exist." : "Message port closed");
+  } });
+  await harness.prepare("chatgpt", sourceTab);
+  assert.equal((await harness.cancel(9, {}, { preserveDestination: true })).ok, result === "missing");
+  assert.deepEqual(harness.operations.removed, []);
 });
 
 for (const from of ["source", "destination"]) test(`Escape from the ${from} closes its created destination and revokes delivery`, async () => {

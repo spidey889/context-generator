@@ -302,6 +302,7 @@ function loadPlatformContent(elements = [], hostname = "chatgpt.com", {
   innerWidth = 1280,
   innerHeight = 720,
   runtimeSendMessage = async () => ({ ok: true }),
+  clipboardWrite = null,
   storageSet = null
 } = {}) {
   let hooks = null;
@@ -441,7 +442,7 @@ function loadPlatformContent(elements = [], hostname = "chatgpt.com", {
   const sandbox = {
     TextEncoder,
     AbortController,
-    navigator: { userAgent: "Chrome" },
+    navigator: { userAgent: "Chrome", ...(clipboardWrite ? { clipboard: { writeText: clipboardWrite } } : {}) },
     console: {
       ...console,
       debug: () => {},
@@ -3086,6 +3087,72 @@ test("source cancellation releases its lock and prevents late summary or local-c
   assert.equal(telemetry.at(-1).status, "failed");
   assert.ok(telemetry.every(event => event.lastStage !== "summary_completed"));
   assert.ok(hooks.beginTransferAttempt("gemini", "next attempt"));
+  hooks.resetRunningFlag();
+});
+
+test("paste handoff bounds delivery to sixty seconds without extending an earlier deadline", () => {
+  const hooks = loadPlatformContent();
+  for (const remaining of [360000, 1500]) {
+    const trace = hooks.beginTransferAttempt("chatgpt", "test");
+    trace.deadlineAt = Date.now() + remaining;
+    const before = Date.now();
+    hooks.startPasteHandoff(trace, "Ready context");
+    assert.ok(trace.deadlineAt <= Date.now() + Math.min(60000, remaining));
+    assert.ok(trace.deadlineAt >= before + Math.min(60000, remaining));
+    hooks.resetRunningFlag();
+  }
+});
+
+test("handoff copy starts clipboard access on click, waits for revocation and ignores double clicks", async () => {
+  const copied = [], messages = [];
+  let acknowledge;
+  const hooks = loadPlatformContent([], "claude.ai", {
+    clipboardWrite: text => { copied.push(text); return Promise.resolve(); },
+    runtimeSendMessage: message => {
+      messages.push(message);
+      return message.type === "CANCEL_TRANSFER" ? new Promise(resolve => { acknowledge = resolve; }) : Promise.resolve({ ok: true });
+    }
+  });
+  hooks.document.createElement = () => new FakeElement();
+  const button = new FakeElement({ tag: "button" });
+  hooks.registerElementId("context-generator-handoff-copy", button);
+  const trace = hooks.beginTransferAttempt("grok", "test");
+  const carry = "  Complete prepared carry.\nKeep whitespace.  ";
+  hooks.startPasteHandoff(trace, carry);
+  const click = button.onclick;
+  const pending = click();
+  assert.deepEqual(copied, [carry], "Clipboard must start before yielding the click's user activation.");
+  await click();
+  assert.equal(trace.completed, false);
+  assert.equal(button.disabled, true);
+  assert.equal(messages.filter(message => message.type === "CANCEL_TRANSFER").length, 1);
+  assert.equal(messages.find(message => message.type === "CANCEL_TRANSFER").preserveDestination, true);
+  acknowledge({ ok: true });
+  await pending;
+  assert.equal(trace.completed, true);
+  assert.equal(button.style.display, "none");
+  assert.equal(button.onclick, null, "Hidden action must release its prepared carry closure.");
+  assert.ok(hooks.beginTransferAttempt("grok", "after copy"));
+  hooks.resetRunningFlag();
+});
+
+test("pending manual copy cannot show stale feedback after source navigation", async () => {
+  let acknowledge;
+  const hooks = loadPlatformContent([], "claude.ai", {
+    clipboardWrite: () => Promise.resolve(),
+    runtimeSendMessage: message => message.type === "CANCEL_TRANSFER" ? new Promise(resolve => { acknowledge = resolve; }) : Promise.resolve({ ok: true })
+  });
+  const button = new FakeElement({ tag: "button" });
+  hooks.registerElementId("context-generator-handoff-copy", button);
+  const trace = hooks.beginTransferAttempt("grok", "test");
+  hooks.startPasteHandoff(trace, "Carry from the original chat");
+  const pending = button.onclick();
+  hooks.navigate("/chat/different");
+  acknowledge({ ok: true });
+  await pending;
+  assert.equal(trace.completed, true);
+  assert.equal(hooks.document.documentElement.children.length, 0, "An old manual action cannot show feedback over a different chat.");
+  assert.ok(hooks.beginTransferAttempt("grok", "new chat"));
   hooks.resetRunningFlag();
 });
 

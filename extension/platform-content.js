@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-25-login-page-clue-v179";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-26-handoff-copy-v180";
   const SOURCE_JSON_RETRY_DELAY_MS = 2000;
   const INLINE_PILL_SIZE = 36;
   const ownedUiStyleSheets = new Map();
@@ -103,6 +103,7 @@
   const HANDOFF_OVERLAY_EXIT_MS = 220;
   // Default JSON transfer budget; also reserved after the DOM capture allowance.
   const RUNNING_AUTO_RESET_MS = 360000;
+  const PASTE_HANDOFF_TIMEOUT_MS = 60000;
   const DOM_CAPTURE_MIN_ALLOWANCE_MS = 20 * 60 * 1000;
   const DOM_CAPTURE_MAX_ALLOWANCE_MS = 2 * 60 * 60 * 1000;
   // Keep aligned with background.js: delivery is restricted to new-chat routes.
@@ -909,13 +910,13 @@
     status.style.cssText = "position:fixed;top:20px;left:50%;transform:translateX(-50%);z-index:2147483647;box-sizing:border-box;max-width:calc(100vw - 32px);padding:12px 18px;border:1px solid #6b5c92;border-radius:14px;background:#211b30;color:#f5f0ff;box-shadow:0 6px 24px #0004;font:500 14px/1.5 system-ui,sans-serif;text-align:center;white-space:pre-line;pointer-events:none;";
     status.textContent = text;
     statusRoot.appendChild(status);
-    return (succeeded) => {
+    return (succeeded, message = null) => {
       // Late completion must not replace a newer transfer's cue or recreated UI.
       if (document.getElementById(DESTINATION_STATUS_ID) !== status) return;
       if (succeeded === null) { status.remove(); return; }
-      status.textContent = succeeded
+      status.textContent = message || (succeeded
         ? "Context ready. Review it, then send when you’re ready."
-        : "Couldn’t add context. Return to your original tab to copy it.";
+        : "Couldn’t add context. Return to your original tab to copy it.");
       setTimeout(() => status.remove(), succeeded ? 3000 : 6000);
     };
   }
@@ -979,6 +980,7 @@
       getVirtualSweepTerminalQuietTimeout,
       createTransferTrace,
       startTransferDeadline,
+      startPasteHandoff,
       extendDomCaptureDeadline,
       estimateDomCaptureTime,
       showDomCaptureEstimate,
@@ -1087,6 +1089,7 @@
       setHandoffProgress("paste", "active");
       transferStage = "paste";
       advanceTransferTelemetryStage(transferTrace, "paste_started");
+      startPasteHandoff(transferTrace, summary);
       const requiresFocusedPaste = localDirect || FOCUSED_PASTE_DESTINATIONS.has(destinationId);
       if (requiresFocusedPaste && !localDirect) {
         await completeHandoffForDestinationReveal(transferTrace);
@@ -1104,6 +1107,7 @@
       });
       mergeTransferDiagnostics(transferTrace, pasteResponse?.diagnostics);
       checkTransferDeadline(transferTrace);
+      clearHandoffCopyAction();
       markTransferTrace(transferTrace, "paste done", pasteResponse?.timing || null);
       // Inactive delivery needs recovery before final activation can fail.
       // Already-focused local delivery can save its receipt before building UI.
@@ -1129,6 +1133,9 @@
       resetRunningFlag();
       if (localDirect) showFallbackModal(summary, getPlatform(destinationId)?.name || "the destination", true);
     } catch (error) {
+      // Manual takeover owns the pending clipboard/cancellation feedback. Late
+      // delivery replies must not dismiss it or finish this attempt twice.
+      if (transferTrace.manualCopy) return;
       if (error?.code === "user_cancelled") {
         cancelSourceTransfer(transferTrace.id, transferTrace);
         return;
@@ -1477,7 +1484,7 @@
     setTransferDeadline(trace, Date.now() + RUNNING_AUTO_RESET_MS);
   }
 
-  function setTransferDeadline(trace, deadlineAt) {
+  function setTransferDeadline(trace, deadlineAt, onTimeout = null) {
     clearRunningResetTimer();
     trace.deadlineAt = deadlineAt;
     runningResetTimer = setTimeout(() => {
@@ -1485,10 +1492,68 @@
       recordTransferFailureDiagnostics(trace, Object.assign(new Error("Transfer deadline expired"), { code: "transfer_timeout" }));
       updateTransferDiagnostics(trace, {}, "deadline_expired");
       markTransferTrace(trace, "failed: Transfer timed out.");
-      finishTransferTrace(trace, "client_interrupted");
+      finishTransferTrace(trace, onTimeout ? "paste_failed" : "client_interrupted");
       resetRunningFlag();
-      showErrorOverlay("Transfer timed out. Please try again.");
+      if (onTimeout) onTimeout();
+      else showErrorOverlay("Transfer timed out. Please try again.");
     }, Math.max(0, deadlineAt - Date.now()));
+  }
+
+  function startPasteHandoff(trace, text) {
+    const stopDelivery = () => notifyBackground({ type: "CANCEL_TRANSFER", transferId: trace.id, preserveDestination: true });
+    // Give the destination the same absolute write deadline as the source UI.
+    // Even a suspended timer or lost cancellation reply cannot permit late writes.
+    setTransferDeadline(trace, Math.min(trace.deadlineAt || Infinity, Date.now() + PASTE_HANDOFF_TIMEOUT_MS), () => {
+      stopDelivery().catch(() => {});
+      showFallbackModal(text, getPlatform(trace.destinationId)?.name || "the destination", false, true);
+    });
+    const button = document.getElementById("context-generator-handoff-copy");
+    if (!button) return;
+    button.style.display = "inline-flex";
+    button.disabled = false;
+    button.textContent = "Copy instead";
+    button.onclick = async () => {
+      if (activeTransferTrace !== trace || trace.completed || trace.cancelled || trace.expired) return;
+      try { checkTransferDeadline(trace); } catch { return; }
+      trace.manualCopy = true;
+      trace.cancelled = true;
+      clearRunningResetTimer();
+      button.disabled = true;
+      button.textContent = "Copying…";
+      // Start clipboard access inside the click's user activation, before any
+      // await. Failure retains the original copy dialog and its native fallback.
+      let copying;
+      try { copying = navigator.clipboard?.writeText ? navigator.clipboard.writeText(text).then(() => true) : false; }
+      catch { copying = false; }
+      const [copied, stopped] = await Promise.all([
+        waitForHandoffAction(copying), waitForHandoffAction(stopDelivery().then(reply => reply?.ok === true))
+      ]);
+      if (!instanceActive || activeTransferTrace !== trace || trace.completed) return;
+      let sourceChanged = false;
+      try { trace.sourceGuard?.check(); } catch { sourceChanged = true; }
+      cancelSourceTransfer(trace.id, trace);
+      if (sourceChanged) return;
+      if (!copied || !stopped) {
+        showFallbackModal(text, getPlatform(trace.destinationId)?.name || "the destination", false, !stopped);
+      } else {
+        showDestinationPasteStatus()?.(true, "Context copied. Auto-paste stopped. Check the destination before pasting.");
+      }
+    };
+  }
+
+  async function waitForHandoffAction(work) {
+    let timer;
+    try {
+      return await Promise.race([work, new Promise(resolve => { timer = setTimeout(() => resolve(false), 4000); })]);
+    } catch { return false; }
+    finally { clearTimeout(timer); }
+  }
+
+  function clearHandoffCopyAction() {
+    const button = document.getElementById("context-generator-handoff-copy");
+    if (!button) return;
+    button.style.display = "none";
+    button.onclick = null;
   }
 
   function extendDomCaptureDeadline(trace, estimateMs = 0) {
@@ -8796,6 +8861,14 @@
       ].join(";");
       brand.appendChild(reassurance);
 
+      const copyInstead = document.createElement("button");
+      copyInstead.id = "context-generator-handoff-copy";
+      copyInstead.type = "button";
+      copyInstead.textContent = "Copy instead";
+      copyInstead.title = "Copy your ready context and stop automatic pasting";
+      copyInstead.style.cssText = "display:none;margin-left:auto;flex:none;align-items:center;justify-content:center;min-height:32px;padding:6px 11px;border:1px solid rgba(190,166,224,0.3);border-radius:8px;background:rgba(174,145,214,0.12);color:#f2edf9;font:600 12px/1.2 system-ui,sans-serif;cursor:pointer";
+      brand.appendChild(copyInstead);
+
       overlay.appendChild(glow);
       overlay.appendChild(brand);
       overlay.appendChild(statusGroup);
@@ -8879,6 +8952,7 @@
 
   function hideOverlay({ immediate = false } = {}) {
     clearDomCaptureNotice();
+    clearHandoffCopyAction();
     const overlay = document.getElementById(OVERLAY_ID);
     const scrim = document.getElementById(HANDOFF_SCRIM_ID);
     const bubble = document.getElementById(BUBBLE_ID);

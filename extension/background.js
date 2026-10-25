@@ -177,7 +177,7 @@ function checkTransferOperation(operation) {
   checkTransferDeadline(operation?.deadlineAt);
 }
 
-function cancelTransferOperation(operation, { closeDestinations = false } = {}) {
+function cancelTransferOperation(operation, { closeDestinations = false, waitForDestinations = false } = {}) {
   const newlyCancelled = !operation.controller.signal.aborted;
   if (newlyCancelled) operation.controller.abort(createTransferCancelledError());
   // Revoke ownership before touching browser tabs, then submit closure before
@@ -185,6 +185,21 @@ function cancelTransferOperation(operation, { closeDestinations = false } = {}) 
   // Association alone never grants permission to close a pre-existing tab.
   const closing = closeDestinations
     ? Promise.all([...operation.createdTabIds].map(tabId => chrome.tabs.remove(tabId).catch(() => {}))) : undefined;
+  if (waitForDestinations) {
+    // Manual takeover keeps tabs open. Acknowledge only after their guards are
+    // revoked; aborting the worker alone cannot stop a paste already dispatched.
+    return Promise.all([...operation.tabIds].filter(tabId => tabId !== operation.sourceTabId).map(async tabId => {
+      try {
+        const reply = await sendMessageBeforeDeadline(tabId, { type: "CANCEL_TRANSFER", transferId: operation.transferId }, Date.now() + 3000, "destination cancellation");
+        return reply?.ok === true;
+      } catch (error) {
+        if (/Receiving end does not exist|Could not establish connection/.test(String(error?.message || ""))) return true;
+        try { await chrome.tabs.get(tabId); }
+        catch (tabError) { return /No tab with id/i.test(String(tabError?.message || "")); }
+        return false;
+      }
+    })).then(results => results.every(Boolean));
+  }
   if (newlyCancelled) {
     for (const tabId of operation.tabIds) {
       chrome.tabs.sendMessage(tabId, { type: "CANCEL_TRANSFER", transferId: operation.transferId }).catch(() => {});
@@ -1049,7 +1064,15 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     }
     // Retain a cancelled token even if Escape beats the first preparation
     // message. Late requests for this attempt must never start new work.
+    const knownOperation = Boolean(operation);
     if (!operation) operation = getTransferOperation(message.transferId, sender.tab);
+    if (message.preserveDestination === true) {
+      if (operation.sourceTabId !== tabId) { sendResponse({ ok: false }); return false; }
+      // A restarted worker may have lost the destination inventory. Latch the
+      // cancellation, but keep recovery cautious rather than claiming revocation.
+      cancelTransferOperation(operation, { waitForDestinations: true }).then(ok => sendResponse({ ok: ok && knownOperation }));
+      return true;
+    }
     cancelTransferOperation(operation, { closeDestinations: true }).then(() => sendResponse({ ok: true }));
     return true;
   }
