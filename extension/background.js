@@ -1151,9 +1151,16 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     summarizeWithBackend(message.conversation, message.transferId, message.deadlineAt, sender?.tab, message.messages, message.platform)
       .then((result) => sendResponse({ ok: true, summary: result.summary, timing: result.timing }))
       .catch((error) => {
-        if (error.code !== "user_cancelled") {
+        // The source recovers summary-service failures with a verified local
+        // carry. Only terminal errors should advertise a failed transfer here.
+        const terminal = ["request_too_large", "transfer_timeout", "extension_reloaded"].includes(error.code);
+        if (terminal) {
           console.error("[Context Generator Relay]", error);
           setBadge("ERR", "#b42318", 5000);
+        } else if (error.code !== "user_cancelled") {
+          console.info?.("[Cap Context] Summary unavailable; local carry recovery is available.", {
+            code: error.diagnostics?.error_code || error.code || "summary_failed"
+          });
         }
         sendResponse({
           ok: false,
@@ -1320,7 +1327,7 @@ function logSummaryResponseFailure(debug, error) {
       : /utf|encoded|encoding/i.test(message) ? "encoding"
       : /json/i.test(message) ? "json"
       : /stream ended before completion/i.test(message) ? "stream_incomplete" : "other" };
-  console.warn("[Cap Context] Summary response failure (local diagnostic)", entry);
+  console.info?.("[Cap Context] Summary response failure (local diagnostic)", entry);
   // Keep only the latest failure; logging must never delay or replace fallback.
   try { Promise.resolve(chrome.storage.local.set({ "context-generator-summary-response-debug-v1": entry })).catch(() => {}); } catch {}
 }
