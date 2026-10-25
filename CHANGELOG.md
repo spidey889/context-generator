@@ -2,6 +2,10 @@
 
 A short history of decisions and regressions that matter when changing the code. Read the relevant section of [LOGIC.md](LOGIC.md) for current behavior, ownership and checks; use this file when you need to understand why an approach changed. Entries describe source changes unless deployment is explicitly recorded. Extension packaging, Web Store publication and backend deployment are separate.
 
+## 2026-10-26
+
+- **Retry one interrupted summary-response download.** A network `TypeError` while reading an already-started summary now gets one fresh request before local-carry recovery. Discard the old body and presentation hint, reuse the exact payload/transfer identity and shared request, and retain one total deadline. Never retry cancellation, expiry, HTTP rejection, malformed/invalid content or an initial fetch failure. Cache only a complete result and include failed-attempt time in the summary duration. Keep this retry-only change separate from the copy-button and local-debug branches.
+
 ## 2026-10-25
 
 - **Handle background API failures during worker shutdown.** Reproduced uncaught `No SW` failures in optional toolbar badges, raw-transcript storage-event alarms and telemetry retry/fallback alarms. Await alarm creation within existing recovery paths and catch badge updates/clears, including timer and error-handler calls. Keep persisted reports and backoff when alarms are unavailable so the next worker can deliver them; no new permission, schema, retry loop or transfer delay. Focused regressions fail before the fix and verify retained-report delivery after restart. The screenshot's separate collapsed `Error in event handler` entry did not expose its cause; interactive inspection was blocked because Computer Use could not verify the browser URL.

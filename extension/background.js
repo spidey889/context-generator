@@ -1221,7 +1221,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 async function readSummaryResponse(response, checkDeadline, onNearEnd = () => {}) {
   // Older deployments return ordinary JSON. The new stream still has exactly
   // one authoritative final result; previews never become pasted context.
-  if (!response.headers?.get("content-type")?.includes("application/x-ndjson")) return response.json();
+  if (!response.headers?.get("content-type")?.includes("application/x-ndjson")) return response.json().catch(markInterruptedSummaryResponse);
   const reader = response.body.getReader();
   const decoder = new TextDecoder("utf-8", { fatal: true });
   let buffer = "", result, eof = false;
@@ -1255,7 +1255,7 @@ async function readSummaryResponse(response, checkDeadline, onNearEnd = () => {}
   try {
     while (!eof) {
       checkDeadline();
-      const chunk = await reader.read();
+      const chunk = await reader.read().catch(markInterruptedSummaryResponse);
       checkDeadline();
       eof = chunk.done;
       buffer += eof ? decoder.decode() : decoder.decode(chunk.value, { stream: true });
@@ -1269,6 +1269,12 @@ async function readSummaryResponse(response, checkDeadline, onNearEnd = () => {}
     if (!eof) { try { reader.cancel().catch(() => {}); } catch {} }
     reader.releaseLock();
   }
+}
+
+function markInterruptedSummaryResponse(error) {
+  // Tag only rejected body reads, not malformed JSON, UTF-8 or summary content.
+  if (error?.name === "TypeError") error.summaryResponseInterrupted = true;
+  throw error;
 }
 
 async function summarizeWithBackend(conversation, transferId = null, deadlineAt = null, sourceTab = null, messages = null, platform = null) {
@@ -1353,6 +1359,26 @@ async function summarizeWithBackend(conversation, transferId = null, deadlineAt 
 }
 
 async function fetchSummaryFromBackend(conversationText, transferId = null, deadlineAt = null, requestSignal = null, onNearEnd = () => {}, payload = { conversation: conversationText }) {
+  const startedAt = nowMs();
+  const retryDeadlineAt = Math.min(Date.now() + SUMMARY_BACKEND_TIMEOUT_MS, deadlineAt || Infinity);
+  for (let attempt = 1; attempt <= 2; attempt++) {
+    requestSignal?.throwIfAborted();
+    checkTransferDeadline(deadlineAt);
+    try {
+      const result = await fetchSummaryFromBackendOnce(conversationText, transferId, deadlineAt, requestSignal, onNearEnd, payload, retryDeadlineAt);
+      result.timing.attempt = attempt;
+      result.timing.summaryMs = Math.round(nowMs() - startedAt);
+      return result;
+    } catch (error) {
+      if (attempt === 2 || !error.summaryResponseInterrupted) throw error;
+      // Restart the whole response once, with the same identity and total time
+      // budget. Partial text and near-end hints never survive the failed read.
+      onNearEnd(false);
+    }
+  }
+}
+
+async function fetchSummaryFromBackendOnce(conversationText, transferId = null, deadlineAt = null, requestSignal = null, onNearEnd = () => {}, payload = { conversation: conversationText }, retryDeadlineAt = Infinity) {
   checkTransferDeadline(deadlineAt);
   const summaryStartedAt = nowMs();
   const diagnostics = { version: 1, diagnostics_revision: 3, last_operation: "summary_request" };
@@ -1361,7 +1387,7 @@ async function fetchSummaryFromBackend(conversationText, transferId = null, dead
   const onCancel = () => controller.abort(requestSignal.reason);
   requestSignal?.addEventListener("abort", onCancel, { once: true });
   if (requestSignal?.aborted) onCancel();
-  const requestDeadlineAt = Math.min(Date.now() + SUMMARY_BACKEND_TIMEOUT_MS, deadlineAt || Infinity);
+  const requestDeadlineAt = Math.min(Date.now() + SUMMARY_BACKEND_TIMEOUT_MS, deadlineAt || Infinity, retryDeadlineAt);
   const timeout = setTimeout(() => controller.abort(), Math.max(0, requestDeadlineAt - Date.now()));
   const stopServiceWorkerKeepAlive = startSummaryServiceWorkerKeepAlive();
   const checkSummaryDeadline = () => {

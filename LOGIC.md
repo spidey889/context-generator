@@ -382,6 +382,8 @@ Transfer routing uses the captured transcript's untrimmed JavaScript `String.len
 
 Source-page recovery covers backend HTTP/network/parse failures, empty replies or unavailable worker messaging after verified capture. It retains the existing quoted full-transcript format, model `local-direct` and fixed fallback reason `summary_service_unavailable`. It carries no fresh server receipt. Do not conflate it with backend `local-direct`, which can be signed. Capture and size limits still apply. A `request_too_large` error stops with the visible request-size message instead of silently substituting a local carry.
 
+Before that local fallback, a summary response whose body read rejects with a network `TypeError` gets one fresh backend request. Discard all text from the broken response and reset its near-end hint; keep the same request payload, transfer identity, shared callers and original total deadline. Retry only rejected JSON/body-stream reads, not HTTP errors, initial fetch failures, malformed JSON/UTF-8, incomplete stream structure or invalid summary content. Cancellation/deadlines stop the retry, and a second interruption uses the existing local fallback. Cache only a complete accepted response; timing includes both attempts and reports the successful attempt number.
+
 ### Configured provider order
 
 ```text
