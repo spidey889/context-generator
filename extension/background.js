@@ -311,11 +311,28 @@ function initializeTelemetryDelivery() {
   telemetryDeliveryChain = (async () => {
     do {
       telemetryDeliveryRequested = false;
+      let recoveryUnavailable = false;
       await enqueueTelemetryWork(async () => {
         await getOrCreateTelemetryInstallId();
-        await restoreActiveTransferTelemetry();
+        try {
+          const restored = await restoreActiveTransferTelemetry();
+          await recoverPendingTransferTelemetry(restored);
+        } catch {
+          // Active snapshots are recovery aids. Their failure must not stop a
+          // healthy local outbox from reaching the database.
+          console.warn("cap_context_telemetry", { reason: "active_storage_unavailable" });
+          recoveryUnavailable = true;
+        }
       });
       await flushTelemetryOutbox();
+      if (recoveryUnavailable) await enqueueTelemetryWork(async () => {
+        // An empty local queue does not prove that the unreadable fallback is
+        // empty. Keep a wakeup even if flushing just cleared the ordinary alarm.
+        const diagnostics = await readTelemetryDiagnostics();
+        chrome.alarms.create(TELEMETRY_RETRY_ALARM, {
+          when: Math.min(Date.now() + TELEMETRY_CONFIG_RETRY_BASE_MS, diagnostics.retry?.nextAttemptAt || Infinity)
+        });
+      });
     } while (telemetryDeliveryRequested);
   })().catch(() => {
     chrome.alarms.create(TELEMETRY_RETRY_ALARM, { delayInMinutes: 5 });
@@ -333,18 +350,21 @@ function enqueueTelemetryWork(work) {
 
 async function recordTransferTelemetry(event, sourceTabId = null) {
   const sanitizedEvent = sanitizeTransferTelemetryEvent(event);
-  if (!sanitizedEvent) return;
+  if (!sanitizedEvent) return false;
   // Once capture has resolved the durable identity, later progress can update
   // its memory snapshot without waiting behind unrelated storage writes.
   updatePreparedSummaryTelemetry(sanitizedEvent);
   return enqueueTelemetryWork(async () => {
-    await restoreActiveTransferTelemetry();
+    try { await restoreActiveTransferTelemetry(); }
+    catch { console.warn("cap_context_telemetry", { reason: "active_storage_unavailable" }); }
     const known = activeTransferTelemetry.get(sanitizedEvent.attemptId);
     if (known && !sameTransferIdentity(known, sanitizedEvent)) {
       await recordTelemetryDiagnostic("identity_conflict", makeTelemetryPayload(sanitizedEvent, null));
-      return;
+      return false;
     }
-    const queuedIdentity = (await readTelemetryOutbox()).find(entry => entry.payload.attempt_id === sanitizedEvent.attemptId)?.payload;
+    let queuedIdentity;
+    try { queuedIdentity = (await readTelemetryOutbox()).find(entry => entry.payload.attempt_id === sanitizedEvent.attemptId)?.payload; }
+    catch { console.warn("cap_context_telemetry", { reason: "outbox_storage_unavailable" }); }
     const mergedEvent = mergeTransferTelemetryEvents(known, {
       ...sanitizedEvent, extensionVersion: queuedIdentity?.extension_version || known?.extensionVersion || chrome.runtime.getManifest?.().version || null
     });
@@ -356,10 +376,39 @@ async function recordTransferTelemetry(event, sourceTabId = null) {
     const installId = await getOrCreateTelemetryInstallId();
     const payload = makeTelemetryPayload(mergedEvent, installId);
     updatePreparedSummaryTelemetry(mergedEvent, installId);
-    await appendTelemetryOutbox(payload);
-    await persistActiveTransferTelemetry(mergedEvent.attemptId);
-    initializeTelemetryDelivery();
+    return queueActiveTransferTelemetry(payload, mergedEvent.attemptId);
   });
+}
+
+async function queueActiveTransferTelemetry(payload, attemptId) {
+  let queued = false;
+  try {
+    queued = await appendTelemetryOutbox(payload);
+    if (!queued) return false; // A diagnosed identity conflict is not recoverable.
+  } catch {
+    console.warn("cap_context_telemetry", { reason: "outbox_storage_unavailable" });
+  }
+  try {
+    // Preserve a failed queue append in the existing active store. The pending
+    // bit survives worker restart and is cleared only after an outbox commit.
+    await persistActiveTransferTelemetry(attemptId, !queued);
+  } catch (error) {
+    console.warn("cap_context_telemetry", { reason: "active_storage_unavailable" });
+    if (!queued) throw error;
+  } finally { initializeTelemetryDelivery(); }
+  return true;
+}
+
+async function recoverPendingTransferTelemetry(entries) {
+  const installId = await getOrCreateTelemetryInstallId();
+  for (const [attemptId, entry] of Object.entries(entries)) {
+    const event = activeTransferTelemetry.get(attemptId);
+    if (entry?.outboxPending !== true || !event || entry.expiresAt <= Date.now()) continue;
+    await appendTelemetryOutbox(makeTelemetryPayload(event, installId));
+    // Replaying a committed revision after a crash is safe: server writes are
+    // idempotent. Keeping this marker after ordinary delivery would loop forever.
+    await persistActiveTransferTelemetry(attemptId, false);
+  }
 }
 
 function updatePreparedSummaryTelemetry(event, installId = null) {
@@ -447,10 +496,11 @@ async function restoreActiveTransferTelemetry() {
     const event = sanitizeTransferTelemetryEvent(entry?.event, false);
     if (!event || event.attemptId !== attemptId) continue;
     if (!Number.isFinite(entry.expiresAt) || entry.expiresAt <= Date.now()) {
-      if (event.status === "started") await recordTelemetryDiagnostic("outcome_unknown", makeTelemetryPayload(event, null));
+      await recordActiveTelemetryDrop(event, entry, true);
       continue;
     }
-    retained[attemptId] = { event, tabId: Number.isInteger(entry.tabId) ? entry.tabId : null, expiresAt: entry.expiresAt };
+    retained[attemptId] = { event, tabId: Number.isInteger(entry.tabId) ? entry.tabId : null, expiresAt: entry.expiresAt,
+      ...(entry.outboxPending === true ? { outboxPending: true } : {}) };
     activeTransferTelemetry.set(attemptId, event);
     if (Number.isInteger(entry.tabId)) activeTransferSourceTabs.set(attemptId, entry.tabId);
     const confirmation = sanitizeSummaryConfirmation(entry);
@@ -472,9 +522,21 @@ async function restoreActiveTransferTelemetry() {
   if (JSON.stringify(entries) !== JSON.stringify(retained)) {
     await activeStorage.set({ [TELEMETRY_ACTIVE_STORAGE_KEY]: retained });
   }
+  return retained;
 }
 
-async function persistActiveTransferTelemetry(attemptId) {
+async function recordActiveTelemetryDrop(event, entry, expired = false) {
+  if (entry.outboxPending === true) {
+    const payload = { ...makeTelemetryPayload(event, null), ...(sanitizeSummaryConfirmation(entry) || {}) };
+    const priority = telemetryDeliveryPriority(payload);
+    await recordTelemetryDiagnostic(`${expired ? "expired" : "overflow"}_${priority === 2 ? "terminal" : priority === 1 ? "confirmation" : "progress"}`,
+      payload);
+  } else if (event.status === "started") {
+    await recordTelemetryDiagnostic("outcome_unknown", makeTelemetryPayload(event, null));
+  }
+}
+
+async function persistActiveTransferTelemetry(attemptId, outboxPending = null) {
   const activeStorage = chrome.storage.session || chrome.storage.local;
   const stored = await activeStorage.get(TELEMETRY_ACTIVE_STORAGE_KEY);
   const entries = stored?.[TELEMETRY_ACTIVE_STORAGE_KEY] || {};
@@ -484,7 +546,7 @@ async function persistActiveTransferTelemetry(attemptId) {
   for (const [id, entry] of Object.entries(entries)) {
     if (entry?.expiresAt > Date.now()) continue;
     const event = sanitizeTransferTelemetryEvent(entry?.event, false);
-    if (event?.status === "started") await recordTelemetryDiagnostic("outcome_unknown", makeTelemetryPayload(event, null));
+    if (event) await recordActiveTelemetryDrop(event, entry, true);
     delete entries[id];
     activeTransferTelemetry.delete(id);
     preparedSummaryTelemetry.delete(id);
@@ -495,15 +557,23 @@ async function persistActiveTransferTelemetry(attemptId) {
     event: currentEvent,
     tabId: currentSourceTabId ?? null,
     expiresAt: Math.max(Date.now() + TELEMETRY_ACTIVE_MAX_AGE_MS, transferOperations.get(attemptId)?.expiresAt || 0),
+    ...((outboxPending ?? entries[attemptId]?.outboxPending) === true ? { outboxPending: true } : {}),
     ...(currentConfirmation || {})
   };
   if (currentEvent) activeTransferTelemetry.set(attemptId, currentEvent);
   if (Number.isInteger(currentSourceTabId)) activeTransferSourceTabs.set(attemptId, currentSourceTabId);
   if (currentConfirmation) summaryProofs.set(attemptId, currentConfirmation);
   while (Object.keys(entries).length > TELEMETRY_OUTBOX_MAX_ENTRIES) {
-    const oldestId = Object.keys(entries).find(id => entries[id].event?.status !== "started") || Object.keys(entries)[0];
+    // Already queued snapshots can be discarded before this store's only copy
+    // of an unsent report. Among pending copies, retain outcomes and proofs first.
+    const priority = entry => entry.outboxPending === true
+      ? 2 + telemetryDeliveryPriority({ status: entry.event?.status, summary_proof: entry.summary_proof })
+      : entry.event?.status === "started" ? 1 : 0;
+    const oldestId = Object.keys(entries).reduce((selected, id) =>
+      selected === null || priority(entries[id]) < priority(entries[selected]) ? id : selected, null);
     const removed = entries[oldestId];
-    if (removed.event?.status === "started") await recordTelemetryDiagnostic("outcome_unknown", makeTelemetryPayload(removed.event, null));
+    const removedEvent = sanitizeTransferTelemetryEvent(removed.event, false);
+    if (removedEvent) await recordActiveTelemetryDrop(removedEvent, removed);
     delete entries[oldestId];
     activeTransferTelemetry.delete(oldestId);
     preparedSummaryTelemetry.delete(oldestId);
@@ -686,11 +756,11 @@ async function appendTelemetryOutbox(payload) {
   const previousIndex = outbox.findIndex(entry => entry.payload.attempt_id === payload.attempt_id);
   if (previousIndex !== -1 && !samePayloadIdentity(outbox[previousIndex].payload, payload)) {
     await recordTelemetryDiagnostic("identity_conflict", payload);
-    return;
+    return false;
   }
   const previous = previousIndex === -1 ? null : outbox[previousIndex];
   const mergedPayload = previous ? mergeTelemetryPayloads(previous.payload, payload) : payload;
-  if (previous && JSON.stringify(previous.payload) === JSON.stringify(mergedPayload)) return;
+  if (previous && JSON.stringify(previous.payload) === JSON.stringify(mergedPayload)) return true;
   const entry = {
     // A revision gets a new delivery ID so an in-flight acknowledgement cannot
     // remove a newer terminal report or proof appended during its request.
@@ -704,6 +774,7 @@ async function appendTelemetryOutbox(payload) {
   // stopping after this write must never leave an oversized or unsanitized queue.
   const retained = await compactTelemetryOutbox(outbox);
   await chrome.storage.local.set({ [TELEMETRY_OUTBOX_STORAGE_KEY]: retained });
+  return true;
 }
 
 async function flushTelemetryOutbox() {
@@ -877,6 +948,8 @@ async function deliverTelemetryPayload(payload) {
   try {
     const response = await fetch(TELEMETRY_ENDPOINT_URL, {
       method: "POST",
+      credentials: "omit",
+      redirect: "error",
       headers: {
         "Content-Type": "application/json",
         "X-Cap-Context-Client": SUMMARY_CLIENT_HEADER
@@ -884,7 +957,9 @@ async function deliverTelemetryPayload(payload) {
       body: JSON.stringify(payload),
       signal: controller.signal
     });
-    if (response.ok) return { kind: "delivered", status: response.status };
+    // Only the recorder's explicit acknowledgement permits removing a report.
+    // A redirected HTML page or an accidental 200/202 cannot confirm a commit.
+    if (response.status === 204) return { kind: "delivered", status: response.status };
     const status = response.status;
     let code = null;
     try {
@@ -1005,7 +1080,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
   if (message?.type === "RECORD_TRANSFER_TELEMETRY") {
     recordTransferTelemetry(message.event, sender?.tab?.id)
-      .then(() => sendResponse({ ok: true }))
+      .then(accepted => sendResponse({ ok: accepted === true }))
       .catch(() => sendResponse({ ok: false }));
     return true;
   }
@@ -1338,14 +1413,11 @@ async function fetchSummaryFromBackend(conversationText, transferId = null, dead
       // keep the serialized write queued if storage stalls or the wait expires.
       await waitForSummaryTelemetry(enqueueTelemetryWork(async () => {
         const active = activeTransferTelemetry.get(transferId);
-        if (active) summaryProofs.set(transferId, confirmation);
-        try {
-          await appendTelemetryOutbox({ ...telemetry, last_stage: "summary_completed", ...confirmation });
-        } finally {
-          // Retain the receipt in session storage even if the local outbox
-          // failed. Neither telemetry store may discard a successful summary.
-          if (active) await persistActiveTransferTelemetry(transferId);
+        if (active) {
+          summaryProofs.set(transferId, confirmation);
+          activeTransferTelemetry.set(transferId, mergeTransferTelemetryEvents(active, { ...active, lastStage: "summary_completed" }));
         }
+        await queueActiveTransferTelemetry({ ...telemetry, last_stage: "summary_completed", ...confirmation }, transferId);
       }), controller.signal);
       initializeTelemetryDelivery();
     }

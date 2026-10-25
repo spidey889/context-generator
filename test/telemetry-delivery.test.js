@@ -222,6 +222,154 @@ test("permanent rejected entries are quarantined without blocking valid terminal
   assert.doesNotMatch(JSON.stringify(shared.local[DIAGNOSTICS]), /SENSITIVE_RESPONSE_BODY/);
 });
 
+test("unexpected successful HTTP responses retain the report until the recorder acknowledges it", async () => {
+  const shared = profile(), requests = [];
+  let acknowledged = false;
+  const background = worker(async (_url, options) => {
+    requests.push(options);
+    return acknowledged ? success() : { ok: true, status: 200, json: async () => ({}) };
+  }, shared);
+  await background.settled();
+  await background.ack(event(1, { status: "succeeded", lastStage: "completed" }));
+  await background.settled();
+  assert.equal(shared.local[OUTBOX].length, 1, "A generic HTTP 200 is not the recorder's acknowledgement.");
+  assert.equal(requests[0].redirect, "error");
+  assert.equal(requests[0].credentials, "omit");
+  acknowledged = true;
+  await background.retry();
+  assert.equal(shared.local[OUTBOX].length, 0);
+  assert.equal(shared.local[DIAGNOSTICS].counts.delivered, 1);
+});
+
+test("a rejected terminal queue write survives worker restart and retries without another source message", async () => {
+  const shared = profile();
+  const first = worker(async () => { throw new Error("offline"); }, shared);
+  await first.settled();
+  await first.ack(event());
+  await first.settled();
+  first.evaluate(`const original = chrome.storage.local.set;
+    chrome.storage.local.set = entries => Object.hasOwn(entries, ${JSON.stringify(OUTBOX)})
+      ? Promise.reject(new Error("temporary queue write failure")) : original(entries);`);
+  const acknowledged = await first.ack(event(1, { status: "succeeded", lastStage: "completed",
+    reportedModel: "local-direct", diagnostics: { version: 1, paste_populated: true } }));
+  await first.settled();
+  assert.equal(acknowledged.ok, true, "The session fallback must accept the report durably.");
+  const requests = [];
+  const restarted = worker(async (_url, options) => { requests.push(JSON.parse(options.body)); return success(); }, shared, NOW + 60000);
+  await restarted.settled();
+  const terminal = requests.find(input => input.status === "succeeded");
+  assert.ok(terminal, "Restart must recover the final report without another content-script event.");
+  assert.equal(terminal.reported_model, "local-direct");
+  assert.equal(terminal.diagnostics.paste_populated, true);
+  assert.equal(shared.local[OUTBOX].length, 0);
+  const count = requests.length;
+  const again = worker(async (_url, options) => { requests.push(JSON.parse(options.body)); return success(); }, shared, NOW + 70000);
+  await again.settled();
+  assert.equal(requests.length, count, "A recovered report must not be replayed indefinitely.");
+});
+
+test("unavailable optional session storage cannot prevent a durable final report from draining", async () => {
+  const requests = [], shared = profile();
+  const background = worker(async (_url, options) => { requests.push(JSON.parse(options.body)); return success(); }, shared);
+  await background.settled();
+  background.evaluate(`chrome.storage.session.get = async () => { throw new Error("session unavailable"); };`);
+  assert.equal((await background.ack(event(1, { status: "succeeded", lastStage: "completed" }))).ok, true);
+  await background.settled();
+  assert.equal(requests.length, 1);
+  assert.equal(requests[0].status, "succeeded");
+  assert.equal(shared.local[OUTBOX].length, 0);
+});
+
+test("an unreadable fallback with an empty local queue retains a retry wakeup", async () => {
+  const shared = profile({ [INSTALL]: id(999) }, { [ACTIVE]: { [id(1)]: {
+    event: event(1, { status: "succeeded", lastStage: "completed" }), tabId: 42,
+    expiresAt: NOW + 360000, outboxPending: true
+  } } });
+  const requests = [];
+  const background = worker(async (_url, options) => { requests.push(JSON.parse(options.body)); return success(); }, shared);
+  background.evaluate(`globalThis.originalSessionGet = chrome.storage.session.get;
+    chrome.storage.session.get = async () => { throw new Error("session temporarily unavailable"); };`);
+  await background.settled();
+  assert.ok(background.alarms.some(alarm => alarm.name === "retry-transfer-telemetry" && alarm.when <= NOW + 300000));
+  assert.equal(requests.length, 0);
+  background.evaluate("chrome.storage.session.get = originalSessionGet");
+  background.clock.now = NOW + 300000;
+  await background.retry();
+  assert.equal(requests.length, 1);
+  assert.equal(requests[0].status, "succeeded");
+});
+
+test("a signed receipt retained after a queue write failure is replayed after restart without a final source report", async () => {
+  const shared = profile(), proof = "e".repeat(64), confirmedAt = new Date(NOW).toISOString();
+  const first = worker(async url => {
+    if (url.endsWith("/api/telemetry")) throw new Error("offline");
+    first.evaluate(`const original = chrome.storage.local.set;
+      chrome.storage.local.set = entries => Object.hasOwn(entries, ${JSON.stringify(OUTBOX)})
+        ? Promise.reject(new Error("queue unavailable")) : original(entries);`);
+    return { ok: true, status: 200, json: async () => ({ summary: "PRIVATE_SUMMARY", summaryProofV3: proof,
+      summaryConfirmedAt: confirmedAt, summaryModel: "gemini-3.5-flash-lite" }) };
+  }, shared);
+  await first.settled();
+  await first.ack(event(1, { lastStage: "summary_request_started" }));
+  await first.settled();
+  assert.equal((await first.evaluate(`summarizeWithBackend("PRIVATE_TRANSCRIPT", "${id(1)}")`)).summary, "PRIVATE_SUMMARY");
+  await first.settled();
+  const requests = [];
+  const restarted = worker(async (_url, options) => { requests.push(JSON.parse(options.body)); return success(); }, shared, NOW + 60000);
+  await restarted.settled();
+  const recovered = requests.find(input => input.summary_proof === proof);
+  assert.ok(recovered);
+  assert.equal(recovered.summary_confirmed_at, confirmedAt);
+  assert.equal(recovered.model, "gemini-3.5-flash-lite");
+  assert.equal(recovered.extension_version, "1.4.6");
+  assert.equal(recovered.status, "started", "Summary proof cannot invent a paste outcome.");
+  assert.equal(recovered.last_stage, "summary_completed");
+  assert.doesNotMatch(JSON.stringify(shared), /PRIVATE_SUMMARY|PRIVATE_TRANSCRIPT/);
+});
+
+test("invalid reports and unavailable stores are not acknowledged as durably accepted", async () => {
+  const background = worker(async () => success());
+  await background.settled();
+  assert.equal((await background.ack(event(1, { lastStage: "not_a_stage" }))).ok, false);
+  background.evaluate(`chrome.storage.local.set = chrome.storage.session.set = async () => { throw new Error("PRIVATE_STORAGE_ERROR"); };`);
+  assert.equal((await background.ack(event())).ok, false);
+  await background.settled();
+});
+
+test("expired session fallback reports are diagnosed instead of replayed or silently removed", async () => {
+  const shared = profile({ [INSTALL]: id(999) }, { [ACTIVE]: { [id(1)]: {
+    event: event(1, { status: "succeeded", lastStage: "completed" }), tabId: 42,
+    expiresAt: NOW - 1, outboxPending: true
+  } } });
+  let requests = 0;
+  const background = worker(async () => { requests++; return success(); }, shared);
+  await background.settled();
+  assert.equal(requests, 0);
+  assert.equal(shared.local[DIAGNOSTICS].counts.expired_terminal, 1);
+  assert.equal(shared.local[DIAGNOSTICS].recent[0].attemptId, id(1));
+  assert.deepEqual(shared.session[ACTIVE], {});
+});
+
+test("session recovery capacity protects unsent final reports before lower-priority snapshots", async () => {
+  const shared = profile(), background = worker(async () => success(), shared);
+  await background.settled();
+  const entries = Object.fromEntries(Array.from({ length: 500 }, (_value, index) => [id(index + 1), {
+    event: event(index + 1, { status: "succeeded", lastStage: "completed" }),
+    tabId: 42, expiresAt: NOW + 300000, outboxPending: true
+  }]));
+  // The last existing pending copy is an unsigned progress report, which is
+  // less valuable than the new terminal outcome when this store is full.
+  entries[id(500)].event = event(500);
+  shared.session[ACTIVE] = entries;
+  background.evaluate(`activeTransferTelemetry.set("${id(501)}", ${JSON.stringify(event(501, { status: "succeeded", lastStage: "completed" }))});`);
+  await background.evaluate(`persistActiveTransferTelemetry("${id(501)}", true)`);
+  assert.equal(Object.keys(shared.session[ACTIVE]).length, 500);
+  assert.ok(shared.session[ACTIVE][id(1)], "Do not evict a pending terminal just because it is older.");
+  assert.ok(shared.session[ACTIVE][id(501)]);
+  assert.equal(shared.session[ACTIVE][id(500)], undefined);
+  assert.equal(shared.local[DIAGNOSTICS].counts.overflow_progress, 1);
+});
+
 test("malformed stored payloads never transmit content or copy it into quarantine diagnostics", async () => {
   const shared = profile({ [OUTBOX]: [
     { deliveryId: id(100), payload: payload(1, { conversation: "SENSITIVE_CHAT", summary: "SENSITIVE_SUMMARY" }) },
@@ -361,9 +509,9 @@ test("active state and optional v3 served-model receipt survive worker restart b
     const retained = shared.session[ACTIVE][id(1)];
     assert.equal(retained.event.status, "failed");
     assert.equal(retained.event.failureReason, "user_cancelled");
-    // A signed receipt advances the durable queue beyond the last source-page event.
+    // A received signed receipt advances both recovery stores beyond the source's last event.
     assert.equal(queued.last_stage, withReceipt ? "summary_completed" : "summary_request_started");
-    assert.equal(retained.event.lastStage, withReceipt ? "summary_response_started" : "summary_request_started");
+    assert.equal(retained.event.lastStage, withReceipt ? "summary_completed" : "summary_request_started");
     assert.ok(retained.expiresAt > NOW + 10000);
     assert.doesNotMatch(JSON.stringify(shared), /SENSITIVE_SUMMARY|SENSITIVE_TRANSCRIPT/);
   }

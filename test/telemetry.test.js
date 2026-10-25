@@ -189,7 +189,7 @@ test("telemetry keeps one install id across summaries, browser restarts, and ext
     assert.equal(options.headers["X-Cap-Context-Client"], "cap-context-extension/1");
     assert.equal(options.headers.apikey, undefined);
     requests.push(JSON.parse(options.body));
-    return { ok: true };
+    return { ok: true, status: 204 };
   };
   const firstWorker = loadTelemetryBackground(deliver);
   await firstWorker.drain();
@@ -415,7 +415,7 @@ test("background persists server confirmation and never rebinds cached proof to 
       }) };
     }
     requests.push(body);
-    return { ok: online };
+    return { ok: online, status: online ? 204 : 503 };
   }, {}, "1.4.6");
   await background.drain();
   await background.sendTelemetry(makeEvent({ lastStage: "summary_request_started" }));
@@ -464,7 +464,7 @@ test("source-tab cancellation stops summary consumption and retains its failure 
       return { ok: true, json: async () => { bodyReads++; return { summary: "Build passed." }; } };
     }
     requests.push(body);
-    return { ok: true };
+    return { ok: true, status: 204 };
   }, {}, "1.4.6");
   await background.drain();
   await background.sendTelemetry(makeEvent({ lastStage: "summary_request_started" }), 42);

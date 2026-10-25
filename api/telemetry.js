@@ -53,6 +53,7 @@ async function handler(req, res) {
     const response = await Promise.race([fetch(upstreamUrl, {
       signal: controller.signal,
       method: "POST",
+      redirect: "error",
       headers: {
         "Content-Type": "application/json",
         apikey: upstreamKey,
@@ -62,7 +63,7 @@ async function handler(req, res) {
     }), new Promise((_, reject) => {
       timer = setTimeout(() => { controller.abort(); reject(new Error("telemetry_timeout")); }, RELAY_TIMEOUT_MS);
     })]);
-    if (!response.ok) {
+    if (response.status !== 204) {
       // Parse only our bounded Edge codes, never relay provider/database bodies.
       const code = await readUpstreamCode(response, controller.signal);
       const permanentCodes = new Set(["invalid_payload", "invalid_summary_proof", "attempt_identity_mismatch", "request_too_large", "unsupported_content_type"]);

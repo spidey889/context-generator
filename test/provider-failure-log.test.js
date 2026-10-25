@@ -43,6 +43,34 @@ test("failure writes retry the same ID, overlap fallback work and flush before s
   release(); await flush; assert.equal(finished, true);
 });
 
+test("provider logging does not mistake HTTP 200 or 202 for a committed observation", async t => {
+  configure(t);
+  for (const status of [200, 202]) {
+    const calls = [], warnings = [];
+    const recorder = createProviderFailureLog({ attemptId: "33333333-3333-4333-8333-333333333333",
+      warn: (...args) => warnings.push(args), fetchImpl: async (_url, options) => {
+        calls.push(JSON.parse(options.body));
+        return new Response(null, { status });
+      } });
+    recorder.record(event());
+    await recorder.flush();
+    assert.equal(warnings.length, 1, "An unconfirmed write must produce the fixed delivery warning.");
+    assert.equal(calls.length, 2);
+    assert.deepEqual(calls[0], calls[1]);
+  }
+});
+
+test("provider logging's bounded capacity emits one fixed warning when observations are dropped", async t => {
+  configure(t);
+  const warnings = [];
+  const recorder = createProviderFailureLog({ attemptId: "33333333-3333-4333-8333-333333333333",
+    fetchImpl: async () => new Response(null, { status: 204 }), warn: (...args) => warnings.push(args) });
+  for (let i = 0; i < 18; i++) recorder.record(event());
+  await recorder.flush();
+  assert.equal(warnings.length, 1);
+  assert.equal(warnings[0][1].reason, "capacity_reached");
+});
+
 test("logging outages, stalled transports and rejected auth never block or expose bodies", async t => {
   configure(t);
   for (const status of [401, 500, null]) {
