@@ -33,3 +33,28 @@ This is a confirmed reporting/cancellation gap worth fixing. It is a possible ex
 - Focused tests cover retained progress, terminal protection, different source/destination ownership, post-event attempts and existing tab-close/expiry behavior.
 - An isolated Brave test starts a real transfer, holds its summary response open, reloads the source document and verifies the worker's accepted interruption report, aborted network read and untouched old destination. A second real transfer from the new document succeeds without replacing the first outcome.
 - The browser test uses synthetic data and a local backend; it does not spend provider quota or write production transfers. CI runs this scenario through `CAP_CONTEXT_SOURCE_RELOAD_SMOKE=1`.
+
+## Permission-preserving follow-up — October 25
+
+Source-tab closure retains `user_cancelled` / `source_tab_closed`; source document
+loading retains `client_interrupted` / `conversation_changed` and
+`source_changed: true`. Chrome's loading event covers reload/navigation; it does
+not identify which user gesture caused it. Only active transfer ownership is
+considered, not unrelated browsing.
+
+The existing native Tabs events require no new manifest permission. The manifest
+and host access remain unchanged; there is no new visible UI or permission
+request. See [Chrome's Tabs API permissions](https://developer.chrome.com/docs/extensions/reference/api/tabs#permissions).
+
+An optional active-store restoration rejection previously suppressed these
+reports even when this worker retained a valid snapshot and local delivery was
+healthy. The follow-up uses that still-live, identity-matched snapshot, with
+expiry/terminal/newer-attempt protections. Regressions reproduced both missing
+reports before the fix and now verify delivery plus expiry protection.
+
+The existing Brave scenario now also starts a third, uncached summary and closes
+the actual source tab. It checks the distinct closure diagnosis and aborted
+summary. Both refresh and closure reports pass through the actual relay/Edge
+handler into the local migrated database, while the transfer between them still
+succeeds. No synthetic production rows are created. Whole-browser crashes or
+unavailable persistence cannot guarantee a final report.

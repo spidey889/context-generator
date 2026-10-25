@@ -177,6 +177,15 @@ async function createTelemetrySmokeFixture(repoRoot, databaseEnabled, summaryMod
       assert.deepEqual(counts, { total: 1, today: 1, failed: 0 });
       assert.equal((await database.query("select count(*)::int as count from public.transfers where summary_verified")).rows[0].count, 1);
     },
+    async verifyInterruptionOutcome(terminal) {
+      if (!databaseEnabled) return;
+      await rpcChain;
+      const row = (await database.query("select status,last_stage,failure_reason,diagnostics from public.transfers where attempt_id=$1", [terminal.attempt_id])).rows[0];
+      assert.deepEqual(row, { status: "failed", last_stage: terminal.last_stage,
+        failure_reason: terminal.failure_reason, diagnostics: terminal.diagnostics });
+      assert.equal(row.diagnostics.cancelled, true);
+      assert.ok(["conversation_changed", "source_tab_closed"].includes(row.diagnostics.error_code));
+    },
     async verifyDraftOutcome(terminal) {
       if (!databaseEnabled) return;
       await rpcChain;

@@ -683,6 +683,31 @@ test("source document reload retains an interrupted report when the old page can
   assert.doesNotMatch(JSON.stringify(delivered), /PRIVATE_CHAT|deepseek\.invalid/);
 });
 
+for (const closed of [false, true]) test(`source ${closed ? "closure" : "reload"} is reported when optional session restoration rejects`, async () => {
+  const delivered = [];
+  const background = worker(async (_url, options) => { delivered.push(JSON.parse(options.body)); return success(); });
+  await background.settled();
+  await background.ack(event(1, { lastStage: "paste_started", reportedModel: "local-direct" }));
+  await background.settled();
+  background.evaluate(`chrome.storage.session.get = async () => { throw new Error("session unavailable"); };`);
+  if (closed) await background.listeners.removed(42);
+  else await background.listeners.updated(42, { status: "loading" });
+  await background.settled();
+  assert.equal(delivered.at(-1).status, "failed");
+  assert.equal(delivered.at(-1).failure_reason, closed ? "user_cancelled" : "client_interrupted");
+  assert.equal(delivered.at(-1).diagnostics.error_code, closed ? "source_tab_closed" : "conversation_changed");
+  assert.equal(delivered.at(-1).last_stage, "paste_started");
+  assert.equal(delivered.at(-1).reported_model, "local-direct");
+  // A failed restore must not revive an expired in-memory attempt later.
+  await background.ack(event(2));
+  await background.settled();
+  background.clock.now += 7 * 60 * 1000;
+  const count = delivered.length;
+  await background.listeners.removed(42);
+  await background.settled();
+  assert.equal(delivered.length, count);
+});
+
 test("source reload cancels only its owned work and preserves completed and newer reports", async () => {
   const background = worker(async () => { throw new Error("offline"); });
   await background.settled();

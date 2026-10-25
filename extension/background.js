@@ -588,12 +588,24 @@ async function recordUserCancelledTransfersForTab(tabId) {
 }
 
 async function recordInterruptedTransfersForTab(tabId, failureReason, errorCode, interruptedAt = Infinity) {
-  await enqueueTelemetryWork(() => restoreActiveTransferTelemetry());
+  const restored = await enqueueTelemetryWork(async () => {
+    try { await restoreActiveTransferTelemetry(); return true; }
+    catch {
+      console.warn("cap_context_telemetry", { reason: "active_storage_unavailable" });
+      return false;
+    }
+  });
   const work = [];
   for (const [attemptId, sourceTabId] of activeTransferSourceTabs.entries()) {
     if (sourceTabId !== tabId) continue;
     const active = activeTransferTelemetry.get(attemptId);
     if (!active || active.status !== "started") continue;
+    if (!restored) {
+      // A session read failure must not hide a real tab interruption when this
+      // worker still has a live, identity-matched snapshot. Never revive expiry.
+      const prepared = preparedSummaryTelemetry.get(attemptId);
+      if (!prepared || prepared.expiresAt <= Date.now() || !sameTransferIdentity(prepared.event, active)) continue;
+    }
     // Storage work can finish after the new document starts its next transfer.
     // A delayed interruption must never finalize that newer attempt.
     if (Date.parse(active.attemptedAt) > interruptedAt) continue;

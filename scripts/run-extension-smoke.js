@@ -878,8 +878,10 @@ async function startFixtureServer() {
       state.summaryRequests.push(JSON.parse(rawBody));
       const validated = validateSummarizeRequest({ headers: request.headers, body: rawBody });
       assert.equal(validated.ok, true, `Installed extension must satisfy the actual backend input contract (${validated.code || "accepted"}).`);
-      if ((ESCAPE_SMOKE || SOURCE_RELOAD_SMOKE) && state.summaryRequests.length === 1) {
+      if ((ESCAPE_SMOKE && state.summaryRequests.length === 1)
+        || (SOURCE_RELOAD_SMOKE && [1, 3].includes(state.summaryRequests.length))) {
         state.summaryPending = true;
+        state.summaryCancelled = false;
         response.writeHead(200, { "Access-Control-Allow-Origin": "*", "Content-Type": "application/x-ndjson" });
         response.write(`${JSON.stringify({ type: "delta", text: ESCAPE_SMOKE === "destination"
           ? "📦 KEY CONTEXT\nVerified fixture context.\n🔁 NEXT STEP\n" : "Halfway through the fixture summary." })}\n`);
@@ -1443,7 +1445,7 @@ async function verifyEscapeCancellation({ sourceSession, devToolsPort, origin, s
   process.stdout.write(`✓ Trusted Escape in ${ESCAPE_SMOKE}: destination tab closed in ${escapeCloseMs}ms, summary socket aborted; source stays open and next transfer succeeds.\n`);
 }
 
-async function verifySourceReloadReport({ sourceSession, devToolsPort, origin, state, destinationSessions }) {
+async function verifySourceReloadReport({ sourceSession, sourceTargetId, browserSession, devToolsPort, origin, state, destinationSessions, telemetryFixture }) {
   const start = `(() => {
     document.getElementById("context-generator-bubble").click();
     [...document.querySelectorAll(".context-generator-destination-tile")].find(tile => tile.textContent.includes("Claude")).click();
@@ -1463,6 +1465,7 @@ async function verifySourceReloadReport({ sourceSession, devToolsPort, origin, s
   assert.equal(terminal.diagnostics.error_code, "conversation_changed");
   assert.equal(terminal.diagnostics.source_changed, true);
   assert.ok(terminal.diagnostics.events.some(event => event.event === "cancelled" && event.code === "conversation_changed"));
+  await waitFor(() => telemetryFixture.verifyInterruptionOutcome(terminal).then(() => true), "the saved source-reload diagnosis");
   await waitFor(() => state.summaryCancelled, "the interrupted summary socket to close");
   assert.equal(await firstDestination.evaluate('document.querySelector("textarea").value'), "");
   assert.equal(await firstDestination.evaluate("window.__capContextSmokeSendClicks"), 0);
@@ -1480,8 +1483,24 @@ async function verifySourceReloadReport({ sourceSession, devToolsPort, origin, s
   assert.equal(await nextDestination.evaluate("window.__capContextSmokeSendClicks"), 0);
   assert.equal(await firstDestination.evaluate('document.querySelector("textarea").value'), "", "Late callbacks must not paste into the interrupted destination.");
   assert.equal(state.telemetryRequests.some(payload => payload.attempt_id === attemptId && payload.status === "succeeded"), false);
+  // Use a different transcript so this third transfer cannot reuse the summary
+  // cache. Close the actual source tab while its new summary body is pending.
+  await sourceSession.call("Page.bringToFront");
+  await sourceSession.evaluate(`document.querySelector('article[data-message-author-role="user"]').append(" Verify source-tab closure on this new transfer.")`);
+  await sourceSession.evaluate(start);
+  await waitFor(() => state.summaryRequests.length === 3 && state.summaryPending, "the pending source-close transfer");
+  const closingId = (await waitFor(() => state.telemetryRequests.find(payload => ![attemptId, next.attempt_id].includes(payload.attempt_id)
+    && payload.status === "started"), "the admitted source-close transfer")).attempt_id;
+  await browserSession.call("Target.closeTarget", { targetId: sourceTargetId });
+  const closed = await waitFor(() => state.telemetryRequests.find(payload => payload.attempt_id === closingId && payload.status === "failed"), "the worker's source-tab-closed report");
+  assert.equal(closed.failure_reason, "user_cancelled");
+  assert.equal(closed.diagnostics.error_code, "source_tab_closed");
+  assert.ok(closed.diagnostics.events.some(event => event.event === "cancelled" && event.code === "source_tab_closed"));
+  await waitFor(() => state.summaryCancelled, "the source-close summary socket to abort");
+  await waitFor(() => telemetryFixture.verifyInterruptionOutcome(closed).then(() => true), "the saved source-tab-closed diagnosis");
   process.stdout.write("✓ Source reload retained a worker interruption report, aborted the old summary and left its destination empty.\n");
   process.stdout.write("✓ A new transfer from the reloaded document succeeded without changing the old outcome.\n");
+  process.stdout.write("✓ Closing the source tab retained its distinct cancellation diagnosis through the relay and database fixture.\n");
 }
 
 async function verifyEarlyHandoff({ sourceSession, devToolsPort, origin, state, destinationSessions }) {
@@ -2192,7 +2211,7 @@ async function run() {
       return;
     }
     if (SOURCE_RELOAD_SMOKE) {
-      await verifySourceReloadReport({ sourceSession, devToolsPort, origin, state, destinationSessions });
+      await verifySourceReloadReport({ sourceSession, sourceTargetId: sourceTarget.id, browserSession, devToolsPort, origin, state, destinationSessions, telemetryFixture });
       assert.ok(telemetryFixture.responses.every(status => status === 204), "Reload reports must pass the real telemetry validators.");
       return;
     }
