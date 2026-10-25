@@ -3156,6 +3156,29 @@ test("pending manual copy cannot show stale feedback after source navigation", a
   hooks.resetRunningFlag();
 });
 
+test("a late handoff-copy callback cannot dismiss or unlock a newer transfer", async () => {
+  let finishCopy, acknowledge;
+  const hooks = loadPlatformContent([], "claude.ai", {
+    clipboardWrite: () => new Promise(resolve => { finishCopy = resolve; }),
+    runtimeSendMessage: message => message.type === "CANCEL_TRANSFER" && message.preserveDestination
+      ? new Promise(resolve => { acknowledge = resolve; }) : Promise.resolve({ ok: true })
+  });
+  const button = new FakeElement({ tag: "button" });
+  hooks.registerElementId("context-generator-handoff-copy", button);
+  const old = hooks.beginTransferAttempt("grok", "test");
+  hooks.startPasteHandoff(old, "Old prepared carry");
+  const pending = button.onclick();
+  hooks.dispatchDocumentEvent("keydown", { key: "Escape", isTrusted: true, preventDefault() {}, stopImmediatePropagation() {} });
+  const next = hooks.beginTransferAttempt("chatgpt", "new attempt");
+  assert.ok(next);
+  finishCopy(); acknowledge({ ok: true });
+  await pending;
+  assert.equal(next.completed, false);
+  assert.equal(hooks.beginTransferAttempt("grok", "duplicate"), null, "The old callback cannot release the new attempt's lock.");
+  assert.equal(hooks.document.documentElement.children.length, 0, "No stale success cue or recovery dialog.");
+  hooks.resetRunningFlag();
+});
+
 test("trusted Escape releases the source immediately while cancellation messaging is pending", async () => {
   const messages = [];
   const cancellationOrder = [];

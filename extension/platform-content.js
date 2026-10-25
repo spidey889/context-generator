@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-26-handoff-copy-v180";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-26-handoff-copy-audit-v181";
   const SOURCE_JSON_RETRY_DELAY_MS = 2000;
   const INLINE_PILL_SIZE = 36;
   const ownedUiStyleSheets = new Map();
@@ -1534,7 +1534,9 @@
       cancelSourceTransfer(trace.id, trace);
       if (sourceChanged) return;
       if (!copied || !stopped) {
-        showFallbackModal(text, getPlatform(trace.destinationId)?.name || "the destination", false, !stopped);
+        // A cancellation acknowledgement stops future writes; the carry may
+        // already have landed before the click, even when clipboard copy fails.
+        showFallbackModal(text, getPlatform(trace.destinationId)?.name || "the destination", false, true);
       } else {
         showDestinationPasteStatus()?.(true, "Context copied. Auto-paste stopped. Check the destination before pasting.");
       }

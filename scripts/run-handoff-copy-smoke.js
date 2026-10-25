@@ -46,10 +46,10 @@ async function run() {
     window.__handoffScenario = scenario;
     window.__handoffCopied = [];
     Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText: text => {
-      if (scenario === 'clipboard-failure') return Promise.reject(new Error('Synthetic clipboard denial'));
+      if (scenario.startsWith('clipboard-failure')) return Promise.reject(new Error('Synthetic clipboard denial'));
       window.__handoffCopied.push(text); return Promise.resolve();
     } } });
-    const text = scenario === 'clipboard-failure' ? 'User: Preserve this exact short conversation.' : 'Verified synthetic conversation. '.repeat(400);
+    const text = scenario.startsWith('clipboard-failure') ? 'User: Preserve this exact short conversation.' : 'Verified synthetic conversation. '.repeat(400);
     const trace = beginTransferAttempt('chatgpt', 'test');
     window.__handoffTrace = trace;
     window.__handoffExpected = text.length < MIN_BACKEND_CONVERSATION_CHARS ? createLocalContextCarry(text).summary : ${JSON.stringify(SUMMARY)};
@@ -64,7 +64,7 @@ async function run() {
     if (window.__handoffScenario === 'timeout') trace.deadlineAt = Date.now() + 2500;`);
     // A lost delivery reply must still reach the source's own timeout recovery.
     installed = installed.replace("  async function notifyBackground(message) {", `  async function notifyBackground(message) {
-    if (window.__handoffScenario === 'timeout' && message.type === 'TRANSFER_TO_DESTINATION') {
+    if (['timeout', 'clipboard-failure-after-insert'].includes(window.__handoffScenario) && message.type === 'TRANSFER_TO_DESTINATION') {
       extensionRuntime.sendMessage(message).catch(() => {}); return new Promise(() => {});
     }
     if (window.__handoffScenario === 'stop-unconfirmed' && message.type === 'CANCEL_TRANSFER' && message.preserveDestination) {
@@ -80,7 +80,7 @@ async function run() {
     source = await CdpSession.connect(target.webSocketDebuggerUrl); await source.call("Runtime.enable");
     const context = await waitFor(() => source.getExtensionContextId(), "installed source extension");
     await waitFor(() => source.evaluate("typeof window.__handoffStart === 'function'", context), "handoff test probe");
-    for (const scenario of ["copy", "clipboard-failure", "stop-unconfirmed", "timeout", "success"]) {
+    for (const scenario of ["copy", "clipboard-failure", "clipboard-failure-after-insert", "stop-unconfirmed", "timeout", "success"]) {
       await source.call("Page.bringToFront");
       await source.evaluate("document.getElementById('context-generator-fallback-dismiss')?.click()");
       const before = destinations;
@@ -96,6 +96,10 @@ async function run() {
       // Let the worker finish its one activation before returning to source;
       // otherwise it can switch tabs between our observation and native click.
       if (scenario !== "timeout") await waitFor(() => destination.evaluate("Boolean(document.getElementById('context-generator-destination-status'))"), "destination paste attempt");
+      if (scenario === "clipboard-failure-after-insert") {
+        await destination.evaluate("document.getElementById('prompt-textarea').disabled=false");
+        await waitFor(() => destination.evaluate("document.getElementById('prompt-textarea').value").then(value => value === expected), "paste before the manual-copy click");
+      }
       await source.call("Page.bringToFront");
       if (scenario === "copy") {
         for (const width of [760, 320]) {
@@ -123,7 +127,7 @@ async function run() {
         if (inspectMs) { console.log("Inspect the disposable Handoff copy fixture window."); await new Promise(resolve => setTimeout(resolve, inspectMs)); }
         await source.call("Emulation.clearDeviceMetricsOverride");
       }
-      if (["copy", "clipboard-failure", "stop-unconfirmed"].includes(scenario)) {
+      if (["copy", "clipboard-failure", "clipboard-failure-after-insert", "stop-unconfirmed"].includes(scenario)) {
         // Invoke the native button with a browser user gesture. Clipboard is
         // mocked; this fixture must not take OS focus away from the owner's apps.
         const clicked = await source.call("Runtime.evaluate", { expression: "document.getElementById('context-generator-handoff-copy').click()", contextId: context, userGesture: true, returnByValue: true });
@@ -144,6 +148,11 @@ async function run() {
             assert.deepEqual(await source.evaluate("window.__handoffCopied", context), [expected]);
             assert.match(await source.evaluate("document.getElementById('context-generator-fallback-title').textContent"), /check.*destination/i);
           }
+          if (scenario === "clipboard-failure-after-insert") {
+            assert.equal(await destination.evaluate("document.getElementById('prompt-textarea').value"), expected, "Manual takeover preserves an already-landed paste.");
+            assert.match(await source.evaluate("document.getElementById('context-generator-fallback-title').textContent"), /check.*destination/i,
+              "Cancelling future writes cannot prove the earlier paste did not land.");
+          }
         }
       } else if (scenario === "timeout") {
         await waitFor(() => source.evaluate("window.__handoffTrace.expired", context), "bounded paste timeout");
@@ -163,7 +172,7 @@ async function run() {
       }
       assert.equal(await destination.evaluate("window.sendClicks"), 0);
       assert.equal(destinations, before + 1, "No second destination or retry after manual takeover.");
-      if (scenario === "clipboard-failure") assert.equal(summaryRequests, summariesBefore, "A local carry never requests a summary.");
+      if (scenario.startsWith("clipboard-failure")) assert.equal(summaryRequests, summariesBefore, "A local carry never requests a summary.");
       console.log(`PASS handoff ${scenario}: complete text, preserved destination, no late paste, no Send.`);
     }
     assert.equal(summaryRequests, 1, "The existing summary cache is reused by later attempts.");

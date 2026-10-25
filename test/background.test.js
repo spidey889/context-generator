@@ -534,6 +534,103 @@ test("a final result buffered with preview headings skips optional near-end mess
   assert.equal(progressMessages.length, 0);
 });
 
+for (const format of ["stream", "json"]) test(`summary response retry: a broken ${format} body restarts once and discards the old result`, async () => {
+  const requests = [];
+  let cancelled = 0, released = 0;
+  const sendSummary = loadBackgroundForSummaryTest(async (_url, options) => {
+    requests.push(options.body);
+    if (requests.length > 1) {
+      if (format === "stream") assert.deepEqual([cancelled, released], [1, 1], "Release the failed reader before retrying.");
+      return new Response(JSON.stringify({ summary: "Fresh complete carry" }));
+    }
+    if (format === "json") return { ok: true, status: 200, json: async () => { throw new TypeError("network error"); } };
+    return { ok: true, status: 200, headers: new Headers({ "content-type": "application/x-ndjson" }), body: { getReader() {
+      let reads = 0;
+      return {
+        read: async () => {
+          if (reads++) throw new TypeError("network error");
+          return { done: false, value: new TextEncoder().encode('{"type":"result","data":{"summary":"Discard this interrupted result"}}\n') };
+        },
+        cancel: async () => { cancelled++; }, releaseLock: () => { released++; }
+      };
+    } } };
+  });
+  const result = await sendSummary("Retry the same complete model input.");
+  assert.equal(result.ok, true);
+  assert.equal(result.summary, "Fresh complete carry");
+  assert.equal(result.timing.attempt, 2);
+  assert.deepEqual(requests, [requests[0], requests[0]]);
+  assert.equal((await sendSummary("Retry the same complete model input.")).summary, result.summary);
+  assert.equal(requests.length, 2, "Cache only the accepted retry.");
+});
+
+test("summary response retry: two broken bodies return failure without a third request", async () => {
+  let fetches = 0;
+  const sendSummary = loadBackgroundForSummaryTest(async () => {
+    fetches++;
+    return { ok: true, status: 200, json: async () => { throw new TypeError("network error"); } };
+  });
+  assert.equal((await sendSummary("Both reads fail")).ok, false);
+  assert.equal(fetches, 2);
+});
+
+for (const kind of ["json", "utf8", "content", "http", "fetch"]) test(`summary response retry: ${kind} rejection is not retried`, async () => {
+  let fetches = 0;
+  const sendSummary = loadBackgroundForSummaryTest(async () => {
+    fetches++;
+    if (kind === "fetch") throw new TypeError("network error before response headers");
+    if (kind === "json") return new Response("invalid JSON");
+    if (kind === "content") return new Response('{"summary":42}');
+    if (kind === "http") return new Response('{"error":"Service unavailable"}', { status: 503 });
+    return new Response(new Uint8Array([255]), { headers: { "content-type": "application/x-ndjson" } });
+  });
+  assert.equal((await sendSummary("Reject without retry: " + kind)).ok, false);
+  assert.equal(fetches, 1);
+});
+
+test("summary response retry: the second request cannot renew the total deadline", async () => {
+  let now = Date.now(), fetches = 0;
+  class Clock extends Date { static now() { return now; } }
+  const sendSummary = loadBackgroundForSummaryTest(async () => ({ ok: true, status: 200, json: async () => {
+    if (++fetches === 1) { now += 1000; throw new TypeError("network error"); }
+    now += 319001;
+    return { summary: "Too late for the original budget" };
+  } }), { clock: Clock });
+  assert.equal((await sendSummary("Use one total time budget")).diagnostics.error_code, "summary_timeout");
+  assert.equal(fetches, 2);
+});
+
+test("summary response retry: source cancellation prevents a retry even when the body rejects with TypeError", async () => {
+  let rejectBody, fetches = 0;
+  const sendSummary = loadBackgroundForSummaryTest(async () => {
+    fetches++;
+    return { ok: true, status: 200, json: () => new Promise((_, reject) => { rejectBody = reject; }) };
+  }, { tabs: [{ id: 9 }] });
+  const pending = sendSummary("Cancel before retry", null, 9);
+  await new Promise(setImmediate);
+  await sendSummary.cancel(9);
+  rejectBody(new TypeError("network error"));
+  assert.equal((await pending).code, "user_cancelled");
+  await new Promise(setImmediate);
+  assert.equal(fetches, 1);
+});
+
+test("summary response retry: shared callers use one retry without duplicate requests", async () => {
+  let rejectBody, fetches = 0;
+  const sendSummary = loadBackgroundForSummaryTest(async () => {
+    if (++fetches === 1) return { ok: true, status: 200, json: () => new Promise((_, reject) => { rejectBody = reject; }) };
+    return new Response('{"summary":"Shared fresh carry"}');
+  }, { tabs: [{ id: 9 }, { id: 10 }] });
+  const first = sendSummary("Shared interrupted response", null, 9);
+  await new Promise(setImmediate);
+  const second = sendSummary("Shared interrupted response", null, 10);
+  await new Promise(setImmediate);
+  rejectBody(new TypeError("network error"));
+  assert.equal((await first).summary, "Shared fresh carry");
+  assert.equal((await second).summary, "Shared fresh carry");
+  assert.equal(fetches, 2);
+});
+
 test("truncated summary streams fail and source closure cancels an outstanding streamed body", async () => {
   const encoder = new TextEncoder();
   const truncated = loadBackgroundForSummaryTest(async () => new Response(`${JSON.stringify({ type: "delta", text: "Partial" })}\n`,
