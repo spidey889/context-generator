@@ -4,6 +4,7 @@ supabase/.branches/
 .test-artifacts/
 .env*
 node_modules/
+dist/
 api/mcp.mjs
 extension/chrome.zip
 extension/chrome-*.zip

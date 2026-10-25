@@ -4,6 +4,8 @@ A short history of decisions and regressions that matter when changing the code.
 
 ## 2026-10-25
 
+- **Separate browser background settings to remove the Brave/Chrome manifest warning.** The default `extension/` manifest now contains only Chromium's service worker. `npm run package:firefox` regenerates a separate folder with Firefox's ordered background scripts and the existing Gecko ID/data-collection declaration, preserving all shared files, permissions and version. This replaces the combined manifest that Chromium loaded with a `background.scripts` warning. Reload the unpacked extension to apply it; installed Store users need a new published package. No version bump or Store publication is included.
+
 - **Use lightweight CI for version-only bumps.** Keep the required Offline checks status, but admit an existing manifest only when its valid numeric version strictly increases and every other parsed field stays identical. Documentation may accompany the bump; permissions, scripts, runtime/config changes and unmerged code still require the full gate. Added malformed-version, downgrade, permission-change and complete-Git-range regressions; manual/ambiguous runs keep full validation.
 
 - **Bump source version to 1.4.26.** Updated the extension manifest and current-version documentation by owner request. Web Store publication remains a separate release step.
