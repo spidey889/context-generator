@@ -927,6 +927,35 @@ test("handoff finish skips suspended frames in an already hidden source tab", { 
   assert.deepEqual(Array.from(trace.marks, (mark) => mark.label), ["handoff finish start", "handoff finish done"]);
 });
 
+clockTest("local handoff uses a short final sweep and adds no hold after the bars finish", async () => {
+  const hooks = loadPlatformContent([], "chatgpt.com", { visibilityState: "hidden" });
+  hooks.document.visibilityState = "visible";
+  const durations = [];
+  const stage = new FakeElement();
+  stage.style.setProperty = (key, value) => {
+    if (key === "--context-generator-stage-progress-duration") durations.push(value);
+  };
+  hooks.document.querySelector = () => stage;
+  // Simulate a visible source with suspended frames: both paint waits are bounded.
+  const trace = hooks.createTransferTrace("chatgpt", "test");
+  const start = Date.now();
+  await hooks.completeLocalHandoff(trace, Promise.resolve({ tabId: 42 }));
+  assert.deepEqual(durations.filter(value => value !== "0ms"), ["100ms", "160ms"]);
+  assert.ok(Date.now() - start <= 550, "Two bounded paint cues and 260 ms of motion must not acquire another hold.");
+  assert.equal(trace.marks.at(-1).label, "local handoff done");
+});
+
+test("a hidden local handoff skips motion and cancelled preparation cannot finish its bars", async () => {
+  const hooks = loadPlatformContent([], "chatgpt.com", { visibilityState: "hidden" });
+  hooks.document.querySelector = () => null;
+  const trace = hooks.createTransferTrace("chatgpt", "test");
+  await hooks.completeLocalHandoff(trace, Promise.resolve());
+  assert.equal(hooks.animationFrameCallbacks.length, 0);
+  const cancelled = hooks.createTransferTrace("chatgpt", "test");
+  await assert.rejects(hooks.completeLocalHandoff(cancelled, Promise.resolve().then(() => { cancelled.cancelled = true; })), /cancelled/i);
+  assert.ok(!cancelled.marks.some(mark => mark.label === "local handoff done"));
+});
+
 test("new-chat routes never bypass empty detection, while saved JSON chats may be unrendered", () => {
   const routes = [
     ["claude.ai", ["/", "/new"], ["/chat/saved"]],

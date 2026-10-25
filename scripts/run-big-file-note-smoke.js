@@ -66,9 +66,11 @@ async function run() {
     source = await CdpSession.connect(target.webSocketDebuggerUrl); await source.call("Runtime.enable");
     const context = await waitFor(() => source.getExtensionContextId(), "source extension");
     await waitFor(() => source.evaluate('typeof window.__capSmokeStartDomTransfer === "function"', context), "transfer helper");
-    await source.evaluate(`window.__localHandoffShown = false; new MutationObserver(() => {
+    await source.evaluate(`window.__localHandoffShown = false; window.__localHandoffCompleted = false; new MutationObserver(() => {
       const card = document.getElementById('context-generator-overlay');
       if (card?.getAttribute('aria-hidden') === 'false') window.__localHandoffShown = true;
+      const stages = [...(card?.querySelectorAll('.context-generator-handoff-stage') || [])].slice(0,2);
+      if (stages.length === 2 && stages.every(stage => stage.dataset.state === 'complete')) window.__localHandoffCompleted = true;
     }).observe(document.documentElement, {subtree:true,childList:true,attributes:true,attributeFilter:['style','aria-hidden']});`);
     const clickedAt = Date.now();
     await source.evaluate("window.__capSmokeStartDomTransfer()", context);
@@ -83,8 +85,10 @@ async function run() {
     assert.equal(fileReads, 0, "The large file must never be downloaded.");
     const pasteMs = Date.now() - clickedAt;
     assert.equal(summaries.length, localTransfer ? 0 : 1);
-    if (localTransfer) assert.equal(await source.evaluate("window.__localHandoffShown"), false,
-      "A native local transfer must never display the handoff card.");
+    if (localTransfer) {
+      assert.equal(await source.evaluate("window.__localHandoffShown"), true, "Local transfer retains its handoff card.");
+      assert.equal(await source.evaluate("window.__localHandoffCompleted"), true, "Both bars finish before delivery.");
+    }
     assert.equal(destinations, 1);
     assert.equal(await destination.evaluate("window.sendClicks"), 0);
     await waitFor(() => reports.some(r => r.status === "succeeded"), "terminal report");

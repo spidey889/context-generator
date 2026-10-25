@@ -1000,6 +1000,7 @@
       getHandoffProgressState,
       getHandoffProgressStatusText,
       completeHandoffForDestinationReveal,
+      completeLocalHandoff,
       createEarlyDestinationReveal,
       startHandoffCountdown,
       stopHandoffCountdown
@@ -1046,9 +1047,10 @@
       destinationPrepPromise = destinationPrepPromise || prepareDestinationTab(destinationId, transferTrace);
       const localDirect = conversationText.length < MIN_BACKEND_CONVERSATION_CHARS;
       if (localDirect) {
-        // Local text is ready: no summary animation or source paint may delay it.
-        hideDestinationSheet({ immediate: true, restoreFocus: false });
-        hideOverlay({ immediate: true });
+        // Keep the card, but skip the slow picker-to-card transition for local text.
+        hideDestinationSheet({ immediate: true, preserveBackdrop: true, restoreFocus: false });
+        if (!isHandoffOverlayVisible() || document.getElementById(OVERLAY_ID)?.getAttribute("aria-hidden") !== "false") showOverlay(destinationId);
+        releaseDestinationSheetBackdrop({ immediate: true });
       } else if (!isHandoffOverlayVisible()) {
         await transitionDestinationSheetToHandoff();
         checkTransferDeadline(transferTrace);
@@ -1068,10 +1070,14 @@
       checkTransferDeadline(transferTrace);
       markTransferTrace(transferTrace, "summary available", { chars: summary.length });
       if (!localDirect) setHandoffProgress("summary", "done");
+      const localPresentation = localDirect ? completeLocalHandoff(transferTrace, destinationPrepPromise) : null;
+      // Preparation/cancellation may settle while the same tab promise is awaited below.
+      localPresentation?.catch(() => {});
       await earlyReveal?.wait();
       checkTransferDeadline(transferTrace);
       transferStage = "destination";
       const preparedDestination = destinationPrepPromise ? await destinationPrepPromise : null;
+      await localPresentation;
       checkTransferDeadline(transferTrace);
       markTransferTrace(transferTrace, "tab open done", {
         tabId: preparedDestination?.tabId || null,
@@ -9174,6 +9180,27 @@
     setHandoffStageLineProgress(stageId, 1);
 
     if (!skipMotion) await delay(durationMs);
+  }
+
+  async function completeLocalHandoff(trace, destinationPreparation = null) {
+    markTransferTrace(trace, "local handoff start");
+    // Work is ready. Do not re-enter the ordinary 400 ms capture caption hold.
+    handoffCapturePresentation = null;
+    await waitForHandoffPaint();
+    checkTransferDeadline(trace);
+    stopHandoffActivityProgress();
+    await completeHandoffStageLine("capture", 100);
+    checkTransferDeadline(trace);
+    setHandoffProgress("summary", "active");
+    await destinationPreparation;
+    checkTransferDeadline(trace);
+    stopHandoffActivityProgress();
+    await completeHandoffStageLine("summary", 160);
+    checkTransferDeadline(trace);
+    setHandoffProgress("summary", "done");
+    await waitForHandoffPaint();
+    checkTransferDeadline(trace);
+    markTransferTrace(trace, "local handoff done");
   }
 
   async function completeHandoffForDestinationReveal(trace = null, pasteCompleted = false) {
