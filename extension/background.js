@@ -1241,10 +1241,13 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   return false;
 });
 
-async function readSummaryResponse(response, checkDeadline, onNearEnd = () => {}) {
+async function readSummaryResponse(response, checkDeadline, onNearEnd = () => {}, debug = {}) {
   // Older deployments return ordinary JSON. The new stream still has exactly
   // one authoritative final result; previews never become pasted context.
-  if (!response.headers?.get("content-type")?.includes("application/x-ndjson")) return response.json();
+  debug.phase = "response_body";
+  debug.format = response.headers?.get("content-type")?.includes("application/x-ndjson") ? "ndjson" : "json";
+  if (debug.format === "json") return response.json();
+  debug.bytes = 0; debug.chunks = 0; debug.events = 0;
   const reader = response.body.getReader();
   const decoder = new TextDecoder("utf-8", { fatal: true });
   let buffer = "", result, eof = false;
@@ -1255,7 +1258,10 @@ async function readSummaryResponse(response, checkDeadline, onNearEnd = () => {}
       const line = buffer.slice(0, newline).trim();
       buffer = buffer.slice(newline + 1);
       if (!line) continue;
+      debug.phase = "stream_json_parse";
       const event = JSON.parse(line);
+      debug.events++;
+      debug.phase = "stream_event_validation";
       if (result || !["reset", "delta", "result"].includes(event.type)) throw new Error("Invalid summary stream");
       if (event.type === "reset") {
         tail = ""; hasKeyContext = false; nearEnd = false;
@@ -1272,26 +1278,51 @@ async function readSummaryResponse(response, checkDeadline, onNearEnd = () => {}
       if (event.type === "result") {
         if (!event.data || typeof event.data !== "object") throw new Error("Invalid summary stream result");
         result = event.data;
+        debug.final_result = true;
       }
     }
   };
   try {
     while (!eof) {
       checkDeadline();
+      debug.phase = "stream_read";
       const chunk = await reader.read();
       checkDeadline();
       eof = chunk.done;
+      debug.eof = eof;
+      if (!eof) {
+        debug.bytes += chunk.value.byteLength;
+        debug.chunks++;
+        debug.last_chunk_at = new Date().toISOString();
+      }
+      debug.phase = "stream_utf8_decode";
       buffer += eof ? decoder.decode() : decoder.decode(chunk.value, { stream: true });
       consume();
       // A buffered final result needs immediate delivery, not another switch.
-      if (!result && nearEnd) onNearEnd(true);
+      if (!result && nearEnd) { debug.phase = "near_end_callback"; onNearEnd(true); }
     }
+    debug.phase = "stream_completion_validation";
     if (buffer.trim() || !result) throw new Error("Summary stream ended before completion");
     return result;
   } finally {
     if (!eof) { try { reader.cancel().catch(() => {}); } catch {} }
     reader.releaseLock();
   }
+}
+
+function logSummaryResponseFailure(debug, error) {
+  // Local-only metadata: never store response text, arbitrary error messages,
+  // URLs, auth headers or stack traces. The Vercel ID can correlate server logs.
+  const message = String(error?.message || "");
+  const entry = { ...debug, failed_at: new Date().toISOString(),
+    error_name: ["TypeError", "SyntaxError", "AbortError", "TimeoutError", "Error"].includes(error?.name) ? error.name : "Other",
+    error_kind: /network|fetch|connection|terminated|aborted/i.test(message) ? "network_or_abort"
+      : /utf|encoded|encoding/i.test(message) ? "encoding"
+      : /json/i.test(message) ? "json"
+      : /stream ended before completion/i.test(message) ? "stream_incomplete" : "other" };
+  console.warn("[Cap Context] Summary response failure (local diagnostic)", entry);
+  // Keep only the latest failure; logging must never delay or replace fallback.
+  try { Promise.resolve(chrome.storage.local.set({ "context-generator-summary-response-debug-v1": entry })).catch(() => {}); } catch {}
 }
 
 async function summarizeWithBackend(conversation, transferId = null, deadlineAt = null, sourceTab = null, messages = null, platform = null) {
@@ -1380,6 +1411,7 @@ async function fetchSummaryFromBackend(conversationText, transferId = null, dead
   const summaryStartedAt = nowMs();
   const diagnostics = { version: 1, diagnostics_revision: 3, last_operation: "summary_request" };
   let responseReceived = false;
+  const responseDebug = { attempt_id: transferId, started_at: new Date().toISOString(), phase: "request" };
   const controller = new AbortController();
   const onCancel = () => controller.abort(requestSignal.reason);
   requestSignal?.addEventListener("abort", onCancel, { once: true });
@@ -1431,6 +1463,11 @@ async function fetchSummaryFromBackend(conversationText, transferId = null, dead
       signal: controller.signal
     });
     responseReceived = true;
+    responseDebug.phase = "response_headers";
+    responseDebug.headers_at = new Date().toISOString();
+    responseDebug.http_status = response.status;
+    const vercelId = response.headers?.get("x-vercel-id");
+    if (typeof vercelId === "string" && /^[a-zA-Z0-9:;._=-]{1,160}$/.test(vercelId)) responseDebug.vercel_request_id = vercelId;
     globalThis.CapTransferDiagnostics?.update(diagnostics, { summary_http_status: response.status,
       summary_fetch_ms: Math.round(nowMs() - fetchStartedAt), last_operation: "summary_response" });
     checkSummaryDeadline();
@@ -1442,7 +1479,8 @@ async function fetchSummaryFromBackend(conversationText, transferId = null, dead
     }
 
     const parseStartedAt = nowMs();
-    const data = await readSummaryResponse(response, checkSummaryDeadline, onNearEnd);
+    const data = await readSummaryResponse(response, checkSummaryDeadline, onNearEnd, responseDebug);
+    responseDebug.phase = "summary_validation";
     const parseMs = Math.round(nowMs() - parseStartedAt);
     if (data?.ok === false || (data?.code && !data?.summary?.trim())) {
       throw createSummaryBackendPayloadError(data, data?.status || response.status);
@@ -1484,6 +1522,10 @@ async function fetchSummaryFromBackend(conversationText, transferId = null, dead
     };
     return { summary, timing };
   } catch (error) {
+    responseDebug.elapsed_ms = Math.round(nowMs() - summaryStartedAt);
+    responseDebug.aborted = controller.signal.aborted;
+    responseDebug.deadline_remaining_ms = Math.max(0, requestDeadlineAt - Date.now());
+    if (responseReceived) logSummaryResponseFailure(responseDebug, error);
     let failure = error;
     try { checkSummaryDeadline(); } catch (deadlineError) { failure = deadlineError; }
     const fallback = controller.signal.aborted ? "summary_timeout" : responseReceived ? "summary_invalid_response" : "summary_transport_failed";
