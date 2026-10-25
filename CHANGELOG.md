@@ -4,6 +4,8 @@ A short history of decisions and regressions that matter when changing the code.
 
 ## 2026-10-26
 
+- **Bump source version to 1.4.28.** Update the authoritative manifest and current-version documentation by owner request. Web Store publication remains a separate release step.
+
 - **Audit manual copy before merging.** Reproduced a landed-paste/clipboard-failure race in installed Brave: a successful stop acknowledgement incorrectly selected the dialog saying auto-paste did not land. Always use the existing check-destination variant for manual-copy recovery, preserving an earlier paste and preventing a misleading duplicate-paste instruction. Add that real insertion/lost-reply regression plus a late-callback/new-attempt ownership check; retain the merged summary-response retry and local metadata-only diagnostics. Advance content readiness to v181; the later normal backup and draft dialogs remain unchanged.
 
 - **Keep recovered summary errors out of Brave's extension-error list.** A failed summary response already falls back to the captured conversation, so report that recoverable condition as local console information without an ERR badge. Keep the detailed local response diagnostic and preserve errors/badges for terminal request-size, transfer-deadline and extension-reload failures. This corrects the failure signal; it does not repair or conceal the underlying network interruption. Tests skipped for this fast local debugging iteration at the owner's request.
