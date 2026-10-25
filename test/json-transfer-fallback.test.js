@@ -369,7 +369,7 @@ test("closing the picker immediately releases its snapshot and drops late result
   }
 });
 
-test("cancelling during handoff immediately releases the picker capture and its navigation timer", async () => {
+test("cancelling during destination preparation immediately releases the picker capture and its navigation timer", async () => {
   const start = source.indexOf("  function finishTransferTrace(");
   const end = source.indexOf("  function formatTraceDetail(", start);
   assert.ok(start >= 0 && end > start);
@@ -388,10 +388,11 @@ test("cancelling during handoff immediately releases the picker capture and its 
     context.startPickerJsonCapture(); await started.promise;
     const entry = context.pickerJsonCapture, pending = entry.promise;
     if (ready) { response.resolve({ text: "Cancelled snapshot", messageTurnCount: 2 }); await pending; }
-    context.transitionDestinationSheetToHandoff = async () => {
+    context.prepareDestinationTab = async () => {
       context.cancelSourceTransfer(context.activeTransferTrace.id);
       assert.equal(context.pickerJsonCapture, null);
       assert.equal(timers.size, 0);
+      return { tabId: 42 };
     };
     await context.start("claude");
     assert.equal(entry.promise, null);

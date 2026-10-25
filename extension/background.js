@@ -196,9 +196,11 @@ function cancelTransferOperation(operation, { closeDestinations = false } = {}) 
 async function checkTransferSource(operation) {
   checkTransferOperation(operation);
   if (!operation) return;
-  try { await chrome.tabs.get(operation.sourceTabId); }
+  let source;
+  try { source = await chrome.tabs.get(operation.sourceTabId); }
   catch { cancelTransferOperation(operation); }
   checkTransferOperation(operation);
+  return source;
 }
 
 async function waitForTransferWork(work, operation) {
@@ -1142,7 +1144,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       message.transferId,
       message.deferFinalActivation === true,
       message.deadlineAt,
-      sender?.tab
+      sender?.tab,
+      message.localDirect === true
     )
       .then((result) => sendResponse({ ok: true, timing: result?.timing || null, marks: result?.marks || [], diagnostics: result?.diagnostics || null }))
       .catch((error) => {
@@ -1604,8 +1607,9 @@ function createTransferTimeoutError() {
 }
 
 async function transferToDestination(destinationId, text, preparedTabId = null, transferId = null,
-  deferFinalActivation = false, deadlineAt = null, sourceTab = null) {
+  deferFinalActivation = false, deadlineAt = null, sourceTab = null, localDirect = false) {
   const trace = createBackgroundTrace();
+  trace.localDirect = localDirect;
   trace.diagnostics = { version: 1, diagnostics_revision: 3 };
   globalThis.CapTransferDiagnostics?.event(trace.diagnostics, "paste_start", 0, "delivery_events");
   recordDeliveryDiagnostics(transferId, destinationId, sourceTab, trace.diagnostics);
@@ -1643,7 +1647,8 @@ async function transferToDestinationObserved(
   }
 
   checkTransferDeadline(deadlineAt);
-  await checkTransferSource(operation);
+  if (trace.localDirect) checkTransferOperation(operation);
+  else await checkTransferSource(operation);
   trace.deadlineAt = deadlineAt;
   trace.operation = operation;
   const destination = DESTINATIONS[destinationId];
@@ -1661,7 +1666,8 @@ async function transferToDestinationObserved(
 
   if (preparedTabId) operation?.tabIds.add(preparedTabId);
   if (preparedTabId && await isPreparedDestinationTabUsable(preparedTabId, destinationId, operation, trace.diagnostics)) {
-    await checkTransferSource(operation);
+    if (trace.localDirect) checkTransferOperation(operation);
+    else await checkTransferSource(operation);
     checkTransferDeadline(deadlineAt);
     preparedAttempted = true;
     destinationTabId = preparedTabId;
@@ -1765,7 +1771,7 @@ async function transferToDestinationObserved(
   }
 
   await checkTransferSource(operation);
-  if (!deferFinalActivation && !destination.focusBeforePaste && operation?.earlyRevealedTabId !== destinationTabId) {
+  if (!deferFinalActivation && !destination.focusBeforePaste && !trace.localDirect && operation?.earlyRevealedTabId !== destinationTabId) {
     markBackgroundTrace(trace, "final tab activate start", { tabId: destinationTabId });
     await activateDestinationTab(destinationTabId, deadlineAt, operation);
     markBackgroundTrace(trace, "final tab activate done", { tabId: destinationTabId });
@@ -1777,7 +1783,8 @@ async function transferToDestinationObserved(
     markBackgroundTrace(trace, "destination already revealed", { tabId: destinationTabId });
   }
   checkTransferOperation(operation);
-  await setBadge("OK", "#1f8f4d", 2500);
+  // A badge is optional presentation, not an acknowledgement prerequisite.
+  setBadge("OK", "#1f8f4d", 2500).catch(() => {});
   return {
     timing: {
       totalMs: Math.round(nowMs() - trace.startedAt),
@@ -1822,12 +1829,13 @@ async function pasteIntoDestinationWithActivation(
   transferId,
   trace
 ) {
-  await checkTransferSource(trace?.operation);
+  if (trace?.localDirect) checkTransferOperation(trace?.operation);
+  else await checkTransferSource(trace?.operation);
   checkTransferDeadline(trace?.deadlineAt);
   // Focus is a paste prerequisite on these destinations, independent of whether
   // final activation is deferred. Near-end reveal already provides that focus;
   // ordinary callers sequence the source completion cue first.
-  if (destination.focusBeforePaste && trace?.operation?.earlyRevealedTabId !== tabId) {
+  if ((destination.focusBeforePaste || trace?.localDirect) && trace?.operation?.earlyRevealedTabId !== tabId) {
     markBackgroundTrace(trace, "tab activate before paste start", { tabId });
     await activateDestinationTab(tabId, trace?.deadlineAt, trace?.operation, trace?.operation,
       destinationId === "claude" ? trace?.diagnostics : null);
@@ -1864,7 +1872,6 @@ async function pasteIntoDestinationWithActivation(
 async function prepareDestination(destinationId, deadlineAt = null, sourceTab = null, transferId = null) {
   const operation = getTransferOperation(transferId, sourceTab, deadlineAt);
   checkTransferDeadline(deadlineAt);
-  await checkTransferSource(operation);
   const startedAt = nowMs();
   const destination = DESTINATIONS[destinationId];
   if (!destination) {
@@ -1882,12 +1889,12 @@ async function prepareDestination(destinationId, deadlineAt = null, sourceTab = 
 
 async function createDestinationTab(destination, options = {}) {
   try {
-    await checkTransferSource(options.operation);
+    const checkedSource = await checkTransferSource(options.operation);
     let placement = {};
     if (Number.isInteger(options.sourceTab?.id)) {
       // The user can focus a different window while capture runs. Resolve the
       // source's current position rather than opening in Chrome's current window.
-      const source = await chrome.tabs.get(options.sourceTab.id);
+      const source = checkedSource?.id === options.sourceTab.id ? checkedSource : await chrome.tabs.get(options.sourceTab.id);
       placement = { windowId: source.windowId, index: source.index + 1, openerTabId: source.id };
     }
     checkTransferOperation(options.operation);

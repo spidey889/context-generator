@@ -112,6 +112,7 @@ function loadBackgroundForTransferTest({
   windowUpdateImpl,
   sendMessageImpl,
   createTabImpl,
+  badgeImpl,
   firstCreatedTabId = 100,
   useRealTimers = false
 } = {}) {
@@ -146,7 +147,7 @@ function loadBackgroundForTransferTest({
     chrome: {
       action: {
         onClicked: { addListener: listener => { toolbarClickListener = listener; } },
-        setBadgeBackgroundColor: async () => {},
+        setBadgeBackgroundColor: async () => badgeImpl?.(),
         setBadgeText: async options => { operations.badges.push(options.text); }
       },
       alarms: {
@@ -227,7 +228,7 @@ function loadBackgroundForTransferTest({
         { tab: senderTab }, resolve
       ));
     },
-    sendTransfer(destination, preparedTabId = null, deferFinalActivation = false, deadlineAt = null, senderTab = null, transferId = "transfer-test") {
+    sendTransfer(destination, preparedTabId = null, deferFinalActivation = false, deadlineAt = null, senderTab = null, transferId = "transfer-test", localDirect = false) {
       return new Promise((resolve, reject) => {
         const keepsChannelOpen = messageListener(
           {
@@ -237,6 +238,7 @@ function loadBackgroundForTransferTest({
             preparedTabId,
             transferId,
             deferFinalActivation,
+            localDirect,
             deadlineAt
           },
           { tab: senderTab },
@@ -822,6 +824,26 @@ test("focused delivery switches once and never reactivates after verification", 
     const harness = loadBackgroundForTransferTest({ preparedTab: { id: 41, url, windowId: 1 } });
     assert.equal((await harness.sendTransfer(destination, 41)).ok, true);
     assert.equal(harness.operations.updated.length, 1);
+  }
+});
+
+test("local carries activate every destination before delivery, without waiting for an optional badge", async () => {
+  for (const [destination, url] of [["chatgpt", "https://chatgpt.com/"], ["claude", "https://claude.ai/"],
+    ["gemini", "https://gemini.google.com/app"], ["grok", "https://grok.com/"], ["deepseek", "https://chat.deepseek.com/"]]) {
+    const sourceTab = { id: 7, url: "https://chatgpt.com/c/source", windowId: 1, index: 0 };
+    const h = loadBackgroundForTransferTest({ sourceTab, preparedTab: { id: 41, url }, badgeImpl: () => new Promise(() => {}),
+      sendMessageImpl: async (_id, message) => {
+        if (message.type === "PASTE_CONTEXT") assert.equal(h.operations.updated.filter(x => x.options.active).length, 1);
+        return { ok: true };
+      } });
+    const result = await h.sendTransfer(destination, 41, false, null, sourceTab, "local-transfer", true);
+    assert.equal(result.ok, true);
+    assert.equal(h.operations.updated.filter(x => x.options.active).length, 1);
+    const closed = loadBackgroundForTransferTest({ sourceTab, preparedTab: { id: 41, url } });
+    closed.closeTab(7, false);
+    assert.equal((await closed.sendTransfer(destination, 41, false, null, sourceTab, "closed-local", true)).code, "user_cancelled");
+    assert.equal(closed.operations.updated.length, 0);
+    assert.equal(closed.operations.sent.filter(x => x.message.type === "PASTE_CONTEXT").length, 0);
   }
 });
 

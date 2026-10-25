@@ -11,11 +11,13 @@ const { fixtures } = require("../test/network-json-fixtures");
 const { CdpSession, waitForProcessExit, findBraveExecutable, createSmokeExtension, readDevToolsPort,
   getTargets, waitFor } = require("./run-extension-smoke");
 const greeting = 'Reply only: "Context loaded. Let\'s pick up right where you left off." Then wait for the user.';
+const localTransfer = process.env.CAP_CONTEXT_LOCAL_TRANSFER_SMOKE === "1";
 
 async function run() {
   const fixture = fixtures("deepseek", "smoke", 1);
   fixture.file.file_name = "original-13mb.txt";
   fixture.file.file_size = 13099028;
+  if (localTransfer) fixture.data.data.biz_data.chat_messages[1].fragments[0].content = "Continue with the attached original file.";
   const reports = [], summaries = [];
   let fileReads = 0, destinations = 0;
   const server = http.createServer(async (req, res) => {
@@ -64,10 +66,14 @@ async function run() {
     source = await CdpSession.connect(target.webSocketDebuggerUrl); await source.call("Runtime.enable");
     const context = await waitFor(() => source.getExtensionContextId(), "source extension");
     await waitFor(() => source.evaluate('typeof window.__capSmokeStartDomTransfer === "function"', context), "transfer helper");
+    await source.evaluate(`window.__localHandoffShown = false; new MutationObserver(() => {
+      const card = document.getElementById('context-generator-overlay');
+      if (card?.getAttribute('aria-hidden') === 'false') window.__localHandoffShown = true;
+    }).observe(document.documentElement, {subtree:true,childList:true,attributes:true,attributeFilter:['style','aria-hidden']});`);
+    const clickedAt = Date.now();
     await source.evaluate("window.__capSmokeStartDomTransfer()", context);
     const dest = await waitFor(async () => (await getTargets(port)).find(t => t.type === "page" && t.url.startsWith(origin + "/destination")), "destination tab");
     destination = await CdpSession.connect(dest.webSocketDebuggerUrl); await destination.call("Runtime.enable");
-    await destination.call("Page.bringToFront");
     const pasted = await waitFor(() => destination.evaluate("document.getElementById('prompt-textarea').value || null"), "pasted context");
     assert.match(pasted, /Context loaded\. Let's pick up right where you left off\./);
     assert.match(pasted, /Then naturally ask the user to upload/);
@@ -75,7 +81,10 @@ async function run() {
     assert.ok(pasted.lastIndexOf("original-13mb.txt") > pasted.indexOf("Next step:"));
     assert.doesNotMatch(pasted, /Reply only:/);
     assert.equal(fileReads, 0, "The large file must never be downloaded.");
-    assert.equal(summaries.length, 1);
+    const pasteMs = Date.now() - clickedAt;
+    assert.equal(summaries.length, localTransfer ? 0 : 1);
+    if (localTransfer) assert.equal(await source.evaluate("window.__localHandoffShown"), false,
+      "A native local transfer must never display the handoff card.");
     assert.equal(destinations, 1);
     assert.equal(await destination.evaluate("window.sendClicks"), 0);
     await waitFor(() => reports.some(r => r.status === "succeeded"), "terminal report");
@@ -84,7 +93,7 @@ async function run() {
       const shot = await destination.call("Page.captureScreenshot", { format: "png" });
       await fs.writeFile(path.resolve(process.env.CAP_CONTEXT_NOTE_SCREENSHOT), Buffer.from(shot.data, "base64"));
     }
-    console.log("PASS big-file note: real capture/summary/paste, preserved greeting, named upload request, zero original downloads/uploads, no Send.");
+    console.log(`PASS ${localTransfer ? "local transfer" : "big-file note"}: click to paste ${pasteMs} ms, ${summaries.length} summary requests, preserved greeting, named upload request, zero original downloads/uploads, no Send.`);
   } finally {
     if (source) { try { await source.call("Browser.close", {}, 5000); } catch {} }
     source?.close(); destination?.close(); child?.kill(); if (child) await waitForProcessExit(child, 5000);

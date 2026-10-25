@@ -3393,12 +3393,8 @@ async function run() {
       }, "the exact direct text transfer receipt");
       assert.equal(stats.status, "completed");
       const directFrames = await sourceSession.evaluate("window.__capDirectHandoffFrames");
-      assert.ok(directFrames.some(([capture, summary]) => capture.state === "active" && capture.progress < 0.95 && summary.state === "upcoming"),
-        "Direct transfers must paint capture in progress before showing completed bars.");
-      assert.ok(directFrames.some(([capture, summary]) => capture.progress >= 0.99 && summary.state === "active" && summary.progress > 0.15 && summary.progress < 0.95),
-        "Direct transfers must visibly sweep the second bar after capture completes.");
-      assert.ok(directFrames.some(stages => stages.every(stage => stage.state === "complete")),
-        "Both sweeps must finish before the destination takes focus.");
+      assert.ok(!directFrames.some(([, summary]) => summary.state === "active"),
+        "Local delivery must not wait for a summary animation after capture.");
       assert.equal(stats.summary.source, "local");
       assert.equal(stats.summary.model, "local-direct");
       assert.equal(stats.summary.profile, "direct");

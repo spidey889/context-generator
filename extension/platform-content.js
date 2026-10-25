@@ -216,7 +216,6 @@
   ];
   const HANDOFF_CAPTURE_LINE_MIN = 0.04;
   const HANDOFF_CAPTURE_CUE_MS = 400;
-  const HANDOFF_DIRECT_READY_CUE_MS = 180;
   const HANDOFF_CAPTURE_LINE_MAX = 0.94;
   const HANDOFF_ACTIVITY_LINE_START = 0.05;
   const HANDOFF_ACTIVITY_LINE_MAX = 0.9;
@@ -1045,31 +1044,34 @@
         markCaptureDone(transferTrace, conversationText);
       }
       destinationPrepPromise = destinationPrepPromise || prepareDestinationTab(destinationId, transferTrace);
-      if (!isHandoffOverlayVisible()) {
+      const localDirect = conversationText.length < MIN_BACKEND_CONVERSATION_CHARS;
+      if (localDirect) {
+        // Local text is ready: no summary animation or source paint may delay it.
+        hideDestinationSheet({ immediate: true, restoreFocus: false });
+        hideOverlay({ immediate: true });
+      } else if (!isHandoffOverlayVisible()) {
+        await transitionDestinationSheetToHandoff();
+        checkTransferDeadline(transferTrace);
         showOverlay(destinationId);
+        releaseDestinationSheetBackdrop();
       }
       transferStage = "summary";
-      const earlyReveal = createEarlyDestinationReveal(transferTrace, destinationPrepPromise);
+      const earlyReveal = localDirect ? null : createEarlyDestinationReveal(transferTrace, destinationPrepPromise);
       try {
-        summary = await summarizeWithBackend(conversationText, transferTrace, earlyReveal.onNearEnd);
+        summary = await summarizeWithBackend(conversationText, transferTrace, earlyReveal?.onNearEnd);
       } finally {
-        earlyReveal.stop();
+        earlyReveal?.stop();
         if (activeTransferTrace === transferTrace) stopHandoffCountdown();
       }
       // Serialize an already-started reveal with paste so a late status message
       // cannot replace the real paste cue or focus the tab after delivery.
       checkTransferDeadline(transferTrace);
       markTransferTrace(transferTrace, "summary available", { chars: summary.length });
-      // Local carries can finish before the overlay's first paint. Present their
-      // two quick sweeps while destination preparation continues in parallel.
-      const directHandoffPresentation = conversationText.length < MIN_BACKEND_CONVERSATION_CHARS
-        ? completeDirectHandoffPresentation(transferTrace) : null;
-      if (!directHandoffPresentation) setHandoffProgress("summary", "done");
-      await earlyReveal.wait();
+      if (!localDirect) setHandoffProgress("summary", "done");
+      await earlyReveal?.wait();
       checkTransferDeadline(transferTrace);
       transferStage = "destination";
       const preparedDestination = destinationPrepPromise ? await destinationPrepPromise : null;
-      await directHandoffPresentation;
       checkTransferDeadline(transferTrace);
       markTransferTrace(transferTrace, "tab open done", {
         tabId: preparedDestination?.tabId || null,
@@ -1079,8 +1081,8 @@
       setHandoffProgress("paste", "active");
       transferStage = "paste";
       advanceTransferTelemetryStage(transferTrace, "paste_started");
-      const requiresFocusedPaste = FOCUSED_PASTE_DESTINATIONS.has(destinationId);
-      if (requiresFocusedPaste) {
+      const requiresFocusedPaste = localDirect || FOCUSED_PASTE_DESTINATIONS.has(destinationId);
+      if (requiresFocusedPaste && !localDirect) {
         await completeHandoffForDestinationReveal(transferTrace);
         checkTransferDeadline(transferTrace);
       }
@@ -1088,6 +1090,7 @@
         type: "TRANSFER_TO_DESTINATION",
         destination: destinationId,
         text: summary,
+        localDirect,
         preparedTabId: preparedDestination?.tabId || null,
         transferId: transferTrace.id,
         deadlineAt: transferTrace.deadlineAt,
@@ -1096,8 +1099,9 @@
       mergeTransferDiagnostics(transferTrace, pasteResponse?.diagnostics);
       checkTransferDeadline(transferTrace);
       markTransferTrace(transferTrace, "paste done", pasteResponse?.timing || null);
-      // Keep recovery available on the source even if final activation fails.
-      showFallbackModal(summary, getPlatform(destinationId)?.name || "the destination", true);
+      // Inactive delivery needs recovery before final activation can fail.
+      // Already-focused local delivery can save its receipt before building UI.
+      if (!localDirect) showFallbackModal(summary, getPlatform(destinationId)?.name || "the destination", true);
       if (!requiresFocusedPaste) {
         await completeHandoffForDestinationReveal(transferTrace, true);
         checkTransferDeadline(transferTrace);
@@ -1117,6 +1121,7 @@
       markTransferTrace(transferTrace, "transfer complete");
       finishTransferTrace(transferTrace);
       resetRunningFlag();
+      if (localDirect) showFallbackModal(summary, getPlatform(destinationId)?.name || "the destination", true);
     } catch (error) {
       if (error?.code === "user_cancelled") {
         cancelSourceTransfer(transferTrace.id, transferTrace);
@@ -7979,10 +7984,14 @@
       if (useClaudeJson || useChatGptJson || useNetworkJson || getDetectedConversationMessageCount() > 0) {
         preparedDestinationPromise = prepareDestinationTab(destinationId, trace);
       }
-      await transitionDestinationSheetToHandoff();
-      checkTransferDeadline(trace);
-      showOverlay(destinationId);
-      releaseDestinationSheetBackdrop();
+      // Native JSON may already be ready in the picker. Read it before any
+      // handoff animation; only a real AI request needs that presentation.
+      if (!useClaudeJson && !useChatGptJson && !useNetworkJson) {
+        await transitionDestinationSheetToHandoff();
+        checkTransferDeadline(trace);
+        showOverlay(destinationId);
+        releaseDestinationSheetBackdrop();
+      }
       reportCaptureProgress(trace, useClaudeJson || useChatGptJson || useNetworkJson ? `${currentPlatform.id}-json` : "structured");
       advanceTransferTelemetryStage(trace, "capture_started");
       if (!useClaudeJson && !useChatGptJson && !useNetworkJson) await prepareSourceForCapture();
@@ -8036,6 +8045,12 @@
           if (useChatGptJson && !trace.sourceJsonRetryExhausted && !isSourceReplyInProgress()) throw error;
           if (trace?.diagnostics) { for (const key of ["error_code", "error_origin", "failure_site", "error_type", "error_file", "error_line", "error_column"]) delete trace.diagnostics[key]; }
           // Recovery stays within this attempt and reuses its destination.
+          if (!isHandoffOverlayVisible()) {
+            await transitionDestinationSheetToHandoff();
+            checkTransferDeadline(trace);
+            showOverlay(destinationId);
+            releaseDestinationSheetBackdrop();
+          }
           showFastCaptureFallbackMessage();
           const jsonFallbackReason = sanitizeCaptureDiagnostics({ jsonFallbackReason: error?.captureFailureReason }).jsonFallbackReason || "request_failed";
           updateTransferDiagnostics(trace, { json_fallback_code: jsonFallbackReason, last_operation: "capture_dom" }, "json_fallback");
@@ -9159,27 +9174,6 @@
     setHandoffStageLineProgress(stageId, 1);
 
     if (!skipMotion) await delay(durationMs);
-  }
-
-  async function completeDirectHandoffPresentation(trace) {
-    const canPresent = () => instanceActive && activeTransferTrace === trace && !trace.cancelled
-      && isHandoffOverlayVisible() && document.visibilityState !== "hidden"
-      && !window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
-    if (!canPresent()) return;
-    clearTimeout(handoffStageAdvanceTimer);
-    handoffStageAdvanceTimer = null;
-    await waitForHandoffPaint();
-    if (!canPresent()) return;
-    if (handoffCapturePresentation) {
-      const paintedAt = handoffCapturePresentation.paintedAt ?? getNow();
-      await completeHandoffStageLine("capture", Math.max(0, HANDOFF_CAPTURE_CUE_MS - (getNow() - paintedAt)));
-      if (!canPresent()) return;
-      handoffCapturePresentation = null;
-    }
-    setHandoffProgress("summary", "active");
-    stopHandoffActivityProgress();
-    await completeHandoffStageLine("summary", HANDOFF_DIRECT_READY_CUE_MS);
-    if (canPresent()) setHandoffProgress("summary", "done");
   }
 
   async function completeHandoffForDestinationReveal(trace = null, pasteCompleted = false) {
