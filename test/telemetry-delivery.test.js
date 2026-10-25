@@ -135,6 +135,63 @@ function summaryWithin(background, deadlineAt = null, conversation = "Complete c
   return { request, observed };
 }
 
+test("worker teardown cannot turn toolbar badge updates into uncaught rejections", async () => {
+  const background = worker(success);
+  await background.settled();
+  for (const method of ["setBadgeBackgroundColor", "setBadgeText"]) {
+    background.evaluate(`globalThis.originalBadgeMethod = chrome.action.${method};
+      chrome.action.${method} = async () => { throw new Error("No SW"); };`);
+    await assert.doesNotReject(async () => background.evaluate('setBadge("ERR", "#b42318", 0)'));
+    await assert.doesNotReject(async () => background.evaluate("clearBadge()"));
+    background.evaluate(`chrome.action.${method} = originalBadgeMethod;`);
+  }
+  background.evaluate(`globalThis.originalTimeout = setTimeout;
+    setTimeout = callback => { globalThis.badgeTimer = callback; };`);
+  await background.evaluate('setBadge("OK", "#1f8f4d", 2500)');
+  background.evaluate(`setTimeout = originalTimeout;
+    chrome.action.setBadgeText = async () => { throw new Error("No SW"); };`);
+  await assert.doesNotReject(async () => background.evaluate("badgeTimer()"));
+  background.evaluate(`globalThis.pickerCalls = 0;
+    chrome.tabs.sendMessage = async () => { pickerCalls++; return { ok: true }; };`);
+  await assert.doesNotReject(async () => background.listeners.click({ id: 42, url: "https://claude.ai/chat/example" }));
+  assert.equal(background.evaluate("pickerCalls"), 1, "an optional badge failure cannot block the toolbar picker");
+  await assert.doesNotReject(async () => background.listeners.click({ id: 43, url: "https://example.com/" }));
+  background.listeners.message({ type: "CONTEXT_TRANSFER_ERROR", error: "fixture failure" }, {}, () => {});
+  await new Promise(setImmediate);
+});
+
+test("raw transcript storage events handle a stopped worker without changing the saved receipt", async () => {
+  const background = worker(success);
+  await background.settled();
+  background.evaluate('chrome.alarms.create = async () => { throw new Error("No SW"); };');
+  const key = "context-generator-last-transfer-stats-v1";
+  const stats = { rawScrapedText: "PRIVATE_TRANSCRIPT_SENTINEL", rawScrapedTextExpiresAt: new Date(NOW + 60000).toISOString() };
+  background.shared.local[key] = structuredClone(stats);
+  background.listeners.storageChanged({ [key]: { newValue: stats } }, "local");
+  await new Promise(setImmediate);
+  assert.deepEqual(background.shared.local[key], stats);
+});
+
+test("failed retry alarms retain queued reports for the next worker startup", async () => {
+  for (const failure of ["throw", "reject"]) {
+    const shared = profile();
+    const background = worker(() => rejection(503, "temporary"), shared);
+    await background.settled();
+    background.evaluate(`chrome.alarms.create = ${failure === "reject" ? "async " : ""}() => { throw new Error("No SW"); };`);
+    assert.equal((await background.ack(event(72))).ok, true);
+    await background.settled();
+    await new Promise(setImmediate);
+    assert.equal(shared.local[OUTBOX].length, 1);
+    assert.ok(shared.local[DIAGNOSTICS].retry.nextAttemptAt > NOW);
+    const deliveries = [];
+    const restarted = worker((_url, options) => { deliveries.push(JSON.parse(options.body)); return success(); },
+      shared, shared.local[DIAGNOSTICS].retry.nextAttemptAt);
+    await restarted.settled();
+    assert.equal(shared.local[OUTBOX].length, 0);
+    assert.ok(deliveries.some(row => row.attempt_id === id(72)));
+  }
+});
+
 test("raw transcript expiry removes only private text at the deadline and recovers legacy receipts", async () => {
   const key = "context-generator-last-transfer-stats-v1";
   const day = 24 * 60 * 60 * 1000;

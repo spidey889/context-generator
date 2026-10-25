@@ -231,7 +231,9 @@ async function checkDestinationTransfer(transferId, sourceTabId) {
 
 chrome.storage.onChanged.addListener((changes, areaName) => {
   if (areaName !== "local" || !changes[LAST_TRANSFER_STATS_STORAGE_KEY]) return;
-  scheduleRawTranscriptExpiry(changes[LAST_TRANSFER_STATS_STORAGE_KEY].newValue || null);
+  scheduleRawTranscriptExpiry(changes[LAST_TRANSFER_STATS_STORAGE_KEY].newValue || null).catch(() => {
+    console.debug("[Context Generator] Raw transcript expiry alarm unavailable; retrying on startup.");
+  });
 });
 
 chrome.alarms.onAlarm.addListener((alarm) => {
@@ -268,7 +270,7 @@ async function scheduleRawTranscriptExpiry(stats) {
     return;
   }
 
-  chrome.alarms.create(RAW_TRANSCRIPT_EXPIRY_ALARM, { when: expiresAt });
+  await chrome.alarms.create(RAW_TRANSCRIPT_EXPIRY_ALARM, { when: expiresAt });
 }
 
 async function expireStoredRawTranscript() {
@@ -279,7 +281,7 @@ async function expireStoredRawTranscript() {
     if (!expiresAt) return;
 
     if (expiresAt > Date.now()) {
-      chrome.alarms.create(RAW_TRANSCRIPT_EXPIRY_ALARM, { when: expiresAt });
+      await chrome.alarms.create(RAW_TRANSCRIPT_EXPIRY_ALARM, { when: expiresAt });
       return;
     }
 
@@ -331,13 +333,19 @@ function initializeTelemetryDelivery() {
         // An empty local queue does not prove that the unreadable fallback is
         // empty. Keep a wakeup even if flushing just cleared the ordinary alarm.
         const diagnostics = await readTelemetryDiagnostics();
-        chrome.alarms.create(TELEMETRY_RETRY_ALARM, {
+        await chrome.alarms.create(TELEMETRY_RETRY_ALARM, {
           when: Math.min(Date.now() + TELEMETRY_CONFIG_RETRY_BASE_MS, diagnostics.retry?.nextAttemptAt || Infinity)
         });
       });
     } while (telemetryDeliveryRequested);
-  })().catch(() => {
-    chrome.alarms.create(TELEMETRY_RETRY_ALARM, { delayInMinutes: 5 });
+  })().catch(async () => {
+    try {
+      await chrome.alarms.create(TELEMETRY_RETRY_ALARM, { delayInMinutes: 5 });
+    } catch {
+      // Reload/shutdown can reject even this fallback with "No SW". The durable
+      // outbox and retry timestamp remain available to the next worker startup.
+      console.debug("[Context Generator] Telemetry retry alarm unavailable; saved reports retry on startup.");
+    }
   }).finally(() => {
     telemetryDeliveryRunning = false;
     if (telemetryDeliveryRequested) initializeTelemetryDelivery();
@@ -798,7 +806,7 @@ async function flushTelemetryOutbox() {
       const diagnostics = await readTelemetryDiagnostics();
       if (!outbox.length) return null;
       if (diagnostics.retry?.nextAttemptAt > Date.now()) {
-        chrome.alarms.create(TELEMETRY_RETRY_ALARM, { when: diagnostics.retry.nextAttemptAt });
+        await chrome.alarms.create(TELEMETRY_RETRY_ALARM, { when: diagnostics.retry.nextAttemptAt });
         return false;
       }
       return outbox.reduce((selected, entry) => !selected || telemetryDeliveryPriority(entry.payload) > telemetryDeliveryPriority(selected.payload)
@@ -952,7 +960,7 @@ async function scheduleTelemetryRetry(result) {
   diagnostics.retry = { failures, nextAttemptAt, kind: result.kind, ...(result.status ? { httpStatus: result.status } : {}) };
   await chrome.storage.local.set({ [TELEMETRY_DIAGNOSTICS_STORAGE_KEY]: diagnostics });
   await recordTelemetryDiagnostic(result.kind === "configuration" ? "configuration_retry" : "transient_retry", null, result);
-  chrome.alarms.create(TELEMETRY_RETRY_ALARM, { when: nextAttemptAt });
+  await chrome.alarms.create(TELEMETRY_RETRY_ALARM, { when: nextAttemptAt });
 }
 
 async function deliverTelemetryPayload(payload) {
@@ -2296,16 +2304,24 @@ function getPlatformFromUrl(url) {
 }
 
 async function setBadge(text, color, timeoutMs) {
-  await chrome.action.setBadgeBackgroundColor({ color });
-  await chrome.action.setBadgeText({ text });
+  // Toolbar decoration is optional, including in error handlers. A worker
+  // teardown must not turn a badge failure into another uncaught error.
+  try {
+    await chrome.action.setBadgeBackgroundColor({ color });
+    await chrome.action.setBadgeText({ text });
 
-  if (timeoutMs) {
-    setTimeout(clearBadge, timeoutMs);
+    if (timeoutMs) setTimeout(clearBadge, timeoutMs);
+  } catch {
+    console.debug("[Context Generator] Toolbar badge unavailable.");
   }
 }
 
-function clearBadge() {
-  chrome.action.setBadgeText({ text: "" });
+async function clearBadge() {
+  try {
+    await chrome.action.setBadgeText({ text: "" });
+  } catch {
+    console.debug("[Context Generator] Toolbar badge unavailable.");
+  }
 }
 
 function createBackgroundTrace() {
