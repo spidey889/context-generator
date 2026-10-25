@@ -3499,4 +3499,4 @@ if (require.main === module) {
   });
 }
 
-module.exports = { CdpSession, waitForProcessExit };
+module.exports = { CdpSession, waitForProcessExit, findBraveExecutable, createSmokeExtension, readDevToolsPort, getTargets, waitFor };

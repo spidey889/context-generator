@@ -248,8 +248,9 @@
   const textFile = file => file?.is_image === false && /\.(txt|md|markdown|csv|json|py|js|ts|tsx|jsx|java|kt|swift|c|h|cpp|hpp|cs|go|rs|rb|php|sh|bash|zsh|lua|r|scala|dart|html|htm|css|scss|vue|svelte|xml|yaml|yml|toml|tsv|sql|ipynb|log)$/i.test(file.file_name || "");
   // Keep descriptor discovery and serialization aligned for a single-file object.
   const fileList = value => Array.isArray(value) ? value : value && typeof value === "object" ? [value] : [];
-  const deepseek = (data, chat, files = {}, metrics, measureOnly = false) => {
+  const deepseek = (data, chat, files = {}, metrics, measureOnly = false, omitLargeFiles = false) => {
     const excludedContentTypes = new Set();
+    const omittedFiles = new Map();
     const turns = deepseekBranch(data, chat).flatMap(message => {
       if (!["USER", "ASSISTANT"].includes(message.role)) return [];
       complete(message);
@@ -270,6 +271,15 @@
             if (measureOnly && (!file || typeof file !== "object")) continue;
             if (typeof file?.file_name === "string" && file.file_name.trim() && !fileIds.has(file.id)) parts.push(`Attachment: ${JSON.stringify(file.file_name)}`);
             if (!textFile(file)) { excludedContentTypes.add(file?.is_image === true ? "media" : "uploads"); continue; }
+            if (omitLargeFiles && !measureOnly && Number.isSafeInteger(file.file_size) && file.file_size > 4100000 && file.status === "SUCCESS") {
+              complete(file);
+              if (!fileIds.has(file.id)) {
+                fileIds.add(file.id);
+                omittedFiles.set(file.id, { name: file.file_name, bytes: file.file_size });
+                parts.push(`This original file (${file.file_size} bytes) is provided separately because it exceeds the 4.1 MB file limit. Its contents are not included here.`);
+              }
+              continue;
+            }
             // Count all successfully read files, but do not let one unreadable
             // file discard the rest. This subset is never a transferable carry.
             if (measureOnly && !Object.hasOwn(files, file.id)) { fileIds.add(file.id); continue; }
@@ -294,7 +304,9 @@
       }
       return turn(message.role === "USER" ? "User" : "Assistant", parts);
     });
-    return transcript("DeepSeek", turns, excludedContentTypes, metrics);
+    const capture = transcript("DeepSeek", turns, excludedContentTypes, metrics);
+    if (omittedFiles.size) capture.omittedFiles = [...omittedFiles.values()];
+    return capture;
   };
   // Presentation only: tolerate partial/unsupported history without turning it
   // into an accepted transcript or a size-limit decision. Never count tools.

@@ -20,7 +20,8 @@ function getBrowserChecks(extended = false) {
     check("json-retry", "JSON retry after offline picker capture", 120, { CAP_CONTEXT_JSON_SMOKE: "chatgpt", CAP_CONTEXT_JSON_RETRY_SMOKE: "1" }),
     check("source-reload", "Source reload and tab closure retain their database reports", 120, { CAP_CONTEXT_SOURCE_RELOAD_SMOKE: "1", CAP_CONTEXT_TELEMETRY_SMOKE: "1" }),
     check("chatgpt-million", "Million-character Unicode capture, summary request and paste", 180, { CAP_CONTEXT_JSON_SMOKE: "chatgpt", CAP_CONTEXT_LARGE_CHAT_SMOKE: "1000000" }),
-    check("deepseek-files", "DeepSeek rate-limit retry, cached-session and concurrent original-file capture", 180, { CAP_CONTEXT_JSON_SMOKE: "deepseek", CAP_CONTEXT_REPLY_SNAPSHOT_SMOKE: "1", CAP_CONTEXT_DEEPSEEK_SESSION_SMOKE: "1", CAP_CONTEXT_RATE_LIMIT_RETRY_SMOKE: "1" })
+    check("deepseek-files", "DeepSeek rate-limit retry, cached-session and concurrent original-file capture", 180, { CAP_CONTEXT_JSON_SMOKE: "deepseek", CAP_CONTEXT_REPLY_SNAPSHOT_SMOKE: "1", CAP_CONTEXT_DEEPSEEK_SESSION_SMOKE: "1", CAP_CONTEXT_RATE_LIMIT_RETRY_SMOKE: "1" }),
+    { ...check("big-file-note", "DeepSeek to ChatGPT: oversized file note without a download", 90), script: "scripts/run-big-file-note-smoke.js" }
   ];
   if (!extended) return regular;
   return regular.concat([
@@ -58,7 +59,7 @@ async function runCheck(check, index, { artifactRoot = ARTIFACT_ROOT, signal } =
     // HTTP/CDP ports and SQL databases are already private to each smoke process.
     child = spawn(check.command || "xvfb-run", check.args || [
       "--auto-servernum", "--server-num=" + (100 + index),
-      process.execPath, path.join(ROOT, "scripts/run-extension-smoke.js")
+      process.execPath, path.join(ROOT, check.script || "scripts/run-extension-smoke.js")
     ], { cwd: ROOT, env: childEnvironment(check, directory), detached: process.platform !== "win32", stdio: ["ignore", log, log], windowsHide: true });
   } finally {
     fs.closeSync(log);

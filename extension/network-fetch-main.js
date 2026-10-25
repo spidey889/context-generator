@@ -3,7 +3,7 @@
   if (!platform || !globalThis.__capNetworkJsonData) return;
   // Advance readiness version with adapter/contract changes: old MAIN closures
   // can survive extension reloads and must be replaced before a new capture.
-  const version = platform === "deepseek" ? 28 : platform === "grok" ? 21 : 18, channel = "cap-context-network-json-v1";
+  const version = platform === "deepseek" ? 30 : platform === "grok" ? 21 : 18, channel = "cap-context-network-json-v1";
   // Bound the whole download, including unused branches, separately from text.
   const maxCaptureBytes = 32000000;
   // Shared across unique text files; the final transcript has its own limits.
@@ -137,6 +137,7 @@
     let storedAuth = null;
     const metrics = globalThis.CapJsonCaptureMetrics.create({ adapter_version: version, deadline_ms: 25000, raw_limit_bytes: maxCaptureBytes, raw_bytes: 0, requests: 0 });
     const measureOnly = request.measureOnly === true;
+    const omitLargeFiles = platform === "deepseek" && !measureOnly && request.omitLargeFiles === true;
     // The independent DOM size check reports numbers only. Its best-effort
     // strings must never pass through ordinary capture's acceptance path.
     if (measureOnly) metrics.transcript = () => true;
@@ -382,7 +383,13 @@
                 continue;
               }
               const nextUploadBytes = uploadBytes + file.file_size;
-              metrics.add("files_supported"); metrics.set({ files_declared_bytes: nextUploadBytes });
+              metrics.add("files_supported"); metrics.add("files_declared_bytes", file.file_size);
+              // Only the selected DeepSeek -> ChatGPT path requests this mode.
+              // Retain file identity/size, but never fetch its oversized body.
+              if (omitLargeFiles && file.file_size > maxUploadBytes) {
+                uploads.set(file.id, { file, url, omitted: true });
+                continue;
+              }
               if (nextUploadBytes > maxUploadBytes) { metrics.fail("supported_files_limit", "attachment_descriptor", "declared_files", nextUploadBytes, maxUploadBytes); throw Object.assign(
                 new api.CaptureError("Text attachments exceed the combined 4.1 MB capture limit.", "size_limit", "attachment_size_limit"),
                 { captureRequestStage: "attachment_descriptor" }); }
@@ -393,7 +400,7 @@
         }
         // Independent original-file reads overlap; serialization still follows
         // branch/fragment order. Validate all descriptors before any download.
-        const pending = [...uploads.values()];
+        const pending = [...uploads.values()].filter(upload => !upload.omitted);
         let next = 0, failure;
         const download = async () => {
           try {
@@ -424,7 +431,8 @@
           measureDeepseek();
           return;
         }
-        reply.capture = metrics.timed("serialize_ms", () => api.deepseek(data, chat, files, metrics));
+        reply.capture = metrics.timed("serialize_ms", () => api.deepseek(data, chat, files, metrics, false, omitLargeFiles));
+        if (reply.capture.omittedFiles?.length) metrics.set({ outcome: "partial" });
       }
       check();
       if (measureOnly) { publishCount(reply.capture); delete reply.capture; }

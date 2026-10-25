@@ -443,6 +443,42 @@ const transientError = (reason = "request_failed", detail = "network_error", sta
     ...(status === undefined ? {} : { capture_http_status: status }) }
 });
 
+test("only DeepSeek -> ChatGPT retries an oversized picker file as a separate-upload note", async () => {
+  for (const destination of ["chatgpt", "claude"]) {
+    const { context, calls } = harness("deepseek", { mode: "success" });
+    const options = [], omittedFiles = [{ name: "original.txt", bytes: 13099028 }];
+    context.window.__capCaptureNetworkJson = async (_path, omitLargeFiles) => {
+      calls.json++; options.push(Boolean(omitLargeFiles));
+      if (!omitLargeFiles) throw Object.assign(transientError("size_limit", "attachment_size_limit"), {
+        jsonCapture: { outcome: "failed", failure_check: "supported_files_limit", files_supported: 1 } });
+      return { text: "Complete chat with separate-file notice", messageTurnCount: 2, omittedFiles,
+        jsonCapture: { outcome: "partial", files_supported: 1 } };
+    };
+    context.startPickerJsonCapture(); await context.pickerJsonCapture.promise;
+    await context.start(destination);
+    assert.deepEqual(options, destination === "chatgpt" ? [false, true] : [false]);
+    assert.equal(calls.dom, 0);
+    assert.equal(calls.flows.length, destination === "chatgpt" ? 1 : 0);
+    if (calls.flows.length) {
+      assert.equal(calls.flows[0].trace.omittedFiles, omittedFiles);
+      assert.equal(calls.flows[0].trace.diagnostics.json_attempts.length, 2);
+    }
+  }
+});
+
+test("a failed separate-file capture cannot silently deliver a smaller DOM subset", async () => {
+  const { context, calls } = harness("deepseek");
+  context.window.__capCaptureNetworkJson = async () => {
+    calls.json++;
+    throw Object.assign(transientError(), { jsonCapture: { outcome: "failed", failure_check: "network_error",
+      files_supported: 2, files_declared_bytes: 13099028 } });
+  };
+  await context.start("chatgpt");
+  assert.equal(calls.json, 2);
+  assert.equal(calls.dom + calls.flows.length, 0);
+  assert.equal(calls.errors.length, 1);
+});
+
 test("JSON attempt observations survive source-to-destination handoff and one retry", async () => {
   const platforms = ["chatgpt", "claude", "gemini", "grok", "deepseek"];
   for (const source of platforms) for (const destination of platforms.filter(value => value !== source)) {

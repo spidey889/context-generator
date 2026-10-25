@@ -2325,6 +2325,30 @@ test("direct and AI ranges use exact captured character boundaries on every plat
   }
 });
 
+test("separate large-file names survive direct, AI and recovery carries in Next step without changing other routes", async () => {
+  const greeting = 'Reply only: "Context loaded. Let\'s pick up right where you left off." Then wait for the user.';
+  for (const mode of ["direct", "remote", "recovery"]) {
+    const hooks = loadPlatformContent([], "chat.deepseek.com", { runtimeSendMessage: async message => {
+      if (message.type !== "SUMMARIZE_WITH_BACKEND") return { ok: true };
+      assert.doesNotMatch(JSON.stringify(message), /original-file.txt|13099028/);
+      if (mode === "recovery") throw new Error("offline");
+      return { ok: true, summary: `Verified chat summary\n\nNext step:\n\n${greeting}` };
+    } });
+    const trace = hooks.createTransferTrace("chatgpt", "test");
+    trace.omittedFiles = [{ name: 'original-file.txt', bytes: 13099028 }, { name: 'quoted\n"name.txt', bytes: 5000000 }];
+    const text = mode === "direct" ? "User: continue this chat." : "x".repeat(10000);
+    const summary = await hooks.summarizeWithBackend(text, trace);
+    assert.match(summary, /Context loaded\. Let's pick up right where you left off\./);
+    assert.match(summary, /Then naturally ask the user to upload/);
+    assert.match(summary, /original-file.txt.*13.10 MB.*4.1 MB/);
+    assert.ok(summary.includes(JSON.stringify(trace.omittedFiles[1].name)));
+    assert.doesNotMatch(summary, /Reply only:/);
+    assert.ok(summary.lastIndexOf("original-file.txt") > summary.search(/Next step:|NEXT STEP/));
+    trace.destinationId = "claude";
+    assert.ok(!(await hooks.summarizeWithBackend(text, trace)).includes("original-file.txt"));
+  }
+});
+
 test("oversized summary JSON surfaces its size error without silently making a local carry", async () => {
   const hooks = loadPlatformContent([], "chatgpt.com", { runtimeSendMessage: async message => {
     assert.equal(message.type, "SUMMARIZE_WITH_BACKEND");
