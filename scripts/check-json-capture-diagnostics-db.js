@@ -40,6 +40,7 @@ async function checkJsonCaptureDiagnostics(db, sql, previousSql = null) {
   // Its later migration verifies the complete current schema separately.
   const historicalSchema = structuredClone(contract.schema);
   delete historicalSchema.destination_auth_prompt;
+  delete historicalSchema.summary_response_failures;
   historicalSchema.capture_detail.values = historicalSchema.capture_detail.values.filter(value => value !== "invalid_utf8");
   historicalSchema.summary_failed_provider.values = historicalSchema.summary_failed_provider.values.filter(provider => provider !== "tokenharbor");
   assert.deepEqual(JSON.parse(sql.match(/rules constant jsonb := '([^']+)'::jsonb/)[1]), historicalSchema);
@@ -121,7 +122,9 @@ async function checkAttachmentDecodeDiagnostics(db, sql) {
   await db.exec(sql);
   assert.deepEqual(await snapshot(), before); checks++;
   const updated = await definition();
-  assert.deepEqual(JSON.parse(updated.match(/rules constant jsonb := '([^']+)'::jsonb/)[1]), contract.schema); checks++;
+  const historicalSchema = structuredClone(contract.schema);
+  delete historicalSchema.summary_response_failures;
+  assert.deepEqual(JSON.parse(updated.match(/rules constant jsonb := '([^']+)'::jsonb/)[1]), historicalSchema); checks++;
   assert.deepEqual(JSON.parse(updated.match(/attempt_rules constant jsonb := '([^']+)'::jsonb/)[1]), contract.jsonAttemptSchema); checks++;
   const withoutRules = value => value.replace(/\b(?:attempt_rules|rules) constant jsonb := '[^']+'::jsonb/g, "RULES");
   assert.equal(withoutRules(updated), withoutRules(original)); checks++;

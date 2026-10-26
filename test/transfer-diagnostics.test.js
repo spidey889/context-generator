@@ -55,6 +55,26 @@ test("attachment decoding clues survive both relays while private or arbitrary v
     assert.equal(validateTelemetryPayload(payload({ diagnostics: report({ [key]: "PRIVATE" }) })), null);
 });
 
+test("summary response failures use one closed schema at every ingress and retain at most two distinct attempts", async () => {
+  const edge = await import("../supabase/functions/transfer-telemetry/validation.mjs");
+  const base = { attempt: 1, phase: "stream_read", reason: "body_read_failed", error_type: "TypeError" };
+  const report = entries => ({ version: 1, summary_response_failures: entries });
+  for (const [key, rule] of Object.entries(diagnostics.summaryResponseFailureSchema)) {
+    for (const value of [...(rule.values || (rule.type === "boolean" ? [true, false] : [rule.min || 0, rule.max])), "PRIVATE", null]) {
+      const input = report([{ ...base, [key]: value }]);
+      const valid = typeof value === rule.type && (rule.values ? rule.values.includes(value)
+        : rule.type !== "number" || Number.isInteger(value) && value >= (rule.min || 0) && value <= rule.max);
+      assert.equal(Boolean(validateTelemetryPayload(payload({ diagnostics: input }))), valid, key);
+      assert.equal(Boolean(edge.validateTelemetryPayload(payload({ diagnostics: input }))), valid, key);
+    }
+  }
+  for (const entries of [[base, base], [base, { ...base, attempt: 2 }, { ...base, attempt: 3 }], [{ attempt: 1 }], [null]])
+    assert.equal(diagnostics.validate(report(entries)), null);
+  for (const key of ["text", "summary", "filename", "url", "headers", "request_id", "stack", "message", "body"])
+    assert.equal(diagnostics.validate(report([{ ...base, [key]: "PRIVATE" }])), null);
+  assert.deepEqual(diagnostics.mergeSummaryResponseFailures([base, { ...base, attempt: 2 }], [base]), [base, { ...base, attempt: 2 }]);
+});
+
 test("unexpected exceptions retain their observed operation and type without inventing a cause", () => {
   const record = { version: 1, last_operation: "paste_verify", editor_seen: true, paste_populated: false };
   diagnostics.failure(record, new Error("PRIVATE account URL and chat text"), "destination", 500);
@@ -170,7 +190,9 @@ test("retry storms retain bounded first and last observations and the counts", (
     if (rule.type === "string") maximal[key] = rule.values.reduce((a, b) => a.length > b.length ? a : b);
     if (rule.type === "number") maximal[key] = rule.values?.[0] || rule.max;
     if (rule.type === "boolean") maximal[key] = true;
-    if (rule.type === "array") maximal[key] = key === "json_attempts" ? [{ outcome: "failed", mode: "fresh", failure_check: "raw_header_limit" }]
+    if (rule.type === "array") maximal[key] = key === "summary_response_failures"
+      ? [1, 2].map(attempt => ({ attempt, phase: "stream_completion_validation", reason: "stream_completion_invalid", error_type: "Error" }))
+      : key === "json_attempts" ? [{ outcome: "failed", mode: "fresh", failure_check: "raw_header_limit" }]
       : Array(32).fill({ event: "destination_activate", at_ms: 2147483647, code: "destination_activation_failed" });
   }
   maximal.prepared_diagnostics = structuredClone(maximal);

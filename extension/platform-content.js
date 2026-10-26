@@ -1219,6 +1219,7 @@
           transferId: trace?.id || null,
           deadlineAt: trace?.deadlineAt
         });
+        mergeTransferDiagnostics(trace, response?.diagnostics);
         if (!response?.summary?.trim()) {
           throw new Error("Backup summarizer returned no summary.");
         }

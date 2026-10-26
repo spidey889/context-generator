@@ -22,6 +22,7 @@ async function checkUsefulDiagnostics(db, sql) {
   historicalContract.summary_failed_provider.values = historicalContract.summary_failed_provider.values.filter(provider => provider !== "tokenharbor");
   delete historicalContract.json_attempts;
   delete historicalContract.destination_auth_prompt;
+  delete historicalContract.summary_response_failures;
   historicalContract.capture_detail.values = historicalContract.capture_detail.values.filter(value => !["attachment_size_limit", "invalid_utf8"].includes(value));
   equal(historicalRules, historicalContract);
   const samples = [];

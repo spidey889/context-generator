@@ -2734,6 +2734,23 @@ test("captured context survives backend errors, empty replies, and a missing wor
   }
 });
 
+test("response failure evidence survives successful retry and local fallback into the source's final report", async () => {
+  const records = [{ attempt: 1, phase: "stream_read", reason: "body_read_failed", error_type: "TypeError", http_status: 200 }];
+  for (const recovered of [true, false]) {
+    const hooks = loadPlatformContent([], "chatgpt.com", { runtimeSendMessage: async message => {
+      if (message.type !== "SUMMARIZE_WITH_BACKEND") return { ok: true };
+      return { ok: recovered, ...(recovered ? { summary: "A complete accepted carry" } : { code: "summary_failed", error: "PRIVATE_EXCEPTION" }),
+        diagnostics: { version: 1, summary_response_failures: records } };
+    } });
+    const trace = hooks.createTransferTrace("claude", "test");
+    await hooks.summarizeWithBackend("x".repeat(10000), trace);
+    assert.deepEqual(JSON.parse(JSON.stringify(trace.diagnostics.summary_response_failures)), records);
+    assert.equal(trace.diagnostics.error_code, undefined, "Recovered summary errors cannot become a terminal transfer failure.");
+    assert.doesNotMatch(JSON.stringify(trace.diagnostics), /PRIVATE/);
+    hooks.teardownContextGeneratorInstance();
+  }
+});
+
 test("an extension reload cannot pretend to summarize locally with a dead worker connection", async () => {
   const hooks = loadPlatformContent([], "claude.ai", { runtimeSendMessage: async message => {
     if (message.type === "SUMMARIZE_WITH_BACKEND") throw new Error("Extension context invalidated");

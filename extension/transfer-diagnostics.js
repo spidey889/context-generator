@@ -88,6 +88,24 @@
     failure_file_index: { type: "number", min: 1, max: 2147483647 },
     failure_file_bytes: { type: "number", max: 4100000 }
   };
+  // Response failures can survive a successful retry. Keep both HTTP attempts
+  // without accepting a response excerpt, raw exception, header, ID or URL.
+  const summaryResponseFailureSchema = {
+    attempt: { type: "number", min: 1, max: 2 },
+    phase: { type: "string", values: ["response_headers", "response_body", "stream_read", "stream_utf8_decode", "stream_json_parse",
+      "stream_event_validation", "stream_completion_validation", "near_end_callback", "summary_validation", "summary_confirmation", "unknown"] },
+    reason: { type: "string", values: ["aborted", "http_rejected", "service_rejected", "body_read_failed", "utf8_decode_failed", "json_parse_failed",
+      "stream_event_invalid", "stream_completion_invalid", "summary_invalid", "callback_failed", "unexpected_exception"] },
+    error_type: { type: "string", values: enums.error_type },
+    format: { type: "string", values: ["json", "ndjson", "unknown"] },
+    http_status: { type: "number", min: 100, max: 599 },
+    service_code: { type: "string", values: ["conversation_too_large", "request_too_large", "rate_limited", "service_busy", "client_not_allowed", "summary_failed", "other"] },
+    service_status: { type: "number", min: 100, max: 599 },
+    ...Object.fromEntries(["bytes_received", "chunks_received", "events_received", "elapsed_ms", "headers_ms", "last_chunk_ms", "deadline_remaining_ms"]
+      .map(key => [key, { type: "number", max: 2147483647 }])),
+    ...Object.fromEntries(["aborted", "caller_aborted", "deadline_elapsed", "transfer_deadline_elapsed", "eof", "final_result", "online"]
+      .map(key => [key, { type: "boolean" }]))
+  };
   const booleans = ["online", "source_saved", "speed_enabled", "json_attempted", "source_changed", "cancelled",
     "destination_prepared", "prepared_reused", "prepared_rejected", "fresh_recovery", "script_injected",
     "editor_seen", "editor_connected", "draft_present", "paste_populated", "paste_stable", "user_handled",
@@ -106,7 +124,8 @@
     ...Object.fromEntries(numbers.map(key => [key, { type: "number", max: 2147483647 }])),
     capture_http_status: { type: "number", min: 100, max: 599 },
     summary_provider_status: { type: "number", min: 100, max: 599 },
-    events: { type: "array" }, delivery_events: { type: "array" }, paste_events: { type: "array" }, json_attempts: { type: "array" }, prepared_diagnostics: { type: "object" }
+    events: { type: "array" }, delivery_events: { type: "array" }, paste_events: { type: "array" }, json_attempts: { type: "array" },
+    summary_response_failures: { type: "array" }, prepared_diagnostics: { type: "object" }
   };
   function validField(key, value, rules = schema) {
     const rule = rules[key];
@@ -125,6 +144,20 @@
     if (!target || !safe || (target.json_attempts?.length || 0) >= 2) return;
     (target.json_attempts || (target.json_attempts = [])).push(safe);
   }
+  function validateSummaryResponseFailure(input) {
+    if (!input || typeof input !== "object" || Array.isArray(input)
+      || !["attempt", "phase", "reason", "error_type"].every(key => Object.hasOwn(input, key))) return null;
+    if (Object.entries(input).some(([key, value]) => !validField(key, value, summaryResponseFailureSchema))) return null;
+    return { ...input };
+  }
+  function mergeSummaryResponseFailures(first = [], second = []) {
+    const records = new Map();
+    for (const input of [...first, ...second]) {
+      const safe = validateSummaryResponseFailure(input);
+      if (safe && !records.has(safe.attempt)) records.set(safe.attempt, safe);
+    }
+    return [...records.values()].sort((a, b) => a.attempt - b.attempt);
+  }
   function validate(input, depth = 0) {
     if (!input || typeof input !== "object" || Array.isArray(input) || input.version !== 1) return null;
     const result = {};
@@ -137,6 +170,10 @@
         if (!Array.isArray(value) || value.length > 2) return null;
         result[key] = value.map(validateJsonAttempt);
         if (result[key].some(entry => !entry)) return null;
+      } else if (key === "summary_response_failures") {
+        if (!Array.isArray(value) || value.length > 2) return null;
+        result[key] = value.map(validateSummaryResponseFailure);
+        if (result[key].some(entry => !entry) || new Set(result[key].map(entry => entry.attempt)).size !== value.length) return null;
       } else if (["events", "delivery_events", "paste_events"].includes(key)) {
         if (!Array.isArray(value) || value.length > 32) return null;
         if (value.some(event => !event || typeof event !== "object" || Array.isArray(event)
@@ -244,7 +281,8 @@
     update(target, { ...errorDetails(error, target?.last_operation), error_code: code, error_origin: origin });
     event(target, "failure", atMs, origin === "destination" ? "paste_events" : origin === "background" ? "delivery_events" : "events", code);
   }
-  const api = { schema, jsonAttemptSchema, validateJsonAttempt, jsonAttempt, codes, operations, events, validate, snapshot, update, event, errorCode, errorDetails, operationErrorCode, failure, claudePage, authPromptFromUrl };
+  const api = { schema, jsonAttemptSchema, summaryResponseFailureSchema, validateJsonAttempt, validateSummaryResponseFailure, mergeSummaryResponseFailures, jsonAttempt,
+    codes, operations, events, validate, snapshot, update, event, errorCode, errorDetails, operationErrorCode, failure, claudePage, authPromptFromUrl };
   root.CapTransferDiagnostics = api;
   if (typeof module !== "undefined" && module.exports) module.exports = api;
 })(globalThis);
