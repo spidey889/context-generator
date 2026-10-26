@@ -32,7 +32,7 @@
     const onAbort = () => finish(false);
     const receive = event => {
       const reply = event.data;
-      if (event.source === window && event.origin === location.origin && reply?.channel === channel && reply.platform === platform && reply.type === "pong" && reply.id === id && reply.version === (platform === "deepseek" ? 31 : platform === "grok" ? 21 : 18)) finish(true);
+      if (event.source === window && event.origin === location.origin && reply?.channel === channel && reply.platform === platform && reply.type === "pong" && reply.id === id && reply.version === (platform === "deepseek" ? 32 : platform === "grok" ? 22 : 19)) finish(true);
     };
     const ping = () => { if (settled) return; window.postMessage({ channel, platform, type: "ping", id }, location.origin); poll = setTimeout(ping, 100); };
     const timer = setTimeout(() => finish(false), timeout);
@@ -66,6 +66,7 @@
       if (signal?.aborted) throw new Error("Size check cancelled.");
       metrics.set({ hook_ms: Date.now() - hookStarted });
       if (changed || JSON.stringify(current()) !== JSON.stringify(before)) throw changedError("The conversation changed during capture.");
+      metrics.stage("history");
       return await new Promise((resolve, reject) => {
         const id = crypto.randomUUID();
         // Await the native cancellation reply before releasing the shared read
@@ -84,27 +85,30 @@
             return;
           }
           cleanup();
-          if (signal?.aborted) return reject(new Error("Size check cancelled."));
-          metrics.adopt(reply.jsonCapture);
-          if (changed || reply.chat !== before.chat || reply.selected !== before.selected || JSON.stringify(current()) !== JSON.stringify(before)) return reject(changedError("The conversation changed during capture."));
-          if (measureOnly && reply.captureDetail === "conversation_changed") return reject(changedError("The conversation changed during capture."));
-          if (measureOnly && Number.isSafeInteger(reply.characterCount) && reply.characterCount >= 0) return resolve({ characterCount: reply.characterCount,
-            ...(Number.isSafeInteger(reply.messageTurnCount) && reply.messageTurnCount >= 0 ? { messageTurnCount: reply.messageTurnCount } : {}),
-            ...(Number.isSafeInteger(reply.estimatedCharacterCount) && reply.estimatedCharacterCount >= 0 ? { estimatedCharacterCount: reply.estimatedCharacterCount } : {}) });
-          if (reply.error) return reject(captureError(reply.error === "size" ? "This chat is too long to transfer (limit: 1,000,000 characters). Try a shorter chat." : `Fast capture failed: ${reply.error} Turn off the lightning button to use standard capture.`, reply.captureFailureReason,
-            reply.captureDetail || "network_error", reply.captureRequestStage || "history", reply.status));
-          const capture = reply.capture;
-          if (capture?.omittedFiles !== undefined && (!omitLargeFiles || platform !== "deepseek" || !Array.isArray(capture.omittedFiles)
-            || capture.omittedFiles.some(file => !file || typeof file.name !== "string" || !file.name.trim()
-              || !Number.isSafeInteger(file.bytes) || file.bytes <= 4100000))) return reject(captureError("Invalid separate-file notice.", "incomplete"));
-          if (typeof capture?.text !== "string" || !capture.text.trim() || !Number.isSafeInteger(capture.messageTurnCount) || capture.messageTurnCount < 1 || capture.text.length > 1000000 || new TextEncoder().encode(capture.text).length > 4000000) return reject(captureError("Fast capture returned an invalid or incomplete conversation.", "incomplete"));
-          const name = { gemini: "Gemini", grok: "Grok", deepseek: "DeepSeek" }[platform];
-          // MAIN owns the native adapter. Verify both views agree before accepting
-          // its message boundaries; never infer roles from flattened text.
-          if (!Array.isArray(capture.messages) || capture.messages.length !== capture.messageTurnCount
-            || capture.messages.some(turn => !turn || !["user", "assistant"].includes(turn.role) || typeof turn.text !== "string" || !turn.text.trim())
-            || capture.text !== `${name} conversation:\n\n${capture.messages.map(turn => `${turn.role === "user" ? "User" : "Assistant"}: ${turn.text}`).join("\n\n")}`) return reject(captureError("Fast capture returned invalid message boundaries.", "incomplete"));
-          resolve(capture);
+          try {
+            if (signal?.aborted) return reject(new Error("Size check cancelled."));
+            metrics.adopt(reply.jsonCapture);
+            if (changed || reply.chat !== before.chat || reply.selected !== before.selected || JSON.stringify(current()) !== JSON.stringify(before)) return reject(changedError("The conversation changed during capture."));
+            if (measureOnly && reply.captureDetail === "conversation_changed") return reject(changedError("The conversation changed during capture."));
+            if (measureOnly && Number.isSafeInteger(reply.characterCount) && reply.characterCount >= 0) return resolve({ characterCount: reply.characterCount,
+              ...(Number.isSafeInteger(reply.messageTurnCount) && reply.messageTurnCount >= 0 ? { messageTurnCount: reply.messageTurnCount } : {}),
+              ...(Number.isSafeInteger(reply.estimatedCharacterCount) && reply.estimatedCharacterCount >= 0 ? { estimatedCharacterCount: reply.estimatedCharacterCount } : {}) });
+            if (reply.error) return reject(captureError(reply.error === "size" ? "This chat is too long to transfer (limit: 1,000,000 characters). Try a shorter chat." : `Fast capture failed: ${reply.error} Turn off the lightning button to use standard capture.`, reply.captureFailureReason,
+              reply.captureDetail || "network_error", reply.captureRequestStage || "history", reply.status));
+            metrics.stage("serialize");
+            const capture = reply.capture;
+            if (capture?.omittedFiles !== undefined && (!omitLargeFiles || platform !== "deepseek" || !Array.isArray(capture.omittedFiles)
+              || capture.omittedFiles.some(file => !file || typeof file.name !== "string" || !file.name.trim()
+                || !Number.isSafeInteger(file.bytes) || file.bytes <= 4100000))) return reject(captureError("Invalid separate-file notice.", "incomplete"));
+            if (typeof capture?.text !== "string" || !capture.text.trim() || !Number.isSafeInteger(capture.messageTurnCount) || capture.messageTurnCount < 1 || capture.text.length > 1000000 || new TextEncoder().encode(capture.text).length > 4000000) return reject(captureError("Fast capture returned an invalid or incomplete conversation.", "incomplete"));
+            const name = { gemini: "Gemini", grok: "Grok", deepseek: "DeepSeek" }[platform];
+            // MAIN owns the native adapter. Verify both views agree before accepting
+            // its message boundaries; never infer roles from flattened text.
+            if (!Array.isArray(capture.messages) || capture.messages.length !== capture.messageTurnCount
+              || capture.messages.some(turn => !turn || !["user", "assistant"].includes(turn.role) || typeof turn.text !== "string" || !turn.text.trim())
+              || capture.text !== `${name} conversation:\n\n${capture.messages.map(turn => `${turn.role === "user" ? "User" : "Assistant"}: ${turn.text}`).join("\n\n")}`) return reject(captureError("Fast capture returned invalid message boundaries.", "incomplete"));
+            resolve(capture);
+          } catch (error) { reject(error); }
         };
         const timer = setTimeout(() => { cleanup(); reject(captureError("Fast capture timed out. Refresh this chat or turn off the lightning button.", "timeout", "timeout", "history")); }, 27000);
         signal?.addEventListener("abort", onAbort, { once: true });
@@ -127,6 +131,7 @@
     globalThis.CapJsonCaptureMetrics.create({ deadline_ms: 27000 }), true, signal, onEstimate);
   window.__capCaptureNetworkJson = async (expectedPath, omitLargeFiles = false) => {
     const metrics = globalThis.CapJsonCaptureMetrics.create({ deadline_ms: 27000 });
+    metrics.stage("hook");
     try {
       const capture = await readCapture(expectedPath, metrics, false, undefined, undefined, omitLargeFiles);
       metrics.set({ selected_turns: capture.messageTurnCount });

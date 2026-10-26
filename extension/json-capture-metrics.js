@@ -1,4 +1,4 @@
-// Numeric observations only. This helper never receives response content or
+// Bounded observations only. This helper never receives response content or
 // identifiers; MAIN records transport costs and the isolated bridge adds timing.
 (function (root) {
   const contract = root.CapTransferDiagnostics;
@@ -6,6 +6,8 @@
   function create(initial = {}) {
     const started = clock();
     const data = { outcome: "succeeded", mode: "fresh" };
+    let currentStage;
+    const stage = value => { if (contract.jsonAttemptSchema.failure_stage.values.includes(value)) currentStage = value; };
     const set = changes => {
       for (const [key, value] of Object.entries(changes || {})) {
         const rule = contract.jsonAttemptSchema[key];
@@ -49,6 +51,7 @@
     };
     const timed = (key, fn) => {
       const began = clock();
+      if (key === "serialize_ms") stage("serialize");
       try { return fn(); } finally { add(key, clock() - began); }
     };
     const transcript = text => {
@@ -63,22 +66,29 @@
       add("files_ignored");
       add(image ? "files_ignored_image" : type === "pdf" || type === "application/pdf" ? "files_ignored_pdf" : "files_ignored_other");
     };
+    const exception = error => {
+      // A bridge may replace the native exception with a safe generic Error.
+      // Retain only the first allowlisted class, never its message or stack.
+      if (!data.failure_error_type && contract.jsonAttemptSchema.failure_error_type.values.includes(error?.name))
+        set({ failure_error_type: error.name });
+    };
     const finish = error => {
       set({ total_ms: clock() - started });
       if (error) {
         const detail = error.diagnostics?.capture_detail || error.captureDetail;
         const site = error.diagnostics?.failure_site;
-        const stage = error.diagnostics?.capture_request_stage || error.captureRequestStage
-          || (contract.jsonAttemptSchema.failure_stage.values.includes(site?.slice(8)) ? site.slice(8) : "serialize");
-        fail(detail || "unknown", stage);
+        const failedStage = error.diagnostics?.capture_request_stage || error.captureRequestStage
+          || (contract.jsonAttemptSchema.failure_stage.values.includes(site?.slice(8)) ? site.slice(8) : currentStage);
+        fail(detail || "unknown", failedStage);
         // Do not derive categories from exception prose or fetch/parser snippets.
-        if (!data.failure_check) fail("unknown", "serialize");
+        if (!data.failure_check) fail("unknown", failedStage);
+        exception(error);
         set({ outcome: detail === "conversation_changed" || detail === "cancelled" ? "cancelled" : "failed" });
       }
       return contract.validateJsonAttempt(data);
     };
     set(initial);
-    return { data, set, add, fail, response, timed, transcript, ignored, finish,
+    return { data, set, add, fail, response, timed, transcript, ignored, finish, stage, exception,
       adopt(value) { const safe = contract.validateJsonAttempt(value); if (safe) set(safe); } };
   }
   root.CapJsonCaptureMetrics = { create };

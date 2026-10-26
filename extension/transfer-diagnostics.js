@@ -243,6 +243,32 @@
     }
     update(details, { error_type: safe?.error_type || (enums.error_type.includes(error?.name) ? error.name : "other"),
       failure_site: safe?.failure_site || operation });
+    if (operation === "capture_json") {
+      // Read the closed native observation, not exception prose. A generic
+      // bridge error must not hide a known guard or its actual request stage.
+      const attempt = validateJsonAttempt(error?.jsonCapture);
+      const check = attempt?.failure_check;
+      const stage = attempt?.failure_stage || safe?.capture_request_stage;
+      const sizeChecks = ["raw_header_limit", "raw_total_stream_limit", "raw_response_stream_limit", "raw_remaining_files_limit",
+        "supported_files_limit", "transcript_char_limit", "transcript_byte_limit"];
+      const observedDetail = sizeChecks.includes(check) ? check === "supported_files_limit" ? "attachment_size_limit" : "size_limit"
+        : check === "attachment_length_mismatch" ? "attachment_failed"
+        : check === "duplicate_id" ? "invalid_branch"
+        : enums.capture_detail.includes(check) ? check : undefined;
+      const broadDetail = error?.captureFailureReason === "timeout" ? "timeout"
+        : error?.captureFailureReason === "size_limit" ? "size_limit" : undefined;
+      const knownCode = safe?.error_code && safe.error_code !== "unknown_error" ? safe.error_code : errorCode(error, "capture_json_failed");
+      const specificCode = sizeChecks.includes(check) ? "conversation_too_large"
+        : check === "conversation_changed" ? "conversation_changed" : undefined;
+      // An unexpected exception has a known step/class, not a proven network
+      // cause. Do not promote a generic bridge label over that observation.
+      if (check === "unknown") delete details.capture_detail;
+      update(details, { capture_detail: observedDetail || (check === "unknown" ? undefined : safe?.capture_detail) || broadDetail,
+        capture_request_stage: stage, failure_site: stage ? `capture_${stage}` : details.failure_site,
+        capture_http_status: attempt?.failure_http_status ?? safe?.capture_http_status,
+        error_type: enums.error_type.includes(attempt?.failure_error_type) ? attempt.failure_error_type : details.error_type,
+        error_code: ["capture_json_failed", "unknown_error"].includes(knownCode) ? specificCode || "capture_json_failed" : knownCode });
+    }
     return details;
   }
   function operationErrorCode(operation) {
@@ -277,8 +303,10 @@
     } catch { return "unavailable"; }
   }
   function failure(target, error, origin, atMs) {
-    const code = errorCode(error, operationErrorCode(target?.last_operation));
-    update(target, { ...errorDetails(error, target?.last_operation), error_code: code, error_origin: origin });
+    const details = errorDetails(error, target?.last_operation);
+    const code = (target?.last_operation === "capture_json" && details.error_code) || errorCode(error, operationErrorCode(target?.last_operation));
+    if (target?.last_operation === "capture_json" && !details.capture_detail) delete target.capture_detail;
+    update(target, { ...details, error_code: code, error_origin: origin });
     event(target, "failure", atMs, origin === "destination" ? "paste_events" : origin === "background" ? "delivery_events" : "events", code);
   }
   const api = { schema, jsonAttemptSchema, summaryResponseFailureSchema, validateJsonAttempt, validateSummaryResponseFailure, mergeSummaryResponseFailures, jsonAttempt,

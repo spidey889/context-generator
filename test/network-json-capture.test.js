@@ -216,6 +216,38 @@ for (const platform of ["gemini", "grok", "deepseek"]) test(`${platform}: native
     return true;
   });
 });
+for (const platform of ["gemini", "grok", "deepseek"]) test(`${platform}: unexpected native serializer exceptions retain stage and class without a guessed network cause`, async () => {
+  const h = setup(platform);
+  await h.observe();
+  h.api[platform] = () => { throw new TypeError("PRIVATE chat filename.csv https://PRIVATE"); };
+  await assert.rejects(h.window.__capCaptureNetworkJson(), error => {
+    assert.equal(error.jsonCapture.failure_stage, "serialize");
+    assert.equal(error.jsonCapture.failure_check, "unknown");
+    assert.equal(error.jsonCapture.failure_error_type, "TypeError");
+    const details = require("../extension/transfer-diagnostics.js").errorDetails(error, "capture_json");
+    assert.equal(details.capture_detail, undefined);
+    assert.equal(details.failure_site, "capture_serialize");
+    assert.doesNotMatch(JSON.stringify(details) + JSON.stringify(error.jsonCapture), /PRIVATE|filename|https/);
+    return true;
+  });
+});
+
+test("Network bridge validation exceptions are reported immediately with the observed serialization stage", async () => {
+  const h = setup("grok", undefined, { beforeMessage(reply) {
+    if (reply.type === "response" && reply.capture) Object.defineProperty(reply.capture, "text", {
+      get() { throw new TypeError("PRIVATE chat filename.csv https://PRIVATE"); }
+    });
+  } });
+  await h.observe();
+  await assert.rejects(h.window.__capCaptureNetworkJson(), error => {
+    assert.equal(error.jsonCapture.failure_stage, "serialize");
+    assert.equal(error.jsonCapture.failure_error_type, "TypeError");
+    assert.equal(error.jsonCapture.failure_check, "unknown");
+    assert.doesNotMatch(JSON.stringify(error.jsonCapture), /PRIVATE|filename|https/);
+    return true;
+  });
+});
+
 function setup(platform, fixture = fixtures(platform), { fetchImpl, responseTransform, runtime, schedule = setTimeout, beforeMessage, localStorage } = {}) {
   const requests = [], replies = [], listeners = new Set(), navigation = new Set(), storage = new Set();
   const host = { gemini: "gemini.google.com", grok: "grok.com", deepseek: "chat.deepseek.com" }[platform];
@@ -944,7 +976,7 @@ test("DeepSeek: one incomplete upload cancels siblings before fallback or a fres
   });
   assert.equal(h.requests.length, 5, "failure stops queued downloads");
   assert.equal(aborted.length, 3);
-  assert.equal(h.window.__capNetworkFetchState.version, 31);
+  assert.equal(h.window.__capNetworkFetchState.version, 32);
   assert.ok(h.replies.every(reply => !reply.capture));
   assert.equal(h.navigationListeners(), 0);
   assert.equal(h.listeners.size, 2);
@@ -1025,7 +1057,7 @@ for (const platform of ["gemini", "grok", "deepseek"]) test(`${platform}: the pr
   old.version = platform === "deepseek" ? 27 : platform === "gemini" ? 16 : 19;
   h.reinstall(files[1]);
   assert.notEqual(h.window.__capNetworkFetchState, old);
-  assert.equal(h.window.__capNetworkFetchState.version, platform === "deepseek" ? 31 : platform === "grok" ? 21 : 18);
+  assert.equal(h.window.__capNetworkFetchState.version, platform === "deepseek" ? 32 : platform === "grok" ? 22 : 19);
   assert.equal(h.listeners.size, 2);
   assert.equal((await h.window.__capCaptureNetworkJson()).text, h.fixture.expected);
 });

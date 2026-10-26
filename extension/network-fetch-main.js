@@ -3,7 +3,7 @@
   if (!platform || !globalThis.__capNetworkJsonData) return;
   // Advance readiness version with adapter/contract changes: old MAIN closures
   // can survive extension reloads and must be replaced before a new capture.
-  const version = platform === "deepseek" ? 31 : platform === "grok" ? 21 : 18, channel = "cap-context-network-json-v1";
+  const version = platform === "deepseek" ? 32 : platform === "grok" ? 22 : 19, channel = "cap-context-network-json-v1";
   // Bound the whole download, including unused branches, separately from text.
   const maxCaptureBytes = 32000000;
   // Shared across unique text files; the final transcript has its own limits.
@@ -136,6 +136,7 @@
     const controller = new AbortController();
     let storedAuth = null;
     const metrics = globalThis.CapJsonCaptureMetrics.create({ adapter_version: version, deadline_ms: 25000, raw_limit_bytes: maxCaptureBytes, raw_bytes: 0, requests: 0 });
+    metrics.stage("history");
     const measureOnly = request.measureOnly === true;
     const omitLargeFiles = platform === "deepseek" && !measureOnly && request.omitLargeFiles === true;
     // The independent DOM size check reports numbers only. Its best-effort
@@ -479,7 +480,7 @@
     } catch (error) {
       delete reply.capture;
       if (controller.signal.reason === "session_changed") error = new api.CaptureError("The conversation changed during capture.", "request_failed", "conversation_changed");
-      metrics.fail(error?.jsonFailureCheck || error?.captureDetail, error?.captureRequestStage || "serialize");
+      metrics.fail(error?.jsonFailureCheck || error?.captureDetail, error?.captureRequestStage);
       // Adapter errors contain structural reasons only. Never return fetch,
       // JSON parser or decoder errors, which can contain private response text.
       const reason = error?.message;
@@ -491,7 +492,9 @@
         : error?.captureDetail || (error?.name === "SyntaxError" ? "invalid_json" : "network_error");
       reply.captureRequestStage = error?.captureRequestStage || "serialize";
       if (Number.isInteger(error?.captureHttpStatus)) reply.status = error.captureHttpStatus;
-      metrics.finish({ captureDetail: reply.captureDetail, captureRequestStage: reply.captureRequestStage });
+      // Keep observed evidence separate from the broad, user-facing wrapper.
+      metrics.finish({ name: error?.name, captureDetail: controller.signal.reason === "capture_timeout" ? "timeout"
+        : error?.captureDetail || (error?.name === "SyntaxError" ? "invalid_json" : undefined), captureRequestStage: error?.captureRequestStage });
     } finally {
       clearTimeout(timer);
       window.navigation?.removeEventListener("navigate", changed);

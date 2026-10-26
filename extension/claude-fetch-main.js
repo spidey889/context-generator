@@ -1,5 +1,5 @@
 (() => {
-  const version = 15;
+  const version = 16;
   // HTTP media types ignore casing; parameters do not change the base type.
   const responseMediaType = response => response.headers.get("content-type")?.split(";", 1)[0].trim().toLowerCase();
   // Unused branches and site metadata need room beyond the selected text cap.
@@ -121,7 +121,8 @@
         let size = 0;
         if (reader) while (true) {
           // Only a rejected native read qualifies for the existing JSON retry.
-          const { done, value } = await reader.read().catch(() => {
+          const { done, value } = await reader.read().catch(error => {
+            metrics.exception(error);
             if (controller.signal.aborted || location.pathname !== `/chat/${chat}`) throw new Error("changed");
             bodyReadFailed = true;
             metrics.fail("network_error", "history");
@@ -160,7 +161,7 @@
       reply.captureDetail = controller.signal.reason === "capture_timeout" ? "timeout"
         : error?.message === "changed" ? "conversation_changed" : reply.captureDetail
         || (error?.message === "size" ? "size_limit" : error?.name === "SyntaxError" ? "invalid_json" : captureFailureReason === "incomplete" ? "partial_response" : "network_error");
-      metrics.finish({ captureDetail: reply.captureDetail, captureRequestStage: "history" });
+      metrics.finish({ name: error?.name, captureDetail: reply.captureDetail, captureRequestStage: "history" });
     } finally {
       observation?.end();
       clearTimeout(timer);

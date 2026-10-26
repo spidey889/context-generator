@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-26-handoff-copy-audit-v181";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-26-json-failure-evidence-v182";
   const SOURCE_JSON_RETRY_DELAY_MS = 2000;
   const INLINE_PILL_SIZE = 36;
   const ownedUiStyleSheets = new Map();
@@ -1643,8 +1643,11 @@
 
   function recordJsonCaptureFailure(trace, error) {
     const details = globalThis.CapTransferDiagnostics?.errorDetails(error, "capture_json");
+    // A second failure must not inherit the first request's cause/status;
+    // each original observation remains available in json_attempts.
+    if (trace?.diagnostics) for (const key of ["capture_detail", "capture_request_stage", "capture_http_status"]) delete trace.diagnostics[key];
     updateTransferDiagnostics(trace, { ...details,
-      capture_error_code: globalThis.CapTransferDiagnostics?.errorCode(error, "capture_json_failed"),
+      capture_error_code: details?.error_code || globalThis.CapTransferDiagnostics?.errorCode(error, "capture_json_failed"),
       capture_failure_site: details?.failure_site, capture_error_type: details?.error_type });
   }
 
@@ -1658,12 +1661,15 @@
   }
 
   function recordTransferFailureDiagnostics(trace, error) {
-    mergeTransferDiagnostics(trace, error?.diagnostics);
     const contract = globalThis.CapTransferDiagnostics;
+    const details = contract?.errorDetails(error, trace?.diagnostics?.last_operation);
+    // Merge the normalized observation so a broad wrapper cannot put a
+    // discarded network label back after recordJsonCaptureFailure.
+    mergeTransferDiagnostics(trace, details ? { version: 1, ...details } : error?.diagnostics);
     const code = isNoConversationError(error) ? "no_conversation"
       : isExtensionContextInvalidated(error) ? "extension_reloaded"
-      : error?.diagnostics?.error_code || contract?.errorCode(error, contract.operationErrorCode(trace?.diagnostics?.last_operation)) || "unknown_error";
-    updateTransferDiagnostics(trace, { ...contract?.errorDetails(error, trace?.diagnostics?.last_operation),
+      : details?.error_code || error?.diagnostics?.error_code || contract?.errorCode(error, contract.operationErrorCode(trace?.diagnostics?.last_operation)) || "unknown_error";
+    updateTransferDiagnostics(trace, { ...details,
       error_code: code, error_origin: trace?.diagnostics?.error_origin || "source",
       source_changed: code === "conversation_changed", cancelled: code === "user_cancelled" });
     globalThis.CapTransferDiagnostics?.event(trace?.diagnostics, "failure", getNow() - trace.startedAt, "events", code);

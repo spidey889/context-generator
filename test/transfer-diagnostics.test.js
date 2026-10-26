@@ -87,6 +87,52 @@ test("unexpected exceptions retain their observed operation and type without inv
   assert.doesNotMatch(JSON.stringify(record), /PRIVATE|account|URL|chat/);
 });
 
+test("JSON reporting keeps a reader's cause and stage over a generic unknown wrapper at every ingress", async () => {
+  const edge = await import("../supabase/functions/transfer-telemetry/validation.mjs");
+  for (const [check, expected, code] of [["invalid_utf8", "invalid_utf8", "capture_json_failed"],
+    ["raw_total_stream_limit", "size_limit", "conversation_too_large"], ["duplicate_id", "invalid_branch", "capture_json_failed"]]) {
+    const error = Object.assign(new Error("PRIVATE chat https://PRIVATE/PRIVATE file PRIVATE.csv"), {
+      diagnosticCode: "unknown_error", code: "unknown_error",
+      diagnostics: { version: 1, error_code: "unknown_error", capture_detail: "network_error", capture_request_stage: "history", failure_site: "capture_history" },
+      jsonCapture: { outcome: "failed", mode: "fresh", failure_check: check, failure_stage: "attachment_body", failure_error_type: "TypeError",
+        failure_http_status: 200, http_status: 503 }
+    });
+    const details = diagnostics.errorDetails(error, "capture_json");
+    assert.equal(details.error_code, code);
+    assert.equal(details.capture_detail, expected);
+    assert.equal(details.capture_request_stage, "attachment_body");
+    assert.equal(details.failure_site, "capture_attachment_body");
+    assert.equal(details.error_type, "TypeError");
+    assert.equal(details.capture_http_status, 200, "Use the failing request, never another concurrent response.");
+    const report = { version: 1, ...details, json_attempts: [error.jsonCapture] };
+    assert.ok(validateTelemetryPayload(payload({ diagnostics: report })));
+    assert.ok(edge.validateTelemetryPayload(payload({ diagnostics: report })));
+    assert.doesNotMatch(JSON.stringify(report), /PRIVATE|https|csv/);
+    assert.equal(error.diagnostics.error_code, "unknown_error", "Reporting must not mutate retry inputs.");
+  }
+});
+
+test("unclassified JSON exceptions retain observed step and class without inventing a network cause", () => {
+  const error = Object.assign(new Error("PRIVATE filename.txt https://PRIVATE chat"), {
+    diagnostics: { version: 1, error_code: "unknown_error", capture_detail: "network_error", capture_request_stage: "history" },
+    jsonCapture: { outcome: "failed", mode: "fresh", failure_check: "unknown", failure_stage: "serialize", failure_error_type: "TypeError", http_status: 200 }
+  });
+  const details = diagnostics.errorDetails(error, "capture_json");
+  assert.equal(details.error_code, "capture_json_failed");
+  assert.equal(details.failure_site, "capture_serialize");
+  assert.equal(details.error_type, "TypeError");
+  assert.equal(details.capture_detail, undefined);
+  assert.equal(details.capture_http_status, undefined);
+  assert.doesNotMatch(JSON.stringify(details), /PRIVATE|filename|https|chat/);
+  const record = { version: 1, last_operation: "capture_json", capture_detail: "network_error" };
+  diagnostics.failure(record, error, "source", 100);
+  assert.equal(record.capture_detail, undefined);
+  assert.equal(record.error_code, "capture_json_failed");
+  assert.equal(record.failure_site, "capture_serialize");
+  error.jsonCapture.private = "PRIVATE";
+  assert.equal(diagnostics.errorDetails(error, "capture_json").failure_site, "capture_history", "Reject an unvalidated reader record entirely.");
+});
+
 test("Claude page observations redact IDs, queries, fragments and unknown paths at every ingress", async () => {
   const edge = await import("../supabase/functions/transfer-telemetry/validation.mjs");
   for (const [url, page] of [

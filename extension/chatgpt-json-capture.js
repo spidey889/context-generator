@@ -276,7 +276,7 @@
       const receive = event => {
         const reply = event.data;
         if (event.source === window && event.origin === location.origin && reply?.channel === channel
-          && reply.type === "pong" && reply.id === id && reply.version === 21) finish(true);
+          && reply.type === "pong" && reply.id === id && reply.version === 22) finish(true);
       };
       const ping = () => {
         if (settled) return;
@@ -320,8 +320,9 @@
         }
       }
       if (signal?.aborted) throw new Error("Size check cancelled.");
-      metrics.set({ hook_ms: Date.now() - hookStarted, adapter_version: 19 });
+      metrics.set({ hook_ms: Date.now() - hookStarted, adapter_version: 22 });
       if (changed || currentChat() !== chat) throw captureError("The ChatGPT conversation changed during capture.", "request_failed", "conversation_changed", "hook");
+      metrics.stage("history");
       return await new Promise((resolve, reject) => {
         const id = crypto.randomUUID();
         // Await the native cancellation reply before releasing the shared read
@@ -358,6 +359,7 @@
               const stage = ["session", "history", "attachment_descriptor", "attachment_body"].includes(reply.captureRequestStage) ? reply.captureRequestStage : "history";
               throw captureError(`ChatGPT JSON capture failed: ${reason} Turn JSON capture off to use DOM capture.`, failureReason, detail, stage, reply.status);
             }
+            metrics.stage("serialize");
             try { resolve(metrics.timed("serialize_ms", () => serialize(reply.data, chat, reply.pastedTexts, reply.sourceTreeCounts, metrics, measureOnly))); }
             catch (error) {
               if (!measureOnly) throw error;
@@ -389,6 +391,7 @@
   };
   window.__capCaptureChatGptJson = async expectedPath => {
     const metrics = globalThis.CapJsonCaptureMetrics.create({ deadline_ms: 17000 });
+    metrics.stage("hook");
     try {
       const capture = await readCapture(expectedPath, metrics);
       metrics.set({ selected_turns: capture.messageTurnCount });

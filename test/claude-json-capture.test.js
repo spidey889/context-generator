@@ -49,6 +49,21 @@ test("Claude structured turns preserve quoted role labels, thinking and source w
   assert.equal(capture.text, `Claude conversation:\n\nUser: ${text}\n\nAssistant: Private reasoning\n\nSelected answer`);
 });
 
+test("Claude unexpected serializer errors retain their step and class without private exception text", async () => {
+  const h = setup(fixture(), { resources: [endpoint], beforeMessage(reply) {
+    if (reply.type === "response" && reply.data) Object.defineProperty(reply.data, "chat_messages", {
+      get() { throw new TypeError("PRIVATE chat filename.csv https://PRIVATE"); }
+    });
+  } });
+  await assert.rejects(h.window.__capCaptureClaudeJson(), error => {
+    assert.equal(error.jsonCapture.failure_stage, "serialize");
+    assert.equal(error.jsonCapture.failure_check, "unknown");
+    assert.equal(error.jsonCapture.failure_error_type, "TypeError");
+    assert.doesNotMatch(JSON.stringify(error.jsonCapture), /PRIVATE|filename|https/);
+    return true;
+  });
+});
+
 test("Claude fresh DOM size check counts readable file text despite another incomplete file", async () => {
   const data = fixture();
   data.chat_messages[0].attachments = [
@@ -193,6 +208,7 @@ test("Claude interrupted history body stays retryable and a fresh capture keeps 
     assert.equal(shouldRetryJson(error), true, "The real transfer retry policy must accept this body-network failure.");
     assert.equal(error.diagnostics.capture_request_stage, "history");
     assert.equal(error.diagnostics.capture_http_status, 200);
+    assert.equal(error.jsonCapture.failure_error_type, "TypeError");
     assert.doesNotMatch(error.message + JSON.stringify(error.diagnostics), /PRIVATE_READ_SENTINEL/);
     return true;
   });

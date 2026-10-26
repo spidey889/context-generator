@@ -215,7 +215,7 @@
       const receive = event => {
         const reply = event.data;
         if (event.source === window && event.origin === location.origin && reply?.channel === channel
-          && reply.type === "pong" && reply.id === id && reply.version === 15) finish(true);
+          && reply.type === "pong" && reply.id === id && reply.version === 16) finish(true);
       };
       const ping = () => {
         if (settled) return;
@@ -256,8 +256,9 @@
         }
       }
       if (signal?.aborted) throw new Error("Size check cancelled.");
-      metrics.set({ hook_ms: Date.now() - hookStarted, adapter_version: 13 });
+      metrics.set({ hook_ms: Date.now() - hookStarted, adapter_version: 16 });
       if (changed || location.pathname !== expectedPath) throw changedError("The Claude conversation changed during capture.");
+      metrics.stage("history");
       return await new Promise((resolve, reject) => {
         const id = crypto.randomUUID();
         // Await the native cancellation reply before releasing the shared read
@@ -274,6 +275,7 @@
             if (changed || location.pathname !== expectedPath || reply.chat !== chat) throw changedError("The Claude conversation changed during capture.");
             if (reply.error) throw captureError("Claude JSON capture failed. Refresh this conversation or turn JSON capture off.", reply.error === "busy" ? "unavailable" : reply.captureFailureReason || "request_failed",
               reply.error === "busy" ? "busy" : reply.captureDetail || "network_error", "history", reply.status);
+            metrics.stage("serialize");
             try { resolve(metrics.timed("serialize_ms", () => serialize(reply.data, chat, metrics, measureOnly))); }
             catch (error) {
               if (!measureOnly) throw error;
@@ -305,6 +307,7 @@
   };
   window.__capCaptureClaudeJson = async expectedPath => {
     const metrics = globalThis.CapJsonCaptureMetrics.create({ deadline_ms: 17000 });
+    metrics.stage("hook");
     try {
       const capture = await readCapture(expectedPath, metrics);
       metrics.set({ selected_turns: capture.messageTurnCount });

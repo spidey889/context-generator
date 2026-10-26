@@ -444,6 +444,34 @@ const transientError = (reason = "request_failed", detail = "network_error", sta
     ...(status === undefined ? {} : { capture_http_status: status }) }
 });
 
+test("fresh and prefetched JSON failures save native evidence even when their wrapper says unknown_error", async () => {
+  for (const prefetched of [false, true]) for (const check of ["invalid_utf8", "unknown"]) {
+    const stage = check === "unknown" ? "serialize" : "attachment_body";
+    const { context, calls } = harness("chatgpt");
+    context.window.__capCaptureChatGptJson = async () => {
+      calls.json++;
+      throw Object.assign(new Error("MUST_NOT_APPEAR chat https://PRIVATE filename.csv"), {
+        diagnosticCode: "unknown_error", diagnostics: { version: 1, error_code: "unknown_error", capture_detail: "network_error", capture_request_stage: "history" },
+        jsonCapture: { outcome: "failed", mode: "fresh", failure_check: check, failure_stage: stage, failure_error_type: "TypeError" }
+      });
+    };
+    if (prefetched) { context.startPickerJsonCapture(); await context.pickerJsonCapture.promise; }
+    await context.start("claude");
+    assert.equal(calls.json, 1, "Richer reporting must not change retry decisions.");
+    assert.equal(calls.finished.length, 1);
+    const details = calls.finished[0].diagnostics;
+    assert.equal(details.error_code, "capture_json_failed");
+    assert.equal(details.capture_error_code, "capture_json_failed");
+    assert.equal(details.capture_detail, check === "unknown" ? undefined : check);
+    assert.equal(details.capture_request_stage, stage);
+    assert.equal(details.failure_site, `capture_${stage}`);
+    assert.equal(details.capture_failure_site, `capture_${stage}`);
+    assert.equal(details.capture_error_type, "TypeError");
+    assert.equal(details.json_attempts[0].failure_check, check);
+    assert.doesNotMatch(JSON.stringify(details), /MUST_NOT_APPEAR|PRIVATE|filename|https/);
+  }
+});
+
 test("only DeepSeek -> ChatGPT retries an oversized picker file as a separate-upload note", async () => {
   for (const destination of ["chatgpt", "claude"]) {
     const { context, calls } = harness("deepseek", { mode: "success" });
@@ -557,7 +585,7 @@ test("size failures stop all five platforms without partial DOM transfer, includ
     assert.equal(context.isRunning, false);
     const diagnostics = calls.finished[0].diagnostics;
     assert.equal(diagnostics.error_code, "conversation_too_large");
-    assert.equal(diagnostics.capture_detail, error.diagnostics.capture_detail);
+    assert.equal(diagnostics.capture_detail, "size_limit", "The recorded size guard is more precise than the generic wrapper.");
     assert.equal(diagnostics.json_fallback_code, undefined);
     assert.equal(diagnostics.json_attempts[0].failure_check, error.jsonCapture.failure_check);
     assert.equal(diagnostics.json_attempts[0].failure_value, error.jsonCapture.failure_value);

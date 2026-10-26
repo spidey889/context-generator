@@ -1,5 +1,5 @@
 (() => {
-  const version = 21;
+  const version = 22;
   // HTTP media types ignore casing; parameters do not change the base type.
   const responseMediaType = response => response.headers.get("content-type")?.split(";", 1)[0].trim().toLowerCase();
   // Match MIME metadata by base type, keeping the serializer's paste gate aligned.
@@ -104,7 +104,8 @@
         let responseBytes = 0;
         if (reader) while (true) {
           // Retry a rejected network read, not decoder/JSON/size failures.
-          const { done, value } = await reader.read().catch(() => {
+          const { done, value } = await reader.read().catch(error => {
+            metrics.exception(error);
             if (controller.signal.aborted || currentChat() !== chat) throw new Error("changed");
             bodyReadFailed = true;
             metrics.fail("network_error", stage);
@@ -126,6 +127,7 @@
         observation.end();
         return metrics.timed("parse_ms", () => JSON.parse(parts.join("")));
       } catch (error) {
+        metrics.exception(error);
         if (error?.name === "SyntaxError") metrics.fail("invalid_json", stage);
         if (error?.name === "SyntaxError") reply.captureDetail = "invalid_json";
         if (reader) await reader.cancel().catch(() => {});
@@ -342,7 +344,7 @@
       // Never expose tokens, parser snippets, or arbitrary upstream errors.
       reply.error = navigated || controller.signal.reason === "account_changed" ? "changed" : controller.signal.aborted ? "timeout"
         : ["http", "partial", "format", "auth", "changed", "paste", "size"].includes(error?.message) ? error.message : error?.name === "SyntaxError" ? "invalid_json" : "network";
-      metrics.finish({ captureDetail: ({ http: "http_error", partial: "partial_response", format: "non_json_response", auth: "auth_missing", changed: "conversation_changed", paste: "attachment_failed", timeout: "timeout", invalid_json: "invalid_json", network: "network_error" })[reply.error], captureRequestStage: reply.captureRequestStage });
+      metrics.finish({ name: error?.name, captureDetail: ({ http: "http_error", partial: "partial_response", format: "non_json_response", auth: "auth_missing", changed: "conversation_changed", paste: "attachment_failed", timeout: "timeout", invalid_json: "invalid_json", network: "network_error" })[reply.error], captureRequestStage: reply.captureRequestStage });
     } finally {
       clearTimeout(timer);
       window.navigation?.removeEventListener("navigate", changed);
