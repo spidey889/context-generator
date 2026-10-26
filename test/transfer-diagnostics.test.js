@@ -38,6 +38,23 @@ test("every relay uses the same diagnostic contract and rejects private data at 
   assert.ok(validateTelemetryPayload(payload()), "Old clients retain the metadata API.");
 });
 
+test("attachment decoding clues survive both relays while private or arbitrary values are rejected", async () => {
+  const edge = await import("../supabase/functions/transfer-telemetry/validation.mjs");
+  const attempt = { mode: "fresh", outcome: "failed", failure_check: "invalid_utf8", failure_stage: "attachment_body",
+    failure_decode_stage: "chunk", failure_file_extension: "csv", failure_response_charset: "missing", failure_body_hint: "unrecognized" };
+  const report = changes => ({ version: 1, capture_detail: "invalid_utf8", json_attempts: [{ ...attempt, ...changes }] });
+  for (const key of ["failure_file_extension", "failure_response_charset", "failure_body_hint", "failure_decode_stage"]) {
+    for (const value of [...diagnostics.jsonAttemptSchema[key].values, "PRIVATE_FILE.csv", "https://PRIVATE", null]) {
+      const data = payload({ diagnostics: report({ [key]: value }) });
+      const valid = diagnostics.jsonAttemptSchema[key].values.includes(value);
+      assert.equal(Boolean(validateTelemetryPayload(data)), valid);
+      assert.equal(Boolean(edge.validateTelemetryPayload(data)), valid);
+    }
+  }
+  for (const key of ["file_name", "file_id", "url", "prefix", "bytes", "content", "raw_error"])
+    assert.equal(validateTelemetryPayload(payload({ diagnostics: report({ [key]: "PRIVATE" }) })), null);
+});
+
 test("unexpected exceptions retain their observed operation and type without inventing a cause", () => {
   const record = { version: 1, last_operation: "paste_verify", editor_seen: true, paste_populated: false };
   diagnostics.failure(record, new Error("PRIVATE account URL and chat text"), "destination", 500);

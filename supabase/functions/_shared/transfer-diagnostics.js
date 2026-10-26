@@ -23,7 +23,7 @@
     error_file: ["background.js", "platform-content.js", "chatgpt-json-capture.js", "chatgpt-fetch-main.js", "claude-json-capture.js", "claude-fetch-main.js", "network-json-capture.js", "network-fetch-main.js", "network-json-data.js"],
     failure_site: [...operations, "capture_hook", "capture_session", "capture_history", "capture_attachment_descriptor", "capture_attachment_body", "capture_serialize", "clipboard_write"],
     capture_request_stage: ["hook", "session", "history", "attachment_descriptor", "attachment_body", "serialize"],
-    capture_detail: ["auth_missing", "hook_unavailable", "busy", "http_error", "network_error", "invalid_json", "non_json_response", "partial_response", "incomplete_history", "invalid_branch", "branch_cycle", "parent_missing", "count_mismatch", "text_invalid", "canvas_invalid", "missing_text", "attachment_failed", "attachment_size_limit", "size_limit", "timeout", "conversation_changed", "unsupported_content", "routing_unavailable"],
+    capture_detail: ["auth_missing", "hook_unavailable", "busy", "http_error", "network_error", "invalid_json", "non_json_response", "partial_response", "incomplete_history", "invalid_branch", "branch_cycle", "parent_missing", "count_mismatch", "text_invalid", "canvas_invalid", "missing_text", "attachment_failed", "attachment_size_limit", "size_limit", "timeout", "conversation_changed", "unsupported_content", "routing_unavailable", "invalid_utf8"],
     document_ready_state: ["loading", "interactive", "complete"],
     destination_tab_status: ["loading", "complete"],
     summary_failed_provider: ["tokenharbor", "openrouter", "gemini", "mistral"],
@@ -67,6 +67,11 @@
     failure_abort: ["none", "capture_timeout", "attachment_failed", "other"],
     failure_online: ["online", "offline", "unknown"],
     failure_content_type: ["text", "json", "html", "octet_stream", "other", "missing"],
+    // Type clues only: never a filename, arbitrary suffix/header or body bytes.
+    failure_file_extension: ["txt", "md", "markdown", "csv", "json", "py", "js", "ts", "tsx", "jsx", "java", "kt", "swift", "c", "h", "cpp", "hpp", "cs", "go", "rs", "rb", "php", "sh", "bash", "zsh", "lua", "r", "scala", "dart", "html", "htm", "css", "scss", "vue", "svelte", "xml", "yaml", "yml", "toml", "tsv", "sql", "ipynb", "log", "other"],
+    failure_response_charset: ["utf8", "utf16", "utf16le", "utf16be", "utf32", "utf32le", "utf32be", "latin1", "windows1252", "ascii", "other", "missing"],
+    failure_body_hint: ["utf8_bom", "utf16le_bom", "utf16be_bom", "utf32le_bom", "utf32be_bom", "utf16le_or_utf32le_bom", "zip_signature", "gzip_signature", "pdf_signature", "png_signature", "jpeg_signature", "gif_signature", "ole_signature", "unrecognized"],
+    failure_decode_stage: ["chunk", "final_flush"],
     numeric_saturated: ["lower_bound"]
   };
   const jsonAttemptNumbers = ["adapter_version", "failure_value", "failure_limit", "http_status", "raw_bytes", "raw_limit_bytes",

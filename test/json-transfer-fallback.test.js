@@ -480,6 +480,28 @@ test("a failed separate-file capture cannot silently deliver a smaller DOM subse
   assert.equal(calls.errors.length, 1);
 });
 
+test("DeepSeek attachment decoding keeps its single retry, DOM fallback and precise failure diagnosis", async () => {
+  const { context, calls } = harness("deepseek");
+  context.window.__capCaptureNetworkJson = async () => {
+    calls.json++;
+    const error = transientError("request_failed", "invalid_utf8", 200);
+    error.diagnostics.capture_request_stage = "attachment_body";
+    error.diagnostics.failure_site = "capture_attachment_body";
+    error.jsonCapture = { outcome: "failed", failure_check: "invalid_utf8", failure_stage: "attachment_body",
+      failure_file_extension: "csv", failure_response_charset: "missing", failure_body_hint: "unrecognized", failure_decode_stage: "chunk" };
+    throw error;
+  };
+  await context.start("gemini");
+  assert.equal(calls.json, 2);
+  assert.equal(calls.dom, 1);
+  assert.equal(calls.flows.length, 1);
+  const diagnostics = calls.flows[0].trace.diagnostics;
+  assert.equal(diagnostics.capture_detail, "invalid_utf8");
+  assert.deepEqual(Array.from(diagnostics.json_attempts, value => [value.mode, value.failure_check]),
+    [["fresh", "invalid_utf8"], ["retry", "invalid_utf8"]]);
+  assert.doesNotMatch(JSON.stringify(diagnostics), /MUST_NOT_APPEAR/);
+});
+
 test("JSON attempt observations survive source-to-destination handoff and one retry", async () => {
   const platforms = ["chatgpt", "claude", "gemini", "grok", "deepseek"];
   for (const source of platforms) for (const destination of platforms.filter(value => value !== source)) {
