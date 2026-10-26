@@ -630,12 +630,14 @@ function pasteFixture(texts = ["Original pasted document"], authorization = "Bea
 test("ChatGPT skips an invalid UTF-8 paste, retains later healthy pastes, and rejects labels without text", async () => {
   const { data, files, fetchImpl } = pasteFixture(["Bad original", "  Healthy original\r\n"]);
   files[0].size = data.mapping.question.message.metadata.attachments[0].size = 1;
+  data.mapping.question.message.metadata.attachments[0].name = "broken-notes.txt";
   const harness = setup(data, 200, { fetchImpl: request => request.url.includes(`/estuary/content?id=${files[0].id}`)
     ? new Response(Uint8Array.of(0xff), { headers: { "content-type": "text/plain" } }) : fetchImpl(request) });
   await discover(harness);
   const capture = await harness.window.__capCaptureChatGptJson();
   assert.ok(capture.text.includes(files[1].text));
   assert.ok(!capture.text.includes(files[0].text));
+  assert.deepEqual(JSON.parse(JSON.stringify(capture.skippedFiles)), [{ name: "broken-notes.txt" }]);
   files[1].text = "";
   data.mapping.answer.message.content.parts = [""];
   data.mapping.question.message.metadata.attachments.push({ name: "Guide.pdf" });

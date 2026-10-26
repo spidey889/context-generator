@@ -250,6 +250,11 @@
   const deepseek = (data, chat, files = {}, metrics, measureOnly = false, omitLargeFiles = false) => {
     const excludedContentTypes = new Set();
     const omittedFiles = new Map();
+    const skippedFiles = new Map();
+    const skipFile = file => {
+      if (!measureOnly && typeof file.file_name === "string" && file.file_name.trim())
+        skippedFiles.set(file.file_name, { name: file.file_name });
+    };
     let hasText = false;
     const turns = deepseekBranch(data, chat).flatMap(message => {
       if (!["USER", "ASSISTANT"].includes(message.role)) return [];
@@ -276,7 +281,7 @@
             }
             if (!textFile(file)) { excludedContentTypes.add(file?.is_image === true ? "media" : "uploads"); continue; }
             if (!measureOnly) {
-              try { complete(file); } catch { excludedContentTypes.add("uploads"); continue; }
+              try { complete(file); } catch { excludedContentTypes.add("uploads"); skipFile(file); continue; }
             }
             if (omitLargeFiles && !measureOnly && Number.isSafeInteger(file.file_size) && file.file_size > 4100000 && file.status === "SUCCESS") {
               if (!fileIds.has(file.id)) {
@@ -291,6 +296,7 @@
             const text = Object.hasOwn(files, file.id) ? files[file.id] : null;
             if (file.status !== "SUCCESS" || typeof text !== "string" || new TextEncoder().encode(text).length !== file.file_size) {
               excludedContentTypes.add("uploads");
+              skipFile(file);
               continue;
             }
             if (text.trim()) hasText = true;
@@ -313,6 +319,7 @@
     // otherwise labels and empty wrappers alone cannot make a usable capture.
     const capture = transcript("DeepSeek", hasText || omittedFiles.size ? turns : [], excludedContentTypes, metrics);
     if (omittedFiles.size) capture.omittedFiles = [...omittedFiles.values()];
+    if (skippedFiles.size) capture.skippedFiles = [...skippedFiles.values()];
     return capture;
   };
   // Presentation only: tolerate partial/unsupported history without turning it

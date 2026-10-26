@@ -32,7 +32,7 @@
     const onAbort = () => finish(false);
     const receive = event => {
       const reply = event.data;
-      if (event.source === window && event.origin === location.origin && reply?.channel === channel && reply.platform === platform && reply.type === "pong" && reply.id === id && reply.version === (platform === "deepseek" ? 31 : platform === "grok" ? 22 : 19)) finish(true);
+      if (event.source === window && event.origin === location.origin && reply?.channel === channel && reply.platform === platform && reply.type === "pong" && reply.id === id && reply.version === (platform === "deepseek" ? 32 : platform === "grok" ? 22 : 19)) finish(true);
     };
     const ping = () => { if (settled) return; window.postMessage({ channel, platform, type: "ping", id }, location.origin); poll = setTimeout(ping, 100); };
     const timer = setTimeout(() => finish(false), timeout);
@@ -94,6 +94,9 @@
           if (reply.error) return reject(captureError(reply.error === "size" ? "This chat is too long to transfer (limit: 1,000,000 characters). Try a shorter chat." : `Fast capture failed: ${reply.error} Turn off the lightning button to use standard capture.`, reply.captureFailureReason,
             reply.captureDetail || "network_error", reply.captureRequestStage || "history", reply.status));
           const capture = reply.capture;
+          if (capture?.skippedFiles !== undefined && (platform !== "deepseek" || !Array.isArray(capture.skippedFiles)
+            || capture.skippedFiles.some(file => !file || typeof file.name !== "string" || !file.name.trim() || /\.pdf$/i.test(file.name.trim()))))
+            return reject(captureError("Invalid unreadable-file notice.", "incomplete"));
           if (capture?.omittedFiles !== undefined && (!omitLargeFiles || platform !== "deepseek" || !Array.isArray(capture.omittedFiles)
             || capture.omittedFiles.some(file => !file || typeof file.name !== "string" || !file.name.trim()
               || !Number.isSafeInteger(file.bytes) || file.bytes <= 4100000))) return reject(captureError("Invalid separate-file notice.", "incomplete"));

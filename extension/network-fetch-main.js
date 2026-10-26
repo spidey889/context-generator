@@ -3,7 +3,7 @@
   if (!platform || !globalThis.__capNetworkJsonData) return;
   // Advance readiness version with adapter/contract changes: old MAIN closures
   // can survive extension reloads and must be replaced before a new capture.
-  const version = platform === "deepseek" ? 31 : platform === "grok" ? 22 : 19, channel = "cap-context-network-json-v1";
+  const version = platform === "deepseek" ? 32 : platform === "grok" ? 22 : 19, channel = "cap-context-network-json-v1";
   // Bound the whole download, including unused branches, separately from text.
   const maxCaptureBytes = 32000000;
   // Shared across unique text files; the final transcript has its own limits.

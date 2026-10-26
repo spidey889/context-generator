@@ -291,6 +291,7 @@ function deepseekUploads(count = 6) {
 
 test("DeepSeek: an invalid UTF-8 attachment cannot discard healthy text or later downloads", async () => {
   const f = deepseekUploads(7);
+  f.data.data.biz_data.chat_messages[0].fragments[0].files.push({ ...f.uploads[0], id: "file-pdf", file_name: "Guide.PDF" });
   const invalid = new Set([f.uploads[0].id, f.uploads[3].id]);
   const bodies = [];
   const h = setup("deepseek", f, { fetchImpl: request => {
@@ -304,6 +305,7 @@ test("DeepSeek: an invalid UTF-8 attachment cannot discard healthy text or later
   await h.observe();
   const capture = await h.window.__capCaptureNetworkJson();
   for (const file of f.uploads) assert.equal(capture.text.includes(f.files[file.id]), !invalid.has(file.id));
+  assert.deepEqual(JSON.parse(JSON.stringify(capture.skippedFiles)), [{ name: "source-0.py" }, { name: "source-3.py" }]);
   assert.equal(h.requests.length, 8, "bad files must not stop queued healthy downloads");
   assert.ok(capture.text.includes(f.data.data.biz_data.chat_messages[1].fragments[0].content));
   assert.ok(bodies.every(body => !body.locked));
@@ -943,7 +945,7 @@ test("DeepSeek: one incomplete upload preserves siblings and a fresh capture ret
   assert.ok(!capture.text.includes(f.files[f.uploads[0].id]));
   assert.equal(h.requests.length, 7, "failure must not stop queued downloads");
   assert.equal(aborted.length, 0);
-  assert.equal(h.window.__capNetworkFetchState.version, 31);
+  assert.equal(h.window.__capNetworkFetchState.version, 32);
   assert.equal(h.navigationListeners(), 0);
   assert.equal(h.listeners.size, 2);
   healthy = true;
@@ -1023,7 +1025,7 @@ for (const platform of ["gemini", "grok", "deepseek"]) test(`${platform}: the pr
   old.version = platform === "deepseek" ? 27 : platform === "gemini" ? 16 : 19;
   h.reinstall(files[1]);
   assert.notEqual(h.window.__capNetworkFetchState, old);
-  assert.equal(h.window.__capNetworkFetchState.version, platform === "deepseek" ? 31 : platform === "grok" ? 22 : 19);
+  assert.equal(h.window.__capNetworkFetchState.version, platform === "deepseek" ? 32 : platform === "grok" ? 22 : 19);
   assert.equal(h.listeners.size, 2);
   assert.equal((await h.window.__capCaptureNetworkJson()).text, h.fixture.expected);
 });

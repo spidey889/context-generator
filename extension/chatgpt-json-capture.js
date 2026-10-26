@@ -21,6 +21,8 @@
   function serialize(data, chat, pastedTexts = {}, sourceTreeCounts, metrics, measureOnly = false) {
     const blocked = (reason, detail = "incomplete_history") => captureError(`ChatGPT JSON capture blocked: ${reason} Turn JSON capture off to use DOM capture.`, "incomplete", detail);
     const excludedContentTypes = new Set();
+    const skippedFiles = new Map();
+    let pastedAttachmentIndex = 0;
     let captureWarning;
     if ((data?.conversation_id ?? data?.id) !== chat) throw blocked("The response belongs to a different conversation.");
     const assertComplete = (scope, label) => {
@@ -205,14 +207,20 @@
         const pastedIds = new Set();
         for (const file of Array.isArray(message.metadata?.attachments) ? message.metadata.attachments : []) {
           if (!isPlainTextPaste(file)) continue;
+          const index = ++pastedAttachmentIndex;
+          const skipFile = () => {
+            const name = typeof file.name === "string" && file.name.trim() ? file.name : `Unnamed pasted text attachment ${index}`;
+            if (!measureOnly && !/\.pdf$/i.test(name.trim())) skippedFiles.set(file.id || name, { name });
+          };
           if (!measureOnly) {
             try { assertComplete(file, "Pasted text attachment"); }
-            catch { excludedContentTypes.add("uploads"); continue; }
+            catch { excludedContentTypes.add("uploads"); skipFile(); continue; }
           }
           const pasted = Object.hasOwn(pastedTexts, file.id) ? pastedTexts[file.id] : null;
           if (measureOnly && typeof pasted !== "string") continue;
           if (typeof pasted !== "string" || !Number.isSafeInteger(file.size) || new TextEncoder().encode(pasted).length !== file.size) {
             excludedContentTypes.add("uploads");
+            skipFile();
             continue;
           }
           if (!pasted.trim() || pastedIds.has(file.id)) continue;
@@ -262,7 +270,7 @@
     metrics?.set({ selected_turns: messageTurnCount });
     if (metrics ? !metrics.transcript(text) : text.length > 1000000 || new TextEncoder().encode(text).length > 4000000) throw captureError("This chat is too long to transfer (limit: 1,000,000 characters). Try a shorter chat.", "size_limit");
     return { text, messages: turns, messageTurnCount, excludedContentTypes: [...excludedContentTypes].sort(),
-      ...(captureWarning ? { captureWarning } : {}) };
+      ...(captureWarning ? { captureWarning } : {}), ...(skippedFiles.size ? { skippedFiles: [...skippedFiles.values()] } : {}) };
   }
 
   function waitForHook(timeoutMs, install = false, signal) {

@@ -601,7 +601,9 @@ test("Claude JSON capture skips missing/truncated pasted content and preserves h
     data.chat_messages[0].attachments = [attachment, pastedAttachment("Healthy pasted text")];
     const harness = setup(data);
     await harness.window.fetch(endpoint);
-    assert.equal((await harness.window.__capCaptureClaudeJson()).text,
+    const capture = await harness.window.__capCaptureClaudeJson();
+    assert.deepEqual(JSON.parse(JSON.stringify(capture.skippedFiles)), [{ name: "Unnamed pasted text attachment 1" }]);
+    assert.equal(capture.text,
       "Claude conversation:\n\nUser: Question\n\nHealthy pasted text\n\nAssistant: Private reasoning\n\nSelected answer");
   }
 });

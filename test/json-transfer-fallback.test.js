@@ -447,12 +447,12 @@ const transientError = (reason = "request_failed", detail = "network_error", sta
 test("only DeepSeek -> ChatGPT retries an oversized picker file as a separate-upload note", async () => {
   for (const destination of ["chatgpt", "claude"]) {
     const { context, calls } = harness("deepseek", { mode: "success" });
-    const options = [], omittedFiles = [{ name: "original.txt", bytes: 13099028 }];
+    const options = [], omittedFiles = [{ name: "original.txt", bytes: 13099028 }], skippedFiles = [{ name: "unreadable.txt" }];
     context.window.__capCaptureNetworkJson = async (_path, omitLargeFiles) => {
       calls.json++; options.push(Boolean(omitLargeFiles));
       if (!omitLargeFiles) throw Object.assign(transientError("size_limit", "attachment_size_limit"), {
         jsonCapture: { outcome: "failed", failure_check: "supported_files_limit", files_supported: 1 } });
-      return { text: "Complete chat with separate-file notice", messageTurnCount: 2, omittedFiles,
+      return { text: "Complete chat with separate-file notice", messageTurnCount: 2, omittedFiles, skippedFiles,
         jsonCapture: { outcome: "partial", files_supported: 1 } };
     };
     context.startPickerJsonCapture(); await context.pickerJsonCapture.promise;
@@ -462,6 +462,7 @@ test("only DeepSeek -> ChatGPT retries an oversized picker file as a separate-up
     assert.equal(calls.flows.length, destination === "chatgpt" ? 1 : 0);
     if (calls.flows.length) {
       assert.equal(calls.flows[0].trace.omittedFiles, omittedFiles);
+      assert.equal(calls.flows[0].trace.skippedFiles, skippedFiles);
       assert.equal(calls.flows[0].trace.diagnostics.json_attempts.length, 2);
     }
   }

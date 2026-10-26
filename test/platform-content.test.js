@@ -2387,6 +2387,37 @@ test("oversized summary JSON surfaces its size error without silently making a l
   await assert.rejects(hooks.summarizeWithBackend("x".repeat(500000)), error => error.code === "request_too_large");
 });
 
+test("unreadable-file upload requests survive direct, AI and recovery carries; PDFs stay excluded", async () => {
+  const greeting = 'Reply only: "Context loaded. Let\'s pick up right where you left off." Then wait for the user.';
+  for (const hostname of ["chat.deepseek.com", "chatgpt.com", "claude.ai"]) for (const mode of ["direct", "remote", "recovery"]) {
+    const hooks = loadPlatformContent([], hostname, { runtimeSendMessage: async message => {
+      if (message.type !== "SUMMARIZE_WITH_BACKEND") return { ok: true };
+      assert.equal(message.skippedFiles, undefined, "File notes remain source-local until final carry assembly.");
+      if (mode === "recovery") throw new Error("offline");
+      return { ok: true, summary: `Verified chat summary\n\nNext step:\n\n${greeting}` };
+    } });
+    const trace = hooks.createTransferTrace("gemini", "test");
+    trace.skippedFiles = [{ name: "broken-source.py" }, { name: 'quoted\n"name.txt' }, { name: "Guide.PDF" }];
+    const summary = await hooks.summarizeWithBackend(mode === "direct" ? "User: continue this chat." : "x".repeat(10000), trace);
+    assert.match(summary, /Then naturally ask the user to upload/);
+    assert.match(summary, /"broken-source.py" \(could not be read as complete text; its contents were skipped\)/);
+    assert.ok(summary.includes(JSON.stringify(trace.skippedFiles[1].name)));
+    assert.ok(summary.lastIndexOf("broken-source.py") > summary.search(/Next step:|NEXT STEP/));
+    assert.doesNotMatch(summary, /Guide.PDF|Reply only:/);
+  }
+  const hooks = loadPlatformContent([], "chat.deepseek.com");
+  const trace = hooks.createTransferTrace("chatgpt", "test");
+  trace.omittedFiles = [{ name: "large.txt", bytes: 5000000 }];
+  trace.skippedFiles = [{ name: "unreadable.py" }];
+  const summary = await hooks.summarizeWithBackend("User: continue this chat.", trace);
+  assert.match(summary, /large.txt.*exceeds the 4.1 MB file limit/);
+  assert.match(summary, /unreadable.py.*contents were skipped/);
+  assert.equal(summary.match(/Then naturally ask the user to upload/g).length, 1);
+  trace.omittedFiles = undefined;
+  trace.skippedFiles = [{ name: "only.PDF" }];
+  assert.doesNotMatch(await hooks.summarizeWithBackend("User: continue this chat.", trace), /ask the user to upload|only.PDF/);
+});
+
 clockTest("local and remote handoffs reveal without a cosmetic one-second delay", async () => {
   for (const local of [true, false]) {
     const hooks = loadPlatformContent([]);

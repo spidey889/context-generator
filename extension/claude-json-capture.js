@@ -27,6 +27,8 @@
     // Report structural metadata only, never message text, file names, or tool payloads.
     const unsupported = (reason, detail = "incomplete_history") => captureError(`This conversation has incomplete or unsupported JSON content: ${reason} Turn JSON capture off to use DOM capture.`, "incomplete", detail);
     const excludedContentTypes = new Set();
+    const skippedFiles = new Map();
+    let pastedAttachmentIndex = 0;
     const assertComplete = (value, label) => {
       if (value == null) return;
       if (typeof value !== "object" || Array.isArray(value)) throw unsupported(`${label} completeness metadata is invalid.`);
@@ -129,6 +131,7 @@
       const pastedBodiesById = new Map();
       for (const attachment of attachments) {
         if (attachment?.file_type !== "txt" || attachment.file_name !== "") continue;
+        const index = ++pastedAttachmentIndex;
         if (measureOnly && (typeof attachment.extracted_content !== "string" || (attachment.file_size > 0 && !attachment.extracted_content.length))) continue;
         try {
           if (!measureOnly) assertComplete(attachment, "Pasted-text attachment");
@@ -138,6 +141,10 @@
           // Pasted cards are optional file text, just like named uploads. Do not
           // discard healthy own-turn text or other complete cards with this one.
           excludedContentTypes.add("uploads");
+          if (!measureOnly) {
+            const name = `Unnamed pasted text attachment ${index}`;
+            skippedFiles.set(attachment.id || name, { name });
+          }
           continue;
         }
         const pastedText = attachment.extracted_content;
@@ -203,7 +210,8 @@
     if (metrics ? !metrics.transcript(text) : text.length > 1000000 || new TextEncoder().encode(text).length > 4000000) {
       throw captureError("Conversation exceeds the supported 1,000,000 character / 4 MB limit.", "size_limit", "size_limit");
     }
-    return { text, messages: turns, messageTurnCount: turns.length, excludedContentTypes: [...excludedContentTypes].sort() };
+    return { text, messages: turns, messageTurnCount: turns.length, excludedContentTypes: [...excludedContentTypes].sort(),
+      ...(skippedFiles.size ? { skippedFiles: [...skippedFiles.values()] } : {}) };
   }
 
   function waitForHook(timeoutMs, install = false, signal) {
