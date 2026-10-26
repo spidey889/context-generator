@@ -349,6 +349,63 @@ test("closed picker results are discarded and reopening never overlaps native re
   assert.equal(calls.flows[0].text, "Fresh reopened picker");
 });
 
+test("ChatGPT closing and reopening cancels the abandoned read before its replacement starts", async () => {
+  const { context, calls } = harness("chatgpt", { mode: "success" });
+  const started = deferred(), cancelled = deferred(), cleanup = deferred();
+  let firstSignal;
+  context.window.__capCaptureChatGptJson = async (_path, signal) => {
+    calls.json++;
+    if (calls.json !== 1) return { text: "Fresh reopened chat", messageTurnCount: 2 };
+    firstSignal = signal;
+    started.resolve();
+    await new Promise(resolve => signal.addEventListener("abort", resolve, { once: true }));
+    cancelled.resolve();
+    await cleanup.promise; // Model MAIN acknowledging native-reader cleanup.
+    throw new Error("Cancelled old capture");
+  };
+  context.startPickerJsonCapture(); await started.promise;
+  context.clearPickerJsonCapture();
+  assert.equal(firstSignal.aborted, true);
+  context.startPickerJsonCapture();
+  const replacement = context.pickerJsonCapture;
+  await cancelled.promise;
+  await new Promise(setImmediate);
+  assert.equal(calls.json, 1, "Do not race a new request against the cancelling native reader.");
+  cleanup.resolve();
+  await replacement.promise;
+  assert.equal(calls.json, 2, "Acknowledged cancellation must release the queue.");
+  await context.start("claude");
+  assert.equal(calls.flows[0].text, "Fresh reopened chat");
+  assert.equal(calls.errors.length + calls.dom, 0);
+});
+
+test("ChatGPT queued picker cancellation skips its download and selection retains its pending read", async () => {
+  for (const scenario of ["closed before start", "selected"]) {
+    const { context, calls } = harness("chatgpt", { mode: "success" });
+    const queued = deferred(), response = deferred(), started = deferred();
+    let signal;
+    context.pendingJsonCapture = queued.promise;
+    context.window.__capCaptureChatGptJson = (_path, currentSignal) => {
+      calls.json++; signal = currentSignal; started.resolve(); return response.promise;
+    };
+    context.startPickerJsonCapture();
+    const entry = context.pickerJsonCapture, settled = entry.promise;
+    if (scenario === "closed before start") {
+      context.clearPickerJsonCapture(); queued.resolve();
+      await settled;
+      assert.equal(calls.json, 0, "A closed queued picker must never start a native download.");
+    } else {
+      const transfer = context.start("claude"); queued.resolve(); await started.promise;
+      assert.equal(signal.aborted, false, "Selecting a destination must keep the owning read alive.");
+      context.clearPickerJsonCapture();
+      assert.equal(signal.aborted, false, "Picker cleanup after selection cannot cancel the transfer's read.");
+      response.resolve({ text: "Selected pending chat", messageTurnCount: 2 }); await transfer;
+      assert.equal(calls.json, 1);
+      assert.equal(calls.flows[0].text, "Selected pending chat");
+    }
+  }
+});
+
 test("closing the picker immediately releases its snapshot and drops late results", async () => {
   for (const ready of [false, true]) {
     const { context, calls } = harness("chatgpt", { mode: "success" });

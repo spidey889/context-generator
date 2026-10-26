@@ -2,6 +2,10 @@
 
 A short history of decisions and regressions that matter when changing the code. Read the relevant section of [LOGIC.md](LOGIC.md) for current behavior, ownership and checks; use this file when you need to understand why an approach changed. Entries describe source changes unless deployment is explicitly recorded. Extension packaging, Web Store publication and backend deployment are separate.
 
+## 2026-10-27
+
+- **Cancel abandoned ChatGPT picker capture.** Closing a picker discarded its text but left the native read running, so reopening could queue behind the old request. Give only ChatGPT picker reads an owned cancellation signal, stop setup/downloads on dismissal, and keep the shared queue until correlated MAIN cleanup acknowledges cancellation. Preserve a selected pending read, skip already-cancelled queued work, and cancel stale history before replacement. Separate capture/measurement IDs prevent late cancellation from stopping another read. Advance ChatGPT MAIN/bridge to v24 and content readiness to v183. Add regression cases for pending/queued dismissal, cleanup acknowledgement, selection ownership, setup/body cancellation and ID isolation. Tests intentionally not run at the owner's request; local source change only. Endpoint selection, other platforms, retry cooldown and handoff animation are unchanged.
+
 ## 2026-10-26
 
 - **Retire the old backend audit.** Remove `BACKEND_AUDIT.md` and its fake-report risk note from `LOGIC.md` at the owner's request. This is documentation cleanup; reporting and counter behavior are unchanged.

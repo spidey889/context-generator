@@ -68,6 +68,104 @@ test("ChatGPT cancelling a background count releases the native read before a ne
   assert.ok((await h.window.__capCaptureChatGptJson()).text.includes("Selected answer"));
 });
 
+test("ChatGPT picker cancellation aborts its history read and releases MAIN before the next capture", async () => {
+  const data = fixture();
+  let stall = false, oldId, activeSignal, started;
+  const began = new Promise(resolve => { started = resolve; });
+  const h = setup(data, 200, { beforeMessage: message => {
+    if (message.type === "request") oldId = message.id;
+  }, fetchImpl: request => {
+    if (!stall) return Response.json(data);
+    activeSignal = request.options.signal;
+    started();
+    return new Promise((_, reject) => activeSignal.addEventListener("abort", () => reject(new Error("aborted")), { once: true }));
+  } });
+  await discover(h); stall = true;
+  const controller = new AbortController();
+  const capture = h.window.__capCaptureChatGptJson(undefined, controller.signal);
+  const stopped = assert.rejects(capture, error => error.diagnosticCode === "user_cancelled");
+  await began; controller.abort(); await stopped;
+  assert.equal(activeSignal.aborted, true);
+  assert.equal(h.replies.at(-1).error, "cancelled");
+  assert.equal(h.replies.at(-1).data, undefined);
+  assert.equal(h.replies.at(-1).jsonCapture.outcome, "cancelled");
+  assert.equal(h.navigationListeners(), 0);
+  const cancelledId = oldId;
+  stall = false;
+  // A late cancel belonging to the old read cannot revoke a new request.
+  h.window.postMessage({ channel: "cap-context-chatgpt-json-v2", type: "cancel_capture", id: cancelledId }, h.location.origin);
+  assert.ok((await h.window.__capCaptureChatGptJson()).text.includes("Selected answer"));
+  assert.equal(h.listeners(), 1);
+});
+
+test("ChatGPT capture and measurement cancellation IDs cannot cancel each other's active read", async () => {
+  for (const measureOnly of [false, true]) {
+    const data = fixture();
+    let stall = false, requestId, activeSignal, started;
+    const began = new Promise(resolve => { started = resolve; });
+    const h = setup(data, 200, { beforeMessage: message => {
+      if (message.type === "request") requestId = message.id;
+    }, fetchImpl: request => {
+      if (!stall) return Response.json(data);
+      activeSignal = request.options.signal; started();
+      return new Promise((_, reject) => activeSignal.addEventListener("abort", () => reject(new Error("aborted")), { once: true }));
+    } });
+    await discover(h); stall = true;
+    const controller = new AbortController();
+    const read = measureOnly ? h.window.__capMeasureChatGptJson(undefined, controller.signal)
+      : h.window.__capCaptureChatGptJson(undefined, controller.signal);
+    const stopped = assert.rejects(read, /cancelled/);
+    await began;
+    for (const [type, id] of [[measureOnly ? "cancel_capture" : "cancel_measurement", requestId],
+      [measureOnly ? "cancel_measurement" : "cancel_capture", "stale-other-request"]]) {
+      h.window.postMessage({ channel: "cap-context-chatgpt-json-v2", type, id }, h.location.origin);
+    }
+    await new Promise(setImmediate);
+    assert.equal(activeSignal.aborted, false);
+    controller.abort(); await stopped;
+    assert.equal(activeSignal.aborted, true);
+    assert.ok(h.replies.every(reply => !reply.data));
+  }
+});
+
+clockTest("ChatGPT picker cancellation during hook recovery stops setup without starting a download", async () => {
+  let installing;
+  const started = new Promise(resolve => { installing = resolve; });
+  const h = setup(fixture(), 200, { runtime: { sendMessage: () => { installing(); return new Promise(() => {}); } } });
+  h.window.__capChatGptFetchState.dispose();
+  const controller = new AbortController();
+  const read = h.window.__capCaptureChatGptJson(undefined, controller.signal);
+  const stopped = assert.rejects(read, error => error.diagnosticCode === "user_cancelled");
+  await started; controller.abort(); await stopped;
+  assert.equal(h.requests.length, 0);
+  assert.equal(h.listeners(), 0);
+  assert.equal(h.navigationListeners(), 0);
+});
+
+test("ChatGPT picker cancellation aborts an original pasted-file body without exposing partial text", async () => {
+  const { data, fetchImpl } = pasteFixture();
+  let started, pendingResponse, activeSignal;
+  const began = new Promise(resolve => { started = resolve; });
+  const h = setup(data, 200, { fetchImpl: request => {
+    if (new URL(request.url, "https://chatgpt.com").pathname !== "/backend-api/estuary/content") return fetchImpl(request);
+    activeSignal = request.options.signal;
+    pendingResponse = new Response(new ReadableStream({ start(stream) {
+      activeSignal.addEventListener("abort", () => stream.error(new Error("aborted")), { once: true });
+      started();
+    } }), { headers: { "content-type": "text/plain" } });
+    return pendingResponse;
+  } });
+  await discover(h);
+  const controller = new AbortController();
+  const capture = h.window.__capCaptureChatGptJson(undefined, controller.signal);
+  const stopped = assert.rejects(capture, error => error.diagnosticCode === "user_cancelled");
+  await began; controller.abort(); await stopped;
+  assert.equal(activeSignal.aborted, true);
+  assert.equal(pendingResponse.body.locked, false);
+  assert.ok(h.replies.every(reply => !reply.data && !reply.pastedTexts));
+  assert.equal(h.navigationListeners(), 0);
+});
+
 test("ChatGPT keeps readable JSON text and flags malformed plain-text parts", async () => {
   for (const part of [{ text: "PRIVATE_DETAILS_SENTINEL" }, 42, null]) {
     const data = fixture();
@@ -791,7 +889,7 @@ test("ChatGPT replaces the previous hook without losing observed authentication"
   old.version = 8;
   harness.reinstall();
   assert.notEqual(harness.window.__capChatGptFetchState, old);
-  assert.equal(harness.window.__capChatGptFetchState.version, 21);
+  assert.equal(harness.window.__capChatGptFetchState.version, 24);
   assert.equal(harness.listeners(), 1);
   assert.equal((await harness.window.__capCaptureChatGptJson()).text,
     "ChatGPT conversation:\n\nUser: Original pasted document\n\nAssistant: Selected answer");

@@ -1,5 +1,5 @@
 (() => {
-  const version = 21;
+  const version = 24;
   // HTTP media types ignore casing; parameters do not change the base type.
   const responseMediaType = response => response.headers.get("content-type")?.split(";", 1)[0].trim().toLowerCase();
   // Match MIME metadata by base type, keeping the serializer's paste gate aligned.
@@ -17,7 +17,7 @@
   let auth = previous?.headers?.() || null;
   previous?.dispose();
   const nativeFetch = window.fetch;
-  let active = null, activeMeasurementId = null;
+  let active = null, activeMeasurementId = null, activeCaptureId = null;
   let authRevision = 0;
   const authKeys = ["authorization", "chatgpt-account-id", "oai-did", "oai-language", "originator"];
 
@@ -44,10 +44,16 @@
 
   const receive = async event => {
     const request = event.data;
-    if (event.source !== window || event.origin !== location.origin || request?.channel !== channel || !["request", "ping", "cancel_measurement"].includes(request.type)) return;
+    if (event.source !== window || event.origin !== location.origin || request?.channel !== channel || !["request", "ping", "cancel_measurement", "cancel_capture"].includes(request.type)) return;
     if (typeof request.id !== "string" || request.id.length > 80) return;
     if (request.type === "cancel_measurement") {
       if (activeMeasurementId === request.id) active?.abort("measurement_cancelled");
+      return;
+    }
+    if (request.type === "cancel_capture") {
+      // Correlate ordinary cancellation separately: an old picker or a count
+      // cancellation must never abort a newer capture or a measurement.
+      if (activeCaptureId === request.id) active?.abort("capture_cancelled");
       return;
     }
     // Readiness probes never fetch session data or conversation messages.
@@ -63,6 +69,7 @@
       raw_bytes: 0, requests: 0, auth_refreshes: 0 });
     active = controller;
     activeMeasurementId = request.measureOnly === true ? request.id : null;
+    activeCaptureId = request.measureOnly === true ? null : request.id;
     let navigated = false;
     const changed = event => {
       const destination = event?.destination ? new URL(event.destination.url) : location;
@@ -340,14 +347,15 @@
       reply.sourceTreeCounts = sourceTreeCounts;
     } catch (error) {
       // Never expose tokens, parser snippets, or arbitrary upstream errors.
-      reply.error = navigated || controller.signal.reason === "account_changed" ? "changed" : controller.signal.aborted ? "timeout"
+      reply.error = navigated || controller.signal.reason === "account_changed" ? "changed"
+        : controller.signal.reason === "capture_cancelled" ? "cancelled" : controller.signal.aborted ? "timeout"
         : ["http", "partial", "format", "auth", "changed", "paste", "size"].includes(error?.message) ? error.message : error?.name === "SyntaxError" ? "invalid_json" : "network";
-      metrics.finish({ captureDetail: ({ http: "http_error", partial: "partial_response", format: "non_json_response", auth: "auth_missing", changed: "conversation_changed", paste: "attachment_failed", timeout: "timeout", invalid_json: "invalid_json", network: "network_error" })[reply.error], captureRequestStage: reply.captureRequestStage });
+      metrics.finish({ captureDetail: ({ http: "http_error", partial: "partial_response", format: "non_json_response", auth: "auth_missing", changed: "conversation_changed", paste: "attachment_failed", timeout: "timeout", cancelled: "cancelled", invalid_json: "invalid_json", network: "network_error" })[reply.error], captureRequestStage: reply.captureRequestStage });
     } finally {
       clearTimeout(timer);
       window.navigation?.removeEventListener("navigate", changed);
       window.removeEventListener("popstate", changed);
-      if (active === controller) { active = null; activeMeasurementId = null; }
+      if (active === controller) { active = null; activeMeasurementId = null; activeCaptureId = null; }
     }
     reply.jsonCapture = metrics.finish();
     window.postMessage(reply, location.origin);

@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-26-handoff-copy-audit-v181";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-27-chatgpt-picker-cancel-v183";
   const SOURCE_JSON_RETRY_DELAY_MS = 2000;
   const INLINE_PILL_SIZE = 36;
   const ownedUiStyleSheets = new Map();
@@ -7808,8 +7808,10 @@
     if (!entry) return;
     entry.discarded = true;
     entry.guard.dispose();
-    // A bounded native read may still hold entry until it settles. Drop the
-    // cached transcript promise and rendered-history copy immediately.
+    // ChatGPT must stop an abandoned native read, not just discard its text:
+    // otherwise reopening queues behind work the owner already dismissed.
+    entry.controller?.abort();
+    // Release source text now; the shared queue still awaits native cleanup.
     entry.promise = null;
     entry.state = null;
   }
@@ -7862,12 +7864,12 @@
     state.controller.abort();
   }
 
-  function captureSourceJson(expectedPath, shouldRead = () => true, measureOnly = false, omitLargeFiles = false) {
-    // Native bridges allow one read at a time. A dismissed read may still be
-    // finishing; queue its replacement rather than provoking a busy fallback.
+  function captureSourceJson(expectedPath, shouldRead = () => true, measureOnly = false, omitLargeFiles = false, signal = null) {
+    // Native bridges allow one read at a time. Cancellation releases this queue
+    // only after the owning MAIN read acknowledges cleanup, avoiding busy races.
     const transferTrace = isRunning ? activeTransferTrace : null;
     const pending = pendingJsonCapture.then(() => {
-      if (!instanceActive || !shouldRead()) throw createDiagnosticError("The conversation changed during capture.", "conversation_changed");
+      if (!instanceActive || signal?.aborted || !shouldRead()) throw createDiagnosticError("The conversation changed during capture.", "conversation_changed");
       checkTransferDeadline(transferTrace);
       const captureJson = measureOnly
         ? currentPlatform.id === "claude" ? window.__capMeasureClaudeJson
@@ -7875,7 +7877,8 @@
         : currentPlatform.id === "claude" ? window.__capCaptureClaudeJson
           : currentPlatform.id === "chatgpt" ? window.__capCaptureChatGptJson : window.__capCaptureNetworkJson;
       if (typeof captureJson !== "function") throw createDiagnosticError(`Refresh ${currentPlatform.name} to enable JSON capture.`, "capture_json_unavailable");
-      return captureJson(expectedPath, measureOnly ? transferTrace?.domSizeCheck?.controller.signal : omitLargeFiles || undefined,
+      return captureJson(expectedPath, measureOnly ? transferTrace?.domSizeCheck?.controller.signal
+        : currentPlatform.id === "chatgpt" ? signal || undefined : omitLargeFiles || undefined,
         measureOnly ? transferTrace?.domSizeCheck?.onEstimate : undefined);
     });
     // Keep only completion in the queue; unused transcripts/errors are not retained.
@@ -7892,6 +7895,7 @@
       url: window.location.href,
       state: getPickerConversationState(),
       guard: createConversationGuard("The conversation changed during capture."),
+      ...(currentPlatform.id === "chatgpt" ? { controller: new AbortController() } : {}),
       selected: false
     };
     pickerJsonCapture = entry;
@@ -7900,7 +7904,7 @@
     entry.promise = captureSourceJson(path, () => {
       checkTransferDeadline(entry.trace);
       return entry.selected || pickerJsonCapture === entry;
-    })
+    }, false, false, entry.controller?.signal)
       .then(capture => entry.discarded ? {} : { capture }, error => entry.discarded ? {} : { error });
   }
 
@@ -7994,7 +7998,12 @@
               return result.capture;
             }
           }
-        } finally { entry.guard.dispose(); }
+        } finally {
+          entry.guard.dispose();
+          // A stale pending snapshot also needs cancellation before its fresh
+          // replacement can acquire the native reader. Completed reads are inert.
+          entry.controller?.abort();
+        }
       }
       return await read();
     } catch (error) {

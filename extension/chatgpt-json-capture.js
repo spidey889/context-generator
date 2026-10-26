@@ -276,7 +276,7 @@
       const receive = event => {
         const reply = event.data;
         if (event.source === window && event.origin === location.origin && reply?.channel === channel
-          && reply.type === "pong" && reply.id === id && reply.version === 21) finish(true);
+          && reply.type === "pong" && reply.id === id && reply.version === 24) finish(true);
       };
       const ping = () => {
         if (settled) return;
@@ -298,6 +298,8 @@
 
   window.__capCaptureChatGptJson = async (expectedPath = location.pathname, metrics, measureOnly = false, signal, onEstimate) => {
     const hookStarted = Date.now();
+    const cancelledError = (stage = "hook") => measureOnly ? new Error("Size check cancelled.")
+      : Object.assign(new Error("ChatGPT capture cancelled."), { diagnosticCode: "user_cancelled", captureDetail: "cancelled", captureRequestStage: stage });
     const chat = currentChat(expectedPath);
     if (!chat) throw captureError("Open a saved ChatGPT conversation to use JSON capture.", "unavailable", "routing_unavailable", "hook");
     let changed = currentChat() !== chat;
@@ -314,19 +316,20 @@
       // Usually document_start already installed MAIN; don't wake/reinstall it
       // on every capture. Missing/older/replaced hooks get bounded recovery.
       if (!await waitForHook(250, false, signal)) {
-        if (signal?.aborted) throw new Error("Size check cancelled.");
+        if (signal?.aborted) throw cancelledError();
         if (typeof chrome === "undefined" || !chrome.runtime?.sendMessage || !await waitForHook(8000, true, signal)) {
+          if (signal?.aborted) throw cancelledError();
           throw captureError("Fast capture isn't ready yet. Refresh this chat and try again, or turn off the lightning button.", "unavailable", "hook_unavailable", "hook");
         }
       }
-      if (signal?.aborted) throw new Error("Size check cancelled.");
-      metrics.set({ hook_ms: Date.now() - hookStarted, adapter_version: 19 });
+      if (signal?.aborted) throw cancelledError();
+      metrics.set({ hook_ms: Date.now() - hookStarted, adapter_version: 24 });
       if (changed || currentChat() !== chat) throw captureError("The ChatGPT conversation changed during capture.", "request_failed", "conversation_changed", "hook");
       return await new Promise((resolve, reject) => {
         const id = crypto.randomUUID();
         // Await the native cancellation reply before releasing the shared read
         // queue; rejecting immediately could race a still-active old download.
-        const onAbort = () => window.postMessage({ channel, type: "cancel_measurement", id }, location.origin);
+        const onAbort = () => window.postMessage({ channel, type: measureOnly ? "cancel_measurement" : "cancel_capture", id }, location.origin);
         const cleanup = () => { clearTimeout(timer); window.removeEventListener("message", receive); signal?.removeEventListener("abort", onAbort); };
         const receive = event => {
           const reply = event.data;
@@ -340,7 +343,7 @@
             return;
           }
           cleanup();
-          if (signal?.aborted) return reject(new Error("Size check cancelled."));
+          if (signal?.aborted) return reject(cancelledError("history"));
           metrics.adopt(reply.jsonCapture);
           try {
             if (changed || currentChat() !== chat || reply.chat !== chat) throw captureError("The ChatGPT conversation changed during capture.", "request_failed", "conversation_changed", "history");
@@ -387,10 +390,10 @@
     return { characterCount: capture.text.length, messageTurnCount: capture.messageTurnCount,
       ...(capture.estimatedCharacterCount !== undefined ? { estimatedCharacterCount: capture.estimatedCharacterCount } : {}) };
   };
-  window.__capCaptureChatGptJson = async expectedPath => {
+  window.__capCaptureChatGptJson = async (expectedPath, signal) => {
     const metrics = globalThis.CapJsonCaptureMetrics.create({ deadline_ms: 17000 });
     try {
-      const capture = await readCapture(expectedPath, metrics);
+      const capture = await readCapture(expectedPath, metrics, false, signal);
       metrics.set({ selected_turns: capture.messageTurnCount });
       if (capture.captureWarning) metrics.set({ outcome: "partial", failure_check: "text_invalid", failure_stage: "serialize" });
       return { ...capture, jsonCapture: metrics.finish() };
