@@ -1,5 +1,5 @@
 (() => {
-  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-27-chatgpt-picker-cancel-v183";
+  const CONTENT_SCRIPT_LOAD_ID = "platform-content-2026-10-27-chatgpt-immediate-retry-v184";
   const SOURCE_JSON_RETRY_DELAY_MS = 2000;
   const INLINE_PILL_SIZE = 36;
   const ownedUiStyleSheets = new Map();
@@ -8016,9 +8016,11 @@
       }
       updateTransferDiagnostics(trace, { last_operation: "capture_json" }, "capture_json");
       markTransferTrace(trace, "retrying JSON capture");
-      // Give rate limits and temporary provider failures time to clear. Keep
-      // this within the same deadline and recheck the original chat after it.
-      if (!fileNoticeRetry) await delay(Math.min(SOURCE_JSON_RETRY_DELAY_MS, Math.max(0, (trace?.deadlineAt || Infinity) - Date.now())));
+      // ChatGPT retries immediately through the existing serialized reader.
+      // Other platforms retain their cooldown; all retries keep the same guards.
+      if (!fileNoticeRetry && currentPlatform.id !== "chatgpt") {
+        await delay(Math.min(SOURCE_JSON_RETRY_DELAY_MS, Math.max(0, (trace?.deadlineAt || Infinity) - Date.now())));
+      }
       checkTransferDeadline(trace);
       // One fresh read at selection, including a failed picker prefetch. Its
       // failure leaves this block for normal recovery; never retry in a loop.

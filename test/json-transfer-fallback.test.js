@@ -666,7 +666,32 @@ test("all five platforms recover a failed picker prefetch silently with one JSON
   }
 });
 
-clockTest("temporary provider failures wait before retrying JSON", async () => {
+clockTest("ChatGPT retries temporary JSON errors immediately with no cooldown", async () => {
+  for (const prefetched of [false, true]) {
+    for (const error of [transientError(), transientError("timeout", "timeout"),
+      transientError("unavailable", "hook_unavailable"), transientError("incomplete", "attachment_failed", 429)]) {
+      const { context, calls } = harness("chatgpt", { mode: "success" });
+      const requestedAt = [];
+      context.delay = ms => { calls.waits.push(ms); return new Promise(resolve => setTimeout(resolve, ms)); };
+      context.window.__capCaptureChatGptJson = async () => {
+        requestedAt.push(Date.now());
+        if (++calls.json === 1) throw error;
+        return { text: "Immediately recovered chat", messageTurnCount: 2 };
+      };
+      if (prefetched) { context.startPickerJsonCapture(); await context.pickerJsonCapture.promise; }
+      const selectedAt = Date.now();
+      await context.start("claude");
+      assert.equal(calls.json, 2, "Keep exactly one retry.");
+      assert.equal(requestedAt[1], selectedAt, "The queued retry must start without a timer delay.");
+      assert.deepEqual(calls.waits, []);
+      assert.equal(calls.destination, 1);
+      assert.equal(calls.dom + calls.notice + calls.errors.length, 0);
+      assert.equal(calls.flows[0].text, "Immediately recovered chat");
+    }
+  }
+});
+
+clockTest("other platforms retain the existing cooldown before retrying JSON", async () => {
   const { context, calls } = harness("deepseek", { mode: "success" });
   const capture = context.window.__capCaptureNetworkJson;
   const requestedAt = [];
@@ -682,7 +707,7 @@ clockTest("temporary provider failures wait before retrying JSON", async () => {
   assert.equal(calls.dom, 0);
 });
 
-test("all five platforms scrape after one cooled-down 429 retry, without a third native size probe", async () => {
+test("all five platforms scrape after one 429 retry with their own timing, without a third native size probe", async () => {
   for (const platform of ["claude", "chatgpt", "gemini", "grok", "deepseek"]) {
     const { context, calls } = harness(platform);
     let probes = 0;
@@ -692,7 +717,7 @@ test("all five platforms scrape after one cooled-down 429 retry, without a third
     context.prepareSourceForCapture = async () => { calls.prepare++; context.startDomCaptureSizeCheck(context.activeTransferTrace); };
     await context.start("claude");
     assert.equal(calls.json, 2);
-    assert.deepEqual(calls.waits, [2000]);
+    assert.deepEqual(calls.waits, platform === "chatgpt" ? [] : [2000]);
     assert.equal(calls.dom, 1);
     assert.equal(probes, 0, "an exhausted provider must not immediately receive another background JSON request");
     assert.equal(calls.destination, 1);

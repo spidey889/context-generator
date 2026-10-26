@@ -4,6 +4,8 @@ A short history of decisions and regressions that matter when changing the code.
 
 ## 2026-10-27
 
+- **Retry ChatGPT capture immediately.** Remove the fixed two-second pause before its existing one temporary-error JSON retry, for both failed picker prefetch and fresh capture. Keep retry eligibility, serialized native cleanup, source/cancellation/deadline checks, size/access rejection and exhausted-retry recovery. Other source platforms retain their cooldown and the intended handoff animations stay unchanged. Advance content readiness to v184 and add a regression that fails with the old pause and checks immediate recovery for transport, timeout, hook and HTTP 429 failures.
+
 - **Cancel abandoned ChatGPT picker capture.** Closing a picker discarded its text but left the native read running, so reopening could queue behind the old request. Give only ChatGPT picker reads an owned cancellation signal, stop setup/downloads on dismissal, and keep the shared queue until correlated MAIN cleanup acknowledges cancellation. Preserve a selected pending read, skip already-cancelled queued work, and cancel stale history before replacement. Separate capture/measurement IDs prevent late cancellation from stopping another read. Advance ChatGPT MAIN/bridge to v24 and content readiness to v183. Add regression cases for pending/queued dismissal, cleanup acknowledgement, selection ownership, setup/body cancellation and ID isolation. Tests intentionally not run at the owner's request; local source change only. Endpoint selection, other platforms, retry cooldown and handoff animation are unchanged.
 
 ## 2026-10-26
